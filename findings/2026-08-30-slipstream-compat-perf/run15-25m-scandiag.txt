@@ -1,0 +1,795 @@
+=== Caixote Init Starting ===
+CAIXOTE_MEMINFO: MemTotal:        3985600 kB MemFree:         3881580 kB MemAvailable:    3762776 kB 
+Loading kernel modules...
+Loaded virtio_blk
+Loaded evdev
+Loaded acpi button
+[supervisor] input /dev/input/event0 name='Power Button'
+[supervisor] power-button watcher on: /dev/input/event0
+Loaded virtio_balloon
+Loaded af_packet
+Loaded failover
+Loaded net_failover
+Loaded virtio_net
+Loaded crc16
+Loaded crc32c_generic
+Loaded mbcache
+Loaded jbd2
+Loaded ext4
+Loaded overlay
+Waiting for disk devices...
+Disk layout: ROOTFS_DEV=/dev/vdb
+Available filesystems:
+nodev	sysfs
+nodev	tmpfs
+nodev	bdev
+nodev	proc
+nodev	cgroup
+nodev	cgroup2
+nodev	devtmpfs
+nodev	debugfs
+nodev	tracefs
+nodev	securityfs
+nodev	sockfs
+nodev	bpf
+nodev	pipefs
+nodev	ramfs
+nodev	hugetlbfs
+nodev	devpts
+nodev	mqueue
+nodev	pstore
+	ext3
+	ext4
+Block devices:
+brw-rw----    1 0        0         253,   0 Aug 31 22:18 [1;35m/dev/vda[m
+brw-rw----    1 0        0         253,  16 Aug 31 22:18 [1;35m/dev/vdb[m
+Mounting container rootfs from /dev/vdb...
+=== dmesg before mount (last 20 lines with ext4/disk) ===
+[    0.338018] Write protecting the kernel read-only data: 24576k
+[    0.482794] virtio_blk virtio1: [vda] 83886080 512-byte logical blocks (42.9 GB/40.0 GiB)
+[    0.485505] virtio_blk virtio2: [vdb] 125829120 512-byte logical blocks (64.4 GB/60.0 GiB)
+Running e2fsck -p on /dev/vdb...
+/dev/vdb: clean, 66347/3886080 files, 923510/15728640 blocks
+mount: mounting /dev/vdb on /rootfs failed: No such device
+Rootfs disk mounted (ext4 rw)
+/rootfs is mounted
+Mount info:
+/dev/vdb /rootfs ext4 rw,noatime 0 0
+Filesystem                Size      Used Available Use% Mounted on
+/dev/vdb                 59.1G      2.6G     53.5G   5% /rootfs
+Rootfs contents:
+total 24
+drwxr-xr-x    4 0        0             4096 Aug 31 21:41 [1;34m.[m
+drwxr-xr-x   17 0        0              380 Aug 31 22:18 [1;34m..[m
+drwxr-xr-x    3 994      982           4096 Aug 29 17:05 [1;34mcontainer[m
+drwx------    2 0        0            16384 Aug 29 17:05 [1;34mlost+found[m
+Rootfs is writable
+Rootfs remounted read-only
+Mount succeeded (auto-detect)
+/data is mounted
+Filesystem                Size      Used Available Use% Mounted on
+/dev/vda                 39.3G    780.1M     36.6G   2% /data
+Kernel cmdline: console=ttyS0 quiet init=/init caixote.hostname=linux-gate-p149b caixote.vpc=vpc-production-e7c5e0f1 caixote.service=linux-gate-p149b caixote.ip=10.0.0.109/24 caixote.gw=10.0.0.1 caixote.wg_privkey=IRgHIIsQUDRfGHVuEShIrDyHHib/NmhYWxaYaZ7PLGE= caixote.wg_peer_pubkey=krMZvBM6hPRDRjVFs3TBQJZ8x+8DlJ0KJrYjTUYKwmU= caixote.wg_endpoint=198.18.0.1 caixote.wg_port=53414 caixote.local_mesh=10.0.0.102,10.0.0.106,10.0.0.110,10.0.0.111,10.0.0.112 caixote.hosts=vpc-production-5a0ef0ce.internal:10.0.0.1,vpc-production-721afb29.internal:10.0.0.1,vpc-production-61a3fd7f.internal:10.0.0.1,vpc-production-6d85984e.internal:10.0.0.1,vpc-production-e7c5e0f1.internal:10.0.0.1,pedra-tcg-guest.internal:10.0.0.106 caixote.eth0_ip=198.18.0.12/16 caixote.eth0_gw=198.18.0.1
+Parsing cmdline parameters...
+  parsed caixote.hostname=linux-gate-p149b
+  parsed caixote.ip=10.0.0.109/24
+  parsed caixote.gw=10.0.0.1
+  parsed caixote.wg_privkey (len=44)
+  parsed caixote.wg_peer_pubkey (len=44)
+  parsed caixote.wg_endpoint=198.18.0.1
+  parsed caixote.wg_port=53414
+  parsed caixote.local_mesh=10.0.0.102,10.0.0.106,10.0.0.110,10.0.0.111,10.0.0.112
+  parsed caixote.hosts=vpc-production-5a0ef0ce.internal:10.0.0.1,vpc-production-721afb29.internal:10.0.0.1,vpc-production-61a3fd7f.internal:10.0.0.1,vpc-production-6d85984e.internal:10.0.0.1,vpc-production-e7c5e0f1.internal:10.0.0.1,pedra-tcg-guest.internal:10.0.0.106
+=== console /dev/ttyS0 reopened ===
+Configuring eth0 with static 198.18.0.12/16 (gw=198.18.0.1)
+WireGuard config check:
+  CAIXOTE_WG_PRIVKEY set: yes
+  CAIXOTE_WG_PEER_PUBKEY set: yes
+  CAIXOTE_WG_ENDPOINT: 198.18.0.1
+  CAIXOTE_WG_PORT: 53414
+  CAIXOTE_IP: 10.0.0.109/24
+Configuring WireGuard...
+Loading WireGuard modules from /lib/modules/6.12.94-0-virt...
+Loaded udp_tunnel.ko
+Loaded ip6_udp_tunnel.ko
+Loaded libcurve25519-generic.ko
+Loaded curve25519-x86_64.ko
+Module curve25519-neon.ko not found
+Failed to load chacha_generic.ko (may be built-in or already loaded)
+Failed to load poly1305_generic.ko (may be built-in or already loaded)
+Loaded libchacha.ko
+Loaded libpoly1305.ko
+Loaded chacha-x86_64.ko
+Loaded poly1305-x86_64.ko
+Module chacha-neon.ko not found
+Module poly1305-neon.ko not found
+Loaded libchacha20poly1305.ko
+Loaded wireguard.ko
+Installing same-host east-west /32s via eth0
+WireGuard configured: 10.0.0.109 via 198.18.0.1:53414
+[0m[32m[1minterface[0m: [32mwg0[0m
+  [1mpublic key[0m: niKOwNuyOS2hVjbJ9mcmLn5YZuHVf3FChVqMZN6NFAs=
+  [1mprivate key[0m: (hidden)
+  [1mlistening port[0m: 39442
+
+[33m[1mpeer[0m: [33mkrMZvBM6hPRDRjVFs3TBQJZ8x+8DlJ0KJrYjTUYKwmU=[0m
+  [1mendpoint[0m: 198.18.0.1:53414
+  [1mallowed ips[0m: 10.0.0.0[36m/[0m8
+  [1mlatest handshake[0m: Now
+  [1mtransfer[0m: 124 [36mB[0m received, 180 [36mB[0m sent
+  [1mpersistent keepalive[0m: every 25 [36mseconds[0m
+  hosts: 10.0.0.1 vpc-production-5a0ef0ce.internal
+  hosts: 10.0.0.1 vpc-production-721afb29.internal
+  hosts: 10.0.0.1 vpc-production-61a3fd7f.internal
+  hosts: 10.0.0.1 vpc-production-6d85984e.internal
+  hosts: 10.0.0.1 vpc-production-e7c5e0f1.internal
+  hosts: 10.0.0.106 pedra-tcg-guest.internal
+Static hosts injected from caixote.hosts
+DNS configured to use vigia at 10.0.0.1
+DNS also has bridge gateway at 198.18.0.1
+Network configuration:
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host 
+       valid_lft forever preferred_lft forever
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP qlen 1000
+    link/ether 52:54:00:d0:33:d7 brd ff:ff:ff:ff:ff:ff
+    inet 198.18.0.12/16 scope global eth0
+       valid_lft forever preferred_lft forever
+    inet6 fe80::5054:ff:fed0:33d7/64 scope link tentative 
+       valid_lft forever preferred_lft forever
+3: wg0: <POINTOPOINT,NOARP,UP,LOWER_UP> mtu 1420 qdisc noqueue state UNKNOWN qlen 1000
+    link/[65534] 
+    inet 10.0.0.109/24 scope global wg0
+       valid_lft forever preferred_lft forever
+default via 198.18.0.1 dev eth0 
+10.0.0.0/24 dev wg0 scope link  src 10.0.0.109 
+10.0.0.0/8 dev wg0 scope link 
+10.0.0.102 dev eth0 scope link 
+10.0.0.106 dev eth0 scope link 
+10.0.0.110 dev eth0 scope link 
+10.0.0.111 dev eth0 scope link 
+10.0.0.112 dev eth0 scope link 
+198.18.0.0/16 dev eth0 scope link  src 198.18.0.12 
+Setting up container on tmpfs for pivot_root support...
+Overlay tmpfs ceiling: 973M (25% of MemTotal unless caixote.overlay_tmpfs_pct=N)
+Mounted tmpfs at /mnt (size=973M)
+Using disk-based rootfs from /dev/vdb
+Overlay mount result: 0 (lowerdir=/rootfs/container/rootfs)
+Installed caixote-unfreeze hook
+No QGA virtio-port found (host did not configure org.qemu.guest_agent.0);               qemu-ga not started
+Bound host /data (legacy disk_mb) into container at /data
+Filesystem                Size      Used Available Use% Mounted on
+/dev/vda                 39.3G    780.1M     36.6G   2% /data
+Bundle contents:
+total 4
+drwxr-xr-x    3 0        0               80 Aug 31 22:18 [1;34m.[m
+drwxrwxrwt    5 0        0              100 Aug 31 22:18 [1;34m..[m
+-rw-r--r--    1 0        0             3101 Aug 31 22:18 [0;0mconfig.json[m
+drwxr-xr-x    1 0        0               60 Aug 31 22:18 [1;34mrootfs[m
+Rootfs contents (first 5):
+total 64
+drwxr-xr-x    1 0        0               60 Aug 31 22:18 .
+drwxr-xr-x    3 0        0               80 Aug 31 22:18 ..
+lrwxrwxrwx    1 994      982              7 Aug  3 00:00 bin -> usr/bin
+drwxr-xr-x    2 994      982           4096 Aug 29 17:02 boot
+/mnt/container/rootfs is now a mount point (overlay on tmpfs)
+Relevant mounts:
+tmpfs on /mnt type tmpfs (rw,relatime,size=996352k,inode64)
+overlay on /mnt/container/rootfs type overlay (rw,relatime,lowerdir=/rootfs/container/rootfs,upperdir=/mnt/upper,workdir=/mnt/work,uuid=on)
+/dev/vda on /mnt/container/rootfs/data type ext4 (rw,relatime)
+DNS configuration copied to container:
+nameserver 10.0.0.1
+nameserver 198.18.0.1
+Static hosts injected into container rootfs from caixote.hosts
+Added container hostname 'youki' to /etc/hosts
+Running ldconfig in container rootfs...
+[supervisor] [uptime=4.03s] Container supervisor starting
+[supervisor] [uptime=4.03s] Bundle: /mnt/container
+[supervisor] [uptime=4.03s] === Starting container (attempt 1) ===
+[supervisor] [uptime=4.03s] Cleaning up previous container state...
+[supervisor] [uptime=4.04s] Cleanup complete
+CAIXOTE_GUEST_READY
+[supervisor] [uptime=4.04s] Executing: runc run --no-pivot --bundle /mnt/container container0
+Mon Aug 31 22:18:19 UTC 2026
+FDFSYNC_PROBE n=200 bytes_per=230400 total_s=0.674 per_op_ms=3.371
+CG_LIMIT=
+/dev/vda         40G  781M   37G   3% /data
+               total        used        free      shared  buff/cache   available
+Mem:            3892         276        3694          30         106        3615
+=== leg pedradb start Mon Aug 31 22:18:20 UTC 2026 ===
+[1m[92m   Compiling[0m pedradb-core v0.1.0 (/src/pedradb/crates/pedradb-core)
+[1m[92m   Compiling[0m pedradb-io-uring v0.1.0 (/src/pedradb/crates/pedradb-io-uring)
+[1m[92m   Compiling[0m pedradb-sim v0.1.0 (/src/pedradb/crates/pedradb-sim)
+[1m[33mwarning[0m[1m: function `cqe_res_ok_as_is` is never used[0m
+   [1m[94m--> [0m/src/pedradb/crates/pedradb-io-uring/src/cqe_kernel.rs:104:8
+    [1m[94m|[0m
+[1m[94m104[0m [1m[94m|[0m pub fn cqe_res_ok_as_is(_res: i32) -> bool {
+    [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mnote[0m: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+[1m[33mwarning[0m[1m: function `cqe_ring_model_admitted` is never used[0m
+   [1m[94m--> [0m/src/pedradb/crates/pedradb-io-uring/src/cqe_kernel.rs:112:8
+    [1m[94m|[0m
+[1m[94m112[0m [1m[94m|[0m pub fn cqe_ring_model_admitted() -> bool {
+    [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: function `cqe_ring_model_admitted_as_is` is never used[0m
+   [1m[94m--> [0m/src/pedradb/crates/pedradb-io-uring/src/cqe_kernel.rs:118:8
+    [1m[94m|[0m
+[1m[94m118[0m [1m[94m|[0m pub fn cqe_ring_model_admitted_as_is() -> bool {
+    [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m: `pedradb-io-uring` (lib) generated 3 warnings
+[1m[92m   Compiling[0m pedradb-ops v0.1.0 (/src/pedradb/crates/pedradb-ops)
+[1m[92m   Compiling[0m rocksdb-compat v0.1.0 (/src/pedradb/crates/rocksdb-compat)
+[1m[33mwarning[0m[1m: function `iter_window_keep_as_is` is never used[0m
+  [1m[94m--> [0m/src/pedradb/crates/rocksdb-compat/src/iter_kernel.rs:16:8
+   [1m[94m|[0m
+[1m[94m16[0m [1m[94m|[0m pub fn iter_window_keep_as_is(_snapshot_live: bool) -> bool {
+   [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^^^^^^^[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mnote[0m: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+[1m[92m   Compiling[0m beyond-slipstream v0.7.3 (/src/slipstream)
+[1m[33mwarning[0m: `rocksdb-compat` (lib) generated 1 warning
+[1m[92m    Finished[0m `bench` profile [optimized] target(s) in 24.45s
+[1m[92m     Running[0m benches/snapshot_backends.rs (/data/target/release/deps/snapshot_backends-658f4d3d34281331)
+Gnuplot not found, using plotters backend
+apply_hydrate: skipped at 25000000 entries (>8M); see the one-shot hydration timings printed by the read benchmarks' setup
+COMPACTDIAG l0=0 l1=0 parked_n=0 pool_n=0 pool_b=0 ent_e=0
+FLUSHDIAG parked_n=0 parked_b=0 active_b=1011820 imm=false retired_b=0 sst_n=0 rss_kb=19968 tick_s=0 mat_n=0 pool_n=0 pool_b=0 ent_e=0
+MEMDIAGD rss=424648 dirty_kb=254164 avail=3126140 cached=883088 cgcur=
+COMPACTDIAG l0=2 l1=0 parked_n=1 pool_n=2 pool_b=60947937 ent_e=0
+FLUSHDIAG parked_n=1 parked_b=67286030 active_b=78163095 imm=false retired_b=68044895 sst_n=4 rss_kb=681076 tick_s=0 mat_n=2 pool_n=4 pool_b=121671623 ent_e=0
+MEMDIAGD rss=704500 dirty_kb=270380 avail=2804040 cached=1097704 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=181368735 imm=false retired_b=68044895 sst_n=6 rss_kb=923992 tick_s=0 mat_n=3 pool_n=11 pool_b=242661846 ent_e=0
+MEMDIAGD rss=981252 dirty_kb=227924 avail=2455176 cached=1265388 cgcur=
+MEMDIAGD rss=1120564 dirty_kb=187120 avail=2217148 cached=1397820 cgcur=
+FLUSHDIAG parked_n=1 parked_b=268609536 active_b=28674 imm=false retired_b=0 sst_n=6 rss_kb=1103616 tick_s=0 mat_n=3 pool_n=10 pool_b=242204342 ent_e=0
+COMPACTDIAG l0=0 l1=6 parked_n=1 pool_n=10 pool_b=242204342 ent_e=0
+MEMDIAGD rss=1313028 dirty_kb=187124 avail=2183200 cached=1338964 cgcur=
+MEMDIAGD rss=1670616 dirty_kb=151356 avail=1850648 cached=1573840 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=281629 imm=false retired_b=0 sst_n=7 rss_kb=1259748 tick_s=3 mat_n=4 pool_n=1 pool_b=240626879 ent_e=0
+MEMDIAGD rss=1259752 dirty_kb=72584 avail=2208164 cached=1494772 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=168243749 imm=false retired_b=0 sst_n=7 rss_kb=1611780 tick_s=0 mat_n=4 pool_n=1 pool_b=240626879 ent_e=0
+MEMDIAGD rss=1843216 dirty_kb=125344 avail=1714392 cached=1765520 cgcur=
+MEMDIAGD rss=891300 dirty_kb=217216 avail=2472080 cached=1554112 cgcur=
+FLUSHDIAG parked_n=1 parked_b=268609536 active_b=57348 imm=false retired_b=0 sst_n=10 rss_kb=928740 tick_s=0 mat_n=4 pool_n=4 pool_b=210884100 ent_e=0
+MEMDIAGD rss=1027620 dirty_kb=217216 avail=2365984 cached=1556200 cgcur=
+MEMDIAGD rss=1491052 dirty_kb=140808 avail=1965856 cached=1853700 cgcur=
+COMPACTDIAG l0=0 l1=6 parked_n=1 pool_n=6 pool_b=241979918 ent_e=0
+MEMDIAGD rss=1249612 dirty_kb=140920 avail=2268600 cached=1616532 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=310303 imm=false retired_b=0 sst_n=11 rss_kb=1075252 tick_s=3 mat_n=5 pool_n=1 pool_b=240626772 ent_e=0
+MEMDIAGD rss=1574488 dirty_kb=95040 avail=1909224 cached=1886448 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=136147138 imm=false retired_b=0 sst_n=11 rss_kb=1731528 tick_s=0 mat_n=5 pool_n=1 pool_b=240626772 ent_e=0
+MEMDIAGD rss=976208 dirty_kb=195204 avail=2404608 cached=1512484 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=265407143 imm=false retired_b=0 sst_n=14 rss_kb=1273424 tick_s=0 mat_n=5 pool_n=4 pool_b=240626928 ent_e=0
+MEMDIAGD rss=982224 dirty_kb=161548 avail=2312400 cached=1610992 cgcur=
+FLUSHDIAG parked_n=1 parked_b=268609536 active_b=86022 imm=false retired_b=0 sst_n=14 rss_kb=998792 tick_s=0 mat_n=5 pool_n=4 pool_b=240736334 ent_e=0
+MEMDIAGD rss=1499060 dirty_kb=87828 avail=1894620 cached=1691868 cgcur=
+MEMDIAGD rss=1873484 dirty_kb=79472 avail=1693616 cached=1732068 cgcur=
+MEMDIAGD rss=1182164 dirty_kb=79384 avail=2328684 cached=1695924 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=338977 imm=false retired_b=0 sst_n=15 rss_kb=1216984 tick_s=3 mat_n=6 pool_n=1 pool_b=240626137 ent_e=0
+MEMDIAGD rss=1098460 dirty_kb=108280 avail=2439052 cached=1926352 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=101773932 imm=false retired_b=0 sst_n=15 rss_kb=1147688 tick_s=0 mat_n=6 pool_n=1 pool_b=60157002 ent_e=0
+MEMDIAGD rss=1076280 dirty_kb=225208 avail=2306584 cached=2268368 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=240899182 imm=false retired_b=0 sst_n=18 rss_kb=1109000 tick_s=0 mat_n=6 pool_n=4 pool_b=240626293 ent_e=0
+MEMDIAGD rss=1016976 dirty_kb=181948 avail=2366180 cached=2286304 cgcur=
+FLUSHDIAG parked_n=1 parked_b=268609536 active_b=114696 imm=false retired_b=0 sst_n=18 rss_kb=1036388 tick_s=0 mat_n=6 pool_n=4 pool_b=240626629 ent_e=0
+MEMDIAGD rss=1568868 dirty_kb=95948 avail=1928704 cached=2013404 cgcur=
+MEMDIAGD rss=2040684 dirty_kb=62956 avail=1473820 cached=1562404 cgcur=
+MEMDIAGD rss=1193852 dirty_kb=63020 avail=2345548 cached=1506756 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=367651 imm=false retired_b=0 sst_n=19 rss_kb=1195900 tick_s=3 mat_n=7 pool_n=1 pool_b=240626494 ent_e=0
+MEMDIAGD rss=1088016 dirty_kb=145656 avail=2437864 cached=1662884 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=113185581 imm=false retired_b=0 sst_n=19 rss_kb=1094024 tick_s=0 mat_n=7 pool_n=1 pool_b=60156818 ent_e=0
+MEMDIAGD rss=1019176 dirty_kb=222496 avail=2215900 cached=1988936 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=220691456 imm=false retired_b=0 sst_n=22 rss_kb=1023224 tick_s=0 mat_n=7 pool_n=4 pool_b=240626650 ent_e=0
+MEMDIAGD rss=1049024 dirty_kb=100044 avail=2319060 cached=1992088 cgcur=
+FLUSHDIAG parked_n=1 parked_b=268609536 active_b=143370 imm=false retired_b=0 sst_n=22 rss_kb=1073812 tick_s=0 mat_n=7 pool_n=4 pool_b=240626549 ent_e=0
+MEMDIAGD rss=1555784 dirty_kb=100004 avail=1952724 cached=2048652 cgcur=
+MEMDIAGD rss=1870908 dirty_kb=71292 avail=1660032 cached=1729036 cgcur=
+MEMDIAGD rss=1154792 dirty_kb=71220 avail=2272624 cached=1432676 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=396325 imm=false retired_b=0 sst_n=23 rss_kb=1227836 tick_s=3 mat_n=8 pool_n=1 pool_b=240626088 ent_e=0
+MEMDIAGD rss=967568 dirty_kb=105464 avail=2468200 cached=1603036 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=117767445 imm=false retired_b=0 sst_n=23 rss_kb=1047152 tick_s=0 mat_n=8 pool_n=1 pool_b=60156828 ent_e=0
+MEMDIAGD rss=1402872 dirty_kb=149464 avail=2013708 cached=1908296 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=236150385 imm=false retired_b=0 sst_n=23 rss_kb=1087124 tick_s=0 mat_n=8 pool_n=2 pool_b=120313330 ent_e=0
+MEMDIAGD rss=1253836 dirty_kb=108132 avail=2183864 cached=2031008 cgcur=
+FLUSHDIAG parked_n=1 parked_b=268609536 active_b=172044 imm=false retired_b=0 sst_n=26 rss_kb=1115824 tick_s=0 mat_n=8 pool_n=4 pool_b=240626226 ent_e=0
+MEMDIAGD rss=1503788 dirty_kb=108196 avail=1998736 cached=2066220 cgcur=
+MEMDIAGD rss=1829776 dirty_kb=187424 avail=1764416 cached=1849316 cgcur=
+MEMDIAGD rss=1483292 dirty_kb=79408 avail=2071132 cached=1633760 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=424999 imm=false retired_b=0 sst_n=27 rss_kb=1314824 tick_s=4 mat_n=9 pool_n=1 pool_b=240617479 ent_e=0
+MEMDIAGD rss=788668 dirty_kb=69612 avail=2748148 cached=1787296 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=118049074 imm=false retired_b=0 sst_n=27 rss_kb=1161380 tick_s=0 mat_n=9 pool_n=1 pool_b=60156695 ent_e=0
+MEMDIAGD rss=1024376 dirty_kb=172092 avail=2504384 cached=2041964 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=217207434 imm=false retired_b=0 sst_n=30 rss_kb=1089808 tick_s=0 mat_n=9 pool_n=4 pool_b=240617635 ent_e=0
+MEMDIAGD rss=1220060 dirty_kb=194160 avail=2334912 cached=2136352 cgcur=
+FLUSHDIAG parked_n=1 parked_b=268609536 active_b=200718 imm=false retired_b=0 sst_n=30 rss_kb=1151088 tick_s=0 mat_n=9 pool_n=4 pool_b=240617621 ent_e=0
+MEMDIAGD rss=1185176 dirty_kb=194204 avail=2241580 cached=2136520 cgcur=
+MEMDIAGD rss=1441668 dirty_kb=118288 avail=1974232 cached=1937616 cgcur=
+MEMDIAGD rss=1558976 dirty_kb=75316 avail=1996232 cached=1359400 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=453673 imm=false retired_b=0 sst_n=31 rss_kb=1320652 tick_s=4 mat_n=10 pool_n=1 pool_b=240625785 ent_e=0
+MEMDIAGD rss=1263000 dirty_kb=105572 avail=2267440 cached=1506980 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=100117943 imm=false retired_b=0 sst_n=31 rss_kb=1210876 tick_s=0 mat_n=10 pool_n=1 pool_b=60156744 ent_e=0
+MEMDIAGD rss=1238336 dirty_kb=117044 avail=2268244 cached=1828560 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=189158103 imm=false retired_b=0 sst_n=34 rss_kb=1049236 tick_s=0 mat_n=10 pool_n=4 pool_b=240625941 ent_e=0
+MEMDIAGD rss=1157680 dirty_kb=226048 avail=2213240 cached=1995744 cgcur=
+MEMDIAGD rss=1147152 dirty_kb=186012 avail=2186128 cached=2099888 cgcur=
+FLUSHDIAG parked_n=1 parked_b=268609536 active_b=229392 imm=false retired_b=0 sst_n=34 rss_kb=1184628 tick_s=0 mat_n=10 pool_n=4 pool_b=240625810 ent_e=0
+MEMDIAGD rss=1468276 dirty_kb=104108 avail=2069992 cached=2158636 cgcur=
+MEMDIAGD rss=1828188 dirty_kb=175264 avail=1740956 cached=1835388 cgcur=
+MEMDIAGD rss=1529596 dirty_kb=67128 avail=2033684 cached=1253048 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=482347 imm=false retired_b=0 sst_n=35 rss_kb=1265484 tick_s=4 mat_n=11 pool_n=1 pool_b=240624822 ent_e=0
+MEMDIAGD rss=883724 dirty_kb=40780 avail=2628116 cached=1353272 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=99893662 imm=false retired_b=0 sst_n=35 rss_kb=1310088 tick_s=0 mat_n=11 pool_n=1 pool_b=60156498 ent_e=0
+MEMDIAGD rss=1077808 dirty_kb=152408 avail=2348588 cached=1699428 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=206387717 imm=false retired_b=0 sst_n=38 rss_kb=1177148 tick_s=0 mat_n=11 pool_n=4 pool_b=240624978 ent_e=0
+MEMDIAGD rss=1295264 dirty_kb=183876 avail=2153048 cached=1875964 cgcur=
+MEMDIAGD rss=1206848 dirty_kb=186072 avail=2162716 cached=1877568 cgcur=
+FLUSHDIAG parked_n=1 parked_b=268609536 active_b=258066 imm=false retired_b=0 sst_n=38 rss_kb=1246728 tick_s=0 mat_n=11 pool_n=4 pool_b=240624762 ent_e=0
+MEMDIAGD rss=1587760 dirty_kb=100064 avail=1912248 cached=1994156 cgcur=
+MEMDIAGD rss=1860300 dirty_kb=163028 avail=1666556 cached=1764936 cgcur=
+MEMDIAGD rss=1528884 dirty_kb=58892 avail=1984900 cached=1325836 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=511021 imm=false retired_b=0 sst_n=39 rss_kb=1402364 tick_s=4 mat_n=12 pool_n=1 pool_b=240625031 ent_e=0
+MEMDIAGD rss=683808 dirty_kb=48860 avail=2741316 cached=1482204 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=97898696 imm=false retired_b=0 sst_n=39 rss_kb=1238260 tick_s=0 mat_n=12 pool_n=1 pool_b=60156689 ent_e=0
+MEMDIAGD rss=1661904 dirty_kb=128540 avail=1813236 cached=1797484 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=164931771 imm=false retired_b=0 sst_n=39 rss_kb=1182476 tick_s=0 mat_n=12 pool_n=4 pool_b=240625688 ent_e=0
+MEMDIAGD rss=1097584 dirty_kb=172696 avail=2279560 cached=1841064 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=196804101 imm=false retired_b=0 sst_n=42 rss_kb=1184448 tick_s=0 mat_n=12 pool_n=4 pool_b=240625187 ent_e=0
+MEMDIAGD rss=1397416 dirty_kb=182968 avail=2043956 cached=2054088 cgcur=
+MEMDIAGD rss=1216032 dirty_kb=186056 avail=2176692 cached=1934916 cgcur=
+FLUSHDIAG parked_n=1 parked_b=268609536 active_b=286740 imm=false retired_b=0 sst_n=42 rss_kb=1259624 tick_s=0 mat_n=12 pool_n=4 pool_b=240625225 ent_e=0
+MEMDIAGD rss=1687724 dirty_kb=104144 avail=1783432 cached=1875244 cgcur=
+MEMDIAGD rss=1806500 dirty_kb=175296 avail=1682076 cached=1657068 cgcur=
+MEMDIAGD rss=1707824 dirty_kb=60 avail=1736960 cached=1297084 cgcur=
+MEMDIAGD rss=1932840 dirty_kb=64 avail=1501220 cached=1313840 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=539695 imm=false retired_b=0 sst_n=43 rss_kb=1342272 tick_s=5 mat_n=13 pool_n=1 pool_b=240624495 ent_e=0
+MEMDIAGD rss=891100 dirty_kb=77268 avail=2522724 cached=1491968 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=101215785 imm=false retired_b=0 sst_n=43 rss_kb=1218204 tick_s=0 mat_n=13 pool_n=1 pool_b=60156483 ent_e=0
+MEMDIAGD rss=1484340 dirty_kb=97104 avail=1988932 cached=1820832 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=194809135 imm=false retired_b=0 sst_n=43 rss_kb=1350412 tick_s=0 mat_n=13 pool_n=2 pool_b=120312555 ent_e=0
+MEMDIAGD rss=1449284 dirty_kb=124628 avail=1943340 cached=1955424 cgcur=
+FLUSHDIAG parked_n=1 parked_b=268609536 active_b=315414 imm=false retired_b=0 sst_n=46 rss_kb=1277580 tick_s=0 mat_n=13 pool_n=4 pool_b=240624256 ent_e=0
+MEMDIAGD rss=1282020 dirty_kb=124628 avail=2138336 cached=1896032 cgcur=
+MEMDIAGD rss=1810924 dirty_kb=130716 avail=1847132 cached=1711832 cgcur=
+MEMDIAGD rss=1943552 dirty_kb=95784 avail=1556592 cached=1619244 cgcur=
+MEMDIAGD rss=1631348 dirty_kb=95796 avail=1839140 cached=1210092 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=568369 imm=false retired_b=0 sst_n=47 rss_kb=1516604 tick_s=4 mat_n=14 pool_n=1 pool_b=240624194 ent_e=0
+MEMDIAGD rss=701072 dirty_kb=38180 avail=2717704 cached=1326428 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=111615614 imm=false retired_b=0 sst_n=47 rss_kb=1325544 tick_s=0 mat_n=14 pool_n=1 pool_b=60156382 ent_e=0
+MEMDIAGD rss=1388256 dirty_kb=78708 avail=2055076 cached=1666464 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=162712524 imm=false retired_b=0 sst_n=47 rss_kb=1696316 tick_s=0 mat_n=14 pool_n=1 pool_b=60156382 ent_e=0
+MEMDIAGD rss=1206296 dirty_kb=149888 avail=2105492 cached=1763156 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=261112019 imm=false retired_b=0 sst_n=50 rss_kb=1410772 tick_s=0 mat_n=14 pool_n=4 pool_b=240624350 ent_e=0
+MEMDIAGD rss=1277652 dirty_kb=140960 avail=2024008 cached=1906392 cgcur=
+FLUSHDIAG parked_n=1 parked_b=268609536 active_b=344088 imm=false retired_b=0 sst_n=50 rss_kb=1287672 tick_s=0 mat_n=14 pool_n=4 pool_b=240624427 ent_e=0
+MEMDIAGD rss=1482860 dirty_kb=140964 avail=1785948 cached=1849048 cgcur=
+MEMDIAGD rss=1877100 dirty_kb=169400 avail=1541884 cached=1615372 cgcur=
+MEMDIAGD rss=1716084 dirty_kb=103984 avail=1699884 cached=1069596 cgcur=
+MEMDIAGD rss=1452008 dirty_kb=113608 avail=1991972 cached=1233088 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=597043 imm=false retired_b=0 sst_n=51 rss_kb=1533932 tick_s=4 mat_n=15 pool_n=1 pool_b=240624260 ent_e=0
+MEMDIAGD rss=1117832 dirty_kb=65492 avail=2332276 cached=1298984 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=78760138 imm=false retired_b=0 sst_n=51 rss_kb=1167356 tick_s=0 mat_n=15 pool_n=1 pool_b=60156179 ent_e=0
+MEMDIAGD rss=1048052 dirty_kb=160904 avail=2142188 cached=1629068 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=167547343 imm=false retired_b=0 sst_n=54 rss_kb=1094296 tick_s=0 mat_n=15 pool_n=4 pool_b=240624416 ent_e=0
+MEMDIAGD rss=1385176 dirty_kb=141000 avail=1926100 cached=1827900 cgcur=
+MEMDIAGD rss=1229820 dirty_kb=141000 avail=2004592 cached=1827900 cgcur=
+FLUSHDIAG parked_n=1 parked_b=268609536 active_b=372762 imm=false retired_b=0 sst_n=54 rss_kb=1287084 tick_s=0 mat_n=15 pool_n=4 pool_b=240624177 ent_e=0
+MEMDIAGD rss=1680456 dirty_kb=71380 avail=1781044 cached=1623136 cgcur=
+MEMDIAGD rss=2252500 dirty_kb=95812 avail=1243708 cached=1308016 cgcur=
+MEMDIAGD rss=1984280 dirty_kb=95784 avail=1491580 cached=1127356 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=878672 imm=false retired_b=0 sst_n=55 rss_kb=1528688 tick_s=4 mat_n=16 pool_n=1 pool_b=240623739 ent_e=0
+MEMDIAGD rss=861732 dirty_kb=59996 avail=2552264 cached=1260092 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=89665877 imm=false retired_b=0 sst_n=55 rss_kb=1233456 tick_s=0 mat_n=16 pool_n=1 pool_b=60156134 ent_e=0
+MEMDIAGD rss=1076080 dirty_kb=148336 avail=2262248 cached=1582836 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=172382162 imm=false retired_b=0 sst_n=58 rss_kb=1142188 tick_s=0 mat_n=16 pool_n=4 pool_b=240623895 ent_e=0
+MEMDIAGD rss=1453064 dirty_kb=116848 avail=1928760 cached=1815988 cgcur=
+MEMDIAGD rss=1248504 dirty_kb=124616 avail=1999248 cached=1823016 cgcur=
+FLUSHDIAG parked_n=1 parked_b=268609536 active_b=401436 imm=false retired_b=0 sst_n=58 rss_kb=1311160 tick_s=0 mat_n=16 pool_n=4 pool_b=240624041 ent_e=0
+MEMDIAGD rss=1700600 dirty_kb=124584 avail=1764028 cached=1655464 cgcur=
+MEMDIAGD rss=1997856 dirty_kb=87596 avail=1553736 cached=1641392 cgcur=
+MEMDIAGD rss=1598276 dirty_kb=13908 avail=1923840 cached=1409536 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=654391 imm=false retired_b=0 sst_n=59 rss_kb=1525500 tick_s=4 mat_n=17 pool_n=1 pool_b=240623470 ent_e=0
+MEMDIAGD rss=1251968 dirty_kb=53560 avail=2219420 cached=1503548 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=108413221 imm=false retired_b=0 sst_n=59 rss_kb=1417008 tick_s=0 mat_n=17 pool_n=1 pool_b=60156125 ent_e=0
+MEMDIAGD rss=1529024 dirty_kb=57656 avail=1943720 cached=1850936 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=220219331 imm=false retired_b=0 sst_n=62 rss_kb=1312840 tick_s=0 mat_n=17 pool_n=4 pool_b=240623626 ent_e=0
+MEMDIAGD rss=1535008 dirty_kb=109892 avail=1876260 cached=1948068 cgcur=
+MEMDIAGD rss=1266472 dirty_kb=120488 avail=2195880 cached=1857492 cgcur=
+FLUSHDIAG parked_n=1 parked_b=268609536 active_b=430110 imm=false retired_b=0 sst_n=62 rss_kb=1333668 tick_s=0 mat_n=17 pool_n=4 pool_b=240623404 ent_e=0
+MEMDIAGD rss=1702820 dirty_kb=120508 avail=1738696 cached=1588644 cgcur=
+MEMDIAGD rss=2014540 dirty_kb=79376 avail=1541912 cached=1633464 cgcur=
+MEMDIAGD rss=1607680 dirty_kb=79380 avail=1935880 cached=1107556 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=683065 imm=false retired_b=0 sst_n=63 rss_kb=1445508 tick_s=4 mat_n=18 pool_n=1 pool_b=240583489 ent_e=0
+MEMDIAGD rss=1557748 dirty_kb=132764 avail=1992404 cached=1269948 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=96300055 imm=false retired_b=0 sst_n=63 rss_kb=1233924 tick_s=0 mat_n=18 pool_n=1 pool_b=60155999 ent_e=0
+MEMDIAGD rss=1424472 dirty_kb=52344 avail=2062916 cached=1581272 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=170162915 imm=false retired_b=0 sst_n=66 rss_kb=1161820 tick_s=0 mat_n=18 pool_n=4 pool_b=240583645 ent_e=0
+MEMDIAGD rss=1411312 dirty_kb=145520 avail=2019800 cached=1732716 cgcur=
+MEMDIAGD rss=1367252 dirty_kb=116416 avail=2010896 cached=1839752 cgcur=
+FLUSHDIAG parked_n=1 parked_b=268609536 active_b=458784 imm=false retired_b=0 sst_n=66 rss_kb=1360796 tick_s=0 mat_n=18 pool_n=4 pool_b=240583857 ent_e=0
+MEMDIAGD rss=1661332 dirty_kb=116420 avail=1788108 cached=1839752 cgcur=
+MEMDIAGD rss=1935684 dirty_kb=79328 avail=1637672 cached=1706504 cgcur=
+MEMDIAGD rss=1767400 dirty_kb=79284 avail=1773968 cached=1232560 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=711739 imm=false retired_b=0 sst_n=67 rss_kb=1535468 tick_s=4 mat_n=19 pool_n=1 pool_b=240513451 ent_e=0
+MEMDIAGD rss=1546468 dirty_kb=88468 avail=1997880 cached=1300788 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=94558044 imm=false retired_b=0 sst_n=67 rss_kb=1249388 tick_s=0 mat_n=19 pool_n=1 pool_b=60156059 ent_e=0
+MEMDIAGD rss=1293436 dirty_kb=156884 avail=2233216 cached=1490164 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=175756599 imm=false retired_b=0 sst_n=70 rss_kb=1219884 tick_s=0 mat_n=19 pool_n=4 pool_b=240513607 ent_e=0
+MEMDIAGD rss=1272468 dirty_kb=190360 avail=2032928 cached=1735272 cgcur=
+MEMDIAGD rss=1291476 dirty_kb=116420 avail=2125064 cached=1872832 cgcur=
+FLUSHDIAG parked_n=1 parked_b=268609536 active_b=487458 imm=false retired_b=0 sst_n=70 rss_kb=1383032 tick_s=0 mat_n=19 pool_n=4 pool_b=240541577 ent_e=0
+MEMDIAGD rss=1456796 dirty_kb=116336 avail=1956576 cached=1888256 cgcur=
+MEMDIAGD rss=1840752 dirty_kb=79392 avail=1701036 cached=1766916 cgcur=
+MEMDIAGD rss=2344136 dirty_kb=95428 avail=1180480 cached=1261284 cgcur=
+MEMDIAGD rss=1654092 dirty_kb=1480 avail=1872304 cached=1176012 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=740413 imm=false retired_b=0 sst_n=71 rss_kb=1497844 tick_s=4 mat_n=20 pool_n=1 pool_b=240513592 ent_e=0
+MEMDIAGD rss=851456 dirty_kb=71920 avail=2596580 cached=1363048 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=105716738 imm=false retired_b=0 sst_n=71 rss_kb=1230284 tick_s=0 mat_n=20 pool_n=1 pool_b=60144334 ent_e=0
+MEMDIAGD rss=1518012 dirty_kb=80628 avail=2042940 cached=1682372 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=192986213 imm=false retired_b=0 sst_n=71 rss_kb=1265620 tick_s=0 mat_n=20 pool_n=4 pool_b=240529871 ent_e=0
+MEMDIAGD rss=1564880 dirty_kb=124588 avail=1855908 cached=1916072 cgcur=
+MEMDIAGD rss=1324780 dirty_kb=124588 avail=2156492 cached=1835264 cgcur=
+FLUSHDIAG parked_n=1 parked_b=268609536 active_b=516132 imm=false retired_b=0 sst_n=74 rss_kb=1405436 tick_s=0 mat_n=20 pool_n=4 pool_b=240512983 ent_e=0
+MEMDIAGD rss=1771412 dirty_kb=124600 avail=1701584 cached=1600220 cgcur=
+MEMDIAGD rss=2027800 dirty_kb=87504 avail=1510876 cached=1583432 cgcur=
+MEMDIAGD rss=1847424 dirty_kb=9696 avail=1598856 cached=1103900 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=769087 imm=false retired_b=0 sst_n=75 rss_kb=1504412 tick_s=4 mat_n=21 pool_n=1 pool_b=240517785 ent_e=0
+MEMDIAGD rss=999424 dirty_kb=71220 avail=2463416 cached=1271564 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=104986547 imm=false retired_b=0 sst_n=75 rss_kb=1369196 tick_s=0 mat_n=21 pool_n=1 pool_b=60129353 ent_e=0
+MEMDIAGD rss=1547764 dirty_kb=154332 avail=1976772 cached=1590204 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=174549172 imm=false retired_b=0 sst_n=78 rss_kb=1240872 tick_s=0 mat_n=21 pool_n=4 pool_b=240517941 ent_e=0
+MEMDIAGD rss=1514432 dirty_kb=124608 avail=1900172 cached=1809192 cgcur=
+MEMDIAGD rss=1345172 dirty_kb=124656 avail=1995740 cached=1809240 cgcur=
+FLUSHDIAG parked_n=1 parked_b=268609536 active_b=544806 imm=false retired_b=0 sst_n=78 rss_kb=1430220 tick_s=0 mat_n=21 pool_n=4 pool_b=240517402 ent_e=0
+MEMDIAGD rss=1754320 dirty_kb=50932 avail=1732232 cached=1797436 cgcur=
+MEMDIAGD rss=2053904 dirty_kb=161292 avail=1515064 cached=1574008 cgcur=
+MEMDIAGD rss=1713120 dirty_kb=83472 avail=1806656 cached=1068660 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=797761 imm=false retired_b=0 sst_n=79 rss_kb=1518984 tick_s=4 mat_n=22 pool_n=1 pool_b=240519078 ent_e=0
+MEMDIAGD rss=878540 dirty_kb=151860 avail=2588084 cached=1241920 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=98691346 imm=false retired_b=0 sst_n=79 rss_kb=1215228 tick_s=0 mat_n=22 pool_n=1 pool_b=60128437 ent_e=0
+MEMDIAGD rss=1417224 dirty_kb=178800 avail=2091960 cached=1546092 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=156112131 imm=false retired_b=0 sst_n=79 rss_kb=1466020 tick_s=0 mat_n=22 pool_n=1 pool_b=60128437 ent_e=0
+MEMDIAGD rss=1347884 dirty_kb=142564 avail=1997760 cached=1576668 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=265894601 imm=false retired_b=0 sst_n=82 rss_kb=1539744 tick_s=0 mat_n=22 pool_n=4 pool_b=240519234 ent_e=0
+MEMDIAGD rss=1513964 dirty_kb=116392 avail=1876012 cached=1739668 cgcur=
+FLUSHDIAG parked_n=1 parked_b=268609536 active_b=573480 imm=false retired_b=0 sst_n=82 rss_kb=1457044 tick_s=0 mat_n=22 pool_n=4 pool_b=240518619 ent_e=0
+MEMDIAGD rss=1725840 dirty_kb=116392 avail=1730024 cached=1797360 cgcur=
+MEMDIAGD rss=2025304 dirty_kb=96984 avail=1507460 cached=1604384 cgcur=
+MEMDIAGD rss=1886544 dirty_kb=23304 avail=1656040 cached=1126640 cgcur=
+MEMDIAGD rss=1541968 dirty_kb=23304 avail=2007580 cached=1179768 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=826435 imm=false retired_b=0 sst_n=83 rss_kb=1544096 tick_s=4 mat_n=23 pool_n=1 pool_b=240521005 ent_e=0
+MEMDIAGD rss=1286456 dirty_kb=110600 avail=2237980 cached=1354668 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=111114815 imm=false retired_b=0 sst_n=83 rss_kb=1327116 tick_s=0 mat_n=23 pool_n=1 pool_b=60129489 ent_e=0
+MEMDIAGD rss=1315608 dirty_kb=149440 avail=1978060 cached=1693060 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=213055680 imm=false retired_b=0 sst_n=86 rss_kb=1357416 tick_s=0 mat_n=23 pool_n=4 pool_b=240521161 ent_e=0
+MEMDIAGD rss=1605976 dirty_kb=67292 avail=1849568 cached=1783024 cgcur=
+FLUSHDIAG parked_n=1 parked_b=268609536 active_b=602154 imm=false retired_b=0 sst_n=86 rss_kb=1480564 tick_s=0 mat_n=23 pool_n=4 pool_b=240519396 ent_e=0
+MEMDIAGD rss=1509264 dirty_kb=67292 avail=1885032 cached=1797064 cgcur=
+MEMDIAGD rss=1844748 dirty_kb=165368 avail=1698380 cached=1783324 cgcur=
+MEMDIAGD rss=2538556 dirty_kb=128 avail=1006108 cached=1082232 cgcur=
+MEMDIAGD rss=2010788 dirty_kb=64 avail=1460176 cached=1047052 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=855109 imm=false retired_b=0 sst_n=87 rss_kb=1570180 tick_s=4 mat_n=24 pool_n=1 pool_b=240524924 ent_e=0
+MEMDIAGD rss=1033068 dirty_kb=62232 avail=2487512 cached=1204024 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=105325524 imm=false retired_b=0 sst_n=87 rss_kb=1422028 tick_s=0 mat_n=24 pool_n=1 pool_b=60129724 ent_e=0
+MEMDIAGD rss=1686676 dirty_kb=91700 avail=1687052 cached=1537756 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=186018169 imm=false retired_b=0 sst_n=90 rss_kb=1340912 tick_s=0 mat_n=24 pool_n=4 pool_b=240525080 ent_e=0
+MEMDIAGD rss=1643400 dirty_kb=132812 avail=1767320 cached=1764604 cgcur=
+MEMDIAGD rss=1412072 dirty_kb=132812 avail=1926072 cached=1737724 cgcur=
+FLUSHDIAG parked_n=1 parked_b=268609536 active_b=630828 imm=false retired_b=0 sst_n=90 rss_kb=1510824 tick_s=0 mat_n=24 pool_n=4 pool_b=240525514 ent_e=0
+MEMDIAGD rss=1968776 dirty_kb=63144 avail=1537784 cached=1602028 cgcur=
+MEMDIAGD rss=2123580 dirty_kb=97664 avail=1427624 cached=1483904 cgcur=
+MEMDIAGD rss=1798952 dirty_kb=95688 avail=1658764 cached=993804 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=883783 imm=false retired_b=0 sst_n=91 rss_kb=1548124 tick_s=4 mat_n=25 pool_n=1 pool_b=240523918 ent_e=0
+MEMDIAGD rss=1006620 dirty_kb=29692 avail=2368728 cached=1114388 cgcur=
+hydrate/pedradb: 25000000 entries in 155.7s (0.16M entries/s); on disk 11.06 GiB (475 B/entry)
+SETTLE_RSS before_flush 1220000 kB
+FLUSHDIAG parked_n=0 parked_b=0 active_b=63126548 imm=false retired_b=0 sst_n=91 rss_kb=1409432 tick_s=0 mat_n=25 pool_n=1 pool_b=60129873 ent_e=0
+MEMDIAGD rss=1149184 dirty_kb=63352 avail=2283168 cached=1382984 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=63126548 imm=false retired_b=0 sst_n=94 rss_kb=1281280 tick_s=0 mat_n=25 pool_n=4 pool_b=240524074 ent_e=0
+MEMDIAGD rss=1312616 dirty_kb=63324 avail=2048832 cached=1499568 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=63126548 imm=false retired_b=0 sst_n=94 rss_kb=1274428 tick_s=0 mat_n=25 pool_n=4 pool_b=240523325 ent_e=0
+MEMDIAGD rss=1063524 dirty_kb=63332 avail=2323480 cached=1616132 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=63126548 imm=false retired_b=0 sst_n=94 rss_kb=1274648 tick_s=0 mat_n=25 pool_n=4 pool_b=240522876 ent_e=0
+MEMDIAGD rss=1164180 dirty_kb=63340 avail=2232384 cached=1732688 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=63126548 imm=false retired_b=0 sst_n=94 rss_kb=1278928 tick_s=0 mat_n=25 pool_n=4 pool_b=240522807 ent_e=0
+MEMDIAGD rss=1190864 dirty_kb=63344 avail=2167128 cached=1849268 cgcur=
+COMPACTDIAG l0=0 l1=6 parked_n=0 pool_n=4 pool_b=240523392 ent_e=0
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=94 rss_kb=1375716 tick_s=0 mat_n=25 pool_n=4 pool_b=240523392 ent_e=0
+MEMDIAGD rss=1240340 dirty_kb=68 avail=2250656 cached=1841540 cgcur=
+SETTLE_PHASE flush_ms=5846
+SETTLE_RSS after_flush 1240376 kB
+LEVELDIAG compact_leveled_start level=0 files=2 bytes=56193768
+LEVELDIAG compact_leveled_start level=1 files=6 bytes=300656158
+LEVELDIAG compact_leveled_start level=2 files=88 bytes=5174242950
+LEVELDIAG compact_leveled_start level=3 files=0 bytes=0
+MEMDIAGD rss=1270988 dirty_kb=40 avail=2236868 cached=1896392 cgcur=
+MEMDIAGD rss=1216692 dirty_kb=48 avail=2223652 cached=1958316 cgcur=
+MEMDIAGD rss=856000 dirty_kb=68 avail=2642580 cached=1959200 cgcur=
+MEMDIAGD rss=871520 dirty_kb=72 avail=2568496 cached=1959376 cgcur=
+MEMDIAGD rss=879788 dirty_kb=92 avail=2496780 cached=2006308 cgcur=
+MEMDIAGD rss=1038424 dirty_kb=100 avail=2395812 cached=2136156 cgcur=
+MEMDIAGD rss=1029188 dirty_kb=100 avail=2418612 cached=2194764 cgcur=
+MEMDIAGD rss=1048932 dirty_kb=116 avail=2412640 cached=2253532 cgcur=
+MEMDIAGD rss=1100244 dirty_kb=132 avail=2317872 cached=2312296 cgcur=
+MEMDIAGD rss=1104168 dirty_kb=136 avail=2453096 cached=2349628 cgcur=
+MEMDIAGD rss=975980 dirty_kb=140 avail=2484748 cached=2321056 cgcur=
+MEMDIAGD rss=1043840 dirty_kb=152 avail=2407980 cached=2393892 cgcur=
+MEMDIAGD rss=1152140 dirty_kb=160 avail=2470948 cached=2381304 cgcur=
+MEMDIAGD rss=1045328 dirty_kb=164 avail=2410420 cached=2454068 cgcur=
+MEMDIAGD rss=1106536 dirty_kb=172 avail=2362284 cached=2355920 cgcur=
+MEMDIAGD rss=978376 dirty_kb=176 avail=2463864 cached=2347084 cgcur=
+MEMDIAGD rss=985920 dirty_kb=184 avail=2516588 cached=2305228 cgcur=
+MEMDIAGD rss=1016972 dirty_kb=188 avail=2449064 cached=2340912 cgcur=
+MEMDIAGD rss=993400 dirty_kb=200 avail=2488808 cached=2340780 cgcur=
+MEMDIAGD rss=1003284 dirty_kb=204 avail=2467860 cached=2376772 cgcur=
+MEMDIAGD rss=903704 dirty_kb=212 avail=2578320 cached=2302772 cgcur=
+MEMDIAGD rss=825992 dirty_kb=216 avail=2625384 cached=2339492 cgcur=
+MEMDIAGD rss=830320 dirty_kb=220 avail=2604756 cached=2294896 cgcur=
+MEMDIAGD rss=837448 dirty_kb=228 avail=2573260 cached=2224328 cgcur=
+MEMDIAGD rss=827248 dirty_kb=232 avail=2623320 cached=2250456 cgcur=
+MEMDIAGD rss=827260 dirty_kb=240 avail=2611920 cached=2247300 cgcur=
+MEMDIAGD rss=835456 dirty_kb=252 avail=2558184 cached=2285808 cgcur=
+MEMDIAGD rss=860516 dirty_kb=256 avail=2511208 cached=2284732 cgcur=
+MEMDIAGD rss=876448 dirty_kb=260 avail=2468732 cached=2218876 cgcur=
+MEMDIAGD rss=880388 dirty_kb=268 avail=2528136 cached=2257848 cgcur=
+MEMDIAGD rss=931836 dirty_kb=0 avail=2446500 cached=2266340 cgcur=
+MEMDIAGD rss=940568 dirty_kb=60 avail=2487640 cached=2303416 cgcur=
+MEMDIAGD rss=953192 dirty_kb=72 avail=2463484 cached=2304972 cgcur=
+MEMDIAGD rss=937448 dirty_kb=80 avail=2467992 cached=2236232 cgcur=
+MEMDIAGD rss=961068 dirty_kb=84 avail=2442792 cached=2306848 cgcur=
+MEMDIAGD rss=974872 dirty_kb=92 avail=2465856 cached=2265980 cgcur=
+MEMDIAGD rss=981768 dirty_kb=104 avail=2459580 cached=2324576 cgcur=
+MEMDIAGD rss=975392 dirty_kb=108 avail=2467576 cached=2275072 cgcur=
+MEMDIAGD rss=981812 dirty_kb=112 avail=2449244 cached=2335380 cgcur=
+MEMDIAGD rss=980536 dirty_kb=120 avail=2451616 cached=2285588 cgcur=
+MEMDIAGD rss=972776 dirty_kb=124 avail=2454664 cached=2308044 cgcur=
+MEMDIAGD rss=950644 dirty_kb=132 avail=2487480 cached=2280280 cgcur=
+MEMDIAGD rss=965164 dirty_kb=140 avail=2464988 cached=2312532 cgcur=
+MEMDIAGD rss=992948 dirty_kb=148 avail=2463784 cached=2272428 cgcur=
+MEMDIAGD rss=973820 dirty_kb=152 avail=2453928 cached=2325836 cgcur=
+MEMDIAGD rss=943548 dirty_kb=164 avail=2481736 cached=2260472 cgcur=
+LEVELDIAG compact_leveled_done level=0 files=0 bytes=0
+LEVELDIAG compact_leveled_done level=1 files=5 bytes=236586875
+LEVELDIAG compact_leveled_done level=2 files=44 bytes=2646165757
+LEVELDIAG compact_leveled_done level=3 files=46 bytes=2648340118
+SETTLE_PHASE compact_ms=47442
+SETTLE_RSS after_compact 845304 kB
+settle/pedradb: 53.3s; on disk after 5.15 GiB
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=845424 tick_s=47 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=847844 dirty_kb=180 avail=2599328 cached=2269124 cgcur=
+probe_hit/pedradb: p50 37.9µs / p90 59.5µs / p99 260.5µs / p999 4.1ms / max 12.5ms
+probe_miss/pedradb: p50 2.7µs / p90 3.0µs / p99 11.6µs / p999 1.3ms / max 3.9ms
+Benchmarking get_hit/pedradb
+Benchmarking get_hit/pedradb: Warming up for 3.0000 s
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=851196 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=851200 dirty_kb=180 avail=2594160 cached=2367068 cgcur=
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=862908 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=862908 dirty_kb=180 avail=2565264 cached=2467252 cgcur=
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=862908 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=862908 dirty_kb=180 avail=2578156 cached=2564316 cgcur=
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=862908 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=865500 dirty_kb=180 avail=2581100 cached=2613900 cgcur=
+Benchmarking get_hit/pedradb: Collecting 100 samples in estimated 5.1553 s (86k iterations)
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=865624 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=865624 dirty_kb=180 avail=2578728 cached=2634760 cgcur=
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=865624 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=865624 dirty_kb=180 avail=2580576 cached=2606356 cgcur=
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=865624 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=865624 dirty_kb=180 avail=2575188 cached=2618860 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=865624 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=865624 dirty_kb=180 avail=2591548 cached=2604364 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=865624 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=865624 dirty_kb=180 avail=2579596 cached=2606488 cgcur=
+Benchmarking get_hit/pedradb: Analyzing
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=885560 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+get_hit/pedradb         time:   [57.931 µs 60.504 µs 63.181 µs]
+                        thrpt:  [15.828 Kelem/s 16.528 Kelem/s 17.262 Kelem/s]
+                 change:
+                        time:   [-6.9946% +8.2246% +23.820%] (p = 0.32 > 0.05)
+                        thrpt:  [-19.238% -7.5996% +7.5206%]
+                        No change in performance detected.
+Found 4 outliers among 100 measurements (4.00%)
+  2 (2.00%) high mild
+  2 (2.00%) high severe
+MEMDIAGD rss=888848 dirty_kb=188 avail=2566768 cached=2618168 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=888848 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=888848 dirty_kb=192 avail=2566068 cached=2618360 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=897380 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+
+Benchmarking prefix_scan/pedradb
+Benchmarking prefix_scan/pedradb: Warming up for 3.0000 s
+MEMDIAGD rss=897992 dirty_kb=196 avail=2575480 cached=2618124 cgcur=
+SCANDIAG ops=2048 streams/op=2.0 setup_ns/op=6366 rows/op=333.3 row_ns/row=228 cache_hits/op=22.30 cache_misses/op=0.03
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=897992 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+SCANDIAG ops=4096 streams/op=2.0 setup_ns/op=5291 rows/op=333.2 row_ns/row=202 cache_hits/op=22.33 cache_misses/op=0.00
+MEMDIAGD rss=897992 dirty_kb=196 avail=2574568 cached=2618116 cgcur=
+SCANDIAG ops=6144 streams/op=2.0 setup_ns/op=5264 rows/op=333.5 row_ns/row=201 cache_hits/op=22.34 cache_misses/op=0.00
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=897992 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=897992 dirty_kb=196 avail=2573296 cached=2618028 cgcur=
+SCANDIAG ops=8192 streams/op=2.0 setup_ns/op=6528 rows/op=333.3 row_ns/row=218 cache_hits/op=22.33 cache_misses/op=0.00
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=897992 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+SCANDIAG ops=10240 streams/op=2.0 setup_ns/op=5056 rows/op=333.2 row_ns/row=200 cache_hits/op=22.33 cache_misses/op=0.00
+MEMDIAGD rss=897992 dirty_kb=32 avail=2571968 cached=2618140 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=897992 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+Benchmarking prefix_scan/pedradb: Collecting 100 samples in estimated 9.1021 s (10k iterations)
+SCANDIAG ops=12288 streams/op=2.0 setup_ns/op=7492 rows/op=333.5 row_ns/row=223 cache_hits/op=22.34 cache_misses/op=0.00
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=897992 dirty_kb=48 avail=2571652 cached=2618136 cgcur=
+SCANDIAG ops=14336 streams/op=2.0 setup_ns/op=6946 rows/op=333.3 row_ns/row=204 cache_hits/op=22.33 cache_misses/op=0.00
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=897992 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+SCANDIAG ops=16384 streams/op=2.0 setup_ns/op=6263 rows/op=333.2 row_ns/row=217 cache_hits/op=22.33 cache_misses/op=0.00
+MEMDIAGD rss=897992 dirty_kb=56 avail=2571772 cached=2618116 cgcur=
+SCANDIAG ops=18432 streams/op=2.0 setup_ns/op=4900 rows/op=333.5 row_ns/row=206 cache_hits/op=22.34 cache_misses/op=0.00
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=897992 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+SCANDIAG ops=20480 streams/op=2.0 setup_ns/op=5290 rows/op=333.3 row_ns/row=215 cache_hits/op=22.33 cache_misses/op=0.00
+MEMDIAGD rss=897992 dirty_kb=56 avail=2572212 cached=2618132 cgcur=
+SCANDIAG ops=22528 streams/op=2.0 setup_ns/op=6139 rows/op=333.2 row_ns/row=207 cache_hits/op=22.33 cache_misses/op=0.00
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=897992 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+SCANDIAG ops=24576 streams/op=2.0 setup_ns/op=5926 rows/op=333.5 row_ns/row=208 cache_hits/op=22.34 cache_misses/op=0.00
+MEMDIAGD rss=897992 dirty_kb=56 avail=2571664 cached=2618128 cgcur=
+SCANDIAG ops=26624 streams/op=2.0 setup_ns/op=5690 rows/op=333.3 row_ns/row=204 cache_hits/op=22.33 cache_misses/op=0.00
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=897992 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+SCANDIAG ops=28672 streams/op=2.0 setup_ns/op=6872 rows/op=333.2 row_ns/row=210 cache_hits/op=22.33 cache_misses/op=0.00
+MEMDIAGD rss=897992 dirty_kb=56 avail=2571140 cached=2618124 cgcur=
+SCANDIAG ops=30720 streams/op=2.0 setup_ns/op=5865 rows/op=333.5 row_ns/row=229 cache_hits/op=22.34 cache_misses/op=0.00
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=897992 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=897992 dirty_kb=56 avail=2571588 cached=2618120 cgcur=
+SCANDIAG ops=32768 streams/op=2.0 setup_ns/op=5928 rows/op=333.3 row_ns/row=211 cache_hits/op=22.33 cache_misses/op=0.00
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=907888 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+SCANDIAG ops=34816 streams/op=2.0 setup_ns/op=5123 rows/op=333.2 row_ns/row=207 cache_hits/op=22.33 cache_misses/op=0.00
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=907888 dirty_kb=56 avail=2564016 cached=2618132 cgcur=
+SCANDIAG ops=36864 streams/op=2.0 setup_ns/op=5343 rows/op=333.5 row_ns/row=221 cache_hits/op=22.34 cache_misses/op=0.00
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=907888 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+SCANDIAG ops=38912 streams/op=2.0 setup_ns/op=5183 rows/op=333.3 row_ns/row=200 cache_hits/op=22.33 cache_misses/op=0.00
+MEMDIAGD rss=907888 dirty_kb=56 avail=2562696 cached=2618132 cgcur=
+SCANDIAG ops=40960 streams/op=2.0 setup_ns/op=5167 rows/op=333.2 row_ns/row=203 cache_hits/op=22.33 cache_misses/op=0.00
+Benchmarking prefix_scan/pedradb: Analyzing
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=907916 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+prefix_scan/pedradb     time:   [766.58 µs 781.69 µs 798.99 µs]
+                        thrpt:  [1.2516 Melem/s 1.2793 Melem/s 1.3045 Melem/s]
+                 change:
+                        time:   [+20.287% +32.187% +42.184%] (p = 0.00 < 0.05)
+                        thrpt:  [-29.668% -24.350% -16.866%]
+                        Performance has regressed.
+Found 6 outliers among 100 measurements (6.00%)
+  2 (2.00%) low mild
+  2 (2.00%) high mild
+  2 (2.00%) high severe
+MEMDIAGD rss=914848 dirty_kb=68 avail=2556208 cached=2618180 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=914848 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=914848 dirty_kb=68 avail=2556064 cached=2618288 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=914848 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+
+Benchmarking lookup_100/pedradb_get_loop
+Benchmarking lookup_100/pedradb_get_loop: Warming up for 3.0000 s
+MEMDIAGD rss=914848 dirty_kb=76 avail=2556524 cached=2596240 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=914848 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=914848 dirty_kb=76 avail=2551040 cached=2610864 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=914848 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=914848 dirty_kb=76 avail=2549836 cached=2586040 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=914848 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+Benchmarking lookup_100/pedradb_get_loop: Collecting 100 samples in estimated 5.4858 s (900 iterations)
+MEMDIAGD rss=914848 dirty_kb=76 avail=2552280 cached=2604808 cgcur=
+MEMDIAGD rss=914848 dirty_kb=76 avail=2552484 cached=2577824 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=914848 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=914848 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=914848 dirty_kb=76 avail=2554380 cached=2585624 cgcur=
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=914848 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=914848 dirty_kb=76 avail=2560088 cached=2584480 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=914848 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=914848 dirty_kb=76 avail=2563916 cached=2575256 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=914848 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=914848 dirty_kb=76 avail=2554540 cached=2590524 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=914848 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=914848 dirty_kb=76 avail=2551976 cached=2596160 cgcur=
+Benchmarking lookup_100/pedradb_get_loop: Analyzing
+lookup_100/pedradb_get_loop
+                        time:   [6.0894 ms 7.2633 ms 9.4135 ms]
+                        thrpt:  [10.623 Kelem/s 13.768 Kelem/s 16.422 Kelem/s]
+                 change:
+                        time:   [+1.7014% +22.534% +66.187%] (p = 0.17 > 0.05)
+                        thrpt:  [-39.827% -18.390% -1.6730%]
+                        No change in performance detected.
+Found 8 outliers among 100 measurements (8.00%)
+  6 (6.00%) high mild
+  2 (2.00%) high severe
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=917320 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=917320 dirty_kb=80 avail=2552308 cached=2585796 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=917320 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=917320 dirty_kb=80 avail=2552488 cached=2585936 cgcur=
+Benchmarking lookup_100/pedradb_multi_get
+Benchmarking lookup_100/pedradb_multi_get: Warming up for 3.0000 s
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=917332 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=917332 dirty_kb=80 avail=2554572 cached=2566844 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=917548 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=917824 dirty_kb=80 avail=2544508 cached=2583380 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=917984 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=917988 dirty_kb=80 avail=2547724 cached=2595892 cgcur=
+Benchmarking lookup_100/pedradb_multi_get: Collecting 100 samples in estimated 5.6030 s (900 iterations)
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=917996 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=917996 dirty_kb=80 avail=2551972 cached=2608748 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=917996 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=917996 dirty_kb=80 avail=2542104 cached=2593816 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=917996 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=917996 dirty_kb=80 avail=2549736 cached=2599384 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=917996 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=917996 dirty_kb=80 avail=2544832 cached=2588504 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=917996 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=917996 dirty_kb=32 avail=2544120 cached=2566532 cgcur=
+Benchmarking lookup_100/pedradb_multi_get: Analyzing
+lookup_100/pedradb_multi_get
+                        time:   [5.3809 ms 5.6237 ms 5.8838 ms]
+                        thrpt:  [16.996 Kelem/s 17.782 Kelem/s 18.584 Kelem/s]
+                 change:
+                        time:   [-13.603% -9.0636% -3.7939%] (p = 0.00 < 0.05)
+                        thrpt:  [+3.9435% +9.9670% +15.745%]
+                        Performance has improved.
+Found 11 outliers among 100 measurements (11.00%)
+  9 (9.00%) high mild
+  2 (2.00%) high severe
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=919632 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=919632 dirty_kb=56 avail=2556596 cached=2588080 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=95 rss_kb=919632 tick_s=0 mat_n=25 pool_n=4 pool_b=240624430 ent_e=0
+COMPACTDIAG l0=0 l1=5 parked_n=0 pool_n=4 pool_b=240624430 ent_e=0
+MEMDIAGD rss=919632 dirty_kb=56 avail=2553884 cached=2588152 cgcur=
+
+MEMDIAGD rss=651000 dirty_kb=60 avail=2840648 cached=1782472 cgcur=
+BENCH_EXIT_pedradb_diag=0
+               total        used        free      shared  buff/cache   available
+Mem:            3892         282        3686          30         109        3609
+/dev/vda         40G  781M   37G   3% /data
+Mon Aug 31 22:23:05 UTC 2026
+=== v17 trim done ===

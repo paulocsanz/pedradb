@@ -1013,3 +1013,128 @@ Honest read:
   custom-harness probe swings ±20 % run-to-run on this guest. The 16 KiB
   verdict rests on all four point legs agreeing (incl. criterion's own
   significance tests), not on any single leg.
+
+## Guest prefix_scan gap: local attribution (macOS `sample`, 6M)
+
+Where does a scan op actually go? Local 6M pedra-only prefix_scan,
+sampled with macOS `sample` during criterion's Collecting phase (clean
+reading 215.68 µs [211.33, 221.12]; local v21j/4 KiB criterion: pedra
+202.9 µs vs rocks 225.7 µs). Raw tree: `local-6m-scan-sample.txt`.
+
+Attribution of 8335 `Bencher::iter` samples:
+
+- `scan_prefix` (compat) 2458 samples = 29.5 % of the op, of which
+  `page_forward` 1141 (13.7 %): `next_window_kv` ≈ 960 — heap push 268
+  (3.2 %), heap pop 79, `SstRangeIter::next` ≈ 450 (memcmp walk),
+  block-cache get_or_insert ≈ 45 — and `page_forward` self ≈ 816
+  (window materialization: codec decode + Vec push + malloc per item).
+- The other ~70 % collapses into frame-pointer-less `Bencher::iter`
+  self (inlined closure body: decode_entry, utf8, starts_with,
+  black_box) — work the rocks leg also pays in its own shape.
+
+So engine-specific work is ~30 % of the op and **already beats rocks
+locally**. The guest multiplies pedra's path ×2.9 (0.53 → 1.56 µs/key)
+while rocks only ×1.35 (0.59 → 0.80). Two live hypotheses, untestable
+remotely: (a) guest scans are not cache-hot — block-cache misses
+re-read blocks through qcow2/virtio; (b) the guest vCPU penalizes
+pedra's instruction mix (Bytes atomic refcounts, heap sifts, malloc).
+
+Side-finding: local hydrate is parking-bound — 92 % of main-thread
+samples sit in `WriteGroup::await_flush_debt` → nanosleep. Relevant
+when the hydrate write-amp lever opens.
+
+## v21l — scan diagnostics instrument (run #15)
+
+Goal: split hypothesis (a) cache misses from (b) CPU cost **on the
+guest**, without touching the read-only compat layer.
+
+- `PEDRA_SCAN_DIAG=1` (read once, `OnceLock`): `next_window_kv` (the
+  function the compat scan actually drives via `into_window_kvs`) is
+  timed with `Instant` around an inner fn; rows + ns go to crate-level
+  atomics. `Db::scan_at_raw` records stream count + setup ns and every
+  2048 scans prints
+  `SCANDIAG ops=N streams/op=… setup_ns/op=… rows/op=… row_ns/row=… cache_hits/op=… cache_misses/op=…`
+  (block-cache counters are DB-global — the per-op attribution holds on
+  a scan-only leg).
+- Settle-start shape: `dump_level_diag("compact_leveled_start")` before
+  the leveled drain, under the existing `PEDRA_LEVEL_DIAG` — learn how
+  many bytes settle actually moves at 25M.
+- Entrypoint: `PEDRA_BLOCK_TARGET=16384` export dropped (refuted,
+  run #14); default 4096 rides again.
+
+Local validation (1M, `local-1m-scandiag.txt`): diag ON prints
+streams/op=2.0, rows/op=333.3 (the bench prefix size), row_ns/row ≈ 70
+ns, cache_misses/op = 0.00, cache_hits/op ≈ 22 — locally the scan is
+fully block-cache-hot, as expected at 1M/256 MiB. OFF-path control:
+199.81 µs, identical to the pre-instrument level (one relaxed load per
+row when disabled). ON-path overhead ≈ +31 % at 1M (two `Instant` calls
+per row) — **guest prefix_scan absolutes in run #15 are instrumented,
+not comparable to #13/#14**; the point is row_ns/row and
+cache_misses/op, not the leg time. Read the instrument against the
+local reading with the same overhead included (~70 ns/row local).
+
+## Guest run #15 (v21l, 25M) — scan verdict: cache-hot, gap is per-row CPU
+
+`BENCH_EXIT_pedradb_diag=0`; raw serial `run15-25m-scandiag.txt`
+(20 SCANDIAG lines over 40 960 scan ops). Default 4 KiB blocks restored.
+
+| leg (25M)              | run #13 | run #15 (v21l)  | rocks default | #15 ratio |
+|------------------------|---------|-----------------|---------------|-----------|
+| hydrate                | 143.7 s | 155.7 s         | 25.3 s        | 0.16× (fd ceiling) |
+| settle                 | 52.0 s  | 53.3 s          | 8.3 s         | 0.16×     |
+| probe_hit p50          | 33.9 µs | 37.9 µs         | 45.4 µs       | 1.20×     |
+| probe_miss p50         | 2.5 µs  | 2.7 µs          | rocks-class   | ~1×       |
+| get_hit (criterion)    | 46.7 µs | 60.5 µs (p=0.32 n.s.) | 38.59 µs | 0.64×     |
+| prefix_scan            | 632.6 µs | **781.7 µs instrumented** | 305.6 µs | 0.39×* |
+| lookup_100 get_loop    | 4.534 ms | 7.263 ms (p=0.17 n.s.) | 3.38 ms | 0.47× |
+| lookup_100 multi_get   | 4.954 ms | 5.624 ms        | 3.70 ms       | 0.66×     |
+| on disk after settle   | 5.15 GiB | 5.15 GiB       | 5.24 GiB      | smaller   |
+
+\* instrumented: two `Instant` calls per row ≈ +60–90 µs at 333 rows/op;
+this boot was also I/O-slow (see fd floor below). The number is for the
+diagnosis, not for the ladder.
+
+**SCANDIAG verdict (the run's purpose), stable across all 20 windows:**
+
+- streams/op = 2.0, rows/op = 333.3, setup_ns/op ≈ 5.2–7.5 µs,
+  **row_ns/row ≈ 200–229 ns (median ~208)**, cache_hits/op ≈ 22.3,
+  **cache_misses/op = 0.00** (first window 0.03 — cold start).
+- **The 25M guest scan is fully block-cache-hot.** Hypothesis (a)
+  (pool/residency misses re-reading through qcow2) is refuted for this
+  leg: the bench's prefix working set (~22 resolved blocks/op) stays in
+  the 256 MiB block cache, same as at 1M locally.
+- Hypothesis (b) confirmed: the guest vCPU runs pedra's per-row merge
+  work at ~208 ns/row vs ~70 ns/row locally (same instrument, ×3.0
+  amplification) while the rocks leg only amplifies ×1.35. The scan gap
+  is per-row CPU cost, not block I/O.
+- **But the core is only ~12 % of the op**: setup 5.9 µs + 333 × 208 ns
+  ≈ 75 µs of a ~632 µs (uninstrumented, #13) op. Even zeroing core scan
+  cost entirely leaves ~557 µs of compat `page_forward` window
+  materialization (codec decode + `to_vec` per row, read-only layer
+  today) + shared bench closure vs rocks' 305.6 µs whole op. **The
+  prefix_scan leg is not closable to ≥1× from inside `scan_at_raw`
+  alone** — it needs the compat iterator path (cheaper per-row
+  materialization) or a core API that lets compat fill windows without
+  per-row allocation.
+
+Boot-regime caveats (why no point-lever verdicts here):
+
+- fd floor this boot: `FDFSYNC_PROBE per_op_ms=3.371` → ×24 414 ≈
+  **82.3 s** vs 48.2 s on run #14's boot. The floor is boot-variable
+  ×1.7 on this guest (same probe, same image) — quote it as a range
+  (48–82 s), never a single number. This boot's hydrate 155.7 s sits
+  ~73 s above its own floor.
+- Point legs all read worse than #13 (get_hit +29 %, get_loop +60 %)
+  with criterion significance mixed (get_hit p=0.32, get_loop p=0.17,
+  multi_get p=0.00) — consistent with a globally slower-I/O boot, not
+  with a v21l regression (the scan-path instrument is off the point
+  path; OFF-control locally was identical to pre-instrument). Runs #12
+  and #14 showed the same ±15–20 % single-run swings.
+
+Settle-start LEVELDIAG (new): at settle entry the shape is
+L0 2×53.6 MiB, L1 6×286.7 MiB, **L2 88×4.82 GiB**, L3 empty → settle
+moves ~2.4 GiB L2→L3 (settled: L1 5×225.7 MiB, L2 44×2.46 GiB,
+L3 46×2.47 GiB). So the 52–53 s settle is a ~2.4 GiB single-writer
+rewrite (~46 MiB/s effective) — the settle-2 lever (batch pairwise-
+disjoint jobs, parallel write via the ParallelMerge seam, sequential
+install) now has its number: **parallelize ~2.4 GiB of L2→L3 pushdown**.

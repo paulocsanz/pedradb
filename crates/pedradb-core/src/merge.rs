@@ -8,11 +8,29 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BinaryHeap, VecDeque};
 use std::ops::Bound;
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+use std::sync::OnceLock;
+use std::time::Instant;
 
 use bytes::Bytes;
 
 use crate::error::Result;
 use crate::key::{InternalKey, SequenceNumber, ValueType};
+
+/// `PEDRA_SCAN_DIAG=1` arms [`Db::scan_at_raw`]'s periodic SCANDIAG print;
+/// read once per process.
+pub(crate) fn scan_diag_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("PEDRA_SCAN_DIAG").is_some())
+}
+
+/// Candidate rows examined by `next_window_kv` (Some returns only).
+pub(crate) static SCAN_DIAG_ROWS: AtomicU64 = AtomicU64::new(0);
+
+/// Nanoseconds spent inside `next_window_kv` (includes block loads on
+/// cache miss, which happen under the stream's `next`).
+pub(crate) static SCAN_DIAG_ROW_NS: AtomicU64 = AtomicU64::new(0);
+
 
 /// One user-visible key/value after MVCC filtering.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -365,6 +383,20 @@ impl<'a> StreamingVisibleIter<'a> {
     /// Does **not** apply [`iter_window_keep`] — the caller (compat window
     /// or [`Iterator::next`]) decides keep/drop from that bit.
     pub fn next_window_kv(&mut self) -> Option<WindowKv> {
+        // PEDRA_SCAN_DIAG aggregates per-row cost here (the compat scan
+        // path consumes this via `into_window_kvs`, not `Iterator::next`).
+        // Disabled = one relaxed load per row.
+        if !scan_diag_enabled() {
+            return self.next_window_kv_inner();
+        }
+        let t0 = Instant::now();
+        let out = self.next_window_kv_inner();
+        SCAN_DIAG_ROW_NS.fetch_add(t0.elapsed().as_nanos() as u64, AtomicOrdering::Relaxed);
+        SCAN_DIAG_ROWS.fetch_add(u64::from(out.is_some()), AtomicOrdering::Relaxed);
+        out
+    }
+
+    fn next_window_kv_inner(&mut self) -> Option<WindowKv> {
         while let Some(item) = self.heap.pop() {
             if let Some((k, v)) = self.streams[item.stream].next() {
                 self.heap.push(HeapItem {

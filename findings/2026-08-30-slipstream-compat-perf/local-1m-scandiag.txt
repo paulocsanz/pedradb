@@ -1,0 +1,54 @@
+Gnuplot not found, using plotters backend
+hydrate/fjall: 1000000 entries in 0.7s (1.36M entries/s); on disk 0.33 GiB (356 B/entry)
+settle/fjall: 0.0s; on disk after 0.34 GiB
+hydrate/rocksdb: 1000000 entries in 0.7s (1.38M entries/s); on disk 0.22 GiB (239 B/entry)
+settle/rocksdb: 0.6s; on disk after 0.21 GiB
+hydrate/pedradb: 1000000 entries in 0.8s (1.18M entries/s); on disk 0.35 GiB (377 B/entry)
+settle/pedradb: 1.1s; on disk after 0.21 GiB
+probe_hit/fjall: p50 4.9µs / p90 5.6µs / p99 7.8µs / p999 17.9µs / max 55.7µs
+probe_miss/fjall: p50 250.0ns / p90 292.0ns / p99 334.0ns / p999 4.1µs / max 8.8µs
+probe_hit/rocksdb: p50 5.7µs / p90 6.3µs / p99 9.5µs / p999 15.3µs / max 41.1µs
+probe_miss/rocksdb: p50 458.0ns / p90 500.0ns / p99 625.0ns / p999 875.0ns / max 12.5µs
+probe_hit/pedradb: p50 2.2µs / p90 3.1µs / p99 6.5µs / p999 14.4µs / max 419.4µs
+probe_miss/pedradb: p50 584.0ns / p90 750.0ns / p99 2.2µs / p999 5.4µs / max 376.2µs
+Benchmarking prefix_scan/pedradb
+Benchmarking prefix_scan/pedradb: Warming up for 1.0000 s
+SCANDIAG ops=2048 streams/op=2.0 setup_ns/op=829 rows/op=333.3 row_ns/row=71 cache_hits/op=21.96 cache_misses/op=0.03
+SCANDIAG ops=4096 streams/op=2.0 setup_ns/op=807 rows/op=333.2 row_ns/row=70 cache_hits/op=21.99 cache_misses/op=0.00
+SCANDIAG ops=6144 streams/op=2.0 setup_ns/op=807 rows/op=333.5 row_ns/row=70 cache_hits/op=22.01 cache_misses/op=0.00
+SCANDIAG ops=8192 streams/op=2.0 setup_ns/op=867 rows/op=333.3 row_ns/row=72 cache_hits/op=22.00 cache_misses/op=0.00
+SCANDIAG ops=10240 streams/op=2.0 setup_ns/op=846 rows/op=333.2 row_ns/row=72 cache_hits/op=21.99 cache_misses/op=0.00
+Benchmarking prefix_scan/pedradb: Collecting 100 samples in estimated 3.9346 s (15k iterations)
+SCANDIAG ops=12288 streams/op=2.0 setup_ns/op=1375 rows/op=333.5 row_ns/row=93 cache_hits/op=22.01 cache_misses/op=0.00
+SCANDIAG ops=14336 streams/op=2.0 setup_ns/op=2175 rows/op=333.3 row_ns/row=116 cache_hits/op=22.00 cache_misses/op=0.00
+SCANDIAG ops=16384 streams/op=2.0 setup_ns/op=932 rows/op=333.2 row_ns/row=73 cache_hits/op=21.99 cache_misses/op=0.00
+SCANDIAG ops=18432 streams/op=2.0 setup_ns/op=1731 rows/op=333.5 row_ns/row=105 cache_hits/op=22.01 cache_misses/op=0.00
+SCANDIAG ops=20480 streams/op=2.0 setup_ns/op=1338 rows/op=333.3 row_ns/row=93 cache_hits/op=22.00 cache_misses/op=0.00
+SCANDIAG ops=22528 streams/op=2.0 setup_ns/op=1158 rows/op=333.2 row_ns/row=83 cache_hits/op=21.99 cache_misses/op=0.00
+SCANDIAG ops=24576 streams/op=2.0 setup_ns/op=1039 rows/op=333.5 row_ns/row=79 cache_hits/op=22.01 cache_misses/op=0.00
+SCANDIAG ops=26624 streams/op=2.0 setup_ns/op=880 rows/op=333.3 row_ns/row=73 cache_hits/op=22.00 cache_misses/op=0.00
+SCANDIAG ops=28672 streams/op=2.0 setup_ns/op=854 rows/op=333.2 row_ns/row=71 cache_hits/op=21.99 cache_misses/op=0.00
+SCANDIAG ops=30720 streams/op=2.0 setup_ns/op=863 rows/op=333.5 row_ns/row=71 cache_hits/op=22.01 cache_misses/op=0.00
+SCANDIAG ops=32768 streams/op=2.0 setup_ns/op=865 rows/op=333.3 row_ns/row=72 cache_hits/op=22.00 cache_misses/op=0.00
+SCANDIAG ops=34816 streams/op=2.0 setup_ns/op=868 rows/op=333.2 row_ns/row=71 cache_hits/op=21.99 cache_misses/op=0.00
+SCANDIAG ops=36864 streams/op=2.0 setup_ns/op=844 rows/op=333.5 row_ns/row=71 cache_hits/op=22.01 cache_misses/op=0.00
+SCANDIAG ops=38912 streams/op=2.0 setup_ns/op=854 rows/op=333.3 row_ns/row=71 cache_hits/op=22.00 cache_misses/op=0.00
+SCANDIAG ops=40960 streams/op=2.0 setup_ns/op=902 rows/op=333.2 row_ns/row=77 cache_hits/op=21.99 cache_misses/op=0.00
+SCANDIAG ops=43008 streams/op=2.0 setup_ns/op=882 rows/op=333.5 row_ns/row=74 cache_hits/op=22.01 cache_misses/op=0.00
+SCANDIAG ops=45056 streams/op=2.0 setup_ns/op=834 rows/op=333.3 row_ns/row=71 cache_hits/op=22.00 cache_misses/op=0.00
+SCANDIAG ops=47104 streams/op=2.0 setup_ns/op=809 rows/op=333.2 row_ns/row=70 cache_hits/op=21.99 cache_misses/op=0.00
+SCANDIAG ops=49152 streams/op=2.0 setup_ns/op=795 rows/op=333.5 row_ns/row=70 cache_hits/op=22.01 cache_misses/op=0.00
+SCANDIAG ops=51200 streams/op=2.0 setup_ns/op=805 rows/op=333.3 row_ns/row=70 cache_hits/op=22.00 cache_misses/op=0.00
+SCANDIAG ops=53248 streams/op=2.0 setup_ns/op=819 rows/op=333.2 row_ns/row=70 cache_hits/op=21.99 cache_misses/op=0.00
+SCANDIAG ops=55296 streams/op=2.0 setup_ns/op=813 rows/op=333.5 row_ns/row=70 cache_hits/op=22.01 cache_misses/op=0.00
+SCANDIAG ops=57344 streams/op=2.0 setup_ns/op=830 rows/op=333.3 row_ns/row=71 cache_hits/op=22.00 cache_misses/op=0.00
+Benchmarking prefix_scan/pedradb: Analyzing
+prefix_scan/pedradb     time:   [253.88 µs 262.58 µs 273.69 µs]
+                        thrpt:  [3.6537 Melem/s 3.8083 Melem/s 3.9389 Melem/s]
+                 change:
+                        time:   [+42.526% +55.340% +70.738%] (p = 0.00 < 0.05)
+                        thrpt:  [-41.431% -35.625% -29.837%]
+                        Performance has regressed.
+Found 6 outliers among 100 measurements (6.00%)
+  6 (6.00%) high mild
+

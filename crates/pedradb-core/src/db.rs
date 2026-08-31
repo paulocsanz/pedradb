@@ -4099,6 +4099,8 @@ impl<E: Env> Db<E> {
             return StreamingVisibleIter::new(Vec::new(), 0, start, end, limit);
         }
         self.scan_ops.fetch_add(1, Ordering::Relaxed);
+        let scan_diag = crate::merge::scan_diag_enabled();
+        let scan_diag_t0 = scan_diag.then(Instant::now);
         // Range tombstones first (G2): a covering delete whose start sits
         // before `start` must still hide keys in the window. Point streams
         // are lazy — later SST blocks are not decoded after `limit` emits.
@@ -4149,7 +4151,61 @@ impl<E: Env> Db<E> {
                 load,
             )));
         }
+        if let Some(t0) = scan_diag_t0 {
+            self.scan_diag_note(t0, streams.len());
+        }
         StreamingVisibleIter::from_point_streams(streams, range_dels, snapshot, start, end, limit)
+    }
+
+    /// `PEDRA_SCAN_DIAG=1`: one aggregate line every 2048 scans — streams
+    /// merged, core setup ns/op, per-row ns (crate::merge counters) and
+    /// block-cache hit/miss deltas. The cache counters are DB-global
+    /// (point reads share the cache), so the per-op numbers are only
+    /// attributable to scans on a scan-only bench leg.
+    fn scan_diag_note(&self, t0: Instant, streams: usize) {
+        static OPS: AtomicU64 = AtomicU64::new(0);
+        static STREAMS: AtomicU64 = AtomicU64::new(0);
+        static SETUP_NS: AtomicU64 = AtomicU64::new(0);
+        static LAST_OPS: AtomicU64 = AtomicU64::new(0);
+        static LAST_STREAMS: AtomicU64 = AtomicU64::new(0);
+        static LAST_SETUP_NS: AtomicU64 = AtomicU64::new(0);
+        static LAST_ROWS: AtomicU64 = AtomicU64::new(0);
+        static LAST_ROW_NS: AtomicU64 = AtomicU64::new(0);
+        static LAST_HITS: AtomicU64 = AtomicU64::new(0);
+        static LAST_MISSES: AtomicU64 = AtomicU64::new(0);
+
+        SETUP_NS.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        STREAMS.fetch_add(streams as u64, Ordering::Relaxed);
+        let ops = OPS.fetch_add(1, Ordering::Relaxed) + 1;
+        if ops % 2048 != 0 {
+            return;
+        }
+        let rows = crate::merge::SCAN_DIAG_ROWS.load(Ordering::Relaxed);
+        let row_ns = crate::merge::SCAN_DIAG_ROW_NS.load(Ordering::Relaxed);
+        let hits = self.block_cache.hits();
+        let misses = self.block_cache.misses();
+        let d = ops - LAST_OPS.swap(ops, Ordering::Relaxed);
+        if d == 0 {
+            return;
+        }
+        let total = STREAMS.load(Ordering::Relaxed);
+        let d_streams = total - LAST_STREAMS.swap(total, Ordering::Relaxed);
+        let total = SETUP_NS.load(Ordering::Relaxed);
+        let d_setup = total - LAST_SETUP_NS.swap(total, Ordering::Relaxed);
+        let d_rows = rows - LAST_ROWS.swap(rows, Ordering::Relaxed);
+        let d_row_ns = row_ns - LAST_ROW_NS.swap(row_ns, Ordering::Relaxed);
+        let d_hits = hits - LAST_HITS.swap(hits, Ordering::Relaxed);
+        let d_misses = misses - LAST_MISSES.swap(misses, Ordering::Relaxed);
+        println!(
+            "SCANDIAG ops={} streams/op={:.1} setup_ns/op={:.0} rows/op={:.1} row_ns/row={:.0} cache_hits/op={:.2} cache_misses/op={:.2}",
+            ops,
+            d_streams as f64 / d as f64,
+            d_setup as f64 / d as f64,
+            d_rows as f64 / d as f64,
+            if d_rows > 0 { d_row_ns as f64 / d_rows as f64 } else { 0.0 },
+            d_hits as f64 / d as f64,
+            d_misses as f64 / d as f64,
+        );
     }
 
     fn memtable_stream<'a>(
@@ -5335,6 +5391,7 @@ impl<E: Env> Db<E> {
         if !crate::leveling::leveled_enabled() {
             return self.compact_with(CompactOptions::default());
         }
+        self.dump_level_diag("compact_leveled_start");
         self.repair_stacked_levels()?;
         // Safety valve only: every job strictly removes an L0 file or moves
         // one file out of an over-target level, so the loop converges.
@@ -5354,8 +5411,8 @@ impl<E: Env> Db<E> {
     }
 
     /// `PEDRA_LEVEL_DIAG=1`: per-level file count + on-disk bytes at a
-    /// scheduling milestone (settle end, repair end) — the shape the read
-    /// path faces, on the guest serial console.
+    /// scheduling milestone (settle start/end, repair end) — the shape the
+    /// read path faces, on the guest serial console.
     fn dump_level_diag(&self, tag: &str) {
         if std::env::var_os("PEDRA_LEVEL_DIAG").is_none() {
             return;
