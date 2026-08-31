@@ -13,25 +13,41 @@
 #   - retry ≤3 é harness, não teorema de liveness (R-es segue).
 #
 # Usage: scripts/rfc0157_tcp_campaign.sh [K]   (default K=8)
-# Env:   RFC0157_SEED_PREFIX (default 0x0157_C0) — fresh, disjoint from every
-#        prior campaign seed before reuse; RFC0157_OUT (default the findings
-#        dir above) + RFC0157_TITLE for registered nightly runs.
+# Env:   RFC0157_SEED_PREFIX (default 0x157c0) — a numeric u64 BASE; seeds
+#        are base+i and must stay disjoint from every numeric seed any prior
+#        campaign actually ran. Correction 2026-08-31: the old mnemonic
+#        prefixes (0x0157_C001…, 0x015A_N01…) were not valid u64 literals
+#        and cluster_real silently collapsed them ALL to its 0x641e28
+#        default — every prior campaign ran ONE world (findings/2026-08-31-
+#        campaign-seed-collapse). Seeds are numeric now and each attempt
+#        cross-checks the fingerprint's echoed seed against the request.
+#        RFC0157_OUT (default the findings dir above) + RFC0157_TITLE for
+#        registered nightly runs.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 K="${1:-8}"
 STAGGER="${RFC0157_STAGGER:-1.5}"
-SEED_PREFIX="${RFC0157_SEED_PREFIX:-0x0157_C0}"
+SEED_PREFIX_RAW="${RFC0157_SEED_PREFIX:-0x157c0}"
+# A failed $(( )) assignment still exits 0 in bash, so validate the token
+# explicitly: numeric hex/decimal only — a mnemonic prefix must stop here.
+[[ "$SEED_PREFIX_RAW" =~ ^(0[xX])?[0-9A-Fa-f]+$ ]] || {
+  echo "error: RFC0157_SEED_PREFIX must be numeric (0x… hex or decimal), not a mnemonic: $SEED_PREFIX_RAW" >&2
+  exit 2
+}
+SEED_BASE_NUM=$(( SEED_PREFIX_RAW ))
+SEED_PREFIX="$(printf '0x%x' "$SEED_BASE_NUM")"
 TITLE="${RFC0157_TITLE:-RFC-0157 P0.3 — K-parallel REAL TCP campaign registration}"
 [[ "$K" =~ ^[1-9][0-9]*$ ]] || { echo "error: K must be a positive integer" >&2; exit 2; }
 OUT="${RFC0157_OUT:-$ROOT/findings/rfc0157-tcp-campaign}"
 LOGS="$OUT/logs"
 mkdir -p "$LOGS"
 
-# Seeds are fresh and disjoint from every prior campaign seed (0156 used
-# 0x0156_1E28 / 0x0157_1E28 / 0x0158_1E28; 0157 P0.3 used 0x0157_C001+):
-# $SEED_PREFIX + i, configurable per registered run via RFC0157_SEED_PREFIX.
-seed_of() { printf '%s%02x' "$SEED_PREFIX" "$1"; }
+# Numeric seeds (base+i), disjoint from every numeric seed a prior campaign
+# actually ran. Historically "used" 0x0156_1E28/0x0157_C001+/0x015A_N001+
+# never reached the binary (see header) — the only numeric seeds ever
+# exercised were 0x641e28 (the silent default) and decimal 671.
+seed_of() { printf '0x%x' "$(( SEED_BASE_NUM + $1 ))"; }
 # Outside the pid-derived default range (23000..24503) so a concurrently
 # running test binary cannot collide with the campaign.
 port_of() { echo $((26000 + 3 * ($1 - 1))); }
@@ -70,6 +86,11 @@ run_seed() {
     dur=$(( $(date +%s) - start ))
     fp="$(grep '^cluster_real ' "$log" | tail -1 | tail -c +14 || true)"
     ok=1
+    got_seed="$(grep -oE 'seed=[0-9a-f]+' <<<"$fp" | head -1 | cut -d= -f2)"
+    if [[ -z "$got_seed" || "0x$got_seed" != "$seed" ]]; then
+      echo "attempt $attempt SEED COLLAPSE: asked $seed, cluster ran ${got_seed:-no-seed}" >>"$log"
+      ok=0
+    fi
     for bit in get=1 after=1 restart=1 remove=1 napply=1; do
       grep -q " $bit" <<<" $fp" || ok=0
     done
