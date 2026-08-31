@@ -100,3 +100,47 @@ truth.
 Option 1 (twin + plant for leveling) remains open, blocked on the
 co-agent's `three_teeth_queued.rs` (plant infrastructure) being clean at
 HEAD.
+
+## Tree sweep (2026-08-31 evening, advisory — was leveling the only one?)
+
+The enrollment tooth enforces; it does not discover. This sweep answers
+whether any OTHER pure decision kernel sits outside the surface.
+Method (persisted as `pure_sweep.py` in this dir, re-runnable):
+
+- surface = glob `*_kernel.rs` (non-verus) ∪ `glue.kernel_paths` ∪ every
+  file referenced by catalog.json (pair kernel/twin/plant/callers, clone
+  sides) = **148 files**
+- sweep every other non-verus `.rs` under `crates/*/src`, prod code only
+  (before `#[cfg(test)]`), pure shape: no `self` receiver, no
+  unsafe/IO/thread/lock/atomics/async signals in the body, non-`()`
+  return; brace-matched bodies, comments stripped
+
+~46 leftover files, all classifiable by hand:
+
+- codecs/framing (`tcp.rs`, `persist.rs`, `dcs`, `msg.rs`, `fdb_layers`,
+  `change_feed`, `sql`), bench/CLI/soak harness (`rocksdb-parity-bench`,
+  `cli`, `montanha-*`, `world` bins, `dst` bins), fault injection
+  (`buggify_hooks`, `pct_hooks`), DST scheduling (`world/schedule.rs`,
+  `pct*`, `scheduler.rs`), test oracles (`oracle`, `sim`), plumbing
+  (`tls`, `client.rs`, `backup`, `txn`, `knobs`, `fold`)
+- **`pedradb-core/src/verified.rs`** — RFC-0058 verified-profile
+  declaration: not a data-fate kernel; it is the claims meta-surface and
+  carries its own machine tie to the catalog
+  (`verified_report_matches_catalog`; ON set must equal catalog pair ids)
+- **`pedradb-core/src/wal/recover_choose.rs`** — DST injection harness by
+  its own header ("not a second recover policy"; production calls
+  `recover_kernel`, these only tear/flip/forge WAL images to drive the
+  real reader)
+- `sst/table.rs` helpers (`block_target` etc.) live in a catalog caller
+  (handler side of `cf_kernel`), tracked by the handler_loc freeze, not
+  kernel-side
+
+**Conclusion: leveling.rs was the only unenrolled pure data-fate
+decision kernel in the tree.** The enrollment surface is complete at the
+pure-kernel level as of this sweep.
+
+Not claiming: that the heuristic is exhaustive (a decision fn taking
+`&self` on a pure struct, or returning `()`, would be missed — advisory
+only, per the word-grep rejection above); anything about codec/harness
+correctness (plants and oracles exercise those); that clones are
+semantically equivalent.
