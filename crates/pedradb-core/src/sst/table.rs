@@ -1723,9 +1723,12 @@ pub fn write_sst_on_with(
     )
 }
 
-/// L0 flush: same as [`write_sst_on_with`] but **uncompressed** (SST v3).
+/// L0 flush: [`write_sst_on_with`] with compressed blocks (SST v5, lz4 +
+/// per-block CRC32C).
 ///
-/// Skip 64 MiB of lz4 on the apply tail; L0→L1 compact still writes v4.
+/// Runs on the flush worker, not the apply tail, so the lz4 cost does not
+/// gate puts; a compressed body keeps the writer's in-RAM file body and the
+/// pooled payload several times smaller than a v3 one.
 ///
 /// # Errors
 /// I/O failures.
@@ -1741,7 +1744,7 @@ pub fn write_l0_sst(
         mem.iter_internal().map(|(k, v)| Ok((k.clone(), v.clone()))),
         mem.len(),
         sync,
-        false,
+        true,
     )
 }
 
@@ -1769,7 +1772,7 @@ pub fn write_l0_sst_for_family(
         }),
         mem.len(),
         sync,
-        false,
+        true,
     )
     .map(|t| t.with_cf(fam))
 }
@@ -2548,12 +2551,13 @@ mod tests {
     }
 
     #[test]
-    fn uncompressed_l0_roundtrip() {
+    fn l0_flush_roundtrip() {
         let mut mem = MemTable::new();
         mem.put(Bytes::from_static(b"a"), 1, Bytes::from_static(b"va"));
         mem.put(Bytes::from_static(b"b"), 2, Bytes::from_static(b"vb"));
         let path = temp_path();
         let table = write_l0_sst(&StdEnv, &path, &mem, false).unwrap();
+        assert!(table.block_crc, "L0 flush is v5 now");
         assert_eq!(
             table.get(b"a", 10),
             Lookup::Found(Bytes::from_static(b"va"))
@@ -2718,8 +2722,17 @@ mod tests {
             let key = format!("v3-{i:03}").into_bytes();
             mem.put(key, u64::from(i), &b"payload-value"[..]);
         }
-        // Uncompressed writer = SST v3, no per-block CRC.
-        let table = crate::sst::write_l0_sst(&StdEnv, &path, &mem, true).unwrap();
+        // Private writer with compress=false = SST v3, no per-block CRC.
+        // (write_l0_sst moved to v5 in v19, so v3 needs the private path.)
+        let table = write_sst_try_sorted_opts(
+            &StdEnv,
+            &path,
+            mem.iter_internal().map(|(k, v)| Ok((k.clone(), v.clone()))),
+            mem.len(),
+            true,
+            false,
+        )
+        .unwrap();
         assert!(table.is_lazy());
         assert!(!table.block_crc, "v3 has no per-block CRC");
         let expected = table.entries_cloned();

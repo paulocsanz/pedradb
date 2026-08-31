@@ -16285,7 +16285,22 @@ mod tests {
         opts.auto_compact_sst_count = None;
         let mut db = Db::open_with_env(&dir, opts, env).unwrap();
         let keys: Vec<Vec<u8>> = (0..32u32).map(|k| format!("k{k:04}").into()).collect();
-        let val = |round: u32, k: u32| vec![(k * 11 + round) as u8; 2048];
+        // Incompressible payloads: constant fill lets lz4 crush every round
+        // to ~nothing (L0 flushes are compressed since v19) and the byte
+        // ratios below would measure compression, not version reclamation.
+        let val = |round: u32, k: u32| {
+            let mut s = u64::from(k).wrapping_mul(0x9E37_79B9)
+                ^ u64::from(round).wrapping_mul(0x85EB_CA6B)
+                ^ 0x27D4_EB2F;
+            let mut v = Vec::with_capacity(2048);
+            for _ in 0..2048 {
+                s = s
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                v.push((s >> 33) as u8);
+            }
+            v
+        };
         let mut round0 = Vec::new();
         for (k, key) in keys.iter().enumerate() {
             let v = val(0, k as u32);
@@ -17025,10 +17040,19 @@ mod tests {
             bytes[mid] ^= 0xff;
             fs::write(&path, bytes).unwrap();
         }
-        assert!(matches!(
-            db.get_at(snap, b"k042"),
-            Err(CoreError::SnapshotTooOld { .. })
-        ));
+        // The hole key's outcome class depends on which covering segment the
+        // byte cap left remote-only — a size-threshold layout choice that
+        // compressed L0 flushes legitimately shift. Either answer is honest
+        // (the key was never written): a coverage-gap SnapshotTooOld when no
+        // remote-only segment covers the snapshot, or a proven-absent None
+        // when every covering segment's sidecar rules the key out. Never a
+        // value — and never a fetch: the corruption above makes a fetched
+        // segment fail CorruptHistory.
+        let hole = db.get_at(snap, b"k042");
+        assert!(
+            matches!(hole, Err(CoreError::SnapshotTooOld { .. })) || matches!(hole, Ok(None)),
+            "hole key must read too-old or absent, got {hole:?}"
+        );
         assert!(matches!(
             db.get_at(Snapshot::at(150), b"k000"),
             Err(CoreError::CorruptHistory(_))
