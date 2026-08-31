@@ -116,6 +116,7 @@ pub fn profile_report() -> &'static [ProfileComponent] {
         // --- commit path (single-writer critical section) ---
         on!("apply_step", "apply_step", "batch apply under the single write lock — the verified commit critical section (F10-apply)"),
         on!("grant_persist", "grant_persist", "durability grant persistence (F15)"),
+        on!("durable_term", "durable_term", "durable become-follower only on a newer term (RFC-0158 / F125/F127)"),
         on!("txn", "txn", "multi-key TX all-or-nothing (F47/F34)"),
         on!("tx_glue", "tx_glue", "OCC glue — validation under the write lock keeps first-committer-wins lone (F47/F34)"),
         on!("isolated", "isolated", "isolated apply (F83)"),
@@ -127,6 +128,8 @@ pub fn profile_report() -> &'static [ProfileComponent] {
         on!("flush_publish", "flush_publish", "MANIFEST after durable SST (RFC-0151 P1)"),
         on!("compact_decision", "compact_decision", "when to compact (F177/F20)"),
         on!("compact_retention", "compact_retention", "what compaction retains (F177/F20)"),
+        on!("leveling", "leveling", "level-size ladder of the leveled scheduler (F-leveling-sweep)"),
+        on!("leveling_pick", "leveling_pick", "leveled job selection: overlap slice, input cap, disjoint gate (F-leveling-sweep)"),
         on!("compact", "compact", "merge iterator correctness (F27/F28)"),
         // --- reads ---
         on!("snapshot", "snapshot", "snapshot reads (F38/F40/F41)"),
@@ -220,6 +223,7 @@ pub fn profile_report() -> &'static [ProfileComponent] {
         on!("l28_tcp_slot", "l28_tcp_slot", "L28 TCP drop repl slot"),
         on!("l28_tcp_sth", "l28_tcp_sth", "L28 TCP drop sent_through"),
         on!("l28_tcp_pj", "l28_tcp_pj", "L28 TCP plant committed joint"),
+        on!("l28_tcp_dterm", "l28_tcp_dterm", "L28 TCP removed-replica durable-term (RFC-0158)"),
         on!("sched_plant_joint", "sched_plant_joint", "World opt-in PlantCommittedJoint"),
         on!("liveness_claim", "liveness_claim", "liveness ES axioms fail-closed"),
         on!("fsync_promote", "fsync_promote", "fsync promotes pending"),
