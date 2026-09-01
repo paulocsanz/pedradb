@@ -2227,8 +2227,21 @@ impl<E: Env> ConcurrentDb<E> {
             };
             {
                 let mut g = self.inner.write();
+                // RFC-0159 P0.2: per-family install level — a latched
+                // pure-append span goes straight to the bottom level
+                // (same decision as `Db::flush_imm_to_l0`); everything
+                // else stays L0, identical to the pre-bulk path.
+                let levels: Vec<u32> = files
+                    .iter()
+                    .map(|(t, _, _)| g.bulk_span_level(g.bulk_family_of_table(t), &imm))
+                    .collect();
+                for ((t, _, _), &level) in files.iter().zip(levels.iter()) {
+                    if level != 0 {
+                        g.bulk_diag("install_flush", g.bulk_family_of_table(t), level);
+                    }
+                }
                 let pairs: Vec<_> = files.into_iter().map(|(t, n, _)| (t, n)).collect();
-                if let Err(e) = g.install_l0_ssts(pairs) {
+                if let Err(e) = g.install_ssts_at_levels(pairs, &levels) {
                     g.restore_imm(imm);
                     return Err(e);
                 }
@@ -2288,8 +2301,18 @@ impl<E: Env> ConcurrentDb<E> {
         // The host worker rotates only when `writes_idle_for`.
         {
             let mut g = self.inner.write();
+            // RFC-0159 P0.2: same per-family level decision as `flush`.
+            let levels: Vec<u32> = files
+                .iter()
+                .map(|(t, _, _)| g.bulk_span_level(g.bulk_family_of_table(t), &imm))
+                .collect();
+            for ((t, _, _), &level) in files.iter().zip(levels.iter()) {
+                if level != 0 {
+                    g.bulk_diag("install_drain", g.bulk_family_of_table(t), level);
+                }
+            }
             let pairs: Vec<_> = files.into_iter().map(|(t, n, _)| (t, n)).collect();
-            g.apply_l0_installs(pairs);
+            g.apply_sst_installs(pairs, &levels);
             g.retire_flush_pin();
         }
         true
@@ -2348,8 +2371,18 @@ impl<E: Env> ConcurrentDb<E> {
         {
             let expect = Arc::as_ptr(&imm);
             let mut g = self.inner.write();
+            // RFC-0159 P0.2: same per-family level decision as `flush`.
+            let levels: Vec<u32> = files
+                .iter()
+                .map(|(t, _, _)| g.bulk_span_level(g.bulk_family_of_table(t), &imm))
+                .collect();
+            for ((t, _, _), &level) in files.iter().zip(levels.iter()) {
+                if level != 0 {
+                    g.bulk_diag("install_parked", g.bulk_family_of_table(t), level);
+                }
+            }
             let pairs: Vec<_> = files.into_iter().map(|(t, n, _)| (t, n)).collect();
-            g.apply_l0_installs(pairs);
+            g.apply_sst_installs(pairs, &levels);
             let popped = g.take_oldest_parked_matching(expect);
             drop(imm);
             if let Some(popped) = popped {
@@ -3622,6 +3655,171 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// RFC-0159 P0.2 on the compat write funnel: `apply_batch_vec`
+    /// (group-commit observation) + [`ConcurrentDb::flush`] must install a
+    /// latched pure-append span at the bottom level, not L0. This is the
+    /// exact path the slipstream bench drives.
+    #[test]
+    fn bulk_concurrent_flush_installs_latched_span_at_bottom() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into(), "meta".into()]);
+        let v = vec![b'v'; 200];
+        let mut keys = Vec::new();
+        for b in 0..40u32 {
+            let mut batch = Vec::new();
+            for j in 0..16u32 {
+                let k = format!("data\0{b:04}-{j:04}").into_bytes();
+                batch.push(BatchOp::put(k.clone(), v.clone()));
+                keys.push(k);
+            }
+            // The slipstream shape: one repeated cursor key in another
+            // family every batch.
+            batch.push(BatchOp::put(b"meta\0cursor".to_vec(), b"c".to_vec()));
+            db.apply_batch_vec(batch).unwrap();
+        }
+        db.flush().unwrap();
+
+        let meta = db.live_sst_meta();
+        let data_bottom = meta
+            .iter()
+            .filter(|m| m.cf == "data" && m.level == crate::db::MAX_LSM_LEVEL)
+            .count();
+        let data_elsewhere = meta
+            .iter()
+            .filter(|m| m.cf == "data" && m.level != crate::db::MAX_LSM_LEVEL)
+            .count();
+        let meta_l0 = meta.iter().filter(|m| m.cf == "meta" && m.level == 0).count();
+        assert_eq!(
+            data_elsewhere, 0,
+            "every data chunk must land at the bottom level"
+        );
+        assert_eq!(data_bottom, 1, "one flush = one bulk chunk");
+        assert_eq!(meta_l0, 1, "repeated cursor key never latches");
+        for (i, k) in keys.iter().enumerate() {
+            assert_eq!(
+                db.get(k).as_deref(),
+                Some(&v[..]),
+                "bulk key {i} must read back"
+            );
+        }
+        assert_eq!(db.get(b"meta\0cursor").as_deref(), Some(&b"c"[..]));
+
+        drop(db);
+        let db2 = ConcurrentDb::open_with(&dir, OpenOptions::default()).unwrap();
+        let bottom = db2
+            .live_sst_meta()
+            .into_iter()
+            .filter(|m| m.level == crate::db::MAX_LSM_LEVEL)
+            .count();
+        assert_eq!(bottom, 1, "reopen must restore the bottom-level chunk");
+        for (i, k) in keys.iter().enumerate() {
+            assert_eq!(
+                db2.get(k).as_deref(),
+                Some(&v[..]),
+                "post-reopen key {i}"
+            );
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0159 P0.2 on the host-worker funnel: deferred auto-flush stages
+    /// an imm; [`ConcurrentDb::drain_imm_once`] must install the latched
+    /// ascending span at the bottom level.
+    #[test]
+    fn bulk_drain_imm_installs_latched_span_at_bottom() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(2048),
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_defer_auto_compact(true);
+        let v = vec![b'v'; 128];
+        let mut keys = Vec::new();
+        for i in 0..32u32 {
+            let k = format!("k{i:06}").into_bytes();
+            db.put(&k, &v).unwrap();
+            keys.push(k);
+        }
+        assert!(
+            db.with_read(|d| d.has_imm()),
+            "auto-flush under defer must leave an imm"
+        );
+        assert!(db.drain_imm_once(), "worker must drain that imm");
+        let meta = db.live_sst_meta();
+        assert!(
+            meta.iter().any(|m| m.level == crate::db::MAX_LSM_LEVEL),
+            "latched ascending span must install at the bottom level: {meta:?}"
+        );
+        assert!(
+            meta.iter().all(|m| m.level != 0),
+            "nothing from this drain may stay at L0: {meta:?}"
+        );
+        for (i, k) in keys.iter().enumerate() {
+            assert_eq!(db.get(k).as_deref(), Some(&v[..]), "drained key {i}");
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0159 P0.2 on the parked funnel: deferred CF auto-flush parks the
+    /// family table; [`ConcurrentDb::materialize_parked_once`] must install
+    /// the latched span at the bottom level.
+    #[test]
+    fn bulk_parked_materialize_installs_latched_span_at_bottom() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(2048),
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into()]);
+        db.set_defer_auto_compact(true);
+        let v = vec![b'v'; 128];
+        let mut keys = Vec::new();
+        for i in 0..32u32 {
+            let k = format!("data\0{i:06}").into_bytes();
+            db.put(&k, &v).unwrap();
+            keys.push(k);
+        }
+        assert!(
+            db.with_read(|d| d.parked_unflushed_count() > 0),
+            "CF auto-flush under defer must park the family table"
+        );
+        assert!(
+            db.materialize_parked_once(),
+            "worker must materialize the parked table"
+        );
+        let meta = db.live_sst_meta();
+        assert!(
+            meta.iter().any(|m| m.level == crate::db::MAX_LSM_LEVEL),
+            "latched ascending span must install at the bottom level: {meta:?}"
+        );
+        assert!(
+            meta.iter().all(|m| m.level != 0),
+            "nothing from this materialize may stay at L0: {meta:?}"
+        );
+        for (i, k) in keys.iter().enumerate() {
+            assert_eq!(db.get(k).as_deref(), Some(&v[..]), "parked key {i}");
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// Host drain must not rotate WAL (SST fsync + MANIFEST) just because
     /// active mem is empty after a stage — that was the apply 224 ms tail.
     #[test]
@@ -3815,6 +4013,8 @@ mod tests {
         )
         .unwrap();
         db.set_defer_auto_compact(true);
+        // Ladder mechanics; bulk would install the ascending spans at MAX.
+        db.with_write(|d| d.bulk_route_enabled = false);
         let val = vec![b'v'; 1024];
         // 24 tables of ~16 KiB each; cap = 4 x 16 KiB = 64 KiB.
         for t in 0..24u64 {

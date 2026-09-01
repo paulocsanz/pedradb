@@ -1145,6 +1145,46 @@ replaces the accidental one. Next guest config (v22) = v21p read-back
 and never re-laddered, so the settle pushdown disappears by construction
 and hydrate stops paying the L0→L1 ladder tax.
 
+## Guest run #22 (v22 = v21p read-back + RFC-0159 P0.2, 25M) — bulk path INERT: the bench flushes through `ConcurrentDb`, whose install funnels were unwired
+
+Raw serial: `run22-v22-25m.txt`. v22 = v21p (a3572f1 read-back) +
+`bff465c` (P0.2 bulk bottom-level install). Verdict: **the bulk path
+never engaged** — BULKDIAG count 0 across the whole run, settle 84.9 s
+(in family with #19's 88.2 s, i.e. the ladder did all the work), and
+every other leg matches the #19/#20 read-back family:
+
+| leg (25M)        | rocks default | #19 (v21p) | #22 (v22) | ratio #22 |
+|------------------|---------------|------------|-----------|-----------|
+| hydrate          | 25.3 s        | 148.9 s    | 157.0 s   | 0.16×     |
+| settle           | 8.3 s         | 88.2 s     | 84.9 s    | 0.098×    |
+| probe_hit p50    | 45.4 µs       | 52.6 µs    | 54.0 µs   | 0.84×     |
+| probe_miss p50   | rocks-class   | 2.2 µs     | 2.3 µs    | ~1×       |
+| get_hit          | 38.59 µs      | 42.4 µs    | 47.4 µs   | 0.81×     |
+| prefix_scan      | 305.6 µs      | 437.6 µs   | 449.0 µs  | 0.68×     |
+| lookup get_loop  | 3.38 ms       | 4.593 ms   | 4.468 ms  | 0.76×     |
+| lookup multi_get | 3.70 ms       | 4.548 ms   | 4.503 ms  | 0.82×     |
+
+Mechanism (code-traced): the compat bench writes through
+`rocksdb_compat::DB::write` → `ConcurrentDb::apply_batch_vec` → group
+commit, and settles through `ConcurrentDb::flush` /
+`drain_imm_once` / `materialize_parked_once`. P0.2's write-side
+observation was already live on that path (`commit_async_ops` /
+`commit_async_one` call `observe_bulk_batch`), but the level decision
+(`bulk_span_level`) was consulted only in `Db::flush_cf` /
+`Db::flush_imm_to_l0` — every `ConcurrentDb` install site called
+`install_l0_ssts` / `apply_l0_installs` unconditionally, and
+`bulk_diag` printed only from `flush_cf`, hence BULKDIAG=0. Run #22 is
+therefore a clean control: v21p read-back reproduced (within run noise)
+with P0.2 present-but-inert.
+
+Fix (v23): the three `ConcurrentDb` install sites route through
+`bulk_span_level` + `install_ssts_at_levels`/`apply_sst_installs`
+exactly like `Db::flush_imm_to_l0`, with their own BULKDIAG tags
+(`install_flush` / `install_drain` / `install_parked`); 3 regression
+tests in `concurrent::tests` drive the real funnels
+(`apply_batch_vec` + `flush`, deferred drain, parked materialize) and
+assert bottom-level installs.
+
 ## Guest prefix_scan gap: local attribution (macOS `sample`, 6M)
 
 Where does a scan op actually go? Local 6M pedra-only prefix_scan,

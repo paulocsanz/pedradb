@@ -1401,7 +1401,7 @@ pub struct Db<E: Env = StdEnv> {
     bulk_latch: crate::bulk_ingest::BulkLatch,
     /// `PEDRA_BULK` read once at open (per-batch env lookups would tax the
     /// commit path; the knob is static for a process lifetime).
-    bulk_route_enabled: bool,
+    pub(crate) bulk_route_enabled: bool,
     /// When `Some(n)`, refuse writes if L0 SST count ≥ n (open-items §2.3).
     write_stall_l0: Option<usize>,
     /// When `Some(n)`, refuse writes if active mem ≈ ≥ n bytes (open-items §2.3 c).
@@ -4812,7 +4812,7 @@ impl<E: Env> Db<E> {
     /// RFC-0159 P0.2: family key of a table for bulk routing. Matches
     /// `family_of_user_key` ("default" when no physical CFs are
     /// registered) so observation and install agree on family identity.
-    fn bulk_family_of_table<'a>(&self, table: &'a SstTable) -> &'a str {
+    pub(crate) fn bulk_family_of_table<'a>(&self, table: &'a SstTable) -> &'a str {
         if self.physical_cfs.is_empty() {
             "default"
         } else {
@@ -4977,7 +4977,7 @@ impl<E: Env> Db<E> {
     /// levels ≥ 1 (those levels would merge it back down; the max level is
     /// never a pushdown source, so a qualifying span is written exactly
     /// once). Anything else stays L0 — identical to the pre-bulk path.
-    fn bulk_span_level(&self, family: &str, mem: &MemTable) -> u32 {
+    pub(crate) fn bulk_span_level(&self, family: &str, mem: &MemTable) -> u32 {
         if !self.bulk_route_enabled || !self.bulk_latch.is_latched(family) {
             return 0;
         }
@@ -5066,7 +5066,7 @@ impl<E: Env> Db<E> {
     }
 
     /// `PEDRA_BULK_DIAG` line for a bulk install decision.
-    fn bulk_diag(&self, tag: &str, family: &str, level: u32) {
+    pub(crate) fn bulk_diag(&self, tag: &str, family: &str, level: u32) {
         if std::env::var_os("PEDRA_BULK_DIAG").is_some() {
             eprintln!(
                 "BULKDIAG {tag} family={family} level={level} ssts={} l0={} max={}",

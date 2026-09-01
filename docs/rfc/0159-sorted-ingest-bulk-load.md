@@ -70,7 +70,13 @@ sorted-ingest-architecture.md` (+ `run19-v21p-guest-25m.txt`).
   `MAX_LSM_LEVEL` instead of L0 — written once, never re-laddered, so settle
   has nothing to push down. Ladder fallback on every disqualifier.
   `PEDRA_BULK=0` kill switch; `PEDRA_BULK_DIAG` prints each non-L0 install
-  (`db.rs: bulk_span_level`). — status: `done` (4 tests in `db::tests`)
+  (`db.rs: bulk_span_level`). — status: `done` (4 tests in `db::tests`;
+  2026-09-01 follow-up: the `ConcurrentDb` install sites — `flush`,
+  `drain_imm_once`, `materialize_parked_once` — were unwired, so run #22
+  benched P0.2 inert (BULKDIAG=0, settle unchanged). Write-side observation
+  was already live (`commit_async_ops` / `commit_async_one`); the fix routes
+  those three installs through `bulk_span_level` — 3 more tests in
+  `concurrent::tests`.)
 70→- [ ] **P0.3** WAL ring for append mode: uninstalled tail only, segment GC
   after install, crash-replay equality test. — status: `todo`
 - [ ] **P0.4** End-to-end regression set: sorted ingest then
@@ -109,7 +115,7 @@ sorted-ingest-architecture.md` (+ `run19-v21p-guest-25m.txt`).
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | Sorted-stream detector + latch | done | `bulk_ingest.rs` | 2026-08-31 |
-| P0.2 | p0 | Bulk flush-path install at bottom level | done | `db.rs` (`bulk_span_level`, 4 tests) | 2026-09-01 |
+| P0.2 | p0 | Bulk flush-path install at bottom level | done | `db.rs` (`bulk_span_level`, 4 tests) + `concurrent.rs` funnels (3 tests) | 2026-09-01 |
 | P0.3 | p0 | WAL ring for append mode | todo | — | 2026-08-31 |
 | P0.4 | p0 | E2E regression set | todo | — | 2026-08-31 |
 | P0.5 | p0 | Local A/B + guest run #20 verdict | todo | — | 2026-08-31 |
