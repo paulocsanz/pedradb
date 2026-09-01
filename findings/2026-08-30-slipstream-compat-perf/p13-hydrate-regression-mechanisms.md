@@ -175,3 +175,76 @@ flusher panics on ENOSPC and poisons its locks; the error surfaces at the
 next `apply`, long after the write that filled the disk. Check `df -h`
 before blaming the binary; clean `${TMPDIR}/.tmp*` after kills. The
 same panic on a fresh `TempDir` is the signature.
+
+## Residual attributed: macOS `sample` of a local 15M uncapped hydrate
+
+Artifact: `run29b-local15m-profile-symbolicated.txt` (25 s window,
+18,820 samples, `debug = 1` build; `sample` printed `???` for most
+frames — symbolicated after the fact with
+`atos -o <bin> -l <load-base> <addrs>`; on-disk libsystem_kernel dyld
+stubs mislabel offsets, syscalls inferred from context: 0x45ec =
+`__psynch_cvwait` under a pthread wrapper, 0x4510 = blocking write).
+
+Wall was 33.5 s; counted spans (commit 14.4 = wal 8.65 / mem 2.91 /
+flush_check 2.68; materialize 13.2) left ~5.9 s. The writer thread was
+~99% busy and the missing time is:
+
+1. **~8.0 s (32% of the window) in `parking_lot::RawMutex::lock_slow` →
+   `__psynch_cvwait` inside `materialize_parked_once`** — the v26 assist
+   parks the WRITER on `flush_lock`, which the flush worker holds across
+   the whole `Db::write_imm_l0_files`. This sits outside every timer
+   span, which is exactly why the residual never appeared in accounting.
+   v24 had no assist → no writer queueing → smaller residual. This is
+   the mechanism behind the v24→v26 hydrate regression.
+2. **~4.1 s in `commit_async_ops → Wal::write_pending_frame →
+   reserve_space → preallocate`** — blocking `F_PREALLOCATE` per 8 MiB
+   chunk across ~3.3 GB of WAL.
+3. ~2 s in `MemTable::insert_many` / `maybe_auto_flush_best_effort`
+   bookkeeping outside the timed sub-spans.
+
+Flush worker 42% busy in `write_imm_l0_sst`; compact worker idle.
+
+## v29 (writer critical path): assist never queues; debt gets runway
+
+Three commits, all answers to the profile above:
+
+- **v29a** (`concurrent.rs`, c2105f7): `materialize_parked_once_try` —
+  the assist try-locks `flush_lock`; if the worker holds it, return
+  false immediately (skip, don't queue). Bounded `await_flush_debt`
+  still resolves when the worker's install drops the debt; anti-wedge
+  fallback (writer materializes when the lock is free) preserved.
+  Blocking `materialize_parked_once` (worker path) unchanged, body
+  extracted to private `materialize_parked_holding_flush`.
+- **v29c** (`db.rs`, c2105f7): `flush_debt_cap` = `2 ×
+  auto_flush_threshold` (was cap == threshold = stop-and-wait per park;
+  run #29 stalled 92×). One parked chunk of runway so fill(N+1)
+  overlaps materialize(N); memory bound now 2 parked chunks.
+- **v29b** (`wal/mod.rs`, 238e27a): `WAL_PREALLOC_CHUNK` 8 → 64 MiB,
+  8× fewer blocking preallocate calls. NOT injected for run #30: guest
+  WAL total was only 6.9 s of the 112.5 s wall (#29), it saves little
+  there, and 64 MiB `fallocate` per call is untested on the guest's
+  Linux/ext4-ublk path. Keep the commit; revisit with its own guest run.
+
+Tests added: `materialize_parked_once_try_skips_when_lock_held`,
+`flush_debt_cap_is_two_thresholds`; suite 684 passed / 2 known
+pre-existing flakes.
+
+## Local 15M interleaved A/B (v28 d1a0130 vs v29ac c2105f7 vs v29acb
+## 238e27a, cap64 shape, 2 reps) — drift-limited, direction favors v29ac
+
+Mac was drifted the whole time (load 7.5/12, `caixote-api` at 210%;
+fjall hydrate drifted 17.8–23.1 s vs 12.6 s quiet — the drift meter
+swung 30% between slots, so arm deltas below ~3 s are not resolvable).
+
+| arm | r1 hyd | r2 hyd | r1 settle | r2 settle | wal_ms r1/r2 |
+|---|---|---|---|---|---|
+| v28    | 39.9 | 59.3 (drift spike) | 16.5 | 28.6 | 28.6 / 48.0 |
+| v29ac  | 38.7 | **32.1** | 16.8 | **9.7** | 27.2 / 20.4 |
+| v29acb | 39.7 | 40.9 | 21.6 | 11.2 | 27.8 / 28.8 |
+
+Readable signals only: v29ac never lost to v28 and produced the two
+best runs of the set; v29acb added nothing over v29ac (and r1 settle
+21.6 s was the worst of the rep). wal_ms differences are fsync-latency
+noise under load. Verdict: **guest run #30 = v29ac only** (concurrent.rs
++ db.rs; wal stays v21p). Binaries preserved: /tmp/bench-v28,
+/tmp/bench-v29ac, /tmp/bench-v29acb.
