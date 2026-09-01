@@ -481,3 +481,56 @@ enc+lz4 20.5 (structural/RFC) > write_all 7.4 (=bytes, same lever as
 encode) > mem 7.5 (BTree insert) > **span 4.4 (cheap incremental-flag
 kill — NEXT, run #34)** > pdrop 3.65 (structural) > wal 5.6 > bloom
 2.8 > crc 1.2 > intra 1.1. Post-span-kill floor ≈ 53.5 s @ load 14.
+
+## Run #34 — span kill (v33, RFC-0159 P1.4)
+
+Implemented as one variable (commit `50c2e52`, memtable.rs v28 +
+db.rs v31):
+
+- `MemTable` keeps `cf_span: BTreeMap<prefix, SpanState>` (impure flag
+  + lo/hi Bytes) maintained by `bump_span` on the `insert`/`insert_many`
+  hot paths — one prefix lookup + one `Bytes` Arc-clone per insert.
+  Strictly ascending puts keep `Pure{lo,hi}`; any dup/descent/
+  tombstone latches `impure` permanently for the prefix.
+- `MemTable::bulk_span(family)` answers Absent/Pure/Impure/Unknown in
+  O(#prefixes). `Db::bulk_span_level` uses it and keeps the legacy
+  whole-table scan (`bulk_span_level_scan`) as the `Unknown` fallback.
+- Conservative by construction: `absorb*` sets `span_stale` (scan
+  fallback), `take_family` transplants prefix state with the keys,
+  `spill_tail`/GC only drop entries (subsequence of an ascending run
+  is ascending; bounds stay a superset), NUL-containing family names
+  and "default"-with-both-prefixes never claim Pure. Family "default"
+  with exactly one populated prefix is a normal pure run.
+- Bench family is `data` (single prefix) — full fast path.
+
+Verified locally before the guest run: +3 tests incl. a randomized
+cross-check against the legacy scan as oracle (pure ⟹ scan pure with
+identical lo/hi; absent ⟹ scan finds nothing), suite 687 pass + 2
+known flakes. 6M local A/B: BULKDIAG 6/6 on-arm (1 install_flush + 5
+install_parked, family=data), settle 0.7–0.8 s vs 9.6–17.5 s off-arm,
+hydrate 6.7–7.4 s both arms (no visible insert-path cost at 6M).
+
+Guest run #34 (v33): base verified = post-#33 image; gate load at
+boot 14.8/13.8/14.3, at completion 13.0/12.9/13.6 (same band as
+#33's ~14). **KEEP.**
+
+- **span 4 420 → 14.8 ms** (n=85 chunks both runs, −99.7 %): the
+  rescan is dead; 0.17 ms/chunk remains (O(1) verdict + sst
+  disjointness loop). install 4.7 → 0.37 s (apply 0.31 + span 0.015).
+- **hydrate 57.9 → 55.8 s** at matched load. Mechanism math:
+  −4.33 (install) + 0.97 (insert-path hook, mem 7.5 → 8.47 s,
+  ~39 ns/entry) = −3.36 expected; observed −2.1 — the rest is
+  file-stage drift in the noise band (write 7.45→7.78, enc
+  14.24→14.61, lz4 6.28→6.43, bloom 2.83→2.88 ≈ +0.9 s).
+- Routing identical to the scan: **BULKDIAG 86/86 level=3** (85
+  install_parked + 1 install_flush, family=data); settle 1.0 s;
+  reads flat (get_hit 43.0 µs, prefix_scan 438.7 µs, probe_hit p50
+  49.6 µs, probe_miss 2.6 µs); disk 11.02 → 5.15 GiB identical.
+- pdrop 3.65 → 3.69 s (unchanged, as predicted — next structural
+  lever after encode).
+
+Post-#34 ranked levers (load-13): enc+lz4 21.0 (structural/RFC) >
+write_all 7.8 (= bytes, same encode lever) > mem 8.5 (BTree insert,
+of which ~1.0 s is the span hook) > wal 5.6 > pdrop 3.7 >
+bloom 2.9 > crc 1.2. Post-span floor ≈ 53.5 s @ load 14; observed
+55.8 (noise band).

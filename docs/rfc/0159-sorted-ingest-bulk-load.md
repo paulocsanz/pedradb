@@ -161,6 +161,7 @@ sorted-ingest-architecture.md` (+ `run19-v21p-guest-25m.txt`).
 | P1.1 | p1 | Materialize per-byte cut (direct block encode + lz4 probe) | in-progress (code+tests+local A/B: FLUSHDUR −13 %, disk identical; guest pending) | `table.rs` | 2026-09-01 |
 | P1.2 | p1 | Batched manifest persists | todo | — | 2026-08-31 |
 | P1.3 | p1 | Chunk-size: per-CF buffer governs stage threshold | done — threshold fix (v25) + take_family split_off (v27) verified on guest; v26 assist initially REGRESSED hydrate 75.6→110.5/112.5 s (#28/#29, chunk-size theory refuted), root-caused by `sample` profile (writer queues on `flush_lock` in the assist) and fixed by v29a try-lock assist + v29c 2× debt cap (c2105f7); run #30: hydrate 76.9 s, residual ~20 s = v24 level, settle 1.4 s | `concurrent.rs`, `memtable.rs`, `db.rs` | 2026-09-01 |
+| P1.4 | p1 | Span kill: incremental per-prefix span state in MemTable; `bulk_span_level` O(1) with legacy scan fallback (run #33: span was 4.42 s of the 4.7 s install) | done — `50c2e52` (memtable v28 + db v31), +3 oracle tests, suite 687+2 known; guest run #34 (v33, load ~13–15): span 4 420 → 14.8 ms (n=85, −99.7 %), install 4.7 → 0.37 s, hydrate 57.9 → 55.8 s, mem +0.97 s hook cost; BULKDIAG 86/86 level=3, settle 1.0 s, reads flat | `memtable.rs`, `db.rs` | 2026-09-01 |
 | P2.1 | p2 | Nearly-sorted window | todo | — | 2026-08-31 |
 | P2.2 | p2 | 100M rung via bulk mode | todo | — | 2026-08-31 |
 
