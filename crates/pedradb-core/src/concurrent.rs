@@ -2354,6 +2354,30 @@ impl<E: Env> ConcurrentDb<E> {
             return false;
         }
         let _flush = self.flush_lock.lock();
+        self.materialize_parked_holding_flush()
+    }
+
+    /// [`Self::materialize_parked_once`] without queueing on `flush_lock`.
+    ///
+    /// Returns `false` untouched when another thread (the flush worker) is
+    /// mid-materialize: an assisting writer must skip rather than block for
+    /// the whole chunk — the local 15M profile showed the writer spending
+    /// 8 s of a 25 s window in `parking_lot` `lock_slow` inside the assist
+    /// while the worker held the lock through `write_imm_l0_files`. The
+    /// bounded `await_flush_debt` wait still resolves the debt when the
+    /// worker's install lands.
+    #[must_use]
+    pub fn materialize_parked_once_try(&self) -> bool {
+        if self.inner.read().parked_unflushed_count() == 0 {
+            return false;
+        }
+        let Some(_flush) = self.flush_lock.try_lock() else {
+            return false;
+        };
+        self.materialize_parked_holding_flush()
+    }
+
+    fn materialize_parked_holding_flush(&self) -> bool {
         let prepared = {
             let mut g = self.inner.write();
             // Arc snapshot: the table stays immutable once parked (fold swaps
@@ -2414,10 +2438,11 @@ impl<E: Env> ConcurrentDb<E> {
     /// parked chunk into seconds of sleep/wake ping-pong (run #27: 21.5 s
     /// `flush_check_ms`, hydrate +54%) — the materialize work is identical
     /// either way, so the writer does it immediately and keeps the core
-    /// busy. One table per submit; `await_flush_debt` stays as the bounded
-    /// fallback for debt still at cap (worker behind on several chunks, or
-    /// materialize erroring). Same in-flight rule as `await_flush_debt`:
-    /// called before `begin_submit`, so an assisting writer reads as idle.
+    /// busy — but never QUEUE: `materialize_parked_once_try` skips when
+    /// the worker is mid-materialize, and the bounded `await_flush_debt`
+    /// inside the submit resolves when that install drops the debt. Same
+    /// in-flight rule as `await_flush_debt`: called before
+    /// `begin_submit`, so an assisting writer reads as idle.
     fn assist_flush_debt(&self) {
         if !self.writes.flusher_attached.load(Ordering::Relaxed) {
             return;
@@ -2431,7 +2456,7 @@ impl<E: Env> ConcurrentDb<E> {
         // `#[must_use]`: the bool (did a file get written) is the worker
         // tick's business; here a `false` just falls through to the
         // bounded `await_flush_debt` inside the submit.
-        let _ = self.materialize_parked_once();
+        let _ = self.materialize_parked_once_try();
     }
 
     /// Persist pending L0s + MANIFEST and rotate WAL when no writer is in
@@ -3481,6 +3506,47 @@ mod tests {
         assert_eq!(db.get(b"after").as_deref(), Some(b"drain".as_ref()));
 
         std::env::remove_var("PEDRA_FLUSH_DEBT_MAX_MS");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// v29: the assist path (`materialize_parked_once_try`) must skip —
+    /// returning `false`, parked set untouched — while another thread
+    /// holds `flush_lock` mid-materialize, instead of queueing the writer
+    /// behind the worker's whole chunk.
+    #[test]
+    fn materialize_parked_once_try_skips_when_lock_held() {
+        let dir = temp_dir();
+        let db = open_debt(&dir);
+        db.set_defer_auto_compact(true);
+        db.put(b"k", [b'v'; 1024]).unwrap();
+        assert!(db.park_imm_once());
+        db.put(b"j", [b'w'; 1024]).unwrap();
+        assert!(db.park_imm_once());
+        assert_eq!(db.parked_unflushed_count(), 2);
+
+        let guard = db.flush_lock.try_lock().expect("lock free");
+        let t0 = std::time::Instant::now();
+        assert!(!db.materialize_parked_once_try(), "must skip, not block");
+        assert!(
+            t0.elapsed() < Duration::from_millis(50),
+            "try path blocked {:?}",
+            t0.elapsed()
+        );
+        assert_eq!(db.parked_unflushed_count(), 2, "parked set untouched");
+        drop(guard);
+
+        assert!(db.materialize_parked_once_try(), "drains once free");
+        assert_eq!(db.parked_unflushed_count(), 1);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// v29: debt cap is TWO staging thresholds — one chunk of runway so
+    /// fill and materialize overlap instead of stop-and-wait per park.
+    #[test]
+    fn flush_debt_cap_is_two_thresholds() {
+        let dir = temp_dir();
+        let db = open_debt(&dir); // auto_flush_bytes: Some(1)
+        assert_eq!(db.flush_debt_cap(), Some(2));
         let _ = fs::remove_dir_all(&dir);
     }
 

@@ -5519,7 +5519,12 @@ impl<E: Env> Db<E> {
     /// (25M slipstream: 185 MB/s ingest vs ~100 MB/s materialize OOMed a
     /// 3892 MB box with nothing bounding `parked_unflushed`).
     pub(crate) fn flush_debt_cap(&self) -> Option<usize> {
-        self.auto_flush_threshold()
+        // Two thresholds = one chunk of runway: the writer keeps filling
+        // chunk N+1 while the worker materializes chunk N. cap ==
+        // threshold made every park stop-and-wait (writer queued on
+        // flush_lock; local 15M profile 8 s lock_slow per 25 s window,
+        // guest run #29 61.5 s unattributed of a 112.5 s wall).
+        self.auto_flush_threshold().map(|t| t.saturating_mul(2))
     }
 
     /// Mem / imm / pin / parked (no SST yet) / folded retired / pending pins.
