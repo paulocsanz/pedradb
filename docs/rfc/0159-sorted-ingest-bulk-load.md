@@ -94,14 +94,23 @@ sorted-ingest-architecture.md` (+ `run19-v21p-guest-25m.txt`).
 
 ### P1 — next wave (depends on P0 or clearly deferrable)
 
-- [ ] **P1.1** Encode-path per-byte cut: bulk builder fills blocks straight
-  from batch payload bytes (no per-entry InternalKey/Bytes allocations). —
-  status: `part-done` (caller-side half shipped 2026-08-31: all four
-  write-path callers re-opened every freshly written SST via `open_on`
-  — a full read + per-block lz4 + per-entry decode pass; they now keep
-  the writer's in-place table. Local 6M A/B: settle −26 %, hydrate −26 %
-  median, paired, both rounds favoring the fix. Block-fill encode cut
-  remains.)
+- [ ] **P1.1** Encode-path per-byte cut — re-aimed 2026-09-01: the guest's
+  hydrate wall is SST **materialize** (run #23: FLUSHDUR sum 63.4 s of the
+  73.6 s hydrate, 73 chunks × 867 ms ≈ 89 MiB/s), not commit encode (local
+  phase profile: prepare+mem+real WAL encode ≈ 2.9 s per 6M; the apparent
+  local WAL dominance is APFS `F_PREALLOCATE` — `findings/
+  2026-08-30-slipstream-compat-perf/hydrate-phase-profile-6m.md`). Cuts in
+  `write_sst_try_sorted_body`: entries encode straight into `block_buf`
+  (was: scratch Vec + copy — one full extra pass per byte), `prev_ikey` kept
+  by move, largest key derived after the loop (was: per-entry clone), and a
+  first-block lz4 probe — truly incompressible payloads write v3 raw for the
+  whole file, skipping lz4 CPU (~30 % of materialize) for ~10 % more disk;
+  `PEDRA_LZ4_PROBE=0` kill switch; `PEDRA_FLUSH_STAGES` prints the per-stage
+  split. Local verdict 2026-09-01: paired 6M A/B FLUSHDUR −13 %, settle
+  1.1→0.4 s; the bench payload compresses 2.6× so the probe never trips
+  (probe on/off disk totals identical to 113 B / 1.24 GiB) — probe ships as
+  protection for incompressible data, lz4 stays on for the bench. — status:
+  `in-progress` (code + tests + local A/B landed; guest run pending)
 - [ ] **P1.2** Batch MANIFEST persists across consecutive chunk installs. —
   status: `todo`
 - [ ] **P1.3** Chunk-size sweep for read legs at 25M (64 vs 128 MiB) —
@@ -124,7 +133,7 @@ sorted-ingest-architecture.md` (+ `run19-v21p-guest-25m.txt`).
 | P0.3 | p0 | WAL ring for append mode | todo | — | 2026-08-31 |
 | P0.4 | p0 | E2E regression set | todo | — | 2026-08-31 |
 | P0.5 | p0 | Local A/B + guest verdict | done | local 6M A/B (`9698caf`): hydrate −39…−45 %, settle −25…−43 %; guest run #23 (25M): settle 84.9→2.3 s = **3.61× vs Rocks 8.3 s**, hydrate 157.0→73.6 s (0.34×), reads flat; 73 BULKDIAG (72 parked + 1 flush) | 2026-09-01 |
-| P1.1 | p1 | Zero-alloc bulk encode | part (caller-side read-back removed) | `db.rs` `table.rs` | 2026-08-31 |
+| P1.1 | p1 | Materialize per-byte cut (direct block encode + lz4 probe) | in-progress (code+tests+local A/B: FLUSHDUR −13 %, disk identical; guest pending) | `table.rs` | 2026-09-01 |
 | P1.2 | p1 | Batched manifest persists | todo | — | 2026-08-31 |
 | P1.3 | p1 | Chunk-size sweep for reads | todo | — | 2026-08-31 |
 | P2.1 | p2 | Nearly-sorted window | todo | — | 2026-08-31 |

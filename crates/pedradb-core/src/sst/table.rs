@@ -2233,6 +2233,27 @@ pub fn write_sst_try_sorted_on(
     write_sst_try_sorted_with(env, path, entries, bloom_hint, true)
 }
 
+/// Per-stage timing for `PEDRA_FLUSH_STAGES` (RFC-0159 P1.1): where the
+/// materialize wall goes. Zero-cost when the env is unset.
+#[derive(Default)]
+struct StageTotals {
+    enabled: bool,
+    enc_ns: u64,
+    lz4_ns: u64,
+    bloom_ns: u64,
+    crc_ns: u64,
+    write_ns: u64,
+}
+
+impl StageTotals {
+    fn add(&mut self, which: fn(&mut Self) -> &mut u64, t0: std::time::Instant) {
+        if self.enabled {
+            let ns = t0.elapsed().as_nanos() as u64;
+            *which(self) = which(self).saturating_add(ns);
+        }
+    }
+}
+
 fn write_sst_try_sorted_body(
     env: &impl Env,
     path: impl AsRef<Path>,
@@ -2242,6 +2263,10 @@ fn write_sst_try_sorted_body(
     compress: bool,
 ) -> Result<SstTable> {
     let path = path.as_ref();
+    let mut stages = StageTotals {
+        enabled: std::env::var_os("PEDRA_FLUSH_STAGES").is_some(),
+        ..StageTotals::default()
+    };
     // Bloom is built AFTER the entry loop from the distinct user keys
     // actually written. The old `with_capacity(bloom_hint)` sized every
     // output file by the caller's TOTAL: whole-levels rewrites pass the
@@ -2258,24 +2283,61 @@ fn write_sst_try_sorted_body(
     let mut max_sequence = 0u64;
     let mut n_entries = 0usize;
     let mut last_bloom: Option<Bytes> = None;
-    let mut enc_scratch = Vec::new();
+    // Compression policy: undecided until the first block probes the ratio.
+    // `PEDRA_LZ4_PROBE=0` restores the unconditional-lz4 policy (A/B arm).
+    let mut policy_compress = compress;
+    let mut policy_decided = !compress
+        || std::env::var("PEDRA_LZ4_PROBE").map_or(false, |v| v == "0");
 
-    let flush_block = |data: &mut Vec<u8>,
-                       block_buf: &mut Vec<u8>,
-                       block_first_user: &mut Option<Bytes>,
-                       index: &mut Vec<BlockHandle>|
-     -> Result<()> {
+    // RFC-0159 P1.1: entries encode straight into `block_buf` (the old path
+    // staged into `enc_scratch` then copied — one full extra pass over every
+    // byte). A block split truncates the just-encoded tail and re-encodes it
+    // into the fresh block (once per block, not per entry).
+    #[allow(clippy::too_many_arguments)]
+    fn flush_block(
+        data: &mut Vec<u8>,
+        block_buf: &mut Vec<u8>,
+        block_first_user: &mut Option<Bytes>,
+        index: &mut Vec<BlockHandle>,
+        stages: &mut StageTotals,
+        policy_compress: &mut bool,
+        policy_decided: &mut bool,
+    ) -> Result<()> {
         if block_buf.is_empty() {
             return Ok(());
         }
-        let payload = if compress {
-            lz4_flex::compress_prepend_size(block_buf)
+        let t0 = std::time::Instant::now();
+        // First block probes the ratio for the whole file: keep lz4 only if
+        // it saves ≥10 %; random payloads (bulk chunks) write v3 raw instead.
+        let probe = if !*policy_decided {
+            *policy_decided = true;
+            if *policy_compress {
+                Some(lz4_flex::compress_prepend_size(block_buf))
+            } else {
+                None
+            }
         } else {
+            None
+        };
+        let payload = if let Some(comp) = probe {
+            stages.add(|s| &mut s.lz4_ns, t0);
+            *policy_compress = comp.len() * 10 < block_buf.len() * 9;
+            if *policy_compress {
+                comp
+            } else {
+                std::mem::take(block_buf)
+            }
+        } else if *policy_compress {
+            let out = lz4_flex::compress_prepend_size(block_buf);
+            stages.add(|s| &mut s.lz4_ns, t0);
+            out
+        } else {
+            stages.add(|s| &mut s.lz4_ns, t0);
             std::mem::take(block_buf)
         };
         let offset = data.len() as u64;
         let mut on_disk = payload;
-        if compress {
+        if *policy_compress {
             // v5: CRC32C of the on-disk block (RFC-0077 P1.1).
             let crc = crc32c::crc32c(&on_disk);
             on_disk.extend_from_slice(&crc.to_le_bytes());
@@ -2293,13 +2355,13 @@ fn write_sst_try_sorted_body(
             first_user_key: first,
         });
         Ok(())
-    };
+    }
 
     // NEVER split a user key across blocks (same contract as write_sst_entries_on).
     let mut prev_ikey: Option<InternalKey> = None;
     let mut smallest_user_key: Option<Bytes> = None;
-    let mut largest_user_key: Option<Bytes> = None;
     let mut range_tombstones: Vec<(InternalKey, Bytes)> = Vec::new();
+    let t_enc = std::time::Instant::now();
     for item in entries {
         let (ikey, value) = item?;
         // Same invariant the open-time decode verify enforced: entries must
@@ -2313,36 +2375,61 @@ fn write_sst_try_sorted_body(
                 )));
             }
         }
-        prev_ikey = Some(ikey.clone());
         max_sequence = max_sequence.max(ikey.sequence);
         n_entries = n_entries.saturating_add(1);
         if smallest_user_key.is_none() {
             smallest_user_key = Some(ikey.user_key.clone());
         }
-        largest_user_key = Some(ikey.user_key.clone());
         if ikey.kind == ValueType::RangeDeletion {
             range_tombstones.push((ikey.clone(), value.clone()));
         }
         let uk = ikey.user_key.as_ref();
         if last_bloom.as_ref().is_none_or(|p| p.as_ref() != uk) {
-            bloom_keys.push(ikey.user_key.clone());
-            last_bloom = Some(ikey.user_key.clone());
+            let k = ikey.user_key.clone();
+            bloom_keys.push(k.clone());
+            last_bloom = Some(k);
         }
-        enc_scratch.clear();
-        encode_entry_into(&ikey, &value, &mut enc_scratch)?;
         let same_user = block_last_user.as_ref().is_some_and(|u| u.as_ref() == uk);
-        if !block_buf.is_empty() && block_buf.len() + enc_scratch.len() > block_target() && !same_user
-        {
-            flush_block(&mut data, &mut block_buf, &mut block_first_user, &mut index)?;
-        }
         if block_buf.is_empty() {
             block_first_user = Some(ikey.user_key.clone());
         }
-        block_buf.extend_from_slice(&enc_scratch);
+        let pre_len = block_buf.len();
+        encode_entry_into(&ikey, &value, &mut block_buf)?;
+        if !same_user && block_buf.len() > block_target() && pre_len > 0 {
+            // Overflow: the just-encoded entry moves to the fresh block.
+            block_buf.truncate(pre_len);
+            flush_block(
+                &mut data,
+                &mut block_buf,
+                &mut block_first_user,
+                &mut index,
+                &mut stages,
+                &mut policy_compress,
+                &mut policy_decided,
+            )?;
+            block_first_user = Some(ikey.user_key.clone());
+            encode_entry_into(&ikey, &value, &mut block_buf)?;
+        }
         block_last_user = Some(ikey.user_key.clone());
+        // `prev_ikey` (and the file's largest key) is the last entry — keep
+        // it by move, not by clone.
+        prev_ikey = Some(ikey);
     }
-    flush_block(&mut data, &mut block_buf, &mut block_first_user, &mut index)?;
+    // The file's largest user key is the last entry's — derived from
+    // `prev_ikey` by move, not tracked with a per-entry clone.
+    let largest_user_key = prev_ikey.as_ref().map(|k| k.user_key.clone());
+    flush_block(
+        &mut data,
+        &mut block_buf,
+        &mut block_first_user,
+        &mut index,
+        &mut stages,
+        &mut policy_compress,
+        &mut policy_decided,
+    )?;
+    stages.add(|s| &mut s.enc_ns, t_enc);
 
+    let t_bloom = std::time::Instant::now();
     let bloom = if bloom_hint == 0 || bloom_keys.is_empty() {
         BloomFilter::always_true()
     } else {
@@ -2352,11 +2439,12 @@ fn write_sst_try_sorted_body(
         }
         b
     };
+    stages.add(|s| &mut s.bloom_ns, t_bloom);
 
     // Header: magic version num_entries max_seq num_blocks data_len (fixed 40 B)
     let mut header = Vec::with_capacity(40);
     header.extend_from_slice(SST_MAGIC);
-    let version = if compress {
+    let version = if policy_compress {
         SST_VERSION
     } else {
         SST_VERSION_V3
@@ -2389,10 +2477,12 @@ fn write_sst_try_sorted_body(
     }
     let mut bloom_bytes = bloom.encode();
 
+    let t_crc = std::time::Instant::now();
     let mut file_crc = crc32c::crc32c(&header);
     file_crc = crc32c::crc32c_append(file_crc, &data);
     file_crc = crc32c::crc32c_append(file_crc, &index_bytes);
     file_crc = crc32c::crc32c_append(file_crc, &bloom_bytes);
+    stages.add(|s| &mut s.crc_ns, t_crc);
 
     // Exact file image assembled once: a single write syscall (was five),
     // and the SstTable is constructed from this in-memory state — the
@@ -2407,12 +2497,26 @@ fn write_sst_try_sorted_body(
     image.append(&mut index_bytes);
     image.append(&mut bloom_bytes);
     image.extend_from_slice(&file_crc.to_le_bytes());
+    let t_write = std::time::Instant::now();
     {
         let mut file = env.create(path)?;
         file.write_all(&image)?;
         if sync {
             file.sync_data()?;
         }
+    }
+    stages.add(|s| &mut s.write_ns, t_write);
+    if stages.enabled {
+        println!(
+            "FLUSHSTAGES entries={n_entries} bytes={payload_len_hint} enc_ms={:.1} \
+             lz4_ms={:.1} bloom_ms={:.1} crc_ms={:.1} write_ms={:.1} lz4={policy_compress}",
+            stages.enc_ns as f64 / 1e6,
+            stages.lz4_ns as f64 / 1e6,
+            stages.bloom_ns as f64 / 1e6,
+            stages.crc_ns as f64 / 1e6,
+            stages.write_ns as f64 / 1e6,
+            payload_len_hint = image.len(),
+        );
     }
     // The retained body is the CRC-stripped image (header included), the
     // same slice `crc_stripped_body` would hand back on an open-on-read.
@@ -2427,8 +2531,8 @@ fn write_sst_try_sorted_body(
         path: path.to_path_buf(),
         payload: Arc::new(parking_lot::RwLock::new(payload)),
         payload_len,
-        compressed_blocks: compress,
-        block_crc: compress,
+        compressed_blocks: policy_compress,
+        block_crc: policy_compress,
         entries: Arc::new(Mutex::new(None)),
         kit: Arc::new(RwLock::new(None)),
         range_tombstones,
@@ -2620,13 +2724,15 @@ mod tests {
             "AS-IS dente: ignore block mismatch"
         );
         let mut mem = MemTable::new();
-        mem.put(b"k".as_slice(), 1, b"sst-block-crc-0077".as_slice());
+        // Repetitive payload: the writer's first-block probe must keep lz4
+        // (v5) — a small/incompressible fixture now legitimately writes v3.
+        mem.put(b"k".as_slice(), 1, Bytes::from(vec![0x5Au8; 8192]));
         let path = temp_path();
         write_sst(&path, &mem).unwrap();
         let mut bytes = std::fs::read(&path).unwrap();
         assert!(bytes.len() >= 40 + 8, "header + at least one data block");
         let ver = u32::from_le_bytes(bytes[8..12].try_into().unwrap());
-        assert_eq!(ver, SST_VERSION, "compressed writer must emit v5");
+        assert_eq!(ver, SST_VERSION, "compressible writer must emit v5");
         // First data byte (header is 40 B). Not the file trailer.
         let pos = 40;
         assert!(pos + 4 < bytes.len() - 4);
@@ -3030,17 +3136,62 @@ mod tests {
     #[test]
     fn l0_flush_roundtrip() {
         let mut mem = MemTable::new();
-        mem.put(Bytes::from_static(b"a"), 1, Bytes::from_static(b"va"));
-        mem.put(Bytes::from_static(b"b"), 2, Bytes::from_static(b"vb"));
+        // Repetitive payloads so the first-block probe keeps lz4 (v5).
+        mem.put(Bytes::from_static(b"a"), 1, Bytes::from(vec![0x61u8; 4096]));
+        mem.put(Bytes::from_static(b"b"), 2, Bytes::from(vec![0x62u8; 4096]));
         let path = temp_path();
         let table = write_l0_sst(&StdEnv, &path, &mem, false).unwrap();
-        assert!(table.block_crc, "L0 flush is v5 now");
+        assert!(table.block_crc, "compressible L0 flush is v5");
         assert_eq!(
             table.get(b"a", 10),
-            Lookup::Found(Bytes::from_static(b"va"))
+            Lookup::Found(Bytes::from(vec![0x61u8; 4096]))
         );
         let re = SstTable::open(&path).unwrap();
-        assert_eq!(re.get(b"b", 10), Lookup::Found(Bytes::from_static(b"vb")));
+        assert_eq!(
+            re.get(b"b", 10),
+            Lookup::Found(Bytes::from(vec![0x62u8; 4096]))
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// RFC-0159 P1.1: incompressible payloads (bulk-chunk shapes) make the
+    /// first block decide v3 raw for the whole file — no lz4 CPU, no block
+    /// CRCs, byte-identical round trip.
+    #[test]
+    fn incompressible_flush_writes_v3_raw() {
+        let mut rng = 0x5EED_5EED_5EED_5EEDu64;
+        let mut mem = MemTable::new();
+        for i in 0..2048u32 {
+            let mut value = vec![0u8; 200];
+            for chunk in value.chunks_mut(8) {
+                rng ^= rng >> 12;
+                rng ^= rng << 25;
+                rng ^= rng >> 27;
+                chunk.copy_from_slice(&rng.to_le_bytes()[..chunk.len()]);
+            }
+            mem.put(Bytes::from(format!("key-{i:06}")), i as u64 + 1, Bytes::from(value));
+        }
+        let path = temp_path();
+        let table = write_l0_sst(&StdEnv, &path, &mem, false).unwrap();
+        assert!(
+            !table.compressed_blocks && !table.block_crc,
+            "incompressible flush must skip lz4 (v3 raw)"
+        );
+        assert_eq!(table.len(), mem.len());
+        for i in (0..2048u32).step_by(97) {
+            let key = format!("key-{i:06}");
+            let want = match mem.get(key.as_bytes(), u64::MAX) {
+                Lookup::Found(v) => v.clone(),
+                other => panic!("memtable missing {key}: {other:?}"),
+            };
+            assert_eq!(
+                table.get(key.as_bytes(), u64::MAX),
+                Lookup::Found(want),
+                "key-{i:06}"
+            );
+        }
+        let re = SstTable::open(&path).unwrap();
+        assert_eq!(re.len(), mem.len());
         let _ = std::fs::remove_file(&path);
     }
 
