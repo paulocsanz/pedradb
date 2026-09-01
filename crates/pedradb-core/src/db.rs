@@ -4993,13 +4993,16 @@ impl<E: Env> Db<E> {
         // name visible); the file bytes stay lazy.
         match write_l0_sst(env, &tmp_path, imm, false) {
             Ok(table) => {
-                drop(table);
                 env.rename(&tmp_path, &final_path)?;
                 if sync {
                     env.sync_dir(dir)?;
                 }
-                let table = SstTable::open_on(env, &final_path)?;
-                Ok((table, num, final_path))
+                // Keep the writer's in-place table (rename does not change
+                // the bytes). Re-opening paid a full read + per-block
+                // decompress + per-entry decode of every flushed file —
+                // the caller-side half of the read-back the v21p writer
+                // fix removed. Reopens at recovery still verify fully.
+                Ok((table.with_path(final_path.clone()), num, final_path))
             }
             Err(e) => {
                 let _ = env.remove_file(&tmp_path);
@@ -5031,12 +5034,15 @@ impl<E: Env> Db<E> {
                     let _ = env.remove_file(&tmp_path);
                     return Ok(None);
                 }
-                drop(table);
                 env.rename(&tmp_path, &final_path)?;
                 if sync {
                     env.sync_dir(dir)?;
                 }
-                let table = SstTable::open_on(env, &final_path)?.with_cf(family.to_string());
+                // In-place table kept (see `write_imm_l0_file`): no
+                // post-rename re-read of the freshly written bytes.
+                let table = table
+                    .with_path(final_path.clone())
+                    .with_cf(family.to_string());
                 Ok(Some((table, num, final_path)))
             }
             Err(e) => {
@@ -5838,10 +5844,12 @@ impl<E: Env> Db<E> {
         let final_path = self.dir.join(format!("{num:06}.sst"));
         let tmp_path = self.dir.join(format!("{num:06}.sst.tmp"));
         let new_table = write_sst_entries_on(&self.env, &tmp_path, &merged)?;
-        drop(new_table);
         self.env.rename(&tmp_path, &final_path)?;
         self.sync_dir_if_required(&self.dir)?;
-        let new_table = SstTable::open_on(&self.env, &final_path)?;
+        // In-place table kept: the rename does not change the bytes, and a
+        // re-open here re-read + decompressed + decoded every entry of the
+        // freshly written file.
+        let new_table = new_table.with_path(final_path.clone());
         self.adopt_sst(&new_table);
         self.table_cache.insert(Arc::new(new_table.clone()));
         let prev_next = self.next_file_num;
@@ -10141,6 +10149,7 @@ fn finish_merged_chunk_on(
     dir: &Path,
     file_num: u64,
     do_sync_dir: bool,
+    table: SstTable,
 ) -> Result<SstTable> {
     let final_path = dir.join(format!("{file_num:06}.sst"));
     let tmp_path = dir.join(format!("{file_num:06}.sst.tmp"));
@@ -10148,7 +10157,12 @@ fn finish_merged_chunk_on(
     if do_sync_dir {
         let _ = env.sync_dir(dir);
     }
-    SstTable::open_on(env, &final_path)
+    // The writer's in-place table is the truth for the bytes just written;
+    // a re-open here re-read + decompressed + decoded every entry of every
+    // compaction chunk (the caller-side half of the read-back v21p removed
+    // from the writer — the per-job drain rate stayed ~110 MiB/s because
+    // of exactly this call). Recovery opens still verify fully.
+    Ok(table.with_path(final_path))
 }
 
 /// How many key-space spans a merge job should be split into (Rocks-shaped
@@ -10299,15 +10313,17 @@ fn write_merged_tables_span(
         });
         let file_num = file_alloc();
         let tmp_path = dir.join(format!("{file_num:06}.sst.tmp"));
-        if let Err(e) =
-            crate::sst::write_sst_try_sorted_on(env, &tmp_path, &mut entries, bloom_hint)
-        {
-            drop(entries);
-            let _ = env.remove_file(&tmp_path);
-            return Err(e);
-        }
+        let written =
+            crate::sst::write_sst_try_sorted_on(env, &tmp_path, &mut entries, bloom_hint);
         drop(entries);
-        let chunk = finish_merged_chunk_on(env, dir, file_num, do_sync_dir)?;
+        let written = match written {
+            Ok(table) => table,
+            Err(e) => {
+                let _ = env.remove_file(&tmp_path);
+                return Err(e);
+            }
+        };
+        let chunk = finish_merged_chunk_on(env, dir, file_num, do_sync_dir, written)?;
         // Register the chunk's resident body the moment it exists: this
         // Vec accumulates every chunk of the job, and a freshly opened
         // chunk holds its whole file body in RAM. Unregistered payloads

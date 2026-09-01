@@ -1064,6 +1064,42 @@ dropped). Raw serial: `run19-v21p-guest-25m.txt`; full analysis:
   verdict rests on all four point legs agreeing (incl. criterion's own
   significance tests), not on any single leg.
 
+## v21p follow-up — the caller-side read-back (why #19's rate didn't move) + local 6M A/B
+
+v21p removed the writer's *internal* re-verify (in-place `SstTable`
+construction from writer state), but all four write-path callers then
+did `drop(table); rename; SstTable::open_on(final)` — and `open_on` →
+`decode` does a full pass over the fresh file (whole-file read,
+per-block lz4 + CRC, per-entry decode + sortedness check). Run #19's
+per-job rate therefore still paid one decode pass per write; that, not
+the removed verify, was the visible ~110 MiB/s.
+
+Fix (uncommitted-until-this-entry; `db.rs` + `SstTable::with_path` in
+`table.rs`): the four sites (`write_imm_l0_file`,
+`write_imm_l0_file_for_family`, whole-Db GC rewrite, and
+`finish_merged_chunk_on` — every compaction chunk) keep the writer's
+in-place table and only retarget its path past the rename. Recovery /
+reopen opens (`db.rs` 4612, 6892, 7122, 10085) still verify fully —
+fail-closed recovery is unchanged; `write_all` errors on short write;
+rename is atomic.
+
+Local 6M quiet A/B (interleaved old/new/old/new on this host, both
+binaries built from explicit states: old = HEAD `a3572f1`, new = HEAD +
+fix; `SLIPSTREAM_BENCH_CACHE_BYTES=256MiB`):
+
+| leg   | old r1 | new r1 | old r2 | new r2 | median Δ |
+|-------|--------|--------|--------|--------|----------|
+| hydrate/pedradb | 24.8 s | 22.0 s | 26.5 s | 16.2 s | 25.65→19.1 s (−26 %) |
+| settle/pedradb  | 14.0 s | 8.5 s  | 11.0 s | 10.0 s | 12.5→9.25 s (−26 %) |
+
+All four pairings favor the fix. The rocksdb control arm drifted
+−8 %/−22 % between arms (host load), so the drift-net hydrate gain is
+conservatively ~10–25 %; the settle direction is consistent in both
+rounds. On-disk after settle identical (1.24 GiB). Guest arbitration
+(run #20 at 25M, where flush_ms/compact_ms give the phase split) is the
+next measurement; expected effect there: settle compact_ms −30–40 %
+(one decode pass fewer per rewritten byte), hydrate −10–25 %.
+
 ## Guest prefix_scan gap: local attribution (macOS `sample`, 6M)
 
 Where does a scan op actually go? Local 6M pedra-only prefix_scan,

@@ -81,7 +81,12 @@ sorted-ingest-architecture.md` (+ `run19-v21p-guest-25m.txt`).
 
 - [ ] **P1.1** Encode-path per-byte cut: bulk builder fills blocks straight
   from batch payload bytes (no per-entry InternalKey/Bytes allocations). —
-  status: `todo`
+  status: `part-done` (caller-side half shipped 2026-08-31: all four
+  write-path callers re-opened every freshly written SST via `open_on`
+  — a full read + per-block lz4 + per-entry decode pass; they now keep
+  the writer's in-place table. Local 6M A/B: settle −26 %, hydrate −26 %
+  median, paired, both rounds favoring the fix. Block-fill encode cut
+  remains.)
 - [ ] **P1.2** Batch MANIFEST persists across consecutive chunk installs. —
   status: `todo`
 - [ ] **P1.3** Chunk-size sweep for read legs at 25M (64 vs 128 MiB) —
@@ -104,7 +109,7 @@ sorted-ingest-architecture.md` (+ `run19-v21p-guest-25m.txt`).
 | P0.3 | p0 | WAL ring for append mode | todo | — | 2026-08-31 |
 | P0.4 | p0 | E2E regression set | todo | — | 2026-08-31 |
 | P0.5 | p0 | Local A/B + guest run #20 verdict | todo | — | 2026-08-31 |
-| P1.1 | p1 | Zero-alloc bulk encode | todo | — | 2026-08-31 |
+| P1.1 | p1 | Zero-alloc bulk encode | part (caller-side read-back removed) | `db.rs` `table.rs` | 2026-08-31 |
 | P1.2 | p1 | Batched manifest persists | todo | — | 2026-08-31 |
 | P1.3 | p1 | Chunk-size sweep for reads | todo | — | 2026-08-31 |
 | P2.1 | p2 | Nearly-sorted window | todo | — | 2026-08-31 |

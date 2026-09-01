@@ -546,6 +546,17 @@ impl SstTable {
         self
     }
 
+    /// Retarget the path after the file is renamed into place. Freshly
+    /// written tables are constructed in place from the writer state (no
+    /// post-write re-read); the writer saw the `.tmp` path, so the rename
+    /// must update it — the payload is the on-disk image by construction
+    /// and eviction re-reads resolve through this path.
+    #[must_use]
+    pub fn with_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.path = path.into();
+        self
+    }
+
     /// Fast negative: key cannot be in this file (bounds and/or bloom).
     #[must_use]
     pub fn key_may_match(&self, user_key: &[u8]) -> bool {
