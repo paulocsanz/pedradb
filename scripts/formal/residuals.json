@@ -109,7 +109,6 @@
         "is_disjoint",
         "leveled_enabled",
         "overlaps",
-        "pick_pushdown",
         "total_bytes"
       ],
       "crates/pedradb-core/src/manifest_kernel.rs": [
