@@ -77,3 +77,101 @@ stage clones, ×2 each, warm): get_hit 4.04–4.22 µs both, prefix_scan
 during v24/v25 (load 34, six qemu ~200% each, caixote-api 249%): guest
 read legs are untrustworthy until it quiets. Clean-host re-baseline of
 read legs is required before any read claim.
+
+## Run #28 (v26+v27, guest 25M, same loaded host): sleep theory REFUTED
+
+hydrate 110.5 s (v25 116.0/120.5), settle 3.5 s, 23 chunks, exit 0.
+WRITEPHASE: `prepare 1828 / wal 6591 / mem 9418 / flush_check 11921 /
+publish 13 ms` — v27 removed the reinsert loop (21474 → 11921). But
+hydrate moved by EXACTLY the flush_check delta and nothing more:
+v26's assist-drain removed the sleeps and the wall did not follow.
+Accounting: commit 29.7 + materialize (FLUSHSTAGES) 35.0 = 64.7 s
+counted vs 110.5 s wall → **45.8 s unattributed, ≈ unchanged vs v25**.
+v24 (64 MiB chunks) had only ~19 s unattributed → the residual scales
+with CHUNK SIZE, not with sleep/scheduling. Mechanism (b) above is dead;
+the ~26 s delta between eras is something else (candidates: memory
+footprint/page reclaim on the 3.9 GB guest — a 256 MiB chunk is a ~2.4
+M-entry BTree ≈ 600+ MB real RSS; retire-cache lifetimes; file-size
+effects). Local mac 25M RSS sampling queued to bound the footprint.
+
+The remaining 11.9 s flush_check is `spill_tail()` inside take_family:
+each entry must land in a BTree exactly once; the tail defers that cost
+to take time, and the SST write would pay the same inserts if the tail
+were extracted instead — a shard-extraction "fix" only RELOCATES the
+cost (v24 paid it inside `enc_ms`, invisible to flush_check). Not worth
+code.
+
+Local 6M cross-check (v26+v27, quiet mac): hydrate 11.2 s, settle 2.6 s,
+all read legs ≥ rocks (get_hit 4.17 vs 5.57 µs, scan 191 vs 199 µs,
+lookup_100 415 vs 628 µs), flush_check 913 ms / 6 chunks = 152 ms/chunk
+(≈ the guest's 11.9/23 = 0.52 s × guest-core factor). No local
+regression from v26+v27.
+
+## v28: `PEDRA_STAGE_MAX_BYTES` (commit `d1a0130`)
+
+Chunk-size sweep knob: clamps `auto_flush_threshold` down (never up;
+0/unparseable/unset = byte-identical default). A 64 MiB clamp also moves
+parking back to whole-memtable staging (host worker `try_stage_if_full`)
+below any per-CF `take_family` limit — the v24-era shape with v26+v27
+code, without touching the vendored bench's CF buffers. Sweep plan:
+256 (run #28 baseline) vs 128 vs 64 on the guest; read legs judged only
+on a quiet host.
+
+## v28 local 6M on-arm sanity (same mac as the 11.2 s cross-check)
+
+`PEDRA_STAGE_MAX_BYTES=67108864`: hydrate **9.8 s** (vs 11.2 s no-cap
+v26+v27, −12.5%), settle **0.5 s** (vs 2.6), 22 chunks × ~60 MiB all
+direct-to-L3 (`l0=0`; 20 `install_parked` + 1 `install_flush`),
+WRITEPHASE `flush_check 0.5 ms` vs **913.5 ms** — the writer-side
+`spill_tail` cost is gone (worker stages below the take_family limit),
+confirming the knob reproduces the v24-era shape. Local hydrate improving
+with smaller chunks is consistent with the chunk-scaled-residual
+hypothesis; the guest 25M run (#29) is the deciding measurement.
+
+## Run #29 (v28 = v26+v27 + 64 MiB cap, guest 25M, loaded host): chunk-size
+## hypothesis REFUTED
+
+hydrate **112.5 s** (#28: 110.5; v24: 75.6), settle **0.7 s** (best yet),
+exit 0, sst_n=93. The knob worked mechanically: **92 data chunks**
+(~60 MiB each, = 4× #28's 23), **92 BULKDIAG installs**, WRITEPHASE
+`prepare 1234.6 / wal 6892.5 / mem 9575.2 / publish 17.2 /
+flush_check 14.9 ms` — the writer-side spill is fully gone. FLUSHSTAGES
+sums (92 chunks): enc 16.8 + lz4 7.6 + bloom 3.4 + crc 1.5 + write 4.0 =
+**33.3 s** (flat vs #28's 35.0 — same bytes, same codec work).
+
+Accounting: commit **17.7** + materialize **33.3** = **51.0 s counted vs
+112.5 s wall → 61.5 s unattributed — WORSE than #28's 45.8**. Halving
+(and quartering) the chunk size did not shrink the residual, and the
+memory-footprint-per-chunk theory predicts the opposite direction.
+Combined with the local 6M pair (11.2 uncapped → 9.8 capped, cap FASTER
+on the mac), the residual is not a property of chunk size at all.
+
+What survives: v24 measured 75.6 s wall / ~19 s unattributed **with this
+exact 64 MiB whole-memtable staging shape** (run26-v24 captures) — so the
+v24→#29 delta (57 s wall, ~42 s residual) at IDENTICAL shape is code
+(v25 threshold fix, v26 assist, v27 take_family fast path — all nominally
+inert here) or environment (host load, guest page-cache state; MEMDIAGD
+shows the 3.9 GB guest at ~1.9 GB cached during reads). Per-chunk
+unattributed: #28 2.0 s/chunk, #29 0.67 s/chunk — neither linear in
+chunks nor in entries. Uncounted candidate sinks common to both shapes:
+`install_parked` (manifest + level links + fd, 92×), the worker-side
+park/swap (outside FLUSHSTAGES timers in #29's shape), retire-cache
+bookkeeping, and dirty-page writeback throttle — none have timers yet.
+
+Next instrument: v29 diag timers around park/install/retire/await inside
+the hydrate span, or a local sampling profile (`sample` on macOS) during
+a local 25M hydrate — the local 15M A/B (capped vs not, RSS-sampled) is
+running to see whether the wall anomaly reproduces on a quiet mac with
+abundant RAM.
+
+probe_hit p50 54.8 µs / probe_miss p50 3.2 µs — host loaded (six qemu
+VMs); read legs remain unjudgeable this run, consistent with #27b/#28.
+
+Operational note (local): two "FjallError: Poisoned" panics at the first
+fjall apply (`snapshot_backends.rs:107`) were NOT a bad build — the data
+volume was at 100% (299 MiB free): timeout-killed bench runs never drop
+their `TempDir`s and had leaked 39 GB into `$TMPDIR`. fjall's background
+flusher panics on ENOSPC and poisons its locks; the error surfaces at the
+next `apply`, long after the write that filled the disk. Check `df -h`
+before blaming the binary; clean `${TMPDIR}/.tmp*` after kills. The
+same panic on a fresh `TempDir` is the signature.

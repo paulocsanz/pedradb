@@ -1,0 +1,1339 @@
+=== Caixote Init Starting ===
+CAIXOTE_MEMINFO: MemTotal:        3985596 kB MemFree:         3877948 kB MemAvailable:    3759076 kB 
+Loading kernel modules...
+Loaded virtio_blk
+Loaded evdev
+Loaded acpi button
+[supervisor] input /dev/input/event0 name='Power Button'
+[supervisor] power-button watcher on: /dev/input/event0
+Loaded virtio_balloon
+Loaded af_packet
+Loaded failover
+Loaded net_failover
+Loaded virtio_net
+Loaded crc16
+Loaded crc32c_generic
+Loaded mbcache
+Loaded jbd2
+Loaded ext4
+Loaded overlay
+Waiting for disk devices...
+Disk layout: ROOTFS_DEV=/dev/vdb
+Available filesystems:
+nodev	sysfs
+nodev	tmpfs
+nodev	bdev
+nodev	proc
+nodev	cgroup
+nodev	cgroup2
+nodev	devtmpfs
+nodev	debugfs
+nodev	tracefs
+nodev	securityfs
+nodev	sockfs
+nodev	bpf
+nodev	pipefs
+nodev	ramfs
+nodev	hugetlbfs
+nodev	devpts
+nodev	mqueue
+nodev	pstore
+	ext3
+	ext4
+Block devices:
+brw-rw----    1 0        0         253,   0 Sep  1 07:39 [1;35m/dev/vda[m
+brw-rw----    1 0        0         253,  16 Sep  1 07:39 [1;35m/dev/vdb[m
+Mounting container rootfs from /dev/vdb...
+=== dmesg before mount (last 20 lines with ext4/disk) ===
+[    0.474160] Write protecting the kernel read-only data: 24576k
+[    0.645209] virtio_blk virtio1: [vda] 83886080 512-byte logical blocks (42.9 GB/40.0 GiB)
+[    0.648457] virtio_blk virtio2: [vdb] 125829120 512-byte logical blocks (64.4 GB/60.0 GiB)
+Running e2fsck -p on /dev/vdb...
+/dev/vdb: clean, 66349/3886080 files, 923537/15728640 blocks
+mount: mounting /dev/vdb on /rootfs failed: No such device
+Rootfs disk mounted (ext4 rw)
+/rootfs is mounted
+Mount info:
+/dev/vdb /rootfs ext4 rw,noatime 0 0
+Filesystem                Size      Used Available Use% Mounted on
+/dev/vdb                 59.1G      2.6G     53.5G   5% /rootfs
+Rootfs contents:
+total 24
+drwxr-xr-x    4 0        0             4096 Sep  1 07:09 [1;34m.[m
+drwxr-xr-x   17 0        0              380 Sep  1 07:39 [1;34m..[m
+drwxr-xr-x    3 994      982           4096 Aug 29 17:05 [1;34mcontainer[m
+drwx------    2 0        0            16384 Aug 29 17:05 [1;34mlost+found[m
+Rootfs is writable
+Rootfs remounted read-only
+Mount succeeded (auto-detect)
+/data is mounted
+Filesystem                Size      Used Available Use% Mounted on
+/dev/vda                 39.3G    781.4M     36.6G   2% /data
+Kernel cmdline: console=ttyS0 quiet init=/init caixote.hostname=linux-gate-p149b caixote.vpc=vpc-production-e7c5e0f1 caixote.service=linux-gate-p149b caixote.ip=10.0.0.109/24 caixote.gw=10.0.0.1 caixote.wg_privkey=IRgHIIsQUDRfGHVuEShIrDyHHib/NmhYWxaYaZ7PLGE= caixote.wg_peer_pubkey=krMZvBM6hPRDRjVFs3TBQJZ8x+8DlJ0KJrYjTUYKwmU= caixote.wg_endpoint=198.18.0.1 caixote.wg_port=53414 caixote.local_mesh=10.0.0.102,10.0.0.106,10.0.0.110,10.0.0.111,10.0.0.112 caixote.hosts=vpc-production-10fbb5e2.internal:10.0.0.1,vpc-production-a0ce155c.internal:10.0.0.1,vpc-production-721afb29.internal:10.0.0.1,vpc-production-61a3fd7f.internal:10.0.0.1,vpc-production-6d85984e.internal:10.0.0.1,vpc-production-e7c5e0f1.internal:10.0.0.1,linux-gate-f208.internal:10.0.0.102,pedra-tcg-guest.internal:10.0.0.106 caixote.eth0_ip=198.18.0.12/16 caixote.eth0_gw=198.18.0.1
+Parsing cmdline parameters...
+  parsed caixote.hostname=linux-gate-p149b
+  parsed caixote.ip=10.0.0.109/24
+  parsed caixote.gw=10.0.0.1
+  parsed caixote.wg_privkey (len=44)
+  parsed caixote.wg_peer_pubkey (len=44)
+  parsed caixote.wg_endpoint=198.18.0.1
+  parsed caixote.wg_port=53414
+  parsed caixote.local_mesh=10.0.0.102,10.0.0.106,10.0.0.110,10.0.0.111,10.0.0.112
+  parsed caixote.hosts=vpc-production-10fbb5e2.internal:10.0.0.1,vpc-production-a0ce155c.internal:10.0.0.1,vpc-production-721afb29.internal:10.0.0.1,vpc-production-61a3fd7f.internal:10.0.0.1,vpc-production-6d85984e.internal:10.0.0.1,vpc-production-e7c5e0f1.internal:10.0.0.1,linux-gate-f208.internal:10.0.0.102,pedra-tcg-guest.internal:10.0.0.106
+=== console /dev/ttyS0 reopened ===
+Configuring eth0 with static 198.18.0.12/16 (gw=198.18.0.1)
+WireGuard config check:
+  CAIXOTE_WG_PRIVKEY set: yes
+  CAIXOTE_WG_PEER_PUBKEY set: yes
+  CAIXOTE_WG_ENDPOINT: 198.18.0.1
+  CAIXOTE_WG_PORT: 53414
+  CAIXOTE_IP: 10.0.0.109/24
+Configuring WireGuard...
+Loading WireGuard modules from /lib/modules/6.12.94-0-virt...
+Loaded udp_tunnel.ko
+Loaded ip6_udp_tunnel.ko
+Loaded libcurve25519-generic.ko
+Loaded curve25519-x86_64.ko
+Module curve25519-neon.ko not found
+Failed to load chacha_generic.ko (may be built-in or already loaded)
+Failed to load poly1305_generic.ko (may be built-in or already loaded)
+Loaded libchacha.ko
+Loaded libpoly1305.ko
+Loaded chacha-x86_64.ko
+Loaded poly1305-x86_64.ko
+Module chacha-neon.ko not found
+Module poly1305-neon.ko not found
+Loaded libchacha20poly1305.ko
+Loaded wireguard.ko
+Installing same-host east-west /32s via eth0
+WireGuard configured: 10.0.0.109 via 198.18.0.1:53414
+[0m[32m[1minterface[0m: [32mwg0[0m
+  [1mpublic key[0m: niKOwNuyOS2hVjbJ9mcmLn5YZuHVf3FChVqMZN6NFAs=
+  [1mprivate key[0m: (hidden)
+  [1mlistening port[0m: 54741
+
+[33m[1mpeer[0m: [33mkrMZvBM6hPRDRjVFs3TBQJZ8x+8DlJ0KJrYjTUYKwmU=[0m
+  [1mendpoint[0m: 198.18.0.1:53414
+  [1mallowed ips[0m: 10.0.0.0[36m/[0m8
+  [1mlatest handshake[0m: Now
+  [1mtransfer[0m: 124 [36mB[0m received, 180 [36mB[0m sent
+  [1mpersistent keepalive[0m: every 25 [36mseconds[0m
+  hosts: 10.0.0.1 vpc-production-10fbb5e2.internal
+  hosts: 10.0.0.1 vpc-production-a0ce155c.internal
+  hosts: 10.0.0.1 vpc-production-721afb29.internal
+  hosts: 10.0.0.1 vpc-production-61a3fd7f.internal
+  hosts: 10.0.0.1 vpc-production-6d85984e.internal
+  hosts: 10.0.0.1 vpc-production-e7c5e0f1.internal
+  hosts: 10.0.0.102 linux-gate-f208.internal
+  hosts: 10.0.0.106 pedra-tcg-guest.internal
+Static hosts injected from caixote.hosts
+DNS configured to use vigia at 10.0.0.1
+DNS also has bridge gateway at 198.18.0.1
+Network configuration:
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host 
+       valid_lft forever preferred_lft forever
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP qlen 1000
+    link/ether 52:54:00:d0:33:d7 brd ff:ff:ff:ff:ff:ff
+    inet 198.18.0.12/16 scope global eth0
+       valid_lft forever preferred_lft forever
+    inet6 fe80::5054:ff:fed0:33d7/64 scope link tentative 
+       valid_lft forever preferred_lft forever
+3: wg0: <POINTOPOINT,NOARP,UP,LOWER_UP> mtu 1420 qdisc noqueue state UNKNOWN qlen 1000
+    link/[65534] 
+    inet 10.0.0.109/24 scope global wg0
+       valid_lft forever preferred_lft forever
+default via 198.18.0.1 dev eth0 
+10.0.0.0/24 dev wg0 scope link  src 10.0.0.109 
+10.0.0.0/8 dev wg0 scope link 
+10.0.0.102 dev eth0 scope link 
+10.0.0.106 dev eth0 scope link 
+10.0.0.110 dev eth0 scope link 
+10.0.0.111 dev eth0 scope link 
+10.0.0.112 dev eth0 scope link 
+198.18.0.0/16 dev eth0 scope link  src 198.18.0.12 
+Setting up container on tmpfs for pivot_root support...
+Overlay tmpfs ceiling: 973M (25% of MemTotal unless caixote.overlay_tmpfs_pct=N)
+Mounted tmpfs at /mnt (size=973M)
+Using disk-based rootfs from /dev/vdb
+Overlay mount result: 0 (lowerdir=/rootfs/container/rootfs)
+Installed caixote-unfreeze hook
+No QGA virtio-port found (host did not configure org.qemu.guest_agent.0);               qemu-ga not started
+Bound host /data (legacy disk_mb) into container at /data
+Filesystem                Size      Used Available Use% Mounted on
+/dev/vda                 39.3G    781.4M     36.6G   2% /data
+Bundle contents:
+total 4
+drwxr-xr-x    3 0        0               80 Sep  1 07:39 [1;34m.[m
+drwxrwxrwt    5 0        0              100 Sep  1 07:39 [1;34m..[m
+-rw-r--r--    1 0        0             3101 Sep  1 07:39 [0;0mconfig.json[m
+drwxr-xr-x    1 0        0               60 Sep  1 07:39 [1;34mrootfs[m
+Rootfs contents (first 5):
+total 64
+drwxr-xr-x    1 0        0               60 Sep  1 07:39 .
+drwxr-xr-x    3 0        0               80 Sep  1 07:39 ..
+lrwxrwxrwx    1 994      982              7 Aug  3 00:00 bin -> usr/bin
+drwxr-xr-x    2 994      982           4096 Aug 29 17:02 boot
+/mnt/container/rootfs is now a mount point (overlay on tmpfs)
+Relevant mounts:
+tmpfs on /mnt type tmpfs (rw,relatime,size=996352k,inode64)
+overlay on /mnt/container/rootfs type overlay (rw,relatime,lowerdir=/rootfs/container/rootfs,upperdir=/mnt/upper,workdir=/mnt/work,uuid=on)
+/dev/vda on /mnt/container/rootfs/data type ext4 (rw,relatime)
+DNS configuration copied to container:
+nameserver 10.0.0.1
+nameserver 198.18.0.1
+Static hosts injected into container rootfs from caixote.hosts
+Added container hostname 'youki' to /etc/hosts
+Running ldconfig in container rootfs...
+[supervisor] [uptime=4.29s] Container supervisor starting
+[supervisor] [uptime=4.29s] Bundle: /mnt/container
+[supervisor] [uptime=4.29s] === Starting container (attempt 1) ===
+[supervisor] [uptime=4.30s] Cleaning up previous container state...
+[supervisor] [uptime=4.30s] Cleanup complete
+CAIXOTE_GUEST_READY
+[supervisor] [uptime=4.31s] Executing: runc run --no-pivot --bundle /mnt/container container0
+Tue Sep  1 07:39:09 UTC 2026
+FDFSYNC_PROBE n=200 bytes_per=230400 total_s=0.659 per_op_ms=3.293
+WRITEPROBE streams=1 mib=512 wall_s=1.22 per_stream_mibs=[421] agg_mib_s=421
+WRITEPROBE streams=2 mib=512 wall_s=2.11 per_stream_mibs=[243 243] agg_mib_s=486
+WRITEPROBE streams=4 mib=512 wall_s=3.94 per_stream_mibs=[130 130 130 130] agg_mib_s=520
+CG_LIMIT=
+/dev/vda         40G  782M   37G   3% /data
+               total        used        free      shared  buff/cache   available
+Mem:            3892         272        3703          30          98        3620
+=== leg pedradb start Tue Sep  1 07:39:17 UTC 2026 ===
+[1m[92m   Compiling[0m pedradb-posix v0.1.0 (/src/pedradb/crates/pedradb-posix)
+[1m[92m   Compiling[0m pedradb-core v0.1.0 (/src/pedradb/crates/pedradb-core)
+[1m[33mwarning[0m[1m: method `set_parallel_jobs` is never used[0m
+    [1m[94m--> [0m/src/pedradb/crates/pedradb-core/src/db.rs:6532:19
+     [1m[94m|[0m
+[1m[94m1534[0m [1m[94m|[0m impl<E: Env> Db<E> {
+     [1m[94m|[0m [1m[94m------------------[0m [1m[94mmethod in this implementation[0m
+[1m[94m...[0m
+[1m[94m6532[0m [1m[94m|[0m     pub(crate) fn set_parallel_jobs(&mut self, k: usize) {
+     [1m[94m|[0m                   [1m[33m^^^^^^^^^^^^^^^^^[0m
+     [1m[94m|[0m
+     [1m[94m= [0m[1mnote[0m: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+[1m[92m   Compiling[0m pedradb-io-uring v0.1.0 (/src/pedradb/crates/pedradb-io-uring)
+[1m[92m   Compiling[0m pedradb-sim v0.1.0 (/src/pedradb/crates/pedradb-sim)
+[1m[33mwarning[0m[1m: function `cqe_res_ok_as_is` is never used[0m
+   [1m[94m--> [0m/src/pedradb/crates/pedradb-io-uring/src/cqe_kernel.rs:104:8
+    [1m[94m|[0m
+[1m[94m104[0m [1m[94m|[0m pub fn cqe_res_ok_as_is(_res: i32) -> bool {
+    [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mnote[0m: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+[1m[33mwarning[0m[1m: function `cqe_ring_model_admitted` is never used[0m
+   [1m[94m--> [0m/src/pedradb/crates/pedradb-io-uring/src/cqe_kernel.rs:112:8
+    [1m[94m|[0m
+[1m[94m112[0m [1m[94m|[0m pub fn cqe_ring_model_admitted() -> bool {
+    [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: function `cqe_ring_model_admitted_as_is` is never used[0m
+   [1m[94m--> [0m/src/pedradb/crates/pedradb-io-uring/src/cqe_kernel.rs:118:8
+    [1m[94m|[0m
+[1m[94m118[0m [1m[94m|[0m pub fn cqe_ring_model_admitted_as_is() -> bool {
+    [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m: `pedradb-io-uring` (lib) generated 3 warnings
+[1m[92m   Compiling[0m pedradb-ops v0.1.0 (/src/pedradb/crates/pedradb-ops)
+[1m[92m   Compiling[0m rocksdb-compat v0.1.0 (/src/pedradb/crates/rocksdb-compat)
+[1m[33mwarning[0m[1m: function `iter_window_keep_as_is` is never used[0m
+  [1m[94m--> [0m/src/pedradb/crates/rocksdb-compat/src/iter_kernel.rs:16:8
+   [1m[94m|[0m
+[1m[94m16[0m [1m[94m|[0m pub fn iter_window_keep_as_is(_snapshot_live: bool) -> bool {
+   [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^^^^^^^[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mnote[0m: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+[1m[92m   Compiling[0m beyond-slipstream v0.7.3 (/src/slipstream)
+[1m[33mwarning[0m: `pedradb-core` (lib) generated 1 warning
+[1m[33mwarning[0m: `rocksdb-compat` (lib) generated 1 warning
+[1m[92m    Finished[0m `bench` profile [optimized] target(s) in 37.57s
+[1m[92m     Running[0m benches/snapshot_backends.rs (/data/target/release/deps/snapshot_backends-658f4d3d34281331)
+Gnuplot not found, using plotters backend
+apply_hydrate: skipped at 25000000 entries (>8M); see the one-shot hydration timings printed by the read benchmarks' setup
+COMPACTDIAG l0=0 l1=0 parked_n=0 pool_n=0 pool_b=0 ent_e=0
+FLUSHDIAG parked_n=0 parked_b=0 active_b=505910 imm=false retired_b=0 sst_n=0 rss_kb=18620 tick_s=0 mat_n=0 pool_n=0 pool_b=0 ent_e=0
+FLUSHSTAGES entries=274432 bytes=60718536 enc_ms=174.8 lz4_ms=81.4 bloom_ms=36.5 crc_ms=15.8 write_ms=36.0 lz4=true
+MEMDIAGD rss=313664 dirty_kb=174164 avail=3207504 cached=814444 cgcur=
+FLUSHSTAGES entries=268 bytes=2817 enc_ms=5.5 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=397
+BULKDIAG install_parked family=data level=3 ssts=0 l0=0 max=0
+FLUSHDIAG parked_n=0 parked_b=0 active_b=11382975 imm=false retired_b=67791940 sst_n=2 rss_kb=231720 tick_s=0 mat_n=1 pool_n=2 pool_b=60721345 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.5 lz4=false
+COMPDUR ms=1 inputs=1 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=3 pool_b=60721467 ent_e=0
+MEMDIAGD rss=310720 dirty_kb=183624 avail=3208016 cached=883180 cgcur=
+FLUSHSTAGES entries=274432 bytes=60720985 enc_ms=189.6 lz4_ms=92.1 bloom_ms=35.6 crc_ms=15.4 write_ms=36.7 lz4=true
+FLUSHSTAGES entries=268 bytes=2818 enc_ms=5.4 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=442
+BULKDIAG install_parked family=data level=3 ssts=2 l0=0 max=1
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=4 rss_kb=323848 tick_s=0 mat_n=1 pool_n=5 pool_b=121445262 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.2 lz4=false
+COMPDUR ms=12 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=6 pool_b=121445384 ent_e=0
+MEMDIAGD rss=340728 dirty_kb=252136 avail=3154860 cached=1010988 cgcur=
+FLUSHSTAGES entries=274432 bytes=60719255 enc_ms=172.7 lz4_ms=81.2 bloom_ms=36.1 crc_ms=16.2 write_ms=36.8 lz4=true
+FLUSHSTAGES entries=268 bytes=2816 enc_ms=5.4 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=398
+BULKDIAG install_parked family=data level=3 ssts=3 l0=0 max=2
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=5 rss_kb=355488 tick_s=0 mat_n=2 pool_n=8 pool_b=182167447 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=2.9 lz4=false
+COMPDUR ms=10 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=9 pool_b=182167569 ent_e=0
+MEMDIAGD rss=400836 dirty_kb=254084 avail=3048040 cached=1138796 cgcur=
+FLUSHSTAGES entries=273408 bytes=60496586 enc_ms=184.9 lz4_ms=85.0 bloom_ms=36.7 crc_ms=16.2 write_ms=39.1 lz4=true
+FLUSHSTAGES entries=267 bytes=2806 enc_ms=5.5 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=425
+BULKDIAG install_parked family=data level=3 ssts=4 l0=0 max=3
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=6 rss_kb=443176 tick_s=0 mat_n=3 pool_n=11 pool_b=242666953 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.5 lz4=false
+COMPDUR ms=16 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=12 pool_b=242667075 ent_e=0
+MEMDIAGD rss=466416 dirty_kb=298588 avail=2924196 cached=1263336 cgcur=
+FLUSHSTAGES entries=274432 bytes=60722985 enc_ms=179.3 lz4_ms=85.7 bloom_ms=39.2 crc_ms=21.5 write_ms=60.8 lz4=true
+FLUSHSTAGES entries=268 bytes=2820 enc_ms=5.8 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=460
+BULKDIAG install_parked family=data level=3 ssts=5 l0=0 max=4
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=7 rss_kb=464160 tick_s=0 mat_n=4 pool_n=13 pool_b=242674340 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.3 lz4=false
+COMPDUR ms=14 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242674462 ent_e=0
+MEMDIAGD rss=447368 dirty_kb=277320 avail=2986592 cached=1374948 cgcur=
+FLUSHSTAGES entries=274432 bytes=60723354 enc_ms=176.2 lz4_ms=85.4 bloom_ms=41.5 crc_ms=20.0 write_ms=48.7 lz4=true
+FLUSHSTAGES entries=268 bytes=2817 enc_ms=5.9 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=436
+BULKDIAG install_parked family=data level=3 ssts=6 l0=0 max=5
+FLUSHDIAG parked_n=0 parked_b=0 active_b=505910 imm=false retired_b=0 sst_n=8 rss_kb=473724 tick_s=0 mat_n=5 pool_n=13 pool_b=242676709 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=6.6 lz4=false
+COMPDUR ms=21 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242676831 ent_e=0
+MEMDIAGD rss=416888 dirty_kb=270992 avail=3022172 cached=1486444 cgcur=
+FLUSHSTAGES entries=274432 bytes=60723282 enc_ms=176.9 lz4_ms=84.5 bloom_ms=36.9 crc_ms=16.4 write_ms=44.5 lz4=true
+FLUSHSTAGES entries=268 bytes=2816 enc_ms=5.7 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=419
+BULKDIAG install_parked family=data level=3 ssts=7 l0=0 max=6
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=9 rss_kb=488672 tick_s=0 mat_n=6 pool_n=13 pool_b=242680734 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=2.2 lz4=false
+COMPDUR ms=13 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242680856 ent_e=0
+MEMDIAGD rss=413484 dirty_kb=263360 avail=2988828 cached=1602320 cgcur=
+FLUSHSTAGES entries=274432 bytes=60723302 enc_ms=172.8 lz4_ms=82.1 bloom_ms=37.5 crc_ms=16.4 write_ms=48.6 lz4=true
+FLUSHSTAGES entries=268 bytes=2817 enc_ms=5.6 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=416
+BULKDIAG install_parked family=data level=3 ssts=8 l0=0 max=7
+FLUSHDIAG parked_n=0 parked_b=0 active_b=1011820 imm=false retired_b=0 sst_n=10 rss_kb=494992 tick_s=0 mat_n=7 pool_n=13 pool_b=242907451 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.2 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=2.6 lz4=false
+MEMDIAGD rss=494992 dirty_kb=249224 avail=2949688 cached=1721056 cgcur=
+COMPDUR ms=18 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242907573 ent_e=0
+FLUSHSTAGES entries=272384 bytes=60269969 enc_ms=176.0 lz4_ms=82.2 bloom_ms=37.0 crc_ms=16.5 write_ms=45.2 lz4=true
+FLUSHSTAGES entries=266 bytes=2796 enc_ms=5.8 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=422
+BULKDIAG install_parked family=data level=3 ssts=9 l0=0 max=8
+FLUSHDIAG parked_n=0 parked_b=0 active_b=1264775 imm=false retired_b=0 sst_n=11 rss_kb=509412 tick_s=0 mat_n=8 pool_n=13 pool_b=242454425 ent_e=0
+MEMDIAGD rss=509412 dirty_kb=225664 avail=2850636 cached=1838568 cgcur=
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.7 lz4=false
+COMPDUR ms=23 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242454547 ent_e=0
+FLUSHSTAGES entries=274432 bytes=60723195 enc_ms=199.5 lz4_ms=99.3 bloom_ms=38.5 crc_ms=16.6 write_ms=40.8 lz4=true
+MEMDIAGD rss=603476 dirty_kb=283912 avail=2785532 cached=1964444 cgcur=
+FLUSHSTAGES entries=268 bytes=2816 enc_ms=5.7 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=432
+BULKDIAG install_parked family=data level=3 ssts=10 l0=0 max=9
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=12 rss_kb=521640 tick_s=0 mat_n=9 pool_n=13 pool_b=242454262 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.5 lz4=false
+COMPDUR ms=18 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242454384 ent_e=0
+MEMDIAGD rss=654352 dirty_kb=272272 avail=2743176 cached=2039032 cgcur=
+FLUSHSTAGES entries=272384 bytes=60270032 enc_ms=176.1 lz4_ms=86.1 bloom_ms=38.1 crc_ms=16.5 write_ms=42.7 lz4=true
+FLUSHSTAGES entries=266 bytes=2797 enc_ms=5.4 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=421
+BULKDIAG install_parked family=data level=3 ssts=11 l0=0 max=10
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=13 rss_kb=514844 tick_s=0 mat_n=9 pool_n=13 pool_b=242000992 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=4.0 lz4=false
+COMPDUR ms=15 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242001114 ent_e=0
+MEMDIAGD rss=542196 dirty_kb=244836 avail=2848516 cached=2159908 cgcur=
+FLUSHSTAGES entries=273408 bytes=60496330 enc_ms=168.4 lz4_ms=82.3 bloom_ms=36.3 crc_ms=15.8 write_ms=37.5 lz4=true
+FLUSHSTAGES entries=267 bytes=2806 enc_ms=5.4 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=399
+BULKDIAG install_parked family=data level=3 ssts=12 l0=0 max=11
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=14 rss_kb=519440 tick_s=0 mat_n=9 pool_n=13 pool_b=241774010 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.4 lz4=false
+COMPDUR ms=18 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241774132 ent_e=0
+MEMDIAGD rss=555388 dirty_kb=264012 avail=2825252 cached=2287328 cgcur=
+FLUSHSTAGES entries=273408 bytes=60496353 enc_ms=187.3 lz4_ms=86.6 bloom_ms=36.7 crc_ms=16.2 write_ms=40.5 lz4=true
+FLUSHSTAGES entries=267 bytes=2808 enc_ms=5.6 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=432
+BULKDIAG install_parked family=data level=3 ssts=13 l0=0 max=12
+FLUSHDIAG parked_n=0 parked_b=0 active_b=505910 imm=false retired_b=0 sst_n=15 rss_kb=559204 tick_s=0 mat_n=10 pool_n=13 pool_b=242000385 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=7.5 lz4=false
+COMPDUR ms=15 inputs=2 outputs=1
+MEMDIAGD rss=530784 dirty_kb=274580 avail=2845796 cached=2406128 cgcur=
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242000507 ent_e=0
+FLUSHSTAGES entries=272384 bytes=60270030 enc_ms=163.4 lz4_ms=79.0 bloom_ms=34.2 crc_ms=15.0 write_ms=41.0 lz4=true
+FLUSHSTAGES entries=266 bytes=2798 enc_ms=5.4 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=385
+BULKDIAG install_parked family=data level=3 ssts=14 l0=0 max=13
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=16 rss_kb=555708 tick_s=0 mat_n=10 pool_n=13 pool_b=241547222 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.1 lz4=false
+COMPDUR ms=12 inputs=2 outputs=1
+MEMDIAGD rss=546348 dirty_kb=278164 avail=2814272 cached=2522256 cgcur=
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241547344 ent_e=0
+FLUSHSTAGES entries=274432 bytes=60723102 enc_ms=169.7 lz4_ms=77.2 bloom_ms=34.6 crc_ms=15.3 write_ms=41.3 lz4=true
+FLUSHSTAGES entries=268 bytes=2816 enc_ms=5.6 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=403
+BULKDIAG install_parked family=data level=3 ssts=15 l0=0 max=14
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=17 rss_kb=579732 tick_s=0 mat_n=11 pool_n=13 pool_b=242000292 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=2.4 lz4=false
+COMPDUR ms=20 inputs=2 outputs=1
+MEMDIAGD rss=536932 dirty_kb=227420 avail=2721312 cached=2637452 cgcur=
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242000414 ent_e=0
+FLUSHSTAGES entries=274432 bytes=60723100 enc_ms=159.3 lz4_ms=76.1 bloom_ms=35.5 crc_ms=15.3 write_ms=50.2 lz4=true
+FLUSHSTAGES entries=268 bytes=2816 enc_ms=5.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=407
+BULKDIAG install_parked family=data level=3 ssts=16 l0=0 max=15
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=18 rss_kb=569508 tick_s=0 mat_n=11 pool_n=13 pool_b=242227081 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.5 lz4=false
+COMPDUR ms=15 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242227203 ent_e=0
+MEMDIAGD rss=516268 dirty_kb=225620 avail=2826972 cached=2645852 cgcur=
+FLUSHSTAGES entries=274432 bytes=60722995 enc_ms=165.2 lz4_ms=76.1 bloom_ms=35.3 crc_ms=15.3 write_ms=44.3 lz4=true
+FLUSHSTAGES entries=268 bytes=2819 enc_ms=5.3 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.2 lz4=true
+FLUSHDUR ms=408
+BULKDIAG install_parked family=data level=3 ssts=17 l0=0 max=16
+FLUSHDIAG parked_n=0 parked_b=0 active_b=505910 imm=false retired_b=0 sst_n=19 rss_kb=600648 tick_s=0 mat_n=12 pool_n=13 pool_b=242453736 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.4 lz4=false
+COMPDUR ms=14 inputs=2 outputs=1
+MEMDIAGD rss=514552 dirty_kb=232696 avail=2842476 cached=2646912 cgcur=
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242453858 ent_e=0
+FLUSHSTAGES entries=273408 bytes=60496666 enc_ms=163.4 lz4_ms=76.4 bloom_ms=35.1 crc_ms=15.6 write_ms=42.5 lz4=true
+FLUSHSTAGES entries=267 bytes=2807 enc_ms=5.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=399
+BULKDIAG install_parked family=data level=3 ssts=18 l0=0 max=17
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=20 rss_kb=610108 tick_s=0 mat_n=13 pool_n=13 pool_b=242680371 ent_e=0
+MEMDIAGD rss=610108 dirty_kb=188600 avail=2738356 cached=2623288 cgcur=
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.5 lz4=false
+COMPDUR ms=14 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242680493 ent_e=0
+FLUSHSTAGES entries=274432 bytes=60723113 enc_ms=163.2 lz4_ms=79.0 bloom_ms=35.4 crc_ms=15.4 write_ms=43.1 lz4=true
+FLUSHSTAGES entries=268 bytes=2817 enc_ms=5.3 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=419
+MEMDIAGD rss=683540 dirty_kb=215844 avail=2724924 cached=2642868 cgcur=
+BULKDIAG install_parked family=data level=3 ssts=19 l0=0 max=18
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=21 rss_kb=601708 tick_s=0 mat_n=13 pool_n=13 pool_b=242680401 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.3 lz4=false
+COMPDUR ms=14 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242680523 ent_e=0
+FLUSHSTAGES entries=272384 bytes=60269799 enc_ms=169.3 lz4_ms=78.4 bloom_ms=35.3 crc_ms=15.4 write_ms=41.8 lz4=true
+MEMDIAGD rss=713304 dirty_kb=269280 avail=2737100 cached=2670576 cgcur=
+FLUSHSTAGES entries=266 bytes=2796 enc_ms=5.3 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=405
+BULKDIAG install_parked family=data level=3 ssts=20 l0=0 max=19
+FLUSHDIAG parked_n=0 parked_b=0 active_b=505910 imm=false retired_b=0 sst_n=22 rss_kb=631472 tick_s=0 mat_n=14 pool_n=13 pool_b=242227080 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.8 lz4=false
+COMPDUR ms=17 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242227202 ent_e=0
+MEMDIAGD rss=711372 dirty_kb=279144 avail=2725200 cached=2739244 cgcur=
+FLUSHSTAGES entries=274432 bytes=60723044 enc_ms=168.3 lz4_ms=77.7 bloom_ms=34.6 crc_ms=15.4 write_ms=48.7 lz4=true
+FLUSHSTAGES entries=268 bytes=2816 enc_ms=6.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=415
+BULKDIAG install_parked family=data level=3 ssts=21 l0=0 max=20
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=23 rss_kb=643444 tick_s=0 mat_n=15 pool_n=13 pool_b=242227129 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=6.4 lz4=false
+COMPDUR ms=28 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242227251 ent_e=0
+MEMDIAGD rss=658408 dirty_kb=232504 avail=2763968 cached=2701760 cgcur=
+FLUSHSTAGES entries=272384 bytes=60269920 enc_ms=198.6 lz4_ms=93.6 bloom_ms=39.0 crc_ms=17.4 write_ms=50.8 lz4=true
+FLUSHSTAGES entries=266 bytes=2796 enc_ms=5.3 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=456
+BULKDIAG install_parked family=data level=3 ssts=22 l0=0 max=21
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=24 rss_kb=653916 tick_s=0 mat_n=16 pool_n=13 pool_b=242000360 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.3 lz4=false
+COMPDUR ms=21 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242000482 ent_e=0
+MEMDIAGD rss=627028 dirty_kb=217688 avail=2809848 cached=2671516 cgcur=
+FLUSHSTAGES entries=274432 bytes=60722797 enc_ms=163.6 lz4_ms=77.3 bloom_ms=35.2 crc_ms=15.4 write_ms=42.3 lz4=true
+FLUSHSTAGES entries=268 bytes=2817 enc_ms=5.5 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=396
+BULKDIAG install_parked family=data level=3 ssts=23 l0=0 max=22
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=25 rss_kb=647020 tick_s=0 mat_n=16 pool_n=13 pool_b=242000054 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.2 lz4=false
+COMPDUR ms=16 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242000176 ent_e=0
+MEMDIAGD rss=607716 dirty_kb=214160 avail=2774348 cached=2696436 cgcur=
+FLUSHSTAGES entries=272384 bytes=60267032 enc_ms=177.9 lz4_ms=80.8 bloom_ms=35.6 crc_ms=16.9 write_ms=43.4 lz4=true
+FLUSHSTAGES entries=266 bytes=2797 enc_ms=5.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=421
+BULKDIAG install_parked family=data level=3 ssts=24 l0=0 max=23
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=26 rss_kb=678168 tick_s=0 mat_n=17 pool_n=13 pool_b=241997267 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.9 lz4=false
+COMPDUR ms=25 inputs=2 outputs=1
+MEMDIAGD rss=580452 dirty_kb=208580 avail=2779580 cached=2515820 cgcur=
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241997389 ent_e=0
+FLUSHSTAGES entries=273408 bytes=60491045 enc_ms=181.2 lz4_ms=88.4 bloom_ms=35.3 crc_ms=15.4 write_ms=44.2 lz4=true
+FLUSHSTAGES entries=267 bytes=2807 enc_ms=5.5 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.2 lz4=true
+FLUSHDUR ms=443
+BULKDIAG install_parked family=data level=3 ssts=25 l0=0 max=24
+MEMDIAGD rss=708836 dirty_kb=152684 avail=2703124 cached=2597596 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=27 rss_kb=686332 tick_s=0 mat_n=18 pool_n=13 pool_b=241765279 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.6 lz4=false
+COMPDUR ms=14 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241765401 ent_e=0
+MEMDIAGD rss=761800 dirty_kb=219388 avail=2653716 cached=2665988 cgcur=
+FLUSHSTAGES entries=273408 bytes=60496392 enc_ms=196.6 lz4_ms=94.9 bloom_ms=40.8 crc_ms=16.6 write_ms=40.7 lz4=true
+FLUSHSTAGES entries=267 bytes=2807 enc_ms=5.8 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=465
+BULKDIAG install_parked family=data level=3 ssts=26 l0=0 max=25
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=28 rss_kb=682936 tick_s=0 mat_n=19 pool_n=13 pool_b=241991742 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=2.6 lz4=false
+COMPDUR ms=23 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241991864 ent_e=0
+MEMDIAGD rss=711908 dirty_kb=230288 avail=2683784 cached=2680172 cgcur=
+FLUSHSTAGES entries=272384 bytes=60269676 enc_ms=174.2 lz4_ms=80.2 bloom_ms=34.9 crc_ms=15.2 write_ms=47.4 lz4=true
+FLUSHSTAGES entries=266 bytes=2796 enc_ms=5.7 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=429
+BULKDIAG install_parked family=data level=3 ssts=27 l0=0 max=26
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=29 rss_kb=688996 tick_s=0 mat_n=19 pool_n=13 pool_b=241538621 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=2.4 lz4=false
+COMPDUR ms=14 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241538743 ent_e=0
+MEMDIAGD rss=704132 dirty_kb=228784 avail=2666144 cached=2641844 cgcur=
+FLUSHSTAGES entries=272384 bytes=60269722 enc_ms=201.1 lz4_ms=94.5 bloom_ms=37.3 crc_ms=15.7 write_ms=42.3 lz4=true
+FLUSHSTAGES entries=266 bytes=2796 enc_ms=5.6 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.2 lz4=true
+FLUSHDUR ms=467
+BULKDIAG install_parked family=data level=3 ssts=28 l0=0 max=27
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=30 rss_kb=697424 tick_s=0 mat_n=19 pool_n=13 pool_b=241541290 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.5 lz4=false
+COMPDUR ms=23 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241541412 ent_e=0
+MEMDIAGD rss=668524 dirty_kb=214612 avail=2721460 cached=2575656 cgcur=
+FLUSHSTAGES entries=272384 bytes=60269777 enc_ms=166.3 lz4_ms=75.3 bloom_ms=35.0 crc_ms=15.2 write_ms=43.7 lz4=true
+FLUSHSTAGES entries=266 bytes=2797 enc_ms=5.7 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.2 lz4=true
+FLUSHDUR ms=408
+BULKDIAG install_parked family=data level=3 ssts=29 l0=0 max=28
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=31 rss_kb=730980 tick_s=0 mat_n=20 pool_n=13 pool_b=241320022 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.3 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=2.3 lz4=false
+COMPDUR ms=21 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241320144 ent_e=0
+MEMDIAGD rss=669240 dirty_kb=210480 avail=2730924 cached=2508532 cgcur=
+FLUSHSTAGES entries=273408 bytes=60496381 enc_ms=166.7 lz4_ms=76.4 bloom_ms=35.0 crc_ms=15.3 write_ms=41.9 lz4=true
+FLUSHSTAGES entries=267 bytes=2808 enc_ms=5.9 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=422
+BULKDIAG install_parked family=data level=3 ssts=30 l0=0 max=29
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=32 rss_kb=722332 tick_s=0 mat_n=20 pool_n=13 pool_b=241320012 ent_e=0
+MEMDIAGD rss=722332 dirty_kb=152696 avail=2681204 cached=2568492 cgcur=
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.3 lz4=false
+COMPDUR ms=18 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241320134 ent_e=0
+FLUSHSTAGES entries=274432 bytes=60722757 enc_ms=169.0 lz4_ms=77.4 bloom_ms=35.9 crc_ms=15.8 write_ms=38.7 lz4=true
+MEMDIAGD rss=833964 dirty_kb=161336 avail=2587796 cached=2511672 cgcur=
+FLUSHSTAGES entries=268 bytes=2816 enc_ms=7.8 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=421
+BULKDIAG install_parked family=data level=3 ssts=31 l0=0 max=30
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=33 rss_kb=752572 tick_s=0 mat_n=21 pool_n=13 pool_b=241773102 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.6 lz4=false
+COMPDUR ms=13 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241773224 ent_e=0
+MEMDIAGD rss=825100 dirty_kb=228036 avail=2569288 cached=2580284 cgcur=
+FLUSHSTAGES entries=274432 bytes=60722893 enc_ms=191.7 lz4_ms=86.3 bloom_ms=45.9 crc_ms=16.2 write_ms=42.8 lz4=true
+FLUSHSTAGES entries=268 bytes=2816 enc_ms=5.8 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=462
+BULKDIAG install_parked family=data level=3 ssts=32 l0=0 max=31
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=34 rss_kb=743496 tick_s=0 mat_n=21 pool_n=13 pool_b=242226293 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.2 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=5.0 lz4=false
+COMPDUR ms=19 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242226415 ent_e=0
+MEMDIAGD rss=769144 dirty_kb=239340 avail=2615020 cached=2590912 cgcur=
+FLUSHSTAGES entries=274432 bytes=60722697 enc_ms=218.9 lz4_ms=118.9 bloom_ms=37.8 crc_ms=16.7 write_ms=47.1 lz4=true
+FLUSHSTAGES entries=268 bytes=2817 enc_ms=5.4 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=503
+BULKDIAG install_parked family=data level=3 ssts=33 l0=0 max=32
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=35 rss_kb=748680 tick_s=0 mat_n=21 pool_n=13 pool_b=242679234 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.4 lz4=false
+COMPDUR ms=15 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242679356 ent_e=0
+MEMDIAGD rss=742444 dirty_kb=222108 avail=2664280 cached=2520420 cgcur=
+FLUSHSTAGES entries=274432 bytes=60722706 enc_ms=191.5 lz4_ms=88.9 bloom_ms=39.3 crc_ms=18.5 write_ms=46.1 lz4=true
+FLUSHSTAGES entries=268 bytes=2816 enc_ms=5.6 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.2 lz4=true
+FLUSHDUR ms=445
+BULKDIAG install_parked family=data level=3 ssts=34 l0=0 max=33
+FLUSHDIAG parked_n=0 parked_b=0 active_b=1011820 imm=false retired_b=0 sst_n=36 rss_kb=782652 tick_s=0 mat_n=22 pool_n=13 pool_b=242905578 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.2 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.7 lz4=false
+COMPDUR ms=12 inputs=2 outputs=1
+MEMDIAGD rss=725520 dirty_kb=147556 avail=2613332 cached=2486468 cgcur=
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242905700 ent_e=0
+FLUSHSTAGES entries=274432 bytes=60722589 enc_ms=173.4 lz4_ms=78.9 bloom_ms=37.0 crc_ms=16.0 write_ms=37.6 lz4=true
+FLUSHSTAGES entries=268 bytes=2821 enc_ms=5.4 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=418
+BULKDIAG install_parked family=data level=3 ssts=35 l0=0 max=34
+MEMDIAGD rss=775696 dirty_kb=149204 avail=2579516 cached=2382804 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=37 rss_kb=775696 tick_s=0 mat_n=22 pool_n=13 pool_b=242905423 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.6 lz4=false
+COMPDUR ms=17 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242905545 ent_e=0
+FLUSHSTAGES entries=272384 bytes=60269497 enc_ms=165.9 lz4_ms=75.4 bloom_ms=34.7 crc_ms=15.4 write_ms=41.1 lz4=true
+FLUSHSTAGES entries=266 bytes=2801 enc_ms=7.5 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=399
+MEMDIAGD rss=883208 dirty_kb=161620 avail=2460708 cached=2359564 cgcur=
+BULKDIAG install_parked family=data level=3 ssts=36 l0=0 max=35
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=38 rss_kb=801376 tick_s=0 mat_n=23 pool_n=13 pool_b=242452012 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.6 lz4=false
+COMPDUR ms=13 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242452134 ent_e=0
+FLUSHSTAGES entries=274432 bytes=60722854 enc_ms=166.7 lz4_ms=76.6 bloom_ms=35.4 crc_ms=15.4 write_ms=43.6 lz4=true
+MEMDIAGD rss=937312 dirty_kb=189972 avail=2463972 cached=2465748 cgcur=
+FLUSHSTAGES entries=268 bytes=2817 enc_ms=5.3 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=398
+BULKDIAG install_parked family=data level=3 ssts=37 l0=0 max=36
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=39 rss_kb=773932 tick_s=0 mat_n=23 pool_n=13 pool_b=242452170 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=2.0 lz4=false
+COMPDUR ms=15 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242452292 ent_e=0
+MEMDIAGD rss=876356 dirty_kb=237964 avail=2479796 cached=2534384 cgcur=
+FLUSHSTAGES entries=274432 bytes=60722744 enc_ms=177.0 lz4_ms=80.8 bloom_ms=35.7 crc_ms=16.0 write_ms=88.3 lz4=true
+FLUSHSTAGES entries=268 bytes=2814 enc_ms=5.4 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=465
+BULKDIAG install_parked family=data level=3 ssts=38 l0=0 max=37
+FLUSHDIAG parked_n=0 parked_b=0 active_b=505910 imm=false retired_b=0 sst_n=40 rss_kb=805108 tick_s=0 mat_n=24 pool_n=13 pool_b=242452205 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.4 lz4=false
+COMPDUR ms=18 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242452327 ent_e=0
+MEMDIAGD rss=817828 dirty_kb=249004 avail=2522460 cached=2514504 cgcur=
+FLUSHSTAGES entries=273408 bytes=60496179 enc_ms=173.3 lz4_ms=78.1 bloom_ms=34.8 crc_ms=15.5 write_ms=44.2 lz4=true
+FLUSHSTAGES entries=267 bytes=2805 enc_ms=5.6 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=430
+BULKDIAG install_parked family=data level=3 ssts=39 l0=0 max=38
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=41 rss_kb=818352 tick_s=0 mat_n=24 pool_n=13 pool_b=242225784 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.9 lz4=false
+COMPDUR ms=14 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242225906 ent_e=0
+MEMDIAGD rss=815464 dirty_kb=182328 avail=2554444 cached=2386540 cgcur=
+FLUSHSTAGES entries=272384 bytes=60269533 enc_ms=185.0 lz4_ms=85.2 bloom_ms=35.9 crc_ms=15.7 write_ms=35.7 lz4=true
+FLUSHSTAGES entries=266 bytes=2798 enc_ms=5.4 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=417
+BULKDIAG install_parked family=data level=3 ssts=40 l0=0 max=39
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=42 rss_kb=843416 tick_s=0 mat_n=25 pool_n=13 pool_b=242225797 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.7 lz4=false
+COMPDUR ms=14 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242225919 ent_e=0
+MEMDIAGD rss=802560 dirty_kb=177884 avail=2550068 cached=2415872 cgcur=
+FLUSHSTAGES entries=272384 bytes=60269368 enc_ms=167.6 lz4_ms=76.9 bloom_ms=35.0 crc_ms=15.1 write_ms=41.1 lz4=true
+FLUSHSTAGES entries=266 bytes=2797 enc_ms=5.4 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=402
+BULKDIAG install_parked family=data level=3 ssts=41 l0=0 max=40
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=43 rss_kb=852992 tick_s=0 mat_n=26 pool_n=13 pool_b=241772307 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.6 lz4=false
+COMPDUR ms=14 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241772429 ent_e=0
+MEMDIAGD rss=807464 dirty_kb=173752 avail=2548404 cached=2328244 cgcur=
+FLUSHSTAGES entries=274432 bytes=60722555 enc_ms=168.6 lz4_ms=75.7 bloom_ms=35.1 crc_ms=15.6 write_ms=36.6 lz4=true
+FLUSHSTAGES entries=268 bytes=2816 enc_ms=5.3 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=392
+BULKDIAG install_parked family=data level=3 ssts=42 l0=0 max=41
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=44 rss_kb=863176 tick_s=0 mat_n=27 pool_n=13 pool_b=241772117 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.5 lz4=false
+COMPDUR ms=12 inputs=2 outputs=1
+MEMDIAGD rss=783488 dirty_kb=177568 avail=2555584 cached=2317988 cgcur=
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241772239 ent_e=0
+FLUSHSTAGES entries=272384 bytes=60269231 enc_ms=181.0 lz4_ms=80.1 bloom_ms=37.6 crc_ms=15.7 write_ms=42.9 lz4=true
+FLUSHSTAGES entries=266 bytes=2796 enc_ms=5.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=412
+BULKDIAG install_parked family=data level=3 ssts=43 l0=0 max=42
+FLUSHDIAG parked_n=0 parked_b=0 active_b=1011820 imm=false retired_b=0 sst_n=45 rss_kb=872352 tick_s=0 mat_n=28 pool_n=13 pool_b=241545151 ent_e=0
+MEMDIAGD rss=872352 dirty_kb=179584 avail=2469268 cached=2288976 cgcur=
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.2 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=2.0 lz4=false
+COMPDUR ms=21 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241545273 ent_e=0
+FLUSHSTAGES entries=274432 bytes=60722738 enc_ms=228.4 lz4_ms=94.8 bloom_ms=35.2 crc_ms=15.2 write_ms=50.9 lz4=true
+MEMDIAGD rss=1025728 dirty_kb=133804 avail=2408156 cached=2310288 cgcur=
+FLUSHSTAGES entries=268 bytes=2816 enc_ms=5.5 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=474
+BULKDIAG install_parked family=data level=3 ssts=44 l0=0 max=43
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=46 rss_kb=885176 tick_s=0 mat_n=29 pool_n=13 pool_b=241998367 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=1.0 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=2.2 lz4=false
+COMPDUR ms=17 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241998489 ent_e=0
+MEMDIAGD rss=959612 dirty_kb=199940 avail=2376388 cached=2372112 cgcur=
+FLUSHSTAGES entries=272384 bytes=60269359 enc_ms=168.4 lz4_ms=76.5 bloom_ms=37.4 crc_ms=15.6 write_ms=36.4 lz4=true
+FLUSHSTAGES entries=266 bytes=2798 enc_ms=5.7 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=402
+BULKDIAG install_parked family=data level=3 ssts=45 l0=0 max=44
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=47 rss_kb=878528 tick_s=0 mat_n=30 pool_n=13 pool_b=241998358 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.6 lz4=false
+COMPDUR ms=14 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241998480 ent_e=0
+MEMDIAGD rss=907052 dirty_kb=210724 avail=2421696 cached=2403300 cgcur=
+FLUSHSTAGES entries=272384 bytes=60269327 enc_ms=175.6 lz4_ms=78.0 bloom_ms=34.4 crc_ms=15.2 write_ms=43.0 lz4=true
+FLUSHSTAGES entries=266 bytes=2799 enc_ms=5.4 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=425
+BULKDIAG install_parked family=data level=3 ssts=46 l0=0 max=45
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=48 rss_kb=904856 tick_s=0 mat_n=31 pool_n=13 pool_b=241545132 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.4 lz4=false
+COMPDUR ms=16 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241545254 ent_e=0
+MEMDIAGD rss=902400 dirty_kb=209200 avail=2362204 cached=2298980 cgcur=
+FLUSHSTAGES entries=273408 bytes=60496087 enc_ms=186.6 lz4_ms=84.4 bloom_ms=37.8 crc_ms=16.6 write_ms=43.3 lz4=true
+FLUSHSTAGES entries=267 bytes=2807 enc_ms=5.6 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=438
+BULKDIAG install_parked family=data level=3 ssts=47 l0=0 max=46
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=49 rss_kb=915600 tick_s=0 mat_n=32 pool_n=13 pool_b=241771979 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.2 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=6.8 lz4=false
+COMPDUR ms=24 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241772101 ent_e=0
+MEMDIAGD rss=891536 dirty_kb=197708 avail=2374628 cached=2200912 cgcur=
+FLUSHSTAGES entries=273408 bytes=60496173 enc_ms=170.5 lz4_ms=76.1 bloom_ms=34.8 crc_ms=15.2 write_ms=48.7 lz4=true
+FLUSHSTAGES entries=267 bytes=2806 enc_ms=5.0 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=397
+BULKDIAG install_parked family=data level=3 ssts=48 l0=0 max=47
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=50 rss_kb=925624 tick_s=0 mat_n=33 pool_n=13 pool_b=241545424 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.9 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.7 lz4=false
+COMPDUR ms=14 inputs=2 outputs=1
+MEMDIAGD rss=881356 dirty_kb=190716 avail=2365796 cached=2262636 cgcur=
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241545546 ent_e=0
+FLUSHSTAGES entries=273408 bytes=60495770 enc_ms=171.1 lz4_ms=77.1 bloom_ms=35.2 crc_ms=15.1 write_ms=42.6 lz4=true
+FLUSHSTAGES entries=267 bytes=2808 enc_ms=5.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.2 lz4=true
+FLUSHDUR ms=399
+BULKDIAG install_parked family=data level=3 ssts=49 l0=0 max=48
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=51 rss_kb=919892 tick_s=0 mat_n=34 pool_n=13 pool_b=241771827 ent_e=0
+MEMDIAGD rss=919892 dirty_kb=135200 avail=2361200 cached=2248100 cgcur=
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.9 lz4=false
+COMPDUR ms=14 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241771949 ent_e=0
+FLUSHSTAGES entries=274432 bytes=60722621 enc_ms=176.8 lz4_ms=84.0 bloom_ms=43.3 crc_ms=16.2 write_ms=39.0 lz4=true
+MEMDIAGD rss=1005988 dirty_kb=144644 avail=2326652 cached=2231572 cgcur=
+FLUSHSTAGES entries=268 bytes=2816 enc_ms=5.9 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=420
+BULKDIAG install_parked family=data level=3 ssts=50 l0=0 max=49
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=52 rss_kb=924596 tick_s=0 mat_n=34 pool_n=13 pool_b=242225139 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=3.1 lz4=false
+COMPDUR ms=21 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242225261 ent_e=0
+MEMDIAGD rss=1007060 dirty_kb=209080 avail=2295100 cached=2300312 cgcur=
+FLUSHSTAGES entries=274432 bytes=60722170 enc_ms=195.6 lz4_ms=87.9 bloom_ms=37.4 crc_ms=16.3 write_ms=42.1 lz4=true
+FLUSHSTAGES entries=268 bytes=2816 enc_ms=5.6 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=452
+BULKDIAG install_parked family=data level=3 ssts=51 l0=0 max=50
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=53 rss_kb=937348 tick_s=0 mat_n=34 pool_n=13 pool_b=242451239 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=2.0 lz4=false
+COMPDUR ms=15 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242451361 ent_e=0
+MEMDIAGD rss=968304 dirty_kb=220272 avail=2264580 cached=2304080 cgcur=
+FLUSHSTAGES entries=274432 bytes=60722333 enc_ms=180.5 lz4_ms=76.1 bloom_ms=34.9 crc_ms=15.2 write_ms=41.8 lz4=true
+FLUSHSTAGES entries=268 bytes=2818 enc_ms=5.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=427
+BULKDIAG install_parked family=data level=3 ssts=52 l0=0 max=51
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=54 rss_kb=969164 tick_s=0 mat_n=35 pool_n=13 pool_b=242677410 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.3 lz4=false
+COMPDUR ms=12 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242677532 ent_e=0
+MEMDIAGD rss=958592 dirty_kb=213336 avail=2226956 cached=2160888 cgcur=
+FLUSHSTAGES entries=273408 bytes=60495870 enc_ms=169.8 lz4_ms=75.9 bloom_ms=34.8 crc_ms=15.4 write_ms=38.9 lz4=true
+FLUSHSTAGES entries=267 bytes=2806 enc_ms=5.0 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=402
+BULKDIAG install_parked family=data level=3 ssts=53 l0=0 max=52
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=55 rss_kb=979800 tick_s=0 mat_n=36 pool_n=13 pool_b=242677510 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.4 lz4=false
+COMPDUR ms=16 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242677632 ent_e=0
+MEMDIAGD rss=946072 dirty_kb=150400 avail=2265356 cached=2107832 cgcur=
+FLUSHSTAGES entries=274432 bytes=60722596 enc_ms=234.9 lz4_ms=106.3 bloom_ms=51.4 crc_ms=23.8 write_ms=44.2 lz4=true
+FLUSHSTAGES entries=268 bytes=2816 enc_ms=5.5 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=509
+BULKDIAG install_parked family=data level=3 ssts=54 l0=0 max=53
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=56 rss_kb=989408 tick_s=0 mat_n=37 pool_n=13 pool_b=242677493 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=8.0 lz4=false
+COMPDUR ms=20 inputs=2 outputs=1
+MEMDIAGD rss=898832 dirty_kb=136204 avail=2374096 cached=2183420 cgcur=
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242677615 ent_e=0
+FLUSHSTAGES entries=274432 bytes=60722641 enc_ms=175.7 lz4_ms=78.6 bloom_ms=36.3 crc_ms=16.0 write_ms=37.4 lz4=true
+FLUSHSTAGES entries=268 bytes=2816 enc_ms=5.6 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=413
+BULKDIAG install_parked family=data level=3 ssts=55 l0=0 max=54
+MEMDIAGD rss=1023468 dirty_kb=150732 avail=2266960 cached=2117964 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=57 rss_kb=1000936 tick_s=0 mat_n=38 pool_n=13 pool_b=242677964 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.6 lz4=false
+COMPDUR ms=13 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242678086 ent_e=0
+MEMDIAGD rss=1093304 dirty_kb=207536 avail=2196648 cached=2186376 cgcur=
+FLUSHSTAGES entries=273408 bytes=60495742 enc_ms=176.5 lz4_ms=78.6 bloom_ms=42.3 crc_ms=22.6 write_ms=47.7 lz4=true
+FLUSHSTAGES entries=267 bytes=2809 enc_ms=5.2 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=433
+BULKDIAG install_parked family=data level=3 ssts=56 l0=0 max=55
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=58 rss_kb=1010688 tick_s=0 mat_n=39 pool_n=13 pool_b=242451366 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.3 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.3 lz4=false
+COMPDUR ms=12 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242451488 ent_e=0
+MEMDIAGD rss=1022476 dirty_kb=218888 avail=2251540 cached=2216572 cgcur=
+FLUSHSTAGES entries=274432 bytes=60722215 enc_ms=177.2 lz4_ms=78.9 bloom_ms=38.7 crc_ms=21.8 write_ms=47.3 lz4=true
+FLUSHSTAGES entries=268 bytes=2817 enc_ms=5.8 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=451
+BULKDIAG install_parked family=data level=3 ssts=57 l0=0 max=56
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=59 rss_kb=1020588 tick_s=0 mat_n=40 pool_n=13 pool_b=242677710 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=2.1 lz4=false
+COMPDUR ms=15 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242677832 ent_e=0
+MEMDIAGD rss=1003264 dirty_kb=196216 avail=2263072 cached=2146872 cgcur=
+FLUSHSTAGES entries=273408 bytes=60495847 enc_ms=232.4 lz4_ms=109.3 bloom_ms=41.7 crc_ms=18.7 write_ms=45.5 lz4=true
+FLUSHSTAGES entries=267 bytes=2811 enc_ms=6.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=502
+BULKDIAG install_parked family=data level=3 ssts=58 l0=0 max=57
+FLUSHDIAG parked_n=0 parked_b=0 active_b=505910 imm=false retired_b=0 sst_n=60 rss_kb=1030312 tick_s=0 mat_n=41 pool_n=13 pool_b=242450966 ent_e=0
+MEMDIAGD rss=1030312 dirty_kb=118272 avail=2178192 cached=2108420 cgcur=
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.4 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.5 lz4=false
+COMPDUR ms=15 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242451088 ent_e=0
+MEMDIAGD rss=1117824 dirty_kb=183328 avail=2114664 cached=2140668 cgcur=
+FLUSHSTAGES entries=272384 bytes=60269035 enc_ms=223.6 lz4_ms=117.1 bloom_ms=42.4 crc_ms=18.4 write_ms=42.5 lz4=true
+FLUSHSTAGES entries=266 bytes=2796 enc_ms=6.4 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=494
+BULKDIAG install_parked family=data level=3 ssts=59 l0=0 max=58
+FLUSHDIAG parked_n=0 parked_b=0 active_b=505910 imm=false retired_b=0 sst_n=61 rss_kb=1036732 tick_s=0 mat_n=42 pool_n=13 pool_b=241997340 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.8 lz4=false
+COMPDUR ms=15 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241997462 ent_e=0
+MEMDIAGD rss=1041432 dirty_kb=184196 avail=2186332 cached=2202584 cgcur=
+FLUSHSTAGES entries=275456 bytes=60948959 enc_ms=190.7 lz4_ms=84.8 bloom_ms=35.0 crc_ms=15.5 write_ms=86.0 lz4=true
+FLUSHSTAGES entries=269 bytes=2826 enc_ms=5.4 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.2 lz4=true
+FLUSHDUR ms=499
+BULKDIAG install_parked family=data level=3 ssts=60 l0=0 max=59
+FLUSHDIAG parked_n=0 parked_b=0 active_b=505910 imm=false retired_b=0 sst_n=62 rss_kb=1052968 tick_s=0 mat_n=43 pool_n=13 pool_b=242450567 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=17.6 lz4=false
+COMPDUR ms=46 inputs=2 outputs=1
+MEMDIAGD rss=1001472 dirty_kb=147612 avail=2184676 cached=2073348 cgcur=
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242450689 ent_e=0
+FLUSHSTAGES entries=273408 bytes=60495639 enc_ms=187.6 lz4_ms=83.1 bloom_ms=39.3 crc_ms=17.5 write_ms=48.1 lz4=true
+MEMDIAGD rss=1144168 dirty_kb=180044 avail=2113436 cached=2017952 cgcur=
+FLUSHSTAGES entries=267 bytes=2807 enc_ms=5.7 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=466
+BULKDIAG install_parked family=data level=3 ssts=61 l0=0 max=60
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=63 rss_kb=1062336 tick_s=0 mat_n=44 pool_n=13 pool_b=242223989 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.6 lz4=false
+COMPDUR ms=20 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242224111 ent_e=0
+MEMDIAGD rss=1075252 dirty_kb=167636 avail=2154420 cached=2086140 cgcur=
+FLUSHSTAGES entries=272384 bytes=60246910 enc_ms=194.6 lz4_ms=88.4 bloom_ms=37.0 crc_ms=15.7 write_ms=39.3 lz4=true
+FLUSHSTAGES entries=266 bytes=2866 enc_ms=5.3 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=476
+BULKDIAG install_parked family=data level=3 ssts=62 l0=0 max=61
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=64 rss_kb=1054372 tick_s=0 mat_n=44 pool_n=13 pool_b=241975101 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=2.4 lz4=false
+COMPDUR ms=24 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241975223 ent_e=0
+MEMDIAGD rss=1064848 dirty_kb=164344 avail=2107252 cached=2093696 cgcur=
+FLUSHSTAGES entries=273408 bytes=60468226 enc_ms=173.3 lz4_ms=77.1 bloom_ms=35.5 crc_ms=15.7 write_ms=44.8 lz4=true
+FLUSHSTAGES entries=267 bytes=2806 enc_ms=5.7 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.2 lz4=true
+FLUSHDUR ms=418
+BULKDIAG install_parked family=data level=3 ssts=63 l0=0 max=62
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=65 rss_kb=1060980 tick_s=0 mat_n=44 pool_n=13 pool_b=242174287 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.4 lz4=false
+COMPDUR ms=14 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242174409 ent_e=0
+MEMDIAGD rss=1052876 dirty_kb=155392 avail=2151916 cached=2079356 cgcur=
+FLUSHSTAGES entries=272384 bytes=60241093 enc_ms=176.2 lz4_ms=77.0 bloom_ms=34.9 crc_ms=15.4 write_ms=44.2 lz4=true
+FLUSHSTAGES entries=266 bytes=2799 enc_ms=6.3 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=427
+BULKDIAG install_parked family=data level=3 ssts=64 l0=0 max=63
+FLUSHDIAG parked_n=0 parked_b=0 active_b=505910 imm=false retired_b=0 sst_n=66 rss_kb=1094632 tick_s=0 mat_n=45 pool_n=13 pool_b=241466424 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.8 lz4=false
+COMPDUR ms=16 inputs=2 outputs=1
+MEMDIAGD rss=999760 dirty_kb=153344 avail=2185412 cached=1993132 cgcur=
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241466546 ent_e=0
+MEMDIAGD rss=1232764 dirty_kb=159212 avail=2001116 cached=2030500 cgcur=
+FLUSHSTAGES entries=272384 bytes=60240938 enc_ms=187.9 lz4_ms=84.3 bloom_ms=38.5 crc_ms=16.9 write_ms=42.4 lz4=true
+FLUSHSTAGES entries=266 bytes=2796 enc_ms=5.9 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=465
+BULKDIAG install_parked family=data level=3 ssts=65 l0=0 max=64
+FLUSHDIAG parked_n=0 parked_b=0 active_b=505910 imm=false retired_b=0 sst_n=67 rss_kb=1104396 tick_s=0 mat_n=46 pool_n=13 pool_b=241211693 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=2.2 lz4=false
+COMPDUR ms=17 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241211815 ent_e=0
+MEMDIAGD rss=1117416 dirty_kb=174324 avail=2082660 cached=2079296 cgcur=
+FLUSHSTAGES entries=273408 bytes=60467839 enc_ms=180.8 lz4_ms=79.3 bloom_ms=34.4 crc_ms=15.4 write_ms=42.8 lz4=true
+FLUSHSTAGES entries=267 bytes=2805 enc_ms=4.9 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=430
+BULKDIAG install_parked family=data level=3 ssts=66 l0=0 max=65
+FLUSHDIAG parked_n=0 parked_b=0 active_b=505910 imm=false retired_b=0 sst_n=68 rss_kb=1112160 tick_s=0 mat_n=47 pool_n=13 pool_b=241432620 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=6.1 lz4=false
+COMPDUR ms=22 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241432742 ent_e=0
+MEMDIAGD rss=1102604 dirty_kb=164940 avail=2070420 cached=1980172 cgcur=
+FLUSHSTAGES entries=272384 bytes=60241431 enc_ms=204.6 lz4_ms=90.0 bloom_ms=41.8 crc_ms=18.3 write_ms=41.3 lz4=true
+FLUSHSTAGES entries=266 bytes=2795 enc_ms=5.4 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=484
+BULKDIAG install_parked family=data level=3 ssts=67 l0=0 max=66
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=69 rss_kb=1121912 tick_s=0 mat_n=48 pool_n=13 pool_b=241205754 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.5 lz4=false
+COMPDUR ms=19 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241205876 ent_e=0
+MEMDIAGD rss=1088500 dirty_kb=148480 avail=2011004 cached=1915184 cgcur=
+FLUSHSTAGES entries=272384 bytes=60242484 enc_ms=202.6 lz4_ms=89.6 bloom_ms=37.4 crc_ms=16.2 write_ms=45.5 lz4=true
+FLUSHSTAGES entries=266 bytes=2798 enc_ms=9.0 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=478
+MEMDIAGD rss=1197820 dirty_kb=103100 avail=1978604 cached=1866244 cgcur=
+BULKDIAG install_parked family=data level=3 ssts=68 l0=0 max=67
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=70 rss_kb=1116456 tick_s=0 mat_n=48 pool_n=13 pool_b=241207137 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.3 lz4=false
+COMPDUR ms=14 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241207259 ent_e=0
+MEMDIAGD rss=1204556 dirty_kb=165912 avail=1957612 cached=1934592 cgcur=
+FLUSHSTAGES entries=273408 bytes=60469212 enc_ms=191.0 lz4_ms=84.0 bloom_ms=37.3 crc_ms=16.4 write_ms=44.9 lz4=true
+FLUSHSTAGES entries=267 bytes=2806 enc_ms=5.3 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=466
+BULKDIAG install_parked family=data level=3 ssts=69 l0=0 max=68
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=71 rss_kb=1143524 tick_s=0 mat_n=49 pool_n=13 pool_b=241435418 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.7 lz4=false
+COMPDUR ms=14 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241435540 ent_e=0
+MEMDIAGD rss=1148188 dirty_kb=171204 avail=2065528 cached=1897488 cgcur=
+FLUSHSTAGES entries=273408 bytes=60468219 enc_ms=187.9 lz4_ms=81.9 bloom_ms=37.3 crc_ms=16.1 write_ms=39.4 lz4=true
+FLUSHSTAGES entries=267 bytes=2805 enc_ms=5.5 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=448
+BULKDIAG install_parked family=data level=3 ssts=70 l0=0 max=69
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=72 rss_kb=1137080 tick_s=0 mat_n=49 pool_n=13 pool_b=241435807 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.3 lz4=false
+COMPDUR ms=12 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241435929 ent_e=0
+MEMDIAGD rss=1127988 dirty_kb=153420 avail=2101336 cached=1969328 cgcur=
+FLUSHSTAGES entries=273408 bytes=60468335 enc_ms=189.5 lz4_ms=83.7 bloom_ms=37.3 crc_ms=16.2 write_ms=42.2 lz4=true
+FLUSHSTAGES entries=267 bytes=2805 enc_ms=5.0 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=462
+BULKDIAG install_parked family=data level=3 ssts=71 l0=0 max=70
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=73 rss_kb=1165532 tick_s=0 mat_n=50 pool_n=13 pool_b=241662711 ent_e=0
+MEMDIAGD rss=1165532 dirty_kb=149416 avail=2065176 cached=1937848 cgcur=
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.4 lz4=false
+COMPDUR ms=13 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241662833 ent_e=0
+FLUSHSTAGES entries=273408 bytes=60468356 enc_ms=183.7 lz4_ms=83.5 bloom_ms=47.2 crc_ms=19.5 write_ms=49.9 lz4=true
+MEMDIAGD rss=1336284 dirty_kb=110744 avail=1892440 cached=1949824 cgcur=
+FLUSHSTAGES entries=267 bytes=2804 enc_ms=5.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=466
+BULKDIAG install_parked family=data level=3 ssts=72 l0=0 max=71
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=74 rss_kb=1157988 tick_s=0 mat_n=50 pool_n=13 pool_b=241888592 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.7 lz4=false
+COMPDUR ms=14 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241888714 ent_e=0
+MEMDIAGD rss=1231652 dirty_kb=173332 avail=1964660 cached=2018124 cgcur=
+FLUSHSTAGES entries=273408 bytes=60468292 enc_ms=212.2 lz4_ms=87.5 bloom_ms=35.0 crc_ms=15.5 write_ms=44.2 lz4=true
+FLUSHSTAGES entries=267 bytes=2811 enc_ms=7.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=2.2 lz4=true
+FLUSHDUR ms=490
+BULKDIAG install_parked family=data level=3 ssts=73 l0=0 max=72
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=75 rss_kb=1185468 tick_s=0 mat_n=51 pool_n=13 pool_b=241887685 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.5 lz4=false
+COMPDUR ms=15 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241887807 ent_e=0
+MEMDIAGD rss=1187940 dirty_kb=178064 avail=1929148 cached=1940484 cgcur=
+FLUSHSTAGES entries=272384 bytes=60243735 enc_ms=184.2 lz4_ms=76.6 bloom_ms=45.4 crc_ms=21.7 write_ms=69.2 lz4=true
+FLUSHSTAGES entries=266 bytes=2795 enc_ms=9.3 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=545
+BULKDIAG install_parked family=data level=3 ssts=74 l0=0 max=73
+FLUSHDIAG parked_n=0 parked_b=0 active_b=505910 imm=false retired_b=0 sst_n=76 rss_kb=1195856 tick_s=0 mat_n=52 pool_n=13 pool_b=241663190 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.2 lz4=false
+COMPDUR ms=12 inputs=2 outputs=1
+MEMDIAGD rss=1161192 dirty_kb=89356 avail=1960800 cached=1830340 cgcur=
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241663312 ent_e=0
+FLUSHSTAGES entries=272384 bytes=60243423 enc_ms=183.3 lz4_ms=81.5 bloom_ms=59.6 crc_ms=15.7 write_ms=40.6 lz4=true
+FLUSHSTAGES entries=266 bytes=2796 enc_ms=5.0 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=460
+MEMDIAGD rss=1286412 dirty_kb=102232 avail=1891476 cached=1812268 cgcur=
+BULKDIAG install_parked family=data level=3 ssts=75 l0=0 max=74
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=77 rss_kb=1204828 tick_s=0 mat_n=53 pool_n=13 pool_b=241438269 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.7 lz4=false
+COMPDUR ms=17 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241438391 ent_e=0
+MEMDIAGD rss=1267384 dirty_kb=164704 avail=1916640 cached=1880380 cgcur=
+FLUSHSTAGES entries=272384 bytes=60242757 enc_ms=181.0 lz4_ms=80.4 bloom_ms=35.7 crc_ms=15.7 write_ms=42.1 lz4=true
+FLUSHSTAGES entries=266 bytes=2795 enc_ms=5.0 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=444
+BULKDIAG install_parked family=data level=3 ssts=76 l0=0 max=75
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=78 rss_kb=1197924 tick_s=0 mat_n=54 pool_n=13 pool_b=241212660 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.3 lz4=false
+COMPDUR ms=14 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241212782 ent_e=0
+MEMDIAGD rss=1224600 dirty_kb=178268 avail=1941628 cached=1902760 cgcur=
+FLUSHSTAGES entries=273408 bytes=60469099 enc_ms=181.7 lz4_ms=77.8 bloom_ms=35.0 crc_ms=15.6 write_ms=46.8 lz4=true
+FLUSHSTAGES entries=267 bytes=2806 enc_ms=5.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=433
+BULKDIAG install_parked family=data level=3 ssts=77 l0=0 max=76
+FLUSHDIAG parked_n=0 parked_b=0 active_b=505910 imm=false retired_b=0 sst_n=79 rss_kb=1226028 tick_s=0 mat_n=55 pool_n=13 pool_b=241213469 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.6 lz4=false
+COMPDUR ms=20 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241213591 ent_e=0
+MEMDIAGD rss=1219224 dirty_kb=167700 avail=1924780 cached=1871580 cgcur=
+FLUSHSTAGES entries=274432 bytes=60695808 enc_ms=185.6 lz4_ms=79.4 bloom_ms=36.1 crc_ms=15.9 write_ms=45.1 lz4=true
+FLUSHSTAGES entries=268 bytes=2814 enc_ms=5.5 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=455
+BULKDIAG install_parked family=data level=3 ssts=78 l0=0 max=77
+FLUSHDIAG parked_n=0 parked_b=0 active_b=505910 imm=false retired_b=0 sst_n=80 rss_kb=1236880 tick_s=0 mat_n=56 pool_n=13 pool_b=241665545 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.7 lz4=false
+COMPDUR ms=23 inputs=2 outputs=1
+MEMDIAGD rss=1199380 dirty_kb=100492 avail=1975980 cached=1835152 cgcur=
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241665667 ent_e=0
+FLUSHSTAGES entries=273408 bytes=60469689 enc_ms=178.1 lz4_ms=78.4 bloom_ms=35.3 crc_ms=15.7 write_ms=45.9 lz4=true
+FLUSHSTAGES entries=267 bytes=2804 enc_ms=5.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=439
+BULKDIAG install_parked family=data level=3 ssts=79 l0=0 max=78
+MEMDIAGD rss=1231316 dirty_kb=109516 avail=1952176 cached=1805000 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=81 rss_kb=1208784 tick_s=0 mat_n=57 pool_n=13 pool_b=241891820 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.7 lz4=false
+COMPDUR ms=15 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241891942 ent_e=0
+MEMDIAGD rss=1318072 dirty_kb=171972 avail=1831332 cached=1873256 cgcur=
+FLUSHSTAGES entries=272384 bytes=60244288 enc_ms=180.9 lz4_ms=77.6 bloom_ms=35.4 crc_ms=17.1 write_ms=45.4 lz4=true
+FLUSHSTAGES entries=266 bytes=2795 enc_ms=5.0 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=434
+BULKDIAG install_parked family=data level=3 ssts=80 l0=0 max=79
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=82 rss_kb=1237652 tick_s=0 mat_n=58 pool_n=13 pool_b=241893350 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=3.9 lz4=false
+COMPDUR ms=19 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241893472 ent_e=0
+MEMDIAGD rss=1251504 dirty_kb=186852 avail=1915576 cached=1883740 cgcur=
+FLUSHSTAGES entries=272384 bytes=60244113 enc_ms=185.3 lz4_ms=79.0 bloom_ms=35.3 crc_ms=15.3 write_ms=45.3 lz4=true
+FLUSHSTAGES entries=266 bytes=2796 enc_ms=5.0 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=436
+BULKDIAG install_parked family=data level=3 ssts=81 l0=0 max=80
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=83 rss_kb=1250368 tick_s=0 mat_n=58 pool_n=13 pool_b=241668365 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.7 lz4=false
+COMPDUR ms=15 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241668487 ent_e=0
+MEMDIAGD rss=1264848 dirty_kb=182148 avail=1882744 cached=1838360 cgcur=
+FLUSHSTAGES entries=273408 bytes=60469831 enc_ms=185.8 lz4_ms=80.2 bloom_ms=36.9 crc_ms=16.5 write_ms=41.4 lz4=true
+FLUSHSTAGES entries=267 bytes=2806 enc_ms=5.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.2 lz4=true
+FLUSHDUR ms=451
+BULKDIAG install_parked family=data level=3 ssts=82 l0=0 max=81
+FLUSHDIAG parked_n=0 parked_b=0 active_b=505910 imm=false retired_b=0 sst_n=84 rss_kb=1279120 tick_s=0 mat_n=59 pool_n=13 pool_b=241442388 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=3.3 lz4=false
+COMPDUR ms=27 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241442510 ent_e=0
+MEMDIAGD rss=1252368 dirty_kb=113644 avail=1918860 cached=1726096 cgcur=
+FLUSHSTAGES entries=273408 bytes=60469867 enc_ms=194.5 lz4_ms=85.8 bloom_ms=36.3 crc_ms=15.8 write_ms=56.7 lz4=true
+FLUSHSTAGES entries=267 bytes=2805 enc_ms=5.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=473
+BULKDIAG install_parked family=data level=3 ssts=83 l0=0 max=82
+MEMDIAGD rss=1293260 dirty_kb=141564 avail=1885332 cached=1771208 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=85 rss_kb=1270728 tick_s=0 mat_n=60 pool_n=13 pool_b=241442557 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.2 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=2.1 lz4=false
+COMPDUR ms=16 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241442679 ent_e=0
+MEMDIAGD rss=1360244 dirty_kb=178988 avail=1814800 cached=1839588 cgcur=
+FLUSHSTAGES entries=273408 bytes=60470213 enc_ms=181.7 lz4_ms=80.6 bloom_ms=37.9 crc_ms=17.0 write_ms=54.6 lz4=true
+FLUSHSTAGES entries=267 bytes=2805 enc_ms=5.5 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=463
+BULKDIAG install_parked family=data level=3 ssts=84 l0=0 max=83
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=86 rss_kb=1256760 tick_s=0 mat_n=60 pool_n=13 pool_b=241668483 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.2 lz4=false
+COMPDUR ms=20 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241668605 ent_e=0
+MEMDIAGD rss=1278520 dirty_kb=180540 avail=1880948 cached=1774656 cgcur=
+FLUSHSTAGES entries=273408 bytes=60470629 enc_ms=210.5 lz4_ms=88.3 bloom_ms=46.3 crc_ms=19.8 write_ms=36.4 lz4=true
+FLUSHSTAGES entries=267 bytes=2805 enc_ms=7.3 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=530
+BULKDIAG install_parked family=data level=3 ssts=85 l0=0 max=84
+FLUSHDIAG parked_n=0 parked_b=0 active_b=505910 imm=false retired_b=0 sst_n=87 rss_kb=1289744 tick_s=0 mat_n=61 pool_n=13 pool_b=241895009 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.6 lz4=false
+COMPDUR ms=18 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241895131 ent_e=0
+MEMDIAGD rss=1260824 dirty_kb=99540 avail=1893428 cached=1765152 cgcur=
+MEMDIAGD rss=1387556 dirty_kb=155740 avail=1759400 cached=1794688 cgcur=
+FLUSHSTAGES entries=272384 bytes=60245106 enc_ms=263.8 lz4_ms=121.7 bloom_ms=41.4 crc_ms=19.6 write_ms=41.3 lz4=true
+FLUSHSTAGES entries=266 bytes=2795 enc_ms=9.2 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=583
+BULKDIAG install_parked family=data level=3 ssts=86 l0=0 max=85
+FLUSHDIAG parked_n=0 parked_b=0 active_b=252955 imm=false retired_b=0 sst_n=88 rss_kb=1302632 tick_s=0 mat_n=62 pool_n=13 pool_b=241670283 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.2 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=2.1 lz4=false
+COMPDUR ms=19 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241670405 ent_e=0
+MEMDIAGD rss=1313772 dirty_kb=142584 avail=1821948 cached=1766928 cgcur=
+FLUSHSTAGES entries=274432 bytes=60698146 enc_ms=217.1 lz4_ms=91.6 bloom_ms=36.2 crc_ms=15.9 write_ms=43.0 lz4=true
+FLUSHSTAGES entries=268 bytes=2816 enc_ms=5.2 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=534
+BULKDIAG install_parked family=data level=3 ssts=87 l0=0 max=86
+FLUSHDIAG parked_n=0 parked_b=0 active_b=505910 imm=false retired_b=0 sst_n=89 rss_kb=1330592 tick_s=0 mat_n=63 pool_n=13 pool_b=241898572 ent_e=0
+MEMDIAGD rss=1330592 dirty_kb=125216 avail=1855436 cached=1686468 cgcur=
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.2 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.4 lz4=false
+COMPDUR ms=16 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241898694 ent_e=0
+FLUSHSTAGES entries=273408 bytes=60470564 enc_ms=179.0 lz4_ms=77.4 bloom_ms=35.4 crc_ms=15.9 write_ms=41.7 lz4=true
+MEMDIAGD rss=1421768 dirty_kb=79708 avail=1768988 cached=1715288 cgcur=
+FLUSHSTAGES entries=267 bytes=2805 enc_ms=7.2 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=450
+BULKDIAG install_parked family=data level=3 ssts=88 l0=0 max=87
+FLUSHDIAG parked_n=0 parked_b=0 active_b=758865 imm=false retired_b=0 sst_n=90 rss_kb=1340180 tick_s=0 mat_n=64 pool_n=13 pool_b=241898923 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=6.1 lz4=false
+COMPDUR ms=22 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=241899045 ent_e=0
+MEMDIAGD rss=1400316 dirty_kb=148248 avail=1761204 cached=1783948 cgcur=
+FLUSHSTAGES entries=274432 bytes=60697092 enc_ms=189.6 lz4_ms=82.5 bloom_ms=36.7 crc_ms=16.4 write_ms=43.6 lz4=true
+FLUSHSTAGES entries=268 bytes=2815 enc_ms=5.2 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=455
+BULKDIAG install_parked family=data level=3 ssts=89 l0=0 max=88
+FLUSHDIAG parked_n=0 parked_b=0 active_b=505910 imm=false retired_b=0 sst_n=91 rss_kb=1354380 tick_s=0 mat_n=65 pool_n=13 pool_b=242125396 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=2.2 lz4=false
+COMPDUR ms=15 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242125518 ent_e=0
+MEMDIAGD rss=1353840 dirty_kb=148756 avail=1796212 cached=1730048 cgcur=
+FLUSHSTAGES entries=272384 bytes=60244321 enc_ms=176.0 lz4_ms=75.3 bloom_ms=35.1 crc_ms=15.3 write_ms=41.3 lz4=true
+FLUSHSTAGES entries=266 bytes=2794 enc_ms=4.9 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=421
+BULKDIAG install_parked family=data level=3 ssts=90 l0=0 max=89
+FLUSHDIAG parked_n=0 parked_b=0 active_b=505910 imm=false retired_b=0 sst_n=92 rss_kb=1361908 tick_s=0 mat_n=66 pool_n=13 pool_b=242124600 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.4 lz4=false
+COMPDUR ms=15 inputs=2 outputs=1
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242124722 ent_e=0
+MEMDIAGD rss=1340964 dirty_kb=134296 avail=1829888 cached=1721888 cgcur=
+FLUSHSTAGES entries=274432 bytes=60698334 enc_ms=180.5 lz4_ms=77.7 bloom_ms=34.9 crc_ms=15.2 write_ms=44.3 lz4=true
+FLUSHSTAGES entries=268 bytes=2816 enc_ms=5.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=439
+BULKDIAG install_parked family=data level=3 ssts=91 l0=0 max=90
+FLUSHDIAG parked_n=0 parked_b=0 active_b=505910 imm=false retired_b=0 sst_n=93 rss_kb=1371948 tick_s=0 mat_n=67 pool_n=13 pool_b=242124809 ent_e=0
+FLUSHSTAGES entries=1 bytes=126 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=1.6 lz4=false
+COMPDUR ms=20 inputs=2 outputs=1
+MEMDIAGD rss=1318420 dirty_kb=127448 avail=1849476 cached=1662864 cgcur=
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=14 pool_b=242124931 ent_e=0
+hydrate/pedradb: 25000000 entries in 112.5s (0.22M entries/s); on disk 11.09 GiB (476 B/entry)
+SETTLE_RSS before_flush 1354204 kB
+FLUSHSTAGES entries=112704 bytes=24927312 enc_ms=88.7 lz4_ms=32.1 bloom_ms=14.9 crc_ms=6.7 write_ms=14.7 lz4=true
+FLUSHSTAGES entries=111 bytes=1240 enc_ms=2.2 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=0.1 lz4=true
+FLUSHDUR ms=176
+BULKDIAG install_flush family=data level=3 ssts=92 l0=0 max=91
+SETTLE_PHASE flush_ms=516
+SETTLE_RSS after_flush 1404928 kB
+LEVELDIAG compact_leveled_start level=0 files=1 bytes=1240
+LEVELDIAG compact_leveled_start level=1 files=1 bytes=126
+LEVELDIAG compact_leveled_start level=2 files=0 bytes=0
+LEVELDIAG compact_leveled_start level=3 files=92 bytes=5530855142
+FLUSHSTAGES entries=112 bytes=1250 enc_ms=0.1 lz4_ms=0.0 bloom_ms=0.0 crc_ms=0.0 write_ms=6.7 lz4=true
+COMPDUR ms=17 inputs=2 outputs=1
+LEVELDIAG compact_leveled_done level=0 files=0 bytes=0
+LEVELDIAG compact_leveled_done level=1 files=1 bytes=1250
+LEVELDIAG compact_leveled_done level=2 files=0 bytes=0
+LEVELDIAG compact_leveled_done level=3 files=92 bytes=5530855142
+SETTLE_PHASE compact_ms=173
+SETTLE_RSS after_compact 1335440 kB
+settle/pedradb: 0.7s; on disk after 5.15 GiB
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1335448 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1335508 dirty_kb=448 avail=1836880 cached=1168460 cgcur=
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+probe_hit/pedradb: p50 54.8µs / p90 77.6µs / p99 138.4µs / p999 2.1ms / max 5.4ms
+probe_miss/pedradb: p50 3.2µs / p90 3.8µs / p99 6.6µs / p999 20.1µs / max 631.2µs
+Benchmarking get_hit/pedradb
+Benchmarking get_hit/pedradb: Warming up for 3.0000 s
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1336028 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1336028 dirty_kb=448 avail=1841256 cached=1286892 cgcur=
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1336028 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1336028 dirty_kb=0 avail=1838660 cached=1405416 cgcur=
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1336028 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1336028 dirty_kb=0 avail=1839544 cached=1539400 cgcur=
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1336028 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1336028 dirty_kb=0 avail=1835088 cached=1663332 cgcur=
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+Benchmarking get_hit/pedradb: Collecting 100 samples in estimated 5.1193 s (86k iterations)
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1336156 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1336156 dirty_kb=0 avail=1843320 cached=1783060 cgcur=
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1336156 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1336156 dirty_kb=52 avail=1840588 cached=1901064 cgcur=
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1336156 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1336156 dirty_kb=52 avail=1848996 cached=1910648 cgcur=
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1336156 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1336156 dirty_kb=52 avail=1851104 cached=1939016 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1336156 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1336156 dirty_kb=52 avail=1844632 cached=1905272 cgcur=
+Benchmarking get_hit/pedradb: Analyzing
+get_hit/pedradb         time:   [52.619 µs 54.513 µs 56.829 µs]
+                        thrpt:  [17.597 Kelem/s 18.344 Kelem/s 19.005 Kelem/s]
+                 change:
+                        time:   [-8.4651% -5.1315% -1.6970%] (p = 0.00 < 0.05)
+                        thrpt:  [+1.7263% +5.4091% +9.2479%]
+                        Performance has improved.
+Found 5 outliers among 100 measurements (5.00%)
+  1 (1.00%) low mild
+  1 (1.00%) high mild
+  3 (3.00%) high severe
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1349076 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1349076 dirty_kb=52 avail=1832444 cached=1898168 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1349076 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1349076 dirty_kb=0 avail=1832284 cached=1898248 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1349076 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+
+Benchmarking prefix_scan/pedradb
+Benchmarking prefix_scan/pedradb: Warming up for 3.0000 s
+MEMDIAGD rss=1349080 dirty_kb=0 avail=1832624 cached=1898632 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1349080 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1349080 dirty_kb=0 avail=1831044 cached=1898760 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1349080 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1349080 dirty_kb=0 avail=1830780 cached=1898760 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1349168 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1349168 dirty_kb=36 avail=1868264 cached=1898308 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1349168 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1349168 dirty_kb=36 avail=1866024 cached=1898308 cgcur=
+Benchmarking prefix_scan/pedradb: Collecting 100 samples in estimated 5.5601 s (10k iterations)
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1349168 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1349168 dirty_kb=36 avail=1865756 cached=1898308 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1349168 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1349168 dirty_kb=36 avail=1862308 cached=1898308 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1349168 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1349168 dirty_kb=36 avail=1862060 cached=1898308 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1349168 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1349168 dirty_kb=36 avail=1859860 cached=1898308 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1349168 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1349168 dirty_kb=0 avail=1859740 cached=1898308 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1349168 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1349168 dirty_kb=0 avail=1859740 cached=1898308 cgcur=
+Benchmarking prefix_scan/pedradb: Analyzing
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1352572 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+prefix_scan/pedradb     time:   [581.89 µs 595.96 µs 611.17 µs]
+                        thrpt:  [1.6362 Melem/s 1.6780 Melem/s 1.7185 Melem/s]
+                 change:
+                        time:   [+0.8668% +4.4223% +9.2118%] (p = 0.03 < 0.05)
+                        thrpt:  [-8.4348% -4.2350% -0.8594%]
+                        Change within noise threshold.
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high severe
+MEMDIAGD rss=1354772 dirty_kb=0 avail=1855900 cached=1898388 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1354772 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1354772 dirty_kb=0 avail=1855764 cached=1898448 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1354772 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1354896 dirty_kb=0 avail=1862756 cached=1898524 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1354896 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+
+Benchmarking lookup_100/pedradb_get_loop
+Benchmarking lookup_100/pedradb_get_loop: Warming up for 3.0000 s
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1354896 dirty_kb=0 avail=1859740 cached=1928364 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1354896 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1354896 dirty_kb=0 avail=1869224 cached=1946028 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1354896 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1354896 dirty_kb=0 avail=1858064 cached=1904232 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1354896 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1354896 dirty_kb=48 avail=1859188 cached=1926520 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1354896 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1354896 dirty_kb=48 avail=1872348 cached=1917036 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1354896 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1354896 dirty_kb=48 avail=1848704 cached=1930952 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1354896 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+Benchmarking lookup_100/pedradb_get_loop: Collecting 100 samples in estimated 5.3047 s (900 iterations)
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1354896 dirty_kb=48 avail=1872080 cached=1939684 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1354896 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1354896 dirty_kb=48 avail=1857924 cached=1937024 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1354896 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1354896 dirty_kb=48 avail=1880308 cached=1942408 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1354896 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1355004 dirty_kb=48 avail=1870736 cached=1917600 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1355004 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1355004 dirty_kb=48 avail=1862220 cached=1945680 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1355004 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+Benchmarking lookup_100/pedradb_get_loop: Analyzing
+lookup_100/pedradb_get_loop
+                        time:   [5.7253 ms 5.8657 ms 6.0128 ms]
+                        thrpt:  [16.631 Kelem/s 17.048 Kelem/s 17.466 Kelem/s]
+                 change:
+                        time:   [+4.4234% +8.4143% +12.370%] (p = 0.00 < 0.05)
+                        thrpt:  [-11.008% -7.7613% -4.2360%]
+                        Performance has regressed.
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+MEMDIAGD rss=1355044 dirty_kb=48 avail=1857356 cached=1915452 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1355452 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1355452 dirty_kb=48 avail=1857932 cached=1915560 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1355452 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1355452 dirty_kb=48 avail=1858184 cached=1915704 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1355452 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+Benchmarking lookup_100/pedradb_multi_get
+Benchmarking lookup_100/pedradb_multi_get: Warming up for 3.0000 s
+MEMDIAGD rss=1355456 dirty_kb=48 avail=1869444 cached=1966036 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1355456 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1355528 dirty_kb=48 avail=1890704 cached=1953836 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1355528 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1355528 dirty_kb=48 avail=1884704 cached=1955340 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1355528 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+Benchmarking lookup_100/pedradb_multi_get: Collecting 100 samples in estimated 5.3830 s (900 iterations)
+MEMDIAGD rss=1355528 dirty_kb=52 avail=1884976 cached=1955892 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1355528 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1355528 dirty_kb=52 avail=1860024 cached=1939100 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1355528 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1355528 dirty_kb=52 avail=1884472 cached=1963328 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1355528 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1355528 dirty_kb=52 avail=1890196 cached=1941264 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1355528 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1355528 dirty_kb=52 avail=1889004 cached=1968352 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1355528 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+Benchmarking lookup_100/pedradb_multi_get: Analyzing
+MEMDIAGD rss=1355528 dirty_kb=52 avail=1886676 cached=1963588 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1355528 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+lookup_100/pedradb_multi_get
+                        time:   [5.8349 ms 5.9381 ms 6.0420 ms]
+                        thrpt:  [16.551 Kelem/s 16.840 Kelem/s 17.138 Kelem/s]
+                 change:
+                        time:   [-2.0773% +0.4359% +3.0120%] (p = 0.74 > 0.05)
+                        thrpt:  [-2.9239% -0.4341% +2.1213%]
+                        No change in performance detected.
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1356804 dirty_kb=52 avail=1884736 cached=1963556 cgcur=
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1356804 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+FLUSHDIAG parked_n=0 parked_b=0 active_b=0 imm=false retired_b=0 sst_n=93 rss_kb=1356804 tick_s=0 mat_n=67 pool_n=17 pool_b=267054721 ent_e=0
+MEMDIAGD rss=1356804 dirty_kb=52 avail=1882800 cached=1963616 cgcur=
+COMPACTDIAG l0=0 l1=1 parked_n=0 pool_n=17 pool_b=267054721 ent_e=0
+
+WRITEPHASE commits=24415 prepare_ms=1234.6 wal_ms=6892.5 mem_ms=9575.2 publish_ms=17.2 flush_check_ms=14.9 lock_wait_ms=0.0
+MEMDIAGD rss=994176 dirty_kb=52 avail=2261152 cached=850580 cgcur=
+BENCH_EXIT_pedradb_diag=0
+               total        used        free      shared  buff/cache   available
+Mem:            3892         330        3131          30         672        3562
+/dev/vda         40G  782M   37G   3% /data
+Tue Sep  1 07:42:42 UTC 2026
+=== v17 trim done ===
