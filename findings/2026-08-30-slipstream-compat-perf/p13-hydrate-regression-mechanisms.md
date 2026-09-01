@@ -534,3 +534,33 @@ write_all 7.8 (= bytes, same encode lever) > mem 8.5 (BTree insert,
 of which ~1.0 s is the span hook) > wal 5.6 > pdrop 3.7 >
 bloom 2.9 > crc 1.2. Post-span floor ≈ 53.5 s @ load 14; observed
 55.8 (noise band).
+
+## Encode lever — block-target branch CLOSED (local sweep, 2026-09-01)
+
+`PEDRA_BLOCK_TARGET` 4k (default) vs 16k vs 64k at 6M local, same
+binary, write stages + read legs per arm:
+
+| arm | hydrate s | enc+lz4+write s | get_hit | prefix_scan | get_loop | multi_get |
+|-----|-----------|-----------------|---------|-------------|----------|-----------|
+| 4k  | 6.5       | 1.63+0.95+1.41  | 4.32 µs | ~246 µs     | ~592 µs  | ~502 µs   |
+| 16k | 9.5       | 1.86+1.03+2.48  | 6.85 µs | 186 µs      | 1.27 ms  | 864 µs    |
+| 64k | 7.0       | 1.96+0.97+1.39  | 20.1 µs | 186 µs      | 1.67 ms  | 2.01 ms   |
+
+- Write side: enc and lz4 are FLAT vs block size (per-entry/per-byte
+  CPU, only block-split overhead amortizes); write(2) time is flat
+  within noise (1.41/2.48/1.39 — the 16k write is an outlier of the
+  local noise band, hydrate 6.5–9.5 s). **Bigger blocks buy no write
+  time.**
+- Read side: point reads degrade hard and significantly
+  (criterion p=0.00 everywhere): get_hit ×1.6 at 16k, ×4.7 at 64k
+  (vs rocks 5.9 µs: 4k is 1.37× ahead, 64k would be 0.3×).
+  prefix_scan is the only winner (−17…−24 %, bigger sequential
+  decode units).
+
+Verdict: the block-size branch of the encode lever is DEAD — it
+trades the constrained resource (point-read latency, already 0.80×
+at 25M guest) for nothing. The encode RFC must aim at per-entry
+encode CPU (enc 14.6 s at 25M is per-key algorithmic cost: key
+delta/prefix compression, SIMD varint, or amortized key encoding),
+not block parameters. lz4 probe policy is already adaptive
+(PEDRA_LZ4_PROBE).
