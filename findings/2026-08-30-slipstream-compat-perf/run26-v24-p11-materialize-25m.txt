@@ -1,0 +1,44 @@
+hydrate/pedradb: 25000000 entries in 75.6s (0.33M entries/s); on disk 11.04 GiB (474 B/entry)
+settle/pedradb: 1.6s; on disk after 5.15 GiB
+probe_hit/pedradb: p50 45.9µs / p90 76.1µs / p99 134.5µs / p999 1.1ms / max 6.0ms
+probe_miss/pedradb: p50 3.7µs / p90 4.2µs / p99 7.0µs / p999 24.5µs / max 1.5ms
+get_hit/pedradb         time:   [46.945 µs 48.434 µs 50.024 µs]
+                        time:   [-4.1243% +5.2642% +15.370%] (p = 0.29 > 0.05)
+prefix_scan/pedradb     time:   [553.13 µs 566.17 µs 581.16 µs]
+                        time:   [+15.592% +23.072% +29.019%] (p = 0.00 < 0.05)
+                        time:   [5.7066 ms 5.8691 ms 6.0378 ms]
+                        time:   [+16.773% +22.271% +27.740%] (p = 0.00 < 0.05)
+                        time:   [4.9071 ms 5.0740 ms 5.2492 ms]
+                        time:   [+22.056% +28.260% +34.614%] (p = 0.00 < 0.05)
+WRITEPHASE commits=24415 prepare_ms=1416.7 wal_ms=7359.3 mem_ms=10288.1 publish_ms=23.2 flush_check_ms=18.7 lock_wait_ms=0.0
+BENCH_EXIT_pedradb_diag=0
+
+=== RUN #26 VERDICT (v24 = v23 + P1.1 materialize cut) ===
+Guest 25M. vs v23 family (runs #23/#24/#25):
+  hydrate 75.6s vs 72.5/73.1/73.6 — FLAT (cut did not move guest wall;
+  see split below: guest is byte-bound CPU, encode already core-speed)
+  settle 1.6s vs 1.8/2.3/3.0 — fine (still >5x rocks 8.3s)
+  get_hit 48.4us vs 43.1-48.5 — FLAT (p=0.29)
+  prefix_scan 566us vs 437-463 — +23% WORSE (p=0.00)
+  get_loop 5.87ms vs 4.49-4.98 — +22% WORSE (p=0.00)
+  multi_get 5.07ms vs 3.96-4.67 — +28% WORSE (p=0.00)
+  probe_hit 45.9us (swing band), probe_miss 3.7us
+
+WHY the sweep legs regressed: 88 data chunks vs v23's 73 (65MiB vs 77MiB
+each; raw 5.13GiB identical, disk after settle identical 5.15GiB).
+Faster materialize -> flush worker drains on a tighter loop -> stages
+closer to the 64MiB global cap -> MORE L3 files. Sweeps (scan,
+get_loop/multi_get) pay per-file overhead; single-file point legs
+(get_hit) do not. Root cause of the 64MiB cap itself: P1.3 (global
+auto_flush_bytes governs staging; per-CF 256MiB ignored) — fixed in
+aa52dd0, next injection (v25) = 256MiB chunks -> ~21 files.
+
+Guest per-chunk split (FLUSHSTAGES, 88 data chunks, this run):
+  enc 19.3s (55%) lz4 9.2s (26%) bloom 3.6s (10%) crc 1.5s (4%)
+  write 3.9s (11%)  = 37.5s total; encode = 272MiB/s on the guest core
+  (local M-series: 845MiB/s — machine-speed scalar code)
+Commit path (WRITEPHASE, 24415 commits): wal 7.4s + mem 10.3s +
+prepare 1.4s = 19.1s.
+Hydrate attribution: 37.5 materialize + 19.1 commit = 56.6s of the 75.6s
+wall; ~19s unattributed (per-chunk stage/rotate/manifest/park overhead).
+Raw FLUSHSTAGES: run26-v24-flushstages.txt.
