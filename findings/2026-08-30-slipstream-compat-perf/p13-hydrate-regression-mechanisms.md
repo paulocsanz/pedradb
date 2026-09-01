@@ -248,3 +248,44 @@ best runs of the set; v29acb added nothing over v29ac (and r1 settle
 noise under load. Verdict: **guest run #30 = v29ac only** (concurrent.rs
 + db.rs; wal stays v21p). Binaries preserved: /tmp/bench-v28,
 /tmp/bench-v29ac, /tmp/bench-v29acb.
+
+## Run #30 (v29ac, guest 25M, host load 33/64 ≈ #29's): regression
+## RECOVERED — residual back to v4/v24 level
+
+hydrate **76.9 s** (#29: 112.5, #28: 110.5, v24: 75.6), settle **1.4 s**
+(best family), on disk 11.05 → 5.15 GiB, exit 0, sst_n=90, **88 chunks /
+88 BULKDIAG installs**. WRITEPHASE commits=24415 prepare 1314.1 /
+wal 7526.8 / mem 10233.1 / publish 22.4 / flush_check 23.3 ms
+(= 19.1 s commit counted). FLUSHSTAGES sums (89 chunks): enc 19.4 +
+lz4 9.1 + bloom 3.7 + crc 1.6 + write 4.0 = **37.7 s**.
+
+Accounting: 19.1 + 37.7 = 56.8 s counted vs 76.9 s wall →
+**residual ~20.1 s ≈ v24's ~19 s**. The v26→v28 regression
+(~41 s of writer-side unattributed time) is gone; the `sample`-based
+attribution (writer queueing on `flush_lock` inside the assist) is
+confirmed on the guest, not just the mac. `parked_n` never exceeded 1 —
+with the assist skipping instead of queueing, debt rarely reached two
+chunks; the 2× cap is headroom, not a code path we exercised.
+
+Read legs under the same loaded host as #29 (probe_hit p50 61.6 µs,
+probe_miss 3.8 µs — unjudgeable, consistent): get_hit 54.5 µs mid,
+prefix_scan 543.7 µs, lookup_100 get_loop 5.93 ms / multi_get 5.15 ms.
+
+Hydrate vs rocks default (~34 s extrapolated from the 15M leg): still
+~0.44× — the remaining gap is now the OLD v4-era ~19 s residual plus
+per-byte write-path CPU (encode-bound at guest-core speed), not the
+assist regression. Next single-variable candidates: v29b (WAL 64 MiB
+prealloc, addresses the 4.1 s/25 s local preallocate share) and diag
+timers around `install_parked`/retire for the last ~20 s.
+
+Operational notes: (1) the injection hit `RACE_SUPERVISOR_RESTARTED_VM`
+during teardown — the supervisor auto-restarted the VM ~65 s BEFORE the
+mv, so that boot ran the old inode (wasted run); a manual stop/start
+after the mv booted the new image cleanly. Budget a stop/start after
+every supervisor race. (2) The guest build log's `Compiling` lines are
+ANSI-colored — `grep "Compiling pedradb-core"` silently matches nothing;
+grep for `Compiling` bare or de-ANSI first (this false-negative nearly
+mis-attributed a good run to a stale image). (3) The bench binary
+relinked as `/data/target/.../snapshot_backends-658f4d3d34281331` —
+the target dir lives on the persistent data volume, so build hashes
+persist across container restarts.

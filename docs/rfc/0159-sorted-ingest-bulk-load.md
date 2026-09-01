@@ -132,8 +132,15 @@ sorted-ingest-architecture.md` (+ `run19-v21p-guest-25m.txt`).
   run #27b repeat reproduced 120.5 s), fixed by writer assist-drain:
   at debt ≥ cap the submit materializes one parked table inline (v26).
   Reads did NOT move with 23 vs 88 files — the v24/v25 read deltas were
-  host-load contamination (gate load 34, six qemu at ~200%). — status:
-  `v26+v27 landed, guest verification run pending (host still loaded)`
+  host-load contamination (gate load 34, six qemu at ~200%). Guest
+  verdict: v26+v27 REGRESSED hydrate (run #28 110.5 s, run #29 with the
+  64 MiB clamp 112.5 s vs v24 75.6 s — chunk-size theory refuted);
+  a macOS `sample` profile attributed the 61.5 s residual to the assist
+  queueing the WRITER on `flush_lock` (held across the whole
+  `write_imm_l0_files`, 8 s/25 s window) — fixed by v29a (assist
+  try-locks and skips) + v29c (debt cap = 2× threshold); guest run #30:
+  hydrate 76.9 s, residual back to ~20 s = v4/v24 level. — status:
+  `closed: v29a+c (c2105f7), run #30 recovered the regression`
 
 ### P2 — later / polish
 
@@ -153,7 +160,7 @@ sorted-ingest-architecture.md` (+ `run19-v21p-guest-25m.txt`).
 | P0.5 | p0 | Local A/B + guest verdict | done | local 6M A/B (`9698caf`): hydrate −39…−45 %, settle −25…−43 %; guest run #23 (25M): settle 84.9→2.3 s = **3.61× vs Rocks 8.3 s**, hydrate 157.0→73.6 s (0.34×), reads flat; 73 BULKDIAG (72 parked + 1 flush) | 2026-09-01 |
 | P1.1 | p1 | Materialize per-byte cut (direct block encode + lz4 probe) | in-progress (code+tests+local A/B: FLUSHDUR −13 %, disk identical; guest pending) | `table.rs` | 2026-09-01 |
 | P1.2 | p1 | Batched manifest persists | todo | — | 2026-08-31 |
-| P1.3 | p1 | Chunk-size: per-CF buffer governs stage threshold | fix landed; guest run #27: 256MiB chunks regress hydrate +54% — (a) `take_family` reinsert loop 21.5s flush_check (fixed: split_off partition, v27) + (b) flush-debt sleep ping-pong ≈33s (fixed: writer assist-drain, v26); reads unaffected by chunk count (host-load contamination found); v26+v27 guest run pending | `concurrent.rs`, `memtable.rs`, `db.rs` | 2026-09-01 |
+| P1.3 | p1 | Chunk-size: per-CF buffer governs stage threshold | done — threshold fix (v25) + take_family split_off (v27) verified on guest; v26 assist initially REGRESSED hydrate 75.6→110.5/112.5 s (#28/#29, chunk-size theory refuted), root-caused by `sample` profile (writer queues on `flush_lock` in the assist) and fixed by v29a try-lock assist + v29c 2× debt cap (c2105f7); run #30: hydrate 76.9 s, residual ~20 s = v24 level, settle 1.4 s | `concurrent.rs`, `memtable.rs`, `db.rs` | 2026-09-01 |
 | P2.1 | p2 | Nearly-sorted window | todo | — | 2026-08-31 |
 | P2.2 | p2 | 100M rung via bulk mode | todo | — | 2026-08-31 |
 
