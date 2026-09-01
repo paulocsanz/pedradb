@@ -1,0 +1,59 @@
+hydrate/pedradb: 25000000 entries in 116.0s (0.22M entries/s); on disk 10.89 GiB (468 B/entry)
+settle/pedradb: 3.2s; on disk after 5.15 GiB
+probe_hit/pedradb: p50 50.6µs / p90 78.7µs / p99 149.8µs / p999 2.1ms / max 4.5ms
+probe_miss/pedradb: p50 2.3µs / p90 2.8µs / p99 3.6µs / p999 20.0µs / max 33.6µs
+get_hit/pedradb         time:   [56.538 µs 57.901 µs 59.395 µs]
+                        time:   [+2.3540% +8.4000% +13.529%] (p = 0.00 < 0.05)
+prefix_scan/pedradb     time:   [575.89 µs 589.27 µs 604.00 µs]
+                        time:   [+0.9809% +3.8495% +6.7093%] (p = 0.01 < 0.05)
+                        time:   [5.5398 ms 5.6915 ms 5.8482 ms]
+                        time:   [-6.5900% -3.0260% +0.8271%] (p = 0.13 > 0.05)
+                        time:   [6.2340 ms 6.3848 ms 6.5434 ms]
+                        time:   [+20.837% +25.833% +31.309%] (p = 0.00 < 0.05)
+WRITEPHASE commits=24415 prepare_ms=1813.0 wal_ms=6467.3 mem_ms=9130.5 publish_ms=10.1 flush_check_ms=21474.2 lock_wait_ms=0.0
+BENCH_EXIT_pedradb_diag=0
+
+=== RUN #27 VERDICT (v25 = v24 + P1.3 stage threshold) ===
+Guest 25M. Chunks staged at the data-CF 256MiB buffer as designed:
+23 data chunks (vs 88 in v24, 73 in v23). Materialize got CHEAPER
+(FLUSHSTAGES: enc 19.3->16.0s, lz4 9.2->7.4s, total 37.5->33.6s).
+But:
+
+  hydrate 116.0s vs v24 75.6 / v23 72.5-73.6  (+54% — REGRESSION)
+  WRITEPHASE flush_check_ms 21474 vs v24 18.7 — writers waited inside
+  the flush path: with 256MiB chunks each stage puts parked debt AT the
+  flush_debt cap (=threshold), so the next stage backpressures; on the
+  1-effective-core guest the waiting writer and the draining worker
+  share the same core — the wait is pure loss. (v24 never hit the cap:
+  64MiB chunks drained 2/tick under a 256MiB cap.)
+  get_hit 57.9us vs 46.9-50.0 (v23/v24) — worse
+  multi_get 6.38ms vs 3.82-5.25 (v23/v24) — worst yet (+25.8% vs v24,
+  criterion delta vs previous run, p=0.00)
+  prefix_scan 589us ~ v24's 566 (both >> v23's 437-463)
+  get_loop 5.69ms ~ v24's 5.87 (both >> v23's 4.49-4.98)
+  settle 3.2s fine; probe_miss 2.3us best-yet; probe_hit 50.6us band.
+
+CONCLUSIONS:
+1. Chunk size 256MiB is a NET LOSS on this guest (hydrate +40s). The
+   read legs did NOT recover with 22 files — the v23->v24 read
+   regression is NOT file count. Prime remaining suspect: the P1.1
+   table.rs block-boundary change itself (+1 entry per block); local
+   3-way A/B (v23/v24/v25 stage clones) in flight to isolate.
+2. Backpressure on a 1-core guest is pure loss — flush_debt_cap must
+   exceed one chunk by enough that the drain loop never gates ingest,
+   or staging must stay small enough to stay under it.
+Raw FLUSHSTAGES: run27-v25-flushstages.txt.
+
+=== ADDENDUM: host-load contamination discovered (2026-09-01) ===
+The gate host is SATURATED by unrelated work during/around the v24/v25
+runs: load average 33.8; six qemu-system-x86 at ~198% CPU each (started
+Sep 1 02:20-03:01 gate-tz), caixote-api at 248%, plus a swarm of
+block_request/queue_drive/snapshot_load processes at ~100% each. The
+v23-family runs (#23/#24) ran on a quieter host hours earlier.
+=> The v23->v24 "read regressions" (scan/get_loop/multi_get +22-28%)
+   may be partly or wholly ENVIRONMENTAL. Local paired 6M A/B (same
+   session, v23=9698caf vs v24=0ecd79e stage clones) shows NO read
+   regression: get_hit 4.09-4.22 (v23) vs 4.04-4.08 (v24), prefix_scan
+   187.9-191.9 vs 188.9-193.0. Local 25M A/B in flight to test at
+   SST-bound scale. Run #27b (v25 repeat, same image) booted into the
+   same loaded host as a self-consistency check.
