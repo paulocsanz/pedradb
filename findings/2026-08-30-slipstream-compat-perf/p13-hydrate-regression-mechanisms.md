@@ -300,9 +300,14 @@ decimal commas):
 
 - prep (nums+ctx under write lock) **≈ 0**
 - files (`write_imm_l0_files` total) **44.8 s** — FLUSHSTAGES sums
-  38.1 s (enc 19.7 + lz4 9.3 + bloom 3.6 + crc 1.6 + write 3.9) →
-  **intra-write remainder 6.7 s** (~76 ms/chunk outside the stage
-  timers: fd/create/truncate/buffer work)
+  43.7 s (enc 20.3 + lz4 9.4 + bloom 3.6 + crc 1.6 + write 8.7) →
+  **intra-write remainder 1.1 s**. [CORRECTED 2026-09-01: the first
+  parse reported sum 38.1 s with write 3.9 s / remainder 6.7 s — it
+  mis-keyed the per-line parser and undercounted `write_ms`. Correct
+  regex sums over all 222 FLUSHSTAGES lines; files 44.8 − 43.7 = 1.1 s
+  unaccounted, so the books balance to 0.1 s and "intra-write" is dead
+  as a lever. The **file write stage (create + write_all + close of
+  ~60 MiB images) is 8.7 s** — the #2 worker lever after enc+lz4.]
 - install (`bulk_span_level` + `apply_sst_installs` manifest/level/fd
   + parked pop) **5.4 s** (~61 ms/chunk — the per-chunk MANIFEST
   persist is the obvious suspect)
@@ -348,14 +353,80 @@ to WAL prealloc; most plausibly one fewer chunk boundary + host-load
 luck. The wall number is real (tight band), the mechanism is not fully
 attributed; recorded as such.
 
+**Run #32b correction (same image, forced re-boot during the v32
+injection supervisor race): hydrate 76.1 s, settle 1.3 s.** The -2.5 s
+did NOT reproduce — samples {76.8, 74.3, 76.1} put the v29b wall delta
+inside a ±~1.5 s run-to-run band; the earlier "0.1 s reproducibility"
+of #30/#31 was an n=2 fluke. Revised verdict: **v29b stays KEPT but as
+NEUTRAL-on-wall** (zero cost, 8× fewer prealloc syscalls, settle
+maybe marginally better: {1.6, 0.9, 1.3}); the -2.5 s claim is
+retracted. Consequence for method: single-run deltas <~3 s on this
+gate are NOT verdict-grade — future levers need a bigger effect or a
+repeat.
+
 Read legs: get_hit 51.1 → 48.6 µs, multi_get 5.47 → 5.16 ms (faster);
 get_loop 5.02 → 5.61 ms (+11.8%) and prefix_scan flat (p=0.59) — all
 inside the established ±15% host-load noise band for this gate (six
 syzkaller VMs); read legs remain unjudgeable here, no regression
 attributable to v29b.
 
-Verdict: **KEEP v29b** (one-line constant, 74/74 wal tests, best wall
-and best settle of every run in the lineage: 74.3 s). New ranked
-ceilings: enc+lz4 28.0 s, mem 10.0 s, wal 7.3 s, intra-write ~6.7 s,
-install 5.4 s (in-memory only — manifest myth dead), retire 3.9 s.
-Floor without encode work now ~59 s.
+Verdict: **KEEP v29b — NEUTRAL on wall** (see #32b correction above;
+one-line constant, 74/74 wal tests, zero cost, 8× fewer prealloc
+syscalls). Corrected ranked
+ceilings (#31/#32 agree): enc+lz4 29.7/28.2 s, mem 10.3/10.0 s, **sst
+write stage 8.7/8.7 s** (create+write_all+close — split by PARKDIAG2),
+wal 7.5/7.3 s, install 5.4/5.4 s (in-memory only — manifest myth
+dead), retire 4.0/3.9 s, bloom 3.6, crc 1.6, intra-write 1.1/1.1 s
+(dead). Floor without encode work ~59 s. Next: PARKDIAG2 run #33
+splits write-stage thirds + install + retire.
+
+## Size gap closed (2026-09-01, code-verified): hydrate-end 11.07 GiB vs
+## settle-after 5.15 GiB is the un-GC'd WAL, not rewrite waste
+
+`dir_size_bytes` (bench) sums **logical file sizes of the whole store
+dir — WAL included**. The WAL is **one file** (`WAL_FILE_NAME` at the
+store root; `wal/mod.rs` has no segments and no GC — only vlog/blob GC
+exists in db.rs). Every commit appends to it; parked-chunk L3 bulk
+installs are in-memory only and never checkpoint/reset it (established
+in #31 code-read). So at hydrate end the dir holds:
+
+- WAL ≈ 11.07 − 5.15 = **5.92 GiB ≈ 254 B/entry** (key+value+record
+  framing; SST encodes the same entries into 216 B/entry)
+- SSTs 5.15 GiB — ONE pass, bulk-installed direct to L3, zero
+  compaction rewrite during load
+
+`settle()` checkpoints → WAL truncated (`create_on` truncates the
+inode; db.rs ~5842 handles the POSIX fd-offset pitfall; module doc
+line 31 states the contract) → 5.15 GiB after.
+
+Conclusions: (a) the "2.15× write-amp" is exactly WAL pass + one SST
+pass — the durability contract's price (WAL-before-Ok), **not**
+wasteful rewriting; nothing to fix in the flush path. (b) P0.3
+(bounded WAL: checkpoint after N bulk installs) would cap disk at
+~SST+ε during load and shave settle, but **cannot cut hydrate wall
+CPU** — the WAL bytes must still be written per entry. P0.3 is a
+footprint/latency lever, not a wall lever.
+
+## Three-sample phase ceilings at 25M (#31 / #32 / #32b, same code family)
+
+| phase                | 31    | 32    | 32b   | stable? |
+|----------------------|-------|-------|-------|---------|
+| writer wal           | 7.5   | 7.3   | 7.5   | ±0.1    |
+| writer mem           | 10.3  | 10.0  | 10.3  | ±0.15   |
+| writer prepare       | 1.3   | 1.3   | 1.3   | exact   |
+| files (worker)       | 44.8  | 43.1  | 44.3  | ±0.9    |
+| — enc                | 20.3  | 19.3  | 19.8  | ±0.5    |
+| — lz4                | 9.4   | 8.9   | 9.0   | ±0.3    |
+| — bloom              | 3.6   | 3.6   | 3.6   | exact   |
+| — crc                | 1.6   | 1.6   | 1.6   | exact   |
+| — write (create+wr+close) | 8.7 | 8.7 | 9.0   | ±0.2    |
+| — intra (files − Σ)  | 1.1   | 1.1   | 1.3   | ±0.1    |
+| install              | 5.4   | 5.4   | 5.3   | ±0.05   |
+| retire               | 4.0   | 3.9   | 4.0   | ±0.05   |
+| **wall**             | 76.8  | 74.3  | 76.1  | ±1.3    |
+
+Chunk counts 88/87/88, FLUSHSTAGES files 222/219/223. The per-phase
+numbers are far tighter than the wall (±0.05–0.5 s vs ±1.3 s): the
+wall's noise lives in the ~2.4–4.9 s unattributed gap (scheduler/host
+steal between phases), not in the phases. Verdict-grade levers on this
+gate need >~3 s wall effect or phase-level attribution.
