@@ -39,10 +39,6 @@
 //! family permanently for the Db session — the workload was not
 //! append-only after all, and the ladder path is unchanged for it.
 
-// RFC-0159 P0.1 ships the decision kernel ahead of its caller; the
-// write-path wiring is P0.2 and removes this allow with it.
-#![allow(dead_code)]
-
 use bytes::Bytes;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
@@ -146,6 +142,13 @@ impl BulkLatch {
             threshold,
             ..Self::default()
         }
+    }
+
+    /// Whether the family's append-only streak reached the threshold
+    /// (qualifying flush spans may install at the bottom level).
+    #[must_use]
+    pub(crate) fn is_latched(&self, family: &str) -> bool {
+        self.state.get(family) == Some(&FamilyState::Latched)
     }
 
     fn kill(&mut self, family: &str) {

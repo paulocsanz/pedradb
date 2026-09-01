@@ -1394,6 +1394,14 @@ pub struct Db<E: Env = StdEnv> {
     /// worker (compat/store, not this crate) drains L0 via
     /// [`Self::prepare_l0_compact`] (RFC-0037 P2.1). Default false.
     defer_auto_compact: bool,
+    /// Sorted-ingest latch (RFC-0159): every committed batch is classified
+    /// per family; a latched family's qualifying flush spans install
+    /// directly at `MAX_LSM_LEVEL` instead of L0 (written once, never
+    /// pushdown-rewritten). Pure decision state — see `bulk_ingest`.
+    bulk_latch: crate::bulk_ingest::BulkLatch,
+    /// `PEDRA_BULK` read once at open (per-batch env lookups would tax the
+    /// commit path; the knob is static for a process lifetime).
+    bulk_route_enabled: bool,
     /// When `Some(n)`, refuse writes if L0 SST count ≥ n (open-items §2.3).
     write_stall_l0: Option<usize>,
     /// When `Some(n)`, refuse writes if active mem ≈ ≥ n bytes (open-items §2.3 c).
@@ -1921,6 +1929,8 @@ impl<E: Env> Db<E> {
             imm: None,
             flush_read_pin: None,
             parked_unflushed: Vec::new(),
+            bulk_latch: crate::bulk_ingest::BulkLatch::new(),
+            bulk_route_enabled: crate::bulk_ingest::bulk_enabled(),
             fold_pair_expected: None,
             retired_pending: Vec::new(),
             retired_fold: MemTable::new(),
@@ -4799,6 +4809,220 @@ impl<E: Env> Db<E> {
         Ok(())
     }
 
+    /// RFC-0159 P0.2: family key of a table for bulk routing. Matches
+    /// `family_of_user_key` ("default" when no physical CFs are
+    /// registered) so observation and install agree on family identity.
+    fn bulk_family_of_table<'a>(&self, table: &'a SstTable) -> &'a str {
+        if self.physical_cfs.is_empty() {
+            "default"
+        } else {
+            table.cf()
+        }
+    }
+
+    /// Largest user key `family` holds on disk or in any memtable layer —
+    /// the `family_max_in_db` input for the latch's **first** observation
+    /// of a family (everything committed after open is observed by the
+    /// latch itself). Free-standing so the borrow checker sees disjoint
+    /// field access next to `&mut self.bulk_latch`.
+    fn bulk_family_max_in_db_parts(
+        ssts: &[SstTable],
+        physical_empty: bool,
+        mems: &[&MemTable],
+        family: &str,
+    ) -> Option<Bytes> {
+        let mut max: Option<Bytes> = None;
+        let bump = |max: &mut Option<Bytes>, k: &[u8]| {
+            if max.as_deref().map_or(true, |m: &[u8]| k > m) {
+                *max = Some(Bytes::copy_from_slice(k));
+            }
+        };
+        for t in ssts {
+            let matches = if physical_empty {
+                family == "default"
+            } else {
+                t.cf() == family
+            };
+            if matches {
+                if let Some(k) = t.largest_user_key() {
+                    bump(&mut max, k);
+                }
+            }
+        }
+        for m in mems {
+            for (ik, _) in m.iter_internal() {
+                if crate::cf_kernel::key_in_cf_family(ik.user_key.as_ref(), family) {
+                    bump(&mut max, ik.user_key.as_ref());
+                }
+            }
+        }
+        max
+    }
+
+    /// Observe one committed batch through the sorted-ingest latch.
+    /// Every write funnel calls this exactly once per batch (the
+    /// memtable-apply sites are NOT the choke point — recovery replay
+    /// must stay unobserved so `family_max_in_db` covers it instead).
+    fn observe_bulk_batch(&mut self, batch: &[BatchOp]) {
+        if batch.is_empty() || !self.bulk_route_enabled {
+            return;
+        }
+        // Field-borrowing family resolver (a `&self` method would borrow
+        // `bulk_latch` into the ops vec): mirrors `family_of_user_key`.
+        let physical = &self.physical_cfs;
+        let fam_of = |key: &[u8]| -> &str {
+            if physical.is_empty() {
+                return "default";
+            }
+            let p = crate::memtable::cf_prefix(key);
+            if p.is_empty() {
+                return "default";
+            }
+            physical
+                .iter()
+                .find(|n| n.as_bytes() == p)
+                .map(String::as_str)
+                .unwrap_or("default")
+        };
+        let ops: Vec<crate::bulk_ingest::BulkOp> = batch
+            .iter()
+            .map(|op| match op {
+                BatchOp::Put { key, .. } => crate::bulk_ingest::BulkOp::Put {
+                    family: fam_of(key.as_ref()),
+                    key: key.as_ref(),
+                },
+                BatchOp::Delete { key } => crate::bulk_ingest::BulkOp::Delete {
+                    family: fam_of(key.as_ref()),
+                    key: key.as_ref(),
+                },
+                BatchOp::DeleteRange { start, end } => {
+                    crate::bulk_ingest::BulkOp::DeleteRange {
+                        start_family: fam_of(start.as_ref()),
+                        start: start.as_ref(),
+                        end_family: fam_of(end.as_ref()),
+                        end: end.as_ref(),
+                    }
+                }
+            })
+            .collect();
+        let ssts = &self.ssts;
+        let physical_empty = self.physical_cfs.is_empty();
+        // Field-direct memtable chain (not `scan_mem_layers`, whose `&self`
+        // receiver would borrow `bulk_latch` too): disjoint-field borrows
+        // let the latch mutate next to these.
+        let mems: Vec<&MemTable> = std::iter::once(&self.mem)
+            .chain(self.imm.as_ref())
+            .chain(self.flush_read_pin.as_ref())
+            .chain(self.parked_unflushed.iter().map(|t| t.as_ref()))
+            .collect();
+        let _routes = self.bulk_latch.classify_batch(&ops, &|f| {
+            Self::bulk_family_max_in_db_parts(ssts, physical_empty, &mems, f)
+        });
+    }
+
+    /// Single-op form of [`Self::observe_bulk_batch`] (iterator-based
+    /// write funnels observe op-granular; the span-level ascending check
+    /// at flush time is the real gate, so granularity loses nothing).
+    fn observe_bulk_op(&mut self, op: &BatchOp) {
+        if self.bulk_route_enabled {
+            self.observe_bulk_batch(std::slice::from_ref(op));
+        }
+    }
+
+    /// Staged-transaction form ([`crate::tx`]): keys arrive without a
+    /// `BatchOp`; observe them so the high-water stays complete.
+    pub(crate) fn observe_bulk_staged(&mut self, key: &[u8], is_put: bool) {
+        if !self.bulk_route_enabled {
+            return;
+        }
+        // Field-borrowing resolver (see `observe_bulk_batch`).
+        let physical = &self.physical_cfs;
+        let fam_of = |key: &[u8]| -> &str {
+            if physical.is_empty() {
+                return "default";
+            }
+            let p = crate::memtable::cf_prefix(key);
+            if p.is_empty() {
+                return "default";
+            }
+            physical
+                .iter()
+                .find(|n| n.as_bytes() == p)
+                .map(String::as_str)
+                .unwrap_or("default")
+        };
+        let family = fam_of(key);
+        let op = if is_put {
+            crate::bulk_ingest::BulkOp::Put { family, key }
+        } else {
+            crate::bulk_ingest::BulkOp::Delete { family, key }
+        };
+        let ssts = &self.ssts;
+        let physical_empty = self.physical_cfs.is_empty();
+        // Same field-direct chain as `observe_bulk_batch`.
+        let mems: Vec<&MemTable> = std::iter::once(&self.mem)
+            .chain(self.imm.as_ref())
+            .chain(self.flush_read_pin.as_ref())
+            .chain(self.parked_unflushed.iter().map(|t| t.as_ref()))
+            .collect();
+        let _routes = self.bulk_latch.classify_batch(&[op], &|f| {
+            Self::bulk_family_max_in_db_parts(ssts, physical_empty, &mems, f)
+        });
+    }
+
+    /// RFC-0159 P0.2: install level for one flushed family span.
+    /// `MAX_LSM_LEVEL` only when every gate holds: the family is latched,
+    /// the span is strictly-ascending puts with no point/range tombstones,
+    /// and the span hull does not overlap the family's existing files at
+    /// levels ≥ 1 (those levels would merge it back down; the max level is
+    /// never a pushdown source, so a qualifying span is written exactly
+    /// once). Anything else stays L0 — identical to the pre-bulk path.
+    fn bulk_span_level(&self, family: &str, mem: &MemTable) -> u32 {
+        if !self.bulk_route_enabled || !self.bulk_latch.is_latched(family) {
+            return 0;
+        }
+        if mem.has_range_tombstones() {
+            return 0;
+        }
+        let mut prev: Option<&[u8]> = None;
+        let mut lo: Option<&[u8]> = None;
+        let mut hi: &[u8] = &[];
+        for (ik, _) in mem.iter_internal() {
+            if !crate::cf_kernel::key_in_cf_family(ik.user_key.as_ref(), family) {
+                continue;
+            }
+            if ik.kind != crate::key::ValueType::Value {
+                return 0; // tombstone in the span: ladder
+            }
+            let uk = ik.user_key.as_ref();
+            if let Some(p) = prev {
+                if uk <= p {
+                    return 0; // duplicate / descent: not a pure append span
+                }
+            }
+            prev = Some(uk);
+            if lo.is_none() {
+                lo = Some(uk);
+            }
+            hi = uk;
+        }
+        let Some(lo) = lo else {
+            return 0; // family absent from this span
+        };
+        for (t, &lvl) in self.ssts.iter().zip(self.sst_levels.iter()) {
+            if lvl == 0 || self.bulk_family_of_table(t) != family {
+                continue;
+            }
+            let (Some(tlo), Some(thi)) = (t.smallest_user_key(), t.largest_user_key()) else {
+                continue;
+            };
+            if tlo <= hi && thi >= lo {
+                return 0; // would stack over an existing lower-level file
+            }
+        }
+        MAX_LSM_LEVEL
+    }
+
     /// Flush only `family` to L0 (RFC-0065 P1.1). Other families stay in mem.
     ///
     /// # Errors
@@ -4825,14 +5049,32 @@ impl<E: Env> Db<E> {
                 return Err(self.fence_io_err(e));
             }
         };
+        // RFC-0159 P0.2: a latched family's pure-append span installs
+        // directly at the bottom level (written once, never re-laddered).
+        let level = self.bulk_span_level(family, &taken);
         let pairs: Vec<_> = files.into_iter().map(|(t, num, _)| (t, num)).collect();
-        if let Err(e) = self.install_l0_ssts(pairs) {
+        if let Err(e) = self.install_ssts_at_levels(pairs, &[level]) {
             for (k, v) in taken.iter_internal() {
                 self.mem.insert(k.clone(), v.clone());
             }
             return Err(self.fence_io_err(e));
         }
+        if level != 0 {
+            self.bulk_diag("install_cf", family, level);
+        }
         Ok(())
+    }
+
+    /// `PEDRA_BULK_DIAG` line for a bulk install decision.
+    fn bulk_diag(&self, tag: &str, family: &str, level: u32) {
+        if std::env::var_os("PEDRA_BULK_DIAG").is_some() {
+            eprintln!(
+                "BULKDIAG {tag} family={family} level={level} ssts={} l0={} max={}",
+                self.ssts.len(),
+                self.level_file_count(0),
+                self.level_file_count(MAX_LSM_LEVEL)
+            );
+        }
     }
 
     /// Rotate a full active mem into the imm slot **without** taking it out.
@@ -5174,14 +5416,27 @@ impl<E: Env> Db<E> {
         self.install_l0_ssts(vec![(table, file_num)])
     }
 
-    /// Install one or more flushed L0 SSTs (MANIFEST before success).
+    /// Install one or more flushed SSTs (MANIFEST before success).
     ///
     /// # Errors
     /// MANIFEST I/O (rolls back inventory).
     pub fn install_l0_ssts(&mut self, files: Vec<(SstTable, u64)>) -> Result<()> {
+        self.install_ssts_at_levels(files, &[])
+    }
+
+    /// Level-explicit flush install (RFC-0159 P0.2): `levels[i]` is the
+    /// level of `files[i]`; an empty / short slice defaults to L0.
+    ///
+    /// # Errors
+    /// MANIFEST I/O (rolls back inventory).
+    pub fn install_ssts_at_levels(
+        &mut self,
+        files: Vec<(SstTable, u64)>,
+        levels: &[u32],
+    ) -> Result<()> {
         // In-memory only. MANIFEST + SST `fdatasync` wait for WAL rotate so a
         // write burst is not charged one extra fd per 64 MiB flush (RFC-0041).
-        let _undo = self.apply_l0_installs(files);
+        let _undo = self.apply_sst_installs(files, levels);
         self.retire_flush_pin();
         Ok(())
     }
@@ -5460,8 +5715,14 @@ impl<E: Env> Db<E> {
                 return Err(self.fence_io_err(e));
             }
         };
+        // RFC-0159 P0.2: per-family install level (bulk spans go to the
+        // bottom level; everything else L0, unchanged).
+        let levels: Vec<u32> = files
+            .iter()
+            .map(|(t, _, _)| self.bulk_span_level(self.bulk_family_of_table(t), &imm))
+            .collect();
         let pairs: Vec<_> = files.into_iter().map(|(t, num, _)| (t, num)).collect();
-        if let Err(e) = self.install_l0_ssts(pairs) {
+        if let Err(e) = self.install_ssts_at_levels(pairs, &levels) {
             self.imm = Some(imm);
             return Err(self.fence_io_err(e));
         }
@@ -7670,6 +7931,7 @@ impl<E: Env> Db<E> {
             let families = self.batch_families(&batch);
             self.ensure_write_admitted_for(&families)?;
         }
+        self.observe_bulk_batch(&batch);
         // Assign sequences only for this attempt; roll back `next_seq` if WAL fails
         // so a failed multi-op does not burn sequence space (TX denser / mid-commit).
         let seq_checkpoint = self.next_seq;
@@ -8119,6 +8381,7 @@ impl<E: Env> Db<E> {
             let families = self.batch_families(&batch);
             self.ensure_write_admitted_for(&families)?;
         }
+        self.observe_bulk_batch(&batch);
         let st = self.phase_stats.clone();
         let t0 = st.as_ref().map(|_| Instant::now());
         let (ops, seq) = self.prepare_write_ops_spill(batch, false)?;
@@ -8176,6 +8439,7 @@ impl<E: Env> Db<E> {
             let families = self.batch_families(std::slice::from_ref(&batch));
             self.ensure_write_admitted_for(&families)?;
         }
+        self.observe_bulk_op(&batch);
         let st = self.phase_stats.clone();
         let t0 = st.as_ref().map(|_| Instant::now());
         let (op, seq) = self.prepare_one_spill(batch, false)?;
@@ -8234,6 +8498,7 @@ impl<E: Env> Db<E> {
             let families = self.batch_families(&ops);
             self.ensure_write_admitted_for(&families)?;
         }
+        self.observe_bulk_batch(&ops);
         let (records, seq) = self.prepare_write_ops(ops)?;
         if records.is_empty() {
             return Ok(seq);
@@ -8458,6 +8723,7 @@ impl<E: Env> Db<E> {
                 g.results[i] = Some(Ok(self.last_sequence()));
                 continue;
             }
+            self.observe_bulk_batch(&ops);
             match self.prepare_write_ops(ops) {
                 Ok((write_ops, last_seq)) => {
                     if do_sync {
@@ -9174,12 +9440,22 @@ impl<E: Env> Db<E> {
 
     /// Push flushed L0 SSTs into the in-memory inventory (no MANIFEST I/O).
     pub fn apply_l0_installs(&mut self, files: Vec<(SstTable, u64)>) -> L0InstallUndo {
+        self.apply_sst_installs(files, &[])
+    }
+
+    /// Level-explicit in-memory install (RFC-0159 P0.2 bulk chunks land at
+    /// `MAX_LSM_LEVEL`; missing entries default to L0).
+    pub fn apply_sst_installs(
+        &mut self,
+        files: Vec<(SstTable, u64)>,
+        levels: &[u32],
+    ) -> L0InstallUndo {
         let undo = L0InstallUndo {
             prev_next: self.next_file_num,
             prev_manifest: self.manifest_file_num,
             n: files.len(),
         };
-        for (table, file_num) in files {
+        for (i, (table, file_num)) in files.into_iter().enumerate() {
             self.adopt_sst(&table);
             self.note_sst_bytes_written(table.path());
             self.table_cache.insert(Arc::new(table.clone()));
@@ -9187,8 +9463,9 @@ impl<E: Env> Db<E> {
                 self.next_file_num = file_num.saturating_add(1);
             }
             self.unsynced_ssts.push(table.path().to_path_buf());
+            let level = levels.get(i).copied().unwrap_or(0);
             self.ssts.push(table);
-            self.sst_levels.push(0);
+            self.sst_levels.push(level);
         }
         self.note_sst_inventory_changed();
         undo
@@ -13059,6 +13336,7 @@ mod tests {
     fn auto_compact_l0_leaves_existing_l1() {
         let dir = temp_dir();
         let mut db = Db::open(&dir).unwrap();
+        db.bulk_route_enabled = false; // ladder mechanics; bulk would install at MAX
         for i in 0..L0_COMPACTION_TRIGGER {
             db.put([b'a', i as u8], [b'1', i as u8]).unwrap();
             db.flush().unwrap();
@@ -13589,6 +13867,7 @@ mod tests {
     fn parallel_jobs_batch_disjoint_and_correct() {
         let dir = temp_dir();
         let mut db = Db::open(&dir).unwrap();
+        db.bulk_route_enabled = false; // ladder mechanics; bulk would install at MAX
         db.set_defer_auto_compact(true);
         db.set_compact_target_file_bytes(64 * 1024);
         // Resting shape: L1 target 8 KiB pushes each round's file down to
@@ -13731,6 +14010,7 @@ mod tests {
     fn rewrite_caps_chunk_size_for_whole_level_merges() {
         let dir = temp_dir();
         let mut db = Db::open(&dir).unwrap();
+        db.bulk_route_enabled = false; // ladder mechanics; bulk would install at MAX
         db.set_defer_auto_compact(true);
         // Without the cap this merge would emit ONE file.
         db.set_compact_target_file_bytes(u64::MAX / 2);
@@ -15782,6 +16062,7 @@ mod tests {
             },
         )
         .unwrap();
+        db.bulk_route_enabled = false; // ladder mechanics; bulk would install at MAX
         let mut model = std::collections::BTreeMap::new();
         // Many small flushes to create multiple L0 SSTs, then compact subset to L1.
         for i in 0..N {
@@ -19047,6 +19328,261 @@ mod tests {
         );
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0159 P0.2: a latched family's pure-append span installs directly
+    /// at the bottom level; the repeated-key meta family stays on the
+    /// ladder; settle does not rewrite the bulk chunks; reopen restores
+    /// the levels.
+    #[test]
+    fn bulk_ingest_installs_latched_family_at_bottom_level() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into(), "meta".into()]);
+        let v = vec![b'v'; 200];
+        let mut keys = Vec::new();
+        for b in 0..40u32 {
+            let mut batch = Vec::new();
+            for j in 0..16u32 {
+                let k = format!("data\0{b:04}-{j:04}").into_bytes();
+                batch.push(BatchOp::put(k.clone(), v.clone()));
+                keys.push(k);
+            }
+            // The slipstream shape: one repeated cursor key in another
+            // family every batch.
+            batch.push(BatchOp::put(b"meta\0cursor".to_vec(), b"c".to_vec()));
+            db.apply_batch(batch).unwrap();
+        }
+        db.flush().unwrap();
+
+        let mut data_max = 0usize;
+        let mut data_elsewhere = 0usize;
+        let mut meta_l0 = 0usize;
+        let mut bulk_paths = Vec::new();
+        for (t, &lvl) in db.ssts.iter().zip(db.sst_levels.iter()) {
+            if t.cf() == "data" {
+                if lvl == MAX_LSM_LEVEL {
+                    data_max += 1;
+                    bulk_paths.push(t.path().to_path_buf());
+                } else {
+                    data_elsewhere += 1;
+                }
+            } else if t.cf() == "meta" && lvl == 0 {
+                meta_l0 += 1;
+            }
+        }
+        assert_eq!(
+            data_elsewhere,
+            0,
+            "every data chunk must land at the bottom level"
+        );
+        assert_eq!(data_max, 1, "one flush = one bulk chunk");
+        assert_eq!(meta_l0, 1, "repeated cursor key never latches");
+
+        for (i, k) in keys.iter().enumerate() {
+            assert_eq!(
+                db.get(k).as_deref(),
+                Some(&v[..]),
+                "bulk key {i} must read back"
+            );
+        }
+        assert_eq!(db.get(b"meta\0cursor").as_deref(), Some(&b"c"[..]));
+
+        // Settle is a no-op for the bulk family: chunk files unchanged.
+        db.compact().unwrap();
+        let after: Vec<std::path::PathBuf> = db
+            .ssts
+            .iter()
+            .zip(db.sst_levels.iter())
+            .filter(|(_, &l)| l == MAX_LSM_LEVEL)
+            .map(|(t, _)| t.path().to_path_buf())
+            .filter(|p| {
+                p.file_name()
+                    .is_some_and(|f| bulk_paths.iter().any(|b| b.file_name() == Some(f)))
+            })
+            .collect();
+        assert_eq!(after.len(), bulk_paths.len(), "compact rewrote bulk chunks");
+        for k in &keys {
+            assert_eq!(db.get(k).as_deref(), Some(&v[..]));
+        }
+
+        drop(db);
+        let db2 = Db::open(&dir).unwrap();
+        let max_files = db2
+            .ssts
+            .iter()
+            .zip(db2.sst_levels.iter())
+            .filter(|(_, &l)| l == MAX_LSM_LEVEL)
+            .count();
+        assert_eq!(max_files, 1, "reopen must restore the bottom-level chunk");
+        for (i, k) in keys.iter().enumerate() {
+            assert_eq!(db2.get(k).as_deref(), Some(&v[..]), "post-reopen {i}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0159 P0.2: a descending batch kills the family; later spans
+    /// install at L0 again and every version stays readable.
+    #[test]
+    fn bulk_ingest_descent_falls_back_to_ladder() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into()]);
+        let v = vec![b'v'; 120];
+        for b in 0..20u32 {
+            let mut batch = Vec::new();
+            for j in 0..4u32 {
+                let k = format!("data\0a{b:04}-{j:04}").into_bytes();
+                batch.push(BatchOp::put(k, v.clone()));
+            }
+            db.apply_batch(batch).unwrap();
+        }
+        db.flush().unwrap();
+        assert!(
+            db.ssts
+                .iter()
+                .zip(db.sst_levels.iter())
+                .any(|(t, &l)| t.cf() == "data" && l == MAX_LSM_LEVEL),
+            "ascending stream must bulk"
+        );
+
+        // Descent: a key below the flushed range kills the family.
+        db.apply_batch(vec![BatchOp::put(b"data\0a0000-0000".to_vec(), v.clone())])
+            .unwrap();
+        for b in 20..24u32 {
+            let mut batch = Vec::new();
+            for j in 0..4u32 {
+                let k = format!("data\0a{b:04}-{j:04}").into_bytes();
+                batch.push(BatchOp::put(k, v.clone()));
+            }
+            db.apply_batch(batch).unwrap();
+        }
+        db.flush().unwrap();
+        assert!(
+            db.ssts
+                .iter()
+                .zip(db.sst_levels.iter())
+                .any(|(t, &l)| t.cf() == "data" && l == 0),
+            "post-kill span must stay on the L0 ladder"
+        );
+        // Overwrite of an existing key still reads the newest version.
+        assert_eq!(db.get(b"data\0a0000-0000").as_deref(), Some(&v[..]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0159 P0.2: a delete in the span keeps the family latched (the
+    /// P0.1 rule) but routes that span's flush to L0 — a bottom-level
+    /// chunk may not carry an unmerged tombstone.
+    #[test]
+    fn bulk_ingest_tombstone_span_routes_ladder() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into()]);
+        let v = vec![b'v'; 120];
+        for b in 0..12u32 {
+            let mut batch = Vec::new();
+            for j in 0..4u32 {
+                let k = format!("data\0b{b:04}-{j:04}").into_bytes();
+                batch.push(BatchOp::put(k, v.clone()));
+            }
+            db.apply_batch(batch).unwrap();
+        }
+        db.flush().unwrap();
+        assert!(
+            db.ssts
+                .iter()
+                .zip(db.sst_levels.iter())
+                .any(|(t, &l)| t.cf() == "data" && l == MAX_LSM_LEVEL)
+        );
+
+        // Delete of an already-bulked key rides with the next span: that
+        // flush carries a tombstone so it routes the ladder, and the L0
+        // tombstone must shadow the bottom-level bulk chunk on reads.
+        db.apply_batch(vec![BatchOp::delete(b"data\0b0000-0000")])
+            .unwrap();
+        for b in 0..4u32 {
+            let mut batch = Vec::new();
+            for j in 0..4u32 {
+                let k = format!("data\0c{b:04}-{j:04}").into_bytes();
+                batch.push(BatchOp::put(k, v.clone()));
+            }
+            db.apply_batch(batch).unwrap();
+        }
+        db.flush().unwrap();
+        assert!(
+            db.ssts
+                .iter()
+                .zip(db.sst_levels.iter())
+                .any(|(t, &l)| t.cf() == "data" && l == 0),
+            "tombstone-carrying span must install at L0"
+        );
+        assert_eq!(
+            db.get(b"data\0b0000-0000").as_deref(),
+            None,
+            "L0 tombstone must shadow the bulk chunk at the bottom level"
+        );
+        assert_eq!(
+            db.get(b"data\0c0001-0001").as_deref(),
+            Some(&v[..]),
+            "put after the delete must survive"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0159 P0.2: no physical CFs — the single "default" family latches
+    /// and installs at the bottom level too.
+    #[test]
+    fn bulk_ingest_default_family_installs_at_bottom() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        for b in 0..12u32 {
+            let mut batch = Vec::new();
+            for j in 0..4u32 {
+                batch.push(BatchOp::put(
+                    format!("k{b:04}-{j:04}").into_bytes(),
+                    b"v".to_vec(),
+                ));
+            }
+            db.apply_batch(batch).unwrap();
+        }
+        db.flush().unwrap();
+        assert!(
+            db.ssts
+                .iter()
+                .zip(db.sst_levels.iter())
+                .any(|(_, &l)| l == MAX_LSM_LEVEL),
+            "default-family append stream must bulk"
+        );
+        assert_eq!(db.get(b"k0011-0003").as_deref(), Some(&b"v"[..]));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

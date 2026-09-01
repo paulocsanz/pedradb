@@ -64,10 +64,14 @@ sorted-ingest-architecture.md` (+ `run19-v21p-guest-25m.txt`).
   decision on the batch ops, latch state machine, conservative fallback
   semantics — pure logic + unit/kernel tests. — status: `done`
   (`crates/pedradb-core/src/bulk_ingest.rs`, 11 tests)
-- [ ] **P0.2** Bulk-run builder → direct-to-bottom disjoint install (chunked
-  SST write, manifest persist, read visibility over the open tail), with
-  `PEDRA_BULK_DIAG` counters. — status: `doing`
-- [ ] **P0.3** WAL ring for append mode: uninstalled tail only, segment GC
+- [x] **P0.2** Flush-path direct-to-bottom install: at flush time, a latched
+  family's pure-append span (strictly-ascending puts, no tombstones, hull
+  disjoint from the family's files at levels ≥ 1) installs its SST at
+  `MAX_LSM_LEVEL` instead of L0 — written once, never re-laddered, so settle
+  has nothing to push down. Ladder fallback on every disqualifier.
+  `PEDRA_BULK=0` kill switch; `PEDRA_BULK_DIAG` prints each non-L0 install
+  (`db.rs: bulk_span_level`). — status: `done` (4 tests in `db::tests`)
+70→- [ ] **P0.3** WAL ring for append mode: uninstalled tail only, segment GC
   after install, crash-replay equality test. — status: `todo`
 - [ ] **P0.4** End-to-end regression set: sorted ingest then
   gets/scans/probes equal the ladder path byte-for-byte; out-of-order
@@ -105,7 +109,7 @@ sorted-ingest-architecture.md` (+ `run19-v21p-guest-25m.txt`).
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | Sorted-stream detector + latch | done | `bulk_ingest.rs` | 2026-08-31 |
-| P0.2 | p0 | Bulk builder → direct-to-bottom install | doing | — | 2026-08-31 |
+| P0.2 | p0 | Bulk flush-path install at bottom level | done | `db.rs` (`bulk_span_level`, 4 tests) | 2026-09-01 |
 | P0.3 | p0 | WAL ring for append mode | todo | — | 2026-08-31 |
 | P0.4 | p0 | E2E regression set | todo | — | 2026-08-31 |
 | P0.5 | p0 | Local A/B + guest run #20 verdict | todo | — | 2026-08-31 |
