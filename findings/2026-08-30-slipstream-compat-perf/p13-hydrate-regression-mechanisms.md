@@ -289,3 +289,42 @@ mis-attributed a good run to a stale image). (3) The bench binary
 relinked as `/data/target/.../snapshot_backends-658f4d3d34281331` —
 the target dir lives on the persistent data volume, so build hashes
 persist across container restarts.
+
+## Run #31 (v30 = v29ac + PARKDIAG timers, guest 25M): residual FULLY
+## attributed — the wall is serial writer+worker CPU
+
+Reproduces #30 almost exactly: hydrate **76.8 s** (#30: 76.9), settle
+1.6 s, commit counted 19.2 s (wal 7465.0 / mem 10347.6 / prepare
+1335.1 ms), 88 chunks. PARKDIAG sums (88 chunks; local `awk` prints
+decimal commas):
+
+- prep (nums+ctx under write lock) **≈ 0**
+- files (`write_imm_l0_files` total) **44.8 s** — FLUSHSTAGES sums
+  38.1 s (enc 19.7 + lz4 9.3 + bloom 3.6 + crc 1.6 + write 3.9) →
+  **intra-write remainder 6.7 s** (~76 ms/chunk outside the stage
+  timers: fd/create/truncate/buffer work)
+- install (`bulk_span_level` + `apply_sst_installs` manifest/level/fd
+  + parked pop) **5.4 s** (~61 ms/chunk — the per-chunk MANIFEST
+  persist is the obvious suspect)
+- retire (Arc unwrap + retire-cache/drop) **4.0 s** (~45 ms/chunk)
+- AWAITDIAG lines: **0** — the bounded debt wait never slept; v29a
+  removed the waits entirely.
+
+New accounting: 19.2 (writer) + 54.2 (worker) = 73.4 s counted vs
+76.8 s wall → unattributed **~3.2 s** (memtable rotate/misc). Every
+block of the #29-era 61.5 s residual is now named: ~41 s assist lock
+queueing (v29a), ~6.7 s intra-write, 5.4 s install, 4.0 s retire.
+
+**The pipeline does not overlap**: writer total 19.2 s, worker total
+54.2 s, wall 76.8 ≈ their SUM — on ≥2 free cores a filled-chunk/
+materialize pipeline would bound the wall near max(19.2, 54.2) ≈ 55 s.
+This matches run #18's "one effective core" conclusion (the guest is
+`smp 4` but CPU-quota'd; MEMDIAGD's `cgcur=` field prints empty, so
+the quota itself is unverified — the sum-arithmetic is the evidence).
+Consequence: on this guest, hydrate wall ≈ total write-path CPU, and
+parallelism is not a lever — only per-cycle cuts are. Ranked levers
+with ceilings: enc+lz4 29.0 s (algorithmic), mem 10.3 s, wal 7.5 s
+(v29b prealloc + P0.3 WAL ring), intra-write 6.7 s (inspect
+`write_imm_l0_files`), install 5.4 s (P1.2 batched manifest), retire
+4.0 s. Reachable near-term floor without encode work: ~61 s (~0.56×
+vs rocks); hydrate ≥1× needs the encode/lz4 block.
