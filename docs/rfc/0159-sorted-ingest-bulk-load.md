@@ -118,7 +118,7 @@ sorted-ingest-architecture.md` (+ `run19-v21p-guest-25m.txt`).
 | P0.2 | p0 | Bulk flush-path install at bottom level | done | `db.rs` (`bulk_span_level`, 4 tests) + `concurrent.rs` funnels (3 tests) | 2026-09-01 |
 | P0.3 | p0 | WAL ring for append mode | todo | — | 2026-08-31 |
 | P0.4 | p0 | E2E regression set | todo | — | 2026-08-31 |
-| P0.5 | p0 | Local A/B + guest run #20 verdict | todo | — | 2026-08-31 |
+| P0.5 | p0 | Local A/B + guest verdict | in-progress | local 6M A/B done (`9698caf`): hydrate −39…−45 %, settle −25…−43 %, 22 BULKDIAG on-arm / 0 off; guest run #23 in flight | 2026-09-01 |
 | P1.1 | p1 | Zero-alloc bulk encode | part (caller-side read-back removed) | `db.rs` `table.rs` | 2026-08-31 |
 | P1.2 | p1 | Batched manifest persists | todo | — | 2026-08-31 |
 | P1.3 | p1 | Chunk-size sweep for reads | todo | — | 2026-08-31 |

@@ -1185,6 +1185,31 @@ tests in `concurrent::tests` drive the real funnels
 (`apply_batch_vec` + `flush`, deferred drain, parked materialize) and
 assert bottom-level installs.
 
+### v23 local 6M A/B — bulk engaged, −39…−45 % hydrate / −25…−43 % settle; stale-binary correction
+
+`PEDRA_BULK=0/1` kill switch, same binary, 2 interleaved rounds
+(fresh build; commit `9698caf`). **Correction:** the earlier "flat"
+local A/B that supported the non-engagement diagnosis ran a stale
+binary — `/tmp/slip-inject/target-local` held an Aug 31 pre-P0.2
+build (no `BULKDIAG`/`install_*` strings at all), while the stage
+rebuilds landed in `stage/target`. The A/B script now resolves the
+stage binary and hard-fails on a binary lacking `install_flush`.
+
+| 6M local | rocks default | off r1 | off r2 | on r1 | on r2 |
+|----------|---------------|--------|--------|-------|-------|
+| hydrate  | 20.3–22.7 s   | 61.5 s | 52.7 s | 33.5 s | 32.2 s |
+| settle   | 12.5–13.1 s   | 23.8 s | 18.0 s | 13.6 s | 13.6 s |
+
+On-arm BULKDIAG = 22 both rounds (21 `install_parked` + 1
+`install_flush`), off-arm 0. The parked-materialize funnel dominates:
+during hydrate the deferred CF auto-flush parks the data family, and
+the host worker materializes each parked table straight to the bottom
+level — the L0→L1→L2→L3 ladder tax disappears from hydrate, and
+settle's explicit flush installs its final span at the bottom too.
+Settle is at parity with Rocks locally (13.6 vs ~13 s); hydrate still
+behind (32–34 vs ~21 s — WAL/memtable apply CPU, next target).
+Guest run #23 (25M, v23 image) arbitrates at scale.
+
 ## Guest prefix_scan gap: local attribution (macOS `sample`, 6M)
 
 Where does a scan op actually go? Local 6M pedra-only prefix_scan,
