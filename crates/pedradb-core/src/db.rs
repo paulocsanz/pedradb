@@ -4985,6 +4985,32 @@ impl<E: Env> Db<E> {
         if mem.has_range_tombstones() {
             return 0;
         }
+        // RFC-0159 P1.4: incremental per-prefix span state — one map lookup
+        // instead of a full parked-table rescan per output file (run #33:
+        // 4.42 s of the 4.7 s install stage at 25M). Absorbed tables and
+        // exotic family names keep the legacy scan below.
+        let (lo, hi) = match mem.bulk_span(family) {
+            crate::memtable::BulkSpan::Absent | crate::memtable::BulkSpan::Impure => return 0,
+            crate::memtable::BulkSpan::Unknown => return self.bulk_span_level_scan(family, mem),
+            crate::memtable::BulkSpan::Pure { lo, hi } => (lo, hi),
+        };
+        for (t, &lvl) in self.ssts.iter().zip(self.sst_levels.iter()) {
+            if lvl == 0 || self.bulk_family_of_table(t) != family {
+                continue;
+            }
+            let (Some(tlo), Some(thi)) = (t.smallest_user_key(), t.largest_user_key()) else {
+                continue;
+            };
+            if tlo <= hi.as_ref() && thi >= lo.as_ref() {
+                return 0; // would stack over an existing lower-level file
+            }
+        }
+        MAX_LSM_LEVEL
+    }
+
+    /// Legacy whole-memtable scan for [`Self::bulk_span_level`] — fallback
+    /// when the incremental span state is not tracked (absorbed tables).
+    fn bulk_span_level_scan(&self, family: &str, mem: &MemTable) -> u32 {
         let mut prev: Option<&[u8]> = None;
         let mut lo: Option<&[u8]> = None;
         let mut hi: &[u8] = &[];
