@@ -80,7 +80,7 @@ pub(crate) struct LevelFile {
 impl LevelFile {
     /// Overlaps the half-open hull `[hull_lo, hull_hi]` (inclusive both ends:
     /// ranges carry concrete smallest/largest keys).
-    fn overlaps(&self, hull_lo: &[u8], hull_hi: &[u8]) -> bool {
+    pub(crate) fn overlaps(&self, hull_lo: &[u8], hull_hi: &[u8]) -> bool {
         self.lo.as_slice() <= hull_hi && self.hi.as_slice() >= hull_lo
     }
 }

@@ -80,6 +80,7 @@ use crate::wal::Wal;
 use parking_lot::Mutex;
 use std::io::{Read, Write};
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 /// Max LSM level we promote into (L0 = flush target, L1+ = compacted).
 pub const MAX_LSM_LEVEL: u32 = 3;
@@ -822,6 +823,35 @@ pub(crate) trait ParallelMerge: Send + Sync {
         chunk_budget: usize,
         kit: Option<crate::cache::PayloadKit>,
     ) -> Result<Vec<SstTable>>;
+
+    /// Write N pairwise key-disjoint jobs concurrently — one thread per
+    /// job, each job merged sequentially (across-job parallelism; the
+    /// within-job [`Self::merge`] spans are a separate, opt-in dimension).
+    /// Returns outputs in job order, CF-attached exactly like
+    /// [`PreparedL0Compact::write`]. Each job's reserved file-number range
+    /// is its own (`build_prepared` burned disjoint ranges in prepare
+    /// order), so concurrent writers cannot collide. Nothing is installed;
+    /// the caller installs sequentially and may drop everything on error.
+    ///
+    /// # Errors
+    /// SST encode / I/O of any job (first error wins; siblings' output
+    /// files are orphaned tmp/rename artifacts the caller's failure path
+    /// already tolerates — nothing references them).
+    fn merge_jobs(&self, jobs: Vec<ParallelJobSpec>) -> Result<Vec<Vec<SstTable>>>;
+}
+
+/// E-free payload of one prepared job for [`ParallelMerge::merge_jobs`] —
+/// the env lives in the executor, so the trait stays object-safe.
+pub(crate) struct ParallelJobSpec {
+    pub(crate) inputs: Vec<SstTable>,
+    pub(crate) file_num: u64,
+    pub(crate) cf: String,
+    pub(crate) gc: crate::merge::CompactGcOptions,
+    pub(crate) dir: PathBuf,
+    pub(crate) sync: bool,
+    pub(crate) split_target: u64,
+    pub(crate) chunk_budget: usize,
+    pub(crate) kit: Option<crate::cache::PayloadKit>,
 }
 
 /// Concrete [`ParallelMerge`] for any thread-shareable env.
@@ -862,6 +892,72 @@ where
             kit.as_ref(),
         )
     }
+
+    fn merge_jobs(&self, jobs: Vec<ParallelJobSpec>) -> Result<Vec<Vec<SstTable>>> {
+        if jobs.len() <= 1 {
+            return jobs.into_iter().map(|j| self.write_spec(&j)).collect();
+        }
+        let results: Vec<Result<Vec<SstTable>>> = std::thread::scope(|scope| {
+            let handles: Vec<_> = jobs
+                .into_iter()
+                .map(|spec| scope.spawn(move || self.write_spec(&spec)))
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| {
+                    h.join().unwrap_or_else(|_| {
+                        Err(CoreError::Internal("parallel compaction job panicked".into()))
+                    })
+                })
+                .collect()
+        });
+        results.into_iter().collect()
+    }
+}
+
+impl<E: Env> ParallelMergeEnv<E> {
+    /// One job, sequentially — the per-thread body of `merge_jobs` and the
+    /// single-job fallback. Mirrors `PreparedL0Compact::write_merged_with_cf`
+    /// (same `write_merged_tables` call shape + CF attachment).
+    fn write_spec(&self, spec: &ParallelJobSpec) -> Result<Vec<SstTable>> {
+        write_merged_tables(
+            &self.env,
+            &spec.dir,
+            spec.file_num,
+            &spec.inputs,
+            spec.gc,
+            spec.sync,
+            spec.split_target,
+            spec.chunk_budget,
+            spec.kit.as_ref(),
+        )
+        .map(|ts| {
+            ts.into_iter()
+                .map(|t| t.with_cf(spec.cf.clone()))
+                .collect::<Vec<_>>()
+        })
+    }
+}
+
+/// `PEDRA_PARALLEL_MERGE=1`: within-job key-space span merges (installed
+/// seam only). Guest run #17 measured this neutral on the guest and the
+/// local 6M A/B was net-negative — default off.
+fn parallel_merge_enabled() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("PEDRA_PARALLEL_MERGE").is_some_and(|v| v == "1"))
+}
+
+/// `PEDRA_PARALLEL_JOBS`: max concurrently-written disjoint compaction
+/// jobs in `Db::compact_leveled`, clamped 1..=8. Default 1 (off).
+fn parallel_jobs_from_env() -> usize {
+    static K: OnceLock<usize> = OnceLock::new();
+    *K.get_or_init(|| {
+        std::env::var("PEDRA_PARALLEL_JOBS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(1)
+            .clamp(1, 8)
+    })
 }
 
 impl<E: Env> PreparedL0Compact<E> {
@@ -879,13 +975,33 @@ impl<E: Env> PreparedL0Compact<E> {
     /// # Errors
     /// SST encode / I/O. On error the live L0 inventory is unchanged.
     pub fn write(&self) -> Result<Vec<SstTable>> {
+        // PEDRA_LEVEL_DIAG: per-job merge+encode wall time — splits a slow
+        // settle/ingest between fd barriers, memtable flush, and compaction.
+        let t0 = std::env::var_os("PEDRA_LEVEL_DIAG").map(|_| Instant::now());
+        let out = self.write_merged_with_cf();
+        if let Some(t0) = t0 {
+            let n_out = out.as_ref().map(Vec::len).unwrap_or(0);
+            println!(
+                "COMPDUR ms={} inputs={} outputs={}",
+                t0.elapsed().as_millis(),
+                self.inputs.len(),
+                n_out
+            );
+        }
+        out
+    }
+
+    fn write_merged_with_cf(&self) -> Result<Vec<SstTable>> {
         let cf = self
             .inputs
             .first()
             .map(|t| t.cf().to_string())
             .unwrap_or_default();
+        // The seam is installed for either parallel dimension; only the
+        // within-job spans opt in here (run #17 no-go keeps them off by
+        // default). Across-job batching goes through `merge_jobs` instead.
         let merged = match &self.parallel {
-            Some(pm) => pm.merge(
+            Some(pm) if parallel_merge_enabled() => pm.merge(
                 self.file_num,
                 &self.inputs,
                 &self.dir,
@@ -895,7 +1011,7 @@ impl<E: Env> PreparedL0Compact<E> {
                 self.chunk_budget,
                 self.kit.clone(),
             ),
-            None => write_merged_tables(
+            _ => write_merged_tables(
                 &self.env,
                 &self.dir,
                 self.file_num,
@@ -912,6 +1028,26 @@ impl<E: Env> PreparedL0Compact<E> {
                 .map(|t| t.with_cf(cf.clone()))
                 .collect::<Vec<_>>()
         })
+    }
+
+    /// E-free copy of this job for [`ParallelMerge::merge_jobs`] (the
+    /// executor owns the env; inputs are cheap `Arc` clones).
+    fn job_spec(&self) -> ParallelJobSpec {
+        ParallelJobSpec {
+            inputs: self.inputs.clone(),
+            file_num: self.file_num,
+            cf: self
+                .inputs
+                .first()
+                .map(|t| t.cf().to_string())
+                .unwrap_or_default(),
+            gc: self.gc,
+            dir: self.dir.clone(),
+            sync: self.sync,
+            split_target: self.split_target,
+            chunk_budget: self.chunk_budget,
+            kit: self.kit.clone(),
+        }
     }
 }
 
@@ -1349,6 +1485,12 @@ pub struct Db<E: Env = StdEnv> {
     /// bounded host open path ([`ConcurrentDb::open_with_env_bounded`]) where
     /// `E: Send + Sync + 'static` holds; `None` = sequential merges.
     parallel_merge: Option<Arc<dyn ParallelMerge>>,
+    /// Max concurrently-written pairwise-disjoint pushdown jobs in
+    /// [`Self::compact_leveled`] (across-job parallelism; each job still
+    /// merges sequentially). 1 = off. Set from `PEDRA_PARALLEL_JOBS` on the
+    /// host open path; needs [`Self::parallel_merge`] installed (thread-
+    /// shareable env).
+    parallel_jobs: usize,
     /// Durable commits since the last CHANGELOG store.
     commits_since_changelog: u64,
     /// Successful CHANGELOG stores since open.
@@ -1442,7 +1584,29 @@ impl<E: Env> Db<E> {
         let source: Arc<dyn crate::env::SstFileSource> = Arc::new(
             crate::env::CachedEnvSource::new(<E as Clone>::clone(&env), Arc::clone(&file_cache)),
         );
-        Self::open_with_env_sourced(path, opts, env, Some(source), file_cache)
+        // Parallel merge executor for thread-shareable envs. Two opt-in
+        // dimensions share the seam: within-job key-space spans
+        // (`PEDRA_PARALLEL_MERGE=1` — guest run #17 neutral, local 6M A/B
+        // net-negative: settle 7.9 vs 5.9 s, apply ~3× slower; stays off)
+        // and across-job disjoint-batch compaction (`PEDRA_PARALLEL_JOBS`,
+        // default 1 = off). Either being on needs the concrete executor
+        // installed; the historical no-seam path (tests, generic envs)
+        // merges sequentially either way.
+        let jobs_k = parallel_jobs_from_env();
+        let seam: Option<Arc<dyn ParallelMerge>> =
+            if parallel_merge_enabled() || jobs_k > 1 {
+                Some(Arc::new(ParallelMergeEnv::new(<E as Clone>::clone(
+                    &env,
+                ))))
+            } else {
+                None
+            };
+        let mut db = Self::open_with_env_sourced(path, opts, env, Some(source), file_cache)?;
+        if let Some(pm) = seam {
+            db.set_parallel_merge(pm);
+        }
+        db.parallel_jobs = jobs_k;
+        Ok(db)
     }
 
     /// Shared open path; `source = Some` arms the payload pool before
@@ -1860,6 +2024,7 @@ impl<E: Env> Db<E> {
             compact_target_file_bytes: crate::compact_kernel::COMPACT_TARGET_FILE_BYTES,
             l1_target_bytes: crate::compact_kernel::COMPACT_TARGET_FILE_BYTES,
             parallel_merge: None,
+            parallel_jobs: 1,
             commits_since_changelog: 0,
             changelog_store_count: 0,
             unsynced_ssts: Vec::new(),
@@ -4896,6 +5061,23 @@ impl<E: Env> Db<E> {
         imm: &MemTable,
         nums: &[u64],
     ) -> Result<Vec<(SstTable, u64, PathBuf)>> {
+        // PEDRA_FLUSH_DIAG: per-memtable SST encode+write wall time (the
+        // drain the hydrate writer parks behind), regardless of caller.
+        let t0 = std::env::var_os("PEDRA_FLUSH_DIAG").map(|_| Instant::now());
+        let out = Self::write_imm_l0_files_inner(env, dir, sync, imm, nums);
+        if let Some(t0) = t0 {
+            println!("FLUSHDUR ms={}", t0.elapsed().as_millis());
+        }
+        out
+    }
+
+    fn write_imm_l0_files_inner(
+        env: &E,
+        dir: &Path,
+        sync: bool,
+        imm: &MemTable,
+        nums: &[u64],
+    ) -> Result<Vec<(SstTable, u64, PathBuf)>> {
         let families = if nums.len() > 1 {
             imm.cf_families()
         } else {
@@ -5393,19 +5575,61 @@ impl<E: Env> Db<E> {
         }
         self.dump_level_diag("compact_leveled_start");
         self.repair_stacked_levels()?;
+        // Across-job batching: only with a thread-shareable env (the seam)
+        // and `parallel_jobs > 1`; the batch's disjoint-job writes then run
+        // on scoped threads through `ParallelMerge::merge_jobs` while this
+        // loop (under the write lock) waits — the lock discipline is
+        // unchanged, the drain wall time shrinks.
+        let jobs_k = match &self.parallel_merge {
+            Some(_) => self.parallel_jobs.clamp(1, 8),
+            None => 1,
+        };
         // Safety valve only: every job strictly removes an L0 file or moves
         // one file out of an over-target level, so the loop converges.
         for _ in 0..100_000 {
-            let job = match self.prepare_l0_compact(CompactOptions::default())? {
-                Some(j) => Some(j),
-                None => self.prepare_pushdown_compact()?,
-            };
-            let Some(job) = job else {
-                self.dump_level_diag("compact_leveled_done");
-                return Ok(());
-            };
-            let tables = job.write()?;
-            self.install_prepared_l0_compact(job, tables)?;
+            // L0→L1 jobs stay one-at-a-time: they absorb the newest flush
+            // and the overlapping L1 slice, and two of them would share it.
+            if let Some(job) = self.prepare_l0_compact(CompactOptions::default())? {
+                let tables = job.write()?;
+                self.install_prepared_l0_compact(job, tables)?;
+                continue;
+            }
+            let batch = self.prepare_disjoint_pushdown_batch(jobs_k)?;
+            match batch.len() {
+                0 => {
+                    self.dump_level_diag("compact_leveled_done");
+                    return Ok(());
+                }
+                1 => {
+                    let job = batch.into_iter().next().expect("len checked");
+                    let tables = job.write()?;
+                    self.install_prepared_l0_compact(job, tables)?;
+                }
+                n => {
+                    // PEDRA_LEVEL_DIAG: batch wall (per-job lines only cover
+                    // the single-job arms; the sum is this line's outputs).
+                    let t0 = std::env::var_os("PEDRA_LEVEL_DIAG").map(|_| Instant::now());
+                    let specs: Vec<ParallelJobSpec> =
+                        batch.iter().map(PreparedL0Compact::job_spec).collect();
+                    let Some(pm) = self.parallel_merge.clone() else {
+                        // Unreachable (jobs_k > 1 requires the seam); stay
+                        // correct anyway — sequential fallback.
+                        for job in batch {
+                            let tables = job.write()?;
+                            self.install_prepared_l0_compact(job, tables)?;
+                        }
+                        continue;
+                    };
+                    let outputs = pm.merge_jobs(specs)?;
+                    if let Some(t0) = t0 {
+                        let total: usize = outputs.iter().map(Vec::len).sum();
+                        println!("COMPDUR jobs={n} outputs={total} ms={}", t0.elapsed().as_millis());
+                    }
+                    for (job, tables) in batch.into_iter().zip(outputs) {
+                        self.install_prepared_l0_compact(job, tables)?;
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -5849,6 +6073,101 @@ impl<E: Env> Db<E> {
         Ok(None)
     }
 
+    /// Up to `max_jobs` **pairwise key-disjoint** pushdown jobs from the
+    /// first over-target (level, family) — same priority as
+    /// [`Self::prepare_pushdown_compact`], but instead of only the oldest
+    /// source file it walks the source view oldest-first and keeps every
+    /// candidate whose *combined input hull* (source ∪ overlapping
+    /// destination files) stays clear of every already-claimed hull. Hull
+    /// disjointness gives both safety properties the batch needs: no
+    /// shared input file (a wide destination file spanning two sources is
+    /// absorbed by whichever job claims it first), and disjoint output
+    /// ranges at the destination level, so the sequential installs
+    /// commute exactly like today's one-at-a-time installs.
+    /// `max_jobs <= 1` delegates to the single-job picker (unchanged
+    /// behavior). Returns an empty vec when nothing can push down.
+    fn prepare_disjoint_pushdown_batch(
+        &mut self,
+        max_jobs: usize,
+    ) -> Result<Vec<PreparedL0Compact<E>>> {
+        if max_jobs <= 1
+            || !crate::leveling::leveled_enabled()
+            || self.ssts.is_empty()
+        {
+            return self
+                .prepare_pushdown_compact()
+                .map(|j| j.into_iter().collect());
+        }
+        let families: Vec<String> = self
+            .ssts
+            .iter()
+            .map(|t| self.compact_family_key(t).to_string())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        for level in 1..MAX_LSM_LEVEL {
+            let target = crate::leveling::level_target_bytes(level, self.l1_target_bytes);
+            for cf in &families {
+                let src_view = self.level_view(level, cf);
+                if src_view.is_empty()
+                    || crate::leveling::total_bytes(&src_view) <= target
+                {
+                    continue;
+                }
+                let dst_view = self.level_view(level + 1, cf);
+                // Same gate `pick_pushdown` applies: a stacked destination
+                // needs a repair rewrite, not a batch.
+                if !crate::leveling::is_disjoint(&dst_view) {
+                    continue;
+                }
+                let mut jobs: Vec<PreparedL0Compact<E>> = Vec::new();
+                let mut hulls: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+                for src in &src_view {
+                    if jobs.len() >= max_jobs {
+                        break;
+                    }
+                    let slice: Vec<&crate::leveling::LevelFile> = dst_view
+                        .iter()
+                        .filter(|f| f.overlaps(&src.lo, &src.hi))
+                        .collect();
+                    let mut lo = src.lo.clone();
+                    let mut hi = src.hi.clone();
+                    for f in &slice {
+                        if f.lo < lo {
+                            lo = f.lo.clone();
+                        }
+                        if f.hi > hi {
+                            hi = f.hi.clone();
+                        }
+                    }
+                    // Reject when the hull touches any claimed hull
+                    // (shared boundary = overlap, matching `is_disjoint`).
+                    if hulls
+                        .iter()
+                        .any(|(l2, h2)| !(hi < *l2 || *h2 < lo))
+                    {
+                        continue;
+                    }
+                    let mut inputs: Vec<SstTable> = vec![self.ssts[src.idx].clone()];
+                    for f in &slice {
+                        inputs.push(self.ssts[f.idx].clone());
+                    }
+                    let Some(job) =
+                        self.build_prepared(inputs, level + 1, crate::merge::CompactGcOptions::default())?
+                    else {
+                        continue;
+                    };
+                    hulls.push((lo, hi));
+                    jobs.push(job);
+                }
+                if !jobs.is_empty() {
+                    return Ok(jobs);
+                }
+            }
+        }
+        Ok(Vec::new())
+    }
+
     /// Reservation tail shared by every prepared leveled job: burn a chunk
     /// range wide enough for the whole output, snapshot dir/env/kit.
     fn build_prepared(
@@ -5911,6 +6230,13 @@ impl<E: Env> Db<E> {
     /// sequentially.
     pub(crate) fn set_parallel_merge(&mut self, pm: Arc<dyn ParallelMerge>) {
         self.parallel_merge = Some(pm);
+    }
+
+    /// Override the across-job batch width (tests; the host open path sets
+    /// it from `PEDRA_PARALLEL_JOBS`). Needs [`Self::set_parallel_merge`]
+    /// to take effect.
+    pub(crate) fn set_parallel_jobs(&mut self, k: usize) {
+        self.parallel_jobs = k.clamp(1, 8);
     }
 
     /// Scheduling view of one family's files at `level` (inventory indices
@@ -13227,6 +13553,100 @@ mod tests {
         db.install_prepared_l0_compact(job, tables).unwrap();
         assert!(db.get(&[b'k', 0]).is_some(), "store reads after install");
         db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Across-job batching (v21o): `prepare_disjoint_pushdown_batch` must
+    /// return pairwise key-disjoint jobs (shared-boundary = overlap), and a
+    /// full `compact_leveled` drain through the real `ParallelMergeEnv`
+    /// executor (scoped threads) must leave every key readable, every level
+    /// a disjoint run set, and a reopen-able MANIFEST.
+    #[test]
+    fn parallel_jobs_batch_disjoint_and_correct() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.set_defer_auto_compact(true);
+        db.set_compact_target_file_bytes(64 * 1024);
+        // Resting shape: L1 target 8 KiB pushes each round's file down to
+        // L2, while L2's 10× fan-out target holds all rounds (~5 KiB each).
+        db.l1_target_bytes = 8 * 1024;
+        let mut expect = std::collections::BTreeMap::new();
+        for round in 0..8u8 {
+            for i in 0..32u8 {
+                let key = [round, i];
+                let val = vec![0xA5u8; 64];
+                db.put(key, val.clone()).unwrap();
+                expect.insert(key.to_vec(), val);
+            }
+            db.flush().unwrap();
+            // No seam installed yet: this drains one job at a time, so the
+            // fixture shape is the pre-v21o sequential behavior.
+            db.compact_leveled().unwrap();
+        }
+        // Squeeze L2 over target so pushdowns are available.
+        db.l1_target_bytes = 1024;
+        let batch = db.prepare_disjoint_pushdown_batch(4).unwrap();
+        assert_eq!(batch.len(), 4, "fixture must fill the requested width");
+        let hulls: Vec<(Vec<u8>, Vec<u8>)> = batch
+            .iter()
+            .map(|j| {
+                let lo = j
+                    .inputs
+                    .iter()
+                    .map(|t| t.smallest_user_key().unwrap_or(&[]).to_vec())
+                    .min()
+                    .unwrap();
+                let hi = j
+                    .inputs
+                    .iter()
+                    .map(|t| t.largest_user_key().unwrap_or(&[]).to_vec())
+                    .max()
+                    .unwrap();
+                (lo, hi)
+            })
+            .collect();
+        for a in 0..hulls.len() {
+            for b in (a + 1)..hulls.len() {
+                let (loa, hia) = &hulls[a];
+                let (lob, hib) = &hulls[b];
+                assert!(
+                    hia < lob || hib < loa,
+                    "job hulls must be disjoint: {hulls:?}"
+                );
+            }
+        }
+        // Dropping a prepared batch burns only file numbers; inputs stay
+        // live. Now drain through the real parallel executor.
+        db.set_parallel_merge(Arc::new(ParallelMergeEnv::new(StdEnv)));
+        db.set_parallel_jobs(4);
+        db.compact_leveled().unwrap();
+        let scan: Vec<(Vec<u8>, Vec<u8>)> = db
+            .scan(
+                std::ops::Bound::Unbounded,
+                std::ops::Bound::Unbounded,
+            )
+            .map(|kv| (kv.key.to_vec(), kv.value.to_vec()))
+            .collect();
+        let want: Vec<(Vec<u8>, Vec<u8>)> = expect.into_iter().collect();
+        assert_eq!(scan, want, "every key survives the parallel drain");
+        for level in 1..=MAX_LSM_LEVEL {
+            let view = db.level_view(level, "");
+            assert!(
+                crate::leveling::is_disjoint(&view),
+                "level {level} stacked after parallel drain"
+            );
+        }
+        db.close().unwrap();
+        let reopened = Db::open(&dir).unwrap();
+        let rescan: Vec<(Vec<u8>, Vec<u8>)> = reopened
+            .scan(
+                std::ops::Bound::Unbounded,
+                std::ops::Bound::Unbounded,
+            )
+            .map(|kv| (kv.key.to_vec(), kv.value.to_vec()))
+            .collect();
+        assert_eq!(rescan, want, "manifest recovers the batched installs");
+        drop(reopened);
         let _ = fs::remove_dir_all(&dir);
     }
 

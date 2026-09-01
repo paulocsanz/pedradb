@@ -16,6 +16,11 @@ use std::io::BufReader;
 use std::path::Path;
 
 use crate::env::{Env, EnvFile, StdEnv};
+
+fn walfd_diag_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("PEDRA_FDSYNC_DIAG").is_some())
+}
 use crate::error::{CoreError, Result};
 
 pub mod crc;
@@ -239,6 +244,35 @@ impl<F: EnvFile> Wal<F> {
     /// # Errors
     /// Returns [`std::io::Error`] propagated from flush or `sync_data`.
     pub fn sync_data(&mut self) -> Result<()> {
+        // PEDRA_FDSYNC_DIAG: the per-batch G1 barrier lives here — the
+        // underlying `E::File` may resolve to the inherent std method
+        // (Linux `fdatasync` inside std), bypassing the posix choke-point
+        // counter, so count at this seam instead.
+        if !walfd_diag_enabled() {
+            return self.sync_data_inner();
+        }
+        let t0 = std::time::Instant::now();
+        let out = self.sync_data_inner();
+        let us = t0.elapsed().as_micros() as u64;
+        static NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        static MAX_US: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        use std::sync::atomic::Ordering::Relaxed;
+        NS.fetch_add(us * 1000, Relaxed);
+        MAX_US.fetch_max(us, Relaxed);
+        let n = N.fetch_add(1, Relaxed) + 1;
+        if n % 2048 == 0 {
+            println!(
+                "WALFDIAG n={n} cum_ms={} avg_us={:.0} max_ms={:.1}",
+                NS.load(Relaxed) / 1_000_000,
+                (NS.load(Relaxed) / 1000) / n,
+                MAX_US.load(Relaxed) as f64 / 1000.0,
+            );
+        }
+        out
+    }
+
+    fn sync_data_inner(&mut self) -> Result<()> {
         self.write_pending_frame()?;
         self.writer.flush()?;
         if self.full_fsync {

@@ -66,9 +66,43 @@ fn posix_rc_to_io(rc: i32) -> io::Result<()> {
 
 /// `fdatasync(2)` on `file`'s data (not Apple `F_FULLFSYNC`).
 ///
+/// `PEDRA_FDSYNC_DIAG=1` prints an aggregate line every 2048 barriers —
+/// the **in-load** fd cost (idle probes understate it), the number that
+/// bounds any write leg whose batches ack behind one barrier each.
+///
 /// # Errors
 /// Underlying I/O.
 pub fn fdatasync_file(file: &File) -> io::Result<()> {
+    if !fdsync_diag_enabled() {
+        return fdatasync_file_inner(file);
+    }
+    let t0 = std::time::Instant::now();
+    let out = fdatasync_file_inner(file);
+    let us = t0.elapsed().as_micros() as u64;
+    static NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    static MAX_US: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    use std::sync::atomic::Ordering::Relaxed;
+    NS.fetch_add(us * 1000, Relaxed);
+    MAX_US.fetch_max(us, Relaxed);
+    let n = N.fetch_add(1, Relaxed) + 1;
+    if n % 2048 == 0 {
+        println!(
+            "FDSYNCDIAG n={n} cum_ms={} avg_us={:.0} max_ms={:.1}",
+            NS.load(Relaxed) / 1_000_000,
+            (NS.load(Relaxed) / 1000) / n,
+            MAX_US.load(Relaxed) as f64 / 1000.0,
+        );
+    }
+    out
+}
+
+fn fdsync_diag_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("PEDRA_FDSYNC_DIAG").is_some())
+}
+
+fn fdatasync_file_inner(file: &File) -> io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::fd::AsRawFd;

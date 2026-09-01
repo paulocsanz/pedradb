@@ -1080,7 +1080,7 @@ local reading with the same overhead included (~70 ns/row local).
 
 | leg (25M)              | run #13 | run #15 (v21l)  | rocks default | #15 ratio |
 |------------------------|---------|-----------------|---------------|-----------|
-| hydrate                | 143.7 s | 155.7 s         | 25.3 s        | 0.16× (fd ceiling) |
+| hydrate                | 143.7 s | 155.7 s         | 25.3 s        | 0.16× (see run #17 correction) |
 | settle                 | 52.0 s  | 53.3 s          | 8.3 s         | 0.16×     |
 | probe_hit p50          | 33.9 µs | 37.9 µs         | 45.4 µs       | 1.20×     |
 | probe_miss p50         | 2.5 µs  | 2.7 µs          | rocks-class   | ~1×       |
@@ -1138,3 +1138,196 @@ L3 46×2.47 GiB). So the 52–53 s settle is a ~2.4 GiB single-writer
 rewrite (~46 MiB/s effective) — the settle-2 lever (batch pairwise-
 disjoint jobs, parallel write via the ParallelMerge seam, sequential
 install) now has its number: **parallelize ~2.4 GiB of L2→L3 pushdown**.
+
+## v21m + Guest run #16 (25M) — hydrate/settle attribution under load
+
+v21m = `PEDRA_FDSYNC_DIAG=1` (posix `fdatasync_file` choke point:
+count/ns/max per 2048 barriers), `FLUSHDUR` (per-memtable SST write in
+`write_imm_l0_files`), `COMPDUR` (per compaction job in
+`PreparedL0Compact::write`). SCAN_DIAG off. Raw serial:
+`run16-25m-hydratediag.txt`. hydrate 145.9 s, settle 49.5 s, disk
+5.15 GiB — same regime as #13/#15.
+
+| bucket (25M)                | wall       | notes                                   |
+|-----------------------------|------------|-----------------------------------------|
+| memtable flushes (26)       | 60.7 s     | avg 2.4 s per 256 MiB flush (~110 MiB/s)|
+| compaction jobs (164)       | 152.8 s    | top job 1.44 s; avg 0.93 s              |
+| fdatasync_file (≥12 288)    | ≥47.4 s    | first 2048 avg 15.8 ms (32.5 s!) — big-file syncs; later ~1.5 ms |
+| WAL per-batch barriers      | uncounted  | see bypass below                        |
+
+Sum (260.9 s) exceeds the 195.4 s hydrate+settle wall — flush/compaction
+run on the compat worker while the writer runs, and the writer parks
+behind the drain (FLUSHDIAG parked_n=1 with a full 256 MiB memtable,
+repeatedly).
+
+Two structural findings:
+
+- **The parallel merge seam was never installed.** `set_parallel_merge`
+  has no caller — compat or bench — so all 164 jobs and 26 flushes ran
+  sequential. The seam (`ParallelMergeEnv` → `write_merged_tables_parallel`,
+  key-disjoint spans, ≥96 MiB inputs, ≤8 spans) is complete and tested in
+  core; it just never executes. Local 6M A/B (parallel default-on vs
+  `PEDRA_PARALLEL_MERGE=0`): **net negative locally** — settle 7.9 vs
+  5.9 s, apply leg ~3× slower (span sharding over-smalls files on this
+  machine). Shipped as opt-in (`PEDRA_PARALLEL_MERGE=1`, installed
+  automatically in `open_with_env_bounded`); guest run #17 is the ON
+  arm against run #16's sequential baseline.
+- **The WAL per-batch barrier bypasses the posix counter**: `Wal::sync_data`
+  → `inner_mut().sync_data()` on concrete `W = std::fs::File` resolves to
+  the *inherent* std method (Linux `fdatasync` inside std), not the
+  `EnvFile` trait impl that routes to `fdatasync_file`. So the ~24 414
+  G1 batch barriers are invisible to the posix choke point; v21n adds
+  `WALFDIAG` at `Wal::sync_data` itself. The counted ≥12 288 big syncs
+  (15.8 ms avg class) are SST/flush-side — per-file, not per-chunk
+  (SSTs sync once per file, table.rs:2371).
+
+## v21n + Guest run #17 (25M) — parallel merge no-go; hydrate is BARRIER-FREE
+
+v21n = `PEDRA_PARALLEL_MERGE=1` exported in the guest entrypoint (the
+opt-in seam auto-installs `ParallelMergeEnv` in `open_with_env_bounded`)
++ `WALFDIAG` (counters at `Wal::sync_data` itself, prints every 2048).
+Raw serial: `run17-25m-parallel.txt`.
+
+| leg (25M) | run #16 (seq) | run #17 (parallel ON) |
+|-----------|---------------|------------------------|
+| hydrate   | 145.9 s       | 158.5 s (11.23 GiB, 482 B/entry) |
+| settle    | 49.5 s        | 54.7 s (5.15 GiB after) |
+| 26 flushes   | 60.7 s (2.4 s avg) | 66.0 s (2.54 s avg) |
+| 164 compaction jobs | 152.8 s (0.93 s avg) | 164.8 s (1.005 s avg) |
+| posix fdatasync | ≥12 288 = ≥47.4 s | ≥10 240 = 48.1 s (max 515.9 ms) |
+
+**Parallel-within-job merge is neutral on the guest** (hydrate band
+143.7–158.5 s across #13–#17, settle band 47.9–54.7 s) and net-negative
+locally (settle +34 %, apply leg ~3×). Lever **closed as no-go** —
+consistent with the guest drain being disk-throughput-bound, not CPU-
+bound. `PEDRA_PARALLEL_MERGE` stays opt-in default-off.
+
+### Major correction — the fd-ceiling hydrate story was wrong for this bench
+
+- `WALFDIAG` printed **zero lines** in run #17. The instrument prints at
+  exact multiples of 2048 calls, so zero lines proves **< 2048 calls**
+  vs ~24 414 batches (< 8 %); the mechanism says zero outright:
+  `need_sync = inflight.needs_sync()` = `any_sync && …`, and no bench
+  write requests sync — `snapshot_pedradb.rs` builds `PedraDbConfig`
+  with `sync: false` (default, line 89), opens `set_sync(false)`
+  (line 120), applies every write with `wo.set_sync(self.config.sync)`
+  (line 323); the `sync: true` at line 369 is only the export/verify
+  checkpoint. The rocks backend is the same (snapshot_rocksdb.rs:570,
+  `WriteOptions::default()`).
+- **Slipstream hydrate is async-vs-async and barrier-free.** The
+  48–82 s `FDFSYNC_PROBE` "floor" (one fdatasync per batch) is not paid
+  by this leg at all — it measures what a sync-mode hydrate would pay.
+  RFC-0041's fd-ceiling write-per-op claims apply to G1-default writes
+  (kernel `OpenOptions.sync=true`), not to this bench's explicit
+  `sync=false`. Never quote the probe floor against this leg again.
+- The remaining ≥10 240 posix fdatasyncs (48.1 s) are SST/flush-side
+  per-file syncs (table.rs:2371, one per finished SST) plus manifest —
+  engine-internal durability, amortizable by overlapping jobs, not a
+  per-batch barrier.
+- Therefore **the 0.16–0.18× hydrate gap is pure engine work and fully
+  attackable**: sequential drain on one compat worker (26 flushes 66 s +
+  164 jobs 165 s, sum 278.8 s vs 213.2 s wall — writer parks behind the
+  debt, `parked_b=268 609 536`), write-amp 2.15× (10.85 GiB written for
+  a 5.15 GiB settled set), at ~110 MiB/s single-writer flush throughput.
+
+Next lever (v21o): **across-job** parallelism inside core
+`compact_leveled` — prepare K pairwise key-disjoint jobs, write them
+concurrently (`std::thread::scope`), install sequentially (file numbers
+pre-allocated atomically); optionally the same machinery for flush
+encode in `write_imm_l0_files`. Sizing requires the guest's aggregate
+write ceiling (single- vs multi-stream), still unmeasured.
+
+## v21o — across-job disjoint-batch compaction: NO-GO on this guest (run #18)
+
+**Guest write ceiling measured (run #18 boot, `writeprobe.py`, 512 MiB
+O_DIRECT per stream on /data/stores):**
+
+| streams | per-stream MiB/s | aggregate MiB/s |
+|---------|------------------|-----------------|
+| 1       | 381              | 381             |
+| 2       | 227 + 227        | **454**         |
+| 4       | 113 × 4          | **453**         |
+
+The guest's aggregate write ceiling is ~453 MiB/s — only **1.19×** the
+single-stream 381 MiB/s. But the drain never got near either number: run
+#16/#17 measured **~110 MiB/s per compaction job** (avg 1.0 s/job) and
+~110 MiB/s per flush. A single job uses less than a third of one
+stream's raw bandwidth — the per-job bottleneck is merge/encode CPU or
+write pattern, not disk. Four concurrent jobs demand ~440 MiB/s, just
+under the ceiling: if per-job throughput holds under concurrency, the
+164.8 s of compaction could compress toward ~40 s.
+
+Core lever on the barrier-free gap. `Db::compact_leveled` now forms a
+**batch of up to K pairwise key-disjoint pushdown jobs** from the first
+over-target (level, family), writes them concurrently through the
+`ParallelMerge` seam (`merge_jobs`: `std::thread::scope`, one thread per
+job, each job merged sequentially), then installs them sequentially —
+`apply_prepared_l0_compact` is path-based, so installs of disjoint jobs
+commute exactly like today's.
+
+- Knob `PEDRA_PARALLEL_JOBS` (read once, clamp 1..=8, default 1 = off).
+  Needs the seam installed: the host open path
+  (`open_with_env_bounded`) installs `ParallelMergeEnv` when **either**
+  knob is on. `PEDRA_PARALLEL_MERGE` (within-job spans, run #17 no-go)
+  is now gated independently and stays off by default — the two
+  dimensions are orthogonal.
+- Disjointness rule (`prepare_disjoint_pushdown_batch`): walk the source
+  view oldest-first; a candidate joins the batch only if its **combined
+  input hull** (source ∪ overlapping destination files) stays clear of
+  every already-claimed hull, shared boundary counting as overlap (same
+  rule as `leveling::is_disjoint`). Hull disjointness gives both
+  required properties: no shared input file (a wide destination file
+  spanning two sources is absorbed by whichever job claims it first) and
+  disjoint output ranges at the destination (the leveled invariant).
+  `max_jobs = 1` delegates to the original single-job picker — identical
+  behavior with the knob off.
+- File numbers: `build_prepared` burns a per-job chunk range in prepare
+  order, so concurrent writers own disjoint ranges (the v5 double-install
+  clobber cannot happen). L0→L1 jobs stay one-at-a-time (they absorb the
+  newest flush and the shared L1 slice).
+- Lock discipline unchanged: `ConcurrentDb::compact` holds the write lock
+  across `compact_leveled` as before; the K job writes overlap each other
+  inside that hold, so the writer's park shrinks from K×job to ~max(job).
+- Core test `parallel_jobs_batch_disjoint_and_correct`: batch fills the
+  requested width, hulls pairwise disjoint, a full drain through the real
+  `ParallelMergeEnv` (scoped threads) keeps every key readable, every
+  level a disjoint run set, and the MANIFEST reopens. Core suite after
+  v21o: 659 passed / 1 failed (`catchup_wait_bounded_by_half_fd`,
+  pre-existing, concurrent-session-flaky).
+- Guest run #18 entrypoint: `PEDRA_PARALLEL_JOBS=4` (arm under test),
+  `PEDRA_PARALLEL_MERGE` export dropped, diag exports unchanged, plus
+  `writeprobe.py` (1/2/4 streams × 512 MiB O_DIRECT on /data/stores) to
+  measure the guest's aggregate write ceiling in the same boot as the
+  bench — the sizing number the lever was blocked on.
+
+### Run #18 verdict (raw serial `run18-25m-paralleljobs4.txt`)
+
+hydrate 161.2 s (band 143.7–158.5 unchanged — the lever never engaged
+during hydrate: the L0-first loop arm keeps ingest compaction single,
+and one family cannot batch L0→L1 jobs that share the L1 slice);
+**settle 76.4 s** (band 47.9–54.7) — no win, slight loss.
+
+- Batches engaged only at settle: 7 batches (4+3+4+4+4+4+4 = 27
+  pushdown jobs), walls 4.24–5.25 s each — **exactly ~4× a single job**
+  (sequential pushdowns avg ~1.0–1.2 s). Perfect timesharing: the four
+  scoped threads got zero aggregate speedup.
+- This boot's settle also carried a 17.7 s whole-L0 monster
+  (`COMPDUR ms=17654 inputs=5` — hydrate left L0 6×1.02 GiB, vs
+  2×53.6 MiB at run #15's settle entry; slow-boot shape variance).
+  Ex-monster settle ≈ 58.6 s — still no better than sequential 54.7 s.
+- **Why: the guest compacts on effectively one core.** A single job
+  drains ~110 MiB/s of a 381 MiB/s single-stream disk (jobs are CPU-
+  bound, not disk-bound); four concurrent CPU-bound jobs timeshare one
+  core → 4× wall. Same signature as the writeprobe's CPU-issuing
+  threads scaling anyway, and opposite to its I/O-bound scaling.
+- **Lever closed as no-go on this guest** (a multi-core guest is the
+  seam's real home). `PEDRA_PARALLEL_JOBS` stays default-off; the code,
+  disjointness rule, and test stay (core suite 659/1-pre-existing).
+- **The sharpened target for hydrate/settle:** per-job throughput
+  110 MiB/s vs 381 MiB/s single-stream disk = 3.5× headroom INSIDE one
+  job, and flush encode hits the same ~110 MiB/s (26×2.68 s for 256 MiB
+  each). The shared bottleneck is the SST write path's per-byte CPU
+  (decode/merge/encode/CRC + per-file fsync ~18 % of wall), not
+  concurrency and not the disk. Next levers: cheaper encode per byte in
+  `table.rs` (mine) and/or write-amp reduction (2.15×: 10.85 GiB written
+  for 5.15 GiB settled) via level-target/slice-cap tuning.
