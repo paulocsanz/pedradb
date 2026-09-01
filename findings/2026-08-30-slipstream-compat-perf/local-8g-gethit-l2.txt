@@ -1,0 +1,56 @@
+=== L2 8GiB get_hit start 2026-09-01T18:55:17Z load: 15:55  up 3 days, 17:48, 15 users, load averages: 6,95 8,36 10,40 ===
+Gnuplot not found, using plotters backend
+apply_hydrate: skipped at 25000000 entries (>8M); see the one-shot hydration timings printed by the read benchmarks' setup
+hydrate/fjall: 25000000 entries in 24.1s (1.04M entries/s); on disk 5.25 GiB (225 B/entry)
+settle/fjall: 14.4s; on disk after 10.09 GiB
+hydrate/rocksdb: 25000000 entries in 19.7s (1.27M entries/s); on disk 6.72 GiB (288 B/entry)
+settle/rocksdb: 4.1s; on disk after 5.24 GiB
+hydrate/pedradb: 25000000 entries in 49.6s (0.50M entries/s); on disk 10.89 GiB (468 B/entry)
+settle/pedradb: 15.0s; on disk after 5.15 GiB
+probe_hit/fjall: p50 144.5µs / p90 275.0µs / p99 505.9µs / p999 1.1ms / max 4.5ms
+probe_miss/fjall: p50 333.0ns / p90 375.0ns / p99 417.0ns / p999 500.0ns / max 2.4µs
+probe_hit/rocksdb: p50 161.8µs / p90 232.8µs / p99 424.3µs / p999 1.8ms / max 2.7ms
+probe_miss/rocksdb: p50 292.0ns / p90 334.0ns / p99 417.0ns / p999 13.2µs / max 54.7µs
+probe_hit/pedradb: p50 4.3µs / p90 5.4µs / p99 10.6µs / p999 51.6µs / max 407.5µs
+probe_miss/pedradb: p50 709.0ns / p90 917.0ns / p99 2.7µs / p999 33.0µs / max 251.2µs
+Benchmarking get_hit/fjall
+Benchmarking get_hit/fjall: Warming up for 3.0000 s
+Benchmarking get_hit/fjall: Collecting 100 samples in estimated 5.4175 s (40k iterations)
+Benchmarking get_hit/fjall: Analyzing
+get_hit/fjall           time:   [107.29 µs 111.29 µs 116.75 µs]
+                        thrpt:  [8.5653 Kelem/s 8.9858 Kelem/s 9.3205 Kelem/s]
+                 change:
+                        time:   [-9.8368% -5.5436% -1.0241%] (p = 0.02 < 0.05)
+                        thrpt:  [+1.0347% +5.8689% +10.910%]
+                        Performance has improved.
+Found 6 outliers among 100 measurements (6.00%)
+  2 (2.00%) high mild
+  4 (4.00%) high severe
+Benchmarking get_hit/rocksdb
+Benchmarking get_hit/rocksdb: Warming up for 3.0000 s
+Benchmarking get_hit/rocksdb: Collecting 100 samples in estimated 5.3309 s (40k iterations)
+Benchmarking get_hit/rocksdb: Analyzing
+get_hit/rocksdb         time:   [114.75 µs 117.11 µs 120.91 µs]
+                        thrpt:  [8.2703 Kelem/s 8.5390 Kelem/s 8.7146 Kelem/s]
+                 change:
+                        time:   [+719.62% +792.12% +870.04%] (p = 0.00 < 0.05)
+                        thrpt:  [-89.691% -88.791% -87.799%]
+                        Performance has regressed.
+Found 2 outliers among 100 measurements (2.00%)
+  1 (1.00%) high mild
+  1 (1.00%) high severe
+Benchmarking get_hit/pedradb
+Benchmarking get_hit/pedradb: Warming up for 3.0000 s
+Benchmarking get_hit/pedradb: Collecting 100 samples in estimated 5.0131 s (1.3M iterations)
+Benchmarking get_hit/pedradb: Analyzing
+get_hit/pedradb         time:   [4.2897 µs 4.3996 µs 4.5182 µs]
+                        thrpt:  [221.33 Kelem/s 227.29 Kelem/s 233.12 Kelem/s]
+                 change:
+                        time:   [-31.016% -27.979% -25.043%] (p = 0.00 < 0.05)
+                        thrpt:  [+33.410% +38.849% +44.960%]
+                        Performance has improved.
+Found 4 outliers among 100 measurements (4.00%)
+  3 (3.00%) high mild
+  1 (1.00%) high severe
+
+=== 8g exit=0 end 2026-09-01T18:58:19Z ===

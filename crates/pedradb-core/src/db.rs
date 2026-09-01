@@ -1217,6 +1217,50 @@ struct UnappliedOp {
     end: Bytes,
 }
 
+/// One level's tables grouped for point lookup: newest-first order, plus
+/// the same tables sorted by `lo` key when the run is provably pairwise
+/// disjoint. Disjoint runs bisect to the single candidate table instead of
+/// walking every table's bounds + bloom.
+struct SstRun {
+    level: u32,
+    tables_newest_first: Vec<usize>,
+    disjoint_by_lo: Option<Vec<usize>>,
+}
+
+impl SstRun {
+    /// Tables sorted by `lo`, or `None` unless every table is bounded and
+    /// the run is strictly disjoint (`hi[i] < lo[i+1]`). Overlaps, duplicate
+    /// bounds, or unbounded tables keep the linear newest-first walk.
+    fn disjoint_sorted_by_lo(
+        ssts: &[SstTable],
+        tables_newest_first: &[usize],
+    ) -> Option<Vec<usize>> {
+        if tables_newest_first.len() < 2 {
+            return None;
+        }
+        for &i in tables_newest_first {
+            if ssts[i].smallest_user_key().is_none() || ssts[i].largest_user_key().is_none() {
+                return None;
+            }
+        }
+        let mut by_lo: Vec<usize> = tables_newest_first.to_vec();
+        by_lo.sort_by(|&a, &b| {
+            ssts[a]
+                .smallest_user_key()
+                .unwrap()
+                .cmp(ssts[b].smallest_user_key().unwrap())
+        });
+        for pair in by_lo.windows(2) {
+            if ssts[pair[0]].largest_user_key().unwrap()
+                >= ssts[pair[1]].smallest_user_key().unwrap()
+            {
+                return None;
+            }
+        }
+        Some(by_lo)
+    }
+}
+
 /// [`Db`] itself is single-threaded (`&mut` for writes). Use [`ConcurrentDb`] for
 /// multi-thread access with a coarse mutex/rwlock.
 pub struct Db<E: Env = StdEnv> {
@@ -1256,6 +1300,10 @@ pub struct Db<E: Env = StdEnv> {
     retired_l0s: usize,
     /// Cached [`Self::sst_indices_newest_first`] (L0 newest → L1+).
     sst_order_newest: Vec<usize>,
+    /// Per-level lookup runs built alongside [`Self::sst_order_newest`]
+    /// (see [`SstRun`]). `last_under_user_prefix_sst` keeps walking the
+    /// flat order above.
+    sst_runs: Vec<SstRun>,
     /// Immutable tables, oldest → newest within inventory order.
     ssts: Vec<SstTable>,
     /// LSM level for each entry in [`Self::ssts`] (parallel array; 0 = L0).
@@ -1935,6 +1983,7 @@ impl<E: Env> Db<E> {
             retired_fold: MemTable::new(),
             retired_l0s: 0,
             sst_order_newest: Vec::new(),
+            sst_runs: Vec::new(),
             ssts,
             sst_levels,
             physical_cfs: Vec::new(),
@@ -3829,6 +3878,31 @@ impl<E: Env> Db<E> {
             }
         });
         self.sst_order_newest = idx;
+        self.rebuild_sst_runs();
+    }
+
+    /// Regroup [`Self::sst_order_newest`] into per-level runs. That order is
+    /// sorted (level asc, index desc), so levels come out contiguous and
+    /// newest-first inside each run — the linear fallback inside `lookup`
+    /// iterates exactly the flat order.
+    fn rebuild_sst_runs(&mut self) {
+        let mut runs: Vec<SstRun> = Vec::new();
+        for &sst_i in &self.sst_order_newest {
+            let level = self.sst_levels.get(sst_i).copied().unwrap_or(0);
+            match runs.last_mut() {
+                Some(run) if run.level == level => run.tables_newest_first.push(sst_i),
+                _ => runs.push(SstRun {
+                    level,
+                    tables_newest_first: vec![sst_i],
+                    disjoint_by_lo: None,
+                }),
+            }
+        }
+        for run in &mut runs {
+            run.disjoint_by_lo =
+                SstRun::disjoint_sorted_by_lo(&self.ssts, &run.tables_newest_first);
+        }
+        self.sst_runs = runs;
     }
 
     /// Drop the retired read cache when no L0 remains to cover.
@@ -8192,29 +8266,60 @@ impl<E: Env> Db<E> {
         // thrashed at random-key scale). Block faults fail-stop — a corrupt
         // block must never read as a miss.
         let mut seek_scratch = PointSeekScratch::default();
-        for &sst_i in self.sst_indices_newest_first() {
-            let table = &self.ssts[sst_i];
-            // Range tombstones always flow: a tombstone's end key lives in
-            // its value, so the table bounds below do not cover its span.
-            table.collect_range_tombstones(snapshot, &mut range_tombs);
-            // Range-prune the point seek: the bounds span every entry's
-            // user key (deletion markers included), so a key outside them
-            // has no point version here. Without this, a get walks every
-            // chunk's bloom — ~95 disjoint chunks after leveled settle
-            // measured ~10 µs/get of pure candidate checking (25M guest).
+        // One probe per table: range-prune, then seek the single candidate
+        // block. The bounds span every entry's user key (deletion markers
+        // included), so a key outside them has no point version here.
+        // Without the prune, a get walks every chunk's bloom — ~95 disjoint
+        // chunks after leveled settle measured ~10 µs/get of pure candidate
+        // checking (25M guest).
+        let ssts = &self.ssts;
+        let mut probe = |table: &SstTable| -> Option<(SequenceNumber, Lookup)> {
             if let (Some(lo), Some(hi)) = (table.smallest_user_key(), table.largest_user_key()) {
                 if key < lo || key > hi {
-                    continue;
+                    return None;
                 }
             }
             match table.point_at_seeking(key, snapshot, &mut seek_scratch) {
-                Ok(Some((seq, look))) => {
-                    best_point_seq = Some(seq);
-                    best_point = look;
-                    break;
-                }
-                Ok(None) => {}
+                Ok(Some((seq, look))) => Some((seq, look)),
+                Ok(None) => None,
                 Err(e) => fail_stop_corrupt_block(table.path(), &e),
+            }
+        };
+        // Levels ascend (L0 newest → L1+), newest-first inside a level —
+        // the same order as the flat walk. Disjoint runs bisect to the one
+        // candidate table; every other run shape keeps the linear walk.
+        'runs: for run in &self.sst_runs {
+            // Range tombstones always flow: a tombstone's end key lives in
+            // its value, so the table bounds do not cover its span. A whole
+            // run at once is behavior-preserving: `range_deleted` hides only
+            // strictly newer points, so tombstones from tables older than
+            // the run's winner stay inert.
+            for &sst_i in &run.tables_newest_first {
+                ssts[sst_i].collect_range_tombstones(snapshot, &mut range_tombs);
+            }
+            if let Some(by_lo) = &run.disjoint_by_lo {
+                // Sorted by `lo`, pairwise disjoint: the last table whose
+                // `lo <= key` is the only one that can hold `key` (every
+                // earlier `hi` sits below the next `lo`). The probe's own
+                // bounds check stays as the fail-safe.
+                let p = by_lo.partition_point(|&i| {
+                    ssts[i].smallest_user_key().is_some_and(|lo| lo <= key)
+                });
+                if p > 0 {
+                    if let Some((seq, look)) = probe(&ssts[by_lo[p - 1]]) {
+                        best_point_seq = Some(seq);
+                        best_point = look;
+                        break 'runs;
+                    }
+                }
+            } else {
+                for &sst_i in &run.tables_newest_first {
+                    if let Some((seq, look)) = probe(&ssts[sst_i]) {
+                        best_point_seq = Some(seq);
+                        best_point = look;
+                        break 'runs;
+                    }
+                }
             }
         }
 
@@ -19549,6 +19654,209 @@ mod tests {
             assert_eq!(db2.get(k).as_deref(), Some(&v[..]), "post-reopen {i}");
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Reference for the run-bisect oracle: the pre-run flat walk, copied
+    /// verbatim from the old `lookup` SST loop (newest-first, lazy tombstone
+    /// collect up to the winner, first-found-point wins).
+    fn lookup_linear_reference(db: &Db, key: &[u8], snapshot: SequenceNumber) -> Lookup {
+        let mut best_point_seq: Option<SequenceNumber> = None;
+        let mut best_point = Lookup::NotFound;
+        let mut range_tombs = Vec::new();
+        for table in db.mem_layers() {
+            Db::<StdEnv>::scan_mem_for_lookup(
+                table,
+                key,
+                snapshot,
+                &mut best_point_seq,
+                &mut best_point,
+                &mut range_tombs,
+            );
+            if let Some(seq) = best_point_seq {
+                return match best_point {
+                    Lookup::Found(_)
+                        if !crate::merge::visible_at(
+                            crate::key::ValueType::Value,
+                            range_deleted(key, seq, &range_tombs),
+                        ) =>
+                    {
+                        Lookup::Deleted
+                    }
+                    other => other,
+                };
+            }
+        }
+        let mut seek_scratch = PointSeekScratch::default();
+        for &sst_i in db.sst_indices_newest_first() {
+            let table = &db.ssts[sst_i];
+            table.collect_range_tombstones(snapshot, &mut range_tombs);
+            if let (Some(lo), Some(hi)) = (table.smallest_user_key(), table.largest_user_key()) {
+                if key < lo || key > hi {
+                    continue;
+                }
+            }
+            match table.point_at_seeking(key, snapshot, &mut seek_scratch) {
+                Ok(Some((seq, look))) => {
+                    best_point_seq = Some(seq);
+                    best_point = look;
+                    break;
+                }
+                Ok(None) => {}
+                Err(e) => fail_stop_corrupt_block(table.path(), &e),
+            }
+        }
+        match best_point {
+            Lookup::Found(v) => {
+                let seq = best_point_seq.unwrap_or(0);
+                if crate::merge::visible_at(
+                    crate::key::ValueType::Value,
+                    range_deleted(key, seq, &range_tombs),
+                ) {
+                    Lookup::Found(v)
+                } else {
+                    Lookup::Deleted
+                }
+            }
+            Lookup::Deleted => Lookup::Deleted,
+            Lookup::NotFound => {
+                if range_deleted(key, 0, &range_tombs) {
+                    Lookup::Deleted
+                } else {
+                    Lookup::NotFound
+                }
+            }
+        }
+    }
+
+    /// Point-lookup run bisect over disjoint bottom-level chunks: `lookup`
+    /// must agree with the flat-walk reference and with a ground-truth model
+    /// for live keys, deleted keys, range-tombstone spans, chunk boundaries,
+    /// and in-gap keys — live and after reopen (lazy tables).
+    #[test]
+    fn lookup_bisect_disjoint_run_matches_linear_walk() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into()]);
+
+        // Three ascending flushes → three pairwise-disjoint bottom chunks.
+        let mut model: std::collections::BTreeMap<Vec<u8>, Option<Vec<u8>>> =
+            std::collections::BTreeMap::new();
+        for tag in ["a", "b", "c"] {
+            for j in 0..50u32 {
+                let k = format!("data\0{tag}{j:03}").into_bytes();
+                let v = format!("v{tag}{j:03}").into_bytes();
+                db.put(&k, &v).unwrap();
+                model.insert(k, Some(v));
+            }
+            db.flush().unwrap();
+        }
+        // Descending batch kills the family latch so everything after lands
+        // on L0 above the chunks: overwrite, point delete, range tombstone
+        // spanning the a/b chunk boundary, second overwrite outside it.
+        let kill = vec![
+            BatchOp::put(b"data\0z999".to_vec(), b"z".to_vec()),
+            BatchOp::put(b"data\0a998".to_vec(), b"z".to_vec()),
+        ];
+        db.apply_batch(kill).unwrap();
+        model.insert(b"data\0z999".to_vec(), Some(b"z".to_vec()));
+        model.insert(b"data\0a998".to_vec(), Some(b"z".to_vec()));
+
+        db.put(b"data\0a050", b"over").unwrap();
+        model.insert(b"data\0a050".to_vec(), Some(b"over".to_vec()));
+        db.delete(b"data\0a000").unwrap();
+        model.insert(b"data\0a000".to_vec(), None);
+        db.delete_range(b"data\0b020", b"data\0b040").unwrap();
+        for j in 20..40u32 {
+            model.insert(format!("data\0b{j:03}").into_bytes(), None);
+        }
+        db.put(b"data\0b060", b"over2").unwrap();
+        model.insert(b"data\0b060".to_vec(), Some(b"over2".to_vec()));
+        db.flush().unwrap();
+
+        // Shape: a bottom-level run with ≥3 disjoint tables (bisect armed)
+        // and an L0 run above it (linear walk).
+        let bottom = db
+            .sst_runs
+            .iter()
+            .find(|r| r.level == MAX_LSM_LEVEL)
+            .expect("bottom-level run");
+        assert!(
+            bottom.tables_newest_first.len() >= 3,
+            "want ≥3 bottom chunks, got {}",
+            bottom.tables_newest_first.len()
+        );
+        let by_lo = bottom
+            .disjoint_by_lo
+            .as_ref()
+            .expect("bottom chunks must bisect");
+        assert_eq!(by_lo.len(), bottom.tables_newest_first.len());
+        assert!(db.sst_runs.iter().any(|r| r.level == 0));
+        assert!(db.sst_runs[0].level == 0, "L0 run comes first");
+        assert!(
+            db.sst_runs[0].disjoint_by_lo.is_none(),
+            "L0 keeps the linear walk"
+        );
+
+        // Oracle sweep: model keys + chunk boundaries + gaps + tombstone
+        // endpoints + outside-all keys.
+        let mut probes: Vec<Vec<u8>> = model.keys().cloned().collect();
+        for k in [
+            &b"data\0"[..],
+            &b"data\0a"[..],
+            &b"data\0a049x"[..],
+            &b"data\0b"[..],
+            &b"data\0b019x"[..],
+            &b"data\0b020"[..],
+            &b"data\0b039"[..],
+            &b"data\0b039x"[..],
+            &b"data\0b040"[..],
+            &b"data\0c"[..],
+            &b"data\0c049x"[..],
+            &b"data\0zzz"[..],
+        ] {
+            probes.push(k.to_vec());
+        }
+        let snapshot = db.last_sequence();
+        for k in &probes {
+            let got = db.lookup(k, snapshot);
+            let want = lookup_linear_reference(&db, k, snapshot);
+            assert_eq!(got, want, "bisect vs flat walk at {k:?}");
+            let expected = model.get(k).map_or(Lookup::NotFound, |m| match m {
+                Some(v) => Lookup::Found(v.clone().into()),
+                None => Lookup::NotFound,
+            });
+            // The model cannot tell Deleted from NotFound; both read absent.
+            let agree = match (&got, &expected) {
+                (Lookup::Found(_), Lookup::Found(_)) => got == expected,
+                (Lookup::Found(_), _) | (_, Lookup::Found(_)) => false,
+                _ => true,
+            };
+            assert!(agree, "model mismatch at {k:?}: got {got:?}, model {expected:?}");
+        }
+
+        db.close().unwrap();
+        let db = Db::open(&dir).unwrap();
+        let snapshot = db.last_sequence();
+        for k in &probes {
+            let got = db.lookup(k, snapshot);
+            let want = lookup_linear_reference(&db, k, snapshot);
+            assert_eq!(got, want, "post-reopen bisect vs flat walk at {k:?}");
+        }
+        let bottom = db
+            .sst_runs
+            .iter()
+            .find(|r| r.level == MAX_LSM_LEVEL)
+            .expect("bottom-level run after reopen");
+        assert!(bottom.disjoint_by_lo.is_some(), "reopen rebuilds runs");
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// RFC-0159 P0.2: a descending batch kills the family; later spans

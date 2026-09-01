@@ -1,0 +1,1229 @@
+Analysis of sampling snapshot_backends-b8536a3e576e7dd6 (pid 98246) every 1 millisecond
+Process:         snapshot_backends-b8536a3e576e7dd6 [98246]
+Path:            /private/tmp/*/snapshot_backends-b8536a3e576e7dd6
+Load Address:    0x100060000
+Identifier:      snapshot_backends-b8536a3e576e7dd6
+Version:         0
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  zsh [98241]
+
+Date/Time:       2026-09-01 15:16:53.085 -0300
+Launch Time:     2026-09-01 15:13:42.002 -0300
+OS Version:      macOS 14.6.1 (23G93)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         11.7G
+Physical footprint (peak):  11.7G
+Idle exit:                  untracked
+----
+
+Call graph:
+    4003 Thread_15077331   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 4000 start  (in dyld) + 2476  [0x191673154]
+    + ! 4000 main  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x10007e6e4]
+    + !   4000 _RNvNtCsa9BKTri5B3M_3std2rt19lang_start_internal  (in snapshot_backends-b8536a3e576e7dd6) + 952  [0x1009276f8]
+    + !     4000 _RNCINvNtCsa9BKTri5B3M_3std2rt10lang_startuE0Cs67Dj2gtHXC5_17snapshot_backends  (in snapshot_backends-b8536a3e576e7dd6) + 16  [0x1000ac168]
+    + !       4000 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceFEuuECs67Dj2gtHXC5_17snapshot_backends  (in snapshot_backends-b8536a3e576e7dd6) + 12  [0x1000aff3c]
+    + !         4000 _RNvCs67Dj2gtHXC5_17snapshot_backends4main  (in snapshot_backends-b8536a3e576e7dd6) + 944  [0x10007d8d8]
+    + !           4000 _RNvCs67Dj2gtHXC5_17snapshot_backends11bench_reads  (in snapshot_backends-b8536a3e576e7dd6) + 6876  [0x10007bf90]
+    + !             4000 _RINvMNtCs8LgfujxyOep_9criterion15benchmark_groupINtB3_14BenchmarkGroupNtNtB5_11measurement8WallTimeE14bench_functionReNCNvCs67Dj2gtHXC5_17snapshot_backends11bench_readss6_0EB1W_  (in snapshot_backends-b8536a3e576e7dd6) + 1244  [0x100081134]
+    + !               4000 _RINvNtCs8LgfujxyOep_9criterion8analysis6commonNtNtB4_11measurement8WallTimeuECs67Dj2gtHXC5_17snapshot_backends  (in snapshot_backends-b8536a3e576e7dd6) + 232  [0x10009c88c]
+    + !                 4000 _RNvYINtNtCs8LgfujxyOep_9criterion7routine8FunctionNtNtB7_11measurement8WallTimeNCINvMNtB7_15benchmark_groupINtB1l_14BenchmarkGroupBM_E14bench_functionReNCNvCs67Dj2gtHXC5_17snapshot_backends11bench_readss6_0E0uEINtB5_7RoutineBM_uE6sampleB2u_  (in snapshot_backends-b8536a3e576e7dd6) + 892  [0x100069230]
+    + !                   4000 _RNvXs_NtCs8LgfujxyOep_9criterion7routineINtB4_8FunctionNtNtB6_11measurement8WallTimeNCINvMNtB6_15benchmark_groupINtB1q_14BenchmarkGroupBR_E14bench_functionReNCNvCs67Dj2gtHXC5_17snapshot_backends11bench_readss6_0E0uEINtB4_7RoutineBR_uE7warm_upB2z_  (in snapshot_backends-b8536a3e576e7dd6) + 276  [0x100063af8]
+    + !                     3868 _RINvMNtCs8LgfujxyOep_9criterion7bencherNtB3_7Bencher4iterINtNtCsgtPOCBgevO_4core6option6OptionNtNtCs6RdFyfYj5zr_10slipstream2kv7KvEntryENCNCNvCs67Dj2gtHXC5_17snapshot_backends11bench_readss6_00EB2g_  (in snapshot_backends-b8536a3e576e7dd6) + 280  [0x1000a35e8]
+    + !                     : 3828 _RNvNtCs6RdFyfYj5zr_10slipstream16snapshot_pedradb9get_entry  (in snapshot_backends-b8536a3e576e7dd6) + 132  [0x100138884]
+    + !                     : | 3582 _RINvMsj_Cs1pByd8LO0u1_14rocksdb_compatNtB6_2DB10get_cachedRShECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 752  [0x10012a68c]
+    + !                     : | + 3468 _RNvMs0_NtCs62sWeHaXwK5_12pedradb_core10concurrentINtB5_12ConcurrentDbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE3getCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 184  [0x100100614]
+    + !                     : | + ! 3068 _RNvMse_NtCs62sWeHaXwK5_12pedradb_core2dbINtB5_2DbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE3getCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 1100  [0x1000e4b48]
+    + !                     : | + ! : 2987 _RNvMse_NtCs62sWeHaXwK5_12pedradb_core2dbINtB5_2DbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE6lookupCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 1056  [0x1000e61c4]
+    + !                     : | + ! : | 1711 _RNvMNtNtCs62sWeHaXwK5_12pedradb_core3sst5tableNtB2_8SstTable16point_at_seeking  (in snapshot_backends-b8536a3e576e7dd6) + 396  [0x10069afac]
+    + !                     : | + ! : | + 1264 _RNvMNtNtCs62sWeHaXwK5_12pedradb_core3sst5tableNtB2_8SstTable16blocks_for_point  (in snapshot_backends-b8536a3e576e7dd6) + 120  [0x10069ad50]
+    + !                     : | + ! : | + ! 735 _platform_memcmp  (in libsystem_platform.dylib) + 56,128,...  [0x191a2bd88,0x191a2bdd0,...]
+    + !                     : | + ! : | + ! 529 DYLD-STUB$$memcmp  (in snapshot_backends-b8536a3e576e7dd6) + 4,0  [0x100979030,0x10097902c]
+    + !                     : | + ! : | + 179 _RNvMNtNtCs62sWeHaXwK5_12pedradb_core3sst5tableNtB2_8SstTable16blocks_for_point  (in snapshot_backends-b8536a3e576e7dd6) + 180  [0x10069ad8c]
+    + !                     : | + ! : | + ! 108 DYLD-STUB$$memcmp  (in snapshot_backends-b8536a3e576e7dd6) + 4  [0x100979030]
+    + !                     : | + ! : | + ! 71 _platform_memcmp  (in libsystem_platform.dylib) + 88,128,...  [0x191a2bda8,0x191a2bdd0,...]
+    + !                     : | + ! : | + 155 _RNvMNtNtCs62sWeHaXwK5_12pedradb_core3sst5tableNtB2_8SstTable16blocks_for_point  (in snapshot_backends-b8536a3e576e7dd6) + 208,256,...  [0x10069ada8,0x10069add8,...]
+    + !                     : | + ! : | + 113 _RNvMNtNtCs62sWeHaXwK5_12pedradb_core3sst5tableNtB2_8SstTable16blocks_for_point  (in snapshot_backends-b8536a3e576e7dd6) + 252  [0x10069add4]
+    + !                     : | + ! : | +   64 _platform_memcmp  (in libsystem_platform.dylib) + 128,88,...  [0x191a2bdd0,0x191a2bda8,...]
+    + !                     : | + ! : | +   49 DYLD-STUB$$memcmp  (in snapshot_backends-b8536a3e576e7dd6) + 4  [0x100979030]
+    + !                     : | + ! : | 1206 _RNvMNtNtCs62sWeHaXwK5_12pedradb_core3sst5tableNtB2_8SstTable16point_at_seeking  (in snapshot_backends-b8536a3e576e7dd6) + 1220  [0x10069b2e4]
+    + !                     : | + ! : | + 764 _RNvNtNtCs62sWeHaXwK5_12pedradb_core3sst5table25seek_point_in_block_image  (in snapshot_backends-b8536a3e576e7dd6) + 124  [0x10069ff7c]
+    + !                     : | + ! : | + ! 531 _RNvNtCsip6YQz7nMgo_6crc32c10hw_aarch646crc32c  (in snapshot_backends-b8536a3e576e7dd6) + 236  [0x1006d39a8]
+    + !                     : | + ! : | + ! : 531 _RINvYINtNtNtCsgtPOCBgevO_4core5slice4iter6ChunksNtNtCsip6YQz7nMgo_6crc32c4util5U64LeENtNtNtNtBa_4iter6traits8iterator8Iterator4foldmNCNvNtBO_10hw_aarch6417crc_u64_parallel30EBO_  (in snapshot_backends-b8536a3e576e7dd6) + 188,152,...  [0x1006d37dc,0x1006d37b8,...]
+    + !                     : | + ! : | + ! 226 _RNvNtCsip6YQz7nMgo_6crc32c10hw_aarch646crc32c  (in snapshot_backends-b8536a3e576e7dd6) + 108,76,...  [0x1006d3928,0x1006d3908,...]
+    + !                     : | + ! : | + ! 4 _RNvNtCsip6YQz7nMgo_6crc32c10hw_aarch646crc32c  (in snapshot_backends-b8536a3e576e7dd6) + 172  [0x1006d3968]
+    + !                     : | + ! : | + ! : 4 _RINvYINtNtNtCsgtPOCBgevO_4core5slice4iter6ChunksNtNtCsip6YQz7nMgo_6crc32c4util5U64LeENtNtNtNtBa_4iter6traits8iterator8Iterator4foldmNCNvNtBO_10hw_aarch6417crc_u64_parallel30EBO_  (in snapshot_backends-b8536a3e576e7dd6) + 12  [0x1006d372c]
+    + !                     : | + ! : | + ! 3 _RINvYINtNtNtCsgtPOCBgevO_4core5slice4iter6ChunksNtNtCsip6YQz7nMgo_6crc32c4util5U64LeENtNtNtNtBa_4iter6traits8iterator8Iterator4foldmNCNvNtBO_10hw_aarch6417crc_u64_parallel30EBO_  (in snapshot_backends-b8536a3e576e7dd6) + 308,312  [0x1006d3854,0x1006d3858]
+    + !                     : | + ! : | + 330 _RNvNtNtCs62sWeHaXwK5_12pedradb_core3sst5table25seek_point_in_block_image  (in snapshot_backends-b8536a3e576e7dd6) + 108,992,...  [0x10069ff6c,0x1006a02e0,...]
+    + !                     : | + ! : | + 49 _RNvNtNtCs62sWeHaXwK5_12pedradb_core3sst5table25seek_point_in_block_image  (in snapshot_backends-b8536a3e576e7dd6) + 216  [0x10069ffd8]
+    + !                     : | + ! : | + ! 49 _platform_memset  (in libsystem_platform.dylib) + 140,108,...  [0x191a2df5c,0x191a2df3c,...]
+    + !                     : | + ! : | + 32 _RNvNtNtCs62sWeHaXwK5_12pedradb_core3sst5table25seek_point_in_block_image  (in snapshot_backends-b8536a3e576e7dd6) + 1764  [0x1006a05e4]
+    + !                     : | + ! : | + ! 24 _platform_memcmp  (in libsystem_platform.dylib) + 96,8,...  [0x191a2bdb0,0x191a2bd58,...]
+    + !                     : | + ! : | + ! 8 DYLD-STUB$$memcmp  (in snapshot_backends-b8536a3e576e7dd6) + 4  [0x100979030]
+    + !                     : | + ! : | + 15 _RNvNtNtCs62sWeHaXwK5_12pedradb_core3sst5table25seek_point_in_block_image  (in snapshot_backends-b8536a3e576e7dd6) + 1884  [0x1006a065c]
+    + !                     : | + ! : | + ! 10 _RNvMNtCs7dCdOs0Eg1C_5bytes5bytesNtB2_5Bytes15copy_from_slice  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x10078fc8c]
+    + !                     : | + ! : | + ! : 5 nanov2_malloc  (in libsystem_malloc.dylib) + 0,108,...  [0x19180dc20,0x19180dc8c,...]
+    + !                     : | + ! : | + ! : 3 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 0,12,...  [0x19183791c,0x191837928,...]
+    + !                     : | + ! : | + ! : 1 DYLD-STUB$$malloc  (in snapshot_backends-b8536a3e576e7dd6) + 4  [0x100979018]
+    + !                     : | + ! : | + ! : 1 _RNvCs9wFQrvczXsK_7___rustc11___rdl_alloc  (in snapshot_backends-b8536a3e576e7dd6) + 0  [0x1009158ac]
+    + !                     : | + ! : | + ! 2 _RNvMNtCs7dCdOs0Eg1C_5bytes5bytesNtB2_5Bytes15copy_from_slice  (in snapshot_backends-b8536a3e576e7dd6) + 40  [0x10078fc80]
+    + !                     : | + ! : | + ! : 2 _RNvCs9wFQrvczXsK_7___rustc35___rust_no_alloc_shim_is_unstable_v2  (in snapshot_backends-b8536a3e576e7dd6) + 0  [0x1000bcc28]
+    + !                     : | + ! : | + ! 2 _RNvMNtCs7dCdOs0Eg1C_5bytes5bytesNtB2_5Bytes15copy_from_slice  (in snapshot_backends-b8536a3e576e7dd6) + 72  [0x10078fca0]
+    + !                     : | + ! : | + ! : 2 _platform_memmove  (in libsystem_platform.dylib) + 0,180  [0x191a2e1a0,0x191a2e254]
+    + !                     : | + ! : | + ! 1 _RNvMNtCs7dCdOs0Eg1C_5bytes5bytesNtB2_5Bytes15copy_from_slice  (in snapshot_backends-b8536a3e576e7dd6) + 0  [0x10078fc58]
+    + !                     : | + ! : | + 15 _RNvNtNtCs62sWeHaXwK5_12pedradb_core3sst5table25seek_point_in_block_image  (in snapshot_backends-b8536a3e576e7dd6) + 2804  [0x1006a09f4]
+    + !                     : | + ! : | + ! 12 _RINvNvMs2_NtCslJsSqIQKwiA_5alloc7raw_vecINtB8_11RawVecInnerpE7reserve21do_reserve_and_handleNtNtBa_5alloc6GlobalECs62sWeHaXwK5_12pedradb_core  (in snapshot_backends-b8536a3e576e7dd6) + 108  [0x100957d98]
+    + !                     : | + ! : | + ! : 11 _RNvMs4_NtCslJsSqIQKwiA_5alloc7raw_vecNtB5_11RawVecInner11finish_growCs62sWeHaXwK5_12pedradb_core  (in snapshot_backends-b8536a3e576e7dd6) + 120  [0x10095831c]
+    + !                     : | + ! : | + ! : | 4 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 0,12,...  [0x19183791c,0x191837928,...]
+    + !                     : | + ! : | + ! : | 2 nanov2_malloc  (in libsystem_malloc.dylib) + 0  [0x19180dc20]
+    + !                     : | + ! : | + ! : | 2 szone_malloc_should_clear  (in libsystem_malloc.dylib) + 128  [0x19180eb20]
+    + !                     : | + ! : | + ! : | + 2 small_malloc_should_clear  (in libsystem_malloc.dylib) + 52  [0x19180ec60]
+    + !                     : | + ! : | + ! : | +   2 rack_get_thread_index  (in libsystem_malloc.dylib) + 0  [0x19182702c]
+    + !                     : | + ! : | + ! : | 2 szone_malloc_should_clear  (in libsystem_malloc.dylib) + 96,284  [0x19180eb00,0x19180ebbc]
+    + !                     : | + ! : | + ! : | 1 small_malloc_should_clear  (in libsystem_malloc.dylib) + 1272  [0x19180f124]
+    + !                     : | + ! : | + ! : 1 szone_malloc_should_clear  (in libsystem_malloc.dylib) + 368  [0x19180ec10]
+    + !                     : | + ! : | + ! 3 _RINvNvMs2_NtCslJsSqIQKwiA_5alloc7raw_vecINtB8_11RawVecInnerpE7reserve21do_reserve_and_handleNtNtBa_5alloc6GlobalECs62sWeHaXwK5_12pedradb_core  (in snapshot_backends-b8536a3e576e7dd6) + 108  [0x100957d98]
+    + !                     : | + ! : | + 1 _RINvNvMs2_NtCslJsSqIQKwiA_5alloc7raw_vecINtB8_11RawVecInnerpE7reserve21do_reserve_and_handleNtNtBa_5alloc6GlobalECs62sWeHaXwK5_12pedradb_core  (in snapshot_backends-b8536a3e576e7dd6) + 132  [0x100957db0]
+    + !                     : | + ! : | 39 _RNvMNtNtCs62sWeHaXwK5_12pedradb_core3sst5tableNtB2_8SstTable16point_at_seeking  (in snapshot_backends-b8536a3e576e7dd6) + 236,272,...  [0x10069af0c,0x10069af30,...]
+    + !                     : | + ! : | 26 _RNvMNtNtCs62sWeHaXwK5_12pedradb_core3sst5tableNtB2_8SstTable16blocks_for_point  (in snapshot_backends-b8536a3e576e7dd6) + 320  [0x10069ae18]
+    + !                     : | + ! : | 3 _RNvMNtNtCs62sWeHaXwK5_12pedradb_core3sst5tableNtB2_8SstTable16point_at_seeking  (in snapshot_backends-b8536a3e576e7dd6) + 428  [0x10069afcc]
+    + !                     : | + ! : | + 3 tlv_get_addr  (in libdyld.dylib) + 20,12  [0x191a05fd4,0x191a05fcc]
+    + !                     : | + ! : | 1 _RNvMNtNtCs62sWeHaXwK5_12pedradb_core3sst5tableNtB2_8SstTable16point_at_seeking  (in snapshot_backends-b8536a3e576e7dd6) + 124  [0x10069ae9c]
+    + !                     : | + ! : | + 1 DYLD-STUB$$memcmp  (in snapshot_backends-b8536a3e576e7dd6) + 4  [0x100979030]
+    + !                     : | + ! : | 1 _RNvNtNtCs62sWeHaXwK5_12pedradb_core3sst5table25seek_point_in_block_image  (in snapshot_backends-b8536a3e576e7dd6) + 1612  [0x1006a054c]
+    + !                     : | + ! : 30 _RNvMse_NtCs62sWeHaXwK5_12pedradb_core2dbINtB5_2DbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE6lookupCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 976,984,...  [0x1000e6174,0x1000e617c,...]
+    + !                     : | + ! : 21 _RNvMse_NtCs62sWeHaXwK5_12pedradb_core2dbINtB5_2DbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE6lookupCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 964  [0x1000e6168]
+    + !                     : | + ! : | 16 _platform_memcmp  (in libsystem_platform.dylib) + 128,8,...  [0x191a2bdd0,0x191a2bd58,...]
+    + !                     : | + ! : | 5 DYLD-STUB$$memcmp  (in snapshot_backends-b8536a3e576e7dd6) + 4  [0x100979030]
+    + !                     : | + ! : 7 _RNvMse_NtCs62sWeHaXwK5_12pedradb_core2dbINtB5_2DbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE6lookupCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 896  [0x1000e6124]
+    + !                     : | + ! : | 7 _RNvMNtNtCs62sWeHaXwK5_12pedradb_core3sst5tableNtB2_8SstTable24collect_range_tombstones  (in snapshot_backends-b8536a3e576e7dd6) + 28,16,...  [0x10069ce8c,0x10069ce80,...]
+    + !                     : | + ! : 5 _RNvMse_NtCs62sWeHaXwK5_12pedradb_core2dbINtB5_2DbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE6lookupCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 484  [0x1000e5f88]
+    + !                     : | + ! : | 5 _RNvMsd_NtCs62sWeHaXwK5_12pedradb_core8memtableNtB5_8MemTable9get_entry  (in snapshot_backends-b8536a3e576e7dd6) + 68,60,...  [0x1006c2d50,0x1006c2d48,...]
+    + !                     : | + ! : 5 _RNvMse_NtCs62sWeHaXwK5_12pedradb_core2dbINtB5_2DbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE6lookupCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 1304  [0x1000e62bc]
+    + !                     : | + ! : | 3 free_small  (in libsystem_malloc.dylib) + 56,176,...  [0x191811364,0x1918113dc,...]
+    + !                     : | + ! : | 1 DYLD-STUB$$free  (in snapshot_backends-b8536a3e576e7dd6) + 4  [0x100978e80]
+    + !                     : | + ! : | 1 _szone_free  (in libsystem_malloc.dylib) + 364  [0x191823bac]
+    + !                     : | + ! : 3 _RNvMNtNtCs62sWeHaXwK5_12pedradb_core3sst5tableNtB2_8SstTable24collect_range_tombstones  (in snapshot_backends-b8536a3e576e7dd6) + 268,264  [0x10069cf7c,0x10069cf78]
+    + !                     : | + ! : 3 _RNvMse_NtCs62sWeHaXwK5_12pedradb_core2dbINtB5_2DbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE6lookupCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 1004  [0x1000e6190]
+    + !                     : | + ! : | 2 DYLD-STUB$$memcmp  (in snapshot_backends-b8536a3e576e7dd6) + 0,4  [0x10097902c,0x100979030]
+    + !                     : | + ! : | 1 _platform_memcmp  (in libsystem_platform.dylib) + 48  [0x191a2bd80]
+    + !                     : | + ! : 2 _RNvMsd_NtCs62sWeHaXwK5_12pedradb_core8memtableNtB5_8MemTable24collect_range_tombstones  (in snapshot_backends-b8536a3e576e7dd6) + 984,992  [0x1006c1068,0x1006c1070]
+    + !                     : | + ! : 2 _RNvMsd_NtCs62sWeHaXwK5_12pedradb_core8memtableNtB5_8MemTable9get_entry  (in snapshot_backends-b8536a3e576e7dd6) + 1904,1912  [0x1006c347c,0x1006c3484]
+    + !                     : | + ! : 1 _RNvMse_NtCs62sWeHaXwK5_12pedradb_core2dbINtB5_2DbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE6lookupCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 460  [0x1000e5f70]
+    + !                     : | + ! : | 1 _RNvMsd_NtCs62sWeHaXwK5_12pedradb_core8memtableNtB5_8MemTable24collect_range_tombstones  (in snapshot_backends-b8536a3e576e7dd6) + 32  [0x1006c0cb0]
+    + !                     : | + ! : 1 _nanov2_free  (in libsystem_malloc.dylib) + 408  [0x19182f6a4]
+    + !                     : | + ! : 1 _szone_free  (in libsystem_malloc.dylib) + 484  [0x191823c24]
+    + !                     : | + ! 321 _RNvMse_NtCs62sWeHaXwK5_12pedradb_core2dbINtB5_2DbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE3getCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 3852  [0x1000e5608]
+    + !                     : | + ! : 78 _RNvMs5_NtCs62sWeHaXwK5_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesEE6insertCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 792  [0x1001249b4]
+    + !                     : | + ! : | 32 _RNvMs5_NtCs62sWeHaXwK5_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesEE6insertCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 792  [0x1001249b4]
+    + !                     : | + ! : | + 27 _free  (in libsystem_malloc.dylib) + 20,0,...  [0x191838588,0x191838574,...]
+    + !                     : | + ! : | + 5 DYLD-STUB$$free  (in snapshot_backends-b8536a3e576e7dd6) + 4  [0x100978e80]
+    + !                     : | + ! : | 29 _RNvNtCs7dCdOs0Eg1C_5bytes5bytes11shared_drop  (in snapshot_backends-b8536a3e576e7dd6) + 64  [0x10078fd20]
+    + !                     : | + ! : | + 18 _nanov2_free  (in libsystem_malloc.dylib) + 840,36,...  [0x19182f854,0x19182f530,...]
+    + !                     : | + ! : | + 6 nanov2_madvise_block  (in libsystem_malloc.dylib) + 132  [0x1918174d4]
+    + !                     : | + ! : | + ! 6 nanov2_madvise_block_locked  (in libsystem_malloc.dylib) + 136  [0x19182fe54]
+    + !                     : | + ! : | + !   6 mvm_madvise_free_plat  (in libsystem_malloc.dylib) + 108  [0x191827834]
+    + !                     : | + ! : | + !     6 madvise  (in libsystem_kernel.dylib) + 8  [0x1919bfa78]
+    + !                     : | + ! : | + 3 _free  (in libsystem_malloc.dylib) + 60,104,...  [0x1918385b0,0x1918385dc,...]
+    + !                     : | + ! : | + 2 _nanov2_free  (in libsystem_malloc.dylib) + 520  [0x19182f714]
+    + !                     : | + ! : | +   2 _platform_memset  (in libsystem_platform.dylib) + 140,160  [0x191a2df5c,0x191a2df70]
+    + !                     : | + ! : | 11 _nanov2_free  (in libsystem_malloc.dylib) + 56,36,...  [0x19182f544,0x19182f530,...]
+    + !                     : | + ! : | 6 _nanov2_free  (in libsystem_malloc.dylib) + 520  [0x19182f714]
+    + !                     : | + ! : |   3 _platform_memset  (in libsystem_platform.dylib) + 180,188,...  [0x191a2df84,0x191a2df8c,...]
+    + !                     : | + ! : |   2 DYLD-STUB$$_platform_bzero  (in libsystem_malloc.dylib) + 8  [0x191840068]
+    + !                     : | + ! : |   1 __bzero  (in libsystem_platform.dylib) + 0  [0x191a2de70]
+    + !                     : | + ! : 64 _RNvMs5_NtCs62sWeHaXwK5_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesEE6insertCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 756  [0x100124990]
+    + !                     : | + ! : | 59 _RINvMs1_NtCs9nAj5kJTqSU_9hashbrown3mapINtB6_7HashMapNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesTyyINtNtCsgtPOCBgevO_4core6option6OptionBO_EEINtNtB1w_4hash18BuildHasherDefaultNtNtCs62sWeHaXwK5_12pedradb_core5cache8FxHasherEE6removeBO_ECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 92,440,...  [0x10015512c,0x100155288,...]
+    + !                     : | + ! : | 3 _RINvMs1_NtCs9nAj5kJTqSU_9hashbrown3mapINtB6_7HashMapNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesTyyINtNtCsgtPOCBgevO_4core6option6OptionBO_EEINtNtB1w_4hash18BuildHasherDefaultNtNtCs62sWeHaXwK5_12pedradb_core5cache8FxHasherEE6removeBO_ECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 88  [0x100155128]
+    + !                     : | + ! : | + 3 _RNvXs3_NtCs62sWeHaXwK5_12pedradb_core5cacheNtB5_8FxHasherNtNtCsgtPOCBgevO_4core4hash6Hasher5write  (in snapshot_backends-b8536a3e576e7dd6) + 52,64,...  [0x1006b8458,0x1006b8464,...]
+    + !                     : | + ! : | 1 _RINvMs1_NtCs9nAj5kJTqSU_9hashbrown3mapINtB6_7HashMapNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesTyyINtNtCsgtPOCBgevO_4core6option6OptionBO_EEINtNtB1w_4hash18BuildHasherDefaultNtNtCs62sWeHaXwK5_12pedradb_core5cache8FxHasherEE6removeBO_ECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 200  [0x100155198]
+    + !                     : | + ! : | + 1 _platform_memcmp  (in libsystem_platform.dylib) + 88  [0x191a2bda8]
+    + !                     : | + ! : | 1 _RINvMs1_NtCs9nAj5kJTqSU_9hashbrown3mapINtB6_7HashMapNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesTyyINtNtCsgtPOCBgevO_4core6option6OptionBO_EEINtNtB1w_4hash18BuildHasherDefaultNtNtCs62sWeHaXwK5_12pedradb_core5cache8FxHasherEE6removeBO_ECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 496  [0x1001552c0]
+    + !                     : | + ! : |   1 _RNvNtCs7dCdOs0Eg1C_5bytes5bytes20promotable_even_drop  (in snapshot_backends-b8536a3e576e7dd6) + 36  [0x1007903a0]
+    + !                     : | + ! : 58 _RNvMs5_NtCs62sWeHaXwK5_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesEE6insertCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 816  [0x1001249cc]
+    + !                     : | + ! : | 22 _nanov2_free  (in libsystem_malloc.dylib) + 272,696,...  [0x19182f61c,0x19182f7c4,...]
+    + !                     : | + ! : | 17 _RNvNtCs7dCdOs0Eg1C_5bytes5bytes11shared_drop  (in snapshot_backends-b8536a3e576e7dd6) + 64  [0x10078fd20]
+    + !                     : | + ! : | + 8 _nanov2_free  (in libsystem_malloc.dylib) + 500,696,...  [0x19182f700,0x19182f7c4,...]
+    + !                     : | + ! : | + 6 _nanov2_free  (in libsystem_malloc.dylib) + 520  [0x19182f714]
+    + !                     : | + ! : | + ! 3 DYLD-STUB$$_platform_bzero  (in libsystem_malloc.dylib) + 8  [0x191840068]
+    + !                     : | + ! : | + ! 3 _platform_memset  (in libsystem_platform.dylib) + 184,188,...  [0x191a2df88,0x191a2df8c,...]
+    + !                     : | + ! : | + 1 DYLD-STUB$$free  (in snapshot_backends-b8536a3e576e7dd6) + 4  [0x100978e80]
+    + !                     : | + ! : | + 1 _free  (in libsystem_malloc.dylib) + 60  [0x1918385b0]
+    + !                     : | + ! : | + 1 nanov2_madvise_block  (in libsystem_malloc.dylib) + 132  [0x1918174d4]
+    + !                     : | + ! : | +   1 nanov2_madvise_block_locked  (in libsystem_malloc.dylib) + 136  [0x19182fe54]
+    + !                     : | + ! : | +     1 mvm_madvise_free_plat  (in libsystem_malloc.dylib) + 108  [0x191827834]
+    + !                     : | + ! : | +       1 madvise  (in libsystem_kernel.dylib) + 8  [0x1919bfa78]
+    + !                     : | + ! : | 15 _nanov2_free  (in libsystem_malloc.dylib) + 520  [0x19182f714]
+    + !                     : | + ! : | + 12 _platform_memset  (in libsystem_platform.dylib) + 180  [0x191a2df84]
+    + !                     : | + ! : | + 2 __bzero  (in libsystem_platform.dylib) + 0  [0x191a2de70]
+    + !                     : | + ! : | + 1 DYLD-STUB$$_platform_bzero  (in libsystem_malloc.dylib) + 8  [0x191840068]
+    + !                     : | + ! : | 3 _RNvMs5_NtCs62sWeHaXwK5_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesEE6insertCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 816  [0x1001249cc]
+    + !                     : | + ! : | + 2 _free  (in libsystem_malloc.dylib) + 60,88  [0x1918385b0,0x1918385cc]
+    + !                     : | + ! : | + 1 DYLD-STUB$$free  (in snapshot_backends-b8536a3e576e7dd6) + 4  [0x100978e80]
+    + !                     : | + ! : | 1 _RNvNtCs7dCdOs0Eg1C_5bytes5bytes11shared_drop  (in snapshot_backends-b8536a3e576e7dd6) + 40  [0x10078fd08]
+    + !                     : | + ! : 36 _RNvMs5_NtCs62sWeHaXwK5_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesEE6insertCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 100  [0x100124700]
+    + !                     : | + ! : | 31 _RINvMs1_NtCs9nAj5kJTqSU_9hashbrown3mapINtB6_7HashMapNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesTyyINtNtCsgtPOCBgevO_4core6option6OptionBO_EEINtNtB1w_4hash18BuildHasherDefaultNtNtCs62sWeHaXwK5_12pedradb_core5cache8FxHasherEE7get_mutShECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 88  [0x100155344]
+    + !                     : | + ! : | + 29 _RINvMs1_NtCs9nAj5kJTqSU_9hashbrown3mapINtB6_7HashMapNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesTyyINtNtCsgtPOCBgevO_4core6option6OptionBO_EEINtNtB1w_4hash18BuildHasherDefaultNtNtCs62sWeHaXwK5_12pedradb_core5cache8FxHasherEE7get_mutShECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 92,228,...  [0x100155348,0x1001553d0,...]
+    + !                     : | + ! : | + 2 _RNvXs3_NtCs62sWeHaXwK5_12pedradb_core5cacheNtB5_8FxHasherNtNtCsgtPOCBgevO_4core4hash6Hasher5write  (in snapshot_backends-b8536a3e576e7dd6) + 68,120  [0x1006b8468,0x1006b849c]
+    + !                     : | + ! : | 4 _RNvMs5_NtCs62sWeHaXwK5_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesEE6insertCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 452  [0x100124860]
+    + !                     : | + ! : | + 4 _RNvXs3_NtCs62sWeHaXwK5_12pedradb_core5cacheNtB5_8FxHasherNtNtCsgtPOCBgevO_4core4hash6Hasher5write  (in snapshot_backends-b8536a3e576e7dd6) + 52,64,...  [0x1006b8458,0x1006b8464,...]
+    + !                     : | + ! : | 1 _RINvMs1_NtCs9nAj5kJTqSU_9hashbrown3mapINtB6_7HashMapNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesTyyINtNtCsgtPOCBgevO_4core6option6OptionBO_EEINtNtB1w_4hash18BuildHasherDefaultNtNtCs62sWeHaXwK5_12pedradb_core5cache8FxHasherEE7get_mutShECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 312  [0x100155424]
+    + !                     : | + ! : 35 _RNvMs5_NtCs62sWeHaXwK5_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesEE6insertCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 456,780,...  [0x100124864,0x1001249a8,...]
+    + !                     : | + ! : 22 _RNvMs5_NtCs62sWeHaXwK5_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesEE6insertCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 1020  [0x100124a98]
+    + !                     : | + ! : | 12 _RNvMs1_NtCs9nAj5kJTqSU_9hashbrown3mapINtB5_7HashMapNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesTyyINtNtCsgtPOCBgevO_4core6option6OptionBN_EEINtNtB1v_4hash18BuildHasherDefaultNtNtCs62sWeHaXwK5_12pedradb_core5cache8FxHasherEE6insertCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 312,460,...  [0x100155a04,0x100155a98,...]
+    + !                     : | + ! : | 10 _RNvMs1_NtCs9nAj5kJTqSU_9hashbrown3mapINtB5_7HashMapNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesTyyINtNtCsgtPOCBgevO_4core6option6OptionBN_EEINtNtB1v_4hash18BuildHasherDefaultNtNtCs62sWeHaXwK5_12pedradb_core5cache8FxHasherEE6insertCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 100  [0x100155930]
+    + !                     : | + ! : |   10 _RNvXs3_NtCs62sWeHaXwK5_12pedradb_core5cacheNtB5_8FxHasherNtNtCsgtPOCBgevO_4core4hash6Hasher5write  (in snapshot_backends-b8536a3e576e7dd6) + 16,52,...  [0x1006b8434,0x1006b8458,...]
+    + !                     : | + ! : 15 _RNvMs5_NtCs62sWeHaXwK5_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesEE6insertCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 852  [0x1001249f0]
+    + !                     : | + ! : | 7 _RNvMNtCs7dCdOs0Eg1C_5bytes5bytesNtB2_5Bytes15copy_from_slice  (in snapshot_backends-b8536a3e576e7dd6) + 72  [0x10078fca0]
+    + !                     : | + ! : | + 7 _platform_memmove  (in libsystem_platform.dylib) + 452,428,...  [0x191a2e364,0x191a2e34c,...]
+    + !                     : | + ! : | 6 _RNvMNtCs7dCdOs0Eg1C_5bytes5bytesNtB2_5Bytes15copy_from_slice  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x10078fc8c]
+    + !                     : | + ! : | + 2 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 12,84  [0x191837928,0x191837970]
+    + !                     : | + ! : | + 2 nanov2_malloc  (in libsystem_malloc.dylib) + 68,424  [0x19180dc64,0x19180ddc8]
+    + !                     : | + ! : | + 1 nanov2_allocate_outlined  (in libsystem_malloc.dylib) + 252  [0x19182f474]
+    + !                     : | + ! : | + ! 1 nanov2_find_block_and_allocate  (in libsystem_malloc.dylib) + 420  [0x19180dfc4]
+    + !                     : | + ! : | + 1 nanov2_allocate_outlined  (in libsystem_malloc.dylib) + 316  [0x19182f4b4]
+    + !                     : | + ! : | 1 _RNvMNtCs7dCdOs0Eg1C_5bytes5bytesNtB2_5Bytes15copy_from_slice  (in snapshot_backends-b8536a3e576e7dd6) + 104  [0x10078fcc0]
+    + !                     : | + ! : | + 1 _RNvXsE_NtCs7dCdOs0Eg1C_5bytes5bytesNtB5_5BytesINtNtCsgtPOCBgevO_4core7convert4FromINtNtCslJsSqIQKwiA_5alloc3vec3VechEE4from  (in snapshot_backends-b8536a3e576e7dd6) + 24  [0x100790774]
+    + !                     : | + ! : | 1 _RNvMs5_NtCs62sWeHaXwK5_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesEE6insertCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 876  [0x100124a08]
+    + !                     : | + ! : |   1 _RNvNtCs7dCdOs0Eg1C_5bytes5bytes21promotable_even_clone  (in snapshot_backends-b8536a3e576e7dd6) + 8  [0x1007904e4]
+    + !                     : | + ! : 10 _RNvMs5_NtCs62sWeHaXwK5_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesEE6insertCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 876  [0x100124a08]
+    + !                     : | + ! : | 6 _RNvNtCs7dCdOs0Eg1C_5bytes5bytes17shallow_clone_vec  (in snapshot_backends-b8536a3e576e7dd6) + 72  [0x100966920]
+    + !                     : | + ! : | + 4 nanov2_malloc  (in libsystem_malloc.dylib) + 68,220,...  [0x19180dc64,0x19180dcfc,...]
+    + !                     : | + ! : | + 1 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 84  [0x191837970]
+    + !                     : | + ! : | + 1 nanov2_allocate_outlined  (in libsystem_malloc.dylib) + 316  [0x19182f4b4]
+    + !                     : | + ! : | 3 _RNvNtCs7dCdOs0Eg1C_5bytes5bytes17shallow_clone_vec  (in snapshot_backends-b8536a3e576e7dd6) + 44,72,...  [0x100966904,0x100966920,...]
+    + !                     : | + ! : | 1 _RNvNtCs7dCdOs0Eg1C_5bytes5bytes17shallow_clone_vec  (in snapshot_backends-b8536a3e576e7dd6) + 60  [0x100966914]
+    + !                     : | + ! : |   1 _RNvCs9wFQrvczXsK_7___rustc35___rust_no_alloc_shim_is_unstable_v2  (in snapshot_backends-b8536a3e576e7dd6) + 0  [0x1000bcc28]
+    + !                     : | + ! : 1 _RINvMs1_NtCs9nAj5kJTqSU_9hashbrown3mapINtB6_7HashMapNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesTyyINtNtCsgtPOCBgevO_4core6option6OptionBO_EEINtNtB1w_4hash18BuildHasherDefaultNtNtCs62sWeHaXwK5_12pedradb_core5cache8FxHasherEE6removeBO_ECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 528  [0x1001552e0]
+    + !                     : | + ! : 1 _RNvMs1_NtCs9nAj5kJTqSU_9hashbrown3mapINtB5_7HashMapNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesTyyINtNtCsgtPOCBgevO_4core6option6OptionBN_EEINtNtB1v_4hash18BuildHasherDefaultNtNtCs62sWeHaXwK5_12pedradb_core5cache8FxHasherEE6insertCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 576  [0x100155b0c]
+    + !                     : | + ! : 1 _nanov2_free  (in libsystem_malloc.dylib) + 852  [0x19182f860]
+    + !                     : | + ! 26 _RNvMse_NtCs62sWeHaXwK5_12pedradb_core2dbINtB5_2DbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE3getCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 64  [0x1000e473c]
+    + !                     : | + ! : 20 _RNvMs5_NtCs62sWeHaXwK5_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesEE3getCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 132,364,...  [0x10012435c,0x100124444,...]
+    + !                     : | + ! : 6 _RNvMs5_NtCs62sWeHaXwK5_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesEE3getCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 128  [0x100124358]
+    + !                     : | + ! :   6 _RNvXs3_NtCs62sWeHaXwK5_12pedradb_core5cacheNtB5_8FxHasherNtNtCsgtPOCBgevO_4core4hash6Hasher5write  (in snapshot_backends-b8536a3e576e7dd6) + 16,52,...  [0x1006b8434,0x1006b8458,...]
+    + !                     : | + ! 22 _RNvMse_NtCs62sWeHaXwK5_12pedradb_core2dbINtB5_2DbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE3getCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 416  [0x1000e489c]
+    + !                     : | + ! : 20 _RNvMs5_NtCs62sWeHaXwK5_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesEE3getCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 132,64,...  [0x10012435c,0x100124318,...]
+    + !                     : | + ! : 2 _RNvMs5_NtCs62sWeHaXwK5_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesEE3getCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 128  [0x100124358]
+    + !                     : | + ! :   2 _RNvXs3_NtCs62sWeHaXwK5_12pedradb_core5cacheNtB5_8FxHasherNtNtCsgtPOCBgevO_4core4hash6Hasher5write  (in snapshot_backends-b8536a3e576e7dd6) + 68  [0x1006b8468]
+    + !                     : | + ! 14 _RNvMse_NtCs62sWeHaXwK5_12pedradb_core2dbINtB5_2DbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE3getCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 408,3804,...  [0x1000e4894,0x1000e55d8,...]
+    + !                     : | + ! 11 _RNvMse_NtCs62sWeHaXwK5_12pedradb_core2dbINtB5_2DbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE3getCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 3820  [0x1000e55e8]
+    + !                     : | + ! : 8 _RNvNtCs7dCdOs0Eg1C_5bytes5bytes17shallow_clone_vec  (in snapshot_backends-b8536a3e576e7dd6) + 72  [0x100966920]
+    + !                     : | + ! : | 4 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 96,12,...  [0x19183797c,0x191837928,...]
+    + !                     : | + ! : | 4 nanov2_malloc  (in libsystem_malloc.dylib) + 276,0  [0x19180dd34,0x19180dc20]
+    + !                     : | + ! : 1 _RNvNtCs7dCdOs0Eg1C_5bytes5bytes17shallow_clone_vec  (in snapshot_backends-b8536a3e576e7dd6) + 60  [0x100966914]
+    + !                     : | + ! : | 1 _RNvCs9wFQrvczXsK_7___rustc35___rust_no_alloc_shim_is_unstable_v2  (in snapshot_backends-b8536a3e576e7dd6) + 0  [0x1000bcc28]
+    + !                     : | + ! : 1 _RNvNtCs7dCdOs0Eg1C_5bytes5bytes17shallow_clone_vec  (in snapshot_backends-b8536a3e576e7dd6) + 8  [0x1009668e0]
+    + !                     : | + ! : 1 _RNvNtCs7dCdOs0Eg1C_5bytes5bytes21promotable_even_clone  (in snapshot_backends-b8536a3e576e7dd6) + 12  [0x1007904e8]
+    + !                     : | + ! 3 _RNvMse_NtCs62sWeHaXwK5_12pedradb_core2dbINtB5_2DbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE3getCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 1212  [0x1000e4bb8]
+    + !                     : | + ! : 2 _RNvMse_NtCs62sWeHaXwK5_12pedradb_core2dbINtB5_2DbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE20resolve_stored_valueCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 104  [0x1000dc880]
+    + !                     : | + ! : | 2 _RNvNtCs62sWeHaXwK5_12pedradb_core4vlog15decode_vlog_ptr  (in snapshot_backends-b8536a3e576e7dd6) + 0,144  [0x1006a7354,0x1006a73e4]
+    + !                     : | + ! : 1 _RNvMse_NtCs62sWeHaXwK5_12pedradb_core2dbINtB5_2DbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE20resolve_stored_valueCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 0  [0x1000dc818]
+    + !                     : | + ! 1 _RNvMse_NtCs62sWeHaXwK5_12pedradb_core2dbINtB5_2DbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE20resolve_stored_valueCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 396  [0x1000dc9a4]
+    + !                     : | + ! 1 _RNvMse_NtCs62sWeHaXwK5_12pedradb_core2dbINtB5_2DbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE3getCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 1152  [0x1000e4b7c]
+    + !                     : | + ! : 1 _RNvNtCs62sWeHaXwK5_12pedradb_core4vlog15decode_vlog_ptr  (in snapshot_backends-b8536a3e576e7dd6) + 0  [0x1006a7354]
+    + !                     : | + ! 1 _RNvMse_NtCs62sWeHaXwK5_12pedradb_core2dbINtB5_2DbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE6lookupCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 1424  [0x1000e6334]
+    + !                     : | + 58 _RNvMs0_NtCs62sWeHaXwK5_12pedradb_core10concurrentINtB5_12ConcurrentDbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE3getCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 140  [0x1001005e8]
+    + !                     : | + ! 43 _RNvMs8_NtCsb1bNbDaTsGO_11parking_lot10raw_rwlockNtB5_9RawRwLock16lock_shared_slow  (in snapshot_backends-b8536a3e576e7dd6) + 696  [0x10095be60]
+    + !                     : | + ! : 42 cthread_yield  (in libsystem_pthread.dylib) + 32  [0x1919fadd0]
+    + !                     : | + ! : | 42 swtch_pri  (in libsystem_kernel.dylib) + 8  [0x1919bce48]
+    + !                     : | + ! : 1 DYLD-STUB$$sched_yield  (in snapshot_backends-b8536a3e576e7dd6) + 4  [0x100979378]
+    + !                     : | + ! 11 _RNvMs8_NtCsb1bNbDaTsGO_11parking_lot10raw_rwlockNtB5_9RawRwLock16lock_shared_slow  (in snapshot_backends-b8536a3e576e7dd6) + 968  [0x10095bf70]
+    + !                     : | + ! : 10 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    + !                     : | + ! : | 10 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    + !                     : | + ! : 1 _pthread_cond_wait  (in libsystem_pthread.dylib) + 260  [0x1919fe194]
+    + !                     : | + ! 4 _RNvMs8_NtCsb1bNbDaTsGO_11parking_lot10raw_rwlockNtB5_9RawRwLock16lock_shared_slow  (in snapshot_backends-b8536a3e576e7dd6) + 640,696,...  [0x10095be28,0x10095be60,...]
+    + !                     : | + 28 _RNvMs0_NtCs62sWeHaXwK5_12pedradb_core10concurrentINtB5_12ConcurrentDbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE3getCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 72  [0x1001005a4]
+    + !                     : | + ! 25 _RNvMs5_NtCs62sWeHaXwK5_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesEE3getCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 132,272,...  [0x10012435c,0x1001243e8,...]
+    + !                     : | + ! 3 _RNvMs5_NtCs62sWeHaXwK5_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesEE3getCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 128  [0x100124358]
+    + !                     : | + !   3 _RNvXs3_NtCs62sWeHaXwK5_12pedradb_core5cacheNtB5_8FxHasherNtNtCsgtPOCBgevO_4core4hash6Hasher5write  (in snapshot_backends-b8536a3e576e7dd6) + 16,68,...  [0x1006b8434,0x1006b8468,...]
+    + !                     : | + 13 _RNvMs8_NtCsb1bNbDaTsGO_11parking_lot10raw_rwlockNtB5_9RawRwLock18unlock_shared_slow  (in snapshot_backends-b8536a3e576e7dd6) + 528  [0x10095c44c]
+    + !                     : | + ! 12 pthread_cond_signal  (in libsystem_pthread.dylib) + 720  [0x1919fd1fc]
+    + !                     : | + ! : 11 __psynch_cvsignal  (in libsystem_kernel.dylib) + 8  [0x1919c1a48]
+    + !                     : | + ! : 1 DYLD-STUB$$__psynch_cvsignal  (in libsystem_pthread.dylib) + 0  [0x191a02980]
+    + !                     : | + ! 1 pthread_cond_signal  (in libsystem_pthread.dylib) + 148  [0x1919fcfc0]
+    + !                     : | + 6 _RNvMs0_NtCs62sWeHaXwK5_12pedradb_core10concurrentINtB5_12ConcurrentDbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE3getCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 232,56,...  [0x100100644,0x100100594,...]
+    + !                     : | + 4 _RNvMs8_NtCsb1bNbDaTsGO_11parking_lot10raw_rwlockNtB5_9RawRwLock18unlock_shared_slow  (in snapshot_backends-b8536a3e576e7dd6) + 384  [0x10095c3bc]
+    + !                     : | + ! 4 _RNvMNtNtNtNtCsa9BKTri5B3M_3std3sys3pal4unix4timeNtB2_8Timespec3now  (in snapshot_backends-b8536a3e576e7dd6) + 24  [0x100916878]
+    + !                     : | + !   4 clock_gettime  (in libsystem_c.dylib) + 72  [0x1918a25a8]
+    + !                     : | + !     2 clock_gettime_nsec_np  (in libsystem_c.dylib) + 240  [0x19189559c]
+    + !                     : | + !     : 1 DYLD-STUB$$mach_timebase_info  (in libsystem_c.dylib) + 0  [0x19190bc00]
+    + !                     : | + !     : 1 mach_timebase_info  (in libsystem_kernel.dylib) + 0  [0x1919bd184]
+    + !                     : | + !     1 clock_gettime_nsec_np  (in libsystem_c.dylib) + 404  [0x191895640]
+    + !                     : | + !     : 1 mach_absolute_time  (in libsystem_kernel.dylib) + 108  [0x1919bd2c0]
+    + !                     : | + !     1 clock_gettime_nsec_np  (in libsystem_c.dylib) + 240  [0x19189559c]
+    + !                     : | + 4 _RNvMse_NtCs62sWeHaXwK5_12pedradb_core2dbINtB5_2DbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE3getCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 3880,3884  [0x1000e5624,0x1000e5628]
+    + !                     : | + 1 _RNvMs8_NtCsb1bNbDaTsGO_11parking_lot10raw_rwlockNtB5_9RawRwLock18unlock_shared_slow  (in snapshot_backends-b8536a3e576e7dd6) + 236  [0x10095c328]
+    + !                     : | 76 _RINvMsj_Cs1pByd8LO0u1_14rocksdb_compatNtB6_2DB10get_cachedRShECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 276  [0x10012a4b0]
+    + !                     : | + 32 _RNvMs9_Cs1pByd8LO0u1_14rocksdb_compatNtB5_12LastGetTable3get  (in snapshot_backends-b8536a3e576e7dd6) + 84,116,...  [0x100681924,0x100681944,...]
+    + !                     : | + 21 _RNvMs9_Cs1pByd8LO0u1_14rocksdb_compatNtB5_12LastGetTable3get  (in snapshot_backends-b8536a3e576e7dd6) + 260  [0x1006819d4]
+    + !                     : | + ! 19 _platform_memcmp  (in libsystem_platform.dylib) + 128,8,...  [0x191a2bdd0,0x191a2bd58,...]
+    + !                     : | + ! 2 DYLD-STUB$$memcmp  (in snapshot_backends-b8536a3e576e7dd6) + 4  [0x100979030]
+    + !                     : | + 19 _RNvMs9_Cs1pByd8LO0u1_14rocksdb_compatNtB5_12LastGetTable3get  (in snapshot_backends-b8536a3e576e7dd6) + 188  [0x10068198c]
+    + !                     : | + ! 14 _platform_memcmp  (in libsystem_platform.dylib) + 180,140,...  [0x191a2be04,0x191a2bddc,...]
+    + !                     : | + ! 5 DYLD-STUB$$memcmp  (in snapshot_backends-b8536a3e576e7dd6) + 4  [0x100979030]
+    + !                     : | + 4 _RNvMs9_Cs1pByd8LO0u1_14rocksdb_compatNtB5_12LastGetTable3get  (in snapshot_backends-b8536a3e576e7dd6) + 312  [0x100681a08]
+    + !                     : | +   3 _platform_memmove  (in libsystem_platform.dylib) + 452,444  [0x191a2e364,0x191a2e35c]
+    + !                     : | +   1 DYLD-STUB$$memcpy  (in snapshot_backends-b8536a3e576e7dd6) + 4  [0x10097903c]
+    + !                     : | 73 _RINvMsj_Cs1pByd8LO0u1_14rocksdb_compatNtB6_2DB10get_cachedRShECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 908  [0x10012a728]
+    + !                     : | + 73 _platform_memmove  (in libsystem_platform.dylib) + 188,180,...  [0x191a2e25c,0x191a2e254,...]
+    + !                     : | 33 _RINvMsj_Cs1pByd8LO0u1_14rocksdb_compatNtB6_2DB10get_cachedRShECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 796  [0x10012a6b8]
+    + !                     : | + 15 _RNvMs9_Cs1pByd8LO0u1_14rocksdb_compatNtB5_12LastGetTable5store  (in snapshot_backends-b8536a3e576e7dd6) + 376,384  [0x100682844,0x10068284c]
+    + !                     : | + 13 _RINvMs2_NtNtCsa9BKTri5B3M_3std6thread5localINtB6_8LocalKeyINtNtCsgtPOCBgevO_4core4cell7RefCellNtCs1pByd8LO0u1_14rocksdb_compat12LastGetTableEE4withNCINvMsj_B1w_NtB1w_2DB10get_cachedRShEs1_0uECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 176  [0x100105a34]
+    + !                     : | + ! 11 _RNvMs9_Cs1pByd8LO0u1_14rocksdb_compatNtB5_12LastGetTable5store  (in snapshot_backends-b8536a3e576e7dd6) + 308,324,...  [0x100682800,0x100682810,...]
+    + !                     : | + ! 1 _RNvMs9_Cs1pByd8LO0u1_14rocksdb_compatNtB5_12LastGetTable5store  (in snapshot_backends-b8536a3e576e7dd6) + 96  [0x10068272c]
+    + !                     : | + ! : 1 _platform_memmove  (in libsystem_platform.dylib) + 452  [0x191a2e364]
+    + !                     : | + ! 1 _RNvMs9_Cs1pByd8LO0u1_14rocksdb_compatNtB5_12LastGetTable5store  (in snapshot_backends-b8536a3e576e7dd6) + 292  [0x1006827f0]
+    + !                     : | + !   1 _RNvNtCs7dCdOs0Eg1C_5bytes5bytes11shared_drop  (in snapshot_backends-b8536a3e576e7dd6) + 32  [0x10078fd00]
+    + !                     : | + 5 _RINvMs2_NtNtCsa9BKTri5B3M_3std6thread5localINtB6_8LocalKeyINtNtCsgtPOCBgevO_4core4cell7RefCellNtCs1pByd8LO0u1_14rocksdb_compat12LastGetTableEE4withNCINvMsj_B1w_NtB1w_2DB10get_cachedRShEs1_0uECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 92,124,...  [0x1001059e0,0x100105a00,...]
+    + !                     : | 23 _RINvMsj_Cs1pByd8LO0u1_14rocksdb_compatNtB6_2DB10get_cachedRShECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 888  [0x10012a714]
+    + !                     : | + 7 nanov2_allocate_outlined  (in libsystem_malloc.dylib) + 316  [0x19182f4b4]
+    + !                     : | + 6 nanov2_allocate_outlined  (in libsystem_malloc.dylib) + 252  [0x19182f474]
+    + !                     : | + ! 6 nanov2_find_block_and_allocate  (in libsystem_malloc.dylib) + 588,420,...  [0x19180e06c,0x19180dfc4,...]
+    + !                     : | + 5 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 12,52,...  [0x191837928,0x191837950,...]
+    + !                     : | + 5 nanov2_malloc  (in libsystem_malloc.dylib) + 252,0,...  [0x19180dd1c,0x19180dc20,...]
+    + !                     : | 21 _RINvMsj_Cs1pByd8LO0u1_14rocksdb_compatNtB6_2DB10get_cachedRShECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 828,908,...  [0x10012a6d8,0x10012a728,...]
+    + !                     : | 13 _RINvMsj_Cs1pByd8LO0u1_14rocksdb_compatNtB6_2DB10get_cachedRShECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 176  [0x10012a44c]
+    + !                     : | + 5 _RNvMs4_NtCs62sWeHaXwK5_12pedradb_core5cacheNtB5_9KeyGenMap12gen_prefixed  (in snapshot_backends-b8536a3e576e7dd6) + 156  [0x1006b67b8]
+    + !                     : | + ! 3 _platform_memmove  (in libsystem_platform.dylib) + 452,428  [0x191a2e364,0x191a2e34c]
+    + !                     : | + ! 2 DYLD-STUB$$memcpy  (in snapshot_backends-b8536a3e576e7dd6) + 4  [0x10097903c]
+    + !                     : | + 4 _RNvMs4_NtCs62sWeHaXwK5_12pedradb_core5cacheNtB5_9KeyGenMap12gen_prefixed  (in snapshot_backends-b8536a3e576e7dd6) + 20,204,...  [0x1006b6730,0x1006b67e8,...]
+    + !                     : | + 2 _RNvMs4_NtCs62sWeHaXwK5_12pedradb_core5cacheNtB5_9KeyGenMap12gen_prefixed  (in snapshot_backends-b8536a3e576e7dd6) + 120  [0x1006b6794]
+    + !                     : | + ! 1 DYLD-STUB$$bzero  (in snapshot_backends-b8536a3e576e7dd6) + 4  [0x100978c58]
+    + !                     : | + ! 1 _platform_memset  (in libsystem_platform.dylib) + 160  [0x191a2df70]
+    + !                     : | + 2 _RNvMs4_NtCs62sWeHaXwK5_12pedradb_core5cacheNtB5_9KeyGenMap12gen_prefixed  (in snapshot_backends-b8536a3e576e7dd6) + 136  [0x1006b67a4]
+    + !                     : | +   2 _platform_memmove  (in libsystem_platform.dylib) + 428,460  [0x191a2e34c,0x191a2e36c]
+    + !                     : | 3 _RINvMsj_Cs1pByd8LO0u1_14rocksdb_compatNtB6_2DB10get_cachedRShECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 544  [0x10012a5bc]
+    + !                     : | + 2 _platform_memmove  (in libsystem_platform.dylib) + 452,460  [0x191a2e364,0x191a2e36c]
+    + !                     : | + 1 DYLD-STUB$$memcpy  (in snapshot_backends-b8536a3e576e7dd6) + 4  [0x10097903c]
+    + !                     : | 2 _RINvMsj_Cs1pByd8LO0u1_14rocksdb_compatNtB6_2DB10get_cachedRShECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 732  [0x10012a678]
+    + !                     : | + 2 _platform_memmove  (in libsystem_platform.dylib) + 420,428  [0x191a2e344,0x191a2e34c]
+    + !                     : | 1 _RINvMs2_NtNtCsa9BKTri5B3M_3std6thread5localINtB6_8LocalKeyINtNtCsgtPOCBgevO_4core4cell7RefCellNtCs1pByd8LO0u1_14rocksdb_compat12LastGetTableEE4withNCINvMsj_B1w_NtB1w_2DB10get_cachedRShEs1_0uECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 204  [0x100105a50]
+    + !                     : | 1 _RINvMsj_Cs1pByd8LO0u1_14rocksdb_compatNtB6_2DB10get_cachedRShECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 960  [0x10012a75c]
+    + !                     : |   1 _RNvNtCs7dCdOs0Eg1C_5bytes5bytes20promotable_even_drop  (in snapshot_backends-b8536a3e576e7dd6) + 16  [0x10079038c]
+    + !                     : 15 _RNvNtCs6RdFyfYj5zr_10slipstream16snapshot_pedradb9get_entry  (in snapshot_backends-b8536a3e576e7dd6) + 280  [0x100138918]
+    + !                     : | 6 _RNvNtCs6RdFyfYj5zr_10slipstream15snapshot_record12decode_entry  (in snapshot_backends-b8536a3e576e7dd6) + 476  [0x100113df0]
+    + !                     : | + 3 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 12,52,...  [0x191837928,0x191837950,...]
+    + !                     : | + 3 nanov2_malloc  (in libsystem_malloc.dylib) + 0,68,...  [0x19180dc20,0x19180dc64,...]
+    + !                     : | 4 _RNvNtCs6RdFyfYj5zr_10slipstream15snapshot_record12decode_entry  (in snapshot_backends-b8536a3e576e7dd6) + 404  [0x100113da8]
+    + !                     : | + 2 DYLD-STUB$$malloc  (in snapshot_backends-b8536a3e576e7dd6) + 4  [0x100979018]
+    + !                     : | + 2 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 12,84  [0x191837928,0x191837970]
+    + !                     : | 2 _RNvNtCs6RdFyfYj5zr_10slipstream15snapshot_record12decode_entry  (in snapshot_backends-b8536a3e576e7dd6) + 24,360  [0x100113c2c,0x100113d7c]
+    + !                     : | 1 _RNvNtCs6RdFyfYj5zr_10slipstream15snapshot_record12decode_entry  (in snapshot_backends-b8536a3e576e7dd6) + 360  [0x100113d7c]
+    + !                     : | + 1 _platform_memmove  (in libsystem_platform.dylib) + 460  [0x191a2e36c]
+    + !                     : | 1 _RNvNtCs6RdFyfYj5zr_10slipstream15snapshot_record12decode_entry  (in snapshot_backends-b8536a3e576e7dd6) + 428  [0x100113dc0]
+    + !                     : | + 1 _platform_memmove  (in libsystem_platform.dylib) + 428  [0x191a2e34c]
+    + !                     : | 1 _RNvNtCs6RdFyfYj5zr_10slipstream15snapshot_record12decode_entry  (in snapshot_backends-b8536a3e576e7dd6) + 496  [0x100113e04]
+    + !                     : |   1 _platform_memmove  (in libsystem_platform.dylib) + 204  [0x191a2e26c]
+    + !                     : 15 _RNvNtCs6RdFyfYj5zr_10slipstream16snapshot_pedradb9get_entry  (in snapshot_backends-b8536a3e576e7dd6) + 356  [0x100138964]
+    + !                     : | 12 _nanov2_free  (in libsystem_malloc.dylib) + 272,332,...  [0x19182f61c,0x19182f658,...]
+    + !                     : | 2 _free  (in libsystem_malloc.dylib) + 0  [0x191838574]
+    + !                     : | 1 _nanov2_free  (in libsystem_malloc.dylib) + 520  [0x19182f714]
+    + !                     : |   1 __bzero  (in libsystem_platform.dylib) + 0  [0x191a2de70]
+    + !                     : 4 _RNvNtCs6RdFyfYj5zr_10slipstream16snapshot_pedradb9get_entry  (in snapshot_backends-b8536a3e576e7dd6) + 284,244,...  [0x10013891c,0x1001388f4,...]
+    + !                     : 3 _RNvNtCs6RdFyfYj5zr_10slipstream16snapshot_pedradb9get_entry  (in snapshot_backends-b8536a3e576e7dd6) + 64  [0x100138840]
+    + !                     : | 3 _RNvNtCs6RdFyfYj5zr_10slipstream16snapshot_pedradb2cf  (in snapshot_backends-b8536a3e576e7dd6) + 104,48  [0x100138710,0x1001386d8]
+    + !                     : 1 _RINvMsj_Cs1pByd8LO0u1_14rocksdb_compatNtB6_2DB10get_cachedRShECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 988  [0x10012a778]
+    + !                     : 1 _RNvNtCs6RdFyfYj5zr_10slipstream15snapshot_record12decode_entry  (in snapshot_backends-b8536a3e576e7dd6) + 308  [0x100113d48]
+    + !                     : 1 _RNvNtCs6RdFyfYj5zr_10slipstream16snapshot_pedradb2cf  (in snapshot_backends-b8536a3e576e7dd6) + 328  [0x1001387f0]
+    + !                     90 _RINvMNtCs8LgfujxyOep_9criterion7bencherNtB3_7Bencher4iterINtNtCsgtPOCBgevO_4core6option6OptionNtNtCs6RdFyfYj5zr_10slipstream2kv7KvEntryENCNCNvCs67Dj2gtHXC5_17snapshot_backends11bench_readss6_00EB2g_  (in snapshot_backends-b8536a3e576e7dd6) + 260  [0x1000a35d4]
+    + !                     : 74 _RNvNvNtCslJsSqIQKwiA_5alloc3fmt6format12format_inner  (in snapshot_backends-b8536a3e576e7dd6) + 308  [0x10093ece0]
+    + !                     : | 62 _RNvNtCsgtPOCBgevO_4core3fmt5write  (in snapshot_backends-b8536a3e576e7dd6) + 324  [0x100945434]
+    + !                     : | + 51 _RNvXsd_NtNtNtCsgtPOCBgevO_4core3fmt3num3impyNtB9_7Display3fmt  (in snapshot_backends-b8536a3e576e7dd6) + 76  [0x10094c87c]
+    + !                     : | + ! 36 _RNvMsa_NtCsgtPOCBgevO_4core3fmtNtB5_9Formatter12pad_integral  (in snapshot_backends-b8536a3e576e7dd6) + 884  [0x100942f58]
+    + !                     : | + ! : 30 _RNvXsZ_NtCslJsSqIQKwiA_5alloc6stringNtB5_6StringNtNtCsgtPOCBgevO_4core3fmt5Write9write_str  (in snapshot_backends-b8536a3e576e7dd6) + 112  [0x10093f084]
+    + !                     : | + ! : | 27 _RINvNvMs2_NtCslJsSqIQKwiA_5alloc7raw_vecINtB8_11RawVecInnerpE7reserve21do_reserve_and_handleNtNtBa_5alloc6GlobalEBa_  (in snapshot_backends-b8536a3e576e7dd6) + 68  [0x100977d08]
+    + !                     : | + ! : | + 24 _RNvMs4_NtCslJsSqIQKwiA_5alloc7raw_vecNtB5_11RawVecInner11finish_growB7_  (in snapshot_backends-b8536a3e576e7dd6) + 44  [0x100977dc8]
+    + !                     : | + ! : | + ! 20 _realloc  (in libsystem_malloc.dylib) + 468  [0x1918387e8]
+    + !                     : | + ! : | + ! : 15 _malloc_zone_realloc  (in libsystem_malloc.dylib) + 144  [0x191837fb0]
+    + !                     : | + ! : | + ! : | 7 nanov2_realloc  (in libsystem_malloc.dylib) + 356  [0x191810dc0]
+    + !                     : | + ! : | + ! : | + 5 _nanov2_free  (in libsystem_malloc.dylib) + 0,16,...  [0x19182f50c,0x19182f51c,...]
+    + !                     : | + ! : | + ! : | + 2 _nanov2_free  (in libsystem_malloc.dylib) + 520  [0x19182f714]
+    + !                     : | + ! : | + ! : | +   1 DYLD-STUB$$_platform_bzero  (in libsystem_malloc.dylib) + 8  [0x191840068]
+    + !                     : | + ! : | + ! : | +   1 _platform_memset  (in libsystem_platform.dylib) + 180  [0x191a2df84]
+    + !                     : | + ! : | + ! : | 4 nanov2_realloc  (in libsystem_malloc.dylib) + 52  [0x191810c90]
+    + !                     : | + ! : | + ! : | + 4 nanov2_pointer_size  (in libsystem_malloc.dylib) + 0,164,...  [0x19180e704,0x19180e7a8,...]
+    + !                     : | + ! : | + ! : | 2 default_zone_realloc  (in libsystem_malloc.dylib) + 0,24  [0x191810c38,0x191810c50]
+    + !                     : | + ! : | + ! : | 2 nanov2_realloc  (in libsystem_malloc.dylib) + 312  [0x191810d94]
+    + !                     : | + ! : | + ! : |   2 nanov2_malloc  (in libsystem_malloc.dylib) + 0,40  [0x19180dc20,0x19180dc48]
+    + !                     : | + ! : | + ! : 4 _malloc_zone_realloc  (in libsystem_malloc.dylib) + 48,72,...  [0x191837f50,0x191837f68,...]
+    + !                     : | + ! : | + ! : 1 nanov2_realloc  (in libsystem_malloc.dylib) + 384  [0x191810ddc]
+    + !                     : | + ! : | + ! 2 _realloc  (in libsystem_malloc.dylib) + 260  [0x191838718]
+    + !                     : | + ! : | + ! : 2 nanov2_size  (in libsystem_malloc.dylib) + 340,360  [0x19180e6e8,0x19180e6fc]
+    + !                     : | + ! : | + ! 2 _realloc  (in libsystem_malloc.dylib) + 100,240  [0x191838678,0x191838704]
+    + !                     : | + ! : | + 3 _RNvMs4_NtCslJsSqIQKwiA_5alloc7raw_vecNtB5_11RawVecInner11finish_growB7_  (in snapshot_backends-b8536a3e576e7dd6) + 4  [0x100977da0]
+    + !                     : | + ! : | 3 _RINvNvMs2_NtCslJsSqIQKwiA_5alloc7raw_vecINtB8_11RawVecInnerpE7reserve21do_reserve_and_handleNtNtBa_5alloc6GlobalEBa_  (in snapshot_backends-b8536a3e576e7dd6) + 68  [0x100977d08]
+    + !                     : | + ! : 6 _RNvXsZ_NtCslJsSqIQKwiA_5alloc6stringNtB5_6StringNtNtCsgtPOCBgevO_4core3fmt5Write9write_str  (in snapshot_backends-b8536a3e576e7dd6) + 64  [0x10093f054]
+    + !                     : | + ! :   4 _platform_memmove  (in libsystem_platform.dylib) + 452,456,...  [0x191a2e364,0x191a2e368,...]
+    + !                     : | + ! :   2 DYLD-STUB$$memcpy  (in snapshot_backends-b8536a3e576e7dd6) + 4  [0x10097903c]
+    + !                     : | + ! 6 _RNvMsa_NtCsgtPOCBgevO_4core3fmtNtB5_9Formatter12pad_integral  (in snapshot_backends-b8536a3e576e7dd6) + 752  [0x100942ed4]
+    + !                     : | + ! : 4 _RNvXsZ_NtCslJsSqIQKwiA_5alloc6stringNtB5_6StringNtNtCsgtPOCBgevO_4core3fmt5Write10write_char  (in snapshot_backends-b8536a3e576e7dd6) + 52,60  [0x10093ef38,0x10093ef40]
+    + !                     : | + ! : 2 _RNvXsZ_NtCslJsSqIQKwiA_5alloc6stringNtB5_6StringNtNtCsgtPOCBgevO_4core3fmt5Write10write_char  (in snapshot_backends-b8536a3e576e7dd6) + 112  [0x10093ef74]
+    + !                     : | + ! :   2 _RINvNvMs2_NtCslJsSqIQKwiA_5alloc7raw_vecINtB8_11RawVecInnerpE7reserve21do_reserve_and_handleNtNtBa_5alloc6GlobalEBa_  (in snapshot_backends-b8536a3e576e7dd6) + 68  [0x100977d08]
+    + !                     : | + ! :     1 _RNvMs4_NtCslJsSqIQKwiA_5alloc7raw_vecNtB5_11RawVecInner11finish_growB7_  (in snapshot_backends-b8536a3e576e7dd6) + 44  [0x100977dc8]
+    + !                     : | + ! :     + 1 _malloc_zone_realloc  (in libsystem_malloc.dylib) + 208  [0x191837ff0]
+    + !                     : | + ! :     1 _realloc  (in libsystem_malloc.dylib) + 516  [0x191838818]
+    + !                     : | + ! 3 _RNvMsa_NtCsgtPOCBgevO_4core3fmtNtB5_9Formatter12pad_integral  (in snapshot_backends-b8536a3e576e7dd6) + 720,748,...  [0x100942eb4,0x100942ed0,...]
+    + !                     : | + ! 3 _RNvXsZ_NtCslJsSqIQKwiA_5alloc6stringNtB5_6StringNtNtCsgtPOCBgevO_4core3fmt5Write10write_char  (in snapshot_backends-b8536a3e576e7dd6) + 264  [0x10093f00c]
+    + !                     : | + ! 2 _RNvXsZ_NtCslJsSqIQKwiA_5alloc6stringNtB5_6StringNtNtCsgtPOCBgevO_4core3fmt5Write9write_str  (in snapshot_backends-b8536a3e576e7dd6) + 84  [0x10093f068]
+    + !                     : | + ! 1 _RNvNvMsa_NtCsgtPOCBgevO_4core3fmtNtB7_9Formatter12pad_integral12write_prefix  (in snapshot_backends-b8536a3e576e7dd6) + 116  [0x100949fa4]
+    + !                     : | + 6 _RNvXsd_NtNtNtCsgtPOCBgevO_4core3fmt3num3impyNtB9_7Display3fmt  (in snapshot_backends-b8536a3e576e7dd6) + 48  [0x10094c860]
+    + !                     : | + ! 6 _RNvMsf_NtNtNtCsgtPOCBgevO_4core3fmt3num3impy10__fmt_inner  (in snapshot_backends-b8536a3e576e7dd6) + 8,204,...  [0x1009447ec,0x1009448b0,...]
+    + !                     : | + 5 _RNvMsa_NtCsgtPOCBgevO_4core3fmtNtB5_9Formatter12pad_integral  (in snapshot_backends-b8536a3e576e7dd6) + 916,908  [0x100942f78,0x100942f70]
+    + !                     : | 10 _RNvNtCsgtPOCBgevO_4core3fmt5write  (in snapshot_backends-b8536a3e576e7dd6) + 124,188,...  [0x10094536c,0x1009453ac,...]
+    + !                     : | 1 _RNvNtCsgtPOCBgevO_4core3fmt5write  (in snapshot_backends-b8536a3e576e7dd6) + 144  [0x100945380]
+    + !                     : | + 1 _RNvXsZ_NtCslJsSqIQKwiA_5alloc6stringNtB5_6StringNtNtCsgtPOCBgevO_4core3fmt5Write9write_str  (in snapshot_backends-b8536a3e576e7dd6) + 64  [0x10093f054]
+    + !                     : | +   1 DYLD-STUB$$memcpy  (in snapshot_backends-b8536a3e576e7dd6) + 4  [0x10097903c]
+    + !                     : | 1 _RNvXsZ_NtCslJsSqIQKwiA_5alloc6stringNtB5_6StringNtNtCsgtPOCBgevO_4core3fmt5Write9write_str  (in snapshot_backends-b8536a3e576e7dd6) + 84  [0x10093f068]
+    + !                     : 9 _RNvNvNtCslJsSqIQKwiA_5alloc3fmt6format12format_inner  (in snapshot_backends-b8536a3e576e7dd6) + 184,92,...  [0x10093ec64,0x10093ec08,...]
+    + !                     : 5 _RNvNvNtCslJsSqIQKwiA_5alloc3fmt6format12format_inner  (in snapshot_backends-b8536a3e576e7dd6) + 264  [0x10093ecb4]
+    + !                     : | 2 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 84,96  [0x191837970,0x19183797c]
+    + !                     : | 2 nanov2_malloc  (in libsystem_malloc.dylib) + 124,424  [0x19180dc9c,0x19180ddc8]
+    + !                     : | 1 _RNvCs9wFQrvczXsK_7___rustc11___rdl_alloc  (in snapshot_backends-b8536a3e576e7dd6) + 0  [0x1009158ac]
+    + !                     : 1 _RNvNtCsgtPOCBgevO_4core3fmt5write  (in snapshot_backends-b8536a3e576e7dd6) + 424  [0x100945498]
+    + !                     : 1 _RNvNvNtCslJsSqIQKwiA_5alloc3fmt6format12format_inner  (in snapshot_backends-b8536a3e576e7dd6) + 248  [0x10093eca4]
+    + !                     :   1 _RNvCs9wFQrvczXsK_7___rustc35___rust_no_alloc_shim_is_unstable_v2  (in snapshot_backends-b8536a3e576e7dd6) + 0  [0x1000bcc28]
+    + !                     15 _RINvMNtCs8LgfujxyOep_9criterion7bencherNtB3_7Bencher4iterINtNtCsgtPOCBgevO_4core6option6OptionNtNtCs6RdFyfYj5zr_10slipstream2kv7KvEntryENCNCNvCs67Dj2gtHXC5_17snapshot_backends11bench_readss6_00EB2g_  (in snapshot_backends-b8536a3e576e7dd6) + 408  [0x1000a3668]
+    + !                     : 13 _nanov2_free  (in libsystem_malloc.dylib) + 840,36,...  [0x19182f854,0x19182f530,...]
+    + !                     : 1 _free  (in libsystem_malloc.dylib) + 124  [0x1918385f0]
+    + !                     : 1 _nanov2_free  (in libsystem_malloc.dylib) + 520  [0x19182f714]
+    + !                     :   1 _platform_memset  (in libsystem_platform.dylib) + 140  [0x191a2df5c]
+    + !                     11 _RINvMNtCs8LgfujxyOep_9criterion7bencherNtB3_7Bencher4iterINtNtCsgtPOCBgevO_4core6option6OptionNtNtCs6RdFyfYj5zr_10slipstream2kv7KvEntryENCNCNvCs67Dj2gtHXC5_17snapshot_backends11bench_readss6_00EB2g_  (in snapshot_backends-b8536a3e576e7dd6) + 388  [0x1000a3654]
+    + !                     : 8 _nanov2_free  (in libsystem_malloc.dylib) + 696,840,...  [0x19182f7c4,0x19182f854,...]
+    + !                     : 2 DYLD-STUB$$free  (in snapshot_backends-b8536a3e576e7dd6) + 4  [0x100978e80]
+    + !                     : 1 free  (in libsystem_malloc.dylib) + 0  [0x19180e590]
+    + !                     9 _RINvMNtCs8LgfujxyOep_9criterion7bencherNtB3_7Bencher4iterINtNtCsgtPOCBgevO_4core6option6OptionNtNtCs6RdFyfYj5zr_10slipstream2kv7KvEntryENCNCNvCs67Dj2gtHXC5_17snapshot_backends11bench_readss6_00EB2g_  (in snapshot_backends-b8536a3e576e7dd6) + 336  [0x1000a3620]
+    + !                     : 4 _nanov2_free  (in libsystem_malloc.dylib) + 520  [0x19182f714]
+    + !                     : | 2 _platform_memset  (in libsystem_platform.dylib) + 180,184  [0x191a2df84,0x191a2df88]
+    + !                     : | 1 DYLD-STUB$$_platform_bzero  (in libsystem_malloc.dylib) + 8  [0x191840068]
+    + !                     : | 1 __bzero  (in libsystem_platform.dylib) + 0  [0x191a2de70]
+    + !                     : 3 _free  (in libsystem_malloc.dylib) + 20,104,...  [0x191838588,0x1918385dc,...]
+    + !                     : 1 DYLD-STUB$$free  (in snapshot_backends-b8536a3e576e7dd6) + 4  [0x100978e80]
+    + !                     : 1 _nanov2_free  (in libsystem_malloc.dylib) + 40  [0x19182f534]
+    + !                     5 _RINvMNtCs8LgfujxyOep_9criterion7bencherNtB3_7Bencher4iterINtNtCsgtPOCBgevO_4core6option6OptionNtNtCs6RdFyfYj5zr_10slipstream2kv7KvEntryENCNCNvCs67Dj2gtHXC5_17snapshot_backends11bench_readss6_00EB2g_  (in snapshot_backends-b8536a3e576e7dd6) + 260,316,...  [0x1000a35d4,0x1000a360c,...]
+    + !                     1 _RNvNvNtCslJsSqIQKwiA_5alloc3fmt6format12format_inner  (in snapshot_backends-b8536a3e576e7dd6) + 340  [0x10093ed00]
+    + !                     1 _nanov2_free  (in libsystem_malloc.dylib) + 852  [0x19182f860]
+    + 1 _RNvMs5_NtCs62sWeHaXwK5_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesEE6insertCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 756  [0x100124990]
+    + ! 1 _RINvMs1_NtCs9nAj5kJTqSU_9hashbrown3mapINtB6_7HashMapNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesTyyINtNtCsgtPOCBgevO_4core6option6OptionBO_EEINtNtB1w_4hash18BuildHasherDefaultNtNtCs62sWeHaXwK5_12pedradb_core5cache8FxHasherEE6removeBO_ECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 16  [0x1001550e0]
+    + 1 _RNvMs9_Cs1pByd8LO0u1_14rocksdb_compatNtB5_12LastGetTable5store  (in snapshot_backends-b8536a3e576e7dd6) + 292  [0x1006827f0]
+    + ! 1 _RNvMs9_Cs1pByd8LO0u1_14rocksdb_compatNtB5_12LastGetTable5store  (in snapshot_backends-b8536a3e576e7dd6) + 188  [0x100682788]
+    + !   1 _platform_memmove  (in libsystem_platform.dylib) + 0  [0x191a2e1a0]
+    + 1 _main_thread  (in dyld) + 172  [0x1f984cfec]
+    +   1 ???  (in <unknown binary>)  [0x2]
+    +     1 _RNvMs5_NtCs62sWeHaXwK5_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesEE6insertCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 1020  [0x100124a98]
+    +       1 _RNvMs1_NtCs9nAj5kJTqSU_9hashbrown3mapINtB5_7HashMapNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesTyyINtNtCsgtPOCBgevO_4core6option6OptionBN_EEINtNtB1v_4hash18BuildHasherDefaultNtNtCs62sWeHaXwK5_12pedradb_core5cache8FxHasherEE6insertCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 28  [0x1001558e8]
+    4003 Thread_15077376: fjall:worker
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 _RNvNvMs0_NtNtNtCsa9BKTri5B3M_3std3sys6thread4unixNtB7_6Thread3new12thread_start  (in snapshot_backends-b8536a3e576e7dd6) + 408  [0x10092fa20]
+    +       4003 _RNSNvYNCINvNtNtCsa9BKTri5B3M_3std6thread9lifecycle15spawn_uncheckedNCNCNvMs_NtCs5VSE9Kv9rbT_5fjall11worker_poolNtB1c_10WorkerPool5start00INtNtCsgtPOCBgevO_4core6result6ResultuNtNtB1e_5error5ErrorEEs_0INtNtNtB2g_3ops8function6FnOnceuE9call_once6vtableB1e_  (in snapshot_backends-b8536a3e576e7dd6) + 160  [0x1006fc77c]
+    +         4003 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCNCNvMs_NtCs5VSE9Kv9rbT_5fjall11worker_poolNtB1g_10WorkerPool5start00INtNtCsgtPOCBgevO_4core6result6ResultuNtNtB1i_5error5ErrorEEB1i_  (in snapshot_backends-b8536a3e576e7dd6) + 44  [0x1006e0844]
+    +           4003 _RNvNtCs5VSE9Kv9rbT_5fjall11worker_pool11worker_tick  (in snapshot_backends-b8536a3e576e7dd6) + 636  [0x1006d99a8]
+    +             4003 _RNvNtNtCsa9BKTri5B3M_3std6thread9functions4park  (in snapshot_backends-b8536a3e576e7dd6) + 96  [0x10092a4ec]
+    +               4003 _dispatch_semaphore_wait_slow  (in libdispatch.dylib) + 132  [0x19184e034]
+    +                 4003 _dispatch_sema4_wait  (in libdispatch.dylib) + 28  [0x19184d984]
+    +                   4003 semaphore_wait_trap  (in libsystem_kernel.dylib) + 8  [0x1919bcd70]
+    4003 Thread_15077377: fjall:worker
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 _RNvNvMs0_NtNtNtCsa9BKTri5B3M_3std3sys6thread4unixNtB7_6Thread3new12thread_start  (in snapshot_backends-b8536a3e576e7dd6) + 408  [0x10092fa20]
+    +       4003 _RNSNvYNCINvNtNtCsa9BKTri5B3M_3std6thread9lifecycle15spawn_uncheckedNCNCNvMs_NtCs5VSE9Kv9rbT_5fjall11worker_poolNtB1c_10WorkerPool5start00INtNtCsgtPOCBgevO_4core6result6ResultuNtNtB1e_5error5ErrorEEs_0INtNtNtB2g_3ops8function6FnOnceuE9call_once6vtableB1e_  (in snapshot_backends-b8536a3e576e7dd6) + 160  [0x1006fc77c]
+    +         4003 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCNCNvMs_NtCs5VSE9Kv9rbT_5fjall11worker_poolNtB1g_10WorkerPool5start00INtNtCsgtPOCBgevO_4core6result6ResultuNtNtB1i_5error5ErrorEEB1i_  (in snapshot_backends-b8536a3e576e7dd6) + 44  [0x1006e0844]
+    +           4003 _RNvNtCs5VSE9Kv9rbT_5fjall11worker_pool11worker_tick  (in snapshot_backends-b8536a3e576e7dd6) + 636  [0x1006d99a8]
+    +             4003 _RNvNtNtCsa9BKTri5B3M_3std6thread9functions4park  (in snapshot_backends-b8536a3e576e7dd6) + 96  [0x10092a4ec]
+    +               4003 _dispatch_semaphore_wait_slow  (in libdispatch.dylib) + 132  [0x19184e034]
+    +                 4003 _dispatch_sema4_wait  (in libdispatch.dylib) + 28  [0x19184d984]
+    +                   4003 semaphore_wait_trap  (in libsystem_kernel.dylib) + 8  [0x1919bcd70]
+    4003 Thread_15077378: fjall:worker
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 _RNvNvMs0_NtNtNtCsa9BKTri5B3M_3std3sys6thread4unixNtB7_6Thread3new12thread_start  (in snapshot_backends-b8536a3e576e7dd6) + 408  [0x10092fa20]
+    +       4003 _RNSNvYNCINvNtNtCsa9BKTri5B3M_3std6thread9lifecycle15spawn_uncheckedNCNCNvMs_NtCs5VSE9Kv9rbT_5fjall11worker_poolNtB1c_10WorkerPool5start00INtNtCsgtPOCBgevO_4core6result6ResultuNtNtB1e_5error5ErrorEEs_0INtNtNtB2g_3ops8function6FnOnceuE9call_once6vtableB1e_  (in snapshot_backends-b8536a3e576e7dd6) + 160  [0x1006fc77c]
+    +         4003 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCNCNvMs_NtCs5VSE9Kv9rbT_5fjall11worker_poolNtB1g_10WorkerPool5start00INtNtCsgtPOCBgevO_4core6result6ResultuNtNtB1i_5error5ErrorEEB1i_  (in snapshot_backends-b8536a3e576e7dd6) + 44  [0x1006e0844]
+    +           4003 _RNvNtCs5VSE9Kv9rbT_5fjall11worker_pool11worker_tick  (in snapshot_backends-b8536a3e576e7dd6) + 636  [0x1006d99a8]
+    +             4003 _RNvNtNtCsa9BKTri5B3M_3std6thread9functions4park  (in snapshot_backends-b8536a3e576e7dd6) + 96  [0x10092a4ec]
+    +               4003 _dispatch_semaphore_wait_slow  (in libdispatch.dylib) + 132  [0x19184e034]
+    +                 4003 _dispatch_sema4_wait  (in libdispatch.dylib) + 28  [0x19184d984]
+    +                   4003 semaphore_wait_trap  (in libsystem_kernel.dylib) + 8  [0x1919bcd70]
+    4003 Thread_15077379: fjall:worker
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 _RNvNvMs0_NtNtNtCsa9BKTri5B3M_3std3sys6thread4unixNtB7_6Thread3new12thread_start  (in snapshot_backends-b8536a3e576e7dd6) + 408  [0x10092fa20]
+    +       4003 _RNSNvYNCINvNtNtCsa9BKTri5B3M_3std6thread9lifecycle15spawn_uncheckedNCNCNvMs_NtCs5VSE9Kv9rbT_5fjall11worker_poolNtB1c_10WorkerPool5start00INtNtCsgtPOCBgevO_4core6result6ResultuNtNtB1e_5error5ErrorEEs_0INtNtNtB2g_3ops8function6FnOnceuE9call_once6vtableB1e_  (in snapshot_backends-b8536a3e576e7dd6) + 160  [0x1006fc77c]
+    +         4003 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCNCNvMs_NtCs5VSE9Kv9rbT_5fjall11worker_poolNtB1g_10WorkerPool5start00INtNtCsgtPOCBgevO_4core6result6ResultuNtNtB1i_5error5ErrorEEB1i_  (in snapshot_backends-b8536a3e576e7dd6) + 44  [0x1006e0844]
+    +           4003 _RNvNtCs5VSE9Kv9rbT_5fjall11worker_pool11worker_tick  (in snapshot_backends-b8536a3e576e7dd6) + 636  [0x1006d99a8]
+    +             4003 _RNvNtNtCsa9BKTri5B3M_3std6thread9functions4park  (in snapshot_backends-b8536a3e576e7dd6) + 96  [0x10092a4ec]
+    +               4003 _dispatch_semaphore_wait_slow  (in libdispatch.dylib) + 132  [0x19184e034]
+    +                 4003 _dispatch_sema4_wait  (in libdispatch.dylib) + 28  [0x19184d984]
+    +                   4003 semaphore_wait_trap  (in libsystem_kernel.dylib) + 8  [0x1919bcd70]
+    4003 Thread_15077380: fjall:worker
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 _RNvNvMs0_NtNtNtCsa9BKTri5B3M_3std3sys6thread4unixNtB7_6Thread3new12thread_start  (in snapshot_backends-b8536a3e576e7dd6) + 408  [0x10092fa20]
+    +       4003 _RNSNvYNCINvNtNtCsa9BKTri5B3M_3std6thread9lifecycle15spawn_uncheckedNCNCNvMs_NtCs5VSE9Kv9rbT_5fjall11worker_poolNtB1c_10WorkerPool5start00INtNtCsgtPOCBgevO_4core6result6ResultuNtNtB1e_5error5ErrorEEs_0INtNtNtB2g_3ops8function6FnOnceuE9call_once6vtableB1e_  (in snapshot_backends-b8536a3e576e7dd6) + 160  [0x1006fc77c]
+    +         4003 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCNCNvMs_NtCs5VSE9Kv9rbT_5fjall11worker_poolNtB1g_10WorkerPool5start00INtNtCsgtPOCBgevO_4core6result6ResultuNtNtB1i_5error5ErrorEEB1i_  (in snapshot_backends-b8536a3e576e7dd6) + 44  [0x1006e0844]
+    +           4003 _RNvNtCs5VSE9Kv9rbT_5fjall11worker_pool11worker_tick  (in snapshot_backends-b8536a3e576e7dd6) + 636  [0x1006d99a8]
+    +             4003 _RNvNtNtCsa9BKTri5B3M_3std6thread9functions4park  (in snapshot_backends-b8536a3e576e7dd6) + 96  [0x10092a4ec]
+    +               4003 _dispatch_semaphore_wait_slow  (in libdispatch.dylib) + 132  [0x19184e034]
+    +                 4003 _dispatch_sema4_wait  (in libdispatch.dylib) + 28  [0x19184d984]
+    +                   4003 semaphore_wait_trap  (in libsystem_kernel.dylib) + 8  [0x1919bcd70]
+    4003 Thread_15077381: fjall:worker
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 _RNvNvMs0_NtNtNtCsa9BKTri5B3M_3std3sys6thread4unixNtB7_6Thread3new12thread_start  (in snapshot_backends-b8536a3e576e7dd6) + 408  [0x10092fa20]
+    +       4003 _RNSNvYNCINvNtNtCsa9BKTri5B3M_3std6thread9lifecycle15spawn_uncheckedNCNCNvMs_NtCs5VSE9Kv9rbT_5fjall11worker_poolNtB1c_10WorkerPool5start00INtNtCsgtPOCBgevO_4core6result6ResultuNtNtB1e_5error5ErrorEEs_0INtNtNtB2g_3ops8function6FnOnceuE9call_once6vtableB1e_  (in snapshot_backends-b8536a3e576e7dd6) + 160  [0x1006fc77c]
+    +         4003 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCNCNvMs_NtCs5VSE9Kv9rbT_5fjall11worker_poolNtB1g_10WorkerPool5start00INtNtCsgtPOCBgevO_4core6result6ResultuNtNtB1i_5error5ErrorEEB1i_  (in snapshot_backends-b8536a3e576e7dd6) + 44  [0x1006e0844]
+    +           4003 _RNvNtCs5VSE9Kv9rbT_5fjall11worker_pool11worker_tick  (in snapshot_backends-b8536a3e576e7dd6) + 636  [0x1006d99a8]
+    +             4003 _RNvNtNtCsa9BKTri5B3M_3std6thread9functions4park  (in snapshot_backends-b8536a3e576e7dd6) + 96  [0x10092a4ec]
+    +               4003 _dispatch_semaphore_wait_slow  (in libdispatch.dylib) + 132  [0x19184e034]
+    +                 4003 _dispatch_sema4_wait  (in libdispatch.dylib) + 28  [0x19184d984]
+    +                   4003 semaphore_wait_trap  (in libsystem_kernel.dylib) + 8  [0x1919bcd70]
+    4003 Thread_15077382: fjall:worker
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 _RNvNvMs0_NtNtNtCsa9BKTri5B3M_3std3sys6thread4unixNtB7_6Thread3new12thread_start  (in snapshot_backends-b8536a3e576e7dd6) + 408  [0x10092fa20]
+    +       4003 _RNSNvYNCINvNtNtCsa9BKTri5B3M_3std6thread9lifecycle15spawn_uncheckedNCNCNvMs_NtCs5VSE9Kv9rbT_5fjall11worker_poolNtB1c_10WorkerPool5start00INtNtCsgtPOCBgevO_4core6result6ResultuNtNtB1e_5error5ErrorEEs_0INtNtNtB2g_3ops8function6FnOnceuE9call_once6vtableB1e_  (in snapshot_backends-b8536a3e576e7dd6) + 160  [0x1006fc77c]
+    +         4003 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCNCNvMs_NtCs5VSE9Kv9rbT_5fjall11worker_poolNtB1g_10WorkerPool5start00INtNtCsgtPOCBgevO_4core6result6ResultuNtNtB1i_5error5ErrorEEB1i_  (in snapshot_backends-b8536a3e576e7dd6) + 44  [0x1006e0844]
+    +           4003 _RNvNtCs5VSE9Kv9rbT_5fjall11worker_pool11worker_tick  (in snapshot_backends-b8536a3e576e7dd6) + 636  [0x1006d99a8]
+    +             4003 _RNvNtNtCsa9BKTri5B3M_3std6thread9functions4park  (in snapshot_backends-b8536a3e576e7dd6) + 96  [0x10092a4ec]
+    +               4003 _dispatch_semaphore_wait_slow  (in libdispatch.dylib) + 132  [0x19184e034]
+    +                 4003 _dispatch_sema4_wait  (in libdispatch.dylib) + 28  [0x19184d984]
+    +                   4003 semaphore_wait_trap  (in libsystem_kernel.dylib) + 8  [0x1919bcd70]
+    4003 Thread_15077383: fjall:worker
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 _RNvNvMs0_NtNtNtCsa9BKTri5B3M_3std3sys6thread4unixNtB7_6Thread3new12thread_start  (in snapshot_backends-b8536a3e576e7dd6) + 408  [0x10092fa20]
+    +       4003 _RNSNvYNCINvNtNtCsa9BKTri5B3M_3std6thread9lifecycle15spawn_uncheckedNCNCNvMs_NtCs5VSE9Kv9rbT_5fjall11worker_poolNtB1c_10WorkerPool5start00INtNtCsgtPOCBgevO_4core6result6ResultuNtNtB1e_5error5ErrorEEs_0INtNtNtB2g_3ops8function6FnOnceuE9call_once6vtableB1e_  (in snapshot_backends-b8536a3e576e7dd6) + 160  [0x1006fc77c]
+    +         4003 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCNCNvMs_NtCs5VSE9Kv9rbT_5fjall11worker_poolNtB1g_10WorkerPool5start00INtNtCsgtPOCBgevO_4core6result6ResultuNtNtB1i_5error5ErrorEEB1i_  (in snapshot_backends-b8536a3e576e7dd6) + 44  [0x1006e0844]
+    +           4003 _RNvNtCs5VSE9Kv9rbT_5fjall11worker_pool11worker_tick  (in snapshot_backends-b8536a3e576e7dd6) + 636  [0x1006d99a8]
+    +             4003 _RNvNtNtCsa9BKTri5B3M_3std6thread9functions4park  (in snapshot_backends-b8536a3e576e7dd6) + 96  [0x10092a4ec]
+    +               4003 _dispatch_semaphore_wait_slow  (in libdispatch.dylib) + 132  [0x19184e034]
+    +                 4003 _dispatch_sema4_wait  (in libdispatch.dylib) + 28  [0x19184d984]
+    +                   4003 semaphore_wait_trap  (in libsystem_kernel.dylib) + 8  [0x1919bcd70]
+    4003 Thread_15077384: fjall:worker
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 _RNvNvMs0_NtNtNtCsa9BKTri5B3M_3std3sys6thread4unixNtB7_6Thread3new12thread_start  (in snapshot_backends-b8536a3e576e7dd6) + 408  [0x10092fa20]
+    +       4003 _RNSNvYNCINvNtNtCsa9BKTri5B3M_3std6thread9lifecycle15spawn_uncheckedNCNCNvMs_NtCs5VSE9Kv9rbT_5fjall11worker_poolNtB1c_10WorkerPool5start00INtNtCsgtPOCBgevO_4core6result6ResultuNtNtB1e_5error5ErrorEEs_0INtNtNtB2g_3ops8function6FnOnceuE9call_once6vtableB1e_  (in snapshot_backends-b8536a3e576e7dd6) + 160  [0x1006fc77c]
+    +         4003 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCNCNvMs_NtCs5VSE9Kv9rbT_5fjall11worker_poolNtB1g_10WorkerPool5start00INtNtCsgtPOCBgevO_4core6result6ResultuNtNtB1i_5error5ErrorEEB1i_  (in snapshot_backends-b8536a3e576e7dd6) + 44  [0x1006e0844]
+    +           4003 _RNvNtCs5VSE9Kv9rbT_5fjall11worker_pool11worker_tick  (in snapshot_backends-b8536a3e576e7dd6) + 636  [0x1006d99a8]
+    +             4003 _RNvNtNtCsa9BKTri5B3M_3std6thread9functions4park  (in snapshot_backends-b8536a3e576e7dd6) + 96  [0x10092a4ec]
+    +               4003 _dispatch_semaphore_wait_slow  (in libdispatch.dylib) + 132  [0x19184e034]
+    +                 4003 _dispatch_sema4_wait  (in libdispatch.dylib) + 28  [0x19184d984]
+    +                   4003 semaphore_wait_trap  (in libsystem_kernel.dylib) + 8  [0x1919bcd70]
+    4003 Thread_15077385: fjall:worker
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 _RNvNvMs0_NtNtNtCsa9BKTri5B3M_3std3sys6thread4unixNtB7_6Thread3new12thread_start  (in snapshot_backends-b8536a3e576e7dd6) + 408  [0x10092fa20]
+    +       4003 _RNSNvYNCINvNtNtCsa9BKTri5B3M_3std6thread9lifecycle15spawn_uncheckedNCNCNvMs_NtCs5VSE9Kv9rbT_5fjall11worker_poolNtB1c_10WorkerPool5start00INtNtCsgtPOCBgevO_4core6result6ResultuNtNtB1e_5error5ErrorEEs_0INtNtNtB2g_3ops8function6FnOnceuE9call_once6vtableB1e_  (in snapshot_backends-b8536a3e576e7dd6) + 160  [0x1006fc77c]
+    +         4003 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCNCNvMs_NtCs5VSE9Kv9rbT_5fjall11worker_poolNtB1g_10WorkerPool5start00INtNtCsgtPOCBgevO_4core6result6ResultuNtNtB1i_5error5ErrorEEB1i_  (in snapshot_backends-b8536a3e576e7dd6) + 44  [0x1006e0844]
+    +           4003 _RNvNtCs5VSE9Kv9rbT_5fjall11worker_pool11worker_tick  (in snapshot_backends-b8536a3e576e7dd6) + 636  [0x1006d99a8]
+    +             4003 _RNvNtNtCsa9BKTri5B3M_3std6thread9functions4park  (in snapshot_backends-b8536a3e576e7dd6) + 96  [0x10092a4ec]
+    +               4003 _dispatch_semaphore_wait_slow  (in libdispatch.dylib) + 132  [0x19184e034]
+    +                 4003 _dispatch_sema4_wait  (in libdispatch.dylib) + 28  [0x19184d984]
+    +                   4003 semaphore_wait_trap  (in libsystem_kernel.dylib) + 8  [0x1919bcd70]
+    4003 Thread_15077386: fjall:worker
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 _RNvNvMs0_NtNtNtCsa9BKTri5B3M_3std3sys6thread4unixNtB7_6Thread3new12thread_start  (in snapshot_backends-b8536a3e576e7dd6) + 408  [0x10092fa20]
+    +       4003 _RNSNvYNCINvNtNtCsa9BKTri5B3M_3std6thread9lifecycle15spawn_uncheckedNCNCNvMs_NtCs5VSE9Kv9rbT_5fjall11worker_poolNtB1c_10WorkerPool5start00INtNtCsgtPOCBgevO_4core6result6ResultuNtNtB1e_5error5ErrorEEs_0INtNtNtB2g_3ops8function6FnOnceuE9call_once6vtableB1e_  (in snapshot_backends-b8536a3e576e7dd6) + 160  [0x1006fc77c]
+    +         4003 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCNCNvMs_NtCs5VSE9Kv9rbT_5fjall11worker_poolNtB1g_10WorkerPool5start00INtNtCsgtPOCBgevO_4core6result6ResultuNtNtB1i_5error5ErrorEEB1i_  (in snapshot_backends-b8536a3e576e7dd6) + 44  [0x1006e0844]
+    +           4003 _RNvNtCs5VSE9Kv9rbT_5fjall11worker_pool11worker_tick  (in snapshot_backends-b8536a3e576e7dd6) + 636  [0x1006d99a8]
+    +             4003 _RNvNtNtCsa9BKTri5B3M_3std6thread9functions4park  (in snapshot_backends-b8536a3e576e7dd6) + 96  [0x10092a4ec]
+    +               4003 _dispatch_semaphore_wait_slow  (in libdispatch.dylib) + 132  [0x19184e034]
+    +                 4003 _dispatch_sema4_wait  (in libdispatch.dylib) + 28  [0x19184d984]
+    +                   4003 semaphore_wait_trap  (in libsystem_kernel.dylib) + 8  [0x1919bcd70]
+    4003 Thread_15077387: fjall:worker
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 _RNvNvMs0_NtNtNtCsa9BKTri5B3M_3std3sys6thread4unixNtB7_6Thread3new12thread_start  (in snapshot_backends-b8536a3e576e7dd6) + 408  [0x10092fa20]
+    +       4003 _RNSNvYNCINvNtNtCsa9BKTri5B3M_3std6thread9lifecycle15spawn_uncheckedNCNCNvMs_NtCs5VSE9Kv9rbT_5fjall11worker_poolNtB1c_10WorkerPool5start00INtNtCsgtPOCBgevO_4core6result6ResultuNtNtB1e_5error5ErrorEEs_0INtNtNtB2g_3ops8function6FnOnceuE9call_once6vtableB1e_  (in snapshot_backends-b8536a3e576e7dd6) + 160  [0x1006fc77c]
+    +         4003 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCNCNvMs_NtCs5VSE9Kv9rbT_5fjall11worker_poolNtB1g_10WorkerPool5start00INtNtCsgtPOCBgevO_4core6result6ResultuNtNtB1i_5error5ErrorEEB1i_  (in snapshot_backends-b8536a3e576e7dd6) + 44  [0x1006e0844]
+    +           4003 _RNvNtCs5VSE9Kv9rbT_5fjall11worker_pool11worker_tick  (in snapshot_backends-b8536a3e576e7dd6) + 636  [0x1006d99a8]
+    +             4003 _RNvNtNtCsa9BKTri5B3M_3std6thread9functions4park  (in snapshot_backends-b8536a3e576e7dd6) + 96  [0x10092a4ec]
+    +               4003 _dispatch_semaphore_wait_slow  (in libdispatch.dylib) + 132  [0x19184e034]
+    +                 4003 _dispatch_sema4_wait  (in libdispatch.dylib) + 28  [0x19184d984]
+    +                   4003 semaphore_wait_trap  (in libsystem_kernel.dylib) + 8  [0x1919bcd70]
+    4003 Thread_15081449
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 std::__thread_proxy[abi:ne180100]<std::tuple<std::unique_ptr<std::__thread_struct>, void (*)(void*), rocksdb::BGThreadMetadata*>>(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x1005a1e18]
+    +       4003 rocksdb::ThreadPoolImpl::Impl::BGThreadWrapper(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 124  [0x1005a01f0]
+    +         4003 rocksdb::ThreadPoolImpl::Impl::BGThread(unsigned long)  (in snapshot_backends-b8536a3e576e7dd6) + 304  [0x10059fe80]
+    +           4003 std::condition_variable::wait(std::unique_lock<std::mutex>&)  (in libc++.1.dylib) + 28  [0x191923b14]
+    +             4003 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +               4003 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    4003 Thread_15081450
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 std::__thread_proxy[abi:ne180100]<std::tuple<std::unique_ptr<std::__thread_struct>, void (*)(void*), rocksdb::BGThreadMetadata*>>(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x1005a1e18]
+    +       4003 rocksdb::ThreadPoolImpl::Impl::BGThreadWrapper(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 124  [0x1005a01f0]
+    +         4003 rocksdb::ThreadPoolImpl::Impl::BGThread(unsigned long)  (in snapshot_backends-b8536a3e576e7dd6) + 304  [0x10059fe80]
+    +           4003 std::condition_variable::wait(std::unique_lock<std::mutex>&)  (in libc++.1.dylib) + 28  [0x191923b14]
+    +             4003 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +               4003 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    4003 Thread_15081451
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 std::__thread_proxy[abi:ne180100]<std::tuple<std::unique_ptr<std::__thread_struct>, void (*)(void*), rocksdb::BGThreadMetadata*>>(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x1005a1e18]
+    +       4003 rocksdb::ThreadPoolImpl::Impl::BGThreadWrapper(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 124  [0x1005a01f0]
+    +         4003 rocksdb::ThreadPoolImpl::Impl::BGThread(unsigned long)  (in snapshot_backends-b8536a3e576e7dd6) + 304  [0x10059fe80]
+    +           4003 std::condition_variable::wait(std::unique_lock<std::mutex>&)  (in libc++.1.dylib) + 28  [0x191923b14]
+    +             4003 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +               4003 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    4003 Thread_15081452
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 std::__thread_proxy[abi:ne180100]<std::tuple<std::unique_ptr<std::__thread_struct>, void (*)(void*), rocksdb::BGThreadMetadata*>>(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x1005a1e18]
+    +       4003 rocksdb::ThreadPoolImpl::Impl::BGThreadWrapper(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 124  [0x1005a01f0]
+    +         4003 rocksdb::ThreadPoolImpl::Impl::BGThread(unsigned long)  (in snapshot_backends-b8536a3e576e7dd6) + 304  [0x10059fe80]
+    +           4003 std::condition_variable::wait(std::unique_lock<std::mutex>&)  (in libc++.1.dylib) + 28  [0x191923b14]
+    +             4003 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +               4003 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    4003 Thread_15081453
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 std::__thread_proxy[abi:ne180100]<std::tuple<std::unique_ptr<std::__thread_struct>, void (*)(void*), rocksdb::BGThreadMetadata*>>(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x1005a1e18]
+    +       4003 rocksdb::ThreadPoolImpl::Impl::BGThreadWrapper(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 124  [0x1005a01f0]
+    +         4003 rocksdb::ThreadPoolImpl::Impl::BGThread(unsigned long)  (in snapshot_backends-b8536a3e576e7dd6) + 304  [0x10059fe80]
+    +           4003 std::condition_variable::wait(std::unique_lock<std::mutex>&)  (in libc++.1.dylib) + 28  [0x191923b14]
+    +             4003 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +               4003 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    4003 Thread_15081454
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 std::__thread_proxy[abi:ne180100]<std::tuple<std::unique_ptr<std::__thread_struct>, void (*)(void*), rocksdb::BGThreadMetadata*>>(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x1005a1e18]
+    +       4003 rocksdb::ThreadPoolImpl::Impl::BGThreadWrapper(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 124  [0x1005a01f0]
+    +         4003 rocksdb::ThreadPoolImpl::Impl::BGThread(unsigned long)  (in snapshot_backends-b8536a3e576e7dd6) + 304  [0x10059fe80]
+    +           4003 std::condition_variable::wait(std::unique_lock<std::mutex>&)  (in libc++.1.dylib) + 28  [0x191923b14]
+    +             4003 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +               4003 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    4003 Thread_15081455
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 std::__thread_proxy[abi:ne180100]<std::tuple<std::unique_ptr<std::__thread_struct>, void (*)(void*), rocksdb::BGThreadMetadata*>>(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x1005a1e18]
+    +       4003 rocksdb::ThreadPoolImpl::Impl::BGThreadWrapper(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 124  [0x1005a01f0]
+    +         4003 rocksdb::ThreadPoolImpl::Impl::BGThread(unsigned long)  (in snapshot_backends-b8536a3e576e7dd6) + 304  [0x10059fe80]
+    +           4003 std::condition_variable::wait(std::unique_lock<std::mutex>&)  (in libc++.1.dylib) + 28  [0x191923b14]
+    +             4003 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +               4003 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    4003 Thread_15081456
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 std::__thread_proxy[abi:ne180100]<std::tuple<std::unique_ptr<std::__thread_struct>, void (*)(void*), rocksdb::BGThreadMetadata*>>(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x1005a1e18]
+    +       4003 rocksdb::ThreadPoolImpl::Impl::BGThreadWrapper(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 124  [0x1005a01f0]
+    +         4003 rocksdb::ThreadPoolImpl::Impl::BGThread(unsigned long)  (in snapshot_backends-b8536a3e576e7dd6) + 304  [0x10059fe80]
+    +           4003 std::condition_variable::wait(std::unique_lock<std::mutex>&)  (in libc++.1.dylib) + 28  [0x191923b14]
+    +             4003 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +               4003 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    4003 Thread_15081457
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 std::__thread_proxy[abi:ne180100]<std::tuple<std::unique_ptr<std::__thread_struct>, void (*)(void*), rocksdb::BGThreadMetadata*>>(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x1005a1e18]
+    +       4003 rocksdb::ThreadPoolImpl::Impl::BGThreadWrapper(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 124  [0x1005a01f0]
+    +         4003 rocksdb::ThreadPoolImpl::Impl::BGThread(unsigned long)  (in snapshot_backends-b8536a3e576e7dd6) + 304  [0x10059fe80]
+    +           4003 std::condition_variable::wait(std::unique_lock<std::mutex>&)  (in libc++.1.dylib) + 28  [0x191923b14]
+    +             4003 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +               4003 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    4003 Thread_15081458
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 std::__thread_proxy[abi:ne180100]<std::tuple<std::unique_ptr<std::__thread_struct>, void (*)(void*), rocksdb::BGThreadMetadata*>>(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x1005a1e18]
+    +       4003 rocksdb::ThreadPoolImpl::Impl::BGThreadWrapper(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 124  [0x1005a01f0]
+    +         4003 rocksdb::ThreadPoolImpl::Impl::BGThread(unsigned long)  (in snapshot_backends-b8536a3e576e7dd6) + 304  [0x10059fe80]
+    +           4003 std::condition_variable::wait(std::unique_lock<std::mutex>&)  (in libc++.1.dylib) + 28  [0x191923b14]
+    +             4003 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +               4003 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    4003 Thread_15081459
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 std::__thread_proxy[abi:ne180100]<std::tuple<std::unique_ptr<std::__thread_struct>, void (*)(void*), rocksdb::BGThreadMetadata*>>(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x1005a1e18]
+    +       4003 rocksdb::ThreadPoolImpl::Impl::BGThreadWrapper(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 124  [0x1005a01f0]
+    +         4003 rocksdb::ThreadPoolImpl::Impl::BGThread(unsigned long)  (in snapshot_backends-b8536a3e576e7dd6) + 304  [0x10059fe80]
+    +           4003 std::condition_variable::wait(std::unique_lock<std::mutex>&)  (in libc++.1.dylib) + 28  [0x191923b14]
+    +             4003 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +               4003 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    4003 Thread_15081460
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 std::__thread_proxy[abi:ne180100]<std::tuple<std::unique_ptr<std::__thread_struct>, void (*)(void*), rocksdb::BGThreadMetadata*>>(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x1005a1e18]
+    +       4003 rocksdb::ThreadPoolImpl::Impl::BGThreadWrapper(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 124  [0x1005a01f0]
+    +         4003 rocksdb::ThreadPoolImpl::Impl::BGThread(unsigned long)  (in snapshot_backends-b8536a3e576e7dd6) + 304  [0x10059fe80]
+    +           4003 std::condition_variable::wait(std::unique_lock<std::mutex>&)  (in libc++.1.dylib) + 28  [0x191923b14]
+    +             4003 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +               4003 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    4003 Thread_15081461
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 std::__thread_proxy[abi:ne180100]<std::tuple<std::unique_ptr<std::__thread_struct>, void (*)(void*), rocksdb::BGThreadMetadata*>>(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x1005a1e18]
+    +       4003 rocksdb::ThreadPoolImpl::Impl::BGThreadWrapper(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 124  [0x1005a01f0]
+    +         4003 rocksdb::ThreadPoolImpl::Impl::BGThread(unsigned long)  (in snapshot_backends-b8536a3e576e7dd6) + 304  [0x10059fe80]
+    +           4003 std::condition_variable::wait(std::unique_lock<std::mutex>&)  (in libc++.1.dylib) + 28  [0x191923b14]
+    +             4003 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +               4003 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    4003 Thread_15081462
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 std::__thread_proxy[abi:ne180100]<std::tuple<std::unique_ptr<std::__thread_struct>, void (*)(void*), rocksdb::BGThreadMetadata*>>(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x1005a1e18]
+    +       4003 rocksdb::ThreadPoolImpl::Impl::BGThreadWrapper(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 124  [0x1005a01f0]
+    +         4003 rocksdb::ThreadPoolImpl::Impl::BGThread(unsigned long)  (in snapshot_backends-b8536a3e576e7dd6) + 304  [0x10059fe80]
+    +           4003 std::condition_variable::wait(std::unique_lock<std::mutex>&)  (in libc++.1.dylib) + 28  [0x191923b14]
+    +             4003 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +               4003 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    4003 Thread_15081463
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 std::__thread_proxy[abi:ne180100]<std::tuple<std::unique_ptr<std::__thread_struct>, void (*)(void*), rocksdb::BGThreadMetadata*>>(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x1005a1e18]
+    +       4003 rocksdb::ThreadPoolImpl::Impl::BGThreadWrapper(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 124  [0x1005a01f0]
+    +         4003 rocksdb::ThreadPoolImpl::Impl::BGThread(unsigned long)  (in snapshot_backends-b8536a3e576e7dd6) + 304  [0x10059fe80]
+    +           4003 std::condition_variable::wait(std::unique_lock<std::mutex>&)  (in libc++.1.dylib) + 28  [0x191923b14]
+    +             4003 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +               4003 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    4003 Thread_15081483
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 std::__thread_proxy[abi:ne180100]<std::tuple<std::unique_ptr<std::__thread_struct>, void (rocksdb::Timer::*)(), rocksdb::Timer*>>(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 72  [0x100328478]
+    +       4003 rocksdb::Timer::Run()  (in snapshot_backends-b8536a3e576e7dd6) + 180  [0x100327f2c]
+    +         4003 rocksdb::InstrumentedCondVar::TimedWait(unsigned long long)  (in snapshot_backends-b8536a3e576e7dd6) + 216  [0x1004392ec]
+    +           4003 rocksdb::port::CondVar::TimedWait(unsigned long long)  (in snapshot_backends-b8536a3e576e7dd6) + 72  [0x1004bc598]
+    +             4003 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +               4003 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    4003 Thread_15084549: pedra-compat-compact
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 _RNvNvMs0_NtNtNtCsa9BKTri5B3M_3std3sys6thread4unixNtB7_6Thread3new12thread_start  (in snapshot_backends-b8536a3e576e7dd6) + 408  [0x10092fa20]
+    +       4003 _RNSNvYNCINvNtNtCsa9BKTri5B3M_3std6thread9lifecycle15spawn_uncheckedNCINvCs1pByd8LO0u1_14rocksdb_compat20spawn_compact_workerNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE0uEs_0INtNtNtCsgtPOCBgevO_4core3ops8function6FnOnceuE9call_once6vtableCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 248  [0x100130c74]
+    +         3836 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCINvCs1pByd8LO0u1_14rocksdb_compat20spawn_compact_workerNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE0uECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 76  [0x1000f7a48]
+    +         ! 3835 _RNvMsg_NtNtCsa9BKTri5B3M_3std4sync4mpmcINtB5_8ReceiverNtCs1pByd8LO0u1_14rocksdb_compat10CompactCmdE12recv_timeoutCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 144  [0x1001263dc]
+    +         ! : 3832 _RNvMs_NtNtNtCsa9BKTri5B3M_3std4sync4mpmc5arrayINtB4_7ChannelNtCs1pByd8LO0u1_14rocksdb_compat10CompactCmdE4recvCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 484  [0x1001361ac]
+    +         ! : | 3832 _RNCNvMs_NtNtNtCsa9BKTri5B3M_3std4sync4mpmc5arrayINtB6_7ChannelINtNtCsgtPOCBgevO_4core6result6ResultyNtNtCs62sWeHaXwK5_12pedradb_core5error9CoreErrorEE4recvs_0Cs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 220  [0x1001306e8]
+    +         ! : |   3830 _RNvMs_NtNtCsa9BKTri5B3M_3std6thread6threadNtB4_6Thread12park_timeout  (in snapshot_backends-b8536a3e576e7dd6) + 100  [0x10091f018]
+    +         ! : |   + 3825 _dispatch_semaphore_wait_slow  (in libdispatch.dylib) + 76  [0x19184dffc]
+    +         ! : |   + ! 3825 _dispatch_sema4_timedwait  (in libdispatch.dylib) + 64  [0x19184da00]
+    +         ! : |   + !   3825 semaphore_timedwait_trap  (in libsystem_kernel.dylib) + 8  [0x1919bcd88]
+    +         ! : |   + 5 dispatch_semaphore_wait  (in libdispatch.dylib) + 12  [0x19184df9c]
+    +         ! : |   2 _RNvMs_NtNtCsa9BKTri5B3M_3std6thread6threadNtB4_6Thread12park_timeout  (in snapshot_backends-b8536a3e576e7dd6) + 88  [0x10091f00c]
+    +         ! : |     1 dispatch_time  (in libdispatch.dylib) + 84  [0x191881034]
+    +         ! : |     ! 1 mach_absolute_time  (in libsystem_kernel.dylib) + 108  [0x1919bd2c0]
+    +         ! : |     1 dispatch_time  (in libdispatch.dylib) + 12  [0x191880fec]
+    +         ! : 2 _RNvMs_NtNtNtCsa9BKTri5B3M_3std4sync4mpmc5arrayINtB4_7ChannelNtCs1pByd8LO0u1_14rocksdb_compat10CompactCmdE4recvCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 100  [0x10013602c]
+    +         ! : 1 _RNvMs_NtNtNtCsa9BKTri5B3M_3std4sync4mpmc5arrayINtB4_7ChannelNtCs1pByd8LO0u1_14rocksdb_compat10CompactCmdE4recvCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 384  [0x100136148]
+    +         ! :   1 _RNvMNtNtNtNtCsa9BKTri5B3M_3std3sys3pal4unix4timeNtB2_8Timespec3now  (in snapshot_backends-b8536a3e576e7dd6) + 24  [0x100916878]
+    +         ! :     1 clock_gettime  (in libsystem_c.dylib) + 52  [0x1918a2594]
+    +         ! 1 _RNvMsg_NtNtCsa9BKTri5B3M_3std4sync4mpmcINtB5_8ReceiverNtCs1pByd8LO0u1_14rocksdb_compat10CompactCmdE12recv_timeoutCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 60  [0x100126388]
+    +         !   1 _RNvMNtCsa9BKTri5B3M_3std4timeNtB2_7Instant11checked_add  (in snapshot_backends-b8536a3e576e7dd6) + 0  [0x100916278]
+    +         75 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCINvCs1pByd8LO0u1_14rocksdb_compat20spawn_compact_workerNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE0uECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 3236  [0x1000f86a0]
+    +         ! 75 _RNvMs8_NtCsb1bNbDaTsGO_11parking_lot10raw_rwlockNtB5_9RawRwLock19lock_exclusive_slow  (in snapshot_backends-b8536a3e576e7dd6) + 1436  [0x10095ca70]
+    +         !   40 _RNvMs8_NtCsb1bNbDaTsGO_11parking_lot10raw_rwlockNtB5_9RawRwLock16wait_for_readers  (in snapshot_backends-b8536a3e576e7dd6) + 172  [0x1006d3b50]
+    +         !   : 40 cthread_yield  (in libsystem_pthread.dylib) + 32  [0x1919fadd0]
+    +         !   :   40 swtch_pri  (in libsystem_kernel.dylib) + 8  [0x1919bce48]
+    +         !   30 _RNvMs8_NtCsb1bNbDaTsGO_11parking_lot10raw_rwlockNtB5_9RawRwLock16wait_for_readers  (in snapshot_backends-b8536a3e576e7dd6) + 792  [0x1006d3dbc]
+    +         !   : 30 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +         !   :   30 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    +         !   4 _RNvMs8_NtCsb1bNbDaTsGO_11parking_lot10raw_rwlockNtB5_9RawRwLock16wait_for_readers  (in snapshot_backends-b8536a3e576e7dd6) + 184,792,...  [0x1006d3b5c,0x1006d3dbc,...]
+    +         !   1 _RNvMs8_NtCsb1bNbDaTsGO_11parking_lot10raw_rwlockNtB5_9RawRwLock16wait_for_readers  (in snapshot_backends-b8536a3e576e7dd6) + 768  [0x1006d3da4]
+    +         !     1 pthread_mutex_lock  (in libsystem_pthread.dylib) + 112  [0x1919f855c]
+    +         71 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCINvCs1pByd8LO0u1_14rocksdb_compat20spawn_compact_workerNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE0uECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 3292  [0x1000f86d8]
+    +         ! 71 _RNvMs8_NtCsb1bNbDaTsGO_11parking_lot10raw_rwlockNtB5_9RawRwLock19lock_exclusive_slow  (in snapshot_backends-b8536a3e576e7dd6) + 1436  [0x10095ca70]
+    +         !   44 _RNvMs8_NtCsb1bNbDaTsGO_11parking_lot10raw_rwlockNtB5_9RawRwLock16wait_for_readers  (in snapshot_backends-b8536a3e576e7dd6) + 792  [0x1006d3dbc]
+    +         !   : 42 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +         !   : | 42 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    +         !   : 1 DYLD-STUB$$pthread_cond_wait  (in snapshot_backends-b8536a3e576e7dd6) + 0  [0x1009791e8]
+    +         !   : 1 _pthread_cond_wait  (in libsystem_pthread.dylib) + 188  [0x1919fe14c]
+    +         !   23 _RNvMs8_NtCsb1bNbDaTsGO_11parking_lot10raw_rwlockNtB5_9RawRwLock16wait_for_readers  (in snapshot_backends-b8536a3e576e7dd6) + 172  [0x1006d3b50]
+    +         !   : 22 cthread_yield  (in libsystem_pthread.dylib) + 32  [0x1919fadd0]
+    +         !   : | 22 swtch_pri  (in libsystem_kernel.dylib) + 8  [0x1919bce48]
+    +         !   : 1 _RNvNtNtCsa9BKTri5B3M_3std6thread9functions9yield_now  (in snapshot_backends-b8536a3e576e7dd6) + 0  [0x10092a600]
+    +         !   4 _RNvMs8_NtCsb1bNbDaTsGO_11parking_lot10raw_rwlockNtB5_9RawRwLock16wait_for_readers  (in snapshot_backends-b8536a3e576e7dd6) + 224,432,...  [0x1006d3b84,0x1006d3c54,...]
+    +         4 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCINvCs1pByd8LO0u1_14rocksdb_compat20spawn_compact_workerNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE0uECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 3336  [0x1000f8704]
+    +         ! 4 _RNvMs8_NtCsb1bNbDaTsGO_11parking_lot10raw_rwlockNtB5_9RawRwLock19lock_exclusive_slow  (in snapshot_backends-b8536a3e576e7dd6) + 1436  [0x10095ca70]
+    +         !   3 _RNvMs8_NtCsb1bNbDaTsGO_11parking_lot10raw_rwlockNtB5_9RawRwLock16wait_for_readers  (in snapshot_backends-b8536a3e576e7dd6) + 792  [0x1006d3dbc]
+    +         !   : 3 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +         !   :   3 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    +         !   1 _RNvMs8_NtCsb1bNbDaTsGO_11parking_lot10raw_rwlockNtB5_9RawRwLock16wait_for_readers  (in snapshot_backends-b8536a3e576e7dd6) + 172  [0x1006d3b50]
+    +         !     1 cthread_yield  (in libsystem_pthread.dylib) + 32  [0x1919fadd0]
+    +         !       1 swtch_pri  (in libsystem_kernel.dylib) + 8  [0x1919bce48]
+    +         3 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCINvCs1pByd8LO0u1_14rocksdb_compat20spawn_compact_workerNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE0uECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 88  [0x1000f7a54]
+    +         ! 2 _RINvCs1pByd8LO0u1_14rocksdb_compat12compact_diagNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 40  [0x100128b68]
+    +         ! : 1 _RNvNtCsa9BKTri5B3M_3std3env7__var_os  (in snapshot_backends-b8536a3e576e7dd6) + 136  [0x100927d0c]
+    +         ! : | 1 _RNCNvNtNtNtCsa9BKTri5B3M_3std3sys3env4unix6getenv0B9_  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x100915370]
+    +         ! : |   1 getenv  (in libsystem_c.dylib) + 64  [0x1918953bc]
+    +         ! : |     1 __findenv_locked  (in libsystem_c.dylib) + 144  [0x191895478]
+    +         ! : 1 _RNvNtCsa9BKTri5B3M_3std3env7__var_os  (in snapshot_backends-b8536a3e576e7dd6) + 124  [0x100927d00]
+    +         ! 1 _RINvCs1pByd8LO0u1_14rocksdb_compat12compact_diagNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 0  [0x100128b40]
+    +         3 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCINvCs1pByd8LO0u1_14rocksdb_compat20spawn_compact_workerNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE0uECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 2468  [0x1000f83a0]
+    +         ! 3 _RNvMse_NtCs62sWeHaXwK5_12pedradb_core2dbINtB5_2DbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE14try_rotate_walCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 0,4,...  [0x1000d1778,0x1000d177c,...]
+    +         3 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCINvCs1pByd8LO0u1_14rocksdb_compat20spawn_compact_workerNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE0uECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 3252  [0x1000f86b0]
+    +         ! 3 _RNvMs8_NtCsb1bNbDaTsGO_11parking_lot10raw_rwlockNtB5_9RawRwLock21unlock_exclusive_slow  (in snapshot_backends-b8536a3e576e7dd6) + 1044  [0x10095cf14]
+    +         !   3 pthread_cond_signal  (in libsystem_pthread.dylib) + 720  [0x1919fd1fc]
+    +         !     3 __psynch_cvsignal  (in libsystem_kernel.dylib) + 8  [0x1919c1a48]
+    +         2 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCINvCs1pByd8LO0u1_14rocksdb_compat20spawn_compact_workerNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE0uECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 1124  [0x1000f7e60]
+    +         ! 2 _RNvMs0_NtCs62sWeHaXwK5_12pedradb_core10concurrentINtB5_12ConcurrentDbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE14flush_debt_capCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 88  [0x1000fd8d4]
+    +         !   2 _RNvMse_NtCs62sWeHaXwK5_12pedradb_core2dbINtB5_2DbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE20auto_flush_thresholdCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 268  [0x1000dc1c8]
+    +         !     1 _RNvNtCsa9BKTri5B3M_3std3env4__var  (in snapshot_backends-b8536a3e576e7dd6) + 60  [0x100927b8c]
+    +         !     : 1 _platform_memmove  (in libsystem_platform.dylib) + 444  [0x191a2e35c]
+    +         !     1 _RNvNtCsa9BKTri5B3M_3std3env4__var  (in snapshot_backends-b8536a3e576e7dd6) + 136  [0x100927bd8]
+    +         !       1 _RNCNvNtNtNtCsa9BKTri5B3M_3std3sys3env4unix6getenv0B9_  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x100915370]
+    +         !         1 getenv  (in libsystem_c.dylib) + 64  [0x1918953bc]
+    +         !           1 __findenv_locked  (in libsystem_c.dylib) + 68  [0x19189542c]
+    +         1 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCINvCs1pByd8LO0u1_14rocksdb_compat20spawn_compact_workerNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE0uECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 608  [0x1000f7c5c]
+    +         ! 1 _RNvMse_NtCs62sWeHaXwK5_12pedradb_core2dbINtB5_2DbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE20auto_flush_thresholdCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 268  [0x1000dc1c8]
+    +         !   1 _RNvNtCsa9BKTri5B3M_3std3env4__var  (in snapshot_backends-b8536a3e576e7dd6) + 136  [0x100927bd8]
+    +         !     1 _RNCNvNtNtNtCsa9BKTri5B3M_3std3sys3env4unix6getenv0B9_  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x100915370]
+    +         !       1 getenv  (in libsystem_c.dylib) + 64  [0x1918953bc]
+    +         !         1 __findenv_locked  (in libsystem_c.dylib) + 48  [0x191895418]
+    +         1 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCINvCs1pByd8LO0u1_14rocksdb_compat20spawn_compact_workerNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE0uECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 1796  [0x1000f8100]
+    +         ! 1 _RNvMs0_NtCs62sWeHaXwK5_12pedradb_core10concurrentINtB5_12ConcurrentDbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE15writes_idle_forCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 192  [0x1000fdafc]
+    +         !   1 _RNvMNtCs62sWeHaXwK5_12pedradb_core10concurrentNtB2_10WriteGroup6now_ns  (in snapshot_backends-b8536a3e576e7dd6) + 16  [0x1006d1f98]
+    +         !     1 _RNvMNtNtNtNtCsa9BKTri5B3M_3std3sys3pal4unix4timeNtB2_8Timespec3now  (in snapshot_backends-b8536a3e576e7dd6) + 24  [0x100916878]
+    +         !       1 clock_gettime  (in libsystem_c.dylib) + 148  [0x1918a25f4]
+    +         !         1 gettimeofday  (in libsystem_c.dylib) + 56  [0x19189add4]
+    +         !           1 __commpage_gettimeofday_internal  (in libsystem_kernel.dylib) + 44  [0x1919becd8]
+    +         !             1 mach_absolute_time  (in libsystem_kernel.dylib) + 108  [0x1919bd2c0]
+    +         1 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCINvCs1pByd8LO0u1_14rocksdb_compat20spawn_compact_workerNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE0uECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 2424  [0x1000f8374]
+    +         ! 1 _RNvMs0_NtCs62sWeHaXwK5_12pedradb_core10concurrentINtB5_12ConcurrentDbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE15writes_idle_forCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 192  [0x1000fdafc]
+    +         !   1 _RNvMNtCs62sWeHaXwK5_12pedradb_core10concurrentNtB2_10WriteGroup6now_ns  (in snapshot_backends-b8536a3e576e7dd6) + 16  [0x1006d1f98]
+    +         !     1 _RNvMNtNtNtNtCsa9BKTri5B3M_3std3sys3pal4unix4timeNtB2_8Timespec3now  (in snapshot_backends-b8536a3e576e7dd6) + 24  [0x100916878]
+    +         !       1 clock_gettime  (in libsystem_c.dylib) + 64  [0x1918a25a0]
+    +         1 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCINvCs1pByd8LO0u1_14rocksdb_compat20spawn_compact_workerNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE0uECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 3352  [0x1000f8714]
+    +         ! 1 _RNvMs8_NtCsb1bNbDaTsGO_11parking_lot10raw_rwlockNtB5_9RawRwLock21unlock_exclusive_slow  (in snapshot_backends-b8536a3e576e7dd6) + 1044  [0x10095cf14]
+    +         !   1 pthread_cond_signal  (in libsystem_pthread.dylib) + 720  [0x1919fd1fc]
+    +         !     1 __psynch_cvsignal  (in libsystem_kernel.dylib) + 8  [0x1919c1a48]
+    +         1 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCINvCs1pByd8LO0u1_14rocksdb_compat20spawn_compact_workerNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE0uECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 3404  [0x1000f8748]
+    +         ! 1 _RNvMs8_NtCsb1bNbDaTsGO_11parking_lot10raw_rwlockNtB5_9RawRwLock21unlock_exclusive_slow  (in snapshot_backends-b8536a3e576e7dd6) + 736  [0x10095cde0]
+    +         !   1 _pthread_mutex_firstfit_lock_slow  (in libsystem_pthread.dylib) + 248  [0x1919f89f0]
+    +         !     1 _pthread_mutex_firstfit_lock_wait  (in libsystem_pthread.dylib) + 84  [0x1919fb060]
+    +         !       1 __psynch_mutexwait  (in libsystem_kernel.dylib) + 8  [0x1919bfaa4]
+    +         1 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCINvCs1pByd8LO0u1_14rocksdb_compat20spawn_compact_workerNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE0uECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 920  [0x1000f7d94]
+    4003 Thread_15084550: pedra-compat-flush
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 _RNvNvMs0_NtNtNtCsa9BKTri5B3M_3std3sys6thread4unixNtB7_6Thread3new12thread_start  (in snapshot_backends-b8536a3e576e7dd6) + 408  [0x10092fa20]
+    +       4003 _RNSNvYNCINvNtNtCsa9BKTri5B3M_3std6thread9lifecycle15spawn_uncheckedNCINvCs1pByd8LO0u1_14rocksdb_compat18spawn_flush_workerNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE0uEs_0INtNtNtCsgtPOCBgevO_4core3ops8function6FnOnceuE9call_once6vtableCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 200  [0x100130a68]
+    +         3994 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCINvCs1pByd8LO0u1_14rocksdb_compat18spawn_flush_workerNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE0uECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 64  [0x1000f78b0]
+    +         ! 3993 _RNvMsg_NtNtCsa9BKTri5B3M_3std4sync4mpmcINtB5_8ReceiverNtCs1pByd8LO0u1_14rocksdb_compat10CompactCmdE12recv_timeoutCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 144  [0x1001263dc]
+    +         ! : 3993 _RNvMs_NtNtNtCsa9BKTri5B3M_3std4sync4mpmc5arrayINtB4_7ChannelNtCs1pByd8LO0u1_14rocksdb_compat10CompactCmdE4recvCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 484  [0x1001361ac]
+    +         ! :   3992 _RNCNvMs_NtNtNtCsa9BKTri5B3M_3std4sync4mpmc5arrayINtB6_7ChannelINtNtCsgtPOCBgevO_4core6result6ResultyNtNtCs62sWeHaXwK5_12pedradb_core5error9CoreErrorEE4recvs_0Cs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 220  [0x1001306e8]
+    +         ! :   | 3992 _RNvMs_NtNtCsa9BKTri5B3M_3std6thread6threadNtB4_6Thread12park_timeout  (in snapshot_backends-b8536a3e576e7dd6) + 100  [0x10091f018]
+    +         ! :   |   3992 _dispatch_semaphore_wait_slow  (in libdispatch.dylib) + 76  [0x19184dffc]
+    +         ! :   |     3992 _dispatch_sema4_timedwait  (in libdispatch.dylib) + 64  [0x19184da00]
+    +         ! :   |       3992 semaphore_timedwait_trap  (in libsystem_kernel.dylib) + 8  [0x1919bcd88]
+    +         ! :   1 _RNCNvMs_NtNtNtCsa9BKTri5B3M_3std4sync4mpmc5arrayINtB6_7ChannelINtNtCsgtPOCBgevO_4core6result6ResultyNtNtCs62sWeHaXwK5_12pedradb_core5error9CoreErrorEE4recvs_0Cs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 196  [0x1001306d0]
+    +         ! :     1 _RNvXs3_NtCsa9BKTri5B3M_3std4timeNtB5_7InstantNtNtNtCsgtPOCBgevO_4core3ops5arith3Sub3sub  (in snapshot_backends-b8536a3e576e7dd6) + 24  [0x1009315bc]
+    +         ! 1 _RNvMsg_NtNtCsa9BKTri5B3M_3std4sync4mpmcINtB5_8ReceiverNtCs1pByd8LO0u1_14rocksdb_compat10CompactCmdE12recv_timeoutCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 60  [0x100126388]
+    +         !   1 _RNvMNtCsa9BKTri5B3M_3std4timeNtB2_7Instant11checked_add  (in snapshot_backends-b8536a3e576e7dd6) + 0  [0x100916278]
+    +         5 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCINvCs1pByd8LO0u1_14rocksdb_compat18spawn_flush_workerNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE0uECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 180  [0x1000f7924]
+    +         ! 3 _RINvCs1pByd8LO0u1_14rocksdb_compat17flush_worker_tickNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 1772  [0x100129a50]
+    +         ! : 2 _RINvMs0_NtCs62sWeHaXwK5_12pedradb_core10concurrentINtB6_12ConcurrentDbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE9with_readINtNtCsgtPOCBgevO_4core6option6OptionjENCINvCs1pByd8LO0u1_14rocksdb_compat17flush_worker_tickB16_E0ECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 56  [0x1000f1948]
+    +         ! : | 1 _RNvMs8_NtCsb1bNbDaTsGO_11parking_lot10raw_rwlockNtB5_9RawRwLock16lock_shared_slow  (in snapshot_backends-b8536a3e576e7dd6) + 696  [0x10095be60]
+    +         ! : | + 1 cthread_yield  (in libsystem_pthread.dylib) + 32  [0x1919fadd0]
+    +         ! : | +   1 swtch_pri  (in libsystem_kernel.dylib) + 8  [0x1919bce48]
+    +         ! : | 1 _RNvMs8_NtCsb1bNbDaTsGO_11parking_lot10raw_rwlockNtB5_9RawRwLock16lock_shared_slow  (in snapshot_backends-b8536a3e576e7dd6) + 968  [0x10095bf70]
+    +         ! : |   1 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +         ! : |     1 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    +         ! : 1 _RINvMs0_NtCs62sWeHaXwK5_12pedradb_core10concurrentINtB6_12ConcurrentDbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE9with_readINtNtCsgtPOCBgevO_4core6option6OptionjENCINvCs1pByd8LO0u1_14rocksdb_compat17flush_worker_tickB16_E0ECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 88  [0x1000f1968]
+    +         ! :   1 _RNvMse_NtCs62sWeHaXwK5_12pedradb_core2dbINtB5_2DbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE20auto_flush_thresholdCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 268  [0x1000dc1c8]
+    +         ! :     1 _RNvNtCsa9BKTri5B3M_3std3env4__var  (in snapshot_backends-b8536a3e576e7dd6) + 136  [0x100927bd8]
+    +         ! :       1 _RNCNvNtNtNtCsa9BKTri5B3M_3std3sys3env4unix6getenv0B9_  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x100915370]
+    +         ! :         1 getenv  (in libsystem_c.dylib) + 64  [0x1918953bc]
+    +         ! :           1 __findenv_locked  (in libsystem_c.dylib) + 68  [0x19189542c]
+    +         ! 2 _RINvCs1pByd8LO0u1_14rocksdb_compat17flush_worker_tickNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 64  [0x1001293a4]
+    +         !   2 _RNvNtCsa9BKTri5B3M_3std3env7__var_os  (in snapshot_backends-b8536a3e576e7dd6) + 136  [0x100927d0c]
+    +         !     2 _RNCNvNtNtNtCsa9BKTri5B3M_3std3sys3env4unix6getenv0B9_  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x100915370]
+    +         !       2 getenv  (in libsystem_c.dylib) + 64  [0x1918953bc]
+    +         !         2 __findenv_locked  (in libsystem_c.dylib) + 92,144  [0x191895444,0x191895478]
+    +         3 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCINvCs1pByd8LO0u1_14rocksdb_compat18spawn_flush_workerNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE0uECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 124  [0x1000f78ec]
+    +         ! 2 _RNvMs8_NtCsb1bNbDaTsGO_11parking_lot10raw_rwlockNtB5_9RawRwLock16lock_shared_slow  (in snapshot_backends-b8536a3e576e7dd6) + 968  [0x10095bf70]
+    +         ! : 2 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +         ! :   2 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    +         ! 1 _RNvMs8_NtCsb1bNbDaTsGO_11parking_lot10raw_rwlockNtB5_9RawRwLock16lock_shared_slow  (in snapshot_backends-b8536a3e576e7dd6) + 696  [0x10095be60]
+    +         !   1 cthread_yield  (in libsystem_pthread.dylib) + 32  [0x1919fadd0]
+    +         !     1 swtch_pri  (in libsystem_kernel.dylib) + 8  [0x1919bce48]
+    +         1 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCINvCs1pByd8LO0u1_14rocksdb_compat18spawn_flush_workerNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE0uECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6) + 228  [0x1000f7954]
+    4003 Thread_15096857
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 _RNvNvMs0_NtNtNtCsa9BKTri5B3M_3std3sys6thread4unixNtB7_6Thread3new12thread_start  (in snapshot_backends-b8536a3e576e7dd6) + 408  [0x10092fa20]
+    +       4003 _RNSNvYNCINvNtNtCsa9BKTri5B3M_3std6thread9lifecycle15spawn_uncheckedNCNvXs0_NtCsiV4eLXulIm8_10rayon_core8registryNtB1b_12DefaultSpawnNtB1b_11ThreadSpawn5spawn0uEs_0INtNtNtCsgtPOCBgevO_4core3ops8function6FnOnceuE9call_once6vtableB1d_  (in snapshot_backends-b8536a3e576e7dd6) + 196  [0x100852310]
+    +         4003 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCNvXs0_NtCsiV4eLXulIm8_10rayon_core8registryNtB1f_12DefaultSpawnNtB1f_11ThreadSpawn5spawn0uEB1h_  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x1008573c0]
+    +           4003 _RNvMNtCsiV4eLXulIm8_10rayon_core8registryNtB2_13ThreadBuilder3run  (in snapshot_backends-b8536a3e576e7dd6) + 300  [0x100854cf8]
+    +             4003 _RNvMs8_NtCsiV4eLXulIm8_10rayon_core8registryNtB5_12WorkerThread15wait_until_cold  (in snapshot_backends-b8536a3e576e7dd6) + 248  [0x10096c410]
+    +               4003 _RINvMNtCsiV4eLXulIm8_10rayon_core5sleepNtB3_5Sleep5sleepNCNvMs8_NtB5_8registryNtB10_12WorkerThread15wait_until_cold0EB5_  (in snapshot_backends-b8536a3e576e7dd6) + 492  [0x10096c9a8]
+    +                 4003 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +                   4003 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    4003 Thread_15096858
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 _RNvNvMs0_NtNtNtCsa9BKTri5B3M_3std3sys6thread4unixNtB7_6Thread3new12thread_start  (in snapshot_backends-b8536a3e576e7dd6) + 408  [0x10092fa20]
+    +       4003 _RNSNvYNCINvNtNtCsa9BKTri5B3M_3std6thread9lifecycle15spawn_uncheckedNCNvXs0_NtCsiV4eLXulIm8_10rayon_core8registryNtB1b_12DefaultSpawnNtB1b_11ThreadSpawn5spawn0uEs_0INtNtNtCsgtPOCBgevO_4core3ops8function6FnOnceuE9call_once6vtableB1d_  (in snapshot_backends-b8536a3e576e7dd6) + 196  [0x100852310]
+    +         4003 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCNvXs0_NtCsiV4eLXulIm8_10rayon_core8registryNtB1f_12DefaultSpawnNtB1f_11ThreadSpawn5spawn0uEB1h_  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x1008573c0]
+    +           4003 _RNvMNtCsiV4eLXulIm8_10rayon_core8registryNtB2_13ThreadBuilder3run  (in snapshot_backends-b8536a3e576e7dd6) + 300  [0x100854cf8]
+    +             4003 _RNvMs8_NtCsiV4eLXulIm8_10rayon_core8registryNtB5_12WorkerThread15wait_until_cold  (in snapshot_backends-b8536a3e576e7dd6) + 248  [0x10096c410]
+    +               4003 _RINvMNtCsiV4eLXulIm8_10rayon_core5sleepNtB3_5Sleep5sleepNCNvMs8_NtB5_8registryNtB10_12WorkerThread15wait_until_cold0EB5_  (in snapshot_backends-b8536a3e576e7dd6) + 492  [0x10096c9a8]
+    +                 4003 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +                   4003 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    4003 Thread_15096859
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 _RNvNvMs0_NtNtNtCsa9BKTri5B3M_3std3sys6thread4unixNtB7_6Thread3new12thread_start  (in snapshot_backends-b8536a3e576e7dd6) + 408  [0x10092fa20]
+    +       4003 _RNSNvYNCINvNtNtCsa9BKTri5B3M_3std6thread9lifecycle15spawn_uncheckedNCNvXs0_NtCsiV4eLXulIm8_10rayon_core8registryNtB1b_12DefaultSpawnNtB1b_11ThreadSpawn5spawn0uEs_0INtNtNtCsgtPOCBgevO_4core3ops8function6FnOnceuE9call_once6vtableB1d_  (in snapshot_backends-b8536a3e576e7dd6) + 196  [0x100852310]
+    +         4003 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCNvXs0_NtCsiV4eLXulIm8_10rayon_core8registryNtB1f_12DefaultSpawnNtB1f_11ThreadSpawn5spawn0uEB1h_  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x1008573c0]
+    +           4003 _RNvMNtCsiV4eLXulIm8_10rayon_core8registryNtB2_13ThreadBuilder3run  (in snapshot_backends-b8536a3e576e7dd6) + 300  [0x100854cf8]
+    +             4003 _RNvMs8_NtCsiV4eLXulIm8_10rayon_core8registryNtB5_12WorkerThread15wait_until_cold  (in snapshot_backends-b8536a3e576e7dd6) + 248  [0x10096c410]
+    +               4003 _RINvMNtCsiV4eLXulIm8_10rayon_core5sleepNtB3_5Sleep5sleepNCNvMs8_NtB5_8registryNtB10_12WorkerThread15wait_until_cold0EB5_  (in snapshot_backends-b8536a3e576e7dd6) + 492  [0x10096c9a8]
+    +                 4003 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +                   4003 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    4003 Thread_15096860
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 _RNvNvMs0_NtNtNtCsa9BKTri5B3M_3std3sys6thread4unixNtB7_6Thread3new12thread_start  (in snapshot_backends-b8536a3e576e7dd6) + 408  [0x10092fa20]
+    +       4003 _RNSNvYNCINvNtNtCsa9BKTri5B3M_3std6thread9lifecycle15spawn_uncheckedNCNvXs0_NtCsiV4eLXulIm8_10rayon_core8registryNtB1b_12DefaultSpawnNtB1b_11ThreadSpawn5spawn0uEs_0INtNtNtCsgtPOCBgevO_4core3ops8function6FnOnceuE9call_once6vtableB1d_  (in snapshot_backends-b8536a3e576e7dd6) + 196  [0x100852310]
+    +         4003 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCNvXs0_NtCsiV4eLXulIm8_10rayon_core8registryNtB1f_12DefaultSpawnNtB1f_11ThreadSpawn5spawn0uEB1h_  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x1008573c0]
+    +           4003 _RNvMNtCsiV4eLXulIm8_10rayon_core8registryNtB2_13ThreadBuilder3run  (in snapshot_backends-b8536a3e576e7dd6) + 300  [0x100854cf8]
+    +             4003 _RNvMs8_NtCsiV4eLXulIm8_10rayon_core8registryNtB5_12WorkerThread15wait_until_cold  (in snapshot_backends-b8536a3e576e7dd6) + 248  [0x10096c410]
+    +               4003 _RINvMNtCsiV4eLXulIm8_10rayon_core5sleepNtB3_5Sleep5sleepNCNvMs8_NtB5_8registryNtB10_12WorkerThread15wait_until_cold0EB5_  (in snapshot_backends-b8536a3e576e7dd6) + 492  [0x10096c9a8]
+    +                 4003 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +                   4003 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    4003 Thread_15096861
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 _RNvNvMs0_NtNtNtCsa9BKTri5B3M_3std3sys6thread4unixNtB7_6Thread3new12thread_start  (in snapshot_backends-b8536a3e576e7dd6) + 408  [0x10092fa20]
+    +       4003 _RNSNvYNCINvNtNtCsa9BKTri5B3M_3std6thread9lifecycle15spawn_uncheckedNCNvXs0_NtCsiV4eLXulIm8_10rayon_core8registryNtB1b_12DefaultSpawnNtB1b_11ThreadSpawn5spawn0uEs_0INtNtNtCsgtPOCBgevO_4core3ops8function6FnOnceuE9call_once6vtableB1d_  (in snapshot_backends-b8536a3e576e7dd6) + 196  [0x100852310]
+    +         4003 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCNvXs0_NtCsiV4eLXulIm8_10rayon_core8registryNtB1f_12DefaultSpawnNtB1f_11ThreadSpawn5spawn0uEB1h_  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x1008573c0]
+    +           4003 _RNvMNtCsiV4eLXulIm8_10rayon_core8registryNtB2_13ThreadBuilder3run  (in snapshot_backends-b8536a3e576e7dd6) + 300  [0x100854cf8]
+    +             4003 _RNvMs8_NtCsiV4eLXulIm8_10rayon_core8registryNtB5_12WorkerThread15wait_until_cold  (in snapshot_backends-b8536a3e576e7dd6) + 248  [0x10096c410]
+    +               4003 _RINvMNtCsiV4eLXulIm8_10rayon_core5sleepNtB3_5Sleep5sleepNCNvMs8_NtB5_8registryNtB10_12WorkerThread15wait_until_cold0EB5_  (in snapshot_backends-b8536a3e576e7dd6) + 492  [0x10096c9a8]
+    +                 4003 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +                   4003 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    4003 Thread_15096862
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 _RNvNvMs0_NtNtNtCsa9BKTri5B3M_3std3sys6thread4unixNtB7_6Thread3new12thread_start  (in snapshot_backends-b8536a3e576e7dd6) + 408  [0x10092fa20]
+    +       4003 _RNSNvYNCINvNtNtCsa9BKTri5B3M_3std6thread9lifecycle15spawn_uncheckedNCNvXs0_NtCsiV4eLXulIm8_10rayon_core8registryNtB1b_12DefaultSpawnNtB1b_11ThreadSpawn5spawn0uEs_0INtNtNtCsgtPOCBgevO_4core3ops8function6FnOnceuE9call_once6vtableB1d_  (in snapshot_backends-b8536a3e576e7dd6) + 196  [0x100852310]
+    +         4003 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCNvXs0_NtCsiV4eLXulIm8_10rayon_core8registryNtB1f_12DefaultSpawnNtB1f_11ThreadSpawn5spawn0uEB1h_  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x1008573c0]
+    +           4003 _RNvMNtCsiV4eLXulIm8_10rayon_core8registryNtB2_13ThreadBuilder3run  (in snapshot_backends-b8536a3e576e7dd6) + 300  [0x100854cf8]
+    +             4003 _RNvMs8_NtCsiV4eLXulIm8_10rayon_core8registryNtB5_12WorkerThread15wait_until_cold  (in snapshot_backends-b8536a3e576e7dd6) + 248  [0x10096c410]
+    +               4003 _RINvMNtCsiV4eLXulIm8_10rayon_core5sleepNtB3_5Sleep5sleepNCNvMs8_NtB5_8registryNtB10_12WorkerThread15wait_until_cold0EB5_  (in snapshot_backends-b8536a3e576e7dd6) + 492  [0x10096c9a8]
+    +                 4003 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +                   4003 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    4003 Thread_15096863
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 _RNvNvMs0_NtNtNtCsa9BKTri5B3M_3std3sys6thread4unixNtB7_6Thread3new12thread_start  (in snapshot_backends-b8536a3e576e7dd6) + 408  [0x10092fa20]
+    +       4003 _RNSNvYNCINvNtNtCsa9BKTri5B3M_3std6thread9lifecycle15spawn_uncheckedNCNvXs0_NtCsiV4eLXulIm8_10rayon_core8registryNtB1b_12DefaultSpawnNtB1b_11ThreadSpawn5spawn0uEs_0INtNtNtCsgtPOCBgevO_4core3ops8function6FnOnceuE9call_once6vtableB1d_  (in snapshot_backends-b8536a3e576e7dd6) + 196  [0x100852310]
+    +         4003 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCNvXs0_NtCsiV4eLXulIm8_10rayon_core8registryNtB1f_12DefaultSpawnNtB1f_11ThreadSpawn5spawn0uEB1h_  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x1008573c0]
+    +           4003 _RNvMNtCsiV4eLXulIm8_10rayon_core8registryNtB2_13ThreadBuilder3run  (in snapshot_backends-b8536a3e576e7dd6) + 300  [0x100854cf8]
+    +             4003 _RNvMs8_NtCsiV4eLXulIm8_10rayon_core8registryNtB5_12WorkerThread15wait_until_cold  (in snapshot_backends-b8536a3e576e7dd6) + 248  [0x10096c410]
+    +               4003 _RINvMNtCsiV4eLXulIm8_10rayon_core5sleepNtB3_5Sleep5sleepNCNvMs8_NtB5_8registryNtB10_12WorkerThread15wait_until_cold0EB5_  (in snapshot_backends-b8536a3e576e7dd6) + 492  [0x10096c9a8]
+    +                 4003 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +                   4003 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    4003 Thread_15096864
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 _RNvNvMs0_NtNtNtCsa9BKTri5B3M_3std3sys6thread4unixNtB7_6Thread3new12thread_start  (in snapshot_backends-b8536a3e576e7dd6) + 408  [0x10092fa20]
+    +       4003 _RNSNvYNCINvNtNtCsa9BKTri5B3M_3std6thread9lifecycle15spawn_uncheckedNCNvXs0_NtCsiV4eLXulIm8_10rayon_core8registryNtB1b_12DefaultSpawnNtB1b_11ThreadSpawn5spawn0uEs_0INtNtNtCsgtPOCBgevO_4core3ops8function6FnOnceuE9call_once6vtableB1d_  (in snapshot_backends-b8536a3e576e7dd6) + 196  [0x100852310]
+    +         4003 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCNvXs0_NtCsiV4eLXulIm8_10rayon_core8registryNtB1f_12DefaultSpawnNtB1f_11ThreadSpawn5spawn0uEB1h_  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x1008573c0]
+    +           4003 _RNvMNtCsiV4eLXulIm8_10rayon_core8registryNtB2_13ThreadBuilder3run  (in snapshot_backends-b8536a3e576e7dd6) + 300  [0x100854cf8]
+    +             4003 _RNvMs8_NtCsiV4eLXulIm8_10rayon_core8registryNtB5_12WorkerThread15wait_until_cold  (in snapshot_backends-b8536a3e576e7dd6) + 248  [0x10096c410]
+    +               4003 _RINvMNtCsiV4eLXulIm8_10rayon_core5sleepNtB3_5Sleep5sleepNCNvMs8_NtB5_8registryNtB10_12WorkerThread15wait_until_cold0EB5_  (in snapshot_backends-b8536a3e576e7dd6) + 492  [0x10096c9a8]
+    +                 4003 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +                   4003 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    4003 Thread_15096865
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 _RNvNvMs0_NtNtNtCsa9BKTri5B3M_3std3sys6thread4unixNtB7_6Thread3new12thread_start  (in snapshot_backends-b8536a3e576e7dd6) + 408  [0x10092fa20]
+    +       4003 _RNSNvYNCINvNtNtCsa9BKTri5B3M_3std6thread9lifecycle15spawn_uncheckedNCNvXs0_NtCsiV4eLXulIm8_10rayon_core8registryNtB1b_12DefaultSpawnNtB1b_11ThreadSpawn5spawn0uEs_0INtNtNtCsgtPOCBgevO_4core3ops8function6FnOnceuE9call_once6vtableB1d_  (in snapshot_backends-b8536a3e576e7dd6) + 196  [0x100852310]
+    +         4003 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCNvXs0_NtCsiV4eLXulIm8_10rayon_core8registryNtB1f_12DefaultSpawnNtB1f_11ThreadSpawn5spawn0uEB1h_  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x1008573c0]
+    +           4003 _RNvMNtCsiV4eLXulIm8_10rayon_core8registryNtB2_13ThreadBuilder3run  (in snapshot_backends-b8536a3e576e7dd6) + 300  [0x100854cf8]
+    +             4003 _RNvMs8_NtCsiV4eLXulIm8_10rayon_core8registryNtB5_12WorkerThread15wait_until_cold  (in snapshot_backends-b8536a3e576e7dd6) + 248  [0x10096c410]
+    +               4003 _RINvMNtCsiV4eLXulIm8_10rayon_core5sleepNtB3_5Sleep5sleepNCNvMs8_NtB5_8registryNtB10_12WorkerThread15wait_until_cold0EB5_  (in snapshot_backends-b8536a3e576e7dd6) + 492  [0x10096c9a8]
+    +                 4003 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +                   4003 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    4003 Thread_15096866
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 _RNvNvMs0_NtNtNtCsa9BKTri5B3M_3std3sys6thread4unixNtB7_6Thread3new12thread_start  (in snapshot_backends-b8536a3e576e7dd6) + 408  [0x10092fa20]
+    +       4003 _RNSNvYNCINvNtNtCsa9BKTri5B3M_3std6thread9lifecycle15spawn_uncheckedNCNvXs0_NtCsiV4eLXulIm8_10rayon_core8registryNtB1b_12DefaultSpawnNtB1b_11ThreadSpawn5spawn0uEs_0INtNtNtCsgtPOCBgevO_4core3ops8function6FnOnceuE9call_once6vtableB1d_  (in snapshot_backends-b8536a3e576e7dd6) + 196  [0x100852310]
+    +         4003 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCNvXs0_NtCsiV4eLXulIm8_10rayon_core8registryNtB1f_12DefaultSpawnNtB1f_11ThreadSpawn5spawn0uEB1h_  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x1008573c0]
+    +           4003 _RNvMNtCsiV4eLXulIm8_10rayon_core8registryNtB2_13ThreadBuilder3run  (in snapshot_backends-b8536a3e576e7dd6) + 300  [0x100854cf8]
+    +             4003 _RNvMs8_NtCsiV4eLXulIm8_10rayon_core8registryNtB5_12WorkerThread15wait_until_cold  (in snapshot_backends-b8536a3e576e7dd6) + 248  [0x10096c410]
+    +               4003 _RINvMNtCsiV4eLXulIm8_10rayon_core5sleepNtB3_5Sleep5sleepNCNvMs8_NtB5_8registryNtB10_12WorkerThread15wait_until_cold0EB5_  (in snapshot_backends-b8536a3e576e7dd6) + 492  [0x10096c9a8]
+    +                 4003 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +                   4003 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    4003 Thread_15096867
+    + 4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+    +   4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+    +     4003 _RNvNvMs0_NtNtNtCsa9BKTri5B3M_3std3sys6thread4unixNtB7_6Thread3new12thread_start  (in snapshot_backends-b8536a3e576e7dd6) + 408  [0x10092fa20]
+    +       4003 _RNSNvYNCINvNtNtCsa9BKTri5B3M_3std6thread9lifecycle15spawn_uncheckedNCNvXs0_NtCsiV4eLXulIm8_10rayon_core8registryNtB1b_12DefaultSpawnNtB1b_11ThreadSpawn5spawn0uEs_0INtNtNtCsgtPOCBgevO_4core3ops8function6FnOnceuE9call_once6vtableB1d_  (in snapshot_backends-b8536a3e576e7dd6) + 196  [0x100852310]
+    +         4003 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCNvXs0_NtCsiV4eLXulIm8_10rayon_core8registryNtB1f_12DefaultSpawnNtB1f_11ThreadSpawn5spawn0uEB1h_  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x1008573c0]
+    +           4003 _RNvMNtCsiV4eLXulIm8_10rayon_core8registryNtB2_13ThreadBuilder3run  (in snapshot_backends-b8536a3e576e7dd6) + 300  [0x100854cf8]
+    +             4003 _RNvMs8_NtCsiV4eLXulIm8_10rayon_core8registryNtB5_12WorkerThread15wait_until_cold  (in snapshot_backends-b8536a3e576e7dd6) + 248  [0x10096c410]
+    +               4003 _RINvMNtCsiV4eLXulIm8_10rayon_core5sleepNtB3_5Sleep5sleepNCNvMs8_NtB5_8registryNtB10_12WorkerThread15wait_until_cold0EB5_  (in snapshot_backends-b8536a3e576e7dd6) + 492  [0x10096c9a8]
+    +                 4003 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+    +                   4003 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+    4003 Thread_15096868
+      4003 thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+        4003 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+          4003 _RNvNvMs0_NtNtNtCsa9BKTri5B3M_3std3sys6thread4unixNtB7_6Thread3new12thread_start  (in snapshot_backends-b8536a3e576e7dd6) + 408  [0x10092fa20]
+            4003 _RNSNvYNCINvNtNtCsa9BKTri5B3M_3std6thread9lifecycle15spawn_uncheckedNCNvXs0_NtCsiV4eLXulIm8_10rayon_core8registryNtB1b_12DefaultSpawnNtB1b_11ThreadSpawn5spawn0uEs_0INtNtNtCsgtPOCBgevO_4core3ops8function6FnOnceuE9call_once6vtableB1d_  (in snapshot_backends-b8536a3e576e7dd6) + 196  [0x100852310]
+              4003 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCNvXs0_NtCsiV4eLXulIm8_10rayon_core8registryNtB1f_12DefaultSpawnNtB1f_11ThreadSpawn5spawn0uEB1h_  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x1008573c0]
+                4003 _RNvMNtCsiV4eLXulIm8_10rayon_core8registryNtB2_13ThreadBuilder3run  (in snapshot_backends-b8536a3e576e7dd6) + 300  [0x100854cf8]
+                  4003 _RNvMs8_NtCsiV4eLXulIm8_10rayon_core8registryNtB5_12WorkerThread15wait_until_cold  (in snapshot_backends-b8536a3e576e7dd6) + 248  [0x10096c410]
+                    4003 _RINvMNtCsiV4eLXulIm8_10rayon_core5sleepNtB3_5Sleep5sleepNCNvMs8_NtB5_8registryNtB10_12WorkerThread15wait_until_cold0EB5_  (in snapshot_backends-b8536a3e576e7dd6) + 492  [0x10096c9a8]
+                      4003 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+                        4003 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1919c05ec]
+
+Total number in stack (recursive counted multiple, when >=5):
+        42       _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1919fdf94]
+        42       thread_start  (in libsystem_pthread.dylib) + 8  [0x1919f8d34]
+        34       __psynch_cvwait  (in libsystem_kernel.dylib) + 0  [0x1919c05e4]
+        34       _pthread_cond_wait  (in libsystem_pthread.dylib) + 1228  [0x1919fe55c]
+        26       _RNvNvMs0_NtNtNtCsa9BKTri5B3M_3std3sys6thread4unixNtB7_6Thread3new12thread_start  (in snapshot_backends-b8536a3e576e7dd6) + 408  [0x10092fa20]
+        15       _platform_memmove  (in libsystem_platform.dylib) + 0  [0x191a2e1a0]
+        15       rocksdb::ThreadPoolImpl::Impl::BGThread(unsigned long)  (in snapshot_backends-b8536a3e576e7dd6) + 304  [0x10059fe80]
+        15       rocksdb::ThreadPoolImpl::Impl::BGThreadWrapper(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 124  [0x1005a01f0]
+        15       std::__thread_proxy[abi:ne180100]<std::tuple<std::unique_ptr<std::__thread_struct>, void (*)(void*), rocksdb::BGThreadMetadata*>>(void*)  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x1005a1e18]
+        15       std::condition_variable::wait(std::unique_lock<std::mutex>&)  (in libc++.1.dylib) + 28  [0x191923b14]
+        12       _RINvMNtCsiV4eLXulIm8_10rayon_core5sleepNtB3_5Sleep5sleepNCNvMs8_NtB5_8registryNtB10_12WorkerThread15wait_until_cold0EB5_  (in snapshot_backends-b8536a3e576e7dd6) + 492  [0x10096c9a8]
+        12       _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCNCNvMs_NtCs5VSE9Kv9rbT_5fjall11worker_poolNtB1g_10WorkerPool5start00INtNtCsgtPOCBgevO_4core6result6ResultuNtNtB1i_5error5ErrorEEB1i_  (in snapshot_backends-b8536a3e576e7dd6) + 44  [0x1006e0844]
+        12       _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCNvXs0_NtCsiV4eLXulIm8_10rayon_core8registryNtB1f_12DefaultSpawnNtB1f_11ThreadSpawn5spawn0uEB1h_  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x1008573c0]
+        12       _RNSNvYNCINvNtNtCsa9BKTri5B3M_3std6thread9lifecycle15spawn_uncheckedNCNCNvMs_NtCs5VSE9Kv9rbT_5fjall11worker_poolNtB1c_10WorkerPool5start00INtNtCsgtPOCBgevO_4core6result6ResultuNtNtB1e_5error5ErrorEEs_0INtNtNtB2g_3ops8function6FnOnceuE9call_once6vtableB1e_  (in snapshot_backends-b8536a3e576e7dd6) + 160  [0x1006fc77c]
+        12       _RNSNvYNCINvNtNtCsa9BKTri5B3M_3std6thread9lifecycle15spawn_uncheckedNCNvXs0_NtCsiV4eLXulIm8_10rayon_core8registryNtB1b_12DefaultSpawnNtB1b_11ThreadSpawn5spawn0uEs_0INtNtNtCsgtPOCBgevO_4core3ops8function6FnOnceuE9call_once6vtableB1d_  (in snapshot_backends-b8536a3e576e7dd6) + 196  [0x100852310]
+        12       _RNvMNtCsiV4eLXulIm8_10rayon_core8registryNtB2_13ThreadBuilder3run  (in snapshot_backends-b8536a3e576e7dd6) + 300  [0x100854cf8]
+        12       _RNvMs8_NtCsiV4eLXulIm8_10rayon_core8registryNtB5_12WorkerThread15wait_until_cold  (in snapshot_backends-b8536a3e576e7dd6) + 248  [0x10096c410]
+        12       _RNvNtCs5VSE9Kv9rbT_5fjall11worker_pool11worker_tick  (in snapshot_backends-b8536a3e576e7dd6) + 636  [0x1006d99a8]
+        12       _RNvNtNtCsa9BKTri5B3M_3std6thread9functions4park  (in snapshot_backends-b8536a3e576e7dd6) + 96  [0x10092a4ec]
+        12       _dispatch_sema4_wait  (in libdispatch.dylib) + 28  [0x19184d984]
+        12       _dispatch_semaphore_wait_slow  (in libdispatch.dylib) + 132  [0x19184e034]
+        12       _nanov2_free  (in libsystem_malloc.dylib) + 0  [0x19182f50c]
+        12       semaphore_wait_trap  (in libsystem_kernel.dylib) + 0  [0x1919bcd68]
+        9       DYLD-STUB$$memcmp  (in snapshot_backends-b8536a3e576e7dd6) + 0  [0x10097902c]
+        9       _malloc_zone_malloc  (in libsystem_malloc.dylib) + 0  [0x19183791c]
+        9       _platform_memcmp  (in libsystem_platform.dylib) + 0  [0x191a2bd50]
+        9       _platform_memset  (in libsystem_platform.dylib) + 0  [0x191a2ded0]
+        9       nanov2_malloc  (in libsystem_malloc.dylib) + 0  [0x19180dc20]
+        8       _nanov2_free  (in libsystem_malloc.dylib) + 520  [0x19182f714]
+        7       _RNvXs3_NtCs62sWeHaXwK5_12pedradb_core5cacheNtB5_8FxHasherNtNtCsgtPOCBgevO_4core4hash6Hasher5write  (in snapshot_backends-b8536a3e576e7dd6) + 0  [0x1006b8424]
+        7       _free  (in libsystem_malloc.dylib) + 0  [0x191838574]
+        6       DYLD-STUB$$free  (in snapshot_backends-b8536a3e576e7dd6) + 0  [0x100978e7c]
+        6       cthread_yield  (in libsystem_pthread.dylib) + 32  [0x1919fadd0]
+        6       swtch_pri  (in libsystem_kernel.dylib) + 0  [0x1919bce40]
+        5       DYLD-STUB$$_platform_bzero  (in libsystem_malloc.dylib) + 0  [0x191840060]
+        5       DYLD-STUB$$memcpy  (in snapshot_backends-b8536a3e576e7dd6) + 0  [0x100979038]
+        5       _RNCNvNtNtNtCsa9BKTri5B3M_3std3sys3env4unix6getenv0B9_  (in snapshot_backends-b8536a3e576e7dd6) + 52  [0x100915370]
+        5       __findenv_locked  (in libsystem_c.dylib) + 0  [0x1918953e8]
+        5       getenv  (in libsystem_c.dylib) + 64  [0x1918953bc]
+
+Sort by top of stack, same collapsed (when >= 5):
+        __psynch_cvwait  (in libsystem_kernel.dylib)        112172
+        semaphore_wait_trap  (in libsystem_kernel.dylib)        48036
+        semaphore_timedwait_trap  (in libsystem_kernel.dylib)        7817
+        _platform_memcmp  (in libsystem_platform.dylib)        945
+        DYLD-STUB$$memcmp  (in snapshot_backends-b8536a3e576e7dd6)        709
+        _RINvYINtNtNtCsgtPOCBgevO_4core5slice4iter6ChunksNtNtCsip6YQz7nMgo_6crc32c4util5U64LeENtNtNtNtBa_4iter6traits8iterator8Iterator4foldmNCNvNtBO_10hw_aarch6417crc_u64_parallel30EBO_  (in snapshot_backends-b8536a3e576e7dd6)        538
+        _RNvNtNtCs62sWeHaXwK5_12pedradb_core3sst5table25seek_point_in_block_image  (in snapshot_backends-b8536a3e576e7dd6)        331
+        _RNvNtCsip6YQz7nMgo_6crc32c10hw_aarch646crc32c  (in snapshot_backends-b8536a3e576e7dd6)        226
+        _RNvMNtNtCs62sWeHaXwK5_12pedradb_core3sst5tableNtB2_8SstTable16blocks_for_point  (in snapshot_backends-b8536a3e576e7dd6)        181
+        swtch_pri  (in libsystem_kernel.dylib)        107
+        _platform_memmove  (in libsystem_platform.dylib)        104
+        _nanov2_free  (in libsystem_malloc.dylib)        101
+        _platform_memset  (in libsystem_platform.dylib)        74
+        _RNvMs5_NtCs62sWeHaXwK5_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesEE3getCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6)        65
+        _RINvMs1_NtCs9nAj5kJTqSU_9hashbrown3mapINtB6_7HashMapNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesTyyINtNtCsgtPOCBgevO_4core6option6OptionBO_EEINtNtB1w_4hash18BuildHasherDefaultNtNtCs62sWeHaXwK5_12pedradb_core5cache8FxHasherEE6removeBO_ECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6)        61
+        _RNvMNtNtCs62sWeHaXwK5_12pedradb_core3sst5tableNtB2_8SstTable16point_at_seeking  (in snapshot_backends-b8536a3e576e7dd6)        39
+        _free  (in libsystem_malloc.dylib)        39
+        _RNvMs5_NtCs62sWeHaXwK5_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesEE6insertCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6)        35
+        _RNvMs9_Cs1pByd8LO0u1_14rocksdb_compatNtB5_12LastGetTable3get  (in snapshot_backends-b8536a3e576e7dd6)        32
+        _RNvMse_NtCs62sWeHaXwK5_12pedradb_core2dbINtB5_2DbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE6lookupCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6)        31
+        _RINvMs1_NtCs9nAj5kJTqSU_9hashbrown3mapINtB6_7HashMapNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesTyyINtNtCsgtPOCBgevO_4core6option6OptionBO_EEINtNtB1w_4hash18BuildHasherDefaultNtNtCs62sWeHaXwK5_12pedradb_core5cache8FxHasherEE7get_mutShECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6)        30
+        _RNvXs3_NtCs62sWeHaXwK5_12pedradb_core5cacheNtB5_8FxHasherNtNtCsgtPOCBgevO_4core4hash6Hasher5write  (in snapshot_backends-b8536a3e576e7dd6)        30
+        nanov2_malloc  (in libsystem_malloc.dylib)        29
+        _RNvMs9_Cs1pByd8LO0u1_14rocksdb_compatNtB5_12LastGetTable5store  (in snapshot_backends-b8536a3e576e7dd6)        26
+        _malloc_zone_malloc  (in libsystem_malloc.dylib)        26
+        _RINvMsj_Cs1pByd8LO0u1_14rocksdb_compatNtB6_2DB10get_cachedRShECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6)        22
+        _RNvMse_NtCs62sWeHaXwK5_12pedradb_core2dbINtB5_2DbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE3getCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6)        18
+        __psynch_cvsignal  (in libsystem_kernel.dylib)        15
+        _RNvMs1_NtCs9nAj5kJTqSU_9hashbrown3mapINtB5_7HashMapNtNtCs7dCdOs0Eg1C_5bytes5bytes5BytesTyyINtNtCsgtPOCBgevO_4core6option6OptionBN_EEINtNtB1v_4hash18BuildHasherDefaultNtNtCs62sWeHaXwK5_12pedradb_core5cache8FxHasherEE6insertCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6)        14
+        DYLD-STUB$$free  (in snapshot_backends-b8536a3e576e7dd6)        11
+        _RNvNtCsgtPOCBgevO_4core3fmt5write  (in snapshot_backends-b8536a3e576e7dd6)        11
+        _RNvMNtNtCs62sWeHaXwK5_12pedradb_core3sst5tableNtB2_8SstTable24collect_range_tombstones  (in snapshot_backends-b8536a3e576e7dd6)        10
+        _RNvNvNtCslJsSqIQKwiA_5alloc3fmt6format12format_inner  (in snapshot_backends-b8536a3e576e7dd6)        10
+        nanov2_allocate_outlined  (in libsystem_malloc.dylib)        9
+        DYLD-STUB$$_platform_bzero  (in libsystem_malloc.dylib)        8
+        _RNvMs8_NtCsb1bNbDaTsGO_11parking_lot10raw_rwlockNtB5_9RawRwLock16wait_for_readers  (in snapshot_backends-b8536a3e576e7dd6)        8
+        _RNvMsa_NtCsgtPOCBgevO_4core3fmtNtB5_9Formatter12pad_integral  (in snapshot_backends-b8536a3e576e7dd6)        8
+        DYLD-STUB$$memcpy  (in snapshot_backends-b8536a3e576e7dd6)        7
+        _RNvMsd_NtCs62sWeHaXwK5_12pedradb_core8memtableNtB5_8MemTable9get_entry  (in snapshot_backends-b8536a3e576e7dd6)        7
+        _RNvXsZ_NtCslJsSqIQKwiA_5alloc6stringNtB5_6StringNtNtCsgtPOCBgevO_4core3fmt5Write10write_char  (in snapshot_backends-b8536a3e576e7dd6)        7
+        madvise  (in libsystem_kernel.dylib)        7
+        nanov2_find_block_and_allocate  (in libsystem_malloc.dylib)        7
+        _RINvMs2_NtNtCsa9BKTri5B3M_3std6thread5localINtB6_8LocalKeyINtNtCsgtPOCBgevO_4core4cell7RefCellNtCs1pByd8LO0u1_14rocksdb_compat12LastGetTableEE4withNCINvMsj_B1w_NtB1w_2DB10get_cachedRShEs1_0uECs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6)        6
+        _RNvMs0_NtCs62sWeHaXwK5_12pedradb_core10concurrentINtB5_12ConcurrentDbNtCshKS11VUEltd_16pedradb_io_uring10IoUringEnvE3getCs6RdFyfYj5zr_10slipstream  (in snapshot_backends-b8536a3e576e7dd6)        6
+        _RNvMsf_NtNtNtCsgtPOCBgevO_4core3fmt3num3impy10__fmt_inner  (in snapshot_backends-b8536a3e576e7dd6)        6
+        __findenv_locked  (in libsystem_c.dylib)        6
+        _RINvMNtCs8LgfujxyOep_9criterion7bencherNtB3_7Bencher4iterINtNtCsgtPOCBgevO_4core6option6OptionNtNtCs6RdFyfYj5zr_10slipstream2kv7KvEntryENCNCNvCs67Dj2gtHXC5_17snapshot_backends11bench_readss6_00EB2g_  (in snapshot_backends-b8536a3e576e7dd6)        5
+        _RNvCs9wFQrvczXsK_7___rustc35___rust_no_alloc_shim_is_unstable_v2  (in snapshot_backends-b8536a3e576e7dd6)        5
+        __bzero  (in libsystem_platform.dylib)        5
+        _malloc_zone_realloc  (in libsystem_malloc.dylib)        5
+        dispatch_semaphore_wait  (in libdispatch.dylib)        5
+
+Binary Images:
+       0x100060000 -        0x100b57fe7 +snapshot_backends-b8536a3e576e7dd6 (0) <6C3AFBC5-385D-320A-8D52-6A6AF1AA36ED> /tmp/*/snapshot_backends-b8536a3e576e7dd6
+       0x19161c000 -        0x19166ce0b  libobjc.A.dylib (912.7) <5C6386BD-F308-3370-BCE9-63D1A89DAB87> /usr/lib/libobjc.A.dylib
+       0x19166d000 -        0x1916f6507  dyld (1.0.0 - 1165.3) <F635824E-318B-3F0C-842C-C369737F2B68> /usr/lib/dyld
+       0x1916f7000 -        0x1916fbff8  libsystem_blocks.dylib (90) <6BC23DD4-94AC-3BB0-BC84-93E6D7813ACE> /usr/lib/system/libsystem_blocks.dylib
+       0x1916fc000 -        0x191746fff  libxpc.dylib (2748.140.10) <987AF6AA-AB54-39CE-84CF-C6D2D1DC9464> /usr/lib/system/libxpc.dylib
+       0x191747000 -        0x191761fff  libsystem_trace.dylib (1510.140.4) <72852AF1-4BCC-326A-BE13-6C6F22A44E4A> /usr/lib/system/libsystem_trace.dylib
+       0x191762000 -        0x19180bfcf  libcorecrypto.dylib (1638.140.6) <717EA919-DB53-3DDA-AFA1-D87BFD649A83> /usr/lib/system/libcorecrypto.dylib
+       0x19180c000 -        0x191848ff7  libsystem_malloc.dylib (521.120.7) <8A69A1AC-6D54-3B64-9860-CD0DB47473ED> /usr/lib/system/libsystem_malloc.dylib
+       0x191849000 -        0x191890fff  libdispatch.dylib (1477.100.9) <1A1CE00A-89CD-36BA-9678-5038AEDD0D8D> /usr/lib/system/libdispatch.dylib
+       0x191891000 -        0x191893fff  libsystem_featureflags.dylib (86) <F9E56A3B-6350-3D8B-BEC6-6BC253B19355> /usr/lib/system/libsystem_featureflags.dylib
+       0x191894000 -        0x191912ff7  libsystem_c.dylib (1592.100.35) <D30F1830-93D0-3D0B-8CBA-9544E84BFD5B> /usr/lib/system/libsystem_c.dylib
+       0x191913000 -        0x19199fff7  libc++.1.dylib (1700.255.5) <AAA5636D-6F3F-3FA7-9F4A-CF966F0308FE> /usr/lib/libc++.1.dylib
+       0x1919a0000 -        0x1919bbffb  libc++abi.dylib (1700.255.5) <68E3EB36-B4BA-30E0-A240-31E942936D06> /usr/lib/libc++abi.dylib
+       0x1919bc000 -        0x1919f6ffb  libsystem_kernel.dylib (10063.141.2) <71FF45B8-F14E-3666-9E96-6CF58315B91D> /usr/lib/system/libsystem_kernel.dylib
+       0x1919f7000 -        0x191a03fff  libsystem_pthread.dylib (519.120.4) <E03E8478-6F5C-3D21-A79A-58408F514000> /usr/lib/system/libsystem_pthread.dylib
+       0x191a04000 -        0x191a29ff7  libdyld.dylib (1165.3) <C433509D-7CD3-3884-B24D-5D68B9B95627> /usr/lib/system/libdyld.dylib
+       0x191a2a000 -        0x191a31fe7  libsystem_platform.dylib (316.100.10) <B4BF9F89-31D7-3742-8CE7-AB3554F9F525> /usr/lib/system/libsystem_platform.dylib
+       0x191a32000 -        0x191a5effb  libsystem_info.dylib (583.0.1) <827E8091-520E-3537-8E72-678CED1BAAAE> /usr/lib/system/libsystem_info.dylib
+       0x191a5f000 -        0x191f37fff  com.apple.CoreFoundation (6.9 - 2602) <55720EE0-D8C3-33A1-9854-8E61A6F44895> /System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation
+       0x191f38000 -        0x1921f2fff  com.apple.LaunchServices (1141.1 - 1141.1) <0D5F4D3D-A719-359D-85C4-9EB0BC650379> /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/LaunchServices
+       0x19233f000 -        0x1926dafef  libBLAS.dylib (1447.120.2) <4D213641-4F79-3A14-857E-A665AE007AD7> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libBLAS.dylib
+       0x1926db000 -        0x1927ccff7  com.apple.Lexicon-framework (1.0 - 134.9) <9ED46359-C232-3D74-A39E-382598CCAB31> /System/Library/PrivateFrameworks/Lexicon.framework/Versions/A/Lexicon
+       0x1927cd000 -        0x192833fff  libSparse.dylib (125) <B69EDD3A-C67B-331D-8B29-92BD7AD6C536> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libSparse.dylib
+       0x192834000 -        0x1928c7fff  com.apple.SystemConfiguration (1.21 - 1.21) <3346C680-6149-30B1-9876-9DC594F84221> /System/Library/Frameworks/SystemConfiguration.framework/Versions/A/SystemConfiguration
+       0x1928c8000 -        0x1928fcff3  libCRFSuite.dylib (52) <F00E2EB4-3ABF-3DFD-B549-048F84397578> /usr/lib/libCRFSuite.dylib
+       0x192bb4000 -        0x193811fff  com.apple.Foundation (6.9 - 2602) <C6949F67-60F6-3735-B583-BF1E069A8A0B> /System/Library/Frameworks/Foundation.framework/Versions/C/Foundation
+       0x193812000 -        0x1939f7fff  com.apple.LanguageModeling (1.0 - 366.9) <CB72FB9E-9192-36E9-968E-49432E6D0943> /System/Library/PrivateFrameworks/LanguageModeling.framework/Versions/A/LanguageModeling
+       0x194788000 -        0x194b5afff  com.apple.security (7.0 - 61123.141.1) <179DB057-449C-3592-853F-09F78A4AD4F4> /System/Library/Frameworks/Security.framework/Versions/A/Security
+       0x194b5b000 -        0x194e21fff  libicucore.A.dylib (74000.403) <ACB4FCE3-712B-32D4-85C5-5F8923DC1578> /usr/lib/libicucore.A.dylib
+       0x194e22000 -        0x194e2cff3  libsystem_darwin.dylib (1592.100.35) <4DD0C579-C2FC-37A7-B6D7-1BA7268DD8B3> /usr/lib/system/libsystem_darwin.dylib
+       0x194e2d000 -        0x195132fff  com.apple.CoreServices.CarbonCore (1333 - 1333) <057F373D-C1D6-3FBD-A137-2D0AFC26CDB6> /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/CarbonCore.framework/Versions/A/CarbonCore
+       0x195133000 -        0x195173ff7  com.apple.CoreServicesInternal (505 - 505) <D612092D-F4BB-3DFB-AEE9-37860758FF5C> /System/Library/PrivateFrameworks/CoreServicesInternal.framework/Versions/A/CoreServicesInternal
+       0x195174000 -        0x1951b4fff  com.apple.CSStore (1141.1 - 1141.1) <3DAD70D2-07A5-3372-9DD3-3F0E038875BB> /System/Library/PrivateFrameworks/CoreServicesStore.framework/Versions/A/CoreServicesStore
+       0x1951b5000 -        0x195297fff  com.apple.framework.IOKit (2.0.2 - 100076.120.9) <34C164ED-8DC0-3EC5-AA47-BE0DB1121990> /System/Library/Frameworks/IOKit.framework/Versions/A/IOKit
+       0x195298000 -        0x1952a8fff  libsystem_notify.dylib (317.120.2) <6902E910-4F75-32C7-BBF3-D46CD6743BFA> /usr/lib/system/libsystem_notify.dylib
+       0x196d19000 -        0x196d19fff  libnetwork.dylib (3762.140.6) <D91F182D-02D2-3FD6-B5C9-49DBEE61ACB4> /usr/lib/libnetwork.dylib
+       0x196d1a000 -        0x1970edfff  com.apple.CFNetwork (1.0 - 1498.700.2) <33F7B4A0-DE02-353D-8B3D-89E20966E2E9> /System/Library/Frameworks/CFNetwork.framework/Versions/A/CFNetwork
+       0x1970ee000 -        0x197108fff  libsystem_networkextension.dylib (1838.140.5.0.1) <9ADD8A04-8F8C-3916-A9ED-20F6947294BD> /usr/lib/system/libsystem_networkextension.dylib
+       0x197109000 -        0x19710afff  libenergytrace.dylib (23) <ECDFD58A-515C-373B-87E1-5051E74F849D> /usr/lib/libenergytrace.dylib
+       0x19710b000 -        0x197180fff  libMobileGestalt.dylib (1332.120.2) <AD887E7D-F70B-3413-88E6-AA1131CF54BF> /usr/lib/libMobileGestalt.dylib
+       0x197181000 -        0x197198ff7  libsystem_asl.dylib (398) <138939F9-52A2-35BF-A8E5-4B2154A3F1B0> /usr/lib/system/libsystem_asl.dylib
+       0x197199000 -        0x1971b9ff0  com.apple.TCC (1.0 - 1) <5F9BEC02-CFD0-375E-8B2C-E2ECFCDC8D1A> /System/Library/PrivateFrameworks/TCC.framework/Versions/A/TCC
+       0x19874e000 -        0x198767fff  com.apple.ProtocolBuffer (1 - 300.26.4.18.2) <19B40E7E-EC18-3679-AF63-2AE0B7B14F44> /System/Library/PrivateFrameworks/ProtocolBuffer.framework/Versions/A/ProtocolBuffer
+       0x198768000 -        0x19891afff  libsqlite3.dylib (351.4) <C553F523-14E5-3615-90F8-B092F9BE721E> /usr/lib/libsqlite3.dylib
+       0x198af4000 -        0x198b67ff7  com.apple.AE (944 - 944) <AD857A12-6FC7-3E06-AB66-317B526736BB> /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/AE.framework/Versions/A/AE
+       0x198b68000 -        0x198b72fff  libdns_services.dylib (2200.140.11) <889C0A4B-F3CE-3C4F-BD01-5AC89C61C6E4> /usr/lib/libdns_services.dylib
+       0x198b73000 -        0x198b7bff3  libsystem_symptoms.dylib (1871.140.6) <3E5E0270-E98C-303F-A566-624005886B88> /usr/lib/system/libsystem_symptoms.dylib
+       0x198b7c000 -        0x1997c8fff  com.apple.Network (1.0 - 1) <D1429DAF-4144-3281-A4D9-34EEBDFFF5B1> /System/Library/Frameworks/Network.framework/Versions/A/Network
+       0x1997c9000 -        0x1997f7fff  com.apple.analyticsd (1.0 - 1) <35829BD9-2962-3C92-9AD2-845DB7710D14> /System/Library/PrivateFrameworks/CoreAnalytics.framework/Versions/A/CoreAnalytics
+       0x1997f8000 -        0x1997f9fff  libDiagnosticMessagesClient.dylib (113) <61643068-DB8F-3F4C-859A-B5C79DC01FEE> /usr/lib/libDiagnosticMessagesClient.dylib
+       0x1997fa000 -        0x199840fff  com.apple.spotlight.metadata.utilities (1.0 - 2274.38) <1AE5021C-CA36-3E9F-87C8-09813308420A> /System/Library/PrivateFrameworks/MetadataUtilities.framework/Versions/A/MetadataUtilities
+       0x199841000 -        0x1998dbfff  com.apple.Metadata (14.6 - 2274.38) <4D2BC1EA-26B7-3469-8449-9B2E9B569ABE> /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Metadata
+       0x1998dc000 -        0x1998e4ffb  com.apple.DiskArbitration (2.7 - 2.7) <D85ED36D-84E7-3CA5-B9A3-42925DB8592E> /System/Library/Frameworks/DiskArbitration.framework/Versions/A/DiskArbitration
+       0x1998e5000 -        0x199ccefc7  com.apple.vImage (8.1 - 587.100.1) <716F299D-CE66-3589-A03E-880C2DFE859D> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vImage.framework/Versions/A/vImage
+       0x19a33b000 -        0x19a34afff  com.apple.OpenDirectory (14.6 - 642) <74E23861-23C5-39CA-8B89-D07D9A0E62AE> /System/Library/Frameworks/OpenDirectory.framework/Versions/A/OpenDirectory
+       0x19a34b000 -        0x19a36affb  com.apple.CFOpenDirectory (14.6 - 642) <0CE2B2BB-EB4F-3524-B93B-0D4FF73B2021> /System/Library/Frameworks/OpenDirectory.framework/Versions/A/Frameworks/CFOpenDirectory.framework/Versions/A/CFOpenDirectory
+       0x19a36b000 -        0x19a377ff7  com.apple.CoreServices.FSEvents (1376.120.2 - 1376.120.2) <F8DB4FE7-DA9F-37B7-A143-E1A99E8DFA63> /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/FSEvents
+       0x19a378000 -        0x19a3a2fff  com.apple.coreservices.SharedFileList (225 - 225) <7980A0D2-0734-3B92-9FA1-9B46ED0092FA> /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/SharedFileList.framework/Versions/A/SharedFileList
+       0x19a3a3000 -        0x19a3a9fff  libapp_launch_measurement.dylib (17) <98B63547-6AA5-3BDB-A0A0-3E3CBCE3F963> /usr/lib/libapp_launch_measurement.dylib
+       0x19a3aa000 -        0x19a3f3fff  com.apple.CoreAutoLayout (1.0 - 32) <7176BC5E-A893-3F96-ACFB-945CC0310571> /System/Library/PrivateFrameworks/CoreAutoLayout.framework/Versions/A/CoreAutoLayout
+       0x19a3f4000 -        0x19a4ddfff  libxml2.2.dylib (37.18) <49214D58-E8A0-3132-8CE2-B03279C543EA> /usr/lib/libxml2.2.dylib
+       0x19bd01000 -        0x19bd2bffb  libsystem_containermanager.dylib (582.140.2) <230DEE13-0738-3710-A305-2D87D2522E52> /usr/lib/system/libsystem_containermanager.dylib
+       0x19bd2c000 -        0x19bd43fff  com.apple.IOSurface (352.50.1 - 352.50.1) <3D9A5F98-65F0-3746-A35D-B7C8F3889906> /System/Library/Frameworks/IOSurface.framework/Versions/A/IOSurface
+       0x19ccc5000 -        0x19ccc9fff  libsystem_configuration.dylib (1300.120.2) <4F21FA09-0224-337E-9843-10109C019B1E> /usr/lib/system/libsystem_configuration.dylib
+       0x19ccca000 -        0x19cccffff  libsystem_sandbox.dylib (2190.140.13) <DA843F8C-6155-3B7C-99B0-DEB74CF9F109> /usr/lib/system/libsystem_sandbox.dylib
+       0x19ccd2000 -        0x19ccd5ffb  com.apple.AppleSystemInfo (3.1.5 - 3.1.5) <A7B727FA-7CE7-3808-B18F-58D5A852BC0B> /System/Library/PrivateFrameworks/AppleSystemInfo.framework/Versions/A/AppleSystemInfo
+       0x19ccd6000 -        0x19ccd7fff  liblangid.dylib (138) <66B29B5E-264D-3FE3-A412-EF2A1EA23CC2> /usr/lib/liblangid.dylib
+       0x19ccd8000 -        0x19cdfafff  com.apple.CoreNLP (1.0 - 313) <82FE6CCD-420D-331F-8BFE-C9E70C3BF4D3> /System/Library/PrivateFrameworks/CoreNLP.framework/Versions/A/CoreNLP
+       0x19cdfb000 -        0x19ce00fff  com.apple.LinguisticData (1.0 - 483.10) <FBAA8093-8115-3A12-92E0-6DCC3BB5A681> /System/Library/PrivateFrameworks/LinguisticData.framework/Versions/A/LinguisticData
+       0x19ce01000 -        0x19d6d4fef  libBNNS.dylib (830.120.10) <DE6D980B-63E1-3ABE-8C21-BD50D7FA561D> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libBNNS.dylib
+       0x19d6d5000 -        0x19d7c5f87  libvDSP.dylib (1043.120.8) <DA5D4B32-1C3E-300F-9EA3-02D2D35FC4BD> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libvDSP.dylib
+       0x19d7c6000 -        0x19d7f9fff  com.apple.CoreEmoji (1.0 - 200.401) <54F6C19A-29F7-3E9A-98E1-FB2190343AD3> /System/Library/PrivateFrameworks/CoreEmoji.framework/Versions/A/CoreEmoji
+       0x19d7fa000 -        0x19d809ff7  com.apple.IOMobileFramebuffer (343.0.0 - 343.0.0) <6F69AA2F-1783-3BA2-BA44-D12B8144C534> /System/Library/PrivateFrameworks/IOMobileFramebuffer.framework/Versions/A/IOMobileFramebuffer
+       0x19da2c000 -        0x19dab9fff  com.apple.securityfoundation (6.0 - 55283) <4C3BFFA3-58B4-308B-963B-9999A5025166> /System/Library/Frameworks/SecurityFoundation.framework/Versions/A/SecurityFoundation
+       0x19daba000 -        0x19dae1fff  com.apple.coreservices.BackgroundTaskManagement (1.0 - 104) <BD4F4313-D6C3-3490-B52B-C0BB8FAB3583> /System/Library/PrivateFrameworks/BackgroundTaskManagement.framework/Versions/A/BackgroundTaskManagement
+       0x19daed000 -        0x19daeffff  libquarantine.dylib (172.140.2) <1F514E6F-7D94-356E-A5DC-6E8DCDD40846> /usr/lib/system/libquarantine.dylib
+       0x19daf0000 -        0x19dafbfff  libCheckFix.dylib (32) <66CA2CDD-A818-3843-B62A-EFEA159F6B88> /usr/lib/libCheckFix.dylib
+       0x19dafc000 -        0x19db13fff  libcoretls.dylib (186) <B87D532B-B785-3D43-A825-A36611297431> /usr/lib/libcoretls.dylib
+       0x19db14000 -        0x19db25ffb  libbsm.0.dylib (89) <D049EEAA-BF5A-3390-BD20-CA48D067D628> /usr/lib/libbsm.0.dylib
+       0x19db26000 -        0x19db81fff  libmecab.dylib (1062.400.200) <D05BCA65-E409-338C-82AC-79F4D389D006> /usr/lib/libmecab.dylib
+       0x19db82000 -        0x19db84ffb  libgermantok.dylib (29) <C896ECD0-D60F-371C-8EF0-CD4AF07028FA> /usr/lib/libgermantok.dylib
+       0x19db85000 -        0x19db99fff  libLinearAlgebra.dylib (1447.120.2) <40AE047A-25AD-3044-8B0C-E89BA59F31AB> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libLinearAlgebra.dylib
+       0x19e1d3000 -        0x19e296fdf  com.apple.AppleFSCompression (163.140.2 - 1.0) <F0DBABE8-C60B-3809-BD9C-C5756E745024> /System/Library/PrivateFrameworks/AppleFSCompression.framework/Versions/A/AppleFSCompression
+       0x19e297000 -        0x19e2a3ffb  libbz2.1.0.dylib (45) <AE9CAD30-1B40-3682-870D-8497FB043D8B> /usr/lib/libbz2.1.0.dylib
+       0x19e2a4000 -        0x19e2a9fff  libsystem_coreservices.dylib (152.5.3) <CF38F1DD-9C1B-34D8-8C4D-DC5899486CD1> /usr/lib/system/libsystem_coreservices.dylib
+       0x19e2aa000 -        0x19e2dbfff  com.apple.CoreServices.OSServices (1141.1 - 1141.1) <29A26974-940B-3A01-906F-A01C4FDCA85C> /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/OSServices.framework/Versions/A/OSServices
+       0x19e5c3000 -        0x19e5d1fff  libz.1.dylib (91.40.4) <590BA915-A4A0-34C4-92B5-7ED2890BC505> /usr/lib/libz.1.dylib
+       0x19e5d2000 -        0x19e608ff3  libsystem_m.dylib (3252.100.9) <0BE2E009-9F7F-331D-B4AC-F39136591F6F> /usr/lib/system/libsystem_m.dylib
+       0x19e609000 -        0x19e60cfff  libcharset.1.dylib (102) <56C33416-C658-3BA4-9210-3D463DFDC945> /usr/lib/libcharset.1.dylib
+       0x19e60d000 -        0x19e614ffb  libmacho.dylib (1010.6) <BB441E41-3804-3949-B620-0B29D7975490> /usr/lib/system/libmacho.dylib
+       0x19e615000 -        0x19e634fff  libkxld.dylib (10063.141.2) <DC5D8B64-7CA8-3DBC-8563-94CE1D5581BD> /usr/lib/system/libkxld.dylib
+       0x19e635000 -        0x19e642ff7  libcommonCrypto.dylib (600028.100.1) <B0A2DDA7-420D-3DDE-9FE2-3AFDD2188F14> /usr/lib/system/libcommonCrypto.dylib
+       0x19e643000 -        0x19e64efff  libunwind.dylib (1700.242) <40A5125B-1225-337B-9D1A-968356D29580> /usr/lib/system/libunwind.dylib
+       0x19e64f000 -        0x19e656fff  liboah.dylib (318.9) <749BB71D-B6F2-3C9D-A96D-65D22F7A42B3> /usr/lib/liboah.dylib
+       0x19e657000 -        0x19e660fff  libcopyfile.dylib (196.120.5) <3F3A181E-C6AB-3F09-BC74-37B8AC2BBE57> /usr/lib/system/libcopyfile.dylib
+       0x19e661000 -        0x19e664fff  libcompiler_rt.dylib (103.2) <D133BCC9-EFB7-3C69-83D2-A33BB6AFA430> /usr/lib/system/libcompiler_rt.dylib
+       0x19e665000 -        0x19e669ffb  libsystem_collections.dylib (1592.100.35) <E08997D8-CC79-3A51-A3E0-B7706A78CC50> /usr/lib/system/libsystem_collections.dylib
+       0x19e66a000 -        0x19e66dffb  libsystem_secinit.dylib (147.140.2) <1F043FF2-1603-32F0-A8FB-DC6CBB118581> /usr/lib/system/libsystem_secinit.dylib
+       0x19e66e000 -        0x19e670ffb  libremovefile.dylib (70.100.4) <01FAC88B-53F2-36C6-91EE-1EC62AC11CC8> /usr/lib/system/libremovefile.dylib
+       0x19e671000 -        0x19e671ffb  libkeymgr.dylib (31) <59B09DF8-56B7-3FAC-94D3-CC946797E98E> /usr/lib/system/libkeymgr.dylib
+       0x19e672000 -        0x19e67afff  libsystem_dnssd.dylib (2200.140.11) <4E11F9C6-8BD5-380C-A46F-7AB5DD6E91B6> /usr/lib/system/libsystem_dnssd.dylib
+       0x19e67b000 -        0x19e680fff  libcache.dylib (93) <291EEBA0-190B-30E0-A7FF-1ED0CA3505B4> /usr/lib/system/libcache.dylib
+       0x19e681000 -        0x19e682fff  libSystem.B.dylib (1345.120.2) <2C0809B3-B3E0-3921-BB57-569E6984EC1A> /usr/lib/libSystem.B.dylib
+       0x19e683000 -        0x19e686fff  libfakelink.dylib (5) <6ED86900-759A-3C75-ACEB-CFBA5E319A72> /usr/lib/libfakelink.dylib
+       0x19e687000 -        0x19e687ffb  com.apple.SoftLinking (1.0 - 47) <6B5FD217-7903-353F-9887-6D0D50A28F2F> /System/Library/PrivateFrameworks/SoftLinking.framework/Versions/A/SoftLinking
+       0x19e688000 -        0x19e6bdff3  libpcap.A.dylib (131) <356BCCED-4526-32B4-B92F-B4317AA95A6B> /usr/lib/libpcap.A.dylib
+       0x19e6be000 -        0x19e6c4ff7  libiconv.2.dylib (102) <132D5CDF-9E1F-3595-A92D-22C4B22F7A92> /usr/lib/libiconv.2.dylib
+       0x19e6c5000 -        0x19e6d6fff  libcmph.dylib (8) <DF19D857-B33F-3D8D-8C65-7FA21FFFDCD7> /usr/lib/libcmph.dylib
+       0x19e6d7000 -        0x19e75ffff  libarchive.2.dylib (131.140.2) <D412275B-040D-32F6-BB47-120D1CE9595E> /usr/lib/libarchive.2.dylib
+       0x19e760000 -        0x19e7d6ff3  com.apple.SearchKit (1.4.1 - 1.4.1) <1B18EE05-38BB-33C3-90D3-86EAA7F709AD> /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/SearchKit.framework/Versions/A/SearchKit
+       0x19e7d7000 -        0x19e7d8ff7  libThaiTokenizer.dylib (15) <56C75CC1-7EBA-3FF6-81F2-8FC9E932DF09> /usr/lib/libThaiTokenizer.dylib
+       0x19e7d9000 -        0x19e7ffff7  com.apple.applesauce (1.0 - 16.60.1) <AFCCF574-5DE1-347E-8AE6-E34D527B0DB6> /System/Library/PrivateFrameworks/AppleSauce.framework/Versions/A/AppleSauce
+       0x19e800000 -        0x19e81affb  libapple_nghttp2.dylib (20.120.2) <7D3364DD-5489-39DE-AA71-91A03E67FFF3> /usr/lib/libapple_nghttp2.dylib
+       0x19e81b000 -        0x19e82dff3  libSparseBLAS.dylib (1447.120.2) <1FEAAF44-337D-380E-9919-FED202CB1D9B> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libSparseBLAS.dylib
+       0x19e830000 -        0x19e835fff  libpam.2.dylib (33) <6FA86132-1E46-38DE-98C9-F7011B2662BE> /usr/lib/libpam.2.dylib
+       0x19e836000 -        0x19e905ff7  libcompression.dylib (169.100.2) <10B32CF8-FB85-3414-AC13-FCF02C0D1AE0> /usr/lib/libcompression.dylib
+       0x19e906000 -        0x19e90affb  libQuadrature.dylib (7) <7F24A040-0576-36C8-8A6B-1BBFC44BE38E> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libQuadrature.dylib
+       0x19e90b000 -        0x19fa85fcf  libLAPACK.dylib (1447.120.2) <9CBFAFCE-10E6-3A43-BA8F-92C684591DC2> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libLAPACK.dylib
+       0x19fa86000 -        0x19fadcfff  com.apple.DictionaryServices (1.2 - 355) <7CEC6B2A-5D93-3E70-9068-37C7EBF3DD0E> /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/DictionaryServices.framework/Versions/A/DictionaryServices
+       0x19fadd000 -        0x19fafbff7  liblzma.5.dylib (20) <1744B75A-D9F2-3E3A-9E46-B888FF8095FC> /usr/lib/liblzma.5.dylib
+       0x19fafc000 -        0x19fafdffb  libcoretls_cfhelpers.dylib (186) <684E9481-84CB-3BD2-B7EA-0E3BB488616B> /usr/lib/libcoretls_cfhelpers.dylib
+       0x19fafe000 -        0x19fb6dff7  com.apple.APFS (2236.141.1 - 2236.141.1) <66F4F5C9-C65B-3059-8373-F015BA369F08> /System/Library/PrivateFrameworks/APFS.framework/Versions/A/APFS
+       0x19fb6e000 -        0x19fb7cffb  libxar.1.dylib (498) <9CFA3E69-001E-3507-94C6-06D58E0472B9> /usr/lib/libxar.1.dylib
+       0x19fb7d000 -        0x19fb80ff7  libutil.dylib (72) <C89FF98C-5D68-3365-84DB-33144DCC9A3C> /usr/lib/libutil.dylib
+       0x19fb81000 -        0x19fbacff3  libxslt.1.dylib (20.3) <429FF7C2-BFC0-3173-AF3A-60818BB1C4D7> /usr/lib/libxslt.1.dylib
+       0x19fbb5000 -        0x19fc30fff  libvMisc.dylib (1043.120.8) <A40032F8-D882-332B-975A-2284391F52D7> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libvMisc.dylib
+       0x19ff5c000 -        0x19ff66fff  libheimdal-asn1.dylib (689.140.1) <B2C1B5BC-C9B8-39DD-98D6-4BA325146C65> /usr/lib/libheimdal-asn1.dylib
+       0x1a16cf000 -        0x1a1c2cfff  libswiftCore.dylib (5.10 - 5.10.0.12.10) <7DB1818B-1D9A-328E-821B-21A33442746A> /usr/lib/swift/libswiftCore.dylib
+       0x1a3c13000 -        0x1a3d50fff  com.apple.combine (1.0 - 311) <62DC1874-9F4A-38C8-A145-B168B2804105> /System/Library/Frameworks/Combine.framework/Versions/A/Combine
+       0x1a5cee000 -        0x1a5ceefff  com.apple.Accelerate.vecLib (3.11 - vecLib 3.11) <EA7D09A7-FE99-33FF-85FB-063097801D7F> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/vecLib
+       0x1a5d17000 -        0x1a5d17fff  com.apple.CoreServices (1226 - 1226) <A41750FF-C2C6-3490-A3F2-32D033878945> /System/Library/Frameworks/CoreServices.framework/Versions/A/CoreServices
+       0x1a5fdc000 -        0x1a5fdcfff  com.apple.Accelerate (1.11 - Accelerate 1.11) <375C2A3C-1105-3576-92FF-7710C719D5A7> /System/Library/Frameworks/Accelerate.framework/Versions/A/Accelerate
+       0x1a7387000 -        0x1a739eff7  libswiftDispatch.dylib (41) <56E6BE07-3E0E-33C0-9E47-09E0525E79D2> /usr/lib/swift/libswiftDispatch.dylib
+       0x1a9c02000 -        0x1a9c05ff5  libswiftObjectiveC.dylib (8) <B4DD2799-4E43-3EFA-965D-F31DDEC54EA9> /usr/lib/swift/libswiftObjectiveC.dylib
+       0x1a9c06000 -        0x1a9c20fff  libswiftos.dylib (1049.100.4) <8457F3FB-87E1-3A93-979A-30665DC5580B> /usr/lib/swift/libswiftos.dylib
+       0x1b4e66000 -        0x1b4e6fff3  libswiftDarwin.dylib (5.10 - 5.10.0.12.10) <967216B4-DF7C-3033-82BA-593BB479944D> /usr/lib/swift/libswiftDarwin.dylib
+       0x1b73c7000 -        0x1b73ebfff  libmis.dylib (386.140.3) <2D163711-9D96-30E1-BBEF-118D9F6BB8FD> /usr/lib/libmis.dylib
+       0x1b73f9000 -        0x1b73fffff  libswiftCoreFoundation.dylib (2401) <F13802E4-2736-3F44-9B7B-A9B1E425FECC> /usr/lib/swift/libswiftCoreFoundation.dylib
+       0x1b740b000 -        0x1b7442ff2  libswiftXPC.dylib (36.100.8) <E8EB03C8-52ED-35F1-829A-FA6EA080308A> /usr/lib/swift/libswiftXPC.dylib
+       0x1b7444000 -        0x1b7444fff  libswiftIOKit.dylib (1) <FBC27EF3-B20F-37CE-86D3-8D0488DF3285> /usr/lib/swift/libswiftIOKit.dylib
+       0x1c7aff000 -        0x1c7b06fff  com.apple.MobileSystemServices (1.0 - 1) <B6C65CC8-BA6C-308A-98A5-893235CDF5EC> /System/Library/PrivateFrameworks/MobileSystemServices.framework/Versions/A/MobileSystemServices
+       0x1e5ba5000 -        0x1e5ba8fff  com.apple.ConfigProfileHelper (16.6 - 1672) <0985A929-798C-30AC-A2FD-ACB5650DAFDB> /System/Library/PrivateFrameworks/ConfigProfileHelper.framework/Versions/A/ConfigProfileHelper
+       0x22a748000 -        0x22a75bfff  com.apple.private.AppleMobileFileIntegrity-fmk (1.0 - 1) <588D3BE0-123D-3AD1-B151-025D9C579BA2> /System/Library/PrivateFrameworks/AppleMobileFileIntegrity.framework/Versions/A/AppleMobileFileIntegrity
+       0x22cfb0000 -        0x22d10ffff  com.apple.CollectionsInternal (1.1.0 - 22) <09432BEB-13DC-3DFC-A7B8-4A1587F9926E> /System/Library/PrivateFrameworks/CollectionsInternal.framework/Versions/A/CollectionsInternal
+       0x23a9f3000 -        0x23aad2fff  com.apple.InstalledContentLibrary (1.0 - 1.0) <2C2D3F03-0145-34CA-9742-13382CCAB635> /System/Library/PrivateFrameworks/InstalledContentLibrary.framework/Versions/A/InstalledContentLibrary
+       0x23c8a0000 -        0x23ce38fff  com.apple.MIL (3304.6 - 3304.6.1) <634DE429-8FA6-313D-AEAA-C558B353540C> /System/Library/PrivateFrameworks/MIL.framework/Versions/A/MIL
+       0x23e151000 -        0x23e19cfff  com.apple.MessageSecurity (1.0 - 101.100.4) <68E07A7B-6D13-33B5-B605-8681A9C45A0A> /System/Library/PrivateFrameworks/MessageSecurity.framework/Versions/A/MessageSecurity
+       0x24325f000 -        0x243267ff7  com.apple.ReflectionInternal (1.0.0 - 22) <35B21886-14A6-34D9-9DBF-A4E63EE4150B> /System/Library/PrivateFrameworks/ReflectionInternal.framework/Versions/A/ReflectionInternal
+       0x2437f1000 -        0x243808fff  com.apple.RuntimeInternal (1.0.0 - 22) <7F8505B8-CDCE-3A9E-91F3-A31BCBC796FE> /System/Library/PrivateFrameworks/RuntimeInternal.framework/Versions/A/RuntimeInternal
+       0x257c35000 -        0x257c40fff  libCoreEntitlements.dylib (53.100.4) <8497AF9C-BA0F-3066-B2FB-2F36B3DD3FFF> /usr/lib/libCoreEntitlements.dylib
+       0x257e23000 -        0x257e2efff  libTLE.dylib (53.100.4) <61C70ADF-1D43-37B6-8098-6FC042F10D4D> /usr/lib/libTLE.dylib
+       0x259228000 -        0x259293ff7  libswift_Concurrency.dylib (5.10 - 5.10.0.12.10) <304344AE-67EB-3702-B525-14332583111E> /usr/lib/swift/libswift_Concurrency.dylib
+       0x2592d3000 -        0x25937bff7  libswift_RegexParser.dylib (5.10 - 5.10.0.12.10) <A0AED893-ADF6-3CD2-B00D-2C7B5C7D05E5> /usr/lib/swift/libswift_RegexParser.dylib
+       0x25937c000 -        0x25941eff7  libswift_StringProcessing.dylib (5.10 - 5.10.0.12.10) <50F95C25-911C-3776-99D1-FCD01298B764> /usr/lib/swift/libswift_StringProcessing.dylib
+       0x259575000 -        0x259578fff  libsystem_darwindirectory.dylib (86.0.2) <815D7896-79A3-36C4-8008-DD672DA625C5> /usr/lib/system/libsystem_darwindirectory.dylib
+       0x259579000 -        0x25957cfff  libsystem_eligibility.dylib (47.140.3) <ADF6A9D2-C5C3-3A9C-9302-4618D9DFAD21> /usr/lib/system/libsystem_eligibility.dylib
+       0x25957d000 -        0x259580ffb  libsystem_sanitizers.dylib (8) <6BBDFCBC-D608-3318-BC22-2172E5258046> /usr/lib/system/libsystem_sanitizers.dylib
