@@ -276,3 +276,32 @@ noise-dominated (one new run at 3.215) — alternating pairs under calm load
 is the reliable local protocol. Suite: 689 pass / 2 documented flakes
 (`catchup_wait_bounded_by_half_fd`, `maybe_auto_flush_physical_cf_is_not_linear_in_keys`
 — the latter load-sensitive). Counter exposed as `ReadProbeSnap.blocks_crc_skipped`.
+
+## prefix_scan: index-heap borrowed-head merge (core merge.rs, 2026-09-01 night)
+
+Old merge: `BinaryHeap<HeapItem>` sifted an owned `{InternalKey, Bytes,
+usize}` struct through every level per row (push+pop each ~log2(streams)
+copies of two refcounted handles + drop glue), on top of the per-advance
+owned handoff from each stream. Rewrite: the heap now sifts **plain
+`usize` stream indices**; owned head rows sit in a side `heads` vec and
+move only when emitted. Ordering replicates `InternalKey` Ord exactly
+(user_key asc, newest seq first, kind desc); `heapify` once at start,
+sift-up on refill. Public API unchanged (merge 27 + scan 35 tests green,
+incl. `multi_level_large_scan_matches_model`; suite 689 pass + the two
+documented flakes).
+
+Local 25 M/256 MiB prefix_scan A/B, alternating N C ×3 (calm load 5.5–6.4;
+`scanheap-*.log`, SCRATCH): pedra medians **new 122.38 / 124.66 / 116.73 µs
+vs ctl (d8125f8) 139.33 / 136.69 / 137.14 µs → −12.0 % mean, clean 3/3**
+(rocks 199–216 µs tight; local ratio ≈ 1.44–1.58 → ≈ 1.65–1.74).
+
+Guest v40 (bitmap) 6-run series same night, gate load 15–18 (worst window
+yet; v37c applies to point legs): get_hit median ratio **0.923** (pedra
+45.9 vs rocks 42.8 µs), get_loop 0.958, multi_get 0.953, prefix_scan
+**0.784** (pedra 461.3 vs rocks 356.8 µs, tight 0.759–0.817 — scan is
+compute-bound and code-responsive). Bitmap verdict on the guest: ~−2 %
+get_hit — expected: 1 GiB payload budget / 3.5 GB data ⇒ ~29 % resident
+share of a ~1–2 % CRC slice of the 46 µs guest op; the −9.2 % local win
+is the fully-resident (8 GiB) regime. Keep: correct, fail-closed, free.
+probe_miss p50 1.9 µs = L2-class signature on all runs. Write path
+unchanged (hydrate 51.8 s, settle 1.1 s).

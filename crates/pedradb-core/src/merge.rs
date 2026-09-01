@@ -247,33 +247,18 @@ pub fn visible_range_limited(
     out
 }
 
-/// Heap entry for multi-way merge of sorted internal-key streams (min-heap by [`InternalKey`]).
-struct HeapItem {
-    key: InternalKey,
-    value: Bytes,
-    stream: usize,
-}
-
-impl PartialEq for HeapItem {
-    fn eq(&self, other: &Self) -> bool {
-        self.key == other.key
-    }
-}
-impl Eq for HeapItem {}
-impl PartialOrd for HeapItem {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-impl Ord for HeapItem {
-    fn cmp(&self, other: &Self) -> Ordering {
-        // BinaryHeap is max-heap; reverse so smallest InternalKey is popped first.
-        other.key.cmp(&self.key)
-    }
-}
-
 /// One sorted point-key stream (RFC-0033: pulled lazily so `limit` cuts I/O).
 pub type LayerStream<'a> = Box<dyn Iterator<Item = (InternalKey, Bytes)> + 'a>;
+
+/// True when head row `a` orders before `b` in [`InternalKey`] order
+/// (user_key asc, newest sequence first). Exhausted heads order last.
+fn head_before(a: &Option<(InternalKey, Bytes)>, b: &Option<(InternalKey, Bytes)>) -> bool {
+    match (a, b) {
+        (Some((ka, _)), Some((kb, _))) => ka.cmp(kb) == Ordering::Less,
+        (Some(_), None) => true,
+        (None, _) => false,
+    }
+}
 
 /// Streaming merge of **pre-sorted** internal entry streams into visible KVs.
 ///
@@ -284,7 +269,13 @@ pub type LayerStream<'a> = Box<dyn Iterator<Item = (InternalKey, Bytes)> + 'a>;
 /// (RFC-0033 P0.3). Range tombstones must be supplied up front so a deleted
 /// prefix cannot hide later live keys (G2).
 pub struct StreamingVisibleIter<'a> {
-    heap: BinaryHeap<HeapItem>,
+    /// Min-heap of **stream indices** ordered by each stream's head row in
+    /// `heads`. Sifting moves plain `usize`s; the owned head rows never
+    /// move until they are emitted (the old `BinaryHeap<HeapItem>` copied
+    /// key+value handles through every sift level).
+    heap: Vec<usize>,
+    /// Head row per stream (`None` = exhausted; never re-inserted).
+    heads: Vec<Option<(InternalKey, Bytes)>>,
     streams: Vec<LayerStream<'a>>,
     snapshot: SequenceNumber,
     range_dels: Vec<RangeTombstone>,
@@ -349,18 +340,19 @@ impl<'a> StreamingVisibleIter<'a> {
         end: Bound<&[u8]>,
         limit: Option<usize>,
     ) -> Self {
-        let mut heap = BinaryHeap::new();
+        let mut heap = Vec::new();
+        let mut heads = Vec::with_capacity(streams.len());
         for (i, it) in streams.iter_mut().enumerate() {
-            if let Some((k, v)) = it.next() {
-                heap.push(HeapItem {
-                    key: k,
-                    value: v,
-                    stream: i,
-                });
+            let head = it.next();
+            heads.push(head);
+            if heads[i].is_some() {
+                heap.push(i);
             }
         }
-        Self {
+        // heap built in registration order with all Some heads: heapify once.
+        let mut iter = Self {
             heap,
+            heads,
             streams,
             snapshot,
             range_dels,
@@ -369,7 +361,69 @@ impl<'a> StreamingVisibleIter<'a> {
             limit,
             emitted: 0,
             skip_user: None,
+        };
+        iter.heapify();
+        iter
+    }
+
+    /// Restore the min-heap invariant over `heap` (bottom-up heapify).
+    fn heapify(&mut self) {
+        for start in (0..self.heap.len() / 2).rev() {
+            self.sift_down(start);
         }
+    }
+
+    fn head_lt(&self, a: usize, b: usize) -> bool {
+        head_before(&self.heads[a], &self.heads[b])
+    }
+
+    fn sift_down(&mut self, mut hole: usize) {
+        let n = self.heap.len();
+        loop {
+            let l = 2 * hole + 1;
+            if l >= n {
+                break;
+            }
+            let r = l + 1;
+            let mut best = l;
+            if r < n && self.head_lt(self.heap[r], self.heap[l]) {
+                best = r;
+            }
+            if self.head_lt(self.heap[best], self.heap[hole]) {
+                self.heap.swap(best, hole);
+                hole = best;
+            } else {
+                break;
+            }
+        }
+    }
+
+    /// Push stream `i` (its head must be `Some`) and sift it up.
+    fn heap_push(&mut self, i: usize) {
+        let mut hole = self.heap.len();
+        self.heap.push(i);
+        while hole > 0 {
+            let parent = (hole - 1) / 2;
+            if self.head_lt(self.heap[hole], self.heap[parent]) {
+                self.heap.swap(hole, parent);
+                hole = parent;
+            } else {
+                break;
+            }
+        }
+    }
+
+    /// Pop the smallest stream index (`None` = all exhausted).
+    fn heap_pop(&mut self) -> Option<usize> {
+        let top = *self.heap.first()?;
+        let last = self.heap.pop();
+        if let Some(last) = last {
+            if !self.heap.is_empty() {
+                self.heap[0] = last;
+                self.sift_down(0);
+            }
+        }
+        Some(top)
     }
 
     fn in_range(&self, user_key: &[u8]) -> bool {
@@ -397,17 +451,19 @@ impl<'a> StreamingVisibleIter<'a> {
     }
 
     fn next_window_kv_inner(&mut self) -> Option<WindowKv> {
-        while let Some(item) = self.heap.pop() {
-            if let Some((k, v)) = self.streams[item.stream].next() {
-                self.heap.push(HeapItem {
-                    key: k,
-                    value: v,
-                    stream: item.stream,
-                });
+        while let Some(si) = self.heap_pop() {
+            // Refill this stream's head before deciding on the popped row so
+            // the successor competes with the other streams immediately.
+            let head = self.streams[si].next();
+            let cur = self.heads[si].take();
+            self.heads[si] = head;
+            if self.heads[si].is_some() {
+                self.heap_push(si);
             }
 
-            let ikey = item.key;
-            let value = item.value;
+            let Some((ikey, value)) = cur else {
+                continue;
+            };
             if ikey.sequence > self.snapshot {
                 continue;
             }
