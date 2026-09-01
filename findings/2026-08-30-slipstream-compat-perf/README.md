@@ -1100,6 +1100,51 @@ rounds. On-disk after settle identical (1.24 GiB). Guest arbitration
 next measurement; expected effect there: settle compact_ms −30–40 %
 (one decode pass fewer per rewritten byte), hydrate −10–25 %.
 
+## Guest runs #20/#21 (read-back removal, 25M) — arbitration: NET LOSS; the read-back was an accidental page-cache warmer
+
+Two identical runs (`ba2d73e` = v21p + caller-side read-back removal,
+nothing else). Raw serial: `run20-readback-25m.txt`,
+`run21-readback-25m.txt`. Every leg reproduced within a few percent
+(ratio = rocks/pedra, same convention as the #19 table):
+
+| leg (25M)        | rocks default | #19 (v21p) | #20      | #21      | #20/#21 ratio |
+|------------------|---------------|------------|----------|----------|---------------|
+| hydrate          | 25.3 s        | 148.9 s    | 129.8 s  | 130.0 s  | 0.19×         |
+| settle           | 8.3 s         | 88.2 s     | 128.3 s  | 130.3 s  | 0.065×        |
+| probe_hit p50    | 45.4 µs       | 52.6 µs    | 51.1 µs  | 56.5 µs  | 0.80–0.89×    |
+| probe_miss p50   | rocks-class   | 2.2 µs     | 2.3 µs   | 2.7 µs   | ~1×           |
+| get_hit          | 38.59 µs      | 42.4 µs    | 54.6 µs  | 53.1 µs  | 0.71–0.73×    |
+| prefix_scan      | 305.6 µs      | 437.6 µs   | 947.0 µs | 953.8 µs | 0.32×         |
+| lookup get_loop  | 3.38 ms       | 4.593 ms   | 4.833 ms | 5.554 ms | 0.61–0.70×    |
+| lookup multi_get | 3.70 ms       | 4.548 ms   | 4.763 ms | 5.497 ms | 0.67–0.78×    |
+| disk after       | 5.24 GiB      | 5.15 GiB   | 5.15 GiB | 5.15 GiB | smaller       |
+
+- hydrate −12.7 % (148.9 → ~130 s, both runs) — the one real win, same
+  direction as the local 6M A/B.
+- settle +47 % (88.2 → ~129 s, both runs) **with less entry debt in
+  #20** (L2 entry 3.48 GiB vs #19's L0+L1+L2 5.1 GiB): per-GiB pushdown
+  roughly halved. #21 entered with more debt (L0=8/1.4 GiB + L1/L2/L3)
+  and landed on the same 128–130 s and the identical final layout
+  (L1=2, L2=14/2.57 GiB, L3=18/2.91 GiB).
+- Every read leg regressed 15–118 %; prefix_scan 2.2×.
+
+Mechanism (hypothesis, consistent with all observations): the removed
+caller-side read-back (`open_on` over every freshly written SST) was
+doubling as a read-ahead that pushed each fresh chunk through the
+guest's page cache (3.9 GiB RAM). Without it, settle's compaction reads
+its inputs cold and the read legs start on a cold block/page cache. On
+the Mac (6M, big RAM, fast NVMe) the same change measured −26 %/−26 % —
+cache warming was worthless there and decode CPU dominated. The guest
+inverts that trade.
+
+Decision: `ba2d73e` stays (correctness-neutral, wins on big-RAM hosts),
+but the arbitration image line builds on the v21p read-back until an
+explicit warm (`fadvise(WILLNEED)` over fresh chunks / settle inputs)
+replaces the accidental one. Next guest config (v22) = v21p read-back
++ RFC-0159 P0.2 bulk bottom-level install: bulk chunks are written once
+and never re-laddered, so the settle pushdown disappears by construction
+and hydrate stops paying the L0→L1 ladder tax.
+
 ## Guest prefix_scan gap: local attribution (macOS `sample`, 6M)
 
 Where does a scan op actually go? Local 6M pedra-only prefix_scan,
