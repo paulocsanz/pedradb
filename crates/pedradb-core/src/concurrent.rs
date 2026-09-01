@@ -3730,6 +3730,73 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// RFC-0159 P0.4 (core half): a bulk-ingested store and its ladder
+    /// twin (identical batches, `bulk_route_enabled=false`) serve the
+    /// identical keyspace after settle — the fast path changes layout,
+    /// never data.
+    #[test]
+    fn bulk_twin_matches_ladder_after_settle() {
+        let dir_bulk = temp_dir();
+        let dir_ladder = temp_dir();
+        let mk = |dir: &std::path::PathBuf, bulk: bool| {
+            let db = ConcurrentDb::open_with(
+                dir,
+                OpenOptions {
+                    sync: false,
+                    ..OpenOptions::default()
+                },
+            )
+            .unwrap();
+            if !bulk {
+                db.with_write(|d| d.bulk_route_enabled = false);
+            }
+            db
+        };
+        let bulk = mk(&dir_bulk, true);
+        let ladder = mk(&dir_ladder, false);
+
+        let v = vec![b'v'; 96];
+        let mut keys = Vec::new();
+        for b in 0..24u32 {
+            let mut batch = Vec::new();
+            for j in 0..32u32 {
+                let k = format!("data\0{b:04}-{j:04}").into_bytes();
+                batch.push(BatchOp::put(k.clone(), v.clone()));
+                keys.push(k);
+            }
+            // Mid-stream descent in another family must not disturb the
+            // data family's latch; a descent IN the data family kills it
+            // and both twins still agree.
+            if b == 12 {
+                let back = format!("data\0{b:04}-{b:04}").into_bytes();
+                batch.push(BatchOp::put(back, v.clone()));
+            }
+            batch.push(BatchOp::put(b"meta\0cursor".to_vec(), b"c".to_vec()));
+            bulk.apply_batch_vec(batch.clone()).unwrap();
+            ladder.apply_batch_vec(batch).unwrap();
+        }
+        bulk.flush().unwrap();
+        bulk.compact().unwrap();
+        ladder.flush().unwrap();
+        ladder.compact().unwrap();
+
+        for k in &keys {
+            assert_eq!(
+                bulk.get(k).as_deref(),
+                ladder.get(k).as_deref(),
+                "twin disagree on {}",
+                String::from_utf8_lossy(k)
+            );
+            assert_eq!(bulk.get(k).as_deref(), Some(&v[..]));
+        }
+        assert_eq!(
+            bulk.get(b"meta\0cursor").as_deref(),
+            ladder.get(b"meta\0cursor").as_deref()
+        );
+        let _ = fs::remove_dir_all(&dir_bulk);
+        let _ = fs::remove_dir_all(&dir_ladder);
+    }
+
     /// RFC-0159 P0.2 on the host-worker funnel: deferred auto-flush stages
     /// an imm; [`ConcurrentDb::drain_imm_once`] must install the latched
     /// ascending span at the bottom level.

@@ -82,10 +82,15 @@ sorted-ingest-architecture.md` (+ `run19-v21p-guest-25m.txt`).
 - [ ] **P0.4** End-to-end regression set: sorted ingest then
   gets/scans/probes equal the ladder path byte-for-byte; out-of-order
   mid-stream falls back and stays correct; settle no-ops on clean levels. —
-  status: `todo`
-- [ ] **P0.5** Measure: local 6M A/B, then guest run #20 at 25M — hydrate,
+  status: `part-done` (core half shipped 2026-09-01:
+  `concurrent::tests::bulk_twin_matches_ladder_after_settle` — bulk vs
+  ladder twin over identical batches incl. a mid-stream descent,
+  equal after settle; compat/E2E half pending)
+- [x] **P0.5** Measure: local 6M A/B, then guest run at 25M — hydrate,
   settle, disk peak, read legs vs RocksDB default; verdict recorded in the
-  findings README. — status: `todo`
+  findings README. — status: `done` (local A/B hydrate −39…−45 % /
+  settle −25…−43 %, 22 vs 0 BULKDIAG; guest run #23: settle 2.3 s vs
+  Rocks 8.3 s = 3.61×, hydrate 73.6 s = 0.34×, reads flat, 73 BULKDIAG)
 
 ### P1 — next wave (depends on P0 or clearly deferrable)
 
@@ -118,7 +123,7 @@ sorted-ingest-architecture.md` (+ `run19-v21p-guest-25m.txt`).
 | P0.2 | p0 | Bulk flush-path install at bottom level | done | `db.rs` (`bulk_span_level`, 4 tests) + `concurrent.rs` funnels (3 tests) | 2026-09-01 |
 | P0.3 | p0 | WAL ring for append mode | todo | — | 2026-08-31 |
 | P0.4 | p0 | E2E regression set | todo | — | 2026-08-31 |
-| P0.5 | p0 | Local A/B + guest verdict | in-progress | local 6M A/B done (`9698caf`): hydrate −39…−45 %, settle −25…−43 %, 22 BULKDIAG on-arm / 0 off; guest run #23 in flight | 2026-09-01 |
+| P0.5 | p0 | Local A/B + guest verdict | done | local 6M A/B (`9698caf`): hydrate −39…−45 %, settle −25…−43 %; guest run #23 (25M): settle 84.9→2.3 s = **3.61× vs Rocks 8.3 s**, hydrate 157.0→73.6 s (0.34×), reads flat; 73 BULKDIAG (72 parked + 1 flush) | 2026-09-01 |
 | P1.1 | p1 | Zero-alloc bulk encode | part (caller-side read-back removed) | `db.rs` `table.rs` | 2026-08-31 |
 | P1.2 | p1 | Batched manifest persists | todo | — | 2026-08-31 |
 | P1.3 | p1 | Chunk-size sweep for reads | todo | — | 2026-08-31 |

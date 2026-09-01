@@ -1210,6 +1210,47 @@ Settle is at parity with Rocks locally (13.6 vs ~13 s); hydrate still
 behind (32–34 vs ~21 s — WAL/memtable apply CPU, next target).
 Guest run #23 (25M, v23 image) arbitrates at scale.
 
+## Guest run #23 (v23 = v22 + ConcurrentDb bulk wiring, 25M) — SETTLE CROSSES: 2.3 s vs Rocks 8.3 s (3.6×); hydrate −53 %
+
+Raw serial: `run23-v23-25m.txt`. v23 = v22 + the three `ConcurrentDb`
+install funnels routed through `bulk_span_level` (commit `9698caf`).
+**73 BULKDIAG** across the run (72 `install_parked` during hydrate +
+1 `install_flush` at settle) — the fast path engaged end to end at
+scale, and the ladder pushdown disappeared by construction:
+
+| leg (25M)        | rocks default | #22 (v22) | #23 (v23) | ratio #23 | vs #22   |
+|------------------|---------------|-----------|-----------|-----------|----------|
+| hydrate          | 25.3 s        | 157.0 s   | 73.6 s    | 0.34×     | −53 %    |
+| settle           | 8.3 s         | 84.9 s    | 2.3 s     | **3.61×** | −97 %    |
+| probe_hit p50    | 45.4 µs       | 54.0 µs   | 54.9 µs   | 0.83×     | ~flat    |
+| probe_miss p50   | rocks-class   | 2.3 µs    | 2.9 µs    | ~1×       | ~flat    |
+| get_hit          | 38.59 µs      | 47.4 µs   | 47.0 µs   | 0.82×     | ~flat    |
+| prefix_scan      | 305.6 µs      | 449.0 µs  | 457.1 µs  | 0.67×     | ~flat    |
+| lookup get_loop  | 3.38 ms       | 4.468 ms  | 4.963 ms  | 0.68×     | +11 %    |
+| lookup multi_get | 3.70 ms       | 4.503 ms  | 5.183 ms  | 0.71×     | +15 %    |
+| disk after       | 5.24 GiB      | 5.15 GiB  | 5.15 GiB  | smaller   | same     |
+
+- **Settle is the first write-leg crossing at 25M: 2.3 s vs Rocks'
+  8.3 s (3.61×), with Pedra still fdatasyncing before Ok (G1).** The
+  bulk chunks are written once and never re-laddered, so settle has
+  nothing to push down — its 2.3 s is the final memtable flush plus
+  manifest work.
+- Hydrate halved (157.0 → 73.6 s) but remains 0.34×: the remaining
+  gap is per-op commit CPU (WAL encode + memtable apply + payload
+  copy), not write volume — write-amp during hydrate collapsed with
+  the ladder gone. The bench peer is `sync=false`, so this leg has no
+  per-op fd on either side; the RFC-0159 P1.1 encode-path per-byte
+  cut is the lever.
+- Read legs unchanged within noise (get_hit 47.0 vs 47.4, scan 457 vs
+  449); get_loop/multi_get +11–15 % vs #22 (single-run swing — the
+  documented ±30 % band covers it; layout identical at 5.15 GiB).
+- No failure markers; `BENCH_EXIT_pedradb_diag=0`.
+
+Next: the read legs are now the whole remaining gap at 25M (hydrate
+CPU aside): get_hit 0.82×, prefix_scan 0.67×, lookup 0.68–0.71× —
+same levers as the read-legs queue (payload-pool granularity, block
+layout, compat iterator window).
+
 ## Guest prefix_scan gap: local attribution (macOS `sample`, 6M)
 
 Where does a scan op actually go? Local 6M pedra-only prefix_scan,
