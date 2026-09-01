@@ -906,7 +906,9 @@ where
                 .into_iter()
                 .map(|h| {
                     h.join().unwrap_or_else(|_| {
-                        Err(CoreError::Internal("parallel compaction job panicked".into()))
+                        Err(CoreError::Internal(
+                            "parallel compaction job panicked".into(),
+                        ))
                     })
                 })
                 .collect()
@@ -1601,14 +1603,11 @@ impl<E: Env> Db<E> {
         // installed; the historical no-seam path (tests, generic envs)
         // merges sequentially either way.
         let jobs_k = parallel_jobs_from_env();
-        let seam: Option<Arc<dyn ParallelMerge>> =
-            if parallel_merge_enabled() || jobs_k > 1 {
-                Some(Arc::new(ParallelMergeEnv::new(<E as Clone>::clone(
-                    &env,
-                ))))
-            } else {
-                None
-            };
+        let seam: Option<Arc<dyn ParallelMerge>> = if parallel_merge_enabled() || jobs_k > 1 {
+            Some(Arc::new(ParallelMergeEnv::new(<E as Clone>::clone(&env))))
+        } else {
+            None
+        };
         let mut db = Self::open_with_env_sourced(path, opts, env, Some(source), file_cache)?;
         if let Some(pm) = seam {
             db.set_parallel_merge(pm);
@@ -4300,7 +4299,11 @@ impl<E: Env> Db<E> {
             // is NOT identity (F188 strips an escape byte), so resolved slots
             // must never flow into a raw-keyed load.
             let id = crate::cache::path_id(table.path())
-                ^ if resolve_values { RESOLVED_BLOCK_TAG } else { 0 };
+                ^ if resolve_values {
+                    RESOLVED_BLOCK_TAG
+                } else {
+                    0
+                };
             let db = self;
             let load: Box<
                 dyn FnMut(usize) -> Option<std::sync::Arc<Vec<(InternalKey, Bytes)>>> + '_,
@@ -4895,14 +4898,12 @@ impl<E: Env> Db<E> {
                     family: fam_of(key.as_ref()),
                     key: key.as_ref(),
                 },
-                BatchOp::DeleteRange { start, end } => {
-                    crate::bulk_ingest::BulkOp::DeleteRange {
-                        start_family: fam_of(start.as_ref()),
-                        start: start.as_ref(),
-                        end_family: fam_of(end.as_ref()),
-                        end: end.as_ref(),
-                    }
-                }
+                BatchOp::DeleteRange { start, end } => crate::bulk_ingest::BulkOp::DeleteRange {
+                    start_family: fam_of(start.as_ref()),
+                    start: start.as_ref(),
+                    end_family: fam_of(end.as_ref()),
+                    end: end.as_ref(),
+                },
             })
             .collect();
         let ssts = &self.ssts;
@@ -5493,6 +5494,21 @@ impl<E: Env> Db<E> {
                 cap = Some(n);
             }
         }
+        // RFC-0159 P1.3 sweep knob: clamp the stage threshold for
+        // chunk-size experiments without touching caller buffers
+        // (`PEDRA_STAGE_MAX_BYTES`, e.g. 67108864 for 64 MiB chunks;
+        // 0 / unparseable = unset). A smaller clamp also moves parking
+        // back to whole-memtable staging (host worker) before any
+        // per-CF `take_family` limit can fire on the writer.
+        if let Some(c) = cap {
+            if let Ok(v) = std::env::var("PEDRA_STAGE_MAX_BYTES") {
+                if let Ok(max) = v.parse::<usize>() {
+                    if max > 0 && max < c {
+                        return Some(max);
+                    }
+                }
+            }
+        }
         cap
     }
 
@@ -5905,7 +5921,10 @@ impl<E: Env> Db<E> {
                     let outputs = pm.merge_jobs(specs)?;
                     if let Some(t0) = t0 {
                         let total: usize = outputs.iter().map(Vec::len).sum();
-                        println!("COMPDUR jobs={n} outputs={total} ms={}", t0.elapsed().as_millis());
+                        println!(
+                            "COMPDUR jobs={n} outputs={total} ms={}",
+                            t0.elapsed().as_millis()
+                        );
                     }
                     for (job, tables) in batch.into_iter().zip(outputs) {
                         self.install_prepared_l0_compact(job, tables)?;
@@ -5955,10 +5974,7 @@ impl<E: Env> Db<E> {
                 for cf in families {
                     let view = self.level_view(level, &cf);
                     if view.len() >= 2 && !crate::leveling::is_disjoint(&view) {
-                        target = Some((
-                            level,
-                            view.iter().map(|f| f.idx).collect(),
-                        ));
+                        target = Some((level, view.iter().map(|f| f.idx).collect()));
                         break 'search;
                     }
                 }
@@ -5967,11 +5983,9 @@ impl<E: Env> Db<E> {
                 return Ok(());
             };
             let inputs: Vec<SstTable> = idxs.iter().map(|&i| self.ssts[i].clone()).collect();
-            let Some(job) = self.build_prepared(
-                inputs,
-                level,
-                crate::merge::CompactGcOptions::default(),
-            )? else {
+            let Some(job) =
+                self.build_prepared(inputs, level, crate::merge::CompactGcOptions::default())?
+            else {
                 return Ok(());
             };
             let tables = job.write()?;
@@ -6295,8 +6309,7 @@ impl<E: Env> Db<E> {
                 ) {
                     let slice_tables: Vec<SstTable> =
                         slice.iter().map(|&i| self.ssts[i].clone()).collect();
-                    let slice_bytes: u64 =
-                        slice_tables.iter().map(|t| self.table_bytes(t)).sum();
+                    let slice_bytes: u64 = slice_tables.iter().map(|t| self.table_bytes(t)).sum();
                     let cap = self.l1_target_bytes.saturating_mul(4);
                     if slice_bytes > cap {
                         // Overlapping L1 is too fat for one bounded job:
@@ -6337,9 +6350,7 @@ impl<E: Env> Db<E> {
             let target = crate::leveling::level_target_bytes(level, self.l1_target_bytes);
             for cf in &families {
                 let src_view = self.level_view(level, cf);
-                if src_view.is_empty()
-                    || crate::leveling::total_bytes(&src_view) <= target
-                {
+                if src_view.is_empty() || crate::leveling::total_bytes(&src_view) <= target {
                     continue;
                 }
                 let dst_view = self.level_view(level + 1, cf);
@@ -6351,7 +6362,11 @@ impl<E: Env> Db<E> {
                 for i in slice {
                     inputs.push(self.ssts[i].clone());
                 }
-                return self.build_prepared(inputs, level + 1, crate::merge::CompactGcOptions::default());
+                return self.build_prepared(
+                    inputs,
+                    level + 1,
+                    crate::merge::CompactGcOptions::default(),
+                );
             }
         }
         Ok(None)
@@ -6374,10 +6389,7 @@ impl<E: Env> Db<E> {
         &mut self,
         max_jobs: usize,
     ) -> Result<Vec<PreparedL0Compact<E>>> {
-        if max_jobs <= 1
-            || !crate::leveling::leveled_enabled()
-            || self.ssts.is_empty()
-        {
+        if max_jobs <= 1 || !crate::leveling::leveled_enabled() || self.ssts.is_empty() {
             return self
                 .prepare_pushdown_compact()
                 .map(|j| j.into_iter().collect());
@@ -6393,9 +6405,7 @@ impl<E: Env> Db<E> {
             let target = crate::leveling::level_target_bytes(level, self.l1_target_bytes);
             for cf in &families {
                 let src_view = self.level_view(level, cf);
-                if src_view.is_empty()
-                    || crate::leveling::total_bytes(&src_view) <= target
-                {
+                if src_view.is_empty() || crate::leveling::total_bytes(&src_view) <= target {
                     continue;
                 }
                 let dst_view = self.level_view(level + 1, cf);
@@ -6426,18 +6436,18 @@ impl<E: Env> Db<E> {
                     }
                     // Reject when the hull touches any claimed hull
                     // (shared boundary = overlap, matching `is_disjoint`).
-                    if hulls
-                        .iter()
-                        .any(|(l2, h2)| !(hi < *l2 || *h2 < lo))
-                    {
+                    if hulls.iter().any(|(l2, h2)| !(hi < *l2 || *h2 < lo)) {
                         continue;
                     }
                     let mut inputs: Vec<SstTable> = vec![self.ssts[src.idx].clone()];
                     for f in &slice {
                         inputs.push(self.ssts[f.idx].clone());
                     }
-                    let Some(job) =
-                        self.build_prepared(inputs, level + 1, crate::merge::CompactGcOptions::default())?
+                    let Some(job) = self.build_prepared(
+                        inputs,
+                        level + 1,
+                        crate::merge::CompactGcOptions::default(),
+                    )?
                     else {
                         continue;
                     };
@@ -8145,8 +8155,7 @@ impl<E: Env> Db<E> {
             // has no point version here. Without this, a get walks every
             // chunk's bloom — ~95 disjoint chunks after leveled settle
             // measured ~10 µs/get of pure candidate checking (25M guest).
-            if let (Some(lo), Some(hi)) = (table.smallest_user_key(), table.largest_user_key())
-            {
+            if let (Some(lo), Some(hi)) = (table.smallest_user_key(), table.largest_user_key()) {
                 if key < lo || key > hi {
                     continue;
                 }
@@ -10614,8 +10623,7 @@ fn write_merged_tables_span(
         });
         let file_num = file_alloc();
         let tmp_path = dir.join(format!("{file_num:06}.sst.tmp"));
-        let written =
-            crate::sst::write_sst_try_sorted_on(env, &tmp_path, &mut entries, bloom_hint);
+        let written = crate::sst::write_sst_try_sorted_on(env, &tmp_path, &mut entries, bloom_hint);
         drop(entries);
         let written = match written {
             Ok(table) => table,
@@ -11408,6 +11416,24 @@ mod tests {
         assert_eq!(db.auto_flush_threshold(), Some(16 * 1024));
         db.set_cf_write_buffer("data", 0); // removal falls back to the rest
         assert_eq!(db.auto_flush_threshold(), Some(1024));
+        // RFC-0159 P1.3 sweep knob: `PEDRA_STAGE_MAX_BYTES` clamps down
+        // for chunk-size sweeps (single test — the env is process-global,
+        // a separate test would race this one's asserts).
+        std::env::set_var("PEDRA_STAGE_MAX_BYTES", "512");
+        assert_eq!(db.auto_flush_threshold(), Some(512));
+        std::env::set_var("PEDRA_STAGE_MAX_BYTES", "0");
+        assert_eq!(db.auto_flush_threshold(), Some(1024));
+        std::env::set_var("PEDRA_STAGE_MAX_BYTES", "not-a-number");
+        assert_eq!(db.auto_flush_threshold(), Some(1024));
+        std::env::set_var("PEDRA_STAGE_MAX_BYTES", "999999999");
+        assert_eq!(
+            db.auto_flush_threshold(),
+            Some(1024),
+            "clamp never raises the threshold"
+        );
+        std::env::remove_var("PEDRA_STAGE_MAX_BYTES");
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// RFC-0042 v18: a bounded open keeps SST payloads within budget and
@@ -12242,7 +12268,11 @@ mod tests {
             .iter()
             .find(|(k, _)| k.as_ref() == b"k-small")
             .unwrap();
-        assert_eq!(small_got.1.as_ref(), small.as_slice(), "escape-prefixed inline verbatim");
+        assert_eq!(
+            small_got.1.as_ref(),
+            small.as_slice(),
+            "escape-prefixed inline verbatim"
+        );
         assert_eq!(db.get(b"k-big").as_deref(), Some(big.as_slice()));
         assert_eq!(db.get(b"k-small").as_deref(), Some(small.as_slice()));
         db.close().unwrap();
@@ -13974,10 +14004,7 @@ mod tests {
         db.set_parallel_jobs(4);
         db.compact_leveled().unwrap();
         let scan: Vec<(Vec<u8>, Vec<u8>)> = db
-            .scan(
-                std::ops::Bound::Unbounded,
-                std::ops::Bound::Unbounded,
-            )
+            .scan(std::ops::Bound::Unbounded, std::ops::Bound::Unbounded)
             .map(|kv| (kv.key.to_vec(), kv.value.to_vec()))
             .collect();
         let want: Vec<(Vec<u8>, Vec<u8>)> = expect.into_iter().collect();
@@ -13992,10 +14019,7 @@ mod tests {
         db.close().unwrap();
         let reopened = Db::open(&dir).unwrap();
         let rescan: Vec<(Vec<u8>, Vec<u8>)> = reopened
-            .scan(
-                std::ops::Bound::Unbounded,
-                std::ops::Bound::Unbounded,
-            )
+            .scan(std::ops::Bound::Unbounded, std::ops::Bound::Unbounded)
             .map(|kv| (kv.key.to_vec(), kv.value.to_vec()))
             .collect();
         assert_eq!(rescan, want, "manifest recovers the batched installs");
@@ -17397,7 +17421,10 @@ mod tests {
         assert!(db.get(k).is_some());
         let first = crate::sst::sst_blocks_decoded();
         assert!(first >= 1, "first get must decode a block");
-        assert!(first <= 2, "candidate window is at most previous block + run");
+        assert!(
+            first <= 2,
+            "candidate window is at most previous block + run"
+        );
         crate::sst::reset_sst_blocks_decoded();
         assert!(db.get(k).is_some());
         // The point cache may serve the repeat outright; when it falls
@@ -19429,8 +19456,7 @@ mod tests {
             }
         }
         assert_eq!(
-            data_elsewhere,
-            0,
+            data_elsewhere, 0,
             "every data chunk must land at the bottom level"
         );
         assert_eq!(data_max, 1, "one flush = one bulk chunk");
@@ -19559,12 +19585,11 @@ mod tests {
             db.apply_batch(batch).unwrap();
         }
         db.flush().unwrap();
-        assert!(
-            db.ssts
-                .iter()
-                .zip(db.sst_levels.iter())
-                .any(|(t, &l)| t.cf() == "data" && l == MAX_LSM_LEVEL)
-        );
+        assert!(db
+            .ssts
+            .iter()
+            .zip(db.sst_levels.iter())
+            .any(|(t, &l)| t.cf() == "data" && l == MAX_LSM_LEVEL));
 
         // Delete of an already-bulked key rides with the next span: that
         // flush carries a tombstone so it routes the ladder, and the L0
