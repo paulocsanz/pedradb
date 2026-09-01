@@ -430,3 +430,21 @@ numbers are far tighter than the wall (±0.05–0.5 s vs ±1.3 s): the
 wall's noise lives in the ~2.4–4.9 s unattributed gap (scheduler/host
 steal between phases), not in the phases. Verdict-grade levers on this
 gate need >~3 s wall effect or phase-level attribution.
+
+## Run #32c (same v29b image, third repeat): the noise IS host load —
+## every CPU phase scales ~20-25% with it
+
+Gate load fell 33 → ~18 (six syzkaller VMs winding down, new pods
+spawning) during this forced extra boot (the double-start incident
+below). Same code, same image: hydrate **61.0 s**, settle 1.2 s.
+Phases vs the load-33 family: wal 7.5→5.9, mem 10.3→7.9, prepare
+1.3→1.1, enc 20.3→15.1, lz4 9.4→6.6, bloom 3.6→3.1, crc 1.6→1.3,
+files 44.8→35.0, install 5.4→4.9, retire 4.0→3.6 — a uniform
+−20/25 % on CPU-bound phases (I/O-ish ones less: write 8.7→8.2,
+retire −9 %). So the "one effective core" itself is host-steal-bound:
+the vCPU's cycle rate, not a guest cgroup quota, sets the wall.
+Implications: (a) cross-run comparisons must record gate load
+(`uptime`); (b) the 61–77 s spread on identical code is the load
+band, not code; (c) the ≥1×-vs-rocks ladder numbers are only sound
+when both backends ran under comparable load (the parity harness runs
+them together, so ratios are safe; absolute walls are not).
