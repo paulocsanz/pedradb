@@ -328,3 +328,34 @@ with ceilings: enc+lz4 29.0 s (algorithmic), mem 10.3 s, wal 7.5 s
 `write_imm_l0_files`), install 5.4 s (P1.2 batched manifest), retire
 4.0 s. Reachable near-term floor without encode work: ~61 s (~0.56×
 vs rocks); hydrate ≥1× needs the encode/lz4 block.
+
+## Run #32 (v29b = #31 + WAL_PREALLOC_CHUNK 8→64 MiB, guest 25M): KEPT
+
+One variable only (commit 238e27a). `pedradb-core` recompiled in the
+guest (verified via de-ANSI `Compiling` grep). Hydrate **74.3 s** vs
+#31's 76.8 s — **-2.5 s (-3.3%)**, far outside this shape's run-to-run
+band (#30 vs #31 reproduced to 0.1 s). Settle **1.6 → 0.9 s**
+(mechanistically clean: ~8× fewer WAL segments to finalize at close).
+87 chunks (vs 88).
+
+Attribution is only partly clean: counted writer 19.2 → 18.6 s (wal
+7.5 → 7.3, mem 10.3 → 10.0, prepare 1.3 → 1.3); worker 54.2 → 52.4 s
+(files 44.8 → 43.1 [enc 20.2 → 19.2, lz4 9.4 → 8.8, bloom/crc/write
+flat], install 5.4 → 5.4, retire 4.0 → 3.9). So -0.2 s is wal-append
+side (fewer ftruncate/fallocate calls in the append path), -0.7 s
+settle, but -1.6 s landed in enc+lz4 — same code, no mechanistic link
+to WAL prealloc; most plausibly one fewer chunk boundary + host-load
+luck. The wall number is real (tight band), the mechanism is not fully
+attributed; recorded as such.
+
+Read legs: get_hit 51.1 → 48.6 µs, multi_get 5.47 → 5.16 ms (faster);
+get_loop 5.02 → 5.61 ms (+11.8%) and prefix_scan flat (p=0.59) — all
+inside the established ±15% host-load noise band for this gate (six
+syzkaller VMs); read legs remain unjudgeable here, no regression
+attributable to v29b.
+
+Verdict: **KEEP v29b** (one-line constant, 74/74 wal tests, best wall
+and best settle of every run in the lineage: 74.3 s). New ranked
+ceilings: enc+lz4 28.0 s, mem 10.0 s, wal 7.3 s, intra-write ~6.7 s,
+install 5.4 s (in-memory only — manifest myth dead), retire 3.9 s.
+Floor without encode work now ~59 s.
