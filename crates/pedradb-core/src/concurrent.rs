@@ -335,10 +335,22 @@ impl WriteGroup {
         }
         let max_wait = flush_debt_max_wait();
         let mut waited = Duration::ZERO;
+        // PEDRA_PARK_DIAG: how much the bounded debt wait actually slept
+        // (expected ~0 with the v29 try-lock assist).
+        let park_diag = std::env::var_os("PEDRA_PARK_DIAG").is_some();
+        let note_slept = |waited: Duration| {
+            if park_diag && !waited.is_zero() {
+                eprintln!("AWAITDIAG slept_ms={:.1}", waited.as_secs_f64() * 1e3);
+            }
+        };
         loop {
             let cap = db.read().flush_debt_cap();
-            let Some(cap) = cap else { return };
+            let Some(cap) = cap else {
+                note_slept(waited);
+                return;
+            };
             if db.read().parked_unflushed_bytes() < cap {
+                note_slept(waited);
                 return;
             }
             if waited >= max_wait {
@@ -348,6 +360,7 @@ impl WriteGroup {
                     "PEDRA flush-debt wait exceeded {max_wait:?} (parked={} cap={cap})",
                     db.read().parked_unflushed_bytes()
                 );
+                note_slept(waited);
                 return;
             }
             std::thread::sleep(FLUSH_DEBT_POLL);
@@ -2378,6 +2391,11 @@ impl<E: Env> ConcurrentDb<E> {
     }
 
     fn materialize_parked_holding_flush(&self) -> bool {
+        // PEDRA_PARK_DIAG: per-chunk phase timings for the sinks FLUSHSTAGES
+        // does not cover (prep under the write lock, install/manifest,
+        // retire-cache tail). Inert unless the env is set.
+        let park_diag = std::env::var_os("PEDRA_PARK_DIAG").is_some();
+        let t0 = std::time::Instant::now();
         let prepared = {
             let mut g = self.inner.write();
             // Arc snapshot: the table stays immutable once parked (fold swaps
@@ -2389,6 +2407,7 @@ impl<E: Env> ConcurrentDb<E> {
             let (env, dir, sync) = g.l0_write_ctx();
             Some((imm, nums, env, dir, sync))
         };
+        let t1 = std::time::Instant::now();
         let Some((imm, nums, env, dir, sync)) = prepared else {
             return false;
         };
@@ -2396,6 +2415,7 @@ impl<E: Env> ConcurrentDb<E> {
             Ok(f) => f,
             Err(_) => return false,
         };
+        let t2 = std::time::Instant::now();
         {
             let expect = Arc::as_ptr(&imm);
             let mut g = self.inner.write();
@@ -2412,6 +2432,7 @@ impl<E: Env> ConcurrentDb<E> {
             let pairs: Vec<_> = files.into_iter().map(|(t, n, _)| (t, n)).collect();
             g.apply_sst_installs(pairs, &levels);
             let popped = g.take_oldest_parked_matching(expect);
+            let t3 = std::time::Instant::now();
             drop(imm);
             if let Some(popped) = popped {
                 // Only this Arc remains (fold cannot run under the lock).
@@ -2426,6 +2447,17 @@ impl<E: Env> ConcurrentDb<E> {
                     let owned = Arc::try_unwrap(popped).unwrap_or_else(|a| (*a).clone());
                     g.retire_mem_as_l0_cache(owned);
                 }
+            }
+            if park_diag {
+                let t4 = std::time::Instant::now();
+                eprintln!(
+                    "PARKDIAG prep_ms={:.1} files_ms={:.1} install_ms={:.1} retire_ms={:.1} pending={}",
+                    (t1 - t0).as_secs_f64() * 1e3,
+                    (t2 - t1).as_secs_f64() * 1e3,
+                    (t3 - t2).as_secs_f64() * 1e3,
+                    (t4 - t3).as_secs_f64() * 1e3,
+                    g.parked_unflushed_count(),
+                );
             }
         }
         true
