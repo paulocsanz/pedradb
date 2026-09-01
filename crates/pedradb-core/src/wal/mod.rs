@@ -44,7 +44,14 @@ pub use writer::WalWriter;
 /// (RFC-0062 P1.1). Segments reserve this much storage past physical EOF
 /// up front (lazily, on first write) and re-reserve as the segment grows.
 /// RocksDB `PosixWritableFile::Allocate` does the same.
-const WAL_PREALLOC_CHUNK: u64 = 8 * 1024 * 1024;
+///
+/// 64 MiB (was 8): the 15M-hydrate profile caught the writer spending
+/// 4.1 s per 25 s window inside `preallocate_file` on this path — each
+/// reservation is a blocking `fcntl(F_PREALLOCATE)`/`fallocate` on the
+/// commit thread. 8× fewer of them for the same extent property (still
+/// well past the 8 MiB APFS boundary); the tail waste is bounded by one
+/// chunk past the frontier per live segment.
+const WAL_PREALLOC_CHUNK: u64 = 64 * 1024 * 1024;
 
 /// High-level, file-backed WAL with real durability semantics.
 ///
