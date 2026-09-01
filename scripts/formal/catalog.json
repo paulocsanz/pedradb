@@ -3292,6 +3292,35 @@
         "file": "crates/pedradb-core/src/leveling.rs",
         "test": "pick_l0_to_l1_on_live_slice_is_not_ok"
       }
+    },
+    {
+      "id": "leveling_pushdown",
+      "finding": "F-leveling-sweep",
+      "twin_kind": "atom",
+      "atom": "pick_pushdown_model",
+      "token_src": "pick_pushdown_as_is_blind",
+      "kernel": "crates/pedradb-core/src/leveling.rs",
+      "twin": "crates/pedradb-core/verus/leveling_pick.rs",
+      "verus": "scripts/verus_leveling_pick.sh",
+      "callers": [
+        "crates/pedradb-core/src/db.rs"
+      ],
+      "entry": "pick_pushdown",
+      "data_fate": true,
+      "handlers": [
+        "prepare_pushdown_compact"
+      ],
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/db.rs",
+          "handler": "prepare_pushdown_compact"
+        }
+      ],
+      "as_is": "pick_pushdown_as_is_blind",
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/leveling.rs",
+        "test": "pick_pushdown_on_live_pushdown_gate_is_not_ok"
+      }
     }
   ],
   "clones": [

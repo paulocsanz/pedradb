@@ -80,7 +80,7 @@ pub(crate) struct LevelFile {
 impl LevelFile {
     /// Overlaps the half-open hull `[hull_lo, hull_hi]` (inclusive both ends:
     /// ranges carry concrete smallest/largest keys).
-    fn overlaps(&self, hull_lo: &[u8], hull_hi: &[u8]) -> bool {
+    pub(crate) fn overlaps(&self, hull_lo: &[u8], hull_hi: &[u8]) -> bool {
         self.lo.as_slice() <= hull_hi && self.hi.as_slice() >= hull_lo
     }
 }
@@ -362,6 +362,33 @@ mod tests {
         assert!(pick_pushdown(&src, &dst).is_none());
         assert!(
             pick_pushdown_as_is_blind(&src, &dst).is_some(),
+            "AS-IS dente: stacked destination rewritten anyway"
+        );
+    }
+
+    /// Plant (pair `leveling_pushdown`, entry `pick_pushdown`): the
+    /// pushdown demotes only the oldest source chunk and only over a
+    /// disjoint destination — the blind mutant rewrites stacked levels.
+    #[test]
+    fn pick_pushdown_on_live_pushdown_gate_is_not_ok() {
+        // Empty source: no chunk to demote at all.
+        assert!(pick_pushdown(&[], &[f(0, "a", "z", 1)]).is_none());
+
+        // Disjoint destination: entry takes the OLDEST chunk's index and
+        // exactly its overlapping slice — the far file stays out.
+        let src = vec![f(7, "m", "p", 5), f(9, "q", "r", 5)];
+        let dst = vec![f(0, "a", "m", 1), f(2, "zz", "zzz", 1)];
+        let (sidx, slice) = pick_pushdown(&src, &dst).unwrap();
+        assert_eq!(sidx, 7, "oldest chunk demoted first");
+        assert_eq!(slice, vec![0]);
+        assert!(!slice.contains(&2), "far file never in the slice");
+
+        // Stacked destination: the entry's disjoint gate refuses; the
+        // blind mutant returns a job that rewrites the stacked level.
+        let stacked = vec![f(0, "a", "m", 1), f(1, "b", "z", 1)];
+        assert!(pick_pushdown(&src, &stacked).is_none());
+        assert!(
+            pick_pushdown_as_is_blind(&src, &stacked).is_some(),
             "AS-IS dente: stacked destination rewritten anyway"
         );
     }

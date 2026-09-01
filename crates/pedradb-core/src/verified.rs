@@ -130,6 +130,7 @@ pub fn profile_report() -> &'static [ProfileComponent] {
         on!("compact_retention", "compact_retention", "what compaction retains (F177/F20)"),
         on!("leveling", "leveling", "level-size ladder of the leveled scheduler (F-leveling-sweep)"),
         on!("leveling_pick", "leveling_pick", "leveled job selection: overlap slice, input cap, disjoint gate (F-leveling-sweep)"),
+        on!("leveling_pushdown", "leveling_pushdown", "leveled pushdown: disjoint-gated oldest-chunk demotion (F-leveling-sweep)"),
         on!("compact", "compact", "merge iterator correctness (F27/F28)"),
         // --- reads ---
         on!("snapshot", "snapshot", "snapshot reads (F38/F40/F41)"),
