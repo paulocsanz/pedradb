@@ -215,3 +215,64 @@ bitmap must preserve the CRC fail-closed contract — audit before shipping);
 gate window (< load 12) for a decisive two-run capture — the entire day ran
 load 15–19 with rocks' own legs swinging 36.8–46.4 µs.
 
+## prefix_scan: zero-copy scan pages (compat lib.rs, 2026-09-01 evening)
+
+User unlocked the compat territory (concurrent session idle 14 h, only a
+cosmetic uncommitted api.rs edit — untouched). Local macOS `sample` of the
+25 M/256 MiB prefix_scan arm (`sample-scan-pedra-2.txt` in SCRATCH,
+893 in-arm samples): **~24 % pure allocator churn** — `page_forward`'s
+`codec.decode(...).to_vec()` + `row.value.to_vec()` = 2 mallocs + 2 copies
+per row × 333 rows/op, all under nanov2/malloc_zone; ~40 % core merge
+machinery (BinaryHeap of owned keys, per-advance `Bytes` clones, `skip_user`
+clone per emitted row); remainder stage-common (utf8 + `decode_entry`,
+shared with rocks and cancels). Guest amplifies this: guest pedra scan
+585 µs vs local 251 µs (2.3×) while rocks only 1.6× — allocation-heavy code
+scales worst on the slow shared guest core.
+
+The cut (one variable, compat `lib.rs` only): `WindowKv` was already
+`(Bytes, Bytes)` — so refill pages now hand out **`Bytes` handles sliced
+from the cached blocks** (`KeyCodec::decode_bytes` = the same suffix slice
+`decode_cf_key` does, on a handle; short-key parity with `unwrap_or(&[])`
+kept + unit test `key_codec_decode_bytes_matches_decode`).
+`DBIterator::items: Vec<(Bytes, Bytes)>`, `Iterator::Item =
+Result<(Bytes, Bytes)>` (the stage's only consumer derefs — `starts_with`,
+`from_utf8`, `decode_entry` — compiles unchanged), `collect_rest` keeps its
+owned-`Vec` signature. Per row: 2 refcount bumps instead of 2 mallocs +
+2 memcpys. `page_last_n` ring likewise.
+
+Local 25 M/256 MiB A/B: **pedra prefix_scan 250.78 → 135.72 µs (−46 %),
+ratio 0.919× → 1.497×** (rocks 230.4 → 203.0 µs same-machine drift band;
+`local-256m-scan-bytes-new1.log` vs the sampled run, SCRATCH). Compat suite:
+84 pass / 1 pre-existing env failure (`block_cache_usage_is_bytes_not_hits`
+fails identically at HEAD with my lib.rs reverted — recorded, not mine).
+
+
+## get_hit: verified-block residency bitmap (core, 2026-09-01 night)
+
+Root cause of per-probe CRC cost: every point probe on a resident payload
+re-ran crc32c over the whole ~4 KiB block body (sample `sample-gethit-pedra-2.txt`:
+crc32c 579 of 3017 in-arm samples ≈ 19 % of the op; `seek_point_in_block_image`
+subtree ≈ 887). RocksDB's block cache carries the same contract structurally:
+verify once on the cache-miss path, trust afterwards.
+
+The cut (one logical variable, core files): `PayloadSlot` now holds
+`ResidentBody { img: Arc<[u8]>, verified: Option<Box<[u64]>> }` — one lazy
+bitmap per resident image; `point_at_seeking`'s resident branch serves a
+marked block via `seek_point_in_block_body` (lz4 + walk, no CRC), and the
+first probe verifies + marks under the write guard. Any payload write
+installs fresh empty marks, so invalidation is structural (no epochs, no
+ABA) and the CRC fail-closed contract is preserved — `from_eager_entries`,
+rot tests, and eviction all re-verify. File-path reads (non-resident
+blocks) still verify every time, fail-closed. New test
+`point_seek_verified_marks_skip_crc_and_invalidate_on_swap` covers
+first-probe-marks / repeat-skips / swap-invalidates / rotten-swap-fails.
+
+Local 4 M / 8 GiB get_hit A/B, strictly alternating N C N C N C (calm load
+4.6–6.4; `ab2-bitmap-*.log`, SCRATCH): pedra medians **new 2.647 / 2.666 /
+2.704 µs vs ctl 2.881 / 2.925 / 3.027 µs → −9.2 % mean, clean in 3/3
+pairs** (every new run beats every ctl run). Rocks same runs 2.49–2.60 µs
+(local ratio ≈ 0.85 → ≈ 0.96). An earlier 4-run batch under load 7–12 was
+noise-dominated (one new run at 3.215) — alternating pairs under calm load
+is the reliable local protocol. Suite: 689 pass / 2 documented flakes
+(`catchup_wait_bounded_by_half_fd`, `maybe_auto_flush_physical_cf_is_not_linear_in_keys`
+— the latter load-sensitive). Counter exposed as `ReadProbeSnap.blocks_crc_skipped`.

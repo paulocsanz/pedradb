@@ -872,6 +872,23 @@ impl KeyCodec {
     fn decode<'a>(&self, cf: &str, encoded: &'a [u8]) -> &'a [u8] {
         decode_cf_key(cf, encoded, self.default_raw)
     }
+
+    /// [`Self::decode`] on a materialized window key: the suffix slice is
+    /// the same, so a `Bytes` handle decodes by re-slicing (refcount bump,
+    /// no copy, no per-row allocation) — the scan page path hands out
+    /// handles into the cached blocks instead of `to_vec` copies. A key
+    /// shorter than the family prefix decodes to empty, matching
+    /// [`decode_cf_key`]'s `unwrap_or(&[])` instead of panicking.
+    fn decode_bytes(&self, cf: &str, encoded: &Bytes) -> Bytes {
+        let effective = cf_encode_effective(cf, self.default_raw);
+        if effective.is_empty() {
+            return encoded.clone();
+        }
+        if encoded.len() > effective.len() {
+            return encoded.slice(effective.len() + 1..);
+        }
+        Bytes::new()
+    }
 }
 
 fn bound_as_ref(b: &Bound<Vec<u8>>) -> Bound<&[u8]> {
@@ -1357,7 +1374,11 @@ const ITER_WINDOW: usize = 512;
 
 /// Windowed CF iterator (RFC-0032 P0.1). Same positioning semantics as v0.
 pub struct DBIterator<E: PedraEnv = StdEnv> {
-    items: Vec<(Vec<u8>, Vec<u8>)>,
+    /// Refill pages as zero-copy `Bytes` handles sliced from the cached
+    /// blocks (`page_forward`/`page_last_n`): consuming a row is a refcount
+    /// bump, not the two `to_vec` allocations per row the owned-Vec page
+    /// paid on the scan path.
+    items: Vec<(Bytes, Bytes)>,
     idx: usize,
     reverse: bool,
     inner: ConcurrentDb<E>,
@@ -1378,16 +1399,15 @@ pub struct DBIterator<E: PedraEnv = StdEnv> {
 }
 
 impl<E: PedraEnv> Iterator for DBIterator<E> {
-    type Item = Result<(Box<[u8]>, Box<[u8]>)>;
+    type Item = Result<(Bytes, Bytes)>;
     fn next(&mut self) -> Option<Self::Item> {
         if !self.valid() {
             return None;
         }
-        // Move the slot out instead of copying through `key()`/`value()`:
-        // refill pages decode into exact-capacity Vecs, so the boxed
-        // conversion is a pointer handoff — two fewer allocs per entry.
-        let (k, v) = std::mem::take(&mut self.items[self.idx]);
-        let item = (k.into_boxed_slice(), v.into_boxed_slice());
+        // Move the handle out instead of copying through `key()`/`value()`:
+        // refill pages are `Bytes` slices, so the handoff is a pointer +
+        // refcount — no allocation and no byte copy per entry.
+        let item = std::mem::take(&mut self.items[self.idx]);
         DBIterator::advance(self);
         Some(Ok(item))
     }
@@ -1429,7 +1449,7 @@ impl<E: PedraEnv> DBIterator<E> {
     pub fn key(&self) -> &[u8] {
         self.items
             .get(self.idx)
-            .map(|(k, _)| k.as_slice())
+            .map(|(k, _)| &k[..])
             .unwrap_or(&[])
     }
 
@@ -1438,7 +1458,7 @@ impl<E: PedraEnv> DBIterator<E> {
     pub fn value(&self) -> &[u8] {
         self.items
             .get(self.idx)
-            .map(|(_, v)| v.as_slice())
+            .map(|(_, v)| &v[..])
             .unwrap_or(&[])
     }
 
@@ -1446,7 +1466,8 @@ impl<E: PedraEnv> DBIterator<E> {
     pub fn collect_rest(&mut self) -> Vec<(Vec<u8>, Vec<u8>)> {
         let mut out = Vec::new();
         while self.valid() {
-            out.push(std::mem::take(&mut self.items[self.idx]));
+            let (k, v) = std::mem::take(&mut self.items[self.idx]);
+            out.push((k.to_vec(), v.to_vec()));
             self.next();
         }
         out
@@ -1527,13 +1548,9 @@ impl<E: PedraEnv> DBIterator<E> {
     }
 
     /// Install a fresh page and record its boundary resume keys.
-    fn set_page(&mut self, page: Vec<(Vec<u8>, Vec<u8>)>) {
-        let fwd = page
-            .last()
-            .map(|(k, _)| self.codec.encode_resume(&self.cf, k));
-        let rev = page
-            .first()
-            .map(|(k, _)| self.codec.encode_resume(&self.cf, k));
+    fn set_page(&mut self, page: Vec<(Bytes, Bytes)>) {
+        let fwd = page.last().map(|(k, _)| self.codec.encode_resume(&self.cf, k));
+        let rev = page.first().map(|(k, _)| self.codec.encode_resume(&self.cf, k));
         if let Some(k) = fwd {
             self.resume_fwd = k;
         }
@@ -1552,7 +1569,7 @@ fn page_forward<E: PedraEnv>(
     start: Bound<Vec<u8>>,
     end: Bound<&[u8]>,
     limit: usize,
-) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+) -> Result<Vec<(Bytes, Bytes)>> {
     let s = bound_as_ref(&start);
     inner
         .with_read(|db| {
@@ -1561,12 +1578,12 @@ fn page_forward<E: PedraEnv>(
                 if !crate::iter_kernel::iter_window_keep(row.snapshot_live) {
                     continue;
                 }
-                out.push((codec.decode(cf, &row.key).to_vec(), row.value.to_vec()));
+                out.push((codec.decode_bytes(cf, &row.key), row.value.clone()));
                 if out.len() >= limit {
                     break;
                 }
             }
-            Ok::<Vec<(Vec<u8>, Vec<u8>)>, CoreError>(out)
+            Ok::<Vec<(Bytes, Bytes)>, CoreError>(out)
         })
         .map_err(Error::from)
 }
@@ -1579,13 +1596,12 @@ fn page_last_n<E: PedraEnv>(
     start: Bound<&[u8]>,
     end: Bound<Vec<u8>>,
     n: usize,
-) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+) -> Result<Vec<(Bytes, Bytes)>> {
     let e = bound_as_ref(&end);
     inner
         .with_read(|db| {
             // Iterator borrows the Db — consume the ring window under the guard.
-            let mut ring: VecDeque<(Vec<u8>, Vec<u8>)> =
-                VecDeque::with_capacity(n.saturating_add(1));
+            let mut ring: VecDeque<(Bytes, Bytes)> = VecDeque::with_capacity(n.saturating_add(1));
             for row in db.try_scan_window_at(seq, start, e)? {
                 if !crate::iter_kernel::iter_window_keep(row.snapshot_live) {
                     continue;
@@ -1593,9 +1609,9 @@ fn page_last_n<E: PedraEnv>(
                 if ring.len() == n {
                     ring.pop_front();
                 }
-                ring.push_back((codec.decode(cf, &row.key).to_vec(), row.value.to_vec()));
+                ring.push_back((codec.decode_bytes(cf, &row.key), row.value.clone()));
             }
-            Ok::<Vec<(Vec<u8>, Vec<u8>)>, CoreError>(ring.into_iter().collect())
+            Ok::<Vec<(Bytes, Bytes)>, CoreError>(ring.into_iter().collect())
         })
         .map_err(Error::from)
 }
@@ -4442,6 +4458,25 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    /// `decode_bytes` must agree with `decode` on every key shape the scan
+    /// page can see: raw-default and prefixed CFs, empty keys, keys equal to
+    /// or shorter than the `cf\0` prefix (old behavior decoded those to
+    /// empty — the Bytes path must not panic or diverge).
+    #[test]
+    fn key_codec_decode_bytes_matches_decode() {
+        for (cf, raw) in [("default", true), ("default", false), ("data", true), ("data", false)] {
+            let codec = KeyCodec { default_raw: raw };
+            for key in [&b""[..], b"d", b"data", b"data\0", b"data\0k", b"\0k", b"k"] {
+                let owned = Bytes::copy_from_slice(key);
+                assert_eq!(
+                    codec.decode_bytes(cf, &owned).as_ref(),
+                    codec.decode(cf, key),
+                    "cf={cf} raw={raw} key={key:?}"
+                );
+            }
+        }
     }
 
     #[test]
