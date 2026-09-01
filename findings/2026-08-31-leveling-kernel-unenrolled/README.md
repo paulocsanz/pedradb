@@ -273,3 +273,29 @@ Not claiming: that the 93 are wrong, or that classification is
 verification. The tooth proves every pub fn in an enrolled kernel is
 NAMED; each graduation round is where the verification claim (or the
 published residual row) gets made.
+
+## Graduation round 1 (same night): `pick_pushdown` → pair `leveling_pushdown`
+
+First baseline entry graduated, chosen because the verification
+artifacts already existed: the `leveling_pick` twin proves
+`pick_pushdown_model` (`None` exactly on empty source or non-disjoint
+dst; blind-mutant divergence) — only the catalog shape was missing.
+
+- Catalog pair `leveling_pushdown` (atom, atom `pick_pushdown_model`,
+  entry `pick_pushdown`, as_is `pick_pushdown_as_is_blind`,
+  `token_src=pick_pushdown_as_is_blind` so the token tooth diffs the
+  mutant mirror that exists on BOTH sides — a real dente, not
+  twin-only). Shares twin + runner with `leveling_pick` (one Verus run
+  verifies both models).
+- Dedicated plant `pick_pushdown_on_live_pushdown_gate_is_not_ok`
+  (empty-src None; disjoint dst takes the OLDEST chunk and exactly its
+  overlapping slice; stacked dst refused by entry, rewritten by the
+  blind mutant). Module 9→10 tests, 10 passed.
+- Board row `on!("leveling_pushdown", …)`; baseline 93→92 (leveling.rs
+  keeps `is_disjoint`, `leveled_enabled`, `overlaps`, `total_bytes`).
+
+Also this round: co-agent landed `6d6168c` (parallel compaction;
+`leveling.rs::overlaps` promoted to `pub(crate)` — already inside the
+baseline because the promotion was in the worktree at baseline-build
+time, so the tooth stayed green through the landing; graduation
+candidate for a later round alongside `is_disjoint`).
