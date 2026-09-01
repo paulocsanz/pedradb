@@ -998,6 +998,56 @@ Honest read:
   stays (default-off, cheap, self-describing reads); **the guest
   entrypoint's `PEDRA_BLOCK_TARGET=16384` export must be dropped in the
   next injection.**
+
+## Guest run #19 (v21p, 25M) — storm gone, best read legs, settle worse: the pipeline is byte-volume-bound
+
+v21p (`38dc2c2`): idle-WAL-rotate manifest storm fix + SST write-path
+single-image rewrite (read-back/verify removal). Entrypoint now exports
+only `PEDRA_FLUSH_DIAG PEDRA_LEVEL_DIAG PEDRA_FDSYNC_DIAG` (JOBS=4
+dropped). Raw serial: `run19-v21p-guest-25m.txt`; full analysis:
+`sorted-ingest-architecture.md`.
+
+| leg (25M)              | run #13 (v21j) | run #19 (v21p) | rocks default | #19 ratio |
+|------------------------|----------------|----------------|---------------|-----------|
+| hydrate                | 143.7 s        | 148.9 s        | 25.3 s        | 0.17×     |
+| settle                 | 52.0 s         | 88.2 s         | 8.3 s         | 0.09×     |
+| probe_hit p50          | 33.9 µs        | 52.6 µs ⚠      | 45.4 µs       | 0.86×     |
+| probe_miss p50         | 2.5 µs         | 2.2 µs         | rocks-class   | ~1×       |
+| get_hit (criterion)    | 46.7 µs        | **42.4 µs**    | 38.59 µs      | 0.91×     |
+| prefix_scan            | 632.6 µs       | **437.6 µs**   | 305.6 µs      | 0.70×     |
+| lookup_100 get_loop    | 4.534 ms       | 4.593 ms       | 3.38 ms       | 0.74×     |
+| lookup_100 multi_get   | 4.954 ms       | **4.548 ms**   | 3.70 ms       | 0.81×     |
+| on disk after settle   | 5.15 GiB       | 5.15 GiB       | 5.24 GiB      | smaller   |
+
+- **FDSYNCDIAG count 0** (run #16: ≥ 12,288 syncs): the manifest storm
+  is gone. The read legs it was drowning are the best ever: get_hit
+  0.83→0.91×, prefix_scan 0.48→0.70×, multi_get 0.75→0.81×.
+- probe_hit ⚠: documented ±30 % single-run swing on this guest
+  (identical code: 33.9 in #13, 49.8 in #18) — needs an arbitration
+  repeat before being called a regression.
+- **hydrate+settle total unchanged** (#18 237.6 s → #19 237.1 s):
+  removing CPU overhead only moved time between phases. The wall time is
+  the ladder's ~25–30 GiB of logical bytes × the ~110 MiB/s per-byte
+  encode/decode rate (unchanged by the read-back removal — measured
+  again at 56–58 MiB/s output / ~110–116 MiB/s per-job in this run's
+  settle). Settle anatomy: flush_ms=10935 (of which ~6.3 s = two
+  hydrate-tail worker jobs) + compact_ms=77249 (23 sequential
+  single-input pushdowns, ~3.2 s each); settle entry L2 = 4.08 GiB in
+  151 MiB chunks vs #15's 5.17 GiB in 59 MiB chunks — same per-byte
+  rate, more bytes.
+- The 38-file final layout (vs 95 in #13) is why the read legs jumped:
+  fewer candidate chunks per probe. The chunk growth is an emergent
+  scheduling artifact, not an intended change.
+- **Drastic-gain answer (see `sorted-ingest-architecture.md`): the bench
+  hydrate is a perfectly sorted append-only stream** (fixed-width
+  ascending keys, batch k sorts before batch k+1) that we push through
+  the full LSM ladder. A sorted-ingest fast path (detect ascending
+  batches → sorted-run builder → direct-to-L3 disjoint install, WAL ring
+  only for the uninstalled tail, settle ≈ tail flush) writes 5.15 GiB
+  once instead of ~25–30 GiB through a 110 MiB/s loop: projected
+  hydrate 18–28 s, settle 1–3 s — provided the encode loop also drops
+  per-entry cost (rocks does 207 MiB/s through its whole ladder on the
+  same core; that is the per-byte bar).
 - Only wins: hydrate 136.1 s and settle 47.9 s (both best-yet — fewer
   block boundaries, slightly less write/verify overhead) and disk after
   settle 5.04 GiB. Not worth the point-leg cost.
