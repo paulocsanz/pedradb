@@ -113,22 +113,105 @@ injection v36 (db.rs v32 = `a16b50b7c2cfc0b6a20f0c31a5e03b76`, all other
 files + entrypoint v35 verified unchanged, swap + start 2026-09-01 18:48 UTC
 at gate load 15.7).
 
-## v36 guest runs (L2 live, same v35 entrypoint)
+## v36+ guest read-leg series (ratio = rocks/pedra, ≥1.0 = pedra wins)
 
-| leg        | v34    | v35    | v36 r1 (load 15.7) | v36 r2 (15.05) | v36 r3 (16.4) |
-|------------|--------|--------|--------------------|----------------|---------------|
-| get_hit    | 0.935  | 1.066  | 0.749 (52.3/39.1)  | 0.846 (44.5/37.7) | 1.027 (42.6/43.8) |
-| prefix_scan| 0.697  | 0.614  | 0.639              | 0.644          | 0.710         |
-| get_loop   | 0.993  | 0.912  | 0.891 (4527/4034)  | 0.984 (3769/3707) | 1.074 (3782/4063) |
-| multi_get  | 0.915  | 0.975  | 0.923 (4799/4428)  | 1.117 (3587/4009) | 1.150 (3994/4592) |
+Runs v34–run6 code/identity verified by md5 at injection and, from v36 on,
+by the probe_miss signature (L2 bisect ≈ 1.8–2.0 µs p50; pre-L2 linear walk
+2.7–2.8 µs). v37c control is pre-L2 v31 db.rs (`0381bf328ca7385a86293f694baf1a6d`)
+run 2026-09-01 in the same day's window, forced-rebuild verified.
 
-(pedra µs / rocks µs in parens; captures `guest-v36-l2-25m-run{1,2,3}.txt`.)
+| run                     | code | load | get_hit              | prefix_scan | get_loop             | multi_get            |
+|-------------------------|------|------|----------------------|-------------|----------------------|----------------------|
+| v34 baseline            | old  | 15.0–16.1 | 0.935 (39.8/37.2) | 0.697       | 0.993 (3802/3775)    | 0.915 (4048/3705)    |
+| v35 scandiag            | old  | ~15  | 1.066 (36.9/39.4)    | 0.614       | 0.912                | 0.975                |
+| v36 r1                  | L2   | 15.7 | 0.749 (52.3/39.1)    | 0.639       | 0.891 (4527/4034)    | 0.923 (4799/4428)    |
+| v36 r2                  | L2   | 15.05| 0.846 (44.5/37.7)    | 0.644       | 0.984 (3769/3707)    | 1.117 (3587/4009)    |
+| v36 r3                  | L2   | 16.4 | 1.027 (42.6/43.8)    | 0.710       | 1.074 (3782/4063)    | 1.150 (3994/4592)    |
+| v36 r4                  | L2   | 16.6 | 1.028 (37.9/38.9)    | 0.593       | 0.984 (3823/3760)    | 0.866 (4116/3566)    |
+| v36 r5                  | L2   | ~17  | 0.969 (38.4/37.2)    | 0.665       | 0.956 (4261/4072)    | 0.835 (4203/3510)    |
+| v37 "control" (mislabeled) | L2 | ~17  | 0.850 (43.4/36.8)    | 0.673       | 0.892 (4001/3571)    | 0.922 (3958/3651)    |
+| v37c true control       | old  | 15.3 | 1.028 (45.1/46.4)    | 0.654       | 1.008 (4389/4425)    | 0.927 (4625/4288)    |
+| v38 r1 (L2 restored)    | L2   | 15.5 | 1.041 (43.5/45.3)    | 0.676       | 0.835 (4856/4053)    | 1.066 (4179/4455)    |
+| v38 r2 (reboot-only)    | L2   | 16.2 | 0.996 (45.7/45.5)    | 0.672       | 1.069 (3754/4011)    | 1.012 (4399/4451)    |
+| v38 r3 (reboot-only)    | L2   | 16.0 | 1.119 (41.2/46.1)    | 0.593       | 1.110 (4081/4528)    | 0.966 (4519/4365)    |
+
+(pedra µs / rocks µs in parens; captures `guest-v36-l2-25m-run{1..5}.txt`,
+`guest-v37-mislabeled-l2-run6.txt`, `guest-v37c-true-v31-run1.txt`.)
 Hydrate 51–56 s, settle 1.1 s (bulk intact), BULKDIAG normal, no read-verification
-errors. **probe_miss pedra 2.7–2.8 → 1.9 µs (−30 %)** — the walk cut is real
-on-guest; multi_get medians 3.59–3.99 ms vs 4.05–4.23 (v34/v35) — improved;
-get_loop medians 3.77–3.78 (r2/r3) vs 3.80–4.19 — improved. get_hit medians
-42.6–52.3 vs 36.9–39.8: dominated by a churny host window (rocks' own get_hit
-swung 37.2→43.8 across the same runs; probe p999 2.1 ms vs v35's 258 µs;
-gate load drifted 15.0→16.6 during the series). Run 3 passed all three point
-legs simultaneously. prefix_scan unchanged (0.61–0.71 band) — compat-bound
+errors in any run. **probe_miss pedra 2.7–2.8 → 1.9–2.0 µs (−30 %) in every
+L2-code run** — the walk cut is real on-guest; multi_get medians 3.59–3.99 ms
+vs 4.05–4.23 (v34/v35) — improved; get_loop medians 3.77–3.82 (r2–r4) vs
+3.80–4.19 — improved. prefix_scan unchanged (0.59–0.71 band) — compat-bound
 per the v35 SCANDIAG decomposition.
+
+### v37 failed control → v37c hardening (injection-methods postmortem)
+
+The first v37 control attempt produced numbers but was **not** a control —
+two compounding failures: (1) the gate clock runs ~3 h behind the guest, so a
+plain `cp` gives the swapped file an mtime older than the guest-built cargo
+artifacts and cargo skips the rebuild ("Finished in 0.38 s"); (2) the nbd
+writeback was lost at `qemu-nbd -d` disconnect under host load 17 — the
+in-mount md5 verified from page cache but the qcow2 never got the blocks
+(image still held v32; probe_miss 1.8 µs in that run = L2 signature, proving
+old code never ran). Fixes, now standing procedure for every injection:
+future-date the swapped mtime (`touch -d "$(date -u -d '+1 day' …)"`),
+`sync`, disconnect, **reconnect and re-verify md5 persisted** before boot, and
+require both a `Compiling pedradb-core` serial line and the probe_miss
+signature before trusting any run. The mislabeled capture is kept as a 6th
+L2-code sample (`guest-v37-mislabeled-l2-run6.txt`).
+
+### v37c true-control verdict: the get_hit ratio is window-dominated
+
+v31 old-walk code, forced rebuild (Compiling pedradb-core, 26.6 s), forced
+persistence, run 2026-09-01 19:27 UTC at gate load 15.3:
+**get_hit 1.028 / get_loop 1.008 / multi_get 0.927** (probe_miss 2.8 µs —
+old-walk signature). The old code passes get_hit/get_loop in a window where
+L2 code had failed 1 h earlier (0.850 at load ~17), and it does so with the
+slowest rocks get_hit of the whole series (46.4 µs vs its own 36.8–43.8 band)
+while pedra sits in its usual 43–45 µs band. Attribution: **the point-leg
+ratios swing ±15–25 % with the host window on both code versions** (rocks'
+own get_hit moved 37.2→46.4 across the series; pedra 36.9→52.3; bands for old
+vs L2 code overlap almost completely). L2's −1 µs/op walk cut (~2–3 % of the
+op) is real but invisible at this noise level. Consequences: (a) run 3's
+all-three-pass is genuine but not separable from window luck — the two-run
+protocol needs a second pass and honest margin reporting, not attribution to
+L2; (b) a quiet window is a prerequisite for any decisive acceptance run;
+(c) the fat probe p999 tails (2.1–2.2 ms) in the v36-era runs vs 12 µs in
+the v37c control are a window artifact of that churny hour, not an L2
+regression (probe_miss p999 14–20 µs appears in both code versions' calmer
+runs).
+
+## Session verdict (2026-09-01): point legs at parity-within-noise; goal NOT closed
+
+Nine L2-code runs (v36 r1–r5, mislabeled run6, v38 r1–r3): **all three
+point legs passed simultaneously exactly once (v36 r3: 1.027/1.074/1.150)**.
+Every leg passes individually in 4–5 of 9 runs and the failing leg rotates
+(r4 multi_get, v38 r1 get_loop, v38 r2 get_hit −0.4 %, v38 r3 multi_get).
+L2-run medians:
+get_hit 0.996, get_loop 0.984, multi_get 0.966 — each within the ±15–25 %
+window band of 1.0, none ≥ 1.0 on median. Old-code medians (3 runs):
+get_hit 1.028, get_loop 0.993, multi_get 0.927 — overlapping bands, and
+multi_get is the one leg where L2 runs hold the only ≥1.0 passes (1.117,
+1.150, 1.066, 1.012 vs old-code max 0.975).
+
+What is settled and shipped (commit e3c5750): L2 run bisect is correct
+(oracle live+reopen, suite 688 pass / 2 known flakes), cuts pure-CPU get_hit
+−24.5 % locally (5.83 → 4.40 µs) and probe_miss −30 % on guest
+(2.7–2.8 → 1.6–2.0 µs), bulk route intact (BULKDIAG level=3, ssts 29–86,
+settle 1.1–1.3 s), zero read-verification errors across every capture.
+
+Why the goal is not marked done: the two-run all-four acceptance is unmet —
+prefix_scan is 0.59–0.71 and blocked on compat per-row decode (v35 SCANDIAG:
+~83 % of the op; concurrent-session files), and the point legs' single-run
+pass flips with the host window (v37c control attribution). Per the plan's
+own bar, a scrape-by 1.01× that flips on noise fails; farming reboots for a
+second lucky pass would be recording window luck, not performance.
+
+Residual and next ranked levers (all core-owned unless noted): (1) in-probe
+costs — 44 % of get_hit CPU per the `sample` decomposition: bloom filter,
+per-access CRC + 4 KiB lz4 on resident payloads (verified-block residency
+bitmap must preserve the CRC fail-closed contract — audit before shipping);
+(2) compat wrappers 13 % (concurrent-session files); (3) a genuinely quiet
+gate window (< load 12) for a decisive two-run capture — the entire day ran
+load 15–19 with rocks' own legs swinging 36.8–46.4 µs.
+
