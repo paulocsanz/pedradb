@@ -1,0 +1,34 @@
+Guest run #25 — ACCIDENTAL v23 repeat (image race), 25M entries, 2026-09-01
+=======================================================================
+
+Context: the v24 injection copied files + edited the entrypoint correctly
+(all MD5_OK, PEDRA_FLUSH_STAGES=1 PEDRA_WRITE_PHASE_STATS=1 verified in the
+mounted image), but the platform supervisor auto-restarted the VM from the
+OLD qcow2 before the `mv` landed; our explicit `caixote start` then 500'd
+("already exists with a running cloud-hypervisor process"). The bench that
+ran booted the v23 image: FLUSHDUR=82 and install_parked=81 present,
+FLUSHSTAGES=0 and WRITEPHASE=0 — the smoking gun. The serial log truncated
+on the subsequent clean restart, so this file (captured mid-run) is the
+only record. Value: a third leg-for-leg v23-family datapoint bounding
+cross-run swing.
+
+Legs (vs run #24 / run #23 in parens):
+  hydrate    73.1s  0.34M entries/s, 11.02 GiB during, 473 B/entry
+             (72.5 / 73.6)
+  settle      1.8s, 5.15 GiB after (3.0 / 2.3)
+  probe_hit  p50 56.3µs / p90 82.6µs / p99 182.0µs / p999 2.5ms / max 12.9ms
+             (47.2 / 54.9 — swing band 47–56µs confirmed)
+  probe_miss p50 3.0µs / p90 3.5µs / p99 5.6µs / p999 59.8µs / max 1.8ms
+             (2.7)
+  get_hit    [41.558 µs 43.118 µs 44.877 µs] (48.467 / —)
+  prefix_scan[437.42 µs 444.22 µs 452.48 µs] (454.68 / —)
+  get_loop   [4.6340 ms 4.8001 ms 4.9788 ms] (4.4922 / —)
+  multi_get  [3.8209 ms 3.9560 ms 4.0932 ms] (4.6737 / —)
+  BENCH_EXIT_pedradb_diag=0; 81 install_parked + FLUSHDUR 82.
+
+Reading: get_hit 43.1 vs 48.5 and multi_get 3.96 vs 4.67 swing within the
+same binary family — cross-run swing at 25M is ±10-15% on read legs, so
+single-run deltas smaller than that are noise. get_loop 4.80 vs 4.49
+swings the other way. Verdict: v23-family baseline reproduced; nothing
+new. Rocks baselines unchanged (hydrate 25.3s, settle 8.3s, get_hit
+38.59µs, prefix_scan 305.6µs, get_loop 3.38ms, multi_get 3.70ms).

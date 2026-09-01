@@ -114,8 +114,14 @@ sorted-ingest-architecture.md` (+ `run19-v21p-guest-25m.txt`).
 - [ ] **P1.2** Batch MANIFEST persists across consecutive chunk installs. —
   status: `todo`
 - [ ] **P1.3** Chunk-size sweep for read legs at 25M (64 vs 128 MiB) —
-  run #19 showed fewer/bigger files improve probe/get legs. — status:
-  `todo`
+  run #19 showed fewer/bigger files improve probe/get legs. Root cause
+  found 2026-09-01: chunks staged at the GLOBAL auto-flush cap (compat
+  DB-level default 64 MiB), not the per-CF buffer — `try_stage_if_full`
+  used `auto_flush_threshold()` which ignored per-CF overrides; fix makes
+  it max(global, per-CF) (`findings/
+  2026-08-30-slipstream-compat-perf/p13-chunk-threshold-root-cause.md`);
+  probe A/B 4→1 parks at the 16 MiB CF limit. — status: `fix landed,
+  guest chunk-size run pending (v25, after v24 measures P1.1)`
 
 ### P2 — later / polish
 
@@ -135,7 +141,7 @@ sorted-ingest-architecture.md` (+ `run19-v21p-guest-25m.txt`).
 | P0.5 | p0 | Local A/B + guest verdict | done | local 6M A/B (`9698caf`): hydrate −39…−45 %, settle −25…−43 %; guest run #23 (25M): settle 84.9→2.3 s = **3.61× vs Rocks 8.3 s**, hydrate 157.0→73.6 s (0.34×), reads flat; 73 BULKDIAG (72 parked + 1 flush) | 2026-09-01 |
 | P1.1 | p1 | Materialize per-byte cut (direct block encode + lz4 probe) | in-progress (code+tests+local A/B: FLUSHDUR −13 %, disk identical; guest pending) | `table.rs` | 2026-09-01 |
 | P1.2 | p1 | Batched manifest persists | todo | — | 2026-08-31 |
-| P1.3 | p1 | Chunk-size sweep for reads | todo | — | 2026-08-31 |
+| P1.3 | p1 | Chunk-size: per-CF buffer governs stage threshold | fix landed (probe 4→1 parks at the CF limit); guest run pending | `db.rs` | 2026-09-01 |
 | P2.1 | p2 | Nearly-sorted window | todo | — | 2026-08-31 |
 | P2.2 | p2 | 100M rung via bulk mode | todo | — | 2026-08-31 |
 

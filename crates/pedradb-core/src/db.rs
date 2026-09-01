@@ -5478,9 +5478,22 @@ impl<E: Env> Db<E> {
     }
 
     /// Configured auto-flush threshold, if any.
+    ///
+    /// RFC-0159 P1.3: per-CF buffers raise the shared stage threshold the
+    /// same way they raise the flush-debt cap — the host worker stages one
+    /// shared active mem, so a per-CF buffer above the global cap must not
+    /// be cut down to the global cap (bench: global 64 MiB, data CF
+    /// 256 MiB, chunks staged at 64 MiB). Per-CF limits for smaller
+    /// families stay enforced by the `maybe_auto_flush` walk.
     #[must_use]
     pub fn auto_flush_threshold(&self) -> Option<usize> {
-        self.auto_flush_bytes
+        let mut cap = self.auto_flush_bytes.filter(|n| *n > 0);
+        for &n in self.cf_write_buffer.values() {
+            if n > 0 && cap.is_none_or(|c| n > c) {
+                cap = Some(n);
+            }
+        }
+        cap
     }
 
     /// Flush-debt cap for concurrent writer backpressure: one parked
@@ -5490,13 +5503,7 @@ impl<E: Env> Db<E> {
     /// (25M slipstream: 185 MB/s ingest vs ~100 MB/s materialize OOMed a
     /// 3892 MB box with nothing bounding `parked_unflushed`).
     pub(crate) fn flush_debt_cap(&self) -> Option<usize> {
-        let mut cap = self.auto_flush_bytes.filter(|n| *n > 0);
-        for &n in self.cf_write_buffer.values() {
-            if n > 0 && cap.is_none_or(|c| n > c) {
-                cap = Some(n);
-            }
-        }
-        cap
+        self.auto_flush_threshold()
     }
 
     /// Mem / imm / pin / parked (no SST yet) / folded retired / pending pins.
@@ -11375,6 +11382,32 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pedradb-db-test-{n}-{i}"));
         let _ = fs::remove_dir_all(&dir);
         dir
+    }
+
+    /// RFC-0159 P1.3: the host-worker stage threshold takes the max of the
+    /// global auto-flush cap and per-CF buffers — a CF buffer above the
+    /// global cap must not be cut down to it (bench: 64 MiB global vs
+    /// 256 MiB data CF staged 64 MiB chunks), and a smaller CF buffer
+    /// never lowers the global stage point.
+    #[test]
+    fn auto_flush_threshold_takes_max_of_global_and_cf_buffers() {
+        let dir = temp_dir();
+        let mut db = Db::<StdEnv>::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(1024),
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(db.auto_flush_threshold(), Some(1024));
+        db.set_cf_write_buffer("data", 16 * 1024);
+        assert_eq!(db.auto_flush_threshold(), Some(16 * 1024));
+        db.set_cf_write_buffer("meta", 512);
+        assert_eq!(db.auto_flush_threshold(), Some(16 * 1024));
+        db.set_cf_write_buffer("data", 0); // removal falls back to the rest
+        assert_eq!(db.auto_flush_threshold(), Some(1024));
     }
 
     /// RFC-0042 v18: a bounded open keeps SST payloads within budget and
