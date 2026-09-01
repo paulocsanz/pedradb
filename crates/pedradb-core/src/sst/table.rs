@@ -2285,10 +2285,33 @@ fn write_sst_try_sorted_body(
     };
 
     // NEVER split a user key across blocks (same contract as write_sst_entries_on).
+    let mut prev_ikey: Option<InternalKey> = None;
+    let mut smallest_user_key: Option<Bytes> = None;
+    let mut largest_user_key: Option<Bytes> = None;
+    let mut range_tombstones: Vec<(InternalKey, Bytes)> = Vec::new();
     for item in entries {
         let (ikey, value) = item?;
+        // Same invariant the open-time decode verify enforced: entries must
+        // arrive InternalKey-sorted. Checked here (cheap memcmp) instead of
+        // via a full decompress+decode pass after writing.
+        if let Some(prev) = &prev_ikey {
+            if prev > &ikey {
+                return Err(CoreError::Internal(format!(
+                    "SST entries not sorted in {path_check}",
+                    path_check = path.display()
+                )));
+            }
+        }
+        prev_ikey = Some(ikey.clone());
         max_sequence = max_sequence.max(ikey.sequence);
         n_entries = n_entries.saturating_add(1);
+        if smallest_user_key.is_none() {
+            smallest_user_key = Some(ikey.user_key.clone());
+        }
+        largest_user_key = Some(ikey.user_key.clone());
+        if ikey.kind == ValueType::RangeDeletion {
+            range_tombstones.push((ikey.clone(), value.clone()));
+        }
         let uk = ikey.user_key.as_ref();
         if last_bloom.as_ref().is_none_or(|p| p.as_ref() != uk) {
             bloom_keys.push(ikey.user_key.clone());
@@ -2353,26 +2376,59 @@ fn write_sst_try_sorted_body(
         index_bytes.extend_from_slice(&kl.to_le_bytes());
         index_bytes.extend_from_slice(&h.first_user_key);
     }
-    let bloom_bytes = bloom.encode();
+    let mut bloom_bytes = bloom.encode();
 
     let mut file_crc = crc32c::crc32c(&header);
     file_crc = crc32c::crc32c_append(file_crc, &data);
     file_crc = crc32c::crc32c_append(file_crc, &index_bytes);
     file_crc = crc32c::crc32c_append(file_crc, &bloom_bytes);
 
+    // Exact file image assembled once: a single write syscall (was five),
+    // and the SstTable is constructed from this in-memory state — the
+    // RocksDB `TableBuilder::Finish` class. The old `SstTable::open_on`
+    // re-read the whole file, re-CRC'd it, and decompress+decode verified
+    // every block and entry: ~2 extra full passes over every flushed or
+    // compacted byte (the drain-pipeline tax behind slipstream settle).
+    // Read-side opens keep the full verify; blocks still CRC lazily on
+    // first read, so torn files fail closed exactly as before.
+    let mut image = header;
+    image.append(&mut data);
+    image.append(&mut index_bytes);
+    image.append(&mut bloom_bytes);
+    image.extend_from_slice(&file_crc.to_le_bytes());
     {
         let mut file = env.create(path)?;
-        file.write_all(&header)?;
-        file.write_all(&data)?;
-        file.write_all(&index_bytes)?;
-        file.write_all(&bloom_bytes)?;
-        file.write_all(&file_crc.to_le_bytes())?;
+        file.write_all(&image)?;
         if sync {
             file.sync_data()?;
         }
     }
-
-    SstTable::open_on(env, path)
+    // The retained body is the CRC-stripped image (header included), the
+    // same slice `crc_stripped_body` would hand back on an open-on-read.
+    image.truncate(image.len() - core::mem::size_of::<u32>());
+    let payload: Arc<[u8]> = image.into();
+    let payload_len = payload.len();
+    let cf = crate::cf_kernel::infer_sst_cf(
+        smallest_user_key.as_deref(),
+        largest_user_key.as_deref(),
+    );
+    Ok(SstTable {
+        path: path.to_path_buf(),
+        payload: Arc::new(parking_lot::RwLock::new(payload)),
+        payload_len,
+        compressed_blocks: compress,
+        block_crc: compress,
+        entries: Arc::new(Mutex::new(None)),
+        kit: Arc::new(RwLock::new(None)),
+        range_tombstones,
+        num_entries: n_entries,
+        max_sequence,
+        index,
+        bloom,
+        smallest_user_key,
+        largest_user_key,
+        cf,
+    })
 }
 
 struct Cursor<'a> {

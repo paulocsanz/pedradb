@@ -5473,6 +5473,14 @@ impl<E: Env> Db<E> {
         {
             return Ok(());
         }
+        // Edge-trigger: a drained pipeline with an empty current segment has
+        // nothing to rotate. Without this every idle poll (the compat compact
+        // worker tick during read-only phases) rewrites MANIFEST+CURRENT and
+        // pays two fdatasync barriers per tick — 10k+ barriers per slipstream
+        // guest run, ~42 s of flush traffic competing with the read legs.
+        if self.wal.lock().position() == 0 {
+            return Ok(());
+        }
         self.rotate_wal_now()
     }
 
@@ -15073,6 +15081,51 @@ mod tests {
         assert_eq!(db.get(b"k").as_deref(), Some(b"v".as_ref()));
         assert!(db.sst_count() >= 1);
         db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The compat compact worker polls `try_rotate_wal_if_idle` while the DB
+    /// is idle; a drained pipeline with an empty current segment must not
+    /// rewrite MANIFEST+CURRENT on every poll (10k+ fdatasync barriers per
+    /// slipstream guest run during the read legs).
+    #[test]
+    fn idle_rotate_with_empty_segment_does_not_rewrite_manifest() {
+        // `store()` renumbers MANIFEST-NNNNNN and drops older files, so the
+        // durable oracle for "a persist happened" is the number CURRENT names.
+        let current_manifest_num = |dir: &Path| -> u32 {
+            let cur = fs::read_to_string(dir.join(crate::manifest::CURRENT_FILE)).unwrap();
+            let name = cur.lines().next().unwrap();
+            name.trim_start_matches(crate::manifest::MANIFEST_PREFIX)
+                .parse()
+                .unwrap_or(0)
+        };
+        let dir = temp_dir();
+        {
+            let mut db = Db::open(&dir).unwrap();
+            db.put(b"k", b"v").unwrap();
+            db.flush().unwrap();
+            // Flush pipeline rotated the non-empty WAL once.
+            let after_flush = current_manifest_num(&dir);
+            assert!(after_flush >= 1);
+            for _ in 0..8 {
+                db.try_rotate_wal_if_idle().unwrap();
+            }
+            assert_eq!(
+                current_manifest_num(&dir),
+                after_flush,
+                "idle polls must not rewrite MANIFEST for an empty segment"
+            );
+            // A new append re-arms rotation exactly once.
+            db.put(b"k2", b"v2").unwrap();
+            db.flush().unwrap();
+            let after_second_flush = current_manifest_num(&dir);
+            assert!(after_second_flush > after_flush);
+            for _ in 0..8 {
+                db.try_rotate_wal_if_idle().unwrap();
+            }
+            assert_eq!(current_manifest_num(&dir), after_second_flush);
+            db.close().unwrap();
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 

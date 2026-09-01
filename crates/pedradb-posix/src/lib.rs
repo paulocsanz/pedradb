@@ -86,6 +86,18 @@ pub fn fdatasync_file(file: &File) -> io::Result<()> {
     NS.fetch_add(us * 1000, Relaxed);
     MAX_US.fetch_max(us, Relaxed);
     let n = N.fetch_add(1, Relaxed) + 1;
+    // PEDRA_FDSYNC_CALLERS: print the call stack of every Nth barrier so a
+    // sync storm can be attributed to its emitter (aggregate lines cannot).
+    if let Ok(step) = std::env::var("PEDRA_FDSYNC_CALLERS") {
+        if let Ok(step) = step.parse::<u64>() {
+            if step > 0 && n % step == 0 {
+                println!(
+                    "FDSYNCCALLER n={n}\n{}",
+                    std::backtrace::Backtrace::force_capture()
+                );
+            }
+        }
+    }
     if n % 2048 == 0 {
         println!(
             "FDSYNCDIAG n={n} cum_ms={} avg_us={:.0} max_ms={:.1}",

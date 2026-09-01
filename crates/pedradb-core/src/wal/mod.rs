@@ -388,6 +388,13 @@ impl<F: EnvFile> Wal<F> {
         self.writer.flush()
     }
 
+    /// Logical bytes written to the current segment (framed payload size;
+    /// preallocated space beyond EOF does not count).
+    #[must_use]
+    pub fn position(&self) -> u64 {
+        self.writer.position()
+    }
+
     /// Flush and close the underlying file.
     ///
     /// # Errors
