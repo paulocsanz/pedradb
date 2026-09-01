@@ -451,6 +451,8 @@ pub struct ReadProbeSnap {
     pub block_cache_misses: u64,
     /// SST blocks actually decompressed on this thread since last reset.
     pub blocks_decoded: u64,
+    /// Probes served without a CRC re-run (verified-residency marks).
+    pub blocks_crc_skipped: u64,
     /// `lookup` answered from a mem layer (no SST probe).
     pub get_mem_hit: u64,
     /// `lookup` had to probe SSTs.
@@ -2347,6 +2349,7 @@ impl<E: Env> Db<E> {
         self.mvcc_ns_copy.store(0, Ordering::Relaxed);
         self.block_cache.reset_stats();
         crate::sst::reset_sst_blocks_decoded();
+        crate::sst::reset_sst_block_crc_skipped();
     }
 
     /// Snapshot of latest/scan counters + LSM shape (RFC-0035 P0).
@@ -2366,6 +2369,7 @@ impl<E: Env> Db<E> {
             block_cache_hits: self.block_cache.hits(),
             block_cache_misses: self.block_cache.misses(),
             blocks_decoded: crate::sst::sst_blocks_decoded() as u64,
+            blocks_crc_skipped: crate::sst::sst_block_crc_skipped() as u64,
             get_mem_hit: self.get_mem_hit.load(Ordering::Relaxed),
             get_sst_fallback: self.get_sst_fallback.load(Ordering::Relaxed),
             get_inline: self.get_inline.load(Ordering::Relaxed),

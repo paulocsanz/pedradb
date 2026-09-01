@@ -95,6 +95,22 @@ thread_local! {
     static SST_BLOCKS_DECODED: Cell<usize> = const { Cell::new(0) };
 }
 
+thread_local! {
+    /// Probes served without a CRC re-run (verified-residency marks).
+    static SST_BLOCK_CRC_SKIPPED: Cell<usize> = const { Cell::new(0) };
+}
+
+/// Reset the thread-local CRC-skip counter (verified-residency tests).
+pub fn reset_sst_block_crc_skipped() {
+    SST_BLOCK_CRC_SKIPPED.with(|c| c.set(0));
+}
+
+/// CRC re-runs skipped via verified-residency marks since the last reset.
+#[must_use]
+pub fn sst_block_crc_skipped() -> usize {
+    SST_BLOCK_CRC_SKIPPED.with(Cell::get)
+}
+
 /// Reset the thread-local SST block-decode counter (RFC-0033 tests).
 pub fn reset_sst_blocks_decoded() {
     SST_BLOCKS_DECODED.with(|c| c.set(0));
@@ -252,7 +268,7 @@ impl SstTable {
 
     #[cfg(test)]
     pub(crate) fn payload_resident(&self) -> bool {
-        !self.payload.read().is_empty()
+        !self.payload.read().img.is_empty()
     }
 
     /// Weak handle to the shared payload slot (pool registration).
@@ -438,7 +454,7 @@ impl SstTable {
             let mut served_from_file = false;
             {
                 let g = self.payload.read();
-                let p: &Arc<[u8]> = &g;
+                let p: &Arc<[u8]> = &g.img;
                 if p.is_empty() {
                     served_from_file = true;
                 } else {
@@ -455,17 +471,59 @@ impl SstTable {
                             self.path.display()
                         )));
                     }
-                    SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
-                    if let Some(found) = seek_point_in_block_image(
-                        &p[start..end],
-                        self.compressed_blocks,
-                        user_key,
-                        snapshot,
-                        &mut scratch.plain,
-                        &self.path,
-                    )? {
-                        if best.as_ref().is_none_or(|(s, _)| found.0 > *s) {
-                            best = Some(found);
+                    // Verified-residency fast path (RFC-0077 fail-closed):
+                    // a mark set for exactly these resident bytes skips the
+                    // per-probe CRC re-run — the first probe of a residency
+                    // verifies and marks under the write guard, and every
+                    // payload write installs fresh, empty marks. RocksDB's
+                    // cached blocks carry the same contract.
+                    if g.is_verified(bi) {
+                        SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
+                        SST_BLOCK_CRC_SKIPPED.with(|c| c.set(c.get().saturating_add(1)));
+                        let img = &p[start..end];
+                        if img.len() < 4 {
+                            return Err(CoreError::Internal(format!(
+                                "SST block CRC truncated in {}",
+                                self.path.display()
+                            )));
+                        }
+                        if let Some(found) = seek_point_in_block_body(
+                            &img[..img.len() - 4],
+                            self.compressed_blocks,
+                            user_key,
+                            snapshot,
+                            &mut scratch.plain,
+                            &self.path,
+                        )? {
+                            if best.as_ref().is_none_or(|(s, _)| found.0 > *s) {
+                                best = Some(found);
+                            }
+                        }
+                    } else {
+                        drop(g);
+                        let mut w = self.payload.write();
+                        let p: &Arc<[u8]> = &w.img;
+                        if p.is_empty() || end > p.len() {
+                            // Evicted (or re-installed shorter) between the
+                            // guards: serve this block from file.
+                            drop(w);
+                            served_from_file = true;
+                        } else {
+                            SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
+                            let found = seek_point_in_block_image(
+                                &p[start..end],
+                                self.compressed_blocks,
+                                user_key,
+                                snapshot,
+                                &mut scratch.plain,
+                                &self.path,
+                            )?;
+                            w.mark_verified(bi, self.index.len());
+                            if let Some(found) = found {
+                                if best.as_ref().is_none_or(|(s, _)| found.0 > *s) {
+                                    best = Some(found);
+                                }
+                            }
                         }
                     }
                 }
@@ -757,7 +815,7 @@ impl SstTable {
         })?;
         {
             let g = self.payload.read();
-            let p: &Arc<[u8]> = &g;
+            let p: &Arc<[u8]> = &g.img;
             if !p.is_empty() {
                 SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
                 return decode_block_from_payload(
@@ -811,7 +869,7 @@ impl SstTable {
     fn ensure_payload(&self, kit: &PayloadKit) -> Result<Arc<[u8]>> {
         {
             let g = self.payload.read();
-            let p: &Arc<[u8]> = &g;
+            let p: &Arc<[u8]> = &g.img;
             if !p.is_empty() {
                 return Ok(Arc::clone(p));
             }
@@ -827,7 +885,9 @@ impl SstTable {
                 self.payload_len
             )));
         }
-        *self.payload.write() = Arc::clone(&body);
+        // Fresh residency installs fresh (empty) CRC marks — a mark from the
+        // previous residency must never trust new bytes.
+        *self.payload.write() = crate::cache::ResidentBody::from_image(Arc::clone(&body));
         kit.pool.register(
             &self.path,
             self.payload_slot_weak(),
@@ -1186,7 +1246,9 @@ impl SstTable {
         );
         Ok(Self {
             path: path.to_path_buf(),
-            payload: Arc::new(parking_lot::RwLock::new(payload)),
+            payload: Arc::new(parking_lot::RwLock::new(
+                crate::cache::ResidentBody::from_image(payload),
+            )),
             payload_len,
             compressed_blocks,
             block_crc,
@@ -1228,7 +1290,9 @@ impl SstTable {
         let payload_len = payload.len();
         Self {
             path,
-            payload: Arc::new(parking_lot::RwLock::new(payload)),
+            payload: Arc::new(parking_lot::RwLock::new(
+                crate::cache::ResidentBody::from_image(payload),
+            )),
             payload_len,
             compressed_blocks,
             block_crc,
@@ -1783,6 +1847,19 @@ fn seek_point_in_block_image(
     path: &Path,
 ) -> Result<Option<(SequenceNumber, Lookup)>> {
     let body = split_block_crc(raw, path)?;
+    seek_point_in_block_body(body, compressed, user_key, snapshot, plain_scratch, path)
+}
+
+/// Seek a CRC-stripped block body the caller already verified: decompress
+/// when lz4, then walk. No CRC work — the verified-residency fast path.
+fn seek_point_in_block_body(
+    body: &[u8],
+    compressed: bool,
+    user_key: &[u8],
+    snapshot: SequenceNumber,
+    plain_scratch: &mut Vec<u8>,
+    path: &Path,
+) -> Result<Option<(SequenceNumber, Lookup)>> {
     let plain: &[u8] = if compressed {
         let (size, input) = lz4_flex::block::uncompressed_size(body).map_err(|e| {
             CoreError::Internal(format!(
@@ -2546,7 +2623,9 @@ fn write_sst_try_sorted_body(
     );
     Ok(SstTable {
         path: path.to_path_buf(),
-        payload: Arc::new(parking_lot::RwLock::new(payload)),
+        payload: Arc::new(parking_lot::RwLock::new(
+                crate::cache::ResidentBody::from_image(payload),
+            )),
         payload_len,
         compressed_blocks: policy_compress,
         block_crc: policy_compress,
@@ -3068,7 +3147,7 @@ mod tests {
         ];
         let table = SstTable {
             path: PathBuf::from("/tmp/hand-made-mid-key-split.sst"),
-            payload: Arc::new(parking_lot::RwLock::new(Arc::from(vec![]))),
+            payload: Arc::new(parking_lot::RwLock::new(crate::cache::ResidentBody::empty())),
             payload_len: 0,
             compressed_blocks: false,
             block_crc: false,
@@ -3423,9 +3502,9 @@ mod tests {
         let h0 = table.index[0].clone();
         {
             let mut g = table.payload.write();
-            let mut body = g.as_ref().to_vec();
+            let mut body = g.img.as_ref().to_vec();
             body[h0.offset as usize + 1] ^= 0xff;
-            *g = Arc::from(body.into_boxed_slice());
+            *g = crate::cache::ResidentBody::from_image(Arc::from(body.into_boxed_slice()));
         }
         let err = table
             .point_at_seeking(b"key-00000", u64::MAX, &mut scratch)
@@ -3438,6 +3517,66 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    /// Verified-residency marks (RFC-0077): the first resident probe verifies
+    /// and marks, later probes skip the CRC re-run, and any payload swap
+    /// installs fresh marks — so a swapped image re-verifies (and a rotten one
+    /// fails closed instead of reading stale-verified bytes).
+    #[test]
+    fn point_seek_verified_marks_skip_crc_and_invalidate_on_swap() {
+        let path = temp_path();
+        let mut mem = MemTable::new();
+        for i in 0..200u32 {
+            let key = format!("key-{i:05}").into_bytes();
+            mem.put(key, u64::from(i), vec![(i % 251) as u8; 60]);
+        }
+        let table = write_sst(&path, &mem).unwrap();
+        assert!(table.block_count() >= 2, "need multiple blocks");
+        let mut scratch = PointSeekScratch::default();
+
+        reset_sst_block_crc_skipped();
+        let first = table
+            .point_at_seeking(b"key-00000", u64::MAX, &mut scratch)
+            .unwrap();
+        assert_eq!(sst_block_crc_skipped(), 0, "first probe verifies, no skip");
+
+        let second = table
+            .point_at_seeking(b"key-00000", u64::MAX, &mut scratch)
+            .unwrap();
+        assert_eq!(
+            sst_block_crc_skipped(),
+            table.blocks_for_point(b"key-00000").count(),
+            "repeat probe skips CRC per probed block"
+        );
+        assert_eq!(first, second, "skipped probe answers identically");
+
+        // Swapping in a fresh Arc of the SAME bytes must drop the marks.
+        reset_sst_block_crc_skipped();
+        let img_copy: Arc<[u8]> = Arc::from(table.payload.read().img.as_ref().to_vec());
+        *table.payload.write() = crate::cache::ResidentBody::from_image(img_copy);
+        let third = table
+            .point_at_seeking(b"key-00000", u64::MAX, &mut scratch)
+            .unwrap();
+        assert_eq!(sst_block_crc_skipped(), 0, "swap invalidates marks");
+        assert_eq!(first, third);
+
+        // A rotten swapped image must fail closed, not read as verified.
+        let h0 = table.index[0].clone();
+        {
+            let mut g = table.payload.write();
+            let mut body = g.img.as_ref().to_vec();
+            body[h0.offset as usize + 1] ^= 0xff;
+            *g = crate::cache::ResidentBody::from_image(Arc::from(body.into_boxed_slice()));
+        }
+        let err = table
+            .point_at_seeking(b"key-00000", u64::MAX, &mut scratch)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("CRC"),
+            "rotten swap must fail closed; got {err:?}"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
     #[test]
     fn evicted_payload_without_kit_fails_closed() {
         let path = temp_path();
@@ -3445,7 +3584,7 @@ mod tests {
         mem.put(&b"k"[..], 1, &b"v"[..]);
         let table = write_sst(&path, &mem).unwrap();
         // Free-standing table: force-clear the slot, no kit attached.
-        *table.payload.write() = Arc::from([]);
+        *table.payload.write() = crate::cache::ResidentBody::empty();
         let err = table.decode_block(0).unwrap_err();
         assert!(
             err.to_string().contains("file source"),
@@ -3488,7 +3627,7 @@ mod tests {
         table.attach_payload_kit(&source, &pool);
         assert!(table.payload_resident(), "fits the budget, stays resident");
         // Force eviction by hand (pool is at no pressure).
-        *table.payload.write() = Arc::from([]);
+        *table.payload.write() = crate::cache::ResidentBody::empty();
         assert!(!table.payload_resident());
         let reloaded = table.materialize_entries().unwrap();
         assert_eq!(reloaded, expected, "whole-body reload must decode equally");
@@ -3496,7 +3635,7 @@ mod tests {
         assert!(table.payload_resident());
 
         // Bitrot after eviction must refuse, never decode garbage.
-        *table.payload.write() = Arc::from([]);
+        *table.payload.write() = crate::cache::ResidentBody::empty();
         let raw = std::fs::read(&path).unwrap();
         let mut corrupt = raw.clone();
         corrupt[60] ^= 0x40;

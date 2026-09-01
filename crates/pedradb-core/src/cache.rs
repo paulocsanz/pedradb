@@ -186,7 +186,56 @@ impl TableCache {
 /// Shared, evictable SST payload slot (RFC-0042 v18).
 ///
 /// Non-empty = file body resident; empty = evicted, blocks served from file.
-pub type PayloadSlot = parking_lot::RwLock<Arc<[u8]>>;
+/// `verified` carries per-block CRC marks for exactly the resident image:
+/// the point seek re-verifies a block's CRC32C only on its first probe of a
+/// residency (RocksDB's checksum-on-read-into-cache contract); any payload
+/// write installs fresh, empty marks — fail-closed under replacement.
+pub type PayloadSlot = parking_lot::RwLock<ResidentBody>;
+
+/// Resident payload image plus its CRC-verified block marks.
+#[derive(Debug, Clone, Default)]
+pub struct ResidentBody {
+    /// Resident image; empty = evicted.
+    pub img: Arc<[u8]>,
+    /// One bit per data block (index order), trusted only for `img`.
+    verified: Option<Box<[u64]>>,
+}
+
+impl ResidentBody {
+    /// Resident image, nothing yet verified.
+    #[must_use]
+    pub fn from_image(img: Arc<[u8]>) -> Self {
+        Self {
+            img,
+            verified: None,
+        }
+    }
+
+    /// Empty (evicted) body.
+    #[must_use]
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    /// Whether block `bi`'s CRC is already verified for this image.
+    #[must_use]
+    pub fn is_verified(&self, bi: usize) -> bool {
+        self.verified
+            .as_ref()
+            .is_some_and(|bits| bi / 64 < bits.len() && bits[bi / 64] & (1 << (bi % 64)) != 0)
+    }
+
+    /// Mark block `bi` verified; `block_count` sizes the bit set on first mark.
+    pub fn mark_verified(&mut self, bi: usize, block_count: usize) {
+        let words = block_count.div_ceil(64);
+        let bits = self
+            .verified
+            .get_or_insert_with(|| vec![0u64; words].into_boxed_slice());
+        if bi / 64 < bits.len() {
+            bits[bi / 64] |= 1 << (bi % 64);
+        }
+    }
+}
 
 /// Bounds the total resident bytes of SST file bodies (RFC-0042 v18).
 ///
@@ -293,7 +342,7 @@ impl SstPayloadPool {
             };
             // A dropped table leaves a dead Weak: entry removed, bytes returned.
             if let Some(slot) = entry.slot.upgrade() {
-                *slot.write() = Arc::from([]);
+                *slot.write() = ResidentBody::empty();
             }
             g.total = g.total.saturating_sub(entry.bytes);
         }
@@ -1448,7 +1497,7 @@ mod tests {
         let pool = SstPayloadPool::with_budget(Some(150));
         assert_eq!(pool.resident_bytes(), 0);
 
-        let mk = |bytes: &[u8]| StdArc::new(parking_lot::RwLock::new(Arc::from(bytes.to_vec())));
+        let mk = |bytes: &[u8]| StdArc::new(parking_lot::RwLock::new(ResidentBody::from_image(Arc::from(bytes.to_vec()))));
         let s1 = mk(&[1u8; 100]);
         let s2 = mk(&[2u8; 100]);
         let s3 = mk(&[3u8; 100]);
@@ -1457,31 +1506,31 @@ mod tests {
         pool.register(Path::new("a.sst"), StdArc::downgrade(&s1), 100);
         pool.register(Path::new("b.sst"), StdArc::downgrade(&s2), 100);
         assert_eq!(pool.resident_bytes(), 200);
-        assert!(!s1.read().is_empty());
+        assert!(!s1.read().img.is_empty());
 
         pool.arm();
         // Eviction clears whole entries: 200 - 100 (oldest) = 100 ≤ 150.
         assert_eq!(pool.resident_bytes(), 100, "arming enforces the budget");
-        assert!(s1.read().is_empty(), "oldest registration evicted first");
-        assert!(!s2.read().is_empty());
+        assert!(s1.read().img.is_empty(), "oldest registration evicted first");
+        assert!(!s2.read().img.is_empty());
 
         // New table: evicts s2, keeps the newcomer.
         pool.register(Path::new("c.sst"), StdArc::downgrade(&s3), 100);
         assert_eq!(pool.resident_bytes(), 100);
-        assert!(s2.read().is_empty());
-        assert!(!s3.read().is_empty());
+        assert!(s2.read().img.is_empty());
+        assert!(!s3.read().img.is_empty());
         assert_eq!(pool.tracked_tables(), 1, "evicted entries leave the map");
 
         // A reader holding a payload clone keeps its bytes: eviction clears
         // the slot only; the clone frees when the reader drops it.
         let held: Arc<[u8]> = {
             let g = s3.read();
-            Arc::clone(&g)
+            Arc::clone(&g.img)
         };
         let s4 = mk(&[4u8; 100]);
         pool.register(Path::new("d.sst"), StdArc::downgrade(&s4), 100);
         assert_eq!(pool.resident_bytes(), 100);
-        assert!(s3.read().is_empty());
+        assert!(s3.read().img.is_empty());
         assert_eq!(
             &held[..3],
             &[3u8, 3, 3],
