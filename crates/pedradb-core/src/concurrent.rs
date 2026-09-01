@@ -2073,6 +2073,7 @@ impl<E: Env> ConcurrentDb<E> {
         #[cfg(feature = "pct")]
         crate::pct_hooks::maybe_yield("op_entry");
         let do_sync = self.resolve_sync(opts);
+        self.assist_flush_debt();
         self.writes
             .submit_one(&self.inner, BatchOp::put(key, value), do_sync)
     }
@@ -2122,6 +2123,7 @@ impl<E: Env> ConcurrentDb<E> {
     /// WAL I/O or sequence exhaustion.
     pub fn delete(&self, key: impl AsRef<[u8]>) -> Result<()> {
         let do_sync = self.resolve_sync(WriteOptions::default());
+        self.assist_flush_debt();
         self.writes
             .submit_one(&self.inner, BatchOp::delete(key), do_sync)
             .map(|_| ())
@@ -2133,6 +2135,7 @@ impl<E: Env> ConcurrentDb<E> {
     /// WAL I/O, bounds, or sequence exhaustion.
     pub fn delete_range(&self, start: impl AsRef<[u8]>, end: impl AsRef<[u8]>) -> Result<()> {
         let do_sync = self.resolve_sync(WriteOptions::default());
+        self.assist_flush_debt();
         self.writes
             .submit(
                 &self.inner,
@@ -2158,6 +2161,7 @@ impl<E: Env> ConcurrentDb<E> {
     /// WAL I/O or sequence exhaustion.
     pub fn apply_batch_vec(&self, ops: Vec<BatchOp>) -> Result<SequenceNumber> {
         let do_sync = self.resolve_sync(WriteOptions::default());
+        self.assist_flush_debt();
         self.writes.submit(&self.inner, ops, do_sync)
     }
 
@@ -2401,6 +2405,33 @@ impl<E: Env> ConcurrentDb<E> {
             }
         }
         true
+    }
+
+    /// RFC-0159 P1.3 (v26): when parked debt is at/above cap, the writer
+    /// materializes **one** parked table inline instead of sleeping for the
+    /// host flush worker (`WriteGroup::await_flush_debt`). On the
+    /// one-effective-core guest the 2 ms poll + worker tick turned each
+    /// parked chunk into seconds of sleep/wake ping-pong (run #27: 21.5 s
+    /// `flush_check_ms`, hydrate +54%) — the materialize work is identical
+    /// either way, so the writer does it immediately and keeps the core
+    /// busy. One table per submit; `await_flush_debt` stays as the bounded
+    /// fallback for debt still at cap (worker behind on several chunks, or
+    /// materialize erroring). Same in-flight rule as `await_flush_debt`:
+    /// called before `begin_submit`, so an assisting writer reads as idle.
+    fn assist_flush_debt(&self) {
+        if !self.writes.flusher_attached.load(Ordering::Relaxed) {
+            return;
+        }
+        let Some(cap) = self.flush_debt_cap() else {
+            return;
+        };
+        if self.parked_unflushed_bytes() < cap {
+            return;
+        }
+        // `#[must_use]`: the bool (did a file get written) is the worker
+        // tick's business; here a `false` just falls through to the
+        // bounded `await_flush_debt` inside the submit.
+        let _ = self.materialize_parked_once();
     }
 
     /// Persist pending L0s + MANIFEST and rotate WAL when no writer is in
@@ -2788,6 +2819,7 @@ impl<E: Env> ConcurrentDb<E> {
         }
         let do_sync = self.resolve_sync(opts);
         let keys: Vec<Bytes> = read_set.into_iter().collect();
+        self.assist_flush_debt();
         self.writes
             .submit_occ(&self.inner, ops, do_sync, snapshot, keys)
     }
@@ -3368,11 +3400,13 @@ mod tests {
         .unwrap()
     }
 
-    /// Flush backpressure: without a flush worker attached a submit never
-    /// waits on parked debt (nothing would drain it); attached, it waits
-    /// out the debt bounded by `PEDRA_FLUSH_DEBT_MAX_MS`.
+    /// Flush backpressure + v26 assist: without a flush worker attached a
+    /// submit neither waits on parked debt nor drains it (nothing would
+    /// drain it); attached, a submit at debt≥cap materializes one parked
+    /// table **inline** instead of sleeping for the worker (RFC-0159 P1.3,
+    /// run #27: the sleep path cost 21.5 s of `flush_check_ms`).
     #[test]
-    fn submit_flush_debt_waits_only_with_worker_attached() {
+    fn submit_flush_debt_assists_with_worker_attached() {
         std::env::set_var("PEDRA_FLUSH_DEBT_MAX_MS", "120");
         let dir = temp_dir();
         let db = open_debt(&dir);
@@ -3383,7 +3417,10 @@ mod tests {
         let cap = db.flush_debt_cap().expect("cap");
         assert!(db.parked_unflushed_bytes() >= cap, "debt at/above cap");
 
-        // No worker: submit must go straight through despite the debt.
+        // No worker: submit must go straight through despite the debt —
+        // and must not assist (parking without a drainer is the caller's
+        // business; an inline materialize here would be an unattached
+        // writer doing the worker's job for nothing).
         let t0 = std::time::Instant::now();
         db.put(b"straight", b"through").unwrap();
         assert!(
@@ -3391,24 +3428,30 @@ mod tests {
             "unattached submit waited {:?}",
             t0.elapsed()
         );
+        assert_eq!(db.parked_unflushed_count(), 1, "no assist unattached");
 
-        // Attached: submit waits out the debt (120 ms cap), then commits.
+        // Attached: submit drains the parked table itself — no worker
+        // thread exists here, so parked==0 after the put proves the
+        // writer materialized inline (the sleep path would wait out the
+        // 120 ms ceiling and leave the debt parked).
         db.set_flush_worker_attached(true);
         let t0 = std::time::Instant::now();
         db.put(b"throttled", b"ok").unwrap();
         let waited = t0.elapsed();
         assert!(
-            waited >= Duration::from_millis(100),
-            "attached submit did not throttle (waited {waited:?})"
+            waited < Duration::from_millis(2000),
+            "attached submit stalled {waited:?}"
         );
+        assert_eq!(db.parked_unflushed_count(), 0, "writer did not assist");
         assert_eq!(db.get(b"throttled").as_deref(), Some(b"ok".as_ref()));
 
         std::env::remove_var("PEDRA_FLUSH_DEBT_MAX_MS");
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// The throttle releases as soon as materialize drains the parked set —
-    /// a live flush worker keeps writers moving (no deadlock, no full cap).
+    /// Writer-assist and a live flush worker race to drain the same parked
+    /// set (the flush lock is single-flight) — no deadlock, the parked set
+    /// ends empty whichever side wins, and the submit stays quick.
     #[test]
     fn submit_flush_debt_releases_on_materialize() {
         std::env::set_var("PEDRA_FLUSH_DEBT_MAX_MS", "30000");
@@ -3422,7 +3465,9 @@ mod tests {
         let drainer = std::sync::Arc::clone(&db);
         let flusher = thread::spawn(move || {
             thread::sleep(Duration::from_millis(60));
-            assert!(drainer.materialize_parked_once());
+            // The writer may have already assisted this table inline —
+            // either winner leaves the parked set drained.
+            let _ = drainer.materialize_parked_once();
         });
         let t0 = std::time::Instant::now();
         db.put(b"after", b"drain").unwrap();
@@ -3433,6 +3478,7 @@ mod tests {
             "submit did not release on drain (waited {waited:?})"
         );
         assert_eq!(db.parked_unflushed_count(), 0);
+        assert_eq!(db.get(b"after").as_deref(), Some(b"drain".as_ref()));
 
         std::env::remove_var("PEDRA_FLUSH_DEBT_MAX_MS");
         let _ = fs::remove_dir_all(&dir);
@@ -3696,7 +3742,10 @@ mod tests {
             .iter()
             .filter(|m| m.cf == "data" && m.level != crate::db::MAX_LSM_LEVEL)
             .count();
-        let meta_l0 = meta.iter().filter(|m| m.cf == "meta" && m.level == 0).count();
+        let meta_l0 = meta
+            .iter()
+            .filter(|m| m.cf == "meta" && m.level == 0)
+            .count();
         assert_eq!(
             data_elsewhere, 0,
             "every data chunk must land at the bottom level"
@@ -3721,11 +3770,7 @@ mod tests {
             .count();
         assert_eq!(bottom, 1, "reopen must restore the bottom-level chunk");
         for (i, k) in keys.iter().enumerate() {
-            assert_eq!(
-                db2.get(k).as_deref(),
-                Some(&v[..]),
-                "post-reopen key {i}"
-            );
+            assert_eq!(db2.get(k).as_deref(), Some(&v[..]), "post-reopen key {i}");
         }
         let _ = fs::remove_dir_all(&dir);
     }

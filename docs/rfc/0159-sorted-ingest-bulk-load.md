@@ -120,8 +120,20 @@ sorted-ingest-architecture.md` (+ `run19-v21p-guest-25m.txt`).
   used `auto_flush_threshold()` which ignored per-CF overrides; fix makes
   it max(global, per-CF) (`findings/
   2026-08-30-slipstream-compat-perf/p13-chunk-threshold-root-cause.md`);
-  probe A/B 4→1 parks at the 16 MiB CF limit. — status: `fix landed,
-  guest chunk-size run pending (v25, after v24 measures P1.1)`
+  probe A/B 4→1 parks at the 16 MiB CF limit. Guest run #27 (v25, 25M):
+  23×256 MiB chunks as designed but hydrate 116.0 s (+54% vs v24 75.6) —
+  two mechanisms, each with its own counter: (a) `flush_check_ms` 18.7 →
+  21474 — `MemTable::take_family` partitions by reinserting every key
+  (256 MiB ≈ 2.6 M keys ≈ 0.9 s/chunk on the writer's commit path; never
+  hit pre-fix because data never reached its per-CF limit in the active
+  mem), fixed by a `split_off` node-move partition + subtractive stats
+  (v27); (b) flush-debt at cap = one chunk parks the writer into
+  2 ms-poll sleeps while the worker materializes (≈ 33 s dead wall,
+  run #27b repeat reproduced 120.5 s), fixed by writer assist-drain:
+  at debt ≥ cap the submit materializes one parked table inline (v26).
+  Reads did NOT move with 23 vs 88 files — the v24/v25 read deltas were
+  host-load contamination (gate load 34, six qemu at ~200%). — status:
+  `v26+v27 landed, guest verification run pending (host still loaded)`
 
 ### P2 — later / polish
 
@@ -141,7 +153,7 @@ sorted-ingest-architecture.md` (+ `run19-v21p-guest-25m.txt`).
 | P0.5 | p0 | Local A/B + guest verdict | done | local 6M A/B (`9698caf`): hydrate −39…−45 %, settle −25…−43 %; guest run #23 (25M): settle 84.9→2.3 s = **3.61× vs Rocks 8.3 s**, hydrate 157.0→73.6 s (0.34×), reads flat; 73 BULKDIAG (72 parked + 1 flush) | 2026-09-01 |
 | P1.1 | p1 | Materialize per-byte cut (direct block encode + lz4 probe) | in-progress (code+tests+local A/B: FLUSHDUR −13 %, disk identical; guest pending) | `table.rs` | 2026-09-01 |
 | P1.2 | p1 | Batched manifest persists | todo | — | 2026-08-31 |
-| P1.3 | p1 | Chunk-size: per-CF buffer governs stage threshold | fix landed (probe 4→1 parks at the CF limit); guest run pending | `db.rs` | 2026-09-01 |
+| P1.3 | p1 | Chunk-size: per-CF buffer governs stage threshold | fix landed; guest run #27: 256MiB chunks regress hydrate +54% — (a) `take_family` reinsert loop 21.5s flush_check (fixed: split_off partition, v27) + (b) flush-debt sleep ping-pong ≈33s (fixed: writer assist-drain, v26); reads unaffected by chunk count (host-load contamination found); v26+v27 guest run pending | `concurrent.rs`, `memtable.rs`, `db.rs` | 2026-09-01 |
 | P2.1 | p2 | Nearly-sorted window | todo | — | 2026-08-31 |
 | P2.2 | p2 | 100M rung via bulk mode | todo | — | 2026-08-31 |
 

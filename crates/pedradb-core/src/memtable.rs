@@ -641,6 +641,13 @@ impl MemTable {
     #[must_use]
     pub fn take_family(&mut self, family: &str) -> Self {
         self.spill_tail();
+        if !family.is_empty()
+            && family != "default"
+            && !family.as_bytes().contains(&0)
+            && !self.map.is_empty()
+        {
+            return self.take_family_contiguous(family);
+        }
         let map = std::mem::take(&mut self.map);
         let mut taken_map = BTreeMap::new();
         for (k, vers) in map {
@@ -654,6 +661,68 @@ impl MemTable {
         let mut taken = Self::new();
         taken.map = taken_map;
         taken.recount();
+        taken
+    }
+
+    /// `take_family` for a NUL-free prefixed family: its `cf\0…` keys form
+    /// one contiguous BTreeMap range, so partition with `split_off` (whole
+    /// node moves) instead of reinserting every key into a fresh map. The
+    /// reinsert loop cost ~0.9 s per 256 MiB chunk inside the commit-tail
+    /// flush check once staging moved to per-CF thresholds (run #27:
+    /// 21.5 s `flush_check_ms`, +54% hydrate). `taken` stats come from one
+    /// pass over the taken range (single cf prefix — no per-version
+    /// `cf_bytes` lookups); the keeper keeps its incrementally-maintained
+    /// counters minus that pass. `tail_max_seq` of the keeper may stay at
+    /// the pre-take max: it only gates iteration strategy and the stale
+    /// value errs toward the generic iterator.
+    fn take_family_contiguous(&mut self, family: &str) -> Self {
+        let f = family.as_bytes();
+        let mut start = Vec::with_capacity(f.len() + 1);
+        start.extend_from_slice(f);
+        start.push(0);
+        let mut end = Vec::with_capacity(f.len() + 1);
+        end.extend_from_slice(f);
+        end.push(1);
+        let mut map = std::mem::take(&mut self.map);
+        // [start, end): exactly the keys `key_in_cf_family` claims — a
+        // NUL-free family prefix cannot be a proper prefix of a longer
+        // family's range (`route\0…` < `route2\0…` byte-wise).
+        let mut upper = map.split_off(end.as_slice());
+        let taken_map = map.split_off(start.as_slice());
+        map.append(&mut upper);
+        self.map = map;
+        self.invalidate_tail_ord();
+
+        let mut taken = Self::new();
+        taken.map = taken_map;
+        let mut bytes = 0usize;
+        let mut entries = 0usize;
+        let mut tombs = 0usize;
+        let mut max_seq = 0;
+        for (uk, vers) in &taken.map {
+            for v in vers.iter() {
+                let n = uk.len() + v.value.len() + 8;
+                bytes = bytes.saturating_add(n);
+                entries = entries.saturating_add(1);
+                if v.key.sequence > max_seq {
+                    max_seq = v.key.sequence;
+                }
+                if v.key.kind == ValueType::RangeDeletion {
+                    tombs = tombs.saturating_add(1);
+                }
+            }
+        }
+        taken.approx_bytes = bytes;
+        taken.entries = entries;
+        taken.range_tombstones = tombs;
+        taken.tail_max_seq = max_seq;
+        if !taken.map.is_empty() {
+            taken.cf_bytes.insert(Bytes::copy_from_slice(f), bytes);
+        }
+        self.approx_bytes = self.approx_bytes.saturating_sub(bytes);
+        self.entries = self.entries.saturating_sub(entries);
+        self.range_tombstones = self.range_tombstones.saturating_sub(tombs);
+        self.cf_bytes.remove(&f[..]);
         taken
     }
 
@@ -2549,6 +2618,70 @@ mod tests {
         );
         assert_eq!(mt.get(b"lock\0a", 10), Lookup::NotFound);
         assert_eq!(lock.approx_memory_usage_cf("default"), 0);
+    }
+
+    #[test]
+    fn take_family_contiguous_partition_exact() {
+        // Fast path (split_off partition) vs the loop's contract:
+        // membership, per-family bytes, version counts, range tombstones —
+        // with boundary keys sorting adjacent to the family range
+        // (`route` raw, `route\0` empty user key, `route2\0…`, raw `s`).
+        let mut mt = MemTable::new();
+        mt.put(b"route\0k1".as_slice(), 1, b"v1".as_slice());
+        mt.put(b"route\0k2".as_slice(), 2, b"v2".as_slice());
+        mt.put(b"route\0k2".as_slice(), 5, b"v2-newer".as_slice());
+        mt.put(b"route\0".as_slice(), 3, b"empty-user-key".as_slice());
+        mt.put(b"route".as_slice(), 4, b"raw-default".as_slice());
+        mt.put(b"route2\0z".as_slice(), 6, b"r2".as_slice());
+        mt.put(b"lock\0x".as_slice(), 7, b"L".as_slice());
+        mt.put(b"s".as_slice(), 8, b"raw-s".as_slice());
+        mt.delete_range(b"route\0k1".as_slice(), b"route\0k9".as_slice(), 9);
+        let before_total = mt.approx_memory_usage();
+        let before_route = mt.approx_memory_usage_cf("route");
+        let before_len = mt.len();
+        assert!(mt.has_range_tombstones());
+
+        let taken = mt.take_family("route");
+
+        // Membership: family keys move, boundary keys stay.
+        assert_eq!(
+            taken.get(b"route\0k2", 8),
+            Lookup::Found(Bytes::from_static(b"v2-newer"))
+        );
+        assert_eq!(
+            taken.get(b"route\0", 8),
+            Lookup::Found(Bytes::from_static(b"empty-user-key"))
+        );
+        assert_eq!(mt.get(b"route\0k2", 8), Lookup::NotFound);
+        assert_eq!(
+            mt.get(b"route", 8),
+            Lookup::Found(Bytes::from_static(b"raw-default"))
+        );
+        assert_eq!(
+            mt.get(b"route2\0z", 8),
+            Lookup::Found(Bytes::from_static(b"r2"))
+        );
+        assert_eq!(
+            mt.get(b"lock\0x", 8),
+            Lookup::Found(Bytes::from_static(b"L"))
+        );
+        assert_eq!(mt.get(b"s", 8), Lookup::Found(Bytes::from_static(b"raw-s")));
+
+        // Conservation: bytes, versions, tombstones split exactly.
+        assert_eq!(taken.approx_memory_usage(), before_route);
+        assert_eq!(mt.approx_memory_usage(), before_total - before_route);
+        assert_eq!(mt.len() + taken.len(), before_len);
+        assert_eq!(mt.approx_memory_usage_cf("route"), 0);
+        assert!(taken.has_range_tombstones());
+        assert!(!mt.has_range_tombstones());
+
+        // Keeper counters keep working incrementally after the family
+        // entry was dropped from `cf_bytes` (re-created on the next put).
+        mt.put(b"route\0new".as_slice(), 10, b"n".as_slice());
+        assert_eq!(
+            mt.approx_memory_usage_cf("route"),
+            b"route\0new".len() + 1 + 8
+        );
     }
 
     #[test]
