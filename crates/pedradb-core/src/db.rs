@@ -8913,6 +8913,23 @@ fn finish_group_results(
 
 impl<E: Env> Drop for Db<E> {
     fn drop(&mut self) {
+        // PEDRA_WRITE_PHASE_STATS: one summary line at teardown so a bench
+        // run can attribute hydrate wall time to the commit phases
+        // (RFC-0159 P1.1). No-op when the env was unset at open.
+        if let Some(st) = &self.phase_stats {
+            let ms = |v: &AtomicU64| v.load(Ordering::Relaxed) as f64 / 1e6;
+            println!(
+                "WRITEPHASE commits={} prepare_ms={:.1} wal_ms={:.1} mem_ms={:.1} \
+                 publish_ms={:.1} flush_check_ms={:.1} lock_wait_ms={:.1}",
+                st.commits.load(Ordering::Relaxed),
+                ms(&st.prepare_ns),
+                ms(&st.wal_ns),
+                ms(&st.mem_ns),
+                ms(&st.publish_ns),
+                ms(&st.flush_check_ns),
+                ms(&st.lock_wait_ns),
+            );
+        }
         // Prefer Env unlock so FailingEnv can observe release; Drop of DirLock
         // is std best-effort only if release already ran or Env fails here.
         if let Some(mut lock) = self.dir_lock.take() {

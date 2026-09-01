@@ -1,0 +1,42 @@
+Guest run #24 — v23 REPEAT (recovery run), 25M entries, 2026-09-01
+==================================================================
+
+Context: the pre-compaction zombie task fired the old v21p injector on the
+gate after run #23, clobbering the v23 image. Recovery re-ran
+`/tmp/inject-v23-gate.sh` (MD5_OK x5, entrypoint restored with
+PEDRA_BULK_DIAG=1, no PARALLEL_JOBS). The bench this restart launched doubles
+as a run #23 repeat for noise arbitration. Stale v21p/v22 gate injectors have
+since been deleted (`inject-v21p-gate.sh`, `inject-v22-gate.sh`, plus
+inject_v21h/v21k..v21o); only `inject-v23-gate.sh` + `.v23` staging files
+remain.
+
+Legs (rocks 25M baselines in parens; ratio = pedra/rocks):
+
+- hydrate/pedradb: 25000000 entries in 72.5s (0.34M entries/s); disk 10.92 GiB
+  (469 B/entry)                     [rocks 25.3s -> 0.35x; #23 was 73.6s]
+- settle/pedradb: 3.0s; disk after 5.15 GiB
+  [rocks 8.3s -> 2.77x WIN; #23 was 2.3s = 3.61x]
+- probe_hit p50 47.2us / p90 67.0us / p99 120.3us / p999 637.2us / max 15.5ms
+  [rocks 45.4us -> 0.96x; #23 was 54.9us = 0.83x]
+- probe_miss p50 2.7us / p90 3.0us / p99 6.3us / p999 27.3us / max 1.6ms
+  [~1x]
+- get_hit   time: [47.037us 48.467us 50.009us]
+  [rocks 38.59us -> 0.80x; #23 median 47.007us = 0.82x]
+- prefix_scan time: [447.39us 454.68us 463.48us]
+  [rocks 305.6us -> 0.67x; #23 median 457.07us = 0.67x]
+- lookup_100 get_loop   time: [4.3644ms 4.4922ms 4.6381ms]
+  [rocks 3.38ms -> 0.75x; #23 median 4.9627ms = 0.68x]
+- lookup_100 multi_get  time: [4.5671ms 4.6737ms 4.7881ms]
+  [rocks 3.70ms -> 0.79x; #23 median 5.1830ms = 0.71x]
+- BENCH_EXIT_pedradb_diag=0
+- BULKDIAG: 73 installs (72 install_parked + 1 install_flush, family=data
+  level=3) — identical funnel mix to #23.
+
+Verdict: run #23 is CONFIRMED, both write legs and every read leg within the
+documented single-run swing. Settle crossing at 25M is stable (2.3-3.0s vs
+rocks 8.3s = 2.8-3.6x, Pedra still fdatasyncing before Ok). Remaining gaps at
+25M, ranked: hydrate 0.35x (commit CPU — RFC-0159 P1.1), prefix_scan 0.67x,
+get_loop 0.75x, multi_get 0.79x, get_hit 0.80x, probe_hit 0.96x, probe_miss
+~1x. probe_hit arbitration: #13 33.9us / #19 52.6us / #23 54.9us / #24 47.2us
+vs rocks 45.4us — the leg swings 16-60% run-to-run; v23 sits at 0.83-0.96x,
+treat probe_hit as ~parity-within-noise, not a tracked gap.

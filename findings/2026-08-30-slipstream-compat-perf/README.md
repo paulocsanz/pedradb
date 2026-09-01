@@ -1568,3 +1568,30 @@ and one family cannot batch L0→L1 jobs that share the L1 slice);
   concurrency and not the disk. Next levers: cheaper encode per byte in
   `table.rs` (mine) and/or write-amp reduction (2.15×: 10.85 GiB written
   for 5.15 GiB settled) via level-target/slice-cap tuning.
+
+## Guest run #24 (v23 REPEAT — post-zombie recovery run, 25M) — run #23 CONFIRMED leg-for-leg; stale gate injectors deleted
+
+The pre-compaction zombie task fired the old v21p injector on the gate after
+run #23, clobbering the v23 image (entrypoint lost `PEDRA_BULK_DIAG`).
+Recovery re-ran `/tmp/inject-v23-gate.sh` — MD5_OK ×5, entrypoint restored
+(BULK_DIAG on, PARALLEL_JOBS dropped) — and the bench that restart launched
+doubles as a run #23 repeat. Full capture:
+`run24-v23-repeat-25m.txt`.
+
+- **hydrate 72.5 s** (#23: 73.6) = 0.35× rocks 25.3 s; **settle 3.0 s**
+  (#23: 2.3) = **2.77× rocks 8.3 s** — the write-leg crossing at 25M is
+  stable at 2.8–3.6×, Pedra still fdatasyncing before Ok. 73 BULKDIAG
+  (72 parked + 1 flush) — identical funnel mix to #23.
+- Read legs, repeat vs #23 (rocks): get_hit 48.47 vs 47.01 µs (38.59) =
+  0.80×/0.82×; prefix_scan 454.7 vs 457.1 µs (305.6) = 0.67×/0.67×;
+  get_loop 4.4922 vs 4.9627 ms (3.38) = 0.75×/0.68×; multi_get 4.6737 vs
+  5.1830 ms (3.70) = 0.79×/0.71×; probe_hit 47.2 vs 54.9 µs (45.4) =
+  0.96×/0.83×; probe_miss 2.7 µs ≈ 1×. Ranked remaining gaps at 25M:
+  **hydrate 0.35× (commit CPU, RFC-0159 P1.1) > prefix_scan 0.67× >
+  get_loop 0.75× > multi_get 0.79× > get_hit 0.80×** > probe_hit ~parity.
+- **probe_hit arbitration closed:** #13 33.9 / #19 52.6 / #23 54.9 /
+  #24 47.2 µs vs rocks 45.4 — the leg swings up to 60 % run-to-run; v23
+  sits at 0.83–0.96×. Treat as parity-within-noise, stop tracking it.
+- Gate hygiene: `inject-v21p-gate.sh`, `inject-v22-gate.sh`,
+  `inject_v21h/v21k..v21o.sh` deleted from the gate; only
+  `inject-v23-gate.sh` + the `.v23` staging files remain.
