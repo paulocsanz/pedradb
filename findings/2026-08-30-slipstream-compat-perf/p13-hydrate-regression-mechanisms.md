@@ -448,3 +448,36 @@ Implications: (a) cross-run comparisons must record gate load
 band, not code; (c) the ≥1×-vs-rocks ladder numbers are only sound
 when both backends ran under comparable load (the parity harness runs
 them together, so ratios are safe; absolute walls are not).
+
+## Run #33 (PARKDIAG2 sub-timers, load ~14, wall 57.9 s): install and
+## retire fully explained; write stage is the write(2) itself
+
+Hydrate 57.9 s, settle 1.0 s, 85 chunks / 215 files. Phases (load-14
+scale): writer 14.1 (wal 5.6 / mem 7.5 / prepare 1.0), files 33.0
+(enc 14.2 + lz4 6.3 + bloom 2.8 + crc 1.2 + write 7.5 + intra 1.1),
+install 4.7, retire 3.65; counted 55.5 vs wall 57.9 (unattributed
+2.4 s, 4 %). Sub-timers:
+
+- **SST write stage 7.45 s = create 0.02 + write_all 7.43 + close
+  0.0** (rename 0.01 s over 172 files). 99.7 % is the `write(2)` into
+  page cache (~5.15 GiB at ~0.7 GiB/s). No open/close/rename fat —
+  cutting this means cutting bytes (the encode lever) or the copy
+  path itself.
+- **install 4.7 s = span 4.42 + apply 0.21 + pop 0.0**. `bulk_span_level`
+  re-iterates the WHOLE parked memtable per output file (per-key CF
+  prefix check + ascending/tombstone scan) just to decide "append
+  span → L3". The actual in-memory install is 0.2 s. **Kill: maintain
+  the strict-ascending/no-tombstone/per-family property incrementally
+  in MemTable** — O(1) span decision, ~4.4 s here (~3.6 s at load 33);
+  verdict-grade.
+- **retire 3.65 s = pdrop 3.65** (unwrap 0, retire-insert 0): the
+  pure BTree dealloc of the dropped parked table (zero-read ingest
+  always takes the drop branch). Structural (node-by-node free);
+  also runs under the write lock — deferring the drop outside the
+  lock helps mixed workloads, not this serial-CPU wall.
+
+New ranked levers (load-14 numbers; ×~1.3 for load 33):
+enc+lz4 20.5 (structural/RFC) > write_all 7.4 (=bytes, same lever as
+encode) > mem 7.5 (BTree insert) > **span 4.4 (cheap incremental-flag
+kill — NEXT, run #34)** > pdrop 3.65 (structural) > wal 5.6 > bloom
+2.8 > crc 1.2 > intra 1.1. Post-span-kill floor ≈ 53.5 s @ load 14.

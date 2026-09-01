@@ -2497,15 +2497,32 @@ fn write_sst_try_sorted_body(
     image.append(&mut index_bytes);
     image.append(&mut bloom_bytes);
     image.extend_from_slice(&file_crc.to_le_bytes());
+    // PEDRA_PARK_DIAG2: split the write stage (create / write_all+sync /
+    // close). The #31 re-parse put the whole stage at 8.7 s of the 44.8 s
+    // files wall — which third is syscall-bound decides the next lever.
+    let diag2 = std::env::var_os("PEDRA_PARK_DIAG2").is_some();
+    let d2_create_ms;
+    let d2_wr_ms;
     let t_write = std::time::Instant::now();
     {
+        let t_c = std::time::Instant::now();
         let mut file = env.create(path)?;
+        d2_create_ms = t_c.elapsed().as_secs_f64() * 1e3;
+        let t_w = std::time::Instant::now();
         file.write_all(&image)?;
         if sync {
             file.sync_data()?;
         }
+        d2_wr_ms = t_w.elapsed().as_secs_f64() * 1e3;
     }
     stages.add(|s| &mut s.write_ns, t_write);
+    if diag2 {
+        let total_ms = t_write.elapsed().as_secs_f64() * 1e3;
+        eprintln!(
+            "PARKDIAG2 sst create_ms={d2_create_ms:.1} write_ms={d2_wr_ms:.1} close_ms={:.1}",
+            total_ms - d2_create_ms - d2_wr_ms
+        );
+    }
     if stages.enabled {
         println!(
             "FLUSHSTAGES entries={n_entries} bytes={payload_len_hint} enc_ms={:.1} \

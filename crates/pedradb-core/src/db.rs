@@ -5236,7 +5236,15 @@ impl<E: Env> Db<E> {
         // name visible); the file bytes stay lazy.
         match write_l0_sst(env, &tmp_path, imm, false) {
             Ok(table) => {
+                // PEDRA_PARK_DIAG2: rename off the tmp name (same dir).
+                let t_r = std::time::Instant::now();
                 env.rename(&tmp_path, &final_path)?;
+                if std::env::var_os("PEDRA_PARK_DIAG2").is_some() {
+                    eprintln!(
+                        "PARKDIAG2 file rename_ms={:.1}",
+                        t_r.elapsed().as_secs_f64() * 1e3
+                    );
+                }
                 if sync {
                     env.sync_dir(dir)?;
                 }
@@ -5277,7 +5285,15 @@ impl<E: Env> Db<E> {
                     let _ = env.remove_file(&tmp_path);
                     return Ok(None);
                 }
+                // PEDRA_PARK_DIAG2: rename off the tmp name (same dir).
+                let t_r = std::time::Instant::now();
                 env.rename(&tmp_path, &final_path)?;
+                if std::env::var_os("PEDRA_PARK_DIAG2").is_some() {
+                    eprintln!(
+                        "PARKDIAG2 file rename_ms={:.1}",
+                        t_r.elapsed().as_secs_f64() * 1e3
+                    );
+                }
                 if sync {
                     env.sync_dir(dir)?;
                 }

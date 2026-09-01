@@ -2395,6 +2395,10 @@ impl<E: Env> ConcurrentDb<E> {
         // does not cover (prep under the write lock, install/manifest,
         // retire-cache tail). Inert unless the env is set.
         let park_diag = std::env::var_os("PEDRA_PARK_DIAG").is_some();
+        // PEDRA_PARK_DIAG2: sub-timers inside install (bulk_span_level /
+        // apply_sst_installs / parked pop) and retire (Arc unwrap-or-clone /
+        // dropped-parked dealloc / retire-cache insert).
+        let park_diag2 = std::env::var_os("PEDRA_PARK_DIAG2").is_some();
         let t0 = std::time::Instant::now();
         let prepared = {
             let mut g = self.inner.write();
@@ -2420,6 +2424,7 @@ impl<E: Env> ConcurrentDb<E> {
             let expect = Arc::as_ptr(&imm);
             let mut g = self.inner.write();
             // RFC-0159 P0.2: same per-family level decision as `flush`.
+            let t_span0 = std::time::Instant::now();
             let levels: Vec<u32> = files
                 .iter()
                 .map(|(t, _, _)| g.bulk_span_level(g.bulk_family_of_table(t), &imm))
@@ -2429,11 +2434,14 @@ impl<E: Env> ConcurrentDb<E> {
                     g.bulk_diag("install_parked", g.bulk_family_of_table(t), level);
                 }
             }
+            let t_span1 = std::time::Instant::now();
             let pairs: Vec<_> = files.into_iter().map(|(t, n, _)| (t, n)).collect();
             g.apply_sst_installs(pairs, &levels);
+            let t_apply1 = std::time::Instant::now();
             let popped = g.take_oldest_parked_matching(expect);
             let t3 = std::time::Instant::now();
             drop(imm);
+            let (mut d2_unwrap_ms, mut d2_pdrop_ms, mut d2_retire_ms) = (0.0f64, 0.0f64, 0.0f64);
             if let Some(popped) = popped {
                 // Only this Arc remains (fold cannot run under the lock).
                 // Retire-cache policy: keep the table as a point/MVCC read
@@ -2444,8 +2452,17 @@ impl<E: Env> ConcurrentDb<E> {
                 let reads = self.reads_served.load(Ordering::Relaxed);
                 let mark = self.retire_reads_mark.swap(reads, Ordering::Relaxed);
                 if reads != mark {
+                    let tu = std::time::Instant::now();
                     let owned = Arc::try_unwrap(popped).unwrap_or_else(|a| (*a).clone());
+                    d2_unwrap_ms = tu.elapsed().as_secs_f64() * 1e3;
+                    let tr = std::time::Instant::now();
                     g.retire_mem_as_l0_cache(owned);
+                    d2_retire_ms = tr.elapsed().as_secs_f64() * 1e3;
+                } else {
+                    // Full BTree dealloc of the parked table.
+                    let td = std::time::Instant::now();
+                    drop(popped);
+                    d2_pdrop_ms = td.elapsed().as_secs_f64() * 1e3;
                 }
             }
             if park_diag {
@@ -2457,6 +2474,18 @@ impl<E: Env> ConcurrentDb<E> {
                     (t3 - t2).as_secs_f64() * 1e3,
                     (t4 - t3).as_secs_f64() * 1e3,
                     g.parked_unflushed_count(),
+                );
+            }
+            if park_diag2 {
+                eprintln!(
+                    "PARKDIAG2 chunk span_ms={:.1} apply_ms={:.1} pop_ms={:.1} \
+                     unwrap_ms={:.1} pdrop_ms={:.1} retire_ms={:.1}",
+                    (t_span1 - t_span0).as_secs_f64() * 1e3,
+                    (t_apply1 - t_span1).as_secs_f64() * 1e3,
+                    (t3 - t_apply1).as_secs_f64() * 1e3,
+                    d2_unwrap_ms,
+                    d2_pdrop_ms,
+                    d2_retire_ms,
                 );
             }
         }
