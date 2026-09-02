@@ -1,0 +1,68 @@
+# prefix_scan CPU sample re-read — corrected attribution (2026-09-01)
+
+Source: `sample-scan-pedra-2.txt` (macOS `sample`, 5 s, 1 ms interval, main thread),
+taken inside the pedra arm of a 25M-entry / 256 MiB-cache `prefix_scan` run
+(`local-256m-scan-sample.txt`). Sampled medians (inflated 10–17 % by the
+sampler, use only for CPU split): pedra 136.00 µs vs rocks 209.45 µs.
+Binary: v41-era point/scan path; valid for HEAD per-row path (LevelRunStream
+was measured neutral end-to-end, streams/op = 2 in both).
+
+## Why the earlier reading was wrong
+
+The earlier "page_forward ≈ 80 % of the arm" number was a **subtree share**:
+`page_forward`'s subtree contains the core merge/SST calls beneath it, so its
+subtree says nothing about where CPU is spent. Correct method: leaf self time.
+Two independent leaf methods agree:
+
+1. whole-file top-of-stack section (authoritative leaf list)
+2. indentation-stack parse of the main-thread call graph, self = node − children
+
+## Scan-arm self-time decomposition (3566 leaf samples ≈ 3.57 s of window)
+
+| bucket | samples | share | detail |
+|---|---|---|---|
+| HARNESS (stage crate, fixed bench cost) | ~1287 | 36 % | `snapshot_pedradb::scan_prefix` self 144 + `_nanov2_free` 562 (a per-op Vec collected+freed inside the scan closure) + `snapshot_record::decode_entry` self 114 + `nanov2_malloc` 170 + `_platform_memmove` 136 + `core::str::from_utf8` 161 |
+| CORE merge + SST (pedradb-core) | ~758 | 21 % | `next_window_kv_inner` 345, `SstRangeIter::next` 362, `next_window_kv` 34, `blocks_overlapping_range` 17 |
+| memcmp (mostly core compares) | 432 | 12 % | `_platform_memcmp` 344 + `DYLD-STUB$$memcmp` 88 |
+| COMPAT page build (rocksdb-compat lib.rs) | ~354 | 10 % | `page_forward` 142, `decode_bytes` 51, `set_page` 17, `scan_prefix`-adjacent glue |
+| Bytes refcount churn | 310 | 9 % | `shared_drop` 169, `shared_clone` 93, `promotable_even_clone` 48 |
+| lock/park wait (`__psynch_cvwait`) | 290 | 8 % | io_uring park inside the arm |
+| memcpy/memset + misc glue | rest | ~4 % | |
+
+Caller chains for the big allocator leaves (from the call tree):
+`criterion… <- snapshot_pedradb::scan_prefix <- snapshot_record::decode_entry
+<- _nanov2_free/nanov2_malloc/memmove/from_utf8` — i.e. the per-row alloc/free
+churn is the **stage harness decode**, shared in kind by the rocks arm, not the
+compat page path.
+
+## Reconciliation with SCANDIAG (15/85 core/non-core split)
+
+`SCAN_DIAG_ROW_NS` times `next_window_kv_inner()` only — the interval between
+window-row emits. Locally 54 ns/row × 333 rows ≈ 18 µs of a 122 µs op (15 %).
+The sample's core leaf share (758+memcmp ≈ 1190/3566 ≈ 33 % of *scan-prefix
+subtree*) matches once you note the arm subtree excludes part of the per-op
+harness loop and the row timer under-counts core work done outside the emit
+interval. Both methods agree the pedra-side hot spots are, in order:
+
+1. core merge emit + SST block row iteration (`next_window_kv_inner`,
+   `SstRangeIter::next`) — MINE
+2. memcmp compares (core bounds/heap/key compares) — MINE
+3. Bytes refcount traffic (~8 atomic inc/dec per row across stream clone →
+   WindowKv → page push → final drop) — split core/compat
+
+The compat page build itself is already zero-copy (`decode_bytes` re-slices,
+`value.clone()` is a refcount bump): the old "kill per-row Vec allocs in
+page_forward" lever is REFUTED — there are none left there.
+
+## Consequence for the guest gap (409 µs guest vs 136 µs local sampled)
+
+Guest SCANDIAG: rows 333 × 235 ns ≈ 78 µs core + 9 µs setup ≈ 87 µs (19 %);
+~322 µs (79 %) outside core. Local non-core ≈ 86 µs → guest non-core degrades
+3.7× while the rocks arm degrades only 1.66× (209→348 µs). Neither SCANDIAG
+nor this local sample can attribute the guest's 322 µs: harness decode should
+track rocks' 1.66× (it is the same stage code), so the excess must sit in
+page_forward machinery / lock acquisition / guest-specific costs (e.g. atomic
+refcount cost on the guest CPU: ~8 locked inc/dec per row). Next step is a
+guest-side page_forward wall-clock counter (PAGEDIAG, env-gated) to split
+op = page_forward(lock+setup+rows+glue) + harness remainder, before choosing
+the next injection.

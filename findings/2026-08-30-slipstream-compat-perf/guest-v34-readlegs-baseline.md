@@ -383,3 +383,15 @@ theirs). Ranked in-probe levers left:
    payload slot rebuild on scan-path misses?) or 4 M under-represented
    the index depth. Needs a number before a fix.
 3. Per-probe alloc/drop churn (~100 samples of `shared_drop`/free).
+
+## prefix_scan arm re-read (2026-09-01, `scan-sample-extract.txt`)
+
+Corrected the earlier scan attribution: "page_forward ≈ 80 % of the arm" was a
+subtree share (its subtree contains the core calls below it). Leaf self time
+of the 25M/256MiB scan arm: harness decode+collect 36 %, core merge+SST 21 %,
+memcmp 12 %, compat page build 10 %, Bytes refcount churn 9 %, park 8 %. The
+compat page path is already zero-copy — "kill per-row Vec allocs in
+page_forward" is refuted. The guest's ~322 µs non-core (79 % of the 409 µs op)
+is still unattributed: harness decode should track the rocks arm's 1.66×
+degradation, not pedra's 3.7×. Guest-side PAGEDIAG (page_forward wall+lock
+counter, env-gated) is the next measurement before any scan injection.
