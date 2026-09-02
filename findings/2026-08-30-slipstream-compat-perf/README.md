@@ -1709,3 +1709,42 @@ multi_get 3771.9 µs in r5).
 Write path unchanged by v44 (entrypoint exports only; settle 0.7–1.4 s,
 hydrate 0.44–0.49M/s across all five runs). Core gate at the image's code
 state (9bd73d3): 694 pass / 2 documented flakes.
+
+## 2026-09-02 — scale ladder on the v44 diag-off image (1M/10M PASS; 100M and 1B BLOCKED)
+
+Same v44 diag-off image as runs 1–5 (md5s re-verified before every boot by
+`ladder-setsize.sh`); the ONLY variable per point is the entrypoint's
+`SLIPSTREAM_BENCH_ENTRIES`. Captures: `guest-v44-diagoff-1m.txt`,
+`guest-v44-diagoff-10m.txt`, `guest-v44-diagoff-100m-failed.txt`.
+
+| leg (ratio pedra/rocks) | 1M      | 10M (archived / repeat) | 25M (r1–r5 band)   | 100M            | 1B   |
+|-------------------------|---------|-------------------------|--------------------|-----------------|------|
+| get_hit                 | 1.375   | 1.036 / 1.248           | 0.967–1.146        | BLOCKED (pedra) | BLOCKED |
+| prefix_scan             | 1.625   | 1.322 / 1.265           | 1.040–1.185        | BLOCKED (pedra) | BLOCKED |
+| get_loop                | 1.241   | 1.576 / 1.275           | 0.966–1.111        | BLOCKED (pedra) | BLOCKED |
+| multi_get               | 1.073   | 1.621 / 1.334           | 1.033–1.168        | BLOCKED (pedra) | BLOCKED |
+
+- **1M** (`guest-v44-diagoff-1m.txt`): all four ≥1.0×; fully cache-hot regime
+  (settled 0.21 GiB each side). Settle 2.0× faster, probe_hit 2.8× faster,
+  hydrate 0.79×.
+- **10M** (`guest-v44-diagoff-10m.txt`): all four ≥1.0× in BOTH passes
+  (archived provenance-clean run + an operator-truncated repeat). Settle 7.6×
+  faster (0.7 s vs 5.3 s); hydrate 0.57×; get_hit CI-overlaps in the archived
+  pass but was clearly separated (1.248) in the repeat.
+- **100M** (`guest-v44-diagoff-100m-failed.txt`): rocks-default completed every
+  stage (hydrate 120.5 s / 25.17 GiB, settle 21.5 s, get_hit 101.32 µs, scan
+  353.74 µs, get_loop 10.560 ms, multi_get 10.451 ms). Pedradb was SIGKILLed
+  (guest OOM) mid-hydrate: RSS climbed 676 MB → 3.4 GB until avail hit
+  ~130 MB in the 3.9 GB guest. The bench harness is memory-flat; the linear
+  structure is the in-memory WAL ring index not GC'd after bulk install
+  (open **p03-wal** item; ~20–30 B/entry ⇒ ~1.2 GB fits at 25M, ~2.5–3 GB+
+  does not at 100M). Disk was fine (118 GiB /data, 327 GiB free on the gate
+  NVMe). Unblocking lever: p03-wal WAL-ring GC — NOT a larger guest, which
+  would re-baseline the cache regime of the 1M–25M points.
+- **1B**: blocked twice over. Disk: ~210 GiB settled per backend (~420 GiB
+  both) with ~650 GiB transient peak vs 327 GiB free on the gate NVMe — needs
+  a ~1 TB-class host volume. Memory: the same WAL-ring index at 1B entries is
+  ~20–30 GiB of RAM before any store opens. No point attempting on this host.
+
+Entrypoint restored to 25000000 and boot-verified after the ladder (VM left
+in the standard post-run state).

@@ -1,0 +1,37 @@
+Guest v44 read-legs capture — scale ladder 1M entries (DIAG-OFF official protocol)
+==================================================================================
+
+Date: 2026-09-02. Same v44 diag-off image as runs 1-5 (md5s re-verified by
+ladder-setsize.sh before boot); the ONLY change vs the 25M runs is the
+entrypoint bench line: SLIPSTREAM_BENCH_ENTRIES=1000000 (ENTRIES_SET_1000000,
+PERSIST_OK, re-verified after nbd disconnect).
+VM started 04:00:36 -03; bench done by 04:06:38 -03.
+Gate uptime: pre-start 03:59:54 load ~21.5; post-start 04:00:36 load ~20.9
+(multi-tenant gate, other tenants active).
+Provenance: 6 `Compiling` lines in serial; 0 SCANDIAG / 0 PAGEDIAG lines
+(diag-off confirmed in band); BENCH_EXIT_readlegs=1; "1000000 entries in".
+
+Legs (median, 1M entries, both backends one process; settled 0.21 GiB each —
+fully cache-hot in the ~3.9 GB guest)
+---------------------------------------------------------------------
+leg                     pedra µs      rocks µs     ratio   verdict
+get_hit                 4.09          5.63         1.375   PASS
+prefix_scan            236.65        384.54       1.625   PASS
+lookup_100/get_loop   407.60        505.78       1.241   PASS
+lookup_100/multi_get  426.76        457.81       1.073   PASS (marginal CI overlap)
+
+  get_hit:    pedra [4.03 4.09 4.15] vs rocks [5.35 5.63 5.95]  — separated
+  prefix_scan pedra [234.32 236.65 239.61] vs rocks [378.09 384.54 392.62] — separated
+  get_loop:   pedra [401.97 407.60 413.89] vs rocks [494.38 505.78 518.80] — separated
+  multi_get:  pedra [414.53 426.76 440.19] vs rocks [431.20 457.81 488.07] — overlap
+
+Aux legs (same run)
+-------------------
+hydrate: rocks 1.1s (0.92M/s, 239 B/entry, 0.22 GiB) vs pedra 1.4s
+  (0.73M/s, 378 B/entry, 0.35 GiB) → 0.79x
+settle:  rocks 1.0s vs pedra 0.5s → pedra 2.0x faster; settled both 0.21 GiB
+probe_hit p50: rocks 12.6µs vs pedra 4.5µs → pedra 2.8x faster
+probe_miss p50: rocks 1.3µs vs pedra 1.3µs → parity
+
+All four gate legs >= 1.0x at 1M. Scale note: small-scale fully-cached regime
+favors pedra broadly; the 25M numbers (runs 1-5) remain the registered claim.

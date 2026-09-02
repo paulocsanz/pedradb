@@ -1,0 +1,46 @@
+Guest v44 read-legs capture — scale ladder 10M entries (DIAG-OFF official protocol)
+===================================================================================
+
+Date: 2026-09-02. Same v44 diag-off image as runs 1-5 (md5s re-verified by
+ladder-setsize.sh before boot); the ONLY change vs the 25M runs is the
+entrypoint bench line: SLIPSTREAM_BENCH_ENTRIES=10000000 (ENTRIES_SET_10000000,
+PERSIST_OK, re-verified after nbd disconnect).
+VM started 04:18:42 -03; bench done by ~04:21:41 -03.
+Gate uptime: pre-start 04:18:37 load 14.92/15.78/16.82; post-start 04:18:42
+load 15.00/15.78/16.81; completion check 04:21:41 load 16.01/16.09/16.77.
+Provenance: 6 `Compiling` lines in serial; 0 SCANDIAG / 0 PAGEDIAG lines;
+BENCH_EXIT_readlegs=1; "10000000 entries in".
+
+A second full 10M pass ran minutes earlier (agent auto-restarted the VM at
+~04:11 after two operator-side start races); its serial was truncated mid-run
+by the operator, so it has no provenance head and is NOT the archived capture
+— it is quoted below only as a repeat numeric sample.
+
+Legs (median, 10M entries, both backends one process; settled 2.10 GiB rocks /
+2.06 GiB pedra — cache-hot in the ~3.9 GB guest)
+---------------------------------------------------------------------
+leg                     pedra µs      rocks µs     ratio   verdict   repeat run
+get_hit                 15.29         15.84        1.036   PASS*     1.248
+prefix_scan            259.33        342.92       1.322   PASS      1.265
+lookup_100/get_loop   723.06        1139.70      1.576   PASS      1.275
+lookup_100/multi_get  705.13        1142.70      1.621   PASS      1.334
+
+  get_hit:    pedra [14.55 15.29 16.14] vs rocks [15.38 15.84 16.42] — overlap
+  prefix_scan pedra [254.79 259.33 264.64] vs rocks [335.77 342.92 351.81] — separated
+  get_loop:   pedra [716.06 723.06 731.15] vs rocks [1.1122 1.1397 1.1751] ms — separated
+  multi_get:  pedra [689.85 705.13 722.71] vs rocks [1.1351 1.1427 1.1517] ms — separated
+
+* get_hit passes on medians in both passes (1.036 / 1.248) but CIs overlap in
+  the archived run; the repeat pass was clearly separated. All other legs are
+  CI-separated in both passes.
+
+Aux legs (archived run)
+-----------------------
+hydrate: rocks 11.1s (0.90M/s, 269 B/entry, 2.50 GiB) vs pedra 19.3s
+  (0.52M/s, 469 B/entry, 4.37 GiB) → 0.57x
+settle:  rocks 5.3s vs pedra 0.7s → pedra 7.6x faster
+probe_hit p50: rocks 43.7µs vs pedra 37.1µs → pedra faster (repeat run showed
+  rocks 16.0 vs pedra 32.1 — this leg swings with cache state; not a gate leg)
+probe_miss p50: rocks 551ns vs pedra 1.3µs → known bloom-class loss, stable
+
+All four gate legs >= 1.0x at 10M in both passes.

@@ -1,0 +1,52 @@
+Guest v44 read-legs capture — scale ladder 100M entries: PEDRA HYDRATE OOM (blocked)
+===================================================================================
+
+Date: 2026-09-02. Same v44 diag-off image as runs 1-5 (md5s re-verified by
+ladder-setsize.sh before boot); the only change vs the 25M runs is
+SLIPSTREAM_BENCH_ENTRIES=100000000 (ENTRIES_SET_100000000, PERSIST_OK).
+VM started 04:22:23 -03; bench exited 101 by ~04:29 -03.
+Gate uptime: pre-start 04:22:18 load 15.53/15.94/16.69; post-start 04:22:23
+load 15.65/15.96/16.69; failure pull 04:29:51 load 15.50/16.51/16.78.
+Provenance: 6 `Compiling` lines; 0 SCANDIAG / 0 PAGEDIAG;
+"100000000 entries in" (rocks only); BENCH_EXIT_readlegs=101 (bench killed).
+
+OUTCOME: the RocksDB-default peer completed every stage at 100M; pedradb was
+SIGKILLed (guest OOM) mid-hydrate before printing anything. NO pedra-vs-rocks
+comparison exists at 100M on this guest. Disk was NOT the constraint
+(rocks settled 20.98 GiB; guest /data 118 GiB; gate NVMe 327 GiB free).
+
+RocksDB-default (sync=false) — completed legs, 100M entries
+-----------------------------------------------------------
+hydrate: 100000000 entries in 120.5s (0.83M entries/s); on disk 25.17 GiB
+  (270 B/entry)
+settle:  21.5s; on disk after 20.98 GiB
+probe_hit p50 97.5µs / p90 230.5µs / p99 450.4µs / p999 2.2ms
+probe_miss p50 671ns / p90 681ns
+get_hit:     101.32 µs  [96.82  101.32  106.76]
+prefix_scan: 353.74 µs  [350.47 353.74 358.21]
+get_loop:    10.560 ms  [10.179 10.560 10.971]
+multi_get:   10.451 ms  [10.121 10.451 10.819]
+
+pedradb — OOM during hydrate (evidence)
+---------------------------------------
+After the rocks store was dropped (rss back to 587 MB, avail 2.97 GB), pedra
+hydrate began (dirty pages 203 MB) and RSS climbed monotonically:
+676 MB -> 2.7 GB -> 3.3-3.4 GB while avail fell 2.9 GB -> 130-360 MB, then:
+  error: bench failed, to rerun pass `--bench snapshot_backends`
+  Caused by: process didn't exit successfully (signal: 9, SIGKILL)
+  BENCH_EXIT_readlegs=101
+Guest memory: MemTotal 3,985,644 kB (~3.9 GB). The bench harness itself is
+memory-flat (1 MiB value pool, keys generated on demand), so the linear
+growth is engine-side: the in-memory WAL ring index, which is not GC'd after
+bulk install (open p03-wal item) — ~20-30 B/entry tracks the observed peaks
+(25M hydrate peak ~1.2 GB fits; 100M needs ~2.5-3 GB+ and does not).
+
+VERDICT
+-------
+100M read-legs parity point: BLOCKED on this 3.9 GB guest by guest memory,
+not by disk and not by a read-path gap. Unblocking levers, in order:
+ 1. p03-wal — WAL ring GC after bulk install (the linear structure above).
+ 2. A larger-RAM guest (would also change cache regime, so 1M-25M points
+    would need re-baselining for apples-to-apples reads).
+Bumping guest RAM is NOT a fix within this ladder: all ladder points must
+share the machine, and 25M was measured at 3.9 GB.
