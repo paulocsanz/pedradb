@@ -879,13 +879,19 @@ impl KeyCodec {
     /// handles into the cached blocks instead of `to_vec` copies. A key
     /// shorter than the family prefix decodes to empty, matching
     /// [`decode_cf_key`]'s `unwrap_or(&[])` instead of panicking.
-    fn decode_bytes(&self, cf: &str, encoded: &Bytes) -> Bytes {
+    /// Decode on a materialized window key by consuming the handle: the
+    /// family prefix is dropped by `advance` (pointer slide — no refcount
+    /// op) or the handle is returned as-is, so the scan page path pays zero
+    /// refcount RMWs per row.
+    fn decode_bytes_owned(&self, cf: &str, mut encoded: Bytes) -> Bytes {
         let effective = cf_encode_effective(cf, self.default_raw);
         if effective.is_empty() {
-            return encoded.clone();
+            return encoded;
         }
         if encoded.len() > effective.len() {
-            return encoded.slice(effective.len() + 1..);
+            use bytes::Buf as _;
+            encoded.advance(effective.len() + 1);
+            return encoded;
         }
         Bytes::new()
     }
@@ -1637,7 +1643,7 @@ fn page_forward_inner<E: PedraEnv>(
                 if !crate::iter_kernel::iter_window_keep(row.snapshot_live) {
                     continue;
                 }
-                out.push((codec.decode_bytes(cf, &row.key), row.value.clone()));
+                out.push((codec.decode_bytes_owned(cf, row.key), row.value));
                 if out.len() >= limit {
                     break;
                 }
@@ -1668,7 +1674,7 @@ fn page_last_n<E: PedraEnv>(
                 if ring.len() == n {
                     ring.pop_front();
                 }
-                ring.push_back((codec.decode_bytes(cf, &row.key), row.value.clone()));
+                ring.push_back((codec.decode_bytes_owned(cf, row.key), row.value));
             }
             Ok::<Vec<(Bytes, Bytes)>, CoreError>(ring.into_iter().collect())
         })
@@ -4530,7 +4536,7 @@ mod tests {
             for key in [&b""[..], b"d", b"data", b"data\0", b"data\0k", b"\0k", b"k"] {
                 let owned = Bytes::copy_from_slice(key);
                 assert_eq!(
-                    codec.decode_bytes(cf, &owned).as_ref(),
+                    codec.decode_bytes_owned(cf, owned).as_ref(),
                     codec.decode(cf, key),
                     "cf={cf} raw={raw} key={key:?}"
                 );
@@ -6540,7 +6546,18 @@ mod tests {
             db.flush().unwrap();
         }
         let db = DB::open(&opts, &dir).unwrap();
-        let _ = db.get(b"k").unwrap();
+        // Since v21h (encoded-block point seek) a point get reads raw block
+        // images through the payload pool and never materializes decoded
+        // entries; scans are what load blocks into the decoded-block cache
+        // this property reports.
+        let mut n = 0usize;
+        for item in db
+            .iterator_opt(IteratorMode::Start, ReadOptions::default())
+            .unwrap()
+        {
+            n += item.unwrap().1.len();
+        }
+        assert!(n > 0, "scan must see the flushed row");
         let usage = db
             .property_int_value(properties::BLOCK_CACHE_USAGE)
             .unwrap()
