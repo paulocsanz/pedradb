@@ -171,6 +171,13 @@ struct BlockHandle {
     offset: u64,
     length: u32,
     first_user_key: Bytes,
+    /// Big-endian u64 window of `first_user_key[key_cp..key_cp+8]`
+    /// (zero-padded), derived with the table's `key_cp`. Comparing `p8`
+    /// before the full memcmp preserves byte order exactly and starts at
+    /// the first byte where index keys actually differ — route-fold keys
+    /// share a 10-byte prefix, so a fixed offset-0 window would carry no
+    /// entropy. Filled by `derive_index_accel`; 0 until then.
+    p8: u64,
 }
 
 /// Cached full entry materialization for an SST (shared across clones).
@@ -217,6 +224,9 @@ pub struct SstTable {
     max_sequence: SequenceNumber,
     /// Sparse index (v2+); empty for v1.
     index: Vec<BlockHandle>,
+    /// Longest prefix shared by every `index` key — the offset the `p8`
+    /// windows start at. Derived with the index (`derive_index_accel`).
+    key_cp: usize,
     /// On-disk or rebuilt bloom (always-true when inactive).
     bloom: BloomFilter,
     /// Smallest user key in file (None if empty).
@@ -745,6 +755,41 @@ impl SstTable {
 
     /// Blocks that can hold versions of `user_key` (O(log N + spans)).
     ///
+    /// Big-endian u64 of `key[cp..cp+8]`, zero-padded past the key's end.
+    /// Because the padding byte (0) is ≤ any real byte, comparing windows
+    /// then falling back to a full memcmp on equality is order-exact.
+    fn p8_window(key: &[u8], cp: usize) -> u64 {
+        let mut buf = [0u8; 8];
+        let end = (cp + 8).min(key.len());
+        if end > cp {
+            buf[..end - cp].copy_from_slice(&key[cp..end]);
+        }
+        u64::from_be_bytes(buf)
+    }
+
+    /// Fill every handle's `p8` and return the common-prefix offset they
+    /// are relative to. Must run once per index after all handles exist
+    /// (both at open and at flush/finish, before the table is used).
+    fn derive_index_accel(index: &mut [BlockHandle]) -> usize {
+        let mut cp = usize::MAX;
+        for w in index.windows(2) {
+            let n = w[0]
+                .first_user_key
+                .iter()
+                .zip(w[1].first_user_key.iter())
+                .take_while(|(a, b)| a == b)
+                .count();
+            cp = cp.min(n);
+        }
+        if cp == usize::MAX {
+            cp = 0;
+        }
+        for h in index.iter_mut() {
+            h.p8 = Self::p8_window(&h.first_user_key, cp);
+        }
+        cp
+    }
+
     /// `index[i]` covers `[first_user_key[i], first_user_key[i+1])`. If an
     /// older writer split mid-key, versions also sit in the previous block
     /// and in any following run with `first_user_key == user_key`.
@@ -752,9 +797,10 @@ impl SstTable {
         if self.index.is_empty() {
             return 0..0;
         }
-        let ge = self
-            .index
-            .partition_point(|h| h.first_user_key.as_ref() < user_key);
+        let t8 = Self::p8_window(user_key, self.key_cp);
+        let ge = self.index.partition_point(|h| {
+            h.p8 < t8 || (h.p8 == t8 && h.first_user_key.as_ref() < user_key)
+        });
         let start = ge.saturating_sub(1);
         let mut end = ge;
         while end < self.index.len() && self.index[end].first_user_key.as_ref() <= user_key {
@@ -1166,6 +1212,8 @@ impl SstTable {
                 offset: block_off,
                 length: block_len,
                 first_user_key,
+                // Real value assigned by `derive_index_accel` below.
+                p8: 0,
             });
         }
 
@@ -1240,6 +1288,7 @@ impl SstTable {
 
         let payload: Arc<[u8]> = Arc::from(buf.to_vec().into_boxed_slice());
         let payload_len = payload.len();
+        let key_cp = Self::derive_index_accel(&mut index);
         let cf = crate::cf_kernel::infer_sst_cf(
             smallest_user_key.as_deref(),
             largest_user_key.as_deref(),
@@ -1259,6 +1308,7 @@ impl SstTable {
             num_entries: n,
             max_sequence,
             index,
+            key_cp,
             bloom,
             smallest_user_key,
             largest_user_key,
@@ -1288,6 +1338,8 @@ impl SstTable {
             largest_user_key.as_deref(),
         );
         let payload_len = payload.len();
+        let mut index = index;
+        let key_cp = Self::derive_index_accel(&mut index);
         Self {
             path,
             payload: Arc::new(parking_lot::RwLock::new(
@@ -1302,6 +1354,7 @@ impl SstTable {
             num_entries,
             max_sequence,
             index,
+            key_cp,
             bloom,
             smallest_user_key,
             largest_user_key,
@@ -2430,6 +2483,8 @@ fn write_sst_try_sorted_body(
             offset,
             length,
             first_user_key: first,
+            // Real value assigned by `derive_index_accel` at finish.
+            p8: 0,
         });
         Ok(())
     }
@@ -2504,6 +2559,7 @@ fn write_sst_try_sorted_body(
         &mut policy_compress,
         &mut policy_decided,
     )?;
+    let key_cp = SstTable::derive_index_accel(&mut index);
     stages.add(|s| &mut s.enc_ns, t_enc);
 
     let t_bloom = std::time::Instant::now();
@@ -2635,6 +2691,7 @@ fn write_sst_try_sorted_body(
         num_entries: n_entries,
         max_sequence,
         index,
+        key_cp,
         bloom,
         smallest_user_key,
         largest_user_key,
@@ -3119,6 +3176,7 @@ mod tests {
             offset,
             length,
             first_user_key: Bytes::copy_from_slice(first),
+            p8: SstTable::p8_window(first, 0),
         };
         // Hand-built sparse index emulating a writer that split `k` across
         // blocks: block 0 = [a@1, k@5, k@3], block 1 = [k@2, z@1].
@@ -3157,6 +3215,7 @@ mod tests {
             num_entries: 5,
             max_sequence: 5,
             index,
+            key_cp: 0,
             bloom: BloomFilter::always_true(),
             smallest_user_key: Some(Bytes::copy_from_slice(b"a")),
             largest_user_key: Some(Bytes::copy_from_slice(b"z")),
@@ -3192,6 +3251,132 @@ mod tests {
             vec![0, 1],
             "range ending at k covers both k blocks"
         );
+    }
+
+    /// Oracle: the accelerated `blocks_for_point` (u64 window past the
+    /// index common prefix, full-memcmp fallback on window equality) must
+    /// return exactly what the pre-acceleration partition_point returned,
+    /// on adversarial indexes — long shared prefixes, equal-key runs
+    /// (mid-key splits), keys shorter than the common prefix, embedded
+    /// 0x00 bytes, and window boundaries at the key's end.
+    #[test]
+    fn blocks_for_point_accel_matches_plain_oracle() {
+        // Verbatim copy of the pre-acceleration implementation.
+        fn plain(index: &[BlockHandle], user_key: &[u8]) -> std::ops::Range<usize> {
+            if index.is_empty() {
+                return 0..0;
+            }
+            let ge = index.partition_point(|h| h.first_user_key.as_ref() < user_key);
+            let start = ge.saturating_sub(1);
+            let mut end = ge;
+            while end < index.len() && index[end].first_user_key.as_ref() <= user_key {
+                end += 1;
+            }
+            start..end
+        }
+
+        fn table_with(firsts: &[&[u8]]) -> SstTable {
+            let mut index: Vec<BlockHandle> = firsts
+                .iter()
+                .map(|k| BlockHandle {
+                    offset: 0,
+                    length: 16,
+                    first_user_key: Bytes::copy_from_slice(k),
+                    p8: 0,
+                })
+                .collect();
+            let key_cp = SstTable::derive_index_accel(&mut index);
+            SstTable {
+                path: PathBuf::from("/tmp/accel-oracle.sst"),
+                payload: Arc::new(parking_lot::RwLock::new(crate::cache::ResidentBody::empty())),
+                payload_len: 0,
+                compressed_blocks: false,
+                block_crc: false,
+                entries: Arc::new(Mutex::new(None)),
+                kit: Arc::new(parking_lot::RwLock::new(None)),
+                range_tombstones: Vec::new(),
+                num_entries: 0,
+                max_sequence: 0,
+                index,
+                key_cp,
+                bloom: BloomFilter::always_true(),
+                smallest_user_key: None,
+                largest_user_key: None,
+                cf: String::new(),
+            }
+        }
+
+        // Route-fold shape: every key shares "route.svc-" (10 B); entropy
+        // starts inside the u64 window only when cp skips those bytes.
+        let route: Vec<Vec<u8>> = (0..40)
+            .map(|i| format!("route.svc-{:06}.{:08}", i / 4, i % 4).into_bytes())
+            .collect();
+        let route_refs: Vec<&[u8]> = route.iter().map(|v| v.as_slice()).collect();
+        let cases: Vec<(Vec<&[u8]>, Vec<Vec<u8>>)> = vec![
+            (
+                route_refs.clone(),
+                vec![
+                    b"".to_vec(),
+                    b"r".to_vec(),
+                    b"route.svc-".to_vec(),
+                    b"route.svc-000000.00000000".to_vec(),
+                    b"route.svc-000009.00000003".to_vec(),
+                    b"route.svc-000005.99999999".to_vec(),
+                    b"route.svc-999999.99999999".to_vec(),
+                    b"route.svc-000000.\x00".to_vec(),
+                ],
+            ),
+            (
+                // Equal-key run (mid-key split) + short keys + embedded NULs.
+                vec![
+                    &b"a"[..],
+                    &b"k\x00\x00\x00\x00\x00\x00\x00\x00"[..],
+                    b"k\x00\x00\x00\x00\x00\x00\x00\x00",
+                    b"kz",
+                    b"z",
+                ],
+                vec![
+                    b"".to_vec(),
+                    b"a".to_vec(),
+                    b"ab".to_vec(),
+                    b"k".to_vec(),
+                    b"k\x00".to_vec(),
+                    b"k\x00\x00\x00\x00\x00\x00\x00".to_vec(),
+                    b"k\x00\x00\x00\x00\x00\x00\x00\x00".to_vec(),
+                    b"k\x00\x00\x00\x00\x00\x00\x00\x00\x00".to_vec(),
+                    b"ky".to_vec(),
+                    b"kz".to_vec(),
+                    b"zz".to_vec(),
+                ],
+            ),
+            (
+                // Single-block and window-past-end regimes.
+                vec![&b"prefix-only"[..]],
+                vec![
+                    b"".to_vec(),
+                    b"prefix".to_vec(),
+                    b"prefix-only".to_vec(),
+                    b"prefix-only-longer".to_vec(),
+                ],
+            ),
+        ];
+
+        for (firsts, probes) in cases {
+            let table = table_with(&firsts);
+            if firsts == route_refs {
+                // "route.svc-00000" is shared by every key (svc < 10 keeps
+                // 5 leading zeros): the window must start past it.
+                assert!(table.key_cp >= 10, "route cp sanity: {}", table.key_cp);
+            }
+            for p in probes {
+                assert_eq!(
+                    table.blocks_for_point(&p),
+                    plain(&table.index, &p),
+                    "accel vs plain: index={firsts:?} probe={p:?} cp={}",
+                    table.key_cp
+                );
+            }
+        }
     }
 
     /// L0 flush streams the BTree in InternalKey order — no collect+sort.
