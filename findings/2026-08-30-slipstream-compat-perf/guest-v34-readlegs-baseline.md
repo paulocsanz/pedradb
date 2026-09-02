@@ -352,3 +352,34 @@ tombstone spanning file boundaries + limit cuts — first draft silently
 dropped the whole grouped level, the test caught it), suite 690 pass +
 the two documented flakes, setup −82 % measured, no per-row regression
 after the concrete-iter fix. db.rs at this point: cc1fbf61.
+
+## get_hit CPU re-sample post-L2+bitmap (25 M/8 GiB, 2026-09-01 night)
+
+`local-8g-gethit-cpu-sample2.txt` + `-extract.txt` (macOS `sample`, 5 s
+inside the pedra get_hit arm; binary = bitmap+merge-heap era — the point
+path is identical at HEAD). Sampled median 4.567 µs (perturbed; clean
+4.40 µs at `local-8g-gethit-l2.txt`). In-arm: `get_entry` 2987 →
+`get_cached` 2817 → `ConcurrentDb::get` 2687 → `Db::get` 2384 (thread
+3912). `Db::get` decomposition:
+
+| layer | samples | share of `Db::get` |
+|---|---|---|
+| `blocks_for_point` ≈ all memcmp (576 platform + 381 stub + ~200 more) | ~1160 | ~49 % |
+| `seek_point_in_block_image` ≈ all hw crc32c (408+169) | ~580 | ~24 % |
+| memtable + tombstone collect + drop/free churn | ~115 | ~5 % |
+| remaining own frames (`point_at_seeking` etc.) | ~530 | ~22 % |
+
+vs the pre-L2 sample (above): the 33 % linear walk is GONE (L2 bisect
+did its job); wrappers outside `Db::get` are now ~25 % of the get path
+(compat `get_cached` + `ConcurrentDb` — concurrent.rs is ours, compat is
+theirs). Ranked in-probe levers left:
+
+1. **Block-index search compares (~49 %)**: the binary search over block
+   index keys runs full-key memcmps; first-8-byte prefix compare or a
+   widened index would cut the per-compare cost at 25 M key widths.
+2. **CRC still 24 % at FULL 8 GiB residency** — the bitmap gave −9.2 %
+   at 4 M/8 GiB; at 25 M either a large share of probes still take the
+   verify path (bitmap coverage audit needed: id split raw/resolved?
+   payload slot rebuild on scan-path misses?) or 4 M under-represented
+   the index depth. Needs a number before a fix.
+3. Per-probe alloc/drop churn (~100 samples of `shared_drop`/free).

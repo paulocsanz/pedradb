@@ -1,0 +1,14 @@
+get_hit CPU sample 25M/8GiB (macOS sample, 5s inside pedra arm, 2026-09-01
+binary = bitmap+merge-heap era (pre-LevelRunStream; point path identical at HEAD)
+medians: pedra 4.567us (sampled) vs rocks 114.64us (rocks arm cold)
+
+In-arm totals: get_entry 2987 / get_cached 2817 / ConcurrentDb::get 2687 / Db::get 2384 (thread total 3912)
+Db::get decomposition:
+  point_at_seeking 1331 (56%)
+    blocks_for_point 957 (40% of Db::get) - ~ALL memcmp (576 platform + 381 stub): block-index binary search
+    point_at_seeking own 888: seek_point_in_block_image 580 - ~ALL crc32c hw (408+169=577): CRC despite 8GiB full residency
+    blocks_for_point small frames 138+120: more memcmp (~200)
+  memtable get_entry 2; collect_range_tombstones ~9; drop/free churn ~100+ (per-probe allocs)
+Outside Db::get: wrapper (get_entry+get_cached+ConcurrentDb) ~600 (25%)
+
+Ranked levers: 1) block-index search compares (40%): prefix-compare/8-byte quick check; 2) CRC still 24% at full residency - audit bitmap coverage at 25M (4M/8GiB gave -9.2%); 3) per-probe alloc/drop churn.

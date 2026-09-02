@@ -1,0 +1,63 @@
+=== sample run2 start 2026-09-01T20:46:31Z load: 17:46  up 3 days, 19:39, 13 users, load averages: 5,21 6,71 6,98 ===
+Gnuplot not found, using plotters backend
+apply_hydrate: skipped at 25000000 entries (>8M); see the one-shot hydration timings printed by the read benchmarks' setup
+hydrate/fjall: 25000000 entries in 30.3s (0.83M entries/s); on disk 5.25 GiB (225 B/entry)
+settle/fjall: 24.6s; on disk after 10.09 GiB
+hydrate/rocksdb: 25000000 entries in 23.5s (1.06M entries/s); on disk 6.72 GiB (289 B/entry)
+settle/rocksdb: 5.1s; on disk after 5.24 GiB
+hydrate/pedradb: 25000000 entries in 63.4s (0.39M entries/s); on disk 10.89 GiB (468 B/entry)
+settle/pedradb: 25.5s; on disk after 5.15 GiB
+probe_hit/fjall: p50 144.1µs / p90 270.3µs / p99 577.0µs / p999 1.3ms / max 5.9ms
+probe_miss/fjall: p50 333.0ns / p90 375.0ns / p99 417.0ns / p999 459.0ns / max 7.2µs
+probe_hit/rocksdb: p50 143.9µs / p90 173.2µs / p99 285.0µs / p999 381.3µs / max 739.2µs
+probe_miss/rocksdb: p50 292.0ns / p90 333.0ns / p99 416.0ns / p999 417.0ns / max 1.5µs
+probe_hit/pedradb: p50 4.3µs / p90 6.1µs / p99 10.5µs / p999 21.7µs / max 268.0µs
+probe_miss/pedradb: p50 709.0ns / p90 916.0ns / p99 2.2µs / p999 4.0µs / max 14.9µs
+Benchmarking get_hit/fjall
+Benchmarking get_hit/fjall: Warming up for 3.0000 s
+Benchmarking get_hit/fjall: Collecting 100 samples in estimated 5.1533 s (40k iterations)
+Benchmarking get_hit/fjall: Analyzing
+get_hit/fjall           time:   [106.03 µs 107.07 µs 108.31 µs]
+                        thrpt:  [9.2328 Kelem/s 9.3394 Kelem/s 9.4315 Kelem/s]
+                 change:
+                        time:   [-6.4436% -2.6163% +0.8756%] (p = 0.18 > 0.05)
+                        thrpt:  [-0.8680% +2.6866% +6.8874%]
+                        No change in performance detected.
+Benchmarking get_hit/rocksdb
+Benchmarking get_hit/rocksdb: Warming up for 3.0000 s
+Benchmarking get_hit/rocksdb: Collecting 100 samples in estimated 5.3915 s (40k iterations)
+Benchmarking get_hit/rocksdb: Analyzing
+get_hit/rocksdb         time:   [113.07 µs 114.64 µs 116.48 µs]
+                        thrpt:  [8.5851 Kelem/s 8.7228 Kelem/s 8.8440 Kelem/s]
+                 change:
+                        time:   [-1.6025% +0.3834% +2.1526%] (p = 0.69 > 0.05)
+                        thrpt:  [-2.1072% -0.3819% +1.6286%]
+                        No change in performance detected.
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking get_hit/pedradb
+Benchmarking get_hit/pedradb: Warming up for 3.0000 s
+SAMPLING pid=21483 at 20:49:46
+Sampling process 21483 for 5 seconds with 1 millisecond of run time between samples
+Benchmarking get_hit/pedradb: Collecting 100 samples in estimated 5.0041 s (1.1M iterations)
+Sampling completed, processing symbols...
+Sample analysis of process 21483 written to file /var/folders/q_/5tskc6890_z2pk73666wb_m40000gn/T/grok-goal-57e458da15fc/implementer/sample-gethit-pedra-1.txt
+Sampling process 21483 for 5 seconds with 1 millisecond of run time between samples
+Benchmarking get_hit/pedradb: Analyzing
+get_hit/pedradb         time:   [4.5040 µs 4.5671 µs 4.6505 µs]
+                        thrpt:  [215.03 Kelem/s 218.96 Kelem/s 222.03 Kelem/s]
+                 change:
+                        time:   [+4.2859% +7.3102% +10.704%] (p = 0.00 < 0.05)
+                        thrpt:  [-9.6692% -6.8122% -4.1098%]
+                        Performance has regressed.
+Found 8 outliers among 100 measurements (8.00%)
+  5 (5.00%) low mild
+  1 (1.00%) high mild
+  2 (2.00%) high severe
+
+Sampling completed, processing symbols...
+Sample analysis of process 21483 written to file /var/folders/q_/5tskc6890_z2pk73666wb_m40000gn/T/grok-goal-57e458da15fc/implementer/sample-gethit-pedra-2.txt
+Sampling process 21483 for 5 seconds with 1 millisecond of run time between samples
+Sampling completed, processing symbols...
+Sample analysis of process 21483 written to file /var/folders/q_/5tskc6890_z2pk73666wb_m40000gn/T/grok-goal-57e458da15fc/implementer/sample-gethit-pedra-3.txt
+=== exit=0 end 2026-09-01T20:50:26Z ===
