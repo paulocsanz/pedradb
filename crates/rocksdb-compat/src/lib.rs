@@ -1372,6 +1372,47 @@ pub enum IteratorMode<'a> {
 /// pay it twice per 1000 rows instead of 16 times.
 const ITER_WINDOW: usize = 512;
 
+/// `PEDRA_PAGE_DIAG=1`: one aggregate line every 2048 forward refills —
+/// wall ns per `page_forward` call and rows per page. With SCANDIAG (core
+/// setup+rows) and the criterion op time it splits the scan op into
+/// `page_forward` (lock + setup + rows + compat glue) vs the harness
+/// remainder, on the machine that matters (guest cores are ~4× slower per
+/// row and only a guest-side wall counter can attribute that gap).
+fn page_diag_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("PEDRA_PAGE_DIAG").is_some())
+}
+
+fn page_diag_note(t0: std::time::Instant, rows: usize) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static PAGES: AtomicU64 = AtomicU64::new(0);
+    static ROWS: AtomicU64 = AtomicU64::new(0);
+    static NS: AtomicU64 = AtomicU64::new(0);
+    static LAST_PAGES: AtomicU64 = AtomicU64::new(0);
+    static LAST_ROWS: AtomicU64 = AtomicU64::new(0);
+    static LAST_NS: AtomicU64 = AtomicU64::new(0);
+    NS.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+    ROWS.fetch_add(rows as u64, Ordering::Relaxed);
+    let pages = PAGES.fetch_add(1, Ordering::Relaxed) + 1;
+    if pages % 2048 != 0 {
+        return;
+    }
+    let d = pages - LAST_PAGES.swap(pages, Ordering::Relaxed);
+    if d == 0 {
+        return;
+    }
+    let rows_total = ROWS.load(Ordering::Relaxed);
+    let ns_total = NS.load(Ordering::Relaxed);
+    let d_rows = rows_total - LAST_ROWS.swap(rows_total, Ordering::Relaxed);
+    let d_ns = ns_total - LAST_NS.swap(ns_total, Ordering::Relaxed);
+    println!(
+        "PAGEDIAG pages={} rows/page={:.1} page_ns/page={:.0}",
+        pages,
+        d_rows as f64 / d as f64,
+        d_ns as f64 / d as f64,
+    );
+}
+
 /// Windowed CF iterator (RFC-0032 P0.1). Same positioning semantics as v0.
 pub struct DBIterator<E: PedraEnv = StdEnv> {
     /// Refill pages as zero-copy `Bytes` handles sliced from the cached
@@ -1562,6 +1603,24 @@ impl<E: PedraEnv> DBIterator<E> {
 }
 
 fn page_forward<E: PedraEnv>(
+    inner: &ConcurrentDb<E>,
+    codec: &KeyCodec,
+    cf: &str,
+    seq: pedradb_core::SequenceNumber,
+    start: Bound<Vec<u8>>,
+    end: Bound<&[u8]>,
+    limit: usize,
+) -> Result<Vec<(Bytes, Bytes)>> {
+    if !page_diag_enabled() {
+        return page_forward_inner(inner, codec, cf, seq, start, end, limit);
+    }
+    let t0 = std::time::Instant::now();
+    let out = page_forward_inner(inner, codec, cf, seq, start, end, limit);
+    page_diag_note(t0, out.as_ref().map_or(0, |p| p.len()));
+    out
+}
+
+fn page_forward_inner<E: PedraEnv>(
     inner: &ConcurrentDb<E>,
     codec: &KeyCodec,
     cf: &str,
