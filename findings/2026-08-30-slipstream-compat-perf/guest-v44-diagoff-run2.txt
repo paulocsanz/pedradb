@@ -1,0 +1,54 @@
+Guest v44 read-legs capture — DIAG-OFF official protocol (run 2)
+=================================================================
+
+Date: 2026-09-02, VM restart 03:02:19–03:02:51 -03 (no re-injection, same
+image as run 1), bench done by 03:09:23 -03.
+Gate uptime: post-start 03:02:51 load 15.75/16.10/16.35; completion check
+03:09:23 load 15.31/16.50/16.58.
+Provenance: 3 `Compiling` lines; BENCH_EXIT_readlegs=1; diag-off confirmed
+in band (0 SCANDIAG, 0 PAGEDIAG lines).
+Image: identical to run 1 (v43 code + diag-off entrypoint; STAGE_MAX restored).
+
+Legs (median, 25M entries, both backends one process)
+-----------------------------------------------------
+leg                     pedra µs      rocks µs     ratio   verdict   run1 ratio
+get_hit                 42.06         42.02        0.999   GAP       1.146 PASS
+prefix_scan            319.37        337.40       1.056   PASS      1.125 PASS
+lookup_100/get_loop   3679.8        3554.0       0.966   GAP       1.111 PASS
+lookup_100/multi_get  4004.0        4137.7       1.033   PASS      1.099 PASS
+
+prefix_scan HOLDS in both diag-off runs with CI separation again:
+  scan: pedra [315.67 319.37 323.56] vs rocks [332.22 337.40 343.83].
+The scan gap that stood at 0.828–0.951 through v42/v43 (diags on) is
+closed by diag-off alone: same code, −22% scan-op cost.
+
+The two point-leg misses this run are window-driven, not code:
+- get_hit 0.999: missed by 0.04 µs (0.1%); CIs heavily overlap (pedra
+  [40.880 42.056 43.356] vs rocks [40.392 42.016 43.729]).
+- get_loop 0.966: rocks posted its best get_loop window ever recorded
+  ([3.4791 3.5540 3.6313] ms; prior rocks get_loop medians 3973–4641 µs),
+  while pedra ALSO posted its best absolute get_loop (3680 µs).
+
+Raw medians (criterion [lo mid hi]):
+  get_hit/rocksdb        [40.392 µs 42.016 µs 43.729 µs]
+  prefix_scan/rocksdb    [332.22 µs 337.40 µs 343.83 µs]
+  rocksdb_get_loop       [3.4791 ms 3.5540 ms 3.6313 ms]
+  rocksdb_multi_get      [4.0227 ms 4.1377 ms 4.2659 ms]
+  get_hit/pedradb        [40.880 µs 42.056 µs 43.356 µs]
+  prefix_scan/pedradb    [315.67 µs 319.37 µs 323.56 µs]
+  pedradb_get_loop       [3.6224 ms 3.6798 ms 3.7449 ms]
+  pedradb_multi_get      [3.8559 ms 4.0040 ms 4.1684 ms]
+
+Hydrate/settle/probe:
+  hydrate/rocksdb: 25M in 29.7s (0.84M/s); disk 7.91 GiB (340 B/entry)
+  settle/rocksdb: 9.2s; after 5.24 GiB
+  hydrate/pedradb: 25M in 51.0s (0.49M/s); disk 11.07 GiB (476 B/entry)
+  settle/pedradb: 0.7s; after 5.15 GiB
+  probe_hit/rocksdb:  p50 55.3µs / p90 76.1µs / p99 113.4µs / p999 306.4µs / max 2.2ms
+  probe_miss/rocksdb: p50 661ns / p90 721ns / p99 952ns / p999 9.2µs / max 19.3µs
+  probe_hit/pedradb:  p50 34.5µs / p90 53.2µs / p99 106.1µs / p999 973.4µs / max 2.4ms
+  probe_miss/pedradb: p50 1.7µs / p90 2.1µs / p99 2.6µs / p999 11.6µs / max 15.2µs
+
+Verdict: run 1 held all four (1.146/1.125/1.111/1.099); run 2 held scan +
+multi_get. All-four-in-two-runs still needs a second all-four run; run 3
+follows on the same image.

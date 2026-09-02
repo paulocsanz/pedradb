@@ -1,0 +1,64 @@
+Guest v44 read-legs capture — DIAG-OFF official protocol (run 1)
+=================================================================
+
+Date: 2026-09-02, injected 02:53 -03 (nbd entrypoint edit, persisted and
+re-verified), supervisor-race recovered, VM started 02:54:41; bench done by
+03:01:24 -03.
+Gate uptime: post-start 02:54:41 load 17.84/16.68/16.46; completion check
+03:01:24 load 15.12/16.19/16.40.
+Provenance: 3 `Compiling` lines (code identical to v43); BENCH_EXIT_readlegs=1;
+diag-off CONFIRMED IN BAND: 0 SCANDIAG lines, 0 PAGEDIAG lines in serial
+(v43 runs printed them constantly).
+Image: v43 code exactly (db 8f97a627, merge 6f340eb, compat f7a2119, table
+53cbcf56). ONE variable vs v43: entrypoint diag exports deleted
+(SCAN/PAGE/FLUSH/LEVEL/FDSYNC/BULK/PARK diags + FLUSH_STAGES +
+WRITE_PHASE_STATS). The flush-stage tuning PEDRA_STAGE_MAX_BYTES=67108864
+that shared a deleted line was restored (only PEDRA export remaining), so
+SST staging is unchanged vs all prior captures.
+
+Legs (median, 25M entries, both backends one process)
+-----------------------------------------------------
+leg                     pedra µs      rocks µs     ratio   verdict   v43 runs
+get_hit                 39.85         45.68        1.146   PASS      0.989/1.080
+prefix_scan            300.32        337.95       1.125   PASS      0.951/0.865
+lookup_100/get_loop   3936.8        4373.5       1.111   PASS      0.972/1.122
+lookup_100/multi_get  4064.3        4468.6       1.099   PASS      1.017/1.042
+
+FIRST-EVER CAPTURE WITH ALL FOUR LEGS >= 1.0x — and with full CI
+separation on every leg (no scrape-by):
+  scan:     pedra [294.01 300.32 307.78] vs rocks [333.15 337.95 343.26]
+  get_loop: pedra [3.8388 3.9368 4.0413] ms vs rocks [4.2675 4.3735 4.4913] ms
+  multi_get: pedra [3.9123 4.0643 4.2258] ms vs rocks [4.2766 4.4686 4.6832] ms
+  get_hit:  pedra [38.781 39.850 41.131] vs rocks [43.949 45.680 47.530]
+
+Diag tax mechanism (v43-diagon vs v44-diagoff, same code): the scan leg
+carried it almost alone — pedra prefix_scan 386.7 → 300.3 µs (−22%, ~86
+µs/op), while pedra point legs moved ≤4% (get_hit 39.79→39.85, get_loop
+3915→3937, multi_get 4240→4064). SCANDIAG/PAGEDIAG printed per op/page to
+the VM serial console; on a loaded gate (load ~16) that I/O dominated.
+The 13–20 µs/op local estimate was for the branch/format cost only; the
+guest serial-write path multiplies it. Rocks arm is untouched by the pedra
+diag env vars (rocks scan 337.95 sits in its fast band 330–338).
+
+Raw medians (criterion [lo mid hi]):
+  get_hit/rocksdb        [43.949 µs 45.680 µs 47.530 µs]
+  prefix_scan/rocksdb    [333.15 µs 337.95 µs 343.26 µs]
+  rocksdb_get_loop       [4.2675 ms 4.3735 ms 4.4913 ms]
+  rocksdb_multi_get      [4.2766 ms 4.4686 ms 4.6832 ms]
+  get_hit/pedradb        [38.781 µs 39.850 µs 41.131 µs]
+  prefix_scan/pedradb    [294.01 µs 300.32 µs 307.78 µs]
+  pedradb_get_loop       [3.8388 ms 3.9368 ms 4.0413 ms]
+  pedradb_multi_get      [3.9123 ms 4.0643 ms 4.2258 ms]
+
+Hydrate/settle/probe (no WRITEPHASE line this run — write-phase stats
+export also removed by diag-off; write path code unchanged from v43):
+  hydrate/rocksdb: 25M in 30.2s (0.83M/s); disk 7.94 GiB (341 B/entry)
+  settle/rocksdb: 9.8s; after 5.24 GiB
+  hydrate/pedradb: 25M in 51.8s (0.48M/s); disk 11.04 GiB (474 B/entry)
+  settle/pedradb: 1.4s; after 5.15 GiB
+  probe_hit/rocksdb:  p50 52.4µs / p90 70.2µs / p99 134.9µs / p999 2.1ms / max 4.0ms
+  probe_miss/rocksdb: p50 631ns / p90 922ns / p99 2.8µs / p999 12.3µs / max 18.0µs
+  probe_hit/pedradb:  p50 41.0µs / p90 61.3µs / p99 127.0µs / p999 611.8µs / max 2.1ms
+
+Acceptance requires this to hold in a SECOND independent run:
+guest-v44-diagoff-run2.txt.
