@@ -1263,6 +1263,119 @@ impl SstRun {
     }
 }
 
+/// Lazy concatenation of one disjoint level's tables in `lo` order. The
+/// scan window visits at most one table at a time (strict disjointness is
+/// proven by [`SstRun::disjoint_sorted_by_lo`]), so the merge sees ONE
+/// stream per level instead of one per file — heap width at 25 M drops
+/// from ~#SSTs to ~#levels + L0 + memtables, cutting sift levels per row.
+struct LevelRunStream<'a, E: Env> {
+    db: &'a Db<E>,
+    files_by_lo: Vec<usize>,
+    next_file: usize,
+    start: Bound<Bytes>,
+    end: Bound<Bytes>,
+    snapshot: SequenceNumber,
+    resolve_values: bool,
+    // Concrete iter (not a boxed LayerStream): one dyn call per row from the
+    // merge, the inner per-row walk stays a static, inlinable call.
+    current: Option<crate::sst::SstRangeIter<'a>>,
+}
+
+/// Bound copies for the per-file `iter_user_range` calls (the iter owns its
+/// own copies; this just re-derives the borrowed view for each call).
+fn bound_slice(b: &Bound<Bytes>) -> Bound<&[u8]> {
+    match b {
+        Bound::Included(k) => Bound::Included(&k[..]),
+        Bound::Excluded(k) => Bound::Excluded(&k[..]),
+        Bound::Unbounded => Bound::Unbounded,
+    }
+}
+
+impl<'a, E: Env> LevelRunStream<'a, E> {
+    fn new(
+        db: &'a Db<E>,
+        files_by_lo: Vec<usize>,
+        start: Bound<&[u8]>,
+        end: Bound<&[u8]>,
+        snapshot: SequenceNumber,
+        resolve_values: bool,
+    ) -> Self {
+        let own = |b: Bound<&[u8]>| match b {
+            Bound::Included(k) => Bound::Included(Bytes::copy_from_slice(k)),
+            Bound::Excluded(k) => Bound::Excluded(Bytes::copy_from_slice(k)),
+            Bound::Unbounded => Bound::Unbounded,
+        };
+        Self {
+            db,
+            files_by_lo,
+            next_file: 0,
+            start: own(start),
+            end: own(end),
+            snapshot,
+            resolve_values,
+            current: None,
+        }
+    }
+}
+
+impl<'a, E: Env> Iterator for LevelRunStream<'a, E> {
+    type Item = (InternalKey, Bytes);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(cur) = self.current.as_mut() {
+                if let Some(row) = cur.next() {
+                    return Some(row);
+                }
+                self.current = None;
+            }
+            while self.next_file < self.files_by_lo.len() {
+                let fi = self.files_by_lo[self.next_file];
+                self.next_file += 1;
+                let table = &self.db.ssts[fi];
+                let (start, end) = (bound_slice(&self.start), bound_slice(&self.end));
+                if !table.overlaps_user_range(start, end) {
+                    continue;
+                }
+                self.db.scan_sst_probed.fetch_add(1, Ordering::Relaxed);
+                let cache = &self.db.block_cache;
+                let id = crate::cache::path_id(table.path())
+                    ^ if self.resolve_values {
+                        RESOLVED_BLOCK_TAG
+                    } else {
+                        0
+                    };
+                let db = self.db;
+                let resolve = self.resolve_values;
+                let load = Box::new(move |bi| {
+                    Some(cache.get_or_insert_with_id(id, bi, || {
+                        let mut entries = match table.decode_block(bi) {
+                            Ok(entries) => entries,
+                            // F1: fail loudly on a corrupt block — same
+                            // contract as the per-file stream path.
+                            Err(e) => fail_stop_corrupt_block(table.path(), &e),
+                        };
+                        if resolve {
+                            db.prefetch_resolve_stream(&mut entries);
+                        }
+                        entries
+                    }))
+                });
+                self.current = Some(table.iter_user_range(
+                    start,
+                    end,
+                    self.snapshot,
+                    self.resolve_values,
+                    load,
+                ));
+                break;
+            }
+            // Nothing drained and no file pulled a stream: run exhausted.
+            self.current.as_ref()?;
+        }
+    }
+}
+
 /// [`Db`] itself is single-threaded (`&mut` for writes). Use [`ConcurrentDb`] for
 /// multi-thread access with a coarse mutex/rwlock.
 pub struct Db<E: Env = StdEnv> {
@@ -4363,49 +4476,72 @@ impl<E: Env> Db<E> {
             table.collect_range_tombstones(snapshot, &mut range_dels);
             streams.push(self.memtable_stream(table, start, end, snapshot, resolve_values));
         }
+        // Range tombstones from EVERY table (G2): a covering delete whose
+        // start sits before `start` must still hide keys in the window,
+        // including tables a grouped stream has not pulled from yet.
         for table in self.ssts.iter() {
             table.collect_range_tombstones(snapshot, &mut range_dels);
-            if !table.overlaps_user_range(start, end) {
+        }
+        // A strictly disjoint level collapses into ONE lazy concatenated
+        // stream ([`LevelRunStream`]): heap width drops from #SSTs to
+        // #levels + L0 + memtables. L0 and overlapping levels keep one
+        // stream per overlapping file (identical load/probe semantics).
+        for run in self.sst_runs.iter() {
+            if let Some(by_lo) = run.disjoint_by_lo.as_ref() {
+                streams.push(Box::new(LevelRunStream::new(
+                    self,
+                    by_lo.clone(),
+                    start,
+                    end,
+                    snapshot,
+                    resolve_values,
+                )));
                 continue;
             }
-            self.scan_sst_probed.fetch_add(1, Ordering::Relaxed);
-            let cache = &self.block_cache;
-            // Hash the path once per stream, not once per block fetch, and
-            // keep value-resolved blocks under a tagged id: a full scan then
-            // resolves each block once (on miss) and later loads are a pure
-            // Arc clone — no per-load deep clone + vlog re-resolve. Re-resolve
-            // is NOT identity (F188 strips an escape byte), so resolved slots
-            // must never flow into a raw-keyed load.
-            let id = crate::cache::path_id(table.path())
-                ^ if resolve_values {
-                    RESOLVED_BLOCK_TAG
-                } else {
-                    0
-                };
-            let db = self;
-            let load: Box<
-                dyn FnMut(usize) -> Option<std::sync::Arc<Vec<(InternalKey, Bytes)>>> + '_,
-            > = Box::new(move |bi| {
-                Some(cache.get_or_insert_with_id(id, bi, || {
-                    let mut entries = match table.decode_block(bi) {
-                        Ok(entries) => entries,
-                        // F1: a CRC/IO-faulted block must fail loudly —
-                        // `unwrap_or_default` would silently skip its keys.
-                        Err(e) => fail_stop_corrupt_block(table.path(), &e),
+            for &ti in run.tables_newest_first.iter() {
+                let table = &self.ssts[ti];
+                if !table.overlaps_user_range(start, end) {
+                    continue;
+                }
+                self.scan_sst_probed.fetch_add(1, Ordering::Relaxed);
+                let cache = &self.block_cache;
+                // Hash the path once per stream, not once per block fetch, and
+                // keep value-resolved blocks under a tagged id: a full scan then
+                // resolves each block once (on miss) and later loads are a pure
+                // Arc clone — no per-load deep clone + vlog re-resolve. Re-resolve
+                // is NOT identity (F188 strips an escape byte), so resolved slots
+                // must never flow into a raw-keyed load.
+                let id = crate::cache::path_id(table.path())
+                    ^ if resolve_values {
+                        RESOLVED_BLOCK_TAG
+                    } else {
+                        0
                     };
-                    if resolve_values {
-                        db.prefetch_resolve_stream(&mut entries);
-                    }
-                    entries
-                }))
-            });
-            streams.push(Box::new(table.iter_user_range(
-                start,
-                end,
-                snapshot,
-                resolve_values,
-                load,
-            )));
+                let db = self;
+                let load: Box<
+                    dyn FnMut(usize) -> Option<std::sync::Arc<Vec<(InternalKey, Bytes)>>> + '_,
+                > = Box::new(move |bi| {
+                    Some(cache.get_or_insert_with_id(id, bi, || {
+                        let mut entries = match table.decode_block(bi) {
+                            Ok(entries) => entries,
+                            // F1: a CRC/IO-faulted block must fail loudly —
+                            // `unwrap_or_default` would silently skip its keys.
+                            Err(e) => fail_stop_corrupt_block(table.path(), &e),
+                        };
+                        if resolve_values {
+                            db.prefetch_resolve_stream(&mut entries);
+                        }
+                        entries
+                    }))
+                });
+                streams.push(Box::new(table.iter_user_range(
+                    start,
+                    end,
+                    snapshot,
+                    resolve_values,
+                    load,
+                )));
+            }
         }
         if let Some(t0) = scan_diag_t0 {
             self.scan_diag_note(t0, streams.len());
@@ -14180,6 +14316,96 @@ mod tests {
             .collect();
         assert_eq!(rescan, want, "manifest recovers the batched installs");
         drop(reopened);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// LevelRunStream oracle (scan heap-width cut): a level holding many
+    /// strictly disjoint tables must scan identically to the per-file merge
+    /// it replaces — full range, windows that cut file boundaries, `limit`,
+    /// newest-wins overwrites, a point delete, and a range tombstone — while
+    /// the overlapping L0 pair keeps the per-file stream path.
+    #[test]
+    fn scan_grouped_disjoint_level_matches_btree() {
+        fn check(
+            db: &Db,
+            expect: &std::collections::BTreeMap<Vec<u8>, Vec<u8>>,
+            start: Bound<&[u8]>,
+            end: Bound<&[u8]>,
+            limit: Option<usize>,
+        ) {
+            let snap = db.visible_sequence();
+            let got: Vec<(Vec<u8>, Vec<u8>)> = db
+                .scan_at(snap, start, end, limit)
+                .map(|kv| (kv.key.to_vec(), kv.value.to_vec()))
+                .collect();
+            let mut want: Vec<(Vec<u8>, Vec<u8>)> = expect
+                .range::<[u8], _>((start, end))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            if let Some(n) = limit {
+                want.truncate(n);
+            }
+            assert_eq!(got, want, "scan {start:?}..{end:?} limit {limit:?}");
+        }
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.bulk_route_enabled = false; // ladder mechanics; bulk would install at MAX
+        db.set_defer_auto_compact(true);
+        db.set_compact_target_file_bytes(64 * 1024);
+        // Same resting shape as `parallel_jobs_batch_disjoint_and_correct`:
+        // each round's L0 file is pushed to L2, which keeps every round.
+        db.l1_target_bytes = 8 * 1024;
+        let mut expect = std::collections::BTreeMap::new();
+        for round in 0..8u8 {
+            for i in 0..64u8 {
+                let key = [round, i];
+                let val = vec![0xA5u8; 48];
+                db.put(key, val.clone()).unwrap();
+                expect.insert(key.to_vec(), val);
+            }
+            db.flush().unwrap();
+            db.compact_leveled().unwrap();
+        }
+        let grouped = db
+            .sst_runs
+            .iter()
+            .filter(|r| r.disjoint_by_lo.is_some())
+            .map(|r| r.tables_newest_first.len())
+            .max()
+            .unwrap_or(0);
+        assert!(
+            grouped >= 3,
+            "fixture must build a grouped disjoint run (>=3 files), got {grouped}"
+        );
+        // Overlapping L0 pair: same key hull in both files keeps that run on
+        // the per-file stream path (newest file wins the shared keys).
+        for (i, v) in [(0u8, 1u8), (1, 2)] {
+            db.put([0u8, 200 + i], vec![v; 16]).unwrap();
+            expect.insert([0, 200 + i].to_vec(), vec![v; 16]);
+            db.put([2u8, 10], vec![v; 16]).unwrap();
+            expect.insert([2, 10].to_vec(), vec![v; 16]);
+            db.flush().unwrap();
+        }
+        // Live memtable rows merged over both stream shapes, a point delete,
+        // and a range tombstone spanning L2 file boundaries.
+        db.put([3, 7], b"mem-newest".to_vec()).unwrap();
+        expect.insert([3, 7].to_vec(), b"mem-newest".to_vec());
+        db.delete([5, 10]).unwrap();
+        expect.remove(&[5u8, 10].to_vec()[..]);
+        db.delete_range([2u8, 100], [4u8, 20]).unwrap();
+        let covered: Vec<Vec<u8>> = expect
+            .range([2u8, 100].to_vec()..[4u8, 20].to_vec())
+            .map(|(k, _)| k.clone())
+            .collect();
+        for k in covered {
+            expect.remove(&k);
+        }
+        check(&db, &expect, Bound::Unbounded, Bound::Unbounded, None);
+        check(&db, &expect, Bound::Included(&[2u8, 50]), Bound::Excluded(&[5u8, 200]), None);
+        check(&db, &expect, Bound::Included(&[2u8, 50]), Bound::Included(&[3u8, 7]), None);
+        check(&db, &expect, Bound::Unbounded, Bound::Unbounded, Some(7));
+        check(&db, &expect, Bound::Excluded(&[0u8, 5]), Bound::Unbounded, Some(200));
+        db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
 

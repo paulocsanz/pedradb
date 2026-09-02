@@ -1,0 +1,6 @@
+SCANDIAG extracts (prefix_scan, 333-row windows)
+== v42a boxed-inner (4M): row 57 setup 142
+== NEW v42a 25M (boxed): streams=2.0 setup=204 row=58-59
+== CTL v41 25M: streams=2.0 setup=1097-1113 row=53-54
+== NEW v42b concrete-iter 4M: streams=2.0 setup=177-181 row=54
+== guest v35 scan-diag 25M (v33-era code): streams=2.0 setup=5708-7808 row=222-246, sst_n=87 l0=0 l1=1

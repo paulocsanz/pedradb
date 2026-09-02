@@ -305,3 +305,50 @@ share of a ~1–2 % CRC slice of the 46 µs guest op; the −9.2 % local win
 is the fully-resident (8 GiB) regime. Keep: correct, fail-closed, free.
 probe_miss p50 1.9 µs = L2-class signature on all runs. Write path
 unchanged (hydrate 51.8 s, settle 1.1 s).
+
+## prefix_scan: LevelRunStream grouped disjoint levels (core db.rs, 2026-09-02) — width hypothesis REFUTED, setup cut kept
+
+Hypothesis: v41 left scan at 409.16 vs 348.01 µs (0.826); the DB holds
+~87 SSTs, so collapsing each strictly disjoint level into ONE lazy
+concatenated stream (`LevelRunStream`: walk `files_by_lo`, pull one
+`SstRangeIter` at a time; strict `hi[i] < lo[i+1]` proven by
+`SstRun::disjoint_sorted_by_lo`) should cut merge heap width 87 → ~4.
+
+**Refuted by SCANDIAG in both environments** (25 M, 333-row windows):
+guest v35 scan-diag and local NEW/CTL both report `streams/op = 2.0` —
+each window overlaps ONE SST (mem + 1 file). The heap was never wide;
+`sst_n=87` is inventory, not merge width. Full decomposition
+(`local-25m-levelrun-scandiag.txt`):
+
+- setup_ns/op local: CTL 1097–1113 → NEW 204 (−82 %): per-op stream
+  assembly now defers per-file iter + load-closure construction to first
+  pull. Guest setup was 5.7–7.8 µs/op ≈ 87-table tombstone sweep +
+  assembly ⇒ expected guest gain ~1.2 % of the 409 µs op — below run
+  noise, so **no guest injection** (one-variable discipline: only inject
+  levers with expected effect > noise).
+- row_ns/row: first draft boxed the inner iter (`LayerStream`) → +5 ns/row
+  (58–59 vs 53–54; double dynamic dispatch per row, +1.3 % end-to-end,
+  visible in `levelrun-n1..n3`). Fixed by holding the concrete
+  `SstRangeIter`: 54 ns/row, one dyn call from the merge, inner walk
+  static.
+
+Local 25 M/256 MiB A/B v42b (concrete iter) vs v41 CTL, alternating
+n4/c4/n5/c5 under load 5–11 (machine shared; `levelrun-n*.log`):
+pedra **122.98 / 123.89 vs 122.58 / 122.79 µs — neutral (±0.4–0.9 %,
+spreads ±0.3 %)**; rocks 191–217. v42a pairs (n1 anomaly 167.3 wide
+spread; n2/n3 123.46/122.61 vs c1–c3 121.3–122.4) same conclusion.
+
+Guest scan attribution after this: op 409 µs = core rows 333 × 235 ns ≈
+78 µs (19 %) + setup ~7 µs (2 %) + **~324 µs (79 %) outside core merge**
+— compat iterator window decode + stage row decode, both in the
+concurrent session's files. Core-side scan levers left are per-row
+micro-cuts (~5–8 %); 25 M prefix_scan parity is dominated by files we
+don't own this session. v41 medians stand (0.826).
+
+Kept anyway: `LevelRunStream` is oracle-covered
+(`scan_grouped_disjoint_level_matches_btree`: ≥3-file disjoint run +
+overlapping L0 pair + memtable overwrites + point delete + range
+tombstone spanning file boundaries + limit cuts — first draft silently
+dropped the whole grouped level, the test caught it), suite 690 pass +
+the two documented flakes, setup −82 % measured, no per-row regression
+after the concrete-iter fix. db.rs at this point: cc1fbf61.

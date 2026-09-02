@@ -1,0 +1,51 @@
+Gnuplot not found, using plotters backend
+apply_hydrate: skipped at 25000000 entries (>8M); see the one-shot hydration timings printed by the read benchmarks' setup
+hydrate/fjall: 25000000 entries in 27.4s (0.91M entries/s); on disk 5.25 GiB (225 B/entry)
+settle/fjall: 18.5s; on disk after 10.09 GiB
+hydrate/rocksdb: 25000000 entries in 26.7s (0.94M entries/s); on disk 6.79 GiB (292 B/entry)
+settle/rocksdb: 6.2s; on disk after 5.24 GiB
+hydrate/pedradb: 25000000 entries in 87.0s (0.29M entries/s); on disk 10.89 GiB (468 B/entry)
+settle/pedradb: 40.3s; on disk after 5.15 GiB
+probe_hit/fjall: p50 148.1µs / p90 298.8µs / p99 623.6µs / p999 6.0ms / max 29.2ms
+probe_miss/fjall: p50 333.0ns / p90 375.0ns / p99 417.0ns / p999 500.0ns / max 12.4µs
+probe_hit/rocksdb: p50 140.5µs / p90 184.4µs / p99 305.7µs / p999 478.6µs / max 2.0ms
+probe_miss/rocksdb: p50 292.0ns / p90 333.0ns / p99 375.0ns / p999 417.0ns / max 4.8µs
+probe_hit/pedradb: p50 6.8µs / p90 145.9µs / p99 248.2µs / p999 516.2µs / max 1.3ms
+probe_miss/pedradb: p50 666.0ns / p90 875.0ns / p99 1.9µs / p999 5.2µs / max 11.1µs
+Benchmarking prefix_scan/fjall
+Benchmarking prefix_scan/fjall: Warming up for 3.0000 s
+Benchmarking prefix_scan/fjall: Collecting 100 samples in estimated 5.4625 s (30k iterations)
+Benchmarking prefix_scan/fjall: Analyzing
+prefix_scan/fjall       time:   [179.92 µs 180.62 µs 181.28 µs]
+                        thrpt:  [5.5162 Melem/s 5.5365 Melem/s 5.5579 Melem/s]
+                 change:
+                        time:   [-6.7131% -1.8625% +1.2423%] (p = 0.57 > 0.05)
+                        thrpt:  [-1.2270% +1.8978% +7.1962%]
+                        No change in performance detected.
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+Benchmarking prefix_scan/rocksdb
+Benchmarking prefix_scan/rocksdb: Warming up for 3.0000 s
+Benchmarking prefix_scan/rocksdb: Collecting 100 samples in estimated 5.0521 s (25k iterations)
+Benchmarking prefix_scan/rocksdb: Analyzing
+prefix_scan/rocksdb     time:   [199.82 µs 200.56 µs 201.33 µs]
+                        thrpt:  [4.9670 Melem/s 4.9860 Melem/s 5.0046 Melem/s]
+                 change:
+                        time:   [+1.0413% +1.5676% +2.0600%] (p = 0.00 < 0.05)
+                        thrpt:  [-2.0185% -1.5434% -1.0306%]
+                        Performance has regressed.
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) low mild
+Benchmarking prefix_scan/pedradb
+Benchmarking prefix_scan/pedradb: Warming up for 3.0000 s
+Benchmarking prefix_scan/pedradb: Collecting 100 samples in estimated 5.1902 s (40k iterations)
+Benchmarking prefix_scan/pedradb: Analyzing
+prefix_scan/pedradb     time:   [120.94 µs 121.42 µs 121.92 µs]
+                        thrpt:  [8.2024 Melem/s 8.2359 Melem/s 8.2686 Melem/s]
+                 change:
+                        time:   [-2.3668% -1.8106% -1.2809%] (p = 0.00 < 0.05)
+                        thrpt:  [+1.2975% +1.8440% +2.4242%]
+                        Performance has improved.
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+
