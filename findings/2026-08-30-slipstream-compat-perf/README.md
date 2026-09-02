@@ -1595,3 +1595,47 @@ doubles as a run #23 repeat. Full capture:
 - Gate hygiene: `inject-v21p-gate.sh`, `inject-v22-gate.sh`,
   `inject_v21h/v21k..v21o.sh` deleted from the gate; only
   `inject-v23-gate.sh` + the `.v23` staging files remain.
+
+## 2026-09-02 — scan arm attributed; accel verdict + guest v42 (first capture with all three point legs ≥1×); merge fast path neutral
+
+Full details in `2026-09-02-scan-arm-attribution.md` (arm split),
+`2026-09-02-accel-local-ab.md` (accel A/B), `guest-v41p-pagediag-run1.txt`
+(v41p + PAGEDIAG baseline), `guest-v42-accel-run1.txt` (v42 capture).
+
+- **Scan attribution (local `sample`, 25M):** rocks arm = iterator-own
+  72.0% / harness 21.1% / TLS 6.8%, scaling uniformly 1.70× to guest.
+  Pedra arm (diag-off) = core 43.2% / compat 9.9% / harness 27.8% /
+  **Bytes refcount atomics 10.9% (~18 µs/op)** / swtch ~5%. Harness is
+  equal-cost both arms (~44–46 µs). Guest excess +124 µs/op = page ~38 µs
+  + outside ~87 µs; in-page rows carry NO Bytes atomics — the gap is
+  uarch-sensitive branchy compute. bytes 1.12.1 audit: refill pages are
+  promotable-Vec `Bytes`; the scan path pays ~8 refcount RMWs per row
+  (stream-head key+value clone, `WindowKv` drop, compat `decode_bytes`
+  re-slice + `row.value.clone()`, harness tuple drop).
+- **Accel (285af59, block-index search) local A/B** at 4M/1GiB (25M/256MiB
+  is invalid for point A/B — page-cache thrash): pedra hot medians
+  get_hit 2.78→2.19 µs, get_loop 342.9→205.6 µs, multi_get 404.4→208.5 µs;
+  9/9 round-pairs favor accel, rocks drift ≤5%.
+- **Guest v42 (v41p + accel table.rs only, diags ON):** get_hit 42.13 vs
+  44.02 = **1.045×**, get_loop 4077 vs 4641 = **1.138×**, multi_get 3958
+  vs 4922 = **1.243×** — first guest capture with all three point legs
+  ≥1× together. prefix_scan 399.2 vs 330.5 = 0.828× remains the only
+  gap. Caveats: single run; rocks arm drifted slow this run (multi_get
+  3847→4922, known 0.87–1.15 swing); durable signal is pedra's own
+  multi_get −11%. Official parity captures still must be diag-off and
+  hold in two runs.
+- **Merge single-live-run fast path (this commit):** local A/B 3
+  interleaved rounds at 25M — NEUTRAL (ctl 164.1/166.8/164.6 µs vs new
+  167.6/164.9/165.0 µs; ±1–2% run noise). New counters explain it:
+  `single=100%` (fast path fires on every row) but `evict/op=0.00` —
+  the second stream is the empty memtable retiring at setup, so the heap
+  was already degenerate and there was almost no per-row merge cost to
+  remove. Kept for the counters, the past-`end` retirement (correctness
+  under interleavings), and as the base for the next scan lever.
+- **Next scan lever (ranked):** cut the per-row Bytes refcount hops —
+  (1) compat `page_forward_inner`/`page_last_n` move `row.value` instead
+  of cloning (2 of 8 RMWs), (2) borrow-emit from the single-stream path
+  (visit/ref API over the cached block, compat arena page) to remove the
+  stream-head clone + `WindowKv` drop + decode re-slice (4+ more). Local
+  expectation ≈ −40 ns/row ≈ −8% of the scan op; guest 2–3× that on
+  mitigation-laden cores.

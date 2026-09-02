@@ -1,0 +1,66 @@
+Guest v42 read-legs capture — accel table.rs (run 1)
+====================================================
+
+Date: 2026-09-02, injection 04:42:15 UTC (01:42:15 -03), bench 04:42:22 → 04:46:02 UTC.
+Gate uptime at parse time: up 5 days, 9:56, load 15.67/16.07/15.73 (01:46:53 -03).
+Gate uptime around injection (from inject log): load ~14.7–14.9.
+
+Image (one variable vs v41p):
+  - table.rs md5 53cbcf5669fa2f3aef84169533e534bc  (accel block-cache probe path, commit 285af59)
+  - db.rs   e03ebf5d…  merge.rs 20a73de0…  compat lib.rs ddc48a0b…  (unchanged v41p)
+  - v41p table.rs was 88b51fc2…
+Inject script: /tmp/inject-v42-accel.sh (gate md5 037c5688…), serial truncated pre-boot.
+Compile signature in serial: pedradb-core, rocksdb-compat, beyond-slipstream all recompiled.
+Diags ON (SCANDIAG=1 + PAGEDIAG=1 baked in p04_entrypoint.sh) — NOT an official parity capture.
+
+Legs (median, 25M entries, both backends one process)
+-----------------------------------------------------
+leg                     pedra µs      rocks µs     ratio   verdict   v41p ratio
+get_hit                 42.135        44.021       1.045   PASS      1.038
+prefix_scan            399.16        330.49       0.828   GAP       0.873
+lookup_100/get_loop   4077.0        4641.0       1.138   PASS      0.946
+lookup_100/multi_get  3958.3        4921.9       1.243   PASS      0.863
+
+Raw medians with criterion CI:
+  get_hit/pedra        [40.242 µs  42.135 µs  44.036 µs]
+  get_hit/rocks        [42.492 µs  44.021 µs  45.719 µs]
+  prefix_scan/pedra    [391.70 µs 399.16 µs 407.15 µs]
+  prefix_scan/rocks    [325.35 µs 330.49 µs 337.09 µs]
+  pedradb_get_loop     [3.9565 ms 4.0770 ms 4.2043 ms]
+  rocksdb_get_loop     [4.4788 ms 4.6410 ms 4.8259 ms]
+  pedradb_multi_get    [3.8527 ms 3.9583 ms 4.0714 ms]
+  rocksdb_multi_get    [4.7080 ms 4.9219 ms 5.1496 ms]
+
+FIRST guest capture with all three point legs >= 1.0x simultaneously.
+Pedra-arm deltas vs v41p (same diags): get_hit 43.94→42.13 (-4%), get_loop
+4088→4077 (flat), multi_get 4456→3958 (-11%), prefix_scan 404.7→399.2 (flat).
+Rocks-arm drift this run: get_hit 45.59→44.02, get_loop 4322→4641 (+7%),
+multi_get 3847→4922 (+28%!), scan 353.4→330.5 (-6%). multi_get rocks swings
+are known (historical ratio 0.87–1.15); the -11% pedra multi_get improvement
+is the durable signal, the 1.243 ratio is flattered by the rocks arm.
+prefix_scan remains the only gap.
+
+Scan diag (tail, scan leg):
+  SCANDIAG ops=69632 streams/op=2.0 setup_ns/op=4749 rows/op=333.3 row_ns/row=173 cache_hits/op=22.34 cache_misses/op=0.00
+  (row_ns/row range this run: 169–200 ns; still 2 streams/op — merge fast path NOT in v42)
+  PAGEDIAG pages=69632 rows/page=333.5 page_ns/page=94550
+  (page_ns/page range: 90.1–102.4 µs ⇒ ~270–307 ns/row incl. merge+diag)
+
+Hydrate/settle/probe:
+  hydrate/rocksdb: 25000000 entries in 29.4s (0.85M entries/s); on disk 7.88 GiB (338 B/entry)
+  settle/rocksdb: 10.2s; on disk after 5.24 GiB
+  hydrate/pedradb: 25000000 entries in 54.9s (0.46M entries/s); on disk 11.05 GiB (474 B/entry)
+  settle/pedradb: 1.2s; on disk after 5.15 GiB
+  probe_hit/rocksdb:  p50 49.5µs / p90 77.9µs / p99 889.6µs / p999 2.3ms / max 3.1ms
+  probe_miss/rocksdb: p50 611.0ns / p90 631.0ns / p99 772.0ns / p999 10.1µs / max 2.0ms
+  probe_hit/pedradb:  p50 43.6µs / p90 61.2µs / p99 135.6µs / p999 2.1ms / max 5.3ms
+  probe_miss/pedradb: p50 2.0µs / p90 2.4µs / p99 3.0µs / p999 15.1µs / max 31.8µs
+
+Write path (WRITEPHASE, write phase before legs):
+  commits=24415 prepare_ms=1031.7 wal_ms=5564.7 mem_ms=8474.4 publish_ms=14.5 flush_check_ms=11.2 lock_wait_ms=0.0
+
+Memory at leg end: FLUSHDIAG sst_n=89 rss_kb=1450420 pool_n=15 pool_b=265697780; guest Mem avail ~3.5GiB free.
+
+Not two independent runs; acceptance still requires a holding second run and
+diag-off official captures. Scan parity lever (single-live-run fast path) is
+in local A/B now (see 2026-09-02-scan-arm-attribution.md for ranking).

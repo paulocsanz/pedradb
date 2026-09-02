@@ -4563,6 +4563,8 @@ impl<E: Env> Db<E> {
         static LAST_SETUP_NS: AtomicU64 = AtomicU64::new(0);
         static LAST_ROWS: AtomicU64 = AtomicU64::new(0);
         static LAST_ROW_NS: AtomicU64 = AtomicU64::new(0);
+        static LAST_SINGLE: AtomicU64 = AtomicU64::new(0);
+        static LAST_EVICTS: AtomicU64 = AtomicU64::new(0);
         static LAST_HITS: AtomicU64 = AtomicU64::new(0);
         static LAST_MISSES: AtomicU64 = AtomicU64::new(0);
 
@@ -4586,15 +4588,21 @@ impl<E: Env> Db<E> {
         let d_setup = total - LAST_SETUP_NS.swap(total, Ordering::Relaxed);
         let d_rows = rows - LAST_ROWS.swap(rows, Ordering::Relaxed);
         let d_row_ns = row_ns - LAST_ROW_NS.swap(row_ns, Ordering::Relaxed);
+        let single = crate::merge::SCAN_DIAG_SINGLE_ROWS.load(Ordering::Relaxed);
+        let evicts = crate::merge::SCAN_DIAG_STREAM_EVICTS.load(Ordering::Relaxed);
+        let d_single = single - LAST_SINGLE.swap(single, Ordering::Relaxed);
+        let d_evicts = evicts - LAST_EVICTS.swap(evicts, Ordering::Relaxed);
         let d_hits = hits - LAST_HITS.swap(hits, Ordering::Relaxed);
         let d_misses = misses - LAST_MISSES.swap(misses, Ordering::Relaxed);
         println!(
-            "SCANDIAG ops={} streams/op={:.1} setup_ns/op={:.0} rows/op={:.1} row_ns/row={:.0} cache_hits/op={:.2} cache_misses/op={:.2}",
+            "SCANDIAG ops={} streams/op={:.1} setup_ns/op={:.0} rows/op={:.1} row_ns/row={:.0} single={:.0}% evict/op={:.2} cache_hits/op={:.2} cache_misses/op={:.2}",
             ops,
             d_streams as f64 / d as f64,
             d_setup as f64 / d as f64,
             d_rows as f64 / d as f64,
             if d_rows > 0 { d_row_ns as f64 / d_rows as f64 } else { 0.0 },
+            if d_rows > 0 { 100.0 * d_single as f64 / d_rows as f64 } else { 0.0 },
+            d_evicts as f64 / d as f64,
             d_hits as f64 / d as f64,
             d_misses as f64 / d as f64,
         );

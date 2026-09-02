@@ -31,6 +31,12 @@ pub(crate) static SCAN_DIAG_ROWS: AtomicU64 = AtomicU64::new(0);
 /// cache miss, which happen under the stream's `next`).
 pub(crate) static SCAN_DIAG_ROW_NS: AtomicU64 = AtomicU64::new(0);
 
+/// Rows emitted from the single-live-stream fast path (diag only).
+pub(crate) static SCAN_DIAG_SINGLE_ROWS: AtomicU64 = AtomicU64::new(0);
+
+/// Streams retired early because their head passed `end` (diag only).
+pub(crate) static SCAN_DIAG_STREAM_EVICTS: AtomicU64 = AtomicU64::new(0);
+
 
 /// One user-visible key/value after MVCC filtering.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,6 +141,17 @@ pub fn user_key_in_range(user_key: &[u8], start: Bound<&[u8]>, end: Bound<&[u8]>
         Bound::Excluded(e) => user_key < e,
     };
     after_start && before_end
+}
+
+/// True when `user_key` sits past `end`: every later key of a sorted stream
+/// is then out of range too, so the stream can be retired early.
+#[must_use]
+pub fn past_end(user_key: &[u8], end: Bound<&[u8]>) -> bool {
+    match end {
+        Bound::Unbounded => false,
+        Bound::Included(e) => user_key > e,
+        Bound::Excluded(e) => user_key >= e,
+    }
 }
 
 /// Extract range tombstones visible at `snapshot` from a stream of versions.
@@ -284,7 +301,9 @@ pub struct StreamingVisibleIter<'a> {
     limit: Option<usize>,
     emitted: usize,
     /// Last user key for which we already decided visibility (skip older versions).
-    skip_user: Option<Bytes>,
+    /// A reused byte buffer, not a `Bytes`: cloning the emitted key was one
+    /// block-Arc inc plus one dec per row inside the scan hot loop.
+    skip_user: Option<Vec<u8>>,
 }
 
 impl StreamingVisibleIter<'static> {
@@ -342,12 +361,28 @@ impl<'a> StreamingVisibleIter<'a> {
     ) -> Self {
         let mut heap = Vec::new();
         let mut heads = Vec::with_capacity(streams.len());
+        let mut evicts = 0u64;
         for (i, it) in streams.iter_mut().enumerate() {
             let head = it.next();
+            // Sorted stream: a head already past `end` can only be followed
+            // by keys further past it — retire the stream before it ever
+            // competes in the heap.
+            let retire = match &head {
+                Some((k, _)) => past_end(k.user_key.as_ref(), end),
+                None => false,
+            };
+            if retire {
+                evicts += 1;
+                heads.push(None);
+                continue;
+            }
             heads.push(head);
             if heads[i].is_some() {
                 heap.push(i);
             }
+        }
+        if evicts > 0 && scan_diag_enabled() {
+            SCAN_DIAG_STREAM_EVICTS.fetch_add(evicts, AtomicOrdering::Relaxed);
         }
         // heap built in registration order with all Some heads: heapify once.
         let mut iter = Self {
@@ -432,6 +467,35 @@ impl<'a> StreamingVisibleIter<'a> {
         user_key_in_range(user_key, start, end)
     }
 
+    /// `past_end` against this iterator's owned `end` bound.
+    fn beyond_end(&self, user_key: &[u8]) -> bool {
+        past_end(user_key, bound_as_ref(&self.end))
+    }
+
+    #[inline]
+    fn skips_user(&self, user_key: &[u8]) -> bool {
+        match &self.skip_user {
+            Some(skip) => user_key == skip.as_slice(),
+            None => false,
+        }
+    }
+
+    /// Record the winning key as the new skip target (reused buffer, no
+    /// `Bytes` clone) and build the window row.
+    fn emit(&mut self, ikey: InternalKey, value: Bytes) -> WindowKv {
+        let skip = self.skip_user.get_or_insert_with(Vec::new);
+        skip.clear();
+        skip.extend_from_slice(ikey.user_key.as_ref());
+        let range_hidden =
+            range_deleted(ikey.user_key.as_ref(), ikey.sequence, &self.range_dels);
+        let snapshot_live = visible_at(ikey.kind, range_hidden);
+        WindowKv {
+            key: ikey.user_key,
+            value,
+            snapshot_live,
+        }
+    }
+
     /// Newest version per user key, with [`WindowKv::snapshot_live`].
     ///
     /// Does **not** apply [`iter_window_keep`] — the caller (compat window
@@ -451,40 +515,91 @@ impl<'a> StreamingVisibleIter<'a> {
     }
 
     fn next_window_kv_inner(&mut self) -> Option<WindowKv> {
+        // Single live stream: nothing to compete with, so skip all heap
+        // work. Reached at setup when one run overlaps the range, or after
+        // the other streams exhaust / retire past `end`.
+        if self.heap.len() == 1 {
+            let si = self.heap[0];
+            let diag = scan_diag_enabled();
+            loop {
+                let head = self.streams[si].next();
+                let cur = self.heads[si].take();
+                if head.is_none() {
+                    self.heap.clear();
+                } else {
+                    self.heads[si] = head;
+                }
+                let Some((ikey, value)) = cur else {
+                    return None;
+                };
+                if ikey.sequence > self.snapshot {
+                    continue;
+                }
+                if self.skips_user(ikey.user_key.as_ref()) {
+                    continue;
+                }
+                if !self.in_range(ikey.user_key.as_ref()) {
+                    // Sorted stream: past `end` nothing re-enters the range.
+                    if self.beyond_end(ikey.user_key.as_ref()) {
+                        self.heap.clear();
+                        self.heads[si] = None;
+                        return None;
+                    }
+                    continue;
+                }
+                if diag {
+                    SCAN_DIAG_SINGLE_ROWS.fetch_add(1, AtomicOrdering::Relaxed);
+                }
+                return Some(self.emit(ikey, value));
+            }
+        }
         while let Some(si) = self.heap_pop() {
             // Refill this stream's head before deciding on the popped row so
             // the successor competes with the other streams immediately.
             let head = self.streams[si].next();
             let cur = self.heads[si].take();
-            self.heads[si] = head;
-            if self.heads[si].is_some() {
-                self.heap_push(si);
+            let retire = match &cur {
+                // Sorted stream: this head passed `end`, so every successor
+                // is out of range too — retire instead of re-pushing.
+                Some((k, _)) => self.beyond_end(k.user_key.as_ref()),
+                None => false,
+            };
+            if retire {
+                if scan_diag_enabled() {
+                    SCAN_DIAG_STREAM_EVICTS.fetch_add(1, AtomicOrdering::Relaxed);
+                }
+                // `head` is the successor of a key past `end`: drop it.
+                self.heads[si] = None;
+            } else {
+                let retire_head = match &head {
+                    Some((k, _)) => self.beyond_end(k.user_key.as_ref()),
+                    None => false,
+                };
+                if retire_head {
+                    if scan_diag_enabled() {
+                        SCAN_DIAG_STREAM_EVICTS.fetch_add(1, AtomicOrdering::Relaxed);
+                    }
+                    self.heads[si] = None;
+                } else {
+                    self.heads[si] = head;
+                    if self.heads[si].is_some() {
+                        self.heap_push(si);
+                    }
+                }
             }
-
             let Some((ikey, value)) = cur else {
                 continue;
             };
             if ikey.sequence > self.snapshot {
                 continue;
             }
-            if let Some(ref skip) = self.skip_user {
-                if ikey.user_key == *skip {
-                    continue;
-                }
+            if self.skips_user(ikey.user_key.as_ref()) {
+                continue;
             }
             if !self.in_range(ikey.user_key.as_ref()) {
                 continue;
             }
-
-            self.skip_user = Some(ikey.user_key.clone());
-            let range_hidden =
-                range_deleted(ikey.user_key.as_ref(), ikey.sequence, &self.range_dels);
-            let snapshot_live = visible_at(ikey.kind, range_hidden);
-            return Some(WindowKv {
-                key: ikey.user_key,
-                value,
-                snapshot_live,
-            });
+            return Some(self.emit(ikey, value));
         }
         None
     }
@@ -1081,6 +1196,221 @@ mod tests {
         assert_eq!(at_3[0].value.as_ref(), b"old");
         let at_10 = visible_range(entries, 10, Bound::Unbounded, Bound::Unbounded);
         assert_eq!(at_10[0].value.as_ref(), b"new");
+    }
+
+    /// Brute-force window oracle: sort every point entry into internal
+    /// order, keep the first version at/below `snapshot` per user key
+    /// (hidden rows included), range-filter, apply range tombstones.
+    fn window_oracle(
+        streams: &[Vec<(InternalKey, Bytes)>],
+        range_dels: &[RangeTombstone],
+        snapshot: SequenceNumber,
+        start: Bound<&[u8]>,
+        end: Bound<&[u8]>,
+    ) -> Vec<WindowKv> {
+        let mut all: Vec<(InternalKey, Bytes)> = streams.iter().flatten().cloned().collect();
+        all.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut out = Vec::new();
+        let mut last: Option<Vec<u8>> = None;
+        for (ikey, value) in all {
+            if ikey.sequence > snapshot {
+                continue;
+            }
+            if let Some(l) = &last {
+                if ikey.user_key.as_ref() == l.as_slice() {
+                    continue;
+                }
+            }
+            if !user_key_in_range(ikey.user_key.as_ref(), start, end) {
+                continue;
+            }
+            last = Some(ikey.user_key.to_vec());
+            let hidden = range_deleted(ikey.user_key.as_ref(), ikey.sequence, range_dels);
+            out.push(WindowKv {
+                key: ikey.user_key,
+                value,
+                snapshot_live: visible_at(ikey.kind, hidden),
+            });
+        }
+        out
+    }
+
+    fn lcg(state: &mut u64) -> u64 {
+        *state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        *state
+    }
+
+    /// Randomized oracle for `StreamingVisibleIter::from_point_streams`:
+    /// 1-4 streams, duplicate keys across streams, versions above snapshot,
+    /// deletions, range tombstones, and bounds that leave whole streams
+    /// past `end` (exercising setup eviction + the single-live fast path).
+    #[test]
+    fn streaming_merge_fast_path_random_oracle() {
+        let mut seed = 0x0000_5eed_0002_u64;
+        let snapshot: SequenceNumber = 8;
+        for case in 0..300 {
+            let n_streams = 1 + (lcg(&mut seed) % 4) as usize;
+            let mut used: std::collections::HashSet<(Vec<u8>, u64)> =
+                std::collections::HashSet::new();
+            let mut streams: Vec<Vec<(InternalKey, Bytes)>> = Vec::new();
+            for _s in 0..n_streams {
+                let mut rows = Vec::new();
+                let mut k = lcg(&mut seed) % 50;
+                for _r in 0..(lcg(&mut seed) % 30) {
+                    let key = format!(
+                        "{}{}",
+                        (b'a' + (k / 10) as u8) as char,
+                        (b'0' + (k % 10) as u8) as char
+                    );
+                    let mut seq = 1 + lcg(&mut seed) % 12;
+                    while !used.insert((key.clone().into_bytes(), seq)) {
+                        seq = 1 + lcg(&mut seed) % 12;
+                    }
+                    let kind = if lcg(&mut seed) % 5 == 0 {
+                        ValueType::Deletion
+                    } else {
+                        ValueType::Value
+                    };
+                    let val = Bytes::from(format!("v{case}/{seq}"));
+                    rows.push((ik(key.as_bytes(), seq, kind), val));
+                    k += 1 + lcg(&mut seed) % 3;
+                }
+                rows.sort_by(|a, b| a.0.cmp(&b.0));
+                streams.push(rows);
+            }
+            let (start, end) = match lcg(&mut seed) % 3 {
+                0 => (Bound::Unbounded, Bound::<&[u8]>::Unbounded),
+                1 => (
+                    Bound::Included(b"b3".as_ref()),
+                    Bound::Excluded(b"d7".as_ref()),
+                ),
+                _ => (
+                    Bound::Excluded(b"a1".as_ref()),
+                    Bound::Included(b"c0".as_ref()),
+                ),
+            };
+            let range_dels = if lcg(&mut seed) % 3 == 0 {
+                vec![RangeTombstone {
+                    start: Bytes::from_static(b"b1"),
+                    end: Bytes::from_static(b"b8"),
+                    sequence: 5,
+                }]
+            } else {
+                Vec::new()
+            };
+            let expected = window_oracle(&streams, &range_dels, snapshot, start, end);
+            let boxed: Vec<LayerStream<'static>> = streams
+                .iter()
+                .map(|s| Box::new(s.clone().into_iter()) as LayerStream<'static>)
+                .collect();
+            let got: Vec<WindowKv> =
+                StreamingVisibleIter::from_point_streams(
+                    boxed,
+                    range_dels,
+                    snapshot,
+                    start,
+                    end,
+                    None,
+                )
+                .into_window_kvs()
+                .collect();
+                assert_eq!(got, expected, "case {case}");
+        }
+    }
+
+    struct CountingIter {
+        rows: std::vec::IntoIter<(InternalKey, Bytes)>,
+        nexts: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl Iterator for CountingIter {
+        type Item = (InternalKey, Bytes);
+        fn next(&mut self) -> Option<Self::Item> {
+            self.nexts.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.rows.next()
+        }
+    }
+
+    /// A stream whose head is already past `end` must be retired at setup:
+    /// one poll for the head, zero heap competition, no row drain.
+    #[test]
+    fn stream_past_end_retired_without_competing() {
+        let a: Vec<(InternalKey, Bytes)> = (0..10)
+            .map(|i| {
+                (
+                    ik(format!("k{i:02}").as_bytes(), 1, ValueType::Value),
+                    Bytes::from(format!("a{i}")),
+                )
+            })
+            .collect();
+        let b: Vec<(InternalKey, Bytes)> = (0..10)
+            .map(|i| {
+                (
+                    ik(format!("z{i:02}").as_bytes(), 1, ValueType::Value),
+                    Bytes::from(format!("b{i}")),
+                )
+            })
+            .collect();
+        let nexts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streams: Vec<LayerStream<'static>> = vec![
+            Box::new(a.into_iter()) as LayerStream<'static>,
+            Box::new(CountingIter {
+                rows: b.into_iter(),
+                nexts: nexts.clone(),
+            }) as LayerStream<'static>,
+        ];
+        let iter = StreamingVisibleIter::from_point_streams(
+            streams,
+            Vec::new(),
+            10,
+            Bound::Unbounded,
+            Bound::Excluded(b"m".as_ref()),
+            None,
+        );
+        let got: Vec<WindowKv> = iter.into_window_kvs().collect();
+        assert_eq!(got.len(), 10);
+        assert_eq!(got[0].key.as_ref(), b"k00");
+        assert_eq!(got[9].key.as_ref(), b"k09");
+        assert_eq!(nexts.load(std::sync::atomic::Ordering::Relaxed), 1);
+    }
+
+    /// Interleaved streams with a cross-stream duplicate key: after the
+    /// second stream exhausts, the first continues on the single-live fast
+    /// path — output still matches the oracle.
+    #[test]
+    fn interleaved_streams_match_oracle_after_exhaustion() {
+        let a = vec![
+            (ik(b"k01", 5, ValueType::Value), Bytes::from_static(b"a1")),
+            (ik(b"k03", 3, ValueType::Value), Bytes::from_static(b"a3")),
+            (ik(b"k07", 2, ValueType::Value), Bytes::from_static(b"a7")),
+        ];
+        let b = vec![
+            (ik(b"k02", 4, ValueType::Value), Bytes::from_static(b"b2")),
+            (ik(b"k03", 6, ValueType::Value), Bytes::from_static(b"b3")),
+            (ik(b"k04", 1, ValueType::Value), Bytes::from_static(b"b4")),
+        ];
+        let streams = vec![a, b];
+        let expected = window_oracle(
+            &streams,
+            &[],
+            8,
+            Bound::Unbounded,
+            Bound::Unbounded,
+        );
+        assert_eq!(expected.len(), 5);
+        assert_eq!(expected[2].key.as_ref(), b"k03");
+        assert_eq!(expected[2].value.as_ref(), b"b3");
+        let boxed: Vec<LayerStream<'static>> = streams
+            .iter()
+            .map(|s| Box::new(s.clone().into_iter()) as LayerStream<'static>)
+            .collect();
+        let got: Vec<WindowKv> =
+            StreamingVisibleIter::from_point_streams(boxed, Vec::new(), 8, Bound::Unbounded, Bound::Unbounded, None)
+                .into_window_kvs()
+                .collect();
+        assert_eq!(got, expected);
     }
 
     #[test]
