@@ -39,8 +39,7 @@ fn main() {
 
     let server = thread::spawn(move || {
         let (mut sock, _) = listener.accept().expect("accept");
-        sock.set_read_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
+        sock.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
         let mut n = 0u32;
         loop {
             let body = match read_frame(&mut sock) {

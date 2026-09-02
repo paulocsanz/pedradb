@@ -1,0 +1,32 @@
+Guest v54 (P1.9: stream bulk SST, 4 MiB write batches, empty payload)
+linux-gate-p149b  2026-09-02
+diag-off, PEDRA_STAGE_MAX_BYTES=67108864
+Official peer: Rocks default WriteOptions.sync=false.
+
+v53a (per-block 256 KiB writes, started 15:47, load ~16.7)
+  hydrate/rocksdb:  28.2s (0.89M/s)
+  hydrate/pedradb:  30.1s (0.83M/s)
+  ratio: 0.83/0.89 = 0.93×  (syscall tax)
+
+v54a (inject-v54-p17.sh, started 15:52, load ~16.6)
+  hydrate/rocksdb:  28.9s (0.87M/s); disk 8.10 GiB
+  settle/rocksdb:   8.1s; after 5.24 GiB
+  hydrate/pedradb:  28.7s (0.87M/s); disk 5.68 GiB
+  settle/pedradb:   0.7s; after 5.94 GiB
+  ratio: 0.87/0.87 = 1.00×  (wall 28.7 < 28.9)
+
+v54b (same image, started 15:55, load ~16.8)
+  hydrate/rocksdb:  29.4s (0.85M/s)
+  settle/rocksdb:   7.1s
+  hydrate/pedradb:  29.0s (0.86M/s)
+  settle/pedradb:   0.6s
+  ratio: 0.86/0.85 = 1.01×  (wall 29.0 < 29.4)
+
+v54c (same image, started 15:58, load ~16.5)
+  hydrate/rocksdb:  28.8s (0.87M/s)
+  settle/rocksdb:   7.5s
+  hydrate/pedradb:  28.5s (0.88M/s)
+  settle/pedradb:   0.6s
+  ratio: 0.88/0.87 = 1.01×  (wall 28.5 < 28.8)
+
+Median 1.01×. All three walls Pedra < Rocks. Memcpy floor ~28.5 s.

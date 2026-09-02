@@ -32,8 +32,8 @@ use pedradb_store::fdb_compat::FdbError;
 use pedradb_store::{StoreCluster, StoreError, MAX_TX_BYTES, MAX_VALUE_BYTES};
 
 use handles::{
-    c_len_admitted, c_path_nul_off_admitted, c_path_walk_bytes, pack, unpack, Handle, Table, KIND_DB,
-    KIND_TX,
+    c_len_admitted, c_path_nul_off_admitted, c_path_walk_bytes, pack, unpack, Handle, Table,
+    KIND_DB, KIND_TX,
 };
 
 /// Success.
@@ -782,7 +782,10 @@ mod tests {
     /// does not copy. AS-IS would admit the length.
     #[test]
     fn c_len_oversize_on_live_tx_is_limit() {
-        assert!(!handles::c_len_admitted(MAX_C_KEY_BYTES + 1, MAX_C_KEY_BYTES));
+        assert!(!handles::c_len_admitted(
+            MAX_C_KEY_BYTES + 1,
+            MAX_C_KEY_BYTES
+        ));
         assert!(handles::c_len_admitted_as_is(
             MAX_C_KEY_BYTES + 1,
             MAX_C_KEY_BYTES
@@ -912,25 +915,11 @@ mod tests {
                 MONTAHA_FDB_ERROR
             );
             assert_eq!(
-                montanha_fdb_transaction_get(
-                    db,
-                    tr,
-                    &tiny,
-                    1,
-                    ptr::null_mut(),
-                    &mut out_len
-                ),
+                montanha_fdb_transaction_get(db, tr, &tiny, 1, ptr::null_mut(), &mut out_len),
                 MONTAHA_FDB_ERROR
             );
             assert_eq!(
-                montanha_fdb_transaction_get(
-                    db,
-                    tr,
-                    &tiny,
-                    1,
-                    &mut out_ptr,
-                    ptr::null_mut()
-                ),
+                montanha_fdb_transaction_get(db, tr, &tiny, 1, &mut out_ptr, ptr::null_mut()),
                 MONTAHA_FDB_ERROR
             );
 
@@ -966,10 +955,7 @@ mod tests {
             montanha_fdb_transaction_destroy(tr_v);
 
             // Dente: AS-IS admits every length.
-            assert!(handles::c_len_admitted_as_is(
-                usize::MAX,
-                MAX_C_KEY_BYTES
-            ));
+            assert!(handles::c_len_admitted_as_is(usize::MAX, MAX_C_KEY_BYTES));
 
             montanha_fdb_transaction_destroy(tr);
             montanha_fdb_database_destroy(db);

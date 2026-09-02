@@ -3,9 +3,7 @@
 //! RFC-0079 P1.2: `--claim-tcg` is refused unless `tcg_guest_admitted`.
 //! Native World does not SSH and does not invent a guest.
 
-use pedradb_world::{
-    allow_claim_tcg_flag, fdb_class_campaign, temp_parent, World,
-};
+use pedradb_world::{allow_claim_tcg_flag, fdb_class_campaign, temp_parent, World};
 
 fn parse_seed(t: &str) -> Option<u64> {
     let t = t.trim();

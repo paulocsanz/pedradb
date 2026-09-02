@@ -61,8 +61,14 @@ pub(crate) fn bulk_enabled() -> bool {
 /// One family-resolved op, borrowed from the batch being classified.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BulkOp<'a> {
-    Put { family: &'a str, key: &'a [u8] },
-    Delete { family: &'a str, key: &'a [u8] },
+    Put {
+        family: &'a str,
+        key: &'a [u8],
+    },
+    Delete {
+        family: &'a str,
+        key: &'a [u8],
+    },
     /// Range-delete; `start` and `end` may resolve to different families
     /// (a span), in which case **both** families route ladder for the
     /// batch.
@@ -151,6 +157,12 @@ impl BulkLatch {
         self.state.get(family) == Some(&FamilyState::Latched)
     }
 
+    /// First observation of `family` still needs `family_max_in_db`.
+    #[must_use]
+    pub(crate) fn has_high_water(&self, family: &str) -> bool {
+        self.high_water.contains_key(family)
+    }
+
     fn kill(&mut self, family: &str) {
         if self.state.get(family) != Some(&FamilyState::Dead) {
             self.killed += 1;
@@ -221,7 +233,10 @@ impl BulkLatch {
                     end_family,
                     end,
                 } => {
-                    per_family.entry(start_family).or_default().push((false, start));
+                    per_family
+                        .entry(start_family)
+                        .or_default()
+                        .push((false, start));
                     per_family.entry(end_family).or_default().push((false, end));
                 }
             }
@@ -242,7 +257,7 @@ impl BulkLatch {
     /// Verdict + state transition for one family's ops within a batch.
     /// `ops` is `(is_put, key)` in batch order. After the verdict the
     /// high-water ratchets over every observed key of the family.
-    fn classify_family(
+    pub(crate) fn classify_family(
         &mut self,
         family: &str,
         ops: &[(bool, &[u8])],
@@ -292,7 +307,8 @@ impl BulkLatch {
                 // A probing family restarts its streak; a latched family
                 // stays latched (a delete does not break append-above).
                 if !was_latched {
-                    self.state.insert(family.to_owned(), FamilyState::Probing { streak: 0 });
+                    self.state
+                        .insert(family.to_owned(), FamilyState::Probing { streak: 0 });
                 }
                 self.ladder_batches += 1;
                 FamilyRoute::Ladder
@@ -303,6 +319,44 @@ impl BulkLatch {
                 FamilyRoute::Ladder
             }
         }
+    }
+
+    /// Latched-family happy path: keys are already owned `Bytes`.
+    /// Admissible span ratchets **only the last key** (high-water is
+    /// monotone). Descent / duplicate / below-water falls through to
+    /// [`Self::classify_family`] so the kill/ratchet contract stays one
+    /// implementation.
+    pub(crate) fn observe_latched_span(&mut self, family: &str, keys: &[Bytes]) -> FamilyRoute {
+        if !self.is_latched(family) {
+            let ops: Vec<(bool, &[u8])> = keys.iter().map(|k| (true, k.as_ref())).collect();
+            return self.classify_family(family, &ops, false, || None);
+        }
+        if keys.is_empty() {
+            return FamilyRoute::Bulk;
+        }
+        let mut ok = true;
+        for w in keys.windows(2) {
+            if w[1].as_ref() <= w[0].as_ref() {
+                ok = false;
+                break;
+            }
+        }
+        if ok {
+            if let Some(hw) = self.high_water.get(family) {
+                if keys[0].as_ref() <= hw.as_ref() {
+                    ok = false;
+                }
+            }
+        }
+        if !ok {
+            let ops: Vec<(bool, &[u8])> = keys.iter().map(|k| (true, k.as_ref())).collect();
+            return self.classify_family(family, &ops, false, || None);
+        }
+        if let Some(last) = keys.last() {
+            self.ratchet(family, last.as_ref());
+        }
+        self.bulk_batches += 1;
+        FamilyRoute::Bulk
     }
 
     /// Pure judgement of one family's batch slice against its state.
@@ -390,6 +444,31 @@ mod tests {
     }
 
     #[test]
+    fn observe_latched_span_ratchets_last_and_kills_on_descent() {
+        let mut latch = BulkLatch::with_threshold(1);
+        let a = Bytes::from_static(b"a");
+        let b = Bytes::from_static(b"b");
+        let c = Bytes::from_static(b"c");
+        assert_eq!(
+            latch.classify_family("data", &[(true, b"a".as_ref())], false, || None),
+            FamilyRoute::Bulk
+        );
+        assert_eq!(
+            latch.observe_latched_span("data", &[b.clone(), c.clone()]),
+            FamilyRoute::Bulk
+        );
+        assert_eq!(
+            latch.high_water.get("data").map(Bytes::as_ref),
+            Some(b"c".as_ref())
+        );
+        assert_eq!(
+            latch.observe_latched_span("data", &[a.clone()]),
+            FamilyRoute::Ladder
+        );
+        assert!(!latch.is_latched("data"));
+    }
+
+    #[test]
     fn latch_engages_after_streak_of_ascending_batches() {
         let mut latch = BulkLatch::with_threshold(3);
         for i in 0..5u32 {
@@ -411,10 +490,7 @@ mod tests {
     #[test]
     fn duplicate_key_within_batch_kills_family() {
         let mut latch = BulkLatch::with_threshold(1);
-        let routes = latch.classify_batch(
-            &[put("data", b"k1"), put("data", b"k1")],
-            &no_db_max,
-        );
+        let routes = latch.classify_batch(&[put("data", b"k1"), put("data", b"k1")], &no_db_max);
         assert_eq!(route_of(&routes, "data"), FamilyRoute::Ladder);
         let routes = latch.classify_batch(&[put("data", b"k9")], &no_db_max);
         assert_eq!(route_of(&routes, "data"), FamilyRoute::Ladder);
@@ -519,22 +595,22 @@ mod tests {
         // it can ever bulk.
         let mut latch = BulkLatch::with_threshold(2);
         let routes = latch.classify_batch(
-            &[put("data", b"k1"), put("data", b"k2"), put("meta", b"cursor")],
+            &[
+                put("data", b"k1"),
+                put("data", b"k2"),
+                put("meta", b"cursor"),
+            ],
             &no_db_max,
         );
         assert_eq!(route_of(&routes, "data"), FamilyRoute::Ladder);
         assert_eq!(route_of(&routes, "meta"), FamilyRoute::Ladder);
-        let routes = latch.classify_batch(
-            &[put("data", b"k3"), put("meta", b"cursor")],
-            &no_db_max,
-        );
+        let routes =
+            latch.classify_batch(&[put("data", b"k3"), put("meta", b"cursor")], &no_db_max);
         assert_eq!(route_of(&routes, "data"), FamilyRoute::Bulk);
         assert_eq!(route_of(&routes, "meta"), FamilyRoute::Ladder);
         // Meta is dead (repeated key); data keeps bulking.
-        let routes = latch.classify_batch(
-            &[put("data", b"k4"), put("meta", b"cursor")],
-            &no_db_max,
-        );
+        let routes =
+            latch.classify_batch(&[put("data", b"k4"), put("meta", b"cursor")], &no_db_max);
         assert_eq!(route_of(&routes, "data"), FamilyRoute::Bulk);
         assert_eq!(route_of(&routes, "meta"), FamilyRoute::Ladder);
     }

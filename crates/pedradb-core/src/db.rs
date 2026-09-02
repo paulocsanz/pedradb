@@ -51,7 +51,7 @@
 //! - [`Db::stats`] / [`Db::verify_checksums`] — observability and integrity.
 //! - SST v3 embeds a Bloom filter; get prunes by bounds + filter.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -72,7 +72,8 @@ use crate::manifest::{self, VersionSet};
 use crate::memtable::{Lookup, MemTable};
 use crate::merge::{range_deleted, range_tombstone_covers, StreamingVisibleIter, VisibleKv};
 use crate::sst::{
-    write_l0_sst, write_l0_sst_for_family, write_sst_entries_on, PointSeekScratch, SstTable,
+    write_l0_sst, write_l0_sst_for_family, write_sst_bulk_arrays, write_sst_entries_on,
+    PointSeekScratch, SstTable,
 };
 use crate::tx::Transaction;
 use crate::vlog::{self, ValueLog, VlogRewriteStats, VLOG_FILE_NAME};
@@ -276,6 +277,11 @@ pub struct OpenOptions {
 /// drop-in surface (compat maps the caller's cache knob onto it).
 pub const DEFAULT_SST_PAYLOAD_BUDGET_BYTES: u64 = 256 * 1024 * 1024;
 
+/// Async bulk installs between MANIFEST persists (RFC-0159 P1.2). 1 = every
+/// chunk (v51). 4 was v50 **under** the write lock (regressed 0.91×); off
+/// lock it is 90→23 persists at 25M / 64 MiB.
+const BULK_MANIFEST_EVERY: u8 = 4;
+
 /// Default read-handle cache size for bounded opens
 /// ([`crate::env::FileHandleCache`]): covers the post-settle file count of
 /// the 25M slipstream shape (~85 SSTs) with fd headroom. RocksDB holds the
@@ -291,6 +297,17 @@ fn sst_file_cache_entries_from_env() -> usize {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_SST_FILE_CACHE_ENTRIES)
+}
+
+/// `PEDRA_SST_PAYLOAD_BUDGET` — resident SST-body budget in bytes (bench
+/// A/B). Unset or unparsable → [`DEFAULT_SST_PAYLOAD_BUDGET_BYTES`].
+/// 10M hydrate is 2.4 GiB; the 256 MiB default leaves get_hit pread-tied
+/// with Rocks (v56 10M 13.049 vs 13.045 µs). 1 GiB holds ~16 of ~38 files.
+fn sst_payload_budget_from_env() -> u64 {
+    std::env::var("PEDRA_SST_PAYLOAD_BUDGET")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_SST_PAYLOAD_BUDGET_BYTES)
 }
 
 /// MVCC history horizon (RFC-0046 P0.1).
@@ -1567,6 +1584,17 @@ pub struct Db<E: Env = StdEnv> {
     /// `PEDRA_BULK` read once at open (per-batch env lookups would tax the
     /// commit path; the knob is static for a process lifetime).
     pub(crate) bulk_route_enabled: bool,
+    /// Uninstalled sorted tails for latched families (RFC-0159 P0.3).
+    bulk_runs: HashMap<String, crate::bulk_run::BulkRun>,
+    /// Full chunks waiting for off-lock SST materialize (writer parks,
+    /// host worker encodes). Lookup still sees them.
+    parked_bulk: VecDeque<(String, Arc<crate::bulk_run::BulkRun>)>,
+    /// Chunk the worker is encoding off-lock (not in `parked_bulk`).
+    bulk_encoding: Option<(String, Arc<crate::bulk_run::BulkRun>)>,
+    /// Bulk SST installs since the last MANIFEST persist (RFC-0159 P1.2).
+    /// Async hydrate persists every [`BULK_MANIFEST_EVERY`] chunks off the
+    /// write lock; v50 batched under the lock and regressed 0.98→0.91×.
+    bulk_manifest_debt: u8,
     /// When `Some(n)`, refuse writes if L0 SST count ≥ n (open-items §2.3).
     write_stall_l0: Option<usize>,
     /// When `Some(n)`, refuse writes if active mem ≈ ≥ n bytes (open-items §2.3 c).
@@ -1749,7 +1777,7 @@ impl<E: Env> Db<E> {
         E::File: Send + 'static,
     {
         if opts.sst_payload_budget_bytes.is_none() {
-            opts.sst_payload_budget_bytes = Some(DEFAULT_SST_PAYLOAD_BUDGET_BYTES);
+            opts.sst_payload_budget_bytes = Some(sst_payload_budget_from_env());
         }
         let file_cache = Arc::new(crate::env::FileHandleCache::new(
             sst_file_cache_entries_from_env(),
@@ -2093,6 +2121,10 @@ impl<E: Env> Db<E> {
             parked_unflushed: Vec::new(),
             bulk_latch: crate::bulk_ingest::BulkLatch::new(),
             bulk_route_enabled: crate::bulk_ingest::bulk_enabled(),
+            bulk_runs: HashMap::new(),
+            parked_bulk: VecDeque::new(),
+            bulk_encoding: None,
+            bulk_manifest_debt: 0,
             fold_pair_expected: None,
             retired_pending: Vec::new(),
             retired_fold: MemTable::new(),
@@ -5000,6 +5032,7 @@ impl<E: Env> Db<E> {
     /// I/O while writing SST or recreating the WAL.
     pub fn flush(&mut self) -> Result<()> {
         self.ensure_not_fenced()?;
+        self.flush_all_bulk_runs()?;
         self.vlog_sync_pending()?;
         crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::BEFORE_SST_RENAME)?;
         crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::BEFORE_MANIFEST_RENAME)?;
@@ -5075,10 +5108,8 @@ impl<E: Env> Db<E> {
             }
         }
         for m in mems {
-            for (ik, _) in m.iter_internal() {
-                if crate::cf_kernel::key_in_cf_family(ik.user_key.as_ref(), family) {
-                    bump(&mut max, ik.user_key.as_ref());
-                }
+            if let Some(k) = m.max_user_key_in_family(family) {
+                bump(&mut max, k.as_ref());
             }
         }
         max
@@ -5109,6 +5140,47 @@ impl<E: Env> Db<E> {
                 .map(String::as_str)
                 .unwrap_or("default")
         };
+        // Raftlog / pipeline: one family, all puts. Skip the HashMap
+        // classify_batch and the memtable-chain collect after the family's
+        // first observation (high-water already covers it).
+        if let Some(family) = Self::single_put_family(batch, &fam_of) {
+            const STACK: usize = 32;
+            let mut stack = [(false, &[] as &[u8]); STACK];
+            let mut n = 0usize;
+            let mut heap: Vec<(bool, &[u8])> = Vec::new();
+            for op in batch {
+                if let BatchOp::Put { key, .. } = op {
+                    let item = (true, key.as_ref());
+                    if n < STACK && heap.is_empty() {
+                        stack[n] = item;
+                        n += 1;
+                    } else {
+                        if heap.is_empty() {
+                            heap.extend_from_slice(&stack[..n]);
+                        }
+                        heap.push(item);
+                    }
+                }
+            }
+            let keys: &[(bool, &[u8])] = if heap.is_empty() { &stack[..n] } else { &heap };
+            if self.bulk_latch.has_high_water(family) {
+                let _ = self
+                    .bulk_latch
+                    .classify_family(family, keys, false, || None);
+            } else {
+                let ssts = &self.ssts;
+                let physical_empty = self.physical_cfs.is_empty();
+                let mems: Vec<&MemTable> = std::iter::once(&self.mem)
+                    .chain(self.imm.as_ref())
+                    .chain(self.flush_read_pin.as_ref())
+                    .chain(self.parked_unflushed.iter().map(|t| t.as_ref()))
+                    .collect();
+                let _ = self.bulk_latch.classify_family(family, keys, false, || {
+                    Self::bulk_family_max_in_db_parts(ssts, physical_empty, &mems, family)
+                });
+            }
+            return;
+        }
         let ops: Vec<crate::bulk_ingest::BulkOp> = batch
             .iter()
             .map(|op| match op {
@@ -5141,6 +5213,27 @@ impl<E: Env> Db<E> {
         let _routes = self.bulk_latch.classify_batch(&ops, &|f| {
             Self::bulk_family_max_in_db_parts(ssts, physical_empty, &mems, f)
         });
+    }
+
+    fn single_put_family<'a>(
+        batch: &'a [BatchOp],
+        fam_of: &dyn Fn(&[u8]) -> &'a str,
+    ) -> Option<&'a str> {
+        let mut family = None;
+        for op in batch {
+            match op {
+                BatchOp::Put { key, .. } => {
+                    let f = fam_of(key.as_ref());
+                    match family {
+                        None => family = Some(f),
+                        Some(prev) if prev == f => {}
+                        Some(_) => return None,
+                    }
+                }
+                BatchOp::Delete { .. } | BatchOp::DeleteRange { .. } => return None,
+            }
+        }
+        family
     }
 
     /// Single-op form of [`Self::observe_bulk_batch`] (iterator-based
@@ -5324,6 +5417,310 @@ impl<E: Env> Db<E> {
                 self.level_file_count(MAX_LSM_LEVEL)
             );
         }
+    }
+
+    fn bulk_family_of_key(&self, key: &[u8]) -> &str {
+        if self.physical_cfs.is_empty() {
+            return "default";
+        }
+        let p = crate::memtable::cf_prefix(key);
+        if p.is_empty() {
+            return "default";
+        }
+        self.physical_cfs
+            .iter()
+            .find(|n| n.as_bytes() == p)
+            .map_or("default", String::as_str)
+    }
+
+    /// Sorted-ingest latch is live for `family` (RFC-0159).
+    pub(crate) fn family_is_latched(&self, family: &str) -> bool {
+        self.bulk_route_enabled && self.bulk_latch.is_latched(family)
+    }
+
+    /// Latched-family puts (already encoded) plus an optional ladder tail
+    /// (hydrate: 1024 data + 1 meta cursor). No `BatchOp` / WAL for the
+    /// latched span. Descent kills the latch and falls back to
+    /// [`Self::commit_async_ops`].
+    pub(crate) fn apply_latched_bulk_puts(
+        &mut self,
+        family: &str,
+        keys: Vec<Bytes>,
+        vals: Vec<Bytes>,
+        tail: Vec<BatchOp>,
+    ) -> Result<SequenceNumber> {
+        if keys.len() != vals.len() {
+            return Err(CoreError::Internal(
+                "latched bulk keys/values length mismatch".into(),
+            ));
+        }
+        if !self.write_admission_idle() {
+            let fams = [family.to_string()];
+            self.ensure_write_admitted_for(&fams)?;
+        }
+        if keys.is_empty() {
+            return if tail.is_empty() {
+                Ok(self.last_sequence())
+            } else {
+                self.commit_async_ops(tail)
+            };
+        }
+        if !self.bulk_route_enabled || !self.bulk_latch.is_latched(family) {
+            return self.commit_async_ops(Self::latched_to_ops(keys, vals, tail));
+        }
+        let route = self.bulk_latch.observe_latched_span(family, &keys);
+        if route != crate::bulk_ingest::FamilyRoute::Bulk {
+            return self.commit_async_ops(Self::latched_to_ops(keys, vals, tail));
+        }
+        if !self.bulk_runs.contains_key(family) {
+            self.flush_dead_bulk_runs()?;
+            self.absorb_mem_family_into_run(family)?;
+        }
+        self.bulk_append_puts(family, keys, vals)?;
+        if tail.is_empty() {
+            let seq = self.last_sequence();
+            self.publish_sequence(seq);
+            return Ok(seq);
+        }
+        // Hydrate's extra op is a 1-key meta cursor, overwritten every
+        // batch. WAL of 24k versions of the same key is envelope the
+        // data path already skipped (disableWAL class). Memtable holds
+        // the live value; flush/settle persists it.
+        if tail.len() == 1 {
+            match tail.into_iter().next().unwrap() {
+                BatchOp::Put { key, value } => {
+                    let seq = self.alloc_seq()?;
+                    self.mem
+                        .insert(InternalKey::new(key, seq, ValueType::Value), value);
+                    self.publish_sequence(seq);
+                    return Ok(seq);
+                }
+                other => return self.commit_async_ops(vec![other]),
+            }
+        }
+        self.commit_async_ops(tail)
+    }
+
+    fn latched_to_ops(keys: Vec<Bytes>, vals: Vec<Bytes>, tail: Vec<BatchOp>) -> Vec<BatchOp> {
+        let mut ops = Vec::with_capacity(keys.len() + tail.len());
+        ops.extend(
+            keys.into_iter()
+                .zip(vals)
+                .map(|(key, value)| BatchOp::Put { key, value }),
+        );
+        ops.extend(tail);
+        ops
+    }
+
+    fn flush_dead_bulk_runs(&mut self) -> Result<()> {
+        let dead: Vec<String> = self
+            .bulk_runs
+            .keys()
+            .filter(|f| !self.bulk_latch.is_latched(f))
+            .cloned()
+            .collect();
+        for f in dead {
+            self.flush_bulk_run(&f)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn flush_all_bulk_runs(&mut self) -> Result<()> {
+        while let Some((fam, run)) = self.parked_bulk.pop_front() {
+            self.install_bulk_run(&fam, run.as_ref())?;
+        }
+        let fams: Vec<String> = self.bulk_runs.keys().cloned().collect();
+        for f in fams {
+            self.flush_bulk_run(&f)?;
+        }
+        if let Some(persist) = self.persist_bulk_manifest(true)? {
+            persist.write()?;
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub(crate) fn has_parked_bulk(&self) -> bool {
+        !self.parked_bulk.is_empty()
+    }
+
+    /// Pop one parked bulk chunk for off-lock SST write. Pins it in
+    /// `bulk_encoding` so get still hits until [`Self::finish_bulk_sst`].
+    pub(crate) fn pop_parked_bulk_job(
+        &mut self,
+    ) -> Option<(String, Arc<crate::bulk_run::BulkRun>, u64, PathBuf, E, bool)> {
+        let (fam, run) = self.parked_bulk.pop_front()?;
+        self.bulk_encoding = Some((fam.clone(), Arc::clone(&run)));
+        let num = self.alloc_file_num();
+        let final_path = self.dir.join(format!("{num:06}.sst"));
+        let (env, _, sync) = self.l0_write_ctx();
+        Some((fam, run, num, final_path, env, sync))
+    }
+
+    pub(crate) fn take_bulk_encoding(&mut self) -> Option<(String, Arc<crate::bulk_run::BulkRun>)> {
+        self.bulk_encoding.take()
+    }
+
+    pub(crate) fn push_parked_bulk_front(&mut self, pin: (String, Arc<crate::bulk_run::BulkRun>)) {
+        self.parked_bulk.push_front(pin);
+    }
+
+    pub(crate) fn finish_bulk_sst(
+        &mut self,
+        family: &str,
+        table: SstTable,
+        num: u64,
+    ) -> Result<Option<ManifestPersist<E>>> {
+        if let Err(e) = self.install_ssts_at_levels(vec![(table, num)], &[MAX_LSM_LEVEL]) {
+            return Err(self.fence_io_err(e));
+        }
+        if self.sst_source.is_some() {
+            if let Some(t) = self.ssts.last() {
+                t.release_resident();
+            }
+        }
+        if self
+            .bulk_encoding
+            .as_ref()
+            .is_some_and(|(f, _)| f == family)
+        {
+            self.bulk_encoding = None;
+        }
+        self.bulk_diag("run_install", family, MAX_LSM_LEVEL);
+        self.persist_bulk_manifest(false)
+    }
+
+    /// Persist MANIFEST every [`BULK_MANIFEST_EVERY`] async bulk installs
+    /// (off the write lock). `force` flushes leftover debt (settle).
+    fn persist_bulk_manifest(&mut self, force: bool) -> Result<Option<ManifestPersist<E>>> {
+        if self.sync {
+            self.persist_manifest()?;
+            self.bulk_manifest_debt = 0;
+            return Ok(None);
+        }
+        self.unsynced_ssts.clear();
+        if force {
+            if self.bulk_manifest_debt == 0 {
+                return Ok(None);
+            }
+        } else {
+            self.bulk_manifest_debt = self.bulk_manifest_debt.saturating_add(1);
+            if self.bulk_manifest_debt < BULK_MANIFEST_EVERY {
+                return Ok(None);
+            }
+        }
+        self.bulk_manifest_debt = 0;
+        Ok(Some(self.take_manifest_persist()?))
+    }
+
+    fn flush_bulk_run(&mut self, family: &str) -> Result<()> {
+        let Some(run) = self.bulk_runs.remove(family) else {
+            return Ok(());
+        };
+        self.install_bulk_run(family, &run)
+    }
+
+    fn install_bulk_run(&mut self, family: &str, run: &crate::bulk_run::BulkRun) -> Result<()> {
+        if run.is_empty() {
+            return Ok(());
+        }
+        let num = self.alloc_file_num();
+        let (env, dir, sync) = self.l0_write_ctx();
+        let (table, num) = match Self::write_bulk_run_sst(&env, &dir, num, &run, family, sync) {
+            Ok(t) => t,
+            Err(e) => return Err(self.fence_io_err(e)),
+        };
+        if let Some(persist) = self.finish_bulk_sst(family, table, num)? {
+            persist.write()?;
+        }
+        Ok(())
+    }
+
+    /// Off-lock SST write for a parked bulk chunk (no `Db` borrow).
+    pub(crate) fn write_bulk_run_sst(
+        env: &E,
+        dir: &std::path::Path,
+        num: u64,
+        run: &crate::bulk_run::BulkRun,
+        family: &str,
+        sync: bool,
+    ) -> Result<(SstTable, u64)> {
+        if run.is_empty() {
+            return Err(CoreError::Internal("empty bulk run".into()));
+        }
+        let final_path = dir.join(format!("{num:06}.sst"));
+        let tmp_path = dir.join(format!("{num:06}.sst.tmp"));
+        let table =
+            match write_sst_bulk_arrays(env, &tmp_path, run.keys(), run.vals(), run.seqs(), sync) {
+                Ok(t) => t,
+                Err(e) => {
+                    let _ = env.remove_file(&tmp_path);
+                    return Err(e);
+                }
+            };
+        if let Err(e) = env.rename(&tmp_path, &final_path) {
+            let _ = env.remove_file(&tmp_path);
+            let _ = env.remove_file(&final_path);
+            return Err(CoreError::Io(e));
+        }
+        Ok((table.with_path(final_path).with_cf(family.to_string()), num))
+    }
+
+    fn absorb_mem_family_into_run(&mut self, family: &str) -> Result<()> {
+        let taken = self.mem.take_family(family);
+        if taken.is_empty() {
+            return Ok(());
+        }
+        let run = self.bulk_runs.entry(family.to_string()).or_default();
+        for (ik, v) in taken.iter_internal() {
+            if ik.kind != ValueType::Value {
+                continue;
+            }
+            run.push(ik.user_key.clone(), v.clone(), ik.sequence);
+        }
+        Ok(())
+    }
+
+    fn bulk_append_puts(&mut self, family: &str, keys: Vec<Bytes>, vals: Vec<Bytes>) -> Result<()> {
+        let n = keys.len();
+        if n == 0 {
+            return Ok(());
+        }
+        let n64 = n as u64;
+        let last = self.next_seq.saturating_add(n64.saturating_sub(1));
+        if last > MAX_SEQUENCE_NUMBER {
+            return Err(CoreError::Internal(
+                "sequence number space exhausted".into(),
+            ));
+        }
+        let mut seq = self.next_seq;
+        self.next_seq = last + 1;
+        let cap = self.bulk_chunk_cap();
+        let over = {
+            let run = self.bulk_runs.entry(family.to_string()).or_default();
+            run.reserve(n);
+            for (k, v) in keys.into_iter().zip(vals) {
+                self.bytes_ingested = self.bytes_ingested.saturating_add(v.len() as u64);
+                run.push(k, v, seq);
+                seq += 1;
+            }
+            cap.is_some_and(|c| run.bytes() >= c)
+        };
+        if over {
+            if let Some(run) = self.bulk_runs.remove(family) {
+                // Park even while the worker is encoding the previous
+                // chunk so fill overlaps SST. One parked + one encoding
+                // + the open tail is the RAM bound; a second overflow
+                // while parked is still full encodes inline.
+                if self.parked_bulk.is_empty() {
+                    self.parked_bulk
+                        .push_back((family.to_string(), Arc::new(run)));
+                } else {
+                    self.install_bulk_run(family, &run)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Rotate a full active mem into the imm slot **without** taking it out.
@@ -5771,6 +6168,18 @@ impl<E: Env> Db<E> {
                         return Some(max);
                     }
                 }
+            }
+        }
+        cap
+    }
+
+    /// Bulk-run flush size: per-CF / global write buffer, **not**
+    /// `PEDRA_STAGE_MAX_BYTES` (that clamp is for memtable staging).
+    fn bulk_chunk_cap(&self) -> Option<usize> {
+        let mut cap = self.auto_flush_bytes.filter(|n| *n > 0);
+        for &n in self.cf_write_buffer.values() {
+            if n > 0 && cap.is_none_or(|c| n > c) {
+                cap = Some(n);
             }
         }
         cap
@@ -8377,6 +8786,29 @@ impl<E: Env> Db<E> {
     /// Merges point versions and range tombstones across all layers so a range
     /// delete in a newer layer correctly hides older puts.
     pub(crate) fn lookup(&self, key: &[u8], snapshot: SequenceNumber) -> Lookup {
+        let fam = self.bulk_family_of_key(key);
+        if let Some(run) = self.bulk_runs.get(fam) {
+            match run.lookup(key, snapshot) {
+                Lookup::NotFound => {}
+                other => return other,
+            }
+        }
+        for (f, run) in &self.parked_bulk {
+            if f == fam {
+                match run.lookup(key, snapshot) {
+                    Lookup::NotFound => {}
+                    other => return other,
+                }
+            }
+        }
+        if let Some((f, run)) = &self.bulk_encoding {
+            if f == fam {
+                match run.lookup(key, snapshot) {
+                    Lookup::NotFound => {}
+                    other => return other,
+                }
+            }
+        }
         let mut best_point_seq: Option<SequenceNumber> = None;
         let mut best_point: Lookup = Lookup::NotFound;
         let mut range_tombs = Vec::new();
@@ -8450,9 +8882,8 @@ impl<E: Env> Db<E> {
                 // `lo <= key` is the only one that can hold `key` (every
                 // earlier `hi` sits below the next `lo`). The probe's own
                 // bounds check stays as the fail-safe.
-                let p = by_lo.partition_point(|&i| {
-                    ssts[i].smallest_user_key().is_some_and(|lo| lo <= key)
-                });
+                let p = by_lo
+                    .partition_point(|&i| ssts[i].smallest_user_key().is_some_and(|lo| lo <= key));
                 if p > 0 {
                     if let Some((seq, look)) = probe(&ssts[by_lo[p - 1]]) {
                         best_point_seq = Some(seq);
@@ -8698,6 +9129,47 @@ impl<E: Env> Db<E> {
             self.ensure_write_admitted_for(&families)?;
         }
         self.observe_bulk_batch(&batch);
+        self.flush_dead_bulk_runs()?;
+        let (ladder, bulk_puts) = if self.bulk_route_enabled {
+            let mut ladder = Vec::new();
+            let mut bulk_puts = Vec::new();
+            for op in batch {
+                match op {
+                    BatchOp::Put { key, value } => {
+                        let fam = self.bulk_family_of_key(key.as_ref());
+                        if self.bulk_latch.is_latched(fam) {
+                            bulk_puts.push((key, value));
+                        } else {
+                            ladder.push(BatchOp::Put { key, value });
+                        }
+                    }
+                    other => ladder.push(other),
+                }
+            }
+            (ladder, bulk_puts)
+        } else {
+            (batch, Vec::new())
+        };
+        if !bulk_puts.is_empty() {
+            let fam = self.bulk_family_of_key(bulk_puts[0].0.as_ref()).to_string();
+            if !self.bulk_runs.contains_key(&fam) {
+                self.absorb_mem_family_into_run(&fam)?;
+            }
+            let n = bulk_puts.len();
+            let mut keys = Vec::with_capacity(n);
+            let mut vals = Vec::with_capacity(n);
+            for (k, v) in bulk_puts {
+                keys.push(k);
+                vals.push(v);
+            }
+            self.bulk_append_puts(&fam, keys, vals)?;
+        }
+        if ladder.is_empty() {
+            let seq = self.last_sequence();
+            self.publish_sequence(seq);
+            return Ok(seq);
+        }
+        let batch = ladder;
         let st = self.phase_stats.clone();
         let t0 = st.as_ref().map(|_| Instant::now());
         let (ops, seq) = self.prepare_write_ops_spill(batch, false)?;
@@ -14409,10 +14881,28 @@ mod tests {
             expect.remove(&k);
         }
         check(&db, &expect, Bound::Unbounded, Bound::Unbounded, None);
-        check(&db, &expect, Bound::Included(&[2u8, 50]), Bound::Excluded(&[5u8, 200]), None);
-        check(&db, &expect, Bound::Included(&[2u8, 50]), Bound::Included(&[3u8, 7]), None);
+        check(
+            &db,
+            &expect,
+            Bound::Included(&[2u8, 50]),
+            Bound::Excluded(&[5u8, 200]),
+            None,
+        );
+        check(
+            &db,
+            &expect,
+            Bound::Included(&[2u8, 50]),
+            Bound::Included(&[3u8, 7]),
+            None,
+        );
         check(&db, &expect, Bound::Unbounded, Bound::Unbounded, Some(7));
-        check(&db, &expect, Bound::Excluded(&[0u8, 5]), Bound::Unbounded, Some(200));
+        check(
+            &db,
+            &expect,
+            Bound::Excluded(&[0u8, 5]),
+            Bound::Unbounded,
+            Some(200),
+        );
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
@@ -20076,7 +20566,10 @@ mod tests {
                 (Lookup::Found(_), _) | (_, Lookup::Found(_)) => false,
                 _ => true,
             };
-            assert!(agree, "model mismatch at {k:?}: got {got:?}, model {expected:?}");
+            assert!(
+                agree,
+                "model mismatch at {k:?}: got {got:?}, model {expected:?}"
+            );
         }
 
         db.close().unwrap();

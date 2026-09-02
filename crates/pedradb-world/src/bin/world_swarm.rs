@@ -13,9 +13,8 @@ use pedradb_world::swarm::run_swarm;
 use pedradb_world::WorldConfig;
 
 fn main() {
-    let arg = |i: usize, d: &str| -> String {
-        std::env::args().nth(i).unwrap_or_else(|| d.to_string())
-    };
+    let arg =
+        |i: usize, d: &str| -> String { std::env::args().nth(i).unwrap_or_else(|| d.to_string()) };
     let n_seeds: u64 = arg(1, "256").parse().unwrap_or(256);
     let start_seed: u64 = arg(2, "1").parse().unwrap_or(1);
     let workers: usize = arg(3, "0").parse().unwrap_or(0);
@@ -69,7 +68,9 @@ fn main() {
         let t = pedradb_world::World::new(dump_seed, cfg)
             .run()
             .unwrap_or_else(|e| panic!("seed {dump_seed}: {e}"));
-        let full_trace = std::env::var("PEDRA_SWARM_TRACE").map(|v| v != "0").unwrap_or(false);
+        let full_trace = std::env::var("PEDRA_SWARM_TRACE")
+            .map(|v| v != "0")
+            .unwrap_or(false);
         for ev in &t.events {
             if full_trace
                 || ev.kind.contains("consistency")
@@ -155,10 +156,7 @@ fn main() {
     if let Ok(dir) = std::env::var("PEDRA_SWARM_LOG") {
         let dir = std::path::PathBuf::from(dir);
         let _ = std::fs::create_dir_all(&dir);
-        let _ = std::fs::write(
-            dir.join("swarm.jsonl"),
-            report.jsonl() + "\n",
-        );
+        let _ = std::fs::write(dir.join("swarm.jsonl"), report.jsonl() + "\n");
         let summary = format!(
             "{{\"seeds\":{},\"workers\":{},\"wall_s\":{:.3},\"seeds_per_s\":{:.3},\"failures\":{},\"n_nodes\":{n_nodes},\"steps\":{steps}}}\n",
             report.seeds.len(),

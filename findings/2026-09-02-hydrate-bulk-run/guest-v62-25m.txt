@@ -1,0 +1,26 @@
+Guest v62 25M (v6 file CRC = header+tail only; data is per-block CRC)
+linux-gate-p149b  2026-09-02
+diag-off, ENTRIES=25000000. table 096a65ba9351162584f09be40645510f.
+
+r1 (started 18:10, load ~16.7)
+  hydrate/rocks  28.2s (0.89M/s)   pedra 28.8s (0.87M/s)  0.98×
+  settle         7.8s vs 0.7s                              11× WIN
+  get_hit        42.96 vs 46.76 µs                         0.92× LOSE
+  prefix         360.3 vs 290.6 µs                         1.24× WIN
+  get_loop       4.139 vs 5.066 ms                         0.82× LOSE
+  multi_get      3.873 vs 5.092 ms                         0.76× LOSE
+
+Absolute hydrate 28.8 s matches v61 r2 (28.6). Rocks was a fast 28.2 s.
+Need ×3. Same image restarts follow.
+
+r2 (18:16, load 16.3→17.5 — canaries starting, contaminated)
+  hydrate/rocks  29.3s (0.85M/s)   pedra 31.2s (0.80M/s)  0.94×
+  get_hit        41.22 vs 44.07 µs                         0.94×
+  prefix         363.8 vs 290.5 µs                         1.25× WIN
+  get_loop       3.769 vs 4.440 ms                         0.85×
+  multi_get      4.212 vs 4.720 ms                         0.89×
+
+v62 does not beat v61's ×3 at load ~15 (hydrate median 0.98×, get_hit 1.11×).
+Header+tail file CRC is still the right write-side cut (no 5.75 GiB
+whole-body CRC on hydrate); r2 is host-load noise, not a revert.
+Do not 3-run at load 17.

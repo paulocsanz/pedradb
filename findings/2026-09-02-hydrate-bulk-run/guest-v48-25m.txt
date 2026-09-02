@@ -1,0 +1,13 @@
+Guest v48 (RFC-0159 P1.7 park BulkRun + in-place 64 KiB SST)
+linux-gate-p149b  2026-09-02
+diag-off, PEDRA_STAGE_MAX_BYTES=67108864
+load ~15.2
+
+25M (inject-v48-p17.sh, started 14:56 -03)
+  Compiling pedradb-core + rocksdb-compat (md5-verified vs v47)
+  hydrate/rocksdb:  25000000 entries in 29.1s (0.86M entries/s); on disk 7.62 GiB (327 B/entry)
+  settle/rocksdb:   6.1s; on disk after 5.24 GiB
+  hydrate/pedradb:  25000000 entries in 35.0s (0.71M entries/s); on disk 5.69 GiB (244 B/entry)
+  settle/pedradb:   0.8s; on disk after 5.94 GiB
+  ratio hydrate: 0.71/0.86 = 0.83×
+  not ≥1×. Park on 1-effective-core does not hide SST encode.

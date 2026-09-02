@@ -921,7 +921,11 @@ mod tests {
         let u = IndexedUsers::new();
         u.set_user(&mut c, b"u1", b"alice", &zip).unwrap();
         let (z, n) = u.get_user(&c, b"u1").unwrap().expect("u1");
-        assert_eq!(z.as_slice(), zip.as_slice(), "live set_user must keep NUL in zip");
+        assert_eq!(
+            z.as_slice(),
+            zip.as_slice(),
+            "live set_user must keep NUL in zip"
+        );
         assert_eq!(n, b"alice");
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -1,0 +1,21 @@
+Guest v45 (BulkRun + latched write_cf_owned + SST clone-drop)
+linux-gate-p149b  2026-09-02
+diag-off, PEDRA_STAGE_MAX_BYTES=67108864
+load ~15–17
+
+25M (inject-v45-bulk.sh, started 13:03 -03)
+  Compiling pedradb-core … Finished bench in 24.82s
+  hydrate/rocksdb:  25000000 entries in 30.0s (0.83M entries/s); on disk 6.76 GiB (290 B/entry)
+  settle/rocksdb:   6.8s; on disk after 5.24 GiB
+  hydrate/pedradb:  25000000 entries in 64.6s (0.39M entries/s); on disk 5.15 GiB (221 B/entry)
+  settle/pedradb:   0.2s; on disk after 5.15 GiB
+  ratio hydrate: 0.39/0.83 = 0.47×
+  RSS at pedra hydrate end ~1.48 GiB
+
+100M (v45-setsize.sh 100000000, started 13:09 -03)
+  Finished bench in 25.06s
+  hydrate/rocksdb:  100000000 entries in 115.6s (0.86M entries/s); on disk 23.62 GiB (254 B/entry)
+  settle/rocksdb:   21.5s; on disk after 20.98 GiB
+  hydrate/pedradb:  no line — SIGKILL
+  RSS climb during pedra hydrate: 0.97 → 1.35 → 1.85 → 2.22 → 2.63 → 3.13 → 3.43 → 3.63 GiB
+  avail 29 MB then BENCH_EXIT_readlegs=101 (signal 9)

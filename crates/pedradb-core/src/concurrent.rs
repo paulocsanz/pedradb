@@ -410,10 +410,44 @@ impl WriteGroup {
     }
 
     fn finish_lone(&self) {
+        self.finish_lone_ops(1);
+    }
+
+    fn finish_lone_ops(&self, n: u64) {
         self.batches.fetch_add(1, Ordering::Relaxed);
-        self.batch_ops.fetch_add(1, Ordering::Relaxed);
+        self.batch_ops.fetch_add(n, Ordering::Relaxed);
         self.active.fetch_sub(1, Ordering::Relaxed);
         self.mark_complete();
+    }
+
+    /// Lone-async latched bulk: skip `BatchOp` / write-group. Concurrent
+    /// writers fall back to the merged submit (same bytes, extra envelope).
+    fn submit_latched_bulk<E: Env>(
+        &self,
+        db: &RwLock<Db<E>>,
+        family: &str,
+        keys: Vec<Bytes>,
+        vals: Vec<Bytes>,
+        tail: Vec<BatchOp>,
+    ) -> Result<SequenceNumber> {
+        let active = self.begin_submit();
+        let n = (keys.len() + tail.len()) as u64;
+        if active == 1 && !self.recently_concurrent() {
+            let result = db.write().apply_latched_bulk_puts(family, keys, vals, tail);
+            self.finish_lone_ops(n);
+            return result;
+        }
+        let ops = {
+            let mut ops = Vec::with_capacity(keys.len() + tail.len());
+            ops.extend(
+                keys.into_iter()
+                    .zip(vals)
+                    .map(|(key, value)| BatchOp::Put { key, value }),
+            );
+            ops.extend(tail);
+            ops
+        };
+        self.submit_after_begin(db, ops, false, None, active)
     }
 
     fn submit_occ<E: Env>(
@@ -2178,6 +2212,31 @@ impl<E: Env> ConcurrentDb<E> {
         self.writes.submit(&self.inner, ops, do_sync)
     }
 
+    /// Async + the family has latched as append-only (RFC-0159).
+    #[must_use]
+    pub fn family_is_latched_async(&self, family: &str) -> bool {
+        !self.default_sync.load(Ordering::Relaxed) && self.inner.read().family_is_latched(family)
+    }
+
+    /// Latched-family puts without `BatchOp` / write-group (RFC-0159 P1.5).
+    /// `tail` is the mixed-family remainder (hydrate meta cursor) and still
+    /// takes the ladder. G1 (`sync=true`) callers must not use this.
+    ///
+    /// # Errors
+    /// WAL I/O on the ladder tail, or sequence exhaustion.
+    pub fn apply_latched_bulk(
+        &self,
+        family: &str,
+        keys: Vec<Bytes>,
+        vals: Vec<Bytes>,
+        tail: Vec<BatchOp>,
+    ) -> Result<SequenceNumber> {
+        // Latched bulk does not park memtables; skip assist/debt (two
+        // read locks per 1024-op hydrate batch).
+        self.writes
+            .submit_latched_bulk(&self.inner, family, keys, vals, tail)
+    }
+
     /// Point lookups for many keys (RFC-0019 P1.1).
     #[must_use]
     pub fn multi_get(&self, keys: &[impl AsRef<[u8]>]) -> Vec<Option<Bytes>> {
@@ -2212,6 +2271,8 @@ impl<E: Env> ConcurrentDb<E> {
     /// I/O.
     pub fn flush(&self) -> Result<()> {
         let _flush = self.flush_lock.lock();
+        while self.materialize_bulk_holding_flush() {}
+        self.inner.write().flush_all_bulk_runs()?;
         // At most two pipeline steps: drain existing imm, then switch+flush active.
         // Do **not** loop while concurrent puts refill mem (that would never end).
         for _ in 0..2 {
@@ -2271,6 +2332,42 @@ impl<E: Env> ConcurrentDb<E> {
         // for the flushed keys.
         g.persist_changelog_after_explicit_flush();
         Ok(())
+    }
+
+    /// Encode+install one parked bulk chunk off the write lock so the
+    /// hydrate writer can fill the next run (RFC-0159 P1.7).
+    #[must_use]
+    pub fn materialize_bulk_once(&self) -> bool {
+        if !self.inner.read().has_parked_bulk() {
+            return false;
+        }
+        let _flush = self.flush_lock.lock();
+        self.materialize_bulk_holding_flush()
+    }
+
+    fn materialize_bulk_holding_flush(&self) -> bool {
+        let job = self.inner.write().pop_parked_bulk_job();
+        let Some((fam, run, num, final_path, env, sync)) = job else {
+            return false;
+        };
+        let dir = final_path
+            .parent()
+            .map(std::path::PathBuf::from)
+            .unwrap_or(final_path);
+        match Db::write_bulk_run_sst(&env, &dir, num, run.as_ref(), &fam, sync) {
+            Ok((table, num)) => match self.inner.write().finish_bulk_sst(&fam, table, num) {
+                Ok(Some(persist)) => persist.write().is_ok(),
+                Ok(None) => true,
+                Err(_) => false,
+            },
+            Err(_) => {
+                let mut g = self.inner.write();
+                if let Some(pin) = g.take_bulk_encoding() {
+                    g.push_parked_bulk_front(pin);
+                }
+                false
+            }
+        }
     }
 
     /// Drain **one existing** immutable memtable → L0 without forcing an
@@ -3898,6 +3995,147 @@ mod tests {
         assert_eq!(bottom, 1, "reopen must restore the bottom-level chunk");
         for (i, k) in keys.iter().enumerate() {
             assert_eq!(db2.get(k).as_deref(), Some(&v[..]), "post-reopen key {i}");
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0159 P1.5: after the family latches, `apply_latched_bulk`
+    /// lands keys without `BatchOp` and they read back (open tail + flush).
+    #[test]
+    fn apply_latched_bulk_reads_back_after_latch() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into(), "meta".into()]);
+        let v = vec![b'v'; 32];
+        let mut keys = Vec::new();
+        for b in 0..10u32 {
+            let mut batch = Vec::new();
+            for j in 0..16u32 {
+                let k = format!("data\0{b:04}-{j:04}").into_bytes();
+                batch.push(BatchOp::put(k.clone(), v.clone()));
+                keys.push(k);
+            }
+            batch.push(BatchOp::put(
+                b"meta\0cursor".to_vec(),
+                b.to_le_bytes().to_vec(),
+            ));
+            db.apply_batch_vec(batch).unwrap();
+        }
+        assert!(
+            db.family_is_latched_async("data"),
+            "10 admissible batches must latch (threshold 8)"
+        );
+        let mut bulk_keys = Vec::new();
+        let mut bulk_vals = Vec::new();
+        let shared = Bytes::from(v.clone());
+        for j in 0..16u32 {
+            let k = format!("data\0{b:04}-{j:04}", b = 10).into_bytes();
+            bulk_keys.push(Bytes::from(k.clone()));
+            bulk_vals.push(shared.clone());
+            keys.push(k);
+        }
+        let tail = vec![BatchOp::put(
+            b"meta\0cursor".to_vec(),
+            10u32.to_le_bytes().to_vec(),
+        )];
+        db.apply_latched_bulk("data", bulk_keys, bulk_vals, tail)
+            .unwrap();
+        for (i, k) in keys.iter().enumerate() {
+            assert_eq!(
+                db.get(k).as_deref(),
+                Some(&v[..]),
+                "latched key {i} must read back"
+            );
+        }
+        assert_eq!(
+            db.get(b"meta\0cursor").as_deref(),
+            Some(10u32.to_le_bytes().as_ref())
+        );
+        db.flush().unwrap();
+        drop(db);
+        let db2 = ConcurrentDb::open_with(&dir, OpenOptions::default()).unwrap();
+        for (i, k) in keys.iter().enumerate() {
+            assert_eq!(db2.get(k).as_deref(), Some(&v[..]), "post-flush key {i}");
+        }
+        assert_eq!(
+            db2.get(b"meta\0cursor").as_deref(),
+            Some(10u32.to_le_bytes().as_ref()),
+            "meta cursor must persist without per-batch WAL"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0159 P1.7: a latched overflow parks the chunk; get still hits
+    /// it; the worker materializes off the write lock.
+    #[test]
+    fn parked_bulk_chunk_is_readable_then_materializes() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(64 * 1024),
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into(), "meta".into()]);
+        let v = vec![b'v'; 32];
+        let mut keys = Vec::new();
+        for b in 0..10u32 {
+            let mut batch = Vec::new();
+            for j in 0..16u32 {
+                let k = format!("data\0{b:04}-{j:04}").into_bytes();
+                batch.push(BatchOp::put(k.clone(), v.clone()));
+                keys.push(k);
+            }
+            batch.push(BatchOp::put(b"meta\0cursor".to_vec(), b"c".to_vec()));
+            db.apply_batch_vec(batch).unwrap();
+        }
+        assert!(
+            db.family_is_latched_async("data"),
+            "10 admissible batches must latch"
+        );
+        let payload = vec![b'x'; 80];
+        let mut bulk_keys = Vec::new();
+        let mut bulk_vals = Vec::new();
+        for j in 0..1200u32 {
+            let k = format!("data\0z-{j:06}").into_bytes();
+            bulk_keys.push(Bytes::from(k.clone()));
+            bulk_vals.push(Bytes::from(payload.clone()));
+            keys.push(k);
+        }
+        db.apply_latched_bulk("data", bulk_keys, bulk_vals, Vec::new())
+            .unwrap();
+        assert!(
+            db.with_read(|d| d.has_parked_bulk()),
+            "overflow must park instead of encoding inline"
+        );
+        for (i, k) in keys.iter().enumerate() {
+            let want: &[u8] = if i < 160 { &v } else { &payload };
+            assert_eq!(db.get(k).as_deref(), Some(want), "parked key {i}");
+        }
+        assert!(
+            db.materialize_bulk_once(),
+            "worker must encode the parked chunk"
+        );
+        assert!(!db.with_read(|d| d.has_parked_bulk()));
+        let meta = db.live_sst_meta();
+        assert!(
+            meta.iter()
+                .any(|m| m.cf == "data" && m.level == crate::db::MAX_LSM_LEVEL),
+            "parked chunk must install at the bottom: {meta:?}"
+        );
+        for (i, k) in keys.iter().enumerate() {
+            let want: &[u8] = if i < 160 { &v } else { &payload };
+            assert_eq!(db.get(k).as_deref(), Some(want), "after materialize {i}");
         }
         let _ = fs::remove_dir_all(&dir);
     }

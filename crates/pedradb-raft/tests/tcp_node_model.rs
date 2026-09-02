@@ -55,8 +55,8 @@
 use pedradb_raft::ae_kernel::{ae_entry_action, AeEntryAction};
 use pedradb_raft::apply_kernel::{apply_advance, ApplyAction};
 use pedradb_raft::{
-    grant_after_persist, liveness_admitted, liveness_admitted_as_is, may_commit_at,
-    propose_ack_ok, vote_decision, PersistOutcome, VoteDecision, VoteInputs,
+    grant_after_persist, liveness_admitted, liveness_admitted_as_is, may_commit_at, propose_ack_ok,
+    vote_decision, PersistOutcome, VoteDecision, VoteInputs,
 };
 use stateright::{Checker, Model, Property};
 
@@ -78,10 +78,18 @@ enum LoopMutant {
 /// carries the persist outcome where the step persists.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum Frame {
-    ReqVote { candidate: u64, persist_ok: bool },
-    AppendEntries { index: u64, term: u64 },
+    ReqVote {
+        candidate: u64,
+        persist_ok: bool,
+    },
+    AppendEntries {
+        index: u64,
+        term: u64,
+    },
     /// Leader ack path: client asks whether index i may be acknowledged.
-    Propose { index: u64 },
+    Propose {
+        index: u64,
+    },
     /// Internal drain: apply committed prefix (still one loop step: the node
     /// reads its commit state, dispatches apply_advance, persists the cursor,
     /// replies nothing).
@@ -356,9 +364,7 @@ impl Model for TcpNodeModel {
             Property::always("Inv-applied-le-commit", |_, s: &NodeSt| {
                 s.last_applied <= s.commit
             }),
-            Property::sometimes("non-vacuity-grant-reply", |_, s: &NodeSt| {
-                s.saw_grant_reply
-            }),
+            Property::sometimes("non-vacuity-grant-reply", |_, s: &NodeSt| s.saw_grant_reply),
             Property::sometimes("non-vacuity-ack-reply", |_, s: &NodeSt| s.saw_ack_ok),
         ]
     }

@@ -1,0 +1,18 @@
+Guest v66 25M r1 (p16 + lock-free can_admit; LAST_CF hash_store off get path)
+linux-gate-p149b  2026-09-02 ~20:21
+compat 0a59abb58cbfc47778847f513132bda0
+table/cache same as v65 (p16 / can_admit).
+load start 16.19, end 17.54/16.77/16.20 — **refuse as published** (load 17.5).
+compile 26.16s. BENCH_EXIT_readlegs=0.
+
+hydrate/rocks  28.9s (0.86M/s)   pedra 29.8s (0.84M/s)  0.969×
+settle         7.8s vs 1.0s                               7.8×
+get_hit        40.902 vs 42.176 µs                        0.970×
+prefix         373.58 vs 307.84 µs                        1.213× (Rocks prefix slow 373)
+get_loop       4.0004 vs 4.2224 ms                        0.947×
+multi_get      4.5339 vs 4.4967 ms                        1.008× (Rocks multi slow 4.53)
+
+v65 hash_store was the point-get regression (get_hit 50.6 → 42.2 recovered).
+p16 did not beat v64 get_hit 1.15× / get_loop 0.94× at load 16.2. Keep p16
+(prefix-friendly, order-exact) but do not claim a lookup win. v64 remains
+the best 25M point-get stack.

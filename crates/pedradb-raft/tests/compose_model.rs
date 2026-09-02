@@ -26,9 +26,7 @@
 use pedradb_raft::ae_kernel::{
     ae_entry_action, ae_entry_action_as_is_rewrite_committed, AeEntryAction,
 };
-use pedradb_raft::apply_kernel::{
-    apply_advance, apply_advance_as_is_skip_holes, ApplyAction,
-};
+use pedradb_raft::apply_kernel::{apply_advance, apply_advance_as_is_skip_holes, ApplyAction};
 use pedradb_raft::{
     grant_after_persist, grant_after_persist_as_is, may_commit_at, may_commit_at_as_is,
     propose_ack_ok, propose_ack_ok_as_is, recover_last_applied, recover_last_applied_as_is,
@@ -81,10 +79,20 @@ impl St {
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum Act {
-    Vote { candidate: u64, persist_ok: bool },
-    Offer { index: u64, term: u64 },
-    TryCommit { majority: bool },
-    Ack { index: u64 },
+    Vote {
+        candidate: u64,
+        persist_ok: bool,
+    },
+    Offer {
+        index: u64,
+        term: u64,
+    },
+    TryCommit {
+        majority: bool,
+    },
+    Ack {
+        index: u64,
+    },
     Apply,
     /// Crash-restart: the state machine is rebuilt and `last_applied`
     /// recovers via the production commit-kernel rule (re-apply from 0) —

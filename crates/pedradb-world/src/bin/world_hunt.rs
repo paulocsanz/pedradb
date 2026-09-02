@@ -29,14 +29,18 @@ fn main() -> ExitCode {
     let mut silent = 0u64;
     let mut interesting = 0u64;
     for _ in 0..n {
-        let (seed, wanted) = pick_seed(&bandit, &mut cursors, &mut used, start, |s, arm| {
-            match arm {
+        let (seed, wanted) = pick_seed(
+            &bandit,
+            &mut cursors,
+            &mut used,
+            start,
+            |s, arm| match arm {
                 "membership" => s % 5 == 0,
                 "net" => s % 3 == 1,
                 "disk" => s % 3 == 2,
                 _ => true,
-            }
-        });
+            },
+        );
         let parent = temp_parent("hunt");
         let mut cfg = fdb_class_campaign(parent.clone());
         cfg.membership_upgrade = wanted == "membership";
@@ -78,9 +82,7 @@ fn main() -> ExitCode {
             }
         }
     }
-    println!(
-        "world_hunt_ok n={n} interesting={interesting} silent_wrong_seeds={silent}"
-    );
+    println!("world_hunt_ok n={n} interesting={interesting} silent_wrong_seeds={silent}");
     if silent > 0 {
         ExitCode::from(1)
     } else {

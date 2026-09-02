@@ -1,0 +1,30 @@
+Guest v52 (P1.8: latched 1-put meta cursor skips WAL)
+linux-gate-p149b  2026-09-02
+diag-off, PEDRA_STAGE_MAX_BYTES=67108864
+
+Three runs, same image. Official peer Rocks default sync=false.
+
+v52a (inject-v52-p17.sh, started 15:27, load ~16.2)
+  hydrate/rocksdb:  25000000 in 29.4s (0.85M/s); disk 6.79 GiB
+  settle/rocksdb:   6.2s; after 5.24 GiB
+  hydrate/pedradb:  25000000 in 31.7s (0.79M/s); disk 5.68 GiB
+  settle/pedradb:   0.9s; after 5.94 GiB
+  ratio: 0.79/0.85 = 0.93×
+
+v52b (same image restart, started 15:30, load ~16.3)
+  Compiling pedradb-core (future-mtime inject vs data-disk target)
+  hydrate/rocksdb:  25000000 in 28.5s (0.88M/s); disk 8.05 GiB
+  settle/rocksdb:   8.9s; after 5.24 GiB
+  hydrate/pedradb:  25000000 in 28.0s (0.89M/s); disk 5.68 GiB
+  settle/pedradb:   0.8s; after 5.94 GiB
+  ratio: 0.89/0.88 = 1.01×
+
+v52c (same image restart, started 15:33, load ~17.1)
+  hydrate/rocksdb:  25000000 in 29.3s (0.85M/s); disk 8.13 GiB
+  settle/rocksdb:   8.0s; after 5.24 GiB
+  hydrate/pedradb:  25000000 in 33.4s (0.75M/s); disk 5.68 GiB
+  settle/pedradb:   0.8s; after 5.94 GiB
+  ratio: 0.75/0.85 = 0.88×
+
+Median ratio 0.93×. One run >1× is not the published number.
+Host noise on Pedra ~3 s (~10 %) at load 16–17.

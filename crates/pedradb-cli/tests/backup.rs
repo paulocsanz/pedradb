@@ -11,10 +11,7 @@ fn pedra() -> Command {
 }
 
 fn scratch(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "pedra-cli-backup-{name}-{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("pedra-cli-backup-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     dir
 }
@@ -97,7 +94,9 @@ fn pedra_verify_backup_flags_poison_changelog() {
         "poison CHANGELOG must fail verify-backup\nstdout: {stdout}\nstderr: {stderr}"
     );
     assert!(
-        stderr.contains("CHANGELOG") || stderr.contains("at-rest scrub") || stdout.contains("CHANGELOG"),
+        stderr.contains("CHANGELOG")
+            || stderr.contains("at-rest scrub")
+            || stdout.contains("CHANGELOG"),
         "must mention scrub/CHANGELOG: {stdout} {stderr}"
     );
     let _ = std::fs::remove_dir_all(&db);

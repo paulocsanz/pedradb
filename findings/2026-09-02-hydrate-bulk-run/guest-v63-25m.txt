@@ -1,0 +1,33 @@
+Guest v63 25M (MANIFEST persist every 4 bulk chunks, off lock; v62 table)
+linux-gate-p149b  2026-09-02
+db 2bdad28a2882a81e3162d9c757198012  table 096a65ba9351162584f09be40645510f
+
+r1 (19:38, load 15.4→17.3)
+  hydrate/rocks  30.6s (0.82M/s)   pedra 28.7s (0.87M/s)  1.06×  (Rocks slow 30.6)
+  settle         6.3s vs 1.0s                              6.3× WIN
+  get_hit        43.76 vs 41.05 µs                         1.07× WIN
+  prefix         340.0 vs 293.9 µs                         1.16× WIN
+  get_loop       4.231 vs 4.514 ms                         0.94× LOSE
+  multi_get      4.390 vs 4.331 ms                         1.01× WIN
+
+Need ×3. Pedra 28.7 s is v61-band; Rocks 30.6 is the fast/slow swing.
+
+r2 (19:42, load 15.4)
+  hydrate/rocks  28.6s (0.87M/s)   pedra 28.1s (0.89M/s)  1.02×  (both in band)
+  get_hit        44.50 vs 46.10 µs                         0.97×
+  prefix         331.8 vs 289.3 µs                         1.15× WIN
+  get_loop       4.136 vs 5.611 ms                         0.74×
+  multi_get      4.127 vs 5.120 ms                         0.81×
+
+r3 (19:47, load 15.5)
+  hydrate/rocks  27.9s (0.90M/s)   pedra 28.8s (0.87M/s)  0.97×  (Rocks fast 27.9)
+  get_hit        42.20 vs 41.62 µs                         1.01×
+  prefix         347.2 vs 294.3 µs                         1.18× WIN
+  get_loop       3.966 vs 4.491 ms                         0.88×
+  multi_get      3.752 vs 4.620 ms                         0.81×
+
+×3 median (wall s): hydrate Pedra 28.7 / Rocks 28.6 = 0.997× — not >1×.
+get_hit 1.01× / prefix 1.16× / get_loop 0.88× / multi_get 0.81×.
+Pedra hydrate is stably 28.1–28.8 s (the 4 KiB floor). Rocks swings 27.9–30.6.
+P1.2 did not regress that floor vs v61; it also did not beat Rocks on a fast day.
+lookup_100 is the remaining structural miss at 25M (100-key disk).

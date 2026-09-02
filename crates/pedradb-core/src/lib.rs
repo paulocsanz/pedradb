@@ -14,9 +14,10 @@
 
 pub mod batch;
 pub mod bloom;
-pub mod bulk_ingest;
 /// Optional DST buggify annotation sites (RFC-0018 P2.5; no-op unless feature).
 pub mod buggify_hooks;
+pub mod bulk_ingest;
+pub(crate) mod bulk_run;
 
 pub mod cache;
 pub mod cf_kernel;

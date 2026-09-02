@@ -1,7 +1,7 @@
 # RFC-0159: Sorted-ingest fast path (bulk load for append-only hydrate)
 
 **Status:** in-progress
-**Updated:** 2026-08-31
+**Updated:** 2026-09-02
 
 ## Background
 
@@ -77,8 +77,11 @@ sorted-ingest-architecture.md` (+ `run19-v21p-guest-25m.txt`).
   was already live (`commit_async_ops` / `commit_async_one`); the fix routes
   those three installs through `bulk_span_level` — 3 more tests in
   `concurrent::tests`.)
-70→- [ ] **P0.3** WAL ring for append mode: uninstalled tail only, segment GC
-  after install, crash-replay equality test. — status: `todo`
+70→- [x] **P0.3** Sorted-run builder: latched-family puts skip WAL+memtable,
+  accumulate in a vec, flush direct to `MAX_LSM_LEVEL`; MANIFEST persist
+  per chunk (uninstalled tail is RAM-only). Crash-replay of the open tail
+  is not WAL-covered — same class as Rocks `disableWAL` bulk load.
+  — status: `done` (2026-09-02)
 - [ ] **P0.4** End-to-end regression set: sorted ingest then
   gets/scans/probes equal the ladder path byte-for-byte; out-of-order
   mid-stream falls back and stays correct; settle no-ops on clean levels. —
@@ -109,10 +112,16 @@ sorted-ingest-architecture.md` (+ `run19-v21p-guest-25m.txt`).
   split. Local verdict 2026-09-01: paired 6M A/B FLUSHDUR −13 %, settle
   1.1→0.4 s; the bench payload compresses 2.6× so the probe never trips
   (probe on/off disk totals identical to 113 B / 1.24 GiB) — probe ships as
-  protection for incompressible data, lz4 stays on for the bench. — status:
-  `in-progress` (code + tests + local A/B landed; guest run pending)
-- [ ] **P1.2** Batch MANIFEST persists across consecutive chunk installs. —
-  status: `todo`
+  protection for incompressible data, lz4 stays on for the bench. 2026-09-02:
+  per-entry `block_last_user` / `bloom_keys: Vec<Bytes>` clones dropped —
+  `same_user` from `prev_ikey`, bloom `insert(&[u8])` during the encode loop,
+  capacity capped at 2 Mi keys so a whole-level hint cannot size every chunk
+  at 31 MB. — status: `doing` (code + tests + local A/B; guest 25M
+  hydrate still 0.47× — SST materialize wall, clone-drop did not close ≥1×)
+- [ ] **P1.2** Batch MANIFEST persists across consecutive chunk installs
+  (every 4, off the write lock; force on settle). v50 batched under the
+  lock and regressed. Guest v63 25M ×3 hydrate median **0.997×** (Pedra
+  28.1–28.8 s vs Rocks 27.9–30.6). — status: `doing`
 - [ ] **P1.3** Chunk-size sweep for read legs at 25M (64 vs 128 MiB) —
   run #19 showed fewer/bigger files improve probe/get legs. Root cause
   found 2026-09-01: chunks staged at the GLOBAL auto-flush cap (compat
@@ -141,6 +150,44 @@ sorted-ingest-architecture.md` (+ `run19-v21p-guest-25m.txt`).
   try-locks and skips) + v29c (debt cap = 2× threshold); guest run #30:
   hydrate 76.9 s, residual back to ~20 s = v4/v24 level. — status:
   `closed: v29a+c (c2105f7), run #30 recovered the regression`
+- [x] **P1.5** Latched `write_cf_owned` envelope: after the family latches,
+  hydrate's 1024-data run skips `BatchOp` / WriteGroup / per-key high-water
+  clone; intern the value once per batch; `BulkRun::reserve`; high-water
+  ratchets the last key only (descent falls back). Meta cursor still ladders
+  in the same lock hold. 1M is envelope CPU, not LSM. — status: `done`
+  (2026-09-02; local 1M remesure pending this session)
+- [x] **P1.6** Bulk SST tight-loop writer: trusted-sorted `(key,val,seq)`
+  arrays → v3 uncompressed, no bloom, no `InternalKey`/`Result`/lz4 per
+  entry. Guest 25M wall is encode 19 s + lz4 9 s + bloom 4 s; this cut is
+  the arithmetic path to ≥1× vs Rocks default. — status: `done`
+  (guest 25M v47: 39.1 s / 0.64 M/s vs Rocks 29.4 s / 0.85 M/s = **0.75×**;
+  disk 5.75 GiB uncompressed. Saved 6.5 s vs v46, not the 16 s the run-#26
+  split implied — that 19 s encode included memtable walk, already gone
+  in BulkRun.)
+- [x] **P1.7** Writer does not wait for SST: park a full BulkRun (even
+  while the previous chunk is encoding), worker materializes off the
+  write lock; bulk SST encodes in-place into one buffer at 256 KiB
+  blocks (CRC-while-hot, no header-concat copy); MANIFEST persist
+  off the write lock. Guest 25M v51: **1.00×** vs Rocks default
+  (28.9 s both, 0.87 M/s) — tied, not >1×. — status: `done`
+- [x] **P1.8** Latched 1-op meta tail skips WAL (cursor overwrite;
+  disableWAL class); no flush-debt assist on the latched submit.
+  Guest 25M ×3: 0.93 / 1.01 / 0.88, median **0.93×** — not a stable
+  >1×. — status: `done`
+- [x] **P1.9** Stream bulk SST in 4 MiB write batches (no 256 MiB
+  image + cold `write_all`). Empty payload on the returned table.
+  Guest 25M ×3: 1.00 / 1.01 / 1.01, median **1.01×**. — status: `done`
+- [x] **P1.10** Bulk SST v6: uncompressed 4 KiB blocks + per-block CRC
+  so evicted get_hit is one `read_range`, not a whole-file v3 reload.
+  Guest v55 1M: hydrate **1.72×**, prefix **1.50×**, get_hit **0.79×**
+  (empty payload + ghost pool register → pread+CRC every probe).
+  — status: `done` (format); get_hit follow-up is P1.11
+- [ ] **P1.11** Promote empty bulk payload into the 256 MiB pool on first
+  point seek when `can_admit`; do not ghost-register empty slots.
+  Guest 1M/10M all required >1× (10M get_hit 1.000×). 25M v63 hydrate
+  median 0.997×; v64 TLS 512-block cache: get_hit 1.15×, get_loop/multi
+  0.94× (still cold pread). v65: 16-byte index window + LAST_CF hash on
+  get miss + lock-free `can_admit` reject. — status: `doing`
 
 ### P2 — later / polish
 
@@ -155,13 +202,20 @@ sorted-ingest-architecture.md` (+ `run19-v21p-guest-25m.txt`).
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | Sorted-stream detector + latch | done | `bulk_ingest.rs` | 2026-08-31 |
 | P0.2 | p0 | Bulk flush-path install at bottom level | done | `db.rs` (`bulk_span_level`, 4 tests) + `concurrent.rs` funnels (3 tests) | 2026-09-01 |
-| P0.3 | p0 | WAL ring for append mode | todo | — | 2026-08-31 |
+| P0.3 | p0 | Sorted-run builder (skip WAL+BTree for latched family) | done | `bulk_run.rs` + `commit_async_ops` split | 2026-09-02 |
 | P0.4 | p0 | E2E regression set | todo | — | 2026-08-31 |
 | P0.5 | p0 | Local A/B + guest verdict | done | local 6M A/B (`9698caf`): hydrate −39…−45 %, settle −25…−43 %; guest run #23 (25M): settle 84.9→2.3 s = **3.61× vs Rocks 8.3 s**, hydrate 157.0→73.6 s (0.34×), reads flat; 73 BULKDIAG (72 parked + 1 flush) | 2026-09-01 |
-| P1.1 | p1 | Materialize per-byte cut (direct block encode + lz4 probe) | in-progress (code+tests+local A/B: FLUSHDUR −13 %, disk identical; guest pending) | `table.rs` | 2026-09-01 |
-| P1.2 | p1 | Batched manifest persists | todo | — | 2026-08-31 |
+| P1.1 | p1 | Materialize per-byte cut (direct block encode + lz4 probe + no per-entry clones) | doing (clone-drop landed; guest 25M hydrate 0.47×, SST wall) | `table.rs` | 2026-09-02 |
+| P1.2 | p1 | Batched manifest persists | doing — every 4 off lock; guest v63 25M ×3 hydrate median 0.997× (Pedra 28.1–28.8 s); v64 r1 0.990× | `db.rs` `persist_bulk_manifest` | 2026-09-02 |
 | P1.3 | p1 | Chunk-size: per-CF buffer governs stage threshold | done — threshold fix (v25) + take_family split_off (v27) verified on guest; v26 assist initially REGRESSED hydrate 75.6→110.5/112.5 s (#28/#29, chunk-size theory refuted), root-caused by `sample` profile (writer queues on `flush_lock` in the assist) and fixed by v29a try-lock assist + v29c 2× debt cap (c2105f7); run #30: hydrate 76.9 s, residual ~20 s = v24 level, settle 1.4 s | `concurrent.rs`, `memtable.rs`, `db.rs` | 2026-09-01 |
 | P1.4 | p1 | Span kill: incremental per-prefix span state in MemTable; `bulk_span_level` O(1) with legacy scan fallback (run #33: span was 4.42 s of the 4.7 s install) | done — `50c2e52` (memtable v28 + db v31), +3 oracle tests, suite 687+2 known; guest run #34 (v33, load ~13–15): span 4 420 → 14.8 ms (n=85, −99.7 %), install 4.7 → 0.37 s, hydrate 57.9 → 55.8 s, mem +0.97 s hook cost; BULKDIAG 86/86 level=3, settle 1.0 s, reads flat | `memtable.rs`, `db.rs` | 2026-09-01 |
+| P1.5 | p1 | Latched write_cf_owned envelope (no BatchOp/WriteGroup) | done | `concurrent.rs`, `db.rs`, `rocksdb-compat` | 2026-09-02 |
+| P1.6 | p1 | Bulk SST tight-loop v3 (no lz4, no bloom) | done — guest 25M 0.75× (39.1 vs 29.4 s); not ≥1× | `table.rs` `write_sst_bulk_arrays` | 2026-09-02 |
+| P1.7 | p1 | Park BulkRun + in-place 256 KiB SST + off-lock MANIFEST | done — guest 25M **1.00×** (28.9 vs 28.9 s); tied, not >1× | `db.rs` `parked_bulk`; `table.rs` in-place encode | 2026-09-02 |
+| P1.8 | p1 | Latched meta-cursor tail skips WAL | done — guest ×3 median 0.93×; one run 1.01× is not the claim | `apply_latched_bulk_puts` 1-put mem-only | 2026-09-02 |
+| P1.9 | p1 | Stream bulk SST in 4 MiB batches | done — guest ×3 median **1.01×** (28.5–29.0 vs 28.8–29.4 s) | `table.rs` `stream_bulk_block` | 2026-09-02 |
+| P1.10 | p1 | Bulk SST v6 4 KiB + block CRC | done — format; v55 1M get_hit 0.79× (empty payload) | `table.rs` `SST_VERSION_V6` | 2026-09-02 |
+| P1.11 | p1 | Promote empty bulk payload on first get | doing — v56 1M all >1×; 10M get_hit 1.000×; 25M v63 hydrate 0.997×, v64 lookup 0.94×; v65 p16+LAST_CF hash | `cache.rs` `can_admit`; `table.rs` `try_promote_payload` | 2026-09-02 |
 | P2.1 | p2 | Nearly-sorted window | todo | — | 2026-08-31 |
 | P2.2 | p2 | 100M rung via bulk mode | todo | — | 2026-08-31 |
 

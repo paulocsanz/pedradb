@@ -1,0 +1,29 @@
+Guest v61 25M (file CRC = crc32c_append per 4 MiB stage, not per 4 KiB)
+linux-gate-p149b  2026-09-02 ~17:08–17:12
+diag-off, ENTRIES=25000000. table c8b1bbe7f5feb59817af8636a4fbe265.
+Load ~14.9. Compiling pedradb-core (from v60).
+
+hydrate/rocks  29.2s (0.85M/s)   pedra 29.7s (0.84M/s)  0.99×  (wall +0.5 s)
+settle         7.4s vs 0.8s                              9.3× WIN
+get_hit        41.395 vs 37.355 µs                       1.11× WIN
+prefix         336.16 vs 302.30 µs                       1.11× WIN
+get_loop       3.796 vs 4.495 ms                         0.85× LOSE
+multi_get      4.063 vs 4.665 ms                         0.87× LOSE
+
+Hydrate path: v56 33.3 → v60 32.1 → v61 29.7 vs Rocks 29.2.
+Need <29.2 for >1×. 0.5 s is inside host noise (~3 s / ~10 %);
+one run is not the claim. lookup_100 flipped vs v60 (1.12/1.09)
+on the same 25M disk-bound floor — not a CRC-path regression.
+
+v61 ×3 same image (run2/run3 restart, no recompile):
+
+  r1  hydrate 29.7 vs 29.2 = 0.983×  get_hit 1.11×  prefix 1.11×  get_loop 0.85×  multi 0.87×
+  r2  hydrate 28.6 vs 28.8 = 1.007×  get_hit 1.16×  prefix 1.26×  get_loop 1.32×  multi 1.17×
+  r3  hydrate 29.8 vs 29.4 = 0.986×  get_hit 1.08×  prefix 1.15×  get_loop 0.92×  multi 1.07×
+
+  hydrate median 29.7 vs 29.2 = 0.98× (Pedra walls 28.6/29.7/29.8)
+  get_hit median 1.11×  prefix 1.15×  get_loop 0.92×  multi_get 1.07×
+  settle always ~0.7–0.8 vs 6–7 s.
+
+Not a published 25M all-benches >1×. Hydrate 2/3 lose by 0.4–0.5 s.
+get_loop median 0.92× (100-key walk, always-true bloom).

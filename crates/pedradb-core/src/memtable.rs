@@ -667,6 +667,80 @@ impl MemTable {
         }
     }
 
+    /// Largest user key belonging to `family` (any version, including
+    /// tombstones). Named families are a contiguous `family\\0…` range —
+    /// O(log n) on the map plus the family's tail shard. `"default"`
+    /// interleaves raw keys with every other prefix, so it walks
+    /// [`Self::iter_internal`] (the first observation of `default` is at
+    /// seed, not on the 264k-entry raftlog leg).
+    ///
+    /// Used by the bulk-ingest latch's first-observation high-water. A full
+    /// `iter_internal` here sorted the whole tail (apply_batch's 264k keys)
+    /// on the first `deps_raftlog` batch.
+    #[must_use]
+    pub(crate) fn max_user_key_in_family(&self, family: &str) -> Option<Bytes> {
+        if family == "default" || family.is_empty() || family.as_bytes().contains(&0) {
+            return self.max_user_key_in_family_scan(family);
+        }
+        let mut pfx = Vec::with_capacity(family.len() + 1);
+        pfx.extend_from_slice(family.as_bytes());
+        pfx.push(0);
+        let end = crate::prefix::prefix_exclusive_end(&pfx);
+        let end_b = match end.as_deref() {
+            Some(e) => Bound::Excluded(e),
+            None => Bound::Unbounded,
+        };
+        let mut max = self
+            .map
+            .range::<[u8], _>((Bound::Included(pfx.as_slice()), end_b))
+            .next_back()
+            .map(|(k, _)| k.clone());
+        if let Some(shard) = self.tail_idx.get(family.as_bytes()) {
+            max = Self::max_bytes(max, self.shard_max_user_key(shard));
+        }
+        max
+    }
+
+    fn max_user_key_in_family_scan(&self, family: &str) -> Option<Bytes> {
+        let mut max: Option<Bytes> = None;
+        for (ik, _) in self.iter_internal() {
+            if crate::cf_kernel::key_in_cf_family(ik.user_key.as_ref(), family)
+                && max
+                    .as_ref()
+                    .is_none_or(|m| ik.user_key.as_ref() > m.as_ref())
+            {
+                max = Some(ik.user_key.clone());
+            }
+        }
+        max
+    }
+
+    fn shard_max_user_key(&self, shard: &TailShard) -> Option<Bytes> {
+        let mut max: Option<Bytes> = None;
+        let bump_i = |max: &mut Option<Bytes>, i: usize| {
+            if let Some(v) = self.tail.get(i) {
+                *max = Self::max_bytes(max.take(), Some(v.key.user_key.clone()));
+            }
+        };
+        if let Some((_, &i)) = shard.short.last_key_value() {
+            bump_i(&mut max, i);
+        }
+        if let Some((k, _)) = shard.long.last_key_value() {
+            max = Self::max_bytes(max, Some(k.clone()));
+        }
+        for &i in shard.point.values() {
+            bump_i(&mut max, i);
+        }
+        max
+    }
+
+    fn max_bytes(a: Option<Bytes>, b: Option<Bytes>) -> Option<Bytes> {
+        match (a, b) {
+            (None, x) | (x, None) => x,
+            (Some(x), Some(y)) => Some(if x >= y { x } else { y }),
+        }
+    }
+
     /// Incremental [`SpanState`] update — one prefix lookup per insert.
     /// Ascending puts keep `Pure`; any duplicate, descent, or tombstone
     /// latches `impure` permanently for the prefix.
@@ -717,7 +791,10 @@ impl MemTable {
             return BulkSpan::Unknown;
         }
         let s = if family == "default" {
-            match (self.cf_span.get(&b""[..]), self.cf_span.get(b"default".as_slice())) {
+            match (
+                self.cf_span.get(&b""[..]),
+                self.cf_span.get(b"default".as_slice()),
+            ) {
                 (Some(_), Some(_)) => return BulkSpan::Impure,
                 (Some(s), None) | (None, Some(s)) => s,
                 (None, None) => return BulkSpan::Absent,
@@ -1980,7 +2057,11 @@ mod tests {
         );
         // Another family interleaving does not disturb cf1's run.
         for i in 0..10u32 {
-            mt.put(format!("cf2\0z{:03}", i), 1000 + u64::from(i), b"v".as_slice());
+            mt.put(
+                format!("cf2\0z{:03}", i),
+                1000 + u64::from(i),
+                b"v".as_slice(),
+            );
         }
         assert_eq!(
             mt.bulk_span("cf1"),
@@ -2009,7 +2090,11 @@ mod tests {
         let mut mt2 = MemTable::new();
         for i in 0..50u32 {
             mt2.put(format!("cf1\0k{:04}", i), i as u64, b"v".as_slice());
-            mt2.put(format!("cf2\0z{:03}", i), 500 + u64::from(i), b"v".as_slice());
+            mt2.put(
+                format!("cf2\0z{:03}", i),
+                500 + u64::from(i),
+                b"v".as_slice(),
+            );
         }
         let taken = mt2.take_family("cf1");
         assert_eq!(
@@ -2376,6 +2461,39 @@ mod tests {
         assert!(!mt.has_range_tombstones());
         mt.delete_range(b"a".as_slice(), b"z".as_slice(), 3);
         assert!(mt.has_range_tombstones());
+    }
+
+    #[test]
+    fn max_user_key_in_family_skips_foreign_cf() {
+        let mut mt = MemTable::new();
+        for i in 0..8_000u32 {
+            let mut k = b"lock\0".to_vec();
+            k.extend_from_slice(&i.to_be_bytes());
+            mt.put(k, u64::from(i) + 1, b"v".as_slice());
+        }
+        assert!(
+            mt.max_user_key_in_family("raftlog").is_none(),
+            "no raftlog keys in a lock-only table"
+        );
+        let lock_max = mt.max_user_key_in_family("lock").expect("lock keys");
+        assert!(
+            crate::cf_kernel::key_in_cf_family(lock_max.as_ref(), "lock"),
+            "lock max must stay in-family"
+        );
+        mt.put(b"raftlog\0z".as_slice(), 9_000, b"r".as_slice());
+        assert_eq!(
+            mt.max_user_key_in_family("raftlog").as_deref(),
+            Some(b"raftlog\0z".as_ref())
+        );
+        mt.spill_tail();
+        assert_eq!(
+            mt.max_user_key_in_family("raftlog").as_deref(),
+            Some(b"raftlog\0z".as_ref())
+        );
+        assert_eq!(
+            mt.max_user_key_in_family("lock").as_deref(),
+            Some(lock_max.as_ref())
+        );
     }
 
     #[test]

@@ -10,9 +10,7 @@
 //! - AS-IS (`joint_still_active_as_is`) must discover the invariant
 //!   (the 0066 hole: treat committed joint as single C-old).
 
-use pedradb_raft::{
-    joint_election_ok, joint_still_active, joint_still_active_as_is,
-};
+use pedradb_raft::{joint_election_ok, joint_still_active, joint_still_active_as_is};
 use stateright::{Checker, Model, Property};
 
 const OLD: [u64; 3] = [1, 2, 3];
@@ -43,11 +41,7 @@ struct LeaveModel {
 
 impl LeaveModel {
     fn pending(&self, left: bool) -> Option<(&'static [u64], &'static [u64])> {
-        let (old, new): (&[u64], &[u64]) = if left {
-            (&NEW, &NEW)
-        } else {
-            (&OLD, &NEW)
-        };
+        let (old, new): (&[u64], &[u64]) = if left { (&NEW, &NEW) } else { (&OLD, &NEW) };
         let active = if self.fixed {
             joint_still_active(old, new)
         } else {
@@ -61,20 +55,13 @@ impl LeaveModel {
     }
 
     fn elect_ok(&self, granted: u8, left: bool) -> bool {
-        let granted_ids = |n: usize| -> u64 {
-            (0..n)
-                .filter(|i| granted & (1 << i) != 0)
-                .count() as u64
-        };
+        let granted_ids =
+            |n: usize| -> u64 { (0..n).filter(|i| granted & (1 << i) != 0).count() as u64 };
         match self.pending(left) {
             Some((old, new)) => {
                 let old_yes = granted_ids(old.len());
                 let new_yes = granted_ids(new.len());
-                joint_election_ok(
-                    old_yes,
-                    old.len() as u64,
-                    Some((new_yes, new.len() as u64)),
-                )
+                joint_election_ok(old_yes, old.len() as u64, Some((new_yes, new.len() as u64)))
             }
             None => {
                 // Production: no pending joint → `ids` only (C-old until leave

@@ -102,7 +102,10 @@ fn main() {
         "compatv" => {
             // RFC-0058 P1.2: the verified profile column (StdEnv + lone
             // commit) on the same suites/opts — only the profile differs.
-            let e = rocksdb_parity_bench::engines::CompatEngine::<pedradb_core::StdEnv>::open_verified(&dbdir);
+            let e =
+                rocksdb_parity_bench::engines::CompatEngine::<pedradb_core::StdEnv>::open_verified(
+                    &dbdir,
+                );
             run_and_report_occ(&e, &cfg, suites.as_str(), &out);
         }
         "concurrent" => {

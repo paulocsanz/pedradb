@@ -403,10 +403,7 @@ mod tests {
     #[test]
     fn fdatasync_rc_ok_on_live_posix_is_not_ok() {
         assert!(!fdatasync_rc_ok(-1));
-        assert!(
-            fdatasync_rc_ok_as_is(-1),
-            "AS-IS dente: ignore rc"
-        );
+        assert!(fdatasync_rc_ok_as_is(-1), "AS-IS dente: ignore rc");
         let dir = temp_dir();
         let path = dir.join("wal.bin");
         let mut f = File::create(&path).unwrap();
@@ -633,19 +630,14 @@ mod tests {
                 continue;
             }
             sites += 1;
-            let window: Vec<&str> =
-                lines[i..(i + 8).min(lines.len())].to_vec();
+            let window: Vec<&str> = lines[i..(i + 8).min(lines.len())].to_vec();
             let gated = window.iter().any(|w| {
                 w.contains("posix_rc_to_io(rc)")
                     || w.contains("rc == 0")
                     || w.contains("rc != 0")
                     || w.contains("raw_os_error")
             });
-            assert!(
-                gated,
-                "ungated unsafe FFI rc at line {}: {line}",
-                i + 1
-            );
+            assert!(gated, "ungated unsafe FFI rc at line {}: {line}", i + 1);
         }
         assert!(
             sites >= 5,

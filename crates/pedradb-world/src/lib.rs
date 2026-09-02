@@ -23,12 +23,12 @@ pub mod tcg;
 pub mod wenv;
 
 pub use buggify::{buggify_schedule_from_seed, BuggifyArm, BuggifySchedule};
+pub use coverage::{CoverageMask, SEAM_IDS};
+pub use scheduler::{pct_ready_queue, pct_ready_queue_hash};
 pub use tcg::{
     allow_claim_tcg_flag, allow_claim_tcg_flag_as_is, tcg_guest_admitted, tcg_guest_admitted_as_is,
     world_runs_guest_ssh, world_runs_guest_ssh_as_is,
 };
-pub use coverage::{CoverageMask, SEAM_IDS};
-pub use scheduler::{pct_ready_queue, pct_ready_queue_hash};
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -2282,7 +2282,10 @@ mod tests {
             // read on every node through the client API.
             for k in [1u8, 2, 3, 4, 7] {
                 for n in 1..=3u64 {
-                    s.push(Action::Get { key_tag: k, node: n });
+                    s.push(Action::Get {
+                        key_tag: k,
+                        node: n,
+                    });
                 }
             }
             s
@@ -2791,10 +2794,7 @@ mod tests {
             .expect("run tcg_guest_status.sh");
         let stdout = String::from_utf8_lossy(&out.stdout);
         assert!(out.status.success(), "residual path must exit 0: {stdout}");
-        assert!(
-            stdout.contains("kernel=tcg_guest_admitted"),
-            "{stdout}"
-        );
+        assert!(stdout.contains("kernel=tcg_guest_admitted"), "{stdout}");
         assert!(stdout.contains("tcg_guest_admitted=0"), "{stdout}");
         assert!(stdout.contains("C2.2=residual_no_guest"), "{stdout}");
     }
@@ -2831,7 +2831,10 @@ mod tests {
         };
         let t = World::new(0x0079_0002, cfg).run().unwrap();
         assert!(!t.events.is_empty(), "World::run must actually schedule");
-        assert!(!t.claim_tcg_guest(), "World must not invent a guest via SSH");
+        assert!(
+            !t.claim_tcg_guest(),
+            "World must not invent a guest via SSH"
+        );
         let _ = std::fs::remove_dir_all(&parent);
     }
 
@@ -2988,14 +2991,10 @@ mod tests {
             "native World must not stack Lying × det_io"
         );
         assert!(
-            pedradb_core::group_commit_kernel::stacked_fsync_liars_admitted_as_is(
-                true, true
-            ),
+            pedradb_core::group_commit_kernel::stacked_fsync_liars_admitted_as_is(true, true),
             "AS-IS dente: AND both fsync-liar boxes"
         );
-        assert!(!pedradb_core::group_commit_kernel::stacked_fsync_liars_admitted(
-            true, true
-        ));
+        assert!(!pedradb_core::group_commit_kernel::stacked_fsync_liars_admitted(true, true));
         let _ = std::fs::remove_dir_all(&parent);
     }
 
@@ -3127,7 +3126,8 @@ mod tests {
         let parent = temp_parent("rec");
         let env = RecordingEnv::with_policy(SyncPolicy::Lying);
         let mut c =
-            StoreCluster::open_with_env_rng_lab_direct(&parent, 3, 1, env, SeedRng::new(0x3EC0)).unwrap();
+            StoreCluster::open_with_env_rng_lab_direct(&parent, 3, 1, env, SeedRng::new(0x3EC0))
+                .unwrap();
         c.set_rpc_mode(RpcMode::Direct);
         c.elect_all(80).unwrap();
         c.put(b"rk", b"rv").unwrap();
@@ -3136,7 +3136,8 @@ mod tests {
         let parent2 = temp_parent("rec2");
         let env2 = RecordingEnv::with_policy(SyncPolicy::Lying);
         let mut c2 =
-            StoreCluster::open_with_env_rng_lab_direct(&parent2, 3, 1, env2, SeedRng::new(0x3EC0)).unwrap();
+            StoreCluster::open_with_env_rng_lab_direct(&parent2, 3, 1, env2, SeedRng::new(0x3EC0))
+                .unwrap();
         c2.set_rpc_mode(RpcMode::Direct);
         c2.elect_all(80).unwrap();
         c2.put(b"rk", b"rv").unwrap();
@@ -3172,20 +3173,10 @@ mod tests {
             pedradb_core::group_commit_kernel::fsync_promotes_pending_as_is(false),
             "AS-IS dente: promote on a lying fsync"
         );
+        assert!(!pedradb_core::group_commit_kernel::stacked_fsync_liars_admitted(true, false));
+        assert!(!pedradb_core::group_commit_kernel::stacked_fsync_liars_admitted(true, true));
         assert!(
-            !pedradb_core::group_commit_kernel::stacked_fsync_liars_admitted(
-                true, false
-            )
-        );
-        assert!(
-            !pedradb_core::group_commit_kernel::stacked_fsync_liars_admitted(
-                true, true
-            )
-        );
-        assert!(
-            pedradb_core::group_commit_kernel::stacked_fsync_liars_admitted_as_is(
-                true, true
-            ),
+            pedradb_core::group_commit_kernel::stacked_fsync_liars_admitted_as_is(true, true),
             "AS-IS dente: AND Lying × det_io"
         );
         let parent = temp_parent("lie-plant-0078");
@@ -3205,14 +3196,9 @@ mod tests {
             assert!(c.count_applied_eq(b"lk", b"lv") >= 2);
         }
         env.crash();
-        let mut c = StoreCluster::open_with_env_rng_lab_direct(
-            &parent,
-            3,
-            1,
-            env,
-            SeedRng::new(0x0078),
-        )
-        .unwrap();
+        let mut c =
+            StoreCluster::open_with_env_rng_lab_direct(&parent, 3, 1, env, SeedRng::new(0x0078))
+                .unwrap();
         c.set_rpc_mode(RpcMode::Direct);
         c.elect_all(80).unwrap();
         assert_eq!(

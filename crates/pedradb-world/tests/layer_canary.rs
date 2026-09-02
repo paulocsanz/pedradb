@@ -59,8 +59,12 @@ fn world_trial_opens_index_and_journal_canaries_under_failing_env() {
     ienv.set_delay_per_op(1);
     let mut idb = Db::open_with_env(&idir, OpenOptions::default(), ienv).unwrap();
     pedradb_index::put_row_with_indexes(&mut idb, b"r1", b"payload", b"name", b"e@x").unwrap();
-    assert!(pedradb_index::row_fully_indexed(&idb, b"r1", b"name", b"e@x"));
-    assert!(!pedradb_index::row_half_indexed(&idb, b"r1", b"name", b"e@x"));
+    assert!(pedradb_index::row_fully_indexed(
+        &idb, b"r1", b"name", b"e@x"
+    ));
+    assert!(!pedradb_index::row_half_indexed(
+        &idb, b"r1", b"name", b"e@x"
+    ));
 
     let _ = std::fs::remove_dir_all(&parent);
 }

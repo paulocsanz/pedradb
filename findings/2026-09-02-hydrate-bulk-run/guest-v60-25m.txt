@@ -1,0 +1,13 @@
+Guest v60 25M (4 KiB encode in-place into 4 MiB stage, no block_buf copy)
+linux-gate-p149b  2026-09-02 ~17:02–17:05
+diag-off, ENTRIES=25000000. Compiling pedradb-core 25.68s. Load ~15.3.
+
+hydrate/rocks  29.2s (0.85M/s)   pedra 32.1s (0.78M/s)  0.92× LOSE  (v56 was 33.3s; copy drop −1.2 s)
+settle         6.3s vs 0.8s                              7.9× WIN
+get_hit        44.132 vs 36.944 µs                       1.19× WIN
+prefix         341.85 vs 318.81 µs                       1.07× WIN
+get_loop       4.156 vs 3.699 ms                         1.12× WIN
+multi_get      4.240 vs 3.892 ms                         1.09× WIN
+
+Reads all >1×. Hydrate still 2.9 s short of Rocks 29.2 s.
+v61: file CRC via crc32c_append of each 4 MiB stage, not 1.5M 4 KiB appends.

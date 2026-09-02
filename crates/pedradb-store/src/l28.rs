@@ -435,18 +435,9 @@ mod tests {
             }
         }
         // Swept attempts space for the retry floor: never admitted.
-        let attempts_sweep = [
-            0u64,
-            1,
-            2,
-            3,
-            8,
-            64,
-            u64::from(u32::MAX),
-            u64::MAX,
-        ]
-        .into_iter()
-        .chain((0..2_000u64).map(|i| 0x0157_8282 ^ i));
+        let attempts_sweep = [0u64, 1, 2, 3, 8, 64, u64::from(u32::MAX), u64::MAX]
+            .into_iter()
+            .chain((0..2_000u64).map(|i| 0x0157_8282 ^ i));
         for attempts in attempts_sweep {
             for napply_ok in [false, true] {
                 assert_eq!(
@@ -509,13 +500,9 @@ mod tests {
                 .as_nanos()
         ));
         let _ = std::fs::remove_dir_all(&dir);
-        let mut cluster = crate::StoreCluster::open_with_rng(
-            &dir,
-            3,
-            1,
-            pedradb_core::SeedRng::new(0x0152_0141),
-        )
-        .unwrap();
+        let mut cluster =
+            crate::StoreCluster::open_with_rng(&dir, 3, 1, pedradb_core::SeedRng::new(0x0152_0141))
+                .unwrap();
         cluster.pin_dst_queued();
         assert_eq!(cluster.rpc_mode(), crate::RpcMode::Queued);
         for _ in 0..120 {
@@ -566,8 +553,7 @@ mod tests {
             .crash_reopen_engine_on(follower, pedradb_io_uring::IoUringEnv::default())
             .expect("crash-reopen follower");
         let after_kill_ok = cluster.count_applied_eq(&key, b"ok") >= 2;
-        let restart_ok =
-            cluster.get_on(follower, &key).unwrap().as_deref() == Some(b"ok".as_ref());
+        let restart_ok = cluster.get_on(follower, &key).unwrap().as_deref() == Some(b"ok".as_ref());
         assert!(
             l28_durability_ok(get_ok, after_kill_ok, restart_ok),
             "live cluster_real gate: get={get_ok} after={after_kill_ok} restart={restart_ok}"

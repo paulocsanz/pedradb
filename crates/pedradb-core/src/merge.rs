@@ -37,7 +37,6 @@ pub(crate) static SCAN_DIAG_SINGLE_ROWS: AtomicU64 = AtomicU64::new(0);
 /// Streams retired early because their head passed `end` (diag only).
 pub(crate) static SCAN_DIAG_STREAM_EVICTS: AtomicU64 = AtomicU64::new(0);
 
-
 /// One user-visible key/value after MVCC filtering.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VisibleKv {
@@ -486,8 +485,7 @@ impl<'a> StreamingVisibleIter<'a> {
         let skip = self.skip_user.get_or_insert_with(Vec::new);
         skip.clear();
         skip.extend_from_slice(ikey.user_key.as_ref());
-        let range_hidden =
-            range_deleted(ikey.user_key.as_ref(), ikey.sequence, &self.range_dels);
+        let range_hidden = range_deleted(ikey.user_key.as_ref(), ikey.sequence, &self.range_dels);
         let snapshot_live = visible_at(ikey.kind, range_hidden);
         WindowKv {
             key: ikey.user_key,
@@ -1305,18 +1303,12 @@ mod tests {
                 .iter()
                 .map(|s| Box::new(s.clone().into_iter()) as LayerStream<'static>)
                 .collect();
-            let got: Vec<WindowKv> =
-                StreamingVisibleIter::from_point_streams(
-                    boxed,
-                    range_dels,
-                    snapshot,
-                    start,
-                    end,
-                    None,
-                )
-                .into_window_kvs()
-                .collect();
-                assert_eq!(got, expected, "case {case}");
+            let got: Vec<WindowKv> = StreamingVisibleIter::from_point_streams(
+                boxed, range_dels, snapshot, start, end, None,
+            )
+            .into_window_kvs()
+            .collect();
+            assert_eq!(got, expected, "case {case}");
         }
     }
 
@@ -1328,7 +1320,8 @@ mod tests {
     impl Iterator for CountingIter {
         type Item = (InternalKey, Bytes);
         fn next(&mut self) -> Option<Self::Item> {
-            self.nexts.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.nexts
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             self.rows.next()
         }
     }
@@ -1392,13 +1385,7 @@ mod tests {
             (ik(b"k04", 1, ValueType::Value), Bytes::from_static(b"b4")),
         ];
         let streams = vec![a, b];
-        let expected = window_oracle(
-            &streams,
-            &[],
-            8,
-            Bound::Unbounded,
-            Bound::Unbounded,
-        );
+        let expected = window_oracle(&streams, &[], 8, Bound::Unbounded, Bound::Unbounded);
         assert_eq!(expected.len(), 5);
         assert_eq!(expected[2].key.as_ref(), b"k03");
         assert_eq!(expected[2].value.as_ref(), b"b3");
@@ -1406,10 +1393,16 @@ mod tests {
             .iter()
             .map(|s| Box::new(s.clone().into_iter()) as LayerStream<'static>)
             .collect();
-        let got: Vec<WindowKv> =
-            StreamingVisibleIter::from_point_streams(boxed, Vec::new(), 8, Bound::Unbounded, Bound::Unbounded, None)
-                .into_window_kvs()
-                .collect();
+        let got: Vec<WindowKv> = StreamingVisibleIter::from_point_streams(
+            boxed,
+            Vec::new(),
+            8,
+            Bound::Unbounded,
+            Bound::Unbounded,
+            None,
+        )
+        .into_window_kvs()
+        .collect();
         assert_eq!(got, expected);
     }
 

@@ -601,7 +601,8 @@ mod tests {
                         for _ in 0..ops {
                             plant.withdraw_all(y);
                         }
-                    }) as Box<dyn FnOnce(&Yielder) + Send + 'static>);
+                    })
+                        as Box<dyn FnOnce(&Yielder) + Send + 'static>);
                 }
                 let probe_plant = Arc::clone(&plant);
                 ExhaustiveSetup {
@@ -609,8 +610,14 @@ mod tests {
                     probe: Box::new(move || probe_plant.violation()),
                 }
             });
-            assert!(!report.diverged, "prefix replay diverged (determinism break)");
-            assert!(!report.hit_cap, "{tag}: unbounded enumeration must complete");
+            assert!(
+                !report.diverged,
+                "prefix replay diverged (determinism break)"
+            );
+            assert!(
+                !report.hit_cap,
+                "{tag}: unbounded enumeration must complete"
+            );
             assert_eq!(
                 report.leaves, report.distinct_leaves,
                 "{tag}: duplicate leaf schedules"
@@ -683,7 +690,8 @@ mod tests {
                         };
                         outcomes.lock().unwrap().push((task * COMMITS + i, tag));
                     }
-                }) as Box<dyn FnOnce(&Yielder) + Send + 'static>);
+                })
+                    as Box<dyn FnOnce(&Yielder) + Send + 'static>);
             }
             let probe_outcomes = Arc::clone(&outcomes);
             ExhaustiveSetup {
@@ -942,10 +950,7 @@ mod tests {
             });
             let mut got = outcomes.lock().unwrap().clone();
             got.sort_unstable();
-            let after_fd = report
-                .steps
-                .iter()
-                .any(|s| s.site == "after_wal_sync");
+            let after_fd = report.steps.iter().any(|s| s.site == "after_wal_sync");
             // Live unpublished: a failed put must not be visible before reopen.
             let mut silent_wrong = 0usize;
             for &(idx, tag) in &got {
@@ -1728,9 +1733,11 @@ mod tests {
             !report.claim_forall_schedules(),
             "PCT d=2 must not round to forall schedules"
         );
-        assert!(!pedradb_core::group_commit_kernel::forall_schedules_admitted(
-            policy_pct_depth(PiPolicy::Pct { depth: 2 })
-        ));
+        assert!(
+            !pedradb_core::group_commit_kernel::forall_schedules_admitted(policy_pct_depth(
+                PiPolicy::Pct { depth: 2 }
+            ))
+        );
         assert!(
             pedradb_core::group_commit_kernel::forall_schedules_admitted_as_is(2),
             "AS-IS dente: d>=2 would claim forall"
@@ -2034,8 +2041,7 @@ mod tests {
                 // act without re-check (the planted bug)
                 *self.balance.lock().unwrap() -= 100;
             }
-            self.taken
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.taken.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         }
 
         fn violation(&self) -> Option<String> {
@@ -2094,9 +2100,7 @@ mod tests {
         // the sweep is 16384 deterministic seeds, not 256.
         let d3_seeds: u64 = 16384;
         let d3_violators: Vec<(u64, String)> = (0..d3_seeds)
-            .filter_map(|s| {
-                plant3_violation(s, N, PiPolicy::Pct { depth: 3 }).map(|v| (s, v))
-            })
+            .filter_map(|s| plant3_violation(s, N, PiPolicy::Pct { depth: 3 }).map(|v| (s, v)))
             .collect();
         let d3_hits = d3_violators.len();
         eprintln!("planted_chain3_found_by_pct_d3: d=3 sweep found {d3_hits}/{d3_seeds}");

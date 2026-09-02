@@ -919,7 +919,7 @@ const LAST_PROBE: usize = 8;
 /// (p11h hashed AND ringed — extra tax, dirty min 0.843). Newest-first
 /// get of idx-1 is 2 compares.
 const LAST_RING: usize = 16;
-const TINY: usize = 64;
+const TINY: usize = 128;
 
 fn fx_mix(hash: u64, word: u64) -> u64 {
     (hash.rotate_left(5) ^ word).wrapping_mul(0x517c_c1b7_2722_0a95)
@@ -1116,6 +1116,43 @@ impl LastGetTable {
             epoch,
             gen,
             cf: TinyBuf::empty(),
+            key: key_t,
+            val,
+        };
+    }
+
+    /// Named-CF get miss: fill the 4096-slot hash. `store` is ring-only
+    /// so raftlog write-through stays 16-deep (p11h). lookup_100's 100
+    /// repeating keys never fit the ring, so every named get re-entered
+    /// the SST (guest v64 25M get_loop 0.94×). Hash-store on the get
+    /// miss keeps the working set; writes stay ring-only.
+    fn hash_store(&mut self, epoch: u64, gen: u64, cf: &str, key: &[u8], val: Option<Bytes>) {
+        let Some(cf_t) = TinyBuf::from_slice(cf.as_bytes()) else {
+            return;
+        };
+        let Some(key_t) = TinyBuf::from_slice(key) else {
+            return;
+        };
+        let h = Self::hash(cf, key);
+        let mut free = None;
+        let cf_b = cf.as_bytes();
+        for p in 0..LAST_PROBE {
+            let i = last_slot(h, p);
+            let s = &mut self.slots[i];
+            if s.epoch == epoch && s.cf.eq(cf_b) && s.key.eq(key) {
+                s.gen = gen;
+                s.val = val;
+                return;
+            }
+            if s.epoch != epoch && free.is_none() {
+                free = Some(i);
+            }
+        }
+        let i = free.unwrap_or_else(|| last_slot(h, LAST_PROBE - 1));
+        self.slots[i] = LastGetSlot {
+            epoch,
+            gen,
+            cf: cf_t,
             key: key_t,
             val,
         };
@@ -1494,19 +1531,13 @@ impl<E: PedraEnv> DBIterator<E> {
     /// Current user key (empty when invalid).
     #[must_use]
     pub fn key(&self) -> &[u8] {
-        self.items
-            .get(self.idx)
-            .map(|(k, _)| &k[..])
-            .unwrap_or(&[])
+        self.items.get(self.idx).map(|(k, _)| &k[..]).unwrap_or(&[])
     }
 
     /// Current value (empty when invalid).
     #[must_use]
     pub fn value(&self) -> &[u8] {
-        self.items
-            .get(self.idx)
-            .map(|(_, v)| &v[..])
-            .unwrap_or(&[])
+        self.items.get(self.idx).map(|(_, v)| &v[..]).unwrap_or(&[])
     }
 
     /// Remaining entries from here to the CF bound (refills pages).
@@ -1596,8 +1627,12 @@ impl<E: PedraEnv> DBIterator<E> {
 
     /// Install a fresh page and record its boundary resume keys.
     fn set_page(&mut self, page: Vec<(Bytes, Bytes)>) {
-        let fwd = page.last().map(|(k, _)| self.codec.encode_resume(&self.cf, k));
-        let rev = page.first().map(|(k, _)| self.codec.encode_resume(&self.cf, k));
+        let fwd = page
+            .last()
+            .map(|(k, _)| self.codec.encode_resume(&self.cf, k));
+        let rev = page
+            .first()
+            .map(|(k, _)| self.codec.encode_resume(&self.cf, k));
         if let Some(k) = fwd {
             self.resume_fwd = k;
         }
@@ -2506,6 +2541,9 @@ impl<E: PedraEnv> DB<E> {
     /// # Errors
     /// WAL I/O; nothing partially applied on error.
     pub fn write(&self, batch: &WriteBatch) -> Result<()> {
+        if self.try_write_latched(batch)? {
+            return Ok(());
+        }
         thread_local! {
             static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
                 std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
@@ -2539,6 +2577,76 @@ impl<E: PedraEnv> DB<E> {
                 .map_err(Error::from)
         });
         r
+    }
+
+    /// Slipstream hydrate is `WriteBatch` + `write_opt`, not `write_cf_owned`.
+    /// After the data family latches, skip `BatchOp` / WriteGroup for the
+    /// prefix run; the meta cursor still ladders.
+    fn try_write_latched(&self, batch: &WriteBatch) -> Result<bool> {
+        let Some((Some(first_cf), BatchOp::Put { .. })) = batch.ops.first() else {
+            return Ok(false);
+        };
+        if !self.inner.family_is_latched_async(first_cf) {
+            return Ok(false);
+        }
+        let family = first_cf.as_str();
+        let mut n = 0usize;
+        for (cf, op) in &batch.ops {
+            match (cf.as_deref(), op) {
+                (Some(cf), BatchOp::Put { .. }) if cf == family => n += 1,
+                _ => break,
+            }
+        }
+        if n == 0 {
+            return Ok(false);
+        }
+        thread_local! {
+            static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
+                std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
+        }
+        KEY_POOL.with(|pool| {
+            let mut pool = pool.borrow_mut();
+            self.check_cf(family)?;
+            let mut pfx = Vec::with_capacity(16);
+            self.codec.fill_run_prefix(family, &mut pfx);
+            let mut keys = Vec::with_capacity(n);
+            let mut vals = Vec::with_capacity(n);
+            for (_, op) in batch.ops.iter().take(n) {
+                if let BatchOp::Put { key, value } = op {
+                    keys.push(self.codec.encode_run(&pfx, key.as_ref(), &mut pool));
+                    vals.push(value.clone());
+                }
+            }
+            let mut tail = Vec::with_capacity(batch.ops.len().saturating_sub(n));
+            let mut last_ok: Option<&str> = None;
+            let mut pfx2 = Vec::with_capacity(16);
+            for (cf, op) in batch.ops.iter().skip(n) {
+                let name = cf.as_deref().unwrap_or(DEFAULT_CF);
+                if last_ok != Some(name) {
+                    self.check_cf(name)?;
+                    self.codec.fill_run_prefix(name, &mut pfx2);
+                    last_ok = Some(name);
+                }
+                tail.push(match op {
+                    BatchOp::Put { key, value } => BatchOp::Put {
+                        key: self.codec.encode_run(&pfx2, key.as_ref(), &mut pool),
+                        value: value.clone(),
+                    },
+                    BatchOp::Delete { key } => BatchOp::Delete {
+                        key: self.codec.encode_run(&pfx2, key.as_ref(), &mut pool),
+                    },
+                    BatchOp::DeleteRange { start, end } => BatchOp::DeleteRange {
+                        start: self.codec.encode_run(&pfx2, start.as_ref(), &mut pool),
+                        end: self.codec.encode_run(&pfx2, end.as_ref(), &mut pool),
+                    },
+                });
+            }
+            self.inner
+                .apply_latched_bulk(family, keys, vals, tail)
+                .map(|_| ())
+                .map_err(Error::from)
+        })?;
+        Ok(true)
     }
 
     /// Consume a [`WriteBatch`] so values move into the WAL encode (RFC-0041:
@@ -2640,6 +2748,20 @@ impl<E: PedraEnv> DB<E> {
         }
     }
 
+    fn already_single_cf_puts(puts: &[(&str, Vec<u8>, Vec<u8>)]) -> bool {
+        match puts.split_first() {
+            None | Some((_, [])) => true,
+            Some((first, rest)) => rest.iter().all(|p| p.0 == first.0),
+        }
+    }
+
+    fn already_single_cf_deletes(deletes: &[(&str, Vec<u8>)]) -> bool {
+        match deletes.split_first() {
+            None | Some((_, [])) => true,
+            Some((first, rest)) => rest.iter().all(|p| p.0 == first.0),
+        }
+    }
+
     fn group_cf_puts(puts: Vec<(&str, Vec<u8>, Vec<u8>)>) -> Vec<(&str, Vec<u8>, Vec<u8>)> {
         let mut b: [Vec<(&str, Vec<u8>, Vec<u8>)>; 5] =
             [Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new()];
@@ -2683,21 +2805,30 @@ impl<E: PedraEnv> DB<E> {
         // — seq order across CFs is not user-visible after one publish.
         // One-pass CF buckets — `sort_by` swapped 100 B payloads O(n log n)
         // on apply (RFC-0149 P2.1). Encode order is still grouped by family.
-        if puts.len() > 1 {
+        if puts.len() > 1 && !Self::already_single_cf_puts(&puts) {
             puts = Self::group_cf_puts(puts);
         }
-        if deletes.len() > 1 {
+        if deletes.len() > 1 && !Self::already_single_cf_deletes(&deletes) {
             deletes = Self::group_cf_deletes(deletes);
-        }
-        thread_local! {
-            static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
-                std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
         }
         // Raftlog reads idx-1 of a 16-append (LAST_RING). Fat apply/lock
         // batches never read-your-writes in the same op — skip the warm Vec.
         let need_warm = puts.len() + deletes.len() <= LAST_RING
             && deletes.is_empty()
             && puts.iter().all(|(cf, _, _)| *cf == "raftlog");
+        // RFC-0159 P1.5: latched first-CF run skips BatchOp / WriteGroup.
+        // Hydrate is 1024 data + 1 meta; only `data` latches.
+        if deletes.is_empty() && !puts.is_empty() {
+            let family = puts[0].0;
+            if self.inner.family_is_latched_async(family) {
+                let n = puts.iter().take_while(|p| p.0 == family).count();
+                return self.write_latched_cf_owned(family, n, puts, need_warm);
+            }
+        }
+        thread_local! {
+            static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
+                std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
+        }
         let mut warm: Vec<(&str, Vec<u8>, Option<Bytes>)> = if need_warm {
             Vec::with_capacity(puts.len())
         } else {
@@ -2751,6 +2882,81 @@ impl<E: PedraEnv> DB<E> {
         if r.is_ok() && !warm.is_empty() {
             // Raftlog reads idx-1 of a 16-append (LAST_RING). Fat apply/lock
             // batches never read-your-writes in the same op.
+            let skip = warm.len().saturating_sub(LAST_RING);
+            LAST_CF.with(|t| {
+                let mut t = t.borrow_mut();
+                for (cf, k, v) in warm.into_iter().skip(skip) {
+                    let (epoch, gen) = self.tls_point_ids(cf, &k);
+                    t.store(epoch, gen, cf, &k, v);
+                }
+            });
+        }
+        r
+    }
+
+    /// Latched first-CF run: intern the value once, skip `BatchOp` for the
+    /// span, ladder the remainder (hydrate meta cursor).
+    fn write_latched_cf_owned(
+        &self,
+        family: &str,
+        n: usize,
+        puts: Vec<(&str, Vec<u8>, Vec<u8>)>,
+        need_warm: bool,
+    ) -> Result<()> {
+        thread_local! {
+            static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
+                std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
+        }
+        let mut warm: Vec<(&str, Vec<u8>, Option<Bytes>)> = if need_warm {
+            Vec::with_capacity(n)
+        } else {
+            Vec::new()
+        };
+        let r = KEY_POOL.with(|pool| {
+            let mut pool = pool.borrow_mut();
+            self.check_cf(family)?;
+            let mut pfx = Vec::with_capacity(16);
+            self.codec.fill_run_prefix(family, &mut pfx);
+            let mut keys = Vec::with_capacity(n);
+            let mut vals = Vec::with_capacity(n);
+            let mut prev_val: Option<Bytes> = None;
+            let mut rest: Vec<(&str, Vec<u8>, Vec<u8>)> = Vec::new();
+            for (i, (cf, k, v)) in puts.into_iter().enumerate() {
+                if i < n {
+                    let val = match prev_val.as_ref() {
+                        Some(p) if p.as_ref() == v.as_slice() => p.clone(),
+                        _ => Bytes::from(v),
+                    };
+                    prev_val = Some(val.clone());
+                    keys.push(self.codec.encode_run(&pfx, k.as_ref(), &mut pool));
+                    if need_warm {
+                        warm.push((cf, k, Some(val.clone())));
+                    }
+                    vals.push(val);
+                } else {
+                    rest.push((cf, k, v));
+                }
+            }
+            let mut tail = Vec::with_capacity(rest.len());
+            let mut last_ok: Option<&str> = None;
+            let mut pfx2 = Vec::with_capacity(16);
+            for (cf, k, v) in rest {
+                if last_ok != Some(cf) {
+                    self.check_cf(cf)?;
+                    self.codec.fill_run_prefix(cf, &mut pfx2);
+                    last_ok = Some(cf);
+                }
+                tail.push(BatchOp::Put {
+                    key: self.codec.encode_run(&pfx2, k.as_ref(), &mut pool),
+                    value: Bytes::from(v),
+                });
+            }
+            self.inner
+                .apply_latched_bulk(family, keys, vals, tail)
+                .map(|_| ())
+                .map_err(Error::from)
+        });
+        if r.is_ok() && !warm.is_empty() {
             let skip = warm.len().saturating_sub(LAST_RING);
             LAST_CF.with(|t| {
                 let mut t = t.borrow_mut();
@@ -3793,6 +3999,7 @@ where
             loop {
                 match rx.recv_timeout(wait) {
                     Ok(CompactCmd::Shutdown) | Err(RecvTimeoutError::Disconnected) => {
+                        while inner.materialize_bulk_once() {}
                         while inner.park_imm_once() {}
                         while inner.fold_parked_once_off_lock() {}
                         while inner.materialize_parked_once() {}
@@ -3800,6 +4007,7 @@ where
                         break;
                     }
                     Ok(CompactCmd::Run) | Err(RecvTimeoutError::Timeout) => {
+                        while inner.materialize_bulk_once() {}
                         compact_diag(&inner);
                         let fenced = inner.is_durability_fenced();
                         if fenced && !fence_notified {
@@ -4044,6 +4252,7 @@ fn compact_diag<E: PedraEnv>(inner: &ConcurrentDb<E>) {
 /// parked-memory bound. Split out so the policy is unit-testable
 /// without thread or fsync timing.
 fn flush_worker_tick<E: PedraEnv>(inner: &ConcurrentDb<E>) {
+    while inner.materialize_bulk_once() {}
     while inner.park_imm_once() {}
     flush_worker_diag(inner);
     let bound = inner
@@ -4531,7 +4740,12 @@ mod tests {
     /// empty — the Bytes path must not panic or diverge).
     #[test]
     fn key_codec_decode_bytes_matches_decode() {
-        for (cf, raw) in [("default", true), ("default", false), ("data", true), ("data", false)] {
+        for (cf, raw) in [
+            ("default", true),
+            ("default", false),
+            ("data", true),
+            ("data", false),
+        ] {
             let codec = KeyCodec { default_raw: raw };
             for key in [&b""[..], b"d", b"data", b"data\0", b"data\0k", b"\0k", b"k"] {
                 let owned = Bytes::copy_from_slice(key);
@@ -5973,6 +6187,91 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// RFC-0159 P1.5: hydrate-shaped `write_cf_owned` latches and reads back.
+    #[test]
+    fn write_cf_owned_latched_hydrate_roundtrip() {
+        let dir = tmp("cfowned-bulk");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        opts.set_sync(false);
+        let db = DB::open_cf(&opts, &dir, &["data", "meta"]).unwrap();
+        let val = vec![b'v'; 64];
+        let mut i = 0u32;
+        for _ in 0..12u32 {
+            let end = i + 32;
+            let mut puts = Vec::with_capacity(33);
+            for j in i..end {
+                puts.push((
+                    "data",
+                    format!("route.svc-{j:06}").into_bytes(),
+                    val.clone(),
+                ));
+            }
+            puts.push(("meta", b"cursor".to_vec(), i.to_le_bytes().to_vec()));
+            db.write_cf_owned(puts, Vec::new()).unwrap();
+            i = end;
+        }
+        assert!(
+            db.inner.family_is_latched_async("data"),
+            "12 hydrate batches must latch data"
+        );
+        let last = format!("route.svc-{:06}", i - 1).into_bytes();
+        assert_eq!(
+            db.get_named("data", &last).unwrap().as_deref(),
+            Some(val.as_slice())
+        );
+        assert_eq!(
+            db.get_named("meta", b"cursor").unwrap().as_deref(),
+            Some((i - 32).to_le_bytes().as_ref())
+        );
+        db.flush().unwrap();
+        drop(db);
+        let db = DB::open_cf(&opts, &dir, &["data", "meta"]).unwrap();
+        assert_eq!(
+            db.get_named("data", &last).unwrap().as_deref(),
+            Some(val.as_slice())
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Slipstream path: `WriteBatch` + `write_opt` after latch, then get.
+    #[test]
+    fn write_opt_latched_hydrate_roundtrip() {
+        let dir = tmp("writeopt-bulk");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        opts.set_sync(false);
+        let db = DB::open_cf(&opts, &dir, &["data", "meta"]).unwrap();
+        let data = db.cf_handle("data").unwrap();
+        let meta = db.cf_handle("meta").unwrap();
+        let val = vec![b'v'; 64];
+        let mut wo = WriteOptions::default();
+        wo.set_sync(false);
+        let mut i = 0u32;
+        for _ in 0..12u32 {
+            let end = i + 32;
+            let mut wb = WriteBatch::default();
+            for j in i..end {
+                wb.put_cf(&data, format!("route.svc-{j:06}").as_bytes(), &val);
+            }
+            wb.put_cf(&meta, b"cursor", i.to_le_bytes());
+            db.write_opt(&wb, &wo).unwrap();
+            i = end;
+        }
+        assert!(db.inner.family_is_latched_async("data"));
+        let last = format!("route.svc-{:06}", i - 1);
+        assert_eq!(
+            db.get_named("data", last.as_bytes()).unwrap().as_deref(),
+            Some(val.as_slice())
+        );
+        db.flush().unwrap();
+        assert_eq!(
+            db.get_named("data", last.as_bytes()).unwrap().as_deref(),
+            Some(val.as_slice())
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// RFC-0062 P1.1: 16 identical raftlog payloads stay readable (WAL v2 intern).
     #[test]
     fn write_cf_owned_sixteen_same_payload_roundtrip() {
@@ -6083,6 +6382,50 @@ mod tests {
         }
         let hits = keys.iter().filter(|k| t.get_key(7, 1, k).is_some()).count();
         assert!(hits >= 972, "uniform hot set hit rate {hits}/1024 < 95%");
+    }
+
+    #[test]
+    fn last_cf_hash_keeps_lookup_100() {
+        // Slipstream lookup_100: 100 named-CF keys, same set every iter.
+        // Ring-only store (16) cannot hold them; hash_store must.
+        let mut t = LastGetTable::new();
+        let keys: Vec<Vec<u8>> = (0..100)
+            .map(|i| format!("route.svc-{:06}.{:08}", i / 4, i % 4).into_bytes())
+            .collect();
+        for k in &keys {
+            t.store(3, 1, "data", k, Some(Bytes::from_static(b"v")));
+        }
+        let ring_hits = keys
+            .iter()
+            .filter(|k| t.get(3, 1, "data", k).is_some())
+            .count();
+        assert!(
+            ring_hits < 100,
+            "ring-only must not hold the whole lookup_100 set (got {ring_hits})"
+        );
+        for k in &keys {
+            t.hash_store(3, 1, "data", k, Some(Bytes::from_static(b"v")));
+        }
+        let hits = keys
+            .iter()
+            .filter(|k| t.get(3, 1, "data", k).is_some())
+            .count();
+        assert_eq!(hits, 100, "hash_store must keep all 100 lookup keys");
+    }
+
+    #[test]
+    fn last_cf_ring_holds_long_slipstream_keys() {
+        // TINY was 64; ~60–80 B slipstream keys silently failed
+        // TinyBuf::from_slice and LAST_CF never warmed (Mac get_hit sample
+        // was 100 % inner.get).
+        let mut t = LastGetTable::new();
+        let k: Vec<u8> = (0..80).map(|i| b'a' + (i % 26)).collect();
+        t.store(1, 1, "data", &k, Some(Bytes::from_static(b"v")));
+        assert_eq!(
+            t.get(1, 1, "data", &k),
+            Some(Some(Bytes::from_static(b"v"))),
+            "80-byte named-CF keys must fit LAST_CF"
+        );
     }
 
     #[test]

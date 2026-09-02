@@ -1,0 +1,16 @@
+[workspace]
+
+[package]
+name = "pedra-async-scale-ladder"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+pedradb-core = { path = "../../crates/pedradb-core" }
+fjall = "3.1.9"
+sled = "0.34"
+
+[profile.release]
+debug = false
+lto = false

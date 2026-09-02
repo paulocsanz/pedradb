@@ -1,0 +1,39 @@
+Guest v56 10M (P1.11 promote, 256 MiB payload budget)
+linux-gate-p149b  2026-09-02 ~16:32–16:35
+diag-off, PEDRA_STAGE_MAX_BYTES=67108864, ENTRIES=10000000
+Official peer: Rocks default WriteOptions.sync=false. Load ~16.6.
+Same v56 image as 1M (no recompile of core).
+
+hydrate/rocksdb:  11.1s (0.90M/s); disk 2.66 GiB
+settle/rocksdb:   4.6s; after 2.10 GiB
+probe_hit/rocks:  p50 16.8µs
+probe_miss/rocks: p50 631 ns
+get_hit/rocksdb:  13.045 µs
+prefix_scan/rocks: 341.36 µs
+get_loop/rocks:   1.2249 ms
+multi_get/rocks:  1.2584 ms
+
+hydrate/pedradb:  10.7s (0.93M/s); disk 2.20 GiB
+settle/pedradb:   0.6s; after 2.40 GiB
+probe_hit/pedra:  p50 7.1µs
+probe_miss/pedra: p50 1.6µs
+get_hit/pedradb:  13.049 µs
+prefix_scan/pedra: 261.38 µs
+get_loop/pedra:   1.1426 ms
+multi_get/pedra:  1.2303 ms
+BENCH_EXIT_readlegs=0
+
+ratios:
+  hydrate     0.93/0.90 = 1.03×  WIN  (wall 10.7 < 11.1)
+  settle      4.6/0.6   = 7.67×  WIN
+  probe_hit   16.8/7.1  = 2.37×  WIN
+  probe_miss  0.63/1.6  = 0.39×  LOSE (always-true bloom; not in required set)
+  get_hit     13.045/13.049 = 1.000×  TIE — not >1×
+  prefix_scan 341/261   = 1.31×  WIN
+  get_loop    1.225/1.143 = 1.07× WIN
+  multi_get   1.258/1.230 = 1.02× WIN
+
+get_hit CI fully overlaps (pedra 12.66–13.48, rocks 12.84–13.32).
+2.40 GiB settled vs 256 MiB pool ⇒ ~4 of ~38 files resident;
+uniform get_hit is pread-bound, same class as Rocks' 13 µs.
+v57: PEDRA_SST_PAYLOAD_BUDGET=1 GiB so ~16 files stay hot.

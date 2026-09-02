@@ -1,0 +1,19 @@
+Guest v56 25M (v6 4 KiB + promote, 256 MiB budget, v57 env helper unset)
+linux-gate-p149b  2026-09-02 ~16:44–16:48
+diag-off, ENTRIES=25000000. Compiling pedradb-core 25.72s (db.rs future-mtime from v57).
+Load ~17.2. Official peer: Rocks default sync=false.
+
+hydrate/rocks  28.9s (0.87M/s) 8.02 GiB    pedra 33.3s (0.75M/s) 5.75 GiB   0.86× LOSE
+settle/rocks   9.0s                         pedra 0.8s                        11.3× WIN
+probe_hit      rocks 51.8µs                 pedra 34.6µs                      1.50× WIN
+probe_miss     rocks 621 ns                 pedra 1.7µs                       0.37× LOSE (always-true bloom)
+get_hit        rocks 41.812 µs              pedra 41.611 µs                   1.005× TIE
+prefix_scan    rocks 341.99 µs              pedra 304.24 µs                   1.12× WIN
+get_loop       rocks 3.6258 ms              pedra 4.0739 ms                   0.89× LOSE
+multi_get      rocks 4.0284 ms              pedra 3.9739 ms                   1.014× WIN
+
+v54 25M hydrate was 28.5–29.0 s (1.01×) with 256 KiB blocks, no per-block CRC
+(v3 empty payload hung get_hit). v6 4 KiB recovered get_hit (completes, ~tie)
+and cost ~4.8 s of hydrate (1.5M blocks vs ~23k). 25M random get_hit is
+disk-bound on this 3.9 GiB guest (5.75 GiB live set); 4 KiB did not beat
+Rocks' 42 µs, it matched it.

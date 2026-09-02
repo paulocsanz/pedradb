@@ -1,0 +1,12 @@
+Guest v59 25M (crc32c_combine instead of second crc32c_append) — REFUSED
+linux-gate-p149b  2026-09-02 ~16:53–16:57
+hydrate/rocks  29.4s (0.85M/s)   pedra 38.2s (0.65M/s)  0.76× LOSE (worse than v56 33.3s)
+settle         6.6s vs 2.5s                              2.64× WIN
+get_hit        40.741 vs 37.285 µs                       1.09× WIN
+prefix         318.28 vs 320.12 µs                       0.99× TIE
+get_loop       4.172 vs 3.841 ms                         1.09× WIN
+multi_get      4.253 vs 4.017 ms                         1.06× WIN
+
+1.5M crc32c_combine(4 KiB) on this guest is slower than a second
+sequential crc32c_append of the same bytes. Reverted in tree.
+Keep v56: promote + v6 4 KiB + double append.

@@ -1,0 +1,15 @@
+Guest v51 (off-lock MANIFEST persist; v49 encode + v48 park)
+linux-gate-p149b  2026-09-02
+diag-off, PEDRA_STAGE_MAX_BYTES=67108864
+load ~16.7
+
+25M (inject-v51-p17.sh, started 15:18 -03)
+  Compiling pedradb-core (md5-verified vs v50)
+  hydrate/rocksdb:  25000000 entries in 28.9s (0.87M entries/s); on disk 6.68 GiB (287 B/entry)
+  settle/rocksdb:   7.5s; on disk after 5.24 GiB
+  hydrate/pedradb:  25000000 entries in 28.9s (0.87M entries/s); on disk 5.69 GiB (244 B/entry)
+  settle/pedradb:   0.8s; on disk after 5.94 GiB
+  ratio hydrate: 0.87/0.87 = 1.00×  (tied, not >1×)
+
+Ladder: v47 0.75× → v48 0.83× → v49 0.98× → v50 0.91× (MANIFEST batch under
+write lock, refused) → v51 1.00× (persist off lock).

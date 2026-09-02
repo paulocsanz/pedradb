@@ -1,0 +1,40 @@
+Guest v55 (P1.10: bulk SST v6, 4 KiB + per-block CRC, empty payload)
+linux-gate-p149b  2026-09-02 ~16:15–16:17 UTC
+diag-off, PEDRA_STAGE_MAX_BYTES=67108864, ENTRIES=1000000
+Official peer: Rocks default WriteOptions.sync=false.
+Load ~15.9–16.0. Image: table 263b74fe7878c3ed9d97b659922b3304.
+
+hydrate/rocksdb:  1.0s (0.97M/s); disk 0.22 GiB
+settle/rocksdb:   1.0s; after 0.21 GiB
+probe_hit/rocks:  p50 12.7µs
+probe_miss/rocks: p50 1.2µs
+get_hit/rocksdb:  4.4624 µs
+prefix_scan/rocks: 356.86 µs
+get_loop/rocks:   424.88 µs
+multi_get/rocks:  375.72 µs
+
+hydrate/pedradb:  0.6s (1.67M/s); disk 0.00 GiB (tail RAM-only)
+settle/pedradb:   0.4s; after 0.24 GiB
+probe_hit/pedra:  p50 4.6µs
+probe_miss/pedra: p50 1.1µs
+get_hit/pedradb:  5.6668 µs
+prefix_scan/pedra: 238.02 µs
+get_loop/pedra:   499.01 µs
+multi_get/pedra:  516.01 µs
+BENCH_EXIT_readlegs=0
+
+ratios (pedra/rocks, >1 = Pedra faster):
+  hydrate     1.67/0.97 = 1.72×  WIN
+  settle      1.0/0.4   = 2.50×  WIN
+  probe_hit   12.7/4.6  = 2.76×  WIN
+  probe_miss  1.2/1.1   = 1.09×  WIN
+  get_hit     4.46/5.67 = 0.79×  LOSE
+  prefix_scan 357/238   = 1.50×  WIN
+  get_loop    425/499   = 0.85×  LOSE
+  multi_get   376/516   = 0.73×  LOSE
+
+Cause of the three point-get losses: finish_bulk_sst / streaming writer
+leave payload empty, and attach_payload_kit registered payload_len against
+the 256 MiB pool so the slot never promoted. Every get_hit was pread+CRC
+(~5.67 µs) vs v44 resident ~3.2 µs (1.375×). 1M settled 0.24 GiB fits the
+budget; v56 promotes on first seek when can_admit.

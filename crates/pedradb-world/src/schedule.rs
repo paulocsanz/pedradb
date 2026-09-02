@@ -625,10 +625,9 @@ mod tests {
     #[test]
     fn opt_in_splice_emits_plant_committed_joint() {
         let mut sch = schedule_from_seed(42, 4, 16);
-        assert!(
-            !sch.iter()
-                .any(|a| matches!(a, Action::PlantCommittedJoint { .. }))
-        );
+        assert!(!sch
+            .iter()
+            .any(|a| matches!(a, Action::PlantCommittedJoint { .. })));
         splice_plant_committed_joint(&mut sch, 4);
         assert!(
             sch.iter()

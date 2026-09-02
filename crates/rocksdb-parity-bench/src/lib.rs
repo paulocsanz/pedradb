@@ -307,11 +307,7 @@ pub trait Engine {
     }
 
     /// RFC-0043 P2.7: `WriteBatchWithIndex` overlay then DB (read-your-writes).
-    fn wbwi_overlay_get(
-        &self,
-        puts: &[(&[u8], &[u8])],
-        key: &[u8],
-    ) -> Result<Option<Vec<u8>>, ()> {
+    fn wbwi_overlay_get(&self, puts: &[(&[u8], &[u8])], key: &[u8]) -> Result<Option<Vec<u8>>, ()> {
         let _ = (puts, key);
         Err(())
     }
@@ -413,45 +409,45 @@ impl YcsbRunner {
         // prewrite rows (lock + default) then commit rows (write, lock del).
         let mut vers: Vec<u64> = vec![0; records];
         if need_seed {
-        let t0 = Instant::now();
-        for round in 0..2u64 {
-            let mut i = 0usize;
-            while i < records {
-                let take = (records - i).min(64);
-                let mut pre = Vec::with_capacity(take * 2);
-                let mut com = Vec::with_capacity(take * 2);
-                for j in 0..take {
-                    let ts = round * records as u64 + (i + j) as u64 + 1;
-                    vers[i + j] = ts;
-                    pre.push(CfWrite::Put {
-                        cf: "lock",
-                        k: ukey(i + j),
-                        v: b"l".to_vec(),
-                    });
-                    pre.push(CfWrite::Put {
-                        cf: "default",
-                        k: mvcc(i + j, ts),
-                        v: yval.clone(),
-                    });
-                    com.push(CfWrite::Put {
-                        cf: "write",
-                        k: mvcc(i + j, ts),
-                        v: b"c".to_vec(),
-                    });
-                    com.push(CfWrite::Delete {
-                        cf: "lock",
-                        k: ukey(i + j),
-                    });
+            let t0 = Instant::now();
+            for round in 0..2u64 {
+                let mut i = 0usize;
+                while i < records {
+                    let take = (records - i).min(64);
+                    let mut pre = Vec::with_capacity(take * 2);
+                    let mut com = Vec::with_capacity(take * 2);
+                    for j in 0..take {
+                        let ts = round * records as u64 + (i + j) as u64 + 1;
+                        vers[i + j] = ts;
+                        pre.push(CfWrite::Put {
+                            cf: "lock",
+                            k: ukey(i + j),
+                            v: b"l".to_vec(),
+                        });
+                        pre.push(CfWrite::Put {
+                            cf: "default",
+                            k: mvcc(i + j, ts),
+                            v: yval.clone(),
+                        });
+                        com.push(CfWrite::Put {
+                            cf: "write",
+                            k: mvcc(i + j, ts),
+                            v: b"c".to_vec(),
+                        });
+                        com.push(CfWrite::Delete {
+                            cf: "lock",
+                            k: ukey(i + j),
+                        });
+                    }
+                    assert!(e.batch(std::mem::take(&mut pre)), "seed prewrite");
+                    assert!(e.batch(std::mem::take(&mut com)), "seed commit");
+                    i += take;
                 }
-                assert!(e.batch(std::mem::take(&mut pre)), "seed prewrite");
-                assert!(e.batch(std::mem::take(&mut com)), "seed commit");
-                i += take;
             }
-        }
-        eprintln!(
-            "[rocks-parity] deps seed {records}×2 versions in {:.1}s",
-            t0.elapsed().as_secs_f64()
-        );
+            eprintln!(
+                "[rocks-parity] deps seed {records}×2 versions in {:.1}s",
+                t0.elapsed().as_secs_f64()
+            );
         } else {
             eprintln!("[rocks-parity] deps seed skipped (ROCKS_PARITY_ONLY)");
         }
@@ -462,59 +458,59 @@ impl YcsbRunner {
         // 1. deps_apply_batch — raftstore apply: per logical op one ready =
         //    prewrite batch + commit batch (batch txns each).
         if want("deps_apply_batch") {
-        let mut lats = Vec::with_capacity(cfg_ops);
-        let (mut txns, mut errors) = (0u64, 0u64);
-        let phase0 = e.write_phase_snapshot();
-        let mut build_ns = Vec::with_capacity(cfg_ops);
-        let t0 = Instant::now();
-        for _ in 0..cfg_ops {
-            let t = Instant::now();
-            let mut picks = Vec::with_capacity(batch);
-            for _ in 0..batch {
-                let u = self.pick(&mut rng, records);
-                vers[u] = vers[u].saturating_add(1);
-                picks.push((u, vers[u]));
+            let mut lats = Vec::with_capacity(cfg_ops);
+            let (mut txns, mut errors) = (0u64, 0u64);
+            let phase0 = e.write_phase_snapshot();
+            let mut build_ns = Vec::with_capacity(cfg_ops);
+            let t0 = Instant::now();
+            for _ in 0..cfg_ops {
+                let t = Instant::now();
+                let mut picks = Vec::with_capacity(batch);
+                for _ in 0..batch {
+                    let u = self.pick(&mut rng, records);
+                    vers[u] = vers[u].saturating_add(1);
+                    picks.push((u, vers[u]));
+                }
+                let mut pre = Vec::with_capacity(batch * 2);
+                let mut com = Vec::with_capacity(batch * 2);
+                for &(u, ts) in &picks {
+                    pre.push(CfWrite::Put {
+                        cf: "lock",
+                        k: ukey(u),
+                        v: b"l".to_vec(),
+                    });
+                    pre.push(CfWrite::Put {
+                        cf: "default",
+                        k: mvcc(u, ts),
+                        v: yval.clone(),
+                    });
+                    com.push(CfWrite::Put {
+                        cf: "write",
+                        k: mvcc(u, ts),
+                        v: b"c".to_vec(),
+                    });
+                    com.push(CfWrite::Delete {
+                        cf: "lock",
+                        k: ukey(u),
+                    });
+                }
+                let t_build = t.elapsed();
+                let ok = e.batch(std::mem::take(&mut pre)) && e.batch(std::mem::take(&mut com));
+                if ok {
+                    txns += batch as u64;
+                } else {
+                    errors += 1;
+                }
+                build_ns.push(t_build.as_nanos());
+                lats.push(ms(t));
             }
-            let mut pre = Vec::with_capacity(batch * 2);
-            let mut com = Vec::with_capacity(batch * 2);
-            for &(u, ts) in &picks {
-                pre.push(CfWrite::Put {
-                    cf: "lock",
-                    k: ukey(u),
-                    v: b"l".to_vec(),
-                });
-                pre.push(CfWrite::Put {
-                    cf: "default",
-                    k: mvcc(u, ts),
-                    v: yval.clone(),
-                });
-                com.push(CfWrite::Put {
-                    cf: "write",
-                    k: mvcc(u, ts),
-                    v: b"c".to_vec(),
-                });
-                com.push(CfWrite::Delete {
-                    cf: "lock",
-                    k: ukey(u),
-                });
-            }
-            let t_build = t.elapsed();
-            let ok = e.batch(std::mem::take(&mut pre)) && e.batch(std::mem::take(&mut com));
-            if ok {
-                txns += batch as u64;
-            } else {
-                errors += 1;
-            }
-            build_ns.push(t_build.as_nanos());
-            lats.push(ms(t));
-        }
-        build_ns.sort_unstable();
-        let bp50 = build_ns[build_ns.len() / 2] as f64 / 1000.0;
-        eprintln!("[rocks-parity] deps_apply_batch split p50 build={bp50:.2}µs");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let n = b[0].saturating_sub(a[0]).max(1);
-            let us = |d: u64| d as f64 / n as f64 / 1000.0;
-            eprintln!(
+            build_ns.sort_unstable();
+            let bp50 = build_ns[build_ns.len() / 2] as f64 / 1000.0;
+            eprintln!("[rocks-parity] deps_apply_batch split p50 build={bp50:.2}µs");
+            if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+                let n = b[0].saturating_sub(a[0]).max(1);
+                let us = |d: u64| d as f64 / n as f64 / 1000.0;
+                eprintln!(
                 "[rocks-parity] deps_apply_batch phasesΔ (per commit, 2/op) prepare={:.2}µs wal={:.2}µs mem={:.2}µs publish={:.2}µs flsh={:.2}µs lock_wait={:.2}µs n={n}",
                 us(b[1].saturating_sub(a[1])),
                 us(b[2].saturating_sub(a[2])),
@@ -523,141 +519,146 @@ impl YcsbRunner {
                 us(b[5].saturating_sub(a[5])),
                 us(b[6].saturating_sub(a[6])),
             );
-        }
-        blocks.push(summarize(
-            "deps_apply_batch",
-            cfg_ops,
-            t0.elapsed(),
-            &mut lats,
-        ));
-        eprintln!("[rocks-parity] deps_apply_batch done txns={txns} errors={errors}");
+            }
+            blocks.push(summarize(
+                "deps_apply_batch",
+                cfg_ops,
+                t0.elapsed(),
+                &mut lats,
+            ));
+            eprintln!("[rocks-parity] deps_apply_batch done txns={txns} errors={errors}");
         }
 
         // 2. deps_mvcc_latest — point read of the latest version: reverse-seek
         //    write CF for the user prefix, then fetch the value in default.
         if want("deps_mvcc_latest") {
-        e.reset_read_probe();
-        let mut lats = Vec::with_capacity(cfg_ops);
-        let (mut reads, mut errors) = (0u64, 0u64);
-        let t0 = Instant::now();
-        for _ in 0..cfg_ops {
-            let t = Instant::now();
-            let u = self.pick(&mut rng, records);
-            match e.latest_then_get_cf("write", &ukey(u), "default") {
-                Ok(Some(_)) => reads += 1,
-                Ok(None) | Err(()) => errors += 1,
+            e.reset_read_probe();
+            let mut lats = Vec::with_capacity(cfg_ops);
+            let (mut reads, mut errors) = (0u64, 0u64);
+            let t0 = Instant::now();
+            for _ in 0..cfg_ops {
+                let t = Instant::now();
+                let u = self.pick(&mut rng, records);
+                match e.latest_then_get_cf("write", &ukey(u), "default") {
+                    Ok(Some(_)) => reads += 1,
+                    Ok(None) | Err(()) => errors += 1,
+                }
+                lats.push(ms(t));
             }
-            lats.push(ms(t));
-        }
-        blocks.push(summarize(
-            "deps_mvcc_latest",
-            cfg_ops,
-            t0.elapsed(),
-            &mut lats,
-        ));
-        let probe = e.read_probe_json().unwrap_or_else(|| "null".into());
-        blocks.push(format!(
-            r#"{{
+            blocks.push(summarize(
+                "deps_mvcc_latest",
+                cfg_ops,
+                t0.elapsed(),
+                &mut lats,
+            ));
+            let probe = e.read_probe_json().unwrap_or_else(|| "null".into());
+            blocks.push(format!(
+                r#"{{
     "name": "deps_mvcc_latest_split",
     "combined": true,
     "probe": {probe}
   }}"#
-        ));
-        eprintln!("[rocks-parity] deps_mvcc_latest done reads={reads} errors={errors}");
+            ));
+            eprintln!("[rocks-parity] deps_mvcc_latest done reads={reads} errors={errors}");
         }
 
         // 3. deps_scan — short range scan over user keys in the write CF
         //    (coprocessor / GC range shape).
         if want("deps_scan") {
-        e.reset_read_probe();
-        let mut lats = Vec::with_capacity(cfg_ops);
-        let (mut scans, mut errors) = (0u64, 0u64);
-        let t0 = Instant::now();
-        for _ in 0..cfg_ops {
-            let t = Instant::now();
-            let u = self.pick(&mut rng, records);
-            match e.scan_count_cf("write", &ukey(u), &ukey(u + 25), 25) {
-                Ok(_) => scans += 1,
-                Err(_) => errors += 1,
+            e.reset_read_probe();
+            let mut lats = Vec::with_capacity(cfg_ops);
+            let (mut scans, mut errors) = (0u64, 0u64);
+            let t0 = Instant::now();
+            for _ in 0..cfg_ops {
+                let t = Instant::now();
+                let u = self.pick(&mut rng, records);
+                match e.scan_count_cf("write", &ukey(u), &ukey(u + 25), 25) {
+                    Ok(_) => scans += 1,
+                    Err(_) => errors += 1,
+                }
+                lats.push(ms(t));
             }
-            lats.push(ms(t));
-        }
-        blocks.push(summarize("deps_scan", cfg_ops, t0.elapsed(), &mut lats));
-        let probe = e.read_probe_json().unwrap_or_else(|| "null".into());
-        blocks.push(format!(
-            r#"{{
+            blocks.push(summarize("deps_scan", cfg_ops, t0.elapsed(), &mut lats));
+            let probe = e.read_probe_json().unwrap_or_else(|| "null".into());
+            blocks.push(format!(
+                r#"{{
     "name": "deps_scan_probe",
     "probe": {probe}
   }}"#
-        ));
-        eprintln!("[rocks-parity] deps_scan done scans={scans} errors={errors}");
+            ));
+            eprintln!("[rocks-parity] deps_scan done scans={scans} errors={errors}");
         }
 
         // 4. deps_raftlog — raftdb append shape: batched sequential appends to
         //    the raftlog CF; every 8th op also reads the previous entry.
         if want("deps_raftlog") {
-        let mut lats = Vec::with_capacity(cfg_ops);
-        let (mut appends, mut reads, mut errors) = (0u64, 0u64, 0u64);
-        let mut idx = 0u64;
-        let mut build_ns = Vec::with_capacity(cfg_ops);
-        let mut batch_ns = Vec::with_capacity(cfg_ops);
-        eprintln!(
-            "[rocks-parity] deps_raftlog enter mem_entries={}",
-            e.mem_entries().map_or_else(|| "?".into(), |n| n.to_string())
-        );
-        // RFC-0054 P0.2 discriminator: untimed fold of the active tail
-        // before the loop (does an empty tail recover isolated p50?).
-        if std::env::var_os("ROCKS_DEPS_FOLD_TAIL").is_some() {
-            let t = e.fold_mem_tail();
-            eprintln!("[rocks-parity] deps_raftlog pre-fold tail={t} mem_entries={}",
-                e.mem_entries().map_or_else(|| "?".into(), |n| n.to_string()));
-        }
-        let phase0 = e.write_phase_snapshot();
-        let t0 = Instant::now();
-        for op in 0..cfg_ops {
-            let t = Instant::now();
-            let mut wb = Vec::with_capacity(16);
-            for _ in 0..16 {
-                idx += 1;
-                wb.push(CfWrite::Put {
-                    cf: "raftlog",
-                    k: format!("raftlog/{idx:08}").into_bytes(),
-                    v: yval.clone(),
-                });
-            }
-            let t_build = t.elapsed();
-            let t_b = Instant::now();
-            let ok = e.batch(std::mem::take(&mut wb));
-            let t_batch = t_b.elapsed();
-            if ok {
-                appends += 16;
-            } else {
-                errors += 1;
-            }
-            if op % 8 == 0 && idx > 1 {
-                match e.get_cf("raftlog", format!("raftlog/{:08}", idx - 1).as_bytes()) {
-                    Ok(_) => reads += 1,
-                    Err(_) => errors += 1,
-                }
-            }
-            build_ns.push(t_build.as_nanos());
-            batch_ns.push(t_batch.as_nanos());
-            lats.push(ms(t));
-        }
-        blocks.push(summarize("deps_raftlog", cfg_ops, t0.elapsed(), &mut lats));
-        build_ns.sort_unstable();
-        batch_ns.sort_unstable();
-        let p50 = |v: &[u128]| v[v.len() / 2] as f64 / 1000.0;
-        eprintln!(
-            "[rocks-parity] deps_raftlog split p50 build={:.2}µs batch={:.2}µs mem_after={}",
-            p50(&build_ns),
-            p50(&batch_ns),
-            e.mem_entries().map_or_else(|| "?".into(), |n| n.to_string())
-        );
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let n = b[0].saturating_sub(a[0]).max(1);
-            let us = |d: u64| d as f64 / n as f64 / 1000.0;
+            let mut lats = Vec::with_capacity(cfg_ops);
+            let (mut appends, mut reads, mut errors) = (0u64, 0u64, 0u64);
+            let mut idx = 0u64;
+            let mut build_ns = Vec::with_capacity(cfg_ops);
+            let mut batch_ns = Vec::with_capacity(cfg_ops);
             eprintln!(
+                "[rocks-parity] deps_raftlog enter mem_entries={}",
+                e.mem_entries()
+                    .map_or_else(|| "?".into(), |n| n.to_string())
+            );
+            // RFC-0054 P0.2 discriminator: untimed fold of the active tail
+            // before the loop (does an empty tail recover isolated p50?).
+            if std::env::var_os("ROCKS_DEPS_FOLD_TAIL").is_some() {
+                let t = e.fold_mem_tail();
+                eprintln!(
+                    "[rocks-parity] deps_raftlog pre-fold tail={t} mem_entries={}",
+                    e.mem_entries()
+                        .map_or_else(|| "?".into(), |n| n.to_string())
+                );
+            }
+            let phase0 = e.write_phase_snapshot();
+            let t0 = Instant::now();
+            for op in 0..cfg_ops {
+                let t = Instant::now();
+                let mut wb = Vec::with_capacity(16);
+                for _ in 0..16 {
+                    idx += 1;
+                    wb.push(CfWrite::Put {
+                        cf: "raftlog",
+                        k: format!("raftlog/{idx:08}").into_bytes(),
+                        v: yval.clone(),
+                    });
+                }
+                let t_build = t.elapsed();
+                let t_b = Instant::now();
+                let ok = e.batch(std::mem::take(&mut wb));
+                let t_batch = t_b.elapsed();
+                if ok {
+                    appends += 16;
+                } else {
+                    errors += 1;
+                }
+                if op % 8 == 0 && idx > 1 {
+                    match e.get_cf("raftlog", format!("raftlog/{:08}", idx - 1).as_bytes()) {
+                        Ok(_) => reads += 1,
+                        Err(_) => errors += 1,
+                    }
+                }
+                build_ns.push(t_build.as_nanos());
+                batch_ns.push(t_batch.as_nanos());
+                lats.push(ms(t));
+            }
+            blocks.push(summarize("deps_raftlog", cfg_ops, t0.elapsed(), &mut lats));
+            build_ns.sort_unstable();
+            batch_ns.sort_unstable();
+            let p50 = |v: &[u128]| v[v.len() / 2] as f64 / 1000.0;
+            eprintln!(
+                "[rocks-parity] deps_raftlog split p50 build={:.2}µs batch={:.2}µs mem_after={}",
+                p50(&build_ns),
+                p50(&batch_ns),
+                e.mem_entries()
+                    .map_or_else(|| "?".into(), |n| n.to_string())
+            );
+            if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+                let n = b[0].saturating_sub(a[0]).max(1);
+                let us = |d: u64| d as f64 / n as f64 / 1000.0;
+                eprintln!(
                 "[rocks-parity] deps_raftlog phasesΔ prepare={:.2}µs wal={:.2}µs mem={:.2}µs publish={:.2}µs flsh={:.2}µs lock_wait={:.2}µs n={n}",
                 us(b[1].saturating_sub(a[1])),
                 us(b[2].saturating_sub(a[2])),
@@ -666,86 +667,86 @@ impl YcsbRunner {
                 us(b[5].saturating_sub(a[5])),
                 us(b[6].saturating_sub(a[6])),
             );
-        }
-        if let Some(line) = e.write_phase_line() {
-            eprintln!("[rocks-parity] deps_raftlog phases {line}");
-        }
-        eprintln!(
-            "[rocks-parity] deps_raftlog done appends={appends} reads={reads} errors={errors}"
-        );
+            }
+            if let Some(line) = e.write_phase_line() {
+                eprintln!("[rocks-parity] deps_raftlog phases {line}");
+            }
+            eprintln!(
+                "[rocks-parity] deps_raftlog done appends={appends} reads={reads} errors={errors}"
+            );
         }
 
         // 5. deps_cache_overwrite — unbatched zipf overwrite of a fixed
         //    keyspace (cache-style dependent; compat worst case).
         if want("deps_cache_overwrite") {
-        let mut lats = Vec::with_capacity(cfg_ops);
-        let (mut writes, mut errors) = (0u64, 0u64);
-        let t0 = Instant::now();
-        for _ in 0..cfg_ops {
-            let t = Instant::now();
-            let u = self.pick(&mut rng, records);
-            if e.put(&format!("c/{u:06}").as_bytes(), &yval) {
-                writes += 1;
-            } else {
-                errors += 1;
+            let mut lats = Vec::with_capacity(cfg_ops);
+            let (mut writes, mut errors) = (0u64, 0u64);
+            let t0 = Instant::now();
+            for _ in 0..cfg_ops {
+                let t = Instant::now();
+                let u = self.pick(&mut rng, records);
+                if e.put(&format!("c/{u:06}").as_bytes(), &yval) {
+                    writes += 1;
+                } else {
+                    errors += 1;
+                }
+                lats.push(ms(t));
             }
-            lats.push(ms(t));
-        }
-        blocks.push(summarize(
-            "deps_cache_overwrite",
-            cfg_ops,
-            t0.elapsed(),
-            &mut lats,
-        ));
-        eprintln!("[rocks-parity] deps_cache_overwrite done writes={writes} errors={errors}");
+            blocks.push(summarize(
+                "deps_cache_overwrite",
+                cfg_ops,
+                t0.elapsed(),
+                &mut lats,
+            ));
+            eprintln!("[rocks-parity] deps_cache_overwrite done writes={writes} errors={errors}");
         }
 
         // 6. RFC-0043: TiKV prewrite-only ready (lock+default WriteBatch, no
         //    commit). Batched — HL, not a 1-op canary.
         if want("deps_lock_prewrite") {
-        let mut lats = Vec::with_capacity(cfg_ops);
-        let (mut txns, mut errors) = (0u64, 0u64);
-        let t0 = Instant::now();
-        for _ in 0..cfg_ops {
-            let t = Instant::now();
-            let mut pre = Vec::with_capacity(batch * 2);
-            for _ in 0..batch {
-                let u = self.pick(&mut rng, records);
-                vers[u] = vers[u].saturating_add(1);
-                pre.push(CfWrite::Put {
+            let mut lats = Vec::with_capacity(cfg_ops);
+            let (mut txns, mut errors) = (0u64, 0u64);
+            let t0 = Instant::now();
+            for _ in 0..cfg_ops {
+                let t = Instant::now();
+                let mut pre = Vec::with_capacity(batch * 2);
+                for _ in 0..batch {
+                    let u = self.pick(&mut rng, records);
+                    vers[u] = vers[u].saturating_add(1);
+                    pre.push(CfWrite::Put {
+                        cf: "lock",
+                        k: ukey(u),
+                        v: b"L".to_vec(),
+                    });
+                    pre.push(CfWrite::Put {
+                        cf: "default",
+                        k: mvcc(u, vers[u]),
+                        v: yval.clone(),
+                    });
+                }
+                if e.batch(std::mem::take(&mut pre)) {
+                    txns += batch as u64;
+                } else {
+                    errors += 1;
+                }
+                lats.push(ms(t));
+            }
+            blocks.push(summarize(
+                "deps_lock_prewrite",
+                cfg_ops,
+                t0.elapsed(),
+                &mut lats,
+            ));
+            eprintln!("[rocks-parity] deps_lock_prewrite done txns={txns} errors={errors}");
+            // Untimed: drop leftover prewrite locks so later assertions / reopen
+            // see the same lock CF as before this shape existed.
+            let cleanup: Vec<CfWrite> = (0..records)
+                .map(|u| CfWrite::Delete {
                     cf: "lock",
                     k: ukey(u),
-                    v: b"L".to_vec(),
-                });
-                pre.push(CfWrite::Put {
-                    cf: "default",
-                    k: mvcc(u, vers[u]),
-                    v: yval.clone(),
-                });
-            }
-            if e.batch(std::mem::take(&mut pre)) {
-                txns += batch as u64;
-            } else {
-                errors += 1;
-            }
-            lats.push(ms(t));
-        }
-        blocks.push(summarize(
-            "deps_lock_prewrite",
-            cfg_ops,
-            t0.elapsed(),
-            &mut lats,
-        ));
-        eprintln!("[rocks-parity] deps_lock_prewrite done txns={txns} errors={errors}");
-        // Untimed: drop leftover prewrite locks so later assertions / reopen
-        // see the same lock CF as before this shape existed.
-        let cleanup: Vec<CfWrite> = (0..records)
-            .map(|u| CfWrite::Delete {
-                cf: "lock",
-                k: ukey(u),
-            })
-            .collect();
-        let _ = e.batch(cleanup);
+                })
+                .collect();
+            let _ = e.batch(cleanup);
         }
 
         self.rng = rng;
@@ -2096,8 +2097,7 @@ impl YcsbRunner {
             let t = Instant::now();
             let k = format!("ing/{i:08}").into_bytes();
             let pair = [(&k[..], yval.as_slice())];
-            if e.ingest_kvs(&pair) && e.get(&k).ok().flatten().as_deref() == Some(yval.as_slice())
-            {
+            if e.ingest_kvs(&pair) && e.get(&k).ok().flatten().as_deref() == Some(yval.as_slice()) {
                 ingest += 1;
             } else {
                 errors += 1;
@@ -2844,7 +2844,13 @@ mod tests {
 
     #[test]
     fn live_wal_log_picks_highest_numbered_segment() {
-        let names = ["LOG", "CURRENT", "000003.log", "000012.log", "MANIFEST-000011"];
+        let names = [
+            "LOG",
+            "CURRENT",
+            "000003.log",
+            "000012.log",
+            "MANIFEST-000011",
+        ];
         assert_eq!(live_wal_log_name(names.iter().copied()), Some("000012.log"));
         assert_eq!(live_wal_log_name(["OPTIONS-000007"].iter().copied()), None);
     }

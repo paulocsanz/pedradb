@@ -10,23 +10,21 @@
 #![cfg(unix)]
 
 use pedradb_store::{
-    l28_durability_ok, l28_leader_kill_ok, l28_leader_kill_ok_as_is, l28_tcp_apply_ok,
-    l28_tcp_apply_ok_as_is, l28_tcp_hw_ok, l28_tcp_hw_ok_as_is, l28_tcp_leave_ok,
-    l28_tcp_leave_ok_as_is, l28_tcp_left_ok, l28_tcp_left_ok_as_is, l28_tcp_napply_ok,
+    l28_durability_ok, l28_leader_kill_ok, l28_leader_kill_ok_as_is, l28_tcp_abort_ok,
+    l28_tcp_abort_ok_as_is, l28_tcp_apply_ok, l28_tcp_apply_ok_as_is, l28_tcp_clear_ok,
+    l28_tcp_clear_ok_as_is, l28_tcp_dsc_ok, l28_tcp_dsc_ok_as_is, l28_tcp_dterm_ok,
+    l28_tcp_dterm_ok_as_is, l28_tcp_fence_ok, l28_tcp_fence_ok_as_is, l28_tcp_hist_ok,
+    l28_tcp_hist_ok_as_is, l28_tcp_hnt_ok, l28_tcp_hnt_ok_as_is, l28_tcp_hw_ok,
+    l28_tcp_hw_ok_as_is, l28_tcp_leave_ok, l28_tcp_leave_ok_as_is, l28_tcp_left_ok,
+    l28_tcp_left_ok_as_is, l28_tcp_lid_ok, l28_tcp_lid_ok_as_is, l28_tcp_napply_ok,
     l28_tcp_napply_ok_as_is, l28_tcp_napply_retry_admitted, l28_tcp_napply_retry_admitted_as_is,
-    l28_tcp_part_ok, l28_tcp_part_ok_as_is, l28_tcp_plant_ok,
-    l28_tcp_abort_ok, l28_tcp_abort_ok_as_is, l28_tcp_clear_ok, l28_tcp_clear_ok_as_is,
-    l28_tcp_lid_ok, l28_tcp_lid_ok_as_is, l28_tcp_peer_ok, l28_tcp_peer_ok_as_is,
-    l28_tcp_dsc_ok, l28_tcp_dsc_ok_as_is, l28_tcp_dterm_ok, l28_tcp_dterm_ok_as_is, l28_tcp_pld_ok, l28_tcp_pld_ok_as_is,
-    l28_tcp_pre_ok, l28_tcp_pre_ok_as_is, l28_tcp_rdr_ok, l28_tcp_rdr_ok_as_is,
-    l28_tcp_hnt_ok, l28_tcp_hnt_ok_as_is, l28_tcp_slot_ok, l28_tcp_slot_ok_as_is,
-    l28_tcp_pj_ok, l28_tcp_pj_ok_as_is, l28_tcp_std_ok, l28_tcp_std_ok_as_is, l28_tcp_sth_ok,
-    l28_tcp_sth_ok_as_is,
-    l28_tcp_fence_ok, l28_tcp_fence_ok_as_is,
-    l28_tcp_hist_ok, l28_tcp_hist_ok_as_is, l28_tcp_nowms_ok, l28_tcp_nowms_ok_as_is,
-    l28_tcp_odrop_ok, l28_tcp_odrop_ok_as_is,
-    l28_tcp_plant_ok_as_is, l28_tcp_trunc_ok, l28_tcp_trunc_ok_as_is, world_seed_l28_ok,
-    world_seed_l28_ok_as_is,
+    l28_tcp_nowms_ok, l28_tcp_nowms_ok_as_is, l28_tcp_odrop_ok, l28_tcp_odrop_ok_as_is,
+    l28_tcp_part_ok, l28_tcp_part_ok_as_is, l28_tcp_peer_ok, l28_tcp_peer_ok_as_is, l28_tcp_pj_ok,
+    l28_tcp_pj_ok_as_is, l28_tcp_plant_ok, l28_tcp_plant_ok_as_is, l28_tcp_pld_ok,
+    l28_tcp_pld_ok_as_is, l28_tcp_pre_ok, l28_tcp_pre_ok_as_is, l28_tcp_rdr_ok,
+    l28_tcp_rdr_ok_as_is, l28_tcp_slot_ok, l28_tcp_slot_ok_as_is, l28_tcp_std_ok,
+    l28_tcp_std_ok_as_is, l28_tcp_sth_ok, l28_tcp_sth_ok_as_is, l28_tcp_trunc_ok,
+    l28_tcp_trunc_ok_as_is, world_seed_l28_ok, world_seed_l28_ok_as_is,
 };
 use std::process::Command;
 use std::sync::Mutex;
@@ -48,8 +46,7 @@ fn run_once(seed: u64, extra: &[&str]) -> Result<String, String> {
     let real = env!("CARGO_BIN_EXE_cluster_real");
     let tcp = env!("CARGO_BIN_EXE_montanha-tcp");
     let mut cmd = Command::new(real);
-    cmd.env("MONTANHA_TCP", tcp)
-        .arg(format!("0x{seed:x}"));
+    cmd.env("MONTANHA_TCP", tcp).arg(format!("0x{seed:x}"));
     for a in extra {
         cmd.arg(a);
     }
@@ -72,9 +69,7 @@ fn run_once(seed: u64, extra: &[&str]) -> Result<String, String> {
 }
 
 fn run_counted(seed: u64, extra: &[&str]) -> (String, u64) {
-    let _gate = CLUSTER_REAL
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
+    let _gate = CLUSTER_REAL.lock().unwrap_or_else(|p| p.into_inner());
     // Wall-tick elect + n3 leave catch-up is a campaign. One SIGKILL of n3
     // before leave lands is `napply=0`; retry the same seed, not a kernel skip.
     let mut last = String::new();
@@ -160,10 +155,7 @@ fn l28_real_tcp_leave_joint_replay() {
         l28_tcp_leave_ok(a.contains("leave=1")),
         "TCP leave kernel miss: {a}"
     );
-    assert!(
-        l28_tcp_leave_ok_as_is(false),
-        "AS-IS dente: skip TCP leave"
-    );
+    assert!(l28_tcp_leave_ok_as_is(false), "AS-IS dente: skip TCP leave");
     eprintln!("{a}");
 }
 
@@ -177,7 +169,10 @@ fn l28_real_tcp_remove_member_left_on_disk() {
     let b = run(seed, &["--remove-member"]);
     assert_eq!(a, b, "remove-member fingerprint must replay");
     assert!(a.contains("remove=1"), "TCP remove plant must fire: {a}");
-    assert!(a.contains("leave=1"), "TCP leave after plant must fire: {a}");
+    assert!(
+        a.contains("leave=1"),
+        "TCP leave after plant must fire: {a}"
+    );
     assert!(a.contains("left=1"), "on-disk C-new-only must hold: {a}");
     let (get_ok, after_ok, restart_ok) = parse_l28(&a);
     assert!(
@@ -269,7 +264,10 @@ fn l28_real_tcp_participating_after_remove() {
     let b = run(seed, &["--remove-member"]);
     assert_eq!(a, b, "participating fingerprint must replay");
     assert!(a.contains("remove=1"), "TCP remove plant must fire: {a}");
-    assert!(a.contains("part=1"), "removed voter must not participate: {a}");
+    assert!(
+        a.contains("part=1"),
+        "removed voter must not participate: {a}"
+    );
     let (get_ok, after_ok, restart_ok) = parse_l28(&a);
     assert!(
         l28_durability_ok(get_ok, after_ok, restart_ok),
@@ -323,7 +321,10 @@ fn l28_real_tcp_removed_recover_apply() {
     let seed = 0x0131_1E28_u64;
     let (a, attempts) = run_counted(seed, &["--remove-member"]);
     let b = run(seed, &["--remove-member"]);
-    assert_eq!(a, b, "removed-replica recover-apply fingerprint must replay");
+    assert_eq!(
+        a, b,
+        "removed-replica recover-apply fingerprint must replay"
+    );
     assert!(a.contains("remove=1"), "TCP remove plant must fire: {a}");
     assert!(
         a.contains("napply=1"),
@@ -363,7 +364,10 @@ fn l28_real_tcp_removed_recover_apply() {
 fn l28_real_tcp_removed_campaign_seeds() {
     for seed in [0x0156_1E28_u64, 0x0157_1E28_u64, 0x0158_1E28_u64] {
         let (a, attempts) = run_counted(seed, &["--remove-member"]);
-        assert!(a.contains("remove=1"), "seed {seed:#x}: remove plant must fire: {a}");
+        assert!(
+            a.contains("remove=1"),
+            "seed {seed:#x}: remove plant must fire: {a}"
+        );
         assert!(
             a.contains("napply=1"),
             "seed {seed:#x}: removed replica recover apply must close the gap: {a}"
@@ -604,7 +608,10 @@ fn l28_real_tcp_removed_pre() {
     let seed = 0x0139_1E28_u64;
     let a = run(seed, &["--remove-member"]);
     let b = run(seed, &["--remove-member"]);
-    assert_eq!(a, b, "removed-replica drop-preimages fingerprint must replay");
+    assert_eq!(
+        a, b,
+        "removed-replica drop-preimages fingerprint must replay"
+    );
     assert!(a.contains("remove=1"), "TCP remove plant must fire: {a}");
     assert!(
         a.contains("pre=1"),
@@ -878,7 +885,10 @@ fn l28_real_tcp_drop_st() {
     let seed = 0x0148_1E28_u64;
     let a = run(seed, &[]);
     let b = run(seed, &[]);
-    assert_eq!(a, b, "remaining-voter oob sent_through fingerprint must replay");
+    assert_eq!(
+        a, b,
+        "remaining-voter oob sent_through fingerprint must replay"
+    );
     assert!(
         a.contains("sth=1"),
         "remaining voter oob remove must drop remote sent_through: {a}"

@@ -56,17 +56,16 @@ use std::time::{Duration, Instant};
 use pedradb_store::{
     client_get, client_leave_joint, client_put, client_remove_member_joint, client_status,
     client_tick, elect_claim_banner, high_water_at_least, l28_durability_ok, l28_leader_kill_ok,
-    l28_tcp_abort_ok, l28_tcp_apply_ok, l28_tcp_clear_ok, l28_tcp_fence_ok, l28_tcp_hist_ok,
-    l28_tcp_hw_ok, l28_tcp_leave_ok, l28_tcp_left_ok, l28_tcp_napply_ok,
-    l28_tcp_napply_retry_admitted, l28_tcp_nowms_ok,
-    l28_tcp_dsc_ok, l28_tcp_dterm_ok, l28_tcp_hnt_ok, l28_tcp_lid_ok, l28_tcp_odrop_ok, l28_tcp_part_ok,
-    l28_tcp_peer_ok, l28_tcp_pld_ok, l28_tcp_plant_ok, l28_tcp_pre_ok, l28_tcp_rdr_ok,
-    l28_tcp_pj_ok, l28_tcp_slot_ok, l28_tcp_std_ok, l28_tcp_sth_ok, l28_tcp_trunc_ok,
-    liveness_admitted, tcp_node_disk_high_water, tcp_node_disk_left_joint, tcp_node_drop_repl_ok,
-    tcp_node_drop_st_ok, tcp_node_hint_ok, tcp_node_plant_joint_ok, tcp_node_recover_apply_ok,
-    tcp_node_removed_abort_ok, tcp_node_removed_clear_ok, tcp_node_removed_dsc_ok,
-    tcp_node_removed_durable_term_ok, tcp_node_removed_fence_ok, tcp_node_removed_hist_ok,
-    tcp_node_removed_lid_ok,
+    l28_tcp_abort_ok, l28_tcp_apply_ok, l28_tcp_clear_ok, l28_tcp_dsc_ok, l28_tcp_dterm_ok,
+    l28_tcp_fence_ok, l28_tcp_hist_ok, l28_tcp_hnt_ok, l28_tcp_hw_ok, l28_tcp_leave_ok,
+    l28_tcp_left_ok, l28_tcp_lid_ok, l28_tcp_napply_ok, l28_tcp_napply_retry_admitted,
+    l28_tcp_nowms_ok, l28_tcp_odrop_ok, l28_tcp_part_ok, l28_tcp_peer_ok, l28_tcp_pj_ok,
+    l28_tcp_plant_ok, l28_tcp_pld_ok, l28_tcp_pre_ok, l28_tcp_rdr_ok, l28_tcp_slot_ok,
+    l28_tcp_std_ok, l28_tcp_sth_ok, l28_tcp_trunc_ok, liveness_admitted, tcp_node_disk_high_water,
+    tcp_node_disk_left_joint, tcp_node_drop_repl_ok, tcp_node_drop_st_ok, tcp_node_hint_ok,
+    tcp_node_plant_joint_ok, tcp_node_recover_apply_ok, tcp_node_removed_abort_ok,
+    tcp_node_removed_clear_ok, tcp_node_removed_dsc_ok, tcp_node_removed_durable_term_ok,
+    tcp_node_removed_fence_ok, tcp_node_removed_hist_ok, tcp_node_removed_lid_ok,
     tcp_node_removed_not_participating, tcp_node_removed_now_ms_ok,
     tcp_node_removed_orphan_drop_ok, tcp_node_removed_peer_ok, tcp_node_removed_pld_ok,
     tcp_node_removed_pre_ok, tcp_node_removed_rdr_ok, tcp_node_removed_recover_apply_ok,
@@ -271,16 +270,14 @@ fn spawn_node(
     for (pid, addr) in peers {
         cmd.arg("--peer").arg(format!("{pid}={addr}"));
     }
-    cmd.spawn().unwrap_or_else(|e| panic!("spawn node {id}: {e}"))
+    cmd.spawn()
+        .unwrap_or_else(|e| panic!("spawn node {id}: {e}"))
 }
 
 fn run(seed: u64, kill_leader: bool, do_leave: bool, do_remove: bool) -> String {
     let bin = tcp_bin();
     assert!(bin.exists(), "montanha-tcp missing at {}", bin.display());
-    let parent = env::temp_dir().join(format!(
-        "pedra-l28-{seed:016x}-{}",
-        std::process::id()
-    ));
+    let parent = env::temp_dir().join(format!("pedra-l28-{seed:016x}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&parent);
     std::fs::create_dir_all(&parent).unwrap();
     for i in 1..=3u64 {
@@ -443,11 +440,7 @@ fn run(seed: u64, kill_leader: bool, do_leave: bool, do_remove: bool) -> String 
             &[1, 2, 3],
             3,
         ));
-        apply_ok = u8::from(tcp_node_recover_apply_ok(
-            &parent.join("n1"),
-            1,
-            &[1, 2, 3],
-        ));
+        apply_ok = u8::from(tcp_node_recover_apply_ok(&parent.join("n1"), 1, &[1, 2, 3]));
         napply_ok = u8::from(tcp_node_removed_recover_apply_ok(
             &parent.join("n3"),
             3,
@@ -463,78 +456,24 @@ fn run(seed: u64, kill_leader: bool, do_leave: bool, do_remove: bool) -> String 
             3,
             &[1, 2, 3],
         ));
-        abort_ok = u8::from(tcp_node_removed_abort_ok(
-            &parent.join("n3"),
-            3,
-            &[1, 2, 3],
-        ));
+        abort_ok = u8::from(tcp_node_removed_abort_ok(&parent.join("n3"), 3, &[1, 2, 3]));
         nowms_ok = u8::from(tcp_node_removed_now_ms_ok(
             &parent.join("n3"),
             3,
             &[1, 2, 3],
         ));
-        hist_ok = u8::from(tcp_node_removed_hist_ok(
-            &parent.join("n3"),
-            3,
-            &[1, 2, 3],
-        ));
-        fence_ok = u8::from(tcp_node_removed_fence_ok(
-            &parent.join("n3"),
-            3,
-            &[1, 2, 3],
-        ));
-        clear_ok = u8::from(tcp_node_removed_clear_ok(
-            &parent.join("n3"),
-            3,
-            &[1, 2, 3],
-        ));
-        pre_ok = u8::from(tcp_node_removed_pre_ok(
-            &parent.join("n3"),
-            3,
-            &[1, 2, 3],
-        ));
-        peer_ok = u8::from(tcp_node_removed_peer_ok(
-            &parent.join("n3"),
-            3,
-            &[1, 2, 3],
-        ));
-        lid_ok = u8::from(tcp_node_removed_lid_ok(
-            &parent.join("n3"),
-            3,
-            &[1, 2, 3],
-        ));
-        rdr_ok = u8::from(tcp_node_removed_rdr_ok(
-            &parent.join("n3"),
-            3,
-            &[1, 2, 3],
-        ));
-        dsc_ok = u8::from(tcp_node_removed_dsc_ok(
-            &parent.join("n3"),
-            3,
-            &[1, 2, 3],
-        ));
-        pld_ok = u8::from(tcp_node_removed_pld_ok(
-            &parent.join("n3"),
-            3,
-            &[1, 2, 3],
-        ));
-        std_ok = u8::from(tcp_node_removed_std_ok(
-            &parent.join("n3"),
-            3,
-            &[1, 2, 3],
-        ));
-        hnt_ok = u8::from(tcp_node_hint_ok(
-            &parent.join("n1"),
-            1,
-            &[1, 2, 3],
-            3,
-        ));
-        slot_ok = u8::from(tcp_node_drop_repl_ok(
-            &parent.join("n1"),
-            1,
-            &[1, 2, 3],
-            3,
-        ));
+        hist_ok = u8::from(tcp_node_removed_hist_ok(&parent.join("n3"), 3, &[1, 2, 3]));
+        fence_ok = u8::from(tcp_node_removed_fence_ok(&parent.join("n3"), 3, &[1, 2, 3]));
+        clear_ok = u8::from(tcp_node_removed_clear_ok(&parent.join("n3"), 3, &[1, 2, 3]));
+        pre_ok = u8::from(tcp_node_removed_pre_ok(&parent.join("n3"), 3, &[1, 2, 3]));
+        peer_ok = u8::from(tcp_node_removed_peer_ok(&parent.join("n3"), 3, &[1, 2, 3]));
+        lid_ok = u8::from(tcp_node_removed_lid_ok(&parent.join("n3"), 3, &[1, 2, 3]));
+        rdr_ok = u8::from(tcp_node_removed_rdr_ok(&parent.join("n3"), 3, &[1, 2, 3]));
+        dsc_ok = u8::from(tcp_node_removed_dsc_ok(&parent.join("n3"), 3, &[1, 2, 3]));
+        pld_ok = u8::from(tcp_node_removed_pld_ok(&parent.join("n3"), 3, &[1, 2, 3]));
+        std_ok = u8::from(tcp_node_removed_std_ok(&parent.join("n3"), 3, &[1, 2, 3]));
+        hnt_ok = u8::from(tcp_node_hint_ok(&parent.join("n1"), 1, &[1, 2, 3], 3));
+        slot_ok = u8::from(tcp_node_drop_repl_ok(&parent.join("n1"), 1, &[1, 2, 3], 3));
         dterm_ok = u8::from(tcp_node_removed_durable_term_ok(
             &parent.join("n3"),
             3,
@@ -551,12 +490,7 @@ fn run(seed: u64, kill_leader: bool, do_leave: bool, do_remove: bool) -> String 
             &[1, 2, 3],
             4,
         ));
-        sth_ok = u8::from(tcp_node_drop_st_ok(
-            &parent.join("n1"),
-            1,
-            &[1, 2, 3],
-            3,
-        ));
+        sth_ok = u8::from(tcp_node_drop_st_ok(&parent.join("n1"), 1, &[1, 2, 3], 3));
     }
     let _ = std::fs::remove_dir_all(&parent);
     let kind = if kill_leader { "leader" } else { "node" };

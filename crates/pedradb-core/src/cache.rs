@@ -255,6 +255,13 @@ impl ResidentBody {
 #[derive(Debug)]
 pub struct SstPayloadPool {
     inner: Mutex<PoolInner>,
+    /// Copy of the budget so `can_admit` can reject a full pool without
+    /// taking the mutex (25M lookup_100: every evicted get retried
+    /// `can_admit` under the lock after the 256 MiB cap filled).
+    budget: Option<u64>,
+    /// Last published `inner.total`. Relaxed: a stale-high value skips a
+    /// promote (safe); a stale-low value falls through to the locked check.
+    total: AtomicU64,
 }
 
 #[derive(Debug, Default)]
@@ -283,6 +290,8 @@ impl SstPayloadPool {
                 budget,
                 ..PoolInner::default()
             }),
+            budget,
+            total: AtomicU64::new(0),
         }
     }
 
@@ -292,10 +301,12 @@ impl SstPayloadPool {
         let mut g = self.inner.lock();
         g.armed = true;
         Self::evict_to_budget(&mut g);
+        self.total.store(g.total, Ordering::Relaxed);
     }
 
     /// Record (or refresh) a resident payload and enforce the budget.
-    /// No-op when unbounded.
+    /// No-op when unbounded. `bytes == 0` unregisters (empty / released
+    /// slot) so a streaming bulk SST does not ghost-consume the budget.
     pub(crate) fn register(&self, path: &Path, slot: std::sync::Weak<PayloadSlot>, bytes: u64) {
         let mut g = self.inner.lock();
         if g.budget.is_none() {
@@ -304,12 +315,40 @@ impl SstPayloadPool {
         if let Some(old) = g.map.remove(path) {
             g.total = g.total.saturating_sub(old.bytes);
         }
+        if bytes == 0 {
+            self.total.store(g.total, Ordering::Relaxed);
+            return;
+        }
         g.tick = g.tick.wrapping_add(1);
         let last = g.tick;
         g.total = g.total.saturating_add(bytes);
         g.map
             .insert(path.to_path_buf(), PoolEntry { slot, bytes, last });
         Self::evict_to_budget(&mut g);
+        self.total.store(g.total, Ordering::Relaxed);
+    }
+
+    /// Whether a currently-empty file of `bytes` can become resident without
+    /// evicting another table. Used by bulk get_hit: hydrate leaves payloads
+    /// empty (100M OOM otherwise); 1M/10M point gets promote into the leftover
+    /// budget so they are not a `pread`+CRC per probe.
+    #[must_use]
+    pub(crate) fn can_admit(&self, path: &Path, bytes: u64) -> bool {
+        let Some(budget) = self.budget else {
+            return false;
+        };
+        if bytes == 0 || bytes > budget {
+            return false;
+        }
+        if self.total.load(Ordering::Relaxed).saturating_add(bytes) > budget {
+            return false;
+        }
+        let g = self.inner.lock();
+        if let Some(e) = g.map.get(path) {
+            let without = g.total.saturating_sub(e.bytes);
+            return without.saturating_add(bytes) <= budget;
+        }
+        g.total.saturating_add(bytes) <= budget
     }
 
     /// Resident bytes currently accounted (≤ budget once armed).
@@ -1497,7 +1536,11 @@ mod tests {
         let pool = SstPayloadPool::with_budget(Some(150));
         assert_eq!(pool.resident_bytes(), 0);
 
-        let mk = |bytes: &[u8]| StdArc::new(parking_lot::RwLock::new(ResidentBody::from_image(Arc::from(bytes.to_vec()))));
+        let mk = |bytes: &[u8]| {
+            StdArc::new(parking_lot::RwLock::new(ResidentBody::from_image(
+                Arc::from(bytes.to_vec()),
+            )))
+        };
         let s1 = mk(&[1u8; 100]);
         let s2 = mk(&[2u8; 100]);
         let s3 = mk(&[3u8; 100]);
@@ -1511,7 +1554,10 @@ mod tests {
         pool.arm();
         // Eviction clears whole entries: 200 - 100 (oldest) = 100 ≤ 150.
         assert_eq!(pool.resident_bytes(), 100, "arming enforces the budget");
-        assert!(s1.read().img.is_empty(), "oldest registration evicted first");
+        assert!(
+            s1.read().img.is_empty(),
+            "oldest registration evicted first"
+        );
         assert!(!s2.read().img.is_empty());
 
         // New table: evicts s2, keeps the newcomer.

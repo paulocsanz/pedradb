@@ -124,7 +124,5 @@ fn main() {
         );
         std::process::exit(4);
     }
-    println!(
-        "buggify_matrix_ok n={n} l2=100% silent_wrong=0 unique_hashes={unique}/{ok_n}"
-    );
+    println!("buggify_matrix_ok n={n} l2=100% silent_wrong=0 unique_hashes={unique}/{ok_n}");
 }

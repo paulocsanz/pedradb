@@ -17,18 +17,18 @@ use crate::{
     l28_tcp_clear_ok, l28_tcp_clear_ok_as_is, l28_tcp_dsc_ok, l28_tcp_dsc_ok_as_is,
     l28_tcp_fence_ok, l28_tcp_fence_ok_as_is, l28_tcp_hist_ok, l28_tcp_hist_ok_as_is,
     l28_tcp_hnt_ok, l28_tcp_hnt_ok_as_is, l28_tcp_hw_ok, l28_tcp_hw_ok_as_is, l28_tcp_left_ok,
-    l28_tcp_pj_ok, l28_tcp_pj_ok_as_is, l28_tcp_slot_ok, l28_tcp_slot_ok_as_is, l28_tcp_sth_ok,
-    l28_tcp_sth_ok_as_is,
     l28_tcp_left_ok_as_is, l28_tcp_lid_ok, l28_tcp_lid_ok_as_is, l28_tcp_napply_ok,
     l28_tcp_napply_ok_as_is, l28_tcp_nowms_ok, l28_tcp_nowms_ok_as_is, l28_tcp_odrop_ok,
     l28_tcp_odrop_ok_as_is, l28_tcp_part_ok, l28_tcp_part_ok_as_is, l28_tcp_peer_ok,
-    l28_tcp_peer_ok_as_is, l28_tcp_pld_ok, l28_tcp_pld_ok_as_is, l28_tcp_pre_ok,
-    l28_tcp_pre_ok_as_is, l28_tcp_rdr_ok, l28_tcp_rdr_ok_as_is, l28_tcp_std_ok,
-    l28_tcp_std_ok_as_is, l28_tcp_trunc_ok, l28_tcp_trunc_ok_as_is, len_pref_value,
-    len_pref_value_as_is, may_compact_through, may_compact_through_as_is, si_reader_beats,
-    si_reader_beats_as_is, snapshot_read_plan, snapshot_read_plan_as_is, snapshot_touches_user_key,
-    snapshot_touches_user_key_as_is, world_seed_l28_ok, world_seed_l28_ok_as_is, LogRec, PeerMsg,
-    RangeEntry, RpcMode, SnapshotRead, StoreCluster, StoreError,
+    l28_tcp_peer_ok_as_is, l28_tcp_pj_ok, l28_tcp_pj_ok_as_is, l28_tcp_pld_ok,
+    l28_tcp_pld_ok_as_is, l28_tcp_pre_ok, l28_tcp_pre_ok_as_is, l28_tcp_rdr_ok,
+    l28_tcp_rdr_ok_as_is, l28_tcp_slot_ok, l28_tcp_slot_ok_as_is, l28_tcp_std_ok,
+    l28_tcp_std_ok_as_is, l28_tcp_sth_ok, l28_tcp_sth_ok_as_is, l28_tcp_trunc_ok,
+    l28_tcp_trunc_ok_as_is, len_pref_value, len_pref_value_as_is, may_compact_through,
+    may_compact_through_as_is, si_reader_beats, si_reader_beats_as_is, snapshot_read_plan,
+    snapshot_read_plan_as_is, snapshot_touches_user_key, snapshot_touches_user_key_as_is,
+    world_seed_l28_ok, world_seed_l28_ok_as_is, LogRec, PeerMsg, RangeEntry, RpcMode, SnapshotRead,
+    StoreCluster, StoreError,
 };
 use pedradb_core::{
     changelog_needs_sst_rebuild, changelog_needs_sst_rebuild_as_is, decode_changelog,
@@ -373,7 +373,13 @@ fn durable_term_rollback_on_live_queued_is_not_ok() {
     // break durability — the cleared leader_id is then observable.
     let mut learned = false;
     for _ in 0..240 {
-        let p = cluster.nodes.get(&follower).unwrap().ranges.get(&1).unwrap();
+        let p = cluster
+            .nodes
+            .get(&follower)
+            .unwrap()
+            .ranges
+            .get(&1)
+            .unwrap();
         if p.leader_id == Some(leader) {
             learned = true;
             break;
@@ -383,7 +389,13 @@ fn durable_term_rollback_on_live_queued_is_not_ok() {
     }
     assert!(learned, "follower must learn its leader before the plant");
     let (term, voted_for, leader_id) = {
-        let p = cluster.nodes.get(&follower).unwrap().ranges.get(&1).unwrap();
+        let p = cluster
+            .nodes
+            .get(&follower)
+            .unwrap()
+            .ranges
+            .get(&1)
+            .unwrap();
         (p.term, p.voted_for, p.leader_id)
     };
     assert_eq!(leader_id, Some(leader), "precondition: leader known");
@@ -425,7 +437,13 @@ fn durable_term_rollback_on_live_queued_is_not_ok() {
     }
     assert!(saw_reply, "expected RequestVoteReply from handle_inbound");
     let (term_after, voted_after, role_after, leader_after) = {
-        let p = cluster.nodes.get(&follower).unwrap().ranges.get(&1).unwrap();
+        let p = cluster
+            .nodes
+            .get(&follower)
+            .unwrap()
+            .ranges
+            .get(&1)
+            .unwrap();
         (p.term, p.voted_for, p.role, p.leader_id)
     };
     assert_eq!(term_after, term, "persist Err must roll the term back");
@@ -4830,7 +4848,10 @@ fn inbound_c_new_leave() -> (StoreCluster, std::path::PathBuf) {
 
 #[test]
 fn l28_tcp_left_ok_on_live_queued_is_not_ok() {
-    assert!(l28_tcp_left_ok_as_is(false), "AS-IS dente: skip on-disk leave");
+    assert!(
+        l28_tcp_left_ok_as_is(false),
+        "AS-IS dente: skip on-disk leave"
+    );
     let (cluster, dir) = inbound_c_new_leave();
     let left = !cluster.is_member(4);
     assert!(
@@ -4867,7 +4888,10 @@ fn l28_tcp_part_ok_on_live_queued_is_not_ok() {
 }
 #[test]
 fn l28_tcp_apply_ok_on_live_queued_is_not_ok() {
-    assert!(l28_tcp_apply_ok_as_is(false), "AS-IS dente: skip recover apply");
+    assert!(
+        l28_tcp_apply_ok_as_is(false),
+        "AS-IS dente: skip recover apply"
+    );
     let (cluster, dir) = inbound_c_new_leave();
     let follower = cluster
         .ids
@@ -4875,7 +4899,13 @@ fn l28_tcp_apply_ok_on_live_queued_is_not_ok() {
         .copied()
         .find(|&id| id != 4)
         .expect("remaining voter");
-    let p = cluster.nodes.get(&follower).unwrap().ranges.get(&1).unwrap();
+    let p = cluster
+        .nodes
+        .get(&follower)
+        .unwrap()
+        .ranges
+        .get(&1)
+        .unwrap();
     let ok = p.applied >= p.commit && !cluster.is_member(4);
     assert!(
         l28_tcp_apply_ok(ok),
@@ -4907,7 +4937,10 @@ fn l28_tcp_trunc_ok_on_live_queued_is_not_ok() {
 }
 #[test]
 fn l28_tcp_odrop_ok_on_live_queued_is_not_ok() {
-    assert!(l28_tcp_odrop_ok_as_is(false), "AS-IS dente: skip orphan drop");
+    assert!(
+        l28_tcp_odrop_ok_as_is(false),
+        "AS-IS dente: skip orphan drop"
+    );
     let (cluster, dir) = inbound_c_new_leave();
     let ok = !cluster.is_member(4);
     assert!(l28_tcp_odrop_ok(ok));
@@ -4947,7 +4980,10 @@ fn l28_tcp_fence_ok_on_live_queued_is_not_ok() {
 }
 #[test]
 fn l28_tcp_clear_ok_on_live_queued_is_not_ok() {
-    assert!(l28_tcp_clear_ok_as_is(false), "AS-IS dente: skip force-clear");
+    assert!(
+        l28_tcp_clear_ok_as_is(false),
+        "AS-IS dente: skip force-clear"
+    );
     let (cluster, dir) = inbound_c_new_leave();
     let ok = !cluster.is_member(4);
     assert!(l28_tcp_clear_ok(ok));
@@ -4979,7 +5015,10 @@ fn l28_tcp_lid_ok_on_live_queued_is_not_ok() {
 }
 #[test]
 fn l28_tcp_rdr_ok_on_live_queued_is_not_ok() {
-    assert!(l28_tcp_rdr_ok_as_is(false), "AS-IS dente: skip reader-local");
+    assert!(
+        l28_tcp_rdr_ok_as_is(false),
+        "AS-IS dente: skip reader-local"
+    );
     let (cluster, dir) = inbound_c_new_leave();
     let ok = !cluster.is_member(4);
     assert!(l28_tcp_rdr_ok(ok));
@@ -4995,7 +5034,10 @@ fn l28_tcp_dsc_ok_on_live_queued_is_not_ok() {
 }
 #[test]
 fn l28_tcp_pld_ok_on_live_queued_is_not_ok() {
-    assert!(l28_tcp_pld_ok_as_is(false), "AS-IS dente: skip persist-leader");
+    assert!(
+        l28_tcp_pld_ok_as_is(false),
+        "AS-IS dente: skip persist-leader"
+    );
     let (cluster, dir) = inbound_c_new_leave();
     let ok = !cluster.is_member(4);
     assert!(l28_tcp_pld_ok(ok));

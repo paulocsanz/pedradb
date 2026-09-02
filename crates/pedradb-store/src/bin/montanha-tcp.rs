@@ -40,11 +40,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use pedradb_store::{
-    client_add_member_joint, client_get, client_leave_joint, client_put, client_remove_member_joint,
-    client_set_peers, client_status, client_tick,
-    elect_claim_banner, install_from_pem_files, liveness_admitted, maybe_client_wrap,
-    maybe_server_wrap, read_frame, resolve_host_port, write_frame, StoreCluster, StoreError,
-    StoreOpenOptions, WireMsg,
+    client_add_member_joint, client_get, client_leave_joint, client_put,
+    client_remove_member_joint, client_set_peers, client_status, client_tick, elect_claim_banner,
+    install_from_pem_files, liveness_admitted, maybe_client_wrap, maybe_server_wrap, read_frame,
+    resolve_host_port, write_frame, StoreCluster, StoreError, StoreOpenOptions, WireMsg,
 };
 
 fn main() {
@@ -659,11 +658,8 @@ fn handle_conn(tx: SyncSender<Work>, mut stream: pedradb_store::IoBox) -> Result
         }
         WireMsg::RemoveMemberJoint { node_id } => {
             let (rtx, rrx) = mpsc::sync_channel(1);
-            tx.send(Work::RemoveMemberJoint {
-                node_id,
-                resp: rtx,
-            })
-            .map_err(|_| StoreError::Msg("worker dead".into()))?;
+            tx.send(Work::RemoveMemberJoint { node_id, resp: rtx })
+                .map_err(|_| StoreError::Msg("worker dead".into()))?;
             let r = rrx
                 .recv_timeout(Duration::from_secs(10))
                 .map_err(|_| StoreError::Msg("remove_member_joint timeout".into()))?;
@@ -674,11 +670,8 @@ fn handle_conn(tx: SyncSender<Work>, mut stream: pedradb_store::IoBox) -> Result
         }
         WireMsg::AddMemberJoint { node_id } => {
             let (rtx, rrx) = mpsc::sync_channel(1);
-            tx.send(Work::AddMemberJoint {
-                node_id,
-                resp: rtx,
-            })
-            .map_err(|_| StoreError::Msg("worker dead".into()))?;
+            tx.send(Work::AddMemberJoint { node_id, resp: rtx })
+                .map_err(|_| StoreError::Msg("worker dead".into()))?;
             let r = rrx
                 .recv_timeout(Duration::from_secs(10))
                 .map_err(|_| StoreError::Msg("add_member_joint timeout".into()))?;

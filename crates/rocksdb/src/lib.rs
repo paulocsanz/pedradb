@@ -23,9 +23,9 @@ pub use rocksdb_compat::{
     ColumnFamilyDescriptor, CompactOptions, DBCompactionStyle, DBCompressionType,
     DBRawIteratorWithThreadMode, DBRecoveryMode, Env, Error, LogLevel, OptimisticTransactionDB,
     OptimisticTransactionOptions, Options, ReadOptions, RestoreOptions, SliceTransform,
-    SnapshotWithThreadMode, SstFileManager, TransactionDB, TransactionDBOptions, TransactionOptions,
-    UniversalCompactOptions, UniversalCompactionStopStyle, WaitForCompactOptions, WriteOptions,
-    KNOB_INVENTORY,
+    SnapshotWithThreadMode, SstFileManager, TransactionDB, TransactionDBOptions,
+    TransactionOptions, UniversalCompactOptions, UniversalCompactionStopStyle,
+    WaitForCompactOptions, WriteOptions, KNOB_INVENTORY,
 };
 
 /// Maps a rust-rocksdb DB type to the Pedra `Env` its handle owns. The

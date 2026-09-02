@@ -218,8 +218,8 @@ pub(crate) fn share_consecutive_equal_values(ops: &mut [WriteOp]) {
         if cur.kind != ValueType::Value
             || prev.kind != ValueType::Value
             || cur.value.is_empty()
-            || prev.value.as_ref() != cur.value.as_ref()
             || std::ptr::eq(prev.value.as_ptr(), cur.value.as_ptr())
+            || prev.value.as_ref() != cur.value.as_ref()
         {
             continue;
         }
