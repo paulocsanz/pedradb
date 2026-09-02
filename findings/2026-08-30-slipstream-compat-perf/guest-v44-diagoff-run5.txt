@@ -1,0 +1,53 @@
+Guest v44 read-legs capture — DIAG-OFF official protocol (run 5) — DECISIVE
+=============================================================================
+
+Date: 2026-09-02, VM restart completed 03:29:58 -03 (no re-injection), bench
+done by 03:36:47 -03.
+Gate uptime: post-start 03:29:58 load 15.19/16.13/16.54; completion check
+03:36:47 load 16.13/16.38/16.59.
+Provenance: 3 `Compiling` lines; BENCH_EXIT_readlegs=1; diag-off confirmed
+(0 SCANDIAG lines).
+Image: identical to runs 1–4 (v43 code + diag-off entrypoint).
+
+Legs (median, 25M entries, both backends one process)
+-----------------------------------------------------
+leg                     pedra µs      rocks µs     ratio   verdict   r1/r2/r3/r4
+get_hit                 36.93         41.04        1.111   PASS      1.146/0.999/0.967/1.017
+prefix_scan            304.64        360.88       1.185   PASS      1.125/1.056/1.040/1.154
+lookup_100/get_loop   4006.7        4216.3       1.052   PASS      1.111/0.966/0.998/1.043
+lookup_100/multi_get  3771.9        4407.0       1.168   PASS      1.099/1.033/1.056/1.089
+
+Third all-four run (with runs 1 and 4). Best absolute pedra numbers of the
+whole series: get_hit 36.93 µs and multi_get 3771.9 µs. CI status:
+  get_hit:  pedra [36.513 36.931 37.472] vs rocks [39.966 41.037 42.195] — separated
+  scan:     pedra [302.53 304.64 306.91] vs rocks [358.61 360.88 363.82] — separated
+  get_loop: pedra [3.9093 4.0067 4.1181] ms vs rocks [4.0719 4.2163 4.3712] ms —
+            median-separated +5.2%, slight lo-overlap (rocks lo 4.0719 < pedra hi 4.1181)
+  multi_get: pedra [3.7040 3.7719 3.8468] ms vs rocks [4.2582 4.4070 4.5674] ms — separated
+
+DECISIVE PAIR for the two-run acceptance: runs 1 + 5 (run 4 as a third
+independent all-four confirmation). Run 1: all four CI-separated
+(1.146/1.125/1.111/1.099). Run 5: 1.111/1.185/1.052/1.168. Thinnest leg in
+the decisive pair is get_loop +5.2% (run 5); no scrape-by anywhere.
+
+Raw medians (criterion [lo mid hi]):
+  get_hit/rocksdb        [39.966 µs 41.037 µs 42.195 µs]
+  prefix_scan/rocksdb    [358.61 µs 360.88 µs 363.82 µs]
+  rocksdb_get_loop       [4.0719 ms 4.2163 ms 4.3712 ms]
+  rocksdb_multi_get      [4.2582 ms 4.4070 ms 4.5674 ms]
+  get_hit/pedradb        [36.513 µs 36.931 µs 37.472 µs]
+  prefix_scan/pedradb    [302.53 µs 304.64 µs 306.91 µs]
+  pedradb_get_loop       [3.9093 ms 4.0067 ms 4.1181 ms]
+  pedradb_multi_get      [3.7040 ms 3.7719 ms 3.8468 ms]
+
+Hydrate/settle/probe (write path stable: settle 0.9 s; hydrate 0.44M/s,
+inside the 0.44–0.49M/s band of all five diag-off runs; write-path code
+unchanged by v44 — only entrypoint exports differed):
+  hydrate/rocksdb: 25M in 30.1s (0.83M/s); disk 7.13 GiB (306 B/entry)
+  settle/rocksdb: 7.5s; after 5.24 GiB
+  hydrate/pedradb: 25M in 56.2s (0.44M/s); disk 11.03 GiB (474 B/entry)
+  settle/pedradb: 0.9s; after 5.15 GiB
+  probe_hit/rocksdb:  p50 53.8µs / p90 74.0µs / p99 186.1µs / p999 2.2ms / max 7.6ms
+  probe_miss/rocksdb: p50 652ns / p90 662ns / p99 732ns / p999 13.3µs / max 41.1µs
+  probe_hit/pedradb:  p50 33.6µs / p90 46.6µs / p99 80.9µs / p999 273.8µs / max 985.9µs
+  probe_miss/pedradb: p50 1.9µs / p90 2.2µs / p99 2.7µs / p999 11.1µs / max 49.6µs

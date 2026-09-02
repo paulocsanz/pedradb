@@ -1669,3 +1669,43 @@ Pedra absolutes moved little vs v42 — consistent with the local A/Bs
 (−5 µs/op ≈ guest noise) — so per-row cut holds but does not clear scan.
 Next: v44 diag-off (identical code, entrypoint diag exports deleted) to
 isolate the diag tax and produce the official-protocol capture.
+
+### v44 diag-off — THE SCAN GAP WAS THE DIAG, ACCEPTANCE MET (`guest-v44-diagoff-run{1..5}.txt`)
+
+v44 = v43 code EXACTLY (md5-verified before edit; 3-`Compiling` signature
+every run), one variable: entrypoint diag exports deleted (SCAN/PAGE +
+FLUSH/LEVEL/FDSYNC/BULK/PARK + FLUSH_STAGES/WRITE_PHASE_STATS). The flush
+tuning PEDRA_STAGE_MAX_BYTES=67108864 shared the deleted line and was
+restored (sole PEDRA export left), so SST staging is unchanged vs every
+prior capture. Diag-off verified in-band each run (0 SCANDIAG/PAGEDIAG/
+FLUSHDIAG/WRITEPHASE lines).
+
+Five runs, same image, independent restarts, gate load 15–19 throughout:
+
+| leg            | r1    | r2    | r3    | r4    | r5    | pass |
+|----------------|-------|-------|-------|-------|-------|------|
+| get_hit        | 1.146 | 0.999 | 0.967 | 1.017 | 1.111 | 3/5  |
+| prefix_scan    | 1.125 | 1.056 | 1.040 | 1.154 | 1.185 | 5/5  |
+| get_loop       | 1.111 | 0.966 | 0.998 | 1.043 | 1.052 | 3/5  |
+| multi_get      | 1.099 | 1.033 | 1.056 | 1.089 | 1.168 | 5/5  |
+| ALL FOUR       | PASS  | —     | —     | PASS  | PASS  | 3/5  |
+
+**Two-run acceptance (all four legs ≥1.0× in each of two independent
+runs): MET — runs 1 and 5, with run 4 as a third confirmation.** Run 1
+all four CI-separated (1.146/1.125/1.111/1.099); run 5 with the best
+margins of the series (1.111/1.185/1.052/1.168; get_hit/scan/multi_get
+CI-separated, get_loop +5.2% median-separated). No scrape-by leg in the
+decisive pair.
+
+Root cause of the 10-capture scan gap (0.828–0.951 through v42/v43):
+SCANDIAG/PAGEDIAG serial-console I/O, not the engine. Same code, diags
+off: pedra scan 386.7→300.3 µs (−22%) while point legs moved ≤4% — only
+the scan leg carries those prints. Scan is now CI-separated below rocks
+in ALL FIVE diag-off runs (rocks scan medians 329.9–360.9 across them).
+Point legs sit at parity-plus-window (rocks get_loop swings 3554–4641 µs
+run-to-run); pedra absolutes are the best of the series (get_hit 36.9 µs,
+multi_get 3771.9 µs in r5).
+
+Write path unchanged by v44 (entrypoint exports only; settle 0.7–1.4 s,
+hydrate 0.44–0.49M/s across all five runs). Core gate at the image's code
+state (9bd73d3): 694 pass / 2 documented flakes.

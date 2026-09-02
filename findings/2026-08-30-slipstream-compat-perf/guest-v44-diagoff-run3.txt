@@ -1,0 +1,48 @@
+Guest v44 read-legs capture — DIAG-OFF official protocol (run 3)
+=================================================================
+
+Date: 2026-09-02, VM restart completed 03:12:18 -03 after clearing a
+lingering cloud-hypervisor pid (supervisor race, second variant), bench
+done by 03:19:04 -03.
+Gate uptime: post-start 03:12:18 load 15.89/15.86/16.29; completion check
+03:19:04 load 16.12/16.29/16.39.
+Provenance: 3 `Compiling` lines; BENCH_EXIT_readlegs=1; diag-off confirmed
+(0 SCANDIAG lines).
+Image: identical to runs 1–2 (v43 code + diag-off entrypoint).
+
+Legs (median, 25M entries, both backends one process)
+-----------------------------------------------------
+leg                     pedra µs      rocks µs     ratio   verdict   r1 / r2
+get_hit                 42.71         41.30        0.967   GAP       1.146 / 0.999
+prefix_scan            317.21        329.88       1.040   PASS      1.125 / 1.056
+lookup_100/get_loop   4190.5        4184.2       0.998   GAP       1.111 / 0.966
+lookup_100/multi_get  4115.6        4346.6       1.056   PASS      1.099 / 1.033
+
+prefix_scan CI-separated for the THIRD consecutive diag-off run:
+pedra [311.62 317.21 323.54] vs rocks [329.18 329.88 330.73]. Scan is
+3/3 with margins 1.040–1.125; multi_get 3/3 (1.033–1.099); the two
+misses are sub-1% (get_loop 0.998) and a get_hit window where pedra's
+own arm ran 7% slower than its run-1 self (42.71 vs 39.85) against
+rocks' fast band (41.30).
+
+Raw medians (criterion [lo mid hi]):
+  get_hit/rocksdb        [40.567 µs 41.298 µs 42.162 µs]
+  prefix_scan/rocksdb    [329.18 µs 329.88 µs 330.73 µs]
+  rocksdb_get_loop       [4.0752 ms 4.1842 ms 4.3001 ms]
+  rocksdb_multi_get      [4.2129 ms 4.3466 ms 4.4936 ms]
+  get_hit/pedradb        [41.224 µs 42.708 µs 44.277 µs]
+  prefix_scan/pedradb    [311.62 µs 317.21 µs 323.54 µs]
+  pedradb_get_loop       [4.0663 ms 4.1905 ms 4.3226 ms]
+  pedradb_multi_get      [3.9902 ms 4.1156 ms 4.2479 ms]
+
+Hydrate/settle/probe:
+  hydrate/rocksdb: 25M in 29.9s (0.84M/s); disk 7.09 GiB (304 B/entry)
+  settle/rocksdb: 7.9s; after 5.24 GiB
+  hydrate/pedradb: 25M in 51.8s (0.48M/s); disk 11.02 GiB (473 B/entry)
+  settle/pedradb: 1.0s; after 5.15 GiB
+  probe_hit/rocksdb:  p50 50.4µs / p90 62.8µs / p99 90.5µs / p999 1.1ms / max 3.1ms
+  probe_miss/rocksdb: p50 632ns / p90 662ns / p99 792ns / p999 9.6µs / max 2.0ms
+  probe_hit/pedradb:  p50 44.4µs / p90 66.0µs / p99 137.5µs / p999 2.1ms / max 7.1ms
+  probe_miss/pedradb: p50 2.1µs / p90 2.6µs / p99 3.3µs / p999 20.7µs / max 29.8µs
+
+Run 4 follows on the same image (run 1 remains the only all-four run).
