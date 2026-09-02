@@ -1,0 +1,45 @@
+Guest v42 read-legs capture — accel table.rs (run 2, same image restart)
+======================================================================
+
+Date: 2026-09-02, VM restart 02:09:26–02:10:00 -03 (no re-injection, same
+image as run 1), bench done by 05:13:42 UTC guest clock.
+Gate uptime: pre-restart up 5 days 10:19, load 14.94/15.16/15.34; post-start
+load 14.16/14.95/15.26; at parse (02:22:38) load 15.85/15.94/15.75.
+Image identical to run 1 (table.rs 53cbcf56 accel; diags ON).
+
+Legs (median, 25M entries, both backends one process)
+-----------------------------------------------------
+leg                     pedra µs      rocks µs     ratio   verdict   run1 ratio
+get_hit                 39.36         42.79        1.087   PASS      1.045 PASS
+prefix_scan            419.34        390.45       0.931   GAP       0.828 GAP
+lookup_100/get_loop   4202.0        4105.1       0.977   GAP       1.138 PASS
+lookup_100/multi_get  4112.2        4666.2       1.135   PASS      1.243 PASS
+
+Raw medians:
+  get_hit/rocksdb        [41.786 µs 42.790 µs 43.976 µs]
+  prefix_scan/rocksdb    [377.82 µs 390.45 µs 405.22 µs]
+  rocksdb_get_loop       [4.0119 ms 4.1051 ms 4.2057 ms]
+  rocksdb_multi_get      [4.4420 ms 4.6662 ms 4.9109 ms]
+  get_hit/pedradb        [38.296 µs 39.360 µs 40.592 µs]
+  prefix_scan/pedradb    [405.86 µs 419.34 µs 434.24 µs]
+  pedradb_get_loop       [4.0673 ms 4.2020 ms 4.3529 ms]
+  pedradb_multi_get      [4.0162 ms 4.1122 ms 4.2182 ms]
+
+Verdict across the two v42 runs: get_hit 2/2 PASS (1.045, 1.087), multi_get
+2/2 PASS (1.243, 1.135), get_loop 1/2 (1.138, 0.977 — flipped by 2.3%),
+prefix_scan 0/2 (0.828, 0.931). The all-four-in-two-runs acceptance is NOT
+met. Point legs sit at parity-plus-noise; scan is the hard gap. Run-2 scan
+window was uniformly slower for BOTH arms (pedra 399→419, rocks 330→390).
+
+Hydrate/settle/probe:
+  hydrate/rocksdb: 25M in 29.8s (0.84M/s); disk 7.51 GiB (323 B/entry)
+  settle/rocksdb: 7.7s; after 5.24 GiB
+  hydrate/pedradb: 25M in 54.8s (0.46M/s); disk 11.04 GiB (474 B/entry)
+  settle/pedradb: 0.9s; after 5.15 GiB
+  probe_hit/rocksdb:  p50 52.0µs / p90 70.2µs / p99 119.5µs / p999 2.1ms
+  probe_miss/rocksdb: p50 712ns / p90 731ns / p99 812ns / p999 8.6µs
+  probe_hit/pedradb:  p50 39.8µs / p90 59.0µs / p99 101.1µs / p999 213µs
+  probe_miss/pedradb: p50 1.8µs / p90 2.1µs / p99 2.5µs / p999 12.7µs
+
+WRITEPHASE commits=24415 prepare_ms=1050.0 wal_ms=5649.0 mem_ms=8413.8
+publish_ms=14.3 flush_check_ms=11.9 lock_wait_ms=0.0 (write path unchanged).

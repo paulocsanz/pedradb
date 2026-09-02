@@ -1,0 +1,49 @@
+Guest v43 read-legs capture — scan-rows per-row cut (run 1, fresh injection)
+============================================================================
+
+Date: 2026-09-02, injected and started ~02:33 -03 (nbd 3-file swap:
+SWAP_OK_V43 + PERSIST_OK_V43 re-verified after disconnect), bench done by
+02:40:26 -03.
+Gate uptime: pre-start 02:33:23 up 5 days 10:43, load 15.33/15.14/15.43;
+completion check 02:40:26, load 16.34/16.77/16.16 (hot window).
+Provenance: 3 `Compiling` lines matching the pedradb-core/rocksdb-compat/
+beyond-slipstream signature; BENCH_EXIT_readlegs=1.
+Image: v42 accel table.rs (53cbcf56, unchanged) + merge single-live-run fast
+path (db.rs 8f97a627, merge.rs 6f340eb; local A/B neutral, commit 8857975) +
+compat scan row handle-move (lib.rs f7a2119; local A/B -3.1%, commit 9bd73d3).
+Diags still ON (SCANDIAG+PAGEDIAG exported by entrypoint, same as v42).
+
+Legs (median, 25M entries, both backends one process)
+-----------------------------------------------------
+leg                     pedra µs      rocks µs     ratio   verdict   v42 runs
+get_hit                 41.32         40.85        0.989   GAP       1.045/1.087 P/P
+prefix_scan            411.55        391.52       0.951   GAP       0.828/0.931 G/G
+lookup_100/get_loop   4086.9        3973.7       0.972   GAP       1.138/0.977 P/G
+lookup_100/multi_get  3879.8        3947.4       1.017   PASS      1.243/1.135 P/P
+
+Best scan ratio yet (0.951 vs 0.828/0.931 in v42) — pedra absolute 411.6,
+rocks arm landed mid-band this window (391.5; swings 330–392 across runs).
+
+Raw medians (criterion [lo mid hi]):
+  get_hit/rocksdb        [39.245 µs 40.849 µs 42.690 µs]
+  prefix_scan/rocksdb    [386.00 µs 391.52 µs 397.76 µs]
+  rocksdb_get_loop       [3.8271 ms 3.9737 ms 4.1335 ms]
+  rocksdb_multi_get      [3.8025 ms 3.9474 ms 4.1036 ms]
+  get_hit/pedradb        [39.787 µs 41.318 µs 43.017 µs]
+  prefix_scan/pedradb    [404.02 µs 411.55 µs 420.81 µs]
+  pedradb_get_loop       [3.9870 ms 4.0869 ms 4.1938 ms]
+  pedradb_multi_get      [3.7822 ms 3.8798 ms 3.9812 ms]
+
+Hydrate/settle/probe:
+  hydrate/rocksdb: 25M in 29.4s (0.85M/s); disk 7.17 GiB (308 B/entry)
+  settle/rocksdb: 7.1s; after 5.24 GiB
+  hydrate/pedradb: 25M in 55.2s (0.45M/s); disk 11.04 GiB (474 B/entry)
+  settle/pedradb: 1.0s; after 5.15 GiB
+  probe_hit/rocksdb:  p50 52.3µs / p90 68.7µs / p99 109.0µs / p999 2.1ms / max 2.5ms
+  probe_miss/rocksdb: p50 661ns / p90 681ns / p99 701ns / p999 8.4µs / max 16.7µs
+  probe_hit/pedradb:  p50 42.8µs / p90 63.2µs / p99 108.9µs / p999 362.8µs / max 2.1ms
+  probe_miss/pedradb: p50 1.8µs / p90 2.2µs / p99 2.8µs / p999 13.1µs / max 1.4ms
+
+Read-leg window was hot (gate load ~16 throughout). All four legs inside the
+0.95–1.02 parity band; nothing regressed vs v42. Run 2 of the same image in
+guest-v43-scanrows-run2.txt.

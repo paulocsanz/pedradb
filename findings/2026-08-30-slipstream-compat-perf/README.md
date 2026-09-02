@@ -1639,3 +1639,33 @@ Full details in `2026-09-02-scan-arm-attribution.md` (arm split),
   stream-head clone + `WindowKv` drop + decode re-slice (4+ more). Local
   expectation ≈ −40 ns/row ≈ −8% of the scan op; guest 2–3× that on
   mitigation-laden cores.
+
+### v42 run 2 (same image restart, `guest-v42-accel-run2.txt`)
+
+Restart without re-injection, gate load ~14–16. get_hit 39.36 vs 42.79 =
+1.087× PASS, multi_get 4112 vs 4666 = 1.135× PASS, get_loop 4202 vs 4105
+= 0.977× GAP (flipped run 1's 1.138 by 2.3%), prefix_scan 419.3 vs 390.5 =
+0.931× GAP (both arms slower this window: rocks 330→390, pedra 399→419).
+Across the two v42 runs: get_hit 2/2, multi_get 2/2, get_loop 1/2, scan
+0/2 — all-four-in-two-runs acceptance still NOT met; point legs at
+parity-plus-noise, scan is the hard gap. Write path unchanged
+(WRITEPHASE ~identical; settle 0.9 s).
+
+### v43 scan-rows (merge fast path + compat handle-move, 2 runs, `guest-v43-scanrows-run{1,2}.txt`)
+
+v42 + the two local-A/B'd per-row commits (8857975 merge single-live-run
+fast path — local neutral, kept for counters + past-`end` retirement;
+9bd73d3 compat scan row handle-move — local −3.1%, 4 of 8 refcount
+RMWs/row cut). Diags still ON. Run 1 (hot, load ~16): get_hit 0.989,
+scan 0.951 (best yet), get_loop 0.972, multi_get 1.017 — all four inside
+the 0.95–1.02 parity band. Run 2: get_hit 1.080, get_loop 1.122,
+multi_get 1.042 — first v43 capture with all three point legs ≥1× in one
+run — scan 0.865 on rocks' best-ever window (334.4 µs, CI 330.8–338.5)
+while pedra posted its best absolute scan (386.7; v42 399/419, v43r1
+411.6). Across the two v43 runs: multi_get 2/2, get_hit 1/2, get_loop
+1/2, scan 0/2; across all four post-accel captures (v42+v43): multi_get
+4/4, get_hit 3/4, get_loop 2/4, scan 0/4. Acceptance still NOT met.
+Pedra absolutes moved little vs v42 — consistent with the local A/Bs
+(−5 µs/op ≈ guest noise) — so per-row cut holds but does not clear scan.
+Next: v44 diag-off (identical code, entrypoint diag exports deleted) to
+isolate the diag tax and produce the official-protocol capture.

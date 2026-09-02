@@ -1,0 +1,52 @@
+Guest v43 read-legs capture — scan-rows per-row cut (run 2, same image restart)
+================================================================================
+
+Date: 2026-09-02, VM restart 02:41:04–02:41:40 -03 (no re-injection, same
+image as run 1), bench done by 02:47:31 -03.
+Gate uptime: pre-restart 02:41:04 load 15.87/16.61/16.13; post-start 02:41:40
+load 15.88/16.54/16.12; completion check 02:47:31 load 16.21/16.78/16.44.
+Provenance: 3 `Compiling` lines (same signature as run 1); BENCH_EXIT_readlegs=1.
+Image: identical to run 1 (v42 accel table.rs 53cbcf56 + merge fast path
+8f97a627/6f340eb + compat handle-move f7a2119); diags ON.
+
+Legs (median, 25M entries, both backends one process)
+-----------------------------------------------------
+leg                     pedra µs      rocks µs     ratio   verdict   run1 ratio
+get_hit                 39.79         42.96        1.080   PASS      0.989 GAP
+prefix_scan            386.70        334.40       0.865   GAP       0.951 GAP
+lookup_100/get_loop   3915.2        4394.6       1.122   PASS      0.972 GAP
+lookup_100/multi_get  4239.5        4419.6       1.042   PASS      1.017 PASS
+
+First v43 capture with all three point legs ≥1× in one run. Scan 0.865 is
+window-driven, not a code regression: the rocks arm hit its best-ever window
+(334.4 µs, CI 330.8–338.5 — the fastest and tightest rocks scan seen) while
+pedra posted its best absolute scan yet (386.7 µs; v42: 399.2/419.3, v43 run1
+411.6). Same-run ratio is the robust metric; rocks scan medians across all
+captures swing 330–392.
+
+Raw medians (criterion [lo mid hi]):
+  get_hit/rocksdb        [40.698 µs 42.962 µs 45.696 µs]
+  prefix_scan/rocksdb    [330.79 µs 334.40 µs 338.54 µs]
+  rocksdb_get_loop       [4.2318 ms 4.3946 ms 4.5637 ms]
+  rocksdb_multi_get      [4.2862 ms 4.4196 ms 4.5694 ms]
+  get_hit/pedradb        [38.345 µs 39.793 µs 41.643 µs]
+  prefix_scan/pedradb    [382.41 µs 386.70 µs 391.53 µs]
+  pedradb_get_loop       [3.8151 ms 3.9152 ms 4.0244 ms]
+  pedradb_multi_get      [4.1262 ms 4.2395 ms 4.3586 ms]
+
+Hydrate/settle/probe:
+  hydrate/rocksdb: 25M in 29.9s (0.84M/s); disk 7.95 GiB (342 B/entry)
+  settle/rocksdb: 9.2s; after 5.24 GiB
+  hydrate/pedradb: 25M in 51.6s (0.48M/s); disk 11.03 GiB (474 B/entry)
+  settle/pedradb: 1.4s; after 5.15 GiB
+  probe_hit/rocksdb:  p50 59.0µs / p90 79.9µs / p99 176.6µs / p999 2.1ms / max 3.1ms
+  probe_miss/rocksdb: p50 631ns / p90 912ns / p99 2.8µs / p999 9.4µs / max 25.4µs
+  probe_hit/pedradb:  p50 51.0µs / p90 75.8µs / p99 148.5µs / p999 475.7µs / max 1.5ms
+  probe_miss/pedradb: p50 2.0µs / p90 2.4µs / p99 3.2µs / p999 12.0µs / max 24.5µs
+
+Verdict across the two v43 runs: multi_get 2/2 PASS (1.017, 1.042), get_hit
+1/2 (0.989, 1.080), get_loop 1/2 (0.972, 1.122), prefix_scan 0/2 (0.951,
+0.865). All-four-in-two-runs acceptance still NOT met. Across all four
+captures since accel (v42+v43): multi_get 4/4, get_hit 3/4, get_loop 2/4,
+scan 0/4. Point legs sit in the 0.97–1.12 parity-plus-window band; scan
+remains the structural gap. Write path unchanged (settle 1.0/1.4 s).
