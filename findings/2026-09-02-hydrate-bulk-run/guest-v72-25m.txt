@@ -1,0 +1,24 @@
+Guest v72 25M r1 — PointCache freeze at capacity (no FIFO on unique miss)
+linux-gate-p149b  2026-09-02 21:56–22:01
+cache 719031bd777f39f226bfb55c4d559445
+db 912be81787c767451b3adf254a847f21
+concurrent f8929478daa2907b3d8a565914d566fb
+cargo: Compiling pedradb-core (25.97s).
+
+load start 14.87, end 16.73/16.45/16.29 — under 17.5.
+Rocks get_loop 4.050 ms — just above the 3.86–4.03 band. Pedra 4.121
+loses even against that slightly-slow peer. Do not publish.
+
+hydrate/rocks  29.2s (0.86M/s)   pedra 31.0s (0.81M/s)  0.942× LOSE
+settle         8.6s vs 1.1s                               7.8×
+get_hit        41.411 vs 41.313 µs                        1.002× (tie)
+prefix         349.33 vs 306.52 µs                        1.140×
+get_loop       4.0503 vs 4.1213 ms                        0.983× LOSE
+multi_get      4.1491 vs 3.9827 ms                        1.042× (Rocks 4.15 slow)
+
+PointCache freeze did not close lookup_100. Pedra get_loop 4.12 is
+worse than v71 r1 3.868 (in-band 1.03×, CI overlap). get_hit abs 41.3
+is a bit better than v71 r1 42.5 — the insert tax was not the hole.
+Honest lookup remains v71 r1: 3.868 vs 3.987 = 1.03× CI overlap.
+Do not 3-run a 0.98×. Hydrate 31.0 vs Pedra floor 28.1–28.8 is host
+noise (v71 r2 was 28.6).
