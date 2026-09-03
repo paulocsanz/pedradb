@@ -35,6 +35,7 @@ fn opts() -> OpenOptions {
         auto_compact_sst_bytes: None,
         exclusive: true,
         large_value_threshold: None,
+        sst_payload_budget_bytes: None,
     }
 }
 
@@ -76,8 +77,7 @@ fn key_in_cf_family_on_live_scan_is_not_ok() {
     );
     for s in &default_ssts {
         assert!(
-            key_in_cf_family(&s.start_key, "default")
-                && key_in_cf_family(&s.end_key, "default"),
+            key_in_cf_family(&s.start_key, "default") && key_in_cf_family(&s.end_key, "default"),
             "default SST bounds must not be the lock family: {s:?}"
         );
         assert!(

@@ -51,7 +51,7 @@
 //! - [`Db::stats`] / [`Db::verify_checksums`] — observability and integrity.
 //! - SST v3 embeds a Bloom filter; get prunes by bounds + filter.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -72,7 +72,8 @@ use crate::manifest::{self, VersionSet};
 use crate::memtable::{Lookup, MemTable};
 use crate::merge::{range_deleted, range_tombstone_covers, StreamingVisibleIter, VisibleKv};
 use crate::sst::{
-    write_l0_sst, write_l0_sst_for_family, write_sst_entries_on, SstTable,
+    put_tls_point_seek_scratch, take_tls_point_seek_scratch, write_l0_sst, write_l0_sst_for_family,
+    write_sst_bulk_arrays, write_sst_entries_on, PointSeekScratch, SstTable,
 };
 use crate::tx::Transaction;
 use crate::vlog::{self, ValueLog, VlogRewriteStats, VLOG_FILE_NAME};
@@ -80,6 +81,7 @@ use crate::wal::Wal;
 use parking_lot::Mutex;
 use std::io::{Read, Write};
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 /// Max LSM level we promote into (L0 = flush target, L1+ = compacted).
 pub const MAX_LSM_LEVEL: u32 = 3;
@@ -100,6 +102,11 @@ pub const WAL_FILE_NAME: &str = "CURRENT.log";
 /// as a vlog pointer (`VLG1…`/`VLG3…`) or that already start with the marker,
 /// so [`Db::resolve_stored_value`] strips exactly one byte unconditionally.
 const INLINE_ESCAPE: u8 = 0x01;
+
+/// Block-cache id tag for value-resolved slots (see `Db::scan_at_raw`).
+/// Resolving a stored value is not idempotent (`INLINE_ESCAPE` is stripped),
+/// so resolved and raw forms of one block never share a slot.
+const RESOLVED_BLOCK_TAG: u64 = 0x7265_736f_6c76_3d21;
 
 /// F188: stored form of an inline (non-spilled) value. Escaped iff the raw
 /// value could be misread as a vlog pointer, or already starts with the
@@ -255,6 +262,52 @@ pub struct OpenOptions {
     /// archived to a capped local history tier and then GCed (pin-aware).
     /// `HistoryHorizon::All` (F20) is the explicit opt-out.
     pub history: HistoryOptions,
+    /// Byte budget for resident SST file bodies (RFC-0042 v18 payload pool).
+    /// `None` (default) = every payload stays resident (legacy behavior).
+    /// `Some(n)` takes effect only on a bounded open
+    /// ([`Db::open_with_env_bounded`]): the freshest `n` bytes of payloads
+    /// stay in RAM, the rest are served from file block-by-block,
+    /// CRC-verified. The bounded-open default budget is
+    /// [`DEFAULT_SST_PAYLOAD_BUDGET_BYTES`] (256 MiB).
+    pub sst_payload_budget_bytes: Option<u64>,
+}
+
+/// Default bounded-open SST payload budget (RFC-0042 v18): 256 MiB. RocksDB's
+/// defaults never hold a whole LSM in RAM; this is the matching bar for the
+/// drop-in surface (compat maps the caller's cache knob onto it).
+pub const DEFAULT_SST_PAYLOAD_BUDGET_BYTES: u64 = 256 * 1024 * 1024;
+
+/// Async bulk installs between MANIFEST persists (RFC-0159 P1.2). 1 = every
+/// chunk (v51). 4 was v50 **under** the write lock (regressed 0.91×); off
+/// lock it is 90→23 persists at 25M / 64 MiB.
+const BULK_MANIFEST_EVERY: u8 = 4;
+
+/// Default read-handle cache size for bounded opens
+/// ([`crate::env::FileHandleCache`]): covers the post-settle file count of
+/// the 25M slipstream shape (~85 SSTs) with fd headroom. RocksDB holds the
+/// equivalent per-DB file cache; `open()`-per-block was 41% of the 6M
+/// `get_hit` profile.
+pub const DEFAULT_SST_FILE_CACHE_ENTRIES: usize = 256;
+
+/// `PEDRA_SST_FILE_CACHE` — read-handle cache size override (bench A/B
+/// knob; `0` disables handle reuse). Unset or unparsable →
+/// [`DEFAULT_SST_FILE_CACHE_ENTRIES`].
+fn sst_file_cache_entries_from_env() -> usize {
+    std::env::var("PEDRA_SST_FILE_CACHE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_SST_FILE_CACHE_ENTRIES)
+}
+
+/// `PEDRA_SST_PAYLOAD_BUDGET` — resident SST-body budget in bytes (bench
+/// A/B). Unset or unparsable → [`DEFAULT_SST_PAYLOAD_BUDGET_BYTES`].
+/// 10M hydrate is 2.4 GiB; the 256 MiB default leaves get_hit pread-tied
+/// with Rocks (v56 10M 13.049 vs 13.045 µs). 1 GiB holds ~16 of ~38 files.
+fn sst_payload_budget_from_env() -> u64 {
+    std::env::var("PEDRA_SST_PAYLOAD_BUDGET")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_SST_PAYLOAD_BUDGET_BYTES)
 }
 
 /// MVCC history horizon (RFC-0046 P0.1).
@@ -415,6 +468,8 @@ pub struct ReadProbeSnap {
     pub block_cache_misses: u64,
     /// SST blocks actually decompressed on this thread since last reset.
     pub blocks_decoded: u64,
+    /// Probes served without a CRC re-run (verified-residency marks).
+    pub blocks_crc_skipped: u64,
     /// `lookup` answered from a mem layer (no SST probe).
     pub get_mem_hit: u64,
     /// `lookup` had to probe SSTs.
@@ -681,6 +736,7 @@ impl Default for OpenOptions {
             exclusive: true,
             large_value_threshold: None,
             history: HistoryOptions::default(),
+            sst_payload_budget_bytes: None,
         }
     }
 }
@@ -710,6 +766,22 @@ fn fail_stop_corrupt_value(context: &str, e: &CoreError) -> ! {
     )
 }
 
+/// F1 fail-stop sibling of [`fail_stop_corrupt_value`] for the point path's
+/// SST block faults. The pre-seek path swallowed `decode_block` errors with
+/// `unwrap_or_default()`, serving a CRC-broken block as a silent miss —
+/// indistinguishable from deleted data.
+///
+/// # Panics
+/// Always — corruption on a read path must be loud, never silent.
+fn fail_stop_corrupt_block(path: &Path, e: &CoreError) -> ! {
+    panic!(
+        "pedradb: corrupt SST block in {} on point seek: {e}; \
+         refusing to serve a silent miss — use get_at/verify_checksums \
+         for an error-shaped read",
+        path.display()
+    )
+}
+
 /// What a range scan yields (RFC-0019 P1.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ScanProjection {
@@ -720,18 +792,193 @@ pub enum ScanProjection {
     KeyOnly,
 }
 
-/// L0 files snapshotted for an off-lock rewrite (RFC-0037 P1.2).
+/// Files snapshotted for an off-lock leveled rewrite (RFC-0037 P1.2; the job
+/// may mix L0 inputs with the L1 slice they overlap, or one L`n` file with
+/// its L`n+1` overlaps — a pushdown).
 ///
 /// Inputs stay in the live inventory until [`Db::install_prepared_l0_compact`].
 /// [`Self::write`] does not need the `Db` write lock.
 pub struct PreparedL0Compact<E: Env> {
     inputs: Vec<SstTable>,
+    /// Level the outputs land at (1 for L0→L1, `n+1` for a pushdown).
+    to_level: u32,
     file_num: u64,
     gc: crate::merge::CompactGcOptions,
     dir: PathBuf,
     env: E,
     sync: bool,
     split_target: u64,
+    /// Hard cap on emitted chunks; `file_num`'s reserved range is exactly
+    /// this wide, so a split past the cap would hand out an unreserved
+    /// number.
+    chunk_budget: usize,
+    /// Payload-pool kit for the emitted chunks: each chunk is opened with
+    /// its whole body resident, so it must be registered (evictable) the
+    /// moment it exists.
+    kit: Option<crate::cache::PayloadKit>,
+    /// Type-erased parallel merge executor (see [`Db::set_parallel_merge`]).
+    parallel: Option<Arc<dyn ParallelMerge>>,
+}
+
+/// Type-erased key-space-parallel merge executor. `E` cannot be shared
+/// across threads generically (`Env: Clone` only), and the compat host
+/// drives compaction through unbounded generic code — so the host open
+/// path (where `E: Send + Sync + 'static` holds) installs one concrete
+/// implementation behind this seam, and prepared jobs inherit it.
+pub(crate) trait ParallelMerge: Send + Sync {
+    /// Merge `tables` into chunked SSTs (see [`write_merged_tables`]),
+    /// in parallel across key-space spans when the inputs are large.
+    ///
+    /// # Errors
+    /// SST encode / I/O.
+    fn merge(
+        &self,
+        first_file_num: u64,
+        tables: &[SstTable],
+        dir: &Path,
+        gc: crate::merge::CompactGcOptions,
+        do_sync_dir: bool,
+        split_target: u64,
+        chunk_budget: usize,
+        kit: Option<crate::cache::PayloadKit>,
+    ) -> Result<Vec<SstTable>>;
+
+    /// Write N pairwise key-disjoint jobs concurrently — one thread per
+    /// job, each job merged sequentially (across-job parallelism; the
+    /// within-job [`Self::merge`] spans are a separate, opt-in dimension).
+    /// Returns outputs in job order, CF-attached exactly like
+    /// [`PreparedL0Compact::write`]. Each job's reserved file-number range
+    /// is its own (`build_prepared` burned disjoint ranges in prepare
+    /// order), so concurrent writers cannot collide. Nothing is installed;
+    /// the caller installs sequentially and may drop everything on error.
+    ///
+    /// # Errors
+    /// SST encode / I/O of any job (first error wins; siblings' output
+    /// files are orphaned tmp/rename artifacts the caller's failure path
+    /// already tolerates — nothing references them).
+    fn merge_jobs(&self, jobs: Vec<ParallelJobSpec>) -> Result<Vec<Vec<SstTable>>>;
+}
+
+/// E-free payload of one prepared job for [`ParallelMerge::merge_jobs`] —
+/// the env lives in the executor, so the trait stays object-safe.
+pub(crate) struct ParallelJobSpec {
+    pub(crate) inputs: Vec<SstTable>,
+    pub(crate) file_num: u64,
+    pub(crate) cf: String,
+    pub(crate) gc: crate::merge::CompactGcOptions,
+    pub(crate) dir: PathBuf,
+    pub(crate) sync: bool,
+    pub(crate) split_target: u64,
+    pub(crate) chunk_budget: usize,
+    pub(crate) kit: Option<crate::cache::PayloadKit>,
+}
+
+/// Concrete [`ParallelMerge`] for any thread-shareable env.
+pub(crate) struct ParallelMergeEnv<E> {
+    env: E,
+}
+
+impl<E> ParallelMergeEnv<E> {
+    pub(crate) fn new(env: E) -> Self {
+        Self { env }
+    }
+}
+
+impl<E> ParallelMerge for ParallelMergeEnv<E>
+where
+    E: Env + Send + Sync + 'static,
+{
+    fn merge(
+        &self,
+        first_file_num: u64,
+        tables: &[SstTable],
+        dir: &Path,
+        gc: crate::merge::CompactGcOptions,
+        do_sync_dir: bool,
+        split_target: u64,
+        chunk_budget: usize,
+        kit: Option<crate::cache::PayloadKit>,
+    ) -> Result<Vec<SstTable>> {
+        write_merged_tables_parallel(
+            &self.env,
+            dir,
+            first_file_num,
+            tables,
+            gc,
+            do_sync_dir,
+            split_target,
+            chunk_budget,
+            kit.as_ref(),
+        )
+    }
+
+    fn merge_jobs(&self, jobs: Vec<ParallelJobSpec>) -> Result<Vec<Vec<SstTable>>> {
+        if jobs.len() <= 1 {
+            return jobs.into_iter().map(|j| self.write_spec(&j)).collect();
+        }
+        let results: Vec<Result<Vec<SstTable>>> = std::thread::scope(|scope| {
+            let handles: Vec<_> = jobs
+                .into_iter()
+                .map(|spec| scope.spawn(move || self.write_spec(&spec)))
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| {
+                    h.join().unwrap_or_else(|_| {
+                        Err(CoreError::Internal(
+                            "parallel compaction job panicked".into(),
+                        ))
+                    })
+                })
+                .collect()
+        });
+        results.into_iter().collect()
+    }
+}
+
+impl<E: Env> ParallelMergeEnv<E> {
+    /// One job, sequentially — the per-thread body of `merge_jobs` and the
+    /// single-job fallback. Mirrors `PreparedL0Compact::write_merged_with_cf`
+    /// (same `write_merged_tables` call shape + CF attachment).
+    fn write_spec(&self, spec: &ParallelJobSpec) -> Result<Vec<SstTable>> {
+        write_merged_tables(
+            &self.env,
+            &spec.dir,
+            spec.file_num,
+            &spec.inputs,
+            spec.gc,
+            spec.sync,
+            spec.split_target,
+            spec.chunk_budget,
+            spec.kit.as_ref(),
+        )
+        .map(|ts| {
+            ts.into_iter()
+                .map(|t| t.with_cf(spec.cf.clone()))
+                .collect::<Vec<_>>()
+        })
+    }
+}
+
+/// `PEDRA_PARALLEL_MERGE=1`: within-job key-space span merges (installed
+/// seam only). Guest run #17 measured this neutral on the guest and the
+/// local 6M A/B was net-negative — default off.
+fn parallel_merge_enabled() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("PEDRA_PARALLEL_MERGE").is_some_and(|v| v == "1"))
+}
+
+/// `PEDRA_PARALLEL_JOBS`: max concurrently-written disjoint compaction
+/// jobs in `Db::compact_leveled`, clamped 1..=8. Default 1 (off).
+fn parallel_jobs_from_env() -> usize {
+    static K: OnceLock<usize> = OnceLock::new();
+    *K.get_or_init(|| {
+        std::env::var("PEDRA_PARALLEL_JOBS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(1)
+            .clamp(1, 8)
+    })
 }
 
 impl<E: Env> PreparedL0Compact<E> {
@@ -742,30 +989,86 @@ impl<E: Env> PreparedL0Compact<E> {
     }
 
     /// Merge inputs into one or more SSTs split at the compaction target
-    /// file size (streaming when `gc` is default).
+    /// file size (streaming when `gc` is default). Large jobs run as
+    /// parallel key-space spans through the [`ParallelMerge`] seam when the
+    /// host installed one ([`Db::set_parallel_merge`]); otherwise sequential.
     ///
     /// # Errors
     /// SST encode / I/O. On error the live L0 inventory is unchanged.
     pub fn write(&self) -> Result<Vec<SstTable>> {
+        // PEDRA_LEVEL_DIAG: per-job merge+encode wall time — splits a slow
+        // settle/ingest between fd barriers, memtable flush, and compaction.
+        let t0 = std::env::var_os("PEDRA_LEVEL_DIAG").map(|_| Instant::now());
+        let out = self.write_merged_with_cf();
+        if let Some(t0) = t0 {
+            let n_out = out.as_ref().map(Vec::len).unwrap_or(0);
+            println!(
+                "COMPDUR ms={} inputs={} outputs={}",
+                t0.elapsed().as_millis(),
+                self.inputs.len(),
+                n_out
+            );
+        }
+        out
+    }
+
+    fn write_merged_with_cf(&self) -> Result<Vec<SstTable>> {
         let cf = self
             .inputs
             .first()
             .map(|t| t.cf().to_string())
             .unwrap_or_default();
-        write_merged_tables(
-            &self.env,
-            &self.dir,
-            self.file_num,
-            &self.inputs,
-            self.gc,
-            self.sync,
-            self.split_target,
-        )
-        .map(|ts| {
+        // The seam is installed for either parallel dimension; only the
+        // within-job spans opt in here (run #17 no-go keeps them off by
+        // default). Across-job batching goes through `merge_jobs` instead.
+        let merged = match &self.parallel {
+            Some(pm) if parallel_merge_enabled() => pm.merge(
+                self.file_num,
+                &self.inputs,
+                &self.dir,
+                self.gc,
+                self.sync,
+                self.split_target,
+                self.chunk_budget,
+                self.kit.clone(),
+            ),
+            _ => write_merged_tables(
+                &self.env,
+                &self.dir,
+                self.file_num,
+                &self.inputs,
+                self.gc,
+                self.sync,
+                self.split_target,
+                self.chunk_budget,
+                self.kit.as_ref(),
+            ),
+        };
+        merged.map(|ts| {
             ts.into_iter()
                 .map(|t| t.with_cf(cf.clone()))
                 .collect::<Vec<_>>()
         })
+    }
+
+    /// E-free copy of this job for [`ParallelMerge::merge_jobs`] (the
+    /// executor owns the env; inputs are cheap `Arc` clones).
+    fn job_spec(&self) -> ParallelJobSpec {
+        ParallelJobSpec {
+            inputs: self.inputs.clone(),
+            file_num: self.file_num,
+            cf: self
+                .inputs
+                .first()
+                .map(|t| t.cf().to_string())
+                .unwrap_or_default(),
+            gc: self.gc,
+            dir: self.dir.clone(),
+            sync: self.sync,
+            split_target: self.split_target,
+            chunk_budget: self.chunk_budget,
+            kit: self.kit.clone(),
+        }
     }
 }
 
@@ -933,6 +1236,163 @@ struct UnappliedOp {
     end: Bytes,
 }
 
+/// One level's tables grouped for point lookup: newest-first order, plus
+/// the same tables sorted by `lo` key when the run is provably pairwise
+/// disjoint. Disjoint runs bisect to the single candidate table instead of
+/// walking every table's bounds + bloom.
+struct SstRun {
+    level: u32,
+    tables_newest_first: Vec<usize>,
+    disjoint_by_lo: Option<Vec<usize>>,
+}
+
+impl SstRun {
+    /// Tables sorted by `lo`, or `None` unless every table is bounded and
+    /// the run is strictly disjoint (`hi[i] < lo[i+1]`). Overlaps, duplicate
+    /// bounds, or unbounded tables keep the linear newest-first walk.
+    fn disjoint_sorted_by_lo(
+        ssts: &[SstTable],
+        tables_newest_first: &[usize],
+    ) -> Option<Vec<usize>> {
+        if tables_newest_first.len() < 2 {
+            return None;
+        }
+        for &i in tables_newest_first {
+            if ssts[i].smallest_user_key().is_none() || ssts[i].largest_user_key().is_none() {
+                return None;
+            }
+        }
+        let mut by_lo: Vec<usize> = tables_newest_first.to_vec();
+        by_lo.sort_by(|&a, &b| {
+            ssts[a]
+                .smallest_user_key()
+                .unwrap()
+                .cmp(ssts[b].smallest_user_key().unwrap())
+        });
+        for pair in by_lo.windows(2) {
+            if ssts[pair[0]].largest_user_key().unwrap()
+                >= ssts[pair[1]].smallest_user_key().unwrap()
+            {
+                return None;
+            }
+        }
+        Some(by_lo)
+    }
+}
+
+/// Lazy concatenation of one disjoint level's tables in `lo` order. The
+/// scan window visits at most one table at a time (strict disjointness is
+/// proven by [`SstRun::disjoint_sorted_by_lo`]), so the merge sees ONE
+/// stream per level instead of one per file — heap width at 25 M drops
+/// from ~#SSTs to ~#levels + L0 + memtables, cutting sift levels per row.
+struct LevelRunStream<'a, E: Env> {
+    db: &'a Db<E>,
+    files_by_lo: Vec<usize>,
+    next_file: usize,
+    start: Bound<Bytes>,
+    end: Bound<Bytes>,
+    snapshot: SequenceNumber,
+    resolve_values: bool,
+    // Concrete iter (not a boxed LayerStream): one dyn call per row from the
+    // merge, the inner per-row walk stays a static, inlinable call.
+    current: Option<crate::sst::SstRangeIter<'a>>,
+}
+
+/// Bound copies for the per-file `iter_user_range` calls (the iter owns its
+/// own copies; this just re-derives the borrowed view for each call).
+fn bound_slice(b: &Bound<Bytes>) -> Bound<&[u8]> {
+    match b {
+        Bound::Included(k) => Bound::Included(&k[..]),
+        Bound::Excluded(k) => Bound::Excluded(&k[..]),
+        Bound::Unbounded => Bound::Unbounded,
+    }
+}
+
+impl<'a, E: Env> LevelRunStream<'a, E> {
+    fn new(
+        db: &'a Db<E>,
+        files_by_lo: Vec<usize>,
+        start: Bound<&[u8]>,
+        end: Bound<&[u8]>,
+        snapshot: SequenceNumber,
+        resolve_values: bool,
+    ) -> Self {
+        let own = |b: Bound<&[u8]>| match b {
+            Bound::Included(k) => Bound::Included(Bytes::copy_from_slice(k)),
+            Bound::Excluded(k) => Bound::Excluded(Bytes::copy_from_slice(k)),
+            Bound::Unbounded => Bound::Unbounded,
+        };
+        Self {
+            db,
+            files_by_lo,
+            next_file: 0,
+            start: own(start),
+            end: own(end),
+            snapshot,
+            resolve_values,
+            current: None,
+        }
+    }
+}
+
+impl<'a, E: Env> Iterator for LevelRunStream<'a, E> {
+    type Item = (InternalKey, Bytes);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(cur) = self.current.as_mut() {
+                if let Some(row) = cur.next() {
+                    return Some(row);
+                }
+                self.current = None;
+            }
+            while self.next_file < self.files_by_lo.len() {
+                let fi = self.files_by_lo[self.next_file];
+                self.next_file += 1;
+                let table = &self.db.ssts[fi];
+                let (start, end) = (bound_slice(&self.start), bound_slice(&self.end));
+                if !table.overlaps_user_range(start, end) {
+                    continue;
+                }
+                self.db.scan_sst_probed.fetch_add(1, Ordering::Relaxed);
+                let cache = &self.db.block_cache;
+                let id = crate::cache::path_id(table.path())
+                    ^ if self.resolve_values {
+                        RESOLVED_BLOCK_TAG
+                    } else {
+                        0
+                    };
+                let db = self.db;
+                let resolve = self.resolve_values;
+                let load = Box::new(move |bi| {
+                    Some(cache.get_or_insert_with_id(id, bi, || {
+                        let mut entries = match table.decode_block(bi) {
+                            Ok(entries) => entries,
+                            // F1: fail loudly on a corrupt block — same
+                            // contract as the per-file stream path.
+                            Err(e) => fail_stop_corrupt_block(table.path(), &e),
+                        };
+                        if resolve {
+                            db.prefetch_resolve_stream(&mut entries);
+                        }
+                        entries
+                    }))
+                });
+                self.current = Some(table.iter_user_range(
+                    start,
+                    end,
+                    self.snapshot,
+                    self.resolve_values,
+                    load,
+                ));
+                break;
+            }
+            // Nothing drained and no file pulled a stream: run exhausted.
+            self.current.as_ref()?;
+        }
+    }
+}
+
 /// [`Db`] itself is single-threaded (`&mut` for writes). Use [`ConcurrentDb`] for
 /// multi-thread access with a coarse mutex/rwlock.
 pub struct Db<E: Env = StdEnv> {
@@ -972,6 +1432,10 @@ pub struct Db<E: Env = StdEnv> {
     retired_l0s: usize,
     /// Cached [`Self::sst_indices_newest_first`] (L0 newest → L1+).
     sst_order_newest: Vec<usize>,
+    /// Per-level lookup runs built alongside [`Self::sst_order_newest`]
+    /// (see [`SstRun`]). `last_under_user_prefix_sst` keeps walking the
+    /// flat order above.
+    sst_runs: Vec<SstRun>,
     /// Immutable tables, oldest → newest within inventory order.
     ssts: Vec<SstTable>,
     /// LSM level for each entry in [`Self::ssts`] (parallel array; 0 = L0).
@@ -1016,6 +1480,16 @@ pub struct Db<E: Env = StdEnv> {
     table_cache: TableCache,
     /// Decompressed block cache (hit stats for read path).
     block_cache: BlockCache,
+    /// Bounded SST payload residency (RFC-0042 v18). Budget `None` = legacy
+    /// (every payload resident). Armed only by a bounded open.
+    sst_payload_pool: Arc<crate::cache::SstPayloadPool>,
+    /// File source for evicted-payload reloads; `None` on a legacy open
+    /// (the pool then never evicts — decode never fails for lack of a source).
+    sst_source: Option<Arc<dyn crate::env::SstFileSource>>,
+    /// Read-handle cache behind [`Self::sst_source`] (bounded opens):
+    /// evicted-table block reads reuse open handles instead of paying
+    /// `open()` per 4 KiB block. Empty (capacity 0) on legacy opens.
+    sst_file_cache: Arc<crate::env::FileHandleCache>,
     /// Latest-snapshot point answers; per-key inval on write (RFC-0035 / 0041).
     /// `Arc` so [`crate::concurrent::ConcurrentDb`] answers a hit without the
     /// Db read lock (YCSB C hit path).
@@ -1061,6 +1535,9 @@ pub struct Db<E: Env = StdEnv> {
     auto_compact_failures: u64,
     /// Last auto-compact error message (cleared only on successful auto-compact).
     last_auto_compact_error: Option<String>,
+    /// Whole-levels rewrite chunk target (logical bytes); see
+    /// [`REWRITE_CHUNK_TARGET_BYTES`].
+    rewrite_chunk_target_bytes: u64,
     /// Large-value threshold (bytes); `None` = inline only.
     large_value_threshold: Option<usize>,
     /// Append-only value log when large values / existing vlog file present.
@@ -1099,6 +1576,25 @@ pub struct Db<E: Env = StdEnv> {
     /// worker (compat/store, not this crate) drains L0 via
     /// [`Self::prepare_l0_compact`] (RFC-0037 P2.1). Default false.
     defer_auto_compact: bool,
+    /// Sorted-ingest latch (RFC-0159): every committed batch is classified
+    /// per family; a latched family's qualifying flush spans install
+    /// directly at `MAX_LSM_LEVEL` instead of L0 (written once, never
+    /// pushdown-rewritten). Pure decision state — see `bulk_ingest`.
+    bulk_latch: crate::bulk_ingest::BulkLatch,
+    /// `PEDRA_BULK` read once at open (per-batch env lookups would tax the
+    /// commit path; the knob is static for a process lifetime).
+    pub(crate) bulk_route_enabled: bool,
+    /// Uninstalled sorted tails for latched families (RFC-0159 P0.3).
+    bulk_runs: HashMap<String, crate::bulk_run::BulkRun>,
+    /// Full chunks waiting for off-lock SST materialize (writer parks,
+    /// host worker encodes). Lookup still sees them.
+    parked_bulk: VecDeque<(String, Arc<crate::bulk_run::BulkRun>)>,
+    /// Chunk the worker is encoding off-lock (not in `parked_bulk`).
+    bulk_encoding: Option<(String, Arc<crate::bulk_run::BulkRun>)>,
+    /// Bulk SST installs since the last MANIFEST persist (RFC-0159 P1.2).
+    /// Async hydrate persists every [`BULK_MANIFEST_EVERY`] chunks off the
+    /// write lock; v50 batched under the lock and regressed 0.98→0.91×.
+    bulk_manifest_debt: u8,
     /// When `Some(n)`, refuse writes if L0 SST count ≥ n (open-items §2.3).
     write_stall_l0: Option<usize>,
     /// When `Some(n)`, refuse writes if active mem ≈ ≥ n bytes (open-items §2.3 c).
@@ -1180,6 +1676,22 @@ pub struct Db<E: Env = StdEnv> {
     /// [`crate::compact_kernel::COMPACT_TARGET_FILE_BYTES`]). Rocks
     /// `target_file_size_base` role; operator-tunable.
     compact_target_file_bytes: u64,
+    /// Size target of L1 for the leveled scheduler ([`crate::leveling`]);
+    /// L`n+1` targets multiply by the fanout. Rocks `max_bytes_for_level_base`
+    /// role. Independent of [`Self::compact_target_file_bytes`] so small-file
+    /// tests do not trip level pushdowns.
+    l1_target_bytes: u64,
+    /// Key-space-parallel merge executor for prepared leveled jobs, shared
+    /// with every job [`Self::build_prepared`] snapshots. Installed by the
+    /// bounded host open path ([`ConcurrentDb::open_with_env_bounded`]) where
+    /// `E: Send + Sync + 'static` holds; `None` = sequential merges.
+    parallel_merge: Option<Arc<dyn ParallelMerge>>,
+    /// Max concurrently-written pairwise-disjoint pushdown jobs in
+    /// [`Self::compact_leveled`] (across-job parallelism; each job still
+    /// merges sequentially). 1 = off. Set from `PEDRA_PARALLEL_JOBS` on the
+    /// host open path; needs [`Self::parallel_merge`] installed (thread-
+    /// shareable env).
+    parallel_jobs: usize,
     /// Durable commits since the last CHANGELOG store.
     commits_since_changelog: u64,
     /// Successful CHANGELOG stores since open.
@@ -1228,11 +1740,86 @@ impl<E: Env> Db<E> {
 
     /// Open with an explicit [`Env`] (fault injection, in-memory, …).
     ///
+    /// Payloads of recovered SSTs stay fully resident (legacy behavior); use
+    /// [`Self::open_with_env_bounded`] to bound residency.
+    ///
     /// # Errors
     /// I/O failures, corrupt logical records, CRC errors, [`CoreError::AlreadyOpen`],
     /// or corrupt MANIFEST.
-    #[allow(clippy::too_many_lines)] // recover WAL + CHANGELOG + vlog in one open path
     pub fn open_with_env(path: impl AsRef<Path>, opts: OpenOptions, env: E) -> Result<Self> {
+        Self::open_with_env_sourced(
+            path,
+            opts,
+            env,
+            None,
+            Arc::new(crate::env::FileHandleCache::new(0)),
+        )
+    }
+
+    /// Open with an explicit [`Env`] **and the SST payload pool armed**
+    /// (RFC-0042 v18). Resident file bodies are held to
+    /// `opts.sst_payload_budget_bytes` (default
+    /// [`DEFAULT_SST_PAYLOAD_BUDGET_BYTES`]); eviction happens during
+    /// recovery, so reopening a multi-GiB store does not transiently hold
+    /// the whole dataset in RAM. Requires `E: Send + Sync + 'static` because
+    /// evicted tables re-read their file through a shared
+    /// [`SstFileSource`](crate::env::SstFileSource) built from the env.
+    ///
+    /// # Errors
+    /// Same as [`Self::open_with_env`].
+    pub fn open_with_env_bounded(
+        path: impl AsRef<Path>,
+        mut opts: OpenOptions,
+        env: E,
+    ) -> Result<Self>
+    where
+        E: Env + Send + Sync + 'static,
+        E::File: Send + 'static,
+    {
+        if opts.sst_payload_budget_bytes.is_none() {
+            opts.sst_payload_budget_bytes = Some(sst_payload_budget_from_env());
+        }
+        let file_cache = Arc::new(crate::env::FileHandleCache::new(
+            sst_file_cache_entries_from_env(),
+        ));
+        let source: Arc<dyn crate::env::SstFileSource> = Arc::new(
+            crate::env::CachedEnvSource::new(<E as Clone>::clone(&env), Arc::clone(&file_cache)),
+        );
+        // Parallel merge executor for thread-shareable envs. Two opt-in
+        // dimensions share the seam: within-job key-space spans
+        // (`PEDRA_PARALLEL_MERGE=1` — guest run #17 neutral, local 6M A/B
+        // net-negative: settle 7.9 vs 5.9 s, apply ~3× slower; stays off)
+        // and across-job disjoint-batch compaction (`PEDRA_PARALLEL_JOBS`,
+        // default 1 = off). Either being on needs the concrete executor
+        // installed; the historical no-seam path (tests, generic envs)
+        // merges sequentially either way.
+        let jobs_k = parallel_jobs_from_env();
+        let seam: Option<Arc<dyn ParallelMerge>> = if parallel_merge_enabled() || jobs_k > 1 {
+            Some(Arc::new(ParallelMergeEnv::new(<E as Clone>::clone(&env))))
+        } else {
+            None
+        };
+        let mut db = Self::open_with_env_sourced(path, opts, env, Some(source), file_cache)?;
+        if let Some(pm) = seam {
+            db.set_parallel_merge(pm);
+        }
+        db.parallel_jobs = jobs_k;
+        Ok(db)
+    }
+
+    /// Shared open path; `source = Some` arms the payload pool before
+    /// recovery so reopen never materializes the whole dataset in RAM.
+    ///
+    /// # Errors
+    /// Same as [`Self::open_with_env`].
+    #[allow(clippy::too_many_lines)] // recover WAL + CHANGELOG + vlog in one open path
+    fn open_with_env_sourced(
+        path: impl AsRef<Path>,
+        opts: OpenOptions,
+        env: E,
+        source: Option<Arc<dyn crate::env::SstFileSource>>,
+        sst_file_cache: Arc<crate::env::FileHandleCache>,
+    ) -> Result<Self> {
         crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::AFTER_OPEN_LOCK)?;
         let dir = path.as_ref().to_path_buf();
         env.create_dir_all(&dir)?;
@@ -1247,6 +1834,16 @@ impl<E: Env> Db<E> {
 
         let table_cache = TableCache::new(64);
         let block_cache = BlockCache::new(8192);
+        let sst_payload_pool = Arc::new(crate::cache::SstPayloadPool::with_budget(
+            opts.sst_payload_budget_bytes,
+        ));
+        if let Some(src) = &source {
+            sst_payload_pool.arm();
+            table_cache.set_payload_kit(crate::cache::PayloadKit {
+                source: Arc::clone(src),
+                pool: Arc::clone(&sst_payload_pool),
+            });
+        }
         // Official YCSB records=4096 (zipfian). 2048 FIFO + sequential load
         // evicted the hot low IDs; C then started cold (parkfold2 C 1.6×).
         let point_cache = Arc::new(PointCache::new(8192));
@@ -1522,11 +2119,18 @@ impl<E: Env> Db<E> {
             imm: None,
             flush_read_pin: None,
             parked_unflushed: Vec::new(),
+            bulk_latch: crate::bulk_ingest::BulkLatch::new(),
+            bulk_route_enabled: crate::bulk_ingest::bulk_enabled(),
+            bulk_runs: HashMap::new(),
+            parked_bulk: VecDeque::new(),
+            bulk_encoding: None,
+            bulk_manifest_debt: 0,
             fold_pair_expected: None,
             retired_pending: Vec::new(),
             retired_fold: MemTable::new(),
             retired_l0s: 0,
             sst_order_newest: Vec::new(),
+            sst_runs: Vec::new(),
             ssts,
             sst_levels,
             physical_cfs: Vec::new(),
@@ -1544,6 +2148,9 @@ impl<E: Env> Db<E> {
             auto_compact_sst_bytes: opts.auto_compact_sst_bytes.filter(|n| *n > 0),
             table_cache,
             block_cache,
+            sst_payload_pool,
+            sst_source: source,
+            sst_file_cache,
             point_cache,
             last_prefix_cache,
             count_cache,
@@ -1562,6 +2169,7 @@ impl<E: Env> Db<E> {
             open_opts: opts,
             auto_compact_failures: 0,
             last_auto_compact_error: None,
+            rewrite_chunk_target_bytes: REWRITE_CHUNK_TARGET_BYTES,
             large_value_threshold,
             vlog,
             vlog_rotate_bytes: None,
@@ -1619,10 +2227,21 @@ impl<E: Env> Db<E> {
             changelog_rebuild_budget_entries:
                 crate::changelog_kernel::DEFAULT_CHANGELOG_REBUILD_BUDGET_ENTRIES,
             compact_target_file_bytes: crate::compact_kernel::COMPACT_TARGET_FILE_BYTES,
+            l1_target_bytes: crate::compact_kernel::COMPACT_TARGET_FILE_BYTES,
+            parallel_merge: None,
+            parallel_jobs: 1,
             commits_since_changelog: 0,
             changelog_store_count: 0,
             unsynced_ssts: Vec::new(),
         };
+        // RFC-0042 v18: `ScanAndInstall` recovery (legacy dirs, no MANIFEST)
+        // opens tables outside the table cache — attach + register them here
+        // so the armed pool bounds them too.
+        if let Some(src) = &db.sst_source {
+            for t in &db.ssts {
+                t.attach_payload_kit(src, &db.sst_payload_pool);
+            }
+        }
         db.rebuild_sst_order();
         db.maybe_rebuild_feed_from_live();
         // RFC-0046 P0.2: restore the archive floor across reopens (a cap
@@ -1875,6 +2494,7 @@ impl<E: Env> Db<E> {
         self.mvcc_ns_copy.store(0, Ordering::Relaxed);
         self.block_cache.reset_stats();
         crate::sst::reset_sst_blocks_decoded();
+        crate::sst::reset_sst_block_crc_skipped();
     }
 
     /// Snapshot of latest/scan counters + LSM shape (RFC-0035 P0).
@@ -1894,6 +2514,7 @@ impl<E: Env> Db<E> {
             block_cache_hits: self.block_cache.hits(),
             block_cache_misses: self.block_cache.misses(),
             blocks_decoded: crate::sst::sst_blocks_decoded() as u64,
+            blocks_crc_skipped: crate::sst::sst_block_crc_skipped() as u64,
             get_mem_hit: self.get_mem_hit.load(Ordering::Relaxed),
             get_sst_fallback: self.get_sst_fallback.load(Ordering::Relaxed),
             get_inline: self.get_inline.load(Ordering::Relaxed),
@@ -2149,6 +2770,28 @@ impl<E: Env> Db<E> {
     /// reads. `None` restores the 8192-entry default; `Some(n)` is a byte budget.
     pub fn install_block_cache(&mut self, cache: BlockCache) {
         self.block_cache = cache;
+    }
+
+    /// Attach + register a newly installed table's payload with the pool
+    /// (RFC-0042 v18). No-op on a legacy open (no source) or a v1/eager
+    /// table. Call at every point a table enters `self.ssts`.
+    fn adopt_sst(&self, table: &SstTable) {
+        if let Some(src) = &self.sst_source {
+            table.attach_payload_kit(src, &self.sst_payload_pool);
+        }
+    }
+
+    /// Shared payload pool (observability).
+    #[must_use]
+    pub fn sst_payload_pool(&self) -> &crate::cache::SstPayloadPool {
+        &self.sst_payload_pool
+    }
+
+    /// Total entries held in per-table decoded-entries caches across all
+    /// installed SSTs (observability — the caches are unbounded per table).
+    #[must_use]
+    pub fn sst_cached_entries(&self) -> usize {
+        self.ssts.iter().map(SstTable::cached_entries_count).sum()
     }
 
     /// Capture a read snapshot of currently committed state (sequence export).
@@ -2554,6 +3197,13 @@ impl<E: Env> Db<E> {
         if let Some(cached) = self.point_cache.get(key) {
             return cached;
         }
+        self.get_after_point_miss(key)
+    }
+
+    /// SST lookup + optional point-cache fill. [`ConcurrentDb::get`] already
+    /// probed the shared cache; calling [`Self::get`] again would take the
+    /// cache mutex a second time on every uniform miss (lookup_100).
+    pub(crate) fn get_after_point_miss(&self, key: &[u8]) -> Option<Bytes> {
         let snap = self.snapshot();
         let got = match self.get_at(snap, key) {
             Ok(v) => v,
@@ -2566,7 +3216,8 @@ impl<E: Env> Db<E> {
         // `publish_sequence` (also read-locked) — a publish can invalidate
         // `key` between the snapshot above and this insert, caching a stale
         // answer indefinitely. Only insert while `published` still matches
-        // the seq the answer was computed at.
+        // the seq the answer was computed at. At capacity the cache freezes
+        // (no FIFO churn on unique keys).
         if self.published_seq.load(Ordering::Acquire) == snap.seq {
             self.point_cache.insert(key, got.clone());
         }
@@ -3384,6 +4035,31 @@ impl<E: Env> Db<E> {
             }
         });
         self.sst_order_newest = idx;
+        self.rebuild_sst_runs();
+    }
+
+    /// Regroup [`Self::sst_order_newest`] into per-level runs. That order is
+    /// sorted (level asc, index desc), so levels come out contiguous and
+    /// newest-first inside each run — the linear fallback inside `lookup`
+    /// iterates exactly the flat order.
+    fn rebuild_sst_runs(&mut self) {
+        let mut runs: Vec<SstRun> = Vec::new();
+        for &sst_i in &self.sst_order_newest {
+            let level = self.sst_levels.get(sst_i).copied().unwrap_or(0);
+            match runs.last_mut() {
+                Some(run) if run.level == level => run.tables_newest_first.push(sst_i),
+                _ => runs.push(SstRun {
+                    level,
+                    tables_newest_first: vec![sst_i],
+                    disjoint_by_lo: None,
+                }),
+            }
+        }
+        for run in &mut runs {
+            run.disjoint_by_lo =
+                SstRun::disjoint_sorted_by_lo(&self.ssts, &run.tables_newest_first);
+        }
+        self.sst_runs = runs;
     }
 
     /// Drop the retired read cache when no L0 remains to cover.
@@ -3828,6 +4504,8 @@ impl<E: Env> Db<E> {
             return StreamingVisibleIter::new(Vec::new(), 0, start, end, limit);
         }
         self.scan_ops.fetch_add(1, Ordering::Relaxed);
+        let scan_diag = crate::merge::scan_diag_enabled();
+        let scan_diag_t0 = scan_diag.then(Instant::now);
         // Range tombstones first (G2): a covering delete whose start sits
         // before `start` must still hide keys in the window. Point streams
         // are lazy — later SST blocks are not decoded after `limit` emits.
@@ -3838,37 +4516,136 @@ impl<E: Env> Db<E> {
             table.collect_range_tombstones(snapshot, &mut range_dels);
             streams.push(self.memtable_stream(table, start, end, snapshot, resolve_values));
         }
+        // Range tombstones from EVERY table (G2): a covering delete whose
+        // start sits before `start` must still hide keys in the window,
+        // including tables a grouped stream has not pulled from yet.
         for table in self.ssts.iter() {
             table.collect_range_tombstones(snapshot, &mut range_dels);
-            if !table.overlaps_user_range(start, end) {
+        }
+        // A strictly disjoint level collapses into ONE lazy concatenated
+        // stream ([`LevelRunStream`]): heap width drops from #SSTs to
+        // #levels + L0 + memtables. L0 and overlapping levels keep one
+        // stream per overlapping file (identical load/probe semantics).
+        for run in self.sst_runs.iter() {
+            if let Some(by_lo) = run.disjoint_by_lo.as_ref() {
+                streams.push(Box::new(LevelRunStream::new(
+                    self,
+                    by_lo.clone(),
+                    start,
+                    end,
+                    snapshot,
+                    resolve_values,
+                )));
                 continue;
             }
-            self.scan_sst_probed.fetch_add(1, Ordering::Relaxed);
-            let cache = &self.block_cache;
-            let path = table.path();
-            let db = self;
-            let load: Box<
-                dyn FnMut(usize) -> Option<std::sync::Arc<Vec<(InternalKey, Bytes)>>> + '_,
-            > = Box::new(move |bi| {
-                let cached = cache
-                    .get_or_insert_with(path, bi, || table.decode_block(bi).unwrap_or_default());
-                if resolve_values {
-                    let mut entries = cached.as_ref().clone();
-                    db.prefetch_resolve_stream(&mut entries);
-                    Some(std::sync::Arc::new(entries))
-                } else {
-                    Some(cached)
+            for &ti in run.tables_newest_first.iter() {
+                let table = &self.ssts[ti];
+                if !table.overlaps_user_range(start, end) {
+                    continue;
                 }
-            });
-            streams.push(Box::new(table.iter_user_range(
-                start,
-                end,
-                snapshot,
-                resolve_values,
-                load,
-            )));
+                self.scan_sst_probed.fetch_add(1, Ordering::Relaxed);
+                let cache = &self.block_cache;
+                // Hash the path once per stream, not once per block fetch, and
+                // keep value-resolved blocks under a tagged id: a full scan then
+                // resolves each block once (on miss) and later loads are a pure
+                // Arc clone — no per-load deep clone + vlog re-resolve. Re-resolve
+                // is NOT identity (F188 strips an escape byte), so resolved slots
+                // must never flow into a raw-keyed load.
+                let id = crate::cache::path_id(table.path())
+                    ^ if resolve_values {
+                        RESOLVED_BLOCK_TAG
+                    } else {
+                        0
+                    };
+                let db = self;
+                let load: Box<
+                    dyn FnMut(usize) -> Option<std::sync::Arc<Vec<(InternalKey, Bytes)>>> + '_,
+                > = Box::new(move |bi| {
+                    Some(cache.get_or_insert_with_id(id, bi, || {
+                        let mut entries = match table.decode_block(bi) {
+                            Ok(entries) => entries,
+                            // F1: a CRC/IO-faulted block must fail loudly —
+                            // `unwrap_or_default` would silently skip its keys.
+                            Err(e) => fail_stop_corrupt_block(table.path(), &e),
+                        };
+                        if resolve_values {
+                            db.prefetch_resolve_stream(&mut entries);
+                        }
+                        entries
+                    }))
+                });
+                streams.push(Box::new(table.iter_user_range(
+                    start,
+                    end,
+                    snapshot,
+                    resolve_values,
+                    load,
+                )));
+            }
+        }
+        if let Some(t0) = scan_diag_t0 {
+            self.scan_diag_note(t0, streams.len());
         }
         StreamingVisibleIter::from_point_streams(streams, range_dels, snapshot, start, end, limit)
+    }
+
+    /// `PEDRA_SCAN_DIAG=1`: one aggregate line every 2048 scans — streams
+    /// merged, core setup ns/op, per-row ns (crate::merge counters) and
+    /// block-cache hit/miss deltas. The cache counters are DB-global
+    /// (point reads share the cache), so the per-op numbers are only
+    /// attributable to scans on a scan-only bench leg.
+    fn scan_diag_note(&self, t0: Instant, streams: usize) {
+        static OPS: AtomicU64 = AtomicU64::new(0);
+        static STREAMS: AtomicU64 = AtomicU64::new(0);
+        static SETUP_NS: AtomicU64 = AtomicU64::new(0);
+        static LAST_OPS: AtomicU64 = AtomicU64::new(0);
+        static LAST_STREAMS: AtomicU64 = AtomicU64::new(0);
+        static LAST_SETUP_NS: AtomicU64 = AtomicU64::new(0);
+        static LAST_ROWS: AtomicU64 = AtomicU64::new(0);
+        static LAST_ROW_NS: AtomicU64 = AtomicU64::new(0);
+        static LAST_SINGLE: AtomicU64 = AtomicU64::new(0);
+        static LAST_EVICTS: AtomicU64 = AtomicU64::new(0);
+        static LAST_HITS: AtomicU64 = AtomicU64::new(0);
+        static LAST_MISSES: AtomicU64 = AtomicU64::new(0);
+
+        SETUP_NS.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        STREAMS.fetch_add(streams as u64, Ordering::Relaxed);
+        let ops = OPS.fetch_add(1, Ordering::Relaxed) + 1;
+        if ops % 2048 != 0 {
+            return;
+        }
+        let rows = crate::merge::SCAN_DIAG_ROWS.load(Ordering::Relaxed);
+        let row_ns = crate::merge::SCAN_DIAG_ROW_NS.load(Ordering::Relaxed);
+        let hits = self.block_cache.hits();
+        let misses = self.block_cache.misses();
+        let d = ops - LAST_OPS.swap(ops, Ordering::Relaxed);
+        if d == 0 {
+            return;
+        }
+        let total = STREAMS.load(Ordering::Relaxed);
+        let d_streams = total - LAST_STREAMS.swap(total, Ordering::Relaxed);
+        let total = SETUP_NS.load(Ordering::Relaxed);
+        let d_setup = total - LAST_SETUP_NS.swap(total, Ordering::Relaxed);
+        let d_rows = rows - LAST_ROWS.swap(rows, Ordering::Relaxed);
+        let d_row_ns = row_ns - LAST_ROW_NS.swap(row_ns, Ordering::Relaxed);
+        let single = crate::merge::SCAN_DIAG_SINGLE_ROWS.load(Ordering::Relaxed);
+        let evicts = crate::merge::SCAN_DIAG_STREAM_EVICTS.load(Ordering::Relaxed);
+        let d_single = single - LAST_SINGLE.swap(single, Ordering::Relaxed);
+        let d_evicts = evicts - LAST_EVICTS.swap(evicts, Ordering::Relaxed);
+        let d_hits = hits - LAST_HITS.swap(hits, Ordering::Relaxed);
+        let d_misses = misses - LAST_MISSES.swap(misses, Ordering::Relaxed);
+        println!(
+            "SCANDIAG ops={} streams/op={:.1} setup_ns/op={:.0} rows/op={:.1} row_ns/row={:.0} single={:.0}% evict/op={:.2} cache_hits/op={:.2} cache_misses/op={:.2}",
+            ops,
+            d_streams as f64 / d as f64,
+            d_setup as f64 / d as f64,
+            d_rows as f64 / d as f64,
+            if d_rows > 0 { d_row_ns as f64 / d_rows as f64 } else { 0.0 },
+            if d_rows > 0 { 100.0 * d_single as f64 / d_rows as f64 } else { 0.0 },
+            d_evicts as f64 / d as f64,
+            d_hits as f64 / d as f64,
+            d_misses as f64 / d as f64,
+        );
     }
 
     fn memtable_stream<'a>(
@@ -4263,6 +5040,7 @@ impl<E: Env> Db<E> {
     /// I/O while writing SST or recreating the WAL.
     pub fn flush(&mut self) -> Result<()> {
         self.ensure_not_fenced()?;
+        self.flush_all_bulk_runs()?;
         self.vlog_sync_pending()?;
         crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::BEFORE_SST_RENAME)?;
         crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::BEFORE_MANIFEST_RENAME)?;
@@ -4297,6 +5075,304 @@ impl<E: Env> Db<E> {
         Ok(())
     }
 
+    /// RFC-0159 P0.2: family key of a table for bulk routing. Matches
+    /// `family_of_user_key` ("default" when no physical CFs are
+    /// registered) so observation and install agree on family identity.
+    pub(crate) fn bulk_family_of_table<'a>(&self, table: &'a SstTable) -> &'a str {
+        if self.physical_cfs.is_empty() {
+            "default"
+        } else {
+            table.cf()
+        }
+    }
+
+    /// Largest user key `family` holds on disk or in any memtable layer —
+    /// the `family_max_in_db` input for the latch's **first** observation
+    /// of a family (everything committed after open is observed by the
+    /// latch itself). Free-standing so the borrow checker sees disjoint
+    /// field access next to `&mut self.bulk_latch`.
+    fn bulk_family_max_in_db_parts(
+        ssts: &[SstTable],
+        physical_empty: bool,
+        mems: &[&MemTable],
+        family: &str,
+    ) -> Option<Bytes> {
+        let mut max: Option<Bytes> = None;
+        let bump = |max: &mut Option<Bytes>, k: &[u8]| {
+            if max.as_deref().map_or(true, |m: &[u8]| k > m) {
+                *max = Some(Bytes::copy_from_slice(k));
+            }
+        };
+        for t in ssts {
+            let matches = if physical_empty {
+                family == "default"
+            } else {
+                t.cf() == family
+            };
+            if matches {
+                if let Some(k) = t.largest_user_key() {
+                    bump(&mut max, k);
+                }
+            }
+        }
+        for m in mems {
+            if let Some(k) = m.max_user_key_in_family(family) {
+                bump(&mut max, k.as_ref());
+            }
+        }
+        max
+    }
+
+    /// Observe one committed batch through the sorted-ingest latch.
+    /// Every write funnel calls this exactly once per batch (the
+    /// memtable-apply sites are NOT the choke point — recovery replay
+    /// must stay unobserved so `family_max_in_db` covers it instead).
+    fn observe_bulk_batch(&mut self, batch: &[BatchOp]) {
+        if batch.is_empty() || !self.bulk_route_enabled {
+            return;
+        }
+        // Field-borrowing family resolver (a `&self` method would borrow
+        // `bulk_latch` into the ops vec): mirrors `family_of_user_key`.
+        let physical = &self.physical_cfs;
+        let fam_of = |key: &[u8]| -> &str {
+            if physical.is_empty() {
+                return "default";
+            }
+            let p = crate::memtable::cf_prefix(key);
+            if p.is_empty() {
+                return "default";
+            }
+            physical
+                .iter()
+                .find(|n| n.as_bytes() == p)
+                .map(String::as_str)
+                .unwrap_or("default")
+        };
+        // Raftlog / pipeline: one family, all puts. Skip the HashMap
+        // classify_batch and the memtable-chain collect after the family's
+        // first observation (high-water already covers it).
+        if let Some(family) = Self::single_put_family(batch, &fam_of) {
+            const STACK: usize = 32;
+            let mut stack = [(false, &[] as &[u8]); STACK];
+            let mut n = 0usize;
+            let mut heap: Vec<(bool, &[u8])> = Vec::new();
+            for op in batch {
+                if let BatchOp::Put { key, .. } = op {
+                    let item = (true, key.as_ref());
+                    if n < STACK && heap.is_empty() {
+                        stack[n] = item;
+                        n += 1;
+                    } else {
+                        if heap.is_empty() {
+                            heap.extend_from_slice(&stack[..n]);
+                        }
+                        heap.push(item);
+                    }
+                }
+            }
+            let keys: &[(bool, &[u8])] = if heap.is_empty() { &stack[..n] } else { &heap };
+            if self.bulk_latch.has_high_water(family) {
+                let _ = self
+                    .bulk_latch
+                    .classify_family(family, keys, false, || None);
+            } else {
+                let ssts = &self.ssts;
+                let physical_empty = self.physical_cfs.is_empty();
+                let mems: Vec<&MemTable> = std::iter::once(&self.mem)
+                    .chain(self.imm.as_ref())
+                    .chain(self.flush_read_pin.as_ref())
+                    .chain(self.parked_unflushed.iter().map(|t| t.as_ref()))
+                    .collect();
+                let _ = self.bulk_latch.classify_family(family, keys, false, || {
+                    Self::bulk_family_max_in_db_parts(ssts, physical_empty, &mems, family)
+                });
+            }
+            return;
+        }
+        let ops: Vec<crate::bulk_ingest::BulkOp> = batch
+            .iter()
+            .map(|op| match op {
+                BatchOp::Put { key, .. } => crate::bulk_ingest::BulkOp::Put {
+                    family: fam_of(key.as_ref()),
+                    key: key.as_ref(),
+                },
+                BatchOp::Delete { key } => crate::bulk_ingest::BulkOp::Delete {
+                    family: fam_of(key.as_ref()),
+                    key: key.as_ref(),
+                },
+                BatchOp::DeleteRange { start, end } => crate::bulk_ingest::BulkOp::DeleteRange {
+                    start_family: fam_of(start.as_ref()),
+                    start: start.as_ref(),
+                    end_family: fam_of(end.as_ref()),
+                    end: end.as_ref(),
+                },
+            })
+            .collect();
+        let ssts = &self.ssts;
+        let physical_empty = self.physical_cfs.is_empty();
+        // Field-direct memtable chain (not `scan_mem_layers`, whose `&self`
+        // receiver would borrow `bulk_latch` too): disjoint-field borrows
+        // let the latch mutate next to these.
+        let mems: Vec<&MemTable> = std::iter::once(&self.mem)
+            .chain(self.imm.as_ref())
+            .chain(self.flush_read_pin.as_ref())
+            .chain(self.parked_unflushed.iter().map(|t| t.as_ref()))
+            .collect();
+        let _routes = self.bulk_latch.classify_batch(&ops, &|f| {
+            Self::bulk_family_max_in_db_parts(ssts, physical_empty, &mems, f)
+        });
+    }
+
+    fn single_put_family<'a>(
+        batch: &'a [BatchOp],
+        fam_of: &dyn Fn(&[u8]) -> &'a str,
+    ) -> Option<&'a str> {
+        let mut family = None;
+        for op in batch {
+            match op {
+                BatchOp::Put { key, .. } => {
+                    let f = fam_of(key.as_ref());
+                    match family {
+                        None => family = Some(f),
+                        Some(prev) if prev == f => {}
+                        Some(_) => return None,
+                    }
+                }
+                BatchOp::Delete { .. } | BatchOp::DeleteRange { .. } => return None,
+            }
+        }
+        family
+    }
+
+    /// Single-op form of [`Self::observe_bulk_batch`] (iterator-based
+    /// write funnels observe op-granular; the span-level ascending check
+    /// at flush time is the real gate, so granularity loses nothing).
+    fn observe_bulk_op(&mut self, op: &BatchOp) {
+        if self.bulk_route_enabled {
+            self.observe_bulk_batch(std::slice::from_ref(op));
+        }
+    }
+
+    /// Staged-transaction form ([`crate::tx`]): keys arrive without a
+    /// `BatchOp`; observe them so the high-water stays complete.
+    pub(crate) fn observe_bulk_staged(&mut self, key: &[u8], is_put: bool) {
+        if !self.bulk_route_enabled {
+            return;
+        }
+        // Field-borrowing resolver (see `observe_bulk_batch`).
+        let physical = &self.physical_cfs;
+        let fam_of = |key: &[u8]| -> &str {
+            if physical.is_empty() {
+                return "default";
+            }
+            let p = crate::memtable::cf_prefix(key);
+            if p.is_empty() {
+                return "default";
+            }
+            physical
+                .iter()
+                .find(|n| n.as_bytes() == p)
+                .map(String::as_str)
+                .unwrap_or("default")
+        };
+        let family = fam_of(key);
+        let op = if is_put {
+            crate::bulk_ingest::BulkOp::Put { family, key }
+        } else {
+            crate::bulk_ingest::BulkOp::Delete { family, key }
+        };
+        let ssts = &self.ssts;
+        let physical_empty = self.physical_cfs.is_empty();
+        // Same field-direct chain as `observe_bulk_batch`.
+        let mems: Vec<&MemTable> = std::iter::once(&self.mem)
+            .chain(self.imm.as_ref())
+            .chain(self.flush_read_pin.as_ref())
+            .chain(self.parked_unflushed.iter().map(|t| t.as_ref()))
+            .collect();
+        let _routes = self.bulk_latch.classify_batch(&[op], &|f| {
+            Self::bulk_family_max_in_db_parts(ssts, physical_empty, &mems, f)
+        });
+    }
+
+    /// RFC-0159 P0.2: install level for one flushed family span.
+    /// `MAX_LSM_LEVEL` only when every gate holds: the family is latched,
+    /// the span is strictly-ascending puts with no point/range tombstones,
+    /// and the span hull does not overlap the family's existing files at
+    /// levels ≥ 1 (those levels would merge it back down; the max level is
+    /// never a pushdown source, so a qualifying span is written exactly
+    /// once). Anything else stays L0 — identical to the pre-bulk path.
+    pub(crate) fn bulk_span_level(&self, family: &str, mem: &MemTable) -> u32 {
+        if !self.bulk_route_enabled || !self.bulk_latch.is_latched(family) {
+            return 0;
+        }
+        if mem.has_range_tombstones() {
+            return 0;
+        }
+        // RFC-0159 P1.4: incremental per-prefix span state — one map lookup
+        // instead of a full parked-table rescan per output file (run #33:
+        // 4.42 s of the 4.7 s install stage at 25M). Absorbed tables and
+        // exotic family names keep the legacy scan below.
+        let (lo, hi) = match mem.bulk_span(family) {
+            crate::memtable::BulkSpan::Absent | crate::memtable::BulkSpan::Impure => return 0,
+            crate::memtable::BulkSpan::Unknown => return self.bulk_span_level_scan(family, mem),
+            crate::memtable::BulkSpan::Pure { lo, hi } => (lo, hi),
+        };
+        for (t, &lvl) in self.ssts.iter().zip(self.sst_levels.iter()) {
+            if lvl == 0 || self.bulk_family_of_table(t) != family {
+                continue;
+            }
+            let (Some(tlo), Some(thi)) = (t.smallest_user_key(), t.largest_user_key()) else {
+                continue;
+            };
+            if tlo <= hi.as_ref() && thi >= lo.as_ref() {
+                return 0; // would stack over an existing lower-level file
+            }
+        }
+        MAX_LSM_LEVEL
+    }
+
+    /// Legacy whole-memtable scan for [`Self::bulk_span_level`] — fallback
+    /// when the incremental span state is not tracked (absorbed tables).
+    fn bulk_span_level_scan(&self, family: &str, mem: &MemTable) -> u32 {
+        let mut prev: Option<&[u8]> = None;
+        let mut lo: Option<&[u8]> = None;
+        let mut hi: &[u8] = &[];
+        for (ik, _) in mem.iter_internal() {
+            if !crate::cf_kernel::key_in_cf_family(ik.user_key.as_ref(), family) {
+                continue;
+            }
+            if ik.kind != crate::key::ValueType::Value {
+                return 0; // tombstone in the span: ladder
+            }
+            let uk = ik.user_key.as_ref();
+            if let Some(p) = prev {
+                if uk <= p {
+                    return 0; // duplicate / descent: not a pure append span
+                }
+            }
+            prev = Some(uk);
+            if lo.is_none() {
+                lo = Some(uk);
+            }
+            hi = uk;
+        }
+        let Some(lo) = lo else {
+            return 0; // family absent from this span
+        };
+        for (t, &lvl) in self.ssts.iter().zip(self.sst_levels.iter()) {
+            if lvl == 0 || self.bulk_family_of_table(t) != family {
+                continue;
+            }
+            let (Some(tlo), Some(thi)) = (t.smallest_user_key(), t.largest_user_key()) else {
+                continue;
+            };
+            if tlo <= hi && thi >= lo {
+                return 0; // would stack over an existing lower-level file
+            }
+        }
+        MAX_LSM_LEVEL
+    }
+
     /// Flush only `family` to L0 (RFC-0065 P1.1). Other families stay in mem.
     ///
     /// # Errors
@@ -4323,12 +5399,350 @@ impl<E: Env> Db<E> {
                 return Err(self.fence_io_err(e));
             }
         };
+        // RFC-0159 P0.2: a latched family's pure-append span installs
+        // directly at the bottom level (written once, never re-laddered).
+        let level = self.bulk_span_level(family, &taken);
         let pairs: Vec<_> = files.into_iter().map(|(t, num, _)| (t, num)).collect();
-        if let Err(e) = self.install_l0_ssts(pairs) {
+        if let Err(e) = self.install_ssts_at_levels(pairs, &[level]) {
             for (k, v) in taken.iter_internal() {
                 self.mem.insert(k.clone(), v.clone());
             }
             return Err(self.fence_io_err(e));
+        }
+        if level != 0 {
+            self.bulk_diag("install_cf", family, level);
+        }
+        Ok(())
+    }
+
+    /// `PEDRA_BULK_DIAG` line for a bulk install decision.
+    pub(crate) fn bulk_diag(&self, tag: &str, family: &str, level: u32) {
+        if std::env::var_os("PEDRA_BULK_DIAG").is_some() {
+            eprintln!(
+                "BULKDIAG {tag} family={family} level={level} ssts={} l0={} max={}",
+                self.ssts.len(),
+                self.level_file_count(0),
+                self.level_file_count(MAX_LSM_LEVEL)
+            );
+        }
+    }
+
+    fn bulk_family_of_key(&self, key: &[u8]) -> &str {
+        if self.physical_cfs.is_empty() {
+            return "default";
+        }
+        let p = crate::memtable::cf_prefix(key);
+        if p.is_empty() {
+            return "default";
+        }
+        self.physical_cfs
+            .iter()
+            .find(|n| n.as_bytes() == p)
+            .map_or("default", String::as_str)
+    }
+
+    /// Sorted-ingest latch is live for `family` (RFC-0159).
+    pub(crate) fn family_is_latched(&self, family: &str) -> bool {
+        self.bulk_route_enabled && self.bulk_latch.is_latched(family)
+    }
+
+    /// Latched-family puts (already encoded) plus an optional ladder tail
+    /// (hydrate: 1024 data + 1 meta cursor). No `BatchOp` / WAL for the
+    /// latched span. Descent kills the latch and falls back to
+    /// [`Self::commit_async_ops`].
+    pub(crate) fn apply_latched_bulk_puts(
+        &mut self,
+        family: &str,
+        keys: Vec<Bytes>,
+        vals: Vec<Bytes>,
+        tail: Vec<BatchOp>,
+    ) -> Result<SequenceNumber> {
+        if keys.len() != vals.len() {
+            return Err(CoreError::Internal(
+                "latched bulk keys/values length mismatch".into(),
+            ));
+        }
+        if !self.write_admission_idle() {
+            let fams = [family.to_string()];
+            self.ensure_write_admitted_for(&fams)?;
+        }
+        if keys.is_empty() {
+            return if tail.is_empty() {
+                Ok(self.last_sequence())
+            } else {
+                self.commit_async_ops(tail)
+            };
+        }
+        if !self.bulk_route_enabled || !self.bulk_latch.is_latched(family) {
+            return self.commit_async_ops(Self::latched_to_ops(keys, vals, tail));
+        }
+        let route = self.bulk_latch.observe_latched_span(family, &keys);
+        if route != crate::bulk_ingest::FamilyRoute::Bulk {
+            return self.commit_async_ops(Self::latched_to_ops(keys, vals, tail));
+        }
+        if !self.bulk_runs.contains_key(family) {
+            self.flush_dead_bulk_runs()?;
+            self.absorb_mem_family_into_run(family)?;
+        }
+        self.bulk_append_puts(family, keys, vals)?;
+        if tail.is_empty() {
+            let seq = self.last_sequence();
+            self.publish_sequence(seq);
+            return Ok(seq);
+        }
+        // Hydrate's extra op is a 1-key meta cursor, overwritten every
+        // batch. WAL of 24k versions of the same key is envelope the
+        // data path already skipped (disableWAL class). Memtable holds
+        // the live value; flush/settle persists it.
+        if tail.len() == 1 {
+            match tail.into_iter().next().unwrap() {
+                BatchOp::Put { key, value } => {
+                    let seq = self.alloc_seq()?;
+                    self.mem
+                        .insert(InternalKey::new(key, seq, ValueType::Value), value);
+                    self.publish_sequence(seq);
+                    return Ok(seq);
+                }
+                other => return self.commit_async_ops(vec![other]),
+            }
+        }
+        self.commit_async_ops(tail)
+    }
+
+    fn latched_to_ops(keys: Vec<Bytes>, vals: Vec<Bytes>, tail: Vec<BatchOp>) -> Vec<BatchOp> {
+        let mut ops = Vec::with_capacity(keys.len() + tail.len());
+        ops.extend(
+            keys.into_iter()
+                .zip(vals)
+                .map(|(key, value)| BatchOp::Put { key, value }),
+        );
+        ops.extend(tail);
+        ops
+    }
+
+    fn flush_dead_bulk_runs(&mut self) -> Result<()> {
+        let dead: Vec<String> = self
+            .bulk_runs
+            .keys()
+            .filter(|f| !self.bulk_latch.is_latched(f))
+            .cloned()
+            .collect();
+        for f in dead {
+            self.flush_bulk_run(&f)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn flush_all_bulk_runs(&mut self) -> Result<()> {
+        while let Some((fam, run)) = self.parked_bulk.pop_front() {
+            self.install_bulk_run(&fam, run.as_ref())?;
+        }
+        let fams: Vec<String> = self.bulk_runs.keys().cloned().collect();
+        for f in fams {
+            self.flush_bulk_run(&f)?;
+        }
+        if let Some(persist) = self.persist_bulk_manifest(true)? {
+            persist.write()?;
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub(crate) fn has_parked_bulk(&self) -> bool {
+        !self.parked_bulk.is_empty()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn bulk_manifest_debt(&self) -> u8 {
+        self.bulk_manifest_debt
+    }
+
+    #[cfg(test)]
+    pub(crate) fn bulk_latch_is_latched(&self, family: &str) -> bool {
+        self.bulk_latch.is_latched(family)
+    }
+
+    /// Pop one parked bulk chunk for off-lock SST write. Pins it in
+    /// `bulk_encoding` so get still hits until [`Self::finish_bulk_sst`].
+    pub(crate) fn pop_parked_bulk_job(
+        &mut self,
+    ) -> Option<(String, Arc<crate::bulk_run::BulkRun>, u64, PathBuf, E, bool)> {
+        let (fam, run) = self.parked_bulk.pop_front()?;
+        self.bulk_encoding = Some((fam.clone(), Arc::clone(&run)));
+        let num = self.alloc_file_num();
+        let final_path = self.dir.join(format!("{num:06}.sst"));
+        let (env, _, sync) = self.l0_write_ctx();
+        Some((fam, run, num, final_path, env, sync))
+    }
+
+    pub(crate) fn take_bulk_encoding(&mut self) -> Option<(String, Arc<crate::bulk_run::BulkRun>)> {
+        self.bulk_encoding.take()
+    }
+
+    pub(crate) fn push_parked_bulk_front(&mut self, pin: (String, Arc<crate::bulk_run::BulkRun>)) {
+        self.parked_bulk.push_front(pin);
+    }
+
+    pub(crate) fn finish_bulk_sst(
+        &mut self,
+        family: &str,
+        table: SstTable,
+        num: u64,
+    ) -> Result<Option<ManifestPersist<E>>> {
+        if let Err(e) = self.install_ssts_at_levels(vec![(table, num)], &[MAX_LSM_LEVEL]) {
+            return Err(self.fence_io_err(e));
+        }
+        if self.sst_source.is_some() {
+            if let Some(t) = self.ssts.last() {
+                t.release_resident();
+            }
+        }
+        if self
+            .bulk_encoding
+            .as_ref()
+            .is_some_and(|(f, _)| f == family)
+        {
+            self.bulk_encoding = None;
+        }
+        self.bulk_diag("run_install", family, MAX_LSM_LEVEL);
+        self.persist_bulk_manifest(false)
+    }
+
+    /// Persist MANIFEST every [`BULK_MANIFEST_EVERY`] async bulk installs
+    /// (off the write lock). `force` flushes leftover debt (settle).
+    fn persist_bulk_manifest(&mut self, force: bool) -> Result<Option<ManifestPersist<E>>> {
+        if self.sync {
+            self.persist_manifest()?;
+            self.bulk_manifest_debt = 0;
+            return Ok(None);
+        }
+        self.unsynced_ssts.clear();
+        if force {
+            if self.bulk_manifest_debt == 0 {
+                return Ok(None);
+            }
+        } else {
+            self.bulk_manifest_debt = self.bulk_manifest_debt.saturating_add(1);
+            if self.bulk_manifest_debt < BULK_MANIFEST_EVERY {
+                return Ok(None);
+            }
+        }
+        self.bulk_manifest_debt = 0;
+        Ok(Some(self.take_manifest_persist()?))
+    }
+
+    fn flush_bulk_run(&mut self, family: &str) -> Result<()> {
+        let Some(run) = self.bulk_runs.remove(family) else {
+            return Ok(());
+        };
+        self.install_bulk_run(family, &run)
+    }
+
+    fn install_bulk_run(&mut self, family: &str, run: &crate::bulk_run::BulkRun) -> Result<()> {
+        if run.is_empty() {
+            return Ok(());
+        }
+        let num = self.alloc_file_num();
+        let (env, dir, sync) = self.l0_write_ctx();
+        let (table, num) = match Self::write_bulk_run_sst(&env, &dir, num, &run, family, sync) {
+            Ok(t) => t,
+            Err(e) => return Err(self.fence_io_err(e)),
+        };
+        if let Some(persist) = self.finish_bulk_sst(family, table, num)? {
+            persist.write()?;
+        }
+        Ok(())
+    }
+
+    /// Off-lock SST write for a parked bulk chunk (no `Db` borrow).
+    pub(crate) fn write_bulk_run_sst(
+        env: &E,
+        dir: &std::path::Path,
+        num: u64,
+        run: &crate::bulk_run::BulkRun,
+        family: &str,
+        sync: bool,
+    ) -> Result<(SstTable, u64)> {
+        if run.is_empty() {
+            return Err(CoreError::Internal("empty bulk run".into()));
+        }
+        let final_path = dir.join(format!("{num:06}.sst"));
+        let tmp_path = dir.join(format!("{num:06}.sst.tmp"));
+        let table =
+            match write_sst_bulk_arrays(env, &tmp_path, run.keys(), run.vals(), run.seqs(), sync) {
+                Ok(t) => t,
+                Err(e) => {
+                    let _ = env.remove_file(&tmp_path);
+                    return Err(e);
+                }
+            };
+        if let Err(e) = env.rename(&tmp_path, &final_path) {
+            let _ = env.remove_file(&tmp_path);
+            let _ = env.remove_file(&final_path);
+            return Err(CoreError::Io(e));
+        }
+        Ok((table.with_path(final_path).with_cf(family.to_string()), num))
+    }
+
+    fn absorb_mem_family_into_run(&mut self, family: &str) -> Result<()> {
+        let taken = self.mem.take_family(family);
+        if taken.is_empty() {
+            return Ok(());
+        }
+        let run = self.bulk_runs.entry(family.to_string()).or_default();
+        for (ik, v) in taken.iter_internal() {
+            if ik.kind != ValueType::Value {
+                continue;
+            }
+            run.push(ik.user_key.clone(), v.clone(), ik.sequence);
+        }
+        Ok(())
+    }
+
+    fn bulk_append_puts(
+        &mut self,
+        family: &str,
+        mut keys: Vec<Bytes>,
+        mut vals: Vec<Bytes>,
+    ) -> Result<()> {
+        let n = keys.len();
+        if n == 0 {
+            return Ok(());
+        }
+        crate::bulk_run::sort_bulk_key_vals(&mut keys, &mut vals);
+        let n64 = n as u64;
+        let last = self.next_seq.saturating_add(n64.saturating_sub(1));
+        if last > MAX_SEQUENCE_NUMBER {
+            return Err(CoreError::Internal(
+                "sequence number space exhausted".into(),
+            ));
+        }
+        let mut seq = self.next_seq;
+        self.next_seq = last + 1;
+        let cap = self.bulk_chunk_cap();
+        let over = {
+            let run = self.bulk_runs.entry(family.to_string()).or_default();
+            run.reserve(n);
+            for (k, v) in keys.into_iter().zip(vals) {
+                self.bytes_ingested = self.bytes_ingested.saturating_add(v.len() as u64);
+                run.push(k, v, seq);
+                seq += 1;
+            }
+            cap.is_some_and(|c| run.bytes() >= c)
+        };
+        if over {
+            if let Some(run) = self.bulk_runs.remove(family) {
+                // Park even while the worker is encoding the previous
+                // chunk so fill overlaps SST. One parked + one encoding
+                // + the open tail is the RAM bound; a second overflow
+                // while parked is still full encodes inline.
+                if self.parked_bulk.is_empty() {
+                    self.parked_bulk
+                        .push_back((family.to_string(), Arc::new(run)));
+                } else {
+                    self.install_bulk_run(family, &run)?;
+                }
+            }
         }
         Ok(())
     }
@@ -4437,6 +5851,20 @@ impl<E: Env> Db<E> {
         n
     }
 
+    /// Remove a DB-owned file and drop any cached read handle for its path.
+    ///
+    /// Invalidation is part of the delete, not an optimization: a cached
+    /// handle keeps an unlinked inode (and its disk space) alive, and a
+    /// failed SST write rolls `next_file_num` back, so the path can be
+    /// re-allocated with different bytes. Every removal of a file that was
+    /// adopted (visible to reads) routes here; write-path cleanup of files
+    /// that were never adopted never entered the cache.
+    fn remove_db_file(&self, path: &Path) -> std::io::Result<()> {
+        self.env.remove_file(path)?;
+        self.sst_file_cache.invalidate(path);
+        Ok(())
+    }
+
     /// Reserve SST numbers for a flush of `imm` (RFC-0065 P0).
     ///
     /// One number when CFs are not registered; one per family otherwise.
@@ -4477,13 +5905,24 @@ impl<E: Env> Db<E> {
         // name visible); the file bytes stay lazy.
         match write_l0_sst(env, &tmp_path, imm, false) {
             Ok(table) => {
-                drop(table);
+                // PEDRA_PARK_DIAG2: rename off the tmp name (same dir).
+                let t_r = std::time::Instant::now();
                 env.rename(&tmp_path, &final_path)?;
+                if std::env::var_os("PEDRA_PARK_DIAG2").is_some() {
+                    eprintln!(
+                        "PARKDIAG2 file rename_ms={:.1}",
+                        t_r.elapsed().as_secs_f64() * 1e3
+                    );
+                }
                 if sync {
                     env.sync_dir(dir)?;
                 }
-                let table = SstTable::open_on(env, &final_path)?;
-                Ok((table, num, final_path))
+                // Keep the writer's in-place table (rename does not change
+                // the bytes). Re-opening paid a full read + per-block
+                // decompress + per-entry decode of every flushed file —
+                // the caller-side half of the read-back the v21p writer
+                // fix removed. Reopens at recovery still verify fully.
+                Ok((table.with_path(final_path.clone()), num, final_path))
             }
             Err(e) => {
                 let _ = env.remove_file(&tmp_path);
@@ -4515,12 +5954,23 @@ impl<E: Env> Db<E> {
                     let _ = env.remove_file(&tmp_path);
                     return Ok(None);
                 }
-                drop(table);
+                // PEDRA_PARK_DIAG2: rename off the tmp name (same dir).
+                let t_r = std::time::Instant::now();
                 env.rename(&tmp_path, &final_path)?;
+                if std::env::var_os("PEDRA_PARK_DIAG2").is_some() {
+                    eprintln!(
+                        "PARKDIAG2 file rename_ms={:.1}",
+                        t_r.elapsed().as_secs_f64() * 1e3
+                    );
+                }
                 if sync {
                     env.sync_dir(dir)?;
                 }
-                let table = SstTable::open_on(env, &final_path)?.with_cf(family.to_string());
+                // In-place table kept (see `write_imm_l0_file`): no
+                // post-rename re-read of the freshly written bytes.
+                let table = table
+                    .with_path(final_path.clone())
+                    .with_cf(family.to_string());
                 Ok(Some((table, num, final_path)))
             }
             Err(e) => {
@@ -4539,6 +5989,23 @@ impl<E: Env> Db<E> {
     /// # Errors
     /// SST I/O, or fewer file numbers than families.
     pub fn write_imm_l0_files(
+        env: &E,
+        dir: &Path,
+        sync: bool,
+        imm: &MemTable,
+        nums: &[u64],
+    ) -> Result<Vec<(SstTable, u64, PathBuf)>> {
+        // PEDRA_FLUSH_DIAG: per-memtable SST encode+write wall time (the
+        // drain the hydrate writer parks behind), regardless of caller.
+        let t0 = std::env::var_os("PEDRA_FLUSH_DIAG").map(|_| Instant::now());
+        let out = Self::write_imm_l0_files_inner(env, dir, sync, imm, nums);
+        if let Some(t0) = t0 {
+            println!("FLUSHDUR ms={}", t0.elapsed().as_millis());
+        }
+        out
+    }
+
+    fn write_imm_l0_files_inner(
         env: &E,
         dir: &Path,
         sync: bool,
@@ -4635,14 +6102,27 @@ impl<E: Env> Db<E> {
         self.install_l0_ssts(vec![(table, file_num)])
     }
 
-    /// Install one or more flushed L0 SSTs (MANIFEST before success).
+    /// Install one or more flushed SSTs (MANIFEST before success).
     ///
     /// # Errors
     /// MANIFEST I/O (rolls back inventory).
     pub fn install_l0_ssts(&mut self, files: Vec<(SstTable, u64)>) -> Result<()> {
+        self.install_ssts_at_levels(files, &[])
+    }
+
+    /// Level-explicit flush install (RFC-0159 P0.2): `levels[i]` is the
+    /// level of `files[i]`; an empty / short slice defaults to L0.
+    ///
+    /// # Errors
+    /// MANIFEST I/O (rolls back inventory).
+    pub fn install_ssts_at_levels(
+        &mut self,
+        files: Vec<(SstTable, u64)>,
+        levels: &[u32],
+    ) -> Result<()> {
         // In-memory only. MANIFEST + SST `fdatasync` wait for WAL rotate so a
         // write burst is not charged one extra fd per 64 MiB flush (RFC-0041).
-        let _undo = self.apply_l0_installs(files);
+        let _undo = self.apply_sst_installs(files, levels);
         self.retire_flush_pin();
         Ok(())
     }
@@ -4684,9 +6164,49 @@ impl<E: Env> Db<E> {
     }
 
     /// Configured auto-flush threshold, if any.
+    ///
+    /// RFC-0159 P1.3: per-CF buffers raise the shared stage threshold the
+    /// same way they raise the flush-debt cap — the host worker stages one
+    /// shared active mem, so a per-CF buffer above the global cap must not
+    /// be cut down to the global cap (bench: global 64 MiB, data CF
+    /// 256 MiB, chunks staged at 64 MiB). Per-CF limits for smaller
+    /// families stay enforced by the `maybe_auto_flush` walk.
     #[must_use]
     pub fn auto_flush_threshold(&self) -> Option<usize> {
-        self.auto_flush_bytes
+        let mut cap = self.auto_flush_bytes.filter(|n| *n > 0);
+        for &n in self.cf_write_buffer.values() {
+            if n > 0 && cap.is_none_or(|c| n > c) {
+                cap = Some(n);
+            }
+        }
+        // RFC-0159 P1.3 sweep knob: clamp the stage threshold for
+        // chunk-size experiments without touching caller buffers
+        // (`PEDRA_STAGE_MAX_BYTES`, e.g. 67108864 for 64 MiB chunks;
+        // 0 / unparseable = unset). A smaller clamp also moves parking
+        // back to whole-memtable staging (host worker) before any
+        // per-CF `take_family` limit can fire on the writer.
+        if let Some(c) = cap {
+            if let Ok(v) = std::env::var("PEDRA_STAGE_MAX_BYTES") {
+                if let Ok(max) = v.parse::<usize>() {
+                    if max > 0 && max < c {
+                        return Some(max);
+                    }
+                }
+            }
+        }
+        cap
+    }
+
+    /// Bulk-run flush size: per-CF / global write buffer, **not**
+    /// `PEDRA_STAGE_MAX_BYTES` (that clamp is for memtable staging).
+    fn bulk_chunk_cap(&self) -> Option<usize> {
+        let mut cap = self.auto_flush_bytes.filter(|n| *n > 0);
+        for &n in self.cf_write_buffer.values() {
+            if n > 0 && cap.is_none_or(|c| n > c) {
+                cap = Some(n);
+            }
+        }
+        cap
     }
 
     /// Flush-debt cap for concurrent writer backpressure: one parked
@@ -4696,13 +6216,12 @@ impl<E: Env> Db<E> {
     /// (25M slipstream: 185 MB/s ingest vs ~100 MB/s materialize OOMed a
     /// 3892 MB box with nothing bounding `parked_unflushed`).
     pub(crate) fn flush_debt_cap(&self) -> Option<usize> {
-        let mut cap = self.auto_flush_bytes.filter(|n| *n > 0);
-        for &n in self.cf_write_buffer.values() {
-            if n > 0 && cap.is_none_or(|c| n > c) {
-                cap = Some(n);
-            }
-        }
-        cap
+        // Two thresholds = one chunk of runway: the writer keeps filling
+        // chunk N+1 while the worker materializes chunk N. cap ==
+        // threshold made every park stop-and-wait (writer queued on
+        // flush_lock; local 15M profile 8 s lock_slow per 25 s window,
+        // guest run #29 61.5 s unattributed of a 112.5 s wall).
+        self.auto_flush_threshold().map(|t| t.saturating_mul(2))
     }
 
     /// Mem / imm / pin / parked (no SST yet) / folded retired / pending pins.
@@ -4921,8 +6440,14 @@ impl<E: Env> Db<E> {
                 return Err(self.fence_io_err(e));
             }
         };
+        // RFC-0159 P0.2: per-family install level (bulk spans go to the
+        // bottom level; everything else L0, unchanged).
+        let levels: Vec<u32> = files
+            .iter()
+            .map(|(t, _, _)| self.bulk_span_level(self.bulk_family_of_table(t), &imm))
+            .collect();
         let pairs: Vec<_> = files.into_iter().map(|(t, num, _)| (t, num)).collect();
-        if let Err(e) = self.install_l0_ssts(pairs) {
+        if let Err(e) = self.install_ssts_at_levels(pairs, &levels) {
             self.imm = Some(imm);
             return Err(self.fence_io_err(e));
         }
@@ -4938,6 +6463,14 @@ impl<E: Env> Db<E> {
         if crate::flush_kernel::wal_rotate_decision(self.wal_pin_state())
             == crate::flush_kernel::WalRotateAction::KeepWal
         {
+            return Ok(());
+        }
+        // Edge-trigger: a drained pipeline with an empty current segment has
+        // nothing to rotate. Without this every idle poll (the compat compact
+        // worker tick during read-only phases) rewrites MANIFEST+CURRENT and
+        // pays two fdatasync barriers per tick — 10k+ barriers per slipstream
+        // guest run, ~42 s of flush traffic competing with the read legs.
+        if self.wal.lock().position() == 0 {
             return Ok(());
         }
         self.rotate_wal_now()
@@ -5022,6 +6555,145 @@ impl<E: Env> Db<E> {
     /// I/O while writing the compacted SST or deleting old files.
     pub fn compact(&mut self) -> Result<()> {
         self.compact_with(CompactOptions::default())
+    }
+
+    /// Settle with bounded leveled jobs ([`crate::leveling`]): drain L0 with
+    /// overlap-closed L0→L1 merges, then push over-target levels down one
+    /// oldest-file job at a time, until the shape is quiet. On a DB whose
+    /// steady state already holds (hydrate drained as it wrote), this is a
+    /// handful of small jobs — not a whole-database rewrite. A stacked
+    /// (non-disjoint) level — a DB written before leveling — is repaired
+    /// first with one whole-level rewrite per family.
+    ///
+    /// `PEDRA_LEVELED=0` selects the historical whole-level [`Self::compact`].
+    ///
+    /// # Errors
+    /// SST / MANIFEST I/O.
+    pub fn compact_leveled(&mut self) -> Result<()> {
+        if !crate::leveling::leveled_enabled() {
+            return self.compact_with(CompactOptions::default());
+        }
+        self.dump_level_diag("compact_leveled_start");
+        self.repair_stacked_levels()?;
+        // Across-job batching: only with a thread-shareable env (the seam)
+        // and `parallel_jobs > 1`; the batch's disjoint-job writes then run
+        // on scoped threads through `ParallelMerge::merge_jobs` while this
+        // loop (under the write lock) waits — the lock discipline is
+        // unchanged, the drain wall time shrinks.
+        let jobs_k = match &self.parallel_merge {
+            Some(_) => self.parallel_jobs.clamp(1, 8),
+            None => 1,
+        };
+        // Safety valve only: every job strictly removes an L0 file or moves
+        // one file out of an over-target level, so the loop converges.
+        for _ in 0..100_000 {
+            // L0→L1 jobs stay one-at-a-time: they absorb the newest flush
+            // and the overlapping L1 slice, and two of them would share it.
+            if let Some(job) = self.prepare_l0_compact(CompactOptions::default())? {
+                let tables = job.write()?;
+                self.install_prepared_l0_compact(job, tables)?;
+                continue;
+            }
+            let batch = self.prepare_disjoint_pushdown_batch(jobs_k)?;
+            match batch.len() {
+                0 => {
+                    self.dump_level_diag("compact_leveled_done");
+                    return Ok(());
+                }
+                1 => {
+                    let job = batch.into_iter().next().expect("len checked");
+                    let tables = job.write()?;
+                    self.install_prepared_l0_compact(job, tables)?;
+                }
+                n => {
+                    // PEDRA_LEVEL_DIAG: batch wall (per-job lines only cover
+                    // the single-job arms; the sum is this line's outputs).
+                    let t0 = std::env::var_os("PEDRA_LEVEL_DIAG").map(|_| Instant::now());
+                    let specs: Vec<ParallelJobSpec> =
+                        batch.iter().map(PreparedL0Compact::job_spec).collect();
+                    let Some(pm) = self.parallel_merge.clone() else {
+                        // Unreachable (jobs_k > 1 requires the seam); stay
+                        // correct anyway — sequential fallback.
+                        for job in batch {
+                            let tables = job.write()?;
+                            self.install_prepared_l0_compact(job, tables)?;
+                        }
+                        continue;
+                    };
+                    let outputs = pm.merge_jobs(specs)?;
+                    if let Some(t0) = t0 {
+                        let total: usize = outputs.iter().map(Vec::len).sum();
+                        println!(
+                            "COMPDUR jobs={n} outputs={total} ms={}",
+                            t0.elapsed().as_millis()
+                        );
+                    }
+                    for (job, tables) in batch.into_iter().zip(outputs) {
+                        self.install_prepared_l0_compact(job, tables)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// `PEDRA_LEVEL_DIAG=1`: per-level file count + on-disk bytes at a
+    /// scheduling milestone (settle start/end, repair end) — the shape the
+    /// read path faces, on the guest serial console.
+    fn dump_level_diag(&self, tag: &str) {
+        if std::env::var_os("PEDRA_LEVEL_DIAG").is_none() {
+            return;
+        }
+        for level in 0..=MAX_LSM_LEVEL {
+            let mut n = 0usize;
+            let mut bytes = 0u64;
+            for (t, &lvl) in self.ssts.iter().zip(self.sst_levels.iter()) {
+                if lvl == level {
+                    n += 1;
+                    bytes += self.table_bytes(t);
+                }
+            }
+            eprintln!("LEVELDIAG {tag} level={level} files={n} bytes={bytes}");
+        }
+    }
+
+    /// One whole-level rewrite per stacked (non-disjoint) family level until
+    /// every level is a disjoint sorted run set — the precondition for
+    /// bounded overlap-sliced jobs (see [`crate::leveling`]).
+    fn repair_stacked_levels(&mut self) -> Result<()> {
+        while crate::leveling::leveled_enabled() {
+            let mut target: Option<(u32, Vec<usize>)> = None;
+            'search: for level in 1..=MAX_LSM_LEVEL {
+                let families: Vec<String> = self
+                    .ssts
+                    .iter()
+                    .zip(self.sst_levels.iter())
+                    .filter(|(_, &lvl)| lvl == level)
+                    .map(|(t, _)| self.compact_family_key(t).to_string())
+                    .collect::<BTreeSet<_>>()
+                    .into_iter()
+                    .collect();
+                for cf in families {
+                    let view = self.level_view(level, &cf);
+                    if view.len() >= 2 && !crate::leveling::is_disjoint(&view) {
+                        target = Some((level, view.iter().map(|f| f.idx).collect()));
+                        break 'search;
+                    }
+                }
+            }
+            let Some((level, idxs)) = target else {
+                return Ok(());
+            };
+            let inputs: Vec<SstTable> = idxs.iter().map(|&i| self.ssts[i].clone()).collect();
+            let Some(job) =
+                self.build_prepared(inputs, level, crate::merge::CompactGcOptions::default())?
+            else {
+                return Ok(());
+            };
+            let tables = job.write()?;
+            self.install_prepared_l0_compact(job, tables)?;
+        }
+        Ok(())
     }
 
     /// Compact with version GC options (RFC-0009 P1.3).
@@ -5156,10 +6828,13 @@ impl<E: Env> Db<E> {
         let final_path = self.dir.join(format!("{num:06}.sst"));
         let tmp_path = self.dir.join(format!("{num:06}.sst.tmp"));
         let new_table = write_sst_entries_on(&self.env, &tmp_path, &merged)?;
-        drop(new_table);
         self.env.rename(&tmp_path, &final_path)?;
         self.sync_dir_if_required(&self.dir)?;
-        let new_table = SstTable::open_on(&self.env, &final_path)?;
+        // In-place table kept: the rename does not change the bytes, and a
+        // re-open here re-read + decompressed + decoded every entry of the
+        // freshly written file.
+        let new_table = new_table.with_path(final_path.clone());
+        self.adopt_sst(&new_table);
         self.table_cache.insert(Arc::new(new_table.clone()));
         let prev_next = self.next_file_num;
         self.next_file_num = num + 1;
@@ -5188,14 +6863,14 @@ impl<E: Env> Db<E> {
             self.next_file_num = prev_next;
             self.earliest_readable_seq = prev_earliest;
             self.note_sst_inventory_changed();
-            let _ = self.env.remove_file(&final_path);
+            let _ = self.remove_db_file(&final_path);
             let _ = self.env.sync_dir(&self.dir);
             return Err(e);
         }
 
         for path in old_paths {
             if path != final_path {
-                let _ = self.env.remove_file(&path);
+                let _ = self.remove_db_file(&path);
             }
         }
         self.compact_count = self.compact_count.saturating_add(1);
@@ -5279,6 +6954,14 @@ impl<E: Env> Db<E> {
     /// Inputs stay readable. Call [`PreparedL0Compact::write`] without this
     /// lock, then [`Self::install_prepared_l0_compact`].
     ///
+    /// Leveled selection: when the family's L1 is a disjoint sorted run set,
+    /// the job also absorbs the L1 slice overlapping the selected L0s, so L1
+    /// never degenerates into stacked full-range runs (see
+    /// [`crate::leveling`]). A stacked L1 (legacy DB) keeps the L0-only job.
+    /// When the overlapping slice is larger than the L1 slice cap, a pushdown
+    /// job ([`Self::prepare_pushdown_compact`]) is returned instead — it is
+    /// the bounded way to shrink the slice before the next L0→L1 merge.
+    ///
     /// # Errors
     /// None today (reservation cannot fail); `Result` for fence / I/O later.
     pub fn prepare_l0_compact(
@@ -5286,6 +6969,7 @@ impl<E: Env> Db<E> {
         options: CompactOptions,
     ) -> Result<Option<PreparedL0Compact<E>>> {
         self.ensure_not_fenced()?;
+        let leveled = crate::leveling::leveled_enabled();
         let mut by_cf: BTreeMap<String, Vec<SstTable>> = BTreeMap::new();
         for (t, &lvl) in self.ssts.iter().zip(self.sst_levels.iter()) {
             if lvl == 0 {
@@ -5295,10 +6979,10 @@ impl<E: Env> Db<E> {
                     .push(t.clone());
             }
         }
-        let mut inputs = by_cf
+        let (cf, mut inputs) = by_cf
             .into_iter()
             .max_by_key(|(_, v)| v.len())
-            .map(|(_, v)| v)
+            .map(|(cf, v)| (cf, v))
             .unwrap_or_default();
         if inputs.is_empty() {
             return Ok(None);
@@ -5306,20 +6990,272 @@ impl<E: Env> Db<E> {
         // `ssts` is append-ordered, so the family vec is oldest-first; a
         // truncated prefix is the oldest N L0 files. Any subset is a valid
         // merge: newer L0 files stay live and shadow the output at read
-        // time exactly as they shadowed the inputs.
+        // time exactly as they shadowed the inputs. The caller's bound is
+        // the contract (compat's 2-input ticks bound merge memory — the
+        // v15 25M OOM); leveled job size is bounded separately by the L1
+        // slice cap below.
         if let Some(max) = options.max_input_files.filter(|m| *m > 0) {
             inputs.truncate(max);
         }
+        if leveled {
+            let l0_view = self.level_view(0, &cf);
+            let l1_view = self.level_view(1, &cf);
+            if crate::leveling::is_disjoint(&l1_view) {
+                if let Some((_l0_sel, slice)) = crate::leveling::pick_l0_to_l1(
+                    &l0_view,
+                    &l1_view,
+                    options
+                        .max_input_files
+                        .filter(|m| *m > 0)
+                        .unwrap_or(usize::MAX),
+                ) {
+                    let slice_tables: Vec<SstTable> =
+                        slice.iter().map(|&i| self.ssts[i].clone()).collect();
+                    let slice_bytes: u64 = slice_tables.iter().map(|t| self.table_bytes(t)).sum();
+                    let cap = self.l1_target_bytes.saturating_mul(4);
+                    if slice_bytes > cap {
+                        // Overlapping L1 is too fat for one bounded job:
+                        // shrink it by pushdown first (oldest chunks leave
+                        // L1 entirely). Falls through to L0-only stacking
+                        // only when nothing can push down.
+                        if let Some(job) = self.prepare_pushdown_compact()? {
+                            return Ok(Some(job));
+                        }
+                    } else {
+                        inputs.extend(slice_tables);
+                    }
+                }
+            }
+        }
+        self.build_prepared(inputs, 1, options.gc)
+    }
+
+    /// Next bounded pushdown job: the oldest file of the lowest level that
+    /// exceeds its size target, merged with the overlapping files one level
+    /// down. `None` when every level is within target (or its destination is
+    /// a stacked, non-disjoint level — those need a repair rewrite first).
+    ///
+    /// # Errors
+    /// None today (reservation cannot fail); `Result` for fence / I/O later.
+    pub fn prepare_pushdown_compact(&mut self) -> Result<Option<PreparedL0Compact<E>>> {
+        if !crate::leveling::leveled_enabled() || self.ssts.is_empty() {
+            return Ok(None);
+        }
+        let families: Vec<String> = self
+            .ssts
+            .iter()
+            .map(|t| self.compact_family_key(t).to_string())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        for level in 1..MAX_LSM_LEVEL {
+            let target = crate::leveling::level_target_bytes(level, self.l1_target_bytes);
+            for cf in &families {
+                let src_view = self.level_view(level, cf);
+                if src_view.is_empty() || crate::leveling::total_bytes(&src_view) <= target {
+                    continue;
+                }
+                let dst_view = self.level_view(level + 1, cf);
+                let Some((src_idx, slice)) = crate::leveling::pick_pushdown(&src_view, &dst_view)
+                else {
+                    continue;
+                };
+                let mut inputs: Vec<SstTable> = vec![self.ssts[src_idx].clone()];
+                for i in slice {
+                    inputs.push(self.ssts[i].clone());
+                }
+                return self.build_prepared(
+                    inputs,
+                    level + 1,
+                    crate::merge::CompactGcOptions::default(),
+                );
+            }
+        }
+        Ok(None)
+    }
+
+    /// Up to `max_jobs` **pairwise key-disjoint** pushdown jobs from the
+    /// first over-target (level, family) — same priority as
+    /// [`Self::prepare_pushdown_compact`], but instead of only the oldest
+    /// source file it walks the source view oldest-first and keeps every
+    /// candidate whose *combined input hull* (source ∪ overlapping
+    /// destination files) stays clear of every already-claimed hull. Hull
+    /// disjointness gives both safety properties the batch needs: no
+    /// shared input file (a wide destination file spanning two sources is
+    /// absorbed by whichever job claims it first), and disjoint output
+    /// ranges at the destination level, so the sequential installs
+    /// commute exactly like today's one-at-a-time installs.
+    /// `max_jobs <= 1` delegates to the single-job picker (unchanged
+    /// behavior). Returns an empty vec when nothing can push down.
+    fn prepare_disjoint_pushdown_batch(
+        &mut self,
+        max_jobs: usize,
+    ) -> Result<Vec<PreparedL0Compact<E>>> {
+        if max_jobs <= 1 || !crate::leveling::leveled_enabled() || self.ssts.is_empty() {
+            return self
+                .prepare_pushdown_compact()
+                .map(|j| j.into_iter().collect());
+        }
+        let families: Vec<String> = self
+            .ssts
+            .iter()
+            .map(|t| self.compact_family_key(t).to_string())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        for level in 1..MAX_LSM_LEVEL {
+            let target = crate::leveling::level_target_bytes(level, self.l1_target_bytes);
+            for cf in &families {
+                let src_view = self.level_view(level, cf);
+                if src_view.is_empty() || crate::leveling::total_bytes(&src_view) <= target {
+                    continue;
+                }
+                let dst_view = self.level_view(level + 1, cf);
+                // Same gate `pick_pushdown` applies: a stacked destination
+                // needs a repair rewrite, not a batch.
+                if !crate::leveling::is_disjoint(&dst_view) {
+                    continue;
+                }
+                let mut jobs: Vec<PreparedL0Compact<E>> = Vec::new();
+                let mut hulls: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+                for src in &src_view {
+                    if jobs.len() >= max_jobs {
+                        break;
+                    }
+                    let slice: Vec<&crate::leveling::LevelFile> = dst_view
+                        .iter()
+                        .filter(|f| f.overlaps(&src.lo, &src.hi))
+                        .collect();
+                    let mut lo = src.lo.clone();
+                    let mut hi = src.hi.clone();
+                    for f in &slice {
+                        if f.lo < lo {
+                            lo = f.lo.clone();
+                        }
+                        if f.hi > hi {
+                            hi = f.hi.clone();
+                        }
+                    }
+                    // Reject when the hull touches any claimed hull
+                    // (shared boundary = overlap, matching `is_disjoint`).
+                    if hulls.iter().any(|(l2, h2)| !(hi < *l2 || *h2 < lo)) {
+                        continue;
+                    }
+                    let mut inputs: Vec<SstTable> = vec![self.ssts[src.idx].clone()];
+                    for f in &slice {
+                        inputs.push(self.ssts[f.idx].clone());
+                    }
+                    let Some(job) = self.build_prepared(
+                        inputs,
+                        level + 1,
+                        crate::merge::CompactGcOptions::default(),
+                    )?
+                    else {
+                        continue;
+                    };
+                    hulls.push((lo, hi));
+                    jobs.push(job);
+                }
+                if !jobs.is_empty() {
+                    return Ok(jobs);
+                }
+            }
+        }
+        Ok(Vec::new())
+    }
+
+    /// Reservation tail shared by every prepared leveled job: burn a chunk
+    /// range wide enough for the whole output, snapshot dir/env/kit.
+    fn build_prepared(
+        &mut self,
+        inputs: Vec<SstTable>,
+        to_level: u32,
+        gc: crate::merge::CompactGcOptions,
+    ) -> Result<Option<PreparedL0Compact<E>>> {
+        if inputs.is_empty() {
+            return Ok(None);
+        }
         let file_num = self.alloc_file_num();
+        // The off-lock `write()` emits one file per split-target chunk
+        // starting at `file_num`, so only the reserved range is safe: a
+        // concurrent allocator between `write` and `install` would
+        // otherwise land inside the range and its tmp→rename would
+        // clobber a chunk path, leaving a live table reading another
+        // table's bytes (v5 per-block CRC mismatch — guest 25M run #4).
+        // No static bound exists in the writer's split currency (logical
+        // entry bytes) once lz4 shrinks the inputs, so the writer is
+        // CAPPED to this chunk budget instead: the last chunk may exceed
+        // the split target, which is sizing advice, not correctness.
+        let inputs_bytes: u64 = inputs
+            .iter()
+            .map(|t| self.env.metadata_len(t.path()).unwrap_or(0))
+            .sum();
+        // Margin for the parallel spans: each span's last chunk can run
+        // past target and one extra chunk absorbs split-key skew.
+        let span_margin = merge_span_count(&self.env, &inputs).saturating_sub(1) as u64;
+        let chunk_budget =
+            usize::try_from(inputs_bytes / self.compact_target_file_bytes.max(1) + 2 + span_margin)
+                .unwrap_or(usize::MAX);
+        for _ in 1..chunk_budget {
+            self.alloc_file_num();
+        }
+        let kit = self
+            .sst_source
+            .as_ref()
+            .map(|source| crate::cache::PayloadKit {
+                source: Arc::clone(source),
+                pool: Arc::clone(&self.sst_payload_pool),
+            });
         Ok(Some(PreparedL0Compact {
             inputs,
+            to_level,
             file_num,
-            gc: options.gc,
+            gc,
             dir: self.dir.clone(),
             env: self.env.clone(),
             sync: self.sync,
             split_target: self.compact_target_file_bytes,
+            chunk_budget,
+            kit,
+            parallel: self.parallel_merge.clone(),
         }))
+    }
+
+    /// Install a key-space-parallel merge executor (host open path, where
+    /// `E: Send + Sync + 'static` holds). Without one, prepared jobs merge
+    /// sequentially.
+    pub(crate) fn set_parallel_merge(&mut self, pm: Arc<dyn ParallelMerge>) {
+        self.parallel_merge = Some(pm);
+    }
+
+    /// Override the across-job batch width (tests; the host open path sets
+    /// it from `PEDRA_PARALLEL_JOBS`). Needs [`Self::set_parallel_merge`]
+    /// to take effect.
+    pub(crate) fn set_parallel_jobs(&mut self, k: usize) {
+        self.parallel_jobs = k.clamp(1, 8);
+    }
+
+    /// Scheduling view of one family's files at `level` (inventory indices
+    /// with user-key range and on-disk size).
+    fn level_view(&self, level: u32, cf: &str) -> Vec<crate::leveling::LevelFile> {
+        self.ssts
+            .iter()
+            .zip(self.sst_levels.iter())
+            .enumerate()
+            .filter(|(_, (t, &lvl))| lvl == level && self.compact_family_key(t) == cf)
+            .map(|(i, (t, _))| crate::leveling::LevelFile {
+                idx: i,
+                lo: t.smallest_user_key().unwrap_or_default().to_vec(),
+                hi: t.largest_user_key().unwrap_or_default().to_vec(),
+                bytes: self.table_bytes(t),
+            })
+            .collect()
+    }
+
+    /// On-disk size of one live table (0 when the stat fails — a missing
+    /// file reports as empty, the conservative direction for sizing).
+    fn table_bytes(&self, t: &SstTable) -> u64 {
+        self.env.metadata_len(t.path()).unwrap_or(0)
     }
 
     /// Publish a prepared L0→L1 SST. L0s flushed while `write` ran are kept.
@@ -5343,7 +7279,7 @@ impl<E: Env> Db<E> {
             return Err(e);
         }
         for path in old_paths {
-            let _ = self.env.remove_file(&path);
+            let _ = self.remove_db_file(&path);
         }
         self.compact_count = self.compact_count.saturating_add(1);
         Ok(())
@@ -5453,7 +7389,8 @@ impl<E: Env> Db<E> {
             .collect()
     }
 
-    /// Rewrite `input_idxs` into one SST at `to_level`; keep every other file.
+    /// Rewrite `input_idxs` into chunked SSTs at `to_level` (split at
+    /// [`REWRITE_CHUNK_TARGET_BYTES`] logical bytes); keep every other file.
     fn rewrite_ssts(
         &mut self,
         input_idxs: Vec<usize>,
@@ -5475,6 +7412,22 @@ impl<E: Env> Db<E> {
             .first()
             .map(|t| t.cf().to_string())
             .unwrap_or_default();
+        let kit = self
+            .sst_source
+            .as_ref()
+            .map(|source| crate::cache::PayloadKit {
+                source: Arc::clone(source),
+                pool: Arc::clone(&self.sst_payload_pool),
+            });
+        // Whole-levels rewrites merge every file of two levels, so the
+        // writer's per-chunk transient (chunk body Vec + bloom + the
+        // post-write read-back) rides on top of the full live-set read
+        // traffic. Cap the chunk at 64 MiB logical — RocksDB's own L1
+        // target-file-size shape — so that transient stays small; a
+        // caller-set smaller target wins.
+        let rewrite_split = self
+            .compact_target_file_bytes
+            .min(self.rewrite_chunk_target_bytes);
         let new_tables: Vec<SstTable> = write_merged_tables(
             &self.env,
             &self.dir,
@@ -5482,7 +7435,12 @@ impl<E: Env> Db<E> {
             &tables,
             options.gc,
             self.sync,
-            self.compact_target_file_bytes,
+            rewrite_split,
+            // Runs under the `&mut self` write lock and advances
+            // `next_file_num` after the write, so no other allocator can
+            // interleave: unlimited chunks are safe here.
+            usize::MAX,
+            kit.as_ref(),
         )?
         .into_iter()
         .map(|t| t.with_cf(cf.clone()))
@@ -5543,7 +7501,7 @@ impl<E: Env> Db<E> {
 
         for path in old_paths {
             if !new_paths.contains(&path) {
-                let _ = self.env.remove_file(&path);
+                let _ = self.remove_db_file(&path);
             }
         }
         self.compact_count = self.compact_count.saturating_add(1);
@@ -5782,7 +7740,7 @@ impl<E: Env> Db<E> {
         let prepared = match self.prepare_remapped_ssts_blob(file_num, &remap) {
             Ok(p) => p,
             Err(e) => {
-                let _ = self.env.remove_file(&vlog::blob_path(&self.dir, dest_num));
+                let _ = self.remove_db_file(&vlog::blob_path(&self.dir, dest_num));
                 return Err(e);
             }
         };
@@ -5803,7 +7761,7 @@ impl<E: Env> Db<E> {
             self.sst_levels = prev_levels;
             self.next_file_num = prev_next;
             self.note_sst_inventory_changed();
-            let _ = self.env.remove_file(&vlog::blob_path(&self.dir, dest_num));
+            let _ = self.remove_db_file(&vlog::blob_path(&self.dir, dest_num));
             return Err(e);
         }
 
@@ -5817,9 +7775,9 @@ impl<E: Env> Db<E> {
             self.table_cache.insert(Arc::new(t.clone()));
         }
         for path in old_paths {
-            let _ = self.env.remove_file(&path);
+            let _ = self.remove_db_file(&path);
         }
-        let _ = self.env.remove_file(&src);
+        let _ = self.remove_db_file(&src);
         let _ = self.env.sync_dir(&self.dir);
         self.vlog_gc_count = self.vlog_gc_count.saturating_add(1);
         Ok(stats)
@@ -5906,14 +7864,14 @@ impl<E: Env> Db<E> {
                 Ok(_) => {}
                 Err(e) => {
                     for p in &staged_paths {
-                        let _ = self.env.remove_file(p);
+                        let _ = self.remove_db_file(p);
                     }
                     return Err(e);
                 }
             }
             if let Err(e) = self.env.rename(&tmp, &dest) {
                 for p in &staged_paths {
-                    let _ = self.env.remove_file(p);
+                    let _ = self.remove_db_file(p);
                 }
                 return Err(CoreError::Io(e));
             }
@@ -5927,7 +7885,7 @@ impl<E: Env> Db<E> {
                 }
                 Err(e) => {
                     for p in &staged_paths {
-                        let _ = self.env.remove_file(p);
+                        let _ = self.remove_db_file(p);
                     }
                     return Err(e);
                 }
@@ -5990,9 +7948,7 @@ impl<E: Env> Db<E> {
         let prepared = match self.prepare_remapped_ssts(&remap) {
             Ok(p) => p,
             Err(e) => {
-                let _ = self
-                    .env
-                    .remove_file(&self.dir.join(crate::vlog::VLOG_NEW_NAME));
+                let _ = self.remove_db_file(&self.dir.join(crate::vlog::VLOG_NEW_NAME));
                 return Err(e);
             }
         };
@@ -6025,9 +7981,7 @@ impl<E: Env> Db<E> {
             self.next_file_num = prev_next;
             self.vlog_use_new = false;
             self.note_sst_inventory_changed();
-            let _ = self
-                .env
-                .remove_file(&self.dir.join(crate::vlog::VLOG_NEW_NAME));
+            let _ = self.remove_db_file(&self.dir.join(crate::vlog::VLOG_NEW_NAME));
             return Err(e);
         }
 
@@ -6047,10 +8001,11 @@ impl<E: Env> Db<E> {
         }
         self.bytes_written_sst = self.bytes_written_sst.saturating_add(staged_bytes);
         for t in &self.ssts {
+            self.adopt_sst(t);
             self.table_cache.insert(Arc::new(t.clone()));
         }
         for path in old_paths {
-            let _ = self.env.remove_file(&path);
+            let _ = self.remove_db_file(&path);
         }
         Ok(stats)
     }
@@ -6143,12 +8098,12 @@ impl<E: Env> Db<E> {
                 Ok(t) => {
                     drop(t);
                     if let Err(e) = self.env.rename(&tmp_path, &final_path) {
-                        let _ = self.env.remove_file(&tmp_path);
+                        let _ = self.remove_db_file(&tmp_path);
                         cleanup_staged(&self.env, &staged_paths);
                         return Err(e.into());
                     }
                     if let Err(e) = self.sync_dir_if_required(&self.dir) {
-                        let _ = self.env.remove_file(&final_path);
+                        let _ = self.remove_db_file(&final_path);
                         cleanup_staged(&self.env, &staged_paths);
                         return Err(e);
                     }
@@ -6163,14 +8118,14 @@ impl<E: Env> Db<E> {
                             new_levels.push(level);
                         }
                         Err(e) => {
-                            let _ = self.env.remove_file(&final_path);
+                            let _ = self.remove_db_file(&final_path);
                             cleanup_staged(&self.env, &staged_paths);
                             return Err(e);
                         }
                     }
                 }
                 Err(e) => {
-                    let _ = self.env.remove_file(&tmp_path);
+                    let _ = self.remove_db_file(&tmp_path);
                     cleanup_staged(&self.env, &staged_paths);
                     return Err(e);
                 }
@@ -6695,6 +8650,7 @@ impl<E: Env> Db<E> {
             let families = self.batch_families(&batch);
             self.ensure_write_admitted_for(&families)?;
         }
+        self.observe_bulk_batch(&batch);
         // Assign sequences only for this attempt; roll back `next_seq` if WAL fails
         // so a failed multi-op does not burn sequence space (TX denser / mid-commit).
         let seq_checkpoint = self.next_seq;
@@ -6854,6 +8810,29 @@ impl<E: Env> Db<E> {
     /// Merges point versions and range tombstones across all layers so a range
     /// delete in a newer layer correctly hides older puts.
     pub(crate) fn lookup(&self, key: &[u8], snapshot: SequenceNumber) -> Lookup {
+        let fam = self.bulk_family_of_key(key);
+        if let Some(run) = self.bulk_runs.get(fam) {
+            match run.lookup(key, snapshot) {
+                Lookup::NotFound => {}
+                other => return other,
+            }
+        }
+        for (f, run) in &self.parked_bulk {
+            if f == fam {
+                match run.lookup(key, snapshot) {
+                    Lookup::NotFound => {}
+                    other => return other,
+                }
+            }
+        }
+        if let Some((f, run)) = &self.bulk_encoding {
+            if f == fam {
+                match run.lookup(key, snapshot) {
+                    Lookup::NotFound => {}
+                    other => return other,
+                }
+            }
+        }
         let mut best_point_seq: Option<SequenceNumber> = None;
         let mut best_point: Lookup = Lookup::NotFound;
         let mut range_tombs = Vec::new();
@@ -6886,19 +8865,67 @@ impl<E: Env> Db<E> {
         self.get_sst_fallback.fetch_add(1, Ordering::Relaxed);
         // Newest file with a point wins (L0 before L1). Older files cannot
         // hide a newer point; a newer tombstone is seen first.
-        for &sst_i in self.sst_indices_newest_first() {
-            let table = &self.ssts[sst_i];
-            table.collect_range_tombstones(snapshot, &mut range_tombs);
-            if let Some((seq, look)) = table.point_at_with(key, snapshot, |bi| {
-                Some(self.block_cache.get_or_insert_with(table.path(), bi, || {
-                    table.decode_block(bi).unwrap_or_default()
-                }))
-            }) {
-                best_point_seq = Some(seq);
-                best_point = look;
-                break;
+        // Encoded-block seek: CRC-verify + decompress the one candidate block
+        // and copy out only the winning value (the decoded-block cache
+        // thrashed at random-key scale). Block faults fail-stop — a corrupt
+        // block must never read as a miss.
+        let mut seek_scratch = take_tls_point_seek_scratch();
+        // One probe per table: range-prune, then seek the single candidate
+        // block. The bounds span every entry's user key (deletion markers
+        // included), so a key outside them has no point version here.
+        // Without the prune, a get walks every chunk's bloom — ~95 disjoint
+        // chunks after leveled settle measured ~10 µs/get of pure candidate
+        // checking (25M guest).
+        let ssts = &self.ssts;
+        let mut probe = |table: &SstTable| -> Option<(SequenceNumber, Lookup)> {
+            if let (Some(lo), Some(hi)) = (table.smallest_user_key(), table.largest_user_key()) {
+                if key < lo || key > hi {
+                    return None;
+                }
+            }
+            match table.point_at_seeking(key, snapshot, &mut seek_scratch) {
+                Ok(Some((seq, look))) => Some((seq, look)),
+                Ok(None) => None,
+                Err(e) => fail_stop_corrupt_block(table.path(), &e),
+            }
+        };
+        // Levels ascend (L0 newest → L1+), newest-first inside a level —
+        // the same order as the flat walk. Disjoint runs bisect to the one
+        // candidate table; every other run shape keeps the linear walk.
+        'runs: for run in &self.sst_runs {
+            // Range tombstones always flow: a tombstone's end key lives in
+            // its value, so the table bounds do not cover its span. A whole
+            // run at once is behavior-preserving: `range_deleted` hides only
+            // strictly newer points, so tombstones from tables older than
+            // the run's winner stay inert.
+            for &sst_i in &run.tables_newest_first {
+                ssts[sst_i].collect_range_tombstones(snapshot, &mut range_tombs);
+            }
+            if let Some(by_lo) = &run.disjoint_by_lo {
+                // Sorted by `lo`, pairwise disjoint: the last table whose
+                // `lo <= key` is the only one that can hold `key` (every
+                // earlier `hi` sits below the next `lo`). The probe's own
+                // bounds check stays as the fail-safe.
+                let p = by_lo
+                    .partition_point(|&i| ssts[i].smallest_user_key().is_some_and(|lo| lo <= key));
+                if p > 0 {
+                    if let Some((seq, look)) = probe(&ssts[by_lo[p - 1]]) {
+                        best_point_seq = Some(seq);
+                        best_point = look;
+                        break 'runs;
+                    }
+                }
+            } else {
+                for &sst_i in &run.tables_newest_first {
+                    if let Some((seq, look)) = probe(&ssts[sst_i]) {
+                        best_point_seq = Some(seq);
+                        best_point = look;
+                        break 'runs;
+                    }
+                }
             }
         }
+        put_tls_point_seek_scratch(seek_scratch);
 
         match best_point {
             Lookup::Found(v) => {
@@ -7126,6 +9153,48 @@ impl<E: Env> Db<E> {
             let families = self.batch_families(&batch);
             self.ensure_write_admitted_for(&families)?;
         }
+        self.observe_bulk_batch(&batch);
+        self.flush_dead_bulk_runs()?;
+        let (ladder, bulk_puts) = if self.bulk_route_enabled {
+            let mut ladder = Vec::new();
+            let mut bulk_puts = Vec::new();
+            for op in batch {
+                match op {
+                    BatchOp::Put { key, value } => {
+                        let fam = self.bulk_family_of_key(key.as_ref());
+                        if self.bulk_latch.is_latched(fam) {
+                            bulk_puts.push((key, value));
+                        } else {
+                            ladder.push(BatchOp::Put { key, value });
+                        }
+                    }
+                    other => ladder.push(other),
+                }
+            }
+            (ladder, bulk_puts)
+        } else {
+            (batch, Vec::new())
+        };
+        if !bulk_puts.is_empty() {
+            let fam = self.bulk_family_of_key(bulk_puts[0].0.as_ref()).to_string();
+            if !self.bulk_runs.contains_key(&fam) {
+                self.absorb_mem_family_into_run(&fam)?;
+            }
+            let n = bulk_puts.len();
+            let mut keys = Vec::with_capacity(n);
+            let mut vals = Vec::with_capacity(n);
+            for (k, v) in bulk_puts {
+                keys.push(k);
+                vals.push(v);
+            }
+            self.bulk_append_puts(&fam, keys, vals)?;
+        }
+        if ladder.is_empty() {
+            let seq = self.last_sequence();
+            self.publish_sequence(seq);
+            return Ok(seq);
+        }
+        let batch = ladder;
         let st = self.phase_stats.clone();
         let t0 = st.as_ref().map(|_| Instant::now());
         let (ops, seq) = self.prepare_write_ops_spill(batch, false)?;
@@ -7183,6 +9252,7 @@ impl<E: Env> Db<E> {
             let families = self.batch_families(std::slice::from_ref(&batch));
             self.ensure_write_admitted_for(&families)?;
         }
+        self.observe_bulk_op(&batch);
         let st = self.phase_stats.clone();
         let t0 = st.as_ref().map(|_| Instant::now());
         let (op, seq) = self.prepare_one_spill(batch, false)?;
@@ -7241,6 +9311,7 @@ impl<E: Env> Db<E> {
             let families = self.batch_families(&ops);
             self.ensure_write_admitted_for(&families)?;
         }
+        self.observe_bulk_batch(&ops);
         let (records, seq) = self.prepare_write_ops(ops)?;
         if records.is_empty() {
             return Ok(seq);
@@ -7465,6 +9536,7 @@ impl<E: Env> Db<E> {
                 g.results[i] = Some(Ok(self.last_sequence()));
                 continue;
             }
+            self.observe_bulk_batch(&ops);
             match self.prepare_write_ops(ops) {
                 Ok((write_ops, last_seq)) => {
                     if do_sync {
@@ -7654,6 +9726,23 @@ fn finish_group_results(
 
 impl<E: Env> Drop for Db<E> {
     fn drop(&mut self) {
+        // PEDRA_WRITE_PHASE_STATS: one summary line at teardown so a bench
+        // run can attribute hydrate wall time to the commit phases
+        // (RFC-0159 P1.1). No-op when the env was unset at open.
+        if let Some(st) = &self.phase_stats {
+            let ms = |v: &AtomicU64| v.load(Ordering::Relaxed) as f64 / 1e6;
+            println!(
+                "WRITEPHASE commits={} prepare_ms={:.1} wal_ms={:.1} mem_ms={:.1} \
+                 publish_ms={:.1} flush_check_ms={:.1} lock_wait_ms={:.1}",
+                st.commits.load(Ordering::Relaxed),
+                ms(&st.prepare_ns),
+                ms(&st.wal_ns),
+                ms(&st.mem_ns),
+                ms(&st.publish_ns),
+                ms(&st.flush_check_ns),
+                ms(&st.lock_wait_ns),
+            );
+        }
         // Prefer Env unlock so FailingEnv can observe release; Drop of DirLock
         // is std best-effort only if release already ran or Env fails here.
         if let Some(mut lock) = self.dir_lock.take() {
@@ -8181,20 +10270,41 @@ impl<E: Env> Db<E> {
 
     /// Push flushed L0 SSTs into the in-memory inventory (no MANIFEST I/O).
     pub fn apply_l0_installs(&mut self, files: Vec<(SstTable, u64)>) -> L0InstallUndo {
+        self.apply_sst_installs(files, &[])
+    }
+
+    /// Level-explicit in-memory install (RFC-0159 P0.2 bulk chunks land at
+    /// `MAX_LSM_LEVEL`; missing entries default to L0).
+    pub fn apply_sst_installs(
+        &mut self,
+        files: Vec<(SstTable, u64)>,
+        levels: &[u32],
+    ) -> L0InstallUndo {
         let undo = L0InstallUndo {
             prev_next: self.next_file_num,
             prev_manifest: self.manifest_file_num,
             n: files.len(),
         };
-        for (table, file_num) in files {
+        for (i, (table, file_num)) in files.into_iter().enumerate() {
+            self.adopt_sst(&table);
             self.note_sst_bytes_written(table.path());
             self.table_cache.insert(Arc::new(table.clone()));
             if self.next_file_num <= file_num {
                 self.next_file_num = file_num.saturating_add(1);
             }
             self.unsynced_ssts.push(table.path().to_path_buf());
+            let level = levels.get(i).copied().unwrap_or(0);
             self.ssts.push(table);
-            self.sst_levels.push(0);
+            self.sst_levels.push(level);
+            // RFC-0159 P1.11: bottom-level bulk files must not pin the
+            // whole image (100M OOM). Streaming v6 is empty at write;
+            // a latched span that flushed through write_imm_l0 still
+            // carries a resident body — drop it so first get promotes.
+            if level == MAX_LSM_LEVEL && self.bulk_route_enabled && self.sst_source.is_some() {
+                if let Some(t) = self.ssts.last() {
+                    t.release_resident();
+                }
+            }
         }
         self.note_sst_inventory_changed();
         undo
@@ -8224,13 +10334,17 @@ impl<E: Env> Db<E> {
         new_tables: Vec<SstTable>,
     ) -> Option<L0CompactUndo> {
         let input_paths: Vec<PathBuf> = job.input_paths();
-        let still_live = self
-            .ssts
+        // Every input must still be live. With leveled jobs the inputs can
+        // mix levels, and a concurrent install may have taken only *some* of
+        // them: this job's outputs merge the data of inputs that are gone,
+        // so installing them would duplicate live versions (G2). Another
+        // install's outputs already cover the gone inputs — skip entirely.
+        let still_live = input_paths
             .iter()
-            .any(|t| input_paths.iter().any(|p| t.path() == p.as_path()));
+            .all(|p| self.ssts.iter().any(|t| t.path() == p.as_path()));
         if !still_live {
             for t in &new_tables {
-                let _ = self.env.remove_file(t.path());
+                let _ = self.remove_db_file(t.path());
             }
             return None;
         }
@@ -8245,10 +10359,11 @@ impl<E: Env> Db<E> {
             keep_levels.push(lvl);
         }
         for t in &new_tables {
+            self.adopt_sst(t);
             self.note_sst_bytes_written(t.path());
             self.table_cache.insert(Arc::new(t.clone()));
             keep_tables.push(t.clone());
-            keep_levels.push(1);
+            keep_levels.push(job.to_level);
         }
         // The prepared job reserved exactly one file number; a split output
         // consumed `job.file_num ..= job.file_num + n - 1`, so burn the rest.
@@ -9011,7 +11126,7 @@ fn recover_ssts<E: Env>(
             // Kernel contract: ScanAndInstall implies absent inventory.
             debug_assert!(loaded.is_ok() && loaded.as_ref().unwrap().is_none());
             // Legacy / first open: scan directory, then write initial MANIFEST.
-            let (tables, next_file_num, max_seq) = load_ssts_scan(env, dir)?;
+            let (tables, next_file_num, max_seq) = load_ssts_scan(env, dir, table_cache)?;
             let levels = vec![0u32; tables.len()];
             let mut vs = VersionSet {
                 next_file_num,
@@ -9070,7 +11185,14 @@ fn recover_ssts<E: Env>(
 }
 
 /// Load `NNNNNN.sst` files ascending; return tables, next file num, max sequence.
-fn load_ssts_scan<E: Env>(env: &E, dir: &Path) -> Result<(Vec<SstTable>, u64, SequenceNumber)> {
+/// `table_cache` supplies the payload kit (RFC-0042 v18): each opened table is
+/// attached + registered so a bounded open stays within budget during the scan.
+fn load_ssts_scan<E: Env>(
+    env: &E,
+    dir: &Path,
+    table_cache: &TableCache,
+) -> Result<(Vec<SstTable>, u64, SequenceNumber)> {
+    let kit = table_cache.payload_kit();
     let mut files: Vec<(u64, PathBuf)> = Vec::new();
     if env.exists(dir) {
         for name in env.read_dir_names(dir)? {
@@ -9085,10 +11207,49 @@ fn load_ssts_scan<E: Env>(env: &E, dir: &Path) -> Result<(Vec<SstTable>, u64, Se
     let mut tables = Vec::with_capacity(files.len());
     for (_, path) in files {
         let t = SstTable::open_on(env, path)?;
+        if let Some(kit) = &kit {
+            t.attach_payload_kit(&kit.source, &kit.pool);
+        }
         max_seq = max_seq.max(t.max_sequence());
         tables.push(t);
     }
     Ok((tables, next_file_num, max_seq))
+}
+
+/// Whole-levels rewrite chunk target (logical bytes). RocksDB's default L1
+/// target file size; small enough that the chunked writer's per-chunk
+/// transient (chunk body + bloom + read-back) stays small when a rewrite
+/// covers an entire level (guest 25M settle: 48 × ~230 MB L1 files).
+const REWRITE_CHUNK_TARGET_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Current process RSS in KiB for `PEDRA_REWRITE_DIAG` (Linux `/proc`,
+/// `ps` elsewhere). `None` when unavailable.
+fn rewrite_diag_rss_kib() -> Option<u64> {
+    if cfg!(target_os = "linux") {
+        std::fs::read_to_string("/proc/self/status")
+            .ok()
+            .and_then(|s| {
+                s.lines()
+                    .find(|l| l.starts_with("VmRSS:"))
+                    .and_then(|l| l.split_whitespace().nth(1).and_then(|v| v.parse().ok()))
+            })
+    } else {
+        let out = std::process::Command::new("ps")
+            .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+            .output()
+            .ok()?;
+        String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+    }
+}
+
+/// Release allocator-free pages to the OS after each rewrite chunk. glibc
+/// arenas pin freed small chunks next to retained ones (per-block index
+/// keys), so a whole-levels rewrite's RSS creeps even though nothing is
+/// retained — the 6M local repro (macOS) is flat across the job while the
+/// 25M guest climb was monotonic. The glibc FFI lives in `pedradb-posix`
+/// (core is `forbid(unsafe_code)`); no-op elsewhere.
+fn rewrite_trim_allocator() {
+    pedradb_posix::trim_process_heap();
 }
 
 /// Merge `tables` into `{file_num:06}.sst` (RFC-0037 streaming when `!gc.requests_gc()`).
@@ -9104,6 +11265,7 @@ fn finish_merged_chunk_on(
     dir: &Path,
     file_num: u64,
     do_sync_dir: bool,
+    table: SstTable,
 ) -> Result<SstTable> {
     let final_path = dir.join(format!("{file_num:06}.sst"));
     let tmp_path = dir.join(format!("{file_num:06}.sst.tmp"));
@@ -9111,79 +11273,112 @@ fn finish_merged_chunk_on(
     if do_sync_dir {
         let _ = env.sync_dir(dir);
     }
-    SstTable::open_on(env, &final_path)
+    // The writer's in-place table is the truth for the bytes just written;
+    // a re-open here re-read + decompressed + decoded every entry of every
+    // compaction chunk (the caller-side half of the read-back v21p removed
+    // from the writer — the per-job drain rate stayed ~110 MiB/s because
+    // of exactly this call). Recovery opens still verify fully.
+    Ok(table.with_path(final_path))
 }
 
-/// Merge `tables` into one **or more** SSTs split at
-/// [`crate::compact_kernel::COMPACT_TARGET_FILE_BYTES`]: the SST writer
-/// buffers one output file in memory, so a single-file merge of every
-/// input would hold the whole dataset in RAM (the 4 GiB settle OOM —
-/// compact added +1.1 GB for a 620 MB dataset, and the 128 GiB host
-/// survived the same shape only as a ~10 GB in-memory file). Splits fall
-/// between user keys — output files hold disjoint contiguous key ranges
-/// at the same level. File numbers run
-/// `first_file_num ..= first_file_num + n - 1`.
-fn write_merged_tables(
+/// How many key-space spans a merge job should be split into (Rocks-shaped
+/// subcompactions). 1 = sequential. Gated on total input size: small jobs pay
+/// more in thread setup and straggler skew than they gain. `PEDRA_MERGE_SPANS`
+/// overrides (A/B on the guest without a rebuild).
+fn merge_span_count(env: &impl Env, tables: &[SstTable]) -> usize {
+    if let Ok(v) = std::env::var("PEDRA_MERGE_SPANS") {
+        if let Ok(n) = v.trim().parse::<usize>() {
+            return n.max(1);
+        }
+    }
+    const PARALLEL_MIN_INPUT_BYTES: u64 = 96 * 1024 * 1024;
+    let total: u64 = tables
+        .iter()
+        .map(|t| env.metadata_len(t.path()).unwrap_or(0))
+        .sum();
+    if total < PARALLEL_MIN_INPUT_BYTES {
+        return 1;
+    }
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .min(8)
+}
+
+/// `parts - 1` user-key split points sampled from the inputs' in-memory block
+/// indexes (no data read). Consecutive splits define half-open spans
+/// `[split_i, split_{i+1})`; a user key's whole version run stays inside one
+/// span, so per-user-key GC decisions remain complete per span.
+fn sample_span_splits(tables: &[SstTable], parts: usize) -> Vec<Vec<u8>> {
+    let mut keys: Vec<&[u8]> = Vec::new();
+    for t in tables {
+        keys.extend(t.block_first_user_keys());
+    }
+    keys.sort_unstable();
+    keys.dedup();
+    if keys.len() < parts {
+        return Vec::new();
+    }
+    (1..parts)
+        .map(|i| {
+            let at = (keys.len() * i) / parts;
+            keys[at.min(keys.len() - 1)].to_vec()
+        })
+        .collect()
+}
+
+/// Merge `tables` into one **or more** SSTs bounded to user keys in `[lo, hi)`
+/// (`None` = unbounded on that side), split at `split_target` logical bytes.
+/// Splits fall between user keys — output files hold disjoint contiguous key
+/// ranges at the same level. `file_alloc` hands out the next output file
+/// number (reserved by the caller); `span_budget` is a hard cap on this
+/// span's chunk count: when the split target would exceed it, the current
+/// chunk simply grows past target (sizing is advisory; correctness is that
+/// the writer never touches numbers beyond the reserved range).
+///
+/// GC rewrites stream too: `GcMergeSource` applies the same retention
+/// decisions per user-key run, so no input table is ever materialized.
+#[allow(clippy::too_many_arguments)]
+fn write_merged_tables_span(
     env: &impl Env,
     dir: &Path,
-    first_file_num: u64,
     tables: &[SstTable],
     gc: crate::merge::CompactGcOptions,
     do_sync_dir: bool,
     split_target: u64,
+    span_budget: usize,
+    kit: Option<&crate::cache::PayloadKit>,
+    lo: Option<&[u8]>,
+    hi: Option<&[u8]>,
+    file_alloc: &mut dyn FnMut() -> u64,
+    span_tag: usize,
 ) -> Result<Vec<SstTable>> {
     let bloom_hint: usize = tables.iter().map(SstTable::len).sum();
     let mut out: Vec<SstTable> = Vec::new();
-    let mut file_num = first_file_num;
-    if gc.requests_gc() {
-        // GC needs the version view of the whole input, so the input is
-        // materialized; the OUTPUT is still chunked (bounded writer buffer).
-        let mut merged: Vec<(InternalKey, Bytes)> = Vec::new();
-        for t in tables {
-            merged.extend(t.entries_cloned());
-        }
-        let merged = crate::merge::gc_compact_entries(merged, gc);
-        let mut i = 0usize;
-        while i < merged.len() {
-            let mut acc = 0u64;
-            let mut j = i;
-            while j < merged.len() {
-                acc = acc.saturating_add(merged_entry_bytes(&merged[j].0, &merged[j].1));
-                j += 1;
-                if crate::compact_kernel::compact_should_split_at(acc, split_target) {
-                    // Never split one user key's version run across files.
-                    while j < merged.len() && merged[j].0.user_key == merged[j - 1].0.user_key {
-                        acc =
-                            acc.saturating_add(merged_entry_bytes(&merged[j].0, &merged[j].1));
-                        j += 1;
-                    }
-                    break;
-                }
-            }
-            let tmp_path = dir.join(format!("{file_num:06}.sst.tmp"));
-            if let Err(e) = crate::sst::write_sst_sorted_on(
-                env,
-                &tmp_path,
-                merged[i..j].iter().cloned(),
-                bloom_hint,
-            ) {
-                let _ = env.remove_file(&tmp_path);
-                return Err(e);
-            }
-            out.push(finish_merged_chunk_on(env, dir, file_num, do_sync_dir)?);
-            file_num += 1;
-            i = j;
-        }
+    if tables.is_empty() {
         return Ok(out);
     }
     let streams: Vec<_> = tables
         .iter()
-        .map(SstTable::iter_internal_streaming)
+        .map(|t| t.iter_internal_between(lo, hi))
         .collect();
-    let mut merge = crate::merge::KwayInternalMerge::from_streams(streams)?;
+    let merge = crate::merge::KwayInternalMerge::from_streams(streams)?;
+    // GC rewrites stream too: `GcMergeSource` applies the same retention
+    // decisions per user-key run, so no input table is ever materialized
+    // (the old batch path held every decoded input table plus a BTreeMap
+    // copy — at bulk-load scale that tripled the merge footprint).
+    let mut source: Box<dyn crate::merge::CompactSource> = if gc.requests_gc() {
+        Box::new(crate::merge::GcMergeSource::new(merge, gc))
+    } else {
+        Box::new(merge)
+    };
     let mut peeked: Option<Result<(InternalKey, Bytes)>> = None;
     let mut stream_ended = false;
     let mut last_user: Option<Bytes> = None;
+    // PEDRA_REWRITE_DIAG: one line per finished chunk (guest 25M settle
+    // OOM hunts — RSS trajectory of the whole-levels rewrite).
+    let rewrite_diag = std::env::var_os("PEDRA_REWRITE_DIAG").is_some();
+    let rewrite_started = std::time::Instant::now();
     while peeked.is_some() || !stream_ended {
         let mut acc = 0u64;
         let mut closed = false;
@@ -9193,7 +11388,7 @@ fn write_merged_tables(
             }
             let entry = match peeked.take() {
                 Some(e) => e,
-                None => match merge.next_entry() {
+                None => match source.next_entry() {
                     Ok(Some(e)) => Ok(e),
                     Ok(None) => {
                         stream_ended = true;
@@ -9214,13 +11409,16 @@ fn write_merged_tables(
                 }
             };
             if crate::compact_kernel::compact_should_split_at(acc, split_target)
+                && out.len() + 1 < span_budget
                 && last_user
                     .as_ref()
                     .is_none_or(|u| u.as_ref() != ok_entry.0.user_key.as_ref())
             {
-                // Target reached and the user key changed — start a new
-                // file with this entry. A same-user version run never
-                // splits: it stays in one file.
+                // Target reached, the user key changed, and one more chunk
+                // still fits this span's share of the reserved range —
+                // start a new file with this entry. A same-user version run
+                // never splits: it stays in one file. Past the span budget
+                // the split is skipped and the chunk runs long instead.
                 peeked = Some(Ok(ok_entry));
                 closed = true;
                 return None;
@@ -9229,18 +11427,170 @@ fn write_merged_tables(
             last_user = Some(ok_entry.0.user_key.clone());
             Some(Ok(ok_entry))
         });
+        let file_num = file_alloc();
         let tmp_path = dir.join(format!("{file_num:06}.sst.tmp"));
-        if let Err(e) =
-            crate::sst::write_sst_try_sorted_on(env, &tmp_path, &mut entries, bloom_hint)
-        {
-            drop(entries);
-            let _ = env.remove_file(&tmp_path);
-            return Err(e);
-        }
+        let written = crate::sst::write_sst_try_sorted_on(env, &tmp_path, &mut entries, bloom_hint);
         drop(entries);
-        out.push(finish_merged_chunk_on(env, dir, file_num, do_sync_dir)?);
-        file_num += 1;
+        let written = match written {
+            Ok(table) => table,
+            Err(e) => {
+                let _ = env.remove_file(&tmp_path);
+                return Err(e);
+            }
+        };
+        let chunk = finish_merged_chunk_on(env, dir, file_num, do_sync_dir, written)?;
+        // Register the chunk's resident body the moment it exists: this
+        // Vec accumulates every chunk of the job, and a freshly opened
+        // chunk holds its whole file body in RAM. Unregistered payloads
+        // are invisible to the pool and can never be evicted — a
+        // whole-levels rewrite then holds its entire output resident
+        // (the 25M settle OOM at ~6 chunks). Idempotent with the
+        // install-time `adopt_sst`.
+        if let Some(kit) = kit {
+            chunk.attach_payload_kit(&kit.source, &kit.pool);
+        }
+        out.push(chunk);
+        rewrite_trim_allocator();
+        if rewrite_diag {
+            eprintln!(
+                "REWRITEDIAG span={span_tag} chunk={file_num:06} out={} pool_b={} rss_kib={} t={:.1}s",
+                out.len(),
+                kit.map(|k| k.pool.resident_bytes()).unwrap_or(0),
+                rewrite_diag_rss_kib().unwrap_or(0),
+                rewrite_started.elapsed().as_secs_f32()
+            );
+        }
     }
+    Ok(out)
+}
+
+/// Merge `tables` into one **or more** SSTs split at `split_target` logical
+/// bytes (sequential; bounded jobs and small inputs). `chunk_budget` caps the
+/// chunk count (the reserved file-number range).
+fn write_merged_tables(
+    env: &impl Env,
+    dir: &Path,
+    first_file_num: u64,
+    tables: &[SstTable],
+    gc: crate::merge::CompactGcOptions,
+    do_sync_dir: bool,
+    split_target: u64,
+    chunk_budget: usize,
+    kit: Option<&crate::cache::PayloadKit>,
+) -> Result<Vec<SstTable>> {
+    let mut next = first_file_num;
+    let mut alloc = || {
+        let n = next;
+        next += 1;
+        n
+    };
+    write_merged_tables_span(
+        env,
+        dir,
+        tables,
+        gc,
+        do_sync_dir,
+        split_target,
+        chunk_budget,
+        kit,
+        None,
+        None,
+        &mut alloc,
+        0,
+    )
+}
+
+/// [`write_merged_tables`] with key-space parallelism when the inputs are
+/// large ([`merge_span_count`]): Rocks-shaped subcompactions. File numbers
+/// come from one shared atomic over the reserved range, so spans interleave
+/// but never collide and stay gapless.
+fn write_merged_tables_parallel<E: Env + Sync>(
+    env: &E,
+    dir: &Path,
+    first_file_num: u64,
+    tables: &[SstTable],
+    gc: crate::merge::CompactGcOptions,
+    do_sync_dir: bool,
+    split_target: u64,
+    chunk_budget: usize,
+    kit: Option<&crate::cache::PayloadKit>,
+) -> Result<Vec<SstTable>> {
+    let parts = merge_span_count(env, tables).min(chunk_budget.max(1));
+    if parts <= 1 {
+        return write_merged_tables(
+            env,
+            dir,
+            first_file_num,
+            tables,
+            gc,
+            do_sync_dir,
+            split_target,
+            chunk_budget,
+            kit,
+        );
+    }
+    let splits = sample_span_splits(tables, parts);
+    let parts = splits.len() + 1;
+    let span_budget = (chunk_budget / parts).max(1);
+    let next_file_num = std::sync::atomic::AtomicU64::new(first_file_num);
+    let alloc_next = &next_file_num;
+    // Half-open spans: [None, s0), [s0, s1), ... [s_{n-1}, None).
+    let mut lo: Option<Vec<u8>> = None;
+    let results: Vec<Result<Vec<SstTable>>> = std::thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(parts);
+        for (i, hi) in splits
+            .iter()
+            .map(Some)
+            .chain(std::iter::once(None))
+            .enumerate()
+        {
+            let span_lo = lo.clone();
+            let hi = hi.cloned();
+            let span_hi = hi.clone();
+            let handle = scope.spawn(move || {
+                let mut alloc = || alloc_next.fetch_add(1, Ordering::Relaxed);
+                write_merged_tables_span(
+                    env,
+                    dir,
+                    tables,
+                    gc,
+                    do_sync_dir,
+                    split_target,
+                    span_budget,
+                    kit,
+                    span_lo.as_deref(),
+                    span_hi.as_deref(),
+                    &mut alloc,
+                    i,
+                )
+            });
+            handles.push(handle);
+            lo = hi;
+        }
+        handles
+            .into_iter()
+            .map(|h| {
+                h.join()
+                    .unwrap_or_else(|_| Err(CoreError::Internal("merge span panicked".into())))
+            })
+            .collect()
+    });
+    let mut out: Vec<SstTable> = Vec::new();
+    for r in results {
+        out.extend(r?);
+    }
+    let consumed = next_file_num.into_inner() - first_file_num;
+    debug_assert_eq!(
+        consumed,
+        out.len() as u64,
+        "span file numbers must be gapless"
+    );
+    // Spans are key-disjoint; present them in key order for a tidy inventory.
+    out.sort_by(|a, b| {
+        a.smallest_user_key()
+            .unwrap_or(&[])
+            .cmp(b.smallest_user_key().unwrap_or(&[]))
+    });
     Ok(out)
 }
 
@@ -9848,6 +12198,106 @@ mod tests {
         dir
     }
 
+    /// RFC-0159 P1.3: the host-worker stage threshold takes the max of the
+    /// global auto-flush cap and per-CF buffers — a CF buffer above the
+    /// global cap must not be cut down to it (bench: 64 MiB global vs
+    /// 256 MiB data CF staged 64 MiB chunks), and a smaller CF buffer
+    /// never lowers the global stage point.
+    #[test]
+    fn auto_flush_threshold_takes_max_of_global_and_cf_buffers() {
+        let dir = temp_dir();
+        let mut db = Db::<StdEnv>::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(1024),
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(db.auto_flush_threshold(), Some(1024));
+        db.set_cf_write_buffer("data", 16 * 1024);
+        assert_eq!(db.auto_flush_threshold(), Some(16 * 1024));
+        db.set_cf_write_buffer("meta", 512);
+        assert_eq!(db.auto_flush_threshold(), Some(16 * 1024));
+        db.set_cf_write_buffer("data", 0); // removal falls back to the rest
+        assert_eq!(db.auto_flush_threshold(), Some(1024));
+        // RFC-0159 P1.3 sweep knob: `PEDRA_STAGE_MAX_BYTES` clamps down
+        // for chunk-size sweeps (single test — the env is process-global,
+        // a separate test would race this one's asserts).
+        std::env::set_var("PEDRA_STAGE_MAX_BYTES", "512");
+        assert_eq!(db.auto_flush_threshold(), Some(512));
+        std::env::set_var("PEDRA_STAGE_MAX_BYTES", "0");
+        assert_eq!(db.auto_flush_threshold(), Some(1024));
+        std::env::set_var("PEDRA_STAGE_MAX_BYTES", "not-a-number");
+        assert_eq!(db.auto_flush_threshold(), Some(1024));
+        std::env::set_var("PEDRA_STAGE_MAX_BYTES", "999999999");
+        assert_eq!(
+            db.auto_flush_threshold(),
+            Some(1024),
+            "clamp never raises the threshold"
+        );
+        std::env::remove_var("PEDRA_STAGE_MAX_BYTES");
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0042 v18: a bounded open keeps SST payloads within budget and
+    /// still serves identical reads across eviction (flush installs adopt
+    /// tables into the pool; eviction pushes blocks to file reads).
+    #[test]
+    fn bounded_open_serves_reads_after_pool_eviction() {
+        let dir = temp_dir();
+        let mut opts = OpenOptions {
+            sync: false,
+            auto_flush_bytes: Some(4 * 1024 * 1024),
+            ..OpenOptions::default()
+        };
+        opts.sst_payload_budget_bytes = Some(1); // evict everything, always
+        let mut db = Db::<StdEnv>::open_with_env_bounded(&dir, opts, StdEnv).unwrap();
+        for round in 0..3u32 {
+            for i in 0..200u32 {
+                let k = format!("r{round}-key-{i:04}").into_bytes();
+                let v = vec![(i % 199) as u8; 120];
+                db.put(&k, &v).unwrap();
+            }
+            db.flush().unwrap();
+        }
+        assert!(
+            db.ssts.len() >= 3,
+            "want several tables, got {}",
+            db.ssts.len()
+        );
+        assert!(
+            db.sst_payload_pool().resident_bytes() <= 1,
+            "pool must hold (almost) nothing at budget 1"
+        );
+        for round in 0..3u32 {
+            for i in 0..200u32 {
+                let k = format!("r{round}-key-{i:04}").into_bytes();
+                let want = vec![(i % 199) as u8; 120];
+                assert_eq!(db.get(&k).expect("read after eviction"), want);
+            }
+        }
+        // Bounded reopen: recovery itself must stay within budget.
+        drop(db);
+        let mut opts2 = OpenOptions {
+            sync: false,
+            ..OpenOptions::default()
+        };
+        opts2.sst_payload_budget_bytes = Some(1);
+        let db2 = Db::<StdEnv>::open_with_env_bounded(&dir, opts2, StdEnv).unwrap();
+        assert!(
+            db2.sst_payload_pool().resident_bytes() <= 1,
+            "recovery must evict during reopen, not after"
+        );
+        assert_eq!(
+            db2.get("r1-key-0150".as_bytes()).expect("reopen read"),
+            vec![(150 % 199) as u8; 120]
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     fn vlog_opts() -> OpenOptions {
         OpenOptions {
             wal_full_fsync: true,
@@ -9859,6 +12309,7 @@ mod tests {
             exclusive: true,
             large_value_threshold: Some(512),
             wal_recovery: WalRecovery::FailClosed,
+            sst_payload_budget_bytes: None,
         }
     }
 
@@ -9873,6 +12324,7 @@ mod tests {
             exclusive: true,
             large_value_threshold: None,
             wal_recovery: WalRecovery::FailClosed,
+            sst_payload_budget_bytes: None,
         }
     }
 
@@ -10578,6 +13030,61 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// Value-resolved block-cache slots must be reused as-is: resolving is
+    /// not idempotent (F188 strips one escape byte), so a resolved slot that
+    /// ever flowed back through a resolve would corrupt 0x01-prefixed
+    /// values. A key-only scan reads the same block under the raw id and
+    /// must not disturb the resolved form.
+    #[test]
+    fn scan_resolved_blocks_reused_verbatim_across_repeated_scans() {
+        use std::ops::Bound;
+        let dir = temp_dir();
+        // vlog-spilled value whose resolved bytes start with the escape byte.
+        let mut big = vec![0xABu8; 3000];
+        big[0] = INLINE_ESCAPE;
+        let mut small = b"inline".to_vec();
+        small.insert(0, INLINE_ESCAPE);
+        let mut db = Db::open_with(&dir, vlog_opts()).unwrap();
+        db.put(b"k-big", &big).unwrap();
+        db.put(b"k-small", &small).unwrap();
+        db.put(b"k-plain", b"v").unwrap();
+        db.flush().unwrap();
+        let snap = db.last_sequence();
+
+        let collect = |db: &Db<StdEnv>| -> Vec<(Bytes, Bytes)> {
+            db.scan(Bound::Unbounded, Bound::Unbounded)
+                .map(|kv| (kv.key, kv.value))
+                .collect()
+        };
+        let first = collect(&db);
+        // Key-only pass over the same blocks (raw slots, same cache).
+        assert_eq!(
+            db.count_in_range(snap, Bound::Unbounded, Bound::Unbounded, None)
+                .unwrap(),
+            3
+        );
+        // Repeat full scans: resolved slots are hits and must be verbatim.
+        for round in 0..3 {
+            let again = collect(&db);
+            assert_eq!(again, first, "scan round {round} diverged");
+        }
+        let big_got = first.iter().find(|(k, _)| k.as_ref() == b"k-big").unwrap();
+        assert_eq!(big_got.1.as_ref(), big.as_slice(), "spilled value verbatim");
+        let small_got = first
+            .iter()
+            .find(|(k, _)| k.as_ref() == b"k-small")
+            .unwrap();
+        assert_eq!(
+            small_got.1.as_ref(),
+            small.as_slice(),
+            "escape-prefixed inline verbatim"
+        );
+        assert_eq!(db.get(b"k-big").as_deref(), Some(big.as_slice()));
+        assert_eq!(db.get(b"k-small").as_deref(), Some(small.as_slice()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// Mid-GC after MANIFEST remap (`vlog_use_new`) but before promote: reopen correct.
     #[test]
     fn compact_vlog_mid_gc_after_manifest_reopen_correct() {
@@ -11142,6 +13649,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: Some(256),
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -11208,6 +13716,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: Some(256),
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -11309,6 +13818,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -11465,6 +13975,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -11711,6 +14222,7 @@ mod tests {
     fn auto_compact_l0_leaves_existing_l1() {
         let dir = temp_dir();
         let mut db = Db::open(&dir).unwrap();
+        db.bulk_route_enabled = false; // ladder mechanics; bulk would install at MAX
         for i in 0..L0_COMPACTION_TRIGGER {
             db.put([b'a', i as u8], [b'1', i as u8]).unwrap();
             db.flush().unwrap();
@@ -11796,6 +14308,53 @@ mod tests {
         assert_eq!(db.get(b"b").as_deref(), Some(b"b2".as_slice()));
         assert_eq!(db.get(b"c").as_deref(), Some(b"c1".as_slice()));
         assert_eq!(db.get(b"d").as_deref(), Some(b"d1".as_slice()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// GC compaction must stream: no input table's decoded-entries cache may
+    /// be filled (2026-08-31 25M OOM: the batch GC path materialized every
+    /// input via `entries_cloned`, holding 1.15M cached entries live
+    /// mid-hydrate). Clones share the cache Arc, so the assert sees exactly
+    /// what the compaction touched.
+    #[test]
+    fn compact_l0_with_gc_leaves_inputs_unmaterialized() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        for round in 0..2u64 {
+            db.put(&round.to_be_bytes(), b"v").unwrap();
+            db.put(b"a", format!("a{round}").as_bytes()).unwrap();
+            db.delete(b"b").unwrap();
+            db.put(b"b", b"gone").unwrap();
+            db.flush().unwrap();
+        }
+        assert_eq!(db.level_file_count(0), 2);
+        let inputs: Vec<SstTable> = db
+            .ssts
+            .iter()
+            .zip(db.sst_levels.iter())
+            .filter(|(_, &lvl)| lvl == 0)
+            .map(|(t, _)| t.clone())
+            .collect();
+        assert!(
+            inputs.iter().all(|t| !t.materialize_cache_filled()),
+            "L0 inputs must start unmaterialized"
+        );
+
+        let gc = crate::merge::CompactGcOptions::for_oldest_snapshot(6);
+        db.compact_l0_into_l1(CompactOptions {
+            gc,
+            ..CompactOptions::default()
+        })
+        .unwrap();
+
+        assert_eq!(db.level_file_count(0), 0);
+        assert!(
+            inputs.iter().all(|t| !t.materialize_cache_filled()),
+            "GC compact must not materialize its input tables"
+        );
+        assert_eq!(db.get(b"a").as_deref(), Some(b"a1".as_slice()));
+        assert_eq!(db.get(b"b").as_deref(), Some(b"gone".as_slice()));
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
@@ -12132,6 +14691,338 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// v21c regression: the off-lock L0 compact writes one file per split
+    /// chunk starting at the number `prepare` reserved; `prepare` must
+    /// reserve every number the job can emit. Otherwise a concurrent
+    /// allocator between `write` and `install` lands inside the chunk
+    /// range and clobbers a chunk path (guest 25M run #4 died in settle
+    /// with `SST block CRC mismatch in .../000018.sst`).
+    #[test]
+    fn prepare_l0_compact_reserves_whole_chunk_range() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.set_defer_auto_compact(true);
+        db.set_compact_target_file_bytes(4 * 1024);
+        for round in 0..4u8 {
+            for i in 0..64u8 {
+                let mut val = vec![0xA5u8; 96];
+                val[0] = round;
+                val[1] = i;
+                db.put([b'k', i], val).unwrap();
+            }
+            db.flush().unwrap();
+        }
+        let job = db
+            .prepare_l0_compact(CompactOptions::default())
+            .unwrap()
+            .expect("L0 job");
+        let tables = job.write().unwrap();
+        assert!(tables.len() >= 2, "fixture must split into chunks");
+        let chunk_num = |t: &SstTable| -> u64 {
+            t.path()
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .and_then(|s| s.parse().ok())
+                .expect("numeric sst name")
+        };
+        let used: Vec<u64> = tables.iter().map(chunk_num).collect();
+        assert!(
+            used.iter().all(|n| *n >= job.file_num),
+            "chunks must start at the reserved number: {used:?} vs {}",
+            job.file_num
+        );
+        // The next allocator must clear the whole chunk range.
+        let next = db.alloc_file_num();
+        let max_used = *used.iter().max().unwrap();
+        assert!(
+            next > max_used,
+            "unreserved chunk number inside the range: next={next}, max used={max_used}"
+        );
+        db.install_prepared_l0_compact(job, tables).unwrap();
+        assert!(db.get(&[b'k', 0]).is_some(), "store reads after install");
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Across-job batching (v21o): `prepare_disjoint_pushdown_batch` must
+    /// return pairwise key-disjoint jobs (shared-boundary = overlap), and a
+    /// full `compact_leveled` drain through the real `ParallelMergeEnv`
+    /// executor (scoped threads) must leave every key readable, every level
+    /// a disjoint run set, and a reopen-able MANIFEST.
+    #[test]
+    fn parallel_jobs_batch_disjoint_and_correct() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.bulk_route_enabled = false; // ladder mechanics; bulk would install at MAX
+        db.set_defer_auto_compact(true);
+        db.set_compact_target_file_bytes(64 * 1024);
+        // Resting shape: L1 target 8 KiB pushes each round's file down to
+        // L2, while L2's 10× fan-out target holds all rounds (~5 KiB each).
+        db.l1_target_bytes = 8 * 1024;
+        let mut expect = std::collections::BTreeMap::new();
+        for round in 0..8u8 {
+            for i in 0..32u8 {
+                let key = [round, i];
+                let val = vec![0xA5u8; 64];
+                db.put(key, val.clone()).unwrap();
+                expect.insert(key.to_vec(), val);
+            }
+            db.flush().unwrap();
+            // No seam installed yet: this drains one job at a time, so the
+            // fixture shape is the pre-v21o sequential behavior.
+            db.compact_leveled().unwrap();
+        }
+        // Squeeze L2 over target so pushdowns are available.
+        db.l1_target_bytes = 1024;
+        let batch = db.prepare_disjoint_pushdown_batch(4).unwrap();
+        assert_eq!(batch.len(), 4, "fixture must fill the requested width");
+        let hulls: Vec<(Vec<u8>, Vec<u8>)> = batch
+            .iter()
+            .map(|j| {
+                let lo = j
+                    .inputs
+                    .iter()
+                    .map(|t| t.smallest_user_key().unwrap_or(&[]).to_vec())
+                    .min()
+                    .unwrap();
+                let hi = j
+                    .inputs
+                    .iter()
+                    .map(|t| t.largest_user_key().unwrap_or(&[]).to_vec())
+                    .max()
+                    .unwrap();
+                (lo, hi)
+            })
+            .collect();
+        for a in 0..hulls.len() {
+            for b in (a + 1)..hulls.len() {
+                let (loa, hia) = &hulls[a];
+                let (lob, hib) = &hulls[b];
+                assert!(
+                    hia < lob || hib < loa,
+                    "job hulls must be disjoint: {hulls:?}"
+                );
+            }
+        }
+        // Dropping a prepared batch burns only file numbers; inputs stay
+        // live. Now drain through the real parallel executor.
+        db.set_parallel_merge(Arc::new(ParallelMergeEnv::new(StdEnv)));
+        db.set_parallel_jobs(4);
+        db.compact_leveled().unwrap();
+        let scan: Vec<(Vec<u8>, Vec<u8>)> = db
+            .scan(std::ops::Bound::Unbounded, std::ops::Bound::Unbounded)
+            .map(|kv| (kv.key.to_vec(), kv.value.to_vec()))
+            .collect();
+        let want: Vec<(Vec<u8>, Vec<u8>)> = expect.into_iter().collect();
+        assert_eq!(scan, want, "every key survives the parallel drain");
+        for level in 1..=MAX_LSM_LEVEL {
+            let view = db.level_view(level, "");
+            assert!(
+                crate::leveling::is_disjoint(&view),
+                "level {level} stacked after parallel drain"
+            );
+        }
+        db.close().unwrap();
+        let reopened = Db::open(&dir).unwrap();
+        let rescan: Vec<(Vec<u8>, Vec<u8>)> = reopened
+            .scan(std::ops::Bound::Unbounded, std::ops::Bound::Unbounded)
+            .map(|kv| (kv.key.to_vec(), kv.value.to_vec()))
+            .collect();
+        assert_eq!(rescan, want, "manifest recovers the batched installs");
+        drop(reopened);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// LevelRunStream oracle (scan heap-width cut): a level holding many
+    /// strictly disjoint tables must scan identically to the per-file merge
+    /// it replaces — full range, windows that cut file boundaries, `limit`,
+    /// newest-wins overwrites, a point delete, and a range tombstone — while
+    /// the overlapping L0 pair keeps the per-file stream path.
+    #[test]
+    fn scan_grouped_disjoint_level_matches_btree() {
+        fn check(
+            db: &Db,
+            expect: &std::collections::BTreeMap<Vec<u8>, Vec<u8>>,
+            start: Bound<&[u8]>,
+            end: Bound<&[u8]>,
+            limit: Option<usize>,
+        ) {
+            let snap = db.visible_sequence();
+            let got: Vec<(Vec<u8>, Vec<u8>)> = db
+                .scan_at(snap, start, end, limit)
+                .map(|kv| (kv.key.to_vec(), kv.value.to_vec()))
+                .collect();
+            let mut want: Vec<(Vec<u8>, Vec<u8>)> = expect
+                .range::<[u8], _>((start, end))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            if let Some(n) = limit {
+                want.truncate(n);
+            }
+            assert_eq!(got, want, "scan {start:?}..{end:?} limit {limit:?}");
+        }
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.bulk_route_enabled = false; // ladder mechanics; bulk would install at MAX
+        db.set_defer_auto_compact(true);
+        db.set_compact_target_file_bytes(64 * 1024);
+        // Same resting shape as `parallel_jobs_batch_disjoint_and_correct`:
+        // each round's L0 file is pushed to L2, which keeps every round.
+        db.l1_target_bytes = 8 * 1024;
+        let mut expect = std::collections::BTreeMap::new();
+        for round in 0..8u8 {
+            for i in 0..64u8 {
+                let key = [round, i];
+                let val = vec![0xA5u8; 48];
+                db.put(key, val.clone()).unwrap();
+                expect.insert(key.to_vec(), val);
+            }
+            db.flush().unwrap();
+            db.compact_leveled().unwrap();
+        }
+        let grouped = db
+            .sst_runs
+            .iter()
+            .filter(|r| r.disjoint_by_lo.is_some())
+            .map(|r| r.tables_newest_first.len())
+            .max()
+            .unwrap_or(0);
+        assert!(
+            grouped >= 3,
+            "fixture must build a grouped disjoint run (>=3 files), got {grouped}"
+        );
+        // Overlapping L0 pair: same key hull in both files keeps that run on
+        // the per-file stream path (newest file wins the shared keys).
+        for (i, v) in [(0u8, 1u8), (1, 2)] {
+            db.put([0u8, 200 + i], vec![v; 16]).unwrap();
+            expect.insert([0, 200 + i].to_vec(), vec![v; 16]);
+            db.put([2u8, 10], vec![v; 16]).unwrap();
+            expect.insert([2, 10].to_vec(), vec![v; 16]);
+            db.flush().unwrap();
+        }
+        // Live memtable rows merged over both stream shapes, a point delete,
+        // and a range tombstone spanning L2 file boundaries.
+        db.put([3, 7], b"mem-newest".to_vec()).unwrap();
+        expect.insert([3, 7].to_vec(), b"mem-newest".to_vec());
+        db.delete([5, 10]).unwrap();
+        expect.remove(&[5u8, 10].to_vec()[..]);
+        db.delete_range([2u8, 100], [4u8, 20]).unwrap();
+        let covered: Vec<Vec<u8>> = expect
+            .range([2u8, 100].to_vec()..[4u8, 20].to_vec())
+            .map(|(k, _)| k.clone())
+            .collect();
+        for k in covered {
+            expect.remove(&k);
+        }
+        check(&db, &expect, Bound::Unbounded, Bound::Unbounded, None);
+        check(
+            &db,
+            &expect,
+            Bound::Included(&[2u8, 50]),
+            Bound::Excluded(&[5u8, 200]),
+            None,
+        );
+        check(
+            &db,
+            &expect,
+            Bound::Included(&[2u8, 50]),
+            Bound::Included(&[3u8, 7]),
+            None,
+        );
+        check(&db, &expect, Bound::Unbounded, Bound::Unbounded, Some(7));
+        check(
+            &db,
+            &expect,
+            Bound::Excluded(&[0u8, 5]),
+            Bound::Unbounded,
+            Some(200),
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// v21d regression: rewrite chunks (whole-levels `compact` /
+    /// `rewrite_ssts`) enter the live inventory pool-registered. Each
+    /// freshly opened chunk holds its whole file body resident, and the
+    /// writer accumulates every chunk of the job before returning, so an
+    /// unregistered chunk payload can never be evicted — the 25M guest
+    /// settle OOM'd at ~6 resident chunks (guest run #5).
+    #[test]
+    fn compact_rewrite_chunks_are_pool_evictable() {
+        let dir = temp_dir();
+        let mut opts = OpenOptions {
+            sync: false,
+            auto_flush_bytes: Some(4 * 1024 * 1024),
+            ..OpenOptions::default()
+        };
+        opts.sst_payload_budget_bytes = Some(1); // evict everything, always
+        let mut db = Db::<StdEnv>::open_with_env_bounded(&dir, opts, StdEnv).unwrap();
+        db.set_defer_auto_compact(true);
+        for round in 0..3u32 {
+            for i in 0..200u32 {
+                let k = format!("r{round}-key-{i:04}").into_bytes();
+                let v = vec![(i % 199) as u8; 120];
+                db.put(&k, &v).unwrap();
+            }
+            db.flush().unwrap();
+        }
+        assert!(db.ssts.len() >= 3, "want several L0 tables");
+        // Whole-levels rewrite: L0(+L1) of the family through
+        // `rewrite_ssts`, the same path settle's `compact()` takes.
+        db.compact_ssts_only().unwrap();
+        let resident = db.ssts.iter().filter(|t| t.payload_resident()).count();
+        assert_eq!(
+            resident, 0,
+            "rewrite chunks must be pool-evictable; {resident} live payloads resident at budget 1"
+        );
+        // Evicted chunk reads re-read blocks from file and must be
+        // identical (fail-closed CRC path).
+        for round in 0..3u32 {
+            for i in 0..200u32 {
+                let k = format!("r{round}-key-{i:04}").into_bytes();
+                let want = vec![(i % 199) as u8; 120];
+                assert_eq!(db.get(&k).expect("read after rewrite"), want);
+            }
+        }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// v21e regression: whole-levels rewrites split at
+    /// `rewrite_chunk_target_bytes` even when `compact_target_file_bytes`
+    /// is set enormous — the chunked writer's per-chunk transient (chunk
+    /// body + bloom + read-back) must not scale with the configured
+    /// compact target during a full-level merge (guest 25M settle
+    /// peak-OOM'd with 256 MiB chunks on a 3.9 GB box).
+    #[test]
+    fn rewrite_caps_chunk_size_for_whole_level_merges() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.bulk_route_enabled = false; // ladder mechanics; bulk would install at MAX
+        db.set_defer_auto_compact(true);
+        // Without the cap this merge would emit ONE file.
+        db.set_compact_target_file_bytes(u64::MAX / 2);
+        db.rewrite_chunk_target_bytes = 8 * 1024;
+        for round in 0..2u32 {
+            for i in 0..200u32 {
+                let k = format!("r{round:02}-key-{i:06}").into_bytes();
+                let v = vec![0xA5u8; 300];
+                db.put(&k, &v).unwrap();
+            }
+            db.flush().unwrap();
+        }
+        db.compact_ssts_only().unwrap();
+        assert!(
+            db.ssts.len() >= 2,
+            "rewrite must split at its chunk cap, got {} files",
+            db.ssts.len()
+        );
+        assert!(db.sst_levels.iter().all(|&lvl| lvl == 1));
+        assert!(db.get(b"r00-key-000000").is_some());
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn prepare_write_install_l0_keeps_inputs_until_install() {
         let dir = temp_dir();
@@ -12204,11 +15095,7 @@ mod tests {
         );
         for i in 0..100u32 {
             let k = format!("split/{i:04}").into_bytes();
-            assert_eq!(
-                db.get(&k).as_deref().map(|v| v.len()),
-                Some(100),
-                "key {i}"
-            );
+            assert_eq!(db.get(&k).as_deref().map(|v| v.len()), Some(100), "key {i}");
         }
         assert_eq!(
             db.get(b"split/zzzz").as_deref().map(|v| v.len()),
@@ -12216,19 +15103,13 @@ mod tests {
             "latest version of the run"
         );
         db.close().unwrap();
-        let mut db = Db::open(&dir).unwrap();
+        let db = Db::open(&dir).unwrap();
         assert!(
             db.level_file_count(1) >= 2,
             "split inventory survives reopen"
         );
-        assert_eq!(
-            db.get(b"split/0042").as_deref().map(|v| v.len()),
-            Some(100)
-        );
-        assert_eq!(
-            db.get(b"split/zzzz").as_deref().map(|v| v.len()),
-            Some(100)
-        );
+        assert_eq!(db.get(b"split/0042").as_deref().map(|v| v.len()), Some(100));
+        assert_eq!(db.get(b"split/zzzz").as_deref().map(|v| v.len()), Some(100));
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
@@ -12248,6 +15129,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -12284,6 +15166,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -12316,6 +15199,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -12352,6 +15236,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -12392,6 +15277,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: Some(512),
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -12415,6 +15301,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: Some(512),
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -12447,6 +15334,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -12491,6 +15379,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -12528,6 +15417,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -12668,6 +15558,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
             env,
         )
@@ -12720,6 +15611,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -12757,6 +15649,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -12817,6 +15710,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -12865,6 +15759,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -12921,6 +15816,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -12965,6 +15861,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -13010,6 +15907,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -13379,6 +16277,7 @@ mod tests {
             auto_compact_sst_bytes: None,
             exclusive: false,
             large_value_threshold: None,
+            sst_payload_budget_bytes: None,
         };
         let db = Db::open_with(&dir, opts).unwrap();
         assert!(
@@ -13466,6 +16365,51 @@ mod tests {
         assert_eq!(db.get(b"k").as_deref(), Some(b"v".as_ref()));
         assert!(db.sst_count() >= 1);
         db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The compat compact worker polls `try_rotate_wal_if_idle` while the DB
+    /// is idle; a drained pipeline with an empty current segment must not
+    /// rewrite MANIFEST+CURRENT on every poll (10k+ fdatasync barriers per
+    /// slipstream guest run during the read legs).
+    #[test]
+    fn idle_rotate_with_empty_segment_does_not_rewrite_manifest() {
+        // `store()` renumbers MANIFEST-NNNNNN and drops older files, so the
+        // durable oracle for "a persist happened" is the number CURRENT names.
+        let current_manifest_num = |dir: &Path| -> u32 {
+            let cur = fs::read_to_string(dir.join(crate::manifest::CURRENT_FILE)).unwrap();
+            let name = cur.lines().next().unwrap();
+            name.trim_start_matches(crate::manifest::MANIFEST_PREFIX)
+                .parse()
+                .unwrap_or(0)
+        };
+        let dir = temp_dir();
+        {
+            let mut db = Db::open(&dir).unwrap();
+            db.put(b"k", b"v").unwrap();
+            db.flush().unwrap();
+            // Flush pipeline rotated the non-empty WAL once.
+            let after_flush = current_manifest_num(&dir);
+            assert!(after_flush >= 1);
+            for _ in 0..8 {
+                db.try_rotate_wal_if_idle().unwrap();
+            }
+            assert_eq!(
+                current_manifest_num(&dir),
+                after_flush,
+                "idle polls must not rewrite MANIFEST for an empty segment"
+            );
+            // A new append re-arms rotation exactly once.
+            db.put(b"k2", b"v2").unwrap();
+            db.flush().unwrap();
+            let after_second_flush = current_manifest_num(&dir);
+            assert!(after_second_flush > after_flush);
+            for _ in 0..8 {
+                db.try_rotate_wal_if_idle().unwrap();
+            }
+            assert_eq!(current_manifest_num(&dir), after_second_flush);
+            db.close().unwrap();
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -13752,6 +16696,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: Some(512),
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -13773,6 +16718,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: Some(512),
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -13845,6 +16791,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: Some(512),
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -13889,6 +16836,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: Some(512),
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -13956,6 +16904,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -14029,6 +16978,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -14096,9 +17046,11 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
+        db.bulk_route_enabled = false; // ladder mechanics; bulk would install at MAX
         let mut model = std::collections::BTreeMap::new();
         // Many small flushes to create multiple L0 SSTs, then compact subset to L1.
         for i in 0..N {
@@ -14176,6 +17128,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -14422,6 +17375,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -14725,6 +17679,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap(),
@@ -14813,6 +17768,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -14841,6 +17797,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -14873,6 +17830,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -14908,6 +17866,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -15050,6 +18009,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -15095,6 +18055,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -15355,9 +18316,12 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// RFC-0034: zipfian point-get must hit the block cache on the second seek.
+    /// RFC-0034, updated for the encoded-block seek: a point-get decodes only
+    /// the candidate window (`blocks_for_point`), and a repeated get does the
+    /// same bounded work for the same answer. The decoded-block cache stays
+    /// on the scan paths.
     #[test]
-    fn point_get_second_seek_hits_block_cache() {
+    fn point_get_seek_decodes_bounded_blocks() {
         let dir = temp_dir();
         let mut db = Db::open(&dir).unwrap();
         let payload = vec![b'y'; 256];
@@ -15371,18 +18335,26 @@ mod tests {
         assert!(db.get(k).is_some());
         let first = crate::sst::sst_blocks_decoded();
         assert!(first >= 1, "first get must decode a block");
+        assert!(
+            first <= 2,
+            "candidate window is at most previous block + run"
+        );
         crate::sst::reset_sst_blocks_decoded();
         assert!(db.get(k).is_some());
-        assert_eq!(
-            crate::sst::sst_blocks_decoded(),
-            0,
-            "second get of the same key must not lz4-decode again"
+        // The point cache may serve the repeat outright; when it falls
+        // through, the seek does the same bounded work (≤ candidate window).
+        assert!(
+            crate::sst::sst_blocks_decoded() <= first,
+            "second get of the same key must not decode more than the first \
+             (first={first}, second={})",
+            crate::sst::sst_blocks_decoded()
         );
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// MVCC latest / deps_scan: second seek of the same prefix/range is cache-only.
+    /// MVCC latest / deps_scan: second prefix seek is bounded (block-cache
+    /// walk + one encoded-seek resolve); second range scan is cache-only.
     #[test]
     fn last_under_prefix_and_scan_second_seek_are_cached() {
         let dir = temp_dir();
@@ -15409,10 +18381,14 @@ mod tests {
         crate::sst::reset_sst_blocks_decoded();
         let last2 = db.last_under_prefix(snap, b"u/10").unwrap();
         assert_eq!(last2.as_deref(), Some(last.as_ref()));
-        assert_eq!(
-            crate::sst::sst_blocks_decoded(),
-            0,
-            "second latest must hit the block cache"
+        // The reverse block walk is block-cache served; the final point
+        // resolve runs the encoded seek, which decompresses the one
+        // candidate block (first decoded `first` blocks overall).
+        assert!(
+            crate::sst::sst_blocks_decoded() <= first,
+            "second latest must do no more work than the first \
+             (first={first}, second={})",
+            crate::sst::sst_blocks_decoded()
         );
 
         db.block_cache.clear();
@@ -15939,6 +18915,7 @@ mod tests {
             exclusive: true,
             large_value_threshold: None,
             wal_recovery: WalRecovery::FailClosed,
+            sst_payload_budget_bytes: None,
         }
     }
 
@@ -16088,7 +19065,22 @@ mod tests {
         opts.auto_compact_sst_count = None;
         let mut db = Db::open_with_env(&dir, opts, env).unwrap();
         let keys: Vec<Vec<u8>> = (0..32u32).map(|k| format!("k{k:04}").into()).collect();
-        let val = |round: u32, k: u32| vec![(k * 11 + round) as u8; 2048];
+        // Incompressible payloads: constant fill lets lz4 crush every round
+        // to ~nothing (L0 flushes are compressed since v19) and the byte
+        // ratios below would measure compression, not version reclamation.
+        let val = |round: u32, k: u32| {
+            let mut s = u64::from(k).wrapping_mul(0x9E37_79B9)
+                ^ u64::from(round).wrapping_mul(0x85EB_CA6B)
+                ^ 0x27D4_EB2F;
+            let mut v = Vec::with_capacity(2048);
+            for _ in 0..2048 {
+                s = s
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                v.push((s >> 33) as u8);
+            }
+            v
+        };
         let mut round0 = Vec::new();
         for (k, key) in keys.iter().enumerate() {
             let v = val(0, k as u32);
@@ -16828,10 +19820,19 @@ mod tests {
             bytes[mid] ^= 0xff;
             fs::write(&path, bytes).unwrap();
         }
-        assert!(matches!(
-            db.get_at(snap, b"k042"),
-            Err(CoreError::SnapshotTooOld { .. })
-        ));
+        // The hole key's outcome class depends on which covering segment the
+        // byte cap left remote-only — a size-threshold layout choice that
+        // compressed L0 flushes legitimately shift. Either answer is honest
+        // (the key was never written): a coverage-gap SnapshotTooOld when no
+        // remote-only segment covers the snapshot, or a proven-absent None
+        // when every covering segment's sidecar rules the key out. Never a
+        // value — and never a fetch: the corruption above makes a fetched
+        // segment fail CorruptHistory.
+        let hole = db.get_at(snap, b"k042");
+        assert!(
+            matches!(hole, Err(CoreError::SnapshotTooOld { .. })) || matches!(hole, Ok(None)),
+            "hole key must read too-old or absent, got {hole:?}"
+        );
         assert!(matches!(
             db.get_at(Snapshot::at(150), b"k000"),
             Err(CoreError::CorruptHistory(_))
@@ -17315,6 +20316,504 @@ mod tests {
             "count scan micro: users={users} vers={versions} rounds={rounds} cold={cold:.3}µs/window warm={warm:.3}µs/window (n={n}, mem_entries={}, ssts={})",
             db.stats().mem_entries,
             db.stats().sst_count
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0159 P0.2: a latched family's pure-append span installs directly
+    /// at the bottom level; the repeated-key meta family stays on the
+    /// ladder; settle does not rewrite the bulk chunks; reopen restores
+    /// the levels.
+    #[test]
+    fn bulk_ingest_installs_latched_family_at_bottom_level() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into(), "meta".into()]);
+        let v = vec![b'v'; 200];
+        let mut keys = Vec::new();
+        for b in 0..40u32 {
+            let mut batch = Vec::new();
+            for j in 0..16u32 {
+                let k = format!("data\0{b:04}-{j:04}").into_bytes();
+                batch.push(BatchOp::put(k.clone(), v.clone()));
+                keys.push(k);
+            }
+            // The slipstream shape: one repeated cursor key in another
+            // family every batch.
+            batch.push(BatchOp::put(b"meta\0cursor".to_vec(), b"c".to_vec()));
+            db.apply_batch(batch).unwrap();
+        }
+        db.flush().unwrap();
+
+        let mut data_max = 0usize;
+        let mut data_elsewhere = 0usize;
+        let mut meta_l0 = 0usize;
+        let mut bulk_paths = Vec::new();
+        for (t, &lvl) in db.ssts.iter().zip(db.sst_levels.iter()) {
+            if t.cf() == "data" {
+                if lvl == MAX_LSM_LEVEL {
+                    data_max += 1;
+                    bulk_paths.push(t.path().to_path_buf());
+                } else {
+                    data_elsewhere += 1;
+                }
+            } else if t.cf() == "meta" && lvl == 0 {
+                meta_l0 += 1;
+            }
+        }
+        assert_eq!(
+            data_elsewhere, 0,
+            "every data chunk must land at the bottom level"
+        );
+        assert_eq!(data_max, 1, "one flush = one bulk chunk");
+        assert_eq!(meta_l0, 1, "repeated cursor key never latches");
+
+        for (i, k) in keys.iter().enumerate() {
+            assert_eq!(
+                db.get(k).as_deref(),
+                Some(&v[..]),
+                "bulk key {i} must read back"
+            );
+        }
+        assert_eq!(db.get(b"meta\0cursor").as_deref(), Some(&b"c"[..]));
+
+        // Settle is a no-op for the bulk family: chunk files unchanged.
+        db.compact().unwrap();
+        let after: Vec<std::path::PathBuf> = db
+            .ssts
+            .iter()
+            .zip(db.sst_levels.iter())
+            .filter(|(_, &l)| l == MAX_LSM_LEVEL)
+            .map(|(t, _)| t.path().to_path_buf())
+            .filter(|p| {
+                p.file_name()
+                    .is_some_and(|f| bulk_paths.iter().any(|b| b.file_name() == Some(f)))
+            })
+            .collect();
+        assert_eq!(after.len(), bulk_paths.len(), "compact rewrote bulk chunks");
+        for k in &keys {
+            assert_eq!(db.get(k).as_deref(), Some(&v[..]));
+        }
+
+        drop(db);
+        let db2 = Db::open(&dir).unwrap();
+        let max_files = db2
+            .ssts
+            .iter()
+            .zip(db2.sst_levels.iter())
+            .filter(|(_, &l)| l == MAX_LSM_LEVEL)
+            .count();
+        assert_eq!(max_files, 1, "reopen must restore the bottom-level chunk");
+        for (i, k) in keys.iter().enumerate() {
+            assert_eq!(db2.get(k).as_deref(), Some(&v[..]), "post-reopen {i}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Reference for the run-bisect oracle: the pre-run flat walk, copied
+    /// verbatim from the old `lookup` SST loop (newest-first, lazy tombstone
+    /// collect up to the winner, first-found-point wins).
+    fn lookup_linear_reference(db: &Db, key: &[u8], snapshot: SequenceNumber) -> Lookup {
+        let mut best_point_seq: Option<SequenceNumber> = None;
+        let mut best_point = Lookup::NotFound;
+        let mut range_tombs = Vec::new();
+        for table in db.mem_layers() {
+            Db::<StdEnv>::scan_mem_for_lookup(
+                table,
+                key,
+                snapshot,
+                &mut best_point_seq,
+                &mut best_point,
+                &mut range_tombs,
+            );
+            if let Some(seq) = best_point_seq {
+                return match best_point {
+                    Lookup::Found(_)
+                        if !crate::merge::visible_at(
+                            crate::key::ValueType::Value,
+                            range_deleted(key, seq, &range_tombs),
+                        ) =>
+                    {
+                        Lookup::Deleted
+                    }
+                    other => other,
+                };
+            }
+        }
+        let mut seek_scratch = PointSeekScratch::default();
+        for &sst_i in db.sst_indices_newest_first() {
+            let table = &db.ssts[sst_i];
+            table.collect_range_tombstones(snapshot, &mut range_tombs);
+            if let (Some(lo), Some(hi)) = (table.smallest_user_key(), table.largest_user_key()) {
+                if key < lo || key > hi {
+                    continue;
+                }
+            }
+            match table.point_at_seeking(key, snapshot, &mut seek_scratch) {
+                Ok(Some((seq, look))) => {
+                    best_point_seq = Some(seq);
+                    best_point = look;
+                    break;
+                }
+                Ok(None) => {}
+                Err(e) => fail_stop_corrupt_block(table.path(), &e),
+            }
+        }
+        match best_point {
+            Lookup::Found(v) => {
+                let seq = best_point_seq.unwrap_or(0);
+                if crate::merge::visible_at(
+                    crate::key::ValueType::Value,
+                    range_deleted(key, seq, &range_tombs),
+                ) {
+                    Lookup::Found(v)
+                } else {
+                    Lookup::Deleted
+                }
+            }
+            Lookup::Deleted => Lookup::Deleted,
+            Lookup::NotFound => {
+                if range_deleted(key, 0, &range_tombs) {
+                    Lookup::Deleted
+                } else {
+                    Lookup::NotFound
+                }
+            }
+        }
+    }
+
+    /// Point-lookup run bisect over disjoint bottom-level chunks: `lookup`
+    /// must agree with the flat-walk reference and with a ground-truth model
+    /// for live keys, deleted keys, range-tombstone spans, chunk boundaries,
+    /// and in-gap keys — live and after reopen (lazy tables).
+    #[test]
+    fn lookup_bisect_disjoint_run_matches_linear_walk() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into()]);
+
+        // Three ascending flushes → three pairwise-disjoint bottom chunks.
+        let mut model: std::collections::BTreeMap<Vec<u8>, Option<Vec<u8>>> =
+            std::collections::BTreeMap::new();
+        for tag in ["a", "b", "c"] {
+            for j in 0..50u32 {
+                let k = format!("data\0{tag}{j:03}").into_bytes();
+                let v = format!("v{tag}{j:03}").into_bytes();
+                db.put(&k, &v).unwrap();
+                model.insert(k, Some(v));
+            }
+            db.flush().unwrap();
+        }
+        // Descending batch kills the family latch so everything after lands
+        // on L0 above the chunks: overwrite, point delete, range tombstone
+        // spanning the a/b chunk boundary, second overwrite outside it.
+        let kill = vec![
+            BatchOp::put(b"data\0z999".to_vec(), b"z".to_vec()),
+            BatchOp::put(b"data\0a998".to_vec(), b"z".to_vec()),
+        ];
+        db.apply_batch(kill).unwrap();
+        model.insert(b"data\0z999".to_vec(), Some(b"z".to_vec()));
+        model.insert(b"data\0a998".to_vec(), Some(b"z".to_vec()));
+
+        db.put(b"data\0a050", b"over").unwrap();
+        model.insert(b"data\0a050".to_vec(), Some(b"over".to_vec()));
+        db.delete(b"data\0a000").unwrap();
+        model.insert(b"data\0a000".to_vec(), None);
+        db.delete_range(b"data\0b020", b"data\0b040").unwrap();
+        for j in 20..40u32 {
+            model.insert(format!("data\0b{j:03}").into_bytes(), None);
+        }
+        db.put(b"data\0b060", b"over2").unwrap();
+        model.insert(b"data\0b060".to_vec(), Some(b"over2".to_vec()));
+        db.flush().unwrap();
+
+        // Shape: a bottom-level run with ≥3 disjoint tables (bisect armed)
+        // and an L0 run above it (linear walk).
+        let bottom = db
+            .sst_runs
+            .iter()
+            .find(|r| r.level == MAX_LSM_LEVEL)
+            .expect("bottom-level run");
+        assert!(
+            bottom.tables_newest_first.len() >= 3,
+            "want ≥3 bottom chunks, got {}",
+            bottom.tables_newest_first.len()
+        );
+        let by_lo = bottom
+            .disjoint_by_lo
+            .as_ref()
+            .expect("bottom chunks must bisect");
+        assert_eq!(by_lo.len(), bottom.tables_newest_first.len());
+        assert!(db.sst_runs.iter().any(|r| r.level == 0));
+        assert!(db.sst_runs[0].level == 0, "L0 run comes first");
+        assert!(
+            db.sst_runs[0].disjoint_by_lo.is_none(),
+            "L0 keeps the linear walk"
+        );
+
+        // Oracle sweep: model keys + chunk boundaries + gaps + tombstone
+        // endpoints + outside-all keys.
+        let mut probes: Vec<Vec<u8>> = model.keys().cloned().collect();
+        for k in [
+            &b"data\0"[..],
+            &b"data\0a"[..],
+            &b"data\0a049x"[..],
+            &b"data\0b"[..],
+            &b"data\0b019x"[..],
+            &b"data\0b020"[..],
+            &b"data\0b039"[..],
+            &b"data\0b039x"[..],
+            &b"data\0b040"[..],
+            &b"data\0c"[..],
+            &b"data\0c049x"[..],
+            &b"data\0zzz"[..],
+        ] {
+            probes.push(k.to_vec());
+        }
+        let snapshot = db.last_sequence();
+        for k in &probes {
+            let got = db.lookup(k, snapshot);
+            let want = lookup_linear_reference(&db, k, snapshot);
+            assert_eq!(got, want, "bisect vs flat walk at {k:?}");
+            let expected = model.get(k).map_or(Lookup::NotFound, |m| match m {
+                Some(v) => Lookup::Found(v.clone().into()),
+                None => Lookup::NotFound,
+            });
+            // The model cannot tell Deleted from NotFound; both read absent.
+            let agree = match (&got, &expected) {
+                (Lookup::Found(_), Lookup::Found(_)) => got == expected,
+                (Lookup::Found(_), _) | (_, Lookup::Found(_)) => false,
+                _ => true,
+            };
+            assert!(
+                agree,
+                "model mismatch at {k:?}: got {got:?}, model {expected:?}"
+            );
+        }
+
+        db.close().unwrap();
+        let db = Db::open(&dir).unwrap();
+        let snapshot = db.last_sequence();
+        for k in &probes {
+            let got = db.lookup(k, snapshot);
+            let want = lookup_linear_reference(&db, k, snapshot);
+            assert_eq!(got, want, "post-reopen bisect vs flat walk at {k:?}");
+        }
+        let bottom = db
+            .sst_runs
+            .iter()
+            .find(|r| r.level == MAX_LSM_LEVEL)
+            .expect("bottom-level run after reopen");
+        assert!(bottom.disjoint_by_lo.is_some(), "reopen rebuilds runs");
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0159 P0.2: a descending batch kills the family; later spans
+    /// install at L0 again and every version stays readable.
+    #[test]
+    fn bulk_ingest_descent_falls_back_to_ladder() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into()]);
+        let v = vec![b'v'; 120];
+        for b in 0..20u32 {
+            let mut batch = Vec::new();
+            for j in 0..4u32 {
+                let k = format!("data\0a{b:04}-{j:04}").into_bytes();
+                batch.push(BatchOp::put(k, v.clone()));
+            }
+            db.apply_batch(batch).unwrap();
+        }
+        db.flush().unwrap();
+        assert!(
+            db.ssts
+                .iter()
+                .zip(db.sst_levels.iter())
+                .any(|(t, &l)| t.cf() == "data" && l == MAX_LSM_LEVEL),
+            "ascending stream must bulk"
+        );
+
+        // Descent: a key below the flushed range kills the family.
+        db.apply_batch(vec![BatchOp::put(b"data\0a0000-0000".to_vec(), v.clone())])
+            .unwrap();
+        for b in 20..24u32 {
+            let mut batch = Vec::new();
+            for j in 0..4u32 {
+                let k = format!("data\0a{b:04}-{j:04}").into_bytes();
+                batch.push(BatchOp::put(k, v.clone()));
+            }
+            db.apply_batch(batch).unwrap();
+        }
+        db.flush().unwrap();
+        assert!(
+            db.ssts
+                .iter()
+                .zip(db.sst_levels.iter())
+                .any(|(t, &l)| t.cf() == "data" && l == 0),
+            "post-kill span must stay on the L0 ladder"
+        );
+        // Overwrite of an existing key still reads the newest version.
+        assert_eq!(db.get(b"data\0a0000-0000").as_deref(), Some(&v[..]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0159 P0.2: a delete in the span keeps the family latched (the
+    /// P0.1 rule) but routes that span's flush to L0 — a bottom-level
+    /// chunk may not carry an unmerged tombstone.
+    #[test]
+    fn bulk_ingest_tombstone_span_routes_ladder() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into()]);
+        let v = vec![b'v'; 120];
+        for b in 0..12u32 {
+            let mut batch = Vec::new();
+            for j in 0..4u32 {
+                let k = format!("data\0b{b:04}-{j:04}").into_bytes();
+                batch.push(BatchOp::put(k, v.clone()));
+            }
+            db.apply_batch(batch).unwrap();
+        }
+        db.flush().unwrap();
+        assert!(db
+            .ssts
+            .iter()
+            .zip(db.sst_levels.iter())
+            .any(|(t, &l)| t.cf() == "data" && l == MAX_LSM_LEVEL));
+
+        // Delete of an already-bulked key rides with the next span: that
+        // flush carries a tombstone so it routes the ladder, and the L0
+        // tombstone must shadow the bottom-level bulk chunk on reads.
+        db.apply_batch(vec![BatchOp::delete(b"data\0b0000-0000")])
+            .unwrap();
+        for b in 0..4u32 {
+            let mut batch = Vec::new();
+            for j in 0..4u32 {
+                let k = format!("data\0c{b:04}-{j:04}").into_bytes();
+                batch.push(BatchOp::put(k, v.clone()));
+            }
+            db.apply_batch(batch).unwrap();
+        }
+        db.flush().unwrap();
+        assert!(
+            db.ssts
+                .iter()
+                .zip(db.sst_levels.iter())
+                .any(|(t, &l)| t.cf() == "data" && l == 0),
+            "tombstone-carrying span must install at L0"
+        );
+        assert_eq!(
+            db.get(b"data\0b0000-0000").as_deref(),
+            None,
+            "L0 tombstone must shadow the bulk chunk at the bottom level"
+        );
+        assert_eq!(
+            db.get(b"data\0c0001-0001").as_deref(),
+            Some(&v[..]),
+            "put after the delete must survive"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0159 P0.2: no physical CFs — the single "default" family latches
+    /// and installs at the bottom level too.
+    #[test]
+    fn bulk_ingest_default_family_installs_at_bottom() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        for b in 0..12u32 {
+            let mut batch = Vec::new();
+            for j in 0..4u32 {
+                batch.push(BatchOp::put(
+                    format!("k{b:04}-{j:04}").into_bytes(),
+                    b"v".to_vec(),
+                ));
+            }
+            db.apply_batch(batch).unwrap();
+        }
+        db.flush().unwrap();
+        assert!(
+            db.ssts
+                .iter()
+                .zip(db.sst_levels.iter())
+                .any(|(_, &l)| l == MAX_LSM_LEVEL),
+            "default-family append stream must bulk"
+        );
+        assert_eq!(db.get(b"k0011-0003").as_deref(), Some(&b"v"[..]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0159 P1.11: bulk SST installs with empty payload; first get
+    /// promotes into the pool when there is room (no ghost-register).
+    #[test]
+    fn bulk_empty_payload_promotes_on_first_get() {
+        let dir = temp_dir();
+        let mut opts = OpenOptions {
+            sync: false,
+            ..OpenOptions::default()
+        };
+        opts.sst_payload_budget_bytes = Some(8 << 20);
+        let mut db = Db::<StdEnv>::open_with_env_bounded(&dir, opts, StdEnv).unwrap();
+        db.set_physical_cfs(vec!["data".into()]);
+        let v = vec![b'v'; 40];
+        let mut keys = Vec::new();
+        for b in 0..12u32 {
+            let mut batch = Vec::new();
+            for j in 0..8u32 {
+                let k = format!("data\0{b:04}-{j:04}").into_bytes();
+                batch.push(BatchOp::put(k.clone(), v.clone()));
+                keys.push(k);
+            }
+            db.apply_batch(batch).unwrap();
+        }
+        db.flush().unwrap();
+        assert!(
+            db.ssts.iter().all(|t| !t.payload_resident()),
+            "bulk install must leave payloads empty (no whole-file pin)"
+        );
+        let before = db.sst_payload_pool().resident_bytes();
+        assert_eq!(db.get(&keys[0]).as_deref(), Some(&v[..]));
+        assert!(
+            db.sst_payload_pool().resident_bytes() > before
+                || db.ssts.iter().any(|t| t.payload_resident()),
+            "first get must promote a file that fits the budget"
         );
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);

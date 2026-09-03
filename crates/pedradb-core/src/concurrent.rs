@@ -34,7 +34,7 @@ use parking_lot::{Condvar, Mutex, RwLock};
 
 use crate::db::{
     BatchOp, BlobGcCandidate, CheckpointMeta, CompactOptions, Db, DbStats, OpenOptions,
-    PreparedL0Compact, Snapshot, SnapshotPin, SstLiveMeta, WriteOptions,
+    ParallelMergeEnv, PreparedL0Compact, Snapshot, SnapshotPin, SstLiveMeta, WriteOptions,
 };
 use crate::env::{Env, StdEnv};
 use crate::error::{CoreError, Result};
@@ -335,10 +335,22 @@ impl WriteGroup {
         }
         let max_wait = flush_debt_max_wait();
         let mut waited = Duration::ZERO;
+        // PEDRA_PARK_DIAG: how much the bounded debt wait actually slept
+        // (expected ~0 with the v29 try-lock assist).
+        let park_diag = std::env::var_os("PEDRA_PARK_DIAG").is_some();
+        let note_slept = |waited: Duration| {
+            if park_diag && !waited.is_zero() {
+                eprintln!("AWAITDIAG slept_ms={:.1}", waited.as_secs_f64() * 1e3);
+            }
+        };
         loop {
             let cap = db.read().flush_debt_cap();
-            let Some(cap) = cap else { return };
+            let Some(cap) = cap else {
+                note_slept(waited);
+                return;
+            };
             if db.read().parked_unflushed_bytes() < cap {
+                note_slept(waited);
                 return;
             }
             if waited >= max_wait {
@@ -348,6 +360,7 @@ impl WriteGroup {
                     "PEDRA flush-debt wait exceeded {max_wait:?} (parked={} cap={cap})",
                     db.read().parked_unflushed_bytes()
                 );
+                note_slept(waited);
                 return;
             }
             std::thread::sleep(FLUSH_DEBT_POLL);
@@ -397,10 +410,44 @@ impl WriteGroup {
     }
 
     fn finish_lone(&self) {
+        self.finish_lone_ops(1);
+    }
+
+    fn finish_lone_ops(&self, n: u64) {
         self.batches.fetch_add(1, Ordering::Relaxed);
-        self.batch_ops.fetch_add(1, Ordering::Relaxed);
+        self.batch_ops.fetch_add(n, Ordering::Relaxed);
         self.active.fetch_sub(1, Ordering::Relaxed);
         self.mark_complete();
+    }
+
+    /// Lone-async latched bulk: skip `BatchOp` / write-group. Concurrent
+    /// writers fall back to the merged submit (same bytes, extra envelope).
+    fn submit_latched_bulk<E: Env>(
+        &self,
+        db: &RwLock<Db<E>>,
+        family: &str,
+        keys: Vec<Bytes>,
+        vals: Vec<Bytes>,
+        tail: Vec<BatchOp>,
+    ) -> Result<SequenceNumber> {
+        let active = self.begin_submit();
+        let n = (keys.len() + tail.len()) as u64;
+        if active == 1 && !self.recently_concurrent() {
+            let result = db.write().apply_latched_bulk_puts(family, keys, vals, tail);
+            self.finish_lone_ops(n);
+            return result;
+        }
+        let ops = {
+            let mut ops = Vec::with_capacity(keys.len() + tail.len());
+            ops.extend(
+                keys.into_iter()
+                    .zip(vals)
+                    .map(|(key, value)| BatchOp::Put { key, value }),
+            );
+            ops.extend(tail);
+            ops
+        };
+        self.submit_after_begin(db, ops, false, None, active)
     }
 
     fn submit_occ<E: Env>(
@@ -1075,6 +1122,21 @@ impl<E: Env> ConcurrentDb<E> {
         Ok(Self::from_db(Db::open_with_env(path, opts, env)?))
     }
 
+    /// Open with an explicit [`Env`] and the SST payload pool armed
+    /// (RFC-0042 v18) — see [`Db::open_with_env_bounded`].
+    ///
+    /// # Errors
+    /// Same as [`Db::open_with_env`].
+    pub fn open_with_env_bounded(path: impl AsRef<Path>, opts: OpenOptions, env: E) -> Result<Self>
+    where
+        E: Env + Send + Sync + 'static,
+        E::File: Send + 'static,
+    {
+        let mut db = Db::open_with_env_bounded(path, opts, env.clone())?;
+        db.set_parallel_merge(Arc::new(ParallelMergeEnv::new(env)));
+        Ok(Self::from_db(db))
+    }
+
     /// Point get. A point-cache hit answers without the Db read lock
     /// (misses fall through to the locked path, which fills the cache).
     #[must_use]
@@ -1083,7 +1145,7 @@ impl<E: Env> ConcurrentDb<E> {
         if let Some(v) = self.point_cache.get(key) {
             return v;
         }
-        self.inner.read().get(key)
+        self.inner.read().get_after_point_miss(key)
     }
 
     /// Point-cache probe (`Some` = hit, including cached miss). OCC get.
@@ -1233,7 +1295,9 @@ impl<E: Env> ConcurrentDb<E> {
                 return Err(e);
             }
         };
-        self.inner.write().install_prepared_l0_compact(job, tables)?;
+        self.inner
+            .write()
+            .install_prepared_l0_compact(job, tables)?;
         Ok(true)
     }
 
@@ -2056,6 +2120,7 @@ impl<E: Env> ConcurrentDb<E> {
         #[cfg(feature = "pct")]
         crate::pct_hooks::maybe_yield("op_entry");
         let do_sync = self.resolve_sync(opts);
+        self.assist_flush_debt();
         self.writes
             .submit_one(&self.inner, BatchOp::put(key, value), do_sync)
     }
@@ -2105,6 +2170,7 @@ impl<E: Env> ConcurrentDb<E> {
     /// WAL I/O or sequence exhaustion.
     pub fn delete(&self, key: impl AsRef<[u8]>) -> Result<()> {
         let do_sync = self.resolve_sync(WriteOptions::default());
+        self.assist_flush_debt();
         self.writes
             .submit_one(&self.inner, BatchOp::delete(key), do_sync)
             .map(|_| ())
@@ -2116,6 +2182,7 @@ impl<E: Env> ConcurrentDb<E> {
     /// WAL I/O, bounds, or sequence exhaustion.
     pub fn delete_range(&self, start: impl AsRef<[u8]>, end: impl AsRef<[u8]>) -> Result<()> {
         let do_sync = self.resolve_sync(WriteOptions::default());
+        self.assist_flush_debt();
         self.writes
             .submit(
                 &self.inner,
@@ -2141,7 +2208,33 @@ impl<E: Env> ConcurrentDb<E> {
     /// WAL I/O or sequence exhaustion.
     pub fn apply_batch_vec(&self, ops: Vec<BatchOp>) -> Result<SequenceNumber> {
         let do_sync = self.resolve_sync(WriteOptions::default());
+        self.assist_flush_debt();
         self.writes.submit(&self.inner, ops, do_sync)
+    }
+
+    /// Async + the family has latched as append-only (RFC-0159).
+    #[must_use]
+    pub fn family_is_latched_async(&self, family: &str) -> bool {
+        !self.default_sync.load(Ordering::Relaxed) && self.inner.read().family_is_latched(family)
+    }
+
+    /// Latched-family puts without `BatchOp` / write-group (RFC-0159 P1.5).
+    /// `tail` is the mixed-family remainder (hydrate meta cursor) and still
+    /// takes the ladder. G1 (`sync=true`) callers must not use this.
+    ///
+    /// # Errors
+    /// WAL I/O on the ladder tail, or sequence exhaustion.
+    pub fn apply_latched_bulk(
+        &self,
+        family: &str,
+        keys: Vec<Bytes>,
+        vals: Vec<Bytes>,
+        tail: Vec<BatchOp>,
+    ) -> Result<SequenceNumber> {
+        // Latched bulk does not park memtables; skip assist/debt (two
+        // read locks per 1024-op hydrate batch).
+        self.writes
+            .submit_latched_bulk(&self.inner, family, keys, vals, tail)
     }
 
     /// Point lookups for many keys (RFC-0019 P1.1).
@@ -2178,6 +2271,8 @@ impl<E: Env> ConcurrentDb<E> {
     /// I/O.
     pub fn flush(&self) -> Result<()> {
         let _flush = self.flush_lock.lock();
+        while self.materialize_bulk_holding_flush() {}
+        self.inner.write().flush_all_bulk_runs()?;
         // At most two pipeline steps: drain existing imm, then switch+flush active.
         // Do **not** loop while concurrent puts refill mem (that would never end).
         for _ in 0..2 {
@@ -2210,8 +2305,21 @@ impl<E: Env> ConcurrentDb<E> {
             };
             {
                 let mut g = self.inner.write();
+                // RFC-0159 P0.2: per-family install level — a latched
+                // pure-append span goes straight to the bottom level
+                // (same decision as `Db::flush_imm_to_l0`); everything
+                // else stays L0, identical to the pre-bulk path.
+                let levels: Vec<u32> = files
+                    .iter()
+                    .map(|(t, _, _)| g.bulk_span_level(g.bulk_family_of_table(t), &imm))
+                    .collect();
+                for ((t, _, _), &level) in files.iter().zip(levels.iter()) {
+                    if level != 0 {
+                        g.bulk_diag("install_flush", g.bulk_family_of_table(t), level);
+                    }
+                }
                 let pairs: Vec<_> = files.into_iter().map(|(t, n, _)| (t, n)).collect();
-                if let Err(e) = g.install_l0_ssts(pairs) {
+                if let Err(e) = g.install_ssts_at_levels(pairs, &levels) {
                     g.restore_imm(imm);
                     return Err(e);
                 }
@@ -2224,6 +2332,42 @@ impl<E: Env> ConcurrentDb<E> {
         // for the flushed keys.
         g.persist_changelog_after_explicit_flush();
         Ok(())
+    }
+
+    /// Encode+install one parked bulk chunk off the write lock so the
+    /// hydrate writer can fill the next run (RFC-0159 P1.7).
+    #[must_use]
+    pub fn materialize_bulk_once(&self) -> bool {
+        if !self.inner.read().has_parked_bulk() {
+            return false;
+        }
+        let _flush = self.flush_lock.lock();
+        self.materialize_bulk_holding_flush()
+    }
+
+    fn materialize_bulk_holding_flush(&self) -> bool {
+        let job = self.inner.write().pop_parked_bulk_job();
+        let Some((fam, run, num, final_path, env, sync)) = job else {
+            return false;
+        };
+        let dir = final_path
+            .parent()
+            .map(std::path::PathBuf::from)
+            .unwrap_or(final_path);
+        match Db::write_bulk_run_sst(&env, &dir, num, run.as_ref(), &fam, sync) {
+            Ok((table, num)) => match self.inner.write().finish_bulk_sst(&fam, table, num) {
+                Ok(Some(persist)) => persist.write().is_ok(),
+                Ok(None) => true,
+                Err(_) => false,
+            },
+            Err(_) => {
+                let mut g = self.inner.write();
+                if let Some(pin) = g.take_bulk_encoding() {
+                    g.push_parked_bulk_front(pin);
+                }
+                false
+            }
+        }
     }
 
     /// Drain **one existing** immutable memtable → L0 without forcing an
@@ -2271,8 +2415,18 @@ impl<E: Env> ConcurrentDb<E> {
         // The host worker rotates only when `writes_idle_for`.
         {
             let mut g = self.inner.write();
+            // RFC-0159 P0.2: same per-family level decision as `flush`.
+            let levels: Vec<u32> = files
+                .iter()
+                .map(|(t, _, _)| g.bulk_span_level(g.bulk_family_of_table(t), &imm))
+                .collect();
+            for ((t, _, _), &level) in files.iter().zip(levels.iter()) {
+                if level != 0 {
+                    g.bulk_diag("install_drain", g.bulk_family_of_table(t), level);
+                }
+            }
             let pairs: Vec<_> = files.into_iter().map(|(t, n, _)| (t, n)).collect();
-            g.apply_l0_installs(pairs);
+            g.apply_sst_installs(pairs, &levels);
             g.retire_flush_pin();
         }
         true
@@ -2310,6 +2464,39 @@ impl<E: Env> ConcurrentDb<E> {
             return false;
         }
         let _flush = self.flush_lock.lock();
+        self.materialize_parked_holding_flush()
+    }
+
+    /// [`Self::materialize_parked_once`] without queueing on `flush_lock`.
+    ///
+    /// Returns `false` untouched when another thread (the flush worker) is
+    /// mid-materialize: an assisting writer must skip rather than block for
+    /// the whole chunk — the local 15M profile showed the writer spending
+    /// 8 s of a 25 s window in `parking_lot` `lock_slow` inside the assist
+    /// while the worker held the lock through `write_imm_l0_files`. The
+    /// bounded `await_flush_debt` wait still resolves the debt when the
+    /// worker's install lands.
+    #[must_use]
+    pub fn materialize_parked_once_try(&self) -> bool {
+        if self.inner.read().parked_unflushed_count() == 0 {
+            return false;
+        }
+        let Some(_flush) = self.flush_lock.try_lock() else {
+            return false;
+        };
+        self.materialize_parked_holding_flush()
+    }
+
+    fn materialize_parked_holding_flush(&self) -> bool {
+        // PEDRA_PARK_DIAG: per-chunk phase timings for the sinks FLUSHSTAGES
+        // does not cover (prep under the write lock, install/manifest,
+        // retire-cache tail). Inert unless the env is set.
+        let park_diag = std::env::var_os("PEDRA_PARK_DIAG").is_some();
+        // PEDRA_PARK_DIAG2: sub-timers inside install (bulk_span_level /
+        // apply_sst_installs / parked pop) and retire (Arc unwrap-or-clone /
+        // dropped-parked dealloc / retire-cache insert).
+        let park_diag2 = std::env::var_os("PEDRA_PARK_DIAG2").is_some();
+        let t0 = std::time::Instant::now();
         let prepared = {
             let mut g = self.inner.write();
             // Arc snapshot: the table stays immutable once parked (fold swaps
@@ -2321,6 +2508,7 @@ impl<E: Env> ConcurrentDb<E> {
             let (env, dir, sync) = g.l0_write_ctx();
             Some((imm, nums, env, dir, sync))
         };
+        let t1 = std::time::Instant::now();
         let Some((imm, nums, env, dir, sync)) = prepared else {
             return false;
         };
@@ -2328,13 +2516,29 @@ impl<E: Env> ConcurrentDb<E> {
             Ok(f) => f,
             Err(_) => return false,
         };
+        let t2 = std::time::Instant::now();
         {
             let expect = Arc::as_ptr(&imm);
             let mut g = self.inner.write();
+            // RFC-0159 P0.2: same per-family level decision as `flush`.
+            let t_span0 = std::time::Instant::now();
+            let levels: Vec<u32> = files
+                .iter()
+                .map(|(t, _, _)| g.bulk_span_level(g.bulk_family_of_table(t), &imm))
+                .collect();
+            for ((t, _, _), &level) in files.iter().zip(levels.iter()) {
+                if level != 0 {
+                    g.bulk_diag("install_parked", g.bulk_family_of_table(t), level);
+                }
+            }
+            let t_span1 = std::time::Instant::now();
             let pairs: Vec<_> = files.into_iter().map(|(t, n, _)| (t, n)).collect();
-            g.apply_l0_installs(pairs);
+            g.apply_sst_installs(pairs, &levels);
+            let t_apply1 = std::time::Instant::now();
             let popped = g.take_oldest_parked_matching(expect);
+            let t3 = std::time::Instant::now();
             drop(imm);
+            let (mut d2_unwrap_ms, mut d2_pdrop_ms, mut d2_retire_ms) = (0.0f64, 0.0f64, 0.0f64);
             if let Some(popped) = popped {
                 // Only this Arc remains (fold cannot run under the lock).
                 // Retire-cache policy: keep the table as a point/MVCC read
@@ -2345,12 +2549,72 @@ impl<E: Env> ConcurrentDb<E> {
                 let reads = self.reads_served.load(Ordering::Relaxed);
                 let mark = self.retire_reads_mark.swap(reads, Ordering::Relaxed);
                 if reads != mark {
+                    let tu = std::time::Instant::now();
                     let owned = Arc::try_unwrap(popped).unwrap_or_else(|a| (*a).clone());
+                    d2_unwrap_ms = tu.elapsed().as_secs_f64() * 1e3;
+                    let tr = std::time::Instant::now();
                     g.retire_mem_as_l0_cache(owned);
+                    d2_retire_ms = tr.elapsed().as_secs_f64() * 1e3;
+                } else {
+                    // Full BTree dealloc of the parked table.
+                    let td = std::time::Instant::now();
+                    drop(popped);
+                    d2_pdrop_ms = td.elapsed().as_secs_f64() * 1e3;
                 }
+            }
+            if park_diag {
+                let t4 = std::time::Instant::now();
+                eprintln!(
+                    "PARKDIAG prep_ms={:.1} files_ms={:.1} install_ms={:.1} retire_ms={:.1} pending={}",
+                    (t1 - t0).as_secs_f64() * 1e3,
+                    (t2 - t1).as_secs_f64() * 1e3,
+                    (t3 - t2).as_secs_f64() * 1e3,
+                    (t4 - t3).as_secs_f64() * 1e3,
+                    g.parked_unflushed_count(),
+                );
+            }
+            if park_diag2 {
+                eprintln!(
+                    "PARKDIAG2 chunk span_ms={:.1} apply_ms={:.1} pop_ms={:.1} \
+                     unwrap_ms={:.1} pdrop_ms={:.1} retire_ms={:.1}",
+                    (t_span1 - t_span0).as_secs_f64() * 1e3,
+                    (t_apply1 - t_span1).as_secs_f64() * 1e3,
+                    (t3 - t_apply1).as_secs_f64() * 1e3,
+                    d2_unwrap_ms,
+                    d2_pdrop_ms,
+                    d2_retire_ms,
+                );
             }
         }
         true
+    }
+
+    /// RFC-0159 P1.3 (v26): when parked debt is at/above cap, the writer
+    /// materializes **one** parked table inline instead of sleeping for the
+    /// host flush worker (`WriteGroup::await_flush_debt`). On the
+    /// one-effective-core guest the 2 ms poll + worker tick turned each
+    /// parked chunk into seconds of sleep/wake ping-pong (run #27: 21.5 s
+    /// `flush_check_ms`, hydrate +54%) — the materialize work is identical
+    /// either way, so the writer does it immediately and keeps the core
+    /// busy — but never QUEUE: `materialize_parked_once_try` skips when
+    /// the worker is mid-materialize, and the bounded `await_flush_debt`
+    /// inside the submit resolves when that install drops the debt. Same
+    /// in-flight rule as `await_flush_debt`: called before
+    /// `begin_submit`, so an assisting writer reads as idle.
+    fn assist_flush_debt(&self) {
+        if !self.writes.flusher_attached.load(Ordering::Relaxed) {
+            return;
+        }
+        let Some(cap) = self.flush_debt_cap() else {
+            return;
+        };
+        if self.parked_unflushed_bytes() < cap {
+            return;
+        }
+        // `#[must_use]`: the bool (did a file get written) is the worker
+        // tick's business; here a `false` just falls through to the
+        // bounded `await_flush_debt` inside the submit.
+        let _ = self.materialize_parked_once_try();
     }
 
     /// Persist pending L0s + MANIFEST and rotate WAL when no writer is in
@@ -2434,10 +2698,47 @@ impl<E: Env> ConcurrentDb<E> {
         }
     }
 
-    /// Publish a prepared L0→L1 compact: mem install under the write lock,
-    /// MANIFEST `fsync` off-lock (RFC-0041 P1.1).
+    /// Publish a prepared leveled compact: mem install under the write lock,
+    /// MANIFEST `fsync` off-lock (RFC-0041 P1.1). After a successful install
+    /// it drives bounded pushdown jobs ([`Db::prepare_pushdown_compact`]):
+    /// with no core-owned compaction thread, the host tick that just grew a
+    /// level past its target is also the cheapest place to relieve it — the
+    /// next L0→L1 job's overlap slice stays bounded instead of growing into
+    /// a whole-level rewrite.
     #[must_use]
     pub fn install_prepared_l0_off_lock(
+        &self,
+        job: PreparedL0Compact<E>,
+        tables: Vec<crate::sst::SstTable>,
+    ) -> bool {
+        if !self.install_prepared_one(job, tables) {
+            return false;
+        }
+        if !crate::leveling::leveled_enabled() {
+            return true;
+        }
+        // Bounded relief per tick: one L0→L1 job adds at most its L0 inputs
+        // over target; each pushdown moves one chunk out. Four covers a
+        // 4-buffer burst; anything larger waits for the next tick.
+        for _ in 0..4 {
+            let job = match self.inner.write().prepare_pushdown_compact() {
+                Ok(Some(j)) => j,
+                _ => break,
+            };
+            let tables = match job.write() {
+                Ok(t) => t,
+                Err(_) => break,
+            };
+            if !self.install_prepared_one(job, tables) {
+                break;
+            }
+        }
+        true
+    }
+
+    /// Single prepared-job install (no follow-ups).
+    #[must_use]
+    fn install_prepared_one(
         &self,
         job: PreparedL0Compact<E>,
         tables: Vec<crate::sst::SstTable>,
@@ -2488,16 +2789,18 @@ impl<E: Env> ConcurrentDb<E> {
         true
     }
 
-    /// Compact: flush pipeline first, then compact under write lock.
+    /// Compact: flush pipeline first, then bounded leveled drain
+    /// ([`Db::compact_leveled`]) — L0 drain plus per-level pushdowns, not a
+    /// whole-level rewrite.
     ///
     /// Flush I/O releases the lock (see [`Self::flush`]); the compact merge still
     /// needs exclusive access to the SST inventory for install safety.
     ///
     /// # Errors
-    /// I/O.
+    /// SST / MANIFEST I/O.
     pub fn compact(&self) -> Result<()> {
         self.flush()?;
-        self.inner.write().compact_ssts_only()
+        self.inner.write().compact_leveled()
     }
 
     /// Compact only SSTs of `cf` (RFC-0065 P0.2). Flushes first so mem keys
@@ -2699,6 +3002,7 @@ impl<E: Env> ConcurrentDb<E> {
         }
         let do_sync = self.resolve_sync(opts);
         let keys: Vec<Bytes> = read_set.into_iter().collect();
+        self.assist_flush_debt();
         self.writes
             .submit_occ(&self.inner, ops, do_sync, snapshot, keys)
     }
@@ -2976,6 +3280,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -3019,6 +3324,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -3053,6 +3359,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -3098,6 +3405,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -3153,6 +3461,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -3207,6 +3516,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -3242,6 +3552,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap()
@@ -3265,17 +3576,20 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 }
             },
         )
         .unwrap()
     }
 
-    /// Flush backpressure: without a flush worker attached a submit never
-    /// waits on parked debt (nothing would drain it); attached, it waits
-    /// out the debt bounded by `PEDRA_FLUSH_DEBT_MAX_MS`.
+    /// Flush backpressure + v26 assist: without a flush worker attached a
+    /// submit neither waits on parked debt nor drains it (nothing would
+    /// drain it); attached, a submit at debt≥cap materializes one parked
+    /// table **inline** instead of sleeping for the worker (RFC-0159 P1.3,
+    /// run #27: the sleep path cost 21.5 s of `flush_check_ms`).
     #[test]
-    fn submit_flush_debt_waits_only_with_worker_attached() {
+    fn submit_flush_debt_assists_with_worker_attached() {
         std::env::set_var("PEDRA_FLUSH_DEBT_MAX_MS", "120");
         let dir = temp_dir();
         let db = open_debt(&dir);
@@ -3286,7 +3600,10 @@ mod tests {
         let cap = db.flush_debt_cap().expect("cap");
         assert!(db.parked_unflushed_bytes() >= cap, "debt at/above cap");
 
-        // No worker: submit must go straight through despite the debt.
+        // No worker: submit must go straight through despite the debt —
+        // and must not assist (parking without a drainer is the caller's
+        // business; an inline materialize here would be an unattached
+        // writer doing the worker's job for nothing).
         let t0 = std::time::Instant::now();
         db.put(b"straight", b"through").unwrap();
         assert!(
@@ -3294,24 +3611,30 @@ mod tests {
             "unattached submit waited {:?}",
             t0.elapsed()
         );
+        assert_eq!(db.parked_unflushed_count(), 1, "no assist unattached");
 
-        // Attached: submit waits out the debt (120 ms cap), then commits.
+        // Attached: submit drains the parked table itself — no worker
+        // thread exists here, so parked==0 after the put proves the
+        // writer materialized inline (the sleep path would wait out the
+        // 120 ms ceiling and leave the debt parked).
         db.set_flush_worker_attached(true);
         let t0 = std::time::Instant::now();
         db.put(b"throttled", b"ok").unwrap();
         let waited = t0.elapsed();
         assert!(
-            waited >= Duration::from_millis(100),
-            "attached submit did not throttle (waited {waited:?})"
+            waited < Duration::from_millis(2000),
+            "attached submit stalled {waited:?}"
         );
+        assert_eq!(db.parked_unflushed_count(), 0, "writer did not assist");
         assert_eq!(db.get(b"throttled").as_deref(), Some(b"ok".as_ref()));
 
         std::env::remove_var("PEDRA_FLUSH_DEBT_MAX_MS");
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// The throttle releases as soon as materialize drains the parked set —
-    /// a live flush worker keeps writers moving (no deadlock, no full cap).
+    /// Writer-assist and a live flush worker race to drain the same parked
+    /// set (the flush lock is single-flight) — no deadlock, the parked set
+    /// ends empty whichever side wins, and the submit stays quick.
     #[test]
     fn submit_flush_debt_releases_on_materialize() {
         std::env::set_var("PEDRA_FLUSH_DEBT_MAX_MS", "30000");
@@ -3325,7 +3648,9 @@ mod tests {
         let drainer = std::sync::Arc::clone(&db);
         let flusher = thread::spawn(move || {
             thread::sleep(Duration::from_millis(60));
-            assert!(drainer.materialize_parked_once());
+            // The writer may have already assisted this table inline —
+            // either winner leaves the parked set drained.
+            let _ = drainer.materialize_parked_once();
         });
         let t0 = std::time::Instant::now();
         db.put(b"after", b"drain").unwrap();
@@ -3336,8 +3661,50 @@ mod tests {
             "submit did not release on drain (waited {waited:?})"
         );
         assert_eq!(db.parked_unflushed_count(), 0);
+        assert_eq!(db.get(b"after").as_deref(), Some(b"drain".as_ref()));
 
         std::env::remove_var("PEDRA_FLUSH_DEBT_MAX_MS");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// v29: the assist path (`materialize_parked_once_try`) must skip —
+    /// returning `false`, parked set untouched — while another thread
+    /// holds `flush_lock` mid-materialize, instead of queueing the writer
+    /// behind the worker's whole chunk.
+    #[test]
+    fn materialize_parked_once_try_skips_when_lock_held() {
+        let dir = temp_dir();
+        let db = open_debt(&dir);
+        db.set_defer_auto_compact(true);
+        db.put(b"k", [b'v'; 1024]).unwrap();
+        assert!(db.park_imm_once());
+        db.put(b"j", [b'w'; 1024]).unwrap();
+        assert!(db.park_imm_once());
+        assert_eq!(db.parked_unflushed_count(), 2);
+
+        let guard = db.flush_lock.try_lock().expect("lock free");
+        let t0 = std::time::Instant::now();
+        assert!(!db.materialize_parked_once_try(), "must skip, not block");
+        assert!(
+            t0.elapsed() < Duration::from_millis(50),
+            "try path blocked {:?}",
+            t0.elapsed()
+        );
+        assert_eq!(db.parked_unflushed_count(), 2, "parked set untouched");
+        drop(guard);
+
+        assert!(db.materialize_parked_once_try(), "drains once free");
+        assert_eq!(db.parked_unflushed_count(), 1);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// v29: debt cap is TWO staging thresholds — one chunk of runway so
+    /// fill and materialize overlap instead of stop-and-wait per park.
+    #[test]
+    fn flush_debt_cap_is_two_thresholds() {
+        let dir = temp_dir();
+        let db = open_debt(&dir); // auto_flush_bytes: Some(1)
+        assert_eq!(db.flush_debt_cap(), Some(2));
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -3358,6 +3725,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: Some(512),
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -3384,6 +3752,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -3530,6 +3899,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -3552,6 +3922,688 @@ mod tests {
         db.put(b"c", b"tiny").unwrap();
         assert!(!db.drain_imm_once());
         assert_eq!(db.get(b"c").as_deref(), Some(&b"tiny"[..]));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0159 P0.2 on the compat write funnel: `apply_batch_vec`
+    /// (group-commit observation) + [`ConcurrentDb::flush`] must install a
+    /// latched pure-append span at the bottom level, not L0. This is the
+    /// exact path the slipstream bench drives.
+    #[test]
+    fn bulk_concurrent_flush_installs_latched_span_at_bottom() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into(), "meta".into()]);
+        let v = vec![b'v'; 200];
+        let mut keys = Vec::new();
+        for b in 0..40u32 {
+            let mut batch = Vec::new();
+            for j in 0..16u32 {
+                let k = format!("data\0{b:04}-{j:04}").into_bytes();
+                batch.push(BatchOp::put(k.clone(), v.clone()));
+                keys.push(k);
+            }
+            // The slipstream shape: one repeated cursor key in another
+            // family every batch.
+            batch.push(BatchOp::put(b"meta\0cursor".to_vec(), b"c".to_vec()));
+            db.apply_batch_vec(batch).unwrap();
+        }
+        db.flush().unwrap();
+
+        let meta = db.live_sst_meta();
+        let data_bottom = meta
+            .iter()
+            .filter(|m| m.cf == "data" && m.level == crate::db::MAX_LSM_LEVEL)
+            .count();
+        let data_elsewhere = meta
+            .iter()
+            .filter(|m| m.cf == "data" && m.level != crate::db::MAX_LSM_LEVEL)
+            .count();
+        let meta_l0 = meta
+            .iter()
+            .filter(|m| m.cf == "meta" && m.level == 0)
+            .count();
+        assert_eq!(
+            data_elsewhere, 0,
+            "every data chunk must land at the bottom level"
+        );
+        assert_eq!(data_bottom, 1, "one flush = one bulk chunk");
+        assert_eq!(meta_l0, 1, "repeated cursor key never latches");
+        for (i, k) in keys.iter().enumerate() {
+            assert_eq!(
+                db.get(k).as_deref(),
+                Some(&v[..]),
+                "bulk key {i} must read back"
+            );
+        }
+        assert_eq!(db.get(b"meta\0cursor").as_deref(), Some(&b"c"[..]));
+
+        drop(db);
+        let db2 = ConcurrentDb::open_with(&dir, OpenOptions::default()).unwrap();
+        let bottom = db2
+            .live_sst_meta()
+            .into_iter()
+            .filter(|m| m.level == crate::db::MAX_LSM_LEVEL)
+            .count();
+        assert_eq!(bottom, 1, "reopen must restore the bottom-level chunk");
+        for (i, k) in keys.iter().enumerate() {
+            assert_eq!(db2.get(k).as_deref(), Some(&v[..]), "post-reopen key {i}");
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0159 P1.5: after the family latches, `apply_latched_bulk`
+    /// lands keys without `BatchOp` and they read back (open tail + flush).
+    #[test]
+    fn apply_latched_bulk_reads_back_after_latch() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into(), "meta".into()]);
+        let v = vec![b'v'; 32];
+        let mut keys = Vec::new();
+        for b in 0..10u32 {
+            let mut batch = Vec::new();
+            for j in 0..16u32 {
+                let k = format!("data\0{b:04}-{j:04}").into_bytes();
+                batch.push(BatchOp::put(k.clone(), v.clone()));
+                keys.push(k);
+            }
+            batch.push(BatchOp::put(
+                b"meta\0cursor".to_vec(),
+                b.to_le_bytes().to_vec(),
+            ));
+            db.apply_batch_vec(batch).unwrap();
+        }
+        assert!(
+            db.family_is_latched_async("data"),
+            "10 admissible batches must latch (threshold 8)"
+        );
+        let mut bulk_keys = Vec::new();
+        let mut bulk_vals = Vec::new();
+        let shared = Bytes::from(v.clone());
+        for j in 0..16u32 {
+            let k = format!("data\0{b:04}-{j:04}", b = 10).into_bytes();
+            bulk_keys.push(Bytes::from(k.clone()));
+            bulk_vals.push(shared.clone());
+            keys.push(k);
+        }
+        let tail = vec![BatchOp::put(
+            b"meta\0cursor".to_vec(),
+            10u32.to_le_bytes().to_vec(),
+        )];
+        db.apply_latched_bulk("data", bulk_keys, bulk_vals, tail)
+            .unwrap();
+        for (i, k) in keys.iter().enumerate() {
+            assert_eq!(
+                db.get(k).as_deref(),
+                Some(&v[..]),
+                "latched key {i} must read back"
+            );
+        }
+        assert_eq!(
+            db.get(b"meta\0cursor").as_deref(),
+            Some(10u32.to_le_bytes().as_ref())
+        );
+        db.flush().unwrap();
+        drop(db);
+        let db2 = ConcurrentDb::open_with(&dir, OpenOptions::default()).unwrap();
+        for (i, k) in keys.iter().enumerate() {
+            assert_eq!(db2.get(k).as_deref(), Some(&v[..]), "post-flush key {i}");
+        }
+        assert_eq!(
+            db2.get(b"meta\0cursor").as_deref(),
+            Some(10u32.to_le_bytes().as_ref()),
+            "meta cursor must persist without per-batch WAL"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0159 P1.7: a latched overflow parks the chunk; get still hits
+    /// it; the worker materializes off the write lock.
+    #[test]
+    fn parked_bulk_chunk_is_readable_then_materializes() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(64 * 1024),
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into(), "meta".into()]);
+        let v = vec![b'v'; 32];
+        let mut keys = Vec::new();
+        for b in 0..10u32 {
+            let mut batch = Vec::new();
+            for j in 0..16u32 {
+                let k = format!("data\0{b:04}-{j:04}").into_bytes();
+                batch.push(BatchOp::put(k.clone(), v.clone()));
+                keys.push(k);
+            }
+            batch.push(BatchOp::put(b"meta\0cursor".to_vec(), b"c".to_vec()));
+            db.apply_batch_vec(batch).unwrap();
+        }
+        assert!(
+            db.family_is_latched_async("data"),
+            "10 admissible batches must latch"
+        );
+        let payload = vec![b'x'; 80];
+        let mut bulk_keys = Vec::new();
+        let mut bulk_vals = Vec::new();
+        for j in 0..1200u32 {
+            let k = format!("data\0z-{j:06}").into_bytes();
+            bulk_keys.push(Bytes::from(k.clone()));
+            bulk_vals.push(Bytes::from(payload.clone()));
+            keys.push(k);
+        }
+        db.apply_latched_bulk("data", bulk_keys, bulk_vals, Vec::new())
+            .unwrap();
+        assert!(
+            db.with_read(|d| d.has_parked_bulk()),
+            "overflow must park instead of encoding inline"
+        );
+        for (i, k) in keys.iter().enumerate() {
+            let want: &[u8] = if i < 160 { &v } else { &payload };
+            assert_eq!(db.get(k).as_deref(), Some(want), "parked key {i}");
+        }
+        assert!(
+            db.materialize_bulk_once(),
+            "worker must encode the parked chunk"
+        );
+        assert!(!db.with_read(|d| d.has_parked_bulk()));
+        let meta = db.live_sst_meta();
+        assert!(
+            meta.iter()
+                .any(|m| m.cf == "data" && m.level == crate::db::MAX_LSM_LEVEL),
+            "parked chunk must install at the bottom: {meta:?}"
+        );
+        for (i, k) in keys.iter().enumerate() {
+            let want: &[u8] = if i < 160 { &v } else { &payload };
+            assert_eq!(db.get(k).as_deref(), Some(want), "after materialize {i}");
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0159 P0.4 (core half): a bulk-ingested store and its ladder
+    /// twin (identical batches, `bulk_route_enabled=false`) serve the
+    /// identical keyspace after settle — the fast path changes layout,
+    /// never data.
+    #[test]
+    fn bulk_twin_matches_ladder_after_settle() {
+        let dir_bulk = temp_dir();
+        let dir_ladder = temp_dir();
+        let mk = |dir: &std::path::PathBuf, bulk: bool| {
+            let db = ConcurrentDb::open_with(
+                dir,
+                OpenOptions {
+                    sync: false,
+                    ..OpenOptions::default()
+                },
+            )
+            .unwrap();
+            if !bulk {
+                db.with_write(|d| d.bulk_route_enabled = false);
+            }
+            db
+        };
+        let bulk = mk(&dir_bulk, true);
+        let ladder = mk(&dir_ladder, false);
+
+        let v = vec![b'v'; 96];
+        let mut keys = Vec::new();
+        for b in 0..24u32 {
+            let mut batch = Vec::new();
+            for j in 0..32u32 {
+                let k = format!("data\0{b:04}-{j:04}").into_bytes();
+                batch.push(BatchOp::put(k.clone(), v.clone()));
+                keys.push(k);
+            }
+            // Mid-stream descent in another family must not disturb the
+            // data family's latch; a descent IN the data family kills it
+            // and both twins still agree.
+            if b == 12 {
+                let back = format!("data\0{b:04}-{b:04}").into_bytes();
+                batch.push(BatchOp::put(back, v.clone()));
+            }
+            batch.push(BatchOp::put(b"meta\0cursor".to_vec(), b"c".to_vec()));
+            bulk.apply_batch_vec(batch.clone()).unwrap();
+            ladder.apply_batch_vec(batch).unwrap();
+        }
+        bulk.flush().unwrap();
+        bulk.compact().unwrap();
+        ladder.flush().unwrap();
+        ladder.compact().unwrap();
+
+        for k in &keys {
+            assert_eq!(
+                bulk.get(k).as_deref(),
+                ladder.get(k).as_deref(),
+                "twin disagree on {}",
+                String::from_utf8_lossy(k)
+            );
+            assert_eq!(bulk.get(k).as_deref(), Some(&v[..]));
+        }
+        assert_eq!(
+            bulk.get(b"meta\0cursor").as_deref(),
+            ladder.get(b"meta\0cursor").as_deref()
+        );
+        let bulk_scan = bulk.scan_collect(Bound::Unbounded, Bound::Unbounded);
+        let ladder_scan = ladder.scan_collect(Bound::Unbounded, Bound::Unbounded);
+        assert_eq!(
+            bulk_scan, ladder_scan,
+            "twin scans must match byte-for-byte"
+        );
+        assert!(
+            bulk.get(b"data\0missing").is_none() && ladder.get(b"data\0missing").is_none(),
+            "absent-key probe must miss on both twins"
+        );
+        let _ = fs::remove_dir_all(&dir_bulk);
+        let _ = fs::remove_dir_all(&dir_ladder);
+    }
+
+    /// RFC-0159 P0.4: a descending batch unlatches; later puts stay
+    /// correct vs a ladder twin (gets + scan).
+    #[test]
+    fn bulk_fallback_midstream_correct() {
+        let dir_b = temp_dir();
+        let dir_l = temp_dir();
+        let mk = |dir: &std::path::PathBuf, bulk: bool| {
+            let db = ConcurrentDb::open_with(
+                dir,
+                OpenOptions {
+                    sync: false,
+                    ..OpenOptions::default()
+                },
+            )
+            .unwrap();
+            if !bulk {
+                db.with_write(|d| d.bulk_route_enabled = false);
+            }
+            db.set_physical_cfs(vec!["data".into()]);
+            db
+        };
+        let bulk = mk(&dir_b, true);
+        let ladder = mk(&dir_l, false);
+        let v = vec![b'v'; 64];
+        let mut keys = Vec::new();
+        for b in 0..16u32 {
+            let mut batch = Vec::new();
+            for j in 0..8u32 {
+                let k = format!("data\0{b:04}-{j:04}").into_bytes();
+                batch.push(BatchOp::put(k.clone(), v.clone()));
+                keys.push(k);
+            }
+            if b == 10 {
+                batch.push(BatchOp::put(b"data\00000-0000".to_vec(), b"over".to_vec()));
+            }
+            bulk.apply_batch_vec(batch.clone()).unwrap();
+            ladder.apply_batch_vec(batch).unwrap();
+        }
+        bulk.flush().unwrap();
+        bulk.compact().unwrap();
+        ladder.flush().unwrap();
+        ladder.compact().unwrap();
+        for k in &keys {
+            assert_eq!(bulk.get(k).as_deref(), ladder.get(k).as_deref());
+        }
+        assert_eq!(
+            bulk.get(b"data\00000-0000").as_deref(),
+            Some(&b"over"[..]),
+            "overwrite after descent must win"
+        );
+        assert_eq!(
+            bulk.scan_collect(Bound::Unbounded, Bound::Unbounded),
+            ladder.scan_collect(Bound::Unbounded, Bound::Unbounded)
+        );
+        let _ = fs::remove_dir_all(&dir_b);
+        let _ = fs::remove_dir_all(&dir_l);
+    }
+
+    /// RFC-0159 P0.4: settle does not rewrite bottom-level bulk chunks.
+    #[test]
+    fn bulk_settle_noops_on_clean_levels() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into(), "meta".into()]);
+        let v = vec![b'v'; 80];
+        for b in 0..16u32 {
+            let mut batch = Vec::new();
+            for j in 0..8u32 {
+                batch.push(BatchOp::put(
+                    format!("data\0{b:04}-{j:04}").into_bytes(),
+                    v.clone(),
+                ));
+            }
+            batch.push(BatchOp::put(b"meta\0cursor".to_vec(), b"c".to_vec()));
+            db.apply_batch_vec(batch).unwrap();
+        }
+        db.flush().unwrap();
+        let before: Vec<_> = db
+            .live_sst_meta()
+            .into_iter()
+            .filter(|m| m.cf == "data" && m.level == crate::db::MAX_LSM_LEVEL)
+            .map(|m| m.name)
+            .collect();
+        assert!(!before.is_empty(), "data family must bulk-install");
+        db.compact().unwrap();
+        let after: Vec<_> = db
+            .live_sst_meta()
+            .into_iter()
+            .filter(|m| m.cf == "data" && m.level == crate::db::MAX_LSM_LEVEL)
+            .map(|m| m.name)
+            .collect();
+        assert_eq!(before, after, "settle must not rewrite clean bulk chunks");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0159 P0.4: crash after N installed chunks (open tail is
+    /// disableWAL-class) — persisted keyspace equals a ladder twin that
+    /// never saw the tail.
+    #[test]
+    fn bulk_crash_replay_equals_ladder_path() {
+        let dir_b = temp_dir();
+        let dir_l = temp_dir();
+        let v = vec![b'v'; 48];
+        let mut installed = Vec::new();
+        {
+            let bulk = ConcurrentDb::open_with(
+                &dir_b,
+                OpenOptions {
+                    sync: false,
+                    ..OpenOptions::default()
+                },
+            )
+            .unwrap();
+            bulk.set_physical_cfs(vec!["data".into()]);
+            let ladder = ConcurrentDb::open_with(
+                &dir_l,
+                OpenOptions {
+                    sync: false,
+                    ..OpenOptions::default()
+                },
+            )
+            .unwrap();
+            ladder.set_physical_cfs(vec!["data".into()]);
+            ladder.with_write(|d| d.bulk_route_enabled = false);
+            for b in 0..12u32 {
+                let mut batch = Vec::new();
+                for j in 0..8u32 {
+                    let k = format!("data\0{b:04}-{j:04}").into_bytes();
+                    batch.push(BatchOp::put(k.clone(), v.clone()));
+                    installed.push(k);
+                }
+                bulk.apply_batch_vec(batch.clone()).unwrap();
+                ladder.apply_batch_vec(batch).unwrap();
+            }
+            bulk.flush().unwrap();
+            ladder.flush().unwrap();
+            // Uninstalled tail: crash loses it on bulk; ladder WAL-covers it
+            // so we do not apply the tail to the ladder twin.
+            for b in 12..14u32 {
+                let mut batch = Vec::new();
+                for j in 0..8u32 {
+                    batch.push(BatchOp::put(
+                        format!("data\0{b:04}-{j:04}").into_bytes(),
+                        v.clone(),
+                    ));
+                }
+                bulk.apply_batch_vec(batch).unwrap();
+            }
+            std::mem::forget(bulk);
+        }
+        let bulk2 = ConcurrentDb::open_with(
+            &dir_b,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        let ladder2 = ConcurrentDb::open_with(
+            &dir_l,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        for k in &installed {
+            assert_eq!(
+                bulk2.get(k).as_deref(),
+                ladder2.get(k).as_deref(),
+                "persisted key {}",
+                String::from_utf8_lossy(k)
+            );
+            assert_eq!(bulk2.get(k).as_deref(), Some(&v[..]));
+        }
+        assert!(
+            bulk2.get(b"data\0012-0000").is_none(),
+            "open tail must not survive crash"
+        );
+        assert_eq!(
+            bulk2.scan_collect(Bound::Unbounded, Bound::Unbounded),
+            ladder2.scan_collect(Bound::Unbounded, Bound::Unbounded)
+        );
+        let _ = fs::remove_dir_all(&dir_b);
+        let _ = fs::remove_dir_all(&dir_l);
+    }
+
+    /// RFC-0159 P1.2: async bulk installs persist MANIFEST every 4 chunks
+    /// off the write lock; settle forces leftover debt.
+    #[test]
+    fn bulk_manifest_persists_every_n_off_lock() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(256),
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into()]);
+        db.set_cf_write_buffer("data", 256);
+        let v = vec![b'x'; 80];
+        // Latch (threshold 8) then overflow the chunk cap so chunks park.
+        for b in 0..40u32 {
+            let mut keys = Vec::new();
+            let mut vals = Vec::new();
+            for j in 0..4u32 {
+                keys.push(Bytes::from(format!("data\0{b:04}-{j:04}").into_bytes()));
+                vals.push(Bytes::from(v.clone()));
+            }
+            if db.with_read(|d| d.bulk_latch_is_latched("data")) {
+                db.apply_latched_bulk("data", keys, vals, Vec::new())
+                    .unwrap();
+            } else {
+                let batch: Vec<_> = keys
+                    .into_iter()
+                    .zip(vals)
+                    .map(|(k, val)| BatchOp::put(k.to_vec(), val.to_vec()))
+                    .collect();
+                db.apply_batch_vec(batch).unwrap();
+            }
+            while db.with_read(|d| d.has_parked_bulk()) {
+                assert!(db.materialize_bulk_once());
+            }
+        }
+        let debt = db.with_read(|d| d.bulk_manifest_debt());
+        assert!(debt < 4, "debt must wrap every 4 installs, got {debt}");
+        db.flush().unwrap();
+        assert_eq!(
+            db.with_read(|d| d.bulk_manifest_debt()),
+            0,
+            "flush/settle must force leftover MANIFEST debt"
+        );
+        assert!(
+            db.get(b"data\00000-0000").is_some(),
+            "first bulk key must read back"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0159 P2.1: a one-swap nearly-sorted batch stays latched and
+    /// reads back in key order.
+    #[test]
+    fn bulk_nearly_sorted_window_stays_latched() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into()]);
+        let v = vec![b'v'; 24];
+        for b in 0..10u32 {
+            let mut batch = Vec::new();
+            for j in 0..4u32 {
+                batch.push(BatchOp::put(
+                    format!("data\0{b:04}-{j:04}").into_bytes(),
+                    v.clone(),
+                ));
+            }
+            db.apply_batch_vec(batch).unwrap();
+        }
+        assert!(
+            db.with_read(|d| d.bulk_latch_is_latched("data")),
+            "ascending stream must latch"
+        );
+        // Swap last two keys of the next batch (one inversion).
+        let swapped = vec![
+            BatchOp::put(b"data\0010-0001".to_vec(), v.clone()),
+            BatchOp::put(b"data\0010-0000".to_vec(), v.clone()),
+        ];
+        db.apply_batch_vec(swapped).unwrap();
+        assert!(
+            db.with_read(|d| d.bulk_latch_is_latched("data")),
+            "one inversion must not unlatch"
+        );
+        db.flush().unwrap();
+        assert_eq!(db.get(b"data\0010-0000").as_deref(), Some(&v[..]));
+        assert_eq!(db.get(b"data\0010-0001").as_deref(), Some(&v[..]));
+        let scan = db.scan_collect(
+            Bound::Included(b"data\0010-0000".as_slice()),
+            Bound::Included(b"data\0010-0001".as_slice()),
+        );
+        assert_eq!(scan.len(), 2);
+        assert!(scan[0].0.as_ref() < scan[1].0.as_ref());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0159 P0.2 on the host-worker funnel: deferred auto-flush stages
+    /// an imm; [`ConcurrentDb::drain_imm_once`] must install the latched
+    /// ascending span at the bottom level.
+    #[test]
+    fn bulk_drain_imm_installs_latched_span_at_bottom() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(2048),
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_defer_auto_compact(true);
+        let v = vec![b'v'; 128];
+        let mut keys = Vec::new();
+        for i in 0..32u32 {
+            let k = format!("k{i:06}").into_bytes();
+            db.put(&k, &v).unwrap();
+            keys.push(k);
+        }
+        assert!(
+            db.with_read(|d| d.has_imm()),
+            "auto-flush under defer must leave an imm"
+        );
+        assert!(db.drain_imm_once(), "worker must drain that imm");
+        let meta = db.live_sst_meta();
+        assert!(
+            meta.iter().any(|m| m.level == crate::db::MAX_LSM_LEVEL),
+            "latched ascending span must install at the bottom level: {meta:?}"
+        );
+        assert!(
+            meta.iter().all(|m| m.level != 0),
+            "nothing from this drain may stay at L0: {meta:?}"
+        );
+        for (i, k) in keys.iter().enumerate() {
+            assert_eq!(db.get(k).as_deref(), Some(&v[..]), "drained key {i}");
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0159 P0.2 on the parked funnel: deferred CF auto-flush parks the
+    /// family table; [`ConcurrentDb::materialize_parked_once`] must install
+    /// the latched span at the bottom level.
+    #[test]
+    fn bulk_parked_materialize_installs_latched_span_at_bottom() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(2048),
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into()]);
+        db.set_defer_auto_compact(true);
+        let v = vec![b'v'; 128];
+        let mut keys = Vec::new();
+        for i in 0..32u32 {
+            let k = format!("data\0{i:06}").into_bytes();
+            db.put(&k, &v).unwrap();
+            keys.push(k);
+        }
+        assert!(
+            db.with_read(|d| d.parked_unflushed_count() > 0),
+            "CF auto-flush under defer must park the family table"
+        );
+        assert!(
+            db.materialize_parked_once(),
+            "worker must materialize the parked table"
+        );
+        let meta = db.live_sst_meta();
+        assert!(
+            meta.iter().any(|m| m.level == crate::db::MAX_LSM_LEVEL),
+            "latched ascending span must install at the bottom level: {meta:?}"
+        );
+        assert!(
+            meta.iter().all(|m| m.level != 0),
+            "nothing from this materialize may stay at L0: {meta:?}"
+        );
+        for (i, k) in keys.iter().enumerate() {
+            assert_eq!(db.get(k).as_deref(), Some(&v[..]), "parked key {i}");
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -3748,6 +4800,8 @@ mod tests {
         )
         .unwrap();
         db.set_defer_auto_compact(true);
+        // Ladder mechanics; bulk would install the ascending spans at MAX.
+        db.with_write(|d| d.bulk_route_enabled = false);
         let val = vec![b'v'; 1024];
         // 24 tables of ~16 KiB each; cap = 4 x 16 KiB = 64 KiB.
         for t in 0..24u64 {
@@ -3808,13 +4862,19 @@ mod tests {
         db.put(b"k1", vec![b'v'; 64]).unwrap();
         assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
         assert!(db.park_imm_once());
-        assert!(db.materialize_parked_once(), "first table: dropped, no reads");
+        assert!(
+            db.materialize_parked_once(),
+            "first table: dropped, no reads"
+        );
         assert_eq!(db.with_read(|d| d.retired_mem_bytes()), 0);
         assert_eq!(db.get(b"k1").as_deref(), Some(&[b'v'; 64][..]));
         db.put(b"k2", vec![b'w'; 64]).unwrap();
         assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
         assert!(db.park_imm_once());
-        assert!(db.materialize_parked_once(), "second table: retired, read arrived");
+        assert!(
+            db.materialize_parked_once(),
+            "second table: retired, read arrived"
+        );
         assert!(db.with_read(|d| d.retired_mem_bytes()) > 0);
         assert_eq!(db.get(b"k2").as_deref(), Some(&[b'w'; 64][..]));
         let _ = fs::remove_dir_all(&dir);
@@ -4594,6 +5654,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap(),
@@ -4893,6 +5954,7 @@ mod tests {
             auto_compact_sst_bytes: None,
             exclusive: true,
             large_value_threshold: None,
+            sst_payload_budget_bytes: None,
         };
         let db = ConcurrentDb::open_with_env(&dir, opts.clone(), env.clone()).unwrap();
         db.set_write_group_catchup_window(Duration::from_millis(500));
@@ -5048,6 +6110,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -5114,6 +6177,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -5292,6 +6356,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -5334,6 +6399,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -5411,6 +6477,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -5646,6 +6713,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: Some(512),
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -5687,6 +6755,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: Some(512),
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -5738,6 +6807,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -5795,6 +6865,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: Some(512),
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -5855,6 +6926,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -5887,6 +6959,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();

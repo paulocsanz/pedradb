@@ -119,6 +119,12 @@ impl<'db, E: crate::env::Env> Transaction<'db, E> {
         }
 
         let staging = mem::take(&mut self.staging);
+        // RFC-0159: staged keys must flow through the bulk latch like any
+        // other write, or the family high-water would miss them.
+        for (key, stage) in &staging {
+            self.db
+                .observe_bulk_staged(key, matches!(stage, Stage::Put(_)));
+        }
         // Sequence checkpoint: if WAL append fails mid-commit, restore so we do
         // not burn sequence numbers for a non-durable TX (denser fail accounting).
         let seq_checkpoint = self.db.next_seq_peek();

@@ -347,6 +347,10 @@ pub struct MemTable {
     /// Bytes per CF prefix (RFC-0065 P1.1). Keyed by `cf_prefix` (empty =
     /// default-raw). `"default\0…"` is a distinct prefix from empty.
     cf_bytes: BTreeMap<Bytes, usize>,
+    /// Bulk-span state per CF prefix (RFC-0159 P1.4). Kept in step by the
+    /// insert paths; `span_stale` gates it off after absorb merges.
+    cf_span: BTreeMap<Bytes, SpanState>,
+    span_stale: bool,
     /// Range-tombstone entries (full-map fallback on ranged scan when > 0).
     range_tombstones: usize,
     /// Total internal versions (not distinct user keys).
@@ -366,10 +370,39 @@ impl Clone for MemTable {
             tail_ord_stale: AtomicBool::new(true),
             approx_bytes: self.approx_bytes,
             cf_bytes: self.cf_bytes.clone(),
+            cf_span: self.cf_span.clone(),
+            span_stale: self.span_stale,
             range_tombstones: self.range_tombstones,
             entries: self.entries,
         }
     }
+}
+
+/// RFC-0159 P1.4: incremental bulk-span state per CF prefix. The insert
+/// paths keep this in step so `Db::bulk_span_level` answers with one map
+/// lookup instead of rescanning a whole 256 MiB parked table per output
+/// file (run #33: 4.42 s of the 4.7 s install stage at 25M).
+#[derive(Clone, Debug, Default)]
+struct SpanState {
+    /// Duplicate, descent, or tombstone seen — never bulk-able again.
+    impure: bool,
+    /// First / last user key of the run (valid while `!impure`).
+    lo: Bytes,
+    hi: Bytes,
+}
+
+/// [`MemTable::bulk_span`] verdict — mirrors the legacy whole-table scan.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum BulkSpan {
+    /// No keys of the family in this table.
+    Absent,
+    /// Ascending tombstone-free run `[lo, hi]`.
+    Pure { lo: Bytes, hi: Bytes },
+    /// Known not bulk-able.
+    Impure,
+    /// Not tracked (absorbed tables, exotic family names) — caller falls
+    /// back to the scan.
+    Unknown,
 }
 
 /// Compat CF encoding is `cf\\0user`. Kernel keys without NUL share one shard.
@@ -634,6 +667,154 @@ impl MemTable {
         }
     }
 
+    /// Largest user key belonging to `family` (any version, including
+    /// tombstones). Named families are a contiguous `family\\0…` range —
+    /// O(log n) on the map plus the family's tail shard. `"default"`
+    /// interleaves raw keys with every other prefix, so it walks
+    /// [`Self::iter_internal`] (the first observation of `default` is at
+    /// seed, not on the 264k-entry raftlog leg).
+    ///
+    /// Used by the bulk-ingest latch's first-observation high-water. A full
+    /// `iter_internal` here sorted the whole tail (apply_batch's 264k keys)
+    /// on the first `deps_raftlog` batch.
+    #[must_use]
+    pub(crate) fn max_user_key_in_family(&self, family: &str) -> Option<Bytes> {
+        if family == "default" || family.is_empty() || family.as_bytes().contains(&0) {
+            return self.max_user_key_in_family_scan(family);
+        }
+        let mut pfx = Vec::with_capacity(family.len() + 1);
+        pfx.extend_from_slice(family.as_bytes());
+        pfx.push(0);
+        let end = crate::prefix::prefix_exclusive_end(&pfx);
+        let end_b = match end.as_deref() {
+            Some(e) => Bound::Excluded(e),
+            None => Bound::Unbounded,
+        };
+        let mut max = self
+            .map
+            .range::<[u8], _>((Bound::Included(pfx.as_slice()), end_b))
+            .next_back()
+            .map(|(k, _)| k.clone());
+        if let Some(shard) = self.tail_idx.get(family.as_bytes()) {
+            max = Self::max_bytes(max, self.shard_max_user_key(shard));
+        }
+        max
+    }
+
+    fn max_user_key_in_family_scan(&self, family: &str) -> Option<Bytes> {
+        let mut max: Option<Bytes> = None;
+        for (ik, _) in self.iter_internal() {
+            if crate::cf_kernel::key_in_cf_family(ik.user_key.as_ref(), family)
+                && max
+                    .as_ref()
+                    .is_none_or(|m| ik.user_key.as_ref() > m.as_ref())
+            {
+                max = Some(ik.user_key.clone());
+            }
+        }
+        max
+    }
+
+    fn shard_max_user_key(&self, shard: &TailShard) -> Option<Bytes> {
+        let mut max: Option<Bytes> = None;
+        let bump_i = |max: &mut Option<Bytes>, i: usize| {
+            if let Some(v) = self.tail.get(i) {
+                *max = Self::max_bytes(max.take(), Some(v.key.user_key.clone()));
+            }
+        };
+        if let Some((_, &i)) = shard.short.last_key_value() {
+            bump_i(&mut max, i);
+        }
+        if let Some((k, _)) = shard.long.last_key_value() {
+            max = Self::max_bytes(max, Some(k.clone()));
+        }
+        for &i in shard.point.values() {
+            bump_i(&mut max, i);
+        }
+        max
+    }
+
+    fn max_bytes(a: Option<Bytes>, b: Option<Bytes>) -> Option<Bytes> {
+        match (a, b) {
+            (None, x) | (x, None) => x,
+            (Some(x), Some(y)) => Some(if x >= y { x } else { y }),
+        }
+    }
+
+    /// Incremental [`SpanState`] update — one prefix lookup per insert.
+    /// Ascending puts keep `Pure`; any duplicate, descent, or tombstone
+    /// latches `impure` permanently for the prefix.
+    fn bump_span(&mut self, user_key: &Bytes, kind: ValueType) {
+        if self.span_stale {
+            return;
+        }
+        let pfx = cf_prefix(user_key.as_ref());
+        if let Some(s) = self.cf_span.get_mut(pfx) {
+            if s.impure {
+                return;
+            }
+            if kind != ValueType::Value || user_key.as_ref() <= s.hi.as_ref() {
+                s.impure = true;
+                s.lo = Bytes::new();
+                s.hi = Bytes::new();
+                return;
+            }
+            s.hi = user_key.clone();
+        } else {
+            let s = if kind == ValueType::Value {
+                SpanState {
+                    impure: false,
+                    lo: user_key.clone(),
+                    hi: user_key.clone(),
+                }
+            } else {
+                SpanState {
+                    impure: true,
+                    ..SpanState::default()
+                }
+            };
+            self.cf_span.insert(Bytes::copy_from_slice(pfx), s);
+        }
+    }
+
+    /// O(1) bulk-route verdict for `family` (RFC-0159 P1.4). `Pure` is
+    /// exactly what the legacy scan proves: family keys form one strictly
+    /// ascending tombstone-free run, `lo`/`hi` its bounds.
+    ///
+    /// `"default"` spans the raw and `default\0` prefixes, which interleave
+    /// in key order — only provably pure when exactly one is populated.
+    /// Family names containing NUL can claim a subset of a prefix and are
+    /// not tracked.
+    #[must_use]
+    pub(crate) fn bulk_span(&self, family: &str) -> BulkSpan {
+        if self.span_stale || family.is_empty() || family.as_bytes().contains(&0) {
+            return BulkSpan::Unknown;
+        }
+        let s = if family == "default" {
+            match (
+                self.cf_span.get(&b""[..]),
+                self.cf_span.get(b"default".as_slice()),
+            ) {
+                (Some(_), Some(_)) => return BulkSpan::Impure,
+                (Some(s), None) | (None, Some(s)) => s,
+                (None, None) => return BulkSpan::Absent,
+            }
+        } else {
+            match self.cf_span.get(family.as_bytes()) {
+                Some(s) => s,
+                None => return BulkSpan::Absent,
+            }
+        };
+        if s.impure {
+            BulkSpan::Impure
+        } else {
+            BulkSpan::Pure {
+                lo: s.lo.clone(),
+                hi: s.hi.clone(),
+            }
+        }
+    }
+
     /// Move every key of `family` into a new table (RFC-0065 P1.1).
     ///
     /// Keepers are not cloned — the map is partitioned in place so a tiny
@@ -641,6 +822,13 @@ impl MemTable {
     #[must_use]
     pub fn take_family(&mut self, family: &str) -> Self {
         self.spill_tail();
+        if !family.is_empty()
+            && family != "default"
+            && !family.as_bytes().contains(&0)
+            && !self.map.is_empty()
+        {
+            return self.take_family_contiguous(family);
+        }
         let map = std::mem::take(&mut self.map);
         let mut taken_map = BTreeMap::new();
         for (k, vers) in map {
@@ -654,6 +842,83 @@ impl MemTable {
         let mut taken = Self::new();
         taken.map = taken_map;
         taken.recount();
+        taken.span_stale = self.span_stale;
+        if family == "default" {
+            // "default" claims the raw and `default\0` prefixes wholesale.
+            for pfx in [&b""[..] as &[u8], b"default"] {
+                if let Some(s) = self.cf_span.remove(pfx) {
+                    taken.cf_span.insert(Bytes::copy_from_slice(pfx), s);
+                }
+            }
+        }
+        // NUL-containing family names claim subsets of a prefix — no state
+        // moves; the keeper's prefix bounds stay a superset (conservative).
+        taken
+    }
+
+    /// `take_family` for a NUL-free prefixed family: its `cf\0…` keys form
+    /// one contiguous BTreeMap range, so partition with `split_off` (whole
+    /// node moves) instead of reinserting every key into a fresh map. The
+    /// reinsert loop cost ~0.9 s per 256 MiB chunk inside the commit-tail
+    /// flush check once staging moved to per-CF thresholds (run #27:
+    /// 21.5 s `flush_check_ms`, +54% hydrate). `taken` stats come from one
+    /// pass over the taken range (single cf prefix — no per-version
+    /// `cf_bytes` lookups); the keeper keeps its incrementally-maintained
+    /// counters minus that pass. `tail_max_seq` of the keeper may stay at
+    /// the pre-take max: it only gates iteration strategy and the stale
+    /// value errs toward the generic iterator.
+    fn take_family_contiguous(&mut self, family: &str) -> Self {
+        let f = family.as_bytes();
+        let mut start = Vec::with_capacity(f.len() + 1);
+        start.extend_from_slice(f);
+        start.push(0);
+        let mut end = Vec::with_capacity(f.len() + 1);
+        end.extend_from_slice(f);
+        end.push(1);
+        let mut map = std::mem::take(&mut self.map);
+        // [start, end): exactly the keys `key_in_cf_family` claims — a
+        // NUL-free family prefix cannot be a proper prefix of a longer
+        // family's range (`route\0…` < `route2\0…` byte-wise).
+        let mut upper = map.split_off(end.as_slice());
+        let taken_map = map.split_off(start.as_slice());
+        map.append(&mut upper);
+        self.map = map;
+        self.invalidate_tail_ord();
+
+        let mut taken = Self::new();
+        taken.map = taken_map;
+        let mut bytes = 0usize;
+        let mut entries = 0usize;
+        let mut tombs = 0usize;
+        let mut max_seq = 0;
+        for (uk, vers) in &taken.map {
+            for v in vers.iter() {
+                let n = uk.len() + v.value.len() + 8;
+                bytes = bytes.saturating_add(n);
+                entries = entries.saturating_add(1);
+                if v.key.sequence > max_seq {
+                    max_seq = v.key.sequence;
+                }
+                if v.key.kind == ValueType::RangeDeletion {
+                    tombs = tombs.saturating_add(1);
+                }
+            }
+        }
+        taken.approx_bytes = bytes;
+        taken.entries = entries;
+        taken.range_tombstones = tombs;
+        taken.tail_max_seq = max_seq;
+        if !taken.map.is_empty() {
+            taken.cf_bytes.insert(Bytes::copy_from_slice(f), bytes);
+            if let Some(s) = self.cf_span.remove(f) {
+                taken.cf_span.insert(Bytes::copy_from_slice(f), s);
+            }
+        }
+        self.approx_bytes = self.approx_bytes.saturating_sub(bytes);
+        self.entries = self.entries.saturating_sub(entries);
+        self.range_tombstones = self.range_tombstones.saturating_sub(tombs);
+        self.cf_bytes.remove(&f[..]);
+        taken.span_stale = self.span_stale;
         taken
     }
 
@@ -878,6 +1143,10 @@ impl MemTable {
         if other.is_empty() {
             return;
         }
+        // The merge interleaves two key sets; per-prefix span state cannot
+        // describe the union — drop it (`bulk_span` falls back to the scan).
+        self.cf_span.clear();
+        self.span_stale = true;
         for (_, vers) in other.map {
             match vers {
                 Versions::One(v) => self.insert_map_gc(v.key, v.value, floor),
@@ -934,6 +1203,7 @@ impl MemTable {
         self.entries = self.entries.saturating_add(1);
         self.approx_bytes = self.approx_bytes.saturating_add(entry_bytes);
         self.bump_cf_bytes(key.user_key.as_ref(), entry_bytes, true);
+        self.bump_span(&key.user_key, key.kind);
         if is_rd {
             self.range_tombstones = self.range_tombstones.saturating_add(1);
         }
@@ -990,6 +1260,7 @@ impl MemTable {
             self.entries = self.entries.saturating_add(1);
             self.approx_bytes = self.approx_bytes.saturating_add(entry_bytes);
             self.bump_cf_bytes(key.user_key.as_ref(), entry_bytes, true);
+            self.bump_span(&key.user_key, key.kind);
             if is_rd {
                 self.range_tombstones = self.range_tombstones.saturating_add(1);
             }
@@ -1745,6 +2016,241 @@ mod tests {
     use super::*;
     use std::ops::Bound;
 
+    /// Oracle for [`MemTable::bulk_span`] — the legacy whole-table scan
+    /// (`Db::bulk_span_level_scan`) verbatim. Contract under test: whenever
+    /// the incremental state says `Pure`, the scan agrees with the same
+    /// bounds; whenever it says `Absent`, the scan finds no family keys.
+    fn scan_span_oracle(mt: &MemTable, family: &str) -> Option<(Bytes, Bytes)> {
+        let mut prev: Option<&[u8]> = None;
+        let mut lo: Option<&[u8]> = None;
+        let mut hi: &[u8] = &[];
+        for (ik, _) in mt.iter_internal() {
+            if !key_in_cf_family(ik.user_key.as_ref(), family) {
+                continue;
+            }
+            if ik.kind != ValueType::Value {
+                return None;
+            }
+            let uk = ik.user_key.as_ref();
+            if prev.is_some_and(|p| uk <= p) {
+                return None;
+            }
+            prev = Some(uk);
+            lo.get_or_insert(uk);
+            hi = uk;
+        }
+        lo.map(|l| (Bytes::copy_from_slice(l), Bytes::copy_from_slice(hi)))
+    }
+
+    #[test]
+    fn bulk_span_pure_ascending_take_family_absorb() {
+        let mut mt = MemTable::new();
+        for i in 0..100u32 {
+            mt.put(format!("cf1\0k{:04}", i), i as u64, b"v".as_slice());
+        }
+        assert_eq!(
+            mt.bulk_span("cf1"),
+            BulkSpan::Pure {
+                lo: Bytes::from("cf1\0k0000"),
+                hi: Bytes::from("cf1\0k0099")
+            }
+        );
+        // Another family interleaving does not disturb cf1's run.
+        for i in 0..10u32 {
+            mt.put(
+                format!("cf2\0z{:03}", i),
+                1000 + u64::from(i),
+                b"v".as_slice(),
+            );
+        }
+        assert_eq!(
+            mt.bulk_span("cf1"),
+            BulkSpan::Pure {
+                lo: Bytes::from("cf1\0k0000"),
+                hi: Bytes::from("cf1\0k0099")
+            }
+        );
+        assert_eq!(
+            mt.bulk_span("cf2"),
+            BulkSpan::Pure {
+                lo: Bytes::from("cf2\0z000"),
+                hi: Bytes::from("cf2\0z009")
+            }
+        );
+        assert_eq!(mt.bulk_span("nope"), BulkSpan::Absent);
+        // Spilling the tail into the BTree keeps the state.
+        mt.spill_tail();
+        assert!(matches!(mt.bulk_span("cf1"), BulkSpan::Pure { .. }));
+        // Duplicate key latches impure.
+        mt.put("cf1\0k0042", 2000, b"v".as_slice());
+        assert_eq!(mt.bulk_span("cf1"), BulkSpan::Impure);
+        assert!(matches!(mt.bulk_span("cf2"), BulkSpan::Pure { .. }));
+
+        // take_family moves the state with the keys; keeper loses it.
+        let mut mt2 = MemTable::new();
+        for i in 0..50u32 {
+            mt2.put(format!("cf1\0k{:04}", i), i as u64, b"v".as_slice());
+            mt2.put(
+                format!("cf2\0z{:03}", i),
+                500 + u64::from(i),
+                b"v".as_slice(),
+            );
+        }
+        let taken = mt2.take_family("cf1");
+        assert_eq!(
+            taken.bulk_span("cf1"),
+            BulkSpan::Pure {
+                lo: Bytes::from("cf1\0k0000"),
+                hi: Bytes::from("cf1\0k0049")
+            }
+        );
+        assert_eq!(taken.bulk_span("cf2"), BulkSpan::Absent);
+        assert_eq!(mt2.bulk_span("cf1"), BulkSpan::Absent);
+        assert!(matches!(mt2.bulk_span("cf2"), BulkSpan::Pure { .. }));
+
+        // Absorb invalidates tracking (scan fallback).
+        let mut host = MemTable::new();
+        host.put("cf1\0a", 1, b"v".as_slice());
+        host.absorb(taken);
+        assert_eq!(host.bulk_span("cf1"), BulkSpan::Unknown);
+        assert_eq!(host.bulk_span("cf2"), BulkSpan::Unknown);
+    }
+
+    #[test]
+    fn bulk_span_conservative_cases() {
+        // Point tombstone.
+        let mut t = MemTable::new();
+        t.put("cf1\0a", 1, b"v".as_slice());
+        t.delete("cf1\0b", 2);
+        assert_eq!(t.bulk_span("cf1"), BulkSpan::Impure);
+        // Range tombstone.
+        let mut t = MemTable::new();
+        t.put("cf1\0a", 1, b"v".as_slice());
+        t.delete_range("cf1\0a", "cf1\0z", 2);
+        assert_eq!(t.bulk_span("cf1"), BulkSpan::Impure);
+        // Descent.
+        let mut t = MemTable::new();
+        t.put("cf1\0b", 1, b"v".as_slice());
+        t.put("cf1\0a", 2, b"v".as_slice());
+        assert_eq!(t.bulk_span("cf1"), BulkSpan::Impure);
+        // Consecutive same-seq replace keeps the run pure.
+        let mut t = MemTable::new();
+        t.put("cf1\0a", 1, b"v1".as_slice());
+        t.put("cf1\0a", 1, b"v2".as_slice());
+        t.put("cf1\0b", 2, b"v".as_slice());
+        assert_eq!(
+            t.bulk_span("cf1"),
+            BulkSpan::Pure {
+                lo: Bytes::from("cf1\0a"),
+                hi: Bytes::from("cf1\0b")
+            }
+        );
+        // "default" with both prefixes populated is conservative impure…
+        let mut t = MemTable::new();
+        t.put("raw1", 1, b"v".as_slice());
+        t.put("default\0d1", 2, b"v".as_slice());
+        assert_eq!(t.bulk_span("default"), BulkSpan::Impure);
+        // …but a single populated prefix is a normal pure run.
+        let mut t = MemTable::new();
+        for i in 0..5u32 {
+            t.put(format!("default\0d{}", i), u64::from(i), b"v".as_slice());
+        }
+        assert_eq!(
+            t.bulk_span("default"),
+            BulkSpan::Pure {
+                lo: Bytes::from("default\0d0"),
+                hi: Bytes::from("default\0d4")
+            }
+        );
+        // Family names containing NUL are never tracked.
+        let mut t = MemTable::new();
+        t.put("a\0b\0k", 1, b"v".as_slice());
+        assert_eq!(t.bulk_span("a\0b"), BulkSpan::Unknown);
+        // Clone keeps the state.
+        let mut t = MemTable::new();
+        t.put("cf1\0a", 1, b"v".as_slice());
+        assert!(matches!(t.clone().bulk_span("cf1"), BulkSpan::Pure { .. }));
+    }
+
+    /// Randomized cross-check of [`MemTable::bulk_span`] against
+    /// [`scan_span_oracle`] across interleaved families, dups, descents,
+    /// tombstones, spills, `take_family`, and `absorb`.
+    #[test]
+    fn bulk_span_matches_scan_oracle() {
+        struct R(u64);
+        impl R {
+            fn next(&mut self) -> u64 {
+                let mut x = self.0;
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                self.0 = x;
+                x
+            }
+            fn below(&mut self, n: u64) -> u64 {
+                self.next() % n
+            }
+        }
+        fn check(mt: &MemTable, label: &str) {
+            for f in ["default", "cf1", "cf2"] {
+                match mt.bulk_span(f) {
+                    BulkSpan::Pure { lo, hi } => assert_eq!(
+                        scan_span_oracle(mt, f),
+                        Some((lo, hi)),
+                        "{label}: pure state for {f} disagrees with the scan"
+                    ),
+                    BulkSpan::Absent => assert!(
+                        scan_span_oracle(mt, f).is_none(),
+                        "{label}: absent state for {f} but the scan finds keys"
+                    ),
+                    BulkSpan::Impure | BulkSpan::Unknown => {}
+                }
+            }
+        }
+        let mut rng = R(0x243F_6A88_85A3_08D3);
+        let mut mt = MemTable::new();
+        let mut seq = 1u64;
+        let mut ctr = [0u64; 3];
+        for step in 1..=3000u32 {
+            let fi = rng.below(3) as usize;
+            let mode = rng.below(10);
+            let idx = if mode < 6 {
+                ctr[fi] += 1;
+                ctr[fi]
+            } else {
+                rng.below(40)
+            };
+            let key: Vec<u8> = match (fi, rng.below(3)) {
+                (0, 0) => format!("r{idx}").into_bytes(),
+                (0, _) => format!("default\0d{idx}").into_bytes(),
+                (1, _) => format!("cf1\0k{idx}").into_bytes(),
+                _ => format!("cf2\0k{idx}").into_bytes(),
+            };
+            seq += 1;
+            match mode {
+                8 => mt.delete(key, seq),
+                9 => mt.delete_range(key, format!("zz{}", idx).into_bytes(), seq),
+                _ => mt.put(key, seq, b"v".as_slice()),
+            }
+            if step % 97 == 0 {
+                mt.spill_tail();
+            }
+            if step % 53 == 0 {
+                check(&mt, "live");
+            }
+            if step % 751 == 0 {
+                let f = ["cf1", "cf2"][rng.below(2) as usize];
+                let taken = mt.take_family(f);
+                check(&taken, "taken");
+                check(&mt, "keeper");
+                mt.absorb(taken);
+                check(&mt, "absorbed");
+            }
+        }
+        mt.spill_tail();
+        check(&mt, "final");
+    }
+
     /// RFC-0044 P2.2 micro: deps_raftlog memtable floor — `insert_many`
     /// (tail append + tail_idx index) only, no WAL/Db/publish. Run:
     /// `cargo test -p pedradb-core --lib --release mem_insert_raftlog_micro -- --ignored --nocapture`
@@ -1955,6 +2461,39 @@ mod tests {
         assert!(!mt.has_range_tombstones());
         mt.delete_range(b"a".as_slice(), b"z".as_slice(), 3);
         assert!(mt.has_range_tombstones());
+    }
+
+    #[test]
+    fn max_user_key_in_family_skips_foreign_cf() {
+        let mut mt = MemTable::new();
+        for i in 0..8_000u32 {
+            let mut k = b"lock\0".to_vec();
+            k.extend_from_slice(&i.to_be_bytes());
+            mt.put(k, u64::from(i) + 1, b"v".as_slice());
+        }
+        assert!(
+            mt.max_user_key_in_family("raftlog").is_none(),
+            "no raftlog keys in a lock-only table"
+        );
+        let lock_max = mt.max_user_key_in_family("lock").expect("lock keys");
+        assert!(
+            crate::cf_kernel::key_in_cf_family(lock_max.as_ref(), "lock"),
+            "lock max must stay in-family"
+        );
+        mt.put(b"raftlog\0z".as_slice(), 9_000, b"r".as_slice());
+        assert_eq!(
+            mt.max_user_key_in_family("raftlog").as_deref(),
+            Some(b"raftlog\0z".as_ref())
+        );
+        mt.spill_tail();
+        assert_eq!(
+            mt.max_user_key_in_family("raftlog").as_deref(),
+            Some(b"raftlog\0z".as_ref())
+        );
+        assert_eq!(
+            mt.max_user_key_in_family("lock").as_deref(),
+            Some(lock_max.as_ref())
+        );
     }
 
     #[test]
@@ -2219,7 +2758,7 @@ mod tests {
         let (_, mid) = mt
             .last_visible_under_prefix(b"u/1", 2, None)
             .expect("mid snapshot");
-        assert_eq!(&mid[..], b"v2");
+        assert_eq!(&mid[..], b"v2".as_slice());
     }
 
     #[test]
@@ -2463,12 +3002,12 @@ mod tests {
             .last_visible_under_prefix(&1999u32.to_le_bytes(), 2000, None)
             .expect("indexed last");
         assert_eq!(&k[..], &1999u32.to_le_bytes());
-        assert_eq!(&v[..], b"v");
+        assert_eq!(&v[..], b"v".as_slice());
     }
 
     #[test]
     fn cf_sharded_tail_idx_isolates_lookups() {
-        // RFC-0054: lock\\0* keys must not sit in the raftlog shard.
+        // RFC-0054: lock\0* keys must not sit in the raftlog shard.
         let mut mt = MemTable::new();
         for i in 0..5000u32 {
             let mut k = b"lock\0".to_vec();
@@ -2549,6 +3088,70 @@ mod tests {
         );
         assert_eq!(mt.get(b"lock\0a", 10), Lookup::NotFound);
         assert_eq!(lock.approx_memory_usage_cf("default"), 0);
+    }
+
+    #[test]
+    fn take_family_contiguous_partition_exact() {
+        // Fast path (split_off partition) vs the loop's contract:
+        // membership, per-family bytes, version counts, range tombstones —
+        // with boundary keys sorting adjacent to the family range
+        // (`route` raw, `route\0` empty user key, `route2\0…`, raw `s`).
+        let mut mt = MemTable::new();
+        mt.put(b"route\0k1".as_slice(), 1, b"v1".as_slice());
+        mt.put(b"route\0k2".as_slice(), 2, b"v2".as_slice());
+        mt.put(b"route\0k2".as_slice(), 5, b"v2-newer".as_slice());
+        mt.put(b"route\0".as_slice(), 3, b"empty-user-key".as_slice());
+        mt.put(b"route".as_slice(), 4, b"raw-default".as_slice());
+        mt.put(b"route2\0z".as_slice(), 6, b"r2".as_slice());
+        mt.put(b"lock\0x".as_slice(), 7, b"L".as_slice());
+        mt.put(b"s".as_slice(), 8, b"raw-s".as_slice());
+        mt.delete_range(b"route\0k1".as_slice(), b"route\0k9".as_slice(), 9);
+        let before_total = mt.approx_memory_usage();
+        let before_route = mt.approx_memory_usage_cf("route");
+        let before_len = mt.len();
+        assert!(mt.has_range_tombstones());
+
+        let taken = mt.take_family("route");
+
+        // Membership: family keys move, boundary keys stay.
+        assert_eq!(
+            taken.get(b"route\0k2", 8),
+            Lookup::Found(Bytes::from_static(b"v2-newer"))
+        );
+        assert_eq!(
+            taken.get(b"route\0", 8),
+            Lookup::Found(Bytes::from_static(b"empty-user-key"))
+        );
+        assert_eq!(mt.get(b"route\0k2", 8), Lookup::NotFound);
+        assert_eq!(
+            mt.get(b"route", 8),
+            Lookup::Found(Bytes::from_static(b"raw-default"))
+        );
+        assert_eq!(
+            mt.get(b"route2\0z", 8),
+            Lookup::Found(Bytes::from_static(b"r2"))
+        );
+        assert_eq!(
+            mt.get(b"lock\0x", 8),
+            Lookup::Found(Bytes::from_static(b"L"))
+        );
+        assert_eq!(mt.get(b"s", 8), Lookup::Found(Bytes::from_static(b"raw-s")));
+
+        // Conservation: bytes, versions, tombstones split exactly.
+        assert_eq!(taken.approx_memory_usage(), before_route);
+        assert_eq!(mt.approx_memory_usage(), before_total - before_route);
+        assert_eq!(mt.len() + taken.len(), before_len);
+        assert_eq!(mt.approx_memory_usage_cf("route"), 0);
+        assert!(taken.has_range_tombstones());
+        assert!(!mt.has_range_tombstones());
+
+        // Keeper counters keep working incrementally after the family
+        // entry was dropped from `cf_bytes` (re-created on the next put).
+        mt.put(b"route\0new".as_slice(), 10, b"n".as_slice());
+        assert_eq!(
+            mt.approx_memory_usage_cf("route"),
+            b"route\0new".len() + 1 + 8
+        );
     }
 
     #[test]
@@ -2824,6 +3427,6 @@ mod tests {
             )
             .collect();
         assert_eq!(old.len(), 1);
-        assert_eq!(&old[0].1[..], b"v");
+        assert_eq!(&old[0].1[..], b"v".as_slice());
     }
 }

@@ -6,13 +6,36 @@
 //! merge path that does not require materialising the full keyspace first.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BinaryHeap};
+use std::collections::{BTreeMap, BinaryHeap, VecDeque};
 use std::ops::Bound;
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+use std::sync::OnceLock;
+use std::time::Instant;
 
 use bytes::Bytes;
 
 use crate::error::Result;
 use crate::key::{InternalKey, SequenceNumber, ValueType};
+
+/// `PEDRA_SCAN_DIAG=1` arms [`Db::scan_at_raw`]'s periodic SCANDIAG print;
+/// read once per process.
+pub(crate) fn scan_diag_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("PEDRA_SCAN_DIAG").is_some())
+}
+
+/// Candidate rows examined by `next_window_kv` (Some returns only).
+pub(crate) static SCAN_DIAG_ROWS: AtomicU64 = AtomicU64::new(0);
+
+/// Nanoseconds spent inside `next_window_kv` (includes block loads on
+/// cache miss, which happen under the stream's `next`).
+pub(crate) static SCAN_DIAG_ROW_NS: AtomicU64 = AtomicU64::new(0);
+
+/// Rows emitted from the single-live-stream fast path (diag only).
+pub(crate) static SCAN_DIAG_SINGLE_ROWS: AtomicU64 = AtomicU64::new(0);
+
+/// Streams retired early because their head passed `end` (diag only).
+pub(crate) static SCAN_DIAG_STREAM_EVICTS: AtomicU64 = AtomicU64::new(0);
 
 /// One user-visible key/value after MVCC filtering.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,6 +140,17 @@ pub fn user_key_in_range(user_key: &[u8], start: Bound<&[u8]>, end: Bound<&[u8]>
         Bound::Excluded(e) => user_key < e,
     };
     after_start && before_end
+}
+
+/// True when `user_key` sits past `end`: every later key of a sorted stream
+/// is then out of range too, so the stream can be retired early.
+#[must_use]
+pub fn past_end(user_key: &[u8], end: Bound<&[u8]>) -> bool {
+    match end {
+        Bound::Unbounded => false,
+        Bound::Included(e) => user_key > e,
+        Bound::Excluded(e) => user_key >= e,
+    }
 }
 
 /// Extract range tombstones visible at `snapshot` from a stream of versions.
@@ -229,33 +263,18 @@ pub fn visible_range_limited(
     out
 }
 
-/// Heap entry for multi-way merge of sorted internal-key streams (min-heap by [`InternalKey`]).
-struct HeapItem {
-    key: InternalKey,
-    value: Bytes,
-    stream: usize,
-}
-
-impl PartialEq for HeapItem {
-    fn eq(&self, other: &Self) -> bool {
-        self.key == other.key
-    }
-}
-impl Eq for HeapItem {}
-impl PartialOrd for HeapItem {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-impl Ord for HeapItem {
-    fn cmp(&self, other: &Self) -> Ordering {
-        // BinaryHeap is max-heap; reverse so smallest InternalKey is popped first.
-        other.key.cmp(&self.key)
-    }
-}
-
 /// One sorted point-key stream (RFC-0033: pulled lazily so `limit` cuts I/O).
 pub type LayerStream<'a> = Box<dyn Iterator<Item = (InternalKey, Bytes)> + 'a>;
+
+/// True when head row `a` orders before `b` in [`InternalKey`] order
+/// (user_key asc, newest sequence first). Exhausted heads order last.
+fn head_before(a: &Option<(InternalKey, Bytes)>, b: &Option<(InternalKey, Bytes)>) -> bool {
+    match (a, b) {
+        (Some((ka, _)), Some((kb, _))) => ka.cmp(kb) == Ordering::Less,
+        (Some(_), None) => true,
+        (None, _) => false,
+    }
+}
 
 /// Streaming merge of **pre-sorted** internal entry streams into visible KVs.
 ///
@@ -266,7 +285,13 @@ pub type LayerStream<'a> = Box<dyn Iterator<Item = (InternalKey, Bytes)> + 'a>;
 /// (RFC-0033 P0.3). Range tombstones must be supplied up front so a deleted
 /// prefix cannot hide later live keys (G2).
 pub struct StreamingVisibleIter<'a> {
-    heap: BinaryHeap<HeapItem>,
+    /// Min-heap of **stream indices** ordered by each stream's head row in
+    /// `heads`. Sifting moves plain `usize`s; the owned head rows never
+    /// move until they are emitted (the old `BinaryHeap<HeapItem>` copied
+    /// key+value handles through every sift level).
+    heap: Vec<usize>,
+    /// Head row per stream (`None` = exhausted; never re-inserted).
+    heads: Vec<Option<(InternalKey, Bytes)>>,
     streams: Vec<LayerStream<'a>>,
     snapshot: SequenceNumber,
     range_dels: Vec<RangeTombstone>,
@@ -275,7 +300,9 @@ pub struct StreamingVisibleIter<'a> {
     limit: Option<usize>,
     emitted: usize,
     /// Last user key for which we already decided visibility (skip older versions).
-    skip_user: Option<Bytes>,
+    /// A reused byte buffer, not a `Bytes`: cloning the emitted key was one
+    /// block-Arc inc plus one dec per row inside the scan hot loop.
+    skip_user: Option<Vec<u8>>,
 }
 
 impl StreamingVisibleIter<'static> {
@@ -331,18 +358,35 @@ impl<'a> StreamingVisibleIter<'a> {
         end: Bound<&[u8]>,
         limit: Option<usize>,
     ) -> Self {
-        let mut heap = BinaryHeap::new();
+        let mut heap = Vec::new();
+        let mut heads = Vec::with_capacity(streams.len());
+        let mut evicts = 0u64;
         for (i, it) in streams.iter_mut().enumerate() {
-            if let Some((k, v)) = it.next() {
-                heap.push(HeapItem {
-                    key: k,
-                    value: v,
-                    stream: i,
-                });
+            let head = it.next();
+            // Sorted stream: a head already past `end` can only be followed
+            // by keys further past it — retire the stream before it ever
+            // competes in the heap.
+            let retire = match &head {
+                Some((k, _)) => past_end(k.user_key.as_ref(), end),
+                None => false,
+            };
+            if retire {
+                evicts += 1;
+                heads.push(None);
+                continue;
+            }
+            heads.push(head);
+            if heads[i].is_some() {
+                heap.push(i);
             }
         }
-        Self {
+        if evicts > 0 && scan_diag_enabled() {
+            SCAN_DIAG_STREAM_EVICTS.fetch_add(evicts, AtomicOrdering::Relaxed);
+        }
+        // heap built in registration order with all Some heads: heapify once.
+        let mut iter = Self {
             heap,
+            heads,
             streams,
             snapshot,
             range_dels,
@@ -351,7 +395,69 @@ impl<'a> StreamingVisibleIter<'a> {
             limit,
             emitted: 0,
             skip_user: None,
+        };
+        iter.heapify();
+        iter
+    }
+
+    /// Restore the min-heap invariant over `heap` (bottom-up heapify).
+    fn heapify(&mut self) {
+        for start in (0..self.heap.len() / 2).rev() {
+            self.sift_down(start);
         }
+    }
+
+    fn head_lt(&self, a: usize, b: usize) -> bool {
+        head_before(&self.heads[a], &self.heads[b])
+    }
+
+    fn sift_down(&mut self, mut hole: usize) {
+        let n = self.heap.len();
+        loop {
+            let l = 2 * hole + 1;
+            if l >= n {
+                break;
+            }
+            let r = l + 1;
+            let mut best = l;
+            if r < n && self.head_lt(self.heap[r], self.heap[l]) {
+                best = r;
+            }
+            if self.head_lt(self.heap[best], self.heap[hole]) {
+                self.heap.swap(best, hole);
+                hole = best;
+            } else {
+                break;
+            }
+        }
+    }
+
+    /// Push stream `i` (its head must be `Some`) and sift it up.
+    fn heap_push(&mut self, i: usize) {
+        let mut hole = self.heap.len();
+        self.heap.push(i);
+        while hole > 0 {
+            let parent = (hole - 1) / 2;
+            if self.head_lt(self.heap[hole], self.heap[parent]) {
+                self.heap.swap(hole, parent);
+                hole = parent;
+            } else {
+                break;
+            }
+        }
+    }
+
+    /// Pop the smallest stream index (`None` = all exhausted).
+    fn heap_pop(&mut self) -> Option<usize> {
+        let top = *self.heap.first()?;
+        let last = self.heap.pop();
+        if let Some(last) = last {
+            if !self.heap.is_empty() {
+                self.heap[0] = last;
+                self.sift_down(0);
+            }
+        }
+        Some(top)
     }
 
     fn in_range(&self, user_key: &[u8]) -> bool {
@@ -360,43 +466,138 @@ impl<'a> StreamingVisibleIter<'a> {
         user_key_in_range(user_key, start, end)
     }
 
+    /// `past_end` against this iterator's owned `end` bound.
+    fn beyond_end(&self, user_key: &[u8]) -> bool {
+        past_end(user_key, bound_as_ref(&self.end))
+    }
+
+    #[inline]
+    fn skips_user(&self, user_key: &[u8]) -> bool {
+        match &self.skip_user {
+            Some(skip) => user_key == skip.as_slice(),
+            None => false,
+        }
+    }
+
+    /// Record the winning key as the new skip target (reused buffer, no
+    /// `Bytes` clone) and build the window row.
+    fn emit(&mut self, ikey: InternalKey, value: Bytes) -> WindowKv {
+        let skip = self.skip_user.get_or_insert_with(Vec::new);
+        skip.clear();
+        skip.extend_from_slice(ikey.user_key.as_ref());
+        let range_hidden = range_deleted(ikey.user_key.as_ref(), ikey.sequence, &self.range_dels);
+        let snapshot_live = visible_at(ikey.kind, range_hidden);
+        WindowKv {
+            key: ikey.user_key,
+            value,
+            snapshot_live,
+        }
+    }
+
     /// Newest version per user key, with [`WindowKv::snapshot_live`].
     ///
     /// Does **not** apply [`iter_window_keep`] — the caller (compat window
     /// or [`Iterator::next`]) decides keep/drop from that bit.
     pub fn next_window_kv(&mut self) -> Option<WindowKv> {
-        while let Some(item) = self.heap.pop() {
-            if let Some((k, v)) = self.streams[item.stream].next() {
-                self.heap.push(HeapItem {
-                    key: k,
-                    value: v,
-                    stream: item.stream,
-                });
-            }
+        // PEDRA_SCAN_DIAG aggregates per-row cost here (the compat scan
+        // path consumes this via `into_window_kvs`, not `Iterator::next`).
+        // Disabled = one relaxed load per row.
+        if !scan_diag_enabled() {
+            return self.next_window_kv_inner();
+        }
+        let t0 = Instant::now();
+        let out = self.next_window_kv_inner();
+        SCAN_DIAG_ROW_NS.fetch_add(t0.elapsed().as_nanos() as u64, AtomicOrdering::Relaxed);
+        SCAN_DIAG_ROWS.fetch_add(u64::from(out.is_some()), AtomicOrdering::Relaxed);
+        out
+    }
 
-            let ikey = item.key;
-            let value = item.value;
+    fn next_window_kv_inner(&mut self) -> Option<WindowKv> {
+        // Single live stream: nothing to compete with, so skip all heap
+        // work. Reached at setup when one run overlaps the range, or after
+        // the other streams exhaust / retire past `end`.
+        if self.heap.len() == 1 {
+            let si = self.heap[0];
+            let diag = scan_diag_enabled();
+            loop {
+                let head = self.streams[si].next();
+                let cur = self.heads[si].take();
+                if head.is_none() {
+                    self.heap.clear();
+                } else {
+                    self.heads[si] = head;
+                }
+                let Some((ikey, value)) = cur else {
+                    return None;
+                };
+                if ikey.sequence > self.snapshot {
+                    continue;
+                }
+                if self.skips_user(ikey.user_key.as_ref()) {
+                    continue;
+                }
+                if !self.in_range(ikey.user_key.as_ref()) {
+                    // Sorted stream: past `end` nothing re-enters the range.
+                    if self.beyond_end(ikey.user_key.as_ref()) {
+                        self.heap.clear();
+                        self.heads[si] = None;
+                        return None;
+                    }
+                    continue;
+                }
+                if diag {
+                    SCAN_DIAG_SINGLE_ROWS.fetch_add(1, AtomicOrdering::Relaxed);
+                }
+                return Some(self.emit(ikey, value));
+            }
+        }
+        while let Some(si) = self.heap_pop() {
+            // Refill this stream's head before deciding on the popped row so
+            // the successor competes with the other streams immediately.
+            let head = self.streams[si].next();
+            let cur = self.heads[si].take();
+            let retire = match &cur {
+                // Sorted stream: this head passed `end`, so every successor
+                // is out of range too — retire instead of re-pushing.
+                Some((k, _)) => self.beyond_end(k.user_key.as_ref()),
+                None => false,
+            };
+            if retire {
+                if scan_diag_enabled() {
+                    SCAN_DIAG_STREAM_EVICTS.fetch_add(1, AtomicOrdering::Relaxed);
+                }
+                // `head` is the successor of a key past `end`: drop it.
+                self.heads[si] = None;
+            } else {
+                let retire_head = match &head {
+                    Some((k, _)) => self.beyond_end(k.user_key.as_ref()),
+                    None => false,
+                };
+                if retire_head {
+                    if scan_diag_enabled() {
+                        SCAN_DIAG_STREAM_EVICTS.fetch_add(1, AtomicOrdering::Relaxed);
+                    }
+                    self.heads[si] = None;
+                } else {
+                    self.heads[si] = head;
+                    if self.heads[si].is_some() {
+                        self.heap_push(si);
+                    }
+                }
+            }
+            let Some((ikey, value)) = cur else {
+                continue;
+            };
             if ikey.sequence > self.snapshot {
                 continue;
             }
-            if let Some(ref skip) = self.skip_user {
-                if ikey.user_key == *skip {
-                    continue;
-                }
+            if self.skips_user(ikey.user_key.as_ref()) {
+                continue;
             }
             if !self.in_range(ikey.user_key.as_ref()) {
                 continue;
             }
-
-            self.skip_user = Some(ikey.user_key.clone());
-            let range_hidden =
-                range_deleted(ikey.user_key.as_ref(), ikey.sequence, &self.range_dels);
-            let snapshot_live = visible_at(ikey.kind, range_hidden);
-            return Some(WindowKv {
-                key: ikey.user_key,
-                value,
-                snapshot_live,
-            });
+            return Some(self.emit(ikey, value));
         }
         None
     }
@@ -723,6 +924,12 @@ impl CompactSource for std::vec::IntoIter<(InternalKey, Bytes)> {
     }
 }
 
+impl<S: CompactSource> CompactSource for KwayInternalMerge<S> {
+    fn next_entry(&mut self) -> Result<Option<(InternalKey, Bytes)>> {
+        KwayInternalMerge::next_entry(self)
+    }
+}
+
 impl<S: CompactSource> KwayInternalMerge<S> {
     /// Seed the heap from each stream's first entry.
     ///
@@ -764,6 +971,156 @@ impl<S: CompactSource> KwayInternalMerge<S> {
             }
             self.last = Some(head.key.clone());
             return Ok(Some((head.key, head.value)));
+        }
+    }
+}
+
+/// Streaming GC compaction over a k-way merge.
+///
+/// Applies the retention decisions of [`gc_compact_entries`] without
+/// materializing the whole input — the batch path held every decoded input
+/// table plus a `BTreeMap` copy, which tripled the merge footprint and
+/// OOMed a 4 GiB host under sustained L0→L1 compaction (25M-entry slipstream
+/// hydrate, 2026-08-31).
+///
+/// Equivalence with the batch path: the merge yields [`InternalKey`] order,
+/// so one user key's version run arrives contiguously (sequence descending),
+/// and every range tombstone that can cover key K sorts at its start key
+/// ≤ K — i.e. it is already in `tombs` when K's run closes. Run decisions
+/// are therefore identical to the batch map walk, and emitting survivors at
+/// their stream position equals the batch's final global sort.
+pub struct GcMergeSource<S: CompactSource> {
+    merge: KwayInternalMerge<S>,
+    gc: CompactGcOptions,
+    tombs: Vec<RangeTombstone>,
+    run: Vec<(InternalKey, Bytes)>,
+    out: VecDeque<(InternalKey, Bytes)>,
+}
+
+impl<S: CompactSource> GcMergeSource<S> {
+    /// Wrap a k-way merge with GC options.
+    #[must_use]
+    pub fn new(merge: KwayInternalMerge<S>, gc: CompactGcOptions) -> Self {
+        Self {
+            merge,
+            gc,
+            tombs: Vec::new(),
+            run: Vec::new(),
+            out: VecDeque::new(),
+        }
+    }
+
+    /// Decide the buffered run (one user key) and queue its survivors.
+    fn close_run(&mut self) {
+        // This run's tombstones have start == this user key, so they can
+        // cover this run's keys: collect them before the coverage decision
+        // (the batch path builds `tombs` from every deletion, including
+        // ones a bottommost rewrite later drops from the output).
+        // Bottommost latest-only drops the tombstones themselves (F177
+        // mirrors `gc_compact_entries`); every other mode passes them
+        // through. `oldest_snapshot` takes precedence over keep-only-latest.
+        let drop_tombs =
+            self.gc.oldest_snapshot.is_none() && self.gc.keep_only_latest && self.gc.bottommost;
+        for (ikey, value) in &self.run {
+            if ikey.kind == ValueType::RangeDeletion {
+                self.tombs.push(RangeTombstone {
+                    start: ikey.user_key.clone(),
+                    end: value.clone(),
+                    sequence: ikey.sequence,
+                });
+            }
+        }
+        let user = self.run[0].0.user_key.clone();
+        let mut keep = vec![false; self.run.len()];
+        let points: Vec<usize> = (0..self.run.len())
+            .filter(|&i| self.run[i].0.kind != ValueType::RangeDeletion)
+            .collect();
+        if let Some(oldest) = self.gc.oldest_snapshot {
+            // `gc_snapshot_safe`: newest always kept; each older version
+            // drops when the newest kept sibling has sequence <= oldest;
+            // a lone bottommost tombstone collapses away.
+            let mut newer_kept: Option<SequenceNumber> = None;
+            for &i in &points {
+                if crate::compact_kernel::point_version_fate(
+                    self.run[i].0.sequence,
+                    newer_kept,
+                    oldest,
+                ) == crate::compact_kernel::VersionFate::Drop
+                {
+                    continue;
+                }
+                keep[i] = true;
+                newer_kept = Some(self.run[i].0.sequence);
+            }
+            let kept: Vec<usize> = points.iter().copied().filter(|&i| keep[i]).collect();
+            let lone = kept.len() == 1 && self.run[kept[0]].0.kind == ValueType::Deletion;
+            if crate::compact_kernel::lone_tombstone_fate(self.gc.bottommost, lone)
+                == crate::compact_kernel::VersionFate::Drop
+            {
+                for &i in &kept {
+                    keep[i] = false;
+                }
+            }
+        } else if self.gc.keep_only_latest {
+            // Keep only the newest version; drop it when a newer range
+            // tombstone covers it. A point tombstone survives a partial
+            // rewrite (F177) and collapses on a bottommost one.
+            if let Some(&i) = points.first() {
+                let ikey = &self.run[i].0;
+                keep[i] = match ikey.kind {
+                    ValueType::Value => !range_deleted(user.as_ref(), ikey.sequence, &self.tombs),
+                    ValueType::Deletion => !self.gc.bottommost,
+                    ValueType::RangeDeletion => false,
+                };
+            }
+        } else {
+            // Pure min-sequence floor: every surviving point is kept.
+            for &i in &points {
+                keep[i] = true;
+            }
+        }
+        let run = std::mem::take(&mut self.run);
+        for (i, (ikey, value)) in run.into_iter().enumerate() {
+            if ikey.kind == ValueType::RangeDeletion {
+                if !drop_tombs {
+                    self.out.push_back((ikey, value));
+                }
+            } else if keep[i] {
+                self.out.push_back((ikey, value));
+            }
+        }
+    }
+}
+
+impl<S: CompactSource> CompactSource for GcMergeSource<S> {
+    fn next_entry(&mut self) -> Result<Option<(InternalKey, Bytes)>> {
+        loop {
+            if let Some(pair) = self.out.pop_front() {
+                return Ok(Some(pair));
+            }
+            match self.merge.next_entry()? {
+                Some((ikey, value)) => {
+                    // Same pre-filter as the batch path: the floor applies
+                    // to point versions and range tombstones alike.
+                    if ikey.sequence < self.gc.min_sequence {
+                        continue;
+                    }
+                    if self
+                        .run
+                        .last()
+                        .is_some_and(|(k, _)| k.user_key != ikey.user_key)
+                    {
+                        self.close_run();
+                    }
+                    self.run.push((ikey, value));
+                }
+                None => {
+                    if self.run.is_empty() {
+                        return Ok(None);
+                    }
+                    self.close_run();
+                }
+            }
         }
     }
 }
@@ -837,6 +1194,216 @@ mod tests {
         assert_eq!(at_3[0].value.as_ref(), b"old");
         let at_10 = visible_range(entries, 10, Bound::Unbounded, Bound::Unbounded);
         assert_eq!(at_10[0].value.as_ref(), b"new");
+    }
+
+    /// Brute-force window oracle: sort every point entry into internal
+    /// order, keep the first version at/below `snapshot` per user key
+    /// (hidden rows included), range-filter, apply range tombstones.
+    fn window_oracle(
+        streams: &[Vec<(InternalKey, Bytes)>],
+        range_dels: &[RangeTombstone],
+        snapshot: SequenceNumber,
+        start: Bound<&[u8]>,
+        end: Bound<&[u8]>,
+    ) -> Vec<WindowKv> {
+        let mut all: Vec<(InternalKey, Bytes)> = streams.iter().flatten().cloned().collect();
+        all.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut out = Vec::new();
+        let mut last: Option<Vec<u8>> = None;
+        for (ikey, value) in all {
+            if ikey.sequence > snapshot {
+                continue;
+            }
+            if let Some(l) = &last {
+                if ikey.user_key.as_ref() == l.as_slice() {
+                    continue;
+                }
+            }
+            if !user_key_in_range(ikey.user_key.as_ref(), start, end) {
+                continue;
+            }
+            last = Some(ikey.user_key.to_vec());
+            let hidden = range_deleted(ikey.user_key.as_ref(), ikey.sequence, range_dels);
+            out.push(WindowKv {
+                key: ikey.user_key,
+                value,
+                snapshot_live: visible_at(ikey.kind, hidden),
+            });
+        }
+        out
+    }
+
+    fn lcg(state: &mut u64) -> u64 {
+        *state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        *state
+    }
+
+    /// Randomized oracle for `StreamingVisibleIter::from_point_streams`:
+    /// 1-4 streams, duplicate keys across streams, versions above snapshot,
+    /// deletions, range tombstones, and bounds that leave whole streams
+    /// past `end` (exercising setup eviction + the single-live fast path).
+    #[test]
+    fn streaming_merge_fast_path_random_oracle() {
+        let mut seed = 0x0000_5eed_0002_u64;
+        let snapshot: SequenceNumber = 8;
+        for case in 0..300 {
+            let n_streams = 1 + (lcg(&mut seed) % 4) as usize;
+            let mut used: std::collections::HashSet<(Vec<u8>, u64)> =
+                std::collections::HashSet::new();
+            let mut streams: Vec<Vec<(InternalKey, Bytes)>> = Vec::new();
+            for _s in 0..n_streams {
+                let mut rows = Vec::new();
+                let mut k = lcg(&mut seed) % 50;
+                for _r in 0..(lcg(&mut seed) % 30) {
+                    let key = format!(
+                        "{}{}",
+                        (b'a' + (k / 10) as u8) as char,
+                        (b'0' + (k % 10) as u8) as char
+                    );
+                    let mut seq = 1 + lcg(&mut seed) % 12;
+                    while !used.insert((key.clone().into_bytes(), seq)) {
+                        seq = 1 + lcg(&mut seed) % 12;
+                    }
+                    let kind = if lcg(&mut seed) % 5 == 0 {
+                        ValueType::Deletion
+                    } else {
+                        ValueType::Value
+                    };
+                    let val = Bytes::from(format!("v{case}/{seq}"));
+                    rows.push((ik(key.as_bytes(), seq, kind), val));
+                    k += 1 + lcg(&mut seed) % 3;
+                }
+                rows.sort_by(|a, b| a.0.cmp(&b.0));
+                streams.push(rows);
+            }
+            let (start, end) = match lcg(&mut seed) % 3 {
+                0 => (Bound::Unbounded, Bound::<&[u8]>::Unbounded),
+                1 => (
+                    Bound::Included(b"b3".as_ref()),
+                    Bound::Excluded(b"d7".as_ref()),
+                ),
+                _ => (
+                    Bound::Excluded(b"a1".as_ref()),
+                    Bound::Included(b"c0".as_ref()),
+                ),
+            };
+            let range_dels = if lcg(&mut seed) % 3 == 0 {
+                vec![RangeTombstone {
+                    start: Bytes::from_static(b"b1"),
+                    end: Bytes::from_static(b"b8"),
+                    sequence: 5,
+                }]
+            } else {
+                Vec::new()
+            };
+            let expected = window_oracle(&streams, &range_dels, snapshot, start, end);
+            let boxed: Vec<LayerStream<'static>> = streams
+                .iter()
+                .map(|s| Box::new(s.clone().into_iter()) as LayerStream<'static>)
+                .collect();
+            let got: Vec<WindowKv> = StreamingVisibleIter::from_point_streams(
+                boxed, range_dels, snapshot, start, end, None,
+            )
+            .into_window_kvs()
+            .collect();
+            assert_eq!(got, expected, "case {case}");
+        }
+    }
+
+    struct CountingIter {
+        rows: std::vec::IntoIter<(InternalKey, Bytes)>,
+        nexts: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl Iterator for CountingIter {
+        type Item = (InternalKey, Bytes);
+        fn next(&mut self) -> Option<Self::Item> {
+            self.nexts
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.rows.next()
+        }
+    }
+
+    /// A stream whose head is already past `end` must be retired at setup:
+    /// one poll for the head, zero heap competition, no row drain.
+    #[test]
+    fn stream_past_end_retired_without_competing() {
+        let a: Vec<(InternalKey, Bytes)> = (0..10)
+            .map(|i| {
+                (
+                    ik(format!("k{i:02}").as_bytes(), 1, ValueType::Value),
+                    Bytes::from(format!("a{i}")),
+                )
+            })
+            .collect();
+        let b: Vec<(InternalKey, Bytes)> = (0..10)
+            .map(|i| {
+                (
+                    ik(format!("z{i:02}").as_bytes(), 1, ValueType::Value),
+                    Bytes::from(format!("b{i}")),
+                )
+            })
+            .collect();
+        let nexts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streams: Vec<LayerStream<'static>> = vec![
+            Box::new(a.into_iter()) as LayerStream<'static>,
+            Box::new(CountingIter {
+                rows: b.into_iter(),
+                nexts: nexts.clone(),
+            }) as LayerStream<'static>,
+        ];
+        let iter = StreamingVisibleIter::from_point_streams(
+            streams,
+            Vec::new(),
+            10,
+            Bound::Unbounded,
+            Bound::Excluded(b"m".as_ref()),
+            None,
+        );
+        let got: Vec<WindowKv> = iter.into_window_kvs().collect();
+        assert_eq!(got.len(), 10);
+        assert_eq!(got[0].key.as_ref(), b"k00");
+        assert_eq!(got[9].key.as_ref(), b"k09");
+        assert_eq!(nexts.load(std::sync::atomic::Ordering::Relaxed), 1);
+    }
+
+    /// Interleaved streams with a cross-stream duplicate key: after the
+    /// second stream exhausts, the first continues on the single-live fast
+    /// path — output still matches the oracle.
+    #[test]
+    fn interleaved_streams_match_oracle_after_exhaustion() {
+        let a = vec![
+            (ik(b"k01", 5, ValueType::Value), Bytes::from_static(b"a1")),
+            (ik(b"k03", 3, ValueType::Value), Bytes::from_static(b"a3")),
+            (ik(b"k07", 2, ValueType::Value), Bytes::from_static(b"a7")),
+        ];
+        let b = vec![
+            (ik(b"k02", 4, ValueType::Value), Bytes::from_static(b"b2")),
+            (ik(b"k03", 6, ValueType::Value), Bytes::from_static(b"b3")),
+            (ik(b"k04", 1, ValueType::Value), Bytes::from_static(b"b4")),
+        ];
+        let streams = vec![a, b];
+        let expected = window_oracle(&streams, &[], 8, Bound::Unbounded, Bound::Unbounded);
+        assert_eq!(expected.len(), 5);
+        assert_eq!(expected[2].key.as_ref(), b"k03");
+        assert_eq!(expected[2].value.as_ref(), b"b3");
+        let boxed: Vec<LayerStream<'static>> = streams
+            .iter()
+            .map(|s| Box::new(s.clone().into_iter()) as LayerStream<'static>)
+            .collect();
+        let got: Vec<WindowKv> = StreamingVisibleIter::from_point_streams(
+            boxed,
+            Vec::new(),
+            8,
+            Bound::Unbounded,
+            Bound::Unbounded,
+            None,
+        )
+        .into_window_kvs()
+        .collect();
+        assert_eq!(got, expected);
     }
 
     #[test]
@@ -1029,6 +1596,131 @@ mod tests {
             got.push(pair);
         }
         assert_eq!(got, expected);
+    }
+
+    /// Randomized cross-validation: the streaming GC source must reproduce
+    /// `gc_compact_entries` exactly (same survivors, same order) across the
+    /// whole option matrix. Small key space forces multi-version runs and
+    /// overlapping range tombstones.
+    #[test]
+    fn gc_merge_source_matches_batch_across_option_matrix() {
+        let keys: [&[u8]; 5] = [b"a", b"b", b"c", b"d", b"e"];
+        let mut state = 0x243F_6A88_85A3_08D3u64;
+        let mut next = move || {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            state
+        };
+        let mut all: Vec<(InternalKey, Bytes)> = Vec::new();
+        let mut seq = 0u64;
+        for _ in 0..400 {
+            seq += 1 + next() % 3;
+            let idx = (next() % keys.len() as u64) as usize;
+            let kind = match next() % 10 {
+                0..=1 => ValueType::Deletion,
+                2..=3 => ValueType::RangeDeletion,
+                _ => ValueType::Value,
+            };
+            let end = if idx + 1 < keys.len() {
+                keys[idx + 1 + (next() % (keys.len() - idx - 1) as u64) as usize]
+            } else {
+                b"z"
+            };
+            let value = if kind == ValueType::RangeDeletion {
+                Bytes::copy_from_slice(end)
+            } else {
+                Bytes::from(format!("v{seq}"))
+            };
+            all.push((ik(keys[idx], seq, kind), value));
+        }
+        all.sort_by(|a, b| a.0.cmp(&b.0));
+        // Deal sorted entries round-robin into three sorted streams so the
+        // k-way merge interleaves all of them.
+        let mut streams: [Vec<(InternalKey, Bytes)>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+        for (i, pair) in all.iter().enumerate() {
+            streams[i % 3].push(pair.clone());
+        }
+        let variants = [
+            CompactGcOptions::default(),
+            CompactGcOptions {
+                min_sequence: 300,
+                ..CompactGcOptions::default()
+            },
+            CompactGcOptions::latest_only(),
+            CompactGcOptions {
+                bottommost: true,
+                ..CompactGcOptions::latest_only()
+            },
+            CompactGcOptions::for_oldest_snapshot(5),
+            CompactGcOptions {
+                bottommost: true,
+                ..CompactGcOptions::for_oldest_snapshot(5)
+            },
+            CompactGcOptions::for_oldest_snapshot(u64::MAX),
+            // Both flags set: oldest_snapshot takes precedence, and the
+            // tombstone-drop condition must not fire in that branch.
+            CompactGcOptions {
+                bottommost: true,
+                keep_only_latest: true,
+                ..CompactGcOptions::for_oldest_snapshot(7)
+            },
+        ];
+        for gc in variants {
+            let expected = gc_compact_entries(all.clone(), gc);
+            let merge = KwayInternalMerge::from_streams(vec![
+                streams[0].clone().into_iter(),
+                streams[1].clone().into_iter(),
+                streams[2].clone().into_iter(),
+            ])
+            .unwrap();
+            let mut src = GcMergeSource::new(merge, gc);
+            let mut got = Vec::new();
+            while let Some(pair) = src.next_entry().unwrap() {
+                got.push(pair);
+            }
+            assert_eq!(got, expected, "streaming GC diverged for {gc:?}");
+        }
+    }
+
+    /// A bottommost latest-only rewrite drops the range tombstone from the
+    /// output but must still use it as coverage for the point it hides
+    /// (the batch path builds `tombs` before deciding tombstone drops).
+    #[test]
+    fn gc_stream_bottommost_dropped_tombstone_still_covers() {
+        let entries = |bottommost: bool| {
+            let stream = vec![
+                (
+                    ik(b"k", 9, ValueType::RangeDeletion),
+                    Bytes::from_static(b"z"),
+                ),
+                (ik(b"k", 5, ValueType::Value), Bytes::from_static(b"v5")),
+            ];
+            let gc = CompactGcOptions {
+                bottommost,
+                ..CompactGcOptions::latest_only()
+            };
+            let expected = gc_compact_entries(stream.clone(), gc);
+            let mut src = GcMergeSource::new(
+                KwayInternalMerge::from_streams(vec![stream.into_iter()]).unwrap(),
+                gc,
+            );
+            let mut got = Vec::new();
+            while let Some(pair) = src.next_entry().unwrap() {
+                got.push(pair);
+            }
+            assert_eq!(got, expected, "mismatch for bottommost={bottommost}");
+            // The covered value is gone in both modes; only the partial
+            // rewrite keeps (and passes through) the tombstone itself.
+            if bottommost {
+                assert!(got.is_empty());
+            } else {
+                assert_eq!(got.len(), 1);
+                assert_eq!(got[0].0.kind, ValueType::RangeDeletion);
+            }
+        };
+        entries(true);
+        entries(false);
     }
 
     #[test]

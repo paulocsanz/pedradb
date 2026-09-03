@@ -540,6 +540,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -591,6 +592,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
