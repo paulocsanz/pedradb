@@ -6,6 +6,7 @@
 use super::{scan_cf_at, DBIterator, Direction, IteratorMode, Result, DB, DEFAULT_CF};
 use pedradb_core::{Env, StdEnv};
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 /// rust-rocksdb `ColumnFamilyDescriptor`.
 pub struct ColumnFamilyDescriptor {
@@ -238,6 +239,10 @@ pub struct DBRawIteratorWithThreadMode<'a, D, E: Env = StdEnv> {
     inner: Option<DBIterator<E>>,
     db: &'a DB<E>,
     seq: pedradb_core::SequenceNumber,
+    /// Column family this raw iterator walks. `reopen` must use this, not
+    /// a hard-coded default — `raw_iterator_cf` is otherwise a silent
+    /// cross-CF leak (issue #1).
+    cf: Arc<str>,
     lower: Option<Vec<u8>>,
     upper: Option<Vec<u8>>,
     /// Whether the windowed iterator is currently walking reverse (fix C2):
@@ -249,10 +254,20 @@ pub struct DBRawIteratorWithThreadMode<'a, D, E: Env = StdEnv> {
 
 impl<'a, D, E: Env> DBRawIteratorWithThreadMode<'a, D, E> {
     pub(crate) fn open(db: &'a DB<E>, seq: pedradb_core::SequenceNumber, ro: &ReadOptions) -> Self {
+        Self::open_cf(db, DEFAULT_CF, seq, ro)
+    }
+
+    pub(crate) fn open_cf(
+        db: &'a DB<E>,
+        cf: &str,
+        seq: pedradb_core::SequenceNumber,
+        ro: &ReadOptions,
+    ) -> Self {
         let mut it = Self {
             inner: None,
             db,
             seq,
+            cf: Arc::from(cf),
             lower: ro.lower.clone(),
             upper: ro.upper.clone(),
             rev: true,
@@ -440,14 +455,11 @@ impl<'a, D, E: Env> DBRawIteratorWithThreadMode<'a, D, E> {
     }
 
     fn reopen(&mut self, mode: IteratorMode<'_>) {
-        let cf = super::ColumnFamily {
-            name: DEFAULT_CF.into(),
-        };
         let names = self.db.cf_names();
         match scan_cf_at(
             &self.db.inner,
             &self.db.codec,
-            DEFAULT_CF,
+            self.cf.as_ref(),
             mode,
             self.seq,
             &names,
@@ -458,7 +470,6 @@ impl<'a, D, E: Env> DBRawIteratorWithThreadMode<'a, D, E> {
             Ok(it) => self.inner = Some(it),
             Err(_) => self.inner = None,
         }
-        let _ = cf;
     }
 }
 

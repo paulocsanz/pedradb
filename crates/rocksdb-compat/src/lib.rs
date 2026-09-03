@@ -3871,8 +3871,19 @@ impl<E: PedraEnv> DB<E> {
 
     /// rust-rocksdb `raw_iterator_cf`.
     #[must_use]
-    pub fn raw_iterator_cf(&self, _cf: &ColumnFamily) -> DBRawIteratorWithThreadMode<'_, Self, E> {
-        self.raw_iterator()
+    pub fn raw_iterator_cf(&self, cf: &ColumnFamily) -> DBRawIteratorWithThreadMode<'_, Self, E> {
+        self.raw_iterator_cf_opt(cf, ReadOptions::default())
+    }
+
+    /// rust-rocksdb `raw_iterator_cf_opt`.
+    #[must_use]
+    pub fn raw_iterator_cf_opt(
+        &self,
+        cf: &ColumnFamily,
+        ro: ReadOptions,
+    ) -> DBRawIteratorWithThreadMode<'_, Self, E> {
+        let seq = ro.snap.unwrap_or_else(|| self.inner.visible_sequence());
+        DBRawIteratorWithThreadMode::open_cf(self, &cf.name, seq, &ro)
     }
 
     /// rust-rocksdb `iterator_opt`. Honours snapshot (F180), iterate bounds,
@@ -5607,6 +5618,47 @@ mod tests {
         let db = DB::open_default(&dir).unwrap();
         assert_eq!(db.get(b"k1").unwrap(), None);
         assert_eq!(db.get(b"k2").unwrap().as_deref(), Some(&b"v2"[..]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Issue #1: `raw_iterator_cf` must walk the named CF, not default.
+    #[test]
+    fn raw_iterator_cf_walks_named_column_family() {
+        let dir = tmp("raw-iter-cf");
+        let db = DB::open_cf(&Options::new(), &dir, &["lock"]).unwrap();
+        let lock = db.cf_handle("lock").unwrap();
+        db.put(b"default-key", b"d").unwrap();
+        db.put_cf(&lock, b"lock-key", b"l").unwrap();
+
+        let via_cf: Vec<_> = db
+            .iterator_cf(&lock, IteratorMode::Start)
+            .unwrap()
+            .map(|r| r.unwrap().0.to_vec())
+            .collect();
+        assert_eq!(via_cf, vec![b"lock-key".to_vec()]);
+
+        let mut raw = db.raw_iterator_cf(&lock);
+        raw.seek_to_first();
+        assert_eq!(raw.key(), Some(b"lock-key".as_ref()));
+        assert_eq!(raw.value(), Some(b"l".as_ref()));
+        raw.next();
+        assert!(!raw.valid(), "lock CF has one key");
+
+        let mut def = db.raw_iterator();
+        def.seek_to_first();
+        assert_eq!(def.key(), Some(b"default-key".as_ref()));
+        def.next();
+        assert!(!def.valid());
+
+        // reopen/seek must stay on the CF (not fall back to default).
+        let mut raw = db.raw_iterator_cf(&lock);
+        raw.seek(b"lock-key");
+        assert_eq!(raw.key(), Some(b"lock-key".as_ref()));
+        raw.seek(b"default-key");
+        assert!(
+            !raw.valid() || raw.key() != Some(b"default-key".as_ref()),
+            "seek on lock CF must not surface default-CF keys"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
