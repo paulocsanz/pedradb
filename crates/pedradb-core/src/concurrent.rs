@@ -1145,7 +1145,7 @@ impl<E: Env> ConcurrentDb<E> {
         if let Some(v) = self.point_cache.get(key) {
             return v;
         }
-        self.inner.read().get(key)
+        self.inner.read().get_after_point_miss(key)
     }
 
     /// Point-cache probe (`Some` = hit, including cached miss). OCC get.

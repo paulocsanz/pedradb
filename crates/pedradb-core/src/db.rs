@@ -3197,6 +3197,13 @@ impl<E: Env> Db<E> {
         if let Some(cached) = self.point_cache.get(key) {
             return cached;
         }
+        self.get_after_point_miss(key)
+    }
+
+    /// SST lookup + optional point-cache fill. [`ConcurrentDb::get`] already
+    /// probed the shared cache; calling [`Self::get`] again would take the
+    /// cache mutex a second time on every uniform miss (lookup_100).
+    pub(crate) fn get_after_point_miss(&self, key: &[u8]) -> Option<Bytes> {
         let snap = self.snapshot();
         let got = match self.get_at(snap, key) {
             Ok(v) => v,
@@ -3209,7 +3216,8 @@ impl<E: Env> Db<E> {
         // `publish_sequence` (also read-locked) — a publish can invalidate
         // `key` between the snapshot above and this insert, caching a stale
         // answer indefinitely. Only insert while `published` still matches
-        // the seq the answer was computed at.
+        // the seq the answer was computed at. At capacity the cache freezes
+        // (no FIFO churn on unique keys).
         if self.published_seq.load(Ordering::Acquire) == snap.seq {
             self.point_cache.insert(key, got.clone());
         }

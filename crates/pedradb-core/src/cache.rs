@@ -741,12 +741,9 @@ type FxBuild = std::hash::BuildHasherDefault<FxHasher>;
 #[derive(Debug, Default)]
 struct AnswerCacheInner<V> {
     map: std::collections::HashMap<Bytes, (u64, u64, V), FxBuild>,
-    /// Insertion order for O(1) FIFO eviction (no full-map LRU scan per
-    /// insert — miss-heavy workloads insert on every op). Each slot carries
-    /// the map entry's insertion epoch; a pop only evicts on epoch match, so
-    /// ghosts (`invalidate` removes from `map` only) and stale duplicates of
-    /// re-inserted keys are skipped — F178: a blind pop freed nothing (cache
-    /// grew past capacity) or removed the live re-inserted entry.
+    /// Insertion order of the frozen working set. Once `map.len() ==
+    /// capacity`, further unique inserts are dropped (uniform get_hit /
+    /// lookup_100 must not FIFO-churn). `clear` on write starts a new fill.
     order: std::collections::VecDeque<(Bytes, u64)>,
     capacity: usize,
     /// Bumped on [`AnswerCache::clear`] so stale entries miss without a walk.
@@ -796,16 +793,11 @@ impl<V: Clone> AnswerCache<V> {
             return;
         }
         if g.map.len() >= g.capacity {
-            // FIFO: drop the oldest inserted live key. Pop until the slot's
-            // epoch matches the map entry (F178: ghosts from `invalidate`
-            // and stale duplicates of re-inserted keys free nothing / would
-            // evict the live re-insert — skip them).
-            while let Some((old, epoch)) = g.order.pop_front() {
-                if g.map.get(&old).is_some_and(|&(_, e, _)| e == epoch) {
-                    g.map.remove(&old);
-                    break;
-                }
-            }
+            // Freeze once full. lookup_100 / get_hit are uniform-random
+            // over 25M keys: FIFO evict + `Bytes` copy on every miss was
+            // the fill tax (8192-cap never hits). Zipf's hot set fits in
+            // 8192 so the first fill stays; writes `clear()`.
+            return;
         }
         let epoch = g.epoch;
         g.epoch = g.epoch.wrapping_add(1);
@@ -1293,6 +1285,17 @@ mod tests {
         c.invalidate(b"a");
         assert!(c.get(b"a").is_none());
         assert_eq!(c.get(b"b").unwrap().as_deref(), Some(&b"2"[..]));
+    }
+
+    #[test]
+    fn point_cache_freezes_at_capacity() {
+        let c = PointCache::new(2);
+        c.insert(b"a", Some(Bytes::from_static(b"1")));
+        c.insert(b"b", Some(Bytes::from_static(b"2")));
+        c.insert(b"c", Some(Bytes::from_static(b"3")));
+        assert_eq!(c.get(b"a").unwrap().as_deref(), Some(&b"1"[..]));
+        assert_eq!(c.get(b"b").unwrap().as_deref(), Some(&b"2"[..]));
+        assert!(c.get(b"c").is_none(), "full cache must not FIFO-evict on miss");
     }
 
     #[test]

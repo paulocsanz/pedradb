@@ -26,3 +26,17 @@ hole: Pedra get_loop/key (38.7 µs) is now faster than Pedra get_hit
 Hydrate 30.8 is +2s vs Pedra floor 28.1–28.8 (inside ~3s host noise);
 Rocks 28.3 is the fast side of 27.9–30.6. Need r2 at load ~15 before
 calling lookup ≥1× or treating hydrate as a regression.
+
+r2 (21:42, load start 14.90, end 17.35/16.94/16.55) — refuse (end 17.35,
+Rocks get_loop 4.252 slow vs 3.86–4.03). Pedra abs also slipped.
+  hydrate/rocks  28.3s (0.88M/s)   pedra 28.6s (0.88M/s)  0.990×
+  settle         7.7s vs 1.0s                               7.7×
+  get_hit        44.131 vs 44.343 µs                        0.995×
+  prefix         346.67 vs 293.50 µs                        1.181×
+  get_loop       4.2521 vs 4.1823 ms                        1.017× (Rocks slow)
+  multi_get      4.3989 vs 4.0637 ms                        1.082× (Rocks slow)
+
+r1 Pedra get_loop 3.868 vs in-band 3.987 remains the honest lookup
+number (1.03×, CI overlap). r2 hydrate 28.6 vs 28.3 is the Pedra floor
+(r1 30.8 was noise). Do not 3-run a 1.03×. Next: PointCache FIFO evict
+on every unique miss (8192 cap, 25M keys never hit) — freeze at capacity.
