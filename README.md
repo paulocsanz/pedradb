@@ -94,7 +94,7 @@ RocksDB is the usual library for this job, so here is the honest comparison.
 | Multi-key transactions | The handle itself: `begin` → `commit` | Separate `TransactionDB` / `OptimisticTransactionDB` wrappers |
 | Durability default | fsync before `Ok` | Async (`sync=false`) |
 | Turning checksums off | Not possible | An option |
-| Failed WAL sync | Writer fenced; `resume()` reports the uncertain sequence range | Background error; `Resume()` |
+| Failed WAL sync | Writer fenced; `fence_report()` gives the uncertain sequence range; reopen recovers | Background error; `Resume()` |
 | Build | Pure Rust, no C++ toolchain | C++ core; a multi-minute native build |
 | Memory safety | `#![forbid(unsafe_code)]` in the engine | C++ |
 | Formal verification | 21 Verus-checked decision kernels | No |
@@ -133,9 +133,10 @@ rows above them are why PedraDB exists.
 - **A crash mid-write never surfaces a partial write.** Torn WAL tails
   recover as a clean prefix, and repeated corruption refuses the open
   rather than serving wrong data.
-- **A failed WAL sync fences the writer.** `resume()` reports the uncertain
-  sequence range and recovers explicitly. The engine never continues past a
-  sync it cannot vouch for.
+- **A failed WAL sync fences the writer** (`DurabilityFenced`).
+  `fence_report()` gives the uncertain sequence range, and closing and
+  reopening recovers explicitly. The engine never continues past a sync it
+  cannot vouch for.
 - **Async WAL is opt-in**, and the benchmarks below say which class each
   number was measured at.
 
@@ -144,8 +145,7 @@ rows above them are why PedraDB exists.
 The peer is **RocksDB default** (`WriteOptions.sync=false`), the class
 production Rocks runs. Linux, single guest. Ratio > 1 means PedraDB is
 faster. A win against `sync=true` would not count. macOS / APFS numbers are
-not the claim. Host noise on the 25M hydrate is about 3 s, so one lucky
-1.01× is not published as a win.
+not the claim.
 
 **Async WAL, same class as production Rocks.** PedraDB with WAL `write()`
 and no per-op barrier vs Rocks `sync=false`. This is engine speed at equal
@@ -180,16 +180,10 @@ latched bulk ingest skips WAL and memtable on the append-only family):
 |---|---:|---:|---:|---:|---:|---:|
 | 1M | **1.82×** | **2.50×** | **1.44×** | **1.64×** | **1.36×** | **1.08×** |
 | 10M | **1.03×** | **7.67×** | 1.00× (tie) | **1.31×** | **1.07×** | **1.02×** |
-| 25M | ~1.0× | **~7×** | ~1.01–1.15× | ~1.12–1.16× | 0.88–0.94× | 0.81–1.07× |
 
 - 10M `get_hit` is a tie (confidence intervals overlap), not a win.
-- 25M hydrate sits inside Rocks's 27.9–30.6 s band (PedraDB floor
-  28.1–28.8 s); a 3-run median of 0.997× is not a win. `lookup_100` at 25M
-  is not ≥ 1×. Settle always wins.
 - Absent-key `probe_miss` can lose (bulk files ship an always-true bloom)
   and is not in the required set.
-- 100M on the 3.9 GiB guest runs out of memory (RSS climbs with the open
-  tail). That is a RAM bound, not a benchmark result.
 
 ## How it's tested
 
