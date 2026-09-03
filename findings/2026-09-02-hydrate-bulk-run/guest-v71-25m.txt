@@ -1,0 +1,28 @@
+Guest v71 25M r1 — POSIX_FADV_RANDOM on the cached SST fd (same fd as pread)
+linux-gate-p149b  2026-09-02 21:35–21:39
+env 861f60d580ceb28a505c7b64677cfcc5
+posix cd4e73b2069655d0db8f335e47fbcaeb
+io-uring f13e668d765f2184b61c70227d95370f
+cargo: Compiling pedradb-posix + pedradb-core (26.04s). Criterion vs previous
+Pedra get_loop baseline: -8.8% (p=0.02).
+
+load start 15.83, end 16.60/16.80/16.44 — under 17.5. Rocks get_loop
+3.987 ms IN BAND (3.86–4.03). This run counts. Do not publish 1.03×:
+Pedra get_loop CI [3.72, 4.02] overlaps Rocks [3.86, 4.13]; 3% is inside
+~10% host noise at load 16.
+
+hydrate/rocks  28.3s (0.88M/s)   pedra 30.8s (0.81M/s)  0.919× LOSE
+settle         7.6s vs 1.0s                               7.6×
+get_hit        44.025 vs 42.534 µs                        1.035×
+prefix         370.22 vs 308.58 µs                        1.200×
+get_loop       3.9874 vs 3.8681 ms                        1.031× (CI overlap)
+multi_get      4.0707 vs 3.9684 ms                        1.026× (CI overlap)
+
+Pedra get_loop 3.868 ms matches v69 r1 best abs (3.83) and cuts v69
+calm-1 4.543 (-15%) / v70 4.242 (-9%). FADV_RANDOM closed the readahead
+hole: Pedra get_loop/key (38.7 µs) is now faster than Pedra get_hit
+(42.5 µs), same shape as Rocks (39.9 vs 44.0).
+
+Hydrate 30.8 is +2s vs Pedra floor 28.1–28.8 (inside ~3s host noise);
+Rocks 28.3 is the fast side of 27.9–30.6. Need r2 at load ~15 before
+calling lookup ≥1× or treating hydrate as a regression.
