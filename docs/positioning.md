@@ -49,7 +49,7 @@ Those become **reasons to trust and stay** after the kernel already justifies it
 
 ## 2. One sentence (product)
 
-**PedraDB (kernel):** a tiny, fast, pure-Rust library — ordered key-value + multi-key ACID on one machine — so you can build correctly on top without a cluster or a C++ engine.
+**PedraDB (kernel):** an embeddable, persistent key-value store with multi-key ACID transactions — a library you link into your process, so you can build correctly on top without a cluster or a C++ engine.
 
 **Platform north star (Montanha + layers, not kernel pitch):**  
 a **Postgres-class high-level system** that **replaces the need for Scylla + ClickHouse + NATS in one product** (multi-primary, automatic OLTP/OLAP/stream paths). Full write-up: [`node-primitive-and-unified-platform.md`](node-primitive-and-unified-platform.md) §1.  

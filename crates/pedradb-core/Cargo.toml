@@ -3,7 +3,7 @@ name = "pedradb-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "PedraDB core: LSM-tree storage engine in Rust — WAL, column families, MVCC snapshots, transactions, backup and PITR"
+description = "Embeddable persistent key-value store with multi-key ACID transactions"
 
 [features]
 default = []

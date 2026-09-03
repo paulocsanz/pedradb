@@ -1,17 +1,23 @@
 # PedraDB
 
-**Embedded ordered key-value store with multi-key ACID transactions — pure Rust, tiny API, durable by default.**
+**An embeddable, persistent key-value store with multi-key ACID transactions.**
 
 [![synthetic-field](https://github.com/paulocsanz/pedradb/actions/workflows/synthetic-field.yml/badge.svg)](https://github.com/paulocsanz/pedradb/actions/workflows/synthetic-field.yml)
 [![world-nightly](https://github.com/paulocsanz/pedradb/actions/workflows/world-nightly.yml/badge.svg)](https://github.com/paulocsanz/pedradb/actions/workflows/world-nightly.yml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 ![MSRV](https://img.shields.io/badge/rust-1.75%2B-orange.svg)
 
-PedraDB is a storage **kernel**: the smallest engine you can correctly build a
-database on. RocksDB gives you a fast LSM but no real transactions — every
-system built on it (CockroachDB, TiKV, …) had to reinvent consistency from
-scratch. PedraDB puts multi-key ACID in the core, so "update the row *and* its
-index" is one atomic, fsynced commit — in-process, no server, no C++.
+PedraDB is a library you link into your process. It stores keys and values
+as arbitrary bytes, in sorted order, on local disk. Every multi-key update
+is one ACID transaction: `commit` does not return `Ok` until that batch is
+on disk. Use it as the storage kernel under a database, a state machine, or
+an application that needs “update the row *and* its index” without standing
+up a cluster.
+
+RocksDB is the usual library for this job. It is fast and has no real
+multi-key transactions — CockroachDB, TiKV, and the rest reinvented
+consistency on top. PedraDB puts that in the core: in-process, no server,
+no C++.
 
 ```text
 open → begin → get / put / delete / range → commit
