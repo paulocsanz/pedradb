@@ -1,9 +1,22 @@
 # PedraDB
 
-**A pure-Rust LSM-tree storage engine with a drop-in RocksDB-compatible API.**
+**An embeddable, persistent key-value store with multi-key ACID transactions.**
 
 [![license](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 ![MSRV](https://img.shields.io/badge/rust-1.88%2B-orange.svg)
+
+PedraDB is a library you link into your process. It stores keys and values
+as arbitrary bytes, in sorted order, on local disk. Every multi-key update
+is one ACID transaction: `commit` does not return `Ok` until that batch is
+on disk. Use it as the storage kernel under a database, a state machine, or
+an application that needs “update the row *and* its index” without standing
+up a cluster.
+
+RocksDB is the usual library for this job. It is fast and has no real
+multi-key transactions — CockroachDB, TiKV, and the rest reinvented
+consistency on top. PedraDB puts that in the core. A rust-rocksdb-compatible
+crate is included so existing Rocks-shaped code can swap the engine; the
+native API is `open → begin → get / put / delete / range → commit`.
 
 > **Alpha (pre-1.0).** Lab-mature, not a production default. The on-disk
 > format and the rust-rocksdb-compatible surface can still break. PedraDB
@@ -11,16 +24,12 @@
 > Use it if you want the contracts below and can tolerate format change.
 > Do not treat the numbers as an SLA.
 
-`rocksdb-compat` reimplements the rust-rocksdb 0.22 API surface in pure
-Rust: the crate itself builds with no C++ toolchain, no cmake, no FFI. Code
-that stays on the covered surface — the common one — swaps by renaming one
-dependency; code that reaches into `rocksdb::ffi` or uncovered corners fails
-to compile rather than misbehave. Underneath is an engine written for people
-who ship databases: WAL + memtable + leveled SSTs, physical column families
-over one WAL, MVCC snapshots, transactions, backup / PITR, io_uring I/O on
-Linux, and a deterministic simulation test framework.
-
 ## Quickstart: the drop-in swap
+
+`rocksdb-compat` is the rust-rocksdb 0.22 API on this engine: no C++ toolchain,
+no cmake, no FFI. Code that stays on the covered surface swaps by renaming
+one dependency; code that reaches into `rocksdb::ffi` fails to compile
+rather than misbehave.
 
 ```toml
 [dependencies]
