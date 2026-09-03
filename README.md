@@ -2,7 +2,7 @@
 
 <p align="center">
   <b>An embeddable key-value store with multi-key ACID transactions at its core.</b><br>
-  Pure Rust. Fail-closed by design. Drop-in for <code>rust-rocksdb</code>.
+  Pure Rust. Durable by default. Fail-closed by design.
 </p>
 
 <p align="center">
@@ -19,51 +19,44 @@ That commit is one WAL record, fsynced before `Ok` returns.
 
 It is built for people who put a database, a state machine, or a replicated
 log on top of a key-value store, and who would rather not rebuild
-consistency above the engine. It ships with `rocksdb-compat`, a
-reimplementation of the rust-rocksdb 0.22 API on the same engine, so
-Rocks-shaped code can swap engines by renaming one dependency.
+consistency above the engine. The API is
+`open → begin → get / put / delete / range → commit`.
 
 ## Why PedraDB
 
-- **Transactions are the API, not a wrapper.** The native handle is
-  transactional. In RocksDB the default handle is a `WriteBatch` store and
-  transactions live in a separate `TransactionDB`; here `Db::begin()` is the
-  front door, and the compat crate still offers `TransactionDB` /
-  `OptimisticTransactionDB` for code that expects them.
-- **Pure Rust, no C++ toolchain.** No cmake, no bindgen, no
-  `librocksdb-sys` build step. 73 packages in the lockfile. The engine is
-  `#![forbid(unsafe_code)]`; the only `unsafe` in the tree is two thin
-  syscall crates (fdatasync / fallocate / fadvise, and io_uring submission).
+- **Transactions are the API, not a wrapper.** The handle you open is
+  transactional. Update a row and its secondary index in one commit, and
+  either both land or neither does. Every system built on RocksDB had to
+  reinvent this above the engine; here it is the engine.
+- **Durable by default.** `commit` fsyncs the WAL before returning `Ok`.
+  On macOS the barrier is `F_FULLFSYNC`-class by default. You can trade
+  durability for speed explicitly; you never get the trade silently.
 - **Fail-closed, never silently wrong.** A CRC mismatch refuses the read.
   Repeated corruption refuses the open. A failed WAL sync fences the writer
-  and reports the uncertain sequence range instead of continuing. Knobs that
-  would turn integrity checks off are refused, not honored.
-- **Machine-checked where it counts.** 21 decision kernels in the shipped
-  crates (WAL recovery, manifest recovery, CRC fate, group commit, flush and
-  compaction decisions, leveling, bloom filters, MVCC visibility, iterator
-  windows) have Verus-verified twins: 39 proof pairs in all. Around them:
-  seeded fault injection and close to 1,000 tests.
-- **Drop-in for rust-rocksdb 0.22.** `DB`, column families, `WriteBatch`,
-  iterators, snapshots, transactions, `Checkpoint`, `BackupEngine`,
-  `SstFileWriter`, merge operators, compaction filters. Every `set_*` knob
-  is classified in a machine-readable inventory. Code that reaches past the
-  covered surface fails to compile; nothing is silently stubbed.
+  and reports the uncertain sequence range instead of continuing. There is
+  no option to turn integrity checks off.
+- **Pure Rust, no C++ toolchain.** No cmake, no bindgen, 73 packages in the
+  lockfile. The engine is `#![forbid(unsafe_code)]`; the only `unsafe` in
+  the tree is two thin syscall crates (fdatasync / fallocate / fadvise, and
+  io_uring submission).
+- **Machine-checked where it counts.** 21 decision kernels (WAL recovery,
+  manifest recovery, CRC fate, group commit, flush and compaction decisions,
+  leveling, bloom filters, MVCC visibility, iterator windows) have
+  Verus-verified twins: 39 proof pairs in all. Around them: seeded fault
+  injection and close to 1,000 tests.
 - **A modern write path.** io_uring on Linux with transparent POSIX
   fallback, group commit, a value log for large values, LZ4 block
   compression, bloom filters, block cache, sorted bulk ingest, and local
   backup with point-in-time restore.
 
-> **Status: alpha, pre-1.0.** The on-disk format and the compat surface can
-> still break. PedraDB does not have RocksDB's years of production exposure,
-> and its files are not RocksDB's. Use it if you want the contracts on this
-> page and can tolerate format change. Treat the benchmark numbers as lab
-> measurements, not an SLA.
+> **Status: alpha, pre-1.0.** The on-disk format and the API can still
+> break. PedraDB does not have RocksDB's years of production exposure. Use
+> it if you want the contracts on this page and can tolerate format change.
+> Treat the benchmark numbers as lab measurements, not an SLA.
 
 ## Quickstart
 
 The crates are not on crates.io yet; depend on the git repository.
-
-### Native API
 
 ```toml
 [dependencies]
@@ -90,40 +83,19 @@ the abort path, is in `examples/secondary_index.rs`:
 cargo run --example secondary_index -p pedradb-core
 ```
 
-### Drop-in swap for rust-rocksdb
-
-Rename the dependency; your `use rocksdb::…` lines keep compiling.
-
-```toml
-[dependencies]
-# rocksdb = "0.22"
-rocksdb = { git = "https://github.com/paulocsanz/pedradb", package = "rocksdb-compat" }
-```
-
-```rust
-use rocksdb::{DB, Options};
-
-let mut opts = Options::default();
-opts.create_if_missing(true);
-// opts.set_sync(true);            // opt into a WAL barrier before every Ok
-
-let db = DB::open(&opts, "/tmp/pedra-compat")?;
-db.put(b"k1", b"v1")?;             // RocksDB's factory WAL class: async, no per-write barrier
-let v = db.get(b"k1")?;            // Some(b"v1")
-db.delete(b"k1")?;
-```
-
-No C++ toolchain is needed for either path.
+No C++ toolchain is needed.
 
 ## PedraDB vs RocksDB
 
-|  | PedraDB | RocksDB via `rust-rocksdb` |
+RocksDB is the usual library for this job, so here is the honest comparison.
+
+|  | PedraDB | RocksDB |
 |---|---|---|
-| Build | Pure Rust, no C++ toolchain | C++ core; `librocksdb-sys` builds it with cc/cmake |
-| Multi-key transactions | Native handle: `begin` → `commit` | Separate `TransactionDB` / `OptimisticTransactionDB` |
-| Durability default | Native engine: fsync before `Ok`. Compat crate: Rocks factory (async) | Async (`sync=false`) |
-| Turning checksums off | Refused (`ErrorKind::NotSupported`) | Honored |
+| Multi-key transactions | The handle itself: `begin` → `commit` | Separate `TransactionDB` / `OptimisticTransactionDB` wrappers |
+| Durability default | fsync before `Ok` | Async (`sync=false`) |
+| Turning checksums off | Not possible | An option |
 | Failed WAL sync | Writer fenced; `resume()` reports the uncertain sequence range | Background error; `Resume()` |
+| Build | Pure Rust, no C++ toolchain | C++ core; a multi-minute native build |
 | Memory safety | `#![forbid(unsafe_code)]` in the engine | C++ |
 | Formal verification | 21 Verus-checked decision kernels | No |
 | Production track record | Alpha. None yet | 10+ years at scale |
@@ -155,40 +127,17 @@ rows above them are why PedraDB exists.
 
 ## Durability, stated precisely
 
-- The **native engine (`pedradb-core`) defaults to durable**: every commit
-  fsyncs the WAL before returning `Ok`. On macOS the barrier is
+- **Every commit fsyncs the WAL before returning `Ok`.** That is the
+  default (`OpenOptions::sync = true`). On macOS the barrier is
   `F_FULLFSYNC`-class by default.
-- The **compat crate defaults to RocksDB's factory WAL class**: async, no
-  barrier per write, because that is the configuration people run.
-  `Options::set_sync(true)` or per-write `WriteOptions::set_sync` turns on
-  the full barrier before `Ok`.
-- Either way, a crash mid-write never surfaces a partial write: torn WAL
-  tails recover as a clean prefix, and repeated corruption refuses the open
+- **A crash mid-write never surfaces a partial write.** Torn WAL tails
+  recover as a clean prefix, and repeated corruption refuses the open
   rather than serving wrong data.
-- A **failed WAL sync fences the writer** (`ErrorKind::Fenced`). `resume()`
-  reports the uncertain sequence range and recovers explicitly.
-
-## Compatibility in detail
-
-`rocksdb-compat` covers the rust-rocksdb 0.22 surface most code uses: `DB`,
-`Options`, column families, `WriteBatch` and `WriteBatchWithIndex`,
-iterators (`iterator_cf`, `prefix_iterator`, raw), snapshots, `multi_get`,
-`get_pinned`, `key_may_exist`, `delete_range`, `TransactionDB` (2PL) and
-`OptimisticTransactionDB`, `Checkpoint`, `BackupEngine`, `SstFileWriter`,
-`ingest_external_file`, merge operators, compaction filters, properties, and
-live-file listing. Anything outside it, `rocksdb::ffi` and `librocksdb-sys`
-types included, is a compile error.
-
-Every `set_*` knob the crate exposes is a row in `KNOB_INVENTORY`, classified
-as **wired** (changes engine state), **inert** (accepted for compile
-compatibility, named as a no-op so you can tell), **refused** (returning `Ok`
-would be silently wrong), or **safer-divergent** (behaviour differs from
-Rocks on purpose and is stricter). Two examples of refused knobs:
-`set_verify_checksums(false)` and skip-any-WAL recovery.
-
-Found a rust-rocksdb behaviour this crate does not match? Open an issue. The
-four filed so far each got a regression test in
-`crates/rocksdb-compat/tests/repro_issues.rs` and a fix the same day.
+- **A failed WAL sync fences the writer.** `resume()` reports the uncertain
+  sequence range and recovers explicitly. The engine never continues past a
+  sync it cannot vouch for.
+- **Async WAL is opt-in**, and the benchmarks below say which class each
+  number was measured at.
 
 ## Benchmarks
 
@@ -198,9 +147,10 @@ faster. A win against `sync=true` would not count. macOS / APFS numbers are
 not the claim. Host noise on the 25M hydrate is about 3 s, so one lucky
 1.01× is not published as a win.
 
-**Drop-in, same WAL class as production Rocks.** `rocksdb-compat` default
-(WAL `write()`, no per-op barrier) vs Rocks `sync=false`. Linux 4 vCPU
-(Threadripper PRO 3975WX, 2026-08-25, 3 rounds, 17/17 shapes **min > 1.0**):
+**Async WAL, same class as production Rocks.** PedraDB with WAL `write()`
+and no per-op barrier vs Rocks `sync=false`. This is engine speed at equal
+durability. Linux 4 vCPU (Threadripper PRO 3975WX, 2026-08-25, 3 rounds,
+17/17 shapes **min > 1.0**):
 
 | shape | median × | min × |
 |---|---:|---:|
@@ -216,12 +166,12 @@ not the claim. Host noise on the 25M hydrate is about 3 s, so one lucky
 
 The floor is `deps_raftlog` at 1.014. That is parity, not 2×.
 
-**With fdatasync before `Ok`** (native default, or `set_sync(true)`) against
-that same async peer: reads stay ahead (1.13–1.99× on the smoke-scale G1
-battery) with the barrier on the write path. Single-client write-per-op
-shapes lose by construction, one full barrier per op against the peer's
-zero. Group commit closes them under concurrency (`apply_mc4` 2.79×). The
-1-client write rows are the price of the contract, not wins.
+**With fdatasync before `Ok`** (the default) against that same async peer:
+reads stay ahead (1.13–1.99× on the smoke-scale G1 battery) with the
+barrier on the write path. Single-client write-per-op shapes lose by
+construction, one full barrier per op against the peer's zero. Group commit
+closes them under concurrency (`apply_mc4` 2.79×). The 1-client write rows
+are the price of the contract, not wins.
 
 **Sorted ingest** (Linux guest, 2026-09-02; 1024-op batches, ~200 B values;
 latched bulk ingest skips WAL and memtable on the append-only family):
@@ -261,16 +211,28 @@ latched bulk ingest skips WAL and memtable on the append-only family):
   RocksDB. The oracle crate is not part of this repository, and RocksDB is
   never linked into the engine.
 
+## Coming from RocksDB
+
+`rocksdb-compat` implements the rust-rocksdb 0.22 API on this engine, so
+existing Rocks-shaped Rust code can try PedraDB by renaming one dependency.
+It is a migration path, not the product: it defaults to Rocks's async WAL
+class so numbers compare like for like, and code that reaches past the
+covered surface fails to compile rather than misbehave.
+
+```toml
+rocksdb = { git = "https://github.com/paulocsanz/pedradb", package = "rocksdb-compat" }
+```
+
 ## Crates
 
 | Crate | What it is |
 |---|---|
 | `pedradb-core` | The storage engine. `#![forbid(unsafe_code)]`. |
-| `rocksdb-compat` | The rust-rocksdb 0.22 API surface on the engine. Swap your `rocksdb` dependency for this. |
 | `pedradb-ops` | Local backup, WAL shipping, point-in-time restore, format migration. |
 | `pedradb-sim` | Seeded fault injection for recovery testing. |
 | `pedradb-io-uring` | Linux io_uring `Env` for WAL/SST writes and fsync; POSIX fallback elsewhere. |
 | `pedradb-posix` | fdatasync / fallocate / fadvise. With `pedradb-io-uring`, the only `unsafe` in the tree. |
+| `rocksdb-compat` | rust-rocksdb 0.22 API on the engine, for migrating existing Rocks code. |
 
 MSRV 1.88. Dual-licensed MIT or Apache-2.0.
 
