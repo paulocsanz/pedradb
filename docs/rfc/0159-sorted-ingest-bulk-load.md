@@ -2,6 +2,7 @@
 
 **Status:** in-progress
 **Updated:** 2026-09-02
+**Child:** [0160](0160-slipstream-scale-2x.md) (scale ladder ≥2× including 100M + lookup)
 
 ## Background
 
@@ -194,7 +195,8 @@ sorted-ingest-architecture.md` (+ `run19-v21p-guest-25m.txt`).
 - [ ] **P2.1** Nearly-sorted tolerance (bounded out-of-order window) for
   real `watch_applied` feeds. — status: `todo`
 - [ ] **P2.2** 100M scale rung via bulk mode (disk peak ≈ live set + one
-  chunk). — status: `todo`
+  chunk). — status: `moved` → [RFC-0160](0160-slipstream-scale-2x.md)
+  (1× then 2× on the full required set, including lookup)
 
 ## Status (living — update with every PR)
 
@@ -217,7 +219,7 @@ sorted-ingest-architecture.md` (+ `run19-v21p-guest-25m.txt`).
 | P1.10 | p1 | Bulk SST v6 4 KiB + block CRC | done — format; v55 1M get_hit 0.79× (empty payload) | `table.rs` `SST_VERSION_V6` | 2026-09-02 |
 | P1.11 | p1 | Promote empty bulk payload on first get | doing — v56 1M all >1×; 10M get_hit 1.000×; 25M v63 hydrate 0.997×, v64 lookup 0.94×; v65 p16+LAST_CF hash | `cache.rs` `can_admit`; `table.rs` `try_promote_payload` | 2026-09-02 |
 | P2.1 | p2 | Nearly-sorted window | todo | — | 2026-08-31 |
-| P2.2 | p2 | 100M rung via bulk mode | todo | — | 2026-08-31 |
+| P2.2 | p2 | 100M rung via bulk mode | moved | [RFC-0160](0160-slipstream-scale-2x.md) | 2026-09-02 |
 
 ## Acceptance Criteria
 

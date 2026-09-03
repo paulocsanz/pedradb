@@ -2,6 +2,8 @@
 
 **When:** 2026-09-02  
 **Peer:** RocksDB default `WriteOptions.sync=false`. Pedra async, same class.
+**Next:** [RFC-0160](../../docs/rfc/0160-slipstream-scale-2x.md) — ≥1× then ≥2×
+on the required set at 1M/10M/25M/100M (lookup + 100M OOM live there).
 
 Latched-family puts skip WAL + memtable BTree, accumulate in a sorted vec,
 flush straight to `MAX_LSM_LEVEL`. Uninstalled tail is RAM-only (Rocks

@@ -36,6 +36,7 @@ README front page; this is the living ledger, the README is the pitch.
 | IronFleet-scale formal (years) | [RFC-0053](rfc/0053-ironfleet-years.md) | **done (Y1–Y3)** — Lean AE/commit extracts; AE/apply caller refinements; reopen kernel + lemmas; bounded liveness sob axioma quórum-vivo; π/VerusSync não disparado (RFC-0051 draft) |
 | Entregar o 100% (relativo ao TCB) | [RFC-0056](rfc/0056-one-hundred-percent-delivery.md) | **done** — itens 1–6/8/9/11 do checklist verdes; 7 gated (RFC-0051 PCT); 10 “TCB à vista” (freeze no CI); 12 contínuo. Estado: [one-hundred-percent-report](formal/one-hundred-percent-report.md) |
 | Lease / index / journal canaries | `pedradb-lease`, `pedradb-index`, `pedradb-journal` | ✅ W1–W4 workloads silent_wrong=0 |
+| Slipstream scale ≥2× Rocks default (1M–100M) | [RFC-0160](rfc/0160-slipstream-scale-2x.md) | **draft** — required set hydrate/settle/get_hit/prefix/lookup at 1M/10M/25M/100M; P0 = 100M runs + named lookup hole; P1 = ≥1× all cells; P2 = ≥2×. Peer Rocks `sync=false`, guest `linux-gate-p149b` only |
 
 RFCs **0001–0012**, **0014**, **0015**, **0019** delivered. **0020** is the confidence/volume program; **0016/0017** remain robustness + cluster substrate (not Rocks field parity claims).
 
