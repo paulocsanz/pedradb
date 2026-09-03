@@ -72,8 +72,8 @@ use crate::manifest::{self, VersionSet};
 use crate::memtable::{Lookup, MemTable};
 use crate::merge::{range_deleted, range_tombstone_covers, StreamingVisibleIter, VisibleKv};
 use crate::sst::{
-    write_l0_sst, write_l0_sst_for_family, write_sst_bulk_arrays, write_sst_entries_on,
-    put_tls_point_seek_scratch, take_tls_point_seek_scratch, PointSeekScratch, SstTable,
+    put_tls_point_seek_scratch, take_tls_point_seek_scratch, write_l0_sst, write_l0_sst_for_family,
+    write_sst_bulk_arrays, write_sst_entries_on, PointSeekScratch, SstTable,
 };
 use crate::tx::Transaction;
 use crate::vlog::{self, ValueLog, VlogRewriteStats, VLOG_FILE_NAME};
@@ -5552,6 +5552,16 @@ impl<E: Env> Db<E> {
         !self.parked_bulk.is_empty()
     }
 
+    #[cfg(test)]
+    pub(crate) fn bulk_manifest_debt(&self) -> u8 {
+        self.bulk_manifest_debt
+    }
+
+    #[cfg(test)]
+    pub(crate) fn bulk_latch_is_latched(&self, family: &str) -> bool {
+        self.bulk_latch.is_latched(family)
+    }
+
     /// Pop one parked bulk chunk for off-lock SST write. Pins it in
     /// `bulk_encoding` so get still hits until [`Self::finish_bulk_sst`].
     pub(crate) fn pop_parked_bulk_job(
@@ -5689,11 +5699,17 @@ impl<E: Env> Db<E> {
         Ok(())
     }
 
-    fn bulk_append_puts(&mut self, family: &str, keys: Vec<Bytes>, vals: Vec<Bytes>) -> Result<()> {
+    fn bulk_append_puts(
+        &mut self,
+        family: &str,
+        mut keys: Vec<Bytes>,
+        mut vals: Vec<Bytes>,
+    ) -> Result<()> {
         let n = keys.len();
         if n == 0 {
             return Ok(());
         }
+        crate::bulk_run::sort_bulk_key_vals(&mut keys, &mut vals);
         let n64 = n as u64;
         let last = self.next_seq.saturating_add(n64.saturating_sub(1));
         if last > MAX_SEQUENCE_NUMBER {
@@ -10280,6 +10296,15 @@ impl<E: Env> Db<E> {
             let level = levels.get(i).copied().unwrap_or(0);
             self.ssts.push(table);
             self.sst_levels.push(level);
+            // RFC-0159 P1.11: bottom-level bulk files must not pin the
+            // whole image (100M OOM). Streaming v6 is empty at write;
+            // a latched span that flushed through write_imm_l0 still
+            // carries a resident body — drop it so first get promotes.
+            if level == MAX_LSM_LEVEL && self.bulk_route_enabled && self.sst_source.is_some() {
+                if let Some(t) = self.ssts.last() {
+                    t.release_resident();
+                }
+            }
         }
         self.note_sst_inventory_changed();
         undo
@@ -20753,6 +20778,45 @@ mod tests {
         );
         assert_eq!(db.get(b"k0011-0003").as_deref(), Some(&b"v"[..]));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0159 P1.11: bulk SST installs with empty payload; first get
+    /// promotes into the pool when there is room (no ghost-register).
+    #[test]
+    fn bulk_empty_payload_promotes_on_first_get() {
+        let dir = temp_dir();
+        let mut opts = OpenOptions {
+            sync: false,
+            ..OpenOptions::default()
+        };
+        opts.sst_payload_budget_bytes = Some(8 << 20);
+        let mut db = Db::<StdEnv>::open_with_env_bounded(&dir, opts, StdEnv).unwrap();
+        db.set_physical_cfs(vec!["data".into()]);
+        let v = vec![b'v'; 40];
+        let mut keys = Vec::new();
+        for b in 0..12u32 {
+            let mut batch = Vec::new();
+            for j in 0..8u32 {
+                let k = format!("data\0{b:04}-{j:04}").into_bytes();
+                batch.push(BatchOp::put(k.clone(), v.clone()));
+                keys.push(k);
+            }
+            db.apply_batch(batch).unwrap();
+        }
+        db.flush().unwrap();
+        assert!(
+            db.ssts.iter().all(|t| !t.payload_resident()),
+            "bulk install must leave payloads empty (no whole-file pin)"
+        );
+        let before = db.sst_payload_pool().resident_bytes();
+        assert_eq!(db.get(&keys[0]).as_deref(), Some(&v[..]));
+        assert!(
+            db.sst_payload_pool().resident_bytes() > before
+                || db.ssts.iter().any(|t| t.payload_resident()),
+            "first get must promote a file that fits the budget"
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
     }
 }
 

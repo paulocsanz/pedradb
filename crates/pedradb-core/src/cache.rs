@@ -1295,7 +1295,10 @@ mod tests {
         c.insert(b"c", Some(Bytes::from_static(b"3")));
         assert_eq!(c.get(b"a").unwrap().as_deref(), Some(&b"1"[..]));
         assert_eq!(c.get(b"b").unwrap().as_deref(), Some(&b"2"[..]));
-        assert!(c.get(b"c").is_none(), "full cache must not FIFO-evict on miss");
+        assert!(
+            c.get(b"c").is_none(),
+            "full cache must not FIFO-evict on miss"
+        );
     }
 
     #[test]
@@ -1528,6 +1531,19 @@ mod tests {
         m.touch(&encoded);
         assert_eq!(other, m.gen(b"untouched"));
         assert_ne!(m.gen(&encoded), other);
+    }
+
+    #[test]
+    fn payload_pool_register_zero_does_not_ghost_charge() {
+        use std::sync::Arc as StdArc;
+        let pool = SstPayloadPool::with_budget(Some(1000));
+        let slot = StdArc::new(parking_lot::RwLock::new(ResidentBody::empty()));
+        pool.register(Path::new("bulk.sst"), StdArc::downgrade(&slot), 0);
+        assert_eq!(pool.resident_bytes(), 0);
+        assert_eq!(pool.tracked_tables(), 0);
+        assert!(!pool.can_admit(Path::new("bulk.sst"), 0));
+        assert!(pool.can_admit(Path::new("bulk.sst"), 100));
+        assert!(!pool.can_admit(Path::new("fat.sst"), 2000));
     }
 
     /// RFC-0042 v18: the pool evicts oldest-first down to budget; a dropped

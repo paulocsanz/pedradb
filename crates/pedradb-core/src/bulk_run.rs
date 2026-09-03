@@ -80,6 +80,30 @@ impl BulkRun {
     }
 }
 
+/// Sort parallel key/value vecs by user key (RFC-0159 P2.1 nearly-sorted
+/// batches). No-op when already strictly ascending. Bytes clones are
+/// refcount bumps.
+pub(crate) fn sort_bulk_key_vals(keys: &mut Vec<Bytes>, vals: &mut Vec<Bytes>) {
+    debug_assert_eq!(keys.len(), vals.len());
+    let n = keys.len();
+    if n < 2 {
+        return;
+    }
+    if keys.windows(2).all(|w| w[0].as_ref() < w[1].as_ref()) {
+        return;
+    }
+    let mut idx: Vec<usize> = (0..n).collect();
+    idx.sort_unstable_by(|&a, &b| keys[a].as_ref().cmp(keys[b].as_ref()));
+    let mut nk = Vec::with_capacity(n);
+    let mut nv = Vec::with_capacity(n);
+    for i in idx {
+        nk.push(std::mem::take(&mut keys[i]));
+        nv.push(std::mem::take(&mut vals[i]));
+    }
+    *keys = nk;
+    *vals = nv;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,5 +127,16 @@ mod tests {
         r.push(Bytes::from_static(b"b"), Bytes::from_static(b"2"), 2);
         assert_eq!(r.len(), 2);
         assert!(matches!(r.lookup(b"b", 2), Lookup::Found(v) if v.as_ref() == b"2"));
+    }
+
+    #[test]
+    fn sort_bulk_key_vals_orders_pairs() {
+        let mut keys = vec![Bytes::from_static(b"c"), Bytes::from_static(b"a")];
+        let mut vals = vec![Bytes::from_static(b"3"), Bytes::from_static(b"1")];
+        sort_bulk_key_vals(&mut keys, &mut vals);
+        assert_eq!(keys[0].as_ref(), b"a");
+        assert_eq!(vals[0].as_ref(), b"1");
+        assert_eq!(keys[1].as_ref(), b"c");
+        assert_eq!(vals[1].as_ref(), b"3");
     }
 }

@@ -4203,8 +4203,318 @@ mod tests {
             bulk.get(b"meta\0cursor").as_deref(),
             ladder.get(b"meta\0cursor").as_deref()
         );
+        let bulk_scan = bulk.scan_collect(Bound::Unbounded, Bound::Unbounded);
+        let ladder_scan = ladder.scan_collect(Bound::Unbounded, Bound::Unbounded);
+        assert_eq!(
+            bulk_scan, ladder_scan,
+            "twin scans must match byte-for-byte"
+        );
+        assert!(
+            bulk.get(b"data\0missing").is_none() && ladder.get(b"data\0missing").is_none(),
+            "absent-key probe must miss on both twins"
+        );
         let _ = fs::remove_dir_all(&dir_bulk);
         let _ = fs::remove_dir_all(&dir_ladder);
+    }
+
+    /// RFC-0159 P0.4: a descending batch unlatches; later puts stay
+    /// correct vs a ladder twin (gets + scan).
+    #[test]
+    fn bulk_fallback_midstream_correct() {
+        let dir_b = temp_dir();
+        let dir_l = temp_dir();
+        let mk = |dir: &std::path::PathBuf, bulk: bool| {
+            let db = ConcurrentDb::open_with(
+                dir,
+                OpenOptions {
+                    sync: false,
+                    ..OpenOptions::default()
+                },
+            )
+            .unwrap();
+            if !bulk {
+                db.with_write(|d| d.bulk_route_enabled = false);
+            }
+            db.set_physical_cfs(vec!["data".into()]);
+            db
+        };
+        let bulk = mk(&dir_b, true);
+        let ladder = mk(&dir_l, false);
+        let v = vec![b'v'; 64];
+        let mut keys = Vec::new();
+        for b in 0..16u32 {
+            let mut batch = Vec::new();
+            for j in 0..8u32 {
+                let k = format!("data\0{b:04}-{j:04}").into_bytes();
+                batch.push(BatchOp::put(k.clone(), v.clone()));
+                keys.push(k);
+            }
+            if b == 10 {
+                batch.push(BatchOp::put(b"data\00000-0000".to_vec(), b"over".to_vec()));
+            }
+            bulk.apply_batch_vec(batch.clone()).unwrap();
+            ladder.apply_batch_vec(batch).unwrap();
+        }
+        bulk.flush().unwrap();
+        bulk.compact().unwrap();
+        ladder.flush().unwrap();
+        ladder.compact().unwrap();
+        for k in &keys {
+            assert_eq!(bulk.get(k).as_deref(), ladder.get(k).as_deref());
+        }
+        assert_eq!(
+            bulk.get(b"data\00000-0000").as_deref(),
+            Some(&b"over"[..]),
+            "overwrite after descent must win"
+        );
+        assert_eq!(
+            bulk.scan_collect(Bound::Unbounded, Bound::Unbounded),
+            ladder.scan_collect(Bound::Unbounded, Bound::Unbounded)
+        );
+        let _ = fs::remove_dir_all(&dir_b);
+        let _ = fs::remove_dir_all(&dir_l);
+    }
+
+    /// RFC-0159 P0.4: settle does not rewrite bottom-level bulk chunks.
+    #[test]
+    fn bulk_settle_noops_on_clean_levels() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into(), "meta".into()]);
+        let v = vec![b'v'; 80];
+        for b in 0..16u32 {
+            let mut batch = Vec::new();
+            for j in 0..8u32 {
+                batch.push(BatchOp::put(
+                    format!("data\0{b:04}-{j:04}").into_bytes(),
+                    v.clone(),
+                ));
+            }
+            batch.push(BatchOp::put(b"meta\0cursor".to_vec(), b"c".to_vec()));
+            db.apply_batch_vec(batch).unwrap();
+        }
+        db.flush().unwrap();
+        let before: Vec<_> = db
+            .live_sst_meta()
+            .into_iter()
+            .filter(|m| m.cf == "data" && m.level == crate::db::MAX_LSM_LEVEL)
+            .map(|m| m.name)
+            .collect();
+        assert!(!before.is_empty(), "data family must bulk-install");
+        db.compact().unwrap();
+        let after: Vec<_> = db
+            .live_sst_meta()
+            .into_iter()
+            .filter(|m| m.cf == "data" && m.level == crate::db::MAX_LSM_LEVEL)
+            .map(|m| m.name)
+            .collect();
+        assert_eq!(before, after, "settle must not rewrite clean bulk chunks");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0159 P0.4: crash after N installed chunks (open tail is
+    /// disableWAL-class) — persisted keyspace equals a ladder twin that
+    /// never saw the tail.
+    #[test]
+    fn bulk_crash_replay_equals_ladder_path() {
+        let dir_b = temp_dir();
+        let dir_l = temp_dir();
+        let v = vec![b'v'; 48];
+        let mut installed = Vec::new();
+        {
+            let bulk = ConcurrentDb::open_with(
+                &dir_b,
+                OpenOptions {
+                    sync: false,
+                    ..OpenOptions::default()
+                },
+            )
+            .unwrap();
+            bulk.set_physical_cfs(vec!["data".into()]);
+            let ladder = ConcurrentDb::open_with(
+                &dir_l,
+                OpenOptions {
+                    sync: false,
+                    ..OpenOptions::default()
+                },
+            )
+            .unwrap();
+            ladder.set_physical_cfs(vec!["data".into()]);
+            ladder.with_write(|d| d.bulk_route_enabled = false);
+            for b in 0..12u32 {
+                let mut batch = Vec::new();
+                for j in 0..8u32 {
+                    let k = format!("data\0{b:04}-{j:04}").into_bytes();
+                    batch.push(BatchOp::put(k.clone(), v.clone()));
+                    installed.push(k);
+                }
+                bulk.apply_batch_vec(batch.clone()).unwrap();
+                ladder.apply_batch_vec(batch).unwrap();
+            }
+            bulk.flush().unwrap();
+            ladder.flush().unwrap();
+            // Uninstalled tail: crash loses it on bulk; ladder WAL-covers it
+            // so we do not apply the tail to the ladder twin.
+            for b in 12..14u32 {
+                let mut batch = Vec::new();
+                for j in 0..8u32 {
+                    batch.push(BatchOp::put(
+                        format!("data\0{b:04}-{j:04}").into_bytes(),
+                        v.clone(),
+                    ));
+                }
+                bulk.apply_batch_vec(batch).unwrap();
+            }
+            std::mem::forget(bulk);
+        }
+        let bulk2 = ConcurrentDb::open_with(
+            &dir_b,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        let ladder2 = ConcurrentDb::open_with(
+            &dir_l,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        for k in &installed {
+            assert_eq!(
+                bulk2.get(k).as_deref(),
+                ladder2.get(k).as_deref(),
+                "persisted key {}",
+                String::from_utf8_lossy(k)
+            );
+            assert_eq!(bulk2.get(k).as_deref(), Some(&v[..]));
+        }
+        assert!(
+            bulk2.get(b"data\0012-0000").is_none(),
+            "open tail must not survive crash"
+        );
+        assert_eq!(
+            bulk2.scan_collect(Bound::Unbounded, Bound::Unbounded),
+            ladder2.scan_collect(Bound::Unbounded, Bound::Unbounded)
+        );
+        let _ = fs::remove_dir_all(&dir_b);
+        let _ = fs::remove_dir_all(&dir_l);
+    }
+
+    /// RFC-0159 P1.2: async bulk installs persist MANIFEST every 4 chunks
+    /// off the write lock; settle forces leftover debt.
+    #[test]
+    fn bulk_manifest_persists_every_n_off_lock() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(256),
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into()]);
+        db.set_cf_write_buffer("data", 256);
+        let v = vec![b'x'; 80];
+        // Latch (threshold 8) then overflow the chunk cap so chunks park.
+        for b in 0..40u32 {
+            let mut keys = Vec::new();
+            let mut vals = Vec::new();
+            for j in 0..4u32 {
+                keys.push(Bytes::from(format!("data\0{b:04}-{j:04}").into_bytes()));
+                vals.push(Bytes::from(v.clone()));
+            }
+            if db.with_read(|d| d.bulk_latch_is_latched("data")) {
+                db.apply_latched_bulk("data", keys, vals, Vec::new())
+                    .unwrap();
+            } else {
+                let batch: Vec<_> = keys
+                    .into_iter()
+                    .zip(vals)
+                    .map(|(k, val)| BatchOp::put(k.to_vec(), val.to_vec()))
+                    .collect();
+                db.apply_batch_vec(batch).unwrap();
+            }
+            while db.with_read(|d| d.has_parked_bulk()) {
+                assert!(db.materialize_bulk_once());
+            }
+        }
+        let debt = db.with_read(|d| d.bulk_manifest_debt());
+        assert!(debt < 4, "debt must wrap every 4 installs, got {debt}");
+        db.flush().unwrap();
+        assert_eq!(
+            db.with_read(|d| d.bulk_manifest_debt()),
+            0,
+            "flush/settle must force leftover MANIFEST debt"
+        );
+        assert!(
+            db.get(b"data\00000-0000").is_some(),
+            "first bulk key must read back"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0159 P2.1: a one-swap nearly-sorted batch stays latched and
+    /// reads back in key order.
+    #[test]
+    fn bulk_nearly_sorted_window_stays_latched() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into()]);
+        let v = vec![b'v'; 24];
+        for b in 0..10u32 {
+            let mut batch = Vec::new();
+            for j in 0..4u32 {
+                batch.push(BatchOp::put(
+                    format!("data\0{b:04}-{j:04}").into_bytes(),
+                    v.clone(),
+                ));
+            }
+            db.apply_batch_vec(batch).unwrap();
+        }
+        assert!(
+            db.with_read(|d| d.bulk_latch_is_latched("data")),
+            "ascending stream must latch"
+        );
+        // Swap last two keys of the next batch (one inversion).
+        let swapped = vec![
+            BatchOp::put(b"data\0010-0001".to_vec(), v.clone()),
+            BatchOp::put(b"data\0010-0000".to_vec(), v.clone()),
+        ];
+        db.apply_batch_vec(swapped).unwrap();
+        assert!(
+            db.with_read(|d| d.bulk_latch_is_latched("data")),
+            "one inversion must not unlatch"
+        );
+        db.flush().unwrap();
+        assert_eq!(db.get(b"data\0010-0000").as_deref(), Some(&v[..]));
+        assert_eq!(db.get(b"data\0010-0001").as_deref(), Some(&v[..]));
+        let scan = db.scan_collect(
+            Bound::Included(b"data\0010-0000".as_slice()),
+            Bound::Included(b"data\0010-0001".as_slice()),
+        );
+        assert_eq!(scan.len(), 2);
+        assert!(scan[0].0.as_ref() < scan[1].0.as_ref());
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// RFC-0159 P0.2 on the host-worker funnel: deferred auto-flush stages

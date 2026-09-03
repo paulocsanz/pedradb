@@ -49,6 +49,12 @@ use std::collections::{HashMap, HashSet};
 /// ascending pairs).
 pub(crate) const BULK_LATCH_STREAK: u32 = 8;
 
+/// Adjacent inversions allowed in an otherwise-append batch before the
+/// family is killed (RFC-0159 P2.1). A real descent (min key ≤
+/// high-water) or a duplicate still kills. The write path sorts an
+/// admissible nearly-sorted span before [`crate::bulk_run::BulkRun`].
+pub(crate) const BULK_NEARLY_SORTED_WINDOW: usize = 8;
+
 /// Kill switch for the whole fast path (`PEDRA_BULK=0`): every batch
 /// routes `Ladder` and the latch never engages. A/B and rollback lever.
 pub(crate) fn bulk_enabled() -> bool {
@@ -374,21 +380,33 @@ impl BulkLatch {
         if spanning {
             return Verdict::Ineligible;
         }
-        // All puts, strictly ascending within the batch.
+        // All puts. Strictly ascending is the fast path; a bounded
+        // adjacent-inversion window (RFC-0159 P2.1) still admits if the
+        // unique sorted span sits strictly above high-water. Duplicates
+        // and a real descent (min ≤ high-water) still kill.
         let mut prev: Option<&[u8]> = None;
+        let mut inversions = 0usize;
         for &(is_put, key) in ops {
             if !is_put {
                 return Verdict::Ineligible;
             }
             if let Some(p) = prev {
-                if key <= p {
-                    // Duplicate or descent inside one batch.
+                if key == p {
                     return Verdict::Kill;
+                }
+                if key < p {
+                    inversions = inversions.saturating_add(1);
+                    if inversions > BULK_NEARLY_SORTED_WINDOW {
+                        return Verdict::Kill;
+                    }
                 }
             }
             prev = Some(key);
         }
-        let Some(first) = ops.first().map(|&(_, k)| k) else {
+        if inversions > 0 && keys_have_duplicate(ops) {
+            return Verdict::Kill;
+        }
+        let Some(first) = ops.iter().map(|&(_, k)| k).min() else {
             // No ops for this family in this batch (only possible via a
             // spanning range-delete naming it): ladder.
             return Verdict::Ineligible;
@@ -419,6 +437,12 @@ enum Verdict {
     Admissible,
     Ineligible,
     Kill,
+}
+
+fn keys_have_duplicate(ops: &[(bool, &[u8])]) -> bool {
+    let mut keys: Vec<&[u8]> = ops.iter().map(|&(_, k)| k).collect();
+    keys.sort_unstable();
+    keys.windows(2).any(|w| w[0] == w[1])
 }
 
 #[cfg(test)]
@@ -620,5 +644,47 @@ mod tests {
         let mut latch = BulkLatch::new();
         let routes = latch.classify_batch(&[], &no_db_max);
         assert!(routes.is_empty());
+    }
+
+    #[test]
+    fn nearly_sorted_adjacent_swap_stays_latched() {
+        let mut latch = BulkLatch::with_threshold(1);
+        latch.classify_batch(&[put("data", b"k1")], &no_db_max);
+        // One inversion inside the window: k3 then k2, both above k1.
+        let routes = latch.classify_batch(&[put("data", b"k3"), put("data", b"k2")], &no_db_max);
+        assert_eq!(route_of(&routes, "data"), FamilyRoute::Bulk);
+        assert!(latch.is_latched("data"));
+        // High-water ratchets over the max observed key (k3).
+        assert_eq!(
+            latch.high_water.get("data").map(Bytes::as_ref),
+            Some(b"k3".as_ref())
+        );
+        let routes = latch.classify_batch(&[put("data", b"k4")], &no_db_max);
+        assert_eq!(route_of(&routes, "data"), FamilyRoute::Bulk);
+    }
+
+    #[test]
+    fn nearly_sorted_too_many_inversions_kills() {
+        let mut latch = BulkLatch::with_threshold(1);
+        latch.classify_batch(&[put("data", b"a")], &no_db_max);
+        let mut ops = Vec::new();
+        // 9 adjacent descents > BULK_NEARLY_SORTED_WINDOW (8).
+        let keys: Vec<Vec<u8>> = (0..10u8).rev().map(|i| vec![b'z', i]).collect();
+        for k in &keys {
+            ops.push(put("data", k));
+        }
+        let routes = latch.classify_batch(&ops, &no_db_max);
+        assert_eq!(route_of(&routes, "data"), FamilyRoute::Ladder);
+        assert!(!latch.is_latched("data"));
+    }
+
+    #[test]
+    fn nearly_sorted_dip_below_high_water_kills() {
+        let mut latch = BulkLatch::with_threshold(1);
+        latch.classify_batch(&[put("data", b"k5")], &no_db_max);
+        // k4 < high-water k5: a real descent, not a within-batch shuffle.
+        let routes = latch.classify_batch(&[put("data", b"k7"), put("data", b"k4")], &no_db_max);
+        assert_eq!(route_of(&routes, "data"), FamilyRoute::Ladder);
+        assert!(!latch.is_latched("data"));
     }
 }
