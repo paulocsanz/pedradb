@@ -169,6 +169,9 @@ pub struct ReadOptions {
     pub(crate) snap: Option<pedradb_core::SequenceNumber>,
     /// rust-rocksdb default is `true`. `false` is G2 — [`Self::refuse_checksums_off`].
     pub(crate) verify_checksums: bool,
+    /// rust-rocksdb `prefix_same_as_start`: a `From(prefix)` scan stops at
+    /// the exclusive next prefix (`prefix_exclusive_end`).
+    pub(crate) prefix_same_as_start: bool,
 }
 
 impl Default for ReadOptions {
@@ -178,6 +181,7 @@ impl Default for ReadOptions {
             upper: None,
             snap: None,
             verify_checksums: true,
+            prefix_same_as_start: false,
         }
     }
 }
@@ -193,7 +197,9 @@ impl ReadOptions {
     pub fn set_verify_checksums(&mut self, v: bool) {
         self.verify_checksums = v;
     }
-    pub fn set_prefix_same_as_start(&mut self, _v: bool) {}
+    pub fn set_prefix_same_as_start(&mut self, v: bool) {
+        self.prefix_same_as_start = v;
+    }
     pub fn set_total_order_seek(&mut self, _v: bool) {}
     pub fn set_timestamp(&mut self, _ts: impl Into<Vec<u8>>) {}
     pub fn set_iterate_lower_bound(&mut self, key: impl Into<Vec<u8>>) {

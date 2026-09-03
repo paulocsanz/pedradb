@@ -71,6 +71,15 @@ impl<E: Env> OccTransaction<E> {
         self.snapshot
     }
 
+    /// Record `key` in the OCC read set without reading (compat iterator
+    /// yields — rust-rocksdb `Transaction::NewIterator` tracks every key).
+    pub fn observe(&mut self, key: &[u8]) {
+        if self.finished {
+            return;
+        }
+        self.read_set.insert(Bytes::copy_from_slice(key));
+    }
+
     /// Read at snapshot; records the key in the OCC read set.
     ///
     /// # Errors

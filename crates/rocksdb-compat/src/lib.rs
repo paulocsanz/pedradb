@@ -47,8 +47,8 @@ pub use shape::{
 };
 
 use pedradb_core::{
-    cf_encode_effective, decode_cf_key, encode_cf_key, key_in_cf_family, BatchOp,
-    CompactOptions as CoreCompactOptions, ConcurrentDb, CoreError, Env as PedraEnv,
+    cf_encode_effective, decode_cf_key, encode_cf_key, key_in_cf_family, prefix_exclusive_end,
+    BatchOp, CompactOptions as CoreCompactOptions, ConcurrentDb, CoreError, Env as PedraEnv,
     Snapshot as CoreSnapshot, SnapshotPin, StdEnv, DEFAULT_SST_PAYLOAD_BUDGET_BYTES,
     L0_COMPACTION_TRIGGER,
 };
@@ -1817,6 +1817,25 @@ fn max_included(cur: Bound<Vec<u8>>, k: &[u8]) -> Bound<Vec<u8>> {
     }
 }
 
+/// rust-rocksdb `prefix_same_as_start`: clamp a `From(prefix)` scan to
+/// `[prefix, next_prefix)`. An explicit tighter `iterate_upper_bound` wins.
+fn clamp_prefix_same_as_start(ro: &mut ReadOptions, mode: IteratorMode<'_>) {
+    if !ro.prefix_same_as_start {
+        return;
+    }
+    let IteratorMode::From(p, _) = mode else {
+        return;
+    };
+    let Some(end) = prefix_exclusive_end(p) else {
+        return;
+    };
+    match &ro.upper {
+        None => ro.upper = Some(end),
+        Some(u) if end.as_slice() < u.as_slice() => ro.upper = Some(end),
+        _ => {}
+    }
+}
+
 /// Tighten an end bound (`Unbounded`/`Excluded`) down to `k`. Both are
 /// end-side, so only `Excluded` competes.
 fn min_excluded(cur: Bound<Vec<u8>>, k: &[u8]) -> Bound<Vec<u8>> {
@@ -1967,6 +1986,10 @@ pub struct DB<E: PedraEnv = IoUringEnv> {
     cache_epoch_base: u64,
     compaction_filter: Option<CompactionFilterFn>,
     merge_operator: Option<MergeOperatorFn>,
+    /// Serializes `merge`/`merge_cf` RMW so concurrent operands on one key
+    /// are not lost (issue #2). Rocks records operands; we combine under
+    /// this lock then put.
+    merge_gate: Mutex<()>,
 }
 
 impl DB<IoUringEnv> {
@@ -2096,12 +2119,6 @@ impl DB<StdEnv> {
         Ok(db)
     }
 }
-
-/// Cap on the decoded-block cache when the caller sets a cache budget
-/// (RFC-0042 v18): the budget bounds the resident SST payload pool (compressed
-/// data, the Rocks block-cache role); this is only the small decompressed
-/// reuse layer on top. 32 MiB ≈ Pedra's 8192-entry default footprint.
-const COMPAT_DECODED_BLOCK_CACHE_BYTES: u64 = 32 * 1024 * 1024;
 
 impl<E: PedraEnv> DB<E> {
     /// Open with an explicit [`Env`] (adversarial `FailingEnv` campaigns).
@@ -2272,10 +2289,12 @@ impl<E: PedraEnv> DB<E> {
             db.set_auto_reclaim(true);
         }
         if let Some(n) = opts.block_cache_bytes {
-            // RFC-0042 v18: the budget itself went to the payload pool at
-            // open; the decoded-block cache stays at a small fixed footprint
-            // (Rocks decompresses per read and caches nothing by default).
-            db.set_block_cache_budget_bytes(n.min(COMPAT_DECODED_BLOCK_CACHE_BYTES));
+            // RFC-0160 P2.3: the caller's `NewLRUCache` / `set_block_cache`
+            // sizes the 4 KiB decoded-block cache (Rocks block cache), not
+            // whole-file SST residency (capped above at 256 MiB). The old
+            // 32 MiB decoded cap left slipstream's 1 GiB knob inert and
+            // get_hit tied with Rocks at 10M+.
+            db.set_block_cache_budget_bytes(n.max(1));
         }
         // Rocks parity: rust-rocksdb drops superseded versions below the
         // oldest live snapshot (`Snapshot` pins / OCC begins). This bounds
@@ -2303,6 +2322,7 @@ impl<E: PedraEnv> DB<E> {
             cache_epoch_base,
             compaction_filter: opts.compaction_filter.clone(),
             merge_operator: opts.merge_operator.clone(),
+            merge_gate: Mutex::new(()),
         })
     }
 
@@ -3725,21 +3745,60 @@ impl<E: PedraEnv> DB<E> {
     }
 
     /// rust-rocksdb `multi_get`.
+    ///
+    /// One snapshot and one `ConcurrentDb` read lock for the whole batch
+    /// (RFC-0160 P2.1). A loop of [`Self::get`] took one lock + CF-encode
+    /// envelope per key — 1M lookup_100 multi_get sat at 1.08× while
+    /// get_loop (same 100 keys, 100 locks) was 1.36×.
     pub fn multi_get<K, I>(&self, keys: I) -> Vec<Result<Option<Vec<u8>>>>
     where
         K: AsRef<[u8]>,
         I: IntoIterator<Item = K>,
     {
-        keys.into_iter().map(|k| self.get(k)).collect()
+        let keys: Vec<K> = keys.into_iter().collect();
+        if keys.is_empty() {
+            return Vec::new();
+        }
+        let encoded: Vec<Vec<u8>> = keys
+            .iter()
+            .map(|k| {
+                self.codec
+                    .encode_with(DEFAULT_CF, k.as_ref(), |enc| enc.to_vec())
+            })
+            .collect();
+        self.inner
+            .multi_get(&encoded)
+            .into_iter()
+            .map(|v| Ok(v.map(|b| b.to_vec())))
+            .collect()
     }
 
     /// rust-rocksdb `multi_get_cf`.
+    ///
+    /// Same one-lock batch as [`Self::multi_get`] (RFC-0160 P2.1). Answers
+    /// the same bytes as 100 [`Self::get_cf`]s, including CRC fail-closed
+    /// (a corrupt block panics the process on this path, matching `get`).
     pub fn multi_get_cf<'a, K, I>(&self, keys: I) -> Vec<Result<Option<Vec<u8>>>>
     where
         K: AsRef<[u8]>,
         I: IntoIterator<Item = (&'a ColumnFamily, K)>,
     {
-        keys.into_iter().map(|(cf, k)| self.get_cf(cf, k)).collect()
+        let pairs: Vec<(&'a ColumnFamily, K)> = keys.into_iter().collect();
+        if pairs.is_empty() {
+            return Vec::new();
+        }
+        let encoded: Vec<Vec<u8>> = pairs
+            .iter()
+            .map(|(cf, k)| {
+                self.codec
+                    .encode_with(&cf.name, k.as_ref(), |enc| enc.to_vec())
+            })
+            .collect();
+        self.inner
+            .multi_get(&encoded)
+            .into_iter()
+            .map(|v| Ok(v.map(|b| b.to_vec())))
+            .collect()
     }
 
     /// rust-rocksdb `key_may_exist`.
@@ -3793,19 +3852,12 @@ impl<E: PedraEnv> DB<E> {
         self.write_opt(&batch, &wo)
     }
 
-    /// rust-rocksdb `merge` (get + full_merge + put).
+    /// rust-rocksdb `merge`.
+    ///
+    /// OCC read-modify-write with retry so concurrent `merge`s on one key
+    /// do not drop operands (a bare get+put lost the other writer — issue #2).
     pub fn merge(&self, key: impl AsRef<[u8]>, operand: impl AsRef<[u8]>) -> Result<()> {
-        let op = self
-            .merge_operator
-            .as_ref()
-            .ok_or_else(|| Error::invalid("merge operator not set"))?;
-        let k = key.as_ref();
-        let existing = self.get(k)?;
-        let operands = MergeOperands::one(operand.as_ref().to_vec());
-        match op(k, existing.as_deref(), &operands) {
-            Some(v) => self.put(k, v),
-            None => self.delete(k),
-        }
+        self.merge_on(DEFAULT_CF, key.as_ref(), operand.as_ref())
     }
 
     /// rust-rocksdb `merge_cf`.
@@ -3815,17 +3867,28 @@ impl<E: PedraEnv> DB<E> {
         key: impl AsRef<[u8]>,
         operand: impl AsRef<[u8]>,
     ) -> Result<()> {
+        self.merge_on(&cf.name, key.as_ref(), operand.as_ref())
+    }
+
+    fn merge_on(&self, cf: &str, key: &[u8], operand: &[u8]) -> Result<()> {
         let op = self
             .merge_operator
             .as_ref()
-            .ok_or_else(|| Error::invalid("merge operator not set"))?;
-        let k = key.as_ref();
-        let existing = self.get_cf(cf, k)?;
-        let operands = MergeOperands::one(operand.as_ref().to_vec());
-        match op(k, existing.as_deref(), &operands) {
-            Some(v) => self.put_cf(cf, k, v),
-            None => self.delete_cf(cf, k),
-        }
+            .ok_or_else(|| Error::invalid("merge operator not set"))?
+            .clone();
+        // Occupies the same slot as a Rocks merge operand: get+combine+put
+        // under a lock so two threads cannot both observe the same existing
+        // value. OCC group-commit treats simultaneous members as one
+        // snapshot and would still last-write-wins.
+        let _g = self.merge_gate.lock();
+        self.codec.encode_with(cf, key, |enc| {
+            let existing = self.inner.get(enc);
+            let operands = MergeOperands::one(operand.to_vec());
+            match op(key, existing.as_deref(), &operands) {
+                Some(v) => self.inner.put(enc, v).map_err(Error::from),
+                None => self.inner.delete(enc).map_err(Error::from),
+            }
+        })
     }
 
     /// rust-rocksdb `flush_cf`.
@@ -3887,9 +3950,15 @@ impl<E: PedraEnv> DB<E> {
     }
 
     /// rust-rocksdb `iterator_opt`. Honours snapshot (F180), iterate bounds,
-    /// and refuses `set_verify_checksums(false)` (RFC-0062 P1.6).
-    pub fn iterator_opt(&self, mode: IteratorMode<'_>, ro: ReadOptions) -> Result<DBIterator<E>> {
+    /// `prefix_same_as_start`, and refuses `set_verify_checksums(false)`
+    /// (RFC-0062 P1.6).
+    pub fn iterator_opt(
+        &self,
+        mode: IteratorMode<'_>,
+        mut ro: ReadOptions,
+    ) -> Result<DBIterator<E>> {
         ro.refuse_checksums_off()?;
+        clamp_prefix_same_as_start(&mut ro, mode);
         let seq = ro.snap.unwrap_or_else(|| self.inner.visible_sequence());
         let names = self.cf_names();
         let bounds = IterBounds {
@@ -3914,9 +3983,10 @@ impl<E: PedraEnv> DB<E> {
         &self,
         cf: &ColumnFamily,
         mode: IteratorMode<'_>,
-        ro: ReadOptions,
+        mut ro: ReadOptions,
     ) -> Result<DBIterator<E>> {
         ro.refuse_checksums_off()?;
+        clamp_prefix_same_as_start(&mut ro, mode);
         let seq = ro.snap.unwrap_or_else(|| self.inner.visible_sequence());
         let names = self.cf_names();
         let bounds = IterBounds {
@@ -3935,8 +4005,26 @@ impl<E: PedraEnv> DB<E> {
     }
 
     /// rust-rocksdb `prefix_iterator`.
+    ///
+    /// Stops at the exclusive next prefix (`prefix_exclusive_end`). A seek
+    /// to `prefix` with no upper bound leaked sibling keys (issue #4).
     pub fn prefix_iterator(&self, prefix: impl AsRef<[u8]>) -> Result<DBIterator<E>> {
-        self.iterator(IteratorMode::From(prefix.as_ref(), Direction::Forward))
+        let p = prefix.as_ref();
+        let mut ro = ReadOptions::default();
+        ro.set_prefix_same_as_start(true);
+        self.iterator_opt(IteratorMode::From(p, Direction::Forward), ro)
+    }
+
+    /// rust-rocksdb `prefix_iterator_cf`.
+    pub fn prefix_iterator_cf(
+        &self,
+        cf: &ColumnFamily,
+        prefix: impl AsRef<[u8]>,
+    ) -> Result<DBIterator<E>> {
+        let p = prefix.as_ref();
+        let mut ro = ReadOptions::default();
+        ro.set_prefix_same_as_start(true);
+        self.iterator_cf_opt(cf, IteratorMode::From(p, Direction::Forward), ro)
     }
 
     /// rust-rocksdb `full_iterator`.
@@ -6924,6 +7012,54 @@ mod tests {
     }
 
     #[test]
+    fn multi_get_cf_matches_get_cf() {
+        let dir = tmp("mget-cf");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        opts.set_sync(false);
+        let db = DB::open_cf(&opts, &dir, &["data"]).unwrap();
+        let cf = db.cf_handle("data").expect("data cf");
+        let keys: Vec<Vec<u8>> = (0..32u32)
+            .map(|i| format!("k{i:04}").into_bytes())
+            .collect();
+        for (i, k) in keys.iter().enumerate() {
+            db.put_cf(&cf, k, format!("v{i}").as_bytes()).unwrap();
+        }
+        db.flush().unwrap();
+        let refs: Vec<_> = keys.iter().map(|k| (&cf, k.as_slice())).collect();
+        let batched = db.multi_get_cf(refs);
+        for (i, k) in keys.iter().enumerate() {
+            let want = db.get_cf(&cf, k).unwrap();
+            let got = batched[i].as_ref().unwrap().clone();
+            assert_eq!(got, want, "multi_get_cf key {i}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn multi_get_matches_get_default_cf() {
+        let dir = tmp("mget-def");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        opts.set_sync(false);
+        let db = DB::open(&opts, &dir).unwrap();
+        db.put(b"a", b"1").unwrap();
+        db.put(b"b", b"2").unwrap();
+        db.put(b"c", b"3").unwrap();
+        let batched = db.multi_get([
+            "a".as_bytes(),
+            "b".as_bytes(),
+            "missing".as_bytes(),
+            "c".as_bytes(),
+        ]);
+        assert_eq!(batched[0].as_ref().unwrap().as_deref(), Some(&b"1"[..]));
+        assert_eq!(batched[1].as_ref().unwrap().as_deref(), Some(&b"2"[..]));
+        assert_eq!(batched[2].as_ref().unwrap().as_deref(), None);
+        assert_eq!(batched[3].as_ref().unwrap().as_deref(), Some(&b"3"[..]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn optimize_for_point_lookup_sizes_cache() {
         let mut o = Options::new();
         o.optimize_for_point_lookup(8);
@@ -6949,10 +7085,8 @@ mod tests {
             db.flush().unwrap();
         }
         let db = DB::open(&opts, &dir).unwrap();
-        // Since v21h (encoded-block point seek) a point get reads raw block
-        // images through the payload pool and never materializes decoded
-        // entries; scans are what load blocks into the decoded-block cache
-        // this property reports.
+        // RFC-0160 P2.3: a byte-budgeted cache is filled by point gets
+        // (decoded 4 KiB blocks). Scan still loads blocks too.
         let mut n = 0usize;
         for item in db
             .iterator_opt(IteratorMode::Start, ReadOptions::default())

@@ -450,9 +450,9 @@ pub const KNOB_INVENTORY: &[KnobEntry] = &[
     e("fill_cache", KnobClass::Inert, "ReadOptions", ""),
     e(
         "set_prefix_same_as_start",
-        KnobClass::Inert,
+        KnobClass::Wired,
         "ReadOptions",
-        "",
+        "From(prefix) scan stops at prefix_exclusive_end",
     ),
     e("set_total_order_seek", KnobClass::Inert, "ReadOptions", ""),
     e("set_timestamp", KnobClass::Inert, "ReadOptions", "UDT gap"),
