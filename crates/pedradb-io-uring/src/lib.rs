@@ -428,6 +428,15 @@ impl EnvFile for IoUringFile {
         use std::os::unix::fs::FileExt;
         self.file.read_exact_at(buf, offset)
     }
+
+    fn advise(&mut self, offset: u64, len: u64, kind: AdviseKind) -> io::Result<()> {
+        let hint = match kind {
+            AdviseKind::Random => pedradb_posix::FileAdvise::Random,
+            AdviseKind::WillNeed => pedradb_posix::FileAdvise::WillNeed,
+            AdviseKind::DontNeed => pedradb_posix::FileAdvise::DontNeed,
+        };
+        pedradb_posix::advise_file(&self.file, offset, len, hint)
+    }
 }
 
 impl Env for IoUringEnv {
@@ -502,6 +511,7 @@ impl Env for IoUringEnv {
     fn advise(&self, path: &Path, offset: u64, len: u64, kind: AdviseKind) -> io::Result<()> {
         let f = File::open(path)?;
         let hint = match kind {
+            AdviseKind::Random => pedradb_posix::FileAdvise::Random,
             AdviseKind::WillNeed => pedradb_posix::FileAdvise::WillNeed,
             AdviseKind::DontNeed => pedradb_posix::FileAdvise::DontNeed,
         };
@@ -677,6 +687,7 @@ mod tests {
             f.sync_all().unwrap();
         }
         let env = IoUringEnv::new().unwrap();
+        env.advise(&path, 0, 0, AdviseKind::Random).unwrap();
         env.advise(&path, 0, 4096, AdviseKind::WillNeed).unwrap();
         env.advise(&path, 0, 4096, AdviseKind::DontNeed).unwrap();
         let _ = fs::remove_dir_all(&dir);

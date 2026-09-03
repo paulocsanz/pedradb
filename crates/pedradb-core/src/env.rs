@@ -9,7 +9,9 @@ use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
+
+use parking_lot::{Mutex, RwLock};
 
 /// Per-file I/O the engine performs on WAL / SST handles.
 pub trait EnvFile: Read + Write + Seek {
@@ -97,11 +99,28 @@ pub trait EnvFile: Read + Write + Seek {
         back?;
         Ok(())
     }
+
+    /// Kernel readahead hint on **this** fd (`posix_fadvise`). Default no-op
+    /// (sim / DST). Must be the cached handle — a second `open` of the same
+    /// path does not affect this fd's readahead.
+    ///
+    /// # Errors
+    /// Underlying I/O when the platform implements the hint. Callers treat
+    /// failure as best-effort.
+    fn advise(&mut self, offset: u64, len: u64, kind: AdviseKind) -> io::Result<()> {
+        let _ = (offset, len, kind);
+        Ok(())
+    }
 }
 
 /// Hint for [`Env::advise`] (RFC-0029 P1.2 — `posix_fadvise`-shaped).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdviseKind {
+    /// Disable kernel readahead (Linux `POSIX_FADV_RANDOM`). Rocks SST
+    /// opens default this on (`set_advise_random_on_open`). Without it,
+    /// each 4 KiB random pread may pull 128 KiB — lookup_100's 100
+    /// fresh keys (v69 in-band 0.87×).
+    Random,
     /// Prefetch / readahead (Linux `POSIX_FADV_WILLNEED`).
     WillNeed,
     /// Drop pages from cache (Linux `POSIX_FADV_DONTNEED`).
@@ -307,7 +326,7 @@ impl<E: Env + Send + Sync> SstFileSource for EnvSource<E> {
 #[derive(Debug)]
 pub struct FileHandleCache {
     capacity: usize,
-    inner: Mutex<FileHandleCacheInner>,
+    inner: RwLock<FileHandleCacheInner>,
 }
 
 #[derive(Debug, Default)]
@@ -336,19 +355,16 @@ impl FileHandleCache {
     pub fn new(capacity: usize) -> Self {
         Self {
             capacity,
-            inner: Mutex::new(FileHandleCacheInner::default()),
+            inner: RwLock::new(FileHandleCacheInner::default()),
         }
     }
 
-    /// Cached handle for `path`, marking it most recently used.
+    /// Cached handle for `path`. No LRU bump: 25M settle is ~90 SSTs and
+    /// the default cap is 256, so get_loop's 100 preads never evict. A
+    /// write lock + tick on every miss-path get was exclusive-mutex tax
+    /// (lookup_100 calm-1 0.87× vs in-band Rocks).
     fn get(&self, path: &Path) -> Option<Arc<Mutex<Box<dyn EnvFile + Send>>>> {
-        let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
-        inner.tick = inner.tick.wrapping_add(1);
-        let tick = inner.tick;
-        inner.map.get_mut(path).map(|h| {
-            h.tick = tick;
-            Arc::clone(&h.file)
-        })
+        self.inner.read().map.get(path).map(|h| Arc::clone(&h.file))
     }
 
     /// Store a freshly opened handle, evicting the least-recently-used
@@ -357,7 +373,7 @@ impl FileHandleCache {
         if self.capacity == 0 {
             return;
         }
-        let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut inner = self.inner.write();
         if inner.map.len() >= self.capacity && !inner.map.contains_key(path) {
             if let Some(oldest) = inner
                 .map
@@ -382,11 +398,7 @@ impl FileHandleCache {
     /// Drop the cached handle for `path` (the fd closes once in-flight
     /// reads finish). No-op when absent.
     pub fn invalidate(&self, path: &Path) {
-        self.inner
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .map
-            .remove(path);
+        self.inner.write().map.remove(path);
     }
 }
 
@@ -427,10 +439,12 @@ where
 {
     fn read_range(&self, path: &Path, offset: u64, buf: &mut [u8]) -> io::Result<()> {
         if let Some(handle) = self.cache.get(path) {
-            let mut file = handle.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut file = handle.lock();
             return file.positioned_read_exact(buf, offset);
         }
         let mut file = self.env.open_read(path)?;
+        // Same fd we will pread: Rocks `set_advise_random_on_open`.
+        let _ = file.advise(0, 0, AdviseKind::Random);
         file.positioned_read_exact(buf, offset)?;
         self.cache.insert(path, Box::new(file));
         Ok(())
@@ -487,6 +501,15 @@ impl EnvFile for File {
     fn positioned_read_exact(&mut self, buf: &mut [u8], offset: u64) -> io::Result<()> {
         std::os::unix::fs::FileExt::read_exact_at(self, buf, offset)
     }
+
+    fn advise(&mut self, offset: u64, len: u64, kind: AdviseKind) -> io::Result<()> {
+        let hint = match kind {
+            AdviseKind::Random => pedradb_posix::FileAdvise::Random,
+            AdviseKind::WillNeed => pedradb_posix::FileAdvise::WillNeed,
+            AdviseKind::DontNeed => pedradb_posix::FileAdvise::DontNeed,
+        };
+        pedradb_posix::advise_file(self, offset, len, hint)
+    }
 }
 
 /// Production [`Env`]: zero-cost passthrough to `std::fs`.
@@ -527,6 +550,7 @@ impl Env for StdEnv {
     fn advise(&self, path: &Path, offset: u64, len: u64, kind: AdviseKind) -> io::Result<()> {
         let f = File::open(path)?;
         let hint = match kind {
+            AdviseKind::Random => pedradb_posix::FileAdvise::Random,
             AdviseKind::WillNeed => pedradb_posix::FileAdvise::WillNeed,
             AdviseKind::DontNeed => pedradb_posix::FileAdvise::DontNeed,
         };
@@ -737,6 +761,7 @@ mod tests {
             f.sync_all().unwrap();
         }
         // StdEnv: Linux posix_fadvise via pedradb-posix; no-op elsewhere.
+        StdEnv.advise(&path, 0, 0, AdviseKind::Random).unwrap();
         StdEnv.advise(&path, 0, 4096, AdviseKind::WillNeed).unwrap();
         StdEnv.advise(&path, 0, 4096, AdviseKind::DontNeed).unwrap();
         let _ = fs::remove_dir_all(&dir);

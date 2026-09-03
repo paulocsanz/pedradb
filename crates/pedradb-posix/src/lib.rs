@@ -22,6 +22,9 @@ use std::io;
 /// Kernel readahead / cache-drop hint ([`advise_file`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileAdvise {
+    /// Linux `POSIX_FADV_RANDOM` — disable readahead (Rocks
+    /// `set_advise_random_on_open`, default true for SST).
+    Random,
     /// Linux `POSIX_FADV_WILLNEED`.
     WillNeed,
     /// Linux `POSIX_FADV_DONTNEED`.
@@ -284,12 +287,14 @@ pub fn advise_file(file: &File, offset: u64, len: u64, kind: FileAdvise) -> io::
     #[cfg(target_os = "linux")]
     {
         use std::os::fd::AsRawFd;
-        // Linux `linux/fadvise.h`: WILLNEED=3, DONTNEED=4. Not Darwin
-        // (no posix_fadvise). Avoid the `libc` crate so this island has
-        // zero dependencies.
+        // Linux `linux/fadvise.h`: RANDOM=1, WILLNEED=3, DONTNEED=4.
+        // Not Darwin (no posix_fadvise). Avoid the `libc` crate so this
+        // island has zero dependencies.
+        const POSIX_FADV_RANDOM: i32 = 1;
         const POSIX_FADV_WILLNEED: i32 = 3;
         const POSIX_FADV_DONTNEED: i32 = 4;
         let advice = match kind {
+            FileAdvise::Random => POSIX_FADV_RANDOM,
             FileAdvise::WillNeed => POSIX_FADV_WILLNEED,
             FileAdvise::DontNeed => POSIX_FADV_DONTNEED,
         };
@@ -511,6 +516,7 @@ mod tests {
             f.sync_all().unwrap();
         }
         let f = File::open(&path).unwrap();
+        advise_file(&f, 0, 0, FileAdvise::Random).unwrap();
         advise_file(&f, 0, 4096, FileAdvise::WillNeed).unwrap();
         advise_file(&f, 0, 4096, FileAdvise::DontNeed).unwrap();
         // Overflow into `off_t` clamps (hint, not a barrier). Must not panic

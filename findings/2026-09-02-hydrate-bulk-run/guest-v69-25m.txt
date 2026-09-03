@@ -1,0 +1,46 @@
+Guest v69 25M r1 — cap set_block_cache whole-file residency at 256 MiB
+linux-gate-p149b  2026-09-02 ~21:05
+compat 7e2dc735d979917153becb8292ad0d3b
+table/db v68 (p8 + TLS scratch). Slipstream default cache_size_bytes=1 GiB
+was pinning 1 GiB of SST files on the 3.9 GiB guest (v57 class).
+load start 15.54, end 17.50/16.53/16.18 — end load 17.5, do not publish the
+ratios (Rocks get_loop 4.51 is slow vs the 3.86 typical).
+
+hydrate/rocks  29.3s (0.85M/s)   pedra 28.8s (0.87M/s)  1.017×
+settle         7.6s vs 1.0s                               7.6×
+get_hit        45.681 vs 43.703 µs                        1.045× (Rocks 45.7 slow vs ~41)
+prefix         384.45 vs 313.93 µs                        1.225× (Rocks prefix slow)
+get_loop       4.5057 vs 3.8317 ms                        1.176× (Rocks 4.51 slow vs ~3.86)
+multi_get      4.4853 vs 3.8239 ms                        1.173× (Rocks 4.49 slow)
+
+Pedra get_loop 3.83 ms is the best Pedra absolute (v64 4.09, v68 4.45).
+The 256 MiB cap is a real cut. Against typical Rocks 3.86 ms this would be
+~1.01× — need a calm-load r2 with Rocks in band before publishing.
+lookup_100 uses 100 fresh random keys every iteration (see
+lookup-100-fresh-keys.md); cache hits cannot win this arm.
+
+r2 (21:10, load start 16.15, end 17.09/16.89/16.40) — refuse (load 17).
+  hydrate/rocks  28.5s (0.88M/s)   pedra 29.8s (0.84M/s)  0.956×
+  settle         7.3s vs 0.9s                               8.1×
+  get_hit        42.509 vs 44.482 µs                        0.956×
+  prefix         351.01 vs 287.96 µs                        1.219×
+  get_loop       4.2863 vs 4.1843 ms                        1.024×
+  multi_get      4.2036 vs 5.0895 ms                        0.826×  (Pedra 5.09, load)
+
+r1 Pedra get_loop 3.83 ms is the cut (vs v68 4.45). r2 is host-noise.
+Need a 3-run at load ~15 with Rocks get_loop in the 3.86–4.03 band
+before publishing lookup ≥1×.
+
+calm-1 (21:16, load start 15.26, end 16.43/16.42/16.30)
+  Rocks get_loop **3.934 ms — in band** (3.86–4.03). This run counts.
+  hydrate/rocks  29.2s (0.86M/s)   pedra 29.0s (0.86M/s)  1.007×  (not a published win)
+  settle         6.0s vs 1.0s                               6.0×
+  get_hit        43.476 vs 44.610 µs                        0.975×
+  prefix         360.35 vs 282.33 µs                        1.276×
+  get_loop       3.9337 vs 4.5430 ms                        **0.866× LOSE**
+  multi_get      4.1748 vs 4.6678 ms                        0.882× LOSE
+
+v69 r1 1.18× was slow-Rocks (4.51 ms). In-band, lookup_100 still loses.
+Do not 3-run a 0.87×. Next: FileHandleCache exclusive mutex on every
+pread (100/get_loop) → parking_lot read, no LRU tick (90 files < 256 cap).
+

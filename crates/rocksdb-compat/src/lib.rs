@@ -49,7 +49,8 @@ pub use shape::{
 use pedradb_core::{
     cf_encode_effective, decode_cf_key, encode_cf_key, key_in_cf_family, BatchOp,
     CompactOptions as CoreCompactOptions, ConcurrentDb, CoreError, Env as PedraEnv,
-    Snapshot as CoreSnapshot, SnapshotPin, StdEnv, L0_COMPACTION_TRIGGER,
+    Snapshot as CoreSnapshot, SnapshotPin, StdEnv, DEFAULT_SST_PAYLOAD_BUDGET_BYTES,
+    L0_COMPACTION_TRIGGER,
 };
 use pedradb_io_uring::IoUringEnv;
 use std::cell::RefCell;
@@ -2239,10 +2240,17 @@ impl<E: PedraEnv> DB<E> {
         } else {
             Some(opts.write_buffer_size)
         };
-        // RFC-0042 v18: the caller's cache knob bounds resident SST payloads
-        // (the compressed-data role a Rocks block cache plays); the decoded
-        // block cache stays small. `None` keeps core's legacy resident mode.
-        core_opts.sst_payload_budget_bytes = opts.block_cache_bytes;
+        // RFC-0042 v18 mapped the Rocks block-cache knob onto whole-file
+        // SST residency. Rocks caches 4 KiB blocks; slipstream's default
+        // 1 GiB knob then pinned 1 GiB of 64 MiB files on the 3.9 GiB
+        // guest and v57 lookup_100 regressed. Cap whole-file residency at
+        // the 256 MiB default; a smaller knob still shrinks it. The decoded
+        // block cache stays separately capped below.
+        core_opts.sst_payload_budget_bytes = Some(
+            opts.block_cache_bytes
+                .unwrap_or(DEFAULT_SST_PAYLOAD_BUDGET_BYTES)
+                .min(DEFAULT_SST_PAYLOAD_BUDGET_BYTES),
+        );
         if opts.enable_blob_files {
             core_opts.large_value_threshold = Some(opts.min_blob_size as usize);
         }

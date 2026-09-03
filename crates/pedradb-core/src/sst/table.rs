@@ -222,17 +222,17 @@ struct BlockHandle {
     offset: u64,
     length: u32,
     first_user_key: Bytes,
-    /// Big-endian u128 window of `first_user_key[key_cp..key_cp+16]`
-    /// (zero-padded), derived with the table's `key_cp`. Comparing `p16`
+    /// Big-endian u64 window of `first_user_key[key_cp..key_cp+8]`
+    /// (zero-padded), derived with the table's `key_cp`. Comparing `p8`
     /// before the full memcmp preserves byte order exactly and starts at
     /// the first byte where index keys actually differ — route-fold keys
     /// share a 10-byte prefix, so a fixed offset-0 window would carry no
-    /// entropy. 8-byte windows collided: `route.svc-{:06}.{:08}` with
-    /// `key_cp=10` makes p8 = svc + `.` + first inst digit, ~63 blocks
-    /// per value, and `blocks_for_point` fell back to memcmp (Mac get_hit
-    /// sample: 33 % of the probe). 16 bytes covers the remaining 15 of a
-    /// 25-byte slipstream key. Filled by `derive_index_accel`; 0 until then.
-    p16: u128,
+    /// entropy. Filled by `derive_index_accel`; 0 until then.
+    ///
+    /// v65 widened this to u128 (16 B). Guest 25M get_hit dropped
+    /// 1.15× → 0.78–0.91×; prefix held. Reverted: 25M point gets are
+    /// pread-bound, and the extra window did not pay.
+    p8: u64,
 }
 
 /// Cached full entry materialization for an SST (shared across clones).
@@ -247,6 +247,22 @@ pub struct PointSeekScratch {
     raw: Vec<u8>,
     /// Decompressed block image.
     plain: Vec<u8>,
+}
+
+thread_local! {
+    static POINT_SEEK_SCRATCH: RefCell<Option<PointSeekScratch>> = const { RefCell::new(None) };
+}
+
+/// Take the thread-local seek scratch (or empty). Pair with
+/// [`put_tls_point_seek_scratch`] so lookup_100's 100 gets reuse one
+/// 4 KiB buffer instead of alloc/free per key.
+pub(crate) fn take_tls_point_seek_scratch() -> PointSeekScratch {
+    POINT_SEEK_SCRATCH.with(|c| c.borrow_mut().take().unwrap_or_default())
+}
+
+/// Return a seek scratch to the thread-local slot.
+pub(crate) fn put_tls_point_seek_scratch(s: PointSeekScratch) {
+    POINT_SEEK_SCRATCH.with(|c| *c.borrow_mut() = Some(s));
 }
 
 /// In-memory view of one SST file.
@@ -279,7 +295,7 @@ pub struct SstTable {
     max_sequence: SequenceNumber,
     /// Sparse index (v2+); empty for v1.
     index: Vec<BlockHandle>,
-    /// Longest prefix shared by every `index` key — the offset the `p16`
+    /// Longest prefix shared by every `index` key — the offset the `p8`
     /// windows start at. Derived with the index (`derive_index_accel`).
     key_cp: usize,
     /// On-disk or rebuilt bloom (always-true when inactive).
@@ -873,19 +889,19 @@ impl SstTable {
 
     /// Blocks that can hold versions of `user_key` (O(log N + spans)).
     ///
-    /// Big-endian u128 of `key[cp..cp+16]`, zero-padded past the key's end.
+    /// Big-endian u64 of `key[cp..cp+8]`, zero-padded past the key's end.
     /// Because the padding byte (0) is ≤ any real byte, comparing windows
     /// then falling back to a full memcmp on equality is order-exact.
-    fn p16_window(key: &[u8], cp: usize) -> u128 {
-        let mut buf = [0u8; 16];
-        let end = (cp + 16).min(key.len());
+    fn p8_window(key: &[u8], cp: usize) -> u64 {
+        let mut buf = [0u8; 8];
+        let end = (cp + 8).min(key.len());
         if end > cp {
             buf[..end - cp].copy_from_slice(&key[cp..end]);
         }
-        u128::from_be_bytes(buf)
+        u64::from_be_bytes(buf)
     }
 
-    /// Fill every handle's `p16` and return the common-prefix offset they
+    /// Fill every handle's `p8` and return the common-prefix offset they
     /// are relative to. Must run once per index after all handles exist
     /// (both at open and at flush/finish, before the table is used).
     fn derive_index_accel(index: &mut [BlockHandle]) -> usize {
@@ -903,7 +919,7 @@ impl SstTable {
             cp = 0;
         }
         for h in index.iter_mut() {
-            h.p16 = Self::p16_window(&h.first_user_key, cp);
+            h.p8 = Self::p8_window(&h.first_user_key, cp);
         }
         cp
     }
@@ -915,10 +931,10 @@ impl SstTable {
         if self.index.is_empty() {
             return 0..0;
         }
-        let t16 = Self::p16_window(user_key, self.key_cp);
-        let ge = self.index.partition_point(|h| {
-            h.p16 < t16 || (h.p16 == t16 && h.first_user_key.as_ref() < user_key)
-        });
+        let t8 = Self::p8_window(user_key, self.key_cp);
+        let ge = self
+            .index
+            .partition_point(|h| h.p8 < t8 || (h.p8 == t8 && h.first_user_key.as_ref() < user_key));
         let start = ge.saturating_sub(1);
         let mut end = ge;
         while end < self.index.len() && self.index[end].first_user_key.as_ref() <= user_key {
@@ -1364,7 +1380,7 @@ impl SstTable {
                 length: block_len,
                 first_user_key,
                 // Real value assigned by `derive_index_accel` below.
-                p16: 0,
+                p8: 0,
             });
         }
 
@@ -1832,10 +1848,9 @@ impl SstTable {
                 // `first_user_key == s` can still hold trailing versions of
                 // `s`. Partition on `< s` (not `<= s`) so that previous
                 // block stays in the window.
-                let t16 = Self::p16_window(s, self.key_cp);
-                let ge = self.index.partition_point(|h| {
-                    h.p16 < t16 || (h.p16 == t16 && h.first_user_key.as_ref() < s)
-                });
+                let ge = self
+                    .index
+                    .partition_point(|h| h.first_user_key.as_ref() < s);
                 ge.saturating_sub(1)
             }
         };
@@ -2712,7 +2727,7 @@ fn finish_staged_block(
         offset: *pos,
         length: stored,
         first_user_key: first.expect("bulk block missing first key"),
-        p16: 0,
+        p8: 0,
     });
     *pos += u64::from(stored);
     staged.extend_from_slice(&crc_bytes);
@@ -2890,7 +2905,7 @@ fn write_sst_try_sorted_body(
                 offset,
                 length,
                 first_user_key: first,
-                p16: 0,
+                p8: 0,
             });
             return Ok(());
         }
@@ -2906,7 +2921,7 @@ fn write_sst_try_sorted_body(
             offset,
             length,
             first_user_key: first,
-            p16: 0,
+            p8: 0,
         });
         Ok(())
     }
@@ -3811,7 +3826,7 @@ mod tests {
             offset,
             length,
             first_user_key: Bytes::copy_from_slice(first),
-            p16: SstTable::p16_window(first, 0),
+            p8: SstTable::p8_window(first, 0),
         };
         // Hand-built sparse index emulating a writer that split `k` across
         // blocks: block 0 = [a@1, k@5, k@3], block 1 = [k@2, z@1].
@@ -3888,7 +3903,7 @@ mod tests {
         );
     }
 
-    /// Oracle: the accelerated `blocks_for_point` (u128 window past the
+    /// Oracle: the accelerated `blocks_for_point` (u64 window past the
     /// index common prefix, full-memcmp fallback on window equality) must
     /// return exactly what the pre-acceleration partition_point returned,
     /// on adversarial indexes — long shared prefixes, equal-key runs
@@ -3917,7 +3932,7 @@ mod tests {
                     offset: 0,
                     length: 16,
                     first_user_key: Bytes::copy_from_slice(k),
-                    p16: 0,
+                    p8: 0,
                 })
                 .collect();
             let key_cp = SstTable::derive_index_accel(&mut index);
@@ -3942,7 +3957,7 @@ mod tests {
         }
 
         // Route-fold shape: every key shares "route.svc-" (10 B); entropy
-        // starts inside the u128 window only when cp skips those bytes.
+        // starts inside the u64 window only when cp skips those bytes.
         let route: Vec<Vec<u8>> = (0..40)
             .map(|i| format!("route.svc-{:06}.{:08}", i / 4, i % 4).into_bytes())
             .collect();

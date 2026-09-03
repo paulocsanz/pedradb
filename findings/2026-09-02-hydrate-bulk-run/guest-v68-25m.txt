@@ -1,0 +1,29 @@
+Guest v68 25M r1 (p8 revert + TLS PointSeekScratch; keep can_admit + TINY=128)
+linux-gate-p149b  2026-09-02 ~20:49
+table d5af9d7acc9e31d424e4322664a046ff
+db 364e7a14682e3c58daef4dcfe817a349
+load start 16.49, end 17.63/16.63/16.06 — **refuse as published** (load 17.6).
+BENCH_EXIT_readlegs=0.
+
+hydrate/rocks  29.9s (0.84M/s)   pedra 31.1s (0.80M/s)  0.961×
+settle         7.1s vs 1.0s                               7.1×
+get_hit        44.318 vs 43.471 µs                        1.019×
+prefix         368.92 vs 298.28 µs                        1.237× (Rocks prefix slow)
+get_loop       4.2018 vs 4.1923 ms                        1.002× (Rocks 4.20 slow vs v64 3.86)
+multi_get      4.3740 vs 4.2674 ms                        1.025× (Rocks 4.37 slow vs v64 4.04)
+
+Pedra get_hit 43.5 µs is not v64's 35.8 (load + host). Do not 3-run at 17.6.
+
+r2 (20:55, load start 14.90/15.17, end 16.73/16.46/16.12) — calm start, no inject.
+  hydrate/rocks  29.0s (0.86M/s)   pedra 28.1s (0.89M/s)  1.032×  (Pedra floor 28.1)
+  settle         6.2s vs 1.0s                               6.2×
+  get_hit        41.754 vs 41.015 µs                        1.018×
+  prefix         328.78 vs 309.35 µs                        1.063×
+  get_loop       4.0331 vs 4.4534 ms                        0.906× LOSE
+  multi_get      4.4400 vs 4.4137 ms                        1.006× (Rocks multi slow 4.44)
+
+TLS scratch did not close lookup_100. get_loop 0.91× is worse than v64 0.94×.
+get_hit ~1.02× is not v64's 1.15× (35.8 µs). Hydrate 28.1 s matches the
+v63 floor; one 1.03× vs Rocks 29.0 is not a 3-run published win (Rocks
+fast day 27.9 s still beats it).
+

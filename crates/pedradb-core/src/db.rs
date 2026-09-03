@@ -73,7 +73,7 @@ use crate::memtable::{Lookup, MemTable};
 use crate::merge::{range_deleted, range_tombstone_covers, StreamingVisibleIter, VisibleKv};
 use crate::sst::{
     write_l0_sst, write_l0_sst_for_family, write_sst_bulk_arrays, write_sst_entries_on,
-    PointSeekScratch, SstTable,
+    put_tls_point_seek_scratch, take_tls_point_seek_scratch, PointSeekScratch, SstTable,
 };
 use crate::tx::Transaction;
 use crate::vlog::{self, ValueLog, VlogRewriteStats, VLOG_FILE_NAME};
@@ -8845,7 +8845,7 @@ impl<E: Env> Db<E> {
         // and copy out only the winning value (the decoded-block cache
         // thrashed at random-key scale). Block faults fail-stop — a corrupt
         // block must never read as a miss.
-        let mut seek_scratch = PointSeekScratch::default();
+        let mut seek_scratch = take_tls_point_seek_scratch();
         // One probe per table: range-prune, then seek the single candidate
         // block. The bounds span every entry's user key (deletion markers
         // included), so a key outside them has no point version here.
@@ -8901,6 +8901,7 @@ impl<E: Env> Db<E> {
                 }
             }
         }
+        put_tls_point_seek_scratch(seek_scratch);
 
         match best_point {
             Lookup::Found(v) => {
