@@ -77,6 +77,7 @@ fn main() {
             auto_compact_sst_bytes: None,
             exclusive: true,
             large_value_threshold: Some(1024),
+            sst_payload_budget_bytes: None,
         },
     )
     .expect("open");

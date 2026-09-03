@@ -18,8 +18,11 @@ pub use scan_kernel::{
     SST_LEGACY_NO_CRC_MAX,
 };
 pub use table::{
-    reset_sst_blocks_decoded, sst_blocks_decoded, write_l0_sst, write_l0_sst_for_family, write_sst,
+    reset_sst_block_crc_skipped, reset_sst_blocks_decoded, sst_block_crc_skipped,
+    sst_blocks_decoded, write_l0_sst, write_l0_sst_for_family, write_sst, write_sst_bulk_arrays,
     write_sst_entries, write_sst_entries_on, write_sst_on, write_sst_on_with, write_sst_sorted_on,
-    write_sst_try_sorted_on, write_sst_try_sorted_with, SstInternalStream, SstRangeIter, SstTable,
-    SST_VERSION, SST_VERSION_V1, SST_VERSION_V2, SST_VERSION_V3, SST_VERSION_V4,
+    write_sst_try_sorted_on, write_sst_try_sorted_with, PointSeekScratch, SstInternalStream,
+    SstRangeIter, SstTable, SST_VERSION, SST_VERSION_V1, SST_VERSION_V2, SST_VERSION_V3,
+    SST_VERSION_V4, SST_VERSION_V6,
 };
+pub(crate) use table::{put_tls_point_seek_scratch, take_tls_point_seek_scratch};

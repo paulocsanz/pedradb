@@ -49,7 +49,8 @@ pub use shape::{
 use pedradb_core::{
     cf_encode_effective, decode_cf_key, encode_cf_key, key_in_cf_family, BatchOp,
     CompactOptions as CoreCompactOptions, ConcurrentDb, CoreError, Env as PedraEnv,
-    Snapshot as CoreSnapshot, SnapshotPin, StdEnv, L0_COMPACTION_TRIGGER,
+    Snapshot as CoreSnapshot, SnapshotPin, StdEnv, DEFAULT_SST_PAYLOAD_BUDGET_BYTES,
+    L0_COMPACTION_TRIGGER,
 };
 use pedradb_io_uring::IoUringEnv;
 use std::cell::RefCell;
@@ -259,8 +260,10 @@ pub struct Options {
     /// rust-rocksdb / Titan `blob_file_size` (rotate cap). `None` = single
     /// `VALUES.vlog` (no numbered blob generation).
     pub blob_file_size: Option<u64>,
-    /// Rocks `NewLRUCache` / `optimize_for_point_lookup` (RFC-0153). `None`
-    /// = Pedra 8192-entry default.
+    /// Rocks `NewLRUCache` / `optimize_for_point_lookup`. `None` = Pedra
+    /// 8192-entry block-cache default. `Some(n)` (RFC-0042 v18) bounds the
+    /// resident SST payload pool — Pedra's equivalent of Rocks' compressed
+    /// block cache — to `n` bytes; the decoded-block cache stays small.
     pub block_cache_bytes: Option<u64>,
     compaction_filter: Option<CompactionFilterFn>,
     merge_operator: Option<MergeOperatorFn>,
@@ -870,6 +873,29 @@ impl KeyCodec {
     fn decode<'a>(&self, cf: &str, encoded: &'a [u8]) -> &'a [u8] {
         decode_cf_key(cf, encoded, self.default_raw)
     }
+
+    /// [`Self::decode`] on a materialized window key: the suffix slice is
+    /// the same, so a `Bytes` handle decodes by re-slicing (refcount bump,
+    /// no copy, no per-row allocation) — the scan page path hands out
+    /// handles into the cached blocks instead of `to_vec` copies. A key
+    /// shorter than the family prefix decodes to empty, matching
+    /// [`decode_cf_key`]'s `unwrap_or(&[])` instead of panicking.
+    /// Decode on a materialized window key by consuming the handle: the
+    /// family prefix is dropped by `advance` (pointer slide — no refcount
+    /// op) or the handle is returned as-is, so the scan page path pays zero
+    /// refcount RMWs per row.
+    fn decode_bytes_owned(&self, cf: &str, mut encoded: Bytes) -> Bytes {
+        let effective = cf_encode_effective(cf, self.default_raw);
+        if effective.is_empty() {
+            return encoded;
+        }
+        if encoded.len() > effective.len() {
+            use bytes::Buf as _;
+            encoded.advance(effective.len() + 1);
+            return encoded;
+        }
+        Bytes::new()
+    }
 }
 
 fn bound_as_ref(b: &Bound<Vec<u8>>) -> Bound<&[u8]> {
@@ -894,7 +920,7 @@ const LAST_PROBE: usize = 8;
 /// (p11h hashed AND ringed — extra tax, dirty min 0.843). Newest-first
 /// get of idx-1 is 2 compares.
 const LAST_RING: usize = 16;
-const TINY: usize = 64;
+const TINY: usize = 128;
 
 fn fx_mix(hash: u64, word: u64) -> u64 {
     (hash.rotate_left(5) ^ word).wrapping_mul(0x517c_c1b7_2722_0a95)
@@ -1091,6 +1117,43 @@ impl LastGetTable {
             epoch,
             gen,
             cf: TinyBuf::empty(),
+            key: key_t,
+            val,
+        };
+    }
+
+    /// Named-CF get miss: fill the 4096-slot hash. `store` is ring-only
+    /// so raftlog write-through stays 16-deep (p11h). lookup_100's 100
+    /// repeating keys never fit the ring, so every named get re-entered
+    /// the SST (guest v64 25M get_loop 0.94×). Hash-store on the get
+    /// miss keeps the working set; writes stay ring-only.
+    fn hash_store(&mut self, epoch: u64, gen: u64, cf: &str, key: &[u8], val: Option<Bytes>) {
+        let Some(cf_t) = TinyBuf::from_slice(cf.as_bytes()) else {
+            return;
+        };
+        let Some(key_t) = TinyBuf::from_slice(key) else {
+            return;
+        };
+        let h = Self::hash(cf, key);
+        let mut free = None;
+        let cf_b = cf.as_bytes();
+        for p in 0..LAST_PROBE {
+            let i = last_slot(h, p);
+            let s = &mut self.slots[i];
+            if s.epoch == epoch && s.cf.eq(cf_b) && s.key.eq(key) {
+                s.gen = gen;
+                s.val = val;
+                return;
+            }
+            if s.epoch != epoch && free.is_none() {
+                free = Some(i);
+            }
+        }
+        let i = free.unwrap_or_else(|| last_slot(h, LAST_PROBE - 1));
+        self.slots[i] = LastGetSlot {
+            epoch,
+            gen,
+            cf: cf_t,
             key: key_t,
             val,
         };
@@ -1353,9 +1416,54 @@ pub enum IteratorMode<'a> {
 /// pay it twice per 1000 rows instead of 16 times.
 const ITER_WINDOW: usize = 512;
 
+/// `PEDRA_PAGE_DIAG=1`: one aggregate line every 2048 forward refills —
+/// wall ns per `page_forward` call and rows per page. With SCANDIAG (core
+/// setup+rows) and the criterion op time it splits the scan op into
+/// `page_forward` (lock + setup + rows + compat glue) vs the harness
+/// remainder, on the machine that matters (guest cores are ~4× slower per
+/// row and only a guest-side wall counter can attribute that gap).
+fn page_diag_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("PEDRA_PAGE_DIAG").is_some())
+}
+
+fn page_diag_note(t0: std::time::Instant, rows: usize) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static PAGES: AtomicU64 = AtomicU64::new(0);
+    static ROWS: AtomicU64 = AtomicU64::new(0);
+    static NS: AtomicU64 = AtomicU64::new(0);
+    static LAST_PAGES: AtomicU64 = AtomicU64::new(0);
+    static LAST_ROWS: AtomicU64 = AtomicU64::new(0);
+    static LAST_NS: AtomicU64 = AtomicU64::new(0);
+    NS.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+    ROWS.fetch_add(rows as u64, Ordering::Relaxed);
+    let pages = PAGES.fetch_add(1, Ordering::Relaxed) + 1;
+    if pages % 2048 != 0 {
+        return;
+    }
+    let d = pages - LAST_PAGES.swap(pages, Ordering::Relaxed);
+    if d == 0 {
+        return;
+    }
+    let rows_total = ROWS.load(Ordering::Relaxed);
+    let ns_total = NS.load(Ordering::Relaxed);
+    let d_rows = rows_total - LAST_ROWS.swap(rows_total, Ordering::Relaxed);
+    let d_ns = ns_total - LAST_NS.swap(ns_total, Ordering::Relaxed);
+    println!(
+        "PAGEDIAG pages={} rows/page={:.1} page_ns/page={:.0}",
+        pages,
+        d_rows as f64 / d as f64,
+        d_ns as f64 / d as f64,
+    );
+}
+
 /// Windowed CF iterator (RFC-0032 P0.1). Same positioning semantics as v0.
 pub struct DBIterator<E: PedraEnv = StdEnv> {
-    items: Vec<(Vec<u8>, Vec<u8>)>,
+    /// Refill pages as zero-copy `Bytes` handles sliced from the cached
+    /// blocks (`page_forward`/`page_last_n`): consuming a row is a refcount
+    /// bump, not the two `to_vec` allocations per row the owned-Vec page
+    /// paid on the scan path.
+    items: Vec<(Bytes, Bytes)>,
     idx: usize,
     reverse: bool,
     inner: ConcurrentDb<E>,
@@ -1376,16 +1484,15 @@ pub struct DBIterator<E: PedraEnv = StdEnv> {
 }
 
 impl<E: PedraEnv> Iterator for DBIterator<E> {
-    type Item = Result<(Box<[u8]>, Box<[u8]>)>;
+    type Item = Result<(Bytes, Bytes)>;
     fn next(&mut self) -> Option<Self::Item> {
         if !self.valid() {
             return None;
         }
-        // Move the slot out instead of copying through `key()`/`value()`:
-        // refill pages decode into exact-capacity Vecs, so the boxed
-        // conversion is a pointer handoff — two fewer allocs per entry.
-        let (k, v) = std::mem::take(&mut self.items[self.idx]);
-        let item = (k.into_boxed_slice(), v.into_boxed_slice());
+        // Move the handle out instead of copying through `key()`/`value()`:
+        // refill pages are `Bytes` slices, so the handoff is a pointer +
+        // refcount — no allocation and no byte copy per entry.
+        let item = std::mem::take(&mut self.items[self.idx]);
         DBIterator::advance(self);
         Some(Ok(item))
     }
@@ -1425,26 +1532,21 @@ impl<E: PedraEnv> DBIterator<E> {
     /// Current user key (empty when invalid).
     #[must_use]
     pub fn key(&self) -> &[u8] {
-        self.items
-            .get(self.idx)
-            .map(|(k, _)| k.as_slice())
-            .unwrap_or(&[])
+        self.items.get(self.idx).map(|(k, _)| &k[..]).unwrap_or(&[])
     }
 
     /// Current value (empty when invalid).
     #[must_use]
     pub fn value(&self) -> &[u8] {
-        self.items
-            .get(self.idx)
-            .map(|(_, v)| v.as_slice())
-            .unwrap_or(&[])
+        self.items.get(self.idx).map(|(_, v)| &v[..]).unwrap_or(&[])
     }
 
     /// Remaining entries from here to the CF bound (refills pages).
     pub fn collect_rest(&mut self) -> Vec<(Vec<u8>, Vec<u8>)> {
         let mut out = Vec::new();
         while self.valid() {
-            out.push(std::mem::take(&mut self.items[self.idx]));
+            let (k, v) = std::mem::take(&mut self.items[self.idx]);
+            out.push((k.to_vec(), v.to_vec()));
             self.next();
         }
         out
@@ -1525,9 +1627,13 @@ impl<E: PedraEnv> DBIterator<E> {
     }
 
     /// Install a fresh page and record its boundary resume keys.
-    fn set_page(&mut self, page: Vec<(Vec<u8>, Vec<u8>)>) {
-        let fwd = page.last().map(|(k, _)| self.codec.encode_resume(&self.cf, k));
-        let rev = page.first().map(|(k, _)| self.codec.encode_resume(&self.cf, k));
+    fn set_page(&mut self, page: Vec<(Bytes, Bytes)>) {
+        let fwd = page
+            .last()
+            .map(|(k, _)| self.codec.encode_resume(&self.cf, k));
+        let rev = page
+            .first()
+            .map(|(k, _)| self.codec.encode_resume(&self.cf, k));
         if let Some(k) = fwd {
             self.resume_fwd = k;
         }
@@ -1546,7 +1652,25 @@ fn page_forward<E: PedraEnv>(
     start: Bound<Vec<u8>>,
     end: Bound<&[u8]>,
     limit: usize,
-) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+) -> Result<Vec<(Bytes, Bytes)>> {
+    if !page_diag_enabled() {
+        return page_forward_inner(inner, codec, cf, seq, start, end, limit);
+    }
+    let t0 = std::time::Instant::now();
+    let out = page_forward_inner(inner, codec, cf, seq, start, end, limit);
+    page_diag_note(t0, out.as_ref().map_or(0, |p| p.len()));
+    out
+}
+
+fn page_forward_inner<E: PedraEnv>(
+    inner: &ConcurrentDb<E>,
+    codec: &KeyCodec,
+    cf: &str,
+    seq: pedradb_core::SequenceNumber,
+    start: Bound<Vec<u8>>,
+    end: Bound<&[u8]>,
+    limit: usize,
+) -> Result<Vec<(Bytes, Bytes)>> {
     let s = bound_as_ref(&start);
     inner
         .with_read(|db| {
@@ -1555,12 +1679,12 @@ fn page_forward<E: PedraEnv>(
                 if !crate::iter_kernel::iter_window_keep(row.snapshot_live) {
                     continue;
                 }
-                out.push((codec.decode(cf, &row.key).to_vec(), row.value.to_vec()));
+                out.push((codec.decode_bytes_owned(cf, row.key), row.value));
                 if out.len() >= limit {
                     break;
                 }
             }
-            Ok::<Vec<(Vec<u8>, Vec<u8>)>, CoreError>(out)
+            Ok::<Vec<(Bytes, Bytes)>, CoreError>(out)
         })
         .map_err(Error::from)
 }
@@ -1573,13 +1697,12 @@ fn page_last_n<E: PedraEnv>(
     start: Bound<&[u8]>,
     end: Bound<Vec<u8>>,
     n: usize,
-) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+) -> Result<Vec<(Bytes, Bytes)>> {
     let e = bound_as_ref(&end);
     inner
         .with_read(|db| {
             // Iterator borrows the Db — consume the ring window under the guard.
-            let mut ring: VecDeque<(Vec<u8>, Vec<u8>)> =
-                VecDeque::with_capacity(n.saturating_add(1));
+            let mut ring: VecDeque<(Bytes, Bytes)> = VecDeque::with_capacity(n.saturating_add(1));
             for row in db.try_scan_window_at(seq, start, e)? {
                 if !crate::iter_kernel::iter_window_keep(row.snapshot_live) {
                     continue;
@@ -1587,9 +1710,9 @@ fn page_last_n<E: PedraEnv>(
                 if ring.len() == n {
                     ring.pop_front();
                 }
-                ring.push_back((codec.decode(cf, &row.key).to_vec(), row.value.to_vec()));
+                ring.push_back((codec.decode_bytes_owned(cf, row.key), row.value));
             }
-            Ok::<Vec<(Vec<u8>, Vec<u8>)>, CoreError>(ring.into_iter().collect())
+            Ok::<Vec<(Bytes, Bytes)>, CoreError>(ring.into_iter().collect())
         })
         .map_err(Error::from)
 }
@@ -1877,7 +2000,16 @@ impl DB<IoUringEnv> {
         path: impl AsRef<std::path::Path>,
         cfs: &[&str],
     ) -> Result<Self> {
-        let mut db = Self::open_cf_with_env(opts, path, cfs, IoUringEnv::default())?;
+        let mut db = Self::open_cf_inner(
+            opts,
+            path,
+            cfs,
+            IoUringEnv::default(),
+            false,
+            |dir, core_opts, env| {
+                ConcurrentDb::open_with_env_bounded(dir, core_opts, env).map_err(Error::from)
+            },
+        )?;
         let (tx, th) = spawn_compact_worker(
             db.inner.clone(),
             Arc::clone(&db.compact_gate),
@@ -1936,7 +2068,16 @@ impl DB<StdEnv> {
         path: impl AsRef<std::path::Path>,
         cfs: &[&str],
     ) -> Result<Self> {
-        let mut db = Self::open_cf_inner(opts, path, cfs, StdEnv::default(), true)?;
+        let mut db = Self::open_cf_inner(
+            opts,
+            path,
+            cfs,
+            StdEnv::default(),
+            true,
+            |dir, core_opts, env| {
+                ConcurrentDb::open_with_env_bounded(dir, core_opts, env).map_err(Error::from)
+            },
+        )?;
         let (tx, th) = spawn_compact_worker(
             db.inner.clone(),
             Arc::clone(&db.compact_gate),
@@ -1956,8 +2097,16 @@ impl DB<StdEnv> {
     }
 }
 
+/// Cap on the decoded-block cache when the caller sets a cache budget
+/// (RFC-0042 v18): the budget bounds the resident SST payload pool (compressed
+/// data, the Rocks block-cache role); this is only the small decompressed
+/// reuse layer on top. 32 MiB ≈ Pedra's 8192-entry default footprint.
+const COMPAT_DECODED_BLOCK_CACHE_BYTES: u64 = 32 * 1024 * 1024;
+
 impl<E: PedraEnv> DB<E> {
     /// Open with an explicit [`Env`] (adversarial `FailingEnv` campaigns).
+    /// The payload pool stays unarmed on this path — Rc-based fault envs are
+    /// not `Send`/`Sync`; eviction needs a shareable file source.
     ///
     /// # Errors
     /// Pedra open errors; duplicate CF names.
@@ -1967,16 +2116,22 @@ impl<E: PedraEnv> DB<E> {
         cfs: &[&str],
         env: E,
     ) -> Result<Self> {
-        Self::open_cf_inner(opts, path, cfs, env, false)
+        Self::open_cf_inner(opts, path, cfs, env, false, |dir, core_opts, env| {
+            ConcurrentDb::open_with_env(dir, core_opts, env).map_err(Error::from)
+        })
     }
 
-    fn open_cf_inner(
+    fn open_cf_inner<O>(
         opts: &Options,
         path: impl AsRef<std::path::Path>,
         cfs: &[&str],
         env: E,
         verified: bool,
-    ) -> Result<Self> {
+        open: O,
+    ) -> Result<Self>
+    where
+        O: FnOnce(std::path::PathBuf, pedradb_core::OpenOptions, E) -> Result<ConcurrentDb<E>>,
+    {
         opts.refuse_g2()?;
         let dir = path.as_ref();
         if !dir.exists() {
@@ -2085,10 +2240,21 @@ impl<E: PedraEnv> DB<E> {
         } else {
             Some(opts.write_buffer_size)
         };
+        // RFC-0042 v18 mapped the Rocks block-cache knob onto whole-file
+        // SST residency. Rocks caches 4 KiB blocks; slipstream's default
+        // 1 GiB knob then pinned 1 GiB of 64 MiB files on the 3.9 GiB
+        // guest and v57 lookup_100 regressed. Cap whole-file residency at
+        // the 256 MiB default; a smaller knob still shrinks it. The decoded
+        // block cache stays separately capped below.
+        core_opts.sst_payload_budget_bytes = Some(
+            opts.block_cache_bytes
+                .unwrap_or(DEFAULT_SST_PAYLOAD_BUDGET_BYTES)
+                .min(DEFAULT_SST_PAYLOAD_BUDGET_BYTES),
+        );
         if opts.enable_blob_files {
             core_opts.large_value_threshold = Some(opts.min_blob_size as usize);
         }
-        let db = ConcurrentDb::open_with_env(dir, core_opts, env)?;
+        let db = open(dir.to_path_buf(), core_opts, env)?;
         if opts.target_file_size_base > 0 {
             db.with_write(|d| d.set_compact_target_file_bytes(opts.target_file_size_base));
         }
@@ -2106,7 +2272,10 @@ impl<E: PedraEnv> DB<E> {
             db.set_auto_reclaim(true);
         }
         if let Some(n) = opts.block_cache_bytes {
-            db.set_block_cache_budget_bytes(n);
+            // RFC-0042 v18: the budget itself went to the payload pool at
+            // open; the decoded-block cache stays at a small fixed footprint
+            // (Rocks decompresses per read and caches nothing by default).
+            db.set_block_cache_budget_bytes(n.min(COMPAT_DECODED_BLOCK_CACHE_BYTES));
         }
         // Rocks parity: rust-rocksdb drops superseded versions below the
         // oldest live snapshot (`Snapshot` pins / OCC begins). This bounds
@@ -2150,7 +2319,9 @@ impl<E: PedraEnv> DB<E> {
             .read()
             .iter()
             .find(|c| c.as_ref() == name)
-            .map(|n| ColumnFamily { name: Arc::clone(n) })
+            .map(|n| ColumnFamily {
+                name: Arc::clone(n),
+            })
     }
 
     pub(crate) fn cf_names(&self) -> Vec<Arc<str>> {
@@ -2378,6 +2549,9 @@ impl<E: PedraEnv> DB<E> {
     /// # Errors
     /// WAL I/O; nothing partially applied on error.
     pub fn write(&self, batch: &WriteBatch) -> Result<()> {
+        if self.try_write_latched(batch)? {
+            return Ok(());
+        }
         thread_local! {
             static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
                 std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
@@ -2411,6 +2585,76 @@ impl<E: PedraEnv> DB<E> {
                 .map_err(Error::from)
         });
         r
+    }
+
+    /// Slipstream hydrate is `WriteBatch` + `write_opt`, not `write_cf_owned`.
+    /// After the data family latches, skip `BatchOp` / WriteGroup for the
+    /// prefix run; the meta cursor still ladders.
+    fn try_write_latched(&self, batch: &WriteBatch) -> Result<bool> {
+        let Some((Some(first_cf), BatchOp::Put { .. })) = batch.ops.first() else {
+            return Ok(false);
+        };
+        if !self.inner.family_is_latched_async(first_cf) {
+            return Ok(false);
+        }
+        let family = first_cf.as_str();
+        let mut n = 0usize;
+        for (cf, op) in &batch.ops {
+            match (cf.as_deref(), op) {
+                (Some(cf), BatchOp::Put { .. }) if cf == family => n += 1,
+                _ => break,
+            }
+        }
+        if n == 0 {
+            return Ok(false);
+        }
+        thread_local! {
+            static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
+                std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
+        }
+        KEY_POOL.with(|pool| {
+            let mut pool = pool.borrow_mut();
+            self.check_cf(family)?;
+            let mut pfx = Vec::with_capacity(16);
+            self.codec.fill_run_prefix(family, &mut pfx);
+            let mut keys = Vec::with_capacity(n);
+            let mut vals = Vec::with_capacity(n);
+            for (_, op) in batch.ops.iter().take(n) {
+                if let BatchOp::Put { key, value } = op {
+                    keys.push(self.codec.encode_run(&pfx, key.as_ref(), &mut pool));
+                    vals.push(value.clone());
+                }
+            }
+            let mut tail = Vec::with_capacity(batch.ops.len().saturating_sub(n));
+            let mut last_ok: Option<&str> = None;
+            let mut pfx2 = Vec::with_capacity(16);
+            for (cf, op) in batch.ops.iter().skip(n) {
+                let name = cf.as_deref().unwrap_or(DEFAULT_CF);
+                if last_ok != Some(name) {
+                    self.check_cf(name)?;
+                    self.codec.fill_run_prefix(name, &mut pfx2);
+                    last_ok = Some(name);
+                }
+                tail.push(match op {
+                    BatchOp::Put { key, value } => BatchOp::Put {
+                        key: self.codec.encode_run(&pfx2, key.as_ref(), &mut pool),
+                        value: value.clone(),
+                    },
+                    BatchOp::Delete { key } => BatchOp::Delete {
+                        key: self.codec.encode_run(&pfx2, key.as_ref(), &mut pool),
+                    },
+                    BatchOp::DeleteRange { start, end } => BatchOp::DeleteRange {
+                        start: self.codec.encode_run(&pfx2, start.as_ref(), &mut pool),
+                        end: self.codec.encode_run(&pfx2, end.as_ref(), &mut pool),
+                    },
+                });
+            }
+            self.inner
+                .apply_latched_bulk(family, keys, vals, tail)
+                .map(|_| ())
+                .map_err(Error::from)
+        })?;
+        Ok(true)
     }
 
     /// Consume a [`WriteBatch`] so values move into the WAL encode (RFC-0041:
@@ -2512,6 +2756,20 @@ impl<E: PedraEnv> DB<E> {
         }
     }
 
+    fn already_single_cf_puts(puts: &[(&str, Vec<u8>, Vec<u8>)]) -> bool {
+        match puts.split_first() {
+            None | Some((_, [])) => true,
+            Some((first, rest)) => rest.iter().all(|p| p.0 == first.0),
+        }
+    }
+
+    fn already_single_cf_deletes(deletes: &[(&str, Vec<u8>)]) -> bool {
+        match deletes.split_first() {
+            None | Some((_, [])) => true,
+            Some((first, rest)) => rest.iter().all(|p| p.0 == first.0),
+        }
+    }
+
     fn group_cf_puts(puts: Vec<(&str, Vec<u8>, Vec<u8>)>) -> Vec<(&str, Vec<u8>, Vec<u8>)> {
         let mut b: [Vec<(&str, Vec<u8>, Vec<u8>)>; 5] =
             [Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new()];
@@ -2555,21 +2813,30 @@ impl<E: PedraEnv> DB<E> {
         // — seq order across CFs is not user-visible after one publish.
         // One-pass CF buckets — `sort_by` swapped 100 B payloads O(n log n)
         // on apply (RFC-0149 P2.1). Encode order is still grouped by family.
-        if puts.len() > 1 {
+        if puts.len() > 1 && !Self::already_single_cf_puts(&puts) {
             puts = Self::group_cf_puts(puts);
         }
-        if deletes.len() > 1 {
+        if deletes.len() > 1 && !Self::already_single_cf_deletes(&deletes) {
             deletes = Self::group_cf_deletes(deletes);
-        }
-        thread_local! {
-            static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
-                std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
         }
         // Raftlog reads idx-1 of a 16-append (LAST_RING). Fat apply/lock
         // batches never read-your-writes in the same op — skip the warm Vec.
         let need_warm = puts.len() + deletes.len() <= LAST_RING
             && deletes.is_empty()
             && puts.iter().all(|(cf, _, _)| *cf == "raftlog");
+        // RFC-0159 P1.5: latched first-CF run skips BatchOp / WriteGroup.
+        // Hydrate is 1024 data + 1 meta; only `data` latches.
+        if deletes.is_empty() && !puts.is_empty() {
+            let family = puts[0].0;
+            if self.inner.family_is_latched_async(family) {
+                let n = puts.iter().take_while(|p| p.0 == family).count();
+                return self.write_latched_cf_owned(family, n, puts, need_warm);
+            }
+        }
+        thread_local! {
+            static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
+                std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
+        }
         let mut warm: Vec<(&str, Vec<u8>, Option<Bytes>)> = if need_warm {
             Vec::with_capacity(puts.len())
         } else {
@@ -2623,6 +2890,81 @@ impl<E: PedraEnv> DB<E> {
         if r.is_ok() && !warm.is_empty() {
             // Raftlog reads idx-1 of a 16-append (LAST_RING). Fat apply/lock
             // batches never read-your-writes in the same op.
+            let skip = warm.len().saturating_sub(LAST_RING);
+            LAST_CF.with(|t| {
+                let mut t = t.borrow_mut();
+                for (cf, k, v) in warm.into_iter().skip(skip) {
+                    let (epoch, gen) = self.tls_point_ids(cf, &k);
+                    t.store(epoch, gen, cf, &k, v);
+                }
+            });
+        }
+        r
+    }
+
+    /// Latched first-CF run: intern the value once, skip `BatchOp` for the
+    /// span, ladder the remainder (hydrate meta cursor).
+    fn write_latched_cf_owned(
+        &self,
+        family: &str,
+        n: usize,
+        puts: Vec<(&str, Vec<u8>, Vec<u8>)>,
+        need_warm: bool,
+    ) -> Result<()> {
+        thread_local! {
+            static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
+                std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
+        }
+        let mut warm: Vec<(&str, Vec<u8>, Option<Bytes>)> = if need_warm {
+            Vec::with_capacity(n)
+        } else {
+            Vec::new()
+        };
+        let r = KEY_POOL.with(|pool| {
+            let mut pool = pool.borrow_mut();
+            self.check_cf(family)?;
+            let mut pfx = Vec::with_capacity(16);
+            self.codec.fill_run_prefix(family, &mut pfx);
+            let mut keys = Vec::with_capacity(n);
+            let mut vals = Vec::with_capacity(n);
+            let mut prev_val: Option<Bytes> = None;
+            let mut rest: Vec<(&str, Vec<u8>, Vec<u8>)> = Vec::new();
+            for (i, (cf, k, v)) in puts.into_iter().enumerate() {
+                if i < n {
+                    let val = match prev_val.as_ref() {
+                        Some(p) if p.as_ref() == v.as_slice() => p.clone(),
+                        _ => Bytes::from(v),
+                    };
+                    prev_val = Some(val.clone());
+                    keys.push(self.codec.encode_run(&pfx, k.as_ref(), &mut pool));
+                    if need_warm {
+                        warm.push((cf, k, Some(val.clone())));
+                    }
+                    vals.push(val);
+                } else {
+                    rest.push((cf, k, v));
+                }
+            }
+            let mut tail = Vec::with_capacity(rest.len());
+            let mut last_ok: Option<&str> = None;
+            let mut pfx2 = Vec::with_capacity(16);
+            for (cf, k, v) in rest {
+                if last_ok != Some(cf) {
+                    self.check_cf(cf)?;
+                    self.codec.fill_run_prefix(cf, &mut pfx2);
+                    last_ok = Some(cf);
+                }
+                tail.push(BatchOp::Put {
+                    key: self.codec.encode_run(&pfx2, k.as_ref(), &mut pool),
+                    value: Bytes::from(v),
+                });
+            }
+            self.inner
+                .apply_latched_bulk(family, keys, vals, tail)
+                .map(|_| ())
+                .map_err(Error::from)
+        });
+        if r.is_ok() && !warm.is_empty() {
             let skip = warm.len().saturating_sub(LAST_RING);
             LAST_CF.with(|t| {
                 let mut t = t.borrow_mut();
@@ -3529,8 +3871,19 @@ impl<E: PedraEnv> DB<E> {
 
     /// rust-rocksdb `raw_iterator_cf`.
     #[must_use]
-    pub fn raw_iterator_cf(&self, _cf: &ColumnFamily) -> DBRawIteratorWithThreadMode<'_, Self, E> {
-        self.raw_iterator()
+    pub fn raw_iterator_cf(&self, cf: &ColumnFamily) -> DBRawIteratorWithThreadMode<'_, Self, E> {
+        self.raw_iterator_cf_opt(cf, ReadOptions::default())
+    }
+
+    /// rust-rocksdb `raw_iterator_cf_opt`.
+    #[must_use]
+    pub fn raw_iterator_cf_opt(
+        &self,
+        cf: &ColumnFamily,
+        ro: ReadOptions,
+    ) -> DBRawIteratorWithThreadMode<'_, Self, E> {
+        let seq = ro.snap.unwrap_or_else(|| self.inner.visible_sequence());
+        DBRawIteratorWithThreadMode::open_cf(self, &cf.name, seq, &ro)
     }
 
     /// rust-rocksdb `iterator_opt`. Honours snapshot (F180), iterate bounds,
@@ -3543,7 +3896,15 @@ impl<E: PedraEnv> DB<E> {
             lower: ro.lower.as_deref(),
             upper: ro.upper.as_deref(),
         };
-        scan_cf_at(&self.inner, &self.codec, DEFAULT_CF, mode, seq, &names, bounds)
+        scan_cf_at(
+            &self.inner,
+            &self.codec,
+            DEFAULT_CF,
+            mode,
+            seq,
+            &names,
+            bounds,
+        )
     }
 
     /// rust-rocksdb `iterator_cf_opt`. Iterate bounds are honoured: both are
@@ -3562,7 +3923,15 @@ impl<E: PedraEnv> DB<E> {
             lower: ro.lower.as_deref(),
             upper: ro.upper.as_deref(),
         };
-        scan_cf_at(&self.inner, &self.codec, &cf.name, mode, seq, &names, bounds)
+        scan_cf_at(
+            &self.inner,
+            &self.codec,
+            &cf.name,
+            mode,
+            seq,
+            &names,
+            bounds,
+        )
     }
 
     /// rust-rocksdb `prefix_iterator`.
@@ -3649,6 +4018,7 @@ where
             loop {
                 match rx.recv_timeout(wait) {
                     Ok(CompactCmd::Shutdown) | Err(RecvTimeoutError::Disconnected) => {
+                        while inner.materialize_bulk_once() {}
                         while inner.park_imm_once() {}
                         while inner.fold_parked_once_off_lock() {}
                         while inner.materialize_parked_once() {}
@@ -3656,6 +4026,7 @@ where
                         break;
                     }
                     Ok(CompactCmd::Run) | Err(RecvTimeoutError::Timeout) => {
+                        while inner.materialize_bulk_once() {}
                         compact_diag(&inner);
                         let fenced = inner.is_durability_fenced();
                         if fenced && !fence_notified {
@@ -3831,6 +4202,16 @@ fn flush_worker_diag<E: PedraEnv>(inner: &ConcurrentDb<E>) {
                 .and_then(|f| f.parse::<u64>().ok())
         })
         .map_or(0, |pages| pages.saturating_mul(4096) / 1024);
+    // v19 forensics: payload-pool occupancy (must sit at/below the budget)
+    // and per-table decoded-entries caches (unbounded per table — the
+    // other table-sized layer a growing RSS floor can come from).
+    let (pool_n, pool_b, ent_e) = inner.with_read(|db| {
+        (
+            db.sst_payload_pool().tracked_tables(),
+            db.sst_payload_pool().resident_bytes(),
+            db.sst_cached_entries(),
+        )
+    });
     let (tick_s, mat_n) = FLUSH_DIAG_STATE
         .lock()
         .ok()
@@ -3840,7 +4221,7 @@ fn flush_worker_diag<E: PedraEnv>(inner: &ConcurrentDb<E>) {
         })
         .map_or((0, 0), |v| v);
     eprintln!(
-        "FLUSHDIAG parked_n={} parked_b={} active_b={} imm={} retired_b={} sst_n={} rss_kb={} tick_s={} mat_n={}",
+        "FLUSHDIAG parked_n={} parked_b={} active_b={} imm={} retired_b={} sst_n={} rss_kb={} tick_s={} mat_n={} pool_n={} pool_b={} ent_e={}",
         inner.parked_unflushed_count(),
         inner.parked_unflushed_bytes(),
         inner.active_mem_usage(),
@@ -3850,6 +4231,9 @@ fn flush_worker_diag<E: PedraEnv>(inner: &ConcurrentDb<E>) {
         rss_kb,
         tick_s,
         mat_n,
+        pool_n,
+        pool_b,
+        ent_e,
     );
 }
 
@@ -3873,10 +4257,13 @@ fn compact_diag<E: PedraEnv>(inner: &ConcurrentDb<E>) {
         return;
     }
     eprintln!(
-        "COMPACTDIAG l0={} l1={} parked_n={}",
+        "COMPACTDIAG l0={} l1={} parked_n={} pool_n={} pool_b={} ent_e={}",
         inner.with_read(|db| db.level_file_count(0)),
         inner.with_read(|db| db.level_file_count(1)),
         inner.parked_unflushed_count(),
+        inner.with_read(|db| db.sst_payload_pool().tracked_tables()),
+        inner.with_read(|db| db.sst_payload_pool().resident_bytes()),
+        inner.with_read(|db| db.sst_cached_entries()),
     );
 }
 
@@ -3884,6 +4271,7 @@ fn compact_diag<E: PedraEnv>(inner: &ConcurrentDb<E>) {
 /// parked-memory bound. Split out so the policy is unit-testable
 /// without thread or fsync timing.
 fn flush_worker_tick<E: PedraEnv>(inner: &ConcurrentDb<E>) {
+    while inner.materialize_bulk_once() {}
     while inner.park_imm_once() {}
     flush_worker_diag(inner);
     let bound = inner
@@ -4363,6 +4751,30 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    /// `decode_bytes` must agree with `decode` on every key shape the scan
+    /// page can see: raw-default and prefixed CFs, empty keys, keys equal to
+    /// or shorter than the `cf\0` prefix (old behavior decoded those to
+    /// empty — the Bytes path must not panic or diverge).
+    #[test]
+    fn key_codec_decode_bytes_matches_decode() {
+        for (cf, raw) in [
+            ("default", true),
+            ("default", false),
+            ("data", true),
+            ("data", false),
+        ] {
+            let codec = KeyCodec { default_raw: raw };
+            for key in [&b""[..], b"d", b"data", b"data\0", b"data\0k", b"\0k", b"k"] {
+                let owned = Bytes::copy_from_slice(key);
+                assert_eq!(
+                    codec.decode_bytes_owned(cf, owned).as_ref(),
+                    codec.decode(cf, key),
+                    "cf={cf} raw={raw} key={key:?}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -5209,6 +5621,47 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Issue #1: `raw_iterator_cf` must walk the named CF, not default.
+    #[test]
+    fn raw_iterator_cf_walks_named_column_family() {
+        let dir = tmp("raw-iter-cf");
+        let db = DB::open_cf(&Options::new(), &dir, &["lock"]).unwrap();
+        let lock = db.cf_handle("lock").unwrap();
+        db.put(b"default-key", b"d").unwrap();
+        db.put_cf(&lock, b"lock-key", b"l").unwrap();
+
+        let via_cf: Vec<_> = db
+            .iterator_cf(&lock, IteratorMode::Start)
+            .unwrap()
+            .map(|r| r.unwrap().0.to_vec())
+            .collect();
+        assert_eq!(via_cf, vec![b"lock-key".to_vec()]);
+
+        let mut raw = db.raw_iterator_cf(&lock);
+        raw.seek_to_first();
+        assert_eq!(raw.key(), Some(b"lock-key".as_ref()));
+        assert_eq!(raw.value(), Some(b"l".as_ref()));
+        raw.next();
+        assert!(!raw.valid(), "lock CF has one key");
+
+        let mut def = db.raw_iterator();
+        def.seek_to_first();
+        assert_eq!(def.key(), Some(b"default-key".as_ref()));
+        def.next();
+        assert!(!def.valid());
+
+        // reopen/seek must stay on the CF (not fall back to default).
+        let mut raw = db.raw_iterator_cf(&lock);
+        raw.seek(b"lock-key");
+        assert_eq!(raw.key(), Some(b"lock-key".as_ref()));
+        raw.seek(b"default-key");
+        assert!(
+            !raw.valid() || raw.key() != Some(b"default-key".as_ref()),
+            "seek on lock CF must not surface default-CF keys"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn write_batch_atomic_and_cfs() {
         let dir = tmp("batch");
@@ -5794,6 +6247,91 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// RFC-0159 P1.5: hydrate-shaped `write_cf_owned` latches and reads back.
+    #[test]
+    fn write_cf_owned_latched_hydrate_roundtrip() {
+        let dir = tmp("cfowned-bulk");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        opts.set_sync(false);
+        let db = DB::open_cf(&opts, &dir, &["data", "meta"]).unwrap();
+        let val = vec![b'v'; 64];
+        let mut i = 0u32;
+        for _ in 0..12u32 {
+            let end = i + 32;
+            let mut puts = Vec::with_capacity(33);
+            for j in i..end {
+                puts.push((
+                    "data",
+                    format!("route.svc-{j:06}").into_bytes(),
+                    val.clone(),
+                ));
+            }
+            puts.push(("meta", b"cursor".to_vec(), i.to_le_bytes().to_vec()));
+            db.write_cf_owned(puts, Vec::new()).unwrap();
+            i = end;
+        }
+        assert!(
+            db.inner.family_is_latched_async("data"),
+            "12 hydrate batches must latch data"
+        );
+        let last = format!("route.svc-{:06}", i - 1).into_bytes();
+        assert_eq!(
+            db.get_named("data", &last).unwrap().as_deref(),
+            Some(val.as_slice())
+        );
+        assert_eq!(
+            db.get_named("meta", b"cursor").unwrap().as_deref(),
+            Some((i - 32).to_le_bytes().as_ref())
+        );
+        db.flush().unwrap();
+        drop(db);
+        let db = DB::open_cf(&opts, &dir, &["data", "meta"]).unwrap();
+        assert_eq!(
+            db.get_named("data", &last).unwrap().as_deref(),
+            Some(val.as_slice())
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Slipstream path: `WriteBatch` + `write_opt` after latch, then get.
+    #[test]
+    fn write_opt_latched_hydrate_roundtrip() {
+        let dir = tmp("writeopt-bulk");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        opts.set_sync(false);
+        let db = DB::open_cf(&opts, &dir, &["data", "meta"]).unwrap();
+        let data = db.cf_handle("data").unwrap();
+        let meta = db.cf_handle("meta").unwrap();
+        let val = vec![b'v'; 64];
+        let mut wo = WriteOptions::default();
+        wo.set_sync(false);
+        let mut i = 0u32;
+        for _ in 0..12u32 {
+            let end = i + 32;
+            let mut wb = WriteBatch::default();
+            for j in i..end {
+                wb.put_cf(&data, format!("route.svc-{j:06}").as_bytes(), &val);
+            }
+            wb.put_cf(&meta, b"cursor", i.to_le_bytes());
+            db.write_opt(&wb, &wo).unwrap();
+            i = end;
+        }
+        assert!(db.inner.family_is_latched_async("data"));
+        let last = format!("route.svc-{:06}", i - 1);
+        assert_eq!(
+            db.get_named("data", last.as_bytes()).unwrap().as_deref(),
+            Some(val.as_slice())
+        );
+        db.flush().unwrap();
+        assert_eq!(
+            db.get_named("data", last.as_bytes()).unwrap().as_deref(),
+            Some(val.as_slice())
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// RFC-0062 P1.1: 16 identical raftlog payloads stay readable (WAL v2 intern).
     #[test]
     fn write_cf_owned_sixteen_same_payload_roundtrip() {
@@ -5904,6 +6442,50 @@ mod tests {
         }
         let hits = keys.iter().filter(|k| t.get_key(7, 1, k).is_some()).count();
         assert!(hits >= 972, "uniform hot set hit rate {hits}/1024 < 95%");
+    }
+
+    #[test]
+    fn last_cf_hash_keeps_lookup_100() {
+        // Slipstream lookup_100: 100 named-CF keys, same set every iter.
+        // Ring-only store (16) cannot hold them; hash_store must.
+        let mut t = LastGetTable::new();
+        let keys: Vec<Vec<u8>> = (0..100)
+            .map(|i| format!("route.svc-{:06}.{:08}", i / 4, i % 4).into_bytes())
+            .collect();
+        for k in &keys {
+            t.store(3, 1, "data", k, Some(Bytes::from_static(b"v")));
+        }
+        let ring_hits = keys
+            .iter()
+            .filter(|k| t.get(3, 1, "data", k).is_some())
+            .count();
+        assert!(
+            ring_hits < 100,
+            "ring-only must not hold the whole lookup_100 set (got {ring_hits})"
+        );
+        for k in &keys {
+            t.hash_store(3, 1, "data", k, Some(Bytes::from_static(b"v")));
+        }
+        let hits = keys
+            .iter()
+            .filter(|k| t.get(3, 1, "data", k).is_some())
+            .count();
+        assert_eq!(hits, 100, "hash_store must keep all 100 lookup keys");
+    }
+
+    #[test]
+    fn last_cf_ring_holds_long_slipstream_keys() {
+        // TINY was 64; ~60–80 B slipstream keys silently failed
+        // TinyBuf::from_slice and LAST_CF never warmed (Mac get_hit sample
+        // was 100 % inner.get).
+        let mut t = LastGetTable::new();
+        let k: Vec<u8> = (0..80).map(|i| b'a' + (i % 26)).collect();
+        t.store(1, 1, "data", &k, Some(Bytes::from_static(b"v")));
+        assert_eq!(
+            t.get(1, 1, "data", &k),
+            Some(Some(Bytes::from_static(b"v"))),
+            "80-byte named-CF keys must fit LAST_CF"
+        );
     }
 
     #[test]
@@ -6367,7 +6949,18 @@ mod tests {
             db.flush().unwrap();
         }
         let db = DB::open(&opts, &dir).unwrap();
-        let _ = db.get(b"k").unwrap();
+        // Since v21h (encoded-block point seek) a point get reads raw block
+        // images through the payload pool and never materializes decoded
+        // entries; scans are what load blocks into the decoded-block cache
+        // this property reports.
+        let mut n = 0usize;
+        for item in db
+            .iterator_opt(IteratorMode::Start, ReadOptions::default())
+            .unwrap()
+        {
+            n += item.unwrap().1.len();
+        }
+        assert!(n > 0, "scan must see the flushed row");
         let usage = db
             .property_int_value(properties::BLOCK_CACHE_USAGE)
             .unwrap()

@@ -22,6 +22,9 @@ use std::io;
 /// Kernel readahead / cache-drop hint ([`advise_file`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileAdvise {
+    /// Linux `POSIX_FADV_RANDOM` — disable readahead (Rocks
+    /// `set_advise_random_on_open`, default true for SST).
+    Random,
     /// Linux `POSIX_FADV_WILLNEED`.
     WillNeed,
     /// Linux `POSIX_FADV_DONTNEED`.
@@ -66,9 +69,55 @@ fn posix_rc_to_io(rc: i32) -> io::Result<()> {
 
 /// `fdatasync(2)` on `file`'s data (not Apple `F_FULLFSYNC`).
 ///
+/// `PEDRA_FDSYNC_DIAG=1` prints an aggregate line every 2048 barriers —
+/// the **in-load** fd cost (idle probes understate it), the number that
+/// bounds any write leg whose batches ack behind one barrier each.
+///
 /// # Errors
 /// Underlying I/O.
 pub fn fdatasync_file(file: &File) -> io::Result<()> {
+    if !fdsync_diag_enabled() {
+        return fdatasync_file_inner(file);
+    }
+    let t0 = std::time::Instant::now();
+    let out = fdatasync_file_inner(file);
+    let us = t0.elapsed().as_micros() as u64;
+    static NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    static MAX_US: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    use std::sync::atomic::Ordering::Relaxed;
+    NS.fetch_add(us * 1000, Relaxed);
+    MAX_US.fetch_max(us, Relaxed);
+    let n = N.fetch_add(1, Relaxed) + 1;
+    // PEDRA_FDSYNC_CALLERS: print the call stack of every Nth barrier so a
+    // sync storm can be attributed to its emitter (aggregate lines cannot).
+    if let Ok(step) = std::env::var("PEDRA_FDSYNC_CALLERS") {
+        if let Ok(step) = step.parse::<u64>() {
+            if step > 0 && n % step == 0 {
+                println!(
+                    "FDSYNCCALLER n={n}\n{}",
+                    std::backtrace::Backtrace::force_capture()
+                );
+            }
+        }
+    }
+    if n % 2048 == 0 {
+        println!(
+            "FDSYNCDIAG n={n} cum_ms={} avg_us={:.0} max_ms={:.1}",
+            NS.load(Relaxed) / 1_000_000,
+            (NS.load(Relaxed) / 1000) / n,
+            MAX_US.load(Relaxed) as f64 / 1000.0,
+        );
+    }
+    out
+}
+
+fn fdsync_diag_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("PEDRA_FDSYNC_DIAG").is_some())
+}
+
+fn fdatasync_file_inner(file: &File) -> io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::fd::AsRawFd;
@@ -238,12 +287,14 @@ pub fn advise_file(file: &File, offset: u64, len: u64, kind: FileAdvise) -> io::
     #[cfg(target_os = "linux")]
     {
         use std::os::fd::AsRawFd;
-        // Linux `linux/fadvise.h`: WILLNEED=3, DONTNEED=4. Not Darwin
-        // (no posix_fadvise). Avoid the `libc` crate so this island has
-        // zero dependencies.
+        // Linux `linux/fadvise.h`: RANDOM=1, WILLNEED=3, DONTNEED=4.
+        // Not Darwin (no posix_fadvise). Avoid the `libc` crate so this
+        // island has zero dependencies.
+        const POSIX_FADV_RANDOM: i32 = 1;
         const POSIX_FADV_WILLNEED: i32 = 3;
         const POSIX_FADV_DONTNEED: i32 = 4;
         let advice = match kind {
+            FileAdvise::Random => POSIX_FADV_RANDOM,
             FileAdvise::WillNeed => POSIX_FADV_WILLNEED,
             FileAdvise::DontNeed => POSIX_FADV_DONTNEED,
         };
@@ -268,6 +319,26 @@ pub fn advise_file(file: &File, offset: u64, len: u64, kind: FileAdvise) -> io::
     {
         let _ = (file, offset, len, kind);
         Ok(())
+    }
+}
+
+/// glibc `malloc_trim(0)`: release free arena pages back to the OS.
+/// Used after whole-levels rewrite chunks — glibc pins freed small
+/// chunks next to retained ones (per-block index keys), so RSS creeps
+/// even though nothing is retained (the 6M macOS repro is flat; the
+/// 25M glibc guest climb was monotonic). Advisory only: the rc (1 =
+/// released something, 0 = nothing to release) is deliberately not a
+/// barrier-style gate. No-op off Linux glibc.
+pub fn trim_process_heap() {
+    #[cfg(all(target_os = "linux", not(miri)))]
+    {
+        // SAFETY: signature is glibc `int malloc_trim(size_t pad)`. `0`
+        // means release as much as possible; there is no errno contract.
+        extern "C" {
+            fn malloc_trim(pad: usize) -> i32;
+        }
+        // SAFETY: no pointers, no stored state; rc is advisory.
+        let _rc = unsafe { malloc_trim(0) };
     }
 }
 
@@ -337,10 +408,7 @@ mod tests {
     #[test]
     fn fdatasync_rc_ok_on_live_posix_is_not_ok() {
         assert!(!fdatasync_rc_ok(-1));
-        assert!(
-            fdatasync_rc_ok_as_is(-1),
-            "AS-IS dente: ignore rc"
-        );
+        assert!(fdatasync_rc_ok_as_is(-1), "AS-IS dente: ignore rc");
         let dir = temp_dir();
         let path = dir.join("wal.bin");
         let mut f = File::create(&path).unwrap();
@@ -448,6 +516,7 @@ mod tests {
             f.sync_all().unwrap();
         }
         let f = File::open(&path).unwrap();
+        advise_file(&f, 0, 0, FileAdvise::Random).unwrap();
         advise_file(&f, 0, 4096, FileAdvise::WillNeed).unwrap();
         advise_file(&f, 0, 4096, FileAdvise::DontNeed).unwrap();
         // Overflow into `off_t` clamps (hint, not a barrier). Must not panic
@@ -567,19 +636,14 @@ mod tests {
                 continue;
             }
             sites += 1;
-            let window: Vec<&str> =
-                lines[i..(i + 8).min(lines.len())].to_vec();
+            let window: Vec<&str> = lines[i..(i + 8).min(lines.len())].to_vec();
             let gated = window.iter().any(|w| {
                 w.contains("posix_rc_to_io(rc)")
                     || w.contains("rc == 0")
                     || w.contains("rc != 0")
                     || w.contains("raw_os_error")
             });
-            assert!(
-                gated,
-                "ungated unsafe FFI rc at line {}: {line}",
-                i + 1
-            );
+            assert!(gated, "ungated unsafe FFI rc at line {}: {line}", i + 1);
         }
         assert!(
             sites >= 5,

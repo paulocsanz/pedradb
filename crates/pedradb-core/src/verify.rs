@@ -684,6 +684,7 @@ mod tests {
             auto_compact_sst_bytes: None,
             exclusive: true,
             large_value_threshold: Some(32),
+            sst_payload_budget_bytes: None,
         }
     }
 

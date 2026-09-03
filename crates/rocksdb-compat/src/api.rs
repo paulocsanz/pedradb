@@ -296,11 +296,7 @@ impl WriteBatchWithIndex {
     fn put_cf_name(&mut self, cf: &str, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) {
         let k = key.as_ref().to_vec();
         let v = value.as_ref().to_vec();
-        self.batch.put_cf(
-            &ColumnFamily { name: cf.into() },
-            &k,
-            &v,
-        );
+        self.batch.put_cf(&ColumnFamily { name: cf.into() }, &k, &v);
         self.index.insert((cf.to_string(), k), Some(v));
     }
 
