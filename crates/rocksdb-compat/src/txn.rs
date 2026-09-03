@@ -9,13 +9,9 @@
 //!
 //! OCC read-set policy (RFC-0048 P1.4): `get`/`get_cf` record the key in
 //! the read set and `commit()` validates it — read-only commits included
-//! (F168). Real Rocks `Transaction::NewIterator` also tracks every key its
-//! iterator yields; our `scan_count`/`raw_iterator_opt` read at the txn
-//! snapshot but are **untracked**: a commit after a concurrent overwrite of
-//! a key that was only seen through a scan still reports `Ok`. Reads that
-//! need conflict detection must `get` the key (guard-key pattern); scan
-//! reads are advisory. Bounded scan tracking is the P2 follow-up if a
-//! caller needs scan-wide OCC.
+//! (F168). rust-rocksdb `Transaction::NewIterator` tracks every key the
+//! iterator yields; `raw_iterator_opt` does the same (issue #3). `scan_count`
+//! still counts without recording individual keys.
 //!
 //! Compile-shape (RFC-0043 P2.4): `open_cf_descriptors`, `ReadOptions`,
 //! `raw_iterator_opt`, `property_int_value`, `flush_opt`/`flush_wal`,
@@ -30,6 +26,7 @@ use bytes::Bytes;
 use parking_lot::Mutex;
 use pedradb_core::{CoreError, Env, OccTransaction};
 use pedradb_io_uring::IoUringEnv;
+use std::collections::BTreeSet;
 use std::ops::{Bound, Deref};
 use std::path::Path;
 use std::sync::Arc;
@@ -485,6 +482,9 @@ pub struct Transaction<'a, E: Env = IoUringEnv> {
     db: &'a DB<E>,
     /// `Some` = pessimistic 2PL ([`TransactionDB`]). `None` = OCC.
     pess: Option<Pess>,
+    /// Keys yielded by [`Self::raw_iterator_opt`] (issue #3). Shared so the
+    /// iterator can outlive a borrow of `self` until `commit` consumes us.
+    scan_reads: Arc<Mutex<BTreeSet<Bytes>>>,
 }
 
 struct Pess {
@@ -518,6 +518,7 @@ impl<'a, E: Env> Transaction<'a, E> {
             codec: db.codec.clone(),
             db,
             pess: None,
+            scan_reads: Arc::new(Mutex::new(BTreeSet::new())),
         }
     }
 
@@ -541,6 +542,7 @@ impl<'a, E: Env> Transaction<'a, E> {
                 timeout,
                 detect,
             }),
+            scan_reads: Arc::new(Mutex::new(BTreeSet::new())),
         }
     }
 
@@ -686,8 +688,8 @@ impl<'a, E: Env> Transaction<'a, E> {
     /// see the uncommitted write batch — F179: a staged put must count, a
     /// staged delete must not).
     ///
-    /// Untracked OCC read (see module policy): the count is snapshot-pinned
-    /// but the scanned keys do not enter the read set.
+    /// Snapshot-pinned count. Individual keys in the range are not added
+    /// to the OCC read set (unlike [`Self::raw_iterator_opt`]).
     ///
     /// # Errors
     /// Snapshot-too-old or Pedra scan.
@@ -758,9 +760,8 @@ impl<'a, E: Env> Transaction<'a, E> {
     /// must hide the committed key (F183). The merged iterator overlays
     /// `staged_entries` on the snapshot read.
     ///
-    /// Untracked OCC read (see module policy): unlike Rocks
-    /// `Transaction::NewIterator`, keys yielded here do not enter the read
-    /// set — a later `commit()` does not conflict on them.
+    /// Keys the iterator yields enter the OCC read set (issue #3 /
+    /// rust-rocksdb `Transaction::NewIterator`).
     #[must_use]
     pub fn raw_iterator_opt(&self, ro: super::ReadOptions) -> TxnRawIterator<'_, Self, E> {
         let (seq, staged) = {
@@ -771,7 +772,7 @@ impl<'a, E: Env> Transaction<'a, E> {
             .into_iter()
             .map(|(k, v)| (k.to_vec(), v.map(|b| b.to_vec())))
             .collect();
-        TxnRawIterator::new(self.db, seq, staged, ro)
+        TxnRawIterator::new(self.db, seq, staged, ro, Arc::clone(&self.scan_reads))
     }
 
     /// rust-rocksdb `snapshot()` — sequence pin matching this txn's begin.
@@ -796,7 +797,13 @@ impl<'a, E: Env> Transaction<'a, E> {
         // Drop (F186 pin release) needs `self` intact; swap in a finished
         // stub instead of a partial move out of a Drop type.
         let stub = self.db.inner.begin_occ();
-        let occ = std::mem::replace(&mut self.occ, Mutex::new(stub)).into_inner();
+        let mut occ = std::mem::replace(&mut self.occ, Mutex::new(stub)).into_inner();
+        {
+            let extra = self.scan_reads.lock();
+            for k in extra.iter() {
+                occ.observe(k);
+            }
+        }
         occ.commit().map_err(|e| match e {
             CoreError::TransactionConflict => Error {
                 msg: "Busy: transaction conflict: key changed since snapshot".into(),
@@ -845,6 +852,11 @@ pub struct TxnRawIterator<'a, D, E: Env = IoUringEnv> {
     /// Materialized merged view (reverse-path only).
     mat: Option<Vec<(Vec<u8>, Vec<u8>)>>,
     mat_at: usize,
+    /// OCC read-set sidecar (issue #3). `None` only if constructed without.
+    scan_reads: Arc<Mutex<BTreeSet<Bytes>>>,
+    /// False while [`Self::materialize`] walks internally (don't record
+    /// keys the caller never positioned on).
+    tracking: bool,
 }
 
 /// Source of the current merged head. A staged head is an index into
@@ -863,6 +875,7 @@ impl<'a, D, E: Env> TxnRawIterator<'a, D, E> {
         seq: pedradb_core::SequenceNumber,
         mut staged: Vec<(Vec<u8>, Option<Vec<u8>>)>,
         ro: super::ReadOptions,
+        scan_reads: Arc<Mutex<BTreeSet<Bytes>>>,
     ) -> Self {
         staged.sort_by(|a, b| a.0.cmp(&b.0));
         staged.dedup_by(|a, b| a.0 == b.0);
@@ -876,7 +889,19 @@ impl<'a, D, E: Env> TxnRawIterator<'a, D, E> {
             upper: ro.upper,
             mat: None,
             mat_at: 0,
+            scan_reads,
+            tracking: true,
         }
+    }
+
+    fn track_if_valid(&self) {
+        if !self.tracking {
+            return;
+        }
+        let Some(k) = self.key() else {
+            return;
+        };
+        self.scan_reads.lock().insert(Bytes::copy_from_slice(k));
     }
 
     fn in_window(&self, k: &[u8]) -> bool {
@@ -987,6 +1012,7 @@ impl<'a, D, E: Env> TxnRawIterator<'a, D, E> {
         self.db.seek(k);
         self.idx = self.staged.partition_point(|(sk, _)| sk.as_slice() < k);
         self.advance_head();
+        self.track_if_valid();
     }
 
     /// Seek first key.
@@ -995,6 +1021,7 @@ impl<'a, D, E: Env> TxnRawIterator<'a, D, E> {
         self.db.seek_to_first();
         self.idx = 0;
         self.advance_head();
+        self.track_if_valid();
     }
 
     /// Next visible key (ascending).
@@ -1003,6 +1030,7 @@ impl<'a, D, E: Env> TxnRawIterator<'a, D, E> {
             if self.mat_at < m.len() {
                 self.mat_at += 1;
             }
+            self.track_if_valid();
             return;
         }
         match std::mem::replace(&mut self.cur, CurRow::End) {
@@ -1014,6 +1042,7 @@ impl<'a, D, E: Env> TxnRawIterator<'a, D, E> {
             CurRow::Staged(_) | CurRow::End => {}
         }
         self.advance_head();
+        self.track_if_valid();
     }
 
     fn advance_head(&mut self) {
@@ -1029,6 +1058,7 @@ impl<'a, D, E: Env> TxnRawIterator<'a, D, E> {
         if self.mat.is_some() {
             return;
         }
+        self.tracking = false;
         // Full merged forward walk (reverse path: correctness over speed).
         let mut out = Vec::new();
         let saved_cur = std::mem::replace(&mut self.cur, CurRow::End);
@@ -1044,6 +1074,7 @@ impl<'a, D, E: Env> TxnRawIterator<'a, D, E> {
         self.idx = saved_idx;
         self.mat = Some(out);
         self.mat_at = 0;
+        self.tracking = true;
     }
 
     /// Seek last key (reverse path — materialized).
@@ -1052,6 +1083,7 @@ impl<'a, D, E: Env> TxnRawIterator<'a, D, E> {
         if let Some(m) = &self.mat {
             self.mat_at = m.len().saturating_sub(1);
         }
+        self.track_if_valid();
     }
 
     /// Previous key (reverse path — materialized).
@@ -1062,6 +1094,7 @@ impl<'a, D, E: Env> TxnRawIterator<'a, D, E> {
         } else {
             self.mat_at = usize::MAX; // exhausted
         }
+        self.track_if_valid();
     }
 
     /// Seek ≤ `key` (reverse path — materialized).
@@ -1073,6 +1106,7 @@ impl<'a, D, E: Env> TxnRawIterator<'a, D, E> {
                 .partition_point(|(mk, _)| mk.as_slice() <= k)
                 .saturating_sub(1);
         }
+        self.track_if_valid();
     }
 }
 
@@ -1139,6 +1173,24 @@ mod tests {
             "{err}"
         );
         assert_eq!(db.get(b"k").unwrap().as_deref(), Some(&b"a"[..]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn txn_iterator_conflict_on_scanned_key() {
+        let dir = tmp("iter-occ");
+        let db = OptimisticTransactionDB::open_default(&dir).unwrap();
+        db.put(b"k", b"v1").unwrap();
+        let tx = db.transaction();
+        let mut it = tx.raw_iterator_opt(crate::ReadOptions::default());
+        it.seek_to_first();
+        assert_eq!(it.key(), Some(b"k".as_ref()));
+        db.put(b"k", b"v2").unwrap();
+        let err = tx.commit().unwrap_err();
+        assert!(
+            err.to_string().contains("Busy") || err.to_string().contains("conflict"),
+            "{err}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
