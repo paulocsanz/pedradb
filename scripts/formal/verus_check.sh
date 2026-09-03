@@ -25,8 +25,8 @@
 # installs the pinned x86-linux build into the container and mounts the repo.
 #
 # Usage:
-#   ./scripts/formal/verus_check.sh          # first twin set (0155: l28,
-#                                            #   group_commit, sst_crc_fate)
+#   ./scripts/formal/verus_check.sh          # first twin set (0155:
+#                                            #   group_commit, sst_crc_fate, wal_recover)
 #   ./scripts/formal/verus_check.sh --all    # every scripts/verus_*.sh twin
 set -uo pipefail
 
@@ -34,7 +34,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
 VERUS_RELEASE="release/0.2026.08.23.fbbbbcf"
 VERUS_VER="0.2026.08.23.fbbbbcf"
-DEFAULT_SET=(l28 group_commit sst_crc_fate)
+DEFAULT_SET=(group_commit sst_crc_fate wal_recover)
 
 die() { echo "error: $*" >&2; exit 1; }
 
