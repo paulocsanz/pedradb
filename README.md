@@ -157,29 +157,39 @@ construction, one full barrier per op against the peer's zero. Group commit
 closes them under concurrency (`apply_mc4` 2.79×). The 1-client write rows
 are the price of the contract, not wins.
 
-**Sorted ingest** (Linux guest, 2026-09-02; 1024-op batches, ~200 B values;
-latched bulk ingest skips WAL and memtable on the append-only family):
+**Sorted ingest** (Linux guest; ~200 B values; latched bulk ingest skips
+WAL and memtable on the append-only family). Ratio > 1 means PedraDB is
+faster than RocksDB default. Hydrate at 25M and 100M is a 3-run median
+(2026-09-03). 100M settle and read legs are the first 100M measurement
+(single-run, 2026-09-03) and are marked as such — not promoted to a
+3-run claim.
 
 | n | hydrate | settle | get_hit | prefix_scan | get_loop | multi_get |
 |---|---:|---:|---:|---:|---:|---:|
 | 1M | **1.82×** | **2.50×** | **1.44×** | **1.64×** | **1.36×** | **1.08×** |
 | 10M | **1.03×** | **7.67×** | 1.00× (tie) | **1.31×** | **1.07×** | **1.02×** |
-| 25M | ~1.0× | **~7×** | ~1.01–1.15× | ~1.12–1.16× | 0.88–0.94× | 0.81–1.07× |
-| 100M | **1.18×** | — | — | — | — | — |
+| 25M | 1.02× | **27×** | **1.14×** | **1.34×** | — | **1.27×** |
+| 100M | **1.18×** | **39×** † | **2.40×** † | **1.19×** † | **2.89×** † | **2.67×** † |
+
+† Single-run, first 100M read/settle measurement. Hydrate 100M is 3-run.
 
 - 10M `get_hit` is a tie (confidence intervals overlap), not a win.
-- 25M hydrate sits inside Rocks's 27.9–34.4 s band (PedraDB floor
-  28.1–30.2 s); the 2026-09-03 3-run median is 1.02× — parity inside the
-  ±3 s host-noise band, not a win claim. `lookup_100` at 25M is not ≥ 1×.
-  Settle always wins.
+- 25M hydrate (3-run median 1.02×: Pedra 29.5 s vs Rocks 30.2 s) sits
+  inside Rocks's 27.9–34.4 s band (Pedra floor 28.1–30.2 s) — parity
+  inside the ±3 s host-noise band, not a win claim. 25M `get_loop` is
+  not published: Rocks ran out of band on that lookup. Settle always
+  wins.
 - 100M used to OOM on the 3.9 GiB guest (sparse-index keys pinned the
   ingest key pool; fixed — index boundary keys are owned copies now).
-  2026-09-03, 3 runs on the same guest: hydrate median **1.18×** (Pedra
-  121.6–127.5 s, Rocks 129.0–149.5 s), on disk 23.97 GiB (257 B/entry) vs
-  Rocks 23.78–24.29 GiB, no OOM. Most of the flip is Rocks-side: Rocks's
-  own same-shape band moved from 117–121 s (2026-08-31) to 129–150 s
-  here while Pedra moved ~2 s. That spread is why every number above is
-  a 3-run median.
+  Hydrate, 2026-09-03, 3 runs: median **1.18×** (Pedra 121.6–127.5 s,
+  Rocks 129.0–149.5 s), on disk 23.97 GiB (257 B/entry) vs Rocks
+  23.78–24.29 GiB, no OOM. Most of that flip is Rocks-side: Rocks's own
+  same-shape band moved from 117–121 s (2026-08-31) to 129–150 s here
+  while Pedra moved ~2 s.
+- 100M reads (single-run): Rocks default thrashes a 256 MiB cache on a
+  24 GiB dataset (~3–4 preads/get); Pedra's pinned index is about one
+  pread/get. That is why `get_hit` / `get_loop` / `multi_get` jump at
+  100M while `prefix_scan` stays ~1.2×. Not a 3-run claim.
 - Absent-key `probe_miss` can lose (bulk files ship an always-true bloom)
   and is not in the required set.
 
