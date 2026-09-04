@@ -2226,7 +2226,15 @@ impl<E: Env> ConcurrentDb<E> {
     /// # Errors
     /// WAL I/O or sequence exhaustion.
     pub fn delete(&self, key: impl AsRef<[u8]>) -> Result<()> {
-        let do_sync = self.resolve_sync(WriteOptions::default());
+        self.delete_with(key, WriteOptions::default())
+    }
+
+    /// Delete with per-call durability (same as [`Self::put_with`]).
+    ///
+    /// # Errors
+    /// WAL I/O or sequence exhaustion.
+    pub fn delete_with(&self, key: impl AsRef<[u8]>, opts: WriteOptions) -> Result<()> {
+        let do_sync = self.resolve_sync(opts);
         self.assist_flush_debt();
         self.writes
             .submit_one(&self.inner, BatchOp::delete(key), do_sync)
@@ -2264,7 +2272,19 @@ impl<E: Env> ConcurrentDb<E> {
     /// # Errors
     /// WAL I/O or sequence exhaustion.
     pub fn apply_batch_vec(&self, ops: Vec<BatchOp>) -> Result<SequenceNumber> {
-        let do_sync = self.resolve_sync(WriteOptions::default());
+        self.apply_batch_vec_with(ops, WriteOptions::default())
+    }
+
+    /// [`Self::apply_batch_vec`] with per-call durability.
+    ///
+    /// # Errors
+    /// WAL I/O or sequence exhaustion.
+    pub fn apply_batch_vec_with(
+        &self,
+        ops: Vec<BatchOp>,
+        opts: WriteOptions,
+    ) -> Result<SequenceNumber> {
+        let do_sync = self.resolve_sync(opts);
         self.assist_flush_debt();
         self.writes.submit(&self.inner, ops, do_sync)
     }
@@ -2422,15 +2442,15 @@ impl<E: Env> ConcurrentDb<E> {
             .unwrap_or(final_path);
         let written =
             match Db::write_bulk_run_sst(&env, &dir, num, run.as_ref(), &fam, sync, "worker") {
-            Ok(t) => t,
-            Err(_) => {
-                let mut g = self.inner.write();
-                if let Some(pin) = g.take_bulk_encoding() {
-                    g.push_parked_bulk_front(pin);
+                Ok(t) => t,
+                Err(_) => {
+                    let mut g = self.inner.write();
+                    if let Some(pin) = g.take_bulk_encoding() {
+                        g.push_parked_bulk_front(pin);
+                    }
+                    return false;
                 }
-                return false;
-            }
-        };
+            };
         // RFC-0159 P1.2: take the MANIFEST job under the write lock, then
         // drop the guard before `persist.write()` (same shape as
         // [`Self::persist_unsynced_l0s_off_lock`]). The match-scrutinee
@@ -4355,10 +4375,7 @@ mod tests {
                     assert!(db.materialize_bulk_once());
                 }
                 let live = db.with_read(|d| d.bulk_live_bytes());
-                assert!(
-                    live <= cap.saturating_mul(3),
-                    "tail {live} > 3×cap"
-                );
+                assert!(live <= cap.saturating_mul(3), "tail {live} > 3×cap");
                 assert!(
                     db.with_read(|d| d.sst_payload_pool().resident_bytes()) <= 1,
                     "payload must stay empty during bulk"
@@ -4389,7 +4406,10 @@ mod tests {
         let grown = end.0.saturating_sub(mid.0);
         let index_grown = end.1.saturating_sub(mid.1);
         assert!(
-            grown <= index_grown.saturating_add(cap.saturating_mul(3)).saturating_add(64 * 1024),
+            grown
+                <= index_grown
+                    .saturating_add(cap.saturating_mul(3))
+                    .saturating_add(64 * 1024),
             "hydrate_resident grew {grown} beyond index {index_grown} + 3×cap (payload leak)"
         );
         db.flush().unwrap();
