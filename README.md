@@ -88,26 +88,6 @@ cargo run --example secondary_index -p pedradb-core
 
 No C++ toolchain is needed.
 
-## PedraDB vs RocksDB
-
-RocksDB is the usual library for this job, so here is the honest comparison.
-
-|  | PedraDB | RocksDB |
-|---|---|---|
-| Multi-key transactions | The handle itself: `begin` → `commit` | Separate `TransactionDB` / `OptimisticTransactionDB` wrappers |
-| Durability default | fsync before `Ok` | Async (`sync=false`) |
-| Turning checksums off | Not possible | An option |
-| Failed WAL sync | Writer fenced; `fence_report()` gives the uncertain sequence range; reopen recovers | Background error; `Resume()` |
-| Build | Pure Rust, no C++ toolchain | C++ core; a multi-minute native build |
-| Memory safety | `#![forbid(unsafe_code)]` in the engine | C++ |
-| Formal verification | 21 Verus-checked decision kernels | No |
-| Production track record | Alpha. None yet | 10+ years at scale |
-| Language bindings | Rust | C, C++, Java, Python, Go, and more |
-| On-disk format | Own format; may change before 1.0 | Stable and widely tooled |
-
-The last three rows are why PedraDB is alpha and RocksDB is the default. The
-rows above them are why PedraDB exists.
-
 ## What's inside
 
 - **LSM tree**: write-ahead log, memtable, leveled SSTs, bloom filters,
