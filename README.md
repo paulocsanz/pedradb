@@ -56,7 +56,14 @@ partial transaction. Try it:
 
 ```sh
 cargo run -p pedradb-cli -- demo /tmp/pedra-demo
+cargo run -p pedradb-examples --example hello
+cargo run -p pedradb-examples --example bank
 ```
+
+The example gallery is a ladder (hello → transactions → index → scan → CAS →
+snapshots → change feed → crash/reopen → concurrent → a small ledger), then
+the same kernel as backup, a durable stream, a tiny SQL layer, and a
+rust-rocksdb drop-in: [`examples/`](examples/).
 
 Full walkthrough (durability contract, CAS, change feed, index-layer sketch):
 [`docs/usage.md`](docs/usage.md).
@@ -175,6 +182,7 @@ Multi-host clusters, swarm campaigns, docker smoke, backup/PITR recipes:
 
 ## Documentation
 
+- [`examples/`](examples/) — **runnable ladder**: hello-world through a small ledger, then backup / stream / SQL / RocksDB drop-in
 - [`docs/usage.md`](docs/usage.md) — **start here**: open, transactions, durability contract, layer sketches
 - [`docs/positioning.md`](docs/positioning.md) — why this exists; power/surface ratio
 - [`docs/architecture.md`](docs/architecture.md) — architecture and roadmap

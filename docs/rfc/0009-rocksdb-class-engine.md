@@ -66,7 +66,7 @@ Public API stays small: `open / begin / get / put / delete / range / commit / ap
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | WriteOptions sync | done | WriteOptions / put_with | 2026-08-11 |
 | P0.2 | p0 | Auto-flush threshold | done | OpenOptions.auto_flush_bytes | 2026-08-11 |
-| P0.3 | p0 | Index-layer example | done | examples/secondary_index.rs | 2026-08-11 |
+| P0.3 | p0 | Index-layer example | done | examples/ (gallery: hello → bank) | 2026-09-04 |
 | P0.4 | p0 | Bench sync vs batched | done | put_sync_each vs put_nosync_then_sync | 2026-08-11 |
 | P1.1 | p1 | Block SST + index | done | SST v2 BLOCK_TARGET + index | 2026-08-11 |
 | P1.2 | p1 | Count-based auto-compact | done | OpenOptions.auto_compact_sst_count | 2026-08-11 |

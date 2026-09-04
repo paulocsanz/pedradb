@@ -11,6 +11,8 @@
 
 Embedded ordered key-value store with **multi-key ACID** in one process.
 
+Runnable gallery (hello → bank → layers): [`examples/`](../examples/).
+
 ```text
 open → begin → get / put / delete → commit
 ```

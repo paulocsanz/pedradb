@@ -28,6 +28,7 @@ members = [
     "crates/rocksdb-compat-alias-smoke",
     "crates/rocksdb",
     "crates/rocksdb-parity-bench",
+    "examples",
 ]
 exclude = [
     "formal/aeneas/vote-kernel",

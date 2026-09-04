@@ -501,6 +501,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "pedradb-examples"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "pedradb-core",
+ "pedradb-ops",
+ "pedradb-sql",
+ "pedradb-stream",
+ "rocksdb-compat",
+]
+
+[[package]]
 name = "pedradb-fold"
 version = "0.1.0"
 dependencies = [
