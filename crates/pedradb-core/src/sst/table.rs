@@ -87,6 +87,38 @@ pub const BLOCK_TARGET: usize = 4_096;
 /// is one block, not a 256 KiB (or whole-file v3) read.
 pub const BULK_BLOCK_TARGET: usize = BLOCK_TARGET;
 
+/// Absolute cap on a decompressed SST block. Matches [`block_target`]'s
+/// upper clamp (256 KiB). PEDRA-001: a forged lz4 size prefix of tens of
+/// MiB used to allocate on GET (`plain_scratch.resize`) / open
+/// (`decompress_size_prepended`) after the block CRC was rewritten; the
+/// engine never writes a block larger than this.
+const LZ4_MAX_PLAIN_BLOCK: usize = 256 * 1024;
+/// Expansion ratio cap (PEDRA-001). A 200-byte frame claiming the full
+/// 256 KiB cap is still a bomb; the absolute cap alone would admit it.
+/// 4 KiB of zeros compresses well under 256× (~20 B frame).
+const LZ4_MAX_EXPANSION: usize = 256;
+
+/// `true` iff `plain` is a size we could have written for `compressed_len`.
+fn lz4_plain_size_ok(plain: usize, compressed_len: usize) -> bool {
+    if plain == 0 || plain > LZ4_MAX_PLAIN_BLOCK {
+        return false;
+    }
+    // Default-target blocks (≤ 4 KiB) may be all zeros — lz4 of 4 KiB
+    // zeros is ~20 B, ratio ~200×, still under 256×. Larger blocks are
+    // bounded by the absolute cap.
+    if plain <= BLOCK_TARGET {
+        return plain <= compressed_len.saturating_mul(LZ4_MAX_EXPANSION);
+    }
+    true
+}
+
+fn lz4_size_rejected(path: &Path, plain: usize, compressed_len: usize) -> CoreError {
+    CoreError::Internal(format!(
+        "SST lz4 uncompressed size {plain} exceeds 256x compressed length ({compressed_len}) in {}",
+        path.display()
+    ))
+}
+
 /// Effective block target for new writes: `PEDRA_BLOCK_TARGET` (bytes,
 /// clamped 1 KiB–256 KiB) when set, else [`BLOCK_TARGET`].
 #[must_use]
@@ -2238,6 +2270,9 @@ fn seek_point_in_block_body(
                 path.display()
             ))
         })?;
+        if !lz4_plain_size_ok(size, body.len()) {
+            return Err(lz4_size_rejected(path, size, body.len()));
+        }
         plain_scratch.clear();
         plain_scratch.resize(size, 0);
         let written = lz4_flex::block::decompress_into(input, plain_scratch).map_err(|e| {
@@ -2412,6 +2447,15 @@ fn decode_block_bytes(
         raw
     };
     let plain: Vec<u8> = if compressed_blocks {
+        let (size, _) = lz4_flex::block::uncompressed_size(raw).map_err(|e| {
+            CoreError::Internal(format!(
+                "SST lz4 decompress failed in {}: {e}",
+                path.display()
+            ))
+        })?;
+        if !lz4_plain_size_ok(size, raw.len()) {
+            return Err(lz4_size_rejected(path, size, raw.len()));
+        }
         lz4_flex::decompress_size_prepended(raw).map_err(|e| {
             CoreError::Internal(format!(
                 "SST lz4 decompress failed in {}: {e}",
@@ -3539,6 +3583,70 @@ mod tests {
             "tail bitrot must fail v6 file CRC; got {err}"
         );
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// PEDRA-001: a forged lz4 size prefix must not allocate.
+    #[test]
+    fn lz4_plain_size_ok_rejects_prefix_bomb_admits_zero_block() {
+        assert!(!lz4_plain_size_ok(64 * 1024 * 1024, 106));
+        assert!(!lz4_plain_size_ok(0, 16));
+        assert!(lz4_plain_size_ok(16, 20));
+        let src = vec![0u8; BLOCK_TARGET];
+        let max = 4usize.saturating_add(lz4_flex::block::get_maximum_output_size(src.len()));
+        let mut frame = vec![0u8; max];
+        frame[..4].copy_from_slice(&(src.len() as u32).to_le_bytes());
+        let n = lz4_flex::block::compress_into(&src, &mut frame[4..]).expect("lz4 zeros");
+        frame.truncate(4 + n);
+        let (size, _) = lz4_flex::block::uncompressed_size(&frame).expect("size prefix");
+        assert!(
+            lz4_plain_size_ok(size, frame.len()),
+            "4 KiB zeros compressed to {} bytes must pass the 256x gate",
+            frame.len()
+        );
+        let src_max = vec![0u8; LZ4_MAX_PLAIN_BLOCK];
+        let max = 4usize.saturating_add(lz4_flex::block::get_maximum_output_size(src_max.len()));
+        let mut frame = vec![0u8; max];
+        frame[..4].copy_from_slice(&(src_max.len() as u32).to_le_bytes());
+        let n = lz4_flex::block::compress_into(&src_max, &mut frame[4..]).expect("lz4 256k zeros");
+        frame.truncate(4 + n);
+        let (size, _) = lz4_flex::block::uncompressed_size(&frame).expect("size prefix");
+        assert!(
+            lz4_plain_size_ok(size, frame.len()),
+            "256 KiB zeros compressed to {} bytes must pass via the absolute cap",
+            frame.len()
+        );
+    }
+
+    #[test]
+    fn lz4_size_prefix_bomb_rejected_on_decode_and_seek() {
+        let src = [b'x'; 16];
+        let max = 4usize.saturating_add(lz4_flex::block::get_maximum_output_size(src.len()));
+        let mut frame = vec![0u8; max];
+        frame[..4].copy_from_slice(&16u32.to_le_bytes());
+        let n = lz4_flex::block::compress_into(&src, &mut frame[4..]).expect("lz4");
+        frame.truncate(4 + n);
+        frame[..4].copy_from_slice(&(64 * 1024 * 1024u32).to_le_bytes());
+        let path = Path::new("bomb.sst");
+        let err = decode_block_bytes(&frame, true, false, path)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("exceeds 256x compressed length"),
+            "decode must name the ceiling, got {err}"
+        );
+        let mut scratch = Vec::new();
+        let err = seek_point_in_block_body(&frame, true, b"k", u64::MAX, &mut scratch, path)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("exceeds 256x compressed length"),
+            "seek must name the ceiling, got {err}"
+        );
+        assert!(
+            scratch.len() < 64 * 1024,
+            "seek must not allocate the forged 64 MiB, scratch={}",
+            scratch.len()
+        );
     }
 
     #[test]
