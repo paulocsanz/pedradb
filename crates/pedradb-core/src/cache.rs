@@ -510,6 +510,24 @@ impl BlockCache {
         self.get_or_insert_with_id(path_id(path), block_idx, load)
     }
 
+    /// Hit-only probe (RFC-0160 P2.3). Miss does not invoke a loader, so
+    /// the caller can `decode_block` (fail-closed) and insert only on Ok.
+    pub fn get(&self, path: &Path, block_idx: usize) -> Option<CachedBlock> {
+        self.get_id(path_id(path), block_idx)
+    }
+
+    /// [`Self::get`] keyed by a precomputed path id.
+    pub fn get_id(&self, id: u64, block_idx: usize) -> Option<CachedBlock> {
+        let key = (id, block_idx);
+        let mut guard = self.inner.lock();
+        let g = &mut *guard;
+        let live = g.map.len();
+        let slot = g.map.get_mut(&key)?;
+        g.hits = g.hits.saturating_add(1);
+        Self::touch(&mut g.order, &mut g.epoch, live, &key, slot);
+        Some(Arc::clone(&slot.block))
+    }
+
     /// [`Self::get_or_insert_with`] keyed by a precomputed path id, so a
     /// stream hashes its path once instead of once per block fetch. Ids from
     /// different tag domains (e.g. value-resolved slots) share the same map;
@@ -1229,6 +1247,23 @@ mod tests {
             crate::memtable::Lookup::Found(Bytes::from_static(b"v"))
         );
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn block_cache_get_is_hit_only() {
+        let cache = BlockCache::with_budget_bytes(64 * 1024);
+        let path = Path::new("/tmp/hit-only.sst");
+        assert!(cache.get(path, 0).is_none());
+        cache.get_or_insert_with(path, 0, || {
+            vec![(
+                InternalKey::new(Bytes::from_static(b"a"), 1, ValueType::Value),
+                Bytes::from_static(b"1"),
+            )]
+        });
+        assert!(cache.get(path, 0).is_some());
+        assert_eq!(cache.hits(), 1);
+        assert!(cache.get(path, 1).is_none(), "unknown block is not a load");
+        assert_eq!(cache.misses(), 1, "get-miss must not count as a load miss");
     }
 
     #[test]

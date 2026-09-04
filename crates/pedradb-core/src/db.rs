@@ -63,7 +63,7 @@ use crate::batch::{WriteOp, WriteRecord};
 use crate::cache::{AnswerCache, BlockCache, KeyGenMap, PointCache, TableCache};
 use crate::change_feed::{ChangeEntry, ChangeKind, ChangeLog};
 use crate::changelog_kernel::{changelog_needs_sst_rebuild, changelog_should_store};
-use crate::env::{Env, EnvFile, StdEnv};
+use crate::env::{AdviseKind, Env, EnvFile, StdEnv};
 use crate::error::{CoreError, Result};
 use crate::host::Host;
 use crate::key::{InternalKey, SequenceNumber, ValueType, MAX_SEQUENCE_NUMBER};
@@ -281,6 +281,13 @@ pub const DEFAULT_SST_PAYLOAD_BUDGET_BYTES: u64 = 256 * 1024 * 1024;
 /// chunk (v51). 4 was v50 **under** the write lock (regressed 0.91×); off
 /// lock it is 90→23 persists at 25M / 64 MiB.
 const BULK_MANIFEST_EVERY: u8 = 4;
+
+/// RFC-0160 P0.5: latched BulkRun always has a chunk cap so 100M hydrate
+/// cannot accumulate the open tail unboundedly. Used when the caller left
+/// `auto_flush_bytes` / per-CF buffers unset (`None` used to mean "never
+/// park" and SIGKILL'd the 3.9 GiB guest). One parked + one encoding +
+/// this tail is the RAM bound.
+pub(crate) const DEFAULT_BULK_CHUNK_BYTES: usize = 64 * 1024 * 1024;
 
 /// Default read-handle cache size for bounded opens
 /// ([`crate::env::FileHandleCache`]): covers the post-settle file count of
@@ -1402,7 +1409,10 @@ pub struct Db<E: Env = StdEnv> {
     /// (RFC-0041 P1.1). Rotate waits for [`Self::commit_inflight`] == 0.
     wal: Arc<Mutex<Wal<E::File>>>,
     /// Group-commit appends in flight (not yet applied). Blocks WAL rotate.
-    commit_inflight: AtomicUsize,
+    /// `Arc` so `ConcurrentDb` can observe it lock-free: the RFC-0062 lone
+    /// path holds the write lock through `fdatasync`, so a counter read
+    /// behind the `Db` RwLock is blind exactly while a commit is in flight.
+    commit_inflight: Arc<AtomicUsize>,
     /// Sequenced WAL ops waiting for the off-lock `fdatasync` to finish
     /// before memtable apply (RFC-0045 P2.1).
     unapplied: Vec<UnappliedOp>,
@@ -1720,6 +1730,33 @@ impl Db<StdEnv> {
     pub fn open_with(path: impl AsRef<Path>, opts: OpenOptions) -> Result<Self> {
         Self::open_with_env(path, opts, StdEnv)
     }
+}
+
+// RFC-0162 P0.2: per-chunk bulk-hydrate timing for diagnostic runs
+// (`PEDRA_BULK_STAGE_TIMING=1`). Zero cost when the env is unset; the
+// official gate runs never set it.
+static BSTAGE_IDX: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static BSTAGE_EPOCH: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+fn bulk_stage_timing_on() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("PEDRA_BULK_STAGE_TIMING").is_ok_and(|v| !v.is_empty() && v != "0")
+    })
+}
+
+fn bulk_stage_line(
+    idx: u64,
+    epoch_ms: u128,
+    t_ms: u128,
+    entries: usize,
+    bytes: usize,
+    caller: &str,
+    sync: bool,
+) -> String {
+    format!(
+        "BSTAGE idx={idx} epoch_ms={epoch_ms} t_ms={t_ms} entries={entries} bytes={bytes} caller={caller} sync={sync}"
+    )
 }
 
 impl<E: Env> Db<E> {
@@ -2113,7 +2150,7 @@ impl<E: Env> Db<E> {
             dir,
             env,
             wal,
-            commit_inflight: AtomicUsize::new(0),
+            commit_inflight: Arc::new(AtomicUsize::new(0)),
             unapplied: Vec::new(),
             mem,
             imm: None,
@@ -2584,6 +2621,11 @@ impl<E: Env> Db<E> {
     /// Best-effort: a store error is logged and never surfaces as commit failure
     /// (RFC-0019: on-disk CHANGELOG is a cache rebuilt from WAL).
     fn persist_changelog_best_effort(&mut self) {
+        // Latched bulk: CHANGELOG is a cache. Collecting the live set is
+        // O(n) RAM (RFC-0039). Skip until BulkRun drains on settle.
+        if !self.bulk_runs.is_empty() || !self.parked_bulk.is_empty() {
+            return;
+        }
         if self.feed_is_lazy() && self.change_log.max_sequence().unwrap_or(0) < self.last_sequence()
         {
             // Best-effort fill (F1): a corrupt payload keeps the cache stale;
@@ -5040,7 +5082,9 @@ impl<E: Env> Db<E> {
     /// I/O while writing SST or recreating the WAL.
     pub fn flush(&mut self) -> Result<()> {
         self.ensure_not_fenced()?;
-        self.flush_all_bulk_runs()?;
+        if let Some(persist) = self.flush_all_bulk_runs()? {
+            persist.write()?;
+        }
         self.vlog_sync_pending()?;
         crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::BEFORE_SST_RENAME)?;
         crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::BEFORE_MANIFEST_RENAME)?;
@@ -5533,7 +5577,7 @@ impl<E: Env> Db<E> {
         Ok(())
     }
 
-    pub(crate) fn flush_all_bulk_runs(&mut self) -> Result<()> {
+    pub(crate) fn flush_all_bulk_runs(&mut self) -> Result<Option<ManifestPersist<E>>> {
         while let Some((fam, run)) = self.parked_bulk.pop_front() {
             self.install_bulk_run(&fam, run.as_ref())?;
         }
@@ -5541,10 +5585,7 @@ impl<E: Env> Db<E> {
         for f in fams {
             self.flush_bulk_run(&f)?;
         }
-        if let Some(persist) = self.persist_bulk_manifest(true)? {
-            persist.write()?;
-        }
-        Ok(())
+        self.persist_bulk_manifest(true)
     }
 
     #[must_use]
@@ -5644,7 +5685,8 @@ impl<E: Env> Db<E> {
         }
         let num = self.alloc_file_num();
         let (env, dir, sync) = self.l0_write_ctx();
-        let (table, num) = match Self::write_bulk_run_sst(&env, &dir, num, &run, family, sync) {
+        let (table, num) =
+            match Self::write_bulk_run_sst(&env, &dir, num, &run, family, sync, "inline") {
             Ok(t) => t,
             Err(e) => return Err(self.fence_io_err(e)),
         };
@@ -5655,6 +5697,7 @@ impl<E: Env> Db<E> {
     }
 
     /// Off-lock SST write for a parked bulk chunk (no `Db` borrow).
+    /// `caller` labels the RFC-0162 BSTAGE line ("worker" vs "inline").
     pub(crate) fn write_bulk_run_sst(
         env: &E,
         dir: &std::path::Path,
@@ -5662,14 +5705,16 @@ impl<E: Env> Db<E> {
         run: &crate::bulk_run::BulkRun,
         family: &str,
         sync: bool,
+        caller: &'static str,
     ) -> Result<(SstTable, u64)> {
         if run.is_empty() {
             return Err(CoreError::Internal("empty bulk run".into()));
         }
+        let t0 = bulk_stage_timing_on().then(std::time::Instant::now);
         let final_path = dir.join(format!("{num:06}.sst"));
         let tmp_path = dir.join(format!("{num:06}.sst.tmp"));
         let table =
-            match write_sst_bulk_arrays(env, &tmp_path, run.keys(), run.vals(), run.seqs(), sync) {
+            match write_sst_bulk_arrays(env, &tmp_path, run.keys(), run.vals(), run.seqs()) {
                 Ok(t) => t,
                 Err(e) => {
                     let _ = env.remove_file(&tmp_path);
@@ -5680,6 +5725,24 @@ impl<E: Env> Db<E> {
             let _ = env.remove_file(&tmp_path);
             let _ = env.remove_file(&final_path);
             return Err(CoreError::Io(e));
+        }
+        // RFC-0162 P1.1 (H1): chunk is synced — drop its pages so writeback
+        // debt never throttles later chunks. Best-effort by the advise contract.
+        let _ = env.advise(&final_path, 0, 0, AdviseKind::DontNeed);
+        if let Some(t0) = t0 {
+            let epoch = BSTAGE_EPOCH.get_or_init(std::time::Instant::now);
+            eprintln!(
+                "{}",
+                bulk_stage_line(
+                    BSTAGE_IDX.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+                    epoch.elapsed().as_millis(),
+                    t0.elapsed().as_millis(),
+                    run.len(),
+                    run.bytes(),
+                    caller,
+                    sync,
+                )
+            );
         }
         Ok((table.with_path(final_path).with_cf(family.to_string()), num))
     }
@@ -5728,7 +5791,7 @@ impl<E: Env> Db<E> {
                 run.push(k, v, seq);
                 seq += 1;
             }
-            cap.is_some_and(|c| run.bytes() >= c)
+            run.bytes() >= cap
         };
         if over {
             if let Some(run) = self.bulk_runs.remove(family) {
@@ -6199,14 +6262,66 @@ impl<E: Env> Db<E> {
 
     /// Bulk-run flush size: per-CF / global write buffer, **not**
     /// `PEDRA_STAGE_MAX_BYTES` (that clamp is for memtable staging).
-    fn bulk_chunk_cap(&self) -> Option<usize> {
+    ///
+    /// Always a real cap (RFC-0160 P0.5). `None` flush thresholds used to
+    /// let the open tail grow with n (100M SIGKILL).
+    ///
+    /// RFC-0161 P0.5: never exceed [`DEFAULT_BULK_CHUNK_BYTES`]. Slipstream
+    /// sets a 256 MiB write buffer; three of those (tail+park+encode) is
+    /// 768 MiB on a 3.9 GiB guest before indexes. Cap the bulk chunk at
+    /// 64 MiB regardless of the memtable threshold.
+    pub(crate) fn bulk_chunk_cap(&self) -> usize {
         let mut cap = self.auto_flush_bytes.filter(|n| *n > 0);
         for &n in self.cf_write_buffer.values() {
             if n > 0 && cap.is_none_or(|c| n > c) {
                 cap = Some(n);
             }
         }
-        cap
+        cap.unwrap_or(DEFAULT_BULK_CHUNK_BYTES)
+            .min(DEFAULT_BULK_CHUNK_BYTES)
+    }
+
+    /// Open BulkRun + parked chunk + in-flight encode (RFC-0160 P0.5).
+    /// Does not include SST payloads (those must stay empty on the bulk
+    /// path) or kernel page-cache.
+    #[must_use]
+    #[allow(dead_code)] // guest MEMDIAG / tests
+    pub(crate) fn bulk_live_bytes(&self) -> usize {
+        let mut n = 0usize;
+        for run in self.bulk_runs.values() {
+            n = n.saturating_add(run.bytes());
+        }
+        for (_, run) in &self.parked_bulk {
+            n = n.saturating_add(run.bytes());
+        }
+        if let Some((_, run)) = &self.bulk_encoding {
+            n = n.saturating_add(run.bytes());
+        }
+        n
+    }
+
+    /// Sparse-index RAM of installed SSTs (RFC-0161 P0.5).
+    #[must_use]
+    pub(crate) fn sst_index_bytes(&self) -> usize {
+        self.ssts.iter().map(SstTable::index_memory_bytes).sum()
+    }
+
+    /// Pedra-side RAM the 100M guest can charge us for: BulkRun tail +
+    /// resident payloads + SST indexes + mem/imm. Not kernel page-cache
+    /// and not a peer Rocks still live in the same process (v74 SIGKILL
+    /// at 3.64 GiB was that sum).
+    #[must_use]
+    pub(crate) fn hydrate_resident_bytes(&self) -> usize {
+        self.bulk_live_bytes()
+            .saturating_add(self.sst_payload_pool.resident_bytes() as usize)
+            .saturating_add(self.sst_index_bytes())
+            .saturating_add(self.mem.approx_memory_usage())
+            .saturating_add(
+                self.imm
+                    .as_ref()
+                    .map(MemTable::approx_memory_usage)
+                    .unwrap_or(0),
+            )
     }
 
     /// Flush-debt cap for concurrent writer backpressure: one parked
@@ -8797,6 +8912,13 @@ impl<E: Env> Db<E> {
     /// # Errors
     /// I/O from WAL flush or lock release.
     pub fn close(mut self) -> Result<()> {
+        // RFC-0159 P0.3: the open bulk tail is disableWAL-class for
+        // *crashes* only — a clean close must not drop acked puts. Drain
+        // runs to SST + MANIFEST (same as `flush`) before the CHANGELOG
+        // persist, whose RAM guard skips while runs are open.
+        if let Some(persist) = self.flush_all_bulk_runs()? {
+            persist.write()?;
+        }
         // RFC-0031: close is a persist point for the CHANGELOG cache.
         self.persist_changelog_best_effort();
         self.vlog_sync_pending()?;
@@ -8877,6 +8999,16 @@ impl<E: Env> Db<E> {
         // chunks after leveled settle measured ~10 µs/get of pure candidate
         // checking (25M guest).
         let ssts = &self.ssts;
+        // RFC-0161: never route point get through `point_at_cached`.
+        // That path `decode_block`s every entry in the 4 KiB block
+        // (`InternalKey` + `Bytes` each) and mutex-inserts into the
+        // byte-budgeted `BlockCache`. lookup_100 draws 100 fresh keys
+        // every Criterion iter — the insert never hits. Guest v73b
+        // (Slipstream `set_block_cache` 1 GiB ⇒ `budget_bytes()>0`):
+        // get_loop 5.25–5.30 ms vs v71 seeking 3.868 ms. `RAW_BLOCKS`
+        // (512 × 4 KiB TLS) already covers get_hit repeats on the
+        // encoded miss path. Default `BlockCache::new(8192)` has
+        // `budget_bytes==0` and was already seeking.
         let mut probe = |table: &SstTable| -> Option<(SequenceNumber, Lookup)> {
             if let (Some(lo), Some(hi)) = (table.smallest_user_key(), table.largest_user_key()) {
                 if key < lo || key > hi {
@@ -9303,9 +9435,13 @@ impl<E: Env> Db<E> {
     /// still encodes under one lock and write+fd under another (RFC-0062
     /// P1.1 p11j; isolated raftlog 0.935 was that extra hop + vec).
     /// Multi-writer leaders stay on [`Self::group_start`].
-    pub(crate) fn lone_sync_commit(&mut self, ops: Vec<BatchOp>) -> Result<SequenceNumber> {
+    ///
+    /// Returns `(commit seq, fdatasync ns)` — the fd sample feeds the
+    /// write-group EMA that bounds the catch-up wait (RFC-0042 P1.1);
+    /// `0` when no WAL append happened (nothing to sample).
+    pub(crate) fn lone_sync_commit(&mut self, ops: Vec<BatchOp>) -> Result<(SequenceNumber, u64)> {
         if ops.is_empty() {
-            return Ok(self.last_sequence());
+            return Ok((self.last_sequence(), 0));
         }
         if !self.write_admission_idle() {
             let families = self.batch_families(&ops);
@@ -9314,15 +9450,16 @@ impl<E: Env> Db<E> {
         self.observe_bulk_batch(&ops);
         let (records, seq) = self.prepare_write_ops(ops)?;
         if records.is_empty() {
-            return Ok(seq);
+            return Ok((seq, 0));
         }
         self.vlog_prepare_wal(true)?;
         let sl = records.as_slice();
-        let (n, sync_r) = {
+        let (n, sync_r, fd_ns) = {
             let mut w = self.wal.lock();
             let n = w.encode_write_op_batches(&[sl])?;
+            let t_fd = std::time::Instant::now();
             let r = w.sync_data();
-            (n, r)
+            (n, r, t_fd.elapsed().as_nanos() as u64)
         };
         // RFC-0071: same publish gate as ConcurrentDb off-lock group I/O.
         if !crate::group_commit_kernel::may_publish_group(sync_r.is_ok()) {
@@ -9344,7 +9481,7 @@ impl<E: Env> Db<E> {
         // skipped this; 1c G1 then never auto-flushed (imm never staged,
         // write_buffer_size was a no-op for the sequential host).
         self.maybe_auto_flush_best_effort();
-        Ok(seq)
+        Ok((seq, fd_ns))
     }
 
     /// Shared WAL handle for off-lock `fdatasync` (ConcurrentDb group leader).
@@ -9404,6 +9541,14 @@ impl<E: Env> Db<E> {
     #[must_use]
     pub fn commit_inflight(&self) -> usize {
         self.commit_inflight.load(Ordering::Acquire)
+    }
+
+    /// Shared handle to [`Self::commit_inflight`] for lock-free observation
+    /// (RFC-0042 P1.1: a commit must be provably in flight even while the
+    /// lone path holds the write lock through its `fdatasync`).
+    #[must_use]
+    pub(crate) fn commit_inflight_handle(&self) -> Arc<AtomicUsize> {
+        Arc::clone(&self.commit_inflight)
     }
 
     pub(crate) fn fence_durability(&mut self, io_error: impl std::fmt::Display, class: FenceClass) {
@@ -11599,6 +11744,186 @@ mod tests {
     use super::*;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// RFC-0162 P0.2: BSTAGE line fields for both callers (inline vs
+    /// worker) and the off-by-default gate (env unset ⇒ timing off).
+    #[test]
+    fn rfc0162_bstage_line_format_and_default_off() {
+        assert_eq!(
+            bulk_stage_line(7, 1234, 56, 1_048_576, 67_108_864, "inline", true),
+            "BSTAGE idx=7 epoch_ms=1234 t_ms=56 entries=1048576 bytes=67108864 \
+             caller=inline sync=true"
+        );
+        assert_eq!(
+            bulk_stage_line(8, 2000, 78, 2, 1024, "worker", false),
+            "BSTAGE idx=8 epoch_ms=2000 t_ms=78 entries=2 bytes=1024 \
+             caller=worker sync=false"
+        );
+        // Skipped when the diagnostic shell exports the var for the run.
+        if std::env::var_os("PEDRA_BULK_STAGE_TIMING").is_none() {
+            assert!(
+                !bulk_stage_timing_on(),
+                "BSTAGE must be off when PEDRA_BULK_STAGE_TIMING is unset"
+            );
+        }
+    }
+
+    /// RFC-0162 P1.1 test env: records per-file `sync_data` and every
+    /// `Env::advise` (`FenceEnv` pattern — `pedradb-sim` is not a core dep).
+    #[derive(Clone)]
+    struct BulkProbeEnv {
+        inner: StdEnv,
+        syncs: std::sync::Arc<std::sync::Mutex<Vec<std::path::PathBuf>>>,
+        advises:
+            std::sync::Arc<std::sync::Mutex<Vec<(std::path::PathBuf, u64, u64, AdviseKind)>>>,
+    }
+
+    impl BulkProbeEnv {
+        fn new() -> Self {
+            Self {
+                inner: StdEnv,
+                syncs: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+                advises: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            }
+        }
+    }
+
+    struct BulkProbeFile {
+        inner: <StdEnv as Env>::File,
+        path: std::path::PathBuf,
+        syncs: std::sync::Arc<std::sync::Mutex<Vec<std::path::PathBuf>>>,
+    }
+
+    impl std::io::Read for BulkProbeFile {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.inner.read(buf)
+        }
+    }
+    impl std::io::Write for BulkProbeFile {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.inner.write(buf)
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.inner.flush()
+        }
+    }
+    impl std::io::Seek for BulkProbeFile {
+        fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+            self.inner.seek(pos)
+        }
+    }
+    impl EnvFile for BulkProbeFile {
+        fn sync_data(&mut self) -> std::io::Result<()> {
+            self.syncs.lock().unwrap().push(self.path.clone());
+            self.inner.sync_data()
+        }
+        fn sync_all(&mut self) -> std::io::Result<()> {
+            self.inner.sync_all()
+        }
+        fn set_len(&mut self, len: u64) -> std::io::Result<()> {
+            self.inner.set_len(len)
+        }
+        fn len(&mut self) -> std::io::Result<u64> {
+            self.inner.len()
+        }
+    }
+
+    impl Env for BulkProbeEnv {
+        type File = BulkProbeFile;
+        fn create_dir_all(&self, path: &std::path::Path) -> std::io::Result<()> {
+            self.inner.create_dir_all(path)
+        }
+        fn create(&self, path: &std::path::Path) -> std::io::Result<Self::File> {
+            Ok(BulkProbeFile {
+                inner: self.inner.create(path)?,
+                path: path.to_path_buf(),
+                syncs: self.syncs.clone(),
+            })
+        }
+        fn open_append(&self, path: &std::path::Path) -> std::io::Result<Self::File> {
+            Ok(BulkProbeFile {
+                inner: self.inner.open_append(path)?,
+                path: path.to_path_buf(),
+                syncs: self.syncs.clone(),
+            })
+        }
+        fn open_read(&self, path: &std::path::Path) -> std::io::Result<Self::File> {
+            Ok(BulkProbeFile {
+                inner: self.inner.open_read(path)?,
+                path: path.to_path_buf(),
+                syncs: self.syncs.clone(),
+            })
+        }
+        fn sync_dir(&self, path: &std::path::Path) -> std::io::Result<()> {
+            self.inner.sync_dir(path)
+        }
+        fn read_dir_names(&self, path: &std::path::Path) -> std::io::Result<Vec<String>> {
+            self.inner.read_dir_names(path)
+        }
+        fn remove_file(&self, path: &std::path::Path) -> std::io::Result<()> {
+            self.inner.remove_file(path)
+        }
+        fn rename(&self, from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+            self.inner.rename(from, to)
+        }
+        fn exists(&self, path: &std::path::Path) -> bool {
+            self.inner.exists(path)
+        }
+        fn metadata_len(&self, path: &std::path::Path) -> std::io::Result<u64> {
+            self.inner.metadata_len(path)
+        }
+        fn advise(
+            &self,
+            path: &std::path::Path,
+            offset: u64,
+            len: u64,
+            kind: AdviseKind,
+        ) -> std::io::Result<()> {
+            self.advises
+                .lock()
+                .unwrap()
+                .push((path.to_path_buf(), offset, len, kind));
+            self.inner.advise(path, offset, len, kind)
+        }
+    }
+
+    /// RFC-0162 P1.1: chunk install is a durability + page-cache hygiene
+    /// point — `fdatasync` runs on the tmp SST even with DB `sync=false`,
+    /// and the final path gets exactly one whole-file `DONTNEED` after the
+    /// rename. Fails if the old `if sync` gate or the missing advise return.
+    #[test]
+    fn rfc0162_bulk_chunk_install_syncs_and_dontneeds_even_with_sync_off() {
+        let dir = temp_dir();
+        fs::create_dir_all(&dir).unwrap();
+        let env = BulkProbeEnv::new();
+        let mut run = crate::bulk_run::BulkRun::default();
+        for i in 0..100u32 {
+            run.push(
+                Bytes::from(format!("key{i:08}")),
+                Bytes::from_static(b"val08bytes"),
+                u64::from(i) + 1,
+            );
+        }
+        let (table, num) =
+            Db::write_bulk_run_sst(&env, &dir, 7, &run, "default", false, "worker").unwrap();
+        let tmp = dir.join("000007.sst.tmp");
+        let final_p = dir.join("000007.sst");
+        assert_eq!(num, 7);
+        assert!(final_p.exists(), "chunk must be renamed into place");
+        assert!(!tmp.exists(), "no tmp residue");
+        assert_eq!(table.cf(), "default");
+        let syncs = env.syncs.lock().unwrap().clone();
+        assert!(
+            syncs.iter().any(|p| p == &tmp),
+            "chunk install must fdatasync the tmp SST even with sync=false, got {syncs:?}"
+        );
+        assert_eq!(
+            env.advises.lock().unwrap().clone(),
+            vec![(final_p, 0, 0, AdviseKind::DontNeed)],
+            "exactly one whole-file DONTNEED on the final path after rename"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     /// RFC-0157 P1.4 — db.rs stage 1: golden-fingerprint characterization
     /// of the CURRENT open/recovery path (nothing extracted;
@@ -14509,7 +14834,12 @@ mod tests {
     }
 
     /// RFC-0149: auto-flush with physical CFs must not scan every memtable
-    /// key. 20k puts under a 64 MiB cap stay in mem and finish in bounded time.
+    /// key per put. 20k puts under a 64 MiB cap stay in mem and the per-put
+    /// cost must not grow with the number of resident keys. The check is a
+    /// early-window/late-window ratio, not a wall-clock bound: suite load
+    /// slows both windows equally, but the "cf_families-per-put" regression
+    /// (rescanning every key on every put) makes the late window ~10x
+    /// slower per put than the early one.
     #[test]
     fn maybe_auto_flush_physical_cf_is_not_linear_in_keys() {
         let dir = temp_dir();
@@ -14523,8 +14853,7 @@ mod tests {
         )
         .unwrap();
         db.set_physical_cfs(vec!["default".into(), "lock".into()]);
-        let t0 = std::time::Instant::now();
-        for i in 0..20_000u32 {
+        fn put_i(db: &mut Db, i: u32) {
             let mut k = [0u8; 10];
             k[..7].copy_from_slice(b"default");
             k[7] = 0;
@@ -14532,10 +14861,26 @@ mod tests {
             k[9] = i as u8;
             db.put(&k, b"v").unwrap();
         }
-        let dt = t0.elapsed();
+        // Early window: memtable holds 0..2k keys.
+        let t0 = std::time::Instant::now();
+        for i in 0..2_000u32 {
+            put_i(&mut db, i);
+        }
+        let early = t0.elapsed();
+        for i in 2_000..18_000u32 {
+            put_i(&mut db, i);
+        }
+        // Late window: memtable holds ~18k keys.
+        let t1 = std::time::Instant::now();
+        for i in 18_000..20_000u32 {
+            put_i(&mut db, i);
+        }
+        let late = t1.elapsed();
+        let growth = late.as_secs_f64() / early.as_secs_f64();
         assert!(
-            dt < std::time::Duration::from_millis(800),
-            "20k physical-CF puts took {dt:?} (cf_families-per-put is back)"
+            growth < 6.0,
+            "per-put cost grows with memtable size (cf_families-per-put is back): \
+             late {late:?} vs early {early:?} over 2000 puts each"
         );
         assert!(
             db.live_sst_meta().is_empty(),
@@ -20817,6 +21162,107 @@ mod tests {
         );
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0161: a byte-budgeted BlockCache must not tax cold point gets.
+    /// lookup_100's keys never repeat; `point_at_cached` decode-insert was
+    /// guest v73b's 5.25 ms get_loop (v71 seeking 3.868 ms). Answers stay
+    /// correct; occupancy stays 0.
+    #[test]
+    fn cold_point_get_does_not_insert_decoded_block_cache() {
+        let dir = temp_dir();
+        let mut db = Db::<StdEnv>::open_with_env_bounded(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(4 * 1024),
+                sst_payload_budget_bytes: Some(1),
+                ..OpenOptions::default()
+            },
+            StdEnv,
+        )
+        .unwrap();
+        db.install_block_cache(BlockCache::with_budget_bytes(4 << 20));
+        db.put(b"k1", vec![b'v'; 64]).unwrap();
+        db.put(b"k2", vec![b'w'; 64]).unwrap();
+        db.flush().unwrap();
+        db.block_cache().reset_stats();
+        let before = db.block_cache().used_bytes();
+        crate::sst::force_get_stages(true);
+        crate::sst::reset_get_stages();
+        assert_eq!(db.get(b"k1").as_deref(), Some(&[b'v'; 64][..]));
+        assert_eq!(db.get(b"k2").as_deref(), Some(&[b'w'; 64][..]));
+        let (pread, crc, walk) = crate::sst::take_get_stages();
+        crate::sst::force_get_stages(false);
+        assert_eq!(
+            db.block_cache().used_bytes(),
+            before,
+            "cold point get must not decode-insert into BlockCache"
+        );
+        assert_eq!(
+            db.block_cache().misses(),
+            0,
+            "point get must not miss-fill BlockCache, misses={}",
+            db.block_cache().misses()
+        );
+        assert!(
+            pread > 0 && crc > 0 && walk > 0,
+            "budgeted cache must still use seeking miss path, stages=({pread},{crc},{walk})"
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0160 P0.5: `auto_flush_bytes: None` still caps BulkRun (the
+    /// 100M SIGKILL was an unbounded open tail).
+    #[test]
+    fn bulk_chunk_cap_defaults_when_no_flush_threshold() {
+        let dir = temp_dir();
+        let db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: None,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(db.bulk_chunk_cap(), DEFAULT_BULK_CHUNK_BYTES);
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0161 P0.5: a 256 MiB write buffer (Slipstream) must not raise
+    /// the BulkRun chunk above 64 MiB on the 3.9 GiB guest.
+    #[test]
+    fn bulk_chunk_cap_clamps_large_write_buffer() {
+        let dir = temp_dir();
+        let db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(256 * 1024 * 1024),
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(db.bulk_chunk_cap(), DEFAULT_BULK_CHUNK_BYTES);
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0162 P0.2: BSTAGE line format and off-by-default.
+    #[test]
+    fn bulk_stage_timing_default_off_and_line_format() {
+        assert!(!bulk_stage_timing_on());
+        let line = bulk_stage_line(7, 12_345, 678, 262_144, 67_108_864, "worker", true);
+        assert!(
+            line.starts_with("BSTAGE idx=7 epoch_ms=12345 t_ms=678 "),
+            "{line}"
+        );
+        assert!(line.contains("entries=262144 bytes=67108864 caller=worker sync=true"));
+        let inline = bulk_stage_line(0, 0, 0, 1, 1, "inline", false);
+        assert!(inline.contains("caller=inline sync=false"));
     }
 }
 

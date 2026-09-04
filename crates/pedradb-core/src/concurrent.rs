@@ -43,6 +43,26 @@ use crate::merge::{StreamingVisibleIter, VisibleKv};
 use crate::occ::OccTransaction;
 use crate::vlog::VlogRewriteStats;
 
+#[cfg(test)]
+thread_local! {
+    static BULK_MANIFEST_OFF_LOCK: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// RFC-0159 P1.2: `persist.write()` must see a free Db write lock.
+#[cfg(test)]
+fn note_bulk_manifest_off_lock<E: Env>(inner: &RwLock<Db<E>>) {
+    assert!(
+        inner.try_write().is_some(),
+        "RFC-0159 P1.2: MANIFEST persist must run with the Db write lock dropped"
+    );
+    BULK_MANIFEST_OFF_LOCK.with(|c| c.set(c.get().saturating_add(1)));
+}
+
+#[cfg(test)]
+fn bulk_manifest_off_lock_count() -> u64 {
+    BULK_MANIFEST_OFF_LOCK.with(std::cell::Cell::get)
+}
+
 struct PendingWrite {
     ops: Vec<BatchOp>,
     do_sync: bool,
@@ -830,7 +850,7 @@ impl WriteGroup {
     /// Multi-writer leaders still fd off-lock via [`Self::finish_group_off_lock`].
     /// RFC-0042 P0.2: `lone_phase_ns` is filled on the off-lock path only.
     fn lone_commit<E: Env>(
-        _group: &WriteGroup,
+        group: &WriteGroup,
         db: &RwLock<Db<E>>,
         ops: Vec<BatchOp>,
         _do_sync: bool,
@@ -855,9 +875,21 @@ impl WriteGroup {
                 return Err(CoreError::TransactionConflict);
             }
         }
-        // One WAL lock encode+write+fd; no GroupInFlight (RFC-0062 P1.1 p11j).
-        // Multi-writer leaders still use [`Self::finish_group_off_lock`].
-        guard.lone_sync_commit(ops)
+        // One WAL lock encode+write+fd; no GroupInFlight (RFC-0062 P1.1
+        // p11j). Multi-writer leaders still use [`Self::finish_group_off_lock`].
+        // RFC-0042 P1.1: a lone commit is a commit in flight exactly like a
+        // group's off-lock fd window — count it, and feed its real fd
+        // duration into the same EMA that bounds the catch-up wait (the
+        // straggler a leader waits out on the sequential host sits right
+        // here, mid-`lone_sync_commit`).
+        guard.begin_commit();
+        let committed = guard.lone_sync_commit(ops);
+        guard.end_commit();
+        let (seq, fd_ns) = committed?;
+        if fd_ns > 0 {
+            group.update_fd_ema(fd_ns);
+        }
+        Ok(seq)
     }
 
     /// WAL encode under the write lock, absorb anyone who queued during that
@@ -999,6 +1031,10 @@ impl WriteGroup {
 #[derive(Clone)]
 pub struct ConcurrentDb<E: Env = StdEnv> {
     inner: Arc<RwLock<Db<E>>>,
+    /// Lock-free view of `Db::commit_inflight` (shared `Arc`): the lone
+    /// G1 path holds the write lock through `fdatasync`, so observing a
+    /// commit in flight must not need the `Db` RwLock (RFC-0042 P1.1).
+    commit_inflight: Arc<std::sync::atomic::AtomicUsize>,
     writes: Arc<WriteGroup>,
     /// Single-flight flush/compact pipeline (F45): dual concurrent `prepare_flush_imm`
     /// + failed `restore_imm` could otherwise race on the one imm slot.
@@ -1094,8 +1130,10 @@ impl<E: Env> ConcurrentDb<E> {
         let occ_registry = Arc::new(Mutex::new(std::collections::BTreeMap::new()));
         let mut db = db;
         db.set_occ_floor_registry(Arc::clone(&occ_registry));
+        let commit_inflight = db.commit_inflight_handle();
         Self {
             inner: Arc::new(RwLock::new(db)),
+            commit_inflight,
             writes: Arc::new(writes),
             flush_lock: Arc::new(Mutex::new(())),
             persist_lock: Arc::new(Mutex::new(())),
@@ -1633,6 +1671,15 @@ impl<E: Env> ConcurrentDb<E> {
         )
     }
 
+    /// Lock-free [`Db::commit_inflight`]: WAL appends whose
+    /// `fdatasync`/mem-apply has not finished, readable even while the lone
+    /// G1 path holds the `Db` write lock through its `fdatasync`
+    /// (RFC-0042 P1.1 + RFC-0062 P1.1).
+    #[must_use]
+    pub fn commit_inflight(&self) -> usize {
+        self.commit_inflight.load(Ordering::Acquire)
+    }
+
     /// True when no writer is in `submit` / group `fdatasync` and the last
     /// Ok is older than `idle`. Uses submit **return** time so a long
     /// apply batch (p95 5–14 ms) is not treated as idle the moment it
@@ -1642,7 +1689,7 @@ impl<E: Env> ConcurrentDb<E> {
         if self.writes.active.load(Ordering::Relaxed) > 0 {
             return false;
         }
-        if self.inner.read().commit_inflight() > 0 {
+        if self.commit_inflight() > 0 {
             return false;
         }
         let last = self.writes.last_complete_ns.load(Ordering::Relaxed);
@@ -1667,8 +1714,7 @@ impl<E: Env> ConcurrentDb<E> {
         if self.writes_idle_for(idle) {
             return None;
         }
-        if self.writes.active.load(Ordering::Relaxed) > 0 || self.inner.read().commit_inflight() > 0
-        {
+        if self.writes.active.load(Ordering::Relaxed) > 0 || self.commit_inflight() > 0 {
             return Some(idle);
         }
         let last = {
@@ -1975,6 +2021,7 @@ impl<E: Env> ConcurrentDb<E> {
         // Drop write-group / flush locks first, then close the sole Db if unique.
         let ConcurrentDb {
             inner,
+            commit_inflight: _,
             writes: _,
             flush_lock: _,
             persist_lock: _,
@@ -2068,7 +2115,7 @@ impl<E: Env> ConcurrentDb<E> {
         // Post-fence commits fail fast at ensure_not_fenced; bounded drain
         // so the reopen never races a mid-write WAL handle.
         let deadline = Instant::now() + Duration::from_secs(2);
-        while self.inner.read().commit_inflight() > 0 {
+        while self.commit_inflight() > 0 {
             if Instant::now() > deadline {
                 return Err(CoreError::Internal(
                     "commit_batch still in flight at recover_from_fence".into(),
@@ -2272,7 +2319,16 @@ impl<E: Env> ConcurrentDb<E> {
     pub fn flush(&self) -> Result<()> {
         let _flush = self.flush_lock.lock();
         while self.materialize_bulk_holding_flush() {}
-        self.inner.write().flush_all_bulk_runs()?;
+        let persist = {
+            let mut g = self.inner.write();
+            g.flush_all_bulk_runs()?
+        };
+        if let Some(persist) = persist {
+            #[cfg(test)]
+            note_bulk_manifest_off_lock(&self.inner);
+            let _p = self.persist_lock.lock();
+            persist.write()?;
+        }
         // At most two pipeline steps: drain existing imm, then switch+flush active.
         // Do **not** loop while concurrent puts refill mem (that would never end).
         for _ in 0..2 {
@@ -2354,20 +2410,40 @@ impl<E: Env> ConcurrentDb<E> {
             .parent()
             .map(std::path::PathBuf::from)
             .unwrap_or(final_path);
-        match Db::write_bulk_run_sst(&env, &dir, num, run.as_ref(), &fam, sync) {
-            Ok((table, num)) => match self.inner.write().finish_bulk_sst(&fam, table, num) {
-                Ok(Some(persist)) => persist.write().is_ok(),
-                Ok(None) => true,
-                Err(_) => false,
-            },
+        let written =
+            match Db::write_bulk_run_sst(&env, &dir, num, run.as_ref(), &fam, sync, "worker") {
+            Ok(t) => t,
             Err(_) => {
                 let mut g = self.inner.write();
                 if let Some(pin) = g.take_bulk_encoding() {
                     g.push_parked_bulk_front(pin);
                 }
-                false
+                return false;
             }
-        }
+        };
+        // RFC-0159 P1.2: take the MANIFEST job under the write lock, then
+        // drop the guard before `persist.write()` (same shape as
+        // [`Self::persist_unsynced_l0s_off_lock`]). The match-scrutinee
+        // temporary of `inner.write().finish_bulk_sst(...)` used to live
+        // across the I/O.
+        let persist = match self
+            .inner
+            .write()
+            .finish_bulk_sst(&fam, written.0, written.1)
+        {
+            Ok(p) => p,
+            Err(_) => return false,
+        };
+        let Some(persist) = persist else {
+            return true;
+        };
+        #[cfg(test)]
+        note_bulk_manifest_off_lock(&self.inner);
+        let wrote = {
+            let _p = self.persist_lock.lock();
+            persist.write()
+        };
+        wrote.is_ok()
     }
 
     /// Drain **one existing** immutable memtable → L0 without forcing an
@@ -4140,6 +4216,178 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// RFC-0160 P0.5: chunked BulkRun + empty payload stay under three
+    /// chunk caps (open tail + parked + encoding). RSS must not climb
+    /// with n.
+    #[test]
+    fn bulk_chunked_ingest_live_bytes_stay_under_three_chunks() {
+        let dir = temp_dir();
+        let cap = 32 * 1024usize;
+        let db = ConcurrentDb::open_with_env_bounded(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(cap),
+                sst_payload_budget_bytes: Some(1),
+                ..OpenOptions::default()
+            },
+            crate::env::StdEnv,
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into()]);
+        let v = vec![b'v'; 48];
+        for b in 0..10u32 {
+            let mut batch = Vec::new();
+            for j in 0..8u32 {
+                batch.push(BatchOp::put(
+                    format!("data\0{b:04}-{j:04}").into_bytes(),
+                    v.clone(),
+                ));
+            }
+            db.apply_batch_vec(batch).unwrap();
+        }
+        assert!(
+            db.family_is_latched_async("data"),
+            "admissible batches must latch"
+        );
+        let payload = vec![b'x'; 80];
+        let mut all_keys = Vec::new();
+        for chunk in 0..12u32 {
+            let mut keys = Vec::new();
+            let mut vals = Vec::new();
+            for j in 0..500u32 {
+                let k = format!("data\0z-{chunk:04}-{j:06}").into_bytes();
+                keys.push(Bytes::from(k.clone()));
+                vals.push(Bytes::from(payload.clone()));
+                all_keys.push(k);
+            }
+            db.apply_latched_bulk("data", keys, vals, Vec::new())
+                .unwrap();
+            while db.with_read(|d| d.has_parked_bulk()) {
+                assert!(db.materialize_bulk_once());
+            }
+            let live = db.with_read(|d| d.bulk_live_bytes());
+            assert!(
+                live <= cap.saturating_mul(3),
+                "chunk {chunk}: bulk live {live} must stay ≤ 3×cap {}",
+                cap * 3
+            );
+        }
+        db.flush().unwrap();
+        assert_eq!(
+            db.with_read(|d| d.bulk_live_bytes()),
+            0,
+            "settle must drain BulkRun / parked / encoding"
+        );
+        assert!(
+            db.with_read(|d| d.sst_payload_pool().resident_bytes()) <= 1,
+            "bulk SSTs must not pin whole-file payloads, resident={}",
+            db.with_read(|d| d.sst_payload_pool().resident_bytes())
+        );
+        assert_eq!(
+            db.get(&all_keys[0]).as_deref(),
+            Some(payload.as_slice()),
+            "first overflow key must read back"
+        );
+        assert_eq!(
+            db.get(all_keys.last().unwrap()).as_deref(),
+            Some(payload.as_slice()),
+            "last overflow key must read back"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0161 P0.5: Pedra-side hydrate RAM is BulkRun tail + indexes +
+    /// mem, **not** whole-file payloads. Doubling chunks must not double
+    /// payload residency (v74 100M SIGKILL was Rocks-still-live + this
+    /// set; the engine bound is this function).
+    #[test]
+    fn hydrate_resident_bytes_exclude_payload_and_cap_tail() {
+        let dir = temp_dir();
+        let cap = 32 * 1024usize;
+        let db = ConcurrentDb::open_with_env_bounded(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(cap),
+                sst_payload_budget_bytes: Some(1),
+                ..OpenOptions::default()
+            },
+            crate::env::StdEnv,
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into()]);
+        let v = vec![b'v'; 48];
+        for b in 0..10u32 {
+            let mut batch = Vec::new();
+            for j in 0..8u32 {
+                batch.push(BatchOp::put(
+                    format!("data\0{b:04}-{j:04}").into_bytes(),
+                    v.clone(),
+                ));
+            }
+            db.apply_batch_vec(batch).unwrap();
+        }
+        assert!(db.family_is_latched_async("data"));
+        let payload = vec![b'x'; 80];
+        let ingest = |db: &ConcurrentDb<_>, chunks: u32, tag: u32| {
+            for chunk in 0..chunks {
+                let mut keys = Vec::new();
+                let mut vals = Vec::new();
+                for j in 0..400u32 {
+                    let k = format!("data\0h{tag}-{chunk:04}-{j:06}").into_bytes();
+                    keys.push(Bytes::from(k));
+                    vals.push(Bytes::from(payload.clone()));
+                }
+                db.apply_latched_bulk("data", keys, vals, Vec::new())
+                    .unwrap();
+                while db.with_read(|d| d.has_parked_bulk()) {
+                    assert!(db.materialize_bulk_once());
+                }
+                let live = db.with_read(|d| d.bulk_live_bytes());
+                assert!(
+                    live <= cap.saturating_mul(3),
+                    "tail {live} > 3×cap"
+                );
+                assert!(
+                    db.with_read(|d| d.sst_payload_pool().resident_bytes()) <= 1,
+                    "payload must stay empty during bulk"
+                );
+            }
+        };
+        ingest(&db, 6, 1);
+        let mid = db.with_read(|d| {
+            (
+                d.hydrate_resident_bytes(),
+                d.sst_index_bytes(),
+                d.bulk_live_bytes(),
+            )
+        });
+        ingest(&db, 6, 2);
+        let end = db.with_read(|d| {
+            (
+                d.hydrate_resident_bytes(),
+                d.sst_index_bytes(),
+                d.bulk_live_bytes(),
+            )
+        });
+        assert!(
+            end.2 <= cap.saturating_mul(3),
+            "tail after more chunks {}",
+            end.2
+        );
+        let grown = end.0.saturating_sub(mid.0);
+        let index_grown = end.1.saturating_sub(mid.1);
+        assert!(
+            grown <= index_grown.saturating_add(cap.saturating_mul(3)).saturating_add(64 * 1024),
+            "hydrate_resident grew {grown} beyond index {index_grown} + 3×cap (payload leak)"
+        );
+        db.flush().unwrap();
+        assert_eq!(db.with_read(|d| d.bulk_live_bytes()), 0);
+        assert!(db.with_read(|d| d.sst_payload_pool().resident_bytes()) <= 1);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// RFC-0159 P0.4 (core half): a bulk-ingested store and its ladder
     /// twin (identical batches, `bulk_route_enabled=false`) serve the
     /// identical keyspace after settle — the fast path changes layout,
@@ -4428,6 +4676,7 @@ mod tests {
         db.set_physical_cfs(vec!["data".into()]);
         db.set_cf_write_buffer("data", 256);
         let v = vec![b'x'; 80];
+        let off_lock_before = bulk_manifest_off_lock_count();
         // Latch (threshold 8) then overflow the chunk cap so chunks park.
         for b in 0..40u32 {
             let mut keys = Vec::new();
@@ -4453,11 +4702,21 @@ mod tests {
         }
         let debt = db.with_read(|d| d.bulk_manifest_debt());
         assert!(debt < 4, "debt must wrap every 4 installs, got {debt}");
+        let off_lock_mid = bulk_manifest_off_lock_count();
+        assert!(
+            off_lock_mid > off_lock_before,
+            "every-N MANIFEST persist must run with the Db write guard dropped \
+             (got {off_lock_mid} off-lock writes, before {off_lock_before})"
+        );
         db.flush().unwrap();
         assert_eq!(
             db.with_read(|d| d.bulk_manifest_debt()),
             0,
             "flush/settle must force leftover MANIFEST debt"
+        );
+        assert!(
+            bulk_manifest_off_lock_count() > off_lock_mid,
+            "settle force persist must also run with the write guard dropped"
         );
         assert!(
             db.get(b"data\00000-0000").is_some(),
@@ -5977,7 +6236,11 @@ mod tests {
         let db_a = db.clone();
         let a = thread::spawn(move || db_a.put(b"a", b"va").unwrap());
         let deadline = Instant::now() + Duration::from_secs(5);
-        while db.with_read(|d| d.commit_inflight()) == 0 {
+        // Lock-free read: the lone G1 path holds the Db write lock through
+        // its fdatasync (RFC-0062 P1.1), so the counter must be observable
+        // without the Db RwLock (RFC-0042 P1.1) — `with_read` would block
+        // until the commit is over and never see it nonzero.
+        while db.commit_inflight() == 0 {
             assert!(Instant::now() < deadline, "A never entered its commit");
             thread::sleep(Duration::from_micros(100));
         }

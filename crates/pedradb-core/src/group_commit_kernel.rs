@@ -279,11 +279,8 @@ mod tests {
             }
             let flags = group_validate(&reads, last_seq);
             for i in 0..n {
-                let alone = occ_conflict(
-                    reads[i].snap,
-                    last_seq,
-                    reads[i].touched_key_written_after,
-                );
+                let alone =
+                    occ_conflict(reads[i].snap, last_seq, reads[i].touched_key_written_after);
                 if flags[i] != alone {
                     viol = Some(format!(
                         "trial={trial} member {i} flag {} != alone {alone} (group not simultaneous)",

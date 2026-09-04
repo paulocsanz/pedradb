@@ -35,10 +35,13 @@ consistency above the engine. The API is
   Repeated corruption refuses the open. A failed WAL sync fences the writer
   and reports the uncertain sequence range instead of continuing. There is
   no option to turn integrity checks off.
-- **Pure Rust, no C++ toolchain.** No cmake, no bindgen, 73 packages in the
-  lockfile. The engine is `#![forbid(unsafe_code)]`; the only `unsafe` in
-  the tree is two thin syscall crates (fdatasync / fallocate / fadvise, and
-  io_uring submission).
+- **Pure Rust, no C++ toolchain.** No cmake, no bindgen; the engine's
+  dependency graph is 73 packages, all Rust. The engine is
+  `#![forbid(unsafe_code)]`; the only `unsafe` in the tree is two thin
+  syscall crates (fdatasync / fallocate / fadvise, and io_uring
+  submission). One C++ exception, optional and explicit: the RocksDB
+  peer behind `rocksdb-parity-bench --features real` (off by default;
+  the engine never links it).
 - **Machine-checked where it counts.** 21 decision kernels (WAL recovery,
   manifest recovery, CRC fate, group commit, flush and compaction decisions,
   leveling, bloom filters, MVCC visibility, iterator windows) have
@@ -182,19 +185,27 @@ latched bulk ingest skips WAL and memtable on the append-only family):
 | 1M | **1.82×** | **2.50×** | **1.44×** | **1.64×** | **1.36×** | **1.08×** |
 | 10M | **1.03×** | **7.67×** | 1.00× (tie) | **1.31×** | **1.07×** | **1.02×** |
 | 25M | ~1.0× | **~7×** | ~1.01–1.15× | ~1.12–1.16× | 0.88–0.94× | 0.81–1.07× |
+| 100M | **1.18×** | — | — | — | — | — |
 
 - 10M `get_hit` is a tie (confidence intervals overlap), not a win.
-- 25M hydrate sits inside Rocks's 27.9–30.6 s band (PedraDB floor
-  28.1–28.8 s); a 3-run median of 0.997× is not a win. `lookup_100` at 25M
-  is not ≥ 1×. Settle always wins.
+- 25M hydrate sits inside Rocks's 27.9–34.4 s band (PedraDB floor
+  28.1–30.2 s); the 2026-09-03 3-run median is 1.02× — parity inside the
+  ±3 s host-noise band, not a win claim. `lookup_100` at 25M is not ≥ 1×.
+  Settle always wins.
+- 100M used to OOM on the 3.9 GiB guest (sparse-index keys pinned the
+  ingest key pool; fixed — index boundary keys are owned copies now).
+  2026-09-03, 3 runs on the same guest: hydrate median **1.18×** (Pedra
+  121.6–127.5 s, Rocks 129.0–149.5 s), on disk 23.97 GiB (257 B/entry) vs
+  Rocks 23.78–24.29 GiB, no OOM. Most of the flip is Rocks-side: Rocks's
+  own same-shape band moved from 117–121 s (2026-08-31) to 129–150 s
+  here while Pedra moved ~2 s. That spread is why every number above is
+  a 3-run median.
 - Absent-key `probe_miss` can lose (bulk files ship an always-true bloom)
   and is not in the required set.
-- 100M on the 3.9 GiB guest runs out of memory (RSS climbs with the open
-  tail). That is a RAM bound, not a benchmark result.
 
 ## How it's tested
 
-- **Close to 1,000 tests** across the six crates: unit tests, model tests
+- **Close to 1,000 tests** across the seven crates: unit tests, model tests
   against `stateright` specifications (recovery, bloom, changelog, prefix,
   range, scan), codec fuzz smoke tests, a WAL durability adversarial suite,
   and a concurrent race stress suite.
@@ -234,6 +245,7 @@ rocksdb = { git = "https://github.com/paulocsanz/pedradb", package = "rocksdb-co
 | `pedradb-io-uring` | Linux io_uring `Env` for WAL/SST writes and fsync; POSIX fallback elsewhere. |
 | `pedradb-posix` | fdatasync / fallocate / fadvise. With `pedradb-io-uring`, the only `unsafe` in the tree. |
 | `rocksdb-compat` | rust-rocksdb 0.22 API on the engine, for migrating existing Rocks code. |
+| `rocksdb-parity-bench` | The parity harness behind the tables above: same shape, same host, Pedra vs RocksDB default. |
 
 MSRV 1.88. Dual-licensed MIT or Apache-2.0.
 
