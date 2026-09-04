@@ -914,3 +914,105 @@ impl OccEngine for RocksOccEngine {
         f(&mut wrap)
     }
 }
+
+/// Fjall LSM peer. YCSB/point shapes only — no named CFs, so `deps` is refused
+/// at the bin. Same-class async (journal to OS, no fsync per put).
+#[cfg(feature = "fjall")]
+pub struct FjallEngine {
+    db: fjall::Database,
+    ks: fjall::Keyspace,
+}
+
+#[cfg(feature = "fjall")]
+impl FjallEngine {
+    pub fn open(path: &Path) -> Self {
+        let db = fjall::Database::builder(path)
+            .open()
+            .expect("fjall open");
+        let ks = db
+            .keyspace("default", fjall::KeyspaceCreateOptions::default)
+            .expect("fjall keyspace");
+        Self { db, ks }
+    }
+}
+
+#[cfg(feature = "fjall")]
+impl Engine for FjallEngine {
+    fn label(&self) -> &'static str {
+        "fjall"
+    }
+    fn durability(&self) -> &'static str {
+        "async-journal (fjall default persist-on-drop; not G1)"
+    }
+    fn sync(&self) -> bool {
+        false
+    }
+    fn put(&self, k: &[u8], v: &[u8]) -> bool {
+        self.ks.insert(k, v).is_ok()
+    }
+    fn get(&self, k: &[u8]) -> Result<Option<Vec<u8>>, ()> {
+        self.ks
+            .get(k)
+            .map(|o| o.map(|v| v.to_vec()))
+            .map_err(|_| ())
+    }
+    fn scan_count(&self, start: &[u8], end: &[u8], cap: usize) -> Result<usize, ()> {
+        Ok(self
+            .ks
+            .range(start.to_vec()..end.to_vec())
+            .take(cap)
+            .count())
+    }
+    fn put_cf(&self, cf: &str, k: &[u8], v: &[u8]) -> bool {
+        if cf == "default" || cf.is_empty() {
+            self.put(k, v)
+        } else {
+            false
+        }
+    }
+    fn get_cf(&self, cf: &str, k: &[u8]) -> Result<Option<Vec<u8>>, ()> {
+        if cf == "default" || cf.is_empty() {
+            self.get(k)
+        } else {
+            Err(())
+        }
+    }
+    fn batch(&self, ops: Vec<CfWrite>) -> bool {
+        let mut wb = self.db.batch();
+        for op in ops {
+            match op {
+                CfWrite::Put { cf, k, v } if cf == "default" || cf.is_empty() => {
+                    wb.insert(&self.ks, k, v);
+                }
+                _ => return false,
+            }
+        }
+        wb.commit().is_ok()
+    }
+    fn latest_cf(&self, cf: &str, prefix: &[u8]) -> Result<Option<Vec<u8>>, ()> {
+        if cf != "default" && !cf.is_empty() {
+            return Err(());
+        }
+        Ok(self
+            .ks
+            .prefix(prefix)
+            .last()
+            .and_then(|g| g.key().ok())
+            .map(|k| k.to_vec()))
+    }
+    fn scan_count_cf(
+        &self,
+        cf: &str,
+        start: &[u8],
+        end: &[u8],
+        cap: usize,
+    ) -> Result<usize, ()> {
+        if cf != "default" && !cf.is_empty() {
+            return Err(());
+        }
+        self.scan_count(start, end, cap)
+    }
+    fn flush(&self) -> bool {
+        self.db.persist(fjall::PersistMode::SyncAll).is_ok()
+    }
+}
