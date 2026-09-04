@@ -643,11 +643,20 @@ impl SstTable {
             return Ok(None);
         }
         if !self.block_crc {
-            // ≤v4 carries no per-block CRC: reuse the whole-body path so the
-            // file-level CRC gate re-runs before any block decodes.
-            return Ok(self.point_in_blocks(user_key, snapshot, &mut |bi| {
-                self.decode_block(bi).ok().map(Arc::new)
-            }));
+            // ≤v4: file-level CRC re-runs on eviction. Propagate decode
+            // errors — `.ok()` used to turn bitrot into a silent miss.
+            let mut best: Option<(SequenceNumber, Lookup)> = None;
+            for bi in self.blocks_for_point(user_key) {
+                let block = self.decode_block(bi)?;
+                if let Some((seq, look)) =
+                    Self::best_point_in_entry_slice(&block, user_key, snapshot)
+                {
+                    if best.as_ref().is_none_or(|(s, _)| seq > *s) {
+                        best = Some((seq, look));
+                    }
+                }
+            }
+            return Ok(best);
         }
         // Bulk hydrate leaves the slot empty (100M RAM). If the 256 MiB
         // pool still has room, promote now so get_hit is a slice+CRC-skip
@@ -1354,6 +1363,12 @@ impl SstTable {
         } else {
             let leftover: Vec<_> = self
                 .entries_cloned()
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "pedradb: corrupt SST in {} on range: {e}",
+                        self.path.display()
+                    )
+                })
                 .into_iter()
                 .filter(|(k, _)| {
                     k.kind != ValueType::RangeDeletion
@@ -1706,9 +1721,16 @@ impl SstTable {
     /// All internal versions in sorted order (materializes lazy tables).
     ///
     /// # Panics
-    /// Does not panic; corrupt re-decode yields empty iterator after logging via empty vec.
+    /// Corrupt re-decode — never an empty stand-in.
     pub fn iter_internal(&self) -> impl Iterator<Item = (InternalKey, Bytes)> + '_ {
-        self.entries_cloned().into_iter()
+        self.entries_cloned()
+            .unwrap_or_else(|e| {
+                panic!(
+                    "pedradb: corrupt SST in {} on iter_internal: {e}",
+                    self.path.display()
+                )
+            })
+            .into_iter()
     }
 
     /// First user key of every data block, from the in-memory index (no I/O).
@@ -1766,9 +1788,12 @@ impl SstTable {
     }
 
     /// Clone all entries (for compaction merge). Materializes lazy tables.
-    #[must_use]
-    pub fn entries_cloned(&self) -> Vec<(InternalKey, Bytes)> {
-        self.materialize_entries().unwrap_or_default()
+    ///
+    /// # Errors
+    /// Block CRC / decode fault. Compact/GC must fail-stop — an empty
+    /// stand-in would rewrite the file as if it had no keys.
+    pub fn entries_cloned(&self) -> Result<Vec<(InternalKey, Bytes)>> {
+        self.materialize_entries()
     }
 
     /// Clone only internal entries whose user key falls in `[start, end)`.
@@ -1850,7 +1875,12 @@ impl SstTable {
             return out;
         }
 
-        let entries = self.entries_cloned();
+        let entries = self.entries_cloned().unwrap_or_else(|e| {
+            panic!(
+                "pedradb: corrupt SST in {} on entries_in_user_range: {e}",
+                self.path.display()
+            )
+        });
         entries
             .into_iter()
             .filter(|(ikey, _)| {
@@ -1974,7 +2004,12 @@ impl SstTable {
             }
             None
         } else {
-            let entries = self.entries_cloned();
+            let entries = self.entries_cloned().unwrap_or_else(|e| {
+                panic!(
+                    "pedradb: corrupt SST in {} on last_visible: {e}",
+                    self.path.display()
+                )
+            });
             let mut last: Option<Bytes> = None;
             let mut users = Vec::new();
             for (k, _) in entries.iter().rev() {
@@ -2114,7 +2149,7 @@ impl SstInternalStream<'_> {
                 if self.block.is_some() {
                     return Ok(None);
                 }
-                self.block = Some(self.table.entries_cloned());
+                self.block = Some(self.table.entries_cloned()?);
                 self.entry_i = 0;
                 continue;
             }
@@ -4087,7 +4122,7 @@ mod tests {
             }
             out
         };
-        assert_eq!(streamed, table.entries_cloned());
+        assert_eq!(streamed, table.entries_cloned().unwrap());
         // Streaming must not fill the materialize cache.
         drop(streamed);
         // Re-open so the cache from entries_cloned() above is gone.
@@ -4709,7 +4744,7 @@ mod tests {
         let table = write_sst(&path, &mem).unwrap();
         assert!(table.block_count() >= 3, "need multiple blocks");
         assert!(table.block_crc, "v5 writer default");
-        let expected_all = table.entries_cloned();
+        let expected_all = table.entries_cloned().unwrap();
         let Lookup::Found(expected_get) = table.get(b"key-00150", 1_000) else {
             panic!("baseline get must hit");
         };
@@ -4944,7 +4979,7 @@ mod tests {
         .unwrap();
         assert!(table.is_lazy());
         assert!(!table.block_crc, "v3 has no per-block CRC");
-        let expected = table.entries_cloned();
+        let expected = table.entries_cloned().unwrap();
         // Drop the decoded-entries cache warmed above so the reload test
         // actually walks the payload path instead of answering from cache.
         *table.entries.lock() = None;

@@ -4897,7 +4897,12 @@ impl<E: Env> Db<E> {
             }
         }
         for t in &self.ssts {
-            for (_, v) in t.entries_cloned() {
+            for (_, v) in t.entries_cloned().unwrap_or_else(|e| {
+                panic!(
+                    "pedradb: corrupt SST in {} on vlog stats: {e}",
+                    t.path().display()
+                )
+            }) {
                 consider(&v);
             }
         }
@@ -5687,9 +5692,9 @@ impl<E: Env> Db<E> {
         let (env, dir, sync) = self.l0_write_ctx();
         let (table, num) =
             match Self::write_bulk_run_sst(&env, &dir, num, &run, family, sync, "inline") {
-            Ok(t) => t,
-            Err(e) => return Err(self.fence_io_err(e)),
-        };
+                Ok(t) => t,
+                Err(e) => return Err(self.fence_io_err(e)),
+            };
         if let Some(persist) = self.finish_bulk_sst(family, table, num)? {
             persist.write()?;
         }
@@ -5713,14 +5718,14 @@ impl<E: Env> Db<E> {
         let t0 = bulk_stage_timing_on().then(std::time::Instant::now);
         let final_path = dir.join(format!("{num:06}.sst"));
         let tmp_path = dir.join(format!("{num:06}.sst.tmp"));
-        let table =
-            match write_sst_bulk_arrays(env, &tmp_path, run.keys(), run.vals(), run.seqs()) {
-                Ok(t) => t,
-                Err(e) => {
-                    let _ = env.remove_file(&tmp_path);
-                    return Err(e);
-                }
-            };
+        let table = match write_sst_bulk_arrays(env, &tmp_path, run.keys(), run.vals(), run.seqs())
+        {
+            Ok(t) => t,
+            Err(e) => {
+                let _ = env.remove_file(&tmp_path);
+                return Err(e);
+            }
+        };
         if let Err(e) = env.rename(&tmp_path, &final_path) {
             let _ = env.remove_file(&tmp_path);
             let _ = env.remove_file(&final_path);
@@ -6915,7 +6920,7 @@ impl<E: Env> Db<E> {
         // Full-DB rewrite: bottommost — tombstones may be collapsed (F177).
         let mut merged: Vec<(InternalKey, Bytes)> = Vec::new();
         for t in &self.ssts {
-            merged.extend(t.entries_cloned());
+            merged.extend(t.entries_cloned()?);
         }
         // F216: `latest_only` seeds the GC watermark from `last_sequence()`,
         // which counts applied-but-unpublished writes (write-group off-lock
@@ -7917,7 +7922,7 @@ impl<E: Env> Db<E> {
             }
         }
         for t in &self.ssts {
-            for (_, v) in t.entries_cloned() {
+            for (_, v) in t.entries_cloned()? {
                 consider(&v);
             }
         }
@@ -7955,7 +7960,7 @@ impl<E: Env> Db<E> {
         let remap_one = |stored: &Bytes| vlog::remap_stored_blob(stored, file_num, remap);
 
         for (idx, table) in self.ssts.iter().enumerate() {
-            let mentions = table.entries_cloned().iter().any(|(_, v)| {
+            let mentions = table.entries_cloned()?.iter().any(|(_, v)| {
                 vlog::decode_vlog_ptr(v.as_ref()).is_some_and(|p| p.file_num == file_num)
             });
             let level = self.sst_levels.get(idx).copied().unwrap_or(0);
@@ -7971,7 +7976,7 @@ impl<E: Env> Db<E> {
             staged_paths.push(tmp.clone());
             staged_paths.push(dest.clone());
             let entries: Vec<(InternalKey, Bytes)> = table
-                .entries_cloned()
+                .entries_cloned()?
                 .into_iter()
                 .map(|(k, v)| (k, remap_one(&v)))
                 .collect();
@@ -8049,7 +8054,7 @@ impl<E: Env> Db<E> {
                     return Ok(());
                 }
                 // Leave prior handle in place if any; fence so puts stop.
-                self.durability_fenced = true;
+                self.fence_durability(&e, FenceClass::of_core(&e));
                 Err(e)
             }
         }
@@ -8105,7 +8110,7 @@ impl<E: Env> Db<E> {
         // remapped mem + old handle. Never clear vlog first.
         if let Err(e) = self.replace_vlog_handle(true) {
             // Inventory is committed; must not serve mismatched handle.
-            self.durability_fenced = true;
+            self.fence_durability(&e, FenceClass::of_core(&e));
             return Err(e);
         }
 
@@ -8143,7 +8148,7 @@ impl<E: Env> Db<E> {
             }
         }
         for t in &self.ssts {
-            for (_, v) in t.entries_cloned() {
+            for (_, v) in t.entries_cloned()? {
                 consider(&v);
             }
         }
@@ -8191,7 +8196,7 @@ impl<E: Env> Db<E> {
         };
 
         for (table, &level) in self.ssts.iter().zip(self.sst_levels.iter()) {
-            let entries = table.entries_cloned();
+            let entries = table.entries_cloned()?;
             let needs = entries.iter().any(|(_, v)| {
                 vlog::decode_vlog_ref(v.as_ref())
                     .is_some_and(|(off, _, _)| remap.contains_key(&off))
@@ -9135,11 +9140,23 @@ impl<E: Env> Db<E> {
         // RFC-0040: encode into WAL scratch (one payload memcpy), then move ops to mem.
         let do_sync = durability.sync.unwrap_or(self.sync);
         self.vlog_prepare_wal(do_sync)?;
-        let n = self.wal.lock().append_write_ops(&records)?;
+        // WAL is O_APPEND: a torn write_all leaves bytes at EOF. Fence on
+        // append failure the same as sync failure.
+        let n = {
+            let r = self.wal.lock().append_write_ops(&records);
+            match r {
+                Ok(n) => n,
+                Err(e) => {
+                    self.fence_durability(&e, FenceClass::of_core(&e));
+                    return Err(e);
+                }
+            }
+        };
         self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
         if do_sync {
-            if let Err(e) = self.wal.lock().sync_data() {
-                self.durability_fenced = true;
+            let sync_err = self.wal.lock().sync_data().err();
+            if let Some(e) = sync_err {
+                self.fence_durability(&e, FenceClass::of_core(&e));
                 return Err(e);
             }
             self.note_wal_sync();
@@ -9261,8 +9278,9 @@ impl<E: Env> Db<E> {
     /// One WAL `fdatasync` for a group of already-appended records.
     pub(crate) fn wal_sync_group(&mut self) -> Result<()> {
         self.ensure_not_fenced()?;
-        if let Err(e) = self.wal.lock().sync_data() {
-            self.durability_fenced = true;
+        let sync_err = self.wal.lock().sync_data().err();
+        if let Some(e) = sync_err {
+            self.fence_durability(&e, FenceClass::of_core(&e));
             return Err(e);
         }
         self.note_wal_sync();
@@ -9732,7 +9750,7 @@ impl<E: Env> Db<E> {
 
     pub(crate) fn group_finish(&mut self, g: GroupInFlight) -> Vec<Result<SequenceNumber>> {
         if let Err(e) = self.vlog_prepare_wal(g.needs_sync()) {
-            self.durability_fenced = true;
+            self.fence_durability(&e, FenceClass::of_core(&e));
             return g.fail_sync(e);
         }
         // One WAL lock: `sync_data` already `write()`s the pending frame
@@ -9742,9 +9760,12 @@ impl<E: Env> Db<E> {
             if let Err(e) = self.wal_sync_group() {
                 return g.fail_sync(e);
             }
-        } else if let Err(e) = self.wal.lock().write_pending_frame() {
-            self.durability_fenced = true;
-            return g.fail_sync(e);
+        } else {
+            let write_err = self.wal.lock().write_pending_frame().err();
+            if let Some(e) = write_err {
+                self.fence_durability(&e, FenceClass::of_core(&e));
+                return g.fail_sync(e);
+            }
         }
         let pub_seq = g.max_appended_seq();
         let results = self.group_apply(g);
@@ -10296,8 +10317,8 @@ impl<E: Env> Db<E> {
             // disk IS the new one (unsynced). Undoing here would put memory
             // behind disk and delete files the manifest references; fence
             // and treat the persist as landed (promote/fence shape).
-            Err(CoreError::ManifestCommittedUnsynced { .. }) => {
-                self.durability_fenced = true;
+            Err(CoreError::ManifestCommittedUnsynced { ref source, .. }) => {
+                self.fence_durability_post_commit(source);
                 Ok(())
             }
             Err(e) => Err(e),
@@ -10984,6 +11005,12 @@ impl<'a> SstCountCursor<'a> {
             // Eager tables: one synthetic "block" with the in-range leftover.
             let leftover: Vec<_> = table
                 .entries_cloned()
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "pedradb: corrupt SST in {} on count: {e}",
+                        table.path().display()
+                    )
+                })
                 .into_iter()
                 .filter(|(k, _)| {
                     k.kind != ValueType::RangeDeletion
@@ -11774,8 +11801,7 @@ mod tests {
     struct BulkProbeEnv {
         inner: StdEnv,
         syncs: std::sync::Arc<std::sync::Mutex<Vec<std::path::PathBuf>>>,
-        advises:
-            std::sync::Arc<std::sync::Mutex<Vec<(std::path::PathBuf, u64, u64, AdviseKind)>>>,
+        advises: std::sync::Arc<std::sync::Mutex<Vec<(std::path::PathBuf, u64, u64, AdviseKind)>>>,
     }
 
     impl BulkProbeEnv {
@@ -14612,7 +14638,7 @@ mod tests {
         let mut concat = Vec::new();
         for (t, &lvl) in db.ssts.iter().zip(db.sst_levels.iter()) {
             if lvl == 0 {
-                concat.extend(t.entries_cloned());
+                concat.extend(t.entries_cloned().unwrap());
             }
         }
         let expected =
@@ -14628,7 +14654,7 @@ mod tests {
             .find(|(_, &lvl)| lvl == 1)
             .map(|(t, _)| t)
             .expect("L1");
-        assert_eq!(l1.entries_cloned(), expected);
+        assert_eq!(l1.entries_cloned().unwrap(), expected);
         assert_eq!(db.get(b"a"), None);
         assert_eq!(db.get(b"b").as_deref(), Some(b"b2".as_slice()));
         assert_eq!(db.get(b"c").as_deref(), Some(b"c1".as_slice()));

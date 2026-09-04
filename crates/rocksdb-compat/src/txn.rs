@@ -33,21 +33,34 @@ use std::sync::Arc;
 use std::time::Duration;
 
 /// rust-rocksdb `WriteOptions` subset. Durability follows the DB
-/// [`super::Options::sync`] (drop-in default false, RFC-0054). `sync` is
-/// accepted so SurrealDB's `set_sync(false)` compiles; it does not override
-/// the DB flag (kernel `WriteOptions` on `OccTransaction::commit_with` does).
+/// [`super::Options::sync`] until [`Self::set_sync`] is called — then the
+/// kernel per-call flag is honored.
 #[derive(Debug, Clone, Default)]
 pub struct WriteOptions {
-    /// Rocks `WriteOptions.sync`. Accepted, not applied — commit uses the
-    /// DB default (`Options::sync`).
+    /// Rocks `WriteOptions.sync`. Meaningful after [`Self::set_sync`].
     pub sync: bool,
+    /// `true` once [`Self::set_sync`] ran — default keeps the DB flag.
+    sync_explicit: bool,
 }
 
 impl WriteOptions {
-    /// Builder: Rocks per-write sync flag (ignored; G1).
+    /// Builder: Rocks per-write sync flag. Overrides [`super::Options::sync`].
     pub fn set_sync(&mut self, v: bool) -> &mut Self {
         self.sync = v;
+        self.sync_explicit = true;
         self
+    }
+
+    /// Kernel durability for this write. `None` = open-time DB default.
+    #[must_use]
+    pub(crate) fn kernel_durability(&self) -> pedradb_core::WriteOptions {
+        if self.sync_explicit {
+            pedradb_core::WriteOptions {
+                sync: Some(self.sync),
+            }
+        } else {
+            pedradb_core::WriteOptions::default()
+        }
     }
 }
 
@@ -385,18 +398,19 @@ impl<E: Env> TransactionDB<E> {
         writeopts: &WriteOptions,
         txn_opts: &TransactionOptions,
     ) -> Transaction<'_, E> {
-        let _ = writeopts;
         let timeout = if txn_opts.lock_timeout < 0 {
             self.txn_lock_timeout
         } else {
             ms_to_dur(txn_opts.lock_timeout)
         };
-        Transaction::new_pessimistic(
+        let mut t = Transaction::new_pessimistic(
             &self.db,
             Arc::clone(&self.locks),
             timeout,
             txn_opts.deadlock_detect,
-        )
+        );
+        t.durability = writeopts.kernel_durability();
+        t
     }
 
     /// 2PC recovered txns. Pedra is 1PC — always empty.
@@ -485,6 +499,7 @@ pub struct Transaction<'a, E: Env = IoUringEnv> {
     /// Keys yielded by [`Self::raw_iterator_opt`] (issue #3). Shared so the
     /// iterator can outlive a borrow of `self` until `commit` consumes us.
     scan_reads: Arc<Mutex<BTreeSet<Bytes>>>,
+    durability: pedradb_core::WriteOptions,
 }
 
 struct Pess {
@@ -507,10 +522,13 @@ impl<E: Env> Drop for Transaction<'_, E> {
 
 impl<'a, E: Env> Transaction<'a, E> {
     pub(crate) fn new(db: &'a DB<E>) -> Self {
-        // F186: pin the version-GC floor for the transaction's lifetime
-        // (rust-rocksdb: a txn's snapshot is pinned; `auto_reclaim` must
-        // never abort a live txn with `SnapshotTooOld`). Pin BEFORE
-        // `begin_occ` so the OCC snapshot is always ≥ the pinned floor.
+        Self::new_with_durability(db, pedradb_core::WriteOptions::default())
+    }
+
+    pub(crate) fn new_with_durability(
+        db: &'a DB<E>,
+        durability: pedradb_core::WriteOptions,
+    ) -> Self {
         let pin = db.inner.pin_snapshot();
         Self {
             occ: Mutex::new(db.inner.begin_occ()),
@@ -519,6 +537,7 @@ impl<'a, E: Env> Transaction<'a, E> {
             db,
             pess: None,
             scan_reads: Arc::new(Mutex::new(BTreeSet::new())),
+            durability,
         }
     }
 
@@ -543,6 +562,7 @@ impl<'a, E: Env> Transaction<'a, E> {
                 detect,
             }),
             scan_reads: Arc::new(Mutex::new(BTreeSet::new())),
+            durability: pedradb_core::WriteOptions::default(),
         }
     }
 
@@ -804,7 +824,7 @@ impl<'a, E: Env> Transaction<'a, E> {
                 occ.observe(k);
             }
         }
-        occ.commit().map_err(|e| match e {
+        occ.commit_with(self.durability).map_err(|e| match e {
             CoreError::TransactionConflict => Error {
                 msg: "Busy: transaction conflict: key changed since snapshot".into(),
                 kind: crate::ErrorKind::TransactionConflict,

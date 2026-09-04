@@ -20,7 +20,7 @@ That commit is one WAL record, fsynced before `Ok` returns.
 It is built for people who put a database, a state machine, or a replicated
 log on top of a key-value store, and who would rather not rebuild
 consistency above the engine. The API is
-`open → begin → get / put / delete / range → commit`.
+`open → begin → get / put / delete → commit`.
 
 ## Why PedraDB
 
@@ -177,12 +177,12 @@ are the price of the contract, not wins.
 WAL and memtable on the append-only family). Ratio > 1 means PedraDB is
 faster than RocksDB default. 25M and 100M rows are 3-run medians.
 
-| n | hydrate | settle | get_hit | prefix_scan | get_loop | multi_get |
-|---|---:|---:|---:|---:|---:|---:|
-| 1M | **1.82×** | **2.50×** | **1.44×** | **1.64×** | **1.36×** | **1.08×** |
-| 10M | **1.03×** | **7.67×** | 1.00× (tie) | **1.31×** | **1.07×** | **1.02×** |
-| 25M | 1.02× | **27×** | **1.14×** | **1.34×** | — | **1.27×** |
-| 100M | **1.23×** | **88×** | **1.80×** | 1.00× (tie) | **1.68×** | **1.74×** |
+| n | hydrate | settle | get_hit | prefix_scan | get_loop | multi_get | probe_miss |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 1M | **1.82×** | **2.50×** | **1.44×** | **1.64×** | **1.36×** | **1.08×** | — |
+| 10M | **1.03×** | **7.67×** | 1.00× (tie) | **1.31×** | **1.07×** | **1.02×** | — |
+| 25M | 1.02× | **27×** | **1.14×** | **1.34×** | — | **1.27×** | — |
+| 100M | **1.15×** | **90×** | **1.46×** | **0.70×** | **1.59×** | **1.39×** | **0.27×** |
 
 - 10M `get_hit` is a tie (confidence intervals overlap), not a win.
 - 25M hydrate (3-run median 1.02×: Pedra 29.5 s vs Rocks 30.2 s) sits
@@ -192,30 +192,39 @@ faster than RocksDB default. 25M and 100M rows are 3-run medians.
   wins.
 - 100M used to OOM on the 3.9 GiB guest (sparse-index keys pinned the
   ingest key pool; fixed — index boundary keys are owned copies now).
-  2026-09-04, 3 runs, same guest, full readlegs: hydrate **1.23×**
-  (Pedra 123.1–124.1 s, Rocks 145–164 s; Pedra matches the 2026-09-03
-  hydrate-only 3-run 121.6–127.5 s). On disk Pedra 23.97 GiB (257
-  B/entry) ×3. Rocks-side spread on hydrate is still there.
-- 100M reads, same 3 runs: `get_hit` **1.80×** (58 vs 104 µs),
-  `get_loop` **1.68×**, `multi_get` **1.74×**. `prefix_scan` is a
-  **1.00× tie** (one run 0.75×) — not a win. An earlier single-run
-  printed 2.4–2.9× on the point-read cells; that was Rocks having a
-  slower miss path that day (125 µs vs 104 µs here). Pedra barely
-  moved. Settle **88×** (0.7 vs 61 s) is the same story in reverse:
-  Rocks settle was 23 s on that single-run, 55–62 s here.
-- Absent-key `probe_miss` is a required miss-path cell, not an optional
-  footnote. 100M 3-run with the previous bulk writer (always-true bloom):
-  Pedra 2.3–2.4 µs vs Rocks 651–692 ns — **0.29×, a named loss**. Bulk
-  files now embed a real bloom (10 bits/key, same as the sorted writer).
-  That cell republishes after a 3-run; no ratio is claimed from the new
-  writer. The 100M hydrate/read row above is the previous writer.
+  2026-09-04, 3 runs, same guest, bulk writer with a real bloom
+  (10 bits/key): hydrate **1.15×** (Pedra 133.4–141.4 s, Rocks
+  157.7–166.3 s). On disk Pedra 24.08 GiB (259 B/entry) ×3. The bloom
+  costs ~17 s of write-side vs the previous-writer 123.7 s median.
+- 100M reads, same 3 runs: `get_hit` **1.46×** (71.6 vs 104.9 µs),
+  `get_loop` **1.59×**, `multi_get` **1.39×**. `prefix_scan` is a
+  **0.70× named loss** (576.8 vs 404.0 µs; Pedra 459/577/627, Rocks
+  stable ~400). Not a tie. Settle **90×** (0.6 vs 54 s).
+- Absent-key `probe_miss` is a required miss-path cell. 100M 3-run with
+  the real bulk bloom: Pedra 2.4–2.5 µs vs Rocks 682–701 ns —
+  **0.27×, a named loss**. The always-true writer was 0.29×; the bloom
+  did not move p50. Remaining cost is O(#SST) range-tombstone collect
+  on a bulk run that has none.
+
+**Fjall** (third peer, optional; not the gate). Same guest, in-tree
+`scale-parity-bench`, 3-run medians, 200 B values, 256 MiB cache.
+Absolute numbers only — reads are a different harness than the
+Pedra/Rocks slipstream column above. Hydrate is the comparable
+one-shot cell.
+
+| n | hydrate | disk | settle | probe_miss p50 | get_hit | prefix_scan | get_loop |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 25M | 49.8 s | 5.16 GiB | 0.1 s | 1.1 µs | 40.2 µs | 272.3 µs | 3.60 ms |
+| 100M | 191.4 s | 20.61 GiB | 0.0 s | 1.1 µs | 82.0 µs | 266.8 µs | 7.82 ms |
+
+100M hydrate vs Pedra's 141.1 s on the same machine is **1.35× Pedra**
+(one-shot). No other Fjall ratio is a published claim.
 
 **Reproducing.** The in-tree harness is `scale-parity-bench` (same key
 shape: clustered `route.svc-*`, 200 B values, 1024-entry batches). One
 backend per process at 25M/100M. Pedra is always available. RocksDB and
 Fjall are optional features (Rocks needs a C++ toolchain; Fjall is pure
-Rust). There is **no published Fjall 100M column** yet — the binary is
-there so you can run it.
+Rust). Official peer remains RocksDB `WriteOptions.sync=false`.
 
 ```sh
 # Pedra, 1M smoke (no extra toolchain)

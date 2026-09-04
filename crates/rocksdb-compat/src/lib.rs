@@ -3068,8 +3068,8 @@ impl<E: PedraEnv> DB<E> {
         writeopts: &WriteOptions,
         otxn_opts: &OptimisticTransactionOptions,
     ) -> Transaction<'_, E> {
-        let _ = (writeopts, otxn_opts);
-        self.transaction()
+        let _ = otxn_opts;
+        Transaction::new_with_durability(self, writeopts.kernel_durability())
     }
 
     /// Iterator over the default CF at the latest sequence.
@@ -3832,29 +3832,62 @@ impl<E: PedraEnv> DB<E> {
         value: impl AsRef<[u8]>,
         wo: &WriteOptions,
     ) -> Result<()> {
-        let prev = self.inner.default_write_sync();
-        self.inner.set_default_write_sync(wo.sync);
-        let r = self.put(key, value);
-        self.inner.set_default_write_sync(prev);
-        r
+        let key = key.as_ref();
+        let value = value.as_ref();
+        let interned = intern_put_value(value);
+        let opts = wo.kernel_durability();
+        self.codec
+            .encode_with(DEFAULT_CF, key, |enc| {
+                self.inner.put_with(enc, interned.as_ref(), opts)
+            })
+            .map_err(Error::from)?;
+        Ok(())
     }
 
     /// rust-rocksdb `delete_opt`.
     pub fn delete_opt(&self, key: impl AsRef<[u8]>, wo: &WriteOptions) -> Result<()> {
-        let prev = self.inner.default_write_sync();
-        self.inner.set_default_write_sync(wo.sync);
-        let r = self.delete(key);
-        self.inner.set_default_write_sync(prev);
-        r
+        let encoded = self.codec.encode(DEFAULT_CF, key.as_ref());
+        self.inner
+            .delete_with(encoded, wo.kernel_durability())
+            .map_err(Error::from)
     }
 
     /// rust-rocksdb `write_opt`.
     pub fn write_opt(&self, batch: &WriteBatch, wo: &WriteOptions) -> Result<()> {
-        let prev = self.inner.default_write_sync();
-        self.inner.set_default_write_sync(wo.sync);
-        let r = self.write(batch);
-        self.inner.set_default_write_sync(prev);
-        r
+        if wo.kernel_durability().sync != Some(true) && self.try_write_latched(batch)? {
+            return Ok(());
+        }
+        thread_local! {
+            static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
+                std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
+        }
+        let opts = wo.kernel_durability();
+        KEY_POOL.with(|pool| {
+            let mut pool = pool.borrow_mut();
+            let mut ops = Vec::with_capacity(batch.ops.len());
+            for (cf, op) in &batch.ops {
+                let name = cf.as_deref().unwrap_or(DEFAULT_CF);
+                self.check_cf(name)?;
+                let encoded = match op {
+                    BatchOp::Put { key, value } => BatchOp::Put {
+                        key: self.codec.encode_pooled(name, key, &mut pool),
+                        value: value.clone(),
+                    },
+                    BatchOp::Delete { key } => BatchOp::Delete {
+                        key: self.codec.encode_pooled(name, key, &mut pool),
+                    },
+                    BatchOp::DeleteRange { start, end } => BatchOp::DeleteRange {
+                        start: self.codec.encode_pooled(name, start, &mut pool),
+                        end: self.codec.encode_pooled(name, end, &mut pool),
+                    },
+                };
+                ops.push(encoded);
+            }
+            self.inner
+                .apply_batch_vec_with(ops, opts)
+                .map(|_| ())
+                .map_err(Error::from)
+        })
     }
 
     /// rust-rocksdb `write_without_wal` — Pedra still WAL-appends; sync is off.
