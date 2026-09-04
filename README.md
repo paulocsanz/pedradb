@@ -123,6 +123,20 @@ No C++ toolchain is needed.
 - **Async WAL is opt-in**, and the benchmarks below say which class each
   number was measured at.
 
+## Verification
+
+The claim is not “no bugs.” It is: 21 decision kernels have Verus twins
+(WAL and manifest recovery, CRC fate, group commit, flush and compaction
+decisions, leveling, bloom filters, MVCC visibility, iterator windows) —
+39 proof pairs, checked against a pinned Verus with
+`scripts/formal/verus_check.sh --all`. Around them: close to 1,000 tests,
+seeded fault injection through a swappable `Env` (`pedradb-sim`), and
+fail-closed recovery. Not proven: the OS, the disk, rustc, Verus, or Z3.
+
+The engine is `#![forbid(unsafe_code)]`. The only `unsafe` in the tree is
+two thin syscall crates. That is the product; the benches below are
+lab measurements of it, not a substitute.
+
 ## Benchmarks
 
 The peer is **RocksDB default** (`WriteOptions.sync=false`), the class
@@ -190,6 +204,32 @@ faster than RocksDB default. 25M and 100M rows are 3-run medians.
 - Absent-key `probe_miss` can lose (bulk files ship an always-true bloom)
   and is not in the required set.
 
+**Reproducing.** The in-tree harness is `scale-parity-bench` (same key
+shape: clustered `route.svc-*`, 200 B values, 1024-entry batches). One
+backend per process at 25M/100M. Pedra is always available. RocksDB and
+Fjall are optional features (Rocks needs a C++ toolchain; Fjall is pure
+Rust). There is **no published Fjall 100M column** yet — the binary is
+there so you can run it.
+
+```sh
+# Pedra, 1M smoke (no extra toolchain)
+SCALE_ENTRIES=1000000 ./scripts/reproduce-scale.sh pedradb /tmp/scale-pedra
+
+# Fjall
+SCALE_ENTRIES=1000000 ./scripts/reproduce-scale.sh fjall /tmp/scale-fjall
+
+# RocksDB default (peer of the table above)
+SCALE_ENTRIES=1000000 ./scripts/reproduce-scale.sh rocksdb /tmp/scale-rocks
+
+# 100M, one backend, real disk (not tmpfs):
+SCALE_ENTRIES=100000000 SCALE_CACHE_BYTES=268435456 TMPDIR=/data/stores \
+  ./scripts/reproduce-scale.sh pedradb /data/scale-100m-pedra
+```
+
+YCSB / dependents (`rocks-parity-bench`): `compat` (Pedra), `rocksdb`
+(`--features real`), or `fjall` (`--features fjall`, YCSB-only — no named
+CFs). Official peer remains RocksDB `WriteOptions.sync=false`.
+
 ## How it's tested
 
 - **Close to 1,000 tests** across the seven crates: unit tests, model tests
@@ -232,7 +272,7 @@ rocksdb = { git = "https://github.com/paulocsanz/pedradb", package = "rocksdb-co
 | `pedradb-io-uring` | Linux io_uring `Env` for WAL/SST writes and fsync; POSIX fallback elsewhere. |
 | `pedradb-posix` | fdatasync / fallocate / fadvise. With `pedradb-io-uring`, the only `unsafe` in the tree. |
 | `rocksdb-compat` | rust-rocksdb 0.22 API on the engine, for migrating existing Rocks code. |
-| `rocksdb-parity-bench` | The parity harness behind the tables above: same shape, same host, Pedra vs RocksDB default. |
+| `rocksdb-parity-bench` | Parity harness: YCSB/deps (`rocks-parity-bench`) and sorted-ingest scale (`scale-parity-bench`). Peers: Pedra, optional RocksDB (`--features real`), optional Fjall (`--features fjall`). |
 
 MSRV 1.88. Dual-licensed MIT or Apache-2.0.
 

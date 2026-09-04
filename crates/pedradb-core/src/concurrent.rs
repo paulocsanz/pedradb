@@ -568,14 +568,24 @@ impl WriteGroup {
                 st.lock_wait_ns
                     .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
             }
-            let result = guard.commit_async_ops(ops);
+            // RFC-0154 P1.6: 1-op async was lone-only (`commit_async_one`).
+            // Concurrent bypass (this branch; `PEDRA_ASYNC_GROUP` default
+            // off) still built a `Vec<BatchOp>` and ran `commit_async_ops`
+            // — same WAL bytes, extra bulk-route/spill envelope. 1-op is
+            // the overwrite/YCSB put. Multi-op batches stay on ops.
+            let n = ops.len() as u64;
+            let result = if ops.len() == 1 {
+                guard.commit_async_one(ops.pop().expect("len checked"))
+            } else {
+                guard.commit_async_ops(ops)
+            };
             if fair {
                 parking_lot::RwLockWriteGuard::unlock_fair(guard);
             } else {
                 drop(guard);
             }
             self.batches.fetch_add(1, Ordering::Relaxed);
-            self.batch_ops.fetch_add(1, Ordering::Relaxed);
+            self.batch_ops.fetch_add(n, Ordering::Relaxed);
             self.active.fetch_sub(1, Ordering::Relaxed);
             self.mark_complete();
             return result;
@@ -7403,6 +7413,55 @@ mod tests {
                 "barriered async write lost, t/{i}"
             );
         }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Concurrent async 1-op bypass uses `commit_async_one` (RFC-0154 P1.6
+    /// envelope, same WAL bytes as `commit_async_ops([op])`). Four writers
+    /// zipf-overwrite; every key is readable after the barrier; bypass
+    /// stats stay un-merged (`queued == 0`, `batches == submits`).
+    #[test]
+    fn concurrent_async_one_op_overwrite_is_visible() {
+        let dir = temp_dir();
+        let n = 4usize;
+        let ops = 200usize;
+        let records = 64usize;
+        let db = Arc::new({
+            let d = ConcurrentDb::open(&dir).unwrap();
+            d.set_default_write_sync(false);
+            d
+        });
+        let barrier = Arc::new(std::sync::Barrier::new(n));
+        std::thread::scope(|s| {
+            for t in 0..n {
+                let db = Arc::clone(&db);
+                let barrier = Arc::clone(&barrier);
+                s.spawn(move || {
+                    let mut rng = 0x5EED_0001u64.wrapping_mul((t as u64) + 0x9E37) ^ t as u64;
+                    barrier.wait();
+                    for i in 0..ops {
+                        rng ^= rng << 13;
+                        rng ^= rng >> 7;
+                        rng ^= rng << 17;
+                        let u = (rng as usize) % records;
+                        let k = format!("c/{u:06}");
+                        let v = [t as u8, i as u8, 9];
+                        db.put(k.as_bytes(), &v).unwrap();
+                    }
+                });
+            }
+        });
+        let (submits, queued, batches, batch_ops) = db.write_group_stats();
+        assert_eq!(submits, (n * ops) as u64);
+        assert_eq!(batch_ops, (n * ops) as u64);
+        assert_eq!(queued, 0, "default async must stay on the un-merged bypass");
+        assert_eq!(batches, submits);
+        for u in 0..records {
+            let k = format!("c/{u:06}");
+            assert!(db.get(k.as_bytes()).is_some(), "lost overwrite {k}");
+        }
+        let db = Arc::try_unwrap(db).unwrap_or_else(|_| panic!("threads still hold the db"));
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

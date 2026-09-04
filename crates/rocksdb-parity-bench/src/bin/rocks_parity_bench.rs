@@ -137,8 +137,25 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        "fjall" => {
+            #[cfg(feature = "fjall")]
+            {
+                if suites_enabled("deps") || suites_enabled("surreal") {
+                    eprintln!("engine 'fjall' is ycsb-only (no named CFs / OCC)");
+                    std::process::exit(1);
+                }
+                let e = rocksdb_parity_bench::engines::FjallEngine::open(&dbdir);
+                run_and_report(&e, &cfg, suites.as_str(), &out);
+            }
+            #[cfg(not(feature = "fjall"))]
+            {
+                let _ = suites;
+                eprintln!("engine 'fjall' needs --features fjall");
+                std::process::exit(1);
+            }
+        }
         other => {
-            eprintln!("unknown engine {other:?} (want compat|rocksdb)");
+            eprintln!("unknown engine {other:?} (want compat|rocksdb|fjall)");
             std::process::exit(1);
         }
     }

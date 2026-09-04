@@ -20,6 +20,7 @@
 #![forbid(unsafe_code)]
 
 pub mod engines;
+pub mod scale;
 
 use std::time::{Duration, Instant};
 
