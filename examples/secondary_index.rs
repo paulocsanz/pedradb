@@ -1,68 +1,138 @@
-//! Secondary-index layer sketch on PedraDB multi-key TX (RFC-0009 P0.3):
-//! a row and its index entry land (or abort) in one atomic, durable commit.
+//! A secondary index is just more keys in the same transaction.
 //!
-//! Run from the repo root:
-//!   cargo run --example secondary_index -p pedradb-core
+//! PedraDB does not implement indexes. You do: primary row + `idx/email/…`
+//! land (or abort) together. Crash mid-commit cannot leave a half-index —
+//! recovery either has the whole WAL record or skips the truncated tail.
+//!
+//! Keys are length-prefixed so `idx/email/a` is not a byte-prefix of
+//! `idx/email/ab` (the classic "slash join" footgun).
+//!
+//! ```sh
+//! cargo run -p pedradb-examples --example secondary_index
+//! ```
+//!
+//! Next: `ordered_scan` — list every row under a prefix, in order.
 
-use pedradb_core::{Db, OpenOptions, Result};
+use pedradb_core::{Db, Result};
 
-/// Toy user row + email index using byte keys only.
-fn upsert_user(db: &mut Db, id: &[u8], email: &[u8], payload: &[u8]) -> Result<()> {
-    let mut pk = b"u/".to_vec();
-    pk.extend_from_slice(id);
-    let mut idx = b"idx/email/".to_vec();
-    idx.extend_from_slice(email);
+fn scratch(name: &str) -> std::path::PathBuf {
+    let n = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let dir = std::env::temp_dir().join(format!("pedradb-ex-{name}-{}-{n}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    dir
+}
 
+fn push_len(buf: &mut Vec<u8>, part: &[u8]) {
+    let n = u32::try_from(part.len()).expect("component fits u32");
+    buf.extend_from_slice(&n.to_be_bytes());
+    buf.extend_from_slice(part);
+}
+
+fn row_key(id: &[u8]) -> Vec<u8> {
+    let mut k = b"row/".to_vec();
+    push_len(&mut k, id);
+    k
+}
+
+fn idx_email(email: &[u8]) -> Vec<u8> {
+    let mut k = b"idx/".to_vec();
+    push_len(&mut k, b"email");
+    push_len(&mut k, email);
+    k
+}
+
+/// Insert or update a user. Email uniqueness is checked inside the TX.
+fn upsert_user(db: &mut Db, id: &[u8], email: &[u8], payload: &[u8]) -> Result<bool> {
+    let pk = row_key(id);
+    let idx = idx_email(email);
     let mut tx = db.begin();
-    tx.put(&pk, payload)?;
+
+    if let Some(owner) = tx.get(&idx)? {
+        if owner.as_ref() != id {
+            tx.abort();
+            return Ok(false); // email taken by someone else
+        }
+    }
+
+    // Moving email: drop the previous index entry in the same commit.
+    if let Some(old) = tx.get(&pk)? {
+        if let Some(old_email) = old.split(|&b| b == 0).next() {
+            if old_email != email {
+                tx.delete(idx_email(old_email))?;
+            }
+        }
+    }
+
+    let mut value = email.to_vec();
+    value.push(0);
+    value.extend_from_slice(payload);
+    tx.put(&pk, &value)?;
     tx.put(&idx, id)?;
-    tx.commit().map(|_| ())
+    tx.commit()?;
+    Ok(true)
 }
 
 fn lookup_id_by_email(db: &Db, email: &[u8]) -> Option<Vec<u8>> {
-    let mut idx = b"idx/email/".to_vec();
-    idx.extend_from_slice(email);
-    db.get(&idx).map(|b| b.to_vec())
+    db.get(&idx_email(email)).map(|b| b.to_vec())
 }
 
-fn main() -> Result<()> {
-    let dir = std::env::temp_dir().join("pedradb-index-example");
-    let _ = std::fs::remove_dir_all(&dir);
-    let mut db = Db::open_with(
-        &dir,
-        OpenOptions {
-            wal_full_fsync: false,
-            history: Default::default(),
-            wal_recovery: Default::default(),
-            sync: true,
-            auto_flush_bytes: Some(1024 * 1024),
-            auto_compact_sst_count: None,
-            auto_compact_sst_bytes: None,
-            exclusive: true,
-            large_value_threshold: None,
-            sst_payload_budget_bytes: None,
-        },
-    )?;
+fn run() -> Result<()> {
+    let dir = scratch("index");
+    let mut db = Db::open(&dir)?;
 
-    upsert_user(&mut db, b"42", b"ada@ex.com", br#"{"name":"ada"}"#)?;
+    assert!(upsert_user(
+        &mut db,
+        b"42",
+        b"ada@ex.com",
+        br#"{"name":"ada"}"#
+    )?);
     let id = lookup_id_by_email(&db, b"ada@ex.com").expect("index hit");
     assert_eq!(id, b"42");
 
-    // Abort path: neither key should land
+    // Change email: old index gone, new index present, row updated — one commit.
+    assert!(upsert_user(
+        &mut db,
+        b"42",
+        b"ada@cs.ex.com",
+        br#"{"name":"ada"}"#
+    )?);
+    assert!(lookup_id_by_email(&db, b"ada@ex.com").is_none());
+    assert_eq!(
+        lookup_id_by_email(&db, b"ada@cs.ex.com").as_deref(),
+        Some(b"42".as_ref())
+    );
+
+    // Unique email: bob cannot steal ada's address.
+    assert!(!upsert_user(&mut db, b"99", b"ada@cs.ex.com", b"nope")?);
+    assert!(db.get(&row_key(b"99")).is_none());
+
+    // Abort: neither the row nor the index lands.
     {
         let mut tx = db.begin();
-        tx.put(b"u/99", b"nope")?;
-        tx.put(b"idx/email/bad@ex.com", b"99")?;
+        tx.put(row_key(b"7"), b"ghost")?;
+        tx.put(idx_email(b"ghost@ex.com"), b"7")?;
         tx.abort();
     }
-    assert!(db.get(b"u/99").is_none());
-    assert!(lookup_id_by_email(&db, b"bad@ex.com").is_none());
+    assert!(db.get(&row_key(b"7")).is_none());
+    assert!(lookup_id_by_email(&db, b"ghost@ex.com").is_none());
 
-    println!(
-        "secondary index example ok (id={})",
-        String::from_utf8_lossy(&id)
-    );
+    println!("secondary_index: ada@cs.ex.com → 42 (unique, atomic, abort-safe)");
     db.close()?;
     let _ = std::fs::remove_dir_all(&dir);
     Ok(())
+}
+
+fn main() -> Result<()> {
+    run()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn smoke() {
+        super::run().expect("secondary_index");
+    }
 }

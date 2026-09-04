@@ -541,6 +541,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pedradb-examples"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "pedradb-core",
+ "pedradb-ops",
+ "rocksdb-compat",
+]
+
+[[package]]
 name = "pedradb-io-uring"
 version = "0.1.0"
 dependencies = [

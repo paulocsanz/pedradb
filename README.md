@@ -80,10 +80,12 @@ let id = db.get(b"idx/name/ada");             // Some(b"42")
 ```
 
 A row and its index land together or not at all. The full example, including
-the abort path, is in `examples/secondary_index.rs`:
+the abort path, is in `examples/secondary_index.rs`. The gallery is a ladder
+from hello-world to a small ledger: [`examples/`](examples/).
 
 ```sh
-cargo run --example secondary_index -p pedradb-core
+cargo run -p pedradb-examples --example hello
+cargo run -p pedradb-examples --example bank
 ```
 
 No C++ toolchain is needed.
@@ -271,6 +273,7 @@ rocksdb = { git = "https://github.com/paulocsanz/pedradb", package = "rocksdb-co
 | Crate | What it is |
 |---|---|
 | `pedradb-core` | The storage engine. `#![forbid(unsafe_code)]`. |
+| `pedradb-examples` | Runnable ladder: hello-world through a small ledger, then backup / Rocks drop-in. |
 | `pedradb-ops` | Local backup, WAL shipping, point-in-time restore, format migration. |
 | `pedradb-sim` | Seeded fault injection for recovery testing. |
 | `pedradb-io-uring` | Linux io_uring `Env` for WAL/SST writes and fsync; POSIX fallback elsewhere. |
@@ -278,7 +281,7 @@ rocksdb = { git = "https://github.com/paulocsanz/pedradb", package = "rocksdb-co
 | `rocksdb-compat` | rust-rocksdb 0.22 API on the engine, for migrating existing Rocks code. |
 | `rocksdb-parity-bench` | Parity harness: YCSB/deps (`rocks-parity-bench`) and sorted-ingest scale (`scale-parity-bench`). Peers: Pedra, optional RocksDB (`--features real`), optional Fjall (`--features fjall`). |
 
-MSRV 1.88. Dual-licensed MIT or Apache-2.0.
+MSRV 1.88. Dual-licensed MIT or Apache-2.0. Runnable gallery: [`examples/`](examples/).
 
 ## License
 
