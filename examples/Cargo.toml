@@ -1,0 +1,66 @@
+[package]
+name = "pedradb-examples"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Runnable PedraDB gallery: from hello-world to a small ledger"
+
+[dependencies]
+bytes.workspace = true
+pedradb-core.workspace = true
+pedradb-ops.workspace = true
+rocksdb-compat = { path = "../crates/rocksdb-compat" }
+
+[[example]]
+name = "hello"
+path = "hello.rs"
+
+[[example]]
+name = "transactions"
+path = "transactions.rs"
+
+[[example]]
+name = "secondary_index"
+path = "secondary_index.rs"
+
+[[example]]
+name = "ordered_scan"
+path = "ordered_scan.rs"
+
+[[example]]
+name = "cas"
+path = "cas.rs"
+
+[[example]]
+name = "snapshots"
+path = "snapshots.rs"
+
+[[example]]
+name = "change_feed"
+path = "change_feed.rs"
+
+[[example]]
+name = "crash_reopen"
+path = "crash_reopen.rs"
+
+[[example]]
+name = "concurrent"
+path = "concurrent.rs"
+
+[[example]]
+name = "bank"
+path = "bank.rs"
+
+[[example]]
+name = "large_values"
+path = "large_values.rs"
+
+[[example]]
+name = "backup"
+path = "backup.rs"
+
+[[example]]
+name = "rocksdb_dropin"
+path = "rocksdb_dropin.rs"

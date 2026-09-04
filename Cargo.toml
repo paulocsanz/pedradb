@@ -8,6 +8,7 @@ members = [
     "crates/pedradb-sim",
     "crates/rocksdb-compat",
     "crates/rocksdb-parity-bench",
+    "examples",
 ]
 
 [workspace.package]

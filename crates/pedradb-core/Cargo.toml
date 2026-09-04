@@ -42,6 +42,3 @@ harness = false
 name = "fsync_amortization"
 harness = false
 
-[[example]]
-name = "secondary_index"
-path = "../../examples/secondary_index.rs"
