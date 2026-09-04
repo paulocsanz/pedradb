@@ -49,13 +49,15 @@ use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU8, Ordering as AtomicOrdering};
 use std::sync::{Arc, OnceLock};
+use std::time::Instant;
 
 use bytes::Bytes;
 use parking_lot::{Mutex, RwLock};
 
 use crate::bloom::{BloomFilter, DEFAULT_BITS_PER_KEY};
-use crate::cache::{PayloadKit, PayloadSlot};
+use crate::cache::{BlockCache, PayloadKit, PayloadSlot};
 use crate::env::{Env, EnvFile, StdEnv};
 use crate::error::{CoreError, Result};
 use crate::key::{pack_sequence_and_type, InternalKey, SequenceNumber, ValueType};
@@ -149,6 +151,55 @@ impl RawBlockCache {
 
 thread_local! {
     static RAW_BLOCKS: RefCell<RawBlockCache> = RefCell::new(RawBlockCache::default());
+}
+
+/// RFC-0160 P0.2: split point-get wall into pread / block CRC / block walk.
+/// `PEDRA_GET_STAGES=1` arms it for a guest capture; tests call
+/// [`force_get_stages`].
+static GET_STAGES: AtomicU8 = AtomicU8::new(0);
+
+thread_local! {
+    static GET_PREAD_NS: Cell<u64> = const { Cell::new(0) };
+    static GET_CRC_NS: Cell<u64> = const { Cell::new(0) };
+    static GET_WALK_NS: Cell<u64> = const { Cell::new(0) };
+}
+
+fn get_stages_enabled() -> bool {
+    match GET_STAGES.load(AtomicOrdering::Relaxed) {
+        2 => true,
+        1 => false,
+        _ => {
+            let on = std::env::var_os("PEDRA_GET_STAGES").is_some();
+            GET_STAGES.store(if on { 2 } else { 1 }, AtomicOrdering::Relaxed);
+            on
+        }
+    }
+}
+
+/// Test/guest knob: pin get-stage clocks on or off (`PEDRA_GET_STAGES`).
+pub fn force_get_stages(on: bool) {
+    GET_STAGES.store(if on { 2 } else { 1 }, AtomicOrdering::Relaxed);
+}
+
+/// Zero the thread-local get-stage clocks.
+pub fn reset_get_stages() {
+    GET_PREAD_NS.with(|c| c.set(0));
+    GET_CRC_NS.with(|c| c.set(0));
+    GET_WALK_NS.with(|c| c.set(0));
+}
+
+/// Take pread / CRC / walk nanoseconds since the last reset (RFC-0160 P0.2).
+#[must_use]
+pub fn take_get_stages() -> (u64, u64, u64) {
+    (
+        GET_PREAD_NS.with(Cell::take),
+        GET_CRC_NS.with(Cell::take),
+        GET_WALK_NS.with(Cell::take),
+    )
+}
+
+fn add_stage(cell: &Cell<u64>, ns: u128) {
+    cell.set(cell.get().saturating_add(ns as u64));
 }
 
 /// Reset the thread-local CRC-skip counter (verified-residency tests).
@@ -278,6 +329,13 @@ pub struct SstTable {
     payload: Arc<PayloadSlot>,
     /// Byte length of the (possibly evicted) file body; 0 for v1/eager.
     payload_len: usize,
+    /// RFC-0159 streaming bulk writer contract: this table was created with
+    /// its body deliberately left on disk (empty payload slot, no kit yet
+    /// — hydrate attaches one at install). Only such a table may reload its
+    /// payload from `path` without a kit; any other kit-less table with an
+    /// empty payload slot fails loud instead of silently re-reading a path
+    /// the owner never vouched for (RFC-0042 v18 fail-closed contract).
+    body_on_disk: bool,
     /// Whether data blocks are lz4 (SST v4+).
     compressed_blocks: bool,
     /// Whether each data block carries a trailing CRC32C (SST v5).
@@ -294,7 +352,10 @@ pub struct SstTable {
     num_entries: usize,
     max_sequence: SequenceNumber,
     /// Sparse index (v2+); empty for v1.
-    index: Vec<BlockHandle>,
+    /// Sparse block index, shared across clones: every installed table is
+    /// held twice (`ssts` + `table_cache`), and a `Vec` clone doubled the
+    /// 100M index (~350 MB) plus one `Bytes` promote per handle.
+    index: Arc<[BlockHandle]>,
     /// Longest prefix shared by every `index` key — the offset the `p8`
     /// windows start at. Derived with the index (`derive_index_accel`).
     key_cp: usize,
@@ -676,9 +737,17 @@ impl SstTable {
                 } else {
                     scratch.raw.clear();
                     scratch.raw.resize(len, 0);
-                    kit.source
-                        .read_range(&self.path, h.offset, &mut scratch.raw)
-                        .map_err(CoreError::Io)?;
+                    if get_stages_enabled() {
+                        let t = Instant::now();
+                        kit.source
+                            .read_range(&self.path, h.offset, &mut scratch.raw)
+                            .map_err(CoreError::Io)?;
+                        GET_PREAD_NS.with(|c| add_stage(c, t.elapsed().as_nanos()));
+                    } else {
+                        kit.source
+                            .read_range(&self.path, h.offset, &mut scratch.raw)
+                            .map_err(CoreError::Io)?;
+                    }
                     SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
                     let found = seek_point_in_block_image(
                         &scratch.raw,
@@ -703,6 +772,57 @@ impl SstTable {
         Ok(best)
     }
 
+    /// Point seek through a byte-budgeted [`BlockCache`] (RFC-0160 P2.3).
+    ///
+    /// First load CRC-verifies via [`Self::decode_block`] and only then
+    /// inserts; a fault is `Err`, never an empty cached block (silent miss).
+    /// Hits skip CRC — Rocks checksum-on-read-into-cache.
+    ///
+    /// # Errors
+    /// Corrupt block payload/framing or I/O on an evicted table.
+    pub fn point_at_cached(
+        &self,
+        user_key: &[u8],
+        snapshot: SequenceNumber,
+        cache: &BlockCache,
+    ) -> Result<Option<(SequenceNumber, Lookup)>> {
+        if let (Some(lo), Some(hi)) = (
+            self.smallest_user_key.as_deref(),
+            self.largest_user_key.as_deref(),
+        ) {
+            if user_key < lo || user_key > hi {
+                return Ok(None);
+            }
+        }
+        if !self.bloom.may_contain(user_key) {
+            return Ok(None);
+        }
+        if !self.is_lazy() {
+            let block = self.materialize_entries()?;
+            return Ok(Self::best_point_in_entry_slice(&block, user_key, snapshot));
+        }
+        if self.index.is_empty() {
+            return Ok(None);
+        }
+        let path = self.path();
+        let id = crate::cache::path_id(path);
+        let mut best: Option<(SequenceNumber, Lookup)> = None;
+        for bi in self.blocks_for_point(user_key) {
+            let block = if let Some(hit) = cache.get_id(id, bi) {
+                hit
+            } else {
+                let decoded = self.decode_block(bi)?;
+                cache.get_or_insert_with_id(id, bi, || decoded)
+            };
+            if let Some((seq, look)) = Self::best_point_in_entry_slice(&block, user_key, snapshot) {
+                if best.as_ref().is_none_or(|(s, _)| seq > *s) {
+                    best = Some((seq, look));
+                }
+            }
+        }
+        Ok(best)
+    }
+
     /// Highest sequence number present in this file.
     #[must_use]
     pub fn max_sequence(&self) -> SequenceNumber {
@@ -713,6 +833,20 @@ impl SstTable {
     #[must_use]
     pub fn block_count(&self) -> usize {
         self.index.len()
+    }
+
+    /// RAM of the sparse index (handles + first-key bytes). Bulk 100M is
+    /// O(blocks) here, not O(values) — payload must stay empty.
+    #[must_use]
+    pub fn index_memory_bytes(&self) -> usize {
+        let mut n = self
+            .index
+            .len()
+            .saturating_mul(std::mem::size_of::<BlockHandle>());
+        for h in self.index.iter() {
+            n = n.saturating_add(h.first_user_key.len());
+        }
+        n
     }
 
     /// Whether the on-disk / rebuilt bloom is active.
@@ -1014,6 +1148,12 @@ impl SstTable {
     fn decode_block_on_file(&self, h: &BlockHandle) -> Result<Vec<(InternalKey, Bytes)>> {
         let kit = self.kit.read().clone();
         let Some(kit) = kit else {
+            if !self.body_on_disk {
+                return Err(CoreError::Internal(format!(
+                    "SST {} payload evicted without a file source (free-standing table)",
+                    self.path.display()
+                )));
+            }
             // Streaming bulk writer leaves the body on disk and the
             // in-memory slot empty. Tests use `open_with` (no kit);
             // hydrate attaches a kit at install.
@@ -1466,6 +1606,7 @@ impl SstTable {
                 crate::cache::ResidentBody::from_image(payload),
             )),
             payload_len,
+            body_on_disk: false,
             compressed_blocks,
             block_crc,
             // Lazy: do not retain full entry vec after open verification.
@@ -1474,7 +1615,7 @@ impl SstTable {
             range_tombstones,
             num_entries: n,
             max_sequence,
-            index,
+            index: index.into(),
             key_cp,
             bloom,
             smallest_user_key,
@@ -1513,6 +1654,7 @@ impl SstTable {
                 crate::cache::ResidentBody::from_image(payload),
             )),
             payload_len,
+            body_on_disk: false,
             compressed_blocks,
             block_crc,
             entries: Arc::new(Mutex::new(Some(entries))),
@@ -1520,7 +1662,7 @@ impl SstTable {
             range_tombstones,
             num_entries,
             max_sequence,
-            index,
+            index: index.into(),
             key_cp,
             bloom,
             smallest_user_key,
@@ -2068,7 +2210,15 @@ fn seek_point_in_block_image(
     path: &Path,
 ) -> Result<Option<(SequenceNumber, Lookup)>> {
     let body = split_block_crc(raw, path)?;
-    seek_point_in_block_body(body, compressed, user_key, snapshot, plain_scratch, path)
+    if get_stages_enabled() {
+        let t = Instant::now();
+        let found =
+            seek_point_in_block_body(body, compressed, user_key, snapshot, plain_scratch, path)?;
+        GET_WALK_NS.with(|c| add_stage(c, t.elapsed().as_nanos()));
+        Ok(found)
+    } else {
+        seek_point_in_block_body(body, compressed, user_key, snapshot, plain_scratch, path)
+    }
 }
 
 /// Seek a CRC-stripped block body the caller already verified: decompress
@@ -2231,7 +2381,14 @@ fn split_block_crc<'a>(raw: &'a [u8], path: &Path) -> Result<&'a [u8]> {
     }
     let (body, crc_bytes) = raw.split_at(raw.len() - 4);
     let stored = u32::from_le_bytes(crc_bytes.try_into().unwrap());
-    let computed = crc32c::crc32c(body);
+    let computed = if get_stages_enabled() {
+        let t = Instant::now();
+        let c = crc32c::crc32c(body);
+        GET_CRC_NS.with(|cell| add_stage(cell, t.elapsed().as_nanos()));
+        c
+    } else {
+        crc32c::crc32c(body)
+    };
     if !crate::sst::sst_block_crc_ok(stored, computed) {
         return Err(CoreError::Internal(format!(
             "SST block CRC mismatch in {}",
@@ -2543,6 +2700,11 @@ pub fn write_sst_try_sorted_with(
 /// per-entry `Result`, no lz4. v3 evicted gets re-read the whole file;
 /// v6 is a Rocks-shaped 4 KiB `read_range`.
 ///
+/// Always `fdatasync`s before returning (RFC-0162 P1.1): the chunk
+/// install is a durability + page-cache hygiene point, not the DB
+/// `sync` default — an unsynced 64 MiB chunk leaves writeback debt that
+/// throttles later chunks.
+///
 /// # Errors
 /// Length mismatch, oversized field, or I/O.
 pub fn write_sst_bulk_arrays(
@@ -2551,9 +2713,8 @@ pub fn write_sst_bulk_arrays(
     keys: &[Bytes],
     vals: &[Bytes],
     seqs: &[SequenceNumber],
-    sync: bool,
 ) -> Result<SstTable> {
-    write_sst_bulk_arrays_body(env, path.as_ref(), keys, vals, seqs, sync)
+    write_sst_bulk_arrays_body(env, path.as_ref(), keys, vals, seqs)
 }
 
 const BULK_SST_HEADER_LEN: usize = 40;
@@ -2566,7 +2727,6 @@ fn write_sst_bulk_arrays_body(
     keys: &[Bytes],
     vals: &[Bytes],
     seqs: &[SequenceNumber],
-    sync: bool,
 ) -> Result<SstTable> {
     if keys.len() != vals.len() || keys.len() != seqs.len() {
         return Err(CoreError::Internal(
@@ -2635,8 +2795,11 @@ fn write_sst_bulk_arrays_body(
         file.write_all(&staged)?;
         staged.clear();
     }
-    let smallest_user_key = Some(keys[0].clone());
-    let largest_user_key = Some(keys[n_entries - 1].clone());
+    // Owned copies: `keys[i]` are slices of the caller's pooled key buffer
+    // (compat `KEY_POOL`, 8 KiB chunks). Retaining a slice pins the whole
+    // chunk; the table must not keep the ingest pool alive (100M RSS).
+    let smallest_user_key = Some(Bytes::copy_from_slice(&keys[0]));
+    let largest_user_key = Some(Bytes::copy_from_slice(&keys[n_entries - 1]));
     let data_len = pos - BULK_SST_HEADER_LEN as u64;
     let key_cp = SstTable::derive_index_accel(&mut index);
     let mut tail = Vec::with_capacity(index.len().saturating_mul(48).saturating_add(64));
@@ -2664,9 +2827,8 @@ fn write_sst_bulk_arrays_body(
     file.write_all(&file_crc.to_le_bytes())?;
     file.seek(SeekFrom::Start(0))?;
     file.write_all(&header)?;
-    if sync {
-        file.sync_data()?;
-    }
+    // RFC-0162 P1.1: unconditional — see `write_sst_bulk_arrays` docs.
+    file.sync_data()?;
     drop(file);
     stages.add(|s| &mut s.write_ns, t_write);
     if stages.enabled {
@@ -2685,6 +2847,9 @@ fn write_sst_bulk_arrays_body(
         path: path.to_path_buf(),
         payload: Arc::new(parking_lot::RwLock::new(crate::cache::ResidentBody::empty())),
         payload_len,
+        // Body stays on disk: this table may path-reload without a kit
+        // until hydrate attaches one at install (RFC-0159).
+        body_on_disk: true,
         compressed_blocks: false,
         block_crc: true,
         entries: Arc::new(Mutex::new(None)),
@@ -2692,7 +2857,7 @@ fn write_sst_bulk_arrays_body(
         range_tombstones: Vec::new(),
         num_entries: n_entries,
         max_sequence,
-        index,
+        index: index.into(),
         key_cp,
         bloom,
         smallest_user_key,
@@ -2723,10 +2888,15 @@ fn finish_staged_block(
     let crc = crc32c::crc32c(&staged[block_start..]);
     let crc_bytes = crc.to_le_bytes();
     let stored = (staged.len() - block_start + 4) as u32;
+    // Copy, do not slice: `first` shares the ingest key pool chunk. One
+    // sparse-index entry per block would otherwise pin every pooled key of
+    // the run for the table's lifetime (measured ~37 B/entry resident at
+    // 4M–100M; the 3.9 GiB guest SIGKILLs at 100M).
+    let first = first.expect("bulk block missing first key");
     index.push(BlockHandle {
         offset: *pos,
         length: stored,
-        first_user_key: first.expect("bulk block missing first key"),
+        first_user_key: Bytes::copy_from_slice(&first),
         p8: 0,
     });
     *pos += u64::from(stored);
@@ -2808,25 +2978,22 @@ fn write_sst_try_sorted_body(
         enabled: std::env::var_os("PEDRA_FLUSH_STAGES").is_some(),
         ..StageTotals::default()
     };
-    // Bloom is built AFTER the entry loop from the distinct user keys
-    // actually written. The old `with_capacity(bloom_hint)` sized every
-    // output file by the caller's TOTAL: whole-levels rewrites pass the
-    // sum over all inputs (25M keys), so every 64 MiB chunk carried a
-    // ~31 MB mostly-zero bloom — retained per opened table (a plain
-    // field, never payload-evictable) and shipped on disk. `bloom_hint`
-    // now only gates whether the file gets a filter at all.
-    // Cap so a whole-level rewrite hint (25M keys) cannot size every
-    // 64 MiB chunk's filter at 31 MB. Inserts past capacity only raise
-    // FPR; the bitset does not grow. `bloom_hint == 0` still means no
-    // filter. Distinct keys are inserted from slices during the encode
-    // loop — no `Vec<Bytes>` of every user key.
+    // The bloom is built AFTER the entry loop, sized by the distinct user
+    // keys actually written. `with_capacity(bloom_hint)` sized every output
+    // file by the caller's TOTAL: whole-levels rewrites pass the sum over
+    // all inputs (25M keys), so every 64 MiB chunk carried a ~31 MB
+    // mostly-zero bloom — retained per opened table (a plain field, never
+    // payload-evictable) and shipped on disk. Distinct user keys are
+    // retained through the encode loop and inserted once at the end:
+    // `Bytes` clones share the source allocation, and the retention is
+    // bounded by the keys of one output file, whose full image this writer
+    // already assembles in memory. `bloom_hint == 0` still means no
+    // filter; the cap only bounds the bitset when a single file holds
+    // tens of millions of keys (inserts past capacity raise FPR; the
+    // bitset does not grow).
     const BLOOM_CAP_MAX: usize = 2_097_152;
-    let mut bloom = if bloom_hint == 0 {
-        BloomFilter::always_true()
-    } else {
-        BloomFilter::with_capacity(bloom_hint.min(BLOOM_CAP_MAX), DEFAULT_BITS_PER_KEY)
-    };
-    let bloom_active = bloom.is_active();
+    let bloom_active = bloom_hint != 0;
+    let mut bloom_keys: Vec<Bytes> = Vec::new();
     let mut data = Vec::new();
     let mut index: Vec<BlockHandle> = Vec::new();
     let mut block_buf = Vec::new();
@@ -2904,7 +3071,8 @@ fn write_sst_try_sorted_body(
             index.push(BlockHandle {
                 offset,
                 length,
-                first_user_key: first,
+                // Owned copy — never pin the memtable / pool buffer.
+                first_user_key: Bytes::copy_from_slice(&first),
                 p8: 0,
             });
             return Ok(());
@@ -2920,7 +3088,8 @@ fn write_sst_try_sorted_body(
         index.push(BlockHandle {
             offset,
             length,
-            first_user_key: first,
+            // Owned copy — never pin the memtable / pool buffer.
+            first_user_key: Bytes::copy_from_slice(&first),
             p8: 0,
         });
         Ok(())
@@ -2947,7 +3116,7 @@ fn write_sst_try_sorted_body(
         max_sequence = max_sequence.max(ikey.sequence);
         n_entries = n_entries.saturating_add(1);
         if smallest_user_key.is_none() {
-            smallest_user_key = Some(ikey.user_key.clone());
+            smallest_user_key = Some(Bytes::copy_from_slice(&ikey.user_key));
         }
         if ikey.kind == ValueType::RangeDeletion {
             range_tombstones.push((ikey.clone(), value.clone()));
@@ -2959,7 +3128,9 @@ fn write_sst_try_sorted_body(
             .as_ref()
             .is_some_and(|p| p.user_key.as_ref() == uk);
         if !same_user && bloom_active {
-            bloom.insert(uk);
+            // Refcount clone; the key bytes are inserted into the filter
+            // after the loop, when their count is known.
+            bloom_keys.push(ikey.user_key.clone());
         }
         if block_buf.is_empty() {
             block_first_user = Some(ikey.user_key.clone());
@@ -2988,7 +3159,9 @@ fn write_sst_try_sorted_body(
     }
     // The file's largest user key is the last entry's — derived from
     // `prev_ikey` by move, not tracked with a per-entry clone.
-    let largest_user_key = prev_ikey.as_ref().map(|k| k.user_key.clone());
+    let largest_user_key = prev_ikey
+        .as_ref()
+        .map(|k| Bytes::copy_from_slice(&k.user_key));
     flush_block(
         &mut data,
         &mut block_buf,
@@ -3001,10 +3174,23 @@ fn write_sst_try_sorted_body(
     )?;
     let key_cp = SstTable::derive_index_accel(&mut index);
     stages.add(|s| &mut s.enc_ns, t_enc);
-    // Bloom inserts ran inside the encode loop (slice, no key clone).
-    if n_entries == 0 {
-        bloom = BloomFilter::always_true();
-    }
+    // Size by the distinct keys written, then insert them all. `bloom_hint`
+    // only decided whether the file gets a filter at all.
+    let t_bloom = std::time::Instant::now();
+    let bloom = if bloom_active && !bloom_keys.is_empty() {
+        let mut b = BloomFilter::with_capacity(
+            bloom_keys.len().min(BLOOM_CAP_MAX),
+            DEFAULT_BITS_PER_KEY,
+        );
+        for key in &bloom_keys {
+            b.insert(key);
+        }
+        b
+    } else {
+        BloomFilter::always_true()
+    };
+    drop(bloom_keys);
+    stages.add(|s| &mut s.bloom_ns, t_bloom);
 
     // Header: magic version num_entries max_seq num_blocks data_len (fixed 40 B)
     let mut header = Vec::with_capacity(40);
@@ -3113,6 +3299,7 @@ fn write_sst_try_sorted_body(
             crate::cache::ResidentBody::from_image(payload),
         )),
         payload_len,
+        body_on_disk: false,
         compressed_blocks: policy_compress,
         block_crc: policy_compress,
         entries: Arc::new(Mutex::new(None)),
@@ -3120,7 +3307,7 @@ fn write_sst_try_sorted_body(
         range_tombstones,
         num_entries: n_entries,
         max_sequence,
-        index,
+        index: index.into(),
         key_cp,
         bloom,
         smallest_user_key,
@@ -3235,7 +3422,7 @@ mod tests {
             .map(|i| Bytes::from(format!("v{i:04}").into_bytes()))
             .collect();
         let seqs: Vec<u64> = (1..=n as u64).collect();
-        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs, true).unwrap();
+        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs).unwrap();
         assert!(!table.compressed_blocks);
         assert!(table.block_crc);
         assert!(!table.has_bloom());
@@ -3266,7 +3453,7 @@ mod tests {
             .map(|i| Bytes::from(format!("v{i:04}").into_bytes()))
             .collect();
         let seqs: Vec<u64> = (1..=n as u64).collect();
-        write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs, true).unwrap();
+        write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs).unwrap();
         let orig = std::fs::read(&path).unwrap();
         assert!(orig.len() > BULK_SST_HEADER_LEN + 8);
 
@@ -3304,7 +3491,7 @@ mod tests {
             .collect();
         let vals: Vec<Bytes> = (0..n).map(|_| Bytes::from(vec![b'v'; 80])).collect();
         let seqs: Vec<u64> = (1..=n as u64).collect();
-        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs, true).unwrap();
+        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs).unwrap();
         let blocks = table.data_block_count();
         // ~160 KiB of values at 4 KiB → tens of blocks (not one 256 KiB).
         assert!(
@@ -3343,7 +3530,7 @@ mod tests {
             .map(|i| Bytes::from(format!("v{i:04}").into_bytes()))
             .collect();
         let seqs: Vec<u64> = (1..=n as u64).collect();
-        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs, true).unwrap();
+        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs).unwrap();
         assert!(!table.payload_resident());
         let source: Arc<dyn crate::env::SstFileSource> = Arc::new(crate::env::EnvSource(StdEnv));
         let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(1 << 20)));
@@ -3393,7 +3580,7 @@ mod tests {
             .collect();
         let vals: Vec<Bytes> = (0..n).map(|_| Bytes::from(vec![b'v'; 80])).collect();
         let seqs: Vec<u64> = (1..=n as u64).collect();
-        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs, true).unwrap();
+        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs).unwrap();
         let source: Arc<dyn crate::env::SstFileSource> = Arc::new(crate::env::EnvSource(StdEnv));
         let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(1)));
         pool.arm();
@@ -3422,7 +3609,7 @@ mod tests {
             .map(|i| Bytes::from(format!("v{i:04}").into_bytes()))
             .collect();
         let seqs: Vec<u64> = (1..=n as u64).collect();
-        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs, true).unwrap();
+        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs).unwrap();
         let source: Arc<dyn crate::env::SstFileSource> = Arc::new(crate::env::EnvSource(StdEnv));
         let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(1)));
         pool.arm();
@@ -3441,6 +3628,141 @@ mod tests {
             sst_block_crc_skipped() >= 1,
             "repeat evicted seek must skip CRC"
         );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// RFC-0160 P0.2: evicted v6 point seek splits into pread / CRC / walk.
+    #[test]
+    fn get_stages_split_pread_crc_walk_on_evicted_v6() {
+        let path = temp_path();
+        let n = 32usize;
+        let keys: Vec<Bytes> = (0..n)
+            .map(|i| Bytes::from(format!("k{i:04}").into_bytes()))
+            .collect();
+        let vals: Vec<Bytes> = (0..n)
+            .map(|i| Bytes::from(format!("v{i:04}").into_bytes()))
+            .collect();
+        let seqs: Vec<u64> = (1..=n as u64).collect();
+        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs).unwrap();
+        let source: Arc<dyn crate::env::SstFileSource> = Arc::new(crate::env::EnvSource(StdEnv));
+        let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(1)));
+        pool.arm();
+        table.attach_payload_kit(&source, &pool);
+        force_get_stages(true);
+        reset_get_stages();
+        let mut scratch = PointSeekScratch::default();
+        let found = table
+            .point_at_seeking(b"k0003", u64::MAX, &mut scratch)
+            .unwrap();
+        assert!(matches!(&found, Some((_, Lookup::Found(v))) if v.as_ref() == b"v0003"));
+        let (pread, crc, walk) = take_get_stages();
+        force_get_stages(false);
+        assert!(pread > 0, "evicted v6 must pread, pread_ns={pread}");
+        assert!(crc > 0, "first probe must CRC, crc_ns={crc}");
+        assert!(walk > 0, "first probe must walk the block, walk_ns={walk}");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// RFC-0161: number the v73b miss-path tax. `point_at_cached` fully
+    /// `decode_block`s every entry (`InternalKey` + `Bytes` per record) and
+    /// mutex-inserts into `BlockCache`. `point_at_seeking` preads 4 KiB,
+    /// CRC-verifies, and walks encoded bytes with no per-entry alloc.
+    /// lookup_100's keys never repeat, so the insert never hits. Guest v73b
+    /// was 5.25–5.30 ms vs v71 seeking 3.868 ms.
+    #[test]
+    fn cold_point_cached_miss_is_slower_than_seeking_on_evicted_v6() {
+        let path = temp_path();
+        let n = 1024usize;
+        let val = Bytes::from(vec![b'v'; 200]);
+        let keys: Vec<Bytes> = (0..n)
+            .map(|i| Bytes::from(format!("k{i:06}").into_bytes()))
+            .collect();
+        let vals: Vec<Bytes> = vec![val; n];
+        let seqs: Vec<u64> = (1..=n as u64).collect();
+        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs).unwrap();
+        let source: Arc<dyn crate::env::SstFileSource> = Arc::new(crate::env::EnvSource(StdEnv));
+        let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(1)));
+        pool.arm();
+        table.attach_payload_kit(&source, &pool);
+        assert!(
+            table.payload.read().img.is_empty(),
+            "payload must be evicted so both paths pread"
+        );
+
+        let mut pread_ns = Vec::with_capacity(200);
+        let mut buf = vec![0u8; 4096];
+        let off = table.index.first().map(|h| h.offset).unwrap_or(40);
+        let len = table
+            .index
+            .first()
+            .map(|h| h.length as usize)
+            .unwrap_or(4096)
+            .min(4096);
+        buf.truncate(len.max(1));
+        for _ in 0..200 {
+            let t = Instant::now();
+            source.read_range(&path, off, &mut buf).unwrap();
+            pread_ns.push(t.elapsed().as_nanos() as u64);
+        }
+        pread_ns.sort_unstable();
+        let pread_p50 = pread_ns[pread_ns.len() / 2];
+
+        // Stride past one 4 KiB block (~15 × 200 B values) so each probe is a
+        // distinct block — lookup_100's shape.
+        let seek_keys: Vec<&[u8]> = (0..32).map(|i| keys[i * 20].as_ref()).collect();
+        let cached_keys: Vec<&[u8]> = (0..32).map(|i| keys[i * 20 + 10].as_ref()).collect();
+
+        let mut scratch = PointSeekScratch::default();
+        force_get_stages(true);
+        reset_get_stages();
+        for k in &seek_keys {
+            assert!(table
+                .point_at_seeking(k, u64::MAX, &mut scratch)
+                .unwrap()
+                .is_some());
+        }
+        let stages = take_get_stages();
+        force_get_stages(false);
+
+        let mut scratch = PointSeekScratch::default();
+        let t_seek = Instant::now();
+        for k in &seek_keys {
+            assert!(table
+                .point_at_seeking(k, u64::MAX, &mut scratch)
+                .unwrap()
+                .is_some());
+        }
+        let seek_ns = t_seek.elapsed().as_nanos() as u64;
+
+        // Tiny budget: every decoded insert evicts (guest 1 GiB cache is full
+        // after the first Criterion samples of unique keys).
+        let cache = BlockCache::with_budget_bytes(256);
+        let t_cached = Instant::now();
+        for k in &cached_keys {
+            assert!(table
+                .point_at_cached(k, u64::MAX, &cache)
+                .unwrap()
+                .is_some());
+        }
+        let cached_ns = t_cached.elapsed().as_nanos() as u64;
+
+        eprintln!(
+            "RFC-0161 miss-path: isolated_4kib_pread_p50_ns={pread_p50} \
+             seeking_32_ns={seek_ns} cached_32_ns={cached_ns} \
+             stages_pread_crc_walk={stages:?} cache_used={} cache_misses={} \
+             n_blocks={}",
+            cache.used_bytes(),
+            cache.misses(),
+            table.index.len()
+        );
+        assert!(
+            cache.used_bytes() > 0 && cache.misses() > 0,
+            "cached miss must decode+insert, used={} misses={}",
+            cache.used_bytes(),
+            cache.misses()
+        );
+        assert!(stages.0 > 0 && stages.1 > 0 && stages.2 > 0);
+        assert!(pread_p50 > 0, "isolated pread must run");
         let _ = std::fs::remove_file(&path);
     }
 
@@ -3857,6 +4179,7 @@ mod tests {
             path: PathBuf::from("/tmp/hand-made-mid-key-split.sst"),
             payload: Arc::new(parking_lot::RwLock::new(crate::cache::ResidentBody::empty())),
             payload_len: 0,
+            body_on_disk: false,
             compressed_blocks: false,
             block_crc: false,
             entries: Arc::new(Mutex::new(Some(entries))),
@@ -3864,7 +4187,7 @@ mod tests {
             range_tombstones: Vec::new(),
             num_entries: 5,
             max_sequence: 5,
-            index,
+            index: index.into(),
             key_cp: 0,
             bloom: BloomFilter::always_true(),
             smallest_user_key: Some(Bytes::copy_from_slice(b"a")),
@@ -3940,6 +4263,7 @@ mod tests {
                 path: PathBuf::from("/tmp/accel-oracle.sst"),
                 payload: Arc::new(parking_lot::RwLock::new(crate::cache::ResidentBody::empty())),
                 payload_len: 0,
+                body_on_disk: false,
                 compressed_blocks: false,
                 block_crc: false,
                 entries: Arc::new(Mutex::new(None)),
@@ -3947,7 +4271,7 @@ mod tests {
                 range_tombstones: Vec::new(),
                 num_entries: 0,
                 max_sequence: 0,
-                index,
+                index: index.into(),
                 key_cp,
                 bloom: BloomFilter::always_true(),
                 smallest_user_key: None,

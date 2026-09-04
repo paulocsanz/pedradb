@@ -95,7 +95,9 @@ impl LevelFile {
 pub(crate) fn is_disjoint(files: &[LevelFile]) -> bool {
     let mut sorted: Vec<&LevelFile> = files.iter().collect();
     sorted.sort_by(|a, b| a.lo.cmp(&b.lo));
-    sorted.windows(2).all(|w| w[0].hi.as_slice() < w[1].lo.as_slice())
+    sorted
+        .windows(2)
+        .all(|w| w[0].hi.as_slice() < w[1].lo.as_slice())
 }
 
 /// Total bytes of a level view.
@@ -127,10 +129,7 @@ pub(crate) fn pick_l0_to_l1(
         .filter(|f| f.overlaps(&hull_lo, &hull_hi))
         .map(|f| f.idx)
         .collect();
-    Some((
-        sel.iter().map(|f| f.idx).collect(),
-        slice,
-    ))
+    Some((sel.iter().map(|f| f.idx).collect(), slice))
 }
 
 /// AS-IS (pair `leveling_pick`): the L0→L1 job reabsorbs the whole L1
@@ -167,10 +166,7 @@ pub(crate) fn pick_l0_to_l1_as_is_uncapped(l0: &[LevelFile], _max_l0: usize) -> 
 /// `src` is caller-ordered oldest-first. Returns `None` when the source level
 /// is empty or the destination view is not disjoint.
 #[must_use]
-pub(crate) fn pick_pushdown(
-    src: &[LevelFile],
-    dst: &[LevelFile],
-) -> Option<(usize, Vec<usize>)> {
+pub(crate) fn pick_pushdown(src: &[LevelFile], dst: &[LevelFile]) -> Option<(usize, Vec<usize>)> {
     let source = src.first().cloned()?;
     if !is_disjoint(dst) {
         return None;

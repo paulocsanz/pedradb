@@ -1,0 +1,33 @@
+[package]
+name = "rocksdb-parity-bench"
+description = "YCSB + dependent-shaped parity bench: rocksdb-compat (pedradb-core) vs real RocksDB"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rocksdb-compat = { path = "../rocksdb-compat" }
+pedradb-core = { path = "../pedradb-core" }
+pedradb-io-uring = { path = "../pedradb-io-uring" }
+rocksdb = { version = "0.22", optional = true, default-features = false }
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+# Builds the real-RocksDB engine adapter (rocksdb crate, bundled C++ build).
+real = ["dep:rocksdb"]
+
+[[test]]
+name = "compat_vs_rocks"
+path = "tests/compat_vs_rocks.rs"
+required-features = ["real"]
+
+[[bin]]
+name = "rocks-parity-bench"
+path = "src/bin/rocks_parity_bench.rs"
+
+[[bin]]
+name = "rocks-parity-compare"
+path = "src/bin/rocks_parity_compare.rs"

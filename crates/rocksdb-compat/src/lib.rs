@@ -838,6 +838,18 @@ impl KeyCodec {
         pool.split_to(n).freeze()
     }
 
+    /// Owned key — no pool slice. For ops that outlive the batch inside a
+    /// sparse structure: the non-run tail of a latched batch (the slipstream
+    /// `meta` cursor) lands in the memtable, where one ~30 B key would pin a
+    /// whole 8 KiB `KEY_POOL` chunk until flush (RFC-0161 P0.5: 100M hydrate
+    /// held ~8.5 B/entry of pool chunks this way).
+    fn encode_run_owned(&self, prefix: &[u8], key: &[u8]) -> Bytes {
+        let mut v = Vec::with_capacity(prefix.len() + key.len());
+        v.extend_from_slice(prefix);
+        v.extend_from_slice(key);
+        Bytes::from(v)
+    }
+
     /// Default-CF raw: copy user key; otherwise `cf\\0key` via the pool.
     fn encode_owned(&self, cf: &str, key: &[u8], pool: &mut bytes::BytesMut) -> Bytes {
         if cf_encode_effective(cf, self.default_raw).is_empty() {
@@ -2657,15 +2669,15 @@ impl<E: PedraEnv> DB<E> {
                 }
                 tail.push(match op {
                     BatchOp::Put { key, value } => BatchOp::Put {
-                        key: self.codec.encode_run(&pfx2, key.as_ref(), &mut pool),
+                        key: self.codec.encode_run_owned(&pfx2, key.as_ref()),
                         value: value.clone(),
                     },
                     BatchOp::Delete { key } => BatchOp::Delete {
-                        key: self.codec.encode_run(&pfx2, key.as_ref(), &mut pool),
+                        key: self.codec.encode_run_owned(&pfx2, key.as_ref()),
                     },
                     BatchOp::DeleteRange { start, end } => BatchOp::DeleteRange {
-                        start: self.codec.encode_run(&pfx2, start.as_ref(), &mut pool),
-                        end: self.codec.encode_run(&pfx2, end.as_ref(), &mut pool),
+                        start: self.codec.encode_run_owned(&pfx2, start.as_ref()),
+                        end: self.codec.encode_run_owned(&pfx2, end.as_ref()),
                     },
                 });
             }
@@ -2975,7 +2987,7 @@ impl<E: PedraEnv> DB<E> {
                     last_ok = Some(cf);
                 }
                 tail.push(BatchOp::Put {
-                    key: self.codec.encode_run(&pfx2, k.as_ref(), &mut pool),
+                    key: self.codec.encode_run_owned(&pfx2, k.as_ref()),
                     value: Bytes::from(v),
                 });
             }
