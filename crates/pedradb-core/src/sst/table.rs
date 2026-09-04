@@ -2696,9 +2696,14 @@ pub fn write_sst_try_sorted_with(
 }
 
 /// Bulk-run SST: trusted-sorted `(key, val, seq)` arrays, SST **v6**
-/// (uncompressed 4 KiB blocks + per-block CRC). No `InternalKey`, no
-/// per-entry `Result`, no lz4. v3 evicted gets re-read the whole file;
+/// (uncompressed 4 KiB blocks + per-block CRC + bloom). No `InternalKey`,
+/// no per-entry `Result`, no lz4. v3 evicted gets re-read the whole file;
 /// v6 is a Rocks-shaped 4 KiB `read_range`.
+///
+/// The filter is sized by the distinct keys written (same 10 bits/key
+/// as the sorted writer). An always-true bloom made absent-key
+/// `probe_miss` a hidden loss; bulk files skip the filter only if the
+/// key set is empty, which this writer rejects.
 ///
 /// Always `fdatasync`s before returning (RFC-0162 P1.1): the chunk
 /// install is a durability + page-cache hygiene point, not the DB
@@ -2720,6 +2725,24 @@ pub fn write_sst_bulk_arrays(
 const BULK_SST_HEADER_LEN: usize = 40;
 /// Stage this many encoded bytes before a `write` (hot cache, few syscalls).
 const BULK_STREAM_BATCH: usize = 4 * 1024 * 1024;
+/// Bitset cap shared with the sorted writer: inserts past this raise
+/// FPR; the bitset does not grow. One 64 MiB bulk chunk is ~2.5e5 keys
+/// at 200 B values, well under 2M.
+const BLOOM_CAP_MAX: usize = 2_097_152;
+
+/// Bloom for a bulk file: sized by distinct written keys, 10 bits/key.
+fn bulk_bloom(keys: &[Bytes]) -> BloomFilter {
+    let mut bloom = BloomFilter::with_capacity(keys.len().min(BLOOM_CAP_MAX), DEFAULT_BITS_PER_KEY);
+    let mut last: Option<&[u8]> = None;
+    for k in keys {
+        let uk = k.as_ref();
+        if last != Some(uk) {
+            bloom.insert(uk);
+            last = Some(uk);
+        }
+    }
+    bloom
+}
 
 fn write_sst_bulk_arrays_body(
     env: &impl Env,
@@ -2802,7 +2825,17 @@ fn write_sst_bulk_arrays_body(
     let largest_user_key = Some(Bytes::copy_from_slice(&keys[n_entries - 1]));
     let data_len = pos - BULK_SST_HEADER_LEN as u64;
     let key_cp = SstTable::derive_index_accel(&mut index);
-    let mut tail = Vec::with_capacity(index.len().saturating_mul(48).saturating_add(64));
+    let bloom_bytes = n_entries
+        .saturating_mul(DEFAULT_BITS_PER_KEY)
+        .saturating_div(8)
+        .saturating_add(16);
+    let mut tail = Vec::with_capacity(
+        index
+            .len()
+            .saturating_mul(48)
+            .saturating_add(64)
+            .saturating_add(bloom_bytes),
+    );
     for h in &index {
         tail.extend_from_slice(&h.offset.to_le_bytes());
         tail.extend_from_slice(&h.length.to_le_bytes());
@@ -2810,12 +2843,14 @@ fn write_sst_bulk_arrays_body(
         tail.extend_from_slice(&kl.to_le_bytes());
         tail.extend_from_slice(&h.first_user_key);
     }
-    let bloom = BloomFilter::always_true();
+    stages.add(|s| &mut s.enc_ns, t_enc);
+    let t_bloom = std::time::Instant::now();
+    let bloom = bulk_bloom(keys);
     tail.extend_from_slice(&bloom.encode());
+    stages.add(|s| &mut s.bloom_ns, t_bloom);
     let n = n_entries as u64;
     let num_blocks = index.len() as u32;
     write_bulk_header(&mut header, n, max_sequence, num_blocks, data_len);
-    stages.add(|s| &mut s.enc_ns, t_enc);
 
     let t_crc = std::time::Instant::now();
     let hdr_crc = crc32c::crc32c(&header);
@@ -2834,8 +2869,9 @@ fn write_sst_bulk_arrays_body(
     if stages.enabled {
         println!(
             "FLUSHSTAGES entries={n_entries} bytes={payload_len_hint} enc_ms={:.1} \
-             lz4_ms=0.0 bloom_ms=0.0 crc_ms={:.1} write_ms={:.1} lz4=false",
+             lz4_ms=0.0 bloom_ms={:.1} crc_ms={:.1} write_ms={:.1} lz4=false",
             stages.enc_ns as f64 / 1e6,
+            stages.bloom_ns as f64 / 1e6,
             stages.crc_ns as f64 / 1e6,
             stages.write_ns as f64 / 1e6,
             payload_len_hint = payload_len + 4,
@@ -2991,7 +3027,6 @@ fn write_sst_try_sorted_body(
     // filter; the cap only bounds the bitset when a single file holds
     // tens of millions of keys (inserts past capacity raise FPR; the
     // bitset does not grow).
-    const BLOOM_CAP_MAX: usize = 2_097_152;
     let bloom_active = bloom_hint != 0;
     let mut bloom_keys: Vec<Bytes> = Vec::new();
     let mut data = Vec::new();
@@ -3178,10 +3213,8 @@ fn write_sst_try_sorted_body(
     // only decided whether the file gets a filter at all.
     let t_bloom = std::time::Instant::now();
     let bloom = if bloom_active && !bloom_keys.is_empty() {
-        let mut b = BloomFilter::with_capacity(
-            bloom_keys.len().min(BLOOM_CAP_MAX),
-            DEFAULT_BITS_PER_KEY,
-        );
+        let mut b =
+            BloomFilter::with_capacity(bloom_keys.len().min(BLOOM_CAP_MAX), DEFAULT_BITS_PER_KEY);
         for key in &bloom_keys {
             b.insert(key);
         }
@@ -3425,18 +3458,44 @@ mod tests {
         let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs).unwrap();
         assert!(!table.compressed_blocks);
         assert!(table.block_crc);
-        assert!(!table.has_bloom());
+        assert!(table.has_bloom());
         assert_eq!(table.len(), n);
+        for i in 0..n {
+            let k = format!("k{i:04}");
+            assert!(
+                table.key_may_match(k.as_bytes()),
+                "bloom must not false-negative written key {k}"
+            );
+        }
+        // In-range absents (between existing keys). Bloom FP ~1%; eight
+        // probes is enough to prove the filter is live, not always-true.
+        let misses: [&[u8]; 8] = [
+            b"k0003x",
+            b"k0010x",
+            b"k0020x",
+            b"k0030x",
+            b"k0040x",
+            b"k0050x",
+            b"k0060x",
+            b"k0025-gone",
+        ];
+        let rejected = misses.iter().filter(|k| !table.key_may_match(k)).count();
+        assert!(
+            rejected >= 6,
+            "bulk bloom must reject in-range misses, rejected={rejected}/8"
+        );
         assert!(
             !table.payload_resident(),
             "streaming writer must not keep the file body resident"
         );
         drop(table);
         let re = SstTable::open_on(&StdEnv, &path).unwrap();
+        assert!(re.has_bloom());
         assert!(matches!(
             re.get(b"k0003", u64::MAX),
             Lookup::Found(v) if v.as_ref() == b"v0003"
         ));
+        assert!(matches!(re.get(b"k0003x", u64::MAX), Lookup::NotFound));
         assert!(matches!(re.get(b"missing", u64::MAX), Lookup::NotFound));
         let _ = std::fs::remove_file(&path);
     }
