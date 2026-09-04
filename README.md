@@ -201,8 +201,12 @@ faster than RocksDB default. 25M and 100M rows are 3-run medians.
   slower miss path that day (125 µs vs 104 µs here). Pedra barely
   moved. Settle **88×** (0.7 vs 61 s) is the same story in reverse:
   Rocks settle was 23 s on that single-run, 55–62 s here.
-- Absent-key `probe_miss` can lose (bulk files ship an always-true bloom)
-  and is not in the required set.
+- Absent-key `probe_miss` is a required miss-path cell, not an optional
+  footnote. 100M 3-run with the previous bulk writer (always-true bloom):
+  Pedra 2.3–2.4 µs vs Rocks 651–692 ns — **0.29×, a named loss**. Bulk
+  files now embed a real bloom (10 bits/key, same as the sorted writer).
+  That cell republishes after a 3-run; no ratio is claimed from the new
+  writer. The 100M hydrate/read row above is the previous writer.
 
 **Reproducing.** The in-tree harness is `scale-parity-bench` (same key
 shape: clustered `route.svc-*`, 200 B values, 1024-entry batches). One
