@@ -1622,8 +1622,25 @@ mod tests {
             "failed TX must restore next_seq (got {})",
             db.last_sequence()
         );
-
+        // Fail-closed fence (5b6789c): a failed WAL append fences the Db —
+        // O_APPEND may have left torn bytes at EOF, so the same WAL must
+        // not accept further acked writes. The retry contract lives after
+        // reopen, not in-process.
+        assert!(
+            db.is_durability_fenced(),
+            "WAL append failure must fence (fail-closed)"
+        );
+        {
+            let mut tx = db.begin();
+            tx.put(b"a", b"1").unwrap();
+            tx.commit()
+                .expect_err("fenced writer must refuse new commits");
+        }
+        drop(db);
         env.disarm();
+
+        // Retry TX after reopen: same contract, now on a fresh WAL.
+        let mut db = Db::open_with_env(&dir, opts(), env).unwrap();
         {
             let mut tx = db.begin();
             tx.put(b"a", b"1").unwrap();
