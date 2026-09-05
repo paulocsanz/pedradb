@@ -1332,40 +1332,12 @@ impl SstRun {
                     < ssts[pair[1]].smallest_user_key().unwrap()
             })
     }
-
-    fn disjoint_sorted_by_lo(
-        ssts: &[SstTable],
-        tables_newest_first: &[usize],
-    ) -> Option<Vec<usize>> {
-        if tables_newest_first.len() < 2 {
-            return None;
-        }
-        for &i in tables_newest_first {
-            if ssts[i].smallest_user_key().is_none() || ssts[i].largest_user_key().is_none() {
-                return None;
-            }
-        }
-        let mut by_lo: Vec<usize> = tables_newest_first.to_vec();
-        by_lo.sort_by(|&a, &b| {
-            ssts[a]
-                .smallest_user_key()
-                .unwrap()
-                .cmp(ssts[b].smallest_user_key().unwrap())
-        });
-        for pair in by_lo.windows(2) {
-            if ssts[pair[0]].largest_user_key().unwrap()
-                >= ssts[pair[1]].smallest_user_key().unwrap()
-            {
-                return None;
-            }
-        }
-        Some(by_lo)
-    }
 }
 
 /// Lazy concatenation of one disjoint level's tables in `lo` order. The
 /// scan window visits at most one table at a time (strict disjointness is
-/// proven by [`SstRun::disjoint_sorted_by_lo`]), so the merge sees ONE
+/// proven when the run's `disjoint_by_lo` order is built), so the merge
+/// sees ONE
 /// stream per level instead of one per file — heap width at 25 M drops
 /// from ~#SSTs to ~#levels + L0 + memtables, cutting sift levels per row.
 struct LevelRunStream<'a, E: Env> {
@@ -2571,11 +2543,13 @@ impl<E: Env> Db<E> {
         Arc::clone(&self.point_cache)
     }
 
+    /// Shared per-CF SST envelope list (RFC-0164 miss fast path).
     #[must_use]
     pub fn sst_envelope_handle(&self) -> Arc<RwLock<Vec<(Bytes, Bytes)>>> {
         Arc::clone(&self.sst_envelope)
     }
 
+    /// Shared settled-SSTs-only flag (RFC-0164 miss fast path gate).
     #[must_use]
     pub fn settled_sst_only_handle(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.settled_sst_only)
@@ -4273,10 +4247,12 @@ impl<E: Env> Db<E> {
     }
 
     /// L0 newest → older → L1+ (same single-writer invariant as the mem hit).
-    fn sst_indices_newest_first(&self) -> &[usize] {
+    #[must_use]
+    pub fn sst_indices_newest_first(&self) -> &[usize] {
         &self.sst_order_newest
     }
 
+    /// Rebuild the newest-first SST order after level changes.
     fn rebuild_sst_order(&mut self) {
         let mut idx: Vec<usize> = (0..self.ssts.len()).collect();
         idx.sort_by(|&a, &b| {
@@ -6660,7 +6636,7 @@ impl<E: Env> Db<E> {
 
     /// Sparse-index RAM of installed SSTs (RFC-0161 P0.5).
     #[must_use]
-    pub(crate) fn sst_index_bytes(&self) -> usize {
+    pub fn sst_index_bytes(&self) -> usize {
         self.ssts.iter().map(SstTable::index_memory_bytes).sum()
     }
 
@@ -6669,7 +6645,7 @@ impl<E: Env> Db<E> {
     /// and not a peer Rocks still live in the same process (v74 SIGKILL
     /// at 3.64 GiB was that sum).
     #[must_use]
-    pub(crate) fn hydrate_resident_bytes(&self) -> usize {
+    pub fn hydrate_resident_bytes(&self) -> usize {
         self.bulk_live_bytes()
             .saturating_add(self.sst_payload_pool.resident_bytes() as usize)
             .saturating_add(self.sst_index_bytes())
@@ -7704,7 +7680,7 @@ impl<E: Env> Db<E> {
     /// Override the across-job batch width (tests; the host open path sets
     /// it from `PEDRA_PARALLEL_JOBS`). Needs [`Self::set_parallel_merge`]
     /// to take effect.
-    pub(crate) fn set_parallel_jobs(&mut self, k: usize) {
+    pub fn set_parallel_jobs(&mut self, k: usize) {
         self.parallel_jobs = k.clamp(1, 8);
     }
 
@@ -9937,18 +9913,22 @@ impl<E: Env> Db<E> {
         Ok(seq)
     }
 
-    /// Sequential G1 client: prepare, one WAL lock (encode + `write` +
-    /// `fdatasync`), apply, publish. Skips [`GroupInFlight`] — that path
-    /// still encodes under one lock and write+fd under another (RFC-0062
-    /// P1.1 p11j; isolated raftlog 0.935 was that extra hop + vec).
-    /// Multi-writer leaders stay on [`Self::group_start`].
+    /// Sequential G1 client, split like the group path (RFC-0045 P2.1):
+    /// [`Self::lone_encode_commit`] under the write lock (admission,
+    /// prepare, vlog flush, WAL encode — no fd), `fdatasync` OFF the lock,
+    /// then [`Self::lone_publish_commit`] on the second write-lock hold
+    /// (publish gate, mem apply, publish). Skips [`GroupInFlight`] —
+    /// multi-writer leaders stay on [`Self::group_start`].
     ///
     /// Returns `(commit seq, fdatasync ns)` — the fd sample feeds the
     /// write-group EMA that bounds the catch-up wait (RFC-0042 P1.1);
     /// `0` when no WAL append happened (nothing to sample).
-    pub(crate) fn lone_sync_commit(&mut self, ops: Vec<BatchOp>) -> Result<(SequenceNumber, u64)> {
+    pub(crate) fn lone_encode_commit(
+        &mut self,
+        ops: Vec<BatchOp>,
+    ) -> Result<(SequenceNumber, Option<LoneInFlight>)> {
         if ops.is_empty() {
-            return Ok((self.last_sequence(), 0));
+            return Ok((self.last_sequence(), None));
         }
         if !self.write_admission_idle() {
             let families = self.batch_families(&ops);
@@ -9957,24 +9937,39 @@ impl<E: Env> Db<E> {
         self.observe_bulk_batch(&ops);
         let (records, seq) = self.prepare_write_ops(ops)?;
         if records.is_empty() {
-            return Ok((seq, 0));
+            return Ok((seq, None));
         }
         self.vlog_prepare_wal(true)?;
-        let sl = records.as_slice();
-        let (n, sync_r, fd_ns) = {
-            let mut w = self.wal.lock();
-            let n = w.encode_write_op_batches(&[sl])?;
-            let t_fd = std::time::Instant::now();
-            let r = w.sync_data();
-            (n, r, t_fd.elapsed().as_nanos() as u64)
-        };
-        // RFC-0071: same publish gate as ConcurrentDb off-lock group I/O.
-        if !crate::group_commit_kernel::may_publish_group(sync_r.is_ok()) {
-            let e = sync_r.err().expect("publish refused iff WAL I/O failed");
+        let n = self
+            .wal
+            .lock()
+            .encode_write_op_batches(&[records.as_slice()])?;
+        self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
+        // RFC-0045 P2.1: OCC must see these encoded-but-unapplied ops while
+        // the fd runs off the write lock (same staging as group leaders).
+        self.stage_unapplied_ops(&records);
+        Ok((seq, Some(LoneInFlight { records, seq })))
+    }
+
+    /// Second write-lock hold of the lone G1 path. `fd` carries the WAL I/O
+    /// result (and duration) of the off-lock `fdatasync`; Ok only after the
+    /// publish gate — same kernel decision as the group path (RFC-0071).
+    pub(crate) fn lone_publish_commit(
+        &mut self,
+        lone: LoneInFlight,
+        fd: Result<u64>,
+    ) -> Result<(SequenceNumber, u64)> {
+        let LoneInFlight { records, seq } = lone;
+        // Same entry contract as `group_apply`: drop the staged ops on both
+        // outcomes — a leftover stage would pin `wal_pin_state().commit_inflight`
+        // forever and refuse every later WAL rotation.
+        self.unstage_unapplied_ops(&records);
+        if !crate::group_commit_kernel::may_publish_group(fd.is_ok()) {
+            let e = fd.err().expect("publish refused iff WAL I/O failed");
             self.fence_durability(&e, FenceClass::of_core(&e));
             return Err(e);
         }
-        self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
+        let fd_ns = fd.expect("io ok ⇒ fd duration present");
         self.note_wal_sync();
         if !self.feed_is_lazy() {
             self.change_log
@@ -9990,8 +9985,19 @@ impl<E: Env> Db<E> {
         self.maybe_auto_flush_best_effort();
         Ok((seq, fd_ns))
     }
+}
 
-    /// Shared WAL handle for off-lock `fdatasync` (ConcurrentDb group leader).
+/// WAL-encoded lone commit parked between its encode (first write-lock
+/// hold) and its mem-apply/publish (second hold) — the RFC-0045 P2.1
+/// off-lock `fdatasync` window, same shape as a group leader's.
+pub(crate) struct LoneInFlight {
+    records: Vec<WriteOp>,
+    seq: SequenceNumber,
+}
+
+impl<E: Env> Db<E> {
+    /// Shared WAL handle for off-lock `fdatasync` (ConcurrentDb group
+    /// leader and lone path).
     pub(crate) fn wal_arc(&self) -> Arc<Mutex<Wal<E::File>>> {
         Arc::clone(&self.wal)
     }
@@ -10008,18 +10014,23 @@ impl<E: Env> Db<E> {
     /// for off-lock `fdatasync` (RFC-0045 P2.1).
     pub(crate) fn stage_unapplied(&mut self, g: &GroupInFlight) {
         for (_, ops, _) in &g.appended {
-            for op in ops {
-                self.unapplied.push(UnappliedOp {
-                    seq: op.sequence,
-                    kind: op.kind,
-                    key: op.key.clone(),
-                    end: if op.kind == ValueType::RangeDeletion {
-                        op.value.clone()
-                    } else {
-                        Bytes::new()
-                    },
-                });
-            }
+            self.stage_unapplied_ops(ops);
+        }
+    }
+
+    /// Lone-path variant of [`Self::stage_unapplied`] (no `GroupInFlight`).
+    pub(crate) fn stage_unapplied_ops(&mut self, ops: &[WriteOp]) {
+        for op in ops {
+            self.unapplied.push(UnappliedOp {
+                seq: op.sequence,
+                kind: op.kind,
+                key: op.key.clone(),
+                end: if op.kind == ValueType::RangeDeletion {
+                    op.value.clone()
+                } else {
+                    Bytes::new()
+                },
+            });
         }
     }
 
@@ -10028,15 +10039,24 @@ impl<E: Env> Db<E> {
         if self.unapplied.is_empty() {
             return;
         }
+        for (_, ops, _) in &g.appended {
+            self.unstage_unapplied_ops(ops);
+        }
+    }
+
+    /// Lone-path variant of [`Self::unstage_unapplied`]: drop the staged
+    /// ops covered by one batch's sequence range.
+    pub(crate) fn unstage_unapplied_ops(&mut self, ops: &[WriteOp]) {
+        if self.unapplied.is_empty() {
+            return;
+        }
         let mut lo = u64::MAX;
         let mut hi = 0u64;
         let mut any = false;
-        for (_, ops, _) in &g.appended {
-            for op in ops {
-                any = true;
-                lo = lo.min(op.sequence);
-                hi = hi.max(op.sequence);
-            }
+        for op in ops {
+            any = true;
+            lo = lo.min(op.sequence);
+            hi = hi.max(op.sequence);
         }
         if !any {
             return;
@@ -10051,8 +10071,8 @@ impl<E: Env> Db<E> {
     }
 
     /// Shared handle to [`Self::commit_inflight`] for lock-free observation
-    /// (RFC-0042 P1.1: a commit must be provably in flight even while the
-    /// lone path holds the write lock through its `fdatasync`).
+    /// (RFC-0042 P1.1: a commit must be provably in flight even while its
+    /// off-lock `fdatasync` window is open).
     #[must_use]
     pub(crate) fn commit_inflight_handle(&self) -> Arc<AtomicUsize> {
         Arc::clone(&self.commit_inflight)
