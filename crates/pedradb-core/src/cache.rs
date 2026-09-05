@@ -9,8 +9,10 @@ use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::hash::Hasher;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
+
+use crate::bloom::BloomFilter;
 
 use bytes::Bytes;
 use parking_lot::Mutex;
@@ -635,6 +637,12 @@ impl BlockCache {
 #[derive(Debug, Default)]
 pub struct AnswerCache<V> {
     inner: Mutex<AnswerCacheInner<V>>,
+    /// Set once `map.len() == capacity`. Further unique inserts are no-ops
+    /// (freeze, not FIFO). Probe_miss must not take the mutex to learn that.
+    frozen: AtomicBool,
+    /// Snapshot of the fill-set bloom, published before `frozen`. Unique
+    /// misses (probe_miss) skip the mutex when this rejects the key.
+    frozen_neg: OnceLock<BloomFilter>,
 }
 
 /// Latest-snapshot point get (`None` = cached absence).
@@ -756,18 +764,27 @@ impl KeyGenMap {
 
 type FxBuild = std::hash::BuildHasherDefault<FxHasher>;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct AnswerCacheInner<V> {
     map: std::collections::HashMap<Bytes, (u64, u64, V), FxBuild>,
-    /// Insertion order of the frozen working set. Once `map.len() ==
-    /// capacity`, further unique inserts are dropped (uniform get_hit /
-    /// lookup_100 must not FIFO-churn). `clear` on write starts a new fill.
     order: std::collections::VecDeque<(Bytes, u64)>,
     capacity: usize,
-    /// Bumped on [`AnswerCache::clear`] so stale entries miss without a walk.
     gen: u64,
-    /// Monotonic insertion epoch (FIFO pop correctness, F178).
     epoch: u64,
+    bloom: BloomFilter,
+}
+
+impl<V> Default for AnswerCacheInner<V> {
+    fn default() -> Self {
+        Self {
+            map: std::collections::HashMap::default(),
+            order: std::collections::VecDeque::new(),
+            capacity: 0,
+            gen: 0,
+            epoch: 0,
+            bloom: BloomFilter::always_true(),
+        }
+    }
 }
 
 impl<V: Clone> AnswerCache<V> {
@@ -781,13 +798,30 @@ impl<V: Clone> AnswerCache<V> {
                 capacity,
                 gen: 0,
                 epoch: 0,
+                bloom: if capacity == 0 {
+                    BloomFilter::always_true()
+                } else {
+                    BloomFilter::with_capacity(capacity, 10)
+                },
             }),
+            frozen: AtomicBool::new(capacity == 0),
+            frozen_neg: OnceLock::new(),
         }
+    }
+
+    fn publish_frozen_neg(&self, bloom: BloomFilter) {
+        let _ = self.frozen_neg.set(bloom);
+        self.frozen.store(true, Ordering::Release);
     }
 
     /// `None` = miss.
     #[must_use]
     pub fn get(&self, key: &[u8]) -> Option<V> {
+        if let Some(b) = self.frozen_neg.get() {
+            if !b.may_contain(key) {
+                return None;
+            }
+        }
         let g = self.inner.lock();
         if g.capacity == 0 {
             return None;
@@ -800,8 +834,12 @@ impl<V: Clone> AnswerCache<V> {
 
     /// Store a latest-snapshot answer.
     pub fn insert(&self, key: &[u8], value: V) {
+        if self.frozen.load(Ordering::Relaxed) {
+            return;
+        }
         let mut g = self.inner.lock();
         if g.capacity == 0 {
+            self.frozen.store(true, Ordering::Relaxed);
             return;
         }
         let now = g.gen;
@@ -815,13 +853,22 @@ impl<V: Clone> AnswerCache<V> {
             // over 25M keys: FIFO evict + `Bytes` copy on every miss was
             // the fill tax (8192-cap never hits). Zipf's hot set fits in
             // 8192 so the first fill stays; writes `clear()`.
+            let snap = g.bloom.clone();
+            drop(g);
+            self.publish_frozen_neg(snap);
             return;
         }
+        g.bloom.insert(key);
         let epoch = g.epoch;
         g.epoch = g.epoch.wrapping_add(1);
         let owned = Bytes::copy_from_slice(key);
         g.order.push_back((owned.clone(), epoch));
         g.map.insert(owned, (now, epoch, value));
+        if g.map.len() >= g.capacity {
+            let snap = g.bloom.clone();
+            drop(g);
+            self.publish_frozen_neg(snap);
+        }
     }
 
     /// Invalidate every entry without walking the map (write path).
@@ -832,6 +879,7 @@ impl<V: Clone> AnswerCache<V> {
             g.map.clear();
             g.order.clear();
             g.gen = 1;
+            self.frozen.store(g.capacity == 0, Ordering::Relaxed);
         }
     }
 

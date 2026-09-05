@@ -73,12 +73,12 @@ use crate::memtable::{Lookup, MemTable};
 use crate::merge::{range_deleted, range_tombstone_covers, StreamingVisibleIter, VisibleKv};
 use crate::sst::{
     put_tls_point_seek_scratch, take_tls_point_seek_scratch, write_l0_sst, write_l0_sst_for_family,
-    write_sst_bulk_arrays, write_sst_entries_on, PointSeekScratch, SstTable,
+    write_sst_bulk_arrays, write_sst_entries_on, SstTable,
 };
 use crate::tx::Transaction;
 use crate::vlog::{self, ValueLog, VlogRewriteStats, VLOG_FILE_NAME};
 use crate::wal::Wal;
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use std::io::{Read, Write};
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -1251,12 +1251,88 @@ struct SstRun {
     level: u32,
     tables_newest_first: Vec<usize>,
     disjoint_by_lo: Option<Vec<usize>>,
+    sorted_by_lo: Option<Vec<usize>>,
+    packed_lo: Option<DisjointLos>,
+    packed_hi: Option<DisjointLos>,
+    disjoint_los: Option<DisjointLos>,
+    /// Any table in the run carries a range tombstone. Bulk hydrate never
+    /// does; skipping the per-get collect over ~400 files was the remaining
+    /// O(n) on `probe_miss` after bounds+bloom.
+    any_range_tombstones: bool,
+}
+
+#[derive(Clone)]
+struct DisjointLos {
+    bytes: Vec<u8>,
+    ends: Vec<u32>,
+}
+
+impl DisjointLos {
+    fn from_tables(ssts: &[SstTable], by_lo: &[usize]) -> Self {
+        let mut bytes = Vec::new();
+        let mut ends = Vec::with_capacity(by_lo.len());
+        for &i in by_lo {
+            let lo = ssts[i]
+                .smallest_user_key()
+                .expect("disjoint run tables are bounded");
+            bytes.extend_from_slice(lo);
+            ends.push(u32::try_from(bytes.len()).expect("concatenated lo keys fit u32"));
+        }
+        Self { bytes, ends }
+    }
+
+    fn lo(&self, i: usize) -> &[u8] {
+        let start = if i == 0 { 0 } else { self.ends[i - 1] as usize };
+        &self.bytes[start..self.ends[i] as usize]
+    }
+
+    fn partition_point_gt(&self, key: &[u8]) -> usize {
+        let n = self.ends.len();
+        let mut lo = 0usize;
+        let mut hi = n;
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            if self.lo(mid) <= key {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        lo
+    }
 }
 
 impl SstRun {
     /// Tables sorted by `lo`, or `None` unless every table is bounded and
     /// the run is strictly disjoint (`hi[i] < lo[i+1]`). Overlaps, duplicate
     /// bounds, or unbounded tables keep the linear newest-first walk.
+    fn sorted_by_lo(ssts: &[SstTable], tables_newest_first: &[usize]) -> Option<Vec<usize>> {
+        if tables_newest_first.is_empty() {
+            return None;
+        }
+        for &i in tables_newest_first {
+            if ssts[i].smallest_user_key().is_none() || ssts[i].largest_user_key().is_none() {
+                return None;
+            }
+        }
+        let mut by_lo: Vec<usize> = tables_newest_first.to_vec();
+        by_lo.sort_by(|&a, &b| {
+            ssts[a]
+                .smallest_user_key()
+                .unwrap()
+                .cmp(ssts[b].smallest_user_key().unwrap())
+        });
+        Some(by_lo)
+    }
+
+    fn pairwise_disjoint(ssts: &[SstTable], by_lo: &[usize]) -> bool {
+        by_lo.len() >= 2
+            && by_lo.windows(2).all(|pair| {
+                ssts[pair[0]].largest_user_key().unwrap()
+                    < ssts[pair[1]].smallest_user_key().unwrap()
+            })
+    }
+
     fn disjoint_sorted_by_lo(
         ssts: &[SstTable],
         tables_newest_first: &[usize],
@@ -1294,7 +1370,7 @@ impl SstRun {
 /// from ~#SSTs to ~#levels + L0 + memtables, cutting sift levels per row.
 struct LevelRunStream<'a, E: Env> {
     db: &'a Db<E>,
-    files_by_lo: Vec<usize>,
+    files_by_lo: &'a [usize],
     next_file: usize,
     start: Bound<Bytes>,
     end: Bound<Bytes>,
@@ -1315,10 +1391,29 @@ fn bound_slice(b: &Bound<Bytes>) -> Bound<&[u8]> {
     }
 }
 
+/// First lo-sorted disjoint file that can overlap `[start, end)`.
+/// Files before this have `hi` strictly before `start`, so a prefix in
+/// the middle of a bulk run must not walk them (O(log n) vs O(#SST)).
+fn first_overlapping_disjoint_file(
+    ssts: &[SstTable],
+    files_by_lo: &[usize],
+    start: Bound<&[u8]>,
+) -> usize {
+    match start {
+        Bound::Unbounded => 0,
+        Bound::Included(s) => {
+            files_by_lo.partition_point(|&i| ssts[i].largest_user_key().is_some_and(|hi| hi < s))
+        }
+        Bound::Excluded(s) => {
+            files_by_lo.partition_point(|&i| ssts[i].largest_user_key().is_some_and(|hi| hi <= s))
+        }
+    }
+}
+
 impl<'a, E: Env> LevelRunStream<'a, E> {
     fn new(
         db: &'a Db<E>,
-        files_by_lo: Vec<usize>,
+        files_by_lo: &'a [usize],
         start: Bound<&[u8]>,
         end: Bound<&[u8]>,
         snapshot: SequenceNumber,
@@ -1329,10 +1424,11 @@ impl<'a, E: Env> LevelRunStream<'a, E> {
             Bound::Excluded(k) => Bound::Excluded(Bytes::copy_from_slice(k)),
             Bound::Unbounded => Bound::Unbounded,
         };
+        let next_file = first_overlapping_disjoint_file(&db.ssts, files_by_lo, start);
         Self {
             db,
             files_by_lo,
-            next_file: 0,
+            next_file,
             start: own(start),
             end: own(end),
             snapshot,
@@ -1362,7 +1458,7 @@ impl<'a, E: Env> Iterator for LevelRunStream<'a, E> {
                     continue;
                 }
                 self.db.scan_sst_probed.fetch_add(1, Ordering::Relaxed);
-                let cache = &self.db.block_cache;
+                let _ = self.db.env.advise(table.path(), 0, 0, AdviseKind::WillNeed);
                 let id = crate::cache::path_id(table.path())
                     ^ if self.resolve_values {
                         RESOLVED_BLOCK_TAG
@@ -1372,7 +1468,7 @@ impl<'a, E: Env> Iterator for LevelRunStream<'a, E> {
                 let db = self.db;
                 let resolve = self.resolve_values;
                 let load = Box::new(move |bi| {
-                    Some(cache.get_or_insert_with_id(id, bi, || {
+                    Some(crate::sst::scan_block_get_or_insert(id, bi, || {
                         let mut entries = match table.decode_block(bi) {
                             Ok(entries) => entries,
                             // F1: fail loudly on a corrupt block — same
@@ -1398,6 +1494,83 @@ impl<'a, E: Env> Iterator for LevelRunStream<'a, E> {
             self.current.as_ref()?;
         }
     }
+}
+
+/// Visible page from one or more internally-disjoint levels (L0 first =
+/// newest). Same user key across levels keeps the highest sequence.
+fn merge_disjoint_level_page<E: Env>(
+    db: &Db<E>,
+    runs: &[&[usize]],
+    start: Bound<&[u8]>,
+    end: Bound<&[u8]>,
+    snapshot: SequenceNumber,
+    limit: usize,
+) -> Vec<(Bytes, Bytes)> {
+    if runs.len() == 1 {
+        let mut stream = LevelRunStream::new(db, runs[0], start, end, snapshot, true);
+        let mut out = Vec::with_capacity(limit);
+        while out.len() < limit {
+            let Some((ikey, value)) = stream.next() else {
+                break;
+            };
+            if ikey.sequence > snapshot || ikey.kind != ValueType::Value {
+                continue;
+            }
+            out.push((ikey.user_key, value));
+        }
+        return out;
+    }
+    let mut streams: Vec<LevelRunStream<'_, E>> = runs
+        .iter()
+        .map(|by_lo| LevelRunStream::new(db, by_lo, start, end, snapshot, true))
+        .collect();
+    let mut heads: Vec<Option<(InternalKey, Bytes)>> =
+        streams.iter_mut().map(Iterator::next).collect();
+    let mut out = Vec::with_capacity(limit);
+    while out.len() < limit {
+        let mut best: Option<usize> = None;
+        for (i, h) in heads.iter().enumerate() {
+            let Some((ik, _)) = h else {
+                continue;
+            };
+            match best {
+                None => best = Some(i),
+                Some(b) => {
+                    let bk = &heads[b].as_ref().expect("best index has a head").0;
+                    match ik.user_key.as_ref().cmp(bk.user_key.as_ref()) {
+                        std::cmp::Ordering::Less => best = Some(i),
+                        std::cmp::Ordering::Equal if ik.sequence > bk.sequence => best = Some(i),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        let Some(i) = best else {
+            break;
+        };
+        let (ikey, value) = heads[i].take().expect("best head");
+        for (j, h) in heads.iter_mut().enumerate() {
+            if j == i {
+                continue;
+            }
+            if h.as_ref().is_some_and(|(k, _)| k.user_key == ikey.user_key) {
+                *h = streams[j].next();
+            }
+        }
+        loop {
+            match streams[i].next() {
+                Some((k, _)) if k.user_key == ikey.user_key => continue,
+                other => {
+                    heads[i] = other;
+                    break;
+                }
+            }
+        }
+        if ikey.sequence <= snapshot && ikey.kind == ValueType::Value {
+            out.push((ikey.user_key, value));
+        }
+    }
+    out
 }
 
 /// [`Db`] itself is single-threaded (`&mut` for writes). Use [`ConcurrentDb`] for
@@ -1446,6 +1619,13 @@ pub struct Db<E: Env = StdEnv> {
     /// (see [`SstRun`]). `last_under_user_prefix_sst` keeps walking the
     /// flat order above.
     sst_runs: Vec<SstRun>,
+    /// Inclusive envelope of every SST's user-key bounds. A point miss
+    /// outside it cannot be in any file (probe_miss keys of the form
+    /// `route.svc-9…` sit past `svc-099999` at 100M).
+    sst_user_lo: Option<Bytes>,
+    sst_user_hi: Option<Bytes>,
+    sst_envelope: Arc<RwLock<Vec<(Bytes, Bytes)>>>,
+    settled_sst_only: Arc<AtomicBool>,
     /// Immutable tables, oldest → newest within inventory order.
     ssts: Vec<SstTable>,
     /// LSM level for each entry in [`Self::ssts`] (parallel array; 0 = L0).
@@ -1569,6 +1749,7 @@ pub struct Db<E: Env = StdEnv> {
     scan_sst_probed: AtomicU64,
     get_mem_hit: AtomicU64,
     get_sst_fallback: AtomicU64,
+    lookup_sst_considered: AtomicU64,
     get_inline: AtomicU64,
     get_vlog: AtomicU64,
     mvcc_split_ops: AtomicU64,
@@ -2168,6 +2349,10 @@ impl<E: Env> Db<E> {
             retired_l0s: 0,
             sst_order_newest: Vec::new(),
             sst_runs: Vec::new(),
+            sst_user_lo: None,
+            sst_user_hi: None,
+            sst_envelope: Arc::new(RwLock::new(Vec::new())),
+            settled_sst_only: Arc::new(AtomicBool::new(false)),
             ssts,
             sst_levels,
             physical_cfs: Vec::new(),
@@ -2221,6 +2406,7 @@ impl<E: Env> Db<E> {
             scan_sst_probed: AtomicU64::new(0),
             get_mem_hit: AtomicU64::new(0),
             get_sst_fallback: AtomicU64::new(0),
+            lookup_sst_considered: AtomicU64::new(0),
             get_inline: AtomicU64::new(0),
             get_vlog: AtomicU64::new(0),
             mvcc_split_ops: AtomicU64::new(0),
@@ -2385,6 +2571,16 @@ impl<E: Env> Db<E> {
         Arc::clone(&self.point_cache)
     }
 
+    #[must_use]
+    pub fn sst_envelope_handle(&self) -> Arc<RwLock<Vec<(Bytes, Bytes)>>> {
+        Arc::clone(&self.sst_envelope)
+    }
+
+    #[must_use]
+    pub fn settled_sst_only_handle(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.settled_sst_only)
+    }
+
     /// Shared count-cache handle (ConcurrentDb `deps_scan` hit, no Db lock).
     #[must_use]
     pub fn count_cache_handle(&self) -> Arc<crate::cache::CountCache> {
@@ -2522,6 +2718,7 @@ impl<E: Env> Db<E> {
         self.scan_sst_probed.store(0, Ordering::Relaxed);
         self.get_mem_hit.store(0, Ordering::Relaxed);
         self.get_sst_fallback.store(0, Ordering::Relaxed);
+        self.lookup_sst_considered.store(0, Ordering::Relaxed);
         self.get_inline.store(0, Ordering::Relaxed);
         self.get_vlog.store(0, Ordering::Relaxed);
         self.mvcc_split_ops.store(0, Ordering::Relaxed);
@@ -3247,20 +3444,34 @@ impl<E: Env> Db<E> {
     /// cache mutex a second time on every uniform miss (lookup_100).
     pub(crate) fn get_after_point_miss(&self, key: &[u8]) -> Option<Bytes> {
         let snap = self.snapshot();
-        let got = match self.get_at(snap, key) {
-            Ok(v) => v,
-            // Below-watermark latest reads are not a corruption signal
-            // (concurrent GC raised the floor past our snapshot token).
-            Err(CoreError::SnapshotTooOld { .. }) => None,
-            Err(e) => fail_stop_corrupt_value(&format!("get key {key:?}"), &e),
-        };
-        // F198: the fill runs under the read lock, which does not exclude
-        // `publish_sequence` (also read-locked) — a publish can invalidate
-        // `key` between the snapshot above and this insert, caching a stale
-        // answer indefinitely. Only insert while `published` still matches
-        // the seq the answer was computed at. At capacity the cache freezes
-        // (no FIFO churn on unique keys).
-        if self.published_seq.load(Ordering::Acquire) == snap.seq {
+        if snap.seq == 0 {
+            return None;
+        }
+        if snap.seq < self.earliest_readable_seq {
+            return match self.get_at(snap, key) {
+                Ok(v) => v,
+                Err(CoreError::SnapshotTooOld { .. }) => None,
+                Err(e) => fail_stop_corrupt_value(&format!("get key {key:?}"), &e),
+            };
+        }
+        // Already cache-missed. Do not re-lock `point_cache` inside `get_at`.
+        let got =
+            match self.lookup(key, snap.seq) {
+                Lookup::Found(v) => {
+                    if vlog::decode_vlog_ptr(v.as_ref()).is_some() {
+                        self.get_vlog.fetch_add(1, Ordering::Relaxed);
+                    } else {
+                        self.get_inline.fetch_add(1, Ordering::Relaxed);
+                    }
+                    Some(self.resolve_stored_value(v).unwrap_or_else(|e| {
+                        fail_stop_corrupt_value(&format!("get key {key:?}"), &e)
+                    }))
+                }
+                Lookup::Deleted | Lookup::NotFound => None,
+            };
+        // Do not cache absence: unique probe_miss keys would freeze 8192
+        // with Nones and take the mutex on every subsequent unique miss.
+        if got.is_some() && self.published_seq.load(Ordering::Acquire) == snap.seq {
             self.point_cache.insert(key, got.clone());
         }
         got
@@ -4094,13 +4305,89 @@ impl<E: Env> Db<E> {
                     level,
                     tables_newest_first: vec![sst_i],
                     disjoint_by_lo: None,
+                    sorted_by_lo: None,
+                    packed_lo: None,
+                    packed_hi: None,
+                    disjoint_los: None,
+                    any_range_tombstones: false,
                 }),
             }
         }
         for run in &mut runs {
-            run.disjoint_by_lo =
-                SstRun::disjoint_sorted_by_lo(&self.ssts, &run.tables_newest_first);
+            run.sorted_by_lo = SstRun::sorted_by_lo(&self.ssts, &run.tables_newest_first);
+            run.disjoint_by_lo = run.sorted_by_lo.as_ref().and_then(|by_lo| {
+                SstRun::pairwise_disjoint(&self.ssts, by_lo).then(|| by_lo.clone())
+            });
+            run.packed_lo = run
+                .sorted_by_lo
+                .as_ref()
+                .map(|by_lo| DisjointLos::from_tables(&self.ssts, by_lo));
+            run.packed_hi = run.sorted_by_lo.as_ref().map(|by_lo| {
+                let mut bytes = Vec::new();
+                let mut ends = Vec::with_capacity(by_lo.len());
+                for &i in by_lo {
+                    bytes.extend_from_slice(self.ssts[i].largest_user_key().unwrap());
+                    ends.push(u32::try_from(bytes.len()).expect("packed hi fits u32"));
+                }
+                DisjointLos { bytes, ends }
+            });
+            run.disjoint_los = run.packed_lo.clone();
+            run.any_range_tombstones = run
+                .tables_newest_first
+                .iter()
+                .any(|&i| self.ssts[i].has_range_tombstones());
         }
+        let mut glo: Option<&[u8]> = None;
+        let mut ghi: Option<&[u8]> = None;
+        for t in &self.ssts {
+            if let Some(lo) = t.smallest_user_key() {
+                if glo.is_none_or(|g| lo < g) {
+                    glo = Some(lo);
+                }
+            }
+            if let Some(hi) = t.largest_user_key() {
+                if ghi.is_none_or(|g| hi > g) {
+                    ghi = Some(hi);
+                }
+            }
+        }
+        self.sst_user_lo = glo.map(Bytes::copy_from_slice);
+        self.sst_user_hi = ghi.map(Bytes::copy_from_slice);
+        let mut per_cf: std::collections::BTreeMap<String, (Bytes, Bytes)> =
+            std::collections::BTreeMap::new();
+        let mut mixed: Vec<(Bytes, Bytes)> = Vec::new();
+        for t in &self.ssts {
+            let Some(lo) = t.smallest_user_key() else {
+                continue;
+            };
+            let Some(hi) = t.largest_user_key() else {
+                continue;
+            };
+            let fam = t.cf();
+            if fam.is_empty() {
+                mixed.push((Bytes::copy_from_slice(lo), Bytes::copy_from_slice(hi)));
+                continue;
+            }
+            per_cf
+                .entry(fam.to_string())
+                .and_modify(|(clo, chi)| {
+                    if lo < clo.as_ref() {
+                        *clo = Bytes::copy_from_slice(lo);
+                    }
+                    if hi > chi.as_ref() {
+                        *chi = Bytes::copy_from_slice(hi);
+                    }
+                })
+                .or_insert_with(|| (Bytes::copy_from_slice(lo), Bytes::copy_from_slice(hi)));
+        }
+        let mut envelopes: Vec<(Bytes, Bytes)> = per_cf.into_values().collect();
+        envelopes.extend(mixed);
+        *self.sst_envelope.write() = envelopes;
+        let settled = self.bulk_live_bytes() == 0
+            && self.mem.is_empty()
+            && self.imm.is_none()
+            && self.parked_unflushed.is_empty();
+        self.settled_sst_only.store(settled, Ordering::Release);
         self.sst_runs = runs;
     }
 
@@ -4372,6 +4659,11 @@ impl<E: Env> Db<E> {
         } else {
             self.key_gen.touch(&keys[0]);
         }
+        let settled = self.bulk_live_bytes() == 0
+            && self.mem.is_empty()
+            && self.imm.is_none()
+            && self.parked_unflushed.is_empty();
+        self.settled_sst_only.store(settled, Ordering::Release);
     }
 
     /// Distinct visible user keys in `[start, end)` at `snapshot`, capped at
@@ -4441,8 +4733,11 @@ impl<E: Env> Db<E> {
                 single = Some(c);
             }
         }
+        let any_sst_tombs = self.sst_runs.iter().any(|r| r.any_range_tombstones);
         for table in self.ssts.iter() {
-            table.collect_range_tombstones(snapshot, &mut range_dels);
+            if any_sst_tombs {
+                table.collect_range_tombstones(snapshot, &mut range_dels);
+            }
             if !table.overlaps_user_range(start, end) {
                 continue;
             }
@@ -4534,6 +4829,57 @@ impl<E: Env> Db<E> {
         count
     }
 
+    /// Settled one-run prefix page: no mem/bulk, no range tombs, exactly one
+    /// overlapping disjoint level. Skips the boxed merge heap the windowed
+    /// iterator otherwise builds per 512-row refill (prefix_scan).
+    #[must_use]
+    pub fn try_disjoint_scan_page(
+        &self,
+        snapshot: SequenceNumber,
+        start: Bound<&[u8]>,
+        end: Bound<&[u8]>,
+        limit: usize,
+    ) -> Option<Vec<(Bytes, Bytes)>> {
+        if snapshot == 0 || limit == 0 {
+            return Some(Vec::new());
+        }
+        if snapshot < self.earliest_readable_seq {
+            return None;
+        }
+        if self.bulk_live_bytes() != 0
+            || !self.mem.is_empty()
+            || self.imm.is_some()
+            || !self.parked_unflushed.is_empty()
+        {
+            return None;
+        }
+        let mut picked: Vec<&[usize]> = Vec::new();
+        for run in &self.sst_runs {
+            if run.any_range_tombstones {
+                return None;
+            }
+            if let Some(by_lo) = run.disjoint_by_lo.as_ref() {
+                let i = first_overlapping_disjoint_file(&self.ssts, by_lo, start);
+                if i < by_lo.len() && self.ssts[by_lo[i]].overlaps_user_range(start, end) {
+                    picked.push(by_lo.as_slice());
+                }
+            } else if run
+                .tables_newest_first
+                .iter()
+                .any(|&ti| self.ssts[ti].overlaps_user_range(start, end))
+            {
+                return None;
+            }
+        }
+        if picked.is_empty() {
+            return Some(Vec::new());
+        }
+        self.scan_ops.fetch_add(1, Ordering::Relaxed);
+        Some(merge_disjoint_level_page(
+            self, &picked, start, end, snapshot, limit,
+        ))
+    }
+
     fn scan_at_raw(
         &self,
         snapshot: SequenceNumber,
@@ -4553,16 +4899,24 @@ impl<E: Env> Db<E> {
         // are lazy — later SST blocks are not decoded after `limit` emits.
         let mut range_dels = Vec::new();
         let mut streams: Vec<crate::merge::LayerStream<'_>> =
-            Vec::with_capacity(3 + self.ssts.len());
+            Vec::with_capacity(4 + self.sst_runs.len());
         for table in self.scan_mem_layers() {
-            table.collect_range_tombstones(snapshot, &mut range_dels);
+            if table.has_range_tombstones() {
+                table.collect_range_tombstones(snapshot, &mut range_dels);
+            }
+            if table.is_empty() {
+                continue;
+            }
             streams.push(self.memtable_stream(table, start, end, snapshot, resolve_values));
         }
         // Range tombstones from EVERY table (G2): a covering delete whose
         // start sits before `start` must still hide keys in the window,
         // including tables a grouped stream has not pulled from yet.
-        for table in self.ssts.iter() {
-            table.collect_range_tombstones(snapshot, &mut range_dels);
+        // Bulk hydrate has none — skip the O(#SST) walk (prefix_scan).
+        if self.sst_runs.iter().any(|r| r.any_range_tombstones) {
+            for table in self.ssts.iter() {
+                table.collect_range_tombstones(snapshot, &mut range_dels);
+            }
         }
         // A strictly disjoint level collapses into ONE lazy concatenated
         // stream ([`LevelRunStream`]): heap width drops from #SSTs to
@@ -4572,7 +4926,7 @@ impl<E: Env> Db<E> {
             if let Some(by_lo) = run.disjoint_by_lo.as_ref() {
                 streams.push(Box::new(LevelRunStream::new(
                     self,
-                    by_lo.clone(),
+                    by_lo,
                     start,
                     end,
                     snapshot,
@@ -4586,7 +4940,6 @@ impl<E: Env> Db<E> {
                     continue;
                 }
                 self.scan_sst_probed.fetch_add(1, Ordering::Relaxed);
-                let cache = &self.block_cache;
                 // Hash the path once per stream, not once per block fetch, and
                 // keep value-resolved blocks under a tagged id: a full scan then
                 // resolves each block once (on miss) and later loads are a pure
@@ -4603,7 +4956,7 @@ impl<E: Env> Db<E> {
                 let load: Box<
                     dyn FnMut(usize) -> Option<std::sync::Arc<Vec<(InternalKey, Bytes)>>> + '_,
                 > = Box::new(move |bi| {
-                    Some(cache.get_or_insert_with_id(id, bi, || {
+                    Some(crate::sst::scan_block_get_or_insert(id, bi, || {
                         let mut entries = match table.decode_block(bi) {
                             Ok(entries) => entries,
                             // F1: a CRC/IO-faulted block must fail loudly —
@@ -8937,6 +9290,16 @@ impl<E: Env> Db<E> {
     /// Merges point versions and range tombstones across all layers so a range
     /// delete in a newer layer correctly hides older puts.
     pub(crate) fn lookup(&self, key: &[u8], snapshot: SequenceNumber) -> Lookup {
+        if self.bulk_runs.is_empty()
+            && self.parked_bulk.is_empty()
+            && self.bulk_encoding.is_none()
+            && self.mem.is_empty()
+            && self.imm.is_none()
+            && self.flush_read_pin.is_none()
+            && self.parked_unflushed.is_empty()
+        {
+            return self.lookup_sst_packed(key, snapshot);
+        }
         let fam = self.bulk_family_of_key(key);
         if let Some(run) = self.bulk_runs.get(fam) {
             match run.lookup(key, snapshot) {
@@ -8965,6 +9328,9 @@ impl<E: Env> Db<E> {
         let mut range_tombs = Vec::new();
 
         for table in self.mem_layers() {
+            if table.is_empty() && !table.has_range_tombstones() {
+                continue;
+            }
             Self::scan_mem_for_lookup(
                 table,
                 key,
@@ -8996,7 +9362,7 @@ impl<E: Env> Db<E> {
         // and copy out only the winning value (the decoded-block cache
         // thrashed at random-key scale). Block faults fail-stop — a corrupt
         // block must never read as a miss.
-        let mut seek_scratch = take_tls_point_seek_scratch();
+        let mut seek_scratch: Option<crate::sst::PointSeekScratch> = None;
         // One probe per table: range-prune, then seek the single candidate
         // block. The bounds span every entry's user key (deletion markers
         // included), so a key outside them has no point version here.
@@ -9015,12 +9381,12 @@ impl<E: Env> Db<E> {
         // encoded miss path. Default `BlockCache::new(8192)` has
         // `budget_bytes==0` and was already seeking.
         let mut probe = |table: &SstTable| -> Option<(SequenceNumber, Lookup)> {
-            if let (Some(lo), Some(hi)) = (table.smallest_user_key(), table.largest_user_key()) {
-                if key < lo || key > hi {
-                    return None;
-                }
+            self.lookup_sst_considered.fetch_add(1, Ordering::Relaxed);
+            if !table.key_may_match(key) {
+                return None;
             }
-            match table.point_at_seeking(key, snapshot, &mut seek_scratch) {
+            let scratch = seek_scratch.get_or_insert_with(take_tls_point_seek_scratch);
+            match table.point_at_seeking(key, snapshot, scratch) {
                 Ok(Some((seq, look))) => Some((seq, look)),
                 Ok(None) => None,
                 Err(e) => fail_stop_corrupt_block(table.path(), &e),
@@ -9035,21 +9401,40 @@ impl<E: Env> Db<E> {
             // run at once is behavior-preserving: `range_deleted` hides only
             // strictly newer points, so tombstones from tables older than
             // the run's winner stay inert.
-            for &sst_i in &run.tables_newest_first {
-                ssts[sst_i].collect_range_tombstones(snapshot, &mut range_tombs);
+            if run.any_range_tombstones {
+                for &sst_i in &run.tables_newest_first {
+                    ssts[sst_i].collect_range_tombstones(snapshot, &mut range_tombs);
+                }
             }
-            if let Some(by_lo) = &run.disjoint_by_lo {
-                // Sorted by `lo`, pairwise disjoint: the last table whose
-                // `lo <= key` is the only one that can hold `key` (every
-                // earlier `hi` sits below the next `lo`). The probe's own
-                // bounds check stays as the fail-safe.
-                let p = by_lo
-                    .partition_point(|&i| ssts[i].smallest_user_key().is_some_and(|lo| lo <= key));
-                if p > 0 {
-                    if let Some((seq, look)) = probe(&ssts[by_lo[p - 1]]) {
-                        best_point_seq = Some(seq);
-                        best_point = look;
-                        break 'runs;
+            if let (Some(by_lo), Some(plos), Some(phis)) =
+                (&run.sorted_by_lo, &run.packed_lo, &run.packed_hi)
+            {
+                let p = plos.partition_point_gt(key);
+                if p == 0 {
+                    continue;
+                }
+                if run.disjoint_by_lo.is_some() {
+                    if phis.lo(p - 1) >= key {
+                        if let Some((seq, look)) = probe(&ssts[by_lo[p - 1]]) {
+                            best_point_seq = Some(seq);
+                            best_point = look;
+                            break 'runs;
+                        }
+                    }
+                } else {
+                    // Overlapping files that share a user key must probe
+                    // newest-first (a newer delete hides an older put).
+                    for &sst_i in &run.tables_newest_first {
+                        if let Some(pos) = by_lo.iter().position(|&i| i == sst_i) {
+                            if pos >= p || phis.lo(pos) < key {
+                                continue;
+                            }
+                        }
+                        if let Some((seq, look)) = probe(&ssts[sst_i]) {
+                            best_point_seq = Some(seq);
+                            best_point = look;
+                            break 'runs;
+                        }
                     }
                 }
             } else {
@@ -9062,8 +9447,110 @@ impl<E: Env> Db<E> {
                 }
             }
         }
-        put_tls_point_seek_scratch(seek_scratch);
+        if let Some(scratch) = seek_scratch {
+            put_tls_point_seek_scratch(scratch);
+        }
 
+        match best_point {
+            Lookup::Found(v) => {
+                let seq = best_point_seq.unwrap_or(0);
+                if crate::merge::visible_at(
+                    crate::key::ValueType::Value,
+                    range_deleted(key, seq, &range_tombs),
+                ) {
+                    Lookup::Found(v)
+                } else {
+                    Lookup::Deleted
+                }
+            }
+            Lookup::Deleted => Lookup::Deleted,
+            Lookup::NotFound => {
+                if range_deleted(key, 0, &range_tombs) {
+                    Lookup::Deleted
+                } else {
+                    Lookup::NotFound
+                }
+            }
+        }
+    }
+
+    fn lookup_sst_packed(&self, key: &[u8], snapshot: SequenceNumber) -> Lookup {
+        {
+            let g = self.sst_envelope.read();
+            if g.iter()
+                .all(|(lo, hi)| key < lo.as_ref() || key > hi.as_ref())
+            {
+                return Lookup::NotFound;
+            }
+        }
+        self.get_sst_fallback.fetch_add(1, Ordering::Relaxed);
+        let mut seek_scratch: Option<crate::sst::PointSeekScratch> = None;
+        let ssts = &self.ssts;
+        let mut best_point_seq: Option<SequenceNumber> = None;
+        let mut best_point = Lookup::NotFound;
+        let mut range_tombs = Vec::new();
+        let mut probe = |table: &SstTable| -> Option<(SequenceNumber, Lookup)> {
+            self.lookup_sst_considered.fetch_add(1, Ordering::Relaxed);
+            if !table.key_may_match(key) {
+                return None;
+            }
+            let scratch = seek_scratch.get_or_insert_with(take_tls_point_seek_scratch);
+            match table.point_at_seeking(key, snapshot, scratch) {
+                Ok(Some((seq, look))) => Some((seq, look)),
+                Ok(None) => None,
+                Err(e) => fail_stop_corrupt_block(table.path(), &e),
+            }
+        };
+        'runs: for run in &self.sst_runs {
+            if run.any_range_tombstones {
+                for &sst_i in &run.tables_newest_first {
+                    ssts[sst_i].collect_range_tombstones(snapshot, &mut range_tombs);
+                }
+            }
+            if let (Some(by_lo), Some(plos), Some(phis)) =
+                (&run.sorted_by_lo, &run.packed_lo, &run.packed_hi)
+            {
+                let p = plos.partition_point_gt(key);
+                if p == 0 {
+                    continue;
+                }
+                if run.disjoint_by_lo.is_some() {
+                    if phis.lo(p - 1) >= key {
+                        if let Some((seq, look)) = probe(&ssts[by_lo[p - 1]]) {
+                            best_point_seq = Some(seq);
+                            best_point = look;
+                            break 'runs;
+                        }
+                    }
+                } else {
+                    // Overlapping files that share a user key must probe
+                    // newest-first (a newer delete hides an older put).
+                    for &sst_i in &run.tables_newest_first {
+                        if let Some(pos) = by_lo.iter().position(|&i| i == sst_i) {
+                            if pos >= p || phis.lo(pos) < key {
+                                continue;
+                            }
+                        }
+                        if let Some((seq, look)) = probe(&ssts[sst_i]) {
+                            best_point_seq = Some(seq);
+                            best_point = look;
+                            break 'runs;
+                        }
+                    }
+                }
+            } else {
+                for &sst_i in &run.tables_newest_first {
+                    if let Some((seq, look)) = probe(&ssts[sst_i]) {
+                        best_point_seq = Some(seq);
+                        best_point = look;
+                        break 'runs;
+                    }
+                }
+            }
+        }
+        if let Some(scratch) = seek_scratch {
+            put_tls_point_seek_scratch(scratch);
+        }
         match best_point {
             Lookup::Found(v) => {
                 let seq = best_point_seq.unwrap_or(0);
@@ -9097,7 +9584,9 @@ impl<E: Env> Db<E> {
     ) {
         // BTree seek — do not walk the whole memtable on every point get
         // (RFC-0032: ycsb_c / layered lookup).
-        table.collect_range_tombstones(snapshot, range_tombs);
+        if table.has_range_tombstones() {
+            table.collect_range_tombstones(snapshot, range_tombs);
+        }
         if let Some((seq, look)) = table.get_entry(key, snapshot) {
             if best_point_seq.is_none_or(|s| seq > s) {
                 *best_point_seq = Some(seq);
@@ -20819,7 +21308,7 @@ mod tests {
                 };
             }
         }
-        let mut seek_scratch = PointSeekScratch::default();
+        let mut seek_scratch = crate::sst::PointSeekScratch::default();
         for &sst_i in db.sst_indices_newest_first() {
             let table = &db.ssts[sst_i];
             table.collect_range_tombstones(snapshot, &mut range_tombs);

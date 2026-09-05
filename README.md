@@ -182,7 +182,7 @@ faster than RocksDB default. 25M and 100M rows are 3-run medians.
 | 1M | **1.82×** | **2.50×** | **1.44×** | **1.64×** | **1.36×** | **1.08×** | — |
 | 10M | **1.03×** | **7.67×** | 1.00× (tie) | **1.31×** | **1.07×** | **1.02×** | — |
 | 25M | 1.02× | **27×** | **1.14×** | **1.34×** | — | **1.27×** | — |
-| 100M | **1.15×** | **90×** | **1.46×** | **0.70×** | **1.59×** | **1.39×** | **0.27×** |
+| 100M | **1.27×** | **81×** | **1.07×** | **1.05×** | **1.14×** | **1.15×** | **2.71×** |
 
 - 10M `get_hit` is a tie (confidence intervals overlap), not a win.
 - 25M hydrate (3-run median 1.02×: Pedra 29.5 s vs Rocks 30.2 s) sits
@@ -196,15 +196,23 @@ faster than RocksDB default. 25M and 100M rows are 3-run medians.
   (10 bits/key): hydrate **1.15×** (Pedra 133.4–141.4 s, Rocks
   157.7–166.3 s). On disk Pedra 24.08 GiB (259 B/entry) ×3. The bloom
   costs ~17 s of write-side vs the previous-writer 123.7 s median.
-- 100M reads, same 3 runs: `get_hit` **1.46×** (71.6 vs 104.9 µs),
-  `get_loop` **1.59×**, `multi_get` **1.39×**. `prefix_scan` is a
-  **0.70× named loss** (576.8 vs 404.0 µs; Pedra 459/577/627, Rocks
-  stable ~400). Not a tie. Settle **90×** (0.6 vs 54 s).
-- Absent-key `probe_miss` is a required miss-path cell. 100M 3-run with
-  the real bulk bloom: Pedra 2.4–2.5 µs vs Rocks 682–701 ns —
-  **0.27×, a named loss**. The always-true writer was 0.29×; the bloom
-  did not move p50. Remaining cost is O(#SST) range-tombstone collect
-  on a bulk run that has none.
+- 100M reads, 2026-09-05, 3 runs (engine with per-column-family SST key
+  envelopes and a k-way disjoint-level merge for settled prefix pages):
+  `get_hit` **1.07×** (63.7 vs 68.4 µs; the first leg was 0.96×),
+  `prefix_scan` **1.05×** (304.8 vs 320.0 µs; per-run 1.13 / 1.00 / 1.02
+  — the middle run is a tie), `get_loop` **1.14×**, `multi_get`
+  **1.15×**, settle **81×** (0.7 vs 56.5 s), hydrate **1.27×** (Pedra
+  118.5–119.5 s vs Rocks 147.6–156.6 s). The prior engine's prefix loss
+  on the same harness was **0.70×** (576.8 vs 404.0 µs, 2026-09-04); the
+  k-way merge of the disjoint settled levels is what moved the cell.
+- Absent-key `probe_miss` **2.71×** (211 vs 571 ns p50; p99 231–311 ns
+  vs 842 ns–2.4 µs). slipstream's `data`/`meta` column split parks a gap
+  (`route.svc-9…` sits past the data family's hi) that a single
+  collapsed `[min,max]` SST envelope swallowed, so every miss probed
+  every table — PR 19 documents the shape. The engine now keeps one
+  envelope per column family and `get_cf` rejects the hole before
+  touching a table. The prior **0.27×** (2.4–2.5 µs vs 682–701 ns) is
+  the same harness before the fix.
 
 **Fjall** (third peer, optional; not the gate). Same guest, in-tree
 `scale-parity-bench`, 3-run medians, 200 B values, 256 MiB cache.

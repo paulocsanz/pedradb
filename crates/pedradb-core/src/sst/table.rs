@@ -185,6 +185,56 @@ thread_local! {
     static RAW_BLOCKS: RefCell<RawBlockCache> = RefCell::new(RawBlockCache::default());
 }
 
+const SCAN_BLOCK_CACHE_CAP: usize = RAW_BLOCK_CACHE_CAP;
+
+#[derive(Default)]
+struct ScanBlockCache {
+    map: HashMap<(u64, u64), Arc<Vec<(InternalKey, Bytes)>>>,
+    order: VecDeque<(u64, u64)>,
+}
+
+impl ScanBlockCache {
+    fn get(&mut self, key: &(u64, u64)) -> Option<Arc<Vec<(InternalKey, Bytes)>>> {
+        self.map.get(key).cloned()
+    }
+
+    fn insert(&mut self, key: (u64, u64), img: Arc<Vec<(InternalKey, Bytes)>>) {
+        if self.map.contains_key(&key) {
+            return;
+        }
+        while self.map.len() >= SCAN_BLOCK_CACHE_CAP {
+            if let Some(old) = self.order.pop_front() {
+                self.map.remove(&old);
+            } else {
+                break;
+            }
+        }
+        self.order.push_back(key);
+        self.map.insert(key, img);
+    }
+}
+
+thread_local! {
+    static SCAN_BLOCKS: RefCell<ScanBlockCache> = RefCell::new(ScanBlockCache::default());
+}
+
+pub(crate) fn scan_block_get_or_insert(
+    path_id: u64,
+    block_idx: usize,
+    fill: impl FnOnce() -> Vec<(InternalKey, Bytes)>,
+) -> Arc<Vec<(InternalKey, Bytes)>> {
+    let key = (path_id, block_idx as u64);
+    SCAN_BLOCKS.with(|c| {
+        let mut c = c.borrow_mut();
+        if let Some(hit) = c.get(&key) {
+            return hit;
+        }
+        let v = Arc::new(fill());
+        c.insert(key, Arc::clone(&v));
+        v
+    })
+}
+
 /// RFC-0160 P0.2: split point-get wall into pread / block CRC / block walk.
 /// `PEDRA_GET_STAGES=1` arms it for a guest capture; tests call
 /// [`force_get_stages`].
@@ -1344,7 +1394,7 @@ impl SstTable {
                 start: start_b,
                 end: end_b,
                 snapshot,
-                skip_user: None,
+                skip_user: Vec::new(),
                 want_values,
             };
         }
@@ -1357,7 +1407,7 @@ impl SstTable {
                 start: start_b,
                 end: end_b,
                 snapshot,
-                skip_user: None,
+                skip_user: Vec::new(),
                 want_values,
             }
         } else {
@@ -1383,7 +1433,7 @@ impl SstTable {
                 start: start_b,
                 end: end_b,
                 snapshot,
-                skip_user: None,
+                skip_user: Vec::new(),
                 want_values,
             }
         }
@@ -2182,8 +2232,9 @@ pub struct SstRangeIter<'a> {
     start: Bound<Bytes>,
     end: Bound<Bytes>,
     snapshot: SequenceNumber,
-    /// Newest visible version per user already yielded (skip older seqs).
-    skip_user: Option<Bytes>,
+    /// Newest visible user already yielded (skip older seqs). Reused buffer
+    /// — a `Bytes` clone here was a third refcount RMW per prefix row.
+    skip_user: Vec<u8>,
     /// When false, yield empty values (`KeyOnly` / count).
     want_values: bool,
 }
@@ -2228,7 +2279,7 @@ impl Iterator for SstRangeIter<'_> {
                     if k.sequence > self.snapshot {
                         continue;
                     }
-                    if self.skip_user.as_ref().is_some_and(|u| u == &k.user_key) {
+                    if !self.skip_user.is_empty() && self.skip_user == uk {
                         continue;
                     }
                     let before_start = match start_b {
@@ -2239,13 +2290,17 @@ impl Iterator for SstRangeIter<'_> {
                     if before_start {
                         continue;
                     }
-                    self.skip_user = Some(k.user_key.clone());
+                    self.skip_user.clear();
+                    self.skip_user.extend_from_slice(uk);
                     let value = if self.want_values {
                         v.clone()
                     } else {
                         Bytes::new()
                     };
-                    return Some((k.clone(), value));
+                    return Some((
+                        InternalKey::new(k.user_key.clone(), k.sequence, k.kind),
+                        value,
+                    ));
                 }
             }
             let bi = self.blocks.next()?;
