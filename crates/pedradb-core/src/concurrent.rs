@@ -1056,6 +1056,8 @@ pub struct ConcurrentDb<E: Env = StdEnv> {
     default_sync: Arc<AtomicBool>,
     /// Shared point cache — a hit needs no Db read lock (YCSB C).
     point_cache: Arc<crate::cache::PointCache>,
+    sst_envelope: Arc<RwLock<Vec<(Bytes, Bytes)>>>,
+    settled_sst_only: Arc<AtomicBool>,
     /// Shared count cache — a hit needs no Db read lock (`deps_scan`).
     count_cache: Arc<crate::cache::CountCache>,
     /// Invalidate epoch for compat TLS last-count (`deps_scan` zipf).
@@ -1127,6 +1129,8 @@ impl<E: Env> ConcurrentDb<E> {
     pub fn from_db(db: Db<E>) -> Self {
         let default_sync = db.default_write_sync();
         let point_cache = db.point_cache_handle();
+        let sst_envelope = db.sst_envelope_handle();
+        let settled_sst_only = db.settled_sst_only_handle();
         let count_cache = db.count_cache_handle();
         let read_cache_epoch = db.read_cache_epoch_handle();
         let point_tls_epoch = db.point_tls_epoch_handle();
@@ -1149,6 +1153,8 @@ impl<E: Env> ConcurrentDb<E> {
             persist_lock: Arc::new(Mutex::new(())),
             default_sync: Arc::new(AtomicBool::new(default_sync)),
             point_cache,
+            sst_envelope,
+            settled_sst_only,
             count_cache,
             read_cache_epoch,
             point_tls_epoch,
@@ -1190,10 +1196,28 @@ impl<E: Env> ConcurrentDb<E> {
     #[must_use]
     pub fn get(&self, key: &[u8]) -> Option<Bytes> {
         self.reads_served.fetch_add(1, Ordering::Relaxed);
+        if self.fast_outside_sst_miss(key) {
+            return None;
+        }
         if let Some(v) = self.point_cache.get(key) {
             return v;
         }
         self.inner.read().get_after_point_miss(key)
+    }
+
+    #[must_use]
+    pub fn fast_outside_sst_miss(&self, key: &[u8]) -> bool {
+        if !self.settled_sst_only.load(Ordering::Acquire) {
+            return false;
+        }
+        let g = self.sst_envelope.read();
+        g.iter()
+            .all(|(lo, hi)| key < lo.as_ref() || key > hi.as_ref())
+    }
+
+    #[must_use]
+    pub fn is_settled_sst_only(&self) -> bool {
+        self.settled_sst_only.load(Ordering::Acquire)
     }
 
     /// Point-cache probe (`Some` = hit, including cached miss). OCC get.
@@ -2037,6 +2061,8 @@ impl<E: Env> ConcurrentDb<E> {
             persist_lock: _,
             default_sync: _,
             point_cache: _,
+            sst_envelope: _,
+            settled_sst_only: _,
             count_cache: _,
             read_cache_epoch: _,
             point_tls_epoch: _,

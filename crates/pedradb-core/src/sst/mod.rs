@@ -26,4 +26,6 @@ pub use table::{
     SstRangeIter, SstTable, SST_VERSION, SST_VERSION_V1, SST_VERSION_V2, SST_VERSION_V3,
     SST_VERSION_V4, SST_VERSION_V6,
 };
-pub(crate) use table::{put_tls_point_seek_scratch, take_tls_point_seek_scratch};
+pub(crate) use table::{
+    put_tls_point_seek_scratch, scan_block_get_or_insert, take_tls_point_seek_scratch,
+};

@@ -46,6 +46,7 @@ pub use shape::{
     UniversalCompactionStopStyle, WaitForCompactOptions,
 };
 
+use pedradb_core::bloom::BloomFilter;
 use pedradb_core::{
     cf_encode_effective, decode_cf_key, encode_cf_key, key_in_cf_family, prefix_exclusive_end,
     BatchOp, CompactOptions as CoreCompactOptions, ConcurrentDb, CoreError, Env as PedraEnv,
@@ -1022,6 +1023,7 @@ struct LastGetTable {
     /// does not touch this.
     ring: [LastGetSlot; LAST_RING],
     ring_i: u8,
+    bloom: BloomFilter,
 }
 
 impl LastGetTable {
@@ -1041,6 +1043,7 @@ impl LastGetTable {
             slots: (0..LAST_N).map(|_| Self::empty_slot()).collect(),
             ring: std::array::from_fn(|_| Self::empty_slot()),
             ring_i: 0,
+            bloom: BloomFilter::with_capacity(LAST_N, 10),
         }
     }
 
@@ -1093,6 +1096,9 @@ impl LastGetTable {
 
     /// Default-CF `get()`: hash the user key only (no `default` prefix).
     fn get_key(&self, epoch: u64, gen: u64, key: &[u8]) -> Option<Option<Bytes>> {
+        if !self.bloom.may_contain(key) {
+            return None;
+        }
         let h = fx_bytes(0, key);
         for p in 0..LAST_PROBE {
             let s = &self.slots[last_slot(h, p)];
@@ -1132,6 +1138,7 @@ impl LastGetTable {
             key: key_t,
             val,
         };
+        self.bloom.insert(key);
     }
 
     /// Named-CF get miss: fill the 4096-slot hash. `store` is ring-only
@@ -1686,6 +1693,12 @@ fn page_forward_inner<E: PedraEnv>(
     let s = bound_as_ref(&start);
     inner
         .with_read(|db| {
+            if let Some(raw) = db.try_disjoint_scan_page(seq, s, end, limit) {
+                return Ok(raw
+                    .into_iter()
+                    .map(|(k, v)| (codec.decode_bytes_owned(cf, k), v))
+                    .collect());
+            }
             let mut out = Vec::with_capacity(limit);
             for row in db.try_scan_window_at(seq, s, end)? {
                 if !crate::iter_kernel::iter_window_keep(row.snapshot_live) {
@@ -2441,6 +2454,9 @@ impl<E: PedraEnv> DB<E> {
         // RFC-0041 YCSB-C: default-CF get hashes the user key only (no
         // `default` prefix / CF compare). Same bytes as `get_named`.
         let key = key.as_ref();
+        if self.inner.fast_outside_sst_miss(key) {
+            return Ok(None);
+        }
         let (epoch, gen) = self.tls_point_ids(DEFAULT_CF, key);
         if let Some(hit) = LAST_GET.with(|slot| slot.borrow().get_key(epoch, gen, key)) {
             return Ok(hit.map(|b| b.to_vec()));
@@ -2448,7 +2464,9 @@ impl<E: PedraEnv> DB<E> {
         let got = self
             .codec
             .encode_with(DEFAULT_CF, key, |enc| self.inner.get(enc));
-        LAST_GET.with(|slot| slot.borrow_mut().store_key(epoch, gen, key, got.clone()));
+        if got.is_some() {
+            LAST_GET.with(|slot| slot.borrow_mut().store_key(epoch, gen, key, got.clone()));
+        }
         Ok(got.map(|b| b.to_vec()))
     }
 
@@ -2458,6 +2476,9 @@ impl<E: PedraEnv> DB<E> {
     /// Pedra read errors.
     pub fn contains(&self, key: impl AsRef<[u8]>) -> Result<bool> {
         let key = key.as_ref();
+        if self.inner.fast_outside_sst_miss(key) {
+            return Ok(false);
+        }
         let (epoch, gen) = self.tls_point_ids(DEFAULT_CF, key);
         if let Some(hit) = LAST_GET.with(|slot| slot.borrow().get_key(epoch, gen, key)) {
             return Ok(hit.is_some());
@@ -2465,7 +2486,9 @@ impl<E: PedraEnv> DB<E> {
         let got = self
             .codec
             .encode_with(DEFAULT_CF, key, |enc| self.inner.get(enc));
-        LAST_GET.with(|slot| slot.borrow_mut().store_key(epoch, gen, key, got.clone()));
+        if got.is_some() {
+            LAST_GET.with(|slot| slot.borrow_mut().store_key(epoch, gen, key, got.clone()));
+        }
         Ok(got.is_some())
     }
 
@@ -2497,6 +2520,13 @@ impl<E: PedraEnv> DB<E> {
     /// TLS-warmed point get on a CF name already known valid.
     fn get_cached(&self, cf: &str, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
         let key = key.as_ref();
+        if self.inner.is_settled_sst_only()
+            && self
+                .codec
+                .encode_with(cf, key, |enc| self.inner.fast_outside_sst_miss(enc))
+        {
+            return Ok(None);
+        }
         // RFC-0041 YCSB-C: zipf (θ=0.99, 4096 keys) concentrates on a hot
         // set. Direct-mapped last-N skips CF-prefix encode + point-cache
         // mutex. Bytes stay shared with the point cache; we copy into Vec
@@ -2506,7 +2536,9 @@ impl<E: PedraEnv> DB<E> {
             return Ok(hit.map(|b| b.to_vec()));
         }
         let got = self.codec.encode_with(cf, key, |enc| self.inner.get(enc));
-        LAST_CF.with(|slot| slot.borrow_mut().store(epoch, gen, cf, key, got.clone()));
+        if got.is_some() {
+            LAST_CF.with(|slot| slot.borrow_mut().store(epoch, gen, cf, key, got.clone()));
+        }
         Ok(got.map(|b| b.to_vec()))
     }
 
