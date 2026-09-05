@@ -926,9 +926,7 @@ pub struct FjallEngine {
 #[cfg(feature = "fjall")]
 impl FjallEngine {
     pub fn open(path: &Path) -> Self {
-        let db = fjall::Database::builder(path)
-            .open()
-            .expect("fjall open");
+        let db = fjall::Database::builder(path).open().expect("fjall open");
         let ks = db
             .keyspace("default", fjall::KeyspaceCreateOptions::default)
             .expect("fjall keyspace");
@@ -1000,13 +998,7 @@ impl Engine for FjallEngine {
             .and_then(|g| g.key().ok())
             .map(|k| k.to_vec()))
     }
-    fn scan_count_cf(
-        &self,
-        cf: &str,
-        start: &[u8],
-        end: &[u8],
-        cap: usize,
-    ) -> Result<usize, ()> {
+    fn scan_count_cf(&self, cf: &str, start: &[u8], end: &[u8], cap: usize) -> Result<usize, ()> {
         if cf != "default" && !cf.is_empty() {
             return Err(());
         }

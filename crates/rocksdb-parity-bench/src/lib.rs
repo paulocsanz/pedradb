@@ -91,7 +91,11 @@ pub fn seed_under_async_barrier<E: Engine>(e: &E, enabled: bool, seed: impl FnOn
 pub fn clients_ladder_from(ladder: Option<&str>, single: usize) -> Vec<usize> {
     let csv = ladder.map(str::trim).filter(|s| !s.is_empty());
     let Some(csv) = csv else {
-        return if single >= 2 { vec![single] } else { Vec::new() };
+        return if single >= 2 {
+            vec![single]
+        } else {
+            Vec::new()
+        };
     };
     let mut ns: Vec<usize> = csv
         .split(',')
@@ -3072,7 +3076,13 @@ mod tests {
         // shuffle so summarize's internal sort is exercised
         lats.reverse();
         let block = summarize("unit_tail", 1000, Duration::from_secs(10), &mut lats);
-        for key in ["\"p50_ms\"", "\"p95_ms\"", "\"p99_ms\"", "\"p999_ms\"", "\"max_ms\""] {
+        for key in [
+            "\"p50_ms\"",
+            "\"p95_ms\"",
+            "\"p99_ms\"",
+            "\"p999_ms\"",
+            "\"max_ms\"",
+        ] {
             assert!(block.contains(key), "missing {key} in:\n{block}");
         }
         let val = |k: &str| {
@@ -3083,14 +3093,29 @@ mod tests {
                 .and_then(|s| s.trim().trim_end_matches(',').parse::<f64>().ok())
                 .unwrap_or_else(|| panic!("parse {k} in:\n{block}"))
         };
-        let (p50, p99, p999, max) = (val("\"p50_ms\""), val("\"p99_ms\""), val("\"p999_ms\""), val("\"max_ms\""));
+        let (p50, p99, p999, max) = (
+            val("\"p50_ms\""),
+            val("\"p99_ms\""),
+            val("\"p999_ms\""),
+            val("\"max_ms\""),
+        );
         // pct index = round(p/100 * (len-1)); len=1000 → idx 500/989/998
         assert_eq!(p50, 501.0, "p50 of 1..=1000");
         assert_eq!(p99, 990.0, "p99 of 1..=1000");
         assert_eq!(p999, 999.0, "p999 of 1..=1000");
         assert_eq!(max, 1000.0);
-        let mc = summarize_mc("unit_mc", 10, Duration::from_secs(1), &mut vec![1.0; 10], 4, 0);
-        assert!(mc.contains("\"clients\": 4") && mc.contains("\"p999_ms\""), "mc block keeps tail:\n{mc}");
+        let mc = summarize_mc(
+            "unit_mc",
+            10,
+            Duration::from_secs(1),
+            &mut vec![1.0; 10],
+            4,
+            0,
+        );
+        assert!(
+            mc.contains("\"clients\": 4") && mc.contains("\"p999_ms\""),
+            "mc block keeps tail:\n{mc}"
+        );
     }
 
     #[test]
