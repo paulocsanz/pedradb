@@ -15409,21 +15409,25 @@ mod tests {
             k[9] = i as u8;
             db.put(&k, b"v").unwrap();
         }
-        // Early window: memtable holds 0..2k keys.
-        let t0 = std::time::Instant::now();
-        for i in 0..2_000u32 {
-            put_i(&mut db, i);
+        // Early window: memtable holds 0..2k keys. Min of 3 windows: one
+        // scheduler hiccup from the parallel suite must not fail the ratio
+        // (the windows are ~ms; contention noise is asymmetric).
+        fn window(db: &mut Db, from: u32, to: u32) -> std::time::Duration {
+            let t = std::time::Instant::now();
+            for i in from..to {
+                put_i(db, i);
+            }
+            t.elapsed()
         }
-        let early = t0.elapsed();
+        let early = (0..3).map(|_| window(&mut db, 0, 2_000)).min().unwrap();
         for i in 2_000..18_000u32 {
             put_i(&mut db, i);
         }
         // Late window: memtable holds ~18k keys.
-        let t1 = std::time::Instant::now();
-        for i in 18_000..20_000u32 {
-            put_i(&mut db, i);
-        }
-        let late = t1.elapsed();
+        let late = (0..3)
+            .map(|_| window(&mut db, 18_000, 20_000))
+            .min()
+            .unwrap();
         let growth = late.as_secs_f64() / early.as_secs_f64();
         assert!(
             growth < 6.0,
