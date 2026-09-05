@@ -2454,7 +2454,17 @@ impl<E: PedraEnv> DB<E> {
         // RFC-0041 YCSB-C: default-CF get hashes the user key only (no
         // `default` prefix / CF compare). Same bytes as `get_named`.
         let key = key.as_ref();
-        if self.inner.fast_outside_sst_miss(key) {
+        // RFC-0164 envelope gate: a default-raw DB stores default keys
+        // unprefixed, so the raw user key probes the envelope; a prefixed
+        // DB must probe with the encoded key or every default-CF get is a
+        // false miss (SSTs and envelopes hold `default\0…` bytes).
+        let outside = if self.codec.default_raw {
+            self.inner.fast_outside_sst_miss(key)
+        } else {
+            self.codec
+                .encode_with(DEFAULT_CF, key, |enc| self.inner.fast_outside_sst_miss(enc))
+        };
+        if outside {
             return Ok(None);
         }
         let (epoch, gen) = self.tls_point_ids(DEFAULT_CF, key);
@@ -2476,7 +2486,15 @@ impl<E: PedraEnv> DB<E> {
     /// Pedra read errors.
     pub fn contains(&self, key: impl AsRef<[u8]>) -> Result<bool> {
         let key = key.as_ref();
-        if self.inner.fast_outside_sst_miss(key) {
+        // Same envelope-gate rule as [`Self::get`]: prefixed DBs probe with
+        // the encoded key (RFC-0164).
+        let outside = if self.codec.default_raw {
+            self.inner.fast_outside_sst_miss(key)
+        } else {
+            self.codec
+                .encode_with(DEFAULT_CF, key, |enc| self.inner.fast_outside_sst_miss(enc))
+        };
+        if outside {
             return Ok(false);
         }
         let (epoch, gen) = self.tls_point_ids(DEFAULT_CF, key);
@@ -5709,6 +5727,8 @@ mod tests {
         let persist_idle = std::time::Duration::from_millis(200);
 
         let mut saw_at_trigger = false;
+        let mut saw_worker_drain = false;
+        let mut prev_l0 = 0usize;
         let mut max_l0 = 0usize;
         // Two rounds so a compact-in-flight of the first TRIGGER files
         // cannot hide the second round from `num-files-at-level0`.
@@ -5716,13 +5736,21 @@ mod tests {
             db.put([b'k', i as u8], [b'v', i as u8]).unwrap();
             db.flush().unwrap();
             let l0 = db.read_probe().l0_files;
+            // Flush only ever adds L0 files; the compact worker is the
+            // only remover, and it fires once L0 reached the trigger. A
+            // drop between probes is that drain landing before our probe
+            // does (suite load makes flush slower than the 5 ms poll).
+            if l0 < prev_l0 {
+                saw_worker_drain = true;
+            }
+            prev_l0 = l0;
             max_l0 = max_l0.max(l0);
             if l0 >= trigger {
                 saw_at_trigger = true;
             }
         }
         assert!(
-            saw_at_trigger,
+            saw_at_trigger || saw_worker_drain,
             "explicit flush must land L0 files at the trigger (max L0={max_l0})"
         );
 
@@ -7158,24 +7186,30 @@ mod tests {
         opts.set_block_cache(&Cache::new_lru_cache(1024 * 1024));
         {
             let db = DB::open(&opts, &dir).unwrap();
-            db.put(b"k", vec![b'v'; 64]).unwrap();
+            for i in 0..8u32 {
+                db.put(format!("k{i}").as_bytes(), vec![b'v'; 64]).unwrap();
+            }
             db.flush().unwrap();
         }
         let db = DB::open(&opts, &dir).unwrap();
-        // RFC-0160 P2.3: a byte-budgeted cache is filled by point gets
-        // (decoded 4 KiB blocks). Scan still loads blocks too.
-        let mut n = 0usize;
-        for item in db
-            .iterator_opt(IteratorMode::Start, ReadOptions::default())
+        // RFC-0161: point gets take the seeking miss path — they must not
+        // decode-insert into the byte-budgeted block cache.
+        assert_eq!(db.get(b"k0").unwrap().as_deref(), Some(&vec![b'v'; 64][..]));
+        let cold = db
+            .property_int_value(properties::BLOCK_CACHE_USAGE)
             .unwrap()
-        {
-            n += item.unwrap().1.len();
-        }
-        assert!(n > 0, "scan must see the flushed row");
+            .unwrap_or(0);
+        assert_eq!(cold, 0, "cold point get must not fill the block cache");
+        // Range count decodes blocks through the budgeted cache
+        // (RFC-0160 P2.3 knob wiring).
+        let n = db.count_named(DEFAULT_CF, b"k", b"l", 100).unwrap();
+        assert_eq!(n, 8);
         let usage = db
             .property_int_value(properties::BLOCK_CACHE_USAGE)
             .unwrap()
             .unwrap_or(0);
+        // RFC-0153: occupancy is decoded payload bytes (8 entries ×
+        // (2-char key + 64 B value + trailer) ≈ 640), not a hit count.
         assert!(usage > 16, "occupancy must be payload bytes, got {usage}");
         let _ = std::fs::remove_dir_all(&dir);
     }
