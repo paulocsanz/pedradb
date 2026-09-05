@@ -856,8 +856,11 @@ impl WriteGroup {
         }
     }
 
-    /// Sequential client: one batch, write lock held through `fdatasync` (G1).
-    /// Multi-writer leaders still fd off-lock via [`Self::finish_group_off_lock`].
+    /// Sequential client: encode under the write lock, `fdatasync` OFF the
+    /// lock, apply + publish on the second hold (RFC-0045 P2.1 — same
+    /// off-lock window as [`Self::finish_group_off_lock`], so a parked fd
+    /// can no longer deadlock flush/GC: they see `commit_inflight > 0` and
+    /// skip WAL rotation instead of waiting on the write lock).
     /// RFC-0042 P0.2: `lone_phase_ns` is filled on the off-lock path only.
     fn lone_commit<E: Env>(
         group: &WriteGroup,
@@ -885,16 +888,42 @@ impl WriteGroup {
                 return Err(CoreError::TransactionConflict);
             }
         }
-        // One WAL lock encode+write+fd; no GroupInFlight (RFC-0062 P1.1
-        // p11j). Multi-writer leaders still use [`Self::finish_group_off_lock`].
         // RFC-0042 P1.1: a lone commit is a commit in flight exactly like a
         // group's off-lock fd window — count it, and feed its real fd
         // duration into the same EMA that bounds the catch-up wait (the
         // straggler a leader waits out on the sequential host sits right
-        // here, mid-`lone_sync_commit`).
+        // here, mid-off-lock fd).
         guard.begin_commit();
-        let committed = guard.lone_sync_commit(ops);
-        guard.end_commit();
+        let committed = match guard.lone_encode_commit(ops) {
+            Ok((seq, None)) => {
+                guard.end_commit();
+                Ok((seq, 0))
+            }
+            Ok((_, Some(staged))) => {
+                let wal = guard.wal_arc();
+                drop(guard);
+                // Off-lock fd window (WAL mutex held, no Db write lock —
+                // same discipline as `finish_group_off_lock`).
+                let fd: Result<u64> = {
+                    let mut w = wal.lock();
+                    match w.write_pending_frame() {
+                        Err(e) => Err(e),
+                        Ok(()) => {
+                            let t_fd = Instant::now();
+                            w.sync_data().map(|_| t_fd.elapsed().as_nanos() as u64)
+                        }
+                    }
+                };
+                let mut g = db.write();
+                let r = g.lone_publish_commit(staged, fd);
+                g.end_commit();
+                r
+            }
+            Err(e) => {
+                guard.end_commit();
+                Err(e)
+            }
+        };
         let (seq, fd_ns) = committed?;
         if fd_ns > 0 {
             group.update_fd_ema(fd_ns);
@@ -1041,9 +1070,9 @@ impl WriteGroup {
 #[derive(Clone)]
 pub struct ConcurrentDb<E: Env = StdEnv> {
     inner: Arc<RwLock<Db<E>>>,
-    /// Lock-free view of `Db::commit_inflight` (shared `Arc`): the lone
-    /// G1 path holds the write lock through `fdatasync`, so observing a
-    /// commit in flight must not need the `Db` RwLock (RFC-0042 P1.1).
+    /// Lock-free view of `Db::commit_inflight` (shared `Arc`): observing a
+    /// commit in flight — e.g. across an open off-lock fd window — must not
+    /// need the `Db` RwLock (RFC-0042 P1.1).
     commit_inflight: Arc<std::sync::atomic::AtomicUsize>,
     writes: Arc<WriteGroup>,
     /// Single-flight flush/compact pipeline (F45): dual concurrent `prepare_flush_imm`
@@ -1205,6 +1234,8 @@ impl<E: Env> ConcurrentDb<E> {
         self.inner.read().get_after_point_miss(key)
     }
 
+    /// True when a key provably falls outside every settled SST envelope
+    /// (RFC-0164 miss fast path; requires `is_settled_sst_only`).
     #[must_use]
     pub fn fast_outside_sst_miss(&self, key: &[u8]) -> bool {
         if !self.settled_sst_only.load(Ordering::Acquire) {
@@ -1215,6 +1246,8 @@ impl<E: Env> ConcurrentDb<E> {
             .all(|(lo, hi)| key < lo.as_ref() || key > hi.as_ref())
     }
 
+    /// Whether every level is settled SSTs only (no mem/imm/L0 holes) —
+    /// gates the envelope miss fast path.
     #[must_use]
     pub fn is_settled_sst_only(&self) -> bool {
         self.settled_sst_only.load(Ordering::Acquire)
