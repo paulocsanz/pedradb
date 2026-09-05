@@ -5415,6 +5415,19 @@ impl<E: Env> Db<E> {
     /// # Errors
     /// I/O while writing SST or recreating the WAL.
     pub fn flush(&mut self) -> Result<()> {
+        // RFC-0050 P0.3: every I/O error leaving an explicit flush fences —
+        // the bulk MANIFEST persist, the SST write, and the WAL-rotate tail
+        // all run before Ok, so none of them may escape unfenced (ENOSPC
+        // used to return Err with the writer still accepting acked writes
+        // on top of a half-flushed pipeline). Internal sites also fence;
+        // `fence_durability` is first-wins so this choke point is idempotent.
+        match self.flush_pipeline() {
+            Ok(()) => Ok(()),
+            Err(e) => Err(self.fence_io_err(e)),
+        }
+    }
+
+    fn flush_pipeline(&mut self) -> Result<()> {
         self.ensure_not_fenced()?;
         if let Some(persist) = self.flush_all_bulk_runs()? {
             persist.write()?;
