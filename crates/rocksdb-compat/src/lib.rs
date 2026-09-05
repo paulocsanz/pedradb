@@ -6909,14 +6909,22 @@ mod tests {
     #[test]
     fn compact_range_cf_lock_leaves_default() {
         let dir = tmp("cf-compact-lock");
-        let db = DB::open_cf(&Options::new(), &dir, &["lock"]).unwrap();
+        // open_cf_with_env spawns no host compact worker — with a worker,
+        // the 200 ms write-idle branch legitimately drains L0 on suite
+        // load, making any before/after file-identity comparison a race.
+        // Here compact_range_cf is the only compactor.
+        let db = DB::open_cf_with_env(&Options::new(), &dir, &["lock"], StdEnv::default()).unwrap();
         let lock = db.cf_handle("lock").unwrap();
+        // Three live L0 files (2 default + 1 lock) also keep the count below
+        // L0_COMPACTION_TRIGGER so inline auto-compact stays disarmed.
         db.put(b"d0", b"0").unwrap();
-        db.put_cf(&lock, b"l0", b"0").unwrap();
         db.flush().unwrap();
         db.put(b"d1", b"1").unwrap();
-        db.put_cf(&lock, b"l1", b"1").unwrap();
         db.flush().unwrap();
+        db.put_cf(&lock, b"l0", b"0").unwrap();
+        db.put_cf(&lock, b"l1", b"1").unwrap();
+        db.flush_cf(&lock).unwrap();
+        assert!(db.read_probe().l0_files < L0_COMPACTION_TRIGGER);
         let default_before: Vec<_> = db
             .live_files()
             .unwrap()

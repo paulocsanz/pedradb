@@ -3755,7 +3755,11 @@ mod tests {
     /// run #27: the sleep path cost 21.5 s of `flush_check_ms`).
     #[test]
     fn submit_flush_debt_assists_with_worker_attached() {
-        std::env::set_var("PEDRA_FLUSH_DEBT_MAX_MS", "120");
+        // 1000 ms sleep ceiling vs the 500 ms bound below: suite load can
+        // push one fdatasync submit past 100 ms (observed 110.9 ms with a
+        // concurrent suite run), which used to trip a 100 ms bound only
+        // 20 ms under the old 120 ms ceiling.
+        std::env::set_var("PEDRA_FLUSH_DEBT_MAX_MS", "1000");
         let dir = temp_dir();
         let db = open_debt(&dir);
         db.set_defer_auto_compact(true);
@@ -3772,7 +3776,7 @@ mod tests {
         let t0 = std::time::Instant::now();
         db.put(b"straight", b"through").unwrap();
         assert!(
-            t0.elapsed() < Duration::from_millis(100),
+            t0.elapsed() < Duration::from_millis(500),
             "unattached submit waited {:?}",
             t0.elapsed()
         );
@@ -3781,7 +3785,7 @@ mod tests {
         // Attached: submit drains the parked table itself — no worker
         // thread exists here, so parked==0 after the put proves the
         // writer materialized inline (the sleep path would wait out the
-        // 120 ms ceiling and leave the debt parked).
+        // 1000 ms ceiling and blow the 2 s bound below).
         db.set_flush_worker_attached(true);
         let t0 = std::time::Instant::now();
         db.put(b"throttled", b"ok").unwrap();

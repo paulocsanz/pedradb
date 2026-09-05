@@ -147,7 +147,11 @@ fn hydrate(store: &mut dyn ScaleStore, n: usize, pool: &[u8], vlen: usize) {
             .iter()
             .map(|(k, v)| (k.as_slice(), v.as_slice()))
             .collect();
-        assert!(store.put_batch(&refs), "hydrate put_batch {}", store.label());
+        assert!(
+            store.put_batch(&refs),
+            "hydrate put_batch {}",
+            store.label()
+        );
         i = end;
     }
 }
@@ -209,7 +213,10 @@ fn run_one(store: &mut dyn ScaleStore, dir: &Path, n: usize, vlen: usize, pool: 
         let _ = store.get(key(i).as_bytes());
         gets.push(t.elapsed().as_nanos() as u64);
     }
-    eprintln!("get_hit/{label}: mean {:.1}µs (n={GET_HIT_N})", mean_us(&gets));
+    eprintln!(
+        "get_hit/{label}: mean {:.1}µs (n={GET_HIT_N})",
+        mean_us(&gets)
+    );
 
     let mid_service = (n / ROUTES_PER_SERVICE) / 2;
     let prefix = format!("route.svc-{mid_service:06}.");
@@ -341,11 +348,10 @@ impl ScaleStore for RocksScale {
         n
     }
     fn settle(&mut self) -> bool {
-        self.db.flush().is_ok()
-            && {
-                self.db.compact_range::<&[u8], &[u8]>(None, None);
-                true
-            }
+        self.db.flush().is_ok() && {
+            self.db.compact_range::<&[u8], &[u8]>(None, None);
+            true
+        }
     }
 }
 

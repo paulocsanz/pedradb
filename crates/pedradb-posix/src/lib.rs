@@ -558,6 +558,11 @@ mod tests {
         let path = dir.join("wal.bin");
         let mut f = File::create(&path).unwrap();
         f.write_all(&[0u8; 4096]).unwrap();
+        // Open the dirfd up front: the ~80 F_FULLFSYNC calls below take
+        // hundreds of ms, and an external TMPDIR sweep can unlink the dir
+        // mid-test (observed ENOENT under full-suite load). A held fd
+        // stays valid on an unlinked directory.
+        let d = File::open(&dir).unwrap();
 
         let mut fd = Vec::with_capacity(80);
         let mut ff = Vec::with_capacity(80);
@@ -580,7 +585,6 @@ mod tests {
             "G1 must be fdatasync-class, not F_FULLFSYNC: fdatasync p50={fd_p50}ns sync_all p50={ff_p50}ns"
         );
 
-        let d = File::open(&dir).unwrap();
         let mut dir_fd = Vec::with_capacity(40);
         let mut dir_ff = Vec::with_capacity(40);
         for _ in 0..40 {

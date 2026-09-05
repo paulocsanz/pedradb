@@ -267,18 +267,13 @@ mod tests {
         DmaAfterReturn,
     }
 
-    fn eintr_then_late_cqe(
-        policy: fn(bool, bool) -> SubmitCompleteAct,
-    ) -> BufLiveness {
+    fn eintr_then_late_cqe(policy: fn(bool, bool) -> SubmitCompleteAct) -> BufLiveness {
         // Drain 1: submit_and_wait EINTR, CQ empty.
         match policy(false, false) {
             SubmitCompleteAct::ReturnSubmitErr => BufLiveness::DmaAfterReturn,
             SubmitCompleteAct::WaitMore => {
                 // Still inside submit_sqe; buf live. Late CQE appears.
-                assert_eq!(
-                    policy(false, true),
-                    SubmitCompleteAct::UseHarvested
-                );
+                assert_eq!(policy(false, true), SubmitCompleteAct::UseHarvested);
                 BufLiveness::DmaWhileLive
             }
             SubmitCompleteAct::UseHarvested => {
@@ -349,7 +344,11 @@ mod tests {
             for j in 0..OPS {
                 assert_eq!(
                     cqe_act(tags[j], tags[i]),
-                    if i == j { CqeAct::Take } else { CqeAct::Discard },
+                    if i == j {
+                        CqeAct::Take
+                    } else {
+                        CqeAct::Discard
+                    },
                     "leftover tag {} at op {} must not be adopted",
                     tags[j],
                     tags[i]
