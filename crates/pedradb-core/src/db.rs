@@ -1326,11 +1326,17 @@ impl SstRun {
     }
 
     fn pairwise_disjoint(ssts: &[SstTable], by_lo: &[usize]) -> bool {
-        by_lo.len() >= 2
-            && by_lo.windows(2).all(|pair| {
-                ssts[pair[0]].largest_user_key().unwrap()
-                    < ssts[pair[1]].smallest_user_key().unwrap()
-            })
+        // RFC-0164 P1.2: the strict arm is kernel-owned — equal-`lo` ties
+        // stay on the newest-first walk, never the single-candidate bisect.
+        let los: Vec<&[u8]> = by_lo
+            .iter()
+            .map(|&i| ssts[i].smallest_user_key().unwrap())
+            .collect();
+        let his: Vec<&[u8]> = by_lo
+            .iter()
+            .map(|&i| ssts[i].largest_user_key().unwrap())
+            .collect();
+        crate::probe_order_kernel::run_pairwise_disjoint_los(&los, &his)
     }
 }
 
@@ -9411,14 +9417,17 @@ impl<E: Env> Db<E> {
                         }
                     }
                 } else {
-                    // Overlapping files that share a user key must probe
-                    // newest-first (a newer delete hides an older put).
-                    for &sst_i in &run.tables_newest_first {
-                        if let Some(pos) = by_lo.iter().position(|&i| i == sst_i) {
-                            if pos >= p || phis.lo(pos) < key {
-                                continue;
-                            }
-                        }
+                    // Overlapping files that share a user key (L0 put +
+                    // later delete) are not pairwise disjoint: the probe
+                    // order is kernel-owned (RFC-0164 P0.2) — candidates
+                    // covering `key`, newest-first; packed bounds skip the
+                    // non-covering files.
+                    for sst_i in crate::probe_order_kernel::probe_order_covering(
+                        &run.tables_newest_first,
+                        by_lo,
+                        p,
+                        |pos| phis.lo(pos) >= key,
+                    ) {
                         if let Some((seq, look)) = probe(&ssts[sst_i]) {
                             best_point_seq = Some(seq);
                             best_point = look;
@@ -9512,14 +9521,17 @@ impl<E: Env> Db<E> {
                         }
                     }
                 } else {
-                    // Overlapping files that share a user key must probe
-                    // newest-first (a newer delete hides an older put).
-                    for &sst_i in &run.tables_newest_first {
-                        if let Some(pos) = by_lo.iter().position(|&i| i == sst_i) {
-                            if pos >= p || phis.lo(pos) < key {
-                                continue;
-                            }
-                        }
+                    // Overlapping files that share a user key (L0 put +
+                    // later delete) are not pairwise disjoint: the probe
+                    // order is kernel-owned (RFC-0164 P0.2) — candidates
+                    // covering `key`, newest-first; packed bounds skip the
+                    // non-covering files.
+                    for sst_i in crate::probe_order_kernel::probe_order_covering(
+                        &run.tables_newest_first,
+                        by_lo,
+                        p,
+                        |pos| phis.lo(pos) >= key,
+                    ) {
                         if let Some((seq, look)) = probe(&ssts[sst_i]) {
                             best_point_seq = Some(seq);
                             best_point = look;
