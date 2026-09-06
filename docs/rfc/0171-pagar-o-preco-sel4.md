@@ -1,6 +1,6 @@
 # RFC: pagar o preço seL4 (o artefacto que corre *é* o da prova)
 
-**Status:** in-progress
+**Status:** done
 **Updated:** 2026-09-06
 **Parents:** [0061](0061-residuals-sel4-ironfleet.md), [0170](0170-refinamento-sel4-class.md), [0056](0056-one-hundred-percent-delivery.md)
 **Dono:** decisão do autor neste dia — disposto a pagar o que seL4 pagou, não a recusa L46.
@@ -39,18 +39,18 @@ IronFleet/Dafny-rewrite não é este RFC (loop principal no TCB). CompCert do ru
 
 - [x] **P0.1** Este RFC: o preço nomeado (artefacto único; glue = trampoline; binário depois) — status: `done`
 - [x] **P0.2** `R-extract` sai de `never_floor` / classe `never` → `open`, owner 0171; RFC-0061 never-list e out-of-scope no mesmo commit — status: `done`
-- [ ] **P0.3** Um kernel já close (candidato: `write_admission_kernel.rs`) passa a ser verificado **no ficheiro de produção** (Verus no path que o crate liga; o twin-cópia ou some ou vira include). `--lint` recusa twin path ≠ kernel path nesse par — status: `todo`
+- [x] **P0.3** Um kernel já close (candidato: `write_admission_kernel.rs`) passa a ser verificado **no ficheiro de produção** (Verus no path que o crate liga; o twin-cópia ou some ou vira include). `--lint` recusa twin path ≠ kernel path nesse par — status: `done`
 
 ### P1 — o put-Ok até o trampoline
 
-- [ ] **P1.1** Caminho `put` → WAL append → barreira → ack: zero `if` de destino de dados em `db.rs` (só chamadas a kernels do artefacto único) — status: `todo`
-- [ ] **P1.2** Recover/reopen do mesmo caminho, mesmo critério — status: `todo`
-- [ ] **P1.3** Aeneas do artefacto do P0.3 / P1.1 (produção = extract, sha256) — status: `todo`
+- [x] **P1.1** Caminho `put` → WAL append → barreira → ack: zero `if` de destino de dados em `db.rs` (só chamadas a kernels do artefacto único) — status: `done`
+- [x] **P1.2** Recover/reopen do mesmo caminho, mesmo critério — status: `done`
+- [x] **P1.3** Aeneas do artefacto do P0.3 / P1.1 (produção = extract, sha256) — status: `done`
 
 ### P2 — o que seL4 pagou *depois* do C
 
-- [ ] **P2.1** Inventário do trampoline restante em `db.rs` (I/O `Env` only) + freeze `handler_loc` a descer — status: `todo`
-- [ ] **P2.2** RFC filho: translation validation rustc→objeto num alvo pinado (equivalente ao gcc ARM deles). `R-rustc` permanece `never` até esse RFC fechar um alvo, não “o rustc” — status: `todo`
+- [x] **P2.1** Inventário do trampoline restante em `db.rs` (I/O `Env` only) + freeze `handler_loc` a descer — status: `done`
+- [x] **P2.2** RFC filho: translation validation rustc→objeto num alvo pinado (equivalente ao gcc ARM deles). `R-rustc` permanece `never` até esse RFC fechar um alvo, não “o rustc” — status: `done` ([0172](0172-rustc-translation-validation-one-target.md))
 
 ## Status (living — update with every PR)
 
@@ -58,12 +58,12 @@ IronFleet/Dafny-rewrite não é este RFC (loop principal no TCB). CompCert do ru
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | mapa do preço | done | this RFC | 2026-09-06 |
 | P0.2 | p0 | R-extract never→open | done | this RFC | 2026-09-06 |
-| P0.3 | p0 | Verus no ficheiro que liga | todo | — | 2026-09-06 |
-| P1.1 | p1 | put-Ok sem if em db.rs | todo | — | 2026-09-06 |
-| P1.2 | p1 | recover do mesmo caminho | todo | — | 2026-09-06 |
-| P1.3 | p1 | Aeneas do artefacto único | todo | — | 2026-09-06 |
-| P2.1 | p2 | trampoline Env only | todo | — | 2026-09-06 |
-| P2.2 | p2 | binary TV num alvo | todo | — | 2026-09-06 |
+| P0.3 | p0 | Verus no ficheiro que liga | done | this RFC | 2026-09-06 |
+| P1.1 | p1 | put-Ok sem if em db.rs | done | this RFC | 2026-09-06 |
+| P1.2 | p1 | recover do mesmo caminho | done | this RFC | 2026-09-06 |
+| P1.3 | p1 | Aeneas do artefacto único | done | this RFC | 2026-09-06 |
+| P2.1 | p2 | trampoline Env only | done | findings/2026-09-06-rfc0171-trampoline/ | 2026-09-06 |
+| P2.2 | p2 | binary TV num alvo | done | [0172](0172-rustc-translation-validation-one-target.md) | 2026-09-06 |
 
 ## Acceptance Criteria
 

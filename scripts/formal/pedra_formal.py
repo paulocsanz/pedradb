@@ -97,8 +97,31 @@ def match_braces(src: str, open_at: int) -> int:
     raise ValueError("unbalanced braces")
 
 
+def strip_cfg_test_mods(src: str) -> str:
+    """Drop `#[cfg(test)]` modules so test helpers are not proved exec.
+
+    RFC-0171 single-artifact kernels keep plants in the production file;
+    char literals / format `{}` in those helpers are not the twin term.
+    Unparsable trailing tests are truncated from the marker (tests last).
+    """
+    text = src
+    marker = "#[cfg(test)]"
+    while True:
+        i = text.find(marker)
+        if i < 0:
+            return text
+        brace = text.find("{", i)
+        if brace < 0:
+            return text[:i]
+        try:
+            end = match_braces(text, brace)
+        except ValueError:
+            return text[:i]
+        text = text[:i] + text[end + 1 :]
+
+
 def iter_fns(src: str):
-    text = strip_comments(src)
+    text = strip_cfg_test_mods(strip_comments(src))
     for m in FN_HEAD.finditer(text):
         pre = m.group("pre") or ""
         name = m.group("name")
@@ -1155,6 +1178,16 @@ def check_twins(root: Path, catalog: dict, r: Report, strict: bool) -> None:
         if kind not in TWIN_KINDS:
             r.fail(f"{pid}: twin_kind must be close|atom|model (got {kind!r})")
             continue
+        if pair.get("single_artifact"):
+            kpath = pair.get("kernel") or ""
+            tpath = pair.get("twin") or ""
+            if kpath != tpath:
+                r.fail(
+                    f"{pid}: single_artifact requires twin == kernel "
+                    f"(RFC-0171 P0.3; kernel={kpath!r} twin={tpath!r})"
+                )
+            else:
+                r.good(f"{pid}: single_artifact twin == kernel")
         absent = pair.get("status") == "absent"
         ksrc = load_text(root, pair["kernel"])
         if ksrc is None:

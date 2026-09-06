@@ -71,11 +71,11 @@
    "crates/pedradb-raft/src/c1_modelo_kernel.rs"
   ],
   "kernel_files": 53,
-  "kernel_loc": 14072,
-  "handler_loc": 103312,
+  "kernel_loc": 15715,
+  "handler_loc": 102893,
   "db_rs_extracted": false,
   "proof_depth": {
-   "extract": 37,
+   "extract": 45,
    "close": 218,
    "atom": 0,
    "model": 13,
@@ -96,6 +96,28 @@
     "assert_inv",
     "d1_holds_every_cut",
     "snapshot"
+   ],
+   "crates/pedradb-core/src/lsm_r1_kernel.rs": [
+    "empty",
+    "inv_lsm",
+    "level_distinct",
+    "level_get",
+    "lsm_flush",
+    "lsm_state_of",
+    "lsm_write",
+    "r1_newest"
+   ],
+   "crates/pedradb-raft/src/c1_modelo_kernel.rs": [
+    "c1_quorum",
+    "joint_add_shape"
+   ],
+   "crates/pedradb-store/src/t1_modelo_kernel.rs": [
+    "inv_tx",
+    "t1_holds_of",
+    "tx_apply_one",
+    "tx_commit",
+    "tx_stage",
+    "tx_state_of"
    ]
   }
  },

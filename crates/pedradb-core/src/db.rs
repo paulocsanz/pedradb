@@ -1866,13 +1866,6 @@ impl<E: Env> Db<E> {
         let mut point_in_time_report: Option<RecoveryReport> = None;
 
         if env.exists(&wal_path) {
-            // Tiny WAL + Truncated(0): failed first append after rotate (or crash
-            // before any complete record). Tolerate empty so SSTs still load (F6).
-            // Large WAL + Truncated(0): bitrot of the first record — fail-stop (F4),
-            // journaled for escalation (RFC-0038 D: repeated events refuse open).
-            // RFC-0047 P0.2: in PointInTime mode the event is still journaled and
-            // escalation still refuses the open; otherwise the decoded prefix is
-            // served and the discarded suffix is reported (never silently skipped).
             let (records, last_good) = match Wal::recover_span_on(&env, &wal_path) {
                 Ok((records, last_good, resync_origin)) => {
                     if let Some(origin) = resync_origin {
@@ -1888,8 +1881,6 @@ impl<E: Env> Db<E> {
                             origin,
                             CoreError::Internal("WAL resync skipped damaged region mid-log".into()),
                         );
-                        // RFC-0053 Y3.3: reopen outcome decided by the pure
-                        // kernel (refuse / serve prefix + report), not ad hoc.
                         match crate::wal::reopen_kernel::reopen_outcome(
                             crate::wal::reopen_kernel::ReopenDamage::Resync,
                             opts.wal_recovery == WalRecovery::PointInTime,
@@ -1917,7 +1908,10 @@ impl<E: Env> Db<E> {
                 }
                 Err(CoreError::Truncated(0)) => {
                     let len = env.metadata_len(&wal_path).unwrap_or(0);
-                    if len < 64 {
+                    if crate::write_admission_kernel::torn_head_is_empty_log(
+                        len,
+                        crate::write_admission_kernel::TINY_WAL_EMPTY_MAX,
+                    ) {
                         (Vec::new(), 0)
                     } else {
                         let escalated = crate::corrupt::escalate_or_fail(
@@ -2010,14 +2004,11 @@ impl<E: Env> Db<E> {
                 }
                 Err(e) => return Err(e),
             };
-            // RFC-0048 P1.1: mid-log resync damage cannot be healed by the
-            // tail-cut below (the damage sits before `last_good` after a
-            // re-anchor) — PointInTime rewrites the WAL from the recovered
-            // records so the next open, even fail-closed, is clean.
-            if point_in_time_report
-                .as_ref()
-                .is_some_and(|r| r.kind == "resync")
-            {
+            if crate::write_admission_kernel::pit_resync_needs_rewrite(
+                point_in_time_report
+                    .as_ref()
+                    .is_some_and(|r| r.kind == "resync"),
+            ) {
                 let repair = dir.join(format!("{WAL_FILE_NAME}.repair"));
                 let mut w = Wal::create_on(&env, &repair)?;
                 w.set_full_fsync(opts.wal_full_fsync);
@@ -2040,22 +2031,22 @@ impl<E: Env> Db<E> {
                 // (crash between WAL sync and changelog persist).
                 let mut missing = Vec::new();
                 for op in &rec.ops {
-                    if op.sequence > feed_max {
+                    if crate::write_admission_kernel::seq_after_feed(op.sequence, feed_max) {
                         missing.push(ChangeEntry::from_write_op(op));
                     }
                 }
-                if !missing.is_empty() {
+                if !crate::write_admission_kernel::batch_is_empty(missing.len() as u64) {
                     change_log.extend(missing);
                 }
             }
-            if change_log.max_sequence().unwrap_or(0) > feed_max {
+            if crate::write_admission_kernel::seq_after_feed(
+                change_log.max_sequence().unwrap_or(0),
+                feed_max,
+            ) {
                 change_log.store_on(&env, &dir)?;
             }
-            // RFC-0038 D: cut a torn tail to the last known-good offset so
-            // new appends never sit on top of the damaged region (re-opening
-            // would then fail-stop on its garbage as if it were records).
             let wal_len = env.metadata_len(&wal_path).unwrap_or(0);
-            if wal_len > last_good {
+            if crate::write_admission_kernel::torn_tail_needs_cut(wal_len, last_good) {
                 let mut wal_file = env.open_append(&wal_path)?;
                 wal_file.set_len(last_good)?;
                 wal_file.sync_data()?;
@@ -2076,7 +2067,7 @@ impl<E: Env> Db<E> {
         // dropped a high-seq tombstone). Keep last_sequence ≥ earliest so current
         // gets never look "too old" after reopen.
         let next_seq = max_seq.max(earliest_readable_seq).saturating_add(1).max(1);
-        if next_seq > MAX_SEQUENCE_NUMBER {
+        if crate::write_admission_kernel::seq_exhausted(next_seq, MAX_SEQUENCE_NUMBER) {
             return Err(CoreError::Internal(
                 "sequence number space exhausted".into(),
             ));
@@ -8653,8 +8644,6 @@ impl<E: Env> Db<E> {
             self.ensure_write_admitted_for(&families)?;
         }
         self.observe_bulk_batch(&batch);
-        // Assign sequences only for this attempt; roll back `next_seq` if WAL fails
-        // so a failed multi-op does not burn sequence space (TX denser / mid-commit).
         let seq_checkpoint = self.next_seq;
         let mut records = Vec::new();
         for op in batch {
@@ -8685,7 +8674,7 @@ impl<E: Env> Db<E> {
                 }
             }
         }
-        if records.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(records.len() as u64) {
             return Ok(self.last_sequence());
         }
         match self.commit_ops_with(records, durability) {
@@ -8973,7 +8962,7 @@ impl<E: Env> Db<E> {
 
     pub(crate) fn alloc_seq(&mut self) -> Result<SequenceNumber> {
         let seq = self.next_seq;
-        if seq > MAX_SEQUENCE_NUMBER {
+        if crate::write_admission_kernel::seq_exhausted(seq, MAX_SEQUENCE_NUMBER) {
             return Err(CoreError::Internal(
                 "sequence number space exhausted".into(),
             ));
@@ -8999,16 +8988,22 @@ impl<E: Env> Db<E> {
         durability: WriteOptions,
     ) -> Result<()> {
         self.ensure_not_fenced()?;
-        // Append then sync: if either fails, caller rolls back sequence; mem not applied.
-        // RFC-0015 H1: if append OK and required sync fails, fence so later fsyncs
-        // cannot silently publish an unacked prefix while in-process mem diverges.
-        // RFC-0040: encode into WAL scratch (one payload memcpy), then move ops to mem.
-        let do_sync = durability.sync.unwrap_or(self.sync);
+        let do_sync = crate::write_admission_kernel::wal_sync_required(
+            durability.sync.is_some(),
+            durability.sync.unwrap_or(false),
+            self.sync,
+        );
         self.vlog_prepare_wal(do_sync)?;
         let n = self.wal.lock().append_write_ops(&records)?;
         self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
-        if do_sync {
-            if let Err(e) = self.wal.lock().sync_data() {
+        if crate::write_admission_kernel::wal_sync_required(
+            durability.sync.is_some(),
+            durability.sync.unwrap_or(false),
+            self.sync,
+        ) {
+            let sync_err = self.wal.lock().sync_data().err();
+            if crate::write_admission_kernel::fence_on_sync_fail(true, sync_err.is_some()) {
+                let e = sync_err.expect("fence_on_sync_fail ⇒ Some");
                 self.durability_fenced = true;
                 return Err(e);
             }
@@ -9025,8 +9020,11 @@ impl<E: Env> Db<E> {
             self.change_log
                 .extend(records.iter().map(ChangeEntry::from_write_op));
         }
-        if do_sync {
-            // RFC-0031: debounce the cache store. WAL is already durable.
+        if crate::write_admission_kernel::wal_sync_required(
+            durability.sync.is_some(),
+            durability.sync.unwrap_or(false),
+            self.sync,
+        ) {
             self.maybe_persist_changelog_after_durable_commit();
         }
         self.apply_ops_to_mem(records);

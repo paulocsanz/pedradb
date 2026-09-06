@@ -2,7 +2,8 @@
 # Machine-check write-admission idle gate (RFC-0170 P2.4).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-core/verus/write_admission.rs"
+# RFC-0171 P0.3: prove the file rustc links, not a twin-cópia.
+SRC="$ROOT/crates/pedradb-core/src/write_admission_kernel.rs"
 if [[ -x "${VERUS:-}" ]]; then
   :
 elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then

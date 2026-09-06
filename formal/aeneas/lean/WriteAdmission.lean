@@ -37,3 +37,9 @@ theorem write_admit_as_is_dente :
       = ok WriteAdmit.Ok := by
   unfold write_admit_as_is
   rfl
+
+/-- Put-Ok: client WriteOptions.sync=true requires a WAL barrier. -/
+theorem wal_sync_required_client_true :
+    wal_sync_required true true false = ok true := by
+  unfold wal_sync_required
+  rfl
