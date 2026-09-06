@@ -90,6 +90,16 @@ fn value_for(pool: &[u8], i: usize, len: usize) -> &[u8] {
     &pool[off..off + len]
 }
 
+fn dir_sst_count(path: &Path) -> usize {
+    std::fs::read_dir(path)
+        .map(|rd| {
+            rd.flatten()
+                .filter(|e| e.path().extension().is_some_and(|x| x == "sst"))
+                .count()
+        })
+        .unwrap_or(0)
+}
+
 fn dir_size_bytes(path: &Path) -> u64 {
     let mut total = 0u64;
     let mut stack = vec![path.to_path_buf()];
@@ -214,16 +224,30 @@ fn run_one(store: &mut dyn ScaleStore, dir: &Path, n: usize, vlen: usize, pool: 
 
     let mut gstate = 0xDEAD_BEEFu64;
     let mut gets = Vec::with_capacity(GET_HIT_N);
+    let cost0 = pedradb_core::cost::read();
     for _ in 0..GET_HIT_N {
         let i = (next_rand(&mut gstate) % n as u64) as usize;
         let t = Instant::now();
         let _ = store.get(key(i).as_bytes());
         gets.push(t.elapsed().as_nanos() as u64);
     }
+    let cost_hit = pedradb_core::cost::read().since(&cost0);
     eprintln!(
         "get_hit/{label}: mean {:.1}µs (n={GET_HIT_N})",
         mean_us(&gets)
     );
+    if pedradb_core::cost::enabled() {
+        let n_sst = dir_sst_count(dir);
+        eprintln!(
+            "cost/get_hit/{label}: {} n_sst={n_sst} mean_us={:.1} probes/op={:.2} file/op={:.2} pread_us/file={:.1} image_us/op={:.2}",
+            cost_hit.line(),
+            mean_us(&gets),
+            if cost_hit.point_ops == 0 { 0.0 } else { cost_hit.point_sst_considered as f64 / cost_hit.point_ops as f64 },
+            if cost_hit.point_ops == 0 { 0.0 } else { cost_hit.point_block_file as f64 / cost_hit.point_ops as f64 },
+            if cost_hit.point_block_file == 0 { 0.0 } else { cost_hit.point_pread_ns as f64 / cost_hit.point_block_file as f64 / 1000.0 },
+            if cost_hit.point_ops == 0 { 0.0 } else { cost_hit.point_image_ns as f64 / cost_hit.point_ops as f64 / 1000.0 },
+        );
+    }
 
     let mid_service = (n / ROUTES_PER_SERVICE) / 2;
     let prefix = format!("route.svc-{mid_service:06}.");
@@ -241,6 +265,7 @@ fn run_one(store: &mut dyn ScaleStore, dir: &Path, n: usize, vlen: usize, pool: 
 
     let mut lstate = 0xC0DE_BEEFu64;
     let mut loops = Vec::with_capacity(LOOKUP_N);
+    let cost_loop0 = pedradb_core::cost::read();
     for _ in 0..LOOKUP_N {
         let keys: Vec<String> = (0..100)
             .map(|_| key((next_rand(&mut lstate) % n as u64) as usize))
@@ -251,10 +276,21 @@ fn run_one(store: &mut dyn ScaleStore, dir: &Path, n: usize, vlen: usize, pool: 
         }
         loops.push(t.elapsed().as_nanos() as u64);
     }
+    let cost_loop = pedradb_core::cost::read().since(&cost_loop0);
     eprintln!(
         "lookup_100/{label}_get_loop: mean {:.1}µs (n={LOOKUP_N})",
         mean_us(&loops)
     );
+    if pedradb_core::cost::enabled() {
+        eprintln!(
+            "cost/get_loop/{label}: {} mean_us={:.1} probes/op={:.2} file/op={:.2} pread_us/file={:.1}",
+            cost_loop.line(),
+            mean_us(&loops),
+            if cost_loop.point_ops == 0 { 0.0 } else { cost_loop.point_sst_considered as f64 / cost_loop.point_ops as f64 },
+            if cost_loop.point_ops == 0 { 0.0 } else { cost_loop.point_block_file as f64 / cost_loop.point_ops as f64 },
+            if cost_loop.point_block_file == 0 { 0.0 } else { cost_loop.point_pread_ns as f64 / cost_loop.point_block_file as f64 / 1000.0 },
+        );
+    }
 }
 
 // ── Pedra (always) ──────────────────────────────────────────────────────────
