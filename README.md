@@ -42,11 +42,9 @@ consistency above the engine. The API is
   submission). One C++ exception, optional and explicit: the RocksDB
   peer behind `rocksdb-parity-bench --features real` (off by default;
   the engine never links it).
-- **Machine-checked where it counts.** 22 decision kernels (WAL recovery,
-  manifest recovery, CRC fate, group commit, flush and compaction decisions,
-  leveling, bloom filters, MVCC visibility, iterator windows, the
-  column-family key codec, and the point-lookup probe order) have
-  Verus-verified twins: 46 proof pairs in all. Around them: seeded fault
+- **Machine-checked where it counts.** 22 decision kernels have
+  Verus-verified twins — 46 proof pairs (table in
+  [Verification](#verification)). Around them: seeded fault
   injection and close to 1,000 tests.
 - **A modern write path.** io_uring on Linux with transparent POSIX
   fallback, group commit, a value log for large values, LZ4 block
@@ -128,20 +126,28 @@ No C++ toolchain is needed.
 
 ## Verification
 
-The claim is not “no bugs.” It is: 22 decision kernels have Verus twins
-(WAL and manifest recovery, CRC fate, group commit, flush and compaction
-decisions, leveling, bloom filters, MVCC visibility, iterator windows, the
-column-family key codec, and the point-lookup probe order — the
-newest-first rule that keeps a newer tombstone from being shadowed by an
-older table, wired into the read path) —
-46 proof pairs, checked against a pinned Verus with
-`scripts/formal/verus_check.sh --all`. Around them: close to 1,000 tests,
-seeded fault injection through a swappable `Env` (`pedradb-sim`), and
-fail-closed recovery. Not proven: the OS, the disk, rustc, Verus, or Z3.
+Not “no bugs” — machine-checked where it counts. 22 decision kernels
+have Verus-verified twins: 46 proof pairs in 33 proof files in the
+shipped crates, checked with `scripts/formal/verus_check.sh --all`
+against a pinned Verus. The production kernel is the source of record;
+the twin proves its decision logic. Not proven: the OS, the disk,
+rustc, Verus, or Z3.
 
-The engine is `#![forbid(unsafe_code)]`. The only `unsafe` in the tree is
-two thin syscall crates. That is the product; the benches below are
-lab measurements of it, not a substitute.
+| Area | Proves | Proof files |
+|---|---|---|
+| WAL recovery | a torn tail recovers as a clean prefix; record framing | `wal_recover`, `write_record_count` |
+| Manifest & reopen | newest consistent MANIFEST; reopen under WAL damage; changelog rebuild; crash-dictionary link | `manifest_recover`, `reopen_outcome`, `changelog_rebuild`, `dictionary_link` |
+| CRC fate | a mismatch refuses the read — fail-closed | `sst_crc_fate`, `crc_match` |
+| Durability syscalls | fdatasync and io_uring completion return codes | `fdatasync_rc`, `cqe_res` |
+| Group commit | queue drain and commit visibility; wait-for is deadlock-free | `group_commit`, `wait_for_deadlock` |
+| Flush & compaction | when to flush, when to compact, which CF a rewrite lands in | `flush_decision`, `compact_decision`, `compact_rewrites_sst_cf` |
+| Leveling | the level-size ladder and the two-level pick | `leveling`, `leveling_pick` |
+| Bloom filters | no false negatives; header bound fails closed | `bloom_filter`, `bloom_header` |
+| MVCC visibility | snapshot visibility | `visible_at` |
+| Iterators & scans | window keep, prefix exclusive-end, range-tombstone cover, scan guard | `iter_window`, `prefix_exclusive_end`, `range_covers`, `scan_guard` |
+| Key codecs | sequence+type packing; CF family, prefix codec round-trip, SST family inference | `ikey_pack`, `cf_family`, `cf_family_of`, `cf_encode_effective`, `encode_cf_key`, `decode_cf_key`, `infer_sst_cf` |
+| Probe order | point lookups probe newest-first; a newer tombstone is never shadowed | `probe_order` |
+| Value log | GC decision | `vlog_gc_decision` |
 
 ## Benchmarks
 
@@ -273,9 +279,8 @@ named CFs).
   whole-system simulator.
 - **Verus twins**: 46 kernel-to-proof pairs over 22 kernels, in 33 proof
   files in the shipped crates, checked against a pinned Verus release with
-  `scripts/formal/verus_check.sh --all`. The production kernel is the source
-  of record and the twin proves its decision logic. Not proven: the
-  operating system, the disk, rustc, or Verus and Z3 themselves.
+  `scripts/formal/verus_check.sh --all` — table in
+  [Verification](#verification).
 - **Oracle testing**: in our lab harness, workloads are diffed against real
   RocksDB. The oracle crate is not part of this repository, and RocksDB is
   never linked into the engine.
