@@ -6240,6 +6240,42 @@
         "file": "crates/pedradb-store/src/t1_modelo_kernel.rs",
         "test": "t1_modelo_on_live_abort_reopen_is_not_ok"
       }
+    },
+    {
+      "id": "c1_advance_commit",
+      "entry": "c1_advance_commit",
+      "as_is": "c1_advance_commit_as_is",
+      "finding": "RFC-0166 P2.3",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-raft/src/c1_modelo_kernel.rs",
+      "twin": "crates/pedradb-raft/verus/c1_modelo.rs",
+      "verus": "scripts/verus_c1_modelo.sh",
+      "callers": [
+        "crates/pedradb-raft/src/c1_modelo_kernel.rs"
+      ],
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-raft/src/c1_modelo_kernel.rs",
+        "test": "c1_modelo_on_live_joint_is_not_ok"
+      }
+    },
+    {
+      "id": "c1_modelo",
+      "entry": "c1_modelo",
+      "as_is": "c1_modelo_as_is",
+      "finding": "RFC-0166 P2.3",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-raft/src/c1_modelo_kernel.rs",
+      "twin": "crates/pedradb-raft/verus/c1_modelo.rs",
+      "verus": "scripts/verus_c1_modelo.sh",
+      "callers": [
+        "crates/pedradb-raft/src/c1_modelo_kernel.rs"
+      ],
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-raft/src/c1_modelo_kernel.rs",
+        "test": "c1_modelo_on_live_joint_is_not_ok"
+      }
     }
   ],
   "clones": [

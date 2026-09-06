@@ -13,6 +13,7 @@
 
 pub mod ae_kernel;
 pub mod apply_kernel;
+pub mod c1_modelo_kernel;
 pub mod commit_kernel;
 pub mod membership_kernel;
 pub mod net;
@@ -23,6 +24,7 @@ pub use ae_kernel::{
     ae_ack_success, ae_ack_success_as_is, ae_entry_action, ae_prev_log_ok, AeEntryAction,
 };
 pub use apply_kernel::{apply_advance, apply_advance_as_is_skip_holes, ApplyAction};
+pub use c1_modelo_kernel::{c1_advance_commit, c1_advance_commit_as_is, c1_modelo, c1_modelo_as_is};
 pub use commit_kernel::{
     may_commit_at, may_commit_at_as_is, propose_ack_ok, propose_ack_ok_as_is, recover_commit,
     recover_commit_as_is, recover_last_applied, recover_last_applied_as_is,

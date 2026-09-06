@@ -339,6 +339,8 @@ pub fn profile_report() -> &'static [ProfileComponent] {
         on!("tx_abort", "tx_abort", "T1 abort: revert + keep the fence so a later commit replay still reverts (RFC-0166 P2.2)"),
         on!("tx_recover", "tx_recover", "T1 recover: leftover prepared / mid-apply TX is aborted — no partial visibility (RFC-0166 P2.2)"),
         on!("t1_modelo", "t1_modelo", "T1-modelo: after recover, T1 holds — even from a mid-apply crash (RFC-0166 P2.2)"),
+        on!("c1_advance_commit", "c1_advance_commit", "C1 commit step: index moves only on joint quorum + matching term (RFC-0166 P2.3)"),
+        on!("c1_modelo", "c1_modelo", "C1-modelo: a served index is covered by majority-durable commit of every active config (RFC-0166 P2.3)"),
         on!("group_validate", "group_validate", "group membership validation (RFC-0051 P1.3 / RFC-0057 P2.1)"),
         on!("pct_default_depth", "pct_default_depth", "PCT campaign default depth (RFC-0070 P2.2)"),
         on!("default_pct_depth_raised", "default_pct_depth_raised", "default PCT depth raised (RFC-0070 P2.2)"),
