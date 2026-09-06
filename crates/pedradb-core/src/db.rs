@@ -21828,6 +21828,33 @@ mod tests {
         let inline = bulk_stage_line(0, 0, 0, 1, 1, "inline", false);
         assert!(inline.contains("caller=inline sync=false"));
     }
+
+    #[test]
+    fn hot_key_versions_survive_whole_level_compact() {
+        // PEDRA-003: a hot key rewritten once per batch (a changelog
+        // cursor), sliced across L0 flushes, merges into one same-user
+        // run under whole-level compact. That run must split at the
+        // reader's absolute block cap — pre-fix the merged run was one
+        // >256 KiB block and the compact's own read rejected it.
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        let n = 12_000u64;
+        for i in 1..=n {
+            db.put(b"meta\0cursor", format!("v{i:05}").as_bytes())
+                .unwrap();
+            if i % 500 == 0 {
+                db.flush().unwrap();
+            }
+        }
+        db.flush().unwrap();
+        db.compact().unwrap();
+        assert_eq!(
+            db.get(b"meta\0cursor").as_deref(),
+            Some(&format!("v{n:05}").into_bytes()[..])
+        );
+        db.close().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 #[cfg(all(test, feature = "buggify"))]
