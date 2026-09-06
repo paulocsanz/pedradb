@@ -190,17 +190,38 @@ this list only by a 3-run of the current engine.
 
 ## Fjall column
 
-Third peer (fjall 3.1.4), not the gate, measured on the same guest with
-`scale-parity-bench` — a different read harness than the
-Pedra/Rocks column, so absolute numbers only:
+Third peer (fjall 3.1.10), not the gate. Legs: 2026-09-04, same guest,
+`scale-parity-bench` harness, one backend per process, 3 runs ×
+{25M, 100M}, 200 B values, 256 MiB cache. That is a different read
+harness than the Pedra/Rocks column, so these ratios are cross-harness,
+orientation only — no bold, no gate. Ratio = Fjall / Pedra; the Pedra
+rows repeat the official `snapshot_backends` numbers above (25M reads:
+single run; 100M: 3-run medians).
 
-| n | hydrate | disk | settle | probe_miss p50 | get_hit | prefix_scan | get_loop |
-|---:|---:|---:|---:|---:|---:|---:|---:|
-| 25M | 49.8 s | 5.16 GiB | 0.1 s | 1.1 µs | 40.2 µs | 272.3 µs | 3.60 ms |
-| 100M | 191.4 s | 20.61 GiB | 0.0 s | 1.1 µs | 82.0 µs | 266.8 µs | 7.82 ms |
+| 25M | hydrate | settle | get_hit | prefix_scan | get_loop | probe_miss p50 | disk |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Fjall | 49.8 s | 0.1 s | 40.2 µs | 272.3 µs | 3.60 ms | 1.1 µs | 5.16 GiB |
+| Pedra | 29.5 s | 0.3 s | 35.2 µs | 248.5 µs | 3.65 ms | — | 5.96 GiB |
+| ratio | 1.69× | 0.33× | 1.14× | 1.10× | 0.99× | — | |
 
-100M hydrate vs Pedra's 141.1 s in the same campaign is 1.35× Pedra;
-no other Fjall ratio is a claim.
+| 100M | hydrate | settle | get_hit | prefix_scan | get_loop | probe_miss p50 | disk |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Fjall | 191.4 s | 0.0 s | 82.0 µs | 266.8 µs | 7.82 ms | 1.1 µs | 20.61 GiB |
+| Pedra | 119.4 s | 0.7 s | 63.7 µs | 304.8 µs | 6.15 ms | 211 ns | 24.16 GiB |
+| ratio | 1.60× | ≈0× | 1.29× | 0.88× | 1.27× | 5.21× | |
+
+Per-run Fjall (hydrate / get_hit / prefix_scan / get_loop):
+
+- 25M: 44.2 s / 28.7 µs / 260.8 µs / 3.22 ms · 53.7 s / 48.9 µs /
+  272.3 µs / 4.48 ms · 49.8 s / 40.2 µs / 273.8 µs / 3.60 ms.
+- 100M: 198.8 s / 81.9 µs / 264.0 µs / 7.72 ms · 190.4 s / 83.6 µs /
+  268.5 µs / 8.20 ms · 191.4 s / 82.0 µs / 266.8 µs / 7.82 ms.
+
+probe_miss p50 1.1 µs in every run (p99 2.3–3.2 µs, p999 14.5–17.7 µs,
+recurring cold-tail max ~8–48 ms). settle ≈ 0 on every leg: fjall
+persists during hydrate. An earlier same-day note compared Fjall's
+191.4 s against the bloom-era Pedra 141.1 s (1.35×); the table's
+official-Pedra baseline supersedes it.
 
 ## Reproducing
 
