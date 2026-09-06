@@ -2346,6 +2346,268 @@ mod tests {
         );
     }
 
+    /// Clone twin (catalog `membership_raft_store`, ALL 69 shared fns):
+    /// both copies must implement the same function. Token identity (lint
+    /// + the 2-fn text test above) catches one-sided drift; this live
+    /// cross-crate sweep covers every shared fn and also catches
+    /// both-sides drift at `cargo test` time, including boundary anchors
+    /// (`u64::MAX`) that source-text comparison cannot express.
+    #[test]
+    fn twin_agrees_with_raft_membership_kernel_on_full_domain() {
+        use pedradb_raft::membership_kernel as raft;
+        let u = [0u64, 1, 2, 3, 5, u64::MAX];
+        let bb = [false, true];
+        let opts: [Option<(u64, u64)>; 5] =
+            [None, Some((0, 0)), Some((1, 2)), Some((2, 1)), Some((3, 3))];
+        let slices: [&[u64]; 5] = [&[], &[1], &[2, 1], &[1, 2, 3], &[7, 7, 7]];
+        let mut checked = 0usize;
+
+        let g_u: [(&str, fn(u64) -> u64, fn(u64) -> u64); 1] =
+            [("majority_of", majority_of, raft::majority_of)];
+        let g_uu_u: [(&str, fn(u64, u64) -> u64, fn(u64, u64) -> u64); 2] = [
+            ("high_water_at_least", high_water_at_least, raft::high_water_at_least),
+            (
+                "high_water_at_least_as_is",
+                high_water_at_least_as_is,
+                raft::high_water_at_least_as_is,
+            ),
+        ];
+        let g_uu_b: [(&str, fn(u64, u64) -> bool, fn(u64, u64) -> bool); 4] = [
+            ("recover_must_apply", recover_must_apply, raft::recover_must_apply),
+            ("recover_must_apply_as_is", recover_must_apply_as_is, raft::recover_must_apply_as_is),
+            (
+                "recover_drop_orphan_seg",
+                recover_drop_orphan_seg,
+                raft::recover_drop_orphan_seg,
+            ),
+            (
+                "recover_drop_orphan_seg_as_is",
+                recover_drop_orphan_seg_as_is,
+                raft::recover_drop_orphan_seg_as_is,
+            ),
+        ];
+        let g_b: [(&str, fn(bool) -> bool, fn(bool) -> bool); 28] = [
+            ("joint_leave_ok", joint_leave_ok, raft::joint_leave_ok),
+            ("joint_leave_ok_as_is", joint_leave_ok_as_is, raft::joint_leave_ok_as_is),
+            (
+                "disk_membership_overrides_cli",
+                disk_membership_overrides_cli,
+                raft::disk_membership_overrides_cli,
+            ),
+            (
+                "disk_membership_overrides_cli_as_is",
+                disk_membership_overrides_cli_as_is,
+                raft::disk_membership_overrides_cli_as_is,
+            ),
+            ("open_peer_uses_disk", open_peer_uses_disk, raft::open_peer_uses_disk),
+            (
+                "open_peer_uses_disk_as_is",
+                open_peer_uses_disk_as_is,
+                raft::open_peer_uses_disk_as_is,
+            ),
+            (
+                "membership_identity_before_applied",
+                membership_identity_before_applied,
+                raft::membership_identity_before_applied,
+            ),
+            (
+                "membership_identity_before_applied_as_is",
+                membership_identity_before_applied_as_is,
+                raft::membership_identity_before_applied_as_is,
+            ),
+            ("local_id_if_member", local_id_if_member, raft::local_id_if_member),
+            (
+                "local_id_if_member_as_is",
+                local_id_if_member_as_is,
+                raft::local_id_if_member_as_is,
+            ),
+            ("reader_id_local", reader_id_local, raft::reader_id_local),
+            ("reader_id_local_as_is", reader_id_local_as_is, raft::reader_id_local_as_is),
+            (
+                "discard_leader_local",
+                discard_leader_local,
+                raft::discard_leader_local,
+            ),
+            (
+                "discard_leader_local_as_is",
+                discard_leader_local_as_is,
+                raft::discard_leader_local_as_is,
+            ),
+            ("removed_steps_down", removed_steps_down, raft::removed_steps_down),
+            (
+                "removed_steps_down_as_is",
+                removed_steps_down_as_is,
+                raft::removed_steps_down_as_is,
+            ),
+            ("hint_if_member", hint_if_member, raft::hint_if_member),
+            ("hint_if_member_as_is", hint_if_member_as_is, raft::hint_if_member_as_is),
+            ("drop_repl_slot", drop_repl_slot, raft::drop_repl_slot),
+            ("drop_repl_slot_as_is", drop_repl_slot_as_is, raft::drop_repl_slot_as_is),
+            ("drop_sent_through", drop_sent_through, raft::drop_sent_through),
+            (
+                "drop_sent_through_as_is",
+                drop_sent_through_as_is,
+                raft::drop_sent_through_as_is,
+            ),
+            (
+                "participating_if_member",
+                participating_if_member,
+                raft::participating_if_member,
+            ),
+            (
+                "participating_if_member_as_is",
+                participating_if_member_as_is,
+                raft::participating_if_member_as_is,
+            ),
+            (
+                "pending_joint_node_counts",
+                pending_joint_node_counts,
+                raft::pending_joint_node_counts,
+            ),
+            (
+                "pending_joint_node_counts_as_is",
+                pending_joint_node_counts_as_is,
+                raft::pending_joint_node_counts_as_is,
+            ),
+            (
+                "joint_add_target_counts",
+                joint_add_target_counts,
+                raft::joint_add_target_counts,
+            ),
+            (
+                "joint_add_target_counts_as_is",
+                joint_add_target_counts_as_is,
+                raft::joint_add_target_counts_as_is,
+            ),
+        ];
+        let g_bb: [(&str, fn(bool, bool) -> bool, fn(bool, bool) -> bool); 26] = [
+            ("recover_apply_node_counts", recover_apply_node_counts, raft::recover_apply_node_counts),
+            ("recover_apply_node_counts_as_is", recover_apply_node_counts_as_is, raft::recover_apply_node_counts_as_is),
+            ("recover_truncate_node_counts", recover_truncate_node_counts, raft::recover_truncate_node_counts),
+            ("recover_truncate_node_counts_as_is", recover_truncate_node_counts_as_is, raft::recover_truncate_node_counts_as_is),
+            ("recover_abort_node_counts", recover_abort_node_counts, raft::recover_abort_node_counts),
+            ("recover_abort_node_counts_as_is", recover_abort_node_counts_as_is, raft::recover_abort_node_counts_as_is),
+            ("persist_meta_node_counts", persist_meta_node_counts, raft::persist_meta_node_counts),
+            ("persist_meta_node_counts_as_is", persist_meta_node_counts_as_is, raft::persist_meta_node_counts_as_is),
+            ("persist_hist_node_counts", persist_hist_node_counts, raft::persist_hist_node_counts),
+            ("persist_hist_node_counts_as_is", persist_hist_node_counts_as_is, raft::persist_hist_node_counts_as_is),
+            ("persist_fence_node_counts", persist_fence_node_counts, raft::persist_fence_node_counts),
+            ("persist_fence_node_counts_as_is", persist_fence_node_counts_as_is, raft::persist_fence_node_counts_as_is),
+            ("force_clear_node_counts", force_clear_node_counts, raft::force_clear_node_counts),
+            ("force_clear_node_counts_as_is", force_clear_node_counts_as_is, raft::force_clear_node_counts_as_is),
+            ("drop_preimages_node_counts", drop_preimages_node_counts, raft::drop_preimages_node_counts),
+            ("drop_preimages_node_counts_as_is", drop_preimages_node_counts_as_is, raft::drop_preimages_node_counts_as_is),
+            ("discard_node_counts", discard_node_counts, raft::discard_node_counts),
+            ("discard_node_counts_as_is", discard_node_counts_as_is, raft::discard_node_counts_as_is),
+            ("election_grant_from_counts", election_grant_from_counts, raft::election_grant_from_counts),
+            ("election_grant_from_counts_as_is", election_grant_from_counts_as_is, raft::election_grant_from_counts_as_is),
+            ("joint_target_counts", joint_target_counts, raft::joint_target_counts),
+            ("joint_target_counts_as_is", joint_target_counts_as_is, raft::joint_target_counts_as_is),
+            ("queued_leave_finish_ok", queued_leave_finish_ok, raft::queued_leave_finish_ok),
+            ("queued_leave_finish_ok_as_is", queued_leave_finish_ok_as_is, raft::queued_leave_finish_ok_as_is),
+            ("plant_joint_schedule_ok", plant_joint_schedule_ok, raft::plant_joint_schedule_ok),
+            ("plant_joint_schedule_ok_as_is", plant_joint_schedule_ok_as_is, raft::plant_joint_schedule_ok_as_is),
+        ];
+        let g_bbb_b: [(&str, fn(bool, bool, bool) -> bool, fn(bool, bool, bool) -> bool); 2] = [
+            ("liveness_admitted", liveness_admitted, raft::liveness_admitted),
+            ("liveness_admitted_as_is", liveness_admitted_as_is, raft::liveness_admitted_as_is),
+        ];
+        let g_bbb_s: [(&str, fn(bool, bool, bool) -> &'static str, fn(bool, bool, bool) -> &'static str); 2] = [
+            ("elect_claim_banner", elect_claim_banner, raft::elect_claim_banner),
+            ("elect_claim_banner_as_is", elect_claim_banner_as_is, raft::elect_claim_banner_as_is),
+        ];
+        let g_opt: [(&str, fn(u64, u64, Option<(u64, u64)>) -> bool, fn(u64, u64, Option<(u64, u64)>) -> bool); 2] = [
+            ("joint_election_ok", joint_election_ok, raft::joint_election_ok),
+            ("joint_election_ok_as_is", joint_election_ok_as_is, raft::joint_election_ok_as_is),
+        ];
+        let g_sl: [(&str, fn(&[u64], &[u64]) -> bool, fn(&[u64], &[u64]) -> bool); 2] = [
+            ("joint_still_active", joint_still_active, raft::joint_still_active),
+            ("joint_still_active_as_is", joint_still_active_as_is, raft::joint_still_active_as_is),
+        ];
+
+        for (n, f, g) in g_u {
+            for &x in &u {
+                assert_eq!(f(x), g(x), "{n}({x})");
+                checked += 1;
+            }
+        }
+        for (n, f, g) in g_uu_u {
+            for &x in &u {
+                for &y in &u {
+                    assert_eq!(f(x, y), g(x, y), "{n}({x},{y})");
+                    checked += 1;
+                }
+            }
+        }
+        for (n, f, g) in g_uu_b {
+            for &x in &u {
+                for &y in &u {
+                    assert_eq!(f(x, y), g(x, y), "{n}({x},{y})");
+                    checked += 1;
+                }
+            }
+        }
+        for (n, f, g) in g_b {
+            for &x in &bb {
+                assert_eq!(f(x), g(x), "{n}({x})");
+                checked += 1;
+            }
+        }
+        for (n, f, g) in g_bb {
+            for &x in &bb {
+                for &y in &bb {
+                    assert_eq!(f(x, y), g(x, y), "{n}({x},{y})");
+                    checked += 1;
+                }
+            }
+        }
+        for (n, f, g) in g_bbb_b {
+            for &x in &bb {
+                for &y in &bb {
+                    for &z in &bb {
+                        assert_eq!(f(x, y, z), g(x, y, z), "{n}({x},{y},{z})");
+                        checked += 1;
+                    }
+                }
+            }
+        }
+        for (n, f, g) in g_bbb_s {
+            for &x in &bb {
+                for &y in &bb {
+                    for &z in &bb {
+                        assert_eq!(f(x, y, z), g(x, y, z), "{n}({x},{y},{z})");
+                        checked += 1;
+                    }
+                }
+            }
+        }
+        for (n, f, g) in g_opt {
+            for &x in &u {
+                for &y in &u {
+                    for &o in &opts {
+                        let os = match o {
+                            None => "None".to_string(),
+                            Some((a, b)) => format!("Some(({a},{b}))"),
+                        };
+                        assert_eq!(f(x, y, o), g(x, y, o), "{n}({x},{y},{os})");
+                        checked += 1;
+                    }
+                }
+            }
+        }
+        for (n, f, g) in g_sl {
+            for &x in &slices {
+                for &y in &slices {
+                    assert_eq!(f(x, y), g(x, y), "{n}({x:?},{y:?})");
+                    checked += 1;
+                }
+            }
+        }
+        // 1·6 + 2·36 + 4·36 + 28·2 + 26·4 + 2·8 + 2·8 + 2·180 + 2·25 = 824
+        // agreement checks over 69 shared fns (34 spec + 35 as-is twins).
+        assert_eq!(checked, 824);
+    }
+
     fn collapse_fn(src: &str, name: &str) -> String {
         let sig = format!("pub fn {name}(");
         let start = src.find(&sig).unwrap_or_else(|| panic!("missing {name}"));

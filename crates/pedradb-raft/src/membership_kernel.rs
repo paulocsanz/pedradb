@@ -69,6 +69,20 @@ pub fn joint_leave_ok_as_is(_leave_in_log: bool) -> bool {
     true
 }
 
+/// RFC-0068 P1.2: opt-in World schedule emitted `PlantCommittedJoint`
+/// and the default seed scheduler omitted it (fingerprint-stable).
+#[must_use]
+pub fn plant_joint_schedule_ok(opt_in_emits: bool, default_omits: bool) -> bool {
+    opt_in_emits && default_omits
+}
+
+/// AS-IS: skip the opt-in plant (the 0068 P1.2 hole — random scheduler
+/// never emits `PlantCommittedJoint`).
+#[must_use]
+pub fn plant_joint_schedule_ok_as_is(_opt_in_emits: bool, _default_omits: bool) -> bool {
+    true
+}
+
 /// RFC-0122: a leave in the log is not done until it is committed.
 #[must_use]
 pub fn queued_leave_finish_ok(leave_in_log: bool, leave_committed: bool) -> bool {
@@ -470,6 +484,17 @@ mod tests {
         assert!(joint_leave_ok(true));
         assert!(!joint_leave_ok(false));
         assert!(joint_leave_ok_as_is(false), "AS-IS dente: skip leave-joint");
+    }
+
+    #[test]
+    fn plant_joint_schedule_ok_requires_opt_in_and_default_omit() {
+        assert!(plant_joint_schedule_ok(true, true));
+        assert!(!plant_joint_schedule_ok(false, true));
+        assert!(!plant_joint_schedule_ok(true, false));
+        assert!(
+            plant_joint_schedule_ok_as_is(false, false),
+            "AS-IS dente: skip opt-in PlantCommittedJoint"
+        );
     }
 
     #[test]

@@ -6376,7 +6376,9 @@
         "recover_drop_orphan_seg_as_is",
         "recover_must_apply_as_is",
         "recover_truncate_node_counts_as_is",
-        "removed_steps_down_as_is"
+        "removed_steps_down_as_is",
+        "plant_joint_schedule_ok",
+        "plant_joint_schedule_ok_as_is"
       ]
     },
     {
