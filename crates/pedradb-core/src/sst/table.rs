@@ -113,10 +113,17 @@ fn lz4_plain_size_ok(plain: usize, compressed_len: usize) -> bool {
 }
 
 fn lz4_size_rejected(path: &Path, plain: usize, compressed_len: usize) -> CoreError {
-    CoreError::Internal(format!(
-        "SST lz4 uncompressed size {plain} exceeds 256x compressed length ({compressed_len}) in {}",
-        path.display()
-    ))
+    // PEDRA-003: the two rejections share this formatter — say which one
+    // fired, a cap rejection mislabeled as a ratio cost an hour of
+    // debugging on the 10M fill-in.
+    let why = if plain > LZ4_MAX_PLAIN_BLOCK {
+        format!(
+            "SST lz4 uncompressed size {plain} exceeds the {LZ4_MAX_PLAIN_BLOCK}-byte block cap (compressed length {compressed_len})"
+        )
+    } else {
+        format!("SST lz4 uncompressed size {plain} exceeds 256x compressed length ({compressed_len})")
+    };
+    CoreError::Internal(format!("{why} in {}", path.display()))
 }
 
 /// Effective block target for new writes: `PEDRA_BLOCK_TARGET` (bytes,
@@ -3304,6 +3311,27 @@ fn write_sst_try_sorted_body(
         if block_buf.is_empty() {
             block_first_user = Some(ikey.user_key.clone());
         }
+        // PEDRA-003: a same-user run (a hot key rewritten every batch —
+        // e.g. a changelog cursor) must not grow a block past the
+        // reader's absolute plain cap. Readers already join consecutive
+        // blocks that share a first_user_key, so splitting mid-user is
+        // format-legal; an unsplittable run wrote a block the reader
+        // rejects on open.
+        if !block_buf.is_empty()
+            && block_buf.len() + uk.len() + value.len() + 64 >= LZ4_MAX_PLAIN_BLOCK
+        {
+            flush_block(
+                &mut data,
+                &mut block_buf,
+                &mut block_first_user,
+                &mut index,
+                &mut stages,
+                &mut policy_compress,
+                &mut policy_decided,
+                &mut lz4_scratch,
+            )?;
+            block_first_user = Some(ikey.user_key.clone());
+        }
         let pre_len = block_buf.len();
         encode_entry_into(&ikey, &value, &mut block_buf)?;
         if !same_user && block_buf.len() > block_target() && pre_len > 0 {
@@ -3579,6 +3607,35 @@ mod tests {
     }
 
     #[test]
+    fn same_user_run_splits_at_block_cap_and_reads_back() {
+        // PEDRA-003: ~12k versions of one key (a changelog cursor
+        // rewritten every batch) must split into cap-bounded blocks, not
+        // land in one block the reader rejects. The oldest version lives
+        // in the final block — that is the read that failed pre-fix.
+        let path = temp_path();
+        let n = 12_000u64;
+        let entries: Vec<(InternalKey, Bytes)> = (0..n)
+            .map(|i| {
+                (
+                    InternalKey::new(
+                        b"meta\0cursor".to_vec(),
+                        n - i,
+                        ValueType::Value,
+                    ),
+                    Bytes::from(vec![0x5a; 200]),
+                )
+            })
+            .collect();
+        let table =
+            write_sst_try_sorted_on(&StdEnv, &path, entries.into_iter().map(Ok), 1).unwrap();
+        assert_eq!(table.len(), n as usize);
+        assert_eq!(table.point_at(b"meta\0cursor", u64::MAX).unwrap().0, n);
+        assert_eq!(table.point_at(b"meta\0cursor", n / 2).unwrap().0, n / 2);
+        assert_eq!(table.point_at(b"meta\0cursor", 1).unwrap().0, 1);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn write_sst_bulk_arrays_is_v6_and_roundtrips() {
         let path = temp_path();
         let n = 64usize;
@@ -3720,8 +3777,10 @@ mod tests {
         let err = decode_block_bytes(&frame, true, false, path)
             .unwrap_err()
             .to_string();
+        // 64 MiB > LZ4_MAX_PLAIN_BLOCK: the absolute-cap arm fires (the
+        // ratio arm only sees sizes under the cap).
         assert!(
-            err.contains("exceeds 256x compressed length"),
+            err.contains("exceeds the 262144-byte block cap"),
             "decode must name the ceiling, got {err}"
         );
         let mut scratch = Vec::new();
@@ -3729,13 +3788,24 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(
-            err.contains("exceeds 256x compressed length"),
+            err.contains("exceeds the 262144-byte block cap"),
             "seek must name the ceiling, got {err}"
         );
         assert!(
             scratch.len() < 64 * 1024,
             "seek must not allocate the forged 64 MiB, scratch={}",
             scratch.len()
+        );
+
+        // Ratio arm: a claim under the absolute cap but above 256x the
+        // frame (4 KiB claimed, ~15 B frame) must name the ratio.
+        frame[..4].copy_from_slice(&4096u32.to_le_bytes());
+        let err = decode_block_bytes(&frame, true, false, path)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("exceeds 256x compressed length"),
+            "decode must name the ratio, got {err}"
         );
     }
 
