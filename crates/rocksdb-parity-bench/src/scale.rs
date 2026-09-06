@@ -284,13 +284,25 @@ impl ScaleStore for PedraScale {
         self.db.get(k).ok().flatten()
     }
     fn prefix_count(&self, prefix: &[u8]) -> usize {
-        let mut end = prefix.to_vec();
-        if let Some(last) = end.last_mut() {
-            *last = last.saturating_add(1);
+        // Measurement fidelity (RFC-0168 P1.2): `count_named` serves the
+        // thread-local count cache after the first call (~ns) while the
+        // rocks/fjall legs iterate for real. Walk the window and
+        // materialize entries so every backend does the same work.
+        let Some(cf) = self.db.cf_handle("default") else {
+            return 0;
+        };
+        let Ok(iter) = self.db.prefix_iterator_cf(&cf, prefix) else {
+            return 0;
+        };
+        let mut n = 0usize;
+        for item in iter {
+            let Ok((k, _)) = item else { break };
+            if !k.starts_with(prefix) {
+                break;
+            }
+            n += 1;
         }
-        self.db
-            .count_named("default", prefix, &end, usize::MAX)
-            .unwrap_or(0)
+        n
     }
     fn settle(&mut self) -> bool {
         self.db.flush().is_ok() && self.db.compact().is_ok()
