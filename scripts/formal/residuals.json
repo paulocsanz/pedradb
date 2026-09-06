@@ -65,7 +65,7 @@
       "crates/rocksdb-compat/src/iter_kernel.rs"
     ],
     "kernel_files": 46,
-    "kernel_loc": 13403,
+    "kernel_loc": 13532,
     "handler_loc": 97868,
     "db_rs_extracted": false,
     "kernel_fn_allowlist": {
