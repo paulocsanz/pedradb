@@ -7074,6 +7074,7 @@ impl<E: Env> Db<E> {
             match batch.len() {
                 0 => {
                     self.dump_level_diag("compact_leveled_done");
+                    self.maybe_willneed_ssts();
                     return Ok(());
                 }
                 1 => {
@@ -7110,7 +7111,23 @@ impl<E: Env> Db<E> {
                 }
             }
         }
+        self.maybe_willneed_ssts();
         Ok(())
+    }
+
+    /// RFC-0168 P1.1: best-effort `WILLNEED` on every live SST after
+    /// settle. No-op unless [`crate::env::settle_willneed_on`]. Pages land
+    /// in the kernel cache (inode-level) even if the later point path
+    /// opens a different fd with `FADV_RANDOM`.
+    fn maybe_willneed_ssts(&self) {
+        if !crate::env::settle_willneed_on() {
+            return;
+        }
+        for table in &self.ssts {
+            let _ = self
+                .env
+                .advise(table.path(), 0, 0, crate::env::AdviseKind::WillNeed);
+        }
     }
 
     /// `PEDRA_LEVEL_DIAG=1`: per-level file count + on-disk bytes at a
@@ -12496,6 +12513,66 @@ mod tests {
             vec![(final_p, 0, 0, AdviseKind::DontNeed)],
             "exactly one whole-file DONTNEED on the final path after rename"
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0168 P1.1 two-state: settle WILLNEED is off by default and
+    /// fires one whole-file advise per live SST when forced on.
+    #[test]
+    fn rfc0168_settle_willneed_two_state() {
+        let dir = temp_dir();
+        let env = BulkProbeEnv::new();
+        let mut db = Db::open_with_env(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(4 * 1024),
+                ..OpenOptions::default()
+            },
+            env.clone(),
+        )
+        .unwrap();
+        for i in 0..32u32 {
+            db.put(format!("k{i:04}").as_bytes(), vec![b'v'; 64])
+                .unwrap();
+        }
+        db.flush().unwrap();
+        env.advises.lock().unwrap().clear();
+        crate::env::force_settle_willneed(Some(false));
+        db.compact_leveled().unwrap();
+        let off: Vec<_> = env
+            .advises
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, _, _, k)| *k == AdviseKind::WillNeed)
+            .cloned()
+            .collect();
+        assert!(
+            off.is_empty(),
+            "default/forced-off settle must not WILLNEED, got {off:?}"
+        );
+        env.advises.lock().unwrap().clear();
+        crate::env::force_settle_willneed(Some(true));
+        db.compact_leveled().unwrap();
+        let on: Vec<_> = env
+            .advises
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, _, _, k)| *k == AdviseKind::WillNeed)
+            .cloned()
+            .collect();
+        crate::env::force_settle_willneed(None);
+        assert!(
+            !on.is_empty(),
+            "PEDRA_SETTLE_WILLNEED must WILLNEED live SSTs after compact"
+        );
+        assert!(
+            on.iter().all(|(_, off, len, _)| *off == 0 && *len == 0),
+            "WILLNEED must be whole-file (offset=0,len=0), got {on:?}"
+        );
+        db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
 
