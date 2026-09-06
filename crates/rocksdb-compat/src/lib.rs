@@ -29,6 +29,7 @@ pub mod backup;
 pub mod checkpoint;
 pub use backup::{BackupEngine, BackupEngineInfo, BackupEngineOptions, RestoreOptions};
 pub use checkpoint::Checkpoint;
+pub use pedradb_core::cost;
 pub use env::{Env, SstFileManager};
 pub use knobs::{g2_not_supported, KnobClass, KnobEntry, KNOB_INVENTORY};
 pub use txn::{
