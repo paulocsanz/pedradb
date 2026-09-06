@@ -162,12 +162,43 @@ thread_local! {
 /// RFC-0168 P1.1: after settle, **read** every live SST through the
 /// cached fd (256 KiB chunks) so page cache is populated on the same
 /// handle `get` will pread. `PEDRA_SETTLE_WILLNEED` only hinted on a
-/// fresh fd and did not move get_hit@10M. Default **off**. Two-state:
-/// `PEDRA_SETTLE_WARM=1` or [`force_settle_warm`].
+/// fresh fd and did not move get_hit@10M.
+///
+/// Default **on**, gated by [`settle_warm_max_bytes`]: 10M settled is
+/// ~2.4 GiB (fillin4) and fits; 25M (~6 GiB) / 100M (~24 GiB) skip so a
+/// 4 GiB box does not thrash and settle vs Fjall stays O(1). Rocks
+/// `compact_range` at 10M leaves that working set in page cache as a
+/// side effect; Pedra's leveled settle is a no-op on sequential bulk.
+/// `PEDRA_SETTLE_WARM=0` forces off; `=1` warms regardless of cap.
 #[must_use]
 pub fn settle_warm_on() -> bool {
     if let Some(v) = SETTLE_WARM.with(Cell::get) {
         return v;
+    }
+    match std::env::var("PEDRA_SETTLE_WARM").as_deref() {
+        Ok("0") | Ok("false") | Ok("FALSE") => false,
+        _ => true,
+    }
+}
+
+/// Live-SST byte cap for the default warm. Override with
+/// `PEDRA_SETTLE_WARM_MAX_BYTES`. `PEDRA_SETTLE_WARM=1` ignores it.
+pub const DEFAULT_SETTLE_WARM_MAX_BYTES: u64 = 3 * (1 << 30);
+
+/// Cap applied when warm is on but not forced unlimited.
+#[must_use]
+pub fn settle_warm_max_bytes() -> u64 {
+    match std::env::var("PEDRA_SETTLE_WARM_MAX_BYTES") {
+        Ok(v) => v.parse().unwrap_or(DEFAULT_SETTLE_WARM_MAX_BYTES),
+        Err(_) => DEFAULT_SETTLE_WARM_MAX_BYTES,
+    }
+}
+
+/// `PEDRA_SETTLE_WARM=1` / `true`: warm even when live SSTs exceed the cap.
+#[must_use]
+pub fn settle_warm_unlimited() -> bool {
+    if let Some(true) = SETTLE_WARM.with(Cell::get) {
+        return true;
     }
     matches!(
         std::env::var("PEDRA_SETTLE_WARM").as_deref(),
