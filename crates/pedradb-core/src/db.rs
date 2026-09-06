@@ -7148,7 +7148,8 @@ impl<E: Env> Db<E> {
 
     /// RFC-0168 P1.1: blocking page-cache fill through `sst_source`
     /// (the same fd `get` preads). No-op unless [`crate::env::settle_warm_on`]
-    /// and a file source is attached (bounded open).
+    /// and a file source is attached (bounded open). Default skips when
+    /// live SST bytes exceed [`crate::env::settle_warm_max_bytes`].
     fn maybe_warm_ssts(&self) {
         if !crate::env::settle_warm_on() {
             return;
@@ -7156,11 +7157,20 @@ impl<E: Env> Db<E> {
         let Some(src) = self.sst_source.as_ref() else {
             return;
         };
+        let mut jobs: Vec<(&std::path::Path, u64)> = Vec::with_capacity(self.ssts.len());
+        let mut total = 0u64;
         for table in &self.ssts {
             let Ok(len) = self.env.metadata_len(table.path()) else {
                 continue;
             };
-            if src.warm(table.path(), len).is_ok() {
+            total = total.saturating_add(len);
+            jobs.push((table.path(), len));
+        }
+        if !crate::env::settle_warm_unlimited() && total > crate::env::settle_warm_max_bytes() {
+            return;
+        }
+        for (path, len) in jobs {
+            if src.warm(path, len).is_ok() {
                 crate::env::add_settle_warm_bytes(len);
             }
         }
@@ -12647,6 +12657,47 @@ mod tests {
         let n = crate::env::take_settle_warm_bytes();
         crate::env::force_settle_warm(None);
         assert!(n > 0, "PEDRA_SETTLE_WARM must stream live SSTs, got {n}");
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0168 P1.1 two-state: default warm skips when live SST bytes
+    /// exceed `PEDRA_SETTLE_WARM_MAX_BYTES` (25M/100M must not stream
+    /// 6–24 GiB into a 4 GiB box). Under the cap, default streams.
+    #[test]
+    fn rfc0168_settle_warm_cap_skips_over_budget() {
+        let dir = temp_dir();
+        let env = BulkProbeEnv::new();
+        let mut db = Db::open_with_env_bounded(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(4 * 1024),
+                sst_payload_budget_bytes: Some(1),
+                ..OpenOptions::default()
+            },
+            env,
+        )
+        .unwrap();
+        for i in 0..32u32 {
+            db.put(format!("k{i:04}").as_bytes(), vec![b'v'; 64])
+                .unwrap();
+        }
+        db.flush().unwrap();
+        crate::env::force_settle_warm(None);
+        let _ = crate::env::take_settle_warm_bytes();
+        std::env::set_var("PEDRA_SETTLE_WARM_MAX_BYTES", "1");
+        db.compact_leveled().unwrap();
+        assert_eq!(
+            crate::env::take_settle_warm_bytes(),
+            0,
+            "over-cap default must not stream"
+        );
+        std::env::set_var("PEDRA_SETTLE_WARM_MAX_BYTES", "1073741824");
+        db.compact_leveled().unwrap();
+        let n = crate::env::take_settle_warm_bytes();
+        std::env::remove_var("PEDRA_SETTLE_WARM_MAX_BYTES");
+        assert!(n > 0, "under-cap default must stream, got {n}");
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
