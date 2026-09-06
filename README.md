@@ -181,25 +181,25 @@ RocksDB row, ratio row. The 1M/10M rows and the 25M read cells are single
 official runs (2026-09-02/03); the 25M hydrate and every 100M cell are
 3-run medians (2026-09-03/05).
 
-| 1M | hydrate | settle | get_hit | prefix_scan | get_loop | multi_get | probe_miss | disk |
+| 1M | hydrate | settle | get_hit | prefix_scan | get_loop | multi_get | probe_miss p50 | disk |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | Pedra | 0.6 s | 0.4 s | 3.0 µs | 202 µs | 313 µs | 336 µs | — | 0.24 GiB |
 | Rocks | 1.1 s | 1.0 s | 4.3 µs | 331 µs | 424 µs | 364 µs | — | 0.21 GiB |
 | ratio | **1.82×** | **2.50×** | **1.44×** | **1.64×** | **1.36×** | **1.08×** | — | |
 
-| 10M | hydrate | settle | get_hit | prefix_scan | get_loop | multi_get | probe_miss | disk |
+| 10M | hydrate | settle | get_hit | prefix_scan | get_loop | multi_get | probe_miss p50 | disk |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | Pedra | 10.7 s | 0.6 s | 13.0 µs | 261 µs | 1.14 ms | 1.23 ms | — | 2.40 GiB |
 | Rocks | 11.1 s | 4.6 s | 13.0 µs | 341 µs | 1.22 ms | 1.26 ms | — | 2.10 GiB |
 | ratio | **1.03×** | **7.67×** | 1.00× (tie) | **1.31×** | **1.07×** | **1.02×** | — | |
 
-| 25M | hydrate | settle | get_hit | prefix_scan | get_loop | multi_get | probe_miss | disk |
+| 25M | hydrate | settle | get_hit | prefix_scan | get_loop | multi_get | probe_miss p50 | disk |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | Pedra | 29.5 s | 0.3 s | 35.2 µs | 248 µs | 3.65 ms | 3.36 ms | — | 5.96 GiB |
 | Rocks | 30.2 s | 8.1 s | 40.3 µs | 333 µs | — | 4.29 ms | — | 6.8–8.0 GiB |
 | ratio | 1.02× | **27×** | **1.14×** | **1.34×** | — | **1.27×** | — | |
 
-| 100M | hydrate | settle | get_hit | prefix_scan | get_loop | multi_get | probe_miss | disk |
+| 100M | hydrate | settle | get_hit | prefix_scan | get_loop | multi_get | probe_miss p50 | disk |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | Pedra | 119.4 s | 0.7 s | 63.7 µs | 305 µs | 6.15 ms | 5.84 ms | 211 ns | 24.16 GiB |
 | Rocks | 151.3 s | 56.5 s | 68.4 µs | 320 µs | 7.00 ms | 6.70 ms | 571 ns | 20.98 GiB |
