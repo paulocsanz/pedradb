@@ -71,7 +71,7 @@ pub use client::{
 };
 pub use commit_kernel::{
     may_commit_at, may_commit_at_as_is, propose_ack_ok, propose_ack_ok_as_is, recover_commit,
-    recover_commit_as_is,
+    recover_commit_as_is, recover_last_applied, recover_last_applied_as_is,
 };
 pub use compact_kernel::{
     compact_index_floor, compact_ready, compact_through_unleft, compact_through_unleft_as_is,

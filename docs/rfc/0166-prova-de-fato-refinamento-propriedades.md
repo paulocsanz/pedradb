@@ -1,6 +1,6 @@
 # RFC: prova de fato — D1/R1/T1/C1 como refinamento machine-checked
 
-**Status:** draft
+**Status:** done
 **Updated:** 2026-09-06
 
 ## Background

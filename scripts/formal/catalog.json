@@ -6298,7 +6298,9 @@
         "propose_ack_ok",
         "may_commit_at_as_is",
         "propose_ack_ok_as_is",
-        "recover_commit_as_is"
+        "recover_commit_as_is",
+        "recover_last_applied",
+        "recover_last_applied_as_is"
       ]
     },
     {
