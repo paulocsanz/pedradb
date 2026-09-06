@@ -64,7 +64,9 @@ mod t1_modelo_kernel;
 mod txn_kernel;
 mod vote_kernel;
 
-pub use ae_ack_kernel::{ae_ack_success, ae_ack_success_as_is};
+pub use ae_ack_kernel::{
+    ae_ack_success, ae_ack_success_as_is, ae_f16_safe, ae_f16_safe_as_is,
+};
 pub use client::{
     classify, classify_message, leader_from_status, leaders_from_status, ClientClass, PendingTx,
     SnapshotTx, TcpClusterClient, Transaction, MAX_SNAPSHOT_LAG,

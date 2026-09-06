@@ -6390,7 +6390,9 @@
         "ae_entry_action",
         "ae_prev_log_ok",
         "ae_entry_action_as_is_rewrite_committed",
-        "ae_ack_success_as_is"
+        "ae_ack_success_as_is",
+        "ae_f16_safe",
+        "ae_f16_safe_as_is"
       ]
     },
     {
