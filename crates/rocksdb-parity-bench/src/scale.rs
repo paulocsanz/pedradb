@@ -131,6 +131,15 @@ pub trait ScaleStore {
     fn put_batch(&mut self, kvs: &[(&[u8], &[u8])]) -> bool;
     fn get(&self, k: &[u8]) -> Option<Vec<u8>>;
     fn prefix_count(&self, prefix: &[u8]) -> usize;
+    /// Drain leftover ingest into SSTs **inside the hydrate timer**.
+    ///
+    /// Fjall persist-on-commit already did this work during `put_batch`;
+    /// Pedra's bulk path parks a <chunk tail until an explicit flush.
+    /// RFC-0168 P1.3: move that tail into hydrate so settle is
+    /// compact-of-quiet (≤ Fjall's persist no-op), not a 64 MiB encode.
+    fn finish_hydrate(&mut self) -> bool {
+        true
+    }
     fn settle(&mut self) -> bool;
 }
 
@@ -154,6 +163,7 @@ fn hydrate(store: &mut dyn ScaleStore, n: usize, pool: &[u8], vlen: usize) {
         );
         i = end;
     }
+    assert!(store.finish_hydrate(), "finish_hydrate {}", store.label());
 }
 
 fn run_one(store: &mut dyn ScaleStore, dir: &Path, n: usize, vlen: usize, pool: &[u8]) {
@@ -174,7 +184,7 @@ fn run_one(store: &mut dyn ScaleStore, dir: &Path, n: usize, vlen: usize, pool: 
     let settle_s = t1.elapsed().as_secs_f64();
     let settled = dir_size_bytes(dir);
     eprintln!(
-        "settle/{label}: {settle_s:.1}s; on disk after {:.2} GiB",
+        "settle/{label}: {settle_s:.3}s; on disk after {:.2} GiB",
         settled as f64 / (1u64 << 30) as f64,
     );
 
@@ -300,6 +310,12 @@ impl ScaleStore for PedraScale {
             n += 1;
         }
         n
+    }
+    fn finish_hydrate(&mut self) -> bool {
+        // Leftover open BulkRun is < bulk_chunk_cap (default 64 MiB) and
+        // is otherwise the whole settle cell vs Fjall. Flush it here so
+        // settle's compact_leveled sees a disjoint max-level run set.
+        self.db.flush().is_ok()
     }
     fn settle(&mut self) -> bool {
         self.db.flush().is_ok() && self.db.compact().is_ok()
