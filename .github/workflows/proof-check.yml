@@ -1,14 +1,25 @@
 # RFC-0166 — proof-check: the machine-checked corpus.
-# Nightly: every Verus twin proves (0 errors) and every Kani harness on a
+# Every Verus twin proves (0 errors) and every Kani harness on a
 # production kernel verifies, with both tools pinned by sha256. A proof
 # regression is a build regression: this job failing means a theorem,
 # twin, or harness broke.
+#
+# The repo default branch is a WIP branch, and GitHub only arms
+# `schedule`/`workflow_dispatch` from the default branch — so the gate
+# also runs on every push to main. The nightly cron takes over when
+# this workflow reaches the default branch.
 name: proof-check
 
 on:
+  push:
+    branches: [main]
   schedule:
     - cron: "0 3 * * *"
   workflow_dispatch:
+
+concurrency:
+  group: proof-check-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   VERUS_VERSION: 0.2026.08.09.92f466f
