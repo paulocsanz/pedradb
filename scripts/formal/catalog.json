@@ -6327,6 +6327,28 @@
         "file": "crates/pedradb-core/src/write_admission_kernel.rs",
         "test": "write_admit_on_live_mem_over_is_not_ok"
       }
+    },
+    {
+      "id": "auto_flush_due",
+      "finding": "RFC-0170 P2.4",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/flush_kernel.rs",
+      "twin": "crates/pedradb-core/verus/flush_decision.rs",
+      "verus": "scripts/verus_flush_decision.sh",
+      "callers": [
+        "crates/pedradb-core/src/db.rs"
+      ],
+      "entry": "auto_flush_due",
+      "data_fate": true,
+      "handlers": [
+        "maybe_auto_flush"
+      ],
+      "as_is": "auto_flush_due_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/flush_kernel.rs",
+        "test": "auto_flush_due_on_live_over_limit_is_not_ok"
+      }
     }
   ],
   "clones": [

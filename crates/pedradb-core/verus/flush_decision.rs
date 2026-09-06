@@ -230,6 +230,37 @@ proof fn lemma_as_is_publishes_unsynced()
 {
 }
 
+pub open spec fn auto_flush_due_spec(mem_bytes: u64, armed: bool, limit: u64) -> bool {
+    armed && mem_bytes >= limit
+}
+
+pub fn auto_flush_due(mem_bytes: u64, armed: bool, limit: u64) -> (d: bool)
+    ensures
+        d == auto_flush_due_spec(mem_bytes, armed, limit),
+{
+    armed && mem_bytes >= limit
+}
+
+pub open spec fn auto_flush_due_as_is_spec(_mem_bytes: u64, _armed: bool, _limit: u64) -> bool {
+    false
+}
+
+pub fn auto_flush_due_as_is(mem_bytes: u64, armed: bool, limit: u64) -> (d: bool)
+    ensures
+        d == auto_flush_due_as_is_spec(mem_bytes, armed, limit),
+        d == false,
+{
+    let _ = (mem_bytes, armed, limit);
+    false
+}
+
+proof fn lemma_as_is_never_auto_flushes()
+    ensures
+        auto_flush_due_spec(100, true, 50),
+        !auto_flush_due_as_is_spec(100, true, 50),
+{
+}
+
 proof fn lemma_mutant_ignores_pin()
     ensures
         wal_rotate_decision(WalPinState {

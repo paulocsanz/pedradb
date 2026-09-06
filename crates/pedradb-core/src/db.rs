@@ -9908,9 +9908,15 @@ impl<E: Env> Db<E> {
             // Hot path: integer compare, not a walk of every memtable key.
             // `cf_families()` scans tail+map (O(entries)) — with CFs registered
             // every 1c put paid that (ycsb_a 2M→0.6M qps, RFC-0149).
-            let mem = self.mem.approx_memory_usage();
-            let global_under = self.auto_flush_bytes.map_or(true, |lim| mem < lim);
-            let cf_under = self.cf_write_buffer.values().all(|&n| n == 0 || mem < n);
+            let mem = self.mem.approx_memory_usage() as u64;
+            let global_under = !crate::flush_kernel::auto_flush_due(
+                mem,
+                self.auto_flush_bytes.is_some(),
+                self.auto_flush_bytes.unwrap_or(0) as u64,
+            );
+            let cf_under = self.cf_write_buffer.values().all(|&n| {
+                !crate::flush_kernel::auto_flush_due(mem, n != 0, n as u64)
+            });
             if global_under && cf_under {
                 return Ok(());
             }
@@ -9920,7 +9926,11 @@ impl<E: Env> Db<E> {
                 let Some(limit) = self.write_buffer_for(fam) else {
                     continue;
                 };
-                if self.mem.approx_memory_usage_cf(fam) < limit {
+                if !crate::flush_kernel::auto_flush_due(
+                    self.mem.approx_memory_usage_cf(fam) as u64,
+                    true,
+                    limit as u64,
+                ) {
                     continue;
                 }
                 let fam = self.physical_cfs[i].clone();
@@ -9935,10 +9945,10 @@ impl<E: Env> Db<E> {
             }
             return Ok(());
         }
-        let Some(limit) = self.auto_flush_bytes else {
-            return Ok(());
-        };
-        if self.mem.approx_memory_usage() >= limit {
+        let mem = self.mem.approx_memory_usage() as u64;
+        let armed = self.auto_flush_bytes.is_some();
+        let limit = self.auto_flush_bytes.unwrap_or(0);
+        if crate::flush_kernel::auto_flush_due(mem, armed, limit as u64) {
             if self.defer_auto_compact {
                 // Leave the table in `imm` for the host worker. Do not call
                 // `prepare_flush_imm` here — that takes the table out and

@@ -28,11 +28,13 @@ calls `write_admission_kernel::write_admit`. Drain/flush stays glue.
 `cf_kernel`, `vlog_gc_kernel`, `reopen_kernel`, `changelog_kernel`,
 `write_admission_kernel`.
 
+`Db::maybe_auto_flush` now asks `flush_kernel::auto_flush_due` (armed byte
+limit reached). SST write / park stays glue. AS-IS never fires.
+
 Next data-fate `if`s that still live in glue (not a catalog `entry`):
 
 | Fn | Decision | Why it is data-fate |
 |----|----------|---------------------|
-| `maybe_auto_flush` | mem bytes vs `write_buffer` / per-CF | whether a write becomes an SST |
 | `maybe_auto_compact` | L0 count / SST bytes fire compact | whether versions disappear |
 | `compact_family_key` | empty `physical_cfs` ⇒ `""` | compact grouping |
 | `commit_ops_with` | `do_sync` fence after append | ack vs durability |

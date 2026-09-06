@@ -142,6 +142,21 @@ pub fn wal_rotate_decision_as_is_ignore_pin(s: WalPinState) -> WalRotateAction {
     }
 }
 
+/// Fire auto-flush when the armed byte limit is reached (RFC-0170 P2.4).
+/// Production [`crate::db::Db::maybe_auto_flush`] calls this; drain/SST write
+/// stays glue.
+#[must_use]
+pub fn auto_flush_due(mem_bytes: u64, armed: bool, limit: u64) -> bool {
+    armed && mem_bytes >= limit
+}
+
+/// AS-IS: never auto-flush — mem grows unbounded (acked keys stay only in
+/// the WAL/memtable until an explicit flush).
+#[must_use]
+pub fn auto_flush_due_as_is(_mem_bytes: u64, _armed: bool, _limit: u64) -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,5 +297,13 @@ mod tests {
             WalRotateAction::RotateWal,
             "AS-IS dente: rotate while pin live"
         );
+    }
+
+    #[test]
+    fn auto_flush_due_on_live_over_limit_is_not_ok() {
+        assert!(auto_flush_due(100, true, 50));
+        assert!(!auto_flush_due_as_is(100, true, 50), "AS-IS dente: never fires");
+        assert!(!auto_flush_due(10, true, 50));
+        assert!(!auto_flush_due(100, false, 50), "unarmed never fires");
     }
 }
