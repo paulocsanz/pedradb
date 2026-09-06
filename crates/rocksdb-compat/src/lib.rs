@@ -29,9 +29,9 @@ pub mod backup;
 pub mod checkpoint;
 pub use backup::{BackupEngine, BackupEngineInfo, BackupEngineOptions, RestoreOptions};
 pub use checkpoint::Checkpoint;
-pub use pedradb_core::cost;
 pub use env::{Env, SstFileManager};
 pub use knobs::{g2_not_supported, KnobClass, KnobEntry, KNOB_INVENTORY};
+pub use pedradb_core::cost;
 pub use txn::{
     OptimisticTransactionDB, OptimisticTransactionOptions, Transaction, TransactionDB,
     TransactionDBOptions, TransactionOptions, WriteOptions,
@@ -2067,7 +2067,9 @@ impl DB<IoUringEnv> {
             opts.background_error_listener.clone(),
         );
         if th.is_some() {
-            db.inner.set_defer_auto_compact(true);
+            if defer_auto_compact_from_env() {
+                db.inner.set_defer_auto_compact(true);
+            }
             db.compact_tx = tx;
             db.compact_thread = th;
             let (ftx, fth) = spawn_flush_worker(db.inner.clone());
@@ -2135,7 +2137,9 @@ impl DB<StdEnv> {
             opts.background_error_listener.clone(),
         );
         if th.is_some() {
-            db.inner.set_defer_auto_compact(true);
+            if defer_auto_compact_from_env() {
+                db.inner.set_defer_auto_compact(true);
+            }
             db.compact_tx = tx;
             db.compact_thread = th;
             let (ftx, fth) = spawn_flush_worker(db.inner.clone());
@@ -4307,6 +4311,17 @@ where
 /// races the compact worker safely; its brief write-lock sections cannot
 /// corrupt an inflight commit, they only insert a sub-ms delay ahead of
 /// its re-acquire.
+
+/// RFC-0168 P1.3: default defers auto-compact while the compact worker
+/// runs (L0 piles until settle). `PEDRA_DEFER_AUTO_COMPACT=0` drains L0
+/// during hydrate so settle is leftover-flush only.
+fn defer_auto_compact_from_env() -> bool {
+    match std::env::var("PEDRA_DEFER_AUTO_COMPACT") {
+        Ok(v) if v == "0" || v.eq_ignore_ascii_case("false") => false,
+        _ => true,
+    }
+}
+
 fn spawn_flush_worker<E>(
     inner: ConcurrentDb<E>,
 ) -> (Option<SyncSender<CompactCmd>>, Option<JoinHandle<()>>)

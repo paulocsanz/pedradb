@@ -4481,6 +4481,80 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// RFC-0168 P1.3 two-state: after parked chunks materialize, an open
+    /// BulkRun tail (< cap) still sits in RAM until an explicit flush —
+    /// that tail *was* the settle cell vs Fjall. Drain it and live bytes
+    /// go to zero without shrinking the chunk cap (4 MiB chunks regress
+    /// get_hit).
+    #[test]
+    fn rfc0168_open_bulk_tail_survives_materialize_until_flush() {
+        let dir = temp_dir();
+        let cap = 32 * 1024usize;
+        let db = ConcurrentDb::open_with_env_bounded(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(cap),
+                sst_payload_budget_bytes: Some(1),
+                ..OpenOptions::default()
+            },
+            crate::env::StdEnv,
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into()]);
+        let v = vec![b'v'; 48];
+        for b in 0..10u32 {
+            let mut batch = Vec::new();
+            for j in 0..8u32 {
+                batch.push(BatchOp::put(
+                    format!("data\0{b:04}-{j:04}").into_bytes(),
+                    v.clone(),
+                ));
+            }
+            db.apply_batch_vec(batch).unwrap();
+        }
+        assert!(db.family_is_latched_async("data"));
+        let payload = vec![b'x'; 80];
+        // One full chunk (parks) plus a half-chunk tail that stays in the
+        // open BulkRun until flush — the settle leftover vs Fjall.
+        let put_chunk = |tag: u32, n: u32| {
+            let mut keys = Vec::new();
+            let mut vals = Vec::new();
+            for j in 0..n {
+                let k = format!("data\0t-{tag:04}-{j:06}").into_bytes();
+                keys.push(Bytes::from(k));
+                vals.push(Bytes::from(payload.clone()));
+            }
+            db.apply_latched_bulk("data", keys, vals, Vec::new())
+                .unwrap();
+        };
+        put_chunk(0, 400);
+        put_chunk(1, 120);
+        while db.with_read(|d| d.has_parked_bulk()) {
+            assert!(db.materialize_bulk_once());
+        }
+        let live = db.with_read(|d| d.bulk_live_bytes());
+        assert!(
+            live > 0,
+            "open tail must remain after parked chunks drain, live={live}"
+        );
+        assert!(
+            live < cap.saturating_mul(2),
+            "open tail {live} must stay under 2×cap (not a piled leftover)"
+        );
+        db.flush().unwrap();
+        assert_eq!(
+            db.with_read(|d| d.bulk_live_bytes()),
+            0,
+            "explicit flush (hydrate finish) must drain the open tail"
+        );
+        assert_eq!(
+            db.get(format!("data\0t-0000-000000").as_bytes()).as_deref(),
+            Some(payload.as_slice())
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// RFC-0159 P0.4 (core half): a bulk-ingested store and its ladder
     /// twin (identical batches, `bulk_route_enabled=false`) serve the
     /// identical keyspace after settle — the fast path changes layout,
