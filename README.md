@@ -175,7 +175,10 @@ are the price of the contract, not wins.
 
 **Sorted ingest** (Linux guest; ~200 B values; latched bulk ingest skips
 WAL and memtable on the append-only family). Ratio > 1 means PedraDB is
-faster than RocksDB default. 25M and 100M rows are 3-run medians.
+faster than RocksDB default. 25M and 100M rows are 3-run medians. The
+Pedra/Rocks cells in this table come from the `snapshot_backends` bench,
+reproduced in-tree by `crates/snapshot-bench` (ported from slipstream
+PR 19; peer = RocksDB default `sync=false`, `rust-rocksdb` 0.50).
 
 | n | hydrate | settle | get_hit | prefix_scan | get_loop | multi_get | probe_miss |
 |---|---:|---:|---:|---:|---:|---:|---:|
@@ -253,6 +256,24 @@ YCSB / dependents (`rocks-parity-bench`): `compat` (Pedra), `rocksdb`
 (`--features real`), or `fjall` (`--features fjall`, YCSB-only — no named
 CFs). Official peer remains RocksDB `WriteOptions.sync=false`.
 
+The Pedra/Rocks **sorted-ingest** column is reproduced by
+`crates/snapshot-bench` — the `snapshot_backends` bench ported from
+slipstream PR 19, byte-faithful workload, in its own workspace (it pins
+the peer to `rust-rocksdb` 0.50; the engine workspace pins 0.22 — one
+`-sys` per graph). Published cells are 3-run criterion medians, one
+backend per process (`SLIPSTREAM_BENCH_BACKENDS=pedradb`, then
+`=rocksdb`), 256 MiB cache, `PEDRA_STAGE_MAX_BYTES=67108864`, `TMPDIR`
+on NVMe:
+
+```sh
+cd crates/snapshot-bench
+SLIPSTREAM_BENCH_BACKENDS=pedradb SLIPSTREAM_BENCH_ENTRIES=1000000 \
+SLIPSTREAM_BENCH_CACHE_BYTES=268435456 PEDRA_STAGE_MAX_BYTES=67108864 \
+TMPDIR=/data/stores \
+  cargo bench --bench snapshot_backends --features fjall,rocksdb,pedradb \
+  -- 'get_hit|prefix_scan|lookup_100'
+```
+
 ## How it's tested
 
 - **Close to 1,000 tests** across the seven crates: unit tests, model tests
@@ -297,6 +318,7 @@ rocksdb = { git = "https://github.com/paulocsanz/pedradb", package = "rocksdb-co
 | `pedradb-posix` | fdatasync / fallocate / fadvise. With `pedradb-io-uring`, the only `unsafe` in the tree. |
 | `rocksdb-compat` | rust-rocksdb 0.22 API on the engine, for migrating existing Rocks code. |
 | `rocksdb-parity-bench` | Parity harness: YCSB/deps (`rocks-parity-bench`) and sorted-ingest scale (`scale-parity-bench`). Peers: Pedra, optional RocksDB (`--features real`), optional Fjall (`--features fjall`). |
+| `snapshot-bench` | `snapshot_backends` comparative bench (sorted-ingest table): fjall vs RocksDB (`rust-rocksdb` 0.50) vs Pedra, ported from slipstream PR 19 (MIT). Own workspace — see its README. |
 
 MSRV 1.88. Dual-licensed MIT or Apache-2.0. Runnable gallery: [`examples/`](examples/).
 
