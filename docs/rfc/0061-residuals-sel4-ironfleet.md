@@ -57,7 +57,9 @@
 Estes ids são o piso `never`. Apagar um deles do json sem o tirar **também**
 deste RFC (e de `never_floor`) faz o `--ci` falhar.
 
-`R-cpu` · `R-rustc` · `R-verus` · `R-crc` · `R-deps` · `R-extract`
+`R-cpu` · `R-rustc` · `R-verus` · `R-crc` · `R-deps`
+
+`R-extract` saiu do piso em 2026-09-06 → classe `open`, owner [RFC-0171](0171-pagar-o-preco-sel4.md) (pagar o preço seL4: artefacto que corre = termo da prova). Não é dump de `db.rs`.
 
 ## Delivery slices (mandatory)
 
@@ -118,8 +120,8 @@ deste RFC (e de `never_floor`) faz o `--ci` falhar.
 
 ## Out of scope (non-goals)
 
-- Tornar Pedra seL4 (reescrever o engine em C+Isabelle, provar o binário).
-- Tornar Pedra IronRSL (reescrever em Dafny; extração total recusada, L46).
+- Tornar Pedra seL4 **em Isabelle/C** (outra língua). O preço seL4 *neste* repo é RFC-0171: Rust verificado = produção, glue = trampoline Env.
+- Tornar Pedra IronRSL (reescrever em Dafny).
 - Provar Linux, rustc, CRC, ECC, ou o ring io_uring.
 - `∀` interleavings do `ConcurrentDb` (escolha 0056 P2.1: kernel de grupo, não π/VerusSync).
 - Remesura quieta vs Rocks `sync=false` (parked nos RFC 0031–0044; não é residual de *prova*).
