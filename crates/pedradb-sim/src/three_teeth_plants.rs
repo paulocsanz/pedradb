@@ -643,3 +643,69 @@ fn env_crash_on_live_recording_is_not_ok() {
     let as_is_promoted = pedradb_core::env_crash_kernel::sync_lying_promotes_as_is(m1);
     assert_ne!(as_is_promoted, m_lying, "AS-IS pretends the lying barrier promoted");
 }
+
+/// RFC-0166 P1.2: Inv-WAL (`acked ⊆ synced ⊆ recoverable prefix`) preserved
+/// by every WAL atom; as-is ack/rotate break it; the acked put survives the
+/// real crash+reopen on the live seam.
+#[test]
+fn wal_inv_on_live_recording_is_not_ok() {
+    use pedradb_core::env_crash_kernel::SyncHonesty;
+    use pedradb_core::wal::wal_state_kernel::{
+        acked_survives_as_is, acked_survives_every_legal_crash, inv_wal, inv_wal_as_is,
+        wal_ack, wal_ack_as_is, wal_append, wal_append_as_is, wal_rotate, wal_rotate_as_is,
+        wal_state_of, wal_sync, WalState,
+    };
+
+    // --- model side: the full atom chain preserves Inv-WAL -------------
+    let s0 = wal_state_of(0, 0, 0);
+    assert!(inv_wal(&s0));
+    let s1 = wal_append(s0, 96); // put("wk", "wv") lands in the log
+    assert!(inv_wal(&s1) && s1.written == 96 && s1.acked == 0);
+    let s2 = wal_sync(s1, SyncHonesty::Honest); // fdatasync before Ok
+    assert!(inv_wal(&s2) && s2.synced == 96);
+    let s3 = wal_ack(s2, 96); // Ok returned to the caller
+    assert!(inv_wal(&s3) && s3.acked == 96);
+    // Every legal crash cut keeps the acked prefix.
+    for cut in 0..=s3.written + 2 {
+        assert!(acked_survives_every_legal_crash(&s3, cut));
+    }
+    // Fully durable+acked: rotate may drop the log, Inv-WAL holds.
+    let s4 = wal_rotate(s3);
+    assert!(inv_wal(&s4) && s4 == wal_state_of(0, 0, 0));
+
+    // --- model teeth: every as-is hole is witnessed -------------------
+    // append-as-is acks before the barrier.
+    let bad_append = wal_append_as_is(s0, 96);
+    assert!(inv_wal_as_is(&bad_append) && !inv_wal(&bad_append));
+    // ack-as-is acks past the barrier (synced=32 of 96 written).
+    let partial = wal_state_of(96, 32, 32);
+    assert_eq!(wal_ack(partial, 64), partial, "ack past the barrier is refused");
+    let bad_ack = wal_ack_as_is(partial, 64);
+    assert!(inv_wal_as_is(&bad_ack) && !inv_wal(&bad_ack));
+    assert!(!acked_survives_every_legal_crash(&bad_ack, 32));
+    // rotate-as-is drops a log with a non-durable tail.
+    let tailed = wal_state_of(96, 32, 32);
+    assert_eq!(wal_rotate(tailed), tailed, "rotate with a non-durable tail is refused");
+    assert!(wal_rotate_as_is(tailed).acked < tailed.acked);
+    // floor-less survival legality diverges (cut below the barrier).
+    assert!(acked_survives_every_legal_crash(&tailed, 8));
+    assert!(!acked_survives_as_is(&tailed, 8));
+
+    // --- live side: the acked put survives the real crash+reopen ------
+    let dir = fresh_dir("wal-inv-honest");
+    let rec = crate::RecordingEnv::new();
+    {
+        let mut db = Db::open_with_env(&dir, opts(), rec.clone()).unwrap();
+        db.put(b"wk", b"wv").unwrap();
+        db.close().unwrap();
+    }
+    rec.crash();
+    let db = Db::open_with_env(&dir, opts(), rec).unwrap();
+    assert_eq!(
+        db.get(b"wk").as_deref(),
+        Some(b"wv".as_ref()),
+        "Inv-WAL: the acked put survives the crash"
+    );
+    db.close().unwrap();
+    let _ = fs::remove_dir_all(&dir);
+}

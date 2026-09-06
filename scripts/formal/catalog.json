@@ -1015,6 +1015,72 @@
       }
     },
     {
+      "id": "dcs_advance_bool",
+      "finding": "F12/F22",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-dcs/src/apply_kernel.rs",
+      "twin": "crates/pedradb-dcs/verus/dcs_apply.rs",
+      "verus": "scripts/verus_dcs_apply.sh",
+      "callers": [
+        "crates/pedradb-dcs/src/apply_kernel.rs"
+      ],
+      "entry": "dcs_apply_should_advance",
+      "as_is": "dcs_apply_should_advance_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-dcs/src/apply_kernel.rs",
+        "test": "as_is_freezes_on_cas"
+      }
+    },
+    {
+      "id": "lease_table",
+      "finding": "F7",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-dcs/src/lease_kernel.rs",
+      "twin": "crates/pedradb-dcs/verus/lease_live.rs",
+      "verus": "scripts/verus_lease_live.sh",
+      "callers": [
+        "crates/pedradb-dcs/src/lib.rs"
+      ],
+      "entry": "lease_table_expired",
+      "as_is": "lease_table_expired_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-dcs/src/lib.rs",
+          "handler": "lease_expired"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-dcs/src/lease_kernel.rs",
+        "test": "as_is_unknown_is_immortal"
+      }
+    },
+    {
+      "id": "lease_next_id",
+      "finding": "F7",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-dcs/src/lease_kernel.rs",
+      "twin": "crates/pedradb-dcs/verus/lease_live.rs",
+      "verus": "scripts/verus_lease_live.sh",
+      "callers": [
+        "crates/pedradb-dcs/src/lib.rs"
+      ],
+      "entry": "next_lease_id_after",
+      "as_is": "next_lease_id_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-dcs/src/lib.rs",
+          "handler": "from_open_db"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-dcs/src/lease_kernel.rs",
+        "test": "as_is_reuse_reanimates"
+      }
+    },
+    {
       "id": "txn",
       "finding": "F47/F34/F52/F35/F36/F49/F50",
       "twin_kind": "close",
@@ -1502,6 +1568,24 @@
       }
     },
     {
+      "id": "stream_next_seq",
+      "finding": "F54",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-stream/src/cursor_kernel.rs",
+      "twin": "crates/pedradb-stream/verus/cursor.rs",
+      "verus": "scripts/verus_stream_cursor.sh",
+      "callers": [
+        "crates/pedradb-stream/src/cursor_kernel.rs"
+      ],
+      "entry": "next_seq",
+      "as_is": "next_seq_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-stream/src/cursor_kernel.rs",
+        "test": "next_seq_on_live_stream_is_not_ok"
+      }
+    },
+    {
       "id": "bearer",
       "finding": "F85/F79",
       "twin_kind": "atom",
@@ -1548,6 +1632,78 @@
       "dst_plant": {
         "file": "crates/pedradb-http/src/lib.rs",
         "test": "keep_body_without_cl_on_live_http_is_not_ok"
+      }
+    },
+    {
+      "id": "invalid_cl_zero",
+      "finding": "F87",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-http/src/cl_kernel.rs",
+      "twin": "crates/pedradb-http/verus/content_length.rs",
+      "verus": "scripts/verus_content_length.sh",
+      "callers": [
+        "crates/pedradb-http/src/lib.rs"
+      ],
+      "entry": "invalid_cl_as_zero",
+      "as_is": "invalid_cl_as_zero_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-http/src/lib.rs",
+          "handler": "read_req"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-http/src/lib.rs",
+        "test": "invalid_cl_as_zero_on_live_http_is_not_ok"
+      }
+    },
+    {
+      "id": "cl_repeat_conflict",
+      "finding": "F88",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-http/src/cl_kernel.rs",
+      "twin": "crates/pedradb-http/verus/content_length.rs",
+      "verus": "scripts/verus_content_length.sh",
+      "callers": [
+        "crates/pedradb-http/src/lib.rs"
+      ],
+      "entry": "content_length_repeat_ok",
+      "as_is": "content_length_repeat_ok_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-http/src/lib.rs",
+          "handler": "read_req"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-http/src/lib.rs",
+        "test": "content_length_repeat_ok_on_live_http_is_not_ok"
+      }
+    },
+    {
+      "id": "short_body_vs_cl",
+      "finding": "F146",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-http/src/cl_kernel.rs",
+      "twin": "crates/pedradb-http/verus/content_length.rs",
+      "verus": "scripts/verus_content_length.sh",
+      "callers": [
+        "crates/pedradb-http/src/lib.rs"
+      ],
+      "entry": "short_body_vs_cl_is_error",
+      "as_is": "short_body_vs_cl_is_error_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-http/src/lib.rs",
+          "handler": "read_req"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-http/src/lib.rs",
+        "test": "short_body_vs_cl_is_error_on_live_http_is_not_ok"
       }
     },
     {
@@ -2065,6 +2221,24 @@
       }
     },
     {
+      "id": "isolated_child",
+      "finding": "F83",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-fold/src/isolated_kernel.rs",
+      "twin": "crates/pedradb-fold/verus/isolated_id.rs",
+      "verus": "scripts/verus_isolated_id.sh",
+      "callers": [
+        "crates/pedradb-fold/src/isolated_kernel.rs"
+      ],
+      "entry": "isolated_child_byte",
+      "as_is": "isolated_child_byte_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-fold/src/isolated_kernel.rs",
+        "test": "theorem_next_byte_domain"
+      }
+    },
+    {
       "id": "children",
       "finding": "F59",
       "twin_kind": "atom",
@@ -2139,6 +2313,78 @@
       }
     },
     {
+      "id": "journal_catch_up_pin",
+      "finding": "W4",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-journal/src/pin_kernel.rs",
+      "twin": "crates/pedradb-journal/verus/pin.rs",
+      "verus": "scripts/verus_journal_pin.sh",
+      "callers": [
+        "crates/pedradb-journal/src/lib.rs"
+      ],
+      "entry": "catch_up_pins_on_read",
+      "as_is": "catch_up_pins_on_read_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-journal/src/lib.rs",
+          "handler": "catch_up"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-journal/src/pin_kernel.rs",
+        "test": "catch_up_pins_on_read_on_live_journal_is_not_ok"
+      }
+    },
+    {
+      "id": "journal_fold_pin",
+      "finding": "H1",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-journal/src/pin_kernel.rs",
+      "twin": "crates/pedradb-journal/verus/pin.rs",
+      "verus": "scripts/verus_journal_pin.sh",
+      "callers": [
+        "crates/pedradb-journal/src/lib.rs"
+      ],
+      "entry": "fold_pins_on_read",
+      "as_is": "fold_pins_on_read_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-journal/src/lib.rs",
+          "handler": "peek"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-journal/src/pin_kernel.rs",
+        "test": "fold_pins_on_read_on_live_journal_is_not_ok"
+      }
+    },
+    {
+      "id": "journal_next_pin",
+      "finding": "H1",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-journal/src/pin_kernel.rs",
+      "twin": "crates/pedradb-journal/verus/pin.rs",
+      "verus": "scripts/verus_journal_pin.sh",
+      "callers": [
+        "crates/pedradb-journal/src/lib.rs"
+      ],
+      "entry": "next_pin",
+      "as_is": "next_pin_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-journal/src/lib.rs",
+          "handler": "catch_up"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-journal/src/pin_kernel.rs",
+        "test": "next_pin_on_live_journal_is_not_ok"
+      }
+    },
+    {
       "id": "wal_recover",
       "finding": "F4/F14",
       "twin_kind": "close",
@@ -2202,6 +2448,24 @@
       "dst_plant": {
         "file": "crates/pedradb-replicate/src/lib.rs",
         "test": "pull_plan_on_live_ship_is_not_ok"
+      }
+    },
+    {
+      "id": "ship_stamp",
+      "finding": "F165",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-replicate/src/ship_kernel.rs",
+      "twin": "crates/pedradb-replicate/verus/ship_guard.rs",
+      "verus": "scripts/verus_ship_guard.sh",
+      "callers": [
+        "crates/pedradb-replicate/src/ship_kernel.rs"
+      ],
+      "entry": "stamp_changed",
+      "as_is": "pull_plan_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-replicate/src/ship_kernel.rs",
+        "test": "stamp_changed_on_rewrite_is_not_ok"
       }
     },
     {
@@ -3581,6 +3845,96 @@
       "dst_plant": {
         "file": "crates/pedradb-io-uring/src/lib.rs",
         "test": "cqe_res_ok_on_live_uring_is_not_ok"
+      }
+    },
+    {
+      "id": "cqe_tags",
+      "finding": "F203",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-io-uring/src/cqe_kernel.rs",
+      "twin": "crates/pedradb-io-uring/verus/cqe_kernel.rs",
+      "verus": "scripts/verus_cqe_kernel.sh",
+      "callers": [
+        "crates/pedradb-io-uring/src/ring.rs"
+      ],
+      "entry": "next_user_data",
+      "as_is": "next_user_data_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-io-uring/src/ring.rs",
+          "handler": "submit_sqe"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-io-uring/src/cqe_kernel.rs",
+        "test": "unique_tags_discard_leftover_same_opcode"
+      }
+    },
+    {
+      "id": "cqe_leftover",
+      "finding": "F203/U1",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-io-uring/src/cqe_kernel.rs",
+      "twin": "crates/pedradb-io-uring/verus/cqe_kernel.rs",
+      "verus": "scripts/verus_cqe_kernel.sh",
+      "callers": [
+        "crates/pedradb-io-uring/src/ring.rs"
+      ],
+      "entry": "cqe_act",
+      "as_is": "cqe_act_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-io-uring/src/ring.rs",
+          "handler": "harvest_ready_cqe"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-io-uring/src/cqe_kernel.rs",
+        "test": "cqe_act_as_is_adopts_leftover"
+      }
+    },
+    {
+      "id": "cqe_submit",
+      "finding": "F208",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-io-uring/src/cqe_kernel.rs",
+      "twin": "crates/pedradb-io-uring/verus/cqe_kernel.rs",
+      "verus": "scripts/verus_cqe_kernel.sh",
+      "callers": [
+        "crates/pedradb-io-uring/src/ring.rs"
+      ],
+      "entry": "submit_complete_act",
+      "as_is": "submit_complete_act_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-io-uring/src/ring.rs",
+          "handler": "submit_sqe"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-io-uring/src/cqe_kernel.rs",
+        "test": "harvest_on_submit_err_uses_cqe"
+      }
+    },
+    {
+      "id": "cqe_ring_refusal",
+      "finding": "RFC-0074 P2.2",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-io-uring/src/cqe_kernel.rs",
+      "twin": "crates/pedradb-io-uring/verus/cqe_kernel.rs",
+      "verus": "scripts/verus_cqe_kernel.sh",
+      "callers": [
+        "crates/pedradb-io-uring/src/cqe_kernel.rs"
+      ],
+      "entry": "cqe_ring_model_admitted",
+      "as_is": "cqe_ring_model_admitted_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-io-uring/src/cqe_kernel.rs",
+        "test": "cqe_ring_model_is_not_admitted"
       }
     },
     {
@@ -5112,6 +5466,120 @@
       "dst_plant": {
         "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
         "test": "env_crash_on_live_recording_is_not_ok"
+      }
+    },
+    {
+      "id": "wal_state",
+      "finding": "RFC-0166 P1.2",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+      "twin": "crates/pedradb-core/verus/wal_state.rs",
+      "verus": "scripts/verus_wal_state.sh",
+      "callers": [
+        "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+        "crates/pedradb-sim/src/three_teeth_plants.rs"
+      ],
+      "entry": "inv_wal",
+      "as_is": "inv_wal_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+        "test": "wal_inv_on_live_recording_is_not_ok"
+      }
+    },
+    {
+      "id": "wal_append",
+      "finding": "RFC-0166 P1.2",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+      "twin": "crates/pedradb-core/verus/wal_state.rs",
+      "verus": "scripts/verus_wal_state.sh",
+      "callers": [
+        "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+        "crates/pedradb-sim/src/three_teeth_plants.rs"
+      ],
+      "entry": "wal_append",
+      "as_is": "wal_append_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+        "test": "wal_inv_on_live_recording_is_not_ok"
+      }
+    },
+    {
+      "id": "wal_sync",
+      "finding": "RFC-0166 P1.2",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+      "twin": "crates/pedradb-core/verus/wal_state.rs",
+      "verus": "scripts/verus_wal_state.sh",
+      "callers": [
+        "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+        "crates/pedradb-sim/src/three_teeth_plants.rs"
+      ],
+      "entry": "wal_sync",
+      "as_is": "wal_sync_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+        "test": "wal_inv_on_live_recording_is_not_ok"
+      }
+    },
+    {
+      "id": "wal_ack",
+      "finding": "RFC-0166 P1.2",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+      "twin": "crates/pedradb-core/verus/wal_state.rs",
+      "verus": "scripts/verus_wal_state.sh",
+      "callers": [
+        "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+        "crates/pedradb-sim/src/three_teeth_plants.rs"
+      ],
+      "entry": "wal_ack",
+      "as_is": "wal_ack_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+        "test": "wal_inv_on_live_recording_is_not_ok"
+      }
+    },
+    {
+      "id": "wal_rotate",
+      "finding": "RFC-0166 P1.2",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+      "twin": "crates/pedradb-core/verus/wal_state.rs",
+      "verus": "scripts/verus_wal_state.sh",
+      "callers": [
+        "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+        "crates/pedradb-sim/src/three_teeth_plants.rs"
+      ],
+      "entry": "wal_rotate",
+      "as_is": "wal_rotate_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+        "test": "wal_inv_on_live_recording_is_not_ok"
+      }
+    },
+    {
+      "id": "wal_acked_survives",
+      "finding": "RFC-0166 P1.2",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+      "twin": "crates/pedradb-core/verus/wal_state.rs",
+      "verus": "scripts/verus_wal_state.sh",
+      "callers": [
+        "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+        "crates/pedradb-sim/src/three_teeth_plants.rs"
+      ],
+      "entry": "acked_survives_every_legal_crash",
+      "as_is": "acked_survives_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+        "test": "wal_inv_on_live_recording_is_not_ok"
       }
     }
   ],

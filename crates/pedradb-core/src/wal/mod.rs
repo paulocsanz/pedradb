@@ -28,6 +28,7 @@ pub mod format;
 pub mod reader;
 pub mod recover_choose;
 pub mod recover_kernel;
+pub mod wal_state_kernel;
 pub mod reopen_kernel;
 pub mod writer;
 
