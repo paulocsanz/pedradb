@@ -1525,7 +1525,7 @@
     {
       "id": "prefix",
       "finding": "F57/F58",
-      "twin_kind": "atom",
+      "twin_kind": "close",
       "atom": "bump_non_ff",
       "kernel": "crates/pedradb-core/src/prefix.rs",
       "twin": "crates/pedradb-core/verus/prefix_exclusive_end.rs",
