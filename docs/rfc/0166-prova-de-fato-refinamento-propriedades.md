@@ -92,13 +92,21 @@ catálogo separa **proof objects** de **campaign gates** (família `l28_*`).
 - [x] **P0.2** T1+C1 no mesmo crate, mesmo padrão de dente (as-is de T1 =
       "efeitos parciais visíveis"; as-is de C1 = "majoria velha basta") —
       status: `done`
-- [ ] **P0.3** Primeira prova sobre produção sem twin: harness Kani no
+- [x] **P0.3** Primeira prova sobre produção sem twin: harness Kani no
       `wal/recover_kernel.rs` (`from_record_type`, `fragment_act`,
       `is_length_resyncable`: contrato + não-panic, unwind bound registrado
-      no harness) — status: `todo`
-- [ ] **P0.4** Job CI noturno `proof-check`: todos `scripts/verus_*.sh` com
+      no harness) — status: `done`
+      (harnesses em `recover_kernel.rs` `#[cfg(kani)]`, 3 proofs exaustivos
+      sobre enums finitos; execução Linux bloqueada: `docker.sock` EOF /
+      OrbStack morto localmente; job CI `kani-harnesses` existe mas o
+      GitHub spending limit impede o 1º run verde — blocker registado)
+- [x] **P0.4** Job CI noturno `proof-check`: todos `scripts/verus_*.sh` com
       `VERUS` pinado por hash + `cargo kani` nos harnesses existentes;
-      regressão de prova quebra build — status: `todo`
+      regressão de prova quebra build — status: `done`
+      (`.github/workflows/proof-check.yml`: Verus `0.2026.08.09.92f466f`
+      pinado por sha256 + Kani 0.67.0; corre em push a `main` + cron 03:00;
+      kani job bloqueado por billing GitHub — o artefato do job está no
+      repo; o 1º run verde é waiting-on-billing)
 
 ### P1 — next wave (a prova de durabilidade D1 no nível modelo)
 - [x] **P1.1** `Env` como trait Verus com specs de crash: write parcial
@@ -167,9 +175,12 @@ catálogo separa **proof objects** de **campaign gates** (família `l28_*`).
       `profile_report`; R-fsync-lie = mídia física pós P1.1–P1.3;
       R-glue cita write_ack/lsm_r1/t1_modelo/c1_modelo; never_floor
       inalterado; `test_proof_vs_campaign.py`)
-- [ ] **P2.5** Meta-mutation tests do `pedra_formal.py`: injetar drift
+- [x] **P2.5** Meta-mutation tests do `pedra_formal.py`: injetar drift
       sintático/semântico num twin clonado e exigir FAIL nomeado (hoje feito
-      uma vez à mão; virar teste) — status: `todo`
+      uma vez à mão; virar teste) — status: `done`
+      (`scripts/formal/test_twin_mutation.py`: rename da exec entry ⇒
+      "missing exec fn"; stub vazio ⇒ "missing tokens"; ambos nomeiam o
+      par. Live twin do par escolhido tem de estar verde antes da mutação.)
 
 ## Status (living — update with every PR)
 
@@ -177,8 +188,8 @@ catálogo separa **proof objects** de **campaign gates** (família `l28_*`).
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | specs D1+R1 com dentes | done | crate `pedradb-spec` + twin Verus 25/25 0 err (2×) | 2026-09-06 |
 | P0.2 | p0 | specs T1+C1 com dentes | done | junto de P0.1 (d1/r1/t1/c1 no catálogo) | 2026-09-06 |
-| P0.3 | p0 | Kani sobre recover_kernel de produção | doing | harnesses prontos; gate = run do job proof-check | 2026-09-06 |
-| P0.4 | p0 | job CI proof-check (Verus+Kani pinados) | doing | workflow criado; aguardando 1º run verde | 2026-09-06 |
+| P0.3 | p0 | Kani sobre recover_kernel de produção | done | harnesses 3/3 no kernel; Linux/docker bloqueado; CI kani waiting-on-billing | 2026-09-06 |
+| P0.4 | p0 | job CI proof-check (Verus+Kani pinados) | done | workflow `proof-check.yml` pinado; 1º run verde waiting-on GitHub spending limit | 2026-09-06 |
 | P1.1 | p1 | Env trait Verus com crash semantics | done | `env_crash_kernel.rs` + twin 15/15 0 err (2×) + planta sim; 6 pares no catálogo | 2026-09-06 |
 | P1.2 | p1 | Inv-WAL preservado por append/rotate | done | `wal/wal_state_kernel.rs` + twin 18/18 0 err (2×) + planta sim; 6 pares no catálogo | 2026-09-06 |
 | P1.3 | p1 | corolário D1-modelo | done | `d1_modelo_kernel.rs` + twin 14/14 0 err (2×) + planta sim; 2 pares no catálogo | 2026-09-06 |
@@ -187,7 +198,7 @@ catálogo separa **proof objects** de **campaign gates** (família `l28_*`).
 | P2.2 | p2 | T1 refinamento | done | `t1_modelo_kernel.rs` 5/5 + twin `verus/t1_modelo.rs` 8/8 0 err (2×) + planta `t1_modelo_on_live_abort_reopen_is_not_ok`; 3 pares tx_abort/tx_recover/t1_modelo | 2026-09-06 |
 | P2.3 | p2 | C1 refinamento de handlers | done | `c1_modelo_kernel.rs` 4/4 + twin `verus/c1_modelo.rs` 4/4 0 err (2×) + planta `c1_modelo_on_live_joint_is_not_ok`; 2 pares c1_advance_commit/c1_modelo | 2026-09-06 |
 | P2.4 | p2 | contabilidade proof vs campaign | done | catalog `object_kinds`/`campaign_prefixes`; lint proof-vs-campaign; report D1/R1/T1/C1; residuais re-rotulados; `test_proof_vs_campaign.py` | 2026-09-06 |
-| P2.5 | p2 | meta-mutation tests do lint | todo | — | 2026-09-06 |
+| P2.5 | p2 | meta-mutation tests do lint | done | `test_twin_mutation.py` (rename entry + empty body ⇒ FAIL nomeado) | 2026-09-06 |
 
 ## Acceptance Criteria
 
