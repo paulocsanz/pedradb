@@ -42,10 +42,11 @@ consistency above the engine. The API is
   submission). One C++ exception, optional and explicit: the RocksDB
   peer behind `rocksdb-parity-bench --features real` (off by default;
   the engine never links it).
-- **Machine-checked where it counts.** 21 decision kernels (WAL recovery,
+- **Machine-checked where it counts.** 22 decision kernels (WAL recovery,
   manifest recovery, CRC fate, group commit, flush and compaction decisions,
-  leveling, bloom filters, MVCC visibility, iterator windows) have
-  Verus-verified twins: 39 proof pairs in all. Around them: seeded fault
+  leveling, bloom filters, MVCC visibility, iterator windows, the
+  column-family key codec, and the point-lookup probe order) have
+  Verus-verified twins: 46 proof pairs in all. Around them: seeded fault
   injection and close to 1,000 tests.
 - **A modern write path.** io_uring on Linux with transparent POSIX
   fallback, group commit, a value log for large values, LZ4 block
@@ -127,10 +128,13 @@ No C++ toolchain is needed.
 
 ## Verification
 
-The claim is not “no bugs.” It is: 21 decision kernels have Verus twins
+The claim is not “no bugs.” It is: 22 decision kernels have Verus twins
 (WAL and manifest recovery, CRC fate, group commit, flush and compaction
-decisions, leveling, bloom filters, MVCC visibility, iterator windows) —
-39 proof pairs, checked against a pinned Verus with
+decisions, leveling, bloom filters, MVCC visibility, iterator windows, the
+column-family key codec, and the point-lookup probe order — the
+newest-first rule that keeps a newer tombstone from being shadowed by an
+older table, wired into the read path) —
+46 proof pairs, checked against a pinned Verus with
 `scripts/formal/verus_check.sh --all`. Around them: close to 1,000 tests,
 seeded fault injection through a swappable `Env` (`pedradb-sim`), and
 fail-closed recovery. Not proven: the OS, the disk, rustc, Verus, or Z3.
@@ -267,7 +271,7 @@ named CFs).
   tails, process kill after commit. Same seed, same execution. It is a
   reproducible injection surface over the real recovery path, not a
   whole-system simulator.
-- **Verus twins**: 39 kernel-to-proof pairs over 21 kernels, in 26 proof
+- **Verus twins**: 46 kernel-to-proof pairs over 22 kernels, in 33 proof
   files in the shipped crates, checked against a pinned Verus release with
   `scripts/formal/verus_check.sh --all`. The production kernel is the source
   of record and the twin proves its decision logic. Not proven: the

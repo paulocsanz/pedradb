@@ -114,6 +114,41 @@ pub fn compact_rewrites_sst_cf_as_is(_sst_cf: &str, _family: &str) -> bool {
     true
 }
 
+/// AS-IS family loss: every key reports `default` (a `lock\0…` key loses its
+/// family, so per-family flush tagging degrades to one bucket).
+#[must_use]
+pub fn cf_family_of_as_is(_user_key: &[u8]) -> String {
+    "default".into()
+}
+
+/// AS-IS raw-mode loss: `default` always carries its prefix, so the raw
+/// on-disk layout diverges from the engine's raw-default contract.
+#[must_use]
+pub fn cf_encode_effective_as_is(cf: &str, _default_raw: bool) -> &str {
+    cf
+}
+
+/// AS-IS prefix loss: keys stored raw — a `lock` key and a `default` key
+/// collide on the same encoded bytes (cross-CF overwrite).
+#[must_use]
+pub fn encode_cf_key_as_is(_cf: &str, key: &[u8], _default_raw: bool) -> Vec<u8> {
+    key.to_vec()
+}
+
+/// AS-IS strip loss: the `cf\0` prefix leaks into the user key returned to
+/// the application.
+#[must_use]
+pub fn decode_cf_key_as_is<'a, 'b>(_cf: &'a str, encoded: &'b [u8], _default_raw: bool) -> &'b [u8] {
+    encoded
+}
+
+/// AS-IS tag loss: every SST tags `default` (a mixed or `lock` file is
+/// compacted as `default`).
+#[must_use]
+pub fn infer_sst_cf_as_is(_smallest: Option<&[u8]>, _largest: Option<&[u8]>) -> String {
+    "default".into()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

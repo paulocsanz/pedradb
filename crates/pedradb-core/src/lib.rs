@@ -46,6 +46,7 @@ pub mod occ;
 #[cfg(feature = "pct")]
 pub mod pct_hooks;
 pub mod prefix;
+pub mod probe_order_kernel;
 pub mod rng;
 pub mod sst;
 pub mod time;
