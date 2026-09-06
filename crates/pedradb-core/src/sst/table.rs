@@ -762,6 +762,7 @@ impl SstTable {
                         SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
                         SST_BLOCK_CRC_SKIPPED.with(|c| c.set(c.get().saturating_add(1)));
                         crate::cost::point_block_resident();
+                        let cost_t0 = crate::cost::enabled().then(Instant::now);
                         let img = &p[start..end];
                         if img.len() < 4 {
                             return Err(CoreError::Internal(format!(
@@ -769,14 +770,18 @@ impl SstTable {
                                 self.path.display()
                             )));
                         }
-                        if let Some(found) = seek_point_in_block_body(
+                        let found = seek_point_in_block_body(
                             &img[..img.len() - 4],
                             self.compressed_blocks,
                             user_key,
                             snapshot,
                             &mut scratch.plain,
                             &self.path,
-                        )? {
+                        )?;
+                        if let Some(t0) = cost_t0 {
+                            crate::cost::point_image_ns(t0.elapsed().as_nanos() as u64);
+                        }
+                        if let Some(found) = found {
                             if best.as_ref().is_none_or(|(s, _)| found.0 > *s) {
                                 best = Some(found);
                             }
@@ -793,6 +798,7 @@ impl SstTable {
                         } else {
                             SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
                             crate::cost::point_block_resident();
+                            let cost_t0 = crate::cost::enabled().then(Instant::now);
                             let found = seek_point_in_block_image(
                                 &p[start..end],
                                 self.compressed_blocks,
@@ -801,6 +807,9 @@ impl SstTable {
                                 &mut scratch.plain,
                                 &self.path,
                             )?;
+                            if let Some(t0) = cost_t0 {
+                                crate::cost::point_image_ns(t0.elapsed().as_nanos() as u64);
+                            }
                             w.mark_verified(bi, self.index.len());
                             if let Some(found) = found {
                                 if best.as_ref().is_none_or(|(s, _)| found.0 > *s) {
@@ -826,14 +835,19 @@ impl SstTable {
                     SST_BLOCK_CRC_SKIPPED.with(|c| c.set(c.get().saturating_add(1)));
                     crate::cost::point_block_tls();
                     if raw.len() >= 4 {
-                        if let Some(found) = seek_point_in_block_body(
+                        let cost_t0 = crate::cost::enabled().then(Instant::now);
+                        let found = seek_point_in_block_body(
                             &raw[..raw.len() - 4],
                             self.compressed_blocks,
                             user_key,
                             snapshot,
                             &mut scratch.plain,
                             &self.path,
-                        )? {
+                        )?;
+                        if let Some(t0) = cost_t0 {
+                            crate::cost::point_image_ns(t0.elapsed().as_nanos() as u64);
+                        }
+                        if let Some(found) = found {
                             if best.as_ref().is_none_or(|(s, _)| found.0 > *s) {
                                 best = Some(found);
                             }
@@ -842,6 +856,7 @@ impl SstTable {
                 } else {
                     scratch.raw.clear();
                     scratch.raw.resize(len, 0);
+                    let cost_t0 = crate::cost::enabled().then(Instant::now);
                     if get_stages_enabled() {
                         let t = Instant::now();
                         kit.source
@@ -853,8 +868,12 @@ impl SstTable {
                             .read_range(&self.path, h.offset, &mut scratch.raw)
                             .map_err(CoreError::Io)?;
                     }
+                    if let Some(t0) = cost_t0 {
+                        crate::cost::point_pread_ns(t0.elapsed().as_nanos() as u64);
+                    }
                     SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
                     crate::cost::point_block_file(len as u64);
+                    let cost_t1 = crate::cost::enabled().then(Instant::now);
                     let found = seek_point_in_block_image(
                         &scratch.raw,
                         self.compressed_blocks,
@@ -863,6 +882,9 @@ impl SstTable {
                         &mut scratch.plain,
                         &self.path,
                     )?;
+                    if let Some(t1) = cost_t1 {
+                        crate::cost::point_image_ns(t1.elapsed().as_nanos() as u64);
+                    }
                     RAW_BLOCKS.with(|c| {
                         c.borrow_mut()
                             .insert(cache_key, Arc::from(scratch.raw.as_slice()));

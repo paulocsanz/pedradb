@@ -139,6 +139,7 @@ pub mod cellcost {
             row.push_str(
                 "run,cell,backend,median_ns,point_ops,point_probes,point_rejected,\
                  point_block_resident,point_block_tls,point_block_file,point_file_bytes,\
+                 point_pread_ns,point_image_ns,\
                  scan_ops,scan_sst_probed,scan_block_loads,scan_block_hits,scan_block_bytes\n",
             );
         }
@@ -148,7 +149,7 @@ pub mod cellcost {
                 .map(|m| format!("{m:.3}"))
                 .unwrap_or_else(|| "NA".to_string());
             row.push_str(&format!(
-                "{run},{group}/{id},{backend},{median},{},{},{},{},{},{},{},{},{},{},{},{}\n",
+                "{run},{group}/{id},{backend},{median},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
                 d.point_ops,
                 d.point_sst_considered,
                 d.point_sst_rejected,
@@ -156,6 +157,8 @@ pub mod cellcost {
                 d.point_block_tls,
                 d.point_block_file,
                 d.point_file_bytes,
+                d.point_pread_ns,
+                d.point_image_ns,
                 d.scan_ops,
                 d.scan_sst_probed,
                 d.scan_block_loads,
