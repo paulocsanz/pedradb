@@ -101,9 +101,9 @@ catálogo separa **proof objects** de **campaign gates** (família `l28_*`).
       regressão de prova quebra build — status: `todo`
 
 ### P1 — next wave (a prova de durabilidade D1 no nível modelo)
-- [ ] **P1.1** `Env` como trait Verus com specs de crash: write parcial
+- [x] **P1.1** `Env` como trait Verus com specs de crash: write parcial
       permitido (torn = prefixo), sync = barreira, `SyncPolicy::Lying`
-      axiomatizado como "sync não implica durable" — status: `todo`
+      axiomatizado como "sync não implica durable" — status: `done`
 - [ ] **P1.2** Inv-WAL invariante indutivo (`acked ⊆ synced ⊆
       prefixo-recuperável`) provado preservado por append/rotate no nível
       kernel+modelo — status: `todo`
@@ -139,7 +139,7 @@ catálogo separa **proof objects** de **campaign gates** (família `l28_*`).
 | P0.2 | p0 | specs T1+C1 com dentes | done | junto de P0.1 (d1/r1/t1/c1 no catálogo) | 2026-09-06 |
 | P0.3 | p0 | Kani sobre recover_kernel de produção | doing | harnesses prontos; gate = run do job proof-check | 2026-09-06 |
 | P0.4 | p0 | job CI proof-check (Verus+Kani pinados) | doing | workflow criado; aguardando 1º run verde | 2026-09-06 |
-| P1.1 | p1 | Env trait Verus com crash semantics | todo | — | 2026-09-06 |
+| P1.1 | p1 | Env trait Verus com crash semantics | done | `env_crash_kernel.rs` + twin 15/15 0 err (2×) + planta sim; 6 pares no catálogo | 2026-09-06 |
 | P1.2 | p1 | Inv-WAL preservado por append/rotate | todo | — | 2026-09-06 |
 | P1.3 | p1 | corolário D1-modelo | todo | — | 2026-09-06 |
 | P1.4 | p1 | write→ack em exec Verus (D1 implementação) | todo | — | 2026-09-06 |

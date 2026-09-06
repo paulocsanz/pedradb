@@ -28,6 +28,7 @@ pub mod concurrent;
 pub mod corrupt;
 pub mod db;
 pub mod env;
+pub mod env_crash_kernel;
 pub mod error;
 pub mod flush_kernel;
 pub mod group_commit_kernel;
@@ -46,6 +47,7 @@ pub mod occ;
 #[cfg(feature = "pct")]
 pub mod pct_hooks;
 pub mod prefix;
+pub mod probe_order_kernel;
 pub mod rng;
 pub mod sst;
 pub mod time;
@@ -76,12 +78,12 @@ pub use changelog_kernel::{
 };
 pub use concurrent::ConcurrentDb;
 pub use db::{
-    copy_db_directory, read_checkpoint_meta, BatchOp, BlobGcCandidate, CheckpointMeta,
-    CompactOptions, Db, DbStats, FenceClass, FenceRecovery, FenceReport, HistoryHorizon,
-    HistoryOptions, OpenOptions, PreparedL0Compact, ReadProbeSnap, RecoveryReport, ScanProjection,
-    Snapshot, SnapshotPin, SstLiveMeta, WalRecovery, WriteOptions, WritePhaseStats,
-    CHECKPOINT_META_FILE, DEFAULT_SST_PAYLOAD_BUDGET_BYTES, L0_COMPACTION_TRIGGER, MAX_LSM_LEVEL,
-    WAL_FILE_NAME,
+    copy_db_directory, read_checkpoint_meta, stored_inline_value, BatchOp, BlobGcCandidate,
+    CheckpointMeta, CompactOptions, Db, DbStats, FenceClass, FenceRecovery, FenceReport,
+    HistoryHorizon, HistoryOptions, OpenOptions, PreparedL0Compact, ReadProbeSnap, RecoveryReport,
+    ScanProjection, Snapshot, SnapshotPin, SstLiveMeta, WalRecovery, WriteOptions,
+    WritePhaseStats, CHECKPOINT_META_FILE, DEFAULT_SST_PAYLOAD_BUDGET_BYTES, L0_COMPACTION_TRIGGER,
+    MAX_LSM_LEVEL, WAL_FILE_NAME,
 };
 pub use env::{AdviseKind, Env, EnvFile, EnvSource, SstFileSource, StdEnv};
 pub use error::{CoreError, Result};
