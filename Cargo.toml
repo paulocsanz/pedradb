@@ -12,6 +12,7 @@ members = [
     "crates/pedradb-raft",
     "crates/pedradb-dcs",
     "crates/pedradb-sql",
+    "crates/pedradb-spec",
     "crates/pedradb-stream",
     "crates/pedradb-http",
     "crates/pedradb-dst",
