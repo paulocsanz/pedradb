@@ -6638,8 +6638,22 @@ impl<E: Env> Db<E> {
                 cap = Some(n);
             }
         }
-        cap.unwrap_or(DEFAULT_BULK_CHUNK_BYTES)
-            .min(DEFAULT_BULK_CHUNK_BYTES)
+        let mut cap = cap
+            .unwrap_or(DEFAULT_BULK_CHUNK_BYTES)
+            .min(DEFAULT_BULK_CHUNK_BYTES);
+        // RFC-0168 P1.3: smaller chunks → smaller settle tail (the leftover
+        // open run is < cap). Default unchanged. `PEDRA_BULK_CHUNK_BYTES`
+        // or `PEDRA_STAGE_MAX_BYTES` (already used by the scale bench).
+        for key in ["PEDRA_BULK_CHUNK_BYTES", "PEDRA_STAGE_MAX_BYTES"] {
+            if let Ok(v) = std::env::var(key) {
+                if let Ok(max) = v.parse::<usize>() {
+                    if max > 0 && max < cap {
+                        cap = max;
+                    }
+                }
+            }
+        }
+        cap
     }
 
     /// Open BulkRun + parked chunk + in-flight encode (RFC-0160 P0.5).
@@ -21962,6 +21976,29 @@ mod tests {
             },
         )
         .unwrap();
+        assert_eq!(db.bulk_chunk_cap(), DEFAULT_BULK_CHUNK_BYTES);
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0168 P1.3 two-state: `PEDRA_BULK_CHUNK_BYTES` shrinks the open
+    /// tail that settle has to flush.
+    #[test]
+    fn rfc0168_bulk_chunk_cap_env_clamp() {
+        let dir = temp_dir();
+        let db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(64 * 1024 * 1024),
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(db.bulk_chunk_cap(), DEFAULT_BULK_CHUNK_BYTES);
+        std::env::set_var("PEDRA_BULK_CHUNK_BYTES", "4194304");
+        assert_eq!(db.bulk_chunk_cap(), 4 * 1024 * 1024);
+        std::env::remove_var("PEDRA_BULK_CHUNK_BYTES");
         assert_eq!(db.bulk_chunk_cap(), DEFAULT_BULK_CHUNK_BYTES);
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
