@@ -38,6 +38,7 @@ use std::path::Path;
 
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use snapshot_bench::snapshot::SnapshotStore;
+use snapshot_bench::cellcost;
 use snapshot_bench::{
     FjallConfig, FjallSnapshot, KvEntry, KvUpdate, PedraDbConfig, PedraDbSnapshot, RocksDbConfig,
     RocksDbReader, RocksDbSnapshot, PedraDbReader, VersionToken, WatchCursor,
@@ -456,6 +457,7 @@ where
         g.measurement_time(std::time::Duration::from_secs(10));
     }
     let mut state = 0xDEAD_BEEFu64;
+    let _cell = cellcost::Guard::new("get_hit", name);
     g.bench_function(name, |b| {
         b.iter(|| {
             let i = (next_rand(&mut state) % n as u64) as usize;
@@ -463,6 +465,8 @@ where
         });
     });
     g.finish();
+    drop(_cell);
+    cellcost::flush_group("get_hit");
 }
 
 fn bench_prefix_scan<F>(c: &mut Criterion, name: &str, n: usize, mut scan: F)
@@ -478,6 +482,7 @@ where
         g.warm_up_time(std::time::Duration::from_secs(2));
         g.measurement_time(std::time::Duration::from_secs(10));
     }
+    let _cell = cellcost::Guard::new("prefix_scan", name);
     g.bench_function(name, |b| {
         b.iter(|| {
             let mut count = 0usize;
@@ -489,6 +494,8 @@ where
         });
     });
     g.finish();
+    drop(_cell);
+    cellcost::flush_group("prefix_scan");
 }
 
 fn bench_lookup_100(c: &mut Criterion, name: &str, n: usize, reader: &RocksDbReader) {
@@ -505,7 +512,9 @@ fn bench_lookup_100(c: &mut Criterion, name: &str, n: usize, reader: &RocksDbRea
         g.measurement_time(std::time::Duration::from_secs(15));
     }
     let mut loop_state = 0xFACE_FEEDu64;
-    g.bench_function(format!("{name}_get_loop"), |b| {
+    let get_loop = format!("{name}_get_loop");
+    let _cell = cellcost::Guard::new("lookup_100", &get_loop);
+    g.bench_function(get_loop.as_str(), |b| {
         b.iter_batched(
             || make_keys(&mut loop_state),
             |keys| {
@@ -516,8 +525,11 @@ fn bench_lookup_100(c: &mut Criterion, name: &str, n: usize, reader: &RocksDbRea
             BatchSize::SmallInput,
         );
     });
+    drop(_cell);
     let mut mg_state = 0xBADC_0FFEu64;
-    g.bench_function(format!("{name}_multi_get"), |b| {
+    let multi_get = format!("{name}_multi_get");
+    let _cell = cellcost::Guard::new("lookup_100", &multi_get);
+    g.bench_function(multi_get.as_str(), |b| {
         b.iter_batched(
             || make_keys(&mut mg_state),
             |keys| {
@@ -530,7 +542,9 @@ fn bench_lookup_100(c: &mut Criterion, name: &str, n: usize, reader: &RocksDbRea
             BatchSize::SmallInput,
         );
     });
+    drop(_cell);
     g.finish();
+    cellcost::flush_group("lookup_100");
 }
 
 fn bench_lookup_100_pedra(c: &mut Criterion, name: &str, n: usize, reader: &PedraDbReader) {
@@ -547,7 +561,9 @@ fn bench_lookup_100_pedra(c: &mut Criterion, name: &str, n: usize, reader: &Pedr
         g.measurement_time(std::time::Duration::from_secs(15));
     }
     let mut loop_state = 0xC0DE_BEEFu64;
-    g.bench_function(format!("{name}_get_loop"), |b| {
+    let get_loop = format!("{name}_get_loop");
+    let _cell = cellcost::Guard::new("lookup_100", &get_loop);
+    g.bench_function(get_loop.as_str(), |b| {
         b.iter_batched(
             || make_keys(&mut loop_state),
             |keys| {
@@ -558,8 +574,11 @@ fn bench_lookup_100_pedra(c: &mut Criterion, name: &str, n: usize, reader: &Pedr
             BatchSize::SmallInput,
         );
     });
+    drop(_cell);
     let mut mg_state = 0xFEED_FACEu64;
-    g.bench_function(format!("{name}_multi_get"), |b| {
+    let multi_get = format!("{name}_multi_get");
+    let _cell = cellcost::Guard::new("lookup_100", &multi_get);
+    g.bench_function(multi_get.as_str(), |b| {
         b.iter_batched(
             || make_keys(&mut mg_state),
             |keys| {
@@ -572,7 +591,9 @@ fn bench_lookup_100_pedra(c: &mut Criterion, name: &str, n: usize, reader: &Pedr
             BatchSize::SmallInput,
         );
     });
+    drop(_cell);
     g.finish();
+    cellcost::flush_group("lookup_100");
 }
 
 fn bench_reads(c: &mut Criterion) {

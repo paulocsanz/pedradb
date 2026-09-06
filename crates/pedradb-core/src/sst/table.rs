@@ -234,9 +234,13 @@ pub(crate) fn scan_block_get_or_insert(
     SCAN_BLOCKS.with(|c| {
         let mut c = c.borrow_mut();
         if let Some(hit) = c.get(&key) {
+            crate::cost::scan_block_hit();
             return hit;
         }
         let v = Arc::new(fill());
+        if crate::cost::enabled() {
+            crate::cost::scan_block_load(crate::cost::entries_bytes(&v));
+        }
         c.insert(key, Arc::clone(&v));
         v
     })
@@ -757,6 +761,7 @@ impl SstTable {
                     if g.is_verified(bi) {
                         SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
                         SST_BLOCK_CRC_SKIPPED.with(|c| c.set(c.get().saturating_add(1)));
+                        crate::cost::point_block_resident();
                         let img = &p[start..end];
                         if img.len() < 4 {
                             return Err(CoreError::Internal(format!(
@@ -787,6 +792,7 @@ impl SstTable {
                             served_from_file = true;
                         } else {
                             SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
+                            crate::cost::point_block_resident();
                             let found = seek_point_in_block_image(
                                 &p[start..end],
                                 self.compressed_blocks,
@@ -818,6 +824,7 @@ impl SstTable {
                 if let Some(raw) = cached {
                     SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
                     SST_BLOCK_CRC_SKIPPED.with(|c| c.set(c.get().saturating_add(1)));
+                    crate::cost::point_block_tls();
                     if raw.len() >= 4 {
                         if let Some(found) = seek_point_in_block_body(
                             &raw[..raw.len() - 4],
@@ -847,6 +854,7 @@ impl SstTable {
                             .map_err(CoreError::Io)?;
                     }
                     SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
+                    crate::cost::point_block_file(len as u64);
                     let found = seek_point_in_block_image(
                         &scratch.raw,
                         self.compressed_blocks,

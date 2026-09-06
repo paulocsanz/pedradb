@@ -1436,6 +1436,7 @@ impl<'a, E: Env> Iterator for LevelRunStream<'a, E> {
                     continue;
                 }
                 self.db.scan_sst_probed.fetch_add(1, Ordering::Relaxed);
+                crate::cost::scan_probe();
                 let _ = self.db.env.advise(table.path(), 0, 0, AdviseKind::WillNeed);
                 let id = crate::cache::path_id(table.path())
                     ^ if self.resolve_values {
@@ -4153,7 +4154,9 @@ impl<E: Env> Db<E> {
                 if let Some((k, _)) =
                     table.last_visible_under_prefix_with(prefix, snapshot, hi, |bi| {
                         Some(self.block_cache.get_or_insert_with(table.path(), bi, || {
-                            table.decode_block(bi).unwrap_or_default()
+                            let block = table.decode_block(bi).unwrap_or_default();
+                            crate::cost::scan_block_load(crate::cost::entries_bytes(&block));
+                            block
                         }))
                     })
                 {
@@ -4412,7 +4415,9 @@ impl<E: Env> Db<E> {
                     before.as_deref(),
                     |bi| {
                         Some(self.block_cache.get_or_insert_with(table.path(), bi, || {
-                            table.decode_block(bi).unwrap_or_default()
+                            let block = table.decode_block(bi).unwrap_or_default();
+                            crate::cost::scan_block_load(crate::cost::entries_bytes(&block));
+                            block
                         }))
                     },
                 ) {
@@ -4724,6 +4729,7 @@ impl<E: Env> Db<E> {
                 continue;
             }
             self.scan_sst_probed.fetch_add(1, Ordering::Relaxed);
+            crate::cost::scan_probe();
             let c = CountCursor::Sst(SstCountCursor::new(
                 table,
                 start,
@@ -4874,6 +4880,7 @@ impl<E: Env> Db<E> {
             return StreamingVisibleIter::new(Vec::new(), 0, start, end, limit);
         }
         self.scan_ops.fetch_add(1, Ordering::Relaxed);
+        crate::cost::scan_op();
         let scan_diag = crate::merge::scan_diag_enabled();
         let scan_diag_t0 = scan_diag.then(Instant::now);
         // Range tombstones first (G2): a covering delete whose start sits
@@ -4922,6 +4929,7 @@ impl<E: Env> Db<E> {
                     continue;
                 }
                 self.scan_sst_probed.fetch_add(1, Ordering::Relaxed);
+                crate::cost::scan_probe();
                 // Hash the path once per stream, not once per block fetch, and
                 // keep value-resolved blocks under a tagged id: a full scan then
                 // resolves each block once (on miss) and later loads are a pure
@@ -9351,6 +9359,7 @@ impl<E: Env> Db<E> {
             }
         }
         self.get_sst_fallback.fetch_add(1, Ordering::Relaxed);
+        crate::cost::point_op();
         // Newest file with a point wins (L0 before L1). Older files cannot
         // hide a newer point; a newer tombstone is seen first.
         // Encoded-block seek: CRC-verify + decompress the one candidate block
@@ -9377,7 +9386,9 @@ impl<E: Env> Db<E> {
         // `budget_bytes==0` and was already seeking.
         let mut probe = |table: &SstTable| -> Option<(SequenceNumber, Lookup)> {
             self.lookup_sst_considered.fetch_add(1, Ordering::Relaxed);
+            crate::cost::point_probe();
             if !table.key_may_match(key) {
+                crate::cost::point_reject();
                 return None;
             }
             let scratch = seek_scratch.get_or_insert_with(take_tls_point_seek_scratch);
@@ -9482,6 +9493,7 @@ impl<E: Env> Db<E> {
             }
         }
         self.get_sst_fallback.fetch_add(1, Ordering::Relaxed);
+        crate::cost::point_op();
         let mut seek_scratch: Option<crate::sst::PointSeekScratch> = None;
         let ssts = &self.ssts;
         let mut best_point_seq: Option<SequenceNumber> = None;
@@ -9489,7 +9501,9 @@ impl<E: Env> Db<E> {
         let mut range_tombs = Vec::new();
         let mut probe = |table: &SstTable| -> Option<(SequenceNumber, Lookup)> {
             self.lookup_sst_considered.fetch_add(1, Ordering::Relaxed);
+            crate::cost::point_probe();
             if !table.key_may_match(key) {
+                crate::cost::point_reject();
                 return None;
             }
             let scratch = seek_scratch.get_or_insert_with(take_tls_point_seek_scratch);

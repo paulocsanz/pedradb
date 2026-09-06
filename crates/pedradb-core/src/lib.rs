@@ -26,6 +26,7 @@ pub mod changelog_kernel;
 pub mod compact_kernel;
 pub mod concurrent;
 pub mod corrupt;
+pub mod cost;
 pub mod db;
 pub mod env;
 pub mod error;
