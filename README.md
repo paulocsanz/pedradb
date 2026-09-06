@@ -231,40 +231,33 @@ vs Pedra's 24.16 GiB).
 - 100M `prefix_scan`: the middle run tied; the median is what is
   published.
 
-**Fjall** (third peer; not the gate; different read harness, so absolute
-numbers only). Same guest, 200 B values, 256 MiB cache:
+**Fjall** (third peer; not the gate). Same guest, 200 B values,
+256 MiB cache. Fjall legs ran on the `scale-parity-bench` harness,
+Pedra on `snapshot_backends` — cross-harness ratios, orientation only
+(no bold, no gate claim). Ratio = Fjall / Pedra; the Pedra rows repeat
+the official numbers above (25M reads: single run; 100M: 3-run medians).
 
-| n | hydrate | disk | settle | probe_miss p50 | get_hit | prefix_scan | get_loop |
-|---:|---:|---:|---:|---:|---:|---:|---:|
-| 25M | 49.8 s | 5.16 GiB | 0.1 s | 1.1 µs | 40.2 µs | 272.3 µs | 3.60 ms |
-| 100M | 191.4 s | 20.61 GiB | 0.0 s | 1.1 µs | 82.0 µs | 266.8 µs | 7.82 ms |
+| 25M | hydrate | settle | get_hit | prefix_scan | get_loop | probe_miss p50 | disk |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Fjall | 49.8 s | 0.1 s | 40.2 µs | 272.3 µs | 3.60 ms | 1.1 µs | 5.16 GiB |
+| Pedra | 29.5 s | 0.3 s | 35.2 µs | 248.5 µs | 3.65 ms | — | 5.96 GiB |
+| ratio | 1.69× | 0.33× | 1.14× | 1.10× | 0.99× | — | |
 
-100M hydrate vs Pedra's 141.1 s in the same campaign is **1.35× Pedra**.
-No other Fjall ratio is a published claim.
+| 100M | hydrate | settle | get_hit | prefix_scan | get_loop | probe_miss p50 | disk |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Fjall | 191.4 s | 0.0 s | 82.0 µs | 266.8 µs | 7.82 ms | 1.1 µs | 20.61 GiB |
+| Pedra | 119.4 s | 0.7 s | 63.7 µs | 304.8 µs | 6.15 ms | 211 ns | 24.16 GiB |
+| ratio | 1.60× | ≈0× | 1.29× | 0.88× | 1.27× | 5.21× | |
 
-**Reproducing.** `scale-parity-bench` (same key shape) and the official
-`snapshot_backends` harness:
+Fjall settles during hydrate (≈0 s) and is ahead cross-harness on 100M
+`prefix_scan` (0.88×); everywhere else shown, Pedra leads. Fjall legs:
+2026-09-04, 3-run medians; per-run values in
+[`docs/benchmarks.md`](docs/benchmarks.md).
 
-```sh
-SCALE_ENTRIES=1000000 ./scripts/reproduce-scale.sh pedradb /tmp/scale-pedra
-
-cd crates/snapshot-bench
-SLIPSTREAM_BENCH_BACKENDS=pedradb SLIPSTREAM_BENCH_ENTRIES=1000000 \
-SLIPSTREAM_BENCH_CACHE_BYTES=268435456 PEDRA_STAGE_MAX_BYTES=67108864 \
-TMPDIR=/data/stores \
-  cargo bench --bench snapshot_backends --features fjall,rocksdb,pedradb \
-  -- 'get_hit|prefix_scan|lookup_100'
-```
-
-One backend per process (`SLIPSTREAM_BENCH_BACKENDS`; the similar
-`SLIPSTREAM_BACKENDS` is not read by this harness). The RocksDB peer
-needs a C++ toolchain; Fjall and Pedra are pure Rust. The official leg
-protocol — smoke, 3 runs, medians, gates — is in
+**Reproducing.** Commands, knobs, and the official leg protocol — smoke,
+3 runs, medians, gates — are in
 [`docs/benchmarks.md`](docs/benchmarks.md) and
 [`crates/snapshot-bench/README.md`](crates/snapshot-bench/README.md).
-YCSB / dependents (`rocks-parity-bench`): `compat` (Pedra), `rocksdb`
-(`--features real`), or `fjall` (`--features fjall`, YCSB-only — no
-named CFs).
 
 ## How it's tested
 
