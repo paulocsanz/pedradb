@@ -26,8 +26,6 @@ env:
   # sha256 of verus-0.2026.08.09.92f466f-x86-linux.zip from the release
   # (the same build the local corpus was proven with).
   VERUS_SHA256: 2f5a41c553f424aacdd732339e9d125563716a0b003c27730f75d6f81a282cef
-  KANI_VERSION: 0.67.0
-  KANI_SHA256: 3b5f7afd3b51603ee720db7bc1bc4fe46b5a4f5d36daad9939c4b4c658b51ac0
 
 jobs:
   verus-corpus:
@@ -37,6 +35,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: install pinned verus
         run: |
+          # the pinned verus release is a rustup shim: it needs its exact
+          # toolchain (also pinned by the release) present
+          rustup toolchain install 1.97.1-x86_64-unknown-linux-gnu
           curl -sSfL -o verus.zip "https://github.com/verus-lang/verus/releases/download/release/${VERUS_VERSION}/verus-${VERUS_VERSION}-x86-linux.zip"
           echo "${VERUS_SHA256}  verus.zip" | sha256sum -c -
           unzip -q verus.zip
@@ -63,12 +64,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: install pinned kani
-        run: |
-          curl -sSfL -o kani.tar.gz "https://github.com/model-checking/kani/releases/download/kani-${KANI_VERSION}/kani-${KANI_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
-          echo "${KANI_SHA256}  kani.tar.gz" | sha256sum -c -
-          tar xzf kani.tar.gz
-          ./kani-${KANI_VERSION}-x86_64-unknown-linux-gnu/install.sh "${HOME}/.kani"
-          echo "${HOME}/.kani/bin" >> "${GITHUB_PATH}"
-      - name: cargo kani — all harnesses (key.rs RFC-0150 + wal/recover_kernel.rs RFC-0166 P0.3)
-        run: cargo kani -p pedradb-core
+      # kani-github-action v1.1, pinned by commit sha; kani itself pinned
+      # by version (the action verifies its sha on install)
+      - uses: model-checking/kani-github-action@f838096619a707b0f6b2118cf435eaccfa33e51f # v1.1
+        with:
+          kani-version: 0.67.0
+          args: -p pedradb-core
