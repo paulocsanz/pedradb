@@ -5,6 +5,7 @@
 //! without changing engine code. Tests and `pedradb-sim` inject faults via a
 //! wrapping [`Env`] (e.g. `FailingEnv`) without rewriting the engine.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -125,6 +126,32 @@ pub enum AdviseKind {
     WillNeed,
     /// Drop pages from cache (Linux `POSIX_FADV_DONTNEED`).
     DontNeed,
+}
+
+thread_local! {
+    static SETTLE_WILLNEED: Cell<Option<bool>> = const { Cell::new(None) };
+}
+
+/// RFC-0168 P1.1: after settle/compact, `POSIX_FADV_WILLNEED` every live
+/// SST so the first read wave can hit the page cache. Rocks gets this as
+/// a side effect of `compact_range` rewriting the store. Pedra's compact
+/// is O(residual) and leaves hydrate-era pages cold. Default **off** (a
+/// store larger than RAM must not pin pages). Two-state:
+/// `PEDRA_SETTLE_WILLNEED=1` or [`force_settle_willneed`].
+#[must_use]
+pub fn settle_willneed_on() -> bool {
+    if let Some(v) = SETTLE_WILLNEED.with(Cell::get) {
+        return v;
+    }
+    matches!(
+        std::env::var("PEDRA_SETTLE_WILLNEED").as_deref(),
+        Ok("1") | Ok("true") | Ok("TRUE")
+    )
+}
+
+/// Test-only override of [`settle_willneed_on`]. `None` restores env.
+pub fn force_settle_willneed(on: Option<bool>) {
+    SETTLE_WILLNEED.with(|c| c.set(on));
 }
 
 /// Directory + file namespace the engine uses.
