@@ -43,6 +43,26 @@ use crate::merge::{StreamingVisibleIter, VisibleKv};
 use crate::occ::OccTransaction;
 use crate::vlog::VlogRewriteStats;
 
+#[cfg(test)]
+thread_local! {
+    static BULK_MANIFEST_OFF_LOCK: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// RFC-0159 P1.2: `persist.write()` must see a free Db write lock.
+#[cfg(test)]
+fn note_bulk_manifest_off_lock<E: Env>(inner: &RwLock<Db<E>>) {
+    assert!(
+        inner.try_write().is_some(),
+        "RFC-0159 P1.2: MANIFEST persist must run with the Db write lock dropped"
+    );
+    BULK_MANIFEST_OFF_LOCK.with(|c| c.set(c.get().saturating_add(1)));
+}
+
+#[cfg(test)]
+fn bulk_manifest_off_lock_count() -> u64 {
+    BULK_MANIFEST_OFF_LOCK.with(std::cell::Cell::get)
+}
+
 struct PendingWrite {
     ops: Vec<BatchOp>,
     do_sync: bool,
@@ -64,6 +84,9 @@ struct WriteGroup {
     /// [`WriteGroup::await_flush_debt`]). Without one, parking is the
     /// caller's business and submits never wait.
     flusher_attached: AtomicBool,
+    /// Submits that parked at least one poll on the L0 stall limit
+    /// (RFC-0167 P1.1 — observability for `await_l0_park`).
+    stall_parks: AtomicU64,
     /// Signalled whenever a writer pushes onto the queue, so a leader holding
     /// its catch-up window open can absorb the arrival immediately.
     arrived: Condvar,
@@ -125,6 +148,12 @@ struct WriteGroup {
     /// async writers keep the un-merged bypass (no leader dependency).
     /// Set once by [`ConcurrentDb::pin_verified`]; never cleared.
     verified: AtomicBool,
+    /// RFC-0166 P1.4: the write→ack ledger of the pinned profile — every
+    /// durable group moves it through the proved kernels
+    /// (`write_ack_kernel.rs` over `wal_state_kernel.rs`/
+    /// `d1_modelo_kernel.rs`), with Inv-WAL asserted fail-closed. Only
+    /// advanced when `verified` is set; the product path never touches it.
+    write_ack: std::sync::Mutex<crate::write_ack_kernel::WriteAckLedger>,
     /// RFC-0045 P0.1: lock-wait accumulation for the async bypass
     /// (`PEDRA_WRITE_PHASE_STATS=1`); `None` when the env is unset.
     phase_stats: Option<Arc<crate::db::WritePhaseStats>>,
@@ -213,6 +242,17 @@ fn flush_debt_max_wait() -> Duration {
         .map_or(Duration::from_secs(30), Duration::from_millis)
 }
 
+/// Ceiling on one writer's L0 stall park (RFC-0167 P1.1). Writers sleep
+/// unlocked while the host compact worker drains L0; if the worker is
+/// wedged, exceed the bound and let the honest `CoreError::WriteStall`
+/// surface from admission. `PEDRA_STALL_PARK_MAX_MS` overrides.
+fn stall_park_max_wait() -> Duration {
+    std::env::var("PEDRA_STALL_PARK_MAX_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map_or(Duration::from_secs(10), Duration::from_millis)
+}
+
 impl WriteGroup {
     fn new() -> Self {
         Self {
@@ -221,6 +261,7 @@ impl WriteGroup {
                 leader_active: false,
             }),
             flusher_attached: AtomicBool::new(false),
+            stall_parks: AtomicU64::new(0),
             arrived: Condvar::new(),
             active: AtomicUsize::new(0),
             catchup_window_us: AtomicU64::new(
@@ -269,6 +310,7 @@ impl WriteGroup {
                 })
                 .unwrap_or(false),
             verified: AtomicBool::new(false),
+            write_ack: std::sync::Mutex::new(crate::write_ack_kernel::WriteAckLedger::new()),
             phase_stats: None,
         }
     }
@@ -368,6 +410,45 @@ impl WriteGroup {
         }
     }
 
+    /// L0 stall park (RFC-0167 P1.1): `WriteStall` stops being an error a
+    /// client hits mid-ingest. When the L0 stall limit is armed and L0 is
+    /// at/above it, sleep **unlocked** (bounded by `stall_park_max_wait`)
+    /// while the host compact worker drains; then admission decides.
+    /// Called before `begin_submit` like [`Self::await_flush_debt`] — a
+    /// parked writer is not in flight and holds no lock.
+    fn await_l0_park<E: Env>(&self, db: &RwLock<Db<E>>) {
+        if !self.flusher_attached.load(Ordering::Relaxed) {
+            // No worker: parking could only hang — lone/workerless paths
+            // keep the honest admission error.
+            return;
+        }
+        let mut parked = false;
+        let mut waited = Duration::ZERO;
+        loop {
+            let (limit, l0) = {
+                let g = db.read();
+                (g.write_stall_l0(), g.level_file_count(0))
+            };
+            let Some(limit) = limit else {
+                break;
+            };
+            if l0 < limit {
+                break;
+            }
+            if waited >= stall_park_max_wait() {
+                // Compact worker wedged — proceed; admission then drains
+                // or surfaces the honest WriteStall error.
+                break;
+            }
+            if !parked {
+                parked = true;
+                self.stall_parks.fetch_add(1, Ordering::Relaxed);
+            }
+            std::thread::sleep(FLUSH_DEBT_POLL);
+            waited += FLUSH_DEBT_POLL;
+        }
+    }
+
     /// Enqueue `ops` and either lead a group commit or wait for the leader.
     fn submit<E: Env>(
         &self,
@@ -386,13 +467,45 @@ impl WriteGroup {
         do_sync: bool,
     ) -> Result<SequenceNumber> {
         self.await_flush_debt(db);
-        let active = self.begin_submit();
-        if active == 1 && !self.recently_concurrent() && !do_sync {
-            let result = db.write().commit_async_one(op);
-            self.finish_lone();
-            return result;
+        self.await_l0_park(db);
+        if !self.flusher_attached.load(Ordering::Relaxed) {
+            let active = self.begin_submit();
+            if active == 1 && !self.recently_concurrent() && !do_sync {
+                let result = db.write().commit_async_one(op);
+                self.finish_lone();
+                return result;
+            }
+            return self.submit_after_begin(db, vec![op], do_sync, None, active);
         }
-        self.submit_after_begin(db, vec![op], do_sync, None, active)
+        // RFC-0167 P1.1 (worker attached): a `WriteStall` from the commit
+        // is a lost park-vs-admit race (another writer's exit-flush pushed
+        // L0 to the limit between this submit's park pass and admission).
+        // Park for the worker drain and retry, bounded; the first attempt
+        // keeps the lone fast path, retries take the group path.
+        let ops = vec![op];
+        let deadline = Instant::now() + stall_park_max_wait();
+        let mut first = true;
+        loop {
+            let active = self.begin_submit();
+            let r = if first && active == 1 && !self.recently_concurrent() && !do_sync {
+                let result = db.write().commit_async_one(ops[0].clone());
+                self.finish_lone();
+                result
+            } else {
+                self.submit_after_begin(db, ops.clone(), do_sync, None, active)
+            };
+            first = false;
+            match r {
+                Err(CoreError::WriteStall { .. }) | Err(CoreError::WriteStallMem { .. }) => {
+                    if Instant::now() >= deadline {
+                        return r;
+                    }
+                    self.stall_parks.fetch_add(1, Ordering::Relaxed);
+                    self.await_l0_park(db);
+                }
+                r => return r,
+            }
+        }
     }
 
     fn begin_submit(&self) -> usize {
@@ -469,8 +582,30 @@ impl WriteGroup {
         occ: Option<(SequenceNumber, Vec<Bytes>)>,
     ) -> Result<SequenceNumber> {
         self.await_flush_debt(db);
-        let active = self.begin_submit();
-        self.submit_after_begin(db, ops, do_sync, occ, active)
+        self.await_l0_park(db);
+        if !self.flusher_attached.load(Ordering::Relaxed) {
+            let active = self.begin_submit();
+            return self.submit_after_begin(db, ops, do_sync, occ, active);
+        }
+        // RFC-0167 P1.1: worker attached — stall errors are lost
+        // park-vs-admit races; retry bounded instead of surfacing.
+        let ops = ops;
+        let occ = occ;
+        let deadline = Instant::now() + stall_park_max_wait();
+        loop {
+            let active = self.begin_submit();
+            match self.submit_after_begin(db, ops.clone(), do_sync, occ.clone(), active) {
+                err @ (Err(CoreError::WriteStall { .. }) | Err(CoreError::WriteStallMem { .. })) => {
+                    if Instant::now() >= deadline {
+                        // Worker wedged past the park bound — honest error.
+                        return err;
+                    }
+                    self.stall_parks.fetch_add(1, Ordering::Relaxed);
+                    self.await_l0_park(db);
+                }
+                r => return r,
+            }
+        }
     }
 
     fn submit_after_begin<E: Env>(
@@ -548,14 +683,24 @@ impl WriteGroup {
                 st.lock_wait_ns
                     .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
             }
-            let result = guard.commit_async_ops(ops);
+            // RFC-0154 P1.6: 1-op async was lone-only (`commit_async_one`).
+            // Concurrent bypass (this branch; `PEDRA_ASYNC_GROUP` default
+            // off) still built a `Vec<BatchOp>` and ran `commit_async_ops`
+            // — same WAL bytes, extra bulk-route/spill envelope. 1-op is
+            // the overwrite/YCSB put. Multi-op batches stay on ops.
+            let n = ops.len() as u64;
+            let result = if ops.len() == 1 {
+                guard.commit_async_one(ops.pop().expect("len checked"))
+            } else {
+                guard.commit_async_ops(ops)
+            };
             if fair {
                 parking_lot::RwLockWriteGuard::unlock_fair(guard);
             } else {
                 drop(guard);
             }
             self.batches.fetch_add(1, Ordering::Relaxed);
-            self.batch_ops.fetch_add(1, Ordering::Relaxed);
+            self.batch_ops.fetch_add(n, Ordering::Relaxed);
             self.active.fetch_sub(1, Ordering::Relaxed);
             self.mark_complete();
             return result;
@@ -826,11 +971,14 @@ impl WriteGroup {
         }
     }
 
-    /// Sequential client: one batch, write lock held through `fdatasync` (G1).
-    /// Multi-writer leaders still fd off-lock via [`Self::finish_group_off_lock`].
+    /// Sequential client: encode under the write lock, `fdatasync` OFF the
+    /// lock, apply + publish on the second hold (RFC-0045 P2.1 — same
+    /// off-lock window as [`Self::finish_group_off_lock`], so a parked fd
+    /// can no longer deadlock flush/GC: they see `commit_inflight > 0` and
+    /// skip WAL rotation instead of waiting on the write lock).
     /// RFC-0042 P0.2: `lone_phase_ns` is filled on the off-lock path only.
     fn lone_commit<E: Env>(
-        _group: &WriteGroup,
+        group: &WriteGroup,
         db: &RwLock<Db<E>>,
         ops: Vec<BatchOp>,
         _do_sync: bool,
@@ -855,9 +1003,70 @@ impl WriteGroup {
                 return Err(CoreError::TransactionConflict);
             }
         }
-        // One WAL lock encode+write+fd; no GroupInFlight (RFC-0062 P1.1 p11j).
-        // Multi-writer leaders still use [`Self::finish_group_off_lock`].
-        guard.lone_sync_commit(ops)
+        // RFC-0042 P1.1: a lone commit is a commit in flight exactly like a
+        // group's off-lock fd window — count it, and feed its real fd
+        // duration into the same EMA that bounds the catch-up wait (the
+        // straggler a leader waits out on the sequential host sits right
+        // here, mid-off-lock fd).
+        guard.begin_commit();
+        let committed = match guard.lone_encode_commit(ops) {
+            Ok((seq, None)) => {
+                guard.end_commit();
+                Ok((seq, 0))
+            }
+            Ok((_, Some(staged))) => {
+                let wal = guard.wal_arc();
+                drop(guard);
+                // Off-lock fd window (WAL mutex held, no Db write lock —
+                // same discipline as `finish_group_off_lock`).
+                // RFC-0166 P1.4: the pinned ledger rides this window with
+                // the same append → barrier → ack discipline as the group
+                // path (lone G1 barriers on every staged frame).
+                let pinned = group.verified.load(std::sync::atomic::Ordering::Acquire);
+                let mut ledger_bytes = 0u64;
+                let fd: Result<u64> = {
+                    let mut w = wal.lock();
+                    let before = if pinned { w.position() } else { 0 };
+                    match w.write_pending_frame() {
+                        Err(e) => Err(e),
+                        Ok(()) => {
+                            if pinned {
+                                ledger_bytes = w.position().saturating_sub(before);
+                            }
+                            let t_fd = Instant::now();
+                            w.sync_data()
+                                .map(|_| t_fd.elapsed().as_nanos() as u64)
+                        }
+                    }
+                };
+                let mut g = db.write();
+                let fd_ok = fd.is_ok();
+                let r = g.lone_publish_commit(staged, fd);
+                if pinned && r.is_ok() {
+                    let mut ledger = group
+                        .write_ack
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
+                    ledger.on_append(ledger_bytes);
+                    if fd_ok {
+                        ledger.on_barrier();
+                    }
+                    ledger.on_ack();
+                    ledger.assert_inv();
+                }
+                g.end_commit();
+                r
+            }
+            Err(e) => {
+                guard.end_commit();
+                Err(e)
+            }
+        };
+        let (seq, fd_ns) = committed?;
+        if fd_ns > 0 {
+            group.update_fd_ema(fd_ns);
+        }
+        Ok(seq)
     }
 
     /// WAL encode under the write lock, absorb anyone who queued during that
@@ -931,11 +1140,16 @@ impl WriteGroup {
         }
         let wal = guard.wal_arc();
         drop(guard);
+        // RFC-0166 P1.4: the pinned profile advances its write→ack ledger
+        // alongside the real critical section (append → barrier → publish).
+        let pinned = group.verified.load(std::sync::atomic::Ordering::Acquire);
+        let mut ledger_bytes = 0u64;
         let io_err = {
             let mut w = wal.lock();
+            let before = if pinned { w.position() } else { 0 };
             // G1: write + fdatasync before Ok. Async: write() per group,
             // no fdatasync — same process-crash class as RocksDB default.
-            w.write_pending_frame().err().or_else(|| {
+            let e = w.write_pending_frame().err().or_else(|| {
                 if need_sync {
                     let t_fd = Instant::now();
                     let r = w.sync_data().err();
@@ -946,7 +1160,11 @@ impl WriteGroup {
                 } else {
                     None
                 }
-            })
+            });
+            if pinned {
+                ledger_bytes = w.position().saturating_sub(before);
+            }
+            e
         };
         // RFC-0071 P1.2: yield after off-lock fd, before the publish gate
         // (no Db write lock held). PCT can interleave a reader here.
@@ -979,6 +1197,22 @@ impl WriteGroup {
         if need_sync {
             g.note_wal_sync();
         }
+        // RFC-0166 P1.4: publish passed — advance the pinned ledger through
+        // the proved kernels and check Inv-WAL fail-closed. Async groups
+        // (no barrier) keep their acked prefix at the old barrier: the
+        // ledger never claims durability the class does not have.
+        if pinned {
+            let mut ledger = group
+                .write_ack
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            ledger.on_append(ledger_bytes);
+            if need_sync && io_err.is_none() {
+                ledger.on_barrier();
+            }
+            ledger.on_ack();
+            ledger.assert_inv();
+        }
         let results: Vec<Result<SequenceNumber>> = chunks
             .into_iter()
             .flat_map(|chunk| match chunk {
@@ -999,6 +1233,10 @@ impl WriteGroup {
 #[derive(Clone)]
 pub struct ConcurrentDb<E: Env = StdEnv> {
     inner: Arc<RwLock<Db<E>>>,
+    /// Lock-free view of `Db::commit_inflight` (shared `Arc`): the lone
+    /// G1 path holds the write lock through `fdatasync`, so observing a
+    /// commit in flight must not need the `Db` RwLock (RFC-0042 P1.1).
+    commit_inflight: Arc<std::sync::atomic::AtomicUsize>,
     writes: Arc<WriteGroup>,
     /// Single-flight flush/compact pipeline (F45): dual concurrent `prepare_flush_imm`
     /// + failed `restore_imm` could otherwise race on the one imm slot.
@@ -1010,6 +1248,10 @@ pub struct ConcurrentDb<E: Env = StdEnv> {
     default_sync: Arc<AtomicBool>,
     /// Shared point cache — a hit needs no Db read lock (YCSB C).
     point_cache: Arc<crate::cache::PointCache>,
+    /// Per-CF SST envelopes + settled flag: a miss outside every family
+    /// returns None without TLS, the point-cache mutex, or the Db read lock.
+    sst_envelope: Arc<RwLock<Vec<(Bytes, Bytes)>>>,
+    settled_sst_only: Arc<AtomicBool>,
     /// Shared count cache — a hit needs no Db read lock (`deps_scan`).
     count_cache: Arc<crate::cache::CountCache>,
     /// Invalidate epoch for compat TLS last-count (`deps_scan` zipf).
@@ -1081,6 +1323,8 @@ impl<E: Env> ConcurrentDb<E> {
     pub fn from_db(db: Db<E>) -> Self {
         let default_sync = db.default_write_sync();
         let point_cache = db.point_cache_handle();
+        let sst_envelope = db.sst_envelope_handle();
+        let settled_sst_only = db.settled_sst_only_handle();
         let count_cache = db.count_cache_handle();
         let read_cache_epoch = db.read_cache_epoch_handle();
         let point_tls_epoch = db.point_tls_epoch_handle();
@@ -1094,13 +1338,17 @@ impl<E: Env> ConcurrentDb<E> {
         let occ_registry = Arc::new(Mutex::new(std::collections::BTreeMap::new()));
         let mut db = db;
         db.set_occ_floor_registry(Arc::clone(&occ_registry));
+        let commit_inflight = db.commit_inflight_handle();
         Self {
             inner: Arc::new(RwLock::new(db)),
+            commit_inflight,
             writes: Arc::new(writes),
             flush_lock: Arc::new(Mutex::new(())),
             persist_lock: Arc::new(Mutex::new(())),
             default_sync: Arc::new(AtomicBool::new(default_sync)),
             point_cache,
+            sst_envelope,
+            settled_sst_only,
             count_cache,
             read_cache_epoch,
             point_tls_epoch,
@@ -1142,10 +1390,34 @@ impl<E: Env> ConcurrentDb<E> {
     #[must_use]
     pub fn get(&self, key: &[u8]) -> Option<Bytes> {
         self.reads_served.fetch_add(1, Ordering::Relaxed);
+        if self.fast_outside_sst_miss(key) {
+            return None;
+        }
         if let Some(v) = self.point_cache.get(key) {
             return v;
         }
         self.inner.read().get_after_point_miss(key)
+    }
+
+    /// Settled SST-only and `key` is outside every CF file's `[lo,hi]`.
+    ///
+    /// A collapsed global min/max swallows the hole between `data\0…` and
+    /// `meta\0cursor`, so slipstream `probe_miss` (`data\0route.svc-9…`)
+    /// would stay inside. Per-family envelopes keep that hole.
+    #[must_use]
+    pub fn fast_outside_sst_miss(&self, key: &[u8]) -> bool {
+        if !self.settled_sst_only.load(Ordering::Acquire) {
+            return false;
+        }
+        let g = self.sst_envelope.read();
+        g.iter()
+            .all(|(lo, hi)| key < lo.as_ref() || key > hi.as_ref())
+    }
+
+    /// Settled SST-only (compat `get_cf` can reject a miss before TLS).
+    #[must_use]
+    pub fn is_settled_sst_only(&self) -> bool {
+        self.settled_sst_only.load(Ordering::Acquire)
     }
 
     /// Point-cache probe (`Some` = hit, including cached miss). OCC get.
@@ -1633,6 +1905,15 @@ impl<E: Env> ConcurrentDb<E> {
         )
     }
 
+    /// Lock-free [`Db::commit_inflight`]: WAL appends whose
+    /// `fdatasync`/mem-apply has not finished, readable even while the lone
+    /// G1 path holds the `Db` write lock through its `fdatasync`
+    /// (RFC-0042 P1.1 + RFC-0062 P1.1).
+    #[must_use]
+    pub fn commit_inflight(&self) -> usize {
+        self.commit_inflight.load(Ordering::Acquire)
+    }
+
     /// True when no writer is in `submit` / group `fdatasync` and the last
     /// Ok is older than `idle`. Uses submit **return** time so a long
     /// apply batch (p95 5–14 ms) is not treated as idle the moment it
@@ -1642,7 +1923,7 @@ impl<E: Env> ConcurrentDb<E> {
         if self.writes.active.load(Ordering::Relaxed) > 0 {
             return false;
         }
-        if self.inner.read().commit_inflight() > 0 {
+        if self.commit_inflight() > 0 {
             return false;
         }
         let last = self.writes.last_complete_ns.load(Ordering::Relaxed);
@@ -1667,8 +1948,7 @@ impl<E: Env> ConcurrentDb<E> {
         if self.writes_idle_for(idle) {
             return None;
         }
-        if self.writes.active.load(Ordering::Relaxed) > 0 || self.inner.read().commit_inflight() > 0
-        {
+        if self.writes.active.load(Ordering::Relaxed) > 0 || self.commit_inflight() > 0 {
             return Some(idle);
         }
         let last = {
@@ -1726,6 +2006,13 @@ impl<E: Env> ConcurrentDb<E> {
         self.writes
             .flusher_attached
             .store(attached, Ordering::Relaxed);
+    }
+
+    /// Submits that parked on the L0 stall limit (RFC-0167 P1.1). Zero
+    /// with no host worker attached (parking is a worker-only relief).
+    #[must_use]
+    pub fn stall_park_count(&self) -> u64 {
+        self.writes.stall_parks.load(Ordering::Relaxed)
     }
 
     /// Flush-debt cap ([`Db::flush_debt_cap`]) — one parked table's worth.
@@ -1906,6 +2193,24 @@ impl<E: Env> ConcurrentDb<E> {
         self.writes.verified.load(Ordering::Acquire)
     }
 
+    /// RFC-0166 P1.4: snapshot `(acked, synced, written)` of the verified
+    /// write→ack ledger — advanced by the proved kernels on every pinned
+    /// durable group, Inv-WAL asserted fail-closed. `None` when the
+    /// profile is not pinned.
+    #[must_use]
+    pub fn verified_write_ack(&self) -> Option<(u64, u64, u64)> {
+        if !self.is_verified() {
+            return None;
+        }
+        Some(
+            self.writes
+                .write_ack
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .snapshot(),
+        )
+    }
+
     /// RFC-0070: admit a “serial==parallel for all OS schedules” claim.
     ///
     /// Finite PCT depth (including d=2) never covers ∀π. This engine is
@@ -1975,11 +2280,14 @@ impl<E: Env> ConcurrentDb<E> {
         // Drop write-group / flush locks first, then close the sole Db if unique.
         let ConcurrentDb {
             inner,
+            commit_inflight: _,
             writes: _,
             flush_lock: _,
             persist_lock: _,
             default_sync: _,
             point_cache: _,
+            sst_envelope: _,
+            settled_sst_only: _,
             count_cache: _,
             read_cache_epoch: _,
             point_tls_epoch: _,
@@ -2068,7 +2376,7 @@ impl<E: Env> ConcurrentDb<E> {
         // Post-fence commits fail fast at ensure_not_fenced; bounded drain
         // so the reopen never races a mid-write WAL handle.
         let deadline = Instant::now() + Duration::from_secs(2);
-        while self.inner.read().commit_inflight() > 0 {
+        while self.commit_inflight() > 0 {
             if Instant::now() > deadline {
                 return Err(CoreError::Internal(
                     "commit_batch still in flight at recover_from_fence".into(),
@@ -2169,7 +2477,15 @@ impl<E: Env> ConcurrentDb<E> {
     /// # Errors
     /// WAL I/O or sequence exhaustion.
     pub fn delete(&self, key: impl AsRef<[u8]>) -> Result<()> {
-        let do_sync = self.resolve_sync(WriteOptions::default());
+        self.delete_with(key, WriteOptions::default())
+    }
+
+    /// Delete with per-call durability (same as [`Self::put_with`]).
+    ///
+    /// # Errors
+    /// WAL I/O or sequence exhaustion.
+    pub fn delete_with(&self, key: impl AsRef<[u8]>, opts: WriteOptions) -> Result<()> {
+        let do_sync = self.resolve_sync(opts);
         self.assist_flush_debt();
         self.writes
             .submit_one(&self.inner, BatchOp::delete(key), do_sync)
@@ -2207,7 +2523,21 @@ impl<E: Env> ConcurrentDb<E> {
     /// # Errors
     /// WAL I/O or sequence exhaustion.
     pub fn apply_batch_vec(&self, ops: Vec<BatchOp>) -> Result<SequenceNumber> {
-        let do_sync = self.resolve_sync(WriteOptions::default());
+        self.apply_batch_vec_with(ops, WriteOptions::default())
+    }
+
+    /// [`Self::apply_batch_vec`] with per-call durability. Used by
+    /// rust-rocksdb `write_opt` so mixed-sync threads never toggle a
+    /// shared default.
+    ///
+    /// # Errors
+    /// WAL I/O or sequence exhaustion.
+    pub fn apply_batch_vec_with(
+        &self,
+        ops: Vec<BatchOp>,
+        opts: WriteOptions,
+    ) -> Result<SequenceNumber> {
+        let do_sync = self.resolve_sync(opts);
         self.assist_flush_debt();
         self.writes.submit(&self.inner, ops, do_sync)
     }
@@ -2272,7 +2602,25 @@ impl<E: Env> ConcurrentDb<E> {
     pub fn flush(&self) -> Result<()> {
         let _flush = self.flush_lock.lock();
         while self.materialize_bulk_holding_flush() {}
-        self.inner.write().flush_all_bulk_runs()?;
+        let persist = {
+            let mut g = self.inner.write();
+            // RFC-0050 P0.3: bulk-phase I/O during an explicit flush fences.
+            g.flush_all_bulk_runs().map_err(|e| {
+                g.fence_durability(&e, crate::db::FenceClass::of_core(&e));
+                e
+            })?
+        };
+        if let Some(persist) = persist {
+            #[cfg(test)]
+            note_bulk_manifest_off_lock(&self.inner);
+            let _p = self.persist_lock.lock();
+            if let Err(e) = persist.write() {
+                self.inner
+                    .write()
+                    .fence_durability(&e, crate::db::FenceClass::of_core(&e));
+                return Err(e);
+            }
+        }
         // At most two pipeline steps: drain existing imm, then switch+flush active.
         // Do **not** loop while concurrent puts refill mem (that would never end).
         for _ in 0..2 {
@@ -2299,7 +2647,10 @@ impl<E: Env> ConcurrentDb<E> {
                 Ok(f) => f,
                 Err(e) => {
                     // Leave a file-num gap (harmless); put imm back for retry/safety.
-                    self.inner.write().restore_imm(imm);
+                    let mut g = self.inner.write();
+                    g.restore_imm(imm);
+                    // RFC-0050 P0.3: ENOSPC/EIO on the SST write fences.
+                    g.fence_durability(&e, crate::db::FenceClass::of_core(&e));
                     return Err(e);
                 }
             };
@@ -2321,12 +2672,18 @@ impl<E: Env> ConcurrentDb<E> {
                 let pairs: Vec<_> = files.into_iter().map(|(t, n, _)| (t, n)).collect();
                 if let Err(e) = g.install_ssts_at_levels(pairs, &levels) {
                     g.restore_imm(imm);
+                    // RFC-0050 P0.3: install/MANIFEST I/O during flush fences.
+                    g.fence_durability(&e, crate::db::FenceClass::of_core(&e));
                     return Err(e);
                 }
             }
         }
         let mut g = self.inner.write();
-        g.finish_flush_pipeline()?;
+        g.finish_flush_pipeline().map_err(|e| {
+            // RFC-0050 P0.3: WAL-rotate I/O at the flush tail fences.
+            g.fence_durability(&e, crate::db::FenceClass::of_core(&e));
+            e
+        })?;
         // F212: explicit flush is a CHANGELOG persist point (same tail as
         // `Db::flush`) — the rotate above dropped the WAL rebuild source
         // for the flushed keys.
@@ -2354,20 +2711,40 @@ impl<E: Env> ConcurrentDb<E> {
             .parent()
             .map(std::path::PathBuf::from)
             .unwrap_or(final_path);
-        match Db::write_bulk_run_sst(&env, &dir, num, run.as_ref(), &fam, sync) {
-            Ok((table, num)) => match self.inner.write().finish_bulk_sst(&fam, table, num) {
-                Ok(Some(persist)) => persist.write().is_ok(),
-                Ok(None) => true,
-                Err(_) => false,
-            },
-            Err(_) => {
-                let mut g = self.inner.write();
-                if let Some(pin) = g.take_bulk_encoding() {
-                    g.push_parked_bulk_front(pin);
+        let written =
+            match Db::write_bulk_run_sst(&env, &dir, num, run.as_ref(), &fam, sync, "worker") {
+                Ok(t) => t,
+                Err(_) => {
+                    let mut g = self.inner.write();
+                    if let Some(pin) = g.take_bulk_encoding() {
+                        g.push_parked_bulk_front(pin);
+                    }
+                    return false;
                 }
-                false
-            }
-        }
+            };
+        // RFC-0159 P1.2: take the MANIFEST job under the write lock, then
+        // drop the guard before `persist.write()` (same shape as
+        // [`Self::persist_unsynced_l0s_off_lock`]). The match-scrutinee
+        // temporary of `inner.write().finish_bulk_sst(...)` used to live
+        // across the I/O.
+        let persist = match self
+            .inner
+            .write()
+            .finish_bulk_sst(&fam, written.0, written.1)
+        {
+            Ok(p) => p,
+            Err(_) => return false,
+        };
+        let Some(persist) = persist else {
+            return true;
+        };
+        #[cfg(test)]
+        note_bulk_manifest_off_lock(&self.inner);
+        let wrote = {
+            let _p = self.persist_lock.lock();
+            persist.write()
+        };
+        wrote.is_ok()
     }
 
     /// Drain **one existing** immutable memtable → L0 without forcing an
@@ -2671,6 +3048,14 @@ impl<E: Env> ConcurrentDb<E> {
         }
         let persist = {
             let mut g = self.inner.write();
+            // RFC-0151 P1.3: gate under the re-taken lock, measured — files
+            // installed while we fsynced off-lock must not ride along in
+            // this publish. Their debt stays for the next drain tick. Same
+            // kernel gate as `persist_manifest` / `persist_bulk_manifest`
+            // (db.rs) and `install_prepared_one` (below).
+            if !crate::flush_kernel::may_publish_manifest(g.unsynced_sst_count() == 0) {
+                return Ok(());
+            }
             match g.take_manifest_persist() {
                 Ok(p) => p,
                 Err(e) => {
@@ -2749,7 +3134,10 @@ impl<E: Env> ConcurrentDb<E> {
                 return true;
             };
             let old_paths = undo.old_paths().to_vec();
-            if g.fsync_unsynced_ssts().is_err() {
+            // RFC-0151 P1.3: publish gate, measured — fsync must succeed and
+            // leave no unsynced debt, else the compact install is undone.
+            let sst_durable = g.fsync_unsynced_ssts().is_ok() && g.unsynced_sst_count() == 0;
+            if !crate::flush_kernel::may_publish_manifest(sst_durable) {
                 g.undo_prepared_l0_compact(undo);
                 return false;
             }
@@ -3281,6 +3669,10 @@ mod tests {
                     exclusive: true,
                     large_value_threshold: None,
                     sst_payload_budget_bytes: None,
+                    resident_payloads: false,
+                    vlog_rotate_bytes: None,
+                    auto_blob_gc_min_ratio: None,
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -3325,6 +3717,10 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: None,
                 sst_payload_budget_bytes: None,
+                resident_payloads: false,
+                vlog_rotate_bytes: None,
+                auto_blob_gc_min_ratio: None,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -3360,6 +3756,10 @@ mod tests {
                     exclusive: true,
                     large_value_threshold: None,
                     sst_payload_budget_bytes: None,
+                    resident_payloads: false,
+                    vlog_rotate_bytes: None,
+                    auto_blob_gc_min_ratio: None,
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -3406,6 +3806,10 @@ mod tests {
                     exclusive: true,
                     large_value_threshold: None,
                     sst_payload_budget_bytes: None,
+                    resident_payloads: false,
+                    vlog_rotate_bytes: None,
+                    auto_blob_gc_min_ratio: None,
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -3462,6 +3866,10 @@ mod tests {
                     exclusive: true,
                     large_value_threshold: None,
                     sst_payload_budget_bytes: None,
+                    resident_payloads: false,
+                    vlog_rotate_bytes: None,
+                    auto_blob_gc_min_ratio: None,
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -3517,6 +3925,10 @@ mod tests {
                     exclusive: true,
                     large_value_threshold: None,
                     sst_payload_budget_bytes: None,
+                    resident_payloads: false,
+                    vlog_rotate_bytes: None,
+                    auto_blob_gc_min_ratio: None,
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -3553,6 +3965,10 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: None,
                 sst_payload_budget_bytes: None,
+                resident_payloads: false,
+                vlog_rotate_bytes: None,
+                auto_blob_gc_min_ratio: None,
+                ..Default::default()
             },
         )
         .unwrap()
@@ -3577,10 +3993,103 @@ mod tests {
                     exclusive: true,
                     large_value_threshold: None,
                     sst_payload_budget_bytes: None,
+                    resident_payloads: false,
+                    vlog_rotate_bytes: None,
+                    auto_blob_gc_min_ratio: None,
                 }
             },
         )
         .unwrap()
+    }
+
+    /// RFC-0167 P1.1: L0 write stall parks (bounded) while a host worker
+    /// drains — a writer never surfaces `WriteStall`, and the park is
+    /// observable (`stall_park_count`) before the drain lands. The test
+    /// thread plays the host worker: nothing drains until a park is seen,
+    /// so the park is deterministic, then each drain unblocks the writer.
+    #[test]
+    fn rfc0167_l0_stall_parks_until_worker_drains() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                wal_full_fsync: true,
+                history: Default::default(),
+                wal_recovery: Default::default(),
+                sync: false,
+                auto_flush_bytes: Some(4 * 1024),
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+                sst_payload_budget_bytes: None,
+                resident_payloads: false,
+                vlog_rotate_bytes: None,
+                auto_blob_gc_min_ratio: None,
+            },
+        )
+        .unwrap();
+        db.set_flush_worker_attached(true);
+        // Below the inline leveling trigger (4): flushes must pile in L0
+        // past this limit, so submits park for the host worker's drain.
+        db.with_write(|d| d.set_write_stall_l0(Some(2)));
+
+        let w = db.clone();
+        let writer = thread::spawn(move || {
+            for i in 0..800u32 {
+                // Scrambled keys: every flushed table spans the whole key
+                // space, so it overlaps L1 and must stay in L0 (ascending
+                // keys get absorbed straight into L1 and never stall).
+                let k = i.wrapping_mul(2_654_435_761) % 100_000;
+                w.put(format!("pk-{k:05}").as_bytes(), &[7u8; 64]).unwrap();
+            }
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let mut saw_park = false;
+        let mut max_l0 = 0usize;
+        while !writer.is_finished() {
+            // sync:false flushes land as unsynced L0s; the host worker
+            // persists them into the level view (compat worker does this).
+            let _ = db.persist_unsynced_l0s_off_lock();
+            let l0 = db.with_read(|d| d.level_file_count(0));
+            max_l0 = max_l0.max(l0);
+            if db.stall_park_count() > 0 {
+                saw_park = true;
+                // Full compact empties L0 (the drain_l0_below_trigger
+                // shape stops at 3, above this test's limit of 2).
+                let _ = db.compact();
+            }
+            assert!(
+                Instant::now() < deadline,
+                "writer never finished (park deadlock?) max_l0={max_l0} parks={}",
+                db.stall_park_count()
+            );
+            thread::sleep(Duration::from_millis(1));
+        }
+        writer.join().expect("writer panicked");
+        assert!(
+            saw_park,
+            "expected at least one L0 stall park (max_l0={max_l0}, parks={}, l0_now={}, ssts={}, mem={})",
+            db.stall_park_count(),
+            db.with_read(|d| d.level_file_count(0)),
+            db.with_read(|d| d.sst_count()),
+            db.active_mem_usage()
+        );
+        assert_eq!(
+            db.with_read(|d| d.write_stall_count()),
+            0,
+            "park + drain must absorb the stall; no surfaced WriteStall"
+        );
+        for i in (0..800u32).step_by(97) {
+            let k = i.wrapping_mul(2_654_435_761) % 100_000;
+            assert_eq!(
+                db.get(format!("pk-{k:05}").as_bytes()).as_deref(),
+                Some(&[7u8; 64][..]),
+                "acked key pk-{k:05} lost"
+            );
+        }
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// Flush backpressure + v26 assist: without a flush worker attached a
@@ -3590,7 +4099,11 @@ mod tests {
     /// run #27: the sleep path cost 21.5 s of `flush_check_ms`).
     #[test]
     fn submit_flush_debt_assists_with_worker_attached() {
-        std::env::set_var("PEDRA_FLUSH_DEBT_MAX_MS", "120");
+        // 1000 ms sleep ceiling vs the 500 ms bound below: suite load can
+        // push one fdatasync submit past 100 ms (observed 110.9 ms with a
+        // concurrent suite run), which used to trip a 100 ms bound only
+        // 20 ms under the old 120 ms ceiling.
+        std::env::set_var("PEDRA_FLUSH_DEBT_MAX_MS", "1000");
         let dir = temp_dir();
         let db = open_debt(&dir);
         db.set_defer_auto_compact(true);
@@ -3607,7 +4120,7 @@ mod tests {
         let t0 = std::time::Instant::now();
         db.put(b"straight", b"through").unwrap();
         assert!(
-            t0.elapsed() < Duration::from_millis(100),
+            t0.elapsed() < Duration::from_millis(500),
             "unattached submit waited {:?}",
             t0.elapsed()
         );
@@ -3616,7 +4129,7 @@ mod tests {
         // Attached: submit drains the parked table itself — no worker
         // thread exists here, so parked==0 after the put proves the
         // writer materialized inline (the sleep path would wait out the
-        // 120 ms ceiling and leave the debt parked).
+        // 1000 ms ceiling and leave the debt parked).
         db.set_flush_worker_attached(true);
         let t0 = std::time::Instant::now();
         db.put(b"throttled", b"ok").unwrap();
@@ -3726,6 +4239,10 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: Some(512),
                 sst_payload_budget_bytes: None,
+                resident_payloads: false,
+                vlog_rotate_bytes: None,
+                auto_blob_gc_min_ratio: None,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -3753,6 +4270,10 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: None,
                 sst_payload_budget_bytes: None,
+                resident_payloads: false,
+                vlog_rotate_bytes: None,
+                auto_blob_gc_min_ratio: None,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -3900,6 +4421,10 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: None,
                 sst_payload_budget_bytes: None,
+                resident_payloads: false,
+                vlog_rotate_bytes: None,
+                auto_blob_gc_min_ratio: None,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -4072,6 +4597,96 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// F188 residual: latched bulk must store the same escaped form as
+    /// ordinary put so an honest VLG1/VLG3 payload is not sniffed as a
+    /// vlog pointer on GET.
+    #[test]
+    fn apply_latched_bulk_vlg_shaped_payload_round_trips() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into(), "meta".into()]);
+        let filler = vec![b'v'; 32];
+        for b in 0..8u32 {
+            let mut batch = Vec::new();
+            for j in 0..16u32 {
+                let k = format!("data\0{b:04}-{j:04}").into_bytes();
+                batch.push(BatchOp::put(k, filler.clone()));
+            }
+            batch.push(BatchOp::put(
+                b"meta\0cursor".to_vec(),
+                b.to_le_bytes().to_vec(),
+            ));
+            db.apply_batch_vec(batch).unwrap();
+        }
+        assert!(
+            db.family_is_latched_async("data"),
+            "8 admissible batches must latch"
+        );
+
+        let mut vlg1 = crate::vlog::VLOG_VALUE_PREFIX.to_vec();
+        vlg1.extend_from_slice(&0u64.to_le_bytes());
+        vlg1.extend_from_slice(&8u32.to_le_bytes());
+        vlg1.extend_from_slice(&0xDEAD_BEEFu32.to_le_bytes());
+        assert_eq!(vlg1.len(), 20);
+        let mut vlg3 = crate::vlog::VLOG_BLOB_PREFIX.to_vec();
+        vlg3.extend_from_slice(&1u32.to_le_bytes());
+        vlg3.extend_from_slice(&0u64.to_le_bytes());
+        vlg3.extend_from_slice(&8u32.to_le_bytes());
+        vlg3.extend_from_slice(&0xDEAD_BEEFu32.to_le_bytes());
+        assert_eq!(vlg3.len(), 24);
+        let plain = b"not-a-vlog-pointer".to_vec();
+
+        db.apply_latched_bulk(
+            "data",
+            vec![
+                Bytes::from(b"data\0zzzz-plain".to_vec()),
+                Bytes::from(b"data\0zzzz-vlg1".to_vec()),
+                Bytes::from(b"data\0zzzz-vlg3".to_vec()),
+            ],
+            vec![
+                Bytes::from(plain.clone()),
+                Bytes::from(vlg1.clone()),
+                Bytes::from(vlg3.clone()),
+            ],
+            vec![],
+        )
+        .unwrap();
+        assert_eq!(
+            db.get(b"data\0zzzz-vlg1").as_deref(),
+            Some(vlg1.as_slice()),
+            "latched VLG1 payload must round-trip"
+        );
+        assert_eq!(
+            db.get(b"data\0zzzz-vlg3").as_deref(),
+            Some(vlg3.as_slice()),
+            "latched VLG3 payload must round-trip"
+        );
+        assert_eq!(
+            db.get(b"data\0zzzz-plain").as_deref(),
+            Some(plain.as_slice()),
+            "latched ordinary payload must still round-trip"
+        );
+
+        db.apply_batch_vec(vec![BatchOp::put(
+            b"meta\0ladder-vlg1".to_vec(),
+            vlg1.clone(),
+        )])
+        .unwrap();
+        assert_eq!(
+            db.get(b"meta\0ladder-vlg1").as_deref(),
+            Some(vlg1.as_slice()),
+            "ladder put of VLG1 must still round-trip"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// RFC-0159 P1.7: a latched overflow parks the chunk; get still hits
     /// it; the worker materializes off the write lock.
     #[test]
@@ -4137,6 +4752,414 @@ mod tests {
             let want: &[u8] = if i < 160 { &v } else { &payload };
             assert_eq!(db.get(k).as_deref(), Some(want), "after materialize {i}");
         }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0160 P0.5: chunked BulkRun + empty payload stay under three
+    /// chunk caps (open tail + parked + encoding). RSS must not climb
+    /// with n.
+    #[test]
+    fn bulk_chunked_ingest_live_bytes_stay_under_three_chunks() {
+        let dir = temp_dir();
+        let cap = 32 * 1024usize;
+        let db = ConcurrentDb::open_with_env_bounded(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(cap),
+                sst_payload_budget_bytes: Some(1),
+                resident_payloads: false,
+                vlog_rotate_bytes: None,
+                auto_blob_gc_min_ratio: None,
+                ..OpenOptions::default()
+            },
+            crate::env::StdEnv,
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into()]);
+        let v = vec![b'v'; 48];
+        for b in 0..10u32 {
+            let mut batch = Vec::new();
+            for j in 0..8u32 {
+                batch.push(BatchOp::put(
+                    format!("data\0{b:04}-{j:04}").into_bytes(),
+                    v.clone(),
+                ));
+            }
+            db.apply_batch_vec(batch).unwrap();
+        }
+        assert!(
+            db.family_is_latched_async("data"),
+            "admissible batches must latch"
+        );
+        let payload = vec![b'x'; 80];
+        let mut all_keys = Vec::new();
+        for chunk in 0..12u32 {
+            let mut keys = Vec::new();
+            let mut vals = Vec::new();
+            for j in 0..500u32 {
+                let k = format!("data\0z-{chunk:04}-{j:06}").into_bytes();
+                keys.push(Bytes::from(k.clone()));
+                vals.push(Bytes::from(payload.clone()));
+                all_keys.push(k);
+            }
+            db.apply_latched_bulk("data", keys, vals, Vec::new())
+                .unwrap();
+            while db.with_read(|d| d.has_parked_bulk()) {
+                assert!(db.materialize_bulk_once());
+            }
+            let live = db.with_read(|d| d.bulk_live_bytes());
+            assert!(
+                live <= cap.saturating_mul(3),
+                "chunk {chunk}: bulk live {live} must stay ≤ 3×cap {}",
+                cap * 3
+            );
+        }
+        db.flush().unwrap();
+        assert_eq!(
+            db.with_read(|d| d.bulk_live_bytes()),
+            0,
+            "settle must drain BulkRun / parked / encoding"
+        );
+        assert!(
+            db.with_read(|d| d.sst_payload_pool().resident_bytes()) <= 1,
+            "bulk SSTs must not pin whole-file payloads, resident={}",
+            db.with_read(|d| d.sst_payload_pool().resident_bytes())
+        );
+        assert_eq!(
+            db.get(&all_keys[0]).as_deref(),
+            Some(payload.as_slice()),
+            "first overflow key must read back"
+        );
+        assert_eq!(
+            db.get(all_keys.last().unwrap()).as_deref(),
+            Some(payload.as_slice()),
+            "last overflow key must read back"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0161 P0.5: Pedra-side hydrate RAM is BulkRun tail + indexes +
+    /// mem, **not** whole-file payloads. Doubling chunks must not double
+    /// payload residency (v74 100M SIGKILL was Rocks-still-live + this
+    /// set; the engine bound is this function).
+    #[test]
+    fn hydrate_resident_bytes_exclude_payload_and_cap_tail() {
+        let dir = temp_dir();
+        let cap = 32 * 1024usize;
+        let db = ConcurrentDb::open_with_env_bounded(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(cap),
+                sst_payload_budget_bytes: Some(1),
+                resident_payloads: false,
+                vlog_rotate_bytes: None,
+                auto_blob_gc_min_ratio: None,
+                ..OpenOptions::default()
+            },
+            crate::env::StdEnv,
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into()]);
+        let v = vec![b'v'; 48];
+        for b in 0..10u32 {
+            let mut batch = Vec::new();
+            for j in 0..8u32 {
+                batch.push(BatchOp::put(
+                    format!("data\0{b:04}-{j:04}").into_bytes(),
+                    v.clone(),
+                ));
+            }
+            db.apply_batch_vec(batch).unwrap();
+        }
+        assert!(db.family_is_latched_async("data"));
+        let payload = vec![b'x'; 80];
+        let ingest = |db: &ConcurrentDb<_>, chunks: u32, tag: u32| {
+            for chunk in 0..chunks {
+                let mut keys = Vec::new();
+                let mut vals = Vec::new();
+                for j in 0..400u32 {
+                    let k = format!("data\0h{tag}-{chunk:04}-{j:06}").into_bytes();
+                    keys.push(Bytes::from(k));
+                    vals.push(Bytes::from(payload.clone()));
+                }
+                db.apply_latched_bulk("data", keys, vals, Vec::new())
+                    .unwrap();
+                while db.with_read(|d| d.has_parked_bulk()) {
+                    assert!(db.materialize_bulk_once());
+                }
+                let live = db.with_read(|d| d.bulk_live_bytes());
+                assert!(live <= cap.saturating_mul(3), "tail {live} > 3×cap");
+                assert!(
+                    db.with_read(|d| d.sst_payload_pool().resident_bytes()) <= 1,
+                    "payload must stay empty during bulk"
+                );
+            }
+        };
+        ingest(&db, 6, 1);
+        let mid = db.with_read(|d| {
+            (
+                d.hydrate_resident_bytes(),
+                d.sst_index_bytes(),
+                d.bulk_live_bytes(),
+            )
+        });
+        ingest(&db, 6, 2);
+        let end = db.with_read(|d| {
+            (
+                d.hydrate_resident_bytes(),
+                d.sst_index_bytes(),
+                d.bulk_live_bytes(),
+            )
+        });
+        assert!(
+            end.2 <= cap.saturating_mul(3),
+            "tail after more chunks {}",
+            end.2
+        );
+        let grown = end.0.saturating_sub(mid.0);
+        let index_grown = end.1.saturating_sub(mid.1);
+        assert!(
+            grown
+                <= index_grown
+                    .saturating_add(cap.saturating_mul(3))
+                    .saturating_add(64 * 1024),
+            "hydrate_resident grew {grown} beyond index {index_grown} + 3×cap (payload leak)"
+        );
+        db.flush().unwrap();
+        assert_eq!(db.with_read(|d| d.bulk_live_bytes()), 0);
+        assert!(db.with_read(|d| d.sst_payload_pool().resident_bytes()) <= 1);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Open BulkRun tail is disableWAL-class for crash, but live GET and
+    /// scan must agree: keys only in the RAM run must still scan.
+    #[test]
+    fn bulk_open_tail_is_visible_to_scan() {
+        use std::collections::HashSet;
+        use std::ops::Bound;
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into(), "meta".into()]);
+        let v = vec![b'v'; 64];
+        let mut keys = Vec::new();
+        for b in 0..24u32 {
+            let mut batch = Vec::new();
+            for j in 0..16u32 {
+                let k = format!("data\0{b:04}-{j:04}").into_bytes();
+                batch.push(BatchOp::put(k.clone(), v.clone()));
+                keys.push(k);
+            }
+            batch.push(BatchOp::put(b"meta\0cursor".to_vec(), b"c".to_vec()));
+            db.apply_batch_vec(batch).unwrap();
+        }
+        assert!(
+            db.with_read(|d| d.bulk_live_bytes()) > 0,
+            "latch must have an open BulkRun tail (no flush)"
+        );
+        for k in &keys {
+            assert_eq!(
+                db.get(k).as_deref(),
+                Some(&v[..]),
+                "GET must see the open bulk tail"
+            );
+        }
+        let scanned: HashSet<Vec<u8>> = db
+            .scan_collect(Bound::Unbounded, Bound::Unbounded)
+            .into_iter()
+            .map(|(k, _)| k.to_vec())
+            .collect();
+        for k in &keys {
+            assert!(
+                scanned.contains(k),
+                "scan missed GET-visible bulk tail key {}",
+                String::from_utf8_lossy(k)
+            );
+        }
+        let n = db
+            .count_in_range(Bound::Unbounded, Bound::Unbounded, None)
+            .unwrap();
+        assert!(
+            n >= keys.len(),
+            "count missed GET-visible bulk tail: count={n} keys={}",
+            keys.len()
+        );
+        let want = keys.last().map(|k| k.as_slice());
+        let last = db.with_read(|d| {
+            d.last_under_prefix(d.visible_sequence(), b"data\0")
+                .unwrap()
+        });
+        assert_eq!(
+            last.as_deref(),
+            want,
+            "last_under_prefix must see the open bulk tail"
+        );
+        let last_user = db.with_read(|d| {
+            d.last_under_user_prefix(d.visible_sequence(), b"data\0")
+                .unwrap()
+        });
+        assert_eq!(
+            last_user.as_deref(),
+            want,
+            "last_under_user_prefix must see the open bulk tail"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Deletes stay on the ladder and must hide a key already in BulkRun.
+    /// lookup used to return Found from the run without merging mem tombs.
+    #[test]
+    fn bulk_open_tail_delete_hides_key() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into(), "meta".into()]);
+        let v = vec![b'v'; 64];
+        let mut keys = Vec::new();
+        for b in 0..24u32 {
+            let mut batch = Vec::new();
+            for j in 0..16u32 {
+                let k = format!("data\0{b:04}-{j:04}").into_bytes();
+                batch.push(BatchOp::put(k.clone(), v.clone()));
+                keys.push(k);
+            }
+            batch.push(BatchOp::put(b"meta\0cursor".to_vec(), b"c".to_vec()));
+            db.apply_batch_vec(batch).unwrap();
+        }
+        assert!(db.with_read(|d| d.bulk_live_bytes()) > 0);
+        let victim = keys[keys.len() / 2].clone();
+        assert_eq!(db.get(&victim).as_deref(), Some(&v[..]));
+        db.apply_batch_vec(vec![BatchOp::delete(victim.clone())])
+            .unwrap();
+        assert_eq!(
+            db.get(&victim),
+            None,
+            "ladder delete must hide a BulkRun put"
+        );
+        let scanned: std::collections::HashSet<Vec<u8>> = db
+            .scan_collect(std::ops::Bound::Unbounded, std::ops::Bound::Unbounded)
+            .into_iter()
+            .map(|(k, _)| k.to_vec())
+            .collect();
+        assert!(
+            !scanned.contains(&victim),
+            "scan must not emit a deleted BulkRun key"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Open BulkRun tail is disableWAL-class: no WAL record, CHANGELOG
+    /// persist skipped while runs are live. `changes_after` used to rebuild
+    /// from WAL/mem/SST only, so GET-visible tail keys were missing from
+    /// the feed (018 sibling).
+    #[test]
+    fn bulk_open_tail_is_visible_to_changelog() {
+        use std::collections::HashSet;
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into(), "meta".into()]);
+        let v = vec![b'v'; 64];
+        let mut keys = Vec::new();
+        for b in 0..24u32 {
+            let mut batch = Vec::new();
+            for j in 0..16u32 {
+                let k = format!("data\0{b:04}-{j:04}").into_bytes();
+                batch.push(BatchOp::put(k.clone(), v.clone()));
+                keys.push(k);
+            }
+            batch.push(BatchOp::put(b"meta\0cursor".to_vec(), b"c".to_vec()));
+            db.apply_batch_vec(batch).unwrap();
+        }
+        assert!(db.with_read(|d| d.bulk_live_bytes()) > 0);
+        let tail = keys.last().cloned().expect("latched keys");
+        assert_eq!(
+            db.get(&tail).as_deref(),
+            Some(&v[..]),
+            "GET must see the open bulk tail"
+        );
+        let feed: HashSet<Vec<u8>> = db
+            .changes_after(0)
+            .into_iter()
+            .map(|e| e.key.to_vec())
+            .collect();
+        for k in &keys {
+            assert!(
+                feed.contains(k),
+                "changelog missed GET-visible bulk tail key {}",
+                String::from_utf8_lossy(k)
+            );
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A probing-phase delete must survive absorb into BulkRun. Skipping
+    /// non-Value kinds would resurrect the key on GET.
+    #[test]
+    fn bulk_absorb_keeps_probing_delete() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into(), "meta".into()]);
+        let v = vec![b'v'; 64];
+        let victim = b"data\00000-0000".to_vec();
+        for b in 0..4u32 {
+            let mut batch = Vec::new();
+            for j in 0..8u32 {
+                let k = format!("data\0{b:04}-{j:04}").into_bytes();
+                batch.push(BatchOp::put(k, v.clone()));
+            }
+            batch.push(BatchOp::put(b"meta\0cursor".to_vec(), b"c".to_vec()));
+            db.apply_batch_vec(batch).unwrap();
+        }
+        assert_eq!(db.get(&victim).as_deref(), Some(&v[..]));
+        db.apply_batch_vec(vec![BatchOp::delete(victim.clone())])
+            .unwrap();
+        assert_eq!(db.get(&victim), None);
+        for b in 4..20u32 {
+            let mut batch = Vec::new();
+            for j in 0..8u32 {
+                let k = format!("data\0{b:04}-{j:04}").into_bytes();
+                batch.push(BatchOp::put(k, v.clone()));
+            }
+            batch.push(BatchOp::put(b"meta\0cursor".to_vec(), b"c".to_vec()));
+            db.apply_batch_vec(batch).unwrap();
+        }
+        assert!(
+            db.with_read(|d| d.bulk_live_bytes()) > 0,
+            "must have latched and absorbed after the probing delete"
+        );
+        let look = db.with_read(|d| d.lookup(&victim, d.visible_sequence()));
+        assert!(
+            !matches!(look, crate::memtable::Lookup::Found(_)),
+            "absorb must not resurrect a probing-phase delete, lookup={look:?}"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -4428,6 +5451,7 @@ mod tests {
         db.set_physical_cfs(vec!["data".into()]);
         db.set_cf_write_buffer("data", 256);
         let v = vec![b'x'; 80];
+        let off_lock_before = bulk_manifest_off_lock_count();
         // Latch (threshold 8) then overflow the chunk cap so chunks park.
         for b in 0..40u32 {
             let mut keys = Vec::new();
@@ -4453,11 +5477,21 @@ mod tests {
         }
         let debt = db.with_read(|d| d.bulk_manifest_debt());
         assert!(debt < 4, "debt must wrap every 4 installs, got {debt}");
+        let off_lock_mid = bulk_manifest_off_lock_count();
+        assert!(
+            off_lock_mid > off_lock_before,
+            "every-N MANIFEST persist must run with the Db write guard dropped \
+             (got {off_lock_mid} off-lock writes, before {off_lock_before})"
+        );
         db.flush().unwrap();
         assert_eq!(
             db.with_read(|d| d.bulk_manifest_debt()),
             0,
             "flush/settle must force leftover MANIFEST debt"
+        );
+        assert!(
+            bulk_manifest_off_lock_count() > off_lock_mid,
+            "settle force persist must also run with the write guard dropped"
         );
         assert!(
             db.get(b"data\00000-0000").is_some(),
@@ -5381,6 +6415,113 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    #[test]
+    fn settled_outside_envelope_is_fast_miss() {
+        let dir = temp_dir();
+        let db = open_sync(&dir);
+        db.put(b"k", b"v").unwrap();
+        db.flush().unwrap();
+        assert!(
+            !db.fast_outside_sst_miss(b"k"),
+            "live key is inside the SST envelope"
+        );
+        assert!(
+            db.fast_outside_sst_miss(b"zzz-not-in-any-file"),
+            "key past every SST hi is a settled miss"
+        );
+        assert_eq!(db.get(b"zzz-not-in-any-file"), None);
+        assert_eq!(db.get(b"k").as_deref(), Some(&b"v"[..]));
+        let miss = b"zzz-not-in-any-file";
+        // Structural proof (load-immune): 50k outside-envelope gets must
+        // never consult the LSM — the fast path answers before Db::lookup.
+        db.with_read(|inner| inner.reset_read_probe());
+        let n = 50_000u32;
+        for _ in 0..n {
+            std::hint::black_box(db.get(miss));
+        }
+        db.with_read(|inner| {
+            assert_eq!(
+                inner.lookup_sst_probed(),
+                0,
+                "settled outside-envelope get must skip LSM (probe counter)"
+            );
+        });
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// slipstream PR 19: `probe_miss` is `get_cf("data", route.svc-9…)`.
+    /// Data + meta SSTs make the collapsed global `[lo,hi]` contain that
+    /// hole; per-CF envelopes must still reject it without an LSM probe.
+    #[test]
+    fn settled_cf_gap_is_fast_miss() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into(), "meta".into()]);
+        let hit = b"data\0route.svc-000000.00000000";
+        let gap = b"data\0route.svc-9000000.00000000";
+        db.put(hit, b"v").unwrap();
+        db.put(b"data\0route.svc-000001.00000000", b"v").unwrap();
+        db.put(b"meta\0cursor", b"c").unwrap();
+        db.flush().unwrap();
+        assert!(
+            !db.fast_outside_sst_miss(hit),
+            "live data key stays inside the data envelope"
+        );
+        assert!(
+            !db.fast_outside_sst_miss(b"meta\0cursor"),
+            "live meta cursor stays inside the meta envelope"
+        );
+        assert!(
+            db.fast_outside_sst_miss(gap),
+            "PR19 miss_key sits in the data/meta hole"
+        );
+        assert_eq!(db.get(gap), None);
+        assert_eq!(db.get(hit).as_deref(), Some(&b"v"[..]));
+        assert_eq!(db.get(b"meta\0cursor").as_deref(), Some(&b"c"[..]));
+        db.with_read(|inner| {
+            inner.reset_read_probe();
+            let snap = inner.last_sequence();
+            assert!(
+                matches!(inner.lookup(gap, snap), crate::memtable::Lookup::NotFound),
+                "gap lookup is NotFound"
+            );
+            let probed = inner.lookup_sst_probed();
+            assert_eq!(
+                probed, 0,
+                "per-CF envelope must not bloom-probe, probed {probed}"
+            );
+            let (glo, ghi) = inner.sst_collapsed_bounds();
+            let glo = glo.as_deref().expect("global lo");
+            let ghi = ghi.as_deref().expect("global hi");
+            assert!(
+                glo < gap.as_slice() && gap.as_slice() < ghi,
+                "proof: collapsed global envelope still contains the hole"
+            );
+        });
+        // Structural proof (load-immune), same as the outside-envelope test:
+        // 50k gap gets must never consult the LSM.
+        db.with_read(|inner| inner.reset_read_probe());
+        let n = 50_000u32;
+        for _ in 0..n {
+            std::hint::black_box(db.get(gap));
+        }
+        db.with_read(|inner| {
+            assert_eq!(
+                inner.lookup_sst_probed(),
+                0,
+                "settled CF-gap get must skip LSM (probe counter)"
+            );
+        });
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// RFC-0045 P2.1: ConcurrentDb (apply after durable fd) recovers the
     /// same user-visible state as single-threaded `Db::group_commit`.
     #[test]
@@ -5655,6 +6796,10 @@ mod tests {
                     exclusive: true,
                     large_value_threshold: None,
                     sst_payload_budget_bytes: None,
+                    resident_payloads: false,
+                    vlog_rotate_bytes: None,
+                    auto_blob_gc_min_ratio: None,
+                    ..Default::default()
                 },
             )
             .unwrap(),
@@ -5955,6 +7100,10 @@ mod tests {
             exclusive: true,
             large_value_threshold: None,
             sst_payload_budget_bytes: None,
+            resident_payloads: false,
+            vlog_rotate_bytes: None,
+            auto_blob_gc_min_ratio: None,
+            ..Default::default()
         };
         let db = ConcurrentDb::open_with_env(&dir, opts.clone(), env.clone()).unwrap();
         db.set_write_group_catchup_window(Duration::from_millis(500));
@@ -5977,7 +7126,11 @@ mod tests {
         let db_a = db.clone();
         let a = thread::spawn(move || db_a.put(b"a", b"va").unwrap());
         let deadline = Instant::now() + Duration::from_secs(5);
-        while db.with_read(|d| d.commit_inflight()) == 0 {
+        // Lock-free read: the lone G1 path holds the Db write lock through
+        // its fdatasync (RFC-0062 P1.1), so the counter must be observable
+        // without the Db RwLock (RFC-0042 P1.1) — `with_read` would block
+        // until the commit is over and never see it nonzero.
+        while db.commit_inflight() == 0 {
             assert!(Instant::now() < deadline, "A never entered its commit");
             thread::sleep(Duration::from_micros(100));
         }
@@ -6111,6 +7264,10 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: None,
                 sst_payload_budget_bytes: None,
+                resident_payloads: false,
+                vlog_rotate_bytes: None,
+                auto_blob_gc_min_ratio: None,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -6178,6 +7335,10 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: None,
                 sst_payload_budget_bytes: None,
+                resident_payloads: false,
+                vlog_rotate_bytes: None,
+                auto_blob_gc_min_ratio: None,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -6357,6 +7518,10 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: None,
                 sst_payload_budget_bytes: None,
+                resident_payloads: false,
+                vlog_rotate_bytes: None,
+                auto_blob_gc_min_ratio: None,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -6400,6 +7565,10 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: None,
                 sst_payload_budget_bytes: None,
+                resident_payloads: false,
+                vlog_rotate_bytes: None,
+                auto_blob_gc_min_ratio: None,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -6478,6 +7647,10 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: None,
                 sst_payload_budget_bytes: None,
+                resident_payloads: false,
+                vlog_rotate_bytes: None,
+                auto_blob_gc_min_ratio: None,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -6714,6 +7887,10 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: Some(512),
                 sst_payload_budget_bytes: None,
+                resident_payloads: false,
+                vlog_rotate_bytes: None,
+                auto_blob_gc_min_ratio: None,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -6756,6 +7933,10 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: Some(512),
                 sst_payload_budget_bytes: None,
+                resident_payloads: false,
+                vlog_rotate_bytes: None,
+                auto_blob_gc_min_ratio: None,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -6808,6 +7989,10 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: None,
                 sst_payload_budget_bytes: None,
+                resident_payloads: false,
+                vlog_rotate_bytes: None,
+                auto_blob_gc_min_ratio: None,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -6866,6 +8051,10 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: Some(512),
                 sst_payload_budget_bytes: None,
+                resident_payloads: false,
+                vlog_rotate_bytes: None,
+                auto_blob_gc_min_ratio: None,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -6927,6 +8116,10 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: None,
                 sst_payload_budget_bytes: None,
+                resident_payloads: false,
+                vlog_rotate_bytes: None,
+                auto_blob_gc_min_ratio: None,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -6960,6 +8153,10 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: None,
                 sst_payload_budget_bytes: None,
+                resident_payloads: false,
+                vlog_rotate_bytes: None,
+                auto_blob_gc_min_ratio: None,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -7140,6 +8337,55 @@ mod tests {
                 "barriered async write lost, t/{i}"
             );
         }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Concurrent async 1-op bypass uses `commit_async_one` (RFC-0154 P1.6
+    /// envelope, same WAL bytes as `commit_async_ops([op])`). Four writers
+    /// zipf-overwrite; every key is readable after the barrier; bypass
+    /// stats stay un-merged (`queued == 0`, `batches == submits`).
+    #[test]
+    fn concurrent_async_one_op_overwrite_is_visible() {
+        let dir = temp_dir();
+        let n = 4usize;
+        let ops = 200usize;
+        let records = 64usize;
+        let db = Arc::new({
+            let d = ConcurrentDb::open(&dir).unwrap();
+            d.set_default_write_sync(false);
+            d
+        });
+        let barrier = Arc::new(std::sync::Barrier::new(n));
+        std::thread::scope(|s| {
+            for t in 0..n {
+                let db = Arc::clone(&db);
+                let barrier = Arc::clone(&barrier);
+                s.spawn(move || {
+                    let mut rng = 0x5EED_0001u64.wrapping_mul((t as u64) + 0x9E37) ^ t as u64;
+                    barrier.wait();
+                    for i in 0..ops {
+                        rng ^= rng << 13;
+                        rng ^= rng >> 7;
+                        rng ^= rng << 17;
+                        let u = (rng as usize) % records;
+                        let k = format!("c/{u:06}");
+                        let v = [t as u8, i as u8, 9];
+                        db.put(k.as_bytes(), &v).unwrap();
+                    }
+                });
+            }
+        });
+        let (submits, queued, batches, batch_ops) = db.write_group_stats();
+        assert_eq!(submits, (n * ops) as u64);
+        assert_eq!(batch_ops, (n * ops) as u64);
+        assert_eq!(queued, 0, "default async must stay on the un-merged bypass");
+        assert_eq!(batches, submits);
+        for u in 0..records {
+            let k = format!("c/{u:06}");
+            assert!(db.get(k.as_bytes()).is_some(), "lost overwrite {k}");
+        }
+        let db = Arc::try_unwrap(db).unwrap_or_else(|_| panic!("threads still hold the db"));
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

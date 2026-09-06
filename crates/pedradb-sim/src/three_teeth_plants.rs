@@ -45,6 +45,7 @@ fn opts() -> OpenOptions {
         exclusive: true,
         large_value_threshold: None,
         sst_payload_budget_bytes: None,
+        ..Default::default()
     }
 }
 
@@ -653,7 +654,7 @@ fn wal_inv_on_live_recording_is_not_ok() {
     use pedradb_core::wal::wal_state_kernel::{
         acked_survives_as_is, acked_survives_every_legal_crash, inv_wal, inv_wal_as_is,
         wal_ack, wal_ack_as_is, wal_append, wal_append_as_is, wal_rotate, wal_rotate_as_is,
-        wal_state_of, wal_sync, WalState,
+        wal_state_of, wal_sync,
     };
 
     // --- model side: the full atom chain preserves Inv-WAL -------------
@@ -768,5 +769,75 @@ fn d1_modelo_on_live_recording_is_not_ok() {
     assert_eq!(db.get(b"dk1").as_deref(), Some(b"dv1".as_ref()));
     assert_eq!(db.get(b"dk2").as_deref(), Some(b"dv2".as_ref()));
     db.close().unwrap();
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// RFC-0166 P1.4: the verified profile's write→ack runs through the proved
+/// ledger — Inv-WAL live-asserted per durable group; D1 holds over every
+/// cut; the acked puts survive the real crash+reopen. The lying seam shows
+/// the conditional premise (barrier honesty) — the ledger models the
+/// honest barrier, the lying env drops the put anyway.
+#[test]
+fn verified_write_ack_on_live_profile_is_not_ok() {
+    use pedradb_core::write_ack_kernel::{write_ack_ledger_as_is, WriteAckLedger};
+
+    // --- model side: the ledger tooth ---------------------------------
+    let mut l = WriteAckLedger::new();
+    l.on_append(64);
+    l.on_barrier();
+    l.on_ack();
+    assert_eq!(l.snapshot(), (64, 64, 64));
+    assert!(l.d1_holds_every_cut(64));
+    let bad = write_ack_ledger_as_is(WriteAckLedger::new(), 64);
+    let (acked, synced, written) = bad.snapshot();
+    assert_eq!((acked, synced, written), (64, 0, 64), "as-is acks with no barrier");
+
+    // --- live side: pinned profile, honest seam -----------------------
+    let dir = fresh_dir("write-ack-verified");
+    let rec = crate::RecordingEnv::new();
+    {
+        let db = pedradb_core::VerifiedProfile::open_with_env(&dir, rec.clone()).unwrap();
+        assert!(db.is_verified());
+        assert_eq!(db.verified_write_ack(), Some((0, 0, 0)));
+        db.put(b"vk", b"vv").unwrap();
+        let (acked, synced, written) = db
+            .verified_write_ack()
+            .expect("ledger alive while pinned");
+        assert!(acked > 0, "the Ok acked a durable group");
+        assert!(acked <= synced && synced <= written, "Inv-WAL holds live");
+        db.close().unwrap();
+    }
+    rec.crash();
+    {
+        let db = pedradb_core::VerifiedProfile::open_with_env(&dir, rec).unwrap();
+        assert_eq!(
+            db.get(b"vk").as_deref(),
+            Some(b"vv".as_ref()),
+            "pinned write→ack: the acked put survives the crash"
+        );
+        assert_eq!(db.verified_write_ack(), Some((0, 0, 0)), "fresh open, cold ledger");
+        db.close().unwrap();
+    }
+    let _ = fs::remove_dir_all(&dir);
+
+    // --- live side: lying seam suspends the premise -------------------
+    // The ledger models the honest barrier (D1's conditional premise);
+    // the lying env returns Ok and drops the bytes — the guarantee is
+    // suspended, not broken, exactly as `put_lying_never_acks` models.
+    let dir = fresh_dir("write-ack-lying");
+    let rec = crate::RecordingEnv::lying();
+    {
+        let db = pedradb_core::VerifiedProfile::open_with_env(&dir, rec.clone()).unwrap();
+        db.put(b"vk", b"vv").unwrap();
+        let (acked, _synced, written) = db.verified_write_ack().unwrap();
+        assert!(acked > 0 && written > 0, "the ledger advanced on the lying Ok");
+        db.close().unwrap();
+    }
+    rec.crash();
+    {
+        let db = pedradb_core::VerifiedProfile::open_with_env(&dir, rec).unwrap();
+        assert_eq!(db.get(b"vk"), None, "lying seam: the put is gone — premise suspended");
+        db.close().unwrap();
+    }
     let _ = fs::remove_dir_all(&dir);
 }

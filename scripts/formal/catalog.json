@@ -1175,7 +1175,7 @@
     },
     {
       "id": "discard_cut",
-      "finding": "RFC-0002 P9\u2013P10",
+      "finding": "RFC-0002 P9–P10",
       "twin_kind": "close",
       "kernel": "crates/pedradb-store/src/txn_kernel.rs",
       "twin": "crates/pedradb-store/verus/txn_kernel.rs",
@@ -2427,6 +2427,159 @@
       }
     },
     {
+      "id": "children_start",
+      "finding": "F57",
+      "twin_kind": "model",
+      "kernel": "crates/montanha-fdb-recipes/src/children_kernel.rs",
+      "twin": "crates/montanha-fdb-recipes/verus/children_range.rs",
+      "verus": "scripts/verus_children_range.sh",
+      "callers": [
+        "crates/montanha-fdb-recipes/src/lib.rs"
+      ],
+      "entry": "packed_children_start",
+      "as_is": "packed_children_start_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/montanha-fdb-recipes/src/lib.rs",
+          "handler": "range_start"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/montanha-fdb-recipes/src/children_kernel.rs",
+        "test": "packed_children_start_on_raw_parent_is_not_ok"
+      }
+    },
+    {
+      "id": "children_half_open",
+      "finding": "F57/F59",
+      "twin_kind": "model",
+      "kernel": "crates/montanha-fdb-recipes/src/children_kernel.rs",
+      "twin": "crates/montanha-fdb-recipes/verus/children_range.rs",
+      "verus": "scripts/verus_children_range.sh",
+      "callers": [
+        "crates/montanha-fdb-recipes/src/children_kernel.rs"
+      ],
+      "entry": "key_in_half_open",
+      "as_is": "key_in_half_open_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/montanha-fdb-recipes/src/children_kernel.rs",
+        "test": "key_in_half_open_on_missing_end_is_not_ok"
+      }
+    },
+    {
+      "id": "children_next_byte",
+      "finding": "F59",
+      "twin_kind": "close",
+      "kernel": "crates/montanha-fdb-recipes/src/children_kernel.rs",
+      "twin": "crates/montanha-fdb-recipes/verus/children_range.rs",
+      "verus": "scripts/verus_children_range.sh",
+      "callers": [
+        "crates/montanha-fdb-recipes/src/children_kernel.rs"
+      ],
+      "entry": "next_byte_in_packed_children",
+      "as_is": "next_byte_in_packed_children_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/montanha-fdb-recipes/src/children_kernel.rs",
+        "test": "theorem_next_byte_domain"
+      }
+    },
+    {
+      "id": "fields_kept",
+      "finding": "F60",
+      "twin_kind": "close",
+      "kernel": "crates/montanha-fdb-recipes/src/fields_kernel.rs",
+      "twin": "crates/montanha-fdb-recipes/verus/fields_nul.rs",
+      "verus": "scripts/verus_fields_nul.sh",
+      "callers": [
+        "crates/montanha-fdb-recipes/src/fields_kernel.rs"
+      ],
+      "entry": "field_kept",
+      "as_is": "field_kept_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/montanha-fdb-recipes/src/fields_kernel.rs",
+        "test": "field_kept_not_nul_offset"
+      }
+    },
+    {
+      "id": "fields_suffix",
+      "finding": "F60",
+      "twin_kind": "atom",
+      "atom": "field_kept",
+      "kernel": "crates/montanha-fdb-recipes/src/fields_kernel.rs",
+      "twin": "crates/montanha-fdb-recipes/verus/fields_nul.rs",
+      "verus": "scripts/verus_fields_nul.sh",
+      "callers": [
+        "crates/montanha-fdb-recipes/src/lib.rs"
+      ],
+      "entry": "child_bytes_after",
+      "as_is": "child_bytes_after_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/montanha-fdb-recipes/src/lib.rs",
+          "handler": "child_suffix"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/montanha-fdb-recipes/src/fields_kernel.rs",
+        "test": "unpack_keeps_nul_inside_id"
+      }
+    },
+    {
+      "id": "fields_decode",
+      "finding": "F60",
+      "twin_kind": "atom",
+      "atom": "field_kept",
+      "kernel": "crates/montanha-fdb-recipes/src/fields_kernel.rs",
+      "twin": "crates/montanha-fdb-recipes/verus/fields_nul.rs",
+      "verus": "scripts/verus_fields_nul.sh",
+      "callers": [
+        "crates/montanha-fdb-recipes/src/lib.rs"
+      ],
+      "entry": "decode_fields",
+      "as_is": "decode_fields_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/montanha-fdb-recipes/src/lib.rs",
+          "handler": "decode_pair_compat"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/montanha-fdb-recipes/src/fields_kernel.rs",
+        "test": "decode_fields_on_raw_nul_split_is_not_ok"
+      }
+    },
+    {
+      "id": "fields_pair_nul",
+      "finding": "F60",
+      "twin_kind": "atom",
+      "atom": "field_kept",
+      "kernel": "crates/montanha-fdb-recipes/src/fields_kernel.rs",
+      "twin": "crates/montanha-fdb-recipes/verus/fields_nul.rs",
+      "verus": "scripts/verus_fields_nul.sh",
+      "callers": [
+        "crates/montanha-fdb-recipes/src/lib.rs"
+      ],
+      "entry": "decode_pair_first_nul",
+      "as_is": "encode_fields_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/montanha-fdb-recipes/src/lib.rs",
+          "handler": "decode_pair_compat"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/montanha-fdb-recipes/src/fields_kernel.rs",
+        "test": "payload_round_trips_nul_zip"
+      }
+    },
+    {
       "id": "ship_guard",
       "finding": "F165",
       "twin_kind": "model",
@@ -2769,7 +2922,7 @@
     },
     {
       "id": "dictionary_link",
-      "finding": "G1/G8 (crash dictionary put\u2192get)",
+      "finding": "G1/G8 (crash dictionary put→get)",
       "twin_kind": "close",
       "kernel": "crates/pedradb-core/src/wal/reopen_kernel.rs",
       "twin": "crates/pedradb-core/verus/dictionary_link.rs",
@@ -3700,6 +3853,49 @@
           "handler": "run"
         }
       ]
+    },
+    {
+      "id": "world_trajectory",
+      "finding": "RFC-0059 P2.2",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-world/src/world_kernel.rs",
+      "twin": "crates/pedradb-world/verus/trajectory.rs",
+      "verus": "scripts/verus_world_trajectory.sh",
+      "callers": [
+        "crates/pedradb-world/src/lib.rs"
+      ],
+      "entry": "trajectory_violation",
+      "as_is": "trajectory_violation_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-world/src/lib.rs",
+          "handler": "exchange"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-world/src/world_kernel.rs",
+        "test": "trajectory_violation_on_applied_regression_is_not_ok"
+      }
+    },
+    {
+      "id": "world_trajectory_fold",
+      "finding": "RFC-0059 P2.2",
+      "twin_kind": "atom",
+      "atom": "trajectory_violation",
+      "kernel": "crates/pedradb-world/src/world_kernel.rs",
+      "twin": "crates/pedradb-world/verus/trajectory.rs",
+      "verus": "scripts/verus_world_trajectory.sh",
+      "callers": [
+        "crates/pedradb-world/src/world_kernel.rs"
+      ],
+      "entry": "check_trajectory",
+      "as_is": "check_trajectory_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-world/src/world_kernel.rs",
+        "test": "check_trajectory_on_resurrected_watermark_is_not_ok"
+      }
     },
     {
       "id": "liveness_claim",
@@ -5661,6 +5857,258 @@
       "dst_plant": {
         "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
         "test": "d1_modelo_on_live_recording_is_not_ok"
+      }
+    },
+    {
+      "id": "point_get_prefer",
+      "finding": "F84",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-store/src/si_kernel.rs",
+      "twin": "crates/pedradb-store/verus/si_reader.rs",
+      "verus": "scripts/verus_si_reader.sh",
+      "callers": [
+        "crates/pedradb-store/src/si_kernel.rs",
+        "crates/pedradb-store/src/lib.rs"
+      ],
+      "entry": "point_get_prefer_applied",
+      "as_is": "point_get_prefer_applied_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "best_reader_for_key"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-store/src/si_kernel.rs",
+        "test": "point_get_uses_range_applied"
+      }
+    },
+    {
+      "id": "point_get_wm",
+      "finding": "F42/F84",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-store/src/si_kernel.rs",
+      "twin": "crates/pedradb-store/verus/si_reader.rs",
+      "verus": "scripts/verus_si_reader.sh",
+      "callers": [
+        "crates/pedradb-store/src/si_kernel.rs"
+      ],
+      "entry": "point_get_watermark",
+      "as_is": "point_get_watermark_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-store/src/si_kernel.rs",
+        "test": "point_get_uses_range_applied"
+      }
+    },
+    {
+      "id": "snap_txn_clear",
+      "finding": "F40",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-store/src/snapshot_kernel.rs",
+      "twin": "crates/pedradb-store/verus/snapshot_kernel.rs",
+      "verus": "scripts/verus_snapshot_kernel.sh",
+      "callers": [
+        "crates/pedradb-store/src/snapshot_kernel.rs",
+        "crates/pedradb-store/src/lib.rs"
+      ],
+      "entry": "snapshot_needs_txn_meta_clear",
+      "as_is": "snapshot_needs_txn_meta_clear_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "on_install_snapshot"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-store/src/snapshot_kernel.rs",
+        "test": "always_clear_txn_meta"
+      }
+    },
+    {
+      "id": "len_tag",
+      "finding": "F80",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-store/src/index_val_kernel.rs",
+      "twin": "crates/pedradb-store/verus/index_val.rs",
+      "verus": "scripts/verus_index_val.sh",
+      "callers": [
+        "crates/pedradb-store/src/index_val_kernel.rs"
+      ],
+      "entry": "value_len_tag",
+      "as_is": "value_len_tag_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-store/src/index_val_kernel.rs",
+        "test": "len_tag_is_injective"
+      }
+    },
+    {
+      "id": "exact_children",
+      "finding": "F78/F80",
+      "twin_kind": "atom",
+      "atom": "value_len_tag",
+      "kernel": "crates/pedradb-store/src/index_val_kernel.rs",
+      "twin": "crates/pedradb-store/verus/index_val.rs",
+      "verus": "scripts/verus_index_val.sh",
+      "callers": [
+        "crates/pedradb-store/src/index_val_kernel.rs",
+        "crates/pedradb-store/src/layers.rs",
+        "crates/pedradb-store/src/fdb_layers.rs"
+      ],
+      "entry": "exact_value_children",
+      "as_is": "exact_value_children_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/layers.rs",
+          "handler": "table_index_value_range"
+        },
+        {
+          "file": "crates/pedradb-store/src/fdb_layers.rs",
+          "handler": "idx_children"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-store/src/index_val_kernel.rs",
+        "test": "as_is_leaks_nul_sibling"
+      }
+    },
+    {
+      "id": "compact_floor",
+      "finding": "F27",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-store/src/compact_kernel.rs",
+      "twin": "crates/pedradb-store/verus/compact_kernel.rs",
+      "verus": "scripts/verus_compact_kernel.sh",
+      "callers": [
+        "crates/pedradb-store/src/compact_kernel.rs",
+        "crates/pedradb-store/src/lib.rs"
+      ],
+      "entry": "compact_index_floor",
+      "as_is": "compact_index_floor_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "compact_through"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-store/src/compact_kernel.rs",
+        "test": "as_is_floor_re_requests_compacted_index"
+      }
+    },
+    {
+      "id": "compact_ready",
+      "finding": "F27",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-store/src/compact_kernel.rs",
+      "twin": "crates/pedradb-store/verus/compact_kernel.rs",
+      "verus": "scripts/verus_compact_kernel.sh",
+      "callers": [
+        "crates/pedradb-store/src/compact_kernel.rs",
+        "crates/pedradb-store/src/lib.rs"
+      ],
+      "entry": "compact_ready",
+      "as_is": "compact_ready_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "maybe_compact_logs"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-store/src/compact_kernel.rs",
+        "test": "as_is_ready_at_zero_compacts_nothing"
+      }
+    },
+    {
+      "id": "compact_peer_counts",
+      "finding": "F28",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-store/src/compact_kernel.rs",
+      "twin": "crates/pedradb-store/verus/compact_kernel.rs",
+      "verus": "scripts/verus_compact_kernel.sh",
+      "callers": [
+        "crates/pedradb-store/src/compact_kernel.rs",
+        "crates/pedradb-store/src/lib.rs"
+      ],
+      "entry": "peer_counts_for_compact",
+      "as_is": "peer_counts_for_compact_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "maybe_compact_logs"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-store/src/compact_kernel.rs",
+        "test": "offline_peer_still_counts"
+      }
+    },
+    {
+      "id": "write_ack_append",
+      "finding": "RFC-0166 P1.4",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/write_ack_kernel.rs",
+      "twin": "crates/pedradb-core/verus/write_ack.rs",
+      "verus": "scripts/verus_write_ack.sh",
+      "callers": [
+        "crates/pedradb-core/src/write_ack_kernel.rs",
+        "crates/pedradb-core/src/concurrent.rs",
+        "crates/pedradb-sim/src/three_teeth_plants.rs"
+      ],
+      "entry": "on_append",
+      "as_is": "write_ack_ledger_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+        "test": "verified_write_ack_on_live_profile_is_not_ok"
+      }
+    },
+    {
+      "id": "write_ack_barrier",
+      "finding": "RFC-0166 P1.4",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/write_ack_kernel.rs",
+      "twin": "crates/pedradb-core/verus/write_ack.rs",
+      "verus": "scripts/verus_write_ack.sh",
+      "callers": [
+        "crates/pedradb-core/src/write_ack_kernel.rs",
+        "crates/pedradb-core/src/concurrent.rs",
+        "crates/pedradb-sim/src/three_teeth_plants.rs"
+      ],
+      "entry": "on_barrier",
+      "as_is": "write_ack_ledger_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+        "test": "verified_write_ack_on_live_profile_is_not_ok"
+      }
+    },
+    {
+      "id": "write_ack_ack",
+      "finding": "RFC-0166 P1.4",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/write_ack_kernel.rs",
+      "twin": "crates/pedradb-core/verus/write_ack.rs",
+      "verus": "scripts/verus_write_ack.sh",
+      "callers": [
+        "crates/pedradb-core/src/write_ack_kernel.rs",
+        "crates/pedradb-core/src/concurrent.rs",
+        "crates/pedradb-sim/src/three_teeth_plants.rs"
+      ],
+      "entry": "on_ack",
+      "as_is": "write_ack_ledger_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+        "test": "verified_write_ack_on_live_profile_is_not_ok"
       }
     }
   ],
