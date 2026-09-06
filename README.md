@@ -142,10 +142,11 @@ lab measurements of it, not a substitute.
 ## Benchmarks
 
 The peer is **RocksDB default** (`WriteOptions.sync=false`), the class
-production Rocks runs. Linux, single guest. Ratio > 1 means PedraDB is
-faster. A win against `sync=true` would not count. macOS / APFS numbers are
-not the claim. Host noise on the 25M hydrate is about 3 s, so one lucky
-1.01× is not published as a win.
+production Rocks runs. Ratio > 1 means PedraDB is faster. Bold is a win;
+plain is a tie or parity; `—` is not measured or refused. A win against
+`sync=true` would not count. macOS / APFS numbers are not the claim.
+Protocol, per-run values, and the full loss registry live in
+[`docs/benchmarks.md`](docs/benchmarks.md).
 
 **Async WAL, same class as production Rocks.** PedraDB with WAL `write()`
 and no per-op barrier vs Rocks `sync=false`. This is engine speed at equal
@@ -169,103 +170,74 @@ The floor is `deps_raftlog` at 1.014. That is parity, not 2×.
 **With fdatasync before `Ok`** (the default) against that same async peer:
 reads stay ahead (1.13–1.99× on the smoke-scale G1 battery) with the
 barrier on the write path. Single-client write-per-op shapes lose by
-construction, one full barrier per op against the peer's zero. Group commit
-closes them under concurrency (`apply_mc4` 2.79×). The 1-client write rows
-are the price of the contract, not wins.
+construction, one full barrier per op against the peer's zero. Group
+commit closes them under concurrency (`apply_mc4` 2.79×). The 1-client
+write rows are the price of the contract, not wins.
 
-**Sorted ingest** (Linux guest; ~200 B values; latched bulk ingest skips
-WAL and memtable on the append-only family). Ratio > 1 means PedraDB is
-faster than RocksDB default. 25M and 100M rows are 3-run medians. The
-Pedra/Rocks cells in this table come from the `snapshot_backends` bench,
-reproduced in-tree by `crates/snapshot-bench` (ported from slipstream
-PR 19; peer = RocksDB default `sync=false`, `rust-rocksdb` 0.50).
+**Sorted ingest — results.** Clustered `route.svc-*` keys, 200 B values,
+1024-entry batches, 256 MiB cache, one backend per process. Harness:
+`snapshot_backends`, in-tree at `crates/snapshot-bench`. Pedra row,
+RocksDB row, ratio row. The 1M/10M rows and the 25M read cells are single
+official runs (2026-09-02/03); the 25M hydrate and every 100M cell are
+3-run medians (2026-09-03/05).
 
-| n | hydrate | settle | get_hit | prefix_scan | get_loop | multi_get | probe_miss |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| 1M | **1.82×** | **2.50×** | **1.44×** | **1.64×** | **1.36×** | **1.08×** | — |
-| 10M | **1.03×** | **7.67×** | 1.00× (tie) | **1.31×** | **1.07×** | **1.02×** | — |
-| 25M | 1.02× | **27×** | **1.14×** | **1.34×** | — | **1.27×** | — |
-| 100M | **1.27×** | **81×** | **1.07×** | **1.05×** | **1.14×** | **1.15×** | **2.71×** |
+| 1M | hydrate | settle | get_hit | prefix_scan | get_loop | multi_get | probe_miss | disk |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Pedra | 0.6 s | 0.4 s | 3.0 µs | 202 µs | 313 µs | 336 µs | — | 0.24 GiB |
+| Rocks | 1.1 s | 1.0 s | 4.3 µs | 331 µs | 424 µs | 364 µs | — | 0.21 GiB |
+| ratio | **1.82×** | **2.50×** | **1.44×** | **1.64×** | **1.36×** | **1.08×** | — | |
+
+| 10M | hydrate | settle | get_hit | prefix_scan | get_loop | multi_get | probe_miss | disk |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Pedra | 10.7 s | 0.6 s | 13.0 µs | 261 µs | 1.14 ms | 1.23 ms | — | 2.40 GiB |
+| Rocks | 11.1 s | 4.6 s | 13.0 µs | 341 µs | 1.22 ms | 1.26 ms | — | 2.10 GiB |
+| ratio | **1.03×** | **7.67×** | 1.00× (tie) | **1.31×** | **1.07×** | **1.02×** | — | |
+
+| 25M | hydrate | settle | get_hit | prefix_scan | get_loop | multi_get | probe_miss | disk |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Pedra | 29.5 s | 0.3 s | 35.2 µs | 248 µs | 3.65 ms | 3.36 ms | — | 5.96 GiB |
+| Rocks | 30.2 s | 8.1 s | 40.3 µs | 333 µs | — | 4.29 ms | — | 6.8–8.0 GiB |
+| ratio | 1.02× | **27×** | **1.14×** | **1.34×** | — | **1.27×** | — | |
+
+| 100M | hydrate | settle | get_hit | prefix_scan | get_loop | multi_get | probe_miss | disk |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Pedra | 119.4 s | 0.7 s | 63.7 µs | 305 µs | 6.15 ms | 5.84 ms | 211 ns | 24.16 GiB |
+| Rocks | 151.3 s | 56.5 s | 68.4 µs | 320 µs | 7.00 ms | 6.70 ms | 571 ns | 20.98 GiB |
+| ratio | **1.27×** | **81×** | **1.07×** | **1.05×** | **1.14×** | **1.15×** | **2.71×** | |
+
+Disk is after settle at 1M/10M/100M; the 25M row shows hydrate-time disk
+(Rocks's size moves during its settle — at 100M it lands at 20.98 GiB
+vs Pedra's 24.16 GiB).
 
 - 10M `get_hit` is a tie (confidence intervals overlap), not a win.
-- 25M hydrate (3-run median 1.02×: Pedra 29.5 s vs Rocks 30.2 s) sits
-  inside Rocks's 27.9–34.4 s band (Pedra floor 28.1–30.2 s) — parity
-  inside the ±3 s host-noise band, not a win claim. 25M `get_loop` is
-  not published: Rocks ran out of band on that lookup. Settle always
-  wins.
-- 100M used to OOM on the 3.9 GiB guest (sparse-index keys pinned the
-  ingest key pool; fixed — index boundary keys are owned copies now).
-  2026-09-04, 3 runs, same guest, bulk writer with a real bloom
-  (10 bits/key): hydrate **1.15×** (Pedra 133.4–141.4 s, Rocks
-  157.7–166.3 s). On disk Pedra 24.08 GiB (259 B/entry) ×3. The bloom
-  costs ~17 s of write-side vs the previous-writer 123.7 s median.
-- 100M reads, 2026-09-05, 3 runs (engine with per-column-family SST key
-  envelopes and a k-way disjoint-level merge for settled prefix pages):
-  `get_hit` **1.07×** (63.7 vs 68.4 µs; the first leg was 0.96×),
-  `prefix_scan` **1.05×** (304.8 vs 320.0 µs; per-run 1.13 / 1.00 / 1.02
-  — the middle run is a tie), `get_loop` **1.14×**, `multi_get`
-  **1.15×**, settle **81×** (0.7 vs 56.5 s), hydrate **1.27×** (Pedra
-  118.5–119.5 s vs Rocks 147.6–156.6 s). The prior engine's prefix loss
-  on the same harness was **0.70×** (576.8 vs 404.0 µs, 2026-09-04); the
-  k-way merge of the disjoint settled levels is what moved the cell.
-- Absent-key `probe_miss` **2.71×** (211 vs 571 ns p50; p99 231–311 ns
-  vs 842 ns–2.4 µs). slipstream's `data`/`meta` column split parks a gap
-  (`route.svc-9…` sits past the data family's hi) that a single
-  collapsed `[min,max]` SST envelope swallowed, so every miss probed
-  every table — PR 19 documents the shape. The engine now keeps one
-  envelope per column family and `get_cf` rejects the hole before
-  touching a table. The prior **0.27×** (2.4–2.5 µs vs 682–701 ns) is
-  the same harness before the fix.
+- 25M hydrate sits inside Rocks's own 27.9–34.4 s band and the ±3 s host
+  noise — parity, not a win claim.
+- 25M `get_loop`: Rocks measured out of its own 3.86–4.03 ms band on
+  every attempt (4.17–4.48 ms), so no ratio is published; Pedra's 3.65 ms
+  stands as a number, not a claim.
+- `probe_miss` at 1M–25M is being measured on the current engine (3
+  runs); the cells publish when they exist. That cell's old-engine
+  history is a named loss, kept in `docs/benchmarks.md`.
+- 100M `prefix_scan`: the middle run tied; the median is what is
+  published.
 
-**Fjall** (third peer, optional; not the gate). Same guest, in-tree
-`scale-parity-bench`, 3-run medians, 200 B values, 256 MiB cache.
-Absolute numbers only — reads are a different harness than the
-Pedra/Rocks slipstream column above. Hydrate is the comparable
-one-shot cell.
+**Fjall** (third peer; not the gate; different read harness, so absolute
+numbers only). Same guest, 200 B values, 256 MiB cache:
 
 | n | hydrate | disk | settle | probe_miss p50 | get_hit | prefix_scan | get_loop |
 |---:|---:|---:|---:|---:|---:|---:|---:|
 | 25M | 49.8 s | 5.16 GiB | 0.1 s | 1.1 µs | 40.2 µs | 272.3 µs | 3.60 ms |
 | 100M | 191.4 s | 20.61 GiB | 0.0 s | 1.1 µs | 82.0 µs | 266.8 µs | 7.82 ms |
 
-100M hydrate vs Pedra's 141.1 s on the same machine is **1.35× Pedra**
-(one-shot). No other Fjall ratio is a published claim.
+100M hydrate vs Pedra's 141.1 s in the same campaign is **1.35× Pedra**.
+No other Fjall ratio is a published claim.
 
-**Reproducing.** The in-tree harness is `scale-parity-bench` (same key
-shape: clustered `route.svc-*`, 200 B values, 1024-entry batches). One
-backend per process at 25M/100M. Pedra is always available. RocksDB and
-Fjall are optional features (Rocks needs a C++ toolchain; Fjall is pure
-Rust). Official peer remains RocksDB `WriteOptions.sync=false`.
+**Reproducing.** `scale-parity-bench` (same key shape) and the official
+`snapshot_backends` harness:
 
 ```sh
-# Pedra, 1M smoke (no extra toolchain)
 SCALE_ENTRIES=1000000 ./scripts/reproduce-scale.sh pedradb /tmp/scale-pedra
 
-# Fjall
-SCALE_ENTRIES=1000000 ./scripts/reproduce-scale.sh fjall /tmp/scale-fjall
-
-# RocksDB default (peer of the table above)
-SCALE_ENTRIES=1000000 ./scripts/reproduce-scale.sh rocksdb /tmp/scale-rocks
-
-# 100M, one backend, real disk (not tmpfs):
-SCALE_ENTRIES=100000000 SCALE_CACHE_BYTES=268435456 TMPDIR=/data/stores \
-  ./scripts/reproduce-scale.sh pedradb /data/scale-100m-pedra
-```
-
-YCSB / dependents (`rocks-parity-bench`): `compat` (Pedra), `rocksdb`
-(`--features real`), or `fjall` (`--features fjall`, YCSB-only — no named
-CFs). Official peer remains RocksDB `WriteOptions.sync=false`.
-
-The Pedra/Rocks **sorted-ingest** column is reproduced by
-`crates/snapshot-bench` — the `snapshot_backends` bench ported from
-slipstream PR 19, byte-faithful workload, in its own workspace (it pins
-the peer to `rust-rocksdb` 0.50; the engine workspace pins 0.22 — one
-`-sys` per graph). Published cells are 3-run criterion medians, one
-backend per process (`SLIPSTREAM_BENCH_BACKENDS=pedradb`, then
-`=rocksdb`), 256 MiB cache, `PEDRA_STAGE_MAX_BYTES=67108864`, `TMPDIR`
-on NVMe:
-
-```sh
 cd crates/snapshot-bench
 SLIPSTREAM_BENCH_BACKENDS=pedradb SLIPSTREAM_BENCH_ENTRIES=1000000 \
 SLIPSTREAM_BENCH_CACHE_BYTES=268435456 PEDRA_STAGE_MAX_BYTES=67108864 \
@@ -273,6 +245,16 @@ TMPDIR=/data/stores \
   cargo bench --bench snapshot_backends --features fjall,rocksdb,pedradb \
   -- 'get_hit|prefix_scan|lookup_100'
 ```
+
+One backend per process (`SLIPSTREAM_BENCH_BACKENDS`; the similar
+`SLIPSTREAM_BACKENDS` is not read by this harness). The RocksDB peer
+needs a C++ toolchain; Fjall and Pedra are pure Rust. The official leg
+protocol — smoke, 3 runs, medians, gates — is in
+[`docs/benchmarks.md`](docs/benchmarks.md) and
+[`crates/snapshot-bench/README.md`](crates/snapshot-bench/README.md).
+YCSB / dependents (`rocks-parity-bench`): `compat` (Pedra), `rocksdb`
+(`--features real`), or `fjall` (`--features fjall`, YCSB-only — no
+named CFs).
 
 ## How it's tested
 
