@@ -6186,6 +6186,60 @@
         "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
         "test": "r1_modelo_on_live_delete_shape_is_not_ok"
       }
+    },
+    {
+      "id": "tx_abort",
+      "entry": "tx_abort",
+      "as_is": "tx_abort_as_is",
+      "finding": "RFC-0166 P2.2",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-store/src/t1_modelo_kernel.rs",
+      "twin": "crates/pedradb-store/verus/t1_modelo.rs",
+      "verus": "scripts/verus_t1_modelo.sh",
+      "callers": [
+        "crates/pedradb-store/src/t1_modelo_kernel.rs"
+      ],
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-store/src/t1_modelo_kernel.rs",
+        "test": "t1_modelo_on_live_abort_reopen_is_not_ok"
+      }
+    },
+    {
+      "id": "tx_recover",
+      "entry": "tx_recover",
+      "as_is": "tx_recover_as_is",
+      "finding": "RFC-0166 P2.2",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-store/src/t1_modelo_kernel.rs",
+      "twin": "crates/pedradb-store/verus/t1_modelo.rs",
+      "verus": "scripts/verus_t1_modelo.sh",
+      "callers": [
+        "crates/pedradb-store/src/t1_modelo_kernel.rs"
+      ],
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-store/src/t1_modelo_kernel.rs",
+        "test": "t1_modelo_on_live_abort_reopen_is_not_ok"
+      }
+    },
+    {
+      "id": "t1_modelo",
+      "entry": "t1_modelo",
+      "as_is": "t1_modelo_as_is",
+      "finding": "RFC-0166 P2.2",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-store/src/t1_modelo_kernel.rs",
+      "twin": "crates/pedradb-store/verus/t1_modelo.rs",
+      "verus": "scripts/verus_t1_modelo.sh",
+      "callers": [
+        "crates/pedradb-store/src/t1_modelo_kernel.rs"
+      ],
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-store/src/t1_modelo_kernel.rs",
+        "test": "t1_modelo_on_live_abort_reopen_is_not_ok"
+      }
     }
   ],
   "clones": [

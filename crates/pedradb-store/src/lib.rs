@@ -60,6 +60,7 @@ mod snapshot_kernel;
 pub mod tcp;
 pub mod tls;
 pub mod tx_glue_kernel;
+mod t1_modelo_kernel;
 mod txn_kernel;
 mod vote_kernel;
 
@@ -138,6 +139,10 @@ pub use tls::{
     tls_installed, IoBox,
 };
 pub use tx_glue_kernel::{tx_range_action, TxRangeAction};
+pub use t1_modelo_kernel::{
+    t1_holds_of, t1_modelo, t1_modelo_as_is, tx_abort, tx_abort_as_is, tx_apply_one, tx_commit,
+    tx_recover, tx_recover_as_is, tx_stage, tx_state_of, TxState,
+};
 pub use txn_kernel::{
     discard_cut, discard_cut_as_is, leftover_txn_is_aborted, leftover_txn_is_aborted_as_is,
     next_txn_id_after, next_txn_id_as_is, prepare_error_aborts_earlier,
