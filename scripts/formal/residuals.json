@@ -71,11 +71,11 @@
    "crates/pedradb-raft/src/c1_modelo_kernel.rs"
   ],
   "kernel_files": 53,
-  "kernel_loc": 15715,
-  "handler_loc": 102893,
+  "kernel_loc": 15785,
+  "handler_loc": 102903,
   "db_rs_extracted": false,
   "proof_depth": {
-   "extract": 45,
+   "extract": 46,
    "close": 218,
    "atom": 0,
    "model": 13,

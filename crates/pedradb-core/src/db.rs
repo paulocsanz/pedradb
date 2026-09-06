@@ -9129,7 +9129,9 @@ impl<E: Env> Db<E> {
     /// One WAL `fdatasync` for a group of already-appended records.
     pub(crate) fn wal_sync_group(&mut self) -> Result<()> {
         self.ensure_not_fenced()?;
-        if let Err(e) = self.wal.lock().sync_data() {
+        let sync_err = self.wal.lock().sync_data().err();
+        if crate::write_admission_kernel::fence_on_sync_fail(true, sync_err.is_some()) {
+            let e = sync_err.expect("fence_on_sync_fail ⇒ Some");
             self.durability_fenced = true;
             return Err(e);
         }
@@ -9762,7 +9764,7 @@ impl<E: Env> Db<E> {
 
     /// When open options require durability, fsync the directory (propagate errors).
     fn sync_dir_if_required(&self, dir: &Path) -> Result<()> {
-        if self.sync {
+        if crate::write_admission_kernel::dir_sync_required(self.sync) {
             self.env.sync_dir(dir)?;
         }
         Ok(())
@@ -9782,20 +9784,34 @@ impl<E: Env> Db<E> {
     }
 
     /// Per-CF stall (RFC-0065 P1.2). Empty `families` = global (kernel / mixed group).
+    ///
+    /// Data-fate (mem/L0 over limit) is `write_admit`. Drain/flush I/O stays
+    /// trampoline (RFC-0171 P1.1).
     pub(crate) fn ensure_write_admitted_for(&mut self, families: &[String]) -> Result<()> {
         let per_cf = !self.physical_cfs.is_empty() && !families.is_empty();
-        // Mem bound first: flush is the natural drain for mem pressure.
-        if let Some(limit) = self.write_stall_mem_bytes {
-            let mut mem_bytes = if per_cf {
+        let mem_armed = self.write_stall_mem_bytes.is_some();
+        let mem_limit = self.write_stall_mem_bytes.unwrap_or(0);
+        let measure_mem = |db: &Self| -> usize {
+            if per_cf {
                 families
                     .iter()
-                    .map(|f| self.mem.approx_memory_usage_cf(f))
+                    .map(|f| db.mem.approx_memory_usage_cf(f))
                     .max()
                     .unwrap_or(0)
             } else {
-                self.mem.approx_memory_usage()
-            };
-            if mem_bytes >= limit {
+                db.mem.approx_memory_usage()
+            }
+        };
+        let mut mem_bytes = measure_mem(self);
+        match crate::write_admission_kernel::write_admit(
+            mem_bytes as u64,
+            mem_armed,
+            mem_limit as u64,
+            0,
+            false,
+            0,
+        ) {
+            crate::write_admission_kernel::WriteAdmit::StallMem => {
                 if self.write_stall_drain {
                     if per_cf {
                         for f in families {
@@ -9804,98 +9820,92 @@ impl<E: Env> Db<E> {
                     } else {
                         let _ = self.flush();
                     }
-                    mem_bytes = if per_cf {
-                        families
-                            .iter()
-                            .map(|f| self.mem.approx_memory_usage_cf(f))
-                            .max()
-                            .unwrap_or(0)
-                    } else {
-                        self.mem.approx_memory_usage()
-                    };
+                    mem_bytes = measure_mem(self);
                 }
                 match crate::write_admission_kernel::write_admit(
                     mem_bytes as u64,
-                    true,
-                    limit as u64,
+                    mem_armed,
+                    mem_limit as u64,
                     0,
                     false,
                     0,
                 ) {
                     crate::write_admission_kernel::WriteAdmit::StallMem => {
                         self.write_stall_count = self.write_stall_count.saturating_add(1);
-                        return Err(CoreError::WriteStallMem { mem_bytes, limit });
+                        return Err(CoreError::WriteStallMem {
+                            mem_bytes,
+                            limit: mem_limit,
+                        });
                     }
                     _ => {}
                 }
             }
+            _ => {}
         }
 
-        let l0_of = |db: &Self, fam: Option<&str>| -> usize {
-            match fam {
-                Some(f) if !db.physical_cfs.is_empty() => db.level_file_count_cf(f),
-                _ => db.level_file_count(0),
-            }
-        };
-
-        // Soft pressure (b): drain once when L0 is elevated, then continue to hard check.
-        if let Some(soft) = self.write_pressure_l0 {
-            let hit = if per_cf {
-                families.iter().any(|f| l0_of(self, Some(f)) >= soft)
-            } else {
-                l0_of(self, None) >= soft
-            };
-            if hit {
-                self.drain_l0_once();
-                self.write_pressure_count = self.write_pressure_count.saturating_add(1);
-            }
-        }
-
-        let Some(limit) = self.write_stall_l0 else {
-            return Ok(());
-        };
-        let mut l0 = if per_cf {
-            families
-                .iter()
-                .map(|f| l0_of(self, Some(f)))
-                .max()
-                .unwrap_or(0)
-        } else {
-            l0_of(self, None)
-        };
-        if l0 < limit {
-            return Ok(());
-        }
-        if self.write_stall_drain {
-            // One honest self-help pass — no sleep, no unbounded loop.
-            self.drain_l0_once();
-            l0 = if per_cf {
+        let measure_l0 = |db: &Self| -> usize {
+            if per_cf {
                 families
                     .iter()
-                    .map(|f| l0_of(self, Some(f)))
+                    .map(|f| db.level_file_count_cf(f))
                     .max()
                     .unwrap_or(0)
             } else {
-                l0_of(self, None)
-            };
-            if l0 < limit {
-                return Ok(());
+                db.level_file_count(0)
             }
+        };
+
+        let pressure_armed = self.write_pressure_l0.is_some();
+        let soft = self.write_pressure_l0.unwrap_or(0);
+        let l0_pressure = measure_l0(self);
+        if matches!(
+            crate::write_admission_kernel::write_admit(
+                0,
+                false,
+                0,
+                l0_pressure as u64,
+                pressure_armed,
+                soft as u64,
+            ),
+            crate::write_admission_kernel::WriteAdmit::StallL0
+        ) {
+            self.drain_l0_once();
+            self.write_pressure_count = self.write_pressure_count.saturating_add(1);
         }
+
+        let l0_armed = self.write_stall_l0.is_some();
+        let l0_limit = self.write_stall_l0.unwrap_or(0);
+        let mut l0 = measure_l0(self);
         match crate::write_admission_kernel::write_admit(
             0,
             false,
             0,
             l0 as u64,
-            true,
-            limit as u64,
+            l0_armed,
+            l0_limit as u64,
         ) {
             crate::write_admission_kernel::WriteAdmit::StallL0 => {
-                self.write_stall_count = self.write_stall_count.saturating_add(1);
-                Err(CoreError::WriteStall {
-                    l0_files: l0,
-                    limit,
-                })
+                if self.write_stall_drain {
+                    self.drain_l0_once();
+                    l0 = measure_l0(self);
+                }
+                match crate::write_admission_kernel::write_admit(
+                    0,
+                    false,
+                    0,
+                    l0 as u64,
+                    l0_armed,
+                    l0_limit as u64,
+                ) {
+                    crate::write_admission_kernel::WriteAdmit::StallL0 => {
+                        self.write_stall_count = self.write_stall_count.saturating_add(1);
+                        Err(CoreError::WriteStall {
+                            l0_files: l0,
+                            limit: l0_limit,
+                        })
+                    }
+                    _ => Ok(()),
+                }
             }
             _ => Ok(()),
         }

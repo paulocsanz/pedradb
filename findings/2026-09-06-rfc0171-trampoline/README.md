@@ -23,5 +23,6 @@ Trampoline: `env.exists`, `metadata_len`, `open_append`, `set_len`, `sync_dir`,
 
 ## Freeze
 
-`handler_loc` 102893 (strictly below freeze 103312 on HEAD `b9c1859a`).
-`kernel_loc` 15715 (53 enrolled paths; write_admission 98 → 740).
+`handler_loc` 102903 (strictly below freeze 103312 on HEAD `b9c1859a`).
+`kernel_loc` 15785 (53 enrolled paths; write_admission 98 → 810).
+`ensure_write_admitted_for` data-fate is `write_admit` (drain/flush I/O trampoline).

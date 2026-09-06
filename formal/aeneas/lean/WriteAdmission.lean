@@ -43,3 +43,9 @@ theorem wal_sync_required_client_true :
     wal_sync_required true true false = ok true := by
   unfold wal_sync_required
   rfl
+
+/-- Open-options sync requires a directory fsync after rename/create. -/
+theorem dir_sync_required_when_sync :
+    dir_sync_required true = ok true := by
+  unfold dir_sync_required
+  rfl

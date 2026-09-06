@@ -67,6 +67,12 @@ macro_rules! fence_on_sync_fail_body {
     };
 }
 
+macro_rules! dir_sync_required_body {
+    ($sync:expr) => {
+        $sync
+    };
+}
+
 macro_rules! torn_head_empty_log_body {
     ($len:expr, $tiny_max:expr) => {
         $len < $tiny_max
@@ -245,6 +251,22 @@ pub fn pit_resync_needs_rewrite(is_resync: bool) -> bool {
 /// AS-IS: never rewrite (next fail-closed open sees mid-log damage).
 #[must_use]
 pub fn pit_resync_needs_rewrite_as_is(_is_resync: bool) -> bool {
+    false
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// Open-options `sync` requires a directory fsync after rename/create
+/// (CURRENT, MANIFEST, SST publish).
+#[must_use]
+pub fn dir_sync_required(sync: bool) -> bool {
+    dir_sync_required_body!(sync)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: never dir-fsync — the dentry of CURRENT/MANIFEST/SST can vanish
+/// after a crash even though the file contents were durable.
+#[must_use]
+pub fn dir_sync_required_as_is(_sync: bool) -> bool {
     false
 }
 
@@ -492,6 +514,37 @@ pub fn pit_resync_needs_rewrite_as_is(is_resync: bool) -> (d: bool)
     false
 }
 
+pub open spec fn dir_sync_required_spec(sync: bool) -> bool {
+    sync
+}
+
+pub fn dir_sync_required(sync: bool) -> (d: bool)
+    ensures
+        d == dir_sync_required_spec(sync),
+{
+    dir_sync_required_body!(sync)
+}
+
+pub open spec fn dir_sync_required_as_is_spec(_sync: bool) -> bool {
+    false
+}
+
+pub fn dir_sync_required_as_is(sync: bool) -> (d: bool)
+    ensures
+        d == dir_sync_required_as_is_spec(sync),
+        d == false,
+{
+    let _ = sync;
+    false
+}
+
+proof fn lemma_as_is_skips_dir_sync()
+    ensures
+        dir_sync_required_spec(true),
+        !dir_sync_required_as_is_spec(true),
+{
+}
+
 proof fn lemma_as_is_ignores_stall()
     ensures
         !write_admission_idle_spec(true, false, false),
@@ -565,6 +618,16 @@ mod tests {
     }
 
     #[test]
+    fn dir_sync_required_on_live_sync_is_not_ok() {
+        assert!(dir_sync_required(true));
+        assert!(
+            !dir_sync_required_as_is(true),
+            "AS-IS dente: never dir-fsync"
+        );
+        assert!(!dir_sync_required(false));
+    }
+
+    #[test]
     fn torn_head_is_empty_log_on_live_large_wal_is_not_ok() {
         assert!(torn_head_is_empty_log(8, TINY_WAL_EMPTY_MAX));
         assert!(
@@ -605,6 +668,9 @@ mod tests {
             "apply_batch_with",
             "commit_ops_with",
             "alloc_seq",
+            "wal_sync_group",
+            "sync_dir_if_required",
+            "ensure_write_admitted_for",
         ];
         let rec_fns = ["open_with_env_sourced"];
         let mut bad = Vec::new();
@@ -685,10 +751,6 @@ mod tests {
                 && (bytes[i + 2] == b' ' || bytes[i + 2] == b'(' || bytes[i + 2] == b'\n');
             if at_if {
                 let rest = &body[i + 2..];
-                if rest.trim_start().starts_with("let ") {
-                    i += 2;
-                    continue;
-                }
                 let end = rest.as_bytes().iter().position(|&b| b == B_OPEN);
                 if let Some(end) = end {
                     out.push(rest[..end].trim().to_string());
@@ -712,6 +774,14 @@ mod tests {
             || cond.contains("source")
             || cond.contains("sst_payload")
             || cond.contains("buggify")
+            || cond.contains("per_cf")
+            || cond.contains("write_stall_drain")
+            || cond.contains("defer_auto_compact")
+            || cond.contains("physical_cfs")
+            || cond.contains("resync_origin")
+            || cond.contains("max_sequence")
+            || cond.contains("large_value_threshold")
+            || cond.contains("auto_blob_gc")
     }
 
     fn is_kernel_pred(cond: &str) -> bool {
@@ -725,11 +795,11 @@ mod tests {
             || cond.contains("wal_state_kernel::")
             || cond.contains("write_admission_idle(")
             || cond.contains("write_admit(")
-            || cond.contains("ensure_write_admitted")
             || cond.contains("wal_sync_required(")
             || cond.contains("seq_exhausted(")
             || cond.contains("batch_is_empty(")
             || cond.contains("fence_on_sync_fail(")
+            || cond.contains("dir_sync_required(")
             || cond.contains("torn_head_is_empty_log(")
             || cond.contains("torn_tail_needs_cut(")
             || cond.contains("seq_after_feed(")
