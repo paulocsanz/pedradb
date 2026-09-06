@@ -36,12 +36,12 @@
 use std::hint::black_box;
 use std::path::Path;
 
-use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use snapshot_bench::snapshot::SnapshotStore;
+use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
 use snapshot_bench::cellcost;
+use snapshot_bench::snapshot::SnapshotStore;
 use snapshot_bench::{
-    FjallConfig, FjallSnapshot, KvEntry, KvUpdate, PedraDbConfig, PedraDbSnapshot, RocksDbConfig,
-    RocksDbReader, RocksDbSnapshot, PedraDbReader, VersionToken, WatchCursor,
+    FjallConfig, FjallSnapshot, KvEntry, KvUpdate, PedraDbConfig, PedraDbReader, PedraDbSnapshot,
+    RocksDbConfig, RocksDbReader, RocksDbSnapshot, VersionToken, WatchCursor,
 };
 use tempfile::TempDir;
 
@@ -149,7 +149,11 @@ fn value_for(pool: &[u8], i: usize, len: usize) -> &[u8] {
 fn hydrate<S: SnapshotStore>(store: &mut S, n: usize, pool: &[u8], vlen: usize) {
     let mut batch = Vec::with_capacity(APPLY_BATCH);
     let mut i = 0usize;
-    let progress_every = if n >= 10_000_000 { 10_000_000 } else { usize::MAX };
+    let progress_every = if n >= 10_000_000 {
+        10_000_000
+    } else {
+        usize::MAX
+    };
     let started = std::time::Instant::now();
     while i < n {
         batch.clear();
@@ -235,9 +239,7 @@ fn free_disk_bytes(path: &Path) -> Option<u64> {
         .output()
         .ok()?;
     let text = String::from_utf8_lossy(&out.stdout);
-    text.lines()
-        .nth(1)
-        .and_then(|l| l.trim().parse().ok())
+    text.lines().nth(1).and_then(|l| l.trim().parse().ok())
 }
 
 fn open_fjall(path: &Path) -> FjallSnapshot {
@@ -383,14 +385,10 @@ fn bench_one_backend_reads(
             probe_percentiles(&format!("probe_hit/{name}"), |i| {
                 let _ = black_box(store.get(&key(i)).expect("get"));
             });
-            probe_percentiles(&format!("probe_miss/{name}"), |i| {
-                let _ = black_box(store.get(&miss_key(i)).expect("get"));
-            });
+            bench_probe_miss(c, name, n, |i| store.get(&miss_key(i)).expect("get"));
             bench_get_hit(c, name, n, |i| store.get(&key(i)).expect("get"));
             bench_prefix_scan(c, name, n, |prefix, f| {
-                store
-                    .for_each_in_range(prefix, |e| f(e))
-                    .expect("scan");
+                store.for_each_in_range(prefix, |e| f(e)).expect("scan");
             });
         }
         Backend::RocksDb => {
@@ -405,14 +403,10 @@ fn bench_one_backend_reads(
             probe_percentiles(&format!("probe_hit/{name}"), |i| {
                 let _ = black_box(store.get(&key(i)).expect("get"));
             });
-            probe_percentiles(&format!("probe_miss/{name}"), |i| {
-                let _ = black_box(store.get(&miss_key(i)).expect("get"));
-            });
+            bench_probe_miss(c, name, n, |i| store.get(&miss_key(i)).expect("get"));
             bench_get_hit(c, name, n, |i| store.get(&key(i)).expect("get"));
             bench_prefix_scan(c, name, n, |prefix, f| {
-                store
-                    .for_each_in_range(prefix, |e| f(e))
-                    .expect("scan");
+                store.for_each_in_range(prefix, |e| f(e)).expect("scan");
             });
             bench_lookup_100(c, name, n, &reader);
         }
@@ -428,14 +422,10 @@ fn bench_one_backend_reads(
             probe_percentiles(&format!("probe_hit/{name}"), |i| {
                 let _ = black_box(store.get(&key(i)).expect("get"));
             });
-            probe_percentiles(&format!("probe_miss/{name}"), |i| {
-                let _ = black_box(store.get(&miss_key(i)).expect("get"));
-            });
+            bench_probe_miss(c, name, n, |i| store.get(&miss_key(i)).expect("get"));
             bench_get_hit(c, name, n, |i| store.get(&key(i)).expect("get"));
             bench_prefix_scan(c, name, n, |prefix, f| {
-                store
-                    .for_each_in_range(prefix, |e| f(e))
-                    .expect("scan");
+                store.for_each_in_range(prefix, |e| f(e)).expect("scan");
             });
             bench_lookup_100_pedra(c, name, n, &reader);
         }
@@ -467,6 +457,30 @@ where
     g.finish();
     drop(_cell);
     cellcost::flush_group("get_hit");
+}
+
+fn bench_probe_miss<F>(c: &mut Criterion, name: &str, n: usize, mut get: F)
+where
+    F: FnMut(usize) -> Option<KvEntry>,
+{
+    let mut g = c.benchmark_group("probe_miss");
+    g.throughput(Throughput::Elements(1));
+    if n >= SEQUENTIAL_ENTRIES {
+        g.sample_size(30);
+        g.warm_up_time(std::time::Duration::from_secs(2));
+        g.measurement_time(std::time::Duration::from_secs(10));
+    }
+    let mut state = 0x0123_4567_89AB_CDEFu64;
+    let _cell = cellcost::Guard::new("probe_miss", name);
+    g.bench_function(name, |b| {
+        b.iter(|| {
+            let i = (next_rand(&mut state) % n as u64) as usize;
+            black_box(get(i))
+        });
+    });
+    g.finish();
+    drop(_cell);
+    cellcost::flush_group("probe_miss");
 }
 
 fn bench_prefix_scan<F>(c: &mut Criterion, name: &str, n: usize, mut scan: F)

@@ -198,11 +198,8 @@ fn run_one(store: &mut dyn ScaleStore, dir: &Path, n: usize, vlen: usize, pool: 
         hit.iter().copied().max().unwrap_or(0) as f64 / 1000.0,
     );
     eprintln!(
-        "probe_miss/{label}: p50 {:.1}µs / p99 {:.1}µs / p999 {:.1}µs / max {:.1}µs",
-        pct_us(&mut miss, 0.50),
-        pct_us(&mut miss, 0.99),
-        pct_us(&mut miss, 0.999),
-        miss.iter().copied().max().unwrap_or(0) as f64 / 1000.0,
+        "probe_miss/{label}: mean {:.1}µs (n={PROBES})",
+        mean_us(&miss)
     );
 
     let mut gstate = 0xDEAD_BEEFu64;
