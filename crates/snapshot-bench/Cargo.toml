@@ -1,0 +1,35 @@
+# Own workspace, deliberately: the official protocol pins the RocksDB peer to
+# rust-rocksdb 0.50 (RocksDB 11.1.1), while the engine workspace's parity
+# harness pins rocksdb 0.22 — two -sys crates may not share one dependency
+# graph (`links = "rocksdb"` conflict). Mirrors upstream, where the bench also
+# lives in its own workspace with the engine as a path dependency.
+[workspace]
+resolver = "2"
+
+[package]
+name = "snapshot-bench"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.88"
+description = "snapshot_backends comparative benchmark harness (fjall vs RocksDB vs PedraDB) on the sorted-ingest route-fold workload — ported from beyondoss/slipstream (MIT), branch cursor/pedradb-snapshot-adapter-cb1b @ d3bc6a4, trimmed to the bench surface"
+
+[dependencies]
+thiserror = "2"
+fjall = { version = "3.1.4", optional = true }
+rocksdb = { package = "rust-rocksdb", version = "0.50", optional = true, default-features = false, features = ["lz4", "zstd", "bindgen-runtime"] }
+rocksdb-compat = { path = "../rocksdb-compat", optional = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+tempfile = "3"
+
+[[bench]]
+name = "snapshot_backends"
+harness = false
+required-features = ["fjall", "rocksdb", "pedradb"]
+
+[features]
+fjall = ["dep:fjall"]
+rocksdb = ["dep:rocksdb"]
+pedradb = ["dep:rocksdb-compat"]
