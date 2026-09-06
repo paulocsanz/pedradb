@@ -10,9 +10,16 @@ calls `write_admission_kernel::write_admission_idle`. Production `db.rs` still
 owns the `Option` knobs; the kernel sees three bools.
 
 - kernel: `crates/pedradb-core/src/write_admission_kernel.rs`
-- twin: `crates/pedradb-core/verus/write_admission.rs` (3 verified / 0 errors)
+- twin: `crates/pedradb-core/verus/write_admission.rs` (6 verified / 0 errors)
 - plant: `write_admission_idle_on_live_stall_is_not_ok`
 - Aeneas: `SOURCE.write_admission` + `WriteAdmission.lean` (no hole)
+
+`Db::ensure_write_admitted_for` hard stall (mem then L0, after optional drain)
+calls `write_admission_kernel::write_admit`. Drain/flush stays glue.
+
+- entry: `write_admit` / as-is always `Ok`
+- plant: `write_admit_on_live_mem_over_is_not_ok`
+- Lean: `write_admit_mem_over_stalls` / `write_admit_as_is_dente`
 
 ## Remaining candidates (next slices, one each)
 
@@ -25,7 +32,6 @@ Next data-fate `if`s that still live in glue (not a catalog `entry`):
 
 | Fn | Decision | Why it is data-fate |
 |----|----------|---------------------|
-| `ensure_write_admitted_for` | hard stall vs drain when mem/L0 over limit | sibling of idle gate; live stall path |
 | `maybe_auto_flush` | mem bytes vs `write_buffer` / per-CF | whether a write becomes an SST |
 | `maybe_auto_compact` | L0 count / SST bytes fire compact | whether versions disappear |
 | `compact_family_key` | empty `physical_cfs` ⇒ `""` | compact grouping |

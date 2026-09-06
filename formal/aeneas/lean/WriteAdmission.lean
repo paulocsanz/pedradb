@@ -22,3 +22,18 @@ theorem write_admission_idle_as_is_dente :
     write_admission_idle_as_is true true true = ok true := by
   unfold write_admission_idle_as_is
   rfl
+
+/-- Hard admit: mem over an armed limit is StallMem. -/
+theorem write_admit_mem_over_stalls :
+    write_admit 100#u64 true 50#u64 0#u64 false 0#u64
+      = ok WriteAdmit.StallMem := by
+  unfold write_admit
+  have h : (100#u64 ≥ 50#u64) = true := by native_decide
+  simp [h]
+
+/-- AS-IS dente: mem over still admits. -/
+theorem write_admit_as_is_dente :
+    write_admit_as_is 100#u64 true 50#u64 8#u64 true 4#u64
+      = ok WriteAdmit.Ok := by
+  unfold write_admit_as_is
+  rfl

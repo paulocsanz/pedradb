@@ -90,6 +90,8 @@
   - `write_admission_idle_matches_spec` (all knobs off → `ok true`)
   - `write_admission_idle_mem_stall_refuses` (`ok false`)
   - `write_admission_idle_as_is_dente` (stalls ignored → `ok true`)
+  - `write_admit_mem_over_stalls` (armed mem over → `StallMem`)
+  - `write_admit_as_is_dente` (mem over still `Ok`)
 
 ## What we may say
 

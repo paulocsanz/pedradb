@@ -9816,9 +9816,19 @@ impl<E: Env> Db<E> {
                         self.mem.approx_memory_usage()
                     };
                 }
-                if mem_bytes >= limit {
-                    self.write_stall_count = self.write_stall_count.saturating_add(1);
-                    return Err(CoreError::WriteStallMem { mem_bytes, limit });
+                match crate::write_admission_kernel::write_admit(
+                    mem_bytes as u64,
+                    true,
+                    limit as u64,
+                    0,
+                    false,
+                    0,
+                ) {
+                    crate::write_admission_kernel::WriteAdmit::StallMem => {
+                        self.write_stall_count = self.write_stall_count.saturating_add(1);
+                        return Err(CoreError::WriteStallMem { mem_bytes, limit });
+                    }
+                    _ => {}
                 }
             }
         }
@@ -9874,11 +9884,23 @@ impl<E: Env> Db<E> {
                 return Ok(());
             }
         }
-        self.write_stall_count = self.write_stall_count.saturating_add(1);
-        Err(CoreError::WriteStall {
-            l0_files: l0,
-            limit,
-        })
+        match crate::write_admission_kernel::write_admit(
+            0,
+            false,
+            0,
+            l0 as u64,
+            true,
+            limit as u64,
+        ) {
+            crate::write_admission_kernel::WriteAdmit::StallL0 => {
+                self.write_stall_count = self.write_stall_count.saturating_add(1);
+                Err(CoreError::WriteStall {
+                    l0_files: l0,
+                    limit,
+                })
+            }
+            _ => Ok(()),
+        }
     }
 
     pub(crate) fn maybe_auto_flush(&mut self) -> Result<()> {

@@ -6305,6 +6305,28 @@
         "file": "crates/pedradb-core/src/write_admission_kernel.rs",
         "test": "write_admission_idle_on_live_stall_is_not_ok"
       }
+    },
+    {
+      "id": "write_admit",
+      "finding": "RFC-0170 P2.4",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "twin": "crates/pedradb-core/verus/write_admission.rs",
+      "verus": "scripts/verus_write_admission.sh",
+      "callers": [
+        "crates/pedradb-core/src/db.rs"
+      ],
+      "entry": "write_admit",
+      "data_fate": true,
+      "handlers": [
+        "ensure_write_admitted_for"
+      ],
+      "as_is": "write_admit_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+        "test": "write_admit_on_live_mem_over_is_not_ok"
+      }
     }
   ],
   "clones": [

@@ -15,7 +15,7 @@ set_option maxRecDepth 2048
 namespace pedra_aeneas_write_admission_kernel
 
 /-- [pedra_aeneas_write_admission_kernel::write_admission_idle]:
-    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 11:0-13:1
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 12:0-14:1
     Visibility: public -/
 def write_admission_idle
   (mem_stall : Bool) (pressure_l0 : Bool) (stall_l0 : Bool) : Result Bool := do
@@ -26,12 +26,135 @@ def write_admission_idle
        else ok (¬ stall_l0)
 
 /-- [pedra_aeneas_write_admission_kernel::write_admission_idle_as_is]:
-    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 17:0-19:1
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 18:0-20:1
     Visibility: public -/
 def write_admission_idle_as_is
   (_mem_stall : Bool) (_pressure_l0 : Bool) (_stall_l0 : Bool) :
   Result Bool
   := do
   ok true
+
+/-- [pedra_aeneas_write_admission_kernel::WriteAdmit]
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 24:0-31:1
+    Visibility: public -/
+@[discriminant isize]
+inductive WriteAdmit where
+| Ok : WriteAdmit
+| StallMem : WriteAdmit
+| StallL0 : WriteAdmit
+
+/-- [pedra_aeneas_write_admission_kernel::{impl core::clone::Clone for pedra_aeneas_write_admission_kernel::WriteAdmit}::clone]:
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 23:9-23:14
+    Visibility: public -/
+def WriteAdmit.Insts.CoreCloneClone.clone
+  (self : WriteAdmit) : Result WriteAdmit := do
+  ok self
+
+/-- Trait implementation: [pedra_aeneas_write_admission_kernel::{impl core::clone::Clone for pedra_aeneas_write_admission_kernel::WriteAdmit}]
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 23:9-23:14 -/
+@[reducible]
+def WriteAdmit.Insts.CoreCloneClone : core.clone.Clone WriteAdmit := {
+  clone := WriteAdmit.Insts.CoreCloneClone.clone
+}
+
+/-- Trait implementation: [pedra_aeneas_write_admission_kernel::{impl core::marker::Copy for pedra_aeneas_write_admission_kernel::WriteAdmit}]
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 23:16-23:20 -/
+@[reducible]
+def WriteAdmit.Insts.CoreMarkerCopy : core.marker.Copy WriteAdmit := {
+  cloneInst := WriteAdmit.Insts.CoreCloneClone
+}
+
+/-- [pedra_aeneas_write_admission_kernel::{impl core::fmt::Debug for pedra_aeneas_write_admission_kernel::WriteAdmit}::fmt]:
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 23:22-23:27
+    Visibility: public -/
+def WriteAdmit.Insts.CoreFmtDebug.fmt
+  (self : WriteAdmit) (f : core.fmt.Formatter) :
+  Result ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter)
+  := do
+  match self with
+  | WriteAdmit.Ok => core.fmt.Formatter.write_str f (toStr "Ok")
+  | WriteAdmit.StallMem => core.fmt.Formatter.write_str f (toStr "StallMem")
+  | WriteAdmit.StallL0 => core.fmt.Formatter.write_str f (toStr "StallL0")
+
+/-- Trait implementation: [pedra_aeneas_write_admission_kernel::{impl core::fmt::Debug for pedra_aeneas_write_admission_kernel::WriteAdmit}]
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 23:22-23:27 -/
+@[reducible]
+def WriteAdmit.Insts.CoreFmtDebug : core.fmt.Debug WriteAdmit := {
+  fmt := WriteAdmit.Insts.CoreFmtDebug.fmt
+}
+
+/-- Trait implementation: [pedra_aeneas_write_admission_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_write_admission_kernel::WriteAdmit}]
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 23:29-23:38 -/
+@[reducible]
+def WriteAdmit.Insts.CoreMarkerStructuralPartialEq :
+  core.marker.StructuralPartialEq WriteAdmit := {
+}
+
+/-- [pedra_aeneas_write_admission_kernel::{impl core::cmp::PartialEq<pedra_aeneas_write_admission_kernel::WriteAdmit> for pedra_aeneas_write_admission_kernel::WriteAdmit}::eq]:
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 23:29-23:38
+    Visibility: public -/
+def WriteAdmit.Insts.CoreCmpPartialEqWriteAdmit.eq
+  (self : WriteAdmit) (other : WriteAdmit) : Result Bool := do
+  let self1 := read_discriminant self
+  let other1 := read_discriminant other
+  ok (self1 = other1)
+
+/-- Trait implementation: [pedra_aeneas_write_admission_kernel::{impl core::cmp::PartialEq<pedra_aeneas_write_admission_kernel::WriteAdmit> for pedra_aeneas_write_admission_kernel::WriteAdmit}]
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 23:29-23:38 -/
+@[reducible]
+def WriteAdmit.Insts.CoreCmpPartialEqWriteAdmit : core.cmp.PartialEq WriteAdmit
+  WriteAdmit := {
+  eq := WriteAdmit.Insts.CoreCmpPartialEqWriteAdmit.eq
+}
+
+/-- [pedra_aeneas_write_admission_kernel::{impl core::cmp::Eq for pedra_aeneas_write_admission_kernel::WriteAdmit}::assert_fields_are_eq]:
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 23:40-23:42
+    Visibility: public -/
+def WriteAdmit.Insts.CoreCmpEq.assert_fields_are_eq
+  (self : WriteAdmit) : Result Unit := do
+  ok ()
+
+/-- Trait implementation: [pedra_aeneas_write_admission_kernel::{impl core::cmp::Eq for pedra_aeneas_write_admission_kernel::WriteAdmit}]
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 23:40-23:42 -/
+@[reducible]
+def WriteAdmit.Insts.CoreCmpEq : core.cmp.Eq WriteAdmit := {
+  partialEqInst := WriteAdmit.Insts.CoreCmpPartialEqWriteAdmit
+  assert_fields_are_eq := WriteAdmit.Insts.CoreCmpEq.assert_fields_are_eq
+}
+
+/-- [pedra_aeneas_write_admission_kernel::write_admit]:
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 35:0-50:1
+    Visibility: public -/
+def write_admit
+  (mem_bytes : Std.U64) (mem_armed : Bool) (mem_limit : Std.U64) (l0 : Std.U64)
+  (l0_armed : Bool) (l0_limit : Std.U64) :
+  Result WriteAdmit
+  := do
+  if mem_armed
+  then
+    if mem_bytes >= mem_limit
+    then ok WriteAdmit.StallMem
+    else
+      if l0_armed
+      then if l0 >= l0_limit
+           then ok WriteAdmit.StallL0
+           else ok WriteAdmit.Ok
+      else ok WriteAdmit.Ok
+  else
+    if l0_armed
+    then if l0 >= l0_limit
+         then ok WriteAdmit.StallL0
+         else ok WriteAdmit.Ok
+    else ok WriteAdmit.Ok
+
+/-- [pedra_aeneas_write_admission_kernel::write_admit_as_is]:
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 54:0-63:1
+    Visibility: public -/
+def write_admit_as_is
+  (_mem_bytes : Std.U64) (_mem_armed : Bool) (_mem_limit : Std.U64)
+  (_l0 : Std.U64) (_l0_armed : Bool) (_l0_limit : Std.U64) :
+  Result WriteAdmit
+  := do
+  ok WriteAdmit.Ok
 
 end pedra_aeneas_write_admission_kernel
