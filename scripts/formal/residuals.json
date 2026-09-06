@@ -29,10 +29,11 @@
       "crates/pedradb-core/src/wal/recover_kernel.rs",
       "crates/pedradb-core/src/wal/reopen_kernel.rs",
       "crates/pedradb-io-uring/src/cqe_kernel.rs",
-      "crates/rocksdb-compat/src/iter_kernel.rs"
+      "crates/rocksdb-compat/src/iter_kernel.rs",
+      "crates/pedradb-ops/src/ops_kernel.rs"
     ],
-    "kernel_files": 13,
-    "kernel_loc": 4253,
+    "kernel_files": 14,
+    "kernel_loc": 4292,
     "handler_loc": 83217,
     "db_rs_extracted": false,
     "kernel_fn_allowlist": {
