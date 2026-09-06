@@ -154,6 +154,42 @@ pub fn force_settle_willneed(on: Option<bool>) {
     SETTLE_WILLNEED.with(|c| c.set(on));
 }
 
+thread_local! {
+    static SETTLE_WARM: Cell<Option<bool>> = const { Cell::new(None) };
+    static SETTLE_WARM_BYTES: Cell<u64> = const { Cell::new(0) };
+}
+
+/// RFC-0168 P1.1: after settle, **read** every live SST through the
+/// cached fd (256 KiB chunks) so page cache is populated on the same
+/// handle `get` will pread. `PEDRA_SETTLE_WILLNEED` only hinted on a
+/// fresh fd and did not move get_hit@10M. Default **off**. Two-state:
+/// `PEDRA_SETTLE_WARM=1` or [`force_settle_warm`].
+#[must_use]
+pub fn settle_warm_on() -> bool {
+    if let Some(v) = SETTLE_WARM.with(Cell::get) {
+        return v;
+    }
+    matches!(
+        std::env::var("PEDRA_SETTLE_WARM").as_deref(),
+        Ok("1") | Ok("true") | Ok("TRUE")
+    )
+}
+
+/// Test-only override of [`settle_warm_on`]. `None` restores env.
+pub fn force_settle_warm(on: Option<bool>) {
+    SETTLE_WARM.with(|c| c.set(on));
+}
+
+/// Bytes streamed by the last settle warm (test counter).
+#[must_use]
+pub fn take_settle_warm_bytes() -> u64 {
+    SETTLE_WARM_BYTES.with(Cell::take)
+}
+
+pub(crate) fn add_settle_warm_bytes(n: u64) {
+    SETTLE_WARM_BYTES.with(|c| c.set(c.get().saturating_add(n)));
+}
+
 /// Directory + file namespace the engine uses.
 ///
 /// `Clone` so flush/open paths can hold a copy alongside open file handles
@@ -305,6 +341,25 @@ pub trait SstFileSource: Send + Sync {
     /// # Errors
     /// Underlying I/O.
     fn read_all(&self, path: &Path) -> io::Result<Vec<u8>>;
+
+    /// Stream `len` bytes of `path` through [`read_range`] so the kernel
+    /// page cache holds them on the same fd later point-gets reuse.
+    ///
+    /// # Errors
+    /// Underlying I/O.
+    fn warm(&self, path: &Path, len: u64) -> io::Result<()> {
+        if len == 0 {
+            return Ok(());
+        }
+        let mut buf = vec![0u8; 1 << 18];
+        let mut off = 0u64;
+        while off < len {
+            let n = core::cmp::min(buf.len() as u64, len - off) as usize;
+            self.read_range(path, off, &mut buf[..n])?;
+            off += n as u64;
+        }
+        Ok(())
+    }
 }
 
 impl std::fmt::Debug for dyn SstFileSource {
