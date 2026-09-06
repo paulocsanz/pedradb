@@ -772,6 +772,101 @@ fn d1_modelo_on_live_recording_is_not_ok() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// RFC-0166 P2.1: the named R1 corollary on the model and the LIVE
+/// delete-resurrect shape. Model side: every atom cut of the
+/// write→flush→compact→delete chain keeps Inv-LSM and the probe answers
+/// the NEWEST version (the tombstone). Mutant teeth: deepest-first
+/// probe, tombstone-dropping compact, and reversed reopen each
+/// resurrect the deleted value on the same shape. Live side: the real
+/// engine answers None across flush, compact and reopen — no
+/// resurrection (findings/2026-09-04-reopen-delete-resurrected).
+#[test]
+fn r1_modelo_on_live_delete_shape_is_not_ok() {
+    use pedradb_core::lsm_r1_kernel::{
+        inv_lsm, lsm_compact, lsm_compact_as_is, lsm_flush, lsm_probe, lsm_probe_as_is,
+        lsm_reopen, lsm_reopen_as_is, lsm_state_of, lsm_write, r1_modelo, r1_modelo_as_is,
+        r1_newest,
+    };
+
+    // --- model side: Inv-LSM at every atom cut; probe == newest --------
+    let s0 = lsm_state_of(1);
+    let s1 = lsm_write(&s0, 7, false);
+    let s2 = lsm_flush(&s1).expect("flush");
+    let s3 = lsm_compact(&s2, 2).expect("compact to level 2");
+    let s4 = lsm_write(&s3, 7, true); // the delete mints the newest seq
+    for s in [&s0, &s1, &s2, &s3, &s4] {
+        assert!(inv_lsm(s), "Inv-LSM at every cut: {s:?}");
+        assert_eq!(lsm_probe(s, 7), r1_newest(s, 7));
+        assert!(r1_modelo(s, 7));
+    }
+    assert_eq!(lsm_probe(&s4, 7).map(|e| e.tomb), Some(true));
+
+    // --- mutant teeth on the same shape --------------------------------
+    // deepest-first probe: the deep value shadows the newer tombstone.
+    assert!(
+        !lsm_probe_as_is(&s4, 7).unwrap().tomb,
+        "AS-IS dente: deepest-first probe resurrects the value"
+    );
+    // the AS-IS corollary catches the same break against the newest.
+    assert!(!r1_modelo_as_is(&s4, 7));
+    // tombstone-dropping compact at depth 1: the tombstone dies in the
+    // merge while the deep value (level 2, outside the fold) survives.
+    let m = lsm_compact_as_is(&s4, 1).expect("compact as-is");
+    assert_eq!(
+        lsm_probe(&m, 7).map(|e| e.tomb),
+        Some(false),
+        "AS-IS dente: dropped tombstone resurrects the deep value"
+    );
+    let honest_c = lsm_compact(&s4, 1).expect("compact");
+    assert_eq!(
+        lsm_probe(&honest_c, 7).map(|e| e.tomb),
+        Some(true),
+        "kernel keeps the tombstone at the fold level"
+    );
+    // reversed reopen: the stack loses recency and the value wins.
+    let honest_r = lsm_reopen(&s4);
+    assert!(inv_lsm(&honest_r), "honest reopen preserves Inv-LSM");
+    assert_eq!(
+        lsm_probe(&honest_r, 7).map(|e| e.tomb),
+        Some(true),
+        "honest reopen keeps the tombstone newest"
+    );
+    let bad = lsm_reopen_as_is(&s4);
+    assert!(!inv_lsm(&bad), "reversed stack breaks recency");
+    assert_eq!(
+        lsm_probe(&bad, 7).map(|e| e.tomb),
+        Some(false),
+        "AS-IS dente: reversed reopen resurrects the value"
+    );
+    // R1 is vacuous off-contract: the guard is the invariant itself.
+    assert!(r1_modelo(&bad, 7));
+
+    // --- live side: the real delete survives flush, compact, reopen ----
+    let dir = fresh_dir("lsm-r1-delete");
+    let env = FailingEnv::passing();
+    {
+        let mut db = Db::open_with_env(&dir, opts(), env).unwrap();
+        db.set_defer_auto_compact(true);
+        db.put(b"k", b"v").unwrap();
+        db.flush().unwrap();
+        db.delete(b"k").unwrap();
+        db.flush().unwrap();
+        assert_eq!(db.get(b"k"), None, "delete answers None before compact");
+        db.compact_reclaim().unwrap();
+        assert_eq!(db.get(b"k"), None, "delete answers None after compact");
+        db.close().unwrap();
+    }
+    let env2 = FailingEnv::passing();
+    let db = Db::open_with_env(&dir, opts(), env2).unwrap();
+    assert_eq!(
+        db.get(b"k"),
+        None,
+        "delete answers None after reopen — the live engine keeps the R1 answer"
+    );
+    db.close().unwrap();
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// RFC-0166 P1.4: the verified profile's write→ack runs through the proved
 /// ledger — Inv-WAL live-asserted per durable group; D1 holds over every
 /// cut; the acked puts survive the real crash+reopen. The lying seam shows

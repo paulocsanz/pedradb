@@ -122,9 +122,21 @@ catálogo separa **proof objects** de **campaign gates** (família `l28_*`).
       25 ns/grupo durável vs bound 10.000 ns)
 
 ### P2 — later / polish (R1, T1, C1 e contabilidade)
-- [ ] **P2.1** Inv-LSM provado preservado por flush/compact/get/reopen →
+- [x] **P2.1** Inv-LSM provado preservado por flush/compact/get/reopen →
       corolário R1 nomeado (a classe do delete ressuscitado vira impossível
-      por construção, não apenas detectada) — status: `todo`
+      por construção, não apenas detectada) — status: `done`
+      (kernel `crates/pedradb-core/src/lsm_r1_kernel.rs` 6/6; twin
+      `verus/lsm_r1.rs` 64/64 0 err (2×): Inv-LSM preservado por
+      write/flush/compact/reopen via fold lemmas + provIn provenance,
+      `r1_theorem` probe == newest sob Inv-LSM, dentes exec probe/version,
+      testemunhas nos 3 mutantes AS-IS (probe deepest-first, compact que
+      derruba tombstone, reopen reverso) + `r1_modelo_asis` falso no shape;
+      planta viva `r1_modelo_on_live_delete_shape_is_not_ok` (put→flush→
+      delete→flush→compact→reopen responde None no motor real); 4 pares no
+      catálogo: lsm_probe/lsm_compact/lsm_reopen/r1_modelo; real bug
+      achado e corrigido no kernel durante a fatia: `lsm_compact` dobrava
+      as fontes do mais raso para o mais fundo deixando versões VELHAS
+      ganharem — agora mais fundo primeiro, raso sobrescreve)
 - [ ] **P2.2** T1 como refinamento (fence/abort/recover kernels já existem:
       amarrar em teorema único) — status: `todo`
 - [ ] **P2.3** C1: refinamento handler↔modelo abstrato para a superfície
@@ -149,7 +161,7 @@ catálogo separa **proof objects** de **campaign gates** (família `l28_*`).
 | P1.2 | p1 | Inv-WAL preservado por append/rotate | done | `wal/wal_state_kernel.rs` + twin 18/18 0 err (2×) + planta sim; 6 pares no catálogo | 2026-09-06 |
 | P1.3 | p1 | corolário D1-modelo | done | `d1_modelo_kernel.rs` + twin 14/14 0 err (2×) + planta sim; 2 pares no catálogo | 2026-09-06 |
 | P1.4 | p1 | write→ack em exec Verus (D1 implementação) | done | `write_ack_kernel.rs` + twin 12/12 0 err (3×) + planta sim; 3 pares no catálogo; ledger 25 ns/grupo | 2026-09-06 |
-| P2.1 | p2 | Inv-LSM → R1 | todo | — | 2026-09-06 |
+| P2.1 | p2 | Inv-LSM → R1 | done | `lsm_r1_kernel.rs` 6/6 + twin `verus/lsm_r1.rs` 64/64 0 err (2×) + planta sim; 4 pares no catálogo; exec teeth `lsm_probe`/`lsm_compact`/`lsm_reopen`/`r1_modelo`; bug real de fold-order corrigido no compact | 2026-09-06 |
 | P2.2 | p2 | T1 refinamento | todo | — | 2026-09-06 |
 | P2.3 | p2 | C1 refinamento de handlers | todo | — | 2026-09-06 |
 | P2.4 | p2 | contabilidade proof vs campaign | todo | — | 2026-09-06 |
