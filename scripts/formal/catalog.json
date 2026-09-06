@@ -909,6 +909,30 @@
         "file": "crates/pedradb-core/src/leveling.rs",
         "test": "pick_pushdown_on_live_pushdown_gate_is_not_ok"
       }
+    },
+    {
+      "id": "ops_pitr_window",
+      "finding": "PITR restore_pitr filter",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-ops/src/ops_kernel.rs",
+      "twin": "crates/pedradb-ops/verus/pitr_window.rs",
+      "verus": "scripts/verus_pitr_window.sh",
+      "callers": [
+        "crates/pedradb-ops/src/lib.rs"
+      ],
+      "entry": "pitr_record_in_window",
+      "as_is": "pitr_record_in_window_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-ops/src/lib.rs",
+          "handler": "restore_pitr"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-ops/src/ops_kernel.rs",
+        "test": "pitr_record_in_window_on_future_seq_is_not_ok"
+      }
     }
   ],
   "clones": [

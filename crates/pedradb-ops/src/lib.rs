@@ -37,6 +37,9 @@ use pedradb_core::{
 };
 use pedradb_io_uring::IoUringEnv;
 
+/// PITR replay-window kernel (moved verbatim from this file).
+pub mod ops_kernel;
+
 /// Ops-layer error (wraps core + structured messages).
 #[derive(Debug, thiserror::Error)]
 pub enum OpsError {
@@ -540,7 +543,11 @@ impl<E: Env> BackupEngine<E> {
                             let Some(ms) = wr.max_sequence() else {
                                 continue;
                             };
-                            if ms > base_meta.last_sequence && ms <= target {
+                            if ops_kernel::pitr_record_in_window(
+                                ms,
+                                base_meta.last_sequence,
+                                target,
+                            ) {
                                 // Filter individual ops? Whole record is one TX;
                                 // include record if max in range (records are atomic).
                                 replay.push(raw);

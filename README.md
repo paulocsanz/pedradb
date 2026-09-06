@@ -42,8 +42,8 @@ consistency above the engine. The API is
   submission). One C++ exception, optional and explicit: the RocksDB
   peer behind `rocksdb-parity-bench --features real` (off by default;
   the engine never links it).
-- **Machine-checked where it counts.** 22 decision kernels have
-  Verus-verified twins — 46 proof pairs (table in
+- **Machine-checked where it counts.** 23 decision kernels have
+  Verus-verified twins — 47 proof pairs (table in
   [Verification](#verification)). Around them: seeded fault
   injection and close to 1,000 tests.
 - **A modern write path.** io_uring on Linux with transparent POSIX
@@ -126,8 +126,8 @@ No C++ toolchain is needed.
 
 ## Verification
 
-Not “no bugs” — machine-checked where it counts. 22 decision kernels
-have Verus-verified twins: 46 proof pairs in 33 proof files in the
+Not “no bugs” — machine-checked where it counts. 23 decision kernels
+have Verus-verified twins: 47 proof pairs in 34 proof files in the
 shipped crates, checked with `scripts/formal/verus_check.sh --all`
 against a pinned Verus. The production kernel is the source of record;
 the twin proves its decision logic. Not proven: the OS, the disk,
@@ -148,6 +148,7 @@ rustc, Verus, or Z3.
 | Key codecs | sequence+type packing; CF family, prefix codec round-trip, SST family inference | `ikey_pack`, `cf_family`, `cf_family_of`, `cf_encode_effective`, `encode_cf_key`, `decode_cf_key`, `infer_sst_cf` |
 | Probe order | point lookups probe newest-first; a newer tombstone is never shadowed | `probe_order` |
 | Value log | GC decision | `vlog_gc_decision` |
+| PITR restore | archived WAL record is replayed iff `base < seq ≤ target`; a future seq cannot appear | `pitr_window` |
 
 ## Benchmarks
 
@@ -270,7 +271,7 @@ Fjall settles during hydrate (≈0 s) and is ahead cross-harness on 100M
   tails, process kill after commit. Same seed, same execution. It is a
   reproducible injection surface over the real recovery path, not a
   whole-system simulator.
-- **Verus twins**: 46 kernel-to-proof pairs over 22 kernels, in 33 proof
+- **Verus twins**: 47 kernel-to-proof pairs over 23 kernels, in 34 proof
   files in the shipped crates, checked against a pinned Verus release with
   `scripts/formal/verus_check.sh --all` — table in
   [Verification](#verification).
