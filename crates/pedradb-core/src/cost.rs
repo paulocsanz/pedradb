@@ -59,6 +59,11 @@ struct Counters {
     point_block_file: AtomicU64,
     /// Bytes moved by those positioned file reads.
     point_file_bytes: AtomicU64,
+    /// Nanoseconds spent in positioned file reads (pread stage).
+    point_pread_ns: AtomicU64,
+    /// Nanoseconds spent decoding/seeking a point block after its bytes are
+    /// in hand (CRC + decompress + entry walk, `image` stage).
+    point_image_ns: AtomicU64,
     /// Scan operations (one prefix window per iterator creation).
     scan_ops: AtomicU64,
     /// SSTs probed by scans (per-window overlap count).
@@ -79,6 +84,8 @@ counters! {
     point_block_tls,
     point_block_file,
     point_file_bytes,
+    point_pread_ns,
+    point_image_ns,
     scan_ops,
     scan_sst_probed,
     scan_block_loads,
@@ -132,6 +139,19 @@ pub fn point_block_file(bytes: u64) {
     }
 }
 
+/// Nanoseconds the positioned file read itself took (pread stage).
+#[inline]
+pub fn point_pread_ns(ns: u64) {
+    bump(&COUNTERS.point_pread_ns, ns);
+}
+
+/// Nanoseconds the post-read block work took — CRC + decompress + entry
+/// walk (`image` stage), for blocks served from any source.
+#[inline]
+pub fn point_image_ns(ns: u64) {
+    bump(&COUNTERS.point_image_ns, ns);
+}
+
 /// One scan window (iterator creation) started.
 #[inline]
 pub fn scan_op() {
@@ -169,6 +189,8 @@ pub struct Snapshot {
     pub point_block_tls: u64,
     pub point_block_file: u64,
     pub point_file_bytes: u64,
+    pub point_pread_ns: u64,
+    pub point_image_ns: u64,
     pub scan_ops: u64,
     pub scan_sst_probed: u64,
     pub scan_block_loads: u64,
@@ -187,6 +209,8 @@ pub fn read() -> Snapshot {
         point_block_tls: COUNTERS.point_block_tls(),
         point_block_file: COUNTERS.point_block_file(),
         point_file_bytes: COUNTERS.point_file_bytes(),
+        point_pread_ns: COUNTERS.point_pread_ns(),
+        point_image_ns: COUNTERS.point_image_ns(),
         scan_ops: COUNTERS.scan_ops(),
         scan_sst_probed: COUNTERS.scan_sst_probed(),
         scan_block_loads: COUNTERS.scan_block_loads(),
@@ -211,6 +235,8 @@ impl Snapshot {
             point_block_tls: self.point_block_tls.saturating_sub(earlier.point_block_tls),
             point_block_file: self.point_block_file.saturating_sub(earlier.point_block_file),
             point_file_bytes: self.point_file_bytes.saturating_sub(earlier.point_file_bytes),
+            point_pread_ns: self.point_pread_ns.saturating_sub(earlier.point_pread_ns),
+            point_image_ns: self.point_image_ns.saturating_sub(earlier.point_image_ns),
             scan_ops: self.scan_ops.saturating_sub(earlier.scan_ops),
             scan_sst_probed: self.scan_sst_probed.saturating_sub(earlier.scan_sst_probed),
             scan_block_loads: self.scan_block_loads.saturating_sub(earlier.scan_block_loads),
@@ -224,6 +250,7 @@ impl Snapshot {
     pub fn line(&self) -> String {
         format!(
             "point ops={} probes={} rejected={} blocks resident={} tls={} file={} file_bytes={} \
+             pread_ns={} image_ns={} \
              scan ops={} sst_probed={} block_loads={} block_hits={} block_bytes={}",
             self.point_ops,
             self.point_sst_considered,
@@ -232,6 +259,8 @@ impl Snapshot {
             self.point_block_tls,
             self.point_block_file,
             self.point_file_bytes,
+            self.point_pread_ns,
+            self.point_image_ns,
             self.scan_ops,
             self.scan_sst_probed,
             self.scan_block_loads,
