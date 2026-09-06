@@ -72,4 +72,50 @@ mod tests {
         }
         assert!(!ack_in_order(u64::MAX, u64::MAX));
     }
+
+    /// Class-F agreement twin (F54 `peek_pin_journal_stream`): sweeps the
+    /// shared clone domain against the LIVE journal `pin_kernel`, so drift
+    /// on either side fails `cargo test`, not only the token lint. Full
+    /// domain: both fns are argument-less bools.
+    #[test]
+    fn twin_agrees_with_journal_pin_kernel_on_full_domain() {
+        let mut checks = 0usize;
+        for (name, stream_fn, journal_fn) in [
+            (
+                "peek_pins_cursor",
+                peek_pins_cursor as fn() -> bool,
+                pedradb_journal::pin_kernel::peek_pins_cursor as fn() -> bool,
+            ),
+            (
+                "peek_pins_cursor_as_is",
+                peek_pins_cursor_as_is as fn() -> bool,
+                pedradb_journal::pin_kernel::peek_pins_cursor_as_is as fn() -> bool,
+            ),
+        ] {
+            let (s, j) = (stream_fn(), journal_fn());
+            assert_eq!(
+                s, j,
+                "peek_pin_journal_stream drift at {name}: stream {s:?} vs journal {j:?}"
+            );
+            checks += 1;
+        }
+        // Teeth: the fixed tooth must refuse pin-on-read on BOTH sides, and
+        // fixed/as-is must disagree (a both-sides flip would cancel out).
+        assert!(!peek_pins_cursor(), "stream fixed tooth must not pin");
+        assert!(
+            !pedradb_journal::pin_kernel::peek_pins_cursor(),
+            "journal fixed tooth must not pin"
+        );
+        assert!(peek_pins_cursor_as_is(), "stream as-is tooth pins");
+        assert!(
+            pedradb_journal::pin_kernel::peek_pins_cursor_as_is(),
+            "journal as-is tooth pins"
+        );
+        assert_ne!(
+            peek_pins_cursor(),
+            peek_pins_cursor_as_is(),
+            "teeth: fixed and as-is must disagree"
+        );
+        assert_eq!(checks, 2, "exact agreement count: 2 fns, full domain");
+    }
 }
