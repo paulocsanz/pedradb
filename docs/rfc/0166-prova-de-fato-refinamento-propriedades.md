@@ -107,9 +107,9 @@ catálogo separa **proof objects** de **campaign gates** (família `l28_*`).
 - [x] **P1.2** Inv-WAL invariante indutivo (`acked ⊆ synced ⊆
       prefixo-recuperável`) provado preservado por append/rotate no nível
       kernel+modelo — status: `done`
-- [ ] **P1.3** Corolário D1-modelo nomeado (twin Verus; Lean via Aeneas se o
+- [x] **P1.3** Corolário D1-modelo nomeado (twin Verus; Lean via Aeneas se o
       toolchain traduzir): put Ok ⇒ sobrevive a todo prefixo de torn —
-      status: `todo`
+      status: `done`
 - [ ] **P1.4** Migração das seções críticas write→ack do perfil verificado
       para exec Verus (Env injetado; `profile_report` inalterado; sem
       regressão nas células G1 publicadas) — D1 no nível implementação —
@@ -141,7 +141,7 @@ catálogo separa **proof objects** de **campaign gates** (família `l28_*`).
 | P0.4 | p0 | job CI proof-check (Verus+Kani pinados) | doing | workflow criado; aguardando 1º run verde | 2026-09-06 |
 | P1.1 | p1 | Env trait Verus com crash semantics | done | `env_crash_kernel.rs` + twin 15/15 0 err (2×) + planta sim; 6 pares no catálogo | 2026-09-06 |
 | P1.2 | p1 | Inv-WAL preservado por append/rotate | done | `wal/wal_state_kernel.rs` + twin 18/18 0 err (2×) + planta sim; 6 pares no catálogo | 2026-09-06 |
-| P1.3 | p1 | corolário D1-modelo | todo | — | 2026-09-06 |
+| P1.3 | p1 | corolário D1-modelo | done | `d1_modelo_kernel.rs` + twin 14/14 0 err (2×) + planta sim; 2 pares no catálogo | 2026-09-06 |
 | P1.4 | p1 | write→ack em exec Verus (D1 implementação) | todo | — | 2026-09-06 |
 | P2.1 | p2 | Inv-LSM → R1 | todo | — | 2026-09-06 |
 | P2.2 | p2 | T1 refinamento | todo | — | 2026-09-06 |

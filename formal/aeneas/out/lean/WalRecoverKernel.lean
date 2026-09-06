@@ -810,8 +810,15 @@ def recover_kernel.FragKind.from_record_type
   | format.RecordType.Middle => ok recover_kernel.FragKind.Middle
   | format.RecordType.Last => ok recover_kernel.FragKind.Last
 
+/-- [pedra_aeneas_wal_recover_kernel::recover_kernel::{pedra_aeneas_wal_recover_kernel::recover_kernel::FragKind}::from_record_type_as_is]:
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 132:4-134:5
+    Visibility: public -/
+def recover_kernel.FragKind.from_record_type_as_is
+  (_t : format.RecordType) : Result recover_kernel.FragKind := do
+  ok recover_kernel.FragKind.Full
+
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::is_length_resyncable]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 132:0-137:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 140:0-145:1
     Visibility: public -/
 def recover_kernel.is_length_resyncable
   (kind : recover_kernel.RecoverKind) : Result Bool := do
@@ -827,7 +834,7 @@ def recover_kernel.is_length_resyncable
   | recover_kernel.RecoverKind.Other => ok false
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::is_length_resyncable_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 142:0-144:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 150:0-152:1
     Visibility: public -/
 def recover_kernel.is_length_resyncable_as_is
   (kind : recover_kernel.RecoverKind) : Result Bool := do
@@ -847,7 +854,7 @@ def recover_kernel.is_length_resyncable_as_is
     | recover_kernel.RecoverKind.Other => ok false
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::recover_collect_act]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 154:0-202:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 162:0-210:1
     Visibility: public -/
 def recover_kernel.recover_collect_act
   (kind : recover_kernel.RecoverKind) (prefix_n : Std.U64) (can_skip : Bool)
@@ -916,7 +923,7 @@ def recover_kernel.recover_collect_act
   | recover_kernel.RecoverKind.Other => ok recover_kernel.RecoverAct.FailStop
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::recover_collect_act_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 207:0-223:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 215:0-231:1
     Visibility: public -/
 def recover_kernel.recover_collect_act_as_is
   (kind : recover_kernel.RecoverKind) (_prefix_n : Std.U64) (_can_skip : Bool)
@@ -939,7 +946,7 @@ def recover_kernel.recover_collect_act_as_is
   | recover_kernel.RecoverKind.Other => ok recover_kernel.RecoverAct.FailStop
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::physical_payload_act]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 227:0-244:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 235:0-252:1
     Visibility: public -/
 def recover_kernel.physical_payload_act
   (length : Std.U64) (max_payload : Std.U64) (payload_end : Std.U64)
@@ -957,7 +964,7 @@ def recover_kernel.physical_payload_act
     else ok recover_kernel.PhysicalAct.Continue
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::physical_payload_act_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 248:0-259:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 256:0-267:1
     Visibility: public -/
 def recover_kernel.physical_payload_act_as_is
   (length : Std.U64) (max_payload : Std.U64) (payload_end : Std.U64)
@@ -972,7 +979,7 @@ def recover_kernel.physical_payload_act_as_is
     else ok recover_kernel.PhysicalAct.Continue
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::fragment_act]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 263:0-283:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 271:0-291:1
     Visibility: public -/
 def recover_kernel.fragment_act
   (kind : recover_kernel.FragKind) (scratch_empty : Bool) :
@@ -992,7 +999,7 @@ def recover_kernel.fragment_act
   | recover_kernel.FragKind.Zero => ok recover_kernel.FragAct.Skip
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::fragment_act_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 287:0-293:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 295:0-301:1
     Visibility: public -/
 def recover_kernel.fragment_act_as_is
   (kind : recover_kernel.FragKind) (scratch_empty : Bool) :

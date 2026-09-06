@@ -709,3 +709,64 @@ fn wal_inv_on_live_recording_is_not_ok() {
     db.close().unwrap();
     let _ = fs::remove_dir_all(&dir);
 }
+
+/// RFC-0166 P1.3: the named D1-modelo corollary — put Ok ⇒ survives every
+/// torn prefix — holds on the model for every cut, the as-is write path
+/// breaks it, and two acked puts survive the real crash+reopen.
+#[test]
+fn d1_modelo_on_live_recording_is_not_ok() {
+    use pedradb_core::d1_modelo_kernel::{
+        d1_modelo, d1_modelo_as_is, put_ok, put_ok_as_is, put_lying_never_acks,
+    };
+    use pedradb_core::env_crash_kernel::{crash_legal, CrashModel};
+    use pedradb_core::wal::wal_state_kernel::{inv_wal, wal_state_of};
+
+    // --- model side: the corollary holds for every torn prefix ---------
+    let s0 = wal_state_of(0, 0, 0);
+    let s = put_ok(s0, 96);
+    assert!(inv_wal(&s) && s.acked == 96 && s.synced == 96);
+    for cut in 0..=s.written + 2 {
+        assert!(d1_modelo(&s, 96, cut));
+    }
+    // A second acked put on top: both records covered, still every cut.
+    let s2 = put_ok(s, 64);
+    assert_eq!(s2.acked, 160);
+    for cut in 0..=s2.written + 2 {
+        assert!(d1_modelo(&s2, 96, cut));
+        assert!(d1_modelo(&s2, 160, cut));
+    }
+
+    // --- model teeth ---------------------------------------------------
+    // AS-IS write path: Ok returned with the barrier unmoved — the legal
+    // cut at 0 drops the "acked" record; the corollary refuses the state
+    // (Inv-WAL broken, vacuous) which is the contract boundary.
+    let bad = put_ok_as_is(wal_state_of(0, 0, 0), 96);
+    assert!(!inv_wal(&bad));
+    assert!(crash_legal(CrashModel::of(bad.written, bad.synced), 0) && 0 < 96);
+    assert!(d1_modelo(&bad, 96, 0));
+    // Floor-less legality diverges: cut below the barrier floor is
+    // "survivable" per as-is and loses the record ending at 96.
+    let honest = wal_state_of(160, 160, 160);
+    assert!(d1_modelo(&honest, 96, 64));
+    assert!(!d1_modelo_as_is(&honest, 96, 64));
+    // Lying barrier suspends the premise: old slack may be acked, the new
+    // record never is.
+    assert!(put_lying_never_acks(wal_state_of(10, 10, 4), 96));
+    assert!(put_lying_never_acks(wal_state_of(0, 0, 0), 96));
+
+    // --- live side: two acked puts survive the real crash+reopen -------
+    let dir = fresh_dir("d1-modelo-honest");
+    let rec = crate::RecordingEnv::new();
+    {
+        let mut db = Db::open_with_env(&dir, opts(), rec.clone()).unwrap();
+        db.put(b"dk1", b"dv1").unwrap();
+        db.put(b"dk2", b"dv2").unwrap();
+        db.close().unwrap();
+    }
+    rec.crash();
+    let db = Db::open_with_env(&dir, opts(), rec).unwrap();
+    assert_eq!(db.get(b"dk1").as_deref(), Some(b"dv1".as_ref()));
+    assert_eq!(db.get(b"dk2").as_deref(), Some(b"dv2".as_ref()));
+    db.close().unwrap();
+    let _ = fs::remove_dir_all(&dir);
+}

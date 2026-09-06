@@ -29,6 +29,7 @@ pub mod corrupt;
 pub mod db;
 pub mod env;
 pub mod env_crash_kernel;
+pub mod d1_modelo_kernel;
 pub mod error;
 pub mod flush_kernel;
 pub mod group_commit_kernel;
