@@ -547,6 +547,72 @@ def check_clones(root: Path, catalog: dict, r: Report) -> None:
 # that way (transitional states get a comment, not a permanent row).
 TCB_FREEZE_ALLOWLIST: dict[str, str] = {}
 
+# RFC-0166 P2.4: catalog accounting. `l28_*` is a campaign gate (named
+# plant / seed replay, not ∀ traces). Everything else defaults to a
+# proof object (machine-checked twin). Pair may override with `"object"`.
+OBJECT_KINDS = {"proof", "campaign"}
+PROPERTY_PROOF_IDS = frozenset(
+    {
+        "d1_durability",
+        "d1_modelo",
+        "r1_no_resurrection",
+        "r1_modelo",
+        "t1_atomicity",
+        "t1_modelo",
+        "c1_quorum",
+        "c1_modelo",
+    }
+)
+
+
+def pair_object(pair: dict, prefixes: list[str]) -> str:
+    """proof | campaign for one catalog pair (explicit, else prefix, else proof)."""
+    explicit = pair.get("object")
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit.strip()
+    pid = pair.get("id") or ""
+    if any(pid.startswith(p) for p in prefixes):
+        return "campaign"
+    return "proof"
+
+
+def check_proof_vs_campaign(_root: Path, catalog: dict, r: Report) -> None:
+    """RFC-0166 P2.4: every pair is a proof object or a campaign gate."""
+    print("== proof vs campaign (RFC-0166 P2.4) ==")
+    kinds = catalog.get("object_kinds")
+    if not isinstance(kinds, dict) or set(kinds) != OBJECT_KINDS:
+        r.fail("catalog object_kinds must map both 'proof' and 'campaign'")
+        return
+    prefixes = catalog.get("campaign_prefixes")
+    if not isinstance(prefixes, list) or "l28_" not in prefixes:
+        r.fail("catalog campaign_prefixes must be a list including 'l28_'")
+        return
+    prefixes = [p for p in prefixes if isinstance(p, str) and p]
+    n_proof = 0
+    n_campaign = 0
+    before = len(r.failed)
+    for pair in catalog.get("pairs") or []:
+        pid = pair.get("id") or "<missing-id>"
+        obj = pair_object(pair, prefixes)
+        if obj not in OBJECT_KINDS:
+            r.fail(f"{pid}: object must be proof|campaign (got {obj!r})")
+            continue
+        if pid.startswith("l28_") and obj != "campaign":
+            r.fail(f"{pid}: l28_* is a campaign gate, not a proof object")
+            continue
+        if pid in PROPERTY_PROOF_IDS and obj != "proof":
+            r.fail(f"{pid}: D1/R1/T1/C1 refinement is a proof object")
+            continue
+        if obj == "campaign":
+            n_campaign += 1
+        else:
+            n_proof += 1
+    if len(r.failed) == before:
+        r.good(
+            f"proof vs campaign: {n_proof} proof objects, {n_campaign} campaign gates"
+        )
+
+
 ISLAND_CRATES = ("pedradb-posix", "pedradb-io-uring", "pedradb-capi")
 RFC_0061 = "docs/rfc/0061-residuals-sel4-ironfleet.md"
 
@@ -1647,6 +1713,7 @@ def main() -> int:
         check_lint(root, catalog, r)
         check_tcb_freeze(root, catalog, r)
         check_three_teeth(root, catalog, r)
+        check_proof_vs_campaign(root, catalog, r)
         check_residuals(root, r, catalog)
         check_class_scan(root, r)
     if args.clones or run_ci:

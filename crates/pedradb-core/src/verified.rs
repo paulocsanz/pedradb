@@ -331,7 +331,7 @@ pub fn profile_report() -> &'static [ProfileComponent] {
         on!("write_ack_append", "write_ack_append", "verified write→ack: ledger append step (RFC-0166 P1.4)"),
         on!("write_ack_barrier", "write_ack_barrier", "verified write→ack: ledger barrier step (RFC-0166 P1.4)"),
         on!("write_ack_ack", "write_ack_ack", "verified write→ack: ledger ack = put_ok composition, Inv-WAL asserted live (RFC-0166 P1.4)"),
-        on!("d1_durability", "d1_durability", "D1: every acked write survives the crash prefix (RFC-0166 spec kernel)"),
+        on!("d1_durability", "d1_durability", "D1 property spec; refinement theorem is d1_modelo (RFC-0166 P0.1/P1.3/P2.4)"),
         on!("lsm_probe", "lsm_probe", "Inv-LSM probe: the recency walk answers the newest version — deepest-first AS-IS resurrects (RFC-0166 P2.1)"),
         on!("lsm_compact", "lsm_compact", "Inv-LSM preserved by compact — newest wins across source levels, bottom tombstones retire (RFC-0166 P2.1)"),
         on!("lsm_reopen", "lsm_reopen", "Inv-LSM preserved by reopen — the durable order rebuilds the same probe order (RFC-0166 P2.1)"),
@@ -346,9 +346,9 @@ pub fn profile_report() -> &'static [ProfileComponent] {
         on!("default_pct_depth_raised", "default_pct_depth_raised", "default PCT depth raised (RFC-0070 P2.2)"),
         on!("fsync_lie_tcg", "fsync_lie_tcg", "fsync-lie closes the TCG guest (RFC-0078 P2.2)"),
         on!("stacked_liars", "stacked_liars", "stacked fsync liars refused (RFC-0078 P1.2)"),
-        on!("r1_no_resurrection", "r1_no_resurrection", "R1: read answers the newest covering entry — no delete resurrection (RFC-0166 spec kernel)"),
-        on!("t1_atomicity", "t1_atomicity", "T1: transaction effects all-or-nothing (RFC-0166 spec kernel)"),
-        on!("c1_quorum", "c1_quorum", "C1: served values committed by a majority of every active config (RFC-0166 spec kernel)"),
+        on!("r1_no_resurrection", "r1_no_resurrection", "R1 property spec; refinement theorem is r1_modelo (RFC-0166 P0.1/P2.1/P2.4)"),
+        on!("t1_atomicity", "t1_atomicity", "T1 property spec; refinement theorem is t1_modelo (RFC-0166 P0.2/P2.2/P2.4)"),
+        on!("c1_quorum", "c1_quorum", "C1 property spec; refinement theorem is c1_modelo (RFC-0166 P0.2/P2.3/P2.4)"),
         on!("tcg_guest", "tcg_guest", "TCG guest claim fail-closed"),
         on!("fdatasync_rc", "fdatasync_rc", "fdatasync nonzero rc is not Ok"),
         on!("cqe_res", "cqe_res", "negative CQE res is not Ok"),
@@ -584,6 +584,21 @@ mod tests {
                 .find(|c| c.component == name)
                 .unwrap_or_else(|| panic!("missing report row {name}"));
             assert_eq!(c.state, ProfileState::Off, "{name}: {c:?}");
+        }
+        for k in [
+            "d1_durability",
+            "d1_modelo",
+            "r1_no_resurrection",
+            "r1_modelo",
+            "t1_atomicity",
+            "t1_modelo",
+            "c1_quorum",
+            "c1_modelo",
+        ] {
+            assert!(
+                reported.contains(k),
+                "RFC-0166 P2.4: property/refinement {k} must be an ON report row"
+            );
         }
         let ring = profile_report()
             .iter()

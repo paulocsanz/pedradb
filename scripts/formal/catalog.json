@@ -1,5 +1,12 @@
 {
-  "comment": "Pedra formal glue catalog. Production kernel is the source; Verus file is a twin; callers must invoke the kernel. twin_kind: close = entry (or token_src) is an exec fn in the twin; atom = smaller fn (atom) only; model = same name, stand-in domain (e.g. u64 for &[u8]). status=absent is a recorded gap (script exists, twin file does not).",
+  "comment": "Pedra formal glue catalog. Production kernel is the source; Verus file is a twin; callers must invoke the kernel. twin_kind: close = entry (or token_src) is an exec fn in the twin; atom = smaller fn (atom) only; model = same name, stand-in domain (e.g. u64 for &[u8]). status=absent is a recorded gap (script exists, twin file does not). object: proof = machine-checked twin (exec==spec); campaign = named plant / seed replay (not forall traces). Default: id prefix in campaign_prefixes (l28_*) is campaign, else proof.",
+  "object_kinds": {
+    "proof": "machine-checked twin — exec==spec (Verus/Kani/Lean)",
+    "campaign": "named plant / seed replay — not forall traces"
+  },
+  "campaign_prefixes": [
+    "l28_"
+  ],
   "pairs": [
     {
       "id": "vote",

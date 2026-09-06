@@ -158,10 +158,15 @@ catálogo separa **proof objects** de **campaign gates** (família `l28_*`).
       planta viva `c1_modelo_on_live_joint_is_not_ok` (3-node Raft
       propose só acka índice committed); 2 pares no catálogo:
       c1_advance_commit/c1_modelo)
-- [ ] **P2.4** Contabilidade: catálogo separa proof objects de campaign
+- [x] **P2.4** Contabilidade: catálogo separa proof objects de campaign
       gates; `profile_report` ganha D1/R1/T1/C1 como linhas; residuais
       re-rotulados (R-fsync-lie estreita para "drive físico"; R-glue encolhe
-      conforme exec-Verus avança; never_floor inalterado) — status: `todo`
+      conforme exec-Verus avança; never_floor inalterado) — status: `done`
+      (`object_kinds` + `campaign_prefixes: ["l28_"]`; lint
+      `check_proof_vs_campaign`; D1/R1/T1/C1 spec+modelo ON no
+      `profile_report`; R-fsync-lie = mídia física pós P1.1–P1.3;
+      R-glue cita write_ack/lsm_r1/t1_modelo/c1_modelo; never_floor
+      inalterado; `test_proof_vs_campaign.py`)
 - [ ] **P2.5** Meta-mutation tests do `pedra_formal.py`: injetar drift
       sintático/semântico num twin clonado e exigir FAIL nomeado (hoje feito
       uma vez à mão; virar teste) — status: `todo`
@@ -181,7 +186,7 @@ catálogo separa **proof objects** de **campaign gates** (família `l28_*`).
 | P2.1 | p2 | Inv-LSM → R1 | done | `lsm_r1_kernel.rs` 6/6 + twin `verus/lsm_r1.rs` 64/64 0 err (2×) + planta sim; 4 pares no catálogo; exec teeth `lsm_probe`/`lsm_compact`/`lsm_reopen`/`r1_modelo`; bug real de fold-order corrigido no compact | 2026-09-06 |
 | P2.2 | p2 | T1 refinamento | done | `t1_modelo_kernel.rs` 5/5 + twin `verus/t1_modelo.rs` 8/8 0 err (2×) + planta `t1_modelo_on_live_abort_reopen_is_not_ok`; 3 pares tx_abort/tx_recover/t1_modelo | 2026-09-06 |
 | P2.3 | p2 | C1 refinamento de handlers | done | `c1_modelo_kernel.rs` 4/4 + twin `verus/c1_modelo.rs` 4/4 0 err (2×) + planta `c1_modelo_on_live_joint_is_not_ok`; 2 pares c1_advance_commit/c1_modelo | 2026-09-06 |
-| P2.4 | p2 | contabilidade proof vs campaign | todo | — | 2026-09-06 |
+| P2.4 | p2 | contabilidade proof vs campaign | done | catalog `object_kinds`/`campaign_prefixes`; lint proof-vs-campaign; report D1/R1/T1/C1; residuais re-rotulados; `test_proof_vs_campaign.py` | 2026-09-06 |
 | P2.5 | p2 | meta-mutation tests do lint | todo | — | 2026-09-06 |
 
 ## Acceptance Criteria
