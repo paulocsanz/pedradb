@@ -7075,6 +7075,7 @@ impl<E: Env> Db<E> {
                 0 => {
                     self.dump_level_diag("compact_leveled_done");
                     self.maybe_willneed_ssts();
+                    self.maybe_warm_ssts();
                     return Ok(());
                 }
                 1 => {
@@ -7112,6 +7113,7 @@ impl<E: Env> Db<E> {
             }
         }
         self.maybe_willneed_ssts();
+        self.maybe_warm_ssts();
         Ok(())
     }
 
@@ -7127,6 +7129,26 @@ impl<E: Env> Db<E> {
             let _ = self
                 .env
                 .advise(table.path(), 0, 0, crate::env::AdviseKind::WillNeed);
+        }
+    }
+
+    /// RFC-0168 P1.1: blocking page-cache fill through `sst_source`
+    /// (the same fd `get` preads). No-op unless [`crate::env::settle_warm_on`]
+    /// and a file source is attached (bounded open).
+    fn maybe_warm_ssts(&self) {
+        if !crate::env::settle_warm_on() {
+            return;
+        }
+        let Some(src) = self.sst_source.as_ref() else {
+            return;
+        };
+        for table in &self.ssts {
+            let Ok(len) = self.env.metadata_len(table.path()) else {
+                continue;
+            };
+            if src.warm(table.path(), len).is_ok() {
+                crate::env::add_settle_warm_bytes(len);
+            }
         }
     }
 
@@ -12572,6 +12594,45 @@ mod tests {
             on.iter().all(|(_, off, len, _)| *off == 0 && *len == 0),
             "WILLNEED must be whole-file (offset=0,len=0), got {on:?}"
         );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0168 P1.1 two-state: settle warm streams SST bytes only when on,
+    /// through the bounded-open file source (same fd as get).
+    #[test]
+    fn rfc0168_settle_warm_two_state() {
+        let dir = temp_dir();
+        let env = BulkProbeEnv::new();
+        let mut db = Db::open_with_env_bounded(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(4 * 1024),
+                sst_payload_budget_bytes: Some(1),
+                ..OpenOptions::default()
+            },
+            env,
+        )
+        .unwrap();
+        for i in 0..32u32 {
+            db.put(format!("k{i:04}").as_bytes(), vec![b'v'; 64])
+                .unwrap();
+        }
+        db.flush().unwrap();
+        let _ = crate::env::take_settle_warm_bytes();
+        crate::env::force_settle_warm(Some(false));
+        db.compact_leveled().unwrap();
+        assert_eq!(
+            crate::env::take_settle_warm_bytes(),
+            0,
+            "forced-off settle must not stream SST bytes"
+        );
+        crate::env::force_settle_warm(Some(true));
+        db.compact_leveled().unwrap();
+        let n = crate::env::take_settle_warm_bytes();
+        crate::env::force_settle_warm(None);
+        assert!(n > 0, "PEDRA_SETTLE_WARM must stream live SSTs, got {n}");
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
