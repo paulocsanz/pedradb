@@ -58,3 +58,15 @@ name = "GroupCommitKernel"
 
 [[lean_lib]]
 name = "GroupCommit"
+
+[[lean_lib]]
+name = "PrefixKernel"
+
+[[lean_lib]]
+name = "Prefix"
+
+[[lean_lib]]
+name = "WriteAdmissionKernel"
+
+[[lean_lib]]
+name = "WriteAdmission"

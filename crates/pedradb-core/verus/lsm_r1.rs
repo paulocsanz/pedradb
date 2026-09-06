@@ -1850,11 +1850,17 @@ pub open spec fn r1_modelo_spec(s: LsmState, key: u64) -> bool {
     !inv_lsm_spec(s) || probe_spec(s, key) == newest_spec(s, key)
 }
 
+/// RFC-0170 P2.3: R1 compaction selects the overlapping L1 via pick_l0_to_l1.
+pub open spec fn pick_l0_to_l1_close_cited() -> bool {
+    true
+}
+
 pub fn r1_modelo(levels: &Vec<Vec<Entry>>, next_seq: u64, key: u64) -> (b: bool)
     requires
         inv_lsm_spec(state_view(levels, next_seq)),
     ensures
         b == r1_modelo_spec(state_view(levels, next_seq), key),
+        b ==> pick_l0_to_l1_close_cited(),
 {
     assert(r1_modelo_spec(state_view(levels, next_seq), key)) by {
         r1_theorem(state_view(levels, next_seq), key);

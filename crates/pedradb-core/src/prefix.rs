@@ -9,9 +9,10 @@
 #[must_use]
 pub fn prefix_exclusive_end(prefix: &[u8]) -> Option<Vec<u8>> {
     let mut e = prefix.to_vec();
-    while let Some(last) = e.last_mut() {
-        if *last < 0xff {
-            *last += 1;
+    while e.len() > 0 {
+        let i = e.len() - 1;
+        if e[i] < 0xff {
+            e[i] += 1;
             return Some(e);
         }
         e.pop();

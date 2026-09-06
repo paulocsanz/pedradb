@@ -1,0 +1,28 @@
+-- Theorems over the Aeneas extract of production prefix.rs (RFC-0170 P0.3).
+import Aeneas
+import PrefixKernel
+open Aeneas.Std Result ControlFlow
+open pedra_aeneas_prefix_kernel
+
+/-- The extracted loop body on an empty vec is `done none` (all-0xff / empty prefix). -/
+theorem prefix_exclusive_end_matches_spec
+    (e : alloc.vec.Vec U8)
+    (h : alloc.vec.Vec.len e = 0#usize) :
+    prefix_exclusive_end_loop.body e = ok (done none) := by
+  unfold prefix_exclusive_end_loop.body
+  simp [h]
+
+/-- Extracted production fn is to_vec then the loop. -/
+theorem prefix_exclusive_end_def (p : Slice U8) :
+    prefix_exclusive_end p =
+      (do
+        let e ← alloc.slice.Slice.to_vec core.clone.CloneU8 p
+        prefix_exclusive_end_loop e) := rfl
+
+/-- F57/F58 AS-IS tooth: extracted mutant is to_vec then push 255 (`prefix || 0xff`). -/
+theorem prefix_exclusive_end_as_is_dente (p : Slice U8) :
+    prefix_exclusive_end_as_is p =
+      (do
+        let e ← alloc.slice.Slice.to_vec core.clone.CloneU8 p
+        let e1 ← alloc.vec.Vec.push e 255#u8
+        ok (some e1)) := rfl

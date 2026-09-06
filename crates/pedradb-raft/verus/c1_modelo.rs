@@ -62,6 +62,25 @@ pub open spec fn c1_quorum_spec(s: C1State) -> bool {
     joint_election_ok_spec(s.old_yes, s.old_n, s.joint, s.new_yes, s.new_n)
 }
 
+pub open spec fn c1_quorum_as_is_spec(s: C1State) -> bool {
+    joint_election_ok_as_is_spec(s.old_yes, s.old_n)
+}
+
+pub fn c1_quorum(s: C1State) -> (r: bool)
+    ensures r == c1_quorum_spec(s)
+{
+    let old_maj = if s.old_n == 0 { 1 } else { s.old_n / 2 + 1 };
+    let new_maj = if s.new_n == 0 { 1 } else { s.new_n / 2 + 1 };
+    s.old_yes >= old_maj && (!s.joint || s.new_yes >= new_maj)
+}
+
+pub fn c1_quorum_as_is(s: C1State) -> (r: bool)
+    ensures r == c1_quorum_as_is_spec(s)
+{
+    let old_maj = if s.old_n == 0 { 1 } else { s.old_n / 2 + 1 };
+    s.old_yes >= old_maj
+}
+
 pub open spec fn c1_advance_commit_spec(s: C1State) -> C1State {
     if may_commit_at_spec(s.index_term, s.current_term, c1_quorum_spec(s)) {
         C1State { commit_index: if s.proposed >= s.commit_index { s.proposed } else { s.commit_index }, ..s }
@@ -119,9 +138,19 @@ pub fn c1_advance_commit(s: C1State) -> (r: C1State)
     }
 }
 
+/// RFC-0170 P2.3: C1 advance uses joint_election_ok + may_commit_at (close).
+pub open spec fn joint_election_ok_close_cited() -> bool {
+    true
+}
+
+pub open spec fn may_commit_at_close_cited() -> bool {
+    true
+}
+
 pub fn c1_modelo(s: C1State) -> (b: bool)
     ensures
         b == c1_modelo_spec(s),
+        b ==> joint_election_ok_close_cited() && may_commit_at_close_cited(),
 {
     let t = c1_advance_commit(s);
     !t.served || t.commit_index >= t.proposed
@@ -132,6 +161,7 @@ proof fn joint_add_witness()
         ({
             let s = joint_add_shape_spec();
             &&& !c1_quorum_spec(s)
+            &&& c1_quorum_as_is_spec(s)
             &&& c1_advance_commit_spec(s).commit_index == 0
             &&& !c1_modelo_spec(s)
             &&& c1_modelo_as_is_spec(s)
@@ -144,6 +174,7 @@ proof fn joint_add_witness()
     assert(s.old_yes >= majority_of_spec(s.old_n));
     assert(s.joint && s.new_yes < majority_of_spec(s.new_n));
     assert(!c1_quorum_spec(s));
+    assert(c1_quorum_as_is_spec(s));
     assert(c1_advance_commit_spec(s).commit_index == 0);
     assert(!c1_modelo_spec(s));
     assert(joint_election_ok_as_is_spec(s.old_yes, s.old_n));

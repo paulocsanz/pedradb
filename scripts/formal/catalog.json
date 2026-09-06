@@ -1451,7 +1451,7 @@
     {
       "id": "index_val",
       "finding": "F80",
-      "twin_kind": "atom",
+      "twin_kind": "close",
       "atom": "value_len_tag",
       "kernel": "crates/pedradb-store/src/index_val_kernel.rs",
       "twin": "crates/pedradb-store/verus/index_val.rs",
@@ -1595,7 +1595,7 @@
     {
       "id": "bearer",
       "finding": "F85/F79",
-      "twin_kind": "atom",
+      "twin_kind": "close",
       "atom": "ascii_lower",
       "kernel": "crates/pedradb-http/src/auth_kernel.rs",
       "twin": "crates/pedradb-http/verus/bearer_scheme.rs",
@@ -1740,7 +1740,7 @@
     {
       "id": "form_plus",
       "finding": "F101",
-      "twin_kind": "atom",
+      "twin_kind": "close",
       "atom": "form_plus_byte",
       "kernel": "crates/pedradb-http/src/form_kernel.rs",
       "twin": "crates/pedradb-http/verus/form_plus.rs",
@@ -1765,7 +1765,7 @@
     {
       "id": "origin_path",
       "finding": "F91/F92",
-      "twin_kind": "atom",
+      "twin_kind": "close",
       "atom": "strip_authority_for_routing",
       "kernel": "crates/pedradb-http/src/path_kernel.rs",
       "twin": "crates/pedradb-http/verus/origin_path.rs",
@@ -1792,7 +1792,7 @@
     {
       "id": "path_after_authority",
       "finding": "F91",
-      "twin_kind": "atom",
+      "twin_kind": "close",
       "atom": "has_path_after_authority",
       "kernel": "crates/pedradb-http/src/path_kernel.rs",
       "twin": "crates/pedradb-http/verus/origin_path.rs",
@@ -1811,7 +1811,7 @@
     {
       "id": "strip_http_authority",
       "finding": "F91/F145",
-      "twin_kind": "atom",
+      "twin_kind": "close",
       "atom": "scheme_prefix_folded_eq",
       "kernel": "crates/pedradb-http/src/path_kernel.rs",
       "twin": "crates/pedradb-http/verus/origin_path.rs",
@@ -1830,7 +1830,7 @@
     {
       "id": "request_target_authority",
       "finding": "F161",
-      "twin_kind": "atom",
+      "twin_kind": "close",
       "atom": "authority_present",
       "kernel": "crates/pedradb-http/src/path_kernel.rs",
       "twin": "crates/pedradb-http/verus/origin_path.rs",
@@ -1856,7 +1856,7 @@
     {
       "id": "host_authority_mismatch",
       "finding": "F161/F162",
-      "twin_kind": "atom",
+      "twin_kind": "close",
       "atom": "default_port_equiv",
       "kernel": "crates/pedradb-http/src/path_kernel.rs",
       "twin": "crates/pedradb-http/verus/origin_path.rs",
@@ -1882,7 +1882,7 @@
     {
       "id": "split_host_port",
       "finding": "F162",
-      "twin_kind": "atom",
+      "twin_kind": "close",
       "atom": "split_userinfo",
       "kernel": "crates/pedradb-http/src/path_kernel.rs",
       "twin": "crates/pedradb-http/verus/origin_path.rs",
@@ -1901,7 +1901,7 @@
     {
       "id": "strip_uri_fragment",
       "finding": "F156",
-      "twin_kind": "atom",
+      "twin_kind": "close",
       "atom": "fragment_gate",
       "kernel": "crates/pedradb-http/src/path_kernel.rs",
       "twin": "crates/pedradb-http/verus/origin_path.rs",
@@ -2006,7 +2006,7 @@
     {
       "id": "query_values_conflict",
       "finding": "F155",
-      "twin_kind": "atom",
+      "twin_kind": "close",
       "atom": "multi_values_can_conflict",
       "kernel": "crates/pedradb-http/src/form_kernel.rs",
       "twin": "crates/pedradb-http/verus/form_plus.rs",
@@ -2055,7 +2055,7 @@
     {
       "id": "query_part_is_bare_name",
       "finding": "F162",
-      "twin_kind": "atom",
+      "twin_kind": "close",
       "atom": "bare_part_gate",
       "kernel": "crates/pedradb-http/src/form_kernel.rs",
       "twin": "crates/pedradb-http/verus/form_plus.rs",
@@ -2116,7 +2116,7 @@
     {
       "id": "is_bearer_scheme",
       "finding": "F85",
-      "twin_kind": "atom",
+      "twin_kind": "close",
       "atom": "ascii_eq_ignore_case",
       "kernel": "crates/pedradb-http/src/auth_kernel.rs",
       "twin": "crates/pedradb-http/verus/bearer_scheme.rs",
@@ -2135,7 +2135,7 @@
     {
       "id": "is_non_bearer_auth_scheme",
       "finding": "F150/F151",
-      "twin_kind": "atom",
+      "twin_kind": "close",
       "atom": "ascii_eq_ignore_case",
       "kernel": "crates/pedradb-http/src/auth_kernel.rs",
       "twin": "crates/pedradb-http/verus/bearer_scheme.rs",
@@ -2154,7 +2154,7 @@
     {
       "id": "normalize_http_method",
       "finding": "F79",
-      "twin_kind": "atom",
+      "twin_kind": "close",
       "atom": "ascii_upper",
       "token_src": "ascii_upper",
       "kernel": "crates/pedradb-http/src/auth_kernel.rs",
@@ -2180,7 +2180,7 @@
     {
       "id": "authorization_matches",
       "finding": "F149/F152",
-      "twin_kind": "atom",
+      "twin_kind": "close",
       "atom": "x_pedra_is_fallback_only",
       "kernel": "crates/pedradb-http/src/auth_kernel.rs",
       "twin": "crates/pedradb-http/verus/bearer_scheme.rs",
@@ -2205,7 +2205,7 @@
     {
       "id": "isolated",
       "finding": "F83",
-      "twin_kind": "atom",
+      "twin_kind": "close",
       "atom": "isolated_child_byte",
       "kernel": "crates/pedradb-fold/src/isolated_kernel.rs",
       "twin": "crates/pedradb-fold/verus/isolated_id.rs",
@@ -2248,7 +2248,7 @@
     {
       "id": "children",
       "finding": "F59",
-      "twin_kind": "atom",
+      "twin_kind": "close",
       "atom": "next_byte_in_packed_children",
       "kernel": "crates/montanha-fdb-recipes/src/children_kernel.rs",
       "twin": "crates/montanha-fdb-recipes/verus/children_range.rs",
@@ -2273,7 +2273,7 @@
     {
       "id": "fields",
       "finding": "F60",
-      "twin_kind": "atom",
+      "twin_kind": "close",
       "atom": "field_kept",
       "kernel": "crates/montanha-fdb-recipes/src/fields_kernel.rs",
       "twin": "crates/montanha-fdb-recipes/verus/fields_nul.rs",
@@ -2514,7 +2514,7 @@
     {
       "id": "fields_suffix",
       "finding": "F60",
-      "twin_kind": "atom",
+      "twin_kind": "close",
       "atom": "field_kept",
       "kernel": "crates/montanha-fdb-recipes/src/fields_kernel.rs",
       "twin": "crates/montanha-fdb-recipes/verus/fields_nul.rs",
@@ -2539,7 +2539,7 @@
     {
       "id": "fields_decode",
       "finding": "F60",
-      "twin_kind": "atom",
+      "twin_kind": "close",
       "atom": "field_kept",
       "kernel": "crates/montanha-fdb-recipes/src/fields_kernel.rs",
       "twin": "crates/montanha-fdb-recipes/verus/fields_nul.rs",
@@ -2564,7 +2564,7 @@
     {
       "id": "fields_pair_nul",
       "finding": "F60",
-      "twin_kind": "atom",
+      "twin_kind": "close",
       "atom": "field_kept",
       "kernel": "crates/montanha-fdb-recipes/src/fields_kernel.rs",
       "twin": "crates/montanha-fdb-recipes/verus/fields_nul.rs",
@@ -2703,7 +2703,7 @@
     {
       "id": "scan_guard",
       "finding": "F167",
-      "twin_kind": "model",
+      "twin_kind": "close",
       "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
       "twin": "crates/pedradb-core/verus/scan_guard.rs",
       "verus": "scripts/verus_scan_guard.sh",
@@ -3888,7 +3888,7 @@
     {
       "id": "world_trajectory_fold",
       "finding": "RFC-0059 P2.2",
-      "twin_kind": "atom",
+      "twin_kind": "close",
       "atom": "trajectory_violation",
       "kernel": "crates/pedradb-world/src/world_kernel.rs",
       "twin": "crates/pedradb-world/verus/trajectory.rs",
@@ -4221,7 +4221,7 @@
     {
       "id": "cf_family",
       "finding": "RFC-0150 P0",
-      "twin_kind": "model",
+      "twin_kind": "close",
       "kernel": "crates/pedradb-core/src/cf_kernel.rs",
       "twin": "crates/pedradb-core/verus/cf_family.rs",
       "verus": "scripts/verus_cf_family.sh",
@@ -4249,7 +4249,7 @@
     {
       "id": "cf_family_of",
       "finding": "RFC-0150 P0",
-      "twin_kind": "model",
+      "twin_kind": "close",
       "kernel": "crates/pedradb-core/src/cf_kernel.rs",
       "twin": "crates/pedradb-core/verus/cf_family_of.rs",
       "verus": "scripts/verus_cf_family_of.sh",
@@ -4273,7 +4273,7 @@
     {
       "id": "cf_encode_effective",
       "finding": "RFC-0150 P0",
-      "twin_kind": "model",
+      "twin_kind": "close",
       "kernel": "crates/pedradb-core/src/cf_kernel.rs",
       "twin": "crates/pedradb-core/verus/cf_encode_effective.rs",
       "verus": "scripts/verus_cf_encode_effective.sh",
@@ -4298,7 +4298,7 @@
     {
       "id": "encode_cf_key",
       "finding": "RFC-0150 P0",
-      "twin_kind": "model",
+      "twin_kind": "close",
       "kernel": "crates/pedradb-core/src/cf_kernel.rs",
       "twin": "crates/pedradb-core/verus/encode_cf_key.rs",
       "verus": "scripts/verus_encode_cf_key.sh",
@@ -4328,7 +4328,7 @@
     {
       "id": "decode_cf_key",
       "finding": "RFC-0150 P0",
-      "twin_kind": "model",
+      "twin_kind": "close",
       "kernel": "crates/pedradb-core/src/cf_kernel.rs",
       "twin": "crates/pedradb-core/verus/decode_cf_key.rs",
       "verus": "scripts/verus_decode_cf_key.sh",
@@ -4357,7 +4357,7 @@
     {
       "id": "infer_sst_cf",
       "finding": "RFC-0150 P0",
-      "twin_kind": "model",
+      "twin_kind": "close",
       "kernel": "crates/pedradb-core/src/cf_kernel.rs",
       "twin": "crates/pedradb-core/verus/infer_sst_cf.rs",
       "verus": "scripts/verus_infer_sst_cf.sh",
@@ -4382,7 +4382,7 @@
     {
       "id": "compact_rewrites_sst_cf",
       "finding": "RFC-0150 P0",
-      "twin_kind": "model",
+      "twin_kind": "close",
       "kernel": "crates/pedradb-core/src/cf_kernel.rs",
       "twin": "crates/pedradb-core/verus/compact_rewrites_sst_cf.rs",
       "verus": "scripts/verus_compact_rewrites_sst_cf.sh",
@@ -4490,7 +4490,7 @@
     {
       "id": "wait_for_deadlock",
       "finding": "RFC-0150 P2c",
-      "twin_kind": "model",
+      "twin_kind": "close",
       "kernel": "crates/rocksdb-compat/src/locktab.rs",
       "twin": "crates/rocksdb-compat/verus/wait_for_deadlock.rs",
       "verus": "scripts/verus_wait_for_deadlock.sh",
@@ -4699,7 +4699,7 @@
     {
       "id": "leveling_pick",
       "finding": "F-leveling-sweep",
-      "twin_kind": "atom",
+      "twin_kind": "close",
       "atom": "pick_l0_to_l1_model",
       "kernel": "crates/pedradb-core/src/leveling.rs",
       "twin": "crates/pedradb-core/verus/leveling_pick.rs",
@@ -4728,7 +4728,7 @@
     {
       "id": "leveling_pushdown",
       "finding": "F-leveling-sweep",
-      "twin_kind": "atom",
+      "twin_kind": "close",
       "atom": "pick_pushdown_model",
       "token_src": "pick_pushdown_as_is_blind",
       "kernel": "crates/pedradb-core/src/leveling.rs",
@@ -5955,7 +5955,7 @@
     {
       "id": "exact_children",
       "finding": "F78/F80",
-      "twin_kind": "atom",
+      "twin_kind": "close",
       "atom": "value_len_tag",
       "kernel": "crates/pedradb-store/src/index_val_kernel.rs",
       "twin": "crates/pedradb-store/verus/index_val.rs",
@@ -6282,6 +6282,28 @@
       "dst_plant": {
         "file": "crates/pedradb-raft/src/c1_modelo_kernel.rs",
         "test": "c1_modelo_on_live_joint_is_not_ok"
+      }
+    },
+    {
+      "id": "write_admission",
+      "finding": "RFC-0170 P2.4",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "twin": "crates/pedradb-core/verus/write_admission.rs",
+      "verus": "scripts/verus_write_admission.sh",
+      "callers": [
+        "crates/pedradb-core/src/db.rs"
+      ],
+      "entry": "write_admission_idle",
+      "data_fate": true,
+      "handlers": [
+        "write_admission_idle"
+      ],
+      "as_is": "write_admission_idle_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+        "test": "write_admission_idle_on_live_stall_is_not_ok"
       }
     }
   ],

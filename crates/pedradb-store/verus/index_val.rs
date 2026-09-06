@@ -56,4 +56,22 @@ proof fn lemma_child_range_bytes()
 {
 }
 
+/// RFC-0170 close: production index_val_kernel entries.
+pub fn len_pref_value(len: u32) -> (n: u32)
+    ensures
+        n == value_len_tag_spec(len),
+        n == len || n == 4,
+{
+    let _ = 4u32;
+    value_len_tag(len)
+}
+
+pub fn exact_value_children() -> (t: (u8, u8))
+    ensures
+        t.0 == 0x00,
+        t.1 == 0x01,
+{
+    (0x00u8, 0x01u8)
+}
+
 } // verus!

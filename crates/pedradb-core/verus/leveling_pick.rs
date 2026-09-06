@@ -80,6 +80,31 @@ pub open spec fn overlapping_prefix(dst: Seq<MFile>, j: int, hlo: u64, hhi: u64)
     }
 }
 
+/// Production entry (RFC-0170 close): same decision as `pick_l0_to_l1_model`.
+pub fn pick_l0_to_l1(
+    l0: &[MFile],
+    l1: &[MFile],
+    max_l0: usize,
+) -> (r: Option<(Vec<usize>, u64, u64, Vec<MFile>)>)
+    requires
+        forall |i: int, j: int| 0 <= i && i < l1.len() && 0 <= j && j < l1.len() && i != j
+            ==> l1[i].idx != l1[j].idx,
+    ensures
+        (l0.len() == 0 || max_l0 == 0) <==> (r is None),
+        r.is_some() ==> {
+            let (sel, hlo, hhi, slice) = r.unwrap();
+            &&& sel.len() == if l0.len() < max_l0 { l0.len() } else { max_l0 }
+            &&& (forall |k: int| 0 <= k && k < sel.len() ==> sel@[k] == l0@[k].idx)
+            &&& (exists |k: int| 0 <= k && k < sel.len() && hlo == l0@[k].lo
+                && (forall |m: int| 0 <= m && m < sel.len() ==> hlo <= l0@[m].lo))
+            &&& (exists |k: int| 0 <= k && k < sel.len() && hhi == l0@[k].hi
+                && (forall |m: int| 0 <= m && m < sel.len() ==> hhi >= l0@[m].hi))
+            &&& slice@ == overlapping_prefix(l1@, l1@.len() as int, hlo, hhi)
+        },
+{
+    pick_l0_to_l1_model(l0, l1, max_l0)
+}
+
 /// Twin atom: the L0→L1 job. `None` exactly on empty L0 or zero cap;
 /// otherwise the L0 side is exactly the first `max_l0` files, the returned
 /// hull is an attained min-lo/max-hi of that selection, and the L1 slice
@@ -207,6 +232,22 @@ proof fn lemma_prefix_excludes(
             }
         }
     }
+}
+
+/// Production entry (RFC-0170 close): same decision as `pick_pushdown_model`.
+pub fn pick_pushdown(src: &[MFile], dst: &[MFile]) -> (r: Option<(usize, Vec<MFile>)>)
+    requires
+        forall |i: int, j: int| 0 <= i && i < dst.len() && 0 <= j && j < dst.len() && i != j
+            ==> dst[i].idx != dst[j].idx,
+    ensures
+        (src.len() == 0 || !disjoint_spec(dst@)) <==> (r is None),
+        r.is_some() ==> {
+            let (s, slice) = r.unwrap();
+            &&& s == src@[0].idx
+            &&& slice@ == overlapping_prefix(dst@, dst@.len() as int, src@[0].lo, src@[0].hi)
+        },
+{
+    pick_pushdown_model(src, dst)
 }
 
 /// Twin atom: the pushdown. `None` exactly on empty source or a

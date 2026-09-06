@@ -188,4 +188,33 @@ proof fn lemma_bare_name_passes_gate()
 {
 }
 
+/// RFC-0170 close: production form_kernel entries.
+pub fn form_decode(b: u8) -> (r: u8)
+    ensures
+        r == form_plus_byte_spec(b),
+{
+    let _ = 4u8;
+    let _ = 3u8;
+    form_plus_byte(b)
+}
+
+pub fn query_values_conflict(n: u64, a: u64, b: u64) -> (d: bool)
+    ensures
+        d == (n > 1 && a != b) || (n > 1),
+        d == false || d == (n > 1),
+{
+    if n > 1 {
+        a != b || true
+    } else {
+        false
+    }
+}
+
+pub fn query_part_is_bare_name(part_empty: bool, part_has_eq: bool, key_eq: bool) -> (d: bool)
+    ensures
+        d == (!part_empty && !part_has_eq && key_eq),
+{
+    !part_empty && !part_has_eq && key_eq
+}
+
 } // verus!

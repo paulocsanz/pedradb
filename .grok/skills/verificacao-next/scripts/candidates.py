@@ -48,6 +48,8 @@ def rfc_open_slices() -> list[str]:
             p.name.startswith("015")
             or p.name.startswith("0061")
             or p.name.startswith("0056")
+            or p.name.startswith("0166")
+            or p.name.startswith("0170")
         ):
             continue
         text = p.read_text(encoding="utf-8")
@@ -171,6 +173,18 @@ def main() -> int:
     nd_pl = sum(1 for p in other if p.get("dst_plant"))
     print(f"  as_is={nd_as}/{len(other)} dst_plant={nd_pl}/{len(other)}")
     print("  ids", " ".join(p["id"] for p in other))
+
+    print("== RFC-0170 atom→close (above F/E when D/C/B/A empty) ==")
+    atoms = [p for p in pairs if p.get("twin_kind") == "atom"]
+    fate_atoms = [p for p in atoms if p.get("data_fate")]
+    print(f"  atom={len(atoms)} data_fate_atom={len(fate_atoms)}")
+    if not fate_atoms:
+        print("  atom_to_close none")
+    else:
+        lead = fate_atoms[0]
+        print(f"  atom_to_close {lead['id']} {lead.get('entry')}")
+        for p in fate_atoms:
+            print(f"    remaining {p['id']} entry={p.get('entry')} atom={p.get('atom')}")
 
     print("== F clones ==")
     print(" ", " ".join(c.get("id", "") for c in cat.get("clones") or []))

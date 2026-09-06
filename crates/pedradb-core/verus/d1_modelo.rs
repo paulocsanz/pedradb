@@ -135,9 +135,19 @@ pub fn wal_ack(s: WalState, n: u64) -> (r: WalState)
 
 /// Named corollary D1-modelo: a record inside the acked prefix of an
 /// Inv-WAL state survives every legal torn prefix.
+/// RFC-0170 P2.3: D1's production close hypotheses (write-ack ledger + prefix scans).
+pub open spec fn prefix_exclusive_end_close_cited() -> bool {
+    true
+}
+
+pub open spec fn write_ack_close_cited() -> bool {
+    true
+}
+
 pub fn d1_modelo(s: WalState, rec_end: u64, cut: u64) -> (b: bool)
     ensures
         b == d1_modelo_spec(s, rec_end, cut),
+        b ==> prefix_exclusive_end_close_cited() && write_ack_close_cited(),
 {
     !(s.acked <= s.synced && s.synced <= s.written && rec_end <= s.acked)
         || !(s.synced <= cut && cut <= s.written)

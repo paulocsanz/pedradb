@@ -2734,9 +2734,11 @@ impl<E: Env> Db<E> {
     /// Stall knobs off (parity default): collecting CF families is unused.
     /// RFC-0149 P2.1: `batch_families` used to `to_string()` on every 1c put.
     fn write_admission_idle(&self) -> bool {
-        self.write_stall_mem_bytes.is_none()
-            && self.write_pressure_l0.is_none()
-            && self.write_stall_l0.is_none()
+        crate::write_admission_kernel::write_admission_idle(
+            self.write_stall_mem_bytes.is_some(),
+            self.write_pressure_l0.is_some(),
+            self.write_stall_l0.is_some(),
+        )
     }
 
     /// Whether flush/compact split by CF family.

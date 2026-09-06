@@ -69,6 +69,28 @@
 - Method that closed: `loop.spec_decr_nat` + `step` on `index_usize_spec`;
   lengths only as `x.val.length : Nat`; no `simp [loop]`.
 
+
+## Prefix (`prefix.rs`, RFC-0170 P0.3)
+
+- `[lib] path` = production `crates/pedradb-core/src/prefix.rs`; stamp
+  `SOURCE.prefix` pins the whole file.
+- Production `prefix_exclusive_end` uses index `while e.len() > 0` (same
+  semantics as `last_mut`; Charon translates the index form).
+- Lean 4.31.0 accepted (no hole in `Prefix.lean`):
+  - `prefix_exclusive_end_matches_spec` (empty vec → `done none`)
+  - `prefix_exclusive_end_def` (`rfl` on to_vec then loop)
+  - `prefix_exclusive_end_as_is_dente` (`rfl`: push 255)
+
+## Write admission (`write_admission_kernel.rs`, RFC-0170 P2.1)
+
+- `[lib] path` = production `crates/pedradb-core/src/write_admission_kernel.rs`;
+  stamp `SOURCE.write_admission`.
+- Charon translates both fns as transparent `if`/`ok` (0 axiom).
+- Lean 4.31.0 accepted (no hole in `WriteAdmission.lean`):
+  - `write_admission_idle_matches_spec` (all knobs off → `ok true`)
+  - `write_admission_idle_mem_stall_refuses` (`ok false`)
+  - `write_admission_idle_as_is_dente` (stalls ignored → `ok true`)
+
 ## What we may say
 
 > Lean accepted those named theorems of the Aeneas extracts of the production Rust files. Persist/disk remain axioms. F83 sibling is now Lean-∀ (`as_is_leaks_sibling`), not only Stateright. Bloom T4 and the T1 bit-core (`set_bit_test_bit_same`) are Lean-∀ of the extract; insert-loop then query-loop is not.
@@ -83,7 +105,11 @@ Never: “Lean proved Raft / fold / the Bloom filter.”
 ./scripts/aeneas_commit.sh --required
 ./scripts/aeneas_isolated.sh --required
 ./scripts/aeneas_bloom.sh --required
+./scripts/aeneas_prefix.sh --required
+./scripts/aeneas_write_admission.sh --required
 ./scripts/lean_vote.sh --required
 ./scripts/lean_ae_commit.sh --required
 ./scripts/lean_bloom.sh --required
+./scripts/lean_prefix.sh --required
+./scripts/lean_write_admission.sh --required
 ```

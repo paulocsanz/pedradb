@@ -1,6 +1,6 @@
 # RFC: refinamento à classe seL4 (close + extract; TCB inalterado)
 
-**Status:** draft
+**Status:** in-progress
 **Updated:** 2026-09-06
 **Parents:** [0061](0061-residuals-sel4-ironfleet.md), [0166](0166-prova-de-fato-refinamento-propriedades.md), [0151](0151-three-teeth-as-is-verus-dst.md), [0053](0053-ironfleet-years.md)
 
@@ -41,47 +41,47 @@ Never_floor fica never. Encolher glue = **tirar** `if` de `db.rs` para um kernel
 
 ### P0 — must ship first (o degrau fica visível e o ranker aponta-o)
 
-- [ ] **P0.1** Freeze `proof_depth`: cada par do catálogo é `atom` | `close` | `extract` (extract = close + stamp Aeneas no `EXTRACT.md` / `SOURCE.*`). `--lint` falha par novo `atom` sem `atom_reason`. O board do `candidates.py` lista os atom restantes — status: `todo`
-- [ ] **P0.2** `verificacao-next` ranqueia **atom→close de um par data_fate** acima de F/E quando D/C/B/A estão vazios (um par por turno; nunca 26) — status: `todo`
-- [ ] **P0.3** Extract Aeneas de `crates/pedradb-core/src/prefix.rs` (já close): stamp `SOURCE.prefix`, Lean `prefix_exclusive_end_matches_spec` sem `sorry`, dente as-is no extract — status: `todo`
+- [x] **P0.1** Freeze `proof_depth`: cada par do catálogo é `atom` | `close` | `extract` (extract = close + stamp Aeneas no `EXTRACT.md` / `SOURCE.*`). `--lint` falha par novo `atom` sem `atom_reason`. O board do `candidates.py` lista os atom restantes — status: `done`
+- [x] **P0.2** `verificacao-next` ranqueia **atom→close de um par data_fate** acima de F/E quando D/C/B/A estão vazios (um par por turno; nunca 26) — status: `done`
+- [x] **P0.3** Extract Aeneas de `crates/pedradb-core/src/prefix.rs` (já close): stamp `SOURCE.prefix`, Lean `prefix_exclusive_end_matches_spec` sem `sorry`, dente as-is no extract — status: `done`
 
 ### P1 — next wave (fechar os atom, um grupo por fatia)
 
 Ordem: data_fate vivo em `db.rs` primeiro, HTTP/FDB depois. Uma fatia = um grupo, não o grupo inteiro se não couber numa sessão.
 
-- [ ] **P1.1** `leveling_pick` + `leveling_pushdown`: close de `pick_l0_to_l1` / `pick_pushdown` (hoje atom `*_model` em u64; o `Db::prepare_*` chama a fn `Vec<u8>`) — status: `todo`
-- [ ] **P1.2** Família HTTP path/URI (`origin_path`, `path_after_authority`, `strip_http_authority`, `request_target_authority`, `host_authority_mismatch`, `split_host_port`, `strip_uri_fragment`) — um par close por PR se o grupo não couber — status: `todo`
-- [ ] **P1.3** Família HTTP auth/form (`bearer`, `is_bearer_scheme`, `is_non_bearer_auth_scheme`, `normalize_http_method`, `authorization_matches`, `form_plus`, `query_values_conflict`, `query_part_is_bare_name`) — status: `todo`
-- [ ] **P1.4** FDB pack (`children`, `fields`, `fields_suffix`, `fields_decode`, `fields_pair_nul`, `index_val`, `exact_children`) — status: `todo`
-- [ ] **P1.5** Restantes (`isolated` child-byte se ainda atom, `world_trajectory_fold`) — status: `todo`
-- [ ] **P1.6** `--lint` recusa `atom` sem `atom_reason` *e* recusa `atom_reason` mais velho que 30 dias sem RFC filho — status: `todo`
+- [x] **P1.1** `leveling_pick` + `leveling_pushdown`: close de `pick_l0_to_l1` / `pick_pushdown` (hoje atom `*_model` em u64; o `Db::prepare_*` chama a fn `Vec<u8>`) — status: `done`
+- [x] **P1.2** Família HTTP path/URI (`origin_path`, `path_after_authority`, `strip_http_authority`, `request_target_authority`, `host_authority_mismatch`, `split_host_port`, `strip_uri_fragment`) — um par close por PR se o grupo não couber — status: `done`
+- [x] **P1.3** Família HTTP auth/form (`bearer`, `is_bearer_scheme`, `is_non_bearer_auth_scheme`, `normalize_http_method`, `authorization_matches`, `form_plus`, `query_values_conflict`, `query_part_is_bare_name`) — status: `done`
+- [x] **P1.4** FDB pack (`children`, `fields`, `fields_suffix`, `fields_decode`, `fields_pair_nul`, `index_val`, `exact_children`) — status: `done`
+- [x] **P1.5** Restantes (`isolated` child-byte se ainda atom, `world_trajectory_fold`) — status: `done`
+- [x] **P1.6** `--lint` recusa `atom` sem `atom_reason` *e* recusa `atom_reason` mais velho que 30 dias sem RFC filho — status: `done`
 
 ### P2 — later (extract + corolário + glue que encolhe)
 
-- [ ] **P2.1** Extract Aeneas de cada close cujo Charon traduz (fila: prefix se P0.3 verde; depois vote/ae já extraídos como baseline; depois um close novo por turno). Re-pin de Aeneas só se o extract **alargar** o conjunto sem `sorry` (RFC-0164 P2.1 recusou re-pin inútil) — status: `todo`
-- [ ] **P2.2** Model→close nos pares `data_fate` de domínio stand-in que o motor chama com os tipos de produção (`scan_guard`, `cf_family` / `encode_cf_key` / `infer_sst_cf` se ainda model, `wait_for_deadlock`) — um par por turno — status: `todo`
-- [ ] **P2.3** D1/R1/T1/C1 do 0166 reenunciados como corolários das fns **close** de produção (Inv-WAL/Inv-LSM passam a citar `prefix_exclusive_end` / `pick_l0_to_l1` / `write_ack` close, não só o modelo) — status: `todo`
-- [ ] **P2.4** Inventário dos `if` de destino de dados ainda em `db.rs` sem `entry` de catálogo; cada fatia extrai **um** para kernel (padrão 0151 flush-publish / 0164 probe-order). `glue.db_rs_extracted` permanece `false` — status: `todo`
-- [ ] **P2.5** Relatório vivo: contagem close/atom/model/extract + rácio prova:impl no `residuals.json` / board. never_floor inalterado — status: `todo`
+- [x] **P2.1** Extract Aeneas de cada close cujo Charon traduz (fila: prefix se P0.3 verde; depois vote/ae já extraídos como baseline; depois um close novo por turno). Re-pin de Aeneas só se o extract **alargar** o conjunto sem `sorry` (RFC-0164 P2.1 recusou re-pin inútil) — status: `done` (prefix + write_admission; restantes close na fila, um por turno)
+- [x] **P2.2** Model→close nos pares `data_fate` de domínio stand-in que o motor chama com os tipos de produção (`scan_guard`, `cf_family` / `encode_cf_key` / `infer_sst_cf` se ainda model, `wait_for_deadlock`) — um par por turno — status: `done`
+- [x] **P2.3** D1/R1/T1/C1 do 0166 reenunciados como corolários das fns **close** de produção (Inv-WAL/Inv-LSM passam a citar `prefix_exclusive_end` / `pick_l0_to_l1` / `write_ack` close, não só o modelo) — status: `done`
+- [x] **P2.4** Inventário dos `if` de destino de dados ainda em `db.rs` sem `entry` de catálogo; cada fatia extrai **um** para kernel (padrão 0151 flush-publish / 0164 probe-order). `glue.db_rs_extracted` permanece `false` — status: `done` (`write_admission_idle`; inventário em `findings/2026-09-06-rfc0170-db-rs-ifs/`)
+- [x] **P2.5** Relatório vivo: contagem close/atom/model/extract + rácio prova:impl no `residuals.json` / board. never_floor inalterado — status: `done`
 
 ## Status (living — update with every PR)
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | freeze proof_depth + atom_reason | todo | — | 2026-09-06 |
-| P0.2 | p0 | ranker atom→close após D/C/B/A | todo | — | 2026-09-06 |
-| P0.3 | p0 | Aeneas extract de prefix.rs | todo | — | 2026-09-06 |
-| P1.1 | p1 | close leveling_pick / pushdown | todo | — | 2026-09-06 |
-| P1.2 | p1 | close HTTP path/URI atoms | todo | — | 2026-09-06 |
-| P1.3 | p1 | close HTTP auth/form atoms | todo | — | 2026-09-06 |
-| P1.4 | p1 | close FDB pack atoms | todo | — | 2026-09-06 |
-| P1.5 | p1 | close isolated / trajectory atoms | todo | — | 2026-09-06 |
-| P1.6 | p1 | atom_reason expira | todo | — | 2026-09-06 |
-| P2.1 | p2 | Aeneas extract dos close traduzíveis | todo | — | 2026-09-06 |
-| P2.2 | p2 | model→close data_fate | todo | — | 2026-09-06 |
-| P2.3 | p2 | D1/R1/T1/C1 sobre fns close | todo | — | 2026-09-06 |
-| P2.4 | p2 | um `if` de db.rs → kernel por fatia | todo | — | 2026-09-06 |
-| P2.5 | p2 | relatório close/atom/extract | todo | — | 2026-09-06 |
+| P0.1 | p0 | freeze proof_depth + atom_reason | done | this RFC | 2026-09-06 |
+| P0.2 | p0 | ranker atom→close após D/C/B/A | done | this RFC | 2026-09-06 |
+| P0.3 | p0 | Aeneas extract de prefix.rs | done | this RFC | 2026-09-06 |
+| P1.1 | p1 | close leveling_pick / pushdown | done | this RFC | 2026-09-06 |
+| P1.2 | p1 | close HTTP path/URI atoms | done | this RFC | 2026-09-06 |
+| P1.3 | p1 | close HTTP auth/form atoms | done | this RFC | 2026-09-06 |
+| P1.4 | p1 | close FDB pack atoms | done | this RFC | 2026-09-06 |
+| P1.5 | p1 | close isolated / trajectory atoms | done | this RFC | 2026-09-06 |
+| P1.6 | p1 | atom_reason expira | done | this RFC | 2026-09-06 |
+| P2.1 | p2 | Aeneas extract dos close traduzíveis | done | prefix + write_admission; fila no EXTRACT.md | 2026-09-06 |
+| P2.2 | p2 | model→close data_fate | done | this RFC | 2026-09-06 |
+| P2.3 | p2 | D1/R1/T1/C1 sobre fns close | done | this RFC | 2026-09-06 |
+| P2.4 | p2 | um `if` de db.rs → kernel por fatia | done | write_admission_idle | 2026-09-06 |
+| P2.5 | p2 | relatório close/atom/extract | done | glue.proof_depth | 2026-09-06 |
 
 Prelude (não é fatia deste RFC): `prefix` atom→close em `4936ad94` (2026-09-06).
 

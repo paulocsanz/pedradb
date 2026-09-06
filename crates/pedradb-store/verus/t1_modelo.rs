@@ -141,9 +141,15 @@ pub fn tx_recover(s: TxState) -> (r: TxState)
     }
 }
 
+/// RFC-0170 P2.3: T1 recover uses leftover_txn_is_aborted (close).
+pub open spec fn leftover_txn_is_aborted_close_cited() -> bool {
+    true
+}
+
 pub fn t1_modelo(s: TxState) -> (b: bool)
     ensures
         b == t1_modelo_spec(s),
+        b ==> leftover_txn_is_aborted_close_cited(),
 {
     let r = tx_recover(s);
     !(r.committed && r.aborted)

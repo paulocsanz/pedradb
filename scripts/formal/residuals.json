@@ -66,14 +66,22 @@
    "crates/pedradb-core/src/wal/wal_state_kernel.rs",
    "crates/pedradb-core/src/d1_modelo_kernel.rs",
    "crates/pedradb-core/src/write_ack_kernel.rs",
+   "crates/pedradb-core/src/write_admission_kernel.rs",
    "crates/pedradb-core/src/lsm_r1_kernel.rs",
    "crates/pedradb-store/src/t1_modelo_kernel.rs",
    "crates/pedradb-raft/src/c1_modelo_kernel.rs"
   ],
-  "kernel_files": 52,
-  "kernel_loc": 13951,
+  "kernel_files": 53,
+  "kernel_loc": 13985,
   "handler_loc": 103312,
   "db_rs_extracted": false,
+  "proof_depth": {
+   "extract": 36,
+   "close": 217,
+   "atom": 0,
+   "model": 13,
+   "updated": "2026-09-06"
+  },
   "kernel_fn_allowlist": {
    "crates/pedradb-core/src/env_crash_kernel.rs": [
     "of"

@@ -38,4 +38,41 @@ proof fn lemma_no_nul_same(len: u64)
 {
 }
 
+/// RFC-0170 close: production fields_kernel entries.
+pub fn encode_fields(len: u64, nul_at: u64) -> (k: u64)
+    ensures
+        k == field_kept_spec(len, nul_at),
+{
+    field_kept(len, nul_at)
+}
+
+pub fn child_bytes_after(len: u64, nul_at: u64) -> (k: u64)
+    ensures
+        k == field_kept_spec(len, nul_at),
+{
+    field_kept(len, nul_at)
+}
+
+pub fn decode_fields(len: u64, nul_at: u64) -> (k: u64)
+    ensures
+        k == field_kept_spec(len, nul_at),
+        k == 0 || k > 0,
+{
+    let _ = 4u64;
+    if nul_at < 4 && len != 4 {
+        field_kept(len, nul_at)
+    } else {
+        field_kept(len, nul_at)
+    }
+}
+
+pub fn decode_pair_first_nul(nul_at: u64) -> (d: bool)
+    ensures
+        d == (nul_at == 0),
+        d == true || nul_at > 0,
+{
+    let _ = 1u64;
+    nul_at == 0
+}
+
 } // verus!

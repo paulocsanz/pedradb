@@ -1032,6 +1032,120 @@ def check_residuals(
 
 TWIN_KINDS = {"close", "atom", "model"}
 
+PROOF_DEPTHS = {"atom", "close", "extract", "model"}
+ATOM_REASON_DATE = re.compile(r"^(\d{4}-\d{2}-\d{2})$")
+# RFC-0170 P0.1: close + Aeneas SOURCE stamp ⇒ proof_depth=extract.
+AENEAS_EXTRACTS = (
+    ("crates/pedradb-raft/src/vote_kernel.rs", "formal/aeneas/out/SOURCE"),
+    ("crates/pedradb-fold/src/isolated_kernel.rs", "formal/aeneas/out/SOURCE.isolated"),
+    ("crates/pedradb-core/src/bloom.rs", "formal/aeneas/out/SOURCE.bloom"),
+    ("crates/pedradb-core/src/probe_order_kernel.rs", "formal/aeneas/out/SOURCE.probe_order"),
+    ("crates/pedradb-raft/src/ae_kernel.rs", "formal/aeneas/out/SOURCE.ae"),
+    ("crates/pedradb-raft/src/commit_kernel.rs", "formal/aeneas/out/SOURCE.commit"),
+    ("crates/pedradb-core/src/group_commit_kernel.rs", "formal/aeneas/out/SOURCE.group_commit"),
+    ("crates/pedradb-core/src/wal/reopen_kernel.rs", "formal/aeneas/out/SOURCE.reopen"),
+    ("crates/pedradb-core/src/wal/recover_kernel.rs", "formal/aeneas/out/SOURCE.wal_recover"),
+    ("crates/pedradb-raft/src/apply_kernel.rs", "formal/aeneas/out/SOURCE.apply"),
+    ("crates/pedradb-core/src/prefix.rs", "formal/aeneas/out/SOURCE.prefix"),
+    (
+        "crates/pedradb-core/src/write_admission_kernel.rs",
+        "formal/aeneas/out/SOURCE.write_admission",
+    ),
+)
+
+
+def proof_depth_of(pair: dict) -> str:
+    kind = pair.get("twin_kind")
+    if kind == "atom":
+        return "atom"
+    if kind == "model":
+        return "model"
+    if kind == "close":
+        kernel = pair.get("kernel") or ""
+        if any(kernel == k for k, _ in AENEAS_EXTRACTS):
+            return "extract"
+        return "close"
+    return "unknown"
+
+
+def check_proof_depth(root: Path, catalog: dict, r: Report) -> None:
+    """RFC-0170 P0.1 + P1.6: atom needs dated atom_reason; >30d needs child_rfc."""
+    print("== proof_depth (RFC-0170: atom|close|extract; model stand-in until P2.2) ==")
+    from datetime import date, datetime
+
+    today = date(2026, 9, 6)
+    n_atom = n_close = n_extract = n_model = 0
+    for pair in catalog["pairs"]:
+        pid = pair["id"]
+        depth = proof_depth_of(pair)
+        if depth == "atom":
+            n_atom += 1
+            reason = pair.get("atom_reason")
+            if not isinstance(reason, dict):
+                r.fail(
+                    f"{pid}: atom twin needs atom_reason "
+                    "{{date: YYYY-MM-DD, why: ...}} (RFC-0170 P0.1)"
+                )
+                continue
+            ds = str(reason.get("date") or "")
+            if not ATOM_REASON_DATE.match(ds):
+                r.fail(f"{pid}: atom_reason.date must be YYYY-MM-DD")
+                continue
+            try:
+                d = datetime.strptime(ds, "%Y-%m-%d").date()
+            except ValueError:
+                r.fail(f"{pid}: atom_reason.date not a real day")
+                continue
+            child = reason.get("child_rfc")
+            age = (today - d).days
+            if age > 30 and not child:
+                r.fail(
+                    f"{pid}: atom_reason older than 30 days without child_rfc "
+                    "(RFC-0170 P1.6)"
+                )
+                continue
+            if not str(reason.get("why") or "").strip():
+                r.fail(f"{pid}: atom_reason.why empty")
+                continue
+            r.good(f"{pid}: proof_depth=atom ({ds})")
+        elif depth == "extract":
+            n_extract += 1
+            r.good(f"{pid}: proof_depth=extract")
+        elif depth == "close":
+            n_close += 1
+            r.good(f"{pid}: proof_depth=close")
+        elif depth == "model":
+            n_model += 1
+            r.good(f"{pid}: proof_depth=model (stand-in)")
+        else:
+            r.fail(f"{pid}: unknown proof_depth from twin_kind={pair.get('twin_kind')!r}")
+    r.good(
+        f"proof_depth counts: extract={n_extract} close={n_close} "
+        f"atom={n_atom} model={n_model}"
+    )
+    res_path = root / "scripts/formal/residuals.json"
+    if res_path.is_file():
+        res = json.loads(res_path.read_text(encoding="utf-8"))
+        pd = (res.get("glue") or {}).get("proof_depth")
+        live = {
+            "extract": n_extract,
+            "close": n_close,
+            "atom": n_atom,
+            "model": n_model,
+        }
+        if not isinstance(pd, dict):
+            r.gap("RFC-0170 P2.5: glue.proof_depth not frozen yet")
+        else:
+            freeze_failed = False
+            for k, v in live.items():
+                if pd.get(k) != v:
+                    freeze_failed = True
+                    r.fail(
+                        f"residuals freeze: glue.proof_depth.{k}={pd.get(k)!r} != live {v}"
+                    )
+            if not freeze_failed:
+                r.good(f"proof_depth freeze matches live {live}")
+
 
 def check_twins(root: Path, catalog: dict, r: Report, strict: bool) -> None:
     print("== twins (kind + kernel tokens ⊆ Verus twin) ==")
@@ -1444,6 +1558,81 @@ def check_extract(
         r.fail(f"lean_vote.sh exit {p.returncode}")
     elif charon_required:
         r.good("lean_vote.sh (vote + Ae + Commit)")
+
+    # RFC-0170 P0.3: prefix.rs stamp.
+    pref_stamp = root / "formal/aeneas/out/SOURCE.prefix"
+    pref_src = root / "crates/pedradb-core/src/prefix.rs"
+    if pref_stamp.is_file() and pref_src.is_file():
+        want = None
+        for line in pref_stamp.read_text(encoding="utf-8").splitlines():
+            if line.startswith("sha256="):
+                want = line.split("=", 1)[1].strip()
+        have = hashlib.sha256(pref_src.read_bytes()).hexdigest()
+        if want and have == want:
+            r.good("aeneas SOURCE.prefix sha256 matches prefix.rs")
+        elif want:
+            r.fail(
+                f"aeneas SOURCE.prefix drifted (kernel {have[:12]}… vs stamp {want[:12]}…; "
+                "re-run ./scripts/aeneas_prefix.sh)"
+            )
+        thy = root / "formal/aeneas/lean/Prefix.lean"
+        if thy.is_file():
+            tt = thy.read_text(encoding="utf-8")
+            if re.search(r"\bsorry\b", tt):
+                r.fail("RFC-0170 P0.3: Prefix.lean contains sorry")
+            elif "theorem prefix_exclusive_end_matches_spec" in tt:
+                r.good("RFC-0170 P0.3: Prefix.lean theorem prefix_exclusive_end_matches_spec")
+            else:
+                r.fail("RFC-0170 P0.3: Prefix.lean missing prefix_exclusive_end_matches_spec")
+        else:
+            r.fail("RFC-0170 P0.3: formal/aeneas/lean/Prefix.lean missing")
+    else:
+        r.gap("aeneas SOURCE.prefix missing (run ./scripts/aeneas_prefix.sh)")
+    # RFC-0170 P2.1: write_admission_kernel.rs stamp.
+    wa_stamp = root / "formal/aeneas/out/SOURCE.write_admission"
+    wa_src = root / "crates/pedradb-core/src/write_admission_kernel.rs"
+    if wa_stamp.is_file() and wa_src.is_file():
+        want = None
+        for line in wa_stamp.read_text(encoding="utf-8").splitlines():
+            if line.startswith("sha256="):
+                want = line.split("=", 1)[1].strip()
+        have = hashlib.sha256(wa_src.read_bytes()).hexdigest()
+        if want and have == want:
+            r.good("aeneas SOURCE.write_admission sha256 matches write_admission_kernel.rs")
+        elif want:
+            r.fail(
+                f"aeneas SOURCE.write_admission drifted (kernel {have[:12]}… vs stamp {want[:12]}…; "
+                "re-run ./scripts/aeneas_write_admission.sh)"
+            )
+        thy = root / "formal/aeneas/lean/WriteAdmission.lean"
+        if thy.is_file():
+            tt = thy.read_text(encoding="utf-8")
+            if re.search(r"\bsorry\b", tt):
+                r.fail("RFC-0170 P2.1: WriteAdmission.lean contains sorry")
+            elif "theorem write_admission_idle_matches_spec" in tt:
+                r.good("RFC-0170 P2.1: WriteAdmission.lean theorem write_admission_idle_matches_spec")
+            else:
+                r.fail("RFC-0170 P2.1: WriteAdmission.lean missing write_admission_idle_matches_spec")
+        else:
+            r.fail("RFC-0170 P2.1: formal/aeneas/lean/WriteAdmission.lean missing")
+    else:
+        r.gap("aeneas SOURCE.write_admission missing (run ./scripts/aeneas_write_admission.sh)")
+    # RFC-0170 P2.3: D1/R1/T1/C1 twins cite close production fns.
+    cites = (
+        ("crates/pedradb-core/verus/d1_modelo.rs", "prefix_exclusive_end_close_cited"),
+        ("crates/pedradb-core/verus/d1_modelo.rs", "write_ack_close_cited"),
+        ("crates/pedradb-core/verus/lsm_r1.rs", "pick_l0_to_l1_close_cited"),
+        ("crates/pedradb-store/verus/t1_modelo.rs", "leftover_txn_is_aborted_close_cited"),
+        ("crates/pedradb-raft/verus/c1_modelo.rs", "joint_election_ok_close_cited"),
+        ("crates/pedradb-raft/verus/c1_modelo.rs", "may_commit_at_close_cited"),
+    )
+    for rel, name in cites:
+        text = load_text(root, rel) or ""
+        if f"spec fn {name}" in text and "ensures" in text:
+            r.good(f"RFC-0170 P2.3: {rel} cites {name}")
+        else:
+            r.fail(f"RFC-0170 P2.3: {rel} missing spec fn {name} in ensures")
+
     if not (want_charon or charon_required):
         return
     script = root / "scripts/aeneas_vote.sh"
@@ -1714,6 +1903,7 @@ def main() -> int:
         check_tcb_freeze(root, catalog, r)
         check_three_teeth(root, catalog, r)
         check_proof_vs_campaign(root, catalog, r)
+        check_proof_depth(root, catalog, r)
         check_residuals(root, r, catalog)
         check_class_scan(root, r)
     if args.clones or run_ci:

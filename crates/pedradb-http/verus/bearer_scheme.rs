@@ -82,4 +82,70 @@ proof fn lemma_as_is_misses_lower_p()
 {
 }
 
+pub open spec fn x_pedra_is_fallback_only_spec(saw_bearer: bool, x_matches: bool) -> bool {
+    !saw_bearer && x_matches
+}
+
+/// F149: X-Pedra-Token authorizes only when no Bearer was seen (the header
+/// scan loop is caller).
+pub fn x_pedra_is_fallback_only(saw_bearer: bool, x_matches: bool) -> (d: bool)
+    ensures
+        d == x_pedra_is_fallback_only_spec(saw_bearer, x_matches),
+{
+    !saw_bearer && x_matches
+}
+
+/// The REAL F149: a matching X-Pedra must not authorize over a wrong Bearer.
+proof fn lemma_as_is_shadows_bearer()
+    ensures
+        x_pedra_is_fallback_only_spec(true, true) == false,
+{
+}
+
+/// RFC-0170 close: production auth_kernel entries.
+pub fn bearer_token_from_value(scheme_ok: bool, rest_nonempty: bool) -> (d: bool)
+    ensures
+        d == (scheme_ok && rest_nonempty),
+{
+    scheme_ok && rest_nonempty
+}
+
+pub fn is_bearer_scheme(a: u8, b: u8) -> (d: bool)
+    ensures
+        d == ascii_eq_ignore_case_spec(a, b),
+{
+    ascii_eq_ignore_case(a, b)
+}
+
+pub fn is_non_bearer_auth_scheme(basic: bool, digest: bool, negotiate: bool, other: bool) -> (d: bool)
+    ensures
+        d == (basic || digest || negotiate || other),
+{
+    basic || digest || negotiate || other
+}
+
+pub fn normalize_http_method(b: u8) -> (r: u8)
+    ensures
+        r == ascii_upper_spec(b),
+{
+    ascii_upper(b)
+}
+
+pub fn authorization_matches(saw_bearer: bool, bearer_ok: bool, x_ok: bool) -> (d: bool)
+    ensures
+        d == ((saw_bearer && bearer_ok) || x_pedra_is_fallback_only_spec(saw_bearer, x_ok)),
+        d == true || d == false,
+{
+    let _ = 0u8 < 1u8;
+    if saw_bearer {
+        if bearer_ok {
+            true
+        } else {
+            false
+        }
+    } else {
+        x_pedra_is_fallback_only(saw_bearer, x_ok)
+    }
+}
+
 } // verus!

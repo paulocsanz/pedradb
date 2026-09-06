@@ -15,17 +15,33 @@ Rank **formal** work. Not benches. Not a proof the system is bug-free.
 **Forbidden:** “acabou”, “perfeito”, “sem bugs”, “garantia total”, seL4.
 Claim is only: kernel K ⊨ spec S relative to axioms A.
 
-## Implement if obvious (same turn)
+## Implement the winner (same turn — mandatory)
 
-After the board + rank, **implement** the winner in this turn when all of:
+After the board + rank, **implement** the first non-empty ranked class
+(D → C → B → A → atom→close → F → E) in this turn. Report-only turns are a
+failure of this skill: the deliverable is landed code (kernel/guard/twin/wire),
+not a description of it.
 
-1. Rank is **D** or **C** (live `if` / missing `live_callers` / cartoon plant).
-2. An already-written formal RFC has `- [ ] **P0` or `- [ ] **P1` naming that slice (tie-break: that P-id, do not invent 0153).
-3. The slice is one kernel + handler + inbound plant — not 42 pairs, not L28 ∀.
+Bound the slice so it lands in one turn:
 
-Then: wire the catalog fn, inbound `handle_inbound` plant (not `entry(` after open), `--lint` names the pair, named `cargo test`, RFC checkbox `done`. Still print the board (winner may already be `done`).
+- **D/C:** one kernel + handler + inbound plant.
+- **B/A:** one freeze hole / one twin.
+- **atom→close (RFC-0170):** ONE `data_fate` atom pair per turn (never 26).
+  Board line `atom_to_close <id> <entry>`. Close the production `entry`, not
+  the inner atom.
+- **F:** ONE clone group per turn (never all 7): expand the group's fns
+  (twin per copy, agreement guard, or drift check), wire catalog, named test.
+- **E:** one pair per turn (never 42).
 
-**Do not implement** E / F-as-campaign / H / G / I. Report those. Never extract `db.rs`.
+Tie-break: an already-written RFC `- [ ] **P0/P1` naming a slice picks that
+slice over an equally-ranked one (do not invent a new RFC to gate the work —
+RFC naming is a tie-break, not a gate).
+
+Acceptance: catalog wired, `--lint` names the pair, named `cargo test` green,
+RFC checkbox `done` when one exists. Still print the board (winner may
+already be `done`).
+
+**Report-only (never implement): H / G / I.** Never extract `db.rs`.
 
 ## 1. Search (mandatory, this turn — do not skip)
 
@@ -60,6 +76,7 @@ If script vs RFC disagree, **code + catalog win**.
 | **C** | store mentions entry without `live_callers`, or live_callers drift | freeze the live call |
 | **D** | protocol bit ≠ catalog fn, or plant is `pure_fn` cartoon | wire fn + inbound plant |
 | **E** | non-`data_fate` three-teeth 0/N | **one** pair, not 42 |
+| **atom→close** | `twin_kind=atom` and `data_fate` | RFC-0170: prove the production `entry` |
 | **F** | clones list | expand fns if tokens can drift |
 | **G** | `never_floor` / extract | refused — not a next proof |
 | **H** | L28 / PCT / lock ∀ | campaign, not theorem |
@@ -74,10 +91,11 @@ not cartoon.
 
 1. **D** then **C** — live `if` or cartoon plant vs catalog kernel.
 2. **B** / **A** — freeze holes.
-3. **F** — clone drift.
-4. **E** — one non-`data_fate` pair.
-5. **H** — only if the user asked for that campaign.
-6. Never **G** or **I**.
+3. **atom→close** — RFC-0170: one data_fate atom, production entry.
+4. **F** — clone drift.
+5. **E** — one non-`data_fate` pair.
+6. **H** — only if the user asked for that campaign.
+7. Never **G** or **I**.
 
 Tie-break: already-written RFC P0/P1 beats inventing a new RFC.
 
