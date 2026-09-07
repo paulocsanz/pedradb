@@ -121,7 +121,9 @@ fn lz4_size_rejected(path: &Path, plain: usize, compressed_len: usize) -> CoreEr
             "SST lz4 uncompressed size {plain} exceeds the {LZ4_MAX_PLAIN_BLOCK}-byte block cap (compressed length {compressed_len})"
         )
     } else {
-        format!("SST lz4 uncompressed size {plain} exceeds 256x compressed length ({compressed_len})")
+        format!(
+            "SST lz4 uncompressed size {plain} exceeds 256x compressed length ({compressed_len})"
+        )
     };
     CoreError::Internal(format!("{why} in {}", path.display()))
 }
@@ -975,6 +977,13 @@ impl SstTable {
             n = n.saturating_add(h.first_user_key.len());
         }
         n
+    }
+
+    /// Index + bloom — the SST metadata that stays in process RSS.
+    #[must_use]
+    pub fn metadata_memory_bytes(&self) -> usize {
+        self.index_memory_bytes()
+            .saturating_add(self.bloom.memory_bytes())
     }
 
     /// Whether the on-disk / rebuilt bloom is active.
@@ -3647,11 +3656,7 @@ mod tests {
         let entries: Vec<(InternalKey, Bytes)> = (0..n)
             .map(|i| {
                 (
-                    InternalKey::new(
-                        b"meta\0cursor".to_vec(),
-                        n - i,
-                        ValueType::Value,
-                    ),
+                    InternalKey::new(b"meta\0cursor".to_vec(), n - i, ValueType::Value),
                     Bytes::from(vec![0x5a; 200]),
                 )
             })

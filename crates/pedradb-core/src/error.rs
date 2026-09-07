@@ -153,6 +153,19 @@ pub enum CoreError {
         /// Configured stall threshold in bytes.
         limit: usize,
     },
+
+    /// Installing this SST would push engine-resident metadata (index +
+    /// bloom + bulk tail + mem) past the cgroup / `PEDRA_RAM_BUDGET_BYTES`
+    /// cap. Fail closed — do not malloc into SIGKILL.
+    #[error("ram budget: used {used}B + {need}B > cap {cap}B")]
+    RamBudget {
+        /// `hydrate_resident_bytes` before the install.
+        used: usize,
+        /// Metadata bytes of the SST(s) being installed.
+        need: usize,
+        /// Engine cap (cgroup/2 or `PEDRA_RAM_BUDGET_BYTES`).
+        cap: usize,
+    },
 }
 
 /// Convenience `Result` alias used throughout the crate.
