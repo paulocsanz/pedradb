@@ -1946,6 +1946,9 @@ impl Db<StdEnv> {
 static BSTAGE_IDX: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static BSTAGE_EPOCH: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
 
+#[cfg(test)]
+static VLOG_STATS_VALUE_VISITS: AtomicU64 = AtomicU64::new(0);
+
 fn bulk_stage_timing_on() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| {
@@ -5282,11 +5285,12 @@ impl<E: Env> Db<E> {
             let p = self.dir.join(VLOG_FILE_NAME);
             self.env.metadata_len(&p).unwrap_or(0)
         };
-        for n in vlog::list_blob_nums(&self.env, &self.dir) {
-            if n == self.blob_active {
+        let blob_nums = vlog::list_blob_nums(&self.env, &self.dir);
+        for n in &blob_nums {
+            if *n == self.blob_active {
                 continue;
             }
-            let p = vlog::blob_path(&self.dir, n);
+            let p = vlog::blob_path(&self.dir, *n);
             vlog_bytes = vlog_bytes.saturating_add(self.env.metadata_len(&p).unwrap_or(0));
         }
         if self.blob_active > 0 {
@@ -5295,9 +5299,17 @@ impl<E: Env> Db<E> {
                 vlog_bytes = vlog_bytes.saturating_add(self.env.metadata_len(&legacy).unwrap_or(0));
             }
         }
+        // Inline-only DBs have no vlog pointers. Walking every SST value
+        // (`entries_cloned`) made scale settle ~80 s @100M: 7×
+        // `property_int_value` → `stats()` decoded 24 GiB of lazy bodies.
+        if self.vlog.is_none() && blob_nums.is_empty() {
+            return (vlog_bytes, 0, 0);
+        }
         let mut live_bytes = 0u64;
         let mut seen: std::collections::HashSet<(u32, u64)> = std::collections::HashSet::new();
         let mut consider = |stored: &Bytes| {
+            #[cfg(test)]
+            VLOG_STATS_VALUE_VISITS.fetch_add(1, Ordering::Relaxed);
             if let Some(ptr) = vlog::decode_vlog_ptr(stored.as_ref()) {
                 if seen.insert((ptr.file_num, ptr.offset)) {
                     live_bytes = live_bytes.saturating_add(u64::from(ptr.len));
@@ -5313,13 +5325,16 @@ impl<E: Env> Db<E> {
             }
         }
         for t in &self.ssts {
-            for (_, v) in t.entries_cloned().unwrap_or_else(|e| {
-                panic!(
-                    "pedradb: corrupt SST in {} on vlog stats: {e}",
-                    t.path().display()
-                )
-            }) {
-                consider(&v);
+            let mut stream = t.iter_internal_streaming();
+            loop {
+                match stream.next_entry() {
+                    Ok(Some((_, v))) => consider(&v),
+                    Ok(None) => break,
+                    Err(e) => panic!(
+                        "pedradb: corrupt SST in {} on vlog stats: {e}",
+                        t.path().display()
+                    ),
+                }
             }
         }
         (vlog_bytes, live_bytes, seen.len() as u64)
@@ -13187,6 +13202,58 @@ mod tests {
             "prefix window must not walk other-prefix SSTs: probed={} sst_count={}",
             p.scan_sst_probed,
             p.sst_count
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0178 P0.9: inline-only `stats()` must not walk SST values
+    /// (`entries_cloned` of 100M made settle ~80 s after compact returned).
+    #[test]
+    fn rfc0178_stats_without_vlog_skips_sst_value_walk() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(4 * 1024),
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        for i in 0..64u32 {
+            db.put(format!("k{i:04}").as_bytes(), vec![b'v'; 64])
+                .unwrap();
+        }
+        db.flush().unwrap();
+        VLOG_STATS_VALUE_VISITS.store(0, Ordering::Relaxed);
+        let s = db.stats();
+        assert_eq!(s.vlog_live_bytes, 0);
+        assert_eq!(s.vlog_live_records, 0);
+        assert!(s.sst_entries >= 64, "got {}", s.sst_entries);
+        assert_eq!(
+            VLOG_STATS_VALUE_VISITS.load(Ordering::Relaxed),
+            0,
+            "inline-only stats must not walk SST values"
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0178 P0.9: vlog live-byte accounting still visits stored values.
+    #[test]
+    fn rfc0178_stats_with_vlog_still_counts_live_bytes() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(&dir, vlog_opts()).unwrap();
+        let big = vec![0xAAu8; 1024];
+        db.put(b"a", &big).unwrap();
+        VLOG_STATS_VALUE_VISITS.store(0, Ordering::Relaxed);
+        let s = db.stats();
+        assert!(s.vlog_live_bytes >= 1024);
+        assert_eq!(s.vlog_live_records, 1);
+        assert!(
+            VLOG_STATS_VALUE_VISITS.load(Ordering::Relaxed) >= 1,
+            "vlog stats must still visit stored values"
         );
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);

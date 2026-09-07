@@ -395,54 +395,25 @@ impl ScaleStore for PedraScale {
         let t_c = Instant::now();
         let ok = self.db.compact_no_flush().is_ok();
         eprintln!("settle_compact_call={:.3}s", t_c.elapsed().as_secs_f64());
-        let compact_ns = self
-            .db
-            .property_int_value(rocksdb_compat::properties::PEDRA_SETTLE_COMPACT_NS)
-            .ok()
-            .flatten()
-            .unwrap_or(0);
-        let warm_ns = self
-            .db
-            .property_int_value(rocksdb_compat::properties::PEDRA_SETTLE_WARM_NS)
-            .ok()
-            .flatten()
-            .unwrap_or(0);
-        let warm_bytes = self
-            .db
-            .property_int_value(rocksdb_compat::properties::PEDRA_SETTLE_WARM_BYTES)
-            .ok()
-            .flatten()
-            .unwrap_or(0);
+        // One stats() snapshot: seven property_int_value calls each ran
+        // ConcurrentDb::stats() (read lock + vlog_size_stats). r8: compact
+        // 1.745 s, settle 82 s — the leftover was this.
+        let t_s = Instant::now();
+        let s = self.db.stats();
+        eprintln!("settle_stats_wall={:.3}s", t_s.elapsed().as_secs_f64());
+        let compact_ns = s.settle_compact_ns;
+        let warm_ns = s.settle_warm_ns;
+        let warm_bytes = s.settle_warm_bytes;
         eprintln!(
             "settle_parts/pedradb: compact={:.3}s warm={:.3}s warm_bytes={warm_bytes}",
             compact_ns as f64 / 1e9,
             warm_ns as f64 / 1e9,
         );
-        let pressure = self
-            .db
-            .property_int_value(rocksdb_compat::properties::PEDRA_RAM_PRESSURE)
-            .ok()
-            .flatten()
-            .unwrap_or(0);
+        let pressure = s.ram_pressure;
         self.ram_mode = Some(ram_mode_label(pressure));
-        let sst = self
-            .db
-            .property_int_value(rocksdb_compat::properties::LIVE_SST_FILES_SIZE)
-            .ok()
-            .flatten()
-            .unwrap_or(0);
-        let cap = self
-            .db
-            .property_int_value(rocksdb_compat::properties::PEDRA_RAM_CEILING_BYTES)
-            .ok()
-            .flatten()
-            .unwrap_or(0);
-        let skip = self
-            .db
-            .property_int_value(rocksdb_compat::properties::PEDRA_RAM_WARM_SKIPPED)
-            .ok()
-            .flatten()
-            .unwrap_or(0);
+        let sst = s.sst_bytes;
+        let cap = s.ram_ceiling_bytes;
+        let skip = s.ram_warm_skipped;
         let mode = self.ram_mode.unwrap_or("hot");
         eprintln!("ram_mode/pedradb: mode={mode} sst_bytes={sst} cap={cap} warm_skipped={skip}");
         if pressure == 1 {
