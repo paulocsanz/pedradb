@@ -155,6 +155,7 @@ these; that is not an extract.
 | `pedradb-dcs/src/lease_kernel.rs` | Aeneas emits Lean, but `lake build LeaseKernel` fails: `core.cmp.Ord.max.default core.cmp.OrdU64` type mismatch (`Ord U64` vs `U64 → U64 → Result Bool`) in `next_lease_id_after`. Pin's Ord.max. Not rewritten. |
 | `pedradb-store/src/txn_kernel.rs` | Same `Ord.max.default` type mismatch (`TxnKernel.lean:143` and `:301`). |
 | `pedradb-capi/src/handles.rs` | Aeneas emits Lean with `sorry`; `lake build CapiHandlesKernel` fails on `IterMut` / `FnOnce.call_once` / `Enumerate` (iterator surface, same class as probe-order). |
+| `pedradb-core/src/probe_order_kernel.rs` | Live whole-file extract `CFailure` Internal error translating `core/src/iter/traits/iterator.rs:42`. Walk/closures stay Charon-refused. Not rewritten. |
 
 ### Refused — include-crate does not compile standalone (15)
 
