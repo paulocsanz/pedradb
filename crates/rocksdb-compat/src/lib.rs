@@ -204,6 +204,9 @@ fn map_property_int<E: PedraEnv>(db: &ConcurrentDb<E>, name: &str) -> Option<u64
         properties::PEDRA_RAM_WARM_SKIPPED => Some(s.ram_warm_skipped),
         properties::PEDRA_RAM_CEILING_BYTES => Some(s.ram_ceiling_bytes),
         properties::PEDRA_ENGINE_RESIDENT_BYTES => Some(s.engine_resident_bytes),
+        properties::PEDRA_SETTLE_WARM_BYTES => Some(s.settle_warm_bytes),
+        properties::PEDRA_SETTLE_WARM_NS => Some(s.settle_warm_ns),
+        properties::PEDRA_SETTLE_COMPACT_NS => Some(s.settle_compact_ns),
         _ => None,
     }
 }
