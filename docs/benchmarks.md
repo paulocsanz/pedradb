@@ -336,6 +336,8 @@ cargo run -q --release -p rocksdb-parity-bench --bin pedra -- diagnose balance \
   --cell wal_encode_or_write:diag --cell flush_check:diag
 
 # cost-trace probes vs P_best (walk-all if class=as_is_walk)
+# scale harness: PEDRA_COST_TRACE=1 prints
+#   diagnose probes probe_miss/<backend> per_get=… p_best=… class=…
 cargo run -q --release -p rocksdb-parity-bench --bin pedra -- diagnose probes \
   --per-get 5 --p-best 5
 ```
