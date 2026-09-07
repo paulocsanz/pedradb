@@ -98,7 +98,14 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
 - [x] **P0.8** Settle `compact_no_flush` (o 2º flush esperava
       `flush_lock` ~90 s). Worker instala com `lock()` — não apaga
       outputs. DIAG r6/r7: get_loop **1.99–2.50 ms** (melhor);
-      settle ainda **85 s**. Nem gate nem write-lock (>50 ms).
+      settle ainda **85 s**. r8: `compact_leveled_wall=1.745s`
+      com settle **82.4 s** — compact **não** era os 80 s.
+      status: `done`
+- [x] **P0.9** `stats()`/`property_int_value` não materializa SST
+      inline. `vlog_size_stats` só anda valores quando há vlog.
+      Scale settle: um `stats()` (não 7×). Testes
+      `rfc0178_stats_without_vlog_skips_sst_value_walk` /
+      `rfc0178_stats_with_vlog_still_counts_live_bytes`.
       status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
@@ -131,7 +138,8 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
 | P0.5 | p0 | compact() re-WARM after gate | done | `clear_warmed_ssts` + worker `try_lock`; DIAG r3 get_loop 2.76 ms | 2026-09-07 |
 | P0.6 | p0 | Worker one compact job per tick | done | `compat_compact_once` once per poll, not `while`; r4 settle 90.9 s | 2026-09-07 |
 | P0.7 | p0 | Drop compact_gate during job.write | done | r5 settle 101.6 s / get_loop 7.18 ms | 2026-09-07 |
-| P0.8 | p0 | compact_no_flush after hydrate | done | skip 2nd flush; no discard-delete | 2026-09-07 |
+| P0.8 | p0 | compact_no_flush after hydrate | done | skip 2nd flush; no discard-delete; r8 compact=1.745s | 2026-09-07 |
+| P0.9 | p0 | stats() skip SST walk without vlog | done | `vlog_size_stats` short-circuit; settle one `stats()` | 2026-09-07 |
 | P1.1 | p1 | probe_miss ≥1× 3-run caixa | todo | — | 2026-09-06 |
 | P1.2 | p1 | prefix 0,70× → ≥1× caixa | todo | — | 2026-09-06 |
 | P1.3 | p1 | overwrite isolado ≥1× caixa | todo | — | 2026-09-06 |
