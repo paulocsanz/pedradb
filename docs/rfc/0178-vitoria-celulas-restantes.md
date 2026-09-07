@@ -96,6 +96,8 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
 
 - [x] **P2.1** Escada 1M/10M/25M/50M/100M com `mode=hot|bounded-cache`
       na linha; proibido racionar os dois — status: `done`
+      (DIAG 100M Darwin: `mode=hot` imprimiu; get_loop **5,46 ms**
+      cliff **não** fechou. `findings/2026-09-07-rfc0178-p21-100m/`)
 - [ ] **P2.2** 50M/100M na caixa 4 GiB **como bounded-cache** (ceiling
       de RAM, número publicado, não “linear”) — status: `todo`
 
@@ -111,7 +113,7 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
 | P1.2 | p1 | prefix 0,70× → ≥1× caixa | todo | — | 2026-09-06 |
 | P1.3 | p1 | overwrite isolado ≥1× caixa | todo | — | 2026-09-06 |
 | P1.4 | p1 | f_mc4 3/3 intra-run ≥1× | todo | — | 2026-09-06 |
-| P2.1 | p2 | Duas curvas na escada | done | `ram_mode/pedradb` + `mode=` em settle/get_hit/prefix/get_loop; `rfc0178_ram_mode_label_two_states` | 2026-09-07 |
+| P2.1 | p2 | Duas curvas na escada | done | `mode=hot` @100M Darwin; get_loop 5,46 ms cliff fica; `findings/2026-09-07-rfc0178-p21-100m/` | 2026-09-07 |
 | P2.2 | p2 | 50M/100M 4 GiB = bounded-cache | todo | — | 2026-09-06 |
 
 ## Acceptance Criteria
