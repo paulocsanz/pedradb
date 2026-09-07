@@ -3,7 +3,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-raft/verus/commit_recover.rs"
+# RFC-0171 P0.3 / RFC-0174: prove the file rustc links (pair commit_raft).
+SRC="$ROOT/crates/pedradb-raft/src/commit_kernel.rs"
 
 if [[ -x "${VERUS:-}" ]]; then
   :

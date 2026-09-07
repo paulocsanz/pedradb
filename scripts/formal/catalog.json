@@ -97,8 +97,9 @@
       "id": "commit_raft",
       "finding": "F10/F11/F23",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/commit_kernel.rs",
-      "twin": "crates/pedradb-raft/verus/commit_recover.rs",
+      "twin": "crates/pedradb-raft/src/commit_kernel.rs",
       "verus": "scripts/verus_commit_recover.sh",
       "callers": [
         "crates/pedradb-raft/src/lib.rs",

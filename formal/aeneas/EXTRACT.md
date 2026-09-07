@@ -51,7 +51,7 @@
 
 ## Commit (`commit_kernel.rs`, RFC-0053 P2.1)
 
-- Charon + Aeneas → `out/lean/CommitKernel.lean` (`SOURCE.commit` sha256).
+- Charon + Aeneas → `out/lean/CommitKernel.lean` (`SOURCE.commit` sha256). Pair `commit_raft` is single_artifact: production file is the Verus term.
 - Lean 4.31.0 accepted (no `sorry` in `Commit.lean`):
   - `may_commit_at_iff` (∀)
   - `recover_commit_caps_examples` (F10 min)
