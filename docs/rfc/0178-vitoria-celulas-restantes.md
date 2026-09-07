@@ -115,6 +115,9 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
       65.1 µs**, settle **0.87 / 1.74 s**, `mode=hot`. Teste
       `rfc0178_pedra_scale_parses_entries_and_dir`. Não vs Rocks,
       não 4 GiB. status: `done`
+- [ ] **P0.11** overwrite_mc4 isolado (`ROCKS_PARITY_ONLY` honrado em
+      `run_clients`). Darwin 1-run vs Rocks default `sync=false`.
+      Teste `rfc0178_mc_only_selects_full_mc_name`. status: `doing`
 
 ### P1 — caixa 4 GiB (pede bake)
 
@@ -149,6 +152,7 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
 | P0.8 | p0 | compact_no_flush after hydrate | done | skip 2nd flush; no discard-delete; r8 compact=1.745s | 2026-09-07 |
 | P0.9 | p0 | stats() skip SST walk without vlog | done | r9 settle 1.743s / get_loop 427µs (flat vs 50M) | 2026-09-07 |
 | P0.10 | p0 | DIAG via `pedra scale` | done | 50M/100M get_loop 403/405µs prefix 65.5/65.1µs | 2026-09-07 |
+| P0.11 | p0 | overwrite_mc4 isolado | doing | `run_clients` honra ONLY; DIAG vs Rocks default | 2026-09-07 |
 | P1.1 | p1 | probe_miss ≥1× 3-run caixa | todo | — | 2026-09-06 |
 | P1.2 | p1 | prefix 0,70× → ≥1× caixa | todo | — | 2026-09-06 |
 | P1.3 | p1 | overwrite isolado ≥1× caixa | todo | — | 2026-09-06 |

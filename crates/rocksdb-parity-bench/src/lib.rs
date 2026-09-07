@@ -2368,6 +2368,10 @@ impl YcsbRunner {
             ("deps_cache_overwrite", 0, false, true),
         ];
         for (name, read_pct, rmw, overwrite) in shapes {
+            let full = format!("{name}_mc{clients}");
+            if !shape_wanted(&full) {
+                continue;
+            }
             if mc_fresh_enabled() {
                 self.seed(e);
             }
@@ -3036,6 +3040,22 @@ mod tests {
             note.starts_with("seed_async=1") && note.contains("column sync"),
             "{note}"
         );
+    }
+
+    #[test]
+    fn rfc0178_mc_only_selects_full_mc_name() {
+        assert!(shape_wanted_in(
+            "deps_cache_overwrite_mc4",
+            Some("deps_cache_overwrite_mc4")
+        ));
+        assert!(!shape_wanted_in(
+            "ycsb_a_mc4",
+            Some("deps_cache_overwrite_mc4")
+        ));
+        assert!(!shape_wanted_in(
+            "deps_cache_overwrite",
+            Some("deps_cache_overwrite_mc4")
+        ));
     }
 
     #[test]
