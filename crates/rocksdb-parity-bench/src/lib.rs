@@ -2431,6 +2431,19 @@ impl YcsbRunner {
                 "[rocks-parity] {name} mc{clients} done ops={} errors={errors}",
                 cfg_ops * clients
             );
+            if let Some((sub, queued, groups, gops)) = e.write_group_stats() {
+                let avg = if groups == 0 {
+                    0.0
+                } else {
+                    gops as f64 / groups as f64
+                };
+                eprintln!(
+                    "[rocks-parity] write_group submits={sub} queued={queued} groups={groups} ops={gops} avg_group={avg:.2}"
+                );
+            }
+            if let Some(line) = e.write_phase_line() {
+                eprintln!("[rocks-parity] {name} mc{clients} phases {line}");
+            }
             blocks.push(block);
         }
         blocks

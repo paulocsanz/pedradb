@@ -974,16 +974,21 @@ impl MemTable {
     /// Push onto the shared tail and index by CF prefix. Returns the global index.
     fn tail_append(&mut self, key: InternalKey, value: Bytes) -> usize {
         let pfx = cf_prefix(key.user_key.as_ref());
-        let pfx_b = Bytes::copy_from_slice(pfx);
         let point = point_cf(pfx);
         let cap = point_reserve(pfx);
-        let s = self.tail_idx.entry(pfx_b).or_insert_with(|| {
-            let mut s = TailShard::default();
-            if cap > 0 {
-                s.point.reserve(cap);
-            }
+        let s = if let Some(s) = self.tail_idx.get_mut(pfx) {
             s
-        });
+        } else {
+            self.tail_idx
+                .entry(Bytes::copy_from_slice(pfx))
+                .or_insert_with(|| {
+                    let mut s = TailShard::default();
+                    if cap > 0 {
+                        s.point.reserve(cap);
+                    }
+                    s
+                })
+        };
         let i = self.tail.len();
         if key.user_key.len() <= 32 {
             let (p0, p1) = pack32(key.user_key.as_ref());

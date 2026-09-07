@@ -637,6 +637,42 @@ pub struct WritePhaseStats {
     pub lock_wait_ns: AtomicU64,
 }
 
+/// RFC-0180: skip dirty-list + map walks when no read cache holds answers.
+#[must_use]
+pub fn read_cache_invalidate_needed(
+    point_empty: bool,
+    count_empty: bool,
+    prefix_empty: bool,
+) -> bool {
+    !(point_empty && count_empty && prefix_empty)
+}
+
+/// RFC-0180: 1-op async overwrite checks auto-flush every 32 seqs, not
+/// every put (physical-CF map walk on the Ok path).
+#[must_use]
+pub fn async_flush_check_due(seq: SequenceNumber) -> bool {
+    seq & 31 == 0
+}
+
+/// RFC-0180: async Ok must not write L0 (Rocks flushes on a background
+/// thread). Stage/park only; the host worker materializes.
+#[must_use]
+pub fn async_ok_flush_is_stage_only() -> bool {
+    true
+}
+
+/// RAII pin for [`Db::commit_inflight`] (RFC-0180 P0.25).
+/// Owns an `Arc` so `commit_async_one` can keep `&mut self`.
+struct CommitInflightPin {
+    n: std::sync::Arc<AtomicUsize>,
+}
+
+impl Drop for CommitInflightPin {
+    fn drop(&mut self) {
+        self.n.fetch_sub(1, Ordering::Release);
+    }
+}
+
 /// Per-write durability / batching knobs (RFC-0009 P0.1).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct WriteOptions {
@@ -1747,6 +1783,8 @@ pub struct Db<E: Env = StdEnv> {
     large_value_threshold: Option<usize>,
     /// Append-only value log when large values / existing vlog file present.
     vlog: Option<Mutex<ValueLog<E::File>>>,
+    /// Userspace vlog tail not yet `write()`n (RFC-0180: skip idle flush).
+    vlog_unwritten: bool,
     /// Rotate the active blob after this many bytes (`None` = single `VALUES.vlog`).
     vlog_rotate_bytes: Option<u64>,
     /// Active blob generation (`0` = `VALUES.vlog`).
@@ -2431,6 +2469,7 @@ impl<E: Env> Db<E> {
             rewrite_chunk_target_bytes: REWRITE_CHUNK_TARGET_BYTES,
             large_value_threshold,
             vlog,
+            vlog_unwritten: false,
             vlog_rotate_bytes: None,
             blob_active,
             scan_prefetch: 4,
@@ -2733,6 +2772,13 @@ impl<E: Env> Db<E> {
     }
 
     fn note_dirty_points(&self, ops: &[WriteOp]) {
+        if !read_cache_invalidate_needed(
+            self.point_cache.is_empty(),
+            self.count_cache.is_empty(),
+            self.last_prefix_cache.is_empty(),
+        ) {
+            return;
+        }
         if ops.len() >= 32 || ops.iter().any(|op| op.kind == ValueType::RangeDeletion) {
             // Fat apply / range: gen-bump at publish. Do not clone 64 keys
             // under the write lock just to discard them (RFC-0041 apply_mc4).
@@ -4080,6 +4126,7 @@ impl<E: Env> Db<E> {
         let mut guard = vlog.lock();
         let (off, len, crc) = guard.append_pending_bytes(value)?;
         drop(guard);
+        self.vlog_unwritten = true;
         Ok(vlog::encode_vlog_ptr(vlog::VlogPtr {
             file_num: self.blob_active,
             offset: off,
@@ -4090,8 +4137,12 @@ impl<E: Env> Db<E> {
 
     /// `write()` vlog tail so WAL pointers cannot outrun the payload (async).
     fn vlog_flush_pending(&mut self) -> Result<()> {
+        if !vlog::vlog_prepare_needed(self.vlog.is_some(), self.vlog_unwritten) {
+            return Ok(());
+        }
         if let Some(v) = &self.vlog {
             v.lock().flush_pending()?;
+            self.vlog_unwritten = false;
         }
         Ok(())
     }
@@ -4687,6 +4738,23 @@ impl<E: Env> Db<E> {
 
     fn invalidate_read_answers(&self, seq: SequenceNumber) {
         let reset = self.point_cache_reset.swap(false, Ordering::Relaxed);
+        // RFC-0180: overwrite/write-only never fills the read caches, so
+        // `note_dirty_points` leaves `dirty_points` empty. Skip that mutex.
+        if !reset
+            && !read_cache_invalidate_needed(
+                self.point_cache.is_empty(),
+                self.count_cache.is_empty(),
+                self.last_prefix_cache.is_empty(),
+            )
+        {
+            self.point_tls_epoch.fetch_add(1, Ordering::Release);
+            self.read_cache_epoch.fetch_add(1, Ordering::Release);
+            // Open starts `settled_sst_only=true` (empty mem). A write that
+            // skips cache invalidation must still drop that flag or
+            // ConcurrentDb::get treats every key as an SST-envelope miss.
+            self.settled_sst_only.store(false, Ordering::Release);
+            return;
+        }
         let keys = std::mem::take(&mut *self.dirty_points.lock());
         // Do not insert WriteOp.value: large values are vlog pointers.
         // Fat apply gen-bumps; small writes drop only the dirty keys.
@@ -5651,6 +5719,9 @@ impl<E: Env> Db<E> {
         // classify_batch and the memtable-chain collect after the family's
         // first observation (high-water already covers it).
         if let Some(family) = Self::single_put_family(batch, &fam_of) {
+            if !crate::bulk_ingest::bulk_observe_needed(true, self.bulk_latch.is_dead(family)) {
+                return;
+            }
             const STACK: usize = 32;
             let mut stack = [(false, &[] as &[u8]); STACK];
             let mut n = 0usize;
@@ -10232,6 +10303,7 @@ impl<E: Env> Db<E> {
     /// Lone-async 1-op put/delete: no `Vec<BatchOp>` / `Vec<WriteOp>`
     /// (RFC-0154 P1.6). Same WAL bytes as [`Self::commit_async_ops`].
     pub(crate) fn commit_async_one(&mut self, batch: BatchOp) -> Result<SequenceNumber> {
+        let _pin = self.pin_commit_inflight();
         if !self.write_admission_idle() {
             let families = self.batch_families(std::slice::from_ref(&batch));
             self.ensure_write_admitted_for(&families)?;
@@ -10248,8 +10320,7 @@ impl<E: Env> Db<E> {
         {
             let t1 = st.as_ref().map(|_| Instant::now());
             let mut w = self.wal.lock();
-            w.encode_write_op_batches(&[std::slice::from_ref(&op)])?;
-            w.write_pending_frame()?;
+            w.encode_and_write_one_op(&op)?;
             if let (Some(st), Some(t1)) = (st.as_ref(), t1) {
                 st.wal_ns
                     .fetch_add(t1.elapsed().as_nanos() as u64, Ordering::Relaxed);
@@ -10261,7 +10332,7 @@ impl<E: Env> Db<E> {
         }
         let t2 = st.as_ref().map(|_| Instant::now());
         self.note_dirty_points(std::slice::from_ref(&op));
-        apply_ops_owned(&mut self.mem, std::iter::once(op));
+        apply_one_owned(&mut self.mem, op);
         if let (Some(st), Some(t2)) = (st.as_ref(), t2) {
             st.mem_ns
                 .fetch_add(t2.elapsed().as_nanos() as u64, Ordering::Relaxed);
@@ -10273,7 +10344,10 @@ impl<E: Env> Db<E> {
                 .fetch_add(t3.elapsed().as_nanos() as u64, Ordering::Relaxed);
         }
         let t4 = st.as_ref().map(|_| Instant::now());
-        self.maybe_auto_flush_best_effort();
+        if async_flush_check_due(seq) {
+            let _ = self
+                .maybe_auto_flush_with(async_ok_flush_is_stage_only() || self.defer_auto_compact);
+        }
         if let (Some(st), Some(t4)) = (st.as_ref(), t4) {
             st.flush_check_ns
                 .fetch_add(t4.elapsed().as_nanos() as u64, Ordering::Relaxed);
@@ -10377,6 +10451,16 @@ impl<E: Env> Db<E> {
 
     pub(crate) fn end_commit(&self) {
         self.commit_inflight.fetch_sub(1, Ordering::Release);
+    }
+
+    /// RFC-0180 P0.25: `commit_async_one` must pin inflight so the host
+    /// compact worker skips (`commit_inflight > 0`) instead of barging
+    /// the write lock between 1-op groups (p27 p999 1.4 ms × ~400 ops).
+    fn pin_commit_inflight(&self) -> CommitInflightPin {
+        self.begin_commit();
+        CommitInflightPin {
+            n: std::sync::Arc::clone(&self.commit_inflight),
+        }
     }
 
     /// Remember WAL-encoded ops so OCC sees them while memtable apply waits
@@ -10698,7 +10782,10 @@ impl<E: Env> Db<E> {
         }
         // Caches bump on [`Self::publish_sequence`] after WAL is durable so
         // a failed fd cannot leave a stale miss for an unpublished key.
-        self.maybe_auto_flush_best_effort();
+        // RFC-0180: async groups stage/park; G1 may still write L0.
+        let _ = self.maybe_auto_flush_with(
+            (!any_sync && async_ok_flush_is_stage_only()) || self.defer_auto_compact,
+        );
         finish_group_results(results)
     }
 }
@@ -10957,6 +11044,12 @@ impl<E: Env> Db<E> {
     }
 
     pub(crate) fn maybe_auto_flush(&mut self) -> Result<()> {
+        self.maybe_auto_flush_with(self.defer_auto_compact)
+    }
+
+    /// `stage_only`: park/imm-swap, never `flush_cf` / `auto_flush_mem`
+    /// (async Ok path — RFC-0180 P0.14).
+    fn maybe_auto_flush_with(&mut self, stage_only: bool) -> Result<()> {
         if !self.physical_cfs.is_empty() {
             // Hot path: integer compare, not a walk of every memtable key.
             // `cf_families()` scans tail+map (O(entries)) — with CFs registered
@@ -10977,7 +11070,7 @@ impl<E: Env> Db<E> {
                     continue;
                 }
                 let fam = self.physical_cfs[i].clone();
-                if self.defer_auto_compact {
+                if stage_only {
                     let taken = self.mem.take_family(&fam);
                     if !taken.is_empty() {
                         self.push_parked_unflushed(taken);
@@ -10992,7 +11085,7 @@ impl<E: Env> Db<E> {
             return Ok(());
         };
         if self.mem.approx_memory_usage() >= limit {
-            if self.defer_auto_compact {
+            if stage_only {
                 // Leave the table in `imm` for the host worker. Do not call
                 // `prepare_flush_imm` here — that takes the table out and
                 // `has_imm` goes false (291k mem / 0 SST in the P2.1 attempt).
@@ -12070,6 +12163,14 @@ fn apply_record(mem: &mut MemTable, rec: &WriteRecord) {
             }
         }
     }
+}
+
+/// RFC-0180: 1-op async put skips the `insert_many` iterator envelope.
+fn apply_one_owned(mem: &mut MemTable, op: WriteOp) {
+    mem.insert(
+        crate::key::InternalKey::new(op.key, op.sequence, op.kind),
+        op.value,
+    );
 }
 
 /// RFC-0040: move `WriteOp` Bytes into the memtable (no extra payload memcpy).
@@ -13205,6 +13306,77 @@ mod tests {
         );
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rfc0180_read_cache_invalidate_needed_skips_idle() {
+        assert!(!read_cache_invalidate_needed(true, true, true));
+        assert!(read_cache_invalidate_needed(false, true, true));
+        assert!(read_cache_invalidate_needed(true, false, true));
+        assert!(read_cache_invalidate_needed(true, true, false));
+    }
+
+    #[test]
+    fn rfc0180_async_flush_check_due_every_32() {
+        assert!(async_flush_check_due(32));
+        assert!(async_flush_check_due(64));
+        assert!(!async_flush_check_due(1));
+        assert!(!async_flush_check_due(31));
+        assert!(!async_flush_check_due(33));
+    }
+
+    #[test]
+    fn rfc0180_async_ok_flush_is_stage_only_policy() {
+        assert!(async_ok_flush_is_stage_only());
+    }
+
+    #[test]
+    fn rfc0180_async_ok_does_not_write_l0_when_over_limit() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                wal_full_fsync: false,
+                history: Default::default(),
+                wal_recovery: Default::default(),
+                sync: false,
+                auto_flush_bytes: Some(4096),
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+                sst_payload_budget_bytes: None,
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["default".into()]);
+        db.set_cf_write_buffer("default", 4096);
+        for i in 0..80u32 {
+            let k = format!("k{i:04}");
+            db.commit_async_one(BatchOp::put(k, vec![b'x'; 64]))
+                .unwrap();
+        }
+        assert_eq!(db.sst_count(), 0, "async Ok must park/stage, not write L0");
+        assert_eq!(db.commit_inflight(), 0, "RFC-0180 P0.25: pin drops on Ok");
+        assert!(db.get(b"k0000").is_some(), "parked/active still readable");
+        db.close().unwrap();
+        let re = Db::open(&dir).unwrap();
+        assert_eq!(re.get(b"k0000").as_deref(), Some(&[b'x'; 64][..]));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rfc0180_apply_one_owned_matches_insert_many_once() {
+        let op = WriteOp::put(3, Bytes::from_static(b"k"), Bytes::from_static(b"v"));
+        let mut a = MemTable::new();
+        let mut b = MemTable::new();
+        apply_one_owned(&mut a, op.clone());
+        apply_ops_owned(&mut b, std::iter::once(op));
+        assert_eq!(a.get(b"k", 3), b.get(b"k", 3));
+        match a.get(b"k", 3) {
+            crate::memtable::Lookup::Found(v) => assert_eq!(&*v, b"v"),
+            other => panic!("expected Found, got {other:?}"),
+        }
     }
 
     /// RFC-0178 P0.9: inline-only `stats()` must not walk SST values

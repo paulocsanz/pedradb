@@ -115,6 +115,12 @@ pub fn encode_vlog_ptr(ptr: VlogPtr) -> Bytes {
     Bytes::from(v)
 }
 
+/// RFC-0180: flush vlog before WAL only when a pointer could outrun the file.
+#[must_use]
+pub fn vlog_prepare_needed(vlog_open: bool, unwritten_tail: bool) -> bool {
+    vlog_open && unwritten_tail
+}
+
 /// Path of blob generation `num` (`000001.blob`).
 #[must_use]
 pub fn blob_path(dir: &Path, num: u32) -> PathBuf {
@@ -869,6 +875,14 @@ mod tests {
     use super::*;
     use crate::env::StdEnv;
     use std::fs;
+
+    #[test]
+    fn rfc0180_vlog_prepare_needed_skips_idle_inline() {
+        assert!(!vlog_prepare_needed(false, true));
+        assert!(!vlog_prepare_needed(true, false));
+        assert!(vlog_prepare_needed(true, true));
+        assert!(!vlog_prepare_needed(false, false));
+    }
 
     #[test]
     fn append_read_round_trip() {
