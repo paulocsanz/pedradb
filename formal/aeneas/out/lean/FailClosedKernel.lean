@@ -48,6 +48,30 @@ def Slice.Insts.CoreCmpPartialEqArray {T : Type} {U : Type} (N : Std.Usize)
   ne := Slice.Insts.CoreCmpPartialEqArray.ne cmpPartialEqInst
 }
 
+/-- [core::iter::traits::iterator::Iterator::all]:
+    Source: '/rustc/library/core/src/iter/traits/iterator.rs', lines 2831:4-2834:37
+    Name pattern: [core::iter::traits::iterator::Iterator::all]
+    Visibility: public -/
+@[trait_default, rust_fun "core::iter::traits::iterator::Iterator::all"]
+axiom core.iter.traits.iterator.Iterator.all.default
+  {Self : Type} {F : Type} {Clause0_Item : Type} (IteratorInst :
+  core.iter.traits.iterator.Iterator Self Clause0_Item)
+  (opsfunctionFnMutFTupleClause0_ItemBoolInst : core.ops.function.FnMut F
+  Clause0_Item Bool) :
+  Self → F → Result (Bool × Self)
+
+/-- [core::iter::traits::iterator::Iterator::any]:
+    Source: '/rustc/library/core/src/iter/traits/iterator.rs', lines 2885:4-2888:37
+    Name pattern: [core::iter::traits::iterator::Iterator::any]
+    Visibility: public -/
+@[trait_default, rust_fun "core::iter::traits::iterator::Iterator::any"]
+axiom core.iter.traits.iterator.Iterator.any.default
+  {Self : Type} {F : Type} {Clause0_Item : Type} (IteratorInst :
+  core.iter.traits.iterator.Iterator Self Clause0_Item)
+  (opsfunctionFnMutFTupleClause0_ItemBoolInst : core.ops.function.FnMut F
+  Clause0_Item Bool) :
+  Self → F → Result (Bool × Self)
+
 /-- [core::iter::traits::iterator::Iterator::position]:
     Source: '/rustc/library/core/src/iter/traits/iterator.rs', lines 3134:4-3137:37
     Name pattern: [core::iter::traits::iterator::Iterator::position]
@@ -132,12 +156,70 @@ impl_def
 axiom core.slice.Slice.windows
   {T : Type} : Slice T → Std.Usize → Result (core.slice.iter.Windows T)
 
+/-- [core::str::iter::Split]
+    Source: '/rustc/library/core/src/str/iter.rs', lines 492:8-492:91
+    Name pattern: [core::str::iter::Split]
+    Visibility: public -/
+@[rust_type "core::str::iter::Split"]
+axiom core.str.iter.Split (P : Type) : Type
+
+/-- [core::str::iter::{impl core::iter::traits::iterator::Iterator<&'a str> for core::str::iter::Split<'a, P>}::next]:
+    Source: '/rustc/library/core/src/str/iter.rs', lines 511:12-511:49
+    Name pattern: [core::str::iter::{core::iter::traits::iterator::Iterator<core::str::iter::Split<'a, @P>, &'a str>}::next]
+    Visibility: public -/
+@[rust_fun
+  "core::str::iter::{core::iter::traits::iterator::Iterator<core::str::iter::Split<'a, @P>, &'a str>}::next"]
+axiom core.str.iter.Split.Insts.CoreIterTraitsIteratorIteratorSharedAStr.next
+  {P : Type} :
+  core.str.iter.Split P → Result ((Option Str) × (core.str.iter.Split P))
+
+/-- Trait implementation: [core::str::iter::{impl core::iter::traits::iterator::Iterator<&'a str> for core::str::iter::Split<'a, P>}]
+    Source: '/rustc/library/core/src/str/iter.rs', lines 507:8-507:66
+    Name pattern: [core::iter::traits::iterator::Iterator<core::str::iter::Split<'a, @P>, &'a str>] -/
+@[reducible, rust_trait_impl
+  "core::iter::traits::iterator::Iterator<core::str::iter::Split<'a, @P>, &'a str>"]
+impl_def core.str.iter.Split.Insts.CoreIterTraitsIteratorIteratorSharedAStr {P
+  : Type} :
+  core.iter.traits.iterator.Iterator (core.str.iter.Split P) Str := {
+  next :=
+    core.str.iter.Split.Insts.CoreIterTraitsIteratorIteratorSharedAStr.next
+}
+
+/-- [core::str::{str}::len]:
+    Source: '/rustc/library/core/src/str/mod.rs', lines 153:4-153:36
+    Name pattern: [core::str::{str}::len]
+    Visibility: public -/
+@[rust_fun "core::str::{str}::len"]
+axiom core.str.Str.len : Str → Result Std.Usize
+
 /-- [core::str::{str}::is_empty]:
     Source: '/rustc/library/core/src/str/mod.rs', lines 173:4-173:40
     Name pattern: [core::str::{str}::is_empty]
     Visibility: public -/
 @[rust_fun "core::str::{str}::is_empty"]
 axiom core.str.Str.is_empty : Str → Result Bool
+
+/-- [core::str::{str}::split]:
+    Source: '/rustc/library/core/src/str/mod.rs', lines 1655:4-1655:59
+    Name pattern: [core::str::{str}::split]
+    Visibility: public -/
+@[rust_fun "core::str::{str}::split"]
+axiom core.str.Str.split {P : Type} :
+  Str → P → Result (core.str.iter.Split P)
+
+/-- [core::str::{str}::trim]:
+    Source: '/rustc/library/core/src/str/mod.rs', lines 2171:4-2171:30
+    Name pattern: [core::str::{str}::trim]
+    Visibility: public -/
+@[rust_fun "core::str::{str}::trim"]
+axiom core.str.Str.trim : Str → Result Str
+
+/-- [core::str::{str}::eq_ignore_ascii_case]:
+    Source: '/rustc/library/core/src/str/mod.rs', lines 2840:4-2840:65
+    Name pattern: [core::str::{str}::eq_ignore_ascii_case]
+    Visibility: public -/
+@[rust_fun "core::str::{str}::eq_ignore_ascii_case"]
+axiom core.str.Str.eq_ignore_ascii_case : Str → Str → Result Bool
 
 /-- [core::str::traits::{impl core::cmp::PartialEq<str> for str}::eq]:
     Source: '/rustc/library/core/src/str/traits.rs', lines 29:4-29:37
@@ -153,6 +235,187 @@ axiom Str.Insts.CoreCmpPartialEqStr.eq : Str → Str → Result Bool
 impl_def Str.Insts.CoreCmpPartialEqStr : core.cmp.PartialEq Str Str := {
   eq := Str.Insts.CoreCmpPartialEqStr.eq
   ne := core.cmp.PartialEq.ne.trait_default Str.Insts.CoreCmpPartialEqStr
+}
+
+/-- [core::str::traits::{impl core::ops::index::Index<I, Clause0_Output> for str}::index]:
+    Source: '/rustc/library/core/src/str/traits.rs', lines 62:4-62:43
+    Name pattern: [core::str::traits::{core::ops::index::Index<str, @I, @Clause0_Output>}::index]
+    Visibility: public -/
+@[rust_fun
+  "core::str::traits::{core::ops::index::Index<str, @I, @Clause0_Output>}::index"]
+axiom Str.Insts.CoreOpsIndexIndex.index
+  {I : Type} {Clause0_Output : Type}
+  (sliceindexSliceIndexIStrClause0_OutputInst : core.slice.index.SliceIndex I
+  Str Clause0_Output) :
+  Str → I → Result Clause0_Output
+
+/-- [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeTo<usize>}::index_mut]:
+    Source: '/rustc/library/core/src/str/traits.rs', lines 476:4-476:60
+    Name pattern: [core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeTo<usize>, str, str>}::index_mut]
+    Visibility: public -/
+@[rust_fun
+  "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeTo<usize>, str, str>}::index_mut"]
+axiom
+  core.ops.range.RangeToUsize.Insts.CoreSliceIndexSliceIndexStrStr.index_mut
+  : core.ops.range.RangeTo Std.Usize → Str → Result (Str × (Str → Str))
+
+/-- [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeTo<usize>}::index]:
+    Source: '/rustc/library/core/src/str/traits.rs', lines 468:4-468:48
+    Name pattern: [core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeTo<usize>, str, str>}::index]
+    Visibility: public -/
+@[rust_fun
+  "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeTo<usize>, str, str>}::index"]
+axiom core.ops.range.RangeToUsize.Insts.CoreSliceIndexSliceIndexStrStr.index
+  : core.ops.range.RangeTo Std.Usize → Str → Result Str
+
+/-- [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeTo<usize>}::get_unchecked_mut]:
+    Source: '/rustc/library/core/src/str/traits.rs', lines 463:4-463:75
+    Name pattern: [core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeTo<usize>, str, str>}::get_unchecked_mut]
+    Visibility: public -/
+@[rust_fun
+  "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeTo<usize>, str, str>}::get_unchecked_mut"]
+axiom
+  core.ops.range.RangeToUsize.Insts.CoreSliceIndexSliceIndexStrStr.get_unchecked_mut
+  :
+  core.ops.range.RangeTo Std.Usize → MutRawPtr Str → Result (MutRawPtr Str)
+
+/-- [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeTo<usize>}::get_unchecked]:
+    Source: '/rustc/library/core/src/str/traits.rs', lines 458:4-458:75
+    Name pattern: [core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeTo<usize>, str, str>}::get_unchecked]
+    Visibility: public -/
+@[rust_fun
+  "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeTo<usize>, str, str>}::get_unchecked"]
+axiom
+  core.ops.range.RangeToUsize.Insts.CoreSliceIndexSliceIndexStrStr.get_unchecked
+  :
+  core.ops.range.RangeTo Std.Usize → ConstRawPtr Str → Result (ConstRawPtr
+    Str)
+
+/-- [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeTo<usize>}::get_mut]:
+    Source: '/rustc/library/core/src/str/traits.rs', lines 448:4-448:66
+    Name pattern: [core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeTo<usize>, str, str>}::get_mut]
+    Visibility: public -/
+@[rust_fun
+  "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeTo<usize>, str, str>}::get_mut"]
+axiom core.ops.range.RangeToUsize.Insts.CoreSliceIndexSliceIndexStrStr.get_mut
+  :
+  core.ops.range.RangeTo Std.Usize → Str → Result ((Option Str) × (Option
+    Str → Str))
+
+/-- [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeTo<usize>}::get]:
+    Source: '/rustc/library/core/src/str/traits.rs', lines 438:4-438:54
+    Name pattern: [core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeTo<usize>, str, str>}::get]
+    Visibility: public -/
+@[rust_fun
+  "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeTo<usize>, str, str>}::get"]
+axiom core.ops.range.RangeToUsize.Insts.CoreSliceIndexSliceIndexStrStr.get
+  : core.ops.range.RangeTo Std.Usize → Str → Result (Option Str)
+
+/-- Trait implementation: [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeTo<usize>}]
+    Source: '/rustc/library/core/src/str/traits.rs', lines 435:0-435:57
+    Name pattern: [core::slice::index::SliceIndex<core::ops::range::RangeTo<usize>, str, str>] -/
+@[reducible, rust_trait_impl
+  "core::slice::index::SliceIndex<core::ops::range::RangeTo<usize>, str, str>"]
+def core.ops.range.RangeToUsize.Insts.CoreSliceIndexSliceIndexStrStr :
+  core.slice.index.SliceIndex (core.ops.range.RangeTo Std.Usize) Str Str := {
+  sealedInst := core.slice.index.private_slice_index.SealedRangeToUsize
+  get := core.ops.range.RangeToUsize.Insts.CoreSliceIndexSliceIndexStrStr.get
+  get_mut :=
+    core.ops.range.RangeToUsize.Insts.CoreSliceIndexSliceIndexStrStr.get_mut
+  get_unchecked :=
+    core.ops.range.RangeToUsize.Insts.CoreSliceIndexSliceIndexStrStr.get_unchecked
+  get_unchecked_mut :=
+    core.ops.range.RangeToUsize.Insts.CoreSliceIndexSliceIndexStrStr.get_unchecked_mut
+  index :=
+    core.ops.range.RangeToUsize.Insts.CoreSliceIndexSliceIndexStrStr.index
+  index_mut :=
+    core.ops.range.RangeToUsize.Insts.CoreSliceIndexSliceIndexStrStr.index_mut
+}
+
+/-- [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeFrom<usize>}::index_mut]:
+    Source: '/rustc/library/core/src/str/traits.rs', lines 547:4-547:60
+    Name pattern: [core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeFrom<usize>, str, str>}::index_mut]
+    Visibility: public -/
+@[rust_fun
+  "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeFrom<usize>, str, str>}::index_mut"]
+axiom
+  core.ops.range.RangeFromUsize.Insts.CoreSliceIndexSliceIndexStrStr.index_mut
+  :
+  core.ops.range.RangeFrom Std.Usize → Str → Result (Str × (Str → Str))
+
+/-- [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeFrom<usize>}::index]:
+    Source: '/rustc/library/core/src/str/traits.rs', lines 539:4-539:48
+    Name pattern: [core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeFrom<usize>, str, str>}::index]
+    Visibility: public -/
+@[rust_fun
+  "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeFrom<usize>, str, str>}::index"]
+axiom core.ops.range.RangeFromUsize.Insts.CoreSliceIndexSliceIndexStrStr.index
+  : core.ops.range.RangeFrom Std.Usize → Str → Result Str
+
+/-- [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeFrom<usize>}::get_unchecked_mut]:
+    Source: '/rustc/library/core/src/str/traits.rs', lines 533:4-533:75
+    Name pattern: [core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeFrom<usize>, str, str>}::get_unchecked_mut]
+    Visibility: public -/
+@[rust_fun
+  "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeFrom<usize>, str, str>}::get_unchecked_mut"]
+axiom
+  core.ops.range.RangeFromUsize.Insts.CoreSliceIndexSliceIndexStrStr.get_unchecked_mut
+  :
+  core.ops.range.RangeFrom Std.Usize → MutRawPtr Str → Result (MutRawPtr
+    Str)
+
+/-- [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeFrom<usize>}::get_unchecked]:
+    Source: '/rustc/library/core/src/str/traits.rs', lines 527:4-527:75
+    Name pattern: [core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeFrom<usize>, str, str>}::get_unchecked]
+    Visibility: public -/
+@[rust_fun
+  "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeFrom<usize>, str, str>}::get_unchecked"]
+axiom
+  core.ops.range.RangeFromUsize.Insts.CoreSliceIndexSliceIndexStrStr.get_unchecked
+  :
+  core.ops.range.RangeFrom Std.Usize → ConstRawPtr Str → Result
+    (ConstRawPtr Str)
+
+/-- [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeFrom<usize>}::get_mut]:
+    Source: '/rustc/library/core/src/str/traits.rs', lines 517:4-517:66
+    Name pattern: [core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeFrom<usize>, str, str>}::get_mut]
+    Visibility: public -/
+@[rust_fun
+  "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeFrom<usize>, str, str>}::get_mut"]
+axiom
+  core.ops.range.RangeFromUsize.Insts.CoreSliceIndexSliceIndexStrStr.get_mut
+  :
+  core.ops.range.RangeFrom Std.Usize → Str → Result ((Option Str) ×
+    (Option Str → Str))
+
+/-- [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeFrom<usize>}::get]:
+    Source: '/rustc/library/core/src/str/traits.rs', lines 507:4-507:54
+    Name pattern: [core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeFrom<usize>, str, str>}::get]
+    Visibility: public -/
+@[rust_fun
+  "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeFrom<usize>, str, str>}::get"]
+axiom core.ops.range.RangeFromUsize.Insts.CoreSliceIndexSliceIndexStrStr.get
+  : core.ops.range.RangeFrom Std.Usize → Str → Result (Option Str)
+
+/-- Trait implementation: [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeFrom<usize>}]
+    Source: '/rustc/library/core/src/str/traits.rs', lines 504:0-504:59
+    Name pattern: [core::slice::index::SliceIndex<core::ops::range::RangeFrom<usize>, str, str>] -/
+@[reducible, rust_trait_impl
+  "core::slice::index::SliceIndex<core::ops::range::RangeFrom<usize>, str, str>"]
+def core.ops.range.RangeFromUsize.Insts.CoreSliceIndexSliceIndexStrStr :
+  core.slice.index.SliceIndex (core.ops.range.RangeFrom Std.Usize) Str Str := {
+  sealedInst := core.slice.index.private_slice_index.SealedRangeFromUsize
+  get := core.ops.range.RangeFromUsize.Insts.CoreSliceIndexSliceIndexStrStr.get
+  get_mut :=
+    core.ops.range.RangeFromUsize.Insts.CoreSliceIndexSliceIndexStrStr.get_mut
+  get_unchecked :=
+    core.ops.range.RangeFromUsize.Insts.CoreSliceIndexSliceIndexStrStr.get_unchecked
+  get_unchecked_mut :=
+    core.ops.range.RangeFromUsize.Insts.CoreSliceIndexSliceIndexStrStr.get_unchecked_mut
+  index :=
+    core.ops.range.RangeFromUsize.Insts.CoreSliceIndexSliceIndexStrStr.index
+  index_mut :=
+    core.ops.range.RangeFromUsize.Insts.CoreSliceIndexSliceIndexStrStr.index_mut
 }
 
 /-- [pedra_aeneas_fail_closed_kernel::parse_error_writes_status]:
@@ -490,11 +753,132 @@ def header_break_len
     else ok 2#usize
   else ok 2#usize
 
+/-- [pedra_aeneas_fail_closed_kernel::expects_100_continue::closure]
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 88:13-88:62 -/
+@[reducible]
+def expects_100_continue.closure := Unit
+
+/-- [pedra_aeneas_fail_closed_kernel::expects_100_continue::{impl core::ops::function::FnMut<(&'_ str,), bool> for pedra_aeneas_fail_closed_kernel::expects_100_continue::closure}::call_mut]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 88:13-88:62 -/
+def
+  expects_100_continue.closure.Insts.CoreOpsFunctionFnMutTupleSharedStrBool.call_mut
+  (c : expects_100_continue.closure) (tupled_args : Str) :
+  Result (Bool × expects_100_continue.closure)
+  := do
+  let s ← core.str.Str.trim tupled_args
+  let b ← core.str.Str.eq_ignore_ascii_case s (toStr "100-continue")
+  ok (b, c)
+
+/-- [pedra_aeneas_fail_closed_kernel::expects_100_continue::{impl core::ops::function::FnOnce<(&'_ str,), bool> for pedra_aeneas_fail_closed_kernel::expects_100_continue::closure}::call_once]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 88:13-88:62 -/
+def
+  expects_100_continue.closure.Insts.CoreOpsFunctionFnOnceTupleSharedStrBool.call_once
+  (c : expects_100_continue.closure) (s : Str) : Result Bool := do
+  let (b, _) ←
+    expects_100_continue.closure.Insts.CoreOpsFunctionFnMutTupleSharedStrBool.call_mut
+      c s
+  ok b
+
+/-- Trait implementation: [pedra_aeneas_fail_closed_kernel::expects_100_continue::{impl core::ops::function::FnOnce<(&'_ str,), bool> for pedra_aeneas_fail_closed_kernel::expects_100_continue::closure}]
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 88:13-88:62 -/
+@[reducible]
+def expects_100_continue.closure.Insts.CoreOpsFunctionFnOnceTupleSharedStrBool
+  : core.ops.function.FnOnce expects_100_continue.closure Str Bool := {
+  call_once :=
+    expects_100_continue.closure.Insts.CoreOpsFunctionFnOnceTupleSharedStrBool.call_once
+}
+
+/-- Trait implementation: [pedra_aeneas_fail_closed_kernel::expects_100_continue::{impl core::ops::function::FnMut<(&'_ str,), bool> for pedra_aeneas_fail_closed_kernel::expects_100_continue::closure}]
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 88:13-88:62 -/
+@[reducible]
+def expects_100_continue.closure.Insts.CoreOpsFunctionFnMutTupleSharedStrBool :
+  core.ops.function.FnMut expects_100_continue.closure Str Bool := {
+  FnOnceInst :=
+    expects_100_continue.closure.Insts.CoreOpsFunctionFnOnceTupleSharedStrBool
+  call_mut :=
+    expects_100_continue.closure.Insts.CoreOpsFunctionFnMutTupleSharedStrBool.call_mut
+}
+
+/-- [pedra_aeneas_fail_closed_kernel::expects_100_continue]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 85:0-89:1
+    Visibility: public -/
+def expects_100_continue (value : Str) : Result Bool := do
+  let s ←
+    core.str.Str.split value ','
+  let (b, _) ←
+    core.iter.traits.iterator.Iterator.any.default
+      (core.str.iter.Split.Insts.CoreIterTraitsIteratorIteratorSharedAStr)
+      expects_100_continue.closure.Insts.CoreOpsFunctionFnMutTupleSharedStrBool
+      s ()
+  ok b
+
 /-- [pedra_aeneas_fail_closed_kernel::expects_100_continue_as_is]:
     Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 93:0-95:1
     Visibility: public -/
 def expects_100_continue_as_is (_value : Str) : Result Bool := do
   ok false
+
+/-- [pedra_aeneas_fail_closed_kernel::expect_field_ok::closure]
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 100:25-103:5 -/
+@[reducible]
+def expect_field_ok.closure := Unit
+
+/-- [pedra_aeneas_fail_closed_kernel::expect_field_ok::{impl core::ops::function::FnMut<(&'_ str,), bool> for pedra_aeneas_fail_closed_kernel::expect_field_ok::closure}::call_mut]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 100:25-103:5 -/
+def
+  expect_field_ok.closure.Insts.CoreOpsFunctionFnMutTupleSharedStrBool.call_mut
+  (c : expect_field_ok.closure) (tupled_args : Str) :
+  Result (Bool × expect_field_ok.closure)
+  := do
+  let t ← core.str.Str.trim tupled_args
+  let b ← core.str.Str.is_empty t
+  if b
+  then ok (true, c)
+  else
+    let b1 ← core.str.Str.eq_ignore_ascii_case t (toStr "100-continue")
+    ok (b1, c)
+
+/-- [pedra_aeneas_fail_closed_kernel::expect_field_ok::{impl core::ops::function::FnOnce<(&'_ str,), bool> for pedra_aeneas_fail_closed_kernel::expect_field_ok::closure}::call_once]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 100:25-103:5 -/
+def
+  expect_field_ok.closure.Insts.CoreOpsFunctionFnOnceTupleSharedStrBool.call_once
+  (c : expect_field_ok.closure) (s : Str) : Result Bool := do
+  let (b, _) ←
+    expect_field_ok.closure.Insts.CoreOpsFunctionFnMutTupleSharedStrBool.call_mut
+      c s
+  ok b
+
+/-- Trait implementation: [pedra_aeneas_fail_closed_kernel::expect_field_ok::{impl core::ops::function::FnOnce<(&'_ str,), bool> for pedra_aeneas_fail_closed_kernel::expect_field_ok::closure}]
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 100:25-103:5 -/
+@[reducible]
+def expect_field_ok.closure.Insts.CoreOpsFunctionFnOnceTupleSharedStrBool :
+  core.ops.function.FnOnce expect_field_ok.closure Str Bool := {
+  call_once :=
+    expect_field_ok.closure.Insts.CoreOpsFunctionFnOnceTupleSharedStrBool.call_once
+}
+
+/-- Trait implementation: [pedra_aeneas_fail_closed_kernel::expect_field_ok::{impl core::ops::function::FnMut<(&'_ str,), bool> for pedra_aeneas_fail_closed_kernel::expect_field_ok::closure}]
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 100:25-103:5 -/
+@[reducible]
+def expect_field_ok.closure.Insts.CoreOpsFunctionFnMutTupleSharedStrBool :
+  core.ops.function.FnMut expect_field_ok.closure Str Bool := {
+  FnOnceInst :=
+    expect_field_ok.closure.Insts.CoreOpsFunctionFnOnceTupleSharedStrBool
+  call_mut :=
+    expect_field_ok.closure.Insts.CoreOpsFunctionFnMutTupleSharedStrBool.call_mut
+}
+
+/-- [pedra_aeneas_fail_closed_kernel::expect_field_ok]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 99:0-104:1
+    Visibility: public -/
+def expect_field_ok (value : Str) : Result Bool := do
+  let s ←
+    core.str.Str.split value ','
+  let (b, _) ←
+    core.iter.traits.iterator.Iterator.all.default
+      (core.str.iter.Split.Insts.CoreIterTraitsIteratorIteratorSharedAStr)
+      expect_field_ok.closure.Insts.CoreOpsFunctionFnMutTupleSharedStrBool s ()
+  ok b
 
 /-- [pedra_aeneas_fail_closed_kernel::expect_field_ok_as_is]:
     Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 108:0-110:1
@@ -507,6 +891,36 @@ def expect_field_ok_as_is (_value : Str) : Result Bool := do
     Visibility: public -/
 def expectation_failed_status : Result Std.U16 := do
   ok 417#u16
+
+/-- [pedra_aeneas_fail_closed_kernel::http_version_requires_host]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 120:0-128:1
+    Visibility: public -/
+def http_version_requires_host (version : Str) : Result Bool := do
+  let v ← core.str.Str.trim version
+  let i ← core.str.Str.len v
+  if i >= 5#usize
+  then
+    let s ←
+      Str.Insts.CoreOpsIndexIndex.index
+        core.ops.range.RangeToUsize.Insts.CoreSliceIndexSliceIndexStrStr v
+        { «end» := 5#usize }
+    let b ← core.str.Str.eq_ignore_ascii_case s (toStr "HTTP/")
+    if b
+    then
+      let rest ←
+        Str.Insts.CoreOpsIndexIndex.index
+          core.ops.range.RangeFromUsize.Insts.CoreSliceIndexSliceIndexStrStr v
+          { start := 5#usize }
+      let b1 ←
+        core.cmp.impls.PartialEqShared.ne Str.Insts.CoreCmpPartialEqStr rest
+          (toStr "1.0")
+      if b1
+      then
+        let b2 ← core.str.Str.eq_ignore_ascii_case rest (toStr "1.0")
+        ok (¬ b2)
+      else ok false
+    else ok false
+  else ok false
 
 /-- [pedra_aeneas_fail_closed_kernel::http_version_requires_host_as_is]:
     Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 132:0-134:1

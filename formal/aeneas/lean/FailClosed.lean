@@ -1,6 +1,6 @@
 -- Theorems over Aeneas extract of fail_closed.rs (RFC-0002 / F102).
--- Charon --start-from catalog + Iterator-free gates + header_break
--- (Windows Iterator extra position field stripped in aeneas_fail_closed.sh).
+-- Charon --start-from catalog + Iterator-free gates + header_break + Expect
+-- (Windows position stripped; Split clauseInst / extra Iterator fields patched).
 import Aeneas
 import FailClosedKernel
 open Aeneas.Std Result
