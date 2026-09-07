@@ -125,8 +125,8 @@ struct WriteGroup {
     /// many groups entered it (diagnostics for the bound).
     catchup_wait_ns: AtomicU64,
     catchup_waits: AtomicU64,
-    /// RFC-0044 P0.5: merge concurrent async writers into one group.
-    async_group: bool,
+    /// RFC-0044 P0.5 / RFC-0178 P0.12: async write-group policy.
+    async_group: AsyncGroupMode,
     /// RFC-0045 P0.2: bounded spin before parking on the bypass write lock
     /// (`PEDRA_WRITE_SPIN`, default 0 = park immediately).
     write_spin: AtomicUsize,
@@ -165,14 +165,32 @@ const CATCHUP_WINDOW_DEFAULT: Duration = Duration::from_micros(50);
 /// disabled (see `last_multi_ns`). 250 µs covers apply pre→com on this box.
 const MULTI_HOLD: Duration = Duration::from_micros(250);
 
-/// RFC-0044 P0.5: merge concurrent async writers into one group frame/`write()`
-/// (leader encodes for all members, no catch-up wait). **Default off** — A/B
-/// on the bench box (findings/rfc0044-p1, 5 paired rounds) the single leader
-/// is a scheduling single point of failure under 50 threads / 12 CPUs:
-/// merge 44–106 k qps vs bypass 311–636 k. The bypass (every writer takes
-/// the write lock itself — the Rocks shape) is the default;
-/// `PEDRA_ASYNC_GROUP=1` re-enables the merge for quiet-box experiments.
-const ASYNC_GROUP_DEFAULT: bool = false;
+/// RFC-0044 P0.5 / RFC-0178 P0.12: merge concurrent async writers into one
+/// WAL `write()`. At 50 threads the single leader was a scheduling SPOF
+/// (merge 44–106 k vs bypass 311–636 k). At 4 clients (`overwrite_mc4`)
+/// the bypass serializes on the write lock (p95 107 µs vs Rocks 27 µs).
+/// Adaptive: merge when `2 <= active <= MAX`, else bypass.
+/// `PEDRA_ASYNC_GROUP=1` always merge; `=0` always bypass.
+const ASYNC_GROUP_ADAPTIVE_MAX: usize = 8;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AsyncGroupMode {
+    Off,
+    On,
+    Adaptive,
+}
+
+/// Whether this submit joins the async write group (pure; RFC-0178 P0.12).
+fn async_merge_admitted(mode: AsyncGroupMode, verified: bool, active: usize) -> bool {
+    if verified {
+        return false;
+    }
+    match mode {
+        AsyncGroupMode::Off => false,
+        AsyncGroupMode::On => true,
+        AsyncGroupMode::Adaptive => (2..=ASYNC_GROUP_ADAPTIVE_MAX).contains(&active),
+    }
+}
 
 /// Skip the catch-up wait only for apply-sized batches (64 ops). Raftlog is
 /// 16 ops — skipping at 16 left `deps_raftlog_mc4` at ~0.6–0.8× (one fd per
@@ -269,11 +287,11 @@ impl WriteGroup {
             async_group: std::env::var("PEDRA_ASYNC_GROUP")
                 .ok()
                 .and_then(|v| match v.as_str() {
-                    "0" | "false" => Some(false),
-                    "1" | "true" => Some(true),
+                    "0" | "false" => Some(AsyncGroupMode::Off),
+                    "1" | "true" => Some(AsyncGroupMode::On),
                     _ => None,
                 })
-                .unwrap_or(ASYNC_GROUP_DEFAULT),
+                .unwrap_or(AsyncGroupMode::Adaptive),
             write_spin: AtomicUsize::new(
                 std::env::var("PEDRA_WRITE_SPIN")
                     .ok()
@@ -507,7 +525,11 @@ impl WriteGroup {
         // The pin's declared composition lives on: `pin_verified`
         // forces the catch-up window to 0 and keeps async writers on
         // the un-merged bypass below.
-        let async_merged = self.async_group && !self.verified.load(Ordering::Relaxed);
+        let async_merged = async_merge_admitted(
+            self.async_group,
+            self.verified.load(Ordering::Relaxed),
+            active,
+        );
 
         // Lone writer (parity bench, sequential client): skip the mpsc hop.
         // G1 keeps the write lock through `fdatasync` (RFC-0062 P1.1
@@ -711,11 +733,10 @@ impl WriteGroup {
             let window = Duration::from_micros(self.catchup_window_us.load(Ordering::Relaxed));
             let batch_ops: usize = batch.iter().map(|p| p.ops.len()).sum();
             let active = self.active.load(Ordering::Relaxed);
-            // Async-only group (RFC-0044 P0.5): no fd to share, so the
-            // catch-up hold is pure latency — the merge (one encode pass,
-            // one `write()` per group) is the whole win.
-            let any_sync = batch.iter().any(|p| p.do_sync);
-            if any_sync && batch_ops < CATCHUP_SKIP_OPS {
+            // Sync groups share one fdatasync; async groups share one
+            // WAL `write()`. Without the wait, 4-client overwrite was
+            // 1-op frames (p95 107 µs). Fat batches still skip.
+            if batch_ops < CATCHUP_SKIP_OPS {
                 if let Some(bound) =
                     catchup_wait_bound(window, self.fd_ema(), batch.len(), active, batch_ops)
                 {
@@ -3261,6 +3282,19 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pedradb-concurrent-{n}-{i}"));
         let _ = fs::remove_dir_all(&dir);
         dir
+    }
+
+    /// RFC-0178 P0.12: 4-client overwrite merges; 50-thread bypass stays.
+    #[test]
+    fn rfc0178_async_merge_adaptive_small_n_only() {
+        assert!(!async_merge_admitted(AsyncGroupMode::Adaptive, false, 1));
+        assert!(async_merge_admitted(AsyncGroupMode::Adaptive, false, 4));
+        assert!(async_merge_admitted(AsyncGroupMode::Adaptive, false, 8));
+        assert!(!async_merge_admitted(AsyncGroupMode::Adaptive, false, 9));
+        assert!(!async_merge_admitted(AsyncGroupMode::Adaptive, false, 50));
+        assert!(!async_merge_admitted(AsyncGroupMode::Adaptive, true, 4));
+        assert!(!async_merge_admitted(AsyncGroupMode::Off, false, 4));
+        assert!(async_merge_admitted(AsyncGroupMode::On, false, 50));
     }
 
     /// RFC-0071 P0: injected WAL sync fail must not publish. AS-IS

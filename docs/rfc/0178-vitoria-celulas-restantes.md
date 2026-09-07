@@ -27,7 +27,7 @@ Células que o utilizador mandou fechar, com o facto (não o slogan):
 | get_loop 50M→100M | **432 → 427 µs** (P0.9 r9) | Era 5,39 ms skip-WARM / ~2 ms com WARM+`stats()` walk. r9: settle deixa de clonar 100M valores; pread 16→1,4 µs/file. Darwin 1-run, não vs Rocks, não 4 GiB |
 | ycsb_f_mc4 run2 | intra-run **0,766×**; mediana **PASS 1,473×** | Rocks spikeou 90,3 kqps; Pedra estável 66–69 k. Não é Pedra a piorar |
 | probe_miss | **0,27×** pós-bloom; skip tombstone **sem** 3-run | O(ficheiros) vazio já saiu (0167). Razão publicável continua 0,27× até a caixa |
-| overwrite_mc4 | **0,454×** isolado Darwin 1-run (P0.11) | Era 0,557× in-suite. Same-class drop-in vs Rocks default. Não é só a suíte. G1 seria pior. P1.3 = 3-run caixa |
+| overwrite_mc4 | **0,61×** Darwin 3-run mediana (P0.12) | Era 0,45× isolado / 0,56× in-suite. Adaptive group 2–8. p95 107→45 µs. Ainda <1×. Não G1. P1.3 = caixa |
 
 Disco vs Fjall (245 vs 222 B/e) e G1 writes **não** estão neste RFC
 (0168 P2.1 / Agents.md).
@@ -120,6 +120,10 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
       (132k vs 292k qps). Isolado não fecha a célula. Não G1, não
       3-run, não 4 GiB. Teste `rfc0178_mc_only_selects_full_mc_name`.
       status: `done`
+- [x] **P0.12** Async write-group adaptativo (merge se 2–8 writers;
+      50-thread bypass fica). overwrite_mc4 Darwin 3-run mediana
+      **0,61×** (era 0,45×); p95 107→45 µs. Ainda named loss.
+      Teste `rfc0178_async_merge_adaptive_small_n_only`. status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
 
@@ -155,6 +159,7 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
 | P0.9 | p0 | stats() skip SST walk without vlog | done | r9 settle 1.743s / get_loop 427µs (flat vs 50M) | 2026-09-07 |
 | P0.10 | p0 | DIAG via `pedra scale` | done | 50M/100M get_loop 403/405µs prefix 65.5/65.1µs | 2026-09-07 |
 | P0.11 | p0 | overwrite_mc4 isolado | done | ONLY honrado; Darwin 0.454× vs Rocks default (named loss) | 2026-09-07 |
+| P0.12 | p0 | adaptive async group 2–8 | done | overwrite_mc4 0.61× 3-run (era 0.45×); still named loss | 2026-09-07 |
 | P1.1 | p1 | probe_miss ≥1× 3-run caixa | todo | — | 2026-09-06 |
 | P1.2 | p1 | prefix 0,70× → ≥1× caixa | todo | — | 2026-09-06 |
 | P1.3 | p1 | overwrite isolado ≥1× caixa | todo | — | 2026-09-06 |
