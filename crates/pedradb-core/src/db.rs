@@ -10211,6 +10211,10 @@ impl<E: Env> Db<E> {
     /// `manual_wal_flush=false` flushes per record). No `fdatasync`
     /// (that is G1), no write-group.
     pub(crate) fn commit_async_ops(&mut self, batch: Vec<BatchOp>) -> Result<SequenceNumber> {
+        // Same pin as `commit_async_one` (RFC-0180 P0.25): host compact
+        // skips while apply/bypass holds this path, instead of barging
+        // the write lock between batches.
+        let _pin = self.pin_commit_inflight();
         if !self.write_admission_idle() {
             let families = self.batch_families(&batch);
             self.ensure_write_admitted_for(&families)?;
@@ -10464,9 +10468,10 @@ impl<E: Env> Db<E> {
         self.commit_inflight.fetch_sub(1, Ordering::Release);
     }
 
-    /// RFC-0180 P0.25: `commit_async_one` must pin inflight so the host
-    /// compact worker skips (`commit_inflight > 0`) instead of barging
-    /// the write lock between 1-op groups (p27 p999 1.4 ms × ~400 ops).
+    /// RFC-0180 P0.25 / 0184 P0.6: `commit_async_one` and
+    /// `commit_async_ops` pin inflight so the host compact worker skips
+    /// (`commit_inflight > 0`) instead of barging the write lock between
+    /// groups (p27 p999 1.4 ms × ~400 ops).
     fn pin_commit_inflight(&self) -> CommitInflightPin {
         self.begin_commit();
         CommitInflightPin {
@@ -13452,6 +13457,11 @@ mod tests {
         assert!(
             db.has_imm() || db.parked_unflushed_count() > 0,
             "default-over must stage/park, not stay only in active mem"
+        );
+        assert_eq!(
+            db.commit_inflight(),
+            0,
+            "RFC-0184 P0.6: ops pin drops on Ok (same as 1-op P0.25)"
         );
         let k0 = crate::cf_kernel::encode_cf_key("lock", b"0000", false);
         assert!(db.get(&k0).is_some(), "parked/active still readable");
