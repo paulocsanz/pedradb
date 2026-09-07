@@ -181,17 +181,24 @@ pub fn settle_warm_on() -> bool {
     }
 }
 
-/// Live-SST byte cap for the default warm. Override with
-/// `PEDRA_SETTLE_WARM_MAX_BYTES`. `PEDRA_SETTLE_WARM=1` ignores it.
+/// Floor for the default warm cap (10M ~2.4 GiB on the 4 GiB box).
 pub const DEFAULT_SETTLE_WARM_MAX_BYTES: u64 = 3 * (1 << 30);
 
 /// Cap applied when warm is on but not forced unlimited.
+///
+/// `PEDRA_SETTLE_WARM_MAX_BYTES` wins. Otherwise `max(3 GiB, 3/4 RAM)` so
+/// 10M fits the 4 GiB box and 100M (~23 GiB) still warms on a 32+ GiB
+/// host — get_hit stays RAM-speed (linear µs/op) without streaming the
+/// store into a machine that cannot hold it.
 #[must_use]
 pub fn settle_warm_max_bytes() -> u64 {
-    match std::env::var("PEDRA_SETTLE_WARM_MAX_BYTES") {
-        Ok(v) => v.parse().unwrap_or(DEFAULT_SETTLE_WARM_MAX_BYTES),
-        Err(_) => DEFAULT_SETTLE_WARM_MAX_BYTES,
+    if let Ok(v) = std::env::var("PEDRA_SETTLE_WARM_MAX_BYTES") {
+        return v.parse().unwrap_or(DEFAULT_SETTLE_WARM_MAX_BYTES);
     }
+    let ram_share = pedradb_posix::physical_ram_bytes()
+        .map(|ram| ram.saturating_mul(3) / 4)
+        .unwrap_or(0);
+    DEFAULT_SETTLE_WARM_MAX_BYTES.max(ram_share)
 }
 
 /// `PEDRA_SETTLE_WARM=1` / `true`: warm even when live SSTs exceed the cap.
@@ -214,11 +221,37 @@ pub fn force_settle_warm(on: Option<bool>) {
 /// Bytes streamed by the last settle warm (test counter).
 #[must_use]
 pub fn take_settle_warm_bytes() -> u64 {
+    SETTLE_WARM_STREAMED.store(0, std::sync::atomic::Ordering::Relaxed);
     SETTLE_WARM_BYTES.with(Cell::take)
 }
 
 pub(crate) fn add_settle_warm_bytes(n: u64) {
     SETTLE_WARM_BYTES.with(|c| c.set(c.get().saturating_add(n)));
+    SETTLE_WARM_STREAMED.fetch_add(n, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Process-wide bytes already streamed through the get fd (ingest or settle).
+static SETTLE_WARM_STREAMED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[must_use]
+pub(crate) fn settle_warm_streamed() -> u64 {
+    SETTLE_WARM_STREAMED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// SST paths to stream through the get fd (collected under a short lock).
+pub(crate) struct WarmPlan {
+    pub src: std::sync::Arc<dyn SstFileSource>,
+    pub jobs: Vec<(PathBuf, u64)>,
+}
+
+impl WarmPlan {
+    pub(crate) fn run(self) {
+        for (path, len) in self.jobs {
+            if self.src.warm(&path, len).is_ok() {
+                add_settle_warm_bytes(len);
+            }
+        }
+    }
 }
 
 /// Directory + file namespace the engine uses.
