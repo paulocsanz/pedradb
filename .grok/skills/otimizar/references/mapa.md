@@ -20,7 +20,7 @@ Refresh this file when a cell moves class. One row per cell.
 | prefix 100M 4 GiB | **W** | caixa 0.70× | bounded-cache scan (not walk-all until cost says) | RFC-0178 P1.2 |
 | probe_miss | **W** | 0.27× | miss path | RFC-0178 P1.1 / 0167 |
 | 1c overwrite Darwin | **C**/DIAG | 0.845× | `wal_encode_or_write` despark=0 | RFC-0183 / 0184 |
-| apply_mc4 Darwin async | **C**/DIAG | 0.478× | `flush_check` mem/gap 2.7% | RFC-0183 |
+| apply_mc4 Darwin async | **C**/DIAG | 0.478× (pré P0.5) | `flush_check`; 0184 P0.5 default-over parks whole mem O(1) | RFC-0183 / 0184 P0.5 |
 | kvrocks_set_mc50 | **C** | 0.37× | `lock_convoy` Adaptive off n≥16 | RFC-0178 / 0183 |
 | G1 1c write-per-op | **C** | fd-ceiling | one barrier/op | Agents.md / floor1x-g1 |
 | ycsb_a/f_mc4 Darwin mixed | **T**→tool | 0.58–0.91 DIAG | `get_path` with `--read-pct 50`; `balance_admits=0` (DIAG) | RFC-0182 / 0184 |
@@ -29,9 +29,8 @@ Refresh this file when a cell moves class. One row per cell.
 
 ## Próxima fase (rank da skill, 2026-09-07)
 
-1. **U / Linux `overwrite_mc4` isolado + WRITEPHASE + diagnose + `balance` no set `BALANCE_SHAPES`** (caixa; 0178 P1.3 / 0184 P1.1). Sem bake: não fechar com Darwin 1.00×.
-2. Se o diagnose Linux admitir um lever (`balance_admits=1`) → um corte, re-diagnosticar as 5 shapes.
-3. Tool **done this turn:** `get_path`, `classify_probes`, `balance_admits` (DIAG board recusa WAL/flush/get_path).
-4. prefix 0.70× caixa e probe_miss 0.27× — reads.
+1. **U / Linux `overwrite_mc4` isolado + diagnose + `balance`** (caixa). Sem bake: não ratio-win Darwin. Skill **ainda implementa** o próximo furo local.
+2. **Done this turn:** 0184 P0.5 — async `commit_async_ops` stage-only; CF **default-over** parka O(1) (não `take_family("default")` O(n); não global-over — 0159 P1.3). 1-op overwrite/YCSB under-limit inalterado.
+3. prefix 0.70× / probe_miss — reads, caixa.
 
-Não: skiplist. Não: n=50 merge. Não: engine cut com `admits=0`.
+Não: skiplist. Não: n=50 merge. Não: turno vazio porque “é caixa”.

@@ -26,17 +26,19 @@ conjunto — regressão S→W é recusa, não “a célula-alvo ganhou”.
 
 **Números vivem nos RFCs / findings.** Este skill aponta; não duplica tabelas.
 
-## Implement the winner (same turn)
+## Implement (same turn — mandatory)
 
-After the board, **do the first unblocked cut** this turn:
+**Report-only is a failure.** Caixa não desculpa turno vazio (espelho
+`/verificacao-next`). Rank the board, then **land code**:
 
-- **Tool gap** (diagnose não classifica o shape / falta lever): kernel + teste + RFC-0184 checkbox.
-- **Engine gap** with a named lever, `balance_admits=1`, and a local test: one lever. Then diagnose **all** `BALANCE_SHAPES`.
-- **Caixa / 3-run Linux:** do **not** fake it on Darwin. Rank it, stop, say bake.
-
-Report-only is a failure unless the winner is caixa.
-
-Bound: one lever or one diagnose class. Then **expand** `references/mapa.md` and this skill if a new frontier appeared (new shape, new use-case, new lever token).
+1. If caixa is rank 1: **say bake** in the output, then **fall through**
+   and implement the next unblocked item this turn.
+2. **Tool gap:** kernel + teste + RFC checkbox.
+3. **Engine:** named lever + local test. `balance_admits=1` **or** a
+   policy hole that already shipped on one path (e.g. P0.14 1-op) and is
+   missing on another (ops/CF). Then re-diagnose `BALANCE_SHAPES` if a
+   bench ran. Never quote Darwin DIAG as a Linux win.
+4. Bound: one lever. Expand `references/mapa.md` in the same change.
 
 ## 0. Search (mandatory — do not skip)
 
@@ -84,9 +86,9 @@ Fill from search. Classes:
 
 ## 2. Rank (first non-empty wins)
 
-1. **U** on the **Linux** write cell that already lost 3/3 (today: `overwrite_mc4` caixa — 0178 P1.3 / 0184 P1.1). Diagnose before code.
-2. **W** whose lever is local (flush_check, wal_encode_or_write, grouping 2–8). One lever.
-3. **T** — mixed still `read_or_client` (no `--read-pct`); probes vs \(P_{\mathrm{best}}\) missing.
+1. **U** on the **Linux** write cell that already lost 3/3 (today: `overwrite_mc4` caixa — 0178 P1.3 / 0184 P1.1). Diagnose before an *engine ratio* claim. If caixa is blocked, still implement (2) or (3).
+2. **W** whose lever is local (flush_check, wal_encode_or_write, grouping 2–8) **or** a policy hole on the write path (async Ok still doing full `flush_cf` / O(n) `take_family`). One lever.
+3. **T** — diagnose still missing a class (compare JSON lever, new shape).
 4. **C** only to document, never to hide.
 5. Never treat Darwin same-boot mixed 0,5–0,7× as the Linux map.
 6. Never 0055 skiplist unless `despark=1` (mem/gap ≥15% **and** clients≥2).

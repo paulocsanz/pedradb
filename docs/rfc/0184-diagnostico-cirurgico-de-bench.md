@@ -54,6 +54,13 @@ a linha quando há phasesΔ. Sem harness novo.
 - [x] **P0.4** Mixed `get_path` (`read_pct≥40`) + `classify_probes` +
       `balance_admits` (DIAG recusa; named-loss Linux ou ≥2 cartaz).
       Set `BALANCE_SHAPES` (0182). — status: `done`
+- [x] **P0.5** Async apply/`commit_async_ops` usa stage-only; CF
+      **default-over** parka a mem inteira (O(1)), não
+      `take_family("default")` O(n). Não parka só porque o global estourou
+      (RFC-0159 P1.3: CF data > cap global). Named CF continua
+      `take_family` contíguo. Teste
+      `rfc0184_async_ops_does_not_write_l0_when_over_limit`.
+      — status: `done`
 
 ### P1 — Linux
 
@@ -73,6 +80,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P0.2 | p0 | kernel + testes 0183 | done | `bench_gap_kernel` | 2026-09-07 |
 | P0.3 | p0 | CLI + harness line | done | `pedra diagnose` | 2026-09-07 |
 | P0.4 | p0 | get_path + probes + balance_admits | done | `BALANCE_SHAPES`; DIAG board recusa | 2026-09-07 |
+| P0.5 | p0 | async ops/CF park O(1) | done | default-over park whole mem; not global-over (0159 P1.3) | 2026-09-07 |
 | P1.1 | p1 | overwrite_mc4 caixa + diagnose | todo | 0178 P1.3 | 2026-09-07 |
 | P1.2 | p1 | compare JSON lever | todo | — | 2026-09-07 |
 | P2.1 | p2 | none yet | todo | — | 2026-09-07 |
@@ -83,7 +91,8 @@ a linha quando há phasesΔ. Sem harness novo.
   `rfc0183_apply_mc4_blames_flush_check`;
   `classify_get_on_as_is_walk_is_not_ok`;
   `ycsb_a_mixed_is_get_path_not_wal`;
-  `rfc0182_darwin_board_refuses_single_diag_cut`.
+  `rfc0182_darwin_board_refuses_single_diag_cut`;
+  `rfc0184_async_ops_does_not_write_l0_when_over_limit`.
 - **Telemetry / Analytics:** uma linha `diagnose dominant=… lever=…`;
   peer continua `sync: false`.
 - **Documentation:** este RFC; `docs/benchmarks.md` receita.
