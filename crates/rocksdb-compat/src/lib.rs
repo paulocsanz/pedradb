@@ -3392,9 +3392,30 @@ impl<E: PedraEnv> DB<E> {
     /// # Errors
     /// Pedra compaction / write errors.
     pub fn compact(&self) -> Result<()> {
+        self.compact_inner(true)
+    }
+
+    /// Compact without a preceding flush (scale settle after `flush_no_notify`).
+    ///
+    /// # Errors
+    /// Pedra compaction / write errors.
+    pub fn compact_no_flush(&self) -> Result<()> {
+        self.compact_inner(false)
+    }
+
+    fn compact_inner(&self, flush: bool) -> Result<()> {
         self.apply_compaction_filter()?;
+        let t0 = std::time::Instant::now();
         let _gate = self.compact_gate.lock();
-        self.inner.compact().map_err(Error::from)
+        let gate_s = t0.elapsed().as_secs_f64();
+        if gate_s > 0.05 {
+            eprintln!("compact_gate_wait={gate_s:.3}s");
+        }
+        if flush {
+            self.inner.compact().map_err(Error::from)
+        } else {
+            self.inner.compact_skip_flush().map_err(Error::from)
+        }
     }
 
     /// Compact after applying `filter` once (RFC-0043 P2.7). Same decisions
@@ -4572,15 +4593,10 @@ fn compat_compact_once<E: PedraEnv>(inner: &ConcurrentDb<E>, gate: &Mutex<()>) -
         Ok(t) => t,
         Err(_) => return false,
     };
-    let Some(_gate) = gate.try_lock() else {
-        for t in &tables {
-            let p = t.path().to_path_buf();
-            inner.with_read(|db| {
-                let _ = db.env().remove_file(&p);
-            });
-        }
-        return false;
-    };
+    // lock(), not try_lock+delete: r5 discarded outputs thrashed page
+    // cache (get_hit 268 µs). Settle holds the gate only for
+    // compact_leveled; we wait to install or apply_prepared no-ops.
+    let _gate = gate.lock();
     // One L0 job only. Pushdowns used to run 4 follow-up `job.write()`s
     // still holding the gate. compact_leveled / the next tick drains.
     if !inner.install_prepared_l0_job(job, tables) {
