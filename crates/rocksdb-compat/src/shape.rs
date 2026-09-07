@@ -500,6 +500,12 @@ pub mod properties {
     pub const PEDRA_RAM_CEILING_BYTES: &str = "pedra.ram-ceiling-bytes";
     /// Engine-resident metadata bytes (index+bloom+mem), not page cache.
     pub const PEDRA_ENGINE_RESIDENT_BYTES: &str = "pedra.engine-resident-bytes";
+    /// Bytes streamed by the last settle warm (`0` if skipped).
+    pub const PEDRA_SETTLE_WARM_BYTES: &str = "pedra.settle-warm-bytes";
+    /// Nanoseconds of the last settle warm.
+    pub const PEDRA_SETTLE_WARM_NS: &str = "pedra.settle-warm-ns";
+    /// Nanoseconds of the last leveled compact, excluding warm.
+    pub const PEDRA_SETTLE_COMPACT_NS: &str = "pedra.settle-compact-ns";
 }
 
 // Env bound kept so scan_cf_at type-checks through DB.
