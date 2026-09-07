@@ -92,7 +92,8 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
       — o `while` **não** era os 87 s (um job ainda segura o gate
       durante `job.write()`). status: `done`
 - [x] **P0.7** Largar `compact_gate` durante `job.write()`; hydrate
-      `flush_no_notify`. O worker não segura o settle no I/O (~90 s).
+      `flush_no_notify`. DIAG r5: settle **101.6 s**, get_loop **7.18 ms**
+      — compact_ns ainda 0.001; a espera não era só o gate no write.
       status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
