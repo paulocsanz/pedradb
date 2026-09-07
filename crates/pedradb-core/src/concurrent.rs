@@ -3020,7 +3020,12 @@ impl<E: Env> ConcurrentDb<E> {
     fn compact_after_flush(&self) -> Result<()> {
         // RFC-0178: hydrate flush already noted those paths. Clear so
         // compact_leveled WARMs the live set immediately before Ok.
+        let t0 = std::time::Instant::now();
         let mut g = self.inner.write();
+        let wait_s = t0.elapsed().as_secs_f64();
+        if wait_s > 0.05 {
+            eprintln!("compact_write_lock_wait={wait_s:.3}s");
+        }
         g.clear_warmed_ssts();
         g.compact_leveled()
     }
