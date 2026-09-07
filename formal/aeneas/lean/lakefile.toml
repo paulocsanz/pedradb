@@ -388,3 +388,9 @@ name = "LsmR1Kernel"
 
 [[lean_lib]]
 name = "LsmR1"
+
+[[lean_lib]]
+name = "LevelingKernel"
+
+[[lean_lib]]
+name = "Leveling"

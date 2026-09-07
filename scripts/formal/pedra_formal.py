@@ -1231,6 +1231,10 @@ AENEAS_EXTRACTS = (
         "crates/pedradb-core/src/lsm_r1_kernel.rs",
         "formal/aeneas/out/SOURCE.lsm_r1",
     ),
+    (
+        "crates/pedradb-core/src/leveling.rs",
+        "formal/aeneas/out/SOURCE.leveling",
+    ),
 )
 
 
