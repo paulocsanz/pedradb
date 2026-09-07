@@ -2886,6 +2886,16 @@ impl<E: Env> ConcurrentDb<E> {
         }
     }
 
+    /// Install one prepared L0 job (no pushdown follow-ups).
+    #[must_use]
+    pub fn install_prepared_l0_job(
+        &self,
+        job: PreparedL0Compact<E>,
+        tables: Vec<crate::sst::SstTable>,
+    ) -> bool {
+        self.install_prepared_one(job, tables)
+    }
+
     /// Publish a prepared leveled compact: mem install under the write lock,
     /// MANIFEST `fsync` off-lock (RFC-0041 P1.1). After a successful install
     /// it drives bounded pushdown jobs ([`Db::prepare_pushdown_compact`]):

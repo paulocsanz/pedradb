@@ -91,6 +91,9 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
       `compact_gate`). DIAG r4: settle **90.9 s** / get_loop **5.73 ms**
       — o `while` **não** era os 87 s (um job ainda segura o gate
       durante `job.write()`). status: `done`
+- [x] **P0.7** Largar `compact_gate` durante `job.write()`; hydrate
+      `flush_no_notify`. O worker não segura o settle no I/O (~90 s).
+      status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
 
@@ -120,7 +123,8 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
 | P0.3 | p0 | Prefix window O(overlap) não O(all SST) | done | `rfc0178_prefix_window_probes_overlapping_ssts_only` | 2026-09-06 |
 | P0.4 | p0 | Isolate mc + WARM por path | done | `ROCKS_PARITY_MC_FRESH`; `rfc0178_compact_new_paths_are_warmed`; scale settle=`compact()` | 2026-09-06 |
 | P0.5 | p0 | compact() re-WARM after gate | done | `clear_warmed_ssts` + worker `try_lock`; DIAG r3 get_loop 2.76 ms | 2026-09-07 |
-| P0.6 | p0 | Worker one compact job per tick | done | `compat_compact_once` once per poll, not `while` | 2026-09-07 |
+| P0.6 | p0 | Worker one compact job per tick | done | `compat_compact_once` once per poll, not `while`; r4 settle 90.9 s | 2026-09-07 |
+| P0.7 | p0 | Drop compact_gate during job.write | done | `flush_no_notify`; install without 4 pushdowns under gate | 2026-09-07 |
 | P1.1 | p1 | probe_miss ≥1× 3-run caixa | todo | — | 2026-09-06 |
 | P1.2 | p1 | prefix 0,70× → ≥1× caixa | todo | — | 2026-09-06 |
 | P1.3 | p1 | overwrite isolado ≥1× caixa | todo | — | 2026-09-06 |
