@@ -1,0 +1,12 @@
+[workspace]
+
+[package]
+name = "pedra-aeneas-tx-glue-kernel"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "Standalone crate whose [lib] path is production tx_glue_kernel.rs"
+
+[lib]
+path = "../../../crates/pedradb-store/src/tx_glue_kernel.rs"

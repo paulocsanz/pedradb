@@ -1,0 +1,4 @@
+path=crates/pedradb-core/src/manifest_kernel.rs
+sha256=3c1f11216f3f387136a562d48b4c66a7d38ed6b531699473f33cd9417a0f016f
+aeneas=daa85d7
+charon=0.1.232

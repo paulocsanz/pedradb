@@ -1,0 +1,4 @@
+path=crates/pedradb-store/src/compact_kernel.rs
+sha256=f4f067f0fd18f6e165021447a04c1e05e6ec143a6c9e228db227969355549902
+aeneas=daa85d7
+charon=0.1.232

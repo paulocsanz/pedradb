@@ -1,0 +1,4 @@
+path=crates/pedradb-store/src/si_kernel.rs
+sha256=fa4dd3b2b90cb3dbf77aab517554ae773ef9ae45571e202c4e40977d75f57025
+aeneas=daa85d7
+charon=0.1.232

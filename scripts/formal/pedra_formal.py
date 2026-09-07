@@ -1078,6 +1078,53 @@ AENEAS_EXTRACTS = (
         "crates/pedradb-core/src/flush_kernel.rs",
         "formal/aeneas/out/SOURCE.flush",
     ),
+    ("crates/pedradb-core/src/lookup_kernel.rs", "formal/aeneas/out/SOURCE.lookup"),
+    ("crates/pedradb-store/src/rpc_mode_kernel.rs", "formal/aeneas/out/SOURCE.rpc_mode"),
+    (
+        "crates/pedradb-store/src/compact_kernel.rs",
+        "formal/aeneas/out/SOURCE.store_compact",
+    ),
+    (
+        "crates/pedradb-store/src/snapshot_kernel.rs",
+        "formal/aeneas/out/SOURCE.snapshot",
+    ),
+    ("crates/pedradb-store/src/si_kernel.rs", "formal/aeneas/out/SOURCE.si"),
+    (
+        "crates/pedradb-store/src/index_val_kernel.rs",
+        "formal/aeneas/out/SOURCE.index_val",
+    ),
+    (
+        "crates/pedradb-core/src/changelog_kernel.rs",
+        "formal/aeneas/out/SOURCE.changelog",
+    ),
+    ("crates/pedradb-stream/src/cursor_kernel.rs", "formal/aeneas/out/SOURCE.cursor"),
+    ("crates/pedradb-http/src/cl_kernel.rs", "formal/aeneas/out/SOURCE.cl"),
+    (
+        "crates/montanha-fdb-recipes/src/children_kernel.rs",
+        "formal/aeneas/out/SOURCE.children",
+    ),
+    ("crates/pedradb-journal/src/pin_kernel.rs", "formal/aeneas/out/SOURCE.pin"),
+    (
+        "crates/montanha-fdb-recipes/src/pack_kernel.rs",
+        "formal/aeneas/out/SOURCE.pack",
+    ),
+    ("crates/pedradb-replicate/src/ship_kernel.rs", "formal/aeneas/out/SOURCE.ship"),
+    ("crates/pedradb-fold/src/fold_kernel.rs", "formal/aeneas/out/SOURCE.fold"),
+    (
+        "crates/pedradb-core/src/manifest_kernel.rs",
+        "formal/aeneas/out/SOURCE.manifest",
+    ),
+    ("crates/pedradb-core/src/compact_kernel.rs", "formal/aeneas/out/SOURCE.compact"),
+    ("crates/pedradb-core/src/vlog_gc_kernel.rs", "formal/aeneas/out/SOURCE.vlog_gc"),
+    ("crates/pedradb-store/src/tx_glue_kernel.rs", "formal/aeneas/out/SOURCE.tx_glue"),
+    ("crates/pedradb-store/src/l28.rs", "formal/aeneas/out/SOURCE.l28"),
+    ("crates/pedradb-world/src/tcg.rs", "formal/aeneas/out/SOURCE.tcg"),
+    ("crates/pedradb-io-uring/src/cqe_kernel.rs", "formal/aeneas/out/SOURCE.cqe"),
+    ("crates/rocksdb-compat/src/iter_kernel.rs", "formal/aeneas/out/SOURCE.iter"),
+    (
+        "crates/pedradb-spec/src/properties_kernel.rs",
+        "formal/aeneas/out/SOURCE.properties",
+    ),
 )
 
 
@@ -1702,6 +1749,250 @@ def check_extract(
             r.fail("RFC-0174 P1.3: formal/aeneas/lean/Flush.lean missing")
     else:
         r.gap("aeneas SOURCE.flush missing (run ./scripts/aeneas_flush.sh)")
+    # Newly enrolled extracts: SOURCE sha256 + Lean theorems, no sorry.
+    for stamp, artifact, marker, regen, src, thy, theorems in [
+        (
+            "lookup",
+            "formal/aeneas/out/lean/LookupKernel.lean",
+            "def snap_is_empty",
+            "./scripts/aeneas_lookup.sh",
+            "crates/pedradb-core/src/lookup_kernel.rs",
+            "formal/aeneas/lean/Lookup.lean",
+            ("theorem snap_is_empty_zero",),
+        ),
+        (
+            "rpc_mode",
+            "formal/aeneas/out/lean/RpcModeKernel.lean",
+            "def allow_direct_rpc",
+            "./scripts/aeneas_rpc_mode.sh",
+            "crates/pedradb-store/src/rpc_mode_kernel.rs",
+            "formal/aeneas/lean/RpcMode.lean",
+            ("theorem allow_direct_rpc_pin_refuses",),
+        ),
+        (
+            "store_compact",
+            "formal/aeneas/out/lean/StoreCompactKernel.lean",
+            "def may_compact_through",
+            "./scripts/aeneas_store_compact.sh",
+            "crates/pedradb-store/src/compact_kernel.rs",
+            "formal/aeneas/lean/StoreCompact.lean",
+            ("theorem may_compact_through_zero_false",),
+        ),
+        (
+            "snapshot",
+            "formal/aeneas/out/lean/SnapshotKernel.lean",
+            "def snapshot_touches_user_key",
+            "./scripts/aeneas_snapshot.sh",
+            "crates/pedradb-store/src/snapshot_kernel.rs",
+            "formal/aeneas/lean/Snapshot.lean",
+            ("theorem snapshot_touches_user_key_unreserved",),
+        ),
+        (
+            "si",
+            "formal/aeneas/out/lean/SiKernel.lean",
+            "def si_reader_beats",
+            "./scripts/aeneas_si.sh",
+            "crates/pedradb-store/src/si_kernel.rs",
+            "formal/aeneas/lean/Si.lean",
+            ("theorem si_reader_beats_c_live",),
+        ),
+        (
+            "index_val",
+            "formal/aeneas/out/lean/IndexValKernel.lean",
+            "def value_len_tag",
+            "./scripts/aeneas_index_val.sh",
+            "crates/pedradb-store/src/index_val_kernel.rs",
+            "formal/aeneas/lean/IndexVal.lean",
+            ("theorem value_len_tag_identity",),
+        ),
+        (
+            "changelog",
+            "formal/aeneas/out/lean/ChangelogKernel.lean",
+            "def changelog_should_store",
+            "./scripts/aeneas_changelog.sh",
+            "crates/pedradb-core/src/changelog_kernel.rs",
+            "formal/aeneas/lean/Changelog.lean",
+            ("theorem changelog_should_store_due",),
+        ),
+        (
+            "cursor",
+            "formal/aeneas/out/lean/CursorKernel.lean",
+            "def next_seq",
+            "./scripts/aeneas_cursor.sh",
+            "crates/pedradb-stream/src/cursor_kernel.rs",
+            "formal/aeneas/lean/Cursor.lean",
+            ("theorem next_seq_from_zero",),
+        ),
+        (
+            "cl",
+            "formal/aeneas/out/lean/ClKernel.lean",
+            "def keep_body_without_cl",
+            "./scripts/aeneas_cl.sh",
+            "crates/pedradb-http/src/cl_kernel.rs",
+            "formal/aeneas/lean/Cl.lean",
+            ("theorem keep_body_without_cl_true",),
+        ),
+        (
+            "children",
+            "formal/aeneas/out/lean/ChildrenKernel.lean",
+            "def PACKED_CHILD_END",
+            "./scripts/aeneas_children.sh",
+            "crates/montanha-fdb-recipes/src/children_kernel.rs",
+            "formal/aeneas/lean/Children.lean",
+            ("theorem packed_child_end_byte",),
+        ),
+        (
+            "pin",
+            "formal/aeneas/out/lean/PinKernel.lean",
+            "def may_advance_pin",
+            "./scripts/aeneas_pin.sh",
+            "crates/pedradb-journal/src/pin_kernel.rs",
+            "formal/aeneas/lean/Pin.lean",
+            ("theorem may_advance_pin_forward",),
+        ),
+        (
+            "pack",
+            "formal/aeneas/out/lean/PackKernel.lean",
+            "def pack_cut_tag",
+            "./scripts/aeneas_pack.sh",
+            "crates/montanha-fdb-recipes/src/pack_kernel.rs",
+            "formal/aeneas/lean/Pack.lean",
+            ("theorem pack_cut_tag_identity",),
+        ),
+        (
+            "ship",
+            "formal/aeneas/out/lean/ShipKernel.lean",
+            "def stamp_changed",
+            "./scripts/aeneas_ship.sh",
+            "crates/pedradb-replicate/src/ship_kernel.rs",
+            "formal/aeneas/lean/Ship.lean",
+            ("theorem stamp_changed_is_def",),
+        ),
+        (
+            "fold",
+            "formal/aeneas/out/lean/FoldKernel.lean",
+            "def fold_event_hides_key",
+            "./scripts/aeneas_fold.sh",
+            "crates/pedradb-fold/src/fold_kernel.rs",
+            "formal/aeneas/lean/Fold.lean",
+            ("theorem fold_event_hides_key_is_def",),
+        ),
+        (
+            "manifest",
+            "formal/aeneas/out/lean/ManifestKernel.lean",
+            "def sst_recover_action",
+            "./scripts/aeneas_manifest.sh",
+            "crates/pedradb-core/src/manifest_kernel.rs",
+            "formal/aeneas/lean/Manifest.lean",
+            ("theorem sst_recover_absent_scans",),
+        ),
+        (
+            "compact",
+            "formal/aeneas/out/lean/CompactKernel.lean",
+            "def compact_pick",
+            "./scripts/aeneas_compact.sh",
+            "crates/pedradb-core/src/compact_kernel.rs",
+            "formal/aeneas/lean/Compact.lean",
+            ("theorem compact_pick_empty_noop",),
+        ),
+        (
+            "vlog_gc",
+            "formal/aeneas/out/lean/VlogGcKernel.lean",
+            "def vlog_recover_action",
+            "./scripts/aeneas_vlog_gc.sh",
+            "crates/pedradb-core/src/vlog_gc_kernel.rs",
+            "formal/aeneas/lean/VlogGc.lean",
+            ("theorem vlog_recover_blob_opens",),
+        ),
+        (
+            "tx_glue",
+            "formal/aeneas/out/lean/TxGlueKernel.lean",
+            "def tx_range_action",
+            "./scripts/aeneas_tx_glue.sh",
+            "crates/pedradb-store/src/tx_glue_kernel.rs",
+            "formal/aeneas/lean/TxGlue.lean",
+            ("theorem tx_range_keep_committed",),
+        ),
+        (
+            "l28",
+            "formal/aeneas/out/lean/L28Kernel.lean",
+            "def l28_durability_ok",
+            "./scripts/aeneas_l28.sh",
+            "crates/pedradb-store/src/l28.rs",
+            "formal/aeneas/lean/L28.lean",
+            ("theorem l28_durability_all_ok",),
+        ),
+        (
+            "tcg",
+            "formal/aeneas/out/lean/TcgKernel.lean",
+            "def tcg_guest_admitted",
+            "./scripts/aeneas_tcg.sh",
+            "crates/pedradb-world/src/tcg.rs",
+            "formal/aeneas/lean/Tcg.lean",
+            ("theorem tcg_guest_admitted_true",),
+        ),
+        (
+            "cqe",
+            "formal/aeneas/out/lean/CqeKernel.lean",
+            "def cqe_res_ok",
+            "./scripts/aeneas_cqe.sh",
+            "crates/pedradb-io-uring/src/cqe_kernel.rs",
+            "formal/aeneas/lean/Cqe.lean",
+            ("theorem cqe_res_ok_nonneg",),
+        ),
+        (
+            "iter",
+            "formal/aeneas/out/lean/IterKernel.lean",
+            "def iter_window_keep",
+            "./scripts/aeneas_iter.sh",
+            "crates/rocksdb-compat/src/iter_kernel.rs",
+            "formal/aeneas/lean/Iter.lean",
+            ("theorem iter_window_keep_live",),
+        ),
+        (
+            "properties",
+            "formal/aeneas/out/lean/PropertiesKernel.lean",
+            "def d1_holds_loop.body",
+            "./scripts/aeneas_properties.sh",
+            "crates/pedradb-spec/src/properties_kernel.rs",
+            "formal/aeneas/lean/Properties.lean",
+            ("theorem d1_holds_loop_body_is_def",),
+        ),
+    ]:
+        art = root / artifact
+        if art.is_file() and marker in art.read_text(encoding="utf-8"):
+            r.good(f"aeneas extract artifact has {marker}")
+        else:
+            r.gap(
+                f"aeneas extract artifact {artifact.rsplit('/', 1)[-1]} missing (run {regen})"
+            )
+        st = root / f"formal/aeneas/out/SOURCE.{stamp}"
+        kr = root / src
+        if st.is_file() and kr.is_file():
+            want = None
+            for line in st.read_text(encoding="utf-8").splitlines():
+                if line.startswith("sha256="):
+                    want = line.split("=", 1)[1].strip()
+            have = hashlib.sha256(kr.read_bytes()).hexdigest()
+            if want and have == want:
+                r.good(f"aeneas SOURCE.{stamp} sha256 matches {src.rsplit('/', 1)[-1]}")
+            elif want:
+                r.fail(
+                    f"aeneas SOURCE.{stamp} drifted (kernel {have[:12]}… vs stamp {want[:12]}…; re-run {regen})"
+                )
+        else:
+            r.gap(f"aeneas SOURCE.{stamp} missing (run {regen})")
+        tf = root / thy
+        if tf.is_file():
+            tt = tf.read_text(encoding="utf-8")
+            if re.search(r"\bsorry\b", tt):
+                r.fail(f"{thy.rsplit('/', 1)[-1]} contains sorry")
+            elif all(t in tt for t in theorems):
+                r.good(f"{thy.rsplit('/', 1)[-1]} theorems (no sorry)")
+            else:
+                r.fail(f"{thy.rsplit('/', 1)[-1]} missing named theorems")
+        else:
+            r.fail(f"{thy} missing")
     # RFC-0170 P2.3: D1/R1/T1/C1 twins cite close production fns.
     cites = (
         ("crates/pedradb-core/verus/d1_modelo.rs", "prefix_exclusive_end_close_cited"),
@@ -1718,6 +2009,16 @@ def check_extract(
         else:
             r.fail(f"RFC-0170 P2.3: {rel} missing spec fn {name} in ensures")
 
+    extracts_script = root / "scripts/lean_extracts.sh"
+    if charon_required:
+        p = subprocess.run(
+            ["bash", str(extracts_script), "--required"],
+            cwd=root,
+        )
+        if p.returncode != 0:
+            r.fail(f"lean_extracts.sh exit {p.returncode}")
+        else:
+            r.good("lean_extracts.sh (new extracts)")
     if not (want_charon or charon_required):
         return
     script = root / "scripts/aeneas_vote.sh"

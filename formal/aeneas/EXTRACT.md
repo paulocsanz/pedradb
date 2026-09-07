@@ -93,6 +93,95 @@
   - `write_admit_mem_over_stalls` (armed mem over → `StallMem`)
   - `write_admit_as_is_dente` (mem over still `Ok`)
 
+## Close-kernel sweep (2026-09-06)
+
+Every unique close-kernel path was either enrolled (`SOURCE.<stamp>` sha256 of
+the production file + Lean theorems without `sorry`) or named below with a
+measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
+`daa85d7` / Lean 4.31.0. Production files were not rewritten to please Charon.
+`db.rs` is not extracted (`glue.db_rs_extracted=false`).
+
+### Enrolled (23)
+
+`[lib] path` = production file. Stamp pins the whole file. Theorems live in
+`formal/aeneas/lean/<Name>.lean` (not the generated `*Kernel.lean`).
+
+| stamp | production | theorem (no `sorry`) |
+|---|---|---|
+| `lookup` | `lookup_kernel.rs` | `snap_is_empty_zero` / `_as_is_dente` |
+| `rpc_mode` | `rpc_mode_kernel.rs` | `allow_direct_rpc_pin_refuses` / `_as_is_dente` |
+| `store_compact` | store `compact_kernel.rs` | `may_compact_through_zero_false` |
+| `snapshot` | `snapshot_kernel.rs` | `snapshot_touches_user_key_unreserved` |
+| `si` | `si_kernel.rs` | `si_reader_beats_c_live` |
+| `index_val` | `index_val_kernel.rs` | `value_len_tag_identity` / `_as_is_dente` |
+| `changelog` | `changelog_kernel.rs` | `changelog_should_store_due` |
+| `cursor` | `cursor_kernel.rs` | `next_seq_from_zero` |
+| `cl` | `cl_kernel.rs` | `keep_body_without_cl_true` / `_as_is_dente` |
+| `children` | `children_kernel.rs` | `packed_child_end_byte` (`0x01`) / `_as_is_dente` (`0xff`) |
+| `pin` | `pin_kernel.rs` | `may_advance_pin_forward` |
+| `pack` | `pack_kernel.rs` | `pack_cut_tag_identity` / `_as_is_dente` |
+| `ship` | `ship_kernel.rs` | `stamp_changed_is_def` (slice extract; `have _ := @stamp_changed`) |
+| `fold` | `fold_kernel.rs` | `fold_event_hides_key_is_def` (slice extract) |
+| `manifest` | `manifest_kernel.rs` | `sst_recover_absent_scans` |
+| `compact` | core `compact_kernel.rs` | `compact_pick_empty_noop` |
+| `vlog_gc` | `vlog_gc_kernel.rs` | `vlog_recover_blob_opens` |
+| `tx_glue` | `tx_glue_kernel.rs` | `tx_range_keep_committed` |
+| `l28` | `l28.rs` | `l28_durability_all_ok` |
+| `tcg` | `tcg.rs` | `tcg_guest_admitted_true` |
+| `cqe` | `cqe_kernel.rs` | `cqe_res_ok_nonneg` |
+| `iter` | `iter_kernel.rs` | `iter_window_keep_live` / `_as_is_dente` |
+| `properties` | `properties_kernel.rs` | `d1_holds_loop_body_is_def` (loop extract) |
+
+Partial `.lean` from a failed Aeneas run is not enrolled.
+
+### Refused — Aeneas/Charon or Lean typecheck of the generated Kernel
+
+Measured on the pin. Aeneas still emitted a **partial** `.lean` for several of
+these; that is not an extract.
+
+| production | measured failure |
+|---|---|
+| `pedradb-raft/src/membership_kernel.rs` | `[Error] There should be no bottoms in the value` on `elect_claim_banner` / `_as_is` (raft lines 451–463). Partial file, 2 errors. |
+| `pedradb-store/src/membership_kernel.rs` | Same bottoms on `elect_claim_banner` / `_as_is` (store lines 445–457). Partial file, 2 errors. |
+| `pedradb-http/src/auth_kernel.rs` | `CFailure` `Unimplemented` translating a method sig; source `core/src/str/pattern.rs:99`. |
+| `pedradb-http/src/fail_closed.rs` | Same `str/pattern.rs:99` `Unimplemented` on method sig. |
+| `pedradb-http/src/form_kernel.rs` | Same `str/pattern.rs:99` `Unimplemented` on method sig. |
+| `pedradb-http/src/path_kernel.rs` | Same `str/pattern.rs:99` `Unimplemented` on method sig. |
+| `montanha-fdb-recipes/src/fields_kernel.rs` | `Nested borrows are not supported yet` in `encode_fields`; plus `Unimplemented`. Partial file, 3 unique errors. Iterator `map`/`collect`/`position` missing from the Lean model. |
+| `pedradb-core/src/cf_kernel.rs` | Bottoms on `compact_family_key`, `cf_encode_effective`, `decode_cf_key`. Partial file, 3 errors. |
+| `pedradb-core/src/leveling.rs` | `[Error] Can't end abstraction 11 as it is set as non-endable`; Iterator `map`/`filter`/`collect`/`all`/`max`/`min`/`sum` missing. Partial file, 5 errors (3 unique). |
+| `pedradb-core/src/lsm_r1_kernel.rs` | `Returns inside of nested loops are not supported yet` (`lsm_compact` / `_as_is`); `Unreachable` in `lsm_reopen_as_is`; `Could not match the contexts` in `lsm_flush`. Partial file, 10 errors (5 unique). |
+| `pedradb-dcs/src/lease_kernel.rs` | Aeneas emits Lean, but `lake build LeaseKernel` fails: `core.cmp.Ord.max.default core.cmp.OrdU64` type mismatch (`Ord U64` vs `U64 → U64 → Result Bool`) in `next_lease_id_after`. Pin's Ord.max. Not rewritten. |
+| `pedradb-store/src/txn_kernel.rs` | Same `Ord.max.default` type mismatch (`TxnKernel.lean:143` and `:301`). |
+| `pedradb-capi/src/handles.rs` | Aeneas emits Lean with `sorry`; `lake build CapiHandlesKernel` fails on `IterMut` / `FnOnce.call_once` / `Enumerate` (iterator surface, same class as probe-order). |
+
+### Refused — include-crate does not compile standalone (15)
+
+The extract crate is `[lib] path = production file` with no parent crate.
+These files `use crate::…` or an external crate the probe did not link. Not a
+Charon crash. Not rewritten.
+
+| production | measured rustc error |
+|---|---|
+| `pedradb-dcs/src/apply_kernel.rs` | `DcsError` / `Result` live in the parent crate |
+| `pedradb-core/src/sst/scan_kernel.rs` | `crate::wal::crc::crc_match_ok` — no `wal` in the extract root |
+| `pedradb-world/src/world_kernel.rs` | `use crate::TrajectorySample` (file is dirty-tree only; not in git HEAD) |
+| `pedradb-posix/src/lib.rs` | unresolved crate `pedradb_telemetry` |
+| `pedradb-core/src/wal/crc.rs` | `crc32c::crc32c_append` — `crc32c` not a crate in the extract |
+| `pedradb-core/src/merge.rs` | unresolved crate `pedradb_telemetry` |
+| `pedradb-core/src/key.rs` | `crate::error` missing from the extract root |
+| `pedradb-core/src/batch.rs` | `crate::key::{SequenceNumber, ValueType}` |
+| `rocksdb-compat/src/locktab.rs` | unresolved crate `parking_lot` |
+| `pedradb-core/src/env_crash_kernel.rs` | `crate::group_commit_kernel::fsync_promotes_pending` |
+| `pedradb-core/src/wal/wal_state_kernel.rs` | `crate::env_crash_kernel` |
+| `pedradb-core/src/d1_modelo_kernel.rs` | `crate::env_crash_kernel` |
+| `pedradb-core/src/write_ack_kernel.rs` | `crate::wal::wal_state_kernel` |
+| `pedradb-store/src/t1_modelo_kernel.rs` | `crate::txn_kernel` |
+| `pedradb-raft/src/c1_modelo_kernel.rs` | `joint_election_ok` / `propose_ack_ok` from `membership_kernel` |
+
+Probe-order iterator/closure refuse is unchanged (see above). Do not re-pin:
+upstream `aeneas@f9a8e33` did not widen this set.
+
 ## What we may say
 
 > Lean accepted those named theorems of the Aeneas extracts of the production Rust files. Persist/disk remain axioms. F83 sibling is now Lean-∀ (`as_is_leaks_sibling`), not only Stateright. Bloom T4 and the T1 bit-core (`set_bit_test_bit_same`) are Lean-∀ of the extract; insert-loop then query-loop is not.
@@ -114,4 +203,5 @@ Never: “Lean proved Raft / fold / the Bloom filter.”
 ./scripts/lean_bloom.sh --required
 ./scripts/lean_prefix.sh --required
 ./scripts/lean_write_admission.sh --required
+./scripts/lean_extracts.sh --required
 ```

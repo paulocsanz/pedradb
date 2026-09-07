@@ -82,3 +82,141 @@ name = "FlushKernel"
 
 [[lean_lib]]
 name = "Flush"
+
+[[lean_lib]]
+name = "LookupKernel"
+
+[[lean_lib]]
+name = "Lookup"
+
+[[lean_lib]]
+name = "RpcModeKernel"
+
+[[lean_lib]]
+name = "RpcMode"
+
+[[lean_lib]]
+name = "StoreCompactKernel"
+
+[[lean_lib]]
+name = "StoreCompact"
+
+[[lean_lib]]
+name = "SnapshotKernel"
+
+[[lean_lib]]
+name = "Snapshot"
+
+[[lean_lib]]
+name = "SiKernel"
+
+[[lean_lib]]
+name = "Si"
+
+[[lean_lib]]
+name = "IndexValKernel"
+
+[[lean_lib]]
+name = "IndexVal"
+
+[[lean_lib]]
+name = "ChangelogKernel"
+
+[[lean_lib]]
+name = "Changelog"
+
+[[lean_lib]]
+name = "CursorKernel"
+
+[[lean_lib]]
+name = "Cursor"
+
+[[lean_lib]]
+name = "ClKernel"
+
+[[lean_lib]]
+name = "Cl"
+
+[[lean_lib]]
+name = "ChildrenKernel"
+
+[[lean_lib]]
+name = "Children"
+
+[[lean_lib]]
+name = "PinKernel"
+
+[[lean_lib]]
+name = "Pin"
+
+[[lean_lib]]
+name = "PackKernel"
+
+[[lean_lib]]
+name = "Pack"
+
+[[lean_lib]]
+name = "ShipKernel"
+
+[[lean_lib]]
+name = "Ship"
+
+[[lean_lib]]
+name = "FoldKernel"
+
+[[lean_lib]]
+name = "Fold"
+
+[[lean_lib]]
+name = "ManifestKernel"
+
+[[lean_lib]]
+name = "Manifest"
+
+[[lean_lib]]
+name = "CompactKernel"
+
+[[lean_lib]]
+name = "Compact"
+
+[[lean_lib]]
+name = "VlogGcKernel"
+
+[[lean_lib]]
+name = "VlogGc"
+
+[[lean_lib]]
+name = "TxGlueKernel"
+
+[[lean_lib]]
+name = "TxGlue"
+
+[[lean_lib]]
+name = "L28Kernel"
+
+[[lean_lib]]
+name = "L28"
+
+[[lean_lib]]
+name = "TcgKernel"
+
+[[lean_lib]]
+name = "Tcg"
+
+[[lean_lib]]
+name = "CqeKernel"
+
+[[lean_lib]]
+name = "Cqe"
+
+[[lean_lib]]
+name = "IterKernel"
+
+[[lean_lib]]
+name = "Iter"
+
+[[lean_lib]]
+name = "PropertiesKernel"
+
+[[lean_lib]]
+name = "Properties"

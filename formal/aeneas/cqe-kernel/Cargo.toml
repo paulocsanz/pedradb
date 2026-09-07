@@ -1,0 +1,12 @@
+[workspace]
+
+[package]
+name = "pedra-aeneas-cqe-kernel"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "Standalone crate whose [lib] path is production cqe_kernel.rs"
+
+[lib]
+path = "../../../crates/pedradb-io-uring/src/cqe_kernel.rs"
