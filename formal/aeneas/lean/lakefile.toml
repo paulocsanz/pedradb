@@ -364,3 +364,9 @@ name = "LocktabKernel"
 
 [[lean_lib]]
 name = "Locktab"
+
+[[lean_lib]]
+name = "ScanKernel"
+
+[[lean_lib]]
+name = "Scan"

@@ -27,7 +27,7 @@ LIBS=(
   EnvCrash WalState D1Modelo WriteAck
   DcsApply StoreApply StoreCommit StoreAeAck StoreVote Key
   Lease Txn T1Modelo Membership StoreMembership C1Modelo
-  CapiHandles Batch Merge FailClosed ProbeOrder Locktab
+  CapiHandles Batch Merge FailClosed ProbeOrder Locktab Scan
 )
 
 for lib in "${LIBS[@]}"; do
