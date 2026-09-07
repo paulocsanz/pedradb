@@ -27,4 +27,46 @@ def c_len_admitted_as_is
   (_len : Std.Usize) (_max : Std.Usize) : Result Bool := do
   ok true
 
+/-- [pedra_aeneas_capi_handles_kernel::C_PATH_WALK_BYTES]
+    Source: '../../../crates/pedradb-capi/src/handles.rs', lines 39:0-39:42
+    Visibility: public -/
+@[global_simps, irreducible] def C_PATH_WALK_BYTES : Std.Usize := 4096#usize
+
+/-- [pedra_aeneas_capi_handles_kernel::c_path_walk_bytes]:
+    Source: '../../../crates/pedradb-capi/src/handles.rs', lines 44:0-46:1
+    Visibility: public -/
+def c_path_walk_bytes : Result Std.Usize := do
+  ok C_PATH_WALK_BYTES
+
+/-- [pedra_aeneas_capi_handles_kernel::c_path_walk_bytes_as_is]:
+    Source: '../../../crates/pedradb-capi/src/handles.rs', lines 50:0-52:1
+    Visibility: public -/
+def c_path_walk_bytes_as_is : Result Std.Usize := do
+  ok core.num.Usize.MAX
+
+/-- [pedra_aeneas_capi_handles_kernel::c_path_nul_off_admitted]:
+    Source: '../../../crates/pedradb-capi/src/handles.rs', lines 57:0-59:1
+    Visibility: public -/
+def c_path_nul_off_admitted (n : Std.Usize) : Result Bool := do
+  let i ← c_path_walk_bytes
+  ok (n < i)
+
+/-- [pedra_aeneas_capi_handles_kernel::c_path_nul_off_admitted_as_is]:
+    Source: '../../../crates/pedradb-capi/src/handles.rs', lines 63:0-65:1
+    Visibility: public -/
+def c_path_nul_off_admitted_as_is (_n : Std.Usize) : Result Bool := do
+  ok true
+
+/-- [pedra_aeneas_capi_handles_kernel::c_free_table_admitted]:
+    Source: '../../../crates/pedradb-capi/src/handles.rs', lines 71:0-73:1
+    Visibility: public -/
+def c_free_table_admitted : Result Bool := do
+  ok false
+
+/-- [pedra_aeneas_capi_handles_kernel::c_free_table_admitted_as_is]:
+    Source: '../../../crates/pedradb-capi/src/handles.rs', lines 77:0-79:1
+    Visibility: public -/
+def c_free_table_admitted_as_is : Result Bool := do
+  ok true
+
 end pedra_aeneas_capi_handles_kernel

@@ -12,7 +12,33 @@ set_option maxHeartbeats 1000000
 /- You can set the `maxRecDepth` value with the `-max-recdepth` CLI option -/
 set_option maxRecDepth 2048
 
+/- You can remove the following line by using the CLI option `-all-computable`: -/
+noncomputable section
+
 namespace pedra_aeneas_fail_closed_kernel
+
+/-- [core::str::{str}::is_empty]:
+    Source: '/rustc/library/core/src/str/mod.rs', lines 173:4-173:40
+    Name pattern: [core::str::{str}::is_empty]
+    Visibility: public -/
+@[rust_fun "core::str::{str}::is_empty"]
+axiom core.str.Str.is_empty : Str → Result Bool
+
+/-- [core::str::traits::{impl core::cmp::PartialEq<str> for str}::eq]:
+    Source: '/rustc/library/core/src/str/traits.rs', lines 29:4-29:37
+    Name pattern: [core::str::traits::{core::cmp::PartialEq<str, str>}::eq]
+    Visibility: public -/
+@[rust_fun "core::str::traits::{core::cmp::PartialEq<str, str>}::eq"]
+axiom Str.Insts.CoreCmpPartialEqStr.eq : Str → Str → Result Bool
+
+/-- Trait implementation: [core::str::traits::{impl core::cmp::PartialEq<str> for str}]
+    Source: '/rustc/library/core/src/str/traits.rs', lines 27:0-27:28
+    Name pattern: [core::cmp::PartialEq<str, str>] -/
+@[reducible, rust_trait_impl "core::cmp::PartialEq<str, str>"]
+impl_def Str.Insts.CoreCmpPartialEqStr : core.cmp.PartialEq Str Str := {
+  eq := Str.Insts.CoreCmpPartialEqStr.eq
+  ne := core.cmp.PartialEq.ne.trait_default Str.Insts.CoreCmpPartialEqStr
+}
 
 /-- [pedra_aeneas_fail_closed_kernel::parse_error_writes_status]:
     Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 10:0-12:1
@@ -25,5 +51,54 @@ def parse_error_writes_status : Result Bool := do
     Visibility: public -/
 def parse_error_writes_status_as_is : Result Bool := do
   ok false
+
+/-- [pedra_aeneas_fail_closed_kernel::reject_transfer_encoding]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 28:0-30:1
+    Visibility: public -/
+def reject_transfer_encoding : Result Bool := do
+  ok true
+
+/-- [pedra_aeneas_fail_closed_kernel::reject_transfer_encoding_as_is]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 34:0-36:1
+    Visibility: public -/
+def reject_transfer_encoding_as_is : Result Bool := do
+  ok false
+
+/-- [pedra_aeneas_fail_closed_kernel::present_bad_int_is_error]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 40:0-42:1
+    Visibility: public -/
+def present_bad_int_is_error : Result Bool := do
+  ok true
+
+/-- [pedra_aeneas_fail_closed_kernel::present_bad_int_is_error_as_is]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 46:0-48:1
+    Visibility: public -/
+def present_bad_int_is_error_as_is : Result Bool := do
+  ok false
+
+/-- [pedra_aeneas_fail_closed_kernel::host_values_conflict]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 138:0-140:1
+    Visibility: public -/
+def host_values_conflict (a : Str) (b : Str) : Result Bool := do
+  core.cmp.impls.PartialEqShared.ne Str.Insts.CoreCmpPartialEqStr a b
+
+/-- [pedra_aeneas_fail_closed_kernel::host_values_conflict_as_is]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 144:0-146:1
+    Visibility: public -/
+def host_values_conflict_as_is (_a : Str) (_b : Str) : Result Bool := do
+  ok false
+
+/-- [pedra_aeneas_fail_closed_kernel::host_value_ok]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 150:0-152:1
+    Visibility: public -/
+def host_value_ok (value : Str) : Result Bool := do
+  let b ← core.str.Str.is_empty value
+  ok (¬ b)
+
+/-- [pedra_aeneas_fail_closed_kernel::host_value_ok_as_is]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 156:0-158:1
+    Visibility: public -/
+def host_value_ok_as_is (_value : Str) : Result Bool := do
+  ok true
 
 end pedra_aeneas_fail_closed_kernel

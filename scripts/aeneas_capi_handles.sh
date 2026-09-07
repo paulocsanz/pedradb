@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Extract production capi handles.rs catalog entries (c_len_admitted).
-# Charon --start-from: rest of handles.rs is IterMut (whole-file sorry).
+# Extract production capi handles.rs catalog entries (c_len_admitted)
+# plus RFC-0075 path-walk / free-table gates (same --start-from; rest of
+# handles.rs is IterMut).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CRATE="$ROOT/formal/aeneas/capi-handles-kernel"
@@ -22,6 +23,12 @@ echo "      charon=$CHARON"
 ( cd "$CRATE" && "$CHARON" cargo --preset=aeneas \
     --start-from 'crate::c_len_admitted' \
     --start-from 'crate::c_len_admitted_as_is' \
+    --start-from 'crate::c_path_walk_bytes' \
+    --start-from 'crate::c_path_walk_bytes_as_is' \
+    --start-from 'crate::c_path_nul_off_admitted' \
+    --start-from 'crate::c_path_nul_off_admitted_as_is' \
+    --start-from 'crate::c_free_table_admitted' \
+    --start-from 'crate::c_free_table_admitted_as_is' \
     --dest-file "$OUT/capi_handles_kernel.llbc" )
 "$AENEAS" -backend lean -dest "$OUT/lean" "$OUT/capi_handles_kernel.llbc"
 {

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Extract production fail_closed.rs catalog entries (parse_error_writes_status).
-# Charon --start-from: rest of the file uses eq_ignore_ascii_case (str/pattern).
+# Extract production fail_closed.rs catalog entries (parse_error_writes_status)
+# plus Iterator-free F104/F105/F157/F158 gates. Expect/TE-header walks that
+# use eq_ignore_ascii_case stay out (str/pattern).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CRATE="$ROOT/formal/aeneas/fail-closed-kernel"
@@ -22,6 +23,14 @@ echo "      charon=$CHARON"
 ( cd "$CRATE" && "$CHARON" cargo --preset=aeneas \
     --start-from 'crate::parse_error_writes_status' \
     --start-from 'crate::parse_error_writes_status_as_is' \
+    --start-from 'crate::reject_transfer_encoding' \
+    --start-from 'crate::reject_transfer_encoding_as_is' \
+    --start-from 'crate::present_bad_int_is_error' \
+    --start-from 'crate::present_bad_int_is_error_as_is' \
+    --start-from 'crate::host_values_conflict' \
+    --start-from 'crate::host_values_conflict_as_is' \
+    --start-from 'crate::host_value_ok' \
+    --start-from 'crate::host_value_ok_as_is' \
     --dest-file "$OUT/fail_closed_kernel.llbc" )
 "$AENEAS" -backend lean -dest "$OUT/lean" "$OUT/fail_closed_kernel.llbc"
 {
