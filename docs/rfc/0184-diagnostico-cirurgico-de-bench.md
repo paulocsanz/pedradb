@@ -65,6 +65,10 @@ a linha quando há phasesΔ. Sem harness novo.
       que 1-op RFC-0180 P0.25). Compact host não barganha o write lock
       entre batches apply/bypass. Pin dropa no Ok.
       — status: `done`
+- [x] **P0.7** `apply_batch_with` / TX async Ok stage/park, não
+      `flush_cf` (espelho P0.14/P0.5). G1 continua a poder escrever L0.
+      Teste `rfc0184_async_apply_batch_does_not_write_l0_when_over_limit`.
+      — status: `done`
 
 ### P1 — Linux
 
@@ -86,6 +90,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P0.4 | p0 | get_path + probes + balance_admits | done | `BALANCE_SHAPES`; DIAG board recusa | 2026-09-07 |
 | P0.5 | p0 | async ops/CF park O(1) | done | default-over park whole mem; not global-over (0159 P1.3) | 2026-09-07 |
 | P0.6 | p0 | ops pin inflight | done | same as 1-op P0.25; drop on Ok | 2026-09-07 |
+| P0.7 | p0 | apply_batch/TX async park | done | flush_after_commit_opts; no L0 on no_sync | 2026-09-07 |
 | P1.1 | p1 | overwrite_mc4 caixa + diagnose | todo | 0178 P1.3 | 2026-09-07 |
 | P1.2 | p1 | compare JSON lever | done | benches[].diagnose.lever; compare ratios | 2026-09-07 |
 | P2.1 | p2 | none yet | todo | — | 2026-09-07 |
@@ -99,6 +104,7 @@ a linha quando há phasesΔ. Sem harness novo.
   `rfc0182_darwin_board_refuses_single_diag_cut`;
   `rfc0184_async_ops_does_not_write_l0_when_over_limit`
   (L0=0 **e** `commit_inflight=0` após Ok);
+  `rfc0184_async_apply_batch_does_not_write_l0_when_over_limit`;
   `rfc0184_diagnosis_json_has_lever`;
   `extract_diagnose_lever_from_bench_object`.
 - **Telemetry / Analytics:** uma linha `diagnose dominant=… lever=…`;
