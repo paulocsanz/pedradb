@@ -49,35 +49,74 @@ thread_local! {
 
 /// RFC-0180: one reply slot per client thread. overwrite_mc4 used to
 /// `sync_channel(1)` on every follower op (~½ of 4-client puts).
+/// RFC-0181: `Steal` wakes leftover waiters when the leader resigns
+/// with pending still queued — they become the next leader instead of
+/// `recv()` forever (drain-in-lead was 0.87×).
+enum FollowerSlot {
+    Empty,
+    Steal,
+    Done(Result<SequenceNumber>),
+}
+
+#[derive(Debug)]
+enum RecvOrSteal {
+    Done(Result<SequenceNumber>),
+    Steal,
+}
+
 struct FollowerReply {
-    state: Mutex<Option<Result<SequenceNumber>>>,
+    state: Mutex<FollowerSlot>,
     cv: Condvar,
 }
 
 impl FollowerReply {
     fn new() -> Self {
         Self {
-            state: Mutex::new(None),
+            state: Mutex::new(FollowerSlot::Empty),
             cv: Condvar::new(),
         }
     }
 
     fn reset(&self) {
-        *self.state.lock() = None;
+        *self.state.lock() = FollowerSlot::Empty;
     }
 
     fn complete(&self, result: Result<SequenceNumber>) {
         let mut g = self.state.lock();
-        *g = Some(result);
+        *g = FollowerSlot::Done(result);
         self.cv.notify_one();
     }
 
-    fn recv(&self) -> Result<SequenceNumber> {
+    fn wake_steal(&self) {
         let mut g = self.state.lock();
-        while g.is_none() {
-            self.cv.wait(&mut g);
+        if matches!(*g, FollowerSlot::Empty) {
+            *g = FollowerSlot::Steal;
         }
-        g.take().expect("follower reply filled")
+        self.cv.notify_all();
+    }
+
+    #[cfg(test)]
+    fn recv(&self) -> Result<SequenceNumber> {
+        match self.recv_or_steal() {
+            RecvOrSteal::Done(r) => r,
+            RecvOrSteal::Steal => Err(CoreError::Internal(
+                "follower slot stole without leader path".into(),
+            )),
+        }
+    }
+
+    fn recv_or_steal(&self) -> RecvOrSteal {
+        let mut g = self.state.lock();
+        loop {
+            match std::mem::replace(&mut *g, FollowerSlot::Empty) {
+                FollowerSlot::Done(r) => return RecvOrSteal::Done(r),
+                FollowerSlot::Steal => return RecvOrSteal::Steal,
+                FollowerSlot::Empty => {
+                    *g = FollowerSlot::Empty;
+                    self.cv.wait(&mut g);
+                }
+            }
+        }
     }
 }
 
@@ -227,6 +266,10 @@ fn async_merge_admitted(mode: AsyncGroupMode, verified: bool, active: usize) -> 
     if verified {
         return false;
     }
+    #[cfg(test)]
+    if force_group() {
+        return true;
+    }
     match mode {
         AsyncGroupMode::Off => false,
         AsyncGroupMode::On => true,
@@ -344,12 +387,67 @@ fn lead_one_group_then_resign() -> bool {
     true
 }
 
-/// RFC-0180 P0.36: drain-in-lead was p48 avg_group 2.51→1.95 (WAL-late
-/// members became a second 1-op group every time). Leftover is the next
-/// leader's first take. Last-op hang is a canary (`rfc0180_leftover_*`).
+/// RFC-0180 P0.36: drain-in-lead was p48 avg_group 2.51→1.95.
+/// RFC-0181: leftover waiters steal leadership on resign instead.
 #[must_use]
 fn lead_drain_leftover_once() -> bool {
     false
+}
+
+#[must_use]
+fn lead_steal_on_resign() -> bool {
+    #[cfg(test)]
+    if steal_off() {
+        return false;
+    }
+    true
+}
+
+#[cfg(test)]
+static STEAL_OFF: AtomicBool = AtomicBool::new(false);
+#[cfg(test)]
+static WAL_GAP_MS: AtomicU64 = AtomicU64::new(0);
+/// Process-wide: skip the 1c lone/bypass path so the leftover hang is
+/// the group `recv()`, not a scheduling race on `active==1`.
+#[cfg(test)]
+static FORCE_GROUP: AtomicBool = AtomicBool::new(false);
+
+#[cfg(test)]
+fn steal_off() -> bool {
+    STEAL_OFF.load(Ordering::Relaxed)
+}
+
+#[cfg(test)]
+fn set_steal_off(off: bool) {
+    STEAL_OFF.store(off, Ordering::Relaxed);
+}
+
+#[cfg(test)]
+fn set_test_wal_gap_ms(ms: u64) {
+    WAL_GAP_MS.store(ms, Ordering::Relaxed);
+}
+
+#[cfg(test)]
+fn test_wal_gap_ms() -> u64 {
+    WAL_GAP_MS.load(Ordering::Relaxed)
+}
+
+#[cfg(test)]
+fn force_group() -> bool {
+    FORCE_GROUP.load(Ordering::Relaxed)
+}
+
+#[cfg(test)]
+fn set_force_group(on: bool) {
+    FORCE_GROUP.store(on, Ordering::Relaxed);
+}
+
+#[cfg(test)]
+fn maybe_test_wal_gap() {
+    let gap = test_wal_gap_ms();
+    if gap > 0 {
+        std::thread::sleep(Duration::from_millis(gap));
+    }
 }
 
 fn async_all_one_op_fast_path(any_sync: bool, batch: &[PendingWrite]) -> bool {
@@ -535,6 +633,10 @@ impl WriteGroup {
     }
 
     fn recently_concurrent(&self) -> bool {
+        #[cfg(test)]
+        if force_group() {
+            return true;
+        }
         let last = self.last_multi_ns.load(Ordering::Relaxed);
         if last == 0 {
             return false;
@@ -883,21 +985,7 @@ impl WriteGroup {
             // on the leader's reply (lock-free).
             #[cfg(feature = "pct")]
             crate::pct_hooks::maybe_yield("follower_wait");
-            // RFC-0051 P1.1: the recv is a real blocking wait — under PCT it
-            // runs as a blocking section (CPU token released, out of the
-            // enabled set until the reply lands).
-            let recv_reply = || slot.recv();
-            #[cfg(feature = "pct")]
-            {
-                crate::pct_hooks::blocking_section("follower_reply", recv_reply)
-            }
-            #[cfg(not(feature = "pct"))]
-            {
-                let t_recv = Instant::now();
-                let r = recv_reply();
-                stall_note("follower_recv", t_recv);
-                r
-            }
+            self.follower_recv_or_steal(db, &slot)
         } else {
             // F197: a leader panic unwinds through `lead` without clearing
             // `leader_active`, so every future writer queues behind a dead
@@ -921,6 +1009,93 @@ impl WriteGroup {
     fn mark_complete(&self) {
         self.last_complete_ns
             .store(Self::now_ns(), Ordering::Relaxed);
+    }
+
+    /// RFC-0181: leftover waiters become leader instead of `recv()` forever.
+    fn follower_recv_or_steal<E: Env>(
+        &self,
+        db: &RwLock<Db<E>>,
+        slot: &Arc<FollowerReply>,
+    ) -> Result<SequenceNumber> {
+        loop {
+            let wait = || slot.recv_or_steal();
+            let outcome = {
+                #[cfg(feature = "pct")]
+                {
+                    crate::pct_hooks::blocking_section("follower_reply", wait)
+                }
+                #[cfg(not(feature = "pct"))]
+                {
+                    let t_recv = Instant::now();
+                    let o = wait();
+                    stall_note("follower_recv", t_recv);
+                    o
+                }
+            };
+            match outcome {
+                RecvOrSteal::Done(r) => return r,
+                RecvOrSteal::Steal => {
+                    if self.try_steal_lead(slot) {
+                        let mut panic_guard = LeadPanicGuard {
+                            group: self,
+                            db,
+                            armed: true,
+                        };
+                        let r = self.lead(db);
+                        panic_guard.armed = false;
+                        return r;
+                    }
+                }
+            }
+        }
+    }
+
+    fn try_steal_lead(&self, slot: &Arc<FollowerReply>) -> bool {
+        let mut g = self.queue.lock();
+        if g.leader_active {
+            return false;
+        }
+        let mut ours = false;
+        for p in &mut g.pending {
+            if p.reply.as_ref().is_some_and(|s| Arc::ptr_eq(s, slot)) {
+                p.reply = None;
+                ours = true;
+                break;
+            }
+        }
+        if !ours {
+            return false;
+        }
+        g.leader_active = true;
+        true
+    }
+
+    fn resign(&self) {
+        let mut g = self.queue.lock();
+        g.leader_active = false;
+        if lead_steal_on_resign() {
+            for p in &g.pending {
+                if let Some(slot) = &p.reply {
+                    slot.wake_steal();
+                }
+            }
+        }
+    }
+
+    /// Unstick leftover `recv()` waiters after the P0.2 hang assertion.
+    #[cfg(test)]
+    fn test_abort_pending(&self) {
+        let mut g = self.queue.lock();
+        g.leader_active = false;
+        let dead = Self::take_pending(&mut g, &self.queued_pending);
+        drop(g);
+        for mut p in dead {
+            if let Some(slot) = p.reply.take() {
+                slot.complete(Err(CoreError::Internal(
+                    "rfc0181 test abort leftover waiter".into(),
+                )));
+            }
+        }
     }
 
     fn push_pending(g: &mut WriteGroupState, counter: &AtomicUsize, w: PendingWrite) {
@@ -1058,12 +1233,14 @@ impl WriteGroup {
                 let result = guard.commit_async_one(op);
                 stall_note("commit_async_one", t_one);
                 drop(guard);
+                #[cfg(test)]
+                maybe_test_wal_gap();
                 self.batches.fetch_add(1, Ordering::Relaxed);
                 self.batch_ops.fetch_add(1, Ordering::Relaxed);
                 prev_group_members = 1;
                 let result = pending.occ_err.take().map(Err).unwrap_or(result);
                 Self::deliver_member(pending.reply.take(), result, &mut leader_result);
-                self.queue.lock().leader_active = false;
+                self.resign();
                 return leader_result.unwrap_or_else(|| {
                     Err(CoreError::Internal(
                         "write group leader had no member result".into(),
@@ -1121,7 +1298,7 @@ impl WriteGroup {
                 let result = pending.occ_err.take().map(Err).unwrap_or(result);
                 Self::deliver_member(pending.reply.take(), result, &mut leader_result);
             }
-            self.queue.lock().leader_active = false;
+            self.resign();
             return leader_result.unwrap_or_else(|| {
                 Err(CoreError::Internal(
                     "write group leader had no member result".into(),
@@ -1330,6 +1507,8 @@ impl WriteGroup {
         }
         let wal = guard.wal_arc();
         drop(guard);
+        #[cfg(test)]
+        maybe_test_wal_gap();
         let io_err = {
             let mut w = wal.lock();
             // G1: write + fdatasync before Ok. Async: write() per group,
@@ -6675,6 +6854,7 @@ mod tests {
         assert!(!async_all_one_op_fast_path(false, &[]));
         assert!(lead_one_group_then_resign());
         assert!(!lead_drain_leftover_once());
+        assert!(lead_steal_on_resign());
         // RFC-0180 P0.26: first debt look never queues on the write lock.
         assert!(flush_debt_skip_if_write_lock_held(false, true));
         assert!(!flush_debt_skip_if_write_lock_held(true, true));
@@ -6747,6 +6927,98 @@ mod tests {
             for k in 0..32u8 {
                 assert_eq!(db.get(&[i, k]).as_deref(), Some(b"v".as_ref()));
             }
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    static RFC0181_GATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct Rfc0181Hooks;
+    impl Drop for Rfc0181Hooks {
+        fn drop(&mut self) {
+            set_steal_off(false);
+            set_test_wal_gap_ms(0);
+            set_force_group(false);
+        }
+    }
+
+    fn rfc0181_begin(
+        steal_off: bool,
+        gap_ms: u64,
+    ) -> (std::sync::MutexGuard<'static, ()>, Rfc0181Hooks) {
+        let g = RFC0181_GATE.lock().unwrap_or_else(|e| e.into_inner());
+        set_steal_off(steal_off);
+        set_test_wal_gap_ms(gap_ms);
+        set_force_group(true);
+        (g, Rfc0181Hooks)
+    }
+
+    /// 3 writers put at the barrier; the 4th sleeps then puts so it lands
+    /// in `pending` during the test WAL gap (after `drop(guard)`).
+    fn rfc0181_late_fourth(db: &ConcurrentDb, late_ms: u64, must_ok: bool) {
+        let barrier = std::sync::Barrier::new(4);
+        std::thread::scope(|s| {
+            for i in 0..4u8 {
+                let db = db;
+                let barrier = &barrier;
+                s.spawn(move || {
+                    barrier.wait();
+                    if i == 3 {
+                        std::thread::sleep(Duration::from_millis(late_ms));
+                    }
+                    let r = db.put([i], b"v");
+                    if must_ok {
+                        r.unwrap();
+                    }
+                });
+            }
+        });
+    }
+
+    #[test]
+    fn rfc0181_slot_steal_does_not_clobber_done() {
+        let slot = FollowerReply::new();
+        slot.wake_steal();
+        assert!(matches!(slot.recv_or_steal(), RecvOrSteal::Steal));
+        slot.complete(Ok(1));
+        slot.wake_steal();
+        match slot.recv_or_steal() {
+            RecvOrSteal::Done(Ok(1)) => {}
+            other => panic!("Done must win over Steal: {other:?}"),
+        }
+    }
+
+    /// RFC-0181 P0.2: WAL-late follower without steal does not finish.
+    #[test]
+    fn rfc0181_without_steal_late_follower_times_out() {
+        let (_gate, _hooks) = rfc0181_begin(true, 80);
+        let dir = temp_dir();
+        let db = ConcurrentDb::open(&dir).unwrap();
+        let live = db.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            rfc0181_late_fourth(&db, 25, false);
+            let _ = tx.send(());
+        });
+        let timed_out = rx.recv_timeout(Duration::from_millis(800)).is_err();
+        live.writes.test_abort_pending();
+        let _ = rx.recv_timeout(Duration::from_millis(400));
+        let _ = fs::remove_dir_all(&dir);
+        assert!(
+            timed_out,
+            "without steal, WAL-late follower must hang (P0.2)"
+        );
+    }
+
+    /// RFC-0181 P0.3: steal unblocks the WAL-late follower.
+    #[test]
+    fn rfc0181_steal_unblocks_late_follower() {
+        let (_gate, _hooks) = rfc0181_begin(false, 80);
+        let dir = temp_dir();
+        let db = ConcurrentDb::open(&dir).unwrap();
+        rfc0181_late_fourth(&db, 25, true);
+        for i in 0..4u8 {
+            assert_eq!(db.get(&[i]).as_deref(), Some(b"v".as_ref()));
         }
         let _ = fs::remove_dir_all(&dir);
     }

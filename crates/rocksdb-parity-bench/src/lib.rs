@@ -756,6 +756,7 @@ impl YcsbRunner {
         if want("deps_cache_overwrite") {
             let mut lats = Vec::with_capacity(cfg_ops);
             let (mut writes, mut errors) = (0u64, 0u64);
+            let phase0 = e.write_phase_snapshot();
             let t0 = Instant::now();
             for _ in 0..cfg_ops {
                 let t = Instant::now();
@@ -774,6 +775,19 @@ impl YcsbRunner {
                 &mut lats,
             ));
             eprintln!("[rocks-parity] deps_cache_overwrite done writes={writes} errors={errors}");
+            if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+                let n = b[0].saturating_sub(a[0]).max(1);
+                let us = |d: u64| d as f64 / n as f64 / 1000.0;
+                eprintln!(
+                    "[rocks-parity] deps_cache_overwrite phasesΔ (per commit) prepare={:.2}µs wal={:.2}µs mem={:.2}µs publish={:.2}µs flsh={:.2}µs lock_wait={:.2}µs n={n}",
+                    us(b[1].saturating_sub(a[1])),
+                    us(b[2].saturating_sub(a[2])),
+                    us(b[3].saturating_sub(a[3])),
+                    us(b[4].saturating_sub(a[4])),
+                    us(b[5].saturating_sub(a[5])),
+                    us(b[6].saturating_sub(a[6])),
+                );
+            }
         }
 
         // 6. RFC-0043: TiKV prewrite-only ready (lock+default WriteBatch, no
@@ -2466,6 +2480,7 @@ impl YcsbRunner {
         // deps_apply_batch_mcN
         {
             let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+            let phase0 = e.write_phase_snapshot();
             let t0 = Instant::now();
             let mut lats = Vec::with_capacity(cfg_ops * clients);
             let mut errors = 0u64;
@@ -2546,6 +2561,19 @@ impl YcsbRunner {
                 };
                 eprintln!(
                     "[rocks-parity] write_group submits={sub} queued={queued} groups={groups} ops={gops} avg_group={avg:.2}"
+                );
+            }
+            if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+                let n = b[0].saturating_sub(a[0]).max(1);
+                let us = |d: u64| d as f64 / n as f64 / 1000.0;
+                eprintln!(
+                    "[rocks-parity] deps_apply_batch_mc{clients} phasesΔ (per commit) prepare={:.2}µs wal={:.2}µs mem={:.2}µs publish={:.2}µs flsh={:.2}µs lock_wait={:.2}µs n={n}",
+                    us(b[1].saturating_sub(a[1])),
+                    us(b[2].saturating_sub(a[2])),
+                    us(b[3].saturating_sub(a[3])),
+                    us(b[4].saturating_sub(a[4])),
+                    us(b[5].saturating_sub(a[5])),
+                    us(b[6].saturating_sub(a[6])),
                 );
             }
         }

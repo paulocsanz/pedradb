@@ -246,3 +246,49 @@ feature needs a C++ toolchain and libclang; Fjall and Pedra are pure
 Rust. YCSB / dependents: `rocks-parity-bench` with `compat` (Pedra),
 `rocksdb` (`--features real`), or `fjall` (`--features fjall`,
 YCSB-only).
+
+## RFC-0182 — same-boot write path (existing bins only)
+
+After a write-path change, one Darwin boot, **no** new harness. Peer is
+RocksDB default (`ROCKS_PARITY_SYNC=0`). Fjall is a third peer:
+absolute QPS only, never a win. Quiet-host floor for overwrite_mc4:
+Rocks ≳260 kQPS; a collapsed Rocks QPS is not a Pedra win. 3/3 quiet
+≥1.0× is P1.1, not this recipe. Do not WARM 100M. Do not bake 4 GiB.
+
+```sh
+# Isolated DIAG knobs (same as RFC-0180 overwrite_mc4).
+export ROCKS_PARITY_SYNC=0 ROCKS_PARITY_BIG=0 ROCKS_PARITY_MC_FRESH=1
+export ROCKS_PARITY_CLIENTS=4 ROCKS_YCSB_OPS=100000
+OUT=findings/rfc0182-same-boot-$(date +%s)
+mkdir -p "$OUT"
+
+# Pedra + Rocks: overwrite_mc4, ycsb_a_mc4, ycsb_f_mc4, apply_mc4, 1c overwrite.
+ONLY=deps_cache_overwrite_mc4,ycsb_a_mc4,ycsb_f_mc4,deps_apply_batch_mc4,deps_cache_overwrite
+for eng in compat rocksdb; do
+  feat=; [ "$eng" = rocksdb ] && feat="--features real"
+  ROCKS_PARITY_SUITE=ycsb,deps ROCKS_PARITY_ONLY=$ONLY \
+    cargo run -q --release -p rocksdb-parity-bench $feat \
+      --bin rocks-parity-bench -- "$OUT/$eng" "$eng"
+done
+ROCKS_PARITY_PEER="$OUT/rocksdb/rocks_parity_bench.json" \
+  cargo run -q --release -p rocksdb-parity-bench --bin rocks-parity-compare -- \
+    "$OUT/compat/rocks_parity_bench.json" "$OUT/compare"
+# compare must print sync: false (exits 2 otherwise). Named losses stay named.
+
+# Fjall: YCSB-only. deps overwrite is a CF shape — use ycsb_a_mc4 as the
+# write mix. Absolute qps; do not compute compat_over_rocksdb as a win.
+ROCKS_PARITY_SUITE=ycsb ROCKS_PARITY_ONLY=ycsb_a_mc4 \
+  cargo run -q --release -p rocksdb-parity-bench --features fjall \
+    --bin rocks-parity-bench -- "$OUT/fjall" fjall
+
+# snapshot-bench 1M — one backend per process.
+cd crates/snapshot-bench
+for b in pedradb rocksdb fjall; do
+  SLIPSTREAM_BENCH_BACKENDS=$b SLIPSTREAM_BENCH_ENTRIES=1000000 \
+    cargo bench --bench snapshot_backends --features fjall,rocksdb,pedradb \
+      -- 'get_hit|prefix_scan|lookup_100'
+done
+```
+
+Smoke (P0.2 exit-0): `ROCKS_YCSB_OPS=1000` on the parity loop;
+`SLIPSTREAM_BENCH_ENTRIES=1000000` is already the 1M smoke.
