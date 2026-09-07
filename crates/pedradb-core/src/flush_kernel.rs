@@ -157,6 +157,18 @@ pub fn auto_flush_due_as_is(_mem_bytes: u64, _armed: bool, _limit: u64) -> bool 
     false
 }
 
+/// Both mem axes under their limits ⇒ skip auto-flush (no SST write).
+#[must_use]
+pub fn skip_auto_flush(global_under: bool, cf_under: bool) -> bool {
+    global_under && cf_under
+}
+
+/// AS-IS: never skip — would flush even when both axes are under.
+#[must_use]
+pub fn skip_auto_flush_as_is(_global_under: bool, _cf_under: bool) -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -305,5 +317,13 @@ mod tests {
         assert!(!auto_flush_due_as_is(100, true, 50), "AS-IS dente: never fires");
         assert!(!auto_flush_due(10, true, 50));
         assert!(!auto_flush_due(100, false, 50), "unarmed never fires");
+    }
+
+    #[test]
+    fn skip_auto_flush_on_live_both_under_is_not_ok() {
+        assert!(skip_auto_flush(true, true));
+        assert!(!skip_auto_flush_as_is(true, true));
+        assert!(!skip_auto_flush(true, false));
+        assert!(!skip_auto_flush(false, true));
     }
 }

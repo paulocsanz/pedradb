@@ -9925,7 +9925,7 @@ impl<E: Env> Db<E> {
             let cf_under = self.cf_write_buffer.values().all(|&n| {
                 !crate::flush_kernel::auto_flush_due(mem, n != 0, n as u64)
             });
-            if global_under && cf_under {
+            if crate::flush_kernel::skip_auto_flush(global_under, cf_under) {
                 return Ok(());
             }
             let n = self.physical_cfs.len();
@@ -9944,7 +9944,7 @@ impl<E: Env> Db<E> {
                 let fam = self.physical_cfs[i].clone();
                 if self.defer_auto_compact {
                     let taken = self.mem.take_family(&fam);
-                    if !taken.is_empty() {
+                    if !crate::write_admission_kernel::batch_is_empty(taken.len() as u64) {
                         self.push_parked_unflushed(taken);
                     }
                 } else {

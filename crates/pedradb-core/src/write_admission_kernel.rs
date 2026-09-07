@@ -671,6 +671,7 @@ mod tests {
             "wal_sync_group",
             "sync_dir_if_required",
             "ensure_write_admitted_for",
+            "maybe_auto_flush",
         ];
         let rec_fns = ["open_with_env_sourced"];
         let mut bad = Vec::new();
@@ -806,5 +807,7 @@ mod tests {
             || cond.contains("pit_resync_needs_rewrite(")
             || cond.contains("reopen_outcome(")
             || cond.contains("feed_is_lazy(")
+            || cond.contains("skip_auto_flush(")
+            || cond.contains("auto_flush_due(")
     }
 }

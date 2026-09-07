@@ -23,6 +23,9 @@ Trampoline: `env.exists`, `metadata_len`, `open_append`, `set_len`, `sync_dir`,
 
 ## Freeze
 
-`handler_loc` 102903 (strictly below freeze 103312 on HEAD `b9c1859a`).
-`kernel_loc` 15785 (53 enrolled paths; write_admission 98 → 810).
 `ensure_write_admitted_for` data-fate is `write_admit` (drain/flush I/O trampoline).
+`maybe_auto_flush` skip is `flush_kernel::skip_auto_flush` (park/flush I/O trampoline).
+
+Remaining `db.rs` loc is Env / lookup / scan / compact *glue*, not unpaid put-Ok
+predicates. Do not dump the file (`db_rs_extracted=false`). RFC-0172 TV is
+on `write_admission_idle`, not on this trampoline.

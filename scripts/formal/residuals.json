@@ -71,7 +71,7 @@
    "crates/pedradb-raft/src/c1_modelo_kernel.rs"
   ],
   "kernel_files": 53,
-  "kernel_loc": 15785,
+  "kernel_loc": 15805,
   "handler_loc": 102903,
   "db_rs_extracted": false,
   "proof_depth": {
@@ -96,6 +96,9 @@
     "assert_inv",
     "d1_holds_every_cut",
     "snapshot"
+   ],
+   "crates/pedradb-core/src/flush_kernel.rs": [
+    "skip_auto_flush"
    ],
    "crates/pedradb-core/src/lsm_r1_kernel.rs": [
     "empty",
