@@ -9558,10 +9558,9 @@ impl<E: Env> Db<E> {
         }
         match self.commit_ops_with(records, durability) {
             Ok(()) => {
-                // F18: the write is already durable (WAL fsync under sync=true). Auto-flush
-                // is a background space concern — failing it must not surface as "put/commit
-                // failed" or clients will retry and the operator loses the success signal.
-                self.maybe_auto_flush_best_effort();
+                // F18: auto-flush must not fail the caller. Async Ok parks
+                // (RFC-0180 P0.14 / 0184 P0.5); G1 may still write L0.
+                self.flush_after_commit_opts(&durability);
                 Ok(self.last_sequence())
             }
             Err(e) => {
@@ -11164,6 +11163,19 @@ impl<E: Env> Db<E> {
     /// [`Db::flush`] or successful auto-flush can retry.
     pub(crate) fn maybe_auto_flush_best_effort(&mut self) {
         let _ = self.maybe_auto_flush();
+    }
+
+    /// RFC-0184 P0.7: async Ok (`do_sync=false`) stage/park; G1 still
+    /// may write L0. Never fails the caller (F18).
+    pub(crate) fn flush_after_commit_opts(&mut self, durability: &WriteOptions) {
+        let do_sync = crate::write_admission_kernel::wal_sync_required(
+            durability.sync.is_some(),
+            durability.sync.unwrap_or(false),
+            self.sync,
+        );
+        let _ = self.maybe_auto_flush_with(
+            (!do_sync && async_ok_flush_is_stage_only()) || self.defer_auto_compact,
+        );
     }
 
     fn maybe_auto_compact(&mut self) -> Result<()> {
@@ -13465,6 +13477,45 @@ mod tests {
         );
         let k0 = crate::cf_kernel::encode_cf_key("lock", b"0000", false);
         assert!(db.get(&k0).is_some(), "parked/active still readable");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0184 P0.7: `apply_batch_with` / `put` async Ok must park, not L0.
+    #[test]
+    fn rfc0184_async_apply_batch_does_not_write_l0_when_over_limit() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                wal_full_fsync: false,
+                history: Default::default(),
+                wal_recovery: Default::default(),
+                sync: false,
+                auto_flush_bytes: Some(4096),
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+                sst_payload_budget_bytes: None,
+            },
+        )
+        .unwrap();
+        db.bulk_route_enabled = false;
+        for i in 0..80u32 {
+            let k = format!("k{i:04}");
+            db.put_with(k, vec![b'x'; 64], WriteOptions::no_sync())
+                .unwrap();
+        }
+        assert_eq!(
+            db.sst_count(),
+            0,
+            "async apply_batch/put Ok must park/stage, not write L0"
+        );
+        assert!(
+            db.has_imm() || db.parked_unflushed_count() > 0,
+            "over-limit async put must stage/park"
+        );
+        assert!(db.get(b"k0000").is_some(), "parked/active still readable");
         let _ = fs::remove_dir_all(&dir);
     }
 
