@@ -43,7 +43,7 @@ comportamento. "Callers" é o que o lint do freeze exige chamar a entrada.
 | id | kernel | twin | callers (glue lintado) |
 |----|--------|------|------------------------|
 | vote | `pedradb-raft/src/vote_kernel.rs` | close | `pedradb-raft/lib.rs` |
-| ae_entry | `pedradb-raft/src/ae_kernel.rs` | close | `pedradb-raft/lib.rs` |
+| ae_entry | `pedradb-raft/src/ae_kernel.rs` | close, single_artifact | `pedradb-raft/lib.rs` |
 | ae_ack | `pedradb-raft/src/ae_kernel.rs` | close | `pedradb-raft/lib.rs` |
 | commit_raft | `pedradb-raft/src/commit_kernel.rs` | close, single_artifact | `pedradb-raft/lib.rs`, `pedradb-raft/net.rs` |
 | lease | `pedradb-dcs/src/lease_kernel.rs` | close, single_artifact | `pedradb-dcs/command.rs` |

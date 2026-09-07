@@ -286,6 +286,22 @@ def main() -> int:
         print("FAIL manifest_recover twin≠kernel did not fail")
         return 1
     print("ok mutant manifest_recover twin≠kernel named")
+    ae_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in ae_mutant["pairs"]:
+        if pair.get("id") == "ae_entry":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/ae_entry_action.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing ae_entry")
+        return 1
+    hits = [m for m in _sa_fails(ae_mutant) if "ae_entry" in m]
+    if not hits:
+        print("FAIL ae_entry twin≠kernel did not fail")
+        return 1
+    print("ok mutant ae_entry twin≠kernel named")
     # Drive the same rule through check_twins (may also report unrelated
     # dirty-tree twin drift; we only require the SA id).
     try:

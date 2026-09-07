@@ -43,7 +43,7 @@
 
 ## AE (`ae_kernel.rs`, RFC-0053 P2.1)
 
-- Charon + Aeneas → `out/lean/AeKernel.lean` (`SOURCE.ae` sha256).
+- Charon + Aeneas → `out/lean/AeKernel.lean` (`SOURCE.ae` sha256). Pair `ae_entry` is single_artifact: production file is the Verus term.
 - Lean 4.31.0 accepted (no `sorry` in `Ae.lean`):
   - `ae_keep_if_same_term` (∀)
   - `ae_refuse_conflict_at_commit` / `ae_truncate_conflict_after_commit`
