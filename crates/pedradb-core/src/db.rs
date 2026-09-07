@@ -10298,7 +10298,10 @@ impl<E: Env> Db<E> {
                 .fetch_add(t3.elapsed().as_nanos() as u64, Ordering::Relaxed);
         }
         let t4 = st.as_ref().map(|_| Instant::now());
-        self.maybe_auto_flush_best_effort();
+        // Same stage-only contract as `commit_async_one` (RFC-0180 P0.14).
+        // Full `flush_cf` here was apply_mc4 WRITEPHASE flush_check 148µs.
+        let _ =
+            self.maybe_auto_flush_with(async_ok_flush_is_stage_only() || self.defer_auto_compact);
         if let (Some(st), Some(t4)) = (st.as_ref(), t4) {
             st.flush_check_ns
                 .fetch_add(t4.elapsed().as_nanos() as u64, Ordering::Relaxed);
@@ -11068,6 +11071,42 @@ impl<E: Env> Db<E> {
             if global_under && cf_under {
                 return Ok(());
             }
+            // RFC-0184: `take_family("default")` walks every key (apply_mc4
+            // flush_check 148µs/commit). Stage-only + default-over → park
+            // the whole table O(1). Do **not** park on global-over alone —
+            // a data CF buffer above the global cap must keep growing
+            // (RFC-0159 P1.3). Named CFs stay contiguous `take_family`.
+            if stage_only {
+                let default_over = self
+                    .write_buffer_for("default")
+                    .is_some_and(|lim| self.mem.approx_memory_usage_cf("default") >= lim);
+                if default_over {
+                    if !self.stage_flush_imm()? && !self.mem.is_empty() {
+                        let taken = std::mem::replace(&mut self.mem, MemTable::new());
+                        self.push_parked_unflushed(taken);
+                    }
+                    return Ok(());
+                }
+                let n = self.physical_cfs.len();
+                for i in 0..n {
+                    let fam = self.physical_cfs[i].as_str();
+                    if fam == "default" {
+                        continue;
+                    }
+                    let Some(limit) = self.write_buffer_for(fam) else {
+                        continue;
+                    };
+                    if self.mem.approx_memory_usage_cf(fam) < limit {
+                        continue;
+                    }
+                    let fam = self.physical_cfs[i].clone();
+                    let taken = self.mem.take_family(&fam);
+                    if !taken.is_empty() {
+                        self.push_parked_unflushed(taken);
+                    }
+                }
+                return Ok(());
+            }
             let n = self.physical_cfs.len();
             for i in 0..n {
                 let fam = self.physical_cfs[i].as_str();
@@ -11078,14 +11117,7 @@ impl<E: Env> Db<E> {
                     continue;
                 }
                 let fam = self.physical_cfs[i].clone();
-                if stage_only {
-                    let taken = self.mem.take_family(&fam);
-                    if !taken.is_empty() {
-                        self.push_parked_unflushed(taken);
-                    }
-                } else {
-                    self.flush_cf(&fam)?;
-                }
+                self.flush_cf(&fam)?;
             }
             return Ok(());
         }
@@ -13374,6 +13406,55 @@ mod tests {
         db.close().unwrap();
         let re = Db::open(&dir).unwrap();
         assert_eq!(re.get(b"k0000").as_deref(), Some(&[b'x'; 64][..]));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0184: `commit_async_ops` (apply path) must park, not `flush_cf`.
+    /// Bulk latch is off so a 4 KiB chunk cap cannot install an SST on Ok
+    /// (that path is ingest, not the apply flush_check walk).
+    #[test]
+    fn rfc0184_async_ops_does_not_write_l0_when_over_limit() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                wal_full_fsync: false,
+                history: Default::default(),
+                wal_recovery: Default::default(),
+                sync: false,
+                auto_flush_bytes: Some(4096),
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+                sst_payload_budget_bytes: None,
+            },
+        )
+        .unwrap();
+        db.bulk_route_enabled = false;
+        db.set_physical_cfs(vec!["lock".into(), "default".into(), "write".into()]);
+        db.set_cf_write_buffer("lock", 4096);
+        db.set_cf_write_buffer("default", 4096);
+        db.set_cf_write_buffer("write", 4096);
+        for i in 0..80u32 {
+            let mut batch = Vec::with_capacity(3);
+            for fam in ["lock", "default", "write"] {
+                let k = crate::cf_kernel::encode_cf_key(fam, format!("{i:04}").as_bytes(), false);
+                batch.push(BatchOp::put(k, vec![b'x'; 80]));
+            }
+            db.commit_async_ops(batch).unwrap();
+        }
+        assert_eq!(
+            db.sst_count(),
+            0,
+            "async apply Ok must park/stage, not write L0"
+        );
+        assert!(
+            db.has_imm() || db.parked_unflushed_count() > 0,
+            "default-over must stage/park, not stay only in active mem"
+        );
+        let k0 = crate::cf_kernel::encode_cf_key("lock", b"0000", false);
+        assert!(db.get(&k0).is_some(), "parked/active still readable");
         let _ = fs::remove_dir_all(&dir);
     }
 
