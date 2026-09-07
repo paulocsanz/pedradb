@@ -87,6 +87,10 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
       `rfc0178_explicit_compact_rewarm_after_flush` — status: `done`
       (DIAG r3: settle `warm_bytes=24.5 GiB` em 1.74 s; get_loop **2.76 ms**
       cliff **não** fechou. Não era path-skip.)
+- [x] **P0.6** Worker de compact: um job por tick (não `while` no
+      `compact_gate`). DIAG r3: settle 87 s com compact=0.001 +
+      warm=1.74 s — o `while` re-pega o mutex entre jobs. —
+      status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
 
@@ -115,7 +119,8 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
 | P0.2 | p0 | DIAG 100M Darwin WARM (prefix/get_loop flat) | done | prefix 42 µs flat; get_loop 5,50 ms cliff fica; `findings/2026-09-06-rfc0178-p02-100m/` | 2026-09-06 |
 | P0.3 | p0 | Prefix window O(overlap) não O(all SST) | done | `rfc0178_prefix_window_probes_overlapping_ssts_only` | 2026-09-06 |
 | P0.4 | p0 | Isolate mc + WARM por path | done | `ROCKS_PARITY_MC_FRESH`; `rfc0178_compact_new_paths_are_warmed`; scale settle=`compact()` | 2026-09-06 |
-| P0.5 | p0 | compact() re-WARM after gate | done | `clear_warmed_ssts` + worker `try_lock`; `rfc0178_explicit_compact_rewarm_after_flush` | 2026-09-07 |
+| P0.5 | p0 | compact() re-WARM after gate | done | `clear_warmed_ssts` + worker `try_lock`; DIAG r3 get_loop 2.76 ms | 2026-09-07 |
+| P0.6 | p0 | Worker one compact job per tick | done | `compat_compact_once` once per poll, not `while` | 2026-09-07 |
 | P1.1 | p1 | probe_miss ≥1× 3-run caixa | todo | — | 2026-09-06 |
 | P1.2 | p1 | prefix 0,70× → ≥1× caixa | todo | — | 2026-09-06 |
 | P1.3 | p1 | overwrite isolado ≥1× caixa | todo | — | 2026-09-06 |
