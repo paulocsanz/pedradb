@@ -101,7 +101,7 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 `daa85d7` / Lean 4.31.0. Production files were not rewritten to please Charon.
 `db.rs` is not extracted (`glue.db_rs_extracted=false`).
 
-### Enrolled (51)
+### Enrolled (52)
 
 `[lib] path` = production file. Stamp pins the whole file. Theorems live in
 `formal/aeneas/lean/<Name>.lean` (not the generated `*Kernel.lean`).
@@ -158,7 +158,8 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 | `locktab` | `locktab.rs` | `wait_for_deadlock_is_loop` / `_as_is_dente` (`--start-from wait_for_deadlock`; `--exclude LockTable` nested borrows; HashMap/HashSet stay axioms) |
 | `scan` | `sst/scan_kernel.rs` | `sst_crc_fate_modern_mismatch` / `scan_reads_file_none_smallest` / `zero_glue_admitted_false` (shim `#[path]` crc; `--start-from` catalog entries; closure `call_mut` patched to `tombstone_reaches_window`) |
 | `cf` | `cf_kernel.rs` | `key_in_cf_family_as_is_dente` / `cf_encode_effective_is_if` / `infer_sst_cf_none_none` (`--start-from` catalog entries; `cf_encode_effective`/`decode_cf_key` patched over lifetime bottoms) |
-| `fields` | `fields_kernel.rs` | `field_kept_id` / `_as_is_dente` (`--start-from` catalog entries; `encode_fields` nested-borrows sorry patched to an index loop) |
+| `fields` | `fields_kernel.rs` | `field_kept_id` / `_as_is_dente` (`--start-from` catalog entries; `encode_fields` nested-borrows hole patched to an index loop) |
+| `lsm_r1` | `lsm_r1_kernel.rs` | `lsm_reopen_id` / `lsm_compact_depth_zero` (`--start-from` catalog entries; compact nested-loop returns patched to `level_put`/`level_remove` loops; reopen_as_is reverse-stack loop) |
 
 Partial `.lean` from a failed Aeneas run is not enrolled. Charon `--start-from` of the catalog entries is an extract of the live file when Aeneas emits a complete Kernel (no `sorry`) containing a `def` for every catalog `entry` on that path.
 
@@ -173,8 +174,7 @@ these; that is not an extract.
 | `pedradb-http/src/auth_kernel.rs` | `CFailure` `Unimplemented` translating a method sig; source `core/src/str/pattern.rs:99`. `ascii_lower`/`ascii_upper` `--start-from` emit defs via rustc axioms; bearer/scheme/`eq_ignore_ascii_case` do not. Not enrolled. |
 | `pedradb-http/src/form_kernel.rs` | `--start-from form_decode`+`query_u64_conflict` is complete; `--start-from` of all 7 catalog entries `CFailure` `str/pattern.rs:99` (`query_part_is_bare_name` `contains`). Not enrolled (missing query_part / query_values defs). |
 | `pedradb-http/src/path_kernel.rs` | `--start-from strip_authority_for_routing` is complete; `--start-from` of all 8 catalog entries `CFailure` `str/pattern.rs:99` (`rsplit_once` / `eq_ignore_ascii_case`). `--opaque`/`--exclude` of `core::str::{str}` still CFailure or 18-error partial. Not enrolled. |
-| `pedradb-core/src/leveling.rs` | `[Error] Can't end abstraction 11 as it is set as non-endable`; Iterator `map`/`filter`/`collect`/`all`/`max`/`min`/`sum` missing. Partial file, 5 errors (3 unique). |
-| `pedradb-core/src/lsm_r1_kernel.rs` | `--start-from` of all 4 catalog entries: `Returns inside of nested loops` in `lsm_compact` / `_as_is` (plus `inv_lsm` / `level_distinct` callees). Partial file. `lsm_probe` / `r1_modelo` / `lsm_reopen` defs exist; compact does not. Not enrolled. |
+| `pedradb-core/src/leveling.rs` | `[Error] Can't end abstraction 11 as it is set as non-endable`; Iterator `map`/`filter`/`collect`/`all`/`max`/`min`/`sum` missing. Partial file, 5 errors (3 unique). `level_target_bytes_as_is` is `#[cfg(test)]` so Charon does not see it. |
 
 
 ### Refused — include-crate does not compile standalone, or `--start-from` still lake-red
@@ -240,6 +240,7 @@ Never: “Lean proved Raft / fold / the Bloom filter.”
 ./scripts/aeneas_scan.sh --required
 ./scripts/aeneas_cf.sh --required
 ./scripts/aeneas_fields.sh --required
+./scripts/aeneas_lsm_r1.sh --required
 ```
 
 ## Scale (`scale_kernel.rs`, RFC-0176)

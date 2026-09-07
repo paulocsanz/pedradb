@@ -1227,6 +1227,10 @@ AENEAS_EXTRACTS = (
         "crates/montanha-fdb-recipes/src/fields_kernel.rs",
         "formal/aeneas/out/SOURCE.fields",
     ),
+    (
+        "crates/pedradb-core/src/lsm_r1_kernel.rs",
+        "formal/aeneas/out/SOURCE.lsm_r1",
+    ),
 )
 
 

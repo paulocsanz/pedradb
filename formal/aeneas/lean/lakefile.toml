@@ -382,3 +382,9 @@ name = "FieldsKernel"
 
 [[lean_lib]]
 name = "Fields"
+
+[[lean_lib]]
+name = "LsmR1Kernel"
+
+[[lean_lib]]
+name = "LsmR1"
