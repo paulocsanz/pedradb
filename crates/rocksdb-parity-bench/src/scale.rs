@@ -354,7 +354,34 @@ impl ScaleStore for PedraScale {
         self.db.flush().is_ok()
     }
     fn settle(&mut self) -> bool {
-        self.db.flush().is_ok() && self.db.compact().is_ok()
+        let ok = self.db.flush().is_ok() && self.db.compact().is_ok();
+        if let Ok(Some(1)) = self
+            .db
+            .property_int_value(rocksdb_compat::properties::PEDRA_RAM_PRESSURE)
+        {
+            let sst = self
+                .db
+                .property_int_value(rocksdb_compat::properties::LIVE_SST_FILES_SIZE)
+                .ok()
+                .flatten()
+                .unwrap_or(0);
+            let cap = self
+                .db
+                .property_int_value(rocksdb_compat::properties::PEDRA_RAM_CEILING_BYTES)
+                .ok()
+                .flatten()
+                .unwrap_or(0);
+            let skip = self
+                .db
+                .property_int_value(rocksdb_compat::properties::PEDRA_RAM_WARM_SKIPPED)
+                .ok()
+                .flatten()
+                .unwrap_or(0);
+            eprintln!(
+                "ram_pressure/pedradb: sst_bytes={sst} cap={cap} warm_skipped={skip} (random gets disk-bound; grow RAM/cgroup)"
+            );
+        }
+        ok
     }
 }
 

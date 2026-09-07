@@ -444,6 +444,15 @@ pub struct DbStats {
     pub changelog_interval: u64,
     /// Successful CHANGELOG cache stores since open (RFC-0031 observability).
     pub changelog_store_count: u64,
+    /// Live SST bytes exceed the warm cap — random point reads are disk-bound.
+    /// `1` = under pressure, `0` = working set fits (or unlimited warm).
+    pub ram_pressure: u64,
+    /// Times warm was skipped for RAM (monotonic since open).
+    pub ram_warm_skipped: u64,
+    /// Warm / cgroup ceiling in bytes (`0` = unknown).
+    pub ram_ceiling_bytes: u64,
+    /// Engine-resident metadata (index+bloom+mem+bulk tail), not page cache.
+    pub engine_resident_bytes: u64,
 }
 
 /// RFC-0035 P0: snapshot of latest/scan counters + LSM shape (no thread).
@@ -1777,6 +1786,10 @@ pub struct Db<E: Env = StdEnv> {
     write_stall_count: u64,
     /// Count of soft pressure drains (not errors).
     write_pressure_count: u64,
+    /// Times SST warm was skipped because the live set exceeds the RAM cap.
+    ram_warm_skipped: AtomicU64,
+    /// One-shot so the RAMPRESSURE line is not a compact-loop flood.
+    ram_pressure_warned: AtomicBool,
     /// Open [`SnapshotPin`]s: pin id → sequence (open-items §2.1).
     snapshot_pins: std::collections::BTreeMap<u64, SequenceNumber>,
     /// Next pin id (monotonic; never reused for this process open).
@@ -2409,6 +2422,8 @@ impl<E: Env> Db<E> {
             write_stall_drain: false,
             write_stall_count: 0,
             write_pressure_count: 0,
+            ram_warm_skipped: AtomicU64::new(0),
+            ram_pressure_warned: AtomicBool::new(false),
             snapshot_pins: std::collections::BTreeMap::new(),
             next_snapshot_pin_id: 1,
             earliest_readable_seq,
@@ -5207,6 +5222,13 @@ impl<E: Env> Db<E> {
             l0_files: self.level_file_count(0) as u64,
             changelog_interval: self.changelog_interval,
             changelog_store_count: self.changelog_store_count,
+            ram_pressure: u64::from(
+                !crate::env::settle_warm_unlimited()
+                    && sst_bytes > crate::env::settle_warm_max_bytes(),
+            ),
+            ram_warm_skipped: self.ram_warm_skipped.load(Ordering::Relaxed),
+            ram_ceiling_bytes: crate::env::settle_warm_max_bytes(),
+            engine_resident_bytes: self.hydrate_resident_bytes() as u64,
         }
     }
 
@@ -7185,6 +7207,7 @@ impl<E: Env> Db<E> {
         }
         if !crate::env::settle_warm_unlimited() {
             if total > crate::env::settle_warm_max_bytes() {
+                self.note_ram_warm_skip(total, crate::env::settle_warm_max_bytes());
                 return None;
             }
             if crate::env::settle_warm_streamed() >= total {
@@ -7192,6 +7215,20 @@ impl<E: Env> Db<E> {
             }
         }
         Some(crate::env::WarmPlan { src, jobs })
+    }
+
+    fn note_ram_warm_skip(&self, sst_bytes: u64, cap: u64) {
+        let n = self.ram_warm_skipped.fetch_add(1, Ordering::Relaxed) + 1;
+        if !self.ram_pressure_warned.swap(true, Ordering::AcqRel) {
+            tracing::warn!(
+                sst_bytes,
+                cap,
+                "SST working set exceeds RAM warm cap; random point reads are disk-bound — grow RAM/cgroup or set PEDRA_SETTLE_WARM_MAX_BYTES"
+            );
+            eprintln!(
+                "RAMPRESSURE sst_bytes={sst_bytes} cap={cap} warm_skipped={n} (random gets disk-bound; grow RAM/cgroup)"
+            );
+        }
     }
 
     /// `PEDRA_LEVEL_DIAG=1`: per-level file count + on-disk bytes at a
@@ -12757,6 +12794,13 @@ mod tests {
             crate::env::take_settle_warm_bytes(),
             0,
             "over-cap default must not stream"
+        );
+        let st = db.stats();
+        assert_eq!(st.ram_pressure, 1, "over-cap must set ram_pressure");
+        assert!(
+            st.ram_warm_skipped >= 1,
+            "over-cap must count warm skip, got {}",
+            st.ram_warm_skipped
         );
         std::env::set_var("PEDRA_SETTLE_WARM_MAX_BYTES", "1073741824");
         db.compact_leveled().unwrap();
