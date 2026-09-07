@@ -277,12 +277,15 @@ the composition files and fails on a missing file or the substring `sorry`.
 | WalState `acked_survives_every_legal_crash` | EnvCrash `crash_legal` | `acked_survives_legal_cut` | `acked_survives_as_is_dente` |
 | WalState `wal_sync` | EnvCrash `sync` | `wal_sync_honest_promotes` | `wal_sync_lying_does_not_promote` |
 | D1Modelo `put_ok` | WalState `wal_append`/`wal_sync`/`wal_ack` | `put_ok_append_sync_ack` | `put_ok_as_is_acks_unsynced` |
-| WriteAck `on_barrier` | WalState `wal_sync` | `on_barrier_honest_promotes` | `wal_sync_lying_leaves_barrier` |
+| WriteAck `on_barrier` | WalState `wal_sync` | `on_barrier_honest_promotes` | `on_barrier_empty_is_id` (same caller; production hardcodes Honest). As-is that skips the barrier: `write_ack_ledger_as_is_dente` |
+| WriteAck `on_ack` | WalState `wal_ack` | `on_ack_promotes_acked` | `on_ack_already_caught_up` |
+| WriteAck `assert_inv` | WalState `inv_wal` | `assert_inv_well_formed` | `assert_inv_ill_formed_fails` |
+| WriteAck `d1_holds_every_cut.closure.call_mut` | D1 `d1_modelo` | `d1_holds_cut_in_window` | `d1_holds_as_is_cut_below_barrier` |
 | Posix `fdatasync_rc_ok` | Posix `fdatasync_eintr_retry_admitted` | `posix_ok_needs_zero_rc_and_no_eintr_retry` | `posix_as_is_admits_nonzero_and_eintr` / `posix_nonzero_rc_not_ok` |
 | Iter `iter_window_keep` | Merge `iter_window_keep` (clone) | `iter_merge_keep_live_agree` / `_hidden_agree` | `iter_merge_keep_as_is_agree` |
 | Membership `joint_election_ok` | StoreMembership clone | `joint_election_ok_clones_refuse` / `_single_cfg` | `joint_election_ok_as_is_clones_agree` |
-| Scan shim `crc_match_ok` | Crc extract | `crc_match_ok_extracts_equal` | `crc_match_ok_extracts_mismatch` |
-| C1Modelo shim `joint_election_ok` | Membership extract | `c1_joint_election_matches_membership` / `_single_cfg` | `c1_joint_election_as_is_matches_membership` |
+| Scan `sst_crc_fate` | Crc extract `crc_match_ok` | `sst_crc_fate_mismatch_via_crc_extract` / `_equal_via_crc_extract` | `sst_crc_fate_as_is_via_crc_as_is` |
+| C1Modelo `c1_modelo` | Membership extract `joint_election_ok` | `c1_modelo_joint_add_via_membership_extract` / `_single_cfg_via_membership_extract` | `c1_modelo_as_is_via_membership_as_is` |
 | T1Modelo `t1_modelo` | Txn `leftover_txn_is_aborted` (shim copy) | `t1_modelo_empty` (already unfolds both) | `leftover_txn_is_aborted_as_is_dente` in `Txn.lean` |
 
 Cross-lib files: `ComposeIterMerge.lean`, `ComposeMembershipClone.lean`,
