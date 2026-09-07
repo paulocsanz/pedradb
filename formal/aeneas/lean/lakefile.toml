@@ -262,3 +262,33 @@ name = "WriteAckKernel"
 
 [[lean_lib]]
 name = "WriteAck"
+
+[[lean_lib]]
+name = "DcsApplyKernel"
+
+[[lean_lib]]
+name = "DcsApply"
+
+[[lean_lib]]
+name = "StoreApplyKernel"
+
+[[lean_lib]]
+name = "StoreApply"
+
+[[lean_lib]]
+name = "StoreCommitKernel"
+
+[[lean_lib]]
+name = "StoreCommit"
+
+[[lean_lib]]
+name = "StoreAeAckKernel"
+
+[[lean_lib]]
+name = "StoreAeAck"
+
+[[lean_lib]]
+name = "StoreVoteKernel"
+
+[[lean_lib]]
+name = "StoreVote"

@@ -25,6 +25,7 @@ LIBS=(
   Cursor Cl Children Pin Pack Ship Fold Manifest Compact VlogGc TxGlue
   L28 Tcg Cqe Iter Properties Scale DiskPressure Crc
   EnvCrash WalState D1Modelo WriteAck
+  DcsApply StoreApply StoreCommit StoreAeAck StoreVote
 )
 
 for lib in "${LIBS[@]}"; do

@@ -1152,6 +1152,26 @@ AENEAS_EXTRACTS = (
         "crates/pedradb-core/src/write_ack_kernel.rs",
         "formal/aeneas/out/SOURCE.write_ack",
     ),
+    (
+        "crates/pedradb-dcs/src/apply_kernel.rs",
+        "formal/aeneas/out/SOURCE.dcs_apply",
+    ),
+    (
+        "crates/pedradb-store/src/apply_kernel.rs",
+        "formal/aeneas/out/SOURCE.store_apply",
+    ),
+    (
+        "crates/pedradb-store/src/commit_kernel.rs",
+        "formal/aeneas/out/SOURCE.store_commit",
+    ),
+    (
+        "crates/pedradb-store/src/ae_ack_kernel.rs",
+        "formal/aeneas/out/SOURCE.store_ae_ack",
+    ),
+    (
+        "crates/pedradb-store/src/vote_kernel.rs",
+        "formal/aeneas/out/SOURCE.store_vote",
+    ),
 )
 
 

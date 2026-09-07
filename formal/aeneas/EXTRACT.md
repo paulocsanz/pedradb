@@ -101,7 +101,7 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 `daa85d7` / Lean 4.31.0. Production files were not rewritten to please Charon.
 `db.rs` is not extracted (`glue.db_rs_extracted=false`).
 
-### Enrolled (30)
+### Enrolled (35)
 
 `[lib] path` = production file. Stamp pins the whole file. Theorems live in
 `formal/aeneas/lean/<Name>.lean` (not the generated `*Kernel.lean`).
@@ -138,6 +138,11 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 | `wal_state` | `wal/wal_state_kernel.rs` | `inv_wal_well_formed` / `inv_wal_as_is_dente` (shim env_crash + group_commit) |
 | `d1_modelo` | `d1_modelo_kernel.rs` | `d1_modelo_unacked_vacuous` / `d1_modelo_as_is_dente` |
 | `write_ack` | `write_ack_kernel.rs` | `on_append_grows_written` / `write_ack_ledger_as_is_dente` |
+| `dcs_apply` | dcs `apply_kernel.rs` | `dcs_apply_should_advance_cas` / `_as_is_dente` (shim names `DcsError` without thiserror; decision fns are production `#[path]`) |
+| `store_apply` | store `apply_kernel.rs` | `apply_advance_hole_stops` / `_as_is_dente` |
+| `store_commit` | store `commit_kernel.rs` | `may_commit_at_current_majority` / `_as_is_dente` |
+| `store_ae_ack` | store `ae_ack_kernel.rs` | `ae_ack_success_dirty_without_persist` / `_as_is_dente` |
+| `store_vote` | store `vote_kernel.rs` | `vote_decision_stale_term` / `_as_is_dente` |
 
 Partial `.lean` from a failed Aeneas run is not enrolled.
 
@@ -165,16 +170,16 @@ these; that is not an extract.
 | `pedradb-core/src/sst/scan_kernel.rs` | Shim linked `wal/crc.rs`; Aeneas `CFailure` Internal error translating `scan_reads_file` closure/`Iterator::any` (lines 112:13–112:85). Partial file. Not rewritten. |
 | `pedradb-core/src/key.rs` | Shim linked `error.rs`+`thiserror`+`bytes`; Aeneas `Unsized cast between dynamic traits` on `core::error::Error::source` (`error.rs:7`). Partial file. Not rewritten. |
 
-### Refused — include-crate does not compile standalone (8)
+### Refused — include-crate does not compile standalone (7)
 
 The extract crate is `[lib] path = production file` with no parent crate.
 These files `use crate::…` or an external crate the probe did not link. Not a
 Charon crash. Not rewritten. `scan_kernel` / `key.rs` moved to the Aeneas
-table after a shim compiled and Aeneas still failed.
+table after a shim compiled and Aeneas still failed. dcs `apply_kernel.rs`
+enrolled via a shim that names `DcsError` without thiserror.
 
 | production | measured rustc error |
 |---|---|
-| `pedradb-dcs/src/apply_kernel.rs` | `DcsError` / `Result` live in the parent crate |
 | `pedradb-world/src/world_kernel.rs` | `use crate::TrajectorySample` (file is dirty-tree only; not in git HEAD) |
 | `pedradb-posix/src/lib.rs` | Linked `libc`; Aeneas still `CFailure`: Dynamic trait types (`std::io::Error::new`), `&raw const`, improperly typed constant in `fdatasync_file`. Partial file, 8 errors. |
 | `pedradb-core/src/merge.rs` | unresolved crate `pedradb_telemetry` |
@@ -212,6 +217,11 @@ Never: “Lean proved Raft / fold / the Bloom filter.”
 ./scripts/aeneas_wal_state.sh --required
 ./scripts/aeneas_d1_modelo.sh --required
 ./scripts/aeneas_write_ack.sh --required
+./scripts/aeneas_dcs_apply.sh --required
+./scripts/aeneas_store_apply.sh --required
+./scripts/aeneas_store_commit.sh --required
+./scripts/aeneas_store_ae_ack.sh --required
+./scripts/aeneas_store_vote.sh --required
 ```
 
 ## Scale (`scale_kernel.rs`, RFC-0176)
