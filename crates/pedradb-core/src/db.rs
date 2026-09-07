@@ -7285,6 +7285,15 @@ impl<E: Env> Db<E> {
         }
     }
 
+    /// Drop path-skip so the next [`Self::maybe_warm_ssts`] streams the
+    /// live set. Explicit `compact()` waits on the host compact gate
+    /// (worker may hold it for tens of seconds); hydrate flush-warm is
+    /// then stale for random get (100M Darwin get_loop 2.65 ms vs 432 µs
+    /// @50M when settle WARMed immediately before probes).
+    pub(crate) fn clear_warmed_ssts(&self) {
+        self.warmed_ssts.lock().clear();
+    }
+
     /// After a write that published SSTs: if the live set already exceeds
     /// the warm cap, drop page-cache pages now (do not wait for settle).
     pub(crate) fn maybe_bounded_cache_after_write(&mut self) {
@@ -13048,6 +13057,43 @@ mod tests {
         assert_eq!(
             st.settle_warm_bytes, 0,
             "second compact must not re-stream unchanged SST paths"
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0178: explicit ConcurrentDb::compact re-warms the live set even
+    /// when flush already streamed those paths (scale settle is compact()).
+    #[test]
+    fn rfc0178_explicit_compact_rewarm_after_flush() {
+        let dir = temp_dir();
+        let env = BulkProbeEnv::new();
+        let db = crate::concurrent::ConcurrentDb::open_with_env_bounded(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(4 * 1024),
+                sst_payload_budget_bytes: Some(1),
+                ..OpenOptions::default()
+            },
+            env,
+        )
+        .unwrap();
+        for i in 0..32u32 {
+            db.put(format!("k{i:04}").as_bytes(), vec![b'v'; 64])
+                .unwrap();
+        }
+        crate::env::force_settle_warm(None);
+        let _ = crate::env::take_settle_warm_bytes();
+        db.flush().unwrap();
+        let flushed = crate::env::take_settle_warm_bytes();
+        assert!(flushed > 0, "flush must stream live SSTs, got {flushed}");
+        db.compact().unwrap();
+        let n = crate::env::take_settle_warm_bytes();
+        crate::env::force_settle_warm(None);
+        assert!(
+            n > 0,
+            "explicit compact must re-warm after flush path-skip, got {n}"
         );
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
