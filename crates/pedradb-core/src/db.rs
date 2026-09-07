@@ -572,6 +572,23 @@ impl DbStats {
             self.write_pressure_l0
         )
     }
+
+    /// RFC-0173: one-line RAM mode (hot vs bounded-cache).
+    #[must_use]
+    pub fn ram_line(&self) -> String {
+        let mode = if self.ram_pressure == 1 {
+            "bounded-cache"
+        } else {
+            "hot"
+        };
+        format!(
+            "ram_pressure={} warm_skipped={} ceiling={}B engine_resident={}B mode={mode}",
+            self.ram_pressure,
+            self.ram_warm_skipped,
+            self.ram_ceiling_bytes,
+            self.engine_resident_bytes
+        )
+    }
 }
 
 /// Metadata written next to a checkpoint (ops / restore tooling).
@@ -7207,7 +7224,7 @@ impl<E: Env> Db<E> {
         }
         if !crate::env::settle_warm_unlimited() {
             if total > crate::env::settle_warm_max_bytes() {
-                self.note_ram_warm_skip(total, crate::env::settle_warm_max_bytes());
+                self.enter_bounded_cache_mode(total, crate::env::settle_warm_max_bytes());
                 return None;
             }
             if crate::env::settle_warm_streamed() >= total {
@@ -7223,11 +7240,28 @@ impl<E: Env> Db<E> {
             tracing::warn!(
                 sst_bytes,
                 cap,
-                "SST working set exceeds RAM warm cap; random point reads are disk-bound — grow RAM/cgroup or set PEDRA_SETTLE_WARM_MAX_BYTES"
+                "bounded-cache mode: SST set exceeds RAM cap; page cache released, block cache only — grow RAM/cgroup to restore RAM-speed gets"
             );
             eprintln!(
-                "RAMPRESSURE sst_bytes={sst_bytes} cap={cap} warm_skipped={n} (random gets disk-bound; grow RAM/cgroup)"
+                "RAMPRESSURE sst_bytes={sst_bytes} cap={cap} warm_skipped={n} mode=bounded-cache (page cache dropped; grow RAM/cgroup)"
             );
+        }
+    }
+
+    /// Working set does not fit: skip whole-file warm and drop kernel
+    /// file pages (Linux `DONTNEED`) so the cgroup is not charged the
+    /// full SST set. Point reads then use the bounded block cache +
+    /// 4 KiB pread — slower, stable, no SIGKILL.
+    fn enter_bounded_cache_mode(&self, sst_bytes: u64, cap: u64) {
+        self.note_ram_warm_skip(sst_bytes, cap);
+        self.drop_sst_page_cache();
+    }
+
+    fn drop_sst_page_cache(&self) {
+        for table in &self.ssts {
+            let _ = self
+                .env
+                .advise(table.path(), 0, 0, crate::env::AdviseKind::DontNeed);
         }
     }
 
@@ -12778,7 +12812,7 @@ mod tests {
                 sst_payload_budget_bytes: Some(1),
                 ..OpenOptions::default()
             },
-            env,
+            env.clone(),
         )
         .unwrap();
         for i in 0..32u32 {
@@ -12788,6 +12822,7 @@ mod tests {
         db.flush().unwrap();
         crate::env::force_settle_warm(None);
         let _ = crate::env::take_settle_warm_bytes();
+        env.advises.lock().unwrap().clear();
         std::env::set_var("PEDRA_SETTLE_WARM_MAX_BYTES", "1");
         db.compact_leveled().unwrap();
         assert_eq!(
@@ -12801,6 +12836,22 @@ mod tests {
             st.ram_warm_skipped >= 1,
             "over-cap must count warm skip, got {}",
             st.ram_warm_skipped
+        );
+        let dont: Vec<_> = env
+            .advises
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, _, _, k)| *k == AdviseKind::DontNeed)
+            .cloned()
+            .collect();
+        assert!(
+            !dont.is_empty(),
+            "bounded-cache mode must DONTNEED SST pages, got {dont:?}"
+        );
+        assert!(
+            dont.iter().all(|(_, off, len, _)| *off == 0 && *len == 0),
+            "DONTNEED must be whole-file (offset=0,len=0), got {dont:?}"
         );
         std::env::set_var("PEDRA_SETTLE_WARM_MAX_BYTES", "1073741824");
         db.compact_leveled().unwrap();
