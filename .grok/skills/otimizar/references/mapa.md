@@ -23,14 +23,14 @@ Refresh this file when a cell moves class. One row per cell.
 | apply_mc4 Darwin async | **C**/DIAG | 0.478× (pré P0.5) | `flush_check`; 0184 P0.5 default-over parks whole mem O(1) | RFC-0183 / 0184 P0.5 |
 | kvrocks_set_mc50 | **C** | 0.37× | `lock_convoy` Adaptive off n≥16 | RFC-0178 / 0183 |
 | G1 1c write-per-op | **C** | fd-ceiling | one barrier/op | Agents.md / floor1x-g1 |
-| ycsb_a/f_mc4 Darwin mixed | **T**→tool | 0.58–0.91 DIAG | `get_path` with `--read-pct 50`; `balance_admits=0` (DIAG) | RFC-0182 / 0184 |
+| ycsb_a/f_mc4 Darwin mixed | **T**→tool | 0.58–0.91 DIAG | `get_path` with `--read-pct 50`; `balance_admits=0` (DIAG); compare `diagnose.lever` (0184 P1.2) | RFC-0182 / 0184 |
 | Linux async apply_mc4 | **U** | G1 2.79× exists; same-class mc4 not in floor1x 15 | — | RFC-0184 |
 | 1B get @64 GiB | **S** (model) | happy ~61 µs; as-is 12.3 ms | `pedra diagnose get` | RFC-0176 |
 
 ## Próxima fase (rank da skill, 2026-09-07)
 
 1. **U / Linux `overwrite_mc4` isolado + diagnose + `balance`** (caixa). Sem bake: não ratio-win Darwin. Skill **ainda implementa** o próximo furo local.
-2. **Done this turn:** 0184 P0.5 — async `commit_async_ops` stage-only; CF **default-over** parka O(1) (não `take_family("default")` O(n); não global-over — 0159 P1.3). 1-op overwrite/YCSB under-limit inalterado.
+2. **Done this turn:** 0184 P1.2 — `benches[].diagnose.lever` no JSON; compare copia para a row. WRITEPHASE também no mc loop (A/F `read_pct`).
 3. prefix 0.70× / probe_miss — reads, caixa.
 
 Não: skiplist. Não: n=50 merge. Não: turno vazio porque “é caixa”.

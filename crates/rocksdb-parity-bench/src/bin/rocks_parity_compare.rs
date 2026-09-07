@@ -142,8 +142,13 @@ fn main() {
         if i > 0 {
             ratios.push_str(",\n");
         }
+        let lever = extract_diagnose_lever(&compat_raw, shape);
+        let diagnose = match lever {
+            Some(l) => format!(r#"{{"lever":"{l}"}}"#),
+            None => "null".into(),
+        };
         ratios.push_str(&format!(
-            r#"    {{"shape":"{shape}","compat_keys_per_s":{c_s},"rocksdb_keys_per_s":{r_s},"compat_over_rocksdb":{ratio},"meets_floor":{meets_floor}}}"#
+            r#"    {{"shape":"{shape}","compat_keys_per_s":{c_s},"rocksdb_keys_per_s":{r_s},"compat_over_rocksdb":{ratio},"meets_floor":{meets_floor},"diagnose":{diagnose}}}"#
         ));
     }
     ratios.push_str("\n  ]");
@@ -311,6 +316,21 @@ fn extract_string_field(raw: &str, field: &str) -> Option<String> {
     Some(rest[..end].to_string())
 }
 
+/// RFC-0184 P1.2: `benches[].diagnose.lever` for one shape, if present.
+fn extract_diagnose_lever(raw: &str, shape: &str) -> Option<String> {
+    for chunk in raw.split("\"name\"") {
+        let Some(name) = json_string_after(chunk, ':') else {
+            continue;
+        };
+        if name != shape {
+            continue;
+        }
+        let d = chunk.find("\"diagnose\"")?;
+        return extract_string_field(&chunk[d..], "lever");
+    }
+    None
+}
+
 /// Best-effort extract name → qps (or keys_per_s) from a bench JSON.
 fn extract_metrics(raw: &str) -> BTreeMap<String, f64> {
     let mut out = BTreeMap::new();
@@ -411,6 +431,20 @@ mod tests {
         let raw = r#"{"benches":[{"name":"ycsb_a","qps":12.5,"keys_per_s":0.0}]}"#;
         let m = extract_metrics(raw);
         assert!((m.get("ycsb_a").copied().unwrap_or(0.0) - 12.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn extract_diagnose_lever_from_bench_object() {
+        let raw = r#"{"benches":[
+            {"name":"deps_cache_overwrite","qps":1.0,"diagnose":{"lever":"wal_encode_or_write","dominant":"wal","despark":0}},
+            {"name":"ycsb_a_mc4","qps":2.0}
+        ]}"#;
+        assert_eq!(
+            extract_diagnose_lever(raw, "deps_cache_overwrite").as_deref(),
+            Some("wal_encode_or_write")
+        );
+        assert_eq!(extract_diagnose_lever(raw, "ycsb_a_mc4"), None);
+        assert_eq!(extract_diagnose_lever(raw, "missing"), None);
     }
 
     #[test]

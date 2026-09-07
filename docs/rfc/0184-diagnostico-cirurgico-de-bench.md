@@ -66,7 +66,7 @@ a linha quando há phasesΔ. Sem harness novo.
 
 - [ ] **P1.1** `overwrite_mc4` isolado na caixa + diagnose (0178 P1.3) —
       status: `todo`
-- [ ] **P1.2** compare JSON inclui `diagnose.lever` — status: `todo`
+- [x] **P1.2** compare JSON inclui `diagnose.lever` — status: `done`
 
 ### P2 — polish
 
@@ -82,7 +82,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P0.4 | p0 | get_path + probes + balance_admits | done | `BALANCE_SHAPES`; DIAG board recusa | 2026-09-07 |
 | P0.5 | p0 | async ops/CF park O(1) | done | default-over park whole mem; not global-over (0159 P1.3) | 2026-09-07 |
 | P1.1 | p1 | overwrite_mc4 caixa + diagnose | todo | 0178 P1.3 | 2026-09-07 |
-| P1.2 | p1 | compare JSON lever | todo | — | 2026-09-07 |
+| P1.2 | p1 | compare JSON lever | done | benches[].diagnose.lever; compare ratios | 2026-09-07 |
 | P2.1 | p2 | none yet | todo | — | 2026-09-07 |
 
 ## Acceptance Criteria
@@ -92,8 +92,11 @@ a linha quando há phasesΔ. Sem harness novo.
   `classify_get_on_as_is_walk_is_not_ok`;
   `ycsb_a_mixed_is_get_path_not_wal`;
   `rfc0182_darwin_board_refuses_single_diag_cut`;
-  `rfc0184_async_ops_does_not_write_l0_when_over_limit`.
+  `rfc0184_async_ops_does_not_write_l0_when_over_limit`;
+  `rfc0184_diagnosis_json_has_lever`;
+  `extract_diagnose_lever_from_bench_object`.
 - **Telemetry / Analytics:** uma linha `diagnose dominant=… lever=…`;
+  `benches[].diagnose.lever` no JSON; compare copia para a row.
   peer continua `sync: false`.
 - **Documentation:** este RFC; `docs/benchmarks.md` receita.
 - **Screenshots:** backend-only.
