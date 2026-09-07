@@ -3,7 +3,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-core/verus/vlog_gc_decision.rs"
+# RFC-0171 P0.3 / RFC-0174: prove the file rustc links (pair vlog_recover).
+SRC="$ROOT/crates/pedradb-core/src/vlog_gc_kernel.rs"
 
 if [[ -x "${VERUS:-}" ]]; then
   :

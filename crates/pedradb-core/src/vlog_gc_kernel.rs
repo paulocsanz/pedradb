@@ -1,6 +1,12 @@
 //! vlog GC decision kernel (RFC-0056 P1.4 — crash dictionary on the
 //! value-log MANIFEST swing and the sealed-blob rewrite guard).
 //!
+//! **Single artifact (pair `vlog_recover`):** this file is what `rustc`
+//! links *and* what Verus proves (`cfg(verus_keep_ghost)`). Pair
+//! `blob_gc_pick` still has a twin-cópia until its turn.
+//!
+//!   ./scripts/verus_vlog_gc.sh
+//!
 //! Pure decision functions only. Production (`db.rs`) calls
 //! [`vlog_recover_action`] on `open_with_env` and [`blob_gc_action`] inside
 //! `compact_blob_auto`; the durable effects (open handles, rename, rewrite)
@@ -14,9 +20,236 @@
 //!   MANIFEST commit) so an uncommitted swing cannot hijack reads.
 //! - The sealed-blob rewrite guard never rewrites the active append
 //!   generation (writers may still be appending into it).
+//!
+//! The rustc bodies stay byte-stable so non-`single_artifact` twins still
+//! token-match. Verus proofs sit in the `cfg(verus_keep_ghost)` block
+//! above them (last-wins for lint is the rustc body).
+
+#![forbid(unsafe_code)]
+
+#[cfg(verus_keep_ghost)]
+use vstd::prelude::*;
+
+#[cfg(verus_keep_ghost)]
+verus! {
+
+/// Mirrors the rustc `VlogRecoverAction` below (cfg-split so Verus does not see Debug).
+pub enum VlogRecoverAction {
+    OpenBlob,
+    OpenNew,
+    OpenPrimary,
+    RefuseOpen,
+    CreateEmptyPrimary,
+    NoVlog,
+}
+
+/// Closed-form spec — same arms as production `vlog_recover_action`.
+pub open spec fn vlog_recover_spec(
+    blob_active: bool,
+    wants_large: bool,
+    primary_exists: bool,
+    use_new: bool,
+    new_exists: bool,
+) -> VlogRecoverAction {
+    if blob_active {
+        VlogRecoverAction::OpenBlob
+    } else if wants_large || primary_exists || (use_new && new_exists) {
+        if use_new && new_exists {
+            VlogRecoverAction::OpenNew
+        } else if primary_exists {
+            VlogRecoverAction::OpenPrimary
+        } else if use_new {
+            VlogRecoverAction::RefuseOpen
+        } else {
+            VlogRecoverAction::CreateEmptyPrimary
+        }
+    } else {
+        VlogRecoverAction::NoVlog
+    }
+}
+
+/// AS-IS ignore-swing: always resolves as if the MANIFEST flag were false.
+pub open spec fn vlog_recover_as_is(
+    blob_active: bool,
+    wants_large: bool,
+    primary_exists: bool,
+    use_new: bool,
+    new_exists: bool,
+) -> VlogRecoverAction {
+    vlog_recover_spec(blob_active, wants_large, primary_exists, false, false)
+}
+
+/// Executable decision — must match the rustc `vlog_recover_action` bit-for-bit.
+#[verifier::when_used_as_spec(vlog_recover_spec)]
+pub fn vlog_recover_action(
+    blob_active: bool,
+    wants_large: bool,
+    primary_exists: bool,
+    use_new: bool,
+    new_exists: bool,
+) -> (a: VlogRecoverAction)
+    ensures
+        a == vlog_recover_spec(blob_active, wants_large, primary_exists, use_new, new_exists),
+        use_new && new_exists && !blob_active ==> a == VlogRecoverAction::OpenNew,
+        !use_new ==> a != VlogRecoverAction::OpenNew,
+        use_new && !primary_exists && !new_exists && wants_large && !blob_active
+            ==> a == VlogRecoverAction::RefuseOpen,
+        a == VlogRecoverAction::CreateEmptyPrimary ==> !use_new,
+{
+    if blob_active {
+        VlogRecoverAction::OpenBlob
+    } else if wants_large || primary_exists || (use_new && new_exists) {
+        if use_new && new_exists {
+            VlogRecoverAction::OpenNew
+        } else if primary_exists {
+            VlogRecoverAction::OpenPrimary
+        } else if use_new {
+            VlogRecoverAction::RefuseOpen
+        } else {
+            VlogRecoverAction::CreateEmptyPrimary
+        }
+    } else {
+        VlogRecoverAction::NoVlog
+    }
+}
+
+/// Mirrors the rustc `BlobGcAction` below.
+pub enum BlobGcAction {
+    Rewrite,
+    Skip,
+}
+
+pub open spec fn blob_gc_spec(is_active: bool, bytes: u64) -> BlobGcAction {
+    if !is_active && bytes > 0 {
+        BlobGcAction::Rewrite
+    } else {
+        BlobGcAction::Skip
+    }
+}
+
+pub open spec fn blob_gc_as_is(is_active: bool, bytes: u64) -> BlobGcAction {
+    if bytes > 0 {
+        BlobGcAction::Rewrite
+    } else {
+        BlobGcAction::Skip
+    }
+}
+
+#[verifier::when_used_as_spec(blob_gc_spec)]
+pub fn blob_gc_action(is_active: bool, bytes: u64) -> (a: BlobGcAction)
+    ensures
+        a == blob_gc_spec(is_active, bytes),
+        is_active ==> a == BlobGcAction::Skip,
+        bytes == 0 ==> a == BlobGcAction::Skip,
+{
+    if !is_active && bytes > 0 {
+        BlobGcAction::Rewrite
+    } else {
+        BlobGcAction::Skip
+    }
+}
+
+/// Crash mid-GC after MANIFEST committed the swing: reopen resolves to `.new`.
+/// PoWER: recoverability is a precondition of the durable swing, not a
+/// post-crash hope that primary is still the inventory.
+proof fn lemma_swing_opens_staged_new(wants_large: bool)
+    ensures
+        vlog_recover_action(false, wants_large, true, true, true)
+            == VlogRecoverAction::OpenNew,
+        vlog_recover_action(false, wants_large, false, true, true)
+            == VlogRecoverAction::OpenNew,
+{
+}
+
+proof fn lemma_orphan_new_never_opened(primary_exists: bool, new_exists: bool)
+    ensures
+        !primary_exists || vlog_recover_action(false, true, primary_exists, false, new_exists)
+            == VlogRecoverAction::OpenPrimary,
+        vlog_recover_action(false, true, primary_exists, false, new_exists)
+            != VlogRecoverAction::OpenNew,
+{
+}
+
+proof fn lemma_promote_done_reconciles_primary()
+    ensures
+        vlog_recover_action(false, true, true, true, false)
+            == VlogRecoverAction::OpenPrimary,
+{
+}
+
+proof fn lemma_f51_refuses_both_missing()
+    ensures
+        vlog_recover_action(false, true, false, true, false)
+            == VlogRecoverAction::RefuseOpen,
+        vlog_recover_action(false, true, false, true, false)
+            != VlogRecoverAction::CreateEmptyPrimary,
+{
+}
+
+proof fn lemma_fresh_db_creates_empty_primary()
+    ensures
+        vlog_recover_action(false, true, false, false, false)
+            == VlogRecoverAction::CreateEmptyPrimary,
+        vlog_recover_action(false, false, false, false, false)
+            == VlogRecoverAction::NoVlog,
+{
+}
+
+proof fn lemma_blob_mode_wins(wants_large: bool, primary_exists: bool, use_new: bool)
+    ensures
+        vlog_recover_action(true, wants_large, primary_exists, use_new, true)
+            == VlogRecoverAction::OpenBlob,
+        vlog_recover_action(true, wants_large, primary_exists, use_new, false)
+            == VlogRecoverAction::OpenBlob,
+{
+}
+
+/// Teeth: ignore-swing AS-IS serves the stale primary after a committed swing.
+proof fn lemma_mutant_serves_stale_primary_after_swing()
+    ensures
+        vlog_recover_as_is(false, true, true, true, true) == VlogRecoverAction::OpenPrimary,
+        vlog_recover_action(false, true, true, true, true) == VlogRecoverAction::OpenNew,
+        vlog_recover_as_is(false, true, true, true, true)
+            != vlog_recover_action(false, true, true, true, true),
+{
+}
+
+proof fn lemma_mutant_invents_empty_primary_on_f51()
+    ensures
+        vlog_recover_as_is(false, true, false, true, false)
+            == VlogRecoverAction::CreateEmptyPrimary,
+        vlog_recover_action(false, true, false, true, false)
+            == VlogRecoverAction::RefuseOpen,
+        vlog_recover_as_is(false, true, false, true, false)
+            != vlog_recover_action(false, true, false, true, false),
+{
+}
+
+proof fn lemma_active_generation_never_rewritten(bytes: u64)
+    ensures
+        blob_gc_action(true, bytes) == BlobGcAction::Skip,
+{
+}
+
+proof fn lemma_empty_file_never_rewritten(is_active: bool)
+    ensures
+        blob_gc_action(is_active, 0) == BlobGcAction::Skip,
+{
+}
+
+proof fn lemma_mutant_rewrites_active_generation()
+    ensures
+        blob_gc_as_is(true, 4096) == BlobGcAction::Rewrite,
+        blob_gc_action(true, 4096) == BlobGcAction::Skip,
+        blob_gc_as_is(true, 4096) != blob_gc_action(true, 4096),
+{
+}
+
+} // verus!
 
 /// What the vlog open path must do, given the recovered MANIFEST flag and
 /// what actually exists on disk after a crash.
+#[cfg(not(verus_keep_ghost))]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum VlogRecoverAction {
     /// Blob-mode store: open the highest sealed generation.
@@ -41,6 +274,7 @@ pub enum VlogRecoverAction {
 ///
 /// Mirrors `ValueLog::resolve_path` + `open_with_flag`'s F51 guard + the
 /// `Db::open_with_env` blob/none gates, as one pure decision.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn vlog_recover_action(
     blob_active: bool,
@@ -76,6 +310,7 @@ pub fn vlog_recover_action(
 /// resolves to primary. After a crash mid-GC (MANIFEST committed with
 /// `use_new`, SSTs remapped into `.new`), the DB silently serves large
 /// values from the stale pre-GC primary — missing or resurrected data.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn vlog_recover_action_as_is_ignore_swing(
     blob_active: bool,
@@ -88,6 +323,7 @@ pub fn vlog_recover_action_as_is_ignore_swing(
 }
 
 /// Sealed-blob rewrite guard: which files `compact_blob_auto` may rewrite.
+#[cfg(not(verus_keep_ghost))]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BlobGcAction {
     /// Sealed, non-empty: eligible for rewrite (θ dead-ratio is policy,
@@ -101,6 +337,7 @@ pub enum BlobGcAction {
 ///
 /// Rewriting the active generation while writers append into it loses the
 /// concurrent appends (file replaced underneath live offsets).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn blob_gc_action(is_active: bool, bytes: u64) -> BlobGcAction {
     if !is_active && bytes > 0 {
@@ -112,6 +349,7 @@ pub fn blob_gc_action(is_active: bool, bytes: u64) -> BlobGcAction {
 
 /// AS-IS mutant: rewrites any non-empty file, including the active append
 /// generation — concurrent appends into the sealed-active file vanish.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn blob_gc_action_as_is_rewrite_active(_is_active: bool, bytes: u64) -> BlobGcAction {
     if bytes > 0 {

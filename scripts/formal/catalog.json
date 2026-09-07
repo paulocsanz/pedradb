@@ -3037,8 +3037,9 @@
       "id": "vlog_recover",
       "finding": "F51/G-swing",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/vlog_gc_kernel.rs",
-      "twin": "crates/pedradb-core/verus/vlog_gc_decision.rs",
+      "twin": "crates/pedradb-core/src/vlog_gc_kernel.rs",
       "verus": "scripts/verus_vlog_gc.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs"
