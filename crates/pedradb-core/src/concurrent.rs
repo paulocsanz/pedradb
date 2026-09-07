@@ -310,17 +310,16 @@ fn leader_linger_want(prev_group_members: usize) -> usize {
 /// RFC-0180 P0.5: async 1-op catch-up as pause-loops, not `wait_for`.
 /// 0 = already full or lone.
 ///
-/// RFC-0180 P0.32: at Adaptive MC (`active ≤ 8`) a 2-member batch is
-/// already a group. 1024 more spins waiting for the last straggler was
-/// overwrite_mc4 p50 15 vs 11 (quiet 0.91×). Extra take under the write
-/// lock + `group_absorb` still pick up latecomers. High-n (`active > 8`)
-/// keeps the 1024 window so apply_mc / 50-thread grouping does not shrink.
-fn async_catchup_skip_when_grouped(batch_len: usize, active: usize) -> bool {
-    batch_len >= 2 && active <= ASYNC_GROUP_ADAPTIVE_MAX
+/// RFC-0180 P0.37: a 2-member batch is already a group at any `active`.
+/// Extra take under the write lock + `group_absorb` still pick up
+/// latecomers (including apply_mc / 50-thread). The `active ≤ 8` gate
+/// was overwrite_mc4-shaped.
+fn async_catchup_skip_when_grouped(batch_len: usize) -> bool {
+    batch_len >= 2
 }
 
 fn async_catchup_spins(batch_len: usize, active: usize) -> u32 {
-    if batch_len >= active || active < 2 || async_catchup_skip_when_grouped(batch_len, active) {
+    if batch_len >= active || active < 2 || async_catchup_skip_when_grouped(batch_len) {
         0
     } else {
         1024
@@ -343,6 +342,14 @@ fn async_one_op_fast_path(any_sync: bool, members: usize, ops: usize) -> bool {
 #[must_use]
 fn lead_one_group_then_resign() -> bool {
     true
+}
+
+/// RFC-0180 P0.36: drain-in-lead was p48 avg_group 2.51→1.95 (WAL-late
+/// members became a second 1-op group every time). Leftover is the next
+/// leader's first take. Last-op hang is a canary (`rfc0180_leftover_*`).
+#[must_use]
+fn lead_drain_leftover_once() -> bool {
+    false
 }
 
 fn async_all_one_op_fast_path(any_sync: bool, batch: &[PendingWrite]) -> bool {
@@ -1056,10 +1063,6 @@ impl WriteGroup {
                 prev_group_members = 1;
                 let result = pending.occ_err.take().map(Err).unwrap_or(result);
                 Self::deliver_member(pending.reply.take(), result, &mut leader_result);
-                // RFC-0180 P0.31: one group per lead(). Chaining groups
-                // into the leader's put() made that one client sample
-                // ≈ 1.5 ms (p999) — the leader thread cannot return until
-                // `lead` returns.
                 self.queue.lock().leader_active = false;
                 return leader_result.unwrap_or_else(|| {
                     Err(CoreError::Internal(
@@ -1118,7 +1121,6 @@ impl WriteGroup {
                 let result = pending.occ_err.take().map(Err).unwrap_or(result);
                 Self::deliver_member(pending.reply.take(), result, &mut leader_result);
             }
-            // RFC-0180 P0.31: one group per `lead` (see 1-op path).
             self.queue.lock().leader_active = false;
             return leader_result.unwrap_or_else(|| {
                 Err(CoreError::Internal(
@@ -6623,19 +6625,15 @@ mod tests {
         assert_eq!(async_catchup_spins(4, 4), 0);
         assert_eq!(async_catchup_spins(1, 4), 1024);
         assert_eq!(async_catchup_spins(1, 2), 1024);
-        // P0.32: already grouped at MC — do not wait for the last straggler.
-        assert!(async_catchup_skip_when_grouped(2, 4));
-        assert!(async_catchup_skip_when_grouped(3, 4));
-        assert!(async_catchup_skip_when_grouped(2, ASYNC_GROUP_ADAPTIVE_MAX));
-        assert!(!async_catchup_skip_when_grouped(1, 4));
-        assert!(!async_catchup_skip_when_grouped(
-            2,
-            ASYNC_GROUP_ADAPTIVE_MAX + 1
-        ));
+        // P0.37: already grouped — no n-gate. High-n extra take still fills.
+        assert!(async_catchup_skip_when_grouped(2));
+        assert!(async_catchup_skip_when_grouped(3));
+        assert!(!async_catchup_skip_when_grouped(1));
         assert_eq!(async_catchup_spins(2, 4), 0);
         assert_eq!(async_catchup_spins(3, 4), 0);
-        assert_eq!(async_catchup_spins(2, 16), 1024);
-        assert_eq!(async_catchup_spins(2, 50), 1024);
+        assert_eq!(async_catchup_spins(2, 16), 0);
+        assert_eq!(async_catchup_spins(2, 50), 0);
+        assert_eq!(async_catchup_spins(1, 50), 1024);
         assert!(async_one_op_fast_path(false, 1, 1));
         assert!(!async_one_op_fast_path(true, 1, 1));
         assert!(!async_one_op_fast_path(false, 2, 2));
@@ -6676,6 +6674,7 @@ mod tests {
         ));
         assert!(!async_all_one_op_fast_path(false, &[]));
         assert!(lead_one_group_then_resign());
+        assert!(!lead_drain_leftover_once());
         // RFC-0180 P0.26: first debt look never queues on the write lock.
         assert!(flush_debt_skip_if_write_lock_held(false, true));
         assert!(!flush_debt_skip_if_write_lock_held(true, true));
@@ -6724,6 +6723,31 @@ mod tests {
             }
         });
         assert_eq!(db.commit_inflight(), 0, "lead session pin must drop");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0180 P0.36: leftover followers after resign must complete.
+    /// 8×32 puts with a barrier — if leftover `recv()` hung, this join
+    /// never returns.
+    #[test]
+    fn rfc0180_leftover_followers_complete_after_resign() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open(&dir).unwrap();
+        std::thread::scope(|s| {
+            for i in 0..8u8 {
+                let db = &db;
+                s.spawn(move || {
+                    for k in 0..32u8 {
+                        db.put([i, k], b"v").unwrap();
+                    }
+                });
+            }
+        });
+        for i in 0..8u8 {
+            for k in 0..32u8 {
+                assert_eq!(db.get(&[i, k]).as_deref(), Some(b"v".as_ref()));
+            }
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 

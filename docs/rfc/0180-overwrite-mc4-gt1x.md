@@ -121,6 +121,18 @@ medida no mesmo harness isolado.
 - [x] **P0.33** Host-worker skip hysteresis 200 µs after last Ok —
       status: `done` (p45: bad Pedra runs were `lead_write` 13–50 ms;
       L0 drain test still passes — 1 ms sleep > 200 µs)
+- [x] **P0.34** Hysterese 200 µs só em `materialize_bulk`; L0-at-trigger
+      e flush-debt usam inflight‖active — status: `done`
+      (5–10 kQPS não empilha L0; overwrite handoff gap ainda skipa bulk)
+- [x] **P0.35** Restaurar TLS last-get write-through no put (≤1024 B) —
+      status: `done` (ycsb_a/f RMW; overwrite_mc4 nunca lia)
+- [x] **P0.36** Leftover drain-in-lead — status: `done` (p48 avg 1,95
+      e overwrite 0,87×; reverted. Canário `rfc0180_leftover_*`. Next
+      leader takes WAL-late members — last-op hang residual.)
+- [x] **P0.37** Catch-up skip quando batch≥2, sem gate `active≤8` —
+      status: `done` (extra take + absorb ainda agrupam high-n)
+- [x] **P0.38** Auto-flush size check em todo Ok 1-op — status: `done`
+      (`maybe_auto_flush_with` already early-outs under limit)
 
 ### P1 — caixa 4 GiB (pede bake)
 
@@ -167,6 +179,11 @@ medida no mesmo harness isolado.
 | P0.31 | p0 | lead one group then resign | done | p39 r1 0.91 quiet; p999 103µs avg 3.04 | 2026-09-07 |
 | P0.32 | p0 | skip catch-up when already grouped at MC | done | p42 quiet median 1.002; run2 Pedra 213k named loss | 2026-09-07 |
 | P0.33 | p0 | host skip 200µs hysteresis | done | p45 lead_write; L0 drain test still ok | 2026-09-07 |
+| P0.34 | p0 | hysteresis only on materialize_bulk | done | L0/flush stay inflight‖active | 2026-09-07 |
+| P0.35 | p0 | restore TLS put write-through | done | ycsb_a/f RMW | 2026-09-07 |
+| P0.36 | p0 | leftover drain-in-lead | done | p48 0.87× avg 1.95 — reverted; canary stays | 2026-09-07 |
+| P0.37 | p0 | catch-up skip batch≥2 any n | done | no active≤8 gate | 2026-09-07 |
+| P0.38 | p0 | flush size check every async Ok | done | no 31-op overshoot | 2026-09-07 |
 | P1.1 | p1 | 3-run caixa | todo | — | 2026-09-07 |
 | P2.1 | p2 | none yet | todo | — | 2026-09-07 |
 
