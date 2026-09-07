@@ -1173,6 +1173,18 @@ AENEAS_EXTRACTS = (
         "formal/aeneas/out/SOURCE.store_vote",
     ),
     ("crates/pedradb-core/src/key.rs", "formal/aeneas/out/SOURCE.key"),
+    (
+        "crates/pedradb-dcs/src/lease_kernel.rs",
+        "formal/aeneas/out/SOURCE.lease",
+    ),
+    (
+        "crates/pedradb-store/src/txn_kernel.rs",
+        "formal/aeneas/out/SOURCE.txn",
+    ),
+    (
+        "crates/pedradb-store/src/t1_modelo_kernel.rs",
+        "formal/aeneas/out/SOURCE.t1_modelo",
+    ),
 )
 
 

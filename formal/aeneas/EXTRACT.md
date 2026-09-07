@@ -101,7 +101,7 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 `daa85d7` / Lean 4.31.0. Production files were not rewritten to please Charon.
 `db.rs` is not extracted (`glue.db_rs_extracted=false`).
 
-### Enrolled (36)
+### Enrolled (39)
 
 `[lib] path` = production file. Stamp pins the whole file. Theorems live in
 `formal/aeneas/lean/<Name>.lean` (not the generated `*Kernel.lean`).
@@ -144,6 +144,9 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 | `store_ae_ack` | store `ae_ack_kernel.rs` | `ae_ack_success_dirty_without_persist` / `_as_is_dente` |
 | `store_vote` | store `vote_kernel.rs` | `vote_decision_stale_term` / `_as_is_dente` |
 | `key` | `key.rs` | `pack_sequence_and_type_def` / `_as_is_dente` (shim names `CoreError::Internal` without thiserror; InternalKey Eq `impl_def` patched like Vote Option::eq) |
+| `lease` | dcs `lease_kernel.rs` | `lease_live_zero` / `_as_is_dente` (`Ord.max.default` patched to pass `lt`) |
+| `txn` | store `txn_kernel.rs` | `txn_commit_action_abort_reverts` / `_as_is_dente` (same Ord.max patch) |
+| `t1_modelo` | `t1_modelo_kernel.rs` | `t1_modelo_empty` / `_as_is_dente` (shim `#[path]` txn_kernel) |
 
 Partial `.lean` from a failed Aeneas run is not enrolled.
 
@@ -164,14 +167,13 @@ these; that is not an extract.
 | `pedradb-core/src/cf_kernel.rs` | Bottoms on `compact_family_key`, `cf_encode_effective`, `decode_cf_key`. Partial file, 3 errors. |
 | `pedradb-core/src/leveling.rs` | `[Error] Can't end abstraction 11 as it is set as non-endable`; Iterator `map`/`filter`/`collect`/`all`/`max`/`min`/`sum` missing. Partial file, 5 errors (3 unique). |
 | `pedradb-core/src/lsm_r1_kernel.rs` | `Returns inside of nested loops are not supported yet` (`lsm_compact` / `_as_is`); `Unreachable` in `lsm_reopen_as_is`; `Could not match the contexts` in `lsm_flush`. Partial file, 10 errors (5 unique). |
-| `pedradb-dcs/src/lease_kernel.rs` | Aeneas emits Lean, but `lake build LeaseKernel` fails: `core.cmp.Ord.max.default core.cmp.OrdU64` type mismatch (`Ord U64` vs `U64 → U64 → Result Bool`) in `next_lease_id_after`. Pin's Ord.max. Not rewritten. |
-| `pedradb-store/src/txn_kernel.rs` | Same `Ord.max.default` type mismatch (`TxnKernel.lean:143` and `:301`). |
+
 | `pedradb-capi/src/handles.rs` | Aeneas emits Lean with `sorry`; `lake build CapiHandlesKernel` fails on `IterMut` / `FnOnce.call_once` / `Enumerate` (iterator surface, same class as probe-order). |
 | `pedradb-core/src/probe_order_kernel.rs` | Live whole-file extract `CFailure` Internal error translating `core/src/iter/traits/iterator.rs:42`. Walk/closures stay Charon-refused. Not rewritten. |
 | `pedradb-core/src/sst/scan_kernel.rs` | Shim linked `wal/crc.rs`; Aeneas `CFailure` Internal error translating `scan_reads_file` closure/`Iterator::any` (lines 112:13–112:85). Partial file. Not rewritten. |
 
 
-### Refused — include-crate does not compile standalone (7)
+### Refused — include-crate does not compile standalone (6)
 
 The extract crate is `[lib] path = production file` with no parent crate.
 These files `use crate::…` or an external crate the probe did not link. Not a
@@ -186,7 +188,6 @@ enrolled via a shim that names `DcsError` without thiserror.
 | `pedradb-core/src/merge.rs` | Shim linked `key.rs`+`compact_kernel`+bytes; Charon type error on `Iterator` for `WindowKvIter` / `StreamingVisibleIter` (`merge.rs:619`). Not rewritten. |
 | `pedradb-core/src/batch.rs` | Shim linked `key.rs`; Aeneas `Early returns inside of loops` in `WriteRecord::decode`. Partial file. Not rewritten. |
 | `rocksdb-compat/src/locktab.rs` | Linked `parking_lot`+`bytes`; Aeneas `unsupported nested borrows` in `LockTable::lock`. Partial file. `wait_for_deadlock` not enrolled. |
-| `pedradb-store/src/t1_modelo_kernel.rs` | `crate::txn_kernel` |
 | `pedradb-raft/src/c1_modelo_kernel.rs` | `joint_election_ok` / `propose_ack_ok` from `membership_kernel` |
 
 Probe-order iterator/closure refuse is unchanged (see above). Do not re-pin:
@@ -224,6 +225,9 @@ Never: “Lean proved Raft / fold / the Bloom filter.”
 ./scripts/aeneas_store_ae_ack.sh --required
 ./scripts/aeneas_store_vote.sh --required
 ./scripts/aeneas_key.sh --required
+./scripts/aeneas_lease.sh --required
+./scripts/aeneas_txn.sh --required
+./scripts/aeneas_t1_modelo.sh --required
 ```
 
 ## Scale (`scale_kernel.rs`, RFC-0176)

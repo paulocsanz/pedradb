@@ -298,3 +298,21 @@ name = "KeyKernel"
 
 [[lean_lib]]
 name = "Key"
+
+[[lean_lib]]
+name = "LeaseKernel"
+
+[[lean_lib]]
+name = "Lease"
+
+[[lean_lib]]
+name = "TxnKernel"
+
+[[lean_lib]]
+name = "Txn"
+
+[[lean_lib]]
+name = "T1ModeloKernel"
+
+[[lean_lib]]
+name = "T1Modelo"

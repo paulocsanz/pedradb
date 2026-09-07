@@ -1,0 +1,12 @@
+[workspace]
+
+[package]
+name = "pedra-aeneas-t1-modelo-kernel"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "Shim exposing production t1_modelo_kernel.rs (+ txn_kernel.rs) to Charon"
+
+[lib]
+path = "src/lib.rs"

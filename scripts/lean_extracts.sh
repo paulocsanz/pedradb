@@ -26,6 +26,7 @@ LIBS=(
   L28 Tcg Cqe Iter Properties Scale DiskPressure Crc
   EnvCrash WalState D1Modelo WriteAck
   DcsApply StoreApply StoreCommit StoreAeAck StoreVote Key
+  Lease Txn T1Modelo
 )
 
 for lib in "${LIBS[@]}"; do

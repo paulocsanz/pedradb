@@ -1,0 +1,12 @@
+[workspace]
+
+[package]
+name = "pedra-aeneas-lease-kernel"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "Standalone crate whose [lib] path is production dcs lease_kernel.rs"
+
+[lib]
+path = "../../../crates/pedradb-dcs/src/lease_kernel.rs"
