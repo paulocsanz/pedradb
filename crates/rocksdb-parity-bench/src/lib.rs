@@ -2250,6 +2250,7 @@ impl YcsbRunner {
         let mut errors = 0u64;
         let mut latest = records;
         let mut rng = std::mem::take(&mut self.rng);
+        let phase0 = e.write_phase_snapshot();
         let t0 = Instant::now();
         for _ in 0..cfg_ops {
             let t = Instant::now();
@@ -2298,10 +2299,15 @@ impl YcsbRunner {
         }
         self.rng = rng;
         let wall = t0.elapsed();
-        let block = summarize(name, cfg_ops, wall, &mut lats);
+        let mut block = summarize(name, cfg_ops, wall, &mut lats);
         eprintln!(
             "[rocks-parity] {name} done ops={cfg_ops} updates={updates} inserts={inserts} scans={scan_ops} errors={errors}"
         );
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, read_pct);
+            eprint_write_diagnose(name, &d);
+            block = attach_diagnose(block, Some(&d));
+        }
         block
     }
 
