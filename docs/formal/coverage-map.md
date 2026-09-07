@@ -95,7 +95,7 @@ comportamento. "Callers" é o que o lint do freeze exige chamar a entrada.
 | **pin_gc** | `pedradb-core/src/compact_kernel.rs` | close | `db.rs` (`compact_reclaim`) |
 | **wait_for_deadlock** | `rocksdb-compat/src/locktab.rs` | model | `locktab.rs` |
 | **flush_publish** | `pedradb-core/src/flush_kernel.rs` | close | `db.rs` (`persist_manifest`) |
-| **iter_window** | `rocksdb-compat/src/iter_kernel.rs` | close | `rocksdb-compat/lib.rs` (`page_forward` / `page_last_n`) |
+| **iter_window** | `rocksdb-compat/src/iter_kernel.rs` | close, single_artifact | `rocksdb-compat/lib.rs` (`page_forward` / `page_last_n`) |
 
 Extratos Aeneas→Lean (segunda máquina — o próprio código de produção):
 `WalRecover`/`Apply`/`ApplyKernel`/`Bloom` e agora `GroupCommitKernel` +

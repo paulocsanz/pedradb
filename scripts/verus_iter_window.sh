@@ -2,7 +2,8 @@
 # Machine-check iterator window retain (RFC-0151 P1).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/rocksdb-compat/verus/iter_window.rs"
+# RFC-0171 P0.3 / RFC-0174: prove the file rustc links, not a twin-cópia.
+SRC="$ROOT/crates/rocksdb-compat/src/iter_kernel.rs"
 if [[ -x "${VERUS:-}" ]]; then
   :
 elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then

@@ -4580,8 +4580,9 @@
       "id": "iter_window",
       "finding": "RFC-0151 P1",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/rocksdb-compat/src/iter_kernel.rs",
-      "twin": "crates/rocksdb-compat/verus/iter_window.rs",
+      "twin": "crates/rocksdb-compat/src/iter_kernel.rs",
       "verus": "scripts/verus_iter_window.sh",
       "callers": [
         "crates/rocksdb-compat/src/lib.rs"

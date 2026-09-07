@@ -15,13 +15,13 @@ set_option maxRecDepth 2048
 namespace pedra_aeneas_iter_kernel
 
 /-- [pedra_aeneas_iter_kernel::iter_window_keep]:
-    Source: '../../../crates/rocksdb-compat/src/iter_kernel.rs', lines 10:0-12:1
+    Source: '../../../crates/rocksdb-compat/src/iter_kernel.rs', lines 61:0-63:1
     Visibility: public -/
 def iter_window_keep (snapshot_live : Bool) : Result Bool := do
   ok snapshot_live
 
 /-- [pedra_aeneas_iter_kernel::iter_window_keep_as_is]:
-    Source: '../../../crates/rocksdb-compat/src/iter_kernel.rs', lines 16:0-18:1
+    Source: '../../../crates/rocksdb-compat/src/iter_kernel.rs', lines 68:0-70:1
     Visibility: public -/
 def iter_window_keep_as_is (_snapshot_live : Bool) : Result Bool := do
   ok true
