@@ -61,6 +61,12 @@ pub fn seed_async_enabled() -> bool {
     std::env::var("ROCKS_PARITY_SEED_ASYNC").as_deref() == Ok("1")
 }
 
+/// RFC-0178 P0.4: re-seed before every mc shape. Default off.
+#[must_use]
+pub fn mc_fresh_enabled() -> bool {
+    std::env::var("ROCKS_PARITY_MC_FRESH").as_deref() == Ok("1")
+}
+
 /// JSON note for the seed barrier (pure — env read once at the call site).
 #[must_use]
 pub fn seed_async_note(enabled: bool) -> Option<&'static str> {
@@ -2180,7 +2186,7 @@ impl YcsbRunner {
         blocks
     }
 
-    pub fn seed<E: Engine>(&mut self, e: &E) {
+    pub fn seed<E: Engine>(&self, e: &E) {
         let val = vec![b'y'; self.cfg.payload];
         for i in 0..self.cfg.records {
             assert!(e.put(&ykey(i), &val), "seed put {i}");
@@ -2362,6 +2368,9 @@ impl YcsbRunner {
             ("deps_cache_overwrite", 0, false, true),
         ];
         for (name, read_pct, rmw, overwrite) in shapes {
+            if mc_fresh_enabled() {
+                self.seed(e);
+            }
             let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
             let t0 = Instant::now();
             let mut lats = Vec::with_capacity(cfg_ops * clients);
@@ -3027,6 +3036,15 @@ mod tests {
             note.starts_with("seed_async=1") && note.contains("column sync"),
             "{note}"
         );
+    }
+
+    #[test]
+    fn rfc0178_mc_fresh_enabled_reads_env() {
+        std::env::remove_var("ROCKS_PARITY_MC_FRESH");
+        assert!(!mc_fresh_enabled());
+        std::env::set_var("ROCKS_PARITY_MC_FRESH", "1");
+        assert!(mc_fresh_enabled());
+        std::env::remove_var("ROCKS_PARITY_MC_FRESH");
     }
 
     /// RFC-0163 P1.4: the ladder csv wins over the single value, canonical

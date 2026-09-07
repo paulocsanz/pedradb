@@ -283,11 +283,6 @@ pub(crate) fn add_settle_warm_bytes(n: u64) {
 /// Process-wide bytes already streamed through the get fd (ingest or settle).
 static SETTLE_WARM_STREAMED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-#[must_use]
-pub(crate) fn settle_warm_streamed() -> u64 {
-    SETTLE_WARM_STREAMED.load(std::sync::atomic::Ordering::Relaxed)
-}
-
 /// SST paths to stream through the get fd (collected under a short lock).
 pub(crate) struct WarmPlan {
     pub src: std::sync::Arc<dyn SstFileSource>,
@@ -295,12 +290,15 @@ pub(crate) struct WarmPlan {
 }
 
 impl WarmPlan {
-    pub(crate) fn run(self) {
+    pub(crate) fn run(self) -> Vec<PathBuf> {
+        let mut ok = Vec::with_capacity(self.jobs.len());
         for (path, len) in self.jobs {
             if self.src.warm(&path, len).is_ok() {
                 add_settle_warm_bytes(len);
+                ok.push(path);
             }
         }
+        ok
     }
 }
 

@@ -51,7 +51,7 @@
 //! - [`Db::stats`] / [`Db::verify_checksums`] — observability and integrity.
 //! - SST v3 embeds a Bloom filter; get prunes by bounds + filter.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -1822,6 +1822,8 @@ pub struct Db<E: Env = StdEnv> {
     last_settle_warm_ns: AtomicU64,
     /// Nanoseconds of the last leveled compact, excluding warm.
     last_settle_compact_ns: AtomicU64,
+    /// SST paths already streamed through the get fd (RFC-0178).
+    warmed_ssts: Mutex<HashSet<PathBuf>>,
     /// Open [`SnapshotPin`]s: pin id → sequence (open-items §2.1).
     snapshot_pins: std::collections::BTreeMap<u64, SequenceNumber>,
     /// Next pin id (monotonic; never reused for this process open).
@@ -2459,6 +2461,7 @@ impl<E: Env> Db<E> {
             last_settle_warm_bytes: AtomicU64::new(0),
             last_settle_warm_ns: AtomicU64::new(0),
             last_settle_compact_ns: AtomicU64::new(0),
+            warmed_ssts: Mutex::new(HashSet::new()),
             snapshot_pins: std::collections::BTreeMap::new(),
             next_snapshot_pin_id: 1,
             earliest_readable_seq,
@@ -5509,9 +5512,7 @@ impl<E: Env> Db<E> {
                 self.maybe_bounded_cache_after_write();
                 // RFC-0168 P2.4: fill the get fd during hydrate (flush),
                 // so settle's compact does not re-stream.
-                if let Some(plan) = self.take_warm_plan() {
-                    plan.run();
-                }
+                self.run_warm_plan();
                 Ok(())
             }
             Err(e) => Err(self.fence_io_err(e)),
@@ -7240,34 +7241,47 @@ impl<E: Env> Db<E> {
     /// Always records `last_settle_warm_{bytes,ns}` (0 bytes if skipped).
     fn maybe_warm_ssts(&mut self) {
         let t0 = Instant::now();
-        let mut streamed = 0u64;
-        if crate::env::settle_warm_on() {
-            let mut jobs: Vec<(std::path::PathBuf, u64)> = Vec::with_capacity(self.ssts.len());
+        if crate::env::settle_warm_on() && !crate::env::settle_warm_unlimited() {
             let mut total = 0u64;
             for table in &self.ssts {
-                let Ok(len) = self.env.metadata_len(table.path()) else {
-                    continue;
-                };
-                total = total.saturating_add(len);
-                jobs.push((table.path().to_path_buf(), len));
-            }
-            if !jobs.is_empty() {
-                if !crate::env::settle_warm_unlimited()
-                    && total > crate::env::settle_warm_max_bytes()
-                {
-                    self.enter_bounded_cache_mode(total, crate::env::settle_warm_max_bytes());
-                } else if let Some(plan) = self.take_warm_plan() {
-                    streamed = plan.jobs.iter().map(|(_, l)| *l).sum();
-                    plan.run();
+                if let Ok(len) = self.env.metadata_len(table.path()) {
+                    total = total.saturating_add(len);
                 }
             }
+            if total > crate::env::settle_warm_max_bytes() {
+                self.enter_bounded_cache_mode(total, crate::env::settle_warm_max_bytes());
+                self.last_settle_warm_bytes.store(0, Ordering::Relaxed);
+                self.last_settle_warm_ns.store(
+                    u64::try_from(t0.elapsed().as_nanos()).unwrap_or(u64::MAX),
+                    Ordering::Relaxed,
+                );
+                return;
+            }
         }
+        let streamed = self.run_warm_plan();
         self.last_settle_warm_bytes
             .store(streamed, Ordering::Relaxed);
         self.last_settle_warm_ns.store(
             u64::try_from(t0.elapsed().as_nanos()).unwrap_or(u64::MAX),
             Ordering::Relaxed,
         );
+    }
+
+    fn run_warm_plan(&mut self) -> u64 {
+        let Some(plan) = self.take_warm_plan() else {
+            return 0;
+        };
+        let streamed: u64 = plan.jobs.iter().map(|(_, l)| *l).sum();
+        let warmed = plan.run();
+        self.note_warmed_ssts(&warmed);
+        streamed
+    }
+
+    pub(crate) fn note_warmed_ssts(&mut self, paths: &[PathBuf]) {
+        let mut g = self.warmed_ssts.lock();
+        for p in paths {
+            g.insert(p.clone());
+        }
     }
 
     /// After a write that published SSTs: if the live set already exceeds
@@ -7305,15 +7319,17 @@ impl<E: Env> Db<E> {
         if jobs.is_empty() {
             return None;
         }
+        if !crate::env::settle_warm_unlimited() && total > crate::env::settle_warm_max_bytes() {
+            self.note_ram_warm_skip(total, crate::env::settle_warm_max_bytes());
+            self.drop_sst_page_cache();
+            return None;
+        }
         if !crate::env::settle_warm_unlimited() {
-            if total > crate::env::settle_warm_max_bytes() {
-                self.note_ram_warm_skip(total, crate::env::settle_warm_max_bytes());
-                self.drop_sst_page_cache();
-                return None;
-            }
-            if crate::env::settle_warm_streamed() >= total {
-                return None;
-            }
+            let warmed = self.warmed_ssts.lock();
+            jobs.retain(|(p, _)| !warmed.contains(p));
+        }
+        if jobs.is_empty() {
+            return None;
         }
         Some(crate::env::WarmPlan { src, jobs })
     }
@@ -7370,6 +7386,7 @@ impl<E: Env> Db<E> {
     }
 
     fn drop_sst_page_cache(&self) {
+        self.warmed_ssts.lock().clear();
         for table in &self.ssts {
             let _ = self
                 .env
@@ -13018,13 +13035,51 @@ mod tests {
         db.flush().unwrap();
         db.compact_leveled().unwrap();
         let n = crate::env::take_settle_warm_bytes();
+        assert!(n > 0, "flush/first compact must stream live SSTs, got {n}");
+        db.compact_leveled().unwrap();
         let st = db.stats();
         crate::env::force_settle_warm(None);
-        assert!(n > 0, "flush must stream live SSTs, got {n}");
         assert_eq!(
             st.settle_warm_bytes, 0,
-            "settle must not re-stream after flush warm"
+            "second compact must not re-stream unchanged SST paths"
         );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0178: compact rewrite installs new SST paths; those must warm.
+    #[test]
+    fn rfc0178_compact_new_paths_are_warmed() {
+        let dir = temp_dir();
+        let env = BulkProbeEnv::new();
+        let mut db = Db::open_with_env_bounded(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(4 * 1024),
+                sst_payload_budget_bytes: Some(1),
+                ..OpenOptions::default()
+            },
+            env,
+        )
+        .unwrap();
+        crate::env::force_settle_warm(None);
+        for i in 0..16u32 {
+            db.put(format!("a/{i:04}").as_bytes(), vec![b'a'; 64])
+                .unwrap();
+        }
+        db.flush().unwrap();
+        db.compact_leveled().unwrap();
+        let _ = crate::env::take_settle_warm_bytes();
+        for i in 0..64u32 {
+            db.put(format!("z/{i:04}").as_bytes(), vec![b'z'; 64])
+                .unwrap();
+        }
+        db.flush().unwrap();
+        db.compact_leveled().unwrap();
+        let n = crate::env::take_settle_warm_bytes();
+        crate::env::force_settle_warm(None);
+        assert!(n > 0, "new SST paths after compact must stream, got {n}");
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
