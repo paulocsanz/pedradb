@@ -101,7 +101,7 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 `daa85d7` / Lean 4.31.0. Production files were not rewritten to please Charon.
 `db.rs` is not extracted (`glue.db_rs_extracted=false`).
 
-### Enrolled (39)
+### Enrolled (42)
 
 `[lib] path` = production file. Stamp pins the whole file. Theorems live in
 `formal/aeneas/lean/<Name>.lean` (not the generated `*Kernel.lean`).
@@ -147,6 +147,9 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 | `lease` | dcs `lease_kernel.rs` | `lease_live_zero` / `_as_is_dente` (`Ord.max.default` patched to pass `lt`) |
 | `txn` | store `txn_kernel.rs` | `txn_commit_action_abort_reverts` / `_as_is_dente` (same Ord.max patch) |
 | `t1_modelo` | `t1_modelo_kernel.rs` | `t1_modelo_empty` / `_as_is_dente` (shim `#[path]` txn_kernel) |
+| `membership` | raft `membership_kernel.rs` | `joint_election_ok_needs_both` / `_as_is_dente` (Charon `--exclude elect_claim_banner`; Ord.max patch) |
+| `store_membership` | store `membership_kernel.rs` | same theorems (clone) |
+| `c1_modelo` | `c1_modelo_kernel.rs` | `c1_modelo_joint_add_refuses` / `_as_is_dente` |
 
 Partial `.lean` from a failed Aeneas run is not enrolled.
 
@@ -157,8 +160,7 @@ these; that is not an extract.
 
 | production | measured failure |
 |---|---|
-| `pedradb-raft/src/membership_kernel.rs` | `[Error] There should be no bottoms in the value` on `elect_claim_banner` / `_as_is` (raft lines 451–463). Partial file, 2 errors. |
-| `pedradb-store/src/membership_kernel.rs` | Same bottoms on `elect_claim_banner` / `_as_is` (store lines 445–457). Partial file, 2 errors. |
+
 | `pedradb-http/src/auth_kernel.rs` | `CFailure` `Unimplemented` translating a method sig; source `core/src/str/pattern.rs:99`. |
 | `pedradb-http/src/fail_closed.rs` | Same `str/pattern.rs:99` `Unimplemented` on method sig. |
 | `pedradb-http/src/form_kernel.rs` | Same `str/pattern.rs:99` `Unimplemented` on method sig. |
@@ -173,7 +175,7 @@ these; that is not an extract.
 | `pedradb-core/src/sst/scan_kernel.rs` | Shim linked `wal/crc.rs`; Aeneas `CFailure` Internal error translating `scan_reads_file` closure/`Iterator::any` (lines 112:13–112:85). Partial file. Not rewritten. |
 
 
-### Refused — include-crate does not compile standalone (6)
+### Refused — include-crate does not compile standalone (5)
 
 The extract crate is `[lib] path = production file` with no parent crate.
 These files `use crate::…` or an external crate the probe did not link. Not a
@@ -188,7 +190,7 @@ enrolled via a shim that names `DcsError` without thiserror.
 | `pedradb-core/src/merge.rs` | Shim linked `key.rs`+`compact_kernel`+bytes; Charon type error on `Iterator` for `WindowKvIter` / `StreamingVisibleIter` (`merge.rs:619`). Not rewritten. |
 | `pedradb-core/src/batch.rs` | Shim linked `key.rs`; Aeneas `Early returns inside of loops` in `WriteRecord::decode`. Partial file. Not rewritten. |
 | `rocksdb-compat/src/locktab.rs` | Linked `parking_lot`+`bytes`; Aeneas `unsupported nested borrows` in `LockTable::lock`. Partial file. `wait_for_deadlock` not enrolled. |
-| `pedradb-raft/src/c1_modelo_kernel.rs` | `joint_election_ok` / `propose_ack_ok` from `membership_kernel` |
+
 
 Probe-order iterator/closure refuse is unchanged (see above). Do not re-pin:
 upstream `aeneas@f9a8e33` did not widen this set.
@@ -228,6 +230,9 @@ Never: “Lean proved Raft / fold / the Bloom filter.”
 ./scripts/aeneas_lease.sh --required
 ./scripts/aeneas_txn.sh --required
 ./scripts/aeneas_t1_modelo.sh --required
+./scripts/aeneas_membership.sh --required
+./scripts/aeneas_store_membership.sh --required
+./scripts/aeneas_c1_modelo.sh --required
 ```
 
 ## Scale (`scale_kernel.rs`, RFC-0176)

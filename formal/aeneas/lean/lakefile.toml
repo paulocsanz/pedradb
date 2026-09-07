@@ -316,3 +316,21 @@ name = "T1ModeloKernel"
 
 [[lean_lib]]
 name = "T1Modelo"
+
+[[lean_lib]]
+name = "MembershipKernel"
+
+[[lean_lib]]
+name = "Membership"
+
+[[lean_lib]]
+name = "StoreMembershipKernel"
+
+[[lean_lib]]
+name = "StoreMembership"
+
+[[lean_lib]]
+name = "C1ModeloKernel"
+
+[[lean_lib]]
+name = "C1Modelo"

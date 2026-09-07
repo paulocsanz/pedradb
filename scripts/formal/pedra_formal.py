@@ -1185,6 +1185,18 @@ AENEAS_EXTRACTS = (
         "crates/pedradb-store/src/t1_modelo_kernel.rs",
         "formal/aeneas/out/SOURCE.t1_modelo",
     ),
+    (
+        "crates/pedradb-raft/src/membership_kernel.rs",
+        "formal/aeneas/out/SOURCE.membership",
+    ),
+    (
+        "crates/pedradb-store/src/membership_kernel.rs",
+        "formal/aeneas/out/SOURCE.store_membership",
+    ),
+    (
+        "crates/pedradb-raft/src/c1_modelo_kernel.rs",
+        "formal/aeneas/out/SOURCE.c1_modelo",
+    ),
 )
 
 
