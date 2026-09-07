@@ -5507,6 +5507,11 @@ impl<E: Env> Db<E> {
         match self.flush_pipeline() {
             Ok(()) => {
                 self.maybe_bounded_cache_after_write();
+                // RFC-0168 P2.4: fill the get fd during hydrate (flush),
+                // so settle's compact does not re-stream.
+                if let Some(plan) = self.take_warm_plan() {
+                    plan.run();
+                }
                 Ok(())
             }
             Err(e) => Err(self.fence_io_err(e)),
@@ -12983,6 +12988,42 @@ mod tests {
             st.ram_line().contains("warm_bytes="),
             "ram_line must name warm_bytes, got {}",
             st.ram_line()
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0168 P2.4: flush streams the get fd; settle compact does not re-stream.
+    #[test]
+    fn rfc0168_flush_warm_skips_settle_rewarm() {
+        let dir = temp_dir();
+        let env = BulkProbeEnv::new();
+        let mut db = Db::open_with_env_bounded(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(4 * 1024),
+                sst_payload_budget_bytes: Some(1),
+                ..OpenOptions::default()
+            },
+            env,
+        )
+        .unwrap();
+        for i in 0..32u32 {
+            db.put(format!("k{i:04}").as_bytes(), vec![b'v'; 64])
+                .unwrap();
+        }
+        crate::env::force_settle_warm(None);
+        let _ = crate::env::take_settle_warm_bytes();
+        db.flush().unwrap();
+        db.compact_leveled().unwrap();
+        let n = crate::env::take_settle_warm_bytes();
+        let st = db.stats();
+        crate::env::force_settle_warm(None);
+        assert!(n > 0, "flush must stream live SSTs, got {n}");
+        assert_eq!(
+            st.settle_warm_bytes, 0,
+            "settle must not re-stream after flush warm"
         );
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
