@@ -4512,7 +4512,11 @@ fn compat_compact_once<E: PedraEnv>(inner: &ConcurrentDb<E>, gate: &Mutex<()>) -
     if l0 == 0 {
         return false;
     }
-    let _gate = gate.lock();
+    // try_lock: explicit DB::compact() must not wait out the whole L0
+    // drain (~85 s @100M). The worker retries on the next 5 ms poll.
+    let Some(_gate) = gate.try_lock() else {
+        return false;
+    };
     let job = inner.with_write(|db| {
         if db.level_file_count(0) == 0 {
             return None;
