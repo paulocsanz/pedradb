@@ -1251,6 +1251,10 @@ AENEAS_EXTRACTS = (
         "crates/pedradb-http/src/path_kernel.rs",
         "formal/aeneas/out/SOURCE.path",
     ),
+    (
+        "crates/pedradb-world/src/world_kernel.rs",
+        "formal/aeneas/out/SOURCE.world",
+    ),
 )
 
 

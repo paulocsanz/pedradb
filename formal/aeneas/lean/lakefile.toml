@@ -418,3 +418,9 @@ name = "PathKernel"
 
 [[lean_lib]]
 name = "Path"
+
+[[lean_lib]]
+name = "WorldKernel"
+
+[[lean_lib]]
+name = "World"

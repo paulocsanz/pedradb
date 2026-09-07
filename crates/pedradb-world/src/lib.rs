@@ -20,6 +20,8 @@ pub mod scheduler;
 pub mod swarm;
 /// RFC-0079: native World is not TCG guest coverage.
 pub mod tcg;
+/// RFC-0059 P2.2: trajectory monotonicity kernel.
+mod world_kernel;
 pub mod wenv;
 
 pub use buggify::{buggify_schedule_from_seed, BuggifyArm, BuggifySchedule};
@@ -28,6 +30,10 @@ pub use scheduler::{pct_ready_queue, pct_ready_queue_hash};
 pub use tcg::{
     allow_claim_tcg_flag, allow_claim_tcg_flag_as_is, tcg_guest_admitted, tcg_guest_admitted_as_is,
     world_runs_guest_ssh, world_runs_guest_ssh_as_is,
+};
+pub use world_kernel::{
+    check_trajectory, check_trajectory_as_is, trajectory_violation, trajectory_violation_as_is,
+    TrajectorySample,
 };
 
 use std::collections::HashMap;
@@ -312,86 +318,6 @@ impl Default for WorldConfig {
             es3: false,
         }
     }
-}
-
-/// Per-node intra-run trajectory sample (RFC-0059 P2.2): raft
-/// coordinates observed right after a net exchange. A live node's term,
-/// snapshot_index and applied_index are monotone across the whole run —
-/// including install-snapshot catch-up (stale snapshots are rejected by
-/// the store's commit guard) and membership exit/rejoin (state is kept,
-/// only the role demotes).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TrajectorySample {
-    /// Schedule step the sample was taken after.
-    pub step: u32,
-    /// Node id (1-based).
-    pub node: u64,
-    /// Range id.
-    pub range: u64,
-    /// Raft term at sample time.
-    pub term: u64,
-    /// Snapshot watermark at sample time.
-    pub snapshot_index: u64,
-    /// Applied watermark at sample time.
-    pub applied_index: u64,
-}
-
-/// Which coordinate regressed between two samples of the same
-/// (node, range): `None` when the pair is monotone.
-#[must_use]
-pub fn trajectory_violation(
-    prev: &TrajectorySample,
-    cur: &TrajectorySample,
-) -> Option<&'static str> {
-    if cur.term < prev.term {
-        Some("term")
-    } else if cur.snapshot_index < prev.snapshot_index {
-        Some("snapshot_index")
-    } else if cur.applied_index < prev.applied_index {
-        Some("applied_index")
-    } else {
-        None
-    }
-}
-
-/// Fold a full sample sequence (any interleaving of nodes/ranges) into
-/// per-(node, range) monotonicity violations. The run itself checks the
-/// same invariant incrementally through [`trajectory_violation`]; this
-/// fold is the exported form (mutant tests + forensics on a captured
-/// trajectory).
-#[must_use]
-pub fn check_trajectory(samples: &[TrajectorySample]) -> Vec<String> {
-    let mut prev: HashMap<(u64, u64), TrajectorySample> = HashMap::new();
-    let mut out = Vec::new();
-    for s in samples {
-        match prev.get(&(s.node, s.range)) {
-            Some(p) => {
-                if let Some(what) = trajectory_violation(p, s) {
-                    out.push(format!(
-                        "n{} r{} {} regressed {}->{} @step {} (after {})",
-                        s.node,
-                        s.range,
-                        what,
-                        match what {
-                            "term" => p.term,
-                            "snapshot_index" => p.snapshot_index,
-                            _ => p.applied_index,
-                        },
-                        match what {
-                            "term" => s.term,
-                            "snapshot_index" => s.snapshot_index,
-                            _ => s.applied_index,
-                        },
-                        s.step,
-                        p.step
-                    ));
-                }
-            }
-            None => {}
-        }
-        prev.insert((s.node, s.range), s.clone());
-    }
-    out
 }
 
 /// Per-node inbound processing order inside each Net exchange round

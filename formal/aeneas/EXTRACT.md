@@ -165,6 +165,7 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 | `form` | `form_kernel.rs` | `form_plus_byte_plus` / `query_u64_conflict_diff` (`--exclude str::contains` / `pattern`; contains Pattern hole and `query_values_conflict` Iterator.any patched to an index loop) |
 | `auth` | `auth_kernel.rs` | `ascii_lower_is_extract` / `is_bearer_scheme_as_is_is_or` (`--exclude` Pattern methods; `bearer_token_from_value` axiom and `authorization_matches` hole patched) |
 | `path` | `path_kernel.rs` | `strip_authority_for_routing_true` / `_as_is_dente` (`--exclude` Pattern methods; catalog-fn holes patched to `find`/`split_once`/`rsplit_once` axioms + index loops) |
+| `world` | `world_kernel.rs` | `trajectory_violation_applied` / `_as_is_dente` (`[lib] path` production kernel split from `lib.rs`; `Option<&'static str>` and HashMap fold patched) |
 
 Partial `.lean` from a failed Aeneas run is not enrolled. Charon `--start-from` of the catalog entries is an extract of the live file when Aeneas emits a complete Kernel (no `sorry`) containing a `def` for every catalog `entry` on that path.
 
@@ -188,9 +189,8 @@ enrolled via a shim that names `DcsError` without thiserror.
 
 | production | measured rustc error |
 |---|---|
-| `pedradb-world/src/world_kernel.rs` | `use crate::TrajectorySample` (file is dirty-tree only; not in git HEAD) |
 
-
+None remaining: `world_kernel.rs` is production (`[lib] path`) and enrolled.
 
 The `probe_order` walk is still Iterator-refused; the catalog pair `first_probe_on_equal_lo` is enrolled via `--start-from`. Do not re-pin: upstream `aeneas@f9a8e33` did not widen the iterator set.
 
@@ -247,6 +247,7 @@ Never: “Lean proved Raft / fold / the Bloom filter.”
 ./scripts/aeneas_form.sh --required
 ./scripts/aeneas_auth.sh --required
 ./scripts/aeneas_path.sh --required
+./scripts/aeneas_world.sh --required
 ```
 
 ## Scale (`scale_kernel.rs`, RFC-0176)
