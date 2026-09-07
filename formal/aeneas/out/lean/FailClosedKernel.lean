@@ -17,6 +17,121 @@ noncomputable section
 
 namespace pedra_aeneas_fail_closed_kernel
 
+/-- [core::array::equality::{impl core::cmp::PartialEq<[U; N]> for [T]}::ne]:
+    Source: '/rustc/library/core/src/array/equality.rs', lines 55:4-55:40
+    Name pattern: [core::array::equality::{core::cmp::PartialEq<[@T], [@U; @N]>}::ne]
+    Visibility: public -/
+@[rust_fun "core::array::equality::{core::cmp::PartialEq<[@T], [@U; @N]>}::ne"]
+axiom Slice.Insts.CoreCmpPartialEqArray.ne
+  {T : Type} {U : Type} {N : Std.Usize} (cmpPartialEqInst : core.cmp.PartialEq
+  T U) :
+  Slice T → Array U N → Result Bool
+
+/-- [core::array::equality::{impl core::cmp::PartialEq<[U; N]> for [T]}::eq]:
+    Source: '/rustc/library/core/src/array/equality.rs', lines 48:4-48:40
+    Name pattern: [core::array::equality::{core::cmp::PartialEq<[@T], [@U; @N]>}::eq]
+    Visibility: public -/
+@[rust_fun "core::array::equality::{core::cmp::PartialEq<[@T], [@U; @N]>}::eq"]
+axiom Slice.Insts.CoreCmpPartialEqArray.eq
+  {T : Type} {U : Type} {N : Std.Usize} (cmpPartialEqInst : core.cmp.PartialEq
+  T U) :
+  Slice T → Array U N → Result Bool
+
+/-- Trait implementation: [core::array::equality::{impl core::cmp::PartialEq<[U; N]> for [T]}]
+    Source: '/rustc/library/core/src/array/equality.rs', lines 43:0-45:28
+    Name pattern: [core::cmp::PartialEq<[@T], [@U; @N]>] -/
+@[reducible, rust_trait_impl "core::cmp::PartialEq<[@T], [@U; @N]>"]
+def Slice.Insts.CoreCmpPartialEqArray {T : Type} {U : Type} (N : Std.Usize)
+  (cmpPartialEqInst : core.cmp.PartialEq T U) : core.cmp.PartialEq (Slice T)
+  (Array U N) := {
+  eq := Slice.Insts.CoreCmpPartialEqArray.eq cmpPartialEqInst
+  ne := Slice.Insts.CoreCmpPartialEqArray.ne cmpPartialEqInst
+}
+
+/-- [core::iter::traits::iterator::Iterator::position]:
+    Source: '/rustc/library/core/src/iter/traits/iterator.rs', lines 3134:4-3137:37
+    Name pattern: [core::iter::traits::iterator::Iterator::position]
+    Visibility: public -/
+@[trait_default, rust_fun "core::iter::traits::iterator::Iterator::position"]
+axiom core.iter.traits.iterator.Iterator.position.default
+  {Self : Type} {P : Type} {Clause0_Item : Type} (IteratorInst :
+  core.iter.traits.iterator.Iterator Self Clause0_Item)
+  (opsfunctionFnMutPTupleClause0_ItemBoolInst : core.ops.function.FnMut P
+  Clause0_Item Bool) :
+  Self → P → Result ((Option Std.Usize) × Self)
+
+/-- [core::option::{core::option::Option<T>}::map]:
+    Source: '/rustc/library/core/src/option.rs', lines 1157:4-1159:53
+    Name pattern: [core::option::{core::option::Option<@T>}::map]
+    Visibility: public -/
+@[rust_fun "core::option::{core::option::Option<@T>}::map"]
+axiom core.option.Option.map
+  {T : Type} {U : Type} {F : Type} (opsfunctionFnOnceFTupleTUInst :
+  core.ops.function.FnOnce F T U) :
+  Option T → F → Result (Option U)
+
+/-- [core::option::{impl core::cmp::PartialEq<core::option::Option<T>> for core::option::Option<T>}::eq]:
+    Source: '/rustc/library/core/src/option.rs', lines 2440:4-2440:38
+    Name pattern: [core::option::{core::cmp::PartialEq<core::option::Option<@T>, core::option::Option<@T>>}::eq]
+    Visibility: public -/
+@[rust_fun
+  "core::option::{core::cmp::PartialEq<core::option::Option<@T>, core::option::Option<@T>>}::eq"]
+axiom core.option.Option.Insts.CoreCmpPartialEqOption.eq
+  {T : Type} (cmpPartialEqInst : core.cmp.PartialEq T T) :
+  Option T → Option T → Result Bool
+
+/-- Trait implementation: [core::slice::cmp::{impl core::cmp::PartialEq<[U]> for [T]}]
+    Source: '/rustc/library/core/src/slice/cmp.rs', lines 14:0-16:28
+    Name pattern: [core::cmp::PartialEq<[@T], [@U]>] -/
+@[reducible, rust_trait_impl "core::cmp::PartialEq<[@T], [@U]>"]
+impl_def Slice.Insts.CoreCmpPartialEqSlice {T : Type} {U : Type}
+  (cmpPartialEqInst : core.cmp.PartialEq T U) : core.cmp.PartialEq (Slice T)
+  (Slice U) := {
+  eq := core.slice.cmp.PartialEqSlice.eq cmpPartialEqInst
+  ne := core.cmp.PartialEq.ne.trait_default (Slice.Insts.CoreCmpPartialEqSlice
+    cmpPartialEqInst)
+}
+
+/-- [core::slice::iter::Windows]
+    Source: '/rustc/library/core/src/slice/iter.rs', lines 1329:0-1329:29
+    Name pattern: [core::slice::iter::Windows]
+    Visibility: public -/
+@[rust_type "core::slice::iter::Windows"]
+axiom core.slice.iter.Windows (T : Type) : Type
+
+/-- [core::slice::iter::{impl core::iter::traits::iterator::Iterator<&'a [T]> for core::slice::iter::Windows<'a, T>}::next]:
+    Source: '/rustc/library/core/src/slice/iter.rs', lines 1354:4-1354:41
+    Name pattern: [core::slice::iter::{core::iter::traits::iterator::Iterator<core::slice::iter::Windows<'a, @T>, &'a [@T]>}::next]
+    Visibility: public -/
+@[rust_fun
+  "core::slice::iter::{core::iter::traits::iterator::Iterator<core::slice::iter::Windows<'a, @T>, &'a [@T]>}::next"]
+axiom
+  core.slice.iter.Windows.Insts.CoreIterTraitsIteratorIteratorSharedASlice.next
+  {T : Type} :
+  core.slice.iter.Windows T → Result ((Option (Slice T)) ×
+    (core.slice.iter.Windows T))
+
+/-- Trait implementation: [core::slice::iter::{impl core::iter::traits::iterator::Iterator<&'a [T]> for core::slice::iter::Windows<'a, T>}]
+    Source: '/rustc/library/core/src/slice/iter.rs', lines 1350:0-1350:39
+    Name pattern: [core::iter::traits::iterator::Iterator<core::slice::iter::Windows<'a, @T>, &'a [@T]>] -/
+@[reducible, rust_trait_impl
+  "core::iter::traits::iterator::Iterator<core::slice::iter::Windows<'a, @T>, &'a [@T]>"]
+impl_def
+  core.slice.iter.Windows.Insts.CoreIterTraitsIteratorIteratorSharedASlice (T :
+  Type) : core.iter.traits.iterator.Iterator (core.slice.iter.Windows T) (Slice
+  T) := {
+  next :=
+    core.slice.iter.Windows.Insts.CoreIterTraitsIteratorIteratorSharedASlice.next
+}
+
+/-- [core::slice::{[T]}::windows]:
+    Source: '/rustc/library/core/src/slice/mod.rs', lines 1116:4-1116:62
+    Name pattern: [core::slice::{[@T]}::windows]
+    Visibility: public -/
+@[rust_fun "core::slice::{[@T]}::windows"]
+axiom core.slice.Slice.windows
+  {T : Type} : Slice T → Std.Usize → Result (core.slice.iter.Windows T)
+
 /-- [core::str::{str}::is_empty]:
     Source: '/rustc/library/core/src/str/mod.rs', lines 173:4-173:40
     Name pattern: [core::str::{str}::is_empty]
@@ -81,6 +196,299 @@ def present_bad_int_is_error : Result Bool := do
     Visibility: public -/
 def present_bad_int_is_error_as_is : Result Bool := do
   ok false
+
+/-- [pedra_aeneas_fail_closed_kernel::header_break_end::closure#3]
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 58:59-58:68 -/
+@[reducible]
+def header_break_end.closure_3 := Unit
+
+/-- [pedra_aeneas_fail_closed_kernel::header_break_end::{impl core::ops::function::FnOnce<(usize,), usize> for pedra_aeneas_fail_closed_kernel::header_break_end::closure#3}::call_once]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 58:59-58:68 -/
+def
+  header_break_end.closure_3.Insts.CoreOpsFunctionFnOnceTupleUsizeUsize.call_once
+  (c : header_break_end.closure_3) (tupled_args : Std.Usize) :
+  Result Std.Usize
+  := do
+  tupled_args + 2#usize
+
+/-- Trait implementation: [pedra_aeneas_fail_closed_kernel::header_break_end::{impl core::ops::function::FnOnce<(usize,), usize> for pedra_aeneas_fail_closed_kernel::header_break_end::closure#3}]
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 58:59-58:68 -/
+@[reducible]
+def header_break_end.closure_3.Insts.CoreOpsFunctionFnOnceTupleUsizeUsize :
+  core.ops.function.FnOnce header_break_end.closure_3 Std.Usize Std.Usize := {
+  call_once :=
+    header_break_end.closure_3.Insts.CoreOpsFunctionFnOnceTupleUsizeUsize.call_once
+}
+
+/-- [pedra_aeneas_fail_closed_kernel::header_break_end::closure#2]
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 58:37-58:53 -/
+@[reducible]
+def header_break_end.closure_2 := Unit
+
+/-- [pedra_aeneas_fail_closed_kernel::header_break_end::{impl core::ops::function::FnMut<(&'_ [u8],), bool> for pedra_aeneas_fail_closed_kernel::header_break_end::closure#2}::call_mut]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 58:37-58:53 -/
+def
+  header_break_end.closure_2.Insts.CoreOpsFunctionFnMutTupleSharedSliceU8Bool.call_mut
+  (c : header_break_end.closure_2) (tupled_args : Slice Std.U8) :
+  Result (Bool × header_break_end.closure_2)
+  := do
+  let a := Array.repeat 2#usize 10#u8
+  let b ←
+    Slice.Insts.CoreCmpPartialEqArray.eq core.cmp.PartialEqU8 tupled_args a
+  ok (b, c)
+
+/-- [pedra_aeneas_fail_closed_kernel::header_break_end::{impl core::ops::function::FnOnce<(&'_ [u8],), bool> for pedra_aeneas_fail_closed_kernel::header_break_end::closure#2}::call_once]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 58:37-58:53 -/
+def
+  header_break_end.closure_2.Insts.CoreOpsFunctionFnOnceTupleSharedSliceU8Bool.call_once
+  (c : header_break_end.closure_2) (s : Slice Std.U8) : Result Bool := do
+  let (b, _) ←
+    header_break_end.closure_2.Insts.CoreOpsFunctionFnMutTupleSharedSliceU8Bool.call_mut
+      c s
+  ok b
+
+/-- Trait implementation: [pedra_aeneas_fail_closed_kernel::header_break_end::{impl core::ops::function::FnOnce<(&'_ [u8],), bool> for pedra_aeneas_fail_closed_kernel::header_break_end::closure#2}]
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 58:37-58:53 -/
+@[reducible]
+def
+  header_break_end.closure_2.Insts.CoreOpsFunctionFnOnceTupleSharedSliceU8Bool
+  : core.ops.function.FnOnce header_break_end.closure_2 (Slice Std.U8) Bool
+  := {
+  call_once :=
+    header_break_end.closure_2.Insts.CoreOpsFunctionFnOnceTupleSharedSliceU8Bool.call_once
+}
+
+/-- Trait implementation: [pedra_aeneas_fail_closed_kernel::header_break_end::{impl core::ops::function::FnMut<(&'_ [u8],), bool> for pedra_aeneas_fail_closed_kernel::header_break_end::closure#2}]
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 58:37-58:53 -/
+@[reducible]
+def header_break_end.closure_2.Insts.CoreOpsFunctionFnMutTupleSharedSliceU8Bool
+  : core.ops.function.FnMut header_break_end.closure_2 (Slice Std.U8) Bool := {
+  FnOnceInst :=
+    header_break_end.closure_2.Insts.CoreOpsFunctionFnOnceTupleSharedSliceU8Bool
+  call_mut :=
+    header_break_end.closure_2.Insts.CoreOpsFunctionFnMutTupleSharedSliceU8Bool.call_mut
+}
+
+/-- [pedra_aeneas_fail_closed_kernel::header_break_end::closure#1]
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 57:65-57:74 -/
+@[reducible]
+def header_break_end.closure_1 := Unit
+
+/-- [pedra_aeneas_fail_closed_kernel::header_break_end::{impl core::ops::function::FnOnce<(usize,), usize> for pedra_aeneas_fail_closed_kernel::header_break_end::closure#1}::call_once]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 57:65-57:74 -/
+def
+  header_break_end.closure_1.Insts.CoreOpsFunctionFnOnceTupleUsizeUsize.call_once
+  (c : header_break_end.closure_1) (tupled_args : Std.Usize) :
+  Result Std.Usize
+  := do
+  tupled_args + 4#usize
+
+/-- Trait implementation: [pedra_aeneas_fail_closed_kernel::header_break_end::{impl core::ops::function::FnOnce<(usize,), usize> for pedra_aeneas_fail_closed_kernel::header_break_end::closure#1}]
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 57:65-57:74 -/
+@[reducible]
+def header_break_end.closure_1.Insts.CoreOpsFunctionFnOnceTupleUsizeUsize :
+  core.ops.function.FnOnce header_break_end.closure_1 Std.Usize Std.Usize := {
+  call_once :=
+    header_break_end.closure_1.Insts.CoreOpsFunctionFnOnceTupleUsizeUsize.call_once
+}
+
+/-- [pedra_aeneas_fail_closed_kernel::header_break_end::closure]
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 57:39-57:59 -/
+@[reducible]
+def header_break_end.closure := Unit
+
+/-- [pedra_aeneas_fail_closed_kernel::header_break_end::{impl core::ops::function::FnMut<(&'_ [u8],), bool> for pedra_aeneas_fail_closed_kernel::header_break_end::closure}::call_mut]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 57:39-57:59 -/
+def
+  header_break_end.closure.Insts.CoreOpsFunctionFnMutTupleSharedSliceU8Bool.call_mut
+  (c : header_break_end.closure) (tupled_args : Slice Std.U8) :
+  Result (Bool × header_break_end.closure)
+  := do
+  let b ←
+    Slice.Insts.CoreCmpPartialEqArray.eq core.cmp.PartialEqU8 tupled_args
+      (Array.make 4#usize [ 13#u8, 10#u8, 13#u8, 10#u8 ])
+  ok (b, c)
+
+/-- [pedra_aeneas_fail_closed_kernel::header_break_end::{impl core::ops::function::FnOnce<(&'_ [u8],), bool> for pedra_aeneas_fail_closed_kernel::header_break_end::closure}::call_once]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 57:39-57:59 -/
+def
+  header_break_end.closure.Insts.CoreOpsFunctionFnOnceTupleSharedSliceU8Bool.call_once
+  (c : header_break_end.closure) (s : Slice Std.U8) : Result Bool := do
+  let (b, _) ←
+    header_break_end.closure.Insts.CoreOpsFunctionFnMutTupleSharedSliceU8Bool.call_mut
+      c s
+  ok b
+
+/-- Trait implementation: [pedra_aeneas_fail_closed_kernel::header_break_end::{impl core::ops::function::FnOnce<(&'_ [u8],), bool> for pedra_aeneas_fail_closed_kernel::header_break_end::closure}]
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 57:39-57:59 -/
+@[reducible]
+def header_break_end.closure.Insts.CoreOpsFunctionFnOnceTupleSharedSliceU8Bool
+  : core.ops.function.FnOnce header_break_end.closure (Slice Std.U8) Bool := {
+  call_once :=
+    header_break_end.closure.Insts.CoreOpsFunctionFnOnceTupleSharedSliceU8Bool.call_once
+}
+
+/-- Trait implementation: [pedra_aeneas_fail_closed_kernel::header_break_end::{impl core::ops::function::FnMut<(&'_ [u8],), bool> for pedra_aeneas_fail_closed_kernel::header_break_end::closure}]
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 57:39-57:59 -/
+@[reducible]
+def header_break_end.closure.Insts.CoreOpsFunctionFnMutTupleSharedSliceU8Bool :
+  core.ops.function.FnMut header_break_end.closure (Slice Std.U8) Bool := {
+  FnOnceInst :=
+    header_break_end.closure.Insts.CoreOpsFunctionFnOnceTupleSharedSliceU8Bool
+  call_mut :=
+    header_break_end.closure.Insts.CoreOpsFunctionFnMutTupleSharedSliceU8Bool.call_mut
+}
+
+/-- [pedra_aeneas_fail_closed_kernel::header_break_end]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 56:0-65:1
+    Visibility: public -/
+def header_break_end (buf : Slice Std.U8) : Result (Option Std.Usize) := do
+  let w ← core.slice.Slice.windows buf 4#usize
+  let (o, _) ←
+    core.iter.traits.iterator.Iterator.position.default
+      (core.slice.iter.Windows.Insts.CoreIterTraitsIteratorIteratorSharedASlice
+      Std.U8)
+      header_break_end.closure.Insts.CoreOpsFunctionFnMutTupleSharedSliceU8Bool
+      w ()
+  let crlf ←
+    core.option.Option.map
+      header_break_end.closure_1.Insts.CoreOpsFunctionFnOnceTupleUsizeUsize o
+      ()
+  let w1 ← core.slice.Slice.windows buf 2#usize
+  let (o1, _) ←
+    core.iter.traits.iterator.Iterator.position.default
+      (core.slice.iter.Windows.Insts.CoreIterTraitsIteratorIteratorSharedASlice
+      Std.U8)
+      header_break_end.closure_2.Insts.CoreOpsFunctionFnMutTupleSharedSliceU8Bool
+      w1 ()
+  let lf ←
+    core.option.Option.map
+      header_break_end.closure_3.Insts.CoreOpsFunctionFnOnceTupleUsizeUsize o1
+      ()
+  match crlf with
+  | none => match lf with
+            | none => ok none
+            | some _ => ok lf
+  | some a =>
+    match lf with
+    | none => ok crlf
+    | some b =>
+      let i ← core.cmp.Ord.min.trait_default core.cmp.OrdUsize a b
+      ok (some i)
+
+/-- [pedra_aeneas_fail_closed_kernel::header_break_end_as_is::closure#1]
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 70:54-70:63 -/
+@[reducible]
+def header_break_end_as_is.closure_1 := Unit
+
+/-- [pedra_aeneas_fail_closed_kernel::header_break_end_as_is::{impl core::ops::function::FnOnce<(usize,), usize> for pedra_aeneas_fail_closed_kernel::header_break_end_as_is::closure#1}::call_once]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 70:54-70:63 -/
+def
+  header_break_end_as_is.closure_1.Insts.CoreOpsFunctionFnOnceTupleUsizeUsize.call_once
+  (c : header_break_end_as_is.closure_1) (tupled_args : Std.Usize) :
+  Result Std.Usize
+  := do
+  tupled_args + 4#usize
+
+/-- Trait implementation: [pedra_aeneas_fail_closed_kernel::header_break_end_as_is::{impl core::ops::function::FnOnce<(usize,), usize> for pedra_aeneas_fail_closed_kernel::header_break_end_as_is::closure#1}]
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 70:54-70:63 -/
+@[reducible]
+def header_break_end_as_is.closure_1.Insts.CoreOpsFunctionFnOnceTupleUsizeUsize
+  : core.ops.function.FnOnce header_break_end_as_is.closure_1 Std.Usize
+  Std.Usize := {
+  call_once :=
+    header_break_end_as_is.closure_1.Insts.CoreOpsFunctionFnOnceTupleUsizeUsize.call_once
+}
+
+/-- [pedra_aeneas_fail_closed_kernel::header_break_end_as_is::closure]
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 70:28-70:48 -/
+@[reducible]
+def header_break_end_as_is.closure := Unit
+
+/-- [pedra_aeneas_fail_closed_kernel::header_break_end_as_is::{impl core::ops::function::FnMut<(&'_ [u8],), bool> for pedra_aeneas_fail_closed_kernel::header_break_end_as_is::closure}::call_mut]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 70:28-70:48 -/
+def
+  header_break_end_as_is.closure.Insts.CoreOpsFunctionFnMutTupleSharedSliceU8Bool.call_mut
+  (c : header_break_end_as_is.closure) (tupled_args : Slice Std.U8) :
+  Result (Bool × header_break_end_as_is.closure)
+  := do
+  let b ←
+    Slice.Insts.CoreCmpPartialEqArray.eq core.cmp.PartialEqU8 tupled_args
+      (Array.make 4#usize [ 13#u8, 10#u8, 13#u8, 10#u8 ])
+  ok (b, c)
+
+/-- [pedra_aeneas_fail_closed_kernel::header_break_end_as_is::{impl core::ops::function::FnOnce<(&'_ [u8],), bool> for pedra_aeneas_fail_closed_kernel::header_break_end_as_is::closure}::call_once]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 70:28-70:48 -/
+def
+  header_break_end_as_is.closure.Insts.CoreOpsFunctionFnOnceTupleSharedSliceU8Bool.call_once
+  (c : header_break_end_as_is.closure) (s : Slice Std.U8) : Result Bool := do
+  let (b, _) ←
+    header_break_end_as_is.closure.Insts.CoreOpsFunctionFnMutTupleSharedSliceU8Bool.call_mut
+      c s
+  ok b
+
+/-- Trait implementation: [pedra_aeneas_fail_closed_kernel::header_break_end_as_is::{impl core::ops::function::FnOnce<(&'_ [u8],), bool> for pedra_aeneas_fail_closed_kernel::header_break_end_as_is::closure}]
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 70:28-70:48 -/
+@[reducible]
+def
+  header_break_end_as_is.closure.Insts.CoreOpsFunctionFnOnceTupleSharedSliceU8Bool
+  : core.ops.function.FnOnce header_break_end_as_is.closure (Slice Std.U8) Bool
+  := {
+  call_once :=
+    header_break_end_as_is.closure.Insts.CoreOpsFunctionFnOnceTupleSharedSliceU8Bool.call_once
+}
+
+/-- Trait implementation: [pedra_aeneas_fail_closed_kernel::header_break_end_as_is::{impl core::ops::function::FnMut<(&'_ [u8],), bool> for pedra_aeneas_fail_closed_kernel::header_break_end_as_is::closure}]
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 70:28-70:48 -/
+@[reducible]
+def
+  header_break_end_as_is.closure.Insts.CoreOpsFunctionFnMutTupleSharedSliceU8Bool
+  : core.ops.function.FnMut header_break_end_as_is.closure (Slice Std.U8) Bool
+  := {
+  FnOnceInst :=
+    header_break_end_as_is.closure.Insts.CoreOpsFunctionFnOnceTupleSharedSliceU8Bool
+  call_mut :=
+    header_break_end_as_is.closure.Insts.CoreOpsFunctionFnMutTupleSharedSliceU8Bool.call_mut
+}
+
+/-- [pedra_aeneas_fail_closed_kernel::header_break_end_as_is]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 69:0-71:1
+    Visibility: public -/
+def header_break_end_as_is
+  (buf : Slice Std.U8) : Result (Option Std.Usize) := do
+  let w ← core.slice.Slice.windows buf 4#usize
+  let (o, _) ←
+    core.iter.traits.iterator.Iterator.position.default
+      (core.slice.iter.Windows.Insts.CoreIterTraitsIteratorIteratorSharedASlice
+      Std.U8)
+      header_break_end_as_is.closure.Insts.CoreOpsFunctionFnMutTupleSharedSliceU8Bool
+      w ()
+  core.option.Option.map
+    header_break_end_as_is.closure_1.Insts.CoreOpsFunctionFnOnceTupleUsizeUsize
+    o ()
+
+/-- [pedra_aeneas_fail_closed_kernel::header_break_len]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 75:0-81:1
+    Visibility: public -/
+def header_break_len
+  (buf : Slice Std.U8) (end1 : Std.Usize) : Result Std.Usize := do
+  if end1 >= 4#usize
+  then
+    let i ← end1 - 4#usize
+    let o ←
+      core.slice.Slice.get (core.slice.index.SliceIndexRangeUsizeSlice Std.U8)
+        buf { start := i, «end» := end1 }
+    let s ←
+      Array.Insts.CoreConvertAsRefSlice.as_ref
+        (Array.make 4#usize [ 13#u8, 10#u8, 13#u8, 10#u8 ])
+    let b ←
+      core.option.Option.Insts.CoreCmpPartialEqOption.eq
+        (core.cmp.PartialEqShared (Slice.Insts.CoreCmpPartialEqSlice
+        core.cmp.PartialEqU8)) o (some s)
+    if b
+    then ok 4#usize
+    else ok 2#usize
+  else ok 2#usize
 
 /-- [pedra_aeneas_fail_closed_kernel::expects_100_continue_as_is]:
     Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 93:0-95:1

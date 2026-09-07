@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Extract production fail_closed.rs catalog entries (parse_error_writes_status)
-# plus Iterator-free F104/F105/F157/F158 gates and status/as-is constants.
-# Expect production walks (eq_ignore_ascii_case) and header_break (Iterator
-# windows/position) stay out.
+# plus Iterator-free F104/F105/F157/F158 gates, status/as-is constants, and
+# header_break (Windows Iterator extra `position` field stripped — Std is
+# next + defaults). Expect production walks (eq_ignore_ascii_case) stay out.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CRATE="$ROOT/formal/aeneas/fail-closed-kernel"
@@ -37,8 +37,31 @@ echo "      charon=$CHARON"
     --start-from 'crate::expects_100_continue_as_is' \
     --start-from 'crate::expect_field_ok_as_is' \
     --start-from 'crate::http_version_requires_host_as_is' \
+    --start-from 'crate::header_break_end' \
+    --start-from 'crate::header_break_end_as_is' \
+    --start-from 'crate::header_break_len' \
     --dest-file "$OUT/fail_closed_kernel.llbc" )
 "$AENEAS" -backend lean -dest "$OUT/lean" "$OUT/fail_closed_kernel.llbc"
+python3 - "$OUT/lean/FailClosedKernel.lean" <<'PYEOF'
+import re
+import sys
+
+p = sys.argv[1]
+src = open(p, encoding="utf-8").read()
+src2, n = re.subn(
+    r"\n  position := fun[\s\S]*?(?=\n\})",
+    "",
+    src,
+)
+if n < 1:
+    sys.exit("patch target not found: Iterator.position extra field")
+open(p, "w", encoding="utf-8").write(src2)
+print(f"      patched fail_closed Iterator.position ×{n}")
+PYEOF
+if grep -q 'sorry' "$OUT/lean/FailClosedKernel.lean"; then
+  echo "FAIL  FailClosedKernel.lean still contains sorry" >&2
+  exit 1
+fi
 {
   echo "path=crates/pedradb-http/src/fail_closed.rs"
   echo "sha256=$(shasum -a 256 "$SRC" | awk '{print $1}')"

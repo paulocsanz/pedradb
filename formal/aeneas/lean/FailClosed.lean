@@ -1,5 +1,6 @@
 -- Theorems over Aeneas extract of fail_closed.rs (RFC-0002 / F102).
--- Charon --start-from parse_error_writes_status (rest is str/pattern).
+-- Charon --start-from catalog + Iterator-free gates + header_break
+-- (Windows Iterator extra position field stripped in aeneas_fail_closed.sh).
 import Aeneas
 import FailClosedKernel
 open Aeneas.Std Result
@@ -82,3 +83,9 @@ theorem http_version_requires_host_as_is_dente (v) :
     http_version_requires_host_as_is v = ok false := by
   unfold http_version_requires_host_as_is
   rfl
+
+/-- F153: a break offset below 4 is the two-byte LF break. -/
+theorem header_break_len_below_four (buf) :
+    header_break_len buf (0#usize) = ok (2#usize) := by
+  unfold header_break_len
+  simp
