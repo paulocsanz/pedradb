@@ -72,16 +72,16 @@
    "crates/pedradb-store/src/t1_modelo_kernel.rs",
    "crates/pedradb-raft/src/c1_modelo_kernel.rs"
   ],
-  "kernel_files": 54,
-  "kernel_loc": 16619,
-  "handler_loc": 102750,
+  "kernel_files": 55,
+  "kernel_loc": 17141,
+  "handler_loc": 103592,
   "db_rs_extracted": false,
   "proof_depth": {
-   "extract": 142,
+   "extract": 145,
    "close": 126,
    "atom": 0,
-   "model": 13,
-   "updated": "2026-09-06"
+   "model": 15,
+   "updated": "2026-09-07"
   },
   "kernel_fn_allowlist": {
    "crates/pedradb-core/src/env_crash_kernel.rs": [

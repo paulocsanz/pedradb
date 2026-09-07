@@ -136,7 +136,129 @@ pub fn happy_hot_bps_as_is(_store_bytes: u64, _ram_bytes: u64) -> u64 {
     SCALE_BPS
 }
 
-#[cfg(test)]
+/// One-process scale table (RFC-0176). CLI and tests call this; they do
+/// not re-derive \(P\) or \(\mathrm{cap}(R)\).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScaleForecast {
+    /// User keys.
+    pub keys: u64,
+    /// Host RAM budget (bytes).
+    pub ram_bytes: u64,
+    /// On-disk bytes \(S = n\cdot b\).
+    pub store_bytes: u64,
+    /// LSM levels \(L\).
+    pub levels: u64,
+    /// Best-path probes \(L+1\).
+    pub p_best: u64,
+    /// Worst production probes \(L+4\).
+    pub p_worst: u64,
+    /// File count if every SST were L1-sized (as-is walk).
+    pub n_files: u64,
+    /// WARM cap for this RAM.
+    pub warm_cap: u64,
+    /// Whether the store fits the WARM cap.
+    pub hot: bool,
+    /// Happy-path hot fraction (basis points).
+    pub happy_hot_bps: u64,
+    /// Predicted get ns: best / happy / worst.
+    pub best_ns: u64,
+    /// Happy-path predicted get ns (cold residual + η).
+    pub happy_ns: u64,
+    /// Worst-path predicted get ns.
+    pub worst_ns: u64,
+}
+
+/// Compose the RFC-0176 table from the atomic kernel fns.
+#[must_use]
+pub fn scale_forecast(keys: u64, ram_bytes: u64) -> ScaleForecast {
+    let store_bytes = keys.saturating_mul(SCALE_BYTES_PER_ENTRY);
+    let levels = u64::from(level_count(store_bytes, SCALE_L1_BYTES));
+    let p_best = point_get_probes(levels, SCALE_L0_BEST);
+    let p_worst = probes_worst(levels, SCALE_L0_WORST);
+    let n_files = if SCALE_L1_BYTES == 0 {
+        0
+    } else {
+        store_bytes.div_ceil(SCALE_L1_BYTES)
+    };
+    let warm_cap = warm_cap_bytes(ram_bytes);
+    let hot = store_bytes <= warm_cap;
+    let happy_hot = happy_hot_bps(store_bytes, ram_bytes);
+    let best_ns = predict_get_ns(p_best, SCALE_TAU_RAM_NS, SCALE_TAU_DISK_NS, SCALE_BPS, 0);
+    let happy_ns = predict_get_ns(
+        p_best,
+        SCALE_TAU_RAM_NS,
+        SCALE_TAU_DISK_NS,
+        happy_hot,
+        SCALE_HAPPY_NOISY_BPS,
+    );
+    let worst_ns = predict_get_ns(
+        p_worst,
+        SCALE_TAU_RAM_NS,
+        SCALE_TAU_DISK_NS,
+        0,
+        SCALE_WORST_NOISY_BPS,
+    );
+    ScaleForecast {
+        keys,
+        ram_bytes,
+        store_bytes,
+        levels,
+        p_best,
+        p_worst,
+        n_files,
+        warm_cap,
+        hot,
+        happy_hot_bps: happy_hot,
+        best_ns,
+        happy_ns,
+        worst_ns,
+    }
+}
+
+/// AS-IS: walk every file and claim the store is always hot.
+#[must_use]
+pub fn scale_forecast_as_is(keys: u64, ram_bytes: u64) -> ScaleForecast {
+    let store_bytes = keys.saturating_mul(SCALE_BYTES_PER_ENTRY);
+    let n_files = if SCALE_L1_BYTES == 0 {
+        0
+    } else {
+        store_bytes.div_ceil(SCALE_L1_BYTES)
+    };
+    ScaleForecast {
+        keys,
+        ram_bytes,
+        store_bytes,
+        levels: n_files,
+        p_best: n_files,
+        p_worst: n_files,
+        n_files,
+        warm_cap: u64::MAX,
+        hot: true,
+        happy_hot_bps: SCALE_BPS,
+        best_ns: predict_get_ns_as_is(
+            n_files,
+            SCALE_TAU_RAM_NS,
+            SCALE_TAU_DISK_NS,
+            SCALE_BPS,
+            0,
+        ),
+        happy_ns: predict_get_ns_as_is(
+            n_files,
+            SCALE_TAU_RAM_NS,
+            SCALE_TAU_DISK_NS,
+            SCALE_BPS,
+            0,
+        ),
+        worst_ns: predict_get_ns_as_is(
+            n_files,
+            SCALE_TAU_RAM_NS,
+            SCALE_TAU_DISK_NS,
+            SCALE_BPS,
+            0,
+        ),
+    }
+}
+
 fn level_count(store_bytes: u64, l1_target: u64) -> u32 {
     if store_bytes == 0 || l1_target == 0 {
         return 0;
@@ -238,5 +360,22 @@ mod tests {
         assert_eq!(happy_hot_bps_as_is(store_10b, ram), SCALE_BPS);
         let tiny = 1u64 << 20;
         assert_eq!(happy_hot_bps(tiny, ram), SCALE_BPS);
+    }
+
+    #[test]
+    fn scale_forecast_on_always_hot_walk_is_not_ok() {
+        let ram = 64u64 << 30;
+        let f1 = scale_forecast(1_000_000_000, ram);
+        let f10 = scale_forecast(10_000_000_000, ram);
+        assert_eq!(f1.p_best, 5);
+        assert_eq!(f10.p_best, 6);
+        assert!(!f1.hot, "1B @ 64 GiB is bounded-cache");
+        assert!(!f10.hot, "10B @ 64 GiB is bounded-cache");
+        assert!(f1.best_ns < f1.happy_ns && f1.happy_ns < f1.worst_ns);
+        assert!(f10.best_ns < f10.happy_ns && f10.happy_ns < f10.worst_ns);
+        let as_is = scale_forecast_as_is(1_000_000_000, ram);
+        assert!(as_is.hot);
+        assert!(as_is.p_best > f1.p_best * 100);
+        assert_eq!(as_is.happy_hot_bps, SCALE_BPS);
     }
 }
