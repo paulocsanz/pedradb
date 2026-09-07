@@ -383,7 +383,9 @@ impl ScaleStore for PedraScale {
         // Leftover open BulkRun is < bulk_chunk_cap (default 64 MiB) and
         // is otherwise the whole settle cell vs Fjall. Flush it here so
         // settle's compact_leveled sees a disjoint max-level run set.
-        self.db.flush().is_ok()
+        // No compact-worker notify: a worker job.write() held compact_gate
+        // ~90 s @100M before settle compact() (compact_ns stayed 0.001).
+        self.db.flush_no_notify().is_ok()
     }
     fn settle(&mut self) -> bool {
         // compact() already flushes. A second flush re-ran WARM / waited
