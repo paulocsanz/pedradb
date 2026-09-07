@@ -38,3 +38,7 @@ path = "src/bin/rocks_parity_compare.rs"
 [[bin]]
 name = "scale-parity-bench"
 path = "src/bin/scale_parity_bench.rs"
+
+[[bin]]
+name = "pedra"
+path = "src/bin/pedra.rs"

@@ -110,6 +110,9 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
       `rfc0178_stats_without_vlog_skips_sst_value_walk` /
       `rfc0178_stats_with_vlog_still_counts_live_bytes`.
       status: `done`
+- [ ] **P0.10** DIAG via `pedra scale` (não o binário cru). 50M+100M
+      neste host. Teste `rfc0178_pedra_scale_parses_entries_and_dir`.
+      status: `doing`
 
 ### P1 — caixa 4 GiB (pede bake)
 
@@ -143,6 +146,7 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
 | P0.7 | p0 | Drop compact_gate during job.write | done | r5 settle 101.6 s / get_loop 7.18 ms | 2026-09-07 |
 | P0.8 | p0 | compact_no_flush after hydrate | done | skip 2nd flush; no discard-delete; r8 compact=1.745s | 2026-09-07 |
 | P0.9 | p0 | stats() skip SST walk without vlog | done | r9 settle 1.743s / get_loop 427µs (flat vs 50M) | 2026-09-07 |
+| P0.10 | p0 | DIAG via `pedra scale` | doing | bin `pedra scale`; 50M+100M a seguir | 2026-09-07 |
 | P1.1 | p1 | probe_miss ≥1× 3-run caixa | todo | — | 2026-09-06 |
 | P1.2 | p1 | prefix 0,70× → ≥1× caixa | todo | — | 2026-09-06 |
 | P1.3 | p1 | overwrite isolado ≥1× caixa | todo | — | 2026-09-06 |
