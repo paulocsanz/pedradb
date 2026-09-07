@@ -397,17 +397,34 @@ fn run_one(store: &mut dyn ScaleStore, dir: &Path, n: usize, vlen: usize, pool: 
     let mid_service = (n / ROUTES_PER_SERVICE) / 2;
     let prefix = format!("route.svc-{mid_service:06}.");
     let mut pfx = Vec::with_capacity(PREFIX_N);
+    let cost_pfx0 = pedradb_core::cost::read();
     for _ in 0..PREFIX_N {
         let t = Instant::now();
         let c = store.prefix_count(prefix.as_bytes());
         pfx.push(t.elapsed().as_nanos() as u64);
         std::hint::black_box(c);
     }
+    let cost_pfx = pedradb_core::cost::read().since(&cost_pfx0);
     eprintln!(
         "prefix_scan/{label}: mean {:.1}µs (n={PREFIX_N}, prefix={prefix}){}",
         mean_us(&pfx),
         mode_suffix(store),
     );
+    if pedradb_core::cost::enabled() {
+        let per_scan = if cost_pfx.scan_ops == 0 {
+            0
+        } else {
+            cost_pfx.scan_sst_probed / cost_pfx.scan_ops
+        };
+        let f =
+            pedradb_core::scale_kernel::scale_forecast(n as u64, cache_bytes().unwrap_or(64 << 30));
+        let class = pedradb_core::classify_probes(per_scan, f.p_best);
+        eprintln!(
+            "diagnose probes prefix_scan/{label} per_scan={per_scan} p_best={} class={}",
+            f.p_best,
+            class.token()
+        );
+    }
 
     let mut lstate = 0xC0DE_BEEFu64;
     let mut loops = Vec::with_capacity(LOOKUP_N);

@@ -89,6 +89,8 @@ a linha quando há phasesΔ. Sem harness novo.
 - [x] **P2.4** scale `probe_miss` + `PEDRA_COST_TRACE` →
       `classify_probes` vs \(P_{\mathrm{best}}\) (walk-all ≠ "disk").
       — status: `done`
+- [x] **P2.5** scale `prefix_scan` + COST_TRACE → `classify_probes`
+      (`scan_sst_probed` / op vs \(P_{\mathrm{best}}\)). — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -107,6 +109,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.2 | p2 | ycsb 1c diagnose.lever | done | `YcsbRunner::run` WRITEPHASE + read_pct | 2026-09-07 |
 | P2.3 | p2 | kvrocks mc50 diagnose.lever | done | n≥16 lock_convoy from WRITEPHASE | 2026-09-07 |
 | P2.4 | p2 | scale probe_miss classify_probes | done | COST_TRACE vs P_best; as_is_walk | 2026-09-07 |
+| P2.5 | p2 | scale prefix_scan classify_probes | done | scan_sst_probed / op vs P_best | 2026-09-07 |
 
 ## Acceptance Criteria
 
