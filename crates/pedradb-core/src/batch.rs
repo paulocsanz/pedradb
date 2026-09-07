@@ -293,8 +293,15 @@ pub(crate) fn encoded_len(ops: &[WriteOp]) -> usize {
             .sum::<usize>()
 }
 
-fn op_encoded_len(o: &WriteOp) -> usize {
+pub(crate) fn op_encoded_len(o: &WriteOp) -> usize {
     1 + 8 + 4 + o.key.len() + 4 + o.value.len()
+}
+
+/// Logical WAL payload of a 1-op record (version + count + op). v1: 1-op
+/// never sets the v2 reuse bit (RFC-0180 Full-record fast path).
+#[must_use]
+pub(crate) fn one_op_logical_len(op: &WriteOp) -> usize {
+    5 + op_encoded_len(op)
 }
 
 fn estimate_size(rec: &WriteRecord) -> usize {

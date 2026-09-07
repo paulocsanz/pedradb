@@ -196,6 +196,17 @@ impl<F: EnvFile> Wal<F> {
         Ok(n)
     }
 
+    /// Encode one op and `write()` it (RFC-0180 `commit_async_one`).
+    /// Same bytes as [`Self::encode_write_op_batches`] + [`Self::write_pending_frame`].
+    ///
+    /// # Errors
+    /// Underlying file write.
+    pub fn encode_and_write_one_op(&mut self, op: &crate::batch::WriteOp) -> Result<u64> {
+        let payload = crate::batch::one_op_logical_len(op);
+        self.reserve_space((format::HEADER_SIZE + payload + format::HEADER_SIZE) as u64);
+        self.writer.encode_and_write_one_op(op).map(|n| n as u64)
+    }
+
     /// Write the frame built by [`Self::encode_write_op_batches`].
     ///
     /// Hits the file (`write()`) on every call — G1, async, close, and

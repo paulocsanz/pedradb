@@ -25,7 +25,6 @@ use std::collections::VecDeque;
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::mpsc::{self, SyncSender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -48,6 +47,44 @@ thread_local! {
     static BULK_MANIFEST_OFF_LOCK: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
+/// RFC-0180: one reply slot per client thread. overwrite_mc4 used to
+/// `sync_channel(1)` on every follower op (~½ of 4-client puts).
+struct FollowerReply {
+    state: Mutex<Option<Result<SequenceNumber>>>,
+    cv: Condvar,
+}
+
+impl FollowerReply {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(None),
+            cv: Condvar::new(),
+        }
+    }
+
+    fn reset(&self) {
+        *self.state.lock() = None;
+    }
+
+    fn complete(&self, result: Result<SequenceNumber>) {
+        let mut g = self.state.lock();
+        *g = Some(result);
+        self.cv.notify_one();
+    }
+
+    fn recv(&self) -> Result<SequenceNumber> {
+        let mut g = self.state.lock();
+        while g.is_none() {
+            self.cv.wait(&mut g);
+        }
+        g.take().expect("follower reply filled")
+    }
+}
+
+thread_local! {
+    static FOLLOWER_REPLY: Arc<FollowerReply> = Arc::new(FollowerReply::new());
+}
+
 /// RFC-0159 P1.2: `persist.write()` must see a free Db write lock.
 #[cfg(test)]
 fn note_bulk_manifest_off_lock<E: Env>(inner: &RwLock<Db<E>>) {
@@ -67,8 +104,8 @@ struct PendingWrite {
     ops: Vec<BatchOp>,
     do_sync: bool,
     /// `None` for the group leader — `lead` returns that result directly
-    /// so the leader skips an mpsc hop (RFC-0041 apply_mc4).
-    reply: Option<SyncSender<Result<SequenceNumber>>>,
+    /// so the leader skips a hop (RFC-0041 apply_mc4).
+    reply: Option<Arc<FollowerReply>>,
     /// OCC: snapshot + read-set. Validated under the leader write lock so
     /// concurrent non-conflicting txs share one fdatasync (`surreal_tx_rmw_mc8`).
     occ: Option<(SequenceNumber, Vec<Bytes>)>,
@@ -87,6 +124,8 @@ struct WriteGroup {
     /// Signalled whenever a writer pushes onto the queue, so a leader holding
     /// its catch-up window open can absorb the arrival immediately.
     arrived: Condvar,
+    /// Members sitting in `queue.pending` (lock-free hint for linger spin).
+    queued_pending: AtomicUsize,
     /// Submits currently in flight (`submit` entry → reply consumed). Writers
     /// counted here but absent from the queue are waking between ops — exactly
     /// the stragglers the catch-up window waits for.
@@ -148,6 +187,9 @@ struct WriteGroup {
     /// RFC-0045 P0.1: lock-wait accumulation for the async bypass
     /// (`PEDRA_WRITE_PHASE_STATS=1`); `None` when the env is unset.
     phase_stats: Option<Arc<crate::db::WritePhaseStats>>,
+    /// Shared with `Db` so `lead` can pin inflight without `db.read()`
+    /// (RFC-0180 P0.27: that read queued behind compact/flush write).
+    commit_inflight: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 /// Default catch-up window (see [`ConcurrentDb::set_write_group_catchup_window`]).
@@ -230,6 +272,87 @@ fn catchup_wait_bound(
     Some(window.min(fd_ema / 2))
 }
 
+/// RFC-0180 P0.24: 512 `spin_loop`. 256 → max 5 ms p50 17; 1024 → max
+/// 0.2 s p50 15 avg 2.0; 2048 → max 1.4 s p50 11. 512 is the remaining
+/// slot between "no stall" and "p50 matches Rocks".
+fn leader_linger_spins(prev_group_members: usize, recently_multi: bool) -> u32 {
+    if prev_group_members > 1 || recently_multi {
+        256
+    } else {
+        0
+    }
+}
+
+/// After the first sibling enqueues, wait this many more (RFC-0180).
+/// Production linger stops at the first enqueue (p11: 2nd phase cut qps).
+#[cfg(test)]
+#[must_use]
+fn leader_linger_second_want() -> usize {
+    3
+}
+
+/// Spins after the first sibling. Full linger-again (2048) after a group
+/// of 2 already formed added ~p50 without bringing the other two.
+#[cfg(test)]
+#[must_use]
+fn leader_linger_second_spins() -> u32 {
+    512
+}
+
+/// How many queued members the linger should collect (the followers
+/// just replied to). 0 = do not linger. Park-wait-for-N cut qps (0.27×);
+/// production linger stops at the first enqueue (`spin_for_pending_n(…, 1)`).
+#[cfg(test)]
+fn leader_linger_want(prev_group_members: usize) -> usize {
+    prev_group_members.saturating_sub(1)
+}
+
+/// RFC-0180 P0.5: async 1-op catch-up as pause-loops, not `wait_for`.
+/// 0 = already full or lone.
+///
+/// RFC-0180 P0.32: at Adaptive MC (`active ≤ 8`) a 2-member batch is
+/// already a group. 1024 more spins waiting for the last straggler was
+/// overwrite_mc4 p50 15 vs 11 (quiet 0.91×). Extra take under the write
+/// lock + `group_absorb` still pick up latecomers. High-n (`active > 8`)
+/// keeps the 1024 window so apply_mc / 50-thread grouping does not shrink.
+fn async_catchup_skip_when_grouped(batch_len: usize, active: usize) -> bool {
+    batch_len >= 2 && active <= ASYNC_GROUP_ADAPTIVE_MAX
+}
+
+fn async_catchup_spins(batch_len: usize, active: usize) -> u32 {
+    if batch_len >= active || active < 2 || async_catchup_skip_when_grouped(batch_len, active) {
+        0
+    } else {
+        1024
+    }
+}
+
+/// RFC-0180: a 1-member async group is `commit_async_one` (no
+/// `GroupInFlight` / dual WAL lock). overwrite_mc4 avg_group ≈1.7 paid
+/// the group envelope on the majority 1-op batches.
+#[must_use]
+fn async_one_op_fast_path(any_sync: bool, members: usize, ops: usize) -> bool {
+    !any_sync && members == 1 && ops == 1
+}
+
+/// RFC-0180 P0.30: every member is a 1-op async put/delete. Each is
+/// `commit_async_one` + immediate deliver — followers do not wait for
+/// `group_start` drop/WAL/`db.write` reacquire (p999 follower_recv).
+/// RFC-0180 P0.31: `lead` commits one group and resigns so the leader's
+/// client put does not include subsequent groups (p999 ≈ 1.5 ms).
+#[must_use]
+fn lead_one_group_then_resign() -> bool {
+    true
+}
+
+fn async_all_one_op_fast_path(any_sync: bool, batch: &[PendingWrite]) -> bool {
+    !any_sync
+        && !batch.is_empty()
+        && batch
+            .iter()
+            .all(|p| p.ops.len() == 1 && p.occ.is_none() && p.occ_err.is_none())
+}
+
 struct WriteGroupState {
     pending: VecDeque<PendingWrite>,
     /// True while a leader is draining / committing a group.
@@ -239,6 +362,44 @@ struct WriteGroupState {
 /// Flush backpressure poll interval: how long a debt-throttled writer
 /// sleeps between parked-bytes checks (the host flush worker drains it).
 const FLUSH_DEBT_POLL: Duration = Duration::from_millis(2);
+
+/// RFC-0180 P0.26: first look at flush debt must not queue on the Db
+/// write lock. The leader holds that lock for `commit_async_one`; three
+/// followers doing `db.read()` there was overwrite_mc4 p999 ≈ 1.5 ms
+/// (~400 ops). Already-waiting pollers still retry.
+#[must_use]
+fn flush_debt_skip_if_write_lock_held(already_waiting: bool, write_lock_held: bool) -> bool {
+    write_lock_held && !already_waiting
+}
+
+/// RFC-0180 P0.28: measured negative (p33 p50 15.5 vs 13; avg 2.2).
+/// Async group still drops the write lock for WAL `write()` like G1
+/// drops it for fd — holding it starved linger (RFC-0180 P0.4).
+#[must_use]
+fn async_group_wal_holds_db_write_lock() -> bool {
+    false
+}
+
+fn stall_thresh_us() -> u64 {
+    static T: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *T.get_or_init(|| {
+        std::env::var("PEDRA_STALL_US")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0)
+    })
+}
+
+fn stall_note(phase: &str, t0: Instant) {
+    let th = stall_thresh_us();
+    if th == 0 {
+        return;
+    }
+    let us = t0.elapsed().as_micros() as u64;
+    if us >= th {
+        eprintln!("STALL {phase} us={us}");
+    }
+}
 
 /// Ceiling on one writer's flush-debt wait. If the parked set never drops
 /// (flush worker dead / materialize erroring) a hang is undebuggable in a
@@ -251,6 +412,21 @@ fn flush_debt_max_wait() -> Duration {
         .map_or(Duration::from_secs(30), Duration::from_millis)
 }
 
+/// F197: `lead` panics must clear `leader_active` and wake followers.
+struct LeadPanicGuard<'a, E: Env> {
+    group: &'a WriteGroup,
+    db: &'a RwLock<Db<E>>,
+    armed: bool,
+}
+
+impl<E: Env> Drop for LeadPanicGuard<'_, E> {
+    fn drop(&mut self) {
+        if self.armed && std::thread::panicking() {
+            self.group.release_leader_after_panic(self.db);
+        }
+    }
+}
+
 impl WriteGroup {
     fn new() -> Self {
         Self {
@@ -260,6 +436,7 @@ impl WriteGroup {
             }),
             flusher_attached: AtomicBool::new(false),
             arrived: Condvar::new(),
+            queued_pending: AtomicUsize::new(0),
             active: AtomicUsize::new(0),
             catchup_window_us: AtomicU64::new(
                 std::env::var("PEDRA_CATCHUP_US")
@@ -308,6 +485,37 @@ impl WriteGroup {
                 .unwrap_or(false),
             verified: AtomicBool::new(false),
             phase_stats: None,
+            commit_inflight: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        }
+    }
+
+    fn deliver_member(
+        reply: Option<Arc<FollowerReply>>,
+        result: Result<SequenceNumber>,
+        leader_result: &mut Option<Result<SequenceNumber>>,
+    ) {
+        match reply {
+            None => *leader_result = Some(result),
+            Some(slot) => slot.complete(result),
+        }
+    }
+
+    fn release_leader_after_panic<E: Env>(&self, db: &RwLock<Db<E>>) {
+        let mut g = self.queue.lock();
+        g.leader_active = false;
+        let dead = Self::take_pending(&mut g, &self.queued_pending);
+        drop(g);
+        for mut p in dead {
+            if let Some(slot) = p.reply.take() {
+                slot.complete(Err(CoreError::Internal(
+                    "write group leader panicked mid-commit".into(),
+                )));
+            }
+        }
+        self.active.fetch_sub(1, Ordering::Relaxed);
+        self.mark_complete();
+        if let Some(mut guard) = db.try_write() {
+            guard.fence_durability_post_commit(&"write group leader panicked mid-commit");
         }
     }
 
@@ -382,22 +590,31 @@ impl WriteGroup {
             }
         };
         loop {
-            let cap = db.read().flush_debt_cap();
-            let Some(cap) = cap else {
-                note_slept(waited);
-                return;
+            let observed = match db.try_read() {
+                None => {
+                    if flush_debt_skip_if_write_lock_held(!waited.is_zero(), true) {
+                        note_slept(waited);
+                        return;
+                    }
+                    None
+                }
+                Some(g) => Some((g.flush_debt_cap(), g.parked_unflushed_bytes())),
             };
-            if db.read().parked_unflushed_bytes() < cap {
-                note_slept(waited);
-                return;
+            if let Some((cap, parked)) = observed {
+                let Some(cap) = cap else {
+                    note_slept(waited);
+                    return;
+                };
+                if parked < cap {
+                    note_slept(waited);
+                    return;
+                }
             }
             if waited >= max_wait {
                 // Flush worker wedged — proceed rather than hang forever;
                 // the memory outcome stays observable on the bench.
-                eprintln!(
-                    "PEDRA flush-debt wait exceeded {max_wait:?} (parked={} cap={cap})",
-                    db.read().parked_unflushed_bytes()
-                );
+                let parked = db.try_read().map(|g| g.parked_unflushed_bytes());
+                eprintln!("PEDRA flush-debt wait exceeded {max_wait:?} (parked={parked:?})");
                 note_slept(waited);
                 return;
             }
@@ -613,89 +830,81 @@ impl WriteGroup {
             return result;
         }
 
-        let (reply, rx) = {
+        let follower_slot = {
+            // Reset the TLS slot *before* the queue lock. Nested
+            // FollowerReply mutex under `queue` inverted lock order with
+            // `complete()` (queue-free) and let a follower hold `queue`
+            // across a contended reset — leader then blocked on `queue`
+            // after linger (RFC-0180 P0.15).
+            let slot = FOLLOWER_REPLY.with(Arc::clone);
+            slot.reset();
             let mut g = self.queue.lock();
             let leader = !g.leader_active;
             if leader {
                 g.leader_active = true;
-                g.pending.push_back(PendingWrite {
-                    ops,
-                    do_sync,
-                    reply: None,
-                    occ,
-                    occ_err: None,
-                });
-                (None, None)
+                Self::push_pending(
+                    &mut g,
+                    &self.queued_pending,
+                    PendingWrite {
+                        ops,
+                        do_sync,
+                        reply: None,
+                        occ,
+                        occ_err: None,
+                    },
+                );
+                None
             } else {
-                let (tx, rx) = mpsc::sync_channel(1);
-                g.pending.push_back(PendingWrite {
-                    ops,
-                    do_sync,
-                    reply: Some(tx),
-                    occ,
-                    occ_err: None,
-                });
+                Self::push_pending(
+                    &mut g,
+                    &self.queued_pending,
+                    PendingWrite {
+                        ops,
+                        do_sync,
+                        reply: Some(Arc::clone(&slot)),
+                        occ,
+                        occ_err: None,
+                    },
+                );
                 self.arrived.notify_all();
-                (Some(()), Some(rx))
+                Some(slot)
             }
         };
-        let r = if reply.is_none() {
-            // F197: a leader panic unwinds through `lead` without clearing
-            // `leader_active`, so every future writer queues behind a dead
-            // leader and blocks on `recv()` forever. Catch the unwind,
-            // release the group (queued members get Err), fence the Db
-            // (mid-commit in-memory state is uncertain — same stance as a
-            // post-commit manifest error), then re-raise the panic.
-            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.lead(db))) {
-                Ok(r) => r,
-                Err(payload) => {
-                    let mut g = self.queue.lock();
-                    g.leader_active = false;
-                    let dead = std::mem::take(&mut g.pending);
-                    drop(g);
-                    for p in dead {
-                        if let Some(tx) = p.reply {
-                            let _ = tx.send(Err(CoreError::Internal(
-                                "write group leader panicked mid-commit".into(),
-                            )));
-                        }
-                    }
-                    // This thread's `active` ticket never reaches the tail
-                    // decrement after a resume; account it here.
-                    self.active.fetch_sub(1, Ordering::Relaxed);
-                    self.mark_complete();
-                    if let Some(mut guard) = db.try_write() {
-                        guard.fence_durability_post_commit(
-                            &"write group leader panicked mid-commit",
-                        );
-                    }
-                    std::panic::resume_unwind(payload);
-                }
-            }
-        } else {
+        let r = if let Some(slot) = follower_slot {
             self.queued.fetch_add(1, Ordering::Relaxed);
             // RFC-0051 P0: PCT preemption point before the follower blocks
-            // on the leader's reply channel (lock-free).
+            // on the leader's reply (lock-free).
             #[cfg(feature = "pct")]
             crate::pct_hooks::maybe_yield("follower_wait");
             // RFC-0051 P1.1: the recv is a real blocking wait — under PCT it
             // runs as a blocking section (CPU token released, out of the
             // enabled set until the reply lands).
-            let recv_reply = || {
-                rx.expect("follower has recv").recv().unwrap_or_else(|_| {
-                    Err(CoreError::Internal(
-                        "write group leader dropped reply channel".into(),
-                    ))
-                })
-            };
+            let recv_reply = || slot.recv();
             #[cfg(feature = "pct")]
             {
                 crate::pct_hooks::blocking_section("follower_reply", recv_reply)
             }
             #[cfg(not(feature = "pct"))]
             {
-                recv_reply()
+                let t_recv = Instant::now();
+                let r = recv_reply();
+                stall_note("follower_recv", t_recv);
+                r
             }
+        } else {
+            // F197: a leader panic unwinds through `lead` without clearing
+            // `leader_active`, so every future writer queues behind a dead
+            // leader and blocks on `recv()` forever. Drop releases the
+            // group (queued members get Err via PendingWrite::drop) and
+            // fences the Db; no `catch_unwind` on the happy path.
+            let mut panic_guard = LeadPanicGuard {
+                group: self,
+                db,
+                armed: true,
+            };
+            let r = self.lead(db);
+            panic_guard.armed = false;
+            r
         };
         self.active.fetch_sub(1, Ordering::Relaxed);
         self.mark_complete();
@@ -707,20 +916,66 @@ impl WriteGroup {
             .store(Self::now_ns(), Ordering::Relaxed);
     }
 
+    fn push_pending(g: &mut WriteGroupState, counter: &AtomicUsize, w: PendingWrite) {
+        g.pending.push_back(w);
+        counter.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn take_pending(g: &mut WriteGroupState, counter: &AtomicUsize) -> Vec<PendingWrite> {
+        let n = g.pending.len();
+        if n > 0 {
+            counter.fetch_sub(n, Ordering::Relaxed);
+        }
+        g.pending.drain(..).collect()
+    }
+
+    fn spin_for_pending_n(&self, spins: u32, want: usize) {
+        if want == 0 {
+            return;
+        }
+        for _ in 0..spins {
+            if self.queued_pending.load(Ordering::Relaxed) >= want {
+                return;
+            }
+            std::hint::spin_loop();
+        }
+    }
+
     fn lead<E: Env>(&self, db: &RwLock<Db<E>>) -> Result<SequenceNumber> {
+        // RFC-0180 P0.27: pin via the shared Arc — no `db.read()` (that
+        // queued behind compact/flush and showed up as p999 ≈ 1.5 ms).
+        self.commit_inflight.fetch_add(1, Ordering::Release);
+        struct LeadInflight(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+        impl Drop for LeadInflight {
+            fn drop(&mut self) {
+                self.0.fetch_sub(1, Ordering::Release);
+            }
+        }
+        let _inflight = LeadInflight(Arc::clone(&self.commit_inflight));
         let mut leader_result: Option<Result<SequenceNumber>> = None;
+        let mut prev_group_members = 0usize;
         loop {
             let mut batch: Vec<PendingWrite> = {
                 let mut g = self.queue.lock();
                 if g.pending.is_empty() {
-                    g.leader_active = false;
-                    return leader_result.unwrap_or_else(|| {
-                        Err(CoreError::Internal(
-                            "write group leader had no member result".into(),
-                        ))
-                    });
+                    let spins = leader_linger_spins(prev_group_members, self.recently_concurrent());
+                    if spins > 0 {
+                        drop(g);
+                        let t_linger = Instant::now();
+                        self.spin_for_pending_n(spins, 1);
+                        stall_note("linger", t_linger);
+                        g = self.queue.lock();
+                    }
+                    if g.pending.is_empty() {
+                        g.leader_active = false;
+                        return leader_result.unwrap_or_else(|| {
+                            Err(CoreError::Internal(
+                                "write group leader had no member result".into(),
+                            ))
+                        });
+                    }
                 }
-                g.pending.drain(..).collect()
+                Self::take_pending(&mut g, &self.queued_pending)
             };
 
             // Catch-up window (RFC-0037 P2.2): writers counted in `active`
@@ -733,10 +988,8 @@ impl WriteGroup {
             let window = Duration::from_micros(self.catchup_window_us.load(Ordering::Relaxed));
             let batch_ops: usize = batch.iter().map(|p| p.ops.len()).sum();
             let active = self.active.load(Ordering::Relaxed);
-            // Sync groups share one fdatasync; async groups share one
-            // WAL `write()`. Without the wait, 4-client overwrite was
-            // 1-op frames (p95 107 µs). Fat batches still skip.
-            if batch_ops < CATCHUP_SKIP_OPS {
+            let any_sync = batch.iter().any(|p| p.do_sync);
+            if any_sync && batch_ops < CATCHUP_SKIP_OPS {
                 if let Some(bound) =
                     catchup_wait_bound(window, self.fd_ema(), batch.len(), active, batch_ops)
                 {
@@ -749,12 +1002,19 @@ impl WriteGroup {
                             break;
                         }
                         let _timed_out = self.arrived.wait_for(&mut g, deadline - now);
-                        batch.extend(g.pending.drain(..));
+                        batch.extend(Self::take_pending(&mut g, &self.queued_pending));
                     }
                     drop(g);
                     self.catchup_wait_ns
                         .fetch_add(t_wait.elapsed().as_nanos() as u64, Ordering::Relaxed);
                     self.catchup_waits.fetch_add(1, Ordering::Relaxed);
+                }
+            } else if !any_sync {
+                let spins = async_catchup_spins(batch.len(), active);
+                if spins > 0 {
+                    self.spin_for_pending_n(spins, 1);
+                    let mut g = self.queue.lock();
+                    batch.extend(Self::take_pending(&mut g, &self.queued_pending));
                 }
             }
 
@@ -765,12 +1025,53 @@ impl WriteGroup {
             // write lock (lock-free: followers can still enqueue).
             #[cfg(feature = "pct")]
             crate::pct_hooks::maybe_yield("lead_write_lock");
+            let t_lock = Instant::now();
             let mut guard = db.write();
+            stall_note("lead_write", t_lock);
+            {
+                let extra = {
+                    let mut q = self.queue.lock();
+                    Self::take_pending(&mut q, &self.queued_pending)
+                };
+                if !extra.is_empty() {
+                    batch.extend(extra);
+                }
+            }
             Self::validate_occ_batch(&mut guard, &mut batch);
+            let any_sync = batch.iter().any(|p| p.do_sync);
+            let nops: usize = batch.iter().map(|p| p.ops.len()).sum();
+            // P0.30 N×1-op loop was p37 p95 75 µs (was 26). 1-member only.
+            if async_one_op_fast_path(any_sync, batch.len(), nops)
+                && batch[0].occ.is_none()
+                && batch[0].occ_err.is_none()
+            {
+                let mut pending = batch.pop().expect("len checked");
+                let op = pending.ops.pop().expect("ops checked");
+                let t_one = Instant::now();
+                let result = guard.commit_async_one(op);
+                stall_note("commit_async_one", t_one);
+                drop(guard);
+                self.batches.fetch_add(1, Ordering::Relaxed);
+                self.batch_ops.fetch_add(1, Ordering::Relaxed);
+                prev_group_members = 1;
+                let result = pending.occ_err.take().map(Err).unwrap_or(result);
+                Self::deliver_member(pending.reply.take(), result, &mut leader_result);
+                // RFC-0180 P0.31: one group per lead(). Chaining groups
+                // into the leader's put() made that one client sample
+                // ≈ 1.5 ms (p999) — the leader thread cannot return until
+                // `lead` returns.
+                self.queue.lock().leader_active = false;
+                return leader_result.unwrap_or_else(|| {
+                    Err(CoreError::Internal(
+                        "write group leader had no member result".into(),
+                    ))
+                });
+            }
             let inputs: Vec<(Vec<BatchOp>, bool)> = batch
                 .iter_mut()
                 .map(|p| (std::mem::take(&mut p.ops), p.do_sync))
                 .collect();
+            let t_grp = Instant::now();
             let results = match guard.group_start(inputs) {
                 Err(results) => {
                     drop(guard);
@@ -783,7 +1084,7 @@ impl WriteGroup {
                             if q.pending.is_empty() {
                                 break;
                             }
-                            q.pending.drain(..).collect()
+                            Self::take_pending(&mut q, &self.queued_pending)
                         };
                         Self::validate_occ_batch(&mut guard, &mut extra);
                         let more: Vec<(Vec<BatchOp>, bool)> = extra
@@ -801,25 +1102,29 @@ impl WriteGroup {
                         Some(&mut batch),
                         || {
                             let mut q = self.queue.lock();
-                            q.pending.drain(..).collect()
+                            Self::take_pending(&mut q, &self.queued_pending)
                         },
                         None,
                     )
                 }
             };
+            stall_note("group_path", t_grp);
             self.batches.fetch_add(1, Ordering::Relaxed);
             self.batch_ops
                 .fetch_add(batch.len() as u64, Ordering::Relaxed);
+            prev_group_members = batch.len();
 
-            for (pending, result) in batch.into_iter().zip(results) {
-                let result = pending.occ_err.map(Err).unwrap_or(result);
-                match pending.reply {
-                    None => leader_result = Some(result),
-                    Some(tx) => {
-                        let _ = tx.send(result);
-                    }
-                }
+            for (mut pending, result) in batch.into_iter().zip(results) {
+                let result = pending.occ_err.take().map(Err).unwrap_or(result);
+                Self::deliver_member(pending.reply.take(), result, &mut leader_result);
             }
+            // RFC-0180 P0.31: one group per `lead` (see 1-op path).
+            self.queue.lock().leader_active = false;
+            return leader_result.unwrap_or_else(|| {
+                Err(CoreError::Internal(
+                    "write group leader had no member result".into(),
+                ))
+            });
         }
     }
 
@@ -1195,6 +1500,7 @@ impl<E: Env> ConcurrentDb<E> {
         let mut db = db;
         db.set_occ_floor_registry(Arc::clone(&occ_registry));
         let commit_inflight = db.commit_inflight_handle();
+        writes.commit_inflight = Arc::clone(&commit_inflight);
         Self {
             inner: Arc::new(RwLock::new(db)),
             commit_inflight,
@@ -6296,6 +6602,128 @@ mod tests {
         // Knob takes effect again after re-enabling.
         db.set_write_group_catchup_window(Duration::from_micros(1234));
         assert_eq!(db.write_group_catchup_window(), Duration::from_micros(1234));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0180 P0.5 — linger after a multi-member group; async 1-op catch-up.
+    #[test]
+    fn rfc0180_leader_linger_and_async_catchup() {
+        assert_eq!(leader_linger_spins(0, false), 0);
+        assert_eq!(leader_linger_spins(1, false), 0);
+        assert_eq!(leader_linger_spins(1, true), 256);
+        assert_eq!(leader_linger_spins(2, false), 256);
+        assert_eq!(leader_linger_spins(4, false), 256);
+        assert_eq!(leader_linger_second_want(), 3);
+        assert_eq!(leader_linger_second_spins(), 512);
+        assert_eq!(leader_linger_want(0), 0);
+        assert_eq!(leader_linger_want(1), 0);
+        assert_eq!(leader_linger_want(2), 1);
+        assert_eq!(leader_linger_want(4), 3);
+        assert_eq!(async_catchup_spins(1, 1), 0);
+        assert_eq!(async_catchup_spins(4, 4), 0);
+        assert_eq!(async_catchup_spins(1, 4), 1024);
+        assert_eq!(async_catchup_spins(1, 2), 1024);
+        // P0.32: already grouped at MC — do not wait for the last straggler.
+        assert!(async_catchup_skip_when_grouped(2, 4));
+        assert!(async_catchup_skip_when_grouped(3, 4));
+        assert!(async_catchup_skip_when_grouped(2, ASYNC_GROUP_ADAPTIVE_MAX));
+        assert!(!async_catchup_skip_when_grouped(1, 4));
+        assert!(!async_catchup_skip_when_grouped(
+            2,
+            ASYNC_GROUP_ADAPTIVE_MAX + 1
+        ));
+        assert_eq!(async_catchup_spins(2, 4), 0);
+        assert_eq!(async_catchup_spins(3, 4), 0);
+        assert_eq!(async_catchup_spins(2, 16), 1024);
+        assert_eq!(async_catchup_spins(2, 50), 1024);
+        assert!(async_one_op_fast_path(false, 1, 1));
+        assert!(!async_one_op_fast_path(true, 1, 1));
+        assert!(!async_one_op_fast_path(false, 2, 2));
+        assert!(!async_one_op_fast_path(false, 1, 16));
+        let one = PendingWrite {
+            ops: vec![BatchOp::put(b"k", b"v")],
+            do_sync: false,
+            reply: None,
+            occ: None,
+            occ_err: None,
+        };
+        assert!(async_all_one_op_fast_path(
+            false,
+            std::slice::from_ref(&one)
+        ));
+        assert!(async_all_one_op_fast_path(
+            false,
+            &[
+                PendingWrite {
+                    ops: vec![BatchOp::put(b"a", b"1")],
+                    do_sync: false,
+                    reply: None,
+                    occ: None,
+                    occ_err: None,
+                },
+                PendingWrite {
+                    ops: vec![BatchOp::put(b"b", b"2")],
+                    do_sync: false,
+                    reply: None,
+                    occ: None,
+                    occ_err: None,
+                },
+            ]
+        ));
+        assert!(!async_all_one_op_fast_path(
+            true,
+            std::slice::from_ref(&one)
+        ));
+        assert!(!async_all_one_op_fast_path(false, &[]));
+        assert!(lead_one_group_then_resign());
+        // RFC-0180 P0.26: first debt look never queues on the write lock.
+        assert!(flush_debt_skip_if_write_lock_held(false, true));
+        assert!(!flush_debt_skip_if_write_lock_held(true, true));
+        assert!(!flush_debt_skip_if_write_lock_held(false, false));
+        assert!(!async_group_wal_holds_db_write_lock());
+    }
+
+    #[test]
+    fn rfc0180_follower_reply_slot_delivers() {
+        let slot = FollowerReply::new();
+        slot.reset();
+        slot.complete(Ok(7));
+        assert_eq!(slot.recv().unwrap(), 7);
+        slot.reset();
+        slot.complete(Err(CoreError::Internal("x".into())));
+        assert!(slot.recv().is_err());
+        let mut pending = PendingWrite {
+            ops: Vec::new(),
+            do_sync: false,
+            reply: Some(Arc::new(FollowerReply::new())),
+            occ: None,
+            occ_err: None,
+        };
+        let slot = pending.reply.take().expect("slot");
+        WriteGroup::deliver_member(Some(Arc::clone(&slot)), Ok(3), &mut None);
+        assert_eq!(slot.recv().unwrap(), 3);
+        let mut leader = None;
+        WriteGroup::deliver_member(None, Ok(9), &mut leader);
+        assert_eq!(leader.unwrap().unwrap(), 9);
+    }
+
+    /// RFC-0180 P0.27: 4-writer put path pins inflight via the shared Arc
+    /// (no `db.read()` at `lead` entry). Must drop to 0 after join.
+    #[test]
+    fn rfc0180_lead_inflight_pin_clears_after_mc4() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open(&dir).unwrap();
+        std::thread::scope(|s| {
+            for i in 0..4u8 {
+                let db = &db;
+                s.spawn(move || {
+                    for k in 0..64u8 {
+                        db.put([i, k], b"v").unwrap();
+                    }
+                });
+            }
+        });
+        assert_eq!(db.commit_inflight(), 0, "lead session pin must drop");
         let _ = fs::remove_dir_all(&dir);
     }
 

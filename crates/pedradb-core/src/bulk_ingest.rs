@@ -40,7 +40,6 @@
 //! append-only after all, and the ladder path is unchanged for it.
 
 use bytes::Bytes;
-use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
 /// Consecutive fully-admissible batches before a family latches into
@@ -62,6 +61,14 @@ pub(crate) fn bulk_enabled() -> bool {
         Ok(v) => v.trim() != "0",
         Err(_) => true,
     }
+}
+
+/// RFC-0180: skip the sorted-ingest observer once a family is dead.
+/// Zipf overwrite kills on the first descent; `classify_family` then
+/// `to_owned` the family name on every 1-op put (commit_async_one tax).
+#[must_use]
+pub(crate) fn bulk_observe_needed(enabled: bool, family_dead: bool) -> bool {
+    enabled && !family_dead
 }
 
 /// One family-resolved op, borrowed from the batch being classified.
@@ -169,6 +176,12 @@ impl BulkLatch {
         self.high_water.contains_key(family)
     }
 
+    /// Family was killed this session (never bulk again).
+    #[must_use]
+    pub(crate) fn is_dead(&self, family: &str) -> bool {
+        self.state.get(family) == Some(&FamilyState::Dead)
+    }
+
     fn kill(&mut self, family: &str) {
         if self.state.get(family) != Some(&FamilyState::Dead) {
             self.killed += 1;
@@ -179,16 +192,14 @@ impl BulkLatch {
     /// Ratchet the family's high-water over `key` (every observed key,
     /// whatever routed it, must gate future bulk puts).
     fn ratchet(&mut self, family: &str, key: &[u8]) {
-        match self.high_water.entry(family.to_owned()) {
-            Entry::Occupied(mut e) => {
-                if e.get().as_ref() < key {
-                    e.insert(Bytes::copy_from_slice(key));
-                }
+        if let Some(hw) = self.high_water.get_mut(family) {
+            if hw.as_ref() < key {
+                *hw = Bytes::copy_from_slice(key);
             }
-            Entry::Vacant(e) => {
-                e.insert(Bytes::copy_from_slice(key));
-            }
+            return;
         }
+        self.high_water
+            .insert(family.to_owned(), Bytes::copy_from_slice(key));
     }
 
     /// Classify one batch. `family_max_in_db` answers "the largest user
@@ -312,6 +323,12 @@ impl BulkLatch {
                 // Deletes / spanning ranges / mixed: ladder this batch.
                 // A probing family restarts its streak; a latched family
                 // stays latched (a delete does not break append-above).
+                // Dead stays dead (RFC-0180: Ineligible used to resurrect
+                // zipf overwrite into Probing on every 1-op put).
+                if matches!(state, FamilyState::Dead) {
+                    self.ladder_batches += 1;
+                    return FamilyRoute::Ladder;
+                }
                 if !was_latched {
                     self.state
                         .insert(family.to_owned(), FamilyState::Probing { streak: 0 });
@@ -509,6 +526,26 @@ mod tests {
             };
             assert_eq!(route_of(&routes, "data"), expected, "batch {i}");
         }
+    }
+
+    #[test]
+    fn rfc0180_bulk_observe_needed_skips_dead() {
+        assert!(!bulk_observe_needed(false, false));
+        assert!(!bulk_observe_needed(false, true));
+        assert!(bulk_observe_needed(true, false));
+        assert!(!bulk_observe_needed(true, true));
+    }
+
+    #[test]
+    fn rfc0180_dead_family_stays_dead_on_later_put() {
+        let mut latch = BulkLatch::with_threshold(1);
+        latch.classify_family("default", &[(true, b"k5".as_ref())], false, || None);
+        latch.classify_family("default", &[(true, b"k4".as_ref())], false, || None);
+        assert!(latch.is_dead("default"), "descent kills");
+        // Above-water 1-op must not resurrect (overwrite_mc4 zipf).
+        latch.classify_family("default", &[(true, b"k9".as_ref())], false, || None);
+        assert!(latch.is_dead("default"));
+        assert!(!bulk_observe_needed(true, latch.is_dead("default")));
     }
 
     #[test]

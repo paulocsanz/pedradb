@@ -2423,13 +2423,8 @@ impl<E: PedraEnv> DB<E> {
                 self.inner.put(enc, interned.as_ref())
             })
             .map_err(Error::from)?;
-        // Blob SET never GETs in the timed window; copying 16 KiB into TLS
-        // was pure tax (RFC-0149 P2.1). Small YCSB/SET values still warm,
-        // sharing the interned Bytes (RFC-0154 P1.8).
-        if interned.len() <= 1024 {
-            let (epoch, gen) = self.tls_point_ids(DEFAULT_CF, key);
-            LAST_GET.with(|t| t.borrow_mut().store_key(epoch, gen, key, Some(interned)));
-        }
+        // TLS last-get is filled by get(), not write-through. overwrite_mc4
+        // never reads; store_key on every put was tax (RFC-0180).
         Ok(())
     }
 
@@ -4269,6 +4264,14 @@ where
                         break;
                     }
                     Ok(CompactCmd::Run) | Err(RecvTimeoutError::Timeout) => {
+                        // RFC-0180 P0.30: skip *before* any Db lock. The
+                        // previous order ran `materialize_bulk_once` (write
+                        // lock) every 5 ms during overwrite_mc4; followers
+                        // sat in `recv` (p999 ≈ 1.5 ms).
+                        if host_worker_skip_during_writes(&inner) {
+                            wait = poll;
+                            continue;
+                        }
                         while inner.materialize_bulk_once() {}
                         compact_diag(&inner);
                         let fenced = inner.is_durability_fenced();
@@ -4297,7 +4300,7 @@ where
                         // steals the lock from apply. 1c still counts as
                         // `writes_active() == 1`, so that predicate is not
                         // enough — skip while a commit is inflight.
-                        if inner.with_read(|db| db.commit_inflight() > 0) {
+                        if host_worker_skip_during_writes(&inner) {
                             wait = poll;
                             continue;
                         }
@@ -4403,6 +4406,9 @@ where
                 match rx.recv_timeout(poll) {
                     Ok(CompactCmd::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
                     Ok(CompactCmd::Run) | Err(RecvTimeoutError::Timeout) => {
+                        if host_worker_skip_during_writes(&inner) {
+                            continue;
+                        }
                         let t0 = std::time::Instant::now();
                         let before = inner.parked_unflushed_count();
                         flush_worker_tick(&inner);
@@ -4527,7 +4533,25 @@ fn compact_diag<E: PedraEnv>(inner: &ConcurrentDb<E>) {
 /// One flush-worker tick: park every staged imm, then enforce the
 /// parked-memory bound. Split out so the policy is unit-testable
 /// without thread or fsync timing.
+/// RFC-0180 P0.33: skip unless writers have been idle this long. Active
+/// or inflight already fail `writes_idle_for`. 200 µs is above overwrite_mc4
+/// inter-put (~13 µs) so compact cannot barge a 5 ms poll into a 1 µs gap
+/// (p42/p44 ~1/3 Pedra runs 213 k, `lead_write` 13–50 ms). Below the 1 ms
+/// sleep in `host_worker_drains_l0_at_trigger_without_idle`.
+fn host_worker_write_busy_hold() -> Duration {
+    Duration::from_micros(200)
+}
+
+/// RFC-0180 P0.30 + P0.33: no Db lock while a writer is in `submit`, a
+/// commit is inflight, or the last Ok is younger than the busy hold.
+fn host_worker_skip_during_writes<E: PedraEnv>(inner: &ConcurrentDb<E>) -> bool {
+    !inner.writes_idle_for(host_worker_write_busy_hold())
+}
+
 fn flush_worker_tick<E: PedraEnv>(inner: &ConcurrentDb<E>) {
+    if host_worker_skip_during_writes(inner) {
+        return;
+    }
     while inner.materialize_bulk_once() {}
     while inner.park_imm_once() {}
     flush_worker_diag(inner);
@@ -5771,6 +5795,32 @@ mod tests {
         let db = DB::open(&opts, &dir).unwrap();
         assert!(db.compact_thread.is_some(), "compact worker must spawn");
         assert!(db.flush_thread.is_some(), "flush worker must spawn");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0180 P0.30 + P0.33: skip while inflight/active or last Ok < 200 µs.
+    #[test]
+    fn rfc0180_host_worker_skip_during_writes() {
+        let dir = tmp("host-skip");
+        let db = DB::open_default(&dir).unwrap();
+        assert!(
+            !host_worker_skip_during_writes(&db.inner),
+            "idle must not skip"
+        );
+        assert_eq!(
+            host_worker_write_busy_hold(),
+            std::time::Duration::from_micros(200)
+        );
+        db.put(b"k", b"v").unwrap();
+        assert!(
+            host_worker_skip_during_writes(&db.inner),
+            "just after Ok, 200 µs hysteresis"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        assert!(
+            !host_worker_skip_during_writes(&db.inner),
+            "1 ms idle clears hysteresis (L0 drain poll still fires)"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

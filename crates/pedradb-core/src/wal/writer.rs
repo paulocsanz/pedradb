@@ -140,6 +140,50 @@ impl<W: Write + Seek> WalWriter<W> {
         n
     }
 
+    /// RFC-0180: fragment `ops` and `write()` in one take/restore (1-op
+    /// async put skipped a second frame hop).
+    pub(crate) fn encode_and_write_ops(&mut self, ops: &[crate::batch::WriteOp]) -> Result<usize> {
+        let mut frame = self.take_frame();
+        let n = self.fragment_encoded_len(ops, &mut frame);
+        let r = self.write_frame(&frame);
+        frame.clear();
+        self.restore_frame(frame);
+        r.map(|()| n)
+    }
+
+    /// RFC-0180: 1-op Full record when it fits the current block — no
+    /// `EncodedOpsSource` state machine / `encoded_len` double walk.
+    pub(crate) fn encode_and_write_one_op(&mut self, op: &crate::batch::WriteOp) -> Result<usize> {
+        let payload = crate::batch::one_op_logical_len(op);
+        if super::format::one_op_fits_full(self.block_offset, payload) {
+            self.emit_full_one_op(op, payload)?;
+            return Ok(payload);
+        }
+        self.encode_and_write_ops(std::slice::from_ref(op))
+    }
+
+    fn emit_full_one_op(&mut self, op: &crate::batch::WriteOp, payload: usize) -> Result<()> {
+        let mut frame = std::mem::take(&mut self.frame);
+        frame.clear();
+        frame.reserve(HEADER_SIZE + payload);
+        frame.extend_from_slice(&[0u8; HEADER_SIZE]);
+        frame.push(crate::batch::WRITE_RECORD_VERSION);
+        frame.extend_from_slice(&1u32.to_le_bytes());
+        frame.push(op.kind.as_u8());
+        frame.extend_from_slice(&op.sequence.to_le_bytes());
+        let kl = u32::try_from(op.key.len()).unwrap_or(u32::MAX);
+        frame.extend_from_slice(&kl.to_le_bytes());
+        frame.extend_from_slice(&op.key);
+        let vl = u32::try_from(op.value.len()).unwrap_or(u32::MAX);
+        frame.extend_from_slice(&vl.to_le_bytes());
+        frame.extend_from_slice(&op.value);
+        self.patch_physical_record(RecordType::Full, payload, 0, &mut frame);
+        let r = self.write_frame(&frame);
+        frame.clear();
+        self.frame = frame;
+        r
+    }
+
     pub(crate) fn write_frame(&mut self, buf: &[u8]) -> Result<()> {
         if !buf.is_empty() {
             self.out.write_all(buf)?;
@@ -704,5 +748,55 @@ mod tests {
         writer.add_records(&refs).unwrap();
         let buf = writer.into_inner().into_inner();
         assert_eq!(collect_records(&buf), records);
+    }
+
+    #[test]
+    fn rfc0180_encode_and_write_ops_matches_fragment_then_write() {
+        use crate::batch::WriteOp;
+        use bytes::Bytes;
+        let op = WriteOp::put(
+            7,
+            Bytes::from_static(b"c/000042"),
+            Bytes::from_static(b"yyyy"),
+        );
+        let mut split = WalWriter::new(Cursor::new(Vec::new())).unwrap();
+        let mut frame = split.take_frame();
+        split.fragment_encoded_len(std::slice::from_ref(&op), &mut frame);
+        split.write_frame(&frame).unwrap();
+        split.restore_frame(Vec::new());
+        let split_bytes = split.into_inner().into_inner();
+
+        let mut once = WalWriter::new(Cursor::new(Vec::new())).unwrap();
+        let n = once
+            .encode_and_write_ops(std::slice::from_ref(&op))
+            .unwrap();
+        assert!(n > 0);
+        assert_eq!(once.into_inner().into_inner(), split_bytes);
+    }
+
+    #[test]
+    fn rfc0180_encode_and_write_one_op_matches_fragment() {
+        use crate::batch::WriteOp;
+        use bytes::Bytes;
+        let op = WriteOp::put(
+            7,
+            Bytes::from_static(b"default\0c/000042"),
+            Bytes::from_static(&[b'y'; 100]),
+        );
+        let mut split = WalWriter::new(Cursor::new(Vec::new())).unwrap();
+        let mut frame = split.take_frame();
+        split.fragment_encoded_len(std::slice::from_ref(&op), &mut frame);
+        split.write_frame(&frame).unwrap();
+        split.restore_frame(Vec::new());
+        let split_bytes = split.into_inner().into_inner();
+
+        let mut once = WalWriter::new(Cursor::new(Vec::new())).unwrap();
+        assert!(crate::wal::format::one_op_fits_full(
+            0,
+            crate::batch::one_op_logical_len(&op)
+        ));
+        let n = once.encode_and_write_one_op(&op).unwrap();
+        assert_eq!(n, crate::batch::one_op_logical_len(&op));
+        assert_eq!(once.into_inner().into_inner(), split_bytes);
     }
 }
