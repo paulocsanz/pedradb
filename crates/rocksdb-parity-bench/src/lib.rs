@@ -582,6 +582,12 @@ impl YcsbRunner {
             build_ns.sort_unstable();
             let bp50 = build_ns[build_ns.len() / 2] as f64 / 1000.0;
             eprintln!("[rocks-parity] deps_apply_batch split p50 build={bp50:.2}µs");
+            blocks.push(summarize(
+                "deps_apply_batch",
+                cfg_ops,
+                t0.elapsed(),
+                &mut lats,
+            ));
             if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
                 let n = b[0].saturating_sub(a[0]).max(1);
                 let us = |d: u64| d as f64 / n as f64 / 1000.0;
@@ -594,13 +600,12 @@ impl YcsbRunner {
                 us(b[5].saturating_sub(a[5])),
                 us(b[6].saturating_sub(a[6])),
             );
+                let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
+                eprint_write_diagnose("deps_apply_batch", &d);
+                if let Some(last) = blocks.last_mut() {
+                    *last = attach_diagnose(std::mem::take(last), Some(&d));
+                }
             }
-            blocks.push(summarize(
-                "deps_apply_batch",
-                cfg_ops,
-                t0.elapsed(),
-                &mut lats,
-            ));
             eprintln!("[rocks-parity] deps_apply_batch done txns={txns} errors={errors}");
         }
 
@@ -787,7 +792,11 @@ impl YcsbRunner {
                     us(b[5].saturating_sub(a[5])),
                     us(b[6].saturating_sub(a[6])),
                 );
-                eprint_write_diagnose("deps_cache_overwrite", pct(&lats, 50.0), a, b, 1, 0.0);
+                let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
+                eprint_write_diagnose("deps_cache_overwrite", &d);
+                if let Some(last) = blocks.last_mut() {
+                    *last = attach_diagnose(std::mem::take(last), Some(&d));
+                }
             }
         }
 
@@ -2391,6 +2400,7 @@ impl YcsbRunner {
                 self.seed(e);
             }
             let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+            let phase0 = e.write_phase_snapshot();
             let t0 = Instant::now();
             let mut lats = Vec::with_capacity(cfg_ops * clients);
             let mut errors = 0u64;
@@ -2434,32 +2444,46 @@ impl YcsbRunner {
                 }
             });
             let wall = t0.elapsed();
-            let block = summarize_mc(
+            let mut avg_group = 0.0;
+            eprintln!(
+                "[rocks-parity] {name} mc{clients} done ops={} errors={errors}",
+                cfg_ops * clients
+            );
+            if let Some((sub, queued, groups, gops)) = e.write_group_stats() {
+                avg_group = if groups == 0 {
+                    0.0
+                } else {
+                    gops as f64 / groups as f64
+                };
+                eprintln!(
+                    "[rocks-parity] write_group submits={sub} queued={queued} groups={groups} ops={gops} avg_group={avg_group:.2}"
+                );
+            }
+            blocks.push(summarize_mc(
                 &format!("{name}_mc{clients}"),
                 cfg_ops * clients,
                 wall,
                 &mut lats,
                 clients,
                 errors,
-            );
-            eprintln!(
-                "[rocks-parity] {name} mc{clients} done ops={} errors={errors}",
-                cfg_ops * clients
-            );
-            if let Some((sub, queued, groups, gops)) = e.write_group_stats() {
-                let avg = if groups == 0 {
-                    0.0
-                } else {
-                    gops as f64 / groups as f64
-                };
-                eprintln!(
-                    "[rocks-parity] write_group submits={sub} queued={queued} groups={groups} ops={gops} avg_group={avg:.2}"
+            ));
+            if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+                let d = diagnose_from_phases(
+                    pct(&lats, 50.0),
+                    a,
+                    b,
+                    clients as u64,
+                    avg_group,
+                    read_pct as u64,
                 );
+                eprint_write_diagnose(&format!("{name}_mc{clients}"), &d);
+                if let Some(last) = blocks.last_mut() {
+                    *last = attach_diagnose(std::mem::take(last), Some(&d));
+                }
             }
             if let Some(line) = e.write_phase_line() {
                 eprintln!("[rocks-parity] {name} mc{clients} phases {line}");
             }
-            blocks.push(block);
         }
         blocks
     }
@@ -2577,14 +2601,11 @@ impl YcsbRunner {
                     us(b[5].saturating_sub(a[5])),
                     us(b[6].saturating_sub(a[6])),
                 );
-                eprint_write_diagnose(
-                    &format!("deps_apply_batch_mc{clients}"),
-                    pct(&lats, 50.0),
-                    a,
-                    b,
-                    clients as u64,
-                    avg_group,
-                );
+                let d = diagnose_from_phases(pct(&lats, 50.0), a, b, clients as u64, avg_group, 0);
+                eprint_write_diagnose(&format!("deps_apply_batch_mc{clients}"), &d);
+                if let Some(last) = blocks.last_mut() {
+                    *last = attach_diagnose(std::mem::take(last), Some(&d));
+                }
             }
         }
 
@@ -2807,23 +2828,23 @@ fn pct(sorted: &[f64], p: f64) -> f64 {
     sorted[idx.min(sorted.len() - 1)]
 }
 
-/// RFC-0184: one diagnose line from WRITEPHASE deltas (per commit).
-fn eprint_write_diagnose(
-    tag: &str,
+/// RFC-0184: WRITEPHASE deltas → kernel diagnosis (per commit).
+fn diagnose_from_phases(
     pedra_p50_ms: f64,
     a: [u64; 7],
     b: [u64; 7],
     clients: u64,
     avg_group: f64,
-) {
+    read_pct: u64,
+) -> pedradb_core::WriteDiagnosis {
     let n = b[0].saturating_sub(a[0]).max(1);
     let per = |i: usize| b[i].saturating_sub(a[i]) / n;
-    let d = pedradb_core::diagnose_write(pedradb_core::WriteGapInput {
+    pedradb_core::diagnose_write(pedradb_core::WriteGapInput {
         pedra_ns: (pedra_p50_ms * 1_000_000.0) as u64,
         rocks_ns: 0,
         clients,
         avg_group_bps: (avg_group * 10_000.0) as u64,
-        read_pct: 0,
+        read_pct,
         phases: pedradb_core::WritePhases {
             prepare_ns: per(1),
             wal_ns: per(2),
@@ -2832,8 +2853,22 @@ fn eprint_write_diagnose(
             flush_check_ns: per(5),
             lock_wait_ns: per(6),
         },
-    });
+    })
+}
+
+fn eprint_write_diagnose(tag: &str, d: &pedradb_core::WriteDiagnosis) {
     eprintln!("[rocks-parity] diagnose {tag} {}", d.line());
+}
+
+/// RFC-0184 P1.2: `diagnose.lever` on the bench object (compare reads it).
+fn attach_diagnose(block: String, d: Option<&pedradb_core::WriteDiagnosis>) -> String {
+    let Some(d) = d else {
+        return block;
+    };
+    block.replace(
+        "\"wall_s\"",
+        &format!("\"diagnose\": {},\n    \"wall_s\"", d.json_object()),
+    )
 }
 
 fn summarize(name: &str, n: usize, wall: Duration, lats_ms: &mut [f64]) -> String {
@@ -3233,6 +3268,23 @@ mod tests {
         assert!(
             mc.contains("\"clients\": 4") && mc.contains("\"p999_ms\""),
             "mc block keeps tail:\n{mc}"
+        );
+        let d = diagnose_from_phases(
+            0.0033,
+            [0, 0, 0, 0, 0, 0, 0],
+            [1, 30, 2_460, 140, 70, 30, 0],
+            1,
+            0.0,
+            0,
+        );
+        let with = attach_diagnose(mc, Some(&d));
+        assert!(
+            with.contains("\"diagnose\": {\"lever\":\"wal_encode_or_write\""),
+            "RFC-0184 P1.2 bench JSON needs diagnose.lever:\n{with}"
+        );
+        assert!(
+            with.contains("\"clients\": 4"),
+            "attach keeps mc fields:\n{with}"
         );
     }
 
