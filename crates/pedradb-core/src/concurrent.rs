@@ -2598,9 +2598,6 @@ impl<E: Env> ConcurrentDb<E> {
                 }
             }
             let pairs: Vec<_> = files.into_iter().map(|(t, n, _)| (t, n)).collect();
-            if g.admit_sst_ram(&pairs).is_err() {
-                return false;
-            }
             g.apply_sst_installs(pairs, &levels);
             g.retire_flush_pin();
         }
@@ -2708,9 +2705,6 @@ impl<E: Env> ConcurrentDb<E> {
             }
             let t_span1 = std::time::Instant::now();
             let pairs: Vec<_> = files.into_iter().map(|(t, n, _)| (t, n)).collect();
-            if g.admit_sst_ram(&pairs).is_err() {
-                return false;
-            }
             g.apply_sst_installs(pairs, &levels);
             let t_apply1 = std::time::Instant::now();
             let popped = g.take_oldest_parked_matching(expect);
