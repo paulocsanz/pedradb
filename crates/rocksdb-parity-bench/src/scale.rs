@@ -14,7 +14,7 @@
 #![allow(dead_code)]
 
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 const ROUTES_PER_SERVICE: usize = 1000;
@@ -58,6 +58,98 @@ pub fn backends() -> Vec<String> {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect()
+}
+
+/// Official scale cache (256 MiB). `pedra scale` applies this when neither
+/// `--cache` nor `SCALE_CACHE_BYTES` is set.
+pub const DEFAULT_SCALE_CACHE_BYTES: u64 = 268_435_456;
+
+/// Parsed `pedra scale` invocation (RFC-0178 P0.10).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PedraScaleCli {
+    /// Store directory (one process, one n).
+    pub dir: PathBuf,
+    /// `SCALE_ENTRIES` override.
+    pub entries: Option<u64>,
+    /// `SCALE_CACHE_BYTES` override.
+    pub cache: Option<u64>,
+    /// `SCALE_BACKENDS` override.
+    pub backends: Option<String>,
+}
+
+const PEDRA_SCALE_USAGE: &str =
+    "usage: pedra scale [--entries N] [--cache BYTES] [--backends NAME] [dir]";
+
+/// Parse `["scale", ...flags, dir]`. Flags win over env at [`apply_pedra_scale`].
+pub fn parse_pedra_scale(args: &[String]) -> Result<PedraScaleCli, String> {
+    if args.first().map(String::as_str) != Some("scale") {
+        return Err(PEDRA_SCALE_USAGE.into());
+    }
+    let mut entries = None;
+    let mut cache = None;
+    let mut backends = None;
+    let mut dir = None;
+    let mut i = 1usize;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--entries" => {
+                let v = args
+                    .get(i + 1)
+                    .and_then(|s| s.parse().ok())
+                    .ok_or_else(|| PEDRA_SCALE_USAGE.to_string())?;
+                entries = Some(v);
+                i += 2;
+            }
+            "--cache" => {
+                let v = args
+                    .get(i + 1)
+                    .and_then(|s| s.parse().ok())
+                    .ok_or_else(|| PEDRA_SCALE_USAGE.to_string())?;
+                cache = Some(v);
+                i += 2;
+            }
+            "--backends" => {
+                let v = args
+                    .get(i + 1)
+                    .cloned()
+                    .ok_or_else(|| PEDRA_SCALE_USAGE.to_string())?;
+                backends = Some(v);
+                i += 2;
+            }
+            "-h" | "--help" => return Err(PEDRA_SCALE_USAGE.into()),
+            s if s.starts_with('-') => {
+                return Err(format!("unknown flag: {s}\n{PEDRA_SCALE_USAGE}"));
+            }
+            s => {
+                if dir.is_some() {
+                    return Err(format!("extra argument: {s}\n{PEDRA_SCALE_USAGE}"));
+                }
+                dir = Some(PathBuf::from(s));
+                i += 1;
+            }
+        }
+    }
+    Ok(PedraScaleCli {
+        dir: dir.unwrap_or_else(|| PathBuf::from("/tmp/pedra-scale")),
+        entries,
+        cache,
+        backends,
+    })
+}
+
+/// Push CLI overrides into `SCALE_*`. Default cache is 256 MiB when unset.
+pub fn apply_pedra_scale(cli: &PedraScaleCli) {
+    if let Some(n) = cli.entries {
+        std::env::set_var("SCALE_ENTRIES", n.to_string());
+    }
+    if let Some(c) = cli.cache {
+        std::env::set_var("SCALE_CACHE_BYTES", c.to_string());
+    } else if std::env::var_os("SCALE_CACHE_BYTES").is_none() {
+        std::env::set_var("SCALE_CACHE_BYTES", DEFAULT_SCALE_CACHE_BYTES.to_string());
+    }
+    if let Some(b) = &cli.backends {
+        std::env::set_var("SCALE_BACKENDS", b);
+    }
 }
 
 fn next_rand(state: &mut u64) -> u64 {
@@ -620,6 +712,29 @@ mod tests {
         assert_eq!(ram_mode_label(0), "hot");
         assert_eq!(ram_mode_label(1), "bounded-cache");
         assert_eq!(ram_mode_label(2), "hot");
+    }
+
+    #[test]
+    fn rfc0178_pedra_scale_parses_entries_and_dir() {
+        let c = parse_pedra_scale(&[
+            "scale".into(),
+            "--entries".into(),
+            "100000000".into(),
+            "--cache".into(),
+            "268435456".into(),
+            "/tmp/x".into(),
+        ])
+        .unwrap();
+        assert_eq!(c.entries, Some(100_000_000));
+        assert_eq!(c.cache, Some(268_435_456));
+        assert_eq!(c.dir, PathBuf::from("/tmp/x"));
+        assert!(c.backends.is_none());
+    }
+
+    #[test]
+    fn rfc0178_pedra_scale_rejects_unknown_flag() {
+        let e = parse_pedra_scale(&["scale".into(), "--nope".into()]).unwrap_err();
+        assert!(e.contains("unknown flag"), "{e}");
     }
 
     #[test]
