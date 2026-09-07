@@ -78,7 +78,9 @@ a linha quando há phasesΔ. Sem harness novo.
 
 ### P2 — polish
 
-- [ ] **P2.1** none yet — status: `todo`
+- [x] **P2.1** `deps_raftlog` / `deps_raftlog_mcN` WRITEPHASE →
+      `diagnose.lever` no JSON (1c já tinha phasesΔ sem attach; mc não
+      tinha snapshot). — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -93,7 +95,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P0.7 | p0 | apply_batch/TX async park | done | flush_after_commit_opts; no L0 on no_sync | 2026-09-07 |
 | P1.1 | p1 | overwrite_mc4 caixa + diagnose | todo | 0178 P1.3 | 2026-09-07 |
 | P1.2 | p1 | compare JSON lever | done | benches[].diagnose.lever; compare ratios | 2026-09-07 |
-| P2.1 | p2 | none yet | todo | — | 2026-09-07 |
+| P2.1 | p2 | raftlog diagnose.lever | done | 1c + mcN WRITEPHASE → JSON | 2026-09-07 |
 
 ## Acceptance Criteria
 
@@ -105,6 +107,7 @@ a linha quando há phasesΔ. Sem harness novo.
   `rfc0184_async_ops_does_not_write_l0_when_over_limit`
   (L0=0 **e** `commit_inflight=0` após Ok);
   `rfc0184_async_apply_batch_does_not_write_l0_when_over_limit`;
+  raftlog 1c/mcN `diagnose.lever` (P2.1);
   `rfc0184_diagnosis_json_has_lever`;
   `extract_diagnose_lever_from_bench_object`.
 - **Telemetry / Analytics:** uma linha `diagnose dominant=… lever=…`;

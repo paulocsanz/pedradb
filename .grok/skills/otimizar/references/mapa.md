@@ -30,7 +30,7 @@ Refresh this file when a cell moves class. One row per cell.
 ## Próxima fase (rank da skill, 2026-09-07)
 
 1. **U / Linux `overwrite_mc4` isolado + diagnose + `balance`** (caixa). Sem bake: não ratio-win Darwin. Skill **ainda implementa** o próximo furo local.
-2. **Done this turn:** 0184 P0.7 — `apply_batch_with` / TX async parka, não `flush_cf` (espelho 1-op/ops).
+2. **Done this turn:** 0184 P2.1 — `deps_raftlog` / `_mcN` passam `diagnose.lever` no JSON (WRITEPHASE).
 3. prefix 0.70× / probe_miss — reads, caixa.
 
 Não: skiplist. Não: n=50 merge. Não: turno vazio porque “é caixa”.
