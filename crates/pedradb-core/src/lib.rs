@@ -13,6 +13,8 @@
 #![warn(clippy::pedantic)]
 
 pub mod batch;
+/// RFC-0184: static WRITEPHASE / scale-clock attribution (surgical cut).
+pub mod bench_gap_kernel;
 pub mod bloom;
 /// Optional DST buggify annotation sites (RFC-0018 P2.5; no-op unless feature).
 pub mod buggify_hooks;
@@ -31,12 +33,12 @@ pub mod db;
 pub mod env;
 pub mod error;
 pub mod flush_kernel;
-pub mod write_admission_kernel;
 pub mod group_commit_kernel;
 pub mod history;
 pub mod host;
 pub mod key;
 mod leveling;
+pub mod write_admission_kernel;
 
 pub mod lock;
 pub mod manifest;
@@ -50,6 +52,8 @@ pub mod pct_hooks;
 pub mod prefix;
 pub mod probe_order_kernel;
 pub mod rng;
+/// RFC-0176: one-process scale clock \(P\) / \(\mathrm{cap}(R)\) / \(T\).
+pub mod scale_kernel;
 pub mod sst;
 pub mod time;
 pub mod tx;
@@ -62,6 +66,10 @@ pub mod wal;
 
 pub use batch::{
     write_record_count_ok, write_record_count_ok_as_is, WriteOp, WriteRecord, WRITE_RECORD_VERSION,
+};
+pub use bench_gap_kernel::{
+    classify_get, classify_get_as_is, diagnose_write, dominant_phase, dominant_phase_as_is,
+    GetClass, WriteDiagnosis, WriteGapInput, WriteLever, WritePhase, WritePhases,
 };
 pub use bloom::{bloom_header_ok, bloom_header_ok_as_is, BloomFilter, DEFAULT_BITS_PER_KEY, MAX_K};
 pub use cache::{BlockCache, SstPayloadPool, TableCache};
@@ -80,12 +88,11 @@ pub use changelog_kernel::{
 pub use concurrent::ConcurrentDb;
 pub use db::{
     copy_db_directory, read_cache_invalidate_needed, read_checkpoint_meta, BatchOp,
-    BlobGcCandidate, CheckpointMeta,
-    CompactOptions, Db, DbStats, FenceClass, FenceRecovery, FenceReport, HistoryHorizon,
-    HistoryOptions, OpenOptions, PreparedL0Compact, ReadProbeSnap, RecoveryReport, ScanProjection,
-    Snapshot, SnapshotPin, SstLiveMeta, WalRecovery, WriteOptions, WritePhaseStats,
-    CHECKPOINT_META_FILE, DEFAULT_SST_PAYLOAD_BUDGET_BYTES, L0_COMPACTION_TRIGGER, MAX_LSM_LEVEL,
-    WAL_FILE_NAME,
+    BlobGcCandidate, CheckpointMeta, CompactOptions, Db, DbStats, FenceClass, FenceRecovery,
+    FenceReport, HistoryHorizon, HistoryOptions, OpenOptions, PreparedL0Compact, ReadProbeSnap,
+    RecoveryReport, ScanProjection, Snapshot, SnapshotPin, SstLiveMeta, WalRecovery, WriteOptions,
+    WritePhaseStats, CHECKPOINT_META_FILE, DEFAULT_SST_PAYLOAD_BUDGET_BYTES, L0_COMPACTION_TRIGGER,
+    MAX_LSM_LEVEL, WAL_FILE_NAME,
 };
 pub use env::{AdviseKind, Env, EnvFile, EnvSource, SstFileSource, StdEnv};
 pub use error::{CoreError, Result};
