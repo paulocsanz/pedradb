@@ -96,6 +96,10 @@ a linha quando há phasesΔ. Sem harness novo.
       — status: `done`
 - [x] **P2.7** scale `lookup_100` / get_loop measured ns/100 →
       `classify_get` vs 0176. — status: `done`
+- [x] **P2.8** Quicksilver `qs_hot_get` / `qs_neg_lookup` /
+      `qs_batch_write` WRITEPHASE → `diagnose.lever` (hot/neg =
+      `get_path`; batch = write lever). Kernel: `read_pct≥40` e
+      timed=0 ⇒ `get_path` (não `prepare`). — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -117,6 +121,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.5 | p2 | scale prefix_scan classify_probes | done | scan_sst_probed / op vs P_best | 2026-09-07 |
 | P2.6 | p2 | scale get_hit classify_get | done | measured ns vs 0176 best/happy/worst/as_is | 2026-09-07 |
 | P2.7 | p2 | scale lookup_100 classify_get | done | loop_ns/100 vs 0176 clock | 2026-09-07 |
+| P2.8 | p2 | qs suite diagnose.lever | done | hot/neg get_path; batch WRITEPHASE | 2026-09-07 |
 
 ## Acceptance Criteria
 
@@ -135,6 +140,8 @@ a linha quando há phasesΔ. Sem harness novo.
   `classify_probes_on_walk_all_is_not_ok`;
   scale `get_hit` `classify_get` (P2.6);
   scale `lookup_100` `classify_get` (P2.7);
+  qs suite `diagnose.lever` (P2.8);
+  `ycsb_c_all_reads_timed_zero_is_get_path`;
   `rfc0184_diagnosis_json_has_lever`;
   `extract_diagnose_lever_from_bench_object`.
 - **Telemetry / Analytics:** uma linha `diagnose dominant=… lever=…`;

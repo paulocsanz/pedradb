@@ -869,6 +869,7 @@ impl YcsbRunner {
         let mut blocks = Vec::with_capacity(3);
 
         // qs_hot_get — 99% get on the hot 10%, 1% WriteBatch ≥32 on that set.
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut gets, mut writes, mut errors) = (0u64, 0u64, 0u64);
         let t0 = Instant::now();
@@ -900,8 +901,16 @@ impl YcsbRunner {
         }
         blocks.push(summarize("qs_hot_get", cfg_ops, t0.elapsed(), &mut lats));
         eprintln!("[rocks-parity] qs_hot_get done gets={gets} writes={writes} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 99, cfg_ops as u64);
+            eprint_write_diagnose("qs_hot_get", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
 
         // qs_neg_lookup — gets past the keyspace (QS: ~10× more misses).
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut misses, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -917,8 +926,16 @@ impl YcsbRunner {
         }
         blocks.push(summarize("qs_neg_lookup", cfg_ops, t0.elapsed(), &mut lats));
         eprintln!("[rocks-parity] qs_neg_lookup done misses={misses} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
+            eprint_write_diagnose("qs_neg_lookup", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
 
         // qs_batch_write — every op is one batched put (QS root write).
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut puts, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -947,6 +964,13 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] qs_batch_write done puts={puts} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
+            eprint_write_diagnose("qs_batch_write", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
 
         self.rng = rng;
         blocks
@@ -2865,7 +2889,29 @@ fn diagnose_from_phases(
     avg_group: f64,
     read_pct: u64,
 ) -> pedradb_core::WriteDiagnosis {
-    let n = b[0].saturating_sub(a[0]).max(1);
+    diagnose_from_phases_n(
+        pedra_p50_ms,
+        a,
+        b,
+        clients,
+        avg_group,
+        read_pct,
+        b[0].saturating_sub(a[0]).max(1),
+    )
+}
+
+/// Same as [`diagnose_from_phases`] with an explicit ns domain (ops, not
+/// commits). qs_hot_get is 99% get / 1 batch — per-commit would dwarf p50.
+fn diagnose_from_phases_n(
+    pedra_p50_ms: f64,
+    a: [u64; 7],
+    b: [u64; 7],
+    clients: u64,
+    avg_group: f64,
+    read_pct: u64,
+    n: u64,
+) -> pedradb_core::WriteDiagnosis {
+    let n = n.max(1);
     let per = |i: usize| b[i].saturating_sub(a[i]) / n;
     pedradb_core::diagnose_write(pedradb_core::WriteGapInput {
         pedra_ns: (pedra_p50_ms * 1_000_000.0) as u64,
@@ -3541,6 +3587,8 @@ mod tests {
 
     #[test]
     fn qs_suite_on_compat_engine() {
+        // RFC-0184 P2.8: qs WRITEPHASE → diagnose.lever (env must be set at open).
+        std::env::set_var("PEDRA_WRITE_PHASE_STATS", "1");
         let dir = tempfile::tempdir().unwrap();
         let e = crate::engines::CompatEngine::open(dir.path());
         let cfg = Cfg {
@@ -3571,7 +3619,21 @@ mod tests {
         );
         for b in &blocks {
             assert!(b.contains("\"p50_ms\""), "{b}");
+            assert!(
+                b.contains("\"diagnose\": {\"lever\":"),
+                "RFC-0184 P2.8 qs JSON needs diagnose.lever:\n{b}"
+            );
         }
+        assert!(
+            blocks[0].contains("\"lever\":\"get_path\""),
+            "qs_hot_get is 99% get:\n{}",
+            blocks[0]
+        );
+        assert!(
+            blocks[1].contains("\"lever\":\"get_path\""),
+            "qs_neg_lookup is miss get:\n{}",
+            blocks[1]
+        );
     }
 
     #[test]
