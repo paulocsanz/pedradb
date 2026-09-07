@@ -226,3 +226,9 @@ name = "ScaleKernel"
 
 [[lean_lib]]
 name = "Scale"
+
+[[lean_lib]]
+name = "DiskPressureKernel"
+
+[[lean_lib]]
+name = "DiskPressure"

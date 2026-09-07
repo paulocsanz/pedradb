@@ -26,6 +26,8 @@
    "crates/pedradb-core/src/flush_kernel.rs",
    "crates/pedradb-core/src/lookup_kernel.rs",
    "crates/pedradb-core/src/scale_kernel.rs",
+   "crates/pedradb-core/src/disk_pressure_kernel.rs",
+   "crates/pedradb-core/src/probe_order_kernel.rs",
    "crates/pedradb-core/src/group_commit_kernel.rs",
    "crates/pedradb-core/src/leveling.rs",
    "crates/pedradb-core/src/manifest_kernel.rs",
@@ -73,8 +75,8 @@
    "crates/pedradb-raft/src/c1_modelo_kernel.rs"
   ],
   "kernel_files": 57,
-  "kernel_loc": 17708,
-  "handler_loc": 105090,
+  "kernel_loc": 17737,
+  "handler_loc": 105230,
   "db_rs_extracted": false,
   "proof_depth": {
    "extract": 144,
@@ -101,6 +103,11 @@
    ],
    "crates/pedradb-core/src/flush_kernel.rs": [
     "skip_auto_flush"
+   ],
+   "crates/pedradb-core/src/disk_pressure_kernel.rs": [
+    "disk_pressure_admit",
+    "compact_allowed_under_pressure",
+    "external_write_admitted"
    ],
    "crates/pedradb-core/src/lsm_r1_kernel.rs": [
     "empty",

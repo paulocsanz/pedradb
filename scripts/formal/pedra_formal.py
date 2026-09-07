@@ -568,7 +568,10 @@ def check_clones(root: Path, catalog: dict, r: Report) -> None:
 # verus/leveling{,_pick}.rs, plant in src/leveling.rs (findings/
 # 2026-08-31-leveling-kernel-unenrolled). The allowlist is empty; keep it
 # that way (transitional states get a comment, not a permanent row).
-TCB_FREEZE_ALLOWLIST: dict[str, str] = {}
+TCB_FREEZE_ALLOWLIST: dict[str, str] = {
+    "crates/pedradb-core/src/disk_pressure_kernel.rs":
+        "RFC-0179 Aeneas extract SOURCE.disk_pressure (catalog twin pending)",
+}
 
 # RFC-0166 P2.4: catalog accounting. `l28_*` is a campaign gate (named
 # plant / seed replay, not ∀ traces). Everything else defaults to a
@@ -1127,6 +1130,10 @@ AENEAS_EXTRACTS = (
     (
         "crates/pedradb-core/src/scale_kernel.rs",
         "formal/aeneas/out/SOURCE.scale",
+    ),
+    (
+        "crates/pedradb-core/src/disk_pressure_kernel.rs",
+        "formal/aeneas/out/SOURCE.disk_pressure",
     ),
 )
 
@@ -1969,6 +1976,15 @@ def check_extract(
             "crates/pedradb-core/src/scale_kernel.rs",
             "formal/aeneas/lean/Scale.lean",
             ("theorem point_get_probes_one_plus_one",),
+        ),
+        (
+            "disk_pressure",
+            "formal/aeneas/out/lean/DiskPressureKernel.lean",
+            "def disk_pressure_admit",
+            "./scripts/aeneas_disk_pressure.sh",
+            "crates/pedradb-core/src/disk_pressure_kernel.rs",
+            "formal/aeneas/lean/DiskPressure.lean",
+            ("theorem disk_pressure_unknown_admits",),
         ),
     ]:
         art = root / artifact

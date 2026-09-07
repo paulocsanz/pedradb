@@ -66,6 +66,24 @@ pub fn compact_allowed_under_pressure_as_is(_available: Option<u64>) -> bool {
     true
 }
 
+/// PITR dest / backup sink / HA replica WAL: same hard floor as live `put`.
+///
+/// Reclaim is still admitted — those callers have nothing to compact on an
+/// empty dest. Soft-floor reclaim stays the live engine's job.
+#[must_use]
+pub fn external_write_admitted(available: Option<u64>) -> bool {
+    !matches!(
+        disk_pressure_admit(available),
+        DiskPressureAdmit::Refuse { .. }
+    )
+}
+
+/// AS-IS: external copy/append proceeds into ENOSPC (torn dest / replica WAL).
+#[must_use]
+pub fn external_write_admitted_as_is(_available: Option<u64>) -> bool {
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,6 +156,17 @@ mod tests {
         assert!(
             compact_allowed_under_pressure_as_is(Some(0)),
             "AS-IS dente: compact at zero free"
+        );
+    }
+
+    #[test]
+    fn external_write_admits_reclaim_refuses_hard() {
+        assert!(external_write_admitted(None));
+        assert!(external_write_admitted(Some(DISK_HARD_FREE_BYTES)));
+        assert!(!external_write_admitted(Some(DISK_HARD_FREE_BYTES - 1)));
+        assert!(
+            external_write_admitted_as_is(Some(0)),
+            "AS-IS dente: PITR/replica append at zero free"
         );
     }
 }
