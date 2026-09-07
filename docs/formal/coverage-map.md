@@ -76,7 +76,7 @@ comportamento. "Callers" é o que o lint do freeze exige chamar a entrada.
 | fold_range | `pedradb-fold/src/fold_kernel.rs` | close | `pedradb-fold/watch.rs`, `pedradb-fold/store.rs` |
 | wal_recover | `pedradb-core/src/wal/recover_kernel.rs` | close | `pedradb-core/wal/reader.rs` |
 | manifest_recover | `pedradb-core/src/manifest_kernel.rs` | close | `pedradb-core/db.rs` |
-| reopen_outcome | `pedradb-core/src/wal/reopen_kernel.rs` | close | `pedradb-core/db.rs` |
+| reopen_outcome | `pedradb-core/src/wal/reopen_kernel.rs` | close, single_artifact | `pedradb-core/db.rs` |
 | dictionary_link | `pedradb-core/src/wal/reopen_kernel.rs` | close | `pedradb-core/db.rs` |
 | flush_decision | `pedradb-core/src/flush_kernel.rs` | close | `pedradb-core/db.rs` |
 | compact_decision | `pedradb-core/src/compact_kernel.rs` | close | `pedradb-core/db.rs` |

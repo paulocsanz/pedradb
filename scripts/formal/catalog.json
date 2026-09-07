@@ -2801,8 +2801,9 @@
       "id": "reopen_outcome",
       "finding": "F170/F171/G8",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/wal/reopen_kernel.rs",
-      "twin": "crates/pedradb-core/verus/reopen_outcome.rs",
+      "twin": "crates/pedradb-core/src/wal/reopen_kernel.rs",
       "verus": "scripts/verus_reopen_outcome.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs"
