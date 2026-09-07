@@ -360,7 +360,9 @@ impl ScaleStore for PedraScale {
         self.db.flush().is_ok()
     }
     fn settle(&mut self) -> bool {
-        let ok = self.db.flush().is_ok() && self.db.compact().is_ok();
+        // compact() already flushes. A second flush re-ran WARM / waited
+        // on the compact worker (87 s @100M with settle_parts compact=0.002).
+        let ok = self.db.compact().is_ok();
         let compact_ns = self
             .db
             .property_int_value(rocksdb_compat::properties::PEDRA_SETTLE_COMPACT_NS)

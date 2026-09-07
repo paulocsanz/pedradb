@@ -74,9 +74,11 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
 - [x] **P0.3** Teste dois-estados: prefix de uma janela settled
       disjunta sonda O(1) SST, não O(ficheiros de outros prefixos) —
       status: `done`
-- [ ] **P0.4** Overwrite/f_mc4: caminho isolado (DB fresco) no harness
-      + teste que o isolate não partilha o store da shape anterior —
-      status: `todo`
+- [x] **P0.4** Overwrite/f_mc4: `ROCKS_PARITY_MC_FRESH=1` re-seed
+      entre shapes mc; teste `rfc0178_mc_fresh_enabled_reads_env`.
+      WARM passa a ser **por path** (compact rewrite não deixa SST
+      novo frio). Settle do scale é só `compact()` (já faz flush) —
+      status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
 
@@ -102,7 +104,7 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
 | P0.1 | p0 | RFC + status | done | este ficheiro | 2026-09-06 |
 | P0.2 | p0 | DIAG 100M Darwin WARM (prefix/get_loop flat) | done | prefix 42 µs flat; get_loop 5,50 ms cliff fica; `findings/2026-09-06-rfc0178-p02-100m/` | 2026-09-06 |
 | P0.3 | p0 | Prefix window O(overlap) não O(all SST) | done | `rfc0178_prefix_window_probes_overlapping_ssts_only` | 2026-09-06 |
-| P0.4 | p0 | Isolate mc shapes no harness | todo | — | 2026-09-06 |
+| P0.4 | p0 | Isolate mc + WARM por path | done | `ROCKS_PARITY_MC_FRESH`; `rfc0178_compact_new_paths_are_warmed`; scale settle=`compact()` | 2026-09-06 |
 | P1.1 | p1 | probe_miss ≥1× 3-run caixa | todo | — | 2026-09-06 |
 | P1.2 | p1 | prefix 0,70× → ≥1× caixa | todo | — | 2026-09-06 |
 | P1.3 | p1 | overwrite isolado ≥1× caixa | todo | — | 2026-09-06 |
