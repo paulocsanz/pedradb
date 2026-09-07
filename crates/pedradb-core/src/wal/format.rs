@@ -14,6 +14,14 @@ pub const BLOCK_SIZE: usize = 32_768;
 /// Size of a physical record header: 4 bytes CRC + 2 bytes length + 1 byte type.
 pub const HEADER_SIZE: usize = 7;
 
+/// RFC-0180: a 1-op logical payload fits as one `Full` physical record in
+/// the current block (no pad / First-Last split).
+#[must_use]
+pub fn one_op_fits_full(block_offset: usize, payload_len: usize) -> bool {
+    let leftover = BLOCK_SIZE.saturating_sub(block_offset);
+    leftover >= HEADER_SIZE && leftover - HEADER_SIZE >= payload_len
+}
+
 /// Physical record types. Values match RocksDB's `RecordType` enum so a WAL
 /// produced by either engine can be parsed by the other.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,5 +83,15 @@ mod tests {
         }
         assert_eq!(RecordType::from_byte(5), None);
         assert_eq!(RecordType::from_byte(255), None);
+    }
+
+    #[test]
+    fn rfc0180_one_op_fits_full_block() {
+        assert!(one_op_fits_full(0, 100));
+        assert!(one_op_fits_full(0, BLOCK_SIZE - HEADER_SIZE));
+        assert!(!one_op_fits_full(0, BLOCK_SIZE - HEADER_SIZE + 1));
+        assert!(!one_op_fits_full(BLOCK_SIZE - 3, 10));
+        assert!(one_op_fits_full(BLOCK_SIZE - HEADER_SIZE - 50, 50));
+        assert!(!one_op_fits_full(BLOCK_SIZE - HEADER_SIZE - 50, 51));
     }
 }

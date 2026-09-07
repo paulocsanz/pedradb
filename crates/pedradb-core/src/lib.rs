@@ -79,7 +79,8 @@ pub use changelog_kernel::{
 };
 pub use concurrent::ConcurrentDb;
 pub use db::{
-    copy_db_directory, read_checkpoint_meta, BatchOp, BlobGcCandidate, CheckpointMeta,
+    copy_db_directory, read_cache_invalidate_needed, read_checkpoint_meta, BatchOp,
+    BlobGcCandidate, CheckpointMeta,
     CompactOptions, Db, DbStats, FenceClass, FenceRecovery, FenceReport, HistoryHorizon,
     HistoryOptions, OpenOptions, PreparedL0Compact, ReadProbeSnap, RecoveryReport, ScanProjection,
     Snapshot, SnapshotPin, SstLiveMeta, WalRecovery, WriteOptions, WritePhaseStats,
@@ -117,6 +118,6 @@ pub use verified::{
 pub use verify::{verify_at_rest, xor_durable_bits, VerifyFailure, VerifyReport};
 pub use vlog::{
     blob_path, decode_vlog_ptr, decode_vlog_ref, encode_vlog_ptr, encode_vlog_ref, list_blob_nums,
-    ValueLog, VlogPtr, VlogRewriteStats, VLOG_BLOB_PREFIX, VLOG_FILE_NAME, VLOG_NEW_NAME,
+    vlog_prepare_needed, ValueLog, VlogPtr, VlogRewriteStats, VLOG_BLOB_PREFIX, VLOG_FILE_NAME,
     VLOG_VALUE_PREFIX,
 };
