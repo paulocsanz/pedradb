@@ -16,3 +16,15 @@ theorem txn_commit_action_as_is_dente :
     txn_commit_action_as_is true = ok TxnCommitAction.Materialise := by
   unfold txn_commit_action_as_is
   rfl
+
+/-- Catalog corollary: leftover TX recovers aborted (T1 shim unfolds this). -/
+theorem leftover_txn_is_aborted_true :
+    leftover_txn_is_aborted = ok true := by
+  unfold leftover_txn_is_aborted
+  rfl
+
+/-- AS-IS dente: leftover TX is not aborted. -/
+theorem leftover_txn_is_aborted_as_is_dente :
+    leftover_txn_is_aborted_as_is = ok false := by
+  unfold leftover_txn_is_aborted_as_is
+  rfl

@@ -424,3 +424,15 @@ name = "WorldKernel"
 
 [[lean_lib]]
 name = "World"
+
+[[lean_lib]]
+name = "ComposeIterMerge"
+
+[[lean_lib]]
+name = "ComposeMembershipClone"
+
+[[lean_lib]]
+name = "ComposeScanCrc"
+
+[[lean_lib]]
+name = "ComposeC1Membership"

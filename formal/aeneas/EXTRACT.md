@@ -186,7 +186,57 @@ Not silent close-kernel **files** (`l28.rs` and `probe_order_kernel.rs` stay enr
 | `--exclude Iterator::{filter,position,copied,map,collect}` | Aeneas exit 1; **partial** file; covering body ignored at kernel.rs:66 (`filter`); leftover `axiom probe_order_covering` returning `Filter (Copied (Iter))` |
 | `--start-from crate::probe_order` (Vec `filter.collect`) | same CFailure `iterator.rs:42` |
 
-Partial + axiom is not a `def`. Do not rewrite the walk. Do not add covering to `scripts/aeneas_probe_order.sh` (would CFailure the enrolled `first_probe_on_equal_lo` extract).
+Partial + axiom is not a `def`. Do not rewrite the walk. Do not add covering to `scripts/aeneas_probe_order.sh` (would CFailure the enrolled `first_probe_on_equal_lo` extract). Catalog `as_is` `probe_order_covering_as_is` has no production `fn` (same refuse: nothing to extract).
+
+**No production `fn` (catalog `as_is` / leftover names).** Close-pair `as_is` columns name mutants that were never added to the enrolled file. Measured: `rg 'fn <name>'` on the kernel is empty. Do not invent them. Named here so they are not silent leftovers (2026-09-07 inventory: `ok_defs=525`, `missing_or_ghost=52`, of which `live_fn=True` is only `probe_order_covering`).
+
+| catalog id | named `as_is` / leftover | enrolled file |
+|---|---|---|
+| `unreserve_si_gen` | `unreserve_si_gen_as_is` | `txn_kernel.rs` |
+| `stream_next_seq` | `next_seq_as_is` | `cursor_kernel.rs` |
+| `path_after_authority` | `path_after_authority_as_is` | `path_kernel.rs` |
+| `strip_http_authority` | `strip_http_authority_as_is` | `path_kernel.rs` |
+| `request_target_authority` | `request_target_authority_as_is` | `path_kernel.rs` |
+| `split_host_port` | `split_host_port_as_is` | `path_kernel.rs` |
+| `from_hex` | `from_hex_as_is` | `form_kernel.rs` |
+| `plus_before_percent` | `plus_before_percent_as_is` | `form_kernel.rs` |
+| `ascii_lower` | `ascii_lower_as_is` | `auth_kernel.rs` |
+| `ascii_upper` | `ascii_upper_as_is` | `auth_kernel.rs` |
+| `is_non_bearer_auth_scheme` | `is_non_bearer_auth_scheme_as_is` | `auth_kernel.rs` |
+| `authorization_matches` | `authorization_matches_as_is` | `auth_kernel.rs` |
+| `journal_catch_up_pin` | `catch_up_pins_on_read_as_is` | `pin_kernel.rs` |
+| `journal_fold_pin` | `fold_pins_on_read_as_is` | `pin_kernel.rs` |
+| `journal_next_pin` | `next_pin_as_is` | `pin_kernel.rs` |
+| `children_start` | `packed_children_start_as_is` | `children_kernel.rs` |
+| `children_half_open` | `key_in_half_open_as_is` | `children_kernel.rs` |
+| `fields_decode` | `decode_fields_as_is` | `fields_kernel.rs` |
+| `cqe_leftover` | `cqe_act_as_is` | `cqe_kernel.rs` |
+| `cf_family_of` | `cf_family_of_as_is` | `cf_kernel.rs` |
+| `cf_encode_effective` | `cf_encode_effective_as_is` | `cf_kernel.rs` |
+| `encode_cf_key` | `encode_cf_key_as_is` | `cf_kernel.rs` |
+| `decode_cf_key` | `decode_cf_key_as_is` | `cf_kernel.rs` |
+| `infer_sst_cf` | `infer_sst_cf_as_is` | `cf_kernel.rs` |
+| `l28_tcp_*` (7 pairs) | `l28_tcp_*_ok` / `l28_tcp_*_ok_as_is` | `l28.rs` (TCP kernels end at `l28_tcp_pj_ok`) |
+| `leveled_enabled` | `leveled_enabled_as_is` | `leveling.rs` |
+| `leveling_disjoint` | `is_disjoint_as_is` | `leveling.rs` |
+| `leveling_overlaps` | `overlaps_as_is` | `leveling.rs` |
+| `leveling_total_bytes` | `total_bytes_as_is` | `leveling.rs` |
+| `key_in_window` | `key_in_window_as_is` | `sst/scan_kernel.rs` |
+| `point_bounds_overlap` | `point_bounds_overlap_as_is` | `sst/scan_kernel.rs` |
+| `from_record_type` | `from_record_type_as_is` | `wal/recover_kernel.rs` |
+| `compact_split` | `compact_should_split_as_is` | core `compact_kernel.rs` |
+| `compact_split_at` | `compact_should_split_at_as_is` | core `compact_kernel.rs` |
+| `pct_default_depth` | `pct_campaign_default_depth_as_is` | `group_commit_kernel.rs` |
+| `compact_floor` | `compact_index_floor_as_is` | store `compact_kernel.rs` |
+| `compact_ready` | `compact_ready_as_is` | store `compact_kernel.rs` |
+
+**Live `fn` on an enrolled file without a Lean `def` (not catalog `entry`s).** Named so they are not silent:
+
+| live name | measured |
+|---|---|
+| `probe_order_as_is` | same Iterator CFailure as `probe_order_covering` (`filter` + `position`). Do not add to `aeneas_probe_order.sh`. |
+| `overlap_distinct_los_still_inverts_as_is` | `#[cfg(test)]` helper, not a decision `fn`. |
+| `flush_plan_as_is` | Verus `spec fn` in the same file; the exec mutant is `flush_plan_as_is_lose_tail` (already a Lean `def`). |
 
 ### Refused — Aeneas/Charon or Lean typecheck of the generated Kernel
 
@@ -212,6 +262,36 @@ enrolled via a shim that names `DcsError` without thiserror.
 None remaining: `world_kernel.rs` is production (`[lib] path`) and enrolled.
 
 The `probe_order` walk is still Iterator-refused; the catalog pair `first_probe_on_equal_lo` is enrolled via `--start-from`. Do not re-pin: upstream `aeneas@f9a8e33` did not widen the iterator set.
+
+## Composed edges (not only per-kernel atoms)
+
+Pedra theorems that `unfold` **both** caller and callee on a representative
+input, plus a second possibility (as-is or other branch). Same-Kernel rows
+are shim `#[path]` callees already inside one generated file. Cross-lib rows
+import two `*Kernel` lake libs. `scripts/lean_extracts.sh --required` builds
+the composition files and fails on a missing file or the substring `sorry`.
+
+| caller | callee | production theorem | second possibility |
+|---|---|---|---|
+| EnvCrash `sync` | GroupCommit `fsync_promotes_pending` (shim copy) | `sync_honest_promotes_via_fsync` | `sync_lying_does_not_promote` |
+| WalState `acked_survives_every_legal_crash` | EnvCrash `crash_legal` | `acked_survives_legal_cut` | `acked_survives_as_is_dente` |
+| WalState `wal_sync` | EnvCrash `sync` | `wal_sync_honest_promotes` | `wal_sync_lying_does_not_promote` |
+| D1Modelo `put_ok` | WalState `wal_append`/`wal_sync`/`wal_ack` | `put_ok_append_sync_ack` | `put_ok_as_is_acks_unsynced` |
+| WriteAck `on_barrier` | WalState `wal_sync` | `on_barrier_honest_promotes` | `wal_sync_lying_leaves_barrier` |
+| Posix `fdatasync_rc_ok` | Posix `fdatasync_eintr_retry_admitted` | `posix_ok_needs_zero_rc_and_no_eintr_retry` | `posix_as_is_admits_nonzero_and_eintr` / `posix_nonzero_rc_not_ok` |
+| Iter `iter_window_keep` | Merge `iter_window_keep` (clone) | `iter_merge_keep_live_agree` / `_hidden_agree` | `iter_merge_keep_as_is_agree` |
+| Membership `joint_election_ok` | StoreMembership clone | `joint_election_ok_clones_refuse` / `_single_cfg` | `joint_election_ok_as_is_clones_agree` |
+| Scan shim `crc_match_ok` | Crc extract | `crc_match_ok_extracts_equal` | `crc_match_ok_extracts_mismatch` |
+| C1Modelo shim `joint_election_ok` | Membership extract | `c1_joint_election_matches_membership` / `_single_cfg` | `c1_joint_election_as_is_matches_membership` |
+| T1Modelo `t1_modelo` | Txn `leftover_txn_is_aborted` (shim copy) | `t1_modelo_empty` (already unfolds both) | `leftover_txn_is_aborted_as_is_dente` in `Txn.lean` |
+
+Cross-lib files: `ComposeIterMerge.lean`, `ComposeMembershipClone.lean`,
+`ComposeScanCrc.lean`, `ComposeC1Membership.lean`.
+
+Measured cross-lib refuses (do not invent a merge of the two Kernels):
+
+- `import T1ModeloKernel` + `import TxnKernel` — lake red `environment already contains 'instDiscriminantRevertUserActionIsize'`. Both extracts stamp the same discriminant instance. T1 already `#[path]`s txn; leftover is unfolded in `t1_modelo_empty` and restated on the txn extract.
+- `import GroupCommitKernel` + EnvCrash `fsync_promotes_pending` — `formal/aeneas/lean/GroupCommitKernel.lean` is the Aug-24 copy (no `fsync_promotes_pending`); `out/lean/GroupCommitKernel.lean` has it. Do not restamp the GroupCommit lake lib in this slice (loop theorems + LawfulBEq). The EnvCrash shim copy is unfolded in `sync_honest_promotes_via_fsync`.
 
 ## What we may say
 

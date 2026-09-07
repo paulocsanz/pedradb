@@ -31,6 +31,14 @@ LIBS=(
   Leveling Posix Form Auth Path World
 )
 
+# Cross-lib composition: import two Kernels. No generated *Kernel.lean.
+COMPOSE=(
+  ComposeIterMerge
+  ComposeMembershipClone
+  ComposeScanCrc
+  ComposeC1Membership
+)
+
 for lib in "${LIBS[@]}"; do
   if [[ ! -f "$LEAN_DIR/${lib}.lean" || ! -e "$LEAN_DIR/${lib}Kernel.lean" ]]; then
     echo "FAIL  formal/aeneas/lean/{${lib},${lib}Kernel}.lean missing" >&2
@@ -46,6 +54,21 @@ for lib in "${LIBS[@]}"; do
   fi
 done
 
+for lib in "${COMPOSE[@]}"; do
+  if [[ ! -f "$LEAN_DIR/${lib}.lean" ]]; then
+    echo "FAIL  formal/aeneas/lean/${lib}.lean missing" >&2
+    exit 1
+  fi
+  if grep -q "sorry" "$LEAN_DIR/${lib}.lean"; then
+    echo "FAIL  ${lib}.lean contains sorry" >&2
+    exit 1
+  fi
+  if ! grep -q "^theorem " "$LEAN_DIR/${lib}.lean"; then
+    echo "FAIL  ${lib}.lean has no theorem" >&2
+    exit 1
+  fi
+done
+
 echo "      lake=$LAKE"
-(cd "$LEAN_DIR" && "$LAKE" build "${LIBS[@]}")
-echo "ok    lean extracts (${#LIBS[@]} libs)"
+(cd "$LEAN_DIR" && "$LAKE" build "${LIBS[@]}" "${COMPOSE[@]}")
+echo "ok    lean extracts (${#LIBS[@]} libs + ${#COMPOSE[@]} compose)"

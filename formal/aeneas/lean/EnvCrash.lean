@@ -19,3 +19,25 @@ theorem crash_legal_as_is_dente :
       (3#u64) = ok true := by
   unfold env_crash_kernel.crash_legal_as_is
   rfl
+
+/-- Honest barrier: `sync` unfolds `fsync_promotes_pending` and promotes. -/
+theorem sync_honest_promotes_via_fsync :
+    env_crash_kernel.sync
+      { written := 96#u64, synced := 0#u64 }
+      env_crash_kernel.SyncHonesty.Honest
+      = ok { written := 96#u64, synced := 96#u64 } := by
+  unfold env_crash_kernel.sync
+  unfold env_crash_kernel.SyncHonesty.Insts.CoreCmpPartialEqSyncHonesty.eq
+  unfold group_commit_kernel.fsync_promotes_pending
+  simp [env_crash_kernel.SyncHonesty.read_discriminant]
+
+/-- Lying OS: same callee returns false, watermark stays. -/
+theorem sync_lying_does_not_promote :
+    env_crash_kernel.sync
+      { written := 96#u64, synced := 0#u64 }
+      env_crash_kernel.SyncHonesty.Lying
+      = ok { written := 96#u64, synced := 0#u64 } := by
+  unfold env_crash_kernel.sync
+  unfold env_crash_kernel.SyncHonesty.Insts.CoreCmpPartialEqSyncHonesty.eq
+  unfold group_commit_kernel.fsync_promotes_pending
+  simp [env_crash_kernel.SyncHonesty.read_discriminant]
