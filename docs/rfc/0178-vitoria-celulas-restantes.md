@@ -85,6 +85,8 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
       do flush fica stale após o worker no `compact_gate`). Worker
       `try_lock` para não starvar o compact explícito. Teste
       `rfc0178_explicit_compact_rewarm_after_flush` — status: `done`
+      (DIAG r3: settle `warm_bytes=24.5 GiB` em 1.74 s; get_loop **2.76 ms**
+      cliff **não** fechou. Não era path-skip.)
 
 ### P1 — caixa 4 GiB (pede bake)
 
