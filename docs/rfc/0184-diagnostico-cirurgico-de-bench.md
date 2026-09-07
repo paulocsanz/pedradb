@@ -94,6 +94,8 @@ a linha quando há phasesΔ. Sem harness novo.
 - [x] **P2.6** scale `get_hit` measured ns → `classify_get` vs 0176
       clock (best/happy/worst/as_is). Sempre, não só COST_TRACE.
       — status: `done`
+- [x] **P2.7** scale `lookup_100` / get_loop measured ns/100 →
+      `classify_get` vs 0176. — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -114,6 +116,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.4 | p2 | scale probe_miss classify_probes | done | COST_TRACE vs P_best; as_is_walk | 2026-09-07 |
 | P2.5 | p2 | scale prefix_scan classify_probes | done | scan_sst_probed / op vs P_best | 2026-09-07 |
 | P2.6 | p2 | scale get_hit classify_get | done | measured ns vs 0176 best/happy/worst/as_is | 2026-09-07 |
+| P2.7 | p2 | scale lookup_100 classify_get | done | loop_ns/100 vs 0176 clock | 2026-09-07 |
 
 ## Acceptance Criteria
 
@@ -131,11 +134,12 @@ a linha quando há phasesΔ. Sem harness novo.
   `mc50_bypass_is_lock_convoy`;
   `classify_probes_on_walk_all_is_not_ok`;
   scale `get_hit` `classify_get` (P2.6);
+  scale `lookup_100` `classify_get` (P2.7);
   `rfc0184_diagnosis_json_has_lever`;
   `extract_diagnose_lever_from_bench_object`.
 - **Telemetry / Analytics:** uma linha `diagnose dominant=… lever=…`;
   `benches[].diagnose.lever` no JSON; compare copia para a row.
-  scale `get_hit` imprime `diagnose get … class=…` (P2.6).
+  scale `get_hit` / `lookup_100` imprimem `diagnose get … class=…` (P2.6/P2.7).
   peer continua `sync: false`.
 - **Documentation:** este RFC; `docs/benchmarks.md` receita.
 - **Screenshots:** backend-only.

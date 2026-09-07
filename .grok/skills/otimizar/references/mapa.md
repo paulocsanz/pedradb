@@ -26,12 +26,12 @@ Refresh this file when a cell moves class. One row per cell.
 | ycsb_a/f_mc4 Darwin mixed | **T**→tool | 0.58–0.91 DIAG | `get_path` with `--read-pct 50`; `balance_admits=0` (DIAG); compare `diagnose.lever` (0184 P1.2) | RFC-0182 / 0184 |
 | Linux async apply_mc4 | **U** | G1 2.79× exists; same-class mc4 not in floor1x 15 | — | RFC-0184 |
 | 1B get @64 GiB | **S** (model) | happy ~61 µs; as-is 12.3 ms | `pedra diagnose get` | RFC-0176 |
-| lookup_100 / get_loop | **T** | Darwin 427 µs @100M | cost dump; no `classify_get` yet | RFC-0178 P0.9 / 0184 |
+| lookup_100 / get_loop | **T**→tool | Darwin 427 µs @100M | scale `classify_get` ns/100 vs 0176 (0184 P2.7) | RFC-0178 P0.9 / 0184 |
 
 ## Próxima fase (rank da skill, 2026-09-07)
 
 1. **U / Linux `overwrite_mc4` isolado + diagnose + `balance`** (caixa). Sem bake: não ratio-win Darwin. Skill **ainda implementa** o próximo furo local.
-2. **Done this turn:** 0184 P2.6 — scale `get_hit` measured ns → `classify_get` vs 0176 (walk-all ≠ "disk").
-3. prefix 0.70× na caixa continua P1.2. lookup_100 ainda não classifica.
+2. **Done this turn:** 0184 P2.7 — scale `lookup_100` ns/100 → `classify_get` vs 0176.
+3. prefix 0.70× na caixa continua P1.2.
 
 Não: skiplist. Não: n=50 merge. Não: turno vazio porque “é caixa”.
