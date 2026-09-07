@@ -116,8 +116,10 @@ pub enum WriteLever {
     PublishInvalidate,
     /// Seq alloc / spill prepare.
     Prepare,
-    /// p50 not explained by WRITEPHASE (mixed get, client, missing timer).
+    /// p50 not explained by WRITEPHASE and read mix unknown.
     ReadOrClient,
+    /// Mixed shape (`read_pct ≥ 40`) whose p50 is the get, not the put.
+    GetPath,
     /// Concurrent writers not grouping (avg_group ~1 at mc4).
     Grouping,
 }
@@ -134,8 +136,26 @@ impl WriteLever {
             Self::PublishInvalidate => "publish_invalidate",
             Self::Prepare => "prepare",
             Self::ReadOrClient => "read_or_client",
+            Self::GetPath => "get_path",
             Self::Grouping => "grouping",
         }
+    }
+
+    /// Parse a token from CLI / mapa. `None` if unknown.
+    #[must_use]
+    pub fn from_token(s: &str) -> Option<Self> {
+        Some(match s {
+            "wal_encode_or_write" => Self::WalEncodeOrWrite,
+            "memtable_off_lock" => Self::MemtableOffLock,
+            "flush_check" => Self::FlushCheck,
+            "lock_convoy" => Self::LockConvoy,
+            "publish_invalidate" => Self::PublishInvalidate,
+            "prepare" => Self::Prepare,
+            "read_or_client" => Self::ReadOrClient,
+            "get_path" => Self::GetPath,
+            "grouping" => Self::Grouping,
+            _ => return None,
+        })
     }
 }
 
@@ -152,6 +172,8 @@ pub struct WriteGapInput {
     pub clients: u64,
     /// `avg_group * GAP_BPS`; `0` = unknown.
     pub avg_group_bps: u64,
+    /// YCSB-style read percent (`0` = unknown / pure write; `50` = A/F).
+    pub read_pct: u64,
     /// Timed phases.
     pub phases: WritePhases,
 }
@@ -271,6 +293,9 @@ fn write_lever(
         return WriteLever::LockConvoy;
     }
     if timed > 0 && bps(unattr, inp.pedra_ns) >= UNATTRIBUTED_READ_BPS {
+        if inp.read_pct >= 40 {
+            return WriteLever::GetPath;
+        }
         return WriteLever::ReadOrClient;
     }
     if dominant == WritePhase::FlushCheck {
@@ -352,6 +377,81 @@ pub fn classify_get(
     GetClass::Best
 }
 
+/// RFC-0182 same-boot set. Any engine cut must diagnose these before
+/// claiming a win. New use-case → add a name here (one home).
+pub const BALANCE_SHAPES: [&str; 5] = [
+    "deps_cache_overwrite_mc4",
+    "ycsb_a_mc4",
+    "ycsb_f_mc4",
+    "deps_apply_batch_mc4",
+    "deps_cache_overwrite",
+];
+
+/// One cell in a multi-shape board (RFC-0182 / /otimizar).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BalanceCell {
+    /// Ranked Linux 3/3 named loss (today: overwrite_mc4 caixa).
+    pub linux_named_loss: bool,
+    /// Darwin DIAG / host-load — not the cartaz.
+    pub diag_only: bool,
+    /// Diagnose lever for this cell.
+    pub lever: WriteLever,
+}
+
+/// Engine cut is admitted iff it is the Linux named-loss cell, or it
+/// hits ≥2 **cartaz** cells. A lever that only shows up on DIAG is
+/// refused (0180-style single-shape overfit).
+#[must_use]
+pub fn balance_admits(cut: WriteLever, cells: &[BalanceCell]) -> bool {
+    let mut hits = 0u32;
+    let mut cartaz = 0u32;
+    let mut named = false;
+    for c in cells {
+        if c.lever != cut {
+            continue;
+        }
+        hits = hits.saturating_add(1);
+        if c.linux_named_loss {
+            named = true;
+        }
+        if !c.diag_only {
+            cartaz = cartaz.saturating_add(1);
+        }
+    }
+    if hits == 0 {
+        return false;
+    }
+    named || cartaz >= 2
+}
+
+/// AS-IS: every cut is admitted (the overfit trap).
+#[must_use]
+pub fn balance_admits_as_is(_cut: WriteLever, _cells: &[BalanceCell]) -> bool {
+    true
+}
+
+/// Cost-trace probes/get vs RFC-0176 \(P_{\mathrm{best}}\).
+/// More than 2× legal probes ⇒ walk-all, not "scale is disk".
+#[must_use]
+pub fn classify_probes(probes_per_get: u64, p_best: u64) -> GetClass {
+    if p_best == 0 {
+        return GetClass::Best;
+    }
+    if probes_per_get > p_best.saturating_mul(2) {
+        return GetClass::AsIsWalk;
+    }
+    if probes_per_get <= p_best.saturating_add(1) {
+        return GetClass::Best;
+    }
+    GetClass::Happy
+}
+
+/// AS-IS: every probe count is best-path.
+#[must_use]
+pub fn classify_probes_as_is(_probes_per_get: u64, _p_best: u64) -> GetClass {
+    GetClass::Best
+}
+
 /// AS-IS: every measured get is "best" (hides walk-all).
 #[must_use]
 pub fn classify_get_as_is(
@@ -379,6 +479,7 @@ mod tests {
             rocks_ns: 2_600,
             clients: 1,
             avg_group_bps: 0,
+            read_pct: 0,
             phases: WritePhases {
                 prepare_ns: 30,
                 wal_ns: 2_460,
@@ -398,6 +499,7 @@ mod tests {
             rocks_ns: 97_163,
             clients: 4,
             avg_group_bps: 71_300,
+            read_pct: 0,
             phases: WritePhases {
                 prepare_ns: 640,
                 wal_ns: 10_310,
@@ -446,6 +548,7 @@ mod tests {
             rocks_ns: 2_000,
             clients: 50,
             avg_group_bps: 10_000,
+            read_pct: 0,
             phases: WritePhases {
                 lock_wait_ns: 8_000,
                 wal_ns: 1_000,
@@ -464,6 +567,7 @@ mod tests {
             rocks_ns: 2_800,
             clients: 4,
             avg_group_bps: 25_000,
+            read_pct: 0,
             phases: WritePhases {
                 wal_ns: 400,
                 mem_ns: 50,
@@ -480,6 +584,7 @@ mod tests {
             rocks_ns: 2_000,
             clients: 4,
             avg_group_bps: 10_000,
+            read_pct: 0,
             phases: WritePhases {
                 wal_ns: 3_000,
                 mem_ns: 200,
@@ -557,5 +662,97 @@ mod tests {
             classify_get(53_900, best_50m, cold, cold.saturating_mul(2), 5_000_000),
             GetClass::Happy
         );
+    }
+
+    #[test]
+    fn ycsb_a_mixed_is_get_path_not_wal() {
+        let mut inp = rfc0183_1c();
+        inp.pedra_ns = 7_000;
+        inp.rocks_ns = 2_800;
+        inp.clients = 4;
+        inp.avg_group_bps = 25_000;
+        inp.read_pct = 50;
+        inp.phases = WritePhases {
+            wal_ns: 400,
+            mem_ns: 50,
+            ..WritePhases::default()
+        };
+        let d = diagnose_write(inp);
+        assert_eq!(d.lever, WriteLever::GetPath);
+        let mut unknown = inp;
+        unknown.read_pct = 0;
+        assert_eq!(diagnose_write(unknown).lever, WriteLever::ReadOrClient);
+    }
+
+    #[test]
+    fn rfc0182_darwin_board_refuses_single_diag_cut() {
+        let board = [
+            BalanceCell {
+                linux_named_loss: false,
+                diag_only: true,
+                lever: WriteLever::GetPath,
+            },
+            BalanceCell {
+                linux_named_loss: false,
+                diag_only: true,
+                lever: WriteLever::GetPath,
+            },
+            BalanceCell {
+                linux_named_loss: false,
+                diag_only: true,
+                lever: WriteLever::WalEncodeOrWrite,
+            },
+            BalanceCell {
+                linux_named_loss: false,
+                diag_only: true,
+                lever: WriteLever::FlushCheck,
+            },
+        ];
+        assert!(
+            !balance_admits(WriteLever::WalEncodeOrWrite, &board),
+            "one Darwin 1c WAL is not an engine cut"
+        );
+        assert!(!balance_admits(WriteLever::FlushCheck, &board));
+        assert!(
+            !balance_admits(WriteLever::GetPath, &board),
+            "two DIAG mixed cells still DIAG"
+        );
+        assert!(balance_admits_as_is(WriteLever::WalEncodeOrWrite, &board));
+    }
+
+    #[test]
+    fn linux_named_loss_admits_its_lever() {
+        let board = [BalanceCell {
+            linux_named_loss: true,
+            diag_only: false,
+            lever: WriteLever::WalEncodeOrWrite,
+        }];
+        assert!(balance_admits(WriteLever::WalEncodeOrWrite, &board));
+        assert!(!balance_admits(WriteLever::FlushCheck, &board));
+    }
+
+    #[test]
+    fn two_cartaz_cells_admit_shared_lever() {
+        let board = [
+            BalanceCell {
+                linux_named_loss: false,
+                diag_only: false,
+                lever: WriteLever::GetPath,
+            },
+            BalanceCell {
+                linux_named_loss: false,
+                diag_only: false,
+                lever: WriteLever::GetPath,
+            },
+        ];
+        assert!(balance_admits(WriteLever::GetPath, &board));
+    }
+
+    #[test]
+    fn classify_probes_on_walk_all_is_not_ok() {
+        assert_eq!(classify_probes(5, 5), GetClass::Best);
+        assert_eq!(classify_probes(900, 5), GetClass::AsIsWalk);
+        assert_eq!(classify_probes_as_is(900, 5), GetClass::Best);
+        assert_eq!(BALANCE_SHAPES.len(), 5);
     }
 }

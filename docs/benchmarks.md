@@ -316,3 +316,23 @@ cargo run -q --release -p rocksdb-parity-bench --bin pedra -- diagnose get \
 
 With `PEDRA_WRITE_PHASE_STATS=1` the parity harness prints
 `diagnose <shape> dominant=… lever=…` after phasesΔ.
+
+Multi-shape **balance** (RFC-0182 / `/otimizar`): never ship an engine
+cut from one cell. `BALANCE_SHAPES` =
+`overwrite_mc4,ycsb_a_mc4,ycsb_f_mc4,apply_mc4,1c overwrite`.
+
+```sh
+# ycsb A: get, not WAL
+cargo run -q --release -p rocksdb-parity-bench --bin pedra -- diagnose write \
+  --pedra-ns 7000 --rocks-ns 2800 --clients 4 --read-pct 50 --wal-ns 400 --mem-ns 50
+
+# Darwin same-boot board must print admits=0 for wal/flush/get_path
+cargo run -q --release -p rocksdb-parity-bench --bin pedra -- diagnose balance \
+  --cut wal_encode_or_write \
+  --cell get_path:diag --cell get_path:diag \
+  --cell wal_encode_or_write:diag --cell flush_check:diag
+
+# cost-trace probes vs P_best (walk-all if class=as_is_walk)
+cargo run -q --release -p rocksdb-parity-bench --bin pedra -- diagnose probes \
+  --per-get 5 --p-best 5
+```

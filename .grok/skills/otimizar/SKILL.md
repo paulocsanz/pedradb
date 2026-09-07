@@ -16,6 +16,14 @@ Peer: RocksDB default `ROCKS_PARITY_SYNC=0`. G1 1c write-per-op não é win.
 Fjall = absoluto, nunca gate. Darwin DIAG ≠ cartaz Linux. Não inventar
 4º harness (RFC-0182). Não skiplist no escuro (RFC-0055/0183).
 
+**Balance (lei):** nunca otimizar uma célula. O conjunto obrigatório é
+`BALANCE_SHAPES` em `bench_gap_kernel` (hoje: overwrite_mc4, ycsb_a_mc4,
+ycsb_f_mc4, apply_mc4, 1c overwrite). Novo caso de uso → **adicionar**
+ao array + linha U no mapa, no mesmo turno. Um corte de engine só
+passa se `balance_admits` (named-loss Linux **ou** ≥2 células cartaz).
+DIAG sozinho `admits=0`. Depois do corte, voltar a diagnosticar o
+conjunto — regressão S→W é recusa, não “a célula-alvo ganhou”.
+
 **Números vivem nos RFCs / findings.** Este skill aponta; não duplica tabelas.
 
 ## Implement the winner (same turn)
@@ -23,7 +31,7 @@ Fjall = absoluto, nunca gate. Darwin DIAG ≠ cartaz Linux. Não inventar
 After the board, **do the first unblocked cut** this turn:
 
 - **Tool gap** (diagnose não classifica o shape / falta lever): kernel + teste + RFC-0184 checkbox.
-- **Engine gap** with a named lever and a local test: one lever, not a campaign.
+- **Engine gap** with a named lever, `balance_admits=1`, and a local test: one lever. Then diagnose **all** `BALANCE_SHAPES`.
 - **Caixa / 3-run Linux:** do **not** fake it on Darwin. Rank it, stop, say bake.
 
 Report-only is a failure unless the winner is caixa.
@@ -44,6 +52,16 @@ cargo run -q --release -p rocksdb-parity-bench --bin pedra -- diagnose write \
 # get vs RFC-0176 clock
 cargo run -q --release -p rocksdb-parity-bench --bin pedra -- diagnose get \
   --keys N --ram BYTES --measured-ns N
+
+# mixed (ycsb A/F): --read-pct 50 → lever=get_path
+# cost-trace vs P_best
+cargo run -q --release -p rocksdb-parity-bench --bin pedra -- diagnose probes \
+  --per-get N --p-best N
+
+# multi-shape gate (0182). --cell TOKEN[:diag|:named]
+cargo run -q --release -p rocksdb-parity-bench --bin pedra -- diagnose balance \
+  --cut wal_encode_or_write \
+  --cell get_path:diag --cell wal_encode_or_write:diag --cell flush_check:diag
 ```
 
 Harness: `PEDRA_WRITE_PHASE_STATS=1` prints `diagnose <shape> dominant=… lever=…`.
@@ -68,7 +86,7 @@ Fill from search. Classes:
 
 1. **U** on the **Linux** write cell that already lost 3/3 (today: `overwrite_mc4` caixa — 0178 P1.3 / 0184 P1.1). Diagnose before code.
 2. **W** whose lever is local (flush_check, wal_encode_or_write, grouping 2–8). One lever.
-3. **T** — mixed get/put still collapsing to `read_or_client`; cost-trace vs \(P_{\mathrm{best}}\).
+3. **T** — mixed still `read_or_client` (no `--read-pct`); probes vs \(P_{\mathrm{best}}\) missing.
 4. **C** only to document, never to hide.
 5. Never treat Darwin same-boot mixed 0,5–0,7× as the Linux map.
 6. Never 0055 skiplist unless `despark=1` (mem/gap ≥15% **and** clients≥2).
@@ -86,7 +104,7 @@ Tie-break: an open RFC `- [ ] **P0/P1` on that cell.
 - **Diagnose:** dominant=… lever=… despark=…
 - **Porquê esta e não as outras:** …
 - **Corte:** … (código local / bake caixa / estender kernel)
-- **Não fazer:** skiplist; G1 1c win; Fjall gate; 4º harness
+- **Não fazer:** skiplist; G1 1c win; Fjall gate; 4º harness; corte com `balance_admits=0`
 
 ## Ferramenta / skill
 - gap no diagnose? → kernel + teste + linha no mapa
@@ -99,6 +117,7 @@ When a new cell/use-case/lever appears, **edit** `references/mapa.md` in the sam
 
 ## Forbidden
 
+- Single-shape engine PR (0180 P0.34–P0.38). `balance_admits=0`.
 - "estamos a perder tudo" from Darwin DIAG.
 - Win vs `sync=true` or G1-off bypass.
 - WARM 100M on 4 GiB. `PEDRA_BULK_CHUNK_BYTES=4MB`.

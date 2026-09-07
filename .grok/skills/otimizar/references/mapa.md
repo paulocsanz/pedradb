@@ -23,15 +23,15 @@ Refresh this file when a cell moves class. One row per cell.
 | apply_mc4 Darwin async | **C**/DIAG | 0.478× | `flush_check` mem/gap 2.7% | RFC-0183 |
 | kvrocks_set_mc50 | **C** | 0.37× | `lock_convoy` Adaptive off n≥16 | RFC-0178 / 0183 |
 | G1 1c write-per-op | **C** | fd-ceiling | one barrier/op | Agents.md / floor1x-g1 |
-| ycsb_a/f_mc4 Darwin mixed | **T** | 0.58–0.91 DIAG | `read_or_client` (bucket, not a cut) | RFC-0182 P0.3 |
+| ycsb_a/f_mc4 Darwin mixed | **T**→tool | 0.58–0.91 DIAG | `get_path` with `--read-pct 50`; `balance_admits=0` (DIAG) | RFC-0182 / 0184 |
 | Linux async apply_mc4 | **U** | G1 2.79× exists; same-class mc4 not in floor1x 15 | — | RFC-0184 |
 | 1B get @64 GiB | **S** (model) | happy ~61 µs; as-is 12.3 ms | `pedra diagnose get` | RFC-0176 |
 
 ## Próxima fase (rank da skill, 2026-09-07)
 
-1. **U / Linux `overwrite_mc4` isolado + WRITEPHASE + `pedra diagnose`** (caixa; 0178 P1.3). Sem bake: não fechar com Darwin 1.00×.
-2. Se o diagnose Linux disser `wal_encode_or_write` / `grouping` / `flush_check` → um lever, testes, RFC checkbox.
-3. Tool: partir `read_or_client` em get vs put (ycsb_a/f) — classe **T**.
-4. prefix 0.70× caixa e probe_miss 0.27× — reads, não write path.
+1. **U / Linux `overwrite_mc4` isolado + WRITEPHASE + diagnose + `balance` no set `BALANCE_SHAPES`** (caixa; 0178 P1.3 / 0184 P1.1). Sem bake: não fechar com Darwin 1.00×.
+2. Se o diagnose Linux admitir um lever (`balance_admits=1`) → um corte, re-diagnosticar as 5 shapes.
+3. Tool **done this turn:** `get_path`, `classify_probes`, `balance_admits` (DIAG board recusa WAL/flush/get_path).
+4. prefix 0.70× caixa e probe_miss 0.27× — reads.
 
-Não: skiplist (`despark=0` no apply Darwin). Não: n=50 merge.
+Não: skiplist. Não: n=50 merge. Não: engine cut com `admits=0`.
