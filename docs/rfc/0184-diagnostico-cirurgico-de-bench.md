@@ -83,6 +83,9 @@ a linha quando há phasesΔ. Sem harness novo.
       tinha snapshot). — status: `done`
 - [x] **P2.2** YCSB 1c `run()` WRITEPHASE → `diagnose.lever` (A/F
       passam `read_pct`; mc já tinha). — status: `done`
+- [x] **P2.3** `kvrocks_set_mc50` WRITEPHASE → `diagnose.lever`
+      (`lock_convoy` n≥16; kernel `mc50_bypass_is_lock_convoy`).
+      — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -99,6 +102,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P1.2 | p1 | compare JSON lever | done | benches[].diagnose.lever; compare ratios | 2026-09-07 |
 | P2.1 | p2 | raftlog diagnose.lever | done | 1c + mcN WRITEPHASE → JSON | 2026-09-07 |
 | P2.2 | p2 | ycsb 1c diagnose.lever | done | `YcsbRunner::run` WRITEPHASE + read_pct | 2026-09-07 |
+| P2.3 | p2 | kvrocks mc50 diagnose.lever | done | n≥16 lock_convoy from WRITEPHASE | 2026-09-07 |
 
 ## Acceptance Criteria
 
@@ -112,6 +116,8 @@ a linha quando há phasesΔ. Sem harness novo.
   `rfc0184_async_apply_batch_does_not_write_l0_when_over_limit`;
   raftlog 1c/mcN `diagnose.lever` (P2.1);
   ycsb 1c `run()` `diagnose.lever` (P2.2);
+  `kvrocks_set_mc50` `diagnose.lever` (P2.3);
+  `mc50_bypass_is_lock_convoy`;
   `rfc0184_diagnosis_json_has_lever`;
   `extract_diagnose_lever_from_bench_object`.
 - **Telemetry / Analytics:** uma linha `diagnose dominant=… lever=…`;
