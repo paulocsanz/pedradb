@@ -406,3 +406,15 @@ name = "FormKernel"
 
 [[lean_lib]]
 name = "Form"
+
+[[lean_lib]]
+name = "AuthKernel"
+
+[[lean_lib]]
+name = "Auth"
+
+[[lean_lib]]
+name = "PathKernel"
+
+[[lean_lib]]
+name = "Path"

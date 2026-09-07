@@ -1243,6 +1243,14 @@ AENEAS_EXTRACTS = (
         "crates/pedradb-http/src/form_kernel.rs",
         "formal/aeneas/out/SOURCE.form",
     ),
+    (
+        "crates/pedradb-http/src/auth_kernel.rs",
+        "formal/aeneas/out/SOURCE.auth",
+    ),
+    (
+        "crates/pedradb-http/src/path_kernel.rs",
+        "formal/aeneas/out/SOURCE.path",
+    ),
 )
 
 
