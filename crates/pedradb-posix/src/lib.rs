@@ -18,6 +18,7 @@
 
 use std::fs::File;
 use std::io;
+use std::path::Path;
 
 /// Kernel readahead / cache-drop hint ([`advise_file`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -342,6 +343,45 @@ pub fn trim_process_heap() {
     }
 }
 
+/// Unprivileged free bytes on the filesystem that holds `path`
+/// (`statvfs` `f_bavail * f_frsize`).
+///
+/// Probe, not a durability barrier. Callers map `Err` to unknown and must
+/// not treat a failed probe as disk-full (RFC-0179).
+///
+/// # Errors
+/// `statvfs` failed, `path` contains an interior NUL, or the platform has
+/// no `statvfs` (Windows / Miri).
+pub fn filesystem_available_bytes(path: &Path) -> io::Result<u64> {
+    #[cfg(all(unix, not(miri)))]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let c_path = std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(|_| {
+            io::Error::new(io::ErrorKind::InvalidInput, "path contains interior NUL")
+        })?;
+        let mut buf = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+        // SAFETY: `c_path` is a live CString; `buf` is written only on rc==0.
+        // Signature is POSIX `int statvfs(const char *, struct statvfs *)`.
+        let rc = unsafe { libc::statvfs(c_path.as_ptr(), buf.as_mut_ptr()) };
+        if rc != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: rc==0 — the kernel initialized `buf`.
+        let st = unsafe { buf.assume_init() };
+        let frsize = st.f_frsize as u64;
+        let bavail = st.f_bavail as u64;
+        Ok(bavail.saturating_mul(frsize))
+    }
+    #[cfg(not(all(unix, not(miri))))]
+    {
+        let _ = path;
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "statvfs not available on this platform",
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -397,6 +437,21 @@ mod tests {
         let mut f = File::create(&path).unwrap();
         f.write_all(b"wal").unwrap();
         fdatasync_file(&f).expect("production path is one syscall, then rc gate");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn filesystem_available_bytes_temp_dir_nonzero() {
+        let dir = temp_dir();
+        match filesystem_available_bytes(&dir) {
+            Ok(n) => assert!(n > 0, "temp fs reported 0 free bytes"),
+            Err(e) => {
+                #[cfg(all(unix, not(miri)))]
+                panic!("statvfs on temp dir failed: {e}");
+                #[cfg(not(all(unix, not(miri))))]
+                let _ = e;
+            }
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -626,6 +681,7 @@ mod tests {
             "fallocate(",
             "fsync(",
             "posix_fadvise(",
+            "statvfs(",
         ];
         let mut sites = 0usize;
         for (i, line) in lines[..cut].iter().enumerate() {
@@ -646,8 +702,8 @@ mod tests {
             assert!(gated, "ungated unsafe FFI rc at line {}: {line}", i + 1);
         }
         assert!(
-            sites >= 5,
-            "expected the 5 known production FFI rc sites, found {sites}"
+            sites >= 6,
+            "expected the 6 known production FFI rc sites, found {sites}"
         );
     }
 }

@@ -6618,6 +6618,96 @@
         "file": "crates/pedradb-core/src/lookup_kernel.rs",
         "test": "prefer_newer_seq_on_live_older_first_is_not_ok"
       }
+    },
+    {
+      "id": "scale_probes",
+      "finding": "RFC-0176 P0",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/scale_kernel.rs",
+      "twin": "crates/pedradb-core/verus/scale.rs",
+      "verus": "scripts/verus_scale.sh",
+      "callers": [
+        "crates/pedradb-core/src/scale_kernel.rs"
+      ],
+      "entry": "point_get_probes",
+      "as_is": "point_get_probes_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/scale_kernel.rs",
+        "test": "point_get_probes_on_all_files_walk_is_not_ok"
+      }
+    },
+    {
+      "id": "scale_warm",
+      "finding": "RFC-0176 P0",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/scale_kernel.rs",
+      "twin": "crates/pedradb-core/verus/scale.rs",
+      "verus": "scripts/verus_scale.sh",
+      "callers": [
+        "crates/pedradb-core/src/scale_kernel.rs"
+      ],
+      "entry": "warm_cap_bytes",
+      "as_is": "warm_cap_bytes_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/scale_kernel.rs",
+        "test": "warm_cap_bytes_on_unbounded_warm_is_not_ok"
+      }
+    },
+    {
+      "id": "scale_probes_worst",
+      "finding": "RFC-0176 P1",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/scale_kernel.rs",
+      "twin": "crates/pedradb-core/verus/scale.rs",
+      "verus": "scripts/verus_scale.sh",
+      "callers": [
+        "crates/pedradb-core/src/scale_kernel.rs"
+      ],
+      "entry": "probes_worst",
+      "as_is": "probes_worst_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/scale_kernel.rs",
+        "test": "probes_worst_on_all_files_walk_is_not_ok"
+      }
+    },
+    {
+      "id": "scale_predict",
+      "finding": "RFC-0176 P1",
+      "twin_kind": "model",
+      "kernel": "crates/pedradb-core/src/scale_kernel.rs",
+      "twin": "crates/pedradb-core/verus/scale.rs",
+      "verus": "scripts/verus_scale.sh",
+      "callers": [
+        "crates/pedradb-core/examples/scale_spectrum.rs"
+      ],
+      "entry": "predict_get_ns",
+      "as_is": "predict_get_ns_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/scale_kernel.rs",
+        "test": "predict_get_ns_on_ignoring_noisy_is_not_ok"
+      }
+    },
+    {
+      "id": "scale_happy_hot",
+      "finding": "RFC-0176 P1",
+      "twin_kind": "model",
+      "kernel": "crates/pedradb-core/src/scale_kernel.rs",
+      "twin": "crates/pedradb-core/verus/scale.rs",
+      "verus": "scripts/verus_scale.sh",
+      "callers": [
+        "crates/pedradb-core/examples/scale_spectrum.rs"
+      ],
+      "entry": "happy_hot_bps",
+      "as_is": "happy_hot_bps_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/scale_kernel.rs",
+        "test": "happy_hot_bps_on_always_hot_is_not_ok"
+      }
     }
   ],
   "clones": [

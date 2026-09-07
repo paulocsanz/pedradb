@@ -101,7 +101,7 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 `daa85d7` / Lean 4.31.0. Production files were not rewritten to please Charon.
 `db.rs` is not extracted (`glue.db_rs_extracted=false`).
 
-### Enrolled (23)
+### Enrolled (24)
 
 `[lib] path` = production file. Stamp pins the whole file. Theorems live in
 `formal/aeneas/lean/<Name>.lean` (not the generated `*Kernel.lean`).
@@ -131,6 +131,7 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 | `cqe` | `cqe_kernel.rs` | `cqe_res_ok_nonneg` |
 | `iter` | `iter_kernel.rs` | `iter_window_keep_live` / `_as_is_dente` |
 | `properties` | `properties_kernel.rs` | `d1_holds_loop_body_is_def` (loop extract) |
+| `scale` | `scale_kernel.rs` | `point_get_probes_one_plus_one` / `_as_is_is_n_files` |
 
 Partial `.lean` from a failed Aeneas run is not enrolled.
 
@@ -205,3 +206,16 @@ Never: “Lean proved Raft / fold / the Bloom filter.”
 ./scripts/lean_write_admission.sh --required
 ./scripts/lean_extracts.sh --required
 ```
+
+## Scale (`scale_kernel.rs`, RFC-0176)
+
+- `[lib] path` = production `crates/pedradb-core/src/scale_kernel.rs`.
+- Charon + Aeneas → `out/lean/ScaleKernel.lean` (`SOURCE.scale` sha256).
+- `warm_cap_bytes` uses `if` not `Ord.max`/`min` (those failed Lean typecheck).
+- Lean 4.31.0 accepted (no `sorry` in `Scale.lean`):
+  - `point_get_probes_as_is_is_n_files` (∀)
+  - `probes_worst_as_is_is_n_files` (∀)
+- **Not claimed:** `saturating_add` 4+1=5 (native_decide failed — add stays
+  in Verus). Clock \(T\) / noisy neighbor are measured, not extracted.
+- Run: `./scripts/aeneas_scale.sh` then `lake build Scale` in `formal/aeneas/lean`.
+

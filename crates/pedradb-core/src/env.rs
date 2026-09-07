@@ -245,6 +245,20 @@ pub trait Env: Clone {
         let _ = (path, offset, len, kind);
         Ok(())
     }
+
+    /// Free bytes on the filesystem that holds `path` (`f_bavail * f_frsize`).
+    ///
+    /// `Ok(None)` = unknown (sim / DST / probe failed). Unknown must **not**
+    /// proactive-refuse writes (RFC-0179); mid-write ENOSPC still fences
+    /// (RFC-0050). Default is unknown.
+    ///
+    /// # Errors
+    /// Underlying I/O when the platform implements the probe. Callers map
+    /// `Err` to unknown — they must not treat a failed probe as "full".
+    fn available_bytes(&self, path: &Path) -> io::Result<Option<u64>> {
+        let _ = path;
+        Ok(None)
+    }
 }
 
 /// POSIX `fdatasync(2)` on the data of `file`.
@@ -580,6 +594,13 @@ impl Env for StdEnv {
 
     fn metadata_len(&self, path: &Path) -> io::Result<u64> {
         Ok(fs::metadata(path)?.len())
+    }
+
+    fn available_bytes(&self, path: &Path) -> io::Result<Option<u64>> {
+        match pedradb_posix::filesystem_available_bytes(path) {
+            Ok(n) => Ok(Some(n)),
+            Err(_) => Ok(None),
+        }
     }
 }
 

@@ -153,6 +153,18 @@ pub enum CoreError {
         /// Configured stall threshold in bytes.
         limit: usize,
     },
+
+    /// Write refused: filesystem free space is below the hard floor (RFC-0179).
+    ///
+    /// Not a durability fence: reads stay up. Do not retry as L0/mem stall.
+    /// Mid-write ENOSPC still fences (RFC-0050).
+    #[error("disk pressure: {available} bytes free (need {need} to write)")]
+    DiskPressure {
+        /// Bytes the probe reported free.
+        available: u64,
+        /// Hard floor that was missed.
+        need: u64,
+    },
 }
 
 /// Convenience `Result` alias used throughout the crate.

@@ -508,6 +508,13 @@ impl Env for IoUringEnv {
         Ok(fs::metadata(path)?.len())
     }
 
+    fn available_bytes(&self, path: &Path) -> io::Result<Option<u64>> {
+        match pedradb_posix::filesystem_available_bytes(path) {
+            Ok(n) => Ok(Some(n)),
+            Err(_) => Ok(None),
+        }
+    }
+
     fn advise(&self, path: &Path, offset: u64, len: u64, kind: AdviseKind) -> io::Result<()> {
         let f = File::open(path)?;
         let hint = match kind {

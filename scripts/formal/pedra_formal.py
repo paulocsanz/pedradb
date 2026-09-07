@@ -1125,6 +1125,10 @@ AENEAS_EXTRACTS = (
         "crates/pedradb-spec/src/properties_kernel.rs",
         "formal/aeneas/out/SOURCE.properties",
     ),
+    (
+        "crates/pedradb-core/src/scale_kernel.rs",
+        "formal/aeneas/out/SOURCE.scale",
+    ),
 )
 
 
@@ -1957,6 +1961,15 @@ def check_extract(
             "crates/pedradb-spec/src/properties_kernel.rs",
             "formal/aeneas/lean/Properties.lean",
             ("theorem d1_holds_loop_body_is_def",),
+        ),
+        (
+            "scale",
+            "formal/aeneas/out/lean/ScaleKernel.lean",
+            "def point_get_probes",
+            "./scripts/aeneas_scale.sh",
+            "crates/pedradb-core/src/scale_kernel.rs",
+            "formal/aeneas/lean/Scale.lean",
+            ("theorem point_get_probes_one_plus_one",),
         ),
     ]:
         art = root / artifact

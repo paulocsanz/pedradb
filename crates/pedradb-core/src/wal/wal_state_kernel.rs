@@ -235,4 +235,284 @@ mod tests {
         assert!(acked_survives_every_legal_crash(&s, 1));
         assert!(!acked_survives_as_is(&s, 1));
     }
+
+    fn freeze_pair(catalog: &[&str]) {
+        let src = include_str!("wal_state_kernel.rs");
+        let prod = src.split("#[cfg(test)]").next().unwrap_or(src);
+        let mut found = Vec::new();
+        let mut rest = prod;
+        while let Some(i) = rest.find("pub fn ") {
+            rest = &rest[i + "pub fn ".len()..];
+            let name = rest.split('(').next().unwrap_or("").trim();
+            if catalog.contains(&name) {
+                found.push(name.to_string());
+            }
+        }
+        for n in catalog {
+            assert!(
+                found.iter().any(|f| f == n),
+                "catalog fn {n} missing from production"
+            );
+        }
+        assert_eq!(found.len(), catalog.len());
+    }
+
+    /// Catalog pair `wal_state`. Name avoids the bare `wal_state` substring
+    /// (that matches the `wal_state_kernel` module).
+    #[test]
+    fn inv_wal_pair_fns_are_exactly_the_catalog() {
+        freeze_pair(&["inv_wal", "inv_wal_as_is"]);
+    }
+
+    /// RFC-0166 P1.2: Inv-WAL is `acked ⊆ synced ⊆ written`; AS-IS drops
+    /// the acked⊆synced arm.
+    #[test]
+    fn theorem_inv_wal_on_finite_domain() {
+        let cases: &[(u64, u64, u64)] = &[
+            (0, 0, 0),
+            (1, 1, 1),
+            (2, 3, 10),
+            (7, 3, 10),
+            (0, 5, 3),
+            (3, 3, 10),
+            (0, 0, 10),
+        ];
+        let mut n = 0u32;
+        for &(acked, synced, written) in cases {
+            let s = WalState {
+                acked,
+                synced,
+                written,
+            };
+            let fixed = inv_wal(&s);
+            let as_is = inv_wal_as_is(&s);
+            if acked <= synced && synced <= written {
+                assert!(fixed, "FIXED holds {acked}/{synced}/{written}");
+            } else {
+                assert!(!fixed, "FIXED rejects {acked}/{synced}/{written}");
+            }
+            if synced <= written {
+                assert!(as_is, "AS-IS synced⊆written {acked}/{synced}/{written}");
+            } else {
+                assert!(!as_is, "AS-IS rejects ceiling {acked}/{synced}/{written}");
+            }
+            if acked > synced && synced <= written {
+                assert!(!fixed && as_is, "AS-IS dente: acked without barrier");
+            }
+            n += 1;
+        }
+        assert_eq!(n, 7);
+    }
+
+    /// Catalog pair `wal_append`.
+    #[test]
+    fn wal_append_pair_fns_are_exactly_the_catalog() {
+        freeze_pair(&["wal_append", "wal_append_as_is"]);
+    }
+
+    /// RFC-0166 P1.2: append grows `written` only; AS-IS acks the same bytes.
+    #[test]
+    fn theorem_wal_append_on_finite_domain() {
+        let s = WalState {
+            acked: 0,
+            synced: 0,
+            written: 0,
+        };
+        let mut n = 0u32;
+        for add in 0u64..7 {
+            let real = wal_append(s, add);
+            assert_eq!(real.written, s.written + add);
+            assert_eq!(real.synced, s.synced);
+            assert_eq!(real.acked, s.acked);
+            assert!(inv_wal(&real));
+            let as_is = wal_append_as_is(s, add);
+            assert_eq!(as_is.acked, s.acked + add, "AS-IS acks with the write n={add}");
+            assert_eq!(as_is.written, s.written + add);
+            if add > 0 {
+                assert!(!inv_wal(&as_is));
+                assert!(inv_wal_as_is(&as_is));
+            }
+            n += 1;
+        }
+        assert_eq!(n, 7);
+    }
+
+    /// Catalog pair `wal_sync`. Names `wal_sync_honesty_*` so a cargo
+    /// filter does not also run `wal_sync_required` in write-admission.
+    #[test]
+    fn wal_sync_honesty_pair_fns_are_exactly_the_catalog() {
+        freeze_pair(&["wal_sync", "wal_sync_as_is"]);
+    }
+
+    /// RFC-0166 P1.2: honest sync promotes pending; lying is a no-op;
+    /// AS-IS always pretends it promoted.
+    #[test]
+    fn theorem_wal_sync_honesty_on_finite_domain() {
+        let s = WalState {
+            acked: 0,
+            synced: 0,
+            written: 8,
+        };
+        let honest = wal_sync(s, SyncHonesty::Honest);
+        assert_eq!(honest.synced, s.written);
+        assert_eq!(honest.acked, s.acked);
+        assert!(inv_wal(&honest));
+        let lying = wal_sync(s, SyncHonesty::Lying);
+        assert_eq!(lying.synced, s.synced);
+        let fake = wal_sync_as_is(s, SyncHonesty::Lying);
+        assert_eq!(
+            fake.synced, s.written,
+            "AS-IS dente: lying Ok pretended to promote"
+        );
+        assert_ne!(lying, fake);
+        let cases: &[SyncHonesty] = &[
+            SyncHonesty::Honest,
+            SyncHonesty::Lying,
+            SyncHonesty::Honest,
+            SyncHonesty::Lying,
+            SyncHonesty::Honest,
+            SyncHonesty::Lying,
+            SyncHonesty::Honest,
+        ];
+        let mut n = 0u32;
+        for &h in cases {
+            let real = wal_sync(s, h);
+            let as_is = wal_sync_as_is(s, h);
+            match h {
+                SyncHonesty::Honest => assert_eq!(real.synced, s.written),
+                SyncHonesty::Lying => assert_eq!(real.synced, s.synced),
+            }
+            assert_eq!(as_is.synced, s.written);
+            n += 1;
+        }
+        assert_eq!(n, 7);
+    }
+
+    /// Catalog pair `wal_ack`.
+    #[test]
+    fn wal_ack_pair_fns_are_exactly_the_catalog() {
+        freeze_pair(&["wal_ack", "wal_ack_as_is"]);
+    }
+
+    /// RFC-0166 P1.2: ack only within the barrier; AS-IS acks past it.
+    #[test]
+    fn theorem_wal_ack_on_finite_domain() {
+        let s = wal_state_of(10, 3, 2);
+        let mut n = 0u32;
+        for k in 0u64..7 {
+            let real = wal_ack(s, k);
+            if s.acked.saturating_add(k) <= s.synced {
+                assert_eq!(real.acked, s.acked + k, "FIXED within-barrier k={k}");
+            } else {
+                assert_eq!(real, s, "FIXED refuse k={k}");
+            }
+            assert!(inv_wal(&real));
+            let as_is = wal_ack_as_is(s, k);
+            assert_eq!(as_is.acked, s.acked + k, "AS-IS unconditional k={k}");
+            if s.acked + k > s.synced {
+                assert!(!inv_wal(&as_is));
+                assert!(inv_wal_as_is(&as_is));
+            }
+            n += 1;
+        }
+        assert_eq!(n, 7);
+    }
+
+    /// Catalog pair `wal_rotate`. Names `wal_rotate_pair_*` so a cargo
+    /// filter does not also run `wal_rotate_decision_on_live_pin_is_not_ok`.
+    #[test]
+    fn wal_rotate_pair_fns_are_exactly_the_catalog() {
+        freeze_pair(&["wal_rotate", "wal_rotate_as_is"]);
+    }
+
+    /// RFC-0166 P1.2: rotate only when fully durable; AS-IS always drops.
+    #[test]
+    fn theorem_wal_rotate_pair_on_finite_domain() {
+        let cases: &[WalState] = &[
+            WalState {
+                acked: 0,
+                synced: 0,
+                written: 0,
+            },
+            WalState {
+                acked: 5,
+                synced: 5,
+                written: 5,
+            },
+            WalState {
+                acked: 3,
+                synced: 3,
+                written: 10,
+            },
+            WalState {
+                acked: 0,
+                synced: 0,
+                written: 4,
+            },
+            WalState {
+                acked: 1,
+                synced: 2,
+                written: 2,
+            },
+            WalState {
+                acked: 4,
+                synced: 4,
+                written: 4,
+            },
+            WalState {
+                acked: 2,
+                synced: 3,
+                written: 10,
+            },
+        ];
+        let mut n = 0u32;
+        for &s in cases {
+            let real = wal_rotate(s);
+            if s.acked == s.synced && s.synced == s.written {
+                assert_eq!(real, wal_state_of(0, 0, 0), "FIXED drop {s:?}");
+            } else {
+                assert_eq!(real, s, "FIXED keep {s:?}");
+            }
+            assert!(inv_wal(&real));
+            assert_eq!(
+                wal_rotate_as_is(s),
+                wal_state_of(0, 0, 0),
+                "AS-IS always drops {s:?}"
+            );
+            n += 1;
+        }
+        assert_eq!(n, 7);
+    }
+
+    /// Catalog pair `wal_acked_survives`. Names avoid the `wal_ack` prefix
+    /// so a cargo filter for `wal_ack` stays 2/0.
+    #[test]
+    fn survives_acked_pair_fns_are_exactly_the_catalog() {
+        freeze_pair(&[
+            "acked_survives_every_legal_crash",
+            "acked_survives_as_is",
+        ]);
+    }
+
+    /// RFC-0166 P1.2: every legal crash cut keeps the acked prefix; AS-IS
+    /// floor-less legality diverges below the barrier.
+    #[test]
+    fn theorem_survives_acked_on_finite_domain() {
+        let s = wal_state_of(10, 3, 3);
+        let mut n = 0u32;
+        for cut in 0u64..7 {
+            assert!(
+                acked_survives_every_legal_crash(&s, cut),
+                "FIXED cut={cut}"
+            );
+            if cut < s.acked && cut <= s.written {
+                assert!(
+                    !acked_survives_as_is(&s, cut),
+                    "AS-IS dente: below-floor cut={cut}"
+                );
+            }
+            n += 1;
+        }
+        assert_eq!(n, 7);
+    }
 }

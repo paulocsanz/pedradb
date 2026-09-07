@@ -1009,53 +1009,10 @@ impl WriteGroup {
         // straggler a leader waits out on the sequential host sits right
         // here, mid-off-lock fd).
         guard.begin_commit();
-        let committed = match guard.lone_encode_commit(ops) {
-            Ok((seq, None)) => {
+        let committed = match guard.lone_sync_commit(ops) {
+            Ok(seq) => {
                 guard.end_commit();
-                Ok((seq, 0))
-            }
-            Ok((_, Some(staged))) => {
-                let wal = guard.wal_arc();
-                drop(guard);
-                // Off-lock fd window (WAL mutex held, no Db write lock —
-                // same discipline as `finish_group_off_lock`).
-                // RFC-0166 P1.4: the pinned ledger rides this window with
-                // the same append → barrier → ack discipline as the group
-                // path (lone G1 barriers on every staged frame).
-                let pinned = group.verified.load(std::sync::atomic::Ordering::Acquire);
-                let mut ledger_bytes = 0u64;
-                let fd: Result<u64> = {
-                    let mut w = wal.lock();
-                    let before = if pinned { w.position() } else { 0 };
-                    match w.write_pending_frame() {
-                        Err(e) => Err(e),
-                        Ok(()) => {
-                            if pinned {
-                                ledger_bytes = w.position().saturating_sub(before);
-                            }
-                            let t_fd = Instant::now();
-                            w.sync_data()
-                                .map(|_| t_fd.elapsed().as_nanos() as u64)
-                        }
-                    }
-                };
-                let mut g = db.write();
-                let fd_ok = fd.is_ok();
-                let r = g.lone_publish_commit(staged, fd);
-                if pinned && r.is_ok() {
-                    let mut ledger = group
-                        .write_ack
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner());
-                    ledger.on_append(ledger_bytes);
-                    if fd_ok {
-                        ledger.on_barrier();
-                    }
-                    ledger.on_ack();
-                    ledger.assert_inv();
-                }
-                g.end_commit();
-                r
+                Ok((seq, 0u64))
             }
             Err(e) => {
                 guard.end_commit();
@@ -1323,8 +1280,8 @@ impl<E: Env> ConcurrentDb<E> {
     pub fn from_db(db: Db<E>) -> Self {
         let default_sync = db.default_write_sync();
         let point_cache = db.point_cache_handle();
-        let sst_envelope = db.sst_envelope_handle();
-        let settled_sst_only = db.settled_sst_only_handle();
+        let sst_envelope = Arc::new(RwLock::new(Vec::new()));
+        let settled_sst_only = Arc::new(AtomicBool::new(false));
         let count_cache = db.count_cache_handle();
         let read_cache_epoch = db.read_cache_epoch_handle();
         let point_tls_epoch = db.point_tls_epoch_handle();
@@ -1338,7 +1295,7 @@ impl<E: Env> ConcurrentDb<E> {
         let occ_registry = Arc::new(Mutex::new(std::collections::BTreeMap::new()));
         let mut db = db;
         db.set_occ_floor_registry(Arc::clone(&occ_registry));
-        let commit_inflight = db.commit_inflight_handle();
+        let commit_inflight = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         Self {
             inner: Arc::new(RwLock::new(db)),
             commit_inflight,
@@ -2610,17 +2567,7 @@ impl<E: Env> ConcurrentDb<E> {
                 e
             })?
         };
-        if let Some(persist) = persist {
-            #[cfg(test)]
-            note_bulk_manifest_off_lock(&self.inner);
-            let _p = self.persist_lock.lock();
-            if let Err(e) = persist.write() {
-                self.inner
-                    .write()
-                    .fence_durability(&e, crate::db::FenceClass::of_core(&e));
-                return Err(e);
-            }
-        }
+        let _ = persist;
         // At most two pipeline steps: drain existing imm, then switch+flush active.
         // Do **not** loop while concurrent puts refill mem (that would never end).
         for _ in 0..2 {
@@ -2712,7 +2659,7 @@ impl<E: Env> ConcurrentDb<E> {
             .map(std::path::PathBuf::from)
             .unwrap_or(final_path);
         let written =
-            match Db::write_bulk_run_sst(&env, &dir, num, run.as_ref(), &fam, sync, "worker") {
+            match Db::write_bulk_run_sst(&env, &dir, num, run.as_ref(), &fam, sync) {
                 Ok(t) => t,
                 Err(_) => {
                     let mut g = self.inner.write();
@@ -3669,9 +3616,6 @@ mod tests {
                     exclusive: true,
                     large_value_threshold: None,
                     sst_payload_budget_bytes: None,
-                    resident_payloads: false,
-                    vlog_rotate_bytes: None,
-                    auto_blob_gc_min_ratio: None,
                     ..Default::default()
                 },
             )
@@ -3717,9 +3661,6 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: None,
                 sst_payload_budget_bytes: None,
-                resident_payloads: false,
-                vlog_rotate_bytes: None,
-                auto_blob_gc_min_ratio: None,
                 ..Default::default()
             },
         )
@@ -3756,9 +3697,6 @@ mod tests {
                     exclusive: true,
                     large_value_threshold: None,
                     sst_payload_budget_bytes: None,
-                    resident_payloads: false,
-                    vlog_rotate_bytes: None,
-                    auto_blob_gc_min_ratio: None,
                     ..Default::default()
                 },
             )
@@ -3806,9 +3744,6 @@ mod tests {
                     exclusive: true,
                     large_value_threshold: None,
                     sst_payload_budget_bytes: None,
-                    resident_payloads: false,
-                    vlog_rotate_bytes: None,
-                    auto_blob_gc_min_ratio: None,
                     ..Default::default()
                 },
             )
@@ -3866,9 +3801,6 @@ mod tests {
                     exclusive: true,
                     large_value_threshold: None,
                     sst_payload_budget_bytes: None,
-                    resident_payloads: false,
-                    vlog_rotate_bytes: None,
-                    auto_blob_gc_min_ratio: None,
                     ..Default::default()
                 },
             )
@@ -3925,9 +3857,6 @@ mod tests {
                     exclusive: true,
                     large_value_threshold: None,
                     sst_payload_budget_bytes: None,
-                    resident_payloads: false,
-                    vlog_rotate_bytes: None,
-                    auto_blob_gc_min_ratio: None,
                     ..Default::default()
                 },
             )
@@ -3965,9 +3894,6 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: None,
                 sst_payload_budget_bytes: None,
-                resident_payloads: false,
-                vlog_rotate_bytes: None,
-                auto_blob_gc_min_ratio: None,
                 ..Default::default()
             },
         )
@@ -3993,9 +3919,6 @@ mod tests {
                     exclusive: true,
                     large_value_threshold: None,
                     sst_payload_budget_bytes: None,
-                    resident_payloads: false,
-                    vlog_rotate_bytes: None,
-                    auto_blob_gc_min_ratio: None,
                 }
             },
         )
@@ -4023,9 +3946,6 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: None,
                 sst_payload_budget_bytes: None,
-                resident_payloads: false,
-                vlog_rotate_bytes: None,
-                auto_blob_gc_min_ratio: None,
             },
         )
         .unwrap();
@@ -4239,9 +4159,6 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: Some(512),
                 sst_payload_budget_bytes: None,
-                resident_payloads: false,
-                vlog_rotate_bytes: None,
-                auto_blob_gc_min_ratio: None,
                 ..Default::default()
             },
         )
@@ -4270,9 +4187,6 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: None,
                 sst_payload_budget_bytes: None,
-                resident_payloads: false,
-                vlog_rotate_bytes: None,
-                auto_blob_gc_min_ratio: None,
                 ..Default::default()
             },
         )
@@ -4421,9 +4335,6 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: None,
                 sst_payload_budget_bytes: None,
-                resident_payloads: false,
-                vlog_rotate_bytes: None,
-                auto_blob_gc_min_ratio: None,
                 ..Default::default()
             },
         )
@@ -4768,9 +4679,6 @@ mod tests {
                 sync: false,
                 auto_flush_bytes: Some(cap),
                 sst_payload_budget_bytes: Some(1),
-                resident_payloads: false,
-                vlog_rotate_bytes: None,
-                auto_blob_gc_min_ratio: None,
                 ..OpenOptions::default()
             },
             crate::env::StdEnv,
@@ -4853,9 +4761,6 @@ mod tests {
                 sync: false,
                 auto_flush_bytes: Some(cap),
                 sst_payload_budget_bytes: Some(1),
-                resident_payloads: false,
-                vlog_rotate_bytes: None,
-                auto_blob_gc_min_ratio: None,
                 ..OpenOptions::default()
             },
             crate::env::StdEnv,
@@ -6796,9 +6701,6 @@ mod tests {
                     exclusive: true,
                     large_value_threshold: None,
                     sst_payload_budget_bytes: None,
-                    resident_payloads: false,
-                    vlog_rotate_bytes: None,
-                    auto_blob_gc_min_ratio: None,
                     ..Default::default()
                 },
             )
@@ -7100,9 +7002,6 @@ mod tests {
             exclusive: true,
             large_value_threshold: None,
             sst_payload_budget_bytes: None,
-            resident_payloads: false,
-            vlog_rotate_bytes: None,
-            auto_blob_gc_min_ratio: None,
             ..Default::default()
         };
         let db = ConcurrentDb::open_with_env(&dir, opts.clone(), env.clone()).unwrap();
@@ -7264,9 +7163,6 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: None,
                 sst_payload_budget_bytes: None,
-                resident_payloads: false,
-                vlog_rotate_bytes: None,
-                auto_blob_gc_min_ratio: None,
                 ..Default::default()
             },
         )
@@ -7335,9 +7231,6 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: None,
                 sst_payload_budget_bytes: None,
-                resident_payloads: false,
-                vlog_rotate_bytes: None,
-                auto_blob_gc_min_ratio: None,
                 ..Default::default()
             },
         )
@@ -7518,9 +7411,6 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: None,
                 sst_payload_budget_bytes: None,
-                resident_payloads: false,
-                vlog_rotate_bytes: None,
-                auto_blob_gc_min_ratio: None,
                 ..Default::default()
             },
         )
@@ -7565,9 +7455,6 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: None,
                 sst_payload_budget_bytes: None,
-                resident_payloads: false,
-                vlog_rotate_bytes: None,
-                auto_blob_gc_min_ratio: None,
                 ..Default::default()
             },
         )
@@ -7647,9 +7534,6 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: None,
                 sst_payload_budget_bytes: None,
-                resident_payloads: false,
-                vlog_rotate_bytes: None,
-                auto_blob_gc_min_ratio: None,
                 ..Default::default()
             },
         )
@@ -7887,9 +7771,6 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: Some(512),
                 sst_payload_budget_bytes: None,
-                resident_payloads: false,
-                vlog_rotate_bytes: None,
-                auto_blob_gc_min_ratio: None,
                 ..Default::default()
             },
         )
@@ -7933,9 +7814,6 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: Some(512),
                 sst_payload_budget_bytes: None,
-                resident_payloads: false,
-                vlog_rotate_bytes: None,
-                auto_blob_gc_min_ratio: None,
                 ..Default::default()
             },
         )
@@ -7989,9 +7867,6 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: None,
                 sst_payload_budget_bytes: None,
-                resident_payloads: false,
-                vlog_rotate_bytes: None,
-                auto_blob_gc_min_ratio: None,
                 ..Default::default()
             },
         )
@@ -8051,9 +7926,6 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: Some(512),
                 sst_payload_budget_bytes: None,
-                resident_payloads: false,
-                vlog_rotate_bytes: None,
-                auto_blob_gc_min_ratio: None,
                 ..Default::default()
             },
         )
@@ -8116,9 +7988,6 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: None,
                 sst_payload_budget_bytes: None,
-                resident_payloads: false,
-                vlog_rotate_bytes: None,
-                auto_blob_gc_min_ratio: None,
                 ..Default::default()
             },
         )
@@ -8153,9 +8022,6 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: None,
                 sst_payload_budget_bytes: None,
-                resident_payloads: false,
-                vlog_rotate_bytes: None,
-                auto_blob_gc_min_ratio: None,
                 ..Default::default()
             },
         )

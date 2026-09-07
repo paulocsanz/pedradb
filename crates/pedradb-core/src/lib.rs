@@ -51,6 +51,10 @@ pub mod occ;
 pub mod pct_hooks;
 pub mod prefix;
 pub mod probe_order_kernel;
+/// One-process scale model (RFC-0176): probes, WARM cap, spectrum clock.
+pub mod scale_kernel;
+/// Disk-pressure watermarks (RFC-0179): refuse writes before ENOSPC, keep reads up.
+pub mod disk_pressure_kernel;
 pub mod lookup_kernel;
 pub mod write_admission_kernel;
 pub mod rng;
@@ -83,7 +87,7 @@ pub use changelog_kernel::{
 };
 pub use concurrent::ConcurrentDb;
 pub use db::{
-    copy_db_directory, read_checkpoint_meta, stored_inline_value, BatchOp, BlobGcCandidate,
+    copy_db_directory, read_checkpoint_meta, escape_inline_value, BatchOp, BlobGcCandidate,
     CheckpointMeta, CompactOptions, Db, DbStats, FenceClass, FenceRecovery, FenceReport,
     HistoryHorizon, HistoryOptions, OpenOptions, PreparedL0Compact, ReadProbeSnap, RecoveryReport,
     ScanProjection, Snapshot, SnapshotPin, SstLiveMeta, WalRecovery, WriteOptions,

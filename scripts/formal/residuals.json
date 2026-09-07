@@ -25,6 +25,7 @@
    "crates/pedradb-core/src/env_crash_kernel.rs",
    "crates/pedradb-core/src/flush_kernel.rs",
    "crates/pedradb-core/src/lookup_kernel.rs",
+   "crates/pedradb-core/src/scale_kernel.rs",
    "crates/pedradb-core/src/group_commit_kernel.rs",
    "crates/pedradb-core/src/leveling.rs",
    "crates/pedradb-core/src/manifest_kernel.rs",

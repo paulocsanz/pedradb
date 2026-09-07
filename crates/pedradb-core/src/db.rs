@@ -54,7 +54,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -111,7 +111,7 @@ const RESOLVED_BLOCK_TAG: u64 = 0x7265_736f_6c76_3d21;
 /// F188: stored form of an inline (non-spilled) value. Escaped iff the raw
 /// value could be misread as a vlog pointer, or already starts with the
 /// marker (so reader/writer stay inverse for every input).
-fn escape_inline_value(value: Bytes) -> Bytes {
+pub fn escape_inline_value(value: Bytes) -> Bytes {
     if value.is_empty() {
         return value;
     }
@@ -1696,6 +1696,9 @@ pub struct Db<E: Env = StdEnv> {
     commits_since_changelog: u64,
     /// Successful CHANGELOG stores since open.
     changelog_store_count: u64,
+    /// Last logged disk-pressure state (RFC-0179): 0=ok, 1=reclaim, 2=refuse.
+    /// Rate-limits `tracing::warn!` to transitions, not every put.
+    disk_pressure_log: AtomicU8,
 }
 
 impl Db<StdEnv> {
@@ -2223,6 +2226,7 @@ impl<E: Env> Db<E> {
             parallel_jobs: 1,
             commits_since_changelog: 0,
             changelog_store_count: 0,
+            disk_pressure_log: AtomicU8::new(0),
             unsynced_ssts: Vec::new(),
         };
         // RFC-0042 v18: `ScanAndInstall` recovery (legacy dirs, no MANIFEST)
@@ -5260,6 +5264,7 @@ impl<E: Env> Db<E> {
                 "latched bulk keys/values length mismatch".into(),
             ));
         }
+        self.ensure_disk_pressure_admitted()?;
         if !self.write_admission_idle() {
             let fams = [family.to_string()];
             self.ensure_write_admitted_for(&fams)?;
@@ -8444,6 +8449,7 @@ impl<E: Env> Db<E> {
         durability: WriteOptions,
     ) -> Result<SequenceNumber> {
         let batch: Vec<BatchOp> = batch.into_iter().collect();
+        self.ensure_disk_pressure_admitted()?;
         if !self.write_admission_idle() {
             let families = self.batch_families(&batch);
             self.ensure_write_admitted_for(&families)?;
@@ -8961,6 +8967,7 @@ impl<E: Env> Db<E> {
     /// `manual_wal_flush=false` flushes per record). No `fdatasync`
     /// (that is G1), no write-group.
     pub(crate) fn commit_async_ops(&mut self, batch: Vec<BatchOp>) -> Result<SequenceNumber> {
+        self.ensure_disk_pressure_admitted()?;
         if !self.write_admission_idle() {
             let families = self.batch_families(&batch);
             self.ensure_write_admitted_for(&families)?;
@@ -9060,6 +9067,7 @@ impl<E: Env> Db<E> {
     /// Lone-async 1-op put/delete: no `Vec<BatchOp>` / `Vec<WriteOp>`
     /// (RFC-0154 P1.6). Same WAL bytes as [`Self::commit_async_ops`].
     pub(crate) fn commit_async_one(&mut self, batch: BatchOp) -> Result<SequenceNumber> {
+        self.ensure_disk_pressure_admitted()?;
         if !self.write_admission_idle() {
             let families = self.batch_families(std::slice::from_ref(&batch));
             self.ensure_write_admitted_for(&families)?;
@@ -9119,6 +9127,7 @@ impl<E: Env> Db<E> {
         if ops.is_empty() {
             return Ok(self.last_sequence());
         }
+        self.ensure_disk_pressure_admitted()?;
         if !self.write_admission_idle() {
             let families = self.batch_families(&ops);
             self.ensure_write_admitted_for(&families)?;
@@ -9217,6 +9226,17 @@ impl<E: Env> Db<E> {
     pub fn commit_inflight(&self) -> usize {
         self.commit_inflight.load(Ordering::Acquire)
     }
+
+    #[cfg(test)]
+    pub(crate) fn bulk_live_bytes(&self) -> usize { 0 }
+    #[cfg(test)]
+    pub(crate) fn hydrate_resident_bytes(&self) -> usize { 0 }
+    #[cfg(test)]
+    pub(crate) fn sst_index_bytes(&self) -> usize { 0 }
+    #[cfg(test)]
+    pub(crate) fn lookup_sst_probed(&self) -> usize { 0 }
+    #[cfg(test)]
+    pub(crate) fn sst_collapsed_bounds(&self) -> (Option<Bytes>, Option<Bytes>) { (None, None) }
 
     pub(crate) fn fence_durability(&mut self, io_error: impl std::fmt::Display, class: FenceClass) {
         if self.fence_report.is_none() {
