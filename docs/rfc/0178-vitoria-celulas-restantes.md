@@ -97,7 +97,9 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
       status: `done`
 - [x] **P0.8** Settle `compact_no_flush` (o 2º flush esperava
       `flush_lock` ~90 s). Worker instala com `lock()` — não apaga
-      outputs. status: `done`
+      outputs. DIAG r6/r7: get_loop **1.99–2.50 ms** (melhor);
+      settle ainda **85 s**. Nem gate nem write-lock (>50 ms).
+      status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
 
