@@ -4280,13 +4280,16 @@ where
                         // (that was the scan-vs-apply race).
                         let l0 = inner.with_read(|db| db.level_file_count(0));
                         if l0 >= pedradb_core::L0_COMPACTION_TRIGGER {
-                            while compat_compact_once(&inner, &gate) {}
+                            // One job per tick: `while` re-took the gate
+                            // between jobs faster than DB::compact's
+                            // `lock()` woke (~85 s @100M scale settle).
+                            let _ = compat_compact_once(&inner, &gate);
                             wait = poll;
                         } else if inner.writes_idle_for(persist_idle) {
                             while inner.materialize_parked_once() {}
                             let _ = inner.persist_unsynced_l0s_off_lock();
                             let _ = inner.rotate_wal_if_writers_idle();
-                            while compat_compact_once(&inner, &gate) {}
+                            let _ = compat_compact_once(&inner, &gate);
                             wait = poll;
                         } else {
                             wait = poll;
