@@ -747,6 +747,11 @@ impl YcsbRunner {
                 us(b[5].saturating_sub(a[5])),
                 us(b[6].saturating_sub(a[6])),
             );
+                let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
+                eprint_write_diagnose("deps_raftlog", &d);
+                if let Some(last) = blocks.last_mut() {
+                    *last = attach_diagnose(std::mem::take(last), Some(&d));
+                }
             }
             if let Some(line) = e.write_phase_line() {
                 eprintln!("[rocks-parity] deps_raftlog phases {line}");
@@ -2612,6 +2617,7 @@ impl YcsbRunner {
         // deps_raftlog_mcN
         {
             let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+            let phase0 = e.write_phase_snapshot();
             let t0 = Instant::now();
             let mut lats = Vec::with_capacity(cfg_ops * clients);
             let mut errors = 0u64;
@@ -2671,6 +2677,15 @@ impl YcsbRunner {
                 "[rocks-parity] deps_raftlog mc{clients} done ops={} errors={errors}",
                 cfg_ops * clients
             );
+            // avg_group 0: write_group_stats is cumulative with apply_mc on
+            // the same engine; don't blame grouping from the other shape.
+            if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+                let d = diagnose_from_phases(pct(&lats, 50.0), a, b, clients as u64, 0.0, 0);
+                eprint_write_diagnose(&name, &d);
+                if let Some(last) = blocks.last_mut() {
+                    *last = attach_diagnose(std::mem::take(last), Some(&d));
+                }
+            }
         }
         blocks
     }
