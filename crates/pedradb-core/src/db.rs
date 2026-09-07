@@ -290,11 +290,12 @@ const BULK_MANIFEST_EVERY: u8 = 4;
 pub(crate) const DEFAULT_BULK_CHUNK_BYTES: usize = 64 * 1024 * 1024;
 
 /// Default read-handle cache size for bounded opens
-/// ([`crate::env::FileHandleCache`]): covers the post-settle file count of
-/// the 25M slipstream shape (~85 SSTs) with fd headroom. RocksDB holds the
-/// equivalent per-DB file cache; `open()`-per-block was 41% of the 6M
-/// `get_hit` profile.
-pub const DEFAULT_SST_FILE_CACHE_ENTRIES: usize = 256;
+/// ([`crate::env::FileHandleCache`]): covers the official 100M ladder
+/// (~347 bulk SSTs @ 245 B/e) with fd headroom. 256 left 100M get_loop
+/// opening a fresh fd on ~1/4 of files (no LRU bump on hit). RocksDB
+/// holds the equivalent per-DB file cache; `open()`-per-block was 41%
+/// of the 6M `get_hit` profile.
+pub const DEFAULT_SST_FILE_CACHE_ENTRIES: usize = 1024;
 
 /// `PEDRA_SST_FILE_CACHE` — read-handle cache size override (bench A/B
 /// knob; `0` disables handle reuse). Unset or unparsable →
@@ -7325,7 +7326,12 @@ impl<E: Env> Db<E> {
             return None;
         }
         if !crate::env::settle_warm_unlimited() {
-            let warmed = self.warmed_ssts.lock();
+            let live: HashSet<PathBuf> = self.ssts.iter().map(|t| t.path().to_path_buf()).collect();
+            let mut warmed = self.warmed_ssts.lock();
+            // Compact rewrite deletes L0 paths and installs new ones.
+            // Stale entries would make take_warm_plan look like the live
+            // set was already streamed (get_loop 5.5 ms @100M, warm_bytes=0).
+            warmed.retain(|p| live.contains(p));
             jobs.retain(|(p, _)| !warmed.contains(p));
         }
         if jobs.is_empty() {
