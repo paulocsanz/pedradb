@@ -1044,6 +1044,7 @@ impl YcsbRunner {
 
         // kvrocks_get — redis-benchmark GET (1-op canary).
         if want("kvrocks_get") {
+            let phase0 = e.write_phase_snapshot();
             let mut lats = Vec::with_capacity(cfg_ops);
             let (mut gets, mut errors) = (0u64, 0u64);
             let t0 = Instant::now();
@@ -1057,10 +1058,18 @@ impl YcsbRunner {
             }
             blocks.push(summarize("kvrocks_get", cfg_ops, t0.elapsed(), &mut lats));
             eprintln!("[rocks-parity] kvrocks_get done gets={gets} errors={errors}");
+            if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+                let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
+                eprint_write_diagnose("kvrocks_get", &d);
+                if let Some(last) = blocks.last_mut() {
+                    *last = attach_diagnose(std::mem::take(last), Some(&d));
+                }
+            }
         }
 
         // kvrocks_set — redis-benchmark SET (1-op canary).
         if want("kvrocks_set") {
+            let phase0 = e.write_phase_snapshot();
             let mut lats = Vec::with_capacity(cfg_ops);
             let (mut sets, mut errors) = (0u64, 0u64);
             let t0 = Instant::now();
@@ -1075,10 +1084,18 @@ impl YcsbRunner {
             }
             blocks.push(summarize("kvrocks_set", cfg_ops, t0.elapsed(), &mut lats));
             eprintln!("[rocks-parity] kvrocks_set done sets={sets} errors={errors}");
+            if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+                let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
+                eprint_write_diagnose("kvrocks_set", &d);
+                if let Some(last) = blocks.last_mut() {
+                    *last = attach_diagnose(std::mem::take(last), Some(&d));
+                }
+            }
         }
 
         // kvrocks_pipelined_set — pipeline of `batch` SETs → 1 WriteBatch (HL).
         if want("kvrocks_pipelined_set") {
+            let phase0 = e.write_phase_snapshot();
             let mut lats = Vec::with_capacity(cfg_ops);
             let (mut puts, mut errors) = (0u64, 0u64);
             let t0 = Instant::now();
@@ -1098,10 +1115,18 @@ impl YcsbRunner {
                 &mut lats,
             ));
             eprintln!("[rocks-parity] kvrocks_pipelined_set done puts={puts} errors={errors}");
+            if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+                let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
+                eprint_write_diagnose("kvrocks_pipelined_set", &d);
+                if let Some(last) = blocks.last_mut() {
+                    *last = attach_diagnose(std::mem::take(last), Some(&d));
+                }
+            }
         }
 
         // kvrocks_scan — Redis SCAN COUNT=25 over a window (HL).
         if want("kvrocks_scan") {
+            let phase0 = e.write_phase_snapshot();
             let mut lats = Vec::with_capacity(cfg_ops);
             let (mut scans, mut errors) = (0u64, 0u64);
             let t0 = Instant::now();
@@ -1115,6 +1140,13 @@ impl YcsbRunner {
             }
             blocks.push(summarize("kvrocks_scan", cfg_ops, t0.elapsed(), &mut lats));
             eprintln!("[rocks-parity] kvrocks_scan done scans={scans} errors={errors}");
+            if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+                let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
+                eprint_write_diagnose("kvrocks_scan", &d);
+                if let Some(last) = blocks.last_mut() {
+                    *last = attach_diagnose(std::mem::take(last), Some(&d));
+                }
+            }
         }
 
         // kvrocks_blob_set — Kvrocks BlobDB-sized value (16 KiB; their post
@@ -1131,6 +1163,7 @@ impl YcsbRunner {
             let blob_keys: Vec<Vec<u8>> = (0..cfg_ops)
                 .map(|_| bkey(self.pick(&mut rng, blob_n)))
                 .collect();
+            let phase0 = e.write_phase_snapshot();
             let mut lats = Vec::with_capacity(cfg_ops);
             let (mut sets, mut errors) = (0u64, 0u64);
             let t0 = Instant::now();
@@ -1150,6 +1183,13 @@ impl YcsbRunner {
                 &mut lats,
             ));
             eprintln!("[rocks-parity] kvrocks_blob_set done sets={sets} errors={errors}");
+            if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+                let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
+                eprint_write_diagnose("kvrocks_blob_set", &d);
+                if let Some(last) = blocks.last_mut() {
+                    *last = attach_diagnose(std::mem::take(last), Some(&d));
+                }
+            }
         }
 
         self.rng = rng;
@@ -3692,6 +3732,8 @@ mod tests {
 
     #[test]
     fn kvrocks_suite_on_compat_engine() {
+        // RFC-0184 P2.9: kvrocks 1c WRITEPHASE → diagnose.lever (env at open).
+        std::env::set_var("PEDRA_WRITE_PHASE_STATS", "1");
         let dir = tempfile::tempdir().unwrap();
         let e = crate::engines::CompatEngine::open(dir.path());
         let cfg = Cfg {
@@ -3721,6 +3763,22 @@ mod tests {
                 Some("kvrocks_blob_set"),
                 Some("kvrocks_set_mc50"),
             ]
+        );
+        for b in &blocks {
+            assert!(
+                b.contains("\"diagnose\": {\"lever\":"),
+                "RFC-0184 P2.9 kvrocks JSON needs diagnose.lever:\n{b}"
+            );
+        }
+        assert!(
+            blocks[0].contains("\"lever\":\"get_path\""),
+            "kvrocks_get is GET:\n{}",
+            blocks[0]
+        );
+        assert!(
+            blocks[3].contains("\"lever\":\"get_path\""),
+            "kvrocks_scan is SCAN:\n{}",
+            blocks[3]
         );
         assert!(e.get(&kkey(0)).unwrap().is_some());
     }
