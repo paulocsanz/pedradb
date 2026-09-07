@@ -167,9 +167,26 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 | `path` | `path_kernel.rs` | `strip_authority_for_routing_true` / `_as_is_dente` (`--exclude` Pattern methods; catalog-fn holes patched to `find`/`split_once`/`rsplit_once` axioms + index loops) |
 | `world` | `world_kernel.rs` | `trajectory_violation_applied` / `_as_is_dente` (`[lib] path` production kernel split from `lib.rs`; `Option<&'static str>` and HashMap fold patched) |
 
-Model-twin `entry`s on already-enrolled files now have Lean `def`s (still `proof_depth=model`): `range_tombstone_covers`, `run_pairwise_disjoint_los`, `key_in_window`, `leveled_enabled`, `total_bytes`. `probe_order_covering` stays out (returns `impl Iterator`).
+Model-twin `entry`s on already-enrolled files now have Lean `def`s (still `proof_depth=model`): `range_tombstone_covers`, `run_pairwise_disjoint_los`, `key_in_window`, `leveled_enabled`, `total_bytes`.
 
 Partial `.lean` from a failed Aeneas run is not enrolled. Charon `--start-from` of the catalog entries is an extract of the live file when Aeneas emits a complete Kernel (no `sorry`) containing a `def` for every catalog `entry` on that path.
+
+### Catalog `entry`s with no Lean `def` on an enrolled path
+
+Not silent close-kernel **files** (`l28.rs` and `probe_order_kernel.rs` stay enrolled for the `fn`s that exist). Named here so the missing catalog `entry`s are not claimed as extracts.
+
+**No production `fn`.** Close pairs `l28_tcp_add` / `l28_tcp_cnew` / `l28_tcp_svget` / `l28_tcp_newget` / `l28_tcp_jleft` / `l28_tcp_caught` / `l28_tcp_grown` name `l28_tcp_*_ok` on enrolled `crates/pedradb-store/src/l28.rs`. Those `fn`s are not in the live file (TCP kernels end at `l28_tcp_pj_ok`). `git log -S l28_tcp_add_ok -- crates/pedradb-store/src/l28.rs` is empty; the names landed in `36d4f685` on catalog / `verified.rs` / `docs/status.md` only. Verus twin, DST plant `l28_real_tcp_add_member_joint_cnew`, `cluster_real --add-member`, and handlers `tcp_node_disk_added_joint` / `tcp_node_disk_caught_up` are also absent. RFC-0119 itself has no P2.3. Not a Charon refuse: there is nothing to extract. Do not invent identity gates to please the catalog.
+
+**Iterator CFailure (pin Charon 0.1.232 / Aeneas daa85d7).** Model pair `probe_order_covering` is a live `pub(crate) fn` (`filter` + `by_lo.iter().position`, returns `impl Iterator`). Measured:
+
+| probe | result |
+|---|---|
+| `--start-from crate::probe_order_covering` | Charon 0; Aeneas CFailure `iterator.rs:42`; no `.lean` |
+| `--opaque core::iter::traits::iterator::Iterator` | same CFailure |
+| `--exclude Iterator::{filter,position,copied,map,collect}` | Aeneas exit 1; **partial** file; covering body ignored at kernel.rs:66 (`filter`); leftover `axiom probe_order_covering` returning `Filter (Copied (Iter))` |
+| `--start-from crate::probe_order` (Vec `filter.collect`) | same CFailure `iterator.rs:42` |
+
+Partial + axiom is not a `def`. Do not rewrite the walk. Do not add covering to `scripts/aeneas_probe_order.sh` (would CFailure the enrolled `first_probe_on_equal_lo` extract).
 
 ### Refused — Aeneas/Charon or Lean typecheck of the generated Kernel
 
