@@ -103,8 +103,8 @@ pub fn predict_get_ns(
         .saturating_mul(tau_ram_ns)
         .saturating_add((SCALE_BPS - hot).saturating_mul(tau_disk_ns));
     let per = (u128::from(probes)).saturating_mul(u128::from(mix)) / u128::from(SCALE_BPS);
-    let taxed = per.saturating_mul(u128::from(SCALE_BPS) + u128::from(noisy))
-        / u128::from(SCALE_BPS);
+    let taxed =
+        per.saturating_mul(u128::from(SCALE_BPS) + u128::from(noisy)) / u128::from(SCALE_BPS);
     u64::try_from(taxed).unwrap_or(u64::MAX)
 }
 
@@ -235,27 +235,9 @@ pub fn scale_forecast_as_is(keys: u64, ram_bytes: u64) -> ScaleForecast {
         warm_cap: u64::MAX,
         hot: true,
         happy_hot_bps: SCALE_BPS,
-        best_ns: predict_get_ns_as_is(
-            n_files,
-            SCALE_TAU_RAM_NS,
-            SCALE_TAU_DISK_NS,
-            SCALE_BPS,
-            0,
-        ),
-        happy_ns: predict_get_ns_as_is(
-            n_files,
-            SCALE_TAU_RAM_NS,
-            SCALE_TAU_DISK_NS,
-            SCALE_BPS,
-            0,
-        ),
-        worst_ns: predict_get_ns_as_is(
-            n_files,
-            SCALE_TAU_RAM_NS,
-            SCALE_TAU_DISK_NS,
-            SCALE_BPS,
-            0,
-        ),
+        best_ns: predict_get_ns_as_is(n_files, SCALE_TAU_RAM_NS, SCALE_TAU_DISK_NS, SCALE_BPS, 0),
+        happy_ns: predict_get_ns_as_is(n_files, SCALE_TAU_RAM_NS, SCALE_TAU_DISK_NS, SCALE_BPS, 0),
+        worst_ns: predict_get_ns_as_is(n_files, SCALE_TAU_RAM_NS, SCALE_TAU_DISK_NS, SCALE_BPS, 0),
     }
 }
 
@@ -344,8 +326,17 @@ mod tests {
             0,
             SCALE_WORST_NOISY_BPS,
         );
-        assert!(best > 0 && best < happy && happy < worst, "{best} {happy} {worst}");
-        let noisy = predict_get_ns(p, SCALE_TAU_RAM_NS, SCALE_TAU_DISK_NS, 0, SCALE_WORST_NOISY_BPS);
+        assert!(
+            best > 0 && best < happy && happy < worst,
+            "{best} {happy} {worst}"
+        );
+        let noisy = predict_get_ns(
+            p,
+            SCALE_TAU_RAM_NS,
+            SCALE_TAU_DISK_NS,
+            0,
+            SCALE_WORST_NOISY_BPS,
+        );
         let quiet = predict_get_ns(p, SCALE_TAU_RAM_NS, SCALE_TAU_DISK_NS, 0, 0);
         assert!(noisy > quiet);
         let as_is = predict_get_ns_as_is(913, SCALE_TAU_RAM_NS, SCALE_TAU_DISK_NS, SCALE_BPS, 0);

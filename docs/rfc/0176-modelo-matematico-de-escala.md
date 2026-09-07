@@ -1,6 +1,6 @@
 # RFC-0176 — Modelo matemático de escala (um processo)
 
-**Status:** in-progress (P0+P1.1+P2.1 done; P1.2/P2.2 open)
+**Status:** in-progress (P0+P1 done; P2.1 done; P2.2 open — caixa oficial)
 **Updated:** 2026-09-07
 **ID:** 0176
 **Parents:** [0153](0153-ram-scale-block-cache-bytes.md),
@@ -117,7 +117,7 @@ Hot ⇔ \(S \le \mathrm{cap}(R)\), \(\mathrm{cap}(R)=\min(\max(3\,\mathrm{GiB},3
 
 - [x] **P1.1** `predict_get_ns` / `probes_worst` / `happy_hot_bps` / \(\eta\)
       + example `scale_spectrum` — status: `done`
-- [ ] **P1.2** `pedra scale-model` CLI — status: `todo`
+- [x] **P1.2** `pedra scale-model` CLI — status: `done`
 
 ### P2
 
@@ -133,14 +133,16 @@ Hot ⇔ \(S \le \mathrm{cap}(R)\), \(\mathrm{cap}(R)=\min(\max(3\,\mathrm{GiB},3
 | P0.2 | p0 | kernel P + cap | done | `scale_kernel.rs` | 2026-09-07 |
 | P0.3 | p0 | Verus | done | `verus/scale.rs` 10/0 | 2026-09-07 |
 | P1.1 | p1 | espectro + noisy + bench | done | `scale_spectrum` | 2026-09-07 |
-| P1.2 | p1 | CLI | todo | — | 2026-09-07 |
+| P1.2 | p1 | CLI | done | `pedra scale-model` → `scale_forecast` | 2026-09-07 |
 | P2.1 | p2 | Aeneas extract + Lean as_is | done | `aeneas_scale.sh` / `Scale.lean` | 2026-09-07 |
 | P2.2 | p2 | escada oficial | todo | — | 2026-09-07 |
 
 ## Acceptance Criteria
 
-- **Tests:** dentes `*_is_not_ok` para probes, warm, worst, predict, happy_hot.
-  Example: quiet ∈ [best/4, worst×4]; noisy ≥ quiet.
+- **Tests:** dentes `*_is_not_ok` para probes, warm, worst, predict, happy_hot,
+  forecast. CLI `rfc0176_pedra_scale_model_prints_kernel_table` +
+  `rfc0176_scale_forecast_64gib_one_and_ten_billion`. Example:
+  quiet ∈ [best/4, worst×4]; noisy ≥ quiet.
 - **Telemetry:** example imprime λ, η, T. Sem probe novo no engine.
 - **Documentation:** este RFC; `docs/status.md`; finding
   `findings/2026-09-07-rfc0176-spectrum/`; `formal/aeneas/EXTRACT.md` (Scale).

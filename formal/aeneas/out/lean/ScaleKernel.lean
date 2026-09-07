@@ -428,7 +428,7 @@ def ScaleForecast.Insts.CoreCmpEq : core.cmp.Eq ScaleForecast := {
 }
 
 /-- [pedra_aeneas_scale_kernel::level_count]: loop body 0:
-    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 1:0-271:5 -/
+    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 1:0-253:5 -/
 @[rust_loop_body]
 def level_count_loop.body
   (store_bytes : Std.U64) (target : Std.U64) (level : Std.U32) :
@@ -445,7 +445,7 @@ def level_count_loop.body
   else ok (done level)
 
 /-- [pedra_aeneas_scale_kernel::level_count]: loop 0:
-    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 1:0-271:5 -/
+    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 1:0-253:5 -/
 @[rust_loop]
 def level_count_loop
   (store_bytes : Std.U64) (target : Std.U64) (level : Std.U32) :
@@ -456,7 +456,7 @@ def level_count_loop
     (target, level)
 
 /-- [pedra_aeneas_scale_kernel::level_count]:
-    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 262:0-273:1 -/
+    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 244:0-255:1 -/
 def level_count
   (store_bytes : Std.U64) (l1_target : Std.U64) : Result Std.U32 := do
   if store_bytes = 0#u64
@@ -509,7 +509,7 @@ def scale_forecast
     }
 
 /-- [pedra_aeneas_scale_kernel::scale_forecast_as_is]:
-    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 220:0-260:1
+    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 220:0-242:1
     Visibility: public -/
 def scale_forecast_as_is
   (keys : Std.U64) (ram_bytes : Std.U64) : Result ScaleForecast := do

@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+use pedradb_core::scale_kernel::{scale_forecast, SCALE_HAPPY_NOISY_BPS, SCALE_WORST_NOISY_BPS};
 use pedradb_core::wal::Wal;
 use pedradb_core::{
     verified_admits_ring, verify_at_rest, BlobGcCandidate, CompactOptions, Db, DbStats, Env,
@@ -14,7 +15,7 @@ fn main() -> std::process::ExitCode {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         eprintln!(
-            "usage: pedra <demo|wal|version|backup|restore|pitr|ship-wal|list-backups|verify-backup|verify|archive|inspect|stats|compact|reclaim|maintain|compact-vlog|compact-blob|blob-gc|migrate> [args...]"
+            "usage: pedra <demo|wal|version|backup|restore|pitr|ship-wal|list-backups|verify-backup|verify|archive|inspect|stats|scale-model|compact|reclaim|maintain|compact-vlog|compact-blob|blob-gc|migrate> [args...]"
         );
         eprintln!(
             "env: PEDRA_VERIFIED=1 runs every command on the verified profile (RFC-0058 P2.3)"
@@ -44,6 +45,7 @@ fn main() -> std::process::ExitCode {
         "archive" => archive_cmd(&args[2..]),
         "inspect" => inspect_cmd(&args[2..]),
         "stats" => stats_cmd(&args[2..]),
+        "scale-model" => scale_model_cmd(&args[2..]),
         "compact" => compact_cmd(&args[2..]),
         "reclaim" => reclaim_cmd(&args[2..]),
         "maintain" => maintain_cmd(&args[2..]),
@@ -540,6 +542,63 @@ fn verify_backup_cmd(args: &[String]) -> std::process::ExitCode {
             std::process::ExitCode::FAILURE
         }
     }
+}
+
+fn scale_model_cmd(args: &[String]) -> std::process::ExitCode {
+    let mut keys: Option<u64> = None;
+    let mut ram: Option<u64> = None;
+    let mut i = 0usize;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--keys" => {
+                let Some(v) = args.get(i + 1).and_then(|s| s.parse().ok()) else {
+                    eprintln!("usage: pedra scale-model --keys N --ram R");
+                    return std::process::ExitCode::from(2);
+                };
+                keys = Some(v);
+                i += 2;
+            }
+            "--ram" => {
+                let Some(v) = args.get(i + 1).and_then(|s| s.parse().ok()) else {
+                    eprintln!("usage: pedra scale-model --keys N --ram R");
+                    return std::process::ExitCode::from(2);
+                };
+                ram = Some(v);
+                i += 2;
+            }
+            other => {
+                eprintln!("unknown scale-model flag: {other}");
+                eprintln!("usage: pedra scale-model --keys N --ram R");
+                return std::process::ExitCode::from(2);
+            }
+        }
+    }
+    let (Some(keys), Some(ram)) = (keys, ram) else {
+        eprintln!("usage: pedra scale-model --keys N --ram R");
+        return std::process::ExitCode::from(2);
+    };
+    print_scale_forecast(keys, ram);
+    std::process::ExitCode::SUCCESS
+}
+
+/// RFC-0176 P1.2: numbers come from [`scale_forecast`], not a second formula.
+fn print_scale_forecast(keys: u64, ram: u64) {
+    let f = scale_forecast(keys, ram);
+    let mode = if f.hot { "hot" } else { "bounded-cache" };
+    let hot_bit = u8::from(f.hot);
+    println!("scale-model keys={} ram={}", f.keys, f.ram_bytes);
+    println!("S={} L={}", f.store_bytes, f.levels);
+    println!("P_best={} P_worst={}", f.p_best, f.p_worst);
+    println!("n_files={} warm_cap={}", f.n_files, f.warm_cap);
+    println!("hot={hot_bit} mode={mode}");
+    println!(
+        "T_ns best={} happy={} worst={}",
+        f.best_ns, f.happy_ns, f.worst_ns
+    );
+    println!(
+        "eta_happy_bps={} eta_worst_bps={} happy_hot_bps={}",
+        SCALE_HAPPY_NOISY_BPS, SCALE_WORST_NOISY_BPS, f.happy_hot_bps
+    );
 }
 
 fn stats_cmd(args: &[String]) -> std::process::ExitCode {

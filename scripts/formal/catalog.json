@@ -6708,6 +6708,30 @@
         "file": "crates/pedradb-core/src/scale_kernel.rs",
         "test": "happy_hot_bps_on_always_hot_is_not_ok"
       }
+    },
+    {
+      "id": "scale_forecast",
+      "finding": "RFC-0176 P1.2",
+      "twin_kind": "model",
+      "kernel": "crates/pedradb-core/src/scale_kernel.rs",
+      "twin": "crates/pedradb-core/verus/scale.rs",
+      "verus": "scripts/verus_scale.sh",
+      "callers": [
+        "crates/pedradb-cli/src/main.rs"
+      ],
+      "entry": "scale_forecast",
+      "as_is": "scale_forecast_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-cli/src/main.rs",
+          "handler": "scale_model_cmd"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/scale_kernel.rs",
+        "test": "scale_forecast_on_always_hot_walk_is_not_ok"
+      }
     }
   ],
   "clones": [
