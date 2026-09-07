@@ -394,3 +394,15 @@ name = "LevelingKernel"
 
 [[lean_lib]]
 name = "Leveling"
+
+[[lean_lib]]
+name = "PosixKernel"
+
+[[lean_lib]]
+name = "Posix"
+
+[[lean_lib]]
+name = "FormKernel"
+
+[[lean_lib]]
+name = "Form"

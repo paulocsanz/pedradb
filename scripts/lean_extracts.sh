@@ -28,7 +28,7 @@ LIBS=(
   DcsApply StoreApply StoreCommit StoreAeAck StoreVote Key
   Lease Txn T1Modelo Membership StoreMembership C1Modelo
   CapiHandles Batch Merge FailClosed ProbeOrder Locktab Scan Cf Fields LsmR1
-  Leveling
+  Leveling Posix Form
 )
 
 for lib in "${LIBS[@]}"; do

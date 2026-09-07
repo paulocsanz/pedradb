@@ -79,8 +79,8 @@
   "handler_loc": 105230,
   "db_rs_extracted": false,
   "proof_depth": {
-   "extract": 246,
-   "close": 25,
+   "extract": 254,
+   "close": 17,
    "atom": 0,
    "model": 16,
    "updated": "2026-09-07"

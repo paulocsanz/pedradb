@@ -161,6 +161,8 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 | `fields` | `fields_kernel.rs` | `field_kept_id` / `_as_is_dente` (`--start-from` catalog entries; `encode_fields` nested-borrows hole patched to an index loop) |
 | `lsm_r1` | `lsm_r1_kernel.rs` | `lsm_reopen_id` / `lsm_compact_depth_zero` (`--start-from` catalog entries; compact nested-loop returns patched to `level_put`/`level_remove` loops; reopen_as_is reverse-stack loop) |
 | `leveling` | `leveling.rs` | `level_target_bytes_l0` / `_as_is_l0` (`RUSTFLAGS=--cfg test` so Charon sees as_is; pick Iterator holes patched to index loops; Iterator extra fields stripped) |
+| `posix` | `pedradb-posix/src/lib.rs` | `fdatasync_rc_ok_zero` / `_nonzero` / `_as_is_dente` (`--start-from fdatasync_rc_ok`; rest of lib.rs is syscall/unsafe). SOURCE sha256 is git HEAD (concurrent clippy on `filesystem_available_bytes` is not in the stamp). |
+| `form` | `form_kernel.rs` | `form_plus_byte_plus` / `query_u64_conflict_diff` (`--exclude str::contains` / `pattern`; contains Pattern hole and `query_values_conflict` Iterator.any patched to an index loop) |
 
 Partial `.lean` from a failed Aeneas run is not enrolled. Charon `--start-from` of the catalog entries is an extract of the live file when Aeneas emits a complete Kernel (no `sorry`) containing a `def` for every catalog `entry` on that path.
 
@@ -172,9 +174,8 @@ these; that is not an extract.
 | production | measured failure |
 |---|---|
 
-| `pedradb-http/src/auth_kernel.rs` | `CFailure` `Unimplemented` translating a method sig; source `core/src/str/pattern.rs:99`. `ascii_lower`/`ascii_upper` `--start-from` emit defs via rustc axioms; bearer/scheme/`eq_ignore_ascii_case` do not. Not enrolled. |
-| `pedradb-http/src/form_kernel.rs` | `--start-from form_decode`+`query_u64_conflict` is complete; `--start-from` of all 7 catalog entries `CFailure` `str/pattern.rs:99` (`query_part_is_bare_name` `contains`). Not enrolled (missing query_part / query_values defs). |
-| `pedradb-http/src/path_kernel.rs` | `--start-from strip_authority_for_routing` is complete; `--start-from` of all 8 catalog entries `CFailure` `str/pattern.rs:99` (`rsplit_once` / `eq_ignore_ascii_case`). `--opaque`/`--exclude` of `core::str::{str}` still CFailure or 18-error partial. Not enrolled. |
+| `pedradb-http/src/auth_kernel.rs` | `--exclude` of `eq_ignore_ascii_case`/`split_once`/`pattern` still leaves `bearer_token_from_value` as an axiom (internal error on `split_once(char::is_whitespace)`) and `authorization_matches` a hole. `--opaque` of those methods is Aeneas `CFailure` `pattern.rs:99`. Not enrolled. |
+| `pedradb-http/src/path_kernel.rs` | `--exclude` of `rsplit_once`/`split_once`/`find`/`pattern` emits defs for every catalog entry but 16 `sorry` (catalog fns themselves are holes: `origin_form_path`, `split_host_port`, `path_after_authority`, …). `--opaque` still `CFailure` `pattern.rs:99`. Partial file, not enrolled. |
 
 ### Refused — include-crate does not compile standalone, or `--start-from` still lake-red
 
@@ -187,7 +188,7 @@ enrolled via a shim that names `DcsError` without thiserror.
 | production | measured rustc error |
 |---|---|
 | `pedradb-world/src/world_kernel.rs` | `use crate::TrajectorySample` (file is dirty-tree only; not in git HEAD) |
-| `pedradb-posix/src/lib.rs` | Whole-file `CFailure` Dynamic trait / `&raw const`. `--start-from fdatasync_rc_ok` is complete (no `sorry`); **not enrolled**: production file is dirty vs HEAD (concurrent clippy on `filesystem_available_bytes`). Re-run `scripts/aeneas_posix.sh` when the tree is clean. |
+
 
 
 The `probe_order` walk is still Iterator-refused; the catalog pair `first_probe_on_equal_lo` is enrolled via `--start-from`. Do not re-pin: upstream `aeneas@f9a8e33` did not widen the iterator set.
@@ -241,6 +242,8 @@ Never: “Lean proved Raft / fold / the Bloom filter.”
 ./scripts/aeneas_fields.sh --required
 ./scripts/aeneas_lsm_r1.sh --required
 ./scripts/aeneas_leveling.sh --required
+./scripts/aeneas_posix.sh --required
+./scripts/aeneas_form.sh --required
 ```
 
 ## Scale (`scale_kernel.rs`, RFC-0176)
