@@ -232,3 +232,9 @@ name = "DiskPressureKernel"
 
 [[lean_lib]]
 name = "DiskPressure"
+
+[[lean_lib]]
+name = "CrcKernel"
+
+[[lean_lib]]
+name = "Crc"

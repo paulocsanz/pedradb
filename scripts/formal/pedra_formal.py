@@ -1135,6 +1135,7 @@ AENEAS_EXTRACTS = (
         "crates/pedradb-core/src/disk_pressure_kernel.rs",
         "formal/aeneas/out/SOURCE.disk_pressure",
     ),
+    ("crates/pedradb-core/src/wal/crc.rs", "formal/aeneas/out/SOURCE.crc"),
 )
 
 
@@ -1985,6 +1986,15 @@ def check_extract(
             "crates/pedradb-core/src/disk_pressure_kernel.rs",
             "formal/aeneas/lean/DiskPressure.lean",
             ("theorem disk_pressure_unknown_admits",),
+        ),
+        (
+            "crc",
+            "formal/aeneas/out/lean/CrcKernel.lean",
+            "def crc_match_ok",
+            "./scripts/aeneas_crc.sh",
+            "crates/pedradb-core/src/wal/crc.rs",
+            "formal/aeneas/lean/Crc.lean",
+            ("theorem crc_match_ok_equal",),
         ),
     ]:
         art = root / artifact

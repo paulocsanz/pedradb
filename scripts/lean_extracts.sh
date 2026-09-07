@@ -23,7 +23,7 @@ fi
 LIBS=(
   Lookup RpcMode StoreCompact Snapshot Si IndexVal Changelog
   Cursor Cl Children Pin Pack Ship Fold Manifest Compact VlogGc TxGlue
-  L28 Tcg Cqe Iter Properties Scale DiskPressure
+  L28 Tcg Cqe Iter Properties Scale DiskPressure Crc
 )
 
 for lib in "${LIBS[@]}"; do

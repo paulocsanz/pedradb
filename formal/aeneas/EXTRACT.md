@@ -101,7 +101,7 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 `daa85d7` / Lean 4.31.0. Production files were not rewritten to please Charon.
 `db.rs` is not extracted (`glue.db_rs_extracted=false`).
 
-### Enrolled (25)
+### Enrolled (26)
 
 `[lib] path` = production file. Stamp pins the whole file. Theorems live in
 `formal/aeneas/lean/<Name>.lean` (not the generated `*Kernel.lean`).
@@ -133,6 +133,7 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 | `properties` | `properties_kernel.rs` | `d1_holds_loop_body_is_def` (loop extract) |
 | `scale` | `scale_kernel.rs` | `point_get_probes_one_plus_one` / `_as_is_is_n_files` |
 | `disk_pressure` | `disk_pressure_kernel.rs` | `disk_pressure_unknown_admits` / `_as_is_dente` |
+| `crc` | `wal/crc.rs` | `crc_match_ok_equal` / `_as_is_dente` (`crc32c` crate fns stay axioms) |
 
 Partial `.lean` from a failed Aeneas run is not enrolled.
 
@@ -169,12 +170,11 @@ Charon crash. Not rewritten.
 | `pedradb-dcs/src/apply_kernel.rs` | `DcsError` / `Result` live in the parent crate |
 | `pedradb-core/src/sst/scan_kernel.rs` | `crate::wal::crc::crc_match_ok` — no `wal` in the extract root |
 | `pedradb-world/src/world_kernel.rs` | `use crate::TrajectorySample` (file is dirty-tree only; not in git HEAD) |
-| `pedradb-posix/src/lib.rs` | unresolved crate `pedradb_telemetry` |
-| `pedradb-core/src/wal/crc.rs` | `crc32c::crc32c_append` — `crc32c` not a crate in the extract |
+| `pedradb-posix/src/lib.rs` | Linked `libc`; Aeneas still `CFailure`: Dynamic trait types (`std::io::Error::new`), `&raw const`, improperly typed constant in `fdatasync_file`. Partial file, 8 errors. |
 | `pedradb-core/src/merge.rs` | unresolved crate `pedradb_telemetry` |
 | `pedradb-core/src/key.rs` | `crate::error` missing from the extract root |
 | `pedradb-core/src/batch.rs` | `crate::key::{SequenceNumber, ValueType}` |
-| `rocksdb-compat/src/locktab.rs` | unresolved crate `parking_lot` |
+| `rocksdb-compat/src/locktab.rs` | Linked `parking_lot`+`bytes`; Aeneas `unsupported nested borrows` in `LockTable::lock`. Partial file. `wait_for_deadlock` not enrolled. |
 | `pedradb-core/src/env_crash_kernel.rs` | `crate::group_commit_kernel::fsync_promotes_pending` |
 | `pedradb-core/src/wal/wal_state_kernel.rs` | `crate::env_crash_kernel` |
 | `pedradb-core/src/d1_modelo_kernel.rs` | `crate::env_crash_kernel` |
