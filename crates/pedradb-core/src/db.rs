@@ -7144,7 +7144,12 @@ impl<E: Env> Db<E> {
         }
         let compact_t0 = Instant::now();
         self.dump_level_diag("compact_leveled_start");
+        let t_repair = Instant::now();
         self.repair_stacked_levels()?;
+        let repair_s = t_repair.elapsed().as_secs_f64();
+        if repair_s > 0.05 {
+            eprintln!("repair_stacked_levels={repair_s:.3}s");
+        }
         // Across-job batching: only with a thread-shareable env (the seam)
         // and `parallel_jobs > 1`; the batch's disjoint-job writes then run
         // on scoped threads through `ParallelMerge::merge_jobs` while this

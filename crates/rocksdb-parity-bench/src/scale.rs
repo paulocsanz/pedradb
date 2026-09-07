@@ -392,7 +392,9 @@ impl ScaleStore for PedraScale {
         // on the compact worker (87 s @100M with settle_parts compact=0.002).
         // finish_hydrate already flushed. A second flush waited on
         // flush_lock (~90 s @100M, compact_ns stayed 0.001).
+        let t_c = Instant::now();
         let ok = self.db.compact_no_flush().is_ok();
+        eprintln!("settle_compact_call={:.3}s", t_c.elapsed().as_secs_f64());
         let compact_ns = self
             .db
             .property_int_value(rocksdb_compat::properties::PEDRA_SETTLE_COMPACT_NS)

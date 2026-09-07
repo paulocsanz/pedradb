@@ -3404,18 +3404,25 @@ impl<E: PedraEnv> DB<E> {
     }
 
     fn compact_inner(&self, flush: bool) -> Result<()> {
+        let wall = std::time::Instant::now();
         self.apply_compaction_filter()?;
-        let t0 = std::time::Instant::now();
+        let t_gate = std::time::Instant::now();
         let _gate = self.compact_gate.lock();
-        let gate_s = t0.elapsed().as_secs_f64();
+        let gate_s = t_gate.elapsed().as_secs_f64();
         if gate_s > 0.05 {
             eprintln!("compact_gate_wait={gate_s:.3}s");
         }
-        if flush {
+        let r = if flush {
             self.inner.compact().map_err(Error::from)
         } else {
             self.inner.compact_skip_flush().map_err(Error::from)
-        }
+        };
+        drop(_gate);
+        eprintln!(
+            "compact_inner_wall={:.3}s flush={flush}",
+            wall.elapsed().as_secs_f64()
+        );
+        r
     }
 
     /// Compact after applying `filter` once (RFC-0043 P2.7). Same decisions
