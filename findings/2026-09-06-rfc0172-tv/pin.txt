@@ -1,0 +1,7 @@
+triple=aarch64-apple-darwin
+rustc=1.97.1
+commit-hash=8bab26f4f68e0e26f0bb7960be334d5b520ea452
+llvm=22.1.6
+opt-level=0
+crate-name=write_admission_kernel
+src=crates/pedradb-core/src/write_admission_kernel.rs

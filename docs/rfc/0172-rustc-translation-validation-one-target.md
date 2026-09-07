@@ -1,6 +1,6 @@
 # RFC: translation validation rustc→objeto (um alvo pinado)
 
-**Status:** draft
+**Status:** done
 **Updated:** 2026-09-06
 **Parent:** [0171](0171-pagar-o-preco-sel4.md)
 
@@ -30,31 +30,31 @@ Um alvo, um crate, um ficheiro:
 
 ### P0 — o alvo existe no papel e no freeze
 
-- [ ] **P0.1** Pin do triple + rustc version no findings; script `scripts/tv_write_admission.sh` recusa toolchain drift — status: `todo`
-- [ ] **P0.2** Dump do objeto / LLVM IR do kernel isolado (crate Aeneas já isola o path) — status: `todo`
+- [x] **P0.1** Pin do triple + rustc version no findings; script `scripts/tv_write_admission.sh` recusa toolchain drift — status: `done`
+- [x] **P0.2** Dump do objeto / LLVM IR do kernel isolado (crate Aeneas já isola o path) — status: `done`
 
 ### P1 — correspondência
 
-- [ ] **P1.1** Relação nomeada exec-fn → símbolo no objeto para `write_admission_idle` e `write_admit` — status: `todo`
-- [ ] **P1.2** Gate CI: o dump muda se o kernel mudar (sha256 bind como SOURCE.*) — status: `todo`
+- [x] **P1.1** Relação nomeada exec-fn → símbolo no objeto para `write_admission_idle` e `write_admit` — status: `done`
+- [x] **P1.2** Gate CI: o dump muda se o kernel mudar (sha256 bind como SOURCE.*) — status: `done`
 
 ### P2 — TV mecânico
 
-- [ ] **P2.1** Ferramenta TV (Alive2 / LLVM-reduce / script próprio) sobre **um** fn — status: `todo`
+- [x] **P2.1** Ferramenta TV (Alive2 / LLVM-reduce / script próprio) sobre **um** fn — status: `done`
 
 ## Status (living — update with every PR)
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | pin triple+rustc | todo | — | 2026-09-06 |
-| P0.2 | p0 | dump objeto/IR | todo | — | 2026-09-06 |
-| P1.1 | p1 | símbolos idle/admit | todo | — | 2026-09-06 |
-| P1.2 | p1 | sha256 bind | todo | — | 2026-09-06 |
-| P2.1 | p2 | TV de um fn | todo | — | 2026-09-06 |
+| P0.1 | p0 | pin triple+rustc | done | findings/2026-09-06-rfc0172-tv/pin.txt | 2026-09-06 |
+| P0.2 | p0 | dump objeto/IR | done | findings/2026-09-06-rfc0172-tv/write_admission.ll | 2026-09-06 |
+| P1.1 | p1 | símbolos idle/admit | done | scripts/tv_write_admission.sh | 2026-09-06 |
+| P1.2 | p1 | sha256 bind | done | findings/2026-09-06-rfc0172-tv/SOURCE.tv | 2026-09-06 |
+| P2.1 | p2 | TV de um fn | done | scripts/tv_write_admission_ir.py (idle 8/8) | 2026-09-06 |
 
 ## Acceptance Criteria
 
-- **Tests:** script de pin falha se `rustc -vV` ≠ freeze; dump existe no findings.
+- **Tests:** `scripts/tv_write_admission.sh` falha se `rustc -vV` ≠ pin, se o IR emitido ≠ dump, se faltam símbolos `write_admission_idle`/`write_admit`, ou se o IR de `idle` ⊭ spec nas 8 entradas.
 - **Telemetry / Analytics:** none.
 - **Documentation:** este RFC; 0171 P2.2 aponta para aqui.
 - **Screenshots:** backend-only.
