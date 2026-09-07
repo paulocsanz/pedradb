@@ -28,13 +28,4 @@ def first_probe_on_equal_lo_as_is
   (_newer : Std.Usize) (older : Std.Usize) : Result Std.Usize := do
   ok older
 
-/-- [pedra_aeneas_probe_order_kernel::probe_order_covering_as_is]:
-    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 78:0-80:1
-    Visibility: public -/
-def probe_order_covering_as_is
-  (_pos : Option Std.Usize) (_prefix_end : Std.Usize) (hi_ge : Bool) :
-  Result Bool
-  := do
-  ok hi_ge
-
 end pedra_aeneas_probe_order_kernel

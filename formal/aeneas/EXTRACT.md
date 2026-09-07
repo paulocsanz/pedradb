@@ -101,7 +101,7 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 `daa85d7` / Lean 4.31.0. Production files were not rewritten to please Charon.
 `db.rs` is not extracted (`glue.db_rs_extracted=false`).
 
-### Enrolled (42)
+### Enrolled (47)
 
 `[lib] path` = production file. Stamp pins the whole file. Theorems live in
 `formal/aeneas/lean/<Name>.lean` (not the generated `*Kernel.lean`).
@@ -150,8 +150,13 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 | `membership` | raft `membership_kernel.rs` | `joint_election_ok_needs_both` / `_as_is_dente` (Charon `--exclude elect_claim_banner`; Ord.max patch) |
 | `store_membership` | store `membership_kernel.rs` | same theorems (clone) |
 | `c1_modelo` | `c1_modelo_kernel.rs` | `c1_modelo_joint_add_refuses` / `_as_is_dente` |
+| `capi_handles` | capi `handles.rs` | `c_len_admitted_oversize` / `_as_is_dente` (Charon `--start-from c_len_admitted`; rest is IterMut) |
+| `batch` | `batch.rs` | `write_record_count_ok_prefix` / `_as_is_dente` (shim `#[path]` key.rs; `--start-from write_record_count_ok`; decode is early-return-in-loop) |
+| `merge` | `merge.rs` | `visible_at_deletion` / `_as_is_dente` (shim `#[path]` key+compact; `--start-from visible_at`; WindowKvIter is Iterator) |
+| `fail_closed` | `fail_closed.rs` | `parse_error_writes_status_true` / `_as_is_dente` (`--start-from parse_error_writes_status`; rest is `str/pattern`) |
+| `probe_order` | `probe_order_kernel.rs` | `first_probe_on_equal_lo_newer` / `_as_is_dente` (`--start-from first_probe_on_equal_lo`; walk is Iterator) |
 
-Partial `.lean` from a failed Aeneas run is not enrolled.
+Partial `.lean` from a failed Aeneas run is not enrolled. Charon `--start-from` of the catalog entries is an extract of the live file when Aeneas emits a complete Kernel (no `sorry`) containing a `def` for every catalog `entry` on that path.
 
 ### Refused — Aeneas/Charon or Lean typecheck of the generated Kernel
 
@@ -161,21 +166,18 @@ these; that is not an extract.
 | production | measured failure |
 |---|---|
 
-| `pedradb-http/src/auth_kernel.rs` | `CFailure` `Unimplemented` translating a method sig; source `core/src/str/pattern.rs:99`. |
-| `pedradb-http/src/fail_closed.rs` | Same `str/pattern.rs:99` `Unimplemented` on method sig. |
-| `pedradb-http/src/form_kernel.rs` | Same `str/pattern.rs:99` `Unimplemented` on method sig. |
+| `pedradb-http/src/auth_kernel.rs` | `CFailure` `Unimplemented` translating a method sig; source `core/src/str/pattern.rs:99`. `ascii_lower`/`ascii_upper` `--start-from` emit defs via rustc axioms; bearer/scheme/`eq_ignore_ascii_case` do not. Not enrolled. |
+| `pedradb-http/src/form_kernel.rs` | `--start-from form_decode`+`query_u64_conflict` is complete; `--start-from` of all 7 catalog entries `CFailure` `str/pattern.rs:99` (`query_part_is_bare_name` `contains`). Not enrolled (missing query_part / query_values defs). |
 | `pedradb-http/src/path_kernel.rs` | Same `str/pattern.rs:99` `Unimplemented` on method sig. |
 | `montanha-fdb-recipes/src/fields_kernel.rs` | `Nested borrows are not supported yet` in `encode_fields`; plus `Unimplemented`. Partial file, 3 unique errors. Iterator `map`/`collect`/`position` missing from the Lean model. |
 | `pedradb-core/src/cf_kernel.rs` | Bottoms on `compact_family_key`, `cf_encode_effective`, `decode_cf_key`. Partial file, 3 errors. |
 | `pedradb-core/src/leveling.rs` | `[Error] Can't end abstraction 11 as it is set as non-endable`; Iterator `map`/`filter`/`collect`/`all`/`max`/`min`/`sum` missing. Partial file, 5 errors (3 unique). |
-| `pedradb-core/src/lsm_r1_kernel.rs` | `Returns inside of nested loops are not supported yet` (`lsm_compact` / `_as_is`); `Unreachable` in `lsm_reopen_as_is`; `Could not match the contexts` in `lsm_flush`. Partial file, 10 errors (5 unique). |
+| `pedradb-core/src/lsm_r1_kernel.rs` | `--start-from` of all 4 catalog entries: `Returns inside of nested loops` in `lsm_compact` / `_as_is` (plus `inv_lsm` / `level_distinct` callees). Partial file. `lsm_probe` / `r1_modelo` / `lsm_reopen` defs exist; compact does not. Not enrolled. |
 
-| `pedradb-capi/src/handles.rs` | Aeneas emits Lean with `sorry`; `lake build CapiHandlesKernel` fails on `IterMut` / `FnOnce.call_once` / `Enumerate` (iterator surface, same class as probe-order). |
-| `pedradb-core/src/probe_order_kernel.rs` | Live whole-file extract `CFailure` Internal error translating `core/src/iter/traits/iterator.rs:42`. Walk/closures stay Charon-refused. Not rewritten. |
-| `pedradb-core/src/sst/scan_kernel.rs` | Shim linked `wal/crc.rs`; Aeneas `CFailure` Internal error translating `scan_reads_file` closure/`Iterator::any` (lines 112:13–112:85). Partial file. Not rewritten. |
+| `pedradb-core/src/sst/scan_kernel.rs` | Shim linked `wal/crc.rs`; `--start-from` of crc/zero_glue/block_crc is complete; `scan_reads_file` is `Iterator::any` `CFailure`. Not enrolled. |
 
 
-### Refused — include-crate does not compile standalone (5)
+### Refused — include-crate does not compile standalone, or `--start-from` still lake-red
 
 The extract crate is `[lib] path = production file` with no parent crate.
 These files `use crate::…` or an external crate the probe did not link. Not a
@@ -186,14 +188,11 @@ enrolled via a shim that names `DcsError` without thiserror.
 | production | measured rustc error |
 |---|---|
 | `pedradb-world/src/world_kernel.rs` | `use crate::TrajectorySample` (file is dirty-tree only; not in git HEAD) |
-| `pedradb-posix/src/lib.rs` | Linked `libc`; Aeneas still `CFailure`: Dynamic trait types (`std::io::Error::new`), `&raw const`, improperly typed constant in `fdatasync_file`. Partial file, 8 errors. |
-| `pedradb-core/src/merge.rs` | Shim linked `key.rs`+`compact_kernel`+bytes; Charon type error on `Iterator` for `WindowKvIter` / `StreamingVisibleIter` (`merge.rs:619`). Not rewritten. |
-| `pedradb-core/src/batch.rs` | Shim linked `key.rs`; Aeneas `Early returns inside of loops` in `WriteRecord::decode`. Partial file. Not rewritten. |
-| `rocksdb-compat/src/locktab.rs` | Linked `parking_lot`+`bytes`; Aeneas `unsupported nested borrows` in `LockTable::lock`. Partial file. `wait_for_deadlock` not enrolled. |
+| `pedradb-posix/src/lib.rs` | Whole-file `CFailure` Dynamic trait / `&raw const`. `--start-from fdatasync_rc_ok` is complete (no `sorry`); **not enrolled**: production file is dirty vs HEAD (concurrent clippy on `filesystem_available_bytes`). Re-run `scripts/aeneas_posix.sh` when the tree is clean. |
+| `rocksdb-compat/src/locktab.rs` | `--start-from wait_for_deadlock` still emits `sorry` in `LockTable.lock` (nested borrows). Complete file with `sorry` is not an extract. |
 
 
-Probe-order iterator/closure refuse is unchanged (see above). Do not re-pin:
-upstream `aeneas@f9a8e33` did not widen this set.
+The `probe_order` walk is still Iterator-refused; the catalog pair `first_probe_on_equal_lo` is enrolled via `--start-from`. Do not re-pin: upstream `aeneas@f9a8e33` did not widen the iterator set.
 
 ## What we may say
 
@@ -233,6 +232,11 @@ Never: “Lean proved Raft / fold / the Bloom filter.”
 ./scripts/aeneas_membership.sh --required
 ./scripts/aeneas_store_membership.sh --required
 ./scripts/aeneas_c1_modelo.sh --required
+./scripts/aeneas_capi_handles.sh --required
+./scripts/aeneas_batch.sh --required
+./scripts/aeneas_merge.sh --required
+./scripts/aeneas_fail_closed.sh --required
+./scripts/aeneas_probe_order.sh --required
 ```
 
 ## Scale (`scale_kernel.rs`, RFC-0176)

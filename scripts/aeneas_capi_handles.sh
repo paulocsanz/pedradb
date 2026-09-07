@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Extract production merge.rs catalog entries (visible_at).
-# Charon --start-from: WindowKvIter / StreamingVisibleIter are Iterator-refused.
+# Extract production capi handles.rs catalog entries (c_len_admitted).
+# Charon --start-from: rest of handles.rs is IterMut (whole-file sorry).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CRATE="$ROOT/formal/aeneas/merge-kernel"
+CRATE="$ROOT/formal/aeneas/capi-handles-kernel"
 OUT="$ROOT/formal/aeneas/out"
 REQUIRED=0
 if [[ "${1:-}" == "--required" ]]; then
@@ -17,17 +17,17 @@ if [[ -z "$CHARON" || -z "$AENEAS" ]]; then
   echo "skip  $msg"; exit 0
 fi
 mkdir -p "$OUT"
-SRC="$ROOT/crates/pedradb-core/src/merge.rs"
+SRC="$ROOT/crates/pedradb-capi/src/handles.rs"
 echo "      charon=$CHARON"
 ( cd "$CRATE" && "$CHARON" cargo --preset=aeneas \
-    --start-from 'crate::merge::visible_at' \
-    --start-from 'crate::merge::visible_at_as_is' \
-    --dest-file "$OUT/merge_kernel.llbc" )
-"$AENEAS" -backend lean -dest "$OUT/lean" "$OUT/merge_kernel.llbc"
+    --start-from 'crate::c_len_admitted' \
+    --start-from 'crate::c_len_admitted_as_is' \
+    --dest-file "$OUT/capi_handles_kernel.llbc" )
+"$AENEAS" -backend lean -dest "$OUT/lean" "$OUT/capi_handles_kernel.llbc"
 {
-  echo "path=crates/pedradb-core/src/merge.rs"
+  echo "path=crates/pedradb-capi/src/handles.rs"
   echo "sha256=$(shasum -a 256 "$SRC" | awk '{print $1}')"
   echo "aeneas=$("$AENEAS" -version 2>/dev/null | awk '{print $NF}')"
   echo "charon=$("$CHARON" version 2>/dev/null | head -1)"
-} > "$OUT/SOURCE.merge"
-echo "ok    extract merge → $OUT"
+} > "$OUT/SOURCE.capi_handles"
+echo "ok    extract capi_handles → $OUT"

@@ -334,3 +334,27 @@ name = "C1ModeloKernel"
 
 [[lean_lib]]
 name = "C1Modelo"
+
+[[lean_lib]]
+name = "CapiHandlesKernel"
+
+[[lean_lib]]
+name = "CapiHandles"
+
+[[lean_lib]]
+name = "BatchKernel"
+
+[[lean_lib]]
+name = "Batch"
+
+[[lean_lib]]
+name = "MergeKernel"
+
+[[lean_lib]]
+name = "Merge"
+
+[[lean_lib]]
+name = "FailClosedKernel"
+
+[[lean_lib]]
+name = "FailClosed"

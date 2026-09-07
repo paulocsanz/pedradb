@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Extract production merge.rs catalog entries (visible_at).
-# Charon --start-from: WindowKvIter / StreamingVisibleIter are Iterator-refused.
+# Extract production fail_closed.rs catalog entries (parse_error_writes_status).
+# Charon --start-from: rest of the file uses eq_ignore_ascii_case (str/pattern).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CRATE="$ROOT/formal/aeneas/merge-kernel"
+CRATE="$ROOT/formal/aeneas/fail-closed-kernel"
 OUT="$ROOT/formal/aeneas/out"
 REQUIRED=0
 if [[ "${1:-}" == "--required" ]]; then
@@ -17,17 +17,17 @@ if [[ -z "$CHARON" || -z "$AENEAS" ]]; then
   echo "skip  $msg"; exit 0
 fi
 mkdir -p "$OUT"
-SRC="$ROOT/crates/pedradb-core/src/merge.rs"
+SRC="$ROOT/crates/pedradb-http/src/fail_closed.rs"
 echo "      charon=$CHARON"
 ( cd "$CRATE" && "$CHARON" cargo --preset=aeneas \
-    --start-from 'crate::merge::visible_at' \
-    --start-from 'crate::merge::visible_at_as_is' \
-    --dest-file "$OUT/merge_kernel.llbc" )
-"$AENEAS" -backend lean -dest "$OUT/lean" "$OUT/merge_kernel.llbc"
+    --start-from 'crate::parse_error_writes_status' \
+    --start-from 'crate::parse_error_writes_status_as_is' \
+    --dest-file "$OUT/fail_closed_kernel.llbc" )
+"$AENEAS" -backend lean -dest "$OUT/lean" "$OUT/fail_closed_kernel.llbc"
 {
-  echo "path=crates/pedradb-core/src/merge.rs"
+  echo "path=crates/pedradb-http/src/fail_closed.rs"
   echo "sha256=$(shasum -a 256 "$SRC" | awk '{print $1}')"
   echo "aeneas=$("$AENEAS" -version 2>/dev/null | awk '{print $NF}')"
   echo "charon=$("$CHARON" version 2>/dev/null | head -1)"
-} > "$OUT/SOURCE.merge"
-echo "ok    extract merge → $OUT"
+} > "$OUT/SOURCE.fail_closed"
+echo "ok    extract fail_closed → $OUT"

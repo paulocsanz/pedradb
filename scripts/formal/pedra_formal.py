@@ -1197,6 +1197,20 @@ AENEAS_EXTRACTS = (
         "crates/pedradb-raft/src/c1_modelo_kernel.rs",
         "formal/aeneas/out/SOURCE.c1_modelo",
     ),
+    (
+        "crates/pedradb-capi/src/handles.rs",
+        "formal/aeneas/out/SOURCE.capi_handles",
+    ),
+    ("crates/pedradb-core/src/batch.rs", "formal/aeneas/out/SOURCE.batch"),
+    ("crates/pedradb-core/src/merge.rs", "formal/aeneas/out/SOURCE.merge"),
+    (
+        "crates/pedradb-http/src/fail_closed.rs",
+        "formal/aeneas/out/SOURCE.fail_closed",
+    ),
+    (
+        "crates/pedradb-core/src/probe_order_kernel.rs",
+        "formal/aeneas/out/SOURCE.probe_order",
+    ),
 )
 
 
