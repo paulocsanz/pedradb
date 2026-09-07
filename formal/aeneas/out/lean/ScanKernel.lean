@@ -176,6 +176,17 @@ def scan_kernel.tombstone_reaches_window
   then ok starts_before_end
   else ok false
 
+/-- [pedra_aeneas_scan_kernel::scan_kernel::tombstone_reaches_window_as_is]:
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 43:0-50:1
+    Visibility: public -/
+def scan_kernel.tombstone_reaches_window_as_is
+  (_t_start : Slice Std.U8) (_t_end : Slice Std.U8)
+  (_start : core.ops.range.Bound (Slice Std.U8))
+  (_end : core.ops.range.Bound (Slice Std.U8)) :
+  Result Bool
+  := do
+  ok false
+
 /-- [pedra_aeneas_scan_kernel::scan_kernel::point_bounds_overlap]:
     Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 54:0-74:1
     Visibility: public -/

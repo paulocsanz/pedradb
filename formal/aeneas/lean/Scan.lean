@@ -62,3 +62,11 @@ theorem scan_reads_file_as_is_dente
       = scan_kernel.point_bounds_overlap smallest largest start end1 := by
   unfold scan_kernel.scan_reads_file_as_is
   rfl
+
+/-- Model as-is: tombstone span is ignored (always false). -/
+theorem tombstone_reaches_window_as_is_dente
+    (t_start t_end start end1) :
+    scan_kernel.tombstone_reaches_window_as_is t_start t_end start end1
+      = ok false := by
+  unfold scan_kernel.tombstone_reaches_window_as_is
+  rfl
