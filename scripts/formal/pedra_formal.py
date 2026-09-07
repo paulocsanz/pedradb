@@ -1062,7 +1062,6 @@ AENEAS_EXTRACTS = (
     ("crates/pedradb-raft/src/vote_kernel.rs", "formal/aeneas/out/SOURCE"),
     ("crates/pedradb-fold/src/isolated_kernel.rs", "formal/aeneas/out/SOURCE.isolated"),
     ("crates/pedradb-core/src/bloom.rs", "formal/aeneas/out/SOURCE.bloom"),
-    ("crates/pedradb-core/src/probe_order_kernel.rs", "formal/aeneas/out/SOURCE.probe_order"),
     ("crates/pedradb-raft/src/ae_kernel.rs", "formal/aeneas/out/SOURCE.ae"),
     ("crates/pedradb-raft/src/commit_kernel.rs", "formal/aeneas/out/SOURCE.commit"),
     ("crates/pedradb-core/src/group_commit_kernel.rs", "formal/aeneas/out/SOURCE.group_commit"),
