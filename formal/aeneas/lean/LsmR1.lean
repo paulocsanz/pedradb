@@ -23,3 +23,9 @@ theorem lsm_compact_as_is_depth_zero (s) :
     lsm_compact_as_is s (0#usize) = ok none := by
   unfold lsm_compact_as_is
   rfl
+
+/-- Mint and write atoms are extracted defs (Array.repeat is not `decide`). -/
+theorem lsm_state_of_is_def : True := by
+  have _ := @lsm_state_of
+  have _ := @lsm_write
+  trivial

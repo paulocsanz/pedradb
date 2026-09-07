@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Extract production store membership_kernel.rs (clone of raft).
+# elect_claim_banner &'static str bottoms patched (toStr), like world.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CRATE="$ROOT/formal/aeneas/store-membership-kernel"
@@ -19,21 +20,64 @@ mkdir -p "$OUT"
 SRC="$ROOT/crates/pedradb-store/src/membership_kernel.rs"
 echo "      charon=$CHARON"
 ( cd "$CRATE" && "$CHARON" cargo --preset=aeneas \
-    --exclude 'crate::elect_claim_banner' \
-    --exclude 'crate::elect_claim_banner_as_is' \
     --dest-file "$OUT/store_membership_kernel.llbc" )
+set +e
 "$AENEAS" -backend lean -dest "$OUT/lean" "$OUT/store_membership_kernel.llbc"
+set -e
 python3 - "$OUT/lean/StoreMembershipKernel.lean" <<'PYEOF'
 import sys
 p = sys.argv[1]
 src = open(p, encoding="utf-8").read()
+n = 0
+
+def repl(old, new, label):
+    global src, n
+    if old not in src:
+        sys.exit(f"patch target not found: {label}")
+    src = src.replace(old, new, 1)
+    n += 1
+
+repl(
+    """def elect_claim_banner
+  (es1 : Bool) (es2 : Bool) (es3 : Bool) : Result Str := do
+  sorry
+""",
+    r'''def elect_claim_banner
+  (es1 : Bool) (es2 : Bool) (es3 : Bool) : Result Str := do
+  let b ← liveness_admitted es1 es2 es3
+  if b
+  then ok (toStr "eventual-live es1=1 es2=1 es3=1")
+  else ok (toStr "bounded-elect not-eventual")
+''',
+    "elect_claim_banner",
+)
+repl(
+    """def elect_claim_banner_as_is
+  (_es1 : Bool) (_es2 : Bool) (_es3 : Bool) : Result Str := do
+  sorry
+""",
+    r'''def elect_claim_banner_as_is
+  (_es1 : Bool) (_es2 : Bool) (_es3 : Bool) : Result Str := do
+  ok (toStr "live")
+''',
+    "elect_claim_banner_as_is",
+)
 old = "core.cmp.Ord.max.default core.cmp.OrdU64"
 new = "core.cmp.Ord.max.default core.cmp.OrdU64.partialOrdInst.lt"
-n = src.count(old)
-if n:
-    open(p, "w", encoding="utf-8").write(src.replace(old, new))
-    print(f"      patched Ord.max.default ×{n}")
+k = src.count(old)
+if k:
+    src = src.replace(old, new)
+    n += k
+    print(f"      patched Ord.max.default ×{k}")
+if "sorry" in src:
+    sys.exit("StoreMembershipKernel.lean still contains sorry")
+open(p, "w", encoding="utf-8").write(src)
+print(f"      patched store_membership ×{n}")
 PYEOF
+if grep -q 'sorry' "$OUT/lean/StoreMembershipKernel.lean"; then
+  echo "FAIL  StoreMembershipKernel.lean still contains sorry" >&2
+  exit 1
+fi
 {
   echo "path=crates/pedradb-store/src/membership_kernel.rs"
   echo "sha256=$(shasum -a 256 "$SRC" | awk '{print $1}')"

@@ -30,6 +30,8 @@ echo "      charon=$CHARON"
     --start-from 'crate::lsm_reopen_as_is' \
     --start-from 'crate::r1_modelo' \
     --start-from 'crate::r1_modelo_as_is' \
+    --start-from 'crate::lsm_state_of' \
+    --start-from 'crate::lsm_write' \
     --dest-file "$OUT/lsm_r1_kernel.llbc" )
 set +e
 "$AENEAS" -backend lean -dest "$OUT/lean" "$OUT/lsm_r1_kernel.llbc"

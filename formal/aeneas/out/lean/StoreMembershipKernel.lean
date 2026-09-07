@@ -513,4 +513,21 @@ def liveness_admitted_as_is
   (_es1 : Bool) (_es2 : Bool) (_es3 : Bool) : Result Bool := do
   ok true
 
+/-- [pedra_aeneas_store_membership_kernel::elect_claim_banner]:
+    Source: '../../../crates/pedradb-store/src/membership_kernel.rs', lines 438:0-444:1
+    Visibility: public -/
+def elect_claim_banner
+  (es1 : Bool) (es2 : Bool) (es3 : Bool) : Result Str := do
+  let b ← liveness_admitted es1 es2 es3
+  if b
+  then ok (toStr "eventual-live es1=1 es2=1 es3=1")
+  else ok (toStr "bounded-elect not-eventual")
+
+/-- [pedra_aeneas_store_membership_kernel::elect_claim_banner_as_is]:
+    Source: '../../../crates/pedradb-store/src/membership_kernel.rs', lines 448:0-450:1
+    Visibility: public -/
+def elect_claim_banner_as_is
+  (_es1 : Bool) (_es2 : Bool) (_es3 : Bool) : Result Str := do
+  ok (toStr "live")
+
 end pedra_aeneas_store_membership_kernel

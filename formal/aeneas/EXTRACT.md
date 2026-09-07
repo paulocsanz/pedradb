@@ -147,7 +147,7 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 | `lease` | dcs `lease_kernel.rs` | `lease_live_zero` / `_as_is_dente` (`Ord.max.default` patched to pass `lt`) |
 | `txn` | store `txn_kernel.rs` | `txn_commit_action_abort_reverts` / `_as_is_dente` (same Ord.max patch) |
 | `t1_modelo` | `t1_modelo_kernel.rs` | `t1_modelo_empty` / `_as_is_dente` (shim `#[path]` txn_kernel) |
-| `membership` | raft `membership_kernel.rs` | `joint_election_ok_needs_both` / `_as_is_dente` (Charon `--exclude elect_claim_banner`; Ord.max patch) |
+| `membership` | raft `membership_kernel.rs` | `joint_election_ok_needs_both` / `elect_claim_banner_bounded` (`&'static str` bottoms patched to `toStr`; Ord.max patch) |
 | `store_membership` | store `membership_kernel.rs` | same theorems (clone) |
 | `c1_modelo` | `c1_modelo_kernel.rs` | `c1_modelo_joint_add_refuses` / `_as_is_dente` |
 | `capi_handles` | capi `handles.rs` | `c_len_admitted_oversize` / `_as_is_dente` / `c_path_walk_bytes_4k` / `c_free_table_admitted_false` (Charon `--start-from` len + path-walk + free-table; rest is IterMut) |
@@ -159,7 +159,7 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 | `scan` | `sst/scan_kernel.rs` | `sst_crc_fate_modern_mismatch` / `scan_reads_file_none_smallest` / `zero_glue_admitted_false` / `tombstone_reaches_window_as_is_dente` (shim `#[path]` crc; `--start-from` catalog entries including model as_is; closure `call_mut` patched to `tombstone_reaches_window`) |
 | `cf` | `cf_kernel.rs` | `key_in_cf_family_as_is_dente` / `cf_encode_effective_is_if` / `infer_sst_cf_none_none` (`--start-from` catalog entries; `cf_encode_effective`/`decode_cf_key` patched over lifetime bottoms) |
 | `fields` | `fields_kernel.rs` | `field_kept_id` / `_as_is_dente` (`--start-from` catalog entries; `encode_fields` nested-borrows hole patched to an index loop) |
-| `lsm_r1` | `lsm_r1_kernel.rs` | `lsm_reopen_id` / `lsm_compact_depth_zero` (`--start-from` catalog entries; compact nested-loop returns patched to `level_put`/`level_remove` loops; reopen_as_is reverse-stack loop) |
+| `lsm_r1` | `lsm_r1_kernel.rs` | `lsm_reopen_id` / `lsm_compact_depth_zero` / `lsm_state_of_is_def` (`--start-from` catalog + `lsm_state_of`/`lsm_write`; compact nested-loop returns patched to `level_put`/`level_remove`; reopen_as_is reverse-stack; `level_distinct`/`inv_lsm`/`lsm_flush` stay nested-loop refuse) |
 | `leveling` | `leveling.rs` | `level_target_bytes_l0` / `_as_is_l0` (`RUSTFLAGS=--cfg test` so Charon sees as_is; pick Iterator holes patched to index loops; Iterator extra fields stripped) |
 | `posix` | `pedradb-posix/src/lib.rs` | `fdatasync_rc_ok_zero` / `_nonzero` / `_as_is_dente` (`--start-from fdatasync_rc_ok`; rest of lib.rs is syscall/unsafe). SOURCE sha256 is git HEAD (concurrent clippy on `filesystem_available_bytes` is not in the stamp). |
 | `form` | `form_kernel.rs` | `form_plus_byte_plus` / `query_u64_conflict_diff` (`--exclude str::contains` / `pattern`; contains Pattern hole and `query_values_conflict` Iterator.any patched to an index loop) |

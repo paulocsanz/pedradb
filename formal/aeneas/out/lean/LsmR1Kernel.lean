@@ -87,6 +87,14 @@ structure LsmState where
   levels : Array LsmLevel 4#usize
   next_seq : Std.U64
 
+/-- [pedra_aeneas_lsm_r1_kernel::lsm_state_of]:
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 83:0-88:1
+    Visibility: public -/
+def lsm_state_of (next_seq : Std.U64) : Result LsmState := do
+  let ll ← LsmLevel.empty
+  let a := Array.repeat 4#usize ll
+  ok { levels := a, next_seq }
+
 /-- [pedra_aeneas_lsm_r1_kernel::level_get]: loop body 0:
     Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 94:4-101:1
     Visibility: public -/
@@ -213,6 +221,18 @@ axiom level_distinct : LsmLevel → Result Bool
     Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 154:0-179:1
     Visibility: public -/
 axiom inv_lsm : LsmState → Result Bool
+
+/-- [pedra_aeneas_lsm_r1_kernel::lsm_write]:
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 183:0-196:1
+    Visibility: public -/
+def lsm_write
+  (s : LsmState) (key : Std.U64) (tomb : Bool) : Result LsmState := do
+  let (ll, index_mut_back) ← Array.index_mut_usize s.levels 0#usize
+  let (ok1, ll1) ← level_put ll { key, seq := s.next_seq, tomb }
+  massert ok1
+  let i ← s.next_seq + 1#u64
+  let a := index_mut_back ll1
+  ok { levels := a, next_seq := i }
 
 /-- [pedra_aeneas_lsm_r1_kernel::lsm_compact]:
     Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 232:0-258:1

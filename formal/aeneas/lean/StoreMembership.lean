@@ -1,5 +1,5 @@
 -- Theorems over Aeneas extract of store membership_kernel.rs.
--- Charon --exclude elect_claim_banner (static-str bottoms).
+-- elect_claim_banner &'static str bottoms patched to toStr (clone of raft).
 import Aeneas
 import StoreMembershipKernel
 open Aeneas.Std Result
@@ -18,3 +18,17 @@ theorem joint_election_ok_as_is_dente :
   unfold joint_election_ok_as_is
   unfold majority_of
   rfl
+
+/-- RFC-0069 P2.2: bounded elect does not print live. -/
+theorem elect_claim_banner_bounded :
+    elect_claim_banner false false false =
+      ok (toStr "bounded-elect not-eventual") := by
+  unfold elect_claim_banner
+  unfold liveness_admitted
+  simp
+
+/-- AS-IS dente: banner is live without naming ES. -/
+theorem elect_claim_banner_as_is_dente :
+    elect_claim_banner_as_is false false false = ok (toStr "live") := by
+  unfold elect_claim_banner_as_is
+  simp
