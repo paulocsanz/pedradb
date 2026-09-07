@@ -2,7 +2,8 @@
 # Machine-check compact_kernel (RFC-0002 P13 / F27 / F28).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-store/verus/compact_kernel.rs"
+# RFC-0171 P0.3 / RFC-0174: prove the file rustc links (pair compact_unleft).
+SRC="$ROOT/crates/pedradb-store/src/compact_kernel.rs"
 if [[ -x "${VERUS:-}" ]]; then
   :
 elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then

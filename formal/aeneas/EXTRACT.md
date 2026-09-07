@@ -110,7 +110,7 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 |---|---|---|
 | `lookup` | `lookup_kernel.rs` | `snap_is_empty_zero` / `_as_is_dente` |
 | `rpc_mode` | `rpc_mode_kernel.rs` | `allow_direct_rpc_pin_refuses` / `_as_is_dente` |
-| `store_compact` | store `compact_kernel.rs` | `may_compact_through_zero_false` |
+| `store_compact` | store `compact_kernel.rs` | `may_compact_through_zero_false` (pair `compact_unleft` is single_artifact: production file is the Verus term) |
 | `snapshot` | `snapshot_kernel.rs` | `snapshot_touches_user_key_unreserved` |
 | `si` | `si_kernel.rs` | `si_reader_beats_c_live` |
 | `index_val` | `index_val_kernel.rs` | `value_len_tag_identity` / `_as_is_dente` |
