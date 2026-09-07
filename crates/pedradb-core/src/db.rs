@@ -647,11 +647,18 @@ pub fn read_cache_invalidate_needed(
     !(point_empty && count_empty && prefix_empty)
 }
 
-/// RFC-0180: 1-op async overwrite checks auto-flush every 32 seqs, not
-/// every put (physical-CF map walk on the Ok path).
+/// RFC-0180 P0.11 sampling (kept for tests). Production `commit_async_one`
+/// always calls `maybe_auto_flush_with` (P0.38) — that function already
+/// early-outs on an integer mem-size compare when under the limit.
 #[must_use]
 pub fn async_flush_check_due(seq: SequenceNumber) -> bool {
     seq & 31 == 0
+}
+
+/// RFC-0180 P0.38: over-limit memtables flush every Ok, not every 32 seqs.
+#[must_use]
+pub fn async_ok_flush_check_needed(mem_at_or_over_limit: bool, seq: SequenceNumber) -> bool {
+    mem_at_or_over_limit || async_flush_check_due(seq)
 }
 
 /// RFC-0180: async Ok must not write L0 (Rocks flushes on a background
@@ -10344,10 +10351,11 @@ impl<E: Env> Db<E> {
                 .fetch_add(t3.elapsed().as_nanos() as u64, Ordering::Relaxed);
         }
         let t4 = st.as_ref().map(|_| Instant::now());
-        if async_flush_check_due(seq) {
-            let _ = self
-                .maybe_auto_flush_with(async_ok_flush_is_stage_only() || self.defer_auto_compact);
-        }
+        // RFC-0180 P0.38: every Ok does the integer size check
+        // (`maybe_auto_flush_with` early-outs when under the limit).
+        // Sampling every 32 seqs overshot the write buffer by 31 ops.
+        let _ =
+            self.maybe_auto_flush_with(async_ok_flush_is_stage_only() || self.defer_auto_compact);
         if let (Some(st), Some(t4)) = (st.as_ref(), t4) {
             st.flush_check_ns
                 .fetch_add(t4.elapsed().as_nanos() as u64, Ordering::Relaxed);
@@ -13323,6 +13331,10 @@ mod tests {
         assert!(!async_flush_check_due(1));
         assert!(!async_flush_check_due(31));
         assert!(!async_flush_check_due(33));
+        assert!(async_ok_flush_check_needed(true, 1));
+        assert!(async_ok_flush_check_needed(true, 31));
+        assert!(!async_ok_flush_check_needed(false, 31));
+        assert!(async_ok_flush_check_needed(false, 32));
     }
 
     #[test]
