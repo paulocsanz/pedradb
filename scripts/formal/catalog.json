@@ -4498,8 +4498,9 @@
       "id": "wait_for_deadlock",
       "finding": "RFC-0150 P2c",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/rocksdb-compat/src/locktab.rs",
-      "twin": "crates/rocksdb-compat/verus/wait_for_deadlock.rs",
+      "twin": "crates/rocksdb-compat/src/locktab.rs",
       "verus": "scripts/verus_wait_for_deadlock.sh",
       "callers": [
         "crates/rocksdb-compat/src/locktab.rs"

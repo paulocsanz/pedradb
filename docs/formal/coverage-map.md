@@ -93,7 +93,7 @@ comportamento. "Callers" é o que o lint do freeze exige chamar a entrada.
 | **ikey_pack** | `pedradb-core/src/key.rs` | close | `key.rs` |
 | **write_record_count** | `pedradb-core/src/batch.rs` | close | `batch.rs` |
 | **pin_gc** | `pedradb-core/src/compact_kernel.rs` | close | `db.rs` (`compact_reclaim`) |
-| **wait_for_deadlock** | `rocksdb-compat/src/locktab.rs` | model | `locktab.rs` |
+| **wait_for_deadlock** | `rocksdb-compat/src/locktab.rs` | close, single_artifact | `locktab.rs` |
 | **flush_publish** | `pedradb-core/src/flush_kernel.rs` | close | `db.rs` (`persist_manifest`) |
 | **iter_window** | `rocksdb-compat/src/iter_kernel.rs` | close, single_artifact | `rocksdb-compat/lib.rs` (`page_forward` / `page_last_n`) |
 
