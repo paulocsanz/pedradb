@@ -1,7 +1,7 @@
 # RFC-0178 — Vitória >1× nas células restantes
 
 **Status:** in-progress
-**Updated:** 2026-09-06
+**Updated:** 2026-09-07
 **ID:** 0178
 **Parents:** [0177](0177-perdas-nomeadas-crescimento-linear.md) (mapa),
 [0161](0161-slipstream-scale-1p5x.md),
@@ -77,7 +77,9 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
 - [x] **P0.4** Overwrite/f_mc4: `ROCKS_PARITY_MC_FRESH=1` re-seed
       entre shapes mc; teste `rfc0178_mc_fresh_enabled_reads_env`.
       WARM passa a ser **por path** (compact rewrite não deixa SST
-      novo frio). Settle do scale é só `compact()` (já faz flush) —
+      novo frio). Settle do scale é só `compact()` (já faz flush).
+      Follow-up: `ConcurrentDb::flush` dropa o ReadGuard **antes**
+      de `note_warmed_ssts` (if-let no guard self-deadlockava) —
       status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
@@ -92,8 +94,8 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
 
 ### P2 — contrato de escala
 
-- [ ] **P2.1** Escada 1M/10M/25M/50M/100M com `mode=hot|bounded-cache`
-      na linha; proibido racionar os dois — status: `todo`
+- [x] **P2.1** Escada 1M/10M/25M/50M/100M com `mode=hot|bounded-cache`
+      na linha; proibido racionar os dois — status: `done`
 - [ ] **P2.2** 50M/100M na caixa 4 GiB **como bounded-cache** (ceiling
       de RAM, número publicado, não “linear”) — status: `todo`
 
@@ -109,7 +111,7 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
 | P1.2 | p1 | prefix 0,70× → ≥1× caixa | todo | — | 2026-09-06 |
 | P1.3 | p1 | overwrite isolado ≥1× caixa | todo | — | 2026-09-06 |
 | P1.4 | p1 | f_mc4 3/3 intra-run ≥1× | todo | — | 2026-09-06 |
-| P2.1 | p2 | Duas curvas na escada | todo | — | 2026-09-06 |
+| P2.1 | p2 | Duas curvas na escada | done | `ram_mode/pedradb` + `mode=` em settle/get_hit/prefix/get_loop; `rfc0178_ram_mode_label_two_states` | 2026-09-07 |
 | P2.2 | p2 | 50M/100M 4 GiB = bounded-cache | todo | — | 2026-09-06 |
 
 ## Acceptance Criteria

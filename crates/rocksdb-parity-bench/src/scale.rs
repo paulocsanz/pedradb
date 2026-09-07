@@ -157,6 +157,27 @@ pub trait ScaleStore {
         true
     }
     fn settle(&mut self) -> bool;
+    /// RFC-0178 P2.1: `hot` or `bounded-cache` after settle. Peers: None.
+    fn ram_mode(&self) -> Option<&'static str> {
+        None
+    }
+}
+
+/// RFC-0178 P2.1: map `pedra.ram-pressure` to the published regime name.
+#[must_use]
+pub fn ram_mode_label(pressure: u64) -> &'static str {
+    if pressure == 1 {
+        "bounded-cache"
+    } else {
+        "hot"
+    }
+}
+
+fn mode_suffix(store: &dyn ScaleStore) -> String {
+    match store.ram_mode() {
+        Some(m) => format!(" mode={m}"),
+        None => String::new(),
+    }
 }
 
 fn hydrate(store: &mut dyn ScaleStore, n: usize, pool: &[u8], vlen: usize) {
@@ -200,8 +221,9 @@ fn run_one(store: &mut dyn ScaleStore, dir: &Path, n: usize, vlen: usize, pool: 
     let settle_s = t1.elapsed().as_secs_f64();
     let settled = dir_size_bytes(dir);
     eprintln!(
-        "settle/{label}: {settle_s:.3}s; on disk after {:.2} GiB",
+        "settle/{label}: {settle_s:.3}s; on disk after {:.2} GiB{}",
         settled as f64 / (1u64 << 30) as f64,
+        mode_suffix(store),
     );
 
     let mut state = 0x0123_4567_89AB_CDEFu64;
@@ -239,8 +261,9 @@ fn run_one(store: &mut dyn ScaleStore, dir: &Path, n: usize, vlen: usize, pool: 
     }
     let cost_hit = pedradb_core::cost::read().since(&cost0);
     eprintln!(
-        "get_hit/{label}: mean {:.1}µs (n={GET_HIT_N})",
-        mean_us(&gets)
+        "get_hit/{label}: mean {:.1}µs (n={GET_HIT_N}){}",
+        mean_us(&gets),
+        mode_suffix(store),
     );
     if pedradb_core::cost::enabled() {
         let n_sst = dir_sst_count(dir);
@@ -265,8 +288,9 @@ fn run_one(store: &mut dyn ScaleStore, dir: &Path, n: usize, vlen: usize, pool: 
         std::hint::black_box(c);
     }
     eprintln!(
-        "prefix_scan/{label}: mean {:.1}µs (n={PREFIX_N}, prefix={prefix})",
-        mean_us(&pfx)
+        "prefix_scan/{label}: mean {:.1}µs (n={PREFIX_N}, prefix={prefix}){}",
+        mean_us(&pfx),
+        mode_suffix(store),
     );
 
     let mut lstate = 0xC0DE_BEEFu64;
@@ -284,8 +308,9 @@ fn run_one(store: &mut dyn ScaleStore, dir: &Path, n: usize, vlen: usize, pool: 
     }
     let cost_loop = pedradb_core::cost::read().since(&cost_loop0);
     eprintln!(
-        "lookup_100/{label}_get_loop: mean {:.1}µs (n={LOOKUP_N})",
-        mean_us(&loops)
+        "lookup_100/{label}_get_loop: mean {:.1}µs (n={LOOKUP_N}){}",
+        mean_us(&loops),
+        mode_suffix(store),
     );
     if pedradb_core::cost::enabled() {
         eprintln!(
@@ -303,6 +328,7 @@ fn run_one(store: &mut dyn ScaleStore, dir: &Path, n: usize, vlen: usize, pool: 
 
 struct PedraScale {
     db: rocksdb_compat::DB,
+    ram_mode: Option<&'static str>,
 }
 
 impl PedraScale {
@@ -314,7 +340,7 @@ impl PedraScale {
             opts.set_block_cache(&rocksdb_compat::Cache::new_lru_cache(b as usize));
         }
         let db = rocksdb_compat::DB::open(&opts, path).expect("pedra open");
-        Self { db }
+        Self { db, ram_mode: None }
     }
 }
 
@@ -386,33 +412,42 @@ impl ScaleStore for PedraScale {
             compact_ns as f64 / 1e9,
             warm_ns as f64 / 1e9,
         );
-        if let Ok(Some(1)) = self
+        let pressure = self
             .db
             .property_int_value(rocksdb_compat::properties::PEDRA_RAM_PRESSURE)
-        {
-            let sst = self
-                .db
-                .property_int_value(rocksdb_compat::properties::LIVE_SST_FILES_SIZE)
-                .ok()
-                .flatten()
-                .unwrap_or(0);
-            let cap = self
-                .db
-                .property_int_value(rocksdb_compat::properties::PEDRA_RAM_CEILING_BYTES)
-                .ok()
-                .flatten()
-                .unwrap_or(0);
-            let skip = self
-                .db
-                .property_int_value(rocksdb_compat::properties::PEDRA_RAM_WARM_SKIPPED)
-                .ok()
-                .flatten()
-                .unwrap_or(0);
+            .ok()
+            .flatten()
+            .unwrap_or(0);
+        self.ram_mode = Some(ram_mode_label(pressure));
+        let sst = self
+            .db
+            .property_int_value(rocksdb_compat::properties::LIVE_SST_FILES_SIZE)
+            .ok()
+            .flatten()
+            .unwrap_or(0);
+        let cap = self
+            .db
+            .property_int_value(rocksdb_compat::properties::PEDRA_RAM_CEILING_BYTES)
+            .ok()
+            .flatten()
+            .unwrap_or(0);
+        let skip = self
+            .db
+            .property_int_value(rocksdb_compat::properties::PEDRA_RAM_WARM_SKIPPED)
+            .ok()
+            .flatten()
+            .unwrap_or(0);
+        let mode = self.ram_mode.unwrap_or("hot");
+        eprintln!("ram_mode/pedradb: mode={mode} sst_bytes={sst} cap={cap} warm_skipped={skip}");
+        if pressure == 1 {
             eprintln!(
                 "ram_pressure/pedradb: sst_bytes={sst} cap={cap} warm_skipped={skip} mode=bounded-cache (page cache dropped; grow RAM/cgroup)"
             );
         }
         ok
+    }
+    fn ram_mode(&self) -> Option<&'static str> {
+        self.ram_mode
     }
 }
 
@@ -604,6 +639,13 @@ mod tests {
     }
 
     #[test]
+    fn rfc0178_ram_mode_label_two_states() {
+        assert_eq!(ram_mode_label(0), "hot");
+        assert_eq!(ram_mode_label(1), "bounded-cache");
+        assert_eq!(ram_mode_label(2), "hot");
+    }
+
+    #[test]
     fn pedra_tiny_hydrate_roundtrip() {
         let dir = TempDir::new().unwrap();
         let mut s = PedraScale::open(dir.path());
@@ -614,5 +656,6 @@ mod tests {
         assert!(s.get(miss_key(0).as_bytes()).is_none());
         assert!(s.prefix_count(b"route.svc-000000.") > 0);
         assert!(s.settle());
+        assert_eq!(s.ram_mode(), Some("hot"));
     }
 }
