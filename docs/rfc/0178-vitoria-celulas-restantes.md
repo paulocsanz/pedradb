@@ -23,7 +23,7 @@ Células que o utilizador mandou fechar, com o facto (não o slogan):
 | célula | número hoje | o que é de verdade |
 |---|---|---|
 | prefix perna bloom | **0,70×** slipstream 100M (577 vs 404 µs) | mesma perna do bloom 10 bpk; Pedra 459/577/627 µs (variância); **caixa 4 GiB**, bounded-cache |
-| prefix 25M→100M | **67 → 125 µs** same-harness | janela **fixa** 1000 chaves (`ROUTES_PER_SERVICE`); 2× mais lento a 4× n. 100M **sem** WARM (cap era 3 GiB). Fjall já ~125 µs @25M |
+| prefix 25M→100M | **65.5 → 65.1 µs** (P0.10, 50M→100M) | Era 67→125 skip-WARM. Same-CLI `pedra scale` Darwin flat. 4 GiB 0,70× continua P1.2 |
 | get_loop 50M→100M | **432 → 427 µs** (P0.9 r9) | Era 5,39 ms skip-WARM / ~2 ms com WARM+`stats()` walk. r9: settle deixa de clonar 100M valores; pread 16→1,4 µs/file. Darwin 1-run, não vs Rocks, não 4 GiB |
 | ycsb_f_mc4 run2 | intra-run **0,766×**; mediana **PASS 1,473×** | Rocks spikeou 90,3 kqps; Pedra estável 66–69 k. Não é Pedra a piorar |
 | probe_miss | **0,27×** pós-bloom; skip tombstone **sem** 3-run | O(ficheiros) vazio já saiu (0167). Razão publicável continua 0,27× até a caixa |
@@ -110,9 +110,11 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
       `rfc0178_stats_without_vlog_skips_sst_value_walk` /
       `rfc0178_stats_with_vlog_still_counts_live_bytes`.
       status: `done`
-- [ ] **P0.10** DIAG via `pedra scale` (não o binário cru). 50M+100M
-      neste host. Teste `rfc0178_pedra_scale_parses_entries_and_dir`.
-      status: `doing`
+- [x] **P0.10** DIAG via `pedra scale` (não o binário cru). 50M+100M
+      Darwin same-boot: get_loop **403 / 405 µs**, prefix **65.5 /
+      65.1 µs**, settle **0.87 / 1.74 s**, `mode=hot`. Teste
+      `rfc0178_pedra_scale_parses_entries_and_dir`. Não vs Rocks,
+      não 4 GiB. status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
 
@@ -128,8 +130,8 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
 
 - [x] **P2.1** Escada 1M/10M/25M/50M/100M com `mode=hot|bounded-cache`
       na linha; proibido racionar os dois — status: `done`
-      (DIAG 100M Darwin: `mode=hot` imprimiu; get_loop **5,46 ms**
-      cliff **não** fechou. `findings/2026-09-07-rfc0178-p21-100m/`)
+      (`pedra scale` 50M/100M Darwin: `mode=hot`; get_loop **403/405 µs**
+      flat. `findings/2026-09-07-rfc0178-p010-pedra-scale/`)
 - [ ] **P2.2** 50M/100M na caixa 4 GiB **como bounded-cache** (ceiling
       de RAM, número publicado, não “linear”) — status: `todo`
 
@@ -146,12 +148,12 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
 | P0.7 | p0 | Drop compact_gate during job.write | done | r5 settle 101.6 s / get_loop 7.18 ms | 2026-09-07 |
 | P0.8 | p0 | compact_no_flush after hydrate | done | skip 2nd flush; no discard-delete; r8 compact=1.745s | 2026-09-07 |
 | P0.9 | p0 | stats() skip SST walk without vlog | done | r9 settle 1.743s / get_loop 427µs (flat vs 50M) | 2026-09-07 |
-| P0.10 | p0 | DIAG via `pedra scale` | doing | bin `pedra scale`; 50M+100M a seguir | 2026-09-07 |
+| P0.10 | p0 | DIAG via `pedra scale` | done | 50M/100M get_loop 403/405µs prefix 65.5/65.1µs | 2026-09-07 |
 | P1.1 | p1 | probe_miss ≥1× 3-run caixa | todo | — | 2026-09-06 |
 | P1.2 | p1 | prefix 0,70× → ≥1× caixa | todo | — | 2026-09-06 |
 | P1.3 | p1 | overwrite isolado ≥1× caixa | todo | — | 2026-09-06 |
 | P1.4 | p1 | f_mc4 3/3 intra-run ≥1× | todo | — | 2026-09-06 |
-| P2.1 | p2 | Duas curvas na escada | done | `mode=hot` @100M Darwin; get_loop 5,46 ms cliff fica; `findings/2026-09-07-rfc0178-p21-100m/` | 2026-09-07 |
+| P2.1 | p2 | Duas curvas na escada | done | `pedra scale` 50M/100M mode=hot; get_loop 403/405µs | 2026-09-07 |
 | P2.2 | p2 | 50M/100M 4 GiB = bounded-cache | todo | — | 2026-09-06 |
 
 ## Acceptance Criteria
