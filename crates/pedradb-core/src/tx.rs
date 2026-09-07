@@ -163,8 +163,9 @@ impl<'db, E: crate::env::Env> Transaction<'db, E> {
         let last_seq = records.last().map_or(0, |o| o.sequence);
         match self.db.commit_ops_with(records, durability) {
             Ok(()) => {
-                // F18: TX is durable after commit_ops; auto-flush must not fail the commit.
-                self.db.maybe_auto_flush_best_effort();
+                // F18: auto-flush must not fail the commit. Async TX parks
+                // (RFC-0184 P0.7); G1 may still write L0.
+                self.db.flush_after_commit_opts(&durability);
                 self.finished = true;
                 Ok(last_seq)
             }
