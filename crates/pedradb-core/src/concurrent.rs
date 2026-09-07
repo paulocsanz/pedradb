@@ -3027,7 +3027,10 @@ impl<E: Env> ConcurrentDb<E> {
             eprintln!("compact_write_lock_wait={wait_s:.3}s");
         }
         g.clear_warmed_ssts();
-        g.compact_leveled()
+        let t_lev = std::time::Instant::now();
+        let r = g.compact_leveled();
+        eprintln!("compact_leveled_wall={:.3}s", t_lev.elapsed().as_secs_f64());
+        r
     }
 
     /// Compact only SSTs of `cf` (RFC-0065 P0.2). Flushes first so mem keys
