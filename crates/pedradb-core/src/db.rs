@@ -6553,10 +6553,25 @@ impl<E: Env> Db<E> {
         files: Vec<(SstTable, u64)>,
         levels: &[u32],
     ) -> Result<()> {
+        self.admit_sst_ram(&files)?;
         // In-memory only. MANIFEST + SST `fdatasync` wait for WAL rotate so a
         // write burst is not charged one extra fd per 64 MiB flush (RFC-0041).
         let _undo = self.apply_sst_installs(files, levels);
         self.retire_flush_pin();
+        Ok(())
+    }
+
+    /// Fail closed if index+bloom of `files` would push engine RSS past
+    /// the cgroup / `PEDRA_RAM_BUDGET_BYTES` cap (SIGKILL otherwise).
+    pub(crate) fn admit_sst_ram(&self, files: &[(SstTable, u64)]) -> Result<()> {
+        let Some(cap) = crate::env::engine_ram_cap_bytes() else {
+            return Ok(());
+        };
+        let need: usize = files.iter().map(|(t, _)| t.metadata_memory_bytes()).sum();
+        let used = self.hydrate_resident_bytes();
+        if used.saturating_add(need) > cap {
+            return Err(CoreError::RamBudget { used, need, cap });
+        }
         Ok(())
     }
 
@@ -6698,7 +6713,7 @@ impl<E: Env> Db<E> {
     pub fn hydrate_resident_bytes(&self) -> usize {
         self.bulk_live_bytes()
             .saturating_add(self.sst_payload_pool.resident_bytes() as usize)
-            .saturating_add(self.sst_index_bytes())
+            .saturating_add(self.ssts.iter().map(SstTable::metadata_memory_bytes).sum())
             .saturating_add(self.mem.approx_memory_usage())
             .saturating_add(
                 self.imm
@@ -10227,6 +10242,9 @@ impl<E: Env> Db<E> {
 
     /// Fence then return `e` (explicit flush / compact I/O — RFC-0050 P0.3).
     fn fence_io_err(&mut self, e: CoreError) -> CoreError {
+        if matches!(e, CoreError::RamBudget { .. }) {
+            return e;
+        }
         self.fence_durability(&e, FenceClass::of_core(&e));
         e
     }
@@ -12769,6 +12787,32 @@ mod tests {
     fn rfc0168_warm_cap_at_least_10m_floor() {
         std::env::remove_var("PEDRA_SETTLE_WARM_MAX_BYTES");
         assert!(crate::env::settle_warm_max_bytes() >= crate::env::DEFAULT_SETTLE_WARM_MAX_BYTES);
+    }
+
+    /// Engine RSS cap: installing SSTs past `PEDRA_RAM_BUDGET_BYTES` is
+    /// `RamBudget`, not SIGKILL.
+    #[test]
+    fn rfc0168_ram_budget_refuses_sst_install() {
+        std::env::set_var("PEDRA_RAM_BUDGET_BYTES", "1");
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(4 * 1024),
+                ..OpenOptions::default()
+            },
+        )
+        .expect("open must succeed under a small budget (no SSTs yet)");
+        for i in 0..256u32 {
+            db.put(format!("k{i:04}").as_bytes(), vec![b'v'; 64])
+                .unwrap();
+        }
+        let err = db.flush().expect_err("flush must hit ram budget");
+        std::env::remove_var("PEDRA_RAM_BUDGET_BYTES");
+        assert!(matches!(err, CoreError::RamBudget { .. }), "got {err:?}");
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// RFC-0157 P1.4 — db.rs stage 1: golden-fingerprint characterization
