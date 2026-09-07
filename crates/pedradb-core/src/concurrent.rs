@@ -2481,11 +2481,13 @@ impl<E: Env> ConcurrentDb<E> {
         // RFC-0168: populate the get fd during flush (hydrate timer in the
         // scale harness) so get_hit stays RAM-speed while the store fits
         // in RAM, and settle's compact_leveled does not re-read.
-        if let Some(plan) = self.inner.read().take_warm_plan() {
-            let warmed = plan.run();
-            if !warmed.is_empty() {
-                self.inner.write().note_warmed_ssts(&warmed);
-            }
+        // `if let Some(plan) = self.inner.read().take_warm_plan()` keeps the
+        // temporary ReadGuard alive for the whole block; `inner.write()` then
+        // self-deadlocks (parking_lot RwLock is not reentrant).
+        let plan = self.inner.read().take_warm_plan();
+        let warmed = plan.map(crate::env::WarmPlan::run).unwrap_or_default();
+        if !warmed.is_empty() {
+            self.inner.write().note_warmed_ssts(&warmed);
         }
         Ok(())
     }
