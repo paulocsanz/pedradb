@@ -15,15 +15,27 @@ set_option maxRecDepth 2048
 namespace pedra_aeneas_posix_kernel
 
 /-- [pedra_aeneas_posix_kernel::fdatasync_rc_ok]:
-    Source: '/tmp/pedra-posix-head/lib.rs', lines 37:0-39:1
+    Source: '../../../crates/pedradb-posix/src/lib.rs', lines 37:0-39:1
     Visibility: public -/
 def fdatasync_rc_ok (rc : Std.I32) : Result Bool := do
   ok (rc = 0#i32)
 
 /-- [pedra_aeneas_posix_kernel::fdatasync_rc_ok_as_is]:
-    Source: '/tmp/pedra-posix-head/lib.rs', lines 43:0-45:1
+    Source: '../../../crates/pedradb-posix/src/lib.rs', lines 43:0-45:1
     Visibility: public -/
 def fdatasync_rc_ok_as_is (_rc : Std.I32) : Result Bool := do
+  ok true
+
+/-- [pedra_aeneas_posix_kernel::fdatasync_eintr_retry_admitted]:
+    Source: '../../../crates/pedradb-posix/src/lib.rs', lines 51:0-53:1
+    Visibility: public -/
+def fdatasync_eintr_retry_admitted : Result Bool := do
+  ok false
+
+/-- [pedra_aeneas_posix_kernel::fdatasync_eintr_retry_admitted_as_is]:
+    Source: '../../../crates/pedradb-posix/src/lib.rs', lines 57:0-59:1
+    Visibility: public -/
+def fdatasync_eintr_retry_admitted_as_is : Result Bool := do
   ok true
 
 end pedra_aeneas_posix_kernel

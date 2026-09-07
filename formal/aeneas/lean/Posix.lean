@@ -1,5 +1,5 @@
 -- Theorems over Aeneas extract of pedradb-posix (RFC-0073).
--- Charon --start-from fdatasync_rc_ok (rest of lib.rs is syscall/unsafe).
+-- Charon --start-from fdatasync_rc_ok + EINTR retry (rest is syscall/unsafe).
 import Aeneas
 import PosixKernel
 open Aeneas.Std Result
@@ -21,4 +21,16 @@ theorem fdatasync_rc_ok_nonzero :
 theorem fdatasync_rc_ok_as_is_dente :
     fdatasync_rc_ok_as_is (5#i32) = ok true := by
   unfold fdatasync_rc_ok_as_is
+  rfl
+
+/-- RFC-0073 P2.2 / RFC-0015 H1: EINTR is not retried as Ok. -/
+theorem fdatasync_eintr_retry_admitted_false :
+    fdatasync_eintr_retry_admitted = ok false := by
+  unfold fdatasync_eintr_retry_admitted
+  rfl
+
+/-- AS-IS dente: EINTR is swallowed. -/
+theorem fdatasync_eintr_retry_admitted_as_is_dente :
+    fdatasync_eintr_retry_admitted_as_is = ok true := by
+  unfold fdatasync_eintr_retry_admitted_as_is
   rfl
