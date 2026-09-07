@@ -378,7 +378,7 @@ impl ScaleStore for PedraScale {
                 .flatten()
                 .unwrap_or(0);
             eprintln!(
-                "ram_pressure/pedradb: sst_bytes={sst} cap={cap} warm_skipped={skip} (random gets disk-bound; grow RAM/cgroup)"
+                "ram_pressure/pedradb: sst_bytes={sst} cap={cap} warm_skipped={skip} mode=bounded-cache (page cache dropped; grow RAM/cgroup)"
             );
         }
         ok
