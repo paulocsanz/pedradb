@@ -26,6 +26,24 @@ axiom Shared1A.Insts.CoreCmpPartialOrdShared0B.lt
   {A : Type} {B : Type} (PartialOrdInst : core.cmp.PartialOrd A B) :
   A → B → Result Bool
 
+/-- [core::cmp::impls::{impl core::cmp::PartialOrd<&'_0 B> for &'_1 A}::le]:
+    Source: '/rustc/library/core/src/cmp.rs', lines 2145:8-2145:40
+    Name pattern: [core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::le]
+    Visibility: public -/
+@[rust_fun "core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::le"]
+axiom Shared1A.Insts.CoreCmpPartialOrdShared0B.le
+  {A : Type} {B : Type} (PartialOrdInst : core.cmp.PartialOrd A B) :
+  A → B → Result Bool
+
+/-- [core::cmp::impls::{impl core::cmp::PartialOrd<&'_0 B> for &'_1 A}::gt]:
+    Source: '/rustc/library/core/src/cmp.rs', lines 2149:8-2149:40
+    Name pattern: [core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::gt]
+    Visibility: public -/
+@[rust_fun "core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::gt"]
+axiom Shared1A.Insts.CoreCmpPartialOrdShared0B.gt
+  {A : Type} {B : Type} (PartialOrdInst : core.cmp.PartialOrd A B) :
+  A → B → Result Bool
+
 /-- [core::cmp::impls::{impl core::cmp::PartialOrd<&'_0 B> for &'_1 A}::ge]:
     Source: '/rustc/library/core/src/cmp.rs', lines 2153:8-2153:40
     Name pattern: [core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::ge]
@@ -34,6 +52,16 @@ axiom Shared1A.Insts.CoreCmpPartialOrdShared0B.lt
 axiom Shared1A.Insts.CoreCmpPartialOrdShared0B.ge
   {A : Type} {B : Type} (PartialOrdInst : core.cmp.PartialOrd A B) :
   A → B → Result Bool
+
+/-- [core::ops::range::Bound]
+    Source: '/rustc/library/core/src/ops/range.rs', lines 692:0-692:17
+    Name pattern: [core::ops::range::Bound]
+    Visibility: public -/
+@[discriminant isize, rust_type "core::ops::range::Bound"]
+inductive core.ops.range.Bound (T : Type) where
+| Included : T → core.ops.range.Bound T
+| Excluded : T → core.ops.range.Bound T
+| Unbounded : core.ops.range.Bound T
 
 /-- Trait implementation: [core::slice::cmp::{impl core::cmp::PartialEq<[U]> for [T]}]
     Source: '/rustc/library/core/src/slice/cmp.rs', lines 14:0-16:28
@@ -50,6 +78,24 @@ def Slice.Insts.CoreCmpPartialEqSlice {T : Type} {U : Type} (cmpPartialEqInst :
     Visibility: public -/
 @[rust_fun "core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::ge"]
 axiom Slice.Insts.CoreCmpPartialOrdSlice.ge
+  {T : Type} (cmpPartialOrdInst : core.cmp.PartialOrd T T) :
+  Slice T → Slice T → Result Bool
+
+/-- [core::slice::cmp::{impl core::cmp::PartialOrd<[T]> for [T]}::gt]:
+    Source: '/rustc/library/core/src/slice/cmp.rs', lines 80:4-80:38
+    Name pattern: [core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::gt]
+    Visibility: public -/
+@[rust_fun "core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::gt"]
+axiom Slice.Insts.CoreCmpPartialOrdSlice.gt
+  {T : Type} (cmpPartialOrdInst : core.cmp.PartialOrd T T) :
+  Slice T → Slice T → Result Bool
+
+/-- [core::slice::cmp::{impl core::cmp::PartialOrd<[T]> for [T]}::le]:
+    Source: '/rustc/library/core/src/slice/cmp.rs', lines 76:4-76:38
+    Name pattern: [core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::le]
+    Visibility: public -/
+@[rust_fun "core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::le"]
+axiom Slice.Insts.CoreCmpPartialOrdSlice.le
   {T : Type} (cmpPartialOrdInst : core.cmp.PartialOrd T T) :
   Slice T → Slice T → Result Bool
 
@@ -83,6 +129,8 @@ def Slice.Insts.CoreCmpPartialOrdSlice {T : Type} (cmpPartialOrdInst :
   partial_cmp := Slice.Insts.CoreCmpPartialOrdSlice.partial_cmp
     cmpPartialOrdInst
   lt := Slice.Insts.CoreCmpPartialOrdSlice.lt cmpPartialOrdInst
+  le := Slice.Insts.CoreCmpPartialOrdSlice.le cmpPartialOrdInst
+  gt := Slice.Insts.CoreCmpPartialOrdSlice.gt cmpPartialOrdInst
   ge := Slice.Insts.CoreCmpPartialOrdSlice.ge cmpPartialOrdInst
 }
 
@@ -136,5 +184,51 @@ def merge.visible_at
 def merge.visible_at_as_is
   (_kind : key.ValueType) (_range_hidden : Bool) : Result Bool := do
   ok true
+
+/-- [pedra_aeneas_merge_kernel::merge::user_key_in_range]:
+    Source: 'src/../../../../crates/pedradb-core/src/merge.rs', lines 131:0-143:1
+    Visibility: public -/
+def merge.user_key_in_range
+  (user_key : Slice Std.U8) (start : core.ops.range.Bound (Slice Std.U8))
+  (end1 : core.ops.range.Bound (Slice Std.U8)) :
+  Result Bool
+  := do
+  let after_start ←
+    match start with
+    | core.ops.range.Bound.Included s =>
+      Shared1A.Insts.CoreCmpPartialOrdShared0B.ge
+        (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) user_key s
+    | core.ops.range.Bound.Excluded s =>
+      Shared1A.Insts.CoreCmpPartialOrdShared0B.gt
+        (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) user_key s
+    | core.ops.range.Bound.Unbounded => ok true
+  let before_end ←
+    match end1 with
+    | core.ops.range.Bound.Included e =>
+      Shared1A.Insts.CoreCmpPartialOrdShared0B.le
+        (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) user_key e
+    | core.ops.range.Bound.Excluded e =>
+      Shared1A.Insts.CoreCmpPartialOrdShared0B.lt
+        (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) user_key e
+    | core.ops.range.Bound.Unbounded => ok true
+  if after_start
+  then ok before_end
+  else ok false
+
+/-- [pedra_aeneas_merge_kernel::merge::past_end]:
+    Source: 'src/../../../../crates/pedradb-core/src/merge.rs', lines 148:0-154:1
+    Visibility: public -/
+def merge.past_end
+  (user_key : Slice Std.U8) (end1 : core.ops.range.Bound (Slice Std.U8)) :
+  Result Bool
+  := do
+  match end1 with
+  | core.ops.range.Bound.Included e =>
+    Shared1A.Insts.CoreCmpPartialOrdShared0B.gt
+      (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) user_key e
+  | core.ops.range.Bound.Excluded e =>
+    Shared1A.Insts.CoreCmpPartialOrdShared0B.ge
+      (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) user_key e
+  | core.ops.range.Bound.Unbounded => ok false
 
 end pedra_aeneas_merge_kernel

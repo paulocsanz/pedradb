@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Extract production merge.rs catalog entries (visible_at).
-# Charon --start-from: WindowKvIter / StreamingVisibleIter are Iterator-refused.
+# Extract production merge.rs catalog entries (visible_at) plus
+# user_key_in_range / past_end. WindowKvIter / StreamingVisibleIter stay
+# Iterator-refused.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CRATE="$ROOT/formal/aeneas/merge-kernel"
@@ -24,6 +25,8 @@ echo "      charon=$CHARON"
     --start-from 'crate::merge::visible_at_as_is' \
     --start-from 'crate::merge::range_tombstone_covers' \
     --start-from 'crate::merge::range_tombstone_covers_as_is' \
+    --start-from 'crate::merge::user_key_in_range' \
+    --start-from 'crate::merge::past_end' \
     --dest-file "$OUT/merge_kernel.llbc" )
 "$AENEAS" -backend lean -dest "$OUT/lean" "$OUT/merge_kernel.llbc"
 {
