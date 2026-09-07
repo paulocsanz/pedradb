@@ -2406,7 +2406,12 @@ impl<E: Env> ConcurrentDb<E> {
     /// # Errors
     /// I/O.
     pub fn flush(&self) -> Result<()> {
+        let t_lock = std::time::Instant::now();
         let _flush = self.flush_lock.lock();
+        let lock_s = t_lock.elapsed().as_secs_f64();
+        if lock_s > 0.05 {
+            eprintln!("flush_lock_wait={lock_s:.3}s");
+        }
         while self.materialize_bulk_holding_flush() {}
         let persist = {
             let mut g = self.inner.write();
@@ -2998,11 +3003,23 @@ impl<E: Env> ConcurrentDb<E> {
     /// SST / MANIFEST I/O.
     pub fn compact(&self) -> Result<()> {
         self.flush()?;
-        // RFC-0178: hydrate flush already noted those paths. The host
-        // compact worker may then hold `compact_gate` for ~85 s @100M.
-        // Path-skip would leave settle's maybe_warm a no-op and random
-        // get disk-pread. Clear so compact_leveled WARMs the live set
-        // immediately before Ok (the 50M recipe).
+        self.compact_after_flush()
+    }
+
+    /// Leveled drain + settle WARM without a second flush.
+    ///
+    /// Scale `finish_hydrate` already flushed; `compact()`'s extra
+    /// `flush()` waited on `flush_lock` (~90 s @100M, compact_ns 0.001).
+    ///
+    /// # Errors
+    /// SST / MANIFEST I/O.
+    pub fn compact_skip_flush(&self) -> Result<()> {
+        self.compact_after_flush()
+    }
+
+    fn compact_after_flush(&self) -> Result<()> {
+        // RFC-0178: hydrate flush already noted those paths. Clear so
+        // compact_leveled WARMs the live set immediately before Ok.
         let mut g = self.inner.write();
         g.clear_warmed_ssts();
         g.compact_leveled()
