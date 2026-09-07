@@ -95,3 +95,45 @@ theorem as_is_serialized_aborts_same_group_writer :
     occ_conflict (10#u64) (10#u64) true = ok false ∧
       occ_conflict_as_is_serialized (10#u64) (10#u64) (1#u64) true = ok true := by
   constructor <;> rfl
+
+/-- ConcurrentDb `claim_lock_interleavings_proven` unfolds this: not a ∀π. -/
+theorem lock_interleavings_not_a_theorem :
+    lock_interleavings_admitted = ok false := by
+  unfold lock_interleavings_admitted
+  rfl
+
+/-- AS-IS dente: a green publish is rounded to ∀ lock schedules. -/
+theorem lock_interleavings_as_is_dente :
+    lock_interleavings_admitted_as_is = ok true := by
+  unfold lock_interleavings_admitted_as_is
+  rfl
+
+/-- ConcurrentDb publish gate: WAL I/O fail does not publish. -/
+theorem may_publish_group_needs_wal_ok :
+    may_publish_group false = ok false := by
+  unfold may_publish_group
+  rfl
+
+/-- AS-IS dente: publish even if WAL I/O failed. -/
+theorem may_publish_group_as_is_dente :
+    may_publish_group_as_is false = ok true := by
+  unfold may_publish_group_as_is
+  rfl
+
+/-- PCT depth 2 is not ∀ OS schedules of ConcurrentDb. -/
+theorem forall_schedules_pct2_not_admitted :
+    forall_schedules_admitted (2#u64) = ok false := by
+  unfold forall_schedules_admitted
+  rfl
+
+/-- AS-IS dente: d≥2 is rounded to forall. -/
+theorem forall_schedules_as_is_dente :
+    forall_schedules_admitted_as_is (2#u64) = ok true := by
+  unfold forall_schedules_admitted_as_is
+  rfl
+
+/-- ConcurrentDb lone_commit first-committer-wins: empty window never conflicts. -/
+theorem concurrent_occ_empty_window :
+    occ_conflict (10#u64) (10#u64) true = ok false := by
+  unfold occ_conflict
+  rfl

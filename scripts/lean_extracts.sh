@@ -24,7 +24,7 @@ LIBS=(
   Lookup RpcMode StoreCompact Snapshot Si IndexVal Changelog
   Cursor Cl Children Pin Pack Ship Fold Manifest Compact VlogGc TxGlue
   L28 Tcg Cqe Iter Properties Scale DiskPressure Crc
-  EnvCrash WalState D1Modelo WriteAck
+  EnvCrash WalState D1Modelo WriteAck GroupCommit
   DcsApply StoreApply StoreCommit StoreAeAck StoreVote Key
   Lease Txn T1Modelo Membership StoreMembership C1Modelo
   CapiHandles Batch Merge FailClosed ProbeOrder Locktab Scan Cf Fields LsmR1

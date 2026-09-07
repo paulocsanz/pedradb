@@ -154,7 +154,7 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 | `batch` | `batch.rs` | `write_record_count_ok_prefix` / `_as_is_dente` (shim `#[path]` key.rs; `--start-from write_record_count_ok`; decode is early-return-in-loop) |
 | `merge` | `merge.rs` | `visible_at_deletion` / `_as_is_dente` / `user_key_in_range_unbounded` / `past_end_unbounded` / `iter_window_keep_hidden` (shim `#[path]` key+compact; `--start-from` visible_at + range + window bounds + keep; WindowKvIter is Iterator) |
 | `fail_closed` | `fail_closed.rs` | `parse_error_writes_status_true` / `reject_transfer_encoding_true` / `present_bad_int_is_error_true` / `parse_error_status_400` / `header_break_len_below_four` (`--start-from` F102 + F104/F105/F157/F158 + header_break + Expect; Windows `position` and Split clauseInst/`all`/`any` patched) |
-| `probe_order` | `probe_order_kernel.rs` | `first_probe_on_equal_lo_newer` / `_as_is_dente` (`--start-from first_probe_on_equal_lo`; walk is Iterator) |
+| `probe_order` | `probe_order_kernel.rs` | `first_probe_on_equal_lo_newer` / `covering_hi_ge_oob` / `probe_order_covering_is_loop` (index walk; covering loop body patched) |
 | `locktab` | `locktab.rs` | `wait_for_deadlock_is_loop` / `_as_is_dente` (`--start-from wait_for_deadlock`; `--exclude LockTable` nested borrows; HashMap/HashSet stay axioms) |
 | `scan` | `sst/scan_kernel.rs` | `sst_crc_fate_modern_mismatch` / `scan_reads_file_none_smallest` / `zero_glue_admitted_false` / `tombstone_reaches_window_as_is_dente` (shim `#[path]` crc; `--start-from` catalog entries including model as_is; closure `call_mut` patched to `tombstone_reaches_window`) |
 | `cf` | `cf_kernel.rs` | `key_in_cf_family_as_is_dente` / `cf_encode_effective_is_if` / `infer_sst_cf_none_none` (`--start-from` catalog entries; `cf_encode_effective`/`decode_cf_key` patched over lifetime bottoms) |
@@ -177,18 +177,11 @@ Not silent close-kernel **files** (`l28.rs` and `probe_order_kernel.rs` stay enr
 
 **No production `fn`.** Close pairs `l28_tcp_add` / `l28_tcp_cnew` / `l28_tcp_svget` / `l28_tcp_newget` / `l28_tcp_jleft` / `l28_tcp_caught` / `l28_tcp_grown` name `l28_tcp_*_ok` on enrolled `crates/pedradb-store/src/l28.rs`. Those `fn`s are not in the live file (TCP kernels end at `l28_tcp_pj_ok`). `git log -S l28_tcp_add_ok -- crates/pedradb-store/src/l28.rs` is empty; the names landed in `36d4f685` on catalog / `verified.rs` / `docs/status.md` only. Verus twin, DST plant `l28_real_tcp_add_member_joint_cnew`, `cluster_real --add-member`, and handlers `tcp_node_disk_added_joint` / `tcp_node_disk_caught_up` are also absent. RFC-0119 itself has no P2.3. Not a Charon refuse: there is nothing to extract. Do not invent identity gates to please the catalog.
 
-**Iterator CFailure (pin Charon 0.1.232 / Aeneas daa85d7).** Model pair `probe_order_covering` is a live `pub(crate) fn` (`filter` + `by_lo.iter().position`, returns `impl Iterator`). Measured:
+**Iterator CFailure is not a refuse of the covering decision.** Production `probe_order_covering` is now an index `while` returning `Vec` (same keep-rule as the old `filter`+`position` walk; Isolated method). Aeneas still holes the nested `Vec.push` loop (`Could not match the contexts`); `aeneas_probe_order.sh` patches that body to `probe_order_covering_loop` so the catalog entry is a Lean `def`. Theorems: `covering_hi_ge_oob`, `probe_order_covering_is_loop` / `_as_is_is_loop`. `probe_order_covering_as_is` is the oldest-first reverse-index walk (production `fn`, not invented). Unpacked `probe_order` (`filter.collect`) is still the Iterator form — covering is the engine-facing packed image.
 
-| probe | result |
-|---|---|
-| `--start-from crate::probe_order_covering` | Charon 0; Aeneas CFailure `iterator.rs:42`; no `.lean` |
-| `--opaque core::iter::traits::iterator::Iterator` | same CFailure |
-| `--exclude Iterator::{filter,position,copied,map,collect}` | Aeneas exit 1; **partial** file; covering body ignored at kernel.rs:66 (`filter`); leftover `axiom probe_order_covering` returning `Filter (Copied (Iter))` |
-| `--start-from crate::probe_order` (Vec `filter.collect`) | same CFailure `iterator.rs:42` |
+**ConcurrentDb is on the proof path.** `concurrent.rs` is glue (`RwLock` / `Env`); the write-group decisions it calls are `group_commit_kernel` (OCC `occ_conflict` / `group_validate`, publish `may_publish_group`, lock-schedule residual `lock_interleavings_admitted`, PCT `forall_schedules_admitted`). Lean: `lock_interleavings_not_a_theorem` (`ok false` — that is the theorem, not “out of scope”), `may_publish_group_needs_wal_ok`, `forall_schedules_pct2_not_admitted`, plus the existing `occ_conflict` closed form / group simultaneity. `ConcurrentDb::claim_lock_interleavings_proven` unfolds `lock_interleavings_admitted`. Glue around the lock stays TCB until more of the group protocol is a named kernel.
 
-Partial + axiom is not a `def`. Do not rewrite the walk. Do not add covering to `scripts/aeneas_probe_order.sh` (would CFailure the enrolled `first_probe_on_equal_lo` extract). Catalog `as_is` `probe_order_covering_as_is` has no production `fn` (same refuse: nothing to extract).
-
-**No production `fn` (catalog `as_is` / leftover names).** Close-pair `as_is` columns name mutants that were never added to the enrolled file. Measured: `rg 'fn <name>'` on the kernel is empty. Do not invent them. Named here so they are not silent leftovers (2026-09-07 inventory: `ok_defs=525`, `missing_or_ghost=52`, of which `live_fn=True` is only `probe_order_covering`).
+**No production `fn` (catalog `as_is` / leftover names).** Close-pair `as_is` columns name mutants that were never added to the enrolled file. Measured: `rg 'fn <name>'` on the kernel is empty. Do not invent them. Named here so they are not silent leftovers. `probe_order_covering` is now a Lean `def` (index walk). Unpacked `probe_order` / `probe_order_as_is` still use `filter.collect`.
 
 | catalog id | named `as_is` / leftover | enrolled file |
 |---|---|---|
@@ -234,7 +227,7 @@ Partial + axiom is not a `def`. Do not rewrite the walk. Do not add covering to 
 
 | live name | measured |
 |---|---|
-| `probe_order_as_is` | same Iterator CFailure as `probe_order_covering` (`filter` + `position`). Do not add to `aeneas_probe_order.sh`. |
+| `probe_order_as_is` | unpacked historical walk (`sort` + `filter.collect`). Packed covering as-is is `probe_order_covering_as_is` (extracted). |
 | `overlap_distinct_los_still_inverts_as_is` | `#[cfg(test)]` helper, not a decision `fn`. |
 | `flush_plan_as_is` | Verus `spec fn` in the same file; the exec mutant is `flush_plan_as_is_lose_tail` (already a Lean `def`). |
 
@@ -261,7 +254,7 @@ enrolled via a shim that names `DcsError` without thiserror.
 
 None remaining: `world_kernel.rs` is production (`[lib] path`) and enrolled.
 
-The `probe_order` walk is still Iterator-refused; the catalog pair `first_probe_on_equal_lo` is enrolled via `--start-from`. Do not re-pin: upstream `aeneas@f9a8e33` did not widen the iterator set.
+The unpacked `probe_order` walk is still Iterator (`filter.collect`); the packed covering image is extracted. Do not re-pin unless it widens the set without `sorry`.
 
 ## Composed edges (not only per-kernel atoms)
 

@@ -206,4 +206,31 @@ def occ_conflict_as_is_serialized
   then ok touched_key_written_after
   else ok false
 
+/-- ConcurrentDb protocol decisions (production group_commit_kernel.rs).
+    Copied from the Aeneas extract in out/lean/GroupCommitKernel.lean so the
+    lake lib matches the live file; loop theorems above stay on this copy. -/
+def forall_schedules_admitted (_pct_depth : Std.U64) : Result Bool := do
+  ok false
+
+def forall_schedules_admitted_as_is (pct_depth : Std.U64) : Result Bool := do
+  ok (pct_depth >= 2#u64)
+
+def may_publish_group (wal_io_ok : Bool) : Result Bool := do
+  ok wal_io_ok
+
+def may_publish_group_as_is (_wal_io_ok : Bool) : Result Bool := do
+  ok true
+
+def lock_interleavings_admitted : Result Bool := do
+  ok false
+
+def lock_interleavings_admitted_as_is : Result Bool := do
+  ok true
+
+def fsync_promotes_pending (os_honest : Bool) : Result Bool := do
+  ok os_honest
+
+def fsync_promotes_pending_as_is (_os_honest : Bool) : Result Bool := do
+  ok true
+
 end pedra_aeneas_group_commit_kernel

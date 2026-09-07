@@ -51,24 +51,74 @@ fn probe_order(
         .collect()
 }
 
-/// Engine-facing packed image of [`probe_order`] (RFC-0164 P0.2): members of
-/// `newest_first` whose packed `[lo, hi]` covers `key`, newest-first — zero
-/// allocations, bounds read from the run's packed arrays. `prefix_end` is
-/// the caller's `partition_point_gt(key)` over the los (`pos < prefix_end`
-/// ⟺ `lo(pos) <= key`); `hi_ge(pos)` reports `hi(pos) >= key`. A table
-/// missing from `by_lo` is kept, matching the engine's walk.
-pub(crate) fn probe_order_covering<'a>(
-    newest_first: &'a [usize],
-    by_lo: &'a [usize],
-    prefix_end: usize,
-    hi_ge: impl Fn(usize) -> bool + 'a,
-) -> impl Iterator<Item = usize> + 'a {
-    newest_first.iter().copied().filter(move |&i| {
-        match by_lo.iter().position(|&j| j == i) {
-            Some(pos) => pos < prefix_end && hi_ge(pos),
-            None => true,
+/// Packed `hi(pos) >= key`. Index form so Charon sees a total fn, not `impl Fn`.
+#[must_use]
+fn covering_hi_ge(his: &[&[u8]], pos: usize, key: &[u8]) -> bool {
+    pos < his.len() && his[pos] >= key
+}
+
+/// Position of `i` in `by_lo`, or `by_lo.len()` if missing (kept, like the
+/// engine walk). Index loop — `Iterator::position` CFailure on this pin.
+#[must_use]
+fn covering_pos(by_lo: &[usize], i: usize) -> usize {
+    let mut pos = 0usize;
+    while pos < by_lo.len() {
+        if by_lo[pos] == i {
+            return pos;
         }
-    })
+        pos += 1;
+    }
+    pos
+}
+
+/// Engine-facing packed image of [`probe_order`] (RFC-0164 P0.2): members of
+/// `newest_first` whose packed `[lo, hi]` covers `key`, newest-first.
+/// `prefix_end` is the caller's `partition_point_gt(key)` over the los
+/// (`pos < prefix_end` ⟺ `lo(pos) <= key`). A table missing from `by_lo`
+/// is kept. Index `while` (not `filter`/`position`/`impl Iterator`) so the
+/// Aeneas pin emits a `def`.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn probe_order_covering(
+    newest_first: &[usize],
+    by_lo: &[usize],
+    prefix_end: usize,
+    his: &[&[u8]],
+    key: &[u8],
+) -> Vec<usize> {
+    let mut out = Vec::with_capacity(newest_first.len());
+    let mut k = 0usize;
+    while k < newest_first.len() {
+        let i = newest_first[k];
+        let pos = covering_pos(by_lo, i);
+        if pos >= by_lo.len() || (pos < prefix_end && covering_hi_ge(his, pos, key)) {
+            out.push(i);
+        }
+        k += 1;
+    }
+    out
+}
+
+/// AS-IS dente: same covering test, oldest-first (historical `.rev()` walk).
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn probe_order_covering_as_is(
+    newest_first: &[usize],
+    by_lo: &[usize],
+    prefix_end: usize,
+    his: &[&[u8]],
+    key: &[u8],
+) -> Vec<usize> {
+    let n = newest_first.len();
+    let mut out = Vec::with_capacity(n);
+    let mut j = 0usize;
+    while j < n {
+        let i = newest_first[n - 1 - j];
+        let pos = covering_pos(by_lo, i);
+        if pos >= by_lo.len() || (pos < prefix_end && covering_hi_ge(his, pos, key)) {
+            out.push(i);
+        }
+        j += 1;
+    }
+    out
 }
 
 /// Strict-disjoint fast-path arm (RFC-0164 P1.2): a run indexed by `lo`
@@ -215,8 +265,7 @@ mod tests {
             vec![0],
             "only the older table covers k (newer hi c < k)"
         );
-        let packed: Vec<usize> =
-            probe_order_covering(&newest_first, &by_lo, 2, |pos| his_sorted[pos] >= k).collect();
+        let packed = probe_order_covering(&newest_first, &by_lo, 2, &his_sorted, k);
         assert_eq!(packed, vec![0]);
 
         // Equal-lo tie: both tables [k,k]; the packed image keeps the
@@ -224,11 +273,10 @@ mod tests {
         let los_tie = [k, k];
         let his_tie = [k, k];
         assert_eq!(probe_order(&los_tie, &his_tie, &newest_first, k), vec![1, 0]);
-        let tie: Vec<usize> = probe_order_covering(&newest_first, &by_lo, 2, |pos| {
-            his_tie.get(pos).is_some() && los_tie.get(pos).is_some()
-        })
-        .collect();
+        let tie = probe_order_covering(&newest_first, &by_lo, 2, &his_tie, k);
         assert_eq!(tie, vec![1, 0]);
+        let mutant = probe_order_covering_as_is(&newest_first, &by_lo, 2, &his_tie, k);
+        assert_eq!(mutant, vec![0, 1]);
     }
 
     /// Finite-domain theorem: on EVERY distinct equal-lo tie the decision
