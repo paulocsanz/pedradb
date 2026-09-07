@@ -88,9 +88,9 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
       (DIAG r3: settle `warm_bytes=24.5 GiB` em 1.74 s; get_loop **2.76 ms**
       cliff **não** fechou. Não era path-skip.)
 - [x] **P0.6** Worker de compact: um job por tick (não `while` no
-      `compact_gate`). DIAG r3: settle 87 s com compact=0.001 +
-      warm=1.74 s — o `while` re-pega o mutex entre jobs. —
-      status: `done`
+      `compact_gate`). DIAG r4: settle **90.9 s** / get_loop **5.73 ms**
+      — o `while` **não** era os 87 s (um job ainda segura o gate
+      durante `job.write()`). status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
 
