@@ -5484,7 +5484,10 @@ impl<E: Env> Db<E> {
         // on top of a half-flushed pipeline). Internal sites also fence;
         // `fence_durability` is first-wins so this choke point is idempotent.
         match self.flush_pipeline() {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                self.maybe_bounded_cache_after_write();
+                Ok(())
+            }
             Err(e) => Err(self.fence_io_err(e)),
         }
     }
@@ -7199,9 +7202,46 @@ impl<E: Env> Db<E> {
     /// and a file source is attached (bounded open). Default skips when
     /// live SST bytes exceed [`crate::env::settle_warm_max_bytes`], or
     /// when ingest already streamed this set (so settle stays O(1)).
-    fn maybe_warm_ssts(&self) {
+    fn maybe_warm_ssts(&mut self) {
+        if !crate::env::settle_warm_on() {
+            return;
+        }
+        let mut jobs: Vec<(std::path::PathBuf, u64)> = Vec::with_capacity(self.ssts.len());
+        let mut total = 0u64;
+        for table in &self.ssts {
+            let Ok(len) = self.env.metadata_len(table.path()) else {
+                continue;
+            };
+            total = total.saturating_add(len);
+            jobs.push((table.path().to_path_buf(), len));
+        }
+        if jobs.is_empty() {
+            return;
+        }
+        if !crate::env::settle_warm_unlimited() && total > crate::env::settle_warm_max_bytes() {
+            self.enter_bounded_cache_mode(total, crate::env::settle_warm_max_bytes());
+            return;
+        }
         if let Some(plan) = self.take_warm_plan() {
             plan.run();
+        }
+    }
+
+    /// After a write that published SSTs: if the live set already exceeds
+    /// the warm cap, drop page-cache pages now (do not wait for settle).
+    pub(crate) fn maybe_bounded_cache_after_write(&mut self) {
+        if crate::env::settle_warm_unlimited() {
+            return;
+        }
+        let mut total = 0u64;
+        for table in &self.ssts {
+            if let Ok(len) = self.env.metadata_len(table.path()) {
+                total = total.saturating_add(len);
+            }
+        }
+        let cap = crate::env::settle_warm_max_bytes();
+        if total > cap {
+            self.enter_bounded_cache_mode(total, cap);
         }
     }
 
@@ -7224,7 +7264,8 @@ impl<E: Env> Db<E> {
         }
         if !crate::env::settle_warm_unlimited() {
             if total > crate::env::settle_warm_max_bytes() {
-                self.enter_bounded_cache_mode(total, crate::env::settle_warm_max_bytes());
+                self.note_ram_warm_skip(total, crate::env::settle_warm_max_bytes());
+                self.drop_sst_page_cache();
                 return None;
             }
             if crate::env::settle_warm_streamed() >= total {
@@ -7251,10 +7292,38 @@ impl<E: Env> Db<E> {
     /// Working set does not fit: skip whole-file warm and drop kernel
     /// file pages (Linux `DONTNEED`) so the cgroup is not charged the
     /// full SST set. Point reads then use the bounded block cache +
-    /// 4 KiB pread — slower, stable, no SIGKILL.
-    fn enter_bounded_cache_mode(&self, sst_bytes: u64, cap: u64) {
+    /// 4 KiB pread — slower, stable, writes still Ok.
+    fn enter_bounded_cache_mode(&mut self, sst_bytes: u64, cap: u64) {
         self.note_ram_warm_skip(sst_bytes, cap);
         self.drop_sst_page_cache();
+        self.page_indexes_for_ram();
+    }
+
+    /// RFC-0173 P2.1: page sparse-index first-keys (file-backed LRU) and
+    /// drop blooms if metadata still exceeds the resident cap. Writes Ok.
+    fn page_indexes_for_ram(&mut self) {
+        const INDEX_PAGE_LRU_BYTES: usize = 64 << 20;
+        const INDEX_RESIDENT_CAP_BYTES: usize = 512 << 20;
+        let n = self.ssts.len().max(1);
+        let per = (INDEX_PAGE_LRU_BYTES / n).max(4096);
+        for t in &mut self.ssts {
+            t.page_index(per);
+        }
+        let mut meta = 0usize;
+        for t in &self.ssts {
+            meta = meta
+                .saturating_add(t.index_memory_bytes())
+                .saturating_add(t.bloom_memory_bytes());
+        }
+        if meta > INDEX_RESIDENT_CAP_BYTES {
+            for t in &mut self.ssts {
+                t.release_bloom();
+            }
+        }
+        let tables: Vec<SstTable> = self.ssts.clone();
+        for t in tables {
+            self.table_cache.insert(std::sync::Arc::new(t));
+        }
     }
 
     fn drop_sst_page_cache(&self) {
@@ -12229,7 +12298,7 @@ fn merge_span_count(env: &impl Env, tables: &[SstTable]) -> usize {
 /// `[split_i, split_{i+1})`; a user key's whole version run stays inside one
 /// span, so per-user-key GC decisions remain complete per span.
 fn sample_span_splits(tables: &[SstTable], parts: usize) -> Vec<Vec<u8>> {
-    let mut keys: Vec<&[u8]> = Vec::new();
+    let mut keys: Vec<bytes::Bytes> = Vec::new();
     for t in tables {
         keys.extend(t.block_first_user_keys());
     }
@@ -12858,6 +12927,45 @@ mod tests {
         let n = crate::env::take_settle_warm_bytes();
         std::env::remove_var("PEDRA_SETTLE_WARM_MAX_BYTES");
         assert!(n > 0, "under-cap default must stream, got {n}");
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0173 P2.1: over-cap settle pages the sparse index; gets still hit.
+    #[test]
+    fn rfc0173_bounded_cache_pages_index_and_gets() {
+        let dir = temp_dir();
+        let env = BulkProbeEnv::new();
+        let mut db = Db::open_with_env_bounded(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(4 * 1024),
+                sst_payload_budget_bytes: Some(1),
+                ..OpenOptions::default()
+            },
+            env.clone(),
+        )
+        .unwrap();
+        let n = 400u32;
+        for i in 0..n {
+            db.put(format!("k{i:06}").as_bytes(), vec![b'v'; 64])
+                .unwrap();
+        }
+        db.flush().unwrap();
+        crate::env::force_settle_warm(None);
+        std::env::set_var("PEDRA_SETTLE_WARM_MAX_BYTES", "1");
+        db.compact_leveled().unwrap();
+        std::env::remove_var("PEDRA_SETTLE_WARM_MAX_BYTES");
+        assert!(
+            db.ssts.iter().any(|t| t.paged_file_backed()),
+            "over-cap settle must file-page at least one live SST"
+        );
+        for i in [0u32, n / 3, n / 2, n - 1] {
+            let k = format!("k{i:06}");
+            let got = db.get(k.as_bytes());
+            assert_eq!(got.as_deref(), Some(&[b'v'; 64][..]), "missed {k}");
+        }
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
