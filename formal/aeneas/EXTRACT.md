@@ -101,7 +101,7 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 `daa85d7` / Lean 4.31.0. Production files were not rewritten to please Charon.
 `db.rs` is not extracted (`glue.db_rs_extracted=false`).
 
-### Enrolled (26)
+### Enrolled (30)
 
 `[lib] path` = production file. Stamp pins the whole file. Theorems live in
 `formal/aeneas/lean/<Name>.lean` (not the generated `*Kernel.lean`).
@@ -134,6 +134,10 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 | `scale` | `scale_kernel.rs` | `point_get_probes_one_plus_one` / `_as_is_is_n_files` |
 | `disk_pressure` | `disk_pressure_kernel.rs` | `disk_pressure_unknown_admits` / `_as_is_dente` |
 | `crc` | `wal/crc.rs` | `crc_match_ok_equal` / `_as_is_dente` (`crc32c` crate fns stay axioms) |
+| `env_crash` | `env_crash_kernel.rs` | `crash_legal_in_window` / `crash_legal_as_is_dente` (shim `#[path]` group_commit) |
+| `wal_state` | `wal/wal_state_kernel.rs` | `inv_wal_well_formed` / `inv_wal_as_is_dente` (shim env_crash + group_commit) |
+| `d1_modelo` | `d1_modelo_kernel.rs` | `d1_modelo_unacked_vacuous` / `d1_modelo_as_is_dente` |
+| `write_ack` | `write_ack_kernel.rs` | `on_append_grows_written` / `write_ack_ledger_as_is_dente` |
 
 Partial `.lean` from a failed Aeneas run is not enrolled.
 
@@ -158,27 +162,24 @@ these; that is not an extract.
 | `pedradb-store/src/txn_kernel.rs` | Same `Ord.max.default` type mismatch (`TxnKernel.lean:143` and `:301`). |
 | `pedradb-capi/src/handles.rs` | Aeneas emits Lean with `sorry`; `lake build CapiHandlesKernel` fails on `IterMut` / `FnOnce.call_once` / `Enumerate` (iterator surface, same class as probe-order). |
 | `pedradb-core/src/probe_order_kernel.rs` | Live whole-file extract `CFailure` Internal error translating `core/src/iter/traits/iterator.rs:42`. Walk/closures stay Charon-refused. Not rewritten. |
+| `pedradb-core/src/sst/scan_kernel.rs` | Shim linked `wal/crc.rs`; Aeneas `CFailure` Internal error translating `scan_reads_file` closure/`Iterator::any` (lines 112:13–112:85). Partial file. Not rewritten. |
+| `pedradb-core/src/key.rs` | Shim linked `error.rs`+`thiserror`+`bytes`; Aeneas `Unsized cast between dynamic traits` on `core::error::Error::source` (`error.rs:7`). Partial file. Not rewritten. |
 
-### Refused — include-crate does not compile standalone (15)
+### Refused — include-crate does not compile standalone (8)
 
 The extract crate is `[lib] path = production file` with no parent crate.
 These files `use crate::…` or an external crate the probe did not link. Not a
-Charon crash. Not rewritten.
+Charon crash. Not rewritten. `scan_kernel` / `key.rs` moved to the Aeneas
+table after a shim compiled and Aeneas still failed.
 
 | production | measured rustc error |
 |---|---|
 | `pedradb-dcs/src/apply_kernel.rs` | `DcsError` / `Result` live in the parent crate |
-| `pedradb-core/src/sst/scan_kernel.rs` | `crate::wal::crc::crc_match_ok` — no `wal` in the extract root |
 | `pedradb-world/src/world_kernel.rs` | `use crate::TrajectorySample` (file is dirty-tree only; not in git HEAD) |
 | `pedradb-posix/src/lib.rs` | Linked `libc`; Aeneas still `CFailure`: Dynamic trait types (`std::io::Error::new`), `&raw const`, improperly typed constant in `fdatasync_file`. Partial file, 8 errors. |
 | `pedradb-core/src/merge.rs` | unresolved crate `pedradb_telemetry` |
-| `pedradb-core/src/key.rs` | `crate::error` missing from the extract root |
 | `pedradb-core/src/batch.rs` | `crate::key::{SequenceNumber, ValueType}` |
 | `rocksdb-compat/src/locktab.rs` | Linked `parking_lot`+`bytes`; Aeneas `unsupported nested borrows` in `LockTable::lock`. Partial file. `wait_for_deadlock` not enrolled. |
-| `pedradb-core/src/env_crash_kernel.rs` | `crate::group_commit_kernel::fsync_promotes_pending` |
-| `pedradb-core/src/wal/wal_state_kernel.rs` | `crate::env_crash_kernel` |
-| `pedradb-core/src/d1_modelo_kernel.rs` | `crate::env_crash_kernel` |
-| `pedradb-core/src/write_ack_kernel.rs` | `crate::wal::wal_state_kernel` |
 | `pedradb-store/src/t1_modelo_kernel.rs` | `crate::txn_kernel` |
 | `pedradb-raft/src/c1_modelo_kernel.rs` | `joint_election_ok` / `propose_ack_ok` from `membership_kernel` |
 
@@ -207,6 +208,10 @@ Never: “Lean proved Raft / fold / the Bloom filter.”
 ./scripts/lean_prefix.sh --required
 ./scripts/lean_write_admission.sh --required
 ./scripts/lean_extracts.sh --required
+./scripts/aeneas_env_crash.sh --required
+./scripts/aeneas_wal_state.sh --required
+./scripts/aeneas_d1_modelo.sh --required
+./scripts/aeneas_write_ack.sh --required
 ```
 
 ## Scale (`scale_kernel.rs`, RFC-0176)

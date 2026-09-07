@@ -238,3 +238,27 @@ name = "CrcKernel"
 
 [[lean_lib]]
 name = "Crc"
+
+[[lean_lib]]
+name = "EnvCrashKernel"
+
+[[lean_lib]]
+name = "EnvCrash"
+
+[[lean_lib]]
+name = "WalStateKernel"
+
+[[lean_lib]]
+name = "WalState"
+
+[[lean_lib]]
+name = "D1ModeloKernel"
+
+[[lean_lib]]
+name = "D1Modelo"
+
+[[lean_lib]]
+name = "WriteAckKernel"
+
+[[lean_lib]]
+name = "WriteAck"

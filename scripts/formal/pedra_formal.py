@@ -1136,6 +1136,22 @@ AENEAS_EXTRACTS = (
         "formal/aeneas/out/SOURCE.disk_pressure",
     ),
     ("crates/pedradb-core/src/wal/crc.rs", "formal/aeneas/out/SOURCE.crc"),
+    (
+        "crates/pedradb-core/src/env_crash_kernel.rs",
+        "formal/aeneas/out/SOURCE.env_crash",
+    ),
+    (
+        "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+        "formal/aeneas/out/SOURCE.wal_state",
+    ),
+    (
+        "crates/pedradb-core/src/d1_modelo_kernel.rs",
+        "formal/aeneas/out/SOURCE.d1_modelo",
+    ),
+    (
+        "crates/pedradb-core/src/write_ack_kernel.rs",
+        "formal/aeneas/out/SOURCE.write_ack",
+    ),
 )
 
 
