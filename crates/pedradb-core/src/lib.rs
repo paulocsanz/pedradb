@@ -31,6 +31,7 @@ pub mod db;
 pub mod env;
 pub mod error;
 pub mod flush_kernel;
+pub mod write_admission_kernel;
 pub mod group_commit_kernel;
 pub mod history;
 pub mod host;

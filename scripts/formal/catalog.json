@@ -933,6 +933,215 @@
         "file": "crates/pedradb-ops/src/ops_kernel.rs",
         "test": "pitr_record_in_window_on_future_seq_is_not_ok"
       }
+    },
+    {
+      "id": "write_admission",
+      "finding": "RFC-0171 P0.3",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "verus": "scripts/verus_write_admission.sh",
+      "callers": ["crates/pedradb-core/src/db.rs"],
+      "entry": "write_admission_idle",
+      "data_fate": true,
+      "as_is": "write_admission_idle_as_is",
+      "three_teeth": true,
+      "live_callers": [{"file": "crates/pedradb-core/src/db.rs", "handler": "write_admission_idle"}],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+        "test": "write_admission_idle_on_live_stall_is_not_ok"
+      }
+    },
+    {
+      "id": "write_admit",
+      "finding": "RFC-0171 P1.1",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "verus": "scripts/verus_write_admission.sh",
+      "callers": ["crates/pedradb-core/src/db.rs"],
+      "entry": "write_admit",
+      "data_fate": true,
+      "as_is": "write_admit_as_is",
+      "three_teeth": true,
+      "live_callers": [{"file": "crates/pedradb-core/src/db.rs", "handler": "ensure_write_admitted_for"}],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+        "test": "write_admit_on_live_mem_over_is_not_ok"
+      }
+    },
+    {
+      "id": "wal_sync_required",
+      "finding": "RFC-0171 P1.1",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "verus": "scripts/verus_write_admission.sh",
+      "callers": ["crates/pedradb-core/src/db.rs"],
+      "entry": "wal_sync_required",
+      "data_fate": true,
+      "as_is": "wal_sync_required_as_is",
+      "three_teeth": true,
+      "live_callers": [{"file": "crates/pedradb-core/src/db.rs", "handler": "commit_ops_with"}],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+        "test": "wal_sync_required_on_live_client_true_is_not_ok"
+      }
+    },
+    {
+      "id": "seq_exhausted",
+      "finding": "RFC-0171 P1.1",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "verus": "scripts/verus_write_admission.sh",
+      "callers": ["crates/pedradb-core/src/db.rs"],
+      "entry": "seq_exhausted",
+      "data_fate": true,
+      "as_is": "seq_exhausted_as_is",
+      "three_teeth": true,
+      "live_callers": [{"file": "crates/pedradb-core/src/db.rs", "handler": "alloc_seq"}],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+        "test": "seq_exhausted_on_live_ceiling_is_not_ok"
+      }
+    },
+    {
+      "id": "batch_is_empty",
+      "finding": "RFC-0171 P1.1",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "verus": "scripts/verus_write_admission.sh",
+      "callers": ["crates/pedradb-core/src/db.rs"],
+      "entry": "batch_is_empty",
+      "data_fate": true,
+      "as_is": "batch_is_empty_as_is",
+      "three_teeth": true,
+      "live_callers": [{"file": "crates/pedradb-core/src/db.rs", "handler": "apply_batch_with"}],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+        "test": "batch_is_empty_on_live_zero_is_not_ok"
+      }
+    },
+    {
+      "id": "fence_on_sync_fail",
+      "finding": "RFC-0171 P1.1",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "verus": "scripts/verus_write_admission.sh",
+      "callers": ["crates/pedradb-core/src/db.rs"],
+      "entry": "fence_on_sync_fail",
+      "data_fate": true,
+      "as_is": "fence_on_sync_fail_as_is",
+      "three_teeth": true,
+      "live_callers": [{"file": "crates/pedradb-core/src/db.rs", "handler": "commit_ops_with"}],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+        "test": "fence_on_sync_fail_on_live_required_fail_is_not_ok"
+      }
+    },
+    {
+      "id": "torn_head_empty_log",
+      "finding": "RFC-0171 P1.2",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "verus": "scripts/verus_write_admission.sh",
+      "callers": ["crates/pedradb-core/src/db.rs"],
+      "entry": "torn_head_is_empty_log",
+      "data_fate": true,
+      "as_is": "torn_head_is_empty_log_as_is",
+      "three_teeth": true,
+      "live_callers": [{"file": "crates/pedradb-core/src/db.rs", "handler": "open_with_env_sourced"}],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+        "test": "torn_head_is_empty_log_on_live_large_wal_is_not_ok"
+      }
+    },
+    {
+      "id": "torn_tail_needs_cut",
+      "finding": "RFC-0171 P1.2",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "verus": "scripts/verus_write_admission.sh",
+      "callers": ["crates/pedradb-core/src/db.rs"],
+      "entry": "torn_tail_needs_cut",
+      "data_fate": true,
+      "as_is": "torn_tail_needs_cut_as_is",
+      "three_teeth": true,
+      "live_callers": [{"file": "crates/pedradb-core/src/db.rs", "handler": "open_with_env_sourced"}],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+        "test": "torn_tail_needs_cut_on_live_overhang_is_not_ok"
+      }
+    },
+    {
+      "id": "seq_after_feed",
+      "finding": "RFC-0171 P1.2",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "verus": "scripts/verus_write_admission.sh",
+      "callers": ["crates/pedradb-core/src/db.rs"],
+      "entry": "seq_after_feed",
+      "data_fate": true,
+      "as_is": "seq_after_feed_as_is",
+      "three_teeth": true,
+      "live_callers": [{"file": "crates/pedradb-core/src/db.rs", "handler": "open_with_env_sourced"}],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+        "test": "seq_after_feed_on_live_newer_is_not_ok"
+      }
+    },
+    {
+      "id": "pit_resync_rewrite",
+      "finding": "RFC-0171 P1.2",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "verus": "scripts/verus_write_admission.sh",
+      "callers": ["crates/pedradb-core/src/db.rs"],
+      "entry": "pit_resync_needs_rewrite",
+      "data_fate": true,
+      "as_is": "pit_resync_needs_rewrite_as_is",
+      "three_teeth": true,
+      "live_callers": [{"file": "crates/pedradb-core/src/db.rs", "handler": "open_with_env_sourced"}],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+        "test": "pit_resync_needs_rewrite_on_live_resync_is_not_ok"
+      }
+    },
+    {
+      "id": "dir_sync_required",
+      "finding": "RFC-0171 P1.1",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "verus": "scripts/verus_write_admission.sh",
+      "callers": ["crates/pedradb-core/src/db.rs"],
+      "entry": "dir_sync_required",
+      "data_fate": true,
+      "as_is": "dir_sync_required_as_is",
+      "three_teeth": true,
+      "live_callers": [{"file": "crates/pedradb-core/src/db.rs", "handler": "sync_dir_if_required"}],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+        "test": "dir_sync_required_on_live_sync_is_not_ok"
+      }
     }
   ],
   "clones": [
