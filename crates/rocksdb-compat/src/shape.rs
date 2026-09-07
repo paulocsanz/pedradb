@@ -492,6 +492,14 @@ pub mod properties {
     pub const COMPACTION_PENDING: &str = "rocksdb.compaction-pending";
     pub const NUM_RUNNING_COMPACTIONS: &str = "rocksdb.num-running-compactions";
     pub const NUM_RUNNING_FLUSHES: &str = "rocksdb.num-running-flushes";
+    /// `1` if live SST bytes exceed the RAM warm cap (disk-bound point reads).
+    pub const PEDRA_RAM_PRESSURE: &str = "pedra.ram-pressure";
+    /// Times SST warm was skipped for RAM since open.
+    pub const PEDRA_RAM_WARM_SKIPPED: &str = "pedra.ram-warm-skipped";
+    /// Warm/cgroup ceiling in bytes.
+    pub const PEDRA_RAM_CEILING_BYTES: &str = "pedra.ram-ceiling-bytes";
+    /// Engine-resident metadata bytes (index+bloom+mem), not page cache.
+    pub const PEDRA_ENGINE_RESIDENT_BYTES: &str = "pedra.engine-resident-bytes";
 }
 
 // Env bound kept so scan_cf_at type-checks through DB.

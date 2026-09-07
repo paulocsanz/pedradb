@@ -200,6 +200,10 @@ fn map_property_int<E: PedraEnv>(db: &ConcurrentDb<E>, name: &str) -> Option<u64
         properties::ESTIMATE_TABLE_READERS_MEM => {
             Some(s.table_cache_hits.saturating_add(s.table_cache_misses))
         }
+        properties::PEDRA_RAM_PRESSURE => Some(s.ram_pressure),
+        properties::PEDRA_RAM_WARM_SKIPPED => Some(s.ram_warm_skipped),
+        properties::PEDRA_RAM_CEILING_BYTES => Some(s.ram_ceiling_bytes),
+        properties::PEDRA_ENGINE_RESIDENT_BYTES => Some(s.engine_resident_bytes),
         _ => None,
     }
 }
