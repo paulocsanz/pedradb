@@ -1,6 +1,7 @@
 //! Sorted-ingest scale harness: hydrate + settle + point/prefix/lookup.
 //!
-//! This is the in-tree reproduction of the published 1M–100M table. One
+//! This is the in-tree reproduction of the published 1M–100M table
+//! (ladder also has 50M — RFC-0168 P2.2). One
 //! backend per process (`SCALE_BACKENDS`, default `pedradb`). Optional
 //! peers behind features: `real` (RocksDB) and `fjall`.
 //!
@@ -18,6 +19,11 @@ use std::time::Instant;
 
 const ROUTES_PER_SERVICE: usize = 1000;
 const APPLY_BATCH: usize = 1024;
+/// Official scale ladder. 50M (RFC-0168 P2.2) sits between 25M and 100M
+/// so get_loop/prefix curvature is visible instead of a 4× jump. On the
+/// 4 GiB box the 3 GiB warm floor already skips 25M+; on a large host
+/// `max(3 GiB, 3/4 RAM)` can still warm 50M.
+pub const SCALE_LADDER: &[u64] = &[1_000_000, 10_000_000, 25_000_000, 50_000_000, 100_000_000];
 const VALUE_POOL_BYTES: usize = 1 << 20;
 const PROBES: usize = 10_000;
 const GET_HIT_N: usize = 10_000;
@@ -561,6 +567,15 @@ mod tests {
         assert_eq!(&key(0)[..16], "route.svc-000000");
         assert_eq!(&key(1000)[..16], "route.svc-000001");
         assert_eq!(key(0).len(), key(42).len());
+    }
+
+    #[test]
+    fn rfc0168_ladder_includes_50m() {
+        assert_eq!(
+            SCALE_LADDER,
+            &[1_000_000, 10_000_000, 25_000_000, 50_000_000, 100_000_000]
+        );
+        assert!(SCALE_LADDER.windows(2).all(|w| w[0] < w[1]));
     }
 
     #[test]
