@@ -2988,7 +2988,14 @@ impl<E: Env> ConcurrentDb<E> {
     /// SST / MANIFEST I/O.
     pub fn compact(&self) -> Result<()> {
         self.flush()?;
-        self.inner.write().compact_leveled()
+        // RFC-0178: hydrate flush already noted those paths. The host
+        // compact worker may then hold `compact_gate` for ~85 s @100M.
+        // Path-skip would leave settle's maybe_warm a no-op and random
+        // get disk-pread. Clear so compact_leveled WARMs the live set
+        // immediately before Ok (the 50M recipe).
+        let mut g = self.inner.write();
+        g.clear_warmed_ssts();
+        g.compact_leveled()
     }
 
     /// Compact only SSTs of `cf` (RFC-0065 P0.2). Flushes first so mem keys
