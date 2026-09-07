@@ -1,9 +1,15 @@
 //! Shim: production `key.rs` uses `crate::error::{CoreError, Result}`.
-//! Charon walks this crate; the production files are the source of truth —
-//! never edit copies.
+//! `error.rs` carries thiserror (`Error::source` unsized-cast — refused).
+//! The decision fns are production via `#[path]`; CoreError here is the
+//! `Internal` constructor `unpack`/`decode` use, without thiserror.
 
-#[path = "../../../../crates/pedradb-core/src/error.rs"]
-pub mod error;
+pub mod error {
+    pub enum CoreError {
+        /// Internal invariant (`key.rs` is the only constructor Charon sees).
+        Internal(String),
+    }
+    pub type Result<T> = std::result::Result<T, CoreError>;
+}
 
 #[path = "../../../../crates/pedradb-core/src/key.rs"]
 pub mod key;

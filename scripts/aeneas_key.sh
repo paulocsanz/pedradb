@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Extract production key.rs (+ error.rs) via the shim crate.
+# Extract production key.rs (CoreError stub, no thiserror) via the shim crate.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CRATE="$ROOT/formal/aeneas/key-kernel"
@@ -35,4 +35,34 @@ echo "      charon=$CHARON"
   echo "aeneas=$("$AENEAS" -version 2>/dev/null | awk '{print $NF}')"
   echo "charon=$("$CHARON" version 2>/dev/null | head -1)"
 } > "$OUT/SOURCE.key"
+# Aeneas emits InternalKey Eq as a recursive impl_def; unfold like other extracts.
+python3 - "$OUT/lean/KeyKernel.lean" <<'PYEOF'
+import sys
+p = sys.argv[1]
+src = open(p, encoding="utf-8").read()
+old = (
+    "@[reducible]\n"
+    "impl_def key.InternalKey.Insts.CoreCmpEq : core.cmp.Eq key.InternalKey := {\n"
+    "  partialEqInst := key.InternalKey.Insts.CoreCmpPartialEqInternalKey\n"
+    "  assert_fields_are_eq := core.cmp.Eq.assert_fields_are_eq.default\n"
+    "    key.InternalKey.Insts.CoreCmpEq\n"
+    "}\n"
+)
+new = (
+    "def key.InternalKey.Insts.CoreCmpEq.assert_fields_are_eq\n"
+    "  (self : key.InternalKey) : Result Unit := do\n"
+    "  ok ()\n"
+    "\n"
+    "@[reducible]\n"
+    "def key.InternalKey.Insts.CoreCmpEq : core.cmp.Eq key.InternalKey := {\n"
+    "  partialEqInst := key.InternalKey.Insts.CoreCmpPartialEqInternalKey\n"
+    "  assert_fields_are_eq := key.InternalKey.Insts.CoreCmpEq.assert_fields_are_eq\n"
+    "}\n"
+)
+if old in src:
+    open(p, "w", encoding="utf-8").write(src.replace(old, new, 1))
+    print("      patched InternalKey Eq impl_def")
+elif new not in src:
+    sys.exit("InternalKey Eq patch target not found")
+PYEOF
 echo "ok    extract key → $OUT"

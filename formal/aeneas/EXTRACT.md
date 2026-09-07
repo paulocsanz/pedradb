@@ -101,7 +101,7 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 `daa85d7` / Lean 4.31.0. Production files were not rewritten to please Charon.
 `db.rs` is not extracted (`glue.db_rs_extracted=false`).
 
-### Enrolled (35)
+### Enrolled (36)
 
 `[lib] path` = production file. Stamp pins the whole file. Theorems live in
 `formal/aeneas/lean/<Name>.lean` (not the generated `*Kernel.lean`).
@@ -143,6 +143,7 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 | `store_commit` | store `commit_kernel.rs` | `may_commit_at_current_majority` / `_as_is_dente` |
 | `store_ae_ack` | store `ae_ack_kernel.rs` | `ae_ack_success_dirty_without_persist` / `_as_is_dente` |
 | `store_vote` | store `vote_kernel.rs` | `vote_decision_stale_term` / `_as_is_dente` |
+| `key` | `key.rs` | `pack_sequence_and_type_def` / `_as_is_dente` (shim names `CoreError::Internal` without thiserror; InternalKey Eq `impl_def` patched like Vote Option::eq) |
 
 Partial `.lean` from a failed Aeneas run is not enrolled.
 
@@ -168,7 +169,7 @@ these; that is not an extract.
 | `pedradb-capi/src/handles.rs` | Aeneas emits Lean with `sorry`; `lake build CapiHandlesKernel` fails on `IterMut` / `FnOnce.call_once` / `Enumerate` (iterator surface, same class as probe-order). |
 | `pedradb-core/src/probe_order_kernel.rs` | Live whole-file extract `CFailure` Internal error translating `core/src/iter/traits/iterator.rs:42`. Walk/closures stay Charon-refused. Not rewritten. |
 | `pedradb-core/src/sst/scan_kernel.rs` | Shim linked `wal/crc.rs`; Aeneas `CFailure` Internal error translating `scan_reads_file` closure/`Iterator::any` (lines 112:13–112:85). Partial file. Not rewritten. |
-| `pedradb-core/src/key.rs` | Shim linked `error.rs`+`thiserror`+`bytes`; Aeneas `Unsized cast between dynamic traits` on `core::error::Error::source` (`error.rs:7`). Partial file. Not rewritten. |
+
 
 ### Refused — include-crate does not compile standalone (7)
 
@@ -182,8 +183,8 @@ enrolled via a shim that names `DcsError` without thiserror.
 |---|---|
 | `pedradb-world/src/world_kernel.rs` | `use crate::TrajectorySample` (file is dirty-tree only; not in git HEAD) |
 | `pedradb-posix/src/lib.rs` | Linked `libc`; Aeneas still `CFailure`: Dynamic trait types (`std::io::Error::new`), `&raw const`, improperly typed constant in `fdatasync_file`. Partial file, 8 errors. |
-| `pedradb-core/src/merge.rs` | unresolved crate `pedradb_telemetry` |
-| `pedradb-core/src/batch.rs` | `crate::key::{SequenceNumber, ValueType}` |
+| `pedradb-core/src/merge.rs` | Shim linked `key.rs`+`compact_kernel`+bytes; Charon type error on `Iterator` for `WindowKvIter` / `StreamingVisibleIter` (`merge.rs:619`). Not rewritten. |
+| `pedradb-core/src/batch.rs` | Shim linked `key.rs`; Aeneas `Early returns inside of loops` in `WriteRecord::decode`. Partial file. Not rewritten. |
 | `rocksdb-compat/src/locktab.rs` | Linked `parking_lot`+`bytes`; Aeneas `unsupported nested borrows` in `LockTable::lock`. Partial file. `wait_for_deadlock` not enrolled. |
 | `pedradb-store/src/t1_modelo_kernel.rs` | `crate::txn_kernel` |
 | `pedradb-raft/src/c1_modelo_kernel.rs` | `joint_election_ok` / `propose_ack_ok` from `membership_kernel` |
@@ -222,6 +223,7 @@ Never: “Lean proved Raft / fold / the Bloom filter.”
 ./scripts/aeneas_store_commit.sh --required
 ./scripts/aeneas_store_ae_ack.sh --required
 ./scripts/aeneas_store_vote.sh --required
+./scripts/aeneas_key.sh --required
 ```
 
 ## Scale (`scale_kernel.rs`, RFC-0176)

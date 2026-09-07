@@ -292,3 +292,9 @@ name = "StoreVoteKernel"
 
 [[lean_lib]]
 name = "StoreVote"
+
+[[lean_lib]]
+name = "KeyKernel"
+
+[[lean_lib]]
+name = "Key"

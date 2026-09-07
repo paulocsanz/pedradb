@@ -1172,6 +1172,7 @@ AENEAS_EXTRACTS = (
         "crates/pedradb-store/src/vote_kernel.rs",
         "formal/aeneas/out/SOURCE.store_vote",
     ),
+    ("crates/pedradb-core/src/key.rs", "formal/aeneas/out/SOURCE.key"),
 )
 
 
