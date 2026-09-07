@@ -381,6 +381,31 @@ fn run_one(store: &mut dyn ScaleStore, dir: &Path, n: usize, vlen: usize, pool: 
         mean_us(&gets),
         mode_suffix(store),
     );
+    {
+        let measured_ns = if gets.is_empty() {
+            0
+        } else {
+            gets.iter().sum::<u64>() / gets.len() as u64
+        };
+        let ram = cache_bytes().unwrap_or(64 << 30);
+        let f = pedradb_core::scale_kernel::scale_forecast(n as u64, ram);
+        let as_is = pedradb_core::scale_kernel::scale_forecast_as_is(n as u64, ram);
+        let class = pedradb_core::classify_get(
+            measured_ns,
+            f.best_ns,
+            f.happy_ns,
+            f.worst_ns,
+            as_is.best_ns,
+        );
+        eprintln!(
+            "diagnose get get_hit/{label} measured_ns={measured_ns} best={} happy={} worst={} as_is={} class={}",
+            f.best_ns,
+            f.happy_ns,
+            f.worst_ns,
+            as_is.best_ns,
+            class.token()
+        );
+    }
     if pedradb_core::cost::enabled() {
         let n_sst = dir_sst_count(dir);
         eprintln!(

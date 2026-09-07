@@ -13,10 +13,10 @@ Refresh this file when a cell moves class. One row per cell.
 | apply 1c async | **S** | Linux 2.58× | — | floor1x |
 | ycsb_a_mc4 25M | **S** | Linux 2.26× 3/3 | — | RFC-0163 Grid B |
 | apply_mc4 G1 quiet | **S** | Linux 2.79× | group commit (fd/grupo) | RFC-0041 head3 |
-| get 50M/100M clock | **S** | calibrated | class best/happy vs 0176 | RFC-0176 |
+| get 50M/100M clock | **S** | calibrated | class best/happy vs 0176; scale `get_hit` `classify_get` (0184 P2.6) | RFC-0176 / 0184 |
 | hydrate 25M/100M | **S** | Linux >1× | — | RFC-0162 |
 | **overwrite_mc4 25M** | **U** | Linux 0.557× 3/3; Darwin 0180 ~1.00 mediana (named 0.816); **caixa pós-0180 none** | unknown on Linux; Darwin avg_group 2.46 | RFC-0178 P1.3 / 0180 P1.1 / 0184 P1.1 |
-| ycsb_f_mc4 3/3 intra | **W** | Linux mediana 1.47; run2 0.766 | not yet diagnose | RFC-0178 P1.4 |
+| ycsb_f_mc4 3/3 intra | **W** | Linux mediana 1.47; run2 0.766 | `get_path` (`read_pct=50`; mc WRITEPHASE) | RFC-0178 P1.4 / 0184 |
 | prefix 100M 4 GiB | **W** | caixa 0.70× | bounded-cache scan; scale `classify_probes` vs \(P_{\mathrm{best}}\) (0184 P2.5) | RFC-0178 P1.2 / 0184 |
 | probe_miss | **W** | 0.27× | miss path; scale `classify_probes` vs \(P_{\mathrm{best}}\) (0184 P2.4) | RFC-0178 P1.1 / 0167 / 0184 |
 | 1c overwrite Darwin | **C**/DIAG | 0.845× | `wal_encode_or_write` despark=0 | RFC-0183 / 0184 |
@@ -26,11 +26,12 @@ Refresh this file when a cell moves class. One row per cell.
 | ycsb_a/f_mc4 Darwin mixed | **T**→tool | 0.58–0.91 DIAG | `get_path` with `--read-pct 50`; `balance_admits=0` (DIAG); compare `diagnose.lever` (0184 P1.2) | RFC-0182 / 0184 |
 | Linux async apply_mc4 | **U** | G1 2.79× exists; same-class mc4 not in floor1x 15 | — | RFC-0184 |
 | 1B get @64 GiB | **S** (model) | happy ~61 µs; as-is 12.3 ms | `pedra diagnose get` | RFC-0176 |
+| lookup_100 / get_loop | **T** | Darwin 427 µs @100M | cost dump; no `classify_get` yet | RFC-0178 P0.9 / 0184 |
 
 ## Próxima fase (rank da skill, 2026-09-07)
 
 1. **U / Linux `overwrite_mc4` isolado + diagnose + `balance`** (caixa). Sem bake: não ratio-win Darwin. Skill **ainda implementa** o próximo furo local.
-2. **Done this turn:** 0184 P2.5 — scale `prefix_scan` + COST_TRACE → `classify_probes` (walk-all ≠ disk).
-3. prefix 0.70× na caixa continua P1.2.
+2. **Done this turn:** 0184 P2.6 — scale `get_hit` measured ns → `classify_get` vs 0176 (walk-all ≠ "disk").
+3. prefix 0.70× na caixa continua P1.2. lookup_100 ainda não classifica.
 
 Não: skiplist. Não: n=50 merge. Não: turno vazio porque “é caixa”.
