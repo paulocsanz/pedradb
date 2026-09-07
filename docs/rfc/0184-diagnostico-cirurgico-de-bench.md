@@ -100,6 +100,10 @@ a linha quando há phasesΔ. Sem harness novo.
       `qs_batch_write` WRITEPHASE → `diagnose.lever` (hot/neg =
       `get_path`; batch = write lever). Kernel: `read_pct≥40` e
       timed=0 ⇒ `get_path` (não `prepare`). — status: `done`
+- [x] **P2.9** kvrocks 1c (`get`/`set`/`pipelined_set`/`scan`/
+      `blob_set`) WRITEPHASE → `diagnose.lever` (get/scan =
+      `get_path`; set = write lever). mc50 já tinha (P2.3).
+      — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -122,6 +126,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.6 | p2 | scale get_hit classify_get | done | measured ns vs 0176 best/happy/worst/as_is | 2026-09-07 |
 | P2.7 | p2 | scale lookup_100 classify_get | done | loop_ns/100 vs 0176 clock | 2026-09-07 |
 | P2.8 | p2 | qs suite diagnose.lever | done | hot/neg get_path; batch WRITEPHASE | 2026-09-07 |
+| P2.9 | p2 | kvrocks 1c diagnose.lever | done | get/scan get_path; set WRITEPHASE | 2026-09-07 |
 
 ## Acceptance Criteria
 
@@ -141,6 +146,7 @@ a linha quando há phasesΔ. Sem harness novo.
   scale `get_hit` `classify_get` (P2.6);
   scale `lookup_100` `classify_get` (P2.7);
   qs suite `diagnose.lever` (P2.8);
+  kvrocks 1c `diagnose.lever` (P2.9);
   `ycsb_c_all_reads_timed_zero_is_get_path`;
   `rfc0184_diagnosis_json_has_lever`;
   `extract_diagnose_lever_from_bench_object`.
