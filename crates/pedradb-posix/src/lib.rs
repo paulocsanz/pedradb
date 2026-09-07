@@ -342,6 +342,60 @@ pub fn trim_process_heap() {
     }
 }
 
+/// Physical RAM in bytes (best-effort). Used to size the SST page-cache
+/// warm so get_hit stays RAM-speed while the store fits, without
+/// streaming 24 GiB into a 4 GiB box.
+#[must_use]
+pub fn physical_ram_bytes() -> Option<u64> {
+    #[cfg(target_os = "macos")]
+    {
+        let mut size: u64 = 0;
+        let mut len = std::mem::size_of::<u64>();
+        let name = b"hw.memsize\0";
+        extern "C" {
+            fn sysctlbyname(
+                name: *const i8,
+                oldp: *mut u8,
+                oldlenp: *mut usize,
+                newp: *mut u8,
+                newlen: usize,
+            ) -> i32;
+        }
+        // SAFETY: `name` is a NUL-terminated C string; `oldp`/`oldlenp`
+        // point at a u64 out-param for `hw.memsize`. `newp` is null (read).
+        let rc = unsafe {
+            sysctlbyname(
+                name.as_ptr().cast::<i8>(),
+                (&mut size as *mut u64).cast(),
+                &mut len,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if rc == 0 && size > 0 {
+            Some(size)
+        } else {
+            None
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let s = std::fs::read_to_string("/proc/meminfo").ok()?;
+        for line in s.lines() {
+            let Some(rest) = line.strip_prefix("MemTotal:") else {
+                continue;
+            };
+            let kb: u64 = rest.split_whitespace().next()?.parse().ok()?;
+            return Some(kb.saturating_mul(1024));
+        }
+        None
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
