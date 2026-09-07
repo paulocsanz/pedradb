@@ -215,6 +215,18 @@ impl WriteDiagnosis {
             self.lever.token()
         )
     }
+
+    /// Compact JSON object for bench / compare files (RFC-0184 P1.2).
+    #[must_use]
+    pub fn json_object(self) -> String {
+        format!(
+            r#"{{"lever":"{}","dominant":"{}","despark":{},"mem_gap_bps":{}}}"#,
+            self.lever.token(),
+            self.dominant.token(),
+            u8::from(self.despark_memtable),
+            self.mem_of_gap_bps
+        )
+    }
 }
 
 /// Largest timed phase (ties: first in [`WritePhase::ALL`]).
@@ -525,6 +537,17 @@ mod tests {
         assert!(d.mem_of_gap_bps >= 1_500 && d.mem_of_gap_bps < 3_000);
         assert_eq!(dominant_phase_as_is(rfc0183_1c().phases), WritePhase::Mem);
         assert_ne!(d.dominant, dominant_phase_as_is(rfc0183_1c().phases));
+    }
+
+    #[test]
+    fn rfc0184_diagnosis_json_has_lever() {
+        let j = diagnose_write(rfc0183_1c()).json_object();
+        assert!(
+            j.contains("\"lever\":\"wal_encode_or_write\""),
+            "compare JSON needs diagnose.lever: {j}"
+        );
+        assert!(j.contains("\"dominant\":\"wal\""), "{j}");
+        assert!(j.contains("\"despark\":0"), "{j}");
     }
 
     #[test]
