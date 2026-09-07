@@ -3,7 +3,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-raft/verus/apply_advance.rs"
+# RFC-0171 P0.3 / RFC-0174: prove the file rustc links, not a twin-cópia.
+SRC="$ROOT/crates/pedradb-raft/src/apply_kernel.rs"
 
 if [[ -x "${VERUS:-}" ]]; then
   :

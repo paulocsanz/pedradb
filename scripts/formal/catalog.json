@@ -2953,8 +2953,9 @@
       "id": "apply_step",
       "finding": "F10-apply",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/apply_kernel.rs",
-      "twin": "crates/pedradb-raft/verus/apply_advance.rs",
+      "twin": "crates/pedradb-raft/src/apply_kernel.rs",
       "verus": "scripts/verus_apply_advance.sh",
       "callers": [
         "crates/pedradb-raft/src/lib.rs"
