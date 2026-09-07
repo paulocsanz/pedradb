@@ -376,3 +376,9 @@ name = "CfKernel"
 
 [[lean_lib]]
 name = "Cf"
+
+[[lean_lib]]
+name = "FieldsKernel"
+
+[[lean_lib]]
+name = "Fields"
