@@ -18,7 +18,10 @@ impl<E: Env> Db<E> {
     /// segments (local and remote alike) before their bytes are read;
     /// only may-affect segments are fetched and CRC-walked.
     pub(super) fn get_at_from_archive(&self, snap: Snapshot, key: &[u8]) -> Result<Option<Bytes>> {
-        let too_old = || CoreError::snapshot_too_old(snap.seq, self.earliest_readable_seq);
+        let too_old = || CoreError::SnapshotTooOld {
+            requested: snap.seq,
+            earliest: self.earliest_readable_seq,
+        };
         let Some(tier) = self.history_tier.as_ref() else {
             return Err(too_old());
         };
@@ -178,7 +181,10 @@ impl<E: Env> Db<E> {
     /// written (all its versions may have been GC'd and tombstone-cleaned),
     /// so `None` here would be a silent destroy.
     pub(super) fn get_at_below_watermark_lsm(&self, snap: Snapshot, key: &[u8]) -> Result<Option<Bytes>> {
-        let too_old = || CoreError::snapshot_too_old(snap.seq, self.earliest_readable_seq);
+        let too_old = || CoreError::SnapshotTooOld {
+            requested: snap.seq,
+            earliest: self.earliest_readable_seq,
+        };
         match self.lookup(key, snap.seq) {
             Lookup::Found(v) => {
                 if vlog::decode_vlog_ptr(v.as_ref()).is_some() {

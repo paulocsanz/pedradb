@@ -387,6 +387,9 @@ mod tests {
             || cond.contains("sst_envelope")
             || cond.contains("f == fam")
             || cond.contains("p == 0")
+            || cond.contains("p > 0")
+            || cond.contains("key < lo")
+            || cond.contains("key > hi")
     }
 
     fn is_kernel_pred(cond: &str) -> bool {
