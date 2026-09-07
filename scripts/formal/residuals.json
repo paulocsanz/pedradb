@@ -12,8 +12,7 @@
     "R-rustc",
     "R-verus",
     "R-crc",
-    "R-deps",
-    "R-extract"
+    "R-deps"
   ],
   "glue": {
     "kernel_paths": [
@@ -30,11 +29,12 @@
       "crates/pedradb-core/src/wal/reopen_kernel.rs",
       "crates/pedradb-io-uring/src/cqe_kernel.rs",
       "crates/rocksdb-compat/src/iter_kernel.rs",
-      "crates/pedradb-ops/src/ops_kernel.rs"
+      "crates/pedradb-ops/src/ops_kernel.rs",
+      "crates/pedradb-core/src/write_admission_kernel.rs"
     ],
-    "kernel_files": 14,
-    "kernel_loc": 4292,
-    "handler_loc": 83217,
+    "kernel_files": 15,
+    "kernel_loc": 5135,
+    "handler_loc": 83270,
     "db_rs_extracted": false,
     "kernel_fn_allowlist": {
       "crates/pedradb-core/src/cf_kernel.rs": [
@@ -132,9 +132,9 @@
     {
       "id": "R-extract",
       "title": "full-engine extraction into the prover",
-      "class": "never",
-      "owner": "0056",
-      "close": "REFUSE (LEDGER L46); production stays Rust"
+      "class": "open",
+      "owner": "0171",
+      "close": "RFC-0171: production file IS the proved term (no twin copy); db.rs shrinks to Env trampoline; glue.db_rs_extracted stays false (do not dump db.rs)."
     },
     {
       "id": "R-glue",

@@ -2114,7 +2114,10 @@ impl<E: Env> Db<E> {
                 }
                 Err(CoreError::Truncated(0)) => {
                     let len = env.metadata_len(&wal_path).unwrap_or(0);
-                    if len < 64 {
+                    if crate::write_admission_kernel::torn_head_is_empty_log(
+                        len,
+                        crate::write_admission_kernel::TINY_WAL_EMPTY_MAX,
+                    ) {
                         (Vec::new(), 0)
                     } else {
                         let escalated = crate::corrupt::escalate_or_fail(
@@ -2211,10 +2214,11 @@ impl<E: Env> Db<E> {
             // tail-cut below (the damage sits before `last_good` after a
             // re-anchor) — PointInTime rewrites the WAL from the recovered
             // records so the next open, even fail-closed, is clean.
-            if point_in_time_report
-                .as_ref()
-                .is_some_and(|r| r.kind == "resync")
-            {
+            if crate::write_admission_kernel::pit_resync_needs_rewrite(
+                point_in_time_report
+                    .as_ref()
+                    .is_some_and(|r| r.kind == "resync"),
+            ) {
                 let repair = dir.join(format!("{WAL_FILE_NAME}.repair"));
                 let mut w = Wal::create_on(&env, &repair)?;
                 w.set_full_fsync(opts.wal_full_fsync);
@@ -2237,22 +2241,25 @@ impl<E: Env> Db<E> {
                 // (crash between WAL sync and changelog persist).
                 let mut missing = Vec::new();
                 for op in &rec.ops {
-                    if op.sequence > feed_max {
+                    if crate::write_admission_kernel::seq_after_feed(op.sequence, feed_max) {
                         missing.push(ChangeEntry::from_write_op(op));
                     }
                 }
-                if !missing.is_empty() {
+                if !crate::write_admission_kernel::batch_is_empty(missing.len() as u64) {
                     change_log.extend(missing);
                 }
             }
-            if change_log.max_sequence().unwrap_or(0) > feed_max {
+            if crate::write_admission_kernel::seq_after_feed(
+                change_log.max_sequence().unwrap_or(0),
+                feed_max,
+            ) {
                 change_log.store_on(&env, &dir)?;
             }
             // RFC-0038 D: cut a torn tail to the last known-good offset so
             // new appends never sit on top of the damaged region (re-opening
             // would then fail-stop on its garbage as if it were records).
             let wal_len = env.metadata_len(&wal_path).unwrap_or(0);
-            if wal_len > last_good {
+            if crate::write_admission_kernel::torn_tail_needs_cut(wal_len, last_good) {
                 let mut wal_file = env.open_append(&wal_path)?;
                 wal_file.set_len(last_good)?;
                 wal_file.sync_data()?;
@@ -2273,7 +2280,7 @@ impl<E: Env> Db<E> {
         // dropped a high-seq tombstone). Keep last_sequence ≥ earliest so current
         // gets never look "too old" after reopen.
         let next_seq = max_seq.max(earliest_readable_seq).saturating_add(1).max(1);
-        if next_seq > MAX_SEQUENCE_NUMBER {
+        if crate::write_admission_kernel::seq_exhausted(next_seq, MAX_SEQUENCE_NUMBER) {
             return Err(CoreError::Internal(
                 "sequence number space exhausted".into(),
             ));
@@ -2954,9 +2961,11 @@ impl<E: Env> Db<E> {
     /// Stall knobs off (parity default): collecting CF families is unused.
     /// RFC-0149 P2.1: `batch_families` used to `to_string()` on every 1c put.
     fn write_admission_idle(&self) -> bool {
-        self.write_stall_mem_bytes.is_none()
-            && self.write_pressure_l0.is_none()
-            && self.write_stall_l0.is_none()
+        crate::write_admission_kernel::write_admission_idle(
+            self.write_stall_mem_bytes.is_some(),
+            self.write_pressure_l0.is_some(),
+            self.write_stall_l0.is_some(),
+        )
     }
 
     /// Whether flush/compact split by CF family.
@@ -9231,7 +9240,7 @@ impl<E: Env> Db<E> {
                 }
             }
         }
-        if records.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(records.len() as u64) {
             return Ok(self.last_sequence());
         }
         match self.commit_ops_with(records, durability) {
@@ -9684,7 +9693,7 @@ impl<E: Env> Db<E> {
 
     pub(crate) fn alloc_seq(&mut self) -> Result<SequenceNumber> {
         let seq = self.next_seq;
-        if seq > MAX_SEQUENCE_NUMBER {
+        if crate::write_admission_kernel::seq_exhausted(seq, MAX_SEQUENCE_NUMBER) {
             return Err(CoreError::Internal(
                 "sequence number space exhausted".into(),
             ));
@@ -9714,7 +9723,11 @@ impl<E: Env> Db<E> {
         // RFC-0015 H1: if append OK and required sync fails, fence so later fsyncs
         // cannot silently publish an unacked prefix while in-process mem diverges.
         // RFC-0040: encode into WAL scratch (one payload memcpy), then move ops to mem.
-        let do_sync = durability.sync.unwrap_or(self.sync);
+        let do_sync = crate::write_admission_kernel::wal_sync_required(
+            durability.sync.is_some(),
+            durability.sync.unwrap_or(false),
+            self.sync,
+        );
         self.vlog_prepare_wal(do_sync)?;
         // WAL is O_APPEND: a torn write_all leaves bytes at EOF. Fence on
         // append failure the same as sync failure.
@@ -9729,9 +9742,14 @@ impl<E: Env> Db<E> {
             }
         };
         self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
-        if do_sync {
+        if crate::write_admission_kernel::wal_sync_required(
+            durability.sync.is_some(),
+            durability.sync.unwrap_or(false),
+            self.sync,
+        ) {
             let sync_err = self.wal.lock().sync_data().err();
-            if let Some(e) = sync_err {
+            if crate::write_admission_kernel::fence_on_sync_fail(true, sync_err.is_some()) {
+                let e = sync_err.expect("fence_on_sync_fail ⇒ Some");
                 self.fence_durability(&e, FenceClass::of_core(&e));
                 return Err(e);
             }
@@ -9748,7 +9766,11 @@ impl<E: Env> Db<E> {
             self.change_log
                 .extend(records.iter().map(ChangeEntry::from_write_op));
         }
-        if do_sync {
+        if crate::write_admission_kernel::wal_sync_required(
+            durability.sync.is_some(),
+            durability.sync.unwrap_or(false),
+            self.sync,
+        ) {
             // RFC-0031: debounce the cache store. WAL is already durable.
             self.maybe_persist_changelog_after_durable_commit();
         }
@@ -9810,7 +9832,7 @@ impl<E: Env> Db<E> {
                 }
             }
         }
-        if records.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(records.len() as u64) {
             return Ok((records, self.last_sequence()));
         }
         crate::batch::share_consecutive_equal_values(&mut records);
@@ -9855,7 +9877,8 @@ impl<E: Env> Db<E> {
     pub(crate) fn wal_sync_group(&mut self) -> Result<()> {
         self.ensure_not_fenced()?;
         let sync_err = self.wal.lock().sync_data().err();
-        if let Some(e) = sync_err {
+        if crate::write_admission_kernel::fence_on_sync_fail(true, sync_err.is_some()) {
+            let e = sync_err.expect("fence_on_sync_fail ⇒ Some");
             self.fence_durability(&e, FenceClass::of_core(&e));
             return Err(e);
         }
@@ -10047,7 +10070,7 @@ impl<E: Env> Db<E> {
         }
         self.observe_bulk_batch(&ops);
         let (records, seq) = self.prepare_write_ops(ops)?;
-        if records.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(records.len() as u64) {
             return Ok((seq, None));
         }
         self.vlog_prepare_wal(true)?;
@@ -10548,7 +10571,7 @@ impl<E: Env> Db<E> {
 
     /// When open options require durability, fsync the directory (propagate errors).
     fn sync_dir_if_required(&self, dir: &Path) -> Result<()> {
-        if self.sync {
+        if crate::write_admission_kernel::dir_sync_required(self.sync) {
             self.env.sync_dir(dir)?;
         }
         Ok(())
@@ -10568,20 +10591,34 @@ impl<E: Env> Db<E> {
     }
 
     /// Per-CF stall (RFC-0065 P1.2). Empty `families` = global (kernel / mixed group).
+    ///
+    /// Data-fate (mem/L0 over limit) is `write_admit`. Drain/flush I/O stays
+    /// trampoline (RFC-0171 P1.1).
     pub(crate) fn ensure_write_admitted_for(&mut self, families: &[String]) -> Result<()> {
         let per_cf = !self.physical_cfs.is_empty() && !families.is_empty();
-        // Mem bound first: flush is the natural drain for mem pressure.
-        if let Some(limit) = self.write_stall_mem_bytes {
-            let mut mem_bytes = if per_cf {
+        let mem_armed = self.write_stall_mem_bytes.is_some();
+        let mem_limit = self.write_stall_mem_bytes.unwrap_or(0);
+        let measure_mem = |db: &Self| -> usize {
+            if per_cf {
                 families
                     .iter()
-                    .map(|f| self.mem.approx_memory_usage_cf(f))
+                    .map(|f| db.mem.approx_memory_usage_cf(f))
                     .max()
                     .unwrap_or(0)
             } else {
-                self.mem.approx_memory_usage()
-            };
-            if mem_bytes >= limit {
+                db.mem.approx_memory_usage()
+            }
+        };
+        let mut mem_bytes = measure_mem(self);
+        match crate::write_admission_kernel::write_admit(
+            mem_bytes as u64,
+            mem_armed,
+            mem_limit as u64,
+            0,
+            false,
+            0,
+        ) {
+            crate::write_admission_kernel::WriteAdmit::StallMem => {
                 if self.write_stall_drain {
                     if per_cf {
                         for f in families {
@@ -10590,79 +10627,95 @@ impl<E: Env> Db<E> {
                     } else {
                         let _ = self.flush();
                     }
-                    mem_bytes = if per_cf {
-                        families
-                            .iter()
-                            .map(|f| self.mem.approx_memory_usage_cf(f))
-                            .max()
-                            .unwrap_or(0)
-                    } else {
-                        self.mem.approx_memory_usage()
-                    };
+                    mem_bytes = measure_mem(self);
                 }
-                if mem_bytes >= limit {
-                    self.write_stall_count = self.write_stall_count.saturating_add(1);
-                    return Err(CoreError::WriteStallMem { mem_bytes, limit });
+                match crate::write_admission_kernel::write_admit(
+                    mem_bytes as u64,
+                    mem_armed,
+                    mem_limit as u64,
+                    0,
+                    false,
+                    0,
+                ) {
+                    crate::write_admission_kernel::WriteAdmit::StallMem => {
+                        self.write_stall_count = self.write_stall_count.saturating_add(1);
+                        return Err(CoreError::WriteStallMem {
+                            mem_bytes,
+                            limit: mem_limit,
+                        });
+                    }
+                    _ => {}
                 }
             }
+            _ => {}
         }
 
-        let l0_of = |db: &Self, fam: Option<&str>| -> usize {
-            match fam {
-                Some(f) if !db.physical_cfs.is_empty() => db.level_file_count_cf(f),
-                _ => db.level_file_count(0),
-            }
-        };
-
-        // Soft pressure (b): drain once when L0 is elevated, then continue to hard check.
-        if let Some(soft) = self.write_pressure_l0 {
-            let hit = if per_cf {
-                families.iter().any(|f| l0_of(self, Some(f)) >= soft)
-            } else {
-                l0_of(self, None) >= soft
-            };
-            if hit {
-                self.drain_l0_once();
-                self.write_pressure_count = self.write_pressure_count.saturating_add(1);
-            }
-        }
-
-        let Some(limit) = self.write_stall_l0 else {
-            return Ok(());
-        };
-        let mut l0 = if per_cf {
-            families
-                .iter()
-                .map(|f| l0_of(self, Some(f)))
-                .max()
-                .unwrap_or(0)
-        } else {
-            l0_of(self, None)
-        };
-        if l0 < limit {
-            return Ok(());
-        }
-        if self.write_stall_drain {
-            // One honest self-help pass — no sleep, no unbounded loop.
-            self.drain_l0_once();
-            l0 = if per_cf {
+        let measure_l0 = |db: &Self| -> usize {
+            if per_cf {
                 families
                     .iter()
-                    .map(|f| l0_of(self, Some(f)))
+                    .map(|f| db.level_file_count_cf(f))
                     .max()
                     .unwrap_or(0)
             } else {
-                l0_of(self, None)
-            };
-            if l0 < limit {
-                return Ok(());
+                db.level_file_count(0)
             }
+        };
+
+        let pressure_armed = self.write_pressure_l0.is_some();
+        let soft = self.write_pressure_l0.unwrap_or(0);
+        let l0_pressure = measure_l0(self);
+        if matches!(
+            crate::write_admission_kernel::write_admit(
+                0,
+                false,
+                0,
+                l0_pressure as u64,
+                pressure_armed,
+                soft as u64,
+            ),
+            crate::write_admission_kernel::WriteAdmit::StallL0
+        ) {
+            self.drain_l0_once();
+            self.write_pressure_count = self.write_pressure_count.saturating_add(1);
         }
-        self.write_stall_count = self.write_stall_count.saturating_add(1);
-        Err(CoreError::WriteStall {
-            l0_files: l0,
-            limit,
-        })
+
+        let l0_armed = self.write_stall_l0.is_some();
+        let l0_limit = self.write_stall_l0.unwrap_or(0);
+        let mut l0 = measure_l0(self);
+        match crate::write_admission_kernel::write_admit(
+            0,
+            false,
+            0,
+            l0 as u64,
+            l0_armed,
+            l0_limit as u64,
+        ) {
+            crate::write_admission_kernel::WriteAdmit::StallL0 => {
+                if self.write_stall_drain {
+                    self.drain_l0_once();
+                    l0 = measure_l0(self);
+                }
+                match crate::write_admission_kernel::write_admit(
+                    0,
+                    false,
+                    0,
+                    l0 as u64,
+                    l0_armed,
+                    l0_limit as u64,
+                ) {
+                    crate::write_admission_kernel::WriteAdmit::StallL0 => {
+                        self.write_stall_count = self.write_stall_count.saturating_add(1);
+                        Err(CoreError::WriteStall {
+                            l0_files: l0,
+                            limit: l0_limit,
+                        })
+                    }
+                    _ => Ok(()),
+                }
+            }
+            _ => Ok(()),
+        }
     }
 
     pub(crate) fn maybe_auto_flush(&mut self) -> Result<()> {
