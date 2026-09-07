@@ -3360,12 +3360,30 @@ impl<E: PedraEnv> DB<E> {
     /// # Errors
     /// Pedra flush errors (I/O).
     pub fn flush(&self) -> Result<()> {
+        self.flush_with_compact_notify(true)
+    }
+
+    /// Flush leftover mem/bulk **without** waking the compact worker.
+    ///
+    /// Scale `finish_hydrate` uses this so settle's `compact()` is not
+    /// queued behind a worker `job.write()` (~90 s @100M). `compact()`
+    /// already flushes again (no-op if quiet) and drains L0 itself.
+    ///
+    /// # Errors
+    /// Pedra flush errors (I/O).
+    pub fn flush_no_notify(&self) -> Result<()> {
+        self.flush_with_compact_notify(false)
+    }
+
+    fn flush_with_compact_notify(&self, notify: bool) -> Result<()> {
         // Serialize with the host L0 worker: compact deletes retired files
         // and must not race an in-flight L0 install (ENOENT on put/flush).
         let _gate = self.compact_gate.lock();
         let r = self.inner.flush().map_err(Error::from);
         drop(_gate);
-        self.notify_compact();
+        if notify {
+            self.notify_compact();
+        }
         r
     }
 
@@ -4517,31 +4535,36 @@ fn compat_compact_once<E: PedraEnv>(inner: &ConcurrentDb<E>, gate: &Mutex<()>) -
     }
     // try_lock: explicit DB::compact() must not wait out the whole L0
     // drain (~85 s @100M). The worker retries on the next 5 ms poll.
-    let Some(_gate) = gate.try_lock() else {
-        return false;
-    };
-    let job = inner.with_write(|db| {
-        if db.level_file_count(0) == 0 {
-            return None;
-        }
-        // Mirror core `maybe_auto_compact`: honor `auto_reclaim` with
-        // pin-aware GC (Rocks-shaped retention); default keeps history.
-        let opts = if db.auto_reclaim() {
-            let oldest = db
-                .oldest_pinned_sequence()
-                .unwrap_or_else(|| db.last_sequence());
-            CoreCompactOptions {
-                gc: pedradb_core::merge::CompactGcOptions::for_oldest_snapshot(oldest),
-                max_input_files: Some(COMPACT_MAX_L0_INPUTS),
-            }
-        } else {
-            CoreCompactOptions {
-                max_input_files: Some(COMPACT_MAX_L0_INPUTS),
-                ..CoreCompactOptions::default()
-            }
+    // Gate only around prepare + install. `job.write()` I/O used to
+    // hold compact_gate (~90 s @100M) so DB::compact's lock() waited
+    // out the merge; settle_parts compact_ns stayed 0.001s.
+    let job = {
+        let Some(_gate) = gate.try_lock() else {
+            return false;
         };
-        db.prepare_l0_compact(opts).ok().flatten()
-    });
+        inner.with_write(|db| {
+            if db.level_file_count(0) == 0 {
+                return None;
+            }
+            // Mirror core `maybe_auto_compact`: honor `auto_reclaim` with
+            // pin-aware GC (Rocks-shaped retention); default keeps history.
+            let opts = if db.auto_reclaim() {
+                let oldest = db
+                    .oldest_pinned_sequence()
+                    .unwrap_or_else(|| db.last_sequence());
+                CoreCompactOptions {
+                    gc: pedradb_core::merge::CompactGcOptions::for_oldest_snapshot(oldest),
+                    max_input_files: Some(COMPACT_MAX_L0_INPUTS),
+                }
+            } else {
+                CoreCompactOptions {
+                    max_input_files: Some(COMPACT_MAX_L0_INPUTS),
+                    ..CoreCompactOptions::default()
+                }
+            };
+            db.prepare_l0_compact(opts).ok().flatten()
+        })
+    };
     let Some(job) = job else {
         return false;
     };
@@ -4549,7 +4572,18 @@ fn compat_compact_once<E: PedraEnv>(inner: &ConcurrentDb<E>, gate: &Mutex<()>) -
         Ok(t) => t,
         Err(_) => return false,
     };
-    if !inner.install_prepared_l0_off_lock(job, tables) {
+    let Some(_gate) = gate.try_lock() else {
+        for t in &tables {
+            let p = t.path().to_path_buf();
+            inner.with_read(|db| {
+                let _ = db.env().remove_file(&p);
+            });
+        }
+        return false;
+    };
+    // One L0 job only. Pushdowns used to run 4 follow-up `job.write()`s
+    // still holding the gate. compact_leveled / the next tick drains.
+    if !inner.install_prepared_l0_job(job, tables) {
         return false;
     }
     inner.with_read(|db| db.level_file_count(0)) > 0
