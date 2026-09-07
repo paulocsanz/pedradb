@@ -370,3 +370,9 @@ name = "ScanKernel"
 
 [[lean_lib]]
 name = "Scan"
+
+[[lean_lib]]
+name = "CfKernel"
+
+[[lean_lib]]
+name = "Cf"

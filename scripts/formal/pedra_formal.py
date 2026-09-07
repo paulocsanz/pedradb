@@ -1219,6 +1219,10 @@ AENEAS_EXTRACTS = (
         "crates/pedradb-core/src/sst/scan_kernel.rs",
         "formal/aeneas/out/SOURCE.scan",
     ),
+    (
+        "crates/pedradb-core/src/cf_kernel.rs",
+        "formal/aeneas/out/SOURCE.cf",
+    ),
 )
 
 
