@@ -185,6 +185,18 @@ def merge.visible_at_as_is
   (_kind : key.ValueType) (_range_hidden : Bool) : Result Bool := do
   ok true
 
+/-- [pedra_aeneas_merge_kernel::merge::iter_window_keep]:
+    Source: 'src/../../../../crates/pedradb-core/src/merge.rs', lines 111:0-113:1
+    Visibility: public -/
+def merge.iter_window_keep (snapshot_live : Bool) : Result Bool := do
+  ok snapshot_live
+
+/-- [pedra_aeneas_merge_kernel::merge::iter_window_keep_as_is]:
+    Source: 'src/../../../../crates/pedradb-core/src/merge.rs', lines 117:0-119:1
+    Visibility: public -/
+def merge.iter_window_keep_as_is (_snapshot_live : Bool) : Result Bool := do
+  ok true
+
 /-- [pedra_aeneas_merge_kernel::merge::user_key_in_range]:
     Source: 'src/../../../../crates/pedradb-core/src/merge.rs', lines 131:0-143:1
     Visibility: public -/

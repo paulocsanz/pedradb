@@ -152,7 +152,7 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 | `c1_modelo` | `c1_modelo_kernel.rs` | `c1_modelo_joint_add_refuses` / `_as_is_dente` |
 | `capi_handles` | capi `handles.rs` | `c_len_admitted_oversize` / `_as_is_dente` / `c_path_walk_bytes_4k` / `c_free_table_admitted_false` (Charon `--start-from` len + path-walk + free-table; rest is IterMut) |
 | `batch` | `batch.rs` | `write_record_count_ok_prefix` / `_as_is_dente` (shim `#[path]` key.rs; `--start-from write_record_count_ok`; decode is early-return-in-loop) |
-| `merge` | `merge.rs` | `visible_at_deletion` / `_as_is_dente` / `user_key_in_range_unbounded` / `past_end_unbounded` (shim `#[path]` key+compact; `--start-from` visible_at + range + window bounds; WindowKvIter is Iterator) |
+| `merge` | `merge.rs` | `visible_at_deletion` / `_as_is_dente` / `user_key_in_range_unbounded` / `past_end_unbounded` / `iter_window_keep_hidden` (shim `#[path]` key+compact; `--start-from` visible_at + range + window bounds + keep; WindowKvIter is Iterator) |
 | `fail_closed` | `fail_closed.rs` | `parse_error_writes_status_true` / `reject_transfer_encoding_true` / `present_bad_int_is_error_true` / `parse_error_status_400` / `header_break_len_below_four` (`--start-from` F102 + F104/F105/F157/F158 + header_break + Expect; Windows `position` and Split clauseInst/`all`/`any` patched) |
 | `probe_order` | `probe_order_kernel.rs` | `first_probe_on_equal_lo_newer` / `_as_is_dente` (`--start-from first_probe_on_equal_lo`; walk is Iterator) |
 | `locktab` | `locktab.rs` | `wait_for_deadlock_is_loop` / `_as_is_dente` (`--start-from wait_for_deadlock`; `--exclude LockTable` nested borrows; HashMap/HashSet stay axioms) |

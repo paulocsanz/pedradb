@@ -29,3 +29,15 @@ theorem past_end_unbounded (k) :
     merge.past_end k core.ops.range.Bound.Unbounded = ok false := by
   unfold merge.past_end
   rfl
+
+/-- Hidden snapshot version is not emitted. -/
+theorem iter_window_keep_hidden :
+    merge.iter_window_keep false = ok false := by
+  unfold merge.iter_window_keep
+  rfl
+
+/-- AS-IS dente: a hidden version still emits. -/
+theorem iter_window_keep_as_is_dente :
+    merge.iter_window_keep_as_is false = ok true := by
+  unfold merge.iter_window_keep_as_is
+  rfl

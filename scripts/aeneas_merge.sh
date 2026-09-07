@@ -27,6 +27,8 @@ echo "      charon=$CHARON"
     --start-from 'crate::merge::range_tombstone_covers_as_is' \
     --start-from 'crate::merge::user_key_in_range' \
     --start-from 'crate::merge::past_end' \
+    --start-from 'crate::merge::iter_window_keep' \
+    --start-from 'crate::merge::iter_window_keep_as_is' \
     --dest-file "$OUT/merge_kernel.llbc" )
 "$AENEAS" -backend lean -dest "$OUT/lean" "$OUT/merge_kernel.llbc"
 {
