@@ -238,6 +238,22 @@ def main() -> int:
         print("FAIL wait_for_deadlock twin≠kernel did not fail")
         return 1
     print("ok mutant wait_for_deadlock twin≠kernel named")
+    cf_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in cf_mutant["pairs"]:
+        if pair.get("id") == "cf_family":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-core/verus/cf_family.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing cf_family")
+        return 1
+    hits = [m for m in _sa_fails(cf_mutant) if "cf_family" in m]
+    if not hits:
+        print("FAIL cf_family twin≠kernel did not fail")
+        return 1
+    print("ok mutant cf_family twin≠kernel named")
     # Drive the same rule through check_twins (may also report unrelated
     # dirty-tree twin drift; we only require the SA id).
     try:

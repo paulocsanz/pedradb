@@ -2,7 +2,8 @@
 # Machine-check CF-family membership (RFC-0150 P0).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-core/verus/cf_family.rs"
+# RFC-0171 P0.3 / RFC-0174: prove the file rustc links (pair cf_family).
+SRC="$ROOT/crates/pedradb-core/src/cf_kernel.rs"
 if [[ -x "${VERUS:-}" ]]; then
   :
 elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then

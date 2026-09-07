@@ -4229,8 +4229,9 @@
       "id": "cf_family",
       "finding": "RFC-0150 P0",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/cf_kernel.rs",
-      "twin": "crates/pedradb-core/verus/cf_family.rs",
+      "twin": "crates/pedradb-core/src/cf_kernel.rs",
       "verus": "scripts/verus_cf_family.sh",
       "callers": [
         "crates/pedradb-core/src/cf_kernel.rs",

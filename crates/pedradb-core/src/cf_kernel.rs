@@ -1,5 +1,11 @@
 //! Pure column-family membership / encode (RFC-0150 P0).
 //!
+//! **Single artifact (pair `cf_family`):** this file is what `rustc` links
+//! *and* what Verus proves (`cfg(verus_keep_ghost)`). Other catalog pairs on
+//! this file still have a twin-cópia until their turn.
+//!
+//!   ./scripts/verus_cf_family.sh
+//!
 //! Compat stores `cf\\0user`. Kernel keys without a NUL share the `default`
 //! family. A scan or compact of `default` that treats `lock\\0…` as in-family
 //! is the CF-leak silent-wrong (foreign keys in a CF iterator / compact of
@@ -8,12 +14,115 @@
 //! Production flush/compact/compat call these helpers. Bytes on disk stay
 //! with the caller.
 //!
-//! Verus twin: `crates/pedradb-core/verus/cf_family.rs`.
+//! The rustc bodies stay byte-stable so non-`single_artifact` twins still
+//! token-match. Verus proofs sit in the `cfg(verus_keep_ghost)` block
+//! above them (last-wins for lint is the rustc body).
 
 #![forbid(unsafe_code)]
 
+#[cfg(verus_keep_ghost)]
+use vstd::prelude::*;
+
+#[cfg(verus_keep_ghost)]
+verus! {
+
+/// Model of rustc `key_in_cf_family` (NUL position / prefix equality stand
+/// in for `&[u8]` — Vest-class: the `cf\0user` wire is unambiguous).
+pub open spec fn key_in_cf_family_spec(
+    nul_pos: Option<u64>,
+    family_is_default: bool,
+    prefix_is_default: bool,
+    prefix_is_family: bool,
+    key_len: u64,
+    family_len: u64,
+) -> bool {
+    if family_is_default {
+        match nul_pos {
+            None | Some(0) => true,
+            Some(_i) => prefix_is_default,
+        }
+    } else {
+        key_len > family_len && prefix_is_family
+    }
+}
+
+/// AS-IS scan leak: every key is in-family.
+pub open spec fn key_in_cf_family_as_is_spec(
+    _nul_pos: Option<u64>,
+    _family_is_default: bool,
+    _prefix_is_default: bool,
+    _prefix_is_family: bool,
+    _key_len: u64,
+    _family_len: u64,
+) -> bool {
+    true
+}
+
+pub fn key_in_cf_family(
+    nul_pos: Option<u64>,
+    family_is_default: bool,
+    prefix_is_default: bool,
+    prefix_is_family: bool,
+    key_len: u64,
+    family_len: u64,
+) -> (d: bool)
+    ensures
+        d == key_in_cf_family_spec(
+            nul_pos,
+            family_is_default,
+            prefix_is_default,
+            prefix_is_family,
+            key_len,
+            family_len,
+        ),
+{
+    if family_is_default {
+        match nul_pos {
+            None | Some(0) => true,
+            Some(_i) => prefix_is_default,
+        }
+    } else {
+        key_len > family_len && prefix_is_family
+    }
+}
+
+pub fn key_in_cf_family_as_is(
+    _nul_pos: Option<u64>,
+    _family_is_default: bool,
+    _prefix_is_default: bool,
+    _prefix_is_family: bool,
+    _key_len: u64,
+    _family_len: u64,
+) -> (d: bool)
+    ensures
+        d == true,
+{
+    true
+}
+
+/// A `lock\0k` key is not in `default`. AS-IS admits it (scan leak).
+/// Vest non-ambiguity: a foreign-CF encoding must not parse as default.
+proof fn lemma_as_is_admits_foreign_cf()
+    ensures
+        !key_in_cf_family_spec(Some(4), true, false, false, 6, 7),
+        key_in_cf_family_as_is_spec(Some(4), true, false, false, 6, 7),
+{
+}
+
+/// Raw and `default\0…` keys are in `default`.
+proof fn lemma_default_matches_raw_and_prefixed()
+    ensures
+        key_in_cf_family_spec(None, true, false, false, 3, 7),
+        key_in_cf_family_spec(Some(0), true, false, false, 2, 7),
+        key_in_cf_family_spec(Some(7), true, true, false, 9, 7),
+{
+}
+
+} // verus!
+
 /// Family of a user key: bytes before the first `0x00`, or `"default"` when
 /// the key has no NUL (kernel / default-raw) or a leading NUL.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn cf_family_of(user_key: &[u8]) -> String {
     match user_key.iter().position(|&b| b == 0) {
@@ -24,6 +133,7 @@ pub fn cf_family_of(user_key: &[u8]) -> String {
 
 /// Whether `user_key` belongs to `family` (`"default"` matches both raw keys
 /// and the `default\0…` prefix).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn key_in_cf_family(user_key: &[u8], family: &str) -> bool {
     if family == "default" {
@@ -38,12 +148,14 @@ pub fn key_in_cf_family(user_key: &[u8], family: &str) -> bool {
 }
 
 /// AS-IS scan leak: every key is in-family (a `lock\0…` key scans as `default`).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn key_in_cf_family_as_is(_user_key: &[u8], _family: &str) -> bool {
     true
 }
 
 /// Effective CF prefix bytes: empty when `default` is stored raw.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn cf_encode_effective<'a>(cf: &'a str, default_raw: bool) -> &'a str {
     if cf == "default" && default_raw {
@@ -54,6 +166,7 @@ pub fn cf_encode_effective<'a>(cf: &'a str, default_raw: bool) -> &'a str {
 }
 
 /// Encode `key` for `cf` (`cf\0key`, or raw when default-raw).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn encode_cf_key(cf: &str, key: &[u8], default_raw: bool) -> Vec<u8> {
     let effective = cf_encode_effective(cf, default_raw);
@@ -69,6 +182,7 @@ pub fn encode_cf_key(cf: &str, key: &[u8], default_raw: bool) -> Vec<u8> {
 
 /// Inverse of [`encode_cf_key`]: strip the `cf\0` prefix, or return `encoded`
 /// unchanged when default-raw.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn decode_cf_key<'a>(cf: &str, encoded: &'a [u8], default_raw: bool) -> &'a [u8] {
     let effective = cf_encode_effective(cf, default_raw);
@@ -79,6 +193,7 @@ pub fn decode_cf_key<'a>(cf: &str, encoded: &'a [u8], default_raw: bool) -> &'a 
 }
 
 /// SST CF tag from key bounds. Empty = mixed / prefix-era (more than one family).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn infer_sst_cf(smallest: Option<&[u8]>, largest: Option<&[u8]>) -> String {
     match (smallest, largest) {
@@ -100,6 +215,7 @@ pub fn infer_sst_cf(smallest: Option<&[u8]>, largest: Option<&[u8]>) -> String {
 ///
 /// Mixed/legacy files (empty tag) are left alone. A tagged file is rewritten
 /// only when a representative encoded key of that tag is in-family.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn compact_rewrites_sst_cf(sst_cf: &str, family: &str) -> bool {
     if sst_cf.is_empty() {
@@ -109,6 +225,7 @@ pub fn compact_rewrites_sst_cf(sst_cf: &str, family: &str) -> bool {
 }
 
 /// AS-IS compact leak: rewrite every SST (lock compact walks default).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn compact_rewrites_sst_cf_as_is(_sst_cf: &str, _family: &str) -> bool {
     true
