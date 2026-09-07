@@ -1149,6 +1149,7 @@ impl YcsbRunner {
         let records = self.cfg.records;
         let yval = std::sync::Arc::new(vec![b'k'; self.cfg.payload]);
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+        let phase0 = e.write_phase_snapshot();
         let t0 = Instant::now();
         let mut lats = Vec::with_capacity(cfg_ops * clients);
         let mut errors = 0u64;
@@ -1182,7 +1183,18 @@ impl YcsbRunner {
             }
         });
         let name = format!("kvrocks_set_mc{clients}");
-        let block = summarize_mc(
+        let mut avg_group = 0.0;
+        if let Some((sub, queued, groups, gops)) = e.write_group_stats() {
+            avg_group = if groups == 0 {
+                0.0
+            } else {
+                gops as f64 / groups as f64
+            };
+            eprintln!(
+                "[rocks-parity] write_group submits={sub} queued={queued} groups={groups} ops={gops} avg_group={avg_group:.2}"
+            );
+        }
+        let mut block = summarize_mc(
             &name,
             cfg_ops * clients,
             t0.elapsed(),
@@ -1194,15 +1206,10 @@ impl YcsbRunner {
             "[rocks-parity] {name} done ops={} errors={errors}",
             cfg_ops * clients
         );
-        if let Some((sub, queued, groups, gops)) = e.write_group_stats() {
-            let avg = if groups == 0 {
-                0.0
-            } else {
-                gops as f64 / groups as f64
-            };
-            eprintln!(
-                "[rocks-parity] write_group submits={sub} queued={queued} groups={groups} ops={gops} avg_group={avg:.2}"
-            );
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, clients as u64, avg_group, 0);
+            eprint_write_diagnose(&name, &d);
+            block = attach_diagnose(block, Some(&d));
         }
         vec![block]
     }
