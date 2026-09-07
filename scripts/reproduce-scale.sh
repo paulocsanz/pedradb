@@ -6,6 +6,8 @@
 #   SCALE_ENTRIES=1000000 ./scripts/reproduce-scale.sh fjall   /tmp/scale-fjall
 #   SCALE_ENTRIES=1000000 ./scripts/reproduce-scale.sh rocksdb /tmp/scale-rocks
 #
+# 50M (RFC-0168 P2.2): SCALE_ENTRIES=50000000 SCALE_CACHE_BYTES=268435456 \
+#       ./scripts/reproduce-scale.sh pedradb /tmp/scale-50m-pedra
 # 100M: SCALE_ENTRIES=100000000 SCALE_CACHE_BYTES=268435456 TMPDIR=/data/stores \
 #       ./scripts/reproduce-scale.sh pedradb /data/scale-100m-pedra
 set -euo pipefail

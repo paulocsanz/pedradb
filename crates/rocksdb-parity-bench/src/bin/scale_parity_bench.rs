@@ -7,7 +7,7 @@
 //! SCALE_BACKENDS=rocksdb SCALE_ENTRIES=1000000 cargo run --release -p rocksdb-parity-bench --features real --bin scale-parity-bench -- /tmp/scale-rocks
 //! ```
 //!
-//! 25M/100M: one backend per process (default). See `scripts/reproduce-scale.sh`.
+//! 25M/50M/100M: one backend per process (default). See `scripts/reproduce-scale.sh`.
 
 #![forbid(unsafe_code)]
 
