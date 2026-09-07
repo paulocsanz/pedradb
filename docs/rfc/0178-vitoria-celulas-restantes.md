@@ -27,7 +27,7 @@ Células que o utilizador mandou fechar, com o facto (não o slogan):
 | get_loop 50M→100M | **432 → 427 µs** (P0.9 r9) | Era 5,39 ms skip-WARM / ~2 ms com WARM+`stats()` walk. r9: settle deixa de clonar 100M valores; pread 16→1,4 µs/file. Darwin 1-run, não vs Rocks, não 4 GiB |
 | ycsb_f_mc4 run2 | intra-run **0,766×**; mediana **PASS 1,473×** | Rocks spikeou 90,3 kqps; Pedra estável 66–69 k. Não é Pedra a piorar |
 | probe_miss | **0,27×** pós-bloom; skip tombstone **sem** 3-run | O(ficheiros) vazio já saiu (0167). Razão publicável continua 0,27× até a caixa |
-| overwrite_mc4 | **0,61×** Darwin 3-run mediana (P0.12) | Era 0,45× isolado / 0,56× in-suite. Adaptive group 2–8. p95 107→45 µs. Ainda <1×. Não G1. P1.3 = caixa |
+| overwrite_mc4 | Darwin [0180](0180-overwrite-mc4-gt1x.md) P0.9 mediana **1,002×** (p42; named loss 0,816). P1.3 = caixa | Isolado 0,45× → adaptive 0,61× → 0180 1,00×. 3/3 quiet ≥1× é 0182 P1.1. Não G1 |
 
 Disco vs Fjall (245 vs 222 B/e) e G1 writes **não** estão neste RFC
 (0168 P2.1 / Agents.md).
@@ -131,7 +131,8 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
       **ou** ceiling se ainda O(n) — status: `todo`
 - [ ] **P1.2** prefix slipstream 100M 3-run ≥1,0× (fecha o 0,70×) —
       status: `todo`
-- [ ] **P1.3** overwrite_mc4 isolado 3-run ≥1,0× — status: `todo`
+- [ ] **P1.3** overwrite_mc4 isolado 3-run ≥1,0× **na caixa** —
+      status: `todo` (Darwin fechou em 0180; 3/3 quiet é 0182 P1.1)
 - [ ] **P1.4** ycsb_f_mc4 3/3 intra-run ≥1,0× (não só mediana) —
       status: `todo`
 
@@ -162,7 +163,7 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
 | P0.12 | p0 | adaptive async group 2–8 | done | overwrite_mc4 0.61× 3-run (era 0.45×); still named loss | 2026-09-07 |
 | P1.1 | p1 | probe_miss ≥1× 3-run caixa | todo | — | 2026-09-06 |
 | P1.2 | p1 | prefix 0,70× → ≥1× caixa | todo | — | 2026-09-06 |
-| P1.3 | p1 | overwrite isolado ≥1× caixa | todo | — | 2026-09-06 |
+| P1.3 | p1 | overwrite isolado ≥1× caixa | todo | Darwin 0180; 3/3 quiet 0182 P1.1 | 2026-09-07 |
 | P1.4 | p1 | f_mc4 3/3 intra-run ≥1× | todo | — | 2026-09-06 |
 | P2.1 | p2 | Duas curvas na escada | done | `pedra scale` 50M/100M mode=hot; get_loop 403/405µs | 2026-09-07 |
 | P2.2 | p2 | 50M/100M 4 GiB = bounded-cache | todo | — | 2026-09-06 |

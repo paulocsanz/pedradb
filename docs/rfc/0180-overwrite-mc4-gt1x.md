@@ -140,7 +140,9 @@ medida no mesmo harness isolado.
 
 ### P2 — polish
 
-- [ ] **P2.1** none yet — status: `todo`
+- [ ] **P2.1** overwrite_mc4 3-run **3/3 quietos ≥1,0×** (não mediana
+      com named loss 0,816) — status: `todo` (filho [0182](0182-same-boot-write-path-harnesses.md) P1.1)
+- [ ] **P2.2** Leftover hang — status: `todo` (filho [0181](0181-leftover-follower-nao-pende.md))
 
 ## Status (living — update with every PR)
 
@@ -185,7 +187,8 @@ medida no mesmo harness isolado.
 | P0.37 | p0 | catch-up skip batch≥2 any n | done | no active≤8 gate | 2026-09-07 |
 | P0.38 | p0 | flush size check every async Ok | done | no 31-op overshoot | 2026-09-07 |
 | P1.1 | p1 | 3-run caixa | todo | — | 2026-09-07 |
-| P2.1 | p2 | none yet | todo | — | 2026-09-07 |
+| P2.1 | p2 | 3/3 quiet ≥1× | todo | 0182 P1.1 | 2026-09-07 |
+| P2.2 | p2 | leftover hang | todo | 0181 | 2026-09-07 |
 
 ## Acceptance Criteria
 
@@ -200,4 +203,4 @@ medida no mesmo harness isolado.
 
 - G1 write row as win. Peer `sync=true`. Fjall as gate.
 - Bake 4 GiB box. mmap, `unsafe`, chunk 4 MiB, RFC-0175.
-- ycsb_f_mc4 3/3 on the box.
+- ycsb_f_mc4 3/3 on the box (0182 / 0178 P1.4). Apply skiplist (0183).
