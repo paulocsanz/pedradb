@@ -46,3 +46,32 @@ theorem wal_rotate_as_is_ignores_pin :
       = ok WalRotateAction.RotateWal := by
   unfold wal_rotate_decision_as_is_ignore_pin
   rfl
+
+/-- ConcurrentDb lock-order: a commit in the off-lock fd window keeps the WAL
+    (flush must not truncate bytes the writer still owns). -/
+theorem wal_rotate_commit_inflight_keeps :
+    wal_rotate_decision
+      { mem_empty := true, imm_present := false, pin_live := false,
+        parked_unflushed := false, commit_inflight := true }
+      = ok WalRotateAction.KeepWal := by
+  unfold wal_rotate_decision
+  rfl
+
+/-- Other branch of the same caller: idle pipeline with no inflight rotates. -/
+theorem wal_rotate_idle_rotates :
+    wal_rotate_decision
+      { mem_empty := true, imm_present := false, pin_live := false,
+        parked_unflushed := false, commit_inflight := false }
+      = ok WalRotateAction.RotateWal := by
+  unfold wal_rotate_decision
+  rfl
+
+/-- Write-lock client protocol: inflight still keeps even if the as-is
+    mutant ignores the flush pin (commit_inflight is not the pin hole). -/
+theorem wal_rotate_inflight_keeps_on_as_is_pin :
+    wal_rotate_decision_as_is_ignore_pin
+      { mem_empty := true, imm_present := false, pin_live := false,
+        parked_unflushed := false, commit_inflight := true }
+      = ok WalRotateAction.KeepWal := by
+  unfold wal_rotate_decision_as_is_ignore_pin
+  rfl

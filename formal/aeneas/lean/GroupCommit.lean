@@ -9,7 +9,7 @@
 -- statements live in the Verus twin, verified by scripts/verus_group_commit.sh).
 import Aeneas
 import GroupCommitKernel
-open Aeneas Std Result
+open Aeneas Std Result ControlFlow
 open pedra_aeneas_group_commit_kernel
 
 /-- Structural lawfulness for the error enum (BEq is derived). -/
@@ -137,3 +137,29 @@ theorem concurrent_occ_empty_window :
     occ_conflict (10#u64) (10#u64) true = ok false := by
   unfold occ_conflict
   rfl
+
+/-- ConcurrentDb `validate_occ_batch`: a lagging member (window `(7, 9]`,
+    touched) conflicts. Unfolds `group_validate` (loop body calls
+    `occ_conflict`) and the callee on the same input. -/
+theorem group_validate_lagging_member_conflicts :
+    group_validate
+        (⟨[{ snap := 7#u64, touched_key_written_after := true }],
+          by native_decide⟩)
+        (9#u64) =
+      ok (⟨[true], by native_decide⟩ : alloc.vec.Vec Bool) ∧
+      occ_conflict (7#u64) (9#u64) true = ok true := by
+  refine ⟨LawfulBEq.eq_of_beq (by native_decide), ?_⟩
+  unfold occ_conflict
+  rfl
+
+/-- Second possibility of the same OCC edge: serialized scheduler conflicts
+    where the group form on an empty window does not. -/
+theorem group_occ_vs_serialized_same_input :
+    occ_conflict (10#u64) (10#u64) true = ok false ∧
+      occ_conflict_as_is_serialized (10#u64) (10#u64) (1#u64) true = ok true ∧
+      group_validate
+          (⟨[{ snap := 10#u64, touched_key_written_after := true }],
+            by native_decide⟩)
+          (10#u64) =
+        ok (⟨[false], by native_decide⟩ : alloc.vec.Vec Bool) := by
+  refine ⟨rfl, rfl, LawfulBEq.eq_of_beq (by native_decide)⟩

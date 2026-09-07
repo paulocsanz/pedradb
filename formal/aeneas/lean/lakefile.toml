@@ -436,3 +436,6 @@ name = "ComposeScanCrc"
 
 [[lean_lib]]
 name = "ComposeC1Membership"
+
+[[lean_lib]]
+name = "ComposeConcurrent"

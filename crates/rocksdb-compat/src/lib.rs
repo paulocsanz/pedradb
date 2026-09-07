@@ -158,6 +158,7 @@ impl From<CoreError> for Error {
             // F196: post-commit manifest unsynced — surfaced by off-lock
             // host persisters; an I/O durability condition.
             CoreError::ManifestCommittedUnsynced { .. } => ErrorKind::Io,
+            CoreError::DiskPressure { .. } => ErrorKind::Io,
         };
         Self {
             msg: e.to_string(),

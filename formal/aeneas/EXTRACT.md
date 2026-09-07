@@ -280,9 +280,14 @@ the composition files and fails on a missing file or the substring `sorry`.
 | Scan `sst_crc_fate` | Crc extract `crc_match_ok` | `sst_crc_fate_mismatch_via_crc_extract` / `_equal_via_crc_extract` | `sst_crc_fate_as_is_via_crc_as_is` |
 | C1Modelo `c1_modelo` | Membership extract `joint_election_ok` | `c1_modelo_joint_add_via_membership_extract` / `_single_cfg_via_membership_extract` | `c1_modelo_as_is_via_membership_as_is` |
 | T1Modelo `t1_modelo` | Txn `leftover_txn_is_aborted` (shim copy) | `t1_modelo_empty` (already unfolds both) | `leftover_txn_is_aborted_as_is_dente` in `Txn.lean` |
+| ConcurrentDb `validate_occ_batch` | `group_validate` / `occ_conflict` | `group_validate_lagging_member_conflicts` | `group_occ_vs_serialized_same_input` |
+| ConcurrentDb off-lock fd | `may_publish_group` ∧ Flush `wal_rotate_decision` | `concurrent_publish_and_inflight_keep_wal` | `concurrent_publish_ok_and_idle_rotates` / `concurrent_as_is_publish_lie_inflight_still_keeps` |
+| ConcurrentDb lock-order | Flush `wal_rotate_decision` (`commit_inflight`) | `wal_rotate_commit_inflight_keeps` | `wal_rotate_idle_rotates` |
+| TransactionDB 2PL | `wait_for_deadlock` | `wait_for_deadlock_is_loop` | `wait_for_deadlock_as_is_dente` / `wait_for_deadlock_loop_vs_as_is` |
+| ConcurrentDb scheduler residual | `lock_interleavings_admitted` | `lock_interleavings_not_a_theorem` | `lock_interleavings_as_is_dente` |
 
 Cross-lib files: `ComposeIterMerge.lean`, `ComposeMembershipClone.lean`,
-`ComposeScanCrc.lean`, `ComposeC1Membership.lean`.
+`ComposeScanCrc.lean`, `ComposeC1Membership.lean`, `ComposeConcurrent.lean`.
 
 Measured cross-lib refuses (do not invent a merge of the two Kernels):
 
