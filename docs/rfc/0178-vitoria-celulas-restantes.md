@@ -24,7 +24,7 @@ Células que o utilizador mandou fechar, com o facto (não o slogan):
 |---|---|---|
 | prefix perna bloom | **0,70×** slipstream 100M (577 vs 404 µs) | mesma perna do bloom 10 bpk; Pedra 459/577/627 µs (variância); **caixa 4 GiB**, bounded-cache |
 | prefix 25M→100M | **67 → 125 µs** same-harness | janela **fixa** 1000 chaves (`ROUTES_PER_SERVICE`); 2× mais lento a 4× n. 100M **sem** WARM (cap era 3 GiB). Fjall já ~125 µs @25M |
-| get_loop 50M→100M | **432 µs → 5,39 ms** | 50M Darwin **WARM** (4,3 µs/get); 100M **skip WARM** (53,9 µs/get). Cliff de regime, não de n. Cap agora `max(3 GiB, 3/4 RAM)` ≈ 72 GiB aqui: 22 GiB **cabe** |
+| get_loop 50M→100M | **432 → 427 µs** (P0.9 r9) | Era 5,39 ms skip-WARM / ~2 ms com WARM+`stats()` walk. r9: settle deixa de clonar 100M valores; pread 16→1,4 µs/file. Darwin 1-run, não vs Rocks, não 4 GiB |
 | ycsb_f_mc4 run2 | intra-run **0,766×**; mediana **PASS 1,473×** | Rocks spikeou 90,3 kqps; Pedra estável 66–69 k. Não é Pedra a piorar |
 | probe_miss | **0,27×** pós-bloom; skip tombstone **sem** 3-run | O(ficheiros) vazio já saiu (0167). Razão publicável continua 0,27× até a caixa |
 | overwrite_mc4 | **0,557×** in-suite; isolado Darwin ~ Rocks guest | Isolar primeiro; depois >1× |
@@ -103,7 +103,10 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
       status: `done`
 - [x] **P0.9** `stats()`/`property_int_value` não materializa SST
       inline. `vlog_size_stats` só anda valores quando há vlog.
-      Scale settle: um `stats()` (não 7×). Testes
+      Scale settle: um `stats()` (não 7×). DIAG r9: settle
+      **1.743 s** (`stats=0.008s`), get_loop **427 µs** (50M 432),
+      get_hit **4.4 µs**. Cliff fechou neste host. Não vs Rocks,
+      não 4 GiB. Testes
       `rfc0178_stats_without_vlog_skips_sst_value_walk` /
       `rfc0178_stats_with_vlog_still_counts_live_bytes`.
       status: `done`
@@ -139,7 +142,7 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
 | P0.6 | p0 | Worker one compact job per tick | done | `compat_compact_once` once per poll, not `while`; r4 settle 90.9 s | 2026-09-07 |
 | P0.7 | p0 | Drop compact_gate during job.write | done | r5 settle 101.6 s / get_loop 7.18 ms | 2026-09-07 |
 | P0.8 | p0 | compact_no_flush after hydrate | done | skip 2nd flush; no discard-delete; r8 compact=1.745s | 2026-09-07 |
-| P0.9 | p0 | stats() skip SST walk without vlog | done | `vlog_size_stats` short-circuit; settle one `stats()` | 2026-09-07 |
+| P0.9 | p0 | stats() skip SST walk without vlog | done | r9 settle 1.743s / get_loop 427µs (flat vs 50M) | 2026-09-07 |
 | P1.1 | p1 | probe_miss ≥1× 3-run caixa | todo | — | 2026-09-06 |
 | P1.2 | p1 | prefix 0,70× → ≥1× caixa | todo | — | 2026-09-06 |
 | P1.3 | p1 | overwrite isolado ≥1× caixa | todo | — | 2026-09-06 |
