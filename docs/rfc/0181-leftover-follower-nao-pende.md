@@ -53,8 +53,9 @@ quem já teve Ok. Sem timed condvar (Darwin coalescing, RFC-0180 P0.15).
 
 ### P1 — recover / caixa
 
-- [ ] **P1.1** `async_concurrent_writers_recover` + steal ainda
-      entrega todas as keys — status: `todo`
+- [x] **P1.1** `async_concurrent_writers_recover` + steal ainda
+      entrega todas as keys — status: `done`
+      (`rfc0181_grouped_async_writers_recover_all_keys`)
 - [ ] **P1.2** overwrite_mc4 isolado 1-run Darwin avg ≥2,3 e sem
       hang no shutdown do bench — status: `todo`
 
@@ -69,13 +70,14 @@ quem já teve Ok. Sem timed condvar (Darwin coalescing, RFC-0180 P0.15).
 | P0.1 | p0 | RFC | done | este ficheiro | 2026-09-07 |
 | P0.2 | p0 | teste que pende sem steal | done | `rfc0181_without_steal_*` | 2026-09-07 |
 | P0.3 | p0 | steal no resign | done | `FollowerSlot::Steal`; avg 2.46 | 2026-09-07 |
-| P1.1 | p1 | recover + keys | todo | — | 2026-09-07 |
+| P1.1 | p1 | recover + keys | done | `rfc0181_grouped_async_writers_recover_all_keys` | 2026-09-07 |
 | P1.2 | p1 | overwrite avg ≥2,3 | todo | — | 2026-09-07 |
 | P2.1 | p2 | none yet | todo | — | 2026-09-07 |
 
 ## Acceptance Criteria
 
 - **Tests:** P0.2 falha (timeout) no HEAD actual; P0.3 faz passar.
+  P1.1: `rfc0181_grouped_async_writers_recover_all_keys`.
   Não reintroduzir drain-in-lead (P0.36).
 - **Telemetry / Analytics:** `write_group` avg_group no log do
   overwrite_mc4; sem `PEDRA_STALL` `follower_recv` ≥1 s no shutdown.

@@ -7023,6 +7023,73 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// RFC-0181 P1.1: grouped async writers (steal path) recover every Ok.
+    #[test]
+    fn rfc0181_grouped_async_writers_recover_all_keys() {
+        let (_gate, _hooks) = rfc0181_begin(false, 0);
+        let dir = temp_dir();
+        const THREADS: u8 = 8;
+        const PER: u8 = 24;
+        {
+            let db = ConcurrentDb::open_with(
+                &dir,
+                OpenOptions {
+                    wal_full_fsync: true,
+                    history: Default::default(),
+                    wal_recovery: Default::default(),
+                    sync: false,
+                    auto_flush_bytes: None,
+                    auto_compact_sst_count: None,
+                    auto_compact_sst_bytes: None,
+                    exclusive: true,
+                    large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
+                },
+            )
+            .unwrap();
+            let live = db.clone();
+            let payload = vec![b'm'; 1024];
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                std::thread::scope(|s| {
+                    for t in 0..THREADS {
+                        let db = &db;
+                        let payload = &payload;
+                        s.spawn(move || {
+                            for i in 0..PER {
+                                db.put_with([b'g', t, i], payload, WriteOptions::no_sync())
+                                    .unwrap();
+                            }
+                        });
+                    }
+                });
+                db.close().unwrap();
+                let _ = tx.send(());
+            });
+            let finished = rx.recv_timeout(Duration::from_secs(8)).is_ok();
+            if !finished {
+                live.writes.test_abort_pending();
+            }
+            assert!(
+                finished,
+                "RFC-0181 P1.1: grouped async writers must finish with steal"
+            );
+        }
+        let db = ConcurrentDb::open(&dir).unwrap();
+        let payload = vec![b'm'; 1024];
+        for t in 0..THREADS {
+            for i in 0..PER {
+                assert_eq!(
+                    db.get(&[b'g', t, i]).as_deref(),
+                    Some(payload.as_slice()),
+                    "lost grouped async put t{t}/{i}"
+                );
+            }
+        }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// RFC-0042 P1.1 — pure break-even policy for the catch-up window.
     #[test]
     fn catchup_bound_policy() {
