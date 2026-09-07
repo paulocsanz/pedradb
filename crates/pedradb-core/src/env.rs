@@ -553,9 +553,9 @@ impl FileHandleCache {
         }
     }
 
-    /// Cached handle for `path`. No LRU bump: 25M settle is ~90 SSTs and
-    /// the default cap is 256, so get_loop's 100 preads never evict. A
-    /// write lock + tick on every miss-path get was exclusive-mutex tax
+    /// Cached handle for `path`. No LRU bump: 100M settle is ~347 SSTs
+    /// and the default cap is 1024, so get_loop's 100 preads never evict.
+    /// A write lock + tick on every miss-path get was exclusive-mutex tax
     /// (lookup_100 calm-1 0.87× vs in-band Rocks).
     fn get(&self, path: &Path) -> Option<Arc<Mutex<Box<dyn EnvFile + Send>>>> {
         self.inner.read().map.get(path).map(|h| Arc::clone(&h.file))

@@ -2484,10 +2484,20 @@ impl<E: Env> ConcurrentDb<E> {
         // `if let Some(plan) = self.inner.read().take_warm_plan()` keeps the
         // temporary ReadGuard alive for the whole block; `inner.write()` then
         // self-deadlocks (parking_lot RwLock is not reentrant).
+        let t0 = std::time::Instant::now();
         let plan = self.inner.read().take_warm_plan();
-        let warmed = plan.map(crate::env::WarmPlan::run).unwrap_or_default();
-        if !warmed.is_empty() {
-            self.inner.write().note_warmed_ssts(&warmed);
+        if let Some(plan) = plan {
+            let streamed: u64 = plan.jobs.iter().map(|(_, l)| *l).sum();
+            let n_files = plan.jobs.len();
+            let warmed = plan.run();
+            let ns = u64::try_from(t0.elapsed().as_nanos()).unwrap_or(u64::MAX);
+            eprintln!(
+                "flush_warm: files={n_files} bytes={streamed} warmed={} ns={ns}",
+                warmed.len()
+            );
+            if !warmed.is_empty() {
+                self.inner.write().note_warmed_ssts(&warmed);
+            }
         }
         Ok(())
     }
