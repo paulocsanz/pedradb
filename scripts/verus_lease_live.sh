@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Machine-check lease_live / lease_table_expired / next_lease_id_after
-# (RFC-0002 P6 / F7 / F56). Twin of crates/pedradb-dcs/src/lease_kernel.rs.
+# (RFC-0002 P6 / F7 / F56).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-dcs/verus/lease_live.rs"
+# RFC-0171 P0.3 / RFC-0174: prove the file rustc links (pair lease).
+SRC="$ROOT/crates/pedradb-dcs/src/lease_kernel.rs"
 
 if [[ -x "${VERUS:-}" ]]; then
   :

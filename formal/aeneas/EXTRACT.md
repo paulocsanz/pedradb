@@ -144,7 +144,7 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 | `store_ae_ack` | store `ae_ack_kernel.rs` | `ae_ack_success_dirty_without_persist` / `_as_is_dente` |
 | `store_vote` | store `vote_kernel.rs` | `vote_decision_stale_term` / `_as_is_dente` |
 | `key` | `key.rs` | `pack_sequence_and_type_def` / `_as_is_dente` (shim names `CoreError::Internal` without thiserror; InternalKey Eq `impl_def` patched like Vote Option::eq) |
-| `lease` | dcs `lease_kernel.rs` | `lease_live_zero` / `_as_is_dente` (`Ord.max.default` patched to pass `lt`) |
+| `lease` | dcs `lease_kernel.rs` | `lease_live_zero` / `_as_is_dente` (`Ord.max.default` patched to pass `lt`; pair `lease` is single_artifact: production file is the Verus term) |
 | `txn` | store `txn_kernel.rs` | `txn_commit_action_abort_reverts` / `_as_is_dente` (same Ord.max patch) |
 | `t1_modelo` | `t1_modelo_kernel.rs` | `t1_modelo_empty` / `_as_is_dente` (shim `#[path]` txn_kernel) |
 | `membership` | raft `membership_kernel.rs` | `joint_election_ok_needs_both` / `elect_claim_banner_bounded` (`&'static str` bottoms patched to `toStr`; Ord.max patch) |

@@ -983,8 +983,9 @@
       "id": "lease",
       "finding": "F7/F56",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-dcs/src/lease_kernel.rs",
-      "twin": "crates/pedradb-dcs/verus/lease_live.rs",
+      "twin": "crates/pedradb-dcs/src/lease_kernel.rs",
       "verus": "scripts/verus_lease_live.sh",
       "callers": [
         "crates/pedradb-dcs/src/command.rs"

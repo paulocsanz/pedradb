@@ -190,6 +190,22 @@ def main() -> int:
         print("FAIL commit_raft twin≠kernel did not fail")
         return 1
     print("ok mutant commit_raft twin≠kernel named")
+    lease_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in lease_mutant["pairs"]:
+        if pair.get("id") == "lease":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-dcs/verus/lease_live.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing lease")
+        return 1
+    hits = [m for m in _sa_fails(lease_mutant) if "lease" in m]
+    if not hits:
+        print("FAIL lease twin≠kernel did not fail")
+        return 1
+    print("ok mutant lease twin≠kernel named")
     # Drive the same rule through check_twins (may also report unrelated
     # dirty-tree twin drift; we only require the SA id).
     try:
