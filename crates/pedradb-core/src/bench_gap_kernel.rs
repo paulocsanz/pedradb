@@ -304,10 +304,13 @@ fn write_lever(
     {
         return WriteLever::LockConvoy;
     }
+    // Get-only / mixed: p50 is the get. Timed=0 (no write in the window)
+    // used to fall through to `prepare` (ycsb_c, qs_neg). Unattributed
+    // ≥50% of p50 is the same hole when a rare write inflates WRITEPHASE.
+    if inp.read_pct >= 40 && (timed == 0 || bps(unattr, inp.pedra_ns) >= UNATTRIBUTED_READ_BPS) {
+        return WriteLever::GetPath;
+    }
     if timed > 0 && bps(unattr, inp.pedra_ns) >= UNATTRIBUTED_READ_BPS {
-        if inp.read_pct >= 40 {
-            return WriteLever::GetPath;
-        }
         return WriteLever::ReadOrClient;
     }
     if dominant == WritePhase::FlushCheck {
@@ -705,6 +708,19 @@ mod tests {
         let mut unknown = inp;
         unknown.read_pct = 0;
         assert_eq!(diagnose_write(unknown).lever, WriteLever::ReadOrClient);
+    }
+
+    #[test]
+    fn ycsb_c_all_reads_timed_zero_is_get_path() {
+        let mut inp = rfc0183_1c();
+        inp.pedra_ns = 4_400;
+        inp.rocks_ns = 0;
+        inp.clients = 1;
+        inp.read_pct = 100;
+        inp.phases = WritePhases::default();
+        assert_eq!(diagnose_write(inp).lever, WriteLever::GetPath);
+        inp.read_pct = 0;
+        assert_eq!(diagnose_write(inp).lever, WriteLever::Prepare);
     }
 
     #[test]

@@ -317,7 +317,8 @@ cargo run -q --release -p rocksdb-parity-bench --bin pedra -- diagnose get \
 With `PEDRA_WRITE_PHASE_STATS=1` the parity harness prints
 `diagnose <shape> dominant=… lever=…` after phasesΔ and writes
 `benches[].diagnose.lever` into the bench JSON (overwrite, apply,
-ycsb 1c/mc, raftlog 1c/mc, kvrocks_set_mc50). `rocks-parity-compare` copies it onto each
+ycsb 1c/mc, raftlog 1c/mc, kvrocks_set_mc50, qs_hot_get / qs_neg_lookup /
+qs_batch_write). `rocks-parity-compare` copies it onto each
 ratio row (`diagnose: {"lever":…}` or `null`).
 
 Multi-shape **balance** (RFC-0182 / `/otimizar`): never ship an engine
