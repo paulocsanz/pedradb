@@ -321,14 +321,23 @@ fn run_one(store: &mut dyn ScaleStore, dir: &Path, n: usize, vlen: usize, pool: 
     let mut state = 0x0123_4567_89AB_CDEFu64;
     let mut hit = Vec::with_capacity(PROBES);
     let mut miss = Vec::with_capacity(PROBES);
+    let cost_on = pedradb_core::cost::enabled();
+    let mut miss_considered = 0u64;
+    let mut miss_ops = 0u64;
     for _ in 0..PROBES {
         let i = (next_rand(&mut state) % n as u64) as usize;
         let t = Instant::now();
         let _ = store.get(key(i).as_bytes());
         hit.push(t.elapsed().as_nanos() as u64);
+        let c0 = cost_on.then(pedradb_core::cost::read);
         let t = Instant::now();
         let _ = store.get(miss_key(i).as_bytes());
         miss.push(t.elapsed().as_nanos() as u64);
+        if let Some(c0) = c0 {
+            let d = pedradb_core::cost::read().since(&c0);
+            miss_considered = miss_considered.saturating_add(d.point_sst_considered);
+            miss_ops = miss_ops.saturating_add(d.point_ops);
+        }
     }
     eprintln!(
         "probe_hit/{label}: p50 {:.1}µs / p99 {:.1}µs / p999 {:.1}µs / max {:.1}µs",
@@ -341,6 +350,21 @@ fn run_one(store: &mut dyn ScaleStore, dir: &Path, n: usize, vlen: usize, pool: 
         "probe_miss/{label}: mean {:.1}µs (n={PROBES})",
         mean_us(&miss)
     );
+    if cost_on {
+        let per_get = if miss_ops == 0 {
+            0
+        } else {
+            miss_considered / miss_ops
+        };
+        let f =
+            pedradb_core::scale_kernel::scale_forecast(n as u64, cache_bytes().unwrap_or(64 << 30));
+        let class = pedradb_core::classify_probes(per_get, f.p_best);
+        eprintln!(
+            "diagnose probes probe_miss/{label} per_get={per_get} p_best={} class={}",
+            f.p_best,
+            class.token()
+        );
+    }
 
     let mut gstate = 0xDEAD_BEEFu64;
     let mut gets = Vec::with_capacity(GET_HIT_N);

@@ -18,7 +18,7 @@ Refresh this file when a cell moves class. One row per cell.
 | **overwrite_mc4 25M** | **U** | Linux 0.557× 3/3; Darwin 0180 ~1.00 mediana (named 0.816); **caixa pós-0180 none** | unknown on Linux; Darwin avg_group 2.46 | RFC-0178 P1.3 / 0180 P1.1 / 0184 P1.1 |
 | ycsb_f_mc4 3/3 intra | **W** | Linux mediana 1.47; run2 0.766 | not yet diagnose | RFC-0178 P1.4 |
 | prefix 100M 4 GiB | **W** | caixa 0.70× | bounded-cache scan (not walk-all until cost says) | RFC-0178 P1.2 |
-| probe_miss | **W** | 0.27× | miss path | RFC-0178 P1.1 / 0167 |
+| probe_miss | **W** | 0.27× | miss path; scale `classify_probes` vs \(P_{\mathrm{best}}\) (0184 P2.4) | RFC-0178 P1.1 / 0167 / 0184 |
 | 1c overwrite Darwin | **C**/DIAG | 0.845× | `wal_encode_or_write` despark=0 | RFC-0183 / 0184 |
 | apply_mc4 Darwin async | **C**/DIAG | 0.478× (pré P0.5) | `flush_check`; 0184 P0.5 default-over parks whole mem O(1) | RFC-0183 / 0184 P0.5 |
 | kvrocks_set_mc50 | **C** | 0.37× | `lock_convoy` Adaptive off n≥16; WRITEPHASE → `diagnose.lever` (0184 P2.3) | RFC-0178 / 0183 / 0184 |
@@ -30,7 +30,7 @@ Refresh this file when a cell moves class. One row per cell.
 ## Próxima fase (rank da skill, 2026-09-07)
 
 1. **U / Linux `overwrite_mc4` isolado + diagnose + `balance`** (caixa). Sem bake: não ratio-win Darwin. Skill **ainda implementa** o próximo furo local.
-2. **Done this turn:** 0184 P2.3 — `kvrocks_set_mc50` WRITEPHASE → `diagnose.lever` (`lock_convoy`).
-3. prefix 0.70× / probe_miss — reads, caixa.
+2. **Done this turn:** 0184 P2.4 — scale `probe_miss` + COST_TRACE → `classify_probes` (walk-all ≠ disk).
+3. prefix 0.70× — reads, caixa.
 
 Não: skiplist. Não: n=50 merge. Não: turno vazio porque “é caixa”.

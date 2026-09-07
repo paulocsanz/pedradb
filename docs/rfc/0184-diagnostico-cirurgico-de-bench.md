@@ -86,6 +86,9 @@ a linha quando há phasesΔ. Sem harness novo.
 - [x] **P2.3** `kvrocks_set_mc50` WRITEPHASE → `diagnose.lever`
       (`lock_convoy` n≥16; kernel `mc50_bypass_is_lock_convoy`).
       — status: `done`
+- [x] **P2.4** scale `probe_miss` + `PEDRA_COST_TRACE` →
+      `classify_probes` vs \(P_{\mathrm{best}}\) (walk-all ≠ "disk").
+      — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -103,6 +106,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.1 | p2 | raftlog diagnose.lever | done | 1c + mcN WRITEPHASE → JSON | 2026-09-07 |
 | P2.2 | p2 | ycsb 1c diagnose.lever | done | `YcsbRunner::run` WRITEPHASE + read_pct | 2026-09-07 |
 | P2.3 | p2 | kvrocks mc50 diagnose.lever | done | n≥16 lock_convoy from WRITEPHASE | 2026-09-07 |
+| P2.4 | p2 | scale probe_miss classify_probes | done | COST_TRACE vs P_best; as_is_walk | 2026-09-07 |
 
 ## Acceptance Criteria
 
@@ -118,6 +122,7 @@ a linha quando há phasesΔ. Sem harness novo.
   ycsb 1c `run()` `diagnose.lever` (P2.2);
   `kvrocks_set_mc50` `diagnose.lever` (P2.3);
   `mc50_bypass_is_lock_convoy`;
+  `classify_probes_on_walk_all_is_not_ok`;
   `rfc0184_diagnosis_json_has_lever`;
   `extract_diagnose_lever_from_bench_object`.
 - **Telemetry / Analytics:** uma linha `diagnose dominant=… lever=…`;
