@@ -3,7 +3,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-core/verus/manifest_recover.rs"
+# RFC-0171 P0.3 / RFC-0174: prove the file rustc links (pair manifest_recover).
+SRC="$ROOT/crates/pedradb-core/src/manifest_kernel.rs"
 
 if [[ -x "${VERUS:-}" ]]; then
   :

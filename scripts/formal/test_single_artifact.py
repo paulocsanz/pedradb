@@ -270,6 +270,22 @@ def main() -> int:
         print("FAIL vlog_recover twin≠kernel did not fail")
         return 1
     print("ok mutant vlog_recover twin≠kernel named")
+    manifest_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in manifest_mutant["pairs"]:
+        if pair.get("id") == "manifest_recover":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-core/verus/manifest_recover.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing manifest_recover")
+        return 1
+    hits = [m for m in _sa_fails(manifest_mutant) if "manifest_recover" in m]
+    if not hits:
+        print("FAIL manifest_recover twin≠kernel did not fail")
+        return 1
+    print("ok mutant manifest_recover twin≠kernel named")
     # Drive the same rule through check_twins (may also report unrelated
     # dirty-tree twin drift; we only require the SA id).
     try:
