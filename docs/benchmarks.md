@@ -292,3 +292,27 @@ done
 
 Smoke (P0.2 exit-0): `ROCKS_YCSB_OPS=1000` on the parity loop;
 `SLIPSTREAM_BENCH_ENTRIES=1000000` is already the 1M smoke.
+
+## RFC-0184 — diagnose (surgical cut)
+
+Same ns in → same `lever` out. No new harness. Linux is the scoreboard;
+Darwin DIAG is not a vs-Rocks win.
+
+```sh
+# 1c overwrite (0183): WAL, not skiplist. --rocks-ns 0 skips gap shares.
+cargo run -q --release -p rocksdb-parity-bench --bin pedra -- diagnose write \
+  --pedra-ns 3300 --rocks-ns 2600 --clients 1 \
+  --wal-ns 2460 --mem-ns 140 --publish-ns 70 --prepare-ns 30 --flush-ns 30
+
+# apply_mc4: flush_check, mem/gap < 15% → do not despark 0055.
+cargo run -q --release -p rocksdb-parity-bench --bin pedra -- diagnose write \
+  --pedra-ns 203170 --rocks-ns 97163 --clients 4 --avg-group 7.13 \
+  --wal-ns 10310 --mem-ns 2896 --flush-ns 148310 --lock-ns 560 --prepare-ns 640
+
+# get vs RFC-0176 clock (1B @ 64 GiB). class=as_is_walk ⇒ P = N_files.
+cargo run -q --release -p rocksdb-parity-bench --bin pedra -- diagnose get \
+  --keys 1000000000 --ram 68719476736 --measured-ns 61000
+```
+
+With `PEDRA_WRITE_PHASE_STATS=1` the parity harness prints
+`diagnose <shape> dominant=… lever=…` after phasesΔ.

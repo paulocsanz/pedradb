@@ -787,6 +787,7 @@ impl YcsbRunner {
                     us(b[5].saturating_sub(a[5])),
                     us(b[6].saturating_sub(a[6])),
                 );
+                eprint_write_diagnose("deps_cache_overwrite", pct(&lats, 50.0), a, b, 1, 0.0);
             }
         }
 
@@ -2553,14 +2554,15 @@ impl YcsbRunner {
                 "[rocks-parity] deps_apply_batch mc{clients} done ops={} errors={errors}",
                 cfg_ops * clients
             );
+            let mut avg_group = 0.0;
             if let Some((sub, queued, groups, gops)) = e.write_group_stats() {
-                let avg = if groups == 0 {
+                avg_group = if groups == 0 {
                     0.0
                 } else {
                     gops as f64 / groups as f64
                 };
                 eprintln!(
-                    "[rocks-parity] write_group submits={sub} queued={queued} groups={groups} ops={gops} avg_group={avg:.2}"
+                    "[rocks-parity] write_group submits={sub} queued={queued} groups={groups} ops={gops} avg_group={avg_group:.2}"
                 );
             }
             if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
@@ -2574,6 +2576,14 @@ impl YcsbRunner {
                     us(b[4].saturating_sub(a[4])),
                     us(b[5].saturating_sub(a[5])),
                     us(b[6].saturating_sub(a[6])),
+                );
+                eprint_write_diagnose(
+                    &format!("deps_apply_batch_mc{clients}"),
+                    pct(&lats, 50.0),
+                    a,
+                    b,
+                    clients as u64,
+                    avg_group,
                 );
             }
         }
@@ -2795,6 +2805,34 @@ fn pct(sorted: &[f64], p: f64) -> f64 {
     }
     let idx = ((p / 100.0) * (sorted.len() as f64 - 1.0)).round() as usize;
     sorted[idx.min(sorted.len() - 1)]
+}
+
+/// RFC-0184: one diagnose line from WRITEPHASE deltas (per commit).
+fn eprint_write_diagnose(
+    tag: &str,
+    pedra_p50_ms: f64,
+    a: [u64; 7],
+    b: [u64; 7],
+    clients: u64,
+    avg_group: f64,
+) {
+    let n = b[0].saturating_sub(a[0]).max(1);
+    let per = |i: usize| b[i].saturating_sub(a[i]) / n;
+    let d = pedradb_core::diagnose_write(pedradb_core::WriteGapInput {
+        pedra_ns: (pedra_p50_ms * 1_000_000.0) as u64,
+        rocks_ns: 0,
+        clients,
+        avg_group_bps: (avg_group * 10_000.0) as u64,
+        phases: pedradb_core::WritePhases {
+            prepare_ns: per(1),
+            wal_ns: per(2),
+            mem_ns: per(3),
+            publish_ns: per(4),
+            flush_check_ns: per(5),
+            lock_wait_ns: per(6),
+        },
+    });
+    eprintln!("[rocks-parity] diagnose {tag} {}", d.line());
 }
 
 fn summarize(name: &str, n: usize, wall: Duration, lats_ms: &mut [f64]) -> String {
