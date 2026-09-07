@@ -7149,31 +7149,40 @@ impl<E: Env> Db<E> {
     /// RFC-0168 P1.1: blocking page-cache fill through `sst_source`
     /// (the same fd `get` preads). No-op unless [`crate::env::settle_warm_on`]
     /// and a file source is attached (bounded open). Default skips when
-    /// live SST bytes exceed [`crate::env::settle_warm_max_bytes`].
+    /// live SST bytes exceed [`crate::env::settle_warm_max_bytes`], or
+    /// when ingest already streamed this set (so settle stays O(1)).
     fn maybe_warm_ssts(&self) {
-        if !crate::env::settle_warm_on() {
-            return;
+        if let Some(plan) = self.take_warm_plan() {
+            plan.run();
         }
-        let Some(src) = self.sst_source.as_ref() else {
-            return;
-        };
-        let mut jobs: Vec<(&std::path::Path, u64)> = Vec::with_capacity(self.ssts.len());
+    }
+
+    pub(crate) fn take_warm_plan(&self) -> Option<crate::env::WarmPlan> {
+        if !crate::env::settle_warm_on() {
+            return None;
+        }
+        let src = self.sst_source.as_ref()?.clone();
+        let mut jobs: Vec<(std::path::PathBuf, u64)> = Vec::with_capacity(self.ssts.len());
         let mut total = 0u64;
         for table in &self.ssts {
             let Ok(len) = self.env.metadata_len(table.path()) else {
                 continue;
             };
             total = total.saturating_add(len);
-            jobs.push((table.path(), len));
+            jobs.push((table.path().to_path_buf(), len));
         }
-        if !crate::env::settle_warm_unlimited() && total > crate::env::settle_warm_max_bytes() {
-            return;
+        if jobs.is_empty() {
+            return None;
         }
-        for (path, len) in jobs {
-            if src.warm(path, len).is_ok() {
-                crate::env::add_settle_warm_bytes(len);
+        if !crate::env::settle_warm_unlimited() {
+            if total > crate::env::settle_warm_max_bytes() {
+                return None;
+            }
+            if crate::env::settle_warm_streamed() >= total {
+                return None;
             }
         }
+        Some(crate::env::WarmPlan { src, jobs })
     }
 
     /// `PEDRA_LEVEL_DIAG=1`: per-level file count + on-disk bytes at a
@@ -12700,6 +12709,13 @@ mod tests {
         assert!(n > 0, "under-cap default must stream, got {n}");
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0168: RAM-aware cap never drops below the 10M floor (3 GiB).
+    #[test]
+    fn rfc0168_warm_cap_at_least_10m_floor() {
+        std::env::remove_var("PEDRA_SETTLE_WARM_MAX_BYTES");
+        assert!(crate::env::settle_warm_max_bytes() >= crate::env::DEFAULT_SETTLE_WARM_MAX_BYTES);
     }
 
     /// RFC-0157 P1.4 — db.rs stage 1: golden-fingerprint characterization
