@@ -21,7 +21,8 @@ pub mod persist;
 pub mod vote_kernel;
 
 pub use ae_kernel::{
-    ae_ack_success, ae_ack_success_as_is, ae_entry_action, ae_prev_log_ok, AeEntryAction,
+    ae_ack_success, ae_ack_success_as_is, ae_entry_action, ae_entry_action_as_is_rewrite_committed,
+    ae_f16_safe, ae_f16_safe_as_is, ae_prev_log_ok, AeEntryAction,
 };
 pub use apply_kernel::{apply_advance, apply_advance_as_is_skip_holes, ApplyAction};
 pub use c1_modelo_kernel::{c1_advance_commit, c1_advance_commit_as_is, c1_modelo, c1_modelo_as_is};

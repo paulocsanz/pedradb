@@ -130,6 +130,20 @@ pub fn ae_f16_safe(
     true
 }
 
+/// AS-IS F16: vacuous always-true safety gate (no check at all). Mutant must
+/// fail the theorem — it passes a committed rewrite the production gate rejects.
+#[must_use]
+pub fn ae_f16_safe_as_is(
+    _entry_index: u64,
+    _entry_term: u64,
+    _existing_term: Option<u64>,
+    _commit_index: u64,
+    _last_log_index: u64,
+    _action: AeEntryAction,
+) -> bool {
+    true
+}
+
 /// F48 protocol: AE `success: true` only if a dirty log was persisted.
 ///
 /// `success ⇒ !log_dirty ∨ persist_ok`. Persist is an axiom (FailingEnv / det_io).
@@ -309,6 +323,17 @@ mod tests {
                                             m
                                         ),
                                         "mutant must violate F16 here"
+                                    );
+                                    assert!(
+                                        ae_f16_safe_as_is(
+                                            entry_index,
+                                            entry_term,
+                                            existing,
+                                            commit_index,
+                                            last_log_index,
+                                            m
+                                        ),
+                                        "AS-IS dente: vacuous gate blesses committed rewrite"
                                     );
                                 }
                             }
