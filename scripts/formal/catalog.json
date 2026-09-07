@@ -3074,8 +3074,9 @@
       "id": "tx_glue",
       "finding": "F47/F34",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-store/src/tx_glue_kernel.rs",
-      "twin": "crates/pedradb-store/verus/tx_glue.rs",
+      "twin": "crates/pedradb-store/src/tx_glue_kernel.rs",
       "verus": "scripts/verus_tx_glue.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"

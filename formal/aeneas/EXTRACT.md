@@ -125,7 +125,7 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 | `manifest` | `manifest_kernel.rs` | `sst_recover_absent_scans` |
 | `compact` | core `compact_kernel.rs` | `compact_pick_empty_noop` |
 | `vlog_gc` | `vlog_gc_kernel.rs` | `vlog_recover_blob_opens` |
-| `tx_glue` | `tx_glue_kernel.rs` | `tx_range_keep_committed` |
+| `tx_glue` | `tx_glue_kernel.rs` | `tx_range_keep_committed` (single_artifact: production file is the Verus term) |
 | `l28` | `l28.rs` | `l28_durability_all_ok` |
 | `tcg` | `tcg.rs` | `tcg_guest_admitted_true` |
 | `cqe` | `cqe_kernel.rs` | `cqe_res_ok_nonneg` / `submit_complete_act_harvested` / `_as_is_dente` (`RUSTFLAGS=--cfg test`; Atomic telemetry in `submit_complete_act` stripped) |

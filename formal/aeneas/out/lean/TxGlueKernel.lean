@@ -15,7 +15,7 @@ set_option maxRecDepth 2048
 namespace pedra_aeneas_tx_glue_kernel
 
 /-- [pedra_aeneas_tx_glue_kernel::TxRangeAction]
-    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 18:0-27:1
+    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 49:0-58:1
     Visibility: public -/
 @[discriminant isize]
 inductive TxRangeAction where
@@ -24,35 +24,35 @@ inductive TxRangeAction where
 | LocalRevert : TxRangeAction
 
 /-- [pedra_aeneas_tx_glue_kernel::{impl core::clone::Clone for pedra_aeneas_tx_glue_kernel::TxRangeAction}::clone]:
-    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 17:9-17:14
+    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 48:9-48:14
     Visibility: public -/
 def TxRangeAction.Insts.CoreCloneClone.clone
   (self : TxRangeAction) : Result TxRangeAction := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_tx_glue_kernel::{impl core::clone::Clone for pedra_aeneas_tx_glue_kernel::TxRangeAction}]
-    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 17:9-17:14 -/
+    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 48:9-48:14 -/
 @[reducible]
 def TxRangeAction.Insts.CoreCloneClone : core.clone.Clone TxRangeAction := {
   clone := TxRangeAction.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [pedra_aeneas_tx_glue_kernel::{impl core::marker::Copy for pedra_aeneas_tx_glue_kernel::TxRangeAction}]
-    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 17:16-17:20 -/
+    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 48:16-48:20 -/
 @[reducible]
 def TxRangeAction.Insts.CoreMarkerCopy : core.marker.Copy TxRangeAction := {
   cloneInst := TxRangeAction.Insts.CoreCloneClone
 }
 
 /-- Trait implementation: [pedra_aeneas_tx_glue_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_tx_glue_kernel::TxRangeAction}]
-    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 17:22-17:31 -/
+    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 48:22-48:31 -/
 @[reducible]
 def TxRangeAction.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq TxRangeAction := {
 }
 
 /-- [pedra_aeneas_tx_glue_kernel::{impl core::cmp::PartialEq<pedra_aeneas_tx_glue_kernel::TxRangeAction> for pedra_aeneas_tx_glue_kernel::TxRangeAction}::eq]:
-    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 17:22-17:31
+    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 48:22-48:31
     Visibility: public -/
 def TxRangeAction.Insts.CoreCmpPartialEqTxRangeAction.eq
   (self : TxRangeAction) (other : TxRangeAction) : Result Bool := do
@@ -61,7 +61,7 @@ def TxRangeAction.Insts.CoreCmpPartialEqTxRangeAction.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_tx_glue_kernel::{impl core::cmp::PartialEq<pedra_aeneas_tx_glue_kernel::TxRangeAction> for pedra_aeneas_tx_glue_kernel::TxRangeAction}]
-    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 17:22-17:31 -/
+    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 48:22-48:31 -/
 @[reducible]
 def TxRangeAction.Insts.CoreCmpPartialEqTxRangeAction : core.cmp.PartialEq
   TxRangeAction TxRangeAction := {
@@ -69,14 +69,14 @@ def TxRangeAction.Insts.CoreCmpPartialEqTxRangeAction : core.cmp.PartialEq
 }
 
 /-- [pedra_aeneas_tx_glue_kernel::{impl core::cmp::Eq for pedra_aeneas_tx_glue_kernel::TxRangeAction}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 17:33-17:35
+    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 48:33-48:35
     Visibility: public -/
 def TxRangeAction.Insts.CoreCmpEq.assert_fields_are_eq
   (self : TxRangeAction) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_tx_glue_kernel::{impl core::cmp::Eq for pedra_aeneas_tx_glue_kernel::TxRangeAction}]
-    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 17:33-17:35 -/
+    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 48:33-48:35 -/
 @[reducible]
 def TxRangeAction.Insts.CoreCmpEq : core.cmp.Eq TxRangeAction := {
   partialEqInst := TxRangeAction.Insts.CoreCmpPartialEqTxRangeAction
@@ -84,7 +84,7 @@ def TxRangeAction.Insts.CoreCmpEq : core.cmp.Eq TxRangeAction := {
 }
 
 /-- [pedra_aeneas_tx_glue_kernel::{impl core::fmt::Debug for pedra_aeneas_tx_glue_kernel::TxRangeAction}::fmt]:
-    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 17:37-17:42
+    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 48:37-48:42
     Visibility: public -/
 def TxRangeAction.Insts.CoreFmtDebug.fmt
   (self : TxRangeAction) (f : core.fmt.Formatter) :
@@ -99,14 +99,14 @@ def TxRangeAction.Insts.CoreFmtDebug.fmt
     core.fmt.Formatter.write_str f (toStr "LocalRevert")
 
 /-- Trait implementation: [pedra_aeneas_tx_glue_kernel::{impl core::fmt::Debug for pedra_aeneas_tx_glue_kernel::TxRangeAction}]
-    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 17:37-17:42 -/
+    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 48:37-48:42 -/
 @[reducible]
 def TxRangeAction.Insts.CoreFmtDebug : core.fmt.Debug TxRangeAction := {
   fmt := TxRangeAction.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_tx_glue_kernel::tx_range_action]:
-    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 32:0-40:1
+    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 64:0-66:1
     Visibility: public -/
 def tx_range_action
   (range_committed : Bool) (tx_failed : Bool) : Result TxRangeAction := do
@@ -118,7 +118,7 @@ def tx_range_action
   else ok TxRangeAction.KeepCommitted
 
 /-- [pedra_aeneas_tx_glue_kernel::tx_range_action_as_is_local_only]:
-    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 46:0-52:1
+    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 73:0-75:1
     Visibility: public -/
 def tx_range_action_as_is_local_only
   (_range_committed : Bool) (tx_failed : Bool) : Result TxRangeAction := do

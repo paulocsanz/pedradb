@@ -87,7 +87,7 @@ comportamento. "Callers" é o que o lint do freeze exige chamar a entrada.
 | grant_persist | `pedradb-raft/src/vote_kernel.rs` | close | `pedradb-raft/lib.rs` |
 | **group_commit** | `pedradb-core/src/group_commit_kernel.rs` | close | `pedradb-core/concurrent.rs` |
 | **group_fence** | `pedradb-core/src/group_commit_kernel.rs` | close | `pedradb-core/db.rs` |
-| tx_glue | `pedradb-store/src/tx_glue_kernel.rs` | close | `pedradb-store/lib.rs` |
+| tx_glue | `pedradb-store/src/tx_glue_kernel.rs` | close, single_artifact | `pedradb-store/lib.rs` |
 | **cf_family** | `pedradb-core/src/cf_kernel.rs` | model | `memtable.rs`, `sst/table.rs`, `db.rs`, `rocksdb-compat/lib.rs` |
 | **visible_at** | `pedradb-core/src/merge.rs` | close | `merge.rs`, `memtable.rs`, `db.rs` |
 | **ikey_pack** | `pedradb-core/src/key.rs` | close | `key.rs` |

@@ -126,6 +126,22 @@ def main() -> int:
         print("FAIL iter_window twin≠kernel did not fail")
         return 1
     print("ok mutant iter_window twin≠kernel named")
+    glue_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in glue_mutant["pairs"]:
+        if pair.get("id") == "tx_glue":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/tx_glue.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing tx_glue")
+        return 1
+    hits = [m for m in _sa_fails(glue_mutant) if "tx_glue" in m]
+    if not hits:
+        print("FAIL tx_glue twin≠kernel did not fail")
+        return 1
+    print("ok mutant tx_glue twin≠kernel named")
     # Drive the same rule through check_twins (may also report unrelated
     # dirty-tree twin drift; we only require the SA id).
     try:
