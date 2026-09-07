@@ -2476,6 +2476,7 @@ impl<E: Env> ConcurrentDb<E> {
         // `Db::flush`) — the rotate above dropped the WAL rebuild source
         // for the flushed keys.
         g.persist_changelog_after_explicit_flush();
+        g.maybe_bounded_cache_after_write();
         drop(g);
         // RFC-0168: populate the get fd during flush (hydrate timer in the
         // scale harness) so get_hit stays RAM-speed while the store fits

@@ -1,6 +1,6 @@
 # RFC-0173 — Bounded-cache: degradar para lentidão, não para Err/OOM
 
-**Status:** in-progress
+**Status:** done
 **Updated:** 2026-09-06
 **Parents:** [0168](0168-vitoria-por-celula-toda-escala.md) (WARM default + cap 3 GiB),
 [0162](0162-hydrate-scale-rate-decay.md) (DONTNEED por chunk no bulk),
@@ -16,8 +16,9 @@
 - Bulk já dá `posix_fadvise(DONTNEED)` no chunk (RFC-0162). Memtable flush
   e compact **não**. O over-cap era um no-op silencioso.
 - Writes recusar com `Err(RamBudget)` foi recusado: o produto é lentidão,
-  não falha de put. Índice+bloom ainda são always-resident (lazy-index
-  LRU é P2 — 1B-em-4GB).
+  não falha de put. Índice+bloom deixam de ser always-resident no
+  bounded-cache (P2.1+P2.3): first-keys paginam do tail; handles em
+  RAM são 1 sample / 32 blocos.
 
 ## Problems This Solves
 
@@ -60,9 +61,13 @@ hit — não vale. DONTNEED-all + LRU do block cache é o intermediário.
 
 ### P2 — later / polish
 
-- [ ] **P2.1** Índice+bloom evictable (lazy-index LRU) — sem isso 1B
-      num box 4 GiB ainda SIGKILL no RSS, não no page cache —
-      status: `todo`
+- [x] **P2.1** Índice+bloom evictable (lazy-index LRU) — first-keys
+      saem do heap (pread do tail on-disk + LRU 64 MiB); bloom cai
+      se metadata > 512 MiB. Writes Ok —
+      status: `done`
+- [x] **P2.3** Índice de dois níveis: RAM guarda 1 sample / 32 blocos,
+      o run é um pread do tail. 1B keys ≈ 50M blocos → ~1,6M samples
+      (~20 MiB) em vez de 1,4 GiB de SoA — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -71,7 +76,8 @@ hit — não vale. DONTNEED-all + LRU do block cache é o intermediário.
 | P0.1 | p0 | Over-cap DONTNEED (bounded-cache) | done | `enter_bounded_cache_mode`; `rfc0168_settle_warm_cap_skips_over_budget` | 2026-09-06 |
 | P0.2 | p0 | RAMPRESSURE warn + properties | done | `DbStats` + `pedra.ram-*` | 2026-09-06 |
 | P1.1 | p1 | Scale `mode=bounded-cache` | done | `PedraScale::settle` | 2026-09-06 |
-| P2.1 | p2 | Lazy-index LRU | todo | — | 2026-09-06 |
+| P2.1 | p2 | Lazy-index LRU | done | `page_index` file-backed; `page_indexes_for_ram`; `rfc0173_paged_index_loads_keys_from_file` + `rfc0173_bounded_cache_pages_index_and_gets` | 2026-09-06 |
+| P2.3 | p2 | Índice dois níveis (fanout 32) | done | `INDEX_HANDLE_FANOUT`; `rfc0173_two_level_handles_are_sublinear` | 2026-09-06 |
 
 ## Acceptance Criteria
 
@@ -84,7 +90,8 @@ hit — não vale. DONTNEED-all + LRU do block cache é o intermediário.
 - **Documentation:** este RFC.
 - **Screenshots:** backend-only.
 - **Product:** put/flush/compact **não** devolvem Err por RAM. Degradação
-  é lentidão. SIGKILL só se índice+bloom não cabem (P2.1).
+  é lentidão. P2.1 pagina first-keys; P2.3 amostra handles 1/32. Bloom
+  pode cair se metadata > 512 MiB.
 
 ## Out of scope
 

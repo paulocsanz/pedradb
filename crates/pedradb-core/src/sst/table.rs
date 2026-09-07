@@ -381,6 +381,391 @@ struct BlockHandle {
     p8: u64,
 }
 
+/// Blocks per index page (RFC-0167 P2.4).
+const INDEX_PAGE_BLOCKS: usize = 4;
+/// File-backed handle fanout (RFC-0173 P2.3): RAM keeps one sample per
+/// this many blocks; the run is pread from the on-disk index tail.
+const INDEX_HANDLE_FANOUT: usize = 32;
+
+/// Sparse index with LRU-decoded first-keys under a byte budget.
+///
+/// File-backed (kit present, `index_file_off > 0`): two-level handles
+/// (RFC-0173 P2.3) — one sample per [`INDEX_HANDLE_FANOUT`] blocks in RAM;
+/// a run is one pread of the on-disk index tail. Blob fallback is tests
+/// without a file offset (RFC-0167 / RFC-0173 P2.1).
+#[derive(Debug)]
+struct PagedIndex {
+    p8s: Arc<[u64]>,
+    sample_p8s: Arc<[u64]>,
+    sample_file_rel: Arc<[u32]>,
+    fanout: usize,
+    key_cp: usize,
+    index_file_off: u64,
+    path: PathBuf,
+    src: Option<Arc<dyn crate::env::SstFileSource>>,
+    blob: Option<Arc<[u8]>>,
+    blob_key_off: Arc<[u32]>,
+    n: usize,
+    lru: Mutex<IndexPageLru>,
+    runs: Mutex<HandleRunLru>,
+}
+
+#[derive(Debug, Clone)]
+struct SlimHandle {
+    offset: u64,
+    length: u32,
+    p8: u64,
+}
+
+#[derive(Debug, Clone)]
+struct HandleRun {
+    handles: Arc<[SlimHandle]>,
+    keys: Arc<[Bytes]>,
+}
+
+#[derive(Debug)]
+struct HandleRunLru {
+    runs: HashMap<usize, HandleRun>,
+    order: VecDeque<usize>,
+    used: usize,
+    budget: usize,
+}
+
+#[derive(Debug)]
+struct IndexPageLru {
+    pages: HashMap<usize, Arc<[Bytes]>>,
+    order: VecDeque<usize>,
+    used: usize,
+    budget: usize,
+}
+
+impl PagedIndex {
+    fn from_handles(
+        index: &[BlockHandle],
+        budget: usize,
+        src: Option<Arc<dyn crate::env::SstFileSource>>,
+        index_file_off: u64,
+        path: PathBuf,
+        key_cp: usize,
+    ) -> Self {
+        let n = index.len();
+        let file_backed = src.is_some() && index_file_off > 0;
+        let (blob, blob_key_off, p8s, sample_p8s, sample_file_rel, fanout) = if file_backed {
+            let fanout = INDEX_HANDLE_FANOUT.max(1);
+            let mut sample_p8s = Vec::new();
+            let mut sample_file_rel = Vec::new();
+            let mut rel = 0u32;
+            for (i, h) in index.iter().enumerate() {
+                if i % fanout == 0 {
+                    sample_p8s.push(h.p8);
+                    sample_file_rel.push(rel);
+                }
+                let kl = u32::try_from(h.first_user_key.len()).unwrap_or(u32::MAX);
+                rel = rel.saturating_add(16).saturating_add(kl);
+            }
+            sample_file_rel.push(rel);
+            (
+                None,
+                Arc::from([]),
+                Arc::from([]),
+                sample_p8s.into(),
+                sample_file_rel.into(),
+                fanout,
+            )
+        } else {
+            let mut blob = Vec::new();
+            let mut key_off = Vec::with_capacity(n);
+            let mut p8s = Vec::with_capacity(n);
+            for h in index {
+                key_off.push(blob.len() as u32);
+                let k = h.first_user_key.as_ref();
+                let len = u32::try_from(k.len()).unwrap_or(u32::MAX);
+                blob.extend_from_slice(&len.to_le_bytes());
+                let take = (len as usize).min(k.len());
+                blob.extend_from_slice(&k[..take]);
+                p8s.push(h.p8);
+            }
+            (
+                Some(blob.into()),
+                key_off.into(),
+                p8s.into(),
+                Arc::from([]),
+                Arc::from([]),
+                0,
+            )
+        };
+        Self {
+            p8s,
+            sample_p8s,
+            sample_file_rel,
+            fanout,
+            key_cp,
+            index_file_off,
+            path,
+            src,
+            blob,
+            blob_key_off,
+            n,
+            lru: Mutex::new(IndexPageLru {
+                pages: HashMap::new(),
+                order: VecDeque::new(),
+                used: 0,
+                budget: budget.max(1),
+            }),
+            runs: Mutex::new(HandleRunLru {
+                runs: HashMap::new(),
+                order: VecDeque::new(),
+                used: 0,
+                budget: budget.max(1),
+            }),
+        }
+    }
+
+    fn file_backed(&self) -> bool {
+        self.blob.is_none() && self.src.is_some()
+    }
+
+    fn two_level(&self) -> bool {
+        self.file_backed() && self.fanout > 0 && !self.sample_p8s.is_empty()
+    }
+
+    fn meta_bytes(&self) -> usize {
+        self.p8s
+            .len()
+            .saturating_mul(8)
+            .saturating_add(self.sample_p8s.len().saturating_mul(8))
+            .saturating_add(self.sample_file_rel.len().saturating_mul(4))
+            .saturating_add(self.blob.as_ref().map(|b| b.len()).unwrap_or(0))
+            .saturating_add(self.blob_key_off.len().saturating_mul(4))
+            .saturating_add(std::mem::size_of::<Self>())
+    }
+
+    fn resident_bytes(&self) -> usize {
+        let keys = self.lru.lock().used;
+        let runs = self.runs.lock().used;
+        if self.file_backed() {
+            keys.saturating_add(runs).saturating_add(self.meta_bytes())
+        } else {
+            keys.saturating_add(self.blob_key_off.len().saturating_mul(4))
+                .saturating_add(std::mem::size_of::<Self>())
+        }
+    }
+
+    fn handle_at(&self, i: usize) -> Option<BlockHandle> {
+        if i >= self.n {
+            return None;
+        }
+        if self.two_level() {
+            let run = self.load_run(i / self.fanout);
+            let local = i % self.fanout;
+            return run.handles.get(local).map(|s| BlockHandle {
+                offset: s.offset,
+                length: s.length,
+                first_user_key: Bytes::new(),
+                p8: s.p8,
+            });
+        }
+        None
+    }
+
+    fn page_of(i: usize) -> usize {
+        i / INDEX_PAGE_BLOCKS
+    }
+
+    fn load_page(&self, page: usize) -> Arc<[Bytes]> {
+        {
+            let mut g = self.lru.lock();
+            if let Some(p) = g.pages.get(&page).cloned() {
+                g.order.retain(|x| *x != page);
+                g.order.push_back(page);
+                return p;
+            }
+        }
+        let start = page * INDEX_PAGE_BLOCKS;
+        let end = (start + INDEX_PAGE_BLOCKS).min(self.n);
+        let mut keys = Vec::with_capacity(end.saturating_sub(start));
+        let mut bytes = 0usize;
+        for i in start..end {
+            let k = self.load_key(i);
+            bytes = bytes.saturating_add(k.len());
+            keys.push(k);
+        }
+        let arc: Arc<[Bytes]> = keys.into();
+        let mut g = self.lru.lock();
+        while g.used.saturating_add(bytes) > g.budget && !g.pages.is_empty() {
+            if let Some(old) = g.order.pop_front() {
+                if let Some(p) = g.pages.remove(&old) {
+                    let drop_n: usize = p.iter().map(|k| k.len()).sum();
+                    g.used = g.used.saturating_sub(drop_n);
+                }
+            } else {
+                break;
+            }
+        }
+        g.used = g.used.saturating_add(bytes);
+        g.pages.insert(page, Arc::clone(&arc));
+        g.order.push_back(page);
+        arc
+    }
+
+    fn key_from_blob(&self, i: usize) -> Bytes {
+        let Some(blob) = &self.blob else {
+            return Bytes::new();
+        };
+        let off = self.blob_key_off[i] as usize;
+        let len = u32::from_le_bytes(blob[off..off + 4].try_into().unwrap()) as usize;
+        Bytes::copy_from_slice(&blob[off + 4..off + 4 + len])
+    }
+
+    fn load_key(&self, i: usize) -> Bytes {
+        self.key_from_blob(i)
+    }
+
+    fn load_run(&self, sample: usize) -> HandleRun {
+        {
+            let mut g = self.runs.lock();
+            if let Some(run) = g.runs.get(&sample).cloned() {
+                g.order.retain(|x| *x != sample);
+                g.order.push_back(sample);
+                return run;
+            }
+        }
+        let Some(src) = &self.src else {
+            panic!(
+                "pedradb: two-level index run {} has no file source in {}",
+                sample,
+                self.path.display()
+            );
+        };
+        let start_rel = self.sample_file_rel[sample];
+        let end_rel = self.sample_file_rel[sample + 1];
+        let nbytes = end_rel.saturating_sub(start_rel) as usize;
+        let mut buf = vec![0u8; nbytes];
+        let off = self.index_file_off.saturating_add(u64::from(start_rel));
+        if nbytes > 0 {
+            if let Err(e) = src.read_range(&self.path, off, &mut buf) {
+                panic!(
+                    "pedradb: two-level index run read failed in {} @ {off}: {e}",
+                    self.path.display()
+                );
+            }
+        }
+        let expect = (self.n - sample * self.fanout).min(self.fanout);
+        let mut handles = Vec::with_capacity(expect);
+        let mut keys = Vec::with_capacity(expect);
+        let mut pos = 0usize;
+        for _ in 0..expect {
+            if pos + 16 > buf.len() {
+                panic!(
+                    "pedradb: two-level index run truncated in {} sample {sample}",
+                    self.path.display()
+                );
+            }
+            let offset = u64::from_le_bytes(buf[pos..pos + 8].try_into().unwrap());
+            let length = u32::from_le_bytes(buf[pos + 8..pos + 12].try_into().unwrap());
+            let kl = u32::from_le_bytes(buf[pos + 12..pos + 16].try_into().unwrap()) as usize;
+            pos += 16;
+            if pos + kl > buf.len() {
+                panic!(
+                    "pedradb: two-level index key truncated in {} sample {sample}",
+                    self.path.display()
+                );
+            }
+            let key = Bytes::copy_from_slice(&buf[pos..pos + kl]);
+            pos += kl;
+            let p8 = SstTable::p8_window(key.as_ref(), self.key_cp);
+            handles.push(SlimHandle { offset, length, p8 });
+            keys.push(key);
+        }
+        let run = HandleRun {
+            handles: handles.into(),
+            keys: keys.into(),
+        };
+        let bytes: usize = run
+            .keys
+            .iter()
+            .map(|k| k.len())
+            .sum::<usize>()
+            .saturating_add(
+                run.handles
+                    .len()
+                    .saturating_mul(std::mem::size_of::<SlimHandle>()),
+            );
+        let mut g = self.runs.lock();
+        while g.used.saturating_add(bytes) > g.budget && !g.runs.is_empty() {
+            if let Some(old) = g.order.pop_front() {
+                if let Some(drop_run) = g.runs.remove(&old) {
+                    let drop_n: usize = drop_run
+                        .keys
+                        .iter()
+                        .map(|k| k.len())
+                        .sum::<usize>()
+                        .saturating_add(
+                            drop_run
+                                .handles
+                                .len()
+                                .saturating_mul(std::mem::size_of::<SlimHandle>()),
+                        );
+                    g.used = g.used.saturating_sub(drop_n);
+                }
+            } else {
+                break;
+            }
+        }
+        g.used = g.used.saturating_add(bytes);
+        g.runs.insert(sample, run.clone());
+        g.order.push_back(sample);
+        run
+    }
+
+    fn p8_at(&self, i: usize) -> u64 {
+        if self.two_level() {
+            if i % self.fanout == 0 {
+                return self.sample_p8s.get(i / self.fanout).copied().unwrap_or(0);
+            }
+            let run = self.load_run(i / self.fanout);
+            return run.handles.get(i % self.fanout).map(|s| s.p8).unwrap_or(0);
+        }
+        self.p8s.get(i).copied().unwrap_or(0)
+    }
+
+    fn key_at(&self, i: usize) -> Bytes {
+        if self.two_level() {
+            let run = self.load_run(i / self.fanout);
+            return run.keys.get(i % self.fanout).cloned().unwrap_or_default();
+        }
+        let page = Self::page_of(i);
+        let local = i - page * INDEX_PAGE_BLOCKS;
+        let p = self.load_page(page);
+        p.get(local).cloned().unwrap_or_default()
+    }
+
+    fn blocks_for_point(&self, user_key: &[u8], key_cp: usize) -> std::ops::Range<usize> {
+        if self.n == 0 {
+            return 0..0;
+        }
+        let t8 = SstTable::p8_window(user_key, key_cp);
+        let mut lo = 0usize;
+        let mut hi = self.n;
+        while lo < hi {
+            let mid = (lo + hi) / 2;
+            let p8 = self.p8_at(mid);
+            if p8 < t8 || (p8 == t8 && self.key_at(mid).as_ref() < user_key) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        let ge = lo;
+        let start = ge.saturating_sub(1);
+        let mut end = ge;
+        while end < self.n && self.key_at(end).as_ref() <= user_key {
+            end += 1;
+        }
+        start..end
+    }
+}
+
 /// Cached full entry materialization for an SST (shared across clones).
 type EntriesCache = Arc<Mutex<Option<Vec<(InternalKey, Bytes)>>>>;
 
@@ -462,6 +847,11 @@ pub struct SstTable {
     largest_user_key: Option<Bytes>,
     /// Column-family name (RFC-0065). Empty = mixed / prefix-era.
     cf: String,
+    /// RFC-0167 P2.4: paged first-keys under a byte budget (`None` = full
+    /// resident index, the default).
+    paged: Option<Arc<PagedIndex>>,
+    /// File offset of the on-disk index tail (0 = unknown; blob fallback).
+    index_file_off: u64,
 }
 
 impl SstTable {
@@ -481,7 +871,7 @@ impl SstTable {
     /// sparse index — they count as one file-level block after the CRC check.
     #[must_use]
     pub fn data_block_count(&self) -> usize {
-        self.index.len().max(1)
+        self.n_blocks().max(1)
     }
 
     /// Whether the table has no entries.
@@ -495,7 +885,30 @@ impl SstTable {
     /// served from file block-by-block instead.
     #[must_use]
     pub fn is_lazy(&self) -> bool {
-        !self.index.is_empty()
+        !self.index.is_empty() || self.paged.is_some()
+    }
+
+    fn n_blocks(&self) -> usize {
+        self.paged.as_ref().map_or(self.index.len(), |p| p.n)
+    }
+
+    fn handle_at(&self, i: usize) -> Option<BlockHandle> {
+        if let Some(p) = &self.paged {
+            if p.file_backed() {
+                return p.handle_at(i);
+            }
+        }
+        self.index.get(i).cloned()
+    }
+
+    fn first_key_at(&self, i: usize) -> Bytes {
+        if let Some(p) = &self.paged {
+            return p.key_at(i);
+        }
+        self.index
+            .get(i)
+            .map(|h| h.first_user_key.clone())
+            .unwrap_or_default()
     }
 
     #[cfg(test)]
@@ -702,7 +1115,7 @@ impl SstTable {
             let block = self.materialize_entries()?;
             return Ok(Self::best_point_in_entry_slice(&block, user_key, snapshot));
         }
-        if self.index.is_empty() {
+        if self.n_blocks() == 0 {
             return Ok(None);
         }
         if !self.block_crc {
@@ -731,7 +1144,7 @@ impl SstTable {
         // resident-payload slice or a single positioned read via the kit.
         let mut best: Option<(SequenceNumber, Lookup)> = None;
         for bi in self.blocks_for_point(user_key) {
-            let Some(h) = self.index.get(bi) else {
+            let Some(h) = self.handle_at(bi) else {
                 continue;
             };
             let len = usize::try_from(h.length)
@@ -812,7 +1225,7 @@ impl SstTable {
                             if let Some(t0) = cost_t0 {
                                 crate::cost::point_image_ns(t0.elapsed().as_nanos() as u64);
                             }
-                            w.mark_verified(bi, self.index.len());
+                            w.mark_verified(bi, self.n_blocks());
                             if let Some(found) = found {
                                 if best.as_ref().is_none_or(|(s, _)| found.0 > *s) {
                                     best = Some(found);
@@ -931,7 +1344,7 @@ impl SstTable {
             let block = self.materialize_entries()?;
             return Ok(Self::best_point_in_entry_slice(&block, user_key, snapshot));
         }
-        if self.index.is_empty() {
+        if self.n_blocks() == 0 {
             return Ok(None);
         }
         let path = self.path();
@@ -962,13 +1375,30 @@ impl SstTable {
     /// Number of data blocks in the sparse index (0 for legacy v1).
     #[must_use]
     pub fn block_count(&self) -> usize {
-        self.index.len()
+        self.n_blocks()
     }
 
     /// RAM of the sparse index (handles + first-key bytes). Bulk 100M is
     /// O(blocks) here, not O(values) — payload must stay empty.
+    ///
+    /// With a paged index (RFC-0173 P2.1) this is the SoA + decoded-page LRU,
+    /// not the first-key `Bytes` array.
     #[must_use]
     pub fn index_memory_bytes(&self) -> usize {
+        if let Some(p) = &self.paged {
+            let mut n = p.resident_bytes();
+            if !p.file_backed() {
+                n = n.saturating_add(
+                    self.index
+                        .len()
+                        .saturating_mul(std::mem::size_of::<BlockHandle>()),
+                );
+                for h in self.index.iter() {
+                    n = n.saturating_add(h.first_user_key.len());
+                }
+            }
+            return n;
+        }
         let mut n = self
             .index
             .len()
@@ -977,6 +1407,62 @@ impl SstTable {
             n = n.saturating_add(h.first_user_key.len());
         }
         n
+    }
+
+    /// RFC-0167 P2.4 / RFC-0173 P2.1: drop the resident first-key array and
+    /// serve point lookups from a byte-capped page LRU. With a file source
+    /// the packed blob is not kept — keys are pread from the SST tail.
+    pub fn page_index(&mut self, budget: usize) {
+        if self.paged.is_some() || self.index.is_empty() {
+            return;
+        }
+        let src = self.kit.read().as_ref().map(|k| Arc::clone(&k.source));
+        let file_backed = src.is_some() && self.index_file_off > 0;
+        let paged = PagedIndex::from_handles(
+            &self.index,
+            budget,
+            src,
+            self.index_file_off,
+            self.path.clone(),
+            self.key_cp,
+        );
+        if file_backed {
+            self.index = Arc::from([]);
+        } else {
+            let mut handles = Vec::with_capacity(self.index.len());
+            for (i, h) in self.index.iter().enumerate() {
+                let keep = i % INDEX_PAGE_BLOCKS == 0;
+                handles.push(BlockHandle {
+                    offset: h.offset,
+                    length: h.length,
+                    first_user_key: if keep {
+                        h.first_user_key.clone()
+                    } else {
+                        Bytes::new()
+                    },
+                    p8: h.p8,
+                });
+            }
+            self.index = handles.into();
+        }
+        self.paged = Some(Arc::new(paged));
+    }
+
+    /// Drop the in-process bloom (always-true). Point hits stay correct;
+    /// misses probe the SST. RFC-0173 P2.1 bounded-cache degrade.
+    pub fn release_bloom(&mut self) {
+        self.bloom = BloomFilter::always_true();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn paged_file_backed(&self) -> bool {
+        self.paged.as_ref().is_some_and(|p| p.file_backed())
+    }
+
+    /// Heap bytes of the bloom bit array.
+    #[must_use]
+    pub fn bloom_memory_bytes(&self) -> usize {
+        self.bloom.memory_bytes()
     }
 
     /// Index + bloom — the SST metadata that stays in process RSS.
@@ -1141,7 +1627,7 @@ impl SstTable {
             let block = self.materialize_entries().ok()?;
             return Self::best_point_in_entry_slice(&block, user_key, snapshot);
         }
-        if self.index.is_empty() {
+        if self.n_blocks() == 0 {
             return None;
         }
         let mut best: Option<(SequenceNumber, Lookup)> = None;
@@ -1199,8 +1685,11 @@ impl SstTable {
     /// older writer split mid-key, versions also sit in the previous block
     /// and in any following run with `first_user_key == user_key`.
     fn blocks_for_point(&self, user_key: &[u8]) -> std::ops::Range<usize> {
-        if self.index.is_empty() {
+        if self.n_blocks() == 0 {
             return 0..0;
+        }
+        if let Some(p) = &self.paged {
+            return p.blocks_for_point(user_key, self.key_cp);
         }
         let t8 = Self::p8_window(user_key, self.key_cp);
         let ge = self
@@ -1208,7 +1697,7 @@ impl SstTable {
             .partition_point(|h| h.p8 < t8 || (h.p8 == t8 && h.first_user_key.as_ref() < user_key));
         let start = ge.saturating_sub(1);
         let mut end = ge;
-        while end < self.index.len() && self.index[end].first_user_key.as_ref() <= user_key {
+        while end < self.n_blocks() && self.first_key_at(end).as_ref() <= user_key {
             end += 1;
         }
         start..end
@@ -1258,7 +1747,7 @@ impl SstTable {
     /// # Errors
     /// Corrupt block payload, invalid index, or I/O on an evicted table.
     pub fn decode_block(&self, block_idx: usize) -> Result<Vec<(InternalKey, Bytes)>> {
-        let h = self.index.get(block_idx).ok_or_else(|| {
+        let h = self.handle_at(block_idx).ok_or_else(|| {
             CoreError::Internal(format!(
                 "SST block index {block_idx} out of range in {}",
                 self.path.display()
@@ -1271,14 +1760,14 @@ impl SstTable {
                 SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
                 return decode_block_from_payload(
                     p,
-                    h,
+                    &h,
                     self.compressed_blocks,
                     self.block_crc,
                     &self.path,
                 );
             }
         }
-        self.decode_block_on_file(h)
+        self.decode_block_on_file(&h)
     }
 
     /// Serve one block of an evicted payload through the attached source.
@@ -1496,7 +1985,7 @@ impl SstTable {
                 return Ok(e.clone());
             }
         }
-        let all = if self.index.is_empty() {
+        let all = if self.n_blocks() == 0 {
             // v1 should already have cache filled at open.
             return Err(CoreError::Internal(format!(
                 "SST {} has no entries cache and no index",
@@ -1504,7 +1993,7 @@ impl SstTable {
             )));
         } else {
             let mut out = Vec::with_capacity(self.num_entries);
-            for i in 0..self.index.len() {
+            for i in 0..self.n_blocks() {
                 out.extend(self.decode_block(i)?);
             }
             if out.len() != self.num_entries {
@@ -1527,14 +2016,22 @@ impl SstTable {
     /// Which index block would contain `user_key` (for tests / future lazy load).
     #[must_use]
     pub fn block_for_user_key(&self, user_key: &[u8]) -> Option<usize> {
-        if self.index.is_empty() {
+        if self.n_blocks() == 0 {
             return None;
         }
         // Last block whose first_user_key <= user_key (same as the linear scan).
-        let gt = self
-            .index
-            .partition_point(|h| h.first_user_key.as_ref() <= user_key);
-        Some(gt.saturating_sub(1))
+        let n = self.n_blocks();
+        let mut lo = 0usize;
+        let mut hi = n;
+        while lo < hi {
+            let mid = (lo + hi) / 2;
+            if self.first_key_at(mid).as_ref() <= user_key {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        Some(lo.saturating_sub(1))
     }
 
     /// Load an SST from disk (real filesystem).
@@ -1764,6 +2261,8 @@ impl SstTable {
             smallest_user_key,
             largest_user_key,
             cf,
+            paged: None,
+            index_file_off: data_end as u64,
         })
     }
 
@@ -1811,6 +2310,8 @@ impl SstTable {
             smallest_user_key,
             largest_user_key,
             cf,
+            paged: None,
+            index_file_off: 0,
         }
     }
 
@@ -1829,14 +2330,11 @@ impl SstTable {
             .into_iter()
     }
 
-    /// First user key of every data block, from the in-memory index (no I/O).
-    /// Used to sample key-space split points for the parallel merge.
+    /// First user key of every data block. Unpaged: in-memory (no I/O).
+    /// Paged: loads keys through the page LRU (may pread the SST tail).
     #[must_use]
-    pub fn block_first_user_keys(&self) -> Vec<&[u8]> {
-        self.index
-            .iter()
-            .map(|h| h.first_user_key.as_ref())
-            .collect()
+    pub fn block_first_user_keys(&self) -> Vec<Bytes> {
+        (0..self.n_blocks()).map(|i| self.first_key_at(i)).collect()
     }
 
     /// Internal versions one block at a time (RFC-0037 compact). Does **not**
@@ -1869,8 +2367,18 @@ impl SstTable {
         // ends below lo (entries are sorted by user key).
         let block_i = lo
             .map(|lo| {
-                self.index
-                    .partition_point(|h| h.first_user_key.as_ref() < lo)
+                let n = self.n_blocks();
+                let mut lo_i = 0usize;
+                let mut hi_i = n;
+                while lo_i < hi_i {
+                    let mid = (lo_i + hi_i) / 2;
+                    if self.first_key_at(mid).as_ref() < lo {
+                        lo_i = mid + 1;
+                    } else {
+                        hi_i = mid;
+                    }
+                }
+                lo_i
             })
             .unwrap_or(0);
         SstInternalStream {
@@ -2140,7 +2648,7 @@ impl SstTable {
         start: Bound<&[u8]>,
         end: Bound<&[u8]>,
     ) -> Vec<usize> {
-        if self.index.is_empty() {
+        if self.n_blocks() == 0 {
             return Vec::new();
         }
         let start_i = match start {
@@ -2153,30 +2661,44 @@ impl SstTable {
                 // `first_user_key == s` can still hold trailing versions of
                 // `s`. Partition on `< s` (not `<= s`) so that previous
                 // block stays in the window.
-                let ge = self
-                    .index
-                    .partition_point(|h| h.first_user_key.as_ref() < s);
-                ge.saturating_sub(1)
+                let n = self.n_blocks();
+                let mut lo_i = 0usize;
+                let mut hi_i = n;
+                while lo_i < hi_i {
+                    let mid = (lo_i + hi_i) / 2;
+                    if self.first_key_at(mid).as_ref() < s {
+                        lo_i = mid + 1;
+                    } else {
+                        hi_i = mid;
+                    }
+                }
+                lo_i.saturating_sub(1)
             }
         };
         let mut out = Vec::new();
-        for i in start_i..self.index.len() {
-            let block_lo = self.index[i].first_user_key.as_ref();
+        for i in start_i..self.n_blocks() {
+            let block_lo = self.first_key_at(i);
             let starts_before_end = match end {
                 Bound::Unbounded => true,
-                Bound::Included(e) => block_lo <= e,
-                Bound::Excluded(e) => block_lo < e,
+                Bound::Included(e) => block_lo.as_ref() <= e,
+                Bound::Excluded(e) => block_lo.as_ref() < e,
             };
             if !starts_before_end {
                 break;
             }
-            let block_hi_excl = self.index.get(i + 1).map(|n| n.first_user_key.as_ref());
+            let block_hi = if i + 1 < self.n_blocks() {
+                Some(self.first_key_at(i + 1))
+            } else {
+                None
+            };
             let ends_after_start = match start {
                 Bound::Unbounded => true,
                 // `hi == s` means the next block starts at `s`; this block
                 // may hold trailing versions of `s` from a mid-key split —
                 // keep it (same window rule as `blocks_for_point`).
-                Bound::Included(s) | Bound::Excluded(s) => block_hi_excl.is_none_or(|hi| hi >= s),
+                Bound::Included(s) | Bound::Excluded(s) => {
+                    block_hi.as_ref().is_none_or(|hi| hi.as_ref() >= s)
+                }
             };
             if ends_after_start {
                 out.push(i);
@@ -3079,6 +3601,8 @@ fn write_sst_bulk_arrays_body(
         smallest_user_key,
         largest_user_key,
         cf,
+        paged: None,
+        index_file_off: (BULK_SST_HEADER_LEN as u64).saturating_add(data_len),
     })
 }
 
@@ -3479,6 +4003,7 @@ fn write_sst_try_sorted_body(
     // first read, so torn files fail closed exactly as before.
     let mut image = header;
     image.append(&mut data);
+    let index_file_off = image.len() as u64;
     image.append(&mut index_bytes);
     image.append(&mut bloom_bytes);
     image.extend_from_slice(&file_crc.to_le_bytes());
@@ -3547,6 +4072,8 @@ fn write_sst_try_sorted_body(
         smallest_user_key,
         largest_user_key,
         cf,
+        paged: None,
+        index_file_off,
     })
 }
 
@@ -3596,6 +4123,7 @@ impl<'a> Cursor<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::env::EnvSource;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_path() -> PathBuf {
@@ -4555,6 +5083,8 @@ mod tests {
             smallest_user_key: Some(Bytes::copy_from_slice(b"a")),
             largest_user_key: Some(Bytes::copy_from_slice(b"z")),
             cf: String::new(),
+            paged: None,
+            index_file_off: 0,
         };
 
         // Reference: the point path already defends the split.
@@ -4586,6 +5116,159 @@ mod tests {
             vec![0, 1],
             "range ending at k covers both k blocks"
         );
+    }
+
+    /// RFC-0167 P2.4: paging the sparse index drops per-block first-key
+    /// `Bytes`; point gets still hit, resident pages stay under the budget
+    /// (plus one page of slack).
+    #[test]
+    fn rfc0167_index_pages_evict_under_budget() {
+        let path = temp_path();
+        let n = 512usize;
+        let keys: Vec<Bytes> = (0..n)
+            .map(|i| Bytes::from(format!("idx{i:05}-{}", "k".repeat(40)).into_bytes()))
+            .collect();
+        let vals: Vec<Bytes> = (0..n)
+            .map(|i| Bytes::from(format!("v{i:05}").into_bytes()))
+            .collect();
+        let entries: Vec<(InternalKey, Bytes)> = keys
+            .iter()
+            .zip(vals.iter())
+            .enumerate()
+            .map(|(i, (k, v))| {
+                (
+                    InternalKey::new(k.clone(), (i as u64) + 1, ValueType::Value),
+                    v.clone(),
+                )
+            })
+            .collect();
+        let mut table = write_sst_entries(&path, &entries).unwrap();
+        assert!(
+            table.block_count() >= INDEX_PAGE_BLOCKS,
+            "need multiple index pages, got {}",
+            table.block_count()
+        );
+        let before = table.index_memory_bytes();
+        table.page_index(1024);
+        let after = table.index_memory_bytes();
+        assert!(
+            after <= before.saturating_add(256),
+            "paged index must not grow the resident first-key array: after={after} before={before}"
+        );
+        for i in [0usize, n / 3, n / 2, n - 1] {
+            let got = table.point_at(keys[i].as_ref(), u64::MAX);
+            assert!(
+                matches!(&got, Some((_, Lookup::Found(v))) if v.as_ref() == vals[i].as_ref()),
+                "paged point get missed key {i}"
+            );
+        }
+        let live = table
+            .paged
+            .as_ref()
+            .map(|p| p.resident_bytes())
+            .unwrap_or(0);
+        assert!(
+            live <= 1024 + 8 * 1024,
+            "decoded index pages must stay near the budget, live={live}"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// RFC-0173 P2.1: with a file source the packed first-key blob is
+    /// dropped; point gets still hit via pread of the on-disk index tail.
+    #[test]
+    fn rfc0173_paged_index_loads_keys_from_file() {
+        let path = temp_path();
+        let n = 512usize;
+        let keys: Vec<Bytes> = (0..n)
+            .map(|i| Bytes::from(format!("idx{i:05}-{}", "k".repeat(40)).into_bytes()))
+            .collect();
+        let vals: Vec<Bytes> = (0..n)
+            .map(|i| Bytes::from(format!("v{i:05}").into_bytes()))
+            .collect();
+        let entries: Vec<(InternalKey, Bytes)> = keys
+            .iter()
+            .zip(vals.iter())
+            .enumerate()
+            .map(|(i, (k, v))| {
+                (
+                    InternalKey::new(k.clone(), (i as u64) + 1, ValueType::Value),
+                    v.clone(),
+                )
+            })
+            .collect();
+        let mut table = write_sst_entries(&path, &entries).unwrap();
+        let src: Arc<dyn crate::env::SstFileSource> = Arc::new(EnvSource(StdEnv));
+        let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(1)));
+        table.attach_payload_kit(&src, &pool);
+        assert!(
+            table.index_file_off > 0,
+            "sorted writer must record index tail offset"
+        );
+        let before = table.index_memory_bytes();
+        table.page_index(1024);
+        assert!(
+            table.paged_file_backed(),
+            "kit + index_file_off must drop the in-RAM key blob"
+        );
+        let after = table.index_memory_bytes();
+        assert!(
+            after < before,
+            "file-backed page must drop first-key Bytes: after={after} before={before}"
+        );
+        for i in [0usize, n / 3, n / 2, n - 1] {
+            let got = table.point_at(keys[i].as_ref(), u64::MAX);
+            assert!(
+                matches!(&got, Some((_, Lookup::Found(v))) if v.as_ref() == vals[i].as_ref()),
+                "file-backed paged point get missed key {i}"
+            );
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// RFC-0173 P2.3: file-backed paging keeps O(blocks/fanout) samples, not
+    /// a 28 B/block SoA. Point gets still hit.
+    #[test]
+    fn rfc0173_two_level_handles_are_sublinear() {
+        let path = temp_path();
+        let n = 2048usize;
+        let keys: Vec<Bytes> = (0..n)
+            .map(|i| Bytes::from(format!("idx{i:05}-{}", "k".repeat(24)).into_bytes()))
+            .collect();
+        let vals: Vec<Bytes> = (0..n)
+            .map(|i| Bytes::from(format!("v{i:05}").into_bytes()))
+            .collect();
+        let entries: Vec<(InternalKey, Bytes)> = keys
+            .iter()
+            .zip(vals.iter())
+            .enumerate()
+            .map(|(i, (k, v))| {
+                (
+                    InternalKey::new(k.clone(), (i as u64) + 1, ValueType::Value),
+                    v.clone(),
+                )
+            })
+            .collect();
+        let mut table = write_sst_entries(&path, &entries).unwrap();
+        let src: Arc<dyn crate::env::SstFileSource> = Arc::new(EnvSource(StdEnv));
+        let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(1)));
+        table.attach_payload_kit(&src, &pool);
+        let blocks = table.block_count();
+        table.page_index(4096);
+        assert!(table.paged_file_backed());
+        let mem = table.index_memory_bytes();
+        assert!(
+            blocks < INDEX_HANDLE_FANOUT || mem < blocks.saturating_mul(20),
+            "two-level must beat 28 B/block SoA: mem={mem} blocks={blocks}"
+        );
+        for i in [0usize, n / 5, n / 2, n - 1] {
+            let got = table.point_at(keys[i].as_ref(), u64::MAX);
+            assert!(
+                matches!(&got, Some((_, Lookup::Found(v))) if v.as_ref() == vals[i].as_ref()),
+                "two-level point get missed key {i}"
+            );
+        }
+        let _ = std::fs::remove_file(&path);
     }
 
     /// Oracle: the accelerated `blocks_for_point` (u64 window past the
@@ -4639,6 +5322,8 @@ mod tests {
                 smallest_user_key: None,
                 largest_user_key: None,
                 cf: String::new(),
+                paged: None,
+                index_file_off: 0,
             }
         }
 
