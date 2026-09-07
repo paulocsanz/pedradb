@@ -1211,6 +1211,10 @@ AENEAS_EXTRACTS = (
         "crates/pedradb-core/src/probe_order_kernel.rs",
         "formal/aeneas/out/SOURCE.probe_order",
     ),
+    (
+        "crates/rocksdb-compat/src/locktab.rs",
+        "formal/aeneas/out/SOURCE.locktab",
+    ),
 )
 
 

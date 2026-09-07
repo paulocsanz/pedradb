@@ -358,3 +358,9 @@ name = "FailClosedKernel"
 
 [[lean_lib]]
 name = "FailClosed"
+
+[[lean_lib]]
+name = "LocktabKernel"
+
+[[lean_lib]]
+name = "Locktab"
