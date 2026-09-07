@@ -74,4 +74,18 @@ def propose_ack_ok_as_is
   (_index : Std.U64) (_commit_index : Std.U64) : Result Bool := do
   ok true
 
+/-- [pedra_aeneas_commit_kernel::should_advance_commit]:
+    Source: '../../../crates/pedradb-raft/src/commit_kernel.rs', lines 64:0-66:1
+    Visibility: public -/
+def should_advance_commit
+  (new_idx : Std.U64) (current : Std.U64) : Result Bool := do
+  ok (new_idx > current)
+
+/-- [pedra_aeneas_commit_kernel::should_advance_commit_as_is]:
+    Source: '../../../crates/pedradb-raft/src/commit_kernel.rs', lines 70:0-72:1
+    Visibility: public -/
+def should_advance_commit_as_is
+  (_new_idx : Std.U64) (_current : Std.U64) : Result Bool := do
+  ok true
+
 end pedra_aeneas_commit_kernel

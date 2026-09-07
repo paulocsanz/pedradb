@@ -6635,7 +6635,9 @@
         "propose_ack_ok_as_is",
         "recover_commit_as_is",
         "recover_last_applied",
-        "recover_last_applied_as_is"
+        "recover_last_applied_as_is",
+        "should_advance_commit",
+        "should_advance_commit_as_is"
       ]
     },
     {

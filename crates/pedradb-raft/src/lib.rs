@@ -997,7 +997,7 @@ impl RaftCluster {
             let term_at = self.nodes.get(&leader_id).unwrap().log_term_at(n);
             if commit_kernel::may_commit_at(term_at, term, true) {
                 let leader = self.nodes.get_mut(&leader_id).unwrap();
-                if n > leader.commit_index {
+                if commit_kernel::should_advance_commit(n, leader.commit_index) {
                     leader.set_commit_and_apply(n)?;
                     // Propagate commit via heartbeat next tick; also push now.
                     self.broadcast_append(leader_id, Vec::new())?;

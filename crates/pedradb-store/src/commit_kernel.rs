@@ -56,9 +56,36 @@ pub fn propose_ack_ok_as_is(_index: u64, _commit_index: u64) -> bool {
     true
 }
 
+/// F10: commit watermark only moves forward.
+#[must_use]
+pub fn should_advance_commit(new_idx: u64, current: u64) -> bool {
+    new_idx > current
+}
+
+/// AS-IS: always "advance" — would rewind commit when `new_idx < current`.
+#[must_use]
+pub fn should_advance_commit_as_is(_new_idx: u64, _current: u64) -> bool {
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn should_advance_commit_on_live_not_greater_is_not_ok() {
+        assert!(!should_advance_commit(5, 5));
+        assert!(
+            should_advance_commit_as_is(5, 5),
+            "AS-IS dente: equal idx still 'advances'"
+        );
+        assert!(should_advance_commit(6, 5));
+        assert!(!should_advance_commit(4, 5));
+        assert!(
+            should_advance_commit_as_is(4, 5),
+            "AS-IS dente: rewind"
+        );
+    }
 
     #[test]
     fn recover_does_not_promote_suffix() {
@@ -112,7 +139,17 @@ mod tests {
                     raft::propose_ack_ok_as_is(x, y),
                     "propose_ack_ok_as_is({x},{y})"
                 );
-                checked += 4;
+                assert_eq!(
+                    should_advance_commit(x, y),
+                    raft::should_advance_commit(x, y),
+                    "should_advance_commit({x},{y})"
+                );
+                assert_eq!(
+                    should_advance_commit_as_is(x, y),
+                    raft::should_advance_commit_as_is(x, y),
+                    "should_advance_commit_as_is({x},{y})"
+                );
+                checked += 6;
             }
             for &t in &anchors {
                 for maj in [false, true] {
@@ -126,9 +163,50 @@ mod tests {
                 }
             }
         }
-        // 1 + n as_is last_applied + n² pairs ×4 + n² terms ×2 majority ×2.
+        // 1 + n as_is last_applied + n² pairs ×6 + n² terms ×2 majority ×2.
         let n = anchors.len();
-        assert_eq!(checked, 1 + n + n * n * 4 + n * n * 2 * 2);
+        assert_eq!(checked, 1 + n + n * n * 6 + n * n * 2 * 2);
+    }
+
+    /// Clone freeze (catalog `commit_raft_store`): every production `pub fn`
+    /// on this copy is in the catalog `fns` list (and the raft copy, via
+    /// the agreement twin). A new helper added here without registering it
+    /// fails this test by name.
+    #[test]
+    fn commit_raft_store_clone_fns_are_exactly_the_catalog() {
+        const CATALOG: &[&str] = &[
+            "recover_commit",
+            "may_commit_at",
+            "propose_ack_ok",
+            "may_commit_at_as_is",
+            "propose_ack_ok_as_is",
+            "recover_commit_as_is",
+            "recover_last_applied",
+            "recover_last_applied_as_is",
+            "should_advance_commit",
+            "should_advance_commit_as_is",
+        ];
+        let src = include_str!("commit_kernel.rs");
+        let prod = src.split("#[cfg(test)]").next().unwrap_or(src);
+        let mut found = Vec::new();
+        let mut rest = prod;
+        while let Some(i) = rest.find("\npub fn ") {
+            rest = &rest[i + "\npub fn ".len()..];
+            let name = rest.split('(').next().unwrap_or("").trim();
+            if !name.is_empty() {
+                found.push(name.to_string());
+            }
+        }
+        for n in CATALOG {
+            assert!(found.iter().any(|f| f == n), "catalog fn {n} missing from production");
+        }
+        for f in &found {
+            assert!(
+                CATALOG.contains(&f.as_str()),
+                "production fn {f} not in catalog commit_raft_store fns"
+            );
+        }
+        assert_eq!(found.len(), CATALOG.len());
     }
 
     /// Mirror of the raft-side theorem on THIS copy (F10/F23/F11): without
@@ -162,6 +240,8 @@ mod tests {
             for commit in 0..B {
                 assert_eq!(propose_ack_ok(idx, commit), commit >= idx);
                 assert!(propose_ack_ok_as_is(idx, commit));
+                assert_eq!(should_advance_commit(idx, commit), idx > commit);
+                assert!(should_advance_commit_as_is(idx, commit));
             }
         }
     }

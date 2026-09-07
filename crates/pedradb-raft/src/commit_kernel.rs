@@ -59,6 +59,18 @@ pub fn propose_ack_ok_as_is(_index: u64, _commit_index: u64) -> bool {
     true
 }
 
+/// F10: commit watermark only moves forward.
+#[must_use]
+pub fn should_advance_commit(new_idx: u64, current: u64) -> bool {
+    new_idx > current
+}
+
+/// AS-IS: always "advance" — would rewind commit when `new_idx < current`.
+#[must_use]
+pub fn should_advance_commit_as_is(_new_idx: u64, _current: u64) -> bool {
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -132,6 +144,29 @@ mod tests {
                 }
             }
         }
-        assert_eq!(n, B * B + B * B * 2);
+        for idx in 0..B {
+            for commit in 0..B {
+                assert_eq!(propose_ack_ok(idx, commit), commit >= idx);
+                assert!(propose_ack_ok_as_is(idx, commit));
+                if commit < idx {
+                    assert_ne!(propose_ack_ok(idx, commit), propose_ack_ok_as_is(idx, commit));
+                }
+                n += 1;
+            }
+        }
+        for new_idx in 0..B {
+            for current in 0..B {
+                assert_eq!(should_advance_commit(new_idx, current), new_idx > current);
+                assert!(should_advance_commit_as_is(new_idx, current));
+                if new_idx <= current {
+                    assert_ne!(
+                        should_advance_commit(new_idx, current),
+                        should_advance_commit_as_is(new_idx, current)
+                    );
+                }
+                n += 1;
+            }
+        }
+        assert_eq!(n, B * B + B * B * 2 + B * B + B * B);
     }
 }

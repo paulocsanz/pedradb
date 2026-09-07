@@ -255,8 +255,19 @@ def ae_f16_safe
           else ok true
         else ok true
 
+/-- [pedra_aeneas_ae_kernel::ae_f16_safe_as_is]:
+    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 136:0-145:1
+    Visibility: public -/
+def ae_f16_safe_as_is
+  (_entry_index : Std.U64) (_entry_term : Std.U64)
+  (_existing_term : Option Std.U64) (_commit_index : Std.U64)
+  (_last_log_index : Std.U64) (_action : AeEntryAction) :
+  Result Bool
+  := do
+  ok true
+
 /-- [pedra_aeneas_ae_kernel::ae_ack_success]:
-    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 137:0-139:1
+    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 151:0-153:1
     Visibility: public -/
 def ae_ack_success (log_dirty : Bool) (persist_ok : Bool) : Result Bool := do
   if log_dirty
@@ -264,14 +275,14 @@ def ae_ack_success (log_dirty : Bool) (persist_ok : Bool) : Result Bool := do
   else ok true
 
 /-- [pedra_aeneas_ae_kernel::ae_ack_success_as_is]:
-    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 143:0-145:1
+    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 157:0-159:1
     Visibility: public -/
 def ae_ack_success_as_is
   (_log_dirty : Bool) (_persist_ok : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_ae_kernel::ae_entry_action_as_is_rewrite_committed]:
-    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 150:0-169:1
+    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 164:0-183:1
     Visibility: public -/
 def ae_entry_action_as_is_rewrite_committed
   (entry_index : Std.U64) (entry_term : Std.U64)

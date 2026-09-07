@@ -4501,7 +4501,7 @@ impl<E: Env> StoreCluster<E> {
         if !membership_kernel::joint_still_active(&old, &new) {
             return Ok(());
         }
-        if idx > p.commit {
+        if !commit_kernel::propose_ack_ok(idx, p.commit) {
             return Ok(());
         }
         self.broadcast_append(
@@ -6087,7 +6087,7 @@ impl<E: Env> StoreCluster<E> {
                     _ => true,
                 };
                 if commit_kernel::may_commit_at(p.term_at(idx), p.term, old_ok && new_ok) {
-                    if idx > p.commit {
+                    if commit_kernel::should_advance_commit(idx, p.commit) {
                         // F126: same class as AE leader_commit path — do not leave
                         // memory commit ahead of durable meta (apply would race).
                         let old_commit = p.commit;
