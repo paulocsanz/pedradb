@@ -48,17 +48,23 @@ apply serial; mc50 bypass). Adaptive 2–8 fica; n=50 não vira merge.
 ### P0 — o número na mesa
 
 - [x] **P0.1** Este RFC — status: `done`
-- [ ] **P0.2** `pipeline_gap` + `PEDRA_WRITE_PHASE_STATS=1` em
+- [x] **P0.2** `pipeline_gap` + `PEDRA_WRITE_PHASE_STATS=1` em
       `deps_apply_batch_mc4` e `deps_cache_overwrite` 1c vs Rocks
       `SYNC=0` (Darwin). Fração mem-apply / hold / wait. Finding.
-      — status: `todo`
-- [ ] **P0.3** Veredito escrito: despark 0055 P1.1 **ou** ceiling
-      nomeado (1c / apply_mc4 / mc50) na 0178 — status: `todo`
+      — status: `done` (`findings/2026-09-07-rfc0183-p02-pipeline-gap/`)
+- [x] **P0.3** Veredito escrito: despark 0055 P1.1 **ou** ceiling
+      nomeado (1c / apply_mc4 / mc50) na 0178 — status: `done`
+      (**não** despark. apply_mc4 mem = 2,7% do gap. 1c = WAL/CPU.)
+
+1c phasesΔ: wal=2,46 µs mem=0,14 µs (4% do p50 3,3 µs). apply_mc4:
+wal=10,3 mem=11,0 flush_check=**148** µs/commit; mem wall 1,16 s /
+gap 42 s = 2,7%. n=50 pipeline_gap lock_wait 74 s vs mem 0,04 s.
 
 ### P1 — só se P0.3 despark
 
 - [ ] **P1.1** Insert fora do write lock (0055 P1.1) **iff** P0.3
-      obrigar ≥15% — status: `todo`
+      obrigar ≥15% — status: `todo` (P0.3: iff **não** disparou;
+      mem apply_mc4 = 2,7% do gap)
 - [ ] **P1.2** apply_mc4 3-run Darwin vs Rocks default depois do
       P1.1 (ou skip se ceiling) — status: `todo`
 
@@ -71,9 +77,9 @@ apply serial; mc50 bypass). Adaptive 2–8 fica; n=50 não vira merge.
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | RFC | done | este ficheiro | 2026-09-07 |
-| P0.2 | p0 | pipeline_gap apply_mc4 + 1c | todo | — | 2026-09-07 |
-| P0.3 | p0 | veredito despark ou ceiling | todo | — | 2026-09-07 |
-| P1.1 | p1 | insert off-lock iff | todo | 0055 P1.1 | 2026-09-07 |
+| P0.2 | p0 | pipeline_gap apply_mc4 + 1c | done | findings/2026-09-07-rfc0183-p02-pipeline-gap | 2026-09-07 |
+| P0.3 | p0 | veredito despark ou ceiling | done | ceiling 0178; 0055 P1.1 parked | 2026-09-07 |
+| P1.1 | p1 | insert off-lock iff | todo | iff não disparou (2,7%) | 2026-09-07 |
 | P1.2 | p1 | apply_mc4 3-run | todo | — | 2026-09-07 |
 | P2.1 | p2 | none yet | todo | — | 2026-09-07 |
 

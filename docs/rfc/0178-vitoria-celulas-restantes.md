@@ -28,6 +28,8 @@ Células que o utilizador mandou fechar, com o facto (não o slogan):
 | ycsb_f_mc4 run2 | intra-run **0,766×**; mediana **PASS 1,473×** | Rocks spikeou 90,3 kqps; Pedra estável 66–69 k. Não é Pedra a piorar |
 | probe_miss | **0,27×** pós-bloom; skip tombstone **sem** 3-run | O(ficheiros) vazio já saiu (0167). Razão publicável continua 0,27× até a caixa |
 | overwrite_mc4 | Darwin [0180](0180-overwrite-mc4-gt1x.md) P0.9 mediana **1,002×** (p42; named loss 0,816). P1.3 = caixa | Isolado 0,45× → adaptive 0,61× → 0180 1,00×. 3/3 quiet ≥1× é 0182 P1.1. Não G1 |
+| 1c overwrite | Darwin [0183](0183-teto-apply-serial-e-1c.md) **0,845×** (284 vs 336 k; p50 3,3 vs 2,6 µs) | WAL/CPU. mem 0,14 µs = 4% do p50. 0055 P1.1 **não** despark |
+| apply_mc4 | Darwin 0183 **0,478×** (4,92 vs 10,3 k; wall 81 vs 39 s) | flush_check 148 µs/commit; mem = 2,7% do gap. Skiplist continua parked |
 
 Disco vs Fjall (245 vs 222 B/e) e G1 writes **não** estão neste RFC
 (0168 P2.1 / Agents.md).

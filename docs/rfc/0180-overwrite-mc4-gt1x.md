@@ -142,7 +142,7 @@ medida no mesmo harness isolado.
 
 - [ ] **P2.1** overwrite_mc4 3-run **3/3 quietos ≥1,0×** (não mediana
       com named loss 0,816) — status: `todo` (filho [0182](0182-same-boot-write-path-harnesses.md) P1.1)
-- [ ] **P2.2** Leftover hang — status: `todo` (filho [0181](0181-leftover-follower-nao-pende.md))
+- [x] **P2.2** Leftover hang — status: `done` (filho [0181](0181-leftover-follower-nao-pende.md) P0.3 steal)
 
 ## Status (living — update with every PR)
 
@@ -188,7 +188,7 @@ medida no mesmo harness isolado.
 | P0.38 | p0 | flush size check every async Ok | done | no 31-op overshoot | 2026-09-07 |
 | P1.1 | p1 | 3-run caixa | todo | — | 2026-09-07 |
 | P2.1 | p2 | 3/3 quiet ≥1× | todo | 0182 P1.1 | 2026-09-07 |
-| P2.2 | p2 | leftover hang | todo | 0181 | 2026-09-07 |
+| P2.2 | p2 | leftover hang | done | 0181 P0.3 steal | 2026-09-07 |
 
 ## Acceptance Criteria
 

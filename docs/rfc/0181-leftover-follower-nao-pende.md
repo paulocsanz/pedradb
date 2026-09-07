@@ -42,12 +42,14 @@ quem já teve Ok. Sem timed condvar (Darwin coalescing, RFC-0180 P0.15).
 ### P0 — local, hang fechado
 
 - [x] **P0.1** Este RFC — status: `done`
-- [ ] **P0.2** Teste que **pende** sem o steal: N writers, 1 put cada,
+- [x] **P0.2** Teste que **pende** sem o steal: N writers, 1 put cada,
       barreira, o último chega depois do WAL do grupo. `join` com
-      deadline. Canário 8×32 não chega. — status: `todo`
-- [ ] **P0.3** Steal no resign: leftover não `recv()` para sempre;
+      deadline. Canário 8×32 não chega. — status: `done`
+      (`rfc0181_without_steal_late_follower_times_out`)
+- [x] **P0.3** Steal no resign: leftover não `recv()` para sempre;
       overwrite_mc4 avg_group fica ≥2,3 (não o 1,95 do P0.36) —
-      status: `todo`
+      status: `done` (`rfc0181_steal_unblocks_late_follower`;
+      same-boot avg_group **2,46**)
 
 ### P1 — recover / caixa
 
@@ -65,8 +67,8 @@ quem já teve Ok. Sem timed condvar (Darwin coalescing, RFC-0180 P0.15).
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | RFC | done | este ficheiro | 2026-09-07 |
-| P0.2 | p0 | teste que pende sem steal | todo | — | 2026-09-07 |
-| P0.3 | p0 | steal no resign | todo | — | 2026-09-07 |
+| P0.2 | p0 | teste que pende sem steal | done | `rfc0181_without_steal_*` | 2026-09-07 |
+| P0.3 | p0 | steal no resign | done | `FollowerSlot::Steal`; avg 2.46 | 2026-09-07 |
 | P1.1 | p1 | recover + keys | todo | — | 2026-09-07 |
 | P1.2 | p1 | overwrite avg ≥2,3 | todo | — | 2026-09-07 |
 | P2.1 | p2 | none yet | todo | — | 2026-09-07 |

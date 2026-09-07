@@ -54,13 +54,27 @@ de escala (não 100M Darwin). Quiet-host: Rocks overwrite_mc4 ≳260 k;
 ### P0 — Darwin, receita + um same-boot
 
 - [x] **P0.1** Este RFC — status: `done`
-- [ ] **P0.2** Receita no `docs/benchmarks.md`: overwrite_mc4 +
+- [x] **P0.2** Receita no `docs/benchmarks.md`: overwrite_mc4 +
       ycsb_a_mc4 + ycsb_f_mc4 + apply_mc4 + 1c overwrite +
       `engine=fjall` overwrite (absoluto) + snapshot-bench 1M
-      (`SLIPSTREAM_BENCH_BACKENDS` um de cada vez) — status: `todo`
-- [ ] **P0.3** Um same-boot Darwin HEAD (`b944113`+): JSON + compare
+      (`SLIPSTREAM_BENCH_BACKENDS` um de cada vez) — status: `done`
+- [x] **P0.3** Um same-boot Darwin HEAD (`b944113`+): JSON + compare
       `sync: false`; Fjall qps absoluto; snapshot 1M get_hit/prefix.
-      Named losses na tabela. Não é 3-run. — status: `todo`
+      Named losses na tabela. Não é 3-run. — status: `done`
+
+Darwin 1-run (`sync: false`; Rocks overwrite **161 k** ≲ quiet 260 k
+— **not a win** on that row):
+
+| shape | Pedra | Rocks | ratio |
+|---|---:|---:|---:|
+| overwrite_mc4 | 210 k | 161 k | 1,304 (Rocks collapsed) |
+| ycsb_a_mc4 | 351 k | 520 k | **0,676** |
+| ycsb_f_mc4 | 299 k | 513 k | **0,582** |
+| apply_mc4 | 4,92 k | 10,3 k | **0,478** |
+| 1c overwrite | 284 k | 336 k | **0,845** |
+
+Fjall `ycsb_a_mc4` **501 k** absoluto. snapshot 1M get_hit 1,38 vs
+2,58 µs; prefix 117 vs 309 µs. avg_group overwrite **2,46**.
 
 ### P1 — 3-run quieto e caixa
 
@@ -80,8 +94,8 @@ de escala (não 100M Darwin). Quiet-host: Rocks overwrite_mc4 ≳260 k;
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | RFC | done | este ficheiro | 2026-09-07 |
-| P0.2 | p0 | receita docs/benchmarks.md | todo | — | 2026-09-07 |
-| P0.3 | p0 | same-boot Darwin 1-run | todo | — | 2026-09-07 |
+| P0.2 | p0 | receita docs/benchmarks.md | done | §RFC-0182 | 2026-09-07 |
+| P0.3 | p0 | same-boot Darwin 1-run | done | findings/2026-09-07-rfc0182-p03-same-boot | 2026-09-07 |
 | P1.1 | p1 | overwrite 3/3 quiet ≥1× | todo | — | 2026-09-07 |
 | P1.2 | p1 | ycsb_a/f 3-run | todo | — | 2026-09-07 |
 | P1.3 | p1 | caixa overwrite | todo | 0180 P1.1 | 2026-09-07 |
