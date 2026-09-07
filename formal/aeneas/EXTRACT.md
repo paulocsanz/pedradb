@@ -128,7 +128,7 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 | `tx_glue` | `tx_glue_kernel.rs` | `tx_range_keep_committed` |
 | `l28` | `l28.rs` | `l28_durability_all_ok` |
 | `tcg` | `tcg.rs` | `tcg_guest_admitted_true` |
-| `cqe` | `cqe_kernel.rs` | `cqe_res_ok_nonneg` |
+| `cqe` | `cqe_kernel.rs` | `cqe_res_ok_nonneg` / `submit_complete_act_harvested` / `_as_is_dente` (`RUSTFLAGS=--cfg test`; Atomic telemetry in `submit_complete_act` stripped) |
 | `iter` | `iter_kernel.rs` | `iter_window_keep_live` / `_as_is_dente` |
 | `properties` | `properties_kernel.rs` | `d1_holds_loop_body_is_def` (loop extract) |
 | `scale` | `scale_kernel.rs` | `point_get_probes_one_plus_one` / `_as_is_is_n_files` |
@@ -176,8 +176,6 @@ Partial `.lean` from a failed Aeneas run is not enrolled. Charon `--start-from` 
 Not silent close-kernel **files** (`l28.rs` and `probe_order_kernel.rs` stay enrolled for the `fn`s that exist). Named here so the missing catalog `entry`s are not claimed as extracts.
 
 **No production `fn`.** Close pairs `l28_tcp_add` / `l28_tcp_cnew` / `l28_tcp_svget` / `l28_tcp_newget` / `l28_tcp_jleft` / `l28_tcp_caught` / `l28_tcp_grown` name `l28_tcp_*_ok` on enrolled `crates/pedradb-store/src/l28.rs`. Those `fn`s are not in the live file (TCP kernels end at `l28_tcp_pj_ok`). `git log -S l28_tcp_add_ok -- crates/pedradb-store/src/l28.rs` is empty; the names landed in `36d4f685` on catalog / `verified.rs` / `docs/status.md` only. Verus twin, DST plant `l28_real_tcp_add_member_joint_cnew`, `cluster_real --add-member`, and handlers `tcp_node_disk_added_joint` / `tcp_node_disk_caught_up` are also absent. RFC-0119 itself has no P2.3. Not a Charon refuse: there is nothing to extract. Do not invent identity gates to please the catalog.
-
-**`#[cfg(test)]` as_is on an enrolled whole-file extract.** `next_user_data_as_is` / `submit_complete_act_as_is` live under `#[cfg(test)]` in `cqe_kernel.rs`. `RUSTFLAGS=--cfg test` on the whole-file extract would also compile the `submit_complete_act` F208 `AtomicU64` branch (test-only telemetry), so the production Lean body would not be the non-test decision. Not rewritten. Production `cqe_res_ok` / `next_user_data` / `cqe_act` / `submit_complete_act` stay the enrolled extract.
 
 **Iterator CFailure (pin Charon 0.1.232 / Aeneas daa85d7).** Model pair `probe_order_covering` is a live `pub(crate) fn` (`filter` + `by_lo.iter().position`, returns `impl Iterator`). Measured:
 

@@ -12,12 +12,58 @@ set_option maxHeartbeats 1000000
 /- You can set the `maxRecDepth` value with the `-max-recdepth` CLI option -/
 set_option maxRecDepth 2048
 
+/- You can remove the following line by using the CLI option `-all-computable`: -/
+noncomputable section
+
 namespace pedra_aeneas_cqe_kernel
 
-/-- [pedra_aeneas_cqe_kernel::FIRST_USER_DATA]
-    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 27:0-27:35
+/-- [core::sync::atomic::private::Align8]
+    Source: '/rustc/library/core/src/sync/atomic.rs', lines 273:4-273:24
+    Name pattern: [core::sync::atomic::private::Align8]
     Visibility: public -/
-@[global_simps, irreducible] def FIRST_USER_DATA : Std.U64 := 1#u64
+@[rust_type "core::sync::atomic::private::Align8"]
+axiom core.sync.atomic.private.Align8 (T : Type) : Type
+
+/-- [core::sync::atomic::Atomic]
+    Source: '/rustc/library/core/src/sync/atomic.rs', lines 366:0-366:37
+    Name pattern: [core::sync::atomic::Atomic]
+    Visibility: public -/
+@[rust_type "core::sync::atomic::Atomic"]
+axiom core.sync.atomic.Atomic (T : Type) (Clause0_Storage : Type) : Type
+
+/-- [core::sync::atomic::Ordering]
+    Source: '/rustc/library/core/src/sync/atomic.rs', lines 447:0-447:17
+    Name pattern: [core::sync::atomic::Ordering]
+    Visibility: public -/
+@[discriminant isize, rust_type "core::sync::atomic::Ordering"]
+inductive core.sync.atomic.Ordering where
+| Relaxed : core.sync.atomic.Ordering
+| Release : core.sync.atomic.Ordering
+| Acquire : core.sync.atomic.Ordering
+| AcqRel : core.sync.atomic.Ordering
+| SeqCst : core.sync.atomic.Ordering
+
+/-- [core::sync::atomic::{core::sync::atomic::Atomic<u64, core::sync::atomic::private::Align8<u64>>}::new]:
+    Source: '/rustc/library/core/src/sync/atomic.rs', lines 2628:12-2628:50
+    Name pattern: [core::sync::atomic::{core::sync::atomic::Atomic<u64, core::sync::atomic::private::Align8<u64>>}::new]
+    Visibility: public -/
+@[rust_fun
+  "core::sync::atomic::{core::sync::atomic::Atomic<u64, core::sync::atomic::private::Align8<u64>>}::new"]
+axiom core.sync.atomic.AtomicU64Align8U64.new
+  :
+  Std.U64 → Result (core.sync.atomic.Atomic Std.U64
+    (core.sync.atomic.private.Align8 Std.U64))
+
+/-- [core::sync::atomic::{core::sync::atomic::Atomic<u64, core::sync::atomic::private::Align8<u64>>}::fetch_add]:
+    Source: '/rustc/library/core/src/sync/atomic.rs', lines 3160:12-3160:81
+    Name pattern: [core::sync::atomic::{core::sync::atomic::Atomic<u64, core::sync::atomic::private::Align8<u64>>}::fetch_add]
+    Visibility: public -/
+@[rust_fun
+  "core::sync::atomic::{core::sync::atomic::Atomic<u64, core::sync::atomic::private::Align8<u64>>}::fetch_add"]
+axiom core.sync.atomic.AtomicU64Align8U64.fetch_add
+  :
+  core.sync.atomic.Atomic Std.U64 (core.sync.atomic.private.Align8 Std.U64) →
+    Std.U64 → core.sync.atomic.Ordering → Result Std.U64
 
 /-- [pedra_aeneas_cqe_kernel::next_user_data]: loop body 0:
     Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 31:4-37:5
@@ -46,6 +92,14 @@ def next_user_data_loop (counter : Std.U64) : Result (Std.U64 × Std.U64) := do
 def next_user_data (counter : Std.U64) : Result (Std.U64 × Std.U64) := do
   next_user_data_loop counter
 
+/-- [pedra_aeneas_cqe_kernel::next_user_data_as_is]:
+    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 43:0-45:1 -/
+def next_user_data_as_is
+  (_counter : Std.U64) (opcode_tag : Std.U64) :
+  Result (Std.U64 × Std.U64)
+  := do
+  ok (opcode_tag, _counter)
+
 /-- [pedra_aeneas_cqe_kernel::CqeAct]
     Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 57:0-62:1
     Visibility: public -/
@@ -53,82 +107,6 @@ def next_user_data (counter : Std.U64) : Result (Std.U64 × Std.U64) := do
 inductive CqeAct where
 | Take : CqeAct
 | Discard : CqeAct
-
-/-- [pedra_aeneas_cqe_kernel::{impl core::fmt::Debug for pedra_aeneas_cqe_kernel::CqeAct}::fmt]:
-    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 56:9-56:14
-    Visibility: public -/
-def CqeAct.Insts.CoreFmtDebug.fmt
-  (self : CqeAct) (f : core.fmt.Formatter) :
-  Result ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter)
-  := do
-  match self with
-  | CqeAct.Take => core.fmt.Formatter.write_str f (toStr "Take")
-  | CqeAct.Discard => core.fmt.Formatter.write_str f (toStr "Discard")
-
-/-- Trait implementation: [pedra_aeneas_cqe_kernel::{impl core::fmt::Debug for pedra_aeneas_cqe_kernel::CqeAct}]
-    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 56:9-56:14 -/
-@[reducible]
-def CqeAct.Insts.CoreFmtDebug : core.fmt.Debug CqeAct := {
-  fmt := CqeAct.Insts.CoreFmtDebug.fmt
-}
-
-/-- [pedra_aeneas_cqe_kernel::{impl core::clone::Clone for pedra_aeneas_cqe_kernel::CqeAct}::clone]:
-    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 56:16-56:21
-    Visibility: public -/
-def CqeAct.Insts.CoreCloneClone.clone (self : CqeAct) : Result CqeAct := do
-  ok self
-
-/-- Trait implementation: [pedra_aeneas_cqe_kernel::{impl core::clone::Clone for pedra_aeneas_cqe_kernel::CqeAct}]
-    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 56:16-56:21 -/
-@[reducible]
-def CqeAct.Insts.CoreCloneClone : core.clone.Clone CqeAct := {
-  clone := CqeAct.Insts.CoreCloneClone.clone
-}
-
-/-- Trait implementation: [pedra_aeneas_cqe_kernel::{impl core::marker::Copy for pedra_aeneas_cqe_kernel::CqeAct}]
-    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 56:23-56:27 -/
-@[reducible]
-def CqeAct.Insts.CoreMarkerCopy : core.marker.Copy CqeAct := {
-  cloneInst := CqeAct.Insts.CoreCloneClone
-}
-
-/-- Trait implementation: [pedra_aeneas_cqe_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_cqe_kernel::CqeAct}]
-    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 56:29-56:38 -/
-@[reducible]
-def CqeAct.Insts.CoreMarkerStructuralPartialEq :
-  core.marker.StructuralPartialEq CqeAct := {
-}
-
-/-- [pedra_aeneas_cqe_kernel::{impl core::cmp::PartialEq<pedra_aeneas_cqe_kernel::CqeAct> for pedra_aeneas_cqe_kernel::CqeAct}::eq]:
-    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 56:29-56:38
-    Visibility: public -/
-def CqeAct.Insts.CoreCmpPartialEqCqeAct.eq
-  (self : CqeAct) (other : CqeAct) : Result Bool := do
-  let self1 := read_discriminant self
-  let other1 := read_discriminant other
-  ok (self1 = other1)
-
-/-- Trait implementation: [pedra_aeneas_cqe_kernel::{impl core::cmp::PartialEq<pedra_aeneas_cqe_kernel::CqeAct> for pedra_aeneas_cqe_kernel::CqeAct}]
-    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 56:29-56:38 -/
-@[reducible]
-def CqeAct.Insts.CoreCmpPartialEqCqeAct : core.cmp.PartialEq CqeAct CqeAct := {
-  eq := CqeAct.Insts.CoreCmpPartialEqCqeAct.eq
-}
-
-/-- [pedra_aeneas_cqe_kernel::{impl core::cmp::Eq for pedra_aeneas_cqe_kernel::CqeAct}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 56:40-56:42
-    Visibility: public -/
-def CqeAct.Insts.CoreCmpEq.assert_fields_are_eq
-  (self : CqeAct) : Result Unit := do
-  ok ()
-
-/-- Trait implementation: [pedra_aeneas_cqe_kernel::{impl core::cmp::Eq for pedra_aeneas_cqe_kernel::CqeAct}]
-    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 56:40-56:42 -/
-@[reducible]
-def CqeAct.Insts.CoreCmpEq : core.cmp.Eq CqeAct := {
-  partialEqInst := CqeAct.Insts.CoreCmpPartialEqCqeAct
-  assert_fields_are_eq := CqeAct.Insts.CoreCmpEq.assert_fields_are_eq
-}
 
 /-- [pedra_aeneas_cqe_kernel::cqe_act]:
     Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 65:0-71:1
@@ -147,91 +125,16 @@ inductive SubmitCompleteAct where
 | WaitMore : SubmitCompleteAct
 | ReturnSubmitErr : SubmitCompleteAct
 
-/-- [pedra_aeneas_cqe_kernel::{impl core::fmt::Debug for pedra_aeneas_cqe_kernel::SubmitCompleteAct}::fmt]:
-    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 74:9-74:14
+/-- [pedra_aeneas_cqe_kernel::F208_WAITMORE_AFTER_SUBMIT_ERR]
+    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 93:0-94:41
     Visibility: public -/
-def SubmitCompleteAct.Insts.CoreFmtDebug.fmt
-  (self : SubmitCompleteAct) (f : core.fmt.Formatter) :
-  Result ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter)
-  := do
-  match self with
-  | SubmitCompleteAct.UseHarvested =>
-    core.fmt.Formatter.write_str f (toStr "UseHarvested")
-  | SubmitCompleteAct.WaitMore =>
-    core.fmt.Formatter.write_str f (toStr "WaitMore")
-  | SubmitCompleteAct.ReturnSubmitErr =>
-    core.fmt.Formatter.write_str f (toStr "ReturnSubmitErr")
-
-/-- Trait implementation: [pedra_aeneas_cqe_kernel::{impl core::fmt::Debug for pedra_aeneas_cqe_kernel::SubmitCompleteAct}]
-    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 74:9-74:14 -/
-@[reducible]
-def SubmitCompleteAct.Insts.CoreFmtDebug : core.fmt.Debug SubmitCompleteAct
-  := {
-  fmt := SubmitCompleteAct.Insts.CoreFmtDebug.fmt
-}
-
-/-- [pedra_aeneas_cqe_kernel::{impl core::clone::Clone for pedra_aeneas_cqe_kernel::SubmitCompleteAct}::clone]:
-    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 74:16-74:21
-    Visibility: public -/
-def SubmitCompleteAct.Insts.CoreCloneClone.clone
-  (self : SubmitCompleteAct) : Result SubmitCompleteAct := do
-  ok self
-
-/-- Trait implementation: [pedra_aeneas_cqe_kernel::{impl core::clone::Clone for pedra_aeneas_cqe_kernel::SubmitCompleteAct}]
-    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 74:16-74:21 -/
-@[reducible]
-def SubmitCompleteAct.Insts.CoreCloneClone : core.clone.Clone SubmitCompleteAct
-  := {
-  clone := SubmitCompleteAct.Insts.CoreCloneClone.clone
-}
-
-/-- Trait implementation: [pedra_aeneas_cqe_kernel::{impl core::marker::Copy for pedra_aeneas_cqe_kernel::SubmitCompleteAct}]
-    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 74:23-74:27 -/
-@[reducible]
-def SubmitCompleteAct.Insts.CoreMarkerCopy : core.marker.Copy SubmitCompleteAct
-  := {
-  cloneInst := SubmitCompleteAct.Insts.CoreCloneClone
-}
-
-/-- Trait implementation: [pedra_aeneas_cqe_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_cqe_kernel::SubmitCompleteAct}]
-    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 74:29-74:38 -/
-@[reducible]
-def SubmitCompleteAct.Insts.CoreMarkerStructuralPartialEq :
-  core.marker.StructuralPartialEq SubmitCompleteAct := {
-}
-
-/-- [pedra_aeneas_cqe_kernel::{impl core::cmp::PartialEq<pedra_aeneas_cqe_kernel::SubmitCompleteAct> for pedra_aeneas_cqe_kernel::SubmitCompleteAct}::eq]:
-    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 74:29-74:38
-    Visibility: public -/
-def SubmitCompleteAct.Insts.CoreCmpPartialEqSubmitCompleteAct.eq
-  (self : SubmitCompleteAct) (other : SubmitCompleteAct) : Result Bool := do
-  let self1 := read_discriminant self
-  let other1 := read_discriminant other
-  ok (self1 = other1)
-
-/-- Trait implementation: [pedra_aeneas_cqe_kernel::{impl core::cmp::PartialEq<pedra_aeneas_cqe_kernel::SubmitCompleteAct> for pedra_aeneas_cqe_kernel::SubmitCompleteAct}]
-    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 74:29-74:38 -/
-@[reducible]
-def SubmitCompleteAct.Insts.CoreCmpPartialEqSubmitCompleteAct :
-  core.cmp.PartialEq SubmitCompleteAct SubmitCompleteAct := {
-  eq := SubmitCompleteAct.Insts.CoreCmpPartialEqSubmitCompleteAct.eq
-}
-
-/-- [pedra_aeneas_cqe_kernel::{impl core::cmp::Eq for pedra_aeneas_cqe_kernel::SubmitCompleteAct}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 74:40-74:42
-    Visibility: public -/
-def SubmitCompleteAct.Insts.CoreCmpEq.assert_fields_are_eq
-  (self : SubmitCompleteAct) : Result Unit := do
-  ok ()
-
-/-- Trait implementation: [pedra_aeneas_cqe_kernel::{impl core::cmp::Eq for pedra_aeneas_cqe_kernel::SubmitCompleteAct}]
-    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 74:40-74:42 -/
-@[reducible]
-def SubmitCompleteAct.Insts.CoreCmpEq : core.cmp.Eq SubmitCompleteAct := {
-  partialEqInst := SubmitCompleteAct.Insts.CoreCmpPartialEqSubmitCompleteAct
-  assert_fields_are_eq :=
-    SubmitCompleteAct.Insts.CoreCmpEq.assert_fields_are_eq
-}
+@[global_simps, irreducible]
+def F208_WAITMORE_AFTER_SUBMIT_ERR
+  :
+  Result (core.sync.atomic.Atomic Std.U64 (core.sync.atomic.private.Align8
+    Std.U64))
+  :=
+  core.sync.atomic.AtomicU64Align8U64.new 0#u64
 
 /-- [pedra_aeneas_cqe_kernel::cqe_res_ok]:
     Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 98:0-100:1
@@ -261,9 +164,17 @@ def cqe_ring_model_admitted_as_is : Result Bool := do
     Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 128:0-138:1
     Visibility: public -/
 def submit_complete_act
-  (submit_ok : Bool) (harvested : Bool) : Result SubmitCompleteAct := do
+  (_submit_ok : Bool) (harvested : Bool) : Result SubmitCompleteAct := do
   if harvested
   then ok SubmitCompleteAct.UseHarvested
   else ok SubmitCompleteAct.WaitMore
+
+/-- [pedra_aeneas_cqe_kernel::submit_complete_act_as_is]:
+    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 143:0-149:1 -/
+def submit_complete_act_as_is
+  (submit_ok : Bool) (_harvested : Bool) : Result SubmitCompleteAct := do
+  if submit_ok
+  then ok SubmitCompleteAct.WaitMore
+  else ok SubmitCompleteAct.ReturnSubmitErr
 
 end pedra_aeneas_cqe_kernel
