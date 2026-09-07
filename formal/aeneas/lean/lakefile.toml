@@ -60,6 +60,12 @@ name = "GroupCommitKernel"
 name = "GroupCommit"
 
 [[lean_lib]]
+name = "ProbeOrderKernel"
+
+[[lean_lib]]
+name = "ProbeOrder"
+
+[[lean_lib]]
 name = "PrefixKernel"
 
 [[lean_lib]]
@@ -70,3 +76,9 @@ name = "WriteAdmissionKernel"
 
 [[lean_lib]]
 name = "WriteAdmission"
+
+[[lean_lib]]
+name = "FlushKernel"
+
+[[lean_lib]]
+name = "Flush"

@@ -2819,8 +2819,9 @@
       "id": "flush_decision",
       "finding": "F2/F43/G1",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",
-      "twin": "crates/pedradb-core/verus/flush_decision.rs",
+      "twin": "crates/pedradb-core/src/flush_kernel.rs",
       "verus": "scripts/verus_flush_decision.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs"
@@ -4509,8 +4510,9 @@
       "id": "flush_publish",
       "finding": "RFC-0151 P1",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",
-      "twin": "crates/pedradb-core/verus/flush_decision.rs",
+      "twin": "crates/pedradb-core/src/flush_kernel.rs",
       "verus": "scripts/verus_flush_decision.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs"
@@ -5387,8 +5389,9 @@
       "id": "flush_plan",
       "finding": "F2/F43",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",
-      "twin": "crates/pedradb-core/verus/flush_decision.rs",
+      "twin": "crates/pedradb-core/src/flush_kernel.rs",
       "verus": "scripts/verus_flush_decision.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs"
@@ -6505,8 +6508,9 @@
       "id": "auto_flush_due",
       "finding": "RFC-0170 P2.4",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",
-      "twin": "crates/pedradb-core/verus/flush_decision.rs",
+      "twin": "crates/pedradb-core/src/flush_kernel.rs",
       "verus": "scripts/verus_flush_decision.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs"
@@ -6521,6 +6525,98 @@
       "dst_plant": {
         "file": "crates/pedradb-core/src/flush_kernel.rs",
         "test": "auto_flush_due_on_live_over_limit_is_not_ok"
+      }
+    },
+    {
+      "id": "snap_empty",
+      "finding": "RFC-0174 P1.1",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/lookup_kernel.rs",
+      "twin": "crates/pedradb-core/src/lookup_kernel.rs",
+      "verus": "scripts/verus_lookup.sh",
+      "callers": [
+        "crates/pedradb-core/src/db.rs"
+      ],
+      "entry": "snap_is_empty",
+      "data_fate": true,
+      "handlers": [
+        "get_at"
+      ],
+      "as_is": "snap_is_empty_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/lookup_kernel.rs",
+        "test": "snap_is_empty_on_live_zero_is_not_ok"
+      }
+    },
+    {
+      "id": "snap_below_watermark",
+      "finding": "RFC-0174 P1.1",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/lookup_kernel.rs",
+      "twin": "crates/pedradb-core/src/lookup_kernel.rs",
+      "verus": "scripts/verus_lookup.sh",
+      "callers": [
+        "crates/pedradb-core/src/db.rs"
+      ],
+      "entry": "snap_below_watermark",
+      "data_fate": true,
+      "handlers": [
+        "get_at"
+      ],
+      "as_is": "snap_below_watermark_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/lookup_kernel.rs",
+        "test": "snap_below_watermark_on_live_below_is_not_ok"
+      }
+    },
+    {
+      "id": "mem_point_decides",
+      "finding": "RFC-0174 P1.1",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/lookup_kernel.rs",
+      "twin": "crates/pedradb-core/src/lookup_kernel.rs",
+      "verus": "scripts/verus_lookup.sh",
+      "callers": [
+        "crates/pedradb-core/src/db.rs"
+      ],
+      "entry": "mem_point_decides",
+      "data_fate": true,
+      "handlers": [
+        "lookup"
+      ],
+      "as_is": "mem_point_decides_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/lookup_kernel.rs",
+        "test": "mem_point_decides_on_live_hit_is_not_ok"
+      }
+    },
+    {
+      "id": "prefer_newer_seq",
+      "finding": "RFC-0174 P1.1",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/lookup_kernel.rs",
+      "twin": "crates/pedradb-core/src/lookup_kernel.rs",
+      "verus": "scripts/verus_lookup.sh",
+      "callers": [
+        "crates/pedradb-core/src/db.rs"
+      ],
+      "entry": "prefer_newer_seq",
+      "data_fate": true,
+      "handlers": [
+        "lookup"
+      ],
+      "as_is": "prefer_newer_seq_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/lookup_kernel.rs",
+        "test": "prefer_newer_seq_on_live_older_first_is_not_ok"
       }
     }
   ],

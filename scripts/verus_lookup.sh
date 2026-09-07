@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
-# Machine-check the flush-pipeline decision kernel (RFC-0056 P0.2).
+# Machine-check lookup snapshot predicates (RFC-0174 P1.1).
 set -euo pipefail
-
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-# RFC-0174 P0.3: prove the file rustc links, not a twin-cópia.
-SRC="$ROOT/crates/pedradb-core/src/flush_kernel.rs"
-
+SRC="$ROOT/crates/pedradb-core/src/lookup_kernel.rs"
 if [[ -x "${VERUS:-}" ]]; then
   :
 elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then
@@ -13,10 +10,9 @@ elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then
 elif command -v verus >/dev/null 2>&1; then
   VERUS="$(command -v verus)"
 else
-  echo "error: verus not found (install to ~/.local/verus/verus-arm64-macos or set VERUS=)" >&2
+  echo "error: verus not found" >&2
   exit 127
 fi
-
 echo "verus: $VERUS"
 "$VERUS" --version
 echo "proving: $SRC"

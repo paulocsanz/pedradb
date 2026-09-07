@@ -1,33 +1,82 @@
-//! Pure flush-pipeline decisions (RFC-0056 P0.2 — crash dictionary on the
-//! memtable → SST → WAL-rotate path).
+//! Pure flush-pipeline decisions (RFC-0056 P0.2 / RFC-0174 P0.3).
+//!
+//! **Single artifact:** this file is what `rustc` links *and* what Verus
+//! proves (`cfg(verus_keep_ghost)`). No twin-cópia.
+//!
+//!   ./scripts/verus_flush_decision.sh
 //!
 //! Production [`crate::Db::flush`] and [`crate::Db::try_rotate_wal`] route
-//! their decisions through this kernel: which flush step runs (finish the
-//! pending imm / write the mem tail to an SST / rotate only), and whether
-//! the WAL may be truncated at all. The invariant that makes it
-//! data-fate: **the WAL may only be rotated once every copy of acked keys
-//! lives in an installed SST** — mem, imm, the off-lock flush read pin,
-//! parked-unflushed tables, and in-flight commits all pin the WAL.
+//! their decisions through this kernel. Data-fate: the WAL may only be
+//! rotated once every copy of acked keys lives in an installed SST.
 //!
-//! Named decisions (the ones that were `SilentWrong` when inverted):
-//! - **Mem tail is never dropped** — `flush` with a non-empty mem always
-//!   writes the SST before any WAL rotate; rotating instead loses every
-//!   acked key that lived only in mem (crash ⇒ data loss).
-//! - **Pin live ⇒ WAL kept** — after `prepare_flush_imm` the only copy of
-//!   acked keys may be the flush read pin (and an in-flight SST);
-//!   truncating the WAL there is the pre-fix hole
-//!   (`Db::rotate_wal_ignoring_pin` replays it).
-//! - **Commit in flight ⇒ WAL kept** — a writer parked in the off-lock
-//!   fsync window still owns WAL bytes (F2).
-//! - **Pending imm finishes first** — single-flight: a previous flush's
-//!   imm is completed before mem is staged.
-//!
-//! Verus twin: `crates/pedradb-core/verus/flush_decision.rs`.
 //! Spec page: `docs/formal/crash-dictionary.md` (flush section).
 
 #![forbid(unsafe_code)]
 
+macro_rules! flush_plan_body {
+    ($mem_empty:expr, $imm_present:expr) => {
+        if $imm_present {
+            FlushPlan::FinishImmThenFlush
+        } else if !$mem_empty {
+            FlushPlan::WriteSstThenRotate
+        } else {
+            FlushPlan::RotateOnly
+        }
+    };
+}
+
+macro_rules! flush_plan_as_is_body {
+    ($mem_empty:expr, $imm_present:expr) => {{
+        let _ = ($mem_empty, $imm_present);
+        FlushPlan::RotateOnly
+    }};
+}
+
+macro_rules! may_publish_body {
+    ($sst_durable:expr) => {
+        $sst_durable
+    };
+}
+
+macro_rules! wal_rotate_body {
+    ($s:expr) => {
+        if $s.mem_empty
+            && !$s.imm_present
+            && !$s.pin_live
+            && !$s.parked_unflushed
+            && !$s.commit_inflight
+        {
+            WalRotateAction::RotateWal
+        } else {
+            WalRotateAction::KeepWal
+        }
+    };
+}
+
+macro_rules! wal_rotate_as_is_body {
+    ($s:expr) => {
+        if $s.mem_empty && !$s.imm_present && !$s.parked_unflushed && !$s.commit_inflight {
+            WalRotateAction::RotateWal
+        } else {
+            WalRotateAction::KeepWal
+        }
+    };
+}
+
+macro_rules! auto_flush_due_body {
+    ($mem_bytes:expr, $armed:expr, $limit:expr) => {
+        $armed && $mem_bytes >= $limit
+    };
+}
+
+macro_rules! skip_auto_flush_body {
+    ($global_under:expr, $cf_under:expr) => {
+        $global_under && $cf_under
+    };
+}
+
 /// One step of the flush pipeline (RFC-0056 P0.2).
+#[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FlushPlan {
     /// A previous flush's imm is pending — finish it first (single-flight),
@@ -40,50 +89,36 @@ pub enum FlushPlan {
     RotateOnly,
 }
 
+#[cfg(not(verus_keep_ghost))]
 /// Pure rule for which flush step runs.
-///
-/// # Post-condition (theorem-ready)
-///
-/// ```text
-/// ensures
-///   (plan == RotateOnly)          ==> mem_empty && !imm_present
-///   !mem_empty                    ==> plan != RotateOnly   // tail never dropped
-///   imm_present                   ==> plan == FinishImmThenFlush
-/// ```
-///
-/// Finite-domain check: [`tests::theorem_flush_plan_on_finite_domain`].
 #[must_use]
 pub fn flush_plan(mem_empty: bool, imm_present: bool) -> FlushPlan {
-    match (imm_present, mem_empty) {
-        (true, _) => FlushPlan::FinishImmThenFlush,
-        (false, false) => FlushPlan::WriteSstThenRotate,
-        (false, true) => FlushPlan::RotateOnly,
-    }
+    flush_plan_body!(mem_empty, imm_present)
 }
 
-/// AS-IS data loss: flush "succeeds" without writing the mem tail — the
-/// WAL rotate then truncates the only durable copy of acked keys that
-/// lived in mem (crash ⇒ every unflushed acked write is gone). Mutant
-/// must fail every theorem above.
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS data loss: flush "succeeds" without writing the mem tail.
 #[must_use]
-pub fn flush_plan_as_is_lose_tail(_mem_empty: bool, _imm_present: bool) -> FlushPlan {
-    FlushPlan::RotateOnly
+pub fn flush_plan_as_is_lose_tail(mem_empty: bool, imm_present: bool) -> FlushPlan {
+    flush_plan_as_is_body!(mem_empty, imm_present)
 }
 
+#[cfg(not(verus_keep_ghost))]
 /// MANIFEST / CURRENT may name an SST only after that file is durable.
 #[must_use]
 pub fn may_publish_manifest(sst_durable: bool) -> bool {
-    sst_durable
+    may_publish_body!(sst_durable)
 }
 
-/// AS-IS: publish MANIFEST while the SST is still unsynced (crash → CURRENT
-/// points at a torn/missing file).
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: publish MANIFEST while the SST is still unsynced.
 #[must_use]
 pub fn may_publish_manifest_as_is(_sst_durable: bool) -> bool {
     true
 }
 
 /// Every way acked keys can still depend on the WAL.
+#[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WalPinState {
     /// Active memtable empty (empty ⇒ nothing depends on the WAL).
@@ -99,6 +134,7 @@ pub struct WalPinState {
 }
 
 /// Whether the flush pipeline may truncate the WAL.
+#[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WalRotateAction {
     /// Every copy of acked keys lives in an installed SST: the WAL may be
@@ -108,33 +144,119 @@ pub enum WalRotateAction {
     KeepWal,
 }
 
+#[cfg(not(verus_keep_ghost))]
 /// Pure rule for the WAL rotate (G1 tail of the flush pipeline).
-///
-/// # Post-condition (theorem-ready)
-///
-/// ```text
-/// ensures
-///   (a == RotateWal) <==> (mem_empty && !imm_present && !pin_live
-///        && !parked_unflushed && !commit_inflight)
-///   pin_live || commit_inflight || imm_present || parked_unflushed
-///        || !mem_empty  ==> a == KeepWal   // never truncate a live WAL
-/// ```
-///
-/// Finite-domain check: [`tests::theorem_wal_rotate_on_finite_domain`].
 #[must_use]
 pub fn wal_rotate_decision(s: WalPinState) -> WalRotateAction {
-    if s.mem_empty && !s.imm_present && !s.pin_live && !s.parked_unflushed && !s.commit_inflight {
+    wal_rotate_body!(s)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS pre-fix hole: decide the rotate ignoring the flush read pin.
+#[must_use]
+pub fn wal_rotate_decision_as_is_ignore_pin(s: WalPinState) -> WalRotateAction {
+    wal_rotate_as_is_body!(s)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// Fire auto-flush when the armed byte limit is reached (RFC-0170 P2.4).
+#[must_use]
+pub fn auto_flush_due(mem_bytes: u64, armed: bool, limit: u64) -> bool {
+    auto_flush_due_body!(mem_bytes, armed, limit)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: never auto-flush.
+#[must_use]
+pub fn auto_flush_due_as_is(_mem_bytes: u64, _armed: bool, _limit: u64) -> bool {
+    false
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// Both mem axes under their limits ⇒ skip auto-flush (no SST write).
+#[must_use]
+pub fn skip_auto_flush(global_under: bool, cf_under: bool) -> bool {
+    skip_auto_flush_body!(global_under, cf_under)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: never skip — would flush even when both axes are under.
+#[must_use]
+pub fn skip_auto_flush_as_is(_global_under: bool, _cf_under: bool) -> bool {
+    false
+}
+
+#[cfg(verus_keep_ghost)]
+use vstd::prelude::*;
+
+#[cfg(verus_keep_ghost)]
+verus! {
+
+pub enum FlushPlan {
+    FinishImmThenFlush,
+    WriteSstThenRotate,
+    RotateOnly,
+}
+
+pub open spec fn flush_plan_spec(mem_empty: bool, imm_present: bool) -> FlushPlan {
+    if imm_present {
+        FlushPlan::FinishImmThenFlush
+    } else if !mem_empty {
+        FlushPlan::WriteSstThenRotate
+    } else {
+        FlushPlan::RotateOnly
+    }
+}
+
+pub open spec fn flush_plan_as_is(_mem_empty: bool, _imm_present: bool) -> FlushPlan {
+    FlushPlan::RotateOnly
+}
+
+#[verifier::when_used_as_spec(flush_plan_spec)]
+pub fn flush_plan(mem_empty: bool, imm_present: bool) -> (p: FlushPlan)
+    ensures
+        p == flush_plan_spec(mem_empty, imm_present),
+        (p == FlushPlan::RotateOnly) ==> (mem_empty && !imm_present),
+        !mem_empty ==> p != FlushPlan::RotateOnly,
+        imm_present ==> p == FlushPlan::FinishImmThenFlush,
+{
+    flush_plan_body!(mem_empty, imm_present)
+}
+
+pub fn flush_plan_as_is_lose_tail(mem_empty: bool, imm_present: bool) -> (p: FlushPlan)
+    ensures
+        p == flush_plan_as_is(mem_empty, imm_present),
+{
+    flush_plan_as_is_body!(mem_empty, imm_present)
+}
+
+pub struct WalPinState {
+    pub mem_empty: bool,
+    pub imm_present: bool,
+    pub pin_live: bool,
+    pub parked_unflushed: bool,
+    pub commit_inflight: bool,
+}
+
+pub enum WalRotateAction {
+    RotateWal,
+    KeepWal,
+}
+
+pub open spec fn wal_rotate_spec(s: WalPinState) -> WalRotateAction {
+    if s.mem_empty
+        && !s.imm_present
+        && !s.pin_live
+        && !s.parked_unflushed
+        && !s.commit_inflight
+    {
         WalRotateAction::RotateWal
     } else {
         WalRotateAction::KeepWal
     }
 }
 
-/// AS-IS pre-fix hole: decide the rotate ignoring the flush read pin —
-/// truncates the WAL while the pin (and an in-flight SST) holds the only
-/// copy of acked keys (`Db::rotate_wal_ignoring_pin` replays this).
-#[must_use]
-pub fn wal_rotate_decision_as_is_ignore_pin(s: WalPinState) -> WalRotateAction {
+pub open spec fn wal_rotate_as_is_ignore_pin(s: WalPinState) -> WalRotateAction {
     if s.mem_empty && !s.imm_present && !s.parked_unflushed && !s.commit_inflight {
         WalRotateAction::RotateWal
     } else {
@@ -142,32 +264,200 @@ pub fn wal_rotate_decision_as_is_ignore_pin(s: WalPinState) -> WalRotateAction {
     }
 }
 
-/// Fire auto-flush when the armed byte limit is reached (RFC-0170 P2.4).
-/// Production [`crate::db::Db::maybe_auto_flush`] calls this; drain/SST write
-/// stays glue.
-#[must_use]
-pub fn auto_flush_due(mem_bytes: u64, armed: bool, limit: u64) -> bool {
+#[verifier::when_used_as_spec(wal_rotate_spec)]
+pub fn wal_rotate_decision(s: WalPinState) -> (a: WalRotateAction)
+    ensures
+        a == wal_rotate_spec(s),
+        (a == WalRotateAction::RotateWal)
+            ==> (s.mem_empty && !s.imm_present && !s.pin_live && !s.parked_unflushed && !s.commit_inflight),
+        (s.pin_live || s.commit_inflight || s.imm_present || s.parked_unflushed || !s.mem_empty)
+            ==> a == WalRotateAction::KeepWal,
+{
+    wal_rotate_body!(s)
+}
+
+pub fn wal_rotate_decision_as_is_ignore_pin(s: WalPinState) -> (a: WalRotateAction)
+    ensures
+        a == wal_rotate_as_is_ignore_pin(s),
+{
+    wal_rotate_as_is_body!(s)
+}
+
+pub open spec fn may_publish_manifest_spec(sst_durable: bool) -> bool {
+    sst_durable
+}
+
+pub open spec fn may_publish_manifest_as_is_spec(_sst_durable: bool) -> bool {
+    true
+}
+
+pub fn may_publish_manifest(sst_durable: bool) -> (d: bool)
+    ensures
+        d == may_publish_manifest_spec(sst_durable),
+{
+    may_publish_body!(sst_durable)
+}
+
+pub fn may_publish_manifest_as_is(_sst_durable: bool) -> (d: bool)
+    ensures
+        d == true,
+{
+    true
+}
+
+pub open spec fn auto_flush_due_spec(mem_bytes: u64, armed: bool, limit: u64) -> bool {
     armed && mem_bytes >= limit
 }
 
-/// AS-IS: never auto-flush — mem grows unbounded (acked keys stay only in
-/// the WAL/memtable until an explicit flush).
-#[must_use]
-pub fn auto_flush_due_as_is(_mem_bytes: u64, _armed: bool, _limit: u64) -> bool {
+pub fn auto_flush_due(mem_bytes: u64, armed: bool, limit: u64) -> (d: bool)
+    ensures
+        d == auto_flush_due_spec(mem_bytes, armed, limit),
+{
+    auto_flush_due_body!(mem_bytes, armed, limit)
+}
+
+pub open spec fn auto_flush_due_as_is_spec(_mem_bytes: u64, _armed: bool, _limit: u64) -> bool {
     false
 }
 
-/// Both mem axes under their limits ⇒ skip auto-flush (no SST write).
-#[must_use]
-pub fn skip_auto_flush(global_under: bool, cf_under: bool) -> bool {
+pub fn auto_flush_due_as_is(mem_bytes: u64, armed: bool, limit: u64) -> (d: bool)
+    ensures
+        d == auto_flush_due_as_is_spec(mem_bytes, armed, limit),
+        d == false,
+{
+    let _ = (mem_bytes, armed, limit);
+    false
+}
+
+pub open spec fn skip_auto_flush_spec(global_under: bool, cf_under: bool) -> bool {
     global_under && cf_under
 }
 
-/// AS-IS: never skip — would flush even when both axes are under.
-#[must_use]
-pub fn skip_auto_flush_as_is(_global_under: bool, _cf_under: bool) -> bool {
+pub fn skip_auto_flush(global_under: bool, cf_under: bool) -> (d: bool)
+    ensures
+        d == skip_auto_flush_spec(global_under, cf_under),
+{
+    skip_auto_flush_body!(global_under, cf_under)
+}
+
+pub open spec fn skip_auto_flush_as_is_spec(_global_under: bool, _cf_under: bool) -> bool {
     false
 }
+
+pub fn skip_auto_flush_as_is(global_under: bool, cf_under: bool) -> (d: bool)
+    ensures
+        d == skip_auto_flush_as_is_spec(global_under, cf_under),
+        d == false,
+{
+    let _ = (global_under, cf_under);
+    false
+}
+
+proof fn lemma_tail_never_dropped(mem_empty: bool, imm_present: bool)
+    requires
+        !mem_empty,
+    ensures
+        flush_plan(mem_empty, imm_present) != FlushPlan::RotateOnly,
+        flush_plan(mem_empty, imm_present) == FlushPlan::WriteSstThenRotate
+            || flush_plan(mem_empty, imm_present) == FlushPlan::FinishImmThenFlush,
+{
+}
+
+proof fn lemma_pending_imm_finishes_first(mem_empty: bool)
+    requires
+        true,
+    ensures
+        flush_plan(mem_empty, true) == FlushPlan::FinishImmThenFlush,
+{
+}
+
+proof fn lemma_clean_pipeline_rotates()
+    ensures
+        flush_plan(true, false) == FlushPlan::RotateOnly,
+        wal_rotate_decision(WalPinState {
+            mem_empty: true,
+            imm_present: false,
+            pin_live: false,
+            parked_unflushed: false,
+            commit_inflight: false,
+        }) == WalRotateAction::RotateWal,
+{
+}
+
+proof fn lemma_pin_keeps_wal(s: WalPinState)
+    requires
+        s.pin_live,
+    ensures
+        wal_rotate_decision(s) == WalRotateAction::KeepWal,
+{
+}
+
+proof fn lemma_commit_inflight_keeps_wal(s: WalPinState)
+    requires
+        s.commit_inflight,
+    ensures
+        wal_rotate_decision(s) == WalRotateAction::KeepWal,
+{
+}
+
+proof fn lemma_unflushed_mem_keeps_wal(s: WalPinState)
+    requires
+        !s.mem_empty,
+    ensures
+        wal_rotate_decision(s) == WalRotateAction::KeepWal,
+{
+}
+
+proof fn lemma_mutant_loses_tail(mem_empty: bool, imm_present: bool)
+    requires
+        !mem_empty,
+    ensures
+        flush_plan(mem_empty, imm_present) != FlushPlan::RotateOnly,
+        flush_plan_as_is(mem_empty, imm_present) == FlushPlan::RotateOnly,
+{
+}
+
+proof fn lemma_as_is_publishes_unsynced()
+    ensures
+        !may_publish_manifest_spec(false),
+        may_publish_manifest_as_is_spec(false),
+{
+}
+
+proof fn lemma_as_is_never_auto_flushes()
+    ensures
+        auto_flush_due_spec(100, true, 50),
+        !auto_flush_due_as_is_spec(100, true, 50),
+{
+}
+
+proof fn lemma_as_is_never_skips_auto_flush()
+    ensures
+        skip_auto_flush_spec(true, true),
+        !skip_auto_flush_as_is_spec(true, true),
+{
+}
+
+proof fn lemma_mutant_ignores_pin()
+    ensures
+        wal_rotate_decision(WalPinState {
+            mem_empty: true,
+            imm_present: false,
+            pin_live: true,
+            parked_unflushed: false,
+            commit_inflight: false,
+        }) == WalRotateAction::KeepWal,
+        wal_rotate_as_is_ignore_pin(WalPinState {
+            mem_empty: true,
+            imm_present: false,
+            pin_live: true,
+            parked_unflushed: false,
+            commit_inflight: false,
+        }) == WalRotateAction::RotateWal,
+{
+}
+
+} // verus!
 
 #[cfg(test)]
 mod tests {

@@ -51,6 +51,7 @@ pub mod occ;
 pub mod pct_hooks;
 pub mod prefix;
 pub mod probe_order_kernel;
+pub mod lookup_kernel;
 pub mod write_admission_kernel;
 pub mod rng;
 pub mod sst;

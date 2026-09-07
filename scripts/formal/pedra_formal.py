@@ -1074,6 +1074,10 @@ AENEAS_EXTRACTS = (
         "crates/pedradb-core/src/write_admission_kernel.rs",
         "formal/aeneas/out/SOURCE.write_admission",
     ),
+    (
+        "crates/pedradb-core/src/flush_kernel.rs",
+        "formal/aeneas/out/SOURCE.flush",
+    ),
 )
 
 
@@ -1168,6 +1172,25 @@ def check_proof_depth(root: Path, catalog: dict, r: Report) -> None:
                     )
             if not freeze_failed:
                 r.good(f"proof_depth freeze matches live {live}")
+        n_sa = sum(1 for p in catalog.get("pairs") or [] if p.get("single_artifact"))
+        n_df = sum(1 for p in catalog.get("pairs") or [] if p.get("data_fate"))
+        print(f"== single_artifact fraction (RFC-0174 P0.2): sa={n_sa} data_fate={n_df} ==")
+        got_sa = (res.get("glue") or {}).get("single_artifact")
+        got_df = (res.get("glue") or {}).get("data_fate")
+        if got_sa != n_sa:
+            r.fail(
+                f"residuals freeze: glue.single_artifact={got_sa!r} != live {n_sa} "
+                "(RFC-0174 P0.2)"
+            )
+        else:
+            r.good(f"single_artifact freeze matches live {n_sa}")
+        if got_df != n_df:
+            r.fail(
+                f"residuals freeze: glue.data_fate={got_df!r} != live {n_df} "
+                "(RFC-0174 P0.2)"
+            )
+        else:
+            r.good(f"data_fate freeze matches live {n_df}")
 
 
 def check_twins(root: Path, catalog: dict, r: Report, strict: bool) -> None:
@@ -1650,6 +1673,35 @@ def check_extract(
             r.fail("RFC-0170 P2.1: formal/aeneas/lean/WriteAdmission.lean missing")
     else:
         r.gap("aeneas SOURCE.write_admission missing (run ./scripts/aeneas_write_admission.sh)")
+    # RFC-0174 P1.3: flush_kernel.rs stamp.
+    fl_stamp = root / "formal/aeneas/out/SOURCE.flush"
+    fl_src = root / "crates/pedradb-core/src/flush_kernel.rs"
+    if fl_stamp.is_file() and fl_src.is_file():
+        want = None
+        for line in fl_stamp.read_text(encoding="utf-8").splitlines():
+            if line.startswith("sha256="):
+                want = line.split("=", 1)[1].strip()
+        have = hashlib.sha256(fl_src.read_bytes()).hexdigest()
+        if want and have == want:
+            r.good("aeneas SOURCE.flush sha256 matches flush_kernel.rs")
+        elif want:
+            r.fail(
+                f"aeneas SOURCE.flush drifted (kernel {have[:12]}… vs stamp {want[:12]}…; "
+                "re-run ./scripts/aeneas_flush.sh)"
+            )
+        thy = root / "formal/aeneas/lean/Flush.lean"
+        if thy.is_file():
+            tt = thy.read_text(encoding="utf-8")
+            if re.search(r"\bsorry\b", tt):
+                r.fail("RFC-0174 P1.3: Flush.lean contains sorry")
+            elif "theorem flush_plan_empty_rotates_only" in tt:
+                r.good("RFC-0174 P1.3: Flush.lean theorem flush_plan_empty_rotates_only")
+            else:
+                r.fail("RFC-0174 P1.3: Flush.lean missing flush_plan_empty_rotates_only")
+        else:
+            r.fail("RFC-0174 P1.3: formal/aeneas/lean/Flush.lean missing")
+    else:
+        r.gap("aeneas SOURCE.flush missing (run ./scripts/aeneas_flush.sh)")
     # RFC-0170 P2.3: D1/R1/T1/C1 twins cite close production fns.
     cites = (
         ("crates/pedradb-core/verus/d1_modelo.rs", "prefix_exclusive_end_close_cited"),
