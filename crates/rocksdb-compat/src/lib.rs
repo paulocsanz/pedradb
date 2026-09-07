@@ -152,7 +152,9 @@ impl From<CoreError> for Error {
             CoreError::TransactionConflict => ErrorKind::TransactionConflict,
             CoreError::CasMismatch => ErrorKind::CasMismatch,
             CoreError::SnapshotTooOld { .. } => ErrorKind::SnapshotTooOld,
-            CoreError::WriteStall { .. } | CoreError::WriteStallMem { .. } => ErrorKind::WriteStall,
+            CoreError::WriteStall { .. }
+            | CoreError::WriteStallMem { .. }
+            | CoreError::RamBudget { .. } => ErrorKind::WriteStall,
             CoreError::AlreadyOpen { .. } => ErrorKind::AlreadyOpen,
             CoreError::Internal(_) | CoreError::TransactionFinished | CoreError::Transaction(_) => {
                 ErrorKind::Other

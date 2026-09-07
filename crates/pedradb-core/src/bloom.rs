@@ -103,6 +103,12 @@ impl BloomFilter {
         }
     }
 
+    /// Heap bytes of the bit array (0 if inactive).
+    #[must_use]
+    pub fn memory_bytes(&self) -> usize {
+        self.bits.len()
+    }
+
     /// Whether this filter can reject keys (non-empty).
     ///
     /// RFC-0030 P2: `len() != 0` rather than `!is_empty()` — `Vec::is_empty`

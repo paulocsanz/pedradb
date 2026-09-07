@@ -195,10 +195,60 @@ pub fn settle_warm_max_bytes() -> u64 {
     if let Ok(v) = std::env::var("PEDRA_SETTLE_WARM_MAX_BYTES") {
         return v.parse().unwrap_or(DEFAULT_SETTLE_WARM_MAX_BYTES);
     }
-    let ram_share = pedradb_posix::physical_ram_bytes()
-        .map(|ram| ram.saturating_mul(3) / 4)
-        .unwrap_or(0);
-    DEFAULT_SETTLE_WARM_MAX_BYTES.max(ram_share)
+    let ceiling = ram_ceiling_bytes().unwrap_or(0);
+    let ram_share = ceiling.saturating_mul(3) / 4;
+    let cap = DEFAULT_SETTLE_WARM_MAX_BYTES.max(ram_share);
+    // Leave 1 GiB for engine RSS so cgroup file-cache + heap cannot
+    // sum past memory.max (Linux charges both).
+    if ceiling > 0 {
+        cap.min(ceiling.saturating_sub(1 << 30))
+    } else {
+        cap
+    }
+}
+
+/// Cgroup `memory.max` (v2) or v1 `memory.limit_in_bytes`. `None` if
+/// unlimited / not in a cgroup (Darwin).
+#[must_use]
+pub fn cgroup_memory_max_bytes() -> Option<u64> {
+    if let Ok(s) = std::fs::read_to_string("/sys/fs/cgroup/memory.max") {
+        let t = s.trim();
+        if t != "max" {
+            return t.parse().ok().filter(|n| *n > 0);
+        }
+    }
+    if let Ok(s) = std::fs::read_to_string("/sys/fs/cgroup/memory/memory.limit_in_bytes") {
+        let n: u64 = s.trim().parse().ok()?;
+        // v1 "unlimited" is 2^63-1-ish.
+        if n > 0 && n < (1u64 << 62) {
+            return Some(n);
+        }
+    }
+    None
+}
+
+/// Hard ceiling: `PEDRA_RAM_BUDGET_BYTES`, else cgroup max, else physical RAM.
+#[must_use]
+pub fn ram_ceiling_bytes() -> Option<u64> {
+    if let Ok(v) = std::env::var("PEDRA_RAM_BUDGET_BYTES") {
+        if let Ok(n) = v.parse::<u64>() {
+            if n > 0 {
+                return Some(n);
+            }
+        }
+    }
+    cgroup_memory_max_bytes().or_else(pedradb_posix::physical_ram_bytes)
+}
+
+/// Anonymous-RSS cap for index/bloom/mem. `None` = do not fail-closed
+/// (no cgroup and no env). Env `PEDRA_RAM_BUDGET_BYTES` is the cap as-is
+/// (tests). A cgroup limit uses half, leaving file cache + allocator.
+#[must_use]
+pub fn engine_ram_cap_bytes() -> Option<usize> {
+    if let Ok(v) = std::env::var("PEDRA_RAM_BUDGET_BYTES") {
+        return v.parse::<usize>().ok().filter(|n| *n > 0);
+    }
+    cgroup_memory_max_bytes().map(|n| (n / 2) as usize)
 }
 
 /// `PEDRA_SETTLE_WARM=1` / `true`: warm even when live SSTs exceed the cap.
