@@ -361,6 +361,29 @@ impl ScaleStore for PedraScale {
     }
     fn settle(&mut self) -> bool {
         let ok = self.db.flush().is_ok() && self.db.compact().is_ok();
+        let compact_ns = self
+            .db
+            .property_int_value(rocksdb_compat::properties::PEDRA_SETTLE_COMPACT_NS)
+            .ok()
+            .flatten()
+            .unwrap_or(0);
+        let warm_ns = self
+            .db
+            .property_int_value(rocksdb_compat::properties::PEDRA_SETTLE_WARM_NS)
+            .ok()
+            .flatten()
+            .unwrap_or(0);
+        let warm_bytes = self
+            .db
+            .property_int_value(rocksdb_compat::properties::PEDRA_SETTLE_WARM_BYTES)
+            .ok()
+            .flatten()
+            .unwrap_or(0);
+        eprintln!(
+            "settle_parts/pedradb: compact={:.3}s warm={:.3}s warm_bytes={warm_bytes}",
+            compact_ns as f64 / 1e9,
+            warm_ns as f64 / 1e9,
+        );
         if let Ok(Some(1)) = self
             .db
             .property_int_value(rocksdb_compat::properties::PEDRA_RAM_PRESSURE)

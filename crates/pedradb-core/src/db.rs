@@ -453,6 +453,12 @@ pub struct DbStats {
     pub ram_ceiling_bytes: u64,
     /// Engine-resident metadata (index+bloom+mem+bulk tail), not page cache.
     pub engine_resident_bytes: u64,
+    /// Bytes streamed by the last settle warm (`0` if skipped / off).
+    pub settle_warm_bytes: u64,
+    /// Nanoseconds of the last settle warm (stream or DONTNEED).
+    pub settle_warm_ns: u64,
+    /// Nanoseconds of the last leveled compact, excluding warm.
+    pub settle_compact_ns: u64,
 }
 
 /// RFC-0035 P0: snapshot of latest/scan counters + LSM shape (no thread).
@@ -582,11 +588,14 @@ impl DbStats {
             "hot"
         };
         format!(
-            "ram_pressure={} warm_skipped={} ceiling={}B engine_resident={}B mode={mode}",
+            "ram_pressure={} warm_skipped={} ceiling={}B engine_resident={}B settle_compact_ms={} settle_warm_ms={} warm_bytes={} mode={mode}",
             self.ram_pressure,
             self.ram_warm_skipped,
             self.ram_ceiling_bytes,
-            self.engine_resident_bytes
+            self.engine_resident_bytes,
+            self.settle_compact_ns / 1_000_000,
+            self.settle_warm_ns / 1_000_000,
+            self.settle_warm_bytes,
         )
     }
 }
@@ -1807,6 +1816,12 @@ pub struct Db<E: Env = StdEnv> {
     ram_warm_skipped: AtomicU64,
     /// One-shot so the RAMPRESSURE line is not a compact-loop flood.
     ram_pressure_warned: AtomicBool,
+    /// Bytes streamed by the last [`Self::maybe_warm_ssts`].
+    last_settle_warm_bytes: AtomicU64,
+    /// Nanoseconds of the last [`Self::maybe_warm_ssts`].
+    last_settle_warm_ns: AtomicU64,
+    /// Nanoseconds of the last leveled compact, excluding warm.
+    last_settle_compact_ns: AtomicU64,
     /// Open [`SnapshotPin`]s: pin id → sequence (open-items §2.1).
     snapshot_pins: std::collections::BTreeMap<u64, SequenceNumber>,
     /// Next pin id (monotonic; never reused for this process open).
@@ -2441,6 +2456,9 @@ impl<E: Env> Db<E> {
             write_pressure_count: 0,
             ram_warm_skipped: AtomicU64::new(0),
             ram_pressure_warned: AtomicBool::new(false),
+            last_settle_warm_bytes: AtomicU64::new(0),
+            last_settle_warm_ns: AtomicU64::new(0),
+            last_settle_compact_ns: AtomicU64::new(0),
             snapshot_pins: std::collections::BTreeMap::new(),
             next_snapshot_pin_id: 1,
             earliest_readable_seq,
@@ -5246,6 +5264,9 @@ impl<E: Env> Db<E> {
             ram_warm_skipped: self.ram_warm_skipped.load(Ordering::Relaxed),
             ram_ceiling_bytes: crate::env::settle_warm_max_bytes(),
             engine_resident_bytes: self.hydrate_resident_bytes() as u64,
+            settle_warm_bytes: self.last_settle_warm_bytes.load(Ordering::Relaxed),
+            settle_warm_ns: self.last_settle_warm_ns.load(Ordering::Relaxed),
+            settle_compact_ns: self.last_settle_compact_ns.load(Ordering::Relaxed),
         }
     }
 
@@ -7114,6 +7135,7 @@ impl<E: Env> Db<E> {
         if !crate::leveling::leveled_enabled() {
             return self.compact_with(CompactOptions::default());
         }
+        let compact_t0 = Instant::now();
         self.dump_level_diag("compact_leveled_start");
         self.repair_stacked_levels()?;
         // Across-job batching: only with a thread-shareable env (the seam)
@@ -7140,6 +7162,10 @@ impl<E: Env> Db<E> {
                 0 => {
                     self.dump_level_diag("compact_leveled_done");
                     self.maybe_willneed_ssts();
+                    self.last_settle_compact_ns.store(
+                        u64::try_from(compact_t0.elapsed().as_nanos()).unwrap_or(u64::MAX),
+                        Ordering::Relaxed,
+                    );
                     self.maybe_warm_ssts();
                     return Ok(());
                 }
@@ -7178,6 +7204,10 @@ impl<E: Env> Db<E> {
             }
         }
         self.maybe_willneed_ssts();
+        self.last_settle_compact_ns.store(
+            u64::try_from(compact_t0.elapsed().as_nanos()).unwrap_or(u64::MAX),
+            Ordering::Relaxed,
+        );
         self.maybe_warm_ssts();
         Ok(())
     }
@@ -7197,34 +7227,42 @@ impl<E: Env> Db<E> {
         }
     }
 
-    /// RFC-0168 P1.1: blocking page-cache fill through `sst_source`
+    /// RFC-0168 P1.1 / P2.3: blocking page-cache fill through `sst_source`
     /// (the same fd `get` preads). No-op unless [`crate::env::settle_warm_on`]
     /// and a file source is attached (bounded open). Default skips when
     /// live SST bytes exceed [`crate::env::settle_warm_max_bytes`], or
     /// when ingest already streamed this set (so settle stays O(1)).
+    /// Always records `last_settle_warm_{bytes,ns}` (0 bytes if skipped).
     fn maybe_warm_ssts(&mut self) {
-        if !crate::env::settle_warm_on() {
-            return;
+        let t0 = Instant::now();
+        let mut streamed = 0u64;
+        if crate::env::settle_warm_on() {
+            let mut jobs: Vec<(std::path::PathBuf, u64)> = Vec::with_capacity(self.ssts.len());
+            let mut total = 0u64;
+            for table in &self.ssts {
+                let Ok(len) = self.env.metadata_len(table.path()) else {
+                    continue;
+                };
+                total = total.saturating_add(len);
+                jobs.push((table.path().to_path_buf(), len));
+            }
+            if !jobs.is_empty() {
+                if !crate::env::settle_warm_unlimited()
+                    && total > crate::env::settle_warm_max_bytes()
+                {
+                    self.enter_bounded_cache_mode(total, crate::env::settle_warm_max_bytes());
+                } else if let Some(plan) = self.take_warm_plan() {
+                    streamed = plan.jobs.iter().map(|(_, l)| *l).sum();
+                    plan.run();
+                }
+            }
         }
-        let mut jobs: Vec<(std::path::PathBuf, u64)> = Vec::with_capacity(self.ssts.len());
-        let mut total = 0u64;
-        for table in &self.ssts {
-            let Ok(len) = self.env.metadata_len(table.path()) else {
-                continue;
-            };
-            total = total.saturating_add(len);
-            jobs.push((table.path().to_path_buf(), len));
-        }
-        if jobs.is_empty() {
-            return;
-        }
-        if !crate::env::settle_warm_unlimited() && total > crate::env::settle_warm_max_bytes() {
-            self.enter_bounded_cache_mode(total, crate::env::settle_warm_max_bytes());
-            return;
-        }
-        if let Some(plan) = self.take_warm_plan() {
-            plan.run();
-        }
+        self.last_settle_warm_bytes
+            .store(streamed, Ordering::Relaxed);
+        self.last_settle_warm_ns.store(
+            u64::try_from(t0.elapsed().as_nanos()).unwrap_or(u64::MAX),
+            Ordering::Relaxed,
+        );
     }
 
     /// After a write that published SSTs: if the live set already exceeds
@@ -12900,11 +12938,20 @@ mod tests {
             "over-cap default must not stream"
         );
         let st = db.stats();
+        assert_eq!(
+            st.settle_warm_bytes, 0,
+            "over-cap must not stream, stats.settle_warm_bytes"
+        );
         assert_eq!(st.ram_pressure, 1, "over-cap must set ram_pressure");
         assert!(
             st.ram_warm_skipped >= 1,
             "over-cap must count warm skip, got {}",
             st.ram_warm_skipped
+        );
+        assert!(
+            st.ram_line().contains("mode=bounded-cache"),
+            "ram_line must name bounded-cache, got {}",
+            st.ram_line()
         );
         let dont: Vec<_> = env
             .advises
@@ -12925,8 +12972,18 @@ mod tests {
         std::env::set_var("PEDRA_SETTLE_WARM_MAX_BYTES", "1073741824");
         db.compact_leveled().unwrap();
         let n = crate::env::take_settle_warm_bytes();
+        let st = db.stats();
         std::env::remove_var("PEDRA_SETTLE_WARM_MAX_BYTES");
         assert!(n > 0, "under-cap default must stream, got {n}");
+        assert_eq!(
+            st.settle_warm_bytes, n,
+            "stats must match streamed warm bytes"
+        );
+        assert!(
+            st.ram_line().contains("warm_bytes="),
+            "ram_line must name warm_bytes, got {}",
+            st.ram_line()
+        );
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
