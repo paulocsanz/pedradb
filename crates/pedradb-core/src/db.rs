@@ -13029,6 +13029,57 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// RFC-0178 P0.3: a settled prefix window must not probe SSTs of other
+    /// prefixes (the 25M→100M prefix cell is a fixed 1000-key window).
+    #[test]
+    fn rfc0178_prefix_window_probes_overlapping_ssts_only() {
+        let dir = temp_dir();
+        let env = BulkProbeEnv::new();
+        let mut db = Db::open_with_env_bounded(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(4 * 1024),
+                sst_payload_budget_bytes: Some(1),
+                ..OpenOptions::default()
+            },
+            env,
+        )
+        .unwrap();
+        for i in 0..32u32 {
+            db.put(format!("a/{i:04}").as_bytes(), vec![b'a'; 64])
+                .unwrap();
+        }
+        db.flush().unwrap();
+        for i in 0..256u32 {
+            db.put(format!("z/{i:04}").as_bytes(), vec![b'z'; 64])
+                .unwrap();
+        }
+        db.flush().unwrap();
+        db.compact_leveled().unwrap();
+        assert!(
+            db.ssts.len() >= 4,
+            "need several live SSTs after compact, got {}",
+            db.ssts.len()
+        );
+        db.reset_read_probe();
+        let got = db.range_limited(
+            std::ops::Bound::Included(&b"a/"[..]),
+            std::ops::Bound::Excluded(&b"b/"[..]),
+            Some(64),
+        );
+        assert_eq!(got.len(), 32, "prefix a/ must return only the window");
+        let p = db.read_probe();
+        assert!(
+            p.scan_sst_probed <= 2,
+            "prefix window must not walk other-prefix SSTs: probed={} sst_count={}",
+            p.scan_sst_probed,
+            p.sst_count
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// RFC-0173 P2.1: over-cap settle pages the sparse index; gets still hit.
     #[test]
     fn rfc0173_bounded_cache_pages_index_and_gets() {
