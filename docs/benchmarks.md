@@ -339,6 +339,10 @@ cargo run -q --release -p rocksdb-parity-bench --bin pedra -- diagnose balance \
 # scale harness: PEDRA_COST_TRACE=1 prints
 #   diagnose probes probe_miss/<backend> per_get=… p_best=… class=…
 #   diagnose probes prefix_scan/<backend> per_scan=… p_best=… class=…
+# scale get_hit always prints (no COST_TRACE needed)
+#   diagnose get get_hit/<backend> measured_ns=… class=…
 cargo run -q --release -p rocksdb-parity-bench --bin pedra -- diagnose probes \
   --per-get 5 --p-best 5
+cargo run -q --release -p rocksdb-parity-bench --bin pedra -- diagnose get \
+  --keys 1000000 --ram 68719476736 --measured-ns 4400
 ```
