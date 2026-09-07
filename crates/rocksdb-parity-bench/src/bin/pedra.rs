@@ -3,13 +3,18 @@
 //!
 //! ```text
 //! pedra scale [--entries N] [--cache BYTES] [--backends NAME] [dir]
-//! pedra diagnose write --pedra-ns N --rocks-ns N [--wal-ns N] [...]
+//! pedra diagnose write --pedra-ns N --rocks-ns N [--read-pct N] [...]
 //! pedra diagnose get --keys N --ram BYTES --measured-ns N
+//! pedra diagnose probes --per-get N --p-best N
+//! pedra diagnose balance --cut TOKEN --cell lever[:diag|:named] [...]
 //! ```
 
 #![forbid(unsafe_code)]
 
-use pedradb_core::bench_gap_kernel::{classify_get, diagnose_write, WriteGapInput, WritePhases};
+use pedradb_core::bench_gap_kernel::{
+    balance_admits, classify_get, classify_probes, diagnose_write, BalanceCell, WriteGapInput,
+    WriteLever, WritePhases, BALANCE_SHAPES,
+};
 use pedradb_core::scale_kernel::{scale_forecast, scale_forecast_as_is};
 
 fn main() {
@@ -34,9 +39,12 @@ fn main() {
         _ => {
             eprintln!("usage: pedra scale [--entries N] [--cache BYTES] [--backends NAME] [dir]");
             eprintln!(
-                "       pedra diagnose write --pedra-ns N --rocks-ns N [--wal-ns N] [--mem-ns N] [--flush-ns N] [--lock-ns N] [--prepare-ns N] [--publish-ns N] [--clients N] [--avg-group X]"
+                "       pedra diagnose write --pedra-ns N --rocks-ns N [--read-pct N] [--wal-ns N] [--mem-ns N] [--flush-ns N] [--lock-ns N] [--prepare-ns N] [--publish-ns N] [--clients N] [--avg-group X]"
             );
             eprintln!("       pedra diagnose get --keys N --ram BYTES --measured-ns N");
+            eprintln!("       pedra diagnose probes --per-get N --p-best N");
+            eprintln!("       pedra diagnose balance --cut TOKEN --cell TOKEN[:diag|:named] [...]");
+            eprintln!("       balance shapes: {}", BALANCE_SHAPES.join(","));
             std::process::exit(2);
         }
     }
@@ -46,8 +54,10 @@ fn diagnose_cmd(args: &[String]) -> Result<(), ()> {
     match args.first().map(String::as_str) {
         Some("write") => diagnose_write_cmd(&args[1..]),
         Some("get") => diagnose_get_cmd(&args[1..]),
+        Some("probes") => diagnose_probes_cmd(&args[1..]),
+        Some("balance") => diagnose_balance_cmd(&args[1..]),
         _ => {
-            eprintln!("usage: pedra diagnose write|get …");
+            eprintln!("usage: pedra diagnose write|get|probes|balance …");
             Err(())
         }
     }
@@ -77,6 +87,7 @@ fn diagnose_write_cmd(args: &[String]) -> Result<(), ()> {
         rocks_ns,
         clients,
         avg_group_bps,
+        read_pct: flag_u64(args, "--read-pct").unwrap_or(0),
         phases: WritePhases {
             prepare_ns: flag_u64(args, "--prepare-ns").unwrap_or(0),
             wal_ns: flag_u64(args, "--wal-ns").unwrap_or(0),
@@ -129,5 +140,83 @@ fn diagnose_get_cmd(args: &[String]) -> Result<(), ()> {
         f.best_ns, f.happy_ns, f.worst_ns, as_is.best_ns
     );
     println!("measured_ns={measured_ns} class={}", class.token());
+    Ok(())
+}
+
+fn diagnose_probes_cmd(args: &[String]) -> Result<(), ()> {
+    let Some(per_get) = flag_u64(args, "--per-get") else {
+        eprintln!("pedra diagnose probes: --per-get is required");
+        return Err(());
+    };
+    let Some(p_best) = flag_u64(args, "--p-best") else {
+        eprintln!("pedra diagnose probes: --p-best is required");
+        return Err(());
+    };
+    let class = classify_probes(per_get, p_best);
+    println!(
+        "pedra diagnose probes per_get={per_get} p_best={p_best} class={}",
+        class.token()
+    );
+    Ok(())
+}
+
+fn diagnose_balance_cmd(args: &[String]) -> Result<(), ()> {
+    let Some(cut_tok) = args
+        .windows(2)
+        .find(|w| w[0] == "--cut")
+        .map(|w| w[1].as_str())
+    else {
+        eprintln!("pedra diagnose balance: --cut TOKEN is required");
+        return Err(());
+    };
+    let Some(cut) = WriteLever::from_token(cut_tok) else {
+        eprintln!("unknown cut token {cut_tok}");
+        return Err(());
+    };
+    let mut cells = Vec::new();
+    let mut i = 0;
+    while i + 1 < args.len() {
+        if args[i] == "--cell" {
+            let spec = &args[i + 1];
+            let mut parts = spec.split(':');
+            let tok = parts.next().unwrap_or("");
+            let Some(lever) = WriteLever::from_token(tok) else {
+                eprintln!("unknown cell lever {spec}");
+                return Err(());
+            };
+            let mut linux_named_loss = false;
+            let mut diag_only = false;
+            for tag in parts {
+                match tag {
+                    "named" => linux_named_loss = true,
+                    "diag" => diag_only = true,
+                    _ => {
+                        eprintln!("unknown cell tag {tag} (want named|diag)");
+                        return Err(());
+                    }
+                }
+            }
+            cells.push(BalanceCell {
+                linux_named_loss,
+                diag_only,
+                lever,
+            });
+            i += 2;
+            continue;
+        }
+        i += 1;
+    }
+    if cells.is_empty() {
+        eprintln!("pedra diagnose balance: at least one --cell TOKEN[:diag|:named]");
+        return Err(());
+    }
+    let admits = balance_admits(cut, &cells);
+    println!(
+        "pedra diagnose balance cut={} cells={} admits={}",
+        cut.token(),
+        cells.len(),
+        u8::from(admits)
+    );
+    println!("shapes={}", BALANCE_SHAPES.join(","));
     Ok(())
 }

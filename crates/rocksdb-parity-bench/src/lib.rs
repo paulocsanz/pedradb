@@ -2823,6 +2823,7 @@ fn eprint_write_diagnose(
         rocks_ns: 0,
         clients,
         avg_group_bps: (avg_group * 10_000.0) as u64,
+        read_pct: 0,
         phases: pedradb_core::WritePhases {
             prepare_ns: per(1),
             wal_ns: per(2),
