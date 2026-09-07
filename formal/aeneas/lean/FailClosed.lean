@@ -52,3 +52,33 @@ theorem host_value_ok_as_is_dente (v) :
     host_value_ok_as_is v = ok true := by
   unfold host_value_ok_as_is
   rfl
+
+/-- F102 status line is 400. -/
+theorem parse_error_status_400 :
+    parse_error_status = ok (400#u16) := by
+  unfold parse_error_status
+  rfl
+
+/-- F159 unrecognized Expect is 417. -/
+theorem expectation_failed_status_417 :
+    expectation_failed_status = ok (417#u16) := by
+  unfold expectation_failed_status
+  rfl
+
+/-- AS-IS dente: never send 100-continue. -/
+theorem expects_100_continue_as_is_dente (v) :
+    expects_100_continue_as_is v = ok false := by
+  unfold expects_100_continue_as_is
+  rfl
+
+/-- AS-IS dente: unknown Expect is ignored. -/
+theorem expect_field_ok_as_is_dente (v) :
+    expect_field_ok_as_is v = ok true := by
+  unfold expect_field_ok_as_is
+  rfl
+
+/-- AS-IS dente: never require Host. -/
+theorem http_version_requires_host_as_is_dente (v) :
+    http_version_requires_host_as_is v = ok false := by
+  unfold http_version_requires_host_as_is
+  rfl

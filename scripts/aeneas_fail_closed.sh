@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Extract production fail_closed.rs catalog entries (parse_error_writes_status)
-# plus Iterator-free F104/F105/F157/F158 gates. Expect/TE-header walks that
-# use eq_ignore_ascii_case stay out (str/pattern).
+# plus Iterator-free F104/F105/F157/F158 gates and status/as-is constants.
+# Expect production walks (eq_ignore_ascii_case) and header_break (Iterator
+# windows/position) stay out.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CRATE="$ROOT/formal/aeneas/fail-closed-kernel"
@@ -31,6 +32,11 @@ echo "      charon=$CHARON"
     --start-from 'crate::host_values_conflict_as_is' \
     --start-from 'crate::host_value_ok' \
     --start-from 'crate::host_value_ok_as_is' \
+    --start-from 'crate::parse_error_status' \
+    --start-from 'crate::expectation_failed_status' \
+    --start-from 'crate::expects_100_continue_as_is' \
+    --start-from 'crate::expect_field_ok_as_is' \
+    --start-from 'crate::http_version_requires_host_as_is' \
     --dest-file "$OUT/fail_closed_kernel.llbc" )
 "$AENEAS" -backend lean -dest "$OUT/lean" "$OUT/fail_closed_kernel.llbc"
 {

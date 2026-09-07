@@ -52,6 +52,12 @@ def parse_error_writes_status : Result Bool := do
 def parse_error_writes_status_as_is : Result Bool := do
   ok false
 
+/-- [pedra_aeneas_fail_closed_kernel::parse_error_status]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 22:0-24:1
+    Visibility: public -/
+def parse_error_status : Result Std.U16 := do
+  ok 400#u16
+
 /-- [pedra_aeneas_fail_closed_kernel::reject_transfer_encoding]:
     Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 28:0-30:1
     Visibility: public -/
@@ -74,6 +80,30 @@ def present_bad_int_is_error : Result Bool := do
     Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 46:0-48:1
     Visibility: public -/
 def present_bad_int_is_error_as_is : Result Bool := do
+  ok false
+
+/-- [pedra_aeneas_fail_closed_kernel::expects_100_continue_as_is]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 93:0-95:1
+    Visibility: public -/
+def expects_100_continue_as_is (_value : Str) : Result Bool := do
+  ok false
+
+/-- [pedra_aeneas_fail_closed_kernel::expect_field_ok_as_is]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 108:0-110:1
+    Visibility: public -/
+def expect_field_ok_as_is (_value : Str) : Result Bool := do
+  ok true
+
+/-- [pedra_aeneas_fail_closed_kernel::expectation_failed_status]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 114:0-116:1
+    Visibility: public -/
+def expectation_failed_status : Result Std.U16 := do
+  ok 417#u16
+
+/-- [pedra_aeneas_fail_closed_kernel::http_version_requires_host_as_is]:
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 132:0-134:1
+    Visibility: public -/
+def http_version_requires_host_as_is (_version : Str) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_fail_closed_kernel::host_values_conflict]:
