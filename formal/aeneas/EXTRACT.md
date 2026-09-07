@@ -167,6 +167,8 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 | `path` | `path_kernel.rs` | `strip_authority_for_routing_true` / `_as_is_dente` (`--exclude` Pattern methods; catalog-fn holes patched to `find`/`split_once`/`rsplit_once` axioms + index loops) |
 | `world` | `world_kernel.rs` | `trajectory_violation_applied` / `_as_is_dente` (`[lib] path` production kernel split from `lib.rs`; `Option<&'static str>` and HashMap fold patched) |
 
+Model-twin `entry`s on already-enrolled files now have Lean `def`s (still `proof_depth=model`): `range_tombstone_covers`, `run_pairwise_disjoint_los`, `key_in_window`, `leveled_enabled`, `total_bytes`. `probe_order_covering` stays out (returns `impl Iterator`).
+
 Partial `.lean` from a failed Aeneas run is not enrolled. Charon `--start-from` of the catalog entries is an extract of the live file when Aeneas emits a complete Kernel (no `sorry`) containing a `def` for every catalog `entry` on that path.
 
 ### Refused — Aeneas/Charon or Lean typecheck of the generated Kernel

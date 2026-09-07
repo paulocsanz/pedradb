@@ -98,12 +98,40 @@ impl_def Shared0A.Insts.CoreCmpOrd {A : Type} (OrdInst : core.cmp.Ord A) :
   min := core.cmp.Ord.min.trait_default (Shared0A.Insts.CoreCmpOrd OrdInst)
 }
 
+/-- [core::convert::{impl core::convert::AsRef<U> for &'_0 T}::as_ref]:
+    Source: '/rustc/library/core/src/convert/mod.rs', lines 717:4-717:26
+    Name pattern: [core::convert::{core::convert::AsRef<&'0 @T, @U>}::as_ref]
+    Visibility: public -/
+@[rust_fun "core::convert::{core::convert::AsRef<&'0 @T, @U>}::as_ref"]
+axiom Shared0T.Insts.CoreConvertAsRef.as_ref
+  {T : Type} {U : Type} (AsRefInst : core.convert.AsRef T U) : T → Result U
+
+/-- Trait implementation: [core::convert::{impl core::convert::AsRef<U> for &'_0 T}]
+    Source: '/rustc/library/core/src/convert/mod.rs', lines 712:0-714:24
+    Name pattern: [core::convert::AsRef<&'0 @T, @U>] -/
+@[reducible, rust_trait_impl "core::convert::AsRef<&'0 @T, @U>"]
+def Shared0T.Insts.CoreConvertAsRef {T : Type} {U : Type} (AsRefInst :
+  core.convert.AsRef T U) : core.convert.AsRef T U := {
+  as_ref := Shared0T.Insts.CoreConvertAsRef.as_ref AsRefInst
+}
+
 /-- [core::iter::adapters::filter::Filter]
     Source: '/rustc/library/core/src/iter/adapters/filter.rs', lines 21:0-21:23
     Name pattern: [core::iter::adapters::filter::Filter]
     Visibility: public -/
 @[rust_type "core::iter::adapters::filter::Filter"]
 axiom core.iter.adapters.filter.Filter (I : Type) (P : Type) : Type
+
+/-- [core::iter::traits::iterator::Iterator::sum]:
+    Source: '/rustc/library/core/src/iter/traits/iterator.rs', lines 3669:4-3672:35
+    Name pattern: [core::iter::traits::iterator::Iterator::sum]
+    Visibility: public -/
+@[trait_default, rust_fun "core::iter::traits::iterator::Iterator::sum"]
+axiom core.iter.traits.iterator.Iterator.sum.default
+  {Self : Type} {S : Type} {Clause0_Item : Type} (IteratorInst :
+  core.iter.traits.iterator.Iterator Self Clause0_Item) (accumSumInst :
+  core.iter.traits.accum.Sum S Clause0_Item) :
+  Self → Result S
 
 /-- [core::iter::traits::iterator::Iterator::min]:
     Source: '/rustc/library/core/src/iter/traits/iterator.rs', lines 3287:4-3290:24
@@ -230,6 +258,28 @@ impl_def core.iter.adapters.map.Map.Insts.CoreIterTraitsIteratorIterator {B :
     traitsiteratorIteratorInst opsfunctionFnMutFTupleClause0_ItemBInst)
 }
 
+/-- [core::iter::traits::accum::{impl core::iter::traits::accum::Sum<u64> for u64}::sum]:
+    Source: '/rustc/library/core/src/iter/traits/accum.rs', lines 51:12-51:59
+    Name pattern: [core::iter::traits::accum::{core::iter::traits::accum::Sum<u64, u64>}::sum]
+    Visibility: public -/
+@[rust_fun
+  "core::iter::traits::accum::{core::iter::traits::accum::Sum<u64, u64>}::sum"]
+axiom U64.Insts.CoreIterTraitsAccumSumU64.sum
+  {I : Type} (iteratorIteratorIU64Inst : core.iter.traits.iterator.Iterator I
+  Std.U64) :
+  I → Result Std.U64
+
+/-- Trait implementation: [core::iter::traits::accum::{impl core::iter::traits::accum::Sum<u64> for u64}]
+    Source: '/rustc/library/core/src/iter/traits/accum.rs', lines 50:8-50:23
+    Name pattern: [core::iter::traits::accum::Sum<u64, u64>] -/
+@[reducible, rust_trait_impl "core::iter::traits::accum::Sum<u64, u64>"]
+def U64.Insts.CoreIterTraitsAccumSumU64 : core.iter.traits.accum.Sum Std.U64
+  Std.U64 := {
+  sum := fun {I : Type} (iteratorIteratorPU64Inst :
+    core.iter.traits.iterator.Iterator I Std.U64) =>
+    U64.Insts.CoreIterTraitsAccumSumU64.sum iteratorIteratorPU64Inst
+}
+
 /-- [core::num::{u64}::saturating_mul]:
     Source: '/rustc/library/core/src/num/uint_macros.rs', lines 2516:8-2516:60
     Name pattern: [core::num::{u64}::saturating_mul]
@@ -285,9 +335,12 @@ axiom
     Source: '/rustc/library/core/src/slice/cmp.rs', lines 14:0-16:28
     Name pattern: [core::cmp::PartialEq<[@T], [@U]>] -/
 @[reducible, rust_trait_impl "core::cmp::PartialEq<[@T], [@U]>"]
-def Slice.Insts.CoreCmpPartialEqSlice {T : Type} {U : Type} (cmpPartialEqInst :
-  core.cmp.PartialEq T U) : core.cmp.PartialEq (Slice T) (Slice U) := {
+impl_def Slice.Insts.CoreCmpPartialEqSlice {T : Type} {U : Type}
+  (cmpPartialEqInst : core.cmp.PartialEq T U) : core.cmp.PartialEq (Slice T)
+  (Slice U) := {
   eq := core.slice.cmp.PartialEqSlice.eq cmpPartialEqInst
+  ne := core.cmp.PartialEq.ne.trait_default (Slice.Insts.CoreCmpPartialEqSlice
+    cmpPartialEqInst)
 }
 
 /-- Trait implementation: [core::slice::cmp::{impl core::cmp::Eq for [T]}]
@@ -434,6 +487,81 @@ axiom core.slice.Slice.first {T : Type} : Slice T → Result (Option T)
 axiom core.slice.Slice.windows
   {T : Type} : Slice T → Std.Usize → Result (core.slice.iter.Windows T)
 
+/-- [core::str::{str}::trim]:
+    Source: '/rustc/library/core/src/str/mod.rs', lines 2171:4-2171:30
+    Name pattern: [core::str::{str}::trim]
+    Visibility: public -/
+@[rust_fun "core::str::{str}::trim"]
+axiom core.str.Str.trim : Str → Result Str
+
+/-- [core::str::traits::{impl core::cmp::PartialEq<str> for str}::eq]:
+    Source: '/rustc/library/core/src/str/traits.rs', lines 29:4-29:37
+    Name pattern: [core::str::traits::{core::cmp::PartialEq<str, str>}::eq]
+    Visibility: public -/
+@[rust_fun "core::str::traits::{core::cmp::PartialEq<str, str>}::eq"]
+axiom Str.Insts.CoreCmpPartialEqStr.eq : Str → Str → Result Bool
+
+/-- Trait implementation: [core::str::traits::{impl core::cmp::PartialEq<str> for str}]
+    Source: '/rustc/library/core/src/str/traits.rs', lines 27:0-27:28
+    Name pattern: [core::cmp::PartialEq<str, str>] -/
+@[reducible, rust_trait_impl "core::cmp::PartialEq<str, str>"]
+impl_def Str.Insts.CoreCmpPartialEqStr : core.cmp.PartialEq Str Str := {
+  eq := Str.Insts.CoreCmpPartialEqStr.eq
+  ne := core.cmp.PartialEq.ne.trait_default Str.Insts.CoreCmpPartialEqStr
+}
+
+/-- [std::ffi::os_str::OsStr]
+    Source: '/rustc/library/std/src/ffi/os_str.rs', lines 119:0-119:16
+    Name pattern: [std::ffi::os_str::OsStr]
+    Visibility: public -/
+@[rust_type "std::ffi::os_str::OsStr"]
+axiom std.ffi.os_str.OsStr : Type
+
+/-- [std::ffi::os_str::OsString]
+    Source: '/rustc/library/std/src/ffi/os_str.rs', lines 93:0-93:19
+    Name pattern: [std::ffi::os_str::OsString]
+    Visibility: public -/
+@[rust_type "std::ffi::os_str::OsString"]
+axiom std.ffi.os_str.OsString : Type
+
+/-- [std::env::VarError]
+    Source: '/rustc/library/std/src/env.rs', lines 268:0-268:17
+    Name pattern: [std::env::VarError]
+    Visibility: public -/
+@[discriminant isize, rust_type "std::env::VarError"]
+inductive std.env.VarError where
+| NotPresent : std.env.VarError
+| NotUnicode : std.ffi.os_str.OsString → std.env.VarError
+
+/-- [std::env::var]:
+    Source: '/rustc/library/std/src/env.rs', lines 222:0-222:63
+    Name pattern: [std::env::var]
+    Visibility: public -/
+@[rust_fun "std::env::var"]
+axiom std.env.var
+  {K : Type} (coreconvertAsRefKOsStrInst : core.convert.AsRef K
+  std.ffi.os_str.OsStr) :
+  K → Result (core.result.Result String std.env.VarError)
+
+/-- [std::ffi::os_str::{impl core::convert::AsRef<std::ffi::os_str::OsStr> for str}::as_ref]:
+    Source: '/rustc/library/std/src/ffi/os_str.rs', lines 1779:4-1779:30
+    Name pattern: [std::ffi::os_str::{core::convert::AsRef<str, std::ffi::os_str::OsStr>}::as_ref]
+    Visibility: public -/
+@[rust_fun
+  "std::ffi::os_str::{core::convert::AsRef<str, std::ffi::os_str::OsStr>}::as_ref"]
+axiom Str.Insts.CoreConvertAsRefOsStr.as_ref
+  : Str → Result std.ffi.os_str.OsStr
+
+/-- Trait implementation: [std::ffi::os_str::{impl core::convert::AsRef<std::ffi::os_str::OsStr> for str}]
+    Source: '/rustc/library/std/src/ffi/os_str.rs', lines 1777:0-1777:25
+    Name pattern: [core::convert::AsRef<str, std::ffi::os_str::OsStr>] -/
+@[reducible, rust_trait_impl
+  "core::convert::AsRef<str, std::ffi::os_str::OsStr>"]
+def Str.Insts.CoreConvertAsRefOsStr : core.convert.AsRef Str
+  std.ffi.os_str.OsStr := {
+  as_ref := Str.Insts.CoreConvertAsRefOsStr.as_ref
+}
+
 /-- [alloc::slice::{[T]}::sort_by]:
     Source: '/rustc/library/alloc/src/slice.rs', lines 192:4-194:37
     Name pattern: [alloc::slice::{[@T]}::sort_by]
@@ -443,6 +571,15 @@ axiom alloc.slice.Slice.sort_by
   {T : Type} {F : Type} (coreopsfunctionFnMutFPairShared0TSharedTOrderingInst :
   core.ops.function.FnMut F (T × T) Ordering) :
   Slice T → F → Result (Slice T)
+
+/-- [alloc::string::{impl core::ops::deref::Deref<str> for alloc::string::String}::deref]:
+    Source: '/rustc/library/alloc/src/string.rs', lines 2835:4-2835:27
+    Name pattern: [alloc::string::{core::ops::deref::Deref<alloc::string::String, str>}::deref]
+    Visibility: public -/
+@[rust_fun
+  "alloc::string::{core::ops::deref::Deref<alloc::string::String, str>}::deref"]
+axiom alloc.string.String.Insts.CoreOpsDerefDerefStr.deref
+  : String → Result Str
 
 /-- [alloc::vec::{alloc::vec::Vec<T>}::as_slice]:
     Source: '/rustc/library/alloc/src/vec/mod.rs', lines 1854:4-1854:40
@@ -464,6 +601,20 @@ axiom alloc.vec.Vec.Insts.CoreCmpOrd.cmp
 /-- [pedra_aeneas_leveling_kernel::LEVEL_FANOUT]
     Source: '../../../crates/pedradb-core/src/leveling.rs', lines 33:0-33:40 -/
 @[global_simps, irreducible] def LEVEL_FANOUT : Std.U64 := 10#u64
+
+/-- [pedra_aeneas_leveling_kernel::leveled_enabled]:
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 38:0-43:1 -/
+def leveled_enabled : Result Bool := do
+  let r ←
+    std.env.var (Shared0T.Insts.CoreConvertAsRef
+      Str.Insts.CoreConvertAsRefOsStr) (toStr "PEDRA_LEVELED")
+  match r with
+  | core.result.Result.Ok v =>
+    let s ← alloc.string.String.Insts.CoreOpsDerefDerefStr.deref v
+    let s1 ← core.str.Str.trim s
+    core.cmp.impls.PartialEqShared.ne Str.Insts.CoreCmpPartialEqStr s1 (toStr
+      "0")
+  | core.result.Result.Err _ => ok true
 
 /-- [pedra_aeneas_leveling_kernel::level_target_bytes]:
     Source: '../../../crates/pedradb-core/src/leveling.rs', lines 48:0-54:1 -/
@@ -701,6 +852,65 @@ def is_disjoint_outer_loop
 
 def is_disjoint (files : Slice LevelFile) : Result Bool := do
   is_disjoint_outer_loop files 0#usize
+
+/-- [pedra_aeneas_leveling_kernel::total_bytes::closure]
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 104:21-104:32 -/
+@[reducible]
+def total_bytes.closure := Unit
+
+/-- [pedra_aeneas_leveling_kernel::total_bytes::{impl core::ops::function::FnMut<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), u64> for pedra_aeneas_leveling_kernel::total_bytes::closure}::call_mut]:
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 104:21-104:32 -/
+def
+  total_bytes.closure.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileU64.call_mut
+  (c : total_bytes.closure) (tupled_args : LevelFile) :
+  Result (Std.U64 × total_bytes.closure)
+  := do
+  ok (tupled_args.bytes, c)
+
+/-- [pedra_aeneas_leveling_kernel::total_bytes::{impl core::ops::function::FnOnce<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), u64> for pedra_aeneas_leveling_kernel::total_bytes::closure}::call_once]:
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 104:21-104:32 -/
+def
+  total_bytes.closure.Insts.CoreOpsFunctionFnOnceTupleSharedLevelFileU64.call_once
+  (c : total_bytes.closure) (lf : LevelFile) : Result Std.U64 := do
+  let (i, _) ←
+    total_bytes.closure.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileU64.call_mut
+      c lf
+  ok i
+
+/-- Trait implementation: [pedra_aeneas_leveling_kernel::total_bytes::{impl core::ops::function::FnOnce<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), u64> for pedra_aeneas_leveling_kernel::total_bytes::closure}]
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 104:21-104:32 -/
+@[reducible]
+def total_bytes.closure.Insts.CoreOpsFunctionFnOnceTupleSharedLevelFileU64 :
+  core.ops.function.FnOnce total_bytes.closure LevelFile Std.U64 := {
+  call_once :=
+    total_bytes.closure.Insts.CoreOpsFunctionFnOnceTupleSharedLevelFileU64.call_once
+}
+
+/-- Trait implementation: [pedra_aeneas_leveling_kernel::total_bytes::{impl core::ops::function::FnMut<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), u64> for pedra_aeneas_leveling_kernel::total_bytes::closure}]
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 104:21-104:32 -/
+@[reducible]
+def total_bytes.closure.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileU64 :
+  core.ops.function.FnMut total_bytes.closure LevelFile Std.U64 := {
+  FnOnceInst :=
+    total_bytes.closure.Insts.CoreOpsFunctionFnOnceTupleSharedLevelFileU64
+  call_mut :=
+    total_bytes.closure.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileU64.call_mut
+}
+
+/-- [pedra_aeneas_leveling_kernel::total_bytes]:
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 103:0-105:1 -/
+def total_bytes (files : Slice LevelFile) : Result Std.U64 := do
+  let i ← core.slice.Slice.iter files
+  let m ←
+    core.iter.traits.iterator.Iterator.map.default
+      (core.iter.traits.iterator.IteratorSliceIter LevelFile)
+      total_bytes.closure.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileU64 i
+      ()
+  core.iter.traits.iterator.Iterator.sum.default
+    (core.iter.adapters.map.Map.Insts.CoreIterTraitsIteratorIterator
+    (core.iter.traits.iterator.IteratorSliceIter LevelFile)
+    total_bytes.closure.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileU64)
+    U64.Insts.CoreIterTraitsAccumSumU64 m
 
 /-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1::closure#4]
     Source: '../../../crates/pedradb-core/src/leveling.rs', lines 131:23-131:32 -/

@@ -12,7 +12,91 @@ set_option maxHeartbeats 1000000
 /- You can set the `maxRecDepth` value with the `-max-recdepth` CLI option -/
 set_option maxRecDepth 2048
 
+/- You can remove the following line by using the CLI option `-all-computable`: -/
+noncomputable section
+
 namespace pedra_aeneas_probe_order_kernel
+
+/-- [core::cmp::impls::{impl core::cmp::PartialOrd<&'_0 B> for &'_1 A}::lt]:
+    Source: '/rustc/library/core/src/cmp.rs', lines 2141:8-2141:40
+    Name pattern: [core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::lt]
+    Visibility: public -/
+@[rust_fun "core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::lt"]
+axiom Shared1A.Insts.CoreCmpPartialOrdShared0B.lt
+  {A : Type} {B : Type} (PartialOrdInst : core.cmp.PartialOrd A B) :
+  A → B → Result Bool
+
+/-- [core::cmp::impls::{impl core::cmp::PartialOrd<&'_0 B> for &'_1 A}::le]:
+    Source: '/rustc/library/core/src/cmp.rs', lines 2145:8-2145:40
+    Name pattern: [core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::le]
+    Visibility: public -/
+@[rust_fun "core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::le"]
+axiom Shared1A.Insts.CoreCmpPartialOrdShared0B.le
+  {A : Type} {B : Type} (PartialOrdInst : core.cmp.PartialOrd A B) :
+  A → B → Result Bool
+
+/-- [core::iter::traits::iterator::Iterator::all]:
+    Source: '/rustc/library/core/src/iter/traits/iterator.rs', lines 2831:4-2834:37
+    Name pattern: [core::iter::traits::iterator::Iterator::all]
+    Visibility: public -/
+@[trait_default, rust_fun "core::iter::traits::iterator::Iterator::all"]
+axiom core.iter.traits.iterator.Iterator.all.default
+  {Self : Type} {F : Type} {Clause0_Item : Type} (IteratorInst :
+  core.iter.traits.iterator.Iterator Self Clause0_Item)
+  (opsfunctionFnMutFTupleClause0_ItemBoolInst : core.ops.function.FnMut F
+  Clause0_Item Bool) :
+  Self → F → Result (Bool × Self)
+
+/-- Trait implementation: [core::slice::cmp::{impl core::cmp::PartialEq<[U]> for [T]}]
+    Source: '/rustc/library/core/src/slice/cmp.rs', lines 14:0-16:28
+    Name pattern: [core::cmp::PartialEq<[@T], [@U]>] -/
+@[reducible, rust_trait_impl "core::cmp::PartialEq<[@T], [@U]>"]
+def Slice.Insts.CoreCmpPartialEqSlice {T : Type} {U : Type} (cmpPartialEqInst :
+  core.cmp.PartialEq T U) : core.cmp.PartialEq (Slice T) (Slice U) := {
+  eq := core.slice.cmp.PartialEqSlice.eq cmpPartialEqInst
+}
+
+/-- [core::slice::cmp::{impl core::cmp::PartialOrd<[T]> for [T]}::le]:
+    Source: '/rustc/library/core/src/slice/cmp.rs', lines 76:4-76:38
+    Name pattern: [core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::le]
+    Visibility: public -/
+@[rust_fun "core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::le"]
+axiom Slice.Insts.CoreCmpPartialOrdSlice.le
+  {T : Type} (cmpPartialOrdInst : core.cmp.PartialOrd T T) :
+  Slice T → Slice T → Result Bool
+
+/-- [core::slice::cmp::{impl core::cmp::PartialOrd<[T]> for [T]}::lt]:
+    Source: '/rustc/library/core/src/slice/cmp.rs', lines 64:4-64:38
+    Name pattern: [core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::lt]
+    Visibility: public -/
+@[rust_fun "core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::lt"]
+axiom Slice.Insts.CoreCmpPartialOrdSlice.lt
+  {T : Type} (cmpPartialOrdInst : core.cmp.PartialOrd T T) :
+  Slice T → Slice T → Result Bool
+
+/-- [core::slice::cmp::{impl core::cmp::PartialOrd<[T]> for [T]}::partial_cmp]:
+    Source: '/rustc/library/core/src/slice/cmp.rs', lines 60:4-60:58
+    Name pattern: [core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::partial_cmp]
+    Visibility: public -/
+@[rust_fun
+  "core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::partial_cmp"]
+axiom Slice.Insts.CoreCmpPartialOrdSlice.partial_cmp
+  {T : Type} (cmpPartialOrdInst : core.cmp.PartialOrd T T) :
+  Slice T → Slice T → Result (Option Ordering)
+
+/-- Trait implementation: [core::slice::cmp::{impl core::cmp::PartialOrd<[T]> for [T]}]
+    Source: '/rustc/library/core/src/slice/cmp.rs', lines 58:0-58:52
+    Name pattern: [core::cmp::PartialOrd<[@T], [@T]>] -/
+@[reducible, rust_trait_impl "core::cmp::PartialOrd<[@T], [@T]>"]
+def Slice.Insts.CoreCmpPartialOrdSlice {T : Type} (cmpPartialOrdInst :
+  core.cmp.PartialOrd T T) : core.cmp.PartialOrd (Slice T) (Slice T) := {
+  partialEqInst := Slice.Insts.CoreCmpPartialEqSlice
+    cmpPartialOrdInst.partialEqInst
+  partial_cmp := Slice.Insts.CoreCmpPartialOrdSlice.partial_cmp
+    cmpPartialOrdInst
+  lt := Slice.Insts.CoreCmpPartialOrdSlice.lt cmpPartialOrdInst
+  le := Slice.Insts.CoreCmpPartialOrdSlice.le cmpPartialOrdInst
+}
 
 /-- [pedra_aeneas_probe_order_kernel::first_probe_on_equal_lo]:
     Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 20:0-22:1
@@ -27,5 +111,149 @@ def first_probe_on_equal_lo
 def first_probe_on_equal_lo_as_is
   (_newer : Std.Usize) (older : Std.Usize) : Result Std.Usize := do
   ok older
+
+/-- [pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los::closure]
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 85:25-85:48 -/
+def run_pairwise_disjoint_los.closure :=
+  Slice (Slice Std.U8) × Slice (Slice Std.U8)
+
+/-- [pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los::{impl core::ops::function::FnMut<(usize,), bool> for pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los::closure<'_0, '_1, '_2, '_3>}::call_mut]:
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 85:25-85:48 -/
+def
+  run_pairwise_disjoint_los.closure.Insts.CoreOpsFunctionFnMutTupleUsizeBool.call_mut
+  (c : run_pairwise_disjoint_los.closure) (tupled_args : Std.Usize) :
+  Result (Bool × run_pairwise_disjoint_los.closure)
+  := do
+  let (his, los) := c
+  let i1 ← tupled_args - 1#usize
+  let hi ← Slice.index_usize his i1
+  let lo ← Slice.index_usize los tupled_args
+  let b ←
+    Slice.Insts.CoreCmpPartialOrdSlice.lt core.cmp.PartialOrdU8 hi lo
+  ok (b, c)
+
+/-- [pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los::{impl core::ops::function::FnOnce<(usize,), bool> for pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los::closure<'_0, '_1, '_2, '_3>}::call_once]:
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 85:25-85:48 -/
+def
+  run_pairwise_disjoint_los.closure.Insts.CoreOpsFunctionFnOnceTupleUsizeBool.call_once
+  (c : run_pairwise_disjoint_los.closure) (i : Std.Usize) : Result Bool := do
+  let (b, _) ←
+    run_pairwise_disjoint_los.closure.Insts.CoreOpsFunctionFnMutTupleUsizeBool.call_mut
+      c i
+  ok b
+
+/-- Trait implementation: [pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los::{impl core::ops::function::FnOnce<(usize,), bool> for pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los::closure<'_0, '_1, '_2, '_3>}]
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 85:25-85:48 -/
+@[reducible]
+def run_pairwise_disjoint_los.closure.Insts.CoreOpsFunctionFnOnceTupleUsizeBool
+  : core.ops.function.FnOnce run_pairwise_disjoint_los.closure Std.Usize Bool
+  := {
+  call_once :=
+    run_pairwise_disjoint_los.closure.Insts.CoreOpsFunctionFnOnceTupleUsizeBool.call_once
+}
+
+/-- Trait implementation: [pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los::{impl core::ops::function::FnMut<(usize,), bool> for pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los::closure<'_0, '_1, '_2, '_3>}]
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 85:25-85:48 -/
+@[reducible]
+def run_pairwise_disjoint_los.closure.Insts.CoreOpsFunctionFnMutTupleUsizeBool
+  : core.ops.function.FnMut run_pairwise_disjoint_los.closure Std.Usize Bool
+  := {
+  FnOnceInst :=
+    run_pairwise_disjoint_los.closure.Insts.CoreOpsFunctionFnOnceTupleUsizeBool
+  call_mut :=
+    run_pairwise_disjoint_los.closure.Insts.CoreOpsFunctionFnMutTupleUsizeBool.call_mut
+}
+
+/-- [pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los]:
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 83:0-86:1
+    Visibility: public -/
+def run_pairwise_disjoint_los
+  (los : Slice (Slice Std.U8)) (his : Slice (Slice Std.U8)) : Result Bool := do
+  let i := Slice.len los
+  let i1 := Slice.len his
+  let n ← core.cmp.Ord.min.trait_default core.cmp.OrdUsize i i1
+  if n >= 2#usize
+  then
+    let (b, _) ←
+      core.iter.traits.iterator.Iterator.all.default
+        (core.iter.traits.iterator.IteratorRange core.iter.range.StepUsize)
+        run_pairwise_disjoint_los.closure.Insts.CoreOpsFunctionFnMutTupleUsizeBool
+        { start := 1#usize, «end» := n } (his, los)
+    ok b
+  else ok false
+
+/-- [pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los_as_is::closure]
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 96:25-96:49 -/
+def run_pairwise_disjoint_los_as_is.closure :=
+  Slice (Slice Std.U8) × Slice (Slice Std.U8)
+
+/-- [pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los_as_is::{impl core::ops::function::FnMut<(usize,), bool> for pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los_as_is::closure<'_0, '_1, '_2, '_3>}::call_mut]:
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 96:25-96:49 -/
+def
+  run_pairwise_disjoint_los_as_is.closure.Insts.CoreOpsFunctionFnMutTupleUsizeBool.call_mut
+  (c : run_pairwise_disjoint_los_as_is.closure) (tupled_args : Std.Usize) :
+  Result (Bool × run_pairwise_disjoint_los_as_is.closure)
+  := do
+  let (his, los) := c
+  let i1 ← tupled_args - 1#usize
+  let hi ← Slice.index_usize his i1
+  let lo ← Slice.index_usize los tupled_args
+  let b ←
+    Slice.Insts.CoreCmpPartialOrdSlice.le core.cmp.PartialOrdU8 hi lo
+  ok (b, c)
+
+/-- [pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los_as_is::{impl core::ops::function::FnOnce<(usize,), bool> for pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los_as_is::closure<'_0, '_1, '_2, '_3>}::call_once]:
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 96:25-96:49 -/
+def
+  run_pairwise_disjoint_los_as_is.closure.Insts.CoreOpsFunctionFnOnceTupleUsizeBool.call_once
+  (c : run_pairwise_disjoint_los_as_is.closure) (i : Std.Usize) :
+  Result Bool
+  := do
+  let (b, _) ←
+    run_pairwise_disjoint_los_as_is.closure.Insts.CoreOpsFunctionFnMutTupleUsizeBool.call_mut
+      c i
+  ok b
+
+/-- Trait implementation: [pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los_as_is::{impl core::ops::function::FnOnce<(usize,), bool> for pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los_as_is::closure<'_0, '_1, '_2, '_3>}]
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 96:25-96:49 -/
+@[reducible]
+def
+  run_pairwise_disjoint_los_as_is.closure.Insts.CoreOpsFunctionFnOnceTupleUsizeBool
+  : core.ops.function.FnOnce run_pairwise_disjoint_los_as_is.closure Std.Usize
+  Bool := {
+  call_once :=
+    run_pairwise_disjoint_los_as_is.closure.Insts.CoreOpsFunctionFnOnceTupleUsizeBool.call_once
+}
+
+/-- Trait implementation: [pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los_as_is::{impl core::ops::function::FnMut<(usize,), bool> for pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los_as_is::closure<'_0, '_1, '_2, '_3>}]
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 96:25-96:49 -/
+@[reducible]
+def
+  run_pairwise_disjoint_los_as_is.closure.Insts.CoreOpsFunctionFnMutTupleUsizeBool
+  : core.ops.function.FnMut run_pairwise_disjoint_los_as_is.closure Std.Usize
+  Bool := {
+  FnOnceInst :=
+    run_pairwise_disjoint_los_as_is.closure.Insts.CoreOpsFunctionFnOnceTupleUsizeBool
+  call_mut :=
+    run_pairwise_disjoint_los_as_is.closure.Insts.CoreOpsFunctionFnMutTupleUsizeBool.call_mut
+}
+
+/-- [pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los_as_is]:
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 94:0-97:1
+    Visibility: public -/
+def run_pairwise_disjoint_los_as_is
+  (los : Slice (Slice Std.U8)) (his : Slice (Slice Std.U8)) : Result Bool := do
+  let i := Slice.len los
+  let i1 := Slice.len his
+  let n ← core.cmp.Ord.min.trait_default core.cmp.OrdUsize i i1
+  if n >= 2#usize
+  then
+    let (b, _) ←
+      core.iter.traits.iterator.Iterator.all.default
+        (core.iter.traits.iterator.IteratorRange core.iter.range.StepUsize)
+        run_pairwise_disjoint_los_as_is.closure.Insts.CoreOpsFunctionFnMutTupleUsizeBool
+        { start := 1#usize, «end» := n } (his, los)
+    ok b
+  else ok false
 
 end pedra_aeneas_probe_order_kernel

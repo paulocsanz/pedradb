@@ -213,6 +213,36 @@ def scan_kernel.point_bounds_overlap
       then ok file_after_start
       else ok false
 
+/-- [pedra_aeneas_scan_kernel::scan_kernel::key_in_window]:
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 79:0-91:1
+    Visibility: public -/
+def scan_kernel.key_in_window
+  (key : Slice Std.U8) (start : core.ops.range.Bound (Slice Std.U8))
+  (end1 : core.ops.range.Bound (Slice Std.U8)) :
+  Result Bool
+  := do
+  let after_start ←
+    match start with
+    | core.ops.range.Bound.Included s =>
+      Shared1A.Insts.CoreCmpPartialOrdShared0B.ge
+        (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) key s
+    | core.ops.range.Bound.Excluded s =>
+      Shared1A.Insts.CoreCmpPartialOrdShared0B.gt
+        (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) key s
+    | core.ops.range.Bound.Unbounded => ok true
+  let before_end ←
+    match end1 with
+    | core.ops.range.Bound.Included e =>
+      Shared1A.Insts.CoreCmpPartialOrdShared0B.le
+        (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) key e
+    | core.ops.range.Bound.Excluded e =>
+      Shared1A.Insts.CoreCmpPartialOrdShared0B.lt
+        (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) key e
+    | core.ops.range.Bound.Unbounded => ok true
+  if after_start
+  then ok before_end
+  else ok false
+
 /-- [pedra_aeneas_scan_kernel::scan_kernel::scan_reads_file::closure]
     Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 112:13-112:85 -/
 def scan_kernel.scan_reads_file.closure :=

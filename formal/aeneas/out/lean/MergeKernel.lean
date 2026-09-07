@@ -12,7 +12,79 @@ set_option maxHeartbeats 1000000
 /- You can set the `maxRecDepth` value with the `-max-recdepth` CLI option -/
 set_option maxRecDepth 2048
 
+/- You can remove the following line by using the CLI option `-all-computable`: -/
+noncomputable section
+
 namespace pedra_aeneas_merge_kernel
+
+/-- [core::cmp::impls::{impl core::cmp::PartialOrd<&'_0 B> for &'_1 A}::lt]:
+    Source: '/rustc/library/core/src/cmp.rs', lines 2141:8-2141:40
+    Name pattern: [core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::lt]
+    Visibility: public -/
+@[rust_fun "core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::lt"]
+axiom Shared1A.Insts.CoreCmpPartialOrdShared0B.lt
+  {A : Type} {B : Type} (PartialOrdInst : core.cmp.PartialOrd A B) :
+  A → B → Result Bool
+
+/-- [core::cmp::impls::{impl core::cmp::PartialOrd<&'_0 B> for &'_1 A}::ge]:
+    Source: '/rustc/library/core/src/cmp.rs', lines 2153:8-2153:40
+    Name pattern: [core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::ge]
+    Visibility: public -/
+@[rust_fun "core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::ge"]
+axiom Shared1A.Insts.CoreCmpPartialOrdShared0B.ge
+  {A : Type} {B : Type} (PartialOrdInst : core.cmp.PartialOrd A B) :
+  A → B → Result Bool
+
+/-- Trait implementation: [core::slice::cmp::{impl core::cmp::PartialEq<[U]> for [T]}]
+    Source: '/rustc/library/core/src/slice/cmp.rs', lines 14:0-16:28
+    Name pattern: [core::cmp::PartialEq<[@T], [@U]>] -/
+@[reducible, rust_trait_impl "core::cmp::PartialEq<[@T], [@U]>"]
+def Slice.Insts.CoreCmpPartialEqSlice {T : Type} {U : Type} (cmpPartialEqInst :
+  core.cmp.PartialEq T U) : core.cmp.PartialEq (Slice T) (Slice U) := {
+  eq := core.slice.cmp.PartialEqSlice.eq cmpPartialEqInst
+}
+
+/-- [core::slice::cmp::{impl core::cmp::PartialOrd<[T]> for [T]}::ge]:
+    Source: '/rustc/library/core/src/slice/cmp.rs', lines 84:4-84:38
+    Name pattern: [core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::ge]
+    Visibility: public -/
+@[rust_fun "core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::ge"]
+axiom Slice.Insts.CoreCmpPartialOrdSlice.ge
+  {T : Type} (cmpPartialOrdInst : core.cmp.PartialOrd T T) :
+  Slice T → Slice T → Result Bool
+
+/-- [core::slice::cmp::{impl core::cmp::PartialOrd<[T]> for [T]}::lt]:
+    Source: '/rustc/library/core/src/slice/cmp.rs', lines 64:4-64:38
+    Name pattern: [core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::lt]
+    Visibility: public -/
+@[rust_fun "core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::lt"]
+axiom Slice.Insts.CoreCmpPartialOrdSlice.lt
+  {T : Type} (cmpPartialOrdInst : core.cmp.PartialOrd T T) :
+  Slice T → Slice T → Result Bool
+
+/-- [core::slice::cmp::{impl core::cmp::PartialOrd<[T]> for [T]}::partial_cmp]:
+    Source: '/rustc/library/core/src/slice/cmp.rs', lines 60:4-60:58
+    Name pattern: [core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::partial_cmp]
+    Visibility: public -/
+@[rust_fun
+  "core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::partial_cmp"]
+axiom Slice.Insts.CoreCmpPartialOrdSlice.partial_cmp
+  {T : Type} (cmpPartialOrdInst : core.cmp.PartialOrd T T) :
+  Slice T → Slice T → Result (Option Ordering)
+
+/-- Trait implementation: [core::slice::cmp::{impl core::cmp::PartialOrd<[T]> for [T]}]
+    Source: '/rustc/library/core/src/slice/cmp.rs', lines 58:0-58:52
+    Name pattern: [core::cmp::PartialOrd<[@T], [@T]>] -/
+@[reducible, rust_trait_impl "core::cmp::PartialOrd<[@T], [@T]>"]
+def Slice.Insts.CoreCmpPartialOrdSlice {T : Type} (cmpPartialOrdInst :
+  core.cmp.PartialOrd T T) : core.cmp.PartialOrd (Slice T) (Slice T) := {
+  partialEqInst := Slice.Insts.CoreCmpPartialEqSlice
+    cmpPartialOrdInst.partialEqInst
+  partial_cmp := Slice.Insts.CoreCmpPartialOrdSlice.partial_cmp
+    cmpPartialOrdInst
+  lt := Slice.Insts.CoreCmpPartialOrdSlice.lt cmpPartialOrdInst
+  ge := Slice.Insts.CoreCmpPartialOrdSlice.ge cmpPartialOrdInst
+}
 
 /-- [pedra_aeneas_merge_kernel::key::ValueType]
     Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 31:0-40:1
@@ -22,6 +94,31 @@ inductive key.ValueType where
 | Deletion : key.ValueType
 | Value : key.ValueType
 | RangeDeletion : key.ValueType
+
+/-- [pedra_aeneas_merge_kernel::merge::range_tombstone_covers]:
+    Source: 'src/../../../../crates/pedradb-core/src/merge.rs', lines 77:0-79:1
+    Visibility: public -/
+def merge.range_tombstone_covers
+  (start : Slice Std.U8) (end1 : Slice Std.U8) (key : Slice Std.U8) :
+  Result Bool
+  := do
+  let b ←
+    Shared1A.Insts.CoreCmpPartialOrdShared0B.ge
+      (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) key start
+  if b
+  then
+    Shared1A.Insts.CoreCmpPartialOrdShared0B.lt
+      (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) key end1
+  else ok false
+
+/-- [pedra_aeneas_merge_kernel::merge::range_tombstone_covers_as_is]:
+    Source: 'src/../../../../crates/pedradb-core/src/merge.rs', lines 83:0-85:1
+    Visibility: public -/
+def merge.range_tombstone_covers_as_is
+  (start : Slice Std.U8) (_end : Slice Std.U8) (key : Slice Std.U8) :
+  Result Bool
+  := do
+  core.slice.cmp.PartialEqSlice.eq core.cmp.PartialEqU8 key start
 
 /-- [pedra_aeneas_merge_kernel::merge::visible_at]:
     Source: 'src/../../../../crates/pedradb-core/src/merge.rs', lines 93:0-98:1

@@ -30,6 +30,8 @@ echo "      charon=$CHARON"
     --start-from 'crate::pick_l0_to_l1_as_is_whole_level' \
     --start-from 'crate::pick_pushdown' \
     --start-from 'crate::pick_pushdown_as_is_blind' \
+    --start-from 'crate::leveled_enabled' \
+    --start-from 'crate::total_bytes' \
     --dest-file "$OUT/leveling_kernel.llbc"
 )
 set +e

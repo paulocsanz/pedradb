@@ -30,6 +30,7 @@ echo "      charon=$CHARON"
     --start-from 'crate::scan_kernel::zero_glue_admitted_as_is' \
     --start-from 'crate::scan_kernel::sst_block_crc_ok' \
     --start-from 'crate::scan_kernel::sst_block_crc_ok_as_is' \
+    --start-from 'crate::scan_kernel::key_in_window' \
     --dest-file "$OUT/scan_kernel.llbc" )
 set +e
 "$AENEAS" -backend lean -dest "$OUT/lean" "$OUT/scan_kernel.llbc"

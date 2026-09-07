@@ -22,6 +22,8 @@ echo "      charon=$CHARON"
 ( cd "$CRATE" && "$CHARON" cargo --preset=aeneas \
     --start-from 'crate::merge::visible_at' \
     --start-from 'crate::merge::visible_at_as_is' \
+    --start-from 'crate::merge::range_tombstone_covers' \
+    --start-from 'crate::merge::range_tombstone_covers_as_is' \
     --dest-file "$OUT/merge_kernel.llbc" )
 "$AENEAS" -backend lean -dest "$OUT/lean" "$OUT/merge_kernel.llbc"
 {
