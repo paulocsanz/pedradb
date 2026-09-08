@@ -11432,7 +11432,7 @@ fn write_merged_tables_span(
 ) -> Result<Vec<SstTable>> {
     let bloom_hint: usize = tables.iter().map(SstTable::len).sum();
     let mut out: Vec<SstTable> = Vec::new();
-    if tables.is_empty() {
+    if crate::write_admission_kernel::batch_is_empty(tables.len() as u64) {
         return Ok(out);
     }
     let streams: Vec<_> = tables
