@@ -87,6 +87,7 @@ pub struct OccRead {
 /// member is decided against the same `last_seq`, so a member's outcome
 /// never depends on another member (simultaneity). Position-for-position
 /// conflict flags.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn group_validate(reads: &[OccRead], last_seq: u64) -> Vec<bool> {
     let mut out = Vec::with_capacity(reads.len());
@@ -527,6 +528,49 @@ pub fn occ_batch_plan_as_is(
     {
         let _ = (too_old[i], reads[i]);
         out.push(OccMemberFate::Ok);
+        i += 1;
+    }
+    out
+}
+
+pub open spec fn group_validate_spec(reads: &[OccRead], last_seq: u64) -> Seq<bool> {
+    Seq::new(
+        reads@.len(),
+        |i: int|
+            if 0 <= i < reads@.len() as int {
+                occ_conflict_spec(reads[i].snap, last_seq, reads[i].touched_key_written_after)
+            } else {
+                false
+            },
+    )
+}
+
+pub fn group_validate(reads: &[OccRead], last_seq: u64) -> (out: Vec<bool>)
+    ensures
+        out.len() == reads.len(),
+        out@ == group_validate_spec(reads, last_seq),
+        forall|i: int|
+            0 <= i < reads.len() ==> out[i] == occ_conflict_spec(
+                reads[i].snap,
+                last_seq,
+                reads[i].touched_key_written_after,
+            ),
+{
+    let mut out: Vec<bool> = Vec::new();
+    let mut i: usize = 0;
+    while i < reads.len()
+        invariant
+            0 <= i <= reads.len(),
+            out.len() == i,
+            forall|j: int|
+                0 <= j < i ==> out[j] == occ_conflict_spec(
+                    reads[j].snap,
+                    last_seq,
+                    reads[j].touched_key_written_after,
+                ),
+        decreases reads.len() - i,
+    {
+        out.push(last_seq > reads[i].snap && reads[i].touched_key_written_after);
         i += 1;
     }
     out
