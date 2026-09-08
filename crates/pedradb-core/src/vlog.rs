@@ -439,7 +439,9 @@ impl<F: EnvFile> ValueLog<F> {
     /// # Errors
     /// I/O.
     pub fn flush_pending(&mut self) -> Result<()> {
-        if self.pending.is_empty() && self.pending_large.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.pending.len() as u64)
+            && self.pending_large.is_empty()
+        {
             return Ok(());
         }
         self.reserve_space(self.staged_len() as u64);
