@@ -91,7 +91,7 @@ impl<'a> LogApplier<'a> {
                     e.index
                 )));
             }
-            if !e.ops.is_empty() {
+            if !pedradb_core::write_admission_kernel::batch_is_empty(e.ops.len() as u64) {
                 last_seq = self.db.apply_batch_with(e.ops.clone(), opts)?;
             }
             self.last_index = e.index;
