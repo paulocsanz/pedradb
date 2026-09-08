@@ -1789,6 +1789,7 @@ impl YcsbRunner {
                 assert!(e.put(&ekey(i, dst), &yval), "nebula seed edge");
             }
         }
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut scans, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -1808,7 +1809,15 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] nebula_get_neighbors done scans={scans} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
+            eprint_write_diagnose("nebula_get_neighbors", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
 
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut puts, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -1838,6 +1847,13 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] nebula_insert_edge done puts={puts} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
+            eprint_write_diagnose("nebula_insert_edge", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
         self.rng = rng;
         blocks
     }
@@ -4009,12 +4025,26 @@ mod tests {
 
     #[test]
     fn expanding_suites_on_compat_engine() {
+        // RFC-0184 P2.12: nebula WRITEPHASE → diagnose.lever (env at open).
+        std::env::set_var("PEDRA_WRITE_PHASE_STATS", "1");
         let dir = tempfile::tempdir().unwrap();
         let e = crate::engines::CompatEngine::open(dir.path());
         let mut r = YcsbRunner::new(tiny_cfg());
+        let neb = r.run_nebula(&e);
         assert_eq!(
-            block_names(&r.run_nebula(&e)),
+            block_names(&neb),
             vec![Some("nebula_get_neighbors"), Some("nebula_insert_edge"),]
+        );
+        for b in &neb {
+            assert!(
+                b.contains("\"diagnose\": {\"lever\":"),
+                "RFC-0184 P2.12 nebula JSON needs diagnose.lever:\n{b}"
+            );
+        }
+        assert!(
+            neb[0].contains("\"lever\":\"get_path\""),
+            "nebula_get_neighbors is prefix scan:\n{}",
+            neb[0]
         );
         assert_eq!(
             block_names(&r.run_streaming(&e)),

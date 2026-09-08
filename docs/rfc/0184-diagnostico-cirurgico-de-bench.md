@@ -110,6 +110,9 @@ a linha quando há phasesΔ. Sem harness novo.
 - [x] **P2.11** Surreal `tx_get` / `tx_put` / `tx_rmw` / `tx_scan` /
       `tx_batch` / `tx_rmw_mc8` WRITEPHASE → `diagnose.lever`
       (get/scan = `get_path`; put/rmw/batch = write lever). — status: `done`
+- [x] **P2.12** Nebula `get_neighbors` / `insert_edge` WRITEPHASE →
+      `diagnose.lever` (neighbors = `get_path`; insert = write lever).
+      — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -135,6 +138,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.9 | p2 | kvrocks 1c diagnose.lever | done | get/scan get_path; set WRITEPHASE | 2026-09-07 |
 | P2.10 | p2 | myrocks+linkbench diagnose.lever | done | select/range/mix get_path; write_tx WRITEPHASE | 2026-09-07 |
 | P2.11 | p2 | surreal diagnose.lever | done | get/scan get_path; put/rmw/batch WRITEPHASE | 2026-09-08 |
+| P2.12 | p2 | nebula diagnose.lever | done | neighbors get_path; insert_edge WRITEPHASE | 2026-09-08 |
 
 ## Acceptance Criteria
 
@@ -157,6 +161,7 @@ a linha quando há phasesΔ. Sem harness novo.
   kvrocks 1c `diagnose.lever` (P2.9);
   myrocks+linkbench `diagnose.lever` (P2.10);
   surreal `diagnose.lever` (P2.11);
+  nebula `diagnose.lever` (P2.12);
   `ycsb_c_all_reads_timed_zero_is_get_path`;
   `rfc0184_diagnosis_json_has_lever`;
   `extract_diagnose_lever_from_bench_object`.
