@@ -129,3 +129,28 @@ theorem occ_snap_lock_order_as_is_dente :
     occ_snap_lock_order_as_is false true = ok false := by
   unfold occ_snap_lock_order_as_is
   rfl
+
+/-- `try_rotate_wal`: idle pipeline may rotate **and** empty segment skips.
+    Unfolds the plan rustc links (`wal_rotate_decision`) and the empty-skip
+    callee (`wal_segment_is_empty`). -/
+theorem try_rotate_idle_empty_segment_skips :
+    wal_rotate_decision
+        { mem_empty := true, imm_present := false, pin_live := false,
+          parked_unflushed := false, commit_inflight := false }
+      = ok WalRotateAction.RotateWal ∧
+      wal_segment_is_empty 0#u64 = ok true := by
+  constructor
+  · unfold wal_rotate_decision; rfl
+  · unfold wal_segment_is_empty; rfl
+
+/-- Other branch: a nonempty segment is not skipped. -/
+theorem wal_segment_is_empty_nonzero :
+    wal_segment_is_empty 1#u64 = ok false := by
+  unfold wal_segment_is_empty
+  rfl
+
+/-- AS-IS dente: never skip empty (idle poll would rewrite MANIFEST). -/
+theorem wal_segment_is_empty_as_is_dente :
+    wal_segment_is_empty_as_is 0#u64 = ok false := by
+  unfold wal_segment_is_empty_as_is
+  rfl

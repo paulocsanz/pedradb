@@ -819,6 +819,12 @@ mod tests {
             rot.contains("wal_rotate_decision("),
             "try_rotate_wal must match wal_rotate_decision"
         );
+        let flush_th = include_str!("../../../formal/aeneas/lean/Flush.lean");
+        assert!(
+            flush_th.contains("unfold wal_rotate_decision")
+                && flush_th.contains("unfold wal_segment_is_empty"),
+            "Flush.lean must dual-unfold plan and wal_segment_is_empty"
+        );
     }
 
     #[test]
