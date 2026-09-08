@@ -4117,7 +4117,7 @@ impl<E: Env> Db<E> {
         limit: Option<usize>,
     ) -> Result<usize> {
         self.ensure_snapshot_readable(Snapshot::at(snapshot))?;
-        if snapshot == 0 {
+        if crate::write_admission_kernel::batch_is_empty(snapshot) {
             return Ok(0);
         }
         let latest = snapshot == self.visible_sequence();
