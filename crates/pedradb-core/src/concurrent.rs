@@ -1314,6 +1314,8 @@ impl WriteGroup {
                             let want = active.saturating_sub(batch.len()).min(4).max(1);
                             self.spin_for_pending_n(spins, want);
                         }
+                        // RFC-0180 P0.45: prepare is the same in-flight window.
+                        self.wait_in_flight_to_queue(batch.len());
                     }
                     loop {
                         let mut extra: Vec<PendingWrite> = {
@@ -6936,7 +6938,8 @@ mod tests {
         assert_eq!(async_catchup_spins(2, 4), 1024);
         assert_eq!(async_catchup_spins(3, 4), 1024);
         assert_eq!(async_catchup_spins(4, 4), 0);
-        // RFC-0180 P0.44: wait while begin_submit ran and push_pending did not.
+        // RFC-0180 P0.44/P0.45: wait while begin_submit ran and push_pending did not
+        // (pre-lock and after group_start).
         assert_eq!(grouping_cap(1), 1);
         assert_eq!(grouping_cap(4), 4);
         assert_eq!(grouping_cap(8), 4);
