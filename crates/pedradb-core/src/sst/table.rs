@@ -1835,7 +1835,7 @@ impl SstTable {
         start: Bound<&[u8]>,
         end: Bound<&[u8]>,
     ) -> Vec<usize> {
-        if self.index.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.index.len() as u64) {
             return Vec::new();
         }
         let start_i = match start {
