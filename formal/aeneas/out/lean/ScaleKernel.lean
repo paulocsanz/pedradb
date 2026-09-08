@@ -181,13 +181,13 @@ def warm_cap_bytes_as_is (_ram_ceiling : Std.U64) : Result Std.U64 := do
   ok core.num.U64.MAX
 
 /-- [pedra_aeneas_scale_kernel::probes_worst]:
-    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 80:0-82:1
+    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 81:0-83:1
     Visibility: public -/
 def probes_worst (levels : Std.U64) (l0_max : Std.U64) : Result Std.U64 := do
-  ok (core.num.U64.saturating_add levels l0_max)
+  point_get_probes levels l0_max
 
 /-- [pedra_aeneas_scale_kernel::probes_worst_as_is]:
-    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 86:0-88:1
+    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 87:0-89:1
     Visibility: public -/
 def probes_worst_as_is
   (n_files : Std.U64) (_levels : Std.U64) (_l0_max : Std.U64) :
@@ -196,7 +196,7 @@ def probes_worst_as_is
   ok n_files
 
 /-- [pedra_aeneas_scale_kernel::predict_get_ns]:
-    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 93:0-109:1
+    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 94:0-110:1
     Visibility: public -/
 def predict_get_ns
   (probes : Std.U64) (tau_ram_ns : Std.U64) (tau_disk_ns : Std.U64)
@@ -225,7 +225,7 @@ def predict_get_ns
   core.result.Result.unwrap_or r core.num.U64.MAX
 
 /-- [pedra_aeneas_scale_kernel::predict_get_ns_as_is]:
-    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 113:0-121:1
+    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 114:0-122:1
     Visibility: public -/
 def predict_get_ns_as_is
   (n_files : Std.U64) (_tau_ram_ns : Std.U64) (tau_disk_ns : Std.U64)
@@ -235,7 +235,7 @@ def predict_get_ns_as_is
   core.num.U64.saturating_mul n_files tau_disk_ns
 
 /-- [pedra_aeneas_scale_kernel::happy_hot_bps]:
-    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 125:0-131:1
+    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 126:0-132:1
     Visibility: public -/
 def happy_hot_bps
   (store_bytes : Std.U64) (ram_bytes : Std.U64) : Result Std.U64 := do
@@ -245,14 +245,14 @@ def happy_hot_bps
   else ok SCALE_HAPPY_COLD_HOT_BPS
 
 /-- [pedra_aeneas_scale_kernel::happy_hot_bps_as_is]:
-    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 135:0-137:1
+    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 136:0-138:1
     Visibility: public -/
 def happy_hot_bps_as_is
   (_store_bytes : Std.U64) (_ram_bytes : Std.U64) : Result Std.U64 := do
   ok SCALE_BPS
 
 /-- [pedra_aeneas_scale_kernel::ScaleForecast]
-    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 142:0-169:1
+    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 143:0-170:1
     Visibility: public -/
 structure ScaleForecast where
   keys : Std.U64
@@ -270,7 +270,7 @@ structure ScaleForecast where
   worst_ns : Std.U64
 
 /-- [pedra_aeneas_scale_kernel::{impl core::fmt::Debug for pedra_aeneas_scale_kernel::ScaleForecast}::fmt]:
-    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 141:9-141:14
+    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 142:9-142:14
     Visibility: public -/
 def ScaleForecast.Insts.CoreFmtDebug.fmt
   (self : ScaleForecast) (f : core.fmt.Formatter) :
@@ -307,14 +307,14 @@ def ScaleForecast.Insts.CoreFmtDebug.fmt
     values
 
 /-- Trait implementation: [pedra_aeneas_scale_kernel::{impl core::fmt::Debug for pedra_aeneas_scale_kernel::ScaleForecast}]
-    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 141:9-141:14 -/
+    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 142:9-142:14 -/
 @[reducible]
 def ScaleForecast.Insts.CoreFmtDebug : core.fmt.Debug ScaleForecast := {
   fmt := ScaleForecast.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_scale_kernel::{impl core::clone::Clone for pedra_aeneas_scale_kernel::ScaleForecast}::clone]:
-    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 141:16-141:21
+    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 142:16-142:21
     Visibility: public -/
 def ScaleForecast.Insts.CoreCloneClone.clone
   (self : ScaleForecast) : Result ScaleForecast := do
@@ -349,21 +349,21 @@ def ScaleForecast.Insts.CoreCloneClone.clone
     }
 
 /-- Trait implementation: [pedra_aeneas_scale_kernel::{impl core::clone::Clone for pedra_aeneas_scale_kernel::ScaleForecast}]
-    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 141:16-141:21 -/
+    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 142:16-142:21 -/
 @[reducible]
 def ScaleForecast.Insts.CoreCloneClone : core.clone.Clone ScaleForecast := {
   clone := ScaleForecast.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [pedra_aeneas_scale_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_scale_kernel::ScaleForecast}]
-    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 141:23-141:32 -/
+    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 142:23-142:32 -/
 @[reducible]
 def ScaleForecast.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq ScaleForecast := {
 }
 
 /-- [pedra_aeneas_scale_kernel::{impl core::cmp::PartialEq<pedra_aeneas_scale_kernel::ScaleForecast> for pedra_aeneas_scale_kernel::ScaleForecast}::eq]:
-    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 141:23-141:32
+    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 142:23-142:32
     Visibility: public -/
 def ScaleForecast.Insts.CoreCmpPartialEqScaleForecast.eq
   (self : ScaleForecast) (other : ScaleForecast) : Result Bool := do
@@ -405,7 +405,7 @@ def ScaleForecast.Insts.CoreCmpPartialEqScaleForecast.eq
   else ok false
 
 /-- Trait implementation: [pedra_aeneas_scale_kernel::{impl core::cmp::PartialEq<pedra_aeneas_scale_kernel::ScaleForecast> for pedra_aeneas_scale_kernel::ScaleForecast}]
-    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 141:23-141:32 -/
+    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 142:23-142:32 -/
 @[reducible]
 def ScaleForecast.Insts.CoreCmpPartialEqScaleForecast : core.cmp.PartialEq
   ScaleForecast ScaleForecast := {
@@ -413,14 +413,14 @@ def ScaleForecast.Insts.CoreCmpPartialEqScaleForecast : core.cmp.PartialEq
 }
 
 /-- [pedra_aeneas_scale_kernel::{impl core::cmp::Eq for pedra_aeneas_scale_kernel::ScaleForecast}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 141:34-141:36
+    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 142:34-142:36
     Visibility: public -/
 def ScaleForecast.Insts.CoreCmpEq.assert_fields_are_eq
   (self : ScaleForecast) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_scale_kernel::{impl core::cmp::Eq for pedra_aeneas_scale_kernel::ScaleForecast}]
-    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 141:34-141:36 -/
+    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 142:34-142:36 -/
 @[reducible]
 def ScaleForecast.Insts.CoreCmpEq : core.cmp.Eq ScaleForecast := {
   partialEqInst := ScaleForecast.Insts.CoreCmpPartialEqScaleForecast
@@ -428,7 +428,7 @@ def ScaleForecast.Insts.CoreCmpEq : core.cmp.Eq ScaleForecast := {
 }
 
 /-- [pedra_aeneas_scale_kernel::level_count]: loop body 0:
-    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 1:0-253:5 -/
+    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 1:0-254:5 -/
 @[rust_loop_body]
 def level_count_loop.body
   (store_bytes : Std.U64) (target : Std.U64) (level : Std.U32) :
@@ -445,7 +445,7 @@ def level_count_loop.body
   else ok (done level)
 
 /-- [pedra_aeneas_scale_kernel::level_count]: loop 0:
-    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 1:0-253:5 -/
+    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 1:0-254:5 -/
 @[rust_loop]
 def level_count_loop
   (store_bytes : Std.U64) (target : Std.U64) (level : Std.U32) :
@@ -456,7 +456,7 @@ def level_count_loop
     (target, level)
 
 /-- [pedra_aeneas_scale_kernel::level_count]:
-    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 244:0-255:1 -/
+    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 245:0-256:1 -/
 def level_count
   (store_bytes : Std.U64) (l1_target : Std.U64) : Result Std.U32 := do
   if store_bytes = 0#u64
@@ -467,7 +467,7 @@ def level_count
     else level_count_loop store_bytes l1_target 1#u32
 
 /-- [pedra_aeneas_scale_kernel::scale_forecast]:
-    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 173:0-216:1
+    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 174:0-217:1
     Visibility: public -/
 def scale_forecast
   (keys : Std.U64) (ram_bytes : Std.U64) : Result ScaleForecast := do
@@ -509,7 +509,7 @@ def scale_forecast
     }
 
 /-- [pedra_aeneas_scale_kernel::scale_forecast_as_is]:
-    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 220:0-242:1
+    Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 221:0-243:1
     Visibility: public -/
 def scale_forecast_as_is
   (keys : Std.U64) (ram_bytes : Std.U64) : Result ScaleForecast := do

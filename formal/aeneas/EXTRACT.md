@@ -134,7 +134,7 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 | `cqe` | `cqe_kernel.rs` | `cqe_res_ok_nonneg` / `submit_complete_act_harvested` / `_as_is_dente` (`RUSTFLAGS=--cfg test`; Atomic telemetry in `submit_complete_act` stripped) |
 | `iter` | `iter_kernel.rs` | `iter_window_keep_live` / `_as_is_dente` (single_artifact: production file is the Verus term) |
 | `properties` | `properties_kernel.rs` | `d1_holds_loop_body_is_def` (loop extract) |
-| `scale` | `scale_kernel.rs` | `point_get_probes_one_plus_one` / `_as_is_is_n_files` |
+| `scale` | `scale_kernel.rs` | `point_get_probes_one_plus_one` / `_as_is_is_n_files` / `probes_worst_l0_trigger_via_point_get` |
 | `disk_pressure` | `disk_pressure_kernel.rs` | `disk_pressure_unknown_admits` / `_as_is_dente` |
 | `crc` | `wal/crc.rs` | `crc_match_ok_equal` / `_as_is_dente` (`crc32c` crate fns stay axioms) |
 | `env_crash` | `env_crash_kernel.rs` | `crash_legal_in_window` / `crash_legal_as_is_dente` (shim `#[path]` group_commit) |
@@ -371,6 +371,7 @@ Never: “Lean proved Raft / fold / the Bloom filter.”
 - Lean 4.31.0 accepted (no `sorry` in `Scale.lean`):
   - `point_get_probes_as_is_is_n_files` (∀)
   - `probes_worst_as_is_is_n_files` (∀)
+  - `probes_worst_l0_trigger_via_point_get` (concrete N: 4+4=8; unfolds `probes_worst` ∧ `point_get_probes`)
 - **Not claimed:** `saturating_add` 4+1=5 (native_decide failed — add stays
   in Verus). Clock \(T\) / noisy neighbor are measured, not extracted.
 - Run: `./scripts/aeneas_scale.sh` then `lake build Scale` in `formal/aeneas/lean`.

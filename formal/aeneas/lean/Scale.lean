@@ -25,3 +25,17 @@ theorem probes_worst_as_is_is_n_files
     probes_worst_as_is n_files levels l0 = ok n_files := by
   unfold probes_worst_as_is
   rfl
+
+/-- Concrete N (RFC-0176 1B-key settle): 4 L1+ levels + L0 trigger 4 = 8
+    probes. Unfolds `probes_worst` **and** `point_get_probes`. -/
+theorem probes_worst_l0_trigger_via_point_get :
+    probes_worst 4#u64 4#u64 = ok (8#u64) ∧
+      point_get_probes 4#u64 4#u64 = ok (8#u64) := by
+  constructor
+  · unfold probes_worst
+    unfold point_get_probes
+    have h : core.num.U64.saturating_add 4#u64 4#u64 = 8#u64 := by native_decide
+    simp [h]
+  · unfold point_get_probes
+    have h : core.num.U64.saturating_add 4#u64 4#u64 = 8#u64 := by native_decide
+    simp [h]

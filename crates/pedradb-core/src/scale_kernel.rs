@@ -76,9 +76,10 @@ pub fn warm_cap_bytes_as_is(_ram_ceiling: u64) -> u64 {
 }
 
 /// Worst production probes: every L1+ level plus a full L0 trigger stack.
+/// Same add as [`point_get_probes`] — the GPS of probes, not a second walk.
 #[must_use]
 pub fn probes_worst(levels: u64, l0_max: u64) -> u64 {
-    levels.saturating_add(l0_max)
+    point_get_probes(levels, l0_max)
 }
 
 /// AS-IS: still walk every live file.
@@ -296,6 +297,23 @@ mod tests {
         assert_eq!(l10, 5);
         assert_eq!(point_get_probes(u64::from(l1), 1), 5);
         assert_eq!(point_get_probes(u64::from(l10), 1), 6);
+    }
+
+    #[test]
+    fn probes_worst_on_l0_trigger_is_not_ok() {
+        assert_eq!(probes_worst(4, SCALE_L0_WORST), 8);
+        assert_eq!(point_get_probes(4, SCALE_L0_WORST), 8);
+        assert_eq!(probes_worst_as_is(913, 4, SCALE_L0_WORST), 913);
+        let src = include_str!("scale_kernel.rs");
+        let worst = src
+            .split("pub fn probes_worst(")
+            .nth(1)
+            .expect("probes_worst");
+        let body = worst.split("pub fn probes_worst_as_is").next().expect("body");
+        assert!(
+            body.contains("point_get_probes("),
+            "probes_worst must call point_get_probes"
+        );
     }
 
     #[test]
