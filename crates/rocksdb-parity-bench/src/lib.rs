@@ -2940,7 +2940,7 @@ impl YcsbRunner {
         let mut blocks = Vec::with_capacity(2);
 
         // deps_apply_batch_mcN
-        {
+        if shape_wanted(&format!("deps_apply_batch_mc{clients}")) {
             let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
             let phase0 = e.write_phase_snapshot();
             let t0 = Instant::now();
@@ -3047,7 +3047,7 @@ impl YcsbRunner {
         }
 
         // deps_raftlog_mcN
-        {
+        if shape_wanted(&format!("deps_raftlog_mc{clients}")) {
             let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
             let phase0 = e.write_phase_snapshot();
             let t0 = Instant::now();
@@ -3648,6 +3648,17 @@ mod tests {
         ));
         assert!(!shape_wanted_in(
             "deps_cache_overwrite",
+            Some("deps_cache_overwrite_mc4")
+        ));
+        assert!(
+            !shape_wanted_in(
+                "deps_apply_batch_mc4",
+                Some("deps_cache_overwrite_mc4")
+            ),
+            "run_deps_clients must not leak apply when ONLY=overwrite_mc4"
+        );
+        assert!(!shape_wanted_in(
+            "deps_raftlog_mc4",
             Some("deps_cache_overwrite_mc4")
         ));
     }
