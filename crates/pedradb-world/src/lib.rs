@@ -1006,7 +1006,7 @@ impl World {
                 }
                 inbound.push((d.from, d.to, d.bytes));
             }
-            if !inbound.is_empty() {
+            if !pedradb_core::write_admission_kernel::batch_is_empty(inbound.len() as u64) {
                 let dests: Vec<u64> = inbound.iter().map(|(_, to, _)| *to).collect();
                 let order = self
                     .order
