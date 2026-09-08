@@ -449,6 +449,14 @@ fn async_catchup_spins(batch_len: usize, active: usize) -> u32 {
     }
 }
 
+/// RFC-0180 P0.61: post-`group_start` catch-up still waits (P0.60 removed
+/// the wait and p999 exploded) but must not hold `db.write()` — that wait
+/// is `lock_hold` / `serial_cs` once grouping is paid.
+#[must_use]
+fn async_catchup_holds_write_lock() -> bool {
+    false
+}
+
 /// RFC-0180: a 1-member async group is `commit_async_one` (no
 /// `GroupInFlight` / dual WAL lock). 1c stays here. At 2–8 writers
 /// (diagnose `write --clients 4` `cut=grouping`) a 1-member batch still
@@ -1499,18 +1507,19 @@ impl WriteGroup {
                     results
                 }
                 Ok(mut inflight) => {
-                    // RFC-0180 P0.43: prepare is a window — followers enqueue
-                    // without the Db write lock. Pre-lock catch-up only saw
-                    // the queue before prepare; spin once more, then absorb.
+                    // RFC-0180 P0.43/P0.45: prepare window catch-up.
+                    // P0.61: wait off db.write() (P0.60 dropped the wait).
+                    debug_assert!(!async_catchup_holds_write_lock());
+                    drop(guard);
                     if !any_sync {
                         let spins = async_catchup_spins(batch.len(), active);
                         if spins > 0 {
                             let want = active.saturating_sub(batch.len()).min(4).max(1);
                             self.spin_for_pending_n(spins, want);
                         }
-                        // RFC-0180 P0.45: prepare is the same in-flight window.
                         self.wait_in_flight_to_queue(batch.len());
                     }
+                    let mut guard = db.write();
                     loop {
                         let mut extra: Vec<PendingWrite> = {
                             let mut q = self.queue.lock();
@@ -1719,14 +1728,15 @@ impl WriteGroup {
         guard.begin_commit();
         guard.stage_unapplied(&inflight);
         let mut chunks = vec![Chunk::Fly(inflight)];
-        // RFC-0180 P0.46: extra drain was take-if-queued. In-flight
-        // begin_submit still not in the queue; wait (no timer) then drain
-        // so they share this off-lock WAL hop. G1 already waited on fd EMA.
+        // RFC-0180 P0.46 waited in-flight under db.write(). P0.61: same
+        // wait, lock dropped (`commit_inflight` already pinned).
+        drop(guard);
         if !need_sync {
             if let Some(b) = batch.as_ref() {
                 group.wait_in_flight_to_queue(b.len());
             }
         }
+        let mut guard = db.write();
         if let Some(batch) = batch.as_mut() {
             loop {
                 let mut extra = drain();
@@ -7272,6 +7282,14 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// RFC-0180 P0.61 — catch-up wait stays; it does not hold `db.write()`.
+    #[test]
+    fn rfc0180_catchup_after_prepare_off_write_lock() {
+        assert!(!async_catchup_holds_write_lock());
+        assert_eq!(async_catchup_spins(1, 4), 1024, "wait still exists");
+        assert_eq!(wait_in_flight_spins(), 4096);
+    }
+
     /// RFC-0180 P0.5 — linger after a multi-member group; async 1-op catch-up.
     #[test]
     fn rfc0180_leader_linger_and_async_catchup() {
@@ -7290,6 +7308,10 @@ mod tests {
         assert_eq!(async_catchup_spins(4, 4), 0);
         assert_eq!(async_catchup_spins(1, 4), 1024);
         assert_eq!(async_catchup_spins(1, 2), 1024);
+        assert!(
+            !async_catchup_holds_write_lock(),
+            "P0.61: catch-up wait is off db.write(); P0.60 removed the wait"
+        );
         // 2–8 clients: gather toward expected_group=4 (diagnose write).
         // P0.43: the same spins run again after `group_start` (prepare window).
         assert!(!async_catchup_skip_when_grouped(2, 4));
