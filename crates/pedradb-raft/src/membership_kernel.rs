@@ -2064,4 +2064,15 @@ mod tests {
         );
         assert!(!disk_membership_overrides_cli(false));
     }
+
+    #[test]
+    fn high_water_at_least_on_live_disk_ahead_is_not_ok() {
+        assert_eq!(high_water_at_least(4, 3), 4);
+        assert_eq!(
+            high_water_at_least_as_is(4, 3),
+            3,
+            "AS-IS dente: RAM/CLI length only"
+        );
+        assert_eq!(high_water_at_least(2, 5), 5);
+    }
 }
