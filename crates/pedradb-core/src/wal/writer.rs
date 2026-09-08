@@ -86,7 +86,7 @@ impl<W: Write + Seek> WalWriter<W> {
     /// # Errors
     /// Returns [`std::io::Error`] propagated from the single underlying write.
     pub fn add_records(&mut self, datas: &[&[u8]]) -> Result<()> {
-        if datas.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(datas.len() as u64) {
             return Ok(());
         }
         let mut frame = std::mem::take(&mut self.frame);
