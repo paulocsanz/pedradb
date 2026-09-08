@@ -1781,7 +1781,11 @@ impl MemTable {
         }
         let mut pfx_buf = [0u8; 32];
         let pfx_len = match (bound_cf_prefix(start), bound_cf_prefix(end)) {
-            (Some(a), Some(b)) if a == b && !a.is_empty() && a.len() < 32 => {
+            (Some(a), Some(b))
+                if a == b
+                    && !crate::write_admission_kernel::batch_is_empty(a.len() as u64)
+                    && a.len() < 32 =>
+            {
                 pfx_buf[..a.len()].copy_from_slice(a);
                 a.len()
             }
