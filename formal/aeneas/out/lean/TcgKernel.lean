@@ -15,19 +15,19 @@ set_option maxRecDepth 2048
 namespace pedra_aeneas_tcg_kernel
 
 /-- [pedra_aeneas_tcg_kernel::tcg_guest_admitted]:
-    Source: '../../../crates/pedradb-world/src/tcg.rs', lines 13:0-15:1
+    Source: '../../../crates/pedradb-world/src/tcg.rs', lines 32:0-34:1
     Visibility: public -/
 def tcg_guest_admitted (guest_reachable : Bool) : Result Bool := do
   ok guest_reachable
 
 /-- [pedra_aeneas_tcg_kernel::tcg_guest_admitted_as_is]:
-    Source: '../../../crates/pedradb-world/src/tcg.rs', lines 19:0-21:1
+    Source: '../../../crates/pedradb-world/src/tcg.rs', lines 39:0-41:1
     Visibility: public -/
 def tcg_guest_admitted_as_is (_guest_reachable : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_tcg_kernel::allow_claim_tcg_flag]:
-    Source: '../../../crates/pedradb-world/src/tcg.rs', lines 26:0-31:1
+    Source: '../../../crates/pedradb-world/src/tcg.rs', lines 47:0-52:1
     Visibility: public -/
 def allow_claim_tcg_flag
   (claim_flag : Bool) (guest_reachable : Bool) : Result Bool := do
@@ -36,20 +36,20 @@ def allow_claim_tcg_flag
   else ok true
 
 /-- [pedra_aeneas_tcg_kernel::allow_claim_tcg_flag_as_is]:
-    Source: '../../../crates/pedradb-world/src/tcg.rs', lines 35:0-37:1
+    Source: '../../../crates/pedradb-world/src/tcg.rs', lines 57:0-59:1
     Visibility: public -/
 def allow_claim_tcg_flag_as_is
   (_claim_flag : Bool) (_guest_reachable : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_tcg_kernel::world_runs_guest_ssh]:
-    Source: '../../../crates/pedradb-world/src/tcg.rs', lines 42:0-44:1
+    Source: '../../../crates/pedradb-world/src/tcg.rs', lines 65:0-67:1
     Visibility: public -/
 def world_runs_guest_ssh : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_tcg_kernel::world_runs_guest_ssh_as_is]:
-    Source: '../../../crates/pedradb-world/src/tcg.rs', lines 48:0-50:1
+    Source: '../../../crates/pedradb-world/src/tcg.rs', lines 72:0-74:1
     Visibility: public -/
 def world_runs_guest_ssh_as_is : Result Bool := do
   ok true

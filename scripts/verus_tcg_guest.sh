@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Machine-check tcg_guest_admitted (RFC-0079 P2.1).
+# Machine-check tcg_guest_admitted on the file rustc links
+# (single artifact — not the twin-cópia).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-world/verus/tcg_guest.rs"
+SRC="$ROOT/crates/pedradb-world/src/tcg.rs"
 
 if [[ -x "${VERUS:-}" ]]; then
   :

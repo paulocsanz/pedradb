@@ -4122,8 +4122,9 @@
       "id": "tcg_guest",
       "finding": "RFC-0079",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-world/src/tcg.rs",
-      "twin": "crates/pedradb-world/verus/tcg_guest.rs",
+      "twin": "crates/pedradb-world/src/tcg.rs",
       "verus": "scripts/verus_tcg_guest.sh",
       "callers": [
         "crates/pedradb-world/src/lib.rs"
