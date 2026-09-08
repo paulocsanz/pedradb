@@ -490,7 +490,11 @@ impl WriteGroup {
         let mut first = true;
         loop {
             let active = self.begin_submit();
-            let r = if first && active == 1 && !self.recently_concurrent() && !do_sync {
+            let r = if first
+                && active == 1
+                && !self.recently_concurrent()
+                && !crate::write_admission_kernel::wal_sync_required(true, do_sync, false)
+            {
                 let result = db.write().commit_async_one(ops[0].clone());
                 self.finish_lone();
                 result
