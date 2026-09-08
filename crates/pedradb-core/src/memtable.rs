@@ -790,7 +790,10 @@ impl MemTable {
     /// not tracked.
     #[must_use]
     pub(crate) fn bulk_span(&self, family: &str) -> BulkSpan {
-        if self.span_stale || family.is_empty() || family.as_bytes().contains(&0) {
+        if self.span_stale
+            || crate::write_admission_kernel::batch_is_empty(family.len() as u64)
+            || family.as_bytes().contains(&0)
+        {
             return BulkSpan::Unknown;
         }
         let s = if family == "default" {
