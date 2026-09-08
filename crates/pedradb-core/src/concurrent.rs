@@ -422,6 +422,12 @@ fn lone_peer_wait_spins() -> u32 {
     256
 }
 
+/// Diagnose `write --clients 4` `expected_group=4`. Stopping at 2
+/// (P0.51) left grouping_cap=2 and a 1+3 / 2+2 split.
+fn lone_peer_wait_target() -> usize {
+    4
+}
+
 fn async_catchup_spins(batch_len: usize, active: usize) -> u32 {
     if batch_len >= active || active < 2 || async_catchup_skip_when_grouped(batch_len, active) {
         0
@@ -1284,10 +1290,12 @@ impl WriteGroup {
         }
     }
 
-    /// RFC-0180 P0.51: before `commit_async_one` on `active==1`.
+    /// RFC-0180 P0.51–P0.52: before `commit_async_one` on `active==1`.
+    /// P0.52 waits toward `expected_group=4`, not the first sibling (2).
     fn wait_peer_before_lone(&self) {
+        let want = lone_peer_wait_target();
         for _ in 0..lone_peer_wait_spins() {
-            if self.active.load(Ordering::Acquire) >= 2 {
+            if self.active.load(Ordering::Acquire) >= want {
                 return;
             }
             std::hint::spin_loop();
@@ -7242,6 +7250,7 @@ mod tests {
         assert!(!lone_peer_wait_needed(1, true), "P0.50 covers re-entry");
         assert!(!lone_peer_wait_needed(2, false));
         assert_eq!(lone_peer_wait_spins(), 256);
+        assert_eq!(lone_peer_wait_target(), 4);
         // n≥16: stop at 2 (kvrocks_set_mc50 lock_convoy ceiling).
         assert!(async_catchup_skip_when_grouped(2, 16));
         assert_eq!(async_catchup_spins(2, 16), 0);
