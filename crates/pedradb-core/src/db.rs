@@ -625,7 +625,7 @@ pub struct WritePhaseStats {
     pub commits: AtomicU64,
     /// `prepare_write_ops` (seq alloc, large-value spill, WriteOp build).
     pub prepare_ns: AtomicU64,
-    /// WAL encode + append (`encode_write_op_batches` + pending write()).
+    /// WAL encode + append (one hop `encode_and_write_op_batches`).
     pub wal_ns: AtomicU64,
     /// Dirty-point note + `apply_ops_owned` (BTree insert).
     pub mem_ns: AtomicU64,
@@ -10273,10 +10273,13 @@ impl<E: Env> Db<E> {
         self.vlog_prepare_wal(false)?;
         {
             let t1 = st.as_ref().map(|_| Instant::now());
-            let mut w = self.wal.lock();
-            let sl = ops.as_slice();
-            w.encode_write_op_batches(&[sl])?;
-            w.write_pending_frame()?;
+            // One hop: same bytes as encode_write_op_batches + write_pending
+            // (RFC-0180 P0.42). Group path already does this off lock (P0.40).
+            let n = self
+                .wal
+                .lock()
+                .encode_and_write_op_batches(&[ops.as_slice()])?;
+            self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
             if let (Some(st), Some(t1)) = (st.as_ref(), t1) {
                 st.wal_ns
                     .fetch_add(t1.elapsed().as_nanos() as u64, Ordering::Relaxed);
@@ -13467,6 +13470,30 @@ mod tests {
             db.point_tls_epoch_handle().load(Ordering::Acquire) > epoch0,
             "n=33 still epoch-bumps"
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0180 P0.42: `commit_async_ops` encode+write is one WAL hop.
+    #[test]
+    fn rfc0180_commit_async_ops_one_hop_recovers() {
+        let dir = temp_dir();
+        {
+            let mut db = Db::open(&dir).unwrap();
+            db.bulk_route_enabled = false;
+            let batch: Vec<BatchOp> = (0..4u8)
+                .map(|i| BatchOp::put(vec![b'a', i], vec![b'b', i]))
+                .collect();
+            db.commit_async_ops(batch).unwrap();
+            db.close().unwrap();
+        }
+        let db = Db::open(&dir).unwrap();
+        for i in 0..4u8 {
+            assert_eq!(
+                db.get(&[b'a', i]).as_deref(),
+                Some(&[b'b', i][..]),
+                "lost async ops put {i}"
+            );
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 
