@@ -2041,6 +2041,7 @@ impl YcsbRunner {
         for i in 0..records {
             assert!(e.put(&shred(i), &yval), "solana shred seed {i}");
         }
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut puts, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -2070,7 +2071,15 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] solana_shred_append done puts={puts} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
+            eprint_write_diagnose("solana_shred_append", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
 
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut scans, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -2090,6 +2099,13 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] solana_trailing_read done scans={scans} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
+            eprint_write_diagnose("solana_trailing_read", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
         self.rng = rng;
         blocks
     }
@@ -4110,9 +4126,21 @@ mod tests {
             "bluestore_omap_read is get+scan:\n{}",
             ceph[1]
         );
+        let sol = r.run_solana(&e);
         assert_eq!(
-            block_names(&r.run_solana(&e)),
+            block_names(&sol),
             vec![Some("solana_shred_append"), Some("solana_trailing_read"),]
+        );
+        for b in &sol {
+            assert!(
+                b.contains("\"diagnose\": {\"lever\":"),
+                "RFC-0184 P2.15 solana JSON needs diagnose.lever:\n{b}"
+            );
+        }
+        assert!(
+            sol[1].contains("\"lever\":\"get_path\""),
+            "solana_trailing_read is scan:\n{}",
+            sol[1]
         );
         assert_eq!(
             block_names(&r.run_arango(&e)),
