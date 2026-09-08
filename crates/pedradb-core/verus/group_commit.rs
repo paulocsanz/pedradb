@@ -461,28 +461,6 @@ pub fn may_publish_group_as_is(_wal_io_ok: bool) -> (ok: bool)
     true
 }
 
-pub open spec fn rwlock_client_may_mutate_spec(holding_write: bool) -> bool {
-    holding_write
-}
-
-pub open spec fn rwlock_client_may_mutate_as_is_spec(_holding_write: bool) -> bool {
-    true
-}
-
-pub fn rwlock_client_may_mutate(holding_write: bool) -> (ok: bool)
-    ensures
-        ok == rwlock_client_may_mutate_spec(holding_write),
-{
-    holding_write
-}
-
-pub fn rwlock_client_may_mutate_as_is(_holding_write: bool) -> (ok: bool)
-    ensures
-        ok == rwlock_client_may_mutate_as_is_spec(_holding_write),
-{
-    true
-}
-
 proof fn lemma_failed_wal_does_not_publish()
     ensures
         !may_publish_group_spec(false),

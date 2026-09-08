@@ -17,12 +17,29 @@
 //!   publish watermark — the max appended member sequence — after WAL
 //!   durability. Called by `GroupInFlight::max_appended_seq` (`db.rs`).
 //!
-//! The Verus twin is `crates/pedradb-core/verus/group_commit.rs`; the
-//! Aeneas extract is `formal/aeneas/lean/GroupCommitKernel.lean` with
+//! The Verus twin is `crates/pedradb-core/verus/group_commit.rs` except
+//! [`rwlock_client_may_mutate`]: that fn is **single artifact** — this
+//! file is what `rustc` links *and* what Verus proves
+//! (`cfg(verus_keep_ghost)`). `./scripts/verus_group_commit_kernel.sh`
+//!
+//! The Aeneas extract is `formal/aeneas/lean/GroupCommitKernel.lean` with
 //! theorems in `GroupCommit.lean` (second machine).
 //!
 //! `occ_conflict_as_is_serialized` is TEST-ONLY teeth (the serialized
 //! mutant the theorems diverge from); production never calls it.
+
+macro_rules! rwlock_client_may_mutate_body {
+    ($holding_write:expr) => {
+        $holding_write
+    };
+}
+
+macro_rules! rwlock_client_may_mutate_as_is_body {
+    ($holding_write:expr) => {{
+        let _ = $holding_write;
+        true
+    }};
+}
 
 /// First-committer-wins predicate (OCC): a transaction that read
 /// snapshot `snap` against current `last_seq` conflicts iff the window
@@ -230,15 +247,17 @@ pub fn may_publish_group(wal_io_ok: bool) -> bool {
 /// Data-race token (CapybaraKV RW-lock *client*, not `parking_lot`):
 /// exclusive mutate of `Db` only while the write guard is held. Off-lock
 /// fd (`drop(guard)` then `sync_data`) must pass `false`.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn rwlock_client_may_mutate(holding_write: bool) -> bool {
-    holding_write
+    rwlock_client_may_mutate_body!(holding_write)
 }
 
 /// AS-IS: mutate even after dropping the write lock (data-race lie).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn rwlock_client_may_mutate_as_is(_holding_write: bool) -> bool {
-    true
+    rwlock_client_may_mutate_as_is_body!(_holding_write)
 }
 
 /// AS-IS: publish even if WAL I/O failed (the 0071 hole — Ok with a lie).
@@ -311,6 +330,34 @@ pub fn fsync_lie_closes_tcg_guest() -> bool {
 pub fn fsync_lie_closes_tcg_guest_as_is() -> bool {
     true
 }
+
+#[cfg(verus_keep_ghost)]
+use vstd::prelude::*;
+
+#[cfg(verus_keep_ghost)]
+verus! {
+
+pub open spec fn rwlock_client_may_mutate_spec(holding_write: bool) -> bool {
+    holding_write
+}
+
+pub fn rwlock_client_may_mutate(holding_write: bool) -> (ok: bool)
+    ensures
+        ok == rwlock_client_may_mutate_spec(holding_write),
+        holding_write ==> ok,
+        !holding_write ==> !ok,
+{
+    rwlock_client_may_mutate_body!(holding_write)
+}
+
+pub fn rwlock_client_may_mutate_as_is(_holding_write: bool) -> (ok: bool)
+    ensures
+        ok == true,
+{
+    rwlock_client_may_mutate_as_is_body!(_holding_write)
+}
+
+} // verus!
 
 #[cfg(test)]
 mod tests {
