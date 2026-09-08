@@ -1496,13 +1496,13 @@ fn apply_txn_commit<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Re
         // Keep preimage until the coordinator finishes all ranges — revert
         // after a later-range failure must still restore the old value.
     }
-    if !ops.is_empty() {
+    if !pedradb_core::write_admission_kernel::batch_is_empty(ops.len() as u64) {
         db.apply_batch(ops)?;
     }
     // Clear status when no remaining pair records for this txn.
     let prefix = txn_pair_prefix(txn_id);
     let left = scan_prefix(db, &prefix);
-    if left.is_empty() {
+    if pedradb_core::write_admission_kernel::batch_is_empty(left.len() as u64) {
         db.apply_batch([BatchOp::delete(txn_status_key(txn_id))])?;
     }
     Ok(())
