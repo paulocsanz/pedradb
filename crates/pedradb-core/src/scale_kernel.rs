@@ -14,6 +14,8 @@ pub const WARM_RESERVE_BYTES: u64 = 1 << 30;
 pub const SCALE_BYTES_PER_ENTRY: u64 = 245;
 /// Compact / L1 target (same as `COMPACT_TARGET_FILE_BYTES`).
 pub const SCALE_L1_BYTES: u64 = 256 * 1024 * 1024;
+/// LSM level fanout \(F\) (RFC-0176). Not [`SCALE_INDEX_FANOUT`] (SST index).
+pub const SCALE_LEVEL_FANOUT: u64 = 10;
 /// SST data-block target.
 pub const SCALE_BLOCK_BYTES: u64 = 4_096;
 /// Two-level index fanout.
@@ -36,6 +38,12 @@ pub const SCALE_WORST_NOISY_BPS: u64 = 5_000;
 pub const SCALE_TAU_RAM_NS: u64 = 1_100;
 /// Per-probe disk time (calibrated; SSD pread).
 pub const SCALE_TAU_DISK_NS: u64 = 13_500;
+/// 1c overwrite WAL+fd band (RFC-0183 Darwin wal ≈ 2.46 µs of 3.3 µs p50).
+pub const SCALE_TAU_FD_NS: u64 = 2_500;
+/// WAL encode aside from the barrier (order-of-magnitude; not a retune of τ_ram).
+pub const SCALE_TAU_WAL_ENCODE_NS: u64 = 200;
+/// Adaptive merge window (RFC-0178 P0.12): n=2–8 merge, else 1.
+pub const SCALE_GROUP_ADAPTIVE_MAX: u64 = 8;
 
 /// After settle: one covering SST per disjoint L1+ level plus `l0_covering`.
 #[must_use]
@@ -171,15 +179,19 @@ pub struct ScaleForecast {
 /// Compose the RFC-0176 table from the atomic kernel fns.
 #[must_use]
 pub fn scale_forecast(keys: u64, ram_bytes: u64) -> ScaleForecast {
-    let store_bytes = keys.saturating_mul(SCALE_BYTES_PER_ENTRY);
+    scale_forecast_with(keys, ram_bytes, SCALE_BYTES_PER_ENTRY)
+}
+
+/// Same as [`scale_forecast`] with an explicit on-disk byte/entry
+/// (YCSB 100 B payload is not the scale-shape 245 B).
+#[must_use]
+pub fn scale_forecast_with(keys: u64, ram_bytes: u64, bytes_per_entry: u64) -> ScaleForecast {
+    let bpe = bytes_per_entry.max(1);
+    let store_bytes = keys.saturating_mul(bpe);
     let levels = u64::from(level_count(store_bytes, SCALE_L1_BYTES));
     let p_best = point_get_probes(levels, SCALE_L0_BEST);
     let p_worst = probes_worst(levels, SCALE_L0_WORST);
-    let n_files = if SCALE_L1_BYTES == 0 {
-        0
-    } else {
-        store_bytes.div_ceil(SCALE_L1_BYTES)
-    };
+    let n_files = file_count(store_bytes);
     let warm_cap = warm_cap_bytes(ram_bytes);
     let hot = store_bytes <= warm_cap;
     let happy_hot = happy_hot_bps(store_bytes, ram_bytes);
@@ -218,12 +230,14 @@ pub fn scale_forecast(keys: u64, ram_bytes: u64) -> ScaleForecast {
 /// AS-IS: walk every file and claim the store is always hot.
 #[must_use]
 pub fn scale_forecast_as_is(keys: u64, ram_bytes: u64) -> ScaleForecast {
-    let store_bytes = keys.saturating_mul(SCALE_BYTES_PER_ENTRY);
-    let n_files = if SCALE_L1_BYTES == 0 {
-        0
-    } else {
-        store_bytes.div_ceil(SCALE_L1_BYTES)
-    };
+    scale_forecast_as_is_with(keys, ram_bytes, SCALE_BYTES_PER_ENTRY)
+}
+
+/// [`scale_forecast_as_is`] with explicit byte/entry.
+#[must_use]
+pub fn scale_forecast_as_is_with(keys: u64, ram_bytes: u64, bytes_per_entry: u64) -> ScaleForecast {
+    let store_bytes = keys.saturating_mul(bytes_per_entry.max(1));
+    let n_files = file_count(store_bytes);
     ScaleForecast {
         keys,
         ram_bytes,
@@ -241,6 +255,77 @@ pub fn scale_forecast_as_is(keys: u64, ram_bytes: u64) -> ScaleForecast {
     }
 }
 
+/// Walk-all is a *different physics* from legal \(P\) iff more than \(2P_{\mathrm{best}}\) files.
+/// Below that, \(N_{\mathrm{files}}\approx P\) and wall-clock cannot prove a probe bug
+/// (1M scale-shape is one L1 file).
+#[must_use]
+pub fn walk_distinguishable(n_files: u64, p_best: u64) -> bool {
+    p_best > 0 && n_files > p_best.saturating_mul(2)
+}
+
+/// Clustered prefix/scan: covering SST count for `prefix_keys` (not the whole store).
+#[must_use]
+pub fn prefix_covering_files(prefix_keys: u64, bytes_per_entry: u64) -> u64 {
+    file_count(prefix_keys.saturating_mul(bytes_per_entry.max(1))).max(1)
+}
+
+/// Adaptive expected group size: n=2–8 → n, else 1 (bypass / 1c fd ceiling).
+#[must_use]
+pub fn expected_avg_group(clients: u64) -> u64 {
+    if (2..=SCALE_GROUP_ADAPTIVE_MAX).contains(&clients) {
+        clients
+    } else {
+        1
+    }
+}
+
+/// Static write clock: 1c = one barrier/op (ceiling); mc 2–8 = barrier/n if merge lives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WriteForecast {
+    /// Client count.
+    pub clients: u64,
+    /// Expected `avg_group` under Adaptive merge.
+    pub expected_group: u64,
+    /// Encode + `fd / expected_group`.
+    pub best_ns: u64,
+    /// Encode + one `fd` per op (grouping dead).
+    pub as_is_ns: u64,
+    /// `clients` in 2–8 (otherwise fd ceiling, not a merge bug).
+    pub distinguishable: bool,
+}
+
+/// Cut token for [`WriteForecast`]: `grouping` or `fd_ceiling`.
+#[must_use]
+pub fn write_forecast_cut(w: WriteForecast) -> &'static str {
+    if w.distinguishable {
+        "grouping"
+    } else {
+        "fd_ceiling"
+    }
+}
+
+/// Predict write ns without a bench. `as_is` is grouping-dead (avg_group=1).
+#[must_use]
+pub fn predict_write(clients: u64) -> WriteForecast {
+    let g = expected_avg_group(clients).max(1);
+    let fd = SCALE_TAU_FD_NS;
+    WriteForecast {
+        clients,
+        expected_group: g,
+        best_ns: SCALE_TAU_WAL_ENCODE_NS.saturating_add(fd / g),
+        as_is_ns: SCALE_TAU_WAL_ENCODE_NS.saturating_add(fd),
+        distinguishable: g > 1,
+    }
+}
+
+fn file_count(store_bytes: u64) -> u64 {
+    if SCALE_L1_BYTES == 0 || store_bytes == 0 {
+        0
+    } else {
+        store_bytes.div_ceil(SCALE_L1_BYTES)
+    }
+}
+
 fn level_count(store_bytes: u64, l1_target: u64) -> u32 {
     if store_bytes == 0 || l1_target == 0 {
         return 0;
@@ -248,7 +333,7 @@ fn level_count(store_bytes: u64, l1_target: u64) -> u32 {
     let mut target = l1_target;
     let mut level = 1u32;
     while target < store_bytes && level < 19 {
-        target = target.saturating_mul(10);
+        target = target.saturating_mul(SCALE_LEVEL_FANOUT);
         level = level.saturating_add(1);
     }
     level
@@ -368,5 +453,69 @@ mod tests {
         assert!(as_is.hot);
         assert!(as_is.p_best > f1.p_best * 100);
         assert_eq!(as_is.happy_hot_bps, SCALE_BPS);
+    }
+
+    #[test]
+    fn walk_distinguishable_by_probes_not_wall_clock() {
+        let ram = 64u64 << 30;
+        let f1 = scale_forecast(1_000_000, ram);
+        let a1 = scale_forecast_as_is(1_000_000, ram);
+        assert_eq!(a1.n_files, 1);
+        assert!(!walk_distinguishable(a1.n_files, f1.p_best));
+        let f10 = scale_forecast(10_000_000, ram);
+        let a10 = scale_forecast_as_is(10_000_000, ram);
+        assert_eq!(a10.n_files, 10);
+        assert!(walk_distinguishable(a10.n_files, f10.p_best));
+        let f1b = scale_forecast(1_000_000_000, ram);
+        let a1b = scale_forecast_as_is(1_000_000_000, ram);
+        assert!(walk_distinguishable(a1b.n_files, f1b.p_best));
+    }
+
+    #[test]
+    fn scale_forecast_with_smaller_entry_has_fewer_files() {
+        let ram = 64u64 << 30;
+        let scale = scale_forecast_with(100_000_000, ram, SCALE_BYTES_PER_ENTRY);
+        let ycsb = scale_forecast_with(100_000_000, ram, 100);
+        assert!(
+            ycsb.n_files < scale.n_files,
+            "{} vs {}",
+            ycsb.n_files,
+            scale.n_files
+        );
+        assert_eq!(scale.n_files, 92);
+    }
+
+    #[test]
+    fn prefix_covering_clustered_is_one_file() {
+        assert_eq!(prefix_covering_files(1_000, SCALE_BYTES_PER_ENTRY), 1);
+        assert!(prefix_covering_files(2_000_000, SCALE_BYTES_PER_ENTRY) > 1);
+    }
+
+    #[test]
+    fn predict_write_mc4_grouping_is_the_gap() {
+        let w1 = predict_write(1);
+        assert!(!w1.distinguishable);
+        assert_eq!(w1.expected_group, 1);
+        assert_eq!(w1.best_ns, w1.as_is_ns);
+        assert_eq!(write_forecast_cut(w1), "fd_ceiling");
+        let w4 = predict_write(4);
+        assert!(w4.distinguishable);
+        assert_eq!(w4.expected_group, 4);
+        assert!(w4.best_ns < w4.as_is_ns);
+        assert_eq!(w4.as_is_ns, w1.as_is_ns);
+        assert_eq!(write_forecast_cut(w4), "grouping");
+        let w50 = predict_write(50);
+        assert!(!w50.distinguishable);
+        assert_eq!(write_forecast_cut(w50), "fd_ceiling");
+    }
+
+    #[test]
+    fn level_count_uses_named_fanout() {
+        assert_eq!(SCALE_LEVEL_FANOUT, 10);
+        assert_eq!(level_count(SCALE_L1_BYTES, SCALE_L1_BYTES), 1);
+        assert_eq!(
+            level_count(SCALE_L1_BYTES.saturating_mul(10), SCALE_L1_BYTES),
+            2
+        );
     }
 }

@@ -168,6 +168,12 @@ a linha quando há phasesΔ. Sem harness novo.
       `pedra diagnose get --keys N --ram R` (sem `--measured-ns`).
       Teste `predict_get_bottleneck_1b_is_walk_without_runtime`.
       — status: `done`
+- [x] **P2.34** Preditor por **probes** não µs: `walk_distinguishable`
+      (\(N>2P\)); 1M = `indistinguishable`; 10M = `as_is_walk`.
+      `scale_forecast_with` bytes/entry; `predict_write` 1c fd-ceiling /
+      mc grouping. CLI `--bytes-per-key`; `diagnose write --clients N`
+      sem fases. Teste `predict_get_bottleneck_uses_probes_not_wall_clock`.
+      — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -215,6 +221,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.31 | p2 | diagnose JSON gap/timed ns | done | json_object gap_ns+timed_ns | 2026-09-08 |
 | P2.32 | p2 | CLI balance JSON shapes | done | shapes array = BALANCE_SHAPES | 2026-09-08 |
 | P2.33 | p2 | predict bottleneck without a get | done | `predict_get_bottleneck`; diagnose get omits measured-ns | 2026-09-07 |
+| P2.34 | p2 | probe-class + write clock + bpe | done | 1M indistinguishable; 10M walk; `predict_write` | 2026-09-07 |
 
 ## Acceptance Criteria
 
