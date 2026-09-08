@@ -1,9 +1,8 @@
 //! Pure TX apply / discard / revert decisions (RFC-0002 P9–P10 / F47 / F34 / F52).
 //!
-//! **Single artifact (pair `txn`):** this file is what `rustc` links *and*
-//! what Verus proves (`cfg(verus_keep_ghost)`). Other pairs on this file
-//! (`revert_clears_status`, `discard_cut`, …) still have a twin-cópia
-//! until their turns.
+//! **Single artifact:** this file is what `rustc` links *and* what Verus
+//! proves (`cfg(verus_keep_ghost)`). All catalog pairs on this file are
+//! `single_artifact` (last: `unreserve_si_gen`).
 //!
 //!   ./scripts/verus_txn_kernel.sh
 //!

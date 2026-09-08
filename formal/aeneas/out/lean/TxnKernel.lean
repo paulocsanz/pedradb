@@ -15,7 +15,7 @@ set_option maxRecDepth 2048
 namespace pedra_aeneas_txn_kernel
 
 /-- [pedra_aeneas_txn_kernel::TxnCommitAction]
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 315:0-320:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 314:0-319:1
     Visibility: public -/
 @[discriminant isize]
 inductive TxnCommitAction where
@@ -23,7 +23,7 @@ inductive TxnCommitAction where
 | Materialise : TxnCommitAction
 
 /-- [pedra_aeneas_txn_kernel::{impl core::fmt::Debug for pedra_aeneas_txn_kernel::TxnCommitAction}::fmt]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 314:9-314:14
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 313:9-313:14
     Visibility: public -/
 def TxnCommitAction.Insts.CoreFmtDebug.fmt
   (self : TxnCommitAction) (f : core.fmt.Formatter) :
@@ -35,21 +35,21 @@ def TxnCommitAction.Insts.CoreFmtDebug.fmt
     core.fmt.Formatter.write_str f (toStr "Materialise")
 
 /-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::fmt::Debug for pedra_aeneas_txn_kernel::TxnCommitAction}]
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 314:9-314:14 -/
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 313:9-313:14 -/
 @[reducible]
 def TxnCommitAction.Insts.CoreFmtDebug : core.fmt.Debug TxnCommitAction := {
   fmt := TxnCommitAction.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_txn_kernel::{impl core::clone::Clone for pedra_aeneas_txn_kernel::TxnCommitAction}::clone]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 314:16-314:21
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 313:16-313:21
     Visibility: public -/
 def TxnCommitAction.Insts.CoreCloneClone.clone
   (self : TxnCommitAction) : Result TxnCommitAction := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::clone::Clone for pedra_aeneas_txn_kernel::TxnCommitAction}]
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 314:16-314:21 -/
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 313:16-313:21 -/
 @[reducible]
 def TxnCommitAction.Insts.CoreCloneClone : core.clone.Clone TxnCommitAction
   := {
@@ -57,7 +57,7 @@ def TxnCommitAction.Insts.CoreCloneClone : core.clone.Clone TxnCommitAction
 }
 
 /-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::marker::Copy for pedra_aeneas_txn_kernel::TxnCommitAction}]
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 314:23-314:27 -/
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 313:23-313:27 -/
 @[reducible]
 def TxnCommitAction.Insts.CoreMarkerCopy : core.marker.Copy TxnCommitAction
   := {
@@ -65,14 +65,14 @@ def TxnCommitAction.Insts.CoreMarkerCopy : core.marker.Copy TxnCommitAction
 }
 
 /-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_txn_kernel::TxnCommitAction}]
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 314:29-314:38 -/
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 313:29-313:38 -/
 @[reducible]
 def TxnCommitAction.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq TxnCommitAction := {
 }
 
 /-- [pedra_aeneas_txn_kernel::{impl core::cmp::PartialEq<pedra_aeneas_txn_kernel::TxnCommitAction> for pedra_aeneas_txn_kernel::TxnCommitAction}::eq]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 314:29-314:38
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 313:29-313:38
     Visibility: public -/
 def TxnCommitAction.Insts.CoreCmpPartialEqTxnCommitAction.eq
   (self : TxnCommitAction) (other : TxnCommitAction) : Result Bool := do
@@ -81,7 +81,7 @@ def TxnCommitAction.Insts.CoreCmpPartialEqTxnCommitAction.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::cmp::PartialEq<pedra_aeneas_txn_kernel::TxnCommitAction> for pedra_aeneas_txn_kernel::TxnCommitAction}]
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 314:29-314:38 -/
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 313:29-313:38 -/
 @[reducible]
 def TxnCommitAction.Insts.CoreCmpPartialEqTxnCommitAction : core.cmp.PartialEq
   TxnCommitAction TxnCommitAction := {
@@ -89,14 +89,14 @@ def TxnCommitAction.Insts.CoreCmpPartialEqTxnCommitAction : core.cmp.PartialEq
 }
 
 /-- [pedra_aeneas_txn_kernel::{impl core::cmp::Eq for pedra_aeneas_txn_kernel::TxnCommitAction}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 314:40-314:42
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 313:40-313:42
     Visibility: public -/
 def TxnCommitAction.Insts.CoreCmpEq.assert_fields_are_eq
   (self : TxnCommitAction) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::cmp::Eq for pedra_aeneas_txn_kernel::TxnCommitAction}]
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 314:40-314:42 -/
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 313:40-313:42 -/
 @[reducible]
 def TxnCommitAction.Insts.CoreCmpEq : core.cmp.Eq TxnCommitAction := {
   partialEqInst := TxnCommitAction.Insts.CoreCmpPartialEqTxnCommitAction
@@ -104,7 +104,7 @@ def TxnCommitAction.Insts.CoreCmpEq : core.cmp.Eq TxnCommitAction := {
 }
 
 /-- [pedra_aeneas_txn_kernel::txn_commit_action]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 325:0-331:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 324:0-330:1
     Visibility: public -/
 def txn_commit_action (status_is_abort : Bool) : Result TxnCommitAction := do
   if status_is_abort
@@ -112,14 +112,14 @@ def txn_commit_action (status_is_abort : Bool) : Result TxnCommitAction := do
   else ok TxnCommitAction.Materialise
 
 /-- [pedra_aeneas_txn_kernel::txn_commit_action_as_is]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 336:0-338:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 335:0-337:1
     Visibility: public -/
 def txn_commit_action_as_is
   (_status_is_abort : Bool) : Result TxnCommitAction := do
   ok TxnCommitAction.Materialise
 
 /-- [pedra_aeneas_txn_kernel::revert_clears_status]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 361:0-363:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 360:0-362:1
     Visibility: public -/
 def revert_clears_status
   (status_is_abort : Bool) (pairs_empty : Bool) : Result Bool := do
@@ -128,14 +128,14 @@ def revert_clears_status
   else ok false
 
 /-- [pedra_aeneas_txn_kernel::revert_clears_status_as_is]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 368:0-370:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 367:0-369:1
     Visibility: public -/
 def revert_clears_status_as_is
   (_status_is_abort : Bool) (pairs_empty : Bool) : Result Bool := do
   ok pairs_empty
 
 /-- [pedra_aeneas_txn_kernel::discard_cut]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 375:0-377:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 374:0-376:1
     Visibility: public -/
 def discard_cut
   (from_index : Std.U64) (commit : Std.U64) : Result Std.U64 := do
@@ -143,14 +143,14 @@ def discard_cut
   core.cmp.Ord.max.default core.cmp.OrdU64.partialOrdInst.lt from_index i
 
 /-- [pedra_aeneas_txn_kernel::discard_cut_as_is]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 382:0-384:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 381:0-383:1
     Visibility: public -/
 def discard_cut_as_is
   (from_index : Std.U64) (_commit : Std.U64) : Result Std.U64 := do
   ok from_index
 
 /-- [pedra_aeneas_txn_kernel::RevertUserAction]
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 389:0-396:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 388:0-395:1
     Visibility: public -/
 @[discriminant isize]
 inductive RevertUserAction where
@@ -159,7 +159,7 @@ inductive RevertUserAction where
 | LeaveUntouched : RevertUserAction
 
 /-- [pedra_aeneas_txn_kernel::{impl core::fmt::Debug for pedra_aeneas_txn_kernel::RevertUserAction}::fmt]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 388:9-388:14
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 387:9-387:14
     Visibility: public -/
 def RevertUserAction.Insts.CoreFmtDebug.fmt
   (self : RevertUserAction) (f : core.fmt.Formatter) :
@@ -174,21 +174,21 @@ def RevertUserAction.Insts.CoreFmtDebug.fmt
     core.fmt.Formatter.write_str f (toStr "LeaveUntouched")
 
 /-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::fmt::Debug for pedra_aeneas_txn_kernel::RevertUserAction}]
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 388:9-388:14 -/
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 387:9-387:14 -/
 @[reducible]
 def RevertUserAction.Insts.CoreFmtDebug : core.fmt.Debug RevertUserAction := {
   fmt := RevertUserAction.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_txn_kernel::{impl core::clone::Clone for pedra_aeneas_txn_kernel::RevertUserAction}::clone]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 388:16-388:21
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 387:16-387:21
     Visibility: public -/
 def RevertUserAction.Insts.CoreCloneClone.clone
   (self : RevertUserAction) : Result RevertUserAction := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::clone::Clone for pedra_aeneas_txn_kernel::RevertUserAction}]
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 388:16-388:21 -/
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 387:16-387:21 -/
 @[reducible]
 def RevertUserAction.Insts.CoreCloneClone : core.clone.Clone RevertUserAction
   := {
@@ -196,7 +196,7 @@ def RevertUserAction.Insts.CoreCloneClone : core.clone.Clone RevertUserAction
 }
 
 /-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::marker::Copy for pedra_aeneas_txn_kernel::RevertUserAction}]
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 388:23-388:27 -/
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 387:23-387:27 -/
 @[reducible]
 def RevertUserAction.Insts.CoreMarkerCopy : core.marker.Copy RevertUserAction
   := {
@@ -204,14 +204,14 @@ def RevertUserAction.Insts.CoreMarkerCopy : core.marker.Copy RevertUserAction
 }
 
 /-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_txn_kernel::RevertUserAction}]
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 388:29-388:38 -/
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 387:29-387:38 -/
 @[reducible]
 def RevertUserAction.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq RevertUserAction := {
 }
 
 /-- [pedra_aeneas_txn_kernel::{impl core::cmp::PartialEq<pedra_aeneas_txn_kernel::RevertUserAction> for pedra_aeneas_txn_kernel::RevertUserAction}::eq]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 388:29-388:38
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 387:29-387:38
     Visibility: public -/
 def RevertUserAction.Insts.CoreCmpPartialEqRevertUserAction.eq
   (self : RevertUserAction) (other : RevertUserAction) : Result Bool := do
@@ -220,7 +220,7 @@ def RevertUserAction.Insts.CoreCmpPartialEqRevertUserAction.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::cmp::PartialEq<pedra_aeneas_txn_kernel::RevertUserAction> for pedra_aeneas_txn_kernel::RevertUserAction}]
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 388:29-388:38 -/
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 387:29-387:38 -/
 @[reducible]
 def RevertUserAction.Insts.CoreCmpPartialEqRevertUserAction :
   core.cmp.PartialEq RevertUserAction RevertUserAction := {
@@ -228,14 +228,14 @@ def RevertUserAction.Insts.CoreCmpPartialEqRevertUserAction :
 }
 
 /-- [pedra_aeneas_txn_kernel::{impl core::cmp::Eq for pedra_aeneas_txn_kernel::RevertUserAction}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 388:40-388:42
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 387:40-387:42
     Visibility: public -/
 def RevertUserAction.Insts.CoreCmpEq.assert_fields_are_eq
   (self : RevertUserAction) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::cmp::Eq for pedra_aeneas_txn_kernel::RevertUserAction}]
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 388:40-388:42 -/
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 387:40-387:42 -/
 @[reducible]
 def RevertUserAction.Insts.CoreCmpEq : core.cmp.Eq RevertUserAction := {
   partialEqInst := RevertUserAction.Insts.CoreCmpPartialEqRevertUserAction
@@ -243,7 +243,7 @@ def RevertUserAction.Insts.CoreCmpEq : core.cmp.Eq RevertUserAction := {
 }
 
 /-- [pedra_aeneas_txn_kernel::revert_user_action]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 401:0-409:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 400:0-408:1
     Visibility: public -/
 def revert_user_action
   (had_pre_record : Bool) (pre_was_absent : Bool) :
@@ -257,7 +257,7 @@ def revert_user_action
   else ok RevertUserAction.LeaveUntouched
 
 /-- [pedra_aeneas_txn_kernel::revert_user_action_as_is]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 414:0-416:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 413:0-415:1
     Visibility: public -/
 def revert_user_action_as_is
   (_had_pre_record : Bool) (_pre_was_absent : Bool) :
@@ -266,7 +266,7 @@ def revert_user_action_as_is
   ok RevertUserAction.RestoreAbsent
 
 /-- [pedra_aeneas_txn_kernel::should_repair_si_hist]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 421:0-423:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 420:0-422:1
     Visibility: public -/
 def should_repair_si_hist
   (restored : Bool) (is_reserved : Bool) : Result Bool := do
@@ -275,70 +275,70 @@ def should_repair_si_hist
   else ok false
 
 /-- [pedra_aeneas_txn_kernel::should_repair_si_hist_as_is]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 428:0-430:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 427:0-429:1
     Visibility: public -/
 def should_repair_si_hist_as_is
   (_restored : Bool) (_is_reserved : Bool) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_txn_kernel::leftover_txn_is_aborted]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 435:0-437:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 434:0-436:1
     Visibility: public -/
 def leftover_txn_is_aborted : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_txn_kernel::leftover_txn_is_aborted_as_is]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 442:0-444:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 441:0-443:1
     Visibility: public -/
 def leftover_txn_is_aborted_as_is : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_txn_kernel::next_txn_id_after]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 449:0-451:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 448:0-450:1
     Visibility: public -/
 def next_txn_id_after (max_seen : Std.U64) : Result Std.U64 := do
   let i ← lift (core.num.U64.saturating_add max_seen 1#u64)
   core.cmp.Ord.max.default core.cmp.OrdU64.partialOrdInst.lt i 1#u64
 
 /-- [pedra_aeneas_txn_kernel::next_txn_id_as_is]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 456:0-458:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 455:0-457:1
     Visibility: public -/
 def next_txn_id_as_is (_max_seen : Std.U64) : Result Std.U64 := do
   ok 1#u64
 
 /-- [pedra_aeneas_txn_kernel::recover_si_generation]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 463:0-465:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 462:0-464:1
     Visibility: public -/
 def recover_si_generation (loaded_max : Std.U64) : Result Std.U64 := do
   ok loaded_max
 
 /-- [pedra_aeneas_txn_kernel::recover_si_generation_as_is]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 470:0-472:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 469:0-471:1
     Visibility: public -/
 def recover_si_generation_as_is (_loaded_max : Std.U64) : Result Std.U64 := do
   ok 0#u64
 
 /-- [pedra_aeneas_txn_kernel::prepare_error_aborts_earlier]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 477:0-479:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 476:0-478:1
     Visibility: public -/
 def prepare_error_aborts_earlier : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_txn_kernel::prepare_error_aborts_earlier_as_is]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 484:0-486:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 483:0-485:1
     Visibility: public -/
 def prepare_error_aborts_earlier_as_is : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_txn_kernel::SiGenReserve]
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 491:0-496:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 490:0-495:1
     Visibility: public -/
 structure SiGenReserve where
   next_current : Std.U64
   reserved : Std.U64
 
 /-- [pedra_aeneas_txn_kernel::{impl core::fmt::Debug for pedra_aeneas_txn_kernel::SiGenReserve}::fmt]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 490:9-490:14
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 489:9-489:14
     Visibility: public -/
 def SiGenReserve.Insts.CoreFmtDebug.fmt
   (self : SiGenReserve) (f : core.fmt.Formatter) :
@@ -350,42 +350,42 @@ def SiGenReserve.Insts.CoreFmtDebug.fmt
     "next_current") dyn (toStr "reserved") dyn1
 
 /-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::fmt::Debug for pedra_aeneas_txn_kernel::SiGenReserve}]
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 490:9-490:14 -/
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 489:9-489:14 -/
 @[reducible]
 def SiGenReserve.Insts.CoreFmtDebug : core.fmt.Debug SiGenReserve := {
   fmt := SiGenReserve.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_txn_kernel::{impl core::clone::Clone for pedra_aeneas_txn_kernel::SiGenReserve}::clone]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 490:16-490:21
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 489:16-489:21
     Visibility: public -/
 def SiGenReserve.Insts.CoreCloneClone.clone
   (self : SiGenReserve) : Result SiGenReserve := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::clone::Clone for pedra_aeneas_txn_kernel::SiGenReserve}]
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 490:16-490:21 -/
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 489:16-489:21 -/
 @[reducible]
 def SiGenReserve.Insts.CoreCloneClone : core.clone.Clone SiGenReserve := {
   clone := SiGenReserve.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::marker::Copy for pedra_aeneas_txn_kernel::SiGenReserve}]
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 490:23-490:27 -/
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 489:23-489:27 -/
 @[reducible]
 def SiGenReserve.Insts.CoreMarkerCopy : core.marker.Copy SiGenReserve := {
   cloneInst := SiGenReserve.Insts.CoreCloneClone
 }
 
 /-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_txn_kernel::SiGenReserve}]
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 490:29-490:38 -/
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 489:29-489:38 -/
 @[reducible]
 def SiGenReserve.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq SiGenReserve := {
 }
 
 /-- [pedra_aeneas_txn_kernel::{impl core::cmp::PartialEq<pedra_aeneas_txn_kernel::SiGenReserve> for pedra_aeneas_txn_kernel::SiGenReserve}::eq]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 490:29-490:38
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 489:29-489:38
     Visibility: public -/
 def SiGenReserve.Insts.CoreCmpPartialEqSiGenReserve.eq
   (self : SiGenReserve) (other : SiGenReserve) : Result Bool := do
@@ -394,7 +394,7 @@ def SiGenReserve.Insts.CoreCmpPartialEqSiGenReserve.eq
   else ok false
 
 /-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::cmp::PartialEq<pedra_aeneas_txn_kernel::SiGenReserve> for pedra_aeneas_txn_kernel::SiGenReserve}]
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 490:29-490:38 -/
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 489:29-489:38 -/
 @[reducible]
 def SiGenReserve.Insts.CoreCmpPartialEqSiGenReserve : core.cmp.PartialEq
   SiGenReserve SiGenReserve := {
@@ -402,14 +402,14 @@ def SiGenReserve.Insts.CoreCmpPartialEqSiGenReserve : core.cmp.PartialEq
 }
 
 /-- [pedra_aeneas_txn_kernel::{impl core::cmp::Eq for pedra_aeneas_txn_kernel::SiGenReserve}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 490:40-490:42
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 489:40-489:42
     Visibility: public -/
 def SiGenReserve.Insts.CoreCmpEq.assert_fields_are_eq
   (self : SiGenReserve) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::cmp::Eq for pedra_aeneas_txn_kernel::SiGenReserve}]
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 490:40-490:42 -/
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 489:40-489:42 -/
 @[reducible]
 def SiGenReserve.Insts.CoreCmpEq : core.cmp.Eq SiGenReserve := {
   partialEqInst := SiGenReserve.Insts.CoreCmpPartialEqSiGenReserve
@@ -417,21 +417,21 @@ def SiGenReserve.Insts.CoreCmpEq : core.cmp.Eq SiGenReserve := {
 }
 
 /-- [pedra_aeneas_txn_kernel::reserve_si_gen]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 501:0-507:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 500:0-506:1
     Visibility: public -/
 def reserve_si_gen (current : Std.U64) : Result SiGenReserve := do
   let n ← lift (core.num.U64.saturating_add current 1#u64)
   ok { next_current := n, reserved := n }
 
 /-- [pedra_aeneas_txn_kernel::reserve_si_gen_as_is]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 512:0-517:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 511:0-516:1
     Visibility: public -/
 def reserve_si_gen_as_is (current : Std.U64) : Result SiGenReserve := do
   let i ← lift (core.num.U64.saturating_add current 1#u64)
   ok { next_current := current, reserved := i }
 
 /-- [pedra_aeneas_txn_kernel::unreserve_si_gen]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 522:0-528:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 521:0-527:1
     Visibility: public -/
 def unreserve_si_gen
   (current : Std.U64) (stamped : Std.U64) : Result Std.U64 := do
