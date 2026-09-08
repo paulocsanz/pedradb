@@ -9754,6 +9754,18 @@ impl<E: Env> Db<E> {
                 };
             }
         }
+        // Packed SST path already rejects via `sst_envelope` (RFC-0167).
+        // Mem-live lookup walked every run's bloom on the same miss.
+        {
+            let g = self.sst_envelope.read();
+            if !g.is_empty()
+                && g.iter()
+                    .all(|(lo, hi)| key < lo.as_ref() || key > hi.as_ref())
+                && !self.sst_runs.iter().any(|r| r.any_range_tombstones)
+            {
+                return Lookup::NotFound;
+            }
+        }
         self.get_sst_fallback.fetch_add(1, Ordering::Relaxed);
         crate::cost::point_op();
         // Newest file with a point wins (L0 before L1). Older files cannot
@@ -19090,6 +19102,28 @@ mod tests {
             let k = format!("absent-{i:04}");
             assert_eq!(db.get(k.as_bytes()), None);
         }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0178 P0.14: mem-live lookup uses the same SST envelope reject
+    /// as the packed path (probe_miss past hi does not bloom-walk).
+    #[test]
+    fn rfc0178_mem_live_envelope_skips_sst_probe_miss() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.put(b"a/key", b"v").unwrap();
+        db.flush().unwrap();
+        db.put(b"a/mem", b"w").unwrap();
+        db.reset_read_probe();
+        assert_eq!(db.get(b"z/miss"), None);
+        let p = db.read_probe();
+        assert_eq!(
+            p.get_sst_fallback, 0,
+            "outside sst_envelope must not probe SST"
+        );
+        assert_eq!(db.get(b"a/key").as_deref(), Some(b"v".as_ref()));
+        assert_eq!(db.get(b"a/mem").as_deref(), Some(b"w".as_ref()));
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
