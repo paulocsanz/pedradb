@@ -2950,8 +2950,9 @@
       "id": "dictionary_link",
       "finding": "G1/G8 (crash dictionary put→get)",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/wal/reopen_kernel.rs",
-      "twin": "crates/pedradb-core/verus/dictionary_link.rs",
+      "twin": "crates/pedradb-core/src/wal/reopen_kernel.rs",
       "verus": "scripts/verus_dictionary_link.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs"

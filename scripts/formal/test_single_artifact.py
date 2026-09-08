@@ -494,6 +494,22 @@ def main() -> int:
         print("FAIL unreserve_si_gen twin≠kernel did not fail")
         return 1
     print("ok mutant unreserve_si_gen twin≠kernel named")
+    dl_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in dl_mutant["pairs"]:
+        if pair.get("id") == "dictionary_link":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-core/verus/dictionary_link.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing dictionary_link")
+        return 1
+    hits = [m for m in _sa_fails(dl_mutant) if m.startswith("dictionary_link:")]
+    if not hits:
+        print("FAIL dictionary_link twin≠kernel did not fail")
+        return 1
+    print("ok mutant dictionary_link twin≠kernel named")
     # Drive the same rule through check_twins (may also report unrelated
     # dirty-tree twin drift; we only require the SA id).
     try:

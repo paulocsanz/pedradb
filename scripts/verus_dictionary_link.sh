@@ -3,7 +3,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-core/verus/dictionary_link.rs"
+# RFC-0171 P0.3 / RFC-0174: prove the file rustc links (pair dictionary_link).
+SRC="$ROOT/crates/pedradb-core/src/wal/reopen_kernel.rs"
 
 if [[ -x "${VERUS:-}" ]]; then
   :
