@@ -9499,13 +9499,25 @@ impl<E: Env> Db<E> {
         // One WAL lock: `sync_data` already `write()`s the pending frame
         // then `fdatasync`s. Split write-then-sync was two mutex hops on
         // the 1c G1 raftlog batch (RFC-0062 P1.1 p11h).
-        if g.needs_sync() {
-            if let Err(e) = self.wal_sync_group() {
-                return g.fail_sync(e);
+        // RFC-0071: same plan as wal_sync_group (Sync before Apply/Ok).
+        let need_sync = g.needs_sync();
+        match crate::write_admission_kernel::wal_commit_plan(need_sync, false) {
+            crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => {
+                if let Err(e) = self.wal.lock().write_pending_frame() {
+                    self.durability_fenced = true;
+                    return g.fail_sync(e);
+                }
             }
-        } else if let Err(e) = self.wal.lock().write_pending_frame() {
-            self.durability_fenced = true;
-            return g.fail_sync(e);
+            crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+            | crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                assert!(
+                    !crate::write_admission_kernel::fence_on_sync_fail(need_sync, false),
+                    "planned Sync before I/O ⇒ not Fence yet"
+                );
+                if let Err(e) = self.wal_sync_group() {
+                    return g.fail_sync(e);
+                }
+            }
         }
         let pub_seq = g.max_appended_seq();
         let results = self.group_apply(g);

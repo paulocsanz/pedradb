@@ -813,6 +813,16 @@ mod tests {
             off.contains("wal_commit_plan("),
             "finish_group_off_lock must match wal_commit_plan"
         );
+        let finish = named_fn_src(include_str!("db.rs"), "group_finish")
+            .expect("group_finish");
+        assert!(
+            finish.contains("wal_commit_plan("),
+            "group_finish must match the plan fn"
+        );
+        assert!(
+            finish.contains("fence_on_sync_fail("),
+            "group_finish must match fence_on_sync_fail"
+        );
     }
 
     #[test]
