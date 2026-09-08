@@ -416,7 +416,7 @@ pub(crate) fn cf_prefix(key: &[u8]) -> &[u8] {
 pub use crate::cf_kernel::{cf_family_of, infer_sst_cf, key_in_cf_family};
 
 fn family_from_prefix(prefix: &[u8]) -> String {
-    if prefix.is_empty() {
+    if crate::write_admission_kernel::batch_is_empty(prefix.len() as u64) {
         "default".into()
     } else {
         String::from_utf8_lossy(prefix).into_owned()
