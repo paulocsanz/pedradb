@@ -889,7 +889,7 @@ impl KeyCodec {
     /// refcount RMWs per row.
     fn decode_bytes_owned(&self, cf: &str, mut encoded: Bytes) -> Bytes {
         let effective = cf_encode_effective(cf, self.default_raw);
-        if effective.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(effective.len() as u64) {
             return encoded;
         }
         if encoded.len() > effective.len() {
