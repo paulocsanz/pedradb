@@ -783,7 +783,7 @@ impl<V: Clone> AnswerCache<V> {
     /// Store a latest-snapshot answer.
     pub fn insert(&self, key: &[u8], value: V) {
         let mut g = self.inner.lock();
-        if g.capacity == 0 {
+        if crate::write_admission_kernel::batch_is_empty(g.capacity as u64) {
             return;
         }
         let now = g.gen;
