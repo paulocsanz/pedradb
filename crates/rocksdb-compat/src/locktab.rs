@@ -278,4 +278,24 @@ mod tests {
         waiting.remove(&2);
         assert!(!wait_for_deadlock(&owned, &waiting, 1, 2));
     }
+
+    #[test]
+    fn three_cycle_is_deadlock() {
+        let mut owned = HashMap::new();
+        let mut waiting = HashMap::new();
+        owned.insert(Bytes::from_static(b"a"), 1);
+        owned.insert(Bytes::from_static(b"b"), 2);
+        owned.insert(Bytes::from_static(b"c"), 3);
+        waiting.insert(1, Bytes::from_static(b"b"));
+        waiting.insert(2, Bytes::from_static(b"c"));
+        waiting.insert(3, Bytes::from_static(b"a"));
+        assert!(
+            wait_for_deadlock(&owned, &waiting, 1, 2),
+            "N-way wait-for: 1→2→3→1 is a deadlock"
+        );
+        assert!(
+            !wait_for_deadlock_as_is(&owned, &waiting, 1, 2),
+            "AS-IS dente: miss the 3-cycle"
+        );
+    }
 }
