@@ -1967,4 +1967,15 @@ mod tests {
         assert!(discard_node_counts(true, true));
         assert!(!discard_node_counts(false, true));
     }
+
+    #[test]
+    fn joint_election_ok_on_live_old_only_is_not_ok() {
+        assert!(!joint_election_ok(2, 3, Some((2, 4))));
+        assert!(
+            joint_election_ok_as_is(2, 3, Some((2, 4))),
+            "AS-IS dente: elect on C-old during joint add"
+        );
+        assert!(joint_election_ok(2, 3, None));
+        assert!(joint_election_ok(2, 3, Some((3, 4))));
+    }
 }
