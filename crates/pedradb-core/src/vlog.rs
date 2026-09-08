@@ -247,7 +247,7 @@ impl<F: EnvFile> ValueLog<F> {
     /// # Errors
     /// I/O.
     pub fn open_blob<E: Env<File = F>>(env: &E, dir: &Path, num: u32) -> Result<Self> {
-        if num == 0 {
+        if crate::write_admission_kernel::batch_is_empty(num as u64) {
             return Self::open_on(env, dir);
         }
         let path = blob_path(dir, num);
