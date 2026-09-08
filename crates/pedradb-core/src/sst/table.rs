@@ -429,7 +429,7 @@ impl SstTable {
         snapshot: SequenceNumber,
         out: &mut Vec<crate::merge::RangeTombstone>,
     ) {
-        if self.range_tombstones.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.range_tombstones.len() as u64) {
             return;
         }
         for (ikey, end) in &self.range_tombstones {
