@@ -1394,7 +1394,7 @@ fn clear_range_txn_meta<E: Env>(db: &mut Db<E>, start: &[u8], end: &[u8]) -> Res
         }
         ops.push(BatchOp::delete(pk));
     }
-    if !ops.is_empty() {
+    if !pedradb_core::write_admission_kernel::batch_is_empty(ops.len() as u64) {
         db.apply_batch(ops)?;
     }
     for tid in touched_txns {
