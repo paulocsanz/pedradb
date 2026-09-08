@@ -854,7 +854,7 @@ impl KeyCodec {
     pub(crate) fn encode_with<R>(&self, cf: &str, key: &[u8], f: impl FnOnce(&[u8]) -> R) -> R {
         const STACK: usize = 192;
         let effective = cf_encode_effective(cf, self.default_raw);
-        if effective.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(effective.len() as u64) {
             return f(key);
         }
         let n = effective.len() + 1 + key.len();
