@@ -385,7 +385,7 @@ impl<'a> EncodedOpsSource<'a> {
                 0 => return &self.preamble[self.off..],
                 1 => {
                     let key = &self.ops[self.idx].key;
-                    if key.is_empty() {
+                    if crate::write_admission_kernel::batch_is_empty(key.len() as u64) {
                         self.finish_key_field();
                         continue;
                     }
