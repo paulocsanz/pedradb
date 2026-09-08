@@ -56,7 +56,7 @@ impl PctScheduler {
 
 impl Scheduler for PctScheduler {
     fn next(&mut self, enabled: &[usize]) -> Option<usize> {
-        if enabled.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(enabled.len() as u64) {
             return None;
         }
         let t = *enabled
