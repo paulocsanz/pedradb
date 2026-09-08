@@ -1222,7 +1222,7 @@ impl WriteGroup {
             crate::group_commit_kernel::rwlock_client_may_mutate(true),
             "apply/publish holds the write guard (data-race token)"
         );
-        if need_sync {
+        if crate::write_admission_kernel::wal_sync_required(true, need_sync, false) {
             g.note_wal_sync();
         }
         // RFC-0166 P1.4: publish passed — advance the pinned ledger through
