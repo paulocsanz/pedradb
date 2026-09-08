@@ -184,7 +184,7 @@ impl SqlEngine {
         self.require_table(table)?;
         let after = after.trim();
         let prefix = Self::row_prefix(table);
-        if after.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(after.len() as u64) {
             let rows = self.scan_table(&prefix);
             return Ok(QueryResult::Rows(rows));
         }
