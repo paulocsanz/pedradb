@@ -2382,6 +2382,7 @@ impl YcsbRunner {
         let mut rng = std::mem::take(&mut self.rng);
         let mut blocks = Vec::with_capacity(4);
 
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut ops_ok, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -2408,7 +2409,16 @@ impl YcsbRunner {
         }
         blocks.push(summarize("mixgraph_like", cfg_ops, t0.elapsed(), &mut lats));
         eprintln!("[rocks-parity] mixgraph_like done ops={ops_ok} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            // 1 put + 2 get + 1 scan → 75% read.
+            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 75, cfg_ops as u64);
+            eprint_write_diagnose("mixgraph_like", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
 
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut gets, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -2429,7 +2439,15 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] wbwi_read_your_writes done gets={gets} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
+            eprint_write_diagnose("wbwi_read_your_writes", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
 
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut drops, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -2455,7 +2473,15 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] compaction_filter_drop done drops={drops} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
+            eprint_write_diagnose("compaction_filter_drop", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
 
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut ingest, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -2472,6 +2498,13 @@ impl YcsbRunner {
         }
         blocks.push(summarize("ingest_sst", cfg_ops, t0.elapsed(), &mut lats));
         eprintln!("[rocks-parity] ingest_sst done ingest={ingest} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
+            eprint_write_diagnose("ingest_sst", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
 
         self.rng = rng;
         blocks
@@ -4245,17 +4278,31 @@ mod tests {
 
     #[test]
     fn rocksapi_suite_on_compat_engine() {
+        // RFC-0184 P2.19: rocksapi WRITEPHASE → diagnose.lever (env at open).
+        std::env::set_var("PEDRA_WRITE_PHASE_STATS", "1");
         let dir = tempfile::tempdir().unwrap();
         let e = crate::engines::CompatEngine::open(dir.path());
         let mut r = YcsbRunner::new(tiny_cfg());
+        let api = r.run_rocksapi(&e);
         assert_eq!(
-            block_names(&r.run_rocksapi(&e)),
+            block_names(&api),
             vec![
                 Some("mixgraph_like"),
                 Some("wbwi_read_your_writes"),
                 Some("compaction_filter_drop"),
                 Some("ingest_sst"),
             ]
+        );
+        for b in &api {
+            assert!(
+                b.contains("\"diagnose\": {\"lever\":"),
+                "RFC-0184 P2.19 rocksapi JSON needs diagnose.lever:\n{b}"
+            );
+        }
+        assert!(
+            api[1].contains("\"lever\":\"get_path\""),
+            "wbwi_read_your_writes is overlay get:\n{}",
+            api[1]
         );
         let k = b"wbwi-probe";
         let v = b"overlay";
