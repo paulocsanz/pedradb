@@ -42,8 +42,19 @@ pub const SCALE_TAU_DISK_NS: u64 = 13_500;
 pub const SCALE_TAU_FD_NS: u64 = 2_500;
 /// WAL encode aside from the barrier (order-of-magnitude; not a retune of τ_ram).
 pub const SCALE_TAU_WAL_ENCODE_NS: u64 = 200;
+/// Async pwrite without `fdatasync` (same-class peer). Not a retune of τ_fd.
+pub const SCALE_TAU_WAL_WRITE_NS: u64 = 2_000;
+/// Serial write-lock CS leftover after Adaptive grouping (order-of-magnitude).
+/// Measured `lock_wait` at mc4 is the real number; this names the cut.
+pub const SCALE_TAU_LOCK_HOLD_NS: u64 = 500;
 /// Adaptive merge window (RFC-0178 P0.12): n=2–8 merge, else 1.
 pub const SCALE_GROUP_ADAPTIVE_MAX: u64 = 8;
+/// Grouping is paid when `avg_group ≥ expected − 0.15` (1_500 bps of 10_000).
+pub const SCALE_GROUPING_PAID_SLACK_BPS: u64 = 1_500;
+/// Mixed shape: p50 is the get, not the put (`read_pct ≥ 40`).
+pub const SCALE_GET_PATH_READ_PCT: u64 = 40;
+/// Adaptive-off convoy (RFC-0178): n≥16, not a merge bug.
+pub const SCALE_LOCK_CONVOY_CLIENTS: u64 = 16;
 
 /// After settle: one covering SST per disjoint L1+ level plus `l0_covering`.
 #[must_use]
@@ -269,7 +280,7 @@ pub fn prefix_covering_files(prefix_keys: u64, bytes_per_entry: u64) -> u64 {
     file_count(prefix_keys.saturating_mul(bytes_per_entry.max(1))).max(1)
 }
 
-/// Adaptive expected group size: n=2–8 → n, else 1 (bypass / 1c fd ceiling).
+/// Adaptive expected group size: n=2–8 → n, else 1 (bypass / 1c).
 #[must_use]
 pub fn expected_avg_group(clients: u64) -> u64 {
     if (2..=SCALE_GROUP_ADAPTIVE_MAX).contains(&clients) {
@@ -279,43 +290,167 @@ pub fn expected_avg_group(clients: u64) -> u64 {
     }
 }
 
-/// Static write clock: 1c = one barrier/op (ceiling); mc 2–8 = barrier/n if merge lives.
+/// `avg_group` has paid Adaptive merge (`expected − 0.15`). `0` bps = unknown.
+#[must_use]
+pub fn grouping_paid(clients: u64, avg_group_bps: u64) -> bool {
+    if avg_group_bps == 0 {
+        return false;
+    }
+    let expected = expected_avg_group(clients).max(1);
+    let floor = expected
+        .saturating_mul(SCALE_BPS)
+        .saturating_sub(SCALE_GROUPING_PAID_SLACK_BPS);
+    avg_group_bps >= floor
+}
+
+/// Static write cut. Deeper than `grouping` vs `fd_ceiling` (RFC-0184 P2.37).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteStaticCut {
+    /// n=2–8 and Adaptive merge is unpaid (avg unknown or &lt; expected−0.15).
+    Grouping,
+    /// n=2–8 grouping paid, or lock_wait at n&lt;16: leader CS, not acquire spin.
+    LockHold,
+    /// n≥16 Adaptive-off (named ceiling; do not "win" by turning merge on).
+    LockConvoy,
+    /// 1c `--sync 1` (G1): one `fdatasync` per op.
+    FdCeiling,
+    /// 1c same-class async: WAL pwrite, not the fd column.
+    AsyncWal,
+    /// `read_pct ≥ 40`: p50 is the get.
+    GetPath,
+}
+
+impl WriteStaticCut {
+    /// Stable token for CLI / JSON / mapa.
+    #[must_use]
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::Grouping => "grouping",
+            Self::LockHold => "lock_hold",
+            Self::LockConvoy => "lock_convoy",
+            Self::FdCeiling => "fd_ceiling",
+            Self::AsyncWal => "async_wal",
+            Self::GetPath => "get_path",
+        }
+    }
+}
+
+/// Inputs for [`predict_write_mix`]. Defaults: async, pure write, avg unknown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WritePredictIn {
+    /// Client count.
+    pub clients: u64,
+    /// YCSB-style read percent (`0` = pure write).
+    pub read_pct: u64,
+    /// G1 (`true`) vs same-class async (`false`, product peer).
+    pub sync: bool,
+    /// `avg_group * SCALE_BPS`; `0` = unknown (static default).
+    pub avg_group_bps: u64,
+}
+
+impl WritePredictIn {
+    /// Pure-write async (product peer).
+    #[must_use]
+    pub const fn clients(clients: u64) -> Self {
+        Self {
+            clients,
+            read_pct: 0,
+            sync: false,
+            avg_group_bps: 0,
+        }
+    }
+}
+
+/// Static write clock. `cut` is the unpaid lever; `next` is what remains after it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WriteForecast {
     /// Client count.
     pub clients: u64,
     /// Expected `avg_group` under Adaptive merge.
     pub expected_group: u64,
-    /// Encode + `fd / expected_group`.
+    /// Encode + `barrier / expected_group`.
     pub best_ns: u64,
-    /// Encode + one `fd` per op (grouping dead).
+    /// Encode + one barrier per op (grouping dead).
     pub as_is_ns: u64,
-    /// `clients` in 2–8 (otherwise fd ceiling, not a merge bug).
+    /// `clients` in 2–8 (merge window exists; cut may already be `lock_hold`).
     pub distinguishable: bool,
+    /// Unpaid lever without a bench.
+    pub cut: WriteStaticCut,
+    /// After `cut` is paid.
+    pub next: WriteStaticCut,
+    /// Serial lock CS leftover (not τ_fd).
+    pub lock_hold_ns: u64,
+    /// Mix that produced `cut`.
+    pub read_pct: u64,
+    /// G1 vs async.
+    pub sync: bool,
 }
 
-/// Cut token for [`WriteForecast`]: `grouping` or `fd_ceiling`.
+/// Cut token for [`WriteForecast`].
 #[must_use]
 pub fn write_forecast_cut(w: WriteForecast) -> &'static str {
-    if w.distinguishable {
-        "grouping"
+    w.cut.token()
+}
+
+/// Next-cut token after [`write_forecast_cut`].
+#[must_use]
+pub fn write_forecast_next(w: WriteForecast) -> &'static str {
+    w.next.token()
+}
+
+/// Predict write ns without a bench. Product peer = async (`sync=false`).
+#[must_use]
+pub fn predict_write(clients: u64) -> WriteForecast {
+    predict_write_mix(WritePredictIn::clients(clients))
+}
+
+/// Predict write ns with mix / durability / measured `avg_group`.
+#[must_use]
+pub fn predict_write_mix(inp: WritePredictIn) -> WriteForecast {
+    let g = expected_avg_group(inp.clients).max(1);
+    let barrier = if inp.sync {
+        SCALE_TAU_FD_NS
     } else {
-        "fd_ceiling"
+        SCALE_TAU_WAL_WRITE_NS
+    };
+    let encode = SCALE_TAU_WAL_ENCODE_NS;
+    let (cut, next) = static_write_cut(inp);
+    WriteForecast {
+        clients: inp.clients,
+        expected_group: g,
+        best_ns: encode.saturating_add(barrier / g),
+        as_is_ns: encode.saturating_add(barrier),
+        distinguishable: (2..=SCALE_GROUP_ADAPTIVE_MAX).contains(&inp.clients),
+        cut,
+        next,
+        lock_hold_ns: SCALE_TAU_LOCK_HOLD_NS,
+        read_pct: inp.read_pct,
+        sync: inp.sync,
     }
 }
 
-/// Predict write ns without a bench. `as_is` is grouping-dead (avg_group=1).
-#[must_use]
-pub fn predict_write(clients: u64) -> WriteForecast {
-    let g = expected_avg_group(clients).max(1);
-    let fd = SCALE_TAU_FD_NS;
-    WriteForecast {
-        clients,
-        expected_group: g,
-        best_ns: SCALE_TAU_WAL_ENCODE_NS.saturating_add(fd / g),
-        as_is_ns: SCALE_TAU_WAL_ENCODE_NS.saturating_add(fd),
-        distinguishable: g > 1,
+fn static_write_cut(inp: WritePredictIn) -> (WriteStaticCut, WriteStaticCut) {
+    if inp.read_pct >= SCALE_GET_PATH_READ_PCT {
+        return (WriteStaticCut::GetPath, WriteStaticCut::GetPath);
     }
+    if inp.clients >= SCALE_LOCK_CONVOY_CLIENTS {
+        return (WriteStaticCut::LockConvoy, WriteStaticCut::LockConvoy);
+    }
+    if inp.clients <= 1 {
+        return if inp.sync {
+            (WriteStaticCut::FdCeiling, WriteStaticCut::FdCeiling)
+        } else {
+            (WriteStaticCut::AsyncWal, WriteStaticCut::FdCeiling)
+        };
+    }
+    if (2..=SCALE_GROUP_ADAPTIVE_MAX).contains(&inp.clients) {
+        if grouping_paid(inp.clients, inp.avg_group_bps) {
+            return (WriteStaticCut::LockHold, WriteStaticCut::AsyncWal);
+        }
+        return (WriteStaticCut::Grouping, WriteStaticCut::LockHold);
+    }
+    // n=9–15: Adaptive-off, not yet the n≥16 named ceiling.
+    (WriteStaticCut::LockHold, WriteStaticCut::LockConvoy)
 }
 
 fn file_count(store_bytes: u64) -> u64 {
@@ -497,16 +632,68 @@ mod tests {
         assert!(!w1.distinguishable);
         assert_eq!(w1.expected_group, 1);
         assert_eq!(w1.best_ns, w1.as_is_ns);
-        assert_eq!(write_forecast_cut(w1), "fd_ceiling");
+        assert_eq!(write_forecast_cut(w1), "async_wal");
+        assert_eq!(write_forecast_next(w1), "fd_ceiling");
         let w4 = predict_write(4);
         assert!(w4.distinguishable);
         assert_eq!(w4.expected_group, 4);
         assert!(w4.best_ns < w4.as_is_ns);
         assert_eq!(w4.as_is_ns, w1.as_is_ns);
         assert_eq!(write_forecast_cut(w4), "grouping");
+        assert_eq!(write_forecast_next(w4), "lock_hold");
         let w50 = predict_write(50);
         assert!(!w50.distinguishable);
-        assert_eq!(write_forecast_cut(w50), "fd_ceiling");
+        assert_eq!(write_forecast_cut(w50), "lock_convoy");
+    }
+
+    #[test]
+    fn predict_write_mix_names_the_four_cells() {
+        // overwrite_mc4: n=4 unpaid grouping; paid avg_group → lock_hold.
+        let over = predict_write(4);
+        assert_eq!(over.cut, WriteStaticCut::Grouping);
+        assert_eq!(over.next, WriteStaticCut::LockHold);
+        let over_paid = predict_write_mix(WritePredictIn {
+            clients: 4,
+            read_pct: 0,
+            sync: false,
+            avg_group_bps: 38_500, // 3.85 ≥ 4 − 0.15
+        });
+        assert!(grouping_paid(4, 38_500));
+        assert!(!grouping_paid(4, 0));
+        assert_eq!(over_paid.cut, WriteStaticCut::LockHold);
+        assert_eq!(over_paid.next, WriteStaticCut::AsyncWal);
+        // ycsb_b_mc4 95% get; yugabyte_docdb_rmw 70% get.
+        let ycsb_b = predict_write_mix(WritePredictIn {
+            clients: 4,
+            read_pct: 95,
+            sync: false,
+            avg_group_bps: 0,
+        });
+        assert_eq!(ycsb_b.cut, WriteStaticCut::GetPath);
+        let yugabyte = predict_write_mix(WritePredictIn {
+            clients: 1,
+            read_pct: 70,
+            sync: false,
+            avg_group_bps: 0,
+        });
+        assert_eq!(yugabyte.cut, WriteStaticCut::GetPath);
+        // rockset_hybrid 1c ~11% get: WAL, not get_path (threshold 40).
+        let rockset = predict_write_mix(WritePredictIn {
+            clients: 1,
+            read_pct: 11,
+            sync: false,
+            avg_group_bps: 0,
+        });
+        assert_eq!(rockset.cut, WriteStaticCut::AsyncWal);
+        // G1 1c is the fd column, not a same-class win.
+        let g1 = predict_write_mix(WritePredictIn {
+            clients: 1,
+            read_pct: 0,
+            sync: true,
+            avg_group_bps: 0,
+        });
+        assert_eq!(g1.cut, WriteStaticCut::FdCeiling);
+        assert_eq!(g1.best_ns, SCALE_TAU_WAL_ENCODE_NS + SCALE_TAU_FD_NS);
     }
 
     #[test]

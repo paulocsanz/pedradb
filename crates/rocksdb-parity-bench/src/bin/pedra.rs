@@ -3,6 +3,7 @@
 //!
 //! ```text
 //! pedra scale [--entries N] [--cache BYTES] [--backends NAME] [dir]
+//! pedra diagnose write [--clients N] [--read-pct N] [--sync 0|1] [--avg-group X]
 //! pedra diagnose write --pedra-ns N --rocks-ns N [--read-pct N] [...]
 //! pedra diagnose get --keys N --ram BYTES [--measured-ns N] [--cache happy|capacity|cold]
 //! pedra diagnose probes --per-get N --p-best N
@@ -16,7 +17,10 @@ use pedradb_core::bench_gap_kernel::{
     WriteGapInput, WriteLever, WritePhases, BALANCE_SHAPES,
 };
 use pedradb_core::get_cost_kernel::{predict_get_composed, CacheCase, INTEL_SERVER_4GHZ};
-use pedradb_core::scale_kernel::{predict_write, write_forecast_cut, SCALE_BYTES_PER_ENTRY};
+use pedradb_core::scale_kernel::{
+    predict_write_mix, write_forecast_cut, write_forecast_next, WritePredictIn,
+    SCALE_BYTES_PER_ENTRY,
+};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -39,6 +43,9 @@ fn main() {
         }
         _ => {
             eprintln!("usage: pedra scale [--entries N] [--cache BYTES] [--backends NAME] [dir]");
+            eprintln!(
+                "       pedra diagnose write [--clients N] [--read-pct N] [--sync 0|1] [--avg-group X]"
+            );
             eprintln!(
                 "       pedra diagnose write --pedra-ns N --rocks-ns N [--read-pct N] [--wal-ns N] [--mem-ns N] [--flush-ns N] [--lock-ns N] [--prepare-ns N] [--publish-ns N] [--clients N] [--avg-group X]"
             );
@@ -77,26 +84,55 @@ fn flag_str<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
         .map(|w| w[1].as_str())
 }
 
+fn avg_group_bps_from_args(args: &[String]) -> u64 {
+    flag_u64(args, "--avg-group-bps").unwrap_or_else(|| {
+        args.windows(2)
+            .find(|w| w[0] == "--avg-group")
+            .and_then(|w| w[1].parse::<f64>().ok())
+            .map(|g| (g * 10_000.0) as u64)
+            .unwrap_or(0)
+    })
+}
+
 fn diagnose_write_cmd(args: &[String]) -> Result<(), ()> {
     if flag_u64(args, "--pedra-ns").is_none() {
         let clients = flag_u64(args, "--clients").unwrap_or(1);
-        let w = predict_write(clients);
-        println!("pedra diagnose write predict=1 clients={clients}");
+        let read_pct = flag_u64(args, "--read-pct").unwrap_or(0);
+        let sync = flag_u64(args, "--sync").unwrap_or(0) != 0;
+        let avg_group_bps = avg_group_bps_from_args(args);
+        let w = predict_write_mix(WritePredictIn {
+            clients,
+            read_pct,
+            sync,
+            avg_group_bps,
+        });
         println!(
-            "expected_group={} distinguishable={} cut={}",
+            "pedra diagnose write predict=1 clients={clients} read_pct={read_pct} sync={}",
+            u8::from(sync)
+        );
+        println!(
+            "expected_group={} distinguishable={} cut={} next={}",
             w.expected_group,
             u8::from(w.distinguishable),
-            write_forecast_cut(w)
-        );
-        println!("T_ns best={} as_is={}", w.best_ns, w.as_is_ns);
-        println!(
-            r#"{{"cut":"{}","distinguishable":{},"clients":{},"expected_group":{},"best":{},"as_is":{}}}"#,
             write_forecast_cut(w),
+            write_forecast_next(w)
+        );
+        println!(
+            "T_ns best={} as_is={} lock_hold={}",
+            w.best_ns, w.as_is_ns, w.lock_hold_ns
+        );
+        println!(
+            r#"{{"cut":"{}","next":"{}","distinguishable":{},"clients":{},"expected_group":{},"best":{},"as_is":{},"lock_hold_ns":{},"read_pct":{},"sync":{}}}"#,
+            write_forecast_cut(w),
+            write_forecast_next(w),
             u8::from(w.distinguishable),
             w.clients,
             w.expected_group,
             w.best_ns,
-            w.as_is_ns
+            w.as_is_ns,
+            w.lock_hold_ns,
+            w.read_pct,
+            u8::from(w.sync)
         );
         return Ok(());
     }
@@ -106,13 +142,7 @@ fn diagnose_write_cmd(args: &[String]) -> Result<(), ()> {
     };
     let rocks_ns = flag_u64(args, "--rocks-ns").unwrap_or(0);
     let clients = flag_u64(args, "--clients").unwrap_or(1);
-    let avg_group_bps = flag_u64(args, "--avg-group-bps").unwrap_or_else(|| {
-        args.windows(2)
-            .find(|w| w[0] == "--avg-group")
-            .and_then(|w| w[1].parse::<f64>().ok())
-            .map(|g| (g * 10_000.0) as u64)
-            .unwrap_or(0)
-    });
+    let avg_group_bps = avg_group_bps_from_args(args);
     let inp = WriteGapInput {
         pedra_ns,
         rocks_ns,
