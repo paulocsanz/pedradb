@@ -1413,7 +1413,7 @@ fn clear_range_txn_meta<E: Env>(db: &mut Db<E>, start: &[u8], end: &[u8]) -> Res
 }
 
 fn clear_txn_keys<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Result<()> {
-    if keys.is_empty() {
+    if pedradb_core::write_admission_kernel::batch_is_empty(keys.len() as u64) {
         return Ok(());
     }
     let mut ops = Vec::new();
