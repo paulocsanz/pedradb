@@ -337,7 +337,7 @@ impl SstPayloadPool {
         let Some(budget) = self.budget else {
             return false;
         };
-        if bytes == 0 || bytes > budget {
+        if crate::write_admission_kernel::batch_is_empty(bytes) || bytes > budget {
             return false;
         }
         if self.total.load(Ordering::Relaxed).saturating_add(bytes) > budget {
