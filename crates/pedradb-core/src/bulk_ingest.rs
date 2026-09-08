@@ -337,7 +337,7 @@ impl BulkLatch {
             let ops: Vec<(bool, &[u8])> = keys.iter().map(|k| (true, k.as_ref())).collect();
             return self.classify_family(family, &ops, false, || None);
         }
-        if keys.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(keys.len() as u64) {
             return FamilyRoute::Bulk;
         }
         let mut ok = true;
