@@ -8512,7 +8512,24 @@ impl<E: Env> Db<E> {
     /// I/O from fsync, or [`CoreError::DurabilityFenced`].
     pub fn sync(&mut self) -> Result<()> {
         self.ensure_not_fenced()?;
-        self.wal.lock().sync_data()
+        let sync_err = self.wal.lock().sync_data().err();
+        let failed = sync_err.is_some();
+        match crate::write_admission_kernel::wal_commit_plan(true, failed) {
+            crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                assert!(
+                    crate::write_admission_kernel::fence_on_sync_fail(true, failed),
+                    "required sync failed ⇒ fence, not Ok"
+                );
+                let e = sync_err.expect("AppendSyncFence ⇒ Some");
+                self.fence_durability(&e, FenceClass::of_core(&e));
+                Err(e)
+            }
+            crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+            | crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => {
+                self.note_wal_sync();
+                Ok(())
+            }
+        }
     }
 
     /// The first fence's report, if this Db was ever durability-fenced

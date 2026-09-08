@@ -35,14 +35,24 @@ def load(rel: str) -> str:
 
 
 def test_body(src: str, name: str) -> str:
-    m = re.search(
-        r"\n\s*" + FN_OPEN + re.escape(name) + r"\s*(?:<[^>]*>)?\s*\(",
-        src,
+    matches = list(
+        re.finditer(
+            r"\n\s*" + FN_OPEN + re.escape(name) + r"\s*(?:<[^>]*>)?\s*\(",
+            src,
+        )
     )
-    if not m:
+    if not matches:
         return ""
-    nxt = FN_HEAD.search(src, m.end())
-    return src[m.start() : nxt.start()] if nxt else src[m.start() :]
+
+    def body_at(m: re.Match) -> str:
+        nxt = FN_HEAD.search(src, m.end())
+        return src[m.start() : nxt.start()] if nxt else src[m.start() :]
+
+    for m in matches:
+        after = src[m.end() : m.end() + 48]
+        if after.lstrip().startswith("&mut self"):
+            return body_at(m)
+    return body_at(matches[0])
 
 
 def rfc_open_slices() -> list[str]:
@@ -247,6 +257,13 @@ GLUE_SCRIPTS = [
     ),
     (
         "lone_sync_commit",
+        "crates/pedradb-core/src/db.rs",
+        ("sync_data", "fence_on_sync_fail"),
+        "fence_on_sync_fail",
+        "wal_commit_plan",
+    ),
+    (
+        "sync",
         "crates/pedradb-core/src/db.rs",
         ("sync_data", "fence_on_sync_fail"),
         "fence_on_sync_fail",

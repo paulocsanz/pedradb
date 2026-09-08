@@ -744,6 +744,20 @@ mod tests {
             commit.contains("fence_on_sync_fail("),
             "commit_ops_with must match fence_on_sync_fail"
         );
+        let db_src = include_str!("db.rs");
+        let sync_fn = db_src
+            .split("pub fn sync(&mut self)")
+            .nth(1)
+            .and_then(|s| s.split("pub fn fence_report").next())
+            .expect("Db::sync");
+        assert!(
+            sync_fn.contains("wal_commit_plan("),
+            "Db::sync must match the plan fn"
+        );
+        assert!(
+            sync_fn.contains("fence_on_sync_fail("),
+            "Db::sync must match fence_on_sync_fail"
+        );
         let lone_sync = named_fn_src(include_str!("db.rs"), "lone_sync_commit")
             .expect("lone_sync_commit");
         assert!(
