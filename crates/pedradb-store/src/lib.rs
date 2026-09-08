@@ -2208,7 +2208,7 @@ pub fn tcp_node_removed_peer_ok(data: impl AsRef<Path>, self_id: u64, cli: &[u64
         return false;
     }
     let disk = c.ids.clone();
-    if disk.is_empty() || disk.contains(&self_id) {
+    if pedradb_core::write_admission_kernel::batch_is_empty(disk.len() as u64) || disk.contains(&self_id) {
         return false;
     }
     let Some(got) = c
