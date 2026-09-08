@@ -829,7 +829,9 @@ impl WriteGroup {
             // Async-only group (RFC-0044 P0.5): no fd to share, so the
             // catch-up hold is pure latency — the merge (one encode pass,
             // one `write()` per group) is the whole win.
-            let any_sync = batch.iter().any(|p| p.do_sync);
+            let any_sync = batch.iter().any(|p| {
+                crate::write_admission_kernel::wal_sync_required(true, p.do_sync, false)
+            });
             if crate::write_admission_kernel::wal_sync_required(true, any_sync, false)
                 && batch_ops < CATCHUP_SKIP_OPS
             {
