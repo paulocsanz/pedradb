@@ -1489,8 +1489,9 @@
       "finding": "F80",
       "twin_kind": "close",
       "atom": "value_len_tag",
+      "single_artifact": true,
       "kernel": "crates/pedradb-store/src/index_val_kernel.rs",
-      "twin": "crates/pedradb-store/verus/index_val.rs",
+      "twin": "crates/pedradb-store/src/index_val_kernel.rs",
       "verus": "scripts/verus_index_val.sh",
       "callers": [
         "crates/pedradb-store/src/layers.rs"

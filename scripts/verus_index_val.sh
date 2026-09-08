@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Machine-check F80 exact index-value range (RFC-0002 P26).
+# Machine-check F80 exact index-value range on the file rustc links
+# (single artifact — not the twin-cópia). RFC-0002 P26.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-store/verus/index_val.rs"
+SRC="$ROOT/crates/pedradb-store/src/index_val_kernel.rs"
 if [[ -x "${VERUS:-}" ]]; then
   :
 elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then
