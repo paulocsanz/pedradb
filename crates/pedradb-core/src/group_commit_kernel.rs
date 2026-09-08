@@ -1201,6 +1201,10 @@ mod tests {
             lone.contains("occ_batch_plan("),
             "lone_commit must match occ_batch_plan"
         );
+        assert!(
+            lone.contains("occ_conflict("),
+            "lone_commit must match occ_conflict"
+        );
     }
 
     #[test]
@@ -1288,6 +1292,10 @@ mod tests {
         assert!(
             lone.contains("occ_batch_plan("),
             "lone_commit must match occ_batch_plan"
+        );
+        assert!(
+            lone.contains("occ_conflict("),
+            "lone_commit must match occ_conflict"
         );
     }
 

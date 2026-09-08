@@ -1006,6 +1006,7 @@ impl WriteGroup {
                 });
             // RFC-0057 P2.1: first-committer-wins is the kernel plan,
             // not an inline predicate (same `occ_batch_plan` as the group).
+            let conflict = crate::group_commit_kernel::occ_conflict(*snap, last_seq, touched);
             match crate::group_commit_kernel::occ_batch_plan(
                 &[false],
                 &[crate::group_commit_kernel::OccRead {
@@ -1018,11 +1019,14 @@ impl WriteGroup {
             .next()
             {
                 Some(crate::group_commit_kernel::OccMemberFate::Conflict) => {
+                    assert!(conflict, "occ_batch_plan Conflict ⇒ occ_conflict");
                     return Err(CoreError::TransactionConflict);
                 }
                 Some(crate::group_commit_kernel::OccMemberFate::TooOld)
                 | Some(crate::group_commit_kernel::OccMemberFate::Ok)
-                | None => {}
+                | None => {
+                    assert!(!conflict, "empty too_old ⇒ Conflict iff occ_conflict");
+                }
             }
         }
         // RFC-0042 P1.1: a lone commit is a commit in flight exactly like a
