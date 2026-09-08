@@ -366,7 +366,9 @@ pub fn splice_bitflip_window(actions: &mut Vec<Action>, n_nodes: u64) {
 /// C-new of 4). Off by default — default `schedule_from_seed` stays
 /// fingerprint-stable.
 pub fn splice_plant_committed_joint(actions: &mut Vec<Action>, n_nodes: u64) {
-    if n_nodes < 4 || actions.is_empty() {
+    if n_nodes < 4
+        || pedradb_core::write_admission_kernel::batch_is_empty(actions.len() as u64)
+    {
         return;
     }
     let node = n_nodes;
