@@ -251,6 +251,12 @@ a linha quando há phasesΔ. Sem harness novo.
       Timed is 100% GET (seed async); JSON suite tag is host-default,
       not a sync-peer win. p50 0.5 vs 0.7 µs; hole is tail (p99 28 vs
       1.8 µs). Not Linux cartaz. — status: `done`
+- [x] **P2.48** `nebula_get_neighbors_mc4` (GO 1-hop prefix scan, 4
+      clients) in `COMPARE_SHAPES`, `BALANCE_SHAPES`, and
+      `run_nebula_clients`. Test `rfc0184_nebula_get_neighbors_mc4_in_compare`.
+      Darwin DIAG vs Rocks `sync=false`: `ratio=0.776` (1.56 M / 2.01 M
+      QPS) — named loss. p50 0.5 vs 1.8 µs; hole is tail. Not Linux
+      cartaz. — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -312,6 +318,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.45 | p2 | venice_fanout_get_mc4 COMPARE+BALANCE | done | Venice 32-get fanout mc4; Darwin DIAG 0.735× named loss | 2026-09-08 |
 | P2.46 | p2 | kvrocks_get_mc4 COMPARE+BALANCE | done | Kvrocks GET mc4; Darwin DIAG 1.205× not Linux cartaz | 2026-09-08 |
 | P2.47 | p2 | myrocks_point_select_mc4 COMPARE+BALANCE | done | MyRocks point-select mc4; Darwin DIAG 0.430× named loss; GET path | 2026-09-08 |
+| P2.48 | p2 | nebula_get_neighbors_mc4 COMPARE+BALANCE | done | Nebula 1-hop mc4; Darwin DIAG 0.776× named loss | 2026-09-08 |
 
 ## Acceptance Criteria
 
@@ -368,7 +375,8 @@ a linha quando há phasesΔ. Sem harness novo.
   `rfc0184_yugabyte_docdb_rmw_mc4_in_compare` (P2.44);
   `rfc0184_venice_fanout_get_mc4_in_compare` (P2.45);
   `rfc0184_kvrocks_get_mc4_in_compare` (P2.46);
-  `rfc0184_myrocks_point_select_mc4_in_compare` (P2.47).
+  `rfc0184_myrocks_point_select_mc4_in_compare` (P2.47);
+  `rfc0184_nebula_get_neighbors_mc4_in_compare` (P2.48).
 - **Telemetry / Analytics:** uma linha `diagnose dominant=… lever=…`;
   `benches[].diagnose.lever` no JSON; compare copia para a row.
   scale `get_hit` / `lookup_100` / `probe_hit` imprimem `diagnose get … class=…` (P2.6/P2.7/P2.21).
