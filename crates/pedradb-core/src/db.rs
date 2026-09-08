@@ -8353,7 +8353,7 @@ impl<E: Env> Db<E> {
             out.sort_by_key(|e| e.sequence);
             return Ok(out);
         }
-        if !from_wal.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(from_wal.len() as u64) {
             return Ok(from_wal);
         }
         self.collect_feed_from_live()
