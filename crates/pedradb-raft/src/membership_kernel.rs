@@ -2043,4 +2043,15 @@ mod tests {
         );
         assert!(joint_add_target_counts(true));
     }
+
+    #[test]
+    fn queued_leave_finish_ok_on_live_uncommitted_leave_is_not_ok() {
+        assert!(!queued_leave_finish_ok(true, false));
+        assert!(
+            queued_leave_finish_ok_as_is(true, false),
+            "AS-IS dente: in the log is enough"
+        );
+        assert!(queued_leave_finish_ok(true, true));
+        assert!(queued_leave_finish_ok(false, false));
+    }
 }

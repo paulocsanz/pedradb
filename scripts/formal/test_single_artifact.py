@@ -1246,6 +1246,22 @@ def main() -> int:
         print("FAIL joint_add_target twin≠kernel did not fail")
         return 1
     print("ok mutant joint_add_target twin≠kernel named")
+    qlf_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in qlf_mutant["pairs"]:
+        if pair.get("id") == "queued_leave_finish":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/membership_joint.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing queued_leave_finish")
+        return 1
+    hits = [m for m in _sa_fails(qlf_mutant) if m.startswith("queued_leave_finish:")]
+    if not hits:
+        print("FAIL queued_leave_finish twin≠kernel did not fail")
+        return 1
+    print("ok mutant queued_leave_finish twin≠kernel named")
     # Drive the same rule through check_twins (may also report unrelated
     # dirty-tree twin drift; we only require the SA id).
     try:

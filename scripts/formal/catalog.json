@@ -323,8 +323,9 @@
       "id": "queued_leave_finish",
       "finding": "RFC-0122/0123",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
-      "twin": "crates/pedradb-raft/verus/membership_joint.rs",
+      "twin": "crates/pedradb-raft/src/membership_kernel.rs",
       "verus": "scripts/verus_membership_joint.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
