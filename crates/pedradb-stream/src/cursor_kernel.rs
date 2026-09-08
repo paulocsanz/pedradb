@@ -1,39 +1,161 @@
 //! Pure consumer-cursor decisions (RFC-0002 P20 / F54).
 //!
+//! **Single artifact:** this file is what `rustc` links *and* what Verus
+//! proves (`cfg(verus_keep_ghost)`). No twin-cópia.
+//!
+//!   ./scripts/verus_stream_cursor.sh
+//!
 //! Production [`crate::Stream::peek`] / [`crate::Stream::ack`] call these
 //! helpers. Persist of the cursor is **caller + axiom**.
 
 #![forbid(unsafe_code)]
 
+macro_rules! next_seq_body {
+    ($last_acked:expr) => {
+        $last_acked.saturating_add(1)
+    };
+}
+
+macro_rules! ack_in_order_body {
+    ($last_acked:expr, $seq:expr) => {
+        $seq == next_seq($last_acked) && $seq > $last_acked
+    };
+}
+
+macro_rules! ack_in_order_as_is_body {
+    ($last_acked:expr, $seq:expr) => {
+        $seq > $last_acked
+    };
+}
+
+macro_rules! peek_pins_cursor_body {
+    () => {
+        false
+    };
+}
+
+macro_rules! peek_pins_cursor_as_is_body {
+    () => {
+        true
+    };
+}
+
 /// Next sequence after last **acked** (`0` = none).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn next_seq(last_acked: u64) -> u64 {
-    last_acked.saturating_add(1)
+    next_seq_body!(last_acked)
 }
 
 /// F54: ack only the immediate next seq (no holes, no skip).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn ack_in_order(last_acked: u64, seq: u64) -> bool {
-    seq == next_seq(last_acked) && seq > last_acked
+    ack_in_order_body!(last_acked, seq)
 }
 
 /// AS-IS F54: any `seq > last` pins (skips unacked messages on reopen).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn ack_in_order_as_is(last_acked: u64, seq: u64) -> bool {
-    seq > last_acked
+    ack_in_order_as_is_body!(last_acked, seq)
 }
 
 /// Peek must **not** persist the cursor (pin-on-read).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn peek_pins_cursor() -> bool {
-    false
+    peek_pins_cursor_body!()
 }
 
 /// AS-IS: `next` persisted cursor before returning the payload.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn peek_pins_cursor_as_is() -> bool {
+    peek_pins_cursor_as_is_body!()
+}
+
+#[cfg(verus_keep_ghost)]
+use vstd::prelude::*;
+
+#[cfg(verus_keep_ghost)]
+verus! {
+
+pub open spec fn sat_add1_spec(x: u64) -> u64 {
+    if x == u64::MAX {
+        x
+    } else {
+        (x + 1) as u64
+    }
+}
+
+pub fn next_seq(last_acked: u64) -> (n: u64)
+    ensures
+        n == sat_add1_spec(last_acked),
+        last_acked < u64::MAX ==> n == last_acked + 1,
+{
+    if last_acked == u64::MAX {
+        last_acked
+    } else {
+        last_acked + 1
+    }
+}
+
+pub fn ack_in_order(last_acked: u64, seq: u64) -> (d: bool)
+    ensures
+        d == (seq == sat_add1_spec(last_acked) && seq > last_acked),
+{
+    let n = next_seq(last_acked);
+    seq == n && seq > last_acked
+}
+
+pub open spec fn ack_in_order_as_is_spec(last_acked: u64, seq: u64) -> bool {
+    seq > last_acked
+}
+
+pub fn ack_in_order_as_is(last_acked: u64, seq: u64) -> (d: bool)
+    ensures
+        d == (seq > last_acked),
+        d == ack_in_order_as_is_spec(last_acked, seq),
+{
+    ack_in_order_as_is_body!(last_acked, seq)
+}
+
+proof fn lemma_as_is_skips(last: u64)
+    requires
+        last + 2 <= u64::MAX,
+    ensures
+        ack_in_order_as_is_spec(last, (last + 2) as u64),
+        !((last + 2) as u64 == sat_add1_spec(last) && (last + 2) as u64 > last),
+{
+}
+
+pub fn peek_pins_cursor() -> (d: bool)
+    ensures
+        !d,
+{
+    peek_pins_cursor_body!()
+}
+
+pub open spec fn peek_pins_cursor_as_is_spec() -> bool {
     true
 }
+
+pub fn peek_pins_cursor_as_is() -> (d: bool)
+    ensures
+        d == true,
+        d == peek_pins_cursor_as_is_spec(),
+{
+    peek_pins_cursor_as_is_body!()
+}
+
+proof fn lemma_as_is_pins()
+    ensures
+        peek_pins_cursor_as_is_spec(),
+{
+}
+
+} // verus!
 
 #[cfg(test)]
 mod tests {

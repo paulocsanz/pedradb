@@ -15,13 +15,13 @@ set_option maxRecDepth 2048
 namespace pedra_aeneas_cursor_kernel
 
 /-- [pedra_aeneas_cursor_kernel::next_seq]:
-    Source: '../../../crates/pedradb-stream/src/cursor_kernel.rs', lines 10:0-12:1
+    Source: '../../../crates/pedradb-stream/src/cursor_kernel.rs', lines 46:0-48:1
     Visibility: public -/
 def next_seq (last_acked : Std.U64) : Result Std.U64 := do
   ok (core.num.U64.saturating_add last_acked 1#u64)
 
 /-- [pedra_aeneas_cursor_kernel::ack_in_order]:
-    Source: '../../../crates/pedradb-stream/src/cursor_kernel.rs', lines 16:0-18:1
+    Source: '../../../crates/pedradb-stream/src/cursor_kernel.rs', lines 53:0-55:1
     Visibility: public -/
 def ack_in_order (last_acked : Std.U64) (seq : Std.U64) : Result Bool := do
   let i ← next_seq last_acked
@@ -30,20 +30,20 @@ def ack_in_order (last_acked : Std.U64) (seq : Std.U64) : Result Bool := do
   else ok false
 
 /-- [pedra_aeneas_cursor_kernel::ack_in_order_as_is]:
-    Source: '../../../crates/pedradb-stream/src/cursor_kernel.rs', lines 22:0-24:1
+    Source: '../../../crates/pedradb-stream/src/cursor_kernel.rs', lines 60:0-62:1
     Visibility: public -/
 def ack_in_order_as_is
   (last_acked : Std.U64) (seq : Std.U64) : Result Bool := do
   ok (seq > last_acked)
 
 /-- [pedra_aeneas_cursor_kernel::peek_pins_cursor]:
-    Source: '../../../crates/pedradb-stream/src/cursor_kernel.rs', lines 28:0-30:1
+    Source: '../../../crates/pedradb-stream/src/cursor_kernel.rs', lines 67:0-69:1
     Visibility: public -/
 def peek_pins_cursor : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_cursor_kernel::peek_pins_cursor_as_is]:
-    Source: '../../../crates/pedradb-stream/src/cursor_kernel.rs', lines 34:0-36:1
+    Source: '../../../crates/pedradb-stream/src/cursor_kernel.rs', lines 74:0-76:1
     Visibility: public -/
 def peek_pins_cursor_as_is : Result Bool := do
   ok true

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Machine-check stream cursor (RFC-0002 P20 / F54).
+# Machine-check stream cursor on the file rustc links
+# (single artifact — not the twin-cópia). RFC-0002 P20 / F54.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-stream/verus/cursor.rs"
+SRC="$ROOT/crates/pedradb-stream/src/cursor_kernel.rs"
 if [[ -x "${VERUS:-}" ]]; then
   :
 elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then

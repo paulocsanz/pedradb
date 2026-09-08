@@ -14,3 +14,5 @@ thiserror.workspace = true
 [dev-dependencies]
 # Same production cursor_kernel as Stream::peek / ack (F54).
 stateright = "0.31"
+# Clone-trap test twin_agrees_with_journal_pin_kernel_on_full_domain.
+pedradb-journal.workspace = true
