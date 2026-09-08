@@ -393,6 +393,9 @@ fn run_and_report_occ<E: rocksdb_parity_bench::OccEngine + Sync>(
     }
     if suites_enabled("surreal") {
         benches.extend(r.run_surreal(e));
+        for clients in rocksdb_parity_bench::clients_from_env() {
+            benches.extend(r.run_surreal_get_clients(e, clients));
+        }
     }
 
     finish_report(e, cfg, suites, out, benches);
