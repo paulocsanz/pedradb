@@ -9495,7 +9495,7 @@ impl<E: Env> Db<E> {
     ) {
         for (off, (ops, do_sync)) in batches.into_iter().enumerate() {
             let i = index_base + off;
-            if ops.is_empty() {
+            if crate::write_admission_kernel::batch_is_empty(ops.len() as u64) {
                 g.results[i] = Some(Ok(self.last_sequence()));
                 continue;
             }
