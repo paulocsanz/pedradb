@@ -15,7 +15,7 @@ set_option maxRecDepth 2048
 namespace pedra_aeneas_si_kernel
 
 /-- [pedra_aeneas_si_kernel::si_reader_beats]:
-    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 16:0-38:1
+    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 73:0-86:1
     Visibility: public -/
 def si_reader_beats
   (c_leader : Bool) (c_part : Bool) (c_self : Bool) (c_applied : Std.U64)
@@ -38,43 +38,43 @@ def si_reader_beats
          else ok (c_applied > b_applied)
 
 /-- [pedra_aeneas_si_kernel::point_get_prefer_applied]:
-    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 43:0-45:1
+    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 92:0-94:1
     Visibility: public -/
 def point_get_prefer_applied : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_si_kernel::point_get_prefer_applied_as_is]:
-    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 49:0-51:1
+    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 99:0-101:1
     Visibility: public -/
 def point_get_prefer_applied_as_is : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_si_kernel::point_get_watermark]:
-    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 55:0-57:1
+    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 106:0-108:1
     Visibility: public -/
 def point_get_watermark
-  (range_applied : Std.U64) (_global_seq : Std.U64) : Result Std.U64 := do
+  (range_applied : Std.U64) (global_seq : Std.U64) : Result Std.U64 := do
   ok range_applied
 
 /-- [pedra_aeneas_si_kernel::point_get_watermark_as_is]:
-    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 61:0-63:1
+    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 113:0-115:1
     Visibility: public -/
 def point_get_watermark_as_is
-  (_range_applied : Std.U64) (global_seq : Std.U64) : Result Std.U64 := do
+  (range_applied : Std.U64) (global_seq : Std.U64) : Result Std.U64 := do
   ok global_seq
 
 /-- [pedra_aeneas_si_kernel::si_reader_beats_as_is]:
-    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 68:0-79:1
+    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 121:0-134:1
     Visibility: public -/
 def si_reader_beats_as_is
-  (_c_leader : Bool) (_c_part : Bool) (_c_self : Bool) (_c_applied : Std.U64)
-  (_b_leader : Bool) (_b_part : Bool) (_b_self : Bool) (_b_applied : Std.U64) :
+  (c_leader : Bool) (c_part : Bool) (c_self : Bool) (c_applied : Std.U64)
+  (b_leader : Bool) (b_part : Bool) (b_self : Bool) (b_applied : Std.U64) :
   Result Bool
   := do
   ok false
 
 /-- [pedra_aeneas_si_kernel::SnapshotRead]
-    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 83:0-90:1
+    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 139:0-146:1
     Visibility: public -/
 @[discriminant isize]
 inductive SnapshotRead where
@@ -82,7 +82,7 @@ inductive SnapshotRead where
 | Serve : SnapshotRead
 
 /-- [pedra_aeneas_si_kernel::{impl core::fmt::Debug for pedra_aeneas_si_kernel::SnapshotRead}::fmt]:
-    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 82:9-82:14
+    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 138:9-138:14
     Visibility: public -/
 def SnapshotRead.Insts.CoreFmtDebug.fmt
   (self : SnapshotRead) (f : core.fmt.Formatter) :
@@ -93,42 +93,42 @@ def SnapshotRead.Insts.CoreFmtDebug.fmt
   | SnapshotRead.Serve => core.fmt.Formatter.write_str f (toStr "Serve")
 
 /-- Trait implementation: [pedra_aeneas_si_kernel::{impl core::fmt::Debug for pedra_aeneas_si_kernel::SnapshotRead}]
-    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 82:9-82:14 -/
+    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 138:9-138:14 -/
 @[reducible]
 def SnapshotRead.Insts.CoreFmtDebug : core.fmt.Debug SnapshotRead := {
   fmt := SnapshotRead.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_si_kernel::{impl core::clone::Clone for pedra_aeneas_si_kernel::SnapshotRead}::clone]:
-    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 82:16-82:21
+    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 138:16-138:21
     Visibility: public -/
 def SnapshotRead.Insts.CoreCloneClone.clone
   (self : SnapshotRead) : Result SnapshotRead := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_si_kernel::{impl core::clone::Clone for pedra_aeneas_si_kernel::SnapshotRead}]
-    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 82:16-82:21 -/
+    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 138:16-138:21 -/
 @[reducible]
 def SnapshotRead.Insts.CoreCloneClone : core.clone.Clone SnapshotRead := {
   clone := SnapshotRead.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [pedra_aeneas_si_kernel::{impl core::marker::Copy for pedra_aeneas_si_kernel::SnapshotRead}]
-    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 82:23-82:27 -/
+    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 138:23-138:27 -/
 @[reducible]
 def SnapshotRead.Insts.CoreMarkerCopy : core.marker.Copy SnapshotRead := {
   cloneInst := SnapshotRead.Insts.CoreCloneClone
 }
 
 /-- Trait implementation: [pedra_aeneas_si_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_si_kernel::SnapshotRead}]
-    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 82:29-82:38 -/
+    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 138:29-138:38 -/
 @[reducible]
 def SnapshotRead.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq SnapshotRead := {
 }
 
 /-- [pedra_aeneas_si_kernel::{impl core::cmp::PartialEq<pedra_aeneas_si_kernel::SnapshotRead> for pedra_aeneas_si_kernel::SnapshotRead}::eq]:
-    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 82:29-82:38
+    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 138:29-138:38
     Visibility: public -/
 def SnapshotRead.Insts.CoreCmpPartialEqSnapshotRead.eq
   (self : SnapshotRead) (other : SnapshotRead) : Result Bool := do
@@ -137,7 +137,7 @@ def SnapshotRead.Insts.CoreCmpPartialEqSnapshotRead.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_si_kernel::{impl core::cmp::PartialEq<pedra_aeneas_si_kernel::SnapshotRead> for pedra_aeneas_si_kernel::SnapshotRead}]
-    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 82:29-82:38 -/
+    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 138:29-138:38 -/
 @[reducible]
 def SnapshotRead.Insts.CoreCmpPartialEqSnapshotRead : core.cmp.PartialEq
   SnapshotRead SnapshotRead := {
@@ -145,14 +145,14 @@ def SnapshotRead.Insts.CoreCmpPartialEqSnapshotRead : core.cmp.PartialEq
 }
 
 /-- [pedra_aeneas_si_kernel::{impl core::cmp::Eq for pedra_aeneas_si_kernel::SnapshotRead}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 82:40-82:42
+    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 138:40-138:42
     Visibility: public -/
 def SnapshotRead.Insts.CoreCmpEq.assert_fields_are_eq
   (self : SnapshotRead) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_si_kernel::{impl core::cmp::Eq for pedra_aeneas_si_kernel::SnapshotRead}]
-    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 82:40-82:42 -/
+    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 138:40-138:42 -/
 @[reducible]
 def SnapshotRead.Insts.CoreCmpEq : core.cmp.Eq SnapshotRead := {
   partialEqInst := SnapshotRead.Insts.CoreCmpPartialEqSnapshotRead
@@ -160,7 +160,7 @@ def SnapshotRead.Insts.CoreCmpEq : core.cmp.Eq SnapshotRead := {
 }
 
 /-- [pedra_aeneas_si_kernel::snapshot_read_plan]:
-    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 101:0-107:1
+    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 158:0-164:1
     Visibility: public -/
 def snapshot_read_plan
   (snapshot : Std.U64) (watermark : Std.U64) : Result SnapshotRead := do
@@ -170,7 +170,7 @@ def snapshot_read_plan
   else ok SnapshotRead.Serve
 
 /-- [pedra_aeneas_si_kernel::snapshot_read_plan_as_is]:
-    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 112:0-114:1
+    Source: '../../../crates/pedradb-store/src/si_kernel.rs', lines 170:0-172:1
     Visibility: public -/
 def snapshot_read_plan_as_is
   (_snapshot : Std.U64) (_watermark : Std.U64) : Result SnapshotRead := do

@@ -1463,8 +1463,9 @@
       "id": "si_reader",
       "finding": "F42/F84",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-store/src/si_kernel.rs",
-      "twin": "crates/pedradb-store/verus/si_reader.rs",
+      "twin": "crates/pedradb-store/src/si_kernel.rs",
       "verus": "scripts/verus_si_reader.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
