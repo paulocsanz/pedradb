@@ -9101,7 +9101,7 @@ impl<E: Env> Db<E> {
         } else {
             (batch, Vec::new())
         };
-        if !bulk_puts.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(bulk_puts.len() as u64) {
             let fam = self.bulk_family_of_key(bulk_puts[0].0.as_ref()).to_string();
             if !self.bulk_runs.contains_key(&fam) {
                 self.absorb_mem_family_into_run(&fam)?;
