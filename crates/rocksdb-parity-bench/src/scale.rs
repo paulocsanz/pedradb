@@ -319,6 +319,7 @@ fn run_one(store: &mut dyn ScaleStore, dir: &Path, n: usize, vlen: usize, pool: 
         super::eprint_write_diagnose(&format!("hydrate/{label}"), &d);
     }
 
+    let phase0 = store.write_phase_snapshot();
     let t1 = Instant::now();
     assert!(store.settle(), "settle {label}");
     let settle_s = t1.elapsed().as_secs_f64();
@@ -328,6 +329,10 @@ fn run_one(store: &mut dyn ScaleStore, dir: &Path, n: usize, vlen: usize, pool: 
         settled as f64 / (1u64 << 30) as f64,
         mode_suffix(store),
     );
+    if let (Some(a), Some(b)) = (phase0, store.write_phase_snapshot()) {
+        let d = super::diagnose_from_phases(settle_s * 1000.0, a, b, 1, 0.0, 0);
+        super::eprint_write_diagnose(&format!("settle/{label}"), &d);
+    }
 
     let mut state = 0x0123_4567_89AB_CDEFu64;
     let mut hit = Vec::with_capacity(PROBES);
@@ -904,6 +909,31 @@ mod tests {
             ),
             "got {}",
             class.token()
+        );
+    }
+
+    /// RFC-0184 P2.24: settle WRITEPHASE carries a write lever.
+    #[test]
+    fn rfc0184_p224_settle_writephase_has_lever() {
+        std::env::set_var("PEDRA_WRITE_PHASE_STATS", "1");
+        let dir = TempDir::new().unwrap();
+        let mut s = PedraScale::open(dir.path());
+        let pool = value_pool();
+        hydrate(&mut s, 64, &pool, 32);
+        let a = s.write_phase_snapshot().expect("WRITEPHASE before settle");
+        assert!(s.settle());
+        let b = s.write_phase_snapshot().expect("WRITEPHASE after settle");
+        let d = crate::diagnose_from_phases(1.0, a, b, 1, 0.0, 0);
+        assert!(
+            d.json_object().contains("\"lever\":"),
+            "settle diagnose.lever: {}",
+            d.json_object()
+        );
+        assert_ne!(
+            d.lever.token(),
+            "get_path",
+            "settle is compact/ingest, not get: {}",
+            d.line()
         );
     }
 
