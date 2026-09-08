@@ -158,6 +158,9 @@ medida no mesmo harness isolado.
       `rfc0180_leader_linger_and_async_catchup`. status: `done`
 - [x] **P0.45** O mesmo wait depois de `group_start` (janela prepare).
       Teste `rfc0180_leader_linger_and_async_catchup`. status: `done`
+- [x] **P0.46** `finish_group_off_lock` espera in-flight antes do
+      drain extra / WAL off-lock (async). Teste
+      `rfc0180_leader_linger_and_async_catchup`. status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
 
@@ -218,6 +221,7 @@ medida no mesmo harness isolado.
 | P0.43 | p0 | catch-up after group_start prepare | done | same spins as pre-lock; absorb then off-lock WAL | 2026-09-08 |
 | P0.44 | p0 | wait in-flight begin_submit→queue | done | no timer; stop on cap or active drop | 2026-09-08 |
 | P0.45 | p0 | wait in-flight after group_start | done | same helper; prepare window | 2026-09-08 |
+| P0.46 | p0 | wait in-flight before off-lock WAL | done | finish_group_off_lock extra drain | 2026-09-08 |
 | P1.1 | p1 | 3-run caixa | todo | — | 2026-09-07 |
 | P2.1 | p2 | 3/3 quiet ≥1× | todo | 0182 P1.1 | 2026-09-07 |
 | P2.2 | p2 | leftover hang | done | 0181 P0.3 steal | 2026-09-07 |
