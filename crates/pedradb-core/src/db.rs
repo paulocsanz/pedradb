@@ -5576,7 +5576,7 @@ impl<E: Env> Db<E> {
                 // chunk so fill overlaps SST. One parked + one encoding
                 // + the open tail is the RAM bound; a second overflow
                 // while parked is still full encodes inline.
-                if self.parked_bulk.is_empty() {
+                if crate::write_admission_kernel::batch_is_empty(self.parked_bulk.len() as u64) {
                     self.parked_bulk
                         .push_back((family.to_string(), Arc::new(run)));
                 } else {
