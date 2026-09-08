@@ -4267,7 +4267,7 @@ impl<E: Env> Db<E> {
                 // Step even on tombstone heads — visibility and cursor
                 // advance must not be coupled (short-circuit spin).
                 let visible = kind == ValueType::Value
-                    && (range_dels.is_empty()
+                    && (crate::write_admission_kernel::batch_is_empty(range_dels.len() as u64)
                         || !crate::merge::range_deleted(head.user_key.as_ref(), seq, &range_dels));
                 c.step_current_user();
                 if visible {
