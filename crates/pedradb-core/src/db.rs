@@ -112,7 +112,7 @@ const RESOLVED_BLOCK_TAG: u64 = 0x7265_736f_6c76_3d21;
 /// value could be misread as a vlog pointer, or already starts with the
 /// marker (so reader/writer stay inverse for every input).
 pub fn escape_inline_value(value: Bytes) -> Bytes {
-    if value.is_empty() {
+    if crate::write_admission_kernel::batch_is_empty(value.len() as u64) {
         return value;
     }
     if value[0] == INLINE_ESCAPE || vlog::decode_vlog_ptr(&value).is_some() {
