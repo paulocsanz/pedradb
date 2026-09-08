@@ -508,7 +508,7 @@ fn query_param_unique(path: &str, key: &str) -> Result<Option<String>> {
     if query_values_conflict(&refs) {
         return Err(HttpError::App(format!("conflicting {key}")));
     }
-    if vs[0].is_empty() {
+    if pedradb_core::write_admission_kernel::batch_is_empty(vs[0].len() as u64) {
         return Err(HttpError::App(format!("bad {key}")));
     }
     Ok(Some(vs[0].clone()))
