@@ -48,7 +48,7 @@ impl FileRec {
     }
 
     fn promote(&mut self) {
-        if !self.pending.is_empty() {
+        if !pedradb_core::write_admission_kernel::batch_is_empty(self.pending.len() as u64) {
             self.durable.extend_from_slice(&self.pending);
             self.pending.clear();
         }
