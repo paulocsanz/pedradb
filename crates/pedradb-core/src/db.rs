@@ -3899,7 +3899,7 @@ impl<E: Env> Db<E> {
     /// Drop the retired read cache when no L0 remains to cover.
     fn sync_retired_to_l0(&mut self) {
         let l0 = self.level_file_count(0);
-        if l0 == 0 {
+        if crate::write_admission_kernel::batch_is_empty(l0 as u64) {
             self.retired_pending.clear();
             self.retired_fold = MemTable::new();
             self.retired_l0s = 0;
