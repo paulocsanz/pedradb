@@ -697,7 +697,7 @@ impl<F: EnvFile> ValueLog<F> {
         live: &[(u64, Bytes)],
         bytes_before: u64,
     ) -> Result<(VlogRewriteStats, std::collections::HashMap<u64, Bytes>)> {
-        if dest_num == 0 {
+        if crate::write_admission_kernel::batch_is_empty(dest_num as u64) {
             return Err(CoreError::Internal(
                 "rewrite_live_to_blob dest must be a numbered blob".into(),
             ));
