@@ -581,7 +581,7 @@ fn handle_conn(
         expect_auth(stream, auth)?;
     }
     let body = read_frame(stream)?;
-    if body.is_empty() {
+    if pedradb_core::write_admission_kernel::batch_is_empty(body.len() as u64) {
         return Ok(());
     }
     match body[0] {
