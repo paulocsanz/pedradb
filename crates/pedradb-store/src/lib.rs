@@ -4601,7 +4601,7 @@ impl<E: Env> StoreCluster<E> {
     /// axioms). AS-IS [`liveness_admitted_as_is`] would admit without them.
     #[must_use]
     pub fn claim_eventual_election(&self, es1: bool, es2: bool, es3: bool) -> bool {
-        if self.ids.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(self.ids.len() as u64) {
             return false;
         }
         membership_kernel::liveness_admitted(es1, es2, es3)
