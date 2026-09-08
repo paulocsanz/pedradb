@@ -1072,7 +1072,7 @@ impl CountCache {
     ) {
         let ck = crate::db::count_cache_key(start, end, limit);
         let mut g = self.state.lock();
-        if g.capacity == 0 {
+        if crate::write_admission_kernel::batch_is_empty(g.capacity as u64) {
             return;
         }
         // RFC-0054: an answer observed before an envelope-dropped publish
