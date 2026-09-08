@@ -1,42 +1,57 @@
 ---
 name: otimizar
 description: >
-  Make Pedra faster than RocksDB default on every cartaz cell. The
-  product of every fire is a measured number (qps, p50, avg_group,
-  ratio, stall_us) — a SHA is not a land. Prove scale with diagnose
-  (no 1B runtime). Use for otimizar, gargalo, ganhar, mapa, diagnose,
+  Make Pedra faster than RocksDB default on every Linux cartaz cell.
+  The product of a fire is Pedra vs Rocks `sync=false` on a named-loss
+  cell (or a new dependent shape with that ratio) — never a Pedra-only
+  Darwin micro. Use for otimizar, gargalo, ganhar, mapa, diagnose,
   escala, /otimizar. Not formal. Not overfit audit.
 ---
 
-# /otimizar — o fire produz um número, não um SHA
+# /otimizar — o fire produz um ratio vs Rocks, não um SHA Darwin
 
 ## Grind pressure (one block, overwritten each fire)
 
-- Last fire: worked (`ef0e937` P0.57 qps 7403→10270; STALL lead_write gone; remaining group_path 1.49s)
-- Why: 64 MiB WAL F_PREALLOCATE on first commit (~1.5s Darwin)
-- This fire MUST land: prealloc at Wal create + group_profile number beating max 1.49s / qps 10k
-- Forbidden this fire: grouping knobs; JSON; Darwin as cartaz; SHA without `number:`
-- Deeper: `Wal::create_on` `reserve_space`; test `rfc0180_wal_prealloc_at_create`
+- Last fire: worked (rockset_hybrid COMPARE + vs-Rocks ratio=0.123 DIAG; overwrite_mc4 DIAG 1.896 with Rocks collapsed 106k≪260k — not a win)
+- Why: Linux overwrite_mc4 0.557× still unpaid; new shape is a named loss
+- This fire MUST land: engine cut aimed at Linux overwrite_mc4 `compat_over_rocksdb` or rockset_hybrid 0.123
+- Forbidden this fire: group_profile as the number; Darwin as Linux win; collapsed Rocks as win
+- Deeper: overwrite_mc4 vs quiet Rocks; rockset ingest batch path
 
 Peer: Rocks default `ROCKS_PARITY_SYNC=0`. G1 1c write-per-op ≠ win.
-Fjall = absoluto. Darwin DIAG ≠ cartaz. Cartaz tables live in RFCs;
-**this fire still pastes its own meter line.**
+Fjall = absoluto, never a ratio win. **Linux 3-run = cartaz. Darwin vs
+Rocks = DIAG of that cell. Pedra-only `group_profile` is not a number
+while any Linux <1× cell is unpaid.**
+
+When the user asks "progress", "benchmarks", "<1×": answer the **Linux
+vs Rocks** table first. Darwin group_profile is not the answer.
 
 ## Meter (first tool calls — skip = failed fire)
 
-No engine diff and no RFC checkbox before this stdout exists. Paste it.
+The unpaid number is `compat_over_rocksdb` on the rank-1 cell. No engine
+diff before this stdout exists.
 
-**Write cell** (overwrite_mc4 / grouping / stall) — async, peer class:
+**Write / YCSB / dependents cell** (the Linux <1× row):
 
 ```bash
-PEDRA_STALL_US=50000 cargo run -q --release -p rocksdb-parity-bench \
-  --example group_profile -- 4 4000 /tmp/pedra-gp 100
+export ROCKS_PARITY_SYNC=0 ROCKS_PARITY_MC_FRESH=1 ROCKS_PARITY_CLIENTS=4
+export ROCKS_PARITY_ONLY=deps_cache_overwrite_mc4   # rank-1 cell
+OUT=/tmp/pedra-vs-rocks
+for eng in compat rocksdb; do
+  feat=; [ "$eng" = rocksdb ] && feat="--features real"
+  cargo run -q --release -p rocksdb-parity-bench $feat \
+    --bin rocks-parity-bench -- "$OUT/$eng" "$eng"
+done
+ROCKS_PARITY_PEER="$OUT/rocksdb/rocks_parity_bench.json" \
+  cargo run -q --release -p rocksdb-parity-bench --bin rocks-parity-compare -- \
+    "$OUT/compat/rocks_parity_bench.json" "$OUT/compare"
 ```
 
-Read `avg_group=` `qps=` `p50` `max` and any `STALL <phase> us=`.
-G1 `put()` is not overwrite_mc4. Static `pedra diagnose write --clients 4`
-`cut=grouping` is a lever **name**, not a number. WRITEPHASE OPS=32
-seed-diluted `avg_group` is not a number.
+Paste `compat_over_rocksdb=` and both QPS. Quiet-host overwrite_mc4 Rocks
+≳260 kQPS. Collapsed Rocks ≠ win. `sync: true` in the peer JSON → refuse.
+
+`group_profile` / `PEDRA_STALL_US` / static `cut=grouping` / seed-diluted
+WRITEPHASE = **lever probe**, not the fire's number.
 
 **GET / probes** — gerador, no 1B runtime:
 
@@ -45,134 +60,124 @@ cargo run -q --release -p rocksdb-parity-bench --bin pedra -- diagnose get \
   --keys 1000000000 --ram 68719476736
 ```
 
-`cut=probe_path` / `class=as_is_walk` → cut probes, not disk.
-`cut=indistinguishable` → do not cry walk-all.
+Linux 3-run is cartaz. Darwin same-boot vs Rocks is DIAG. Caixa blocked
+→ still run the Meter above (Darwin DIAG of the Linux cell), then cut.
 
-**Cartaz ratio** — `rocks-parity-bench`, `ROCKS_PARITY_SYNC=0`, Linux 3-run.
-Darwin = DIAG. Quiet-host overwrite_mc4 Rocks ≳260 kQPS. Collapsed Rocks ≠ win.
+## Linux <1× (same-class) — rank lives here
+
+Unpaid until Linux 3-run ≥1.0 quiet, or a named ceiling (C):
+
+| cell | Linux cartaz | notes |
+|---|---|---|
+| overwrite_mc4 | **0.557×** 3/3 | rank 1. Isolated Darwin mediana 1.002 named loss 0.816. Caixa not re-run after 0180 |
+| ycsb_f_mc4 | mediana 1.47, run2 **0.766×** | 3/3 quiet still unpaid |
+| apply_mc4 same-class | not in floor 15/15 | G1 2.79× is another column. Darwin DIAG 0.48× |
+| prefix 100M @ 4 GiB | **0.70×** | caixa bounded-cache. Big-guest 100M is 1.05× |
+| kvrocks_set_mc50 | **0.37×** | **C** Adaptive-off n≥16 — document, do not "win" |
+| ycsb_b_mc4 | no Linux 3-run | in BALANCE_SHAPES — measure vs Rocks |
+
+`group_profile` avg_group≈4 does **not** pay overwrite_mc4.
 
 ## Paid lever (do not re-pick)
 
-| lever | paid when | next unpaid number |
-|---|---|---|
-| grouping 2–8 | timed `avg_group` ≥ `expected_group − 0.1` | `qps` / `p50_ns` / `stall_us` / max |
-| wal on-lock | `STALL lead_write` / `lone_wal` ≪ previous max or gone | qps / p50 |
-| fd_ceiling 1c G1 | always (not a win) | other cells |
+A lever is paid when **that cell's vs-Rocks ratio** no longer names it,
+or when it is a named ceiling. `avg_group≈4` on Darwin does not pay a
+Linux 0.557× row. After grouping is a Darwin DIAG fact, the unpaid
+number is still `compat_over_rocksdb` on that shape.
 
-Picking a paid lever again is a **failed fire**. After grouping paid,
-`grouping_cap` / `wait_peer` / `last_peak` / `sibling_reentry` are paid.
+## Valid land (exactly one)
 
-## Valid land (exactly one; SHA is not the product)
-
-Journal **must** contain a line from **this** fire's meter stdout:
+Journal **must** contain, from **this** fire's Meter stdout:
 
 ```
-number: avg_group=… qps=… p50_ns=… max=… stall_us=… (before: …) DIAG|cartaz
+number: ratio=… pedra_qps=… rocks_qps=… shape=… (DIAG|cartaz)
 ```
 
-Same line first in `## Prova`. Missing, copied from a previous fire, or
-only `cut=grouping` = **failed**. Grind autopsy: no `number:` = **noop**.
+No `ratio=` vs Rocks = **failed**. `avg_group` / `qps` / `stall_us` from
+`group_profile` = **failed** while a Linux <1× cell is unpaid.
+Copied number = failed. Grind: that journal line missing or Pedra-only = **noop**.
 
 Then exactly one of:
 
-1. **Engine** — production fn + named test. The unpaid number moved, **or**
-   a new `STALL <phase> us=` the previous meter did not name (qps/p50/max
-   still re-measured). Policy hole only with before/after of that meter.
-2. **New cartaz shape** — real use missing from `COMPARE_SHAPES`. Same
-   xorshift/zipf (`YcsbRunner`, seed `0x5EED_0001`). Append, never delete.
-   Must-win → also `BALANCE_SHAPES` + mapa **U**. Still a number if you
-   claim the cell.
-3. **Kernel physics that did not exist** — new lever token or
-   `predict_*_bottleneck` class. One-shot. Still a number if a cell moved.
+1. **Engine** — production fn + named test. The unpaid **ratio** moved
+   (DIAG or cartaz), or a policy hole on the rank-1 cell with before/after
+   of that same vs-Rocks meter.
+2. **New cartaz shape** — real use from `docs/rocksdb-dependents-benchmarks.md`
+   (or Fjall/Pebble-class workload) **missing** from `COMPARE_SHAPES`.
+   Same `YcsbRunner` / xorshift seed `0x5EED_0001`. Append, never delete.
+   Run vs Rocks (`SYNC=0`) this fire; paste `ratio=`. Must-win → also
+   `BALANCE_SHAPES` + mapa **U**.
+3. **Kernel physics that did not exist** — new `predict_*` class. One-shot.
+   Still a vs-Rocks number if it claims a cell moved.
 
-Anything else (eprint clone, JSON field, mapa-only, RFC tick, grouping
-knob after grouping paid) = **failed fire**. Patch Rank so that class
-cannot be picked again, then do (1) or (2) this turn.
+Anything else (group_profile P0, eprint clone, JSON field, mapa-only,
+RFC tick) = **failed fire**.
 
-Caixa / 100M / 1B **não** desculpa turno vazio.
-
-## 0. Gerador (sem runtime 1B)
+## 0. Gerador (sem 1B)
 
 Não WARM 100M. Não "preciso da caixa para saber o lever".
-
-GET composto (P2.35, spec Intel 4 GHz): `--cache happy|capacity|cold`.
-WRITE estático nomeia o lever; o **número** é o Meter acima.
-
-```bash
-cargo run -q --release -p rocksdb-parity-bench --bin pedra -- diagnose get \
-  --keys 50000000 --ram 68719476736 --cache capacity
-PEDRA_WRITE_PHASE_STATS=1 ROCKS_YCSB_OPS=2048 ROCKS_PARITY_ONLY=deps_cache_overwrite_mc4 \
-  ROCKS_PARITY_CLIENTS=4 ROCKS_PARITY_SYNC=0 ROCKS_PARITY_MC_FRESH=1 \
-  cargo run -q --release -p rocksdb-parity-bench --bin rocks-parity-bench -- --engine compat
-```
-
-Mapa vs RFC: RFC + meter ganham. Actualiza `references/mapa.md` no mesmo change.
+WRITE estático nomeia o lever; o **número** é o Meter vs Rocks.
 
 ## 1. Board
 
-Lê `references/mapa.md`. **S** Linux 3-run — não reabrir. **W** perda com
-lever — cortar o número não-pago. **U** perda sem diagnose — Meter
+Lê `references/mapa.md`. **S** Linux 3-run — não reabrir. **W** perda
+com lever — cortar o ratio. **U** perda sem diagnose — Meter vs Rocks
 primeiro. **C** teto — documentar. **T** kernel não emite — só física nova.
 
-## 2. Rank (unpaid number, not unpaid RFC checkbox)
+## 2. Rank (Linux <1× first)
 
-1. **W/U** cujo número não-pago o Meter já nomeou → corta essa fase.
-   Grouping unpaid (`avg_group` < expected−0.1) vence COMPARE.
-   Grouping **paid** → stall/qps, never another grouping knob.
-2. Policy hole num segundo path, with the same meter before/after.
-3. Uso real em `docs/benchmarks.md` / dependents **não** em `COMPARE_SHAPES`
-   → land (2) acima.
-4. **C** só documenta.
-5. Caixa 3-run: diz bake, cai para 1–3. Nunca para.
-6. Nunca skiplist sem `despark=1` (mem/gap ≥15% **e** clients≥2).
-   Nunca Darwin como cartaz. Nunca T-clone (`classify_*` / `diagnose.lever`
-   numa impressora nova).
+1. Linux **same-class <1×** in the table above (overwrite_mc4, then
+   ycsb_f_mc4 3/3, then apply_mc4 same-class). Meter vs Rocks, then cut.
+2. `BALANCE_SHAPES` row with no Linux number (today: ycsb_b_mc4) → measure.
+3. Real dependent / Fjall-class use **not** in `COMPARE_SHAPES` → land (2).
+   Source: `docs/rocksdb-dependents-benchmarks.md` (internal) / RFC-0043.
+   Do not re-add Kvrocks/MyRocks/Surreal/Nebula/Ceph already in COMPARE.
+4. **C** só documenta (kvrocks_set_mc50, G1 1c fd-ceiling).
+5. Caixa 3-run: diz bake, **cai para 1–3** (Darwin vs Rocks DIAG or new
+   shape). Never stop. Never fall through into `group_profile`.
+6. Nunca skiplist sem `despark=1`. Nunca Darwin como cartaz. Nunca T-clone.
 
 Rank vazio de verdade: **diz o bloco**. Não inventes linha T.
 
 ## 3. Novo bench (harness que já existe)
 
-- `Cfg` + `YcsbRunner::new` + `xorshift`. Os dois peers, o mesmo seed.
+- `Cfg` + `YcsbRunner::new` + `xorshift`. Pedra **e** Rocks, mesmo seed.
 - Append `COMPARE_SHAPES`. Nunca apagar shape para subir min_ratio.
 - Must-win → `BALANCE_SHAPES` + mapa **U** no mesmo turno.
 - Só o trait `Engine`. Sem crate novo (RFC-0182). Sem `db_bench` C++.
-- Depois: Meter + corte até S ou C nomeado. "Adicionei e perdi" não é win.
+- Fjall: `--features fjall`, QPS absoluto, never `compat_over_rocksdb` as win.
+- "Adicionei e perdi" não é win — keep the named loss.
 
 ## 4. Ganhar em todos
 
 Cartaz = `BALANCE_SHAPES` + cada must-win que (3) adicionar. Win = Linux
 3-run mediana ≥1.0 vs Rocks `sync=false`, quiet. Perdas nomeadas ficam.
-Fjall absoluto. G1 1c write-per-op é teto fd.
-
-Depois de um corte: `pedra diagnose balance` no conjunto. S→W recusa o PR.
 
 ## 5. Output
 
 ```markdown
-## Prova (gerador, sem 1B/caixa)
-- number: avg_group=… qps=… p50_ns=… max=… (before: …) DIAG|cartaz
-- get/probes: predict_get_bottleneck keys=… class=…
+## Prova
+- number: ratio=… pedra_qps=… rocks_qps=… shape=… DIAG|cartaz
+- Linux <1× still unpaid: …
 
 ## Corte (um)
-- Cell / unpaid number / fn de produção / teste nomeado
-- Porquê esta: …
-- Não fazer: skiplist; G1 1c win; Fjall gate; 4º crate; T-clone; paid lever
+- Cell / unpaid ratio / fn de produção / teste nomeado
+- Não fazer: group_profile as product; G1 1c win; Fjall gate; 4º crate
 
 ## Mapa
-- linhas que mudaram de classe (pointers)
+- linhas que mudaram de classe
 ```
-
-No `number:` line = failed fire. SHA in `## Corte` without that line = failed.
 
 ## Forbidden
 
-- SHA + named test without journal `number:` from this fire's meter.
-- N RFC P0s as "progress". Hours of grouping without qps/p50 is the failure.
-- Paid lever again (grouping knobs after `avg_group` paid).
+- Journal number from `group_profile` / stall_us / Pedra-only qps while a
+  Linux <1× cell is unpaid — **the hours-of-irrelevant-P0s failure**.
+- Answering "progress / benchmarks / <1×" with Darwin DIAG first.
+- SHA + named test without `ratio=` vs Rocks.
+- Darwin quoted as Linux win. Collapsed Rocks as win.
 - `balance_admits=0` / single-shape 0180.
 - Win vs `sync=true` ou G1-off.
 - WARM 100M em 4 GiB. `PEDRA_BULK_CHUNK_BYTES=4MB`.
 - RFC-0175. Push `origin` na árvore interna.
-- Parar porque "é caixa" sem ter corrido o Meter.
-- Static `cut=grouping` or seed-diluted avg_group as the number.
-- Darwin quoted as Linux win.
+- Parar porque "é caixa" sem Meter vs Rocks (Darwin DIAG of that cell)
+  or a new dependent shape.

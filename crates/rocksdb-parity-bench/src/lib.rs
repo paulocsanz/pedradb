@@ -13,9 +13,9 @@
 //!
 //! Opt-in suites grow the catalog (RFC-0043; never replace the official 16):
 //! `qs` (Quicksilver-inspired), `kvrocks` (Redis GET/SET/pipeline/SCAN),
-//! `myrocks` (sysbench point/range/tx + LinkBench-inspired mix), `rocksapi`
-//! (mixgraph / WBWI / compaction filter / ingest). See [`COMPARE_SHAPES`]
-//! and `docs/rocksdb-dependents-benchmarks.md`.
+//! `myrocks` (sysbench point/range/tx + LinkBench-inspired mix), `rockset`
+//! (`rockset_hybrid` ingest+get), `rocksapi` (mixgraph / WBWI / compaction
+//! filter / ingest). See [`COMPARE_SHAPES`].
 
 #![forbid(unsafe_code)]
 
@@ -274,6 +274,8 @@ pub const COMPARE_SHAPES: &[&str] = &[
     // RFC-0184 P2.36: 95% get mc4 already in BALANCE_SHAPES / run_clients;
     // compare iterated COMPARE only, so the cell was invisible on the cartaz.
     "ycsb_b_mc4",
+    // RFC-0043 — Rockset (→OpenAI) converged index. Ingest batch + point get.
+    "rockset_hybrid",
 ];
 
 /// Length of the RFC-0041 official prefix of [`COMPARE_SHAPES`].
@@ -2293,6 +2295,64 @@ impl YcsbRunner {
         blocks
     }
 
+    /// RFC-0043 — Rockset converged index: ingest batch + point get per op.
+    /// Same-class `sync=false`. Not SQL/aggregator.
+    pub fn run_rockset<E: Engine>(&mut self, e: &E) -> Vec<String> {
+        if !shape_wanted("rockset_hybrid") {
+            return Vec::new();
+        }
+        e.set_write_sync(write_sync_for_suite("rockset"));
+        let records = self.cfg.records;
+        let cfg_ops = self.cfg.ops;
+        let ingest = self.cfg.batch.max(1).min(8);
+        let yval = vec![b'R'; self.cfg.payload];
+        let mut rng = std::mem::take(&mut self.rng);
+        for i in 0..records {
+            assert!(e.put(&dkey(i), &yval), "rockset seed {i}");
+        }
+        let phase0 = e.write_phase_snapshot();
+        let mut lats = Vec::with_capacity(cfg_ops);
+        let mut errors = 0u64;
+        let t0 = Instant::now();
+        for op in 0..cfg_ops {
+            let t = Instant::now();
+            let mut ok = true;
+            for j in 0..ingest {
+                let u = (op * ingest + j) % records;
+                if !e.put(&dkey(u), &yval) {
+                    ok = false;
+                    break;
+                }
+            }
+            if ok {
+                let q = self.pick(&mut rng, records);
+                if e.get(&dkey(q)).is_err() {
+                    ok = false;
+                }
+            }
+            if !ok {
+                errors += 1;
+            }
+            lats.push(ms(t));
+        }
+        let mut blocks = vec![summarize(
+            "rockset_hybrid",
+            cfg_ops,
+            t0.elapsed(),
+            &mut lats,
+        )];
+        eprintln!("[rocks-parity] rockset_hybrid done ops={cfg_ops} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 50, cfg_ops as u64);
+            eprint_write_diagnose("rockset_hybrid", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
+        self.rng = rng;
+        blocks
+    }
+
     /// RFC-0043 P2.6 — Oxigraph still ships RocksDB (feature `rocksdb`, 0.5.x
     /// 2026). Shape is SPO point lookup + triple insert batch, not SPARQL.
     pub fn run_oxigraph<E: Engine>(&mut self, e: &E) -> Vec<String> {
@@ -3971,6 +4031,7 @@ mod tests {
             "compaction_filter_drop",
             "ingest_sst",
             "ycsb_b_mc4",
+            "rockset_hybrid",
         ] {
             assert!(
                 COMPARE_SHAPES.contains(&name),
@@ -4280,6 +4341,13 @@ mod tests {
             ven[0].contains("\"lever\":\"get_path\""),
             "venice_fanout_get is 32 point-gets:\n{}",
             ven[0]
+        );
+        let rok = r.run_rockset(&e);
+        assert_eq!(block_names(&rok), vec![Some("rockset_hybrid")]);
+        assert!(
+            rok[0].contains("\"diagnose\": {\"lever\":"),
+            "rockset_hybrid JSON needs diagnose.lever:\n{}",
+            rok[0]
         );
         let oxi = r.run_oxigraph(&e);
         assert_eq!(
