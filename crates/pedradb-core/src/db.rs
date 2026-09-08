@@ -5014,7 +5014,7 @@ impl<E: Env> Db<E> {
                     }
                 }
             }
-            let keys: &[(bool, &[u8])] = if heap.is_empty() { &stack[..n] } else { &heap };
+            let keys: &[(bool, &[u8])] = if crate::write_admission_kernel::batch_is_empty(heap.len() as u64) { &stack[..n] } else { &heap };
             if self.bulk_latch.has_high_water(family) {
                 let _ = self
                     .bulk_latch
