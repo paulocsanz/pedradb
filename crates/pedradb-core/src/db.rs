@@ -5862,7 +5862,7 @@ impl<E: Env> Db<E> {
         } else {
             Vec::new()
         };
-        if families.is_empty() || nums.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(families.len() as u64) || nums.is_empty() {
             let num = nums.first().copied().unwrap_or(1);
             let one = Self::write_imm_l0_file(env, dir, sync, imm, num)?;
             return Ok(vec![one]);
