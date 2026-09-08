@@ -398,7 +398,7 @@ impl PeerClient {
         let mut s = self.connect()?;
         write_frame(&mut s, &b)?;
         let body = read_frame(&mut s)?;
-        if body.is_empty() || body[0] == 0 {
+        if pedradb_core::write_admission_kernel::batch_is_empty(body.len() as u64) || body[0] == 0 {
             return Ok(None);
         }
         let mut off = 1;
