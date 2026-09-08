@@ -2963,7 +2963,7 @@ fn write_sst_try_sorted_body(
         if !same_user && bloom_active {
             bloom.insert(uk);
         }
-        if block_buf.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(block_buf.len() as u64) {
             block_first_user = Some(ikey.user_key.clone());
         }
         let pre_len = block_buf.len();
