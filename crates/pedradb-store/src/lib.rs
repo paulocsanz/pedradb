@@ -3086,7 +3086,7 @@ fn election_timeout_for(node_id: u64, range_id: u64, member_ids: &[u64]) -> u64 
     let mut sorted: Vec<u64> = member_ids.to_vec();
     sorted.sort_unstable();
     sorted.dedup();
-    if sorted.is_empty() {
+    if pedradb_core::write_admission_kernel::batch_is_empty(sorted.len() as u64) {
         // [4, 9] — independent of pure node_id so multi-range still spreads.
         return 4
             + ((node_id
