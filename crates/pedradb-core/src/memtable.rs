@@ -440,9 +440,12 @@ pub(crate) fn idx_prefix(key: &[u8]) -> &[u8] {
 }
 
 /// Park the live mem (O(1) swap) before inserting `pfx` when leftover is
-/// another one-slash family already at half the write buffer — seed
-/// `ycsb/` then timed `c/` must not mix in one table (Linux overwrite
-/// 25M leftover ≈ buffer). Always-on; not a Cargo feature.
+/// another one-slash family. Seed `ycsb/` then timed `c/` must not mix.
+/// P0.68 required mem ≥ write-buffer/2; after seed auto-flush the
+/// remainder is often 10–80 MiB and still mixed. P0.75 parks any
+/// non-empty leftover. Host must not materialize that parked table
+/// while `recently_multi` (flush_worker_tick) — park-alone barged
+/// leftover+L0. Always-on; not a Cargo feature.
 pub(crate) fn park_foreign_idx_decision(
     pfx: &[u8],
     mem_empty: bool,
@@ -450,16 +453,13 @@ pub(crate) fn park_foreign_idx_decision(
     mem_bytes: usize,
     flush_limit: Option<usize>,
 ) -> bool {
-    if mem_empty || live_has_pfx {
+    if mem_empty || live_has_pfx || mem_bytes == 0 {
         return false;
     }
     if pfx.is_empty() || !pfx.ends_with(b"/") {
         return false;
     }
-    let Some(lim) = flush_limit.filter(|n| *n > 0) else {
-        return false;
-    };
-    mem_bytes >= lim / 2
+    flush_limit.filter(|n| *n > 0).is_some()
 }
 
 pub use crate::cf_kernel::{cf_family_of, infer_sst_cf, key_in_cf_family};
@@ -3124,8 +3124,8 @@ mod tests {
     fn rfc0180_park_foreign_idx_decision() {
         let lim = Some(256 * 1024 * 1024);
         assert!(
-            !park_foreign_idx_decision(b"c/", false, false, 12 * 1024 * 1024, lim),
-            "small leftover (Darwin 100k) must not park"
+            park_foreign_idx_decision(b"c/", false, false, 12 * 1024 * 1024, lim),
+            "P0.75: post-flush remainder must park (leftover+L0 ~44 MiB, 100k ~12 MiB)"
         );
         assert!(
             park_foreign_idx_decision(b"c/", false, false, 200 * 1024 * 1024, lim),

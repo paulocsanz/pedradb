@@ -4282,14 +4282,17 @@ where
                         // still run at moderate QPS (5–10 k, 100–200 µs
                         // between puts) — P0.33 skipped that path.
                         if host_worker_skip_opportunistic(&inner) {
-                            let l0 = inner.with_read(|db| db.level_file_count(0));
-                            // RFC-0180 P0.69: L0-at-trigger barges the write
-                            // lock in the mc4 handoff gap. 1c moderate QPS
-                            // is not recently_multi — drain stays.
-                            if l0 >= pedradb_core::L0_COMPACTION_TRIGGER
-                                && !host_worker_skip_l0_during_multi(&inner)
-                            {
-                                let _ = compat_compact_once(&inner, &gate);
+                            // RFC-0180 P0.75: skip the `with_read` L0 count
+                            // when recently_multi — compact is skipped anyway
+                            // (P0.69) and the read lock barges mc4 apply.
+                            if !host_worker_skip_l0_during_multi(&inner) {
+                                let l0 = inner.with_read(|db| db.level_file_count(0));
+                                // RFC-0180 P0.69: L0-at-trigger barges the write
+                                // lock in the mc4 handoff gap. 1c moderate QPS
+                                // is not recently_multi — drain stays.
+                                if l0 >= pedradb_core::L0_COMPACTION_TRIGGER {
+                                    let _ = compat_compact_once(&inner, &gate);
+                                }
                             }
                             // RFC-0180 P0.70: 1c seed WAL would otherwise
                             // grow without the 200 ms idle rotate.
@@ -4352,9 +4355,15 @@ where
                         // RFC-0039 P2.2: if L0 is at/above the trigger, drain
                         // now — do not wait for the 200 ms write-idle window
                         // (that was the scan-vs-apply race).
+                        // RFC-0180 P0.75: 200 µs opportunistic hold expired
+                        // but recently_multi (2 ms) still — no with_read /
+                        // materialize (same barge as flush_worker_tick).
+                        if host_worker_skip_l0_during_multi(&inner) {
+                            wait = poll;
+                            continue;
+                        }
                         let l0 = inner.with_read(|db| db.level_file_count(0));
                         if l0 >= pedradb_core::L0_COMPACTION_TRIGGER
-                            && !host_worker_skip_l0_during_multi(&inner)
                         {
                             // One job per tick: `while` re-took the gate
                             // between jobs faster than DB::compact's
@@ -4590,6 +4599,12 @@ fn host_worker_skip_l0_during_multi<E: PedraEnv>(inner: &ConcurrentDb<E>) -> boo
 /// without thread or fsync timing.
 fn flush_worker_tick<E: PedraEnv>(inner: &ConcurrentDb<E>) {
     if host_worker_skip_during_writes(inner) {
+        return;
+    }
+    // RFC-0180 P0.75: mc4 `recently_multi` must not materialize parked
+    // leftover (install takes `db.write()` + rebuilds SST order). P0.68
+    // park without this barge made leftover+L0 Pedra QPS flat/down.
+    if host_worker_skip_l0_during_multi(inner) {
         return;
     }
     if host_worker_skip_opportunistic(inner) {
@@ -5941,6 +5956,40 @@ mod tests {
             !host_worker_skip_l0_during_multi(&db.inner),
             "2 ms hold elapsed — L0 drain may run"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0180 P0.75: flush worker must not materialize parked leftover
+    /// while recently_multi (install takes db.write()).
+    #[test]
+    fn rfc0180_flush_worker_skips_materialize_when_recently_multi() {
+        let dir = tmp("host-skip-flush-multi");
+        let db = DB::open_default(&dir).unwrap();
+        db.put(b"ycsb/000000", vec![b'y'; 64]).unwrap();
+        db.flush().unwrap();
+        let n = 4usize;
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(n));
+        std::thread::scope(|s| {
+            for i in 0..n {
+                let db = &db;
+                let barrier = std::sync::Arc::clone(&barrier);
+                s.spawn(move || {
+                    barrier.wait();
+                    for j in 0..64u8 {
+                        db.put([i as u8, j], [i as u8, j, 1]).unwrap();
+                    }
+                });
+            }
+        });
+        assert!(
+            db.inner.recently_multi(std::time::Duration::from_secs(1)),
+            "mc4 burst must set last_multi"
+        );
+        assert!(
+            host_worker_skip_l0_during_multi(&db.inner),
+            "recently_multi(2ms) skips flush-worker materialize"
+        );
+        flush_worker_tick(&db.inner);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

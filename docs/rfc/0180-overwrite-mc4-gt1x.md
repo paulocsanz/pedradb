@@ -250,6 +250,16 @@ medida no mesmo harness isolado.
       inserts). Empty prefix and `ycsb/` stay BTree (ycsb_e / zipf range).
       Always-on, no Cargo feature. Tests `rfc0180_c_slash_point_hashmap`,
       `rfc0180_idx_prefix_one_slash_splits_c_and_ycsb`. status: `done`
+- [x] **P0.75** Park any non-empty foreign one-slash leftover **and**
+      skip flush-worker / compact-worker `with_read`+materialize while
+      `recently_multi`. P0.74 park-alone remetered Pedra 177k→175k
+      (host barged install). Darwin leftover+L0 2M vs quiet Rocks
+      `sync=false`: `ratio=0.795` (208 925 / 262 885, p50 17.4 vs
+      11.5 µs) — named loss; previous 0.91 was vs Rocks 195 k (not
+      quiet ≳244 k). Tests
+      `rfc0180_park_foreign_idx_remainder_below_half_buffer`,
+      `rfc0180_flush_worker_skips_materialize_when_recently_multi`.
+      status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
 
@@ -330,6 +340,7 @@ medida no mesmo harness isolado.
 | P0.69 | p0 | skip L0-at-trigger while recently_multi | done | 1c drain stays; no Cargo feature | 2026-09-08 |
 | P0.70 | p0 | 1c checkpoint WAL when ≥2× write-buffer | done | mc4 stage/park stays; no Cargo feature | 2026-09-08 |
 | P0.71 | p0 | c/ tail idx point HashMap | done | ycsb/ + empty prefix stay BTree | 2026-09-08 |
+| P0.75 | p0 | park remainder + skip materialize while multi | done | leftover+L0 DIAG 0.795 vs quiet Rocks 263k | 2026-09-08 |
 | P1.1 | p1 | 3-run caixa | todo | — | 2026-09-07 |
 | P2.1 | p2 | 3/3 quiet ≥1× | todo | 0182 P1.1 | 2026-09-07 |
 | P2.2 | p2 | leftover hang | done | 0181 P0.3 steal | 2026-09-07 |
