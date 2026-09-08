@@ -1213,7 +1213,7 @@ impl SstTable {
                 return Ok(e.clone());
             }
         }
-        let all = if self.index.is_empty() {
+        let all = if crate::write_admission_kernel::batch_is_empty(self.index.len() as u64) {
             // v1 should already have cache filled at open.
             return Err(CoreError::Internal(format!(
                 "SST {} has no entries cache and no index",
