@@ -10217,6 +10217,20 @@ impl<E: Env> Db<E> {
         // skips while apply/bypass holds this path, instead of barging
         // the write lock between batches.
         let _pin = self.pin_commit_inflight();
+        match self.async_ops_stage(batch)? {
+            AsyncOpsStaged::Applied(seq) => Ok(seq),
+            AsyncOpsStaged::Pending { ops, seq } => {
+                let wal = self
+                    .wal
+                    .lock()
+                    .encode_and_write_op_batches(&[ops.as_slice()]);
+                self.async_ops_publish(ops, seq, wal)
+            }
+        }
+    }
+
+    /// Prepare + stage under the write lock (RFC-0180 P0.48).
+    pub(crate) fn async_ops_stage(&mut self, batch: Vec<BatchOp>) -> Result<AsyncOpsStaged> {
         if !self.write_admission_idle() {
             let families = self.batch_families(&batch);
             self.ensure_write_admitted_for(&families)?;
@@ -10260,63 +10274,42 @@ impl<E: Env> Db<E> {
         if ladder.is_empty() {
             let seq = self.last_sequence();
             self.publish_sequence(seq);
-            return Ok(seq);
+            return Ok(AsyncOpsStaged::Applied(seq));
         }
-        let batch = ladder;
-        let st = self.phase_stats.clone();
-        let t0 = st.as_ref().map(|_| Instant::now());
-        let (ops, seq) = self.prepare_write_ops_spill(batch, false)?;
-        if let (Some(st), Some(t0)) = (st.as_ref(), t0) {
-            st.prepare_ns
-                .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
-        }
+        let (ops, seq) = self.prepare_write_ops_spill(ladder, false)?;
         self.vlog_prepare_wal(false)?;
-        {
-            let t1 = st.as_ref().map(|_| Instant::now());
-            // One hop: same bytes as encode_write_op_batches + write_pending
-            // (RFC-0180 P0.42). Group path already does this off lock (P0.40).
-            let n = self
-                .wal
-                .lock()
-                .encode_and_write_op_batches(&[ops.as_slice()])?;
-            self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
-            if let (Some(st), Some(t1)) = (st.as_ref(), t1) {
-                st.wal_ns
-                    .fetch_add(t1.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        self.stage_unapplied_ops(&ops);
+        Ok(AsyncOpsStaged::Pending { ops, seq })
+    }
+
+    /// Apply after off-lock (or on-lock) async WAL write (RFC-0180 P0.48).
+    pub(crate) fn async_ops_publish(
+        &mut self,
+        ops: Vec<WriteOp>,
+        seq: SequenceNumber,
+        wal: Result<u64>,
+    ) -> Result<SequenceNumber> {
+        self.unstage_unapplied_ops(&ops);
+        match wal {
+            Err(e) => {
+                self.fence_durability(&e, FenceClass::of_core(&e));
+                Err(e)
+            }
+            Ok(n) => {
+                self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
+                if !self.feed_is_lazy() {
+                    self.change_log
+                        .extend(ops.iter().map(ChangeEntry::from_write_op));
+                }
+                self.note_dirty_points(&ops);
+                apply_ops_owned(&mut self.mem, ops);
+                self.publish_sequence(seq);
+                let _ = self.maybe_auto_flush_with(
+                    async_ok_flush_is_stage_only() || self.defer_auto_compact,
+                );
+                Ok(seq)
             }
         }
-        // F213: feed the non-lazy change log on the async path too — the
-        // write is visible via `get` once published; `commit_ops_with`
-        // extends regardless of sync, and a later durable commit would
-        // otherwise persist a CHANGELOG that never contains this event.
-        if !self.feed_is_lazy() {
-            self.change_log
-                .extend(ops.iter().map(ChangeEntry::from_write_op));
-        }
-        let t2 = st.as_ref().map(|_| Instant::now());
-        self.note_dirty_points(&ops);
-        apply_ops_owned(&mut self.mem, ops);
-        if let (Some(st), Some(t2)) = (st.as_ref(), t2) {
-            st.mem_ns
-                .fetch_add(t2.elapsed().as_nanos() as u64, Ordering::Relaxed);
-        }
-        let t3 = st.as_ref().map(|_| Instant::now());
-        self.publish_sequence(seq);
-        if let (Some(st), Some(t3)) = (st.as_ref(), t3) {
-            st.publish_ns
-                .fetch_add(t3.elapsed().as_nanos() as u64, Ordering::Relaxed);
-        }
-        let t4 = st.as_ref().map(|_| Instant::now());
-        // Same stage-only contract as `commit_async_one` (RFC-0180 P0.14).
-        // Full `flush_cf` here was apply_mc4 WRITEPHASE flush_check 148µs.
-        let _ =
-            self.maybe_auto_flush_with(async_ok_flush_is_stage_only() || self.defer_auto_compact);
-        if let (Some(st), Some(t4)) = (st.as_ref(), t4) {
-            st.flush_check_ns
-                .fetch_add(t4.elapsed().as_nanos() as u64, Ordering::Relaxed);
-            st.commits.fetch_add(1, Ordering::Relaxed);
-        }
-        Ok(seq)
     }
 
     /// Lone-async 1-op put/delete: no `Vec<BatchOp>` / `Vec<WriteOp>`
@@ -10500,6 +10493,20 @@ impl<E: Env> Db<E> {
 pub(crate) struct LoneInFlight {
     records: Vec<WriteOp>,
     seq: SequenceNumber,
+}
+
+/// RFC-0180 P0.48: prepare + stage under the Db write lock. Caller
+/// encodes off lock, then [`Db::async_ops_publish`].
+pub(crate) enum AsyncOpsStaged {
+    /// Bulk-only: already published, no WAL hop.
+    Applied(SequenceNumber),
+    /// Ladder ops staged; WAL write still due.
+    Pending {
+        /// Prepared WAL ops (not yet `write()`n).
+        ops: Vec<WriteOp>,
+        /// Last sequence in this batch.
+        seq: SequenceNumber,
+    },
 }
 
 impl<E: Env> Db<E> {
