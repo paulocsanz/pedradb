@@ -9445,16 +9445,26 @@ impl<E: Env> Db<E> {
         g.results
             .resize_with(g.next_i, || None::<Result<SequenceNumber>>);
         self.group_prepare(g, batches, base);
-        if let Err(e) = self.vlog_prepare_wal(g.any_sync) {
-            let msg = e.to_string();
-            g.failed = true;
-            for (i, _, _) in &g.pending {
-                g.results[*i] = Some(Err(CoreError::Internal(format!(
-                    "vlog flush failed: {msg}"
-                ))));
+        match crate::write_admission_kernel::wal_commit_plan(g.any_sync, false) {
+            crate::write_admission_kernel::WalCommitPlan::AppendApplyOk
+            | crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+            | crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                assert!(
+                    !crate::write_admission_kernel::fence_on_sync_fail(g.any_sync, false),
+                    "planned vlog step before I/O ⇒ not Fence yet"
+                );
+                if let Err(e) = self.vlog_prepare_wal(g.any_sync) {
+                    let msg = e.to_string();
+                    g.failed = true;
+                    for (i, _, _) in &g.pending {
+                        g.results[*i] = Some(Err(CoreError::Internal(format!(
+                            "vlog flush failed: {msg}"
+                        ))));
+                    }
+                    g.pending.clear();
+                    return;
+                }
             }
-            g.pending.clear();
-            return;
         }
         self.group_append_ops(g);
     }

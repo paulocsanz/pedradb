@@ -899,6 +899,15 @@ mod tests {
             gstart.contains("fence_on_sync_fail("),
             "group_start must match fence_on_sync_fail"
         );
+        let gabs = named_fn_src(include_str!("db.rs"), "group_absorb").expect("group_absorb");
+        assert!(
+            gabs.contains("wal_commit_plan("),
+            "group_absorb must match the plan fn"
+        );
+        assert!(
+            gabs.contains("fence_on_sync_fail("),
+            "group_absorb must match fence_on_sync_fail"
+        );
     }
 
     #[test]
