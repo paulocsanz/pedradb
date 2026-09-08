@@ -41,6 +41,25 @@ macro_rules! rwlock_client_may_mutate_as_is_body {
     }};
 }
 
+macro_rules! occ_member_fate_body {
+    ($too_old:expr, $conflict:expr) => {
+        if $too_old {
+            OccMemberFate::TooOld
+        } else if $conflict {
+            OccMemberFate::Conflict
+        } else {
+            OccMemberFate::Ok
+        }
+    };
+}
+
+macro_rules! occ_member_fate_as_is_body {
+    ($too_old:expr, $conflict:expr) => {{
+        let _ = ($too_old, $conflict);
+        OccMemberFate::Ok
+    }};
+}
+
 /// First-committer-wins predicate (OCC): a transaction that read
 /// snapshot `snap` against current `last_seq` conflicts iff the window
 /// `(snap, last_seq]` is non-empty **and** some key it touched was
@@ -84,6 +103,7 @@ pub fn group_validate(reads: &[OccRead], last_seq: u64) -> Vec<bool> {
 
 /// Fate of one OCC member after `group_validate` (and snapshot TooOld).
 /// `validate_occ_batch` matches this — TooOld wins over Conflict.
+#[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OccMemberFate {
     /// Apply with the group.
@@ -95,21 +115,17 @@ pub enum OccMemberFate {
 }
 
 /// Caller of `group_validate`: too-old or conflict ⇒ abort that member.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn occ_member_fate(too_old: bool, conflict: bool) -> OccMemberFate {
-    if too_old {
-        OccMemberFate::TooOld
-    } else if conflict {
-        OccMemberFate::Conflict
-    } else {
-        OccMemberFate::Ok
-    }
+    occ_member_fate_body!(too_old, conflict)
 }
 
 /// AS-IS: never abort (lagging member commits).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn occ_member_fate_as_is(_too_old: bool, _conflict: bool) -> OccMemberFate {
-    OccMemberFate::Ok
+    occ_member_fate_as_is_body!(_too_old, _conflict)
 }
 
 /// ConcurrentDb `validate_occ_batch` / `lone_commit` plan: TooOld wins
@@ -355,6 +371,37 @@ pub fn rwlock_client_may_mutate_as_is(_holding_write: bool) -> (ok: bool)
         ok == true,
 {
     rwlock_client_may_mutate_as_is_body!(_holding_write)
+}
+
+#[derive(PartialEq, Eq, Copy, Clone)]
+pub enum OccMemberFate {
+    Ok,
+    TooOld,
+    Conflict,
+}
+
+pub open spec fn occ_member_fate_spec(too_old: bool, conflict: bool) -> OccMemberFate {
+    if too_old {
+        OccMemberFate::TooOld
+    } else if conflict {
+        OccMemberFate::Conflict
+    } else {
+        OccMemberFate::Ok
+    }
+}
+
+pub fn occ_member_fate(too_old: bool, conflict: bool) -> (d: OccMemberFate)
+    ensures
+        d == occ_member_fate_spec(too_old, conflict),
+{
+    occ_member_fate_body!(too_old, conflict)
+}
+
+pub fn occ_member_fate_as_is(_too_old: bool, _conflict: bool) -> (d: OccMemberFate)
+    ensures
+        d == OccMemberFate::Ok,
+{
+    occ_member_fate_as_is_body!(_too_old, _conflict)
 }
 
 } // verus!

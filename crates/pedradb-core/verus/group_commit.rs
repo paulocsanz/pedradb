@@ -139,13 +139,6 @@ pub fn occ_member_fate(too_old: bool, conflict: bool) -> (d: OccMemberFate)
     }
 }
 
-pub fn occ_member_fate_as_is(_too_old: bool, _conflict: bool) -> (d: OccMemberFate)
-    ensures
-        d == OccMemberFate::Ok,
-{
-    OccMemberFate::Ok
-}
-
 pub open spec fn occ_batch_plan_spec(
     too_old: &[bool],
     reads: &[OccRead],
