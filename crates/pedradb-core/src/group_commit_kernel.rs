@@ -173,6 +173,18 @@ macro_rules! pct_campaign_default_depth_as_is_body {
     };
 }
 
+macro_rules! default_pct_depth_raised_body {
+    () => {
+        false
+    };
+}
+
+macro_rules! default_pct_depth_raised_as_is_body {
+    () => {
+        true
+    };
+}
+
 /// First-committer-wins predicate (OCC): a transaction that read
 /// snapshot `snap` against current `last_seq` conflicts iff the window
 /// `(snap, last_seq]` is non-empty **and** some key it touched was
@@ -378,15 +390,17 @@ pub fn pct_campaign_default_depth_as_is() -> u64 {
 
 /// RFC-0070 P2.2: admit a “0070 raised the default PCT depth” claim.
 /// Always false.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn default_pct_depth_raised() -> bool {
-    false
+    default_pct_depth_raised_body!()
 }
 
 /// AS-IS: 0070 P2 is rounded to “we now run d>2 by default”.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn default_pct_depth_raised_as_is() -> bool {
-    true
+    default_pct_depth_raised_as_is_body!()
 }
 
 /// Visibility publish after group (or lone) WAL I/O (RFC-0071 / R-group-glue).
@@ -635,6 +649,20 @@ pub fn pct_campaign_default_depth_as_is() -> (d: u64)
         d == 3,
 {
     pct_campaign_default_depth_as_is_body!()
+}
+
+pub fn default_pct_depth_raised() -> (ok: bool)
+    ensures
+        ok == false,
+{
+    default_pct_depth_raised_body!()
+}
+
+pub fn default_pct_depth_raised_as_is() -> (ok: bool)
+    ensures
+        ok == true,
+{
+    default_pct_depth_raised_as_is_body!()
 }
 
 #[derive(PartialEq, Eq, Copy, Clone)]
