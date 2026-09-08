@@ -352,7 +352,7 @@ impl PeerClient {
         let mut s = self.connect()?;
         write_frame(&mut s, &b)?;
         let body = read_frame(&mut s)?;
-        if body.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(body.len() as u64) {
             return Err(RaftError::Network("empty propose reply".into()));
         }
         if body[0] == 0 {
