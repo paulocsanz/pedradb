@@ -6194,7 +6194,7 @@ impl<E: Env> Db<E> {
 
     /// Keep `mem` as a point/MVCC cache covering one newly installed L0.
     pub fn retire_mem_as_l0_cache(&mut self, mem: MemTable) {
-        if !mem.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(mem.len() as u64) {
             self.retired_pending.push(mem);
             self.retired_l0s = self.retired_l0s.saturating_add(1);
             self.trim_retired_cache();
