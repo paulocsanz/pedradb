@@ -323,6 +323,13 @@ GLUE_SCRIPTS = [
         "fence_on_sync_fail",
         "wal_commit_plan",
     ),
+    (
+        "try_rotate_wal",
+        "crates/pedradb-core/src/db.rs",
+        ("wal_rotate_decision", "wal_segment_is_empty", "rotate_wal_now"),
+        "wal_segment_is_empty",
+        "wal_rotate_decision",
+    ),
 ]
 
 
@@ -374,6 +381,10 @@ def script_compose_board() -> None:
             unpaid_script += 1
             print(f"  {glue} plan={plan} UNPAID order still inline{extra}")
     print(f"  unpaid_script={unpaid_script}/{len(GLUE_SCRIPTS)}")
+    print(
+        "  leftover_next try_rotate_wal empty-segment skip paid "
+        "iff wal_segment_is_empty; next: dual-unfold that fn"
+    )
     print("== compose glue callers (rank 5: unfold plan AND callee) ==")
     for glue, rel, tokens, callee, plan in GLUE_SCRIPTS:
         unfold_plan = lean_unfolds(plan)

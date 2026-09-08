@@ -6303,7 +6303,7 @@ impl<E: Env> Db<E> {
         // worker tick during read-only phases) rewrites MANIFEST+CURRENT and
         // pays two fdatasync barriers per tick — 10k+ barriers per slipstream
         // guest run, ~42 s of flush traffic competing with the read legs.
-        if self.wal.lock().position() == 0 {
+        if crate::flush_kernel::wal_segment_is_empty(self.wal.lock().position()) {
             return Ok(());
         }
         self.rotate_wal_now()

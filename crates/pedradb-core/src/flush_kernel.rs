@@ -69,6 +69,13 @@ macro_rules! auto_flush_due_body {
     };
 }
 
+/// Empty current WAL segment: rotate would only rewrite MANIFEST (idle poll).
+macro_rules! wal_segment_is_empty_body {
+    ($pos:expr) => {
+        $pos == 0u64
+    };
+}
+
 /// OCC snap uses published seq while a commit owns the WAL (lock-order).
 macro_rules! occ_snap_uses_published_body {
     ($inflight:expr) => {
@@ -233,6 +240,20 @@ pub fn auto_flush_due(mem_bytes: u64, armed: bool, limit: u64) -> bool {
 /// AS-IS: never auto-flush.
 #[must_use]
 pub fn auto_flush_due_as_is(_mem_bytes: u64, _armed: bool, _limit: u64) -> bool {
+    false
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// Current WAL segment has no framed payload — rotate is a no-op rewrite.
+#[must_use]
+pub fn wal_segment_is_empty(pos: u64) -> bool {
+    wal_segment_is_empty_body!(pos)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: never skip (idle poll rotates empty, two fdatasyncs per tick).
+#[must_use]
+pub fn wal_segment_is_empty_as_is(_pos: u64) -> bool {
     false
 }
 
@@ -435,6 +456,25 @@ pub fn auto_flush_due_as_is(mem_bytes: u64, armed: bool, limit: u64) -> (d: bool
         d == false,
 {
     let _ = (mem_bytes, armed, limit);
+    false
+}
+
+pub open spec fn wal_segment_is_empty_spec(pos: u64) -> bool {
+    pos == 0
+}
+
+pub fn wal_segment_is_empty(pos: u64) -> (d: bool)
+    ensures
+        d == wal_segment_is_empty_spec(pos),
+{
+    wal_segment_is_empty_body!(pos)
+}
+
+pub fn wal_segment_is_empty_as_is(pos: u64) -> (d: bool)
+    ensures
+        d == false,
+{
+    let _ = pos;
     false
 }
 
@@ -755,6 +795,29 @@ mod tests {
             wal_rotate_decision_as_is_ignore_pin(s),
             WalRotateAction::RotateWal,
             "AS-IS dente: rotate while pin live"
+        );
+    }
+
+    #[test]
+    fn wal_segment_is_empty_on_live_zero_is_not_ok() {
+        assert!(wal_segment_is_empty(0));
+        assert!(
+            !wal_segment_is_empty_as_is(0),
+            "AS-IS dente: rotate empty segment"
+        );
+        assert!(!wal_segment_is_empty(1));
+        let rot = include_str!("db.rs")
+            .split("fn try_rotate_wal(&mut self)")
+            .nth(1)
+            .and_then(|s| s.split("fn wal_pin_state").next())
+            .expect("try_rotate_wal");
+        assert!(
+            rot.contains("wal_segment_is_empty("),
+            "try_rotate_wal must match wal_segment_is_empty"
+        );
+        assert!(
+            rot.contains("wal_rotate_decision("),
+            "try_rotate_wal must match wal_rotate_decision"
         );
     }
 
