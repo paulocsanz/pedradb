@@ -973,13 +973,37 @@ impl WriteGroup {
                     }
                 }
             } else {
-                let r = guard.commit_async_ops(ops);
-                if fair {
-                    parking_lot::RwLockWriteGuard::unlock_fair(guard);
-                } else {
-                    drop(guard);
+                // RFC-0180 P0.48: multi-op WAL off the Db write lock.
+                guard.begin_commit();
+                match guard.async_ops_stage(ops) {
+                    Err(e) => {
+                        guard.end_commit();
+                        if fair {
+                            parking_lot::RwLockWriteGuard::unlock_fair(guard);
+                        } else {
+                            drop(guard);
+                        }
+                        Err(e)
+                    }
+                    Ok(crate::db::AsyncOpsStaged::Applied(seq)) => {
+                        guard.end_commit();
+                        if fair {
+                            parking_lot::RwLockWriteGuard::unlock_fair(guard);
+                        } else {
+                            drop(guard);
+                        }
+                        Ok(seq)
+                    }
+                    Ok(crate::db::AsyncOpsStaged::Pending { ops: recs, seq }) => {
+                        let wal = guard.wal_arc();
+                        drop(guard);
+                        let io = wal.lock().encode_and_write_op_batches(&[recs.as_slice()]);
+                        let mut g = db.write();
+                        let r = g.async_ops_publish(recs, seq, io);
+                        g.end_commit();
+                        r
+                    }
                 }
-                r
             };
             self.batches.fetch_add(1, Ordering::Relaxed);
             self.batch_ops.fetch_add(n, Ordering::Relaxed);
@@ -4399,6 +4423,68 @@ mod tests {
                     db.get(&[b'b', t, i]).as_deref(),
                     Some(payload.as_slice()),
                     "lost bypass async put t{t}/{i}"
+                );
+            }
+        }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0180 P0.48: 9 writers × 2-op batches → bypass `commit_async_ops`
+    /// WAL off lock. Keys must recover.
+    #[test]
+    fn rfc0180_bypass_async_ops_wal_off_lock_recovers() {
+        let dir = temp_dir();
+        const THREADS: u8 = 9;
+        const PER: u8 = 4;
+        {
+            let db = ConcurrentDb::open_with(
+                &dir,
+                OpenOptions {
+                    wal_full_fsync: true,
+                    history: Default::default(),
+                    wal_recovery: Default::default(),
+                    sync: false,
+                    auto_flush_bytes: None,
+                    auto_compact_sst_count: None,
+                    auto_compact_sst_bytes: None,
+                    exclusive: true,
+                    large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
+                },
+            )
+            .unwrap();
+            std::thread::scope(|s| {
+                for t in 0..THREADS {
+                    let db = &db;
+                    s.spawn(move || {
+                        for i in 0..PER {
+                            db.apply_batch_vec_with(
+                                vec![
+                                    BatchOp::put([b'o', t, i, 0], [b'x', t, i]),
+                                    BatchOp::put([b'o', t, i, 1], [b'y', t, i]),
+                                ],
+                                WriteOptions::no_sync(),
+                            )
+                            .unwrap();
+                        }
+                    });
+                }
+            });
+            db.close().unwrap();
+        }
+        let db = ConcurrentDb::open(&dir).unwrap();
+        for t in 0..THREADS {
+            for i in 0..PER {
+                assert_eq!(
+                    db.get(&[b'o', t, i, 0]).as_deref(),
+                    Some(&[b'x', t, i][..]),
+                    "lost bypass async ops put t{t}/{i}/0"
+                );
+                assert_eq!(
+                    db.get(&[b'o', t, i, 1]).as_deref(),
+                    Some(&[b'y', t, i][..]),
+                    "lost bypass async ops put t{t}/{i}/1"
                 );
             }
         }
