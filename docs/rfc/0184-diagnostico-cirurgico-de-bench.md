@@ -189,6 +189,14 @@ a linha quando há phasesΔ. Sem harness novo.
 - [x] **P2.36** `COMPARE_SHAPES` inclui `ycsb_b_mc4` (já em
       `BALANCE_SHAPES` / `run_clients`; compare só itera COMPARE).
       Teste `compare_shapes_keep_official_16_prefix`. — status: `done`
+- [x] **P2.37** Relógio WRITE estático nomeia mais que `grouping` vs
+      `fd_ceiling`: `async_wal` (1c same-class), `fd_ceiling` (`--sync 1`),
+      `grouping` → `next=lock_hold`, grouping pago → `lock_hold`,
+      n≥16 → `lock_convoy`, `read_pct≥40` → `get_path`. Diagnose
+      medido: `lock_wait` n=2–8 grouping pago = `lock_hold`, não
+      convoy. CLI honra `--read-pct --sync --avg-group`. Testes
+      `predict_write_mix_names_the_four_cells`,
+      `mc4_lock_wait_grouping_paid_is_lock_hold`. — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -239,6 +247,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.34 | p2 | probe-class + write clock + bpe | done | 1M indistinguishable; 10M walk; `predict_write` | 2026-09-07 |
 | P2.35 | p2 | GetWork × MachineSpec | done | `predict_get_composed`; `--cache happy|capacity|cold` | 2026-09-08 |
 | P2.36 | p2 | COMPARE_SHAPES ycsb_b_mc4 | done | 95% get mc4 visível no compare | 2026-09-08 |
+| P2.37 | p2 | static write cuts beyond grouping/fd | done | lock_hold/async_wal/get_path/lock_convoy; next= | 2026-09-08 |
 
 ## Acceptance Criteria
 
@@ -284,6 +293,8 @@ a linha quando há phasesΔ. Sem harness novo.
   `pedra diagnose balance` JSON `shapes` (P2.32);
   `predict_get_bottleneck` 1B without a get (P2.33);
   `predict_get_composed` happy/capacity/cold (P2.35);
+  `predict_write_mix_names_the_four_cells` (P2.37);
+  `mc4_lock_wait_grouping_paid_is_lock_hold` (P2.37);
   `composed_does_not_charge_disk_on_bloom_reject`;
   `ycsb_c_all_reads_timed_zero_is_get_path`;
   `rfc0184_diagnosis_json_has_lever`;
