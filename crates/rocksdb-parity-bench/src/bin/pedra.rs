@@ -167,7 +167,12 @@ fn diagnose_probes_cmd(args: &[String]) -> Result<(), ()> {
         "pedra diagnose probes per_get={per_get} p_best={p_best} class={}",
         class.token()
     );
-    println!(r#"{{"class":"{}"}}"#, class.token());
+    println!(
+        r#"{{"class":"{}","per_get":{},"p_best":{}}}"#,
+        class.token(),
+        per_get,
+        p_best
+    );
     Ok(())
 }
 
