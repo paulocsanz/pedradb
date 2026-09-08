@@ -1098,7 +1098,6 @@ impl MemTable {
         Some(arc)
     }
 
-    #[allow(dead_code)]
     fn tail_idx_get(&self, user_key: &[u8]) -> Option<usize> {
         let shard = self.tail_idx.get(cf_prefix(user_key))?;
         Self::shard_lookup(shard, user_key)
@@ -1171,6 +1170,21 @@ impl MemTable {
 
     /// Insert a put or deletion. Does not assign sequence numbers — caller does.
     pub fn insert(&mut self, key: InternalKey, value: Bytes) {
+        self.insert_ex(key, value, false);
+    }
+
+    /// [`Self::insert`] with optional latest-only supersede (see
+    /// [`Self::insert_many_ex`]).
+    pub fn insert_ex(&mut self, mut key: InternalKey, mut value: Bytes, supersede: bool) {
+        if supersede {
+            match self.try_supersede(key, value) {
+                Ok(()) => return,
+                Err(pair) => {
+                    key = pair.0;
+                    value = pair.1;
+                }
+            }
+        }
         let entry_bytes = key.user_key.len() + value.len() + 8;
         let is_rd = key.kind == ValueType::RangeDeletion;
         // Consecutive same-seq replace only (O(1)). apply_mc4 keys are distinct;
@@ -1223,11 +1237,33 @@ impl MemTable {
     /// consecutive same-seq replace scan (apply keys are distinct) — it does
     /// **not** skip the index.
     pub fn insert_many(&mut self, items: impl IntoIterator<Item = (InternalKey, Bytes)>) {
+        self.insert_many_ex(items, false);
+    }
+
+    /// [`Self::insert_many`]. `supersede` replaces the live slot for a user
+    /// key in place (tail idx or spilled map) instead of appending a new
+    /// version. Callers may set it only when no snapshot pin / OCC snap can
+    /// observe the dropped sequence (RFC-0180 P0.62). Distinct keys are
+    /// unchanged — apply_mc4 / raftlog do not regress.
+    pub fn insert_many_ex(
+        &mut self,
+        items: impl IntoIterator<Item = (InternalKey, Bytes)>,
+        supersede: bool,
+    ) {
         let iter = items.into_iter();
         let hint = iter.size_hint().0;
         let skip_replace = hint >= 16;
         let mut any = false;
-        for (key, value) in iter {
+        for (mut key, mut value) in iter {
+            if supersede {
+                match self.try_supersede(key, value) {
+                    Ok(()) => continue,
+                    Err(pair) => {
+                        key = pair.0;
+                        value = pair.1;
+                    }
+                }
+            }
             let entry_bytes = key.user_key.len() + value.len() + 8;
             let is_rd = key.kind == ValueType::RangeDeletion;
             if !skip_replace {
@@ -1276,6 +1312,105 @@ impl MemTable {
         if any {
             self.invalidate_tail_ord();
         }
+    }
+
+    /// Replace the live version of `key` when it already sits in the tail or
+    /// the spilled map. `Err` returns the pair so the caller can append.
+    fn try_supersede(
+        &mut self,
+        key: InternalKey,
+        value: Bytes,
+    ) -> std::result::Result<(), (InternalKey, Bytes)> {
+        if key.kind == ValueType::RangeDeletion {
+            return Err((key, value));
+        }
+        if let Some(i) = self.tail_idx_get(key.user_key.as_ref()) {
+            self.supersede_tail_at(i, key, value);
+            return Ok(());
+        }
+        if self.map.contains_key(key.user_key.as_ref()) {
+            self.supersede_map(key, value);
+            return Ok(());
+        }
+        Err((key, value))
+    }
+
+    fn supersede_tail_at(&mut self, i: usize, key: InternalKey, value: Bytes) {
+        let v = &mut self.tail[i];
+        let old_rd = v.key.kind == ValueType::RangeDeletion;
+        let old_n = v.key.user_key.len() + v.value.len() + 8;
+        let new_n = key.user_key.len() + value.len() + 8;
+        v.key = key;
+        v.value = value;
+        self.approx_bytes = self
+            .approx_bytes
+            .saturating_sub(old_n)
+            .saturating_add(new_n);
+        if new_n >= old_n {
+            Self::bump_cf_bytes_map(
+                &mut self.cf_bytes,
+                v.key.user_key.as_ref(),
+                new_n - old_n,
+                true,
+            );
+        } else {
+            Self::bump_cf_bytes_map(
+                &mut self.cf_bytes,
+                v.key.user_key.as_ref(),
+                old_n - new_n,
+                false,
+            );
+        }
+        if old_rd {
+            self.range_tombstones = self.range_tombstones.saturating_sub(1);
+        }
+        self.tail_max_seq = self.tail_max_seq.max(v.key.sequence);
+    }
+
+    fn supersede_map(&mut self, key: InternalKey, value: Bytes) {
+        let uk = key.user_key.clone();
+        let new_n = key.user_key.len() + value.len() + 8;
+        let new_seq = key.sequence;
+        let accounted = {
+            let Some(vers) = self.map.get_mut(&uk) else {
+                return;
+            };
+            let mut old_n = 0usize;
+            let mut old_rd = 0usize;
+            let old_versions = match vers {
+                Versions::One(v) => {
+                    old_n = v.key.user_key.len() + v.value.len() + 8;
+                    if v.key.kind == ValueType::RangeDeletion {
+                        old_rd = 1;
+                    }
+                    1usize
+                }
+                Versions::Many(list) => {
+                    for v in list.iter() {
+                        old_n = old_n.saturating_add(v.key.user_key.len() + v.value.len() + 8);
+                        if v.key.kind == ValueType::RangeDeletion {
+                            old_rd = old_rd.saturating_add(1);
+                        }
+                    }
+                    list.len()
+                }
+            };
+            *vers = Versions::One(Version { key, value });
+            (old_n, old_versions, old_rd)
+        };
+        let (old_n, old_versions, old_rd) = accounted;
+        self.entries = self.entries.saturating_sub(old_versions.saturating_sub(1));
+        self.approx_bytes = self
+            .approx_bytes
+            .saturating_sub(old_n)
+            .saturating_add(new_n);
+        if new_n >= old_n {
+            Self::bump_cf_bytes_map(&mut self.cf_bytes, uk.as_ref(), new_n - old_n, true);
+        } else {
+            Self::bump_cf_bytes_map(&mut self.cf_bytes, uk.as_ref(), old_n - new_n, false);
+        }
+        self.range_tombstones = self.range_tombstones.saturating_sub(old_rd);
+        self.tail_max_seq = self.tail_max_seq.max(new_seq);
     }
 
     /// `insert_map` with optional version-GC floor (see
@@ -2704,6 +2839,90 @@ mod tests {
         assert_eq!(a.len(), b.len());
         assert_eq!(a.get(b"k1", 3), b.get(b"k1", 3));
         assert_eq!(a.approx_memory_usage(), b.approx_memory_usage());
+    }
+
+    /// RFC-0180 P0.62: unpinned overwrite of the same user key must not
+    /// grow the tail (Darwin overwrite_mc4 is 40 versions/key at 10k×400k).
+    /// Distinct keys still append. Pinned MVCC is the caller's job (they
+    /// pass `supersede=false`).
+    #[test]
+    fn rfc0180_insert_many_supersede_overwrite_does_not_grow_tail() {
+        let mut mt = MemTable::new();
+        let k = Bytes::from_static(b"c/000001");
+        let items: Vec<_> = (1..=40u64)
+            .map(|seq| {
+                (
+                    InternalKey::new(k.clone(), seq, ValueType::Value),
+                    Bytes::from(vec![b'v'; 8]),
+                )
+            })
+            .collect();
+        mt.insert_many_ex(items, true);
+        assert_eq!(mt.tail_len(), 1, "supersede keeps one tail slot");
+        assert_eq!(mt.len(), 1);
+        assert_eq!(
+            mt.get(b"c/000001", 40),
+            Lookup::Found(Bytes::from(vec![b'v'; 8]))
+        );
+        assert_eq!(
+            mt.get(b"c/000001", 1),
+            Lookup::NotFound,
+            "dropped seq is gone — only legal with no snapshot pin"
+        );
+        // Distinct keys still grow.
+        let more = [
+            (
+                InternalKey::new(Bytes::from_static(b"c/000002"), 41, ValueType::Value),
+                Bytes::from_static(b"x"),
+            ),
+            (
+                InternalKey::new(Bytes::from_static(b"c/000003"), 42, ValueType::Value),
+                Bytes::from_static(b"y"),
+            ),
+        ];
+        mt.insert_many_ex(more, true);
+        assert_eq!(mt.tail_len(), 3);
+        assert_eq!(mt.len(), 3);
+        // Default insert_many still keeps every version (F20).
+        let mut keep = MemTable::new();
+        keep.insert_many([
+            (
+                InternalKey::new(Bytes::from_static(b"k"), 1, ValueType::Value),
+                Bytes::from_static(b"a"),
+            ),
+            (
+                InternalKey::new(Bytes::from_static(b"k"), 2, ValueType::Value),
+                Bytes::from_static(b"b"),
+            ),
+        ]);
+        assert_eq!(keep.tail_len(), 2);
+        assert_eq!(keep.get(b"k", 1), Lookup::Found(Bytes::from_static(b"a")));
+        assert_eq!(keep.get(b"k", 2), Lookup::Found(Bytes::from_static(b"b")));
+    }
+
+    #[test]
+    fn rfc0180_insert_many_supersede_after_spill_replaces_map() {
+        let mut mt = MemTable::new();
+        mt.insert_many_ex(
+            [(
+                InternalKey::new(Bytes::from_static(b"k"), 1, ValueType::Value),
+                Bytes::from_static(b"old"),
+            )],
+            true,
+        );
+        mt.spill_tail();
+        assert_eq!(mt.tail_len(), 0);
+        mt.insert_many_ex(
+            [(
+                InternalKey::new(Bytes::from_static(b"k"), 2, ValueType::Value),
+                Bytes::from_static(b"new"),
+            )],
+            true,
+        );
+        assert_eq!(mt.tail_len(), 0, "supersede hits the spilled map, not tail");
+        assert_eq!(mt.len(), 1);
+        assert_eq!(mt.get(b"k", 2), Lookup::Found(Bytes::from_static(b"new")));
+        assert_eq!(mt.get(b"k", 1), Lookup::NotFound);
     }
 
     #[test]
