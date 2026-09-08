@@ -1991,4 +1991,14 @@ mod tests {
         let same = [1u64, 2, 3];
         assert!(!joint_still_active(&same, &same));
     }
+
+    #[test]
+    fn pending_joint_node_counts_on_live_non_member_is_not_ok() {
+        assert!(!pending_joint_node_counts(false));
+        assert!(
+            pending_joint_node_counts_as_is(false),
+            "AS-IS dente: count removed node"
+        );
+        assert!(pending_joint_node_counts(true));
+    }
 }

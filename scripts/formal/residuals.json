@@ -76,7 +76,7 @@
    "crates/pedradb-world/src/world_kernel.rs"
   ],
   "kernel_files": 58,
-  "kernel_loc": 22920,
+  "kernel_loc": 22930,
   "handler_loc": 107728,
   "db_rs_extracted": false,
   "proof_depth": {
@@ -133,7 +133,7 @@
     "tx_state_of"
    ]
   },
-  "single_artifact": 85,
+  "single_artifact": 86,
   "data_fate": 125
  },
  "residuals": [
