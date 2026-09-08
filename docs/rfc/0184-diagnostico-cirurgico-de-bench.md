@@ -303,6 +303,13 @@ a linha quando há phasesΔ. Sem harness novo.
       `ratio=0.897` (50.8 k / 56.7 k QPS) — named loss. Same-class
       async. p50 72 vs 58 µs. Rocks 57 k batch-ops is not collapsed.
       Not Linux cartaz. — status: `done`
+- [x] **P2.56** `bluestore_omap_read_mc4` (get + 8-key scan, 4 clients)
+      in `COMPARE_SHAPES`, `BALANCE_SHAPES`, and `run_ceph_read_clients`.
+      Test `rfc0184_bluestore_omap_read_mc4_in_compare`. Darwin DIAG
+      `ratio=0.828` (1.12 M / 1.35 M QPS) — named loss. Timed is GET+scan
+      (seed async); JSON suite tag is host-default (`peer_sync=true`),
+      not a published win vs Rocks default. p50 0.9 vs 2.7 µs. Not Linux
+      cartaz. — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -372,6 +379,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.53 | p2 | kvrocks_scan_mc4 COMPARE+BALANCE | done | Kvrocks SCAN mc4; Darwin DIAG 1.687× not Linux cartaz | 2026-09-08 |
 | P2.54 | p2 | flink_window_state_mc4 COMPARE+BALANCE | done | Flink window-state mc4; Darwin DIAG 0.522× named loss | 2026-09-08 |
 | P2.55 | p2 | kafka_changelog_flush_mc4 COMPARE+BALANCE | done | Kafka changelog mc4; Darwin DIAG 0.897× named loss; no per-op flush | 2026-09-08 |
+| P2.56 | p2 | bluestore_omap_read_mc4 COMPARE+BALANCE | done | Ceph omap-read mc4; Darwin DIAG 0.828×; JSON host-default not a win | 2026-09-08 |
 
 ## Acceptance Criteria
 
@@ -436,7 +444,8 @@ a linha quando há phasesΔ. Sem harness novo.
   `rfc0184_solana_trailing_read_mc4_in_compare` (P2.52);
   `rfc0184_kvrocks_scan_mc4_in_compare` (P2.53);
   `rfc0184_flink_window_state_mc4_in_compare` (P2.54);
-  `rfc0184_kafka_changelog_flush_mc4_in_compare` (P2.55).
+  `rfc0184_kafka_changelog_flush_mc4_in_compare` (P2.55);
+  `rfc0184_bluestore_omap_read_mc4_in_compare` (P2.56).
 - **Telemetry / Analytics:** uma linha `diagnose dominant=… lever=…`;
   `benches[].diagnose.lever` no JSON; compare copia para a row.
   scale `get_hit` / `lookup_100` / `probe_hit` imprimem `diagnose get … class=…` (P2.6/P2.7/P2.21).
