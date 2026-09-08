@@ -10229,8 +10229,34 @@ impl<E: Env> Db<E> {
         self.snapshot_pins.is_empty() && self.occ_registry_floor().is_none()
     }
 
+    /// RFC-0180 P0.68: O(1) park leftover of another one-slash idx family
+    /// before applying `key`. Seed `ycsb/` then timed `c/` must not share
+    /// a memtable at write-buffer scale.
+    fn maybe_park_foreign_idx(&mut self, key: &[u8]) {
+        let pfx = crate::memtable::idx_prefix(key);
+        if !crate::memtable::park_foreign_idx_decision(
+            pfx,
+            self.mem.is_empty(),
+            self.mem.has_idx_prefix(pfx),
+            self.mem.approx_memory_usage(),
+            self.auto_flush_bytes,
+        ) {
+            return;
+        }
+        if self.stage_flush_imm().ok() == Some(true) {
+            return;
+        }
+        if !self.mem.is_empty() {
+            let taken = std::mem::replace(&mut self.mem, MemTable::new());
+            self.push_parked_unflushed(taken);
+        }
+    }
+
     /// Apply prepared ops to the memtable after durable WAL.
     pub(crate) fn apply_ops_to_mem(&mut self, ops: Vec<WriteOp>) {
+        if let Some(op) = ops.first() {
+            self.maybe_park_foreign_idx(op.key.as_ref());
+        }
         self.note_dirty_points(&ops);
         let supersede = self.apply_supersede_latest();
         apply_ops_owned(&mut self.mem, ops, supersede);
@@ -10332,6 +10358,9 @@ impl<E: Env> Db<E> {
                 }
                 self.note_dirty_points(&ops);
                 let supersede = self.apply_supersede_latest();
+                if let Some(op) = ops.first() {
+                    self.maybe_park_foreign_idx(op.key.as_ref());
+                }
                 apply_ops_owned(&mut self.mem, ops, supersede);
                 self.publish_sequence(seq);
                 let _ = self.maybe_auto_flush_with(
@@ -10375,6 +10404,7 @@ impl<E: Env> Db<E> {
         let t2 = st.as_ref().map(|_| Instant::now());
         self.note_dirty_points(std::slice::from_ref(&op));
         let supersede = self.apply_supersede_latest();
+        self.maybe_park_foreign_idx(op.key.as_ref());
         apply_one_owned(&mut self.mem, op, supersede);
         if let (Some(st), Some(t2)) = (st.as_ref(), t2) {
             st.mem_ns
@@ -10435,6 +10465,7 @@ impl<E: Env> Db<E> {
                 }
                 self.note_dirty_points(std::slice::from_ref(&op));
                 let supersede = self.apply_supersede_latest();
+                self.maybe_park_foreign_idx(op.key.as_ref());
                 apply_one_owned(&mut self.mem, op, supersede);
                 self.publish_sequence(seq);
                 let _ = self.maybe_auto_flush_with(
@@ -10510,6 +10541,9 @@ impl<E: Env> Db<E> {
         self.maybe_persist_changelog_after_durable_commit();
         self.note_dirty_points(&records);
         let supersede = self.apply_supersede_latest();
+        if let Some(op) = records.first() {
+            self.maybe_park_foreign_idx(op.key.as_ref());
+        }
         apply_ops_owned(&mut self.mem, records, supersede);
         self.publish_sequence(seq);
         // Same as `commit_ops_with` / `commit_async_ops`. P1.1 lone_sync
@@ -10916,6 +10950,11 @@ impl<E: Env> Db<E> {
         }
 
         let supersede = self.apply_supersede_latest();
+        if let Some((_, write_ops, _)) = appended.first() {
+            if let Some(op) = write_ops.first() {
+                self.maybe_park_foreign_idx(op.key.as_ref());
+            }
+        }
         for (i, write_ops, last_seq) in appended {
             self.note_dirty_points(&write_ops);
             apply_ops_owned(&mut self.mem, write_ops, supersede);
@@ -13775,6 +13814,42 @@ mod tests {
             Some(b"old".as_ref())
         );
         assert_eq!(pinned.get(b"k").as_deref(), Some(b"new".as_ref()));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0180 P0.68: first `c/` put parks write-buffer-scale `ycsb/` leftover.
+    #[test]
+    fn rfc0180_park_foreign_idx_on_new_slash_prefix() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(8192),
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        let val = vec![b'y'; 100];
+        for i in 0..50u32 {
+            db.put(format!("ycsb/{i:06}").as_bytes(), &val).unwrap();
+        }
+        let before = db.stats().mem_entries;
+        assert!(
+            before >= 40,
+            "ycsb leftover stays in mem before c/: {before}"
+        );
+        db.put(b"c/000001", b"v").unwrap();
+        assert!(
+            db.has_imm() || db.parked_unflushed_count() > 0,
+            "ycsb leftover must leave the live mem (imm or parked)"
+        );
+        assert_eq!(
+            db.get(b"ycsb/000000").as_deref(),
+            Some(val.as_slice()),
+            "parked ycsb must still get"
+        );
+        assert_eq!(db.get(b"c/000001").as_deref(), Some(b"v".as_ref()));
         let _ = fs::remove_dir_all(&dir);
     }
 

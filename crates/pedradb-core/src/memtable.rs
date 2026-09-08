@@ -439,6 +439,29 @@ pub(crate) fn idx_prefix(key: &[u8]) -> &[u8] {
     }
 }
 
+/// Park the live mem (O(1) swap) before inserting `pfx` when leftover is
+/// another one-slash family already at half the write buffer — seed
+/// `ycsb/` then timed `c/` must not mix in one table (Linux overwrite
+/// 25M leftover ≈ buffer). Always-on; not a Cargo feature.
+pub(crate) fn park_foreign_idx_decision(
+    pfx: &[u8],
+    mem_empty: bool,
+    live_has_pfx: bool,
+    mem_bytes: usize,
+    flush_limit: Option<usize>,
+) -> bool {
+    if mem_empty || live_has_pfx {
+        return false;
+    }
+    if pfx.is_empty() || !pfx.ends_with(b"/") {
+        return false;
+    }
+    let Some(lim) = flush_limit.filter(|n| *n > 0) else {
+        return false;
+    };
+    mem_bytes >= lim / 2
+}
+
 pub use crate::cf_kernel::{cf_family_of, infer_sst_cf, key_in_cf_family};
 
 fn family_from_prefix(prefix: &[u8]) -> String {
@@ -1129,6 +1152,12 @@ impl MemTable {
     fn tail_idx_get(&self, user_key: &[u8]) -> Option<usize> {
         let shard = self.tail_idx.get(idx_prefix(user_key))?;
         Self::shard_lookup(shard, user_key)
+    }
+
+    /// Whether this table already holds `pfx` in the live tail index.
+    #[must_use]
+    pub(crate) fn has_idx_prefix(&self, pfx: &[u8]) -> bool {
+        self.tail_idx.contains_key(pfx)
     }
 
     /// Fold [`Self::tail`] into the BTree (SST write / fold / tests).
@@ -3039,6 +3068,54 @@ mod tests {
             !got.iter().any(|k| *k == b"c/000001".as_ref()),
             "c/ must not leak into d/m window: {got:?}"
         );
+    }
+
+    #[test]
+    fn rfc0180_park_foreign_idx_decision() {
+        let lim = Some(256 * 1024 * 1024);
+        assert!(
+            !park_foreign_idx_decision(b"c/", false, false, 12 * 1024 * 1024, lim),
+            "small leftover (Darwin 100k) must not park"
+        );
+        assert!(
+            park_foreign_idx_decision(b"c/", false, false, 200 * 1024 * 1024, lim),
+            "write-buffer-scale leftover must park"
+        );
+        assert!(!park_foreign_idx_decision(
+            b"c/",
+            false,
+            true,
+            200 * 1024 * 1024,
+            lim
+        ));
+        assert!(!park_foreign_idx_decision(
+            b"c/",
+            true,
+            false,
+            200 * 1024 * 1024,
+            lim
+        ));
+        assert!(!park_foreign_idx_decision(
+            b"lock",
+            false,
+            false,
+            200 * 1024 * 1024,
+            lim
+        ));
+        assert!(!park_foreign_idx_decision(
+            b"",
+            false,
+            false,
+            200 * 1024 * 1024,
+            lim
+        ));
+        assert!(!park_foreign_idx_decision(
+            b"c/",
+            false,
+            false,
+            200 * 1024 * 1024,
+            None
+        ));
     }
 
     #[test]
