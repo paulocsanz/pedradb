@@ -8468,7 +8468,7 @@ impl<E: Env> Db<E> {
                 return;
             }
         };
-        if entries.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(entries.len() as u64) {
             return;
         }
         self.change_log.replace_sorted(entries);
