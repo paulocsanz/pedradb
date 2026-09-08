@@ -1304,6 +1304,7 @@ impl YcsbRunner {
         }
 
         // myrocks_point_select — sysbench oltp_point_select (1-op canary).
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut gets, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -1323,8 +1324,16 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] myrocks_point_select done gets={gets} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
+            eprint_write_diagnose("myrocks_point_select", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
 
         // myrocks_read_only — sysbench oltp_read_only short PK range (HL).
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut scans, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -1344,8 +1353,16 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] myrocks_read_only done scans={scans} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
+            eprint_write_diagnose("myrocks_read_only", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
 
         // myrocks_write_tx — one OLTP tx = `batch` row updates, one WriteBatch.
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut rows, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -1374,10 +1391,18 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] myrocks_write_tx done rows={rows} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
+            eprint_write_diagnose("myrocks_write_tx", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
 
         // linkbench_mix — inspired by LinkBench proportions, not a replay:
         //   55% GET_LINKS_LIST (prefix scan), 15% GET_NODE,
         //   25% ADD/UPDATE_LINK as a 4-put batch, 5% DELETE_LINK.
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut scans, mut gets, mut writes, mut deletes, mut errors) =
             (0u64, 0u64, 0u64, 0u64, 0u64);
@@ -1439,6 +1464,13 @@ impl YcsbRunner {
         eprintln!(
             "[rocks-parity] linkbench_mix done scans={scans} gets={gets} writes={writes} deletes={deletes} errors={errors}"
         );
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 70, cfg_ops as u64);
+            eprint_write_diagnose("linkbench_mix", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
 
         self.rng = rng;
         blocks
@@ -3785,6 +3817,8 @@ mod tests {
 
     #[test]
     fn myrocks_suite_on_compat_engine() {
+        // RFC-0184 P2.10: myrocks WRITEPHASE → diagnose.lever (env at open).
+        std::env::set_var("PEDRA_WRITE_PHASE_STATS", "1");
         let dir = tempfile::tempdir().unwrap();
         let e = crate::engines::CompatEngine::open(dir.path());
         let cfg = Cfg {
@@ -3812,6 +3846,27 @@ mod tests {
                 Some("myrocks_write_tx"),
                 Some("linkbench_mix"),
             ]
+        );
+        for b in &blocks {
+            assert!(
+                b.contains("\"diagnose\": {\"lever\":"),
+                "RFC-0184 P2.10 myrocks JSON needs diagnose.lever:\n{b}"
+            );
+        }
+        assert!(
+            blocks[0].contains("\"lever\":\"get_path\""),
+            "myrocks_point_select is GET:\n{}",
+            blocks[0]
+        );
+        assert!(
+            blocks[1].contains("\"lever\":\"get_path\""),
+            "myrocks_read_only is range scan:\n{}",
+            blocks[1]
+        );
+        assert!(
+            blocks[3].contains("\"lever\":\"get_path\""),
+            "linkbench_mix is 70% read:\n{}",
+            blocks[3]
         );
         assert!(e.get(&nkey(0)).unwrap().is_some());
         // Seeded outgoing edge 0 → 1 survives unless the mix deleted it;
