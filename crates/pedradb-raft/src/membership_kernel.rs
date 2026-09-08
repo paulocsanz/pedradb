@@ -2105,4 +2105,15 @@ mod tests {
         );
         assert!(!recover_must_apply(2, 2));
     }
+
+    #[test]
+    fn recover_apply_node_counts_on_live_local_non_member_is_not_ok() {
+        assert!(recover_apply_node_counts(true, false));
+        assert!(
+            !recover_apply_node_counts_as_is(true, false),
+            "AS-IS dente: skip recover apply on local non-member"
+        );
+        assert!(recover_apply_node_counts(true, true));
+        assert!(!recover_apply_node_counts(false, true));
+    }
 }
