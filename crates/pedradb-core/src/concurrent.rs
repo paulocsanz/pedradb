@@ -414,6 +414,13 @@ fn sibling_reentry_spins() -> u32 {
     1024
 }
 
+/// RFC-0180 P0.55: unbounded wait_in_flight spun until a descheduled
+/// sibling ran (`group_profile` max 970 ms). No condvar. Last-op still
+/// stops via `in_flight_off_queue` (active drop) inside the bound.
+fn wait_in_flight_spins() -> u32 {
+    4096
+}
+
 /// RFC-0180 P0.51: the first arriver after a barrier sees `active==1`
 /// and `recently_concurrent==false`, takes `commit_async_one`, and the
 /// other three form a group (WRITEPHASE 1+3 → avg ~2.7). 256 `spin_loop`
@@ -1270,8 +1277,9 @@ impl WriteGroup {
     /// / previous-round recv finishing without a next put). Merge-only
     /// (2–8); n≥16 cap is 2.
     /// RFC-0180 P0.49: Acquire pairs with push_pending's Release.
+    /// RFC-0180 P0.55: bounded — unbounded spin was group_profile max 970 ms.
     fn wait_in_flight_to_queue(&self, batch_len: usize) {
-        loop {
+        for _ in 0..wait_in_flight_spins() {
             let q = self.queued_pending.load(Ordering::Acquire);
             let active = self.active.load(Ordering::Acquire);
             if !in_flight_off_queue(batch_len, q, active) {
@@ -7234,6 +7242,7 @@ mod tests {
         assert!(!in_flight_off_queue(2, 0, 16), "n≥16 cap=2 already met");
         assert!(in_flight_off_queue(1, 0, 16), "n≥16 still wait for 2nd");
         assert!(!in_flight_off_queue(4, 0, 4));
+        assert_eq!(wait_in_flight_spins(), 4096);
         // RFC-0180 P0.50: first re-enter after resign (active=1) still
         // waits for siblings when recently_concurrent. 1c does not.
         assert!(!sibling_reentry_needed(1, 0, 1, false, 4), "1c");
