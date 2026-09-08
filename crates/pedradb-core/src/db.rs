@@ -5479,7 +5479,7 @@ impl<E: Env> Db<E> {
     }
 
     fn install_bulk_run(&mut self, family: &str, run: &crate::bulk_run::BulkRun) -> Result<()> {
-        if run.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(run.len() as u64) {
             return Ok(());
         }
         let num = self.alloc_file_num();
