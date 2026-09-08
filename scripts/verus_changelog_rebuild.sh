@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Machine-check changelog SST-rebuild gate (RFC-0002 P22 / F53).
+# Machine-check changelog SST-rebuild gate on the file rustc links
+# (single artifact — not the twin-cópia). RFC-0002 P22 / F53.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-core/verus/changelog_rebuild.rs"
+SRC="$ROOT/crates/pedradb-core/src/changelog_kernel.rs"
 if [[ -x "${VERUS:-}" ]]; then
   :
 elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then

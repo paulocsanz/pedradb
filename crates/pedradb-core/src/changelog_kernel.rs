@@ -1,25 +1,71 @@
 //! Pure changelog SST-rebuild gate (RFC-0002 P22 / F53).
 //!
+//! **Single artifact:** this file is what `rustc` links *and* what Verus
+//! proves (`cfg(verus_keep_ghost)`). No twin-cópia.
+//!
+//!   ./scripts/verus_changelog_rebuild.sh
+//!
 //! Production [`crate::db::Db::maybe_rebuild_feed_from_live`] calls this.
 //! Scan of MemTable ∪ SSTs and persist of `CHANGELOG` are caller + axiom.
 
 #![forbid(unsafe_code)]
+
+macro_rules! changelog_needs_sst_rebuild_body {
+    ($feed_empty:expr, $last_sequence:expr) => {
+        $feed_empty && $last_sequence > 0
+    };
+}
+
+macro_rules! changelog_needs_sst_rebuild_as_is_body {
+    ($feed_empty:expr, $last_sequence:expr) => {{
+        let _ = ($feed_empty, $last_sequence);
+        false
+    }};
+}
+
+macro_rules! changelog_should_store_body {
+    ($commits_since:expr, $interval:expr) => {
+        $interval > 0 && $commits_since >= $interval
+    };
+}
+
+macro_rules! changelog_should_store_as_is_body {
+    ($commits_since:expr, $interval:expr) => {{
+        let _ = $interval;
+        $commits_since >= 1
+    }};
+}
+
+macro_rules! changelog_rebuild_within_budget_body {
+    ($live_entries:expr, $budget_entries:expr) => {
+        $live_entries <= $budget_entries
+    };
+}
+
+macro_rules! changelog_rebuild_within_budget_as_is_body {
+    ($live_entries:expr, $budget_entries:expr) => {{
+        let _ = ($live_entries, $budget_entries);
+        true
+    }};
+}
 
 /// Rebuild a last-per-key feed from MemTable ∪ SSTs when the loaded+WAL
 /// changelog is empty but the DB already has a durable sequence.
 ///
 /// After `flush` the WAL is truncated; a missing `CHANGELOG` must not leave
 /// fold/journal with `changes_after(0) == []` while SST keys are live.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn changelog_needs_sst_rebuild(feed_empty: bool, last_sequence: u64) -> bool {
-    feed_empty && last_sequence > 0
+    changelog_needs_sst_rebuild_body!(feed_empty, last_sequence)
 }
 
 /// AS-IS F53: WAL-only rebuild — never consult SST/Mem even when the feed
 /// is empty after a truncated WAL.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
-pub fn changelog_needs_sst_rebuild_as_is(_feed_empty: bool, _last_sequence: u64) -> bool {
-    false
+pub fn changelog_needs_sst_rebuild_as_is(feed_empty: bool, last_sequence: u64) -> bool {
+    changelog_needs_sst_rebuild_as_is_body!(feed_empty, last_sequence)
 }
 
 /// Default durable-commit interval between CHANGELOG cache stores (RFC-0031).
@@ -31,15 +77,17 @@ pub const DEFAULT_CHANGELOG_INTERVAL: u64 = 64;
 /// it is never a durability gate. `interval == 0` means never on the commit
 /// path (flush / close / checkpoint still force a store). `interval >= 1`
 /// persists when `commits_since >= interval`.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn changelog_should_store(commits_since: u64, interval: u64) -> bool {
-    interval > 0 && commits_since >= interval
+    changelog_should_store_body!(commits_since, interval)
 }
 
 /// AS-IS RFC-0031: every durable commit stores (pre-debounce).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
-pub fn changelog_should_store_as_is(commits_since: u64, _interval: u64) -> bool {
-    commits_since >= 1
+pub fn changelog_should_store_as_is(commits_since: u64, interval: u64) -> bool {
+    changelog_should_store_as_is_body!(commits_since, interval)
 }
 
 /// Default lazy-feed rebuild budget in entries. Above it the explicit
@@ -54,17 +102,99 @@ pub const DEFAULT_CHANGELOG_REBUILD_BUDGET_ENTRIES: u64 = 100_000;
 /// only while the live entry count stays within `budget_entries`
 /// (RFC-0039 P0.3 / RFC-0041 P1.1 — flush stays O(write buffer), not
 /// O(live set)).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn changelog_rebuild_within_budget(live_entries: u64, budget_entries: u64) -> bool {
-    live_entries <= budget_entries
+    changelog_rebuild_within_budget_body!(live_entries, budget_entries)
 }
 
 /// AS-IS: always materialize — the 25M OOM dente (guest settle flush held
 /// ~3× live set; killed at 3.3 GB for a 0.61 GiB store).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
-pub fn changelog_rebuild_within_budget_as_is(_live_entries: u64, _budget_entries: u64) -> bool {
-    true
+pub fn changelog_rebuild_within_budget_as_is(live_entries: u64, budget_entries: u64) -> bool {
+    changelog_rebuild_within_budget_as_is_body!(live_entries, budget_entries)
 }
+
+#[cfg(verus_keep_ghost)]
+use vstd::prelude::*;
+
+#[cfg(verus_keep_ghost)]
+verus! {
+
+pub open spec fn changelog_needs_sst_rebuild_spec(feed_empty: bool, last_sequence: u64) -> bool {
+    feed_empty && last_sequence > 0
+}
+
+pub fn changelog_needs_sst_rebuild(feed_empty: bool, last_sequence: u64) -> (d: bool)
+    ensures
+        d == changelog_needs_sst_rebuild_spec(feed_empty, last_sequence),
+        d ==> feed_empty,
+        d ==> last_sequence > 0,
+{
+    changelog_needs_sst_rebuild_body!(feed_empty, last_sequence)
+}
+
+pub open spec fn changelog_needs_sst_rebuild_as_is_spec(_feed_empty: bool, _last_sequence: u64) -> bool {
+    false
+}
+
+pub fn changelog_needs_sst_rebuild_as_is(feed_empty: bool, last_sequence: u64) -> (d: bool)
+    ensures
+        d == false,
+        d == changelog_needs_sst_rebuild_as_is_spec(feed_empty, last_sequence),
+{
+    changelog_needs_sst_rebuild_as_is_body!(feed_empty, last_sequence)
+}
+
+proof fn lemma_as_is_misses_empty_feed_with_seq()
+    ensures
+        changelog_needs_sst_rebuild_spec(true, 1),
+        !changelog_needs_sst_rebuild_as_is_spec(true, 1),
+{
+}
+
+proof fn lemma_fresh_db_no_rebuild()
+    ensures
+        !changelog_needs_sst_rebuild_spec(true, 0),
+{
+}
+
+proof fn lemma_live_feed_no_rebuild()
+    ensures
+        !changelog_needs_sst_rebuild_spec(false, 99),
+{
+}
+
+pub fn changelog_should_store(commits_since: u64, interval: u64) -> (d: bool)
+    ensures
+        d == (interval > 0 && commits_since >= interval),
+{
+    changelog_should_store_body!(commits_since, interval)
+}
+
+pub fn changelog_should_store_as_is(commits_since: u64, interval: u64) -> (d: bool)
+    ensures
+        d == (commits_since >= 1),
+{
+    changelog_should_store_as_is_body!(commits_since, interval)
+}
+
+pub fn changelog_rebuild_within_budget(live_entries: u64, budget_entries: u64) -> (d: bool)
+    ensures
+        d == (live_entries <= budget_entries),
+{
+    changelog_rebuild_within_budget_body!(live_entries, budget_entries)
+}
+
+pub fn changelog_rebuild_within_budget_as_is(live_entries: u64, budget_entries: u64) -> (d: bool)
+    ensures
+        d == true,
+{
+    changelog_rebuild_within_budget_as_is_body!(live_entries, budget_entries)
+}
+
+} // verus!
 
 #[cfg(test)]
 mod tests {

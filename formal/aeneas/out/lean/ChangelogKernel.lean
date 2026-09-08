@@ -15,7 +15,7 @@ set_option maxRecDepth 2048
 namespace pedra_aeneas_changelog_kernel
 
 /-- [pedra_aeneas_changelog_kernel::changelog_needs_sst_rebuild]:
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 14:0-16:1
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 59:0-61:1
     Visibility: public -/
 def changelog_needs_sst_rebuild
   (feed_empty : Bool) (last_sequence : Std.U64) : Result Bool := do
@@ -24,19 +24,19 @@ def changelog_needs_sst_rebuild
   else ok false
 
 /-- [pedra_aeneas_changelog_kernel::changelog_needs_sst_rebuild_as_is]:
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 21:0-23:1
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 67:0-69:1
     Visibility: public -/
 def changelog_needs_sst_rebuild_as_is
-  (_feed_empty : Bool) (_last_sequence : Std.U64) : Result Bool := do
+  (feed_empty : Bool) (last_sequence : Std.U64) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_changelog_kernel::DEFAULT_CHANGELOG_INTERVAL]
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 26:0-26:47
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 72:0-72:47
     Visibility: public -/
 @[global_simps, irreducible] def DEFAULT_CHANGELOG_INTERVAL : Std.U64 := 64#u64
 
 /-- [pedra_aeneas_changelog_kernel::changelog_should_store]:
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 35:0-37:1
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 82:0-84:1
     Visibility: public -/
 def changelog_should_store
   (commits_since : Std.U64) (interval : Std.U64) : Result Bool := do
@@ -45,30 +45,30 @@ def changelog_should_store
   else ok false
 
 /-- [pedra_aeneas_changelog_kernel::changelog_should_store_as_is]:
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 41:0-43:1
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 89:0-91:1
     Visibility: public -/
 def changelog_should_store_as_is
-  (commits_since : Std.U64) (_interval : Std.U64) : Result Bool := do
+  (commits_since : Std.U64) (interval : Std.U64) : Result Bool := do
   ok (commits_since >= 1#u64)
 
 /-- [pedra_aeneas_changelog_kernel::DEFAULT_CHANGELOG_REBUILD_BUDGET_ENTRIES]
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 51:0-51:66
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 99:0-99:66
     Visibility: public -/
 @[global_simps, irreducible]
 def DEFAULT_CHANGELOG_REBUILD_BUDGET_ENTRIES : Std.U64 := 100000#u64
 
 /-- [pedra_aeneas_changelog_kernel::changelog_rebuild_within_budget]:
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 58:0-60:1
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 107:0-109:1
     Visibility: public -/
 def changelog_rebuild_within_budget
   (live_entries : Std.U64) (budget_entries : Std.U64) : Result Bool := do
   ok (live_entries <= budget_entries)
 
 /-- [pedra_aeneas_changelog_kernel::changelog_rebuild_within_budget_as_is]:
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 65:0-67:1
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 115:0-117:1
     Visibility: public -/
 def changelog_rebuild_within_budget_as_is
-  (_live_entries : Std.U64) (_budget_entries : Std.U64) : Result Bool := do
+  (live_entries : Std.U64) (budget_entries : Std.U64) : Result Bool := do
   ok true
 
 end pedra_aeneas_changelog_kernel
