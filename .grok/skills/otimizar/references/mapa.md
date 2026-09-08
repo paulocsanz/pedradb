@@ -35,11 +35,12 @@ Refresh this file when a cell moves class. One row per cell.
 | flink window / kafka changelog | **T**→tool | RFC-0043 | WRITEPHASE → `diagnose.lever` (0184 P2.13); window mix `get_path` | RFC-0043 / 0184 |
 | ceph bluestore omap | **T**→tool | RFC-0043 | WRITEPHASE → `diagnose.lever` (0184 P2.14); read `get_path` | RFC-0043 / 0184 |
 | solana shred/trailing | **T**→tool | RFC-0043 | WRITEPHASE → `diagnose.lever` (0184 P2.15); trailing `get_path` | RFC-0043 / 0184 |
+| arango crud/traversal | **T**→tool | RFC-0043 | WRITEPHASE → `diagnose.lever` (0184 P2.16); traversal `get_path` | RFC-0043 / 0184 |
 
 ## Próxima fase (rank da skill, 2026-09-07)
 
 1. **U / Linux `overwrite_mc4` isolado + diagnose + `balance`** (caixa). Sem bake: não ratio-win Darwin. Skill **ainda implementa** o próximo furo local.
-2. **Done this turn:** 0184 P2.15 — solana WRITEPHASE → `diagnose.lever`.
+2. **Done this turn:** 0184 P2.16 — arango WRITEPHASE → `diagnose.lever`.
 3. prefix 0.70× na caixa continua P1.2.
 
 Não: skiplist. Não: n=50 merge. Não: turno vazio porque “é caixa”.
