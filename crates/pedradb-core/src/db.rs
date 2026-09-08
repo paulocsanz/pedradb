@@ -6653,7 +6653,7 @@ impl<E: Env> Db<E> {
     /// I/O while flushing or rewriting SSTs.
     pub fn compact_for_reads(&mut self) -> Result<()> {
         self.flush()?;
-        if self.ssts.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.ssts.len() as u64) {
             return Ok(());
         }
         // Merge every live SST (any level) with latest-only GC into one file at Lmax.
