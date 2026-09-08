@@ -4981,7 +4981,7 @@ impl<E: Env> Db<E> {
                 return "default";
             }
             let p = crate::memtable::cf_prefix(key);
-            if p.is_empty() {
+            if crate::write_admission_kernel::batch_is_empty(p.len() as u64) {
                 return "default";
             }
             physical
