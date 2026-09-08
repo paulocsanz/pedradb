@@ -1807,7 +1807,7 @@ impl MemTable {
         let shard = self.tail_idx.get(pfx)?;
         let has_long = !crate::write_admission_kernel::batch_is_empty(shard.long.len() as u64);
         let has_point = !crate::write_admission_kernel::batch_is_empty(shard.point.len() as u64);
-        let has_short = !shard.short.is_empty();
+        let has_short = !crate::write_admission_kernel::batch_is_empty(shard.short.len() as u64);
         if has_long {
             return None;
         }
