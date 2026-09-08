@@ -3728,7 +3728,7 @@ impl<E: Env> Db<E> {
         loop {
             let mut cand: Option<Bytes> = None;
             let mut consider = |k: Bytes| {
-                if !prefix.is_empty() && !k.starts_with(prefix) {
+                if !crate::write_admission_kernel::batch_is_empty(prefix.len() as u64) && !k.starts_with(prefix) {
                     return;
                 }
                 if let Some(h) = before.as_deref() {
