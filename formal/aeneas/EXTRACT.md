@@ -290,6 +290,7 @@ the composition files and fails on a missing file or the substring `sorry`.
 | ConcurrentDb `validate_occ_batch` / `lone_commit` | `occ_batch_plan` ∧ `occ_member_fate` ∧ `occ_conflict` (Verus SA on production file) | `occ_batch_plan_lagging_conflict` | `occ_batch_plan_as_is_dente` |
 | ConcurrentDb `validate_occ_batch` N-way | `group_validate` ∧ `occ_batch_plan` ∧ `occ_conflict` (Verus SA on production file) | `group_validate_n3_one_lagging` / `occ_batch_plan_n3_one_lagging` | `occ_batch_plan_as_is` all-Ok |
 | ConcurrentDb `finish_group_off_lock` | `rwlock_client_may_mutate` (Verus SA on production file) | `rwlock_client_may_mutate_needs_write` | `rwlock_client_may_mutate_as_is_dente` |
+| ConcurrentDb `occ_snapshot` | `rwlock_client_may_read` ∧ `rwlock_client_may_mutate` (Verus SA on production file) | `rwlock_client_may_read_needs_guard` | `rwlock_client_may_read_as_is_dente` |
 | ConcurrentDb off-lock fd | `may_publish_group` ∧ Flush `wal_rotate_decision` (Verus SA on production file) | `concurrent_publish_and_inflight_keep_wal` | `concurrent_publish_ok_and_idle_rotates` / `concurrent_as_is_publish_lie_inflight_still_keeps` |
 | ConcurrentDb `occ_snapshot` | `occ_snap_uses_published` ∧ `may_publish_group` | `occ_snap_published_and_no_publish_on_wal_fail` | `occ_snap_uses_published_as_is_dente` |
 | ConcurrentDb `occ_snapshot` | `occ_snap_lock_order` ∧ `occ_snap_uses_published` (Verus SA on production file) | `occ_snap_lock_order_write_held` | `occ_snap_lock_order_as_is_dente` |

@@ -44,7 +44,7 @@ This is the Pedra analogue of “atomicity violation” in the Petri-net Rust co
 1. Dual-unfold ConcurrentDb OCC path: `validate_occ_batch` facts → `group_validate` → `occ_conflict` (Lean already has the callees; caller is still in `concurrent.rs`). **Paid:** `occ_batch_plan_lagging_conflict`.
 2. Dual-unfold publish: off-lock WAL result → `may_publish_group` (kernel exists; wire theorem from the ConcurrentDb claim methods). **Paid:** `may_publish_group_needs_wal_ok`.
 3. Deadlock: keep locktab cycle as the 2PL theorem; name a ConcurrentDb lock-order kernel for flush vs group (commit_inflight / may_rotate). **Paid:** `wal_rotate_commit_inflight_keeps`. Write-lock OCC snap: `occ_snap_lock_order` (read-lock held vs writer exclusive) dual-unfolds `occ_snap_uses_published` — `ConcurrentDb::occ_snapshot` matches it.
-4. Data race: Verus token protocol on `RwLock` clients (CapybaraKV RW-lock pattern / VerusSync), not a dump of `parking_lot`. Partial: `rwlock_client_may_mutate`. Reader token still unpaid.
+4. Data race: Verus token protocol on `RwLock` clients (CapybaraKV RW-lock pattern / VerusSync), not a dump of `parking_lot`. **Paid:** `rwlock_client_may_mutate` (exclusive write) and `rwlock_client_may_read` (shared read; `occ_snapshot` matches). `parking_lot` internals stay TCB.
 5. Weak memory: only after (1)–(4), one lock algorithm like seL4’s ticket lock paper — not “the computer”.
 6. N-way: **Paid** `group_validate_n3_one_lagging` unfolds `group_validate` ∧ `occ_conflict`; `occ_batch_plan_n3_one_lagging` unfolds the plan `validate_occ_batch` matches. Named test `occ_batch_plan_n3_one_lagging_is_not_ok`.
 

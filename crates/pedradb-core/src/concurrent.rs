@@ -1828,6 +1828,10 @@ impl<E: Env> ConcurrentDb<E> {
     pub(crate) fn occ_snapshot(&self) -> SequenceNumber {
         match self.inner.try_read() {
             Some(g) => {
+                assert!(
+                    crate::group_commit_kernel::rwlock_client_may_read(true, false),
+                    "try_read holds the read guard"
+                );
                 if crate::flush_kernel::occ_snap_lock_order(true, g.commit_inflight() > 0) {
                     self.published_seq.load(Ordering::Acquire)
                 } else {
@@ -1835,6 +1839,11 @@ impl<E: Env> ConcurrentDb<E> {
                 }
             }
             None => {
+                // No read guard: cannot sample last_sequence (data-race token).
+                assert!(
+                    !crate::group_commit_kernel::rwlock_client_may_read(false, false),
+                    "no guard ⇒ cannot read last_seq"
+                );
                 // Writer holds the lock: the kernel says published.
                 assert!(
                     crate::flush_kernel::occ_snap_lock_order(false, self.commit_inflight() > 0),

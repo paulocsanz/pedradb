@@ -41,6 +41,22 @@ macro_rules! rwlock_client_may_mutate_as_is_body {
     }};
 }
 
+/// Shared read of `Db` is allowed with a read **or** write guard. Always
+/// calls the mutate token so Lean can unfold both.
+macro_rules! rwlock_client_may_read_body {
+    ($holding_read:expr, $holding_write:expr) => {{
+        let write_ok = rwlock_client_may_mutate($holding_write);
+        $holding_read || write_ok
+    }};
+}
+
+macro_rules! rwlock_client_may_read_as_is_body {
+    ($holding_read:expr, $holding_write:expr) => {{
+        let _ = ($holding_read, $holding_write);
+        true
+    }};
+}
+
 macro_rules! occ_member_fate_body {
     ($too_old:expr, $conflict:expr) => {
         if $too_old {
@@ -427,6 +443,23 @@ pub fn rwlock_client_may_mutate_as_is(_holding_write: bool) -> bool {
     rwlock_client_may_mutate_as_is_body!(_holding_write)
 }
 
+/// Data-race token (CapybaraKV RW-lock *client*): shared read of `Db` only
+/// while a read **or** write guard is held. `occ_snapshot` matches this —
+/// no guard ⇒ published seq, not `last_sequence`. Calls
+/// [`rwlock_client_may_mutate`].
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn rwlock_client_may_read(holding_read: bool, holding_write: bool) -> bool {
+    rwlock_client_may_read_body!(holding_read, holding_write)
+}
+
+/// AS-IS: read `Db` with no guard (data-race lie).
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn rwlock_client_may_read_as_is(_holding_read: bool, _holding_write: bool) -> bool {
+    rwlock_client_may_read_as_is_body!(_holding_read, _holding_write)
+}
+
 /// AS-IS: publish even if WAL I/O failed (the 0071 hole — Ok with a lie).
 #[cfg(not(verus_keep_ghost))]
 #[must_use]
@@ -533,6 +566,26 @@ pub fn rwlock_client_may_mutate_as_is(_holding_write: bool) -> (ok: bool)
         ok == true,
 {
     rwlock_client_may_mutate_as_is_body!(_holding_write)
+}
+
+pub open spec fn rwlock_client_may_read_spec(holding_read: bool, holding_write: bool) -> bool {
+    holding_read || rwlock_client_may_mutate_spec(holding_write)
+}
+
+pub fn rwlock_client_may_read(holding_read: bool, holding_write: bool) -> (ok: bool)
+    ensures
+        ok == rwlock_client_may_read_spec(holding_read, holding_write),
+        holding_read ==> ok,
+        !holding_read ==> ok == rwlock_client_may_mutate_spec(holding_write),
+{
+    rwlock_client_may_read_body!(holding_read, holding_write)
+}
+
+pub fn rwlock_client_may_read_as_is(_holding_read: bool, _holding_write: bool) -> (ok: bool)
+    ensures
+        ok == true,
+{
+    rwlock_client_may_read_as_is_body!(_holding_read, _holding_write)
 }
 
 pub open spec fn may_publish_group_spec(wal_io_ok: bool) -> bool {
@@ -1268,6 +1321,29 @@ mod tests {
         assert!(
             !until_reacquire.contains("publish_sequence("),
             "must not publish while the write lock is dropped"
+        );
+    }
+
+    #[test]
+    fn rwlock_client_may_read_on_no_guard_is_not_ok() {
+        assert!(
+            !rwlock_client_may_read(false, false),
+            "no guard ⇒ cannot read last_seq"
+        );
+        assert!(rwlock_client_may_read(true, false));
+        assert!(rwlock_client_may_read(false, true));
+        assert!(rwlock_client_may_read(true, true));
+        assert!(
+            rwlock_client_may_read_as_is(false, false),
+            "AS-IS dente: read Db with no guard"
+        );
+        let snap = include_str!("concurrent.rs")
+            .split("fn occ_snapshot(")
+            .nth(1)
+            .expect("occ_snapshot");
+        assert!(
+            snap.contains("rwlock_client_may_read("),
+            "occ_snapshot must match the reader token"
         );
     }
 

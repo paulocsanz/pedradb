@@ -295,3 +295,40 @@ theorem rwlock_client_may_mutate_as_is_dente :
     rwlock_client_may_mutate_as_is false = ok true := by
   unfold rwlock_client_may_mutate_as_is
   rfl
+
+/-- Data-race reader token: no guard ⇒ cannot read last_seq. Unfolds the
+    plan rustc links and the mutate callee. -/
+theorem rwlock_client_may_read_needs_guard :
+    rwlock_client_may_read false false = ok false ∧
+      rwlock_client_may_mutate false = ok false := by
+  constructor
+  · unfold rwlock_client_may_read
+    unfold rwlock_client_may_mutate
+    rfl
+  · unfold rwlock_client_may_mutate; rfl
+
+/-- Other branch: a read guard allows the snap even without the write lock. -/
+theorem rwlock_client_may_read_with_read_guard :
+    rwlock_client_may_read true false = ok true ∧
+      rwlock_client_may_mutate false = ok false := by
+  constructor
+  · unfold rwlock_client_may_read
+    unfold rwlock_client_may_mutate
+    rfl
+  · unfold rwlock_client_may_mutate; rfl
+
+/-- Write guard implies mutate and therefore read. -/
+theorem rwlock_client_may_read_via_write :
+    rwlock_client_may_read false true = ok true ∧
+      rwlock_client_may_mutate true = ok true := by
+  constructor
+  · unfold rwlock_client_may_read
+    unfold rwlock_client_may_mutate
+    rfl
+  · unfold rwlock_client_may_mutate; rfl
+
+/-- AS-IS dente: read Db with no guard. -/
+theorem rwlock_client_may_read_as_is_dente :
+    rwlock_client_may_read_as_is false false = ok true := by
+  unfold rwlock_client_may_read_as_is
+  rfl
