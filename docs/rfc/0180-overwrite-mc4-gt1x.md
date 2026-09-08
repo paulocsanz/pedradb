@@ -133,6 +133,10 @@ medida no mesmo harness isolado.
       status: `done` (extra take + absorb ainda agrupam high-n)
 - [x] **P0.38** Auto-flush size check em todo Ok 1-op — status: `done`
       (`maybe_auto_flush_with` already early-outs under limit)
+- [x] **P0.39** Catch-up até 4 membros quando `2≤active≤8` (`diagnose
+      write --clients 4` cut=grouping expected_group=4). n≥16 continua
+      skip em 2. Teste `rfc0180_leader_linger_and_async_catchup`.
+      status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
 
@@ -186,6 +190,7 @@ medida no mesmo harness isolado.
 | P0.36 | p0 | leftover drain-in-lead | done | p48 0.87× avg 1.95 — reverted; canary stays | 2026-09-07 |
 | P0.37 | p0 | catch-up skip batch≥2 any n | done | no active≤8 gate | 2026-09-07 |
 | P0.38 | p0 | flush size check every async Ok | done | no 31-op overshoot | 2026-09-07 |
+| P0.39 | p0 | catch-up to 4 when 2–8 writers | done | grouping lever; n≥16 still skip at 2 | 2026-09-08 |
 | P1.1 | p1 | 3-run caixa | todo | — | 2026-09-07 |
 | P2.1 | p2 | 3/3 quiet ≥1× | todo | 0182 P1.1 | 2026-09-07 |
 | P2.2 | p2 | leftover hang | done | 0181 P0.3 steal | 2026-09-07 |

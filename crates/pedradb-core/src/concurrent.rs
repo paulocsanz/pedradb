@@ -353,16 +353,22 @@ fn leader_linger_want(prev_group_members: usize) -> usize {
 /// RFC-0180 P0.5: async 1-op catch-up as pause-loops, not `wait_for`.
 /// 0 = already full or lone.
 ///
-/// RFC-0180 P0.37: a 2-member batch is already a group at any `active`.
-/// Extra take under the write lock + `group_absorb` still pick up
-/// latecomers (including apply_mc / 50-thread). The `active ≤ 8` gate
-/// was overwrite_mc4-shaped.
-fn async_catchup_skip_when_grouped(batch_len: usize) -> bool {
-    batch_len >= 2
+/// RFC-0184 grind: diagnose `write --clients 4` is `cut=grouping`
+/// `expected_group=4`. Skipping at 2 left overwrite_mc4 `avg_group≈1.6`
+/// on the timed window (WRITEPHASE). n≥16 still stops at 2 (50-thread
+/// linger was a stall). Extra take under the write lock still fills.
+fn async_catchup_skip_when_grouped(batch_len: usize, active: usize) -> bool {
+    if batch_len >= active {
+        true
+    } else if active > ASYNC_GROUP_ADAPTIVE_MAX {
+        batch_len >= 2
+    } else {
+        batch_len >= 4
+    }
 }
 
 fn async_catchup_spins(batch_len: usize, active: usize) -> u32 {
-    if batch_len >= active || active < 2 || async_catchup_skip_when_grouped(batch_len) {
+    if batch_len >= active || active < 2 || async_catchup_skip_when_grouped(batch_len, active) {
         0
     } else {
         1024
@@ -1194,7 +1200,8 @@ impl WriteGroup {
             } else if !any_sync {
                 let spins = async_catchup_spins(batch.len(), active);
                 if spins > 0 {
-                    self.spin_for_pending_n(spins, 1);
+                    let want = active.saturating_sub(batch.len()).min(4).max(1);
+                    self.spin_for_pending_n(spins, want);
                     let mut g = self.queue.lock();
                     batch.extend(Self::take_pending(&mut g, &self.queued_pending));
                 }
@@ -6804,12 +6811,16 @@ mod tests {
         assert_eq!(async_catchup_spins(4, 4), 0);
         assert_eq!(async_catchup_spins(1, 4), 1024);
         assert_eq!(async_catchup_spins(1, 2), 1024);
-        // P0.37: already grouped — no n-gate. High-n extra take still fills.
-        assert!(async_catchup_skip_when_grouped(2));
-        assert!(async_catchup_skip_when_grouped(3));
-        assert!(!async_catchup_skip_when_grouped(1));
-        assert_eq!(async_catchup_spins(2, 4), 0);
-        assert_eq!(async_catchup_spins(3, 4), 0);
+        // 2–8 clients: gather toward expected_group=4 (diagnose write).
+        assert!(!async_catchup_skip_when_grouped(2, 4));
+        assert!(!async_catchup_skip_when_grouped(3, 4));
+        assert!(async_catchup_skip_when_grouped(4, 4));
+        assert!(!async_catchup_skip_when_grouped(1, 4));
+        assert_eq!(async_catchup_spins(2, 4), 1024);
+        assert_eq!(async_catchup_spins(3, 4), 1024);
+        assert_eq!(async_catchup_spins(4, 4), 0);
+        // n≥16: stop at 2 (kvrocks_set_mc50 lock_convoy ceiling).
+        assert!(async_catchup_skip_when_grouped(2, 16));
         assert_eq!(async_catchup_spins(2, 16), 0);
         assert_eq!(async_catchup_spins(2, 50), 0);
         assert_eq!(async_catchup_spins(1, 50), 1024);
