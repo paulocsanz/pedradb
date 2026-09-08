@@ -905,7 +905,7 @@ impl TcpClusterClient {
     /// # Errors
     /// Exhausted attempts, Conflict, limits, or non-retryable error.
     pub fn put_batch(&mut self, pairs: &[(Vec<u8>, Vec<u8>)]) -> Result<()> {
-        if pairs.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(pairs.len() as u64) {
             return Ok(());
         }
         validate_tx_pairs(pairs)?;
