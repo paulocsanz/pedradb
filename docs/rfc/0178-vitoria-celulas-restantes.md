@@ -126,6 +126,11 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
       50-thread bypass fica). overwrite_mc4 Darwin 3-run mediana
       **0,61×** (era 0,45×); p95 107→45 µs. Ainda named loss.
       Teste `rfc0178_async_merge_adaptive_small_n_only`. status: `done`
+- [x] **P0.13** TLS last-get: `touch` em dirt ≤32 (mesmo bound que
+      `point_cache.invalidate_many`). P1.5 era n=1; Adaptive n=2–8
+      epoch-bumpava `ycsb_a/f` get_path. Teste
+      `rfc0178_tls_precise_small_group_does_not_bump_epoch` +
+      `tls_precise_invalidate_matches_point_cache_bound`. — status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
 
@@ -163,6 +168,7 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
 | P0.10 | p0 | DIAG via `pedra scale` | done | 50M/100M get_loop 403/405µs prefix 65.5/65.1µs | 2026-09-07 |
 | P0.11 | p0 | overwrite_mc4 isolado | done | ONLY honrado; Darwin 0.454× vs Rocks default (named loss) | 2026-09-07 |
 | P0.12 | p0 | adaptive async group 2–8 | done | overwrite_mc4 0.61× 3-run (era 0.45×); still named loss | 2026-09-07 |
+| P0.13 | p0 | TLS precise n≤32 (get_path) | done | group no longer epoch-bumps zipf last-get | 2026-09-07 |
 | P1.1 | p1 | probe_miss ≥1× 3-run caixa | todo | — | 2026-09-06 |
 | P1.2 | p1 | prefix 0,70× → ≥1× caixa | todo | — | 2026-09-06 |
 | P1.3 | p1 | overwrite isolado ≥1× caixa | todo | Darwin 0180; 3/3 quiet 0182 P1.1 | 2026-09-07 |

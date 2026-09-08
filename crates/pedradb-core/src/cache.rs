@@ -762,6 +762,16 @@ impl KeyGenMap {
     }
 }
 
+/// Precise TLS invalidation (touch dirty keys) vs process-wide epoch bump.
+///
+/// Same bound as `point_cache.invalidate_many` (≤32). RFC-0154 P1.5 did
+/// n=1 only; Adaptive merge n=2–8 then wiped zipf last-get every group
+/// (`ycsb_a/f_mc4` get_path). Reset / empty / fat still epoch-bump.
+#[must_use]
+pub(crate) fn tls_precise_invalidate(reset: bool, n_dirty: usize) -> bool {
+    !reset && n_dirty >= 1 && n_dirty <= 32
+}
+
 type FxBuild = std::hash::BuildHasherDefault<FxHasher>;
 
 #[derive(Debug)]
@@ -1614,6 +1624,17 @@ mod tests {
         m.touch(&encoded);
         assert_eq!(other, m.gen(b"untouched"));
         assert_ne!(m.gen(&encoded), other);
+    }
+
+    #[test]
+    fn tls_precise_invalidate_matches_point_cache_bound() {
+        assert!(tls_precise_invalidate(false, 1));
+        assert!(tls_precise_invalidate(false, 4));
+        assert!(tls_precise_invalidate(false, 8));
+        assert!(tls_precise_invalidate(false, 32));
+        assert!(!tls_precise_invalidate(false, 0));
+        assert!(!tls_precise_invalidate(false, 33));
+        assert!(!tls_precise_invalidate(true, 4));
     }
 
     #[test]

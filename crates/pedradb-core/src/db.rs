@@ -4780,12 +4780,15 @@ impl<E: Env> Db<E> {
         }
         self.last_prefix_cache.clear();
         self.read_cache_epoch.fetch_add(1, Ordering::Release);
-        // RFC-0154 P1.5: 1-key put bumps one TLS gen bucket so zipf gets of
-        // other keys stay cached. Fat apply / unknown dirt still epoch-bumps.
-        if reset || keys.len() != 1 {
-            self.point_tls_epoch.fetch_add(1, Ordering::Release);
+        // RFC-0154 P1.5 + group: precise TLS when dirt is small (same
+        // ≤32 bound as point_cache.invalidate_many). Adaptive merge n=2–8
+        // was epoch-bumping every ycsb_a/f get.
+        if crate::cache::tls_precise_invalidate(reset, keys.len()) {
+            for k in &keys {
+                self.key_gen.touch(k);
+            }
         } else {
-            self.key_gen.touch(&keys[0]);
+            self.point_tls_epoch.fetch_add(1, Ordering::Release);
         }
         let settled = self.bulk_live_bytes() == 0
             && self.mem.is_empty()
@@ -13389,6 +13392,34 @@ mod tests {
     #[test]
     fn rfc0180_async_ok_flush_is_stage_only_policy() {
         assert!(async_ok_flush_is_stage_only());
+    }
+
+    #[test]
+    fn rfc0178_tls_precise_small_group_does_not_bump_epoch() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.bulk_route_enabled = false;
+        db.put(b"hot", b"v1").unwrap();
+        assert_eq!(db.get(b"hot").as_deref(), Some(b"v1".as_ref()));
+        let epoch0 = db.point_tls_epoch_handle().load(Ordering::Acquire);
+        let batch: Vec<BatchOp> = (0..4u8)
+            .map(|i| BatchOp::put(vec![b'x', i], vec![b'y', i]))
+            .collect();
+        db.commit_async_ops(batch).unwrap();
+        assert_eq!(
+            db.point_tls_epoch_handle().load(Ordering::Acquire),
+            epoch0,
+            "n=4 group must touch TLS gens, not epoch"
+        );
+        let fat: Vec<BatchOp> = (0..33u8)
+            .map(|i| BatchOp::put(vec![b'z', i], vec![b'w', i]))
+            .collect();
+        db.commit_async_ops(fat).unwrap();
+        assert!(
+            db.point_tls_epoch_handle().load(Ordering::Acquire) > epoch0,
+            "n=33 still epoch-bumps"
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
