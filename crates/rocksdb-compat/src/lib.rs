@@ -800,7 +800,7 @@ impl KeyCodec {
     /// alloc per `write()` instead of one malloc per op).
     fn encode_pooled(&self, cf: &str, key: &[u8], pool: &mut bytes::BytesMut) -> Bytes {
         let effective = cf_encode_effective(cf, self.default_raw);
-        if effective.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(effective.len() as u64) {
             pool.reserve(key.len());
             pool.extend_from_slice(key);
             return pool.split_to(key.len()).freeze();
