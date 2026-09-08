@@ -9319,7 +9319,7 @@ impl<E: Env> Db<E> {
 
     /// Drop staged ops for `g` (apply finished, or the group's fsync fenced).
     pub(crate) fn unstage_unapplied(&mut self, g: &GroupInFlight) {
-        if self.unapplied.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.unapplied.len() as u64) {
             return;
         }
         let mut lo = u64::MAX;
