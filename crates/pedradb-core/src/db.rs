@@ -5389,7 +5389,7 @@ impl<E: Env> Db<E> {
 
     #[must_use]
     pub(crate) fn has_parked_bulk(&self) -> bool {
-        !self.parked_bulk.is_empty()
+        !crate::write_admission_kernel::batch_is_empty(self.parked_bulk.len() as u64)
     }
 
     #[cfg(test)]
