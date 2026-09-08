@@ -4477,8 +4477,9 @@
       "id": "write_record_count",
       "finding": "RFC-0150 P2a",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/batch.rs",
-      "twin": "crates/pedradb-core/verus/write_record_count.rs",
+      "twin": "crates/pedradb-core/src/batch.rs",
       "verus": "scripts/verus_write_record_count.sh",
       "callers": [
         "crates/pedradb-core/src/batch.rs"

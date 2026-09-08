@@ -1,0 +1,237 @@
+// WriteBatch::rep_ :=
+//    sequence: fixed64
+//    count: fixed32
+//    data: record[count]
+
+  if (prot_info_ != nullptr) {
+    prot_info_->entries_.clear();
+  }
+  wal_term_point_.clear();
+  default_cf_ts_sz_ = 0;
+}
+
+uint32_t WriteBatch::Count() const { return WriteBatchInternal::Count(this); }
+
+uint32_t WriteBatch::ComputeContentFlags() const {
+  auto rv = content_flags_.load(std::memory_order_relaxed);
+  if ((rv & ContentFlags::DEFERRED) != 0) {
+---
+            "unknown WriteBatch tag",
+            std::to_string(static_cast<unsigned int>(tag)));
+    }
+  }
+  if (!s.ok()) {
+    return s;
+  }
+  if (handler_continue && whole_batch &&
+      found != WriteBatchInternal::Count(wb)) {
+    return Status::Corruption("WriteBatch has wrong count");
+  } else {
+    return Status::OK();
+  }
+---
+            std::to_string(static_cast<unsigned int>(tag)));
+    }
+  }
+  if (!s.ok()) {
+    return s;
+  }
+  if (handler_continue && whole_batch &&
+      found != WriteBatchInternal::Count(wb)) {
+    return Status::Corruption("WriteBatch has wrong count");
+  } else {
+    return Status::OK();
+  }
+}
+---
+bool WriteBatchInternal::IsLatestPersistentState(const WriteBatch* b) {
+  return b->is_latest_persistent_state_;
+}
+
+void WriteBatchInternal::SetAsLatestPersistentState(WriteBatch* b) {
+  b->is_latest_persistent_state_ = true;
+}
+
+uint32_t WriteBatchInternal::Count(const WriteBatch* b) {
+  return DecodeFixed32(b->rep_.data() + 8);
+}
+
+void WriteBatchInternal::SetCount(WriteBatch* b, uint32_t n) {
+---
+  if (key.size() > kMaxWriteBatchKeySize) {
+    return Status::InvalidArgument("key is too large");
+  }
+  if (value.size() > size_t{std::numeric_limits<uint32_t>::max()}) {
+    return Status::InvalidArgument("value is too large");
+  }
+
+  LocalSavePoint save(b);
+  WriteBatchInternal::SetCount(b, WriteBatchInternal::Count(b) + 1);
+  if (column_family_id == 0) {
+    b->rep_.push_back(static_cast<char>(kTypeValue));
+  } else {
+    b->rep_.push_back(static_cast<char>(kTypeColumnFamilyValue));
+---
+  if (value.size() > size_t{std::numeric_limits<uint32_t>::max()}) {
+    return Status::InvalidArgument("value is too large");
+  }
+  if (std::numeric_limits<uint64_t>::max() == write_unix_time) {
+    return WriteBatchInternal::Put(b, column_family_id, key, value);
+  }
+  LocalSavePoint save(b);
+
+  WriteBatchInternal::SetCount(b, WriteBatchInternal::Count(b) + 1);
+  if (column_family_id == 0) {
+    b->rep_.push_back(static_cast<char>(kTypeValuePreferredSeqno));
+  } else {
+    b->rep_.push_back(static_cast<char>(kTypeColumnFamilyValuePreferredSeqno));
+---
+Status WriteBatchInternal::Put(WriteBatch* b, uint32_t column_family_id,
+                               const SliceParts& key, const SliceParts& value) {
+  Status s = CheckSlicePartsLength(key, value);
+  if (!s.ok()) {
+    return s;
+  }
+
+  LocalSavePoint save(b);
+  WriteBatchInternal::SetCount(b, WriteBatchInternal::Count(b) + 1);
+  if (column_family_id == 0) {
+    b->rep_.push_back(static_cast<char>(kTypeValue));
+  } else {
+    b->rep_.push_back(static_cast<char>(kTypeColumnFamilyValue));
+---
+  }
+
+  if (entity.size() > size_t{std::numeric_limits<uint32_t>::max()}) {
+    return Status::InvalidArgument("wide column entity is too large");
+  }
+
+  LocalSavePoint save(b);
+
+  WriteBatchInternal::SetCount(b, WriteBatchInternal::Count(b) + 1);
+
+  if (column_family_id == 0) {
+    b->rep_.push_back(static_cast<char>(kTypeWideColumnEntity));
+  } else {
+---
+}
+
+Status WriteBatchInternal::Delete(WriteBatch* b, uint32_t column_family_id,
+                                  const Slice& key) {
+  if (key.size() > kMaxWriteBatchKeySize) {
+    return Status::InvalidArgument("key is too large");
+  }
+  LocalSavePoint save(b);
+  WriteBatchInternal::SetCount(b, WriteBatchInternal::Count(b) + 1);
+  if (column_family_id == 0) {
+    b->rep_.push_back(static_cast<char>(kTypeDeletion));
+  } else {
+    b->rep_.push_back(static_cast<char>(kTypeColumnFamilyDeletion));
+---
+
+Status WriteBatchInternal::Delete(WriteBatch* b, uint32_t column_family_id,
+                                  const SliceParts& key) {
+  Status s = CheckSlicePartsLength(key, SliceParts(nullptr, 0));
+  if (!s.ok()) {
+    return s;
+  }
+  LocalSavePoint save(b);
+  WriteBatchInternal::SetCount(b, WriteBatchInternal::Count(b) + 1);
+  if (column_family_id == 0) {
+    b->rep_.push_back(static_cast<char>(kTypeDeletion));
+  } else {
+    b->rep_.push_back(static_cast<char>(kTypeColumnFamilyDeletion));
+---
+
+Status WriteBatchInternal::SingleDelete(WriteBatch* b,
+                                        uint32_t column_family_id,
+                                        const Slice& key) {
+  if (key.size() > kMaxWriteBatchKeySize) {
+    return Status::InvalidArgument("key is too large");
+  }
+  LocalSavePoint save(b);
+  WriteBatchInternal::SetCount(b, WriteBatchInternal::Count(b) + 1);
+  if (column_family_id == 0) {
+    b->rep_.push_back(static_cast<char>(kTypeSingleDeletion));
+  } else {
+    b->rep_.push_back(static_cast<char>(kTypeColumnFamilySingleDeletion));
+---
+Status WriteBatchInternal::SingleDelete(WriteBatch* b,
+                                        uint32_t column_family_id,
+                                        const SliceParts& key) {
+  Status s = CheckSlicePartsLength(key, SliceParts(nullptr, 0));
+  if (!s.ok()) {
+    return s;
+  }
+  LocalSavePoint save(b);
+  WriteBatchInternal::SetCount(b, WriteBatchInternal::Count(b) + 1);
+  if (column_family_id == 0) {
+    b->rep_.push_back(static_cast<char>(kTypeSingleDeletion));
+  } else {
+    b->rep_.push_back(static_cast<char>(kTypeColumnFamilySingleDeletion));
+---
+                                       const Slice& end_key) {
+  if (begin_key.size() > kMaxWriteBatchKeySize) {
+    return Status::InvalidArgument("key is too large");
+  }
+  if (end_key.size() > kMaxWriteBatchKeySize) {
+    return Status::InvalidArgument("end key is too large");
+  }
+  LocalSavePoint save(b);
+  WriteBatchInternal::SetCount(b, WriteBatchInternal::Count(b) + 1);
+  if (column_family_id == 0) {
+    b->rep_.push_back(static_cast<char>(kTypeRangeDeletion));
+  } else {
+    b->rep_.push_back(static_cast<char>(kTypeColumnFamilyRangeDeletion));
+---
+Status WriteBatchInternal::DeleteRange(WriteBatch* b, uint32_t column_family_id,
+                                       const SliceParts& begin_key,
+                                       const SliceParts& end_key) {
+  Status s = CheckSlicePartsLength(begin_key, end_key);
+  if (!s.ok()) {
+    return s;
+  }
+  LocalSavePoint save(b);
+  WriteBatchInternal::SetCount(b, WriteBatchInternal::Count(b) + 1);
+  if (column_family_id == 0) {
+    b->rep_.push_back(static_cast<char>(kTypeRangeDeletion));
+  } else {
+    b->rep_.push_back(static_cast<char>(kTypeColumnFamilyRangeDeletion));
+---
+  if (key.size() > kMaxWriteBatchKeySize) {
+    return Status::InvalidArgument("key is too large");
+  }
+  if (value.size() > size_t{std::numeric_limits<uint32_t>::max()}) {
+    return Status::InvalidArgument("value is too large");
+  }
+
+  LocalSavePoint save(b);
+  WriteBatchInternal::SetCount(b, WriteBatchInternal::Count(b) + 1);
+  if (column_family_id == 0) {
+    b->rep_.push_back(static_cast<char>(kTypeMerge));
+  } else {
+    b->rep_.push_back(static_cast<char>(kTypeColumnFamilyMerge));
+---
+                                 const SliceParts& key,
+                                 const SliceParts& value) {
+  Status s = CheckSlicePartsLength(key, value);
+  if (!s.ok()) {
+    return s;
+  }
+
+  LocalSavePoint save(b);
+  WriteBatchInternal::SetCount(b, WriteBatchInternal::Count(b) + 1);
+  if (column_family_id == 0) {
+    b->rep_.push_back(static_cast<char>(kTypeMerge));
+  } else {
+    b->rep_.push_back(static_cast<char>(kTypeColumnFamilyMerge));
+---
+  return Status::InvalidArgument(
+      "Cannot call this method on column family enabling timestamp");
+}
+
+Status WriteBatchInternal::PutBlobIndex(WriteBatch* b,
+                                        uint32_t column_family_id,
+                                        const Slice& key, const Slice& value) {
+  LocalSavePoint save(b);
+  WriteB

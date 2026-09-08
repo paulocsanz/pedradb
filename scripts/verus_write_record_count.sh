@@ -2,7 +2,8 @@
 # Machine-check WriteRecord count atomicity (RFC-0150 P2a).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-core/verus/write_record_count.rs"
+# RFC-0171 P0.3 / RFC-0174: prove the file rustc links (pair write_record_count).
+SRC="$ROOT/crates/pedradb-core/src/batch.rs"
 if [[ -x "${VERUS:-}" ]]; then
   :
 elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then

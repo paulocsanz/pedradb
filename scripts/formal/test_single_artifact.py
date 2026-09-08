@@ -574,6 +574,22 @@ def main() -> int:
         print("FAIL leveling_pushdown twin≠kernel did not fail")
         return 1
     print("ok mutant leveling_pushdown twin≠kernel named")
+    wrc_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in wrc_mutant["pairs"]:
+        if pair.get("id") == "write_record_count":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-core/verus/write_record_count.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing write_record_count")
+        return 1
+    hits = [m for m in _sa_fails(wrc_mutant) if m.startswith("write_record_count:")]
+    if not hits:
+        print("FAIL write_record_count twin≠kernel did not fail")
+        return 1
+    print("ok mutant write_record_count twin≠kernel named")
     # Drive the same rule through check_twins (may also report unrelated
     # dirty-tree twin drift; we only require the SA id).
     try:
