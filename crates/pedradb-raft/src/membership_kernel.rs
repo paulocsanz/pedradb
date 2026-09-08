@@ -2054,4 +2054,14 @@ mod tests {
         assert!(queued_leave_finish_ok(true, true));
         assert!(queued_leave_finish_ok(false, false));
     }
+
+    #[test]
+    fn disk_membership_overrides_cli_on_live_has_disk_is_not_ok() {
+        assert!(disk_membership_overrides_cli(true));
+        assert!(
+            !disk_membership_overrides_cli_as_is(true),
+            "AS-IS dente: CLI --peer overwrites disk"
+        );
+        assert!(!disk_membership_overrides_cli(false));
+    }
 }
