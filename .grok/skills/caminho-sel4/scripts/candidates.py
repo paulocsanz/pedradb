@@ -213,7 +213,7 @@ GLUE_SCRIPTS = [
     (
         "commit_ops_with",
         "crates/pedradb-core/src/db.rs",
-        ("append_write_ops", "sync_data", "apply_ops_to_mem"),
+        ("append_write_ops", "sync_data", "apply_ops_to_mem", "fence_on_sync_fail"),
         "wal_sync_required",
         "wal_commit_plan",
     ),

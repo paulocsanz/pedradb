@@ -8822,6 +8822,10 @@ impl<E: Env> Db<E> {
         };
         match crate::write_admission_kernel::wal_commit_plan(do_sync, sync_err.is_some()) {
             crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                assert!(
+                    crate::write_admission_kernel::fence_on_sync_fail(do_sync, true),
+                    "required sync failed ⇒ fence, not Ok"
+                );
                 let e = sync_err.expect("AppendSyncFence ⇒ Some");
                 self.durability_fenced = true;
                 return Err(e);
