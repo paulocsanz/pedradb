@@ -5302,7 +5302,7 @@ impl<E: Env> Db<E> {
             self.ensure_write_admitted_for(&fams)?;
         }
         if crate::write_admission_kernel::batch_is_empty(keys.len() as u64) {
-            return if tail.is_empty() {
+            return if crate::write_admission_kernel::batch_is_empty(tail.len() as u64) {
                 Ok(self.last_sequence())
             } else {
                 self.commit_async_ops(tail)
