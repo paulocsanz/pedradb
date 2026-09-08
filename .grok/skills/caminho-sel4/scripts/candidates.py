@@ -272,7 +272,12 @@ GLUE_SCRIPTS = [
     (
         "open_with_env_sourced",
         "crates/pedradb-core/src/db.rs",
-        ("pit_resync_needs_rewrite", "wal_commit_plan", "fence_on_sync_fail"),
+        (
+            "pit_resync_needs_rewrite",
+            "torn_tail_needs_cut",
+            "wal_commit_plan",
+            "fence_on_sync_fail",
+        ),
         "fence_on_sync_fail",
         "wal_commit_plan",
     ),

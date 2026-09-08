@@ -768,6 +768,19 @@ mod tests {
             open.contains("fence_on_sync_fail("),
             "PIT WAL rewrite must match fence_on_sync_fail"
         );
+        let torn = db_src
+            .split("torn_tail_needs_cut")
+            .nth(1)
+            .and_then(|s| s.split("let wal = Arc::new").next())
+            .expect("torn_tail_needs_cut site");
+        assert!(
+            torn.contains("wal_commit_plan("),
+            "torn-tail WAL cut must match the plan fn"
+        );
+        assert!(
+            torn.contains("fence_on_sync_fail("),
+            "torn-tail WAL cut must match fence_on_sync_fail"
+        );
         let lone_sync = named_fn_src(include_str!("db.rs"), "lone_sync_commit")
             .expect("lone_sync_commit");
         assert!(

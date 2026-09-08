@@ -2063,7 +2063,18 @@ impl<E: Env> Db<E> {
             if crate::write_admission_kernel::torn_tail_needs_cut(wal_len, last_good) {
                 let mut wal_file = env.open_append(&wal_path)?;
                 wal_file.set_len(last_good)?;
-                wal_file.sync_data()?;
+                let sync_err = wal_file.sync_data().err();
+                match crate::write_admission_kernel::wal_commit_plan(true, sync_err.is_some()) {
+                    crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                        assert!(
+                            crate::write_admission_kernel::fence_on_sync_fail(true, true),
+                            "required torn-tail sync failed ⇒ not Ok"
+                        );
+                        return Err(sync_err.expect("AppendSyncFence ⇒ Some").into());
+                    }
+                    crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+                    | crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => {}
+                }
             }
         }
 
