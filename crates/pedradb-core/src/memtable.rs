@@ -828,7 +828,7 @@ impl MemTable {
     #[must_use]
     pub fn take_family(&mut self, family: &str) -> Self {
         self.spill_tail();
-        if !family.is_empty()
+        if !crate::write_admission_kernel::batch_is_empty(family.len() as u64)
             && family != "default"
             && !family.as_bytes().contains(&0)
             && !self.map.is_empty()
