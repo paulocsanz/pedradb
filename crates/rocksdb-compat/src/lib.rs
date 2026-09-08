@@ -1574,7 +1574,9 @@ impl<E: PedraEnv> DBIterator<E> {
     }
 
     fn refill_forward(&mut self) {
-        if self.exhausted || self.items.is_empty() {
+        if self.exhausted
+            || pedradb_core::write_admission_kernel::batch_is_empty(self.items.len() as u64)
+        {
             self.invalidate();
             return;
         }
