@@ -928,7 +928,7 @@ impl SstTable {
     /// older writer split mid-key, versions also sit in the previous block
     /// and in any following run with `first_user_key == user_key`.
     fn blocks_for_point(&self, user_key: &[u8]) -> std::ops::Range<usize> {
-        if self.index.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.index.len() as u64) {
             return 0..0;
         }
         let t8 = Self::p8_window(user_key, self.key_cp);
