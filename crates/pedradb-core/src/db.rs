@@ -4183,7 +4183,7 @@ impl<E: Env> Db<E> {
         let cap = limit.unwrap_or(usize::MAX);
         // deps_scan / kvrocks_scan: one memtable, no SST, latest snapshot —
         // count the live tail index (RFC-0154).
-        if self.ssts.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.ssts.len() as u64) {
             let mut only: Option<&MemTable> = None;
             let mut many = false;
             for t in self.scan_mem_layers() {
