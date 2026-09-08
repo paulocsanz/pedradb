@@ -184,6 +184,10 @@ medida no mesmo harness isolado.
 - [x] **P0.52** O wait P0.51 parava em `active>=2` (`grouping_cap=2`).
       Agora espera `expected_group=4`. 1c ainda lone depois de 256.
       Teste `rfc0180_leader_linger_and_async_catchup`. status: `done`
+- [x] **P0.53** Hoped cap = `grouping_cap(last_peak)` (não magic 4).
+      2-client não espera fantasmas; n≥16 leftover cap=2. `begin_submit`
+      `fetch_max` o pico. Teste `rfc0180_leader_linger_and_async_catchup`.
+      status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
 
@@ -251,6 +255,7 @@ medida no mesmo harness isolado.
 | P0.50 | p0 | wait sibling re-entry after resign | done | active==1 hole; 1024 spins; 1c skips | 2026-09-08 |
 | P0.51 | p0 | wait peer before lone (barrier start) | done | 256 spins; 1c still lones | 2026-09-08 |
 | P0.52 | p0 | wait_peer target expected_group=4 | done | not stop at 2; 1c still lones | 2026-09-08 |
+| P0.53 | p0 | hoped cap = grouping_cap(last_peak) | done | 2-client / n≥16 leftover | 2026-09-08 |
 | P1.1 | p1 | 3-run caixa | todo | — | 2026-09-07 |
 | P2.1 | p2 | 3/3 quiet ≥1× | todo | 0182 P1.1 | 2026-09-07 |
 | P2.2 | p2 | leftover hang | done | 0181 P0.3 steal | 2026-09-07 |
