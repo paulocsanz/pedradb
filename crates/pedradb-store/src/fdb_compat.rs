@@ -404,7 +404,7 @@ pub fn run_phase1_bindingtester_subset(
         let left = tr3
             .get_range(&db, b"p1c/", b"p1c0")
             .map_err(|e| FdbError::from_store(&e))?;
-        if !left.is_empty() {
+        if !pedradb_core::write_admission_kernel::batch_is_empty(left.len() as u64) {
             return Err(FdbError::Other(format!("clear_range left keys {left:?}")));
         }
         let keep = tr3
