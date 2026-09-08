@@ -12,10 +12,10 @@
 #![forbid(unsafe_code)]
 
 use pedradb_core::bench_gap_kernel::{
-    balance_admits, classify_get, classify_probes, diagnose_write, predict_get_bottleneck,
-    BalanceCell, WriteGapInput, WriteLever, WritePhases, BALANCE_SHAPES,
+    balance_admits, classify_get, classify_probes, diagnose_write, scale_bottleneck, BalanceCell,
+    WriteGapInput, WriteLever, WritePhases, BALANCE_SHAPES,
 };
-use pedradb_core::scale_kernel::{scale_forecast, scale_forecast_as_is};
+use pedradb_core::scale_kernel::{predict_write, write_forecast_cut, SCALE_BYTES_PER_ENTRY};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -41,7 +41,9 @@ fn main() {
             eprintln!(
                 "       pedra diagnose write --pedra-ns N --rocks-ns N [--read-pct N] [--wal-ns N] [--mem-ns N] [--flush-ns N] [--lock-ns N] [--prepare-ns N] [--publish-ns N] [--clients N] [--avg-group X]"
             );
-            eprintln!("       pedra diagnose get --keys N --ram BYTES [--measured-ns N]");
+            eprintln!(
+                "       pedra diagnose get --keys N --ram BYTES [--measured-ns N] [--bytes-per-key B]"
+            );
             eprintln!("       pedra diagnose probes --per-get N --p-best N");
             eprintln!("       pedra diagnose balance --cut TOKEN --cell TOKEN[:diag|:named] [...]");
             eprintln!("       balance shapes: {}", BALANCE_SHAPES.join(","));
@@ -69,6 +71,28 @@ fn flag_u64(args: &[String], name: &str) -> Option<u64> {
 }
 
 fn diagnose_write_cmd(args: &[String]) -> Result<(), ()> {
+    if flag_u64(args, "--pedra-ns").is_none() {
+        let clients = flag_u64(args, "--clients").unwrap_or(1);
+        let w = predict_write(clients);
+        println!("pedra diagnose write predict=1 clients={clients}");
+        println!(
+            "expected_group={} distinguishable={} cut={}",
+            w.expected_group,
+            u8::from(w.distinguishable),
+            write_forecast_cut(w)
+        );
+        println!("T_ns best={} as_is={}", w.best_ns, w.as_is_ns);
+        println!(
+            r#"{{"cut":"{}","distinguishable":{},"clients":{},"expected_group":{},"best":{},"as_is":{}}}"#,
+            write_forecast_cut(w),
+            u8::from(w.distinguishable),
+            w.clients,
+            w.expected_group,
+            w.best_ns,
+            w.as_is_ns
+        );
+        return Ok(());
+    }
     let Some(pedra_ns) = flag_u64(args, "--pedra-ns") else {
         eprintln!("pedra diagnose write: --pedra-ns is required");
         return Err(());
@@ -117,22 +141,26 @@ fn diagnose_get_cmd(args: &[String]) -> Result<(), ()> {
         eprintln!("pedra diagnose get: --ram is required (bytes)");
         return Err(());
     };
-    let f = scale_forecast(keys, ram);
-    let as_is = scale_forecast_as_is(keys, ram);
-    // Omit --measured-ns ⇒ classify the as-is walk (prove bottleneck
-    // at this n without running a get). Same as predict_get_bottleneck.
+    let bpe = flag_u64(args, "--bytes-per-key").unwrap_or(SCALE_BYTES_PER_ENTRY);
+    let b = scale_bottleneck(keys, ram, bpe);
+    let f = &b.legal;
+    let as_is = &b.as_is;
     let (measured_ns, class, predict) = match flag_u64(args, "--measured-ns") {
         Some(ns) => (
             ns,
             classify_get(ns, f.best_ns, f.happy_ns, f.worst_ns, as_is.best_ns),
             false,
         ),
-        None => (as_is.best_ns, predict_get_bottleneck(keys, ram), true),
+        None => (as_is.best_ns, b.walk_class, true),
     };
     let mode = if f.hot { "hot" } else { "bounded-cache" };
-    println!("pedra diagnose get keys={keys} ram={ram} mode={mode}");
+    println!("pedra diagnose get keys={keys} ram={ram} mode={mode} bpe={bpe}");
     if predict {
-        println!("predict=1 (as-is walk vs legal clock; no get ran)");
+        println!(
+            "predict=1 distinguishable={} cut={} (probes; no get ran)",
+            u8::from(b.distinguishable),
+            b.cut_token()
+        );
     }
     println!(
         "P_best={} P_worst={} n_files={}",
@@ -144,13 +172,15 @@ fn diagnose_get_cmd(args: &[String]) -> Result<(), ()> {
     );
     println!("measured_ns={measured_ns} class={}", class.token());
     println!(
-        r#"{{"class":"{}","measured_ns":{},"best":{},"happy":{},"worst":{},"as_is":{}}}"#,
+        r#"{{"class":"{}","measured_ns":{},"best":{},"happy":{},"worst":{},"as_is":{},"distinguishable":{},"cut":"{}"}}"#,
         class.token(),
         measured_ns,
         f.best_ns,
         f.happy_ns,
         f.worst_ns,
-        as_is.best_ns
+        as_is.best_ns,
+        u8::from(b.distinguishable),
+        b.cut_token()
     );
     Ok(())
 }

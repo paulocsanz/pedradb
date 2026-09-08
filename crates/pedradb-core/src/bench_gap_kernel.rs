@@ -345,6 +345,8 @@ pub enum GetClass {
     AsIsWalk,
     /// Faster than the best-path clock (model slack or cache hit).
     FasterThanModel,
+    /// \(N_{\mathrm{files}}\le 2P_{\mathrm{best}}\): walk-all is the same physics as legal P.
+    Indistinguishable,
 }
 
 impl GetClass {
@@ -357,6 +359,7 @@ impl GetClass {
             Self::Worst => "worst",
             Self::AsIsWalk => "as_is_walk",
             Self::FasterThanModel => "faster_than_model",
+            Self::Indistinguishable => "indistinguishable",
         }
     }
 }
@@ -471,29 +474,75 @@ pub fn classify_probes_as_is(_probes_per_get: u64, _p_best: u64) -> GetClass {
     GetClass::Best
 }
 
+/// Static GET bottleneck: legal clock vs walk-all, decided by **probes**
+/// not wall-clock (time-class lies below ~25M where \(N_{\mathrm{files}}\approx P\)).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScaleBottleneck {
+    /// Legal RFC-0176 forecast.
+    pub legal: crate::scale_kernel::ScaleForecast,
+    /// Walk-every-L1-file forecast.
+    pub as_is: crate::scale_kernel::ScaleForecast,
+    /// Probe-based class (`as_is_walk` or `indistinguishable`).
+    pub walk_class: GetClass,
+    /// `n_files > 2 P_best`.
+    pub distinguishable: bool,
+    /// Byte/entry used for \(S\).
+    pub bytes_per_entry: u64,
+}
+
+impl ScaleBottleneck {
+    /// `probe_path` if walk-all is a different physics; else `indistinguishable`.
+    #[must_use]
+    pub fn cut_token(&self) -> &'static str {
+        if self.distinguishable {
+            "probe_path"
+        } else {
+            "indistinguishable"
+        }
+    }
+}
+
 /// RFC-0176 bottleneck at `keys` **without running a get**.
 ///
-/// Classifies the as-is walk clock (`n_files * τ_disk`) against the legal
-/// spectrum. `AsIsWalk` ⇒ cut the probe path; do not WARM that `n`.
+/// Probe rule (not µs): `n_files > 2 P_best` ⇒ `AsIsWalk` (cut probe path).
+/// Otherwise `Indistinguishable` — do not claim walk-all at 1M.
+#[must_use]
+pub fn scale_bottleneck(keys: u64, ram: u64, bytes_per_entry: u64) -> ScaleBottleneck {
+    let bpe = bytes_per_entry.max(1);
+    let legal = crate::scale_kernel::scale_forecast_with(keys, ram, bpe);
+    let as_is = crate::scale_kernel::scale_forecast_as_is_with(keys, ram, bpe);
+    let distinguishable = crate::scale_kernel::walk_distinguishable(as_is.n_files, legal.p_best);
+    let walk_class = if distinguishable {
+        classify_probes(as_is.n_files, legal.p_best)
+    } else {
+        GetClass::Indistinguishable
+    };
+    ScaleBottleneck {
+        legal,
+        as_is,
+        walk_class,
+        distinguishable,
+        bytes_per_entry: bpe,
+    }
+}
+
+/// Scale-shape wrapper (`b=245`).
 #[must_use]
 pub fn predict_get_bottleneck(keys: u64, ram: u64) -> GetClass {
-    let f = crate::scale_kernel::scale_forecast(keys, ram);
-    let as_is = crate::scale_kernel::scale_forecast_as_is(keys, ram);
-    classify_get(
-        as_is.best_ns,
-        f.best_ns,
-        f.happy_ns,
-        f.worst_ns,
-        as_is.best_ns,
-    )
+    scale_bottleneck(keys, ram, crate::scale_kernel::SCALE_BYTES_PER_ENTRY).walk_class
 }
 
 /// Same proof for probes: walk-all file count vs \(P_{\mathrm{best}}\).
+/// At small n this is `Best` (not `Indistinguishable`) — one file is legal P.
 #[must_use]
 pub fn predict_probes_bottleneck(keys: u64, ram: u64) -> GetClass {
     let f = crate::scale_kernel::scale_forecast(keys, ram);
     let as_is = crate::scale_kernel::scale_forecast_as_is(keys, ram);
-    classify_probes(as_is.n_files, f.p_best)
+    if crate::scale_kernel::walk_distinguishable(as_is.n_files, f.p_best) {
+        classify_probes(as_is.n_files, f.p_best)
+    } else {
+        GetClass::Indistinguishable
+    }
 }
 
 /// AS-IS: every measured get is "best" (hides walk-all).
@@ -710,6 +759,27 @@ mod tests {
         );
         let f = scale_forecast(1_000_000_000, ram);
         assert_eq!(f.p_best, 5, "1B legal probes stay L+1, not n_files");
+    }
+
+    #[test]
+    fn predict_get_bottleneck_uses_probes_not_wall_clock() {
+        let ram = 64u64 << 30;
+        assert_eq!(
+            predict_get_bottleneck(1_000_000, ram),
+            GetClass::Indistinguishable,
+            "1M is one L1 file — time-class used to say worst"
+        );
+        assert_eq!(
+            predict_get_bottleneck(10_000_000, ram),
+            GetClass::AsIsWalk,
+            "10 files vs P=3 is walk-all; time-class used to say worst"
+        );
+        let b = scale_bottleneck(10_000_000, ram, crate::scale_kernel::SCALE_BYTES_PER_ENTRY);
+        assert!(b.distinguishable);
+        assert_eq!(b.cut_token(), "probe_path");
+        let small = scale_bottleneck(1_000_000, ram, crate::scale_kernel::SCALE_BYTES_PER_ENTRY);
+        assert!(!small.distinguishable);
+        assert_eq!(small.cut_token(), "indistinguishable");
     }
 
     #[test]
