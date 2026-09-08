@@ -1087,7 +1087,7 @@ impl SstTable {
     fn ensure_payload_from_path(&self) -> Result<Arc<[u8]>> {
         {
             let g = self.payload.read();
-            if !g.img.is_empty() {
+            if !crate::write_admission_kernel::batch_is_empty(g.img.len() as u64) {
                 return Ok(Arc::clone(&g.img));
             }
         }
