@@ -4730,8 +4730,9 @@
       "finding": "F-leveling-sweep",
       "twin_kind": "close",
       "atom": "pick_l0_to_l1_model",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/leveling.rs",
-      "twin": "crates/pedradb-core/verus/leveling_pick.rs",
+      "twin": "crates/pedradb-core/src/leveling.rs",
       "verus": "scripts/verus_leveling_pick.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs"

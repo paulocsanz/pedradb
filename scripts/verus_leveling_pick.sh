@@ -4,10 +4,12 @@
 # `leveling_pick`. Split from verus_leveling.sh: the close-tier ladder and
 # this atom live in separate files (recursive spec fns in one crate perturb
 # the other's nonlinear-arithmetic queries; the split is the fix).
+# RFC-0171 P0.3 / RFC-0174: prove the file rustc links (pair leveling_pick).
+# leveling_pushdown still twins this script's last-wins catalog row.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-core/verus/leveling_pick.rs"
+SRC="$ROOT/crates/pedradb-core/src/leveling.rs"
 
 if [[ -x "${VERUS:-}" ]]; then
   :
