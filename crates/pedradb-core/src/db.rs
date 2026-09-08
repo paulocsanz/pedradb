@@ -3522,7 +3522,9 @@ impl<E: Env> Db<E> {
 
     /// One flush + leveled compact (shared by pressure and stall-drain).
     fn drain_l0_once(&mut self) {
-        if !self.mem.is_empty() || self.imm.is_some() {
+        if !crate::write_admission_kernel::batch_is_empty(self.mem.len() as u64)
+            || self.imm.is_some()
+        {
             let _ = self.flush();
         }
         let _ = self.compact_with_ssts_only(CompactOptions::default());
