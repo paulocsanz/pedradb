@@ -9424,7 +9424,9 @@ impl<E: Env> Db<E> {
         g: &mut GroupInFlight,
         batches: Vec<(Vec<BatchOp>, bool)>,
     ) {
-        if g.failed || batches.is_empty() {
+        if g.failed
+            || crate::write_admission_kernel::batch_is_empty(batches.len() as u64)
+        {
             return;
         }
         let base = g.next_i;

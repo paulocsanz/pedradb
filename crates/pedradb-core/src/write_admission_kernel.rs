@@ -708,6 +708,11 @@ mod tests {
             start.contains("batch_is_empty("),
             "group_start must match batch_is_empty"
         );
+        let absorb = named_fn_src(include_str!("db.rs"), "group_absorb").expect("group_absorb");
+        assert!(
+            absorb.contains("batch_is_empty("),
+            "group_absorb must match batch_is_empty"
+        );
     }
 
     #[test]
