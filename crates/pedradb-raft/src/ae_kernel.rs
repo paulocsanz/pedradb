@@ -1,8 +1,8 @@
 //! Pure AppendEntries log decisions (Beyond-style kernel, F16).
 //!
-//! **Single artifact (pair `ae_entry`):** this file is what `rustc` links
-//! *and* what Verus proves (`cfg(verus_keep_ghost)`). Pairs `ae_ack` and
-//! `ae_f16_gate` still have twin-cópias until their turns.
+//! **Single artifact (pairs `ae_entry`, `ae_ack`):** this file is what
+//! `rustc` links *and* what Verus proves (`cfg(verus_keep_ghost)`). Pair
+//! `ae_f16_gate` still has a twin-cópia until its turn.
 //!
 //!   ./scripts/verus_ae_entry_action.sh
 //!
@@ -271,6 +271,8 @@ pub fn ae_ack_success(log_dirty: bool, persist_ok: bool) -> (d: bool)
     !log_dirty || persist_ok
 }
 
+/// F48 / Raft Fig.2: persist dirty log before `success: true`.
+/// raft-lean-squad MaybePersist: never ack past unstable storage.
 proof fn lemma_success_reply_only_after_persist(log_dirty: bool, persist_ok: bool)
     ensures
         ae_ack_success(log_dirty, persist_ok) && log_dirty ==> persist_ok,

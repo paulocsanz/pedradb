@@ -70,8 +70,9 @@
       "id": "ae_ack",
       "finding": "F48",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/ae_kernel.rs",
-      "twin": "crates/pedradb-raft/verus/ae_ack_success.rs",
+      "twin": "crates/pedradb-raft/src/ae_kernel.rs",
       "verus": "scripts/verus_ae_ack_success.sh",
       "callers": [
         "crates/pedradb-raft/src/lib.rs"

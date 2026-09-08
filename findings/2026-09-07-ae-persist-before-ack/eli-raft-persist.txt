@@ -1,0 +1,13 @@
+Source: https://eli.thegreenplace.net/2020/implementing-raft-part-3-persistence-and-optimizations/
+Fetched: 2026-09-07 (page last noted live 2026-08-28)
+
+Precisely for this reason, Figure 2 in the Raft paper clearly marks which
+state should be persistent; persistent state is written and flushed to
+nonvolatile storage every time it's updated. Whatever state has to be
+persisted by a server is persisted before the server issues the next RPC
+or replies to an ongoing RPC.
+
+Raft can get by with persisting only a subset of its state, namely:
+- currentTerm
+- votedFor
+- log

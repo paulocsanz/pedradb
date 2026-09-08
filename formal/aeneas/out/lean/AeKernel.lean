@@ -15,7 +15,7 @@ set_option maxRecDepth 2048
 namespace pedra_aeneas_ae_kernel
 
 /-- [pedra_aeneas_ae_kernel::ae_prev_log_ok]:
-    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 297:0-310:1
+    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 299:0-312:1
     Visibility: public -/
 def ae_prev_log_ok
   (prev_log_index : Std.U64) (prev_log_term : Std.U64)
@@ -30,7 +30,7 @@ def ae_prev_log_ok
     else ok (log_term_at_prev = prev_log_term)
 
 /-- [pedra_aeneas_ae_kernel::AeEntryAction]
-    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 315:0-324:1
+    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 317:0-326:1
     Visibility: public -/
 @[discriminant isize]
 inductive AeEntryAction where
@@ -40,7 +40,7 @@ inductive AeEntryAction where
 | Refuse : AeEntryAction
 
 /-- [pedra_aeneas_ae_kernel::{impl core::fmt::Debug for pedra_aeneas_ae_kernel::AeEntryAction}::fmt]:
-    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 314:9-314:14
+    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 316:9-316:14
     Visibility: public -/
 def AeEntryAction.Insts.CoreFmtDebug.fmt
   (self : AeEntryAction) (f : core.fmt.Formatter) :
@@ -54,42 +54,42 @@ def AeEntryAction.Insts.CoreFmtDebug.fmt
   | AeEntryAction.Refuse => core.fmt.Formatter.write_str f (toStr "Refuse")
 
 /-- Trait implementation: [pedra_aeneas_ae_kernel::{impl core::fmt::Debug for pedra_aeneas_ae_kernel::AeEntryAction}]
-    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 314:9-314:14 -/
+    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 316:9-316:14 -/
 @[reducible]
 def AeEntryAction.Insts.CoreFmtDebug : core.fmt.Debug AeEntryAction := {
   fmt := AeEntryAction.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_ae_kernel::{impl core::clone::Clone for pedra_aeneas_ae_kernel::AeEntryAction}::clone]:
-    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 314:16-314:21
+    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 316:16-316:21
     Visibility: public -/
 def AeEntryAction.Insts.CoreCloneClone.clone
   (self : AeEntryAction) : Result AeEntryAction := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_ae_kernel::{impl core::clone::Clone for pedra_aeneas_ae_kernel::AeEntryAction}]
-    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 314:16-314:21 -/
+    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 316:16-316:21 -/
 @[reducible]
 def AeEntryAction.Insts.CoreCloneClone : core.clone.Clone AeEntryAction := {
   clone := AeEntryAction.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [pedra_aeneas_ae_kernel::{impl core::marker::Copy for pedra_aeneas_ae_kernel::AeEntryAction}]
-    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 314:23-314:27 -/
+    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 316:23-316:27 -/
 @[reducible]
 def AeEntryAction.Insts.CoreMarkerCopy : core.marker.Copy AeEntryAction := {
   cloneInst := AeEntryAction.Insts.CoreCloneClone
 }
 
 /-- Trait implementation: [pedra_aeneas_ae_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_ae_kernel::AeEntryAction}]
-    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 314:29-314:38 -/
+    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 316:29-316:38 -/
 @[reducible]
 def AeEntryAction.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq AeEntryAction := {
 }
 
 /-- [pedra_aeneas_ae_kernel::{impl core::cmp::PartialEq<pedra_aeneas_ae_kernel::AeEntryAction> for pedra_aeneas_ae_kernel::AeEntryAction}::eq]:
-    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 314:29-314:38
+    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 316:29-316:38
     Visibility: public -/
 def AeEntryAction.Insts.CoreCmpPartialEqAeEntryAction.eq
   (self : AeEntryAction) (other : AeEntryAction) : Result Bool := do
@@ -98,7 +98,7 @@ def AeEntryAction.Insts.CoreCmpPartialEqAeEntryAction.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_ae_kernel::{impl core::cmp::PartialEq<pedra_aeneas_ae_kernel::AeEntryAction> for pedra_aeneas_ae_kernel::AeEntryAction}]
-    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 314:29-314:38 -/
+    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 316:29-316:38 -/
 @[reducible]
 def AeEntryAction.Insts.CoreCmpPartialEqAeEntryAction : core.cmp.PartialEq
   AeEntryAction AeEntryAction := {
@@ -106,14 +106,14 @@ def AeEntryAction.Insts.CoreCmpPartialEqAeEntryAction : core.cmp.PartialEq
 }
 
 /-- [pedra_aeneas_ae_kernel::{impl core::cmp::Eq for pedra_aeneas_ae_kernel::AeEntryAction}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 314:40-314:42
+    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 316:40-316:42
     Visibility: public -/
 def AeEntryAction.Insts.CoreCmpEq.assert_fields_are_eq
   (self : AeEntryAction) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_ae_kernel::{impl core::cmp::Eq for pedra_aeneas_ae_kernel::AeEntryAction}]
-    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 314:40-314:42 -/
+    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 316:40-316:42 -/
 @[reducible]
 def AeEntryAction.Insts.CoreCmpEq : core.cmp.Eq AeEntryAction := {
   partialEqInst := AeEntryAction.Insts.CoreCmpPartialEqAeEntryAction
@@ -121,7 +121,7 @@ def AeEntryAction.Insts.CoreCmpEq : core.cmp.Eq AeEntryAction := {
 }
 
 /-- [pedra_aeneas_ae_kernel::ae_entry_action]:
-    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 341:0-368:1
+    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 343:0-370:1
     Visibility: public -/
 def ae_entry_action
   (entry_index : Std.U64) (entry_term : Std.U64)
@@ -144,7 +144,7 @@ def ae_entry_action
       else ok AeEntryAction.TruncateAndInstall
 
 /-- [pedra_aeneas_ae_kernel::ae_f16_safe]:
-    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 373:0-402:1
+    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 375:0-404:1
     Visibility: public -/
 def ae_f16_safe
   (entry_index : Std.U64) (entry_term : Std.U64)
@@ -256,7 +256,7 @@ def ae_f16_safe
         else ok true
 
 /-- [pedra_aeneas_ae_kernel::ae_f16_safe_as_is]:
-    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 408:0-417:1
+    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 410:0-419:1
     Visibility: public -/
 def ae_f16_safe_as_is
   (_entry_index : Std.U64) (_entry_term : Std.U64)
@@ -267,7 +267,7 @@ def ae_f16_safe_as_is
   ok true
 
 /-- [pedra_aeneas_ae_kernel::ae_ack_success]:
-    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 424:0-426:1
+    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 426:0-428:1
     Visibility: public -/
 def ae_ack_success (log_dirty : Bool) (persist_ok : Bool) : Result Bool := do
   if log_dirty
@@ -275,14 +275,14 @@ def ae_ack_success (log_dirty : Bool) (persist_ok : Bool) : Result Bool := do
   else ok true
 
 /-- [pedra_aeneas_ae_kernel::ae_ack_success_as_is]:
-    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 431:0-433:1
+    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 433:0-435:1
     Visibility: public -/
 def ae_ack_success_as_is
   (_log_dirty : Bool) (_persist_ok : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_ae_kernel::ae_entry_action_as_is_rewrite_committed]:
-    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 439:0-458:1
+    Source: '../../../crates/pedradb-raft/src/ae_kernel.rs', lines 441:0-460:1
     Visibility: public -/
 def ae_entry_action_as_is_rewrite_committed
   (entry_index : Std.U64) (entry_term : Std.U64)
