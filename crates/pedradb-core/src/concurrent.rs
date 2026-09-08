@@ -830,7 +830,9 @@ impl WriteGroup {
             // catch-up hold is pure latency — the merge (one encode pass,
             // one `write()` per group) is the whole win.
             let any_sync = batch.iter().any(|p| p.do_sync);
-            if any_sync && batch_ops < CATCHUP_SKIP_OPS {
+            if crate::write_admission_kernel::wal_sync_required(true, any_sync, false)
+                && batch_ops < CATCHUP_SKIP_OPS
+            {
                 if let Some(bound) =
                     catchup_wait_bound(window, self.fd_ema(), batch.len(), active, batch_ops)
                 {

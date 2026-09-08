@@ -704,6 +704,15 @@ mod tests {
             ns.contains("wal_sync_required("),
             "GroupInFlight::needs_sync must match wal_sync_required"
         );
+        let lead = include_str!("concurrent.rs")
+            .split("fn lead<")
+            .nth(1)
+            .and_then(|s| s.split("fn validate_occ_batch").next())
+            .expect("lead");
+        assert!(
+            lead.contains("wal_sync_required("),
+            "WriteGroup::lead catch-up must match wal_sync_required"
+        );
     }
 
     #[test]
