@@ -455,57 +455,69 @@ def default_pct_depth_raised_as_is : Result Bool := do
 def may_publish_group (wal_io_ok : Bool) : Result Bool := do
   ok wal_io_ok
 
+/-- [pedra_aeneas_group_commit_kernel::rwlock_client_may_mutate]:
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 234:0-236:1
+    Visibility: public -/
+def rwlock_client_may_mutate (holding_write : Bool) : Result Bool := do
+  ok holding_write
+
+/-- [pedra_aeneas_group_commit_kernel::rwlock_client_may_mutate_as_is]:
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 240:0-242:1
+    Visibility: public -/
+def rwlock_client_may_mutate_as_is (_holding_write : Bool) : Result Bool := do
+  ok true
+
 /-- [pedra_aeneas_group_commit_kernel::may_publish_group_as_is]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 232:0-234:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 246:0-248:1
     Visibility: public -/
 def may_publish_group_as_is (_wal_io_ok : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_group_commit_kernel::lock_interleavings_admitted]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 239:0-241:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 253:0-255:1
     Visibility: public -/
 def lock_interleavings_admitted : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_group_commit_kernel::lock_interleavings_admitted_as_is]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 245:0-247:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 259:0-261:1
     Visibility: public -/
 def lock_interleavings_admitted_as_is : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_group_commit_kernel::fsync_promotes_pending]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 252:0-254:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 266:0-268:1
     Visibility: public -/
 def fsync_promotes_pending (os_honest : Bool) : Result Bool := do
   ok os_honest
 
 /-- [pedra_aeneas_group_commit_kernel::fsync_promotes_pending_as_is]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 258:0-260:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 272:0-274:1
     Visibility: public -/
 def fsync_promotes_pending_as_is (_os_honest : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_group_commit_kernel::media_durable_admitted]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 264:0-266:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 278:0-280:1
     Visibility: public -/
 def media_durable_admitted (_fsync_ok : Bool) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_group_commit_kernel::media_durable_admitted_as_is]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 270:0-272:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 284:0-286:1
     Visibility: public -/
 def media_durable_admitted_as_is (fsync_ok : Bool) : Result Bool := do
   ok fsync_ok
 
 /-- [pedra_aeneas_group_commit_kernel::stacked_fsync_liars_admitted]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 278:0-280:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 292:0-294:1
     Visibility: public -/
 def stacked_fsync_liars_admitted
   (_lying : Bool) (_det_io : Bool) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_group_commit_kernel::stacked_fsync_liars_admitted_as_is]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 284:0-286:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 298:0-300:1
     Visibility: public -/
 def stacked_fsync_liars_admitted_as_is
   (lying : Bool) (det_io : Bool) : Result Bool := do
@@ -514,13 +526,13 @@ def stacked_fsync_liars_admitted_as_is
   else ok false
 
 /-- [pedra_aeneas_group_commit_kernel::fsync_lie_closes_tcg_guest]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 291:0-293:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 305:0-307:1
     Visibility: public -/
 def fsync_lie_closes_tcg_guest : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_group_commit_kernel::fsync_lie_closes_tcg_guest_as_is]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 297:0-299:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 311:0-313:1
     Visibility: public -/
 def fsync_lie_closes_tcg_guest_as_is : Result Bool := do
   ok true

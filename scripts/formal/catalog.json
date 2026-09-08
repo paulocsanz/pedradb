@@ -3204,6 +3204,30 @@
       }
     },
     {
+      "id": "rwlock_client_may_mutate",
+      "finding": "RFC-0070 data-race client",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
+      "twin": "crates/pedradb-core/verus/group_commit.rs",
+      "verus": "scripts/verus_group_commit.sh",
+      "callers": ["crates/pedradb-core/src/concurrent.rs"],
+      "entry": "rwlock_client_may_mutate",
+      "data_fate": true,
+      "handlers": ["finish_group_off_lock"],
+      "as_is": "rwlock_client_may_mutate_as_is",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/concurrent.rs",
+          "handler": "finish_group_off_lock"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/group_commit_kernel.rs",
+        "test": "rwlock_client_may_mutate_on_live_off_lock_is_not_ok"
+      },
+      "three_teeth": true
+    },
+    {
       "id": "forall_schedules",
       "finding": "RFC-0070",
       "twin_kind": "close",

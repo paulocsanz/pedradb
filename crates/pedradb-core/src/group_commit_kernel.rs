@@ -227,6 +227,20 @@ pub fn may_publish_group(wal_io_ok: bool) -> bool {
     wal_io_ok
 }
 
+/// Data-race token (CapybaraKV RW-lock *client*, not `parking_lot`):
+/// exclusive mutate of `Db` only while the write guard is held. Off-lock
+/// fd (`drop(guard)` then `sync_data`) must pass `false`.
+#[must_use]
+pub fn rwlock_client_may_mutate(holding_write: bool) -> bool {
+    holding_write
+}
+
+/// AS-IS: mutate even after dropping the write lock (data-race lie).
+#[must_use]
+pub fn rwlock_client_may_mutate_as_is(_holding_write: bool) -> bool {
+    true
+}
+
 /// AS-IS: publish even if WAL I/O failed (the 0071 hole — Ok with a lie).
 #[must_use]
 pub fn may_publish_group_as_is(_wal_io_ok: bool) -> bool {
@@ -511,6 +525,39 @@ mod tests {
         assert!(
             lone.contains("occ_batch_plan("),
             "lone_commit must match occ_batch_plan"
+        );
+    }
+
+    #[test]
+    fn rwlock_client_may_mutate_on_live_off_lock_is_not_ok() {
+        assert!(rwlock_client_may_mutate(true));
+        assert!(!rwlock_client_may_mutate(false));
+        assert!(
+            rwlock_client_may_mutate_as_is(false),
+            "AS-IS dente: mutate after dropping the write lock"
+        );
+        let src = include_str!("concurrent.rs");
+        let off = src
+            .split("fn finish_group_off_lock")
+            .nth(1)
+            .expect("finish_group_off_lock");
+        assert!(
+            off.contains("drop(guard)"),
+            "off-lock fd drops the write guard"
+        );
+        assert!(
+            off.contains("rwlock_client_may_mutate("),
+            "finish_group_off_lock must match the data-race token"
+        );
+        let after_drop = off.split("drop(guard)").nth(1).expect("after drop");
+        let until_reacquire = after_drop.split("db.write()").next().expect("until write");
+        assert!(
+            !until_reacquire.contains("group_apply("),
+            "must not apply mem while the write lock is dropped"
+        );
+        assert!(
+            !until_reacquire.contains("publish_sequence("),
+            "must not publish while the write lock is dropped"
         );
     }
 

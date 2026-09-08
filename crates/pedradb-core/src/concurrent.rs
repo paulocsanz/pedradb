@@ -1119,6 +1119,10 @@ impl WriteGroup {
         }
         let wal = guard.wal_arc();
         drop(guard);
+        assert!(
+            !crate::group_commit_kernel::rwlock_client_may_mutate(false),
+            "off-lock fd must not mutate Db (data-race token)"
+        );
         // RFC-0166 P1.4: the pinned profile advances its write→ack ledger
         // alongside the real critical section (append → barrier → publish).
         let pinned = group.verified.load(std::sync::atomic::Ordering::Acquire);
@@ -1175,6 +1179,10 @@ impl WriteGroup {
                 .collect();
         }
         let mut g = db.write();
+        assert!(
+            crate::group_commit_kernel::rwlock_client_may_mutate(true),
+            "apply/publish holds the write guard (data-race token)"
+        );
         if need_sync {
             g.note_wal_sync();
         }

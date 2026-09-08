@@ -251,3 +251,17 @@ theorem occ_batch_plan_as_is_dente :
       ok (⟨[OccMemberFate.Ok], by native_decide⟩
         : alloc.vec.Vec OccMemberFate) := by
   exact LawfulBEq.eq_of_beq (by native_decide)
+
+/-- Data-race token: exclusive mutate only while the write guard is held. -/
+theorem rwlock_client_may_mutate_needs_write :
+    rwlock_client_may_mutate false = ok false ∧
+      rwlock_client_may_mutate true = ok true := by
+  constructor
+  · unfold rwlock_client_may_mutate; rfl
+  · unfold rwlock_client_may_mutate; rfl
+
+/-- AS-IS dente: mutate after dropping the write lock. -/
+theorem rwlock_client_may_mutate_as_is_dente :
+    rwlock_client_may_mutate_as_is false = ok true := by
+  unfold rwlock_client_may_mutate_as_is
+  rfl
