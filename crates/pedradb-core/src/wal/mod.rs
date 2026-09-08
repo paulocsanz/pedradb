@@ -209,7 +209,7 @@ impl<F: EnvFile> Wal<F> {
     /// Underlying file write.
     pub fn write_pending_frame(&mut self) -> Result<()> {
         let mut frame = self.writer.take_frame();
-        if frame.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(frame.len() as u64) {
             self.writer.restore_frame(frame);
             return Ok(());
         }
