@@ -4175,7 +4175,7 @@ impl<E: Env> StoreCluster<E> {
                 }
             }
         }
-        if !corrupt_only.is_empty() {
+        if !pedradb_core::write_admission_kernel::batch_is_empty(corrupt_only.len() as u64) {
             return Err(StoreError::Msg(
                 "si hist: corrupt on all local replicas".into(),
             ));
