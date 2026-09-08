@@ -5019,7 +5019,8 @@ impl<E: Env> Db<E> {
                     .classify_family(family, keys, false, || None);
             } else {
                 let ssts = &self.ssts;
-                let physical_empty = self.physical_cfs.is_empty();
+                let physical_empty =
+                    crate::write_admission_kernel::batch_is_empty(self.physical_cfs.len() as u64);
                 let mems: Vec<&MemTable> = std::iter::once(&self.mem)
                     .chain(self.imm.as_ref())
                     .chain(self.flush_read_pin.as_ref())
