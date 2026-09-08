@@ -2723,7 +2723,7 @@ impl<E: Env> Db<E> {
     }
 
     fn batch_families(&self, ops: &[BatchOp]) -> Vec<String> {
-        if self.physical_cfs.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.physical_cfs.len() as u64) {
             return Vec::new();
         }
         let mut out = Vec::with_capacity(4);
