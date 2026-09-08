@@ -264,6 +264,13 @@ a linha quando há phasesΔ. Sem harness novo.
       loss. p50 2.3 vs 3.5 µs; hole is tail (p99 4.86 vs 0.007 ms,
       wall 58 vs 0.19 s). Rocks 1.05 M 2-hop scans is not collapsed.
       Not Linux cartaz. — status: `done`
+- [x] **P2.50** `surreal_tx_get_mc4` (snapshot get + commit, 4 clients)
+      in `COMPARE_SHAPES`, `BALANCE_SHAPES`, and `run_surreal_get_clients`.
+      Test `rfc0184_surreal_tx_get_mc4_in_compare`. Darwin DIAG
+      `ratio=1.364` (364 k / 267 k QPS). Timed is 100% snapshot GET
+      (seed async); JSON suite tag is host-default (`peer_sync=true`),
+      not a published win vs Rocks default. p50 10 vs 12 µs. Not Linux
+      cartaz. — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -327,6 +334,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.47 | p2 | myrocks_point_select_mc4 COMPARE+BALANCE | done | MyRocks point-select mc4; Darwin DIAG 0.430× named loss; GET path | 2026-09-08 |
 | P2.48 | p2 | nebula_get_neighbors_mc4 COMPARE+BALANCE | done | Nebula 1-hop mc4; Darwin DIAG 0.776× named loss | 2026-09-08 |
 | P2.49 | p2 | arango_traversal_mc4 COMPARE+BALANCE | done | Arango 2-hop mc4; Darwin DIAG 0.003× named loss | 2026-09-08 |
+| P2.50 | p2 | surreal_tx_get_mc4 COMPARE+BALANCE | done | Surreal snapshot-get mc4; Darwin DIAG 1.364; JSON host-default not a win | 2026-09-08 |
 
 ## Acceptance Criteria
 
@@ -385,7 +393,8 @@ a linha quando há phasesΔ. Sem harness novo.
   `rfc0184_kvrocks_get_mc4_in_compare` (P2.46);
   `rfc0184_myrocks_point_select_mc4_in_compare` (P2.47);
   `rfc0184_nebula_get_neighbors_mc4_in_compare` (P2.48);
-  `rfc0184_arango_traversal_mc4_in_compare` (P2.49).
+  `rfc0184_arango_traversal_mc4_in_compare` (P2.49);
+  `rfc0184_surreal_tx_get_mc4_in_compare` (P2.50).
 - **Telemetry / Analytics:** uma linha `diagnose dominant=… lever=…`;
   `benches[].diagnose.lever` no JSON; compare copia para a row.
   scale `get_hit` / `lookup_100` / `probe_hit` imprimem `diagnose get … class=…` (P2.6/P2.7/P2.21).

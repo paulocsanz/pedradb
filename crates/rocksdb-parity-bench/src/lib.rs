@@ -301,6 +301,8 @@ pub const COMPARE_SHAPES: &[&str] = &[
     "nebula_get_neighbors_mc4",
     // RFC-0184 P2.49: Arango 2-hop traversal mc4 — 1c is suite-only.
     "arango_traversal_mc4",
+    // RFC-0184 P2.50: Surreal snapshot-get mc4 — 1c is suite-only; rmw already has mc8.
+    "surreal_tx_get_mc4",
 ];
 
 /// Length of the RFC-0041 official prefix of [`COMPARE_SHAPES`].
@@ -1984,14 +1986,23 @@ impl YcsbRunner {
         let mut rng = std::mem::take(&mut self.rng);
         let mut blocks = Vec::with_capacity(5);
 
+        if shape_wanted("surreal_tx_get")
+            || shape_wanted("surreal_tx_put")
+            || shape_wanted("surreal_tx_rmw")
+            || shape_wanted("surreal_tx_scan")
+            || shape_wanted("surreal_tx_batch")
+            || shape_wanted("surreal_tx_rmw_mc8")
+        {
         for i in 0..records {
             assert!(e.put(&skey(i), &yval), "surreal seed {i}");
         }
         for i in 0..records {
             let _ = e.get(&skey(i));
         }
+        }
 
         // surreal_tx_get — read-only txn (snapshot get + commit). HL.
+        if shape_wanted("surreal_tx_get") {
         let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut gets, mut errors) = (0u64, 0u64);
@@ -2025,8 +2036,10 @@ impl YcsbRunner {
                 *last = attach_diagnose(std::mem::take(last), Some(&d));
             }
         }
+        }
 
         // surreal_tx_put — 1 put + commit (canary: one fd/Ok).
+        if shape_wanted("surreal_tx_put") {
         let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut puts, mut errors) = (0u64, 0u64);
@@ -2061,8 +2074,10 @@ impl YcsbRunner {
                 *last = attach_diagnose(std::mem::take(last), Some(&d));
             }
         }
+        }
 
         // surreal_tx_rmw — SurrealQL UPDATE: get + put + one commit (HL).
+        if shape_wanted("surreal_tx_rmw") {
         let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut rmws, mut errors) = (0u64, 0u64);
@@ -2106,8 +2121,10 @@ impl YcsbRunner {
                 *last = attach_diagnose(std::mem::take(last), Some(&d));
             }
         }
+        }
 
         // surreal_tx_scan — snapshot range + commit (HL).
+        if shape_wanted("surreal_tx_scan") {
         let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut scans, mut errors) = (0u64, 0u64);
@@ -2141,8 +2158,10 @@ impl YcsbRunner {
                 *last = attach_diagnose(std::mem::take(last), Some(&d));
             }
         }
+        }
 
         // surreal_tx_batch — crud-bench insert: N puts, one commit (HL).
+        if shape_wanted("surreal_tx_batch") {
         let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut rows, mut errors) = (0u64, 0u64);
@@ -2178,6 +2197,7 @@ impl YcsbRunner {
                 *last = attach_diagnose(std::mem::take(last), Some(&d));
             }
         }
+        }
 
         self.rng = rng;
         // crud-bench is concurrent; 1c rmw misses OCC conflict + group commit.
@@ -2193,6 +2213,10 @@ impl YcsbRunner {
         clients: usize,
     ) -> Vec<String> {
         assert!(clients >= 2, "multi-client harness needs >= 2 clients");
+        let name = format!("surreal_tx_rmw_mc{clients}");
+        if !shape_wanted(&name) {
+            return Vec::new();
+        }
         let cfg_ops = self.cfg.ops;
         let records = self.cfg.records;
         let yval = std::sync::Arc::new(vec![b's'; self.cfg.payload]);
@@ -2248,7 +2272,6 @@ impl YcsbRunner {
                 lats.append(&mut l);
             }
         });
-        let name = format!("surreal_tx_rmw_mc{clients}");
         let mut block = summarize_mc(
             &name,
             cfg_ops * clients,
@@ -2267,6 +2290,95 @@ impl YcsbRunner {
             block = attach_diagnose(block, Some(&d));
         }
         vec![block]
+    }
+
+    /// RFC-0184 P2.50: surreal_tx_get at N clients (snapshot get + commit).
+    pub fn run_surreal_get_clients<E: OccEngine + Sync>(
+        &self,
+        e: &E,
+        clients: usize,
+    ) -> Vec<String> {
+        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
+        let full = format!("surreal_tx_get_mc{clients}");
+        if !shape_wanted(&full) {
+            return Vec::new();
+        }
+        // Timed window is snapshot GET + commit. Seed untimed async so we
+        // don't pay 100k host-sync puts (1c suite still uses Surreal
+        // sync-on-commit).
+        e.set_write_sync(false);
+        let records = self.cfg.records;
+        let cfg_ops = self.cfg.ops;
+        let yval = vec![b's'; self.cfg.payload];
+        for i in 0..records {
+            assert!(e.put(&skey(i), &yval), "surreal mc seed {i}");
+        }
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+        let phase0 = e.write_phase_snapshot();
+        let t0 = Instant::now();
+        let mut lats = Vec::with_capacity(cfg_ops * clients);
+        let mut errors = 0u64;
+        std::thread::scope(|s| {
+            let handles: Vec<_> = (0..clients)
+                .map(|c| {
+                    let barrier = barrier.clone();
+                    s.spawn(move || {
+                        let mut rng =
+                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
+                        let mut lats = Vec::with_capacity(cfg_ops);
+                        let mut errors = 0u64;
+                        barrier.wait();
+                        for _ in 0..cfg_ops {
+                            let t = Instant::now();
+                            let u = self.pick(&mut rng, records);
+                            let ok = e.with_txn(|tx| match tx.get(&skey(u)) {
+                                Ok(_) => tx.commit(),
+                                Err(()) => false,
+                            });
+                            if !ok {
+                                errors += 1;
+                            }
+                            lats.push(ms(t));
+                        }
+                        (lats, errors)
+                    })
+                })
+                .collect();
+            for h in handles {
+                let (mut l, err) = h.join().expect("surreal get client thread");
+                errors += err;
+                lats.append(&mut l);
+            }
+        });
+        let wall = t0.elapsed();
+        eprintln!(
+            "[rocks-parity] {full} done ops={} errors={errors}",
+            cfg_ops * clients
+        );
+        let mut blocks = vec![summarize_mc(
+            &full,
+            cfg_ops * clients,
+            wall,
+            &mut lats,
+            clients,
+            errors,
+        )];
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(
+                pct(&lats, 50.0),
+                a,
+                b,
+                clients as u64,
+                0.0,
+                100,
+                (cfg_ops * clients) as u64,
+            );
+            eprint_write_diagnose(&full, &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
+        blocks
     }
 
     /// RFC-0043 P2.6 — NebulaGraph storage: vertex prefix-scan (GO 1-hop)
@@ -4820,6 +4932,26 @@ mod tests {
     }
 
     #[test]
+    fn rfc0184_surreal_tx_get_mc4_in_compare() {
+        assert!(
+            COMPARE_SHAPES.contains(&"surreal_tx_get_mc4"),
+            "Surreal snapshot-get mc4 must be on the cartaz"
+        );
+        assert!(shape_wanted_in(
+            "surreal_tx_get_mc4",
+            Some("surreal_tx_get_mc4")
+        ));
+        assert!(
+            !shape_wanted_in("surreal_tx_get", Some("surreal_tx_get_mc4")),
+            "1c surreal_tx_get must not leak into ONLY=surreal_tx_get_mc4"
+        );
+        assert!(
+            !shape_wanted_in("surreal_tx_rmw_mc8", Some("surreal_tx_get_mc4")),
+            "rmw mc8 must not leak into ONLY=surreal_tx_get_mc4"
+        );
+    }
+
+    #[test]
     fn rfc0178_mc_only_selects_full_mc_name() {
         assert!(shape_wanted_in(
             "deps_cache_overwrite_mc4",
@@ -5304,6 +5436,7 @@ mod tests {
             "myrocks_point_select_mc4",
             "nebula_get_neighbors_mc4",
             "arango_traversal_mc4",
+            "surreal_tx_get_mc4",
         ] {
             assert!(
                 COMPARE_SHAPES.contains(&name),
