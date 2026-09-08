@@ -10185,7 +10185,7 @@ impl<E: Env> Db<E> {
                 | crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => {}
             }
         }
-        if sync_dir && !paths.is_empty() {
+        if crate::write_admission_kernel::dir_sync_required(sync_dir) && !paths.is_empty() {
             env.sync_dir(dir)?;
         }
         Ok(())

@@ -298,7 +298,7 @@ GLUE_SCRIPTS = [
     (
         "fsync_sst_paths",
         "crates/pedradb-core/src/db.rs",
-        ("sync_data", "fence_on_sync_fail"),
+        ("sync_data", "fence_on_sync_fail", "dir_sync_required"),
         "fence_on_sync_fail",
         "wal_commit_plan",
     ),

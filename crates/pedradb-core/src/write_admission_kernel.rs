@@ -843,6 +843,10 @@ mod tests {
             sst.contains("fence_on_sync_fail("),
             "fsync_sst_paths must match fence_on_sync_fail"
         );
+        assert!(
+            sst.contains("dir_sync_required("),
+            "fsync_sst_paths must match dir_sync_required"
+        );
         let ckpt = named_fn_src(include_str!("db.rs"), "write_checkpoint_meta")
             .expect("write_checkpoint_meta");
         assert!(
