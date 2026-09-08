@@ -551,7 +551,7 @@ impl<E: Env> BackupEngine<E> {
             }
         }
 
-        if !replay.is_empty() {
+        if !pedradb_core::write_admission_kernel::batch_is_empty(replay.len() as u64) {
             // Replace empty/rotated WAL with recovered filtered records.
             let wal_path = dest.join(WAL_FILE_NAME);
             let _ = self.env.remove_file(&wal_path);
