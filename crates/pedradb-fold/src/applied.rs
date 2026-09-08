@@ -90,7 +90,7 @@ pub fn watch_applied_prefix<E: Env>(
             Some(p) => crate::follow::in_prefixes(e.key.as_ref(), p),
         })
         .collect();
-    if batch.is_empty() {
+    if pedradb_core::write_admission_kernel::batch_is_empty(batch.len() as u64) {
         return Ok(store.cursor());
     }
     let updates: Vec<FoldUpdate> = batch
