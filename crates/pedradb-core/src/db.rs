@@ -5503,7 +5503,7 @@ impl<E: Env> Db<E> {
         family: &str,
         sync: bool,
     ) -> Result<(SstTable, u64)> {
-        if run.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(run.len() as u64) {
             return Err(CoreError::Internal("empty bulk run".into()));
         }
         let final_path = dir.join(format!("{num:06}.sst"));
