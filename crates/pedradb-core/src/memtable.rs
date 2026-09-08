@@ -679,7 +679,10 @@ impl MemTable {
     /// on the first `deps_raftlog` batch.
     #[must_use]
     pub(crate) fn max_user_key_in_family(&self, family: &str) -> Option<Bytes> {
-        if family == "default" || family.is_empty() || family.as_bytes().contains(&0) {
+        if family == "default"
+            || crate::write_admission_kernel::batch_is_empty(family.len() as u64)
+            || family.as_bytes().contains(&0)
+        {
             return self.max_user_key_in_family_scan(family);
         }
         let mut pfx = Vec::with_capacity(family.len() + 1);
