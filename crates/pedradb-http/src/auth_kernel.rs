@@ -1,5 +1,11 @@
 //! Bearer scheme match (RFC-0002 P31 / F85).
 //!
+//! **Single artifact:** this file is what `rustc` links *and* what Verus
+//! proves (`cfg(verus_keep_ghost)`). String `eq_ignore_ascii_case` is
+//! caller; the byte fold is the term. No twin-cópia.
+//!
+//!   ./scripts/verus_bearer_scheme.sh
+//!
 //! Production `header_token` calls [`is_bearer_scheme`].
 //! RFC 9110 §11.1: auth-scheme is case-insensitive.
 //!
@@ -9,6 +15,7 @@
 #![forbid(unsafe_code)]
 
 /// ASCII lowercase (`A`–`Z` → `a`–`z`).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn ascii_lower(b: u8) -> u8 {
     if b.is_ascii_uppercase() {
@@ -19,6 +26,7 @@ pub fn ascii_lower(b: u8) -> u8 {
 }
 
 /// ASCII uppercase (`a`–`z` → `A`–`Z`). F79 methods.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn ascii_upper(b: u8) -> u8 {
     if b.is_ascii_lowercase() {
@@ -29,18 +37,21 @@ pub fn ascii_upper(b: u8) -> u8 {
 }
 
 /// RFC 9110: method token compared in ASCII uppercase.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn normalize_http_method(m: &str) -> String {
     m.to_ascii_uppercase()
 }
 
 /// AS-IS F79: raw request token (`put` ≠ `PUT`).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn normalize_http_method_as_is(m: &str) -> String {
     m.to_string()
 }
 
 /// RFC 9110: scheme token equals `bearer` ignoring ASCII case.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn is_bearer_scheme(scheme: &str) -> bool {
     scheme.eq_ignore_ascii_case("bearer")
@@ -48,6 +59,7 @@ pub fn is_bearer_scheme(scheme: &str) -> bool {
 
 /// Other common auth-schemes. Scheme-only (`Authorization: Basic`) is not a
 /// shared-secret token (F151).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn is_non_bearer_auth_scheme(scheme: &str) -> bool {
     scheme.eq_ignore_ascii_case("basic")
@@ -57,6 +69,7 @@ pub fn is_non_bearer_auth_scheme(scheme: &str) -> bool {
 }
 
 /// AS-IS F85: only the two literal prefixes that were stripped.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn is_bearer_scheme_as_is(scheme: &str) -> bool {
     scheme == "Bearer" || scheme == "bearer"
@@ -71,6 +84,7 @@ pub fn is_bearer_scheme_as_is(scheme: &str) -> bool {
 ///   be the raw token `"Bearer"` and stop the scan)
 /// - Empty value → `None`
 /// - Bare value with no scheme → `Some(value)` (legacy)
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn bearer_token_from_value(value: &str) -> Option<&str> {
     let v = value.trim();
@@ -97,6 +111,7 @@ pub fn bearer_token_from_value(value: &str) -> Option<&str> {
 
 /// AS-IS F85: only exact `Bearer ` / `bearer ` prefixes; `BEARER tok` is the
 /// whole header compared to the configured token (401).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn bearer_token_from_value_as_is(value: &str) -> Option<&str> {
     let v = value.trim();
@@ -117,6 +132,7 @@ pub fn bearer_token_from_value_as_is(value: &str) -> Option<&str> {
 /// F152: a later valid Bearer must win over an earlier dummy Bearer.
 ///
 /// X-Pedra-Token is fallback only when no Bearer token was extracted (F149).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn authorization_matches<K: AsRef<str>, V: AsRef<str>>(
     headers: &[(K, V)],
@@ -145,6 +161,84 @@ pub fn authorization_matches<K: AsRef<str>, V: AsRef<str>>(
     }
     x_pedra == Some(expected)
 }
+
+#[cfg(verus_keep_ghost)]
+use vstd::prelude::*;
+
+#[cfg(verus_keep_ghost)]
+verus! {
+
+pub open spec fn ascii_lower_spec(b: u8) -> u8 {
+    if b >= 65u8 && b <= 90u8 {
+        (b + 32) as u8
+    } else {
+        b
+    }
+}
+
+pub fn ascii_lower(b: u8) -> (r: u8)
+    ensures
+        r == ascii_lower_spec(b),
+        (b >= 65u8 && b <= 90u8) ==> r == (b + 32) as u8,
+{
+    if b >= 65u8 && b <= 90u8 {
+        (b + 32) as u8
+    } else {
+        b
+    }
+}
+
+pub open spec fn ascii_eq_ignore_case_spec(a: u8, b: u8) -> bool {
+    ascii_lower_spec(a) == ascii_lower_spec(b)
+}
+
+fn ascii_eq_ignore_case(a: u8, b: u8) -> (d: bool)
+    ensures
+        d == ascii_eq_ignore_case_spec(a, b),
+{
+    ascii_lower(a) == ascii_lower(b)
+}
+
+pub open spec fn ascii_eq_as_is_spec(a: u8, b: u8) -> bool {
+    a == b
+}
+
+proof fn lemma_as_is_misses_upper_b()
+    ensures
+        ascii_eq_ignore_case_spec(66u8, 98u8),
+        !ascii_eq_as_is_spec(66u8, 98u8),
+{
+}
+
+pub open spec fn ascii_upper_spec(b: u8) -> u8 {
+    if b >= 97u8 && b <= 122u8 {
+        (b - 32) as u8
+    } else {
+        b
+    }
+}
+
+pub fn ascii_upper(b: u8) -> (r: u8)
+    ensures
+        r == ascii_upper_spec(b),
+        (b >= 97u8 && b <= 122u8) ==> r == (b - 32) as u8,
+{
+    if b >= 97u8 && b <= 122u8 {
+        (b - 32) as u8
+    } else {
+        b
+    }
+}
+
+proof fn lemma_as_is_misses_lower_p()
+    ensures
+        ascii_eq_ignore_case_spec(80u8, 112u8),
+        !ascii_eq_as_is_spec(80u8, 112u8),
+        ascii_upper_spec(112u8) == 80u8,
+{
+}
+
+} // verus!
 
 #[cfg(test)]
 mod tests {

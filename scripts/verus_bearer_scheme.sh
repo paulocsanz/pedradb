@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Machine-check F85 Bearer scheme case-fold (RFC-0002 P31).
+# Machine-check F85 Bearer scheme case-fold on the file rustc links
+# (single artifact — not the twin-cópia). RFC-0002 P31.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-http/verus/bearer_scheme.rs"
+SRC="$ROOT/crates/pedradb-http/src/auth_kernel.rs"
 if [[ -x "${VERUS:-}" ]]; then
   :
 elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then

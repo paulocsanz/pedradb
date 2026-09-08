@@ -1637,8 +1637,9 @@
       "finding": "F85/F79",
       "twin_kind": "close",
       "atom": "ascii_lower",
+      "single_artifact": true,
       "kernel": "crates/pedradb-http/src/auth_kernel.rs",
-      "twin": "crates/pedradb-http/verus/bearer_scheme.rs",
+      "twin": "crates/pedradb-http/src/auth_kernel.rs",
       "verus": "scripts/verus_bearer_scheme.sh",
       "callers": [
         "crates/pedradb-http/src/lib.rs"
