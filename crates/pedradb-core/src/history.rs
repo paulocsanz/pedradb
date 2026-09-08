@@ -1187,7 +1187,7 @@ impl RemoteTier {
             report.failures.push(("LATEST".into(), "unreadable".into()));
             return;
         };
-        if f.read_to_string(&mut buf).is_err() || buf.trim().is_empty() {
+        if f.read_to_string(&mut buf).is_err() || crate::write_admission_kernel::batch_is_empty(buf.trim().len() as u64) {
             report.errors = report.errors.saturating_add(1);
             report.failures.push(("LATEST".into(), "empty".into()));
             return;
