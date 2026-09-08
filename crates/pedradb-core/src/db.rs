@@ -9227,7 +9227,7 @@ impl<E: Env> Db<E> {
         }
         self.observe_bulk_batch(&ops);
         let (records, seq) = self.prepare_write_ops(ops)?;
-        if records.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(records.len() as u64) {
             return Ok(seq);
         }
         self.vlog_prepare_wal(true)?;
