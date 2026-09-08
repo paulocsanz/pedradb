@@ -758,6 +758,16 @@ mod tests {
             sync_fn.contains("fence_on_sync_fail("),
             "Db::sync must match fence_on_sync_fail"
         );
+        let open = named_fn_src(include_str!("db.rs"), "open_with_env_sourced")
+            .expect("open_with_env_sourced");
+        assert!(
+            open.contains("wal_commit_plan("),
+            "PIT WAL rewrite must match the plan fn"
+        );
+        assert!(
+            open.contains("fence_on_sync_fail("),
+            "PIT WAL rewrite must match fence_on_sync_fail"
+        );
         let lone_sync = named_fn_src(include_str!("db.rs"), "lone_sync_commit")
             .expect("lone_sync_commit");
         assert!(

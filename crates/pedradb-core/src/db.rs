@@ -2018,7 +2018,18 @@ impl<E: Env> Db<E> {
                 for raw in &records {
                     w.append_record(raw)?;
                 }
-                w.sync_data()?;
+                let sync_err = w.sync_data().err();
+                match crate::write_admission_kernel::wal_commit_plan(true, sync_err.is_some()) {
+                    crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                        assert!(
+                            crate::write_admission_kernel::fence_on_sync_fail(true, true),
+                            "required repair sync failed ⇒ not Ok"
+                        );
+                        return Err(sync_err.expect("AppendSyncFence ⇒ Some"));
+                    }
+                    crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+                    | crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => {}
+                }
                 drop(w);
                 env.rename(&repair, &wal_path)?;
                 env.sync_dir(&dir)?;
