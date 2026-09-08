@@ -264,7 +264,7 @@ pub fn append_wal_bytes_on<E: Env>(
     replica_dir: impl AsRef<Path>,
     bytes: &[u8],
 ) -> ShipResult<()> {
-    if bytes.is_empty() {
+    if pedradb_core::write_admission_kernel::batch_is_empty(bytes.len() as u64) {
         return Ok(());
     }
     let dir = replica_dir.as_ref();
