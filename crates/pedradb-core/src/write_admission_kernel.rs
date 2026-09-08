@@ -767,6 +767,12 @@ mod tests {
             occ.contains("batch_is_empty("),
             "apply_batch_occ_with must match batch_is_empty"
         );
+        let obs = named_fn_src(include_str!("db.rs"), "observe_bulk_batch")
+            .expect("observe_bulk_batch");
+        assert!(
+            obs.contains("batch_is_empty("),
+            "observe_bulk_batch must match batch_is_empty"
+        );
     }
 
     #[test]

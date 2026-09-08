@@ -4960,7 +4960,9 @@ impl<E: Env> Db<E> {
     /// memtable-apply sites are NOT the choke point — recovery replay
     /// must stay unobserved so `family_max_in_db` covers it instead).
     fn observe_bulk_batch(&mut self, batch: &[BatchOp]) {
-        if batch.is_empty() || !self.bulk_route_enabled {
+        if crate::write_admission_kernel::batch_is_empty(batch.len() as u64)
+            || !self.bulk_route_enabled
+        {
             return;
         }
         // Field-borrowing family resolver (a `&self` method would borrow
