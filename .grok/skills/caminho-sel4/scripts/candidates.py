@@ -330,6 +330,13 @@ GLUE_SCRIPTS = [
         "wal_segment_is_empty",
         "wal_rotate_decision",
     ),
+    (
+        "group_start",
+        "crates/pedradb-core/src/db.rs",
+        ("batch_is_empty", "vlog_prepare_wal", "fence_on_sync_fail"),
+        "fence_on_sync_fail",
+        "wal_commit_plan",
+    ),
 ]
 
 
@@ -382,8 +389,8 @@ def script_compose_board() -> None:
             print(f"  {glue} plan={plan} UNPAID order still inline{extra}")
     print(f"  unpaid_script={unpaid_script}/{len(GLUE_SCRIPTS)}")
     print(
-        "  leftover_next group_admit leftover if still inline; "
-        "named kernel not SA"
+        "  leftover_next group_absorb vlog_prepare_wal leftover order; "
+        "named plan not SA"
     )
     print("== compose glue callers (rank 5: unfold plan AND callee) ==")
     for glue, rel, tokens, callee, plan in GLUE_SCRIPTS:

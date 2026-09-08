@@ -890,6 +890,15 @@ mod tests {
             rot.contains("fence_on_sync_fail("),
             "rotate_wal_now must match fence_on_sync_fail"
         );
+        let gstart = named_fn_src(include_str!("db.rs"), "group_start").expect("group_start");
+        assert!(
+            gstart.contains("wal_commit_plan("),
+            "group_start must match the plan fn"
+        );
+        assert!(
+            gstart.contains("fence_on_sync_fail("),
+            "group_start must match fence_on_sync_fail"
+        );
     }
 
     #[test]

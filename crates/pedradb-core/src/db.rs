@@ -9408,11 +9408,22 @@ impl<E: Env> Db<E> {
             return Err(results);
         }
         self.group_prepare(&mut g, batches, 0);
-        if let Err(e) = self.vlog_prepare_wal(g.any_sync) {
-            let msg = e.to_string();
-            return Err((0..n)
-                .map(|_| Err(CoreError::Internal(format!("vlog flush failed: {msg}"))))
-                .collect());
+        // RFC-0071: vlog barrier vs write-only from the same plan as put-Ok.
+        match crate::write_admission_kernel::wal_commit_plan(g.any_sync, false) {
+            crate::write_admission_kernel::WalCommitPlan::AppendApplyOk
+            | crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+            | crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                assert!(
+                    !crate::write_admission_kernel::fence_on_sync_fail(g.any_sync, false),
+                    "planned vlog step before I/O ⇒ not Fence yet"
+                );
+                if let Err(e) = self.vlog_prepare_wal(g.any_sync) {
+                    let msg = e.to_string();
+                    return Err((0..n)
+                        .map(|_| Err(CoreError::Internal(format!("vlog flush failed: {msg}"))))
+                        .collect());
+                }
+            }
         }
         self.group_append_ops(&mut g);
         Ok(g)
