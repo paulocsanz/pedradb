@@ -4299,7 +4299,7 @@ impl<E: Env> Db<E> {
             let visible = {
                 let head = cursors[bi].head().expect("best head");
                 head.kind == ValueType::Value
-                    && (range_dels.is_empty()
+                    && (crate::write_admission_kernel::batch_is_empty(range_dels.len() as u64)
                         || !crate::merge::range_deleted(
                             head.user_key.as_ref(),
                             head.sequence,
