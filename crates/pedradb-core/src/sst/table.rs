@@ -384,7 +384,7 @@ impl SstTable {
             source: Arc::clone(source),
             pool: Arc::clone(pool),
         });
-        if !self.payload.read().img.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(self.payload.read().img.len() as u64) {
             pool.register(
                 &self.path,
                 self.payload_slot_weak(),
