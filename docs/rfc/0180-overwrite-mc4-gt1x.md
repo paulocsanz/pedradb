@@ -246,6 +246,10 @@ medida no mesmo harness isolado.
       mc4 stays stage/park (P0.14). Always-on, no Cargo feature. Tests
       `rfc0180_checkpoint_wal_if_lone_and_fat`,
       `rfc0180_checkpoint_wal_skips_when_recently_multi`. status: `done`
+- [x] **P0.71** `c/` tail idx is a point HashMap (unique cache-style
+      inserts). Empty prefix and `ycsb/` stay BTree (ycsb_e / zipf range).
+      Always-on, no Cargo feature. Tests `rfc0180_c_slash_point_hashmap`,
+      `rfc0180_idx_prefix_one_slash_splits_c_and_ycsb`. status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
 
@@ -325,6 +329,7 @@ medida no mesmo harness isolado.
 | P0.68 | p0 | park foreign slash leftover O(1) | done | ≥ write-buffer/2; ycsb seed vs c/ apply | 2026-09-08 |
 | P0.69 | p0 | skip L0-at-trigger while recently_multi | done | 1c drain stays; no Cargo feature | 2026-09-08 |
 | P0.70 | p0 | 1c checkpoint WAL when ≥2× write-buffer | done | mc4 stage/park stays; no Cargo feature | 2026-09-08 |
+| P0.71 | p0 | c/ tail idx point HashMap | done | ycsb/ + empty prefix stay BTree | 2026-09-08 |
 | P1.1 | p1 | 3-run caixa | todo | — | 2026-09-07 |
 | P2.1 | p2 | 3/3 quiet ≥1× | todo | 0182 P1.1 | 2026-09-07 |
 | P2.2 | p2 | leftover hang | done | 0181 P0.3 steal | 2026-09-07 |

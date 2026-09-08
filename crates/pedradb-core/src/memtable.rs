@@ -552,19 +552,22 @@ impl Hasher for FxHasher {
 
 type PointMap = HashMap<PackKey, usize, BuildHasherDefault<FxHasher>>;
 
-/// Point shards (HashMap): `lock` / `default`. `write` stays a BTree —
-/// MVCC latest is reverse-seek (RFC-0154 P1.2). Empty prefix and `raftlog`
+/// Point shards (HashMap): `lock` / `default` / cache-style `c/`
+/// (deps_cache_overwrite unique inserts). `write` stays a BTree — MVCC
+/// latest is reverse-seek (RFC-0154 P1.2). Empty prefix and `raftlog`
 /// stay a BTree (YCSB E / kvrocks SCAN / sequential append). P1.3
 /// (empty→HashMap) **regressed** CHV 7/17→6/17 (`ycsb_c` lost 3×).
+/// `ycsb/` stays BTree so zipf range/count (ycsb_e) does not sort a map.
 #[inline]
 fn point_cf(pfx: &[u8]) -> bool {
-    pfx == b"lock" || pfx == b"default"
+    pfx == b"lock" || pfx == b"default" || pfx == b"c/"
 }
 
 #[inline]
 fn point_reserve(pfx: &[u8]) -> usize {
     match pfx {
         b"default" => 1 << 17,
+        b"c/" => 1 << 19,
         b"lock" => 2048,
         _ => 0,
     }
@@ -2981,7 +2984,8 @@ mod tests {
     }
 
     /// RFC-0180 P0.66: one-slash raw keys (`c/`, `ycsb/`) do not share a
-    /// tail BTree. Multi-slash F220 keys stay empty. Not a HashMap.
+    /// tail BTree. Multi-slash F220 keys stay empty. Empty prefix is not
+    /// a HashMap (P0.64 / P1.3 ycsb_e). P0.71: `c/` is the point HashMap.
     #[test]
     fn rfc0180_idx_prefix_one_slash_splits_c_and_ycsb() {
         assert_eq!(idx_prefix(b"c/000001"), b"c/");
@@ -3017,8 +3021,24 @@ mod tests {
             mt.tail_idx.get(&b""[..]).is_none(),
             "one-slash keys must not land in the empty shard"
         );
-        assert_eq!(mt.tail_idx.get(&b"c/"[..]).unwrap().short.len(), 32);
-        assert_eq!(mt.tail_idx.get(&b"ycsb/"[..]).unwrap().short.len(), 32);
+        assert_eq!(
+            mt.tail_idx.get(&b"c/"[..]).unwrap().point.len(),
+            32,
+            "c/ is point HashMap (RFC-0180 P0.71)"
+        );
+        assert!(
+            mt.tail_idx.get(&b"c/"[..]).unwrap().short.is_empty(),
+            "c/ must not sit in the scan BTree"
+        );
+        assert_eq!(
+            mt.tail_idx.get(&b"ycsb/"[..]).unwrap().short.len(),
+            32,
+            "ycsb/ stays BTree for range/count"
+        );
+        assert!(
+            mt.tail_idx.get(&b"ycsb/"[..]).unwrap().point.is_empty(),
+            "ycsb/ must not be the overwrite HashMap"
+        );
         assert_eq!(
             mt.get(b"c/000001", 200),
             Lookup::Found(Bytes::from_static(b"v"))
@@ -3038,6 +3058,36 @@ mod tests {
         assert_eq!(n, 22, "ycsb/000010..000031 is 22 keys (only 32 seeded)");
         let families = mt.cf_families();
         assert_eq!(families, vec!["default".to_string()]);
+    }
+
+    /// RFC-0180 P0.71: cache-style `c/` unique inserts are a point HashMap.
+    /// Empty prefix and `ycsb/` stay BTrees (ycsb_e / zipf range).
+    #[test]
+    fn rfc0180_c_slash_point_hashmap() {
+        assert!(point_cf(b"c/"));
+        assert!(!point_cf(b"ycsb/"));
+        assert!(!point_cf(b""));
+        assert_eq!(point_reserve(b"c/"), 1 << 19);
+        let mut mt = MemTable::new();
+        let val = Bytes::from_static(b"v");
+        for i in 0..256u32 {
+            mt.put(
+                Bytes::from(format!("c/{i:06}")),
+                u64::from(i) + 1,
+                val.clone(),
+            );
+        }
+        let shard = mt.tail_idx.get(&b"c/"[..]).expect("c/ shard");
+        assert_eq!(shard.point.len(), 256);
+        assert!(shard.short.is_empty());
+        assert_eq!(
+            mt.get(b"c/000001", 300),
+            Lookup::Found(Bytes::from_static(b"v"))
+        );
+        assert!(
+            mt.tail_idx.get(&b""[..]).is_none(),
+            "empty-prefix HashMap is still forbidden"
+        );
     }
 
     #[test]
