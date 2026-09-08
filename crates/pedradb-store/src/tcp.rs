@@ -628,7 +628,7 @@ pub fn client_commit_tx(addr: impl AsRef<str>, pairs: &[(Vec<u8>, Vec<u8>)]) -> 
 /// # Errors
 /// Network, NotLeader, NotCommitted, limits.
 pub fn client_put_batch(addr: impl AsRef<str>, pairs: &[(Vec<u8>, Vec<u8>)]) -> Result<()> {
-    if pairs.is_empty() {
+    if pedradb_core::write_admission_kernel::batch_is_empty(pairs.len() as u64) {
         return Ok(());
     }
     validate_tx_pairs(pairs)?;
