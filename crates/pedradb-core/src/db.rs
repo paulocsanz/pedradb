@@ -10654,7 +10654,7 @@ pub fn copy_db_directory(
     let dest = dest.as_ref();
     if env.exists(dest) {
         let names = env.read_dir_names(dest)?;
-        if !names.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(names.len() as u64) {
             return Err(CoreError::Internal(format!(
                 "copy dest not empty: {}",
                 dest.display()
