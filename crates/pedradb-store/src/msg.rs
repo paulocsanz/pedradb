@@ -223,7 +223,7 @@ impl PeerMsg {
             return Err(StoreError::Msg("peer msg short".into()));
         }
         let buf = strip_crc(bytes)?;
-        if buf.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(buf.len() as u64) {
             return Err(StoreError::Msg("peer msg empty".into()));
         }
         let tag = buf[0];
