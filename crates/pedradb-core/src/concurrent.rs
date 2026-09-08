@@ -874,7 +874,8 @@ impl WriteGroup {
                     loop {
                         let mut extra: Vec<PendingWrite> = {
                             let mut q = self.queue.lock();
-                            if q.pending.is_empty() {
+                            if crate::write_admission_kernel::batch_is_empty(q.pending.len() as u64)
+                            {
                                 break;
                             }
                             q.pending.drain(..).collect()
