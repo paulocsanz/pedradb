@@ -7518,7 +7518,7 @@ impl<E: Env> Db<E> {
                 continue;
             }
             if crate::write_admission_kernel::batch_is_empty(file_num as u64)
-                && self.blob_active == 0
+                && crate::write_admission_kernel::batch_is_empty(self.blob_active as u64)
             {
                 // Single-file mode: compact_vlog is the hammer; still report ratio.
             }
