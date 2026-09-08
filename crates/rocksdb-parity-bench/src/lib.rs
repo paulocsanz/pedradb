@@ -285,6 +285,8 @@ pub const COMPARE_SHAPES: &[&str] = &[
     "qs_batch_write_mc4",
     // RFC-0043 — Rockset (→OpenAI) converged index. Ingest batch + point get.
     "rockset_hybrid",
+    // RFC-0184 P2.43: Rockset hybrid mc4 — 1c is suite-only.
+    "rockset_hybrid_mc4",
     // YugabyteDB DocDB: intents CF + committed CF (Rocks-based).
     "yugabyte_docdb_rmw",
 ];
@@ -2645,6 +2647,113 @@ impl YcsbRunner {
         blocks
     }
 
+    /// RFC-0184 P2.43: rockset_hybrid at N clients (ingest batch + point get).
+    pub fn run_rockset_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
+        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
+        let full = format!("rockset_hybrid_mc{clients}");
+        if !shape_wanted(&full) {
+            return Vec::new();
+        }
+        e.set_write_sync(write_sync_for_suite("rockset"));
+        let records = self.cfg.records;
+        let cfg_ops = self.cfg.ops;
+        let ingest = self.cfg.batch.max(1).min(8);
+        let yval = std::sync::Arc::new(vec![b'R'; self.cfg.payload]);
+        for i in 0..records {
+            assert!(e.put(&dkey(i), yval.as_ref()), "rockset mc seed {i}");
+        }
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+        let phase0 = e.write_phase_snapshot();
+        let group0 = e.write_group_stats();
+        let t0 = Instant::now();
+        let mut lats = Vec::with_capacity(cfg_ops * clients);
+        let mut errors = 0u64;
+        std::thread::scope(|s| {
+            let handles: Vec<_> = (0..clients)
+                .map(|c| {
+                    let barrier = barrier.clone();
+                    let yval = yval.clone();
+                    s.spawn(move || {
+                        let mut rng =
+                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
+                        let mut lats = Vec::with_capacity(cfg_ops);
+                        let mut errors = 0u64;
+                        barrier.wait();
+                        for op in 0..cfg_ops {
+                            let t = Instant::now();
+                            let keys: Vec<Vec<u8>> = (0..ingest)
+                                .map(|j| {
+                                    dkey(
+                                        (c.wrapping_mul(cfg_ops).wrapping_add(op) * ingest + j)
+                                            % records,
+                                    )
+                                })
+                                .collect();
+                            let q = self.pick(&mut rng, records);
+                            let ok = e.batch_put_same("default", &keys, yval.as_ref())
+                                && e.get(&dkey(q)).is_ok();
+                            if !ok {
+                                errors += 1;
+                            }
+                            lats.push(ms(t));
+                        }
+                        (lats, errors)
+                    })
+                })
+                .collect();
+            for h in handles {
+                let (mut l, err) = h.join().expect("rockset client thread");
+                errors += err;
+                lats.append(&mut l);
+            }
+        });
+        let wall = t0.elapsed();
+        let mut avg_group = 0.0;
+        eprintln!(
+            "[rocks-parity] rockset_hybrid mc{clients} done ops={} errors={errors}",
+            cfg_ops * clients
+        );
+        if let Some((sub1, queued1, groups1, gops1)) = e.write_group_stats() {
+            let (sub0, queued0, groups0, gops0) = group0.unwrap_or((0, 0, 0, 0));
+            let sub = sub1.saturating_sub(sub0);
+            let queued = queued1.saturating_sub(queued0);
+            let groups = groups1.saturating_sub(groups0);
+            let gops = gops1.saturating_sub(gops0);
+            avg_group = if groups == 0 {
+                0.0
+            } else {
+                gops as f64 / groups as f64
+            };
+            eprintln!(
+                "[rocks-parity] write_group timed submits={sub} queued={queued} groups={groups} ops={gops} avg_group={avg_group:.2}"
+            );
+        }
+        let mut blocks = vec![summarize_mc(
+            &full,
+            cfg_ops * clients,
+            wall,
+            &mut lats,
+            clients,
+            errors,
+        )];
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(
+                pct(&lats, 50.0),
+                a,
+                b,
+                clients as u64,
+                avg_group,
+                50,
+                (cfg_ops * clients) as u64,
+            );
+            eprint_write_diagnose(&full, &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
+        blocks
+    }
+
     /// YugabyteDB DocDB: intent keyspace then committed keyspace (two
     /// prefixes on default CF — DocDB uses two Rocks instances; the mix
     /// is overlay-get vs atomic intent+commit). 70/30. Same-class async.
@@ -4005,6 +4114,26 @@ mod tests {
     }
 
     #[test]
+    fn rfc0184_rockset_hybrid_mc4_in_compare() {
+        assert!(
+            COMPARE_SHAPES.contains(&"rockset_hybrid_mc4"),
+            "Rockset hybrid mc4 must be on the cartaz"
+        );
+        assert!(shape_wanted_in(
+            "rockset_hybrid_mc4",
+            Some("rockset_hybrid_mc4")
+        ));
+        assert!(
+            !shape_wanted_in("rockset_hybrid", Some("rockset_hybrid_mc4")),
+            "1c rockset_hybrid must not leak into ONLY=rockset_hybrid_mc4"
+        );
+        assert!(
+            !shape_wanted_in("qs_batch_write_mc4", Some("rockset_hybrid_mc4")),
+            "qs batch mc4 must not leak into ONLY=rockset_hybrid_mc4"
+        );
+    }
+
+    #[test]
     fn rfc0178_mc_only_selects_full_mc_name() {
         assert!(shape_wanted_in(
             "deps_cache_overwrite_mc4",
@@ -4481,6 +4610,7 @@ mod tests {
             "qs_neg_lookup_mc4",
             "qs_batch_write_mc4",
             "rockset_hybrid",
+            "rockset_hybrid_mc4",
             "yugabyte_docdb_rmw",
         ] {
             assert!(
