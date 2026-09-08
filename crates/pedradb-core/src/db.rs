@@ -6953,7 +6953,10 @@ impl<E: Env> Db<E> {
         &mut self,
         max_jobs: usize,
     ) -> Result<Vec<PreparedL0Compact<E>>> {
-        if max_jobs <= 1 || !crate::leveling::leveled_enabled() || self.ssts.is_empty() {
+        if max_jobs <= 1
+            || !crate::leveling::leveled_enabled()
+            || crate::write_admission_kernel::batch_is_empty(self.ssts.len() as u64)
+        {
             return self
                 .prepare_pushdown_compact()
                 .map(|j| j.into_iter().collect());
