@@ -4502,8 +4502,9 @@
       "id": "pin_gc",
       "finding": "RFC-0150 P2b / F20",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/compact_kernel.rs",
-      "twin": "crates/pedradb-core/verus/compact_decision.rs",
+      "twin": "crates/pedradb-core/src/compact_kernel.rs",
       "verus": "scripts/verus_compact_decision.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs"
