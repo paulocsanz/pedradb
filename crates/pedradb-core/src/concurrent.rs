@@ -7328,6 +7328,45 @@ mod tests {
         assert!(!async_group_wal_holds_db_write_lock());
     }
 
+    /// RFC-0180 P0.54: 4 async clients must merge (avg_group > 1.2).
+    /// Darwin DIAG canary — not cartaz. Seed-diluted WRITEPHASE hid this.
+    #[test]
+    fn rfc0180_async_mc4_avg_group_not_one() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open(&dir).unwrap();
+        db.set_default_write_sync(false);
+        let n = 4usize;
+        let barrier = Arc::new(std::sync::Barrier::new(n));
+        let mut handles = Vec::new();
+        for i in 0..n {
+            let db = db.clone();
+            let barrier = Arc::clone(&barrier);
+            handles.push(thread::spawn(move || {
+                barrier.wait();
+                for j in 0..64u8 {
+                    db.put_with(
+                        [u8::try_from(i).expect("n fits u8"), j],
+                        [u8::try_from(i).expect("n fits u8"), j, 7],
+                        crate::db::WriteOptions::no_sync(),
+                    )
+                    .unwrap();
+                }
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+        let (submits, _queued, groups, gops) = db.write_group_stats();
+        assert_eq!(submits, (n * 64) as u64);
+        assert_eq!(gops, submits);
+        let avg = gops as f64 / groups.max(1) as f64;
+        assert!(
+            avg > 1.2,
+            "async mc4 avg_group={avg:.2} groups={groups} submits={submits} (merge dead)"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn rfc0180_follower_reply_slot_delivers() {
         let slot = FollowerReply::new();
