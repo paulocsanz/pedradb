@@ -4,7 +4,7 @@
 //! ```text
 //! pedra scale [--entries N] [--cache BYTES] [--backends NAME] [dir]
 //! pedra diagnose write --pedra-ns N --rocks-ns N [--read-pct N] [...]
-//! pedra diagnose get --keys N --ram BYTES [--measured-ns N]
+//! pedra diagnose get --keys N --ram BYTES [--measured-ns N] [--cache happy|capacity|cold]
 //! pedra diagnose probes --per-get N --p-best N
 //! pedra diagnose balance --cut TOKEN --cell lever[:diag|:named] [...]
 //! ```
@@ -15,6 +15,7 @@ use pedradb_core::bench_gap_kernel::{
     balance_admits, classify_get, classify_probes, diagnose_write, scale_bottleneck, BalanceCell,
     WriteGapInput, WriteLever, WritePhases, BALANCE_SHAPES,
 };
+use pedradb_core::get_cost_kernel::{predict_get_composed, CacheCase, INTEL_SERVER_4GHZ};
 use pedradb_core::scale_kernel::{predict_write, write_forecast_cut, SCALE_BYTES_PER_ENTRY};
 
 fn main() {
@@ -42,7 +43,7 @@ fn main() {
                 "       pedra diagnose write --pedra-ns N --rocks-ns N [--read-pct N] [--wal-ns N] [--mem-ns N] [--flush-ns N] [--lock-ns N] [--prepare-ns N] [--publish-ns N] [--clients N] [--avg-group X]"
             );
             eprintln!(
-                "       pedra diagnose get --keys N --ram BYTES [--measured-ns N] [--bytes-per-key B]"
+                "       pedra diagnose get --keys N --ram BYTES [--measured-ns N] [--bytes-per-key B] [--cache happy|capacity|cold]"
             );
             eprintln!("       pedra diagnose probes --per-get N --p-best N");
             eprintln!("       pedra diagnose balance --cut TOKEN --cell TOKEN[:diag|:named] [...]");
@@ -68,6 +69,12 @@ fn diagnose_cmd(args: &[String]) -> Result<(), ()> {
 fn flag_u64(args: &[String], name: &str) -> Option<u64> {
     args.windows(2)
         .find_map(|w| (w[0] == name).then(|| w[1].parse().ok()).flatten())
+}
+
+fn flag_str<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
+    args.windows(2)
+        .find(|w| w[0] == name)
+        .map(|w| w[1].as_str())
 }
 
 fn diagnose_write_cmd(args: &[String]) -> Result<(), ()> {
@@ -142,9 +149,20 @@ fn diagnose_get_cmd(args: &[String]) -> Result<(), ()> {
         return Err(());
     };
     let bpe = flag_u64(args, "--bytes-per-key").unwrap_or(SCALE_BYTES_PER_ENTRY);
+    let cache = match flag_str(args, "--cache") {
+        None => CacheCase::Capacity,
+        Some(s) => match CacheCase::from_token(s) {
+            Some(c) => c,
+            None => {
+                eprintln!("pedra diagnose get: --cache must be happy|capacity|cold");
+                return Err(());
+            }
+        },
+    };
     let b = scale_bottleneck(keys, ram, bpe);
     let f = &b.legal;
     let as_is = &b.as_is;
+    let composed = predict_get_composed(keys, ram, bpe, INTEL_SERVER_4GHZ, cache);
     let (measured_ns, class, predict) = match flag_u64(args, "--measured-ns") {
         Some(ns) => (
             ns,
@@ -167,12 +185,22 @@ fn diagnose_get_cmd(args: &[String]) -> Result<(), ()> {
         f.p_best, f.p_worst, f.n_files
     );
     println!(
+        "work legal_probes={} as_is_files={} bloom_k={} index_cmps={} block_cmps={} key_bytes={}",
+        composed.work_legal.probes,
+        composed.work_as_is.probes,
+        composed.work_legal.bloom_k,
+        composed.work_legal.index_cmps,
+        composed.work_legal.block_cmps,
+        composed.work_legal.key_bytes
+    );
+    println!(
         "T_ns best={} happy={} worst={} as_is={}",
         f.best_ns, f.happy_ns, f.worst_ns, as_is.best_ns
     );
+    println!("{}", composed.line());
     println!("measured_ns={measured_ns} class={}", class.token());
     println!(
-        r#"{{"class":"{}","measured_ns":{},"best":{},"happy":{},"worst":{},"as_is":{},"distinguishable":{},"cut":"{}"}}"#,
+        r#"{{"class":"{}","measured_ns":{},"best":{},"happy":{},"worst":{},"as_is":{},"distinguishable":{},"cut":"{}","composed_legal":{},"composed_as_is":{},"bloom_ns":{},"index_ns":{},"block_ns":{},"pread_ns":{},"bloom_level":"{}","block_level":"{}","dominant":"{}","cache":"{}"}}"#,
         class.token(),
         measured_ns,
         f.best_ns,
@@ -180,7 +208,17 @@ fn diagnose_get_cmd(args: &[String]) -> Result<(), ()> {
         f.worst_ns,
         as_is.best_ns,
         u8::from(b.distinguishable),
-        b.cut_token()
+        b.cut_token(),
+        composed.cost_legal.total_ns,
+        composed.cost_as_is.total_ns,
+        composed.cost_legal.bloom_ns,
+        composed.cost_legal.index_ns,
+        composed.cost_legal.block_ns,
+        composed.cost_legal.pread_ns,
+        composed.cost_legal.bloom_level.token(),
+        composed.cost_legal.block_level.token(),
+        composed.cost_legal.dominant.token(),
+        cache.token()
     );
     Ok(())
 }
