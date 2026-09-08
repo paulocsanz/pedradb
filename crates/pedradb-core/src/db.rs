@@ -5220,7 +5220,7 @@ impl<E: Env> Db<E> {
                 self.imm = None;
             }
         }
-        if taken.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(taken.len() as u64) {
             return Ok(());
         }
         let nums = vec![self.alloc_file_num()];
