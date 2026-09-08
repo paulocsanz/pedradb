@@ -510,6 +510,22 @@ def main() -> int:
         print("FAIL dictionary_link twin≠kernel did not fail")
         return 1
     print("ok mutant dictionary_link twin≠kernel named")
+    blob_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in blob_mutant["pairs"]:
+        if pair.get("id") == "blob_gc_pick":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-core/verus/vlog_gc_decision.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing blob_gc_pick")
+        return 1
+    hits = [m for m in _sa_fails(blob_mutant) if m.startswith("blob_gc_pick:")]
+    if not hits:
+        print("FAIL blob_gc_pick twin≠kernel did not fail")
+        return 1
+    print("ok mutant blob_gc_pick twin≠kernel named")
     # Drive the same rule through check_twins (may also report unrelated
     # dirty-tree twin drift; we only require the SA id).
     try:
