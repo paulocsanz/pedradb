@@ -350,6 +350,29 @@ mod tests {
     }
 
     #[test]
+    fn scale_forecast_on_empty_store_is_not_ok() {
+        let f = scale_forecast(0, 0);
+        assert_eq!(f.levels, 0);
+        assert_eq!(f.p_best, point_get_probes(0, SCALE_L0_BEST));
+        assert_eq!(f.best_ns, best_get_ns(0));
+        assert_eq!(f.happy_ns, happy_get_ns(0, 0, 0));
+        assert_eq!(f.worst_ns, worst_get_ns(0, SCALE_L0_WORST));
+        assert_eq!(
+            scale_forecast_as_is(0, 0).p_best,
+            0,
+            "AS-IS dente: empty walk is 0 files not L0-best probes"
+        );
+        let src = include_str!("scale_kernel.rs");
+        let forecast = src
+            .split("pub fn scale_forecast(")
+            .nth(1)
+            .expect("scale_forecast");
+        assert!(forecast.contains("best_get_ns("));
+        assert!(forecast.contains("happy_get_ns("));
+        assert!(forecast.contains("worst_get_ns("));
+    }
+
+    #[test]
     fn best_get_ns_on_l0_best_is_not_ok() {
         assert_eq!(
             best_get_ns(4),

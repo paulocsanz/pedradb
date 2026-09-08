@@ -114,3 +114,19 @@ theorem best_get_ns_as_is_dente :
     ) := by
   unfold best_get_ns_as_is
   rfl
+
+/-- Empty store (keys=0): `scale_forecast` still routes best_ns through
+    `best_get_ns`. Unfolds `best_get_ns` **and** `point_get_probes`. -/
+theorem scale_forecast_empty_best_via_best_get_ns :
+    best_get_ns 0#u64 = (
+      do
+        let i ← point_get_probes 0#u64 SCALE_L0_BEST
+        predict_get_ns i SCALE_TAU_RAM_NS SCALE_TAU_DISK_NS SCALE_BPS 0#u64
+    ) ∧ point_get_probes 0#u64 SCALE_L0_BEST = ok (1#u64) := by
+  constructor
+  · unfold best_get_ns
+    rfl
+  · unfold point_get_probes
+    unfold SCALE_L0_BEST
+    have h : core.num.U64.saturating_add 0#u64 1#u64 = 1#u64 := by native_decide
+    simp [h]

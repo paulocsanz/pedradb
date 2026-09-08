@@ -381,6 +381,63 @@ def concurrency_board() -> None:
             f"unfold_callee={str(unfold_callee).lower()} {status}"
         )
     print(f"  unpaid_concurrency={unpaid}/{len(CONCURRENCY)}")
+    scale_board()
+
+
+# Rank 10: enrolled scale_kernel on a concrete N. Handler scale_forecast
+# must call the named clock; Lean unfolds that clock AND a callee.
+SCALE_CLOCKS = [
+    (
+        "best clock",
+        "crates/pedradb-core/src/scale_kernel.rs",
+        "scale_forecast",
+        "best_get_ns",
+        "point_get_probes",
+    ),
+    (
+        "happy clock",
+        "crates/pedradb-core/src/scale_kernel.rs",
+        "scale_forecast",
+        "happy_get_ns",
+        "point_get_probes",
+    ),
+    (
+        "worst clock",
+        "crates/pedradb-core/src/scale_kernel.rs",
+        "scale_forecast",
+        "worst_get_ns",
+        "probes_worst",
+    ),
+]
+
+
+def scale_board() -> None:
+    print("== scale (rank 10: named clock + unfold clock AND callee) ==")
+    unpaid = 0
+    for label, rel, handler, caller, callee in SCALE_CLOCKS:
+        src = load(rel)
+        body = test_body(src, handler)
+        calls = bool(body) and (caller + "(" in body)
+        unfold_caller = lean_unfolds(caller)
+        unfold_callee = lean_unfolds(callee)
+        if not body:
+            status = "UNPAID missing handler"
+            unpaid += 1
+        elif not calls:
+            status = "UNPAID handler does not call " + caller
+            unpaid += 1
+        elif not (unfold_caller and unfold_callee):
+            status = "UNPAID no dual-unfold"
+            unpaid += 1
+        else:
+            status = "lean_unfold_caller_and_callee"
+        print(
+            f"  {label} handler={handler} caller={caller} callee={callee} "
+            f"calls={str(calls).lower()} "
+            f"unfold_caller={str(unfold_caller).lower()} "
+            f"unfold_callee={str(unfold_callee).lower()} {status}"
+        )
+    print(f"  unpaid_scale={unpaid}/{len(SCALE_CLOCKS)}")
 
 
 def sa_unpaid_board(fate: list) -> None:
