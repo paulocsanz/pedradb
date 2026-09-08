@@ -231,7 +231,11 @@ fn run_with_sched(
         };
         let site = ts.grant(t);
         steps.push(RunStep { worker: t, site });
-        if ts.finished() == n && ts.ready_tasks().is_empty() {
+        if ts.finished() == n
+            && pedradb_core::write_admission_kernel::batch_is_empty(
+                ts.ready_tasks().len() as u64,
+            )
+        {
             break;
         }
     }
