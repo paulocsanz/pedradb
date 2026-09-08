@@ -5764,7 +5764,7 @@ impl<E: Env> Db<E> {
                         t_r.elapsed().as_secs_f64() * 1e3
                     );
                 }
-                if sync {
+                if crate::write_admission_kernel::dir_sync_required(sync) {
                     env.sync_dir(dir)?;
                 }
                 // Keep the writer's in-place table (rename does not change
