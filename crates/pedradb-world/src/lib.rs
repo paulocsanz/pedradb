@@ -483,7 +483,9 @@ impl World {
         cov.hit("H.open");
         cov.hit("C.tick");
         // Lab clock skew (P2.2): advance lease clock by max peer skew.
-        if !self.cfg.clock_skew_ms.is_empty() {
+        if !pedradb_core::write_admission_kernel::batch_is_empty(
+            self.cfg.clock_skew_ms.len() as u64,
+        ) {
             let max_skew = self.cfg.clock_skew_ms.iter().copied().max().unwrap_or(0);
             if max_skew > 0 {
                 let _ = cluster.advance_now_ms(max_skew);
