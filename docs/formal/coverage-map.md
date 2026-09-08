@@ -48,7 +48,7 @@ comportamento. "Callers" é o que o lint do freeze exige chamar a entrada.
 | commit_raft | `pedradb-raft/src/commit_kernel.rs` | close, single_artifact | `pedradb-raft/lib.rs`, `pedradb-raft/net.rs` |
 | lease | `pedradb-dcs/src/lease_kernel.rs` | close, single_artifact | `pedradb-dcs/command.rs` |
 | dcs_apply | `pedradb-raft/src/apply_kernel.rs` | close | `pedradb-raft/lib.rs` |
-| txn | `pedradb-store/src/txn_kernel.rs` | close | `pedradb-store/lib.rs` |
+| txn | `pedradb-store/src/txn_kernel.rs` | close, single_artifact | `pedradb-store/lib.rs` |
 | compact | `pedradb-store/src/compact_kernel.rs` | close | `pedradb-store/lib.rs` |
 | snapshot | `pedradb-store/src/snapshot_kernel.rs` | close | `pedradb-store/lib.rs` |
 | si_reader | `pedradb-store/src/si_kernel.rs` | close | `pedradb-store/lib.rs` |

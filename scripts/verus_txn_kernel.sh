@@ -2,7 +2,8 @@
 # Machine-check txn_commit_action / discard_cut (RFC-0002 P9 / F47).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-store/verus/txn_kernel.rs"
+# RFC-0171 P0.3 / RFC-0174: prove the file rustc links (pair txn).
+SRC="$ROOT/crates/pedradb-store/src/txn_kernel.rs"
 if [[ -x "${VERUS:-}" ]]; then
   :
 elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then
