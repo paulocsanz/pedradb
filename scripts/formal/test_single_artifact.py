@@ -1198,6 +1198,22 @@ def main() -> int:
         print("FAIL joint_leave_ok twin≠kernel did not fail")
         return 1
     print("ok mutant joint_leave_ok twin≠kernel named")
+    eg_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in eg_mutant["pairs"]:
+        if pair.get("id") == "election_grant_from":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/membership_joint.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing election_grant_from")
+        return 1
+    hits = [m for m in _sa_fails(eg_mutant) if m.startswith("election_grant_from:")]
+    if not hits:
+        print("FAIL election_grant_from twin≠kernel did not fail")
+        return 1
+    print("ok mutant election_grant_from twin≠kernel named")
     # Drive the same rule through check_twins (may also report unrelated
     # dirty-tree twin drift; we only require the SA id).
     try:

@@ -2011,4 +2011,15 @@ mod tests {
         );
         assert!(joint_leave_ok(true));
     }
+
+    #[test]
+    fn election_grant_from_counts_on_live_neither_is_not_ok() {
+        assert!(!election_grant_from_counts(false, false));
+        assert!(
+            election_grant_from_counts_as_is(false, false),
+            "AS-IS dente: record any grant"
+        );
+        assert!(election_grant_from_counts(true, false));
+        assert!(election_grant_from_counts(false, true));
+    }
 }
