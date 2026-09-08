@@ -10229,9 +10229,9 @@ impl<E: Env> Db<E> {
         self.snapshot_pins.is_empty() && self.occ_registry_floor().is_none()
     }
 
-    /// RFC-0180 P0.68: O(1) park leftover of another one-slash idx family
-    /// before applying `key`. Seed `ycsb/` then timed `c/` must not share
-    /// a memtable at write-buffer scale.
+    /// RFC-0180 P0.68/P0.75: O(1) park leftover of another one-slash idx
+    /// family before applying `key`. Seed `ycsb/` then timed `c/` must not
+    /// share a memtable — including post-flush remainder below half buffer.
     fn maybe_park_foreign_idx(&mut self, key: &[u8]) {
         let pfx = crate::memtable::idx_prefix(key);
         if !crate::memtable::park_foreign_idx_decision(
@@ -13814,6 +13814,47 @@ mod tests {
             Some(b"old".as_ref())
         );
         assert_eq!(pinned.get(b"k").as_deref(), Some(b"new".as_ref()));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0180 P0.75: leftover below write-buffer/2 still parks (post-flush
+    /// remainder). 64 KiB limit, ~18 KiB ycsb, first `c/` must not mix.
+    #[test]
+    fn rfc0180_park_foreign_idx_remainder_below_half_buffer() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(64 * 1024),
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        let val = vec![b'y'; 100];
+        for i in 0..150u32 {
+            db.put(format!("ycsb/{i:06}").as_bytes(), &val).unwrap();
+        }
+        let before = db.stats().mem_entries;
+        assert!(
+            before >= 100,
+            "ycsb remainder stays in mem before c/: {before}"
+        );
+        assert!(
+            before < 400,
+            "fixture must sit below half of 64 KiB: {before}"
+        );
+        db.put(b"c/000001", b"v").unwrap();
+        assert!(
+            db.has_imm() || db.parked_unflushed_count() > 0,
+            "remainder ycsb must leave the live mem (imm or parked)"
+        );
+        assert_eq!(
+            db.get(b"ycsb/000000").as_deref(),
+            Some(val.as_slice()),
+            "parked ycsb remainder must still get"
+        );
+        assert_eq!(db.get(b"c/000001").as_deref(), Some(b"v".as_ref()));
         let _ = fs::remove_dir_all(&dir);
     }
 
