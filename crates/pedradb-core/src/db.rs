@@ -4758,7 +4758,7 @@ impl<E: Env> Db<E> {
         let dest = dest.as_ref();
         if self.env.exists(dest) {
             let names = self.env.read_dir_names(dest)?;
-            if !names.is_empty() {
+            if !crate::write_admission_kernel::batch_is_empty(names.len() as u64) {
                 return Err(CoreError::Internal(format!(
                     "checkpoint destination not empty: {}",
                     dest.display()
