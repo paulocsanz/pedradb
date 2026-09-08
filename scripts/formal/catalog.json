@@ -4003,8 +4003,9 @@
       "id": "world_trajectory",
       "finding": "RFC-0059 P2.2",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-world/src/world_kernel.rs",
-      "twin": "crates/pedradb-world/verus/trajectory.rs",
+      "twin": "crates/pedradb-world/src/world_kernel.rs",
       "verus": "scripts/verus_world_trajectory.sh",
       "callers": [
         "crates/pedradb-world/src/lib.rs"
