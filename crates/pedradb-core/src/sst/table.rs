@@ -2633,7 +2633,7 @@ fn write_sst_bulk_arrays_body(
             &mut index,
         )?;
     }
-    if !staged.is_empty() {
+    if !crate::write_admission_kernel::batch_is_empty(staged.len() as u64) {
         file.write_all(&staged)?;
         staged.clear();
     }
