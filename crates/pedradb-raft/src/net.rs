@@ -849,7 +849,7 @@ fn network_start_election(
         let Some(addr) = peers.get(&pid) else {
             continue;
         };
-        let client = if auth.is_empty() {
+        let client = if pedradb_core::write_admission_kernel::batch_is_empty(auth.len() as u64) {
             PeerClient::new(*addr)
         } else {
             PeerClient::with_auth(*addr, auth)
