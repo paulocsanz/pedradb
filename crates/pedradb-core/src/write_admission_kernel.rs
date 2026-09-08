@@ -773,6 +773,15 @@ mod tests {
             obs.contains("batch_is_empty("),
             "observe_bulk_batch must match batch_is_empty"
         );
+        let lead = include_str!("concurrent.rs")
+            .split("fn lead<")
+            .nth(1)
+            .and_then(|s| s.split("fn validate_occ_batch").next())
+            .expect("lead");
+        assert!(
+            lead.contains("batch_is_empty("),
+            "WriteGroup::lead must match batch_is_empty"
+        );
     }
 
     #[test]

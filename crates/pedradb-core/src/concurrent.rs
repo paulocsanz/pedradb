@@ -805,7 +805,7 @@ impl WriteGroup {
         loop {
             let mut batch: Vec<PendingWrite> = {
                 let mut g = self.queue.lock();
-                if g.pending.is_empty() {
+                if crate::write_admission_kernel::batch_is_empty(g.pending.len() as u64) {
                     g.leader_active = false;
                     return leader_result.unwrap_or_else(|| {
                         Err(CoreError::Internal(
