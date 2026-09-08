@@ -4,8 +4,8 @@
 # `leveling_pick`. Split from verus_leveling.sh: the close-tier ladder and
 # this atom live in separate files (recursive spec fns in one crate perturb
 # the other's nonlinear-arithmetic queries; the split is the fix).
-# RFC-0171 P0.3 / RFC-0174: prove the file rustc links (pair leveling_pick).
-# leveling_pushdown still twins this script's last-wins catalog row.
+# RFC-0171 P0.3 / RFC-0174: prove the file rustc links
+# (pairs leveling_pick / leveling_pushdown).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

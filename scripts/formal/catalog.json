@@ -4761,8 +4761,9 @@
       "twin_kind": "close",
       "atom": "pick_pushdown_model",
       "token_src": "pick_pushdown_as_is_blind",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/leveling.rs",
-      "twin": "crates/pedradb-core/verus/leveling_pick.rs",
+      "twin": "crates/pedradb-core/src/leveling.rs",
       "verus": "scripts/verus_leveling_pick.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs"
