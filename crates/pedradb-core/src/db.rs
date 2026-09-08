@@ -8327,7 +8327,7 @@ impl<E: Env> Db<E> {
         // by the WAL-first short-circuit (`put A; flush; put B` → feed `[B]`).
         // Union instead: flush-time last-per-key cache + newer WAL ops, in
         // sequence order.
-        if !self.change_log.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(self.change_log.len() as u64) {
             let mut out = self.change_log.changes_after(0);
             if crate::write_admission_kernel::batch_is_empty(from_wal.len() as u64) {
                 return Ok(out);
