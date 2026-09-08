@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Machine-check the env-crash kernel (RFC-0166 P1.1).
+# Machine-check crash_legal on the file rustc links (single artifact —
+# not the twin-cópia). Honest/lying sync stay rustc.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-core/verus/env_crash.rs"
+SRC="$ROOT/crates/pedradb-core/src/env_crash_kernel.rs"
 
 if [[ -x "${VERUS:-}" ]]; then
   :

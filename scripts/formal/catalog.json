@@ -5776,8 +5776,9 @@
       "id": "env_crash",
       "finding": "RFC-0166 P1.1",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/env_crash_kernel.rs",
-      "twin": "crates/pedradb-core/verus/env_crash.rs",
+      "twin": "crates/pedradb-core/src/env_crash_kernel.rs",
       "verus": "scripts/verus_env_crash.sh",
       "callers": [
         "crates/pedradb-core/src/env_crash_kernel.rs",
