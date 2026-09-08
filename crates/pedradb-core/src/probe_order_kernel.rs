@@ -1,5 +1,11 @@
 //! RFC-0164 P0.1: probe-order kernel — candidate order for point probes.
 //!
+//! **Single artifact (pair `probe_order`):** this file is what `rustc` links
+//! *and* what Verus proves (`cfg(verus_keep_ghost)`). Slice covering walk
+//! stays rustc. No twin-cópia.
+//!
+//!   ./scripts/verus_probe_order.sh
+//!
 //! Spec S: the tables probed for a point lookup must be visited newest-first
 //! among the candidates whose `[lo, hi]` covers the key. The engine's
 //! historical walk sorted candidates by `lo` ascending and walked them in
@@ -8,27 +14,80 @@
 //! is resurrected (findings/2026-09-04-reopen-delete-resurrected, db.rs
 //! `.rev()` loops). This kernel owns the order; the wire (P0.2) lands after
 //! the read-path fix.
-//!
-//! Verus twin: `crates/pedradb-core/verus/probe_order.rs`.
 
 #![forbid(unsafe_code)]
+
+macro_rules! first_probe_on_equal_lo_body {
+    ($newer:expr, $older:expr) => {{
+        let _ = $older;
+        $newer
+    }};
+}
+
+macro_rules! first_probe_on_equal_lo_as_is_body {
+    ($newer:expr, $older:expr) => {{
+        let _ = $newer;
+        $older
+    }};
+}
 
 /// Decision core (theorem-ready): among two covering candidates tied at
 /// `lo`, the probe order visits the NEWEST first — a newer tombstone or
 /// overwrite must never be shadowed by an older table's `Found`.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn first_probe_on_equal_lo(newer: usize, _older: usize) -> usize {
-    newer
+    first_probe_on_equal_lo_body!(newer, _older)
 }
 
 /// AS-IS twin (recorded mutant): the historical descending-`lo` walk
 /// (stable sort + `.rev()`) visits the OLDEST tied candidate first —
 /// `Found` wins there, the newer tombstone is never consulted, and the
 /// deleted value is resurrected.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn first_probe_on_equal_lo_as_is(_newer: usize, older: usize) -> usize {
+    first_probe_on_equal_lo_as_is_body!(_newer, older)
+}
+
+#[cfg(verus_keep_ghost)]
+use vstd::prelude::*;
+
+#[cfg(verus_keep_ghost)]
+verus! {
+
+pub open spec fn first_probe_on_equal_lo_spec(newer: usize, _older: usize) -> usize {
+    newer
+}
+
+pub open spec fn first_probe_on_equal_lo_as_is_spec(_newer: usize, older: usize) -> usize {
     older
 }
+
+pub fn first_probe_on_equal_lo(newer: usize, older: usize) -> (r: usize)
+    ensures
+        r == first_probe_on_equal_lo_spec(newer, older),
+        r == newer,
+{
+    first_probe_on_equal_lo_body!(newer, older)
+}
+
+pub fn first_probe_on_equal_lo_as_is(newer: usize, older: usize) -> (r: usize)
+    ensures
+        r == first_probe_on_equal_lo_as_is_spec(newer, older),
+        r == older,
+{
+    first_probe_on_equal_lo_as_is_body!(newer, older)
+}
+
+proof fn lemma_as_is_picks_oldest_on_tie()
+    ensures
+        first_probe_on_equal_lo_spec(1, 0) == 1,
+        first_probe_on_equal_lo_as_is_spec(1, 0) == 0,
+{
+}
+
+} // verus!
 
 /// Candidate tables for a point probe, newest-first (the spec).
 ///
@@ -37,6 +96,7 @@ pub fn first_probe_on_equal_lo_as_is(_newer: usize, older: usize) -> usize {
 /// whose range covers `key`. Total function: out-of-range indices are
 /// skipped, never panic. P0.2 wires the engine walk to `probe_order`; the
 /// transitional dead-code allow ends there.
+#[cfg(not(verus_keep_ghost))]
 #[cfg_attr(not(test), allow(dead_code))]
 fn probe_order(
     los: &[&[u8]],
@@ -52,6 +112,7 @@ fn probe_order(
 }
 
 /// Packed `hi(pos) >= key`. Index form so Charon sees a total fn, not `impl Fn`.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 fn covering_hi_ge(his: &[&[u8]], pos: usize, key: &[u8]) -> bool {
     pos < his.len() && his[pos] >= key
@@ -59,6 +120,7 @@ fn covering_hi_ge(his: &[&[u8]], pos: usize, key: &[u8]) -> bool {
 
 /// Position of `i` in `by_lo`, or `by_lo.len()` if missing (kept, like the
 /// engine walk). Index loop — `Iterator::position` CFailure on this pin.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 fn covering_pos(by_lo: &[usize], i: usize) -> usize {
     let mut pos = 0usize;
@@ -77,6 +139,7 @@ fn covering_pos(by_lo: &[usize], i: usize) -> usize {
 /// (`pos < prefix_end` ⟺ `lo(pos) <= key`). A table missing from `by_lo`
 /// is kept. Index `while` (not `filter`/`position`/`impl Iterator`) so the
 /// Aeneas pin emits a `def`.
+#[cfg(not(verus_keep_ghost))]
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn probe_order_covering(
     newest_first: &[usize],
@@ -99,6 +162,7 @@ pub(crate) fn probe_order_covering(
 }
 
 /// AS-IS dente: same covering test, oldest-first (historical `.rev()` walk).
+#[cfg(not(verus_keep_ghost))]
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn probe_order_covering_as_is(
     newest_first: &[usize],
@@ -129,6 +193,7 @@ pub(crate) fn probe_order_covering_as_is(
 /// ([`probe_order_covering`]). `SstRun::pairwise_disjoint` wires here;
 /// the engine passes parallel arrays in `by_lo` order, and `min` keeps
 /// the fn total on mismatched lengths.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn run_pairwise_disjoint_los(los: &[&[u8]], his: &[&[u8]]) -> bool {
     let n = los.len().min(his.len());
@@ -140,6 +205,7 @@ pub fn run_pairwise_disjoint_los(los: &[&[u8]], his: &[&[u8]]) -> bool {
 /// stable sort keeps newest-first among ties, so `by_lo[p-1]` lands on
 /// the OLDER table and the deleted value is resurrected — the fast-path
 /// variant of the measured failure (the P0.1 walk mutant is the other).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn run_pairwise_disjoint_los_as_is(los: &[&[u8]], his: &[&[u8]]) -> bool {
     let n = los.len().min(his.len());
@@ -154,6 +220,7 @@ pub fn run_pairwise_disjoint_los_as_is(los: &[&[u8]], his: &[&[u8]]) -> bool {
 /// tables — the two `.rev()` loops in `Db::lookup`/`lookup_sst_packed`.
 /// On an equal-`lo` tie the stable sort preserves newest-first, so the
 /// reverse walk probes the OLDEST table first: the stale pick.
+#[cfg(not(verus_keep_ghost))]
 #[cfg_attr(not(test), allow(dead_code))]
 fn probe_order_as_is(
     los: &[&[u8]],

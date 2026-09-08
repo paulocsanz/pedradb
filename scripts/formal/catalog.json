@@ -4681,8 +4681,9 @@
       "id": "probe_order",
       "finding": "RFC-0164 P0.1",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/probe_order_kernel.rs",
-      "twin": "crates/pedradb-core/verus/probe_order.rs",
+      "twin": "crates/pedradb-core/src/probe_order_kernel.rs",
       "verus": "scripts/verus_probe_order.sh",
       "callers": [
         "crates/pedradb-core/src/probe_order_kernel.rs"
