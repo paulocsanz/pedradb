@@ -2898,7 +2898,9 @@ impl<E: Env> ConcurrentDb<E> {
     /// worker's install lands.
     #[must_use]
     pub fn materialize_parked_once_try(&self) -> bool {
-        if self.inner.read().parked_unflushed_count() == 0 {
+        if crate::write_admission_kernel::batch_is_empty(
+            self.inner.read().parked_unflushed_count() as u64,
+        ) {
             return false;
         }
         let Some(_flush) = self.flush_lock.try_lock() else {
