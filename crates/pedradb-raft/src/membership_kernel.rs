@@ -2001,4 +2001,14 @@ mod tests {
         );
         assert!(pending_joint_node_counts(true));
     }
+
+    #[test]
+    fn joint_leave_ok_on_live_missing_leave_is_not_ok() {
+        assert!(!joint_leave_ok(false));
+        assert!(
+            joint_leave_ok_as_is(false),
+            "AS-IS dente: skip leave-joint"
+        );
+        assert!(joint_leave_ok(true));
+    }
 }

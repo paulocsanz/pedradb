@@ -1182,6 +1182,22 @@ def main() -> int:
         print("FAIL pending_joint_node twin≠kernel did not fail")
         return 1
     print("ok mutant pending_joint_node twin≠kernel named")
+    jlo_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in jlo_mutant["pairs"]:
+        if pair.get("id") == "joint_leave_ok":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/membership_joint.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing joint_leave_ok")
+        return 1
+    hits = [m for m in _sa_fails(jlo_mutant) if m.startswith("joint_leave_ok:")]
+    if not hits:
+        print("FAIL joint_leave_ok twin≠kernel did not fail")
+        return 1
+    print("ok mutant joint_leave_ok twin≠kernel named")
     # Drive the same rule through check_twins (may also report unrelated
     # dirty-tree twin drift; we only require the SA id).
     try:
