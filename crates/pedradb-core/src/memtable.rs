@@ -914,7 +914,7 @@ impl MemTable {
         taken.entries = entries;
         taken.range_tombstones = tombs;
         taken.tail_max_seq = max_seq;
-        if !taken.map.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(taken.map.len() as u64) {
             taken.cf_bytes.insert(Bytes::copy_from_slice(f), bytes);
             if let Some(s) = self.cf_span.remove(f) {
                 taken.cf_span.insert(Bytes::copy_from_slice(f), s);
