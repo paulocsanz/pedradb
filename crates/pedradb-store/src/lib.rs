@@ -6761,7 +6761,7 @@ impl<E: Env> StoreCluster<E> {
     /// (Compacting past offline peers left them unable to catch up without snapshot install.)
     fn maybe_compact_logs(&mut self, rid: u64) -> Result<()> {
         let ids = self.ids.clone();
-        if ids.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(ids.len() as u64) {
             return Ok(());
         }
         // Multi-host: remotes are not in `nodes` — use leader match_index for them.
