@@ -97,6 +97,19 @@ macro_rules! lock_interleavings_admitted_as_is_body {
     };
 }
 
+macro_rules! forall_schedules_admitted_body {
+    ($pct_depth:expr) => {{
+        let _ = $pct_depth;
+        false
+    }};
+}
+
+macro_rules! forall_schedules_admitted_as_is_body {
+    ($pct_depth:expr) => {
+        $pct_depth >= 2
+    };
+}
+
 /// First-committer-wins predicate (OCC): a transaction that read
 /// snapshot `snap` against current `last_seq` conflicts iff the window
 /// `(snap, last_seq]` is non-empty **and** some key it touched was
@@ -272,15 +285,17 @@ pub fn occ_conflict_as_is_serialized(
 
 /// Finite PCT depth never covers ∀ OS interleavings (RFC-0070 / R-pct).
 /// A campaign of depth `pct_depth` (including d=2) is not a ∀π theorem.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn forall_schedules_admitted(_pct_depth: u64) -> bool {
-    false
+    forall_schedules_admitted_body!(_pct_depth)
 }
 
 /// AS-IS: d≥2 is rounded to forall (the 0070 hole — PCT CLEAN as a theorem).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn forall_schedules_admitted_as_is(pct_depth: u64) -> bool {
-    pct_depth >= 2
+    forall_schedules_admitted_as_is_body!(pct_depth)
 }
 
 /// RFC-0070 P2.2: campaign default PCT depth. d>2 stays RFC-0051
@@ -457,6 +472,20 @@ pub fn lock_interleavings_admitted_as_is() -> (ok: bool)
         ok == true,
 {
     lock_interleavings_admitted_as_is_body!()
+}
+
+pub fn forall_schedules_admitted(_pct_depth: u64) -> (ok: bool)
+    ensures
+        ok == false,
+{
+    forall_schedules_admitted_body!(_pct_depth)
+}
+
+pub fn forall_schedules_admitted_as_is(pct_depth: u64) -> (ok: bool)
+    ensures
+        ok == (pct_depth >= 2),
+{
+    forall_schedules_admitted_as_is_body!(pct_depth)
 }
 
 #[derive(PartialEq, Eq, Copy, Clone)]

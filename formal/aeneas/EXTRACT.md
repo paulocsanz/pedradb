@@ -294,6 +294,7 @@ the composition files and fails on a missing file or the substring `sorry`.
 | ConcurrentDb lock-order | Flush `wal_rotate_decision` (`commit_inflight`) | `wal_rotate_commit_inflight_keeps` | `wal_rotate_idle_rotates` |
 | TransactionDB 2PL | `wait_for_deadlock` | `wait_for_deadlock_is_loop` | `wait_for_deadlock_as_is_dente` / `wait_for_deadlock_loop_vs_as_is` |
 | ConcurrentDb scheduler residual | `lock_interleavings_admitted` (Verus SA on production file) | `lock_interleavings_not_a_theorem` | `lock_interleavings_as_is_dente` |
+| ConcurrentDb PCT residual | `forall_schedules_admitted` (Verus SA on production file; always false) | `forall_schedules_pct2_not_admitted` | `forall_schedules_as_is_dente` |
 
 Cross-lib files: `ComposeIterMerge.lean`, `ComposeMembershipClone.lean`,
 `ComposeScanCrc.lean`, `ComposeC1Membership.lean`, `ComposeConcurrent.lean`.
