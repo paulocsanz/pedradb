@@ -740,6 +740,12 @@ mod tests {
             commit.contains("wal_commit_plan("),
             "commit_ops_with must match the plan fn"
         );
+        let group = named_fn_src(include_str!("db.rs"), "wal_sync_group")
+            .expect("wal_sync_group");
+        assert!(
+            group.contains("wal_commit_plan("),
+            "wal_sync_group must match the plan fn"
+        );
     }
 
     #[test]

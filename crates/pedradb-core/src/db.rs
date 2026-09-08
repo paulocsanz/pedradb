@@ -8952,13 +8952,18 @@ impl<E: Env> Db<E> {
     pub(crate) fn wal_sync_group(&mut self) -> Result<()> {
         self.ensure_not_fenced()?;
         let sync_err = self.wal.lock().sync_data().err();
-        if crate::write_admission_kernel::fence_on_sync_fail(true, sync_err.is_some()) {
-            let e = sync_err.expect("fence_on_sync_fail ⇒ Some");
-            self.durability_fenced = true;
-            return Err(e);
+        match crate::write_admission_kernel::wal_commit_plan(true, sync_err.is_some()) {
+            crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                let e = sync_err.expect("AppendSyncFence ⇒ Some");
+                self.durability_fenced = true;
+                Err(e)
+            }
+            crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+            | crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => {
+                self.note_wal_sync();
+                Ok(())
+            }
         }
-        self.note_wal_sync();
-        Ok(())
     }
 
     /// Apply prepared ops to the memtable after durable WAL.
