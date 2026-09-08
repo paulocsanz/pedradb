@@ -8459,7 +8459,7 @@ impl<E: Env> StoreCluster<E> {
     /// # Errors
     /// SI generation/watermark persist (F136).
     fn note_mutations_at(&mut self, reserved: Option<u64>, items: &[VersionNote]) -> Result<()> {
-        if items.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(items.len() as u64) {
             return Ok(());
         }
         let g = match reserved {
