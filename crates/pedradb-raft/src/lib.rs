@@ -873,7 +873,7 @@ impl RaftCluster {
     ) -> Result<()> {
         let peer_ids = self.ids.clone();
         // Append client entries to leader log first.
-        if !client_entries.is_empty() {
+        if !pedradb_core::write_admission_kernel::batch_is_empty(client_entries.len() as u64) {
             let leader = self
                 .nodes
                 .get_mut(&leader_id)
