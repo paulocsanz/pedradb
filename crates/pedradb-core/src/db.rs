@@ -5554,7 +5554,7 @@ impl<E: Env> Db<E> {
         mut vals: Vec<Bytes>,
     ) -> Result<()> {
         let n = keys.len();
-        if n == 0 {
+        if crate::write_admission_kernel::batch_is_empty(n as u64) {
             return Ok(());
         }
         crate::bulk_run::sort_bulk_key_vals(&mut keys, &mut vals);
