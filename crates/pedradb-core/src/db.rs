@@ -8329,7 +8329,7 @@ impl<E: Env> Db<E> {
         // sequence order.
         if !self.change_log.is_empty() {
             let mut out = self.change_log.changes_after(0);
-            if from_wal.is_empty() {
+            if crate::write_admission_kernel::batch_is_empty(from_wal.len() as u64) {
                 return Ok(out);
             }
             // Per-key cutoff, not `out.last().sequence`. The cache is
