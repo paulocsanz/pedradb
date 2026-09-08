@@ -646,6 +646,13 @@ mod tests {
             src.contains("occ_snap_uses_published("),
             "occ_snapshot must match occ_snap_uses_published"
         );
+        assert!(
+            src.split("fn writes_idle_for")
+                .nth(1)
+                .expect("writes_idle_for")
+                .contains("occ_snap_uses_published("),
+            "writes_idle_for must not treat inflight as idle"
+        );
     }
 
     #[test]

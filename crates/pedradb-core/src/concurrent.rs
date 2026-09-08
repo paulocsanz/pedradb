@@ -1891,7 +1891,7 @@ impl<E: Env> ConcurrentDb<E> {
         if self.writes.active.load(Ordering::Relaxed) > 0 {
             return false;
         }
-        if self.commit_inflight() > 0 {
+        if crate::flush_kernel::occ_snap_uses_published(self.commit_inflight() > 0) {
             return false;
         }
         let last = self.writes.last_complete_ns.load(Ordering::Relaxed);
@@ -1916,7 +1916,9 @@ impl<E: Env> ConcurrentDb<E> {
         if self.writes_idle_for(idle) {
             return None;
         }
-        if self.writes.active.load(Ordering::Relaxed) > 0 || self.commit_inflight() > 0 {
+        if self.writes.active.load(Ordering::Relaxed) > 0
+            || crate::flush_kernel::occ_snap_uses_published(self.commit_inflight() > 0)
+        {
             return Some(idle);
         }
         let last = {
