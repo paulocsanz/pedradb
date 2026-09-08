@@ -934,7 +934,7 @@ fn network_broadcast_append(
             entries,
             leader_commit: commit,
         };
-        let client = if auth.is_empty() {
+        let client = if pedradb_core::write_admission_kernel::batch_is_empty(auth.len() as u64) {
             PeerClient::new(*addr)
         } else {
             PeerClient::with_auth(*addr, auth)
