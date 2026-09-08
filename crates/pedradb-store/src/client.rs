@@ -498,7 +498,7 @@ impl Transaction {
     /// Empty TX, Conflict, TransactionTooOld, limits, NotLeader, NotCommitted.
     pub fn commit(self, cluster: &mut StoreCluster) -> Result<u64> {
         let pairs = self.pairs();
-        if pairs.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(pairs.len() as u64) {
             return Err(StoreError::Msg("empty transaction".into()));
         }
         validate_tx_pairs(&pairs)?;
