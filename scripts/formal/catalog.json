@@ -1759,8 +1759,9 @@
       "id": "fail_closed",
       "finding": "F102/F104/F105",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-http/src/fail_closed.rs",
-      "twin": "crates/pedradb-http/verus/fail_closed.rs",
+      "twin": "crates/pedradb-http/src/fail_closed.rs",
       "verus": "scripts/verus_fail_closed.sh",
       "callers": [
         "crates/pedradb-http/src/lib.rs"

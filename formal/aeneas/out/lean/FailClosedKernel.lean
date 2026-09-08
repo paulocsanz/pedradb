@@ -419,54 +419,54 @@ def core.ops.range.RangeFromUsize.Insts.CoreSliceIndexSliceIndexStrStr :
 }
 
 /-- [pedra_aeneas_fail_closed_kernel::parse_error_writes_status]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 10:0-12:1
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 53:0-55:1
     Visibility: public -/
 def parse_error_writes_status : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_fail_closed_kernel::parse_error_writes_status_as_is]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 16:0-18:1
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 60:0-62:1
     Visibility: public -/
 def parse_error_writes_status_as_is : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_fail_closed_kernel::parse_error_status]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 22:0-24:1
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 67:0-69:1
     Visibility: public -/
 def parse_error_status : Result Std.U16 := do
   ok 400#u16
 
 /-- [pedra_aeneas_fail_closed_kernel::reject_transfer_encoding]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 28:0-30:1
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 74:0-76:1
     Visibility: public -/
 def reject_transfer_encoding : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_fail_closed_kernel::reject_transfer_encoding_as_is]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 34:0-36:1
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 81:0-83:1
     Visibility: public -/
 def reject_transfer_encoding_as_is : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_fail_closed_kernel::present_bad_int_is_error]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 40:0-42:1
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 88:0-90:1
     Visibility: public -/
 def present_bad_int_is_error : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_fail_closed_kernel::present_bad_int_is_error_as_is]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 46:0-48:1
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 95:0-97:1
     Visibility: public -/
 def present_bad_int_is_error_as_is : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_fail_closed_kernel::header_break_end::closure#3]
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 58:59-58:68 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 108:59-108:68 -/
 @[reducible]
 def header_break_end.closure_3 := Unit
 
 /-- [pedra_aeneas_fail_closed_kernel::header_break_end::{impl core::ops::function::FnOnce<(usize,), usize> for pedra_aeneas_fail_closed_kernel::header_break_end::closure#3}::call_once]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 58:59-58:68 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 108:59-108:68 -/
 def
   header_break_end.closure_3.Insts.CoreOpsFunctionFnOnceTupleUsizeUsize.call_once
   (c : header_break_end.closure_3) (tupled_args : Std.Usize) :
@@ -475,7 +475,7 @@ def
   tupled_args + 2#usize
 
 /-- Trait implementation: [pedra_aeneas_fail_closed_kernel::header_break_end::{impl core::ops::function::FnOnce<(usize,), usize> for pedra_aeneas_fail_closed_kernel::header_break_end::closure#3}]
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 58:59-58:68 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 108:59-108:68 -/
 @[reducible]
 def header_break_end.closure_3.Insts.CoreOpsFunctionFnOnceTupleUsizeUsize :
   core.ops.function.FnOnce header_break_end.closure_3 Std.Usize Std.Usize := {
@@ -484,12 +484,12 @@ def header_break_end.closure_3.Insts.CoreOpsFunctionFnOnceTupleUsizeUsize :
 }
 
 /-- [pedra_aeneas_fail_closed_kernel::header_break_end::closure#2]
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 58:37-58:53 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 108:37-108:53 -/
 @[reducible]
 def header_break_end.closure_2 := Unit
 
 /-- [pedra_aeneas_fail_closed_kernel::header_break_end::{impl core::ops::function::FnMut<(&'_ [u8],), bool> for pedra_aeneas_fail_closed_kernel::header_break_end::closure#2}::call_mut]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 58:37-58:53 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 108:37-108:53 -/
 def
   header_break_end.closure_2.Insts.CoreOpsFunctionFnMutTupleSharedSliceU8Bool.call_mut
   (c : header_break_end.closure_2) (tupled_args : Slice Std.U8) :
@@ -501,7 +501,7 @@ def
   ok (b, c)
 
 /-- [pedra_aeneas_fail_closed_kernel::header_break_end::{impl core::ops::function::FnOnce<(&'_ [u8],), bool> for pedra_aeneas_fail_closed_kernel::header_break_end::closure#2}::call_once]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 58:37-58:53 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 108:37-108:53 -/
 def
   header_break_end.closure_2.Insts.CoreOpsFunctionFnOnceTupleSharedSliceU8Bool.call_once
   (c : header_break_end.closure_2) (s : Slice Std.U8) : Result Bool := do
@@ -511,7 +511,7 @@ def
   ok b
 
 /-- Trait implementation: [pedra_aeneas_fail_closed_kernel::header_break_end::{impl core::ops::function::FnOnce<(&'_ [u8],), bool> for pedra_aeneas_fail_closed_kernel::header_break_end::closure#2}]
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 58:37-58:53 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 108:37-108:53 -/
 @[reducible]
 def
   header_break_end.closure_2.Insts.CoreOpsFunctionFnOnceTupleSharedSliceU8Bool
@@ -522,7 +522,7 @@ def
 }
 
 /-- Trait implementation: [pedra_aeneas_fail_closed_kernel::header_break_end::{impl core::ops::function::FnMut<(&'_ [u8],), bool> for pedra_aeneas_fail_closed_kernel::header_break_end::closure#2}]
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 58:37-58:53 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 108:37-108:53 -/
 @[reducible]
 def header_break_end.closure_2.Insts.CoreOpsFunctionFnMutTupleSharedSliceU8Bool
   : core.ops.function.FnMut header_break_end.closure_2 (Slice Std.U8) Bool := {
@@ -533,12 +533,12 @@ def header_break_end.closure_2.Insts.CoreOpsFunctionFnMutTupleSharedSliceU8Bool
 }
 
 /-- [pedra_aeneas_fail_closed_kernel::header_break_end::closure#1]
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 57:65-57:74 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 107:65-107:74 -/
 @[reducible]
 def header_break_end.closure_1 := Unit
 
 /-- [pedra_aeneas_fail_closed_kernel::header_break_end::{impl core::ops::function::FnOnce<(usize,), usize> for pedra_aeneas_fail_closed_kernel::header_break_end::closure#1}::call_once]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 57:65-57:74 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 107:65-107:74 -/
 def
   header_break_end.closure_1.Insts.CoreOpsFunctionFnOnceTupleUsizeUsize.call_once
   (c : header_break_end.closure_1) (tupled_args : Std.Usize) :
@@ -547,7 +547,7 @@ def
   tupled_args + 4#usize
 
 /-- Trait implementation: [pedra_aeneas_fail_closed_kernel::header_break_end::{impl core::ops::function::FnOnce<(usize,), usize> for pedra_aeneas_fail_closed_kernel::header_break_end::closure#1}]
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 57:65-57:74 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 107:65-107:74 -/
 @[reducible]
 def header_break_end.closure_1.Insts.CoreOpsFunctionFnOnceTupleUsizeUsize :
   core.ops.function.FnOnce header_break_end.closure_1 Std.Usize Std.Usize := {
@@ -556,12 +556,12 @@ def header_break_end.closure_1.Insts.CoreOpsFunctionFnOnceTupleUsizeUsize :
 }
 
 /-- [pedra_aeneas_fail_closed_kernel::header_break_end::closure]
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 57:39-57:59 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 107:39-107:59 -/
 @[reducible]
 def header_break_end.closure := Unit
 
 /-- [pedra_aeneas_fail_closed_kernel::header_break_end::{impl core::ops::function::FnMut<(&'_ [u8],), bool> for pedra_aeneas_fail_closed_kernel::header_break_end::closure}::call_mut]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 57:39-57:59 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 107:39-107:59 -/
 def
   header_break_end.closure.Insts.CoreOpsFunctionFnMutTupleSharedSliceU8Bool.call_mut
   (c : header_break_end.closure) (tupled_args : Slice Std.U8) :
@@ -573,7 +573,7 @@ def
   ok (b, c)
 
 /-- [pedra_aeneas_fail_closed_kernel::header_break_end::{impl core::ops::function::FnOnce<(&'_ [u8],), bool> for pedra_aeneas_fail_closed_kernel::header_break_end::closure}::call_once]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 57:39-57:59 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 107:39-107:59 -/
 def
   header_break_end.closure.Insts.CoreOpsFunctionFnOnceTupleSharedSliceU8Bool.call_once
   (c : header_break_end.closure) (s : Slice Std.U8) : Result Bool := do
@@ -583,7 +583,7 @@ def
   ok b
 
 /-- Trait implementation: [pedra_aeneas_fail_closed_kernel::header_break_end::{impl core::ops::function::FnOnce<(&'_ [u8],), bool> for pedra_aeneas_fail_closed_kernel::header_break_end::closure}]
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 57:39-57:59 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 107:39-107:59 -/
 @[reducible]
 def header_break_end.closure.Insts.CoreOpsFunctionFnOnceTupleSharedSliceU8Bool
   : core.ops.function.FnOnce header_break_end.closure (Slice Std.U8) Bool := {
@@ -592,7 +592,7 @@ def header_break_end.closure.Insts.CoreOpsFunctionFnOnceTupleSharedSliceU8Bool
 }
 
 /-- Trait implementation: [pedra_aeneas_fail_closed_kernel::header_break_end::{impl core::ops::function::FnMut<(&'_ [u8],), bool> for pedra_aeneas_fail_closed_kernel::header_break_end::closure}]
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 57:39-57:59 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 107:39-107:59 -/
 @[reducible]
 def header_break_end.closure.Insts.CoreOpsFunctionFnMutTupleSharedSliceU8Bool :
   core.ops.function.FnMut header_break_end.closure (Slice Std.U8) Bool := {
@@ -603,7 +603,7 @@ def header_break_end.closure.Insts.CoreOpsFunctionFnMutTupleSharedSliceU8Bool :
 }
 
 /-- [pedra_aeneas_fail_closed_kernel::header_break_end]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 56:0-65:1
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 106:0-115:1
     Visibility: public -/
 def header_break_end (buf : Slice Std.U8) : Result (Option Std.Usize) := do
   let w ← core.slice.Slice.windows buf 4#usize
@@ -640,12 +640,12 @@ def header_break_end (buf : Slice Std.U8) : Result (Option Std.Usize) := do
       ok (some i)
 
 /-- [pedra_aeneas_fail_closed_kernel::header_break_end_as_is::closure#1]
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 70:54-70:63 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 121:54-121:63 -/
 @[reducible]
 def header_break_end_as_is.closure_1 := Unit
 
 /-- [pedra_aeneas_fail_closed_kernel::header_break_end_as_is::{impl core::ops::function::FnOnce<(usize,), usize> for pedra_aeneas_fail_closed_kernel::header_break_end_as_is::closure#1}::call_once]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 70:54-70:63 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 121:54-121:63 -/
 def
   header_break_end_as_is.closure_1.Insts.CoreOpsFunctionFnOnceTupleUsizeUsize.call_once
   (c : header_break_end_as_is.closure_1) (tupled_args : Std.Usize) :
@@ -654,7 +654,7 @@ def
   tupled_args + 4#usize
 
 /-- Trait implementation: [pedra_aeneas_fail_closed_kernel::header_break_end_as_is::{impl core::ops::function::FnOnce<(usize,), usize> for pedra_aeneas_fail_closed_kernel::header_break_end_as_is::closure#1}]
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 70:54-70:63 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 121:54-121:63 -/
 @[reducible]
 def header_break_end_as_is.closure_1.Insts.CoreOpsFunctionFnOnceTupleUsizeUsize
   : core.ops.function.FnOnce header_break_end_as_is.closure_1 Std.Usize
@@ -664,12 +664,12 @@ def header_break_end_as_is.closure_1.Insts.CoreOpsFunctionFnOnceTupleUsizeUsize
 }
 
 /-- [pedra_aeneas_fail_closed_kernel::header_break_end_as_is::closure]
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 70:28-70:48 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 121:28-121:48 -/
 @[reducible]
 def header_break_end_as_is.closure := Unit
 
 /-- [pedra_aeneas_fail_closed_kernel::header_break_end_as_is::{impl core::ops::function::FnMut<(&'_ [u8],), bool> for pedra_aeneas_fail_closed_kernel::header_break_end_as_is::closure}::call_mut]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 70:28-70:48 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 121:28-121:48 -/
 def
   header_break_end_as_is.closure.Insts.CoreOpsFunctionFnMutTupleSharedSliceU8Bool.call_mut
   (c : header_break_end_as_is.closure) (tupled_args : Slice Std.U8) :
@@ -681,7 +681,7 @@ def
   ok (b, c)
 
 /-- [pedra_aeneas_fail_closed_kernel::header_break_end_as_is::{impl core::ops::function::FnOnce<(&'_ [u8],), bool> for pedra_aeneas_fail_closed_kernel::header_break_end_as_is::closure}::call_once]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 70:28-70:48 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 121:28-121:48 -/
 def
   header_break_end_as_is.closure.Insts.CoreOpsFunctionFnOnceTupleSharedSliceU8Bool.call_once
   (c : header_break_end_as_is.closure) (s : Slice Std.U8) : Result Bool := do
@@ -691,7 +691,7 @@ def
   ok b
 
 /-- Trait implementation: [pedra_aeneas_fail_closed_kernel::header_break_end_as_is::{impl core::ops::function::FnOnce<(&'_ [u8],), bool> for pedra_aeneas_fail_closed_kernel::header_break_end_as_is::closure}]
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 70:28-70:48 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 121:28-121:48 -/
 @[reducible]
 def
   header_break_end_as_is.closure.Insts.CoreOpsFunctionFnOnceTupleSharedSliceU8Bool
@@ -702,7 +702,7 @@ def
 }
 
 /-- Trait implementation: [pedra_aeneas_fail_closed_kernel::header_break_end_as_is::{impl core::ops::function::FnMut<(&'_ [u8],), bool> for pedra_aeneas_fail_closed_kernel::header_break_end_as_is::closure}]
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 70:28-70:48 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 121:28-121:48 -/
 @[reducible]
 def
   header_break_end_as_is.closure.Insts.CoreOpsFunctionFnMutTupleSharedSliceU8Bool
@@ -715,7 +715,7 @@ def
 }
 
 /-- [pedra_aeneas_fail_closed_kernel::header_break_end_as_is]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 69:0-71:1
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 120:0-122:1
     Visibility: public -/
 def header_break_end_as_is
   (buf : Slice Std.U8) : Result (Option Std.Usize) := do
@@ -731,7 +731,7 @@ def header_break_end_as_is
     o ()
 
 /-- [pedra_aeneas_fail_closed_kernel::header_break_len]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 75:0-81:1
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 127:0-133:1
     Visibility: public -/
 def header_break_len
   (buf : Slice Std.U8) (end1 : Std.Usize) : Result Std.Usize := do
@@ -754,12 +754,12 @@ def header_break_len
   else ok 2#usize
 
 /-- [pedra_aeneas_fail_closed_kernel::expects_100_continue::closure]
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 88:13-88:62 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 141:13-141:62 -/
 @[reducible]
 def expects_100_continue.closure := Unit
 
 /-- [pedra_aeneas_fail_closed_kernel::expects_100_continue::{impl core::ops::function::FnMut<(&'_ str,), bool> for pedra_aeneas_fail_closed_kernel::expects_100_continue::closure}::call_mut]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 88:13-88:62 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 141:13-141:62 -/
 def
   expects_100_continue.closure.Insts.CoreOpsFunctionFnMutTupleSharedStrBool.call_mut
   (c : expects_100_continue.closure) (tupled_args : Str) :
@@ -770,7 +770,7 @@ def
   ok (b, c)
 
 /-- [pedra_aeneas_fail_closed_kernel::expects_100_continue::{impl core::ops::function::FnOnce<(&'_ str,), bool> for pedra_aeneas_fail_closed_kernel::expects_100_continue::closure}::call_once]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 88:13-88:62 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 141:13-141:62 -/
 def
   expects_100_continue.closure.Insts.CoreOpsFunctionFnOnceTupleSharedStrBool.call_once
   (c : expects_100_continue.closure) (s : Str) : Result Bool := do
@@ -780,7 +780,7 @@ def
   ok b
 
 /-- Trait implementation: [pedra_aeneas_fail_closed_kernel::expects_100_continue::{impl core::ops::function::FnOnce<(&'_ str,), bool> for pedra_aeneas_fail_closed_kernel::expects_100_continue::closure}]
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 88:13-88:62 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 141:13-141:62 -/
 @[reducible]
 def expects_100_continue.closure.Insts.CoreOpsFunctionFnOnceTupleSharedStrBool
   : core.ops.function.FnOnce expects_100_continue.closure Str Bool := {
@@ -789,7 +789,7 @@ def expects_100_continue.closure.Insts.CoreOpsFunctionFnOnceTupleSharedStrBool
 }
 
 /-- Trait implementation: [pedra_aeneas_fail_closed_kernel::expects_100_continue::{impl core::ops::function::FnMut<(&'_ str,), bool> for pedra_aeneas_fail_closed_kernel::expects_100_continue::closure}]
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 88:13-88:62 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 141:13-141:62 -/
 @[reducible]
 def expects_100_continue.closure.Insts.CoreOpsFunctionFnMutTupleSharedStrBool :
   core.ops.function.FnMut expects_100_continue.closure Str Bool := {
@@ -800,7 +800,7 @@ def expects_100_continue.closure.Insts.CoreOpsFunctionFnMutTupleSharedStrBool :
 }
 
 /-- [pedra_aeneas_fail_closed_kernel::expects_100_continue]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 85:0-89:1
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 138:0-142:1
     Visibility: public -/
 def expects_100_continue (value : Str) : Result Bool := do
   let s ←
@@ -813,18 +813,18 @@ def expects_100_continue (value : Str) : Result Bool := do
   ok b
 
 /-- [pedra_aeneas_fail_closed_kernel::expects_100_continue_as_is]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 93:0-95:1
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 147:0-149:1
     Visibility: public -/
 def expects_100_continue_as_is (_value : Str) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_fail_closed_kernel::expect_field_ok::closure]
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 100:25-103:5 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 155:25-158:5 -/
 @[reducible]
 def expect_field_ok.closure := Unit
 
 /-- [pedra_aeneas_fail_closed_kernel::expect_field_ok::{impl core::ops::function::FnMut<(&'_ str,), bool> for pedra_aeneas_fail_closed_kernel::expect_field_ok::closure}::call_mut]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 100:25-103:5 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 155:25-158:5 -/
 def
   expect_field_ok.closure.Insts.CoreOpsFunctionFnMutTupleSharedStrBool.call_mut
   (c : expect_field_ok.closure) (tupled_args : Str) :
@@ -839,7 +839,7 @@ def
     ok (b1, c)
 
 /-- [pedra_aeneas_fail_closed_kernel::expect_field_ok::{impl core::ops::function::FnOnce<(&'_ str,), bool> for pedra_aeneas_fail_closed_kernel::expect_field_ok::closure}::call_once]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 100:25-103:5 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 155:25-158:5 -/
 def
   expect_field_ok.closure.Insts.CoreOpsFunctionFnOnceTupleSharedStrBool.call_once
   (c : expect_field_ok.closure) (s : Str) : Result Bool := do
@@ -849,7 +849,7 @@ def
   ok b
 
 /-- Trait implementation: [pedra_aeneas_fail_closed_kernel::expect_field_ok::{impl core::ops::function::FnOnce<(&'_ str,), bool> for pedra_aeneas_fail_closed_kernel::expect_field_ok::closure}]
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 100:25-103:5 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 155:25-158:5 -/
 @[reducible]
 def expect_field_ok.closure.Insts.CoreOpsFunctionFnOnceTupleSharedStrBool :
   core.ops.function.FnOnce expect_field_ok.closure Str Bool := {
@@ -858,7 +858,7 @@ def expect_field_ok.closure.Insts.CoreOpsFunctionFnOnceTupleSharedStrBool :
 }
 
 /-- Trait implementation: [pedra_aeneas_fail_closed_kernel::expect_field_ok::{impl core::ops::function::FnMut<(&'_ str,), bool> for pedra_aeneas_fail_closed_kernel::expect_field_ok::closure}]
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 100:25-103:5 -/
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 155:25-158:5 -/
 @[reducible]
 def expect_field_ok.closure.Insts.CoreOpsFunctionFnMutTupleSharedStrBool :
   core.ops.function.FnMut expect_field_ok.closure Str Bool := {
@@ -869,7 +869,7 @@ def expect_field_ok.closure.Insts.CoreOpsFunctionFnMutTupleSharedStrBool :
 }
 
 /-- [pedra_aeneas_fail_closed_kernel::expect_field_ok]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 99:0-104:1
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 154:0-159:1
     Visibility: public -/
 def expect_field_ok (value : Str) : Result Bool := do
   let s ←
@@ -881,19 +881,19 @@ def expect_field_ok (value : Str) : Result Bool := do
   ok b
 
 /-- [pedra_aeneas_fail_closed_kernel::expect_field_ok_as_is]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 108:0-110:1
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 164:0-166:1
     Visibility: public -/
 def expect_field_ok_as_is (_value : Str) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_fail_closed_kernel::expectation_failed_status]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 114:0-116:1
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 171:0-173:1
     Visibility: public -/
 def expectation_failed_status : Result Std.U16 := do
   ok 417#u16
 
 /-- [pedra_aeneas_fail_closed_kernel::http_version_requires_host]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 120:0-128:1
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 178:0-186:1
     Visibility: public -/
 def http_version_requires_host (version : Str) : Result Bool := do
   let v ← core.str.Str.trim version
@@ -923,32 +923,32 @@ def http_version_requires_host (version : Str) : Result Bool := do
   else ok false
 
 /-- [pedra_aeneas_fail_closed_kernel::http_version_requires_host_as_is]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 132:0-134:1
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 191:0-193:1
     Visibility: public -/
 def http_version_requires_host_as_is (_version : Str) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_fail_closed_kernel::host_values_conflict]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 138:0-140:1
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 198:0-200:1
     Visibility: public -/
 def host_values_conflict (a : Str) (b : Str) : Result Bool := do
   core.cmp.impls.PartialEqShared.ne Str.Insts.CoreCmpPartialEqStr a b
 
 /-- [pedra_aeneas_fail_closed_kernel::host_values_conflict_as_is]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 144:0-146:1
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 205:0-207:1
     Visibility: public -/
 def host_values_conflict_as_is (_a : Str) (_b : Str) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_fail_closed_kernel::host_value_ok]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 150:0-152:1
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 212:0-214:1
     Visibility: public -/
 def host_value_ok (value : Str) : Result Bool := do
   let b ← core.str.Str.is_empty value
   ok (¬ b)
 
 /-- [pedra_aeneas_fail_closed_kernel::host_value_ok_as_is]:
-    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 156:0-158:1
+    Source: '../../../crates/pedradb-http/src/fail_closed.rs', lines 219:0-221:1
     Visibility: public -/
 def host_value_ok_as_is (_value : Str) : Result Bool := do
   ok true

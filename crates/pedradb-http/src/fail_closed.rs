@@ -1,50 +1,99 @@
 //! Fail-closed HTTP wire (RFC-0002 P38 / F102 / F104 / F105).
 //!
+//! **Single artifact:** this file is what `rustc` links *and* what Verus
+//! proves (`cfg(verus_keep_ghost)`). Socket write / parse / byte scan stay
+//! rustc. No twin-cópia.
+//!
+//!   ./scripts/verus_fail_closed.sh
+//!
 //! Production `handle_kv` / `handle_dcs` / `read_req` / `query_u64` call these.
 //! Writing the status line and parsing integers are caller + axiom.
 
 #![forbid(unsafe_code)]
 
+macro_rules! parse_error_writes_status_body {
+    () => {
+        true
+    };
+}
+macro_rules! parse_error_writes_status_as_is_body {
+    () => {
+        false
+    };
+}
+macro_rules! parse_error_status_body {
+    () => {
+        400u16
+    };
+}
+macro_rules! reject_transfer_encoding_body {
+    () => {
+        true
+    };
+}
+macro_rules! reject_transfer_encoding_as_is_body {
+    () => {
+        false
+    };
+}
+macro_rules! present_bad_int_is_error_body {
+    () => {
+        true
+    };
+}
+macro_rules! present_bad_int_is_error_as_is_body {
+    () => {
+        false
+    };
+}
+
 /// F102: `read_req` Err writes a status line (does not drop the socket mute).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn parse_error_writes_status() -> bool {
-    true
+    parse_error_writes_status_body!()
 }
 
 /// AS-IS F102: worker returns Err and closes with no HTTP response.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn parse_error_writes_status_as_is() -> bool {
-    false
+    parse_error_writes_status_as_is_body!()
 }
 
 /// Status code for a wire parse failure.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn parse_error_status() -> u16 {
-    400
+    parse_error_status_body!()
 }
 
 /// F104: any `Transfer-Encoding` is rejected (chunked unsupported).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn reject_transfer_encoding() -> bool {
-    true
+    reject_transfer_encoding_body!()
 }
 
 /// AS-IS F104: ignore TE; F86 keep-without-CL stores the raw chunk framing.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn reject_transfer_encoding_as_is() -> bool {
-    false
+    reject_transfer_encoding_as_is_body!()
 }
 
 /// F105: a *present* but unparseable integer is an error (not the default).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn present_bad_int_is_error() -> bool {
-    true
+    present_bad_int_is_error_body!()
 }
 
 /// AS-IS F105: `parse().ok().unwrap_or(default)` — `ttl_ms=abc` acquires.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn present_bad_int_is_error_as_is() -> bool {
-    false
+    present_bad_int_is_error_as_is_body!()
 }
 
 /// Offset just past the header/body break.
@@ -52,6 +101,7 @@ pub fn present_bad_int_is_error_as_is() -> bool {
 /// RFC 9112 prefers `\r\n\r\n`. F153: LF-only clients send `\n\n`; looking
 /// only for CRLF 400'd those requests (and could mis-frame a body that
 /// itself contains `\r\n\r\n`).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn header_break_end(buf: &[u8]) -> Option<usize> {
     let crlf = buf.windows(4).position(|w| w == b"\r\n\r\n").map(|i| i + 4);
@@ -65,12 +115,14 @@ pub fn header_break_end(buf: &[u8]) -> Option<usize> {
 }
 
 /// AS-IS F153: only the four-byte CRLF break.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn header_break_end_as_is(buf: &[u8]) -> Option<usize> {
     buf.windows(4).position(|w| w == b"\r\n\r\n").map(|i| i + 4)
 }
 
 /// Length of the break ending at `end` (4 for CRLFCRLF, 2 for LFLF).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn header_break_len(buf: &[u8], end: usize) -> usize {
     if end >= 4 && buf.get(end - 4..end) == Some(b"\r\n\r\n".as_ref()) {
@@ -81,6 +133,7 @@ pub fn header_break_len(buf: &[u8], end: usize) -> usize {
 }
 
 /// F154: `Expect: 100-continue` (RFC 9110) — case-insensitive, comma list.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn expects_100_continue(value: &str) -> bool {
     value
@@ -89,12 +142,14 @@ pub fn expects_100_continue(value: &str) -> bool {
 }
 
 /// AS-IS F154: never send 100; client and server wait on each other.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn expects_100_continue_as_is(_value: &str) -> bool {
     false
 }
 
 /// F159: every Expect token is empty or `100-continue` (RFC 9110).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn expect_field_ok(value: &str) -> bool {
     value.split(',').all(|t| {
@@ -104,18 +159,21 @@ pub fn expect_field_ok(value: &str) -> bool {
 }
 
 /// AS-IS F159: unknown Expect is ignored.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn expect_field_ok_as_is(_value: &str) -> bool {
     true
 }
 
 /// Status for an unrecognized expectation.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn expectation_failed_status() -> u16 {
     417
 }
 
 /// F157: RFC 9112 — HTTP/1.1 (and later) request-line requires `Host`.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn http_version_requires_host(version: &str) -> bool {
     let v = version.trim();
@@ -128,34 +186,147 @@ pub fn http_version_requires_host(version: &str) -> bool {
 }
 
 /// AS-IS F157: never require Host.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn http_version_requires_host_as_is(_version: &str) -> bool {
     false
 }
 
 /// F157: two `Host` field-values disagree.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn host_values_conflict(a: &str, b: &str) -> bool {
     a != b
 }
 
 /// AS-IS: last Host wins.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn host_values_conflict_as_is(_a: &str, _b: &str) -> bool {
     false
 }
 
 /// F158: RFC 9112 invalid `Host` field-value (empty after OWS trim).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn host_value_ok(value: &str) -> bool {
     !value.is_empty()
 }
 
 /// AS-IS F157 residual: empty Host counted as present.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn host_value_ok_as_is(_value: &str) -> bool {
     true
 }
+
+#[cfg(verus_keep_ghost)]
+use vstd::prelude::*;
+
+#[cfg(verus_keep_ghost)]
+verus! {
+
+pub open spec fn parse_error_writes_status_spec() -> bool {
+    true
+}
+
+pub fn parse_error_writes_status() -> (d: bool)
+    ensures
+        d == parse_error_writes_status_spec(),
+        d,
+{
+    parse_error_writes_status_body!()
+}
+
+pub open spec fn parse_error_writes_status_as_is_spec() -> bool {
+    false
+}
+
+pub fn parse_error_writes_status_as_is() -> (d: bool)
+    ensures
+        d == false,
+        d == parse_error_writes_status_as_is_spec(),
+{
+    parse_error_writes_status_as_is_body!()
+}
+
+pub fn parse_error_status() -> (c: u16)
+    ensures
+        c == 400u16,
+{
+    parse_error_status_body!()
+}
+
+pub open spec fn reject_transfer_encoding_spec() -> bool {
+    true
+}
+
+pub fn reject_transfer_encoding() -> (d: bool)
+    ensures
+        d == reject_transfer_encoding_spec(),
+        d,
+{
+    reject_transfer_encoding_body!()
+}
+
+pub open spec fn reject_transfer_encoding_as_is_spec() -> bool {
+    false
+}
+
+pub fn reject_transfer_encoding_as_is() -> (d: bool)
+    ensures
+        d == false,
+        d == reject_transfer_encoding_as_is_spec(),
+{
+    reject_transfer_encoding_as_is_body!()
+}
+
+pub open spec fn present_bad_int_is_error_spec() -> bool {
+    true
+}
+
+pub fn present_bad_int_is_error() -> (d: bool)
+    ensures
+        d == present_bad_int_is_error_spec(),
+        d,
+{
+    present_bad_int_is_error_body!()
+}
+
+pub open spec fn present_bad_int_is_error_as_is_spec() -> bool {
+    false
+}
+
+pub fn present_bad_int_is_error_as_is() -> (d: bool)
+    ensures
+        d == false,
+        d == present_bad_int_is_error_as_is_spec(),
+{
+    present_bad_int_is_error_as_is_body!()
+}
+
+proof fn lemma_f102_as_is_mute()
+    ensures
+        parse_error_writes_status_spec(),
+        !parse_error_writes_status_as_is_spec(),
+{
+}
+
+proof fn lemma_f104_as_is_accepts_te()
+    ensures
+        reject_transfer_encoding_spec(),
+        !reject_transfer_encoding_as_is_spec(),
+{
+}
+
+proof fn lemma_f105_as_is_defaults()
+    ensures
+        present_bad_int_is_error_spec(),
+        !present_bad_int_is_error_as_is_spec(),
+{
+}
+
+} // verus!
 
 #[cfg(test)]
 mod tests {
@@ -193,7 +364,6 @@ mod tests {
         assert_ne!(header_break_end(lf), header_break_end_as_is(lf));
         assert_eq!(header_break_len(crlf, crlf_end), 4);
         assert_eq!(header_break_len(lf, lf_end), 2);
-        // Earliest break: LF headers + body that contains `\r\n\r\n`.
         let mixed = b"PUT /kv/b HTTP/1.0\nContent-Length: 8\n\nab\r\n\r\ncd";
         let m = header_break_end(mixed).expect("mixed");
         assert_eq!(&mixed[m..], b"ab\r\n\r\ncd");
