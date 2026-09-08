@@ -4221,7 +4221,7 @@ impl<E: Env> Db<E> {
             if table.has_range_tombstones() {
                 table.collect_range_tombstones(snapshot, &mut range_dels);
             }
-            if table.is_empty() {
+            if crate::write_admission_kernel::batch_is_empty(table.len() as u64) {
                 continue;
             }
             let c = CountCursor::Mem(MemCountCursor::new(table, start, end, snapshot));
