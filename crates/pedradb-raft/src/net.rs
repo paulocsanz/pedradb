@@ -1006,7 +1006,7 @@ pub fn wait_for_leader_auth(
     let steps = max_ms / 50;
     for _ in 0..steps {
         for &a in addrs {
-            let c = if secret.is_empty() {
+            let c = if pedradb_core::write_admission_kernel::batch_is_empty(secret.len() as u64) {
                 PeerClient::new(a)
             } else {
                 PeerClient::with_auth(a, secret)
