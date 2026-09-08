@@ -742,7 +742,7 @@ impl SstTable {
     /// Overlay the MANIFEST CF tag (empty leaves the inferred value).
     #[must_use]
     pub fn with_cf(mut self, cf: String) -> Self {
-        if !cf.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(cf.len() as u64) {
             self.cf = cf;
         }
         self
