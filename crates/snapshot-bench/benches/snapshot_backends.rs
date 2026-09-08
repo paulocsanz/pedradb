@@ -38,6 +38,7 @@ use std::path::Path;
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
 use snapshot_bench::cellcost;
+use snapshot_bench::diagnose;
 use snapshot_bench::snapshot::SnapshotStore;
 use snapshot_bench::{
     FjallConfig, FjallSnapshot, KvEntry, KvUpdate, PedraDbConfig, PedraDbReader, PedraDbSnapshot,
@@ -211,6 +212,11 @@ fn cache_bytes() -> Option<u64> {
     std::env::var("SLIPSTREAM_BENCH_CACHE_BYTES")
         .ok()
         .and_then(|v| v.parse().ok())
+}
+
+/// RFC-0176 clock input. Unset cache → 64 GiB (same default as `pedra scale`).
+fn ram_for_clock() -> u64 {
+    cache_bytes().unwrap_or(64 << 30)
 }
 
 fn dir_size_bytes(path: &Path) -> u64 {
@@ -457,6 +463,8 @@ where
     g.finish();
     drop(_cell);
     cellcost::flush_group("get_hit");
+    // RFC-0182 P2.1: criterion median vs 0176 clock (scale get_hit P2.6).
+    diagnose::eprint_get_from_criterion("get_hit", name, n as u64, ram_for_clock());
 }
 
 fn bench_probe_miss<F>(c: &mut Criterion, name: &str, n: usize, mut get: F)

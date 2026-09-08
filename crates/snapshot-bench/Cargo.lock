@@ -1030,6 +1030,7 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "fjall",
+ "pedradb-core",
  "rocksdb-compat",
  "rust-rocksdb",
  "tempfile",

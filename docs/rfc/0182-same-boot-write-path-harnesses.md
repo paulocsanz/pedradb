@@ -87,7 +87,10 @@ Fjall `ycsb_a_mc4` **501 k** absoluto. snapshot 1M get_hit 1,38 vs
 
 ### P2 — polish
 
-- [ ] **P2.1** none yet — status: `todo`
+- [x] **P2.1** snapshot-bench `get_hit` criterion median → `classify_get`
+      vs RFC-0176 clock (best/happy/worst/as_is). Same line as scale
+      P2.6: `diagnose get get_hit/<backend> … class=…`. Always, not
+      COST_TRACE-gated. — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -99,15 +102,18 @@ Fjall `ycsb_a_mc4` **501 k** absoluto. snapshot 1M get_hit 1,38 vs
 | P1.1 | p1 | overwrite 3/3 quiet ≥1× | todo | — | 2026-09-07 |
 | P1.2 | p1 | ycsb_a/f 3-run | todo | — | 2026-09-07 |
 | P1.3 | p1 | caixa overwrite | todo | 0180 P1.1 | 2026-09-07 |
-| P2.1 | p2 | none yet | todo | — | 2026-09-07 |
+| P2.1 | p2 | snapshot-bench get_hit classify_get | done | criterion median vs 0176; `rfc0182_p21_snapshot_get_hit_classifies_vs_0176` | 2026-09-07 |
 
 ## Acceptance Criteria
 
 - **Tests:** nenhum binário novo. P0.2 é doc + comando que exit 0 no
-  smoke 1M / ycsb 1 k ops.
+  smoke 1M / ycsb 1 k ops. P2.1:
+  `rfc0182_p21_snapshot_get_hit_classifies_vs_0176` (1M 1,38 µs ≠
+  as-is walk); `rfc0182_p21_as_is_walk_is_not_best`.
 - **Telemetry / Analytics:** JSON `rocks_parity_bench` +
   `compare_report`; snapshot criterion stderr; Fjall **sem**
-  `compat_over_rocksdb` como win.
+  `compat_over_rocksdb` como win. snapshot-bench `get_hit` imprime
+  `diagnose get get_hit/<backend> … class=…` (P2.1).
 - **Documentation:** este RFC; `docs/benchmarks.md` P0.2.
 - **Screenshots:** backend-only.
 
