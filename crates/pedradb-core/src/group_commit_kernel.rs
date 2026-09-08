@@ -60,15 +60,28 @@ macro_rules! occ_member_fate_as_is_body {
     }};
 }
 
+macro_rules! occ_conflict_body {
+    ($snap:expr, $last_seq:expr, $touched:expr) => {
+        $last_seq > $snap && $touched
+    };
+}
+
+macro_rules! occ_conflict_as_is_serialized_body {
+    ($snap:expr, $last_seq:expr, $writes_before:expr, $touched:expr) => {
+        $last_seq + $writes_before > $snap && $touched
+    };
+}
+
 /// First-committer-wins predicate (OCC): a transaction that read
 /// snapshot `snap` against current `last_seq` conflicts iff the window
 /// `(snap, last_seq]` is non-empty **and** some key it touched was
 /// written inside it. `last_seq > snap` (not `!=`) is the faithful
 /// window: with `last_seq <= snap` the window is empty and no key can
 /// be in it.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn occ_conflict(snap: u64, last_seq: u64, touched_key_written_after: bool) -> bool {
-    last_seq > snap && touched_key_written_after
+    occ_conflict_body!(snap, last_seq, touched_key_written_after)
 }
 
 /// One member's OCC read of the pre-group state (collected under the
@@ -214,6 +227,7 @@ pub fn fence_publish_seq_as_is(member_seqs: &[u64]) -> u64 {
 /// intra-group write to a shared key, the serialized form conflicts
 /// where the group form does not: that divergence is exactly the
 /// RFC-0051 P1.3 planted-bug shape the theorems pin.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn occ_conflict_as_is_serialized(
     snap: u64,
@@ -221,7 +235,12 @@ pub fn occ_conflict_as_is_serialized(
     writes_before: u64,
     touched_key_written_after: bool,
 ) -> bool {
-    last_seq + writes_before > snap && touched_key_written_after
+    occ_conflict_as_is_serialized_body!(
+        snap,
+        last_seq,
+        writes_before,
+        touched_key_written_after
+    )
 }
 
 /// Finite PCT depth never covers ∀ OS interleavings (RFC-0070 / R-pct).
@@ -420,6 +439,47 @@ pub open spec fn occ_conflict_spec(
     touched_key_written_after: bool,
 ) -> bool {
     last_seq > snap && touched_key_written_after
+}
+
+#[verifier::when_used_as_spec(occ_conflict_spec)]
+pub fn occ_conflict(snap: u64, last_seq: u64, touched_key_written_after: bool) -> (c: bool)
+    ensures
+        c == occ_conflict_spec(snap, last_seq, touched_key_written_after),
+{
+    occ_conflict_body!(snap, last_seq, touched_key_written_after)
+}
+
+pub open spec fn occ_conflict_as_is_serialized_spec(
+    snap: u64,
+    last_seq: u64,
+    writes_before: u64,
+    touched_key_written_after: bool,
+) -> bool {
+    last_seq + writes_before > snap && touched_key_written_after
+}
+
+pub fn occ_conflict_as_is_serialized(
+    snap: u64,
+    last_seq: u64,
+    writes_before: u64,
+    touched_key_written_after: bool,
+) -> (c: bool)
+    requires
+        last_seq + writes_before <= 0xffff_ffff_ffff_ffff,
+    ensures
+        c == occ_conflict_as_is_serialized_spec(
+            snap,
+            last_seq,
+            writes_before,
+            touched_key_written_after,
+        ),
+{
+    occ_conflict_as_is_serialized_body!(
+        snap,
+        last_seq,
+        writes_before,
+        touched_key_written_after
+    )
 }
 
 pub open spec fn occ_batch_plan_spec(
