@@ -2766,7 +2766,7 @@ impl<E: Env> Db<E> {
 
     /// Compact grouping key: all files share `""` until CFs are registered.
     fn compact_family_key<'a>(&self, table: &'a SstTable) -> &'a str {
-        if self.physical_cfs.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.physical_cfs.len() as u64) {
             ""
         } else {
             table.cf()
