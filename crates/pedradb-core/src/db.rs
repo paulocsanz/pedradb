@@ -513,7 +513,7 @@ impl DbStats {
     /// RFC-0026 P0.1: one number an operator can alert on (`≪ 1` ⇒ garbage).
     #[must_use]
     pub fn vlog_live_ratio(&self) -> f64 {
-        if self.vlog_bytes == 0 {
+        if crate::write_admission_kernel::batch_is_empty(self.vlog_bytes) {
             return 1.0;
         }
         #[allow(clippy::cast_precision_loss)]
