@@ -1,4 +1,4 @@
 path=crates/pedradb-raft/src/membership_kernel.rs
-sha256=dafde15dc8d4f807c13a692c2e48a9cb6447712811b189b51ec87236f967fa90
+sha256=bec36a969d976168e517045799a2c9c53fb8a887cbcd654cd2124a78196c6ec8
 aeneas=daa85d7
 charon=0.1.232

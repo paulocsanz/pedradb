@@ -2022,4 +2022,15 @@ mod tests {
         assert!(election_grant_from_counts(true, false));
         assert!(election_grant_from_counts(false, true));
     }
+
+    #[test]
+    fn joint_target_counts_on_live_ids_not_nodes_is_not_ok() {
+        assert!(joint_target_counts(true, false));
+        assert!(
+            !joint_target_counts_as_is(true, false),
+            "AS-IS dente: require peer in local nodes"
+        );
+        assert!(!joint_target_counts(false, true));
+        assert!(joint_target_counts_as_is(false, true));
+    }
 }
