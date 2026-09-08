@@ -5610,7 +5610,7 @@ impl<E: Env> Db<E> {
         let taken = if self.imm.is_some() {
             // Still flushing previous imm — caller should finish that first.
             self.imm.take()
-        } else if self.mem.is_empty() {
+        } else if crate::write_admission_kernel::batch_is_empty(self.mem.len() as u64) {
             None
         } else {
             Some(std::mem::replace(&mut self.mem, MemTable::new()))
