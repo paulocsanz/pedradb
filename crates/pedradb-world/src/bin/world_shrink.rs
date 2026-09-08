@@ -105,7 +105,10 @@ fn main() {
         kept.len()
     );
     // C0.7 bar: either reduced arm count, empty (all optional), or documented irreducible set.
-    if !reduced && irreducible.is_empty() && base_arms > 0 {
+    if !reduced
+        && pedradb_core::write_admission_kernel::batch_is_empty(irreducible.len() as u64)
+        && base_arms > 0
+    {
         // All arms dropped successfully → reduced to 0
         println!("note=all_arms_optional");
     }
