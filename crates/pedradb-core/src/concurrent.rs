@@ -642,7 +642,7 @@ impl WriteGroup {
                 )));
             }
         }
-        self.active.fetch_sub(1, Ordering::Relaxed);
+        self.active.fetch_sub(1, Ordering::Release);
         self.mark_complete();
         if let Some(mut guard) = db.try_write() {
             guard.fence_durability_post_commit(&"write group leader panicked mid-commit");
@@ -785,7 +785,7 @@ impl WriteGroup {
     }
 
     fn begin_submit(&self) -> usize {
-        self.active.fetch_add(1, Ordering::Relaxed);
+        self.active.fetch_add(1, Ordering::Release);
         self.submits.fetch_add(1, Ordering::Relaxed);
         // RFC-0154 P1.6: do not `SystemTime::now` here. Idle uses `active`
         // (in-flight) then `last_complete_ns` (mark_complete on the way out).
@@ -805,7 +805,7 @@ impl WriteGroup {
     fn finish_lone_ops(&self, n: u64) {
         self.batches.fetch_add(1, Ordering::Relaxed);
         self.batch_ops.fetch_add(n, Ordering::Relaxed);
-        self.active.fetch_sub(1, Ordering::Relaxed);
+        self.active.fetch_sub(1, Ordering::Release);
         self.mark_complete();
     }
 
@@ -1007,7 +1007,7 @@ impl WriteGroup {
             };
             self.batches.fetch_add(1, Ordering::Relaxed);
             self.batch_ops.fetch_add(n, Ordering::Relaxed);
-            self.active.fetch_sub(1, Ordering::Relaxed);
+            self.active.fetch_sub(1, Ordering::Release);
             self.mark_complete();
             return result;
         }
@@ -1074,7 +1074,7 @@ impl WriteGroup {
             panic_guard.armed = false;
             r
         };
-        self.active.fetch_sub(1, Ordering::Relaxed);
+        self.active.fetch_sub(1, Ordering::Release);
         self.mark_complete();
         r
     }
@@ -1173,13 +1173,16 @@ impl WriteGroup {
 
     fn push_pending(g: &mut WriteGroupState, counter: &AtomicUsize, w: PendingWrite) {
         g.pending.push_back(w);
-        counter.fetch_add(1, Ordering::Relaxed);
+        // RFC-0180 P0.49: Release so the leader's Acquire load in
+        // `wait_in_flight_to_queue` / `spin_for_pending_n` sees the enqueue
+        // (Darwin ARM Relaxed could miss it).
+        counter.fetch_add(1, Ordering::Release);
     }
 
     fn take_pending(g: &mut WriteGroupState, counter: &AtomicUsize) -> Vec<PendingWrite> {
         let n = g.pending.len();
         if n > 0 {
-            counter.fetch_sub(n, Ordering::Relaxed);
+            counter.fetch_sub(n, Ordering::AcqRel);
         }
         g.pending.drain(..).collect()
     }
@@ -1189,7 +1192,7 @@ impl WriteGroup {
             return;
         }
         for _ in 0..spins {
-            if self.queued_pending.load(Ordering::Relaxed) >= want {
+            if self.queued_pending.load(Ordering::Acquire) >= want {
                 return;
             }
             std::hint::spin_loop();
@@ -1201,10 +1204,11 @@ impl WriteGroup {
     /// Stops when the grouping cap is met **or** `active` drops (last op
     /// / previous-round recv finishing without a next put). Merge-only
     /// (2–8); n≥16 cap is 2.
+    /// RFC-0180 P0.49: Acquire pairs with push_pending's Release.
     fn wait_in_flight_to_queue(&self, batch_len: usize) {
         loop {
-            let q = self.queued_pending.load(Ordering::Relaxed);
-            let active = self.active.load(Ordering::Relaxed);
+            let q = self.queued_pending.load(Ordering::Acquire);
+            let active = self.active.load(Ordering::Acquire);
             if !in_flight_off_queue(batch_len, q, active) {
                 return;
             }
@@ -1289,7 +1293,7 @@ impl WriteGroup {
                 // P0.44: 1024 spins can finish while siblings are still
                 // between `begin_submit` and `push_pending`.
                 self.wait_in_flight_to_queue(batch.len());
-                if self.queued_pending.load(Ordering::Relaxed) > 0 {
+                if self.queued_pending.load(Ordering::Acquire) > 0 {
                     let mut g = self.queue.lock();
                     batch.extend(Self::take_pending(&mut g, &self.queued_pending));
                 }
@@ -7110,8 +7114,9 @@ mod tests {
         assert_eq!(async_catchup_spins(2, 4), 1024);
         assert_eq!(async_catchup_spins(3, 4), 1024);
         assert_eq!(async_catchup_spins(4, 4), 0);
-        // RFC-0180 P0.44–P0.46: wait while begin_submit ran and push_pending
+        // RFC-0180 P0.44–P0.49: wait while begin_submit ran and push_pending
         // did not (pre-lock, after group_start, before off-lock WAL).
+        // P0.49: queued_pending Release/Acquire so Darwin ARM sees enqueue.
         assert_eq!(grouping_cap(1), 1);
         assert_eq!(grouping_cap(4), 4);
         assert_eq!(grouping_cap(8), 4);
