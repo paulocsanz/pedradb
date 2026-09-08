@@ -163,6 +163,11 @@ a linha quando há phasesΔ. Sem harness novo.
       `timed_ns` (unattributed = gap−timed). — status: `done`
 - [x] **P2.32** `pedra diagnose balance` JSON inclui `shapes` (gate
       0182). — status: `done`
+- [x] **P2.33** `predict_get_bottleneck` / `predict_probes_bottleneck`
+      classificam o walk as-is a `n` **sem correr um get**. CLI
+      `pedra diagnose get --keys N --ram R` (sem `--measured-ns`).
+      Teste `predict_get_bottleneck_1b_is_walk_without_runtime`.
+      — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -209,6 +214,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.30 | p2 | CLI probes JSON inputs | done | class+per_get+p_best | 2026-09-08 |
 | P2.31 | p2 | diagnose JSON gap/timed ns | done | json_object gap_ns+timed_ns | 2026-09-08 |
 | P2.32 | p2 | CLI balance JSON shapes | done | shapes array = BALANCE_SHAPES | 2026-09-08 |
+| P2.33 | p2 | predict bottleneck without a get | done | `predict_get_bottleneck`; diagnose get omits measured-ns | 2026-09-07 |
 
 ## Acceptance Criteria
 
@@ -252,6 +258,7 @@ a linha quando há phasesΔ. Sem harness novo.
   `pedra diagnose probes` JSON inputs (P2.30);
   `json_object` `gap_ns`/`timed_ns` (P2.31);
   `pedra diagnose balance` JSON `shapes` (P2.32);
+  `predict_get_bottleneck` 1B without a get (P2.33);
   `ycsb_c_all_reads_timed_zero_is_get_path`;
   `rfc0184_diagnosis_json_has_lever`;
   `extract_diagnose_lever_from_bench_object`.

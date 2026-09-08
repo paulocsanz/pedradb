@@ -471,6 +471,31 @@ pub fn classify_probes_as_is(_probes_per_get: u64, _p_best: u64) -> GetClass {
     GetClass::Best
 }
 
+/// RFC-0176 bottleneck at `keys` **without running a get**.
+///
+/// Classifies the as-is walk clock (`n_files * τ_disk`) against the legal
+/// spectrum. `AsIsWalk` ⇒ cut the probe path; do not WARM that `n`.
+#[must_use]
+pub fn predict_get_bottleneck(keys: u64, ram: u64) -> GetClass {
+    let f = crate::scale_kernel::scale_forecast(keys, ram);
+    let as_is = crate::scale_kernel::scale_forecast_as_is(keys, ram);
+    classify_get(
+        as_is.best_ns,
+        f.best_ns,
+        f.happy_ns,
+        f.worst_ns,
+        as_is.best_ns,
+    )
+}
+
+/// Same proof for probes: walk-all file count vs \(P_{\mathrm{best}}\).
+#[must_use]
+pub fn predict_probes_bottleneck(keys: u64, ram: u64) -> GetClass {
+    let f = crate::scale_kernel::scale_forecast(keys, ram);
+    let as_is = crate::scale_kernel::scale_forecast_as_is(keys, ram);
+    classify_probes(as_is.n_files, f.p_best)
+}
+
 /// AS-IS: every measured get is "best" (hides walk-all).
 #[must_use]
 pub fn classify_get_as_is(
@@ -669,6 +694,22 @@ mod tests {
         );
         let walk = predict_get_ns_as_is(f.n_files, SCALE_TAU_RAM_NS, SCALE_TAU_DISK_NS, 0, 0);
         assert_eq!(walk, as_is.best_ns);
+    }
+
+    /// 1B @ 64 GiB: the as-is walk is the bottleneck without running a get.
+    #[test]
+    fn predict_get_bottleneck_1b_is_walk_without_runtime() {
+        let ram = 64u64 << 30;
+        assert_eq!(
+            predict_get_bottleneck(1_000_000_000, ram),
+            GetClass::AsIsWalk
+        );
+        assert_eq!(
+            predict_probes_bottleneck(1_000_000_000, ram),
+            GetClass::AsIsWalk
+        );
+        let f = scale_forecast(1_000_000_000, ram);
+        assert_eq!(f.p_best, 5, "1B legal probes stay L+1, not n_files");
     }
 
     #[test]
