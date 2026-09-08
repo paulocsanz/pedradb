@@ -1,7 +1,7 @@
 # RFC-0184 — Diagnóstico cirúrgico de um cell de bench
 
 **Status:** in-progress
-**Updated:** 2026-09-07
+**Updated:** 2026-09-08
 **ID:** 0184
 **Parents:** [0176](0176-modelo-matematico-de-escala.md),
 [0183](0183-teto-apply-serial-e-1c.md),
@@ -16,6 +16,9 @@
 - RFC-0176 prevê **get**: \(T=P\cdot(H\tau_{\mathrm{ram}}+(1-H)\tau_{\mathrm{disk}})\cdot(1+\eta)\).
   CLI `pedra scale-model` existe no tree interno; o binário público
   `pedra` só corria `scale` (ladder 1M/25M/100M).
+  P2.35 decompõe o mesmo get em `GetWork × MachineSpec` (bloom/index/block/`pread`
+  × L1/L2/L3/DRAM/SSD). Envelope 0176 fica; o composicional é o lower
+  bound da spec (não llvm-mca, não η).
 - WRITEPHASE (`PEDRA_WRITE_PHASE_STATS=1`) soma prepare/wal/mem/publish/
   flush_check/lock_wait. O harness imprimia µs e o humano adivinhava
   o corte. 0183 teve de fazer a conta à mão: 1c = WAL; apply = flush_check
@@ -174,6 +177,15 @@ a linha quando há phasesΔ. Sem harness novo.
       mc grouping. CLI `--bytes-per-key`; `diagnose write --clients N`
       sem fases. Teste `predict_get_bottleneck_uses_probes_not_wall_clock`.
       — status: `done`
+- [x] **P2.35** Relógio composicional `GetWork × MachineSpec` (spec
+      Intel 4 GHz: L1/L2/L3/DRAM/`pread`). Trabalho discreto exacto
+      (bloom `k`, `⌈log₂ n_blocks⌉`, FNV bytes, YCSB `ycsb/{i:06}`).
+      `--cache happy|capacity|cold`. Envelope 0176 \(P\cdot\tau\)
+      fica; este é o lower bound (sem glue/η/OOO). Testes
+      `composed_does_not_charge_disk_on_bloom_reject`,
+      `happy_is_faster_than_capacity_is_faster_than_cold`,
+      `as_is_walk_is_bloom_bound_when_hot`.
+      — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -222,6 +234,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.32 | p2 | CLI balance JSON shapes | done | shapes array = BALANCE_SHAPES | 2026-09-08 |
 | P2.33 | p2 | predict bottleneck without a get | done | `predict_get_bottleneck`; diagnose get omits measured-ns | 2026-09-07 |
 | P2.34 | p2 | probe-class + write clock + bpe | done | 1M indistinguishable; 10M walk; `predict_write` | 2026-09-07 |
+| P2.35 | p2 | GetWork × MachineSpec | done | `predict_get_composed`; `--cache happy|capacity|cold` | 2026-09-08 |
 
 ## Acceptance Criteria
 
@@ -266,6 +279,8 @@ a linha quando há phasesΔ. Sem harness novo.
   `json_object` `gap_ns`/`timed_ns` (P2.31);
   `pedra diagnose balance` JSON `shapes` (P2.32);
   `predict_get_bottleneck` 1B without a get (P2.33);
+  `predict_get_composed` happy/capacity/cold (P2.35);
+  `composed_does_not_charge_disk_on_bloom_reject`;
   `ycsb_c_all_reads_timed_zero_is_get_path`;
   `rfc0184_diagnosis_json_has_lever`;
   `extract_diagnose_lever_from_bench_object`.

@@ -40,6 +40,8 @@ pub mod key;
 mod leveling;
 pub mod write_admission_kernel;
 
+/// RFC-0184 P2.35: GetWork × MachineSpec (spec lower bound, not \(P\cdot\tau\)).
+pub mod get_cost_kernel;
 pub mod lock;
 pub mod manifest;
 pub mod manifest_kernel;
@@ -99,6 +101,11 @@ pub use db::{
 };
 pub use env::{AdviseKind, Env, EnvFile, EnvSource, SstFileSource, StdEnv};
 pub use error::{CoreError, Result};
+pub use get_cost_kernel::{
+    cache_level, cache_level_as_is, cost_of, get_work, mix_ns, predict_get_composed,
+    ycsb_key_bytes, CacheCase, CacheLevel, ComposedGet, GetCost, GetStage, GetWork, MachineSpec,
+    INTEL_SERVER_4GHZ,
+};
 pub use host::{DetHost, Host, StdHost};
 pub use key::{
     ikey_seq_cmp, pack_sequence_and_type, unpack_sequence_and_type, InternalKey, SequenceNumber,
