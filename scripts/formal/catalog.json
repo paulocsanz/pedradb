@@ -2803,8 +2803,9 @@
       "id": "fold_range",
       "finding": "F169",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-fold/src/fold_kernel.rs",
-      "twin": "crates/pedradb-fold/verus/fold_range.rs",
+      "twin": "crates/pedradb-fold/src/fold_kernel.rs",
       "verus": "scripts/verus_fold_range.sh",
       "callers": [
         "crates/pedradb-fold/src/watch.rs",

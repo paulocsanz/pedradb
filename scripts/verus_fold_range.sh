@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Machine-check the F169 fold range-tombstone coverage kernel.
+# Machine-check F169 fold range-tombstone coverage on the file rustc links
+# (single artifact — not the twin-cópia).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-fold/verus/fold_range.rs"
+SRC="$ROOT/crates/pedradb-fold/src/fold_kernel.rs"
 if [[ -x "${VERUS:-}" ]]; then
   :
 elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then
