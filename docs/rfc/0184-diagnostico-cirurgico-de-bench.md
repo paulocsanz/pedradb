@@ -125,6 +125,9 @@ a linha quando há phasesΔ. Sem harness novo.
 - [x] **P2.16** Arango `doc_crud` / `traversal` WRITEPHASE →
       `diagnose.lever` (traversal = `get_path`; crud mix 70% read =
       `get_path`). — status: `done`
+- [x] **P2.17** Venice `fanout_get` / Rockstore `widecol_rw` WRITEPHASE →
+      `diagnose.lever` (fanout = `get_path`; widecol mix 50% read =
+      `get_path`). — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -155,6 +158,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.14 | p2 | ceph omap diagnose.lever | done | read get_path; write WRITEPHASE | 2026-09-08 |
 | P2.15 | p2 | solana diagnose.lever | done | trailing get_path; shred WRITEPHASE | 2026-09-08 |
 | P2.16 | p2 | arango diagnose.lever | done | traversal get_path; crud mix 70% | 2026-09-08 |
+| P2.17 | p2 | venice diagnose.lever | done | fanout get_path; widecol mix 50% | 2026-09-08 |
 
 ## Acceptance Criteria
 
@@ -182,6 +186,7 @@ a linha quando há phasesΔ. Sem harness novo.
   ceph omap `diagnose.lever` (P2.14);
   solana `diagnose.lever` (P2.15);
   arango `diagnose.lever` (P2.16);
+  venice `diagnose.lever` (P2.17);
   `ycsb_c_all_reads_timed_zero_is_get_path`;
   `rfc0184_diagnosis_json_has_lever`;
   `extract_diagnose_lever_from_bench_object`.

@@ -2216,6 +2216,7 @@ impl YcsbRunner {
             }
         }
         const FANOUT: usize = 32;
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut gets, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -2242,7 +2243,15 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] venice_fanout_get done gets={gets} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
+            eprint_write_diagnose("venice_fanout_get", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
 
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut ops, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -2270,6 +2279,13 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] rockstore_widecol_rw done ops={ops} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 50, cfg_ops as u64);
+            eprint_write_diagnose("rockstore_widecol_rw", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
         self.rng = rng;
         blocks
     }
@@ -4175,9 +4191,21 @@ mod tests {
             "arango_traversal is 2-hop scan:\n{}",
             ara[1]
         );
+        let ven = r.run_venice(&e);
         assert_eq!(
-            block_names(&r.run_venice(&e)),
+            block_names(&ven),
             vec![Some("venice_fanout_get"), Some("rockstore_widecol_rw"),]
+        );
+        for b in &ven {
+            assert!(
+                b.contains("\"diagnose\": {\"lever\":"),
+                "RFC-0184 P2.17 venice JSON needs diagnose.lever:\n{b}"
+            );
+        }
+        assert!(
+            ven[0].contains("\"lever\":\"get_path\""),
+            "venice_fanout_get is 32 point-gets:\n{}",
+            ven[0]
         );
         assert_eq!(
             block_names(&r.run_oxigraph(&e)),
