@@ -1662,8 +1662,9 @@
       "id": "content_length",
       "finding": "F86/F87/F88",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-http/src/cl_kernel.rs",
-      "twin": "crates/pedradb-http/verus/content_length.rs",
+      "twin": "crates/pedradb-http/src/cl_kernel.rs",
       "verus": "scripts/verus_content_length.sh",
       "callers": [
         "crates/pedradb-http/src/lib.rs"
