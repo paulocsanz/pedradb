@@ -189,3 +189,14 @@ theorem occ_member_fate_via_occ_conflict :
   constructor
   · unfold occ_conflict; rfl
   · unfold occ_member_fate; rfl
+
+/-- N-way: three OccReads, one last_seq. Only the lagging member conflicts. -/
+theorem group_validate_n3_one_lagging :
+    group_validate
+        (⟨[{ snap := 10#u64, touched_key_written_after := true },
+           { snap := 10#u64, touched_key_written_after := true },
+           { snap := 7#u64, touched_key_written_after := true }],
+          by native_decide⟩)
+        (10#u64) =
+      ok (⟨[false, false, true], by native_decide⟩ : alloc.vec.Vec Bool) := by
+  exact LawfulBEq.eq_of_beq (by native_decide)

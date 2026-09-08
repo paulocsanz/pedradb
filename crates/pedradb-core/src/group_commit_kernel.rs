@@ -368,6 +368,25 @@ mod tests {
         assert_eq!(group_validate(&reads, 10), vec![false, false]);
         // The serialized mutant aborts the second member.
         assert!(occ_conflict_as_is_serialized(10, 10, 1, true));
+        let n3 = [
+            OccRead {
+                snap: 10,
+                touched_key_written_after: true,
+            },
+            OccRead {
+                snap: 10,
+                touched_key_written_after: true,
+            },
+            OccRead {
+                snap: 7,
+                touched_key_written_after: true,
+            },
+        ];
+        assert_eq!(
+            group_validate(&n3, 10),
+            vec![false, false, true],
+            "N-way: only the lagging member conflicts"
+        );
     }
 
     #[test]
