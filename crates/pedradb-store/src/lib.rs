@@ -7444,7 +7444,7 @@ impl<E: Env> StoreCluster<E> {
     /// Install peer dial map in-process (RFC-0021 P1.3). Does not require SSH.
     pub fn set_peer_addrs(&mut self, peers: impl IntoIterator<Item = (u64, String)>) -> Result<()> {
         let map: HashMap<u64, String> = peers.into_iter().collect();
-        if map.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(map.len() as u64) {
             return Err(StoreError::Msg("empty peer map".into()));
         }
         self.peer_addrs = map;
