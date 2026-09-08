@@ -10466,8 +10466,18 @@ fn write_checkpoint_meta(env: &impl Env, dest: &Path, meta: &CheckpointMeta) -> 
     body.extend_from_slice(&crc.to_le_bytes());
     let mut f = env.create(&path)?;
     f.write_all(&body)?;
-    f.sync_all()?;
-    Ok(())
+    let sync_err = f.sync_all().err();
+    match crate::write_admission_kernel::wal_commit_plan(true, sync_err.is_some()) {
+        crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+            assert!(
+                crate::write_admission_kernel::fence_on_sync_fail(true, true),
+                "required checkpoint sync failed ⇒ not Ok"
+            );
+            return Err(sync_err.expect("AppendSyncFence ⇒ Some").into());
+        }
+        crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+        | crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => Ok(()),
+    }
 }
 
 /// Read [`CHECKPOINT_META_FILE`] written by [`Db::create_checkpoint`].

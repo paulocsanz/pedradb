@@ -843,6 +843,16 @@ mod tests {
             sst.contains("fence_on_sync_fail("),
             "fsync_sst_paths must match fence_on_sync_fail"
         );
+        let ckpt = named_fn_src(include_str!("db.rs"), "write_checkpoint_meta")
+            .expect("write_checkpoint_meta");
+        assert!(
+            ckpt.contains("wal_commit_plan("),
+            "write_checkpoint_meta must match the plan fn"
+        );
+        assert!(
+            ckpt.contains("fence_on_sync_fail("),
+            "write_checkpoint_meta must match fence_on_sync_fail"
+        );
     }
 
     #[test]
