@@ -5317,7 +5317,9 @@ impl<E: Env> StoreCluster<E> {
         let Some(self_id) = self.local_node_id() else {
             return Ok(0);
         };
-        if pedradb_core::write_admission_kernel::batch_is_empty(self.ids.len() as u64) || self.ranges.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(self.ids.len() as u64)
+            || pedradb_core::write_admission_kernel::batch_is_empty(self.ranges.len() as u64)
+        {
             return Ok(0);
         }
         let n_nodes = self.ids.len() as u64;
