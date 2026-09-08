@@ -216,15 +216,18 @@ impl WriteDiagnosis {
         )
     }
 
-    /// Compact JSON object for bench / compare files (RFC-0184 P1.2).
+    /// Compact JSON object for bench / compare files (RFC-0184 P1.2 / P2.31).
     #[must_use]
     pub fn json_object(self) -> String {
         format!(
-            r#"{{"lever":"{}","dominant":"{}","despark":{},"mem_gap_bps":{}}}"#,
+            r#"{{"lever":"{}","dominant":"{}","despark":{},"mem_gap_bps":{},"gap_ns":{},"timed_ns":{},"unattributed_ns":{}}}"#,
             self.lever.token(),
             self.dominant.token(),
             u8::from(self.despark_memtable),
-            self.mem_of_gap_bps
+            self.mem_of_gap_bps,
+            self.gap_ns,
+            self.timed_ns,
+            self.unattributed_ns
         )
     }
 }
@@ -552,6 +555,12 @@ mod tests {
         );
         assert!(j.contains("\"dominant\":\"wal\""), "{j}");
         assert!(j.contains("\"despark\":0"), "{j}");
+        assert!(j.contains("\"gap_ns\":"), "RFC-0184 P2.31 clock: {j}");
+        assert!(j.contains("\"timed_ns\":"), "RFC-0184 P2.31 clock: {j}");
+        assert!(
+            j.contains("\"unattributed_ns\":"),
+            "RFC-0184 P2.31 clock: {j}"
+        );
     }
 
     #[test]
