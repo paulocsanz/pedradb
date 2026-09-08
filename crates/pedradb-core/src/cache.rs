@@ -1112,7 +1112,7 @@ impl CountCache {
         // still inserts one observed earlier will carry `seq <
         // skipped_below` and miss in `get`. Skipping keeps write-only
         // shapes from allocating two Boxes per written key per publish.
-        if g.map.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(g.map.len() as u64) {
             g.skipped_below = g.skipped_below.max(seq);
             return;
         }
