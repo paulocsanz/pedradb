@@ -154,7 +154,9 @@ impl Net for InProcessNet {
             }
         }
         let mut bytes = bytes;
-        if self.corrupt_ppm > 0 && !bytes.is_empty() {
+        if self.corrupt_ppm > 0
+            && !pedradb_core::write_admission_kernel::batch_is_empty(bytes.len() as u64)
+        {
             let r = self.rng.gen_range(1_000_000);
             if r < u64::from(self.corrupt_ppm) {
                 let i = self.rng.gen_range(bytes.len() as u64) as usize;
