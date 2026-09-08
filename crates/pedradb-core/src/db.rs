@@ -5466,7 +5466,7 @@ impl<E: Env> Db<E> {
         }
         self.unsynced_ssts.clear();
         if force {
-            if self.bulk_manifest_debt == 0 {
+            if crate::write_admission_kernel::batch_is_empty(self.bulk_manifest_debt as u64) {
                 return Ok(None);
             }
         } else {
