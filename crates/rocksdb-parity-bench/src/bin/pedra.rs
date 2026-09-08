@@ -18,8 +18,8 @@ use pedradb_core::bench_gap_kernel::{
 };
 use pedradb_core::get_cost_kernel::{predict_get_composed, CacheCase, INTEL_SERVER_4GHZ};
 use pedradb_core::scale_kernel::{
-    predict_write_mix, write_forecast_cut, write_forecast_next, WritePredictIn,
-    SCALE_BYTES_PER_ENTRY,
+    predict_write_mix, write_forecast_cut, write_forecast_growth, write_forecast_next,
+    WritePredictIn, SCALE_BYTES_PER_ENTRY,
 };
 
 fn main() {
@@ -111,20 +111,22 @@ fn diagnose_write_cmd(args: &[String]) -> Result<(), ()> {
             u8::from(sync)
         );
         println!(
-            "expected_group={} distinguishable={} cut={} next={}",
+            "expected_group={} distinguishable={} cut={} next={} growth={}",
             w.expected_group,
             u8::from(w.distinguishable),
             write_forecast_cut(w),
-            write_forecast_next(w)
+            write_forecast_next(w),
+            write_forecast_growth(w)
         );
         println!(
             "T_ns best={} as_is={} lock_hold={}",
             w.best_ns, w.as_is_ns, w.lock_hold_ns
         );
         println!(
-            r#"{{"cut":"{}","next":"{}","distinguishable":{},"clients":{},"expected_group":{},"best":{},"as_is":{},"lock_hold_ns":{},"read_pct":{},"sync":{}}}"#,
+            r#"{{"cut":"{}","next":"{}","growth":"{}","distinguishable":{},"clients":{},"expected_group":{},"best":{},"as_is":{},"lock_hold_ns":{},"read_pct":{},"sync":{}}}"#,
             write_forecast_cut(w),
             write_forecast_next(w),
+            write_forecast_growth(w),
             u8::from(w.distinguishable),
             w.clients,
             w.expected_group,
@@ -205,9 +207,10 @@ fn diagnose_get_cmd(args: &[String]) -> Result<(), ()> {
     println!("pedra diagnose get keys={keys} ram={ram} mode={mode} bpe={bpe}");
     if predict {
         println!(
-            "predict=1 distinguishable={} cut={} (probes; no get ran)",
+            "predict=1 distinguishable={} cut={} growth={} (probes; no get ran)",
             u8::from(b.distinguishable),
-            b.cut_token()
+            b.cut_token(),
+            b.growth_token()
         );
     }
     println!(
@@ -230,7 +233,7 @@ fn diagnose_get_cmd(args: &[String]) -> Result<(), ()> {
     println!("{}", composed.line());
     println!("measured_ns={measured_ns} class={}", class.token());
     println!(
-        r#"{{"class":"{}","measured_ns":{},"best":{},"happy":{},"worst":{},"as_is":{},"distinguishable":{},"cut":"{}","composed_legal":{},"composed_as_is":{},"bloom_ns":{},"index_ns":{},"block_ns":{},"pread_ns":{},"bloom_level":"{}","block_level":"{}","dominant":"{}","cache":"{}"}}"#,
+        r#"{{"class":"{}","measured_ns":{},"best":{},"happy":{},"worst":{},"as_is":{},"distinguishable":{},"cut":"{}","growth":"{}","composed_legal":{},"composed_as_is":{},"bloom_ns":{},"index_ns":{},"block_ns":{},"pread_ns":{},"bloom_level":"{}","block_level":"{}","dominant":"{}","cache":"{}"}}"#,
         class.token(),
         measured_ns,
         f.best_ns,
@@ -239,6 +242,7 @@ fn diagnose_get_cmd(args: &[String]) -> Result<(), ()> {
         as_is.best_ns,
         u8::from(b.distinguishable),
         b.cut_token(),
+        b.growth_token(),
         composed.cost_legal.total_ns,
         composed.cost_as_is.total_ns,
         composed.cost_legal.bloom_ns,

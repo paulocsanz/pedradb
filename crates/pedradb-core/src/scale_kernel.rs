@@ -384,6 +384,37 @@ pub struct WriteForecast {
     pub read_pct: u64,
     /// G1 vs async.
     pub sync: bool,
+    /// How QPS scales with `clients` (or get mix): not always ~n.
+    pub growth: WriteGrowth,
+}
+
+/// Non-linear QPS vs client count / mix (RFC-0184 P2.38).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteGrowth {
+    /// n=1: one barrier (or pwrite) per op. QPS does not grow with n.
+    OneBarrier,
+    /// n=2–8, grouping unpaid: QPS should scale ~n if merge lives.
+    Amortize,
+    /// n=2–8, grouping paid: QPS ≈ 1/τ_cs, **not** ~n (serial lock CS).
+    SerialCs,
+    /// n≥16 Adaptive-off: QPS falls as n grows. Named ceiling.
+    ConvoyCollapse,
+    /// `read_pct ≥ 40`: QPS bound by get tail, not put. p50 ≠ QPS.
+    GetBound,
+}
+
+impl WriteGrowth {
+    /// Stable token for CLI / JSON.
+    #[must_use]
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::OneBarrier => "one_barrier",
+            Self::Amortize => "amortize",
+            Self::SerialCs => "serial_cs",
+            Self::ConvoyCollapse => "convoy_collapse",
+            Self::GetBound => "get_bound",
+        }
+    }
 }
 
 /// Cut token for [`WriteForecast`].
@@ -426,7 +457,24 @@ pub fn predict_write_mix(inp: WritePredictIn) -> WriteForecast {
         lock_hold_ns: SCALE_TAU_LOCK_HOLD_NS,
         read_pct: inp.read_pct,
         sync: inp.sync,
+        growth: write_growth(cut),
     }
+}
+
+fn write_growth(cut: WriteStaticCut) -> WriteGrowth {
+    match cut {
+        WriteStaticCut::GetPath => WriteGrowth::GetBound,
+        WriteStaticCut::LockConvoy => WriteGrowth::ConvoyCollapse,
+        WriteStaticCut::FdCeiling | WriteStaticCut::AsyncWal => WriteGrowth::OneBarrier,
+        WriteStaticCut::Grouping => WriteGrowth::Amortize,
+        WriteStaticCut::LockHold => WriteGrowth::SerialCs,
+    }
+}
+
+/// Growth token for [`WriteForecast`].
+#[must_use]
+pub fn write_forecast_growth(w: WriteForecast) -> &'static str {
+    w.growth.token()
 }
 
 fn static_write_cut(inp: WritePredictIn) -> (WriteStaticCut, WriteStaticCut) {
@@ -694,6 +742,28 @@ mod tests {
         });
         assert_eq!(g1.cut, WriteStaticCut::FdCeiling);
         assert_eq!(g1.best_ns, SCALE_TAU_WAL_ENCODE_NS + SCALE_TAU_FD_NS);
+        // Non-linear QPS vs n / mix (RFC-0184 P2.38).
+        assert_eq!(over.growth, WriteGrowth::Amortize);
+        assert_eq!(over_paid.growth, WriteGrowth::SerialCs);
+        assert_eq!(ycsb_b.growth, WriteGrowth::GetBound);
+        assert_eq!(rockset.growth, WriteGrowth::OneBarrier);
+        assert_eq!(predict_write(50).growth, WriteGrowth::ConvoyCollapse);
+        assert_eq!(g1.growth, WriteGrowth::OneBarrier);
+    }
+
+    #[test]
+    fn predict_write_growth_is_not_linear_in_n() {
+        // Grouping unpaid: QPS ~ n. Paid: QPS stuck at 1/CS.
+        assert_eq!(write_forecast_growth(predict_write(4)), "amortize");
+        let paid = predict_write_mix(WritePredictIn {
+            clients: 4,
+            read_pct: 0,
+            sync: false,
+            avg_group_bps: 38_500,
+        });
+        assert_eq!(write_forecast_growth(paid), "serial_cs");
+        assert_eq!(write_forecast_growth(predict_write(50)), "convoy_collapse");
+        assert_eq!(write_forecast_growth(predict_write(1)), "one_barrier");
     }
 
     #[test]
