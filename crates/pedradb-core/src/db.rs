@@ -5718,7 +5718,7 @@ impl<E: Env> Db<E> {
     /// One number when CFs are not registered; one per family otherwise.
     #[must_use]
     pub fn alloc_file_nums_for_imm(&mut self, imm: &crate::memtable::MemTable) -> Vec<u64> {
-        let n = if self.physical_cfs.is_empty() {
+        let n = if crate::write_admission_kernel::batch_is_empty(self.physical_cfs.len() as u64) {
             1
         } else {
             imm.cf_families().len().max(1)
