@@ -272,7 +272,11 @@ fn header_token(headers: &[(String, String)]) -> Option<&str> {
 fn authorize(headers: &[(String, String)], token: &Option<String>) -> bool {
     match token {
         None => true,
-        Some(t) if t.is_empty() => true,
+        Some(t)
+            if pedradb_core::write_admission_kernel::batch_is_empty(t.len() as u64) =>
+        {
+            true
+        }
         // F152: any extracted Bearer may match; first dummy Bearer used to 401
         // a later valid one under the old first-match extractor.
         Some(t) => authorization_matches(headers, t),
