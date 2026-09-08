@@ -2095,4 +2095,14 @@ mod tests {
         );
         assert!(!membership_identity_before_applied(false));
     }
+
+    #[test]
+    fn recover_must_apply_on_live_commit_ahead_is_not_ok() {
+        assert!(recover_must_apply(1, 2));
+        assert!(
+            !recover_must_apply_as_is(1, 2),
+            "AS-IS dente: skip apply on recover"
+        );
+        assert!(!recover_must_apply(2, 2));
+    }
 }
