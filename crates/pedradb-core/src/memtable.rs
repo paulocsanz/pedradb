@@ -1142,7 +1142,7 @@ impl MemTable {
     pub fn absorb_with_floor(&mut self, mut other: Self, floor: Option<SequenceNumber>) {
         self.spill_tail_with_gc(floor);
         other.spill_tail_with_gc(floor);
-        if self.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.len() as u64) {
             *self = other;
             return;
         }
