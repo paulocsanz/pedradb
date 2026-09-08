@@ -1727,7 +1727,11 @@ impl MemTable {
             {
                 self.tail_idx.get(a)
             }
-            (Some(a), Some(b)) if a == b && a.is_empty() && self.tail_idx.len() == 1 => {
+            (Some(a), Some(b))
+                if a == b
+                    && crate::write_admission_kernel::batch_is_empty(a.len() as u64)
+                    && self.tail_idx.len() == 1 =>
+            {
                 self.tail_idx.values().next()
             }
             _ if self.tail_idx.len() == 1 => self.tail_idx.values().next(),
