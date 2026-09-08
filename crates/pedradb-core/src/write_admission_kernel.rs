@@ -823,6 +823,16 @@ mod tests {
             finish.contains("fence_on_sync_fail("),
             "group_finish must match fence_on_sync_fail"
         );
+        let vlog = named_fn_src(include_str!("db.rs"), "vlog_prepare_wal")
+            .expect("vlog_prepare_wal");
+        assert!(
+            vlog.contains("wal_commit_plan("),
+            "vlog_prepare_wal must match the plan fn"
+        );
+        assert!(
+            vlog.contains("fence_on_sync_fail("),
+            "vlog_prepare_wal must match fence_on_sync_fail"
+        );
     }
 
     #[test]

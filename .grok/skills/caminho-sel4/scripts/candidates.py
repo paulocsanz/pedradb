@@ -288,6 +288,13 @@ GLUE_SCRIPTS = [
         "fence_on_sync_fail",
         "wal_commit_plan",
     ),
+    (
+        "vlog_prepare_wal",
+        "crates/pedradb-core/src/db.rs",
+        ("vlog_sync_pending", "vlog_flush_pending", "fence_on_sync_fail"),
+        "fence_on_sync_fail",
+        "wal_commit_plan",
+    ),
 ]
 
 

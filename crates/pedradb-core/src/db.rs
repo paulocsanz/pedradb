@@ -3630,10 +3630,18 @@ impl<E: Env> Db<E> {
 
     /// Async: `write()` only. G1: `fsync` so a crash after Ok still resolves.
     fn vlog_prepare_wal(&mut self, do_sync: bool) -> Result<()> {
-        if do_sync {
-            self.vlog_sync_pending()
-        } else {
-            self.vlog_flush_pending()
+        match crate::write_admission_kernel::wal_commit_plan(do_sync, false) {
+            crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => {
+                self.vlog_flush_pending()
+            }
+            crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+            | crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                assert!(
+                    !crate::write_admission_kernel::fence_on_sync_fail(do_sync, false),
+                    "planned vlog Sync before I/O ⇒ not Fence yet"
+                );
+                self.vlog_sync_pending()
+            }
         }
     }
 
