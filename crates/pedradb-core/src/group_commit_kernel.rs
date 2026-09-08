@@ -85,6 +85,18 @@ macro_rules! may_publish_group_as_is_body {
     }};
 }
 
+macro_rules! lock_interleavings_admitted_body {
+    () => {
+        false
+    };
+}
+
+macro_rules! lock_interleavings_admitted_as_is_body {
+    () => {
+        true
+    };
+}
+
 /// First-committer-wins predicate (OCC): a transaction that read
 /// snapshot `snap` against current `last_seq` conflicts iff the window
 /// `(snap, last_seq]` is non-empty **and** some key it touched was
@@ -324,15 +336,17 @@ pub fn may_publish_group_as_is(_wal_io_ok: bool) -> bool {
 
 /// RFC-0071 P2.2: lock / OS-scheduler interleavings around the publish
 /// gate are not a ∀π theorem. Always refuse.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn lock_interleavings_admitted() -> bool {
-    false
+    lock_interleavings_admitted_body!()
 }
 
 /// AS-IS: a green publish gate is rounded to ∀ lock schedules.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn lock_interleavings_admitted_as_is() -> bool {
-    true
+    lock_interleavings_admitted_as_is_body!()
 }
 
 /// RFC-0078 / R-fsync-lie: promote pending bytes only when the OS (or Env)
@@ -429,6 +443,20 @@ pub fn may_publish_group_as_is(_wal_io_ok: bool) -> (ok: bool)
         ok == true,
 {
     may_publish_group_as_is_body!(_wal_io_ok)
+}
+
+pub fn lock_interleavings_admitted() -> (ok: bool)
+    ensures
+        ok == false,
+{
+    lock_interleavings_admitted_body!()
+}
+
+pub fn lock_interleavings_admitted_as_is() -> (ok: bool)
+    ensures
+        ok == true,
+{
+    lock_interleavings_admitted_as_is_body!()
 }
 
 #[derive(PartialEq, Eq, Copy, Clone)]

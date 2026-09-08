@@ -293,7 +293,7 @@ the composition files and fails on a missing file or the substring `sorry`.
 | ConcurrentDb `occ_snapshot` | `occ_snap_uses_published` ∧ `may_publish_group` | `occ_snap_published_and_no_publish_on_wal_fail` | `occ_snap_uses_published_as_is_dente` |
 | ConcurrentDb lock-order | Flush `wal_rotate_decision` (`commit_inflight`) | `wal_rotate_commit_inflight_keeps` | `wal_rotate_idle_rotates` |
 | TransactionDB 2PL | `wait_for_deadlock` | `wait_for_deadlock_is_loop` | `wait_for_deadlock_as_is_dente` / `wait_for_deadlock_loop_vs_as_is` |
-| ConcurrentDb scheduler residual | `lock_interleavings_admitted` | `lock_interleavings_not_a_theorem` | `lock_interleavings_as_is_dente` |
+| ConcurrentDb scheduler residual | `lock_interleavings_admitted` (Verus SA on production file) | `lock_interleavings_not_a_theorem` | `lock_interleavings_as_is_dente` |
 
 Cross-lib files: `ComposeIterMerge.lean`, `ComposeMembershipClone.lean`,
 `ComposeScanCrc.lean`, `ComposeC1Membership.lean`, `ComposeConcurrent.lean`.
