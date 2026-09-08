@@ -4249,7 +4249,7 @@ impl<E: Env> Db<E> {
             if let Some(first) = single.take() {
                 cursors.push(first);
                 cursors.push(c);
-            } else if cursors.is_empty() {
+            } else if crate::write_admission_kernel::batch_is_empty(cursors.len() as u64) {
                 single = Some(c);
             } else {
                 cursors.push(c);
