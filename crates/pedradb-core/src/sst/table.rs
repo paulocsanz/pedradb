@@ -2330,7 +2330,7 @@ fn v6_file_crc(head: &[u8]) -> Option<u32> {
 }
 
 fn user_key_bounds(entries: &[(InternalKey, Bytes)]) -> (Option<Bytes>, Option<Bytes>) {
-    if entries.is_empty() {
+    if crate::write_admission_kernel::batch_is_empty(entries.len() as u64) {
         return (None, None);
     }
     let first = entries[0].0.user_key.clone();
