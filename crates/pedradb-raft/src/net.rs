@@ -889,7 +889,9 @@ fn network_broadcast_append(
     // Attach new entries already on leader log if any; broadcast current tail.
     let (term, commit, last_idx, snapshot_log) = {
         let n = node.lock().map_err(|e| RaftError::Network(e.to_string()))?;
-        if !n.is_leader() && !new_entries.is_empty() {
+        if !n.is_leader()
+            && !pedradb_core::write_admission_kernel::batch_is_empty(new_entries.len() as u64)
+        {
             return Err(RaftError::NotLeader {
                 leader_hint: n.leader_id,
             });
