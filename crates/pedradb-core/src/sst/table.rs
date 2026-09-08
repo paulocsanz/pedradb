@@ -996,7 +996,7 @@ impl SstTable {
         {
             let g = self.payload.read();
             let p: &Arc<[u8]> = &g.img;
-            if !p.is_empty() {
+            if !crate::write_admission_kernel::batch_is_empty(p.len() as u64) {
                 SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
                 return decode_block_from_payload(
                     p,
