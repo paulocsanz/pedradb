@@ -217,7 +217,7 @@ Not silent close-kernel **files** (`l28.rs` and `probe_order_kernel.rs` stay enr
 | `leveling_total_bytes` | `total_bytes_as_is` | `leveling.rs` |
 | `key_in_window` | `key_in_window_as_is` | `sst/scan_kernel.rs` |
 | `point_bounds_overlap` | `point_bounds_overlap_as_is` | `sst/scan_kernel.rs` |
-| `from_record_type` | `from_record_type_as_is` | `wal/recover_kernel.rs` |
+| `from_record_type` | `from_record_type_as_is` | `wal/recover_kernel.rs` (pair `wal_recover` is single_artifact: production file is the Verus term) |
 | `compact_split` | `compact_should_split_as_is` | core `compact_kernel.rs` |
 | `compact_split_at` | `compact_should_split_at_as_is` | core `compact_kernel.rs` |
 | `pct_default_depth` | `pct_campaign_default_depth_as_is` | `group_commit_kernel.rs` |

@@ -2,7 +2,8 @@
 # Machine-check WAL recover choices (F4 / F14 / CRC).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-core/verus/wal_recover.rs"
+# RFC-0171 P0.3 / RFC-0174: prove the file rustc links (pair wal_recover).
+SRC="$ROOT/crates/pedradb-core/src/wal/recover_kernel.rs"
 if [[ -x "${VERUS:-}" ]]; then
   :
 elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then

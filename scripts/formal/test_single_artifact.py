@@ -702,6 +702,22 @@ def main() -> int:
         print("FAIL pin_gc twin≠kernel did not fail")
         return 1
     print("ok mutant pin_gc twin≠kernel named")
+    wr_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in wr_mutant["pairs"]:
+        if pair.get("id") == "wal_recover":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-core/verus/wal_recover.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing wal_recover")
+        return 1
+    hits = [m for m in _sa_fails(wr_mutant) if m.startswith("wal_recover:")]
+    if not hits:
+        print("FAIL wal_recover twin≠kernel did not fail")
+        return 1
+    print("ok mutant wal_recover twin≠kernel named")
     # Drive the same rule through check_twins (may also report unrelated
     # dirty-tree twin drift; we only require the SA id).
     try:

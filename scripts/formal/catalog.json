@@ -2412,8 +2412,9 @@
       "id": "wal_recover",
       "finding": "F4/F14",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/wal/recover_kernel.rs",
-      "twin": "crates/pedradb-core/verus/wal_recover.rs",
+      "twin": "crates/pedradb-core/src/wal/recover_kernel.rs",
       "verus": "scripts/verus_wal_recover.sh",
       "callers": [
         "crates/pedradb-core/src/wal/reader.rs"
