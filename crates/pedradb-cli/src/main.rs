@@ -995,7 +995,7 @@ fn blob_gc_cmd(args: &[String]) -> std::process::ExitCode {
     match open_live(&args[0]) {
         Ok(db) => match db.blob_gc_candidates() {
             Ok(cands) => {
-                if cands.is_empty() {
+                if pedradb_core::write_admission_kernel::batch_is_empty(cands.len() as u64) {
                     println!("no blob files");
                 }
                 for c in cands {
