@@ -1171,7 +1171,10 @@ fn intern_put_value(v: &[u8]) -> Bytes {
     }
     LAST.with(|slot| {
         let mut g = slot.borrow_mut();
-        if g.len() == v.len() && !g.is_empty() && g.as_ref() == v {
+        if g.len() == v.len()
+            && !pedradb_core::write_admission_kernel::batch_is_empty(g.len() as u64)
+            && g.as_ref() == v
+        {
             g.clone()
         } else {
             let b = Bytes::copy_from_slice(v);
