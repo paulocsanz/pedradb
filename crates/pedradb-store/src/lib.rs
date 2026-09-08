@@ -969,7 +969,7 @@ pub fn validate_tx_pairs(pairs: &[(Vec<u8>, Vec<u8>)]) -> Result<()> {
             });
         }
     }
-    if pairs.is_empty() {
+    if pedradb_core::write_admission_kernel::batch_is_empty(pairs.len() as u64) {
         return Err(StoreError::Msg("empty transaction".into()));
     }
     Ok(())
