@@ -7,7 +7,7 @@
 //!            rocksdb (needs --features real; real RocksDB via the rocksdb crate)
 //!   suites: ROCKS_PARITY_SUITE (default "ycsb,deps"; csv; "all" = every
 //!            suite). Opt-in: qs, kvrocks, myrocks, surreal, nebula,
-//!            streaming, ceph, solana, arango, venice, oxigraph, rocksapi (RFC-0043).
+//!            streaming, ceph, solana, arango, venice, rockset, oxigraph, rocksapi (RFC-0043).
 //!
 //! Env: ROCKS_YCSB_RECORDS/OPS/PAYLOAD/DIST (uniform|zipfian), ROCKS_DEPS_BATCH
 //! (ops per apply commit), ROCKS_PARITY_SYNC (rocksdb engine only; **0 = default
@@ -68,6 +68,9 @@ fn main() {
         }
         if suites_enabled("venice") {
             v.push("venice");
+        }
+        if suites_enabled("rockset") {
+            v.push("rockset");
         }
         if suites_enabled("oxigraph") {
             v.push("oxigraph");
@@ -252,6 +255,9 @@ fn run_and_report<E: Engine + Sync>(e: &E, cfg: &Cfg, suites: &str, out: &Path) 
     if suites_enabled("venice") {
         benches.extend(r.run_venice(e));
     }
+    if suites_enabled("rockset") {
+        benches.extend(r.run_rockset(e));
+    }
     if suites_enabled("oxigraph") {
         benches.extend(r.run_oxigraph(e));
     }
@@ -318,6 +324,9 @@ fn run_and_report_occ<E: rocksdb_parity_bench::OccEngine + Sync>(
     }
     if suites_enabled("venice") {
         benches.extend(r.run_venice(e));
+    }
+    if suites_enabled("rockset") {
+        benches.extend(r.run_rockset(e));
     }
     if suites_enabled("oxigraph") {
         benches.extend(r.run_oxigraph(e));
