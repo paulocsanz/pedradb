@@ -109,6 +109,25 @@ pub fn predict_get_ns(
     u64::try_from(taxed).unwrap_or(u64::MAX)
 }
 
+/// Worst-path clock: L0-trigger probes, all cold, η = [`SCALE_WORST_NOISY_BPS`].
+/// `scale_forecast` matches this for `worst_ns`.
+#[must_use]
+pub fn worst_get_ns(levels: u64, l0_max: u64) -> u64 {
+    predict_get_ns(
+        probes_worst(levels, l0_max),
+        SCALE_TAU_RAM_NS,
+        SCALE_TAU_DISK_NS,
+        0,
+        SCALE_WORST_NOISY_BPS,
+    )
+}
+
+/// AS-IS: walk every live file as a cold disk probe (η ignored).
+#[must_use]
+pub fn worst_get_ns_as_is(n_files: u64, _levels: u64, _l0_max: u64) -> u64 {
+    predict_get_ns_as_is(n_files, SCALE_TAU_RAM_NS, SCALE_TAU_DISK_NS, 0, 0)
+}
+
 /// AS-IS: every live file is a cold disk probe; η is ignored.
 #[must_use]
 pub fn predict_get_ns_as_is(
@@ -192,13 +211,7 @@ pub fn scale_forecast(keys: u64, ram_bytes: u64) -> ScaleForecast {
         happy_hot,
         SCALE_HAPPY_NOISY_BPS,
     );
-    let worst_ns = predict_get_ns(
-        p_worst,
-        SCALE_TAU_RAM_NS,
-        SCALE_TAU_DISK_NS,
-        0,
-        SCALE_WORST_NOISY_BPS,
-    );
+    let worst_ns = worst_get_ns(levels, SCALE_L0_WORST);
     ScaleForecast {
         keys,
         ram_bytes,
@@ -297,6 +310,27 @@ mod tests {
         assert_eq!(l10, 5);
         assert_eq!(point_get_probes(u64::from(l1), 1), 5);
         assert_eq!(point_get_probes(u64::from(l10), 1), 6);
+    }
+
+    #[test]
+    fn worst_get_ns_on_l0_trigger_is_not_ok() {
+        assert_eq!(
+            worst_get_ns(4, SCALE_L0_WORST),
+            predict_get_ns(8, SCALE_TAU_RAM_NS, SCALE_TAU_DISK_NS, 0, SCALE_WORST_NOISY_BPS)
+        );
+        assert!(
+            worst_get_ns_as_is(913, 4, SCALE_L0_WORST) > worst_get_ns(4, SCALE_L0_WORST) * 50,
+            "as-is walk is >50× the L0-trigger clock"
+        );
+        let src = include_str!("scale_kernel.rs");
+        let forecast = src
+            .split("pub fn scale_forecast(")
+            .nth(1)
+            .expect("scale_forecast");
+        assert!(
+            forecast.contains("worst_get_ns("),
+            "scale_forecast must match worst_get_ns"
+        );
     }
 
     #[test]

@@ -39,3 +39,28 @@ theorem probes_worst_l0_trigger_via_point_get :
   · unfold point_get_probes
     have h : core.num.U64.saturating_add 4#u64 4#u64 = 8#u64 := by native_decide
     simp [h]
+
+/-- Worst-path clock on that N: `scale_forecast` matches `worst_get_ns`.
+    Unfolds `worst_get_ns` **and** `probes_worst`. -/
+theorem worst_get_ns_l0_trigger_via_probes_worst :
+    worst_get_ns 4#u64 4#u64 = (
+      do
+        let i ← probes_worst 4#u64 4#u64
+        predict_get_ns i SCALE_TAU_RAM_NS SCALE_TAU_DISK_NS 0#u64
+          SCALE_WORST_NOISY_BPS
+    ) ∧ probes_worst 4#u64 4#u64 = ok (8#u64) := by
+  constructor
+  · unfold worst_get_ns
+    rfl
+  · unfold probes_worst
+    unfold point_get_probes
+    have h : core.num.U64.saturating_add 4#u64 4#u64 = 8#u64 := by native_decide
+    simp [h]
+
+/-- AS-IS dente: walk every live file as a cold disk probe. -/
+theorem worst_get_ns_as_is_dente :
+    worst_get_ns_as_is 913#u64 4#u64 4#u64 = (
+      predict_get_ns_as_is 913#u64 SCALE_TAU_RAM_NS SCALE_TAU_DISK_NS 0#u64 0#u64
+    ) := by
+  unfold worst_get_ns_as_is
+  rfl
