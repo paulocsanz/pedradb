@@ -9217,7 +9217,7 @@ impl<E: Env> Db<E> {
     /// P1.1 p11j; isolated raftlog 0.935 was that extra hop + vec).
     /// Multi-writer leaders stay on [`Self::group_start`].
     pub(crate) fn lone_sync_commit(&mut self, ops: Vec<BatchOp>) -> Result<SequenceNumber> {
-        if ops.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(ops.len() as u64) {
             return Ok(self.last_sequence());
         }
         self.ensure_disk_pressure_admitted()?;

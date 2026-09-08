@@ -724,6 +724,12 @@ mod tests {
             prep.contains("batch_is_empty("),
             "group_prepare must match batch_is_empty"
         );
+        let lone = named_fn_src(include_str!("db.rs"), "lone_sync_commit")
+            .expect("lone_sync_commit");
+        assert!(
+            lone.contains("batch_is_empty("),
+            "lone_sync_commit must match batch_is_empty"
+        );
     }
 
     #[test]
