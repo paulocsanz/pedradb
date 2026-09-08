@@ -8476,7 +8476,7 @@ impl<E: Env> StoreCluster<E> {
         };
         for (k, val, pre) in items {
             let hist = self.key_history.entry(k.clone()).or_default();
-            if hist.is_empty() {
+            if pedradb_core::write_admission_kernel::batch_is_empty(hist.len() as u64) {
                 hist.push((0, pre.clone()));
             }
             let live = if val.is_empty() {
