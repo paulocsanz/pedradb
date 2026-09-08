@@ -6752,7 +6752,7 @@ impl<E: Env> Db<E> {
     /// # Errors
     /// I/O while writing the compacted SST or deleting old files.
     pub fn compact_with_ssts_only(&mut self, options: CompactOptions) -> Result<()> {
-        if self.ssts.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.ssts.len() as u64) {
             return Ok(());
         }
         // Pick lowest level that has files and can promote (N → N+1);
