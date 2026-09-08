@@ -5052,7 +5052,8 @@ impl<E: Env> Db<E> {
             })
             .collect();
         let ssts = &self.ssts;
-        let physical_empty = self.physical_cfs.is_empty();
+        let physical_empty =
+            crate::write_admission_kernel::batch_is_empty(self.physical_cfs.len() as u64);
         // Field-direct memtable chain (not `scan_mem_layers`, whose `&self`
         // receiver would borrow `bulk_latch` too): disjoint-field borrows
         // let the latch mutate next to these.
