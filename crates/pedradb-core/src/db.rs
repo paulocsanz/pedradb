@@ -2708,7 +2708,7 @@ impl<E: Env> Db<E> {
     }
 
     fn family_of_user_key<'a>(&'a self, key: &[u8]) -> &'a str {
-        if self.physical_cfs.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.physical_cfs.len() as u64) {
             return "default";
         }
         let p = crate::memtable::cf_prefix(key);
