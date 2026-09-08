@@ -625,7 +625,7 @@ pub fn restore_history_from_remote<E: Env>(
 ) -> Result<HistoryRestoreReport> {
     let tier = pedradb_core::history::RemoteTier::new(remote_root.as_ref());
     let segs = tier.latest_segments(env)?;
-    if segs.is_empty() {
+    if pedradb_core::write_admission_kernel::batch_is_empty(segs.len() as u64) {
         return Err(OpsError::Msg(
             "remote history tier has no manifest — nothing to restore".into(),
         ));
