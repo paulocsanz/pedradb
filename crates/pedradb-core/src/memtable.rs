@@ -1720,7 +1720,13 @@ impl MemTable {
         // admits `d/m/\0…` keys that live in the "d/m/" shard (F220).
         // RFC-0154: kvrocks/YCSB default-raw is that one empty shard.
         let shard = match (bound_cf_prefix(start), bound_cf_prefix(end)) {
-            (Some(a), Some(b)) if a == b && !a.is_empty() && a.len() < 32 => self.tail_idx.get(a),
+            (Some(a), Some(b))
+                if a == b
+                    && !crate::write_admission_kernel::batch_is_empty(a.len() as u64)
+                    && a.len() < 32 =>
+            {
+                self.tail_idx.get(a)
+            }
             (Some(a), Some(b)) if a == b && a.is_empty() && self.tail_idx.len() == 1 => {
                 self.tail_idx.values().next()
             }
