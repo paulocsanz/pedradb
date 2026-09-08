@@ -49,7 +49,7 @@ struct LiveQueued {
 fn pump_queued<E: Env>(c: &mut StoreCluster<E>, rounds: usize) {
     for _ in 0..rounds {
         let batch = c.drain_outbound();
-        if batch.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(batch.len() as u64) {
             break;
         }
         for (from, to, bytes) in batch {
