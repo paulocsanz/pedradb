@@ -15,7 +15,7 @@ Refresh this file when a cell moves class. One row per cell.
 | apply_mc4 G1 quiet | **S** | Linux 2.79× | group commit (fd/grupo) | RFC-0041 head3 |
 | get 50M/100M clock | **S** | calibrated | class best/happy vs 0176; scale `get_hit` `classify_get` (0184 P2.6) | RFC-0176 / 0184 |
 | hydrate 25M/100M | **S** | Linux >1× | — | RFC-0162 |
-| **overwrite_mc4 25M** | **U** | Linux 0.557× 3/3; Darwin 0180 ~1.00 mediana (named 0.816); **caixa pós-0180 none** | grouping **paid** (timed avg_group≈4). Unpaid: stall/qps (`STALL lead_write`; P0.57 lone async WAL off lock). | RFC-0178 P1.3 / 0180 P0.57 / 0184 P1.1 |
+| **overwrite_mc4 25M** | **U** | Linux 0.557× 3/3; Darwin 0180 ~1.00 mediana (named 0.816); **caixa pós-0180 none** | grouping **paid** (avg_group=4). Unpaid: stall/qps (`STALL lone_wal` first pwrite ~1.17s DIAG). | RFC-0178 P1.3 / 0180 P0.58 / 0184 P1.1 |
 | ycsb_f_mc4 3/3 intra | **W** | Linux mediana 1.47; run2 0.766 | `get_path` (`read_pct=50`; mc WRITEPHASE) | RFC-0178 P1.4 / 0184 |
 | prefix 100M 4 GiB | **W** | caixa 0.70× | bounded-cache scan; scale `classify_probes` vs \(P_{\mathrm{best}}\) (0184 P2.5) | RFC-0178 P1.2 / 0184 |
 | probe_miss | **W** | 0.27× | miss path; scale `classify_probes` vs \(P_{\mathrm{best}}\) (0184 P2.4) | RFC-0178 P1.1 / 0167 / 0184 |

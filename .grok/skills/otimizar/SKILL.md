@@ -12,11 +12,11 @@ description: >
 
 ## Grind pressure (one block, overwritten each fire)
 
-- Last fire: shallow (P0.49–P0.56 grouping paid avg_group≈4; qps/max not the artefact)
-- Why: skill counted SHA+named-test as land; grouping knobs after grouping paid
-- This fire MUST land: lone 1c async WAL off lock + group_profile number vs max 1.3s / qps 17k
-- Forbidden this fire: grouping_cap / wait_peer / last_peak; JSON; Darwin as cartaz; SHA without `number:`
-- Deeper: `submit_one` `commit_async_one`; test `rfc0180_lone_async_wal_off_lock_recovers`
+- Last fire: worked (`ef0e937` P0.57 qps 7403→10270; STALL lead_write gone; remaining group_path 1.49s)
+- Why: 64 MiB WAL F_PREALLOCATE on first commit (~1.5s Darwin)
+- This fire MUST land: prealloc at Wal create + group_profile number beating max 1.49s / qps 10k
+- Forbidden this fire: grouping knobs; JSON; Darwin as cartaz; SHA without `number:`
+- Deeper: `Wal::create_on` `reserve_space`; test `rfc0180_wal_prealloc_at_create`
 
 Peer: Rocks default `ROCKS_PARITY_SYNC=0`. G1 1c write-per-op ≠ win.
 Fjall = absoluto. Darwin DIAG ≠ cartaz. Cartaz tables live in RFCs;

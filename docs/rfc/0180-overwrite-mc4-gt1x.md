@@ -205,6 +205,11 @@ medida no mesmo harness isolado.
       qps 7403→10270, max 2.07s→1.49s, `STALL lead_write` gone;
       remaining `STALL group_path` ~1.49s. G1 1c stays on-lock through
       fd. Test `rfc0180_lone_async_wal_off_lock_recovers`. status: `done`
+- [x] **P0.58** First 64 MiB WAL `F_PREALLOCATE` at `Wal::create_on` /
+      `append_on`, not the first commit. DIAG `group_profile` 4×4000:
+      qps 10270→12996, max 1.49s→1.17s; remaining `STALL lone_wal`
+      ~1.17s (first `pwrite`, not the reservation). Test
+      `rfc0180_wal_prealloc_at_create`. status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
 
@@ -277,6 +282,7 @@ medida no mesmo harness isolado.
 | P0.55 | p0 | bound wait_in_flight 4096 spins | done | unbounded was 970ms max DIAG | 2026-09-08 |
 | P0.56 | p0 | group_profile 256MiB memtable | done | stall remains ~1s; not 4MiB flush | 2026-09-08 |
 | P0.57 | p0 | lone 1c async WAL off Db write lock | done | STALL lead_write ~2s; G1 1c on-lock stays | 2026-09-08 |
+| P0.58 | p0 | WAL 64MiB prealloc at create not commit | done | STALL group_path was F_PREALLOCATE | 2026-09-08 |
 | P1.1 | p1 | 3-run caixa | todo | — | 2026-09-07 |
 | P2.1 | p2 | 3/3 quiet ≥1× | todo | 0182 P1.1 | 2026-09-07 |
 | P2.2 | p2 | leftover hang | done | 0181 P0.3 steal | 2026-09-07 |
