@@ -405,7 +405,9 @@ pub(crate) enum BulkSpan {
     Unknown,
 }
 
-/// Compat CF encoding is `cf\\0user`. Kernel keys without NUL share one shard.
+/// Compat CF encoding is `cf\\0user`. Kernel keys without NUL share one
+/// **family** (bytes / flush / `"default"`). Tail **index** shards may
+/// split further — see [`idx_prefix`].
 pub(crate) fn cf_prefix(key: &[u8]) -> &[u8] {
     match key.iter().position(|&b| b == 0) {
         Some(i) => &key[..i],
@@ -413,10 +415,36 @@ pub(crate) fn cf_prefix(key: &[u8]) -> &[u8] {
     }
 }
 
+/// Tail-index shard. NUL CFs stay `cf` (bytes before NUL). Raw keys with
+/// **exactly one** `/` (`c/000001`, `ycsb/000001`, `u/000`) shard on that
+/// component so overwrite inserts do not share a BTree with the YCSB seed.
+/// Multi-slash keys (`d/m/ha/leader`) stay empty so F220 windows
+/// `["d/m/", "d/m0")` cannot pin a single slash shard (bounds disagree).
+pub(crate) fn idx_prefix(key: &[u8]) -> &[u8] {
+    if let Some(i) = key.iter().position(|&b| b == 0) {
+        return &key[..i];
+    }
+    let mut first = None;
+    for (i, &b) in key.iter().enumerate() {
+        if b == b'/' {
+            if first.is_some() {
+                return &[];
+            }
+            first = Some(i);
+        }
+    }
+    match first {
+        Some(i) => &key[..=i],
+        None => &[],
+    }
+}
+
 pub use crate::cf_kernel::{cf_family_of, infer_sst_cf, key_in_cf_family};
 
 fn family_from_prefix(prefix: &[u8]) -> String {
-    if prefix.is_empty() {
+    // Slash-ending idx shards (`ycsb/`, `c/`) are raw default keys, not a CF.
+    // NUL prefix `d/m/` (F220) also ends with `/` and is default-raw.
+    if prefix.is_empty() || prefix.ends_with(b"/") {
         "default".into()
     } else {
         String::from_utf8_lossy(prefix).into_owned()
@@ -587,7 +615,7 @@ fn packed_bound(b: Bound<&[u8]>) -> Bound<TailIdxKey> {
 
 fn bound_cf_prefix(b: Bound<&[u8]>) -> Option<&[u8]> {
     match b {
-        Bound::Included(k) | Bound::Excluded(k) => Some(cf_prefix(k)),
+        Bound::Included(k) | Bound::Excluded(k) => Some(idx_prefix(k)),
         Bound::Unbounded => None,
     }
 }
@@ -973,7 +1001,7 @@ impl MemTable {
 
     /// Push onto the shared tail and index by CF prefix. Returns the global index.
     fn tail_append(&mut self, key: InternalKey, value: Bytes) -> usize {
-        let pfx = cf_prefix(key.user_key.as_ref());
+        let pfx = idx_prefix(key.user_key.as_ref());
         let point = point_cf(pfx);
         let cap = point_reserve(pfx);
         let s = if let Some(s) = self.tail_idx.get_mut(pfx) {
@@ -1011,7 +1039,7 @@ impl MemTable {
     }
 
     fn tail_idx_insert(&mut self, key: &[u8], i: usize) {
-        self.tail_idx_insert_at(key, cf_prefix(key), i);
+        self.tail_idx_insert_at(key, idx_prefix(key), i);
     }
 
     fn tail_idx_insert_at(&mut self, key: &[u8], pfx: &[u8], i: usize) {
@@ -1099,7 +1127,7 @@ impl MemTable {
     }
 
     fn tail_idx_get(&self, user_key: &[u8]) -> Option<usize> {
-        let shard = self.tail_idx.get(cf_prefix(user_key))?;
+        let shard = self.tail_idx.get(idx_prefix(user_key))?;
         Self::shard_lookup(shard, user_key)
     }
 
@@ -1664,7 +1692,7 @@ impl MemTable {
     }
 
     fn tail_best(&self, user_key: &[u8], snapshot: SequenceNumber) -> Option<&Version> {
-        let pfx = cf_prefix(user_key);
+        let pfx = idx_prefix(user_key);
         let shard = self.tail_idx.get(pfx)?;
         let i = Self::shard_lookup(shard, user_key)?;
         let newest = self.tail.get(i)?;
@@ -1846,13 +1874,11 @@ impl MemTable {
         if !self.has_tail() || snapshot < self.tail_max_seq {
             return self.iter_internal_iter(start, end);
         }
-        // Single CF shard: a non-empty `cf\0` prefix on BOTH bounds pins the
-        // range inside that shard's key space (shard keys are exactly
-        // `cf\0…`; any key of another shard sorts outside `cf\0…`).
-        // Empty-prefix bounds (kernel keys without NUL) are only safe over a
-        // one-shard index — a range like `["d/m/", "d/m0")` has no NUL, yet
-        // admits `d/m/\0…` keys that live in the "d/m/" shard (F220).
-        // RFC-0154: kvrocks/YCSB default-raw is that one empty shard.
+        // Single CF / one-slash idx shard: a non-empty prefix on BOTH bounds
+        // pins the range inside that shard (`cf\0…`, or raw `ycsb/` / `c/`).
+        // Multi-slash F220 windows `["d/m/", "d/m0")` disagree (empty vs
+        // `d/`) and fall through to the merge. Empty-prefix bounds are only
+        // safe over a one-shard index.
         let shard = match (bound_cf_prefix(start), bound_cf_prefix(end)) {
             (Some(a), Some(b)) if a == b && !a.is_empty() && a.len() < 32 => self.tail_idx.get(a),
             (Some(a), Some(b)) if a == b && a.is_empty() && self.tail_idx.len() == 1 => {
@@ -2923,6 +2949,96 @@ mod tests {
         assert_eq!(mt.len(), 1);
         assert_eq!(mt.get(b"k", 2), Lookup::Found(Bytes::from_static(b"new")));
         assert_eq!(mt.get(b"k", 1), Lookup::NotFound);
+    }
+
+    /// RFC-0180 P0.66: one-slash raw keys (`c/`, `ycsb/`) do not share a
+    /// tail BTree. Multi-slash F220 keys stay empty. Not a HashMap.
+    #[test]
+    fn rfc0180_idx_prefix_one_slash_splits_c_and_ycsb() {
+        assert_eq!(idx_prefix(b"c/000001"), b"c/");
+        assert_eq!(idx_prefix(b"ycsb/000001"), b"ycsb/");
+        assert_eq!(idx_prefix(b"u/000"), b"u/");
+        assert_eq!(idx_prefix(b"k0001"), b"");
+        assert_eq!(idx_prefix(b"d/m/ha/leader"), b"", "multi-slash stays empty");
+        assert_eq!(idx_prefix(b"d/m/\x00\x00/ha"), b"d/m/", "NUL still wins");
+        assert_eq!(idx_prefix(b"lock\0u/01"), b"lock");
+        assert_eq!(cf_prefix(b"c/000001"), b"", "family stays default-raw");
+
+        let mut mt = MemTable::new();
+        let val = Bytes::from_static(b"v");
+        let mut items = Vec::new();
+        for i in 0..32u32 {
+            let c = format!("c/{i:06}").into_bytes();
+            let y = format!("ycsb/{i:06}").into_bytes();
+            items.push((
+                InternalKey::new(Bytes::from(c), u64::from(i) + 1, ValueType::Value),
+                val.clone(),
+            ));
+            items.push((
+                InternalKey::new(Bytes::from(y), 100 + u64::from(i), ValueType::Value),
+                val.clone(),
+            ));
+        }
+        mt.insert_many(items);
+        assert!(
+            mt.tail_idx.get(&b"c/"[..]).is_some() && mt.tail_idx.get(&b"ycsb/"[..]).is_some(),
+            "c/ and ycsb/ must be distinct shards"
+        );
+        assert!(
+            mt.tail_idx.get(&b""[..]).is_none(),
+            "one-slash keys must not land in the empty shard"
+        );
+        assert_eq!(mt.tail_idx.get(&b"c/"[..]).unwrap().short.len(), 32);
+        assert_eq!(mt.tail_idx.get(&b"ycsb/"[..]).unwrap().short.len(), 32);
+        assert_eq!(
+            mt.get(b"c/000001", 200),
+            Lookup::Found(Bytes::from_static(b"v"))
+        );
+        assert_eq!(
+            mt.get(b"ycsb/000001", 200),
+            Lookup::Found(Bytes::from_static(b"v"))
+        );
+        let n = mt
+            .count_latest_in_range(
+                Bound::Included(b"ycsb/000010".as_slice()),
+                Bound::Excluded(b"ycsb/000035".as_slice()),
+                25,
+                200,
+            )
+            .expect("ycsb/ range must stay a live idx count, not O(n) merge");
+        assert_eq!(n, 22, "ycsb/000010..000031 is 22 keys (only 32 seeded)");
+        let families = mt.cf_families();
+        assert_eq!(families, vec!["default".to_string()]);
+    }
+
+    #[test]
+    fn rfc0180_idx_prefix_f220_bounds_disagree() {
+        assert_eq!(idx_prefix(b"d/m/"), b"", "two slashes");
+        assert_eq!(idx_prefix(b"d/m0"), b"d/");
+        let mut mt = MemTable::new();
+        mt.put(b"d/m/ha/leader".as_slice(), 1, b"plain".as_slice());
+        mt.put(
+            b"d/m/\x00\x00\x00\x0a/ha/leader".as_slice(),
+            2,
+            b"nul".as_slice(),
+        );
+        mt.put(b"c/000001".as_slice(), 3, b"c".as_slice());
+        let got: Vec<&[u8]> = mt
+            .iter_internal_range(Bound::Included(b"d/m/"), Bound::Excluded(b"d/m0"))
+            .map(|(k, _)| k.user_key.as_ref())
+            .collect();
+        assert!(
+            got.iter().any(|k| *k == b"d/m/ha/leader".as_ref()),
+            "plain multi-slash in window: {got:?}"
+        );
+        assert!(
+            got.iter().any(|k| k.starts_with(b"d/m/\x00")),
+            "NUL F220 key in window: {got:?}"
+        );
+        assert!(
+            !got.iter().any(|k| *k == b"c/000001".as_ref()),
+            "c/ must not leak into d/m window: {got:?}"
+        );
     }
 
     #[test]
