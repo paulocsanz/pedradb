@@ -307,7 +307,7 @@ impl<E: Env> BackupEngine<E> {
                 max_seq = max_seq.max(ms);
             }
         }
-        if to_ship.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(to_ship.len() as u64) {
             return Ok(WalShipMeta {
                 segment: None,
                 records: 0,
