@@ -761,6 +761,12 @@ mod tests {
             ns.contains("batch_is_empty("),
             "GroupInFlight::needs_sync must match batch_is_empty"
         );
+        let occ = named_fn_src(include_str!("concurrent.rs"), "apply_batch_occ_with")
+            .expect("apply_batch_occ_with");
+        assert!(
+            occ.contains("batch_is_empty("),
+            "apply_batch_occ_with must match batch_is_empty"
+        );
     }
 
     #[test]

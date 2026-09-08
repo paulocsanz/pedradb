@@ -3402,7 +3402,7 @@ impl<E: Env> ConcurrentDb<E> {
         ops: Vec<BatchOp>,
         opts: WriteOptions,
     ) -> Result<SequenceNumber> {
-        if ops.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(ops.len() as u64) {
             return Ok(self.last_sequence());
         }
         let do_sync = self.resolve_sync(opts);
