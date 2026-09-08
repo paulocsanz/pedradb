@@ -2303,6 +2303,7 @@ impl YcsbRunner {
         for i in 0..records {
             assert!(e.put(&tkey(i, 0, i), &yval), "oxigraph seed {i}");
         }
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut gets, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -2322,7 +2323,15 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] oxigraph_spo_lookup done gets={gets} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
+            eprint_write_diagnose("oxigraph_spo_lookup", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
 
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut puts, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -2352,6 +2361,13 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] oxigraph_triple_put done puts={puts} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
+            eprint_write_diagnose("oxigraph_triple_put", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
         self.rng = rng;
         blocks
     }
@@ -4207,9 +4223,21 @@ mod tests {
             "venice_fanout_get is 32 point-gets:\n{}",
             ven[0]
         );
+        let oxi = r.run_oxigraph(&e);
         assert_eq!(
-            block_names(&r.run_oxigraph(&e)),
+            block_names(&oxi),
             vec![Some("oxigraph_spo_lookup"), Some("oxigraph_triple_put"),]
+        );
+        for b in &oxi {
+            assert!(
+                b.contains("\"diagnose\": {\"lever\":"),
+                "RFC-0184 P2.18 oxigraph JSON needs diagnose.lever:\n{b}"
+            );
+        }
+        assert!(
+            oxi[0].contains("\"lever\":\"get_path\""),
+            "oxigraph_spo_lookup is point get:\n{}",
+            oxi[0]
         );
         assert!(ekey(3, 7).starts_with(&eprefix(3)));
         assert!(tkey(1, 0, 1).starts_with(b"t/"));

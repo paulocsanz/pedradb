@@ -318,7 +318,7 @@ With `PEDRA_WRITE_PHASE_STATS=1` the parity harness prints
 `diagnose <shape> dominant=… lever=…` after phasesΔ and writes
 `benches[].diagnose.lever` into the bench JSON (overwrite, apply,
 ycsb 1c/mc, raftlog 1c/mc, kvrocks 1c + mc50, qs, myrocks + linkbench,
-surreal, nebula, streaming, ceph, solana, arango, venice). `rocks-parity-compare` copies it onto each
+surreal, nebula, streaming, ceph, solana, arango, venice, oxigraph). `rocks-parity-compare` copies it onto each
 ratio row (`diagnose: {"lever":…}` or `null`).
 
 Multi-shape **balance** (RFC-0182 / `/otimizar`): never ship an engine
