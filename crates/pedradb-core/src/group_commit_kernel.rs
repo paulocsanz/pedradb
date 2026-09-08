@@ -1151,6 +1151,47 @@ mod tests {
     }
 
     #[test]
+    fn occ_batch_plan_n3_one_lagging_is_not_ok() {
+        let too_old = [false, false, false];
+        let reads = [
+            OccRead {
+                snap: 10,
+                touched_key_written_after: true,
+            },
+            OccRead {
+                snap: 10,
+                touched_key_written_after: true,
+            },
+            OccRead {
+                snap: 7,
+                touched_key_written_after: true,
+            },
+        ];
+        assert_eq!(
+            occ_batch_plan(&too_old, &reads, 10),
+            vec![
+                OccMemberFate::Ok,
+                OccMemberFate::Ok,
+                OccMemberFate::Conflict
+            ],
+            "N-way: only the lagging member conflicts"
+        );
+        assert_eq!(
+            occ_batch_plan_as_is(&too_old, &reads, 10),
+            vec![OccMemberFate::Ok, OccMemberFate::Ok, OccMemberFate::Ok],
+            "AS-IS dente: lagging member still Ok"
+        );
+        let validate = include_str!("concurrent.rs")
+            .split("fn validate_occ_batch")
+            .nth(1)
+            .expect("validate_occ_batch");
+        assert!(
+            validate.contains("occ_batch_plan("),
+            "validate_occ_batch must match occ_batch_plan"
+        );
+    }
+
+    #[test]
     fn occ_batch_plan_on_live_lagging_is_not_ok() {
         let too_old = [false, true];
         let reads = [

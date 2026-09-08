@@ -344,6 +344,13 @@ CONCURRENCY = [
         "group_validate",
         "occ_conflict",
     ),
+    (
+        "rwlock reader token",
+        "crates/pedradb-core/src/concurrent.rs",
+        "occ_snapshot",
+        "rwlock_client_may_read",
+        "rwlock_client_may_mutate",
+    ),
 ]
 
 

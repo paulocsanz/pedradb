@@ -201,7 +201,9 @@ theorem occ_member_fate_via_occ_conflict :
   · unfold occ_conflict; rfl
   · unfold occ_member_fate; rfl
 
-/-- N-way: three OccReads, one last_seq. Only the lagging member conflicts. -/
+/-- N-way: three OccReads, one last_seq. Only the lagging member conflicts.
+    Unfolds `group_validate` (the loop rustc links) **and** `occ_conflict`.
+    `native_decide` of the loop without `unfold` is not compose. -/
 theorem group_validate_n3_one_lagging :
     group_validate
         (⟨[{ snap := 10#u64, touched_key_written_after := true },
@@ -209,8 +211,33 @@ theorem group_validate_n3_one_lagging :
            { snap := 7#u64, touched_key_written_after := true }],
           by native_decide⟩)
         (10#u64) =
-      ok (⟨[false, false, true], by native_decide⟩ : alloc.vec.Vec Bool) := by
-  exact LawfulBEq.eq_of_beq (by native_decide)
+      ok (⟨[false, false, true], by native_decide⟩ : alloc.vec.Vec Bool) ∧
+      occ_conflict (7#u64) (10#u64) true = ok true ∧
+      occ_conflict (10#u64) (10#u64) true = ok false := by
+  refine ⟨?g, ?lag, ?same⟩
+  · unfold group_validate
+    exact LawfulBEq.eq_of_beq (by native_decide)
+  · unfold occ_conflict; rfl
+  · unfold occ_conflict; rfl
+
+/-- N-way of the plan `validate_occ_batch` matches: three members, one last_seq.
+    Unfolds `occ_batch_plan` **and** `occ_conflict`. -/
+theorem occ_batch_plan_n3_one_lagging :
+    occ_batch_plan
+        (⟨[false, false, false], by native_decide⟩)
+        (⟨[{ snap := 10#u64, touched_key_written_after := true },
+           { snap := 10#u64, touched_key_written_after := true },
+           { snap := 7#u64, touched_key_written_after := true }],
+          by native_decide⟩)
+        (10#u64) =
+      ok (⟨[OccMemberFate.Ok, OccMemberFate.Ok, OccMemberFate.Conflict],
+            by native_decide⟩
+        : alloc.vec.Vec OccMemberFate) ∧
+      occ_conflict (7#u64) (10#u64) true = ok true := by
+  constructor
+  · unfold occ_batch_plan
+    exact LawfulBEq.eq_of_beq (by native_decide)
+  · unfold occ_conflict; rfl
 
 /-- ConcurrentDb `validate_occ_batch` caller: Lean `unfold`s the plan rustc
     links (`occ_batch_plan`) **and** the callees. Lagging member is Conflict.
