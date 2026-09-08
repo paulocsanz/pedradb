@@ -3593,7 +3593,7 @@ impl<E: Env> Db<E> {
             // Open already created VALUES.vlog when the threshold is set.
             // Rotation mode must start at 000001.blob — otherwise the first
             // spills are VLG1 on file 0 and the first get after rotate misses.
-            if self.blob_active == 0 {
+            if crate::write_admission_kernel::batch_is_empty(self.blob_active as u64) {
                 self.rotate_blob()?;
             } else {
                 let len = self.vlog.as_ref().map_or(0, |v| v.lock().len_bytes());
