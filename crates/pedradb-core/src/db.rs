@@ -9115,7 +9115,7 @@ impl<E: Env> Db<E> {
             }
             self.bulk_append_puts(&fam, keys, vals)?;
         }
-        if ladder.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(ladder.len() as u64) {
             let seq = self.last_sequence();
             self.publish_sequence(seq);
             return Ok(seq);
