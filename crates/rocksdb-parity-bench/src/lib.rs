@@ -2656,6 +2656,7 @@ impl YcsbRunner {
             "[rocks-parity] ycsb_c_big seed {big} keys in {:.1}s (untimed)",
             t0.elapsed().as_secs_f64()
         );
+        let phase0 = e.write_phase_snapshot();
         let mut rng = std::mem::take(&mut self.rng);
         let mut lats = Vec::with_capacity(cfg_ops);
         let mut errors = 0u64;
@@ -2669,8 +2670,13 @@ impl YcsbRunner {
             lats.push(ms(t));
         }
         self.rng = rng;
-        let block = summarize("ycsb_c_big", cfg_ops, t0.elapsed(), &mut lats);
+        let mut block = summarize("ycsb_c_big", cfg_ops, t0.elapsed(), &mut lats);
         eprintln!("[rocks-parity] ycsb_c_big done (uniform 2^20 keyspace) errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
+            eprint_write_diagnose("ycsb_c_big", &d);
+            block = attach_diagnose(block, Some(&d));
+        }
         Some(block)
     }
 
@@ -3623,6 +3629,15 @@ mod tests {
         assert!(
             with.contains("\"clients\": 4"),
             "attach keeps mc fields:\n{with}"
+        );
+        // RFC-0184 P2.20: ycsb_c_big is 100% get over 2^20 (harness skips
+        // the 1M seed here; same kernel+attach as run_c_big).
+        let mut cbig = summarize("ycsb_c_big", 8, Duration::from_millis(1), &mut vec![0.1; 8]);
+        let d = diagnose_from_phases_n(0.1, [0; 7], [0; 7], 1, 0.0, 100, 8);
+        cbig = attach_diagnose(cbig, Some(&d));
+        assert!(
+            cbig.contains("\"diagnose\": {\"lever\":\"get_path\""),
+            "RFC-0184 P2.20 ycsb_c_big all-reads is get_path:\n{cbig}"
         );
     }
 
