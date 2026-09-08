@@ -1730,7 +1730,7 @@ impl SstTable {
             self.smallest_user_key.as_deref(),
             self.largest_user_key.as_deref(),
         ) {
-            if !prefix.is_empty() && hi < prefix {
+            if !crate::write_admission_kernel::batch_is_empty(prefix.len() as u64) && hi < prefix {
                 return None;
             }
             if let Some(e) = end_owned.as_deref() {
