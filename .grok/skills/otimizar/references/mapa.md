@@ -41,11 +41,12 @@ Refresh this file when a cell moves class. One row per cell.
 | rocksapi mixgraph/wbwi/compact/ingest | **T**→tool | RFC-0043 | WRITEPHASE → `diagnose.lever` (0184 P2.19); wbwi `get_path` | RFC-0043 / 0184 |
 | ycsb_c_big 2^20 uniform get | **T**→tool | RFC-0059 | WRITEPHASE → `diagnose.lever` (0184 P2.20); `get_path` | RFC-0059 / 0184 |
 | probe_hit p50 | **T**→tool | scale | `classify_get` p50 vs 0176 (0184 P2.21) | RFC-0184 |
+| hydrate ingest | **T**→tool | scale | WRITEPHASE → `diagnose.lever` (0184 P2.22) | RFC-0184 |
 
 ## Próxima fase (rank da skill, 2026-09-07)
 
 1. **U / Linux `overwrite_mc4` isolado + diagnose + `balance`** (caixa). Sem bake: não ratio-win Darwin. Skill **ainda implementa** o próximo furo local.
-2. **Done this turn:** 0184 P2.21 — scale probe_hit p50 → `classify_get`.
+2. **Done this turn:** 0184 P2.22 — scale hydrate WRITEPHASE → `diagnose.lever`.
 3. prefix 0.70× na caixa continua P1.2.
 
 Não: skiplist. Não: n=50 merge. Não: turno vazio porque “é caixa”.

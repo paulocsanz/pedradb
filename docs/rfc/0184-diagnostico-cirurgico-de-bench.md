@@ -139,6 +139,8 @@ a linha quando há phasesΔ. Sem harness novo.
 - [x] **P2.21** scale `probe_hit` p50 ns → `classify_get` vs 0176
       clock (always; published p50, not the later `get_hit` mean).
       — status: `done`
+- [x] **P2.22** scale `hydrate` WRITEPHASE → `diagnose.lever`
+      (ingest batches; write lever, not `get_path`). — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -174,6 +176,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.19 | p2 | rocksapi diagnose.lever | done | wbwi get_path; compact/ingest WRITEPHASE | 2026-09-08 |
 | P2.20 | p2 | ycsb_c_big diagnose.lever | done | 100% get 2^20 → get_path | 2026-09-08 |
 | P2.21 | p2 | scale probe_hit classify_get | done | p50 ns vs 0176 best/happy/worst/as_is | 2026-09-08 |
+| P2.22 | p2 | scale hydrate diagnose.lever | done | WRITEPHASE ingest batches | 2026-09-08 |
 
 ## Acceptance Criteria
 
@@ -206,6 +209,7 @@ a linha quando há phasesΔ. Sem harness novo.
   rocksapi `diagnose.lever` (P2.19);
   ycsb_c_big `diagnose.lever` (P2.20);
   scale `probe_hit` `classify_get` (P2.21);
+  scale `hydrate` `diagnose.lever` (P2.22);
   `ycsb_c_all_reads_timed_zero_is_get_path`;
   `rfc0184_diagnosis_json_has_lever`;
   `extract_diagnose_lever_from_bench_object`.
