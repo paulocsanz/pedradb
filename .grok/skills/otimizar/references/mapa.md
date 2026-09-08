@@ -32,11 +32,12 @@ Refresh this file when a cell moves class. One row per cell.
 | myrocks + linkbench_mix | **T**→tool | RFC-0043 | WRITEPHASE → `diagnose.lever` (0184 P2.10); select/range/mix `get_path` | RFC-0043 / 0184 |
 | surreal tx get/put/rmw/scan | **T**→tool | RFC-0043 | WRITEPHASE → `diagnose.lever` (0184 P2.11); get/scan `get_path` | RFC-0043 / 0184 |
 | nebula neighbors/insert | **T**→tool | RFC-0043 | WRITEPHASE → `diagnose.lever` (0184 P2.12); neighbors `get_path` | RFC-0043 / 0184 |
+| flink window / kafka changelog | **T**→tool | RFC-0043 | WRITEPHASE → `diagnose.lever` (0184 P2.13); window mix `get_path` | RFC-0043 / 0184 |
 
 ## Próxima fase (rank da skill, 2026-09-07)
 
 1. **U / Linux `overwrite_mc4` isolado + diagnose + `balance`** (caixa). Sem bake: não ratio-win Darwin. Skill **ainda implementa** o próximo furo local.
-2. **Done this turn:** 0184 P2.12 — nebula WRITEPHASE → `diagnose.lever`.
+2. **Done this turn:** 0184 P2.13 — streaming WRITEPHASE → `diagnose.lever`.
 3. prefix 0.70× na caixa continua P1.2.
 
 Não: skiplist. Não: n=50 merge. Não: turno vazio porque “é caixa”.
