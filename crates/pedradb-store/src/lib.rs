@@ -5260,7 +5260,7 @@ impl<E: Env> StoreCluster<E> {
     /// # Errors
     /// Elect timeout / step-down failures.
     pub fn rebalance_range_leaders(&mut self, max_ticks: u64) -> Result<()> {
-        if self.ids.is_empty() || self.ranges.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(self.ids.len() as u64) || self.ranges.is_empty() {
             return Ok(());
         }
         let n_nodes = self.ids.len() as u64;
