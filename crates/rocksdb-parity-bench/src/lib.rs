@@ -276,6 +276,9 @@ pub const COMPARE_SHAPES: &[&str] = &[
     "ycsb_b_mc4",
     // RFC-0184 P2.39: YCSB C (100% get) mc4 — official 16 is 1c only.
     "ycsb_c_mc4",
+    // RFC-0184 P2.40: Quicksilver hot-get mc4 — 1c qs_hot_get is official qs
+    // suite only; concurrent hot 10% + 1% batch was invisible on the cartaz.
+    "qs_hot_get_mc4",
     // RFC-0043 — Rockset (→OpenAI) converged index. Ingest batch + point get.
     "rockset_hybrid",
     // YugabyteDB DocDB: intents CF + committed CF (Rocks-based).
@@ -878,6 +881,7 @@ impl YcsbRunner {
         let mut blocks = Vec::with_capacity(3);
 
         // qs_hot_get — 99% get on the hot 10%, 1% WriteBatch ≥32 on that set.
+        if shape_wanted("qs_hot_get") {
         let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut gets, mut writes, mut errors) = (0u64, 0u64, 0u64);
@@ -917,8 +921,10 @@ impl YcsbRunner {
                 *last = attach_diagnose(std::mem::take(last), Some(&d));
             }
         }
+        }
 
         // qs_neg_lookup — gets past the keyspace (QS: ~10× more misses).
+        if shape_wanted("qs_neg_lookup") {
         let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut misses, mut errors) = (0u64, 0u64);
@@ -942,8 +948,10 @@ impl YcsbRunner {
                 *last = attach_diagnose(std::mem::take(last), Some(&d));
             }
         }
+        }
 
         // qs_batch_write — every op is one batched put (QS root write).
+        if shape_wanted("qs_batch_write") {
         let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut puts, mut errors) = (0u64, 0u64);
@@ -980,8 +988,121 @@ impl YcsbRunner {
                 *last = attach_diagnose(std::mem::take(last), Some(&d));
             }
         }
+        }
 
         self.rng = rng;
+        blocks
+    }
+
+    /// RFC-0184 P2.40: qs_hot_get at N clients (99% get on the hot 10%,
+    /// 1% WriteBatch on that set). Same mix as 1c `run_qs`.
+    pub fn run_qs_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
+        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
+        let full = format!("qs_hot_get_mc{clients}");
+        if !shape_wanted(&full) {
+            return Vec::new();
+        }
+        if mc_fresh_enabled() {
+            self.seed(e);
+        }
+        let records = self.cfg.records;
+        let cfg_ops = self.cfg.ops;
+        let batch = self.cfg.batch;
+        let hot = records.div_ceil(10).max(16).min(records);
+        let yval = std::sync::Arc::new(vec![b'q'; self.cfg.payload]);
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+        let phase0 = e.write_phase_snapshot();
+        let group0 = e.write_group_stats();
+        let t0 = Instant::now();
+        let mut lats = Vec::with_capacity(cfg_ops * clients);
+        let mut errors = 0u64;
+        std::thread::scope(|s| {
+            let handles: Vec<_> = (0..clients)
+                .map(|c| {
+                    let barrier = barrier.clone();
+                    let yval = yval.clone();
+                    s.spawn(move || {
+                        let mut rng =
+                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
+                        let mut lats = Vec::with_capacity(cfg_ops);
+                        let mut errors = 0u64;
+                        barrier.wait();
+                        for i in 0..cfg_ops {
+                            let t = Instant::now();
+                            let ok = if i % 100 == 0 {
+                                let mut wb = Vec::with_capacity(batch);
+                                for _ in 0..batch {
+                                    let u = (xorshift(&mut rng) as usize) % hot;
+                                    wb.push(CfWrite::Put {
+                                        cf: "default",
+                                        k: ykey(u),
+                                        v: yval.as_ref().clone(),
+                                    });
+                                }
+                                e.batch(wb)
+                            } else {
+                                let u = (xorshift(&mut rng) as usize) % hot;
+                                e.get(&ykey(u)).is_ok()
+                            };
+                            if !ok {
+                                errors += 1;
+                            }
+                            lats.push(ms(t));
+                        }
+                        (lats, errors)
+                    })
+                })
+                .collect();
+            for h in handles {
+                let (mut l, err) = h.join().expect("client thread");
+                errors += err;
+                lats.append(&mut l);
+            }
+        });
+        let wall = t0.elapsed();
+        let mut avg_group = 0.0;
+        eprintln!(
+            "[rocks-parity] qs_hot_get mc{clients} done ops={} errors={errors}",
+            cfg_ops * clients
+        );
+        if let Some((sub1, queued1, groups1, gops1)) = e.write_group_stats() {
+            let (sub0, queued0, groups0, gops0) = group0.unwrap_or((0, 0, 0, 0));
+            let sub = sub1.saturating_sub(sub0);
+            let queued = queued1.saturating_sub(queued0);
+            let groups = groups1.saturating_sub(groups0);
+            let gops = gops1.saturating_sub(gops0);
+            avg_group = if groups == 0 {
+                0.0
+            } else {
+                gops as f64 / groups as f64
+            };
+            eprintln!(
+                "[rocks-parity] write_group timed submits={sub} queued={queued} groups={groups} ops={gops} avg_group={avg_group:.2}"
+            );
+        }
+        let mut blocks = vec![summarize_mc(
+            &full,
+            cfg_ops * clients,
+            wall,
+            &mut lats,
+            clients,
+            errors,
+        )];
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(
+                pct(&lats, 50.0),
+                a,
+                b,
+                clients as u64,
+                avg_group,
+                99,
+                (cfg_ops * clients) as u64,
+            );
+            eprint_write_diagnose(&full, &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
         blocks
     }
 
@@ -3653,6 +3774,19 @@ mod tests {
     }
 
     #[test]
+    fn rfc0184_qs_hot_get_mc4_in_compare() {
+        assert!(
+            COMPARE_SHAPES.contains(&"qs_hot_get_mc4"),
+            "Quicksilver hot-get mc4 must be on the cartaz"
+        );
+        assert!(shape_wanted_in("qs_hot_get_mc4", Some("qs_hot_get_mc4")));
+        assert!(
+            !shape_wanted_in("qs_hot_get", Some("qs_hot_get_mc4")),
+            "1c qs_hot_get must not leak into ONLY=qs_hot_get_mc4"
+        );
+    }
+
+    #[test]
     fn rfc0178_mc_only_selects_full_mc_name() {
         assert!(shape_wanted_in(
             "deps_cache_overwrite_mc4",
@@ -4125,6 +4259,7 @@ mod tests {
             "ingest_sst",
             "ycsb_b_mc4",
             "ycsb_c_mc4",
+            "qs_hot_get_mc4",
             "rockset_hybrid",
             "yugabyte_docdb_rmw",
         ] {

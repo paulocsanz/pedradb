@@ -233,6 +233,9 @@ fn run_and_report<E: Engine + Sync>(e: &E, cfg: &Cfg, suites: &str, out: &Path) 
             r.seed(e);
         }
         benches.extend(r.run_qs(e));
+        for clients in rocksdb_parity_bench::clients_from_env() {
+            benches.extend(r.run_qs_clients(e, clients));
+        }
     }
     if suites_enabled("kvrocks") {
         benches.extend(r.run_kvrocks(e));
@@ -306,6 +309,9 @@ fn run_and_report_occ<E: rocksdb_parity_bench::OccEngine + Sync>(
             r.seed(e);
         }
         benches.extend(r.run_qs(e));
+        for clients in rocksdb_parity_bench::clients_from_env() {
+            benches.extend(r.run_qs_clients(e, clients));
+        }
     }
     if suites_enabled("kvrocks") {
         benches.extend(r.run_kvrocks(e));
