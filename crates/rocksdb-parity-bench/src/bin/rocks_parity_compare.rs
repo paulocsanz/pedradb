@@ -349,6 +349,14 @@ fn extract_cli_diagnose_class(raw: &str) -> Option<String> {
     extract_string_field(raw, "class")
 }
 
+/// RFC-0184 P2.28: `pedra diagnose balance` stdout `{"admits":0|1,…}`.
+fn extract_cli_diagnose_admits(raw: &str) -> Option<u8> {
+    if raw.contains("\"name\"") {
+        return None;
+    }
+    json_number_field(raw, "admits").map(|n| n as u8)
+}
+
 /// Best-effort extract name → qps (or keys_per_s) from a bench JSON.
 fn extract_metrics(raw: &str) -> BTreeMap<String, f64> {
     let mut out = BTreeMap::new();
@@ -479,6 +487,13 @@ mod tests {
         );
         assert_eq!(extract_cli_diagnose_class(raw), None);
         assert_eq!(extract_cli_diagnose_class(cli), None);
+        let bal = r#"{"admits":0,"cut":"wal_encode_or_write","cells":3}"#;
+        assert_eq!(
+            extract_cli_diagnose_admits(bal),
+            Some(0),
+            "RFC-0184 P2.28 CLI balance admits"
+        );
+        assert_eq!(extract_cli_diagnose_admits(raw), None);
     }
 
     #[test]
