@@ -713,6 +713,12 @@ mod tests {
             absorb.contains("batch_is_empty("),
             "group_absorb must match batch_is_empty"
         );
+        let append = named_fn_src(include_str!("db.rs"), "group_append_ops")
+            .expect("group_append_ops");
+        assert!(
+            append.contains("batch_is_empty("),
+            "group_append_ops must match batch_is_empty"
+        );
     }
 
     #[test]

@@ -9514,7 +9514,9 @@ impl<E: Env> Db<E> {
 
     /// Encode [`GroupInFlight::pending`] into the WAL frame (no `write` syscall).
     fn group_append_ops(&mut self, g: &mut GroupInFlight) {
-        if g.failed || g.pending.is_empty() {
+        if g.failed
+            || crate::write_admission_kernel::batch_is_empty(g.pending.len() as u64)
+        {
             return;
         }
         if let Err(e) = self.ensure_not_fenced() {
