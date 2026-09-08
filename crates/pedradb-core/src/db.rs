@@ -5592,7 +5592,9 @@ impl<E: Env> Db<E> {
     /// [`CoreError::DurabilityFenced`].
     pub fn stage_flush_imm(&mut self) -> Result<bool> {
         self.ensure_not_fenced()?;
-        if self.imm.is_some() || self.mem.is_empty() {
+        if self.imm.is_some()
+            || crate::write_admission_kernel::batch_is_empty(self.mem.len() as u64)
+        {
             return Ok(false);
         }
         self.imm = Some(std::mem::replace(&mut self.mem, MemTable::new()));
