@@ -265,6 +265,9 @@ fn run_and_report<E: Engine + Sync>(e: &E, cfg: &Cfg, suites: &str, out: &Path) 
     }
     if suites_enabled("ceph") {
         benches.extend(r.run_ceph(e));
+        for clients in rocksdb_parity_bench::clients_from_env() {
+            benches.extend(r.run_ceph_read_clients(e, clients));
+        }
     }
     if suites_enabled("solana") {
         benches.extend(r.run_solana(e));
@@ -373,6 +376,9 @@ fn run_and_report_occ<E: rocksdb_parity_bench::OccEngine + Sync>(
     }
     if suites_enabled("ceph") {
         benches.extend(r.run_ceph(e));
+        for clients in rocksdb_parity_bench::clients_from_env() {
+            benches.extend(r.run_ceph_read_clients(e, clients));
+        }
     }
     if suites_enabled("solana") {
         benches.extend(r.run_solana(e));
