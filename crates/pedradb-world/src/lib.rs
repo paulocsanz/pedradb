@@ -1492,7 +1492,9 @@ impl World {
                     if cluster.is_member(*node) {
                         let _ = cluster.set_participating(*node, true);
                     }
-                    if memb.offline_ids().is_empty() {
+                    if pedradb_core::write_admission_kernel::batch_is_empty(
+                        memb.offline_ids().len() as u64,
+                    ) {
                         net.heal();
                     } else {
                         let offline = memb.offline_ids();
