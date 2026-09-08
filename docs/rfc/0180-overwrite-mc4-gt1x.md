@@ -210,6 +210,10 @@ medida no mesmo harness isolado.
       qps 10270→12996, max 1.49s→1.17s; remaining `STALL lone_wal`
       ~1.17s (first `pwrite`, not the reservation). Test
       `rfc0180_wal_prealloc_at_create`. status: `done`
+- [x] **P0.61** Post-`group_start` catch-up wait **off** `db.write()`
+      (P0.60 removed the wait → p999 0.065→3.2 ms). Wait stays;
+      `commit_inflight` pins compact. Test
+      `rfc0180_catchup_after_prepare_off_write_lock`. status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
 
@@ -283,6 +287,7 @@ medida no mesmo harness isolado.
 | P0.56 | p0 | group_profile 256MiB memtable | done | stall remains ~1s; not 4MiB flush | 2026-09-08 |
 | P0.57 | p0 | lone 1c async WAL off Db write lock | done | STALL lead_write ~2s; G1 1c on-lock stays | 2026-09-08 |
 | P0.58 | p0 | WAL 64MiB prealloc at create not commit | done | STALL group_path was F_PREALLOCATE | 2026-09-08 |
+| P0.61 | p0 | catch-up wait off db.write() | done | keep wait; P0.60 removed it | 2026-09-08 |
 | P1.1 | p1 | 3-run caixa | todo | — | 2026-09-07 |
 | P2.1 | p2 | 3/3 quiet ≥1× | todo | 0182 P1.1 | 2026-09-07 |
 | P2.2 | p2 | leftover hang | done | 0181 P0.3 steal | 2026-09-07 |

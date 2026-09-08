@@ -197,6 +197,10 @@ a linha quando há phasesΔ. Sem harness novo.
       convoy. CLI honra `--read-pct --sync --avg-group`. Testes
       `predict_write_mix_names_the_four_cells`,
       `mc4_lock_wait_grouping_paid_is_lock_hold`. — status: `done`
+- [x] **P2.38** Crescimento não-linear: `growth=` `one_barrier` /
+      `amortize` / `serial_cs` / `convoy_collapse` / `get_bound`. Get:
+      `log_n` / `ram_wall` / `walk_all`. Teste
+      `predict_write_growth_is_not_linear_in_n`. — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -248,6 +252,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.35 | p2 | GetWork × MachineSpec | done | `predict_get_composed`; `--cache happy|capacity|cold` | 2026-09-08 |
 | P2.36 | p2 | COMPARE_SHAPES ycsb_b_mc4 | done | 95% get mc4 visível no compare | 2026-09-08 |
 | P2.37 | p2 | static write cuts beyond grouping/fd | done | lock_hold/async_wal/get_path/lock_convoy; next= | 2026-09-08 |
+| P2.38 | p2 | non-linear growth tokens | done | serial_cs vs amortize vs convoy_collapse; get ram_wall | 2026-09-08 |
 
 ## Acceptance Criteria
 

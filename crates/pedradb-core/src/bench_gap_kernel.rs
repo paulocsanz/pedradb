@@ -506,6 +506,18 @@ impl ScaleBottleneck {
             "indistinguishable"
         }
     }
+
+    /// How get T grows with keys/RAM: `log_n` / `ram_wall` / `walk_all`.
+    #[must_use]
+    pub fn growth_token(&self) -> &'static str {
+        if self.distinguishable {
+            "walk_all"
+        } else if !self.legal.hot {
+            "ram_wall"
+        } else {
+            "log_n"
+        }
+    }
 }
 
 /// RFC-0176 bottleneck at `keys` **without running a get**.
