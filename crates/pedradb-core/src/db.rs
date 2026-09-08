@@ -6101,7 +6101,7 @@ impl<E: Env> Db<E> {
 
     /// Park a flushed mem with no SST file. WAL still covers it (G1).
     pub fn push_parked_unflushed(&mut self, table: MemTable) {
-        if !table.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(table.len() as u64) {
             self.parked_unflushed.push(Arc::new(table));
         }
     }
