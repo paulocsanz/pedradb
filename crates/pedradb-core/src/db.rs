@@ -4885,7 +4885,7 @@ impl<E: Env> Db<E> {
                 if self.imm.is_some() {
                     self.flush_imm_to_l0()?;
                 }
-                if self.mem.is_empty() {
+                if crate::write_admission_kernel::batch_is_empty(self.mem.len() as u64) {
                     self.try_rotate_wal()?;
                     return Ok(());
                 }
