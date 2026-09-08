@@ -297,6 +297,8 @@ pub const COMPARE_SHAPES: &[&str] = &[
     "kvrocks_get_mc4",
     // RFC-0184 P2.47: MyRocks oltp_point_select mc4 — 1c is suite-only.
     "myrocks_point_select_mc4",
+    // RFC-0184 P2.48: Nebula getNeighbors mc4 — 1c is suite-only.
+    "nebula_get_neighbors_mc4",
 ];
 
 /// Length of the RFC-0041 official prefix of [`COMPARE_SHAPES`].
@@ -2275,12 +2277,15 @@ impl YcsbRunner {
         let yval = vec![b'n'; self.cfg.payload];
         let mut rng = std::mem::take(&mut self.rng);
         let mut blocks = Vec::with_capacity(2);
+        if shape_wanted("nebula_get_neighbors") || shape_wanted("nebula_insert_edge") {
         for i in 0..records {
             for d in 1..=4 {
                 let dst = (i + d) % records;
                 assert!(e.put(&ekey(i, dst), &yval), "nebula seed edge");
             }
         }
+        }
+        if shape_wanted("nebula_get_neighbors") {
         let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut scans, mut errors) = (0u64, 0u64);
@@ -2308,7 +2313,9 @@ impl YcsbRunner {
                 *last = attach_diagnose(std::mem::take(last), Some(&d));
             }
         }
+        }
 
+        if shape_wanted("nebula_insert_edge") {
         let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut puts, mut errors) = (0u64, 0u64);
@@ -2346,7 +2353,89 @@ impl YcsbRunner {
                 *last = attach_diagnose(std::mem::take(last), Some(&d));
             }
         }
+        }
         self.rng = rng;
+        blocks
+    }
+
+    /// RFC-0184 P2.48: nebula_get_neighbors at N clients (GO 1-hop prefix scan).
+    pub fn run_nebula_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
+        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
+        let full = format!("nebula_get_neighbors_mc{clients}");
+        if !shape_wanted(&full) {
+            return Vec::new();
+        }
+        e.set_write_sync(write_sync_for_suite("nebula"));
+        let records = self.cfg.records;
+        let cfg_ops = self.cfg.ops;
+        let yval = vec![b'n'; self.cfg.payload];
+        for i in 0..records {
+            for d in 1..=4 {
+                let dst = (i + d) % records;
+                assert!(e.put(&ekey(i, dst), &yval), "nebula mc seed edge");
+            }
+        }
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+        let phase0 = e.write_phase_snapshot();
+        let t0 = Instant::now();
+        let mut lats = Vec::with_capacity(cfg_ops * clients);
+        let mut errors = 0u64;
+        std::thread::scope(|s| {
+            let handles: Vec<_> = (0..clients)
+                .map(|c| {
+                    let barrier = barrier.clone();
+                    s.spawn(move || {
+                        let mut rng =
+                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
+                        let mut lats = Vec::with_capacity(cfg_ops);
+                        let mut errors = 0u64;
+                        barrier.wait();
+                        for _ in 0..cfg_ops {
+                            let t = Instant::now();
+                            let u = self.pick(&mut rng, records);
+                            if e.scan_count(&eprefix(u), &eprefix(u + 1), 25).is_err() {
+                                errors += 1;
+                            }
+                            lats.push(ms(t));
+                        }
+                        (lats, errors)
+                    })
+                })
+                .collect();
+            for h in handles {
+                let (mut l, err) = h.join().expect("nebula client thread");
+                errors += err;
+                lats.append(&mut l);
+            }
+        });
+        let wall = t0.elapsed();
+        eprintln!(
+            "[rocks-parity] {full} done ops={} errors={errors}",
+            cfg_ops * clients
+        );
+        let mut blocks = vec![summarize_mc(
+            &full,
+            cfg_ops * clients,
+            wall,
+            &mut lats,
+            clients,
+            errors,
+        )];
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(
+                pct(&lats, 50.0),
+                a,
+                b,
+                clients as u64,
+                0.0,
+                100,
+                (cfg_ops * clients) as u64,
+            );
+            eprint_write_diagnose(&full, &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
         blocks
     }
 
@@ -4599,6 +4688,26 @@ mod tests {
     }
 
     #[test]
+    fn rfc0184_nebula_get_neighbors_mc4_in_compare() {
+        assert!(
+            COMPARE_SHAPES.contains(&"nebula_get_neighbors_mc4"),
+            "Nebula getNeighbors mc4 must be on the cartaz"
+        );
+        assert!(shape_wanted_in(
+            "nebula_get_neighbors_mc4",
+            Some("nebula_get_neighbors_mc4")
+        ));
+        assert!(
+            !shape_wanted_in("nebula_get_neighbors", Some("nebula_get_neighbors_mc4")),
+            "1c nebula_get_neighbors must not leak into ONLY=nebula_get_neighbors_mc4"
+        );
+        assert!(
+            !shape_wanted_in("nebula_insert_edge", Some("nebula_get_neighbors_mc4")),
+            "insert_edge 1c must not leak into ONLY=nebula_get_neighbors_mc4"
+        );
+    }
+
+    #[test]
     fn rfc0178_mc_only_selects_full_mc_name() {
         assert!(shape_wanted_in(
             "deps_cache_overwrite_mc4",
@@ -5081,6 +5190,7 @@ mod tests {
             "venice_fanout_get_mc4",
             "kvrocks_get_mc4",
             "myrocks_point_select_mc4",
+            "nebula_get_neighbors_mc4",
         ] {
             assert!(
                 COMPARE_SHAPES.contains(&name),
