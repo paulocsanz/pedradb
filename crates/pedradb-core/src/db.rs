@@ -6074,7 +6074,10 @@ impl<E: Env> Db<E> {
         // the fold, or a post-fold rewrite is served stale.
         self.scan_mem_layers()
             .chain(self.retired_pending.iter().rev())
-            .chain((!self.retired_fold.is_empty()).then_some(&self.retired_fold))
+            .chain((!crate::write_admission_kernel::batch_is_empty(
+                self.retired_fold.len() as u64,
+            ))
+            .then_some(&self.retired_fold))
     }
 
     /// Layers that have no covering SST: live mems + parked-unflushed.
