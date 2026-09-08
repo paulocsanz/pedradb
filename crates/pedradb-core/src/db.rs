@@ -4187,7 +4187,7 @@ impl<E: Env> Db<E> {
             let mut only: Option<&MemTable> = None;
             let mut many = false;
             for t in self.scan_mem_layers() {
-                if t.is_empty() {
+                if crate::write_admission_kernel::batch_is_empty(t.len() as u64) {
                     continue;
                 }
                 if only.is_some() {
