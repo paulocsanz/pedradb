@@ -86,7 +86,7 @@ pub fn apply_recover_choice(buf: &mut Vec<u8>, choice: RecoverChoice) -> bool {
     match choice {
         RecoverChoice::Clean => true,
         RecoverChoice::TearTail { bytes } => {
-            if buf.is_empty() {
+            if crate::write_admission_kernel::batch_is_empty(buf.len() as u64) {
                 return false;
             }
             let keep = buf.len().saturating_sub(bytes);
