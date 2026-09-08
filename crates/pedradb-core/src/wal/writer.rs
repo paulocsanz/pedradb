@@ -141,7 +141,7 @@ impl<W: Write + Seek> WalWriter<W> {
     }
 
     pub(crate) fn write_frame(&mut self, buf: &[u8]) -> Result<()> {
-        if !buf.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(buf.len() as u64) {
             self.out.write_all(buf)?;
             self.position = self.position.saturating_add(buf.len() as u64);
         }
