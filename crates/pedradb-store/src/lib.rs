@@ -1400,7 +1400,7 @@ fn clear_range_txn_meta<E: Env>(db: &mut Db<E>, start: &[u8], end: &[u8]) -> Res
     for tid in touched_txns {
         let prefix = txn_pair_prefix(tid);
         let left = scan_prefix(db, &prefix);
-        if left.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(left.len() as u64) {
             // F47: abort fence must survive snapshot install (export is user
             // keys only). Wiping status here lets a later TxnCommit replay.
             let st = db.get(&txn_status_key(tid));
