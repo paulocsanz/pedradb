@@ -289,6 +289,8 @@ pub const COMPARE_SHAPES: &[&str] = &[
     "rockset_hybrid_mc4",
     // YugabyteDB DocDB: intents CF + committed CF (Rocks-based).
     "yugabyte_docdb_rmw",
+    // RFC-0184 P2.44: Yugabyte DocDB RMW mc4 — 1c is suite-only.
+    "yugabyte_docdb_rmw_mc4",
 ];
 
 /// Length of the RFC-0041 official prefix of [`COMPARE_SHAPES`].
@@ -2815,6 +2817,118 @@ impl YcsbRunner {
         blocks
     }
 
+    /// RFC-0184 P2.44: yugabyte_docdb_rmw at N clients (70% overlay-get / 30% RMW).
+    pub fn run_yugabyte_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
+        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
+        let full = format!("yugabyte_docdb_rmw_mc{clients}");
+        if !shape_wanted(&full) {
+            return Vec::new();
+        }
+        e.set_write_sync(write_sync_for_suite("yugabyte"));
+        let records = self.cfg.records;
+        let cfg_ops = self.cfg.ops;
+        let yval = std::sync::Arc::new(vec![b'Y'; self.cfg.payload]);
+        for i in 0..records {
+            assert!(e.put(&yckey(i), yval.as_ref()), "yugabyte mc seed {i}");
+        }
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+        let phase0 = e.write_phase_snapshot();
+        let group0 = e.write_group_stats();
+        let t0 = Instant::now();
+        let mut lats = Vec::with_capacity(cfg_ops * clients);
+        let mut errors = 0u64;
+        std::thread::scope(|s| {
+            let handles: Vec<_> = (0..clients)
+                .map(|c| {
+                    let barrier = barrier.clone();
+                    let yval = yval.clone();
+                    s.spawn(move || {
+                        let mut rng =
+                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
+                        let mut lats = Vec::with_capacity(cfg_ops);
+                        let mut errors = 0u64;
+                        barrier.wait();
+                        for _ in 0..cfg_ops {
+                            let t = Instant::now();
+                            let u = self.pick(&mut rng, records);
+                            let ok = if xorshift(&mut rng) % 100 < 70 {
+                                e.get(&yikey(u)).is_ok() && e.get(&yckey(u)).is_ok()
+                            } else {
+                                e.batch(vec![
+                                    CfWrite::Put {
+                                        cf: "default",
+                                        k: yikey(u),
+                                        v: yval.as_ref().clone(),
+                                    },
+                                    CfWrite::Put {
+                                        cf: "default",
+                                        k: yckey(u),
+                                        v: yval.as_ref().clone(),
+                                    },
+                                ])
+                            };
+                            if !ok {
+                                errors += 1;
+                            }
+                            lats.push(ms(t));
+                        }
+                        (lats, errors)
+                    })
+                })
+                .collect();
+            for h in handles {
+                let (mut l, err) = h.join().expect("yugabyte client thread");
+                errors += err;
+                lats.append(&mut l);
+            }
+        });
+        let wall = t0.elapsed();
+        let mut avg_group = 0.0;
+        eprintln!(
+            "[rocks-parity] yugabyte_docdb_rmw mc{clients} done ops={} errors={errors}",
+            cfg_ops * clients
+        );
+        if let Some((sub1, queued1, groups1, gops1)) = e.write_group_stats() {
+            let (sub0, queued0, groups0, gops0) = group0.unwrap_or((0, 0, 0, 0));
+            let sub = sub1.saturating_sub(sub0);
+            let queued = queued1.saturating_sub(queued0);
+            let groups = groups1.saturating_sub(groups0);
+            let gops = gops1.saturating_sub(gops0);
+            avg_group = if groups == 0 {
+                0.0
+            } else {
+                gops as f64 / groups as f64
+            };
+            eprintln!(
+                "[rocks-parity] write_group timed submits={sub} queued={queued} groups={groups} ops={gops} avg_group={avg_group:.2}"
+            );
+        }
+        let mut blocks = vec![summarize_mc(
+            &full,
+            cfg_ops * clients,
+            wall,
+            &mut lats,
+            clients,
+            errors,
+        )];
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(
+                pct(&lats, 50.0),
+                a,
+                b,
+                clients as u64,
+                avg_group,
+                70,
+                (cfg_ops * clients) as u64,
+            );
+            eprint_write_diagnose(&full, &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
+        blocks
+    }
+
     /// RFC-0043 P2.6 — Oxigraph still ships RocksDB (feature `rocksdb`, 0.5.x
     /// 2026). Shape is SPO point lookup + triple insert batch, not SPARQL.
     pub fn run_oxigraph<E: Engine>(&mut self, e: &E) -> Vec<String> {
@@ -4134,6 +4248,26 @@ mod tests {
     }
 
     #[test]
+    fn rfc0184_yugabyte_docdb_rmw_mc4_in_compare() {
+        assert!(
+            COMPARE_SHAPES.contains(&"yugabyte_docdb_rmw_mc4"),
+            "Yugabyte DocDB RMW mc4 must be on the cartaz"
+        );
+        assert!(shape_wanted_in(
+            "yugabyte_docdb_rmw_mc4",
+            Some("yugabyte_docdb_rmw_mc4")
+        ));
+        assert!(
+            !shape_wanted_in("yugabyte_docdb_rmw", Some("yugabyte_docdb_rmw_mc4")),
+            "1c yugabyte_docdb_rmw must not leak into ONLY=yugabyte_docdb_rmw_mc4"
+        );
+        assert!(
+            !shape_wanted_in("rockset_hybrid_mc4", Some("yugabyte_docdb_rmw_mc4")),
+            "rockset mc4 must not leak into ONLY=yugabyte_docdb_rmw_mc4"
+        );
+    }
+
+    #[test]
     fn rfc0178_mc_only_selects_full_mc_name() {
         assert!(shape_wanted_in(
             "deps_cache_overwrite_mc4",
@@ -4612,6 +4746,7 @@ mod tests {
             "rockset_hybrid",
             "rockset_hybrid_mc4",
             "yugabyte_docdb_rmw",
+            "yugabyte_docdb_rmw_mc4",
         ] {
             assert!(
                 COMPARE_SHAPES.contains(&name),
