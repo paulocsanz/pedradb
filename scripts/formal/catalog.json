@@ -3547,8 +3547,9 @@
       "id": "l28_tcp_clear",
       "finding": "RFC-0138",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-store/src/l28.rs",
-      "twin": "crates/pedradb-store/verus/l28.rs",
+      "twin": "crates/pedradb-store/src/l28.rs",
       "verus": "scripts/verus_l28.sh",
       "callers": [
         "crates/pedradb-store/src/bin/cluster_real.rs"

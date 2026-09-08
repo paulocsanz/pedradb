@@ -766,6 +766,22 @@ def main() -> int:
         print("FAIL l28_tcp_napply twin≠kernel did not fail")
         return 1
     print("ok mutant l28_tcp_napply twin≠kernel named")
+    clear_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in clear_mutant["pairs"]:
+        if pair.get("id") == "l28_tcp_clear":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/l28.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing l28_tcp_clear")
+        return 1
+    hits = [m for m in _sa_fails(clear_mutant) if m.startswith("l28_tcp_clear:")]
+    if not hits:
+        print("FAIL l28_tcp_clear twin≠kernel did not fail")
+        return 1
+    print("ok mutant l28_tcp_clear twin≠kernel named")
     # Drive the same rule through check_twins (may also report unrelated
     # dirty-tree twin drift; we only require the SA id).
     try:
