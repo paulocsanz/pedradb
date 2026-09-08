@@ -4180,7 +4180,7 @@ impl<E: Env> Db<E> {
         end: Bound<&[u8]>,
         limit: Option<usize>,
     ) -> usize {
-        if snapshot == 0 {
+        if crate::write_admission_kernel::batch_is_empty(snapshot) {
             return 0;
         }
         let cap = limit.unwrap_or(usize::MAX);
