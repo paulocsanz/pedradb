@@ -2889,7 +2889,7 @@ fn write_sst_try_sorted_body(
         }
         let offset = data.len() as u64;
         if *policy_compress {
-            if lz4_scratch.is_empty() {
+            if crate::write_admission_kernel::batch_is_empty(lz4_scratch.len() as u64) {
                 lz4_into(block_buf, lz4_scratch)?;
                 stages.add(|s| &mut s.lz4_ns, t0);
             }
