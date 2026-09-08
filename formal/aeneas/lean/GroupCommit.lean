@@ -212,8 +212,9 @@ theorem group_validate_n3_one_lagging :
       ok (⟨[false, false, true], by native_decide⟩ : alloc.vec.Vec Bool) := by
   exact LawfulBEq.eq_of_beq (by native_decide)
 
-/-- ConcurrentDb `validate_occ_batch` / `lone_commit` caller: `occ_batch_plan`
-    unfolds `occ_member_fate` and `occ_conflict`. Lagging member is Conflict. -/
+/-- ConcurrentDb `validate_occ_batch` caller: Lean `unfold`s the plan rustc
+    links (`occ_batch_plan`) **and** the callees. Lagging member is Conflict.
+    `native_decide` of the plan without `unfold` is not compose. -/
 theorem occ_batch_plan_lagging_conflict :
     occ_batch_plan
         (⟨[false], by native_decide⟩)
@@ -225,7 +226,8 @@ theorem occ_batch_plan_lagging_conflict :
       occ_member_fate false true = ok OccMemberFate.Conflict ∧
       occ_conflict (7#u64) (10#u64) true = ok true := by
   constructor
-  · exact LawfulBEq.eq_of_beq (by native_decide)
+  · unfold occ_batch_plan
+    exact LawfulBEq.eq_of_beq (by native_decide)
   constructor
   · unfold occ_member_fate; rfl
   · unfold occ_conflict; rfl
@@ -241,7 +243,7 @@ theorem occ_batch_plan_too_old_wins :
         : alloc.vec.Vec OccMemberFate) := by
   exact LawfulBEq.eq_of_beq (by native_decide)
 
-/-- AS-IS dente: lagging member still Ok. -/
+/-- AS-IS dente: lagging member still Ok. Unfold the as-is plan. -/
 theorem occ_batch_plan_as_is_dente :
     occ_batch_plan_as_is
         (⟨[false], by native_decide⟩)
@@ -250,6 +252,7 @@ theorem occ_batch_plan_as_is_dente :
         (10#u64) =
       ok (⟨[OccMemberFate.Ok], by native_decide⟩
         : alloc.vec.Vec OccMemberFate) := by
+  unfold occ_batch_plan_as_is
   exact LawfulBEq.eq_of_beq (by native_decide)
 
 /-- Data-race token: exclusive mutate only while the write guard is held. -/
