@@ -39,11 +39,12 @@ Refresh this file when a cell moves class. One row per cell.
 | venice fanout / rockstore | **T**→tool | RFC-0043 | WRITEPHASE → `diagnose.lever` (0184 P2.17); fanout `get_path` | RFC-0043 / 0184 |
 | oxigraph spo/triple | **T**→tool | RFC-0043 | WRITEPHASE → `diagnose.lever` (0184 P2.18); lookup `get_path` | RFC-0043 / 0184 |
 | rocksapi mixgraph/wbwi/compact/ingest | **T**→tool | RFC-0043 | WRITEPHASE → `diagnose.lever` (0184 P2.19); wbwi `get_path` | RFC-0043 / 0184 |
+| ycsb_c_big 2^20 uniform get | **T**→tool | RFC-0059 | WRITEPHASE → `diagnose.lever` (0184 P2.20); `get_path` | RFC-0059 / 0184 |
 
 ## Próxima fase (rank da skill, 2026-09-07)
 
 1. **U / Linux `overwrite_mc4` isolado + diagnose + `balance`** (caixa). Sem bake: não ratio-win Darwin. Skill **ainda implementa** o próximo furo local.
-2. **Done this turn:** 0184 P2.19 — rocksapi WRITEPHASE → `diagnose.lever`.
+2. **Done this turn:** 0184 P2.20 — ycsb_c_big WRITEPHASE → `diagnose.lever`.
 3. prefix 0.70× na caixa continua P1.2.
 
 Não: skiplist. Não: n=50 merge. Não: turno vazio porque “é caixa”.

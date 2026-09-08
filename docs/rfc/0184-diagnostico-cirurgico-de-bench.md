@@ -134,6 +134,8 @@ a linha quando há phasesΔ. Sem harness novo.
 - [x] **P2.19** RocksAPI `mixgraph_like` / `wbwi` / `compaction_filter` /
       `ingest_sst` WRITEPHASE → `diagnose.lever` (wbwi = `get_path`;
       compact/ingest = write lever). — status: `done`
+- [x] **P2.20** `ycsb_c_big` WRITEPHASE → `diagnose.lever` (100% uniform
+      get over 2^20 = `get_path`). — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -167,6 +169,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.17 | p2 | venice diagnose.lever | done | fanout get_path; widecol mix 50% | 2026-09-08 |
 | P2.18 | p2 | oxigraph diagnose.lever | done | spo get_path; triple WRITEPHASE | 2026-09-08 |
 | P2.19 | p2 | rocksapi diagnose.lever | done | wbwi get_path; compact/ingest WRITEPHASE | 2026-09-08 |
+| P2.20 | p2 | ycsb_c_big diagnose.lever | done | 100% get 2^20 → get_path | 2026-09-08 |
 
 ## Acceptance Criteria
 
@@ -197,6 +200,7 @@ a linha quando há phasesΔ. Sem harness novo.
   venice `diagnose.lever` (P2.17);
   oxigraph `diagnose.lever` (P2.18);
   rocksapi `diagnose.lever` (P2.19);
+  ycsb_c_big `diagnose.lever` (P2.20);
   `ycsb_c_all_reads_timed_zero_is_get_path`;
   `rfc0184_diagnosis_json_has_lever`;
   `extract_diagnose_lever_from_bench_object`.
