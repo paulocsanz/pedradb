@@ -703,6 +703,11 @@ mod tests {
         assert!(batch_is_empty(0));
         assert!(!batch_is_empty_as_is(0));
         assert!(!batch_is_empty(1));
+        let start = named_fn_src(include_str!("db.rs"), "group_start").expect("group_start");
+        assert!(
+            start.contains("batch_is_empty("),
+            "group_start must match batch_is_empty"
+        );
     }
 
     #[test]

@@ -9401,7 +9401,7 @@ impl<E: Env> Db<E> {
             next_i: n,
             failed: false,
         };
-        if n == 0 {
+        if crate::write_admission_kernel::batch_is_empty(n as u64) {
             return Ok(g);
         }
         if let Err(results) = self.group_admit(n) {
