@@ -73,6 +73,7 @@ pub fn occ_conflict(snap: u64, last_seq: u64, touched_key_written_after: bool) -
 
 /// One member's OCC read of the pre-group state (collected under the
 /// write lock, before any group sequence is assigned).
+#[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OccRead {
     /// Snapshot the member read at.
@@ -131,6 +132,7 @@ pub fn occ_member_fate_as_is(_too_old: bool, _conflict: bool) -> OccMemberFate {
 /// ConcurrentDb `validate_occ_batch` / `lone_commit` plan: TooOld wins
 /// over Conflict over Ok, against one `last_seq`. Glue collects
 /// (`too_old`, `OccRead`); this fn is the order rustc links.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn occ_batch_plan(
     too_old: &[bool],
@@ -157,6 +159,7 @@ pub fn occ_batch_plan(
 }
 
 /// AS-IS: every member Ok (lagging / too-old still commit).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn occ_batch_plan_as_is(
     too_old: &[bool],
@@ -402,6 +405,131 @@ pub fn occ_member_fate_as_is(_too_old: bool, _conflict: bool) -> (d: OccMemberFa
         d == OccMemberFate::Ok,
 {
     occ_member_fate_as_is_body!(_too_old, _conflict)
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub struct OccRead {
+    pub snap: u64,
+    pub touched_key_written_after: bool,
+}
+
+pub open spec fn occ_conflict_spec(
+    snap: u64,
+    last_seq: u64,
+    touched_key_written_after: bool,
+) -> bool {
+    last_seq > snap && touched_key_written_after
+}
+
+pub open spec fn occ_batch_plan_spec(
+    too_old: &[bool],
+    reads: &[OccRead],
+    last_seq: u64,
+) -> Seq<OccMemberFate> {
+    let n = if too_old@.len() <= reads@.len() {
+        too_old@.len()
+    } else {
+        reads@.len()
+    };
+    Seq::new(
+        n,
+        |i: int|
+            if 0 <= i < too_old@.len() && i < reads@.len() {
+                occ_member_fate_spec(
+                    too_old[i],
+                    occ_conflict_spec(
+                        reads[i].snap,
+                        last_seq,
+                        reads[i].touched_key_written_after,
+                    ),
+                )
+            } else {
+                OccMemberFate::Ok
+            },
+    )
+}
+
+pub fn occ_batch_plan(
+    too_old: &[bool],
+    reads: &[OccRead],
+    last_seq: u64,
+) -> (out: Vec<OccMemberFate>)
+    ensures
+        out@ == occ_batch_plan_spec(too_old, reads, last_seq),
+{
+    let n: usize = if too_old.len() <= reads.len() {
+        too_old.len()
+    } else {
+        reads.len()
+    };
+    let mut out: Vec<OccMemberFate> = Vec::new();
+    let mut i: usize = 0;
+    while i < n
+        invariant
+            0 <= i <= n,
+            n <= too_old.len(),
+            n <= reads.len(),
+            n == (if too_old@.len() <= reads@.len() {
+                too_old@.len()
+            } else {
+                reads@.len()
+            }),
+            out.len() == i,
+            forall|j: int|
+                0 <= j < i ==> out[j] == occ_member_fate_spec(
+                    too_old[j],
+                    occ_conflict_spec(
+                        reads[j].snap,
+                        last_seq,
+                        reads[j].touched_key_written_after,
+                    ),
+                ),
+        decreases n - i,
+    {
+        let conflict = last_seq > reads[i].snap && reads[i].touched_key_written_after;
+        out.push(occ_member_fate(too_old[i], conflict));
+        i += 1;
+    }
+    proof {
+        assert(out@ == occ_batch_plan_spec(too_old, reads, last_seq));
+    }
+    out
+}
+
+pub fn occ_batch_plan_as_is(
+    too_old: &[bool],
+    reads: &[OccRead],
+    _last_seq: u64,
+) -> (out: Vec<OccMemberFate>)
+    ensures
+        out.len() == (if too_old.len() <= reads.len() {
+            too_old.len()
+        } else {
+            reads.len()
+        }),
+        forall|j: int| 0 <= j < out.len() ==> out[j] == OccMemberFate::Ok,
+{
+    let n: usize = if too_old.len() <= reads.len() {
+        too_old.len()
+    } else {
+        reads.len()
+    };
+    let mut out: Vec<OccMemberFate> = Vec::new();
+    let mut i: usize = 0;
+    while i < n
+        invariant
+            0 <= i <= n,
+            n <= too_old.len(),
+            n <= reads.len(),
+            out.len() == i,
+            forall|j: int| 0 <= j < i ==> out[j] == OccMemberFate::Ok,
+        decreases n - i,
+    {
+        let _ = (too_old[i], reads[i]);
+        out.push(OccMemberFate::Ok);
+        i += 1;
+    }
+    out
 }
 
 } // verus!

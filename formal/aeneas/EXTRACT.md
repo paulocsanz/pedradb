@@ -286,7 +286,7 @@ the composition files and fails on a missing file or the substring `sorry`.
 | T1Modelo `t1_modelo` | Txn `leftover_txn_is_aborted` (shim copy) | `t1_modelo_empty` (already unfolds both) | `leftover_txn_is_aborted_as_is_dente` in `Txn.lean` |
 | ConcurrentDb `validate_occ_batch` | `group_validate` / `occ_conflict` | `group_validate_lagging_member_conflicts` | `group_occ_vs_serialized_same_input` |
 | ConcurrentDb `validate_occ_batch` | `occ_member_fate` ∧ `group_validate` (Verus SA on production file) | `occ_member_fate_conflict_via_group_validate` | `occ_member_fate_as_is_dente` |
-| ConcurrentDb `validate_occ_batch` / `lone_commit` | `occ_batch_plan` ∧ `occ_member_fate` ∧ `occ_conflict` | `occ_batch_plan_lagging_conflict` | `occ_batch_plan_as_is_dente` |
+| ConcurrentDb `validate_occ_batch` / `lone_commit` | `occ_batch_plan` ∧ `occ_member_fate` ∧ `occ_conflict` (Verus SA on production file) | `occ_batch_plan_lagging_conflict` | `occ_batch_plan_as_is_dente` |
 | ConcurrentDb `finish_group_off_lock` | `rwlock_client_may_mutate` (Verus SA on production file) | `rwlock_client_may_mutate_needs_write` | `rwlock_client_may_mutate_as_is_dente` |
 | ConcurrentDb off-lock fd | `may_publish_group` ∧ Flush `wal_rotate_decision` | `concurrent_publish_and_inflight_keep_wal` | `concurrent_publish_ok_and_idle_rotates` / `concurrent_as_is_publish_lie_inflight_still_keeps` |
 | ConcurrentDb `occ_snapshot` | `occ_snap_uses_published` ∧ `may_publish_group` | `occ_snap_published_and_no_publish_on_wal_fail` | `occ_snap_uses_published_as_is_dente` |
