@@ -2342,8 +2342,11 @@ impl<E: Env> ConcurrentDb<E> {
     }
 
     fn resolve_sync(&self, opts: WriteOptions) -> bool {
-        opts.sync
-            .unwrap_or_else(|| self.default_sync.load(Ordering::Relaxed))
+        crate::write_admission_kernel::wal_sync_required(
+            opts.sync.is_some(),
+            opts.sync.unwrap_or(false),
+            self.default_sync.load(Ordering::Relaxed),
+        )
     }
 
     /// Override the open-time [`crate::db::OpenOptions::sync`] default.

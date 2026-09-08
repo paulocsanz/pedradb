@@ -713,6 +713,12 @@ mod tests {
             lead.contains("wal_sync_required("),
             "WriteGroup::lead catch-up must match wal_sync_required"
         );
+        let rs = named_fn_src(include_str!("concurrent.rs"), "resolve_sync")
+            .expect("resolve_sync");
+        assert!(
+            rs.contains("wal_sync_required("),
+            "ConcurrentDb::resolve_sync must match wal_sync_required"
+        );
     }
 
     #[test]
