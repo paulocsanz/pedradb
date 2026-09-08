@@ -142,11 +142,13 @@ fn main() {
         if i > 0 {
             ratios.push_str(",\n");
         }
-        let lever = extract_diagnose_lever(&compat_raw, shape);
-        let diagnose = match lever {
-            Some(l) => format!(r#"{{"lever":"{l}"}}"#),
-            None => "null".into(),
-        };
+        let diagnose = extract_diagnose_lever(&compat_raw, shape)
+            .or_else(|| extract_cli_diagnose_lever(&compat_raw))
+            .map(|l| format!(r#"{{"lever":"{l}"}}"#))
+            .or_else(|| {
+                extract_cli_diagnose_class(&compat_raw).map(|c| format!(r#"{{"class":"{c}"}}"#))
+            })
+            .unwrap_or_else(|| "null".into());
         ratios.push_str(&format!(
             r#"    {{"shape":"{shape}","compat_keys_per_s":{c_s},"rocksdb_keys_per_s":{r_s},"compat_over_rocksdb":{ratio},"meets_floor":{meets_floor},"diagnose":{diagnose}}}"#
         ));
@@ -339,6 +341,14 @@ fn extract_cli_diagnose_lever(raw: &str) -> Option<String> {
     extract_string_field(raw, "lever")
 }
 
+/// RFC-0184 P2.27: `pedra diagnose get|probes` stdout `{"class":…}`.
+fn extract_cli_diagnose_class(raw: &str) -> Option<String> {
+    if raw.contains("\"name\"") {
+        return None;
+    }
+    extract_string_field(raw, "class")
+}
+
 /// Best-effort extract name → qps (or keys_per_s) from a bench JSON.
 fn extract_metrics(raw: &str) -> BTreeMap<String, f64> {
     let mut out = BTreeMap::new();
@@ -461,6 +471,14 @@ mod tests {
             "RFC-0184 P2.26 CLI diagnose JSON"
         );
         assert_eq!(extract_cli_diagnose_lever(raw), None);
+        let get_cli = r#"{"class":"worst"}"#;
+        assert_eq!(
+            extract_cli_diagnose_class(get_cli).as_deref(),
+            Some("worst"),
+            "RFC-0184 P2.27 CLI get/probes class"
+        );
+        assert_eq!(extract_cli_diagnose_class(raw), None);
+        assert_eq!(extract_cli_diagnose_class(cli), None);
     }
 
     #[test]
