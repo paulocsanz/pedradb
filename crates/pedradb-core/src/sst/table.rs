@@ -1740,7 +1740,9 @@ impl SstTable {
             }
         }
         let in_window = |uk: &[u8]| -> bool {
-            if !prefix.is_empty() && !uk.starts_with(prefix) {
+            if !crate::write_admission_kernel::batch_is_empty(prefix.len() as u64)
+                && !uk.starts_with(prefix)
+            {
                 return false;
             }
             match end_owned.as_deref() {
