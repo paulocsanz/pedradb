@@ -177,3 +177,12 @@ theorem scale_forecast_is_three_clocks (keys ram_bytes : U64) :
     rfl
   · unfold best_get_ns
     rfl
+
+/-- RFC-0176 10B-key settle: 5 L1+ levels + L0-best 1 = 6 probes.
+    Named test `rfc0176_one_and_ten_billion_stay_log_n`. -/
+theorem rfc0176_10b_is_six_probes :
+    point_get_probes 5#u64 SCALE_L0_BEST = ok (6#u64) := by
+  unfold point_get_probes
+  unfold SCALE_L0_BEST
+  have h : core.num.U64.saturating_add 5#u64 1#u64 = 6#u64 := by native_decide
+  simp [h]

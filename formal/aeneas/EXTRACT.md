@@ -373,7 +373,7 @@ Never: “Lean proved Raft / fold / the Bloom filter.”
   - `probes_worst_as_is_is_n_files` (∀)
   - `probes_worst_l0_trigger_via_point_get` (concrete N: 4+4=8; unfolds `probes_worst` ∧ `point_get_probes`)
   - `scale_forecast_is_three_clocks` (unfolds `scale_forecast` ∧ `best_get_ns`)
-- **Not claimed:** `saturating_add` 4+1=5 (native_decide failed — add stays
-  in Verus). Clock \(T\) / noisy neighbor are measured, not extracted.
+- **Now claimed:** `saturating_add` 4+1=5 / 5+1=6 after `unfold SCALE_L0_BEST`
+  (`rfc0176_10b_is_six_probes`). Clock \(T\) / noisy neighbor stay measured.
 - Run: `./scripts/aeneas_scale.sh` then `lake build Scale` in `formal/aeneas/lean`.
 
