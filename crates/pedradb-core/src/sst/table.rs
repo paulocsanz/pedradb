@@ -2870,7 +2870,7 @@ fn write_sst_try_sorted_body(
         policy_decided: &mut bool,
         lz4_scratch: &mut Vec<u8>,
     ) -> Result<()> {
-        if block_buf.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(block_buf.len() as u64) {
             return Ok(());
         }
         let t0 = std::time::Instant::now();
