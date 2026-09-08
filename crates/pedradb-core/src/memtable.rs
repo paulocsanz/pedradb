@@ -1356,7 +1356,7 @@ impl MemTable {
                 if let Some(f) = floor {
                     Self::gc_below_floor(&mut list, f, dropped);
                 }
-                *vers = if list.is_empty() {
+                *vers = if crate::write_admission_kernel::batch_is_empty(list.len() as u64) {
                     // Both versions fell below the floor — impossible (the
                     // inserted version is kept), but keep the shape honest.
                     Versions::Many(VecDeque::new())
