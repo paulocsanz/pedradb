@@ -1102,6 +1102,22 @@ def main() -> int:
         print("FAIL l28_tcp_pj twin≠kernel did not fail")
         return 1
     print("ok mutant l28_tcp_pj twin≠kernel named")
+    dl_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in dl_mutant["pairs"]:
+        if pair.get("id") == "discard_leader":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/membership_joint.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing discard_leader")
+        return 1
+    hits = [m for m in _sa_fails(dl_mutant) if m.startswith("discard_leader:")]
+    if not hits:
+        print("FAIL discard_leader twin≠kernel did not fail")
+        return 1
+    print("ok mutant discard_leader twin≠kernel named")
     # Drive the same rule through check_twins (may also report unrelated
     # dirty-tree twin drift; we only require the SA id).
     try:

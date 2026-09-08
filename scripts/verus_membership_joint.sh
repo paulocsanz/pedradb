@@ -3,7 +3,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-raft/verus/membership_joint.rs"
+# RFC-0171 P0.3 / RFC-0174: prove the file rustc links (pair discard_leader).
+SRC="$ROOT/crates/pedradb-raft/src/membership_kernel.rs"
 
 if [[ -x "${VERUS:-}" ]]; then
   :
