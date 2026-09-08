@@ -113,7 +113,7 @@ impl<'db, E: crate::env::Env> Transaction<'db, E> {
             .ensure_snapshot_readable(crate::db::Snapshot::at(self.snapshot))?;
         // L0 write stall (open-items §2.3) — same gate as put/apply_batch.
         self.db.ensure_write_admitted()?;
-        if self.staging.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.staging.len() as u64) {
             self.finished = true;
             return Ok(self.db.last_sequence());
         }
