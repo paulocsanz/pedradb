@@ -1742,7 +1742,7 @@ impl MemTable {
         };
         // Long keys keep a Bytes tree; mixed shards fall back to the sorted
         // tail merge so total order stays exact (RFC-0149 P2.1).
-        if !shard.long.is_empty()
+        if !crate::write_admission_kernel::batch_is_empty(shard.long.len() as u64)
             || shard.short.is_empty()
             || !bound_len_le_32(start)
             || !bound_len_le_32(end)
