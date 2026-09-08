@@ -19,9 +19,9 @@
 
 #![forbid(unsafe_code)]
 
-//! **Single artifact (pair `durable_term`):** this file is what `rustc`
-//! links *and* what Verus proves (`cfg(verus_keep_ghost)`). Pairs `vote`
-//! / `grant_persist` keep twins until their turns.
+//! **Single artifact (pairs `durable_term`, `grant_persist`):** this file
+//! is what `rustc` links *and* what Verus proves (`cfg(verus_keep_ghost)`).
+//! Pair `vote` keeps its twin until its turn.
 //!
 //!   ./scripts/verus_durable_term.sh
 //!
@@ -44,6 +44,46 @@ pub enum DurableTerm {
     Keep,
     Raised,
     Restored,
+}
+
+/// Mirrors rustc `VoteDecision` (pair `grant_persist`).
+pub enum VoteDecision {
+    WouldGrant,
+    Deny,
+}
+
+/// F15: wire grant only if the kernel would grant **and** persist Ok.
+/// Ongaro Fig. 2: votedFor updated on stable storage before responding.
+pub open spec fn grant_after_persist_spec(d: VoteDecision, p: PersistOutcome) -> bool {
+    match (d, p) {
+        (VoteDecision::WouldGrant, PersistOutcome::Ok) => true,
+        _ => false,
+    }
+}
+
+pub fn grant_after_persist(decision: VoteDecision, persist: PersistOutcome) -> (g: bool)
+    ensures
+        g == grant_after_persist_spec(decision, persist),
+        g ==> persist == PersistOutcome::Ok,
+{
+    match (decision, persist) {
+        (VoteDecision::WouldGrant, PersistOutcome::Ok) => true,
+        (VoteDecision::WouldGrant, PersistOutcome::Err) => false,
+        (VoteDecision::Deny, PersistOutcome::Ok) => false,
+        (VoteDecision::Deny, PersistOutcome::Err) => false,
+    }
+}
+
+/// AS-IS F15: ignore persist (teeth: grants on Err).
+pub fn grant_after_persist_as_is(decision: VoteDecision, persist: PersistOutcome) -> (g: bool)
+    ensures
+        g == (decision == VoteDecision::WouldGrant),
+{
+    let _ = persist;
+    match decision {
+        VoteDecision::WouldGrant => true,
+        VoteDecision::Deny => false,
+    }
 }
 
 /// Spec of the durable-term step (closed form).

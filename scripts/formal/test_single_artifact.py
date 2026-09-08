@@ -622,6 +622,22 @@ def main() -> int:
         print("FAIL durable_term twin≠kernel did not fail")
         return 1
     print("ok mutant durable_term twin≠kernel named")
+    gp_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in gp_mutant["pairs"]:
+        if pair.get("id") == "grant_persist":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/vote_decision.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing grant_persist")
+        return 1
+    hits = [m for m in _sa_fails(gp_mutant) if m.startswith("grant_persist:")]
+    if not hits:
+        print("FAIL grant_persist twin≠kernel did not fail")
+        return 1
+    print("ok mutant grant_persist twin≠kernel named")
     # Drive the same rule through check_twins (may also report unrelated
     # dirty-tree twin drift; we only require the SA id).
     try:

@@ -3000,8 +3000,9 @@
       "id": "grant_persist",
       "finding": "F15",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/vote_kernel.rs",
-      "twin": "crates/pedradb-raft/verus/vote_decision.rs",
+      "twin": "crates/pedradb-raft/src/vote_kernel.rs",
       "verus": "scripts/verus_vote_decision.sh",
       "callers": [
         "crates/pedradb-raft/src/lib.rs"
