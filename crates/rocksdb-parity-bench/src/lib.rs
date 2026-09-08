@@ -1496,6 +1496,7 @@ impl YcsbRunner {
         }
 
         // surreal_tx_get — read-only txn (snapshot get + commit). HL.
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut gets, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -1521,8 +1522,16 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] surreal_tx_get done gets={gets} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
+            eprint_write_diagnose("surreal_tx_get", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
 
         // surreal_tx_put — 1 put + commit (canary: one fd/Ok).
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut puts, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -1549,8 +1558,16 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] surreal_tx_put done puts={puts} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
+            eprint_write_diagnose("surreal_tx_put", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
 
         // surreal_tx_rmw — SurrealQL UPDATE: get + put + one commit (HL).
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut rmws, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -1586,8 +1603,16 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] surreal_tx_rmw done rmws={rmws} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
+            eprint_write_diagnose("surreal_tx_rmw", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
 
         // surreal_tx_scan — snapshot range + commit (HL).
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut scans, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -1613,8 +1638,16 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] surreal_tx_scan done scans={scans} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
+            eprint_write_diagnose("surreal_tx_scan", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
 
         // surreal_tx_batch — crud-bench insert: N puts, one commit (HL).
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut rows, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -1642,6 +1675,13 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] surreal_tx_batch done rows={rows} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
+            eprint_write_diagnose("surreal_tx_batch", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
 
         self.rng = rng;
         // crud-bench is concurrent; 1c rmw misses OCC conflict + group commit.
@@ -1661,6 +1701,7 @@ impl YcsbRunner {
         let records = self.cfg.records;
         let yval = std::sync::Arc::new(vec![b's'; self.cfg.payload]);
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+        let phase0 = e.write_phase_snapshot();
         let t0 = Instant::now();
         let mut lats = Vec::with_capacity(cfg_ops * clients);
         let mut errors = 0u64;
@@ -1712,7 +1753,7 @@ impl YcsbRunner {
             }
         });
         let name = format!("surreal_tx_rmw_mc{clients}");
-        let block = summarize_mc(
+        let mut block = summarize_mc(
             &name,
             cfg_ops * clients,
             t0.elapsed(),
@@ -1724,6 +1765,11 @@ impl YcsbRunner {
             "[rocks-parity] {name} done ops={} errors={errors}",
             cfg_ops * clients
         );
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, clients as u64, 0.0, 0);
+            eprint_write_diagnose(&name, &d);
+            block = attach_diagnose(block, Some(&d));
+        }
         vec![block]
     }
 
@@ -3879,6 +3925,8 @@ mod tests {
 
     #[test]
     fn surreal_suite_on_compat_engine() {
+        // RFC-0184 P2.11: surreal WRITEPHASE → diagnose.lever (env at open).
+        std::env::set_var("PEDRA_WRITE_PHASE_STATS", "1");
         let dir = tempfile::tempdir().unwrap();
         let e = crate::engines::CompatEngine::open(dir.path());
         let cfg = Cfg {
@@ -3908,6 +3956,22 @@ mod tests {
                 Some("surreal_tx_batch"),
                 Some("surreal_tx_rmw_mc8"),
             ]
+        );
+        for b in &blocks {
+            assert!(
+                b.contains("\"diagnose\": {\"lever\":"),
+                "RFC-0184 P2.11 surreal JSON needs diagnose.lever:\n{b}"
+            );
+        }
+        assert!(
+            blocks[0].contains("\"lever\":\"get_path\""),
+            "surreal_tx_get is snapshot get:\n{}",
+            blocks[0]
+        );
+        assert!(
+            blocks[3].contains("\"lever\":\"get_path\""),
+            "surreal_tx_scan is snapshot range:\n{}",
+            blocks[3]
         );
         assert!(e.get(&skey(0)).unwrap().is_some());
     }
