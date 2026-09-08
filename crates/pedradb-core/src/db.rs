@@ -6325,7 +6325,9 @@ impl<E: Env> Db<E> {
             mem_empty: crate::write_admission_kernel::batch_is_empty(self.mem.len() as u64),
             imm_present: self.imm.is_some(),
             pin_live: self.flush_read_pin.is_some(),
-            parked_unflushed: !self.parked_unflushed.is_empty(),
+            parked_unflushed: !crate::write_admission_kernel::batch_is_empty(
+                self.parked_unflushed.len() as u64,
+            ),
             commit_inflight: self.commit_inflight.load(Ordering::Acquire) > 0
                 || !crate::write_admission_kernel::batch_is_empty(self.unapplied.len() as u64),
         }

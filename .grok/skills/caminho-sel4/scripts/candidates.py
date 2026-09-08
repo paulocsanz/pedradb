@@ -396,7 +396,7 @@ def script_compose_board() -> None:
             print(f"  {glue} plan={plan} UNPAID order still inline{extra}")
     print(f"  unpaid_script={unpaid_script}/{len(GLUE_SCRIPTS)}")
     print(
-        "  leftover_next wal_pin_state parked_unflushed leftover arg; named kernel not SA"
+        "  leftover_next changelog rebuild entries.is_empty leftover if; named kernel not SA"
     )
     print("== compose glue callers (rank 5: unfold plan AND callee) ==")
     for glue, rel, tokens, callee, plan in GLUE_SCRIPTS:
