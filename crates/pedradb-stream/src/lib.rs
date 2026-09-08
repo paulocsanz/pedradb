@@ -166,7 +166,7 @@ impl Stream {
     }
 
     fn load_consumer_seq(&self, consumer: &str) -> Result<u64> {
-        if consumer.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(consumer.len() as u64) {
             return Err(StreamError::Msg("bad consumer name".into()));
         }
         // F111: missing cursor → 0; present but short → hard error (not silent rewind).
