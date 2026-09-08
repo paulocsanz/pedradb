@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Machine-check F62 pack injectivity (RFC-0002 P25).
+# Machine-check F62 pack injectivity on the file rustc links
+# (single artifact — not the twin-cópia). RFC-0002 P25.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/montanha-fdb-recipes/verus/pack_inject.rs"
+SRC="$ROOT/crates/montanha-fdb-recipes/src/pack_kernel.rs"
 if [[ -x "${VERUS:-}" ]]; then
   :
 elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then

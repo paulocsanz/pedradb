@@ -2463,8 +2463,9 @@
       "id": "pack",
       "finding": "F62",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/montanha-fdb-recipes/src/pack_kernel.rs",
-      "twin": "crates/montanha-fdb-recipes/verus/pack_inject.rs",
+      "twin": "crates/montanha-fdb-recipes/src/pack_kernel.rs",
       "verus": "scripts/verus_pack_inject.sh",
       "callers": [
         "crates/montanha-fdb-recipes/src/lib.rs"

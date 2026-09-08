@@ -15,20 +15,20 @@ set_option maxRecDepth 2048
 namespace pedra_aeneas_pack_kernel
 
 /-- [pedra_aeneas_pack_kernel::PACK_CUT_SEP]
-    Source: '../../../crates/montanha-fdb-recipes/src/pack_kernel.rs', lines 9:0-9:34
+    Source: '../../../crates/montanha-fdb-recipes/src/pack_kernel.rs', lines 14:0-14:34
     Visibility: public -/
 @[global_simps, irreducible] def PACK_CUT_SEP : Std.U8 := 0#u8
 
 /-- [pedra_aeneas_pack_kernel::pack_cut_tag]:
-    Source: '../../../crates/montanha-fdb-recipes/src/pack_kernel.rs', lines 13:0-15:1
+    Source: '../../../crates/montanha-fdb-recipes/src/pack_kernel.rs', lines 32:0-34:1
     Visibility: public -/
 def pack_cut_tag (len : Std.U32) : Result Std.U32 := do
   ok len
 
 /-- [pedra_aeneas_pack_kernel::pack_cut_tag_as_is]:
-    Source: '../../../crates/montanha-fdb-recipes/src/pack_kernel.rs', lines 19:0-21:1
+    Source: '../../../crates/montanha-fdb-recipes/src/pack_kernel.rs', lines 39:0-41:1
     Visibility: public -/
-def pack_cut_tag_as_is (_len : Std.U32) : Result Std.U32 := do
+def pack_cut_tag_as_is (len : Std.U32) : Result Std.U32 := do
   ok 0#u32
 
 end pedra_aeneas_pack_kernel
