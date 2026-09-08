@@ -4153,7 +4153,7 @@ impl<E: Env> Db<E> {
         // Count answers are window-scoped: range-check the dirty keys
         // instead of clearing every window (RFC-0044 `ycsb-longwindow`).
         // Fat apply / range deletion / unknown dirt still clear wholesale.
-        if reset || keys.is_empty() {
+        if reset || crate::write_admission_kernel::batch_is_empty(keys.len() as u64) {
             self.count_cache.clear();
         } else {
             self.count_cache.record_dirty(seq, &keys);
