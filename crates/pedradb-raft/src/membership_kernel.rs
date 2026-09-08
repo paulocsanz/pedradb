@@ -1978,4 +1978,17 @@ mod tests {
         assert!(joint_election_ok(2, 3, None));
         assert!(joint_election_ok(2, 3, Some((3, 4))));
     }
+
+    #[test]
+    fn joint_still_active_on_live_differing_sets_is_not_ok() {
+        let old = [1u64, 2, 3];
+        let new = [1u64, 2, 3, 4];
+        assert!(joint_still_active(&old, &new));
+        assert!(
+            !joint_still_active_as_is(&old, &new),
+            "AS-IS dente: treat joint as single"
+        );
+        let same = [1u64, 2, 3];
+        assert!(!joint_still_active(&same, &same));
+    }
 }
