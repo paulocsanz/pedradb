@@ -307,6 +307,8 @@ pub const COMPARE_SHAPES: &[&str] = &[
     "oxigraph_spo_lookup_mc4",
     // RFC-0184 P2.52: Solana trailing-read mc4 — 1c is suite-only.
     "solana_trailing_read_mc4",
+    // RFC-0184 P2.53: Kvrocks SCAN mc4 — 1c is suite-only; GET already has mc4.
+    "kvrocks_scan_mc4",
 ];
 
 /// Length of the RFC-0041 official prefix of [`COMPARE_SHAPES`].
@@ -1316,6 +1318,13 @@ impl YcsbRunner {
 
         // Untimed Redis-string keyspace (independent of ycsb/).
         let ktab: Vec<Vec<u8>> = (0..records + 25).map(kkey).collect();
+        if shape_wanted("kvrocks_get")
+            || shape_wanted("kvrocks_set")
+            || shape_wanted("kvrocks_pipelined_set")
+            || shape_wanted("kvrocks_scan")
+            || shape_wanted("kvrocks_blob_set")
+            || shape_wanted("kvrocks_set_mc50")
+        {
         for i in 0..records {
             assert!(e.put(&ktab[i], &yval), "kvrocks seed {i}");
         }
@@ -1324,6 +1333,7 @@ impl YcsbRunner {
         // tanked kvrocks_set / pipeline.
         for i in 0..records {
             let _ = e.get(&ktab[i]);
+        }
         }
 
         // RFC-0044 P0.5 A/B tool: `ROCKS_PARITY_ONLY=csv` runs a subset of
@@ -1649,6 +1659,84 @@ impl YcsbRunner {
                 .collect();
             for h in handles {
                 let (mut l, err) = h.join().expect("kvrocks get client");
+                errors += err;
+                lats.append(&mut l);
+            }
+        });
+        let wall = t0.elapsed();
+        eprintln!(
+            "[rocks-parity] {full} done ops={} errors={errors}",
+            cfg_ops * clients
+        );
+        let mut blocks = vec![summarize_mc(
+            &full,
+            cfg_ops * clients,
+            wall,
+            &mut lats,
+            clients,
+            errors,
+        )];
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(
+                pct(&lats, 50.0),
+                a,
+                b,
+                clients as u64,
+                0.0,
+                100,
+                (cfg_ops * clients) as u64,
+            );
+            eprint_write_diagnose(&full, &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
+        blocks
+    }
+
+    /// RFC-0184 P2.53: kvrocks SCAN at N clients (COUNT=25 window).
+    pub fn run_kvrocks_scan_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
+        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
+        let full = format!("kvrocks_scan_mc{clients}");
+        if !shape_wanted(&full) {
+            return Vec::new();
+        }
+        e.set_write_sync(write_sync_for_suite("kvrocks"));
+        let cfg_ops = self.cfg.ops;
+        let records = self.cfg.records;
+        let yval = vec![b'k'; self.cfg.payload];
+        for i in 0..records {
+            assert!(e.put(&kkey(i), &yval), "kvrocks scan-mc seed {i}");
+        }
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+        let phase0 = e.write_phase_snapshot();
+        let t0 = Instant::now();
+        let mut lats = Vec::with_capacity(cfg_ops * clients);
+        let mut errors = 0u64;
+        std::thread::scope(|s| {
+            let handles: Vec<_> = (0..clients)
+                .map(|c| {
+                    let barrier = barrier.clone();
+                    s.spawn(move || {
+                        let mut rng =
+                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
+                        let mut lats = Vec::with_capacity(cfg_ops);
+                        let mut errors = 0u64;
+                        barrier.wait();
+                        for _ in 0..cfg_ops {
+                            let t = Instant::now();
+                            let u = self.pick(&mut rng, records);
+                            if e.scan_count(&kkey(u), &kkey(u + 25), 25).is_err() {
+                                errors += 1;
+                            }
+                            lats.push(ms(t));
+                        }
+                        (lats, errors)
+                    })
+                })
+                .collect();
+            for h in handles {
+                let (mut l, err) = h.join().expect("kvrocks scan client");
                 errors += err;
                 lats.append(&mut l);
             }
@@ -5164,6 +5252,23 @@ mod tests {
     }
 
     #[test]
+    fn rfc0184_kvrocks_scan_mc4_in_compare() {
+        assert!(
+            COMPARE_SHAPES.contains(&"kvrocks_scan_mc4"),
+            "Kvrocks SCAN mc4 must be on the cartaz"
+        );
+        assert!(shape_wanted_in("kvrocks_scan_mc4", Some("kvrocks_scan_mc4")));
+        assert!(
+            !shape_wanted_in("kvrocks_scan", Some("kvrocks_scan_mc4")),
+            "1c kvrocks_scan must not leak into ONLY=kvrocks_scan_mc4"
+        );
+        assert!(
+            !shape_wanted_in("kvrocks_get_mc4", Some("kvrocks_scan_mc4")),
+            "GET mc4 must not leak into ONLY=kvrocks_scan_mc4"
+        );
+    }
+
+    #[test]
     fn rfc0178_mc_only_selects_full_mc_name() {
         assert!(shape_wanted_in(
             "deps_cache_overwrite_mc4",
@@ -5651,6 +5756,7 @@ mod tests {
             "surreal_tx_get_mc4",
             "oxigraph_spo_lookup_mc4",
             "solana_trailing_read_mc4",
+            "kvrocks_scan_mc4",
         ] {
             assert!(
                 COMPARE_SHAPES.contains(&name),
