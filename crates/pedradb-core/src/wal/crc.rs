@@ -1,5 +1,12 @@
 //! CRC32C masking, compatible with RocksDB's log format.
 //!
+//! **Single artifact (pair `crc_match`):** this file is what `rustc` links
+//! *and* what Verus proves (`cfg(verus_keep_ghost)`). Equality of two u32s
+//! is the term — not a collision theorem (`crc_collision_admitted` stays
+//! false; `never_floor` keeps `R-crc`).
+//!
+//!   ./scripts/verus_crc_match.sh
+//!
 //! RocksDB does not store the raw CRC32C in a record header; it applies a
 //! reversible mask so that data containing pre-existing valid checksums is
 //! not accidentally accepted. We replicate the exact transform so a PedraDB
@@ -8,18 +15,23 @@
 //!
 //! Reference: RocksDB `util/crc32c.h` — `Mask` / `Unmask`.
 
+#![forbid(unsafe_code)]
+
 /// Constant added during masking (same value as RocksDB's `kMaskDelta`).
+#[cfg(not(verus_keep_ghost))]
 pub const MASK_DELTA: u32 = 0xa282_ead8;
 
 /// Mask a raw CRC32C value the way RocksDB does, for on-disk storage.
 ///
 /// `masked = rotate_right_15(crc) + MASK_DELTA`
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn mask(crc: u32) -> u32 {
     crc.rotate_right(15).wrapping_add(MASK_DELTA)
 }
 
 /// Reverse [`mask`]. Used when validating a record read back from disk.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn unmask(masked_crc: u32) -> u32 {
     masked_crc.wrapping_sub(MASK_DELTA).rotate_left(15)
@@ -27,6 +39,7 @@ pub fn unmask(masked_crc: u32) -> u32 {
 
 /// Compute a raw (unmasked) CRC32C over `data`, matching the Castagnoli
 /// polynomial used by both the `crc32c` crate and RocksDB.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn crc32c(data: &[u8]) -> u32 {
     crc32c::crc32c(data)
@@ -38,6 +51,7 @@ pub fn crc32c(data: &[u8]) -> u32 {
 /// which checksums only `{type, data}`). A flipped length mid-file otherwise
 /// looks like a clean torn tail (`Ok(None)`), silently dropping later durable
 /// WAL records (F4). Pre-release: not byte-compatible with RocksDB WAL CRCs.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn record_checksum(record_type: u8, length: u16, data: &[u8]) -> u32 {
     let crc = crc32c::crc32c_append(0, &length.to_le_bytes());
@@ -46,31 +60,86 @@ pub fn record_checksum(record_type: u8, length: u16, data: &[u8]) -> u32 {
     mask(crc)
 }
 
+macro_rules! crc_match_ok_body {
+    ($stored:expr, $computed:expr) => {
+        $stored == $computed
+    };
+}
+
+macro_rules! crc_match_ok_as_is_body {
+    ($stored:expr, $computed:expr) => {{
+        let _ = ($stored, $computed);
+        true
+    }};
+}
+
 /// Admit a stored checksum against the computed one (RFC-0076 / R-hardware).
 /// Mismatch is never Ok — never serve corruption as a valid record.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn crc_match_ok(stored: u32, computed: u32) -> bool {
-    stored == computed
+    crc_match_ok_body!(stored, computed)
 }
 
 /// AS-IS: any checksum matches (the 0076 hole — silent-wrong record).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn crc_match_ok_as_is(_stored: u32, _computed: u32) -> bool {
-    true
+    crc_match_ok_as_is_body!(_stored, _computed)
 }
 
 /// RFC-0076 P2.2 / R-crc: CRC32C collision-freedom as a Pedra theorem.
 /// Always false. `crc_match_ok` is equality of two u32s, not a collision proof.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn crc_collision_admitted() -> bool {
     false
 }
 
 /// AS-IS: matching checksums look collision-free (the 0076 P2.2 hole).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn crc_collision_admitted_as_is() -> bool {
     true
 }
+
+#[cfg(verus_keep_ghost)]
+use vstd::prelude::*;
+
+#[cfg(verus_keep_ghost)]
+verus! {
+
+pub open spec fn crc_match_ok_spec(stored: u32, computed: u32) -> bool {
+    stored == computed
+}
+
+pub open spec fn crc_match_ok_as_is_spec(_stored: u32, _computed: u32) -> bool {
+    true
+}
+
+pub fn crc_match_ok(stored: u32, computed: u32) -> (ok: bool)
+    ensures
+        ok == crc_match_ok_spec(stored, computed),
+{
+    crc_match_ok_body!(stored, computed)
+}
+
+pub fn crc_match_ok_as_is(_stored: u32, _computed: u32) -> (ok: bool)
+    ensures
+        ok == crc_match_ok_as_is_spec(_stored, _computed),
+{
+    crc_match_ok_as_is_body!(_stored, _computed)
+}
+
+proof fn lemma_mismatch_is_not_ok()
+    ensures
+        crc_match_ok_spec(1, 1),
+        !crc_match_ok_spec(1, 2),
+        crc_match_ok_as_is_spec(1, 2),
+{
+}
+
+} // verus!
 
 #[cfg(test)]
 mod tests {

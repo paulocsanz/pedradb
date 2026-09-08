@@ -32,32 +32,32 @@ axiom crc32c.crc32c : Slice Std.U8 → Result Std.U32
 axiom crc32c.crc32c_append : Std.U32 → Slice Std.U8 → Result Std.U32
 
 /-- [pedra_aeneas_crc_kernel::MASK_DELTA]
-    Source: '../../../crates/pedradb-core/src/wal/crc.rs', lines 12:0-12:40
+    Source: '../../../crates/pedradb-core/src/wal/crc.rs', lines 22:0-22:40
     Visibility: public -/
 @[global_simps, irreducible] def MASK_DELTA : Std.U32 := 2726488792#u32
 
 /-- [pedra_aeneas_crc_kernel::mask]:
-    Source: '../../../crates/pedradb-core/src/wal/crc.rs', lines 18:0-20:1
+    Source: '../../../crates/pedradb-core/src/wal/crc.rs', lines 29:0-31:1
     Visibility: public -/
 def mask (crc : Std.U32) : Result Std.U32 := do
   let i ← lift (core.num.U32.rotate_right crc 15#u32)
   ok (core.num.U32.wrapping_add i MASK_DELTA)
 
 /-- [pedra_aeneas_crc_kernel::unmask]:
-    Source: '../../../crates/pedradb-core/src/wal/crc.rs', lines 24:0-26:1
+    Source: '../../../crates/pedradb-core/src/wal/crc.rs', lines 36:0-38:1
     Visibility: public -/
 def unmask (masked_crc : Std.U32) : Result Std.U32 := do
   let i ← lift (core.num.U32.wrapping_sub masked_crc MASK_DELTA)
   ok (core.num.U32.rotate_left i 15#u32)
 
 /-- [pedra_aeneas_crc_kernel::crc32c]:
-    Source: '../../../crates/pedradb-core/src/wal/crc.rs', lines 31:0-33:1
+    Source: '../../../crates/pedradb-core/src/wal/crc.rs', lines 44:0-46:1
     Visibility: public -/
 def crc32c (data : Slice Std.U8) : Result Std.U32 := do
   crc32c.crc32c data
 
 /-- [pedra_aeneas_crc_kernel::record_checksum]:
-    Source: '../../../crates/pedradb-core/src/wal/crc.rs', lines 42:0-47:1
+    Source: '../../../crates/pedradb-core/src/wal/crc.rs', lines 56:0-61:1
     Visibility: public -/
 def record_checksum
   (record_type : Std.U8) (length : Std.U16) (data : Slice Std.U8) :
@@ -72,26 +72,26 @@ def record_checksum
   mask crc2
 
 /-- [pedra_aeneas_crc_kernel::crc_match_ok]:
-    Source: '../../../crates/pedradb-core/src/wal/crc.rs', lines 52:0-54:1
+    Source: '../../../crates/pedradb-core/src/wal/crc.rs', lines 80:0-82:1
     Visibility: public -/
 def crc_match_ok (stored : Std.U32) (computed : Std.U32) : Result Bool := do
   ok (stored = computed)
 
 /-- [pedra_aeneas_crc_kernel::crc_match_ok_as_is]:
-    Source: '../../../crates/pedradb-core/src/wal/crc.rs', lines 58:0-60:1
+    Source: '../../../crates/pedradb-core/src/wal/crc.rs', lines 87:0-89:1
     Visibility: public -/
 def crc_match_ok_as_is
   (_stored : Std.U32) (_computed : Std.U32) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_crc_kernel::crc_collision_admitted]:
-    Source: '../../../crates/pedradb-core/src/wal/crc.rs', lines 65:0-67:1
+    Source: '../../../crates/pedradb-core/src/wal/crc.rs', lines 95:0-97:1
     Visibility: public -/
 def crc_collision_admitted : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_crc_kernel::crc_collision_admitted_as_is]:
-    Source: '../../../crates/pedradb-core/src/wal/crc.rs', lines 71:0-73:1
+    Source: '../../../crates/pedradb-core/src/wal/crc.rs', lines 102:0-104:1
     Visibility: public -/
 def crc_collision_admitted_as_is : Result Bool := do
   ok true

@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Machine-check crc_match_ok (RFC-0076 P2.1). Not a collision theorem (P2.2).
+# Machine-check crc_match_ok on the file rustc links (single artifact —
+# not the twin-cópia). Not a collision theorem (P2.2 / R-crc).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-core/verus/crc_match.rs"
+SRC="$ROOT/crates/pedradb-core/src/wal/crc.rs"
 
 if [[ -x "${VERUS:-}" ]]; then
   :

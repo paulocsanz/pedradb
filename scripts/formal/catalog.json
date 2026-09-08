@@ -4309,8 +4309,9 @@
       "id": "crc_match",
       "finding": "RFC-0076/0081/0082/0083/0084/0085/0086/0087/0088/0089/0092/0093",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/wal/crc.rs",
-      "twin": "crates/pedradb-core/verus/crc_match.rs",
+      "twin": "crates/pedradb-core/src/wal/crc.rs",
       "verus": "scripts/verus_crc_match.sh",
       "callers": [
         "crates/pedradb-core/src/wal/reader.rs",
