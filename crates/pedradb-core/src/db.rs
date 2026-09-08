@@ -5001,7 +5001,9 @@ impl<E: Env> Db<E> {
             for op in batch {
                 if let BatchOp::Put { key, .. } = op {
                     let item = (true, key.as_ref());
-                    if n < STACK && heap.is_empty() {
+                    if n < STACK
+                        && crate::write_admission_kernel::batch_is_empty(heap.len() as u64)
+                    {
                         stack[n] = item;
                         n += 1;
                     } else {
