@@ -291,6 +291,8 @@ pub const COMPARE_SHAPES: &[&str] = &[
     "yugabyte_docdb_rmw",
     // RFC-0184 P2.44: Yugabyte DocDB RMW mc4 — 1c is suite-only.
     "yugabyte_docdb_rmw_mc4",
+    // RFC-0184 P2.45: Venice fanout-get mc4 — 1c is suite-only.
+    "venice_fanout_get_mc4",
 ];
 
 /// Length of the RFC-0041 official prefix of [`COMPARE_SHAPES`].
@@ -2524,6 +2526,7 @@ impl YcsbRunner {
             }
         }
         const FANOUT: usize = 32;
+        if shape_wanted("venice_fanout_get") {
         let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut gets, mut errors) = (0u64, 0u64);
@@ -2558,7 +2561,9 @@ impl YcsbRunner {
                 *last = attach_diagnose(std::mem::take(last), Some(&d));
             }
         }
+        }
 
+        if shape_wanted("rockstore_widecol_rw") {
         let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut ops, mut errors) = (0u64, 0u64);
@@ -2594,7 +2599,94 @@ impl YcsbRunner {
                 *last = attach_diagnose(std::mem::take(last), Some(&d));
             }
         }
+        }
         self.rng = rng;
+        blocks
+    }
+
+    /// RFC-0184 P2.45: venice_fanout_get at N clients (32 point-gets / op).
+    pub fn run_venice_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
+        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
+        let full = format!("venice_fanout_get_mc{clients}");
+        if !shape_wanted(&full) {
+            return Vec::new();
+        }
+        e.set_write_sync(write_sync_for_suite("venice"));
+        let records = self.cfg.records;
+        let cfg_ops = self.cfg.ops;
+        let yval = vec![b'V'; self.cfg.payload];
+        for i in 0..records {
+            assert!(e.put(&dkey(i), &yval), "venice mc seed {i}");
+        }
+        const FANOUT: usize = 32;
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+        let phase0 = e.write_phase_snapshot();
+        let t0 = Instant::now();
+        let mut lats = Vec::with_capacity(cfg_ops * clients);
+        let mut errors = 0u64;
+        std::thread::scope(|s| {
+            let handles: Vec<_> = (0..clients)
+                .map(|c| {
+                    let barrier = barrier.clone();
+                    s.spawn(move || {
+                        let mut rng =
+                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
+                        let mut lats = Vec::with_capacity(cfg_ops);
+                        let mut errors = 0u64;
+                        barrier.wait();
+                        for _ in 0..cfg_ops {
+                            let t = Instant::now();
+                            let mut ok = true;
+                            for _ in 0..FANOUT {
+                                let u = self.pick(&mut rng, records);
+                                if e.get(&dkey(u)).is_err() {
+                                    ok = false;
+                                    break;
+                                }
+                            }
+                            if !ok {
+                                errors += 1;
+                            }
+                            lats.push(ms(t));
+                        }
+                        (lats, errors)
+                    })
+                })
+                .collect();
+            for h in handles {
+                let (mut l, err) = h.join().expect("venice client thread");
+                errors += err;
+                lats.append(&mut l);
+            }
+        });
+        let wall = t0.elapsed();
+        eprintln!(
+            "[rocks-parity] venice_fanout_get mc{clients} done ops={} errors={errors}",
+            cfg_ops * clients
+        );
+        let mut blocks = vec![summarize_mc(
+            &full,
+            cfg_ops * clients,
+            wall,
+            &mut lats,
+            clients,
+            errors,
+        )];
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(
+                pct(&lats, 50.0),
+                a,
+                b,
+                clients as u64,
+                0.0,
+                100,
+                (cfg_ops * clients) as u64,
+            );
+            eprint_write_diagnose(&full, &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
         blocks
     }
 
@@ -4268,6 +4360,26 @@ mod tests {
     }
 
     #[test]
+    fn rfc0184_venice_fanout_get_mc4_in_compare() {
+        assert!(
+            COMPARE_SHAPES.contains(&"venice_fanout_get_mc4"),
+            "Venice fanout-get mc4 must be on the cartaz"
+        );
+        assert!(shape_wanted_in(
+            "venice_fanout_get_mc4",
+            Some("venice_fanout_get_mc4")
+        ));
+        assert!(
+            !shape_wanted_in("venice_fanout_get", Some("venice_fanout_get_mc4")),
+            "1c venice_fanout_get must not leak into ONLY=venice_fanout_get_mc4"
+        );
+        assert!(
+            !shape_wanted_in("rockstore_widecol_rw", Some("venice_fanout_get_mc4")),
+            "rockstore 1c must not leak into ONLY=venice_fanout_get_mc4"
+        );
+    }
+
+    #[test]
     fn rfc0178_mc_only_selects_full_mc_name() {
         assert!(shape_wanted_in(
             "deps_cache_overwrite_mc4",
@@ -4747,6 +4859,7 @@ mod tests {
             "rockset_hybrid_mc4",
             "yugabyte_docdb_rmw",
             "yugabyte_docdb_rmw_mc4",
+            "venice_fanout_get_mc4",
         ] {
             assert!(
                 COMPARE_SHAPES.contains(&name),
