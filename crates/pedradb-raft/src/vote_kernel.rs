@@ -19,9 +19,123 @@
 
 #![forbid(unsafe_code)]
 
+//! **Single artifact (pair `durable_term`):** this file is what `rustc`
+//! links *and* what Verus proves (`cfg(verus_keep_ghost)`). Pairs `vote`
+//! / `grant_persist` keep twins until their turns.
+//!
+//!   ./scripts/verus_durable_term.sh
+//!
+//! rustc `durable_term_if_newer` stays last-wins. Verus stand-in enums
+//! (same decision: term rises only when persist Ok).
+
+#[cfg(verus_keep_ghost)]
+use vstd::prelude::*;
+
+#[cfg(verus_keep_ghost)]
+verus! {
+/// Mirrors `PersistOutcome` in vote_kernel.rs (axiom of the environment).
+pub enum PersistOutcome {
+    Ok,
+    Err,
+}
+
+/// Mirrors `DurableTerm` in vote_kernel.rs.
+pub enum DurableTerm {
+    Keep,
+    Raised,
+    Restored,
+}
+
+/// Spec of the durable-term step (closed form).
+pub open spec fn durable_term_spec(
+    current_term: u64,
+    incoming_term: u64,
+    persist: PersistOutcome,
+) -> DurableTerm {
+    if incoming_term <= current_term {
+        DurableTerm::Keep
+    } else if persist == PersistOutcome::Ok {
+        DurableTerm::Raised
+    } else {
+        DurableTerm::Restored
+    }
+}
+
+/// Exec twin of `vote_kernel::durable_term_if_newer` (same match shape).
+pub fn durable_term_if_newer(
+    current_term: u64,
+    incoming_term: u64,
+    persist: PersistOutcome,
+) -> (out: DurableTerm)
+    ensures
+        out == durable_term_spec(current_term, incoming_term, persist),
+{
+    match (incoming_term > current_term, persist) {
+        (false, _) => DurableTerm::Keep,
+        (true, PersistOutcome::Ok) => DurableTerm::Raised,
+        (true, PersistOutcome::Err) => DurableTerm::Restored,
+    }
+}
+
+/// The term the process may act at after the step (spec).
+pub open spec fn surviving_term_spec(
+    current_term: u64,
+    incoming_term: u64,
+    persist: PersistOutcome,
+) -> u64 {
+    match durable_term_spec(current_term, incoming_term, persist) {
+        DurableTerm::Keep => current_term,
+        DurableTerm::Raised => incoming_term,
+        DurableTerm::Restored => current_term,
+    }
+}
+
+/// Exec form of `surviving_term_spec`.
+pub fn surviving_term(
+    current_term: u64,
+    incoming_term: u64,
+    persist: PersistOutcome,
+) -> (t: u64)
+    ensures
+        t == surviving_term_spec(current_term, incoming_term, persist),
+{
+    match durable_term_if_newer(current_term, incoming_term, persist) {
+        DurableTerm::Keep => current_term,
+        DurableTerm::Raised => incoming_term,
+        DurableTerm::Restored => current_term,
+    }
+}
+
+/// Safety (F125/F127): the surviving term rises above the previous one only
+/// when the hard state was durable. The undurable raise is unreachable.
+proof fn term_rises_only_when_durable(
+    current_term: u64,
+    incoming_term: u64,
+    persist: PersistOutcome,
+)
+    ensures
+        surviving_term_spec(current_term, incoming_term, persist) > current_term
+            ==> persist == PersistOutcome::Ok,
+{}
+
+/// Safety: a Restored step keeps the previous term — the process never acts
+/// at a term that did not hit disk.
+proof fn restored_keeps_previous_term(
+    current_term: u64,
+    incoming_term: u64,
+    persist: PersistOutcome,
+)
+    ensures
+        durable_term_spec(current_term, incoming_term, persist) == DurableTerm::Restored
+            ==> surviving_term_spec(current_term, incoming_term, persist) == current_term,
+{}
+} // verus!
+
 /// Inputs for a RequestVote decision after the follower has already adopted
 /// `args.term` into hard state when `args.term > current_term` (caller-side).
+#[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(not(verus_keep_ghost))]
 pub struct VoteInputs {
     /// Follower current term (post step-down if candidate term was higher).
     pub current_term: u64,
@@ -42,7 +156,9 @@ pub struct VoteInputs {
 }
 
 /// Outcome of the pure vote rule (Raft §5.2 / §5.4.1).
+#[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(not(verus_keep_ghost))]
 pub enum VoteDecision {
     /// Caller may persist `voted_for = candidate` and, **only if persist Ok**, set `vote_granted`.
     WouldGrant,
@@ -51,7 +167,9 @@ pub enum VoteDecision {
 }
 
 /// Whether the follower may still vote for `candidate_id` in this term.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn can_vote(voted_for: Option<u64>, candidate_id: u64) -> bool {
     // Match, not `Option ==`: Aeneas has no model of `PartialEq<Option<u64>>`
     // (extract would axiom it). `u64 == u64` is in the Lean std.
@@ -62,7 +180,9 @@ pub fn can_vote(voted_for: Option<u64>, candidate_id: u64) -> bool {
 }
 
 /// Raft §5.4.1 log up-to-date (candidate at least as new as local).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn log_up_to_date(
     my_last_term: u64,
     my_last_index: u64,
@@ -96,7 +216,9 @@ pub fn log_up_to_date(
 /// # Does not cover
 ///
 /// Durability of the vote, network delivery, or step-down — caller + axioms (F15).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn vote_decision(i: VoteInputs) -> VoteDecision {
     if i.candidate_term != i.current_term {
         return VoteDecision::Deny;
@@ -116,7 +238,9 @@ pub fn vote_decision(i: VoteInputs) -> VoteDecision {
 }
 
 /// Spec predicate: outcome matches the closed-form rule (bidirectional).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn vote_decision_spec(i: VoteInputs, d: VoteDecision) -> bool {
     let grant = i.candidate_term == i.current_term
         && can_vote(i.voted_for, i.candidate_id)
@@ -134,7 +258,9 @@ pub fn vote_decision_spec(i: VoteInputs, d: VoteDecision) -> bool {
 
 /// AS-IS / mutant: grant whenever the term matches, **ignoring** log up-to-date
 /// and existing vote. Used only to prove the model/kernel invariant has teeth.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn vote_decision_as_is_ignore_log_and_vote(i: VoteInputs) -> VoteDecision {
     if i.candidate_term == i.current_term {
         VoteDecision::WouldGrant
@@ -144,7 +270,9 @@ pub fn vote_decision_as_is_ignore_log_and_vote(i: VoteInputs) -> VoteDecision {
 }
 
 /// Persist result the handler sees (axiom of the environment).
+#[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(not(verus_keep_ghost))]
 pub enum PersistOutcome {
     /// `persist_hard` returned Ok.
     Ok,
@@ -156,7 +284,9 @@ pub enum PersistOutcome {
 ///
 /// This is the refinement of `handle_request_vote_with_persist` minus I/O.
 /// `sent_grant ⇒ persist == Ok`.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn grant_after_persist(decision: VoteDecision, persist: PersistOutcome) -> bool {
     // Match, not `==` on enums: derived PartialEq extracts to discriminant
     // `Result` wrappers that Lean cannot `cases` through.
@@ -167,14 +297,18 @@ pub fn grant_after_persist(decision: VoteDecision, persist: PersistOutcome) -> b
 }
 
 /// AS-IS F15: grant as soon as the kernel says so, persist is ignored.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn grant_after_persist_as_is(decision: VoteDecision, persist: PersistOutcome) -> bool {
     let _ = persist;
     decision == VoteDecision::WouldGrant
 }
 
 /// F125/F127 outcome of stepping to a newer term under a persist result.
+#[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(not(verus_keep_ghost))]
 pub enum DurableTerm {
     /// Incoming term is not newer — no step.
     Keep,
@@ -187,7 +321,9 @@ pub enum DurableTerm {
 
 /// F125/F127: the term rises only when hard state is durable.
 /// `Raised ⇒ persist == Ok`; `Restored ⇒ previous term/vote survive`.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn durable_term_if_newer(
     current_term: u64,
     incoming_term: u64,
@@ -204,7 +340,9 @@ pub fn durable_term_if_newer(
 
 /// AS-IS F125/F127 mutant: keep the raised term even when persist failed —
 /// the process acts at a term that never hit disk. Used to prove teeth.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn durable_term_if_newer_as_is(
     current_term: u64,
     incoming_term: u64,
@@ -218,6 +356,7 @@ pub fn durable_term_if_newer_as_is(
     }
 }
 
+#[cfg(not(verus_keep_ghost))]
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -4,7 +4,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-raft/verus/durable_term.rs"
+# RFC-0171 P0.3 / RFC-0174: prove the file rustc links (pair durable_term).
+SRC="$ROOT/crates/pedradb-raft/src/vote_kernel.rs"
 
 # Prefer explicit install location used on this machine; else PATH.
 if [[ -x "${VERUS:-}" ]]; then
