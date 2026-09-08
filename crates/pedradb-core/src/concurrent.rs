@@ -383,6 +383,32 @@ fn in_flight_off_queue(batch_len: usize, queued: usize, active: usize) -> bool {
     accounted < cap && accounted < active
 }
 
+/// RFC-0180 P0.50: after `lead` resigns, the first client to re-enter
+/// sees `active==1` (`grouping_cap=1`) while siblings are between
+/// deliver and the next put. `in_flight_off_queue` then stops; WRITEPHASE
+/// avg_group stays ~2.7 vs `expected_group=4`. Wait for `active` to grow
+/// toward the merge cap. 1c never sets `last_multi` (`recently=false`).
+/// Last-op: `MULTI_HOLD` expires or the spin bound fires — no condvar.
+#[must_use]
+fn sibling_reentry_needed(batch_len: usize, queued: usize, active: usize, recently: bool) -> bool {
+    if !recently {
+        return false;
+    }
+    // Not `grouping_cap(active)`: that is min(4, active), so active==2
+    // already "meets cap" and WRITEPHASE stops at ~2.7. Diagnose
+    // `--clients 4` expected_group=4. n≥16 stays 2 (bypass convoy).
+    let cap = if active > ASYNC_GROUP_ADAPTIVE_MAX {
+        2
+    } else {
+        4
+    };
+    batch_len.saturating_add(queued) < cap && active < cap
+}
+
+fn sibling_reentry_spins() -> u32 {
+    1024
+}
+
 fn async_catchup_spins(batch_len: usize, active: usize) -> u32 {
     if batch_len >= active || active < 2 || async_catchup_skip_when_grouped(batch_len, active) {
         0
@@ -1216,6 +1242,22 @@ impl WriteGroup {
         }
     }
 
+    /// RFC-0180 P0.50: bounded `spin_loop` until siblings `begin_submit`
+    /// after a resign (or `MULTI_HOLD` / 1024 spins — last-op, no timer).
+    fn wait_sibling_reentry(&self, batch_len: usize) {
+        for _ in 0..sibling_reentry_spins() {
+            if !self.recently_concurrent() {
+                return;
+            }
+            let q = self.queued_pending.load(Ordering::Acquire);
+            let active = self.active.load(Ordering::Acquire);
+            if !sibling_reentry_needed(batch_len, q, active, true) {
+                return;
+            }
+            std::hint::spin_loop();
+        }
+    }
+
     fn lead<E: Env>(&self, db: &RwLock<Db<E>>) -> Result<SequenceNumber> {
         // RFC-0180 P0.27: pin via the shared Arc — no `db.read()` (that
         // queued behind compact/flush and showed up as p999 ≈ 1.5 ms).
@@ -1262,7 +1304,7 @@ impl WriteGroup {
             // cannot burn more than half an fd of everyone's latency.
             let window = Duration::from_micros(self.catchup_window_us.load(Ordering::Relaxed));
             let batch_ops: usize = batch.iter().map(|p| p.ops.len()).sum();
-            let active = self.active.load(Ordering::Relaxed);
+            let mut active = self.active.load(Ordering::Acquire);
             let any_sync = batch.iter().any(|p| p.do_sync);
             if any_sync && batch_ops < CATCHUP_SKIP_OPS {
                 if let Some(bound) =
@@ -1285,6 +1327,17 @@ impl WriteGroup {
                     self.catchup_waits.fetch_add(1, Ordering::Relaxed);
                 }
             } else if !any_sync {
+                // RFC-0180 P0.50: wait for siblings to re-enter after resign
+                // *before* in-flight-off-queue (that helper stops at
+                // active==1). 1c does not wait (`recently_concurrent`).
+                if self.recently_concurrent() {
+                    self.wait_sibling_reentry(batch.len());
+                    if self.queued_pending.load(Ordering::Acquire) > 0 {
+                        let mut g = self.queue.lock();
+                        batch.extend(Self::take_pending(&mut g, &self.queued_pending));
+                    }
+                    active = self.active.load(Ordering::Acquire);
+                }
                 let spins = async_catchup_spins(batch.len(), active);
                 if spins > 0 {
                     let want = active.saturating_sub(batch.len()).min(4).max(1);
@@ -1297,6 +1350,7 @@ impl WriteGroup {
                     let mut g = self.queue.lock();
                     batch.extend(Self::take_pending(&mut g, &self.queued_pending));
                 }
+                active = self.active.load(Ordering::Acquire);
             }
 
             // First write lock: append + absorb anyone who queued during
@@ -7128,6 +7182,23 @@ mod tests {
         assert!(!in_flight_off_queue(2, 0, 16), "n≥16 cap=2 already met");
         assert!(in_flight_off_queue(1, 0, 16), "n≥16 still wait for 2nd");
         assert!(!in_flight_off_queue(4, 0, 4));
+        // RFC-0180 P0.50: first re-enter after resign (active=1) still
+        // waits for siblings when recently_concurrent. 1c does not.
+        assert!(!sibling_reentry_needed(1, 0, 1, false), "1c");
+        assert!(sibling_reentry_needed(1, 0, 1, true), "mc re-enter hole");
+        assert!(sibling_reentry_needed(1, 0, 2, true), "still under cap 4");
+        assert!(sibling_reentry_needed(2, 0, 2, true));
+        assert!(
+            !sibling_reentry_needed(1, 3, 4, true),
+            "already 4 accounted"
+        );
+        assert!(!sibling_reentry_needed(4, 0, 4, true));
+        assert!(!sibling_reentry_needed(2, 0, 16, true), "n≥16 cap=2 met");
+        assert!(
+            !sibling_reentry_needed(1, 0, 16, true),
+            "n≥16 active already ≥ cap"
+        );
+        assert_eq!(sibling_reentry_spins(), 1024);
         // n≥16: stop at 2 (kvrocks_set_mc50 lock_convoy ceiling).
         assert!(async_catchup_skip_when_grouped(2, 16));
         assert_eq!(async_catchup_spins(2, 16), 0);
