@@ -347,7 +347,7 @@ pub fn splice_membership_windows(actions: &mut Vec<Action>, n_nodes: u64) {
 /// RFC-0060 P1.2: inject a deterministic BitFlip after the first puts so a
 /// durable file exists. Off by default — pinning historical seeds.
 pub fn splice_bitflip_window(actions: &mut Vec<Action>, n_nodes: u64) {
-    if actions.is_empty() || n_nodes == 0 {
+    if pedradb_core::write_admission_kernel::batch_is_empty(actions.len() as u64) || n_nodes == 0 {
         return;
     }
     let at = (actions.len() / 2).max(1);
