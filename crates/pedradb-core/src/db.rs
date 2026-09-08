@@ -7032,7 +7032,7 @@ impl<E: Env> Db<E> {
         to_level: u32,
         gc: crate::merge::CompactGcOptions,
     ) -> Result<Option<PreparedL0Compact<E>>> {
-        if inputs.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(inputs.len() as u64) {
             return Ok(None);
         }
         let file_num = self.alloc_file_num();
