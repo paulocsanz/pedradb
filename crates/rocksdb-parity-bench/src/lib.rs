@@ -305,6 +305,8 @@ pub const COMPARE_SHAPES: &[&str] = &[
     "surreal_tx_get_mc4",
     // RFC-0184 P2.51: Oxigraph SPO lookup mc4 — 1c is suite-only.
     "oxigraph_spo_lookup_mc4",
+    // RFC-0184 P2.52: Solana trailing-read mc4 — 1c is suite-only.
+    "solana_trailing_read_mc4",
 ];
 
 /// Length of the RFC-0041 official prefix of [`COMPARE_SHAPES`].
@@ -2735,9 +2737,12 @@ impl YcsbRunner {
         let yval = vec![b'S'; self.cfg.payload];
         let mut rng = std::mem::take(&mut self.rng);
         let mut blocks = Vec::with_capacity(2);
+        if shape_wanted("solana_shred_append") || shape_wanted("solana_trailing_read") {
         for i in 0..records {
             assert!(e.put(&shred(i), &yval), "solana shred seed {i}");
         }
+        }
+        if shape_wanted("solana_shred_append") {
         let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut puts, mut errors) = (0u64, 0u64);
@@ -2775,7 +2780,9 @@ impl YcsbRunner {
                 *last = attach_diagnose(std::mem::take(last), Some(&d));
             }
         }
+        }
 
+        if shape_wanted("solana_trailing_read") {
         let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut scans, mut errors) = (0u64, 0u64);
@@ -2803,7 +2810,86 @@ impl YcsbRunner {
                 *last = attach_diagnose(std::mem::take(last), Some(&d));
             }
         }
+        }
         self.rng = rng;
+        blocks
+    }
+
+    /// RFC-0184 P2.52: solana_trailing_read at N clients (trailing slot scan).
+    pub fn run_solana_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
+        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
+        let full = format!("solana_trailing_read_mc{clients}");
+        if !shape_wanted(&full) {
+            return Vec::new();
+        }
+        e.set_write_sync(write_sync_for_suite("solana"));
+        let records = self.cfg.records;
+        let cfg_ops = self.cfg.ops;
+        let yval = vec![b'S'; self.cfg.payload];
+        for i in 0..records {
+            assert!(e.put(&shred(i), &yval), "solana mc seed {i}");
+        }
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+        let phase0 = e.write_phase_snapshot();
+        let t0 = Instant::now();
+        let mut lats = Vec::with_capacity(cfg_ops * clients);
+        let mut errors = 0u64;
+        std::thread::scope(|s| {
+            let handles: Vec<_> = (0..clients)
+                .map(|c| {
+                    let barrier = barrier.clone();
+                    s.spawn(move || {
+                        let mut rng =
+                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
+                        let mut lats = Vec::with_capacity(cfg_ops);
+                        let mut errors = 0u64;
+                        barrier.wait();
+                        for _ in 0..cfg_ops {
+                            let t = Instant::now();
+                            let u = self.pick(&mut rng, records).max(25);
+                            if e.scan_count(&shred(u - 25), &shred(u + 1), 25).is_err() {
+                                errors += 1;
+                            }
+                            lats.push(ms(t));
+                        }
+                        (lats, errors)
+                    })
+                })
+                .collect();
+            for h in handles {
+                let (mut l, err) = h.join().expect("solana client thread");
+                errors += err;
+                lats.append(&mut l);
+            }
+        });
+        let wall = t0.elapsed();
+        eprintln!(
+            "[rocks-parity] {full} done ops={} errors={errors}",
+            cfg_ops * clients
+        );
+        let mut blocks = vec![summarize_mc(
+            &full,
+            cfg_ops * clients,
+            wall,
+            &mut lats,
+            clients,
+            errors,
+        )];
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(
+                pct(&lats, 50.0),
+                a,
+                b,
+                clients as u64,
+                0.0,
+                100,
+                (cfg_ops * clients) as u64,
+            );
+            eprint_write_diagnose(&full, &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
         blocks
     }
 
@@ -5058,6 +5144,26 @@ mod tests {
     }
 
     #[test]
+    fn rfc0184_solana_trailing_read_mc4_in_compare() {
+        assert!(
+            COMPARE_SHAPES.contains(&"solana_trailing_read_mc4"),
+            "Solana trailing-read mc4 must be on the cartaz"
+        );
+        assert!(shape_wanted_in(
+            "solana_trailing_read_mc4",
+            Some("solana_trailing_read_mc4")
+        ));
+        assert!(
+            !shape_wanted_in("solana_trailing_read", Some("solana_trailing_read_mc4")),
+            "1c solana_trailing_read must not leak into ONLY=solana_trailing_read_mc4"
+        );
+        assert!(
+            !shape_wanted_in("solana_shred_append", Some("solana_trailing_read_mc4")),
+            "shred_append 1c must not leak into ONLY=solana_trailing_read_mc4"
+        );
+    }
+
+    #[test]
     fn rfc0178_mc_only_selects_full_mc_name() {
         assert!(shape_wanted_in(
             "deps_cache_overwrite_mc4",
@@ -5544,6 +5650,7 @@ mod tests {
             "arango_traversal_mc4",
             "surreal_tx_get_mc4",
             "oxigraph_spo_lookup_mc4",
+            "solana_trailing_read_mc4",
         ] {
             assert!(
                 COMPARE_SHAPES.contains(&name),

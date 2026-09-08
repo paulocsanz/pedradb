@@ -277,6 +277,12 @@ a linha quando há phasesΔ. Sem harness novo.
       Rocks `sync=false`: `ratio=0.985` (4.28 M / 4.34 M QPS) — named
       loss. Same-class async. p50 0.6 vs 0.8 µs. Not Linux cartaz. —
       status: `done`
+- [x] **P2.52** `solana_trailing_read_mc4` (trailing slot scan, 4 clients)
+      in `COMPARE_SHAPES`, `BALANCE_SHAPES`, and `run_solana_clients`.
+      Test `rfc0184_solana_trailing_read_mc4_in_compare`. Darwin DIAG vs
+      Rocks `sync=false`: `ratio=2.414` (2.34 M / 968 k QPS). Same-class
+      async. p50 0.3 vs 3.8 µs. Rocks 968 k 25-key scans is not collapsed.
+      Not Linux cartaz. — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -342,6 +348,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.49 | p2 | arango_traversal_mc4 COMPARE+BALANCE | done | Arango 2-hop mc4; Darwin DIAG 0.003× named loss | 2026-09-08 |
 | P2.50 | p2 | surreal_tx_get_mc4 COMPARE+BALANCE | done | Surreal snapshot-get mc4; Darwin DIAG 1.364; JSON host-default not a win | 2026-09-08 |
 | P2.51 | p2 | oxigraph_spo_lookup_mc4 COMPARE+BALANCE | done | Oxigraph SPO get mc4; Darwin DIAG 0.985× named loss | 2026-09-08 |
+| P2.52 | p2 | solana_trailing_read_mc4 COMPARE+BALANCE | done | Solana trailing-read mc4; Darwin DIAG 2.414× not Linux cartaz | 2026-09-08 |
 
 ## Acceptance Criteria
 
@@ -402,7 +409,8 @@ a linha quando há phasesΔ. Sem harness novo.
   `rfc0184_nebula_get_neighbors_mc4_in_compare` (P2.48);
   `rfc0184_arango_traversal_mc4_in_compare` (P2.49);
   `rfc0184_surreal_tx_get_mc4_in_compare` (P2.50);
-  `rfc0184_oxigraph_spo_lookup_mc4_in_compare` (P2.51).
+  `rfc0184_oxigraph_spo_lookup_mc4_in_compare` (P2.51);
+  `rfc0184_solana_trailing_read_mc4_in_compare` (P2.52).
 - **Telemetry / Analytics:** uma linha `diagnose dominant=… lever=…`;
   `benches[].diagnose.lever` no JSON; compare copia para a row.
   scale `get_hit` / `lookup_100` / `probe_hit` imprimem `diagnose get … class=…` (P2.6/P2.7/P2.21).
