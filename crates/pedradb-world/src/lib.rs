@@ -1584,7 +1584,9 @@ impl World {
                 }
                 let mut k = 0u32;
                 while let Some(d) = net.poll() {
-                    if !d.bytes.is_empty() && (1..=6).contains(&d.bytes[0]) {
+                    if !pedradb_core::write_admission_kernel::batch_is_empty(d.bytes.len() as u64)
+                        && (1..=6).contains(&d.bytes[0])
+                    {
                         if cluster.handle_inbound(d.from, d.to, &d.bytes).is_ok() {
                             k += 1;
                             trace.rpc_applied += 1;
