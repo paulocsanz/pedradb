@@ -75,3 +75,20 @@ theorem wal_rotate_inflight_keeps_on_as_is_pin :
       = ok WalRotateAction.KeepWal := by
   unfold wal_rotate_decision_as_is_ignore_pin
   rfl
+
+/-- Lock-order client: inflight ⇒ OCC uses published seq, and rotate keeps WAL. -/
+theorem occ_snap_published_and_rotate_keeps :
+    occ_snap_uses_published true = ok true ∧
+      wal_rotate_decision
+          { mem_empty := true, imm_present := false, pin_live := false,
+            parked_unflushed := false, commit_inflight := true }
+        = ok WalRotateAction.KeepWal := by
+  constructor
+  · unfold occ_snap_uses_published; rfl
+  · unfold wal_rotate_decision; rfl
+
+/-- AS-IS dente: last_seq while inflight. -/
+theorem occ_snap_uses_published_as_is_dente :
+    occ_snap_uses_published_as_is true = ok false := by
+  unfold occ_snap_uses_published_as_is
+  rfl

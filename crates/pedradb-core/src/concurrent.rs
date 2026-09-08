@@ -1807,7 +1807,7 @@ impl<E: Env> ConcurrentDb<E> {
     pub(crate) fn occ_snapshot(&self) -> SequenceNumber {
         match self.inner.try_read() {
             Some(g) => {
-                if g.commit_inflight() > 0 {
+                if crate::flush_kernel::occ_snap_uses_published(g.commit_inflight() > 0) {
                     self.published_seq.load(Ordering::Acquire)
                 } else {
                     g.last_sequence()

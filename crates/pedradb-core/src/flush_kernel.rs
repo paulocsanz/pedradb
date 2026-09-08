@@ -69,6 +69,20 @@ macro_rules! auto_flush_due_body {
     };
 }
 
+/// OCC snap uses published seq while a commit owns the WAL (lock-order).
+macro_rules! occ_snap_uses_published_body {
+    ($inflight:expr) => {
+        $inflight
+    };
+}
+
+macro_rules! occ_snap_uses_published_as_is_body {
+    ($inflight:expr) => {{
+        let _ = $inflight;
+        false
+    }};
+}
+
 macro_rules! skip_auto_flush_body {
     ($global_under:expr, $cf_under:expr) => {
         $global_under && $cf_under
@@ -156,6 +170,22 @@ pub fn wal_rotate_decision(s: WalPinState) -> WalRotateAction {
 #[must_use]
 pub fn wal_rotate_decision_as_is_ignore_pin(s: WalPinState) -> WalRotateAction {
     wal_rotate_as_is_body!(s)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// Lock-order client: OCC snapshot must not take `last_sequence` while a
+/// group is in the off-lock fd window (`commit_inflight`). That seq is
+/// unapplied; a snap equal to it misses the write and skips OCC conflict.
+#[must_use]
+pub fn occ_snap_uses_published(commit_inflight: bool) -> bool {
+    occ_snap_uses_published_body!(commit_inflight)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: always last_sequence (TOCTOU vs unapplied group).
+#[must_use]
+pub fn occ_snap_uses_published_as_is(_commit_inflight: bool) -> bool {
+    occ_snap_uses_published_as_is_body!(_commit_inflight)
 }
 
 #[cfg(not(verus_keep_ghost))]
@@ -281,6 +311,25 @@ pub fn wal_rotate_decision_as_is_ignore_pin(s: WalPinState) -> (a: WalRotateActi
         a == wal_rotate_as_is_ignore_pin(s),
 {
     wal_rotate_as_is_body!(s)
+}
+
+pub open spec fn occ_snap_uses_published_spec(commit_inflight: bool) -> bool {
+    commit_inflight
+}
+
+pub fn occ_snap_uses_published(commit_inflight: bool) -> (d: bool)
+    ensures
+        d == occ_snap_uses_published_spec(commit_inflight),
+        d == commit_inflight,
+{
+    occ_snap_uses_published_body!(commit_inflight)
+}
+
+pub fn occ_snap_uses_published_as_is(commit_inflight: bool) -> (d: bool)
+    ensures
+        d == false,
+{
+    occ_snap_uses_published_as_is_body!(commit_inflight)
 }
 
 pub open spec fn may_publish_manifest_spec(sst_durable: bool) -> bool {
@@ -582,6 +631,21 @@ mod tests {
             "AS-IS dente: MANIFEST names unsynced SST"
         );
         assert!(may_publish_manifest(true));
+    }
+
+    #[test]
+    fn occ_snap_uses_published_on_live_inflight_is_not_ok() {
+        assert!(occ_snap_uses_published(true));
+        assert!(!occ_snap_uses_published(false));
+        assert!(
+            !occ_snap_uses_published_as_is(true),
+            "AS-IS dente: last_seq while inflight"
+        );
+        let src = include_str!("concurrent.rs");
+        assert!(
+            src.contains("occ_snap_uses_published("),
+            "occ_snapshot must match occ_snap_uses_published"
+        );
     }
 
     #[test]

@@ -2875,6 +2875,25 @@
       }
     },
     {
+      "id": "occ_snap_published",
+      "finding": "RFC-0045 P2.1 lock-order",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/flush_kernel.rs",
+      "twin": "crates/pedradb-core/src/flush_kernel.rs",
+      "verus": "scripts/verus_flush_decision.sh",
+      "callers": ["crates/pedradb-core/src/concurrent.rs"],
+      "entry": "occ_snap_uses_published",
+      "data_fate": true,
+      "handlers": ["occ_snapshot"],
+      "as_is": "occ_snap_uses_published_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/flush_kernel.rs",
+        "test": "occ_snap_uses_published_on_live_inflight_is_not_ok"
+      }
+    },
+    {
       "id": "group_commit",
       "finding": "RFC-0051-P1.3/RFC-0057-P2.1",
       "twin_kind": "close",
