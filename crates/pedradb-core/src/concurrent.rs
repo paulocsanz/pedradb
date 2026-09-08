@@ -1517,10 +1517,22 @@ impl WriteGroup {
         #[cfg(test)]
         maybe_test_wal_gap();
         let io_err = {
+            let mut deferred: Vec<&[crate::batch::WriteOp]> = Vec::new();
+            for chunk in &chunks {
+                if let Chunk::Fly(inf) = chunk {
+                    inf.collect_deferred_wal(&mut deferred);
+                }
+            }
             let mut w = wal.lock();
-            // G1: write + fdatasync before Ok. Async: write() per group,
-            // no fdatasync — same process-crash class as RocksDB default.
-            w.write_pending_frame().err().or_else(|| {
+            // G1: frame already encoded under the write lock; write +
+            // fdatasync here. Async: encode+write in this one hop (RFC-0180
+            // P0.40) — same process-crash class as RocksDB default.
+            let write_err = if deferred.is_empty() {
+                w.write_pending_frame().err()
+            } else {
+                w.encode_and_write_op_batches(&deferred).err()
+            };
+            write_err.or_else(|| {
                 if need_sync {
                     let t_fd = Instant::now();
                     let r = w.sync_data().err();
@@ -4195,6 +4207,60 @@ mod tests {
                     db.get(&[b'g', t, i]).as_deref(),
                     Some(payload.as_slice()),
                     "lost concurrent async put t{t}/{i}"
+                );
+            }
+        }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0180 P0.40: async group encodes+writes off the Db write lock
+    /// in one WAL hop. Four clients must still recover.
+    #[test]
+    fn rfc0180_async_group_wal_one_hop_recovers() {
+        let dir = temp_dir();
+        const THREADS: u8 = 4;
+        const PER: u8 = 16;
+        {
+            let db = ConcurrentDb::open_with(
+                &dir,
+                OpenOptions {
+                    wal_full_fsync: true,
+                    history: Default::default(),
+                    wal_recovery: Default::default(),
+                    sync: false,
+                    auto_flush_bytes: None,
+                    auto_compact_sst_count: None,
+                    auto_compact_sst_bytes: None,
+                    exclusive: true,
+                    large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
+                },
+            )
+            .unwrap();
+            let payload = vec![b'w'; 64];
+            std::thread::scope(|s| {
+                for t in 0..THREADS {
+                    let db = &db;
+                    let payload = &payload;
+                    s.spawn(move || {
+                        for i in 0..PER {
+                            db.put_with([b'w', t, i], payload, WriteOptions::no_sync())
+                                .unwrap();
+                        }
+                    });
+                }
+            });
+            db.close().unwrap();
+        }
+        let db = ConcurrentDb::open(&dir).unwrap();
+        let payload = vec![b'w'; 64];
+        for t in 0..THREADS {
+            for i in 0..PER {
+                assert_eq!(
+                    db.get(&[b'w', t, i]).as_deref(),
+                    Some(payload.as_slice()),
+                    "lost async group put t{t}/{i}"
                 );
             }
         }
