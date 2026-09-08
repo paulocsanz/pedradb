@@ -2848,7 +2848,7 @@ impl<E: PedraEnv> DB<E> {
         // RFC-0159 P1.5: latched first-CF run skips BatchOp / WriteGroup.
         // Hydrate is 1024 data + 1 meta; only `data` latches.
         if pedradb_core::write_admission_kernel::batch_is_empty(deletes.len() as u64)
-            && !puts.is_empty()
+            && !pedradb_core::write_admission_kernel::batch_is_empty(puts.len() as u64)
         {
             let family = puts[0].0;
             if self.inner.family_is_latched_async(family) {
