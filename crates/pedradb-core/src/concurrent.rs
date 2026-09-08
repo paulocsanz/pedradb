@@ -2878,7 +2878,9 @@ impl<E: Env> ConcurrentDb<E> {
     /// cache. Returns whether a file was written.
     #[must_use]
     pub fn materialize_parked_once(&self) -> bool {
-        if self.inner.read().parked_unflushed_count() == 0 {
+        if crate::write_admission_kernel::batch_is_empty(
+            self.inner.read().parked_unflushed_count() as u64,
+        ) {
             return false;
         }
         let _flush = self.flush_lock.lock();
