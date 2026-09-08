@@ -279,6 +279,8 @@ pub const COMPARE_SHAPES: &[&str] = &[
     // RFC-0184 P2.40: Quicksilver hot-get mc4 — 1c qs_hot_get is official qs
     // suite only; concurrent hot 10% + 1% batch was invisible on the cartaz.
     "qs_hot_get_mc4",
+    // RFC-0184 P2.41: Quicksilver negative lookup mc4 — 1c is qs suite only.
+    "qs_neg_lookup_mc4",
     // RFC-0043 — Rockset (→OpenAI) converged index. Ingest batch + point get.
     "rockset_hybrid",
     // YugabyteDB DocDB: intents CF + committed CF (Rocks-based).
@@ -994,14 +996,12 @@ impl YcsbRunner {
         blocks
     }
 
-    /// RFC-0184 P2.40: qs_hot_get at N clients (99% get on the hot 10%,
-    /// 1% WriteBatch on that set). Same mix as 1c `run_qs`.
+    /// RFC-0184 P2.40/P2.41: qs_hot_get and qs_neg_lookup at N clients.
     pub fn run_qs_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
         assert!(clients >= 2, "multi-client harness needs >= 2 clients");
+        let mut out = Vec::new();
         let full = format!("qs_hot_get_mc{clients}");
-        if !shape_wanted(&full) {
-            return Vec::new();
-        }
+        if shape_wanted(&full) {
         if mc_fresh_enabled() {
             self.seed(e);
         }
@@ -1103,7 +1103,80 @@ impl YcsbRunner {
                 *last = attach_diagnose(std::mem::take(last), Some(&d));
             }
         }
-        blocks
+        out.extend(blocks);
+        }
+
+        let neg = format!("qs_neg_lookup_mc{clients}");
+        if shape_wanted(&neg) {
+            if mc_fresh_enabled() {
+                self.seed(e);
+            }
+            let records = self.cfg.records;
+            let cfg_ops = self.cfg.ops;
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+            let phase0 = e.write_phase_snapshot();
+            let t0 = Instant::now();
+            let mut lats = Vec::with_capacity(cfg_ops * clients);
+            let mut errors = 0u64;
+            std::thread::scope(|s| {
+                let handles: Vec<_> = (0..clients)
+                    .map(|c| {
+                        let barrier = barrier.clone();
+                        s.spawn(move || {
+                            let mut rng =
+                                0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
+                            let mut lats = Vec::with_capacity(cfg_ops);
+                            let mut errors = 0u64;
+                            barrier.wait();
+                            for _ in 0..cfg_ops {
+                                let t = Instant::now();
+                                let u = records + (xorshift(&mut rng) as usize % records.max(1));
+                                if e.get(&ykey(u)).is_err() {
+                                    errors += 1;
+                                }
+                                lats.push(ms(t));
+                            }
+                            (lats, errors)
+                        })
+                    })
+                    .collect();
+                for h in handles {
+                    let (mut l, err) = h.join().expect("client thread");
+                    errors += err;
+                    lats.append(&mut l);
+                }
+            });
+            let wall = t0.elapsed();
+            eprintln!(
+                "[rocks-parity] qs_neg_lookup mc{clients} done ops={} errors={errors}",
+                cfg_ops * clients
+            );
+            let mut blocks = vec![summarize_mc(
+                &neg,
+                cfg_ops * clients,
+                wall,
+                &mut lats,
+                clients,
+                errors,
+            )];
+            if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+                let d = diagnose_from_phases_n(
+                    pct(&lats, 50.0),
+                    a,
+                    b,
+                    clients as u64,
+                    0.0,
+                    100,
+                    (cfg_ops * clients) as u64,
+                );
+                eprint_write_diagnose(&neg, &d);
+                if let Some(last) = blocks.last_mut() {
+                    *last = attach_diagnose(std::mem::take(last), Some(&d));
+                }
+            }
+            out.extend(blocks);
+        }
+        out
     }
 
     /// RFC-0043 P2.3 — Apache Kvrocks (Redis protocol on RocksDB).
@@ -3787,6 +3860,26 @@ mod tests {
     }
 
     #[test]
+    fn rfc0184_qs_neg_lookup_mc4_in_compare() {
+        assert!(
+            COMPARE_SHAPES.contains(&"qs_neg_lookup_mc4"),
+            "Quicksilver neg-lookup mc4 must be on the cartaz"
+        );
+        assert!(shape_wanted_in(
+            "qs_neg_lookup_mc4",
+            Some("qs_neg_lookup_mc4")
+        ));
+        assert!(
+            !shape_wanted_in("qs_neg_lookup", Some("qs_neg_lookup_mc4")),
+            "1c qs_neg_lookup must not leak into ONLY=qs_neg_lookup_mc4"
+        );
+        assert!(
+            !shape_wanted_in("qs_hot_get_mc4", Some("qs_neg_lookup_mc4")),
+            "hot-get mc4 must not leak into ONLY=qs_neg_lookup_mc4"
+        );
+    }
+
+    #[test]
     fn rfc0178_mc_only_selects_full_mc_name() {
         assert!(shape_wanted_in(
             "deps_cache_overwrite_mc4",
@@ -4260,6 +4353,7 @@ mod tests {
             "ycsb_b_mc4",
             "ycsb_c_mc4",
             "qs_hot_get_mc4",
+            "qs_neg_lookup_mc4",
             "rockset_hybrid",
             "yugabyte_docdb_rmw",
         ] {
