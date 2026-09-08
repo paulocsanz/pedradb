@@ -6977,7 +6977,9 @@ impl<E: Env> Db<E> {
             let target = crate::leveling::level_target_bytes(level, self.l1_target_bytes);
             for cf in &families {
                 let src_view = self.level_view(level, cf);
-                if src_view.is_empty() || crate::leveling::total_bytes(&src_view) <= target {
+                if crate::write_admission_kernel::batch_is_empty(src_view.len() as u64)
+                    || crate::leveling::total_bytes(&src_view) <= target
+                {
                     continue;
                 }
                 let dst_view = self.level_view(level + 1, cf);
