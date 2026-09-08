@@ -1942,7 +1942,9 @@ impl MemTable {
                         *cand = Some(uk.clone());
                     }
                 }
-                if short_ok && !shard.point.is_empty() {
+                if short_ok
+                    && !crate::write_admission_kernel::batch_is_empty(shard.point.len() as u64)
+                {
                     point_pfxs.push(pfx.clone());
                 }
             };
