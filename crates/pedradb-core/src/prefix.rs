@@ -1,11 +1,17 @@
 //! Exclusive end of a prefix scan (F57 / F58).
 //!
+//! **Single artifact:** this file is what `rustc` links *and* what Verus
+//! proves (`cfg(verus_keep_ghost)`). No twin-cópia.
+//!
+//!   ./scripts/verus_prefix_exclusive_end.sh
+//!
 //! Increment the last non-`0xff` byte. `None` = unbounded (empty or all-`0xff`).
 //! Store, fold, and SQL must call **this** function — not `prefix || [0xff]`.
 
 #![forbid(unsafe_code)]
 
 /// Next key after every key that starts with `prefix` (exclusive end).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn prefix_exclusive_end(prefix: &[u8]) -> Option<Vec<u8>> {
     let mut e = prefix.to_vec();
@@ -21,6 +27,7 @@ pub fn prefix_exclusive_end(prefix: &[u8]) -> Option<Vec<u8>> {
 }
 
 /// AS-IS F57/F58: `prefix || 0xff`. Drops `prefix || 0xff || …`.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn prefix_exclusive_end_as_is(prefix: &[u8]) -> Option<Vec<u8>> {
     let mut e = prefix.to_vec();
@@ -29,6 +36,7 @@ pub fn prefix_exclusive_end_as_is(prefix: &[u8]) -> Option<Vec<u8>> {
 }
 
 /// Whether `key` is in `[prefix, end)` (bytewise). `end = None` is unbounded.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn key_in_prefix_range(key: &[u8], prefix: &[u8], end: Option<&[u8]>) -> bool {
     if !key.starts_with(prefix) {
@@ -39,6 +47,158 @@ pub fn key_in_prefix_range(key: &[u8], prefix: &[u8], end: Option<&[u8]>) -> boo
         Some(e) => key < e,
     }
 }
+
+#[cfg(verus_keep_ghost)]
+use vstd::prelude::*;
+
+#[cfg(verus_keep_ghost)]
+verus! {
+
+pub open spec fn bump_non_ff_spec(b: u8) -> Option<u8> {
+    if b < 0xff {
+        Some((b + 1) as u8)
+    } else {
+        None
+    }
+}
+
+fn bump_non_ff(b: u8) -> (r: Option<u8>)
+    ensures
+        r == bump_non_ff_spec(b),
+        (b < 0xff) ==> r == Some((b + 1) as u8),
+        (b == 0xff) ==> r.is_none(),
+{
+    if b < 0xff {
+        Some((b + 1) as u8)
+    } else {
+        None
+    }
+}
+
+pub open spec fn prefix_exclusive_end_spec(p: Seq<u8>) -> Option<Seq<u8>>
+    decreases p.len(),
+{
+    if p.len() == 0 {
+        None
+    } else {
+        let last = p[p.len() as int - 1];
+        if last < 0xff {
+            Some(p.update(p.len() as int - 1, (last + 1) as u8))
+        } else {
+            prefix_exclusive_end_spec(p.subrange(0, p.len() as int - 1))
+        }
+    }
+}
+
+pub open spec fn prefix_exclusive_end_as_is_spec(p: Seq<u8>) -> Seq<u8> {
+    p + seq![0xffu8]
+}
+
+fn clone_bytes(prefix: &[u8]) -> (e: Vec<u8>)
+    ensures
+        e@ == prefix@,
+{
+    let mut e: Vec<u8> = Vec::new();
+    let mut k: usize = 0;
+    while k < prefix.len()
+        invariant
+            k <= prefix.len(),
+            e@ == prefix@.subrange(0, k as int),
+        decreases prefix.len() - k,
+    {
+        e.push(prefix[k]);
+        k = k + 1;
+    }
+    e
+}
+
+pub fn prefix_exclusive_end(prefix: &[u8]) -> (r: Option<Vec<u8>>)
+    ensures
+        match (r, prefix_exclusive_end_spec(prefix@)) {
+            (None, None) => true,
+            (Some(v), Some(s)) => v@ == s,
+            _ => false,
+        },
+{
+    let mut e = clone_bytes(prefix);
+    while e.len() > 0
+        invariant
+            prefix_exclusive_end_spec(prefix@) == prefix_exclusive_end_spec(e@),
+        decreases e.len(),
+    {
+        let i: usize = (e.len() - 1) as usize;
+        let last: u8 = e[i];
+        if last < 0xff {
+            let bumped: u8 = (last + 1) as u8;
+            let ghost before = e@;
+            proof {
+                assert(i as int == before.len() as int - 1);
+                assert(last == before[i as int]);
+                assert(last < 0xff);
+                assert((last + 1) as u8 == bumped);
+                assert(prefix_exclusive_end_spec(before) == Some(before.update(i as int, bumped)));
+            }
+            e.set(i, bumped);
+            proof {
+                assert(e@ == before.update(i as int, bumped));
+            }
+            return Some(e);
+        }
+        let ghost before = e@;
+        let popped = e.pop();
+        proof {
+            assert(popped == Some(0xffu8));
+            assert(e@ == before.subrange(0, before.len() as int - 1));
+            assert(prefix_exclusive_end_spec(before) == prefix_exclusive_end_spec(e@));
+        }
+        let _ = popped;
+    }
+    None
+}
+
+pub fn prefix_exclusive_end_as_is(prefix: &[u8]) -> (r: Option<Vec<u8>>)
+    ensures
+        r.is_some(),
+        r.unwrap()@ == prefix_exclusive_end_as_is_spec(prefix@),
+{
+    let mut e = clone_bytes(prefix);
+    e.push(0xff);
+    Some(e)
+}
+
+pub open spec fn as_is_ff_wall_spec() -> u8 {
+    0xff
+}
+
+proof fn lemma_as_is_wall_excludes_ff_continuation()
+    ensures
+        as_is_ff_wall_spec() == 0xffu8,
+        0xffu8 <= as_is_ff_wall_spec(),
+{
+}
+
+proof fn lemma_bump_is_above(b: u8)
+    requires
+        b < 0xff,
+    ensures
+        bump_non_ff_spec(b).unwrap() > b,
+{
+}
+
+proof fn lemma_empty_is_unbounded()
+    ensures
+        prefix_exclusive_end_spec(Seq::<u8>::empty()) is None,
+{
+}
+
+proof fn lemma_as_is_differs_on_empty()
+    ensures
+        prefix_exclusive_end_spec(Seq::<u8>::empty()) is None,
+        prefix_exclusive_end_as_is_spec(Seq::<u8>::empty()) == seq![0xffu8],
+{
+}
+
+} // verus!
 
 #[cfg(test)]
 mod tests {

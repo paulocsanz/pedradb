@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Machine-check prefix exclusive-end byte rule (RFC-0002 P11 / F57 / F58).
+# Machine-check prefix exclusive-end on the file rustc links
+# (single artifact — not the twin-cópia). RFC-0002 P11 / F57 / F58.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-core/verus/prefix_exclusive_end.rs"
+SRC="$ROOT/crates/pedradb-core/src/prefix.rs"
 if [[ -x "${VERUS:-}" ]]; then
   :
 elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then

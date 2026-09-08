@@ -1565,8 +1565,9 @@
       "finding": "F57/F58",
       "twin_kind": "close",
       "atom": "bump_non_ff",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/prefix.rs",
-      "twin": "crates/pedradb-core/verus/prefix_exclusive_end.rs",
+      "twin": "crates/pedradb-core/src/prefix.rs",
       "verus": "scripts/verus_prefix_exclusive_end.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs",
