@@ -366,7 +366,7 @@ impl HistoryTier {
         let (key_lo, key_hi) = match key_coverage {
             // An empty segment carries no coverage — keep `None` (always
             // walks; decode of an all-empty tier stays `None` too).
-            Some((lo, hi)) if !crate::write_admission_kernel::batch_is_empty(lo.len() as u64) || !hi.is_empty() => (Some(lo), Some(hi)),
+            Some((lo, hi)) if !crate::write_admission_kernel::batch_is_empty(lo.len() as u64) || !crate::write_admission_kernel::batch_is_empty(hi.len() as u64) => (Some(lo), Some(hi)),
             _ => (None, None),
         };
         self.manifest.segs.push_back(SegmentMeta {
