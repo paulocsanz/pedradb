@@ -38,12 +38,7 @@ pub fn first_probe_on_equal_lo_as_is(_newer: usize, older: usize) -> usize {
 /// skipped, never panic. P0.2 wires the engine walk to `probe_order`; the
 /// transitional dead-code allow ends there.
 #[cfg_attr(not(test), allow(dead_code))]
-fn probe_order(
-    los: &[&[u8]],
-    his: &[&[u8]],
-    newest_first: &[usize],
-    key: &[u8],
-) -> Vec<usize> {
+fn probe_order(los: &[&[u8]], his: &[&[u8]], newest_first: &[usize], key: &[u8]) -> Vec<usize> {
     newest_first
         .iter()
         .copied()
@@ -57,18 +52,43 @@ fn probe_order(
 /// the caller's `partition_point_gt(key)` over the los (`pos < prefix_end`
 /// ⟺ `lo(pos) <= key`); `hi_ge(pos)` reports `hi(pos) >= key`. A table
 /// missing from `by_lo` is kept, matching the engine's walk.
+/// Rank of each `newest_first[k]` inside `by_lo`, or `u32::MAX` if absent.
+/// Built once per run rebuild — [`probe_order_covering`] must not scan
+/// `by_lo` per get (RFC-0178 P0.15).
+#[must_use]
+pub(crate) fn by_lo_rank(newest_first: &[usize], by_lo: &[usize]) -> Vec<u32> {
+    newest_first
+        .iter()
+        .map(|&i| {
+            by_lo
+                .iter()
+                .position(|&j| j == i)
+                .map(|p| p as u32)
+                .unwrap_or(u32::MAX)
+        })
+        .collect()
+}
+
+/// Engine-facing packed image of [`probe_order`]. `by_lo_pos` is
+/// [`by_lo_rank`] — `u32::MAX` keeps a table missing from `by_lo`.
 pub(crate) fn probe_order_covering<'a>(
     newest_first: &'a [usize],
-    by_lo: &'a [usize],
+    by_lo_pos: &'a [u32],
     prefix_end: usize,
     hi_ge: impl Fn(usize) -> bool + 'a,
 ) -> impl Iterator<Item = usize> + 'a {
-    newest_first.iter().copied().filter(move |&i| {
-        match by_lo.iter().position(|&j| j == i) {
-            Some(pos) => pos < prefix_end && hi_ge(pos),
-            None => true,
-        }
-    })
+    newest_first
+        .iter()
+        .copied()
+        .zip(by_lo_pos.iter().copied())
+        .filter_map(move |(i, pos)| {
+            if pos == u32::MAX {
+                Some(i)
+            } else {
+                let p = pos as usize;
+                (p < prefix_end && hi_ge(p)).then_some(i)
+            }
+        })
 }
 
 /// Strict-disjoint fast-path arm (RFC-0164 P1.2): a run indexed by `lo`
@@ -158,7 +178,12 @@ mod tests {
     /// newer's — descending-lo still hits the older table first.
     #[test]
     fn overlap_distinct_los_still_inverts_as_is() {
-        let (a, b, m, z) = (b"a".as_slice(), b"b".as_slice(), b"m".as_slice(), b"z".as_slice());
+        let (a, b, m, z) = (
+            b"a".as_slice(),
+            b"b".as_slice(),
+            b"m".as_slice(),
+            b"z".as_slice(),
+        );
         // table 0 (older): [b, z]; table 1 (newer): [a, m]; key = b.
         let los = [b, a];
         let his = [z, m];
@@ -171,7 +196,12 @@ mod tests {
     /// path stays legitimate exactly here).
     #[test]
     fn disjoint_run_agrees() {
-        let (a, b, c, d) = (b"a".as_slice(), b"b".as_slice(), b"c".as_slice(), b"d".as_slice());
+        let (a, b, c, d) = (
+            b"a".as_slice(),
+            b"b".as_slice(),
+            b"c".as_slice(),
+            b"d".as_slice(),
+        );
         let los = [a, c];
         let his = [b, d];
         let newest_first = [1, 0];
@@ -215,16 +245,21 @@ mod tests {
             vec![0],
             "only the older table covers k (newer hi c < k)"
         );
+        let rank = by_lo_rank(&newest_first, &by_lo);
+        assert_eq!(rank, vec![0, 1]);
         let packed: Vec<usize> =
-            probe_order_covering(&newest_first, &by_lo, 2, |pos| his_sorted[pos] >= k).collect();
+            probe_order_covering(&newest_first, &rank, 2, |pos| his_sorted[pos] >= k).collect();
         assert_eq!(packed, vec![0]);
 
         // Equal-lo tie: both tables [k,k]; the packed image keeps the
         // newest-first order exactly like the spec.
         let los_tie = [k, k];
         let his_tie = [k, k];
-        assert_eq!(probe_order(&los_tie, &his_tie, &newest_first, k), vec![1, 0]);
-        let tie: Vec<usize> = probe_order_covering(&newest_first, &by_lo, 2, |pos| {
+        assert_eq!(
+            probe_order(&los_tie, &his_tie, &newest_first, k),
+            vec![1, 0]
+        );
+        let tie: Vec<usize> = probe_order_covering(&newest_first, &rank, 2, |pos| {
             his_tie.get(pos).is_some() && los_tie.get(pos).is_some()
         })
         .collect();

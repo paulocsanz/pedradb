@@ -134,6 +134,10 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
 - [x] **P0.14** `lookup` com mem viva usa `sst_envelope` (o path packed
       já rejeitava). probe_miss past-hi não bloom-walk. Teste
       `rfc0178_mem_live_envelope_skips_sst_probe_miss`. — status: `done`
+- [x] **P0.15** Overlapping-run `probe_order_covering`: rank pré-computado
+      (`by_lo_rank` / `SstRun.by_lo_pos`) em vez de `position` O(n) por
+      tabela por get. Teste `packed_covering_matches_probe_order`.
+      — status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
 
@@ -173,6 +177,7 @@ Não: mmap, `unsafe`, WARM 100M no 4 GiB, chunk 4 MiB, v8, 0175.
 | P0.12 | p0 | adaptive async group 2–8 | done | overwrite_mc4 0.61× 3-run (era 0.45×); still named loss | 2026-09-07 |
 | P0.13 | p0 | TLS precise n≤32 (get_path) | done | group no longer epoch-bumps zipf last-get | 2026-09-07 |
 | P0.14 | p0 | mem-live lookup uses sst_envelope | done | probe_miss past-hi skips SST bloom walk | 2026-09-08 |
+| P0.15 | p0 | overlapping probe by_lo_rank O(1) | done | no per-get position scan | 2026-09-08 |
 | P1.1 | p1 | probe_miss ≥1× 3-run caixa | todo | — | 2026-09-06 |
 | P1.2 | p1 | prefix 0,70× → ≥1× caixa | todo | — | 2026-09-06 |
 | P1.3 | p1 | overwrite isolado ≥1× caixa | todo | Darwin 0180; 3/3 quiet 0182 P1.1 | 2026-09-07 |
