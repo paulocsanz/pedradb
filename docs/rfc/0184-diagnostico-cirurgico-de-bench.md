@@ -271,6 +271,12 @@ a linha quando há phasesΔ. Sem harness novo.
       (seed async); JSON suite tag is host-default (`peer_sync=true`),
       not a published win vs Rocks default. p50 10 vs 12 µs. Not Linux
       cartaz. — status: `done`
+- [x] **P2.51** `oxigraph_spo_lookup_mc4` (SPO point get, 4 clients)
+      in `COMPARE_SHAPES`, `BALANCE_SHAPES`, and `run_oxigraph_clients`.
+      Test `rfc0184_oxigraph_spo_lookup_mc4_in_compare`. Darwin DIAG vs
+      Rocks `sync=false`: `ratio=0.985` (4.28 M / 4.34 M QPS) — named
+      loss. Same-class async. p50 0.6 vs 0.8 µs. Not Linux cartaz. —
+      status: `done`
 
 ## Status (living — update with every PR)
 
@@ -335,6 +341,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.48 | p2 | nebula_get_neighbors_mc4 COMPARE+BALANCE | done | Nebula 1-hop mc4; Darwin DIAG 0.776× named loss | 2026-09-08 |
 | P2.49 | p2 | arango_traversal_mc4 COMPARE+BALANCE | done | Arango 2-hop mc4; Darwin DIAG 0.003× named loss | 2026-09-08 |
 | P2.50 | p2 | surreal_tx_get_mc4 COMPARE+BALANCE | done | Surreal snapshot-get mc4; Darwin DIAG 1.364; JSON host-default not a win | 2026-09-08 |
+| P2.51 | p2 | oxigraph_spo_lookup_mc4 COMPARE+BALANCE | done | Oxigraph SPO get mc4; Darwin DIAG 0.985× named loss | 2026-09-08 |
 
 ## Acceptance Criteria
 
@@ -394,7 +401,8 @@ a linha quando há phasesΔ. Sem harness novo.
   `rfc0184_myrocks_point_select_mc4_in_compare` (P2.47);
   `rfc0184_nebula_get_neighbors_mc4_in_compare` (P2.48);
   `rfc0184_arango_traversal_mc4_in_compare` (P2.49);
-  `rfc0184_surreal_tx_get_mc4_in_compare` (P2.50).
+  `rfc0184_surreal_tx_get_mc4_in_compare` (P2.50);
+  `rfc0184_oxigraph_spo_lookup_mc4_in_compare` (P2.51).
 - **Telemetry / Analytics:** uma linha `diagnose dominant=… lever=…`;
   `benches[].diagnose.lever` no JSON; compare copia para a row.
   scale `get_hit` / `lookup_100` / `probe_hit` imprimem `diagnose get … class=…` (P2.6/P2.7/P2.21).
