@@ -6319,7 +6319,7 @@ impl<E: Env> StoreCluster<E> {
                 .map(|(k, _)| k.to_vec())
                 .filter(|k| snapshot_kernel::snapshot_touches_user_key(is_reserved_store_key(k)))
                 .collect();
-            if !stale.is_empty() {
+            if !pedradb_core::write_admission_kernel::batch_is_empty(stale.len() as u64) {
                 let ops: Vec<BatchOp> = stale.into_iter().map(BatchOp::delete).collect();
                 n.db.apply_batch(ops)?;
             }
