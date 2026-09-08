@@ -4227,7 +4227,7 @@ impl<E: Env> StoreCluster<E> {
                 hist_writes.push((hist_key(k), encode_hist(hist)));
             }
         }
-        if hist_writes.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(hist_writes.len() as u64) {
             return Ok(());
         }
         let nids: Vec<u64> = self.nodes.keys().copied().collect();
