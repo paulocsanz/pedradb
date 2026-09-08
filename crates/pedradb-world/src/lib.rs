@@ -1001,7 +1001,9 @@ impl World {
             while let Some(d) = net.poll() {
                 got += 1;
                 // PeerMsg tags 1..=6 (incl. InstallSnapshot).
-                if d.bytes.is_empty() || !(1..=6).contains(&d.bytes[0]) {
+                if pedradb_core::write_admission_kernel::batch_is_empty(d.bytes.len() as u64)
+                    || !(1..=6).contains(&d.bytes[0])
+                {
                     continue;
                 }
                 inbound.push((d.from, d.to, d.bytes));
