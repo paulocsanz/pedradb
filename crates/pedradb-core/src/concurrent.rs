@@ -3030,7 +3030,7 @@ impl<E: Env> ConcurrentDb<E> {
     /// Safe during a write burst: absorb does not hold the Db write lock.
     pub fn fold_retired_pending_off_lock(&self) {
         let pending = self.inner.write().take_retired_pending();
-        if pending.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(pending.len() as u64) {
             return;
         }
         let mut built = crate::memtable::MemTable::new();

@@ -790,6 +790,12 @@ mod tests {
             off.contains("batch_is_empty("),
             "finish_group_off_lock must match batch_is_empty"
         );
+        let fold = named_fn_src(include_str!("concurrent.rs"), "fold_retired_pending_off_lock")
+            .expect("fold_retired_pending_off_lock");
+        assert!(
+            fold.contains("batch_is_empty("),
+            "fold_retired_pending_off_lock must match batch_is_empty"
+        );
     }
 
     #[test]
