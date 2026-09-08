@@ -1,5 +1,11 @@
 //! CQE ownership for the Linux io_uring path (U1 / F203 follow-up).
 //!
+//! **Single artifact (pair `cqe_res`):** this file is what `rustc` links
+//! *and* what Verus proves (`cfg(verus_keep_ghost)`). `cqe_res_ok` is the
+//! term — not a ring model (`cqe_ring_model_admitted` stays false).
+//!
+//!   ./scripts/verus_cqe_res.sh
+//!
 //! Production Linux `ring::UringState` is the only caller. Bytes on disk, the
 //! ring, and `submit_and_wait` are **caller + axiom**.
 //!
@@ -93,17 +99,72 @@ pub enum SubmitCompleteAct {
 pub static F208_WAITMORE_AFTER_SUBMIT_ERR: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
+macro_rules! cqe_res_ok_body {
+    ($res:expr) => {
+        $res >= 0
+    };
+}
+
+macro_rules! cqe_res_ok_as_is_body {
+    ($res:expr) => {{
+        let _ = $res;
+        true
+    }};
+}
+
 /// Admit a harvested CQE `res` (RFC-0074). Negative is a kernel errno, not Ok.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn cqe_res_ok(res: i32) -> bool {
-    res >= 0
+    cqe_res_ok_body!(res)
 }
 
 /// AS-IS: treat any CQE as success (the 0074 hole — false Ok on fsync).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn cqe_res_ok_as_is(_res: i32) -> bool {
+    cqe_res_ok_as_is_body!(_res)
+}
+
+#[cfg(verus_keep_ghost)]
+use vstd::prelude::*;
+
+#[cfg(verus_keep_ghost)]
+verus! {
+
+pub open spec fn cqe_res_ok_spec(res: i32) -> bool {
+    res >= 0
+}
+
+pub open spec fn cqe_res_ok_as_is_spec(_res: i32) -> bool {
     true
 }
+
+pub fn cqe_res_ok(res: i32) -> (ok: bool)
+    ensures
+        ok == cqe_res_ok_spec(res),
+{
+    cqe_res_ok_body!(res)
+}
+
+pub fn cqe_res_ok_as_is(_res: i32) -> (ok: bool)
+    ensures
+        ok == cqe_res_ok_as_is_spec(_res),
+{
+    cqe_res_ok_as_is_body!(_res)
+}
+
+proof fn lemma_negative_res_is_not_ok()
+    ensures
+        cqe_res_ok_spec(0i32),
+        cqe_res_ok_spec(16i32),
+        !cqe_res_ok_spec(-5i32),
+        !cqe_res_ok_spec(-1i32),
+        cqe_res_ok_as_is_spec(-5i32),
+{
+}
+
+} // verus!
 
 /// RFC-0074 P2.2 / R-uring: a Verus twin of the io_uring *ring* (submit_sqe,
 /// harvest, SQE layout). Always false. `cqe_res_ok` is cataloged; the ring

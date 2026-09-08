@@ -4171,8 +4171,9 @@
       "id": "cqe_res",
       "finding": "RFC-0074",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-io-uring/src/cqe_kernel.rs",
-      "twin": "crates/pedradb-io-uring/verus/cqe_res.rs",
+      "twin": "crates/pedradb-io-uring/src/cqe_kernel.rs",
       "verus": "scripts/verus_cqe_res.sh",
       "callers": [
         "crates/pedradb-io-uring/src/ring.rs"
