@@ -5216,7 +5216,7 @@ impl<E: Env> Db<E> {
         let mut taken = self.mem.take_family(family);
         if let Some(ref mut imm) = self.imm {
             taken.absorb(imm.take_family(family));
-            if imm.is_empty() {
+            if crate::write_admission_kernel::batch_is_empty(imm.len() as u64) {
                 self.imm = None;
             }
         }
