@@ -3073,7 +3073,7 @@ impl<E: Env> ConcurrentDb<E> {
     pub fn persist_unsynced_l0s_off_lock(&self) -> Result<()> {
         let prepared = {
             let mut g = self.inner.write();
-            if g.unsynced_sst_count() == 0 {
+            if crate::write_admission_kernel::batch_is_empty(g.unsynced_sst_count() as u64) {
                 return Ok(());
             }
             let paths = g.take_unsynced_ssts();
