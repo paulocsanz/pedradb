@@ -4142,7 +4142,10 @@ impl<E: Env> Db<E> {
         let keys = std::mem::take(&mut *self.dirty_points.lock());
         // Do not insert WriteOp.value: large values are vlog pointers.
         // Fat apply gen-bumps; small writes drop only the dirty keys.
-        if reset || keys.len() > 32 || keys.is_empty() {
+        if reset
+            || keys.len() > 32
+            || crate::write_admission_kernel::batch_is_empty(keys.len() as u64)
+        {
             self.point_cache.clear();
         } else {
             self.point_cache.invalidate_many(&keys);
