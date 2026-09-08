@@ -3920,7 +3920,9 @@ impl<E: PedraEnv> DB<E> {
         Ok(rows
             .into_iter()
             .map(|r| LiveFile {
-                column_family_name: if r.cf.is_empty() {
+                column_family_name: if pedradb_core::write_admission_kernel::batch_is_empty(
+                    r.cf.len() as u64,
+                ) {
                     DEFAULT_CF.to_string()
                 } else {
                     r.cf
