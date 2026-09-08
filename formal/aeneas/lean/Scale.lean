@@ -130,3 +130,50 @@ theorem scale_forecast_empty_best_via_best_get_ns :
     unfold SCALE_L0_BEST
     have h : core.num.U64.saturating_add 0#u64 1#u64 = 1#u64 := by native_decide
     simp [h]
+
+/-- `scale_forecast` is the plan rustc links: collect levels, then the three
+    clocks. Unfolds `scale_forecast` **and** `best_get_ns`. -/
+theorem scale_forecast_is_three_clocks (keys ram_bytes : U64) :
+    scale_forecast keys ram_bytes = (
+      do
+        let store_bytes ← core.num.U64.saturating_mul keys SCALE_BYTES_PER_ENTRY
+        let i ← SCALE_L1_BYTES
+        let i1 ← level_count store_bytes i
+        let levels ← lift (core.convert.num.FromU64U32.from i1)
+        let p_best ← point_get_probes levels SCALE_L0_BEST
+        let p_worst ← probes_worst levels SCALE_L0_WORST
+        let n_files ←
+          if i = 0#u64
+          then ok 0#u64
+          else core.num.U64.div_ceil store_bytes i
+        let warm_cap ← warm_cap_bytes ram_bytes
+        let happy_hot ← happy_hot_bps store_bytes ram_bytes
+        let best_ns ← best_get_ns levels
+        let happy_ns ← happy_get_ns levels store_bytes ram_bytes
+        let worst_ns ← worst_get_ns levels SCALE_L0_WORST
+        ok
+          {
+            keys,
+            ram_bytes,
+            store_bytes,
+            levels,
+            p_best,
+            p_worst,
+            n_files,
+            warm_cap,
+            hot := (store_bytes <= warm_cap),
+            happy_hot_bps := happy_hot,
+            best_ns,
+            happy_ns,
+            worst_ns
+          }
+    ) ∧ best_get_ns 0#u64 = (
+      do
+        let i ← point_get_probes 0#u64 SCALE_L0_BEST
+        predict_get_ns i SCALE_TAU_RAM_NS SCALE_TAU_DISK_NS SCALE_BPS 0#u64
+    ) := by
+  constructor
+  · unfold scale_forecast
+    rfl
+  · unfold best_get_ns
+    rfl
