@@ -2125,6 +2125,7 @@ impl YcsbRunner {
                 let _ = e.put(&ekey(i, dst), &yval);
             }
         }
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut ops, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -2154,7 +2155,16 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] arango_doc_crud done ops={ops} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            // 50% get + 20% scan = 70% read (linkbench mix).
+            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 70, cfg_ops as u64);
+            eprint_write_diagnose("arango_doc_crud", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
 
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut hops, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -2179,6 +2189,13 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] arango_traversal done hops={hops} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
+            eprint_write_diagnose("arango_traversal", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
         self.rng = rng;
         blocks
     }
@@ -4142,9 +4159,21 @@ mod tests {
             "solana_trailing_read is scan:\n{}",
             sol[1]
         );
+        let ara = r.run_arango(&e);
         assert_eq!(
-            block_names(&r.run_arango(&e)),
+            block_names(&ara),
             vec![Some("arango_doc_crud"), Some("arango_traversal")]
+        );
+        for b in &ara {
+            assert!(
+                b.contains("\"diagnose\": {\"lever\":"),
+                "RFC-0184 P2.16 arango JSON needs diagnose.lever:\n{b}"
+            );
+        }
+        assert!(
+            ara[1].contains("\"lever\":\"get_path\""),
+            "arango_traversal is 2-hop scan:\n{}",
+            ara[1]
         );
         assert_eq!(
             block_names(&r.run_venice(&e)),
