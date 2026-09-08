@@ -1555,7 +1555,7 @@ fn apply_txn_revert<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Re
         ops.push(BatchOp::delete(txn_pair_key(txn_id, u)));
         ops.push(BatchOp::delete(txn_pre_key(txn_id, u)));
     }
-    if !ops.is_empty() {
+    if !pedradb_core::write_admission_kernel::batch_is_empty(ops.len() as u64) {
         db.apply_batch(ops)?;
     }
     // F52: align durable SI hist with restored Pedra (TxnCommit may have stamped
