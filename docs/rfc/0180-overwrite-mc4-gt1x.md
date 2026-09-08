@@ -230,6 +230,11 @@ medida no mesmo harness isolado.
       Not a HashMap (P0.64 / P1.3 ycsb_e). `cf_prefix` (family/bytes)
       unchanged. Tests `rfc0180_idx_prefix_one_slash_splits_c_and_ycsb`,
       `rfc0180_idx_prefix_f220_bounds_disagree`. status: `done`
+- [x] **P0.68** O(1) park of foreign one-slash leftover before the first
+      `c/` apply when mem ≥ write-buffer/2. Seed `ycsb/` then timed `c/`
+      must not mix at 25M leftover. Always-on, no Cargo feature.
+      Tests `rfc0180_park_foreign_idx_decision`,
+      `rfc0180_park_foreign_idx_on_new_slash_prefix`. status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
 
@@ -306,6 +311,7 @@ medida no mesmo harness isolado.
 | P0.61 | p0 | catch-up wait off db.write() | done | keep wait; P0.60 removed it | 2026-09-08 |
 | P0.62 | p0 | unpinned overwrite supersede live slot | done | tail stays unique keys; pin keeps MVCC | 2026-09-08 |
 | P0.66 | p0 | one-slash idx shard (c/ vs ycsb/) | done | not HashMap; F220 multi-slash empty | 2026-09-08 |
+| P0.68 | p0 | park foreign slash leftover O(1) | done | ≥ write-buffer/2; ycsb seed vs c/ apply | 2026-09-08 |
 | P1.1 | p1 | 3-run caixa | todo | — | 2026-09-07 |
 | P2.1 | p2 | 3/3 quiet ≥1× | todo | 0182 P1.1 | 2026-09-07 |
 | P2.2 | p2 | leftover hang | done | 0181 P0.3 steal | 2026-09-07 |
