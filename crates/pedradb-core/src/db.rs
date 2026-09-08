@@ -7531,7 +7531,7 @@ impl<E: Env> Db<E> {
             let live = self.collect_vlog_live_for_file(file_num)?;
             let live_bytes: u64 = live.iter().map(|(_, b)| b.len() as u64).sum();
             let live_records = live.len() as u64;
-            let dead_ratio = if bytes == 0 {
+            let dead_ratio = if crate::write_admission_kernel::batch_is_empty(bytes) {
                 0.0
             } else {
                 1.0 - (live_bytes as f64 / bytes as f64)
