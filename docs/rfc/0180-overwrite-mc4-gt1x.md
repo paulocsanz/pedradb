@@ -176,6 +176,11 @@ medida no mesmo harness isolado.
       até `active` crescer, só se `recently_concurrent`. Sem condvar.
       1c não espera. Teste `rfc0180_leader_linger_and_async_catchup`.
       status: `done`
+- [x] **P0.51** Primeiro arriver pós-barreira: `active==1` e
+      `recently=false` → `commit_async_one` e os outros 3 agrupam
+      (1+3). `wait_peer_before_lone` 256 `spin_loop` antes do lone.
+      1c paga 256 pauses. Teste `rfc0180_leader_linger_and_async_catchup`.
+      status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
 
@@ -241,6 +246,7 @@ medida no mesmo harness isolado.
 | P0.48 | p0 | bypass multi-op WAL off lock | done | async_ops_stage/publish; commit_async_ops uses same stage | 2026-09-08 |
 | P0.49 | p0 | queued_pending Release/Acquire | done | Darwin ARM catch-up sees enqueue | 2026-09-08 |
 | P0.50 | p0 | wait sibling re-entry after resign | done | active==1 hole; 1024 spins; 1c skips | 2026-09-08 |
+| P0.51 | p0 | wait peer before lone (barrier start) | done | 256 spins; 1c still lones | 2026-09-08 |
 | P1.1 | p1 | 3-run caixa | todo | — | 2026-09-07 |
 | P2.1 | p2 | 3/3 quiet ≥1× | todo | 0182 P1.1 | 2026-09-07 |
 | P2.2 | p2 | leftover hang | done | 0181 P0.3 steal | 2026-09-07 |
