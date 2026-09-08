@@ -253,6 +253,10 @@ pub trait ScaleStore {
     fn ram_mode(&self) -> Option<&'static str> {
         None
     }
+    /// RFC-0184 P2.22: WRITEPHASE snapshot (`None` unless env at open).
+    fn write_phase_snapshot(&self) -> Option<[u64; 7]> {
+        None
+    }
 }
 
 /// RFC-0178 P2.1: map `pedra.ram-pressure` to the published regime name.
@@ -297,6 +301,7 @@ fn hydrate(store: &mut dyn ScaleStore, n: usize, pool: &[u8], vlen: usize) {
 
 fn run_one(store: &mut dyn ScaleStore, dir: &Path, n: usize, vlen: usize, pool: &[u8]) {
     let label = store.label();
+    let phase0 = store.write_phase_snapshot();
     let t0 = Instant::now();
     hydrate(store, n, pool, vlen);
     let secs = t0.elapsed().as_secs_f64();
@@ -307,6 +312,12 @@ fn run_one(store: &mut dyn ScaleStore, dir: &Path, n: usize, vlen: usize, pool: 
         bytes as f64 / (1u64 << 30) as f64,
         bytes as f64 / n as f64,
     );
+    if let (Some(a), Some(b)) = (phase0, store.write_phase_snapshot()) {
+        let batches = ((n + APPLY_BATCH - 1) / APPLY_BATCH).max(1);
+        let p50_ms = (secs / batches as f64) * 1000.0;
+        let d = super::diagnose_from_phases(p50_ms, a, b, 1, 0.0, 0);
+        super::eprint_write_diagnose(&format!("hydrate/{label}"), &d);
+    }
 
     let t1 = Instant::now();
     assert!(store.settle(), "settle {label}");
@@ -637,6 +648,19 @@ impl ScaleStore for PedraScale {
     fn ram_mode(&self) -> Option<&'static str> {
         self.ram_mode
     }
+    fn write_phase_snapshot(&self) -> Option<[u64; 7]> {
+        let st = self.db.write_phase_stats()?;
+        let r = std::sync::atomic::Ordering::Relaxed;
+        Some([
+            st.commits.load(r),
+            st.prepare_ns.load(r),
+            st.wal_ns.load(r),
+            st.mem_ns.load(r),
+            st.publish_ns.load(r),
+            st.flush_check_ns.load(r),
+            st.lock_wait_ns.load(r),
+        ])
+    }
 }
 
 // ── RocksDB (feature real) ──────────────────────────────────────────────────
@@ -880,6 +904,30 @@ mod tests {
             ),
             "got {}",
             class.token()
+        );
+    }
+
+    /// RFC-0184 P2.22: hydrate WRITEPHASE is a write lever, not get_path.
+    #[test]
+    fn rfc0184_p222_hydrate_writephase_has_lever() {
+        std::env::set_var("PEDRA_WRITE_PHASE_STATS", "1");
+        let dir = TempDir::new().unwrap();
+        let mut s = PedraScale::open(dir.path());
+        let a = s.write_phase_snapshot().expect("WRITEPHASE at open");
+        let pool = value_pool();
+        hydrate(&mut s, 64, &pool, 32);
+        let b = s.write_phase_snapshot().expect("WRITEPHASE after hydrate");
+        let d = crate::diagnose_from_phases(1.0, a, b, 1, 0.0, 0);
+        assert_ne!(
+            d.lever.token(),
+            "get_path",
+            "hydrate is ingest: {}",
+            d.line()
+        );
+        assert!(
+            d.json_object().contains("\"lever\":"),
+            "{}",
+            d.json_object()
         );
     }
 
