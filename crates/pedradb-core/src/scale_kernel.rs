@@ -347,6 +347,7 @@ mod tests {
         assert_eq!(l10, 5);
         assert_eq!(point_get_probes(u64::from(l1), 1), 5);
         assert_eq!(point_get_probes(u64::from(l10), 1), 6);
+        assert_eq!(probes_worst(u64::from(l10), SCALE_L0_WORST), 9);
     }
 
     #[test]

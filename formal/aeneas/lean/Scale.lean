@@ -186,3 +186,16 @@ theorem rfc0176_10b_is_six_probes :
   unfold SCALE_L0_BEST
   have h : core.num.U64.saturating_add 5#u64 1#u64 = 6#u64 := by native_decide
   simp [h]
+
+/-- RFC-0176 10B-key worst production: 5 L1+ levels + L0 trigger 4 = 9. -/
+theorem rfc0176_10b_worst_is_nine_probes :
+    probes_worst 5#u64 4#u64 = ok (9#u64) ∧
+      point_get_probes 5#u64 4#u64 = ok (9#u64) := by
+  constructor
+  · unfold probes_worst
+    unfold point_get_probes
+    have h : core.num.U64.saturating_add 5#u64 4#u64 = 9#u64 := by native_decide
+    simp [h]
+  · unfold point_get_probes
+    have h : core.num.U64.saturating_add 5#u64 4#u64 = 9#u64 := by native_decide
+    simp [h]
