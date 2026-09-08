@@ -5794,7 +5794,7 @@ impl<E: Env> Db<E> {
         let tmp_path = dir.join(format!("{num:06}.sst.tmp"));
         match write_l0_sst_for_family(env, &tmp_path, imm, family, false) {
             Ok(table) => {
-                if table.is_empty() {
+                if crate::write_admission_kernel::batch_is_empty(table.len() as u64) {
                     drop(table);
                     let _ = env.remove_file(&tmp_path);
                     return Ok(None);
