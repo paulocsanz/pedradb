@@ -184,6 +184,9 @@ struct WriteGroup {
     /// from 4 clients share fsyncs instead of each taking the lone-writer
     /// path between the two `write()`s (RFC-0040 P1.2).
     last_multi_ns: AtomicU64,
+    /// Peak `active` during the current [`MULTI_HOLD`] window (RFC-0180
+    /// P0.53). Sibling re-entry hopes `grouping_cap(peak)`, not a magic 4.
+    last_peak: AtomicUsize,
     /// Last `submit` entry (ns).
     last_submit_ns: AtomicU64,
     /// Last `submit` **return** (ns). Host compact must wait on this, not
@@ -390,18 +393,20 @@ fn in_flight_off_queue(batch_len: usize, queued: usize, active: usize) -> bool {
 /// toward the merge cap. 1c never sets `last_multi` (`recently=false`).
 /// Last-op: `MULTI_HOLD` expires or the spin bound fires — no condvar.
 #[must_use]
-fn sibling_reentry_needed(batch_len: usize, queued: usize, active: usize, recently: bool) -> bool {
+fn sibling_reentry_needed(
+    batch_len: usize,
+    queued: usize,
+    active: usize,
+    recently: bool,
+    peak: usize,
+) -> bool {
     if !recently {
         return false;
     }
-    // Not `grouping_cap(active)`: that is min(4, active), so active==2
-    // already "meets cap" and WRITEPHASE stops at ~2.7. Diagnose
-    // `--clients 4` expected_group=4. n≥16 stays 2 (bypass convoy).
-    let cap = if active > ASYNC_GROUP_ADAPTIVE_MAX {
-        2
-    } else {
-        4
-    };
+    // Peak from this MULTI_HOLD window (P0.53). Magic-4 made 2-client
+    // wait for ghosts and n≥16 leftover hope 4. grouping_cap(peak):
+    // 2-client → 2, mc4 → 4, n≥16 → 2.
+    let cap = grouping_cap(peak.max(2));
     batch_len.saturating_add(queued) < cap && active < cap
 }
 
@@ -624,6 +629,7 @@ impl WriteGroup {
             batches: AtomicU64::new(0),
             batch_ops: AtomicU64::new(0),
             last_multi_ns: AtomicU64::new(0),
+            last_peak: AtomicUsize::new(0),
             last_submit_ns: AtomicU64::new(0),
             last_complete_ns: AtomicU64::new(0),
             lone_phase_ns: [
@@ -844,6 +850,7 @@ impl WriteGroup {
         let active = self.active.load(Ordering::Relaxed);
         if active > 1 {
             self.last_multi_ns.store(Self::now_ns(), Ordering::Relaxed);
+            let _ = self.last_peak.fetch_max(active, Ordering::Release);
         }
         active
     }
@@ -1283,7 +1290,8 @@ impl WriteGroup {
             }
             let q = self.queued_pending.load(Ordering::Acquire);
             let active = self.active.load(Ordering::Acquire);
-            if !sibling_reentry_needed(batch_len, q, active, true) {
+            let peak = self.last_peak.load(Ordering::Acquire);
+            if !sibling_reentry_needed(batch_len, q, active, true, peak) {
                 return;
             }
             std::hint::spin_loop();
@@ -7228,18 +7236,28 @@ mod tests {
         assert!(!in_flight_off_queue(4, 0, 4));
         // RFC-0180 P0.50: first re-enter after resign (active=1) still
         // waits for siblings when recently_concurrent. 1c does not.
-        assert!(!sibling_reentry_needed(1, 0, 1, false), "1c");
-        assert!(sibling_reentry_needed(1, 0, 1, true), "mc re-enter hole");
-        assert!(sibling_reentry_needed(1, 0, 2, true), "still under cap 4");
-        assert!(sibling_reentry_needed(2, 0, 2, true));
+        assert!(!sibling_reentry_needed(1, 0, 1, false, 4), "1c");
+        assert!(sibling_reentry_needed(1, 0, 1, true, 4), "mc re-enter hole");
         assert!(
-            !sibling_reentry_needed(1, 3, 4, true),
+            sibling_reentry_needed(1, 0, 2, true, 4),
+            "still under cap 4"
+        );
+        assert!(sibling_reentry_needed(2, 0, 2, true, 4));
+        assert!(
+            !sibling_reentry_needed(2, 0, 2, true, 2),
+            "2-client peak already met"
+        );
+        assert!(
+            !sibling_reentry_needed(1, 3, 4, true, 4),
             "already 4 accounted"
         );
-        assert!(!sibling_reentry_needed(4, 0, 4, true));
-        assert!(!sibling_reentry_needed(2, 0, 16, true), "n≥16 cap=2 met");
+        assert!(!sibling_reentry_needed(4, 0, 4, true, 4));
         assert!(
-            !sibling_reentry_needed(1, 0, 16, true),
+            !sibling_reentry_needed(2, 0, 16, true, 16),
+            "n≥16 cap=2 met"
+        );
+        assert!(
+            !sibling_reentry_needed(1, 0, 16, true, 16),
             "n≥16 active already ≥ cap"
         );
         assert_eq!(sibling_reentry_spins(), 1024);
