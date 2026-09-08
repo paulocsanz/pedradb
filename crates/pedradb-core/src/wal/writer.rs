@@ -404,7 +404,7 @@ impl<'a> EncodedOpsSource<'a> {
                         continue;
                     }
                     let value = &self.ops[self.idx].value;
-                    if value.is_empty() {
+                    if crate::write_admission_kernel::batch_is_empty(value.len() as u64) {
                         self.next_op();
                         continue;
                     }
