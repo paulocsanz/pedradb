@@ -398,7 +398,7 @@ impl SstTable {
     /// `pread`+CRC). No-op when the budget is full — evicted v6 stays one
     /// 4 KiB `read_range`. Does not run during hydrate (no gets).
     fn try_promote_payload(&self) -> Result<bool> {
-        if !self.payload.read().img.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(self.payload.read().img.len() as u64) {
             return Ok(true);
         }
         let Some(kit) = self.kit.read().clone() else {
