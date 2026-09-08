@@ -265,7 +265,7 @@ impl InProcessCluster {
         let m = self.majority();
         for node in self.nodes.iter_mut().take(m) {
             let pending = self.log.entries_after(node.last_index);
-            if pending.is_empty() {
+            if pedradb_core::write_admission_kernel::batch_is_empty(pending.len() as u64) {
                 continue;
             }
             let mut applier = LogApplier::new(&mut node.db, node.last_index);
