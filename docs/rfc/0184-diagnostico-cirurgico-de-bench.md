@@ -211,6 +211,11 @@ a linha quando há phasesΔ. Sem harness novo.
       Test `rfc0184_qs_hot_get_mc4_in_compare`. Darwin DIAG vs Rocks
       `sync=false`: `ratio=0.719` (2.09 M / 2.90 M QPS) — named loss
       kept. p50 0.7 vs 0.8 µs; hole is tail. Not Linux cartaz. — status: `done`
+- [x] **P2.41** `qs_neg_lookup_mc4` (100% miss get, 4 clients) in
+      `COMPARE_SHAPES`, `BALANCE_SHAPES`, and `run_qs_clients`.
+      Test `rfc0184_qs_neg_lookup_mc4_in_compare`. Darwin DIAG vs Rocks
+      `sync=false`: `ratio=0.808` (4.34 M / 5.37 M QPS) — named loss
+      kept. p50 0.9 vs 0.6 µs. Not Linux cartaz. — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -265,6 +270,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.38 | p2 | non-linear growth tokens | done | serial_cs vs amortize vs convoy_collapse; get ram_wall | 2026-09-08 |
 | P2.39 | p2 | ycsb_c_mc4 COMPARE+BALANCE | done | 100% get mc4; Darwin DIAG 0.909× named loss | 2026-09-08 |
 | P2.40 | p2 | qs_hot_get_mc4 COMPARE+BALANCE | done | QS hot mc4; Darwin DIAG 0.719× named loss | 2026-09-08 |
+| P2.41 | p2 | qs_neg_lookup_mc4 COMPARE+BALANCE | done | QS miss mc4; Darwin DIAG 0.808× named loss | 2026-09-08 |
 
 ## Acceptance Criteria
 
