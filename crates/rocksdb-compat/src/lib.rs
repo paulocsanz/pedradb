@@ -4283,7 +4283,12 @@ where
                         // between puts) — P0.33 skipped that path.
                         if host_worker_skip_opportunistic(&inner) {
                             let l0 = inner.with_read(|db| db.level_file_count(0));
-                            if l0 >= pedradb_core::L0_COMPACTION_TRIGGER {
+                            // RFC-0180 P0.69: L0-at-trigger barges the write
+                            // lock in the mc4 handoff gap. 1c moderate QPS
+                            // is not recently_multi — drain stays.
+                            if l0 >= pedradb_core::L0_COMPACTION_TRIGGER
+                                && !host_worker_skip_l0_during_multi(&inner)
+                            {
                                 let _ = compat_compact_once(&inner, &gate);
                             }
                             wait = poll;
@@ -4345,7 +4350,9 @@ where
                         // now — do not wait for the 200 ms write-idle window
                         // (that was the scan-vs-apply race).
                         let l0 = inner.with_read(|db| db.level_file_count(0));
-                        if l0 >= pedradb_core::L0_COMPACTION_TRIGGER {
+                        if l0 >= pedradb_core::L0_COMPACTION_TRIGGER
+                            && !host_worker_skip_l0_during_multi(&inner)
+                        {
                             // One job per tick: `while` re-took the gate
                             // between jobs faster than DB::compact's
                             // `lock()` woke (~85 s @100M scale settle).
@@ -4565,6 +4572,13 @@ fn host_worker_skip_during_writes<E: PedraEnv>(inner: &ConcurrentDb<E>) -> bool 
 /// Compact worker skips `materialize_bulk_once` here; L0-at-trigger does not.
 fn host_worker_skip_opportunistic<E: PedraEnv>(inner: &ConcurrentDb<E>) -> bool {
     host_worker_skip_during_writes(inner) || !inner.writes_idle_for(host_worker_write_busy_hold())
+}
+
+/// RFC-0180 P0.69: mc4 group handoff (`recently_multi`) must not L0-compact
+/// on the 5 ms poll — `install_prepared_l0_compact` takes `db.write()`.
+/// 1c moderate QPS (100–200 µs between puts) is not multi; drain stays.
+fn host_worker_skip_l0_during_multi<E: PedraEnv>(inner: &ConcurrentDb<E>) -> bool {
+    inner.recently_multi(Duration::from_millis(2))
 }
 
 /// One flush-worker tick: park every staged imm, then enforce the
@@ -5880,6 +5894,48 @@ mod tests {
         assert!(
             !host_worker_skip_opportunistic(&db.inner),
             "1 ms idle clears opportunistic hold"
+        );
+        assert!(
+            !host_worker_skip_l0_during_multi(&db.inner),
+            "1c put is not recently_multi — L0 drain stays"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0180 P0.69: four concurrent writers set recently_multi; L0-at-trigger
+    /// must not barge. 1c (previous test) still drains.
+    #[test]
+    fn rfc0180_skip_l0_compact_while_recently_multi() {
+        let dir = tmp("host-skip-l0-multi");
+        let db = DB::open_default(&dir).unwrap();
+        let n = 4usize;
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(n));
+        std::thread::scope(|s| {
+            for i in 0..n {
+                let db = &db;
+                let barrier = std::sync::Arc::clone(&barrier);
+                s.spawn(move || {
+                    barrier.wait();
+                    for j in 0..64u8 {
+                        db.put([i as u8, j], [i as u8, j, 1]).unwrap();
+                    }
+                });
+            }
+        });
+        assert!(
+            db.inner.recently_multi(std::time::Duration::from_secs(1)),
+            "mc4 burst must set last_multi"
+        );
+        if db.inner.recently_multi(std::time::Duration::from_millis(2)) {
+            assert!(
+                host_worker_skip_l0_during_multi(&db.inner),
+                "recently_multi(2ms) skips L0-at-trigger"
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        assert!(
+            !host_worker_skip_l0_during_multi(&db.inner),
+            "2 ms hold elapsed — L0 drain may run"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
