@@ -5270,7 +5270,7 @@ impl<E: Env> Db<E> {
     }
 
     fn bulk_family_of_key(&self, key: &[u8]) -> &str {
-        if self.physical_cfs.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.physical_cfs.len() as u64) {
             return "default";
         }
         let p = crate::memtable::cf_prefix(key);
