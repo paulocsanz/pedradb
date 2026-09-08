@@ -2339,7 +2339,7 @@ fn user_key_bounds(entries: &[(InternalKey, Bytes)]) -> (Option<Bytes>, Option<B
 }
 
 fn rebuild_bloom(entries: &[(InternalKey, Bytes)]) -> BloomFilter {
-    if entries.is_empty() {
+    if crate::write_admission_kernel::batch_is_empty(entries.len() as u64) {
         return BloomFilter::always_true();
     }
     // Distinct user keys ≈ entries (upper bound is fine for sizing).
