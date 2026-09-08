@@ -201,6 +201,11 @@ a linha quando há phasesΔ. Sem harness novo.
       `amortize` / `serial_cs` / `convoy_collapse` / `get_bound`. Get:
       `log_n` / `ram_wall` / `walk_all`. Teste
       `predict_write_growth_is_not_linear_in_n`. — status: `done`
+- [x] **P2.39** `ycsb_c_mc4` (100% get, 4 clients) in `COMPARE_SHAPES`,
+      `BALANCE_SHAPES`, and `run_clients`. Official 16 is 1c C only.
+      Test `rfc0184_ycsb_c_mc4_in_compare`. Darwin DIAG vs Rocks
+      `sync=false`: `ratio=0.909` (4.71 M / 5.18 M QPS) — named loss
+      kept. Not Linux cartaz. — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -253,6 +258,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.36 | p2 | COMPARE_SHAPES ycsb_b_mc4 | done | 95% get mc4 visível no compare | 2026-09-08 |
 | P2.37 | p2 | static write cuts beyond grouping/fd | done | lock_hold/async_wal/get_path/lock_convoy; next= | 2026-09-08 |
 | P2.38 | p2 | non-linear growth tokens | done | serial_cs vs amortize vs convoy_collapse; get ram_wall | 2026-09-08 |
+| P2.39 | p2 | ycsb_c_mc4 COMPARE+BALANCE | done | 100% get mc4; Darwin DIAG 0.909× named loss | 2026-09-08 |
 
 ## Acceptance Criteria
 

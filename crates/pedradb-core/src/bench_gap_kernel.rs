@@ -406,10 +406,11 @@ pub fn classify_get(
 
 /// RFC-0182 same-boot set. Any engine cut must diagnose these before
 /// claiming a win. New use-case → add a name here (one home).
-pub const BALANCE_SHAPES: [&str; 6] = [
+pub const BALANCE_SHAPES: [&str; 7] = [
     "deps_cache_overwrite_mc4",
     "ycsb_a_mc4",
     "ycsb_b_mc4",
+    "ycsb_c_mc4",
     "ycsb_f_mc4",
     "deps_apply_batch_mc4",
     "deps_cache_overwrite",
@@ -954,7 +955,8 @@ mod tests {
         assert_eq!(classify_probes(5, 5), GetClass::Best);
         assert_eq!(classify_probes(900, 5), GetClass::AsIsWalk);
         assert_eq!(classify_probes_as_is(900, 5), GetClass::Best);
-        assert_eq!(BALANCE_SHAPES.len(), 6);
+        assert_eq!(BALANCE_SHAPES.len(), 7);
         assert!(BALANCE_SHAPES.contains(&"ycsb_b_mc4"));
+        assert!(BALANCE_SHAPES.contains(&"ycsb_c_mc4"));
     }
 }
