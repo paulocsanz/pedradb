@@ -1049,7 +1049,7 @@ impl CountCache {
     ) -> Option<usize> {
         let ck = crate::db::count_cache_key(start, end, limit);
         let g = self.state.lock();
-        if g.capacity == 0 {
+        if crate::write_admission_kernel::batch_is_empty(g.capacity as u64) {
             return None;
         }
         let e = g.map.get(ck.as_slice())?;
