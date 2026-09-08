@@ -15,7 +15,7 @@ set_option maxRecDepth 2048
 namespace pedra_aeneas_group_commit_kernel
 
 /-- [pedra_aeneas_group_commit_kernel::occ_conflict]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 172:0-174:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 184:0-186:1
     Visibility: public -/
 def occ_conflict
   (snap : Std.U64) (last_seq : Std.U64) (touched_key_written_after : Bool) :
@@ -26,14 +26,14 @@ def occ_conflict
   else ok false
 
 /-- [pedra_aeneas_group_commit_kernel::OccRead]
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 180:0-186:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 192:0-198:1
     Visibility: public -/
 structure OccRead where
   snap : Std.U64
   touched_key_written_after : Bool
 
 /-- [pedra_aeneas_group_commit_kernel::{impl core::fmt::Debug for pedra_aeneas_group_commit_kernel::OccRead}::fmt]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 179:9-179:14
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 191:9-191:14
     Visibility: public -/
 def OccRead.Insts.CoreFmtDebug.fmt
   (self : OccRead) (f : core.fmt.Formatter) :
@@ -47,41 +47,41 @@ def OccRead.Insts.CoreFmtDebug.fmt
     "snap") dyn (toStr "touched_key_written_after") dyn1
 
 /-- Trait implementation: [pedra_aeneas_group_commit_kernel::{impl core::fmt::Debug for pedra_aeneas_group_commit_kernel::OccRead}]
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 179:9-179:14 -/
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 191:9-191:14 -/
 @[reducible]
 def OccRead.Insts.CoreFmtDebug : core.fmt.Debug OccRead := {
   fmt := OccRead.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_group_commit_kernel::{impl core::clone::Clone for pedra_aeneas_group_commit_kernel::OccRead}::clone]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 179:16-179:21
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 191:16-191:21
     Visibility: public -/
 def OccRead.Insts.CoreCloneClone.clone (self : OccRead) : Result OccRead := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_group_commit_kernel::{impl core::clone::Clone for pedra_aeneas_group_commit_kernel::OccRead}]
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 179:16-179:21 -/
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 191:16-191:21 -/
 @[reducible]
 def OccRead.Insts.CoreCloneClone : core.clone.Clone OccRead := {
   clone := OccRead.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [pedra_aeneas_group_commit_kernel::{impl core::marker::Copy for pedra_aeneas_group_commit_kernel::OccRead}]
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 179:23-179:27 -/
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 191:23-191:27 -/
 @[reducible]
 def OccRead.Insts.CoreMarkerCopy : core.marker.Copy OccRead := {
   cloneInst := OccRead.Insts.CoreCloneClone
 }
 
 /-- Trait implementation: [pedra_aeneas_group_commit_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_group_commit_kernel::OccRead}]
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 179:29-179:38 -/
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 191:29-191:38 -/
 @[reducible]
 def OccRead.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq OccRead := {
 }
 
 /-- [pedra_aeneas_group_commit_kernel::{impl core::cmp::PartialEq<pedra_aeneas_group_commit_kernel::OccRead> for pedra_aeneas_group_commit_kernel::OccRead}::eq]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 179:29-179:38
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 191:29-191:38
     Visibility: public -/
 def OccRead.Insts.CoreCmpPartialEqOccRead.eq
   (self : OccRead) (other : OccRead) : Result Bool := do
@@ -90,7 +90,7 @@ def OccRead.Insts.CoreCmpPartialEqOccRead.eq
   else ok false
 
 /-- Trait implementation: [pedra_aeneas_group_commit_kernel::{impl core::cmp::PartialEq<pedra_aeneas_group_commit_kernel::OccRead> for pedra_aeneas_group_commit_kernel::OccRead}]
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 179:29-179:38 -/
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 191:29-191:38 -/
 @[reducible]
 def OccRead.Insts.CoreCmpPartialEqOccRead : core.cmp.PartialEq OccRead OccRead
   := {
@@ -98,14 +98,14 @@ def OccRead.Insts.CoreCmpPartialEqOccRead : core.cmp.PartialEq OccRead OccRead
 }
 
 /-- [pedra_aeneas_group_commit_kernel::{impl core::cmp::Eq for pedra_aeneas_group_commit_kernel::OccRead}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 179:40-179:42
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 191:40-191:42
     Visibility: public -/
 def OccRead.Insts.CoreCmpEq.assert_fields_are_eq
   (self : OccRead) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_group_commit_kernel::{impl core::cmp::Eq for pedra_aeneas_group_commit_kernel::OccRead}]
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 179:40-179:42 -/
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 191:40-191:42 -/
 @[reducible]
 def OccRead.Insts.CoreCmpEq : core.cmp.Eq OccRead := {
   partialEqInst := OccRead.Insts.CoreCmpPartialEqOccRead
@@ -113,7 +113,7 @@ def OccRead.Insts.CoreCmpEq : core.cmp.Eq OccRead := {
 }
 
 /-- [pedra_aeneas_group_commit_kernel::group_validate]: loop body 0:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 197:4-204:5
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 209:4-216:5
     Visibility: public -/
 @[rust_loop_body]
 def group_validate_loop.body
@@ -132,7 +132,7 @@ def group_validate_loop.body
   else ok (done out)
 
 /-- [pedra_aeneas_group_commit_kernel::group_validate]: loop 0:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 197:4-204:5
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 209:4-216:5
     Visibility: public -/
 @[rust_loop]
 def group_validate_loop
@@ -145,7 +145,7 @@ def group_validate_loop
     (out, i)
 
 /-- [pedra_aeneas_group_commit_kernel::group_validate]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 194:0-206:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 206:0-218:1
     Visibility: public -/
 def group_validate
   (reads : Slice OccRead) (last_seq : Std.U64) :
@@ -156,7 +156,7 @@ def group_validate
   group_validate_loop reads last_seq out 0#usize
 
 /-- [pedra_aeneas_group_commit_kernel::OccMemberFate]
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 212:0-219:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 224:0-231:1
     Visibility: public -/
 @[discriminant isize]
 inductive OccMemberFate where
@@ -165,7 +165,7 @@ inductive OccMemberFate where
 | Conflict : OccMemberFate
 
 /-- [pedra_aeneas_group_commit_kernel::{impl core::fmt::Debug for pedra_aeneas_group_commit_kernel::OccMemberFate}::fmt]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 211:9-211:14
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 223:9-223:14
     Visibility: public -/
 def OccMemberFate.Insts.CoreFmtDebug.fmt
   (self : OccMemberFate) (f : core.fmt.Formatter) :
@@ -177,42 +177,42 @@ def OccMemberFate.Insts.CoreFmtDebug.fmt
   | OccMemberFate.Conflict => core.fmt.Formatter.write_str f (toStr "Conflict")
 
 /-- Trait implementation: [pedra_aeneas_group_commit_kernel::{impl core::fmt::Debug for pedra_aeneas_group_commit_kernel::OccMemberFate}]
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 211:9-211:14 -/
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 223:9-223:14 -/
 @[reducible]
 def OccMemberFate.Insts.CoreFmtDebug : core.fmt.Debug OccMemberFate := {
   fmt := OccMemberFate.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_group_commit_kernel::{impl core::clone::Clone for pedra_aeneas_group_commit_kernel::OccMemberFate}::clone]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 211:16-211:21
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 223:16-223:21
     Visibility: public -/
 def OccMemberFate.Insts.CoreCloneClone.clone
   (self : OccMemberFate) : Result OccMemberFate := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_group_commit_kernel::{impl core::clone::Clone for pedra_aeneas_group_commit_kernel::OccMemberFate}]
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 211:16-211:21 -/
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 223:16-223:21 -/
 @[reducible]
 def OccMemberFate.Insts.CoreCloneClone : core.clone.Clone OccMemberFate := {
   clone := OccMemberFate.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [pedra_aeneas_group_commit_kernel::{impl core::marker::Copy for pedra_aeneas_group_commit_kernel::OccMemberFate}]
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 211:23-211:27 -/
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 223:23-223:27 -/
 @[reducible]
 def OccMemberFate.Insts.CoreMarkerCopy : core.marker.Copy OccMemberFate := {
   cloneInst := OccMemberFate.Insts.CoreCloneClone
 }
 
 /-- Trait implementation: [pedra_aeneas_group_commit_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_group_commit_kernel::OccMemberFate}]
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 211:29-211:38 -/
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 223:29-223:38 -/
 @[reducible]
 def OccMemberFate.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq OccMemberFate := {
 }
 
 /-- [pedra_aeneas_group_commit_kernel::{impl core::cmp::PartialEq<pedra_aeneas_group_commit_kernel::OccMemberFate> for pedra_aeneas_group_commit_kernel::OccMemberFate}::eq]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 211:29-211:38
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 223:29-223:38
     Visibility: public -/
 def OccMemberFate.Insts.CoreCmpPartialEqOccMemberFate.eq
   (self : OccMemberFate) (other : OccMemberFate) : Result Bool := do
@@ -221,7 +221,7 @@ def OccMemberFate.Insts.CoreCmpPartialEqOccMemberFate.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_group_commit_kernel::{impl core::cmp::PartialEq<pedra_aeneas_group_commit_kernel::OccMemberFate> for pedra_aeneas_group_commit_kernel::OccMemberFate}]
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 211:29-211:38 -/
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 223:29-223:38 -/
 @[reducible]
 def OccMemberFate.Insts.CoreCmpPartialEqOccMemberFate : core.cmp.PartialEq
   OccMemberFate OccMemberFate := {
@@ -229,14 +229,14 @@ def OccMemberFate.Insts.CoreCmpPartialEqOccMemberFate : core.cmp.PartialEq
 }
 
 /-- [pedra_aeneas_group_commit_kernel::{impl core::cmp::Eq for pedra_aeneas_group_commit_kernel::OccMemberFate}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 211:40-211:42
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 223:40-223:42
     Visibility: public -/
 def OccMemberFate.Insts.CoreCmpEq.assert_fields_are_eq
   (self : OccMemberFate) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_group_commit_kernel::{impl core::cmp::Eq for pedra_aeneas_group_commit_kernel::OccMemberFate}]
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 211:40-211:42 -/
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 223:40-223:42 -/
 @[reducible]
 def OccMemberFate.Insts.CoreCmpEq : core.cmp.Eq OccMemberFate := {
   partialEqInst := OccMemberFate.Insts.CoreCmpPartialEqOccMemberFate
@@ -244,7 +244,7 @@ def OccMemberFate.Insts.CoreCmpEq : core.cmp.Eq OccMemberFate := {
 }
 
 /-- [pedra_aeneas_group_commit_kernel::occ_member_fate]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 224:0-226:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 236:0-238:1
     Visibility: public -/
 def occ_member_fate
   (too_old : Bool) (conflict : Bool) : Result OccMemberFate := do
@@ -255,14 +255,14 @@ def occ_member_fate
        else ok OccMemberFate.Ok
 
 /-- [pedra_aeneas_group_commit_kernel::occ_member_fate_as_is]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 231:0-233:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 243:0-245:1
     Visibility: public -/
 def occ_member_fate_as_is
   (_too_old : Bool) (_conflict : Bool) : Result OccMemberFate := do
   ok OccMemberFate.Ok
 
 /-- [pedra_aeneas_group_commit_kernel::occ_batch_plan]: loop body 0:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 252:4-260:5
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 264:4-272:5
     Visibility: public -/
 @[rust_loop_body]
 def occ_batch_plan_loop.body
@@ -283,7 +283,7 @@ def occ_batch_plan_loop.body
   else ok (done out)
 
 /-- [pedra_aeneas_group_commit_kernel::occ_batch_plan]: loop 0:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 252:4-260:5
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 264:4-272:5
     Visibility: public -/
 @[rust_loop]
 def occ_batch_plan_loop
@@ -297,7 +297,7 @@ def occ_batch_plan_loop
     (out, i)
 
 /-- [pedra_aeneas_group_commit_kernel::occ_batch_plan]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 240:0-262:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 252:0-274:1
     Visibility: public -/
 def occ_batch_plan
   (too_old : Slice Bool) (reads : Slice OccRead) (last_seq : Std.U64) :
@@ -312,7 +312,7 @@ def occ_batch_plan
   occ_batch_plan_loop too_old reads last_seq n out 0#usize
 
 /-- [pedra_aeneas_group_commit_kernel::occ_batch_plan_as_is]: loop body 0:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 279:4-283:5
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 291:4-295:5
     Visibility: public -/
 @[rust_loop_body]
 def occ_batch_plan_as_is_loop.body
@@ -331,7 +331,7 @@ def occ_batch_plan_as_is_loop.body
   else ok (done out)
 
 /-- [pedra_aeneas_group_commit_kernel::occ_batch_plan_as_is]: loop 0:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 279:4-283:5
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 291:4-295:5
     Visibility: public -/
 @[rust_loop]
 def occ_batch_plan_as_is_loop
@@ -344,7 +344,7 @@ def occ_batch_plan_as_is_loop
     (out, i)
 
 /-- [pedra_aeneas_group_commit_kernel::occ_batch_plan_as_is]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 267:0-285:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 279:0-297:1
     Visibility: public -/
 def occ_batch_plan_as_is
   (too_old : Slice Bool) (reads : Slice OccRead) (_last_seq : Std.U64) :
@@ -359,7 +359,7 @@ def occ_batch_plan_as_is
   occ_batch_plan_as_is_loop too_old reads n out 0#usize
 
 /-- [pedra_aeneas_group_commit_kernel::fence_publish_seq]: loop body 0:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 294:4-299:5
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 306:4-311:5
     Visibility: public -/
 @[rust_loop_body]
 def fence_publish_seq_loop.body
@@ -378,7 +378,7 @@ def fence_publish_seq_loop.body
   else ok (done best)
 
 /-- [pedra_aeneas_group_commit_kernel::fence_publish_seq]: loop 0:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 294:4-299:5
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 306:4-311:5
     Visibility: public -/
 @[rust_loop]
 def fence_publish_seq_loop
@@ -390,14 +390,14 @@ def fence_publish_seq_loop
     (best, i)
 
 /-- [pedra_aeneas_group_commit_kernel::fence_publish_seq]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 291:0-301:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 303:0-313:1
     Visibility: public -/
 @[reducible]
 def fence_publish_seq (member_seqs : Slice Std.U64) : Result Std.U64 := do
   fence_publish_seq_loop member_seqs 0#u64 0#usize
 
 /-- [pedra_aeneas_group_commit_kernel::fence_publish_seq_as_is]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 307:0-313:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 319:0-325:1
     Visibility: public -/
 def fence_publish_seq_as_is
   (member_seqs : Slice Std.U64) : Result Std.U64 := do
@@ -407,7 +407,7 @@ def fence_publish_seq_as_is
   else Slice.index_usize member_seqs 0#usize
 
 /-- [pedra_aeneas_group_commit_kernel::occ_conflict_as_is_serialized]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 323:0-335:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 335:0-347:1
     Visibility: public -/
 def occ_conflict_as_is_serialized
   (snap : Std.U64) (last_seq : Std.U64) (writes_before : Std.U64)
@@ -420,104 +420,110 @@ def occ_conflict_as_is_serialized
   else ok false
 
 /-- [pedra_aeneas_group_commit_kernel::forall_schedules_admitted]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 341:0-343:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 353:0-355:1
     Visibility: public -/
 def forall_schedules_admitted (_pct_depth : Std.U64) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_group_commit_kernel::forall_schedules_admitted_as_is]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 348:0-350:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 360:0-362:1
     Visibility: public -/
 def forall_schedules_admitted_as_is (pct_depth : Std.U64) : Result Bool := do
   ok (pct_depth >= 2#u64)
 
 /-- [pedra_aeneas_group_commit_kernel::pct_campaign_default_depth]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 355:0-357:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 368:0-370:1
     Visibility: public -/
 def pct_campaign_default_depth : Result Std.U64 := do
   ok 2#u64
 
+/-- [pedra_aeneas_group_commit_kernel::pct_campaign_default_depth_as_is]:
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 375:0-377:1
+    Visibility: public -/
+def pct_campaign_default_depth_as_is : Result Std.U64 := do
+  ok 3#u64
+
 /-- [pedra_aeneas_group_commit_kernel::default_pct_depth_raised]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 362:0-364:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 382:0-384:1
     Visibility: public -/
 def default_pct_depth_raised : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_group_commit_kernel::default_pct_depth_raised_as_is]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 368:0-370:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 388:0-390:1
     Visibility: public -/
 def default_pct_depth_raised_as_is : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_group_commit_kernel::may_publish_group]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 376:0-378:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 396:0-398:1
     Visibility: public -/
 def may_publish_group (wal_io_ok : Bool) : Result Bool := do
   ok wal_io_ok
 
 /-- [pedra_aeneas_group_commit_kernel::rwlock_client_may_mutate]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 385:0-387:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 405:0-407:1
     Visibility: public -/
 def rwlock_client_may_mutate (holding_write : Bool) : Result Bool := do
   ok holding_write
 
 /-- [pedra_aeneas_group_commit_kernel::rwlock_client_may_mutate_as_is]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 392:0-394:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 412:0-414:1
     Visibility: public -/
 def rwlock_client_may_mutate_as_is (_holding_write : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_group_commit_kernel::may_publish_group_as_is]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 399:0-401:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 419:0-421:1
     Visibility: public -/
 def may_publish_group_as_is (_wal_io_ok : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_group_commit_kernel::lock_interleavings_admitted]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 407:0-409:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 427:0-429:1
     Visibility: public -/
 def lock_interleavings_admitted : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_group_commit_kernel::lock_interleavings_admitted_as_is]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 414:0-416:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 434:0-436:1
     Visibility: public -/
 def lock_interleavings_admitted_as_is : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_group_commit_kernel::fsync_promotes_pending]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 422:0-424:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 442:0-444:1
     Visibility: public -/
 def fsync_promotes_pending (os_honest : Bool) : Result Bool := do
   ok os_honest
 
 /-- [pedra_aeneas_group_commit_kernel::fsync_promotes_pending_as_is]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 429:0-431:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 449:0-451:1
     Visibility: public -/
 def fsync_promotes_pending_as_is (_os_honest : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_group_commit_kernel::media_durable_admitted]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 436:0-438:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 456:0-458:1
     Visibility: public -/
 def media_durable_admitted (_fsync_ok : Bool) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_group_commit_kernel::media_durable_admitted_as_is]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 443:0-445:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 463:0-465:1
     Visibility: public -/
 def media_durable_admitted_as_is (fsync_ok : Bool) : Result Bool := do
   ok fsync_ok
 
 /-- [pedra_aeneas_group_commit_kernel::stacked_fsync_liars_admitted]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 452:0-454:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 472:0-474:1
     Visibility: public -/
 def stacked_fsync_liars_admitted
   (_lying : Bool) (_det_io : Bool) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_group_commit_kernel::stacked_fsync_liars_admitted_as_is]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 459:0-461:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 479:0-481:1
     Visibility: public -/
 def stacked_fsync_liars_admitted_as_is
   (lying : Bool) (det_io : Bool) : Result Bool := do
@@ -526,13 +532,13 @@ def stacked_fsync_liars_admitted_as_is
   else ok false
 
 /-- [pedra_aeneas_group_commit_kernel::fsync_lie_closes_tcg_guest]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 467:0-469:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 487:0-489:1
     Visibility: public -/
 def fsync_lie_closes_tcg_guest : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_group_commit_kernel::fsync_lie_closes_tcg_guest_as_is]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 474:0-476:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 494:0-496:1
     Visibility: public -/
 def fsync_lie_closes_tcg_guest_as_is : Result Bool := do
   ok true

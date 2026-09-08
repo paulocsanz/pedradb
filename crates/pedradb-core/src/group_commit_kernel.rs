@@ -161,6 +161,18 @@ macro_rules! fsync_lie_closes_tcg_guest_as_is_body {
     };
 }
 
+macro_rules! pct_campaign_default_depth_body {
+    () => {
+        2u64
+    };
+}
+
+macro_rules! pct_campaign_default_depth_as_is_body {
+    () => {
+        3u64
+    };
+}
+
 /// First-committer-wins predicate (OCC): a transaction that read
 /// snapshot `snap` against current `last_seq` conflicts iff the window
 /// `(snap, last_seq]` is non-empty **and** some key it touched was
@@ -351,9 +363,17 @@ pub fn forall_schedules_admitted_as_is(pct_depth: u64) -> bool {
 
 /// RFC-0070 P2.2: campaign default PCT depth. d>2 stays RFC-0051
 /// (`planted_depth3_three_teeth`); this RFC does not raise it.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn pct_campaign_default_depth() -> u64 {
-    2
+    pct_campaign_default_depth_body!()
+}
+
+/// AS-IS: 0070 P2 is rounded to “default PCT depth is now 3”.
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn pct_campaign_default_depth_as_is() -> u64 {
+    pct_campaign_default_depth_as_is_body!()
 }
 
 /// RFC-0070 P2.2: admit a “0070 raised the default PCT depth” claim.
@@ -601,6 +621,20 @@ pub fn fsync_lie_closes_tcg_guest_as_is() -> (ok: bool)
         ok == true,
 {
     fsync_lie_closes_tcg_guest_as_is_body!()
+}
+
+pub fn pct_campaign_default_depth() -> (d: u64)
+    ensures
+        d == 2,
+{
+    pct_campaign_default_depth_body!()
+}
+
+pub fn pct_campaign_default_depth_as_is() -> (d: u64)
+    ensures
+        d == 3,
+{
+    pct_campaign_default_depth_as_is_body!()
 }
 
 #[derive(PartialEq, Eq, Copy, Clone)]
@@ -1300,6 +1334,11 @@ mod tests {
         assert!(forall_schedules_admitted_as_is(2));
         assert!(forall_schedules_admitted_as_is(3));
         assert_eq!(pct_campaign_default_depth(), 2);
+        assert_eq!(
+            pct_campaign_default_depth_as_is(),
+            3,
+            "AS-IS dente: 0070 would raise default PCT depth"
+        );
         assert!(!default_pct_depth_raised());
         assert!(
             default_pct_depth_raised_as_is(),
