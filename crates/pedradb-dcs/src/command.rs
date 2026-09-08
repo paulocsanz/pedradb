@@ -106,7 +106,7 @@ impl DcsCommand {
     /// # Errors
     /// Corrupt bytes.
     pub fn decode(buf: &[u8]) -> Result<Self> {
-        if buf.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(buf.len() as u64) {
             return Err(DcsError::Corrupt("empty cmd".into()));
         }
         let mut off = 1usize;
