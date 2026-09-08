@@ -110,6 +110,19 @@ macro_rules! forall_schedules_admitted_as_is_body {
     };
 }
 
+macro_rules! fsync_promotes_pending_body {
+    ($os_honest:expr) => {
+        $os_honest
+    };
+}
+
+macro_rules! fsync_promotes_pending_as_is_body {
+    ($os_honest:expr) => {{
+        let _ = $os_honest;
+        true
+    }};
+}
+
 /// First-committer-wins predicate (OCC): a transaction that read
 /// snapshot `snap` against current `last_seq` conflicts iff the window
 /// `(snap, last_seq]` is non-empty **and** some key it touched was
@@ -366,15 +379,17 @@ pub fn lock_interleavings_admitted_as_is() -> bool {
 
 /// RFC-0078 / R-fsync-lie: promote pending bytes only when the OS (or Env)
 /// is honest. A lying `fsync` Ok must not make the write crash-durable.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn fsync_promotes_pending(os_honest: bool) -> bool {
-    os_honest
+    fsync_promotes_pending_body!(os_honest)
 }
 
 /// AS-IS: fsync Ok always promotes (the 0078 hole — Lying recovers).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn fsync_promotes_pending_as_is(_os_honest: bool) -> bool {
-    true
+    fsync_promotes_pending_as_is_body!(_os_honest)
 }
 
 /// `fdatasync` rc==0 is not a proof the drive stored the bytes (R-fsync-lie).
@@ -486,6 +501,20 @@ pub fn forall_schedules_admitted_as_is(pct_depth: u64) -> (ok: bool)
         ok == (pct_depth >= 2),
 {
     forall_schedules_admitted_as_is_body!(pct_depth)
+}
+
+pub fn fsync_promotes_pending(os_honest: bool) -> (ok: bool)
+    ensures
+        ok == os_honest,
+{
+    fsync_promotes_pending_body!(os_honest)
+}
+
+pub fn fsync_promotes_pending_as_is(_os_honest: bool) -> (ok: bool)
+    ensures
+        ok == true,
+{
+    fsync_promotes_pending_as_is_body!(_os_honest)
 }
 
 #[derive(PartialEq, Eq, Copy, Clone)]
