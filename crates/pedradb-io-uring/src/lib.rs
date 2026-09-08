@@ -255,7 +255,7 @@ impl IoUringFile {
     /// `submit_and_wait(1)` serialized every WAL/SST write (diag-6).
     /// Durability is [`EnvFile::sync_data`] (`fdatasync(2)`, not the ring).
     fn posix_pwrite(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if buf.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(buf.len() as u64) {
             return Ok(0);
         }
         #[cfg(unix)]
