@@ -577,7 +577,7 @@ fn handle_conn(
     peer_ids: &[u64],
     auth: &[u8],
 ) -> Result<()> {
-    if !auth.is_empty() {
+    if !pedradb_core::write_admission_kernel::batch_is_empty(auth.len() as u64) {
         expect_auth(stream, auth)?;
     }
     let body = read_frame(stream)?;
