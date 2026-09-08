@@ -7798,7 +7798,7 @@ impl<E: Env> StoreCluster<E> {
             .into_iter()
             .map(|(k, v)| (k.as_ref().to_vec(), v.as_ref().to_vec()))
             .collect();
-        if owned.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(owned.len() as u64) {
             return Err(StoreError::Msg("empty transaction".into()));
         }
         let groups = self.group_pairs_by_range(&owned)?;
