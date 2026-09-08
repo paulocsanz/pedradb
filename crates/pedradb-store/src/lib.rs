@@ -7670,7 +7670,7 @@ impl<E: Env> StoreCluster<E> {
     /// # Errors
     /// Same as [`Self::put_many`].
     pub fn flush_writes(&mut self) -> Result<()> {
-        if self.write_coalesce.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(self.write_coalesce.len() as u64) {
             return Ok(());
         }
         // Clone so a failed put_many does not wipe the buffer (F66).
