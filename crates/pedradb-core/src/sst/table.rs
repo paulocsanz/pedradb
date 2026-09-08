@@ -2576,7 +2576,7 @@ fn write_sst_bulk_arrays_body(
         ));
     }
     let n_entries = keys.len();
-    if n_entries == 0 {
+    if crate::write_admission_kernel::batch_is_empty(n_entries as u64) {
         return Err(CoreError::Internal("bulk SST empty".into()));
     }
     let mut stages = StageTotals {
