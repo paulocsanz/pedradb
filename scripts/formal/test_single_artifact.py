@@ -1118,6 +1118,22 @@ def main() -> int:
         print("FAIL discard_leader twin≠kernel did not fail")
         return 1
     print("ok mutant discard_leader twin≠kernel named")
+    du_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in du_mutant["pairs"]:
+        if pair.get("id") == "discard_uncommitted":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/membership_joint.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing discard_uncommitted")
+        return 1
+    hits = [m for m in _sa_fails(du_mutant) if m.startswith("discard_uncommitted:")]
+    if not hits:
+        print("FAIL discard_uncommitted twin≠kernel did not fail")
+        return 1
+    print("ok mutant discard_uncommitted twin≠kernel named")
     # Drive the same rule through check_twins (may also report unrelated
     # dirty-tree twin drift; we only require the SA id).
     try:

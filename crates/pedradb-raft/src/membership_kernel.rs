@@ -1956,4 +1956,15 @@ mod tests {
         );
         assert!(discard_leader_local(true));
     }
+
+    #[test]
+    fn discard_node_counts_on_live_local_non_member_is_not_ok() {
+        assert!(discard_node_counts(true, false));
+        assert!(
+            !discard_node_counts_as_is(true, false),
+            "AS-IS dente: skip live discard on local non-member"
+        );
+        assert!(discard_node_counts(true, true));
+        assert!(!discard_node_counts(false, true));
+    }
 }
