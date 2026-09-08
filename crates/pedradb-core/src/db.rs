@@ -10071,7 +10071,9 @@ impl<E: Env> Db<E> {
         // at least doubled since then, rewrite ALL SSTs under the horizon
         // floor. Archive first, GC fail-closed (an archive error keeps the
         // data and the trigger retries on the next flush).
-        if !self.auto_reclaim && !self.ssts.is_empty() {
+        if !self.auto_reclaim
+            && !crate::write_admission_kernel::batch_is_empty(self.ssts.len() as u64)
+        {
             if let Some((floor, true)) = self.auto_gc_floor() {
                 let mut total: u64 = 0;
                 for t in &self.ssts {
