@@ -479,7 +479,10 @@ impl<F: EnvFile> ValueLog<F> {
     /// # Errors
     /// I/O.
     pub fn sync_pending(&mut self) -> Result<()> {
-        if self.pending.is_empty() && self.pending_large.is_empty() && !self.needs_sync {
+        if crate::write_admission_kernel::batch_is_empty(self.pending.len() as u64)
+            && self.pending_large.is_empty()
+            && !self.needs_sync
+        {
             return Ok(());
         }
         self.flush_pending()?;
