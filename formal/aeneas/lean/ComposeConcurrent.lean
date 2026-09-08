@@ -44,3 +44,13 @@ theorem concurrent_as_is_publish_lie_inflight_still_keeps :
     rfl
   · unfold pedra_aeneas_flush_kernel.wal_rotate_decision_as_is_ignore_pin
     rfl
+
+/-- OCC client + publish: inflight uses published snap; failed WAL does not publish. -/
+theorem occ_snap_published_and_no_publish_on_wal_fail :
+    pedra_aeneas_flush_kernel.occ_snap_uses_published true = ok true
+      ∧ pedra_aeneas_group_commit_kernel.may_publish_group false = ok false := by
+  constructor
+  · unfold pedra_aeneas_flush_kernel.occ_snap_uses_published
+    rfl
+  · unfold pedra_aeneas_group_commit_kernel.may_publish_group
+    rfl
