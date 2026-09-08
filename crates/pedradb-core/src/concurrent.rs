@@ -1583,7 +1583,7 @@ impl<E: Env> ConcurrentDb<E> {
     pub fn compact_l0_off_lock(&self) -> Result<bool> {
         let job = {
             let mut g = self.inner.write();
-            if g.level_file_count(0) == 0 {
+            if crate::write_admission_kernel::batch_is_empty(g.level_file_count(0) as u64) {
                 return Ok(false);
             }
             match g.prepare_l0_compact(CompactOptions::default())? {
