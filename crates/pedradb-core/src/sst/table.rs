@@ -621,7 +621,7 @@ impl SstTable {
                         drop(g);
                         let mut w = self.payload.write();
                         let p: &Arc<[u8]> = &w.img;
-                        if p.is_empty() || end > p.len() {
+                        if crate::write_admission_kernel::batch_is_empty(p.len() as u64) || end > p.len() {
                             // Evicted (or re-installed shorter) between the
                             // guards: serve this block from file.
                             drop(w);
