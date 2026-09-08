@@ -1244,7 +1244,7 @@ impl SstTable {
     /// Which index block would contain `user_key` (for tests / future lazy load).
     #[must_use]
     pub fn block_for_user_key(&self, user_key: &[u8]) -> Option<usize> {
-        if self.index.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.index.len() as u64) {
             return None;
         }
         // Last block whose first_user_key <= user_key (same as the linear scan).
