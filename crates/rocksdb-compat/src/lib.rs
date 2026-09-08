@@ -818,7 +818,7 @@ impl KeyCodec {
     fn fill_run_prefix(&self, cf: &str, pfx: &mut Vec<u8>) {
         pfx.clear();
         let effective = cf_encode_effective(cf, self.default_raw);
-        if effective.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(effective.len() as u64) {
             return;
         }
         pfx.extend_from_slice(effective.as_bytes());
