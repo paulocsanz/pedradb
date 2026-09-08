@@ -185,7 +185,7 @@ impl<F: EnvFile> Wal<F> {
     /// # Errors
     /// None today (encode is infallible); `Result` matches the append path.
     pub fn encode_write_op_batches(&mut self, batches: &[&[crate::batch::WriteOp]]) -> Result<u64> {
-        if batches.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(batches.len() as u64) {
             return Ok(0);
         }
         let mut frame = self.writer.take_frame();
