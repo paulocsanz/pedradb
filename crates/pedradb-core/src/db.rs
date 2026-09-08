@@ -5656,7 +5656,7 @@ impl<E: Env> Db<E> {
     /// one undividable cache layer: over cap it is dropped whole — reads
     /// fall back to the covered SSTs.
     pub fn install_retired_fold(&mut self, built: MemTable) {
-        if self.retired_fold.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.retired_fold.len() as u64) {
             self.retired_fold = built;
         } else {
             self.retired_fold.absorb(built);
