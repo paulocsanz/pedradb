@@ -234,11 +234,17 @@ fn diagnose_balance_cmd(args: &[String]) -> Result<(), ()> {
         u8::from(admits)
     );
     println!("shapes={}", BALANCE_SHAPES.join(","));
+    let shapes_json = BALANCE_SHAPES
+        .iter()
+        .map(|s| format!("\"{s}\""))
+        .collect::<Vec<_>>()
+        .join(",");
     println!(
-        r#"{{"admits":{},"cut":"{}","cells":{}}}"#,
+        r#"{{"admits":{},"cut":"{}","cells":{},"shapes":[{}]}}"#,
         u8::from(admits),
         cut.token(),
-        cells.len()
+        cells.len(),
+        shapes_json
     );
     Ok(())
 }
