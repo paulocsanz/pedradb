@@ -122,6 +122,8 @@ pub enum WriteLever {
     GetPath,
     /// Concurrent writers not grouping (avg_group ~1 at mc4).
     Grouping,
+    /// n=2–8 grouping paid: leader holds the write lock (not acquire spin, not n≥16 convoy).
+    LockHold,
 }
 
 impl WriteLever {
@@ -138,6 +140,7 @@ impl WriteLever {
             Self::ReadOrClient => "read_or_client",
             Self::GetPath => "get_path",
             Self::Grouping => "grouping",
+            Self::LockHold => "lock_hold",
         }
     }
 
@@ -154,6 +157,7 @@ impl WriteLever {
             "read_or_client" => Self::ReadOrClient,
             "get_path" => Self::GetPath,
             "grouping" => Self::Grouping,
+            "lock_hold" => Self::LockHold,
             _ => return None,
         })
     }
@@ -325,7 +329,9 @@ fn write_lever(
     match dominant {
         WritePhase::Wal => WriteLever::WalEncodeOrWrite,
         WritePhase::Mem => WriteLever::MemtableOffLock,
-        WritePhase::LockWait => WriteLever::LockConvoy,
+        // n≥16 already returned LockConvoy. n=2–8 grouping-paid lock_wait
+        // is hold time (overwrite_mc4), not Adaptive-off convoy.
+        WritePhase::LockWait => WriteLever::LockHold,
         WritePhase::Publish => WriteLever::PublishInvalidate,
         WritePhase::Prepare => WriteLever::Prepare,
         WritePhase::FlushCheck => WriteLever::FlushCheck,
@@ -668,6 +674,29 @@ mod tests {
         });
         assert_eq!(d.lever, WriteLever::LockConvoy);
         assert_eq!(d.dominant, WritePhase::LockWait);
+    }
+
+    #[test]
+    fn mc4_lock_wait_grouping_paid_is_lock_hold() {
+        // overwrite_mc4 Darwin DIAG: avg_group=3.85, lock≈12.5 µs/op.
+        // Grouping is paid; n=4 is not the n≥16 convoy.
+        let d = diagnose_write(WriteGapInput {
+            pedra_ns: 15_000,
+            rocks_ns: 9_200,
+            clients: 4,
+            avg_group_bps: 38_500,
+            read_pct: 0,
+            phases: WritePhases {
+                lock_wait_ns: 12_500,
+                wal_ns: 2_000,
+                mem_ns: 200,
+                ..WritePhases::default()
+            },
+        });
+        assert_eq!(d.lever, WriteLever::LockHold);
+        assert_eq!(d.dominant, WritePhase::LockWait);
+        assert_ne!(d.lever, WriteLever::LockConvoy);
+        assert_ne!(d.lever, WriteLever::Grouping);
     }
 
     #[test]
