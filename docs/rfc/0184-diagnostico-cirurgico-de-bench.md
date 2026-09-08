@@ -310,6 +310,13 @@ a linha quando há phasesΔ. Sem harness novo.
       (seed async); JSON suite tag is host-default (`peer_sync=true`),
       not a published win vs Rocks default. p50 0.9 vs 2.7 µs. Not Linux
       cartaz. — status: `done`
+- [x] **P2.57** `myrocks_read_only_mc4` (oltp_read_only PK range, 4 clients)
+      in `COMPARE_SHAPES`, `BALANCE_SHAPES`, and `run_myrocks_range_clients`.
+      Test `rfc0184_myrocks_read_only_mc4_in_compare`. Darwin DIAG
+      `ratio=1.870` (1.94 M / 1.04 M QPS). Timed is 25-key scan (seed
+      async); JSON suite tag is host-default (`peer_sync=true`), not a
+      published win vs Rocks default. p50 0.3 vs 3.6 µs. Not Linux
+      cartaz. — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -380,6 +387,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.54 | p2 | flink_window_state_mc4 COMPARE+BALANCE | done | Flink window-state mc4; Darwin DIAG 0.522× named loss | 2026-09-08 |
 | P2.55 | p2 | kafka_changelog_flush_mc4 COMPARE+BALANCE | done | Kafka changelog mc4; Darwin DIAG 0.897× named loss; no per-op flush | 2026-09-08 |
 | P2.56 | p2 | bluestore_omap_read_mc4 COMPARE+BALANCE | done | Ceph omap-read mc4; Darwin DIAG 0.828×; JSON host-default not a win | 2026-09-08 |
+| P2.57 | p2 | myrocks_read_only_mc4 COMPARE+BALANCE | done | MyRocks oltp_read_only mc4; Darwin DIAG 1.870; JSON host-default not a win | 2026-09-08 |
 
 ## Acceptance Criteria
 
@@ -445,7 +453,8 @@ a linha quando há phasesΔ. Sem harness novo.
   `rfc0184_kvrocks_scan_mc4_in_compare` (P2.53);
   `rfc0184_flink_window_state_mc4_in_compare` (P2.54);
   `rfc0184_kafka_changelog_flush_mc4_in_compare` (P2.55);
-  `rfc0184_bluestore_omap_read_mc4_in_compare` (P2.56).
+  `rfc0184_bluestore_omap_read_mc4_in_compare` (P2.56);
+  `rfc0184_myrocks_read_only_mc4_in_compare` (P2.57).
 - **Telemetry / Analytics:** uma linha `diagnose dominant=… lever=…`;
   `benches[].diagnose.lever` no JSON; compare copia para a row.
   scale `get_hit` / `lookup_100` / `probe_hit` imprimem `diagnose get … class=…` (P2.6/P2.7/P2.21).
