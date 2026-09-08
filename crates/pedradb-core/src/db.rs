@@ -4552,7 +4552,7 @@ impl<E: Env> Db<E> {
                     continue;
                 }
                 if let Some(ptr) = vlog::decode_vlog_ptr(slot.1.as_ref()) {
-                    let path = if ptr.file_num == 0 {
+                    let path = if crate::write_admission_kernel::batch_is_empty(ptr.file_num as u64) {
                         self.dir.join(VLOG_FILE_NAME)
                     } else {
                         vlog::blob_path(&self.dir, ptr.file_num)
