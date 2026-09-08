@@ -313,7 +313,7 @@ impl PeerClient {
     fn connect(&self) -> Result<TcpStream> {
         let mut s =
             TcpStream::connect_timeout(&self.addr, Duration::from_secs(2)).map_err(io_net)?;
-        if !self.auth.is_empty() {
+        if !pedradb_core::write_admission_kernel::batch_is_empty(self.auth.len() as u64) {
             write_auth(&mut s, &self.auth)?;
         }
         Ok(s)
