@@ -462,6 +462,22 @@ def main() -> int:
         print("FAIL prepare_error_aborts_earlier twin≠kernel did not fail")
         return 1
     print("ok mutant prepare_error_aborts_earlier twin≠kernel named")
+    rsg2_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in rsg2_mutant["pairs"]:
+        if pair.get("id") == "reserve_si_gen":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/txn_kernel.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing reserve_si_gen")
+        return 1
+    hits = [m for m in _sa_fails(rsg2_mutant) if m.startswith("reserve_si_gen:")]
+    if not hits:
+        print("FAIL reserve_si_gen twin≠kernel did not fail")
+        return 1
+    print("ok mutant reserve_si_gen twin≠kernel named")
     # Drive the same rule through check_twins (may also report unrelated
     # dirty-tree twin drift; we only require the SA id).
     try:
