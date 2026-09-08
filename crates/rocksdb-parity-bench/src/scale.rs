@@ -346,6 +346,33 @@ fn run_one(store: &mut dyn ScaleStore, dir: &Path, n: usize, vlen: usize, pool: 
         pct_us(&mut hit, 0.999),
         hit.iter().copied().max().unwrap_or(0) as f64 / 1000.0,
     );
+    {
+        // RFC-0184 P2.21: p50 of the hit arm vs the 0176 clock (get_hit
+        // is a mean of a later random sample; this is the published p50).
+        let measured_ns = if hit.is_empty() {
+            0
+        } else {
+            hit[(((hit.len() as f64) * 0.50) as usize).min(hit.len() - 1)]
+        };
+        let ram = cache_bytes().unwrap_or(64 << 30);
+        let f = pedradb_core::scale_kernel::scale_forecast(n as u64, ram);
+        let as_is = pedradb_core::scale_kernel::scale_forecast_as_is(n as u64, ram);
+        let class = pedradb_core::classify_get(
+            measured_ns,
+            f.best_ns,
+            f.happy_ns,
+            f.worst_ns,
+            as_is.best_ns,
+        );
+        eprintln!(
+            "diagnose get probe_hit/{label} measured_ns={measured_ns} (p50) best={} happy={} worst={} as_is={} class={}",
+            f.best_ns,
+            f.happy_ns,
+            f.worst_ns,
+            as_is.best_ns,
+            class.token()
+        );
+    }
     eprintln!(
         "probe_miss/{label}: mean {:.1}µs (n={PROBES})",
         mean_us(&miss)
@@ -827,6 +854,33 @@ mod tests {
     fn rfc0178_pedra_scale_rejects_unknown_flag() {
         let e = parse_pedra_scale(&["scale".into(), "--nope".into()]).unwrap_err();
         assert!(e.contains("unknown flag"), "{e}");
+    }
+
+    /// RFC-0184 P2.21: probe_hit p50 at RAM clock is not as-is walk.
+    #[test]
+    fn rfc0184_p221_probe_hit_p50_classifies_vs_0176() {
+        let n = 1_000_000u64;
+        let ram = 64u64 << 30;
+        let f = pedradb_core::scale_kernel::scale_forecast(n, ram);
+        let as_is = pedradb_core::scale_kernel::scale_forecast_as_is(n, ram);
+        let class =
+            pedradb_core::classify_get(1_100, f.best_ns, f.happy_ns, f.worst_ns, as_is.best_ns);
+        assert_ne!(
+            class,
+            pedradb_core::GetClass::AsIsWalk,
+            "probe_hit p50 @ τ_ram is not walk-all: {}",
+            class.token()
+        );
+        assert!(
+            matches!(
+                class,
+                pedradb_core::GetClass::Best
+                    | pedradb_core::GetClass::Happy
+                    | pedradb_core::GetClass::FasterThanModel
+            ),
+            "got {}",
+            class.token()
+        );
     }
 
     #[test]
