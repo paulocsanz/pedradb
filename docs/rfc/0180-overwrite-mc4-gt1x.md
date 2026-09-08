@@ -214,6 +214,16 @@ medida no mesmo harness isolado.
       (P0.60 removed the wait → p999 0.065→3.2 ms). Wait stays;
       `commit_inflight` pins compact. Test
       `rfc0180_catchup_after_prepare_off_write_lock`. status: `done`
+- [x] **P0.62** Unpinned overwrite **supersedes** the live memtable slot
+      (tail idx or spilled map) instead of appending a version. Darwin
+      overwrite_mc4 is 10k keys × 400k ops (~40 versions/key) — the tail
+      stayed ~unique keys, not 400k Versions, and auto-flush 4 MiB no
+      longer fires mid-window. Distinct keys (apply_mc4) still append.
+      Snapshot pin / OCC snap disable supersede (MVCC). Tests
+      `rfc0180_insert_many_supersede_overwrite_does_not_grow_tail`,
+      `rfc0180_unpinned_overwrite_supersedes_mem_version`,
+      `rfc0180_concurrent_unpinned_overwrite_supersedes_mem_version`.
+      status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
 
@@ -288,6 +298,7 @@ medida no mesmo harness isolado.
 | P0.57 | p0 | lone 1c async WAL off Db write lock | done | STALL lead_write ~2s; G1 1c on-lock stays | 2026-09-08 |
 | P0.58 | p0 | WAL 64MiB prealloc at create not commit | done | STALL group_path was F_PREALLOCATE | 2026-09-08 |
 | P0.61 | p0 | catch-up wait off db.write() | done | keep wait; P0.60 removed it | 2026-09-08 |
+| P0.62 | p0 | unpinned overwrite supersede live slot | done | tail stays unique keys; pin keeps MVCC | 2026-09-08 |
 | P1.1 | p1 | 3-run caixa | todo | — | 2026-09-07 |
 | P2.1 | p2 | 3/3 quiet ≥1× | todo | 0182 P1.1 | 2026-09-07 |
 | P2.2 | p2 | leftover hang | done | 0181 P0.3 steal | 2026-09-07 |

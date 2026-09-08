@@ -6889,6 +6889,41 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// RFC-0180 P0.62: ConcurrentDb async overwrite (the overwrite_mc4
+    /// apply path) must not stack one mem version per put when unpinned.
+    #[test]
+    fn rfc0180_concurrent_unpinned_overwrite_supersedes_mem_version() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: None,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.put(b"k", b"v0").unwrap();
+        for i in 1..32u32 {
+            db.put(b"k", format!("v{i}").as_bytes()).unwrap();
+        }
+        assert_eq!(
+            db.stats().mem_entries,
+            1,
+            "async group apply must supersede unpinned overwrite"
+        );
+        assert_eq!(db.get(b"k").as_deref(), Some(b"v31".as_ref()));
+        let pin = db.pin_snapshot();
+        db.put(b"k", b"after-pin").unwrap();
+        assert!(db.stats().mem_entries >= 2, "pin must disable supersede");
+        assert_eq!(
+            db.get_at(pin.snapshot(), b"k").unwrap().as_deref(),
+            Some(b"v31".as_ref())
+        );
+        assert_eq!(db.get(b"k").as_deref(), Some(b"after-pin".as_ref()));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// RFC-0045 P2.1: ConcurrentDb (apply after durable fd) recovers the
     /// same user-visible state as single-threaded `Db::group_commit`.
     #[test]

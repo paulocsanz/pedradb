@@ -10222,10 +10222,18 @@ impl<E: Env> Db<E> {
         Ok(())
     }
 
+    /// Latest-only mem apply is legal iff no snapshot pin / OCC snap can
+    /// observe a dropped sequence (RFC-0180 P0.62). Distinct keys still
+    /// append — this is not a grouping knob.
+    fn apply_supersede_latest(&self) -> bool {
+        self.snapshot_pins.is_empty() && self.occ_registry_floor().is_none()
+    }
+
     /// Apply prepared ops to the memtable after durable WAL.
     pub(crate) fn apply_ops_to_mem(&mut self, ops: Vec<WriteOp>) {
         self.note_dirty_points(&ops);
-        apply_ops_owned(&mut self.mem, ops);
+        let supersede = self.apply_supersede_latest();
+        apply_ops_owned(&mut self.mem, ops, supersede);
         self.publish_sequence(self.last_sequence());
     }
 
@@ -10323,7 +10331,8 @@ impl<E: Env> Db<E> {
                         .extend(ops.iter().map(ChangeEntry::from_write_op));
                 }
                 self.note_dirty_points(&ops);
-                apply_ops_owned(&mut self.mem, ops);
+                let supersede = self.apply_supersede_latest();
+                apply_ops_owned(&mut self.mem, ops, supersede);
                 self.publish_sequence(seq);
                 let _ = self.maybe_auto_flush_with(
                     async_ok_flush_is_stage_only() || self.defer_auto_compact,
@@ -10365,7 +10374,8 @@ impl<E: Env> Db<E> {
         }
         let t2 = st.as_ref().map(|_| Instant::now());
         self.note_dirty_points(std::slice::from_ref(&op));
-        apply_one_owned(&mut self.mem, op);
+        let supersede = self.apply_supersede_latest();
+        apply_one_owned(&mut self.mem, op, supersede);
         if let (Some(st), Some(t2)) = (st.as_ref(), t2) {
             st.mem_ns
                 .fetch_add(t2.elapsed().as_nanos() as u64, Ordering::Relaxed);
@@ -10424,7 +10434,8 @@ impl<E: Env> Db<E> {
                         .extend(std::iter::once(ChangeEntry::from_write_op(&op)));
                 }
                 self.note_dirty_points(std::slice::from_ref(&op));
-                apply_one_owned(&mut self.mem, op);
+                let supersede = self.apply_supersede_latest();
+                apply_one_owned(&mut self.mem, op, supersede);
                 self.publish_sequence(seq);
                 let _ = self.maybe_auto_flush_with(
                     async_ok_flush_is_stage_only() || self.defer_auto_compact,
@@ -10498,7 +10509,8 @@ impl<E: Env> Db<E> {
         }
         self.maybe_persist_changelog_after_durable_commit();
         self.note_dirty_points(&records);
-        apply_ops_owned(&mut self.mem, records);
+        let supersede = self.apply_supersede_latest();
+        apply_ops_owned(&mut self.mem, records, supersede);
         self.publish_sequence(seq);
         // Same as `commit_ops_with` / `commit_async_ops`. P1.1 lone_sync
         // skipped this; 1c G1 then never auto-flushed (imm never staged,
@@ -10903,9 +10915,10 @@ impl<E: Env> Db<E> {
             self.maybe_persist_changelog_after_durable_commit();
         }
 
+        let supersede = self.apply_supersede_latest();
         for (i, write_ops, last_seq) in appended {
             self.note_dirty_points(&write_ops);
-            apply_ops_owned(&mut self.mem, write_ops);
+            apply_ops_owned(&mut self.mem, write_ops, supersede);
             results[i] = Some(Ok(last_seq));
         }
         // Caches bump on [`Self::publish_sequence`] after WAL is durable so
@@ -12349,21 +12362,26 @@ fn apply_record(mem: &mut MemTable, rec: &WriteRecord) {
 }
 
 /// RFC-0180: 1-op async put skips the `insert_many` iterator envelope.
-fn apply_one_owned(mem: &mut MemTable, op: WriteOp) {
-    mem.insert(
+fn apply_one_owned(mem: &mut MemTable, op: WriteOp, supersede: bool) {
+    mem.insert_ex(
         crate::key::InternalKey::new(op.key, op.sequence, op.kind),
         op.value,
+        supersede,
     );
 }
 
 /// RFC-0040: move `WriteOp` Bytes into the memtable (no extra payload memcpy).
-fn apply_ops_owned(mem: &mut MemTable, ops: impl IntoIterator<Item = WriteOp>) {
-    mem.insert_many(ops.into_iter().map(|op| {
-        (
-            crate::key::InternalKey::new(op.key, op.sequence, op.kind),
-            op.value,
-        )
-    }));
+/// RFC-0180 P0.62: `supersede` replaces the live user-key slot (no pin).
+fn apply_ops_owned(mem: &mut MemTable, ops: impl IntoIterator<Item = WriteOp>, supersede: bool) {
+    mem.insert_many_ex(
+        ops.into_iter().map(|op| {
+            (
+                crate::key::InternalKey::new(op.key, op.sequence, op.kind),
+                op.value,
+            )
+        }),
+        supersede,
+    );
 }
 
 /// Repeat puts of the same slice (kvrocks SET / blob) share one `Bytes`.
@@ -13702,13 +13720,62 @@ mod tests {
         let op = WriteOp::put(3, Bytes::from_static(b"k"), Bytes::from_static(b"v"));
         let mut a = MemTable::new();
         let mut b = MemTable::new();
-        apply_one_owned(&mut a, op.clone());
-        apply_ops_owned(&mut b, std::iter::once(op));
+        apply_one_owned(&mut a, op.clone(), false);
+        apply_ops_owned(&mut b, std::iter::once(op), false);
         assert_eq!(a.get(b"k", 3), b.get(b"k", 3));
         match a.get(b"k", 3) {
             crate::memtable::Lookup::Found(v) => assert_eq!(&*v, b"v"),
             other => panic!("expected Found, got {other:?}"),
         }
+    }
+
+    /// RFC-0180 P0.62: unpinned overwrite must not stack memtable versions.
+    /// A live snapshot pin keeps the old sequence (MVCC).
+    #[test]
+    fn rfc0180_unpinned_overwrite_supersedes_mem_version() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: None,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.put(b"k", b"v0").unwrap();
+        for i in 1..32u32 {
+            db.put(b"k", format!("v{i}").as_bytes()).unwrap();
+        }
+        assert_eq!(
+            db.stats().mem_entries,
+            1,
+            "unpinned overwrite must replace in place"
+        );
+        assert_eq!(db.get(b"k").as_deref(), Some(b"v31".as_ref()));
+
+        let mut pinned = Db::open_with(
+            &dir.join("pin"),
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: None,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        pinned.put(b"k", b"old").unwrap();
+        let pin = pinned.pin_snapshot();
+        pinned.put(b"k", b"new").unwrap();
+        assert!(
+            pinned.stats().mem_entries >= 2,
+            "pin must keep the old version"
+        );
+        assert_eq!(
+            pinned.get_at(pin.snapshot(), b"k").unwrap().as_deref(),
+            Some(b"old".as_ref())
+        );
+        assert_eq!(pinned.get(b"k").as_deref(), Some(b"new".as_ref()));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// RFC-0178 P0.9: inline-only `stats()` must not walk SST values
