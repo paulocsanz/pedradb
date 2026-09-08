@@ -771,7 +771,7 @@ impl<V: Clone> AnswerCache<V> {
     #[must_use]
     pub fn get(&self, key: &[u8]) -> Option<V> {
         let g = self.inner.lock();
-        if g.capacity == 0 {
+        if crate::write_admission_kernel::batch_is_empty(g.capacity as u64) {
             return None;
         }
         match g.map.get(key) {
