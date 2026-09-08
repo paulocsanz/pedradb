@@ -165,7 +165,7 @@ impl Read for RecordingFile {
 
 impl Write for RecordingFile {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if buf.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(buf.len() as u64) {
             return Ok(0);
         }
         let mut img = self.image.borrow_mut();
