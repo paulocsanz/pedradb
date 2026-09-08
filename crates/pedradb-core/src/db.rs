@@ -2613,7 +2613,7 @@ impl<E: Env> Db<E> {
                 self.changelog_rebuild_budget_entries,
             ) {
                 if let Ok(entries) = self.collect_feed_from_live() {
-                    if !entries.is_empty() {
+                    if !crate::write_admission_kernel::batch_is_empty(entries.len() as u64) {
                         self.change_log.replace_sorted(entries);
                     }
                 }
