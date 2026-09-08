@@ -65,6 +65,36 @@ pub fn group_validate(reads: &[OccRead], last_seq: u64) -> Vec<bool> {
     out
 }
 
+/// Fate of one OCC member after `group_validate` (and snapshot TooOld).
+/// `validate_occ_batch` matches this — TooOld wins over Conflict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OccMemberFate {
+    /// Apply with the group.
+    Ok,
+    /// Snapshot unreadable — abort TooOld.
+    TooOld,
+    /// OCC conflict — abort TransactionConflict.
+    Conflict,
+}
+
+/// Caller of `group_validate`: too-old or conflict ⇒ abort that member.
+#[must_use]
+pub fn occ_member_fate(too_old: bool, conflict: bool) -> OccMemberFate {
+    if too_old {
+        OccMemberFate::TooOld
+    } else if conflict {
+        OccMemberFate::Conflict
+    } else {
+        OccMemberFate::Ok
+    }
+}
+
+/// AS-IS: never abort (lagging member commits).
+#[must_use]
+pub fn occ_member_fate_as_is(_too_old: bool, _conflict: bool) -> OccMemberFate {
+    OccMemberFate::Ok
+}
+
 /// The fence watermark: one publish sequence for the whole group — the
 /// max appended member sequence (0 for an empty group).
 #[must_use]
@@ -338,6 +368,26 @@ mod tests {
         assert_eq!(group_validate(&reads, 10), vec![false, false]);
         // The serialized mutant aborts the second member.
         assert!(occ_conflict_as_is_serialized(10, 10, 1, true));
+    }
+
+    #[test]
+    fn occ_member_fate_on_live_conflict_is_not_ok() {
+        assert_eq!(
+            occ_member_fate(false, true),
+            OccMemberFate::Conflict
+        );
+        assert_eq!(occ_member_fate(true, true), OccMemberFate::TooOld);
+        assert_eq!(occ_member_fate(false, false), OccMemberFate::Ok);
+        assert_eq!(
+            occ_member_fate_as_is(true, true),
+            OccMemberFate::Ok,
+            "AS-IS dente: lagging member still Ok"
+        );
+        let src = include_str!("concurrent.rs");
+        assert!(
+            src.contains("occ_member_fate("),
+            "validate_occ_batch must match occ_member_fate"
+        );
     }
 
     /// Catalog three-teeth plant. Direct `group_members_are_simultaneous` is **not** this tooth.

@@ -959,14 +959,16 @@ impl WriteGroup {
         }
         let conflicts = crate::group_commit_kernel::group_validate(&reads, guard.last_sequence());
         for ((p, conflict), old) in batch.iter_mut().zip(conflicts).zip(too_old) {
-            if let Some(e) = old {
-                p.ops.clear();
-                p.occ_err = Some(e);
-                continue;
-            }
-            if conflict {
-                p.ops.clear();
-                p.occ_err = Some(CoreError::TransactionConflict);
+            match crate::group_commit_kernel::occ_member_fate(old.is_some(), conflict) {
+                crate::group_commit_kernel::OccMemberFate::TooOld => {
+                    p.ops.clear();
+                    p.occ_err = old;
+                }
+                crate::group_commit_kernel::OccMemberFate::Conflict => {
+                    p.ops.clear();
+                    p.occ_err = Some(CoreError::TransactionConflict);
+                }
+                crate::group_commit_kernel::OccMemberFate::Ok => {}
             }
         }
     }

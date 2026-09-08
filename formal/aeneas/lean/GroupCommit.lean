@@ -163,3 +163,21 @@ theorem group_occ_vs_serialized_same_input :
           (10#u64) =
         ok (⟨[false], by native_decide⟩ : alloc.vec.Vec Bool) := by
   refine ⟨rfl, rfl, LawfulBEq.eq_of_beq (by native_decide)⟩
+
+/-- `validate_occ_batch` caller: group_validate conflict ⇒ occ_member_fate Conflict. -/
+theorem occ_member_fate_conflict_via_group_validate :
+    group_validate
+        (⟨[{ snap := 7#u64, touched_key_written_after := true }],
+          by native_decide⟩)
+        (9#u64) =
+      ok (⟨[true], by native_decide⟩ : alloc.vec.Vec Bool) ∧
+      occ_member_fate false true = ok OccMemberFate.Conflict := by
+  constructor
+  · exact LawfulBEq.eq_of_beq (by native_decide)
+  · unfold occ_member_fate; rfl
+
+/-- AS-IS dente: too-old + conflict still Ok. -/
+theorem occ_member_fate_as_is_dente :
+    occ_member_fate_as_is true true = ok OccMemberFate.Ok := by
+  unfold occ_member_fate_as_is
+  rfl

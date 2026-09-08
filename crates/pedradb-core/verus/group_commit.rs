@@ -108,6 +108,43 @@ pub fn occ_conflict(snap: u64, last_seq: u64, touched_key_written_after: bool) -
     last_seq > snap && touched_key_written_after
 }
 
+#[derive(PartialEq, Eq)]
+pub enum OccMemberFate {
+    Ok,
+    TooOld,
+    Conflict,
+}
+
+pub open spec fn occ_member_fate_spec(too_old: bool, conflict: bool) -> OccMemberFate {
+    if too_old {
+        OccMemberFate::TooOld
+    } else if conflict {
+        OccMemberFate::Conflict
+    } else {
+        OccMemberFate::Ok
+    }
+}
+
+pub fn occ_member_fate(too_old: bool, conflict: bool) -> (d: OccMemberFate)
+    ensures
+        d == occ_member_fate_spec(too_old, conflict),
+{
+    if too_old {
+        OccMemberFate::TooOld
+    } else if conflict {
+        OccMemberFate::Conflict
+    } else {
+        OccMemberFate::Ok
+    }
+}
+
+pub fn occ_member_fate_as_is(_too_old: bool, _conflict: bool) -> (d: OccMemberFate)
+    ensures
+        d == OccMemberFate::Ok,
+{
+    OccMemberFate::Ok
+}
+
 pub fn group_validate(reads: &[OccRead], last_seq: u64) -> (out: Vec<bool>)
     ensures
         out.len() == reads.len(),
