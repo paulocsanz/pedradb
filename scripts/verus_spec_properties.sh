@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Machine-check the RFC-0166 property kernel (D1/R1/T1/C1 + teeth).
+# Machine-check D1 d1_holds on the file rustc links (single artifact —
+# not the twin-cópia). R1/T1/C1 stay rustc.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-spec/verus/properties.rs"
+SRC="$ROOT/crates/pedradb-spec/src/properties_kernel.rs"
 
 if [[ -x "${VERUS:-}" ]]; then
   :

@@ -28,7 +28,7 @@ axiom core.option.Option.Insts.CoreCmpPartialEqOption.eq
   Option T → Option T → Result Bool
 
 /-- [pedra_aeneas_properties_kernel::majority]:
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 32:0-38:1 -/
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 35:0-41:1 -/
 def majority (n : Std.U64) : Result Std.U64 := do
   if n = 0#u64
   then ok 1#u64
@@ -36,7 +36,7 @@ def majority (n : Std.U64) : Result Std.U64 := do
        i + 1#u64
 
 /-- [pedra_aeneas_properties_kernel::d1_holds]: loop body 0:
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 1:0-54:1
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 1:0-58:1
     Visibility: public -/
 @[rust_loop_body]
 def d1_holds_loop.body
@@ -58,7 +58,7 @@ def d1_holds_loop.body
   else ok (done true)
 
 /-- [pedra_aeneas_properties_kernel::d1_holds]: loop 0:
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 1:0-54:1
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 1:0-58:1
     Visibility: public -/
 @[rust_loop]
 def d1_holds_loop
@@ -70,14 +70,14 @@ def d1_holds_loop
     i
 
 /-- [pedra_aeneas_properties_kernel::d1_holds]:
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 45:0-54:1
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 49:0-58:1
     Visibility: public -/
 @[reducible]
 def d1_holds (acked : Slice Bool) (survives : Std.Usize) : Result Bool := do
   d1_holds_loop acked survives 0#usize
 
 /-- [pedra_aeneas_properties_kernel::d1_holds_as_is]: loop body 0:
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 1:0-69:1
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 1:0-74:1
     Visibility: public -/
 @[rust_loop_body]
 def d1_holds_as_is_loop.body
@@ -99,7 +99,7 @@ def d1_holds_as_is_loop.body
   else ok (done true)
 
 /-- [pedra_aeneas_properties_kernel::d1_holds_as_is]: loop 0:
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 1:0-69:1
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 1:0-74:1
     Visibility: public -/
 @[rust_loop]
 def d1_holds_as_is_loop
@@ -111,7 +111,7 @@ def d1_holds_as_is_loop
     i
 
 /-- [pedra_aeneas_properties_kernel::d1_holds_as_is]:
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 60:0-69:1
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 65:0-74:1
     Visibility: public -/
 @[reducible]
 def d1_holds_as_is
@@ -119,7 +119,7 @@ def d1_holds_as_is
   d1_holds_as_is_loop synced survives 0#usize
 
 /-- [pedra_aeneas_properties_kernel::Slot]
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 73:0-78:1
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 79:0-84:1
     Visibility: public -/
 @[discriminant isize]
 inductive Slot where
@@ -127,7 +127,7 @@ inductive Slot where
 | Tombstone : Slot
 
 /-- [pedra_aeneas_properties_kernel::{impl core::fmt::Debug for pedra_aeneas_properties_kernel::Slot}::fmt]:
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 72:9-72:14
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 78:9-78:14
     Visibility: public -/
 def Slot.Insts.CoreFmtDebug.fmt
   (self : Slot) (f : core.fmt.Formatter) :
@@ -140,41 +140,41 @@ def Slot.Insts.CoreFmtDebug.fmt
   | Slot.Tombstone => core.fmt.Formatter.write_str f (toStr "Tombstone")
 
 /-- Trait implementation: [pedra_aeneas_properties_kernel::{impl core::fmt::Debug for pedra_aeneas_properties_kernel::Slot}]
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 72:9-72:14 -/
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 78:9-78:14 -/
 @[reducible]
 def Slot.Insts.CoreFmtDebug : core.fmt.Debug Slot := {
   fmt := Slot.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_properties_kernel::{impl core::clone::Clone for pedra_aeneas_properties_kernel::Slot}::clone]:
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 72:16-72:21
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 78:16-78:21
     Visibility: public -/
 def Slot.Insts.CoreCloneClone.clone (self : Slot) : Result Slot := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_properties_kernel::{impl core::clone::Clone for pedra_aeneas_properties_kernel::Slot}]
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 72:16-72:21 -/
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 78:16-78:21 -/
 @[reducible]
 def Slot.Insts.CoreCloneClone : core.clone.Clone Slot := {
   clone := Slot.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [pedra_aeneas_properties_kernel::{impl core::marker::Copy for pedra_aeneas_properties_kernel::Slot}]
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 72:23-72:27 -/
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 78:23-78:27 -/
 @[reducible]
 def Slot.Insts.CoreMarkerCopy : core.marker.Copy Slot := {
   cloneInst := Slot.Insts.CoreCloneClone
 }
 
 /-- Trait implementation: [pedra_aeneas_properties_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_properties_kernel::Slot}]
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 72:29-72:38 -/
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 78:29-78:38 -/
 @[reducible]
 def Slot.Insts.CoreMarkerStructuralPartialEq : core.marker.StructuralPartialEq
   Slot := {
 }
 
 /-- [pedra_aeneas_properties_kernel::{impl core::cmp::PartialEq<pedra_aeneas_properties_kernel::Slot> for pedra_aeneas_properties_kernel::Slot}::eq]:
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 72:29-72:38
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 78:29-78:38
     Visibility: public -/
 def Slot.Insts.CoreCmpPartialEqSlot.eq
   (self : Slot) (other : Slot) : Result Bool := do
@@ -192,20 +192,20 @@ def Slot.Insts.CoreCmpPartialEqSlot.eq
   else ok false
 
 /-- Trait implementation: [pedra_aeneas_properties_kernel::{impl core::cmp::PartialEq<pedra_aeneas_properties_kernel::Slot> for pedra_aeneas_properties_kernel::Slot}]
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 72:29-72:38 -/
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 78:29-78:38 -/
 @[reducible]
 def Slot.Insts.CoreCmpPartialEqSlot : core.cmp.PartialEq Slot Slot := {
   eq := Slot.Insts.CoreCmpPartialEqSlot.eq
 }
 
 /-- [pedra_aeneas_properties_kernel::{impl core::cmp::Eq for pedra_aeneas_properties_kernel::Slot}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 72:40-72:42
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 78:40-78:42
     Visibility: public -/
 def Slot.Insts.CoreCmpEq.assert_fields_are_eq (self : Slot) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_properties_kernel::{impl core::cmp::Eq for pedra_aeneas_properties_kernel::Slot}]
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 72:40-72:42 -/
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 78:40-78:42 -/
 @[reducible]
 def Slot.Insts.CoreCmpEq : core.cmp.Eq Slot := {
   partialEqInst := Slot.Insts.CoreCmpPartialEqSlot
@@ -213,7 +213,7 @@ def Slot.Insts.CoreCmpEq : core.cmp.Eq Slot := {
 }
 
 /-- [pedra_aeneas_properties_kernel::r1_first_hit]: loop body 0:
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 83:4-90:1 -/
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 90:4-97:1 -/
 @[rust_loop_body]
 def r1_first_hit_loop.body
   (probes : Slice (Option Slot)) (i : Std.Usize) :
@@ -231,7 +231,7 @@ def r1_first_hit_loop.body
   else ok (done none)
 
 /-- [pedra_aeneas_properties_kernel::r1_first_hit]: loop 0:
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 83:4-90:1 -/
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 90:4-97:1 -/
 @[rust_loop]
 def r1_first_hit_loop
   (probes : Slice (Option Slot)) (i : Std.Usize) : Result (Option Slot) := do
@@ -240,13 +240,13 @@ def r1_first_hit_loop
     i
 
 /-- [pedra_aeneas_properties_kernel::r1_first_hit]:
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 81:0-90:1 -/
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 88:0-97:1 -/
 @[reducible]
 def r1_first_hit (probes : Slice (Option Slot)) : Result (Option Slot) := do
   r1_first_hit_loop probes 0#usize
 
 /-- [pedra_aeneas_properties_kernel::r1_answer_ok]:
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 95:0-97:1
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 103:0-105:1
     Visibility: public -/
 def r1_answer_ok
   (probes : Slice (Option Slot)) (answer : Option Slot) : Result Bool := do
@@ -255,7 +255,7 @@ def r1_answer_ok
     Slot.Insts.CoreCmpPartialEqSlot answer o
 
 /-- [pedra_aeneas_properties_kernel::r1_answer_ok_as_is]:
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 102:0-107:1
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 111:0-116:1
     Visibility: public -/
 def r1_answer_ok_as_is
   (probes : Slice (Option Slot)) (answer : Option Slot) : Result Bool := do
@@ -266,7 +266,7 @@ def r1_answer_ok_as_is
               ok (core.option.Option.is_some o)
 
 /-- [pedra_aeneas_properties_kernel::t1_holds]: loop body 0:
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 119:4-130:1
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 129:4-140:1
     Visibility: public -/
 @[rust_loop_body]
 def t1_holds_loop0.body
@@ -285,7 +285,7 @@ def t1_holds_loop0.body
        ok (done (i1 = staged_n))
 
 /-- [pedra_aeneas_properties_kernel::t1_holds]: loop 0:
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 119:4-130:1
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 129:4-140:1
     Visibility: public -/
 @[rust_loop]
 def t1_holds_loop0
@@ -297,7 +297,7 @@ def t1_holds_loop0
     j
 
 /-- [pedra_aeneas_properties_kernel::t1_holds]: loop body 1:
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 119:4-130:1
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 129:4-140:1
     Visibility: public -/
 @[rust_loop_body]
 def t1_holds_loop1.body
@@ -316,7 +316,7 @@ def t1_holds_loop1.body
        ok (done b)
 
 /-- [pedra_aeneas_properties_kernel::t1_holds]: loop 1:
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 119:4-130:1
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 129:4-140:1
     Visibility: public -/
 @[rust_loop]
 def t1_holds_loop1
@@ -328,7 +328,7 @@ def t1_holds_loop1
     j
 
 /-- [pedra_aeneas_properties_kernel::t1_holds]:
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 114:0-130:1
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 124:0-140:1
     Visibility: public -/
 def t1_holds
   (committed : Bool) (aborted : Bool) (staged_n : Std.Usize)
@@ -342,7 +342,7 @@ def t1_holds
   else t1_holds_loop1 staged_n visible 0#usize
 
 /-- [pedra_aeneas_properties_kernel::t1_holds_as_is]: loop body 0:
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 138:4-145:1
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 149:4-156:1
     Visibility: public -/
 @[rust_loop_body]
 def t1_holds_as_is_loop.body
@@ -360,7 +360,7 @@ def t1_holds_as_is_loop.body
   else ok (done true)
 
 /-- [pedra_aeneas_properties_kernel::t1_holds_as_is]: loop 0:
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 138:4-145:1
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 149:4-156:1
     Visibility: public -/
 @[rust_loop]
 def t1_holds_as_is_loop
@@ -372,7 +372,7 @@ def t1_holds_as_is_loop
     j
 
 /-- [pedra_aeneas_properties_kernel::t1_holds_as_is]:
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 136:0-145:1
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 147:0-156:1
     Visibility: public -/
 @[reducible]
 def t1_holds_as_is
@@ -380,7 +380,7 @@ def t1_holds_as_is
   t1_holds_as_is_loop staged_n visible 0#usize
 
 /-- [pedra_aeneas_properties_kernel::c1_holds]:
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 150:0-168:1
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 162:0-180:1
     Visibility: public -/
 def c1_holds
   (old_n : Std.U64) (old_yes : Std.U64) (joint : Bool) (new_n : Std.U64)
@@ -402,7 +402,7 @@ def c1_holds
   else ok true
 
 /-- [pedra_aeneas_properties_kernel::c1_holds_as_is]:
-    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 172:0-174:1
+    Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 185:0-187:1
     Visibility: public -/
 def c1_holds_as_is
   (old_n : Std.U64) (old_yes : Std.U64) (served : Bool) : Result Bool := do

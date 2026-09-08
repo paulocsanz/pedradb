@@ -4,6 +4,12 @@
 //! and the property does not — the spec is neither trivial nor implied
 //! by the weaker check).
 //!
+//! **Single artifact (pair `d1_durability`):** this file is what `rustc`
+//! links *and* what Verus proves (`cfg(verus_keep_ghost)`). `d1_holds` is
+//! the term. R1/T1/C1 stay rustc until their turn.
+//!
+//!   ./scripts/verus_spec_properties.sh
+//!
 //! - **D1** `d1_holds`: every acked write survives the crash prefix
 //!   (put→Ok is durable — the G1 product promise). AS-IS `d1_holds_as_is`
 //!   only promises barrier semantics for synced entries — the
@@ -21,14 +27,11 @@
 //! - **C1** `c1_holds`: a served value is committed by a majority of
 //!   every active config (joint: old AND new). AS-IS accepts the old
 //!   majority alone — the joint_election as-is hole (RFC-0064).
-//!
-//! Verus twin: `crates/pedradb-spec/verus/properties.rs`
-//! (`scripts/verus_spec_properties.sh`). Teeth witnesses are also Rust
-//! tests in this file (the catalog `dst_plant`s).
 
 #![forbid(unsafe_code)]
 
 /// Majority of a config size (Raft §5 / `membership_kernel::majority_of`).
+#[cfg(not(verus_keep_ghost))]
 fn majority(n: u64) -> u64 {
     if n == 0 {
         1
@@ -41,6 +44,7 @@ fn majority(n: u64) -> u64 {
 /// client) implies `i` is inside the crash-surviving prefix `survives`.
 /// "Value or later value" is positional: a surviving entry is replayed,
 /// and later surviving entries of the same key supersede it in order.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn d1_holds(acked: &[bool], survives: usize) -> bool {
     let mut i = 0;
@@ -56,6 +60,7 @@ pub fn d1_holds(acked: &[bool], survives: usize) -> bool {
 /// D1 AS-IS — the weaker barrier-only class: synced entries survive.
 /// An implementation that acks before the barrier (the `sync=false`
 /// peer) loses exactly the acked-but-not-synced writes and still passes.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn d1_holds_as_is(synced: &[bool], survives: usize) -> bool {
     let mut i = 0;
@@ -69,6 +74,7 @@ pub fn d1_holds_as_is(synced: &[bool], survives: usize) -> bool {
 }
 
 /// One source's entry for a key: a value, a tombstone, or no coverage.
+#[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Slot {
     /// The source holds a value for the key.
@@ -78,6 +84,7 @@ pub enum Slot {
 }
 
 /// The newest covering entry in probe order (index 0 = newest source).
+#[cfg(not(verus_keep_ghost))]
 fn r1_first_hit(probes: &[Option<Slot>]) -> Option<Slot> {
     let mut i = 0;
     while i < probes.len() {
@@ -91,6 +98,7 @@ fn r1_first_hit(probes: &[Option<Slot>]) -> Option<Slot> {
 
 /// R1 — the read answer is exactly the newest covering entry: a newer
 /// tombstone answers "not present", a newer value answers itself.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn r1_answer_ok(probes: &[Option<Slot>], answer: Option<Slot>) -> bool {
     answer == r1_first_hit(probes)
@@ -98,6 +106,7 @@ pub fn r1_answer_ok(probes: &[Option<Slot>], answer: Option<Slot>) -> bool {
 
 /// R1 AS-IS — any covering hit is acceptable (probe order does not
 /// matter): a resurrected older value under a newer tombstone passes.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn r1_answer_ok_as_is(probes: &[Option<Slot>], answer: Option<Slot>) -> bool {
     match answer {
@@ -110,6 +119,7 @@ pub fn r1_answer_ok_as_is(probes: &[Option<Slot>], answer: Option<Slot>) -> bool
 /// both committed and aborted; committed ⇒ every staged write visible;
 /// otherwise ⇒ nothing visible; and visible indices always name staged
 /// writes.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn t1_holds(committed: bool, aborted: bool, staged_n: usize, visible: &[usize]) -> bool {
     if committed && aborted {
@@ -132,6 +142,7 @@ pub fn t1_holds(committed: bool, aborted: bool, staged_n: usize, visible: &[usiz
 /// T1 AS-IS — byte-level integrity only: visible indices name staged
 /// writes, but any subset may be visible whatever the status — an
 /// aborted tx with partial effects committed passes.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn t1_holds_as_is(staged_n: usize, visible: &[usize]) -> bool {
     let mut j = 0;
@@ -146,6 +157,7 @@ pub fn t1_holds_as_is(staged_n: usize, visible: &[usize]) -> bool {
 
 /// C1 — a served value is committed: replicated to a majority of every
 /// active config (joint consensus: old AND new; single: old).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn c1_holds(
     old_n: u64,
@@ -168,10 +180,78 @@ pub fn c1_holds(
 }
 
 /// C1 AS-IS — the old majority alone suffices (the joint-election hole).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn c1_holds_as_is(old_n: u64, old_yes: u64, served: bool) -> bool {
     !served || old_yes >= majority(old_n)
 }
+
+#[cfg(verus_keep_ghost)]
+use vstd::prelude::*;
+
+#[cfg(verus_keep_ghost)]
+verus! {
+
+pub open spec fn d1_holds_spec(acked: Seq<bool>, survives: int) -> bool {
+    forall|i: int| 0 <= i < acked.len() ==> (acked[i] ==> i < survives)
+}
+
+pub fn d1_holds(acked: &[bool], survives: usize) -> (b: bool)
+    ensures
+        b == d1_holds_spec(acked@, survives as int),
+{
+    let mut i = 0;
+    while i < acked.len()
+        invariant
+            0 <= i <= acked.len(),
+            forall|j: int| 0 <= j < i ==> (acked@[j] ==> j < survives as int),
+        decreases acked.len() - i,
+    {
+        if acked[i] && i >= survives {
+            assert(acked@[i as int] && i as int >= survives as int);
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+pub open spec fn d1_holds_as_is_spec(synced: Seq<bool>, survives: int) -> bool {
+    forall|i: int| 0 <= i < synced.len() ==> (synced[i] ==> i < survives)
+}
+
+pub fn d1_holds_as_is(synced: &[bool], survives: usize) -> (b: bool)
+    ensures
+        b == d1_holds_as_is_spec(synced@, survives as int),
+{
+    let mut i = 0;
+    while i < synced.len()
+        invariant
+            0 <= i <= synced.len(),
+            forall|j: int| 0 <= j < i ==> (synced@[j] ==> j < survives as int),
+        decreases synced.len() - i,
+    {
+        if synced[i] && i >= survives {
+            assert(synced@[i as int] && i as int >= survives as int);
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+proof fn lemma_d1_as_is_does_not_imply_d1()
+    ensures
+        d1_holds_as_is_spec(seq![false], 0),
+        !d1_holds_spec(seq![true], 0),
+{
+    assert(!d1_holds_spec(seq![true], 0)) by {
+        assert(seq![true][0] == true);
+        assert(!(0 < 0));
+    };
+}
+
+} // verus!
 
 #[cfg(test)]
 mod tests {

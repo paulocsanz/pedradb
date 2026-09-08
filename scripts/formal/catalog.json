@@ -5096,8 +5096,9 @@
       "id": "d1_durability",
       "finding": "RFC-0166 P0.1",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-spec/src/properties_kernel.rs",
-      "twin": "crates/pedradb-spec/verus/properties.rs",
+      "twin": "crates/pedradb-spec/src/properties_kernel.rs",
       "verus": "scripts/verus_spec_properties.sh",
       "callers": [
         "crates/pedradb-spec/src/properties_kernel.rs"
