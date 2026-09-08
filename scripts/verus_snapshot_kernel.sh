@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Machine-check snapshot_kernel (RFC-0002 P14 / F38 / F40 / F41).
+# Machine-check snapshot_kernel on the file rustc links
+# (single artifact — not the twin-cópia). RFC-0002 P14 / F38 / F40 / F41.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-store/verus/snapshot_kernel.rs"
+SRC="$ROOT/crates/pedradb-store/src/snapshot_kernel.rs"
 if [[ -x "${VERUS:-}" ]]; then
   :
 elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then

@@ -1438,8 +1438,9 @@
       "id": "snapshot",
       "finding": "F38/F40/F41",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-store/src/snapshot_kernel.rs",
-      "twin": "crates/pedradb-store/verus/snapshot_kernel.rs",
+      "twin": "crates/pedradb-store/src/snapshot_kernel.rs",
       "verus": "scripts/verus_snapshot_kernel.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"

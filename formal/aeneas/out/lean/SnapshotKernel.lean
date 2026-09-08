@@ -15,25 +15,25 @@ set_option maxRecDepth 2048
 namespace pedra_aeneas_snapshot_kernel
 
 /-- [pedra_aeneas_snapshot_kernel::snapshot_touches_user_key]:
-    Source: '../../../crates/pedradb-store/src/snapshot_kernel.rs', lines 14:0-16:1
+    Source: '../../../crates/pedradb-store/src/snapshot_kernel.rs', lines 45:0-47:1
     Visibility: public -/
 def snapshot_touches_user_key (is_reserved : Bool) : Result Bool := do
   ok (¬ is_reserved)
 
 /-- [pedra_aeneas_snapshot_kernel::snapshot_touches_user_key_as_is]:
-    Source: '../../../crates/pedradb-store/src/snapshot_kernel.rs', lines 20:0-22:1
+    Source: '../../../crates/pedradb-store/src/snapshot_kernel.rs', lines 52:0-54:1
     Visibility: public -/
-def snapshot_touches_user_key_as_is (_is_reserved : Bool) : Result Bool := do
+def snapshot_touches_user_key_as_is (is_reserved : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_snapshot_kernel::snapshot_needs_txn_meta_clear]:
-    Source: '../../../crates/pedradb-store/src/snapshot_kernel.rs', lines 29:0-31:1
+    Source: '../../../crates/pedradb-store/src/snapshot_kernel.rs', lines 62:0-64:1
     Visibility: public -/
 def snapshot_needs_txn_meta_clear : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_snapshot_kernel::snapshot_needs_txn_meta_clear_as_is]:
-    Source: '../../../crates/pedradb-store/src/snapshot_kernel.rs', lines 35:0-37:1
+    Source: '../../../crates/pedradb-store/src/snapshot_kernel.rs', lines 69:0-71:1
     Visibility: public -/
 def snapshot_needs_txn_meta_clear_as_is : Result Bool := do
   ok false
