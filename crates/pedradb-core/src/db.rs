@@ -5893,7 +5893,7 @@ impl<E: Env> Db<E> {
                 }
             }
         }
-        if out.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(out.len() as u64) {
             let one = Self::write_imm_l0_file(env, dir, sync, imm, nums[0])?;
             return Ok(vec![one]);
         }
