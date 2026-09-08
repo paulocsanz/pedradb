@@ -148,6 +148,10 @@ medida no mesmo harness isolado.
 - [x] **P0.42** `commit_async_ops` encode+write num hop (espelho
       grupo P0.40 / 1-op `encode_and_write_one_op`). Teste
       `rfc0180_commit_async_ops_one_hop_recovers`. status: `done`
+- [x] **P0.43** Catch-up depois de `group_start` (janela do prepare:
+      followers enfileiram sem o write lock). Mesmos spins que o
+      catch-up pré-lock. Teste `rfc0180_leader_linger_and_async_catchup`.
+      status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
 
@@ -205,6 +209,7 @@ medida no mesmo harness isolado.
 | P0.40 | p0 | async group WAL one hop off lock | done | ConcurrentDb finish_group_off_lock encode_and_write_op_batches | 2026-09-08 |
 | P0.41 | p0 | 1-op fast path only when active<2 | done | MC 1-member stays on group_start; 1c unchanged | 2026-09-08 |
 | P0.42 | p0 | commit_async_ops WAL one hop | done | encode_and_write_op_batches; G1 lone still encode-then-fd | 2026-09-08 |
+| P0.43 | p0 | catch-up after group_start prepare | done | same spins as pre-lock; absorb then off-lock WAL | 2026-09-08 |
 | P1.1 | p1 | 3-run caixa | todo | — | 2026-09-07 |
 | P2.1 | p2 | 3/3 quiet ≥1× | todo | 0182 P1.1 | 2026-09-07 |
 | P2.2 | p2 | leftover hang | done | 0181 P0.3 steal | 2026-09-07 |

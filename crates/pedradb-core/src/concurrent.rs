@@ -1268,6 +1268,16 @@ impl WriteGroup {
                     results
                 }
                 Ok(mut inflight) => {
+                    // RFC-0180 P0.43: prepare is a window — followers enqueue
+                    // without the Db write lock. Pre-lock catch-up only saw
+                    // the queue before prepare; spin once more, then absorb.
+                    if !any_sync {
+                        let spins = async_catchup_spins(batch.len(), active);
+                        if spins > 0 {
+                            let want = active.saturating_sub(batch.len()).min(4).max(1);
+                            self.spin_for_pending_n(spins, want);
+                        }
+                    }
                     loop {
                         let mut extra: Vec<PendingWrite> = {
                             let mut q = self.queue.lock();
@@ -6881,6 +6891,7 @@ mod tests {
         assert_eq!(async_catchup_spins(1, 4), 1024);
         assert_eq!(async_catchup_spins(1, 2), 1024);
         // 2–8 clients: gather toward expected_group=4 (diagnose write).
+        // P0.43: the same spins run again after `group_start` (prepare window).
         assert!(!async_catchup_skip_when_grouped(2, 4));
         assert!(!async_catchup_skip_when_grouped(3, 4));
         assert!(async_catchup_skip_when_grouped(4, 4));
