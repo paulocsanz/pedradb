@@ -6264,7 +6264,7 @@ impl<E: Env> Db<E> {
         let Some(imm) = self.imm.take() else {
             return Ok(());
         };
-        if imm.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(imm.len() as u64) {
             return Ok(());
         }
         let nums = self.alloc_file_nums_for_imm(&imm);
