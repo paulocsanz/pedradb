@@ -1,11 +1,12 @@
 //! RFC-0037 P2.2 group-commit sizing (lab-only): N client threads × OPS puts
-//! through `ConcurrentDb` (sync WAL — fdatasync before each reply), then
-//! report wall, qps, WAL fsync count (real group size = ops / fsyncs),
-//! write-group diagnostics and per-op latency percentiles.
+//! through `ConcurrentDb` async (`sync=false`, overwrite_mc4 class), then
+//! report wall, qps, avg_group, per-op latency percentiles.
 //!
 //! Usage: cargo run --release -p rocksdb-parity-bench --example group_profile [clients] [ops] [dir]
+//! Memtable default 256 MiB — same as `compat` bench (`ROCKS_PARITY_COMPAT_MEMTABLE`).
 
 use pedradb_core::concurrent::ConcurrentDb;
+use pedradb_core::OpenOptions;
 use std::time::Instant;
 
 fn pct(sorted: &[u64], p: f64) -> u64 {
@@ -34,8 +35,12 @@ fn main() {
         .unwrap_or(1000);
     let catchup_us: Option<u64> = std::env::args().nth(5).and_then(|s| s.parse().ok());
     let _ = std::fs::remove_dir_all(&dir);
-    let db = ConcurrentDb::open(&dir).expect("open");
-    // overwrite_mc4 class: Rocks default sync=false. G1 put() is not that cell.
+    let mut opts = OpenOptions::default();
+    opts.sync = false;
+    // Same as compat bench: 4 MiB auto_flush was the group_profile stall
+    // (P0.54 max 970 ms), not the overwrite_mc4 cell (256 MiB).
+    opts.auto_flush_bytes = Some(256 * 1024 * 1024);
+    let db = ConcurrentDb::open_with(&dir, opts).expect("open");
     db.set_default_write_sync(false);
     if let Some(us) = catchup_us {
         db.set_write_group_catchup_window(std::time::Duration::from_micros(us));
