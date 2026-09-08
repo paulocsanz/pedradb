@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Machine-check the DST Queued-RPC pin kernel (RFC-0067 P2.1).
+# Machine-check the DST Queued-RPC pin on the file rustc links
+# (single artifact — not the twin-cópia).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-store/verus/rpc_mode.rs"
+SRC="$ROOT/crates/pedradb-store/src/rpc_mode_kernel.rs"
 
 if [[ -x "${VERUS:-}" ]]; then
   :

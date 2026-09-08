@@ -3179,8 +3179,9 @@
       "id": "rpc_mode",
       "finding": "RFC-0067",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-store/src/rpc_mode_kernel.rs",
-      "twin": "crates/pedradb-store/verus/rpc_mode.rs",
+      "twin": "crates/pedradb-store/src/rpc_mode_kernel.rs",
       "verus": "scripts/verus_rpc_mode.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"

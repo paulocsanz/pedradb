@@ -15,7 +15,7 @@ set_option maxRecDepth 2048
 namespace pedra_aeneas_rpc_mode_kernel
 
 /-- [pedra_aeneas_rpc_mode_kernel::allow_direct_rpc]:
-    Source: '../../../crates/pedradb-store/src/rpc_mode_kernel.rs', lines 13:0-19:1
+    Source: '../../../crates/pedradb-store/src/rpc_mode_kernel.rs', lines 36:0-38:1
     Visibility: public -/
 def allow_direct_rpc (dst_pin : Bool) (want_direct : Bool) : Result Bool := do
   if want_direct
@@ -25,7 +25,7 @@ def allow_direct_rpc (dst_pin : Bool) (want_direct : Bool) : Result Bool := do
   else ok true
 
 /-- [pedra_aeneas_rpc_mode_kernel::allow_direct_rpc_as_is]:
-    Source: '../../../crates/pedradb-store/src/rpc_mode_kernel.rs', lines 24:0-26:1
+    Source: '../../../crates/pedradb-store/src/rpc_mode_kernel.rs', lines 44:0-46:1
     Visibility: public -/
 def allow_direct_rpc_as_is
   (_dst_pin : Bool) (_want_direct : Bool) : Result Bool := do
