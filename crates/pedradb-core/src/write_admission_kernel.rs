@@ -833,6 +833,16 @@ mod tests {
             vlog.contains("fence_on_sync_fail("),
             "vlog_prepare_wal must match fence_on_sync_fail"
         );
+        let sst = named_fn_src(include_str!("db.rs"), "fsync_sst_paths")
+            .expect("fsync_sst_paths");
+        assert!(
+            sst.contains("wal_commit_plan("),
+            "fsync_sst_paths must match the plan fn"
+        );
+        assert!(
+            sst.contains("fence_on_sync_fail("),
+            "fsync_sst_paths must match fence_on_sync_fail"
+        );
     }
 
     #[test]

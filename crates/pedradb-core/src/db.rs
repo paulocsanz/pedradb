@@ -10172,7 +10172,18 @@ impl<E: Env> Db<E> {
                 continue;
             }
             let mut f = env.open_read(path)?;
-            f.sync_data()?;
+            let sync_err = f.sync_data().err();
+            match crate::write_admission_kernel::wal_commit_plan(true, sync_err.is_some()) {
+                crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                    assert!(
+                        crate::write_admission_kernel::fence_on_sync_fail(true, true),
+                        "required SST sync failed ⇒ not Ok"
+                    );
+                    return Err(sync_err.expect("AppendSyncFence ⇒ Some").into());
+                }
+                crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+                | crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => {}
+            }
         }
         if sync_dir && !paths.is_empty() {
             env.sync_dir(dir)?;
