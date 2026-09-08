@@ -590,7 +590,7 @@ impl<F: EnvFile> ValueLog<F> {
             }
             return Ok(Some(rec.data.clone()));
         }
-        if self.pending.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.pending.len() as u64) {
             return Ok(None);
         }
         let rec_len = 8u64.saturating_add(u64::from(len));
