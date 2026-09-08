@@ -195,6 +195,9 @@ medida no mesmo harness isolado.
       (unbounded + sibling desagendado = max 970 ms no group_profile).
       Sem condvar. Teste `rfc0180_leader_linger_and_async_catchup`.
       status: `done`
+- [x] **P0.56** `group_profile` memtable 256 MiB (mesmo que o bench
+      compat). O stall max ~1 s **não** era o auto_flush 4 MiB.
+      status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
 
@@ -265,6 +268,7 @@ medida no mesmo harness isolado.
 | P0.53 | p0 | hoped cap = grouping_cap(last_peak) | done | 2-client / n≥16 leftover | 2026-09-08 |
 | P0.54 | p0 | timed avg_group delta + async canary | done | seed no longer dilutes; group_profile async | 2026-09-08 |
 | P0.55 | p0 | bound wait_in_flight 4096 spins | done | unbounded was 970ms max DIAG | 2026-09-08 |
+| P0.56 | p0 | group_profile 256MiB memtable | done | stall remains ~1s; not 4MiB flush | 2026-09-08 |
 | P1.1 | p1 | 3-run caixa | todo | — | 2026-09-07 |
 | P2.1 | p2 | 3/3 quiet ≥1× | todo | 0182 P1.1 | 2026-09-07 |
 | P2.2 | p2 | leftover hang | done | 0181 P0.3 steal | 2026-09-07 |
