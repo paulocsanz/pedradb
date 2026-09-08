@@ -4,7 +4,7 @@
 //! ```text
 //! pedra scale [--entries N] [--cache BYTES] [--backends NAME] [dir]
 //! pedra diagnose write --pedra-ns N --rocks-ns N [--read-pct N] [...]
-//! pedra diagnose get --keys N --ram BYTES --measured-ns N
+//! pedra diagnose get --keys N --ram BYTES [--measured-ns N]
 //! pedra diagnose probes --per-get N --p-best N
 //! pedra diagnose balance --cut TOKEN --cell lever[:diag|:named] [...]
 //! ```
@@ -12,8 +12,8 @@
 #![forbid(unsafe_code)]
 
 use pedradb_core::bench_gap_kernel::{
-    balance_admits, classify_get, classify_probes, diagnose_write, BalanceCell, WriteGapInput,
-    WriteLever, WritePhases, BALANCE_SHAPES,
+    balance_admits, classify_get, classify_probes, diagnose_write, predict_get_bottleneck,
+    BalanceCell, WriteGapInput, WriteLever, WritePhases, BALANCE_SHAPES,
 };
 use pedradb_core::scale_kernel::{scale_forecast, scale_forecast_as_is};
 
@@ -41,7 +41,7 @@ fn main() {
             eprintln!(
                 "       pedra diagnose write --pedra-ns N --rocks-ns N [--read-pct N] [--wal-ns N] [--mem-ns N] [--flush-ns N] [--lock-ns N] [--prepare-ns N] [--publish-ns N] [--clients N] [--avg-group X]"
             );
-            eprintln!("       pedra diagnose get --keys N --ram BYTES --measured-ns N");
+            eprintln!("       pedra diagnose get --keys N --ram BYTES [--measured-ns N]");
             eprintln!("       pedra diagnose probes --per-get N --p-best N");
             eprintln!("       pedra diagnose balance --cut TOKEN --cell TOKEN[:diag|:named] [...]");
             eprintln!("       balance shapes: {}", BALANCE_SHAPES.join(","));
@@ -117,21 +117,23 @@ fn diagnose_get_cmd(args: &[String]) -> Result<(), ()> {
         eprintln!("pedra diagnose get: --ram is required (bytes)");
         return Err(());
     };
-    let Some(measured_ns) = flag_u64(args, "--measured-ns") else {
-        eprintln!("pedra diagnose get: --measured-ns is required");
-        return Err(());
-    };
     let f = scale_forecast(keys, ram);
     let as_is = scale_forecast_as_is(keys, ram);
-    let class = classify_get(
-        measured_ns,
-        f.best_ns,
-        f.happy_ns,
-        f.worst_ns,
-        as_is.best_ns,
-    );
+    // Omit --measured-ns ⇒ classify the as-is walk (prove bottleneck
+    // at this n without running a get). Same as predict_get_bottleneck.
+    let (measured_ns, class, predict) = match flag_u64(args, "--measured-ns") {
+        Some(ns) => (
+            ns,
+            classify_get(ns, f.best_ns, f.happy_ns, f.worst_ns, as_is.best_ns),
+            false,
+        ),
+        None => (as_is.best_ns, predict_get_bottleneck(keys, ram), true),
+    };
     let mode = if f.hot { "hot" } else { "bounded-cache" };
     println!("pedra diagnose get keys={keys} ram={ram} mode={mode}");
+    if predict {
+        println!("predict=1 (as-is walk vs legal clock; no get ran)");
+    }
     println!(
         "P_best={} P_worst={} n_files={}",
         f.p_best, f.p_worst, f.n_files
