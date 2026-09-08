@@ -199,3 +199,19 @@ theorem rfc0176_10b_worst_is_nine_probes :
   · unfold point_get_probes
     have h : core.num.U64.saturating_add 5#u64 4#u64 = 9#u64 := by native_decide
     simp [h]
+
+/-- RFC-0176 10B-key best clock: `best_get_ns` 5 levels. Unfolds
+    `best_get_ns` **and** `point_get_probes`. -/
+theorem rfc0176_10b_best_via_best_get_ns :
+    best_get_ns 5#u64 = (
+      do
+        let i ← point_get_probes 5#u64 SCALE_L0_BEST
+        predict_get_ns i SCALE_TAU_RAM_NS SCALE_TAU_DISK_NS SCALE_BPS 0#u64
+    ) ∧ point_get_probes 5#u64 SCALE_L0_BEST = ok (6#u64) := by
+  constructor
+  · unfold best_get_ns
+    rfl
+  · unfold point_get_probes
+    unfold SCALE_L0_BEST
+    have h : core.num.U64.saturating_add 5#u64 1#u64 = 6#u64 := by native_decide
+    simp [h]

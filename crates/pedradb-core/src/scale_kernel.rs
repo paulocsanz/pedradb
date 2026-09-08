@@ -348,6 +348,13 @@ mod tests {
         assert_eq!(point_get_probes(u64::from(l1), 1), 5);
         assert_eq!(point_get_probes(u64::from(l10), 1), 6);
         assert_eq!(probes_worst(u64::from(l10), SCALE_L0_WORST), 9);
+        assert_eq!(best_get_ns(u64::from(l10)), predict_get_ns(
+            6,
+            SCALE_TAU_RAM_NS,
+            SCALE_TAU_DISK_NS,
+            SCALE_BPS,
+            0,
+        ));
     }
 
     #[test]
