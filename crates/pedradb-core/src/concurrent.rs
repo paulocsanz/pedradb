@@ -948,15 +948,39 @@ impl WriteGroup {
             // the overwrite/YCSB put. Multi-op batches stay on ops.
             let n = ops.len() as u64;
             let result = if ops.len() == 1 {
-                guard.commit_async_one(ops.pop().expect("len checked"))
+                // RFC-0180 P0.47: WAL write off the Db write lock (group
+                // path already does this). 1c lone stays on-lock.
+                let op = ops.pop().expect("len checked");
+                guard.begin_commit();
+                match guard.async_one_stage(op) {
+                    Err(e) => {
+                        guard.end_commit();
+                        if fair {
+                            parking_lot::RwLockWriteGuard::unlock_fair(guard);
+                        } else {
+                            drop(guard);
+                        }
+                        Err(e)
+                    }
+                    Ok((rec, seq)) => {
+                        let wal = guard.wal_arc();
+                        drop(guard);
+                        let io = wal.lock().encode_and_write_one_op(&rec);
+                        let mut g = db.write();
+                        let r = g.async_one_publish(rec, seq, io);
+                        g.end_commit();
+                        r
+                    }
+                }
             } else {
-                guard.commit_async_ops(ops)
+                let r = guard.commit_async_ops(ops);
+                if fair {
+                    parking_lot::RwLockWriteGuard::unlock_fair(guard);
+                } else {
+                    drop(guard);
+                }
+                r
             };
-            if fair {
-                parking_lot::RwLockWriteGuard::unlock_fair(guard);
-            } else {
-                drop(guard);
-            }
             self.batches.fetch_add(1, Ordering::Relaxed);
             self.batch_ops.fetch_add(n, Ordering::Relaxed);
             self.active.fetch_sub(1, Ordering::Relaxed);
@@ -4321,6 +4345,60 @@ mod tests {
                     db.get(&[b'w', t, i]).as_deref(),
                     Some(payload.as_slice()),
                     "lost async group put t{t}/{i}"
+                );
+            }
+        }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0180 P0.47: 9 writers → adaptive bypass; 1-op WAL is off the
+    /// Db write lock. Keys must recover.
+    #[test]
+    fn rfc0180_bypass_async_wal_off_lock_recovers() {
+        let dir = temp_dir();
+        const THREADS: u8 = 9;
+        const PER: u8 = 8;
+        {
+            let db = ConcurrentDb::open_with(
+                &dir,
+                OpenOptions {
+                    wal_full_fsync: true,
+                    history: Default::default(),
+                    wal_recovery: Default::default(),
+                    sync: false,
+                    auto_flush_bytes: None,
+                    auto_compact_sst_count: None,
+                    auto_compact_sst_bytes: None,
+                    exclusive: true,
+                    large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
+                },
+            )
+            .unwrap();
+            let payload = vec![b'b'; 32];
+            std::thread::scope(|s| {
+                for t in 0..THREADS {
+                    let db = &db;
+                    let payload = &payload;
+                    s.spawn(move || {
+                        for i in 0..PER {
+                            db.put_with([b'b', t, i], payload, WriteOptions::no_sync())
+                                .unwrap();
+                        }
+                    });
+                }
+            });
+            db.close().unwrap();
+        }
+        let db = ConcurrentDb::open(&dir).unwrap();
+        let payload = vec![b'b'; 32];
+        for t in 0..THREADS {
+            for i in 0..PER {
+                assert_eq!(
+                    db.get(&[b'b', t, i]).as_deref(),
+                    Some(payload.as_slice()),
+                    "lost bypass async put t{t}/{i}"
                 );
             }
         }

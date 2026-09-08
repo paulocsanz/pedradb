@@ -10376,6 +10376,50 @@ impl<E: Env> Db<E> {
         Ok(seq)
     }
 
+    /// RFC-0180 P0.47: prepare + stage under the Db write lock. Caller
+    /// `encode_and_write_one_op`s off lock, then [`Self::async_one_publish`].
+    pub(crate) fn async_one_stage(&mut self, batch: BatchOp) -> Result<(WriteOp, SequenceNumber)> {
+        if !self.write_admission_idle() {
+            let families = self.batch_families(std::slice::from_ref(&batch));
+            self.ensure_write_admitted_for(&families)?;
+        }
+        self.observe_bulk_op(&batch);
+        let (op, seq) = self.prepare_one_spill(batch, false)?;
+        self.vlog_prepare_wal(false)?;
+        self.stage_unapplied_ops(std::slice::from_ref(&op));
+        Ok((op, seq))
+    }
+
+    /// Second write-lock hold after off-lock async WAL (bypass 1-op).
+    pub(crate) fn async_one_publish(
+        &mut self,
+        op: WriteOp,
+        seq: SequenceNumber,
+        wal: Result<u64>,
+    ) -> Result<SequenceNumber> {
+        self.unstage_unapplied_ops(std::slice::from_ref(&op));
+        match wal {
+            Err(e) => {
+                self.fence_durability(&e, FenceClass::of_core(&e));
+                Err(e)
+            }
+            Ok(n) => {
+                self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
+                if !self.feed_is_lazy() {
+                    self.change_log
+                        .extend(std::iter::once(ChangeEntry::from_write_op(&op)));
+                }
+                self.note_dirty_points(std::slice::from_ref(&op));
+                apply_one_owned(&mut self.mem, op);
+                self.publish_sequence(seq);
+                let _ = self.maybe_auto_flush_with(
+                    async_ok_flush_is_stage_only() || self.defer_auto_compact,
+                );
+                Ok(seq)
+            }
+        }
+    }
+
     /// Sequential G1 client, split like the group path (RFC-0045 P2.1):
     /// [`Self::lone_encode_commit`] under the write lock (admission,
     /// prepare, vlog flush, WAL encode — no fd), `fdatasync` OFF the lock,
