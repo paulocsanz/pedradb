@@ -654,7 +654,10 @@ impl WriteGroup {
         // syncs (there is no fd to share). `PEDRA_ASYNC_GROUP=0` keeps the
         // Rocks shape instead: every async writer takes the write lock
         // itself (no mpsc, no leader dependency).
-        if occ.is_none() && !do_sync && !async_merged {
+        if occ.is_none()
+            && !crate::write_admission_kernel::wal_sync_required(true, do_sync, false)
+            && !async_merged
+        {
             let t0 = self.phase_stats.as_ref().map(|_| Instant::now());
             // RFC-0045 P0.2: bounded spin-then-park (`PEDRA_WRITE_SPIN`).
             // Default 0 = plain park (current shape). P0 measured the 50-thread
