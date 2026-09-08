@@ -3181,7 +3181,8 @@ impl<E: Env> ConcurrentDb<E> {
             let old_paths = undo.old_paths().to_vec();
             // RFC-0151 P1.3: publish gate, measured — fsync must succeed and
             // leave no unsynced debt, else the compact install is undone.
-            let sst_durable = g.fsync_unsynced_ssts().is_ok() && g.unsynced_sst_count() == 0;
+            let sst_durable = g.fsync_unsynced_ssts().is_ok()
+                && crate::write_admission_kernel::batch_is_empty(g.unsynced_sst_count() as u64);
             if !crate::flush_kernel::may_publish_manifest(sst_durable) {
                 g.undo_prepared_l0_compact(undo);
                 return false;
