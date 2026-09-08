@@ -21008,7 +21008,7 @@ impl<'a, E: Env> MemChunkStream<'a, E> {
             chunk.push((k.clone(), value));
         }
         drop(iter);
-        if chunk.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(chunk.len() as u64) {
             return false;
         }
         if self.resolve {
