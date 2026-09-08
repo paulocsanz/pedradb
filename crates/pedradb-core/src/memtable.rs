@@ -1146,7 +1146,7 @@ impl MemTable {
             *self = other;
             return;
         }
-        if other.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(other.len() as u64) {
             return;
         }
         // The merge interleaves two key sets; per-prefix span state cannot
