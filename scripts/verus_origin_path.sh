@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Machine-check F91/F92 origin-form path (RFC-0002 P34).
+# Machine-check F91/F92 origin-form path on the file rustc links
+# (single artifact — not the twin-cópia). RFC-0002 P34.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-http/verus/origin_path.rs"
+SRC="$ROOT/crates/pedradb-http/src/path_kernel.rs"
 if [[ -x "${VERUS:-}" ]]; then
   :
 elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then

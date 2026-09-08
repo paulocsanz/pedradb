@@ -1811,8 +1811,9 @@
       "finding": "F91/F92",
       "twin_kind": "close",
       "atom": "strip_authority_for_routing",
+      "single_artifact": true,
       "kernel": "crates/pedradb-http/src/path_kernel.rs",
-      "twin": "crates/pedradb-http/verus/origin_path.rs",
+      "twin": "crates/pedradb-http/src/path_kernel.rs",
       "verus": "scripts/verus_origin_path.sh",
       "callers": [
         "crates/pedradb-http/src/lib.rs"

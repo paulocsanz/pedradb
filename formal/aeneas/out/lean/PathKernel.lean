@@ -471,12 +471,12 @@ def core.ops.range.RangeToInclusiveUsize.Insts.CoreSliceIndexSliceIndexStrStr :
 }
 
 /-- [pedra_aeneas_path_kernel::path_after_authority::closure]
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 11:23-11:37 -/
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 30:23-30:37 -/
 @[reducible]
 def path_after_authority.closure := Str
 
 /-- [pedra_aeneas_path_kernel::path_after_authority::{impl core::ops::function::FnOnce<(usize,), &'_ str> for pedra_aeneas_path_kernel::path_after_authority::closure<'_0>}::call_once]:
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 11:23-11:37 -/
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 30:23-30:37 -/
 def
   path_after_authority.closure.Insts.CoreOpsFunctionFnOnceTupleUsizeSharedStr.call_once
   (c : path_after_authority.closure) (tupled_args : Std.Usize) :
@@ -487,7 +487,7 @@ def
     { start := tupled_args }
 
 /-- Trait implementation: [pedra_aeneas_path_kernel::path_after_authority::{impl core::ops::function::FnOnce<(usize,), &'_ str> for pedra_aeneas_path_kernel::path_after_authority::closure<'_0>}]
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 11:23-11:37 -/
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 30:23-30:37 -/
 @[reducible]
 def path_after_authority.closure.Insts.CoreOpsFunctionFnOnceTupleUsizeSharedStr
   : core.ops.function.FnOnce path_after_authority.closure Std.Usize Str := {
@@ -496,7 +496,7 @@ def path_after_authority.closure.Insts.CoreOpsFunctionFnOnceTupleUsizeSharedStr
 }
 
 /-- [pedra_aeneas_path_kernel::path_after_authority]:
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 10:0-12:1
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 29:0-31:1
     Visibility: public -/
 def path_after_authority (rest : Str) : Result Str := do
   let o ← core.str.Str.find rest '/'
@@ -508,7 +508,7 @@ def path_after_authority (rest : Str) : Result Str := do
       { start := i }
 
 /-- [pedra_aeneas_path_kernel::strip_http_authority_rest]:
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 38:0-47:1 -/
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 60:0-69:1 -/
 def strip_http_authority_rest (target : Str) : Result (Option Str) := do
   let b ← core.str.Str.as_bytes target
   let i := Slice.len b
@@ -579,7 +579,7 @@ def strip_http_authority_rest (target : Str) : Result (Option Str) := do
     else ok none
 
 /-- [pedra_aeneas_path_kernel::strip_http_authority]:
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 16:0-18:1
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 36:0-38:1
     Visibility: public -/
 def strip_http_authority (target : Str) : Result (Option Str) := do
   let o ← strip_http_authority_rest target
@@ -590,12 +590,12 @@ def strip_http_authority (target : Str) : Result (Option Str) := do
     ok (some p)
 
 /-- [pedra_aeneas_path_kernel::strip_uri_fragment::closure]
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 97:31-97:41 -/
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 124:31-124:41 -/
 @[reducible]
 def strip_uri_fragment.closure := Unit
 
 /-- [pedra_aeneas_path_kernel::strip_uri_fragment::{impl core::ops::function::FnOnce<((&'_ str, &'_ str),), &'_ str> for pedra_aeneas_path_kernel::strip_uri_fragment::closure}::call_once]:
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 97:31-97:41 -/
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 124:31-124:41 -/
 def
   strip_uri_fragment.closure.Insts.CoreOpsFunctionFnOnceTuplePairSharedStrSharedStrSharedStr.call_once
   (c : strip_uri_fragment.closure) (tupled_args : (Str × Str)) :
@@ -604,7 +604,7 @@ def
   ok tupled_args.1
 
 /-- Trait implementation: [pedra_aeneas_path_kernel::strip_uri_fragment::{impl core::ops::function::FnOnce<((&'_ str, &'_ str),), &'_ str> for pedra_aeneas_path_kernel::strip_uri_fragment::closure}]
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 97:31-97:41 -/
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 124:31-124:41 -/
 @[reducible]
 def
   strip_uri_fragment.closure.Insts.CoreOpsFunctionFnOnceTuplePairSharedStrSharedStrSharedStr
@@ -614,7 +614,7 @@ def
 }
 
 /-- [pedra_aeneas_path_kernel::strip_uri_fragment]:
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 96:0-98:1
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 123:0-125:1
     Visibility: public -/
 def strip_uri_fragment (target : Str) : Result Str := do
   let o ← core.str.Str.split_once target '#'
@@ -623,7 +623,7 @@ def strip_uri_fragment (target : Str) : Result Str := do
   | some (a, _) => ok a
 
 /-- [pedra_aeneas_path_kernel::request_target_authority]:
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 22:0-36:1
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 43:0-57:1
     Visibility: public -/
 def request_target_authority (target : Str) : Result (Option Str) := do
   let target1 ← strip_uri_fragment target
@@ -666,7 +666,7 @@ def request_target_authority (target : Str) : Result (Option Str) := do
     else ok (some auth)
 
 /-- [pedra_aeneas_path_kernel::ports_equivalent]:
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 80:0-86:1 -/
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 105:0-111:1 -/
 def ports_equivalent (a : Option Str) (b : Option Str) : Result Bool := do
   match a with
   | none =>
@@ -687,12 +687,12 @@ def ports_equivalent (a : Option Str) (b : Option Str) : Result Bool := do
     | some y => Str.Insts.CoreCmpPartialEqStr.eq p y
 
 /-- [pedra_aeneas_path_kernel::split_host_port::closure#2]
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 73:42-73:64 -/
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 97:42-97:64 -/
 @[reducible]
 def split_host_port.closure_2 := Unit
 
 /-- [pedra_aeneas_path_kernel::split_host_port::{impl core::ops::function::FnMut<(u8,), bool> for pedra_aeneas_path_kernel::split_host_port::closure#2}::call_mut]:
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 73:42-73:64 -/
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 97:42-97:64 -/
 def split_host_port.closure_2.Insts.CoreOpsFunctionFnMutTupleU8Bool.call_mut
   (c : split_host_port.closure_2) (tupled_args : Std.U8) :
   Result (Bool × split_host_port.closure_2)
@@ -701,7 +701,7 @@ def split_host_port.closure_2.Insts.CoreOpsFunctionFnMutTupleU8Bool.call_mut
   ok (b, c)
 
 /-- [pedra_aeneas_path_kernel::split_host_port::{impl core::ops::function::FnOnce<(u8,), bool> for pedra_aeneas_path_kernel::split_host_port::closure#2}::call_once]:
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 73:42-73:64 -/
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 97:42-97:64 -/
 def split_host_port.closure_2.Insts.CoreOpsFunctionFnOnceTupleU8Bool.call_once
   (c : split_host_port.closure_2) (i : Std.U8) : Result Bool := do
   let (b, _) ←
@@ -710,7 +710,7 @@ def split_host_port.closure_2.Insts.CoreOpsFunctionFnOnceTupleU8Bool.call_once
   ok b
 
 /-- Trait implementation: [pedra_aeneas_path_kernel::split_host_port::{impl core::ops::function::FnOnce<(u8,), bool> for pedra_aeneas_path_kernel::split_host_port::closure#2}]
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 73:42-73:64 -/
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 97:42-97:64 -/
 @[reducible]
 def split_host_port.closure_2.Insts.CoreOpsFunctionFnOnceTupleU8Bool :
   core.ops.function.FnOnce split_host_port.closure_2 Std.U8 Bool := {
@@ -719,7 +719,7 @@ def split_host_port.closure_2.Insts.CoreOpsFunctionFnOnceTupleU8Bool :
 }
 
 /-- Trait implementation: [pedra_aeneas_path_kernel::split_host_port::{impl core::ops::function::FnMut<(u8,), bool> for pedra_aeneas_path_kernel::split_host_port::closure#2}]
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 73:42-73:64 -/
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 97:42-97:64 -/
 @[reducible]
 def split_host_port.closure_2.Insts.CoreOpsFunctionFnMutTupleU8Bool :
   core.ops.function.FnMut split_host_port.closure_2 Std.U8 Bool := {
@@ -730,12 +730,12 @@ def split_host_port.closure_2.Insts.CoreOpsFunctionFnMutTupleU8Bool :
 }
 
 /-- [pedra_aeneas_path_kernel::split_host_port::closure#1]
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 68:64-68:81 -/
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 92:64-92:81 -/
 @[reducible]
 def split_host_port.closure_1 := Unit
 
 /-- [pedra_aeneas_path_kernel::split_host_port::{impl core::ops::function::FnOnce<(&'_ &'_ str,), bool> for pedra_aeneas_path_kernel::split_host_port::closure#1}::call_once]:
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 68:64-68:81 -/
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 92:64-92:81 -/
 def
   split_host_port.closure_1.Insts.CoreOpsFunctionFnOnceTupleSharedSharedStrBool.call_once
   (c : split_host_port.closure_1) (tupled_args : Str) : Result Bool := do
@@ -743,7 +743,7 @@ def
   ok (¬ b)
 
 /-- Trait implementation: [pedra_aeneas_path_kernel::split_host_port::{impl core::ops::function::FnOnce<(&'_ &'_ str,), bool> for pedra_aeneas_path_kernel::split_host_port::closure#1}]
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 68:64-68:81 -/
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 92:64-92:81 -/
 @[reducible]
 def
   split_host_port.closure_1.Insts.CoreOpsFunctionFnOnceTupleSharedSharedStrBool
@@ -753,19 +753,19 @@ def
 }
 
 /-- [pedra_aeneas_path_kernel::split_host_port::closure]
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 64:45-64:55 -/
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 88:45-88:55 -/
 @[reducible]
 def split_host_port.closure := Unit
 
 /-- [pedra_aeneas_path_kernel::split_host_port::{impl core::ops::function::FnOnce<((&'_ str, &'_ str),), &'_ str> for pedra_aeneas_path_kernel::split_host_port::closure}::call_once]:
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 64:45-64:55 -/
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 88:45-88:55 -/
 def
   split_host_port.closure.Insts.CoreOpsFunctionFnOnceTuplePairSharedStrSharedStrSharedStr.call_once
   (c : split_host_port.closure) (tupled_args : (Str × Str)) : Result Str := do
   ok tupled_args.2
 
 /-- Trait implementation: [pedra_aeneas_path_kernel::split_host_port::{impl core::ops::function::FnOnce<((&'_ str, &'_ str),), &'_ str> for pedra_aeneas_path_kernel::split_host_port::closure}]
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 64:45-64:55 -/
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 88:45-88:55 -/
 @[reducible]
 def
   split_host_port.closure.Insts.CoreOpsFunctionFnOnceTuplePairSharedStrSharedStrSharedStr
@@ -775,7 +775,7 @@ def
 }
 
 /-- [pedra_aeneas_path_kernel::split_host_port]:
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 63:0-78:1
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 87:0-102:1
     Visibility: public -/
 @[rust_loop_body]
 def ascii_digits_loop.body (bs : Slice Std.U8) (i : Std.Usize) :
@@ -843,7 +843,7 @@ def split_host_port (raw1 : Str) : Result (Str × (Option Str)) := do
   | none => split_host_port_colon s
 
 /-- [pedra_aeneas_path_kernel::host_authority_mismatch]:
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 52:0-59:1
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 75:0-82:1
     Visibility: public -/
 def host_authority_mismatch (host : Str) (authority : Str) : Result Bool := do
   let (h1, p1) ← split_host_port host
@@ -855,25 +855,25 @@ def host_authority_mismatch (host : Str) (authority : Str) : Result Bool := do
   else ok true
 
 /-- [pedra_aeneas_path_kernel::host_authority_mismatch_as_is]:
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 90:0-92:1
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 116:0-118:1
     Visibility: public -/
 def host_authority_mismatch_as_is
   (_host : Str) (_authority : Str) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_path_kernel::strip_uri_fragment_as_is]:
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 102:0-104:1
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 130:0-132:1
     Visibility: public -/
 def strip_uri_fragment_as_is (target : Str) : Result Str := do
   ok target
 
 /-- [pedra_aeneas_path_kernel::origin_form_path::closure]
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 118:26-118:36 -/
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 147:26-147:36 -/
 @[reducible]
 def origin_form_path.closure := Unit
 
 /-- [pedra_aeneas_path_kernel::origin_form_path::{impl core::ops::function::FnOnce<((&'_ str, &'_ str),), &'_ str> for pedra_aeneas_path_kernel::origin_form_path::closure}::call_once]:
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 118:26-118:36 -/
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 147:26-147:36 -/
 def
   origin_form_path.closure.Insts.CoreOpsFunctionFnOnceTuplePairSharedStrSharedStrSharedStr.call_once
   (c : origin_form_path.closure) (tupled_args : (Str × Str)) :
@@ -882,7 +882,7 @@ def
   ok tupled_args.1
 
 /-- Trait implementation: [pedra_aeneas_path_kernel::origin_form_path::{impl core::ops::function::FnOnce<((&'_ str, &'_ str),), &'_ str> for pedra_aeneas_path_kernel::origin_form_path::closure}]
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 118:26-118:36 -/
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 147:26-147:36 -/
 @[reducible]
 def
   origin_form_path.closure.Insts.CoreOpsFunctionFnOnceTuplePairSharedStrSharedStrSharedStr
@@ -892,7 +892,7 @@ def
 }
 
 /-- [pedra_aeneas_path_kernel::origin_form_path]:
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 109:0-119:1
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 138:0-148:1
     Visibility: public -/
 def origin_form_path (target : Str) : Result Str := do
   let target1 ← strip_uri_fragment target
@@ -911,12 +911,12 @@ def origin_form_path (target : Str) : Result Str := do
   | some (a, _) => ok a
 
 /-- [pedra_aeneas_path_kernel::origin_form_path_as_is::closure]
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 124:31-124:41 -/
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 154:31-154:41 -/
 @[reducible]
 def origin_form_path_as_is.closure := Unit
 
 /-- [pedra_aeneas_path_kernel::origin_form_path_as_is::{impl core::ops::function::FnOnce<((&'_ str, &'_ str),), &'_ str> for pedra_aeneas_path_kernel::origin_form_path_as_is::closure}::call_once]:
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 124:31-124:41 -/
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 154:31-154:41 -/
 def
   origin_form_path_as_is.closure.Insts.CoreOpsFunctionFnOnceTuplePairSharedStrSharedStrSharedStr.call_once
   (c : origin_form_path_as_is.closure) (tupled_args : (Str × Str)) :
@@ -925,7 +925,7 @@ def
   ok tupled_args.1
 
 /-- Trait implementation: [pedra_aeneas_path_kernel::origin_form_path_as_is::{impl core::ops::function::FnOnce<((&'_ str, &'_ str),), &'_ str> for pedra_aeneas_path_kernel::origin_form_path_as_is::closure}]
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 124:31-124:41 -/
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 154:31-154:41 -/
 @[reducible]
 def
   origin_form_path_as_is.closure.Insts.CoreOpsFunctionFnOnceTuplePairSharedStrSharedStrSharedStr
@@ -936,7 +936,7 @@ def
 }
 
 /-- [pedra_aeneas_path_kernel::origin_form_path_as_is]:
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 123:0-125:1
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 153:0-155:1
     Visibility: public -/
 def origin_form_path_as_is (target : Str) : Result Str := do
   let o ← core.str.Str.split_once target '?'
@@ -945,16 +945,16 @@ def origin_form_path_as_is (target : Str) : Result Str := do
   | some (a, _) => ok a
 
 /-- [pedra_aeneas_path_kernel::strip_authority_for_routing]:
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 129:0-131:1
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 160:0-162:1
     Visibility: public -/
 def strip_authority_for_routing (is_authority_form : Bool) : Result Bool := do
   ok is_authority_form
 
 /-- [pedra_aeneas_path_kernel::strip_authority_for_routing_as_is]:
-    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 135:0-137:1
+    Source: '../../../crates/pedradb-http/src/path_kernel.rs', lines 167:0-169:1
     Visibility: public -/
 def strip_authority_for_routing_as_is
-  (_is_authority_form : Bool) : Result Bool := do
+  (is_authority_form : Bool) : Result Bool := do
   ok false
 
 end pedra_aeneas_path_kernel

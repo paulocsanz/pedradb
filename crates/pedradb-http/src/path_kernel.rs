@@ -1,23 +1,44 @@
 //! Origin-form path for routing (RFC-0002 P34 / F91 / F92).
 //!
+//! **Single artifact:** this file is what `rustc` links *and* what Verus
+//! proves (`cfg(verus_keep_ghost)`). String slice is caller. No twin-cópia.
+//!
+//!   ./scripts/verus_origin_path.sh
+//!
 //! Production `path_only` / `handle_kv` / `handle_dcs` call
 //! [`origin_form_path`]. Query strip after that is the same for FIXED and AS-IS.
 
 #![forbid(unsafe_code)]
 
+macro_rules! strip_authority_for_routing_body {
+    ($is_authority_form:expr) => {
+        $is_authority_form
+    };
+}
+
+macro_rules! strip_authority_for_routing_as_is_body {
+    ($is_authority_form:expr) => {{
+        let _ = $is_authority_form;
+        false
+    }};
+}
+
 /// First `/…` after an authority, or `"/"` if the authority has no path.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn path_after_authority(rest: &str) -> &str {
     rest.find('/').map(|i| &rest[i..]).unwrap_or("/")
 }
 
 /// Strip `http(s)://authority` (scheme case-insensitive — RFC 9110 / F145).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn strip_http_authority(target: &str) -> Option<&str> {
     strip_http_authority_rest(target).map(path_after_authority)
 }
 
 /// Authority of an absolute-form or network-path target (`host[:port]`).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn request_target_authority(target: &str) -> Option<&str> {
     let target = strip_uri_fragment(target);
@@ -35,6 +56,7 @@ pub fn request_target_authority(target: &str) -> Option<&str> {
     }
 }
 
+#[cfg(not(verus_keep_ghost))]
 fn strip_http_authority_rest(target: &str) -> Option<&str> {
     let b = target.as_bytes();
     if b.len() >= 7 && b[..7].eq_ignore_ascii_case(b"http://") {
@@ -48,6 +70,7 @@ fn strip_http_authority_rest(target: &str) -> Option<&str> {
 
 /// F161/F162: Host and absolute-form / network-path authority disagree (RFC 9112).
 /// F162: ignore `userinfo@` and default `:80` / `:443` (raw compare 400'd those).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn host_authority_mismatch(host: &str, authority: &str) -> bool {
     let (h1, p1) = split_host_port(host);
@@ -59,6 +82,7 @@ pub fn host_authority_mismatch(host: &str, authority: &str) -> bool {
 }
 
 /// Host / `[v6]` and optional numeric port. Strips a leading `userinfo@`.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn split_host_port(raw: &str) -> (&str, Option<&str>) {
     let s = raw.rsplit_once('@').map_or(raw, |(_, h)| h);
@@ -77,6 +101,7 @@ pub fn split_host_port(raw: &str) -> (&str, Option<&str>) {
     (s, None)
 }
 
+#[cfg(not(verus_keep_ghost))]
 fn ports_equivalent(a: Option<&str>, b: Option<&str>) -> bool {
     match (a, b) {
         (None, None) => true,
@@ -86,18 +111,21 @@ fn ports_equivalent(a: Option<&str>, b: Option<&str>) -> bool {
 }
 
 /// AS-IS F161: never compare Host to the request-target authority.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn host_authority_mismatch_as_is(_host: &str, _authority: &str) -> bool {
     false
 }
 
 /// RFC 3986: `#fragment` is not part of the request-target path or query.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn strip_uri_fragment(target: &str) -> &str {
     target.split_once('#').map(|(a, _)| a).unwrap_or(target)
 }
 
 /// AS-IS F156: fragment stays in the path / last query value.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn strip_uri_fragment_as_is(target: &str) -> &str {
     target
@@ -105,6 +133,7 @@ pub fn strip_uri_fragment_as_is(target: &str) -> &str {
 
 /// F91/F92: strip absolute-form / network-path, then the query string.
 /// F156: `#fragment` is not a path segment (same class as `?query` / F74).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn origin_form_path(target: &str) -> &str {
     let target = strip_uri_fragment(target);
@@ -119,22 +148,97 @@ pub fn origin_form_path(target: &str) -> &str {
 }
 
 /// AS-IS F91/F92: only strip `?query` — `http://host/kv/x` never matches `/kv/`.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn origin_form_path_as_is(target: &str) -> &str {
     target.split_once('?').map(|(a, _)| a).unwrap_or(target)
 }
 
 /// Whether an authority-form target must be stripped before routing.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn strip_authority_for_routing(is_authority_form: bool) -> bool {
-    is_authority_form
+    strip_authority_for_routing_body!(is_authority_form)
 }
 
 /// AS-IS: never strip authority (route sees `http://` / `//`).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
-pub fn strip_authority_for_routing_as_is(_is_authority_form: bool) -> bool {
+pub fn strip_authority_for_routing_as_is(is_authority_form: bool) -> bool {
+    strip_authority_for_routing_as_is_body!(is_authority_form)
+}
+
+#[cfg(verus_keep_ghost)]
+use vstd::prelude::*;
+
+#[cfg(verus_keep_ghost)]
+verus! {
+
+pub open spec fn strip_authority_for_routing_spec(is_authority_form: bool) -> bool {
+    is_authority_form
+}
+
+pub fn strip_authority_for_routing(is_authority_form: bool) -> (d: bool)
+    ensures
+        d == strip_authority_for_routing_spec(is_authority_form),
+        d == is_authority_form,
+{
+    strip_authority_for_routing_body!(is_authority_form)
+}
+
+pub open spec fn strip_authority_for_routing_as_is_spec(_is_authority_form: bool) -> bool {
     false
 }
+
+pub fn strip_authority_for_routing_as_is(is_authority_form: bool) -> (d: bool)
+    ensures
+        d == strip_authority_for_routing_as_is_spec(is_authority_form),
+        !d,
+{
+    strip_authority_for_routing_as_is_body!(is_authority_form)
+}
+
+proof fn lemma_as_is_keeps_authority()
+    ensures
+        strip_authority_for_routing_spec(true),
+        !strip_authority_for_routing_as_is_spec(true),
+{
+}
+
+proof fn lemma_origin_form_untouched()
+    ensures
+        !strip_authority_for_routing_spec(false),
+{
+}
+
+pub open spec fn default_port_equiv_spec(a: Option<u64>, b: Option<u64>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(x), Some(y)) => x == y,
+        (None, Some(p)) | (Some(p), None) => p == 80 || p == 443,
+    }
+}
+
+fn default_port_equiv(a: Option<u64>, b: Option<u64>) -> (d: bool)
+    ensures
+        d == default_port_equiv_spec(a, b),
+{
+    match (a, b) {
+        (None, None) => true,
+        (Some(x), Some(y)) => x == y,
+        (None, Some(p)) | (Some(p), None) => p == 80 || p == 443,
+    }
+}
+
+proof fn lemma_default_port_is_not_mismatch()
+    ensures
+        default_port_equiv_spec(None, Some(80)),
+        default_port_equiv_spec(None, Some(443)),
+        !default_port_equiv_spec(None, Some(8080)),
+{
+}
+
+} // verus!
 
 #[cfg(test)]
 mod tests {
@@ -151,10 +255,8 @@ mod tests {
         assert_eq!(origin_form_path("//127.0.0.1:9/kv/x"), "/kv/x");
         assert_eq!(origin_form_path("//h/dcs/kv/k?rev=1"), "/dcs/kv/k");
         assert_eq!(origin_form_path("//only-host"), "/");
-        // F145: scheme is case-insensitive (RFC 9110).
         assert_eq!(origin_form_path("Http://h/kv/x"), "/kv/x");
         assert_eq!(origin_form_path("HtTpS://h/kv/y?z=1"), "/kv/y");
-        // F156: fragment is not a path component.
         assert_eq!(origin_form_path("/kv/x#frag"), "/kv/x");
         assert_eq!(origin_form_path("/kv/x?y=1#f"), "/kv/x");
         assert_eq!(origin_form_path("http://h/kv/x#f"), "/kv/x");
@@ -169,7 +271,6 @@ mod tests {
         assert!(host_authority_mismatch("localhost", "evil.example"));
         assert!(!host_authority_mismatch("LocalHost", "localhost"));
         assert!(!host_authority_mismatch_as_is("localhost", "evil.example"));
-        // F162: default port + userinfo are not mismatches.
         assert!(!host_authority_mismatch("localhost", "localhost:80"));
         assert!(!host_authority_mismatch("localhost", "localhost:443"));
         assert!(!host_authority_mismatch("localhost", "user:pass@localhost"));
