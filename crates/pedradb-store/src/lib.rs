@@ -7054,7 +7054,7 @@ impl<E: Env> StoreCluster<E> {
                 }
                 (start, end, recs)
             };
-            if recs.is_empty() {
+            if pedradb_core::write_admission_kernel::batch_is_empty(recs.len() as u64) {
                 return Ok(());
             }
             let mut applied_to = start - 1;
