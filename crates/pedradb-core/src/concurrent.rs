@@ -1086,7 +1086,7 @@ impl WriteGroup {
         if let Some(batch) = batch.as_mut() {
             loop {
                 let mut extra = drain();
-                if extra.is_empty() {
+                if crate::write_admission_kernel::batch_is_empty(extra.len() as u64) {
                     break;
                 }
                 Self::validate_occ_batch(&mut guard, &mut extra);

@@ -782,6 +782,14 @@ mod tests {
             lead.contains("batch_is_empty("),
             "WriteGroup::lead must match batch_is_empty"
         );
+        let off = include_str!("concurrent.rs")
+            .split("fn finish_group_off_lock")
+            .nth(1)
+            .expect("finish_group_off_lock");
+        assert!(
+            off.contains("batch_is_empty("),
+            "finish_group_off_lock must match batch_is_empty"
+        );
     }
 
     #[test]
