@@ -831,7 +831,7 @@ impl MemTable {
         if !crate::write_admission_kernel::batch_is_empty(family.len() as u64)
             && family != "default"
             && !family.as_bytes().contains(&0)
-            && !self.map.is_empty()
+            && !crate::write_admission_kernel::batch_is_empty(self.map.len() as u64)
         {
             return self.take_family_contiguous(family);
         }
