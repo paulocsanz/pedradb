@@ -281,7 +281,7 @@ impl IoUringFile {
         let Inner::Uring { state } = &*self.env.inner else {
             return self.posix_pwrite(buf);
         };
-        if buf.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(buf.len() as u64) {
             return Ok(0);
         }
         let mut state = state.lock();
