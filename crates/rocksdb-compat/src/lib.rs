@@ -1590,7 +1590,7 @@ impl<E: PedraEnv> DBIterator<E> {
             bound_as_ref(&self.cf_end),
             ITER_WINDOW,
         ) {
-            Ok(page) if !page.is_empty() => {
+            Ok(page) if !pedradb_core::write_admission_kernel::batch_is_empty(page.len() as u64) => {
                 self.set_page(page);
                 self.idx = 0;
             }
