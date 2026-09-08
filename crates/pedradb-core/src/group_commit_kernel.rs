@@ -95,6 +95,56 @@ pub fn occ_member_fate_as_is(_too_old: bool, _conflict: bool) -> OccMemberFate {
     OccMemberFate::Ok
 }
 
+/// ConcurrentDb `validate_occ_batch` / `lone_commit` plan: TooOld wins
+/// over Conflict over Ok, against one `last_seq`. Glue collects
+/// (`too_old`, `OccRead`); this fn is the order rustc links.
+#[must_use]
+pub fn occ_batch_plan(
+    too_old: &[bool],
+    reads: &[OccRead],
+    last_seq: u64,
+) -> Vec<OccMemberFate> {
+    let n = if too_old.len() <= reads.len() {
+        too_old.len()
+    } else {
+        reads.len()
+    };
+    let mut out = Vec::with_capacity(n);
+    let mut i = 0;
+    while i < n {
+        let conflict = occ_conflict(
+            reads[i].snap,
+            last_seq,
+            reads[i].touched_key_written_after,
+        );
+        out.push(occ_member_fate(too_old[i], conflict));
+        i += 1;
+    }
+    out
+}
+
+/// AS-IS: every member Ok (lagging / too-old still commit).
+#[must_use]
+pub fn occ_batch_plan_as_is(
+    too_old: &[bool],
+    reads: &[OccRead],
+    _last_seq: u64,
+) -> Vec<OccMemberFate> {
+    let n = if too_old.len() <= reads.len() {
+        too_old.len()
+    } else {
+        reads.len()
+    };
+    let mut out = Vec::with_capacity(n);
+    let mut i = 0;
+    while i < n {
+        let _ = (too_old[i], reads[i]);
+        out.push(OccMemberFate::Ok);
+        i += 1;
+    }
+    out
+}
+
 /// The fence watermark: one publish sequence for the whole group — the
 /// max appended member sequence (0 for an empty group).
 #[must_use]
@@ -404,16 +454,63 @@ mod tests {
         );
         let src = include_str!("concurrent.rs");
         assert!(
-            src.contains("occ_member_fate("),
-            "validate_occ_batch must match occ_member_fate"
+            src.contains("occ_batch_plan("),
+            "validate_occ_batch must match occ_batch_plan"
         );
         let lone = src
             .split("fn lone_commit")
             .nth(1)
             .expect("lone_commit");
         assert!(
-            lone.contains("occ_member_fate("),
-            "lone_commit must match occ_member_fate"
+            lone.contains("occ_batch_plan("),
+            "lone_commit must match occ_batch_plan"
+        );
+    }
+
+    #[test]
+    fn occ_batch_plan_on_live_lagging_is_not_ok() {
+        let too_old = [false, true];
+        let reads = [
+            OccRead {
+                snap: 10,
+                touched_key_written_after: true,
+            },
+            OccRead {
+                snap: 7,
+                touched_key_written_after: true,
+            },
+        ];
+        assert_eq!(
+            occ_batch_plan(&too_old, &reads, 10),
+            vec![OccMemberFate::Ok, OccMemberFate::TooOld]
+        );
+        let lag = [false];
+        let lag_read = [OccRead {
+            snap: 7,
+            touched_key_written_after: true,
+        }];
+        assert_eq!(
+            occ_batch_plan(&lag, &lag_read, 10),
+            vec![OccMemberFate::Conflict]
+        );
+        assert_eq!(
+            occ_batch_plan_as_is(&lag, &lag_read, 10),
+            vec![OccMemberFate::Ok],
+            "AS-IS dente: lagging member still Ok"
+        );
+        let src = include_str!("concurrent.rs");
+        let validate = src
+            .split("fn validate_occ_batch")
+            .nth(1)
+            .expect("validate_occ_batch");
+        assert!(
+            validate.contains("occ_batch_plan("),
+            "validate_occ_batch must match occ_batch_plan"
+        );
+        let lone = src.split("fn lone_commit").nth(1).expect("lone_commit");
+        assert!(
+            lone.contains("occ_batch_plan("),
+            "lone_commit must match occ_batch_plan"
         );
     }
 

@@ -5604,6 +5604,34 @@
       "three_teeth": true
     },
     {
+      "id": "occ_batch_plan",
+      "finding": "RFC-0057 P2.1 script",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
+      "twin": "crates/pedradb-core/verus/group_commit.rs",
+      "verus": "scripts/verus_group_commit.sh",
+      "callers": ["crates/pedradb-core/src/concurrent.rs"],
+      "entry": "occ_batch_plan",
+      "data_fate": true,
+      "handlers": ["validate_occ_batch", "lone_commit"],
+      "as_is": "occ_batch_plan_as_is",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/concurrent.rs",
+          "handler": "validate_occ_batch"
+        },
+        {
+          "file": "crates/pedradb-core/src/concurrent.rs",
+          "handler": "lone_commit"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/group_commit_kernel.rs",
+        "test": "occ_batch_plan_on_live_lagging_is_not_ok"
+      },
+      "three_teeth": true
+    },
+    {
       "id": "pct_default_depth",
       "finding": "RFC-0070 P2.2",
       "twin_kind": "close",

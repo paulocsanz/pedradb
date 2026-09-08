@@ -12,6 +12,17 @@ import GroupCommitKernel
 open Aeneas Std Result ControlFlow
 open pedra_aeneas_group_commit_kernel
 
+deriving instance BEq for OccMemberFate
+
+/-- Structural lawfulness for the OCC member-fate enum (BEq is derived). -/
+private instance : LawfulBEq OccMemberFate where
+  eq_of_beq {a b} h := by
+    cases a <;> cases b <;>
+      first
+        | rfl
+        | exact absurd h (by decide)
+  rfl {a} := by cases a <;> rfl
+
 /-- Structural lawfulness for the error enum (BEq is derived). -/
 private instance : LawfulBEq Error where
   eq_of_beq {a b} h := by
@@ -199,4 +210,44 @@ theorem group_validate_n3_one_lagging :
           by native_decide⟩)
         (10#u64) =
       ok (⟨[false, false, true], by native_decide⟩ : alloc.vec.Vec Bool) := by
+  exact LawfulBEq.eq_of_beq (by native_decide)
+
+/-- ConcurrentDb `validate_occ_batch` / `lone_commit` caller: `occ_batch_plan`
+    unfolds `occ_member_fate` and `occ_conflict`. Lagging member is Conflict. -/
+theorem occ_batch_plan_lagging_conflict :
+    occ_batch_plan
+        (⟨[false], by native_decide⟩)
+        (⟨[{ snap := 7#u64, touched_key_written_after := true }],
+          by native_decide⟩)
+        (10#u64) =
+      ok (⟨[OccMemberFate.Conflict], by native_decide⟩
+        : alloc.vec.Vec OccMemberFate) ∧
+      occ_member_fate false true = ok OccMemberFate.Conflict ∧
+      occ_conflict (7#u64) (10#u64) true = ok true := by
+  constructor
+  · exact LawfulBEq.eq_of_beq (by native_decide)
+  constructor
+  · unfold occ_member_fate; rfl
+  · unfold occ_conflict; rfl
+
+/-- TooOld wins over Conflict on the same plan. -/
+theorem occ_batch_plan_too_old_wins :
+    occ_batch_plan
+        (⟨[true], by native_decide⟩)
+        (⟨[{ snap := 7#u64, touched_key_written_after := true }],
+          by native_decide⟩)
+        (10#u64) =
+      ok (⟨[OccMemberFate.TooOld], by native_decide⟩
+        : alloc.vec.Vec OccMemberFate) := by
+  exact LawfulBEq.eq_of_beq (by native_decide)
+
+/-- AS-IS dente: lagging member still Ok. -/
+theorem occ_batch_plan_as_is_dente :
+    occ_batch_plan_as_is
+        (⟨[false], by native_decide⟩)
+        (⟨[{ snap := 7#u64, touched_key_written_after := true }],
+          by native_decide⟩)
+        (10#u64) =
+      ok (⟨[OccMemberFate.Ok], by native_decide⟩
+        : alloc.vec.Vec OccMemberFate) := by
   exact LawfulBEq.eq_of_beq (by native_decide)

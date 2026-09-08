@@ -957,9 +957,14 @@ impl WriteGroup {
             });
             too_old.push(None);
         }
-        let conflicts = crate::group_commit_kernel::group_validate(&reads, guard.last_sequence());
-        for ((p, conflict), old) in batch.iter_mut().zip(conflicts).zip(too_old) {
-            match crate::group_commit_kernel::occ_member_fate(old.is_some(), conflict) {
+        let too_old_flags: Vec<bool> = too_old.iter().map(|o| o.is_some()).collect();
+        let fates = crate::group_commit_kernel::occ_batch_plan(
+            &too_old_flags,
+            &reads,
+            guard.last_sequence(),
+        );
+        for ((p, fate), old) in batch.iter_mut().zip(fates).zip(too_old) {
+            match fate {
                 crate::group_commit_kernel::OccMemberFate::TooOld => {
                     p.ops.clear();
                     p.occ_err = old;
@@ -999,17 +1004,25 @@ impl WriteGroup {
                     }
                     BatchOp::DeleteRange { .. } => false,
                 });
-            // RFC-0057 P2.1: first-committer-wins is the kernel's
-            // decision, not an inline predicate.
-            match crate::group_commit_kernel::occ_member_fate(
-                false,
-                crate::group_commit_kernel::occ_conflict(*snap, last_seq, touched),
-            ) {
-                crate::group_commit_kernel::OccMemberFate::Conflict => {
+            // RFC-0057 P2.1: first-committer-wins is the kernel plan,
+            // not an inline predicate (same `occ_batch_plan` as the group).
+            match crate::group_commit_kernel::occ_batch_plan(
+                &[false],
+                &[crate::group_commit_kernel::OccRead {
+                    snap: *snap,
+                    touched_key_written_after: touched,
+                }],
+                last_seq,
+            )
+            .into_iter()
+            .next()
+            {
+                Some(crate::group_commit_kernel::OccMemberFate::Conflict) => {
                     return Err(CoreError::TransactionConflict);
                 }
-                crate::group_commit_kernel::OccMemberFate::TooOld
-                | crate::group_commit_kernel::OccMemberFate::Ok => {}
+                Some(crate::group_commit_kernel::OccMemberFate::TooOld)
+                | Some(crate::group_commit_kernel::OccMemberFate::Ok)
+                | None => {}
             }
         }
         // RFC-0042 P1.1: a lone commit is a commit in flight exactly like a
