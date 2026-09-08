@@ -2847,7 +2847,9 @@ impl<E: PedraEnv> DB<E> {
             && puts.iter().all(|(cf, _, _)| *cf == "raftlog");
         // RFC-0159 P1.5: latched first-CF run skips BatchOp / WriteGroup.
         // Hydrate is 1024 data + 1 meta; only `data` latches.
-        if deletes.is_empty() && !puts.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(deletes.len() as u64)
+            && !puts.is_empty()
+        {
             let family = puts[0].0;
             if self.inner.family_is_latched_async(family) {
                 let n = puts.iter().take_while(|p| p.0 == family).count();
