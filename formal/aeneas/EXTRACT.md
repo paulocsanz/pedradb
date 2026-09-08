@@ -123,7 +123,7 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 | `ship` | `ship_kernel.rs` | `stamp_changed_is_def` (slice extract; `have _ := @stamp_changed`) |
 | `fold` | `fold_kernel.rs` | `fold_event_hides_key_is_def` (slice extract) |
 | `manifest` | `manifest_kernel.rs` | `sst_recover_absent_scans` (pair `manifest_recover` is single_artifact: production file is the Verus term) |
-| `compact` | core `compact_kernel.rs` | `compact_pick_empty_noop` |
+| `compact` | core `compact_kernel.rs` | `compact_pick_empty_noop` (pair `compact_decision` is single_artifact: production file is the Verus term) |
 | `vlog_gc` | `vlog_gc_kernel.rs` | `vlog_recover_blob_opens` (pair `vlog_recover` is single_artifact: production file is the Verus term) |
 | `tx_glue` | `tx_glue_kernel.rs` | `tx_range_keep_committed` (single_artifact: production file is the Verus term) |
 | `l28` | `l28.rs` | `l28_durability_all_ok` |

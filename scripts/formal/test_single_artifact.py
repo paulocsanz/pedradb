@@ -654,6 +654,22 @@ def main() -> int:
         print("FAIL vote twin≠kernel did not fail")
         return 1
     print("ok mutant vote twin≠kernel named")
+    cd_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in cd_mutant["pairs"]:
+        if pair.get("id") == "compact_decision":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-core/verus/compact_decision.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing compact_decision")
+        return 1
+    hits = [m for m in _sa_fails(cd_mutant) if m.startswith("compact_decision:")]
+    if not hits:
+        print("FAIL compact_decision twin≠kernel did not fail")
+        return 1
+    print("ok mutant compact_decision twin≠kernel named")
     # Drive the same rule through check_twins (may also report unrelated
     # dirty-tree twin drift; we only require the SA id).
     try:
