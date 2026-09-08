@@ -309,6 +309,8 @@ pub const COMPARE_SHAPES: &[&str] = &[
     "solana_trailing_read_mc4",
     // RFC-0184 P2.53: Kvrocks SCAN mc4 — 1c is suite-only; GET already has mc4.
     "kvrocks_scan_mc4",
+    // RFC-0184 P2.54: Flink window-state mc4 — 1c is suite-only.
+    "flink_window_state_mc4",
 ];
 
 /// Length of the RFC-0041 official prefix of [`COMPARE_SHAPES`].
@@ -2656,10 +2658,13 @@ impl YcsbRunner {
         let mut rng = std::mem::take(&mut self.rng);
         let mut blocks = Vec::with_capacity(2);
         let windows = (records / 16).max(1);
+        if shape_wanted("flink_window_state") || shape_wanted("kafka_changelog_flush") {
         for i in 0..records {
             let win = i % windows;
             assert!(e.put(&wkey(win, i), &yval), "flink seed {i}");
         }
+        }
+        if shape_wanted("flink_window_state") {
         let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut ops, mut errors) = (0u64, 0u64);
@@ -2691,7 +2696,9 @@ impl YcsbRunner {
                 *last = attach_diagnose(std::mem::take(last), Some(&d));
             }
         }
+        }
 
+        if shape_wanted("kafka_changelog_flush") {
         let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut puts, mut errors) = (0u64, 0u64);
@@ -2728,7 +2735,93 @@ impl YcsbRunner {
                 *last = attach_diagnose(std::mem::take(last), Some(&d));
             }
         }
+        }
         self.rng = rng;
+        blocks
+    }
+
+    /// RFC-0184 P2.54: flink_window_state at N clients (put + window scan).
+    pub fn run_flink_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
+        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
+        let full = format!("flink_window_state_mc{clients}");
+        if !shape_wanted(&full) {
+            return Vec::new();
+        }
+        e.set_write_sync(write_sync_for_suite("streaming"));
+        let records = self.cfg.records;
+        let cfg_ops = self.cfg.ops;
+        let yval = std::sync::Arc::new(vec![b'f'; self.cfg.payload]);
+        let windows = (records / 16).max(1);
+        for i in 0..records {
+            let win = i % windows;
+            assert!(e.put(&wkey(win, i), &yval), "flink mc seed {i}");
+        }
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+        let phase0 = e.write_phase_snapshot();
+        let t0 = Instant::now();
+        let mut lats = Vec::with_capacity(cfg_ops * clients);
+        let mut errors = 0u64;
+        std::thread::scope(|s| {
+            let handles: Vec<_> = (0..clients)
+                .map(|c| {
+                    let barrier = barrier.clone();
+                    let yval = yval.clone();
+                    s.spawn(move || {
+                        let mut rng =
+                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
+                        let mut lats = Vec::with_capacity(cfg_ops);
+                        let mut errors = 0u64;
+                        barrier.wait();
+                        for i in 0..cfg_ops {
+                            let t = Instant::now();
+                            let u = self.pick(&mut rng, records);
+                            let win = u % windows;
+                            let seq = records + c * cfg_ops + i;
+                            let ok = e.put(&wkey(win, seq), yval.as_ref())
+                                && e.scan_count(&wprefix(win), &wprefix(win + 1), 25).is_ok();
+                            if !ok {
+                                errors += 1;
+                            }
+                            lats.push(ms(t));
+                        }
+                        (lats, errors)
+                    })
+                })
+                .collect();
+            for h in handles {
+                let (mut l, err) = h.join().expect("flink client thread");
+                errors += err;
+                lats.append(&mut l);
+            }
+        });
+        let wall = t0.elapsed();
+        eprintln!(
+            "[rocks-parity] {full} done ops={} errors={errors}",
+            cfg_ops * clients
+        );
+        let mut blocks = vec![summarize_mc(
+            &full,
+            cfg_ops * clients,
+            wall,
+            &mut lats,
+            clients,
+            errors,
+        )];
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(
+                pct(&lats, 50.0),
+                a,
+                b,
+                clients as u64,
+                0.0,
+                50,
+                (cfg_ops * clients) as u64,
+            );
+            eprint_write_diagnose(&full, &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
         blocks
     }
 
@@ -5269,6 +5362,26 @@ mod tests {
     }
 
     #[test]
+    fn rfc0184_flink_window_state_mc4_in_compare() {
+        assert!(
+            COMPARE_SHAPES.contains(&"flink_window_state_mc4"),
+            "Flink window-state mc4 must be on the cartaz"
+        );
+        assert!(shape_wanted_in(
+            "flink_window_state_mc4",
+            Some("flink_window_state_mc4")
+        ));
+        assert!(
+            !shape_wanted_in("flink_window_state", Some("flink_window_state_mc4")),
+            "1c flink_window_state must not leak into ONLY=flink_window_state_mc4"
+        );
+        assert!(
+            !shape_wanted_in("kafka_changelog_flush", Some("flink_window_state_mc4")),
+            "kafka changelog 1c must not leak into ONLY=flink_window_state_mc4"
+        );
+    }
+
+    #[test]
     fn rfc0178_mc_only_selects_full_mc_name() {
         assert!(shape_wanted_in(
             "deps_cache_overwrite_mc4",
@@ -5757,6 +5870,7 @@ mod tests {
             "oxigraph_spo_lookup_mc4",
             "solana_trailing_read_mc4",
             "kvrocks_scan_mc4",
+            "flink_window_state_mc4",
         ] {
             assert!(
                 COMPARE_SHAPES.contains(&name),
