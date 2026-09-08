@@ -559,7 +559,7 @@ impl SstTable {
         // Bulk hydrate leaves the slot empty (100M RAM). If the 256 MiB
         // pool still has room, promote now so get_hit is a slice+CRC-skip
         // (v55 1M was 0.79× vs Rocks because every probe was pread+CRC).
-        if self.payload.read().img.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.payload.read().img.len() as u64) {
             self.try_promote_payload()?;
         }
         // v5: each block carries its own CRC, so one image suffices — a
