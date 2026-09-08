@@ -348,6 +348,8 @@ cargo run -q --release -p rocksdb-parity-bench --bin pedra -- diagnose balance \
 #   diagnose hydrate/<backend> dominant=… lever=…
 # scale settle + PEDRA_WRITE_PHASE_STATS=1:
 #   diagnose settle/<backend> dominant=… lever=…
+# CLI also prints a JSON object (0184 P2.25):
+#   diagnose write → {"lever":…} ; get/probes → {"class":…} ; balance → {"admits":…}
 cargo run -q --release -p rocksdb-parity-bench --bin pedra -- diagnose probes \
   --per-get 5 --p-best 5
 cargo run -q --release -p rocksdb-parity-bench --bin pedra -- diagnose get \

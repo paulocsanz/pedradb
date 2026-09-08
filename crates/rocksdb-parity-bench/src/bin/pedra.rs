@@ -104,6 +104,7 @@ fn diagnose_write_cmd(args: &[String]) -> Result<(), ()> {
         d.gap_ns, d.timed_ns, d.unattributed_ns
     );
     println!("{}", d.line());
+    println!("{}", d.json_object());
     Ok(())
 }
 
@@ -140,6 +141,7 @@ fn diagnose_get_cmd(args: &[String]) -> Result<(), ()> {
         f.best_ns, f.happy_ns, f.worst_ns, as_is.best_ns
     );
     println!("measured_ns={measured_ns} class={}", class.token());
+    println!(r#"{{"class":"{}"}}"#, class.token());
     Ok(())
 }
 
@@ -157,6 +159,7 @@ fn diagnose_probes_cmd(args: &[String]) -> Result<(), ()> {
         "pedra diagnose probes per_get={per_get} p_best={p_best} class={}",
         class.token()
     );
+    println!(r#"{{"class":"{}"}}"#, class.token());
     Ok(())
 }
 
@@ -218,5 +221,11 @@ fn diagnose_balance_cmd(args: &[String]) -> Result<(), ()> {
         u8::from(admits)
     );
     println!("shapes={}", BALANCE_SHAPES.join(","));
+    println!(
+        r#"{{"admits":{},"cut":"{}","cells":{}}}"#,
+        u8::from(admits),
+        cut.token(),
+        cells.len()
+    );
     Ok(())
 }
