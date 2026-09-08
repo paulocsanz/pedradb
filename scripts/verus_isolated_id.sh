@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Machine-check F83 isolated-id match (RFC-0002 P29).
+# Machine-check F83 isolated-id match on the file rustc links
+# (single artifact — not the twin-cópia). RFC-0002 P29.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-fold/verus/isolated_id.rs"
+SRC="$ROOT/crates/pedradb-fold/src/isolated_kernel.rs"
 if [[ -x "${VERUS:-}" ]]; then
   :
 elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then
