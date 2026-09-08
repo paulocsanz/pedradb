@@ -6802,7 +6802,7 @@ impl<E: Env> Db<E> {
                 .filter(|(_, (t, &lvl))| lvl == 0 && self.compact_family_key(t) == fam)
                 .map(|(i, _)| i)
                 .collect();
-            if !input_idxs.is_empty() {
+            if !crate::write_admission_kernel::batch_is_empty(input_idxs.len() as u64) {
                 self.rewrite_ssts(input_idxs, 1, options)?;
             }
         }
