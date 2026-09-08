@@ -3176,7 +3176,7 @@ impl<E: Env> Db<E> {
     }
 
     fn archive_flush_chunk(&mut self, chunk: &mut Vec<(Vec<u8>, Vec<u8>, u64, u8)>) -> Result<()> {
-        if chunk.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(chunk.len() as u64) {
             return Ok(());
         }
         let env = self.env.clone();
