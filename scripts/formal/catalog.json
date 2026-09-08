@@ -1296,8 +1296,9 @@
       "id": "prepare_error_aborts_earlier",
       "finding": "F50",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-store/src/txn_kernel.rs",
-      "twin": "crates/pedradb-store/verus/txn_kernel.rs",
+      "twin": "crates/pedradb-store/src/txn_kernel.rs",
       "verus": "scripts/verus_txn_kernel.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs",
