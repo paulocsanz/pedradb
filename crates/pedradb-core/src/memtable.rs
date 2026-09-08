@@ -1770,7 +1770,10 @@ impl MemTable {
         limit: usize,
         snapshot: SequenceNumber,
     ) -> Option<usize> {
-        if snapshot < self.tail_max_seq || !self.map.is_empty() || self.has_range_tombstones() {
+        if snapshot < self.tail_max_seq
+            || !crate::write_admission_kernel::batch_is_empty(self.map.len() as u64)
+            || self.has_range_tombstones()
+        {
             return None;
         }
         if self.tail_len() == 0 {
