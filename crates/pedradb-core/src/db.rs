@@ -6327,7 +6327,7 @@ impl<E: Env> Db<E> {
             pin_live: self.flush_read_pin.is_some(),
             parked_unflushed: !self.parked_unflushed.is_empty(),
             commit_inflight: self.commit_inflight.load(Ordering::Acquire) > 0
-                || !self.unapplied.is_empty(),
+                || !crate::write_admission_kernel::batch_is_empty(self.unapplied.len() as u64),
         }
     }
 
