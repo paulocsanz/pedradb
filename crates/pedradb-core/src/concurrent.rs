@@ -358,13 +358,29 @@ fn leader_linger_want(prev_group_members: usize) -> usize {
 /// on the timed window (WRITEPHASE). n≥16 still stops at 2 (50-thread
 /// linger was a stall). Extra take under the write lock still fills.
 fn async_catchup_skip_when_grouped(batch_len: usize, active: usize) -> bool {
-    if batch_len >= active {
-        true
+    batch_len >= grouping_cap(active)
+}
+
+/// How many members the async catch-up waits for. 1c: 1. 2–8: min(4,
+/// active) (`diagnose write --clients 4`). n≥16: 2 (kvrocks convoy).
+#[must_use]
+fn grouping_cap(active: usize) -> usize {
+    if active < 2 {
+        1
     } else if active > ASYNC_GROUP_ADAPTIVE_MAX {
-        batch_len >= 2
+        2
     } else {
-        batch_len >= 4
+        4.min(active)
     }
+}
+
+/// True while merge-path submits have `begin_submit` but not `push_pending`.
+/// Last-op: those threads decrement `active` without a next put — stop.
+#[must_use]
+fn in_flight_off_queue(batch_len: usize, queued: usize, active: usize) -> bool {
+    let cap = grouping_cap(active);
+    let accounted = batch_len.saturating_add(queued);
+    accounted < cap && accounted < active
 }
 
 fn async_catchup_spins(batch_len: usize, active: usize) -> u32 {
@@ -1132,6 +1148,22 @@ impl WriteGroup {
         }
     }
 
+    /// RFC-0180 P0.44: keep spinning while `begin_submit` has run and
+    /// `push_pending` has not. No condvar timer (Darwin coalescing).
+    /// Stops when the grouping cap is met **or** `active` drops (last op
+    /// / previous-round recv finishing without a next put). Merge-only
+    /// (2–8); n≥16 cap is 2.
+    fn wait_in_flight_to_queue(&self, batch_len: usize) {
+        loop {
+            let q = self.queued_pending.load(Ordering::Relaxed);
+            let active = self.active.load(Ordering::Relaxed);
+            if !in_flight_off_queue(batch_len, q, active) {
+                return;
+            }
+            std::hint::spin_loop();
+        }
+    }
+
     fn lead<E: Env>(&self, db: &RwLock<Db<E>>) -> Result<SequenceNumber> {
         // RFC-0180 P0.27: pin via the shared Arc — no `db.read()` (that
         // queued behind compact/flush and showed up as p999 ≈ 1.5 ms).
@@ -1205,6 +1237,11 @@ impl WriteGroup {
                 if spins > 0 {
                     let want = active.saturating_sub(batch.len()).min(4).max(1);
                     self.spin_for_pending_n(spins, want);
+                }
+                // P0.44: 1024 spins can finish while siblings are still
+                // between `begin_submit` and `push_pending`.
+                self.wait_in_flight_to_queue(batch.len());
+                if self.queued_pending.load(Ordering::Relaxed) > 0 {
                     let mut g = self.queue.lock();
                     batch.extend(Self::take_pending(&mut g, &self.queued_pending));
                 }
@@ -6899,6 +6936,18 @@ mod tests {
         assert_eq!(async_catchup_spins(2, 4), 1024);
         assert_eq!(async_catchup_spins(3, 4), 1024);
         assert_eq!(async_catchup_spins(4, 4), 0);
+        // RFC-0180 P0.44: wait while begin_submit ran and push_pending did not.
+        assert_eq!(grouping_cap(1), 1);
+        assert_eq!(grouping_cap(4), 4);
+        assert_eq!(grouping_cap(8), 4);
+        assert_eq!(grouping_cap(16), 2);
+        assert!(in_flight_off_queue(1, 0, 4));
+        assert!(in_flight_off_queue(1, 0, 2));
+        assert!(!in_flight_off_queue(1, 3, 4));
+        assert!(!in_flight_off_queue(1, 0, 1), "1c / last-op active drop");
+        assert!(!in_flight_off_queue(2, 0, 16), "n≥16 cap=2 already met");
+        assert!(in_flight_off_queue(1, 0, 16), "n≥16 still wait for 2nd");
+        assert!(!in_flight_off_queue(4, 0, 4));
         // n≥16: stop at 2 (kvrocks_set_mc50 lock_convoy ceiling).
         assert!(async_catchup_skip_when_grouped(2, 16));
         assert_eq!(async_catchup_spins(2, 16), 0);
