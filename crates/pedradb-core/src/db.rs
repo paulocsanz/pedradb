@@ -5521,7 +5521,7 @@ impl<E: Env> Db<E> {
 
     fn absorb_mem_family_into_run(&mut self, family: &str) -> Result<()> {
         let taken = self.mem.take_family(family);
-        if taken.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(taken.len() as u64) {
             return Ok(());
         }
         let run = self.bulk_runs.entry(family.to_string()).or_default();
