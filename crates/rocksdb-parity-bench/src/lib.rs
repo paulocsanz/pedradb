@@ -274,6 +274,8 @@ pub const COMPARE_SHAPES: &[&str] = &[
     // RFC-0184 P2.36: 95% get mc4 already in BALANCE_SHAPES / run_clients;
     // compare iterated COMPARE only, so the cell was invisible on the cartaz.
     "ycsb_b_mc4",
+    // RFC-0184 P2.39: YCSB C (100% get) mc4 — official 16 is 1c only.
+    "ycsb_c_mc4",
     // RFC-0043 — Rockset (→OpenAI) converged index. Ingest batch + point get.
     "rockset_hybrid",
     // YugabyteDB DocDB: intents CF + committed CF (Rocks-based).
@@ -2816,9 +2818,10 @@ impl YcsbRunner {
         // (name, read_pct, rmw, overwrite) — mirrors run()/run_deps mixes.
         // RFC-0163 P1.4: ycsb_b (95% get / 5% put) is the read-dominated
         // rung of the concurrency ladder.
-        let shapes: [(&str, u64, bool, bool); 4] = [
+        let shapes: [(&str, u64, bool, bool); 5] = [
             ("ycsb_a", 50, false, false),
             ("ycsb_b", 95, false, false),
+            ("ycsb_c", 100, false, false),
             ("ycsb_f", 50, true, false),
             ("deps_cache_overwrite", 0, false, true),
         ];
@@ -3637,6 +3640,19 @@ mod tests {
     }
 
     #[test]
+    fn rfc0184_ycsb_c_mc4_in_compare() {
+        assert!(
+            COMPARE_SHAPES.contains(&"ycsb_c_mc4"),
+            "YCSB C 100% get mc4 must be on the cartaz"
+        );
+        assert!(shape_wanted_in("ycsb_c_mc4", Some("ycsb_c_mc4")));
+        assert!(
+            !shape_wanted_in("ycsb_c", Some("ycsb_c_mc4")),
+            "1c C must not leak into ONLY=ycsb_c_mc4"
+        );
+    }
+
+    #[test]
     fn rfc0178_mc_only_selects_full_mc_name() {
         assert!(shape_wanted_in(
             "deps_cache_overwrite_mc4",
@@ -4108,6 +4124,7 @@ mod tests {
             "compaction_filter_drop",
             "ingest_sst",
             "ycsb_b_mc4",
+            "ycsb_c_mc4",
             "rockset_hybrid",
             "yugabyte_docdb_rmw",
         ] {
