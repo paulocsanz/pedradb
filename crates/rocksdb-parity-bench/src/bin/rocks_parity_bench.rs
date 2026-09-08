@@ -245,6 +245,9 @@ fn run_and_report<E: Engine + Sync>(e: &E, cfg: &Cfg, suites: &str, out: &Path) 
     }
     if suites_enabled("myrocks") {
         benches.extend(r.run_myrocks(e));
+        for clients in rocksdb_parity_bench::clients_from_env() {
+            benches.extend(r.run_myrocks_clients(e, clients));
+        }
     }
     if suites_enabled("nebula") {
         benches.extend(r.run_nebula(e));
@@ -333,6 +336,9 @@ fn run_and_report_occ<E: rocksdb_parity_bench::OccEngine + Sync>(
     }
     if suites_enabled("myrocks") {
         benches.extend(r.run_myrocks(e));
+        for clients in rocksdb_parity_bench::clients_from_env() {
+            benches.extend(r.run_myrocks_clients(e, clients));
+        }
     }
     if suites_enabled("nebula") {
         benches.extend(r.run_nebula(e));

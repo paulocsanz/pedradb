@@ -295,6 +295,8 @@ pub const COMPARE_SHAPES: &[&str] = &[
     "venice_fanout_get_mc4",
     // RFC-0184 P2.46: Kvrocks GET mc4 — 1c is suite-only; set already has mc50.
     "kvrocks_get_mc4",
+    // RFC-0184 P2.47: MyRocks oltp_point_select mc4 — 1c is suite-only.
+    "myrocks_point_select_mc4",
 ];
 
 /// Length of the RFC-0041 official prefix of [`COMPARE_SHAPES`].
@@ -1689,6 +1691,13 @@ impl YcsbRunner {
         let mut blocks = Vec::with_capacity(4);
 
         // Untimed: one node + 4 outgoing links per record (LinkBench seed).
+        // Skip when ONLY=mc4 so we don't pay 5×N host-sync puts before the
+        // concurrent GET harness seeds its own nkey space.
+        if shape_wanted("myrocks_point_select")
+            || shape_wanted("myrocks_read_only")
+            || shape_wanted("myrocks_write_tx")
+            || shape_wanted("linkbench_mix")
+        {
         for i in 0..records {
             assert!(e.put(&nkey(i), &yval), "myrocks node seed {i}");
             for d in 1..=4 {
@@ -1696,8 +1705,10 @@ impl YcsbRunner {
                 assert!(e.put(&lkey(i, dst), &yval), "myrocks link seed");
             }
         }
+        }
 
         // myrocks_point_select — sysbench oltp_point_select (1-op canary).
+        if shape_wanted("myrocks_point_select") {
         let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut gets, mut errors) = (0u64, 0u64);
@@ -1725,8 +1736,10 @@ impl YcsbRunner {
                 *last = attach_diagnose(std::mem::take(last), Some(&d));
             }
         }
+        }
 
         // myrocks_read_only — sysbench oltp_read_only short PK range (HL).
+        if shape_wanted("myrocks_read_only") {
         let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut scans, mut errors) = (0u64, 0u64);
@@ -1754,8 +1767,10 @@ impl YcsbRunner {
                 *last = attach_diagnose(std::mem::take(last), Some(&d));
             }
         }
+        }
 
         // myrocks_write_tx — one OLTP tx = `batch` row updates, one WriteBatch.
+        if shape_wanted("myrocks_write_tx") {
         let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut rows, mut errors) = (0u64, 0u64);
@@ -1792,8 +1807,10 @@ impl YcsbRunner {
                 *last = attach_diagnose(std::mem::take(last), Some(&d));
             }
         }
+        }
 
         // linkbench_mix — inspired by LinkBench proportions, not a replay:
+        if shape_wanted("linkbench_mix") {
         //   55% GET_LINKS_LIST (prefix scan), 15% GET_NODE,
         //   25% ADD/UPDATE_LINK as a 4-put batch, 5% DELETE_LINK.
         let phase0 = e.write_phase_snapshot();
@@ -1865,8 +1882,89 @@ impl YcsbRunner {
                 *last = attach_diagnose(std::mem::take(last), Some(&d));
             }
         }
+        }
 
         self.rng = rng;
+        blocks
+    }
+
+    /// RFC-0184 P2.47: myrocks_point_select at N clients (sysbench oltp_point_select).
+    pub fn run_myrocks_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
+        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
+        let full = format!("myrocks_point_select_mc{clients}");
+        if !shape_wanted(&full) {
+            return Vec::new();
+        }
+        // Timed window is 100% GET. Seed untimed async so we don't pay
+        // 100k host-sync puts (1c suite still uses MyRocks sync-on-commit).
+        e.set_write_sync(false);
+        let records = self.cfg.records;
+        let cfg_ops = self.cfg.ops;
+        let yval = vec![b'm'; self.cfg.payload];
+        for i in 0..records {
+            assert!(e.put(&nkey(i), &yval), "myrocks mc seed {i}");
+        }
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+        let phase0 = e.write_phase_snapshot();
+        let t0 = Instant::now();
+        let mut lats = Vec::with_capacity(cfg_ops * clients);
+        let mut errors = 0u64;
+        std::thread::scope(|s| {
+            let handles: Vec<_> = (0..clients)
+                .map(|c| {
+                    let barrier = barrier.clone();
+                    s.spawn(move || {
+                        let mut rng =
+                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
+                        let mut lats = Vec::with_capacity(cfg_ops);
+                        let mut errors = 0u64;
+                        barrier.wait();
+                        for _ in 0..cfg_ops {
+                            let t = Instant::now();
+                            let u = self.pick(&mut rng, records);
+                            if e.get(&nkey(u)).is_err() {
+                                errors += 1;
+                            }
+                            lats.push(ms(t));
+                        }
+                        (lats, errors)
+                    })
+                })
+                .collect();
+            for h in handles {
+                let (mut l, err) = h.join().expect("myrocks client thread");
+                errors += err;
+                lats.append(&mut l);
+            }
+        });
+        let wall = t0.elapsed();
+        eprintln!(
+            "[rocks-parity] {full} done ops={} errors={errors}",
+            cfg_ops * clients
+        );
+        let mut blocks = vec![summarize_mc(
+            &full,
+            cfg_ops * clients,
+            wall,
+            &mut lats,
+            clients,
+            errors,
+        )];
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(
+                pct(&lats, 50.0),
+                a,
+                b,
+                clients as u64,
+                0.0,
+                100,
+                (cfg_ops * clients) as u64,
+            );
+            eprint_write_diagnose(&full, &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
         blocks
     }
 
@@ -4481,6 +4579,26 @@ mod tests {
     }
 
     #[test]
+    fn rfc0184_myrocks_point_select_mc4_in_compare() {
+        assert!(
+            COMPARE_SHAPES.contains(&"myrocks_point_select_mc4"),
+            "MyRocks oltp_point_select mc4 must be on the cartaz"
+        );
+        assert!(shape_wanted_in(
+            "myrocks_point_select_mc4",
+            Some("myrocks_point_select_mc4")
+        ));
+        assert!(
+            !shape_wanted_in("myrocks_point_select", Some("myrocks_point_select_mc4")),
+            "1c myrocks_point_select must not leak into ONLY=myrocks_point_select_mc4"
+        );
+        assert!(
+            !shape_wanted_in("linkbench_mix", Some("myrocks_point_select_mc4")),
+            "linkbench 1c must not leak into ONLY=myrocks_point_select_mc4"
+        );
+    }
+
+    #[test]
     fn rfc0178_mc_only_selects_full_mc_name() {
         assert!(shape_wanted_in(
             "deps_cache_overwrite_mc4",
@@ -4962,6 +5080,7 @@ mod tests {
             "yugabyte_docdb_rmw_mc4",
             "venice_fanout_get_mc4",
             "kvrocks_get_mc4",
+            "myrocks_point_select_mc4",
         ] {
             assert!(
                 COMPARE_SHAPES.contains(&name),
