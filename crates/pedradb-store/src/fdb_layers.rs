@@ -350,7 +350,7 @@ fn encode_list(items: &[Vec<u8>]) -> Vec<u8> {
 /// (`break` on bad hex or short payload). Append then persisted that prefix
 /// and dropped the tail — silent loss. Fail closed.
 fn decode_list(raw: &[u8]) -> Result<Vec<Vec<u8>>> {
-    if raw.is_empty() {
+    if pedradb_core::write_admission_kernel::batch_is_empty(raw.len() as u64) {
         return Ok(Vec::new());
     }
     let mut items = Vec::new();
