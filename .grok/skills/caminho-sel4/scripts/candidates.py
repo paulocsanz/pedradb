@@ -309,6 +309,71 @@ def script_compose_board() -> None:
             f"unfold_callee={str(unfold_callee).lower()} {status}"
         )
     print(f"  unpaid_compose={unpaid_compose}/{len(GLUE_SCRIPTS)}")
+    concurrency_board()
+
+
+# Rank 6: named total fn the live handler calls + Lean unfold of that
+# caller AND a callee. Not dump of concurrent.rs / db.rs. Not SA wrap.
+# tuple: label, file, handler, caller, callee
+CONCURRENCY = [
+    (
+        "write-lock client",
+        "crates/pedradb-core/src/concurrent.rs",
+        "occ_snapshot",
+        "occ_snap_lock_order",
+        "occ_snap_uses_published",
+    ),
+    (
+        "lost-update",
+        "crates/pedradb-core/src/concurrent.rs",
+        "validate_occ_batch",
+        "occ_batch_plan",
+        "occ_conflict",
+    ),
+    (
+        "deadlock 2PL",
+        "crates/rocksdb-compat/src/locktab.rs",
+        "lock",
+        "wait_for_deadlock",
+        "wait_for_deadlock",
+    ),
+    (
+        "N-way OCC",
+        "crates/pedradb-core/src/group_commit_kernel.rs",
+        "group_validate",
+        "group_validate",
+        "occ_conflict",
+    ),
+]
+
+
+def concurrency_board() -> None:
+    print("== concurrency (rank 6: named fn + unfold caller AND callee) ==")
+    unpaid = 0
+    for label, rel, handler, caller, callee in CONCURRENCY:
+        src = load(rel)
+        body = test_body(src, handler)
+        calls = bool(body) and (caller + "(" in body)
+        unfold_caller = lean_unfolds(caller)
+        unfold_callee = lean_unfolds(callee)
+        if not body:
+            status = "UNPAID missing handler"
+            unpaid += 1
+        elif not calls:
+            status = "UNPAID handler does not call " + caller
+            unpaid += 1
+        elif not (unfold_caller and unfold_callee):
+            status = "UNPAID no dual-unfold"
+            unpaid += 1
+        else:
+            status = "lean_unfold_caller_and_callee"
+        print(
+            f"  {label} handler={handler} caller={caller} callee={callee} "
+            f"calls={str(calls).lower()} "
+            f"unfold_caller={str(unfold_caller).lower()} "
+            f"unfold_callee={str(unfold_callee).lower()} {status}"
+        )
+    print(f"  unpaid_concurrency={unpaid}/{len(CONCURRENCY)}")
 
 
 def sa_unpaid_board(fate: list) -> None:

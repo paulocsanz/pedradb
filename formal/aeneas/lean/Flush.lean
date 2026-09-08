@@ -92,3 +92,40 @@ theorem occ_snap_uses_published_as_is_dente :
     occ_snap_uses_published_as_is true = ok false := by
   unfold occ_snap_uses_published_as_is
   rfl
+
+/-- Write-lock client: no read lock ⇒ published snap. Unfolds the plan
+    rustc links (`occ_snap_lock_order`) and the inflight callee. -/
+theorem occ_snap_lock_order_write_held :
+    occ_snap_lock_order false false = ok true ∧
+      occ_snap_uses_published false = ok false := by
+  constructor
+  · unfold occ_snap_lock_order
+    unfold occ_snap_uses_published
+    rfl
+  · unfold occ_snap_uses_published; rfl
+
+/-- Other branch: read lock held and idle pipeline uses last_seq. -/
+theorem occ_snap_lock_order_idle_read :
+    occ_snap_lock_order true false = ok false ∧
+      occ_snap_uses_published false = ok false := by
+  constructor
+  · unfold occ_snap_lock_order
+    unfold occ_snap_uses_published
+    rfl
+  · unfold occ_snap_uses_published; rfl
+
+/-- Read lock held but a commit owns the WAL ⇒ published. -/
+theorem occ_snap_lock_order_inflight_read :
+    occ_snap_lock_order true true = ok true ∧
+      occ_snap_uses_published true = ok true := by
+  constructor
+  · unfold occ_snap_lock_order
+    unfold occ_snap_uses_published
+    rfl
+  · unfold occ_snap_uses_published; rfl
+
+/-- AS-IS dente: last_seq even when the write lock is held. -/
+theorem occ_snap_lock_order_as_is_dente :
+    occ_snap_lock_order_as_is false true = ok false := by
+  unfold occ_snap_lock_order_as_is
+  rfl

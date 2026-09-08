@@ -1828,13 +1828,20 @@ impl<E: Env> ConcurrentDb<E> {
     pub(crate) fn occ_snapshot(&self) -> SequenceNumber {
         match self.inner.try_read() {
             Some(g) => {
-                if crate::flush_kernel::occ_snap_uses_published(g.commit_inflight() > 0) {
+                if crate::flush_kernel::occ_snap_lock_order(true, g.commit_inflight() > 0) {
                     self.published_seq.load(Ordering::Acquire)
                 } else {
                     g.last_sequence()
                 }
             }
-            None => self.published_seq.load(Ordering::Acquire),
+            None => {
+                // Writer holds the lock: the kernel says published.
+                assert!(
+                    crate::flush_kernel::occ_snap_lock_order(false, self.commit_inflight() > 0),
+                    "write lock held ⇒ published OCC snap"
+                );
+                self.published_seq.load(Ordering::Acquire)
+            }
         }
     }
 

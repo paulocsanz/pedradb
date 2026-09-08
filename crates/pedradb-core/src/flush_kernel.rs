@@ -83,6 +83,23 @@ macro_rules! occ_snap_uses_published_as_is_body {
     }};
 }
 
+/// Write-lock client: published snap if the read lock is not held (writer
+/// exclusive) **or** a commit owns the WAL. Always calls the inflight
+/// callee so Lean can unfold both.
+macro_rules! occ_snap_lock_order_body {
+    ($read_held:expr, $inflight:expr) => {{
+        let inflight_pub = occ_snap_uses_published($inflight);
+        !$read_held || inflight_pub
+    }};
+}
+
+macro_rules! occ_snap_lock_order_as_is_body {
+    ($read_held:expr, $inflight:expr) => {{
+        let _ = ($read_held, $inflight);
+        false
+    }};
+}
+
 macro_rules! skip_auto_flush_body {
     ($global_under:expr, $cf_under:expr) => {
         $global_under && $cf_under
@@ -186,6 +203,23 @@ pub fn occ_snap_uses_published(commit_inflight: bool) -> bool {
 #[must_use]
 pub fn occ_snap_uses_published_as_is(_commit_inflight: bool) -> bool {
     occ_snap_uses_published_as_is_body!(_commit_inflight)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// Write-lock client protocol: OCC snap uses published seq when the read
+/// lock is not held (writer exclusive) **or** `commit_inflight`.
+/// `ConcurrentDb::occ_snapshot` matches this — not an inline nest of
+/// `try_read` / inflight. Calls [`occ_snap_uses_published`].
+#[must_use]
+pub fn occ_snap_lock_order(read_held: bool, inflight: bool) -> bool {
+    occ_snap_lock_order_body!(read_held, inflight)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: last_sequence even when the write lock is held (TOCTOU).
+#[must_use]
+pub fn occ_snap_lock_order_as_is(_read_held: bool, _inflight: bool) -> bool {
+    occ_snap_lock_order_as_is_body!(_read_held, _inflight)
 }
 
 #[cfg(not(verus_keep_ghost))]
@@ -330,6 +364,32 @@ pub fn occ_snap_uses_published_as_is(commit_inflight: bool) -> (d: bool)
         d == false,
 {
     occ_snap_uses_published_as_is_body!(commit_inflight)
+}
+
+pub open spec fn occ_snap_lock_order_spec(read_held: bool, inflight: bool) -> bool {
+    !read_held || occ_snap_uses_published_spec(inflight)
+}
+
+pub fn occ_snap_lock_order(read_held: bool, inflight: bool) -> (d: bool)
+    ensures
+        d == occ_snap_lock_order_spec(read_held, inflight),
+        !read_held ==> d,
+        read_held ==> d == occ_snap_uses_published_spec(inflight),
+{
+    occ_snap_lock_order_body!(read_held, inflight)
+}
+
+pub fn occ_snap_lock_order_as_is(_read_held: bool, _inflight: bool) -> (d: bool)
+    ensures
+        d == false,
+{
+    occ_snap_lock_order_as_is_body!(_read_held, _inflight)
+}
+
+proof fn lemma_write_held_snap_published(inflight: bool)
+    ensures
+        occ_snap_lock_order_spec(false, inflight),
+{
 }
 
 pub open spec fn may_publish_manifest_spec(sst_durable: bool) -> bool {
@@ -652,6 +712,32 @@ mod tests {
                 .expect("writes_idle_for")
                 .contains("occ_snap_uses_published("),
             "writes_idle_for must not treat inflight as idle"
+        );
+    }
+
+    #[test]
+    fn occ_snap_lock_order_on_write_held_is_not_ok() {
+        assert!(
+            occ_snap_lock_order(false, false),
+            "write lock held, idle pipeline ⇒ published"
+        );
+        assert!(occ_snap_lock_order(false, true));
+        assert!(occ_snap_lock_order(true, true));
+        assert!(
+            !occ_snap_lock_order(true, false),
+            "read lock held, idle ⇒ last_seq"
+        );
+        assert!(
+            !occ_snap_lock_order_as_is(false, true),
+            "AS-IS dente: last_seq while write lock held"
+        );
+        let snap = include_str!("concurrent.rs")
+            .split("fn occ_snapshot(")
+            .nth(1)
+            .expect("occ_snapshot");
+        assert!(
+            snap.contains("occ_snap_lock_order("),
+            "occ_snapshot must match occ_snap_lock_order"
         );
     }
 

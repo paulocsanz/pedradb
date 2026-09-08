@@ -291,6 +291,7 @@ the composition files and fails on a missing file or the substring `sorry`.
 | ConcurrentDb `finish_group_off_lock` | `rwlock_client_may_mutate` (Verus SA on production file) | `rwlock_client_may_mutate_needs_write` | `rwlock_client_may_mutate_as_is_dente` |
 | ConcurrentDb off-lock fd | `may_publish_group` ∧ Flush `wal_rotate_decision` (Verus SA on production file) | `concurrent_publish_and_inflight_keep_wal` | `concurrent_publish_ok_and_idle_rotates` / `concurrent_as_is_publish_lie_inflight_still_keeps` |
 | ConcurrentDb `occ_snapshot` | `occ_snap_uses_published` ∧ `may_publish_group` | `occ_snap_published_and_no_publish_on_wal_fail` | `occ_snap_uses_published_as_is_dente` |
+| ConcurrentDb `occ_snapshot` | `occ_snap_lock_order` ∧ `occ_snap_uses_published` (Verus SA on production file) | `occ_snap_lock_order_write_held` | `occ_snap_lock_order_as_is_dente` |
 | ConcurrentDb lock-order | Flush `wal_rotate_decision` (`commit_inflight`) | `wal_rotate_commit_inflight_keeps` | `wal_rotate_idle_rotates` |
 | TransactionDB 2PL | `wait_for_deadlock` | `wait_for_deadlock_is_loop` | `wait_for_deadlock_as_is_dente` / `wait_for_deadlock_loop_vs_as_is` |
 | ConcurrentDb scheduler residual | `lock_interleavings_admitted` (Verus SA on production file) | `lock_interleavings_not_a_theorem` | `lock_interleavings_as_is_dente` |
