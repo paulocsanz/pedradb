@@ -841,7 +841,9 @@ impl KeyCodec {
 
     /// Default-CF raw: copy user key; otherwise `cf\\0key` via the pool.
     fn encode_owned(&self, cf: &str, key: &[u8], pool: &mut bytes::BytesMut) -> Bytes {
-        if cf_encode_effective(cf, self.default_raw).is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(
+            cf_encode_effective(cf, self.default_raw).len() as u64,
+        ) {
             Bytes::copy_from_slice(key)
         } else {
             self.encode_pooled(cf, key, pool)
