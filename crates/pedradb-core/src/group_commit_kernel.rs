@@ -72,6 +72,19 @@ macro_rules! occ_conflict_as_is_serialized_body {
     };
 }
 
+macro_rules! may_publish_group_body {
+    ($wal_io_ok:expr) => {
+        $wal_io_ok
+    };
+}
+
+macro_rules! may_publish_group_as_is_body {
+    ($wal_io_ok:expr) => {{
+        let _ = $wal_io_ok;
+        true
+    }};
+}
+
 /// First-committer-wins predicate (OCC): a transaction that read
 /// snapshot `snap` against current `last_seq` conflicts iff the window
 /// `(snap, last_seq]` is non-empty **and** some key it touched was
@@ -278,9 +291,10 @@ pub fn default_pct_depth_raised_as_is() -> bool {
 
 /// Visibility publish after group (or lone) WAL I/O (RFC-0071 / R-group-glue).
 /// The group becomes visible only when off-lock / lone WAL I/O succeeded.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn may_publish_group(wal_io_ok: bool) -> bool {
-    wal_io_ok
+    may_publish_group_body!(wal_io_ok)
 }
 
 /// Data-race token (CapybaraKV RW-lock *client*, not `parking_lot`):
@@ -300,9 +314,10 @@ pub fn rwlock_client_may_mutate_as_is(_holding_write: bool) -> bool {
 }
 
 /// AS-IS: publish even if WAL I/O failed (the 0071 hole — Ok with a lie).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn may_publish_group_as_is(_wal_io_ok: bool) -> bool {
-    true
+    may_publish_group_as_is_body!(_wal_io_ok)
 }
 
 /// RFC-0071 P2.2: lock / OS-scheduler interleavings around the publish
@@ -394,6 +409,24 @@ pub fn rwlock_client_may_mutate_as_is(_holding_write: bool) -> (ok: bool)
         ok == true,
 {
     rwlock_client_may_mutate_as_is_body!(_holding_write)
+}
+
+pub open spec fn may_publish_group_spec(wal_io_ok: bool) -> bool {
+    wal_io_ok
+}
+
+pub fn may_publish_group(wal_io_ok: bool) -> (ok: bool)
+    ensures
+        ok == may_publish_group_spec(wal_io_ok),
+{
+    may_publish_group_body!(wal_io_ok)
+}
+
+pub fn may_publish_group_as_is(_wal_io_ok: bool) -> (ok: bool)
+    ensures
+        ok == true,
+{
+    may_publish_group_as_is_body!(_wal_io_ok)
 }
 
 #[derive(PartialEq, Eq, Copy, Clone)]
