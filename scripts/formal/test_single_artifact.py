@@ -1230,6 +1230,22 @@ def main() -> int:
         print("FAIL joint_target twin≠kernel did not fail")
         return 1
     print("ok mutant joint_target twin≠kernel named")
+    jat_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in jat_mutant["pairs"]:
+        if pair.get("id") == "joint_add_target":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/membership_joint.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing joint_add_target")
+        return 1
+    hits = [m for m in _sa_fails(jat_mutant) if m.startswith("joint_add_target:")]
+    if not hits:
+        print("FAIL joint_add_target twin≠kernel did not fail")
+        return 1
+    print("ok mutant joint_add_target twin≠kernel named")
     # Drive the same rule through check_twins (may also report unrelated
     # dirty-tree twin drift; we only require the SA id).
     try:

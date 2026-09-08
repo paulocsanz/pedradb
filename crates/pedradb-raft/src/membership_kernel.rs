@@ -2033,4 +2033,14 @@ mod tests {
         assert!(!joint_target_counts(false, true));
         assert!(joint_target_counts_as_is(false, true));
     }
+
+    #[test]
+    fn joint_add_target_counts_on_live_not_in_nodes_is_not_ok() {
+        assert!(joint_add_target_counts(false));
+        assert!(
+            !joint_add_target_counts_as_is(false),
+            "AS-IS dente: require joiner in local nodes"
+        );
+        assert!(joint_add_target_counts(true));
+    }
 }
