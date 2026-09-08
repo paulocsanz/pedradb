@@ -376,11 +376,14 @@ fn async_catchup_spins(batch_len: usize, active: usize) -> u32 {
 }
 
 /// RFC-0180: a 1-member async group is `commit_async_one` (no
-/// `GroupInFlight` / dual WAL lock). overwrite_mc4 avg_group ≈1.7 paid
-/// the group envelope on the majority 1-op batches.
+/// `GroupInFlight` / dual WAL lock). 1c stays here. At 2–8 writers
+/// (diagnose `write --clients 4` `cut=grouping`) a 1-member batch still
+/// goes through `group_start` so absorb + off-lock WAL run (P0.41).
+/// P0.13 used sticky `recently_multi` and poisoned 1c; this uses live
+/// `active`.
 #[must_use]
-fn async_one_op_fast_path(any_sync: bool, members: usize, ops: usize) -> bool {
-    !any_sync && members == 1 && ops == 1
+fn async_one_op_fast_path(any_sync: bool, members: usize, ops: usize, active: usize) -> bool {
+    !any_sync && members == 1 && ops == 1 && active < 2
 }
 
 /// RFC-0180 P0.30: every member is a 1-op async put/delete. Each is
@@ -1230,7 +1233,7 @@ impl WriteGroup {
             let any_sync = batch.iter().any(|p| p.do_sync);
             let nops: usize = batch.iter().map(|p| p.ops.len()).sum();
             // P0.30 N×1-op loop was p37 p95 75 µs (was 26). 1-member only.
-            if async_one_op_fast_path(any_sync, batch.len(), nops)
+            if async_one_op_fast_path(any_sync, batch.len(), nops, active)
                 && batch[0].occ.is_none()
                 && batch[0].occ_err.is_none()
             {
@@ -6890,10 +6893,15 @@ mod tests {
         assert_eq!(async_catchup_spins(2, 16), 0);
         assert_eq!(async_catchup_spins(2, 50), 0);
         assert_eq!(async_catchup_spins(1, 50), 1024);
-        assert!(async_one_op_fast_path(false, 1, 1));
-        assert!(!async_one_op_fast_path(true, 1, 1));
-        assert!(!async_one_op_fast_path(false, 2, 2));
-        assert!(!async_one_op_fast_path(false, 1, 16));
+        assert!(async_one_op_fast_path(false, 1, 1, 1));
+        assert!(!async_one_op_fast_path(true, 1, 1, 1));
+        assert!(!async_one_op_fast_path(false, 2, 2, 1));
+        assert!(!async_one_op_fast_path(false, 1, 16, 1));
+        // RFC-0180 P0.41: MC 1-member batches stay on group_start.
+        assert!(!async_one_op_fast_path(false, 1, 1, 2));
+        assert!(!async_one_op_fast_path(false, 1, 1, 4));
+        assert!(!async_one_op_fast_path(false, 1, 1, 8));
+        assert!(async_one_op_fast_path(false, 1, 1, 1));
         let one = PendingWrite {
             ops: vec![BatchOp::put(b"k", b"v")],
             do_sync: false,

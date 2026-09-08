@@ -141,6 +141,10 @@ medida no mesmo harness isolado.
       (`finish_group_off_lock`; `group_commit` via `group_finish`).
       G1 continua encode-under-lock then `sync_data`. Teste
       `rfc0180_async_group_wal_one_hop_recovers`. status: `done`
+- [x] **P0.41** 1-op fast path só com `active < 2` (1c). A 2–8
+      writers um batch de 1 membro ainda faz `group_start` (absorb +
+      WAL off-lock). Não é P0.13 (`recently_multi` sticky). Teste
+      `rfc0180_leader_linger_and_async_catchup`. status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
 
@@ -196,6 +200,7 @@ medida no mesmo harness isolado.
 | P0.38 | p0 | flush size check every async Ok | done | no 31-op overshoot | 2026-09-07 |
 | P0.39 | p0 | catch-up to 4 when 2–8 writers | done | grouping lever; n≥16 still skip at 2 | 2026-09-08 |
 | P0.40 | p0 | async group WAL one hop off lock | done | ConcurrentDb finish_group_off_lock encode_and_write_op_batches | 2026-09-08 |
+| P0.41 | p0 | 1-op fast path only when active<2 | done | MC 1-member stays on group_start; 1c unchanged | 2026-09-08 |
 | P1.1 | p1 | 3-run caixa | todo | — | 2026-09-07 |
 | P2.1 | p2 | 3/3 quiet ≥1× | todo | 0182 P1.1 | 2026-09-07 |
 | P2.2 | p2 | leftover hang | done | 0181 P0.3 steal | 2026-09-07 |
