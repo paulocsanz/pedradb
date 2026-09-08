@@ -7190,7 +7190,7 @@ impl<E: Env> StoreCluster<E> {
     fn install_applied_membership(&mut self, mut new: Vec<u64>) -> Result<()> {
         new.sort_unstable();
         new.dedup();
-        if new.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(new.len() as u64) {
             return Err(StoreError::Msg(
                 "membership joint: refusing empty voter set".into(),
             ));
