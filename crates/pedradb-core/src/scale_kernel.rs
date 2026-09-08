@@ -109,6 +109,25 @@ pub fn predict_get_ns(
     u64::try_from(taxed).unwrap_or(u64::MAX)
 }
 
+/// Best-path clock: L0-best probes, 100% hot, η = 0. `scale_forecast` matches
+/// this for `best_ns`.
+#[must_use]
+pub fn best_get_ns(levels: u64) -> u64 {
+    predict_get_ns(
+        point_get_probes(levels, SCALE_L0_BEST),
+        SCALE_TAU_RAM_NS,
+        SCALE_TAU_DISK_NS,
+        SCALE_BPS,
+        0,
+    )
+}
+
+/// AS-IS: walk every live file as a cold disk probe (η ignored).
+#[must_use]
+pub fn best_get_ns_as_is(n_files: u64, _levels: u64) -> u64 {
+    predict_get_ns_as_is(n_files, SCALE_TAU_RAM_NS, SCALE_TAU_DISK_NS, 0, 0)
+}
+
 /// Happy-path clock: L0-best probes, residual hot fraction, η = [`SCALE_HAPPY_NOISY_BPS`].
 /// `scale_forecast` matches this for `happy_ns`.
 #[must_use]
@@ -227,7 +246,7 @@ pub fn scale_forecast(keys: u64, ram_bytes: u64) -> ScaleForecast {
     let warm_cap = warm_cap_bytes(ram_bytes);
     let hot = store_bytes <= warm_cap;
     let happy_hot = happy_hot_bps(store_bytes, ram_bytes);
-    let best_ns = predict_get_ns(p_best, SCALE_TAU_RAM_NS, SCALE_TAU_DISK_NS, SCALE_BPS, 0);
+    let best_ns = best_get_ns(levels);
     let happy_ns = happy_get_ns(levels, store_bytes, ram_bytes);
     let worst_ns = worst_get_ns(levels, SCALE_L0_WORST);
     ScaleForecast {
@@ -328,6 +347,32 @@ mod tests {
         assert_eq!(l10, 5);
         assert_eq!(point_get_probes(u64::from(l1), 1), 5);
         assert_eq!(point_get_probes(u64::from(l10), 1), 6);
+    }
+
+    #[test]
+    fn best_get_ns_on_l0_best_is_not_ok() {
+        assert_eq!(
+            best_get_ns(4),
+            predict_get_ns(
+                point_get_probes(4, SCALE_L0_BEST),
+                SCALE_TAU_RAM_NS,
+                SCALE_TAU_DISK_NS,
+                SCALE_BPS,
+                0
+            )
+        );
+        assert!(
+            best_get_ns_as_is(913, 4) > best_get_ns(4),
+            "as-is walk is slower than the best clock"
+        );
+        let forecast = include_str!("scale_kernel.rs")
+            .split("pub fn scale_forecast(")
+            .nth(1)
+            .expect("scale_forecast");
+        assert!(
+            forecast.contains("best_get_ns("),
+            "scale_forecast must match best_get_ns"
+        );
     }
 
     #[test]
