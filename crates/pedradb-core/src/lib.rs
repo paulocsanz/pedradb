@@ -70,8 +70,9 @@ pub use batch::{
 pub use bench_gap_kernel::{
     balance_admits, balance_admits_as_is, classify_get, classify_get_as_is, classify_probes,
     classify_probes_as_is, diagnose_write, dominant_phase, dominant_phase_as_is,
-    predict_get_bottleneck, predict_probes_bottleneck, BalanceCell, GetClass, WriteDiagnosis,
-    WriteGapInput, WriteLever, WritePhase, WritePhases, BALANCE_SHAPES,
+    predict_get_bottleneck, predict_probes_bottleneck, scale_bottleneck, BalanceCell, GetClass,
+    ScaleBottleneck, WriteDiagnosis, WriteGapInput, WriteLever, WritePhase, WritePhases,
+    BALANCE_SHAPES,
 };
 pub use bloom::{bloom_header_ok, bloom_header_ok_as_is, BloomFilter, DEFAULT_BITS_PER_KEY, MAX_K};
 pub use cache::{BlockCache, SstPayloadPool, TableCache};
