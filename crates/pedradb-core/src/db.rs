@@ -2697,7 +2697,7 @@ impl<E: Env> Db<E> {
     /// L0 files tagged with `cf` (empty physical set = global L0).
     #[must_use]
     pub fn level_file_count_cf(&self, cf: &str) -> usize {
-        if self.physical_cfs.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.physical_cfs.len() as u64) {
             return self.level_file_count(0);
         }
         self.ssts
