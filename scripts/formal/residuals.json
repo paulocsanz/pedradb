@@ -77,7 +77,7 @@
   ],
   "kernel_files": 58,
   "kernel_loc": 20655,
-  "handler_loc": 107185,
+  "handler_loc": 107359,
   "db_rs_extracted": false,
   "proof_depth": {
    "extract": 271,
@@ -133,7 +133,7 @@
     "tx_state_of"
    ]
   },
-  "single_artifact": 49,
+  "single_artifact": 50,
   "data_fate": 125
  },
  "residuals": [

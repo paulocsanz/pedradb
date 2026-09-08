@@ -2,7 +2,8 @@
 # Machine-check visible_at + F30 range tombstone (RFC-0150 P1).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-core/verus/visible_at.rs"
+# RFC-0171 P0.3 / RFC-0174: prove the file rustc links (pair visible_at).
+SRC="$ROOT/crates/pedradb-core/src/merge.rs"
 if [[ -x "${VERUS:-}" ]]; then
   :
 elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then

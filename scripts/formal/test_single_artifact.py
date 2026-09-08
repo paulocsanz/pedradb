@@ -590,6 +590,22 @@ def main() -> int:
         print("FAIL write_record_count twin≠kernel did not fail")
         return 1
     print("ok mutant write_record_count twin≠kernel named")
+    vis_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in vis_mutant["pairs"]:
+        if pair.get("id") == "visible_at":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-core/verus/visible_at.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing visible_at")
+        return 1
+    hits = [m for m in _sa_fails(vis_mutant) if m.startswith("visible_at:")]
+    if not hits:
+        print("FAIL visible_at twin≠kernel did not fail")
+        return 1
+    print("ok mutant visible_at twin≠kernel named")
     # Drive the same rule through check_twins (may also report unrelated
     # dirty-tree twin drift; we only require the SA id).
     try:
