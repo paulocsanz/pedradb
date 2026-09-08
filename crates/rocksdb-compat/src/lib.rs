@@ -3785,7 +3785,7 @@ impl<E: PedraEnv> DB<E> {
         I: IntoIterator<Item = (&'a ColumnFamily, K)>,
     {
         let pairs: Vec<(&'a ColumnFamily, K)> = keys.into_iter().collect();
-        if pairs.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(pairs.len() as u64) {
             return Vec::new();
         }
         let encoded: Vec<Vec<u8>> = pairs
