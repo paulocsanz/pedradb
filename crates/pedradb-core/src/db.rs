@@ -11316,7 +11316,7 @@ fn finish_merged_chunk_on(
     let final_path = dir.join(format!("{file_num:06}.sst"));
     let tmp_path = dir.join(format!("{file_num:06}.sst.tmp"));
     env.rename(&tmp_path, &final_path)?;
-    if do_sync_dir {
+    if crate::write_admission_kernel::dir_sync_required(do_sync_dir) {
         let _ = env.sync_dir(dir);
     }
     // The writer's in-place table is the truth for the bytes just written;
