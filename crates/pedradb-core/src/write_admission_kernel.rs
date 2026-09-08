@@ -857,6 +857,19 @@ mod tests {
             ckpt.contains("fence_on_sync_fail("),
             "write_checkpoint_meta must match fence_on_sync_fail"
         );
+        let close = named_fn_src(include_str!("db.rs"), "close").expect("Db::close");
+        assert!(
+            close.contains("wal_commit_plan("),
+            "Db::close must match the plan fn"
+        );
+        assert!(
+            close.contains("fence_on_sync_fail("),
+            "Db::close must match fence_on_sync_fail"
+        );
+        assert!(
+            close.contains("vlog_prepare_wal("),
+            "Db::close must prepare vlog through the plan helper"
+        );
     }
 
     #[test]

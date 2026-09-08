@@ -8648,10 +8648,23 @@ impl<E: Env> Db<E> {
     pub fn close(mut self) -> Result<()> {
         // RFC-0031: close is a persist point for the CHANGELOG cache.
         self.persist_changelog_best_effort();
-        self.vlog_sync_pending()?;
+        self.vlog_prepare_wal(true)?;
         self.release_lock()?;
         // Flush in place — `Db` implements `Drop` (Env unlock), so we cannot move `wal`.
-        self.wal.lock().flush()
+        // Close is not put-Ok: AppendApplyOk ⇒ write the pending frame, no fdatasync.
+        match crate::write_admission_kernel::wal_commit_plan(false, false) {
+            crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => {
+                self.wal.lock().flush()
+            }
+            crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+            | crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                assert!(
+                    !crate::write_admission_kernel::fence_on_sync_fail(false, false),
+                    "close is not a required-sync Ok"
+                );
+                self.wal.lock().sync_data()
+            }
+        }
     }
 
     /// Lookup visible version at `snapshot` across mem + imm + SSTs.
