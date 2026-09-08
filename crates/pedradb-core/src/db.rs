@@ -8812,18 +8812,24 @@ impl<E: Env> Db<E> {
         self.vlog_prepare_wal(do_sync)?;
         let n = self.wal.lock().append_write_ops(&records)?;
         self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
-        if crate::write_admission_kernel::wal_sync_required(
-            durability.sync.is_some(),
-            durability.sync.unwrap_or(false),
-            self.sync,
-        ) {
-            let sync_err = self.wal.lock().sync_data().err();
-            if crate::write_admission_kernel::fence_on_sync_fail(true, sync_err.is_some()) {
-                let e = sync_err.expect("fence_on_sync_fail ⇒ Some");
+        let planned = crate::write_admission_kernel::wal_commit_plan(do_sync, false);
+        let sync_err = match planned {
+            crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => None,
+            crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+            | crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                self.wal.lock().sync_data().err()
+            }
+        };
+        match crate::write_admission_kernel::wal_commit_plan(do_sync, sync_err.is_some()) {
+            crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                let e = sync_err.expect("AppendSyncFence ⇒ Some");
                 self.durability_fenced = true;
                 return Err(e);
             }
-            self.note_wal_sync();
+            crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk => {
+                self.note_wal_sync();
+            }
+            crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => {}
         }
         // In-memory change feed after durable WAL. CHANGELOG on disk is a cache:
         // never gate commit success on a second fsync/rename (RFC-0019) — reopen

@@ -76,15 +76,15 @@
    "crates/pedradb-world/src/world_kernel.rs"
   ],
   "kernel_files": 58,
-  "kernel_loc": 23045,
-  "handler_loc": 107728,
+  "kernel_loc": 23171,
+  "handler_loc": 107734,
   "db_rs_extracted": false,
   "proof_depth": {
-   "extract": 271,
+   "extract": 272,
    "close": 0,
    "atom": 0,
    "model": 16,
-   "updated": "2026-09-07"
+   "updated": "2026-09-08"
   },
   "kernel_fn_allowlist": {
    "crates/pedradb-core/src/env_crash_kernel.rs": [
@@ -133,8 +133,8 @@
     "tx_state_of"
    ]
   },
-  "single_artifact": 97,
-  "data_fate": 125
+  "single_artifact": 98,
+  "data_fate": 126
  },
  "residuals": [
   {

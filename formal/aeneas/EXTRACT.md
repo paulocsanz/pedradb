@@ -92,6 +92,9 @@
   - `write_admission_idle_as_is_dente` (stalls ignored → `ok true`)
   - `write_admit_mem_over_stalls` (armed mem over → `StallMem`)
   - `write_admit_as_is_dente` (mem over still `Ok`)
+  - `wal_commit_plan_need_sync_ok` (Sync before Apply/Ok)
+  - `wal_commit_plan_fence_via_fence_on_sync_fail` (plan + `fence_on_sync_fail`)
+  - `wal_commit_plan_as_is_dente` (Apply/Ok after failed sync)
 
 ## Close-kernel sweep (2026-09-06)
 

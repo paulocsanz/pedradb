@@ -67,6 +67,33 @@ macro_rules! fence_on_sync_fail_body {
     };
 }
 
+/// Order of put-Ok after WAL append: Sync (if required) before Apply/Ok.
+/// Fence = required sync failed — no apply, no Ok.
+macro_rules! wal_commit_plan_body {
+    ($need_sync:expr, $sync_failed:expr) => {
+        if $need_sync {
+            if $sync_failed {
+                WalCommitPlan::AppendSyncFence
+            } else {
+                WalCommitPlan::AppendSyncApplyOk
+            }
+        } else {
+            WalCommitPlan::AppendApplyOk
+        }
+    };
+}
+
+macro_rules! wal_commit_plan_as_is_body {
+    ($need_sync:expr, $sync_failed:expr) => {{
+        let _ = $sync_failed;
+        if $need_sync {
+            WalCommitPlan::AppendSyncApplyOk
+        } else {
+            WalCommitPlan::AppendApplyOk
+        }
+    }};
+}
+
 macro_rules! dir_sync_required_body {
     ($sync:expr) => {
         $sync
@@ -98,6 +125,18 @@ pub enum WriteAdmit {
     StallMem,
     /// L0 file count still at/above the armed L0 stall limit.
     StallL0,
+}
+
+/// Put-Ok script after WAL append (RFC-0171 trampoline order).
+#[cfg(not(verus_keep_ghost))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WalCommitPlan {
+    /// No barrier: apply mem, then Ok.
+    AppendApplyOk,
+    /// Barrier Ok: apply mem, then Ok (Sync before Apply).
+    AppendSyncApplyOk,
+    /// Required barrier failed: fence. No apply, no Ok.
+    AppendSyncFence,
 }
 
 #[cfg(not(verus_keep_ghost))]
@@ -199,6 +238,21 @@ pub fn fence_on_sync_fail_as_is(_sync_required: bool, _sync_failed: bool) -> boo
 }
 
 #[cfg(not(verus_keep_ghost))]
+/// After append: whether to sync, apply, or fence. Sync is in the variant
+/// name before Apply; Fence has no Apply/Ok.
+#[must_use]
+pub fn wal_commit_plan(need_sync: bool, sync_failed: bool) -> WalCommitPlan {
+    wal_commit_plan_body!(need_sync, sync_failed)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: Apply/Ok even when a required sync failed.
+#[must_use]
+pub fn wal_commit_plan_as_is(need_sync: bool, sync_failed: bool) -> WalCommitPlan {
+    wal_commit_plan_as_is_body!(need_sync, sync_failed)
+}
+
+#[cfg(not(verus_keep_ghost))]
 /// Truncated(0) on a tiny WAL is empty-log, not bitrot of the first record.
 #[must_use]
 pub fn torn_head_is_empty_log(len: u64, tiny_max: u64) -> bool {
@@ -281,6 +335,13 @@ pub enum WriteAdmit {
     Ok,
     StallMem,
     StallL0,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum WalCommitPlan {
+    AppendApplyOk,
+    AppendSyncApplyOk,
+    AppendSyncFence,
 }
 
 pub open spec fn write_admission_idle_spec(mem: bool, pressure: bool, stall: bool) -> bool {
@@ -440,6 +501,44 @@ pub fn fence_on_sync_fail_as_is(sync_required: bool, sync_failed: bool) -> (d: b
 {
     let _ = (sync_required, sync_failed);
     false
+}
+
+pub open spec fn wal_commit_plan_spec(need_sync: bool, sync_failed: bool) -> WalCommitPlan {
+    if need_sync {
+        if sync_failed {
+            WalCommitPlan::AppendSyncFence
+        } else {
+            WalCommitPlan::AppendSyncApplyOk
+        }
+    } else {
+        WalCommitPlan::AppendApplyOk
+    }
+}
+
+pub fn wal_commit_plan(need_sync: bool, sync_failed: bool) -> (d: WalCommitPlan)
+    ensures
+        d == wal_commit_plan_spec(need_sync, sync_failed),
+        need_sync && !sync_failed ==> d == WalCommitPlan::AppendSyncApplyOk,
+        need_sync && sync_failed ==> d == WalCommitPlan::AppendSyncFence,
+        !need_sync ==> d == WalCommitPlan::AppendApplyOk,
+{
+    wal_commit_plan_body!(need_sync, sync_failed)
+}
+
+pub open spec fn wal_commit_plan_as_is_spec(need_sync: bool, _sync_failed: bool) -> WalCommitPlan {
+    if need_sync {
+        WalCommitPlan::AppendSyncApplyOk
+    } else {
+        WalCommitPlan::AppendApplyOk
+    }
+}
+
+pub fn wal_commit_plan_as_is(need_sync: bool, sync_failed: bool) -> (d: WalCommitPlan)
+    ensures
+        d == wal_commit_plan_as_is_spec(need_sync, sync_failed),
+        need_sync ==> d == WalCommitPlan::AppendSyncApplyOk,
+{
+    wal_commit_plan_as_is_body!(need_sync, sync_failed)
 }
 
 pub open spec fn torn_head_is_empty_log_spec(len: u64, tiny_max: u64) -> bool {
@@ -615,6 +714,32 @@ mod tests {
         assert!(fence_on_sync_fail(true, true));
         assert!(!fence_on_sync_fail_as_is(true, true));
         assert!(!fence_on_sync_fail(true, false));
+    }
+
+    #[test]
+    fn wal_commit_plan_on_live_sync_fail_is_not_ok() {
+        assert_eq!(
+            wal_commit_plan(true, false),
+            WalCommitPlan::AppendSyncApplyOk,
+            "need_sync ⇒ Sync before Apply/Ok"
+        );
+        assert_eq!(
+            wal_commit_plan(true, true),
+            WalCommitPlan::AppendSyncFence,
+            "required sync failed ⇒ no apply, no Ok"
+        );
+        assert_eq!(wal_commit_plan(false, true), WalCommitPlan::AppendApplyOk);
+        assert_eq!(
+            wal_commit_plan_as_is(true, true),
+            WalCommitPlan::AppendSyncApplyOk,
+            "AS-IS dente: Apply/Ok after failed sync"
+        );
+        let commit = named_fn_src(include_str!("db.rs"), "commit_ops_with")
+            .expect("commit_ops_with");
+        assert!(
+            commit.contains("wal_commit_plan("),
+            "commit_ops_with must match the plan fn"
+        );
     }
 
     #[test]
@@ -800,6 +925,7 @@ mod tests {
             || cond.contains("seq_exhausted(")
             || cond.contains("batch_is_empty(")
             || cond.contains("fence_on_sync_fail(")
+            || cond.contains("wal_commit_plan(")
             || cond.contains("dir_sync_required(")
             || cond.contains("torn_head_is_empty_log(")
             || cond.contains("torn_tail_needs_cut(")

@@ -49,3 +49,23 @@ theorem dir_sync_required_when_sync :
     dir_sync_required true = ok true := by
   unfold dir_sync_required
   rfl
+
+/-- Put-Ok script: required sync that succeeded is Sync before Apply/Ok. -/
+theorem wal_commit_plan_need_sync_ok :
+    wal_commit_plan true false = ok WalCommitPlan.AppendSyncApplyOk := by
+  unfold wal_commit_plan
+  rfl
+
+/-- Required sync failed ⇒ Fence (no Apply/Ok). Unfolds plan and fence. -/
+theorem wal_commit_plan_fence_via_fence_on_sync_fail :
+    fence_on_sync_fail true true = ok true ∧
+      wal_commit_plan true true = ok WalCommitPlan.AppendSyncFence := by
+  constructor
+  · unfold fence_on_sync_fail; rfl
+  · unfold wal_commit_plan; rfl
+
+/-- AS-IS dente: Apply/Ok even after a failed required sync. -/
+theorem wal_commit_plan_as_is_dente :
+    wal_commit_plan_as_is true true = ok WalCommitPlan.AppendSyncApplyOk := by
+  unfold wal_commit_plan_as_is
+  rfl
