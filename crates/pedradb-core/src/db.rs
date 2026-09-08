@@ -6319,7 +6319,7 @@ impl<E: Env> Db<E> {
     /// (input to `flush_kernel::wal_rotate_decision`).
     fn wal_pin_state(&self) -> crate::flush_kernel::WalPinState {
         crate::flush_kernel::WalPinState {
-            mem_empty: self.mem.is_empty(),
+            mem_empty: crate::write_admission_kernel::batch_is_empty(self.mem.len() as u64),
             imm_present: self.imm.is_some(),
             pin_live: self.flush_read_pin.is_some(),
             parked_unflushed: !self.parked_unflushed.is_empty(),
