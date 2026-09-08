@@ -111,7 +111,7 @@ fn main() {
     }
     if base_ok && kept.len() < base_arms {
         println!("proof=reduced");
-    } else if kept.is_empty() {
+    } else if pedradb_core::write_admission_kernel::batch_is_empty(kept.len() as u64) {
         println!("proof=empty_optional");
     } else {
         println!("proof=irreducible_or_stable");
