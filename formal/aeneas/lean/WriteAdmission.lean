@@ -56,13 +56,16 @@ theorem wal_commit_plan_need_sync_ok :
   unfold wal_commit_plan
   rfl
 
-/-- Required sync failed ⇒ Fence (no Apply/Ok). Unfolds plan and fence. -/
+/-- Required sync failed ⇒ Fence (no Apply/Ok). Unfolds the plan rustc
+    links **and** `fence_on_sync_fail` (the callee the plan now calls). -/
 theorem wal_commit_plan_fence_via_fence_on_sync_fail :
     fence_on_sync_fail true true = ok true ∧
       wal_commit_plan true true = ok WalCommitPlan.AppendSyncFence := by
   constructor
   · unfold fence_on_sync_fail; rfl
-  · unfold wal_commit_plan; rfl
+  · unfold wal_commit_plan
+    unfold fence_on_sync_fail
+    rfl
 
 /-- AS-IS dente: Apply/Ok even after a failed required sync. -/
 theorem wal_commit_plan_as_is_dente :

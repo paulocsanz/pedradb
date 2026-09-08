@@ -71,12 +71,10 @@ macro_rules! fence_on_sync_fail_body {
 /// Fence = required sync failed — no apply, no Ok.
 macro_rules! wal_commit_plan_body {
     ($need_sync:expr, $sync_failed:expr) => {
-        if $need_sync {
-            if $sync_failed {
-                WalCommitPlan::AppendSyncFence
-            } else {
-                WalCommitPlan::AppendSyncApplyOk
-            }
+        if fence_on_sync_fail($need_sync, $sync_failed) {
+            WalCommitPlan::AppendSyncFence
+        } else if $need_sync {
+            WalCommitPlan::AppendSyncApplyOk
         } else {
             WalCommitPlan::AppendApplyOk
         }
@@ -504,12 +502,10 @@ pub fn fence_on_sync_fail_as_is(sync_required: bool, sync_failed: bool) -> (d: b
 }
 
 pub open spec fn wal_commit_plan_spec(need_sync: bool, sync_failed: bool) -> WalCommitPlan {
-    if need_sync {
-        if sync_failed {
-            WalCommitPlan::AppendSyncFence
-        } else {
-            WalCommitPlan::AppendSyncApplyOk
-        }
+    if fence_on_sync_fail_spec(need_sync, sync_failed) {
+        WalCommitPlan::AppendSyncFence
+    } else if need_sync {
+        WalCommitPlan::AppendSyncApplyOk
     } else {
         WalCommitPlan::AppendApplyOk
     }
@@ -733,6 +729,10 @@ mod tests {
             wal_commit_plan_as_is(true, true),
             WalCommitPlan::AppendSyncApplyOk,
             "AS-IS dente: Apply/Ok after failed sync"
+        );
+        assert!(
+            include_str!("write_admission_kernel.rs").contains("fence_on_sync_fail($need_sync"),
+            "wal_commit_plan must call fence_on_sync_fail"
         );
         let commit = named_fn_src(include_str!("db.rs"), "commit_ops_with")
             .expect("commit_ops_with");
