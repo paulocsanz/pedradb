@@ -9502,7 +9502,11 @@ impl<E: Env> Db<E> {
             self.observe_bulk_batch(&ops);
             match self.prepare_write_ops(ops) {
                 Ok((write_ops, last_seq)) => {
-                    if do_sync {
+                    if crate::write_admission_kernel::wal_sync_required(
+                        true,
+                        do_sync,
+                        false,
+                    ) {
                         g.any_sync = true;
                     }
                     g.pending.push((i, write_ops, last_seq));
