@@ -271,6 +271,9 @@ pub const COMPARE_SHAPES: &[&str] = &[
     "ycsb_b_unif",
     "ycsb_c_unif",
     "ycsb_c_big",
+    // RFC-0184 P2.36: 95% get mc4 already in BALANCE_SHAPES / run_clients;
+    // compare iterated COMPARE only, so the cell was invisible on the cartaz.
+    "ycsb_b_mc4",
 ];
 
 /// Length of the RFC-0041 official prefix of [`COMPARE_SHAPES`].
@@ -3961,6 +3964,7 @@ mod tests {
             "wbwi_read_your_writes",
             "compaction_filter_drop",
             "ingest_sst",
+            "ycsb_b_mc4",
         ] {
             assert!(
                 COMPARE_SHAPES.contains(&name),

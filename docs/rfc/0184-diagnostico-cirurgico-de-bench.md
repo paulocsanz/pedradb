@@ -186,6 +186,9 @@ a linha quando há phasesΔ. Sem harness novo.
       `happy_is_faster_than_capacity_is_faster_than_cold`,
       `as_is_walk_is_bloom_bound_when_hot`.
       — status: `done`
+- [x] **P2.36** `COMPARE_SHAPES` inclui `ycsb_b_mc4` (já em
+      `BALANCE_SHAPES` / `run_clients`; compare só itera COMPARE).
+      Teste `compare_shapes_keep_official_16_prefix`. — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -235,6 +238,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.33 | p2 | predict bottleneck without a get | done | `predict_get_bottleneck`; diagnose get omits measured-ns | 2026-09-07 |
 | P2.34 | p2 | probe-class + write clock + bpe | done | 1M indistinguishable; 10M walk; `predict_write` | 2026-09-07 |
 | P2.35 | p2 | GetWork × MachineSpec | done | `predict_get_composed`; `--cache happy|capacity|cold` | 2026-09-08 |
+| P2.36 | p2 | COMPARE_SHAPES ycsb_b_mc4 | done | 95% get mc4 visível no compare | 2026-09-08 |
 
 ## Acceptance Criteria
 
