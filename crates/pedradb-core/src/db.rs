@@ -4919,7 +4919,7 @@ impl<E: Env> Db<E> {
     /// `family_of_user_key` ("default" when no physical CFs are
     /// registered) so observation and install agree on family identity.
     pub(crate) fn bulk_family_of_table<'a>(&self, table: &'a SstTable) -> &'a str {
-        if self.physical_cfs.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.physical_cfs.len() as u64) {
             "default"
         } else {
             table.cf()
