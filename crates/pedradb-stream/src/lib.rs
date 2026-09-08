@@ -62,7 +62,7 @@ impl Stream {
     /// # Errors
     /// PedraDB open / meta init.
     pub fn open(path: impl AsRef<std::path::Path>, name: &str) -> Result<Self> {
-        if name.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(name.len() as u64) {
             return Err(StreamError::Msg("bad stream name".into()));
         }
         let db = Db::open_with_env(
