@@ -234,7 +234,7 @@ GLUE_SCRIPTS = [
     (
         "finish_group_off_lock",
         "crates/pedradb-core/src/concurrent.rs",
-        ("write_pending_frame", "sync_data"),
+        ("write_pending_frame", "sync_data", "fence_on_sync_fail"),
         "may_publish_group",
         "wal_commit_plan",
     ),

@@ -754,7 +754,14 @@ mod tests {
             group.contains("fence_on_sync_fail("),
             "wal_sync_group must match fence_on_sync_fail"
         );
-        let off = include_str!("concurrent.rs");
+        let off = include_str!("concurrent.rs")
+            .split("fn finish_group_off_lock")
+            .nth(1)
+            .expect("finish_group_off_lock");
+        assert!(
+            off.contains("fence_on_sync_fail("),
+            "finish_group_off_lock must match fence_on_sync_fail"
+        );
         assert!(
             off.contains("wal_commit_plan("),
             "finish_group_off_lock must match wal_commit_plan"
