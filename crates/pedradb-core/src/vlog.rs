@@ -449,7 +449,7 @@ impl<F: EnvFile> ValueLog<F> {
             Write::write_all(&mut self.file, &self.pending)?;
             self.pending.clear();
         }
-        if !self.pending_large.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(self.pending_large.len() as u64) {
             // One contiguous write — `writev` on an O_APPEND handle was
             // dropping the payload (get read UnexpectedEof). Concat is
             // once per 64 KiB, not once per 16 KiB put.
