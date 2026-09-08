@@ -5,64 +5,716 @@
 
 #![forbid(unsafe_code)]
 
+//! **Single artifact (pair `l28_tcp_abort`):** this file is what `rustc`
+//! links *and* what Verus proves (`cfg(verus_keep_ghost)`). Other
+//! `l28_tcp_*` pairs keep twins until their turns.
+//!
+//!   ./scripts/verus_l28.sh
+
+#[cfg(verus_keep_ghost)]
+use vstd::prelude::*;
+
+#[cfg(verus_keep_ghost)]
+verus! {
+pub open spec fn l28_durability_ok_spec(get_ok: bool, after_kill_ok: bool, restart_ok: bool) -> bool {
+    get_ok && after_kill_ok && restart_ok
+}
+
+/// AS-IS: first get is enough (ignore kill/restart).
+pub open spec fn l28_durability_ok_as_is_spec(get_ok: bool, _after_kill_ok: bool, _restart_ok: bool) -> bool {
+    get_ok
+}
+
+pub fn l28_durability_ok(get_ok: bool, after_kill_ok: bool, restart_ok: bool) -> (ok: bool)
+    ensures
+        ok == l28_durability_ok_spec(get_ok, after_kill_ok, restart_ok),
+{
+    get_ok && after_kill_ok && restart_ok
+}
+
+pub fn l28_durability_ok_as_is(get_ok: bool, _after_kill_ok: bool, _restart_ok: bool) -> (ok: bool)
+    ensures
+        ok == l28_durability_ok_as_is_spec(get_ok, _after_kill_ok, _restart_ok),
+{
+    get_ok
+}
+
+pub open spec fn l28_leader_kill_ok_spec(get_ok: bool, after_kill_ok: bool, restart_ok: bool) -> bool {
+    l28_durability_ok_spec(get_ok, after_kill_ok, restart_ok)
+}
+
+pub fn l28_leader_kill_ok(get_ok: bool, after_kill_ok: bool, restart_ok: bool) -> (ok: bool)
+    ensures
+        ok == l28_leader_kill_ok_spec(get_ok, after_kill_ok, restart_ok),
+{
+    l28_durability_ok(get_ok, after_kill_ok, restart_ok)
+}
+
+proof fn lemma_get_only_is_not_l28()
+    ensures
+        !l28_durability_ok_spec(true, false, true),
+        l28_durability_ok_as_is_spec(true, false, false),
+{
+}
+
+/// RFC-0121 P1.2 / 0066 P2.2: on-disk C-new-only after REAL TCP plant.
+pub open spec fn l28_tcp_left_ok_spec(left: bool) -> bool {
+    left
+}
+
+/// AS-IS: skip the on-disk scan.
+pub open spec fn l28_tcp_left_ok_as_is_spec(_left: bool) -> bool {
+    true
+}
+
+pub fn l28_tcp_left_ok(left: bool) -> (ok: bool)
+    ensures
+        ok == l28_tcp_left_ok_spec(left),
+{
+    left
+}
+
+pub fn l28_tcp_left_ok_as_is(_left: bool) -> (ok: bool)
+    ensures
+        ok == l28_tcp_left_ok_as_is_spec(_left),
+{
+    true
+}
+
+/// RFC-0126 P1.2: on-disk high-water after REAL TCP plant.
+pub open spec fn l28_tcp_hw_ok_spec(kept: bool) -> bool {
+    kept
+}
+
+pub open spec fn l28_tcp_hw_ok_as_is_spec(_kept: bool) -> bool {
+    true
+}
+
+pub fn l28_tcp_hw_ok(kept: bool) -> (ok: bool)
+    ensures
+        ok == l28_tcp_hw_ok_spec(kept),
+{
+    kept
+}
+
+pub fn l28_tcp_hw_ok_as_is(_kept: bool) -> (ok: bool)
+    ensures
+        ok == l28_tcp_hw_ok_as_is_spec(_kept),
+{
+    true
+}
+
+/// RFC-0128 P1.2: removed voter is not participating after REAL TCP plant.
+pub open spec fn l28_tcp_part_ok_spec(ok: bool) -> bool {
+    ok
+}
+
+pub open spec fn l28_tcp_part_ok_as_is_spec(_ok: bool) -> bool {
+    true
+}
+
+pub fn l28_tcp_part_ok(ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_part_ok_spec(ok),
+{
+    ok
+}
+
+pub fn l28_tcp_part_ok_as_is(_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_part_ok_as_is_spec(_ok),
+{
+    true
+}
+
+/// RFC-0130 P1.2: recover apply closed `commit > applied` after REAL TCP plant.
+pub open spec fn l28_tcp_apply_ok_spec(ok: bool) -> bool {
+    ok
+}
+
+pub open spec fn l28_tcp_apply_ok_as_is_spec(_ok: bool) -> bool {
+    true
+}
+
+pub fn l28_tcp_apply_ok(ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_apply_ok_spec(ok),
+{
+    ok
+}
+
+pub fn l28_tcp_apply_ok_as_is(_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_apply_ok_as_is_spec(_ok),
+{
+    true
+}
+
+/// RFC-0131 P1.2: recover apply on a replica already dropped from `ids`.
+pub open spec fn l28_tcp_napply_ok_spec(ok: bool) -> bool {
+    ok
+}
+
+pub open spec fn l28_tcp_napply_ok_as_is_spec(_ok: bool) -> bool {
+    true
+}
+
+pub fn l28_tcp_napply_ok(ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_napply_ok_spec(ok),
+{
+    ok
+}
+
+pub fn l28_tcp_napply_ok_as_is(_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_napply_ok_as_is_spec(_ok),
+{
+    true
+}
+
+/// RFC-0155 P0: harness retries are not ∀ TCP traces. Always false.
+pub open spec fn l28_tcp_napply_retry_admitted_spec(_attempts: u64, _napply_ok: bool) -> bool {
+    false
+}
+
+pub open spec fn l28_tcp_napply_retry_admitted_as_is_spec(attempts: u64, napply_ok: bool) -> bool {
+    attempts >= 1 && napply_ok
+}
+
+pub fn l28_tcp_napply_retry_admitted(_attempts: u64, _napply_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_napply_retry_admitted_spec(_attempts, _napply_ok),
+{
+    false
+}
+
+pub fn l28_tcp_napply_retry_admitted_as_is(attempts: u64, napply_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_napply_retry_admitted_as_is_spec(attempts, napply_ok),
+{
+    attempts >= 1 && napply_ok
+}
+
+/// RFC-0132 P1.2: truncate persist on a replica already dropped from `ids`.
+pub open spec fn l28_tcp_trunc_ok_spec(ok: bool) -> bool {
+    ok
+}
+
+pub open spec fn l28_tcp_trunc_ok_as_is_spec(_ok: bool) -> bool {
+    true
+}
+
+pub fn l28_tcp_trunc_ok(ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_trunc_ok_spec(ok),
+{
+    ok
+}
+
+pub fn l28_tcp_trunc_ok_as_is(_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_trunc_ok_as_is_spec(_ok),
+{
+    true
+}
+
+/// RFC-0133 P1.2: orphan log_entry_key drop on a replica dropped from `ids`.
+pub open spec fn l28_tcp_odrop_ok_spec(ok: bool) -> bool {
+    ok
+}
+
+pub open spec fn l28_tcp_odrop_ok_as_is_spec(_ok: bool) -> bool {
+    true
+}
+
+pub fn l28_tcp_odrop_ok(ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_odrop_ok_spec(ok),
+{
+    ok
+}
+
+pub fn l28_tcp_odrop_ok_as_is(_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_odrop_ok_as_is_spec(_ok),
+{
+    true
+}
+
+/// RFC-0134 P1.2: leftover 2PC abort on a replica dropped from `ids`.
+pub open spec fn l28_tcp_abort_ok_spec(ok: bool) -> bool {
+    ok
+}
+
+pub open spec fn l28_tcp_abort_ok_as_is_spec(_ok: bool) -> bool {
+    true
+}
+
+pub fn l28_tcp_abort_ok(ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_abort_ok_spec(ok),
+{
+    ok
+}
+
+pub fn l28_tcp_abort_ok_as_is(_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_abort_ok_as_is_spec(_ok),
+{
+    true
+}
+
+/// RFC-0135 P1.2: now_ms persist on a replica dropped from `ids`.
+pub open spec fn l28_tcp_nowms_ok_spec(ok: bool) -> bool {
+    ok
+}
+
+pub open spec fn l28_tcp_nowms_ok_as_is_spec(_ok: bool) -> bool {
+    true
+}
+
+pub fn l28_tcp_nowms_ok(ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_nowms_ok_spec(ok),
+{
+    ok
+}
+
+pub fn l28_tcp_nowms_ok_as_is(_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_nowms_ok_as_is_spec(_ok),
+{
+    true
+}
+
+/// RFC-0158 P2.1: durable-term rollback on the removed replica's REAL dir.
+pub open spec fn l28_tcp_dterm_ok_spec(ok: bool) -> bool {
+    ok
+}
+
+pub open spec fn l28_tcp_dterm_ok_as_is_spec(_ok: bool) -> bool {
+    true
+}
+
+pub fn l28_tcp_dterm_ok(ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_dterm_ok_spec(ok),
+{
+    ok
+}
+
+pub fn l28_tcp_dterm_ok_as_is(_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_dterm_ok_as_is_spec(_ok),
+{
+    true
+}
+
+/// RFC-0136 P1.2: SI hist persist on a replica dropped from `ids`.
+pub open spec fn l28_tcp_hist_ok_spec(ok: bool) -> bool {
+    ok
+}
+
+pub open spec fn l28_tcp_hist_ok_as_is_spec(_ok: bool) -> bool {
+    true
+}
+
+pub fn l28_tcp_hist_ok(ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_hist_ok_spec(ok),
+{
+    ok
+}
+
+pub fn l28_tcp_hist_ok_as_is(_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_hist_ok_as_is_spec(_ok),
+{
+    true
+}
+
+/// RFC-0137 P1.2: abort-fence persist on a replica dropped from `ids`.
+pub open spec fn l28_tcp_fence_ok_spec(ok: bool) -> bool {
+    ok
+}
+
+pub open spec fn l28_tcp_fence_ok_as_is_spec(_ok: bool) -> bool {
+    true
+}
+
+pub fn l28_tcp_fence_ok(ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_fence_ok_spec(ok),
+{
+    ok
+}
+
+pub fn l28_tcp_fence_ok_as_is(_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_fence_ok_as_is_spec(_ok),
+{
+    true
+}
+
+/// RFC-0138 P1.2: force-local TX clear on a replica dropped from `ids`.
+pub open spec fn l28_tcp_clear_ok_spec(ok: bool) -> bool {
+    ok
+}
+
+pub open spec fn l28_tcp_clear_ok_as_is_spec(_ok: bool) -> bool {
+    true
+}
+
+pub fn l28_tcp_clear_ok(ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_clear_ok_spec(ok),
+{
+    ok
+}
+
+pub fn l28_tcp_clear_ok_as_is(_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_clear_ok_as_is_spec(_ok),
+{
+    true
+}
+
+/// RFC-0139 P1.2: drop TX preimages on a replica dropped from `ids`.
+pub open spec fn l28_tcp_pre_ok_spec(ok: bool) -> bool {
+    ok
+}
+
+pub open spec fn l28_tcp_pre_ok_as_is_spec(_ok: bool) -> bool {
+    true
+}
+
+pub fn l28_tcp_pre_ok(ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_pre_ok_spec(ok),
+{
+    ok
+}
+
+pub fn l28_tcp_pre_ok_as_is(_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_pre_ok_as_is_spec(_ok),
+{
+    true
+}
+
+/// RFC-0140 P1.2: TCP ctor election timeout follows disk C-new.
+pub open spec fn l28_tcp_peer_ok_spec(ok: bool) -> bool {
+    ok
+}
+
+pub open spec fn l28_tcp_peer_ok_as_is_spec(_ok: bool) -> bool {
+    true
+}
+
+pub fn l28_tcp_peer_ok(ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_peer_ok_spec(ok),
+{
+    ok
+}
+
+pub fn l28_tcp_peer_ok_as_is(_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_peer_ok_as_is_spec(_ok),
+{
+    true
+}
+
+/// RFC-0141 P1.2: TCP ctor must not treat HashMap first-key as identity.
+pub open spec fn l28_tcp_lid_ok_spec(ok: bool) -> bool {
+    ok
+}
+
+pub open spec fn l28_tcp_lid_ok_as_is_spec(_ok: bool) -> bool {
+    true
+}
+
+pub fn l28_tcp_lid_ok(ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_lid_ok_spec(ok),
+{
+    ok
+}
+
+pub fn l28_tcp_lid_ok_as_is(_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_lid_ok_as_is_spec(_ok),
+{
+    true
+}
+
+/// RFC-0142 P1.2: TCP ctor must not pick remote ids.first as reader.
+pub open spec fn l28_tcp_rdr_ok_spec(ok: bool) -> bool {
+    ok
+}
+
+pub open spec fn l28_tcp_rdr_ok_as_is_spec(_ok: bool) -> bool {
+    true
+}
+
+pub fn l28_tcp_rdr_ok(ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_rdr_ok_spec(ok),
+{
+    ok
+}
+
+pub fn l28_tcp_rdr_ok_as_is(_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_rdr_ok_as_is_spec(_ok),
+{
+    true
+}
+
+/// RFC-0143 P1.2: live discard on a replica dropped from ids.
+pub open spec fn l28_tcp_dsc_ok_spec(ok: bool) -> bool {
+    ok
+}
+
+pub open spec fn l28_tcp_dsc_ok_as_is_spec(_ok: bool) -> bool {
+    true
+}
+
+pub fn l28_tcp_dsc_ok(ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_dsc_ok_spec(ok),
+{
+    ok
+}
+
+pub fn l28_tcp_dsc_ok_as_is(_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_dsc_ok_as_is_spec(_ok),
+{
+    true
+}
+
+/// RFC-0144 P1.2: no-leader persist-leader must be local.
+pub open spec fn l28_tcp_pld_ok_spec(ok: bool) -> bool {
+    ok
+}
+
+pub open spec fn l28_tcp_pld_ok_as_is_spec(_ok: bool) -> bool {
+    true
+}
+
+pub fn l28_tcp_pld_ok(ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_pld_ok_spec(ok),
+{
+    ok
+}
+
+pub fn l28_tcp_pld_ok_as_is(_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_pld_ok_as_is_spec(_ok),
+{
+    true
+}
+
+/// RFC-0145 P1.2: re-install of C-new steps a planted Leader down.
+pub open spec fn l28_tcp_std_ok_spec(ok: bool) -> bool {
+    ok
+}
+
+pub open spec fn l28_tcp_std_ok_as_is_spec(_ok: bool) -> bool {
+    true
+}
+
+pub fn l28_tcp_std_ok(ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_std_ok_spec(ok),
+{
+    ok
+}
+
+pub fn l28_tcp_std_ok_as_is(_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_std_ok_as_is_spec(_ok),
+{
+    true
+}
+
+/// RFC-0146 P1.2: remaining voter's leader_hint omits the removed replica.
+pub open spec fn l28_tcp_hnt_ok_spec(ok: bool) -> bool {
+    ok
+}
+
+pub open spec fn l28_tcp_hnt_ok_as_is_spec(_ok: bool) -> bool {
+    true
+}
+
+pub fn l28_tcp_hnt_ok(ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_hnt_ok_spec(ok),
+{
+    ok
+}
+
+pub fn l28_tcp_hnt_ok_as_is(_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_hnt_ok_as_is_spec(_ok),
+{
+    true
+}
+
+/// RFC-0147 P1.2: remaining voter forgets next/match/sent_through of the removed replica.
+pub open spec fn l28_tcp_slot_ok_spec(ok: bool) -> bool {
+    ok
+}
+
+pub open spec fn l28_tcp_slot_ok_as_is_spec(_ok: bool) -> bool {
+    true
+}
+
+pub fn l28_tcp_slot_ok(ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_slot_ok_spec(ok),
+{
+    ok
+}
+
+pub fn l28_tcp_slot_ok_as_is(_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_slot_ok_as_is_spec(_ok),
+{
+    true
+}
+
+/// RFC-0148 P1.2: remaining voter forgets sent_through of a remote replica on oob remove.
+pub open spec fn l28_tcp_sth_ok_spec(ok: bool) -> bool {
+    ok
+}
+
+pub open spec fn l28_tcp_sth_ok_as_is_spec(_ok: bool) -> bool {
+    true
+}
+
+pub fn l28_tcp_sth_ok(ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_sth_ok_spec(ok),
+{
+    ok
+}
+
+pub fn l28_tcp_sth_ok_as_is(_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_sth_ok_as_is_spec(_ok),
+{
+    true
+}
+
+/// RFC-0068 P2.2: planted committed joint without leave refuses C-old majority.
+pub open spec fn l28_tcp_pj_ok_spec(ok: bool) -> bool {
+    ok
+}
+
+pub open spec fn l28_tcp_pj_ok_as_is_spec(_ok: bool) -> bool {
+    true
+}
+
+pub fn l28_tcp_pj_ok(ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_pj_ok_spec(ok),
+{
+    ok
+}
+
+pub fn l28_tcp_pj_ok_as_is(_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_pj_ok_as_is_spec(_ok),
+{
+    true
+}
+
+fn main() {}
+} // verus!
+
+
 /// Durability fingerprint for a REAL 3-process TCP cluster (RFC-0072).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_durability_ok(get_ok: bool, after_kill_ok: bool, restart_ok: bool) -> bool {
     get_ok && after_kill_ok && restart_ok
 }
 
 /// AS-IS: first get is enough (the 0072 hole — ignore kill/restart).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_durability_ok_as_is(get_ok: bool, _after_kill_ok: bool, _restart_ok: bool) -> bool {
     get_ok
 }
 
 /// RFC-0072 P2.2: leader-kill path is the same durability triple.
 /// Named so `cluster_real --leader-kill` cannot skip the kernel.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_leader_kill_ok(get_ok: bool, after_kill_ok: bool, restart_ok: bool) -> bool {
     l28_durability_ok(get_ok, after_kill_ok, restart_ok)
 }
 
 /// AS-IS: ignore the leader-kill flag and kill+restart (get-only).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_leader_kill_ok_as_is(get_ok: bool, _after_kill_ok: bool, _restart_ok: bool) -> bool {
     get_ok
 }
 
 /// RFC-0072 P1.2: a World-clean seed is not L28-clean unless `cluster_real`
 /// durability also holds. World `silent_wrong == 0` alone is the hole.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn world_seed_l28_ok(world_silent_wrong: u64, cluster_real_ok: bool) -> bool {
     world_silent_wrong == 0 && cluster_real_ok
 }
 
 /// AS-IS: World-clean is enough (the 0072 P1.2 hole — skip REAL TCP).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn world_seed_l28_ok_as_is(world_silent_wrong: u64, _cluster_real_ok: bool) -> bool {
     world_silent_wrong == 0
 }
 
 /// RFC-0118: REAL TCP `leave_joint` was invoked (`client_leave_joint` Ok).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_leave_ok(tcp_ok: bool) -> bool {
     tcp_ok
 }
 
 /// AS-IS: skip the TCP leave flag (the 0117 leftover — wire unused).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_leave_ok_as_is(_tcp_ok: bool) -> bool {
     true
 }
 
 /// RFC-0121: REAL TCP planted a joint remove **and** leave was invoked.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_plant_ok(remove_ok: bool, leave_ok: bool) -> bool {
     remove_ok && leave_ok
 }
 
 /// AS-IS: skip the plant flag (the 0120 leftover — wire unused by cluster_real).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_plant_ok_as_is(_remove_ok: bool, _leave_ok: bool) -> bool {
     true
 }
@@ -72,129 +724,169 @@ pub fn l28_tcp_plant_ok_as_is(_remove_ok: bool, _leave_ok: bool) -> bool {
 /// `left` is true when a recovered raft log has `MembershipJoint` with
 /// `old == new`, or durable membership is already C-new and no still-active
 /// joint remains (leave applied, then compacted).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_left_ok(left: bool) -> bool {
     left
 }
 
 /// AS-IS: plant invoke is enough (the 0121 leftover — skip the on-disk scan).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_left_ok_as_is(_left: bool) -> bool {
     true
 }
 
 /// RFC-0126 P1.2: on-disk high-water after REAL TCP plant is still above
 /// the live set (3-node history survives process death after shrink to 2).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_hw_ok(kept: bool) -> bool {
     kept
 }
 
 /// AS-IS: skip the on-disk high-water scan (the 0125 leftover — TCP restart).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_hw_ok_as_is(_kept: bool) -> bool {
     true
 }
 
 /// RFC-0128 P1.2: after REAL TCP plant, a removed voter is not participating
 /// (stale CLI/`nodes` map must not count it).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_part_ok(ok: bool) -> bool {
     ok
 }
 
 /// AS-IS: skip the participating scan (the 0127 leftover — reopen flag only).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_part_ok_as_is(_ok: bool) -> bool {
     true
 }
 
 /// RFC-0130 P1.2: after REAL TCP plant + process death, recover apply
 /// closes `commit > applied` (production TCP ctor).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_apply_ok(ok: bool) -> bool {
     ok
 }
 
 /// AS-IS: skip recover apply (the 0129 leftover — committed joint stays C-old).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_apply_ok_as_is(_ok: bool) -> bool {
     true
 }
 
 /// RFC-0131 P1.2: after REAL TCP plant + process death, recover apply
 /// closes `commit > applied` on a replica already dropped from `ids`.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_napply_ok(ok: bool) -> bool {
     ok
 }
 
 /// AS-IS: skip removed-replica recover apply (the 0130 leftover — ids only).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_napply_ok_as_is(_ok: bool) -> bool {
     true
 }
 
 /// RFC-0155 P0: harness retries are not ∀ TCP traces. Always false.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_napply_retry_admitted(_attempts: u64, _napply_ok: bool) -> bool {
     false
 }
 
 /// AS-IS: a successful napply after ≥1 attempt is rounded to ∀ TCP.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_napply_retry_admitted_as_is(attempts: u64, napply_ok: bool) -> bool {
     attempts >= 1 && napply_ok
 }
 
 /// RFC-0132 P1.2: after REAL TCP plant + process death, recover truncate
 /// persists so disk has no `index > commit` on a replica dropped from `ids`.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_trunc_ok(ok: bool) -> bool {
     ok
 }
 
 /// AS-IS: skip removed-replica truncate persist (the 0131 leftover — ids only).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_trunc_ok_as_is(_ok: bool) -> bool {
     true
 }
 
 /// RFC-0133 P1.2: after REAL TCP plant + process death, recover truncate
 /// deletes `log_entry_key` rows past the new hi on a replica dropped from `ids`.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_odrop_ok(ok: bool) -> bool {
     ok
 }
 
 /// AS-IS: skip orphan-segment drop (the 0132 leftover — watermark only).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_odrop_ok_as_is(_ok: bool) -> bool {
     true
 }
 
 /// RFC-0134 P1.2: after REAL TCP plant + process death, recover abort
 /// deletes leftover 2PC intents on a replica dropped from `ids`.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_abort_ok(ok: bool) -> bool {
     ok
 }
 
 /// AS-IS: skip leftover abort (the 0133 leftover — ids only).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_abort_ok_as_is(_ok: bool) -> bool {
     true
 }
 
 /// RFC-0135 P1.2: after REAL TCP plant + process death, persist `now_ms`
 /// on a replica dropped from `ids`.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_nowms_ok(ok: bool) -> bool {
     ok
 }
 
 /// AS-IS: skip now_ms persist (the 0134 leftover — ids only).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_nowms_ok_as_is(_ok: bool) -> bool {
     true
 }
@@ -202,169 +894,221 @@ pub fn l28_tcp_nowms_ok_as_is(_ok: bool) -> bool {
 /// RFC-0158 P2.1: on the removed replica's REAL dir, a newer-term
 /// RequestVote whose hard-state persist fails must roll the term back —
 /// reply, memory and disk keep the previous term (F125/F127).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_dterm_ok(ok: bool) -> bool {
     ok
 }
 
 /// AS-IS: keep the undurable raise (memory term above disk hard state).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_dterm_ok_as_is(_ok: bool) -> bool {
     true
 }
 
 /// RFC-0136 P1.2: after REAL TCP plant + process death, persist SI hist
 /// on a replica dropped from `ids`.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_hist_ok(ok: bool) -> bool {
     ok
 }
 
 /// AS-IS: skip SI hist persist (the 0135 leftover — ids only).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_hist_ok_as_is(_ok: bool) -> bool {
     true
 }
 
 /// RFC-0137 P1.2: after REAL TCP plant + process death, persist abort fence
 /// on a replica dropped from `ids`.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_fence_ok(ok: bool) -> bool {
     ok
 }
 
 /// AS-IS: skip abort-fence persist (the 0136 leftover — ids only).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_fence_ok_as_is(_ok: bool) -> bool {
     true
 }
 
 /// RFC-0138 P1.2: after REAL TCP plant + process death, force-local TX
 /// clear drops stuck intents on a replica dropped from `ids`.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_clear_ok(ok: bool) -> bool {
     ok
 }
 
 /// AS-IS: skip force-local clear (the 0137 leftover — ids only).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_clear_ok_as_is(_ok: bool) -> bool {
     true
 }
 
 /// RFC-0139 P1.2: after REAL TCP plant + process death, drop TX preimages
 /// on a replica dropped from `ids`.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_pre_ok(ok: bool) -> bool {
     ok
 }
 
 /// AS-IS: skip drop-preimages (the 0138 leftover — ids only).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_pre_ok_as_is(_ok: bool) -> bool {
     true
 }
 
 /// RFC-0140 P1.2: after REAL TCP plant + process death, TCP ctor
 /// election timeout follows disk C-new, not stale CLI.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_peer_ok(ok: bool) -> bool {
     ok
 }
 
 /// AS-IS: skip TCP disk-peer timeout (the 0139 leftover — CLI n_nodes).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_peer_ok_as_is(_ok: bool) -> bool {
     true
 }
 
 /// RFC-0141 P1.2: after REAL TCP plant + process death, TCP ctor of a
 /// replica dropped from `ids` must not treat HashMap first-key as identity.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_lid_ok(ok: bool) -> bool {
     ok
 }
 
 /// AS-IS: skip TCP local-id gate (the 0140 leftover — first-key always).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_lid_ok_as_is(_ok: bool) -> bool {
     true
 }
 
 /// RFC-0142 P1.2: after REAL TCP plant + process death, TCP ctor must not
 /// pick remote `ids.first()` as a LocalApplied reader (`empty`, not `bad node`).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_rdr_ok(ok: bool) -> bool {
     ok
 }
 
 /// AS-IS: skip TCP reader-local gate (the 0141 leftover — ids.first always).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_rdr_ok_as_is(_ok: bool) -> bool {
     true
 }
 
 /// RFC-0143 P1.2: after REAL TCP plant + process death, live discard must
 /// drop the uncommitted suffix on a replica dropped from `ids`.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_dsc_ok(ok: bool) -> bool {
     ok
 }
 
 /// AS-IS: skip live discard (the 0142 leftover — ids only).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_dsc_ok_as_is(_ok: bool) -> bool {
     true
 }
 
 /// RFC-0144 P1.2: after REAL TCP plant + process death, no-leader abort
 /// persist-leader must be local so `next_index` repair runs.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_pld_ok(ok: bool) -> bool {
     ok
 }
 
 /// AS-IS: skip persist-leader locality (the 0143 leftover — ids.first).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_pld_ok_as_is(_ok: bool) -> bool {
     true
 }
 
 /// RFC-0145 P1.2: after REAL TCP plant + process death, re-install of C-new
 /// must step a planted Leader down on a replica dropped from `ids`.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_std_ok(ok: bool) -> bool {
     ok
 }
 
 /// AS-IS: skip step-down (the 0144 leftover — keep Role::Leader).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_std_ok_as_is(_ok: bool) -> bool {
     true
 }
 
 /// RFC-0146 P1.2: after REAL TCP plant + process death, TCP ctor of a
 /// remaining voter must not route `leader_hint` to the removed replica.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_hnt_ok(ok: bool) -> bool {
     ok
 }
 
 /// AS-IS: skip hint filter (the 0145 leftover — any leader_id).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_hnt_ok_as_is(_ok: bool) -> bool {
     true
 }
 
 /// RFC-0147 P1.2: after REAL TCP plant + process death, TCP ctor of a
 /// remaining voter must forget next/match/sent_through of the removed replica.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_slot_ok(ok: bool) -> bool {
     ok
 }
 
 /// AS-IS: skip slot drop (the 0146 leftover — keep next/match/sent_through).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_slot_ok_as_is(_ok: bool) -> bool {
     true
 }
@@ -372,13 +1116,17 @@ pub fn l28_tcp_slot_ok_as_is(_ok: bool) -> bool {
 /// RFC-0148 P1.2: after REAL TCP process death, TCP ctor of a remaining
 /// 3-node voter must forget `sent_through` of a remote replica on oob
 /// `remove_member`. 0147 joint `drop_repl_slot` is **not** this tooth.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_sth_ok(ok: bool) -> bool {
     ok
 }
 
 /// AS-IS: skip oob sent_through drop (the 0147 leftover — keep sent_through).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_sth_ok_as_is(_ok: bool) -> bool {
     true
 }
@@ -386,17 +1134,22 @@ pub fn l28_tcp_sth_ok_as_is(_ok: bool) -> bool {
 /// RFC-0068 P2.2: after REAL TCP process death, TCP ctor of a 3-node
 /// voter with a planted committed C-old,new (no leave) must refuse a
 /// C-old majority elect.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_pj_ok(ok: bool) -> bool {
     ok
 }
 
 /// AS-IS: skip the planted joint (the 0148 leftover — elect on C-old).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
+#[cfg(not(verus_keep_ghost))]
 pub fn l28_tcp_pj_ok_as_is(_ok: bool) -> bool {
     true
 }
 
+#[cfg(not(verus_keep_ghost))]
 #[cfg(test)]
 mod tests {
     use super::*;

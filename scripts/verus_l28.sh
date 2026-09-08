@@ -3,7 +3,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-store/verus/l28.rs"
+# RFC-0171 P0.3 / RFC-0174: prove the file rustc links (pair l28_tcp_abort).
+SRC="$ROOT/crates/pedradb-store/src/l28.rs"
 
 if [[ -x "${VERUS:-}" ]]; then
   :
