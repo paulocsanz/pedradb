@@ -1,4 +1,4 @@
 path=crates/pedradb-core/src/write_admission_kernel.rs
-sha256=310534faa3341129a9629e29abb996d956dc7bd7c7dd1748b08b6121a924c173
+sha256=efd1920f77ae15f3304eaed82cf783e3faabefa4665cfee35def3736006c35e2
 aeneas=daa85d7
 charon=0.1.232

@@ -6366,7 +6366,20 @@ impl<E: Env> Db<E> {
         // offset, so `close()` after the truncate would write the frame at
         // the pre-truncate offset — a sparse zero hole that makes reopen
         // fail-stop (`WalZeroHeader`) although L0+MANIFEST are intact.
-        self.wal.lock().flush()?;
+        // SST is already durable: AppendApplyOk ⇒ flush, not fdatasync.
+        match crate::write_admission_kernel::wal_commit_plan(false, false) {
+            crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => {
+                self.wal.lock().flush()?;
+            }
+            crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+            | crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                assert!(
+                    !crate::write_admission_kernel::fence_on_sync_fail(false, false),
+                    "rotate discards WAL after SST durable ⇒ not required sync"
+                );
+                self.wal.lock().sync_data()?;
+            }
+        }
         let mut new = Wal::create_on(&self.env, &wal_path)?;
         // Barrier class is a DB-level contract: the rotated segment inherits
         // the strong-class flag (OpenOptions::wal_full_fsync).

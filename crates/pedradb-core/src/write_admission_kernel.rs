@@ -870,6 +870,16 @@ mod tests {
             close.contains("vlog_prepare_wal("),
             "Db::close must prepare vlog through the plan helper"
         );
+        let rot = named_fn_src(include_str!("db.rs"), "rotate_wal_now")
+            .expect("rotate_wal_now");
+        assert!(
+            rot.contains("wal_commit_plan("),
+            "rotate_wal_now must match the plan fn"
+        );
+        assert!(
+            rot.contains("fence_on_sync_fail("),
+            "rotate_wal_now must match fence_on_sync_fail"
+        );
     }
 
     #[test]
