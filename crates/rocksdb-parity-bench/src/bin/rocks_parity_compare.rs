@@ -496,7 +496,7 @@ mod tests {
             Some("as_is_walk"),
             "RFC-0184 P2.30 probes JSON still yields class"
         );
-        let bal = r#"{"admits":0,"cut":"wal_encode_or_write","cells":3}"#;
+        let bal = r#"{"admits":0,"cut":"wal_encode_or_write","cells":3,"shapes":["ycsb_b_mc4"]}"#;
         assert_eq!(
             extract_cli_diagnose_admits(bal),
             Some(0),

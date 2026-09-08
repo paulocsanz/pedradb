@@ -161,6 +161,8 @@ a linha quando há phasesΔ. Sem harness novo.
       `p_best` + `class`. — status: `done`
 - [x] **P2.31** `WriteDiagnosis::json_object` inclui `gap_ns` /
       `timed_ns` (unattributed = gap−timed). — status: `done`
+- [x] **P2.32** `pedra diagnose balance` JSON inclui `shapes` (gate
+      0182). — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -206,6 +208,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.29 | p2 | CLI get JSON 0176 clock | done | class+best/happy/worst/as_is | 2026-09-08 |
 | P2.30 | p2 | CLI probes JSON inputs | done | class+per_get+p_best | 2026-09-08 |
 | P2.31 | p2 | diagnose JSON gap/timed ns | done | json_object gap_ns+timed_ns | 2026-09-08 |
+| P2.32 | p2 | CLI balance JSON shapes | done | shapes array = BALANCE_SHAPES | 2026-09-08 |
 
 ## Acceptance Criteria
 
@@ -248,6 +251,7 @@ a linha quando há phasesΔ. Sem harness novo.
   `pedra diagnose get` JSON clock (P2.29);
   `pedra diagnose probes` JSON inputs (P2.30);
   `json_object` `gap_ns`/`timed_ns` (P2.31);
+  `pedra diagnose balance` JSON `shapes` (P2.32);
   `ycsb_c_all_reads_timed_zero_is_get_path`;
   `rfc0184_diagnosis_json_has_lever`;
   `extract_diagnose_lever_from_bench_object`.

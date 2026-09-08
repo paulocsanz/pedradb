@@ -51,11 +51,12 @@ Refresh this file when a cell moves class. One row per cell.
 | pedra diagnose get JSON clock | **T**→tool | CLI | 0176 best/happy/worst/as_is in JSON (0184 P2.29) | RFC-0184 |
 | pedra diagnose probes JSON | **T**→tool | CLI | per_get/p_best in JSON (0184 P2.30) | RFC-0184 |
 | diagnose JSON gap/timed | **T**→tool | kernel | json_object gap_ns+timed_ns (0184 P2.31) | RFC-0184 |
+| pedra diagnose balance shapes | **T**→tool | CLI | JSON shapes=BALANCE_SHAPES (0184 P2.32) | RFC-0184 |
 
 ## Próxima fase (rank da skill, 2026-09-07)
 
 1. **U / Linux `overwrite_mc4` isolado + diagnose + `balance`** (caixa). Sem bake: não ratio-win Darwin. Skill **ainda implementa** o próximo furo local.
-2. **Done this turn:** 0184 P2.31 — json_object gap_ns/timed_ns.
+2. **Done this turn:** 0184 P2.32 — CLI balance JSON shapes.
 3. prefix 0.70× na caixa continua P1.2.
 
 Não: skiplist. Não: n=50 merge. Não: turno vazio porque “é caixa”.
