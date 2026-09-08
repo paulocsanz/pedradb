@@ -119,6 +119,9 @@ a linha quando há phasesΔ. Sem harness novo.
 - [x] **P2.14** Ceph `bluestore_omap_write` / `bluestore_omap_read`
       WRITEPHASE → `diagnose.lever` (read = `get_path`; write = write
       lever). — status: `done`
+- [x] **P2.15** Solana `shred_append` / `trailing_read` WRITEPHASE →
+      `diagnose.lever` (trailing = `get_path`; shred = write lever).
+      — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -147,6 +150,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.12 | p2 | nebula diagnose.lever | done | neighbors get_path; insert_edge WRITEPHASE | 2026-09-08 |
 | P2.13 | p2 | streaming diagnose.lever | done | flink mix get_path; kafka changelog WRITEPHASE | 2026-09-08 |
 | P2.14 | p2 | ceph omap diagnose.lever | done | read get_path; write WRITEPHASE | 2026-09-08 |
+| P2.15 | p2 | solana diagnose.lever | done | trailing get_path; shred WRITEPHASE | 2026-09-08 |
 
 ## Acceptance Criteria
 
@@ -172,6 +176,7 @@ a linha quando há phasesΔ. Sem harness novo.
   nebula `diagnose.lever` (P2.12);
   streaming `diagnose.lever` (P2.13);
   ceph omap `diagnose.lever` (P2.14);
+  solana `diagnose.lever` (P2.15);
   `ycsb_c_all_reads_timed_zero_is_get_path`;
   `rfc0184_diagnosis_json_has_lever`;
   `extract_diagnose_lever_from_bench_object`.
