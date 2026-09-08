@@ -1,5 +1,11 @@
 //! Slot + generation table (U2).
 //!
+//! **Single artifact (pair `c_len`):** this file is what `rustc` links
+//! *and* what Verus proves (`cfg(verus_keep_ghost)`). `c_len_admitted` is
+//! the term — not a free-table proof (`c_free_table_admitted` stays false).
+//!
+//!   ./scripts/verus_c_len.sh
+//!
 //! AS-IS C ABI used `Box::into_raw` / `from_raw`: double-destroy and
 //! use-after-destroy are UB. Handles here are packed integers (cast to
 //! opaque C pointers). Stale / double-free lookups return `None`.
@@ -22,18 +28,72 @@ const GEN_MASK: u64 = (1 << 31) - 1;
 pub const KIND_DB: u64 = 1;
 pub const KIND_TX: u64 = 2;
 
+macro_rules! c_len_admitted_body {
+    ($len:expr, $max:expr) => {
+        $len <= $max
+    };
+}
+
+macro_rules! c_len_admitted_as_is_body {
+    ($len:expr, $max:expr) => {{
+        let _ = ($len, $max);
+        true
+    }};
+}
+
 /// Admit a C `*_len` against a marshalling cap (RFC-0075 / F215).
 /// Oversize must not become a slice for `copy_nonoverlapping`.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn c_len_admitted(len: usize, max: usize) -> bool {
-    len <= max
+    c_len_admitted_body!(len, max)
 }
 
 /// AS-IS: any length is copied (the 0075 hole — terabyte slice / ASan-miss).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn c_len_admitted_as_is(_len: usize, _max: usize) -> bool {
+    c_len_admitted_as_is_body!(_len, _max)
+}
+
+#[cfg(verus_keep_ghost)]
+use vstd::prelude::*;
+
+#[cfg(verus_keep_ghost)]
+verus! {
+
+pub open spec fn c_len_admitted_spec(len: usize, max: usize) -> bool {
+    len <= max
+}
+
+pub open spec fn c_len_admitted_as_is_spec(_len: usize, _max: usize) -> bool {
     true
 }
+
+pub fn c_len_admitted(len: usize, max: usize) -> (ok: bool)
+    ensures
+        ok == c_len_admitted_spec(len, max),
+{
+    c_len_admitted_body!(len, max)
+}
+
+pub fn c_len_admitted_as_is(_len: usize, _max: usize) -> (ok: bool)
+    ensures
+        ok == c_len_admitted_as_is_spec(_len, _max),
+{
+    c_len_admitted_as_is_body!(_len, _max)
+}
+
+proof fn lemma_oversize_len_is_not_admitted()
+    ensures
+        c_len_admitted_spec(0, 10),
+        c_len_admitted_spec(10, 10),
+        !c_len_admitted_spec(11, 10),
+        c_len_admitted_as_is_spec(11, 10),
+{
+}
+
+} // verus!
 
 /// C path NUL-walk window (RFC-0075 P1.1). Header `MONTAHA_FDB_MAX_PATH_BYTES`.
 pub const C_PATH_WALK_BYTES: usize = 4096;

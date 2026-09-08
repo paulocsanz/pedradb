@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Machine-check c_len_admitted (RFC-0075 P2.1). Not a free-table proof (P2.2).
+# Machine-check c_len_admitted on the file rustc links (single artifact —
+# not the twin-cópia). Not a free-table proof (P2.2).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-capi/verus/c_len.rs"
+SRC="$ROOT/crates/pedradb-capi/src/handles.rs"
 
 if [[ -x "${VERUS:-}" ]]; then
   :

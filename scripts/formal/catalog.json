@@ -4287,8 +4287,9 @@
       "id": "c_len",
       "finding": "RFC-0075",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-capi/src/handles.rs",
-      "twin": "crates/pedradb-capi/verus/c_len.rs",
+      "twin": "crates/pedradb-capi/src/handles.rs",
       "verus": "scripts/verus_c_len.sh",
       "callers": [
         "crates/pedradb-capi/src/lib.rs"
