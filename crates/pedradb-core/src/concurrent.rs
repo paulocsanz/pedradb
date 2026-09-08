@@ -1235,7 +1235,9 @@ impl WriteGroup {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner());
             ledger.on_append(ledger_bytes);
-            if need_sync && io_err.is_none() {
+            if crate::write_admission_kernel::wal_sync_required(true, need_sync, false)
+                && io_err.is_none()
+            {
                 ledger.on_barrier();
             }
             ledger.on_ack();
