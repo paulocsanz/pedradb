@@ -1873,6 +1873,7 @@ impl YcsbRunner {
             let win = i % windows;
             assert!(e.put(&wkey(win, i), &yval), "flink seed {i}");
         }
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut ops, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -1896,7 +1897,15 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] flink_window_state done ops={ops} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 50, cfg_ops as u64);
+            eprint_write_diagnose("flink_window_state", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
 
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut puts, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -1925,6 +1934,13 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] kafka_changelog_flush done puts={puts} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
+            eprint_write_diagnose("kafka_changelog_flush", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
         self.rng = rng;
         blocks
     }
@@ -4046,9 +4062,21 @@ mod tests {
             "nebula_get_neighbors is prefix scan:\n{}",
             neb[0]
         );
+        let stream = r.run_streaming(&e);
         assert_eq!(
-            block_names(&r.run_streaming(&e)),
+            block_names(&stream),
             vec![Some("flink_window_state"), Some("kafka_changelog_flush"),]
+        );
+        for b in &stream {
+            assert!(
+                b.contains("\"diagnose\": {\"lever\":"),
+                "RFC-0184 P2.13 streaming JSON needs diagnose.lever:\n{b}"
+            );
+        }
+        assert!(
+            stream[0].contains("\"lever\":\"get_path\""),
+            "flink_window_state is put+scan:\n{}",
+            stream[0]
         );
         assert_eq!(
             block_names(&r.run_ceph(&e)),
