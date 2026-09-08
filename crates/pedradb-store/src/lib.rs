@@ -4134,7 +4134,7 @@ impl<E: Env> StoreCluster<E> {
                 // Keep abort fence after revert (revert/clear may drop status).
                 node.db.put(txn_status_key(tid), b"abort")?;
             }
-            if !garbage.is_empty() {
+            if !pedradb_core::write_admission_kernel::batch_is_empty(garbage.len() as u64) {
                 let ops: Vec<BatchOp> = garbage.into_iter().map(BatchOp::delete).collect();
                 node.db.apply_batch(ops)?;
             }
