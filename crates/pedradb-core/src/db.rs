@@ -6898,7 +6898,9 @@ impl<E: Env> Db<E> {
     /// # Errors
     /// None today (reservation cannot fail); `Result` for fence / I/O later.
     pub fn prepare_pushdown_compact(&mut self) -> Result<Option<PreparedL0Compact<E>>> {
-        if !crate::leveling::leveled_enabled() || self.ssts.is_empty() {
+        if !crate::leveling::leveled_enabled()
+            || crate::write_admission_kernel::batch_is_empty(self.ssts.len() as u64)
+        {
             return Ok(None);
         }
         let families: Vec<String> = self
