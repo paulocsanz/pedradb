@@ -409,6 +409,19 @@ fn sibling_reentry_spins() -> u32 {
     1024
 }
 
+/// RFC-0180 P0.51: the first arriver after a barrier sees `active==1`
+/// and `recently_concurrent==false`, takes `commit_async_one`, and the
+/// other three form a group (WRITEPHASE 1+3 → avg ~2.7). 256 `spin_loop`
+/// for a sibling `begin_submit` before lone. 1c pays 256 pauses (~ns).
+#[must_use]
+fn lone_peer_wait_needed(active: usize, recently: bool) -> bool {
+    active == 1 && !recently
+}
+
+fn lone_peer_wait_spins() -> u32 {
+    256
+}
+
 fn async_catchup_spins(batch_len: usize, active: usize) -> u32 {
     if batch_len >= active || active < 2 || async_catchup_skip_when_grouped(batch_len, active) {
         0
@@ -801,7 +814,12 @@ impl WriteGroup {
         do_sync: bool,
     ) -> Result<SequenceNumber> {
         self.await_flush_debt(db);
-        let active = self.begin_submit();
+        let mut active = self.begin_submit();
+        // RFC-0180 P0.51: barrier-start hole — wait for a sibling before lone.
+        if lone_peer_wait_needed(active, self.recently_concurrent()) && !do_sync {
+            self.wait_peer_before_lone();
+            active = self.active.load(Ordering::Acquire);
+        }
         if active == 1 && !self.recently_concurrent() && !do_sync {
             let result = db.write().commit_async_one(op);
             self.finish_lone();
@@ -845,8 +863,12 @@ impl WriteGroup {
         vals: Vec<Bytes>,
         tail: Vec<BatchOp>,
     ) -> Result<SequenceNumber> {
-        let active = self.begin_submit();
+        let mut active = self.begin_submit();
         let n = (keys.len() + tail.len()) as u64;
+        if lone_peer_wait_needed(active, self.recently_concurrent()) {
+            self.wait_peer_before_lone();
+            active = self.active.load(Ordering::Acquire);
+        }
         if active == 1 && !self.recently_concurrent() {
             let result = db.write().apply_latched_bulk_puts(family, keys, vals, tail);
             self.finish_lone_ops(n);
@@ -884,7 +906,11 @@ impl WriteGroup {
         occ: Option<(SequenceNumber, Vec<Bytes>)>,
     ) -> Result<SequenceNumber> {
         self.await_flush_debt(db);
-        let active = self.begin_submit();
+        let mut active = self.begin_submit();
+        if occ.is_none() && !do_sync && lone_peer_wait_needed(active, self.recently_concurrent()) {
+            self.wait_peer_before_lone();
+            active = self.active.load(Ordering::Acquire);
+        }
         self.submit_after_begin(db, ops, do_sync, occ, active)
     }
 
@@ -1252,6 +1278,16 @@ impl WriteGroup {
             let q = self.queued_pending.load(Ordering::Acquire);
             let active = self.active.load(Ordering::Acquire);
             if !sibling_reentry_needed(batch_len, q, active, true) {
+                return;
+            }
+            std::hint::spin_loop();
+        }
+    }
+
+    /// RFC-0180 P0.51: before `commit_async_one` on `active==1`.
+    fn wait_peer_before_lone(&self) {
+        for _ in 0..lone_peer_wait_spins() {
+            if self.active.load(Ordering::Acquire) >= 2 {
                 return;
             }
             std::hint::spin_loop();
@@ -7199,6 +7235,13 @@ mod tests {
             "n≥16 active already ≥ cap"
         );
         assert_eq!(sibling_reentry_spins(), 1024);
+        // RFC-0180 P0.51: first arriver after barrier must not lone
+        // before a sibling `begin_submit`. 1c (recently=false, stays 1)
+        // still lones after 256 pauses.
+        assert!(lone_peer_wait_needed(1, false));
+        assert!(!lone_peer_wait_needed(1, true), "P0.50 covers re-entry");
+        assert!(!lone_peer_wait_needed(2, false));
+        assert_eq!(lone_peer_wait_spins(), 256);
         // n≥16: stop at 2 (kvrocks_set_mc50 lock_convoy ceiling).
         assert!(async_catchup_skip_when_grouped(2, 16));
         assert_eq!(async_catchup_spins(2, 16), 0);
