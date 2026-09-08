@@ -1164,10 +1164,23 @@ impl WriteGroup {
             l[2] = 0;
         }
         // RFC-0071: visibility publish is a kernel decision, not inline glue.
-        // Required sync failed ⇒ fence (same token as wal_sync_group).
-        if crate::write_admission_kernel::fence_on_sync_fail(need_sync, io_err.is_some())
-            || !crate::group_commit_kernel::may_publish_group(io_err.is_none())
+        // After fd: same plan as wal_sync_group (Fence iff required sync failed).
+        let failed = io_err.is_some();
+        let refuse_publish = match crate::write_admission_kernel::wal_commit_plan(need_sync, failed)
         {
+            crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                assert!(
+                    crate::write_admission_kernel::fence_on_sync_fail(need_sync, failed),
+                    "required sync failed ⇒ fence, not publish"
+                );
+                true
+            }
+            crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+            | crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => {
+                !crate::group_commit_kernel::may_publish_group(!failed)
+            }
+        };
+        if refuse_publish {
             let e = io_err.expect("publish refused iff WAL I/O failed");
             let mut g = db.write();
             for chunk in &chunks {
