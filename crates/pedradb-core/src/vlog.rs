@@ -445,7 +445,7 @@ impl<F: EnvFile> ValueLog<F> {
             return Ok(());
         }
         self.reserve_space(self.staged_len() as u64);
-        if !self.pending.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(self.pending.len() as u64) {
             Write::write_all(&mut self.file, &self.pending)?;
             self.pending.clear();
         }
