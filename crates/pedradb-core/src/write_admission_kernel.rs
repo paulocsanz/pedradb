@@ -719,6 +719,15 @@ mod tests {
             rs.contains("wal_sync_required("),
             "ConcurrentDb::resolve_sync must match wal_sync_required"
         );
+        let sub = include_str!("concurrent.rs")
+            .split("fn submit_after_begin<")
+            .nth(1)
+            .and_then(|s| s.split("fn lead<").next())
+            .expect("submit_after_begin");
+        assert!(
+            sub.contains("wal_sync_required("),
+            "submit_after_begin must match wal_sync_required"
+        );
     }
 
     #[test]

@@ -633,7 +633,11 @@ impl WriteGroup {
         // write() still joins the group (RFC-0040 P1.2). Lone async
         // (`do_sync=false`) takes `commit_async_one` / `commit_async_ops`.
         if occ.is_none() && active == 1 && !self.recently_concurrent() {
-            let result = if do_sync {
+            let result = if crate::write_admission_kernel::wal_sync_required(
+                true,
+                do_sync,
+                false,
+            ) {
                 Self::lone_commit(self, db, ops, do_sync, occ)
             } else if ops.len() == 1 {
                 db.write().commit_async_one(ops.pop().expect("len checked"))
