@@ -285,7 +285,7 @@ impl WireMsg {
     /// # Errors
     /// Truncation / bad tag.
     pub fn decode(buf: &[u8]) -> Result<Self> {
-        if buf.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(buf.len() as u64) {
             return Err(StoreError::Msg("tcp empty body".into()));
         }
         let mut off = 1usize;
