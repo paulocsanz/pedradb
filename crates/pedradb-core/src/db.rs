@@ -6189,7 +6189,7 @@ impl<E: Env> Db<E> {
         }
         self.parked_unflushed.remove(0);
         self.parked_unflushed.remove(0);
-        if !built.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(built.len() as u64) {
             self.parked_unflushed.insert(0, Arc::new(built));
         }
         true
