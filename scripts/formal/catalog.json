@@ -1021,8 +1021,9 @@
       "id": "dcs_apply",
       "finding": "F12/F22",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-dcs/src/apply_kernel.rs",
-      "twin": "crates/pedradb-dcs/verus/dcs_apply.rs",
+      "twin": "crates/pedradb-dcs/src/apply_kernel.rs",
       "verus": "scripts/verus_dcs_apply.sh",
       "callers": [
         "crates/pedradb-raft/src/lib.rs"

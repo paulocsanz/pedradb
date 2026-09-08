@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Machine-check dcs_apply_should_advance (RFC-0002 P12 / F12 / F22).
+# Machine-check dcs_apply_should_advance on the file rustc links
+# (single artifact — not the twin-cópia). RFC-0002 P12 / F12 / F22.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-dcs/verus/dcs_apply.rs"
+SRC="$ROOT/crates/pedradb-dcs/src/apply_kernel.rs"
 if [[ -x "${VERUS:-}" ]]; then
   :
 elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then

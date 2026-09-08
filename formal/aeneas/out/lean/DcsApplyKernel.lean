@@ -15,7 +15,7 @@ set_option maxRecDepth 2048
 namespace pedra_aeneas_dcs_apply_kernel
 
 /-- [pedra_aeneas_dcs_apply_kernel::apply_kernel::dcs_apply_should_advance]:
-    Source: 'src/../../../../crates/pedradb-dcs/src/apply_kernel.rs', lines 16:0-18:1
+    Source: 'src/../../../../crates/pedradb-dcs/src/apply_kernel.rs', lines 36:0-38:1
     Visibility: public -/
 def apply_kernel.dcs_apply_should_advance
   (ok1 : Bool) (cas_failed : Bool) : Result Bool := do
@@ -34,7 +34,7 @@ inductive DcsError where
 | Corrupt : String → DcsError
 
 /-- [pedra_aeneas_dcs_apply_kernel::apply_kernel::dcs_apply_should_advance_result]:
-    Source: 'src/../../../../crates/pedradb-dcs/src/apply_kernel.rs', lines 22:0-28:1
+    Source: 'src/../../../../crates/pedradb-dcs/src/apply_kernel.rs', lines 43:0-49:1
     Visibility: public -/
 def apply_kernel.dcs_apply_should_advance_result
   {T : Type} (r : core.result.Result T DcsError) : Result Bool := do
@@ -49,10 +49,10 @@ def apply_kernel.dcs_apply_should_advance_result
     | DcsError.Corrupt _ => apply_kernel.dcs_apply_should_advance false false
 
 /-- [pedra_aeneas_dcs_apply_kernel::apply_kernel::dcs_apply_should_advance_as_is]:
-    Source: 'src/../../../../crates/pedradb-dcs/src/apply_kernel.rs', lines 32:0-34:1
+    Source: 'src/../../../../crates/pedradb-dcs/src/apply_kernel.rs', lines 54:0-56:1
     Visibility: public -/
 def apply_kernel.dcs_apply_should_advance_as_is
-  (ok1 : Bool) (_cas_failed : Bool) : Result Bool := do
+  (ok1 : Bool) (cas_failed : Bool) : Result Bool := do
   ok ok1
 
 end pedra_aeneas_dcs_apply_kernel
