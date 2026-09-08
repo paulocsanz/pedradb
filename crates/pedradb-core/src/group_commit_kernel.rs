@@ -149,6 +149,18 @@ macro_rules! stacked_fsync_liars_admitted_as_is_body {
     };
 }
 
+macro_rules! fsync_lie_closes_tcg_guest_body {
+    () => {
+        false
+    };
+}
+
+macro_rules! fsync_lie_closes_tcg_guest_as_is_body {
+    () => {
+        true
+    };
+}
+
 /// First-committer-wins predicate (OCC): a transaction that read
 /// snapshot `snap` against current `last_seq` conflicts iff the window
 /// `(snap, last_seq]` is non-empty **and** some key it touched was
@@ -450,15 +462,17 @@ pub fn stacked_fsync_liars_admitted_as_is(lying: bool, det_io: bool) -> bool {
 
 /// RFC-0078 P2.2: closing the lying-fsync model does not invent a TCG
 /// guest (`R-tcg-guest` stays 0079). Always false.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn fsync_lie_closes_tcg_guest() -> bool {
-    false
+    fsync_lie_closes_tcg_guest_body!()
 }
 
 /// AS-IS: 0078 is rounded to TCG guest coverage (the hole).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn fsync_lie_closes_tcg_guest_as_is() -> bool {
-    true
+    fsync_lie_closes_tcg_guest_as_is_body!()
 }
 
 #[cfg(verus_keep_ghost)]
@@ -573,6 +587,20 @@ pub fn stacked_fsync_liars_admitted_as_is(lying: bool, det_io: bool) -> (ok: boo
         ok == (lying && det_io),
 {
     stacked_fsync_liars_admitted_as_is_body!(lying, det_io)
+}
+
+pub fn fsync_lie_closes_tcg_guest() -> (ok: bool)
+    ensures
+        ok == false,
+{
+    fsync_lie_closes_tcg_guest_body!()
+}
+
+pub fn fsync_lie_closes_tcg_guest_as_is() -> (ok: bool)
+    ensures
+        ok == true,
+{
+    fsync_lie_closes_tcg_guest_as_is_body!()
 }
 
 #[derive(PartialEq, Eq, Copy, Clone)]

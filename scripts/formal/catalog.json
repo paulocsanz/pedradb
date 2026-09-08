@@ -5712,9 +5712,10 @@
       "id": "fsync_lie_tcg",
       "finding": "RFC-0078 P2.2",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
-      "twin": "crates/pedradb-core/verus/group_commit.rs",
-      "verus": "scripts/verus_group_commit.sh",
+      "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+      "verus": "scripts/verus_group_commit_kernel.sh",
       "callers": [
         "crates/pedradb-core/src/group_commit_kernel.rs"
       ],
