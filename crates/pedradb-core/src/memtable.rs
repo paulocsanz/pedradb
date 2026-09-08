@@ -1789,7 +1789,13 @@ impl MemTable {
                 pfx_buf[..a.len()].copy_from_slice(a);
                 a.len()
             }
-            (Some(a), Some(b)) if a == b && a.is_empty() && self.tail_idx.len() == 1 => 0,
+            (Some(a), Some(b))
+                if a == b
+                    && crate::write_admission_kernel::batch_is_empty(a.len() as u64)
+                    && self.tail_idx.len() == 1 =>
+            {
+                0
+            }
             _ => return None,
         };
         let pfx = &pfx_buf[..pfx_len];
