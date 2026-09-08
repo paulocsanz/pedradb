@@ -1232,7 +1232,7 @@ impl RemoteTier {
         if env.exists(&latest) {
             if let Ok(mut f) = env.open_read(&latest) {
                 let mut buf = String::new();
-                if f.read_to_string(&mut buf).is_ok_and(|_| !buf.is_empty()) {
+                if f.read_to_string(&mut buf).is_ok_and(|_| !crate::write_admission_kernel::batch_is_empty(buf.len() as u64)) {
                     if let Some((name, expect_crc)) = Self::parse_latest_pointer(&buf) {
                         let p = self.segment_path(name);
                         if env.exists(&p) {
