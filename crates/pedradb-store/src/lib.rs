@@ -3448,7 +3448,7 @@ impl StoreCluster<IoUringEnv> {
         rng: SeedRng,
         store_opts: StoreOpenOptions,
     ) -> Result<Self> {
-        if n_ranges == 0 || member_ids.is_empty() {
+        if n_ranges == 0 || pedradb_core::write_admission_kernel::batch_is_empty(member_ids.len() as u64) {
             return Err(StoreError::Msg("need members and ranges".into()));
         }
         if !member_ids.contains(&self_id) {
