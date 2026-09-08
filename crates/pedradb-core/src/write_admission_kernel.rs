@@ -744,6 +744,16 @@ mod tests {
             commit.contains("fence_on_sync_fail("),
             "commit_ops_with must match fence_on_sync_fail"
         );
+        let lone_sync = named_fn_src(include_str!("db.rs"), "lone_sync_commit")
+            .expect("lone_sync_commit");
+        assert!(
+            lone_sync.contains("wal_commit_plan("),
+            "lone_sync_commit must match the plan fn"
+        );
+        assert!(
+            lone_sync.contains("fence_on_sync_fail("),
+            "lone_sync_commit must match fence_on_sync_fail"
+        );
         let group = named_fn_src(include_str!("db.rs"), "wal_sync_group")
             .expect("wal_sync_group");
         assert!(

@@ -245,6 +245,13 @@ GLUE_SCRIPTS = [
         "occ_conflict",
         "occ_batch_plan",
     ),
+    (
+        "lone_sync_commit",
+        "crates/pedradb-core/src/db.rs",
+        ("sync_data", "fence_on_sync_fail"),
+        "fence_on_sync_fail",
+        "wal_commit_plan",
+    ),
 ]
 
 

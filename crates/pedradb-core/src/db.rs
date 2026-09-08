@@ -9165,11 +9165,26 @@ impl<E: Env> Db<E> {
             let r = w.sync_data();
             (n, r)
         };
-        // RFC-0071: same publish gate as ConcurrentDb off-lock group I/O.
-        if !crate::group_commit_kernel::may_publish_group(sync_r.is_ok()) {
-            let e = sync_r.err().expect("publish refused iff WAL I/O failed");
-            self.fence_durability(&e, FenceClass::of_core(&e));
-            return Err(e);
+        // RFC-0071: same plan as wal_sync_group (Fence iff required sync failed).
+        let failed = sync_r.is_err();
+        match crate::write_admission_kernel::wal_commit_plan(true, failed) {
+            crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                assert!(
+                    crate::write_admission_kernel::fence_on_sync_fail(true, failed),
+                    "required sync failed ⇒ fence, not Ok"
+                );
+                let e = sync_r.err().expect("AppendSyncFence ⇒ Some");
+                self.fence_durability(&e, FenceClass::of_core(&e));
+                return Err(e);
+            }
+            crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+            | crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => {
+                if !crate::group_commit_kernel::may_publish_group(!failed) {
+                    let e = sync_r.err().expect("publish refused iff WAL I/O failed");
+                    self.fence_durability(&e, FenceClass::of_core(&e));
+                    return Err(e);
+                }
+            }
         }
         self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
         self.note_wal_sync();
