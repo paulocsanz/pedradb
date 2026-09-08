@@ -7089,7 +7089,7 @@ impl<E: Env> StoreCluster<E> {
                                 ops.push(BatchOp::put(k, v));
                             }
                         }
-                        if !ops.is_empty() {
+                        if !pedradb_core::write_admission_kernel::batch_is_empty(ops.len() as u64) {
                             node.db.apply_batch(ops)?;
                         }
                         if *si_gen > 0 {
