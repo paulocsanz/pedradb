@@ -5446,7 +5446,7 @@ impl<E: Env> Db<E> {
     /// Persist MANIFEST every [`BULK_MANIFEST_EVERY`] async bulk installs
     /// (off the write lock). `force` flushes leftover debt (settle).
     fn persist_bulk_manifest(&mut self, force: bool) -> Result<Option<ManifestPersist<E>>> {
-        if self.sync {
+        if crate::write_admission_kernel::dir_sync_required(self.sync) {
             self.persist_manifest()?;
             self.bulk_manifest_debt = 0;
             return Ok(None);
