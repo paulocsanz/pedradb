@@ -9800,7 +9800,8 @@ impl<E: Env> Db<E> {
     /// Data-fate (mem/L0 over limit) is `write_admit`. Drain/flush I/O stays
     /// trampoline (RFC-0171 P1.1).
     pub(crate) fn ensure_write_admitted_for(&mut self, families: &[String]) -> Result<()> {
-        let per_cf = !self.physical_cfs.is_empty() && !families.is_empty();
+        let per_cf = !crate::write_admission_kernel::batch_is_empty(self.physical_cfs.len() as u64)
+            && !families.is_empty();
         let mem_armed = self.write_stall_mem_bytes.is_some();
         let mem_limit = self.write_stall_mem_bytes.unwrap_or(0);
         let measure_mem = |db: &Self| -> usize {
