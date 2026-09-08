@@ -406,7 +406,7 @@ pub fn classify_get(
 
 /// RFC-0182 same-boot set. Any engine cut must diagnose these before
 /// claiming a win. New use-case → add a name here (one home).
-pub const BALANCE_SHAPES: [&str; 16] = [
+pub const BALANCE_SHAPES: [&str; 17] = [
     "deps_cache_overwrite_mc4",
     "ycsb_a_mc4",
     "ycsb_b_mc4",
@@ -423,6 +423,7 @@ pub const BALANCE_SHAPES: [&str; 16] = [
     "kvrocks_get_mc4",
     "myrocks_point_select_mc4",
     "nebula_get_neighbors_mc4",
+    "arango_traversal_mc4",
 ];
 
 /// One cell in a multi-shape board (RFC-0182 / /otimizar).
@@ -964,7 +965,7 @@ mod tests {
         assert_eq!(classify_probes(5, 5), GetClass::Best);
         assert_eq!(classify_probes(900, 5), GetClass::AsIsWalk);
         assert_eq!(classify_probes_as_is(900, 5), GetClass::Best);
-        assert_eq!(BALANCE_SHAPES.len(), 16);
+        assert_eq!(BALANCE_SHAPES.len(), 17);
         assert!(BALANCE_SHAPES.contains(&"ycsb_b_mc4"));
         assert!(BALANCE_SHAPES.contains(&"ycsb_c_mc4"));
         assert!(BALANCE_SHAPES.contains(&"qs_hot_get_mc4"));
@@ -976,5 +977,6 @@ mod tests {
         assert!(BALANCE_SHAPES.contains(&"kvrocks_get_mc4"));
         assert!(BALANCE_SHAPES.contains(&"myrocks_point_select_mc4"));
         assert!(BALANCE_SHAPES.contains(&"nebula_get_neighbors_mc4"));
+        assert!(BALANCE_SHAPES.contains(&"arango_traversal_mc4"));
     }
 }
