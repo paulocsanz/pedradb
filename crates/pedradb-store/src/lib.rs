@@ -1426,7 +1426,7 @@ fn clear_txn_keys<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Resu
     let prefix = txn_pair_prefix(txn_id);
     db.apply_batch(ops)?;
     let left = scan_prefix(db, &prefix);
-    if left.is_empty() {
+    if pedradb_core::write_admission_kernel::batch_is_empty(left.len() as u64) {
         let _ = db.put(txn_status_key(txn_id), b""); // will delete below
         db.apply_batch([BatchOp::delete(txn_status_key(txn_id))])?;
     }
