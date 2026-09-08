@@ -4880,7 +4880,10 @@ impl<E: Env> Db<E> {
         crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::BEFORE_MANIFEST_RENAME)?;
         // Flush plan decided by the pure kernel (RFC-0056 P0.2): the mem
         // tail is always written to an SST before any WAL rotate.
-        match crate::flush_kernel::flush_plan(self.mem.is_empty(), self.imm.is_some()) {
+        match crate::flush_kernel::flush_plan(
+            crate::write_admission_kernel::batch_is_empty(self.mem.len() as u64),
+            self.imm.is_some(),
+        ) {
             crate::flush_kernel::FlushPlan::FinishImmThenFlush
             | crate::flush_kernel::FlushPlan::WriteSstThenRotate => {
                 // Finish any in-flight imm first (single-flight).
