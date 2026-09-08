@@ -5007,7 +5007,7 @@ impl<E: Env> Db<E> {
                         stack[n] = item;
                         n += 1;
                     } else {
-                        if heap.is_empty() {
+                        if crate::write_admission_kernel::batch_is_empty(heap.len() as u64) {
                             heap.extend_from_slice(&stack[..n]);
                         }
                         heap.push(item);
