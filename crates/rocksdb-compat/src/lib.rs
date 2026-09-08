@@ -3757,7 +3757,7 @@ impl<E: PedraEnv> DB<E> {
         I: IntoIterator<Item = K>,
     {
         let keys: Vec<K> = keys.into_iter().collect();
-        if keys.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(keys.len() as u64) {
             return Vec::new();
         }
         let encoded: Vec<Vec<u8>> = keys
