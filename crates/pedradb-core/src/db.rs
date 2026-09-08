@@ -10606,6 +10606,7 @@ impl<E: Env> Db<E> {
             any_sync: false,
             next_i: n,
             failed: false,
+            wal_encoded: false,
         };
         if n == 0 {
             return Ok(g);
@@ -10711,12 +10712,31 @@ impl<E: Env> Db<E> {
             g.pending.clear();
             return;
         }
-        let refs: Vec<&[crate::batch::WriteOp]> =
-            g.pending.iter().map(|(_, ops, _)| ops.as_slice()).collect();
+        // Async: leave ops in `appended` unencoded. ConcurrentDb encodes+writes
+        // off the Db write lock (`finish_group_off_lock`); `group_commit`
+        // does the same hop in `group_finish`. G1 still encodes here so
+        // `sync_data` can write+fsync the pending frame.
+        if !g.any_sync {
+            g.appended.extend(g.pending.drain(..));
+            return;
+        }
+        let refs: Vec<&[crate::batch::WriteOp]> = if g.wal_encoded {
+            g.pending.iter().map(|(_, ops, _)| ops.as_slice()).collect()
+        } else {
+            g.appended
+                .iter()
+                .map(|(_, ops, _)| ops.as_slice())
+                .chain(g.pending.iter().map(|(_, ops, _)| ops.as_slice()))
+                .collect()
+        };
+        if refs.is_empty() {
+            return;
+        }
         match self.wal.lock().encode_write_op_batches(&refs) {
             Ok(n) => {
                 self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
                 g.appended.extend(g.pending.drain(..));
+                g.wal_encoded = true;
             }
             Err(e) => {
                 let msg = e.to_string();
@@ -10744,10 +10764,25 @@ impl<E: Env> Db<E> {
                 return g.fail_sync(e);
             }
         } else {
-            let write_err = self.wal.lock().write_pending_frame().err();
-            if let Some(e) = write_err {
-                self.fence_durability(&e, FenceClass::of_core(&e));
-                return g.fail_sync(e);
+            // Drop the WAL MutexGuard before fencing (`E0502` on `*self`).
+            let write_res = if g.wal_encoded {
+                self.wal.lock().write_pending_frame().map(|()| 0)
+            } else {
+                let refs: Vec<&[crate::batch::WriteOp]> = g
+                    .appended
+                    .iter()
+                    .map(|(_, ops, _)| ops.as_slice())
+                    .collect();
+                self.wal.lock().encode_and_write_op_batches(&refs)
+            };
+            match write_res {
+                Ok(n) => {
+                    self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
+                }
+                Err(e) => {
+                    self.fence_durability(&e, FenceClass::of_core(&e));
+                    return g.fail_sync(e);
+                }
             }
         }
         let pub_seq = g.max_appended_seq();
@@ -10818,6 +10853,9 @@ pub(crate) struct GroupInFlight {
     any_sync: bool,
     next_i: usize,
     failed: bool,
+    /// G1: ops already in the WAL pending frame. Async: false until the
+    /// off-lock encode+write hop (RFC-0180 P0.40).
+    wal_encoded: bool,
 }
 
 impl GroupInFlight {
@@ -10853,6 +10891,16 @@ impl GroupInFlight {
             self.results[*i] = Some(Err(CoreError::Internal(msg.clone())));
         }
         finish_group_results(self.results)
+    }
+
+    /// Async members not yet in the WAL frame (encode deferred off lock).
+    pub(crate) fn collect_deferred_wal<'a>(&'a self, out: &mut Vec<&'a [WriteOp]>) {
+        if self.wal_encoded || self.failed {
+            return;
+        }
+        for (_, ops, _) in &self.appended {
+            out.push(ops.as_slice());
+        }
     }
 
     #[cfg(feature = "pct")]

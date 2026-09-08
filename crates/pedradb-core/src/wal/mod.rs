@@ -196,6 +196,34 @@ impl<F: EnvFile> Wal<F> {
         Ok(n)
     }
 
+    /// Encode batches and `write()` in one take/restore (async group).
+    /// Same bytes as [`Self::encode_write_op_batches`] + [`Self::write_pending_frame`].
+    ///
+    /// # Errors
+    /// Underlying file write.
+    pub fn encode_and_write_op_batches(
+        &mut self,
+        batches: &[&[crate::batch::WriteOp]],
+    ) -> Result<u64> {
+        if batches.is_empty() {
+            return Ok(0);
+        }
+        let mut frame = self.writer.take_frame();
+        let mut n = 0u64;
+        for ops in batches {
+            n = n.saturating_add(self.writer.fragment_encoded_len(ops, &mut frame) as u64);
+        }
+        if frame.is_empty() {
+            self.writer.restore_frame(frame);
+            return Ok(n);
+        }
+        self.reserve_space(frame.len() as u64);
+        let r = self.writer.write_frame(&frame);
+        frame.clear();
+        self.writer.restore_frame(frame);
+        r.map(|()| n)
+    }
+
     /// Encode one op and `write()` it (RFC-0180 `commit_async_one`).
     /// Same bytes as [`Self::encode_write_op_batches`] + [`Self::write_pending_frame`].
     ///
@@ -504,6 +532,55 @@ mod probe_tests {
             el.as_secs_f64() * 1e6 / (n as f64 * per as f64),
         );
         drop(w);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0180 P0.40: one-hop encode+write matches encode-then-write bytes.
+    #[test]
+    fn rfc0180_encode_and_write_op_batches_matches_two_step() {
+        let dir = std::env::temp_dir().join(format!(
+            "wal-onehop-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let val = bytes::Bytes::from(vec![b'x'; 64]);
+        let mut batches: Vec<Vec<crate::batch::WriteOp>> = Vec::new();
+        for b in 0..4u64 {
+            let mut ops = Vec::new();
+            for i in 0..4u64 {
+                ops.push(crate::batch::WriteOp::put(
+                    b * 4 + i + 1,
+                    format!("k/{b}/{i}"),
+                    val.clone(),
+                ));
+            }
+            batches.push(ops);
+        }
+        let refs: Vec<&[crate::batch::WriteOp]> = batches.iter().map(|o| o.as_slice()).collect();
+
+        let split_path = dir.join("split.log");
+        let mut split = Wal::create(&split_path).unwrap();
+        split.encode_write_op_batches(&refs).unwrap();
+        split.write_pending_frame().unwrap();
+        drop(split);
+
+        let once_path = dir.join("once.log");
+        let mut once = Wal::create(&once_path).unwrap();
+        once.encode_and_write_op_batches(&refs).unwrap();
+        drop(once);
+
+        let (a, end_a, _) = Wal::recover_span_on(&StdEnv, &split_path).unwrap();
+        let (b, end_b, _) = Wal::recover_span_on(&StdEnv, &once_path).unwrap();
+        assert_eq!(a, b);
+        assert_eq!(end_a, end_b);
+        assert_eq!(
+            StdEnv.metadata_len(&split_path).unwrap(),
+            StdEnv.metadata_len(&once_path).unwrap()
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
