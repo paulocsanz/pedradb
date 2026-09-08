@@ -827,7 +827,7 @@ impl KeyCodec {
 
     /// [`Self::encode_pooled`] with a prefix from [`Self::fill_run_prefix`].
     fn encode_run(&self, prefix: &[u8], key: &[u8], pool: &mut bytes::BytesMut) -> Bytes {
-        if prefix.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(prefix.len() as u64) {
             pool.reserve(key.len());
             pool.extend_from_slice(key);
             return pool.split_to(key.len()).freeze();
