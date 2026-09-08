@@ -28,6 +28,14 @@ conjunto — regressão S→W é recusa, não “a célula-alvo ganhou”.
 
 ## Implement (same turn — mandatory)
 
+**Grind law:** report-only is a failure. Rank then land. Blocked item
+(caixa / waiting-on-human) → say blocked, fall through, implement the
+next unblocked item this turn.
+
+**Number this fire:** engine land without measured `avg_group` / `qps` /
+`p50_ns` / `ratio` (timed window, not seed, not static `cut=grouping`) is
+a failed fire. Journal `number:`. Darwin = DIAG.
+
 **Report-only is a failure.** Caixa não desculpa turno vazio (espelho
 `/verificacao-next`). Rank the board, then **land code**:
 

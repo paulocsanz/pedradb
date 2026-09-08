@@ -188,6 +188,9 @@ medida no mesmo harness isolado.
       2-client não espera fantasmas; n≥16 leftover cap=2. `begin_submit`
       `fetch_max` o pico. Teste `rfc0180_leader_linger_and_async_catchup`.
       status: `done`
+- [x] **P0.54** `avg_group` da janela timed (delta `write_group_stats`),
+      não o seed 1c. Canário `rfc0180_async_mc4_avg_group_not_one`.
+      `group_profile` default async (`sync=false`). status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
 
@@ -256,6 +259,7 @@ medida no mesmo harness isolado.
 | P0.51 | p0 | wait peer before lone (barrier start) | done | 256 spins; 1c still lones | 2026-09-08 |
 | P0.52 | p0 | wait_peer target expected_group=4 | done | not stop at 2; 1c still lones | 2026-09-08 |
 | P0.53 | p0 | hoped cap = grouping_cap(last_peak) | done | 2-client / n≥16 leftover | 2026-09-08 |
+| P0.54 | p0 | timed avg_group delta + async canary | done | seed no longer dilutes; group_profile async | 2026-09-08 |
 | P1.1 | p1 | 3-run caixa | todo | — | 2026-09-07 |
 | P2.1 | p2 | 3/3 quiet ≥1× | todo | 0182 P1.1 | 2026-09-07 |
 | P2.2 | p2 | leftover hang | done | 0181 P0.3 steal | 2026-09-07 |

@@ -35,6 +35,8 @@ fn main() {
     let catchup_us: Option<u64> = std::env::args().nth(5).and_then(|s| s.parse().ok());
     let _ = std::fs::remove_dir_all(&dir);
     let db = ConcurrentDb::open(&dir).expect("open");
+    // overwrite_mc4 class: Rocks default sync=false. G1 put() is not that cell.
+    db.set_default_write_sync(false);
     if let Some(us) = catchup_us {
         db.set_write_group_catchup_window(std::time::Duration::from_micros(us));
     }
@@ -69,11 +71,11 @@ fn main() {
     let (submits, queued, groups, group_ops) = db.write_group_stats();
     all_latencies.sort_unstable();
     let avg = all_latencies.iter().sum::<u64>() / total.max(1) as u64;
+    let avg_group = group_ops as f64 / groups.max(1) as f64;
     println!(
-        "group_profile clients={clients} ops={total} payload={payload_len}B catchup={window_us}us wall={:.3}s qps={:.0} wal_syncs={syncs} group_size={:.2}",
+        "group_profile sync=false clients={clients} ops={total} payload={payload_len}B catchup={window_us}us wall={:.3}s qps={:.0} wal_syncs={syncs} avg_group={avg_group:.2}",
         wall.as_secs_f64(),
         total as f64 / wall.as_secs_f64(),
-        total as f64 / syncs.max(1) as f64
     );
     println!(
         "  diag submits={submits} queued_behind_leader={queued} ({:.0}%) groups={groups} ops_in_groups={group_ops} avg_group={:.2}",
