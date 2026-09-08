@@ -1122,7 +1122,7 @@ impl CountCache {
         // a "past" write for the entry that reader is about to insert —
         // without this record the pre-write answer validates forever,
         // because `get` only checks the dirty log.
-        if g.dirty.capacity == 0 {
+        if crate::write_admission_kernel::batch_is_empty(g.dirty.capacity as u64) {
             return;
         }
         for k in keys {
