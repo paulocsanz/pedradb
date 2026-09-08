@@ -2085,4 +2085,14 @@ mod tests {
         );
         assert!(participating_if_member(true));
     }
+
+    #[test]
+    fn membership_identity_before_applied_on_live_applied_first_is_not_ok() {
+        assert!(membership_identity_before_applied(true));
+        assert!(
+            !membership_identity_before_applied_as_is(true),
+            "AS-IS dente: persist applied first"
+        );
+        assert!(!membership_identity_before_applied(false));
+    }
 }
