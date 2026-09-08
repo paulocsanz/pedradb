@@ -1586,7 +1586,7 @@ fn repair_si_hist_tip<E: Env>(db: &mut Db<E>, user_key: &[u8], live: Option<&[u8
         None => return Ok(()),
         Some(b) => decode_hist(b.as_ref())?,
     };
-    if hist.is_empty() {
+    if pedradb_core::write_admission_kernel::batch_is_empty(hist.len() as u64) {
         return Ok(());
     }
     let tip_gen = hist.last().map(|(g, _)| *g).unwrap_or(0);
