@@ -16,7 +16,9 @@ Refresh this file when a cell moves class. One row per cell.
 | get 50M/100M clock | **S** | calibrated | class best/happy vs 0176; scale `get_hit` `classify_get` (0184 P2.6) | RFC-0176 / 0184 |
 | hydrate 25M/100M | **S** | Linux >1× | — | RFC-0162 |
 | **overwrite_mc4 25M** | **U** | Linux 0.557× 3/3; Darwin 0180 ~1.00 mediana (named 0.816); **caixa pós-0180 none** | Unpaid: Linux `compat_over_rocksdb`. Darwin group_profile is not this cell. | RFC-0178 P1.3 / 0180 / 0184 P1.1 |
-| rockset_hybrid | **U** | Darwin DIAG **0.123×** (5.1 k vs 41 k); no Linux 3-run | Rockset ingest batch + point get. Named loss. | RFC-0043 |
+| rockset_hybrid | **U** | Darwin DIAG **0.811×** (115 k vs 142 k; was 0.123 serial puts) | WriteBatch ingest + get. Named loss. | RFC-0043 |
+| yugabyte_docdb_rmw | **U** | Darwin DIAG **0.732×** (404 k vs 552 k) | DocDB intent overlay + committed batch. Named loss. | RFC-0043 |
+| ycsb_b_mc4 | **U** | Darwin DIAG **0.060×** (253 k vs 4.2 M, tiny window); no Linux 3-run | 95% get mc4. `BALANCE_SHAPES`. | RFC-0184 P2.36 |
 | ycsb_f_mc4 3/3 intra | **W** | Linux mediana 1.47; run2 0.766 | `get_path` (`read_pct=50`; mc WRITEPHASE) | RFC-0178 P1.4 / 0184 |
 | prefix 100M 4 GiB | **W** | caixa 0.70× | bounded-cache scan; scale `classify_probes` vs \(P_{\mathrm{best}}\) (0184 P2.5) | RFC-0178 P1.2 / 0184 |
 | probe_miss | **W** | 0.27× | miss path; scale `classify_probes` vs \(P_{\mathrm{best}}\) (0184 P2.4) | RFC-0178 P1.1 / 0167 / 0184 |
@@ -43,7 +45,6 @@ Refresh this file when a cell moves class. One row per cell.
 | ycsb_c_big 2^20 uniform get | **T**→tool | RFC-0059 | WRITEPHASE → `diagnose.lever` (0184 P2.20); `get_path` | RFC-0059 / 0184 |
 | probe_hit p50 | **T**→tool | scale | `classify_get` p50 vs 0176 (0184 P2.21) | RFC-0184 |
 | hydrate ingest | **T**→tool | scale | WRITEPHASE → `diagnose.lever` (0184 P2.22) | RFC-0184 |
-| ycsb_b_mc4 | **U** | harness 95% get | `get_path`; no Linux 3-run cartaz; now in `BALANCE_SHAPES` (0184 P2.23) | RFC-0163 / 0184 |
 | settle compact | **T**→tool | scale | WRITEPHASE → `diagnose.lever` (0184 P2.24) | RFC-0184 |
 | pedra diagnose CLI JSON | **T**→tool | CLI | same `{"lever":…}` / `{"class":…}` as harness (0184 P2.25) | RFC-0184 |
 | compare CLI diagnose JSON | **T**→tool | compare | `extract_cli_diagnose_lever` (0184 P2.26) | RFC-0184 |

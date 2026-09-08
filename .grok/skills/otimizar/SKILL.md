@@ -12,11 +12,11 @@ description: >
 
 ## Grind pressure (one block, overwritten each fire)
 
-- Last fire: worked (rockset_hybrid COMPARE + vs-Rocks ratio=0.123 DIAG; overwrite_mc4 DIAG 1.896 with Rocks collapsed 106k≪260k — not a win)
-- Why: Linux overwrite_mc4 0.557× still unpaid; new shape is a named loss
-- This fire MUST land: engine cut aimed at Linux overwrite_mc4 `compat_over_rocksdb` or rockset_hybrid 0.123
-- Forbidden this fire: group_profile as the number; Darwin as Linux win; collapsed Rocks as win
-- Deeper: overwrite_mc4 vs quiet Rocks; rockset ingest batch path
+- Last fire: worked (yugabyte_docdb_rmw 0.732 DIAG; rockset_hybrid 0.123→0.811 via WriteBatch; ycsb_b_mc4 0.060 DIAG)
+- Why: Linux overwrite_mc4 0.557× still unpaid; RwLock spin/fair already exists (RFC-0045) — do not re-land
+- This fire MUST land: engine cut on overwrite_mc4 or ycsb_b_mc4 get_path — not another lock spin
+- Forbidden this fire: PEDRA_WRITE_SPIN/FAIR duplicate; group_profile; Darwin as Linux
+- Deeper: ycsb_b_mc4 get_path; overwrite lock_wait hold time (not acquire spin)
 
 Peer: Rocks default `ROCKS_PARITY_SYNC=0`. G1 1c write-per-op ≠ win.
 Fjall = absoluto, never a ratio win. **Linux 3-run = cartaz. Darwin vs
