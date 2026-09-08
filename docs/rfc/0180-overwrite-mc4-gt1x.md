@@ -235,6 +235,11 @@ medida no mesmo harness isolado.
       must not mix at 25M leftover. Always-on, no Cargo feature.
       Tests `rfc0180_park_foreign_idx_decision`,
       `rfc0180_park_foreign_idx_on_new_slash_prefix`. status: `done`
+- [x] **P0.69** Host worker skips L0-at-trigger compact while
+      `recently_multi` (2 ms). `install_prepared_l0_compact` takes
+      `db.write()` in the mc4 handoff gap. 1c moderate QPS still drains
+      (not multi). Always-on, no Cargo feature. Test
+      `rfc0180_skip_l0_compact_while_recently_multi`. status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
 
@@ -312,6 +317,7 @@ medida no mesmo harness isolado.
 | P0.62 | p0 | unpinned overwrite supersede live slot | done | tail stays unique keys; pin keeps MVCC | 2026-09-08 |
 | P0.66 | p0 | one-slash idx shard (c/ vs ycsb/) | done | not HashMap; F220 multi-slash empty | 2026-09-08 |
 | P0.68 | p0 | park foreign slash leftover O(1) | done | ≥ write-buffer/2; ycsb seed vs c/ apply | 2026-09-08 |
+| P0.69 | p0 | skip L0-at-trigger while recently_multi | done | 1c drain stays; no Cargo feature | 2026-09-08 |
 | P1.1 | p1 | 3-run caixa | todo | — | 2026-09-07 |
 | P2.1 | p2 | 3/3 quiet ≥1× | todo | 0182 P1.1 | 2026-09-07 |
 | P2.2 | p2 | leftover hang | done | 0181 P0.3 steal | 2026-09-07 |
