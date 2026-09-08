@@ -1526,7 +1526,9 @@ impl World {
                     match cluster.add_member(*node) {
                         Ok(()) => {
                             memb.set_offline(*node, false);
-                            if memb.offline_ids().is_empty() {
+                            if pedradb_core::write_admission_kernel::batch_is_empty(
+                                memb.offline_ids().len() as u64,
+                            ) {
                                 net.heal();
                             }
                             self.exchange(cluster, net, trace, step, "add")?;
