@@ -276,6 +276,8 @@ pub const COMPARE_SHAPES: &[&str] = &[
     "ycsb_b_mc4",
     // RFC-0043 — Rockset (→OpenAI) converged index. Ingest batch + point get.
     "rockset_hybrid",
+    // YugabyteDB DocDB: intents CF + committed CF (Rocks-based).
+    "yugabyte_docdb_rmw",
 ];
 
 /// Length of the RFC-0041 official prefix of [`COMPARE_SHAPES`].
@@ -2316,20 +2318,13 @@ impl YcsbRunner {
         let t0 = Instant::now();
         for op in 0..cfg_ops {
             let t = Instant::now();
-            let mut ok = true;
-            for j in 0..ingest {
-                let u = (op * ingest + j) % records;
-                if !e.put(&dkey(u), &yval) {
-                    ok = false;
-                    break;
-                }
-            }
-            if ok {
-                let q = self.pick(&mut rng, records);
-                if e.get(&dkey(q)).is_err() {
-                    ok = false;
-                }
-            }
+            // Real Rockset ingest is a WriteBatch, not 8 serial puts
+            // (those 8× the 1c write-lock tax and were 0.123× vs Rocks).
+            let keys: Vec<Vec<u8>> = (0..ingest)
+                .map(|j| dkey((op * ingest + j) % records))
+                .collect();
+            let q = self.pick(&mut rng, records);
+            let ok = e.batch_put_same("default", &keys, &yval) && e.get(&dkey(q)).is_ok();
             if !ok {
                 errors += 1;
             }
@@ -2345,6 +2340,67 @@ impl YcsbRunner {
         if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
             let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 50, cfg_ops as u64);
             eprint_write_diagnose("rockset_hybrid", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
+        self.rng = rng;
+        blocks
+    }
+
+    /// YugabyteDB DocDB: intent keyspace then committed keyspace (two
+    /// prefixes on default CF — DocDB uses two Rocks instances; the mix
+    /// is overlay-get vs atomic intent+commit). 70/30. Same-class async.
+    pub fn run_yugabyte<E: Engine>(&mut self, e: &E) -> Vec<String> {
+        if !shape_wanted("yugabyte_docdb_rmw") {
+            return Vec::new();
+        }
+        e.set_write_sync(write_sync_for_suite("yugabyte"));
+        let records = self.cfg.records;
+        let cfg_ops = self.cfg.ops;
+        let yval = vec![b'Y'; self.cfg.payload];
+        let mut rng = std::mem::take(&mut self.rng);
+        for i in 0..records {
+            assert!(e.put(&yckey(i), &yval), "yugabyte seed {i}");
+        }
+        let phase0 = e.write_phase_snapshot();
+        let mut lats = Vec::with_capacity(cfg_ops);
+        let mut errors = 0u64;
+        let t0 = Instant::now();
+        for _ in 0..cfg_ops {
+            let t = Instant::now();
+            let u = self.pick(&mut rng, records);
+            let ok = if xorshift(&mut rng) % 100 < 70 {
+                e.get(&yikey(u)).is_ok() && e.get(&yckey(u)).is_ok()
+            } else {
+                e.batch(vec![
+                    CfWrite::Put {
+                        cf: "default",
+                        k: yikey(u),
+                        v: yval.clone(),
+                    },
+                    CfWrite::Put {
+                        cf: "default",
+                        k: yckey(u),
+                        v: yval.clone(),
+                    },
+                ])
+            };
+            if !ok {
+                errors += 1;
+            }
+            lats.push(ms(t));
+        }
+        let mut blocks = vec![summarize(
+            "yugabyte_docdb_rmw",
+            cfg_ops,
+            t0.elapsed(),
+            &mut lats,
+        )];
+        eprintln!("[rocks-parity] yugabyte_docdb_rmw done ops={cfg_ops} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 70, cfg_ops as u64);
+            eprint_write_diagnose("yugabyte_docdb_rmw", &d);
             if let Some(last) = blocks.last_mut() {
                 *last = attach_diagnose(std::mem::take(last), Some(&d));
             }
@@ -3132,6 +3188,16 @@ pub fn lprefix(src: usize) -> Vec<u8> {
 /// SurrealDB / crud-bench document key (independent of YCSB).
 pub fn skey(i: usize) -> Vec<u8> {
     format!("s/{i:06}").into_bytes()
+}
+
+/// Yugabyte DocDB intent (provisional) vs committed keyspaces.
+pub fn yikey(i: usize) -> Vec<u8> {
+    format!("yi/{i:06}").into_bytes()
+}
+
+/// Yugabyte DocDB committed row.
+pub fn yckey(i: usize) -> Vec<u8> {
+    format!("yc/{i:06}").into_bytes()
 }
 
 /// Kvrocks BlobDB-sized value key (independent of the 1 KB SET canary).
@@ -4032,6 +4098,7 @@ mod tests {
             "ingest_sst",
             "ycsb_b_mc4",
             "rockset_hybrid",
+            "yugabyte_docdb_rmw",
         ] {
             assert!(
                 COMPARE_SHAPES.contains(&name),
@@ -4348,6 +4415,13 @@ mod tests {
             rok[0].contains("\"diagnose\": {\"lever\":"),
             "rockset_hybrid JSON needs diagnose.lever:\n{}",
             rok[0]
+        );
+        let yb = r.run_yugabyte(&e);
+        assert_eq!(block_names(&yb), vec![Some("yugabyte_docdb_rmw")]);
+        assert!(
+            yb[0].contains("\"diagnose\": {\"lever\":"),
+            "yugabyte_docdb_rmw JSON needs diagnose.lever:\n{}",
+            yb[0]
         );
         let oxi = r.run_oxigraph(&e);
         assert_eq!(
