@@ -170,6 +170,12 @@ medida no mesmo harness isolado.
 - [x] **P0.49** `queued_pending` / `active`: Release no enqueue,
       Acquire no catch-up (Darwin ARM Relaxed podia perder o join).
       Teste `rfc0180_leader_linger_and_async_catchup`. status: `done`
+- [x] **P0.50** Depois do resign, o primeiro a reentrar vê `active==1`
+      (`grouping_cap=1`) e fecha o grupo sozinho — WRITEPHASE avg~2.7
+      vs `expected_group=4`. `wait_sibling_reentry`: 1024 `spin_loop`
+      até `active` crescer, só se `recently_concurrent`. Sem condvar.
+      1c não espera. Teste `rfc0180_leader_linger_and_async_catchup`.
+      status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
 
@@ -234,6 +240,7 @@ medida no mesmo harness isolado.
 | P0.47 | p0 | bypass 1-op WAL off Db write lock | done | async_one_stage/publish; 1c on-lock stays | 2026-09-08 |
 | P0.48 | p0 | bypass multi-op WAL off lock | done | async_ops_stage/publish; commit_async_ops uses same stage | 2026-09-08 |
 | P0.49 | p0 | queued_pending Release/Acquire | done | Darwin ARM catch-up sees enqueue | 2026-09-08 |
+| P0.50 | p0 | wait sibling re-entry after resign | done | active==1 hole; 1024 spins; 1c skips | 2026-09-08 |
 | P1.1 | p1 | 3-run caixa | todo | — | 2026-09-07 |
 | P2.1 | p2 | 3/3 quiet ≥1× | todo | 0182 P1.1 | 2026-09-07 |
 | P2.2 | p2 | leftover hang | done | 0181 P0.3 steal | 2026-09-07 |
