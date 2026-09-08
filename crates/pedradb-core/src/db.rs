@@ -8984,7 +8984,7 @@ impl<E: Env> Db<E> {
                 }
             }
         }
-        if records.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(records.len() as u64) {
             return Ok((records, self.last_sequence()));
         }
         crate::batch::share_consecutive_equal_values(&mut records);

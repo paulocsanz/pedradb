@@ -730,6 +730,12 @@ mod tests {
             lone.contains("batch_is_empty("),
             "lone_sync_commit must match batch_is_empty"
         );
+        let prep_ops = named_fn_src(include_str!("db.rs"), "prepare_write_ops_spill")
+            .expect("prepare_write_ops_spill");
+        assert!(
+            prep_ops.contains("batch_is_empty("),
+            "prepare_write_ops_spill must match batch_is_empty"
+        );
     }
 
     #[test]
