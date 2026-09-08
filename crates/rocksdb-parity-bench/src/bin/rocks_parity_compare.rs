@@ -490,6 +490,12 @@ mod tests {
         );
         assert_eq!(extract_cli_diagnose_class(raw), None);
         assert_eq!(extract_cli_diagnose_class(cli), None);
+        let probes_cli = r#"{"class":"as_is_walk","per_get":900,"p_best":5}"#;
+        assert_eq!(
+            extract_cli_diagnose_class(probes_cli).as_deref(),
+            Some("as_is_walk"),
+            "RFC-0184 P2.30 probes JSON still yields class"
+        );
         let bal = r#"{"admits":0,"cut":"wal_encode_or_write","cells":3}"#;
         assert_eq!(
             extract_cli_diagnose_admits(bal),
