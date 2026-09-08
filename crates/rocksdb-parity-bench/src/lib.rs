@@ -1958,6 +1958,7 @@ impl YcsbRunner {
         for i in 0..records {
             assert!(e.put(&okey(i), &yval), "ceph omap seed {i}");
         }
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut puts, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -1986,7 +1987,15 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] bluestore_omap_write done puts={puts} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
+            eprint_write_diagnose("bluestore_omap_write", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
 
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut gets, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -2010,6 +2019,13 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] bluestore_omap_read done gets={gets} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
+            eprint_write_diagnose("bluestore_omap_read", &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
         self.rng = rng;
         blocks
     }
@@ -4078,9 +4094,21 @@ mod tests {
             "flink_window_state is put+scan:\n{}",
             stream[0]
         );
+        let ceph = r.run_ceph(&e);
         assert_eq!(
-            block_names(&r.run_ceph(&e)),
+            block_names(&ceph),
             vec![Some("bluestore_omap_write"), Some("bluestore_omap_read"),]
+        );
+        for b in &ceph {
+            assert!(
+                b.contains("\"diagnose\": {\"lever\":"),
+                "RFC-0184 P2.14 ceph JSON needs diagnose.lever:\n{b}"
+            );
+        }
+        assert!(
+            ceph[1].contains("\"lever\":\"get_path\""),
+            "bluestore_omap_read is get+scan:\n{}",
+            ceph[1]
         );
         assert_eq!(
             block_names(&r.run_solana(&e)),
