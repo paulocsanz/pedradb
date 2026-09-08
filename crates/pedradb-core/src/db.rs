@@ -1334,6 +1334,9 @@ struct SstRun {
     packed_lo: Option<DisjointLos>,
     packed_hi: Option<DisjointLos>,
     disjoint_los: Option<DisjointLos>,
+    /// Parallel to `tables_newest_first`: index in `sorted_by_lo`, or
+    /// `u32::MAX` if absent (RFC-0178 P0.15).
+    by_lo_pos: Option<Vec<u32>>,
     /// Any table in the run carries a range tombstone. Bulk hydrate never
     /// does; skipping the per-get collect over ~400 files was the remaining
     /// O(n) on `probe_miss` after bounds+bloom.
@@ -4418,6 +4421,7 @@ impl<E: Env> Db<E> {
                     packed_lo: None,
                     packed_hi: None,
                     disjoint_los: None,
+                    by_lo_pos: None,
                     any_range_tombstones: false,
                 }),
             }
@@ -4441,6 +4445,9 @@ impl<E: Env> Db<E> {
                 DisjointLos { bytes, ends }
             });
             run.disjoint_los = run.packed_lo.clone();
+            run.by_lo_pos = run.sorted_by_lo.as_ref().map(|by_lo| {
+                crate::probe_order_kernel::by_lo_rank(&run.tables_newest_first, by_lo)
+            });
             run.any_range_tombstones = run
                 .tables_newest_first
                 .iter()
@@ -9841,9 +9848,10 @@ impl<E: Env> Db<E> {
                     // order is kernel-owned (RFC-0164 P0.2) — candidates
                     // covering `key`, newest-first; packed bounds skip the
                     // non-covering files.
+                    let pos = run.by_lo_pos.as_deref().unwrap_or(&[]);
                     for sst_i in crate::probe_order_kernel::probe_order_covering(
                         &run.tables_newest_first,
-                        by_lo,
+                        pos,
                         p,
                         |pos| phis.lo(pos) >= key,
                     ) {
@@ -9948,9 +9956,10 @@ impl<E: Env> Db<E> {
                     // order is kernel-owned (RFC-0164 P0.2) — candidates
                     // covering `key`, newest-first; packed bounds skip the
                     // non-covering files.
+                    let pos = run.by_lo_pos.as_deref().unwrap_or(&[]);
                     for sst_i in crate::probe_order_kernel::probe_order_covering(
                         &run.tables_newest_first,
-                        by_lo,
+                        pos,
                         p,
                         |pos| phis.lo(pos) >= key,
                     ) {
