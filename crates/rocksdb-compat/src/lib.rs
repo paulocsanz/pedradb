@@ -2370,7 +2370,7 @@ impl<E: PedraEnv> DB<E> {
     fn tls_point_ids(&self, cf: &str, key: &[u8]) -> (u64, u64) {
         let epoch = self.cache_epoch_base + self.inner.point_tls_epoch();
         let effective = cf_encode_effective(cf, self.codec.default_raw);
-        let gen = if effective.is_empty() {
+        let gen = if pedradb_core::write_admission_kernel::batch_is_empty(effective.len() as u64) {
             self.inner.key_tls_gen(key)
         } else {
             self.inner.key_tls_gen_prefixed(effective.as_bytes(), key)
