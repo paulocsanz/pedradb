@@ -694,6 +694,11 @@ mod tests {
             prep.contains("wal_sync_required("),
             "group_prepare must match wal_sync_required"
         );
+        let apply = named_fn_src(include_str!("db.rs"), "group_apply").expect("group_apply");
+        assert!(
+            apply.contains("wal_sync_required("),
+            "group_apply must match wal_sync_required"
+        );
     }
 
     #[test]

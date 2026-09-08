@@ -9621,7 +9621,7 @@ impl<E: Env> Db<E> {
             }
             self.change_log.extend(feed_batch);
         }
-        if any_sync {
+        if crate::write_admission_kernel::wal_sync_required(true, any_sync, false) {
             self.maybe_persist_changelog_after_durable_commit();
         }
 
