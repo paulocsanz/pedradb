@@ -222,6 +222,12 @@ a linha quando há phasesΔ. Sem harness novo.
       Darwin DIAG vs Rocks `sync=false`: `ratio=1.021` (32.7 k / 32.0 k
       QPS) — tied on a load-12 host, not a quiet win, Pedra max 147 ms
       vs Rocks 17 ms. Not Linux cartaz. — status: `done`
+- [x] **P2.43** `rockset_hybrid_mc4` (ingest WriteBatch + point get, 4
+      clients) in `COMPARE_SHAPES`, `BALANCE_SHAPES`, and
+      `run_rockset_clients`. Test `rfc0184_rockset_hybrid_mc4_in_compare`.
+      Darwin DIAG vs Rocks `sync=false`: `ratio=0.543` (29.0 k / 53.3 k
+      QPS) — named loss kept. 1c was 0.811. Not Linux cartaz.
+      — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -278,6 +284,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.40 | p2 | qs_hot_get_mc4 COMPARE+BALANCE | done | QS hot mc4; Darwin DIAG 0.719× named loss | 2026-09-08 |
 | P2.41 | p2 | qs_neg_lookup_mc4 COMPARE+BALANCE | done | QS miss mc4; Darwin DIAG 0.808× named loss | 2026-09-08 |
 | P2.42 | p2 | qs_batch_write_mc4 COMPARE+BALANCE | done | QS batch-put mc4; Darwin DIAG 1.021 tied, not a quiet win | 2026-09-08 |
+| P2.43 | p2 | rockset_hybrid_mc4 COMPARE+BALANCE | done | Rockset ingest+get mc4; Darwin DIAG 0.543× named loss | 2026-09-08 |
 
 ## Acceptance Criteria
 
@@ -329,7 +336,8 @@ a linha quando há phasesΔ. Sem harness novo.
   `ycsb_c_all_reads_timed_zero_is_get_path`;
   `rfc0184_diagnosis_json_has_lever`;
   `extract_diagnose_lever_from_bench_object`;
-  `rfc0184_qs_batch_write_mc4_in_compare` (P2.42).
+  `rfc0184_qs_batch_write_mc4_in_compare` (P2.42);
+  `rfc0184_rockset_hybrid_mc4_in_compare` (P2.43).
 - **Telemetry / Analytics:** uma linha `diagnose dominant=… lever=…`;
   `benches[].diagnose.lever` no JSON; compare copia para a row.
   scale `get_hit` / `lookup_100` / `probe_hit` imprimem `diagnose get … class=…` (P2.6/P2.7/P2.21).
