@@ -136,6 +136,19 @@ macro_rules! media_durable_admitted_as_is_body {
     };
 }
 
+macro_rules! stacked_fsync_liars_admitted_body {
+    ($lying:expr, $det_io:expr) => {{
+        let _ = ($lying, $det_io);
+        false
+    }};
+}
+
+macro_rules! stacked_fsync_liars_admitted_as_is_body {
+    ($lying:expr, $det_io:expr) => {
+        $lying && $det_io
+    };
+}
+
 /// First-committer-wins predicate (OCC): a transaction that read
 /// snapshot `snap` against current `last_seq` conflicts iff the window
 /// `(snap, last_seq]` is non-empty **and** some key it touched was
@@ -422,15 +435,17 @@ pub fn media_durable_admitted_as_is(fsync_ok: bool) -> bool {
 /// RFC-0078 P1.2 / RFC-0052: `RecordingEnv::Lying` and det_io PRELOAD
 /// are two fsync-liar boxes. Stacking them in one process is not a
 /// campaign. Always refuse.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn stacked_fsync_liars_admitted(_lying: bool, _det_io: bool) -> bool {
-    false
+    stacked_fsync_liars_admitted_body!(_lying, _det_io)
 }
 
 /// AS-IS: AND both liar boxes in one run (the 0052 hole).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn stacked_fsync_liars_admitted_as_is(lying: bool, det_io: bool) -> bool {
-    lying && det_io
+    stacked_fsync_liars_admitted_as_is_body!(lying, det_io)
 }
 
 /// RFC-0078 P2.2: closing the lying-fsync model does not invent a TCG
@@ -544,6 +559,20 @@ pub fn media_durable_admitted_as_is(fsync_ok: bool) -> (ok: bool)
         ok == fsync_ok,
 {
     media_durable_admitted_as_is_body!(fsync_ok)
+}
+
+pub fn stacked_fsync_liars_admitted(_lying: bool, _det_io: bool) -> (ok: bool)
+    ensures
+        ok == false,
+{
+    stacked_fsync_liars_admitted_body!(_lying, _det_io)
+}
+
+pub fn stacked_fsync_liars_admitted_as_is(lying: bool, det_io: bool) -> (ok: bool)
+    ensures
+        ok == (lying && det_io),
+{
+    stacked_fsync_liars_admitted_as_is_body!(lying, det_io)
 }
 
 #[derive(PartialEq, Eq, Copy, Clone)]
