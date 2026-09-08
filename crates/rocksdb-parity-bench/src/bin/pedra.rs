@@ -141,7 +141,15 @@ fn diagnose_get_cmd(args: &[String]) -> Result<(), ()> {
         f.best_ns, f.happy_ns, f.worst_ns, as_is.best_ns
     );
     println!("measured_ns={measured_ns} class={}", class.token());
-    println!(r#"{{"class":"{}"}}"#, class.token());
+    println!(
+        r#"{{"class":"{}","measured_ns":{},"best":{},"happy":{},"worst":{},"as_is":{}}}"#,
+        class.token(),
+        measured_ns,
+        f.best_ns,
+        f.happy_ns,
+        f.worst_ns,
+        as_is.best_ns
+    );
     Ok(())
 }
 

@@ -482,11 +482,11 @@ mod tests {
             "RFC-0184 P2.26 CLI diagnose JSON"
         );
         assert_eq!(extract_cli_diagnose_lever(raw), None);
-        let get_cli = r#"{"class":"worst"}"#;
+        let get_cli = r#"{"class":"worst","measured_ns":4400,"best":1100,"happy":2000,"worst":3000,"as_is":12000}"#;
         assert_eq!(
             extract_cli_diagnose_class(get_cli).as_deref(),
             Some("worst"),
-            "RFC-0184 P2.27 CLI get/probes class"
+            "RFC-0184 P2.29 clock JSON still yields class"
         );
         assert_eq!(extract_cli_diagnose_class(raw), None);
         assert_eq!(extract_cli_diagnose_class(cli), None);
