@@ -700,7 +700,7 @@ impl KeyGenMap {
 
     /// Hash of `pfx || 0 || key`, same bytes as a CF-prefixed user key.
     fn bucket_prefixed(pfx: &[u8], key: &[u8]) -> usize {
-        if pfx.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(pfx.len() as u64) {
             return Self::bucket_of(key);
         }
         const STACK: usize = 192;
