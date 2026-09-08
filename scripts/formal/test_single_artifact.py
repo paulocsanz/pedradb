@@ -350,6 +350,22 @@ def main() -> int:
         print("FAIL revert_clears_status twin≠kernel did not fail")
         return 1
     print("ok mutant revert_clears_status twin≠kernel named")
+    rua_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in rua_mutant["pairs"]:
+        if pair.get("id") == "revert_user_action":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/txn_kernel.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing revert_user_action")
+        return 1
+    hits = [m for m in _sa_fails(rua_mutant) if m.startswith("revert_user_action:")]
+    if not hits:
+        print("FAIL revert_user_action twin≠kernel did not fail")
+        return 1
+    print("ok mutant revert_user_action twin≠kernel named")
     # Drive the same rule through check_twins (may also report unrelated
     # dirty-tree twin drift; we only require the SA id).
     try:
