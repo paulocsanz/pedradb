@@ -148,6 +148,8 @@ a linha quando há phasesΔ. Sem harness novo.
 - [x] **P2.25** `pedra diagnose write|get|probes|balance` imprime
       JSON object (`{"lever":…}` / `{"class":…}` / `{"admits":…}`).
       — status: `done`
+- [x] **P2.26** compare lê `{"lever":…}` de stdout CLI (sem
+      `benches[]`). — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -187,6 +189,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.23 | p2 | BALANCE_SHAPES ycsb_b_mc4 | done | 95% get rung no gate 0182 | 2026-09-08 |
 | P2.24 | p2 | scale settle diagnose.lever | done | WRITEPHASE compact/ingest | 2026-09-08 |
 | P2.25 | p2 | CLI diagnose JSON object | done | write lever; get/probes class; balance admits | 2026-09-08 |
+| P2.26 | p2 | compare CLI diagnose JSON | done | extract_cli_diagnose_lever | 2026-09-08 |
 
 ## Acceptance Criteria
 
@@ -223,6 +226,7 @@ a linha quando há phasesΔ. Sem harness novo.
   `BALANCE_SHAPES` `ycsb_b_mc4` (P2.23);
   scale `settle` `diagnose.lever` (P2.24);
   `pedra diagnose` JSON object (P2.25);
+  compare CLI `{"lever":…}` (P2.26);
   `ycsb_c_all_reads_timed_zero_is_get_path`;
   `rfc0184_diagnosis_json_has_lever`;
   `extract_diagnose_lever_from_bench_object`.

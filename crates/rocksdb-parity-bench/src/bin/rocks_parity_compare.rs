@@ -331,6 +331,14 @@ fn extract_diagnose_lever(raw: &str, shape: &str) -> Option<String> {
     None
 }
 
+/// RFC-0184 P2.26: `pedra diagnose write` stdout is a bare object (no benches).
+fn extract_cli_diagnose_lever(raw: &str) -> Option<String> {
+    if raw.contains("\"name\"") {
+        return None;
+    }
+    extract_string_field(raw, "lever")
+}
+
 /// Best-effort extract name → qps (or keys_per_s) from a bench JSON.
 fn extract_metrics(raw: &str) -> BTreeMap<String, f64> {
     let mut out = BTreeMap::new();
@@ -445,6 +453,14 @@ mod tests {
         );
         assert_eq!(extract_diagnose_lever(raw, "ycsb_a_mc4"), None);
         assert_eq!(extract_diagnose_lever(raw, "missing"), None);
+        let cli =
+            r#"{"lever":"wal_encode_or_write","dominant":"wal","despark":0,"mem_gap_bps":119}"#;
+        assert_eq!(
+            extract_cli_diagnose_lever(cli).as_deref(),
+            Some("wal_encode_or_write"),
+            "RFC-0184 P2.26 CLI diagnose JSON"
+        );
+        assert_eq!(extract_cli_diagnose_lever(raw), None);
     }
 
     #[test]
