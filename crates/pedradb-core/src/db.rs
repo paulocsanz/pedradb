@@ -9651,7 +9651,9 @@ pub(crate) struct GroupInFlight {
 
 impl GroupInFlight {
     pub(crate) fn needs_sync(&self) -> bool {
-        self.any_sync && !self.failed && !self.appended.is_empty()
+        crate::write_admission_kernel::wal_sync_required(true, self.any_sync, false)
+            && !self.failed
+            && !crate::write_admission_kernel::batch_is_empty(self.appended.len() as u64)
     }
 
     pub(crate) fn max_appended_seq(&self) -> SequenceNumber {

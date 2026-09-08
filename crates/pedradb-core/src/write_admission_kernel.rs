@@ -699,6 +699,11 @@ mod tests {
             apply.contains("wal_sync_required("),
             "group_apply must match wal_sync_required"
         );
+        let ns = named_fn_src(include_str!("db.rs"), "needs_sync").expect("needs_sync");
+        assert!(
+            ns.contains("wal_sync_required("),
+            "GroupInFlight::needs_sync must match wal_sync_required"
+        );
     }
 
     #[test]
@@ -750,6 +755,11 @@ mod tests {
         assert!(
             apply.contains("batch_is_empty("),
             "group_apply must match batch_is_empty"
+        );
+        let ns = named_fn_src(include_str!("db.rs"), "needs_sync").expect("needs_sync");
+        assert!(
+            ns.contains("batch_is_empty("),
+            "GroupInFlight::needs_sync must match batch_is_empty"
         );
     }
 
