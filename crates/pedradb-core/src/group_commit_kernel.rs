@@ -388,6 +388,14 @@ mod tests {
             src.contains("occ_member_fate("),
             "validate_occ_batch must match occ_member_fate"
         );
+        let lone = src
+            .split("fn lone_commit")
+            .nth(1)
+            .expect("lone_commit");
+        assert!(
+            lone.contains("occ_member_fate("),
+            "lone_commit must match occ_member_fate"
+        );
     }
 
     /// Catalog three-teeth plant. Direct `group_members_are_simultaneous` is **not** this tooth.

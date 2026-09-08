@@ -1001,8 +1001,15 @@ impl WriteGroup {
                 });
             // RFC-0057 P2.1: first-committer-wins is the kernel's
             // decision, not an inline predicate.
-            if crate::group_commit_kernel::occ_conflict(*snap, last_seq, touched) {
-                return Err(CoreError::TransactionConflict);
+            match crate::group_commit_kernel::occ_member_fate(
+                false,
+                crate::group_commit_kernel::occ_conflict(*snap, last_seq, touched),
+            ) {
+                crate::group_commit_kernel::OccMemberFate::Conflict => {
+                    return Err(CoreError::TransactionConflict);
+                }
+                crate::group_commit_kernel::OccMemberFate::TooOld
+                | crate::group_commit_kernel::OccMemberFate::Ok => {}
             }
         }
         // RFC-0042 P1.1: a lone commit is a commit in flight exactly like a

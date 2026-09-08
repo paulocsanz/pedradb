@@ -181,3 +181,11 @@ theorem occ_member_fate_as_is_dente :
     occ_member_fate_as_is true true = ok OccMemberFate.Ok := by
   unfold occ_member_fate_as_is
   rfl
+
+/-- `lone_commit` caller: occ_conflict ⇒ occ_member_fate Conflict. -/
+theorem occ_member_fate_via_occ_conflict :
+    occ_conflict (7#u64) (9#u64) true = ok true ∧
+      occ_member_fate false true = ok OccMemberFate.Conflict := by
+  constructor
+  · unfold occ_conflict; rfl
+  · unfold occ_member_fate; rfl
