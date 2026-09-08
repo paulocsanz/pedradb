@@ -2716,6 +2716,7 @@ impl YcsbRunner {
             }
             let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
             let phase0 = e.write_phase_snapshot();
+            let group0 = e.write_group_stats();
             let t0 = Instant::now();
             let mut lats = Vec::with_capacity(cfg_ops * clients);
             let mut errors = 0u64;
@@ -2764,14 +2765,19 @@ impl YcsbRunner {
                 "[rocks-parity] {name} mc{clients} done ops={} errors={errors}",
                 cfg_ops * clients
             );
-            if let Some((sub, queued, groups, gops)) = e.write_group_stats() {
+            if let Some((sub1, queued1, groups1, gops1)) = e.write_group_stats() {
+                let (sub0, queued0, groups0, gops0) = group0.unwrap_or((0, 0, 0, 0));
+                let sub = sub1.saturating_sub(sub0);
+                let queued = queued1.saturating_sub(queued0);
+                let groups = groups1.saturating_sub(groups0);
+                let gops = gops1.saturating_sub(gops0);
                 avg_group = if groups == 0 {
                     0.0
                 } else {
                     gops as f64 / groups as f64
                 };
                 eprintln!(
-                    "[rocks-parity] write_group submits={sub} queued={queued} groups={groups} ops={gops} avg_group={avg_group:.2}"
+                    "[rocks-parity] write_group timed submits={sub} queued={queued} groups={groups} ops={gops} avg_group={avg_group:.2}"
                 );
             }
             blocks.push(summarize_mc(
