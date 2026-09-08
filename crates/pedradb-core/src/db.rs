@@ -5104,7 +5104,7 @@ impl<E: Env> Db<E> {
         // Field-borrowing resolver (see `observe_bulk_batch`).
         let physical = &self.physical_cfs;
         let fam_of = |key: &[u8]| -> &str {
-            if physical.is_empty() {
+            if crate::write_admission_kernel::batch_is_empty(physical.len() as u64) {
                 return "default";
             }
             let p = crate::memtable::cf_prefix(key);
