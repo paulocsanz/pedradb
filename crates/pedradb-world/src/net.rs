@@ -183,7 +183,7 @@ impl Net for InProcessNet {
             .filter(|(_, p)| p.ready_at <= self.tick)
             .map(|(i, _)| i)
             .collect();
-        if ready.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(ready.len() as u64) {
             return None;
         }
         let pick = if self.reorder_window > 1 && ready.len() > 1 {
