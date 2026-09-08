@@ -152,6 +152,10 @@ medida no mesmo harness isolado.
       followers enfileiram sem o write lock). Mesmos spins que o
       catch-up pré-lock. Teste `rfc0180_leader_linger_and_async_catchup`.
       status: `done`
+- [x] **P0.44** Catch-up espera `begin_submit`→queue (sem timer):
+      `wait_in_flight_to_queue` enquanto `batch+queued < min(cap,active)`.
+      Last-op: `active` desce sem próximo put. n≥16 cap=2. Teste
+      `rfc0180_leader_linger_and_async_catchup`. status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
 
@@ -210,6 +214,7 @@ medida no mesmo harness isolado.
 | P0.41 | p0 | 1-op fast path only when active<2 | done | MC 1-member stays on group_start; 1c unchanged | 2026-09-08 |
 | P0.42 | p0 | commit_async_ops WAL one hop | done | encode_and_write_op_batches; G1 lone still encode-then-fd | 2026-09-08 |
 | P0.43 | p0 | catch-up after group_start prepare | done | same spins as pre-lock; absorb then off-lock WAL | 2026-09-08 |
+| P0.44 | p0 | wait in-flight begin_submit→queue | done | no timer; stop on cap or active drop | 2026-09-08 |
 | P1.1 | p1 | 3-run caixa | todo | — | 2026-09-07 |
 | P2.1 | p2 | 3/3 quiet ≥1× | todo | 0182 P1.1 | 2026-09-07 |
 | P2.2 | p2 | leftover hang | done | 0181 P0.3 steal | 2026-09-07 |
