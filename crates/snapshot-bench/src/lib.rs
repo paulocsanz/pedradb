@@ -36,9 +36,13 @@ pub use kv::{KvEntry, KvUpdate, VersionToken, WatchCursor};
 pub use snapshot_fjall::{FjallConfig, FjallReader, FjallSnapshot};
 #[cfg(feature = "pedradb")]
 pub use snapshot_pedradb::{PedraDbConfig, PedraDbReader, PedraDbSnapshot};
+#[cfg(feature = "pedradb")]
+mod diagnose;
+#[cfg(feature = "pedradb")]
+pub use diagnose::{classify_measured, diagnose_line, eprint_get, eprint_get_from_criterion};
+pub use snapshot::SnapshotStore;
 #[cfg(feature = "rocksdb")]
 pub use snapshot_rocksdb::{RocksDbConfig, RocksDbReader, RocksDbSnapshot};
-pub use snapshot::SnapshotStore;
 
 /// RFC-0168 P0.2/P0.3 — per-cell cost lines and the machine-readable
 /// per-cell artifact.
@@ -95,10 +99,11 @@ pub mod cellcost {
                 }
                 None => CostSnapshot::default(),
             };
-            CELLS
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .push((self.group.clone(), self.id.clone(), delta));
+            CELLS.lock().unwrap_or_else(|e| e.into_inner()).push((
+                self.group.clone(),
+                self.id.clone(),
+                delta,
+            ));
         }
     }
 
@@ -106,8 +111,7 @@ pub mod cellcost {
         if let Some(home) = std::env::var_os("CRITERION_HOME") {
             return PathBuf::from(home);
         }
-        let target =
-            std::env::var_os("CARGO_TARGET_DIR").unwrap_or_else(|| "target".into());
+        let target = std::env::var_os("CARGO_TARGET_DIR").unwrap_or_else(|| "target".into());
         PathBuf::from(target).join("criterion")
     }
 
@@ -123,13 +127,15 @@ pub mod cellcost {
 
     fn drain(group: &str) -> Vec<Cell> {
         let mut all = CELLS.lock().unwrap_or_else(|e| e.into_inner());
-        let (matched, rest): (Vec<Cell>, Vec<Cell>) =
-            std::mem::take(&mut *all).into_iter().partition(|(g, _, _)| g == group);
+        let (matched, rest): (Vec<Cell>, Vec<Cell>) = std::mem::take(&mut *all)
+            .into_iter()
+            .partition(|(g, _, _)| g == group);
         *all = rest;
         matched
     }
 
-    pub(crate) fn flush_group_to(home: &Path, artifact: &Path, group: &str) {        let cells = drain(group);
+    pub(crate) fn flush_group_to(home: &Path, artifact: &Path, group: &str) {
+        let cells = drain(group);
         if cells.is_empty() {
             return;
         }
@@ -179,11 +185,16 @@ pub mod cellcost {
     }
 
     fn criterion_median_ns(home: &Path, group: &str, id: &str) -> Option<f64> {
-        let text = std::fs::read_to_string(
-            home.join(group).join(id).join("new").join("estimates.json"),
-        )
-        .ok()?;
+        let text =
+            std::fs::read_to_string(home.join(group).join(id).join("new").join("estimates.json"))
+                .ok()?;
         extract_median_ns(&text)
+    }
+
+    /// Criterion median (ns) for `group/id` after `BenchmarkGroup::finish`.
+    #[must_use]
+    pub fn median_ns(group: &str, id: &str) -> Option<f64> {
+        criterion_median_ns(&criterion_home(), group, id)
     }
 
     /// Pull the `median` estimate (nanoseconds) out of criterion's compact

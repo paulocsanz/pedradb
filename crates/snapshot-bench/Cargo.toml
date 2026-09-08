@@ -19,6 +19,7 @@ thiserror = "2"
 fjall = { version = "3.1.4", optional = true }
 rocksdb = { package = "rust-rocksdb", version = "0.50", optional = true, default-features = false, features = ["lz4", "zstd", "bindgen-runtime"] }
 rocksdb-compat = { path = "../rocksdb-compat", optional = true }
+pedradb-core = { path = "../pedradb-core", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
@@ -32,4 +33,4 @@ required-features = ["fjall", "rocksdb", "pedradb"]
 [features]
 fjall = ["dep:fjall"]
 rocksdb = ["dep:rocksdb"]
-pedradb = ["dep:rocksdb-compat"]
+pedradb = ["dep:rocksdb-compat", "dep:pedradb-core"]
