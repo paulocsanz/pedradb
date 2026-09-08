@@ -157,6 +157,8 @@ a linha quando há phasesΔ. Sem harness novo.
 - [x] **P2.29** `pedra diagnose get` JSON inclui relógio 0176
       (`measured_ns`, `best`, `happy`, `worst`, `as_is` + `class`).
       — status: `done`
+- [x] **P2.30** `pedra diagnose probes` JSON inclui `per_get` /
+      `p_best` + `class`. — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -200,6 +202,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.27 | p2 | compare CLI get/probes class | done | extract_cli_diagnose_class | 2026-09-08 |
 | P2.28 | p2 | compare CLI balance admits | done | extract_cli_diagnose_admits | 2026-09-08 |
 | P2.29 | p2 | CLI get JSON 0176 clock | done | class+best/happy/worst/as_is | 2026-09-08 |
+| P2.30 | p2 | CLI probes JSON inputs | done | class+per_get+p_best | 2026-09-08 |
 
 ## Acceptance Criteria
 
@@ -240,6 +243,7 @@ a linha quando há phasesΔ. Sem harness novo.
   compare CLI `{"class":…}` (P2.27);
   compare CLI `{"admits":…}` (P2.28);
   `pedra diagnose get` JSON clock (P2.29);
+  `pedra diagnose probes` JSON inputs (P2.30);
   `ycsb_c_all_reads_timed_zero_is_get_path`;
   `rfc0184_diagnosis_json_has_lever`;
   `extract_diagnose_lever_from_bench_object`.

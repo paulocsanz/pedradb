@@ -49,11 +49,12 @@ Refresh this file when a cell moves class. One row per cell.
 | compare CLI get/probes class | **T**→tool | compare | `extract_cli_diagnose_class` (0184 P2.27) | RFC-0184 |
 | compare CLI balance admits | **T**→tool | compare | `extract_cli_diagnose_admits` (0184 P2.28) | RFC-0184 |
 | pedra diagnose get JSON clock | **T**→tool | CLI | 0176 best/happy/worst/as_is in JSON (0184 P2.29) | RFC-0184 |
+| pedra diagnose probes JSON | **T**→tool | CLI | per_get/p_best in JSON (0184 P2.30) | RFC-0184 |
 
 ## Próxima fase (rank da skill, 2026-09-07)
 
 1. **U / Linux `overwrite_mc4` isolado + diagnose + `balance`** (caixa). Sem bake: não ratio-win Darwin. Skill **ainda implementa** o próximo furo local.
-2. **Done this turn:** 0184 P2.29 — CLI get JSON clock.
+2. **Done this turn:** 0184 P2.30 — CLI probes JSON inputs.
 3. prefix 0.70× na caixa continua P1.2.
 
 Não: skiplist. Não: n=50 merge. Não: turno vazio porque “é caixa”.
