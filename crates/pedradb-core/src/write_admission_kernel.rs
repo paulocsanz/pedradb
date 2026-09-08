@@ -746,6 +746,11 @@ mod tests {
             group.contains("wal_commit_plan("),
             "wal_sync_group must match the plan fn"
         );
+        let off = include_str!("concurrent.rs");
+        assert!(
+            off.contains("wal_commit_plan("),
+            "finish_group_off_lock must match wal_commit_plan"
+        );
     }
 
     #[test]

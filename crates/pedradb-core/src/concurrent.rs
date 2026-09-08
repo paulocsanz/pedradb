@@ -1116,15 +1116,17 @@ impl WriteGroup {
             // G1: write + fdatasync before Ok. Async: write() per group,
             // no fdatasync — same process-crash class as RocksDB default.
             let e = w.write_pending_frame().err().or_else(|| {
-                if need_sync {
-                    let t_fd = Instant::now();
-                    let r = w.sync_data().err();
-                    if r.is_none() {
-                        group.update_fd_ema(t_fd.elapsed().as_nanos() as u64);
+                match crate::write_admission_kernel::wal_commit_plan(need_sync, false) {
+                    crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => None,
+                    crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+                    | crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                        let t_fd = Instant::now();
+                        let r = w.sync_data().err();
+                        if r.is_none() {
+                            group.update_fd_ema(t_fd.elapsed().as_nanos() as u64);
+                        }
+                        r
                     }
-                    r
-                } else {
-                    None
                 }
             });
             if pinned {
