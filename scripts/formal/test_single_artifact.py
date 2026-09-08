@@ -526,6 +526,22 @@ def main() -> int:
         print("FAIL blob_gc_pick twin≠kernel did not fail")
         return 1
     print("ok mutant blob_gc_pick twin≠kernel named")
+    lev_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in lev_mutant["pairs"]:
+        if pair.get("id") == "leveling":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-core/verus/leveling.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing leveling")
+        return 1
+    hits = [m for m in _sa_fails(lev_mutant) if m.startswith("leveling:")]
+    if not hits:
+        print("FAIL leveling twin≠kernel did not fail")
+        return 1
+    print("ok mutant leveling twin≠kernel named")
     # Drive the same rule through check_twins (may also report unrelated
     # dirty-tree twin drift; we only require the SA id).
     try:

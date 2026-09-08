@@ -4,7 +4,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-core/verus/leveling.rs"
+# RFC-0171 P0.3 / RFC-0174: prove the file rustc links (pair leveling).
+SRC="$ROOT/crates/pedradb-core/src/leveling.rs"
 
 if [[ -x "${VERUS:-}" ]]; then
   :

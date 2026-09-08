@@ -1,9 +1,13 @@
 //! Leveled compaction scheduling (pure selection kernel).
 //! kernel: leveling — enrolled in residuals.json glue.kernel_paths; the
 //! suffix-less enrollment tooth requires this marker (2026-08-31, findings/
-//! 2026-08-31-leveling-kernel-unenrolled). Catalog pairs `leveling` (close)
-//! and `leveling_pick` (atom); twins `verus/leveling.rs` +
-//! `verus/leveling_pick.rs`, plant below.
+//! 2026-08-31-leveling-kernel-unenrolled).
+//!
+//! **Single artifact (pair `leveling`):** this file is what `rustc` links
+//! *and* what Verus proves (`cfg(verus_keep_ghost)`). Pairs `leveling_pick`
+//! / `leveling_pushdown` still have twin-cópias until their turns.
+//!
+//!   ./scripts/verus_leveling.sh
 //!
 //! Policy: L0→L1 jobs absorb the L1 slice that overlaps the selected L0s, and
 //! each level `n ≥ 1` is capped at [`level_target_bytes`]. When a level is over
@@ -28,6 +32,138 @@
 //! hull, and the new disjoint chunks (split at user-key boundaries) plus the
 //! unselected files form a disjoint level again. Inductively the invariant
 //! holds from the first job on an empty level.
+//!
+//! The rustc bodies stay byte-stable so non-`single_artifact` twins still
+//! token-match. Verus proofs sit in the `cfg(verus_keep_ghost)` block
+//! above them (last-wins for lint is the rustc body).
+
+#[cfg(verus_keep_ghost)]
+use vstd::prelude::*;
+#[cfg(verus_keep_ghost)]
+use vstd::arithmetic::mul::*;
+
+#[cfg(verus_keep_ghost)]
+verus! {
+
+broadcast use vstd::arithmetic::mul::lemma_mul_is_commutative, vstd::arithmetic::mul::lemma_mul_inequality;
+
+pub open spec fn ten_pow(exp: int) -> int
+    decreases exp,
+{
+    if exp <= 0 { 1int } else { 10int * ten_pow(exp - 1) }
+}
+
+/// Spec domain is `int`; `level == 0` has no target, the ladder is
+/// `l1_target * LEVEL_FANOUT^min(level-1, 18)` with `LEVEL_FANOUT == 10`.
+pub open spec fn level_target_bytes_spec(level: int, l1_target: int) -> int {
+    if level <= 0 {
+        0int
+    } else {
+        let exp = if level >= 19 { 18int } else { level - 1 };
+        l1_target * ten_pow(exp)
+    }
+}
+
+/// Mirrors rustc `level_target_bytes` on every input where the saturating
+/// arms do not engage (the precondition states exactly that).
+pub fn level_target_bytes(level: u32, l1_target: u64) -> (t: u64)
+    requires
+        level_target_bytes_spec(level as int, l1_target as int) <= 0xffff_ffff_ffff_ffffint,
+    ensures
+        t as int == level_target_bytes_spec(level as int, l1_target as int),
+        level == 0 ==> t == 0,
+        level >= 1 ==> t >= l1_target,
+{
+    if level == 0 {
+        0
+    } else if l1_target == 0 {
+        0
+    } else {
+        let exp: u32 = if level >= 19 { 18 } else { level - 1 };
+        let p = ten_pow_exec(exp, l1_target);
+        assert(ten_pow(exp as int) >= 1) by {
+            lemma_ten_pow_pos(exp as int);
+        };
+        assert(1int * l1_target as int <= ten_pow(exp as int) * l1_target as int);
+        l1_target * p
+    }
+}
+
+fn ten_pow_exec(exp: u32, cap: u64) -> (p: u64)
+    requires
+        cap >= 1,
+        cap as int * ten_pow(exp as int) <= 0xffff_ffff_ffff_ffffint,
+    ensures
+        p as int == ten_pow(exp as int),
+    decreases exp,
+{
+    if exp == 0 {
+        1
+    } else {
+        assert(ten_pow((exp - 1) as int) <= ten_pow(exp as int)) by {
+            lemma_ten_pow_monotone((exp - 1) as int, exp as int);
+        };
+        assert(ten_pow((exp - 1) as int) * cap as int <= ten_pow(exp as int) * cap as int);
+        assert(ten_pow((exp - 1) as int) * cap as int <= 0xffff_ffff_ffff_ffffint);
+        assert(1int * ten_pow(exp as int) <= cap as int * ten_pow(exp as int));
+        assert(ten_pow(exp as int) <= 0xffff_ffff_ffff_ffffint);
+        let child = ten_pow_exec((exp - 1) as u32, cap);
+        child * 10
+    }
+}
+
+proof fn lemma_ten_pow_pos(exp: int)
+    requires
+        exp >= 0,
+    ensures
+        ten_pow(exp) >= 1,
+    decreases exp,
+{
+    if exp == 0 {
+    } else {
+        lemma_ten_pow_pos(exp - 1);
+    }
+}
+
+proof fn lemma_ten_pow_monotone(a: int, b: int)
+    requires
+        0 <= a,
+        a <= b,
+    ensures
+        ten_pow(a) <= ten_pow(b),
+    decreases b - a,
+{
+    if a == b {
+    } else {
+        lemma_ten_pow_monotone(a, b - 1);
+        lemma_ten_pow_pos(a);
+    }
+}
+
+/// Named lemma (ladder / RocksDB Target_Size(Ln+1) = Target_Size(Ln)*10):
+/// targets never shrink as the level grows — wrapping as-is does.
+proof fn lemma_targets_monotone(a: int, b: int, l1_target: int)
+    requires
+        1 <= a,
+        a <= b,
+        l1_target >= 1,
+    ensures
+        level_target_bytes_spec(a, l1_target) <= level_target_bytes_spec(b, l1_target),
+{
+    let ea = if a >= 19 { 18int } else { a - 1 };
+    let eb = if b >= 19 { 18int } else { b - 1 };
+    assert(ea <= eb) by {
+        if a >= 19 {
+            assert(eb <= 18);
+        } else if b >= 19 {
+            assert(a - 1 <= 18);
+        }
+    };
+    lemma_ten_pow_monotone(ea, eb);
+    assert(ten_pow(ea) * l1_target <= ten_pow(eb) * l1_target);
+}
+
+} // verus!
 
 /// Size multiplier between consecutive levels (RocksDB `fanout` shape).
 pub(crate) const LEVEL_FANOUT: u64 = 10;
@@ -35,6 +171,7 @@ pub(crate) const LEVEL_FANOUT: u64 = 10;
 /// Kill switch for the leveled scheduler (`PEDRA_LEVELED=0`): jobs fall back
 /// to L0-only stacking and settle to a whole-level rewrite (the pre-leveled
 /// shape). A/B and emergency-rollback lever for guest runs.
+#[cfg(not(verus_keep_ghost))]
 pub(crate) fn leveled_enabled() -> bool {
     match std::env::var("PEDRA_LEVELED") {
         Ok(v) => v.trim() != "0",
@@ -44,6 +181,7 @@ pub(crate) fn leveled_enabled() -> bool {
 
 /// Byte target of level `level` (1-based). Level 0 has no target (L0 is
 /// drained, not sized); the caller treats the maximum level as unbounded.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub(crate) fn level_target_bytes(level: u32, l1_target: u64) -> u64 {
     if level == 0 {
@@ -69,6 +207,7 @@ pub(crate) fn level_target_bytes_as_is(level: u32, l1_target: u64) -> u64 {
 /// One scheduling candidate: live-inventory index plus its user-key range and
 /// on-disk size. Key ranges are user keys (internal suffixes only widen a
 /// range, and overlap on user keys is the conservative direction).
+#[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone)]
 pub(crate) struct LevelFile {
     pub idx: usize,
@@ -77,6 +216,7 @@ pub(crate) struct LevelFile {
     pub bytes: u64,
 }
 
+#[cfg(not(verus_keep_ghost))]
 impl LevelFile {
     /// Overlaps the half-open hull `[hull_lo, hull_hi]` (inclusive both ends:
     /// ranges carry concrete smallest/largest keys).
@@ -91,6 +231,7 @@ impl LevelFile {
 /// boundaries never share a user key, so a shared boundary means the set was
 /// not produced by this policy (legacy stacking) and must be repaired before
 /// overlap-sliced jobs run on it.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub(crate) fn is_disjoint(files: &[LevelFile]) -> bool {
     let mut sorted: Vec<&LevelFile> = files.iter().collect();
@@ -99,6 +240,7 @@ pub(crate) fn is_disjoint(files: &[LevelFile]) -> bool {
 }
 
 /// Total bytes of a level view.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub(crate) fn total_bytes(files: &[LevelFile]) -> u64 {
     files.iter().map(|f| f.bytes).sum()
@@ -110,6 +252,7 @@ pub(crate) fn total_bytes(files: &[LevelFile]) -> u64 {
 /// Returns `None` when there is no L0 input. The caller has already verified
 /// the L1 view is disjoint ([`is_disjoint`]) — over a stacked L1 the slice
 /// would be the whole level (see module docs).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub(crate) fn pick_l0_to_l1(
     l0: &[LevelFile],
@@ -166,6 +309,7 @@ pub(crate) fn pick_l0_to_l1_as_is_uncapped(l0: &[LevelFile], _max_l0: usize) -> 
 ///
 /// `src` is caller-ordered oldest-first. Returns `None` when the source level
 /// is empty or the destination view is not disjoint.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub(crate) fn pick_pushdown(
     src: &[LevelFile],
