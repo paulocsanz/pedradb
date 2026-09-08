@@ -143,6 +143,8 @@ a linha quando há phasesΔ. Sem harness novo.
       (ingest batches; write lever, not `get_path`). — status: `done`
 - [x] **P2.23** `BALANCE_SHAPES` inclui `ycsb_b_mc4` (rung 95% get
       já no harness RFC-0163; faltava no gate de engine). — status: `done`
+- [x] **P2.24** scale `settle` WRITEPHASE → `diagnose.lever`
+      (compact/ingest; write lever, not `get_path`). — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -180,6 +182,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.21 | p2 | scale probe_hit classify_get | done | p50 ns vs 0176 best/happy/worst/as_is | 2026-09-08 |
 | P2.22 | p2 | scale hydrate diagnose.lever | done | WRITEPHASE ingest batches | 2026-09-08 |
 | P2.23 | p2 | BALANCE_SHAPES ycsb_b_mc4 | done | 95% get rung no gate 0182 | 2026-09-08 |
+| P2.24 | p2 | scale settle diagnose.lever | done | WRITEPHASE compact/ingest | 2026-09-08 |
 
 ## Acceptance Criteria
 
@@ -214,6 +217,7 @@ a linha quando há phasesΔ. Sem harness novo.
   scale `probe_hit` `classify_get` (P2.21);
   scale `hydrate` `diagnose.lever` (P2.22);
   `BALANCE_SHAPES` `ycsb_b_mc4` (P2.23);
+  scale `settle` `diagnose.lever` (P2.24);
   `ycsb_c_all_reads_timed_zero_is_get_path`;
   `rfc0184_diagnosis_json_has_lever`;
   `extract_diagnose_lever_from_bench_object`.

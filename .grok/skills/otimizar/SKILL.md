@@ -18,7 +18,7 @@ Fjall = absoluto, nunca gate. Darwin DIAG ≠ cartaz Linux. Não inventar
 
 **Balance (lei):** nunca otimizar uma célula. O conjunto obrigatório é
 `BALANCE_SHAPES` em `bench_gap_kernel` (hoje: overwrite_mc4, ycsb_a_mc4,
-ycsb_f_mc4, apply_mc4, 1c overwrite). Novo caso de uso → **adicionar**
+ycsb_b_mc4, ycsb_f_mc4, apply_mc4, 1c overwrite). Novo caso de uso → **adicionar**
 ao array + linha U no mapa, no mesmo turno. Um corte de engine só
 passa se `balance_admits` (named-loss Linux **ou** ≥2 células cartaz).
 DIAG sozinho `admits=0`. Depois do corte, voltar a diagnosticar o
@@ -94,6 +94,12 @@ Fill from search. Classes:
 6. Never 0055 skiplist unless `despark=1` (mem/gap ≥15% **and** clients≥2).
 
 Tie-break: an open RFC `- [ ] **P0/P1` on that cell.
+
+7. **Rank empty** (only caixa / C / slices `done`): do **not** stop.
+   Search a new frontier and land it this turn: RFC `- [ ]` P2 not yet
+   a mapa row; scale cell without `classify_*` / WRITEPHASE; `run_*`
+   without `diagnose.lever`; CLI diagnose missing a class. **Edit this
+   Rank** (or mapa) so the next `/otimizar` sees it. Persist the source.
 
 ## 3. Output
 
