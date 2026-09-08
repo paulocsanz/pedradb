@@ -4977,7 +4977,7 @@ impl<E: Env> Db<E> {
         // `bulk_latch` into the ops vec): mirrors `family_of_user_key`.
         let physical = &self.physical_cfs;
         let fam_of = |key: &[u8]| -> &str {
-            if physical.is_empty() {
+            if crate::write_admission_kernel::batch_is_empty(physical.len() as u64) {
                 return "default";
             }
             let p = crate::memtable::cf_prefix(key);
