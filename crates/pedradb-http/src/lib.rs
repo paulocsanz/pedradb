@@ -501,7 +501,7 @@ fn query_param_unique(path: &str, key: &str) -> Result<Option<String>> {
         }
     }
     let vs = query_decoded_values(path, key);
-    if vs.is_empty() {
+    if pedradb_core::write_admission_kernel::batch_is_empty(vs.len() as u64) {
         return Ok(None);
     }
     let refs: Vec<&str> = vs.iter().map(String::as_str).collect();
