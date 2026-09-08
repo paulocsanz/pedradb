@@ -287,8 +287,11 @@ def script_compose_board() -> None:
         missing = [t for t in tokens if t not in body]
         calls_plan = plan + "(" in body or "_plan(" in body
         extra = (" tokens_missing=" + ",".join(missing)) if missing else ""
-        if calls_plan:
-            print(f"  {glue} plan={plan} calls_plan extra={extra or 'ok'}")
+        if calls_plan and not missing:
+            print(f"  {glue} plan={plan} calls_plan extra=ok")
+        elif calls_plan and missing:
+            unpaid_script += 1
+            print(f"  {glue} plan={plan} UNPAID tokens_missing={','.join(missing)}")
         else:
             unpaid_script += 1
             print(f"  {glue} plan={plan} UNPAID order still inline{extra}")

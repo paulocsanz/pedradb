@@ -8952,8 +8952,13 @@ impl<E: Env> Db<E> {
     pub(crate) fn wal_sync_group(&mut self) -> Result<()> {
         self.ensure_not_fenced()?;
         let sync_err = self.wal.lock().sync_data().err();
-        match crate::write_admission_kernel::wal_commit_plan(true, sync_err.is_some()) {
+        let failed = sync_err.is_some();
+        match crate::write_admission_kernel::wal_commit_plan(true, failed) {
             crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                assert!(
+                    crate::write_admission_kernel::fence_on_sync_fail(true, failed),
+                    "required sync failed ⇒ fence, not Ok"
+                );
                 let e = sync_err.expect("AppendSyncFence ⇒ Some");
                 self.durability_fenced = true;
                 Err(e)
