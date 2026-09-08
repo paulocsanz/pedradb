@@ -19,9 +19,9 @@
 
 #![forbid(unsafe_code)]
 
-//! **Single artifact (pairs `durable_term`, `grant_persist`):** this file
-//! is what `rustc` links *and* what Verus proves (`cfg(verus_keep_ghost)`).
-//! Pair `vote` keeps its twin until its turn.
+//! **Single artifact (pairs `durable_term`, `grant_persist`, `vote`):**
+//! this file is what `rustc` links *and* what Verus proves
+//! (`cfg(verus_keep_ghost)`).
 //!
 //!   ./scripts/verus_durable_term.sh
 //!
@@ -50,6 +50,86 @@ pub enum DurableTerm {
 pub enum VoteDecision {
     WouldGrant,
     Deny,
+}
+
+/// Mirrors rustc `can_vote`.
+pub open spec fn can_vote(voted_for: Option<u64>, candidate_id: u64) -> bool {
+    match voted_for {
+        None => true,
+        Some(v) => v == candidate_id,
+    }
+}
+
+/// Mirrors rustc `log_up_to_date` (Raft §5.4.1).
+pub open spec fn log_up_to_date(
+    my_last_term: u64,
+    my_last_index: u64,
+    cand_last_term: u64,
+    cand_last_index: u64,
+) -> bool {
+    cand_last_term > my_last_term
+        || (cand_last_term == my_last_term && cand_last_index >= my_last_index)
+}
+
+/// Spec of the decision (closed form).
+pub open spec fn should_grant(
+    current_term: u64,
+    voted_for: Option<u64>,
+    last_log_term: u64,
+    last_log_index: u64,
+    candidate_term: u64,
+    candidate_id: u64,
+    candidate_last_log_term: u64,
+    candidate_last_log_index: u64,
+) -> bool {
+    candidate_term == current_term
+        && can_vote(voted_for, candidate_id)
+        && log_up_to_date(
+            last_log_term,
+            last_log_index,
+            candidate_last_log_term,
+            candidate_last_log_index,
+        )
+}
+
+/// Flattened stand-in for rustc `vote_decision(VoteInputs)` (pair `vote`).
+pub fn vote_decision(
+    current_term: u64,
+    voted_for: Option<u64>,
+    last_log_term: u64,
+    last_log_index: u64,
+    candidate_term: u64,
+    candidate_id: u64,
+    candidate_last_log_term: u64,
+    candidate_last_log_index: u64,
+) -> (d: VoteDecision)
+    ensures
+        (d == VoteDecision::WouldGrant) == should_grant(
+            current_term,
+            voted_for,
+            last_log_term,
+            last_log_index,
+            candidate_term,
+            candidate_id,
+            candidate_last_log_term,
+            candidate_last_log_index,
+        ),
+{
+    if candidate_term != current_term {
+        return VoteDecision::Deny;
+    }
+    let can = match voted_for {
+        None => true,
+        Some(v) => v == candidate_id,
+    };
+    let up = candidate_last_log_term > last_log_term
+        || (candidate_last_log_term == last_log_term
+            && candidate_last_log_index >= last_log_index);
+    if can && up {
+        VoteDecision::WouldGrant
+    } else {
+        VoteDecision::Deny
+    }
 }
 
 /// F15: wire grant only if the kernel would grant **and** persist Ok.

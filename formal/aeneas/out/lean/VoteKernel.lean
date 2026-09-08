@@ -52,7 +52,7 @@ def core.option.Option.Insts.CoreCmpPartialEqOption.eq
     | _, _ => ok false
 
 /-- [pedra_aeneas_vote_kernel::VoteInputs]
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 179:0-196:1
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 259:0-276:1
     Visibility: public -/
 structure VoteInputs where
   current_term : Std.U64
@@ -65,7 +65,7 @@ structure VoteInputs where
   candidate_last_log_index : Std.U64
 
 /-- [pedra_aeneas_vote_kernel::{impl core::fmt::Debug for pedra_aeneas_vote_kernel::VoteInputs}::fmt]:
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 177:9-177:14
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 257:9-257:14
     Visibility: public -/
 def VoteInputs.Insts.CoreFmtDebug.fmt
   (self : VoteInputs) (f : core.fmt.Formatter) :
@@ -96,42 +96,42 @@ def VoteInputs.Insts.CoreFmtDebug.fmt
   core.fmt.Formatter.debug_struct_fields_finish f (toStr "VoteInputs") s values
 
 /-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::fmt::Debug for pedra_aeneas_vote_kernel::VoteInputs}]
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 177:9-177:14 -/
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 257:9-257:14 -/
 @[reducible]
 def VoteInputs.Insts.CoreFmtDebug : core.fmt.Debug VoteInputs := {
   fmt := VoteInputs.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_vote_kernel::{impl core::clone::Clone for pedra_aeneas_vote_kernel::VoteInputs}::clone]:
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 177:16-177:21
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 257:16-257:21
     Visibility: public -/
 def VoteInputs.Insts.CoreCloneClone.clone
   (self : VoteInputs) : Result VoteInputs := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::clone::Clone for pedra_aeneas_vote_kernel::VoteInputs}]
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 177:16-177:21 -/
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 257:16-257:21 -/
 @[reducible]
 def VoteInputs.Insts.CoreCloneClone : core.clone.Clone VoteInputs := {
   clone := VoteInputs.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::marker::Copy for pedra_aeneas_vote_kernel::VoteInputs}]
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 177:23-177:27 -/
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 257:23-257:27 -/
 @[reducible]
 def VoteInputs.Insts.CoreMarkerCopy : core.marker.Copy VoteInputs := {
   cloneInst := VoteInputs.Insts.CoreCloneClone
 }
 
 /-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_vote_kernel::VoteInputs}]
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 177:29-177:38 -/
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 257:29-257:38 -/
 @[reducible]
 def VoteInputs.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq VoteInputs := {
 }
 
 /-- [pedra_aeneas_vote_kernel::{impl core::cmp::PartialEq<pedra_aeneas_vote_kernel::VoteInputs> for pedra_aeneas_vote_kernel::VoteInputs}::eq]:
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 177:29-177:38
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 257:29-257:38
     Visibility: public -/
 def VoteInputs.Insts.CoreCmpPartialEqVoteInputs.eq
   (self : VoteInputs) (other : VoteInputs) : Result Bool := do
@@ -160,7 +160,7 @@ def VoteInputs.Insts.CoreCmpPartialEqVoteInputs.eq
   else ok false
 
 /-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::cmp::PartialEq<pedra_aeneas_vote_kernel::VoteInputs> for pedra_aeneas_vote_kernel::VoteInputs}]
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 177:29-177:38 -/
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 257:29-257:38 -/
 @[reducible]
 def VoteInputs.Insts.CoreCmpPartialEqVoteInputs : core.cmp.PartialEq VoteInputs
   VoteInputs := {
@@ -168,14 +168,14 @@ def VoteInputs.Insts.CoreCmpPartialEqVoteInputs : core.cmp.PartialEq VoteInputs
 }
 
 /-- [pedra_aeneas_vote_kernel::{impl core::cmp::Eq for pedra_aeneas_vote_kernel::VoteInputs}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 177:40-177:42
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 257:40-257:42
     Visibility: public -/
 def VoteInputs.Insts.CoreCmpEq.assert_fields_are_eq
   (self : VoteInputs) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::cmp::Eq for pedra_aeneas_vote_kernel::VoteInputs}]
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 177:40-177:42 -/
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 257:40-257:42 -/
 @[reducible]
 def VoteInputs.Insts.CoreCmpEq : core.cmp.Eq VoteInputs := {
   partialEqInst := VoteInputs.Insts.CoreCmpPartialEqVoteInputs
@@ -183,7 +183,7 @@ def VoteInputs.Insts.CoreCmpEq : core.cmp.Eq VoteInputs := {
 }
 
 /-- [pedra_aeneas_vote_kernel::VoteDecision]
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 202:0-207:1
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 282:0-287:1
     Visibility: public -/
 @[discriminant isize]
 inductive VoteDecision where
@@ -191,7 +191,7 @@ inductive VoteDecision where
 | Deny : VoteDecision
 
 /-- [pedra_aeneas_vote_kernel::{impl core::fmt::Debug for pedra_aeneas_vote_kernel::VoteDecision}::fmt]:
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 200:9-200:14
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 280:9-280:14
     Visibility: public -/
 def VoteDecision.Insts.CoreFmtDebug.fmt
   (self : VoteDecision) (f : core.fmt.Formatter) :
@@ -203,42 +203,42 @@ def VoteDecision.Insts.CoreFmtDebug.fmt
   | VoteDecision.Deny => core.fmt.Formatter.write_str f (toStr "Deny")
 
 /-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::fmt::Debug for pedra_aeneas_vote_kernel::VoteDecision}]
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 200:9-200:14 -/
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 280:9-280:14 -/
 @[reducible]
 def VoteDecision.Insts.CoreFmtDebug : core.fmt.Debug VoteDecision := {
   fmt := VoteDecision.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_vote_kernel::{impl core::clone::Clone for pedra_aeneas_vote_kernel::VoteDecision}::clone]:
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 200:16-200:21
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 280:16-280:21
     Visibility: public -/
 def VoteDecision.Insts.CoreCloneClone.clone
   (self : VoteDecision) : Result VoteDecision := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::clone::Clone for pedra_aeneas_vote_kernel::VoteDecision}]
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 200:16-200:21 -/
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 280:16-280:21 -/
 @[reducible]
 def VoteDecision.Insts.CoreCloneClone : core.clone.Clone VoteDecision := {
   clone := VoteDecision.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::marker::Copy for pedra_aeneas_vote_kernel::VoteDecision}]
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 200:23-200:27 -/
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 280:23-280:27 -/
 @[reducible]
 def VoteDecision.Insts.CoreMarkerCopy : core.marker.Copy VoteDecision := {
   cloneInst := VoteDecision.Insts.CoreCloneClone
 }
 
 /-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_vote_kernel::VoteDecision}]
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 200:29-200:38 -/
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 280:29-280:38 -/
 @[reducible]
 def VoteDecision.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq VoteDecision := {
 }
 
 /-- [pedra_aeneas_vote_kernel::{impl core::cmp::PartialEq<pedra_aeneas_vote_kernel::VoteDecision> for pedra_aeneas_vote_kernel::VoteDecision}::eq]:
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 200:29-200:38
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 280:29-280:38
     Visibility: public -/
 def VoteDecision.Insts.CoreCmpPartialEqVoteDecision.eq
   (self : VoteDecision) (other : VoteDecision) : Result Bool := do
@@ -247,7 +247,7 @@ def VoteDecision.Insts.CoreCmpPartialEqVoteDecision.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::cmp::PartialEq<pedra_aeneas_vote_kernel::VoteDecision> for pedra_aeneas_vote_kernel::VoteDecision}]
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 200:29-200:38 -/
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 280:29-280:38 -/
 @[reducible]
 def VoteDecision.Insts.CoreCmpPartialEqVoteDecision : core.cmp.PartialEq
   VoteDecision VoteDecision := {
@@ -255,14 +255,14 @@ def VoteDecision.Insts.CoreCmpPartialEqVoteDecision : core.cmp.PartialEq
 }
 
 /-- [pedra_aeneas_vote_kernel::{impl core::cmp::Eq for pedra_aeneas_vote_kernel::VoteDecision}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 200:40-200:42
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 280:40-280:42
     Visibility: public -/
 def VoteDecision.Insts.CoreCmpEq.assert_fields_are_eq
   (self : VoteDecision) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::cmp::Eq for pedra_aeneas_vote_kernel::VoteDecision}]
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 200:40-200:42 -/
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 280:40-280:42 -/
 @[reducible]
 def VoteDecision.Insts.CoreCmpEq : core.cmp.Eq VoteDecision := {
   partialEqInst := VoteDecision.Insts.CoreCmpPartialEqVoteDecision
@@ -270,7 +270,7 @@ def VoteDecision.Insts.CoreCmpEq : core.cmp.Eq VoteDecision := {
 }
 
 /-- [pedra_aeneas_vote_kernel::can_vote]:
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 213:0-220:1
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 293:0-300:1
     Visibility: public -/
 def can_vote
   (voted_for : Option Std.U64) (candidate_id : Std.U64) : Result Bool := do
@@ -279,7 +279,7 @@ def can_vote
   | some v => ok (v = candidate_id)
 
 /-- [pedra_aeneas_vote_kernel::log_up_to_date]:
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 226:0-234:1
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 306:0-314:1
     Visibility: public -/
 def log_up_to_date
   (my_last_term : Std.U64) (my_last_index : Std.U64) (cand_last_term : Std.U64)
@@ -294,7 +294,7 @@ def log_up_to_date
     else ok false
 
 /-- [pedra_aeneas_vote_kernel::vote_decision]:
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 262:0-278:1
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 342:0-358:1
     Visibility: public -/
 def vote_decision (i : VoteInputs) : Result VoteDecision := do
   if i.candidate_term != i.current_term
@@ -312,7 +312,7 @@ def vote_decision (i : VoteInputs) : Result VoteDecision := do
     else ok VoteDecision.Deny
 
 /-- [pedra_aeneas_vote_kernel::vote_decision_spec]:
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 284:0-297:1
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 364:0-377:1
     Visibility: public -/
 def vote_decision_spec (i : VoteInputs) (d : VoteDecision) : Result Bool := do
   let grant ←
@@ -331,7 +331,7 @@ def vote_decision_spec (i : VoteInputs) (d : VoteDecision) : Result Bool := do
   | VoteDecision.Deny => ok (¬ grant)
 
 /-- [pedra_aeneas_vote_kernel::vote_decision_as_is_ignore_log_and_vote]:
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 304:0-310:1
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 384:0-390:1
     Visibility: public -/
 def vote_decision_as_is_ignore_log_and_vote
   (i : VoteInputs) : Result VoteDecision := do
@@ -340,7 +340,7 @@ def vote_decision_as_is_ignore_log_and_vote
   else ok VoteDecision.Deny
 
 /-- [pedra_aeneas_vote_kernel::PersistOutcome]
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 316:0-321:1
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 396:0-401:1
     Visibility: public -/
 @[discriminant isize]
 inductive PersistOutcome where
@@ -348,7 +348,7 @@ inductive PersistOutcome where
 | Err : PersistOutcome
 
 /-- [pedra_aeneas_vote_kernel::{impl core::fmt::Debug for pedra_aeneas_vote_kernel::PersistOutcome}::fmt]:
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 314:9-314:14
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 394:9-394:14
     Visibility: public -/
 def PersistOutcome.Insts.CoreFmtDebug.fmt
   (self : PersistOutcome) (f : core.fmt.Formatter) :
@@ -359,42 +359,42 @@ def PersistOutcome.Insts.CoreFmtDebug.fmt
   | PersistOutcome.Err => core.fmt.Formatter.write_str f (toStr "Err")
 
 /-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::fmt::Debug for pedra_aeneas_vote_kernel::PersistOutcome}]
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 314:9-314:14 -/
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 394:9-394:14 -/
 @[reducible]
 def PersistOutcome.Insts.CoreFmtDebug : core.fmt.Debug PersistOutcome := {
   fmt := PersistOutcome.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_vote_kernel::{impl core::clone::Clone for pedra_aeneas_vote_kernel::PersistOutcome}::clone]:
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 314:16-314:21
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 394:16-394:21
     Visibility: public -/
 def PersistOutcome.Insts.CoreCloneClone.clone
   (self : PersistOutcome) : Result PersistOutcome := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::clone::Clone for pedra_aeneas_vote_kernel::PersistOutcome}]
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 314:16-314:21 -/
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 394:16-394:21 -/
 @[reducible]
 def PersistOutcome.Insts.CoreCloneClone : core.clone.Clone PersistOutcome := {
   clone := PersistOutcome.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::marker::Copy for pedra_aeneas_vote_kernel::PersistOutcome}]
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 314:23-314:27 -/
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 394:23-394:27 -/
 @[reducible]
 def PersistOutcome.Insts.CoreMarkerCopy : core.marker.Copy PersistOutcome := {
   cloneInst := PersistOutcome.Insts.CoreCloneClone
 }
 
 /-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_vote_kernel::PersistOutcome}]
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 314:29-314:38 -/
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 394:29-394:38 -/
 @[reducible]
 def PersistOutcome.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq PersistOutcome := {
 }
 
 /-- [pedra_aeneas_vote_kernel::{impl core::cmp::PartialEq<pedra_aeneas_vote_kernel::PersistOutcome> for pedra_aeneas_vote_kernel::PersistOutcome}::eq]:
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 314:29-314:38
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 394:29-394:38
     Visibility: public -/
 def PersistOutcome.Insts.CoreCmpPartialEqPersistOutcome.eq
   (self : PersistOutcome) (other : PersistOutcome) : Result Bool := do
@@ -403,7 +403,7 @@ def PersistOutcome.Insts.CoreCmpPartialEqPersistOutcome.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::cmp::PartialEq<pedra_aeneas_vote_kernel::PersistOutcome> for pedra_aeneas_vote_kernel::PersistOutcome}]
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 314:29-314:38 -/
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 394:29-394:38 -/
 @[reducible]
 def PersistOutcome.Insts.CoreCmpPartialEqPersistOutcome : core.cmp.PartialEq
   PersistOutcome PersistOutcome := {
@@ -411,14 +411,14 @@ def PersistOutcome.Insts.CoreCmpPartialEqPersistOutcome : core.cmp.PartialEq
 }
 
 /-- [pedra_aeneas_vote_kernel::{impl core::cmp::Eq for pedra_aeneas_vote_kernel::PersistOutcome}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 314:40-314:42
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 394:40-394:42
     Visibility: public -/
 def PersistOutcome.Insts.CoreCmpEq.assert_fields_are_eq
   (self : PersistOutcome) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::cmp::Eq for pedra_aeneas_vote_kernel::PersistOutcome}]
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 314:40-314:42 -/
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 394:40-394:42 -/
 @[reducible]
 def PersistOutcome.Insts.CoreCmpEq : core.cmp.Eq PersistOutcome := {
   partialEqInst := PersistOutcome.Insts.CoreCmpPartialEqPersistOutcome
@@ -426,7 +426,7 @@ def PersistOutcome.Insts.CoreCmpEq : core.cmp.Eq PersistOutcome := {
 }
 
 /-- [pedra_aeneas_vote_kernel::grant_after_persist]:
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 330:0-337:1
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 410:0-417:1
     Visibility: public -/
 def grant_after_persist
   (decision : VoteDecision) (persist : PersistOutcome) : Result Bool := do
@@ -438,7 +438,7 @@ def grant_after_persist
   | VoteDecision.Deny => ok false
 
 /-- [pedra_aeneas_vote_kernel::grant_after_persist_as_is]:
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 343:0-346:1
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 423:0-426:1
     Visibility: public -/
 def grant_after_persist_as_is
   (decision : VoteDecision) (persist : PersistOutcome) : Result Bool := do
@@ -446,7 +446,7 @@ def grant_after_persist_as_is
     VoteDecision.WouldGrant
 
 /-- [pedra_aeneas_vote_kernel::DurableTerm]
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 352:0-360:1
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 432:0-440:1
     Visibility: public -/
 @[discriminant isize]
 inductive DurableTerm where
@@ -455,7 +455,7 @@ inductive DurableTerm where
 | Restored : DurableTerm
 
 /-- [pedra_aeneas_vote_kernel::{impl core::fmt::Debug for pedra_aeneas_vote_kernel::DurableTerm}::fmt]:
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 350:9-350:14
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 430:9-430:14
     Visibility: public -/
 def DurableTerm.Insts.CoreFmtDebug.fmt
   (self : DurableTerm) (f : core.fmt.Formatter) :
@@ -467,42 +467,42 @@ def DurableTerm.Insts.CoreFmtDebug.fmt
   | DurableTerm.Restored => core.fmt.Formatter.write_str f (toStr "Restored")
 
 /-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::fmt::Debug for pedra_aeneas_vote_kernel::DurableTerm}]
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 350:9-350:14 -/
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 430:9-430:14 -/
 @[reducible]
 def DurableTerm.Insts.CoreFmtDebug : core.fmt.Debug DurableTerm := {
   fmt := DurableTerm.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_vote_kernel::{impl core::clone::Clone for pedra_aeneas_vote_kernel::DurableTerm}::clone]:
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 350:16-350:21
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 430:16-430:21
     Visibility: public -/
 def DurableTerm.Insts.CoreCloneClone.clone
   (self : DurableTerm) : Result DurableTerm := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::clone::Clone for pedra_aeneas_vote_kernel::DurableTerm}]
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 350:16-350:21 -/
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 430:16-430:21 -/
 @[reducible]
 def DurableTerm.Insts.CoreCloneClone : core.clone.Clone DurableTerm := {
   clone := DurableTerm.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::marker::Copy for pedra_aeneas_vote_kernel::DurableTerm}]
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 350:23-350:27 -/
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 430:23-430:27 -/
 @[reducible]
 def DurableTerm.Insts.CoreMarkerCopy : core.marker.Copy DurableTerm := {
   cloneInst := DurableTerm.Insts.CoreCloneClone
 }
 
 /-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_vote_kernel::DurableTerm}]
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 350:29-350:38 -/
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 430:29-430:38 -/
 @[reducible]
 def DurableTerm.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq DurableTerm := {
 }
 
 /-- [pedra_aeneas_vote_kernel::{impl core::cmp::PartialEq<pedra_aeneas_vote_kernel::DurableTerm> for pedra_aeneas_vote_kernel::DurableTerm}::eq]:
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 350:29-350:38
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 430:29-430:38
     Visibility: public -/
 def DurableTerm.Insts.CoreCmpPartialEqDurableTerm.eq
   (self : DurableTerm) (other : DurableTerm) : Result Bool := do
@@ -511,7 +511,7 @@ def DurableTerm.Insts.CoreCmpPartialEqDurableTerm.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::cmp::PartialEq<pedra_aeneas_vote_kernel::DurableTerm> for pedra_aeneas_vote_kernel::DurableTerm}]
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 350:29-350:38 -/
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 430:29-430:38 -/
 @[reducible]
 def DurableTerm.Insts.CoreCmpPartialEqDurableTerm : core.cmp.PartialEq
   DurableTerm DurableTerm := {
@@ -519,14 +519,14 @@ def DurableTerm.Insts.CoreCmpPartialEqDurableTerm : core.cmp.PartialEq
 }
 
 /-- [pedra_aeneas_vote_kernel::{impl core::cmp::Eq for pedra_aeneas_vote_kernel::DurableTerm}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 350:40-350:42
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 430:40-430:42
     Visibility: public -/
 def DurableTerm.Insts.CoreCmpEq.assert_fields_are_eq
   (self : DurableTerm) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::cmp::Eq for pedra_aeneas_vote_kernel::DurableTerm}]
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 350:40-350:42 -/
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 430:40-430:42 -/
 @[reducible]
 def DurableTerm.Insts.CoreCmpEq : core.cmp.Eq DurableTerm := {
   partialEqInst := DurableTerm.Insts.CoreCmpPartialEqDurableTerm
@@ -534,7 +534,7 @@ def DurableTerm.Insts.CoreCmpEq : core.cmp.Eq DurableTerm := {
 }
 
 /-- [pedra_aeneas_vote_kernel::durable_term_if_newer]:
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 367:0-379:1
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 447:0-459:1
     Visibility: public -/
 def durable_term_if_newer
   (current_term : Std.U64) (incoming_term : Std.U64) (persist : PersistOutcome)
@@ -549,7 +549,7 @@ def durable_term_if_newer
   else ok DurableTerm.Keep
 
 /-- [pedra_aeneas_vote_kernel::durable_term_if_newer_as_is]:
-    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 386:0-397:1
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 466:0-477:1
     Visibility: public -/
 def durable_term_if_newer_as_is
   (current_term : Std.U64) (incoming_term : Std.U64) (persist : PersistOutcome)
