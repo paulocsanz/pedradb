@@ -3850,7 +3850,7 @@ impl<E: Env> StoreCluster<E> {
             }
             if let Some(raw) = node.db.get(&cluster_membership_key()) {
                 let ids = decode_membership(&raw)?;
-                if disk_mem.is_none() && !ids.is_empty() {
+                if disk_mem.is_none() && !pedradb_core::write_admission_kernel::batch_is_empty(ids.len() as u64) {
                     disk_mem = Some(ids);
                 }
             }
