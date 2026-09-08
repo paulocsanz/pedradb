@@ -6467,7 +6467,7 @@ impl<E: Env> StoreCluster<E> {
                     txn_kernel::unreserve_si_gen(self.commit_generation, stamped_gen);
                 return Err(e);
             }
-            if !note_items.is_empty() {
+            if !pedradb_core::write_admission_kernel::batch_is_empty(note_items.len() as u64) {
                 self.pending_version_notes
                     .insert((rid, idx), (stamped_gen, note_items));
             }
