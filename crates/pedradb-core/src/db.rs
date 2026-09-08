@@ -11192,7 +11192,7 @@ fn recover_ssts<E: Env>(
                 let t = table_cache.get_or_open(env, &path)?;
                 max_seq = max_seq.max(t.max_sequence());
                 let mut table = (*t).clone();
-                if let Some(cf) = vs.sst_cfs.get(i).filter(|s| !s.is_empty()) {
+                if let Some(cf) = vs.sst_cfs.get(i).filter(|s| !crate::write_admission_kernel::batch_is_empty(s.len() as u64)) {
                     table = table.with_cf(cf.clone());
                 }
                 tables.push(table);
