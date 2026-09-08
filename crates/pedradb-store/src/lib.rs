@@ -7743,7 +7743,7 @@ impl<E: Env> StoreCluster<E> {
         rids.sort_unstable();
         for rid in rids {
             let group = by_range.remove(&rid).unwrap_or_default();
-            if group.is_empty() {
+            if pedradb_core::write_admission_kernel::batch_is_empty(group.len() as u64) {
                 continue;
             }
             self.put_batch(group)?;
