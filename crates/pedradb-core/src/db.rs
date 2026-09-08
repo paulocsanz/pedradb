@@ -7590,7 +7590,7 @@ impl<E: Env> Db<E> {
     /// I/O, CRC, active-file refuse, or durability fence.
     pub fn compact_blob(&mut self, file_num: u32) -> Result<VlogRewriteStats> {
         self.ensure_not_fenced()?;
-        if file_num == 0 {
+        if crate::write_admission_kernel::batch_is_empty(file_num as u64) {
             return self.compact_vlog();
         }
         if file_num == self.blob_active {
