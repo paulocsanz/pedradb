@@ -2849,7 +2849,7 @@ impl<E: PedraEnv> DB<E> {
         // Raftlog reads idx-1 of a 16-append (LAST_RING). Fat apply/lock
         // batches never read-your-writes in the same op — skip the warm Vec.
         let need_warm = puts.len() + deletes.len() <= LAST_RING
-            && deletes.is_empty()
+            && pedradb_core::write_admission_kernel::batch_is_empty(deletes.len() as u64)
             && puts.iter().all(|(cf, _, _)| *cf == "raftlog");
         // RFC-0159 P1.5: latched first-CF run skips BatchOp / WriteGroup.
         // Hydrate is 1024 data + 1 meta; only `data` latches.
