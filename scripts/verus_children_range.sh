@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Machine-check packed-children exclusive end (RFC-0002 P23 / F59).
+# Machine-check packed-children exclusive end on the file rustc links
+# (single artifact — not the twin-cópia). RFC-0002 P23 / F59.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/montanha-fdb-recipes/verus/children_range.rs"
+SRC="$ROOT/crates/montanha-fdb-recipes/src/children_kernel.rs"
 if [[ -x "${VERUS:-}" ]]; then
   :
 elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then

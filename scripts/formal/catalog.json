@@ -2296,8 +2296,9 @@
       "finding": "F59",
       "twin_kind": "close",
       "atom": "next_byte_in_packed_children",
+      "single_artifact": true,
       "kernel": "crates/montanha-fdb-recipes/src/children_kernel.rs",
-      "twin": "crates/montanha-fdb-recipes/verus/children_range.rs",
+      "twin": "crates/montanha-fdb-recipes/src/children_kernel.rs",
       "verus": "scripts/verus_children_range.sh",
       "callers": [
         "crates/montanha-fdb-recipes/src/lib.rs"
