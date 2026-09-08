@@ -123,6 +123,19 @@ macro_rules! fsync_promotes_pending_as_is_body {
     }};
 }
 
+macro_rules! media_durable_admitted_body {
+    ($fsync_ok:expr) => {{
+        let _ = $fsync_ok;
+        false
+    }};
+}
+
+macro_rules! media_durable_admitted_as_is_body {
+    ($fsync_ok:expr) => {
+        $fsync_ok
+    };
+}
+
 /// First-committer-wins predicate (OCC): a transaction that read
 /// snapshot `snap` against current `last_seq` conflicts iff the window
 /// `(snap, last_seq]` is non-empty **and** some key it touched was
@@ -393,15 +406,17 @@ pub fn fsync_promotes_pending_as_is(_os_honest: bool) -> bool {
 }
 
 /// `fdatasync` rc==0 is not a proof the drive stored the bytes (R-fsync-lie).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn media_durable_admitted(_fsync_ok: bool) -> bool {
-    false
+    media_durable_admitted_body!(_fsync_ok)
 }
 
 /// AS-IS: rc==0 is rounded to a media theorem (the 0078 hole).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn media_durable_admitted_as_is(fsync_ok: bool) -> bool {
-    fsync_ok
+    media_durable_admitted_as_is_body!(fsync_ok)
 }
 
 /// RFC-0078 P1.2 / RFC-0052: `RecordingEnv::Lying` and det_io PRELOAD
@@ -515,6 +530,20 @@ pub fn fsync_promotes_pending_as_is(_os_honest: bool) -> (ok: bool)
         ok == true,
 {
     fsync_promotes_pending_as_is_body!(_os_honest)
+}
+
+pub fn media_durable_admitted(_fsync_ok: bool) -> (ok: bool)
+    ensures
+        ok == false,
+{
+    media_durable_admitted_body!(_fsync_ok)
+}
+
+pub fn media_durable_admitted_as_is(fsync_ok: bool) -> (ok: bool)
+    ensures
+        ok == fsync_ok,
+{
+    media_durable_admitted_as_is_body!(fsync_ok)
 }
 
 #[derive(PartialEq, Eq, Copy, Clone)]
