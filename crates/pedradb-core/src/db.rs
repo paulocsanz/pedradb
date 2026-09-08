@@ -7028,7 +7028,7 @@ impl<E: Env> Db<E> {
                     hulls.push((lo, hi));
                     jobs.push(job);
                 }
-                if !jobs.is_empty() {
+                if !crate::write_admission_kernel::batch_is_empty(jobs.len() as u64) {
                     return Ok(jobs);
                 }
             }
