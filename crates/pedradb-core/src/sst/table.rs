@@ -3004,7 +3004,7 @@ fn write_sst_try_sorted_body(
     let key_cp = SstTable::derive_index_accel(&mut index);
     stages.add(|s| &mut s.enc_ns, t_enc);
     // Bloom inserts ran inside the encode loop (slice, no key clone).
-    if n_entries == 0 {
+    if crate::write_admission_kernel::batch_is_empty(n_entries as u64) {
         bloom = BloomFilter::always_true();
     }
 
