@@ -6844,7 +6844,7 @@ impl<E: Env> Db<E> {
             .max_by_key(|(_, v)| v.len())
             .map(|(cf, v)| (cf, v))
             .unwrap_or_default();
-        if inputs.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(inputs.len() as u64) {
             return Ok(None);
         }
         // `ssts` is append-ordered, so the family vec is oldest-first; a
