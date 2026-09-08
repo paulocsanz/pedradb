@@ -9608,7 +9608,7 @@ impl<E: Env> Db<E> {
             }
             return finish_group_results(results);
         }
-        if appended.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(appended.len() as u64) {
             return finish_group_results(results);
         }
 

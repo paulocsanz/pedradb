@@ -741,6 +741,11 @@ mod tests {
             prep_ops.contains("batch_is_empty("),
             "prepare_write_ops_spill must match batch_is_empty"
         );
+        let apply = named_fn_src(include_str!("db.rs"), "group_apply").expect("group_apply");
+        assert!(
+            apply.contains("batch_is_empty("),
+            "group_apply must match batch_is_empty"
+        );
     }
 
     #[test]
