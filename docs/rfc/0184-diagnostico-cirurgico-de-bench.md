@@ -239,6 +239,11 @@ a linha quando há phasesΔ. Sem harness novo.
       Test `rfc0184_venice_fanout_get_mc4_in_compare`. Darwin DIAG vs
       Rocks `sync=false`: `ratio=0.735` (102 k / 139 k QPS) — named
       loss kept. Not Linux cartaz. — status: `done`
+- [x] **P2.46** `kvrocks_get_mc4` (redis-benchmark GET, 4 clients) in
+      `COMPARE_SHAPES`, `BALANCE_SHAPES`, and `run_kvrocks_get_clients`.
+      Test `rfc0184_kvrocks_get_mc4_in_compare`. Darwin DIAG vs Rocks
+      `sync=false`: `ratio=1.205` (5.32 M / 4.42 M QPS). Not Linux
+      cartaz. — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -298,6 +303,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.43 | p2 | rockset_hybrid_mc4 COMPARE+BALANCE | done | Rockset ingest+get mc4; Darwin DIAG 0.543× named loss | 2026-09-08 |
 | P2.44 | p2 | yugabyte_docdb_rmw_mc4 COMPARE+BALANCE | done | YB DocDB RMW mc4; Darwin DIAG 0.952× named loss | 2026-09-08 |
 | P2.45 | p2 | venice_fanout_get_mc4 COMPARE+BALANCE | done | Venice 32-get fanout mc4; Darwin DIAG 0.735× named loss | 2026-09-08 |
+| P2.46 | p2 | kvrocks_get_mc4 COMPARE+BALANCE | done | Kvrocks GET mc4; Darwin DIAG 1.205× not Linux cartaz | 2026-09-08 |
 
 ## Acceptance Criteria
 
@@ -352,7 +358,8 @@ a linha quando há phasesΔ. Sem harness novo.
   `rfc0184_qs_batch_write_mc4_in_compare` (P2.42);
   `rfc0184_rockset_hybrid_mc4_in_compare` (P2.43);
   `rfc0184_yugabyte_docdb_rmw_mc4_in_compare` (P2.44);
-  `rfc0184_venice_fanout_get_mc4_in_compare` (P2.45).
+  `rfc0184_venice_fanout_get_mc4_in_compare` (P2.45);
+  `rfc0184_kvrocks_get_mc4_in_compare` (P2.46).
 - **Telemetry / Analytics:** uma linha `diagnose dominant=… lever=…`;
   `benches[].diagnose.lever` no JSON; compare copia para a row.
   scale `get_hit` / `lookup_100` / `probe_hit` imprimem `diagnose get … class=…` (P2.6/P2.7/P2.21).
