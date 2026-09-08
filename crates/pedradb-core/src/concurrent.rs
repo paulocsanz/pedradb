@@ -1525,6 +1525,14 @@ impl WriteGroup {
         guard.begin_commit();
         guard.stage_unapplied(&inflight);
         let mut chunks = vec![Chunk::Fly(inflight)];
+        // RFC-0180 P0.46: extra drain was take-if-queued. In-flight
+        // begin_submit still not in the queue; wait (no timer) then drain
+        // so they share this off-lock WAL hop. G1 already waited on fd EMA.
+        if !need_sync {
+            if let Some(b) = batch.as_ref() {
+                group.wait_in_flight_to_queue(b.len());
+            }
+        }
         if let Some(batch) = batch.as_mut() {
             loop {
                 let mut extra = drain();
@@ -6938,8 +6946,8 @@ mod tests {
         assert_eq!(async_catchup_spins(2, 4), 1024);
         assert_eq!(async_catchup_spins(3, 4), 1024);
         assert_eq!(async_catchup_spins(4, 4), 0);
-        // RFC-0180 P0.44/P0.45: wait while begin_submit ran and push_pending did not
-        // (pre-lock and after group_start).
+        // RFC-0180 P0.44–P0.46: wait while begin_submit ran and push_pending
+        // did not (pre-lock, after group_start, before off-lock WAL).
         assert_eq!(grouping_cap(1), 1);
         assert_eq!(grouping_cap(4), 4);
         assert_eq!(grouping_cap(8), 4);
