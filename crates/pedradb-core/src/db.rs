@@ -9925,7 +9925,7 @@ impl<E: Env> Db<E> {
     }
 
     pub(crate) fn maybe_auto_flush(&mut self) -> Result<()> {
-        if !self.physical_cfs.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(self.physical_cfs.len() as u64) {
             // Hot path: integer compare, not a walk of every memtable key.
             // `cf_families()` scans tail+map (O(entries)) — with CFs registered
             // every 1c put paid that (ycsb_a 2M→0.6M qps, RFC-0149).
