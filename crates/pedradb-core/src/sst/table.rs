@@ -870,7 +870,7 @@ impl SstTable {
             let block = self.materialize_entries().ok()?;
             return Self::best_point_in_entry_slice(&block, user_key, snapshot);
         }
-        if self.index.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.index.len() as u64) {
             return None;
         }
         let mut best: Option<(SequenceNumber, Lookup)> = None;
