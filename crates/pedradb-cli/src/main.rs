@@ -614,7 +614,9 @@ fn stats_cmd(args: &[String]) -> std::process::ExitCode {
             println!("wal_bytes={} wal_syncs={}", s.wal_bytes, s.wal_sync_count);
             println!("{}", s.gc_line());
             println!("auto_blob_gc={:?}", db.auto_blob_gc_min_ratio());
-            if !s.last_auto_compact_error.is_empty() {
+            if !pedradb_core::write_admission_kernel::batch_is_empty(
+                s.last_auto_compact_error.len() as u64,
+            ) {
                 println!("last_auto_compact_error={}", s.last_auto_compact_error);
             }
             println!("{}", s.vlog_line());
