@@ -2908,7 +2908,7 @@ impl<E: PedraEnv> DB<E> {
                 .map(|_| ())
                 .map_err(Error::from)
         });
-        if r.is_ok() && !warm.is_empty() {
+        if r.is_ok() && !pedradb_core::write_admission_kernel::batch_is_empty(warm.len() as u64) {
             // Raftlog reads idx-1 of a 16-append (LAST_RING). Fat apply/lock
             // batches never read-your-writes in the same op.
             let skip = warm.len().saturating_sub(LAST_RING);
