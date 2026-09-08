@@ -702,7 +702,7 @@ impl TcpClusterClient {
     /// # Errors
     /// If **no** peer accepts the map.
     pub fn rewire_peer_map(&mut self, peers: &[(u64, String)]) -> Result<()> {
-        if peers.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(peers.len() as u64) {
             return Err(StoreError::Msg("empty peer map".into()));
         }
         let list: Vec<(u64, String)> = peers.to_vec();
