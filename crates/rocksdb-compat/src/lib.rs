@@ -2900,7 +2900,7 @@ impl<E: PedraEnv> DB<E> {
                     key: self.codec.encode_run(&pfx, k.as_ref(), &mut pool),
                 });
             }
-            if ops.is_empty() {
+            if pedradb_core::write_admission_kernel::batch_is_empty(ops.len() as u64) {
                 return Ok(());
             }
             self.inner
