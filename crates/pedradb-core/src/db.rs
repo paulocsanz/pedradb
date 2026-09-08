@@ -9801,7 +9801,7 @@ impl<E: Env> Db<E> {
     /// trampoline (RFC-0171 P1.1).
     pub(crate) fn ensure_write_admitted_for(&mut self, families: &[String]) -> Result<()> {
         let per_cf = !crate::write_admission_kernel::batch_is_empty(self.physical_cfs.len() as u64)
-            && !families.is_empty();
+            && !crate::write_admission_kernel::batch_is_empty(families.len() as u64);
         let mem_armed = self.write_stall_mem_bytes.is_some();
         let mem_limit = self.write_stall_mem_bytes.unwrap_or(0);
         let measure_mem = |db: &Self| -> usize {
