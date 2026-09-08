@@ -1085,7 +1085,7 @@ impl MemTable {
         }
         let mut v: Vec<(PackKey, usize)> = {
             let shard = self.tail_idx.get(pfx)?;
-            if shard.point.is_empty() {
+            if crate::write_admission_kernel::batch_is_empty(shard.point.len() as u64) {
                 return None;
             }
             shard.point.iter().map(|(&k, &i)| (k, i)).collect()
