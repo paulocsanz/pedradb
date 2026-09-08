@@ -1294,6 +1294,22 @@ def main() -> int:
         print("FAIL high_water twin≠kernel did not fail")
         return 1
     print("ok mutant high_water twin≠kernel named")
+    pm_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in pm_mutant["pairs"]:
+        if pair.get("id") == "participating_member":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/membership_joint.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing participating_member")
+        return 1
+    hits = [m for m in _sa_fails(pm_mutant) if m.startswith("participating_member:")]
+    if not hits:
+        print("FAIL participating_member twin≠kernel did not fail")
+        return 1
+    print("ok mutant participating_member twin≠kernel named")
     # Drive the same rule through check_twins (may also report unrelated
     # dirty-tree twin drift; we only require the SA id).
     try:

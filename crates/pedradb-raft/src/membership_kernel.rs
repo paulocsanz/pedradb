@@ -2075,4 +2075,14 @@ mod tests {
         );
         assert_eq!(high_water_at_least(2, 5), 5);
     }
+
+    #[test]
+    fn participating_if_member_on_live_removed_is_not_ok() {
+        assert!(!participating_if_member(false));
+        assert!(
+            participating_if_member_as_is(false),
+            "AS-IS dente: keep captured participating"
+        );
+        assert!(participating_if_member(true));
+    }
 }
