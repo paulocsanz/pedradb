@@ -4291,6 +4291,9 @@ where
                             {
                                 let _ = compat_compact_once(&inner, &gate);
                             }
+                            // RFC-0180 P0.70: 1c seed WAL would otherwise
+                            // grow without the 200 ms idle rotate.
+                            let _ = inner.checkpoint_wal_if_lone_and_fat();
                             wait = poll;
                             continue;
                         }
@@ -4365,6 +4368,7 @@ where
                             let _ = compat_compact_once(&inner, &gate);
                             wait = poll;
                         } else {
+                            let _ = inner.checkpoint_wal_if_lone_and_fat();
                             wait = poll;
                         }
                     }

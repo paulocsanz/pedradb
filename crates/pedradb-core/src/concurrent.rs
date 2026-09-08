@@ -3613,6 +3613,36 @@ impl<E: Env> ConcurrentDb<E> {
         self.inner.write().try_rotate_wal_if_idle()
     }
 
+    /// RFC-0180 P0.70: 1c seed never sits idle 200 ms, so WAL grows to the
+    /// whole keyspace (25M ≈ 3 GiB next to SST + mem on a 4 GiB box).
+    /// When not `recently_multi` and WAL ≥ 2× write-buffer, flush live mem
+    /// (so rotate is legal) and replace the log. mc4 stays stage/park
+    /// (P0.14) — this is host-worker 1c only, not async Ok.
+    #[must_use]
+    pub fn checkpoint_wal_if_lone_and_fat(&self) -> bool {
+        if self.recently_multi(Duration::from_millis(2)) {
+            return false;
+        }
+        if self.commit_inflight() > 0 || self.writes_active() > 0 {
+            return false;
+        }
+        let limit = self
+            .with_read(|db| db.auto_flush_threshold())
+            .unwrap_or(0) as u64;
+        if limit == 0 {
+            return false;
+        }
+        let wal = self.with_read(|db| db.wal_arc().lock().position());
+        if wal < limit.saturating_mul(2) {
+            return false;
+        }
+        if self.flush().is_err() {
+            return false;
+        }
+        let _ = self.rotate_wal_if_writers_idle();
+        true
+    }
+
     /// Merge parked flush pins into one retired BTree **off** the write lock.
     ///
     /// Drain only pushes pins (apply must not absorb under the write lock).
@@ -6146,6 +6176,94 @@ mod tests {
         }
         let re = open_sync(&dir);
         assert_eq!(re.get(b"k").as_deref(), Some(&[b'v'; 64][..]));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn open_async_small_flush(dir: &std::path::Path) -> ConcurrentDb {
+        ConcurrentDb::open_with(
+            dir,
+            OpenOptions {
+                wal_full_fsync: true,
+                history: Default::default(),
+                wal_recovery: Default::default(),
+                sync: false,
+                auto_flush_bytes: Some(4096),
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+                sst_payload_budget_bytes: None,
+            },
+        )
+        .unwrap()
+    }
+
+    /// RFC-0180 P0.70: 1c async seed with a fat WAL checkpoints (flush+rotate).
+    #[test]
+    fn rfc0180_checkpoint_wal_if_lone_and_fat() {
+        let dir = temp_dir();
+        let db = open_async_small_flush(&dir);
+        let v = vec![b'v'; 256];
+        for i in 0..64u32 {
+            db.put(&i.to_be_bytes(), &v).unwrap();
+        }
+        let wal_before = db.stats().wal_bytes;
+        assert!(
+            wal_before >= 8192,
+            "1c puts must grow WAL past 2× write-buffer, got {wal_before}"
+        );
+        assert!(
+            db.checkpoint_wal_if_lone_and_fat(),
+            "1c fat WAL must checkpoint"
+        );
+        let wal_after = db.stats().wal_bytes;
+        assert!(
+            wal_after < wal_before,
+            "checkpoint must replace WAL ({wal_after} !< {wal_before})"
+        );
+        for i in 0..64u32 {
+            assert_eq!(db.get(&i.to_be_bytes()).as_deref(), Some(v.as_slice()));
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0180 P0.70: mc4 recently_multi must not checkpoint (P0.14 stage/park).
+    #[test]
+    fn rfc0180_checkpoint_wal_skips_when_recently_multi() {
+        let dir = temp_dir();
+        let db = open_async_small_flush(&dir);
+        let v = vec![b'v'; 256];
+        for i in 0..64u32 {
+            db.put(&i.to_be_bytes(), &v).unwrap();
+        }
+        let n = 4usize;
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(n));
+        std::thread::scope(|s| {
+            for t in 0..n {
+                let db = &db;
+                let barrier = std::sync::Arc::clone(&barrier);
+                let v = &v;
+                s.spawn(move || {
+                    barrier.wait();
+                    for j in 0..32u32 {
+                        let mut k = [0u8; 8];
+                        k[0] = t as u8;
+                        k[1..5].copy_from_slice(&j.to_be_bytes());
+                        db.put(&k, v).unwrap();
+                    }
+                });
+            }
+        });
+        assert!(
+            db.recently_multi(std::time::Duration::from_secs(1)),
+            "mc4 burst must set last_multi"
+        );
+        if db.recently_multi(std::time::Duration::from_millis(2)) {
+            assert!(
+                !db.checkpoint_wal_if_lone_and_fat(),
+                "recently_multi must not checkpoint"
+            );
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 
