@@ -1,5 +1,11 @@
 //! Form-urlencoded query values (RFC-0002 P35 / F101).
 //!
+//! **Single artifact:** this file is what `rustc` links *and* what Verus
+//! proves (`cfg(verus_keep_ghost)`). Vec loop / `%HH` scan stay rustc.
+//! No twin-cópia.
+//!
+//!   ./scripts/verus_form_plus.sh
+//!
 //! Production [`crate::query_param`] calls [`form_decode`]. Path segments still
 //! use `%HH` only (`+` stays literal — RFC 3986).
 //!
@@ -7,29 +13,64 @@
 
 #![forbid(unsafe_code)]
 
+macro_rules! form_plus_byte_body {
+    ($b:expr) => {
+        if $b == b'+' {
+            b' '
+        } else {
+            $b
+        }
+    };
+}
+
+macro_rules! form_plus_byte_as_is_body {
+    ($b:expr) => {
+        $b
+    };
+}
+
+macro_rules! plus_before_percent_body {
+    () => {
+        true
+    };
+}
+
+macro_rules! query_u64_conflict_body {
+    ($a:expr, $b:expr) => {
+        $a != $b
+    };
+}
+
+macro_rules! query_u64_conflict_as_is_body {
+    ($a:expr, $b:expr) => {{
+        let _ = ($a, $b);
+        false
+    }};
+}
+
 /// F101: a raw `+` in a query value is a space.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn form_plus_byte(b: u8) -> u8 {
-    if b == b'+' {
-        b' '
-    } else {
-        b
-    }
+    form_plus_byte_body!(b)
 }
 
 /// AS-IS F101: `+` stays `+` (path-style / F76 only).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn form_plus_byte_as_is(b: u8) -> u8 {
-    b
+    form_plus_byte_as_is_body!(b)
 }
 
 /// `+` is mapped **before** `%HH`, so `%2B` remains a literal plus.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn plus_before_percent() -> bool {
-    true
+    plus_before_percent_body!()
 }
 
 /// Hex nibble for `%HH`.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn from_hex(c: u8) -> Option<u8> {
     match c {
@@ -41,6 +82,7 @@ pub fn from_hex(c: u8) -> Option<u8> {
 }
 
 /// Query-value decode: `+` → space, then `%HH`.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn form_decode(s: &str) -> Vec<u8> {
     let b = s.as_bytes();
@@ -66,6 +108,7 @@ pub fn form_decode(s: &str) -> Vec<u8> {
 }
 
 /// F155: two decoded query values for the same name disagree.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn query_values_conflict(values: &[&str]) -> bool {
     match values {
@@ -75,36 +118,42 @@ pub fn query_values_conflict(values: &[&str]) -> bool {
 }
 
 /// AS-IS F155: first value always wins; never a conflict.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn query_values_conflict_as_is(_values: &[&str]) -> bool {
     false
 }
 
 /// F155: parsed query ints disagree (`rev=1` then `rev=0`).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn query_u64_conflict(a: u64, b: u64) -> bool {
-    a != b
+    query_u64_conflict_body!(a, b)
 }
 
 /// AS-IS F88-class: last/first wins, never reject.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
-pub fn query_u64_conflict_as_is(_a: u64, _b: u64) -> bool {
-    false
+pub fn query_u64_conflict_as_is(a: u64, b: u64) -> bool {
+    query_u64_conflict_as_is_body!(a, b)
 }
 
 /// F162: a query part with no `=` whose decoded name is `key` (`?rev`).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn query_part_is_bare_name(part: &str, key: &str) -> bool {
     !part.is_empty() && !part.contains('=') && form_decode(part) == key.as_bytes()
 }
 
 /// AS-IS F162: skip parts without `=`.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn query_part_is_bare_name_as_is(_part: &str, _key: &str) -> bool {
     false
 }
 
 /// AS-IS F101: `%HH` only (no `+` → space).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn form_decode_as_is(s: &str) -> Vec<u8> {
     let b = s.as_bytes();
@@ -123,6 +172,123 @@ pub fn form_decode_as_is(s: &str) -> Vec<u8> {
     }
     out
 }
+
+#[cfg(verus_keep_ghost)]
+use vstd::prelude::*;
+
+#[cfg(verus_keep_ghost)]
+verus! {
+
+pub open spec fn form_plus_byte_spec(b: u8) -> u8 {
+    if b == 43u8 {
+        32u8
+    } else {
+        b
+    }
+}
+
+pub fn form_plus_byte(b: u8) -> (r: u8)
+    ensures
+        r == form_plus_byte_spec(b),
+        (b == 43u8) ==> r == 32u8,
+{
+    form_plus_byte_body!(b)
+}
+
+pub open spec fn form_plus_byte_as_is_spec(b: u8) -> u8 {
+    b
+}
+
+pub fn form_plus_byte_as_is(b: u8) -> (r: u8)
+    ensures
+        r == form_plus_byte_as_is_spec(b),
+        r == b,
+{
+    form_plus_byte_as_is_body!(b)
+}
+
+proof fn lemma_plus_is_space()
+    ensures
+        form_plus_byte_spec(43u8) == 32u8,
+        form_plus_byte_as_is_spec(43u8) == 43u8,
+{
+}
+
+proof fn lemma_other_bytes_unchanged(b: u8)
+    requires
+        b != 43u8,
+    ensures
+        form_plus_byte_spec(b) == b,
+        form_plus_byte_spec(b) == form_plus_byte_as_is_spec(b),
+{
+}
+
+pub fn plus_before_percent() -> (d: bool)
+    ensures
+        d == true,
+{
+    plus_before_percent_body!()
+}
+
+pub open spec fn from_hex_spec(c: u8) -> Option<u8> {
+    if b'0' <= c && c <= b'9' {
+        Some((c - b'0') as u8)
+    } else if b'a' <= c && c <= b'f' {
+        Some((c - b'a' + 10u8) as u8)
+    } else if b'A' <= c && c <= b'F' {
+        Some((c - b'A' + 10u8) as u8)
+    } else {
+        None
+    }
+}
+
+pub fn from_hex(c: u8) -> (r: Option<u8>)
+    ensures
+        r == from_hex_spec(c),
+{
+    if b'0' <= c && c <= b'9' {
+        Some(c - b'0')
+    } else if b'a' <= c && c <= b'f' {
+        Some(c - b'a' + 10u8)
+    } else if b'A' <= c && c <= b'F' {
+        Some(c - b'A' + 10u8)
+    } else {
+        None
+    }
+}
+
+pub open spec fn query_u64_conflict_spec(a: u64, b: u64) -> bool {
+    a != b
+}
+
+pub fn query_u64_conflict(a: u64, b: u64) -> (d: bool)
+    ensures
+        d == query_u64_conflict_spec(a, b),
+        d == (a != b),
+{
+    query_u64_conflict_body!(a, b)
+}
+
+pub open spec fn query_u64_conflict_as_is_spec(_a: u64, _b: u64) -> bool {
+    false
+}
+
+pub fn query_u64_conflict_as_is(a: u64, b: u64) -> (d: bool)
+    ensures
+        d == false,
+        d == query_u64_conflict_as_is_spec(a, b),
+{
+    query_u64_conflict_as_is_body!(a, b)
+}
+
+proof fn lemma_as_is_swallows_conflict()
+    ensures
+        query_u64_conflict_spec(1u64, 0u64),
+        !query_u64_conflict_as_is_spec(1u64, 0u64),
+{
+}
+
+} // verus!
 
 #[cfg(test)]
 mod tests {

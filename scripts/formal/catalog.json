@@ -1785,8 +1785,9 @@
       "finding": "F101",
       "twin_kind": "close",
       "atom": "form_plus_byte",
+      "single_artifact": true,
       "kernel": "crates/pedradb-http/src/form_kernel.rs",
-      "twin": "crates/pedradb-http/verus/form_plus.rs",
+      "twin": "crates/pedradb-http/src/form_kernel.rs",
       "verus": "scripts/verus_form_plus.sh",
       "callers": [
         "crates/pedradb-http/src/lib.rs"

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Machine-check F101 form-urlencoded plus (RFC-0002 P35).
+# Machine-check F101 form-urlencoded plus on the file rustc links
+# (single artifact — not the twin-cópia). RFC-0002 P35.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-http/verus/form_plus.rs"
+SRC="$ROOT/crates/pedradb-http/src/form_kernel.rs"
 if [[ -x "${VERUS:-}" ]]; then
   :
 elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then
