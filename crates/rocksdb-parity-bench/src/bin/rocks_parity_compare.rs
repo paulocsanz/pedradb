@@ -148,6 +148,9 @@ fn main() {
             .or_else(|| {
                 extract_cli_diagnose_class(&compat_raw).map(|c| format!(r#"{{"class":"{c}"}}"#))
             })
+            .or_else(|| {
+                extract_cli_diagnose_admits(&compat_raw).map(|a| format!(r#"{{"admits":{a}}}"#))
+            })
             .unwrap_or_else(|| "null".into());
         ratios.push_str(&format!(
             r#"    {{"shape":"{shape}","compat_keys_per_s":{c_s},"rocksdb_keys_per_s":{r_s},"compat_over_rocksdb":{ratio},"meets_floor":{meets_floor},"diagnose":{diagnose}}}"#
