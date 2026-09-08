@@ -116,12 +116,17 @@ impl<F: EnvFile> Wal<F> {
     /// Env I/O.
     pub fn create_on<E: Env<File = F>, P: AsRef<Path>>(env: &E, path: P) -> Result<Self> {
         let file = env.create(path.as_ref())?;
-        Ok(Self {
+        let mut wal = Self {
             writer: WalWriter::new(file)?,
             logical: Vec::new(),
             prealloc_to: 0,
             full_fsync: false,
-        })
+        };
+        // RFC-0180 P0.58: first 64 MiB F_PREALLOCATE on Darwin was ~1.5 s
+        // on the commit thread (`STALL group_path`). Open is outside the
+        // timed window; first put then only appends.
+        wal.reserve_space(0);
+        Ok(wal)
     }
 
     /// Open existing WAL for appending via `env` (creates if missing).
@@ -130,12 +135,14 @@ impl<F: EnvFile> Wal<F> {
     /// Env I/O.
     pub fn append_on<E: Env<File = F>, P: AsRef<Path>>(env: &E, path: P) -> Result<Self> {
         let file = env.open_append(path.as_ref())?;
-        Ok(Self {
+        let mut wal = Self {
             writer: WalWriter::new(file)?,
             logical: Vec::new(),
             prealloc_to: 0,
             full_fsync: false,
-        })
+        };
+        wal.reserve_space(0);
+        Ok(wal)
     }
 
     /// Append one logical record. Not durable until [`Self::sync_all`] /
@@ -441,6 +448,11 @@ impl<F: EnvFile> Wal<F> {
         self.writer.position()
     }
 
+    #[cfg(test)]
+    pub(crate) fn prealloc_frontier(&self) -> u64 {
+        self.prealloc_to
+    }
+
     /// Flush and close the underlying file.
     ///
     /// # Errors
@@ -453,6 +465,26 @@ impl<F: EnvFile> Wal<F> {
 #[cfg(test)]
 mod probe_tests {
     use super::*;
+
+    /// RFC-0180 P0.58: the first 64 MiB reservation is at create, not
+    /// the first commit. Logical size stays 0 (KEEP_SIZE).
+    #[test]
+    fn rfc0180_wal_prealloc_at_create() {
+        let dir = std::env::temp_dir().join(format!("wal-prealloc-create-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("wal.log");
+        let w = Wal::create(&path).unwrap();
+        assert_eq!(w.position(), 0);
+        assert_eq!(StdEnv.metadata_len(&path).unwrap(), 0);
+        assert!(
+            w.prealloc_frontier() >= WAL_PREALLOC_CHUNK,
+            "prealloc_to={} — first chunk belongs at create",
+            w.prealloc_frontier()
+        );
+        drop(w);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn prealloc_keeps_logical_size_and_recovers() {
