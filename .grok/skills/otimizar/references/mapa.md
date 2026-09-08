@@ -29,11 +29,12 @@ Refresh this file when a cell moves class. One row per cell.
 | lookup_100 / get_loop | **T**→tool | Darwin 427 µs @100M | scale `classify_get` ns/100 vs 0176 (0184 P2.7) | RFC-0178 P0.9 / 0184 |
 | qs_hot_get / qs_neg / qs_batch_write | **T**→tool | RFC-0043 HL | WRITEPHASE → `diagnose.lever` (0184 P2.8); hot/neg `get_path` | RFC-0043 / 0184 |
 | kvrocks 1c get/set/scan | **T**→tool | RFC-0043 | WRITEPHASE → `diagnose.lever` (0184 P2.9); get/scan `get_path` | RFC-0043 / 0184 |
+| myrocks + linkbench_mix | **T**→tool | RFC-0043 | WRITEPHASE → `diagnose.lever` (0184 P2.10); select/range/mix `get_path` | RFC-0043 / 0184 |
 
 ## Próxima fase (rank da skill, 2026-09-07)
 
 1. **U / Linux `overwrite_mc4` isolado + diagnose + `balance`** (caixa). Sem bake: não ratio-win Darwin. Skill **ainda implementa** o próximo furo local.
-2. **Done this turn:** 0184 P2.9 — kvrocks 1c WRITEPHASE → `diagnose.lever`.
+2. **Done this turn:** 0184 P2.10 — myrocks + linkbench WRITEPHASE → `diagnose.lever`.
 3. prefix 0.70× na caixa continua P1.2.
 
 Não: skiplist. Não: n=50 merge. Não: turno vazio porque “é caixa”.

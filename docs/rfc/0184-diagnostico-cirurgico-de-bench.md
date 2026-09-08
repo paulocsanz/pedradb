@@ -104,6 +104,9 @@ a linha quando há phasesΔ. Sem harness novo.
       `blob_set`) WRITEPHASE → `diagnose.lever` (get/scan =
       `get_path`; set = write lever). mc50 já tinha (P2.3).
       — status: `done`
+- [x] **P2.10** MyRocks `point_select` / `read_only` / `write_tx` +
+      `linkbench_mix` WRITEPHASE → `diagnose.lever` (select/range/
+      mix 70% read = `get_path`; write_tx = write lever). — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -127,6 +130,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.7 | p2 | scale lookup_100 classify_get | done | loop_ns/100 vs 0176 clock | 2026-09-07 |
 | P2.8 | p2 | qs suite diagnose.lever | done | hot/neg get_path; batch WRITEPHASE | 2026-09-07 |
 | P2.9 | p2 | kvrocks 1c diagnose.lever | done | get/scan get_path; set WRITEPHASE | 2026-09-07 |
+| P2.10 | p2 | myrocks+linkbench diagnose.lever | done | select/range/mix get_path; write_tx WRITEPHASE | 2026-09-07 |
 
 ## Acceptance Criteria
 
@@ -147,6 +151,7 @@ a linha quando há phasesΔ. Sem harness novo.
   scale `lookup_100` `classify_get` (P2.7);
   qs suite `diagnose.lever` (P2.8);
   kvrocks 1c `diagnose.lever` (P2.9);
+  myrocks+linkbench `diagnose.lever` (P2.10);
   `ycsb_c_all_reads_timed_zero_is_get_path`;
   `rfc0184_diagnosis_json_has_lever`;
   `extract_diagnose_lever_from_bench_object`.
