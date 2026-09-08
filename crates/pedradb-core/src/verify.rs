@@ -613,7 +613,7 @@ pub fn xor_durable_bits<E: Env>(
     }
     let dir = dir.as_ref();
     let names = collect_durable_relpaths(env, dir);
-    if names.is_empty() {
+    if crate::write_admission_kernel::batch_is_empty(names.len() as u64) {
         return None;
     }
     let idx = usize::try_from(seed % names.len() as u64).unwrap_or(0);
