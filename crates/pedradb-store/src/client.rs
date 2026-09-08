@@ -799,7 +799,7 @@ impl TcpClusterClient {
             };
             if let Ok(st) = client_status(addr) {
                 let map = leaders_from_status(&st);
-                if map.is_empty() {
+                if pedradb_core::write_admission_kernel::batch_is_empty(map.len() as u64) {
                     continue;
                 }
                 self.leaders.extend(map);
