@@ -261,12 +261,14 @@ def lean_unfolds(name: str) -> bool:
 
 def lean_has_def(name: str) -> bool:
     lean_dir = ROOT / "formal/aeneas/lean"
-    if not lean_dir.is_dir():
-        return False
-    pat = re.compile(r"\bdef\s+" + re.escape(name) + r"\b")
-    for p in lean_dir.glob("*.lean"):
-        if pat.search(p.read_text(encoding="utf-8", errors="replace")):
-            return True
+    out_dir = ROOT / "formal/aeneas/out/lean"
+    pat = re.compile(r"\bdef\s+(?:[A-Za-z0-9_]+\.)*" + re.escape(name) + r"\b")
+    for d in (lean_dir, out_dir):
+        if not d.is_dir():
+            continue
+        for p in d.glob("*.lean"):
+            if pat.search(p.read_text(encoding="utf-8", errors="replace")):
+                return True
     return False
 
 
