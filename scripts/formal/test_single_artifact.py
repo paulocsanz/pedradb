@@ -334,6 +334,22 @@ def main() -> int:
         print("FAIL txn twin≠kernel did not fail")
         return 1
     print("ok mutant txn twin≠kernel named")
+    revert_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in revert_mutant["pairs"]:
+        if pair.get("id") == "revert_clears_status":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/txn_kernel.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing revert_clears_status")
+        return 1
+    hits = [m for m in _sa_fails(revert_mutant) if m.startswith("revert_clears_status:")]
+    if not hits:
+        print("FAIL revert_clears_status twin≠kernel did not fail")
+        return 1
+    print("ok mutant revert_clears_status twin≠kernel named")
     # Drive the same rule through check_twins (may also report unrelated
     # dirty-tree twin drift; we only require the SA id).
     try:
