@@ -27,12 +27,12 @@ impl_def Slice.Insts.CoreCmpPartialEqSlice {T : Type} {U : Type}
 }
 
 /-- [pedra_aeneas_ship_kernel::SHIP_STAMP_BYTES]
-    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 15:0-15:39
+    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 25:0-25:39
     Visibility: public -/
 @[global_simps, irreducible] def SHIP_STAMP_BYTES : Std.Usize := 64#usize
 
 /-- [pedra_aeneas_ship_kernel::PullPlan]
-    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 19:0-34:1
+    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 30:0-45:1
     Visibility: public -/
 @[discriminant isize]
 inductive PullPlan where
@@ -41,7 +41,7 @@ inductive PullPlan where
 | Ship : Std.U64 → PullPlan
 
 /-- [pedra_aeneas_ship_kernel::{impl core::fmt::Debug for pedra_aeneas_ship_kernel::PullPlan}::fmt]:
-    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 18:9-18:14
+    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 29:9-29:14
     Visibility: public -/
 def PullPlan.Insts.CoreFmtDebug.fmt
   (self : PullPlan) (f : core.fmt.Formatter) :
@@ -60,42 +60,42 @@ def PullPlan.Insts.CoreFmtDebug.fmt
       "bytes") __self_01
 
 /-- Trait implementation: [pedra_aeneas_ship_kernel::{impl core::fmt::Debug for pedra_aeneas_ship_kernel::PullPlan}]
-    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 18:9-18:14 -/
+    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 29:9-29:14 -/
 @[reducible]
 def PullPlan.Insts.CoreFmtDebug : core.fmt.Debug PullPlan := {
   fmt := PullPlan.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_ship_kernel::{impl core::clone::Clone for pedra_aeneas_ship_kernel::PullPlan}::clone]:
-    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 18:16-18:21
+    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 29:16-29:21
     Visibility: public -/
 def PullPlan.Insts.CoreCloneClone.clone
   (self : PullPlan) : Result PullPlan := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_ship_kernel::{impl core::clone::Clone for pedra_aeneas_ship_kernel::PullPlan}]
-    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 18:16-18:21 -/
+    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 29:16-29:21 -/
 @[reducible]
 def PullPlan.Insts.CoreCloneClone : core.clone.Clone PullPlan := {
   clone := PullPlan.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [pedra_aeneas_ship_kernel::{impl core::marker::Copy for pedra_aeneas_ship_kernel::PullPlan}]
-    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 18:23-18:27 -/
+    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 29:23-29:27 -/
 @[reducible]
 def PullPlan.Insts.CoreMarkerCopy : core.marker.Copy PullPlan := {
   cloneInst := PullPlan.Insts.CoreCloneClone
 }
 
 /-- Trait implementation: [pedra_aeneas_ship_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_ship_kernel::PullPlan}]
-    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 18:29-18:38 -/
+    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 29:29-29:38 -/
 @[reducible]
 def PullPlan.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq PullPlan := {
 }
 
 /-- [pedra_aeneas_ship_kernel::{impl core::cmp::PartialEq<pedra_aeneas_ship_kernel::PullPlan> for pedra_aeneas_ship_kernel::PullPlan}::eq]:
-    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 18:29-18:38
+    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 29:29-29:38
     Visibility: public -/
 def PullPlan.Insts.CoreCmpPartialEqPullPlan.eq
   (self : PullPlan) (other : PullPlan) : Result Bool := do
@@ -123,7 +123,7 @@ def PullPlan.Insts.CoreCmpPartialEqPullPlan.eq
   else ok false
 
 /-- Trait implementation: [pedra_aeneas_ship_kernel::{impl core::cmp::PartialEq<pedra_aeneas_ship_kernel::PullPlan> for pedra_aeneas_ship_kernel::PullPlan}]
-    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 18:29-18:38 -/
+    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 29:29-29:38 -/
 @[reducible]
 impl_def PullPlan.Insts.CoreCmpPartialEqPullPlan : core.cmp.PartialEq PullPlan
   PullPlan := {
@@ -133,14 +133,14 @@ impl_def PullPlan.Insts.CoreCmpPartialEqPullPlan : core.cmp.PartialEq PullPlan
 }
 
 /-- [pedra_aeneas_ship_kernel::{impl core::cmp::Eq for pedra_aeneas_ship_kernel::PullPlan}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 18:40-18:42
+    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 29:40-29:42
     Visibility: public -/
 def PullPlan.Insts.CoreCmpEq.assert_fields_are_eq
   (self : PullPlan) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_ship_kernel::{impl core::cmp::Eq for pedra_aeneas_ship_kernel::PullPlan}]
-    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 18:40-18:42 -/
+    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 29:40-29:42 -/
 @[reducible]
 def PullPlan.Insts.CoreCmpEq : core.cmp.Eq PullPlan := {
   partialEqInst := PullPlan.Insts.CoreCmpPartialEqPullPlan
@@ -148,7 +148,7 @@ def PullPlan.Insts.CoreCmpEq : core.cmp.Eq PullPlan := {
 }
 
 /-- [pedra_aeneas_ship_kernel::stamp_changed]:
-    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 42:0-47:1
+    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 54:0-59:1
     Visibility: public -/
 def stamp_changed
   (stamp_then : Slice Std.U8) (stamp_now : Slice Std.U8) : Result Bool := do
@@ -166,7 +166,7 @@ def stamp_changed
       core.cmp.PartialEqU8) s stamp_now
 
 /-- [pedra_aeneas_ship_kernel::pull_plan]:
-    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 55:0-91:1
+    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 68:0-104:1
     Visibility: public -/
 def pull_plan
   (file_len : Option Std.U64) (cursor : Std.U64) (max_pull : Std.U64)
@@ -208,7 +208,7 @@ def pull_plan
             ok (PullPlan.Ship i1)
 
 /-- [pedra_aeneas_ship_kernel::pull_plan_as_is]:
-    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 95:0-117:1
+    Source: '../../../crates/pedradb-replicate/src/ship_kernel.rs', lines 109:0-131:1
     Visibility: public -/
 def pull_plan_as_is
   (file_len : Option Std.U64) (cursor : Std.U64) (max_pull : Std.U64)

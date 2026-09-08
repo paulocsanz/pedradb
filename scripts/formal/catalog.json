@@ -2665,9 +2665,10 @@
       "id": "ship_stamp",
       "finding": "F165",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-replicate/src/ship_kernel.rs",
-      "twin": "crates/pedradb-replicate/verus/ship_guard.rs",
-      "verus": "scripts/verus_ship_guard.sh",
+      "twin": "crates/pedradb-replicate/src/ship_kernel.rs",
+      "verus": "scripts/verus_ship_stamp.sh",
       "callers": [
         "crates/pedradb-replicate/src/ship_kernel.rs"
       ],
