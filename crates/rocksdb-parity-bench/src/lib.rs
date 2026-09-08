@@ -311,6 +311,8 @@ pub const COMPARE_SHAPES: &[&str] = &[
     "kvrocks_scan_mc4",
     // RFC-0184 P2.54: Flink window-state mc4 — 1c is suite-only.
     "flink_window_state_mc4",
+    // RFC-0184 P2.55: Kafka changelog-flush mc4 — 1c is suite-only.
+    "kafka_changelog_flush_mc4",
 ];
 
 /// Length of the RFC-0041 official prefix of [`COMPARE_SHAPES`].
@@ -2817,6 +2819,85 @@ impl YcsbRunner {
                 50,
                 (cfg_ops * clients) as u64,
             );
+            eprint_write_diagnose(&full, &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
+        blocks
+    }
+
+    /// RFC-0184 P2.55: kafka_changelog_flush at N clients (batch + flush).
+    pub fn run_kafka_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
+        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
+        let full = format!("kafka_changelog_flush_mc{clients}");
+        if !shape_wanted(&full) {
+            return Vec::new();
+        }
+        e.set_write_sync(write_sync_for_suite("streaming"));
+        let cfg_ops = self.cfg.ops;
+        let batch = self.cfg.batch;
+        let yval = std::sync::Arc::new(vec![b'f'; self.cfg.payload]);
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+        let phase0 = e.write_phase_snapshot();
+        let t0 = Instant::now();
+        let mut lats = Vec::with_capacity(cfg_ops * clients);
+        let mut errors = 0u64;
+        std::thread::scope(|s| {
+            let handles: Vec<_> = (0..clients)
+                .map(|c| {
+                    let barrier = barrier.clone();
+                    let yval = yval.clone();
+                    s.spawn(move || {
+                        let mut lats = Vec::with_capacity(cfg_ops);
+                        let mut errors = 0u64;
+                        barrier.wait();
+                        for i in 0..cfg_ops {
+                            let t = Instant::now();
+                            let mut wb = Vec::with_capacity(batch);
+                            let base = c * cfg_ops + i;
+                            for j in 0..batch {
+                                wb.push(CfWrite::Put {
+                                    cf: "default",
+                                    k: format!("ch/{base:06}/{j:04}").into_bytes(),
+                                    v: yval.as_ref().clone(),
+                                });
+                            }
+                            // 1c kafka_changelog_flush fsyncs memtable every
+                            // changelog. Concurrent flush-per-op is an L0
+                            // storm (named ceiling); mc4 times the ingest
+                            // WriteBatch path only.
+                            let ok = e.batch(std::mem::take(&mut wb));
+                            if !ok {
+                                errors += 1;
+                            }
+                            lats.push(ms(t));
+                        }
+                        (lats, errors)
+                    })
+                })
+                .collect();
+            for h in handles {
+                let (mut l, err) = h.join().expect("kafka client thread");
+                errors += err;
+                lats.append(&mut l);
+            }
+        });
+        let wall = t0.elapsed();
+        eprintln!(
+            "[rocks-parity] {full} done ops={} errors={errors}",
+            cfg_ops * clients
+        );
+        let mut blocks = vec![summarize_mc(
+            &full,
+            cfg_ops * clients,
+            wall,
+            &mut lats,
+            clients,
+            errors,
+        )];
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, clients as u64, 0.0, 0);
             eprint_write_diagnose(&full, &d);
             if let Some(last) = blocks.last_mut() {
                 *last = attach_diagnose(std::mem::take(last), Some(&d));
@@ -5382,6 +5463,26 @@ mod tests {
     }
 
     #[test]
+    fn rfc0184_kafka_changelog_flush_mc4_in_compare() {
+        assert!(
+            COMPARE_SHAPES.contains(&"kafka_changelog_flush_mc4"),
+            "Kafka changelog-flush mc4 must be on the cartaz"
+        );
+        assert!(shape_wanted_in(
+            "kafka_changelog_flush_mc4",
+            Some("kafka_changelog_flush_mc4")
+        ));
+        assert!(
+            !shape_wanted_in("kafka_changelog_flush", Some("kafka_changelog_flush_mc4")),
+            "1c kafka_changelog_flush must not leak into ONLY=kafka_changelog_flush_mc4"
+        );
+        assert!(
+            !shape_wanted_in("flink_window_state_mc4", Some("kafka_changelog_flush_mc4")),
+            "flink mc4 must not leak into ONLY=kafka_changelog_flush_mc4"
+        );
+    }
+
+    #[test]
     fn rfc0178_mc_only_selects_full_mc_name() {
         assert!(shape_wanted_in(
             "deps_cache_overwrite_mc4",
@@ -5871,6 +5972,7 @@ mod tests {
             "solana_trailing_read_mc4",
             "kvrocks_scan_mc4",
             "flink_window_state_mc4",
+            "kafka_changelog_flush_mc4",
         ] {
             assert!(
                 COMPARE_SHAPES.contains(&name),
