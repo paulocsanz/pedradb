@@ -871,7 +871,7 @@ impl World {
             )
             .map_err(|e| WorldError::Store(e.to_string()))?;
             let mut expected: BTreeMap<Vec<u8>, Vec<u8>> = BTreeMap::new();
-            if !changes.is_empty() {
+            if !pedradb_core::write_admission_kernel::batch_is_empty(changes.len() as u64) {
                 let updates: Vec<FoldUpdate> = changes
                     .iter()
                     .map(|e| match e.kind {
