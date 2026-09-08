@@ -1,5 +1,10 @@
 //! Length-prefixed fields (RFC-0002 P24 / F60).
 //!
+//! **Single artifact:** this file is what `rustc` links *and* what Verus
+//! proves (`cfg(verus_keep_ghost)`). Vec encode/decode is caller. No twin-cópia.
+//!
+//!   ./scripts/verus_fields_nul.sh
+//!
 //! Production payload write/read and [`crate::Subspace::child_suffix`] call
 //! these. Do **not** split a field on raw `0x00`.
 //!
@@ -9,31 +14,50 @@
 
 #![forbid(unsafe_code)]
 
+macro_rules! field_kept_body {
+    ($len:expr, $nul_at:expr) => {{
+        let _ = $nul_at;
+        $len
+    }};
+}
+
+macro_rules! field_kept_as_is_body {
+    ($len:expr, $nul_at:expr) => {{
+        let _ = $len;
+        $nul_at
+    }};
+}
+
 /// Bytes of a field of `len` that contains a NUL at `nul_at` (FIXED: all of it).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
-pub fn field_kept(len: u64, _nul_at: u64) -> u64 {
-    len
+pub fn field_kept(len: u64, nul_at: u64) -> u64 {
+    field_kept_body!(len, nul_at)
 }
 
 /// AS-IS F60: first/last NUL is the delimiter — keep only `[0, nul_at)`.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
-pub fn field_kept_as_is(_len: u64, nul_at: u64) -> u64 {
-    nul_at
+pub fn field_kept_as_is(len: u64, nul_at: u64) -> u64 {
+    field_kept_as_is_body!(len, nul_at)
 }
 
 /// Child payload after `start = pack || 0x00` (full suffix, NULs inside stay).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn child_bytes_after<'a>(key: &'a [u8], start: &[u8]) -> Option<&'a [u8]> {
     key.strip_prefix(start)
 }
 
 /// AS-IS F60: last `0x00` in the whole key is the delimiter.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn child_bytes_after_as_is<'a>(key: &'a [u8], _start: &[u8]) -> Option<&'a [u8]> {
     Some(key.rsplit(|b| *b == 0).next().unwrap_or(key))
 }
 
 /// Length-prefixed field join (payload write).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn encode_fields(parts: &[&[u8]]) -> Vec<u8> {
     let mut out = Vec::new();
@@ -46,6 +70,7 @@ pub fn encode_fields(parts: &[&[u8]]) -> Vec<u8> {
 }
 
 /// AS-IS F60: join with raw `0x00`.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn encode_fields_as_is(parts: &[&[u8]]) -> Vec<u8> {
     let mut out = Vec::new();
@@ -59,6 +84,7 @@ pub fn encode_fields_as_is(parts: &[&[u8]]) -> Vec<u8> {
 }
 
 /// Decode [`encode_fields`] into `n` fields. `None` on short/corrupt input.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn decode_fields(raw: &[u8], n: usize) -> Option<Vec<Vec<u8>>> {
     let mut off = 0usize;
@@ -82,6 +108,7 @@ pub fn decode_fields(raw: &[u8], n: usize) -> Option<Vec<Vec<u8>>> {
 }
 
 /// AS-IS F60: first `0x00` splits a pair (NUL inside the first field truncates).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn decode_pair_first_nul(raw: &[u8]) -> (Vec<u8>, Vec<u8>) {
     let sep = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
@@ -93,6 +120,52 @@ pub fn decode_pair_first_nul(raw: &[u8]) -> (Vec<u8>, Vec<u8>) {
     };
     (a, b)
 }
+
+#[cfg(verus_keep_ghost)]
+use vstd::prelude::*;
+
+#[cfg(verus_keep_ghost)]
+verus! {
+
+pub open spec fn field_kept_spec(len: u64, _nul_at: u64) -> u64 {
+    len
+}
+
+pub fn field_kept(len: u64, nul_at: u64) -> (k: u64)
+    ensures
+        k == field_kept_spec(len, nul_at),
+        k == len,
+{
+    field_kept_body!(len, nul_at)
+}
+
+pub open spec fn field_kept_as_is_spec(_len: u64, nul_at: u64) -> u64 {
+    nul_at
+}
+
+pub fn field_kept_as_is(len: u64, nul_at: u64) -> (k: u64)
+    ensures
+        k == field_kept_as_is_spec(len, nul_at),
+        k == nul_at,
+{
+    field_kept_as_is_body!(len, nul_at)
+}
+
+proof fn lemma_as_is_truncates(len: u64, nul_at: u64)
+    requires
+        nul_at < len,
+    ensures
+        field_kept_as_is_spec(len, nul_at) < field_kept_spec(len, nul_at),
+{
+}
+
+proof fn lemma_no_nul_same(len: u64)
+    ensures
+        field_kept_spec(len, len) == field_kept_as_is_spec(len, len),
+{
+}
+
+} // verus!
 
 #[cfg(test)]
 mod tests {

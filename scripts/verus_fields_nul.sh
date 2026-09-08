@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Machine-check F60 field span (RFC-0002 P24).
+# Machine-check F60 field span on the file rustc links
+# (single artifact — not the twin-cópia). RFC-0002 P24.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/montanha-fdb-recipes/verus/fields_nul.rs"
+SRC="$ROOT/crates/montanha-fdb-recipes/src/fields_kernel.rs"
 if [[ -x "${VERUS:-}" ]]; then
   :
 elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then

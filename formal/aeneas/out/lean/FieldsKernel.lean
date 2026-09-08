@@ -158,19 +158,19 @@ def Slice.Insts.CoreSliceSlicePattern (T : Type) : core.slice.SlicePattern
 }
 
 /-- [pedra_aeneas_fields_kernel::field_kept]:
-    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 14:0-16:1
+    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 34:0-36:1
     Visibility: public -/
-def field_kept (len : Std.U64) (_nul_at : Std.U64) : Result Std.U64 := do
+def field_kept (len : Std.U64) (nul_at : Std.U64) : Result Std.U64 := do
   ok len
 
 /-- [pedra_aeneas_fields_kernel::field_kept_as_is]:
-    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 20:0-22:1
+    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 41:0-43:1
     Visibility: public -/
-def field_kept_as_is (_len : Std.U64) (nul_at : Std.U64) : Result Std.U64 := do
+def field_kept_as_is (len : Std.U64) (nul_at : Std.U64) : Result Std.U64 := do
   ok nul_at
 
 /-- [pedra_aeneas_fields_kernel::child_bytes_after]:
-    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 26:0-28:1
+    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 48:0-50:1
     Visibility: public -/
 def child_bytes_after
   (key : Slice Std.U8) (start : Slice Std.U8) :
@@ -180,12 +180,12 @@ def child_bytes_after
     core.cmp.PartialEqU8 key start
 
 /-- [pedra_aeneas_fields_kernel::child_bytes_after_as_is::closure]
-    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 33:20-33:31 -/
+    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 56:20-56:31 -/
 @[reducible]
 def child_bytes_after_as_is.closure := Unit
 
 /-- [pedra_aeneas_fields_kernel::child_bytes_after_as_is::{impl core::ops::function::FnMut<(&'_ u8,), bool> for pedra_aeneas_fields_kernel::child_bytes_after_as_is::closure}::call_mut]:
-    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 33:20-33:31 -/
+    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 56:20-56:31 -/
 def
   child_bytes_after_as_is.closure.Insts.CoreOpsFunctionFnMutTupleSharedU8Bool.call_mut
   (c : child_bytes_after_as_is.closure) (tupled_args : Std.U8) :
@@ -194,7 +194,7 @@ def
   ok (tupled_args = 0#u8, c)
 
 /-- [pedra_aeneas_fields_kernel::child_bytes_after_as_is::{impl core::ops::function::FnOnce<(&'_ u8,), bool> for pedra_aeneas_fields_kernel::child_bytes_after_as_is::closure}::call_once]:
-    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 33:20-33:31 -/
+    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 56:20-56:31 -/
 def
   child_bytes_after_as_is.closure.Insts.CoreOpsFunctionFnOnceTupleSharedU8Bool.call_once
   (c : child_bytes_after_as_is.closure) (i : Std.U8) : Result Bool := do
@@ -204,7 +204,7 @@ def
   ok b
 
 /-- Trait implementation: [pedra_aeneas_fields_kernel::child_bytes_after_as_is::{impl core::ops::function::FnOnce<(&'_ u8,), bool> for pedra_aeneas_fields_kernel::child_bytes_after_as_is::closure}]
-    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 33:20-33:31 -/
+    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 56:20-56:31 -/
 @[reducible]
 def
   child_bytes_after_as_is.closure.Insts.CoreOpsFunctionFnOnceTupleSharedU8Bool
@@ -214,7 +214,7 @@ def
 }
 
 /-- Trait implementation: [pedra_aeneas_fields_kernel::child_bytes_after_as_is::{impl core::ops::function::FnMut<(&'_ u8,), bool> for pedra_aeneas_fields_kernel::child_bytes_after_as_is::closure}]
-    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 33:20-33:31 -/
+    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 56:20-56:31 -/
 @[reducible]
 def child_bytes_after_as_is.closure.Insts.CoreOpsFunctionFnMutTupleSharedU8Bool
   : core.ops.function.FnMut child_bytes_after_as_is.closure Std.U8 Bool := {
@@ -225,7 +225,7 @@ def child_bytes_after_as_is.closure.Insts.CoreOpsFunctionFnMutTupleSharedU8Bool
 }
 
 /-- [pedra_aeneas_fields_kernel::child_bytes_after_as_is]:
-    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 32:0-34:1
+    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 55:0-57:1
     Visibility: public -/
 def child_bytes_after_as_is
   (key : Slice Std.U8) (_start : Slice Std.U8) :
@@ -243,7 +243,7 @@ def child_bytes_after_as_is
   ok (some s)
 
 /-- [pedra_aeneas_fields_kernel::encode_fields]:
-    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 38:0-46:1
+    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 62:0-70:1
     Visibility: public -/
 @[rust_loop_body]
 def encode_fields_loop.body
@@ -288,7 +288,7 @@ def encode_fields
   encode_fields_loop parts { start := 0#usize, «end» := n } out
 
 /-- [pedra_aeneas_fields_kernel::encode_fields_as_is]:
-    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 50:0-59:1
+    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 75:0-84:1
     Visibility: public -/
 @[rust_loop_body]
 def encode_fields_as_is_loop.body
@@ -331,7 +331,7 @@ def encode_fields_as_is
   encode_fields_as_is_loop parts { start := 0#usize, «end» := n } out
 
 /-- [pedra_aeneas_fields_kernel::decode_fields]: loop body 0:
-    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 1:0-82:1
+    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 1:0-108:1
     Visibility: public -/
 @[rust_loop_body]
 def decode_fields_loop.body
@@ -386,7 +386,7 @@ def decode_fields_loop.body
         ok (done o2)
 
 /-- [pedra_aeneas_fields_kernel::decode_fields]: loop 0:
-    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 1:0-82:1
+    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 1:0-108:1
     Visibility: public -/
 @[rust_loop]
 def decode_fields_loop
@@ -399,7 +399,7 @@ def decode_fields_loop
     (iter, off, out)
 
 /-- [pedra_aeneas_fields_kernel::decode_fields]:
-    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 63:0-82:1
+    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 89:0-108:1
     Visibility: public -/
 def decode_fields
   (raw1 : Slice Std.U8) (n : Std.Usize) :
@@ -409,12 +409,12 @@ def decode_fields
   decode_fields_loop { start := 0#usize, «end» := n } raw1 0#usize out
 
 /-- [pedra_aeneas_fields_kernel::decode_pair_first_nul::closure]
-    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 87:34-87:45 -/
+    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 114:34-114:45 -/
 @[reducible]
 def decode_pair_first_nul.closure := Unit
 
 /-- [pedra_aeneas_fields_kernel::decode_pair_first_nul::{impl core::ops::function::FnMut<(&'_ u8,), bool> for pedra_aeneas_fields_kernel::decode_pair_first_nul::closure}::call_mut]:
-    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 87:34-87:45 -/
+    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 114:34-114:45 -/
 def
   decode_pair_first_nul.closure.Insts.CoreOpsFunctionFnMutTupleSharedU8Bool.call_mut
   (c : decode_pair_first_nul.closure) (tupled_args : Std.U8) :
@@ -423,7 +423,7 @@ def
   ok (tupled_args = 0#u8, c)
 
 /-- [pedra_aeneas_fields_kernel::decode_pair_first_nul::{impl core::ops::function::FnOnce<(&'_ u8,), bool> for pedra_aeneas_fields_kernel::decode_pair_first_nul::closure}::call_once]:
-    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 87:34-87:45 -/
+    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 114:34-114:45 -/
 def
   decode_pair_first_nul.closure.Insts.CoreOpsFunctionFnOnceTupleSharedU8Bool.call_once
   (c : decode_pair_first_nul.closure) (i : Std.U8) : Result Bool := do
@@ -433,7 +433,7 @@ def
   ok b
 
 /-- Trait implementation: [pedra_aeneas_fields_kernel::decode_pair_first_nul::{impl core::ops::function::FnOnce<(&'_ u8,), bool> for pedra_aeneas_fields_kernel::decode_pair_first_nul::closure}]
-    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 87:34-87:45 -/
+    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 114:34-114:45 -/
 @[reducible]
 def decode_pair_first_nul.closure.Insts.CoreOpsFunctionFnOnceTupleSharedU8Bool
   : core.ops.function.FnOnce decode_pair_first_nul.closure Std.U8 Bool := {
@@ -442,7 +442,7 @@ def decode_pair_first_nul.closure.Insts.CoreOpsFunctionFnOnceTupleSharedU8Bool
 }
 
 /-- Trait implementation: [pedra_aeneas_fields_kernel::decode_pair_first_nul::{impl core::ops::function::FnMut<(&'_ u8,), bool> for pedra_aeneas_fields_kernel::decode_pair_first_nul::closure}]
-    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 87:34-87:45 -/
+    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 114:34-114:45 -/
 @[reducible]
 def decode_pair_first_nul.closure.Insts.CoreOpsFunctionFnMutTupleSharedU8Bool :
   core.ops.function.FnMut decode_pair_first_nul.closure Std.U8 Bool := {
@@ -453,7 +453,7 @@ def decode_pair_first_nul.closure.Insts.CoreOpsFunctionFnMutTupleSharedU8Bool :
 }
 
 /-- [pedra_aeneas_fields_kernel::decode_pair_first_nul]:
-    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 86:0-95:1
+    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 113:0-122:1
     Visibility: public -/
 def decode_pair_first_nul
   (raw1 : Slice Std.U8) :
