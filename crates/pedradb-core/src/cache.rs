@@ -315,7 +315,7 @@ impl SstPayloadPool {
         if let Some(old) = g.map.remove(path) {
             g.total = g.total.saturating_sub(old.bytes);
         }
-        if bytes == 0 {
+        if crate::write_admission_kernel::batch_is_empty(bytes) {
             self.total.store(g.total, Ordering::Relaxed);
             return;
         }
