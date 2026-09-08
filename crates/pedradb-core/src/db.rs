@@ -5320,7 +5320,7 @@ impl<E: Env> Db<E> {
             self.absorb_mem_family_into_run(family)?;
         }
         self.bulk_append_puts(family, keys, vals)?;
-        if tail.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(tail.len() as u64) {
             let seq = self.last_sequence();
             self.publish_sequence(seq);
             return Ok(seq);
