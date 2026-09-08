@@ -136,6 +136,9 @@ a linha quando há phasesΔ. Sem harness novo.
       compact/ingest = write lever). — status: `done`
 - [x] **P2.20** `ycsb_c_big` WRITEPHASE → `diagnose.lever` (100% uniform
       get over 2^20 = `get_path`). — status: `done`
+- [x] **P2.21** scale `probe_hit` p50 ns → `classify_get` vs 0176
+      clock (always; published p50, not the later `get_hit` mean).
+      — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -170,6 +173,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.18 | p2 | oxigraph diagnose.lever | done | spo get_path; triple WRITEPHASE | 2026-09-08 |
 | P2.19 | p2 | rocksapi diagnose.lever | done | wbwi get_path; compact/ingest WRITEPHASE | 2026-09-08 |
 | P2.20 | p2 | ycsb_c_big diagnose.lever | done | 100% get 2^20 → get_path | 2026-09-08 |
+| P2.21 | p2 | scale probe_hit classify_get | done | p50 ns vs 0176 best/happy/worst/as_is | 2026-09-08 |
 
 ## Acceptance Criteria
 
@@ -201,12 +205,13 @@ a linha quando há phasesΔ. Sem harness novo.
   oxigraph `diagnose.lever` (P2.18);
   rocksapi `diagnose.lever` (P2.19);
   ycsb_c_big `diagnose.lever` (P2.20);
+  scale `probe_hit` `classify_get` (P2.21);
   `ycsb_c_all_reads_timed_zero_is_get_path`;
   `rfc0184_diagnosis_json_has_lever`;
   `extract_diagnose_lever_from_bench_object`.
 - **Telemetry / Analytics:** uma linha `diagnose dominant=… lever=…`;
   `benches[].diagnose.lever` no JSON; compare copia para a row.
-  scale `get_hit` / `lookup_100` imprimem `diagnose get … class=…` (P2.6/P2.7).
+  scale `get_hit` / `lookup_100` / `probe_hit` imprimem `diagnose get … class=…` (P2.6/P2.7/P2.21).
   peer continua `sync: false`.
 - **Documentation:** este RFC; `docs/benchmarks.md` receita.
 - **Screenshots:** backend-only.
