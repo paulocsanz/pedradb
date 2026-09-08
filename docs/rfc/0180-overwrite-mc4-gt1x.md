@@ -198,6 +198,13 @@ medida no mesmo harness isolado.
 - [x] **P0.56** `group_profile` memtable 256 MiB (mesmo que o bench
       compat). O stall max ~1 s **não** era o auto_flush 4 MiB.
       status: `done`
+- [x] **P0.57** Lone 1c async WAL off the Db write lock (same
+      `async_one_stage` / drop / `encode_and_write_one_op` /
+      `async_one_publish` as P0.47 bypass). First arriver no longer
+      holds the lock for the WAL write. DIAG `group_profile` 4×4000:
+      qps 7403→10270, max 2.07s→1.49s, `STALL lead_write` gone;
+      remaining `STALL group_path` ~1.49s. G1 1c stays on-lock through
+      fd. Test `rfc0180_lone_async_wal_off_lock_recovers`. status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
 
@@ -269,6 +276,7 @@ medida no mesmo harness isolado.
 | P0.54 | p0 | timed avg_group delta + async canary | done | seed no longer dilutes; group_profile async | 2026-09-08 |
 | P0.55 | p0 | bound wait_in_flight 4096 spins | done | unbounded was 970ms max DIAG | 2026-09-08 |
 | P0.56 | p0 | group_profile 256MiB memtable | done | stall remains ~1s; not 4MiB flush | 2026-09-08 |
+| P0.57 | p0 | lone 1c async WAL off Db write lock | done | STALL lead_write ~2s; G1 1c on-lock stays | 2026-09-08 |
 | P1.1 | p1 | 3-run caixa | todo | — | 2026-09-07 |
 | P2.1 | p2 | 3/3 quiet ≥1× | todo | 0182 P1.1 | 2026-09-07 |
 | P2.2 | p2 | leftover hang | done | 0181 P0.3 steal | 2026-09-07 |
