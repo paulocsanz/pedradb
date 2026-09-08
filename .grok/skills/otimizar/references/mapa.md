@@ -46,11 +46,12 @@ Refresh this file when a cell moves class. One row per cell.
 | settle compact | **T**→tool | scale | WRITEPHASE → `diagnose.lever` (0184 P2.24) | RFC-0184 |
 | pedra diagnose CLI JSON | **T**→tool | CLI | same `{"lever":…}` / `{"class":…}` as harness (0184 P2.25) | RFC-0184 |
 | compare CLI diagnose JSON | **T**→tool | compare | `extract_cli_diagnose_lever` (0184 P2.26) | RFC-0184 |
+| compare CLI get/probes class | **T**→tool | compare | `extract_cli_diagnose_class` (0184 P2.27) | RFC-0184 |
 
 ## Próxima fase (rank da skill, 2026-09-07)
 
 1. **U / Linux `overwrite_mc4` isolado + diagnose + `balance`** (caixa). Sem bake: não ratio-win Darwin. Skill **ainda implementa** o próximo furo local.
-2. **Done this turn:** 0184 P2.26 — compare lê CLI `{"lever":…}`.
+2. **Done this turn:** 0184 P2.27 — compare lê CLI `{"class":…}`.
 3. prefix 0.70× na caixa continua P1.2.
 
 Não: skiplist. Não: n=50 merge. Não: turno vazio porque “é caixa”.

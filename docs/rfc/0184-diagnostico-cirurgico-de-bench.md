@@ -150,6 +150,8 @@ a linha quando há phasesΔ. Sem harness novo.
       — status: `done`
 - [x] **P2.26** compare lê `{"lever":…}` de stdout CLI (sem
       `benches[]`). — status: `done`
+- [x] **P2.27** compare lê `{"class":…}` de `pedra diagnose get|probes`.
+      — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -190,6 +192,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.24 | p2 | scale settle diagnose.lever | done | WRITEPHASE compact/ingest | 2026-09-08 |
 | P2.25 | p2 | CLI diagnose JSON object | done | write lever; get/probes class; balance admits | 2026-09-08 |
 | P2.26 | p2 | compare CLI diagnose JSON | done | extract_cli_diagnose_lever | 2026-09-08 |
+| P2.27 | p2 | compare CLI get/probes class | done | extract_cli_diagnose_class | 2026-09-08 |
 
 ## Acceptance Criteria
 
@@ -227,6 +230,7 @@ a linha quando há phasesΔ. Sem harness novo.
   scale `settle` `diagnose.lever` (P2.24);
   `pedra diagnose` JSON object (P2.25);
   compare CLI `{"lever":…}` (P2.26);
+  compare CLI `{"class":…}` (P2.27);
   `ycsb_c_all_reads_timed_zero_is_get_path`;
   `rfc0184_diagnosis_json_has_lever`;
   `extract_diagnose_lever_from_bench_object`.
