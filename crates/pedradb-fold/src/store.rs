@@ -148,7 +148,7 @@ impl<E: Env> PedraFold<E> {
     /// # Errors
     /// Apply.
     pub fn evict_values(&mut self, keys: &[&[u8]]) -> Result<()> {
-        if keys.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(keys.len() as u64) {
             return Ok(());
         }
         let mut ops = Vec::new();
