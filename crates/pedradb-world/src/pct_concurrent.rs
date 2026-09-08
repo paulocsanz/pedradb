@@ -223,7 +223,7 @@ fn run_with_sched(
     loop {
         ts.wait_ready();
         let enabled = ts.ready_tasks();
-        if enabled.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(enabled.len() as u64) {
             break;
         }
         let Some(t) = sched.next(&enabled) else {
