@@ -377,7 +377,7 @@ impl SstTable {
         source: &Arc<dyn crate::env::SstFileSource>,
         pool: &Arc<crate::cache::SstPayloadPool>,
     ) {
-        if self.payload_len == 0 {
+        if crate::write_admission_kernel::batch_is_empty(self.payload_len as u64) {
             return;
         }
         *self.kit.write() = Some(PayloadKit {
