@@ -3550,7 +3550,7 @@ impl<E: Env> Db<E> {
 
     fn rotate_blob(&mut self) -> Result<()> {
         self.vlog_sync_pending()?;
-        let next = if self.blob_active == 0 {
+        let next = if crate::write_admission_kernel::batch_is_empty(self.blob_active as u64) {
             1
         } else {
             self.blob_active
