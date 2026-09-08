@@ -44,11 +44,12 @@ Refresh this file when a cell moves class. One row per cell.
 | hydrate ingest | **T**→tool | scale | WRITEPHASE → `diagnose.lever` (0184 P2.22) | RFC-0184 |
 | ycsb_b_mc4 | **U** | harness 95% get | `get_path`; no Linux 3-run cartaz; now in `BALANCE_SHAPES` (0184 P2.23) | RFC-0163 / 0184 |
 | settle compact | **T**→tool | scale | WRITEPHASE → `diagnose.lever` (0184 P2.24) | RFC-0184 |
+| pedra diagnose CLI JSON | **T**→tool | CLI | same `{"lever":…}` / `{"class":…}` as harness (0184 P2.25) | RFC-0184 |
 
 ## Próxima fase (rank da skill, 2026-09-07)
 
 1. **U / Linux `overwrite_mc4` isolado + diagnose + `balance`** (caixa). Sem bake: não ratio-win Darwin. Skill **ainda implementa** o próximo furo local.
-2. **Done this turn:** 0184 P2.24 — scale settle WRITEPHASE → `diagnose.lever`.
+2. **Done this turn:** 0184 P2.25 — CLI diagnose JSON object.
 3. prefix 0.70× na caixa continua P1.2.
 
 Não: skiplist. Não: n=50 merge. Não: turno vazio porque “é caixa”.
