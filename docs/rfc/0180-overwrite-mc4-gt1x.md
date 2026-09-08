@@ -167,6 +167,9 @@ medida no mesmo harness isolado.
 - [x] **P0.48** Bypass multi-op: WAL off lock (`async_ops_stage` /
       `async_ops_publish`). Teste
       `rfc0180_bypass_async_ops_wal_off_lock_recovers`. status: `done`
+- [x] **P0.49** `queued_pending` / `active`: Release no enqueue,
+      Acquire no catch-up (Darwin ARM Relaxed podia perder o join).
+      Teste `rfc0180_leader_linger_and_async_catchup`. status: `done`
 
 ### P1 — caixa 4 GiB (pede bake)
 
@@ -230,6 +233,7 @@ medida no mesmo harness isolado.
 | P0.46 | p0 | wait in-flight before off-lock WAL | done | finish_group_off_lock extra drain | 2026-09-08 |
 | P0.47 | p0 | bypass 1-op WAL off Db write lock | done | async_one_stage/publish; 1c on-lock stays | 2026-09-08 |
 | P0.48 | p0 | bypass multi-op WAL off lock | done | async_ops_stage/publish; commit_async_ops uses same stage | 2026-09-08 |
+| P0.49 | p0 | queued_pending Release/Acquire | done | Darwin ARM catch-up sees enqueue | 2026-09-08 |
 | P1.1 | p1 | 3-run caixa | todo | — | 2026-09-07 |
 | P2.1 | p2 | 3/3 quiet ≥1× | todo | 0182 P1.1 | 2026-09-07 |
 | P2.2 | p2 | leftover hang | done | 0181 P0.3 steal | 2026-09-07 |
