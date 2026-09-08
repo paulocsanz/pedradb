@@ -446,7 +446,7 @@ fn query_decoded_values(path: &str, key: &str) -> Vec<String> {
     };
     let mut out = Vec::new();
     for part in q.split('&') {
-        if part.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(part.len() as u64) {
             continue;
         }
         // F106: names form-decoded.
