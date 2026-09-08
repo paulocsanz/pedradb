@@ -5642,7 +5642,7 @@ impl<E: Env> Db<E> {
     /// Park the flush pin for later off-lock fold (no BTree merge here).
     pub fn retire_flush_pin(&mut self) {
         if let Some(pin) = self.flush_read_pin.take() {
-            if !pin.is_empty() {
+            if !crate::write_admission_kernel::batch_is_empty(pin.len() as u64) {
                 self.retired_pending.push(pin);
                 self.retired_l0s = self.retired_l0s.saturating_add(1);
                 self.trim_retired_cache();
