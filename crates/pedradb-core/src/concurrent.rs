@@ -422,9 +422,10 @@ fn wait_in_flight_spins() -> u32 {
 }
 
 /// RFC-0180 P0.51: the first arriver after a barrier sees `active==1`
-/// and `recently_concurrent==false`, takes `commit_async_one`, and the
-/// other three form a group (WRITEPHASE 1+3 → avg ~2.7). 256 `spin_loop`
-/// for a sibling `begin_submit` before lone. 1c pays 256 pauses (~ns).
+/// and `recently_concurrent==false`, loned (WAL on lock until P0.57),
+/// and the other three form a group (WRITEPHASE 1+3 → avg ~2.7). 256
+/// `spin_loop` for a sibling `begin_submit` before lone. 1c pays 256
+/// pauses (~ns). P0.57: that lone WAL is off the Db write lock.
 #[must_use]
 fn lone_peer_wait_needed(active: usize, recently: bool) -> bool {
     active == 1 && !recently
@@ -825,6 +826,32 @@ impl WriteGroup {
         self.submit_inner(db, ops, do_sync, None)
     }
 
+    /// RFC-0180 P0.57: lone 1c async WAL off the Db write lock (P0.47
+    /// bypass already did this; first arriver at a barrier still loned
+    /// and held the lock for the WAL write — `STALL lead_write` ~2s).
+    /// G1 (`do_sync`) stays on-lock through fd.
+    fn commit_lone_async_one<E: Env>(db: &RwLock<Db<E>>, op: BatchOp) -> Result<SequenceNumber> {
+        let mut guard = db.write();
+        guard.begin_commit();
+        match guard.async_one_stage(op) {
+            Err(e) => {
+                guard.end_commit();
+                Err(e)
+            }
+            Ok((rec, seq)) => {
+                let wal = guard.wal_arc();
+                drop(guard);
+                let t_wal = Instant::now();
+                let io = wal.lock().encode_and_write_one_op(&rec);
+                stall_note("lone_wal", t_wal);
+                let mut g = db.write();
+                let r = g.async_one_publish(rec, seq, io);
+                g.end_commit();
+                r
+            }
+        }
+    }
+
     /// 1c put/delete: no `Vec<BatchOp>` on the lone-async path (RFC-0154 P1.6).
     fn submit_one<E: Env>(
         &self,
@@ -840,7 +867,7 @@ impl WriteGroup {
             active = self.active.load(Ordering::Acquire);
         }
         if active == 1 && !self.recently_concurrent() && !do_sync {
-            let result = db.write().commit_async_one(op);
+            let result = Self::commit_lone_async_one(db, op);
             self.finish_lone();
             return result;
         }
@@ -960,13 +987,13 @@ impl WriteGroup {
         // `sync=true`). Group leader still fds off-lock so followers can
         // enqueue and the host worker can drain imm. Stay off this path
         // for MULTI_HOLD after a concurrent burst so apply's second
-        // write() still joins the group (RFC-0040 P1.2). Lone async
-        // (`do_sync=false`) takes `commit_async_one` / `commit_async_ops`.
+        // write() still joins the group (RFC-0040 P1.2). Lone async 1-op
+        // WAL is off-lock (RFC-0180 P0.57); multi-op still `commit_async_ops`.
         if occ.is_none() && active == 1 && !self.recently_concurrent() {
             let result = if do_sync {
                 Self::lone_commit(self, db, ops, do_sync, occ)
             } else if ops.len() == 1 {
-                db.write().commit_async_one(ops.pop().expect("len checked"))
+                Self::commit_lone_async_one(db, ops.pop().expect("len checked"))
             } else {
                 db.write().commit_async_ops(ops)
             };
@@ -1021,7 +1048,8 @@ impl WriteGroup {
             let n = ops.len() as u64;
             let result = if ops.len() == 1 {
                 // RFC-0180 P0.47: WAL write off the Db write lock (group
-                // path already does this). 1c lone stays on-lock.
+                // path already does this). P0.57: 1c lone async uses the
+                // same stage/drop/write/publish (`commit_lone_async_one`).
                 let op = ops.pop().expect("len checked");
                 guard.begin_commit();
                 match guard.async_one_stage(op) {
@@ -4543,6 +4571,49 @@ mod tests {
                     "lost bypass async put t{t}/{i}"
                 );
             }
+        }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0180 P0.57: lone 1c async WAL is off the Db write lock
+    /// (same stage/drop/write/publish as P0.47 bypass). Keys recover.
+    #[test]
+    fn rfc0180_lone_async_wal_off_lock_recovers() {
+        let dir = temp_dir();
+        const PER: u8 = 32;
+        {
+            let db = ConcurrentDb::open_with(
+                &dir,
+                OpenOptions {
+                    wal_full_fsync: true,
+                    history: Default::default(),
+                    wal_recovery: Default::default(),
+                    sync: false,
+                    auto_flush_bytes: None,
+                    auto_compact_sst_count: None,
+                    auto_compact_sst_bytes: None,
+                    exclusive: true,
+                    large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
+                },
+            )
+            .unwrap();
+            let payload = vec![b'l'; 32];
+            for i in 0..PER {
+                db.put_with([b'l', 0, i], payload.as_slice(), WriteOptions::no_sync())
+                    .unwrap();
+            }
+            db.close().unwrap();
+        }
+        let db = ConcurrentDb::open(&dir).unwrap();
+        let payload = vec![b'l'; 32];
+        for i in 0..PER {
+            assert_eq!(
+                db.get(&[b'l', 0, i]).as_deref(),
+                Some(payload.as_slice()),
+                "lost lone async put {i}"
+            );
         }
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
