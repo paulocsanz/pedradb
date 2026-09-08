@@ -5301,7 +5301,7 @@ impl<E: Env> Db<E> {
             let fams = [family.to_string()];
             self.ensure_write_admitted_for(&fams)?;
         }
-        if keys.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(keys.len() as u64) {
             return if tail.is_empty() {
                 Ok(self.last_sequence())
             } else {
