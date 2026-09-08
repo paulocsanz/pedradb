@@ -7586,7 +7586,7 @@ impl<E: Env> StoreCluster<E> {
             }
             owned.push((key, v.as_ref().to_vec()));
         }
-        if owned.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(owned.len() as u64) {
             return Ok(());
         }
         validate_tx_pairs(&owned)?;
