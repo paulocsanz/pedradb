@@ -210,6 +210,7 @@ pub fn occ_batch_plan_as_is(
 
 /// The fence watermark: one publish sequence for the whole group — the
 /// max appended member sequence (0 for an empty group).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn fence_publish_seq(member_seqs: &[u64]) -> u64 {
     let mut best = 0;
@@ -225,6 +226,7 @@ pub fn fence_publish_seq(member_seqs: &[u64]) -> u64 {
 
 /// AS-IS RFC-0057: fence is the first member's seq — later members stay
 /// unpublished at the watermark.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn fence_publish_seq_as_is(member_seqs: &[u64]) -> u64 {
     if member_seqs.is_empty() {
@@ -667,6 +669,80 @@ pub fn group_validate(reads: &[OccRead], last_seq: u64) -> (out: Vec<bool>)
         i += 1;
     }
     out
+}
+
+pub open spec fn max_prefix(s: Seq<u64>, i: int) -> u64
+    recommends 0 <= i <= s.len(),
+    decreases i,
+{
+    if 0 < i && i <= s.len() {
+        let m = max_prefix(s, i - 1);
+        if s[i - 1] > m {
+            s[i - 1]
+        } else {
+            m
+        }
+    } else {
+        0
+    }
+}
+
+pub open spec fn fence_publish_seq_spec(member_seqs: &[u64]) -> u64 {
+    max_prefix(member_seqs@, member_seqs@.len() as int)
+}
+
+proof fn max_prefix_ge_elem(s: Seq<u64>, k: int)
+    requires
+        0 <= k <= s.len(),
+    ensures
+        forall|j: int| 0 <= j < k ==> s[j] <= max_prefix(s, k),
+    decreases k,
+{
+    if k > 0 {
+        max_prefix_ge_elem(s, k - 1);
+        assert(max_prefix(s, k) >= max_prefix(s, k - 1));
+        assert(max_prefix(s, k) >= s[k - 1]);
+    }
+}
+
+#[verifier::when_used_as_spec(fence_publish_seq_spec)]
+pub fn fence_publish_seq(member_seqs: &[u64]) -> (p: u64)
+    ensures
+        p == fence_publish_seq_spec(member_seqs),
+        forall|i: int| 0 <= i < member_seqs.len() ==> member_seqs[i] <= p,
+{
+    let mut best: u64 = 0;
+    let mut i: usize = 0;
+    while i < member_seqs.len()
+        invariant
+            0 <= i <= member_seqs.len(),
+            best == max_prefix(member_seqs@, i as int),
+        decreases member_seqs.len() - i,
+    {
+        if member_seqs[i] > best {
+            best = member_seqs[i];
+        }
+        i += 1;
+    }
+    proof {
+        max_prefix_ge_elem(member_seqs@, member_seqs@.len() as int);
+    }
+    best
+}
+
+pub fn fence_publish_seq_as_is(member_seqs: &[u64]) -> (p: u64)
+    ensures
+        p == (if member_seqs.len() == 0 {
+            0
+        } else {
+            member_seqs[0]
+        }),
+{
+    if member_seqs.len() == 0 {
+        0
+    } else {
+        member_seqs[0]
+    }
 }
 
 } // verus!

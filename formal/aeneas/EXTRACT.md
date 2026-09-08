@@ -285,6 +285,7 @@ the composition files and fails on a missing file or the substring `sorry`.
 | C1Modelo `c1_modelo` | Membership extract `joint_election_ok` | `c1_modelo_joint_add_via_membership_extract` / `_single_cfg_via_membership_extract` | `c1_modelo_as_is_via_membership_as_is` |
 | T1Modelo `t1_modelo` | Txn `leftover_txn_is_aborted` (shim copy) | `t1_modelo_empty` (already unfolds both) | `leftover_txn_is_aborted_as_is_dente` in `Txn.lean` |
 | ConcurrentDb `validate_occ_batch` | `group_validate` / `occ_conflict` (Verus SA on production file) | `group_validate_lagging_member_conflicts` / `occ_conflict` closed form | `group_occ_vs_serialized_same_input` |
+| ConcurrentDb fence | `fence_publish_seq` (Verus SA on production file) | `fence_is_max_member_seq` | `fence_publish_seq_as_is` first-member |
 | ConcurrentDb `validate_occ_batch` | `occ_member_fate` ∧ `group_validate` (Verus SA on production file) | `occ_member_fate_conflict_via_group_validate` | `occ_member_fate_as_is_dente` |
 | ConcurrentDb `validate_occ_batch` / `lone_commit` | `occ_batch_plan` ∧ `occ_member_fate` ∧ `occ_conflict` (Verus SA on production file) | `occ_batch_plan_lagging_conflict` | `occ_batch_plan_as_is_dente` |
 | ConcurrentDb `finish_group_off_lock` | `rwlock_client_may_mutate` (Verus SA on production file) | `rwlock_client_may_mutate_needs_write` | `rwlock_client_may_mutate_as_is_dente` |
