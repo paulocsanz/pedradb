@@ -3161,7 +3161,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-store/src/tx_glue_kernel.rs",
       "twin": "crates/pedradb-store/src/tx_glue_kernel.rs",
-      "verus": "scripts/verus_tx_glue.sh",
+      "aeneas": "scripts/aeneas_tx_glue.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -3183,7 +3183,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-store/src/rpc_mode_kernel.rs",
       "twin": "crates/pedradb-store/src/rpc_mode_kernel.rs",
-      "verus": "scripts/verus_rpc_mode.sh",
+      "aeneas": "scripts/aeneas_rpc_mode.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],

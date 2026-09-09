@@ -106,7 +106,7 @@ def TxRangeAction.Insts.CoreFmtDebug : core.fmt.Debug TxRangeAction := {
 }
 
 /-- [pedra_aeneas_tx_glue_kernel::tx_range_action]:
-    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 64:0-66:1
+    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 63:0-65:1
     Visibility: public -/
 def tx_range_action
   (range_committed : Bool) (tx_failed : Bool) : Result TxRangeAction := do
@@ -118,7 +118,7 @@ def tx_range_action
   else ok TxRangeAction.KeepCommitted
 
 /-- [pedra_aeneas_tx_glue_kernel::tx_range_action_as_is_local_only]:
-    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 73:0-75:1
+    Source: '../../../crates/pedradb-store/src/tx_glue_kernel.rs', lines 71:0-73:1
     Visibility: public -/
 def tx_range_action_as_is_local_only
   (_range_committed : Bool) (tx_failed : Bool) : Result TxRangeAction := do

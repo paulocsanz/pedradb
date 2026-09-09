@@ -25,7 +25,7 @@ def allow_direct_rpc (dst_pin : Bool) (want_direct : Bool) : Result Bool := do
   else ok true
 
 /-- [pedra_aeneas_rpc_mode_kernel::allow_direct_rpc_as_is]:
-    Source: '../../../crates/pedradb-store/src/rpc_mode_kernel.rs', lines 44:0-46:1
+    Source: '../../../crates/pedradb-store/src/rpc_mode_kernel.rs', lines 43:0-45:1
     Visibility: public -/
 def allow_direct_rpc_as_is
   (_dst_pin : Bool) (_want_direct : Bool) : Result Bool := do
