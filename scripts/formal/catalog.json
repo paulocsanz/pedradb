@@ -1080,8 +1080,9 @@
       "id": "lease_table",
       "finding": "F7",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-dcs/src/lease_kernel.rs",
-      "twin": "crates/pedradb-dcs/verus/lease_live.rs",
+      "twin": "crates/pedradb-dcs/src/lease_kernel.rs",
       "aeneas": "scripts/aeneas_lease.sh",
       "callers": [
         "crates/pedradb-dcs/src/lib.rs"
@@ -1104,8 +1105,9 @@
       "id": "lease_next_id",
       "finding": "F7",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-dcs/src/lease_kernel.rs",
-      "twin": "crates/pedradb-dcs/verus/lease_live.rs",
+      "twin": "crates/pedradb-dcs/src/lease_kernel.rs",
       "aeneas": "scripts/aeneas_lease.sh",
       "callers": [
         "crates/pedradb-dcs/src/lib.rs"
