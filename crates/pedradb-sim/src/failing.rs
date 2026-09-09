@@ -380,7 +380,7 @@ impl<F: EnvFile> Write for FailingFile<F> {
                         self.state.remaining.set(u64::MAX);
                     }
                     let n = cap.min(buf.len());
-                    if n == 0 {
+                    if pedradb_core::write_admission_kernel::batch_is_empty(n as u64) {
                         return Err(FaultKind::ShortWrite.to_error());
                     }
                     let wrote = self.inner.write(&buf[..n])?;
