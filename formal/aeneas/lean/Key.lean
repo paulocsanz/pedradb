@@ -153,3 +153,52 @@ theorem internal_key_cmp_user_key_then_seq
         | Ordering.gt => ok Ordering.gt) := by
   unfold key.InternalKey.Insts.CoreCmpOrd.cmp
   rfl
+
+/-- Catalog entry: `decode` is `len < 8` fail-closed, else split + `unpack_sequence_and_type`. Dual-unfold. -/
+theorem internal_key_decode_is_len_then_unpack (encoded : Slice U8) :
+    key.InternalKey.decode encoded =
+      (do
+        let i := Slice.len encoded
+        if i < 8#usize
+        then
+          let args := Slice.len encoded
+          let a ← core.fmt.rt.Argument.new_display Usize.Insts.CoreFmtDisplay args
+          let a1 ←
+            core.fmt.Arguments.new
+              (Array.make 34#usize [
+                24#u8, 105#u8, 110#u8, 116#u8, 101#u8, 114#u8, 110#u8, 97#u8, 108#u8,
+                32#u8, 107#u8, 101#u8, 121#u8, 32#u8, 116#u8, 111#u8, 111#u8, 32#u8,
+                115#u8, 104#u8, 111#u8, 114#u8, 116#u8, 58#u8, 32#u8, 192#u8, 6#u8,
+                32#u8, 98#u8, 121#u8, 116#u8, 101#u8, 115#u8, 0#u8
+                ]) (Array.make 1#usize [ a ])
+          let s ← alloc.fmt.format a1
+          let s1 ← core.hint.must_use s
+          ok (core.result.Result.Err (error.CoreError.Internal s1))
+        else
+          let i1 := Slice.len encoded
+          let split ← i1 - 8#usize
+          let s ←
+            core.slice.index.Slice.index
+              (core.slice.index.SliceIndexRangeToUsizeSlice U8) encoded
+              { «end» := split }
+          let user_key ← bytes.bytes.Bytes.copy_from_slice s
+          let trailer := Array.repeat 8#usize 0#u8
+          let (s1, to_slice_mut_back) ← lift (Array.to_slice_mut trailer)
+          let s2 ←
+            core.slice.index.Slice.index
+              (core.slice.index.SliceIndexRangeFromUsizeSlice U8) encoded
+              { start := split }
+          let s3 ← core.slice.Slice.copy_from_slice core.marker.CopyU8 s1 s2
+          let trailer1 := to_slice_mut_back s3
+          let packed ← lift (core.num.U64.from_be_bytes trailer1)
+          let r ← key.unpack_sequence_and_type packed
+          let cf ← core.result.Result.Insts.CoreOpsTry.branch r
+          match cf with
+          | core.ops.control_flow.ControlFlow.Continue val =>
+            let (sequence, kind) := val
+            ok (core.result.Result.Ok { user_key, sequence, kind })
+          | core.ops.control_flow.ControlFlow.Break residual =>
+            core.result.Result.Insts.CoreOpsTryTraitFromResidualResultInfallible.from_residual
+              key.InternalKey (core.convert.FromSame error.CoreError) residual) := by
+  unfold key.InternalKey.decode
+  rfl
