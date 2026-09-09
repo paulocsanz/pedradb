@@ -87,6 +87,21 @@ theorem point_bounds_overlap_missing_largest
   unfold scan_kernel.point_bounds_overlap
   rfl
 
+/-- Unbounded start + excluded end: file lo `<` e, start side always true. Dual-unfold. -/
+theorem point_bounds_overlap_unbounded_start_excluded_end
+    (lo hi e : Slice U8) :
+    scan_kernel.point_bounds_overlap (some lo) (some hi)
+      core.ops.range.Bound.Unbounded
+      (core.ops.range.Bound.Excluded e) =
+      (do
+        let file_before_end ←
+          Shared1A.Insts.CoreCmpPartialOrdShared0B.lt
+            (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) lo e
+        let file_after_start ← ok true
+        if file_before_end then ok file_after_start else ok false) := by
+  unfold scan_kernel.point_bounds_overlap
+  rfl
+
 /-- Unbounded start + included end: file lo `<=` e, start side always true. Dual-unfold. -/
 theorem point_bounds_overlap_unbounded_start_included_end
     (lo hi e : Slice U8) :
