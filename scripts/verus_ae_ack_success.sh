@@ -1,23 +1,16 @@
 #!/usr/bin/env bash
-# Machine-check AE persist-before-success (RFC-0002 P5.2 / F48).
+# ae_kernel.rs rustc body is the term (Aeneas Ae.lean).
+# A Verus stand-in is not last-wins. Fail closed if it returns.
 set -euo pipefail
-
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-# RFC-0171 P0.3 / RFC-0174: prove the file rustc links (pair ae_ack).
 SRC="$ROOT/crates/pedradb-raft/src/ae_kernel.rs"
-
-if [[ -x "${VERUS:-}" ]]; then
-  :
-elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then
-  VERUS="$HOME/.local/verus/verus-arm64-macos/verus"
-elif command -v verus >/dev/null 2>&1; then
-  VERUS="$(command -v verus)"
-else
-  echo "error: verus not found (install to ~/.local/verus/verus-arm64-macos or set VERUS=)" >&2
-  exit 127
+if grep -n 'verus!' "$SRC"; then
+  echo "error: verus_ae_ack_success: verus! stand-in still in ae_kernel.rs" >&2
+  exit 1
 fi
-
-echo "verus: $VERUS"
-"$VERUS" --version
-echo "proving: $SRC"
-exec "$VERUS" "$SRC" --crate-type=lib --multiple-errors 10 --time "$@"
+if grep -n 'verus_keep_ghost' "$SRC"; then
+  echo "error: verus_ae_ack_success: cfg(verus_keep_ghost) split still in ae_kernel.rs" >&2
+  exit 1
+fi
+echo "ok: no Verus cartoon in $SRC; term is Aeneas formal/aeneas/lean/Ae.lean"
+exit 0

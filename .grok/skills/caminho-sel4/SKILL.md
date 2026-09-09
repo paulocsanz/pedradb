@@ -19,11 +19,11 @@ description: >
 
 ## Grind pressure (one block, overwritten each fire)
 
-- Last fire: worked (`4d925ad8` delete merge.rs Verus cartoon; rustc `&[u8]` is the term)
-- Why: leftover_next_first vote; flattened `vote_decision` u64s ≠ rustc `VoteInputs`
-- This fire MUST land: delete the `vote_kernel.rs` `verus!` stand-in; rustc `VoteInputs` stays; Aeneas of those types is the term
+- Last fire: worked (`3c91d402` delete vote_kernel.rs Verus cartoon; rustc `VoteInputs` is the term)
+- Why: leftover_next_first ae_entry; Verus stand-in enums ≠ rustc AE types
+- This fire MUST land: delete the `ae_kernel.rs` `verus!` stand-in; rustc AE types stay; Aeneas of those types is the term
 - Forbidden this fire: mint u64 twin; `_body!` over different types; skip cartoon as "not a land"; FACTORY_BAN halt; git checkout of db.rs/concurrent.rs
-- Deeper: Search leftover_next=cartoon remaining; open vote_kernel.rs; named cargo `grants_when_free_and_log_ok`; `aeneas_vote.sh` / lake VoteKernel
+- Deeper: Search leftover_next=cartoon remaining; open ae_kernel.rs; named cargo `prev_log_empty_ok`; `aeneas_ae.sh` / lake Ae
 
 This skill **lands one payable slice per Fire**. Rank 1–10 unpaid first.
 When those boards are 0, Search prints `leftover_next`: cartoon remaining

@@ -1,10 +1,10 @@
 //! Pure AppendEntries log decisions (Beyond-style kernel, F16).
 //!
-//! **Single artifact (pairs `ae_entry`, `ae_ack`):** this file is what
-//! `rustc` links *and* what Verus proves (`cfg(verus_keep_ghost)`). Pair
-//! `ae_f16_gate` still has a twin-cópia until its turn.
+//! **Term:** this file is what `rustc` links. Aeneas extracts that body
+//! (`scripts/aeneas_ae.sh`). A Verus stand-in of the rustc AE enums is a
+//! model twin — not last-wins (deleted).
 //!
-//!   ./scripts/verus_ae_entry_action.sh
+//!   ./scripts/aeneas_ae.sh --required
 //!
 //! # Contract
 //!
@@ -21,280 +21,18 @@
 //! | truncate/push entries, `persist_log`, advance commit | caller |
 //! | log bytes durable / AE network | **axiom** — World / FailingEnv |
 //!
-//! The rustc bodies stay byte-stable so non-`single_artifact` twins still
-//! token-match. Verus proofs sit in the `cfg(verus_keep_ghost)` block
-//! above them (last-wins for lint is the rustc body).
+//! Aeneas of the rustc bodies is the term. A Verus stand-in is not last-wins.
 //!
 //! Spec page: `determinismo/pedradb-dst/formal/F16-ae-conflict.md`.
 
 #![forbid(unsafe_code)]
 
-#[cfg(verus_keep_ghost)]
-use vstd::prelude::*;
-
-#[cfg(verus_keep_ghost)]
-verus! {
-
-/// Mirrors the rustc `AeEntryAction` below (cfg-split so Verus does not see Debug).
-pub enum AeEntryAction {
-    Keep,
-    Append,
-    TruncateAndInstall,
-    Refuse,
-}
-
-/// Faithful `u64::saturating_add(1)` (production uses saturating_add).
-pub open spec fn sat_add1(x: u64) -> u64 {
-    if x == u64::MAX {
-        x
-    } else {
-        (x + 1) as u64
-    }
-}
-
-/// Closed-form spec — same arms as production `ae_entry_action`.
-pub open spec fn ae_entry_action_spec(
-    entry_index: u64,
-    entry_term: u64,
-    existing_term: Option<u64>,
-    commit_index: u64,
-    last_log_index: u64,
-) -> AeEntryAction {
-    match existing_term {
-        Some(t) => {
-            if t == entry_term {
-                AeEntryAction::Keep
-            } else if entry_index <= commit_index {
-                AeEntryAction::Refuse
-            } else {
-                AeEntryAction::TruncateAndInstall
-            }
-        },
-        None => {
-            if entry_index != sat_add1(last_log_index) {
-                AeEntryAction::Refuse
-            } else {
-                AeEntryAction::Append
-            }
-        },
-    }
-}
-
-/// F16 safety predicates (mirrors rustc `ae_f16_safe`).
-pub open spec fn ae_f16_safe(
-    entry_index: u64,
-    entry_term: u64,
-    existing_term: Option<u64>,
-    commit_index: u64,
-    last_log_index: u64,
-    action: AeEntryAction,
-) -> bool {
-    &&& !(action == AeEntryAction::TruncateAndInstall && entry_index <= commit_index)
-    &&& (action == AeEntryAction::Append ==>
-            existing_term.is_none() && entry_index == sat_add1(last_log_index))
-    &&& (match existing_term {
-            Some(t) => {
-                t != entry_term && entry_index <= commit_index ==>
-                    action == AeEntryAction::Refuse
-            },
-            None => true,
-        })
-}
-
-/// AS-IS mutant: truncate on any term conflict, even at/before commit (F16 bug).
-pub open spec fn ae_entry_action_as_is(
-    entry_index: u64,
-    entry_term: u64,
-    existing_term: Option<u64>,
-    last_log_index: u64,
-) -> AeEntryAction {
-    match existing_term {
-        Some(t) => {
-            if t == entry_term {
-                AeEntryAction::Keep
-            } else {
-                AeEntryAction::TruncateAndInstall
-            }
-        },
-        None => {
-            if entry_index != sat_add1(last_log_index) {
-                AeEntryAction::Refuse
-            } else {
-                AeEntryAction::Append
-            }
-        },
-    }
-}
-
-/// Executable decision — must match the rustc `ae_entry_action` bit-for-bit.
-pub fn ae_entry_action(
-    entry_index: u64,
-    entry_term: u64,
-    existing_term: Option<u64>,
-    commit_index: u64,
-    last_log_index: u64,
-) -> (d: AeEntryAction)
-    ensures
-        d == ae_entry_action_spec(
-            entry_index,
-            entry_term,
-            existing_term,
-            commit_index,
-            last_log_index,
-        ),
-        ae_f16_safe(
-            entry_index,
-            entry_term,
-            existing_term,
-            commit_index,
-            last_log_index,
-            d,
-        ),
-        (d == AeEntryAction::TruncateAndInstall) ==> (entry_index > commit_index),
-        (d == AeEntryAction::Append) ==> (
-            existing_term.is_none() && entry_index == sat_add1(last_log_index)
-        ),
-{
-    if let Some(t) = existing_term {
-        if t == entry_term {
-            AeEntryAction::Keep
-        } else if entry_index <= commit_index {
-            AeEntryAction::Refuse
-        } else {
-            AeEntryAction::TruncateAndInstall
-        }
-    } else {
-        let expect = if last_log_index == u64::MAX {
-            last_log_index
-        } else {
-            last_log_index + 1
-        };
-        if entry_index != expect {
-            AeEntryAction::Refuse
-        } else {
-            AeEntryAction::Append
-        }
-    }
-}
-
-/// Prev-log house (Raft §5.3) — same short-circuit as production.
-pub fn ae_prev_log_ok(
-    prev_log_index: u64,
-    prev_log_term: u64,
-    last_log_index: u64,
-    log_term_at_prev: u64,
-) -> (ok: bool)
-    ensures
-        ok == (prev_log_index == 0 || (last_log_index >= prev_log_index
-            && log_term_at_prev == prev_log_term)),
-{
-    if prev_log_index == 0 {
-        true
-    } else if last_log_index < prev_log_index {
-        false
-    } else {
-        log_term_at_prev == prev_log_term
-    }
-}
-
-/// Spec always satisfies F16 (independent of exec).
-proof fn lemma_spec_is_f16_safe(
-    entry_index: u64,
-    entry_term: u64,
-    existing_term: Option<u64>,
-    commit_index: u64,
-    last_log_index: u64,
-)
-    ensures
-        ae_f16_safe(
-            entry_index,
-            entry_term,
-            existing_term,
-            commit_index,
-            last_log_index,
-            ae_entry_action_spec(
-                entry_index,
-                entry_term,
-                existing_term,
-                commit_index,
-                last_log_index,
-            ),
-        ),
-{
-}
-
-/// Mutant violates F16 on committed term conflict (teeth).
-/// raft-lean-squad CPS1 / `hno_overwrite`: committed entries are not overwritten.
-proof fn lemma_mutant_violates_committed_conflict(
-    entry_index: u64,
-    entry_term: u64,
-    existing: u64,
-    commit_index: u64,
-    last_log_index: u64,
-)
-    requires
-        existing != entry_term,
-        entry_index <= commit_index,
-    ensures
-        ae_entry_action_as_is(
-            entry_index,
-            entry_term,
-            Some(existing),
-            last_log_index,
-        ) == AeEntryAction::TruncateAndInstall,
-        !ae_f16_safe(
-            entry_index,
-            entry_term,
-            Some(existing),
-            commit_index,
-            last_log_index,
-            AeEntryAction::TruncateAndInstall,
-        ),
-{
-}
-
-pub open spec fn ae_ack_success_spec(log_dirty: bool, persist_ok: bool) -> bool {
-    !log_dirty || persist_ok
-}
-
-pub open spec fn ae_ack_success_as_is(_log_dirty: bool, _persist_ok: bool) -> bool {
-    true
-}
-
-#[verifier::when_used_as_spec(ae_ack_success_spec)]
-pub fn ae_ack_success(log_dirty: bool, persist_ok: bool) -> (d: bool)
-    ensures
-        d == ae_ack_success_spec(log_dirty, persist_ok),
-        d ==> !log_dirty || persist_ok,
-        (log_dirty && !persist_ok) ==> !d,
-{
-    !log_dirty || persist_ok
-}
-
-/// F48 / Raft Fig.2: persist dirty log before `success: true`.
-/// raft-lean-squad MaybePersist: never ack past unstable storage.
-proof fn lemma_success_reply_only_after_persist(log_dirty: bool, persist_ok: bool)
-    ensures
-        ae_ack_success(log_dirty, persist_ok) && log_dirty ==> persist_ok,
-        !ae_ack_success(log_dirty, false) || !log_dirty,
-{
-}
-
-proof fn lemma_mutant_swallows_persist_fail()
-    ensures
-        ae_ack_success_as_is(true, false),
-        !ae_ack_success_spec(true, false),
-{
-}
-
-} // verus!
 
 /// Whether the follower's log matches the leader's `prev_log_*` (Raft §5.3).
 ///
 /// `log_term_at_prev` is `None` if the follower has no entry at `prev_log_index`
 /// (including when `prev_log_index == 0`, which always matches — pass `Some(0)`
 /// or use [`ae_prev_log_ok`] with `prev_log_index == 0` short-circuit).
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn ae_prev_log_ok(
     prev_log_index: u64,
@@ -312,7 +50,6 @@ pub fn ae_prev_log_ok(
 }
 
 /// What to do with one leader log entry relative to the follower log (F16).
-#[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AeEntryAction {
     /// Same index+term already present — leave suffix alone for now.
@@ -338,7 +75,6 @@ pub enum AeEntryAction {
 /// ```
 ///
 /// Finite-domain check: [`tests::theorem_ae_f16_on_finite_domain`].
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn ae_entry_action(
     entry_index: u64,
@@ -370,7 +106,6 @@ pub fn ae_entry_action(
 }
 
 /// Spec predicates for F16 safety (used by finite-domain theorem).
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn ae_f16_safe(
     entry_index: u64,
@@ -405,7 +140,6 @@ pub fn ae_f16_safe(
 
 /// AS-IS F16: vacuous always-true safety gate (no check at all). Mutant must
 /// fail the theorem — it passes a committed rewrite the production gate rejects.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn ae_f16_safe_as_is(
     _entry_index: u64,
@@ -421,14 +155,12 @@ pub fn ae_f16_safe_as_is(
 /// F48 protocol: AE `success: true` only if a dirty log was persisted.
 ///
 /// `success ⇒ !log_dirty ∨ persist_ok`. Persist is an axiom (FailingEnv / det_io).
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn ae_ack_success(log_dirty: bool, persist_ok: bool) -> bool {
     !log_dirty || persist_ok
 }
 
 /// AS-IS F48: always ack success (swallow persist). Mutant must fail the theorem.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn ae_ack_success_as_is(_log_dirty: bool, _persist_ok: bool) -> bool {
     true
@@ -436,7 +168,6 @@ pub fn ae_ack_success_as_is(_log_dirty: bool, _persist_ok: bool) -> bool {
 
 /// AS-IS mutant: always truncate-and-install on term conflict, **even at/before
 /// commit** (the F16 bug). Used only to prove the fixed rule has teeth.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn ae_entry_action_as_is_rewrite_committed(
     entry_index: u64,
@@ -462,6 +193,15 @@ pub fn ae_entry_action_as_is_rewrite_committed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ae_kernel_has_no_verus_cartoon() {
+        let src = include_str!("ae_kernel.rs");
+        let block = concat!("verus", "!", " {");
+        let cfg = concat!("cfg(", "verus", "_keep", "_ghost)");
+        assert!(!src.contains(block), "stand-in is not last-wins of rustc AE types");
+        assert!(!src.contains(cfg), "cfg split hides rustc types from the prover");
+    }
 
     #[test]
     fn prev_log_empty_ok() {
