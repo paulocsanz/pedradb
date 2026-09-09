@@ -1,5 +1,11 @@
 //! Pure WAL recover choices (F4 / F14 / EXPLODE).
 //!
+//! **Single artifact (Aeneas-paid):** this file is what `rustc` links and
+//! what the Lean theorems run over — Charon+Aeneas extract of these exact
+//! bodies. No Verus twin stands in for them.
+//!
+//!   ./scripts/aeneas_wal_recover.sh
+//!
 //! Production [`crate::wal::reader::WalReader::collect_all`] and
 //! [`crate::wal::reader::WalReader::read_record`] call these. Bytes on disk,
 //! torn writes, and fsync are **caller + axiom**.
@@ -130,6 +136,21 @@ impl FragKind {
             RecordType::Middle => Self::Middle,
             RecordType::Last => Self::Last,
         }
+    }
+}
+
+/// AS-IS (pair `from_record_type`): the wire `First` byte decodes as
+/// `Middle` — every multi-part record's opening fragment reads as an
+/// orphan continuation, so assembly fail-stops instead of starting the
+/// scratch.
+#[must_use]
+pub fn from_record_type_as_is(t: RecordType) -> FragKind {
+    match t {
+        RecordType::Zero => FragKind::Zero,
+        RecordType::Full => FragKind::Full,
+        RecordType::First => FragKind::Middle,
+        RecordType::Middle => FragKind::Middle,
+        RecordType::Last => FragKind::Last,
     }
 }
 
@@ -533,6 +554,26 @@ mod tests {
             RecoverAct::Resync,
             "AS-IS dente: CRC becomes silent resync"
         );
+    }
+
+    /// Catalog three-teeth plant (from_record_type): the wire FIRST byte
+    /// must open a scratch — the as-is misdecode turns it into an orphan
+    /// continuation and the fragment never assembles.
+    #[test]
+    fn from_record_type_on_wire_type_is_not_ok() {
+        assert_eq!(
+            FragKind::from_record_type(RecordType::First),
+            FragKind::First
+        );
+        assert_eq!(
+            from_record_type_as_is(RecordType::First),
+            FragKind::Middle,
+            "AS-IS dente: FIRST fragment byte decodes as continuation"
+        );
+        // Downstream: the kernel starts the scratch; the misdecode is an
+        // orphan Middle with nothing in flight — F14 fail-stop.
+        assert_eq!(fragment_act(FragKind::First, true), FragAct::Start);
+        assert_eq!(fragment_act(FragKind::Middle, true), FragAct::FailStop);
     }
 }
 

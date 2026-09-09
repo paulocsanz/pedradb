@@ -159,7 +159,7 @@ def format.decode_crc (bytes : Array Std.U8 4#usize) : Result Std.U32 := do
   ok (core.num.U32.from_le_bytes bytes)
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::MAX_CONSECUTIVE_SKIPS]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 33:0-33:55
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 39:0-39:55
     Visibility: public -/
 @[global_simps, irreducible]
 def recover_kernel.MAX_CONSECUTIVE_SKIPS : Result Std.U64 := do
@@ -167,7 +167,7 @@ def recover_kernel.MAX_CONSECUTIVE_SKIPS : Result Std.U64 := do
   i * 1024#u64
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverKind]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 37:0-60:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 43:0-66:1
     Visibility: public -/
 @[discriminant isize]
 inductive recover_kernel.RecoverKind where
@@ -182,7 +182,7 @@ inductive recover_kernel.RecoverKind where
 | Other : recover_kernel.RecoverKind
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::fmt::Debug for pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverKind}::fmt]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 36:9-36:14
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 42:9-42:14
     Visibility: public -/
 def recover_kernel.RecoverKind.Insts.CoreFmtDebug.fmt
   (self : recover_kernel.RecoverKind) (f : core.fmt.Formatter) :
@@ -209,7 +209,7 @@ def recover_kernel.RecoverKind.Insts.CoreFmtDebug.fmt
     core.fmt.Formatter.write_str f (toStr "Other")
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::fmt::Debug for pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverKind}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 36:9-36:14 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 42:9-42:14 -/
 @[reducible]
 def recover_kernel.RecoverKind.Insts.CoreFmtDebug : core.fmt.Debug
   recover_kernel.RecoverKind := {
@@ -217,14 +217,14 @@ def recover_kernel.RecoverKind.Insts.CoreFmtDebug : core.fmt.Debug
 }
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::clone::Clone for pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverKind}::clone]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 36:16-36:21
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 42:16-42:21
     Visibility: public -/
 def recover_kernel.RecoverKind.Insts.CoreCloneClone.clone
   (self : recover_kernel.RecoverKind) : Result recover_kernel.RecoverKind := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::clone::Clone for pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverKind}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 36:16-36:21 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 42:16-42:21 -/
 @[reducible]
 def recover_kernel.RecoverKind.Insts.CoreCloneClone : core.clone.Clone
   recover_kernel.RecoverKind := {
@@ -232,7 +232,7 @@ def recover_kernel.RecoverKind.Insts.CoreCloneClone : core.clone.Clone
 }
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::marker::Copy for pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverKind}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 36:23-36:27 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 42:23-42:27 -/
 @[reducible]
 def recover_kernel.RecoverKind.Insts.CoreMarkerCopy : core.marker.Copy
   recover_kernel.RecoverKind := {
@@ -240,14 +240,14 @@ def recover_kernel.RecoverKind.Insts.CoreMarkerCopy : core.marker.Copy
 }
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverKind}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 36:29-36:38 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 42:29-42:38 -/
 @[reducible]
 def recover_kernel.RecoverKind.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq recover_kernel.RecoverKind := {
 }
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::cmp::PartialEq<pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverKind> for pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverKind}::eq]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 36:29-36:38
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 42:29-42:38
     Visibility: public -/
 def recover_kernel.RecoverKind.Insts.CoreCmpPartialEqRecoverKind.eq
   (self : recover_kernel.RecoverKind) (other : recover_kernel.RecoverKind) :
@@ -258,7 +258,7 @@ def recover_kernel.RecoverKind.Insts.CoreCmpPartialEqRecoverKind.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::cmp::PartialEq<pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverKind> for pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverKind}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 36:29-36:38 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 42:29-42:38 -/
 @[reducible]
 def recover_kernel.RecoverKind.Insts.CoreCmpPartialEqRecoverKind :
   core.cmp.PartialEq recover_kernel.RecoverKind recover_kernel.RecoverKind := {
@@ -266,14 +266,14 @@ def recover_kernel.RecoverKind.Insts.CoreCmpPartialEqRecoverKind :
 }
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::cmp::Eq for pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverKind}::assert_fields_are_eq]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 36:40-36:42
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 42:40-42:42
     Visibility: public -/
 def recover_kernel.RecoverKind.Insts.CoreCmpEq.assert_fields_are_eq
   (self : recover_kernel.RecoverKind) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::cmp::Eq for pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverKind}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 36:40-36:42 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 42:40-42:42 -/
 @[reducible]
 def recover_kernel.RecoverKind.Insts.CoreCmpEq : core.cmp.Eq
   recover_kernel.RecoverKind := {
@@ -283,7 +283,7 @@ def recover_kernel.RecoverKind.Insts.CoreCmpEq : core.cmp.Eq
 }
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::hash::Hash for pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverKind}::hash]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 36:44-36:48
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 42:44-42:48
     Visibility: public -/
 def recover_kernel.RecoverKind.Insts.CoreHashHash.hash
   {__H : Type} (corehashHasherInst : core.hash.Hasher __H)
@@ -294,7 +294,7 @@ def recover_kernel.RecoverKind.Insts.CoreHashHash.hash
   Isize.Insts.CoreHashHash.hash corehashHasherInst self1 state
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::hash::Hash for pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverKind}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 36:44-36:48 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 42:44-42:48 -/
 @[reducible]
 def recover_kernel.RecoverKind.Insts.CoreHashHash : core.hash.Hash
   recover_kernel.RecoverKind := {
@@ -303,7 +303,7 @@ def recover_kernel.RecoverKind.Insts.CoreHashHash : core.hash.Hash
 }
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverAct]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 64:0-75:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 70:0-81:1
     Visibility: public -/
 @[discriminant isize]
 inductive recover_kernel.RecoverAct where
@@ -314,7 +314,7 @@ inductive recover_kernel.RecoverAct where
 | FailStop : recover_kernel.RecoverAct
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::fmt::Debug for pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverAct}::fmt]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 63:9-63:14
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 69:9-69:14
     Visibility: public -/
 def recover_kernel.RecoverAct.Insts.CoreFmtDebug.fmt
   (self : recover_kernel.RecoverAct) (f : core.fmt.Formatter) :
@@ -333,7 +333,7 @@ def recover_kernel.RecoverAct.Insts.CoreFmtDebug.fmt
     core.fmt.Formatter.write_str f (toStr "FailStop")
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::fmt::Debug for pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverAct}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 63:9-63:14 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 69:9-69:14 -/
 @[reducible]
 def recover_kernel.RecoverAct.Insts.CoreFmtDebug : core.fmt.Debug
   recover_kernel.RecoverAct := {
@@ -341,14 +341,14 @@ def recover_kernel.RecoverAct.Insts.CoreFmtDebug : core.fmt.Debug
 }
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::clone::Clone for pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverAct}::clone]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 63:16-63:21
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 69:16-69:21
     Visibility: public -/
 def recover_kernel.RecoverAct.Insts.CoreCloneClone.clone
   (self : recover_kernel.RecoverAct) : Result recover_kernel.RecoverAct := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::clone::Clone for pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverAct}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 63:16-63:21 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 69:16-69:21 -/
 @[reducible]
 def recover_kernel.RecoverAct.Insts.CoreCloneClone : core.clone.Clone
   recover_kernel.RecoverAct := {
@@ -356,7 +356,7 @@ def recover_kernel.RecoverAct.Insts.CoreCloneClone : core.clone.Clone
 }
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::marker::Copy for pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverAct}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 63:23-63:27 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 69:23-69:27 -/
 @[reducible]
 def recover_kernel.RecoverAct.Insts.CoreMarkerCopy : core.marker.Copy
   recover_kernel.RecoverAct := {
@@ -364,14 +364,14 @@ def recover_kernel.RecoverAct.Insts.CoreMarkerCopy : core.marker.Copy
 }
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverAct}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 63:29-63:38 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 69:29-69:38 -/
 @[reducible]
 def recover_kernel.RecoverAct.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq recover_kernel.RecoverAct := {
 }
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::cmp::PartialEq<pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverAct> for pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverAct}::eq]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 63:29-63:38
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 69:29-69:38
     Visibility: public -/
 def recover_kernel.RecoverAct.Insts.CoreCmpPartialEqRecoverAct.eq
   (self : recover_kernel.RecoverAct) (other : recover_kernel.RecoverAct) :
@@ -382,7 +382,7 @@ def recover_kernel.RecoverAct.Insts.CoreCmpPartialEqRecoverAct.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::cmp::PartialEq<pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverAct> for pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverAct}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 63:29-63:38 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 69:29-69:38 -/
 @[reducible]
 def recover_kernel.RecoverAct.Insts.CoreCmpPartialEqRecoverAct :
   core.cmp.PartialEq recover_kernel.RecoverAct recover_kernel.RecoverAct := {
@@ -390,14 +390,14 @@ def recover_kernel.RecoverAct.Insts.CoreCmpPartialEqRecoverAct :
 }
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::cmp::Eq for pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverAct}::assert_fields_are_eq]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 63:40-63:42
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 69:40-69:42
     Visibility: public -/
 def recover_kernel.RecoverAct.Insts.CoreCmpEq.assert_fields_are_eq
   (self : recover_kernel.RecoverAct) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::cmp::Eq for pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverAct}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 63:40-63:42 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 69:40-69:42 -/
 @[reducible]
 def recover_kernel.RecoverAct.Insts.CoreCmpEq : core.cmp.Eq
   recover_kernel.RecoverAct := {
@@ -407,7 +407,7 @@ def recover_kernel.RecoverAct.Insts.CoreCmpEq : core.cmp.Eq
 }
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::hash::Hash for pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverAct}::hash]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 63:44-63:48
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 69:44-69:48
     Visibility: public -/
 def recover_kernel.RecoverAct.Insts.CoreHashHash.hash
   {__H : Type} (corehashHasherInst : core.hash.Hasher __H)
@@ -418,7 +418,7 @@ def recover_kernel.RecoverAct.Insts.CoreHashHash.hash
   Isize.Insts.CoreHashHash.hash corehashHasherInst self1 state
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::hash::Hash for pedra_aeneas_wal_recover_kernel::recover_kernel::RecoverAct}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 63:44-63:48 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 69:44-69:48 -/
 @[reducible]
 def recover_kernel.RecoverAct.Insts.CoreHashHash : core.hash.Hash
   recover_kernel.RecoverAct := {
@@ -427,7 +427,7 @@ def recover_kernel.RecoverAct.Insts.CoreHashHash : core.hash.Hash
 }
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::PhysicalAct]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 79:0-88:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 85:0-94:1
     Visibility: public -/
 @[discriminant isize]
 inductive recover_kernel.PhysicalAct where
@@ -437,7 +437,7 @@ inductive recover_kernel.PhysicalAct where
 | CleanEof : recover_kernel.PhysicalAct
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::fmt::Debug for pedra_aeneas_wal_recover_kernel::recover_kernel::PhysicalAct}::fmt]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 78:9-78:14
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 84:9-84:14
     Visibility: public -/
 def recover_kernel.PhysicalAct.Insts.CoreFmtDebug.fmt
   (self : recover_kernel.PhysicalAct) (f : core.fmt.Formatter) :
@@ -454,7 +454,7 @@ def recover_kernel.PhysicalAct.Insts.CoreFmtDebug.fmt
     core.fmt.Formatter.write_str f (toStr "CleanEof")
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::fmt::Debug for pedra_aeneas_wal_recover_kernel::recover_kernel::PhysicalAct}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 78:9-78:14 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 84:9-84:14 -/
 @[reducible]
 def recover_kernel.PhysicalAct.Insts.CoreFmtDebug : core.fmt.Debug
   recover_kernel.PhysicalAct := {
@@ -462,14 +462,14 @@ def recover_kernel.PhysicalAct.Insts.CoreFmtDebug : core.fmt.Debug
 }
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::clone::Clone for pedra_aeneas_wal_recover_kernel::recover_kernel::PhysicalAct}::clone]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 78:16-78:21
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 84:16-84:21
     Visibility: public -/
 def recover_kernel.PhysicalAct.Insts.CoreCloneClone.clone
   (self : recover_kernel.PhysicalAct) : Result recover_kernel.PhysicalAct := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::clone::Clone for pedra_aeneas_wal_recover_kernel::recover_kernel::PhysicalAct}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 78:16-78:21 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 84:16-84:21 -/
 @[reducible]
 def recover_kernel.PhysicalAct.Insts.CoreCloneClone : core.clone.Clone
   recover_kernel.PhysicalAct := {
@@ -477,7 +477,7 @@ def recover_kernel.PhysicalAct.Insts.CoreCloneClone : core.clone.Clone
 }
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::marker::Copy for pedra_aeneas_wal_recover_kernel::recover_kernel::PhysicalAct}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 78:23-78:27 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 84:23-84:27 -/
 @[reducible]
 def recover_kernel.PhysicalAct.Insts.CoreMarkerCopy : core.marker.Copy
   recover_kernel.PhysicalAct := {
@@ -485,14 +485,14 @@ def recover_kernel.PhysicalAct.Insts.CoreMarkerCopy : core.marker.Copy
 }
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_wal_recover_kernel::recover_kernel::PhysicalAct}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 78:29-78:38 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 84:29-84:38 -/
 @[reducible]
 def recover_kernel.PhysicalAct.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq recover_kernel.PhysicalAct := {
 }
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::cmp::PartialEq<pedra_aeneas_wal_recover_kernel::recover_kernel::PhysicalAct> for pedra_aeneas_wal_recover_kernel::recover_kernel::PhysicalAct}::eq]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 78:29-78:38
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 84:29-84:38
     Visibility: public -/
 def recover_kernel.PhysicalAct.Insts.CoreCmpPartialEqPhysicalAct.eq
   (self : recover_kernel.PhysicalAct) (other : recover_kernel.PhysicalAct) :
@@ -503,7 +503,7 @@ def recover_kernel.PhysicalAct.Insts.CoreCmpPartialEqPhysicalAct.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::cmp::PartialEq<pedra_aeneas_wal_recover_kernel::recover_kernel::PhysicalAct> for pedra_aeneas_wal_recover_kernel::recover_kernel::PhysicalAct}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 78:29-78:38 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 84:29-84:38 -/
 @[reducible]
 def recover_kernel.PhysicalAct.Insts.CoreCmpPartialEqPhysicalAct :
   core.cmp.PartialEq recover_kernel.PhysicalAct recover_kernel.PhysicalAct := {
@@ -511,14 +511,14 @@ def recover_kernel.PhysicalAct.Insts.CoreCmpPartialEqPhysicalAct :
 }
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::cmp::Eq for pedra_aeneas_wal_recover_kernel::recover_kernel::PhysicalAct}::assert_fields_are_eq]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 78:40-78:42
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 84:40-84:42
     Visibility: public -/
 def recover_kernel.PhysicalAct.Insts.CoreCmpEq.assert_fields_are_eq
   (self : recover_kernel.PhysicalAct) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::cmp::Eq for pedra_aeneas_wal_recover_kernel::recover_kernel::PhysicalAct}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 78:40-78:42 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 84:40-84:42 -/
 @[reducible]
 def recover_kernel.PhysicalAct.Insts.CoreCmpEq : core.cmp.Eq
   recover_kernel.PhysicalAct := {
@@ -528,7 +528,7 @@ def recover_kernel.PhysicalAct.Insts.CoreCmpEq : core.cmp.Eq
 }
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::hash::Hash for pedra_aeneas_wal_recover_kernel::recover_kernel::PhysicalAct}::hash]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 78:44-78:48
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 84:44-84:48
     Visibility: public -/
 def recover_kernel.PhysicalAct.Insts.CoreHashHash.hash
   {__H : Type} (corehashHasherInst : core.hash.Hasher __H)
@@ -539,7 +539,7 @@ def recover_kernel.PhysicalAct.Insts.CoreHashHash.hash
   Isize.Insts.CoreHashHash.hash corehashHasherInst self1 state
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::hash::Hash for pedra_aeneas_wal_recover_kernel::recover_kernel::PhysicalAct}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 78:44-78:48 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 84:44-84:48 -/
 @[reducible]
 def recover_kernel.PhysicalAct.Insts.CoreHashHash : core.hash.Hash
   recover_kernel.PhysicalAct := {
@@ -548,7 +548,7 @@ def recover_kernel.PhysicalAct.Insts.CoreHashHash : core.hash.Hash
 }
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::FragKind]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 92:0-103:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 98:0-109:1
     Visibility: public -/
 @[discriminant isize]
 inductive recover_kernel.FragKind where
@@ -559,7 +559,7 @@ inductive recover_kernel.FragKind where
 | Zero : recover_kernel.FragKind
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::fmt::Debug for pedra_aeneas_wal_recover_kernel::recover_kernel::FragKind}::fmt]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 91:9-91:14
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 97:9-97:14
     Visibility: public -/
 def recover_kernel.FragKind.Insts.CoreFmtDebug.fmt
   (self : recover_kernel.FragKind) (f : core.fmt.Formatter) :
@@ -578,7 +578,7 @@ def recover_kernel.FragKind.Insts.CoreFmtDebug.fmt
     core.fmt.Formatter.write_str f (toStr "Zero")
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::fmt::Debug for pedra_aeneas_wal_recover_kernel::recover_kernel::FragKind}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 91:9-91:14 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 97:9-97:14 -/
 @[reducible]
 def recover_kernel.FragKind.Insts.CoreFmtDebug : core.fmt.Debug
   recover_kernel.FragKind := {
@@ -586,14 +586,14 @@ def recover_kernel.FragKind.Insts.CoreFmtDebug : core.fmt.Debug
 }
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::clone::Clone for pedra_aeneas_wal_recover_kernel::recover_kernel::FragKind}::clone]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 91:16-91:21
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 97:16-97:21
     Visibility: public -/
 def recover_kernel.FragKind.Insts.CoreCloneClone.clone
   (self : recover_kernel.FragKind) : Result recover_kernel.FragKind := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::clone::Clone for pedra_aeneas_wal_recover_kernel::recover_kernel::FragKind}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 91:16-91:21 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 97:16-97:21 -/
 @[reducible]
 def recover_kernel.FragKind.Insts.CoreCloneClone : core.clone.Clone
   recover_kernel.FragKind := {
@@ -601,7 +601,7 @@ def recover_kernel.FragKind.Insts.CoreCloneClone : core.clone.Clone
 }
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::marker::Copy for pedra_aeneas_wal_recover_kernel::recover_kernel::FragKind}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 91:23-91:27 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 97:23-97:27 -/
 @[reducible]
 def recover_kernel.FragKind.Insts.CoreMarkerCopy : core.marker.Copy
   recover_kernel.FragKind := {
@@ -609,14 +609,14 @@ def recover_kernel.FragKind.Insts.CoreMarkerCopy : core.marker.Copy
 }
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_wal_recover_kernel::recover_kernel::FragKind}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 91:29-91:38 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 97:29-97:38 -/
 @[reducible]
 def recover_kernel.FragKind.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq recover_kernel.FragKind := {
 }
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::cmp::PartialEq<pedra_aeneas_wal_recover_kernel::recover_kernel::FragKind> for pedra_aeneas_wal_recover_kernel::recover_kernel::FragKind}::eq]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 91:29-91:38
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 97:29-97:38
     Visibility: public -/
 def recover_kernel.FragKind.Insts.CoreCmpPartialEqFragKind.eq
   (self : recover_kernel.FragKind) (other : recover_kernel.FragKind) :
@@ -627,7 +627,7 @@ def recover_kernel.FragKind.Insts.CoreCmpPartialEqFragKind.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::cmp::PartialEq<pedra_aeneas_wal_recover_kernel::recover_kernel::FragKind> for pedra_aeneas_wal_recover_kernel::recover_kernel::FragKind}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 91:29-91:38 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 97:29-97:38 -/
 @[reducible]
 def recover_kernel.FragKind.Insts.CoreCmpPartialEqFragKind : core.cmp.PartialEq
   recover_kernel.FragKind recover_kernel.FragKind := {
@@ -635,14 +635,14 @@ def recover_kernel.FragKind.Insts.CoreCmpPartialEqFragKind : core.cmp.PartialEq
 }
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::cmp::Eq for pedra_aeneas_wal_recover_kernel::recover_kernel::FragKind}::assert_fields_are_eq]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 91:40-91:42
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 97:40-97:42
     Visibility: public -/
 def recover_kernel.FragKind.Insts.CoreCmpEq.assert_fields_are_eq
   (self : recover_kernel.FragKind) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::cmp::Eq for pedra_aeneas_wal_recover_kernel::recover_kernel::FragKind}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 91:40-91:42 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 97:40-97:42 -/
 @[reducible]
 def recover_kernel.FragKind.Insts.CoreCmpEq : core.cmp.Eq
   recover_kernel.FragKind := {
@@ -652,7 +652,7 @@ def recover_kernel.FragKind.Insts.CoreCmpEq : core.cmp.Eq
 }
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::hash::Hash for pedra_aeneas_wal_recover_kernel::recover_kernel::FragKind}::hash]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 91:44-91:48
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 97:44-97:48
     Visibility: public -/
 def recover_kernel.FragKind.Insts.CoreHashHash.hash
   {__H : Type} (corehashHasherInst : core.hash.Hasher __H)
@@ -663,7 +663,7 @@ def recover_kernel.FragKind.Insts.CoreHashHash.hash
   Isize.Insts.CoreHashHash.hash corehashHasherInst self1 state
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::hash::Hash for pedra_aeneas_wal_recover_kernel::recover_kernel::FragKind}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 91:44-91:48 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 97:44-97:48 -/
 @[reducible]
 def recover_kernel.FragKind.Insts.CoreHashHash : core.hash.Hash
   recover_kernel.FragKind := {
@@ -672,7 +672,7 @@ def recover_kernel.FragKind.Insts.CoreHashHash : core.hash.Hash
 }
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::FragAct]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 107:0-120:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 113:0-126:1
     Visibility: public -/
 @[discriminant isize]
 inductive recover_kernel.FragAct where
@@ -684,7 +684,7 @@ inductive recover_kernel.FragAct where
 | CleanEof : recover_kernel.FragAct
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::fmt::Debug for pedra_aeneas_wal_recover_kernel::recover_kernel::FragAct}::fmt]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 106:9-106:14
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 112:9-112:14
     Visibility: public -/
 def recover_kernel.FragAct.Insts.CoreFmtDebug.fmt
   (self : recover_kernel.FragAct) (f : core.fmt.Formatter) :
@@ -705,7 +705,7 @@ def recover_kernel.FragAct.Insts.CoreFmtDebug.fmt
     core.fmt.Formatter.write_str f (toStr "CleanEof")
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::fmt::Debug for pedra_aeneas_wal_recover_kernel::recover_kernel::FragAct}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 106:9-106:14 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 112:9-112:14 -/
 @[reducible]
 def recover_kernel.FragAct.Insts.CoreFmtDebug : core.fmt.Debug
   recover_kernel.FragAct := {
@@ -713,14 +713,14 @@ def recover_kernel.FragAct.Insts.CoreFmtDebug : core.fmt.Debug
 }
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::clone::Clone for pedra_aeneas_wal_recover_kernel::recover_kernel::FragAct}::clone]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 106:16-106:21
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 112:16-112:21
     Visibility: public -/
 def recover_kernel.FragAct.Insts.CoreCloneClone.clone
   (self : recover_kernel.FragAct) : Result recover_kernel.FragAct := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::clone::Clone for pedra_aeneas_wal_recover_kernel::recover_kernel::FragAct}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 106:16-106:21 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 112:16-112:21 -/
 @[reducible]
 def recover_kernel.FragAct.Insts.CoreCloneClone : core.clone.Clone
   recover_kernel.FragAct := {
@@ -728,7 +728,7 @@ def recover_kernel.FragAct.Insts.CoreCloneClone : core.clone.Clone
 }
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::marker::Copy for pedra_aeneas_wal_recover_kernel::recover_kernel::FragAct}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 106:23-106:27 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 112:23-112:27 -/
 @[reducible]
 def recover_kernel.FragAct.Insts.CoreMarkerCopy : core.marker.Copy
   recover_kernel.FragAct := {
@@ -736,14 +736,14 @@ def recover_kernel.FragAct.Insts.CoreMarkerCopy : core.marker.Copy
 }
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_wal_recover_kernel::recover_kernel::FragAct}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 106:29-106:38 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 112:29-112:38 -/
 @[reducible]
 def recover_kernel.FragAct.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq recover_kernel.FragAct := {
 }
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::cmp::PartialEq<pedra_aeneas_wal_recover_kernel::recover_kernel::FragAct> for pedra_aeneas_wal_recover_kernel::recover_kernel::FragAct}::eq]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 106:29-106:38
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 112:29-112:38
     Visibility: public -/
 def recover_kernel.FragAct.Insts.CoreCmpPartialEqFragAct.eq
   (self : recover_kernel.FragAct) (other : recover_kernel.FragAct) :
@@ -754,7 +754,7 @@ def recover_kernel.FragAct.Insts.CoreCmpPartialEqFragAct.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::cmp::PartialEq<pedra_aeneas_wal_recover_kernel::recover_kernel::FragAct> for pedra_aeneas_wal_recover_kernel::recover_kernel::FragAct}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 106:29-106:38 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 112:29-112:38 -/
 @[reducible]
 def recover_kernel.FragAct.Insts.CoreCmpPartialEqFragAct : core.cmp.PartialEq
   recover_kernel.FragAct recover_kernel.FragAct := {
@@ -762,14 +762,14 @@ def recover_kernel.FragAct.Insts.CoreCmpPartialEqFragAct : core.cmp.PartialEq
 }
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::cmp::Eq for pedra_aeneas_wal_recover_kernel::recover_kernel::FragAct}::assert_fields_are_eq]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 106:40-106:42
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 112:40-112:42
     Visibility: public -/
 def recover_kernel.FragAct.Insts.CoreCmpEq.assert_fields_are_eq
   (self : recover_kernel.FragAct) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::cmp::Eq for pedra_aeneas_wal_recover_kernel::recover_kernel::FragAct}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 106:40-106:42 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 112:40-112:42 -/
 @[reducible]
 def recover_kernel.FragAct.Insts.CoreCmpEq : core.cmp.Eq recover_kernel.FragAct
   := {
@@ -779,7 +779,7 @@ def recover_kernel.FragAct.Insts.CoreCmpEq : core.cmp.Eq recover_kernel.FragAct
 }
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::hash::Hash for pedra_aeneas_wal_recover_kernel::recover_kernel::FragAct}::hash]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 106:44-106:48
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 112:44-112:48
     Visibility: public -/
 def recover_kernel.FragAct.Insts.CoreHashHash.hash
   {__H : Type} (corehashHasherInst : core.hash.Hasher __H)
@@ -790,7 +790,7 @@ def recover_kernel.FragAct.Insts.CoreHashHash.hash
   Isize.Insts.CoreHashHash.hash corehashHasherInst self1 state
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::recover_kernel::{impl core::hash::Hash for pedra_aeneas_wal_recover_kernel::recover_kernel::FragAct}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 106:44-106:48 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 112:44-112:48 -/
 @[reducible]
 def recover_kernel.FragAct.Insts.CoreHashHash : core.hash.Hash
   recover_kernel.FragAct := {
@@ -799,7 +799,7 @@ def recover_kernel.FragAct.Insts.CoreHashHash : core.hash.Hash
 }
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::{pedra_aeneas_wal_recover_kernel::recover_kernel::FragKind}::from_record_type]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 125:4-133:5
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 131:4-139:5
     Visibility: public -/
 def recover_kernel.FragKind.from_record_type
   (t : format.RecordType) : Result recover_kernel.FragKind := do
@@ -810,8 +810,20 @@ def recover_kernel.FragKind.from_record_type
   | format.RecordType.Middle => ok recover_kernel.FragKind.Middle
   | format.RecordType.Last => ok recover_kernel.FragKind.Last
 
+/-- [pedra_aeneas_wal_recover_kernel::recover_kernel::from_record_type_as_is]:
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 147:0-155:1
+    Visibility: public -/
+def recover_kernel.from_record_type_as_is
+  (t : format.RecordType) : Result recover_kernel.FragKind := do
+  match t with
+  | format.RecordType.Zero => ok recover_kernel.FragKind.Zero
+  | format.RecordType.Full => ok recover_kernel.FragKind.Full
+  | format.RecordType.First => ok recover_kernel.FragKind.Middle
+  | format.RecordType.Middle => ok recover_kernel.FragKind.Middle
+  | format.RecordType.Last => ok recover_kernel.FragKind.Last
+
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::is_length_resyncable]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 139:0-144:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 160:0-165:1
     Visibility: public -/
 def recover_kernel.is_length_resyncable
   (kind : recover_kernel.RecoverKind) : Result Bool := do
@@ -827,7 +839,7 @@ def recover_kernel.is_length_resyncable
   | recover_kernel.RecoverKind.Other => ok false
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::is_length_resyncable_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 149:0-151:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 170:0-172:1
     Visibility: public -/
 def recover_kernel.is_length_resyncable_as_is
   (kind : recover_kernel.RecoverKind) : Result Bool := do
@@ -847,7 +859,7 @@ def recover_kernel.is_length_resyncable_as_is
     | recover_kernel.RecoverKind.Other => ok false
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::recover_collect_act]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 161:0-209:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 182:0-230:1
     Visibility: public -/
 def recover_kernel.recover_collect_act
   (kind : recover_kernel.RecoverKind) (prefix_n : Std.U64) (can_skip : Bool)
@@ -916,7 +928,7 @@ def recover_kernel.recover_collect_act
   | recover_kernel.RecoverKind.Other => ok recover_kernel.RecoverAct.FailStop
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::recover_collect_act_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 214:0-230:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 235:0-251:1
     Visibility: public -/
 def recover_kernel.recover_collect_act_as_is
   (kind : recover_kernel.RecoverKind) (_prefix_n : Std.U64) (_can_skip : Bool)
@@ -939,7 +951,7 @@ def recover_kernel.recover_collect_act_as_is
   | recover_kernel.RecoverKind.Other => ok recover_kernel.RecoverAct.FailStop
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::physical_payload_act]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 234:0-251:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 255:0-272:1
     Visibility: public -/
 def recover_kernel.physical_payload_act
   (length : Std.U64) (max_payload : Std.U64) (payload_end : Std.U64)
@@ -957,7 +969,7 @@ def recover_kernel.physical_payload_act
     else ok recover_kernel.PhysicalAct.Continue
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::physical_payload_act_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 255:0-266:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 276:0-287:1
     Visibility: public -/
 def recover_kernel.physical_payload_act_as_is
   (length : Std.U64) (max_payload : Std.U64) (payload_end : Std.U64)
@@ -972,7 +984,7 @@ def recover_kernel.physical_payload_act_as_is
     else ok recover_kernel.PhysicalAct.Continue
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::fragment_act]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 270:0-290:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 291:0-311:1
     Visibility: public -/
 def recover_kernel.fragment_act
   (kind : recover_kernel.FragKind) (scratch_empty : Bool) :
@@ -992,7 +1004,7 @@ def recover_kernel.fragment_act
   | recover_kernel.FragKind.Zero => ok recover_kernel.FragAct.Skip
 
 /-- [pedra_aeneas_wal_recover_kernel::recover_kernel::fragment_act_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 294:0-300:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 315:0-321:1
     Visibility: public -/
 def recover_kernel.fragment_act_as_is
   (kind : recover_kernel.FragKind) (scratch_empty : Bool) :
