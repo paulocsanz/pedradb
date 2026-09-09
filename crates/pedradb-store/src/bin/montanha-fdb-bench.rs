@@ -1631,7 +1631,8 @@ fn main() {
   }}"#,
                         mk = merged.len(),
                         ws = wall.as_secs_f64(),
-                        pass = mismatches == 0 && err_all < ok_all.saturating_add(1),
+                        pass = pedradb_core::write_admission_kernel::batch_is_empty(mismatches)
+                            && err_all < ok_all.saturating_add(1),
                     ));
                     progress!(
                         "E2 tcp multi-bt ok={ok_all} err={err_all} verified={verified}/{} mismatches={mismatches}",
