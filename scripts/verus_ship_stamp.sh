@@ -1,20 +1,16 @@
 #!/usr/bin/env bash
-# Machine-check F165 WAL-ship stamp_changed on the file rustc links
-# (single artifact — not the twin-cópia).
+# ship_kernel.rs rustc body is the term (Aeneas Ship.lean).
+# A u64 fingerprint of rustc &[u8] stamps is not last-wins. Fail closed if it returns.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="$ROOT/crates/pedradb-replicate/src/ship_kernel.rs"
-if [[ -x "${VERUS:-}" ]]; then
-  :
-elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then
-  VERUS="$HOME/.local/verus/verus-arm64-macos/verus"
-elif command -v verus >/dev/null 2>&1; then
-  VERUS="$(command -v verus)"
-else
-  echo "error: verus not found" >&2
-  exit 127
+if grep -n 'verus!' "$SRC"; then
+  echo "error: verus_ship_stamp: verus! stand-in still in ship_kernel.rs (not last-wins of rustc &[u8])" >&2
+  exit 1
 fi
-echo "verus: $VERUS"
-"$VERUS" --version
-echo "proving: $SRC"
-exec "$VERUS" "$SRC" --crate-type=lib --multiple-errors 10 --time "$@"
+if grep -n 'verus_keep_ghost' "$SRC"; then
+  echo "error: verus_ship_stamp: cfg(verus_keep_ghost) split still in ship_kernel.rs" >&2
+  exit 1
+fi
+echo "ok: no Verus cartoon in $SRC; term is Aeneas formal/aeneas/lean/Ship.lean"
+exit 0

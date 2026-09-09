@@ -1,11 +1,10 @@
 //! Pure pull/rotation decision for WAL shipping (F165).
 //!
-//! **Single artifact (pair `ship_stamp`):** this file is what `rustc` links
-//! *and* what Verus proves (`cfg(verus_keep_ghost)`). Byte stamps stay
-//! slices on rustc; the u64 fingerprint is the term. Pair `ship_guard`
-//! (`pull_plan`) stays a twin-cópia until its turn.
+//! **Term:** this file is what `rustc` links. Aeneas extracts that body
+//! (`scripts/aeneas_ship.sh`). A u64 fingerprint of rustc `&[u8]` stamps
+//! is a model twin — not last-wins (deleted).
 //!
-//!   ./scripts/verus_ship_stamp.sh
+//!   ./scripts/aeneas_ship.sh --required
 //!
 //! `Db::flush` rotates `CURRENT.log` by **truncating in place** (same path,
 //! offset 0). A byte cursor alone cannot distinguish "grew" from "rotated and
@@ -21,11 +20,9 @@
 #![forbid(unsafe_code)]
 
 /// Bytes of WAL prefix compared per pull to detect in-place rotation.
-#[cfg(not(verus_keep_ghost))]
 pub const SHIP_STAMP_BYTES: usize = 64;
 
 /// Plan for one [`crate::WalShipper::pull`] attempt.
-#[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PullPlan {
     /// Primary WAL no longer continues the shipped stream; re-bootstrap.
@@ -49,7 +46,6 @@ pub enum PullPlan {
 /// `stamp_now` is the first `min(stamp_then.len(), file_len)` bytes of the
 /// current file. Tail-only shrink (torn-write trim) keeps the prefix and is
 /// not a rotation when the cursor still fits; any rewritten byte is.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn stamp_changed(stamp_then: &[u8], stamp_now: &[u8]) -> bool {
     if stamp_now.len() > stamp_then.len() {
@@ -63,7 +59,6 @@ pub fn stamp_changed(stamp_then: &[u8], stamp_now: &[u8]) -> bool {
 /// Order matters: a missing file under an advanced cursor is a rotation even
 /// before lengths are compared; a shrink past the cursor and a stamp change
 /// are rotations; only a stable prefix with `len > cursor` ships.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn pull_plan(
     file_len: Option<u64>,
@@ -104,7 +99,6 @@ pub fn pull_plan(
 }
 
 /// AS-IS F165: length-only rotation check (misses truncate-then-regrow).
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn pull_plan_as_is(
     file_len: Option<u64>,
@@ -130,38 +124,24 @@ pub fn pull_plan_as_is(
     }
 }
 
-#[cfg(verus_keep_ghost)]
-use vstd::prelude::*;
-
-#[cfg(verus_keep_ghost)]
-verus! {
-
-/// Fingerprint form of rustc `stamp_changed` (equal fingerprint = unchanged
-/// prefix, the append-only axiom).
-pub open spec fn stamp_changed_spec(stamp_then: u64, stamp_now: u64) -> bool {
-    stamp_then != stamp_now
-}
-
-pub fn stamp_changed(stamp_then: u64, stamp_now: u64) -> (d: bool)
-    ensures
-        d == stamp_changed_spec(stamp_then, stamp_now),
-        d == (stamp_then != stamp_now),
-{
-    stamp_then != stamp_now
-}
-
-proof fn lemma_rewritten_prefix_detected()
-    ensures
-        stamp_changed_spec(7, 9),
-        !stamp_changed_spec(7, 7),
-{
-}
-
-} // verus!
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ship_kernel_has_no_verus_cartoon() {
+        let src = include_str!("ship_kernel.rs");
+        let block = concat!("verus", "!", " {");
+        let cfg = concat!("cfg(", "verus", "_keep", "_ghost)");
+        assert!(
+            !src.contains(block),
+            "u64 fingerprint is not last-wins of rustc &[u8] stamps"
+        );
+        assert!(
+            !src.contains(cfg),
+            "cfg split hides rustc types from the prover"
+        );
+    }
 
     const STAMP: &[u8] = &[7u8; SHIP_STAMP_BYTES];
 
