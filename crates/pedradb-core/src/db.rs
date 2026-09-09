@@ -6477,6 +6477,15 @@ impl<E: Env> Db<E> {
     /// # Errors
     /// SST / MANIFEST I/O.
     pub fn compact_leveled(&mut self) -> Result<()> {
+        let probe = crate::env::probe_available_bytes(&self.env, &self.dir);
+        if !crate::disk_pressure_kernel::compact_allowed_under_pressure(probe) {
+            return match crate::disk_pressure_kernel::disk_pressure_admit(probe) {
+                crate::disk_pressure_kernel::DiskPressureAdmit::Refuse { available, need } => {
+                    Err(CoreError::DiskPressure { available, need })
+                }
+                _ => Ok(()),
+            };
+        }
         if !crate::leveling::leveled_enabled() {
             return self.compact_with(CompactOptions::default());
         }

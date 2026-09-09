@@ -359,6 +359,15 @@ mod tests {
             ssts_only.contains("compact_allowed_under_pressure("),
             "compact_with_ssts_only must match compact_allowed_under_pressure"
         );
+        let leveled = include_str!("db.rs")
+            .split("pub fn compact_leveled(")
+            .nth(1)
+            .and_then(|s| s.split("fn dump_level_diag").next())
+            .expect("compact_leveled");
+        assert!(
+            leveled.contains("compact_allowed_under_pressure("),
+            "compact_leveled must match compact_allowed_under_pressure"
+        );
     }
 
     #[test]
