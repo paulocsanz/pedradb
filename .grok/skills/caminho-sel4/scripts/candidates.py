@@ -396,7 +396,7 @@ def script_compose_board() -> None:
             print(f"  {glue} plan={plan} UNPAID order still inline{extra}")
     print(f"  unpaid_script={unpaid_script}/{len(GLUE_SCRIPTS)}")
     print(
-        "  leftover_next batch.rs decode trailing-bytes if !cur.is_empty() matches batch_is_empty via remaining bytes; named kernel not SA"
+        "  leftover_next survey fresh: grep production == 0 / is_empty() data-fate guards outside skip classes; named kernel not SA"
     )
     print("== compose glue callers (rank 5: unfold plan AND callee) ==")
     for glue, rel, tokens, callee, plan in GLUE_SCRIPTS:

@@ -12,6 +12,9 @@ pub mod error {
 #[path = "../../../../crates/pedradb-core/src/key.rs"]
 pub mod key;
 
+#[path = "../../../../crates/pedradb-core/src/write_admission_kernel.rs"]
+pub mod write_admission_kernel;
+
 #[path = "../../../../crates/pedradb-core/src/batch.rs"]
 pub mod batch;
 

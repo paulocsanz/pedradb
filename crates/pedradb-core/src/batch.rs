@@ -241,7 +241,7 @@ impl WriteRecord {
                 value,
             });
         }
-        if !cur.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(cur.data.len().saturating_sub(cur.pos) as u64) {
             return Err(CoreError::Internal(
                 "trailing bytes after write record".into(),
             ));
