@@ -341,6 +341,15 @@ mod tests {
             compact.contains("compact_allowed_under_pressure("),
             "compact_with must match compact_allowed_under_pressure"
         );
+        let flush = include_str!("db.rs")
+            .split("pub fn flush(")
+            .nth(1)
+            .and_then(|s| s.split("pub(crate) fn bulk_family_of_table").next())
+            .expect("flush");
+        assert!(
+            flush.contains("compact_allowed_under_pressure("),
+            "flush must match compact_allowed_under_pressure"
+        );
     }
 
     #[test]

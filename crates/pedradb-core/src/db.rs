@@ -4880,6 +4880,15 @@ impl<E: Env> Db<E> {
     /// # Errors
     /// I/O while writing SST or recreating the WAL.
     pub fn flush(&mut self) -> Result<()> {
+        let probe = crate::env::probe_available_bytes(&self.env, &self.dir);
+        if !crate::disk_pressure_kernel::compact_allowed_under_pressure(probe) {
+            return match crate::disk_pressure_kernel::disk_pressure_admit(probe) {
+                crate::disk_pressure_kernel::DiskPressureAdmit::Refuse { available, need } => {
+                    Err(CoreError::DiskPressure { available, need })
+                }
+                _ => Ok(()),
+            };
+        }
         self.ensure_not_fenced()?;
         self.flush_all_bulk_runs()?;
         self.vlog_sync_pending()?;
