@@ -66,6 +66,38 @@ pub fn compact_allowed_under_pressure_as_is(_available: Option<u64>) -> bool {
     true
 }
 
+/// Which reclaim I/O the live engine runs while still ≥ hard (RFC-0179 P1.2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DiskReclaimPlan {
+    /// Compact SST levels (P0 already did this).
+    pub compact_sst: bool,
+    /// Rotate/recycle the current WAL segment.
+    pub rotate_wal: bool,
+    /// GC the value log / blobs.
+    pub compact_vlog: bool,
+}
+
+/// Reclaim plan: SST compact **and** WAL recycle **and** vlog GC, or nothing
+/// when compact is forbidden (below hard).
+#[must_use]
+pub fn disk_pressure_reclaim_plan(allowed: bool) -> DiskReclaimPlan {
+    DiskReclaimPlan {
+        compact_sst: allowed,
+        rotate_wal: allowed,
+        compact_vlog: allowed,
+    }
+}
+
+/// AS-IS hole: SST compact only — WAL recycle / vlog GC never run on reclaim.
+#[must_use]
+pub fn disk_pressure_reclaim_plan_as_is(allowed: bool) -> DiskReclaimPlan {
+    DiskReclaimPlan {
+        compact_sst: allowed,
+        rotate_wal: false,
+        compact_vlog: false,
+    }
+}
+
 /// PITR dest / backup sink / HA replica WAL: same hard floor as live `put`.
 ///
 /// Reclaim is still admitted — those callers have nothing to compact on an
@@ -144,6 +176,29 @@ mod tests {
             DiskPressureAdmit::Ok,
             "AS-IS dente: zero free still admits"
         );
+    }
+
+    #[test]
+    fn disk_pressure_reclaim_plan_on_live_reclaim_is_not_ok() {
+        let live = disk_pressure_reclaim_plan(true);
+        assert!(live.compact_sst && live.rotate_wal && live.compact_vlog);
+        let as_is = disk_pressure_reclaim_plan_as_is(true);
+        assert!(as_is.compact_sst);
+        assert!(!as_is.rotate_wal, "AS-IS dente: no WAL recycle");
+        assert!(!as_is.compact_vlog, "AS-IS dente: no vlog GC");
+        let denied = disk_pressure_reclaim_plan(false);
+        assert!(!denied.compact_sst && !denied.rotate_wal && !denied.compact_vlog);
+        let body = include_str!("db.rs")
+            .split("fn reclaim_disk_for_uptime")
+            .nth(1)
+            .and_then(|s| s.split("fn drop_page_cache_best_effort").next())
+            .expect("reclaim_disk_for_uptime");
+        assert!(
+            body.contains("disk_pressure_reclaim_plan("),
+            "reclaim_disk_for_uptime must match disk_pressure_reclaim_plan"
+        );
+        assert!(body.contains("plan.rotate_wal"), "must recycle WAL");
+        assert!(body.contains("plan.compact_vlog"), "must GC vlog");
     }
 
     #[test]

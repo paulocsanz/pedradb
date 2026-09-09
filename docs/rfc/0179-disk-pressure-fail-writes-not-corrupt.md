@@ -1,6 +1,6 @@
 # RFC-0179 — Disk pressure: recusar writes, não corromper
 
-**Status:** in-progress (P0+P1.1+P1.4+P1.5 done; P1.2–P1.3 / P2 open)
+**Status:** in-progress (P0+P1.1+P1.2+P1.4+P1.5 done; P1.3 / P2 open)
 **Updated:** 2026-09-09
 **ID:** 0179
 **Parents:** [0050](0050-nine-axis-robustness.md) (ENOSPC mid-flush já cerca),
@@ -78,8 +78,8 @@ admitido (não há compact); só o hard recusa.
 ### P1 — inject + mais reclaim + PITR/HA
 
 - [x] **P1.1** `FailingEnv` inject de `available_bytes` — status: `done`
-- [ ] **P1.2** WAL recycle / vlog GC no reclaim (além de compact SST) —
-      status: `todo`
+- [x] **P1.2** WAL recycle / vlog GC no reclaim (além de compact SST) —
+      status: `done`
 - [ ] **P1.3** sonda de telemetria (RFC-0169, default off) — status: `todo`
 - [x] **P1.4** PITR: `restore_pitr` / `ship_wal` / `create_checkpoint` /
       `copy_db_directory` / history restore recusam abaixo do hard;
@@ -102,7 +102,7 @@ admitido (não há compact); só o hard recusa.
 | P0.3 | p0 | admit + put hard-floor | done | db.rs SpaceEnv test | 2026-09-07 |
 | P0.4 | p0 | tracing warn na transição | done | disk_pressure_log AtomicU8 | 2026-09-07 |
 | P1.1 | p1 | FailingEnv inject | done | failing.rs set_available_bytes | 2026-09-09 |
-| P1.2 | p1 | WAL/vlog reclaim | todo | — | 2026-09-07 |
+| P1.2 | p1 | WAL/vlog reclaim | done | disk_pressure_reclaim_plan | 2026-09-09 |
 | P1.3 | p1 | telemetry probe | todo | — | 2026-09-07 |
 | P1.4 | p1 | PITR dest/ship recusa hard | done | ops restore_pitr / ship_wal | 2026-09-07 |
 | P1.5 | p1 | HA replica append recusa hard | done | replicate append_wal_bytes | 2026-09-07 |

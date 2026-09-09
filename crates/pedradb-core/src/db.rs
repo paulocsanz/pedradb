@@ -9939,13 +9939,21 @@ impl<E: Env> Db<E> {
         }
     }
 
-    /// Compact (only while still ≥ hard) + drop page cache. Errors are
-    /// swallowed: compact_ssts_only does not fence; a failed reclaim must
-    /// not take reads down.
+    /// Compact + WAL recycle + vlog GC (only while still ≥ hard) + drop
+    /// page cache. Errors are swallowed: reclaim I/O does not fence; a
+    /// failed reclaim must not take reads down (RFC-0179 P1.2).
     fn reclaim_disk_for_uptime(&mut self, before: Option<u64>) {
         self.drop_page_cache_best_effort();
-        if crate::disk_pressure_kernel::compact_allowed_under_pressure(before) {
+        let allowed = crate::disk_pressure_kernel::compact_allowed_under_pressure(before);
+        let plan = crate::disk_pressure_kernel::disk_pressure_reclaim_plan(allowed);
+        if plan.compact_sst {
             let _ = self.compact_ssts_only();
+        }
+        if plan.rotate_wal {
+            let _ = self.try_rotate_wal();
+        }
+        if plan.compact_vlog {
+            let _ = self.compact_vlog();
         }
     }
 

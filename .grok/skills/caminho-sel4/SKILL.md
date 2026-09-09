@@ -16,11 +16,11 @@ description: >
 
 ## Grind pressure (one block, overwritten each fire)
 
-- Last fire: shallow
-- Why: leftover is_empty wrap factory is not seL4 path (user: go deeper, no Montanha)
-- This fire MUST land: RFC-0179 P1.1 FailingEnv available_bytes inject; put under hard floor is DiskPressure, get Ok, not fenced
-- Forbidden this fire: leftover is_empty/==0 wrap onto batch_is_empty; Montanha store/bins; twin=kernel wrap; dump db.rs; rank-7 SA
-- Deeper: open FailingEnv Env impl; named test failing_env_hard_floor_refuses_put_get_ok; skip Montanha
+- Last fire: worked
+- Why: fc0375b6 / bf57bacf FailingEnv disk inject; this fire RFC-0179 P1.2 reclaim plan
+- This fire MUST land: disk_pressure_reclaim_plan (WAL recycle + vlog GC + SST); db.rs reclaim_disk_for_uptime matches
+- Forbidden this fire: leftover is_empty wrap factory; Montanha; twin=kernel wrap; dump db.rs; rank-7 SA
+- Deeper: named test disk_pressure_reclaim_plan_on_live_reclaim_is_not_ok; skip Montanha
 
 This skill **lands one payable slice per Fire**. Under `/grind`, that is
 not the end of the turn: after the commit, Fire again (tools, land).
