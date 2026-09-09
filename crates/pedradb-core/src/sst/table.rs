@@ -2616,7 +2616,10 @@ fn write_sst_bulk_arrays_body(
             max_sequence = seq;
         }
         let need = k.len() + v.len() + 16;
-        if staged.len() - block_start > 0 && staged.len() - block_start + need > target {
+        if !crate::write_admission_kernel::batch_is_empty(
+            staged.len().saturating_sub(block_start) as u64,
+        ) && staged.len() - block_start + need > target
+        {
             finish_staged_block(
                 &mut file,
                 &mut staged,
