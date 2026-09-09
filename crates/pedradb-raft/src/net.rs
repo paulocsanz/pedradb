@@ -788,7 +788,7 @@ fn network_tick(
     let action = {
         let mut n = node.lock().map_err(|e| RaftError::Network(e.to_string()))?;
         if n.is_leader() {
-            if n.heartbeat_ticks_left == 0 {
+            if pedradb_core::write_admission_kernel::batch_is_empty(n.heartbeat_ticks_left) {
                 n.heartbeat_ticks_left = n.heartbeat_every;
                 Some(1u8) // heartbeat
             } else {
