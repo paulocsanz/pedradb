@@ -55,6 +55,15 @@ theorem scan_reads_file_none_smallest
   unfold scan_kernel.point_bounds_overlap
   rfl
 
+/-- Caller: missing file largest ⇒ overlap, read the file. Dual-unfold. -/
+theorem scan_reads_file_none_largest
+    (lo : Slice U8)
+    (tombs start end1) :
+    scan_kernel.scan_reads_file (some lo) none tombs start end1 = ok true := by
+  unfold scan_kernel.scan_reads_file
+  unfold scan_kernel.point_bounds_overlap
+  rfl
+
 /-- Caller: both Unbounded window, both file bounds present ⇒ overlap, read the file. Dual-unfold. -/
 theorem scan_reads_file_both_unbounded
     (lo hi : Slice U8)
