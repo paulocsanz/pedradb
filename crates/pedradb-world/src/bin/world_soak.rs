@@ -37,7 +37,11 @@ fn interest(t: &pedradb_world::Trace, cov: ScheduleCoverage) -> f64 {
     } else {
         0.0
     };
-    r += if t.puts_ok > 0 { 0.15 } else { 0.0 };
+    r += if !pedradb_core::write_admission_kernel::batch_is_empty(t.puts_ok as u64) {
+        0.15
+    } else {
+        0.0
+    };
     r += if cov.membership { 0.1 } else { 0.0 };
     r += if cov.dcs_ttl { 0.1 } else { 0.0 };
     r += if cov.disk { 0.15 } else { 0.0 };
