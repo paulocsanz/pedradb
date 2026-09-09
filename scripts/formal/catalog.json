@@ -5973,9 +5973,10 @@
       "id": "wal_state",
       "finding": "RFC-0166 P1.2",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
-      "twin": "crates/pedradb-core/verus/wal_state.rs",
-      "verus": "scripts/verus_wal_state.sh",
+      "twin": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+      "aeneas": "scripts/aeneas_wal_state.sh",
       "callers": [
         "crates/pedradb-core/src/wal/wal_state_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -5992,9 +5993,10 @@
       "id": "wal_append",
       "finding": "RFC-0166 P1.2",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
-      "twin": "crates/pedradb-core/verus/wal_state.rs",
-      "verus": "scripts/verus_wal_state.sh",
+      "twin": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+      "aeneas": "scripts/aeneas_wal_state.sh",
       "callers": [
         "crates/pedradb-core/src/wal/wal_state_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -6011,9 +6013,10 @@
       "id": "wal_sync",
       "finding": "RFC-0166 P1.2",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
-      "twin": "crates/pedradb-core/verus/wal_state.rs",
-      "verus": "scripts/verus_wal_state.sh",
+      "twin": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+      "aeneas": "scripts/aeneas_wal_state.sh",
       "callers": [
         "crates/pedradb-core/src/wal/wal_state_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -6030,9 +6033,10 @@
       "id": "wal_ack",
       "finding": "RFC-0166 P1.2",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
-      "twin": "crates/pedradb-core/verus/wal_state.rs",
-      "verus": "scripts/verus_wal_state.sh",
+      "twin": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+      "aeneas": "scripts/aeneas_wal_state.sh",
       "callers": [
         "crates/pedradb-core/src/wal/wal_state_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -6049,9 +6053,10 @@
       "id": "wal_rotate",
       "finding": "RFC-0166 P1.2",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
-      "twin": "crates/pedradb-core/verus/wal_state.rs",
-      "verus": "scripts/verus_wal_state.sh",
+      "twin": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+      "aeneas": "scripts/aeneas_wal_state.sh",
       "callers": [
         "crates/pedradb-core/src/wal/wal_state_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -6068,9 +6073,10 @@
       "id": "wal_acked_survives",
       "finding": "RFC-0166 P1.2",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
-      "twin": "crates/pedradb-core/verus/wal_state.rs",
-      "verus": "scripts/verus_wal_state.sh",
+      "twin": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+      "aeneas": "scripts/aeneas_wal_state.sh",
       "callers": [
         "crates/pedradb-core/src/wal/wal_state_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"

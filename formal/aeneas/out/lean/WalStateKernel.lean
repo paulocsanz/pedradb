@@ -902,7 +902,7 @@ def group_commit_kernel.fsync_lie_closes_tcg_guest_as_is : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::WalState]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 34:0-41:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 35:0-42:1
     Visibility: public -/
 structure wal.wal_state_kernel.WalState where
   acked : Std.U64
@@ -910,7 +910,7 @@ structure wal.wal_state_kernel.WalState where
   written : Std.U64
 
 /-- [pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::{impl core::fmt::Debug for pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::WalState}::fmt]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 33:9-33:14
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 34:9-34:14
     Visibility: public -/
 def wal.wal_state_kernel.WalState.Insts.CoreFmtDebug.fmt
   (self : wal.wal_state_kernel.WalState) (f : core.fmt.Formatter) :
@@ -923,7 +923,7 @@ def wal.wal_state_kernel.WalState.Insts.CoreFmtDebug.fmt
     "acked") dyn (toStr "synced") dyn1 (toStr "written") dyn2
 
 /-- Trait implementation: [pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::{impl core::fmt::Debug for pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::WalState}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 33:9-33:14 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 34:9-34:14 -/
 @[reducible]
 def wal.wal_state_kernel.WalState.Insts.CoreFmtDebug : core.fmt.Debug
   wal.wal_state_kernel.WalState := {
@@ -931,7 +931,7 @@ def wal.wal_state_kernel.WalState.Insts.CoreFmtDebug : core.fmt.Debug
 }
 
 /-- [pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::{impl core::clone::Clone for pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::WalState}::clone]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 33:16-33:21
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 34:16-34:21
     Visibility: public -/
 def wal.wal_state_kernel.WalState.Insts.CoreCloneClone.clone
   (self : wal.wal_state_kernel.WalState) :
@@ -940,7 +940,7 @@ def wal.wal_state_kernel.WalState.Insts.CoreCloneClone.clone
   ok self
 
 /-- Trait implementation: [pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::{impl core::clone::Clone for pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::WalState}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 33:16-33:21 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 34:16-34:21 -/
 @[reducible]
 def wal.wal_state_kernel.WalState.Insts.CoreCloneClone : core.clone.Clone
   wal.wal_state_kernel.WalState := {
@@ -948,7 +948,7 @@ def wal.wal_state_kernel.WalState.Insts.CoreCloneClone : core.clone.Clone
 }
 
 /-- Trait implementation: [pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::{impl core::marker::Copy for pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::WalState}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 33:23-33:27 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 34:23-34:27 -/
 @[reducible]
 def wal.wal_state_kernel.WalState.Insts.CoreMarkerCopy : core.marker.Copy
   wal.wal_state_kernel.WalState := {
@@ -956,14 +956,14 @@ def wal.wal_state_kernel.WalState.Insts.CoreMarkerCopy : core.marker.Copy
 }
 
 /-- Trait implementation: [pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::WalState}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 33:29-33:38 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 34:29-34:38 -/
 @[reducible]
 def wal.wal_state_kernel.WalState.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq wal.wal_state_kernel.WalState := {
 }
 
 /-- [pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::{impl core::cmp::PartialEq<pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::WalState> for pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::WalState}::eq]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 33:29-33:38
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 34:29-34:38
     Visibility: public -/
 def wal.wal_state_kernel.WalState.Insts.CoreCmpPartialEqWalState.eq
   (self : wal.wal_state_kernel.WalState)
@@ -978,7 +978,7 @@ def wal.wal_state_kernel.WalState.Insts.CoreCmpPartialEqWalState.eq
   else ok false
 
 /-- Trait implementation: [pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::{impl core::cmp::PartialEq<pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::WalState> for pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::WalState}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 33:29-33:38 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 34:29-34:38 -/
 @[reducible]
 def wal.wal_state_kernel.WalState.Insts.CoreCmpPartialEqWalState :
   core.cmp.PartialEq wal.wal_state_kernel.WalState
@@ -987,14 +987,14 @@ def wal.wal_state_kernel.WalState.Insts.CoreCmpPartialEqWalState :
 }
 
 /-- [pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::{impl core::cmp::Eq for pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::WalState}::assert_fields_are_eq]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 33:40-33:42
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 34:40-34:42
     Visibility: public -/
 def wal.wal_state_kernel.WalState.Insts.CoreCmpEq.assert_fields_are_eq
   (self : wal.wal_state_kernel.WalState) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::{impl core::cmp::Eq for pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::WalState}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 33:40-33:42 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 34:40-34:42 -/
 @[reducible]
 def wal.wal_state_kernel.WalState.Insts.CoreCmpEq : core.cmp.Eq
   wal.wal_state_kernel.WalState := {
@@ -1004,7 +1004,7 @@ def wal.wal_state_kernel.WalState.Insts.CoreCmpEq : core.cmp.Eq
 }
 
 /-- [pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::wal_state_of]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 45:0-52:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 46:0-53:1
     Visibility: public -/
 def wal.wal_state_kernel.wal_state_of
   (written : Std.U64) (synced : Std.U64) (acked : Std.U64) :
@@ -1015,7 +1015,7 @@ def wal.wal_state_kernel.wal_state_of
   ok { acked := i, synced := synced1, written }
 
 /-- [pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::inv_wal]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 57:0-59:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 58:0-60:1
     Visibility: public -/
 def wal.wal_state_kernel.inv_wal
   (s : wal.wal_state_kernel.WalState) : Result Bool := do
@@ -1024,7 +1024,7 @@ def wal.wal_state_kernel.inv_wal
   else ok false
 
 /-- [pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::wal_append]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 63:0-69:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 64:0-70:1
     Visibility: public -/
 def wal.wal_state_kernel.wal_append
   (s : wal.wal_state_kernel.WalState) (n : Std.U64) :
@@ -1034,7 +1034,7 @@ def wal.wal_state_kernel.wal_append
   ok { s with written := i }
 
 /-- [pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::wal_sync]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 74:0-81:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 75:0-82:1
     Visibility: public -/
 def wal.wal_state_kernel.wal_sync
   (s : wal.wal_state_kernel.WalState) (honesty : env_crash_kernel.SyncHonesty)
@@ -1046,7 +1046,7 @@ def wal.wal_state_kernel.wal_sync
   ok { s with synced := m.synced, written := m.written }
 
 /-- [pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::wal_ack]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 86:0-96:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 87:0-97:1
     Visibility: public -/
 def wal.wal_state_kernel.wal_ack
   (s : wal.wal_state_kernel.WalState) (n : Std.U64) :
@@ -1059,7 +1059,7 @@ def wal.wal_state_kernel.wal_ack
   else ok s
 
 /-- [pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::wal_rotate]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 101:0-107:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 102:0-108:1
     Visibility: public -/
 def wal.wal_state_kernel.wal_rotate
   (s : wal.wal_state_kernel.WalState) :
@@ -1073,7 +1073,7 @@ def wal.wal_state_kernel.wal_rotate
   else ok s
 
 /-- [pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::acked_survives_every_legal_crash]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 112:0-114:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 113:0-115:1
     Visibility: public -/
 def wal.wal_state_kernel.acked_survives_every_legal_crash
   (s : wal.wal_state_kernel.WalState) (cut : Std.U64) : Result Bool := do
@@ -1084,14 +1084,14 @@ def wal.wal_state_kernel.acked_survives_every_legal_crash
   else ok true
 
 /-- [pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::inv_wal_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 121:0-123:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 122:0-124:1
     Visibility: public -/
 def wal.wal_state_kernel.inv_wal_as_is
   (s : wal.wal_state_kernel.WalState) : Result Bool := do
   ok (s.synced <= s.written)
 
 /-- [pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::wal_append_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 128:0-134:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 129:0-135:1
     Visibility: public -/
 def wal.wal_state_kernel.wal_append_as_is
   (s : wal.wal_state_kernel.WalState) (n : Std.U64) :
@@ -1102,7 +1102,7 @@ def wal.wal_state_kernel.wal_append_as_is
   ok { s with acked := i, written := i1 }
 
 /-- [pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::wal_sync_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 138:0-144:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 139:0-145:1
     Visibility: public -/
 def wal.wal_state_kernel.wal_sync_as_is
   (s : wal.wal_state_kernel.WalState) (_honesty : env_crash_kernel.SyncHonesty)
@@ -1112,7 +1112,7 @@ def wal.wal_state_kernel.wal_sync_as_is
   ok { s with synced := s.written }
 
 /-- [pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::wal_ack_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 148:0-154:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 149:0-155:1
     Visibility: public -/
 def wal.wal_state_kernel.wal_ack_as_is
   (s : wal.wal_state_kernel.WalState) (n : Std.U64) :
@@ -1122,7 +1122,7 @@ def wal.wal_state_kernel.wal_ack_as_is
   ok { s with acked := i }
 
 /-- [pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::wal_rotate_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 158:0-160:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 159:0-161:1
     Visibility: public -/
 def wal.wal_state_kernel.wal_rotate_as_is
   (_s : wal.wal_state_kernel.WalState) :
@@ -1131,7 +1131,7 @@ def wal.wal_state_kernel.wal_rotate_as_is
   wal.wal_state_kernel.wal_state_of 0#u64 0#u64 0#u64
 
 /-- [pedra_aeneas_wal_state_kernel::wal::wal_state_kernel::acked_survives_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 165:0-167:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 166:0-168:1
     Visibility: public -/
 def wal.wal_state_kernel.acked_survives_as_is
   (s : wal.wal_state_kernel.WalState) (cut : Std.U64) : Result Bool := do

@@ -19,8 +19,9 @@
 //! AS-IS mutants ack before the barrier, ack past the barrier, pretend a
 //! lying sync promoted, and rotate (drop the log) with a non-durable tail —
 //! each violates Inv-WAL or loses acked bytes; teeth witnesses pin all
-//! holes. Verus twin: `crates/pedradb-core/verus/wal_state.rs`
-//! (`scripts/verus_wal_state.sh`).
+//! holes. Single artifact (Aeneas-paid): this file is what `rustc` links
+//! and what the Lean defs run over (`scripts/aeneas_wal_state.sh`,
+//! `WalStateKernel.lean`). No Verus twin stands in for them.
 
 #![forbid(unsafe_code)]
 
