@@ -69,7 +69,7 @@ macro_rules! point_get_watermark_as_is_body {
 /// Order: live local leader ≻ participating ≻ self ≻ higher `applied`.
 /// Never “first id wins” (F42: partitioned `ids[0]` poisons hist).
 #[must_use]
-#[allow(clippy::too_many_arguments)] // arity locked to verus/si_reader.rs
+#[allow(clippy::too_many_arguments)] // arity locked to the aeneas_si.sh extract of this file
 pub fn si_reader_beats(
     c_leader: bool,
     c_part: bool,
@@ -112,7 +112,7 @@ pub fn point_get_watermark_as_is(range_applied: u64, global_seq: u64) -> u64 {
 
 /// AS-IS F42: first candidate always stays (ids[0] / first local).
 #[must_use]
-#[allow(clippy::too_many_arguments)] // arity locked to verus/si_reader.rs
+#[allow(clippy::too_many_arguments)] // arity locked to the aeneas_si.sh extract of this file
 pub fn si_reader_beats_as_is(
     c_leader: bool,
     c_part: bool,

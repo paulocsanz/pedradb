@@ -6218,8 +6218,9 @@
       "id": "point_get_prefer",
       "finding": "F84",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-store/src/si_kernel.rs",
-      "twin": "crates/pedradb-store/verus/si_reader.rs",
+      "twin": "crates/pedradb-store/src/si_kernel.rs",
       "aeneas": "scripts/aeneas_si.sh",
       "callers": [
         "crates/pedradb-store/src/si_kernel.rs",
@@ -6243,8 +6244,9 @@
       "id": "point_get_wm",
       "finding": "F42/F84",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-store/src/si_kernel.rs",
-      "twin": "crates/pedradb-store/verus/si_reader.rs",
+      "twin": "crates/pedradb-store/src/si_kernel.rs",
       "aeneas": "scripts/aeneas_si.sh",
       "callers": [
         "crates/pedradb-store/src/si_kernel.rs"
