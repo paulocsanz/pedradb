@@ -331,6 +331,9 @@ pub const COMPARE_SHAPES: &[&str] = &[
     "arango_doc_crud_mc4",
     // RFC-0184 P2.64: Kvrocks pipelined-set mc4 — 1c is already in COMPARE.
     "kvrocks_pipelined_set_mc4",
+    // RFC-0184 P2.65: Pinterest Rockstore wide-column mc4 — 1c lives in
+    // run_venice; concurrent must not mix with venice_fanout_get_mc4.
+    "rockstore_widecol_rw_mc4",
 ];
 
 /// Length of the RFC-0041 official prefix of [`COMPARE_SHAPES`].
@@ -3858,10 +3861,14 @@ impl YcsbRunner {
         let yval = vec![b'V'; self.cfg.payload];
         let mut rng = std::mem::take(&mut self.rng);
         let mut blocks = Vec::with_capacity(2);
-        for i in 0..records {
-            assert!(e.put(&dkey(i), &yval), "venice seed {i}");
-            for col in 0..4u16 {
-                let _ = e.put(&colkey(i, col, 1), &yval);
+        // Skip when ONLY=mc4 so 500k untimed puts do not leak into the
+        // concurrent harness (same gate as myrocks 1c seed).
+        if shape_wanted("venice_fanout_get") || shape_wanted("rockstore_widecol_rw") {
+            for i in 0..records {
+                assert!(e.put(&dkey(i), &yval), "venice seed {i}");
+                for col in 0..4u16 {
+                    let _ = e.put(&colkey(i, col, 1), &yval);
+                }
             }
         }
         const FANOUT: usize = 32;
@@ -4019,6 +4026,98 @@ impl YcsbRunner {
                 clients as u64,
                 0.0,
                 100,
+                (cfg_ops * clients) as u64,
+            );
+            eprint_write_diagnose(&full, &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
+        blocks
+    }
+
+    /// RFC-0184 P2.65: rockstore_widecol_rw at N clients (50% put / 50% col scan).
+    pub fn run_rockstore_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
+        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
+        let full = format!("rockstore_widecol_rw_mc{clients}");
+        if !shape_wanted(&full) {
+            return Vec::new();
+        }
+        e.set_write_sync(write_sync_for_suite("venice"));
+        let records = self.cfg.records;
+        let cfg_ops = self.cfg.ops;
+        let yval = std::sync::Arc::new(vec![b'V'; self.cfg.payload]);
+        for i in 0..records {
+            for col in 0..4u16 {
+                assert!(
+                    e.put(&colkey(i, col, 1), yval.as_ref()),
+                    "rockstore mc seed {i}/{col}"
+                );
+            }
+        }
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+        let phase0 = e.write_phase_snapshot();
+        let t0 = Instant::now();
+        let mut lats = Vec::with_capacity(cfg_ops * clients);
+        let mut errors = 0u64;
+        std::thread::scope(|s| {
+            let handles: Vec<_> = (0..clients)
+                .map(|c| {
+                    let barrier = barrier.clone();
+                    let yval = yval.clone();
+                    s.spawn(move || {
+                        let mut rng =
+                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
+                        let mut lats = Vec::with_capacity(cfg_ops);
+                        let mut errors = 0u64;
+                        barrier.wait();
+                        for i in 0..cfg_ops {
+                            let t = Instant::now();
+                            let row = self.pick(&mut rng, records);
+                            let col = (xorshift(&mut rng) % 4) as u16;
+                            let ok = if i % 2 == 0 {
+                                let ts = 2 + (c as u64) * (cfg_ops as u64) + (i as u64);
+                                e.put(&colkey(row, col, ts), yval.as_ref())
+                            } else {
+                                e.scan_count(&colprefix(row, col), &colprefix(row, col + 1), 8)
+                                    .is_ok()
+                            };
+                            if !ok {
+                                errors += 1;
+                            }
+                            lats.push(ms(t));
+                        }
+                        (lats, errors)
+                    })
+                })
+                .collect();
+            for h in handles {
+                let (mut l, err) = h.join().expect("rockstore client thread");
+                errors += err;
+                lats.append(&mut l);
+            }
+        });
+        let wall = t0.elapsed();
+        eprintln!(
+            "[rocks-parity] {full} done ops={} errors={errors}",
+            cfg_ops * clients
+        );
+        let mut blocks = vec![summarize_mc(
+            &full,
+            cfg_ops * clients,
+            wall,
+            &mut lats,
+            clients,
+            errors,
+        )];
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(
+                pct(&lats, 50.0),
+                a,
+                b,
+                clients as u64,
+                0.0,
+                50,
                 (cfg_ops * clients) as u64,
             );
             eprint_write_diagnose(&full, &d);
@@ -6422,6 +6521,30 @@ mod tests {
     }
 
     #[test]
+    fn rfc0184_rockstore_widecol_rw_mc4_in_compare() {
+        assert!(
+            COMPARE_SHAPES.contains(&"rockstore_widecol_rw_mc4"),
+            "Rockstore wide-column mc4 must be on the cartaz"
+        );
+        assert!(shape_wanted_in(
+            "rockstore_widecol_rw_mc4",
+            Some("rockstore_widecol_rw_mc4")
+        ));
+        assert!(
+            !shape_wanted_in("rockstore_widecol_rw", Some("rockstore_widecol_rw_mc4")),
+            "1c rockstore_widecol_rw must not leak into ONLY=rockstore_widecol_rw_mc4"
+        );
+        assert!(
+            !shape_wanted_in("venice_fanout_get", Some("rockstore_widecol_rw_mc4")),
+            "1c venice_fanout_get must not leak into ONLY=rockstore_widecol_rw_mc4"
+        );
+        assert!(
+            !shape_wanted_in("venice_fanout_get_mc4", Some("rockstore_widecol_rw_mc4")),
+            "venice fanout mc4 must not leak into ONLY=rockstore_widecol_rw_mc4"
+        );
+    }
+
+    #[test]
     fn rfc0178_mc_only_selects_full_mc_name() {
         assert!(shape_wanted_in(
             "deps_cache_overwrite_mc4",
@@ -6921,6 +7044,7 @@ mod tests {
             "solana_shred_append_mc4",
             "arango_doc_crud_mc4",
             "kvrocks_pipelined_set_mc4",
+            "rockstore_widecol_rw_mc4",
         ] {
             assert!(
                 COMPARE_SHAPES.contains(&name),
