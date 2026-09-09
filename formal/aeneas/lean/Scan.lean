@@ -249,6 +249,19 @@ theorem tombstone_reaches_window_excluded_start_unbounded_end
   unfold scan_kernel.tombstone_reaches_window
   rfl
 
+/-- Inclusive window start, unbounded end: rustc `Included | Excluded` both `t_end > s`. Dual-unfold. -/
+theorem tombstone_reaches_window_included_start_unbounded_end
+    (t_start t_end s) :
+    scan_kernel.tombstone_reaches_window t_start t_end
+      (core.ops.range.Bound.Included s) core.ops.range.Bound.Unbounded =
+      (do
+        let reaches_start ←
+          Shared1A.Insts.CoreCmpPartialOrdShared0B.gt
+            (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) t_end s
+        if reaches_start then ok true else ok false) := by
+  unfold scan_kernel.tombstone_reaches_window
+  rfl
+
 /-- Exclusive key window: start is slice `>` then unbounded end. Dual-unfold. -/
 theorem key_in_window_excluded_unbounded (user s) :
     scan_kernel.key_in_window user (core.ops.range.Bound.Excluded s)
