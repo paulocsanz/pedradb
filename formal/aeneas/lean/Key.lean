@@ -49,3 +49,12 @@ theorem value_type_from_u8_unknown :
     key.ValueType.from_u8 3#u8 = ok none := by
   unfold key.ValueType.from_u8
   rfl
+
+/-- Catalog entry: lookup probe is `new` at snapshot with Value (kValueTypeForSeek). Dual-unfold. -/
+theorem internal_key_for_lookup_is_new_value
+    {T0 : Type} (inst : core.convert.Into T0 bytes.bytes.Bytes)
+    (user_key : T0) (snapshot : U64) :
+    key.InternalKey.for_lookup inst user_key snapshot
+    = key.InternalKey.new inst user_key snapshot key.ValueType.Value := by
+  unfold key.InternalKey.for_lookup
+  rfl
