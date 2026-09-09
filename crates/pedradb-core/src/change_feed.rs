@@ -136,7 +136,7 @@ impl ChangeLog {
     /// Whether empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        crate::write_admission_kernel::batch_is_empty(self.entries.len() as u64)
     }
 
     /// Highest sequence in the log, if any.
