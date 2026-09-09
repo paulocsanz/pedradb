@@ -116,6 +116,15 @@ macro_rules! cas_eq_put_body {
     };
 }
 
+macro_rules! range_inverted_body {
+    ($start_ge_end:expr) => {
+        match $start_ge_end {
+            true => true,
+            false => false,
+        }
+    };
+}
+
 macro_rules! torn_head_empty_log_body {
     ($len:expr, $tiny_max:expr) => {
         $len < $tiny_max
@@ -366,6 +375,20 @@ pub fn cas_eq_put(live_eq: bool) -> bool {
 #[must_use]
 pub fn cas_eq_put_as_is(_live_eq: bool) -> bool {
     true
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// `delete_range`: `start >= end` ⇒ refuse. Data-fate, not Env.
+#[must_use]
+pub fn range_inverted(start_ge_end: bool) -> bool {
+    range_inverted_body!(start_ge_end)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: never refuse (would WAL an inverted range tombstone).
+#[must_use]
+pub fn range_inverted_as_is(_start_ge_end: bool) -> bool {
+    false
 }
 
 #[cfg(verus_keep_ghost)]
@@ -715,6 +738,25 @@ pub fn cas_eq_put_as_is(live_eq: bool) -> (d: bool)
 {
     let _ = live_eq;
     true
+}
+
+pub open spec fn range_inverted_spec(start_ge_end: bool) -> bool {
+    start_ge_end
+}
+
+pub fn range_inverted(start_ge_end: bool) -> (d: bool)
+    ensures
+        d == range_inverted_spec(start_ge_end),
+{
+    range_inverted_body!(start_ge_end)
+}
+
+pub fn range_inverted_as_is(start_ge_end: bool) -> (d: bool)
+    ensures
+        d == false,
+{
+    let _ = start_ge_end;
+    false
 }
 
 proof fn lemma_as_is_skips_dir_sync()
@@ -1182,6 +1224,26 @@ mod tests {
         );
     }
 
+    #[test]
+    fn range_inverted_on_live_inverted_is_not_ok() {
+        assert!(range_inverted(true));
+        assert!(!range_inverted(false));
+        assert!(
+            !range_inverted_as_is(true),
+            "AS-IS dente: inverted range still applies"
+        );
+        let body = named_fn_src(include_str!("db.rs"), "delete_range_with")
+            .expect("delete_range_with");
+        assert!(
+            body.contains("range_inverted("),
+            "delete_range_with must match range_inverted"
+        );
+        assert!(
+            !body.contains("if s >= e"),
+            "delete_range_with must not keep a raw inverted-range if"
+        );
+    }
+
     /// RFC-0171 P1.1/P1.2: data-fate `if`s on put-Ok and recover/reopen
     /// must call a kernel (not a raw predicate in `db.rs`).
     #[test]
@@ -1332,6 +1394,7 @@ mod tests {
             || cond.contains("pit_resync_needs_rewrite(")
             || cond.contains("cas_absent_put(")
             || cond.contains("cas_eq_put(")
+            || cond.contains("range_inverted(")
             || cond.contains("reopen_outcome(")
             || cond.contains("feed_is_lazy(")
             || cond.contains("skip_auto_flush(")

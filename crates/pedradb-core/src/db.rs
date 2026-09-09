@@ -8261,7 +8261,7 @@ impl<E: Env> Db<E> {
     ) -> Result<()> {
         let s = start.as_ref();
         let e = end.as_ref();
-        if s >= e {
+        if crate::write_admission_kernel::range_inverted(s >= e) {
             return Err(CoreError::Internal(
                 "delete_range requires start < end".into(),
             ));
