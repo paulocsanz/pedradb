@@ -4758,8 +4758,9 @@
       "id": "run_disjoint",
       "finding": "RFC-0164 P1.2",
       "twin_kind": "model",
+        "single_artifact": true,
       "kernel": "crates/pedradb-core/src/probe_order_kernel.rs",
-      "twin": "crates/pedradb-core/verus/probe_order.rs",
+      "twin": "crates/pedradb-core/src/probe_order_kernel.rs",
       "verus": "scripts/verus_probe_order.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs"
@@ -5704,8 +5705,9 @@
       "id": "probe_order_covering",
       "finding": "RFC-0164 P0.2",
       "twin_kind": "model",
+        "single_artifact": true,
       "kernel": "crates/pedradb-core/src/probe_order_kernel.rs",
-      "twin": "crates/pedradb-core/verus/probe_order.rs",
+      "twin": "crates/pedradb-core/src/probe_order_kernel.rs",
       "verus": "scripts/verus_probe_order.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs"

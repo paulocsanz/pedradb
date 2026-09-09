@@ -414,4 +414,124 @@ mod tests {
         assert!(!run_pairwise_disjoint_los(&los, &his));
         assert!(!run_pairwise_disjoint_los_as_is(&los, &his));
     }
+
+    /// Live shape helper: two REAL SSTs from the production writer — older
+    /// put@1, newer tombstone@2 over one key — returning (older, newer,
+    /// key, paths) with the measured lo/hi bounds of both tables.
+    fn live_equal_lo_tables()
+    -> (crate::sst::SstTable, crate::sst::SstTable, Vec<u8>, Vec<std::path::PathBuf>) {
+        use crate::env::StdEnv;
+        use crate::key::{InternalKey, ValueType};
+        use bytes::Bytes;
+
+        let n = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let k = format!("pedra-probe-tie-{n}").into_bytes();
+        let dir = std::env::temp_dir();
+        let older_path = dir.join(format!("pedra-probe-older-{n}-{}", std::process::id()));
+        let newer_path = dir.join(format!("pedra-probe-newer-{n}-{}", std::process::id()));
+        let older = crate::sst::write_sst_try_sorted_on(
+            &StdEnv,
+            &older_path,
+            [Ok((
+                InternalKey::new(k.clone(), 1, ValueType::Value),
+                Bytes::from_static(b"v"),
+            ))],
+            1,
+        )
+        .expect("write older put SST");
+        let newer = crate::sst::write_sst_try_sorted_on(
+            &StdEnv,
+            &newer_path,
+            [Ok((
+                InternalKey::new(k.clone(), 2, ValueType::Deletion),
+                Bytes::from_static(b""),
+            ))],
+            1,
+        )
+        .expect("write newer tombstone SST");
+        (older, newer, k, vec![older_path, newer_path])
+    }
+
+    /// Catalog three-teeth plant (`run_disjoint`): the live equal-lo tie —
+    /// put then tombstone over one key both land at lo = hi = k. The
+    /// strict kernel keeps the covering walk (disjoint = false, the newer
+    /// tombstone is consulted); the AS-IS `<=` mutant arms the bisect
+    /// fast path onto the older put — the resurrected delete of
+    /// findings/2026-09-04-reopen-delete-resurrected.
+    #[test]
+    fn run_disjoint_on_live_equal_lo_is_not_ok() {
+        use crate::key::SequenceNumber;
+        use crate::memtable::Lookup;
+
+        let (older, newer, k, paths) = live_equal_lo_tables();
+        for p in &paths {
+            let _ = std::fs::remove_file(p);
+        }
+        // Measured live bounds: both single-key tables tie at lo = hi = k.
+        let (lo_n, hi_n) = (
+            newer.smallest_user_key().expect("newer lo"),
+            newer.largest_user_key().expect("newer hi"),
+        );
+        let (lo_o, hi_o) = (
+            older.smallest_user_key().expect("older lo"),
+            older.largest_user_key().expect("older hi"),
+        );
+        assert_eq!(lo_n, hi_n, "single-key table ties at lo = hi");
+        assert_eq!(lo_n, k.as_slice());
+        assert_eq!(lo_o, lo_n, "the measured shape: equal lo across tables");
+        let los = [lo_n, lo_o];
+        let his = [hi_n, hi_o];
+        assert!(
+            !run_pairwise_disjoint_los(&los, &his),
+            "kernel: the tie keeps the covering walk"
+        );
+        assert!(
+            run_pairwise_disjoint_los_as_is(&los, &his),
+            "AS-IS dente: `<=` arms the bisect on the equal-lo tie"
+        );
+        // Live anchor: each table alone answers put vs tombstone — the
+        // walk order is what decides which one the point lookup sees.
+        assert!(matches!(
+            older.get(&k, SequenceNumber::MAX),
+            Lookup::Found(_)
+        ));
+        assert!(matches!(newer.get(&k, SequenceNumber::MAX), Lookup::Deleted));
+    }
+
+    /// Catalog three-teeth plant (`probe_order_covering`): the same live
+    /// equal-lo tie through the packed zero-alloc covering image. The
+    /// kernel gate visits the newest (tombstone) table first; the AS-IS
+    /// gate visits the older put first — the not-ok order the engine
+    /// historically walked (`.rev()` over lo-ascending).
+    #[test]
+    fn probe_order_covering_on_live_gate_is_not_ok() {
+        use crate::key::SequenceNumber;
+        use crate::memtable::Lookup;
+
+        let (older, newer, k, paths) = live_equal_lo_tables();
+        for p in &paths {
+            let _ = std::fs::remove_file(p);
+        }
+        let hi_n = newer.largest_user_key().expect("newer hi");
+        let hi_o = older.largest_user_key().expect("older hi");
+        assert_eq!(hi_n, hi_o, "the measured shape: equal lo/hi tie");
+        // by_lo stable sort on a tie keeps the given order; newest_first
+        // says table 1 (the tombstone) is newer.
+        let newest_first = [1usize, 0];
+        let by_lo = [1usize, 0];
+        let his_sorted = [hi_n, hi_o];
+        let gate = probe_order_covering(&newest_first, &by_lo, 2, &his_sorted, &k);
+        assert_eq!(gate, vec![1, 0], "kernel gate: newest tombstone first");
+        let mutant = probe_order_covering_as_is(&newest_first, &by_lo, 2, &his_sorted, &k);
+        assert_eq!(
+            mutant, vec![0, 1],
+            "AS-IS dente: older put first — the resurrecting order"
+        );
+        // Live anchor: the gate's first pick is the table the lookup
+        // consults — the newest answers Deleted.
+        assert!(matches!(newer.get(&k, SequenceNumber::MAX), Lookup::Deleted));
+    }
 }
