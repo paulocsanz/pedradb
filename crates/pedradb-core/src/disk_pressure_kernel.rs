@@ -396,6 +396,15 @@ mod tests {
             flush_cf.contains("compact_refuse("),
             "flush_cf must match compact_refuse"
         );
+        let cf = include_str!("db.rs")
+            .split("pub fn compact_ssts_only_cf(")
+            .nth(1)
+            .and_then(|s| s.split("pub fn live_sst_meta").next())
+            .expect("compact_ssts_only_cf");
+        assert!(
+            cf.contains("compact_refuse("),
+            "compact_ssts_only_cf must match compact_refuse"
+        );
     }
 
     #[test]

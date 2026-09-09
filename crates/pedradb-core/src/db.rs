@@ -7279,6 +7279,10 @@ impl<E: Env> Db<E> {
         if input_idxs.len() == 1 {
             return Ok(());
         }
+        let probe = crate::env::probe_available_bytes(&self.env, &self.dir);
+        if let Some((available, need)) = crate::disk_pressure_kernel::compact_refuse(probe) {
+            return Err(CoreError::DiskPressure { available, need });
+        }
         let all_l0 = input_idxs.iter().all(|&i| self.sst_levels[i] == 0);
         let to_level = if all_l0 {
             1
