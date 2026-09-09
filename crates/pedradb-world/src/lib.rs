@@ -923,7 +923,7 @@ impl World {
                 + got.len().saturating_sub(want.len()) as u32;
         }
 
-        if net.sent > 0 {
+        if !pedradb_core::write_admission_kernel::batch_is_empty(net.sent as u64) {
             cov.hit("N.send");
         }
         if net.corrupted > 0 {
