@@ -11208,13 +11208,11 @@ impl<'a> SstCountCursor<'a> {
                         self.blocks = Vec::new().into_iter();
                         return;
                     }
-                    let before_start = match self.start {
-                        Bound::Unbounded => false,
-                        Bound::Included(s) => uk < s,
-                        Bound::Excluded(s) => uk <= s,
-                    };
-                    let skip = before_start
-                        || k.kind == ValueType::RangeDeletion
+                    if !crate::merge::user_key_in_range(uk, self.start, self.end) {
+                        self.idx += 1;
+                        continue;
+                    }
+                    let skip = k.kind == ValueType::RangeDeletion
                         || k.sequence > self.snapshot;
                     if skip {
                         self.idx += 1;

@@ -1565,6 +1565,34 @@ mod tests {
         );
     }
 
+    #[test]
+    fn user_key_in_range_on_live_cursor_is_not_ok() {
+        assert!(user_key_in_range(
+            b"m",
+            Bound::Included(b"a"),
+            Bound::Excluded(b"z")
+        ));
+        assert!(!user_key_in_range(
+            b"a",
+            Bound::Excluded(b"a"),
+            Bound::Unbounded
+        ));
+        let src = include_str!("db.rs");
+        let sst = src
+            .split("impl<'a> SstCountCursor")
+            .nth(1)
+            .and_then(|s| s.split("impl<'a>").next())
+            .expect("SstCountCursor impl");
+        assert!(
+            sst.contains("user_key_in_range("),
+            "SstCountCursor::settle must match user_key_in_range"
+        );
+        assert!(
+            !sst.contains("Bound::Included(s) => uk < s"),
+            "SstCountCursor::settle must not keep a raw start Bound match"
+        );
+    }
+
     /// Interleaved streams with a cross-stream duplicate key: after the
     /// second stream exhausts, the first continues on the single-live fast
     /// path — output still matches the oracle.
