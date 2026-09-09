@@ -1767,7 +1767,7 @@ impl World {
                     );
                 }
                 self.exchange(cluster, net, trace, step, "drain")?;
-                if k == 0 {
+                if pedradb_core::write_admission_kernel::batch_is_empty(k as u64) {
                     trace.push(step, "net_drain", "empty");
                 }
             }
