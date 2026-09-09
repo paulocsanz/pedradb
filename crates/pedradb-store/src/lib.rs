@@ -5375,7 +5375,7 @@ impl<E: Env> StoreCluster<E> {
                 .unwrap();
             match p.role {
                 Role::Leader => {
-                    if p.hb_left == 0 {
+                    if pedradb_core::write_admission_kernel::batch_is_empty(p.hb_left as u64) {
                         hb.push(nid);
                         p.hb_left = 2;
                     } else {
