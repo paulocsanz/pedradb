@@ -15,20 +15,20 @@ set_option maxRecDepth 2048
 namespace pedra_aeneas_commit_kernel
 
 /-- [pedra_aeneas_commit_kernel::recover_commit]:
-    Source: '../../../crates/pedradb-raft/src/commit_kernel.rs', lines 128:0-130:1
+    Source: '../../../crates/pedradb-raft/src/commit_kernel.rs', lines 26:0-28:1
     Visibility: public -/
 def recover_commit
   (loaded_commit : Std.U64) (log_last : Std.U64) : Result Std.U64 := do
   core.cmp.Ord.min.trait_default core.cmp.OrdU64 loaded_commit log_last
 
 /-- [pedra_aeneas_commit_kernel::recover_last_applied]:
-    Source: '../../../crates/pedradb-raft/src/commit_kernel.rs', lines 135:0-137:1
+    Source: '../../../crates/pedradb-raft/src/commit_kernel.rs', lines 32:0-34:1
     Visibility: public -/
 def recover_last_applied : Result Std.U64 := do
   ok 0#u64
 
 /-- [pedra_aeneas_commit_kernel::may_commit_at]:
-    Source: '../../../crates/pedradb-raft/src/commit_kernel.rs', lines 143:0-145:1
+    Source: '../../../crates/pedradb-raft/src/commit_kernel.rs', lines 39:0-41:1
     Visibility: public -/
 def may_commit_at
   (index_term : Std.U64) (current_term : Std.U64) (has_majority : Bool) :
@@ -39,27 +39,27 @@ def may_commit_at
   else ok false
 
 /-- [pedra_aeneas_commit_kernel::propose_ack_ok]:
-    Source: '../../../crates/pedradb-raft/src/commit_kernel.rs', lines 150:0-152:1
+    Source: '../../../crates/pedradb-raft/src/commit_kernel.rs', lines 45:0-47:1
     Visibility: public -/
 def propose_ack_ok
   (index : Std.U64) (commit_index : Std.U64) : Result Bool := do
   ok (commit_index >= index)
 
 /-- [pedra_aeneas_commit_kernel::recover_commit_as_is]:
-    Source: '../../../crates/pedradb-raft/src/commit_kernel.rs', lines 157:0-159:1
+    Source: '../../../crates/pedradb-raft/src/commit_kernel.rs', lines 51:0-53:1
     Visibility: public -/
 def recover_commit_as_is
   (_loaded_commit : Std.U64) (log_last : Std.U64) : Result Std.U64 := do
   ok log_last
 
 /-- [pedra_aeneas_commit_kernel::recover_last_applied_as_is]:
-    Source: '../../../crates/pedradb-raft/src/commit_kernel.rs', lines 164:0-166:1
+    Source: '../../../crates/pedradb-raft/src/commit_kernel.rs', lines 57:0-59:1
     Visibility: public -/
 def recover_last_applied_as_is (log_last : Std.U64) : Result Std.U64 := do
   ok log_last
 
 /-- [pedra_aeneas_commit_kernel::may_commit_at_as_is]:
-    Source: '../../../crates/pedradb-raft/src/commit_kernel.rs', lines 171:0-173:1
+    Source: '../../../crates/pedradb-raft/src/commit_kernel.rs', lines 63:0-65:1
     Visibility: public -/
 def may_commit_at_as_is
   (_index_term : Std.U64) (_current_term : Std.U64) (has_majority : Bool) :
@@ -68,21 +68,21 @@ def may_commit_at_as_is
   ok has_majority
 
 /-- [pedra_aeneas_commit_kernel::propose_ack_ok_as_is]:
-    Source: '../../../crates/pedradb-raft/src/commit_kernel.rs', lines 178:0-180:1
+    Source: '../../../crates/pedradb-raft/src/commit_kernel.rs', lines 69:0-71:1
     Visibility: public -/
 def propose_ack_ok_as_is
   (_index : Std.U64) (_commit_index : Std.U64) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_commit_kernel::should_advance_commit]:
-    Source: '../../../crates/pedradb-raft/src/commit_kernel.rs', lines 185:0-187:1
+    Source: '../../../crates/pedradb-raft/src/commit_kernel.rs', lines 75:0-77:1
     Visibility: public -/
 def should_advance_commit
   (new_idx : Std.U64) (current : Std.U64) : Result Bool := do
   ok (new_idx > current)
 
 /-- [pedra_aeneas_commit_kernel::should_advance_commit_as_is]:
-    Source: '../../../crates/pedradb-raft/src/commit_kernel.rs', lines 192:0-194:1
+    Source: '../../../crates/pedradb-raft/src/commit_kernel.rs', lines 81:0-83:1
     Visibility: public -/
 def should_advance_commit_as_is
   (_new_idx : Std.U64) (_current : Std.U64) : Result Bool := do

@@ -19,11 +19,11 @@ description: >
 
 ## Grind pressure (one block, overwritten each fire)
 
-- Last fire: worked (`3c91d402` delete vote_kernel.rs Verus cartoon; rustc `VoteInputs` is the term)
-- Why: leftover_next_first ae_entry; Verus stand-in enums ≠ rustc AE types
-- This fire MUST land: delete the `ae_kernel.rs` `verus!` stand-in; rustc AE types stay; Aeneas of those types is the term
+- Last fire: worked (`db1a3d80` delete ae_kernel.rs Verus cartoon; rustc AE types are the term)
+- Why: leftover_next_first commit_raft; Verus stand-in ≠ rustc commit types
+- This fire MUST land: delete the `commit_kernel.rs` `verus!` stand-in; rustc types stay; Aeneas of those types is the term
 - Forbidden this fire: mint u64 twin; `_body!` over different types; skip cartoon as "not a land"; FACTORY_BAN halt; git checkout of db.rs/concurrent.rs
-- Deeper: Search leftover_next=cartoon remaining; open ae_kernel.rs; named cargo `prev_log_empty_ok`; `aeneas_ae.sh` / lake Ae
+- Deeper: Search leftover_next=cartoon remaining; open commit_kernel.rs; named cargo; `aeneas_*.sh` / lake
 
 This skill **lands one payable slice per Fire**. Rank 1–10 unpaid first.
 When those boards are 0, Search prints `leftover_next`: cartoon remaining
