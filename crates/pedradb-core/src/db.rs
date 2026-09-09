@@ -1298,16 +1298,6 @@ struct LevelRunStream<'a, E: Env> {
     current: Option<crate::sst::SstRangeIter<'a>>,
 }
 
-/// Bound copies for the per-file `iter_user_range` calls (the iter owns its
-/// own copies; this just re-derives the borrowed view for each call).
-fn bound_slice(b: &Bound<Bytes>) -> Bound<&[u8]> {
-    match b {
-        Bound::Included(k) => Bound::Included(&k[..]),
-        Bound::Excluded(k) => Bound::Excluded(&k[..]),
-        Bound::Unbounded => Bound::Unbounded,
-    }
-}
-
 impl<'a, E: Env> LevelRunStream<'a, E> {
     fn new(
         db: &'a Db<E>,
@@ -1317,17 +1307,12 @@ impl<'a, E: Env> LevelRunStream<'a, E> {
         snapshot: SequenceNumber,
         resolve_values: bool,
     ) -> Self {
-        let own = |b: Bound<&[u8]>| match b {
-            Bound::Included(k) => Bound::Included(Bytes::copy_from_slice(k)),
-            Bound::Excluded(k) => Bound::Excluded(Bytes::copy_from_slice(k)),
-            Bound::Unbounded => Bound::Unbounded,
-        };
         Self {
             db,
             files_by_lo,
             next_file: 0,
-            start: own(start),
-            end: own(end),
+            start: crate::merge::bound_to_owned(start),
+            end: crate::merge::bound_to_owned(end),
             snapshot,
             resolve_values,
             current: None,
@@ -1350,7 +1335,7 @@ impl<'a, E: Env> Iterator for LevelRunStream<'a, E> {
                 let fi = self.files_by_lo[self.next_file];
                 self.next_file += 1;
                 let table = &self.db.ssts[fi];
-                let (start, end) = (bound_slice(&self.start), bound_slice(&self.end));
+                let (start, end) = (crate::merge::bound_as_ref(&self.start), crate::merge::bound_as_ref(&self.end));
                 if !table.overlaps_user_range(start, end) {
                     continue;
                 }

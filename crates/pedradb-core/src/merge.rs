@@ -1567,6 +1567,20 @@ mod tests {
     }
 
     #[test]
+    fn bound_as_ref_on_live_level_run_is_not_ok() {
+        let src = include_str!("db.rs");
+        assert!(
+            src.contains("bound_as_ref(&self.start)")
+                && src.contains("bound_to_owned(start)"),
+            "LevelRunStream must match merge bound_as_ref / bound_to_owned"
+        );
+        assert!(
+            !src.contains("fn bound_slice"),
+            "db.rs must not keep a duplicate Bound copy helper"
+        );
+    }
+
+    #[test]
     fn write_op_covers_key_on_live_unapplied_is_not_ok() {
         assert!(write_op_covers_key(
             ValueType::Value,
