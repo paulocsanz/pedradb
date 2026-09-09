@@ -19,18 +19,20 @@ description: >
 
 ## Grind pressure (one block, overwritten each fire)
 
-- Last fire: worked (`c56155e3` delete compact_kernel.rs Verus cartoon; rustc 4-arg `compact_pick` is the term)
-- Why: leftover_next_first apply_step; Verus stand-in billed as last-wins of rustc apply
-- This fire MUST land: delete the `apply_kernel.rs` `verus!` stand-in; rustc types stay; Aeneas of those types is the term
-- Forbidden this fire: mint u64 twin; `_body!` over different types; skip cartoon as "not a land"; leftover_next store/Montanha; FACTORY_BAN halt; git checkout of db.rs/concurrent.rs
-- Deeper: Search leftover_next=cartoon remaining (skip store); open apply_kernel.rs; inspect WT diff; named cargo; `aeneas_*.sh` / lake
+- Last fire: worked (`cae8835a` memtable `range_snapshot` calls `visible_at`)
+- Why: Search scanned only data_fate; `prefix.rs` twin==kernel + cfg/`Seq<u8>` stand-in billed as last-wins of rustc `&[u8]`
+- This fire MUST land: delete `prefix.rs` verus stand-in + cfg split; rustc `&[u8]` body stays; Aeneas of that body; Search leftover_next scans all catalog kernels
+- Forbidden this fire: mint u64/`Seq` twin; leftover_next store/Montanha; leftover is_empty wrap; compact_refuse spray; git checkout of db.rs/concurrent.rs; skip cartoon as "not a land"; Bound-helper as cartoon payment
+- Deeper: Search leftover_next cartoon remaining prefix.rs; delete stand-in; named cargo; aeneas_prefix.sh --required; lake Prefix
 
 This skill **lands one payable slice per Fire**. Rank 1–10 unpaid first.
 When those boards are 0, Search prints `leftover_next`: cartoon remaining
 if `cartoon_twin>0`, else trampoline remaining — **not a halt**. Do not
 invent a `compact_refuse` / `batch_is_empty` wrap. Do not replace
 `leftover_next` with a spray-queue fn name. Catalog-only `single_artifact`
-is skip. Empty 4–10 is **not** a stop.
+is skip **only if** Lean has `def` of the rustc entry **and the file is
+not a cartoon**. `twin==kernel` + cfg split is unpaid. Empty 4–10 is
+**not** a stop.
 
 Pay the seL4-class path this fire (empty the trampoline of data-fate
 `if`s). `never_floor` / disk-not-media / `∀π` refused stay TCB — not
@@ -94,6 +96,8 @@ catalog):
 
 - script/compose glue the board marked unpaid (`commit_ops_with`,
   `validate_occ_batch`, `lone_commit`, `finish_group_off_lock`, …)
+- catalog kernel with a `verus!` stand-in or cfg split (unpaid cartoon even
+  if `twin==kernel` / `single_artifact` / not `data_fate`)
 - `data_fate` with `twin` path ≠ `kernel` path (real single-artifact debt)
 - enrolled Aeneas path whose catalog `entry`/`as_is` has no Lean `def` and is
   not named in `EXTRACT.md` (silent leftover)
@@ -104,8 +108,12 @@ If script vs RFC disagree, **code + catalog win**.
 
 `leftover_next` is **computed**. Unpaid 4–10 → those boards. Else if
 `cartoon_twin>0` → cartoon remaining (named kernel file: delete the
-stand-in). Else trampoline remaining. Never a production fn name, never
-FACTORY_BAN halt, never mint, never skip cartoon as "not a land".
+stand-in). Search scans **every catalog kernel**, not only `data_fate`.
+`twin==kernel` / `single_artifact: true` with a `verus!` stand-in or
+cfg split is unpaid cartoon (rustc `&[u8]` vs Verus `Seq<u8>` /
+clone_bytes / u64 flattened args is the same lie). Else trampoline
+remaining. Never a production fn name, never FACTORY_BAN halt, never
+mint, never skip cartoon as "not a land".
 
 ## 2. Rank (first non-empty wins — then implement it)
 

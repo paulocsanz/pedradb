@@ -131,7 +131,7 @@ def prefix_exclusive_end
   prefix_exclusive_end_loop e
 
 /-- [pedra_aeneas_prefix_kernel::prefix_exclusive_end_as_is]:
-    Source: '../../../crates/pedradb-core/src/prefix.rs', lines 32:0-36:1
+    Source: '../../../crates/pedradb-core/src/prefix.rs', lines 31:0-35:1
     Visibility: public -/
 def prefix_exclusive_end_as_is
   (prefix1 : Slice Std.U8) : Result (Option (alloc.vec.Vec Std.U8)) := do
@@ -140,7 +140,7 @@ def prefix_exclusive_end_as_is
   ok (some e1)
 
 /-- [pedra_aeneas_prefix_kernel::key_in_prefix_range]:
-    Source: '../../../crates/pedradb-core/src/prefix.rs', lines 41:0-49:1
+    Source: '../../../crates/pedradb-core/src/prefix.rs', lines 39:0-47:1
     Visibility: public -/
 def key_in_prefix_range
   (key : Slice Std.U8) (prefix1 : Slice Std.U8) (end1 : Option (Slice Std.U8))

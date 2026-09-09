@@ -213,7 +213,10 @@ def main() -> int:
     unpaid_script, unpaid_compose = script_compose_board()
     unpaid_concurrency = concurrency_board()
     unpaid_scale = scale_board()
-    cartoons = sa_unpaid_board(fate)
+    # Every catalog kernel, not only data_fate. twin==kernel +
+    # single_artifact with a cfg/verus stand-in is still unpaid cartoon
+    # (prefix.rs Seq vs rustc &[u8] hid here).
+    cartoons = sa_unpaid_board(pairs)
     print_leftover_next(
         unpaid_script,
         unpaid_compose,
@@ -641,7 +644,10 @@ def verus_token_kind(src: str) -> str:
 
 
 def sa_unpaid_board(fate: list) -> list[tuple[str, str]]:
-    print("== single_artifact (rank 7: rustc body extract; Verus cartoon ≠ last-wins) ==")
+    print(
+        "== single_artifact (rank 7: rustc body extract; "
+        "Verus cartoon ≠ last-wins; all catalog kernels, not only data_fate) =="
+    )
     unpaid = []
     skip_extracted = []
     skip_verus = []
