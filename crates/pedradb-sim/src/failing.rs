@@ -143,7 +143,7 @@ impl FailState {
             self.remaining.set(left - 1);
         }
         let d = self.delay_per_op.get();
-        if d > 0 {
+        if !pedradb_core::write_admission_kernel::batch_is_empty(d) {
             self.delay_ticks
                 .set(self.delay_ticks.get().saturating_add(d));
         }
