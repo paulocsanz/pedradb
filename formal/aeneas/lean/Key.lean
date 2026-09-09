@@ -93,6 +93,12 @@ theorem value_type_eq_is_discriminant
   unfold key.ValueType.Insts.CoreCmpPartialEqValueType.eq
   rfl
 
+/-- Catalog entry: rustc derived Clone of Copy ValueType is identity. Dual-unfold. -/
+theorem value_type_clone_is_self (self : key.ValueType) :
+    key.ValueType.Insts.CoreCloneClone.clone self = ok self := by
+  unfold key.ValueType.Insts.CoreCloneClone.clone
+  rfl
+
 /-- Catalog entry: ValueType PartialOrd is `Some(cmp)`. Dual-unfold. -/
 theorem value_type_partial_cmp_is_some_cmp
     (self other : key.ValueType) :
