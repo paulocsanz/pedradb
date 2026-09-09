@@ -464,6 +464,24 @@ mod tests {
     }
 
     #[test]
+    fn apply_record_matches_apply_ops_owned() {
+        let src = include_str!("db.rs");
+        let body = src
+            .split("fn apply_record(")
+            .nth(1)
+            .and_then(|s| s.split("fn apply_ops_owned").next())
+            .expect("apply_record");
+        assert!(
+            body.contains("apply_ops_owned("),
+            "WAL recover apply_record must match apply_ops_owned"
+        );
+        assert!(
+            !body.contains("ValueType::Value =>"),
+            "apply_record must not keep a raw ValueType match"
+        );
+    }
+
+    #[test]
     fn rejects_bad_version() {
         let err = WriteRecord::decode(&[99, 0, 0, 0, 0]).unwrap_err();
         assert!(err.to_string().contains("version"));

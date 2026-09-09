@@ -11298,19 +11298,7 @@ pub(crate) fn count_cache_key(
 }
 
 fn apply_record(mem: &mut MemTable, rec: &WriteRecord) {
-    for op in &rec.ops {
-        match op.kind {
-            ValueType::Value => {
-                mem.put(op.key.clone(), op.sequence, op.value.clone());
-            }
-            ValueType::Deletion => {
-                mem.delete(op.key.clone(), op.sequence);
-            }
-            ValueType::RangeDeletion => {
-                mem.delete_range(op.key.clone(), op.value.clone(), op.sequence);
-            }
-        }
-    }
+    apply_ops_owned(mem, rec.ops.iter().cloned());
 }
 
 /// RFC-0040: move `WriteOp` Bytes into the memtable (no extra payload memcpy).
