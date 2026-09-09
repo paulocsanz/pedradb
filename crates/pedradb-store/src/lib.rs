@@ -7304,7 +7304,7 @@ impl<E: Env> StoreCluster<E> {
             out.l0_files_max = out.l0_files_max.max(s.l0_files);
             out.write_stall_count_sum += s.write_stall_count;
             out.write_pressure_count_sum += s.write_pressure_count;
-            if s.write_stall_l0 > 0 {
+            if !pedradb_core::write_admission_kernel::batch_is_empty(s.write_stall_l0) {
                 out.write_stall_l0 = s.write_stall_l0;
             }
             if s.write_pressure_l0 > 0 {
