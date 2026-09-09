@@ -3368,11 +3368,12 @@ impl<E: Env> Db<E> {
         let Some(ptr) = vlog::decode_vlog_ptr(stored.as_ref()) else {
             return Ok(stored);
         };
-        let Some(ref vlog) = self.vlog else {
+        if crate::lookup_kernel::vlog_ptr_orphaned(self.vlog.is_none()) {
             return Err(CoreError::Internal(
                 "vlog ref in DB but VALUES.vlog not open".into(),
             ));
-        };
+        }
+        let vlog = self.vlog.as_ref().expect("vlog_ptr_orphaned");
         let guard = vlog.lock();
         guard.read_ptr_on(&self.env, &self.dir, ptr, self.vlog_use_new)
     }
