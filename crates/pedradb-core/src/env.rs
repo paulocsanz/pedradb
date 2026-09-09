@@ -77,7 +77,7 @@ pub trait EnvFile: Read + Write + Seek {
     /// # Errors
     /// Underlying I/O.
     fn is_empty(&mut self) -> io::Result<bool> {
-        Ok(self.len()? == 0)
+        Ok(crate::write_admission_kernel::batch_is_empty(self.len()?))
     }
 
     /// Positioned read that fills `buf` exactly from `offset` without
