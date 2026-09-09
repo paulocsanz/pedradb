@@ -27,7 +27,7 @@ impl_def Slice.Insts.CoreCmpPartialEqSlice {T : Type} {U : Type}
 }
 
 /-- [pedra_aeneas_membership_kernel::majority_of]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1074:0-1080:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 24:0-30:1
     Visibility: public -/
 def majority_of (n : Std.U64) : Result Std.U64 := do
   if n = 0#u64
@@ -36,7 +36,7 @@ def majority_of (n : Std.U64) : Result Std.U64 := do
        i + 1#u64
 
 /-- [pedra_aeneas_membership_kernel::joint_election_ok]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1088:0-1096:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 36:0-44:1
     Visibility: public -/
 def joint_election_ok
   (old_yes : Std.U64) (old_n : Std.U64) (new_yes : Option (Std.U64 × Std.U64))
@@ -54,7 +54,7 @@ def joint_election_ok
                 ok (yes >= i1)
 
 /-- [pedra_aeneas_membership_kernel::joint_election_ok_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1102:0-1104:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 48:0-50:1
     Visibility: public -/
 def joint_election_ok_as_is
   (old_yes : Std.U64) (old_n : Std.U64)
@@ -65,7 +65,7 @@ def joint_election_ok_as_is
   ok (old_yes >= i)
 
 /-- [pedra_aeneas_membership_kernel::joint_still_active]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1111:0-1113:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 55:0-57:1
     Visibility: public -/
 def joint_still_active
   (old : Slice Std.U64) (new : Slice Std.U64) : Result Bool := do
@@ -73,26 +73,26 @@ def joint_still_active
     core.cmp.PartialEqU64) old new
 
 /-- [pedra_aeneas_membership_kernel::joint_still_active_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1120:0-1122:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 62:0-64:1
     Visibility: public -/
 def joint_still_active_as_is
   (_old : Slice Std.U64) (_new : Slice Std.U64) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_membership_kernel::joint_leave_ok]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1129:0-1131:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 69:0-71:1
     Visibility: public -/
 def joint_leave_ok (leave_in_log : Bool) : Result Bool := do
   ok leave_in_log
 
 /-- [pedra_aeneas_membership_kernel::joint_leave_ok_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1137:0-1139:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 75:0-77:1
     Visibility: public -/
 def joint_leave_ok_as_is (_leave_in_log : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_membership_kernel::plant_joint_schedule_ok]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1146:0-1148:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 82:0-84:1
     Visibility: public -/
 def plant_joint_schedule_ok
   (opt_in_emits : Bool) (default_omits : Bool) : Result Bool := do
@@ -101,14 +101,14 @@ def plant_joint_schedule_ok
   else ok false
 
 /-- [pedra_aeneas_membership_kernel::plant_joint_schedule_ok_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1155:0-1157:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 89:0-91:1
     Visibility: public -/
 def plant_joint_schedule_ok_as_is
   (_opt_in_emits : Bool) (_default_omits : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_membership_kernel::queued_leave_finish_ok]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1163:0-1165:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 95:0-97:1
     Visibility: public -/
 def queued_leave_finish_ok
   (leave_in_log : Bool) (leave_committed : Bool) : Result Bool := do
@@ -117,75 +117,75 @@ def queued_leave_finish_ok
   else ok true
 
 /-- [pedra_aeneas_membership_kernel::queued_leave_finish_ok_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1171:0-1173:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 101:0-103:1
     Visibility: public -/
 def queued_leave_finish_ok_as_is
   (leave_in_log : Bool) (_leave_committed : Bool) : Result Bool := do
   ok leave_in_log
 
 /-- [pedra_aeneas_membership_kernel::disk_membership_overrides_cli]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1179:0-1181:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 107:0-109:1
     Visibility: public -/
 def disk_membership_overrides_cli (has_disk : Bool) : Result Bool := do
   ok has_disk
 
 /-- [pedra_aeneas_membership_kernel::disk_membership_overrides_cli_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1187:0-1189:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 113:0-115:1
     Visibility: public -/
 def disk_membership_overrides_cli_as_is (_has_disk : Bool) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_membership_kernel::membership_identity_before_applied]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1195:0-1197:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 119:0-121:1
     Visibility: public -/
 def membership_identity_before_applied
   (identity_first : Bool) : Result Bool := do
   ok identity_first
 
 /-- [pedra_aeneas_membership_kernel::membership_identity_before_applied_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1203:0-1205:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 125:0-127:1
     Visibility: public -/
 def membership_identity_before_applied_as_is
   (_identity_first : Bool) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_membership_kernel::high_water_at_least]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1211:0-1213:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 131:0-133:1
     Visibility: public -/
 def high_water_at_least
   (disk_hw : Std.U64) (ram_hw : Std.U64) : Result Std.U64 := do
   core.cmp.Ord.max.default core.cmp.OrdU64.partialOrdInst.lt disk_hw ram_hw
 
 /-- [pedra_aeneas_membership_kernel::high_water_at_least_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1219:0-1221:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 137:0-139:1
     Visibility: public -/
 def high_water_at_least_as_is
   (_disk_hw : Std.U64) (ram_hw : Std.U64) : Result Std.U64 := do
   ok ram_hw
 
 /-- [pedra_aeneas_membership_kernel::recover_must_apply]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1227:0-1229:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 143:0-145:1
     Visibility: public -/
 def recover_must_apply
   (applied : Std.U64) (commit : Std.U64) : Result Bool := do
   ok (commit > applied)
 
 /-- [pedra_aeneas_membership_kernel::recover_must_apply_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1235:0-1237:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 149:0-151:1
     Visibility: public -/
 def recover_must_apply_as_is
   (_applied : Std.U64) (_commit : Std.U64) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_membership_kernel::recover_apply_node_counts]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1243:0-1245:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 155:0-157:1
     Visibility: public -/
 def recover_apply_node_counts
   (is_local : Bool) (_in_ids : Bool) : Result Bool := do
   ok is_local
 
 /-- [pedra_aeneas_membership_kernel::recover_apply_node_counts_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1251:0-1253:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 161:0-163:1
     Visibility: public -/
 def recover_apply_node_counts_as_is
   (is_local : Bool) (in_ids : Bool) : Result Bool := do
@@ -194,14 +194,14 @@ def recover_apply_node_counts_as_is
   else ok false
 
 /-- [pedra_aeneas_membership_kernel::recover_truncate_node_counts]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1259:0-1261:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 167:0-169:1
     Visibility: public -/
 def recover_truncate_node_counts
   (is_local : Bool) (_in_ids : Bool) : Result Bool := do
   ok is_local
 
 /-- [pedra_aeneas_membership_kernel::recover_truncate_node_counts_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1267:0-1269:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 173:0-175:1
     Visibility: public -/
 def recover_truncate_node_counts_as_is
   (is_local : Bool) (in_ids : Bool) : Result Bool := do
@@ -210,28 +210,28 @@ def recover_truncate_node_counts_as_is
   else ok false
 
 /-- [pedra_aeneas_membership_kernel::recover_drop_orphan_seg]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1275:0-1277:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 179:0-181:1
     Visibility: public -/
 def recover_drop_orphan_seg
   (seg_index : Std.U64) (new_hi : Std.U64) : Result Bool := do
   ok (seg_index > new_hi)
 
 /-- [pedra_aeneas_membership_kernel::recover_drop_orphan_seg_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1283:0-1285:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 185:0-187:1
     Visibility: public -/
 def recover_drop_orphan_seg_as_is
   (_seg_index : Std.U64) (_new_hi : Std.U64) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_membership_kernel::recover_abort_node_counts]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1291:0-1293:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 191:0-193:1
     Visibility: public -/
 def recover_abort_node_counts
   (is_local : Bool) (_in_ids : Bool) : Result Bool := do
   ok is_local
 
 /-- [pedra_aeneas_membership_kernel::recover_abort_node_counts_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1299:0-1301:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 197:0-199:1
     Visibility: public -/
 def recover_abort_node_counts_as_is
   (is_local : Bool) (in_ids : Bool) : Result Bool := do
@@ -240,14 +240,14 @@ def recover_abort_node_counts_as_is
   else ok false
 
 /-- [pedra_aeneas_membership_kernel::persist_meta_node_counts]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1307:0-1309:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 203:0-205:1
     Visibility: public -/
 def persist_meta_node_counts
   (is_local : Bool) (_in_ids : Bool) : Result Bool := do
   ok is_local
 
 /-- [pedra_aeneas_membership_kernel::persist_meta_node_counts_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1315:0-1317:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 209:0-211:1
     Visibility: public -/
 def persist_meta_node_counts_as_is
   (is_local : Bool) (in_ids : Bool) : Result Bool := do
@@ -256,14 +256,14 @@ def persist_meta_node_counts_as_is
   else ok false
 
 /-- [pedra_aeneas_membership_kernel::persist_hist_node_counts]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1323:0-1325:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 215:0-217:1
     Visibility: public -/
 def persist_hist_node_counts
   (is_local : Bool) (_in_ids : Bool) : Result Bool := do
   ok is_local
 
 /-- [pedra_aeneas_membership_kernel::persist_hist_node_counts_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1331:0-1333:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 221:0-223:1
     Visibility: public -/
 def persist_hist_node_counts_as_is
   (is_local : Bool) (in_ids : Bool) : Result Bool := do
@@ -272,14 +272,14 @@ def persist_hist_node_counts_as_is
   else ok false
 
 /-- [pedra_aeneas_membership_kernel::persist_fence_node_counts]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1339:0-1341:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 227:0-229:1
     Visibility: public -/
 def persist_fence_node_counts
   (is_local : Bool) (_in_ids : Bool) : Result Bool := do
   ok is_local
 
 /-- [pedra_aeneas_membership_kernel::persist_fence_node_counts_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1347:0-1349:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 233:0-235:1
     Visibility: public -/
 def persist_fence_node_counts_as_is
   (is_local : Bool) (in_ids : Bool) : Result Bool := do
@@ -288,14 +288,14 @@ def persist_fence_node_counts_as_is
   else ok false
 
 /-- [pedra_aeneas_membership_kernel::force_clear_node_counts]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1355:0-1357:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 239:0-241:1
     Visibility: public -/
 def force_clear_node_counts
   (is_local : Bool) (_in_ids : Bool) : Result Bool := do
   ok is_local
 
 /-- [pedra_aeneas_membership_kernel::force_clear_node_counts_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1363:0-1365:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 245:0-247:1
     Visibility: public -/
 def force_clear_node_counts_as_is
   (is_local : Bool) (in_ids : Bool) : Result Bool := do
@@ -304,14 +304,14 @@ def force_clear_node_counts_as_is
   else ok false
 
 /-- [pedra_aeneas_membership_kernel::drop_preimages_node_counts]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1371:0-1373:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 251:0-253:1
     Visibility: public -/
 def drop_preimages_node_counts
   (is_local : Bool) (_in_ids : Bool) : Result Bool := do
   ok is_local
 
 /-- [pedra_aeneas_membership_kernel::drop_preimages_node_counts_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1379:0-1381:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 257:0-259:1
     Visibility: public -/
 def drop_preimages_node_counts_as_is
   (is_local : Bool) (in_ids : Bool) : Result Bool := do
@@ -320,49 +320,49 @@ def drop_preimages_node_counts_as_is
   else ok false
 
 /-- [pedra_aeneas_membership_kernel::open_peer_uses_disk]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1387:0-1389:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 263:0-265:1
     Visibility: public -/
 def open_peer_uses_disk (has_disk : Bool) : Result Bool := do
   ok has_disk
 
 /-- [pedra_aeneas_membership_kernel::open_peer_uses_disk_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1395:0-1397:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 269:0-271:1
     Visibility: public -/
 def open_peer_uses_disk_as_is (_has_disk : Bool) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_membership_kernel::local_id_if_member]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1403:0-1405:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 275:0-277:1
     Visibility: public -/
 def local_id_if_member (in_ids : Bool) : Result Bool := do
   ok in_ids
 
 /-- [pedra_aeneas_membership_kernel::local_id_if_member_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1411:0-1413:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 281:0-283:1
     Visibility: public -/
 def local_id_if_member_as_is (_in_ids : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_membership_kernel::reader_id_local]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1419:0-1421:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 287:0-289:1
     Visibility: public -/
 def reader_id_local (is_local : Bool) : Result Bool := do
   ok is_local
 
 /-- [pedra_aeneas_membership_kernel::reader_id_local_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1427:0-1429:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 293:0-295:1
     Visibility: public -/
 def reader_id_local_as_is (_is_local : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_membership_kernel::discard_node_counts]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1435:0-1437:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 299:0-301:1
     Visibility: public -/
 def discard_node_counts (is_local : Bool) (_in_ids : Bool) : Result Bool := do
   ok is_local
 
 /-- [pedra_aeneas_membership_kernel::discard_node_counts_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1443:0-1445:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 305:0-307:1
     Visibility: public -/
 def discard_node_counts_as_is
   (is_local : Bool) (in_ids : Bool) : Result Bool := do
@@ -371,116 +371,116 @@ def discard_node_counts_as_is
   else ok false
 
 /-- [pedra_aeneas_membership_kernel::discard_leader_local]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1451:0-1453:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 311:0-313:1
     Visibility: public -/
 def discard_leader_local (is_local : Bool) : Result Bool := do
   ok is_local
 
 /-- [pedra_aeneas_membership_kernel::discard_leader_local_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1459:0-1461:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 317:0-319:1
     Visibility: public -/
 def discard_leader_local_as_is (_is_local : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_membership_kernel::removed_steps_down]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1467:0-1469:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 323:0-325:1
     Visibility: public -/
 def removed_steps_down (in_ids : Bool) : Result Bool := do
   ok (¬ in_ids)
 
 /-- [pedra_aeneas_membership_kernel::removed_steps_down_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1475:0-1477:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 329:0-331:1
     Visibility: public -/
 def removed_steps_down_as_is (_in_ids : Bool) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_membership_kernel::hint_if_member]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1483:0-1485:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 335:0-337:1
     Visibility: public -/
 def hint_if_member (in_ids : Bool) : Result Bool := do
   ok in_ids
 
 /-- [pedra_aeneas_membership_kernel::hint_if_member_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1491:0-1493:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 341:0-343:1
     Visibility: public -/
 def hint_if_member_as_is (_in_ids : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_membership_kernel::drop_repl_slot]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1499:0-1501:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 347:0-349:1
     Visibility: public -/
 def drop_repl_slot (in_ids : Bool) : Result Bool := do
   ok (¬ in_ids)
 
 /-- [pedra_aeneas_membership_kernel::drop_repl_slot_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1507:0-1509:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 353:0-355:1
     Visibility: public -/
 def drop_repl_slot_as_is (_in_ids : Bool) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_membership_kernel::drop_sent_through]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1515:0-1517:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 359:0-361:1
     Visibility: public -/
 def drop_sent_through (in_ids : Bool) : Result Bool := do
   ok (¬ in_ids)
 
 /-- [pedra_aeneas_membership_kernel::drop_sent_through_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1523:0-1525:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 365:0-367:1
     Visibility: public -/
 def drop_sent_through_as_is (_in_ids : Bool) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_membership_kernel::participating_if_member]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1531:0-1533:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 371:0-373:1
     Visibility: public -/
 def participating_if_member (in_ids : Bool) : Result Bool := do
   ok in_ids
 
 /-- [pedra_aeneas_membership_kernel::participating_if_member_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1539:0-1541:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 377:0-379:1
     Visibility: public -/
 def participating_if_member_as_is (_in_ids : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_membership_kernel::pending_joint_node_counts]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1547:0-1549:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 383:0-385:1
     Visibility: public -/
 def pending_joint_node_counts (is_member : Bool) : Result Bool := do
   ok is_member
 
 /-- [pedra_aeneas_membership_kernel::pending_joint_node_counts_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1555:0-1557:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 389:0-391:1
     Visibility: public -/
 def pending_joint_node_counts_as_is (_is_member : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_membership_kernel::joint_target_counts]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1564:0-1566:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 396:0-398:1
     Visibility: public -/
 def joint_target_counts (in_ids : Bool) (_in_nodes : Bool) : Result Bool := do
   ok in_ids
 
 /-- [pedra_aeneas_membership_kernel::joint_target_counts_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1573:0-1575:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 403:0-405:1
     Visibility: public -/
 def joint_target_counts_as_is
   (_in_ids : Bool) (in_nodes : Bool) : Result Bool := do
   ok in_nodes
 
 /-- [pedra_aeneas_membership_kernel::joint_add_target_counts]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1582:0-1584:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 410:0-412:1
     Visibility: public -/
 def joint_add_target_counts (_in_nodes : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_membership_kernel::joint_add_target_counts_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1590:0-1592:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 416:0-418:1
     Visibility: public -/
 def joint_add_target_counts_as_is (in_nodes : Bool) : Result Bool := do
   ok in_nodes
 
 /-- [pedra_aeneas_membership_kernel::election_grant_from_counts]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1599:0-1601:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 423:0-425:1
     Visibility: public -/
 def election_grant_from_counts
   (in_ids : Bool) (in_pending_old_or_new : Bool) : Result Bool := do
@@ -489,14 +489,14 @@ def election_grant_from_counts
   else ok in_pending_old_or_new
 
 /-- [pedra_aeneas_membership_kernel::election_grant_from_counts_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1607:0-1609:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 429:0-431:1
     Visibility: public -/
 def election_grant_from_counts_as_is
   (_in_ids : Bool) (_in_pending_old_or_new : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_membership_kernel::liveness_admitted]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1618:0-1620:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 438:0-440:1
     Visibility: public -/
 def liveness_admitted
   (es1 : Bool) (es2 : Bool) (es3 : Bool) : Result Bool := do
@@ -507,14 +507,14 @@ def liveness_admitted
   else ok false
 
 /-- [pedra_aeneas_membership_kernel::liveness_admitted_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1626:0-1628:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 444:0-446:1
     Visibility: public -/
 def liveness_admitted_as_is
   (_es1 : Bool) (_es2 : Bool) (_es3 : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_membership_kernel::elect_claim_banner]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1635:0-1641:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 451:0-457:1
     Visibility: public -/
 def elect_claim_banner
   (es1 : Bool) (es2 : Bool) (es3 : Bool) : Result Str := do
@@ -524,7 +524,7 @@ def elect_claim_banner
   else ok (toStr "bounded-elect not-eventual")
 
 /-- [pedra_aeneas_membership_kernel::elect_claim_banner_as_is]:
-    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 1647:0-1649:1
+    Source: '../../../crates/pedradb-raft/src/membership_kernel.rs', lines 461:0-463:1
     Visibility: public -/
 def elect_claim_banner_as_is
   (_es1 : Bool) (_es2 : Bool) (_es3 : Bool) : Result Str := do
