@@ -97,7 +97,9 @@ pub fn apply_recover_choice(buf: &mut Vec<u8>, choice: RecoverChoice) -> bool {
             let Some((h, len, _)) = nth_phys(buf, index) else {
                 return false;
             };
-            if len == 0 || h + HEADER_SIZE >= buf.len() {
+            if crate::write_admission_kernel::batch_is_empty(len as u64)
+                || h + HEADER_SIZE >= buf.len()
+            {
                 return false;
             }
             buf[h + HEADER_SIZE] ^= 0xff;
