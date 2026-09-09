@@ -2320,8 +2320,9 @@
       "id": "isolated_child",
       "finding": "F83",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-fold/src/isolated_kernel.rs",
-      "twin": "crates/pedradb-fold/verus/isolated_id.rs",
+      "twin": "crates/pedradb-fold/src/isolated_kernel.rs",
       "aeneas": "scripts/aeneas_isolated.sh",
       "callers": [
         "crates/pedradb-fold/src/isolated_kernel.rs"
