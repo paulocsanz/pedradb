@@ -75,3 +75,15 @@ theorem ikey_seq_cmp_is_reverse (a b : U64) :
     key.ikey_seq_cmp a b = ok (core.cmp.impls.OrdU64.cmp b a) := by
   unfold key.ikey_seq_cmp
   rfl
+
+/-- Catalog entry: `encode` is capacity + `encode_into` + `Bytes::from`. Dual-unfold. -/
+theorem internal_key_encode_is_encode_into (self : key.InternalKey) :
+    key.InternalKey.encode self =
+      (do
+        let i ← bytes.bytes.Bytes.len self.user_key
+        let i1 ← i + 8#usize
+        let buf := alloc.vec.Vec.with_capacity U8 i1
+        let buf1 ← key.InternalKey.encode_into self buf
+        bytes.bytes.Bytes.Insts.CoreConvertFromVecU8.from buf1) := by
+  unfold key.InternalKey.encode
+  rfl
