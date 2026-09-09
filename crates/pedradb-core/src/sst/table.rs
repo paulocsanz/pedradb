@@ -1321,7 +1321,7 @@ impl SstTable {
         } else {
             max_sequence = file_max;
         }
-        if !c.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(c.data.len().saturating_sub(c.pos) as u64) {
             return Err(CoreError::Internal(format!(
                 "trailing bytes in SST {}",
                 path.display()
