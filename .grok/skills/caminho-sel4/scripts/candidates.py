@@ -396,7 +396,7 @@ def script_compose_board() -> None:
             print(f"  {glue} plan={plan} UNPAID order still inline{extra}")
     print(f"  unpaid_script={unpaid_script}/{len(GLUE_SCRIPTS)}")
     print(
-        "  leftover_next survey leftover is_empty()/len() counts outside skip/SOURCE/posix-cycle; named kernel not SA"
+        "  leftover_next rocksdb-compat compat_compact_once leftover if l0 == 0 matches batch_is_empty; named kernel not SA"
     )
     print("== compose glue callers (rank 5: unfold plan AND callee) ==")
     for glue, rel, tokens, callee, plan in GLUE_SCRIPTS:

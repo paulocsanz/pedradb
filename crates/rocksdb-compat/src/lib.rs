@@ -2635,7 +2635,7 @@ impl<E: PedraEnv> DB<E> {
                 _ => break,
             }
         }
-        if n == 0 {
+        if pedradb_core::write_admission_kernel::batch_is_empty(n as u64) {
             return Ok(false);
         }
         thread_local! {
