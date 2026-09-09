@@ -324,6 +324,13 @@ a linha quando há phasesΔ. Sem harness novo.
       (`peer_policy=rocks-default`, `sync=false`). p50 0.4 vs 0.2 µs.
       Pedra pays real WBWI; Rocks rust-rocksdb 0.22 adapter is last-write-wins
       overlay then DB get. Named loss. Not Linux cartaz. — status: `done`
+- [x] **P2.59** `mixgraph_like_mc4` (put + 2 get + seek, 4 clients)
+      in `COMPARE_SHAPES`, `BALANCE_SHAPES`, and `run_mixgraph_clients`.
+      Test `rfc0184_mixgraph_like_mc4_in_compare`. Darwin DIAG
+      `ratio=1.154` (108 k / 93.8 k QPS). Same-class async
+      (`peer_policy=rocks-default`, `sync=false`). p50 33 vs 22 µs
+      (Pedra loses p50; QPS from a shorter tail). Not Linux cartaz.
+      — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -396,6 +403,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.56 | p2 | bluestore_omap_read_mc4 COMPARE+BALANCE | done | Ceph omap-read mc4; Darwin DIAG 0.828×; JSON host-default not a win | 2026-09-08 |
 | P2.57 | p2 | myrocks_read_only_mc4 COMPARE+BALANCE | done | MyRocks oltp_read_only mc4; Darwin DIAG 1.870; JSON host-default not a win | 2026-09-08 |
 | P2.58 | p2 | wbwi_read_your_writes_mc4 COMPARE+BALANCE | done | WBWI overlay-get mc4; Darwin DIAG 0.410× named loss | 2026-09-08 |
+| P2.59 | p2 | mixgraph_like_mc4 COMPARE+BALANCE | done | mixgraph put+2get+seek mc4; Darwin DIAG 1.154× not Linux cartaz | 2026-09-08 |
 
 ## Acceptance Criteria
 
@@ -463,7 +471,8 @@ a linha quando há phasesΔ. Sem harness novo.
   `rfc0184_kafka_changelog_flush_mc4_in_compare` (P2.55);
   `rfc0184_bluestore_omap_read_mc4_in_compare` (P2.56);
   `rfc0184_myrocks_read_only_mc4_in_compare` (P2.57);
-  `rfc0184_wbwi_read_your_writes_mc4_in_compare` (P2.58).
+  `rfc0184_wbwi_read_your_writes_mc4_in_compare` (P2.58);
+  `rfc0184_mixgraph_like_mc4_in_compare` (P2.59).
 - **Telemetry / Analytics:** uma linha `diagnose dominant=… lever=…`;
   `benches[].diagnose.lever` no JSON; compare copia para a row.
   scale `get_hit` / `lookup_100` / `probe_hit` imprimem `diagnose get … class=…` (P2.6/P2.7/P2.21).
