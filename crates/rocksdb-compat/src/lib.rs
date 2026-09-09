@@ -4157,7 +4157,11 @@ where
                         // steals the lock from apply. 1c still counts as
                         // `writes_active() == 1`, so that predicate is not
                         // enough — skip while a commit is inflight.
-                        if inner.with_read(|db| db.commit_inflight() > 0) {
+                        if inner.with_read(|db| {
+                            !pedradb_core::write_admission_kernel::batch_is_empty(
+                                db.commit_inflight() as u64,
+                            )
+                        }) {
                             wait = poll;
                             continue;
                         }
