@@ -634,7 +634,11 @@ fn bound_cf_prefix(b: Bound<&[u8]>) -> Option<&[u8]> {
 
 /// [`InternalKey`] order on `(seq, kind)` only (user key already equal).
 fn version_newer(a: &Version, b: &Version) -> bool {
-    a.key.sequence > b.key.sequence || (a.key.sequence == b.key.sequence && a.key.kind > b.key.kind)
+    match crate::key::ikey_seq_cmp(a.key.sequence, b.key.sequence) {
+        Ordering::Less => true,
+        Ordering::Greater => false,
+        Ordering::Equal => a.key.kind > b.key.kind,
+    }
 }
 
 fn ver_cmp(
@@ -643,7 +647,7 @@ fn ver_cmp(
     b_seq: SequenceNumber,
     b_kind: ValueType,
 ) -> Ordering {
-    match b_seq.cmp(&a_seq) {
+    match crate::key::ikey_seq_cmp(a_seq, b_seq) {
         Ordering::Equal => b_kind.cmp(&a_kind),
         o => o,
     }
@@ -2106,6 +2110,33 @@ impl MemTable {
 mod tests {
     use super::*;
     use std::ops::Bound;
+
+    #[test]
+    fn version_newer_and_ver_cmp_call_ikey_seq_cmp() {
+        let src = include_str!("memtable.rs");
+        let newer = src
+            .split("fn version_newer")
+            .nth(1)
+            .and_then(|s| s.split("fn ver_cmp").next())
+            .expect("version_newer");
+        let cmp = src
+            .split("fn ver_cmp")
+            .nth(1)
+            .and_then(|s| s.split("fn ").next())
+            .expect("ver_cmp");
+        assert!(
+            newer.contains("ikey_seq_cmp("),
+            "memtable newest-wins must call catalog ikey_seq_cmp"
+        );
+        assert!(
+            cmp.contains("ikey_seq_cmp("),
+            "ver_cmp must call catalog ikey_seq_cmp"
+        );
+        assert!(
+            !cmp.contains("b_seq.cmp(&a_seq)"),
+            "seq-desc if must not stay inline in ver_cmp"
+        );
+    }
 
     /// Oracle for [`MemTable::bulk_span`] — the legacy whole-table scan
     /// (`Db::bulk_span_level_scan`) verbatim. Contract under test: whenever
