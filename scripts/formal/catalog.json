@@ -531,8 +531,9 @@
       "id": "recover_truncate",
       "finding": "RFC-0132",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
-      "twin": "crates/pedradb-raft/verus/membership_joint.rs",
+      "twin": "crates/pedradb-raft/src/membership_kernel.rs",
       "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
@@ -561,8 +562,9 @@
       "id": "recover_drop_orphan",
       "finding": "RFC-0133",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
-      "twin": "crates/pedradb-raft/verus/membership_joint.rs",
+      "twin": "crates/pedradb-raft/src/membership_kernel.rs",
       "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
@@ -588,8 +590,9 @@
       "id": "recover_abort",
       "finding": "RFC-0134",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
-      "twin": "crates/pedradb-raft/verus/membership_joint.rs",
+      "twin": "crates/pedradb-raft/src/membership_kernel.rs",
       "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
@@ -618,8 +621,9 @@
       "id": "persist_meta",
       "finding": "RFC-0135",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
-      "twin": "crates/pedradb-raft/verus/membership_joint.rs",
+      "twin": "crates/pedradb-raft/src/membership_kernel.rs",
       "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
@@ -645,8 +649,9 @@
       "id": "persist_hist",
       "finding": "RFC-0136",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
-      "twin": "crates/pedradb-raft/verus/membership_joint.rs",
+      "twin": "crates/pedradb-raft/src/membership_kernel.rs",
       "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
@@ -672,8 +677,9 @@
       "id": "persist_fence",
       "finding": "RFC-0137",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
-      "twin": "crates/pedradb-raft/verus/membership_joint.rs",
+      "twin": "crates/pedradb-raft/src/membership_kernel.rs",
       "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
@@ -699,8 +705,9 @@
       "id": "force_clear",
       "finding": "RFC-0138",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
-      "twin": "crates/pedradb-raft/verus/membership_joint.rs",
+      "twin": "crates/pedradb-raft/src/membership_kernel.rs",
       "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
@@ -726,8 +733,9 @@
       "id": "drop_preimages",
       "finding": "RFC-0139",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
-      "twin": "crates/pedradb-raft/verus/membership_joint.rs",
+      "twin": "crates/pedradb-raft/src/membership_kernel.rs",
       "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
@@ -753,8 +761,9 @@
       "id": "open_peer_disk",
       "finding": "RFC-0140",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
-      "twin": "crates/pedradb-raft/verus/membership_joint.rs",
+      "twin": "crates/pedradb-raft/src/membership_kernel.rs",
       "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
@@ -780,8 +789,9 @@
       "id": "local_id_member",
       "finding": "RFC-0141",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
-      "twin": "crates/pedradb-raft/verus/membership_joint.rs",
+      "twin": "crates/pedradb-raft/src/membership_kernel.rs",
       "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
@@ -807,8 +817,9 @@
       "id": "reader_local",
       "finding": "RFC-0142",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
-      "twin": "crates/pedradb-raft/verus/membership_joint.rs",
+      "twin": "crates/pedradb-raft/src/membership_kernel.rs",
       "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
@@ -891,8 +902,9 @@
       "id": "removed_step_down",
       "finding": "RFC-0145",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
-      "twin": "crates/pedradb-raft/verus/membership_joint.rs",
+      "twin": "crates/pedradb-raft/src/membership_kernel.rs",
       "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
@@ -918,8 +930,9 @@
       "id": "hint_member",
       "finding": "RFC-0146",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
-      "twin": "crates/pedradb-raft/verus/membership_joint.rs",
+      "twin": "crates/pedradb-raft/src/membership_kernel.rs",
       "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
@@ -946,8 +959,9 @@
       "id": "drop_repl_slot",
       "finding": "RFC-0147",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
-      "twin": "crates/pedradb-raft/verus/membership_joint.rs",
+      "twin": "crates/pedradb-raft/src/membership_kernel.rs",
       "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
@@ -975,8 +989,9 @@
       "id": "drop_sent_through",
       "finding": "RFC-0148",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
-      "twin": "crates/pedradb-raft/verus/membership_joint.rs",
+      "twin": "crates/pedradb-raft/src/membership_kernel.rs",
       "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
@@ -3976,9 +3991,10 @@
       "id": "sched_plant_joint",
       "finding": "RFC-0068",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-store/src/membership_kernel.rs",
-      "twin": "crates/pedradb-raft/verus/membership_joint.rs",
-      "aeneas": "scripts/aeneas_membership.sh",
+      "twin": "crates/pedradb-store/src/membership_kernel.rs",
+      "aeneas": "scripts/aeneas_store_membership.sh",
       "callers": [
         "crates/pedradb-world/src/lib.rs"
       ],
@@ -4047,8 +4063,9 @@
       "id": "liveness_claim",
       "finding": "RFC-0069",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
-      "twin": "crates/pedradb-raft/verus/membership_joint.rs",
+      "twin": "crates/pedradb-raft/src/membership_kernel.rs",
       "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs",

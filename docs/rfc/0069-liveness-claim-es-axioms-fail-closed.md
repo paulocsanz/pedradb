@@ -38,7 +38,7 @@
 - [x] **P1.2** World refuses a liveness flag unless axioms are set — status: `done` (`world_run_refuses_eventual_election_without_es_axioms`)
 
 ### P2 — later
-- [x] **P2.1** Verus twin of `liveness_admitted` — status: `done` (`verus/membership_joint.rs` + catalog `liveness_claim`)
+- [x] **P2.1** Verus twin of `liveness_admitted` — status: `done` (payment now the Aeneas extract of the raft kernel `membership_kernel.rs` — `scripts/aeneas_membership.sh`; the `verus/membership_joint.rs` mirror twin was deleted, catalog `liveness_claim`)
 - [x] **P2.2** montanha-tcp / cluster_real cannot print “live” without naming ES — status: `done` (`elect_claim_banner`; `cluster_real` + `montanha-tcp` elect-wait)
 
 ## Status (living — update with every PR)
@@ -60,7 +60,7 @@
   - `claim_eventual_election_refused_without_es_axioms`: `open` + `elect_all` succeeds (bounded); `claim_eventual_election(false,true,true)` is false; all-true is true.
   - P1.1 `tcp_node_model_liveness_claim_needs_es_axioms`: `LivenessModel::fixed()` admits; unrestricted / no ES-3 / broken drain refuse; AS-IS would admit. Existing BFS tests (`liveness_holds_under_eventual_synchrony_axioms`, `liveness_is_refuted_without_axioms`, …) call the same kernel on the model path.
   - P1.2 `world_run_refuses_eventual_election_without_es_axioms`: live `World::run` default axioms off → `claim_eventual_election` false; AS-IS would admit; naming ES-1∧ES-2∧ES-3 admits.
-  - P2.1 catalog pair `liveness_claim` entry `liveness_admitted` with Verus twin in `verus/membership_joint.rs` (freeze of twin files; `verus` not on PATH).
+  - P2.1 catalog pair `liveness_claim` entry `liveness_admitted` paid by the Aeneas extract of `crates/pedradb-raft/src/membership_kernel.rs` (`scripts/aeneas_membership.sh`, single artifact; the `verus/membership_joint.rs` twin was deleted — twin bodies can drift).
   - P2.2 `elect_claim_banner(false,false,false)` is `bounded-elect not-eventual` (no `live`); AS-IS is `live`. `claim_eventual_election_refused_without_es_axioms` after live `elect_all`. `cluster_real` / `montanha-tcp` elect-wait print the banner via `liveness_admitted`.
 - **Telemetry / Analytics:** none — honesty invariant.
 - **Documentation:** this RFC; `residuals.json` `R-es` close-text + owner 0069.

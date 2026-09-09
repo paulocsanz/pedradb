@@ -563,19 +563,19 @@ mod tests {
             "catalog pair queued_leave_finish must stay"
         );
         assert!(
-            catalog.contains("crates/pedradb-raft/verus/membership_joint.rs"),
-            "twin path must stay membership_joint.rs"
+            catalog.contains("\"twin\": \"crates/pedradb-raft/src/membership_kernel.rs\""),
+            "twin path must stay the kernel (single artifact; mirror twin deleted)"
         );
         assert!(
-            catalog.contains("scripts/verus_membership_joint.sh"),
-            "verus script must stay registered (freeze, not exec)"
+            catalog.contains("\"aeneas\": \"scripts/aeneas_membership.sh\""),
+            "aeneas extract script must stay registered (freeze, not exec)"
         );
         let twin =
-            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
-                .expect("membership_joint.rs");
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/src/membership_kernel.rs"))
+                .expect("membership_kernel.rs");
         assert!(
             twin.contains("fn queued_leave_finish_ok"),
-            "twin freeze of queued_leave_finish_ok is not a Verus exec claim"
+            "kernel freeze of queued_leave_finish_ok is the term"
         );
     }
 
@@ -606,11 +606,11 @@ mod tests {
             "catalog entry must stay queued_leave_finish_ok"
         );
         let twin =
-            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
-                .expect("membership_joint.rs");
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/src/membership_kernel.rs"))
+                .expect("membership_kernel.rs");
         assert!(
             twin.contains("fn queued_leave_finish_ok"),
-            "twin freeze is not a Verus exec claim"
+            "kernel freeze is the term the extract pays"
         );
     }
 
@@ -858,8 +858,8 @@ mod tests {
             "catalog entry must stay high_water_at_least"
         );
         let twin =
-            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
-                .expect("membership_joint.rs");
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/src/membership_kernel.rs"))
+                .expect("membership_kernel.rs");
         assert!(
             twin.contains("fn high_water_at_least"),
             "twin freeze is not a Verus exec claim"
@@ -956,8 +956,8 @@ mod tests {
             "catalog entry must stay participating_if_member"
         );
         let twin =
-            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
-                .expect("membership_joint.rs");
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/src/membership_kernel.rs"))
+                .expect("membership_kernel.rs");
         assert!(
             twin.contains("fn participating_if_member"),
             "twin freeze is not a Verus exec claim"
@@ -1017,8 +1017,8 @@ mod tests {
             "recover_apply catalog pair must stay"
         );
         let twin =
-            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
-                .expect("membership_joint.rs");
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/src/membership_kernel.rs"))
+                .expect("membership_kernel.rs");
         assert!(
             twin.contains("fn recover_must_apply"),
             "twin freeze is not a Verus exec claim"
@@ -1078,8 +1078,8 @@ mod tests {
             "recover_apply_node catalog pair must stay"
         );
         let twin =
-            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
-                .expect("membership_joint.rs");
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/src/membership_kernel.rs"))
+                .expect("membership_kernel.rs");
         assert!(
             twin.contains("fn recover_apply_node_counts"),
             "twin freeze is not a Verus exec claim"
@@ -1139,8 +1139,8 @@ mod tests {
             "recover_truncate catalog pair must stay"
         );
         let twin =
-            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
-                .expect("membership_joint.rs");
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/src/membership_kernel.rs"))
+                .expect("membership_kernel.rs");
         assert!(
             twin.contains("fn recover_truncate_node_counts"),
             "twin freeze is not a Verus exec claim"
@@ -1200,8 +1200,8 @@ mod tests {
             "recover_drop_orphan catalog pair must stay"
         );
         let twin =
-            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
-                .expect("membership_joint.rs");
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/src/membership_kernel.rs"))
+                .expect("membership_kernel.rs");
         assert!(
             twin.contains("fn recover_drop_orphan_seg"),
             "twin freeze is not a Verus exec claim"
@@ -1261,8 +1261,8 @@ mod tests {
             "recover_abort catalog pair must stay"
         );
         let twin =
-            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
-                .expect("membership_joint.rs");
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/src/membership_kernel.rs"))
+                .expect("membership_kernel.rs");
         assert!(
             twin.contains("fn recover_abort_node_counts"),
             "twin freeze is not a Verus exec claim"
@@ -1322,8 +1322,8 @@ mod tests {
             "persist_meta catalog pair must stay"
         );
         let twin =
-            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
-                .expect("membership_joint.rs");
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/src/membership_kernel.rs"))
+                .expect("membership_kernel.rs");
         assert!(
             twin.contains("fn persist_meta_node_counts"),
             "twin freeze is not a Verus exec claim"
@@ -1383,8 +1383,8 @@ mod tests {
             "persist_hist catalog pair must stay"
         );
         let twin =
-            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
-                .expect("membership_joint.rs");
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/src/membership_kernel.rs"))
+                .expect("membership_kernel.rs");
         assert!(
             twin.contains("fn persist_hist_node_counts"),
             "twin freeze is not a Verus exec claim"
@@ -1444,8 +1444,8 @@ mod tests {
             "persist_fence catalog pair must stay"
         );
         let twin =
-            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
-                .expect("membership_joint.rs");
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/src/membership_kernel.rs"))
+                .expect("membership_kernel.rs");
         assert!(
             twin.contains("fn persist_fence_node_counts"),
             "twin freeze is not a Verus exec claim"
@@ -1505,8 +1505,8 @@ mod tests {
             "force_clear catalog pair must stay"
         );
         let twin =
-            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
-                .expect("membership_joint.rs");
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/src/membership_kernel.rs"))
+                .expect("membership_kernel.rs");
         assert!(
             twin.contains("fn force_clear_node_counts"),
             "twin freeze is not a Verus exec claim"
@@ -1566,8 +1566,8 @@ mod tests {
             "drop_preimages catalog pair must stay"
         );
         let twin =
-            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
-                .expect("membership_joint.rs");
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/src/membership_kernel.rs"))
+                .expect("membership_kernel.rs");
         assert!(
             twin.contains("fn drop_preimages_node_counts"),
             "twin freeze is not a Verus exec claim"
@@ -1627,8 +1627,8 @@ mod tests {
             "open_peer_disk catalog pair must stay"
         );
         let twin =
-            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
-                .expect("membership_joint.rs");
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/src/membership_kernel.rs"))
+                .expect("membership_kernel.rs");
         assert!(
             twin.contains("fn open_peer_uses_disk"),
             "twin freeze is not a Verus exec claim"
@@ -1688,8 +1688,8 @@ mod tests {
             "local_id_member catalog pair must stay"
         );
         let twin =
-            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
-                .expect("membership_joint.rs");
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/src/membership_kernel.rs"))
+                .expect("membership_kernel.rs");
         assert!(
             twin.contains("fn local_id_if_member"),
             "twin freeze is not a Verus exec claim"
@@ -1749,8 +1749,8 @@ mod tests {
             "reader_local catalog pair must stay"
         );
         let twin =
-            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
-                .expect("membership_joint.rs");
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/src/membership_kernel.rs"))
+                .expect("membership_kernel.rs");
         assert!(
             twin.contains("fn reader_id_local"),
             "twin freeze is not a Verus exec claim"
@@ -1810,8 +1810,8 @@ mod tests {
             "discard_uncommitted catalog pair must stay"
         );
         let twin =
-            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
-                .expect("membership_joint.rs");
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/src/membership_kernel.rs"))
+                .expect("membership_kernel.rs");
         assert!(
             twin.contains("fn discard_node_counts"),
             "twin freeze is not a Verus exec claim"
@@ -1871,8 +1871,8 @@ mod tests {
             "discard_leader catalog pair must stay"
         );
         let twin =
-            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
-                .expect("membership_joint.rs");
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/src/membership_kernel.rs"))
+                .expect("membership_kernel.rs");
         assert!(
             twin.contains("fn discard_leader_local"),
             "twin freeze is not a Verus exec claim"
@@ -1932,8 +1932,8 @@ mod tests {
             "removed_step_down catalog pair must stay"
         );
         let twin =
-            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
-                .expect("membership_joint.rs");
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/src/membership_kernel.rs"))
+                .expect("membership_kernel.rs");
         assert!(
             twin.contains("fn removed_steps_down"),
             "twin freeze is not a Verus exec claim"
@@ -1993,8 +1993,8 @@ mod tests {
             "hint_member catalog pair must stay"
         );
         let twin =
-            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
-                .expect("membership_joint.rs");
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/src/membership_kernel.rs"))
+                .expect("membership_kernel.rs");
         assert!(
             twin.contains("fn hint_if_member"),
             "twin freeze is not a Verus exec claim"
@@ -2054,8 +2054,8 @@ mod tests {
             "drop_repl_slot catalog pair must stay"
         );
         let twin =
-            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
-                .expect("membership_joint.rs");
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/src/membership_kernel.rs"))
+                .expect("membership_kernel.rs");
         assert!(
             twin.contains("fn drop_repl_slot"),
             "twin freeze is not a Verus exec claim"
@@ -2115,8 +2115,8 @@ mod tests {
             "drop_sent_through catalog pair must stay"
         );
         let twin =
-            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
-                .expect("membership_joint.rs");
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/src/membership_kernel.rs"))
+                .expect("membership_kernel.rs");
         assert!(
             twin.contains("fn drop_sent_through"),
             "twin freeze is not a Verus exec claim"
@@ -2145,8 +2145,8 @@ mod tests {
             "identity_before_applied catalog pair must stay"
         );
         let twin =
-            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
-                .expect("membership_joint.rs");
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/src/membership_kernel.rs"))
+                .expect("membership_kernel.rs");
         assert!(
             twin.contains("fn membership_identity_before_applied"),
             "twin freeze is not a Verus exec claim"
