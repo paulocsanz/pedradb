@@ -1975,7 +1975,9 @@ impl<E: Env> ConcurrentDb<E> {
         if self.writes.active.load(Ordering::Relaxed) > 0 {
             return false;
         }
-        if crate::flush_kernel::occ_snap_uses_published(self.commit_inflight() > 0) {
+        if crate::flush_kernel::occ_snap_uses_published(
+            !crate::write_admission_kernel::batch_is_empty(self.commit_inflight() as u64),
+        ) {
             return false;
         }
         let last = self.writes.last_complete_ns.load(Ordering::Relaxed);
