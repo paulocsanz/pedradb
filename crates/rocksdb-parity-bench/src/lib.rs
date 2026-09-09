@@ -321,6 +321,8 @@ pub const COMPARE_SHAPES: &[&str] = &[
     "wbwi_read_your_writes_mc4",
     // RFC-0184 P2.59: mixgraph-like mc4 — 1c is already in COMPARE.
     "mixgraph_like_mc4",
+    // RFC-0184 P2.60: Oxigraph triple-put mc4 — 1c is already in COMPARE.
+    "oxigraph_triple_put_mc4",
 ];
 
 /// Length of the RFC-0041 official prefix of [`COMPARE_SHAPES`].
@@ -4191,6 +4193,84 @@ impl YcsbRunner {
         blocks
     }
 
+    /// RFC-0184 P2.60: oxigraph_triple_put at N clients (WriteBatch ingest).
+    pub fn run_oxigraph_put_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
+        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
+        let full = format!("oxigraph_triple_put_mc{clients}");
+        if !shape_wanted(&full) {
+            return Vec::new();
+        }
+        e.set_write_sync(write_sync_for_suite("oxigraph"));
+        let records = self.cfg.records;
+        let cfg_ops = self.cfg.ops;
+        let batch = self.cfg.batch;
+        let yval = std::sync::Arc::new(vec![b'x'; self.cfg.payload]);
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+        let phase0 = e.write_phase_snapshot();
+        let t0 = Instant::now();
+        let mut lats = Vec::with_capacity(cfg_ops * clients);
+        let mut errors = 0u64;
+        std::thread::scope(|s| {
+            let handles: Vec<_> = (0..clients)
+                .map(|c| {
+                    let barrier = barrier.clone();
+                    let yval = yval.clone();
+                    s.spawn(move || {
+                        let mut rng =
+                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
+                        let mut lats = Vec::with_capacity(cfg_ops);
+                        let mut errors = 0u64;
+                        barrier.wait();
+                        for _ in 0..cfg_ops {
+                            let t = Instant::now();
+                            let mut wb = Vec::with_capacity(batch);
+                            for p in 0..batch {
+                                let s = self.pick(&mut rng, records);
+                                let o = self.pick(&mut rng, records);
+                                wb.push(CfWrite::Put {
+                                    cf: "default",
+                                    k: tkey(s, (p % 8) as u16, o),
+                                    v: yval.as_ref().clone(),
+                                });
+                            }
+                            if !e.batch(std::mem::take(&mut wb)) {
+                                errors += 1;
+                            }
+                            lats.push(ms(t));
+                        }
+                        (lats, errors)
+                    })
+                })
+                .collect();
+            for h in handles {
+                let (mut l, err) = h.join().expect("oxigraph put client thread");
+                errors += err;
+                lats.append(&mut l);
+            }
+        });
+        let wall = t0.elapsed();
+        eprintln!(
+            "[rocks-parity] {full} done ops={} errors={errors}",
+            cfg_ops * clients
+        );
+        let mut blocks = vec![summarize_mc(
+            &full,
+            cfg_ops * clients,
+            wall,
+            &mut lats,
+            clients,
+            errors,
+        )];
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, clients as u64, 0.0, 0);
+            eprint_write_diagnose(&full, &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
+        blocks
+    }
+
     /// RFC-0043 P2.7 — rust-rocksdb APIs that were catalog-`blocked`:
     /// mixgraph-like put/get/seek mix, `WriteBatchWithIndex`, compaction
     /// filter, `SstFileWriter`+ingest. Opt-in `ROCKS_PARITY_SUITE=rocksapi`.
@@ -5909,6 +5989,26 @@ mod tests {
     }
 
     #[test]
+    fn rfc0184_oxigraph_triple_put_mc4_in_compare() {
+        assert!(
+            COMPARE_SHAPES.contains(&"oxigraph_triple_put_mc4"),
+            "Oxigraph triple-put mc4 must be on the cartaz"
+        );
+        assert!(shape_wanted_in(
+            "oxigraph_triple_put_mc4",
+            Some("oxigraph_triple_put_mc4")
+        ));
+        assert!(
+            !shape_wanted_in("oxigraph_triple_put", Some("oxigraph_triple_put_mc4")),
+            "1c oxigraph_triple_put must not leak into ONLY=oxigraph_triple_put_mc4"
+        );
+        assert!(
+            !shape_wanted_in("oxigraph_spo_lookup", Some("oxigraph_triple_put_mc4")),
+            "1c spo_lookup must not leak into ONLY=oxigraph_triple_put_mc4"
+        );
+    }
+
+    #[test]
     fn rfc0178_mc_only_selects_full_mc_name() {
         assert!(shape_wanted_in(
             "deps_cache_overwrite_mc4",
@@ -6403,6 +6503,7 @@ mod tests {
             "myrocks_read_only_mc4",
             "wbwi_read_your_writes_mc4",
             "mixgraph_like_mc4",
+            "oxigraph_triple_put_mc4",
         ] {
             assert!(
                 COMPARE_SHAPES.contains(&name),
