@@ -283,7 +283,7 @@ pub(crate) fn share_consecutive_equal_values(ops: &mut [WriteOp]) {
         let cur = &mut tail[0];
         if cur.kind != ValueType::Value
             || prev.kind != ValueType::Value
-            || cur.value.is_empty()
+            || crate::write_admission_kernel::batch_is_empty(cur.value.len() as u64)
             || std::ptr::eq(prev.value.as_ptr(), cur.value.as_ptr())
             || prev.value.as_ref() != cur.value.as_ref()
         {
