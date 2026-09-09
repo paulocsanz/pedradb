@@ -102,3 +102,43 @@ fn failing_env_arc_hard_floor_refuses_put_get_ok() {
     assert!(!db.is_durability_fenced());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// RFC-0179 P1.2: between hard and soft the write is Reclaim, not Refuse —
+/// put still Ok after the named reclaim plan (WAL recycle + vlog GC + SST).
+#[test]
+fn failing_env_reclaim_band_put_ok() {
+    use pedradb_core::disk_pressure_kernel::{
+        compact_allowed_under_pressure, disk_pressure_admit, disk_pressure_reclaim_plan,
+        DiskPressureAdmit, DISK_HARD_FREE_BYTES,
+    };
+
+    assert!(matches!(
+        disk_pressure_admit(Some(DISK_HARD_FREE_BYTES)),
+        DiskPressureAdmit::Reclaim
+    ));
+    assert!(compact_allowed_under_pressure(Some(DISK_HARD_FREE_BYTES)));
+    let plan = disk_pressure_reclaim_plan(true);
+    assert!(plan.rotate_wal && plan.compact_vlog && plan.compact_sst);
+
+    let dir = tmp();
+    let env = FailingEnv::passing();
+    let handle = env.clone();
+    let mut db = Db::open_with_env(
+        &dir,
+        OpenOptions {
+            sync: false,
+            auto_flush_bytes: None,
+            auto_compact_sst_count: None,
+            auto_compact_sst_bytes: None,
+            ..OpenOptions::default()
+        },
+        env,
+    )
+    .unwrap();
+    db.put(b"k", b"v").unwrap();
+    handle.set_available_bytes(Some(DISK_HARD_FREE_BYTES));
+    db.put(b"k2", b"v2").unwrap();
+    assert_eq!(db.get(b"k2").as_deref(), Some(b"v2".as_ref()));
+    assert!(!db.is_durability_fenced());
+    let _ = std::fs::remove_dir_all(&dir);
+}
