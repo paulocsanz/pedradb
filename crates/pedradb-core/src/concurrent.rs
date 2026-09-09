@@ -1873,7 +1873,10 @@ impl<E: Env> ConcurrentDb<E> {
                     crate::group_commit_kernel::rwlock_client_may_read(true, false),
                     "try_read holds the read guard"
                 );
-                if crate::flush_kernel::occ_snap_lock_order(true, g.commit_inflight() > 0) {
+                if crate::flush_kernel::occ_snap_lock_order(
+                    true,
+                    !crate::write_admission_kernel::batch_is_empty(g.commit_inflight() as u64),
+                ) {
                     self.published_seq.load(Ordering::Acquire)
                 } else {
                     g.last_sequence()
