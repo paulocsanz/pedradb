@@ -1224,7 +1224,7 @@ fn main() {
                     total_ok += ok;
                     all.extend(l);
                 }
-                if !all.is_empty() {
+                if !pedradb_core::write_admission_kernel::batch_is_empty(all.len() as u64) {
                     benches.push(summarize(
                         &format!("D4_tcp_mt_put_{n_threads}thr"),
                         total_ok as usize,
