@@ -211,7 +211,7 @@ impl InProcessCluster {
     /// Whether the cluster has zero nodes (always false after [`Self::new`]).
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.nodes.is_empty()
+        pedradb_core::write_admission_kernel::batch_is_empty(self.nodes.len() as u64)
     }
 
     /// Majority size (`n/2 + 1`).
