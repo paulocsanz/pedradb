@@ -1,7 +1,7 @@
 # RFC-0179 — Disk pressure: recusar writes, não corromper
 
-**Status:** in-progress (P0+P1.4+P1.5 done; P1.1–P1.3 / P2 open)
-**Updated:** 2026-09-07
+**Status:** in-progress (P0+P1.1+P1.4+P1.5 done; P1.2–P1.3 / P2 open)
+**Updated:** 2026-09-09
 **ID:** 0179
 **Parents:** [0050](0050-nine-axis-robustness.md) (ENOSPC mid-flush já cerca),
 [0173](0173-bounded-cache-ram-degrade.md) (`DONTNEED` liberta RAM, não disco)
@@ -77,7 +77,7 @@ admitido (não há compact); só o hard recusa.
 
 ### P1 — inject + mais reclaim + PITR/HA
 
-- [ ] **P1.1** `FailingEnv` inject de `available_bytes` — status: `todo`
+- [x] **P1.1** `FailingEnv` inject de `available_bytes` — status: `done`
 - [ ] **P1.2** WAL recycle / vlog GC no reclaim (além de compact SST) —
       status: `todo`
 - [ ] **P1.3** sonda de telemetria (RFC-0169, default off) — status: `todo`
@@ -101,7 +101,7 @@ admitido (não há compact); só o hard recusa.
 | P0.2 | p0 | Env + posix statvfs | done | pedradb-posix / StdEnv | 2026-09-07 |
 | P0.3 | p0 | admit + put hard-floor | done | db.rs SpaceEnv test | 2026-09-07 |
 | P0.4 | p0 | tracing warn na transição | done | disk_pressure_log AtomicU8 | 2026-09-07 |
-| P1.1 | p1 | FailingEnv inject | todo | — | 2026-09-07 |
+| P1.1 | p1 | FailingEnv inject | done | failing.rs set_available_bytes | 2026-09-09 |
 | P1.2 | p1 | WAL/vlog reclaim | todo | — | 2026-09-07 |
 | P1.3 | p1 | telemetry probe | todo | — | 2026-09-07 |
 | P1.4 | p1 | PITR dest/ship recusa hard | done | ops restore_pitr / ship_wal | 2026-09-07 |

@@ -102,6 +102,10 @@ struct FailState {
     delay_ticks: Cell<u64>,
     /// Stall ticks to add each time a counted op passes while armed.
     delay_per_op: Cell<u64>,
+    /// RFC-0179 P1.1: when true, `Env::available_bytes` returns `available`.
+    space_injected: Cell<bool>,
+    /// Injected free bytes (`None` = unknown probe). Ignored until injected.
+    available: Cell<Option<u64>>,
 }
 
 impl FailState {
@@ -239,6 +243,8 @@ impl<E: Env> FailingEnv<E> {
             short_write_cap: Cell::new(None),
             delay_ticks: Cell::new(0),
             delay_per_op: Cell::new(0),
+            space_injected: Cell::new(false),
+            available: Cell::new(None),
         };
         Self {
             inner,
@@ -303,6 +309,14 @@ impl<E: Env> FailingEnv<E> {
     #[must_use]
     pub fn delay_ticks(&self) -> u64 {
         self.state.delay_ticks.get()
+    }
+
+    /// RFC-0179 P1.1: inject `Env::available_bytes` (`None` = unknown probe).
+    /// Shared across clones (`Rc`), so a handle kept outside `Db` can drop
+    /// free space after open.
+    pub fn set_available_bytes(&self, n: Option<u64>) {
+        self.state.space_injected.set(true);
+        self.state.available.set(n);
     }
 
     /// Heal even a permanent fault.
@@ -506,6 +520,14 @@ impl<E: Env> Env for FailingEnv<E> {
     fn is_dir(&self, path: &Path) -> io::Result<bool> {
         self.state.gate_class(OpClass::Meta)?;
         self.inner.is_dir(path)
+    }
+
+    fn available_bytes(&self, path: &Path) -> io::Result<Option<u64>> {
+        if self.state.space_injected.get() {
+            Ok(self.state.available.get())
+        } else {
+            self.inner.available_bytes(path)
+        }
     }
 }
 
