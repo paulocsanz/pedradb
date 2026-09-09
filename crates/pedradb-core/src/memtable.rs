@@ -625,7 +625,7 @@ impl MemTable {
     /// Whether no entries are stored.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.entries == 0
+        crate::write_admission_kernel::batch_is_empty(self.entries as u64)
     }
 
     /// Approximate memory used by keys and values (for flush thresholds).
