@@ -202,3 +202,13 @@ theorem internal_key_decode_is_len_then_unpack (encoded : Slice U8) :
               key.InternalKey (core.convert.FromSame error.CoreError) residual) := by
   unfold key.InternalKey.decode
   rfl
+
+/-- Catalog entry: PartialEq is `cmp == Equal`. Dual-unfold. -/
+theorem internal_key_eq_is_cmp_equal
+    (self other : key.InternalKey) :
+    key.InternalKey.Insts.CoreCmpPartialEqInternalKey.eq self other =
+      (do
+        let o ← key.InternalKey.Insts.CoreCmpOrd.cmp self other
+        core.cmp.Ordering.Insts.CoreCmpPartialEqOrdering.eq o Ordering.eq) := by
+  unfold key.InternalKey.Insts.CoreCmpPartialEqInternalKey.eq
+  rfl
