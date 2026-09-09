@@ -826,10 +826,13 @@ impl SstTable {
 
         match point {
             Lookup::Found(v) => {
-                if self.range_deleted(user_key, point_seq, snapshot) {
-                    Lookup::Deleted
-                } else {
+                if crate::merge::visible_at(
+                    crate::key::ValueType::Value,
+                    self.range_deleted(user_key, point_seq, snapshot),
+                ) {
                     Lookup::Found(v)
+                } else {
+                    Lookup::Deleted
                 }
             }
             Lookup::Deleted => Lookup::Deleted,
@@ -3236,6 +3239,24 @@ mod tests {
         assert!(
             !body.contains("file_before_end"),
             "Bound-match if must not stay inline in overlaps_user_range"
+        );
+    }
+
+    #[test]
+    fn sst_get_found_calls_visible_at() {
+        let src = include_str!("table.rs");
+        let body = src
+            .split("pub fn get(")
+            .nth(1)
+            .and_then(|s| s.split("pub(crate) fn has_range_tombstones").next())
+            .expect("SstTable::get");
+        assert!(
+            body.contains("visible_at("),
+            "SST get Found range-hide if must call catalog visible_at"
+        );
+        assert!(
+            !body.contains("if self.range_deleted(user_key, point_seq, snapshot)"),
+            "Found+range_deleted must not stay inline"
         );
     }
 
