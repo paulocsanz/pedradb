@@ -2273,7 +2273,9 @@ fn decode_block_bytes(
     };
     let mut bc = Cursor::new(&plain);
     let mut entries = Vec::new();
-    while !bc.is_empty() {
+    while !crate::write_admission_kernel::batch_is_empty(
+        bc.data.len().saturating_sub(bc.pos) as u64,
+    ) {
         entries.push(read_entry(&mut bc)?);
     }
     Ok(entries)
