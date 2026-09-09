@@ -1556,7 +1556,7 @@ impl MemTable {
         snapshot: SequenceNumber,
         out: &mut Vec<crate::merge::RangeTombstone>,
     ) {
-        if self.range_tombstones == 0 {
+        if crate::write_admission_kernel::batch_is_empty(self.range_tombstones as u64) {
             return;
         }
         for (uk, vers) in &self.map {
