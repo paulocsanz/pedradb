@@ -1558,9 +1558,10 @@
       "id": "range_covers",
       "finding": "F30",
       "twin_kind": "model",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/merge.rs",
-      "twin": "crates/pedradb-core/verus/range_covers.rs",
-      "verus": "scripts/verus_range_covers.sh",
+      "twin": "crates/pedradb-core/src/merge.rs",
+      "aeneas": "scripts/aeneas_merge.sh",
       "callers": [
         "crates/pedradb-core/src/merge.rs",
         "crates/pedradb-core/src/db.rs"
