@@ -1890,7 +1890,10 @@ impl<E: Env> ConcurrentDb<E> {
                 );
                 // Writer holds the lock: the kernel says published.
                 assert!(
-                    crate::flush_kernel::occ_snap_lock_order(false, self.commit_inflight() > 0),
+                    crate::flush_kernel::occ_snap_lock_order(
+                        false,
+                        !crate::write_admission_kernel::batch_is_empty(self.commit_inflight() as u64),
+                    ),
                     "write lock held ⇒ published OCC snap"
                 );
                 self.published_seq.load(Ordering::Acquire)
