@@ -88,6 +88,21 @@ theorem internal_key_encode_is_encode_into (self : key.InternalKey) :
   unfold key.InternalKey.encode
   rfl
 
+/-- Catalog entry: `encode_into` is extend user_key, pack trailer, extend BE bytes. Dual-unfold. -/
+theorem internal_key_encode_into_is_extend_packed
+    (self : key.InternalKey) (out : alloc.vec.Vec U8) :
+    key.InternalKey.encode_into self out =
+      (do
+        let s ←
+          bytes.bytes.Bytes.Insts.CoreOpsDerefDerefSliceU8.deref self.user_key
+        let out1 ← alloc.vec.Vec.extend_from_slice core.clone.CloneU8 out s
+        let packed ← key.pack_sequence_and_type self.sequence self.kind
+        let a ← lift (core.num.U64.to_be_bytes packed)
+        let s1 ← lift (Array.to_slice a)
+        alloc.vec.Vec.extend_from_slice core.clone.CloneU8 out1 s1) := by
+  unfold key.InternalKey.encode_into
+  rfl
+
 /-- Catalog entry: Ord is user-key slice cmp first, then `ikey_seq_cmp`, then kind reverse. Dual-unfold. -/
 theorem internal_key_cmp_user_key_then_seq
     (self other : key.InternalKey) :
