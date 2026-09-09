@@ -38,7 +38,7 @@
 - [x] **P1.2** Production G1 POSIX documented (this RFC Background) — status: `done`
 
 ### P2 — later
-- [x] **P2.1** Verus twin of `cqe_res_ok` (was allowlist) — status: `done` (`verus/cqe_res.rs` + catalog `cqe_res`)
+- [x] **P2.1** Verus twin of `cqe_res_ok` (was allowlist) — status: `done` (paid single-artifact since 2026-09-09: Charon+Aeneas extract of the rustc body, `scripts/aeneas_cqe.sh`; the `verus/cqe_res.rs` twin and ghost block are deleted)
 - [x] **P2.2** Ring model (R-uring) still blocked — status: `done` (`cqe_ring_model_admitted`; no `verus/ring_model.rs`)
 
 ## Status (living — update with every PR)
@@ -59,7 +59,7 @@
   - `cqe_negative_res_is_not_ok` (cqe_kernel): `cqe_res_ok(0)` true; negative false; AS-IS true on negative. Runs on Darwin.
   - `linux_cqe_eio_is_not_ok`: live `IoBackend::IoUring`, `inject_next_cqe_res(-EIO)` then `sync_data` is Err(EIO); `-ENOSPC` then `write_all` is Err. **Skipped off Linux.** Dropping `cqe_res_ok` from `fsync`/`pwrite` (returning Ok on negative res) fails this test.
   - P2.1 catalog pair `cqe_res` entry `cqe_res_ok` with Verus twin (freeze of twin files; `verus` not on PATH). `cqe_kernel.rs` leaves the TCB allowlist (now a catalog pair). No new `*_kernel.rs`.
-  - P2.2 `cqe_ring_model_is_not_admitted`: `cqe_ring_model_admitted()` false; AS-IS true; `crates/pedradb-io-uring/verus/cqe_res.rs` present; `verus/ring_model.rs` absent. Production WAL stays POSIX (RFC-0062 / 0080).
+  - P2.2 `cqe_ring_model_is_not_admitted`: `cqe_ring_model_admitted()` false; AS-IS true; the kernel `src/cqe_kernel.rs` is the single artifact (`verus/cqe_res.rs` deleted 2026-09-09); `verus/ring_model.rs` absent. Production WAL stays POSIX (RFC-0062 / 0080).
 - **Telemetry / Analytics:** none — durability invariant.
 - **Documentation:** this RFC; `residuals.json` `R-unsafe-uring` close-text + owner 0074 (SAFETY.md ≠ forall).
 - **Screenshots:** backend-only.

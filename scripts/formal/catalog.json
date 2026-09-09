@@ -4217,7 +4217,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-io-uring/src/cqe_kernel.rs",
       "twin": "crates/pedradb-io-uring/src/cqe_kernel.rs",
-      "verus": "scripts/verus_cqe_res.sh",
+      "aeneas": "scripts/aeneas_cqe.sh",
       "callers": [
         "crates/pedradb-io-uring/src/ring.rs"
       ],

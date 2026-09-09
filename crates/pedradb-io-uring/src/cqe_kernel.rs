@@ -1,10 +1,12 @@
 //! CQE ownership for the Linux io_uring path (U1 / F203 follow-up).
 //!
-//! **Single artifact (pair `cqe_res`):** this file is what `rustc` links
-//! *and* what Verus proves (`cfg(verus_keep_ghost)`). `cqe_res_ok` is the
-//! term — not a ring model (`cqe_ring_model_admitted` stays false).
+//! **Single artifact (Aeneas-paid):** this file is what `rustc` links and
+//! what the Lean theorems run over — Charon+Aeneas extract of these exact
+//! bodies (`cqe_res_ok` included). No Verus twin or ghost block stands in
+//! for them; `cqe_res_ok` is the term — not a ring model
+//! (`cqe_ring_model_admitted` stays false).
 //!
-//!   ./scripts/verus_cqe_res.sh
+//!   ./scripts/aeneas_cqe.sh
 //!
 //! Production Linux `ring::UringState` is the only caller. Bytes on disk, the
 //! ring, and `submit_and_wait` are **caller + axiom**.
@@ -133,45 +135,6 @@ pub fn cqe_res_ok_as_is(_res: i32) -> bool {
     cqe_res_ok_as_is_body!(_res)
 }
 
-#[cfg(verus_keep_ghost)]
-use vstd::prelude::*;
-
-#[cfg(verus_keep_ghost)]
-verus! {
-
-pub open spec fn cqe_res_ok_spec(res: i32) -> bool {
-    res >= 0
-}
-
-pub open spec fn cqe_res_ok_as_is_spec(_res: i32) -> bool {
-    true
-}
-
-pub fn cqe_res_ok(res: i32) -> (ok: bool)
-    ensures
-        ok == cqe_res_ok_spec(res),
-{
-    cqe_res_ok_body!(res)
-}
-
-pub fn cqe_res_ok_as_is(_res: i32) -> (ok: bool)
-    ensures
-        ok == cqe_res_ok_as_is_spec(_res),
-{
-    cqe_res_ok_as_is_body!(_res)
-}
-
-proof fn lemma_negative_res_is_not_ok()
-    ensures
-        cqe_res_ok_spec(0i32),
-        cqe_res_ok_spec(16i32),
-        !cqe_res_ok_spec(-5i32),
-        !cqe_res_ok_spec(-1i32),
-        cqe_res_ok_as_is_spec(-5i32),
-{
-}
-
-} // verus!
 
 /// RFC-0074 P2.2 / R-uring: a Verus twin of the io_uring *ring* (submit_sqe,
 /// harvest, SQE layout). Always false. `cqe_res_ok` is cataloged; the ring
@@ -299,8 +262,8 @@ mod tests {
         {
             let crate_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
             assert!(
-                crate_dir.join("verus/cqe_res.rs").is_file(),
-                "RFC-0074 P2.1: cqe_res_ok twin must exist"
+                crate_dir.join("src/cqe_kernel.rs").is_file(),
+                "RFC-0074 P2.1: cqe_res_ok single artifact — the kernel is the proof body"
             );
             assert!(
                 !crate_dir.join("verus/ring_model.rs").exists(),
