@@ -2421,25 +2421,25 @@ impl<E: PedraEnv> DB<E> {
     pub fn put(&self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Result<()> {
         let key = key.as_ref();
         let value = value.as_ref();
-        let interned = intern_put_value(value);
-        self.codec
-            .encode_with(DEFAULT_CF, key, |enc| {
-                self.inner.put(enc, interned.as_ref())
-            })
-            .map_err(Error::from)?;
-        // RFC-0154 P1.8 / RFC-0180 P0.35: small values warm TLS last-get
-        // so ycsb_a/f RMW on this thread hits. Overwrite never gets, so
-        // P0.79 skips the store until a get on this thread arms the table
-        // (P0.3 dropped write-through globally and regresses the mixed
-        // floor). Blob SET (len > 1024) still skips the copy.
-        if interned.len() <= 1024 {
+        // RFC-0180 P0.80: overwrite never arms TLS, so skip the compat
+        // intern (BatchOp still interns). ycsb_a/f after a get still
+        // intern once for write-through (P0.35 / P0.79).
+        let live = LAST_GET.with(|t| t.borrow().live);
+        if live && value.len() <= 1024 {
+            let interned = intern_put_value(value);
+            self.codec
+                .encode_with(DEFAULT_CF, key, |enc| {
+                    self.inner.put(enc, interned.as_ref())
+                })
+                .map_err(Error::from)?;
             LAST_GET.with(|t| {
-                let mut g = t.borrow_mut();
-                if g.live {
-                    let (epoch, gen) = self.tls_point_ids(DEFAULT_CF, key);
-                    g.store_key(epoch, gen, key, Some(interned));
-                }
+                let (epoch, gen) = self.tls_point_ids(DEFAULT_CF, key);
+                t.borrow_mut().store_key(epoch, gen, key, Some(interned));
             });
+        } else {
+            self.codec
+                .encode_with(DEFAULT_CF, key, |enc| self.inner.put(enc, value))
+                .map_err(Error::from)?;
         }
         Ok(())
     }
