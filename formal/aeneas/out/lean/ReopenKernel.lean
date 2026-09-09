@@ -26,7 +26,7 @@ axiom Isize.Insts.CoreHashHash.hash
   {H : Type} (HasherInst : core.hash.Hasher H) : Std.Isize → H → Result H
 
 /-- [pedra_aeneas_reopen_kernel::ReopenDamage]
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 220:0-231:1
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 35:0-46:1
     Visibility: public -/
 @[discriminant isize]
 inductive ReopenDamage where
@@ -37,7 +37,7 @@ inductive ReopenDamage where
 | Resync : ReopenDamage
 
 /-- [pedra_aeneas_reopen_kernel::{impl core::fmt::Debug for pedra_aeneas_reopen_kernel::ReopenDamage}::fmt]:
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 219:9-219:14
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 34:9-34:14
     Visibility: public -/
 def ReopenDamage.Insts.CoreFmtDebug.fmt
   (self : ReopenDamage) (f : core.fmt.Formatter) :
@@ -53,42 +53,42 @@ def ReopenDamage.Insts.CoreFmtDebug.fmt
   | ReopenDamage.Resync => core.fmt.Formatter.write_str f (toStr "Resync")
 
 /-- Trait implementation: [pedra_aeneas_reopen_kernel::{impl core::fmt::Debug for pedra_aeneas_reopen_kernel::ReopenDamage}]
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 219:9-219:14 -/
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 34:9-34:14 -/
 @[reducible]
 def ReopenDamage.Insts.CoreFmtDebug : core.fmt.Debug ReopenDamage := {
   fmt := ReopenDamage.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_reopen_kernel::{impl core::clone::Clone for pedra_aeneas_reopen_kernel::ReopenDamage}::clone]:
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 219:16-219:21
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 34:16-34:21
     Visibility: public -/
 def ReopenDamage.Insts.CoreCloneClone.clone
   (self : ReopenDamage) : Result ReopenDamage := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_reopen_kernel::{impl core::clone::Clone for pedra_aeneas_reopen_kernel::ReopenDamage}]
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 219:16-219:21 -/
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 34:16-34:21 -/
 @[reducible]
 def ReopenDamage.Insts.CoreCloneClone : core.clone.Clone ReopenDamage := {
   clone := ReopenDamage.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [pedra_aeneas_reopen_kernel::{impl core::marker::Copy for pedra_aeneas_reopen_kernel::ReopenDamage}]
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 219:23-219:27 -/
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 34:23-34:27 -/
 @[reducible]
 def ReopenDamage.Insts.CoreMarkerCopy : core.marker.Copy ReopenDamage := {
   cloneInst := ReopenDamage.Insts.CoreCloneClone
 }
 
 /-- Trait implementation: [pedra_aeneas_reopen_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_reopen_kernel::ReopenDamage}]
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 219:29-219:38 -/
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 34:29-34:38 -/
 @[reducible]
 def ReopenDamage.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq ReopenDamage := {
 }
 
 /-- [pedra_aeneas_reopen_kernel::{impl core::cmp::PartialEq<pedra_aeneas_reopen_kernel::ReopenDamage> for pedra_aeneas_reopen_kernel::ReopenDamage}::eq]:
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 219:29-219:38
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 34:29-34:38
     Visibility: public -/
 def ReopenDamage.Insts.CoreCmpPartialEqReopenDamage.eq
   (self : ReopenDamage) (other : ReopenDamage) : Result Bool := do
@@ -97,7 +97,7 @@ def ReopenDamage.Insts.CoreCmpPartialEqReopenDamage.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_reopen_kernel::{impl core::cmp::PartialEq<pedra_aeneas_reopen_kernel::ReopenDamage> for pedra_aeneas_reopen_kernel::ReopenDamage}]
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 219:29-219:38 -/
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 34:29-34:38 -/
 @[reducible]
 def ReopenDamage.Insts.CoreCmpPartialEqReopenDamage : core.cmp.PartialEq
   ReopenDamage ReopenDamage := {
@@ -105,14 +105,14 @@ def ReopenDamage.Insts.CoreCmpPartialEqReopenDamage : core.cmp.PartialEq
 }
 
 /-- [pedra_aeneas_reopen_kernel::{impl core::cmp::Eq for pedra_aeneas_reopen_kernel::ReopenDamage}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 219:40-219:42
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 34:40-34:42
     Visibility: public -/
 def ReopenDamage.Insts.CoreCmpEq.assert_fields_are_eq
   (self : ReopenDamage) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_reopen_kernel::{impl core::cmp::Eq for pedra_aeneas_reopen_kernel::ReopenDamage}]
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 219:40-219:42 -/
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 34:40-34:42 -/
 @[reducible]
 def ReopenDamage.Insts.CoreCmpEq : core.cmp.Eq ReopenDamage := {
   partialEqInst := ReopenDamage.Insts.CoreCmpPartialEqReopenDamage
@@ -120,7 +120,7 @@ def ReopenDamage.Insts.CoreCmpEq : core.cmp.Eq ReopenDamage := {
 }
 
 /-- [pedra_aeneas_reopen_kernel::{impl core::hash::Hash for pedra_aeneas_reopen_kernel::ReopenDamage}::hash]:
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 219:44-219:48
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 34:44-34:48
     Visibility: public -/
 def ReopenDamage.Insts.CoreHashHash.hash
   {__H : Type} (corehashHasherInst : core.hash.Hasher __H)
@@ -131,7 +131,7 @@ def ReopenDamage.Insts.CoreHashHash.hash
   Isize.Insts.CoreHashHash.hash corehashHasherInst self1 state
 
 /-- Trait implementation: [pedra_aeneas_reopen_kernel::{impl core::hash::Hash for pedra_aeneas_reopen_kernel::ReopenDamage}]
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 219:44-219:48 -/
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 34:44-34:48 -/
 @[reducible]
 def ReopenDamage.Insts.CoreHashHash : core.hash.Hash ReopenDamage := {
   hash := fun {H : Type} (corehashHasherInst : core.hash.Hasher H) =>
@@ -139,7 +139,7 @@ def ReopenDamage.Insts.CoreHashHash : core.hash.Hash ReopenDamage := {
 }
 
 /-- [pedra_aeneas_reopen_kernel::ReopenOutcome]
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 236:0-244:1
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 50:0-58:1
     Visibility: public -/
 @[discriminant isize]
 inductive ReopenOutcome where
@@ -148,7 +148,7 @@ inductive ReopenOutcome where
 | RefuseOpen : ReopenOutcome
 
 /-- [pedra_aeneas_reopen_kernel::{impl core::fmt::Debug for pedra_aeneas_reopen_kernel::ReopenOutcome}::fmt]:
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 235:9-235:14
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 49:9-49:14
     Visibility: public -/
 def ReopenOutcome.Insts.CoreFmtDebug.fmt
   (self : ReopenOutcome) (f : core.fmt.Formatter) :
@@ -162,42 +162,42 @@ def ReopenOutcome.Insts.CoreFmtDebug.fmt
     core.fmt.Formatter.write_str f (toStr "RefuseOpen")
 
 /-- Trait implementation: [pedra_aeneas_reopen_kernel::{impl core::fmt::Debug for pedra_aeneas_reopen_kernel::ReopenOutcome}]
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 235:9-235:14 -/
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 49:9-49:14 -/
 @[reducible]
 def ReopenOutcome.Insts.CoreFmtDebug : core.fmt.Debug ReopenOutcome := {
   fmt := ReopenOutcome.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_reopen_kernel::{impl core::clone::Clone for pedra_aeneas_reopen_kernel::ReopenOutcome}::clone]:
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 235:16-235:21
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 49:16-49:21
     Visibility: public -/
 def ReopenOutcome.Insts.CoreCloneClone.clone
   (self : ReopenOutcome) : Result ReopenOutcome := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_reopen_kernel::{impl core::clone::Clone for pedra_aeneas_reopen_kernel::ReopenOutcome}]
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 235:16-235:21 -/
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 49:16-49:21 -/
 @[reducible]
 def ReopenOutcome.Insts.CoreCloneClone : core.clone.Clone ReopenOutcome := {
   clone := ReopenOutcome.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [pedra_aeneas_reopen_kernel::{impl core::marker::Copy for pedra_aeneas_reopen_kernel::ReopenOutcome}]
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 235:23-235:27 -/
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 49:23-49:27 -/
 @[reducible]
 def ReopenOutcome.Insts.CoreMarkerCopy : core.marker.Copy ReopenOutcome := {
   cloneInst := ReopenOutcome.Insts.CoreCloneClone
 }
 
 /-- Trait implementation: [pedra_aeneas_reopen_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_reopen_kernel::ReopenOutcome}]
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 235:29-235:38 -/
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 49:29-49:38 -/
 @[reducible]
 def ReopenOutcome.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq ReopenOutcome := {
 }
 
 /-- [pedra_aeneas_reopen_kernel::{impl core::cmp::PartialEq<pedra_aeneas_reopen_kernel::ReopenOutcome> for pedra_aeneas_reopen_kernel::ReopenOutcome}::eq]:
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 235:29-235:38
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 49:29-49:38
     Visibility: public -/
 def ReopenOutcome.Insts.CoreCmpPartialEqReopenOutcome.eq
   (self : ReopenOutcome) (other : ReopenOutcome) : Result Bool := do
@@ -206,7 +206,7 @@ def ReopenOutcome.Insts.CoreCmpPartialEqReopenOutcome.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_reopen_kernel::{impl core::cmp::PartialEq<pedra_aeneas_reopen_kernel::ReopenOutcome> for pedra_aeneas_reopen_kernel::ReopenOutcome}]
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 235:29-235:38 -/
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 49:29-49:38 -/
 @[reducible]
 def ReopenOutcome.Insts.CoreCmpPartialEqReopenOutcome : core.cmp.PartialEq
   ReopenOutcome ReopenOutcome := {
@@ -214,14 +214,14 @@ def ReopenOutcome.Insts.CoreCmpPartialEqReopenOutcome : core.cmp.PartialEq
 }
 
 /-- [pedra_aeneas_reopen_kernel::{impl core::cmp::Eq for pedra_aeneas_reopen_kernel::ReopenOutcome}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 235:40-235:42
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 49:40-49:42
     Visibility: public -/
 def ReopenOutcome.Insts.CoreCmpEq.assert_fields_are_eq
   (self : ReopenOutcome) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_reopen_kernel::{impl core::cmp::Eq for pedra_aeneas_reopen_kernel::ReopenOutcome}]
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 235:40-235:42 -/
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 49:40-49:42 -/
 @[reducible]
 def ReopenOutcome.Insts.CoreCmpEq : core.cmp.Eq ReopenOutcome := {
   partialEqInst := ReopenOutcome.Insts.CoreCmpPartialEqReopenOutcome
@@ -229,7 +229,7 @@ def ReopenOutcome.Insts.CoreCmpEq : core.cmp.Eq ReopenOutcome := {
 }
 
 /-- [pedra_aeneas_reopen_kernel::{impl core::hash::Hash for pedra_aeneas_reopen_kernel::ReopenOutcome}::hash]:
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 235:44-235:48
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 49:44-49:48
     Visibility: public -/
 def ReopenOutcome.Insts.CoreHashHash.hash
   {__H : Type} (corehashHasherInst : core.hash.Hasher __H)
@@ -240,7 +240,7 @@ def ReopenOutcome.Insts.CoreHashHash.hash
   Isize.Insts.CoreHashHash.hash corehashHasherInst self1 state
 
 /-- Trait implementation: [pedra_aeneas_reopen_kernel::{impl core::hash::Hash for pedra_aeneas_reopen_kernel::ReopenOutcome}]
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 235:44-235:48 -/
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 49:44-49:48 -/
 @[reducible]
 def ReopenOutcome.Insts.CoreHashHash : core.hash.Hash ReopenOutcome := {
   hash := fun {H : Type} (corehashHasherInst : core.hash.Hasher H) =>
@@ -248,7 +248,7 @@ def ReopenOutcome.Insts.CoreHashHash : core.hash.Hash ReopenOutcome := {
 }
 
 /-- [pedra_aeneas_reopen_kernel::reopen_outcome]:
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 261:0-272:1
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 74:0-85:1
     Visibility: public -/
 def reopen_outcome
   (damage : ReopenDamage) (point_in_time : Bool) (escalated : Bool) :
@@ -286,7 +286,7 @@ def reopen_outcome
     else ok ReopenOutcome.RefuseOpen
 
 /-- [pedra_aeneas_reopen_kernel::reopen_outcome_as_is_silent]:
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 278:0-284:1
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 90:0-96:1
     Visibility: public -/
 def reopen_outcome_as_is_silent
   (_damage : ReopenDamage) (_point_in_time : Bool) (_escalated : Bool) :
