@@ -2427,7 +2427,7 @@ impl<E: Env> ConcurrentDb<E> {
         // Post-fence commits fail fast at ensure_not_fenced; bounded drain
         // so the reopen never races a mid-write WAL handle.
         let deadline = Instant::now() + Duration::from_secs(2);
-        while self.commit_inflight() > 0 {
+        while !crate::write_admission_kernel::batch_is_empty(self.commit_inflight() as u64) {
             if Instant::now() > deadline {
                 return Err(CoreError::Internal(
                     "commit_batch still in flight at recover_from_fence".into(),
