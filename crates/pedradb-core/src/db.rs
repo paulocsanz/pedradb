@@ -1402,7 +1402,9 @@ pub struct Db<E: Env = StdEnv> {
     /// (RFC-0041 P1.1). Rotate waits for [`Self::commit_inflight`] == 0.
     wal: Arc<Mutex<Wal<E::File>>>,
     /// Group-commit appends in flight (not yet applied). Blocks WAL rotate.
-    commit_inflight: AtomicUsize,
+    /// `Arc` so ConcurrentDb pipeline can bump it without `db.write()`
+    /// (Pebble-style WAL mutex; rotate rechecks under `wal.lock()`).
+    commit_inflight: Arc<AtomicUsize>,
     /// Sequenced WAL ops waiting for the off-lock `fdatasync` to finish
     /// before memtable apply (RFC-0045 P2.1).
     unapplied: Vec<UnappliedOp>,
@@ -1462,7 +1464,9 @@ pub struct Db<E: Env = StdEnv> {
     /// MANIFEST flag: open `VALUES.vlog.new` (SST pointers already remapped).
     vlog_use_new: bool,
     /// Next sequence to assign (1-based; 0 means “no writes yet”).
-    next_seq: SequenceNumber,
+    /// Atomic so the async 1-op pipeline can mint under the WAL mutex
+    /// without `db.write()` (Pebble commit pipeline).
+    next_seq: Arc<AtomicU64>,
     /// Highest sequence default reads may observe. Assigned (`next_seq-1`)
     /// may be ahead while a ConcurrentDb leader has encoded WAL but not yet
     /// applied+published (RFC-0045 P2.1: apply after durable fsync; G1: Ok
@@ -2129,7 +2133,7 @@ impl<E: Env> Db<E> {
             dir,
             env,
             wal,
-            commit_inflight: AtomicUsize::new(0),
+            commit_inflight: Arc::new(AtomicUsize::new(0)),
             unapplied: Vec::new(),
             mem,
             imm: None,
@@ -2155,7 +2159,7 @@ impl<E: Env> Db<E> {
             manifest_epoch: 0,
             manifest_write_gate: Arc::new(Mutex::new(0)),
             vlog_use_new,
-            next_seq,
+            next_seq: Arc::new(AtomicU64::new(next_seq)),
             published_seq: Arc::new(AtomicU64::new(next_seq.saturating_sub(1))),
             sync: opts.sync,
             auto_flush_bytes: opts.auto_flush_bytes.filter(|n| *n > 0),
@@ -2327,7 +2331,7 @@ impl<E: Env> Db<E> {
     /// Latest sequence that has been written (0 if empty).
     #[must_use]
     pub fn last_sequence(&self) -> SequenceNumber {
-        self.next_seq.saturating_sub(1)
+        self.next_seq.load(Ordering::Relaxed).saturating_sub(1)
     }
 
     /// RFC-0078: admit a “this `fdatasync` Ok proves the drive” claim.
@@ -5578,14 +5582,15 @@ impl<E: Env> Db<E> {
         }
         crate::bulk_run::sort_bulk_key_vals(&mut keys, &mut vals);
         let n64 = n as u64;
-        let last = self.next_seq.saturating_add(n64.saturating_sub(1));
+        let seq0 = self.next_seq.fetch_add(n64, Ordering::Relaxed);
+        let last = seq0.saturating_add(n64.saturating_sub(1));
         if last > MAX_SEQUENCE_NUMBER {
+            self.next_seq.fetch_sub(n64, Ordering::Relaxed);
             return Err(CoreError::Internal(
                 "sequence number space exhausted".into(),
             ));
         }
-        let mut seq = self.next_seq;
-        self.next_seq = last + 1;
+        let mut seq = seq0;
         let cap = self.bulk_chunk_cap();
         let over = {
             let run = self.bulk_runs.entry(family.to_string()).or_default();
@@ -6359,13 +6364,17 @@ impl<E: Env> Db<E> {
         {
             return Ok(());
         }
-        // Edge-trigger: a drained pipeline with an empty current segment has
-        // nothing to rotate. Without this every idle poll (the compat compact
-        // worker tick during read-only phases) rewrites MANIFEST+CURRENT and
-        // pays two fdatasync barriers per tick — 10k+ barriers per slipstream
-        // guest run, ~42 s of flush traffic competing with the read legs.
-        if crate::flush_kernel::wal_segment_is_empty(self.wal.lock().position()) {
-            return Ok(());
+        // Pipeline mints seq + appends under wal.lock() without db.write().
+        // Recheck inflight while holding the WAL mutex so rotate cannot
+        // truncate a just-written frame (Pebble-style split).
+        {
+            let w = self.wal.lock();
+            if self.commit_inflight.load(Ordering::Acquire) > 0 {
+                return Ok(());
+            }
+            if crate::flush_kernel::wal_segment_is_empty(w.position()) {
+                return Ok(());
+            }
         }
         self.rotate_wal_now()
     }
@@ -6422,6 +6431,9 @@ impl<E: Env> Db<E> {
         // / close still store.
         if self.changelog_interval > 0 {
             self.persist_changelog_best_effort();
+        }
+        if self.commit_inflight.load(Ordering::Acquire) > 0 {
+            return Ok(());
         }
         let wal_path = self.dir.join(WAL_FILE_NAME);
         // F182: drain the old handle's pending async frame BEFORE
@@ -8142,7 +8154,7 @@ impl<E: Env> Db<E> {
     ) -> Result<SequenceNumber> {
         self.ensure_not_fenced()?;
         let k = key.as_ref();
-        if self.get(k).is_some() {
+        if !crate::write_admission_kernel::cas_absent_put(self.get(k).is_some()) {
             return Err(CoreError::CasMismatch);
         }
         self.put_with(k, value, opts)
@@ -8588,13 +8600,13 @@ impl<E: Env> Db<E> {
             self.ensure_write_admitted_for(&families)?;
         }
         self.observe_bulk_batch(&batch);
-        let seq_checkpoint = self.next_seq;
+        let seq_checkpoint = self.next_seq.load(Ordering::Relaxed);
         let mut records = Vec::new();
         for op in batch {
             let seq = match self.alloc_seq() {
                 Ok(s) => s,
                 Err(e) => {
-                    self.next_seq = seq_checkpoint;
+                    self.next_seq.store(seq_checkpoint, Ordering::Relaxed);
                     return Err(e);
                 }
             };
@@ -8604,7 +8616,7 @@ impl<E: Env> Db<E> {
                     let stored = match self.maybe_spill_large_value(value) {
                         Ok(v) => v,
                         Err(e) => {
-                            self.next_seq = seq_checkpoint;
+                            self.next_seq.store(seq_checkpoint, Ordering::Relaxed);
                             return Err(e);
                         }
                     };
@@ -8630,7 +8642,7 @@ impl<E: Env> Db<E> {
                 Ok(self.last_sequence())
             }
             Err(e) => {
-                self.next_seq = seq_checkpoint;
+                self.next_seq.store(seq_checkpoint, Ordering::Relaxed);
                 Err(e)
             }
         }
@@ -8938,25 +8950,44 @@ impl<E: Env> Db<E> {
     }
 
     pub(crate) fn alloc_seq(&mut self) -> Result<SequenceNumber> {
-        let seq = self.next_seq;
+        Self::alloc_seq_atomic(&self.next_seq)
+    }
+
+    /// Mint a sequence under the WAL mutex (no `db.write()`).
+    ///
+    /// Shared by [`Self::alloc_seq`] and the ConcurrentDb 1-op pipeline.
+    pub(crate) fn alloc_seq_atomic(next: &AtomicU64) -> Result<SequenceNumber> {
+        let seq = next.fetch_add(1, Ordering::Relaxed);
         if crate::write_admission_kernel::seq_exhausted(seq, MAX_SEQUENCE_NUMBER) {
+            next.fetch_sub(1, Ordering::Relaxed);
             return Err(CoreError::Internal(
                 "sequence number space exhausted".into(),
             ));
         }
-        self.next_seq = seq + 1;
         Ok(seq)
     }
 
     /// Peek next sequence without allocating (TX sequence checkpoint).
     #[must_use]
     pub(crate) fn next_seq_peek(&self) -> SequenceNumber {
-        self.next_seq
+        self.next_seq.load(Ordering::Relaxed)
     }
 
     /// Restore sequence counter after a failed multi-op commit (no WAL durable).
     pub(crate) fn restore_next_seq(&mut self, seq: SequenceNumber) {
-        self.next_seq = seq;
+        self.next_seq.store(seq, Ordering::Relaxed);
+    }
+
+    /// Shared seq counter for the WAL-mutex pipeline.
+    #[must_use]
+    pub(crate) fn next_seq_handle(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.next_seq)
+    }
+
+    /// Shared in-flight counter (same Arc ConcurrentDb observes lock-free).
+    #[must_use]
+    pub(crate) fn commit_inflight_handle(&self) -> Arc<AtomicUsize> {
+        Arc::clone(&self.commit_inflight)
     }
 
     pub(crate) fn commit_ops_with(
@@ -9040,14 +9071,14 @@ impl<E: Env> Db<E> {
         spill: bool,
     ) -> Result<(Vec<WriteOp>, SequenceNumber)> {
         self.ensure_not_fenced()?;
-        let seq_checkpoint = self.next_seq;
+        let seq_checkpoint = self.next_seq.load(Ordering::Relaxed);
         let batch = batch.into_iter();
         let mut records = Vec::with_capacity(batch.size_hint().0);
         for op in batch {
             let seq = match self.alloc_seq() {
                 Ok(s) => s,
                 Err(e) => {
-                    self.next_seq = seq_checkpoint;
+                    self.next_seq.store(seq_checkpoint, Ordering::Relaxed);
                     return Err(e);
                 }
             };
@@ -9058,7 +9089,7 @@ impl<E: Env> Db<E> {
                         match self.maybe_spill_large_value(value) {
                             Ok(v) => v,
                             Err(e) => {
-                                self.next_seq = seq_checkpoint;
+                                self.next_seq.store(seq_checkpoint, Ordering::Relaxed);
                                 return Err(e);
                             }
                         }
@@ -9086,11 +9117,11 @@ impl<E: Env> Db<E> {
     /// Single-op form of [`Self::prepare_write_ops_spill`] (RFC-0154 P1.6).
     fn prepare_one_spill(&mut self, op: BatchOp, spill: bool) -> Result<(WriteOp, SequenceNumber)> {
         self.ensure_not_fenced()?;
-        let seq_checkpoint = self.next_seq;
+        let seq_checkpoint = self.next_seq.load(Ordering::Relaxed);
         let seq = match self.alloc_seq() {
             Ok(s) => s,
             Err(e) => {
-                self.next_seq = seq_checkpoint;
+                self.next_seq.store(seq_checkpoint, Ordering::Relaxed);
                 return Err(e);
             }
         };
@@ -9101,7 +9132,7 @@ impl<E: Env> Db<E> {
                     match self.maybe_spill_large_value(value) {
                         Ok(v) => v,
                         Err(e) => {
-                            self.next_seq = seq_checkpoint;
+                            self.next_seq.store(seq_checkpoint, Ordering::Relaxed);
                             return Err(e);
                         }
                     }

@@ -98,6 +98,15 @@ macro_rules! dir_sync_required_body {
     };
 }
 
+macro_rules! cas_absent_put_body {
+    ($has_live:expr) => {
+        match $has_live {
+            true => false,
+            false => true,
+        }
+    };
+}
+
 macro_rules! torn_head_empty_log_body {
     ($len:expr, $tiny_max:expr) => {
         $len < $tiny_max
@@ -320,6 +329,20 @@ pub fn dir_sync_required(sync: bool) -> bool {
 #[must_use]
 pub fn dir_sync_required_as_is(_sync: bool) -> bool {
     false
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// `put_if_absent`: live key ⇒ CasMismatch; else put. Data-fate, not Env.
+#[must_use]
+pub fn cas_absent_put(has_live: bool) -> bool {
+    cas_absent_put_body!(has_live)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: always put (lost-update / clobber).
+#[must_use]
+pub fn cas_absent_put_as_is(_has_live: bool) -> bool {
+    true
 }
 
 #[cfg(verus_keep_ghost)]
@@ -631,6 +654,25 @@ pub fn dir_sync_required_as_is(sync: bool) -> (d: bool)
 {
     let _ = sync;
     false
+}
+
+pub open spec fn cas_absent_put_spec(has_live: bool) -> bool {
+    !has_live
+}
+
+pub fn cas_absent_put(has_live: bool) -> (d: bool)
+    ensures
+        d == cas_absent_put_spec(has_live),
+{
+    cas_absent_put_body!(has_live)
+}
+
+pub fn cas_absent_put_as_is(has_live: bool) -> (d: bool)
+    ensures
+        d == true,
+{
+    let _ = has_live;
+    true
 }
 
 proof fn lemma_as_is_skips_dir_sync()
@@ -1056,6 +1098,22 @@ mod tests {
         assert!(!pit_resync_needs_rewrite(false));
     }
 
+    #[test]
+    fn cas_absent_put_on_live_key_is_not_ok() {
+        assert!(cas_absent_put(false));
+        assert!(!cas_absent_put(true));
+        assert!(
+            cas_absent_put_as_is(true),
+            "AS-IS dente: live key still puts"
+        );
+        let body = named_fn_src(include_str!("db.rs"), "put_if_absent_with")
+            .expect("put_if_absent_with");
+        assert!(
+            body.contains("cas_absent_put("),
+            "put_if_absent_with must match cas_absent_put"
+        );
+    }
+
     /// RFC-0171 P1.1/P1.2: data-fate `if`s on put-Ok and recover/reopen
     /// must call a kernel (not a raw predicate in `db.rs`).
     #[test]
@@ -1204,6 +1262,7 @@ mod tests {
             || cond.contains("torn_tail_needs_cut(")
             || cond.contains("seq_after_feed(")
             || cond.contains("pit_resync_needs_rewrite(")
+            || cond.contains("cas_absent_put(")
             || cond.contains("reopen_outcome(")
             || cond.contains("feed_is_lazy(")
             || cond.contains("skip_auto_flush(")

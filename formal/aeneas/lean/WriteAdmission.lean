@@ -72,3 +72,21 @@ theorem wal_commit_plan_as_is_dente :
     wal_commit_plan_as_is true true = ok WalCommitPlan.AppendSyncApplyOk := by
   unfold wal_commit_plan_as_is
   rfl
+
+/-- `put_if_absent`: no live key ⇒ put. -/
+theorem cas_absent_put_empty_puts :
+    cas_absent_put false = ok true := by
+  unfold cas_absent_put
+  rfl
+
+/-- Live key ⇒ do not put (CasMismatch). -/
+theorem cas_absent_put_live_refuses :
+    cas_absent_put true = ok false := by
+  unfold cas_absent_put
+  rfl
+
+/-- AS-IS dente: live key still puts. -/
+theorem cas_absent_put_as_is_dente :
+    cas_absent_put_as_is true = ok true := by
+  unfold cas_absent_put_as_is
+  rfl
