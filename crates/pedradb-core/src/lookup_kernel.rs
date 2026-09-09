@@ -257,6 +257,12 @@ mod tests {
             user.contains("snap_is_empty("),
             "last_under_user_prefix must match snap_is_empty"
         );
+        let vis =
+            named_fn_src(include_str!("db.rs"), "count_visible").expect("count_visible");
+        assert!(
+            vis.contains("snap_is_empty("),
+            "count_visible must match snap_is_empty"
+        );
     }
 
     #[test]
