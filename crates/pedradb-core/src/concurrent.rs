@@ -2003,7 +2003,9 @@ impl<E: Env> ConcurrentDb<E> {
             return None;
         }
         if self.writes.active.load(Ordering::Relaxed) > 0
-            || crate::flush_kernel::occ_snap_uses_published(self.commit_inflight() > 0)
+            || crate::flush_kernel::occ_snap_uses_published(
+                !crate::write_admission_kernel::batch_is_empty(self.commit_inflight() as u64),
+            )
         {
             return Some(idle);
         }
