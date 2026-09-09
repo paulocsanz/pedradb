@@ -6548,9 +6548,10 @@
       "as_is": "tx_abort_as_is",
       "finding": "RFC-0166 P2.2",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-store/src/t1_modelo_kernel.rs",
-      "twin": "crates/pedradb-store/verus/t1_modelo.rs",
-      "verus": "scripts/verus_t1_modelo.sh",
+      "twin": "crates/pedradb-store/src/t1_modelo_kernel.rs",
+      "aeneas": "scripts/aeneas_t1_modelo.sh",
       "callers": [
         "crates/pedradb-store/src/t1_modelo_kernel.rs"
       ],
@@ -6566,9 +6567,10 @@
       "as_is": "tx_recover_as_is",
       "finding": "RFC-0166 P2.2",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-store/src/t1_modelo_kernel.rs",
-      "twin": "crates/pedradb-store/verus/t1_modelo.rs",
-      "verus": "scripts/verus_t1_modelo.sh",
+      "twin": "crates/pedradb-store/src/t1_modelo_kernel.rs",
+      "aeneas": "scripts/aeneas_t1_modelo.sh",
       "callers": [
         "crates/pedradb-store/src/t1_modelo_kernel.rs"
       ],
@@ -6584,9 +6586,10 @@
       "as_is": "t1_modelo_as_is",
       "finding": "RFC-0166 P2.2",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-store/src/t1_modelo_kernel.rs",
-      "twin": "crates/pedradb-store/verus/t1_modelo.rs",
-      "verus": "scripts/verus_t1_modelo.sh",
+      "twin": "crates/pedradb-store/src/t1_modelo_kernel.rs",
+      "aeneas": "scripts/aeneas_t1_modelo.sh",
       "callers": [
         "crates/pedradb-store/src/t1_modelo_kernel.rs"
       ],

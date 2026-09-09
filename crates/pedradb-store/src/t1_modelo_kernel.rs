@@ -21,8 +21,16 @@
 //! - [`t1_modelo`]: after recover, T1 holds — even if the pre-state was
 //!   a mid-apply crash.
 //!
-//! Verus twin: `crates/pedradb-store/verus/t1_modelo.rs`
-//! (`scripts/verus_t1_modelo.sh`).
+//! Single artifact (RFC-0171): the rustc body above **is** the proof
+//! object — extracted whole-file by Charon+Aeneas
+//! (`scripts/aeneas_t1_modelo.sh` → `out/lean/T1ModeloKernel.lean`,
+//! sorry-free; theorems `formal/aeneas/lean/T1Modelo.lean`). RFC-0170
+//! P2.3 close citation: `tx_recover` refines the production atom
+//! `crate::txn_kernel::leftover_txn_is_aborted` (leftover prepared TX
+//! after crash is aborted — no coordinator log). The former Verus twin
+//! `verus/t1_modelo.rs` (and its runner `scripts/verus_t1_modelo.sh`)
+//! was deleted 2026-09-09: it re-proved a same-shaped `TxState` model,
+//! not this rustc body.
 
 #![forbid(unsafe_code)]
 

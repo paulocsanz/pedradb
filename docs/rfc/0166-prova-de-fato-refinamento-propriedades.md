@@ -151,7 +151,11 @@ catálogo separa **proof objects** de **campaign gates** (família `l28_*`).
 - [x] **P2.2** T1 como refinamento (fence/abort/recover kernels já existem:
       amarrar em teorema único) — status: `done`
       (kernel `crates/pedradb-store/src/t1_modelo_kernel.rs` 5/5; twin
-      `verus/t1_modelo.rs` 8/8 0 err (2×): Inv-TX restaurado por recover
+      `verus/t1_modelo.rs` 8/8 0 err (2×) — **mirror deletado 2026-09-09:
+      os 3 pares são single-artifact pagos pelo extrato Aeneas do corpo
+      rustc (`scripts/aeneas_t1_modelo.sh`, `T1ModeloKernel.lean` sem
+      sorry + teoremas `T1Modelo.lean`; close citation
+      `leftover_txn_is_aborted` no header do kernel)**: Inv-TX restaurado por recover
       inclusive de mid-apply, `t1_modelo_theorem` pós-recover T1 vale,
       testemunha mid-apply (staged=2,visible=1) honest T1 / AS-IS leftover
       deixa parcial; átomos amarram `txn_commit_action`+`revert_clears_status`
@@ -198,7 +202,7 @@ catálogo separa **proof objects** de **campaign gates** (família `l28_*`).
 | P1.3 | p1 | corolário D1-modelo | done | `d1_modelo_kernel.rs` + twin 14/14 0 err (2×) + planta sim; 2 pares no catálogo | 2026-09-06 |
 | P1.4 | p1 | write→ack em exec Verus (D1 implementação) | done | `write_ack_kernel.rs` + twin 12/12 0 err (3×) + planta sim; 3 pares no catálogo; ledger 25 ns/grupo | 2026-09-06 |
 | P2.1 | p2 | Inv-LSM → R1 | done | `lsm_r1_kernel.rs` 6/6 + twin `verus/lsm_r1.rs` 64/64 0 err (2×) — mirror deletado 2026-09-09, single-artifact via `aeneas_lsm_r1.sh`/`LsmR1.lean` + planta sim; 4 pares no catálogo; exec teeth `lsm_probe`/`lsm_compact`/`lsm_reopen`/`r1_modelo`; bug real de fold-order corrigido no compact | 2026-09-06 |
-| P2.2 | p2 | T1 refinamento | done | `t1_modelo_kernel.rs` 5/5 + twin `verus/t1_modelo.rs` 8/8 0 err (2×) + planta `t1_modelo_on_live_abort_reopen_is_not_ok`; 3 pares tx_abort/tx_recover/t1_modelo | 2026-09-06 |
+| P2.2 | p2 | T1 refinamento | done | `t1_modelo_kernel.rs` 5/5 + twin `verus/t1_modelo.rs` 8/8 0 err (2×) — mirror deletado 2026-09-09, single-artifact via `aeneas_t1_modelo.sh`/`T1Modelo.lean` + planta `t1_modelo_on_live_abort_reopen_is_not_ok`; 3 pares tx_abort/tx_recover/t1_modelo | 2026-09-06 |
 | P2.3 | p2 | C1 refinamento de handlers | done | `c1_modelo_kernel.rs` 4/4 + twin `verus/c1_modelo.rs` 4/4 0 err (2×) + planta `c1_modelo_on_live_joint_is_not_ok`; 2 pares c1_advance_commit/c1_modelo | 2026-09-06 |
 | P2.4 | p2 | contabilidade proof vs campaign | done | catalog `object_kinds`/`campaign_prefixes`; lint proof-vs-campaign; report D1/R1/T1/C1; residuais re-rotulados; `test_proof_vs_campaign.py` | 2026-09-06 |
 | P2.5 | p2 | meta-mutation tests do lint | done | `test_twin_mutation.py` (rename entry + empty body ⇒ FAIL nomeado) | 2026-09-06 |

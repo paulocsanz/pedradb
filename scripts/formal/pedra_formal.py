@@ -2128,6 +2128,15 @@ def check_extract(
             "formal/aeneas/lean/LsmR1.lean",
             ("theorem lsm_reopen_id", "theorem lsm_compact_depth_zero"),
         ),
+        (
+            "t1_modelo",
+            "formal/aeneas/out/lean/T1ModeloKernel.lean",
+            "def t1_modelo_kernel.tx_recover",
+            "./scripts/aeneas_t1_modelo.sh",
+            "crates/pedradb-store/src/t1_modelo_kernel.rs",
+            "formal/aeneas/lean/T1Modelo.lean",
+            ("theorem t1_modelo_empty", "theorem t1_modelo_as_is_dente"),
+        ),
     ]:
         art = root / artifact
         if art.is_file() and marker in art.read_text(encoding="utf-8"):
@@ -2164,12 +2173,12 @@ def check_extract(
         else:
             r.fail(f"{thy} missing")
     # RFC-0170 P2.3: D1/R1/T1/C1 twins cite close production fns.
-    # (lsm_r1 mirror swept to single-artifact: close citation enforced by
-    # the theory-check block entry above — twin==kernel + LsmR1.lean.)
+    # (lsm_r1 + t1_modelo mirrors swept to single-artifact: close
+    # citation enforced by the theory-check block entries above —
+    # twin==kernel + LsmR1.lean/T1Modelo.lean.)
     cites = (
         ("crates/pedradb-core/verus/d1_modelo.rs", "prefix_exclusive_end_close_cited"),
         ("crates/pedradb-core/verus/d1_modelo.rs", "write_ack_close_cited"),
-        ("crates/pedradb-store/verus/t1_modelo.rs", "leftover_txn_is_aborted_close_cited"),
         ("crates/pedradb-raft/verus/c1_modelo.rs", "joint_election_ok_close_cited"),
         ("crates/pedradb-raft/verus/c1_modelo.rs", "may_commit_at_close_cited"),
     )
