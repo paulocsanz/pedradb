@@ -73,6 +73,17 @@ theorem value_type_cmp_is_discriminant_u8
   unfold key.ValueType.Insts.CoreCmpOrd.cmp
   rfl
 
+/-- Catalog entry: ValueType PartialEq is discriminant equality. Dual-unfold. -/
+theorem value_type_eq_is_discriminant
+    (self other : key.ValueType) :
+    key.ValueType.Insts.CoreCmpPartialEqValueType.eq self other =
+      (do
+        let self1 := read_discriminant self
+        let other1 := read_discriminant other
+        ok (self1 = other1)) := by
+  unfold key.ValueType.Insts.CoreCmpPartialEqValueType.eq
+  rfl
+
 /-- Catalog entry: unknown nibble is none. -/
 theorem value_type_from_u8_unknown :
     key.ValueType.from_u8 3#u8 = ok none := by
