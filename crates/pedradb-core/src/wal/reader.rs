@@ -246,7 +246,7 @@ impl<R: Read> WalReader<R> {
         let mut filled = 0usize;
         while filled < BLOCK_SIZE {
             let n = self.src.read(&mut self.block[filled..])?;
-            if n == 0 {
+            if crate::write_admission_kernel::batch_is_empty(n as u64) {
                 break;
             }
             filled += n;
