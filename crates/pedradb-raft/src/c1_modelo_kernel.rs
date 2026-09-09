@@ -18,8 +18,16 @@
 //!   plus ack-without-commit ([`crate::propose_ack_ok_as_is`]) — a joint
 //!   add elects/commits/serves on C-old alone.
 //!
-//! Verus twin: `crates/pedradb-raft/verus/c1_modelo.rs`
-//! (`scripts/verus_c1_modelo.sh`).
+//! Single artifact (RFC-0171): this file is what `rustc` links and what
+//! the Lean theorems run over — Charon+Aeneas extract of these exact
+//! bodies (`scripts/aeneas_c1_modelo.sh` → `out/lean/C1ModeloKernel.lean`,
+//! sorry-free; theorems `formal/aeneas/lean/C1Modelo.lean`). RFC-0170
+//! P2.3 close citations: `c1_advance_commit` refines `joint_election_ok`
+//! (majority of every active config) and `may_commit_at` (term match) —
+//! the production atoms above. The former Verus twin
+//! `verus/c1_modelo.rs` (and runner `scripts/verus_c1_modelo.sh`) was
+//! deleted 2026-09-09: it re-proved a same-shaped state model, not this
+//! rustc body.
 
 #![forbid(unsafe_code)]
 

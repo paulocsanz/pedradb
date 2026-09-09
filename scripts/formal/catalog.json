@@ -6619,9 +6619,10 @@
       "as_is": "c1_advance_commit_as_is",
       "finding": "RFC-0166 P2.3",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/c1_modelo_kernel.rs",
-      "twin": "crates/pedradb-raft/verus/c1_modelo.rs",
-      "verus": "scripts/verus_c1_modelo.sh",
+      "twin": "crates/pedradb-raft/src/c1_modelo_kernel.rs",
+      "aeneas": "scripts/aeneas_c1_modelo.sh",
       "callers": [
         "crates/pedradb-raft/src/c1_modelo_kernel.rs"
       ],
@@ -6637,9 +6638,10 @@
       "as_is": "c1_modelo_as_is",
       "finding": "RFC-0166 P2.3",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/c1_modelo_kernel.rs",
-      "twin": "crates/pedradb-raft/verus/c1_modelo.rs",
-      "verus": "scripts/verus_c1_modelo.sh",
+      "twin": "crates/pedradb-raft/src/c1_modelo_kernel.rs",
+      "aeneas": "scripts/aeneas_c1_modelo.sh",
       "callers": [
         "crates/pedradb-raft/src/c1_modelo_kernel.rs"
       ],

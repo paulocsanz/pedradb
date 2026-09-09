@@ -2146,6 +2146,15 @@ def check_extract(
             "formal/aeneas/lean/D1Modelo.lean",
             ("theorem d1_modelo_unacked_vacuous", "theorem d1_modelo_as_is_dente"),
         ),
+        (
+            "c1_modelo",
+            "formal/aeneas/out/lean/C1ModeloKernel.lean",
+            "def c1_modelo_kernel.c1_modelo",
+            "./scripts/aeneas_c1_modelo.sh",
+            "crates/pedradb-raft/src/c1_modelo_kernel.rs",
+            "formal/aeneas/lean/C1Modelo.lean",
+            ("theorem c1_modelo_joint_add_refuses", "theorem c1_modelo_as_is_dente"),
+        ),
     ]:
         art = root / artifact
         if art.is_file() and marker in art.read_text(encoding="utf-8"):
@@ -2182,19 +2191,11 @@ def check_extract(
         else:
             r.fail(f"{thy} missing")
     # RFC-0170 P2.3: D1/R1/T1/C1 twins cite close production fns.
-    # (lsm_r1 + t1_modelo + d1_modelo mirrors swept to single-artifact:
-    # close citation enforced by the theory-check block entries above —
-    # twin==kernel + LsmR1.lean/T1Modelo.lean/D1Modelo.lean.)
-    cites = (
-        ("crates/pedradb-raft/verus/c1_modelo.rs", "joint_election_ok_close_cited"),
-        ("crates/pedradb-raft/verus/c1_modelo.rs", "may_commit_at_close_cited"),
-    )
-    for rel, name in cites:
-        text = load_text(root, rel) or ""
-        if f"spec fn {name}" in text and "ensures" in text:
-            r.good(f"RFC-0170 P2.3: {rel} cites {name}")
-        else:
-            r.fail(f"RFC-0170 P2.3: {rel} missing spec fn {name} in ensures")
+    # All four mirrors (lsm_r1, t1_modelo, d1_modelo, c1_modelo) swept to
+    # single-artifact 2026-09-09: close citation is enforced by the
+    # theory-check block entries above — twin==kernel + extract artifact
+    # + LsmR1.lean/T1Modelo.lean/D1Modelo.lean/C1Modelo.lean theorems.
+    # (The twin-file cites loop is gone: no twin files remain to grep.)
 
     extracts_script = root / "scripts/lean_extracts.sh"
     if charon_required:

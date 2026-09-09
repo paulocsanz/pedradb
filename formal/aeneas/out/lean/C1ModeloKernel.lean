@@ -27,7 +27,7 @@ impl_def Slice.Insts.CoreCmpPartialEqSlice {T : Type} {U : Type}
 }
 
 /-- [pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::C1State]
-    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 33:0-54:1
+    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 41:0-62:1
     Visibility: public -/
 structure c1_modelo_kernel.C1State where
   old_n : Std.U64
@@ -42,14 +42,14 @@ structure c1_modelo_kernel.C1State where
   served : Bool
 
 /-- [pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::{impl core::clone::Clone for pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::C1State}::clone]:
-    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 32:9-32:14
+    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 40:9-40:14
     Visibility: public -/
 def c1_modelo_kernel.C1State.Insts.CoreCloneClone.clone
   (self : c1_modelo_kernel.C1State) : Result c1_modelo_kernel.C1State := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::{impl core::clone::Clone for pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::C1State}]
-    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 32:9-32:14 -/
+    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 40:9-40:14 -/
 @[reducible]
 def c1_modelo_kernel.C1State.Insts.CoreCloneClone : core.clone.Clone
   c1_modelo_kernel.C1State := {
@@ -57,7 +57,7 @@ def c1_modelo_kernel.C1State.Insts.CoreCloneClone : core.clone.Clone
 }
 
 /-- Trait implementation: [pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::{impl core::marker::Copy for pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::C1State}]
-    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 32:16-32:20 -/
+    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 40:16-40:20 -/
 @[reducible]
 def c1_modelo_kernel.C1State.Insts.CoreMarkerCopy : core.marker.Copy
   c1_modelo_kernel.C1State := {
@@ -65,7 +65,7 @@ def c1_modelo_kernel.C1State.Insts.CoreMarkerCopy : core.marker.Copy
 }
 
 /-- [pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::{impl core::fmt::Debug for pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::C1State}::fmt]:
-    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 32:22-32:27
+    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 40:22-40:27
     Visibility: public -/
 def c1_modelo_kernel.C1State.Insts.CoreFmtDebug.fmt
   (self : c1_modelo_kernel.C1State) (f : core.fmt.Formatter) :
@@ -96,7 +96,7 @@ def c1_modelo_kernel.C1State.Insts.CoreFmtDebug.fmt
   core.fmt.Formatter.debug_struct_fields_finish f (toStr "C1State") s values
 
 /-- Trait implementation: [pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::{impl core::fmt::Debug for pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::C1State}]
-    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 32:22-32:27 -/
+    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 40:22-40:27 -/
 @[reducible]
 def c1_modelo_kernel.C1State.Insts.CoreFmtDebug : core.fmt.Debug
   c1_modelo_kernel.C1State := {
@@ -104,14 +104,14 @@ def c1_modelo_kernel.C1State.Insts.CoreFmtDebug : core.fmt.Debug
 }
 
 /-- Trait implementation: [pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::C1State}]
-    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 32:29-32:38 -/
+    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 40:29-40:38 -/
 @[reducible]
 def c1_modelo_kernel.C1State.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq c1_modelo_kernel.C1State := {
 }
 
 /-- [pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::{impl core::cmp::PartialEq<pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::C1State> for pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::C1State}::eq]:
-    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 32:29-32:38
+    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 40:29-40:38
     Visibility: public -/
 def c1_modelo_kernel.C1State.Insts.CoreCmpPartialEqC1State.eq
   (self : c1_modelo_kernel.C1State) (other : c1_modelo_kernel.C1State) :
@@ -146,7 +146,7 @@ def c1_modelo_kernel.C1State.Insts.CoreCmpPartialEqC1State.eq
   else ok false
 
 /-- Trait implementation: [pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::{impl core::cmp::PartialEq<pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::C1State> for pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::C1State}]
-    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 32:29-32:38 -/
+    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 40:29-40:38 -/
 @[reducible]
 impl_def c1_modelo_kernel.C1State.Insts.CoreCmpPartialEqC1State :
   core.cmp.PartialEq c1_modelo_kernel.C1State c1_modelo_kernel.C1State := {
@@ -156,14 +156,14 @@ impl_def c1_modelo_kernel.C1State.Insts.CoreCmpPartialEqC1State :
 }
 
 /-- [pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::{impl core::cmp::Eq for pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::C1State}::assert_fields_are_eq]:
-    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 32:40-32:42
+    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 40:40-40:42
     Visibility: public -/
 def c1_modelo_kernel.C1State.Insts.CoreCmpEq.assert_fields_are_eq
   (self : c1_modelo_kernel.C1State) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::{impl core::cmp::Eq for pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::C1State}]
-    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 32:40-32:42 -/
+    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 40:40-40:42 -/
 @[reducible]
 def c1_modelo_kernel.C1State.Insts.CoreCmpEq : core.cmp.Eq
   c1_modelo_kernel.C1State := {
@@ -173,7 +173,7 @@ def c1_modelo_kernel.C1State.Insts.CoreCmpEq : core.cmp.Eq
 }
 
 /-- [pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::new_cfg]:
-    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 56:0-62:1 -/
+    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 64:0-70:1 -/
 def c1_modelo_kernel.new_cfg
   (s : c1_modelo_kernel.C1State) : Result (Option (Std.U64 × Std.U64)) := do
   if s.joint
@@ -181,7 +181,7 @@ def c1_modelo_kernel.new_cfg
   else ok none
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::majority_of]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 17:0-23:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 24:0-30:1
     Visibility: public -/
 def membership_kernel.majority_of (n : Std.U64) : Result Std.U64 := do
   if n = 0#u64
@@ -190,7 +190,7 @@ def membership_kernel.majority_of (n : Std.U64) : Result Std.U64 := do
        i + 1#u64
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::joint_election_ok]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 29:0-37:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 36:0-44:1
     Visibility: public -/
 def membership_kernel.joint_election_ok
   (old_yes : Std.U64) (old_n : Std.U64) (new_yes : Option (Std.U64 × Std.U64))
@@ -209,7 +209,7 @@ def membership_kernel.joint_election_ok
       ok (yes >= i1)
 
 /-- [pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::c1_quorum]:
-    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 66:0-68:1
+    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 74:0-76:1
     Visibility: public -/
 def c1_modelo_kernel.c1_quorum
   (s : c1_modelo_kernel.C1State) : Result Bool := do
@@ -217,7 +217,7 @@ def c1_modelo_kernel.c1_quorum
   membership_kernel.joint_election_ok s.old_yes s.old_n o
 
 /-- [pedra_aeneas_c1_modelo_kernel::commit_kernel::may_commit_at]:
-    Source: 'src/../../../../crates/pedradb-raft/src/commit_kernel.rs', lines 28:0-30:1
+    Source: 'src/../../../../crates/pedradb-raft/src/commit_kernel.rs', lines 39:0-41:1
     Visibility: public -/
 def commit_kernel.may_commit_at
   (index_term : Std.U64) (current_term : Std.U64) (has_majority : Bool) :
@@ -228,7 +228,7 @@ def commit_kernel.may_commit_at
   else ok false
 
 /-- [pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::c1_advance_commit]:
-    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 73:0-82:1
+    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 81:0-90:1
     Visibility: public -/
 def c1_modelo_kernel.c1_advance_commit
   (s : c1_modelo_kernel.C1State) : Result c1_modelo_kernel.C1State := do
@@ -242,7 +242,7 @@ def c1_modelo_kernel.c1_advance_commit
   else ok s
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::joint_election_ok_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 41:0-43:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 48:0-50:1
     Visibility: public -/
 def membership_kernel.joint_election_ok_as_is
   (old_yes : Std.U64) (old_n : Std.U64)
@@ -253,7 +253,7 @@ def membership_kernel.joint_election_ok_as_is
   ok (old_yes >= i)
 
 /-- [pedra_aeneas_c1_modelo_kernel::commit_kernel::may_commit_at_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/commit_kernel.rs', lines 52:0-54:1
+    Source: 'src/../../../../crates/pedradb-raft/src/commit_kernel.rs', lines 63:0-65:1
     Visibility: public -/
 def commit_kernel.may_commit_at_as_is
   (_index_term : Std.U64) (_current_term : Std.U64) (has_majority : Bool) :
@@ -262,7 +262,7 @@ def commit_kernel.may_commit_at_as_is
   ok has_majority
 
 /-- [pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::c1_advance_commit_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 86:0-96:1
+    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 94:0-104:1
     Visibility: public -/
 def c1_modelo_kernel.c1_advance_commit_as_is
   (s : c1_modelo_kernel.C1State) : Result c1_modelo_kernel.C1State := do
@@ -279,14 +279,14 @@ def c1_modelo_kernel.c1_advance_commit_as_is
   else ok s
 
 /-- [pedra_aeneas_c1_modelo_kernel::commit_kernel::propose_ack_ok]:
-    Source: 'src/../../../../crates/pedradb-raft/src/commit_kernel.rs', lines 34:0-36:1
+    Source: 'src/../../../../crates/pedradb-raft/src/commit_kernel.rs', lines 45:0-47:1
     Visibility: public -/
 def commit_kernel.propose_ack_ok
   (index : Std.U64) (commit_index : Std.U64) : Result Bool := do
   ok (commit_index >= index)
 
 /-- [pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::c1_modelo]:
-    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 100:0-103:1
+    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 108:0-111:1
     Visibility: public -/
 def c1_modelo_kernel.c1_modelo
   (s : c1_modelo_kernel.C1State) : Result Bool := do
@@ -296,14 +296,14 @@ def c1_modelo_kernel.c1_modelo
   else ok true
 
 /-- [pedra_aeneas_c1_modelo_kernel::commit_kernel::propose_ack_ok_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/commit_kernel.rs', lines 58:0-60:1
+    Source: 'src/../../../../crates/pedradb-raft/src/commit_kernel.rs', lines 69:0-71:1
     Visibility: public -/
 def commit_kernel.propose_ack_ok_as_is
   (_index : Std.U64) (_commit_index : Std.U64) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::c1_modelo_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 107:0-110:1
+    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 115:0-118:1
     Visibility: public -/
 def c1_modelo_kernel.c1_modelo_as_is
   (s : c1_modelo_kernel.C1State) : Result Bool := do
@@ -313,7 +313,7 @@ def c1_modelo_kernel.c1_modelo_as_is
   else ok true
 
 /-- [pedra_aeneas_c1_modelo_kernel::c1_modelo_kernel::joint_add_shape]:
-    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 115:0-128:1
+    Source: 'src/../../../../crates/pedradb-raft/src/c1_modelo_kernel.rs', lines 123:0-136:1
     Visibility: public -/
 def c1_modelo_kernel.joint_add_shape : Result c1_modelo_kernel.C1State := do
   ok
@@ -331,48 +331,48 @@ def c1_modelo_kernel.joint_add_shape : Result c1_modelo_kernel.C1State := do
     }
 
 /-- [pedra_aeneas_c1_modelo_kernel::commit_kernel::recover_commit]:
-    Source: 'src/../../../../crates/pedradb-raft/src/commit_kernel.rs', lines 15:0-17:1
+    Source: 'src/../../../../crates/pedradb-raft/src/commit_kernel.rs', lines 26:0-28:1
     Visibility: public -/
 def commit_kernel.recover_commit
   (loaded_commit : Std.U64) (log_last : Std.U64) : Result Std.U64 := do
   core.cmp.Ord.min.trait_default core.cmp.OrdU64 loaded_commit log_last
 
 /-- [pedra_aeneas_c1_modelo_kernel::commit_kernel::recover_last_applied]:
-    Source: 'src/../../../../crates/pedradb-raft/src/commit_kernel.rs', lines 21:0-23:1
+    Source: 'src/../../../../crates/pedradb-raft/src/commit_kernel.rs', lines 32:0-34:1
     Visibility: public -/
 def commit_kernel.recover_last_applied : Result Std.U64 := do
   ok 0#u64
 
 /-- [pedra_aeneas_c1_modelo_kernel::commit_kernel::recover_commit_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/commit_kernel.rs', lines 40:0-42:1
+    Source: 'src/../../../../crates/pedradb-raft/src/commit_kernel.rs', lines 51:0-53:1
     Visibility: public -/
 def commit_kernel.recover_commit_as_is
   (_loaded_commit : Std.U64) (log_last : Std.U64) : Result Std.U64 := do
   ok log_last
 
 /-- [pedra_aeneas_c1_modelo_kernel::commit_kernel::recover_last_applied_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/commit_kernel.rs', lines 46:0-48:1
+    Source: 'src/../../../../crates/pedradb-raft/src/commit_kernel.rs', lines 57:0-59:1
     Visibility: public -/
 def commit_kernel.recover_last_applied_as_is
   (log_last : Std.U64) : Result Std.U64 := do
   ok log_last
 
 /-- [pedra_aeneas_c1_modelo_kernel::commit_kernel::should_advance_commit]:
-    Source: 'src/../../../../crates/pedradb-raft/src/commit_kernel.rs', lines 64:0-66:1
+    Source: 'src/../../../../crates/pedradb-raft/src/commit_kernel.rs', lines 75:0-77:1
     Visibility: public -/
 def commit_kernel.should_advance_commit
   (new_idx : Std.U64) (current : Std.U64) : Result Bool := do
   ok (new_idx > current)
 
 /-- [pedra_aeneas_c1_modelo_kernel::commit_kernel::should_advance_commit_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/commit_kernel.rs', lines 70:0-72:1
+    Source: 'src/../../../../crates/pedradb-raft/src/commit_kernel.rs', lines 81:0-83:1
     Visibility: public -/
 def commit_kernel.should_advance_commit_as_is
   (_new_idx : Std.U64) (_current : Std.U64) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::joint_still_active]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 48:0-50:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 55:0-57:1
     Visibility: public -/
 def membership_kernel.joint_still_active
   (old : Slice Std.U64) (new : Slice Std.U64) : Result Bool := do
@@ -380,27 +380,27 @@ def membership_kernel.joint_still_active
     core.cmp.PartialEqU64) old new
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::joint_still_active_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 55:0-57:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 62:0-64:1
     Visibility: public -/
 def membership_kernel.joint_still_active_as_is
   (_old : Slice Std.U64) (_new : Slice Std.U64) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::joint_leave_ok]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 62:0-64:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 69:0-71:1
     Visibility: public -/
 def membership_kernel.joint_leave_ok (leave_in_log : Bool) : Result Bool := do
   ok leave_in_log
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::joint_leave_ok_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 68:0-70:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 75:0-77:1
     Visibility: public -/
 def membership_kernel.joint_leave_ok_as_is
   (_leave_in_log : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::plant_joint_schedule_ok]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 75:0-77:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 82:0-84:1
     Visibility: public -/
 def membership_kernel.plant_joint_schedule_ok
   (opt_in_emits : Bool) (default_omits : Bool) : Result Bool := do
@@ -409,14 +409,14 @@ def membership_kernel.plant_joint_schedule_ok
   else ok false
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::plant_joint_schedule_ok_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 82:0-84:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 89:0-91:1
     Visibility: public -/
 def membership_kernel.plant_joint_schedule_ok_as_is
   (_opt_in_emits : Bool) (_default_omits : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::queued_leave_finish_ok]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 88:0-90:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 95:0-97:1
     Visibility: public -/
 def membership_kernel.queued_leave_finish_ok
   (leave_in_log : Bool) (leave_committed : Bool) : Result Bool := do
@@ -425,77 +425,77 @@ def membership_kernel.queued_leave_finish_ok
   else ok true
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::queued_leave_finish_ok_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 94:0-96:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 101:0-103:1
     Visibility: public -/
 def membership_kernel.queued_leave_finish_ok_as_is
   (leave_in_log : Bool) (_leave_committed : Bool) : Result Bool := do
   ok leave_in_log
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::disk_membership_overrides_cli]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 100:0-102:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 107:0-109:1
     Visibility: public -/
 def membership_kernel.disk_membership_overrides_cli
   (has_disk : Bool) : Result Bool := do
   ok has_disk
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::disk_membership_overrides_cli_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 106:0-108:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 113:0-115:1
     Visibility: public -/
 def membership_kernel.disk_membership_overrides_cli_as_is
   (_has_disk : Bool) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::membership_identity_before_applied]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 112:0-114:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 119:0-121:1
     Visibility: public -/
 def membership_kernel.membership_identity_before_applied
   (identity_first : Bool) : Result Bool := do
   ok identity_first
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::membership_identity_before_applied_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 118:0-120:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 125:0-127:1
     Visibility: public -/
 def membership_kernel.membership_identity_before_applied_as_is
   (_identity_first : Bool) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::high_water_at_least]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 124:0-126:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 131:0-133:1
     Visibility: public -/
 def membership_kernel.high_water_at_least
   (disk_hw : Std.U64) (ram_hw : Std.U64) : Result Std.U64 := do
   core.cmp.Ord.max.default core.cmp.OrdU64.partialOrdInst.lt disk_hw ram_hw
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::high_water_at_least_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 130:0-132:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 137:0-139:1
     Visibility: public -/
 def membership_kernel.high_water_at_least_as_is
   (_disk_hw : Std.U64) (ram_hw : Std.U64) : Result Std.U64 := do
   ok ram_hw
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::recover_must_apply]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 136:0-138:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 143:0-145:1
     Visibility: public -/
 def membership_kernel.recover_must_apply
   (applied : Std.U64) (commit : Std.U64) : Result Bool := do
   ok (commit > applied)
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::recover_must_apply_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 142:0-144:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 149:0-151:1
     Visibility: public -/
 def membership_kernel.recover_must_apply_as_is
   (_applied : Std.U64) (_commit : Std.U64) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::recover_apply_node_counts]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 148:0-150:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 155:0-157:1
     Visibility: public -/
 def membership_kernel.recover_apply_node_counts
   (is_local : Bool) (_in_ids : Bool) : Result Bool := do
   ok is_local
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::recover_apply_node_counts_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 154:0-156:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 161:0-163:1
     Visibility: public -/
 def membership_kernel.recover_apply_node_counts_as_is
   (is_local : Bool) (in_ids : Bool) : Result Bool := do
@@ -504,14 +504,14 @@ def membership_kernel.recover_apply_node_counts_as_is
   else ok false
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::recover_truncate_node_counts]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 160:0-162:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 167:0-169:1
     Visibility: public -/
 def membership_kernel.recover_truncate_node_counts
   (is_local : Bool) (_in_ids : Bool) : Result Bool := do
   ok is_local
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::recover_truncate_node_counts_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 166:0-168:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 173:0-175:1
     Visibility: public -/
 def membership_kernel.recover_truncate_node_counts_as_is
   (is_local : Bool) (in_ids : Bool) : Result Bool := do
@@ -520,28 +520,28 @@ def membership_kernel.recover_truncate_node_counts_as_is
   else ok false
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::recover_drop_orphan_seg]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 172:0-174:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 179:0-181:1
     Visibility: public -/
 def membership_kernel.recover_drop_orphan_seg
   (seg_index : Std.U64) (new_hi : Std.U64) : Result Bool := do
   ok (seg_index > new_hi)
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::recover_drop_orphan_seg_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 178:0-180:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 185:0-187:1
     Visibility: public -/
 def membership_kernel.recover_drop_orphan_seg_as_is
   (_seg_index : Std.U64) (_new_hi : Std.U64) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::recover_abort_node_counts]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 184:0-186:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 191:0-193:1
     Visibility: public -/
 def membership_kernel.recover_abort_node_counts
   (is_local : Bool) (_in_ids : Bool) : Result Bool := do
   ok is_local
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::recover_abort_node_counts_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 190:0-192:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 197:0-199:1
     Visibility: public -/
 def membership_kernel.recover_abort_node_counts_as_is
   (is_local : Bool) (in_ids : Bool) : Result Bool := do
@@ -550,14 +550,14 @@ def membership_kernel.recover_abort_node_counts_as_is
   else ok false
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::persist_meta_node_counts]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 196:0-198:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 203:0-205:1
     Visibility: public -/
 def membership_kernel.persist_meta_node_counts
   (is_local : Bool) (_in_ids : Bool) : Result Bool := do
   ok is_local
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::persist_meta_node_counts_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 202:0-204:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 209:0-211:1
     Visibility: public -/
 def membership_kernel.persist_meta_node_counts_as_is
   (is_local : Bool) (in_ids : Bool) : Result Bool := do
@@ -566,14 +566,14 @@ def membership_kernel.persist_meta_node_counts_as_is
   else ok false
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::persist_hist_node_counts]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 208:0-210:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 215:0-217:1
     Visibility: public -/
 def membership_kernel.persist_hist_node_counts
   (is_local : Bool) (_in_ids : Bool) : Result Bool := do
   ok is_local
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::persist_hist_node_counts_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 214:0-216:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 221:0-223:1
     Visibility: public -/
 def membership_kernel.persist_hist_node_counts_as_is
   (is_local : Bool) (in_ids : Bool) : Result Bool := do
@@ -582,14 +582,14 @@ def membership_kernel.persist_hist_node_counts_as_is
   else ok false
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::persist_fence_node_counts]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 220:0-222:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 227:0-229:1
     Visibility: public -/
 def membership_kernel.persist_fence_node_counts
   (is_local : Bool) (_in_ids : Bool) : Result Bool := do
   ok is_local
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::persist_fence_node_counts_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 226:0-228:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 233:0-235:1
     Visibility: public -/
 def membership_kernel.persist_fence_node_counts_as_is
   (is_local : Bool) (in_ids : Bool) : Result Bool := do
@@ -598,14 +598,14 @@ def membership_kernel.persist_fence_node_counts_as_is
   else ok false
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::force_clear_node_counts]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 232:0-234:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 239:0-241:1
     Visibility: public -/
 def membership_kernel.force_clear_node_counts
   (is_local : Bool) (_in_ids : Bool) : Result Bool := do
   ok is_local
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::force_clear_node_counts_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 238:0-240:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 245:0-247:1
     Visibility: public -/
 def membership_kernel.force_clear_node_counts_as_is
   (is_local : Bool) (in_ids : Bool) : Result Bool := do
@@ -614,14 +614,14 @@ def membership_kernel.force_clear_node_counts_as_is
   else ok false
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::drop_preimages_node_counts]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 244:0-246:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 251:0-253:1
     Visibility: public -/
 def membership_kernel.drop_preimages_node_counts
   (is_local : Bool) (_in_ids : Bool) : Result Bool := do
   ok is_local
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::drop_preimages_node_counts_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 250:0-252:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 257:0-259:1
     Visibility: public -/
 def membership_kernel.drop_preimages_node_counts_as_is
   (is_local : Bool) (in_ids : Bool) : Result Bool := do
@@ -630,53 +630,53 @@ def membership_kernel.drop_preimages_node_counts_as_is
   else ok false
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::open_peer_uses_disk]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 256:0-258:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 263:0-265:1
     Visibility: public -/
 def membership_kernel.open_peer_uses_disk (has_disk : Bool) : Result Bool := do
   ok has_disk
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::open_peer_uses_disk_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 262:0-264:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 269:0-271:1
     Visibility: public -/
 def membership_kernel.open_peer_uses_disk_as_is
   (_has_disk : Bool) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::local_id_if_member]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 268:0-270:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 275:0-277:1
     Visibility: public -/
 def membership_kernel.local_id_if_member (in_ids : Bool) : Result Bool := do
   ok in_ids
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::local_id_if_member_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 274:0-276:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 281:0-283:1
     Visibility: public -/
 def membership_kernel.local_id_if_member_as_is
   (_in_ids : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::reader_id_local]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 280:0-282:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 287:0-289:1
     Visibility: public -/
 def membership_kernel.reader_id_local (is_local : Bool) : Result Bool := do
   ok is_local
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::reader_id_local_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 286:0-288:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 293:0-295:1
     Visibility: public -/
 def membership_kernel.reader_id_local_as_is
   (_is_local : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::discard_node_counts]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 292:0-294:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 299:0-301:1
     Visibility: public -/
 def membership_kernel.discard_node_counts
   (is_local : Bool) (_in_ids : Bool) : Result Bool := do
   ok is_local
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::discard_node_counts_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 298:0-300:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 305:0-307:1
     Visibility: public -/
 def membership_kernel.discard_node_counts_as_is
   (is_local : Bool) (in_ids : Bool) : Result Bool := do
@@ -685,127 +685,127 @@ def membership_kernel.discard_node_counts_as_is
   else ok false
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::discard_leader_local]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 304:0-306:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 311:0-313:1
     Visibility: public -/
 def membership_kernel.discard_leader_local
   (is_local : Bool) : Result Bool := do
   ok is_local
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::discard_leader_local_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 310:0-312:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 317:0-319:1
     Visibility: public -/
 def membership_kernel.discard_leader_local_as_is
   (_is_local : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::removed_steps_down]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 316:0-318:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 323:0-325:1
     Visibility: public -/
 def membership_kernel.removed_steps_down (in_ids : Bool) : Result Bool := do
   ok (¬ in_ids)
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::removed_steps_down_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 322:0-324:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 329:0-331:1
     Visibility: public -/
 def membership_kernel.removed_steps_down_as_is
   (_in_ids : Bool) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::hint_if_member]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 328:0-330:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 335:0-337:1
     Visibility: public -/
 def membership_kernel.hint_if_member (in_ids : Bool) : Result Bool := do
   ok in_ids
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::hint_if_member_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 334:0-336:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 341:0-343:1
     Visibility: public -/
 def membership_kernel.hint_if_member_as_is (_in_ids : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::drop_repl_slot]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 340:0-342:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 347:0-349:1
     Visibility: public -/
 def membership_kernel.drop_repl_slot (in_ids : Bool) : Result Bool := do
   ok (¬ in_ids)
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::drop_repl_slot_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 346:0-348:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 353:0-355:1
     Visibility: public -/
 def membership_kernel.drop_repl_slot_as_is (_in_ids : Bool) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::drop_sent_through]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 352:0-354:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 359:0-361:1
     Visibility: public -/
 def membership_kernel.drop_sent_through (in_ids : Bool) : Result Bool := do
   ok (¬ in_ids)
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::drop_sent_through_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 358:0-360:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 365:0-367:1
     Visibility: public -/
 def membership_kernel.drop_sent_through_as_is
   (_in_ids : Bool) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::participating_if_member]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 364:0-366:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 371:0-373:1
     Visibility: public -/
 def membership_kernel.participating_if_member
   (in_ids : Bool) : Result Bool := do
   ok in_ids
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::participating_if_member_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 370:0-372:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 377:0-379:1
     Visibility: public -/
 def membership_kernel.participating_if_member_as_is
   (_in_ids : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::pending_joint_node_counts]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 376:0-378:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 383:0-385:1
     Visibility: public -/
 def membership_kernel.pending_joint_node_counts
   (is_member : Bool) : Result Bool := do
   ok is_member
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::pending_joint_node_counts_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 382:0-384:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 389:0-391:1
     Visibility: public -/
 def membership_kernel.pending_joint_node_counts_as_is
   (_is_member : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::joint_target_counts]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 389:0-391:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 396:0-398:1
     Visibility: public -/
 def membership_kernel.joint_target_counts
   (in_ids : Bool) (_in_nodes : Bool) : Result Bool := do
   ok in_ids
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::joint_target_counts_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 396:0-398:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 403:0-405:1
     Visibility: public -/
 def membership_kernel.joint_target_counts_as_is
   (_in_ids : Bool) (in_nodes : Bool) : Result Bool := do
   ok in_nodes
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::joint_add_target_counts]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 403:0-405:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 410:0-412:1
     Visibility: public -/
 def membership_kernel.joint_add_target_counts
   (_in_nodes : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::joint_add_target_counts_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 409:0-411:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 416:0-418:1
     Visibility: public -/
 def membership_kernel.joint_add_target_counts_as_is
   (in_nodes : Bool) : Result Bool := do
   ok in_nodes
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::election_grant_from_counts]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 416:0-418:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 423:0-425:1
     Visibility: public -/
 def membership_kernel.election_grant_from_counts
   (in_ids : Bool) (in_pending_old_or_new : Bool) : Result Bool := do
@@ -814,14 +814,14 @@ def membership_kernel.election_grant_from_counts
   else ok in_pending_old_or_new
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::election_grant_from_counts_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 422:0-424:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 429:0-431:1
     Visibility: public -/
 def membership_kernel.election_grant_from_counts_as_is
   (_in_ids : Bool) (_in_pending_old_or_new : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::liveness_admitted]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 431:0-433:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 438:0-440:1
     Visibility: public -/
 def membership_kernel.liveness_admitted
   (es1 : Bool) (es2 : Bool) (es3 : Bool) : Result Bool := do
@@ -832,7 +832,7 @@ def membership_kernel.liveness_admitted
   else ok false
 
 /-- [pedra_aeneas_c1_modelo_kernel::membership_kernel::liveness_admitted_as_is]:
-    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 437:0-439:1
+    Source: 'src/../../../../crates/pedradb-raft/src/membership_kernel.rs', lines 444:0-446:1
     Visibility: public -/
 def membership_kernel.liveness_admitted_as_is
   (_es1 : Bool) (_es2 : Bool) (_es3 : Bool) : Result Bool := do
