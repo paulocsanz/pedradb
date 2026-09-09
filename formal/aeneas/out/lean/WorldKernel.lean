@@ -305,7 +305,7 @@ def std.hash.random.RandomState.Insts.CoreHashBuildHasherDefaultHasher :
 axiom alloc.fmt.format : core.fmt.Arguments → Result String
 
 /-- [pedra_aeneas_world_kernel::TrajectorySample]
-    Source: '../../../crates/pedradb-world/src/world_kernel.rs', lines 27:0-40:1
+    Source: '../../../crates/pedradb-world/src/world_kernel.rs', lines 24:0-37:1
     Visibility: public -/
 structure TrajectorySample where
   step : Std.U32
@@ -316,7 +316,7 @@ structure TrajectorySample where
   applied_index : Std.U64
 
 /-- [pedra_aeneas_world_kernel::{impl core::clone::Clone for pedra_aeneas_world_kernel::TrajectorySample}::clone]:
-    Source: '../../../crates/pedradb-world/src/world_kernel.rs', lines 26:16-26:21
+    Source: '../../../crates/pedradb-world/src/world_kernel.rs', lines 23:16-23:21
     Visibility: public -/
 def TrajectorySample.Insts.CoreCloneClone.clone
   (self : TrajectorySample) : Result TrajectorySample := do
@@ -337,7 +337,7 @@ def TrajectorySample.Insts.CoreCloneClone.clone
     }
 
 /-- [pedra_aeneas_world_kernel::trajectory_violation]:
-    Source: '../../../crates/pedradb-world/src/world_kernel.rs', lines 46:0-59:1
+    Source: '../../../crates/pedradb-world/src/world_kernel.rs', lines 42:0-55:1
     Visibility: public -/
 def trajectory_violation
   (prev : TrajectorySample) (cur : TrajectorySample) :
@@ -354,7 +354,7 @@ def trajectory_violation
       else ok none
 
 /-- [pedra_aeneas_world_kernel::trajectory_violation_as_is]:
-    Source: '../../../crates/pedradb-world/src/world_kernel.rs', lines 66:0-75:1
+    Source: '../../../crates/pedradb-world/src/world_kernel.rs', lines 61:0-70:1
     Visibility: public -/
 def trajectory_violation_as_is
   (prev : TrajectorySample) (cur : TrajectorySample) :
@@ -365,7 +365,7 @@ def trajectory_violation_as_is
   else ok none
 
 /-- [pedra_aeneas_world_kernel::check_trajectory]:
-    Source: '../../../crates/pedradb-world/src/world_kernel.rs', lines 84:0-116:1
+    Source: '../../../crates/pedradb-world/src/world_kernel.rs', lines 78:0-110:1
     Visibility: public -/
 axiom str_to_string : Str → Result String
 
@@ -434,7 +434,7 @@ def check_trajectory
   check_trajectory_loop samples out0 0#usize
 
 /-- [pedra_aeneas_world_kernel::check_trajectory_as_is]:
-    Source: '../../../crates/pedradb-world/src/world_kernel.rs', lines 122:0-154:1
+    Source: '../../../crates/pedradb-world/src/world_kernel.rs', lines 115:0-147:1
     Visibility: public -/
 @[rust_loop_body]
 def check_trajectory_as_is_loop.body
