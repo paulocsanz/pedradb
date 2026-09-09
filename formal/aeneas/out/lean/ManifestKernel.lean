@@ -34,7 +34,7 @@ axiom U64.Insts.CoreHashHash.hash
   {H : Type} (HasherInst : core.hash.Hasher H) : Std.U64 → H → Result H
 
 /-- [pedra_aeneas_manifest_kernel::ManifestObs]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 219:0-228:1
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 41:0-50:1
     Visibility: public -/
 @[discriminant isize]
 inductive ManifestObs where
@@ -43,7 +43,7 @@ inductive ManifestObs where
 | Corrupt : ManifestObs
 
 /-- [pedra_aeneas_manifest_kernel::{impl core::fmt::Debug for pedra_aeneas_manifest_kernel::ManifestObs}::fmt]:
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 218:9-218:14
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 40:9-40:14
     Visibility: public -/
 def ManifestObs.Insts.CoreFmtDebug.fmt
   (self : ManifestObs) (f : core.fmt.Formatter) :
@@ -55,42 +55,42 @@ def ManifestObs.Insts.CoreFmtDebug.fmt
   | ManifestObs.Corrupt => core.fmt.Formatter.write_str f (toStr "Corrupt")
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::fmt::Debug for pedra_aeneas_manifest_kernel::ManifestObs}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 218:9-218:14 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 40:9-40:14 -/
 @[reducible]
 def ManifestObs.Insts.CoreFmtDebug : core.fmt.Debug ManifestObs := {
   fmt := ManifestObs.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_manifest_kernel::{impl core::clone::Clone for pedra_aeneas_manifest_kernel::ManifestObs}::clone]:
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 218:16-218:21
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 40:16-40:21
     Visibility: public -/
 def ManifestObs.Insts.CoreCloneClone.clone
   (self : ManifestObs) : Result ManifestObs := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::clone::Clone for pedra_aeneas_manifest_kernel::ManifestObs}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 218:16-218:21 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 40:16-40:21 -/
 @[reducible]
 def ManifestObs.Insts.CoreCloneClone : core.clone.Clone ManifestObs := {
   clone := ManifestObs.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::marker::Copy for pedra_aeneas_manifest_kernel::ManifestObs}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 218:23-218:27 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 40:23-40:27 -/
 @[reducible]
 def ManifestObs.Insts.CoreMarkerCopy : core.marker.Copy ManifestObs := {
   cloneInst := ManifestObs.Insts.CoreCloneClone
 }
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_manifest_kernel::ManifestObs}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 218:29-218:38 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 40:29-40:38 -/
 @[reducible]
 def ManifestObs.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq ManifestObs := {
 }
 
 /-- [pedra_aeneas_manifest_kernel::{impl core::cmp::PartialEq<pedra_aeneas_manifest_kernel::ManifestObs> for pedra_aeneas_manifest_kernel::ManifestObs}::eq]:
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 218:29-218:38
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 40:29-40:38
     Visibility: public -/
 def ManifestObs.Insts.CoreCmpPartialEqManifestObs.eq
   (self : ManifestObs) (other : ManifestObs) : Result Bool := do
@@ -99,7 +99,7 @@ def ManifestObs.Insts.CoreCmpPartialEqManifestObs.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::cmp::PartialEq<pedra_aeneas_manifest_kernel::ManifestObs> for pedra_aeneas_manifest_kernel::ManifestObs}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 218:29-218:38 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 40:29-40:38 -/
 @[reducible]
 def ManifestObs.Insts.CoreCmpPartialEqManifestObs : core.cmp.PartialEq
   ManifestObs ManifestObs := {
@@ -107,14 +107,14 @@ def ManifestObs.Insts.CoreCmpPartialEqManifestObs : core.cmp.PartialEq
 }
 
 /-- [pedra_aeneas_manifest_kernel::{impl core::cmp::Eq for pedra_aeneas_manifest_kernel::ManifestObs}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 218:40-218:42
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 40:40-40:42
     Visibility: public -/
 def ManifestObs.Insts.CoreCmpEq.assert_fields_are_eq
   (self : ManifestObs) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::cmp::Eq for pedra_aeneas_manifest_kernel::ManifestObs}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 218:40-218:42 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 40:40-40:42 -/
 @[reducible]
 def ManifestObs.Insts.CoreCmpEq : core.cmp.Eq ManifestObs := {
   partialEqInst := ManifestObs.Insts.CoreCmpPartialEqManifestObs
@@ -122,7 +122,7 @@ def ManifestObs.Insts.CoreCmpEq : core.cmp.Eq ManifestObs := {
 }
 
 /-- [pedra_aeneas_manifest_kernel::{impl core::hash::Hash for pedra_aeneas_manifest_kernel::ManifestObs}::hash]:
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 218:44-218:48
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 40:44-40:48
     Visibility: public -/
 def ManifestObs.Insts.CoreHashHash.hash
   {__H : Type} (corehashHasherInst : core.hash.Hasher __H) (self : ManifestObs)
@@ -133,7 +133,7 @@ def ManifestObs.Insts.CoreHashHash.hash
   Isize.Insts.CoreHashHash.hash corehashHasherInst self1 state
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::hash::Hash for pedra_aeneas_manifest_kernel::ManifestObs}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 218:44-218:48 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 40:44-40:48 -/
 @[reducible]
 def ManifestObs.Insts.CoreHashHash : core.hash.Hash ManifestObs := {
   hash := fun {H : Type} (corehashHasherInst : core.hash.Hasher H) =>
@@ -141,7 +141,7 @@ def ManifestObs.Insts.CoreHashHash : core.hash.Hash ManifestObs := {
 }
 
 /-- [pedra_aeneas_manifest_kernel::ListedSst]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 233:0-238:1
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 54:0-59:1
     Visibility: public -/
 @[discriminant isize]
 inductive ListedSst where
@@ -149,7 +149,7 @@ inductive ListedSst where
 | Missing : Std.U64 → ListedSst
 
 /-- [pedra_aeneas_manifest_kernel::{impl core::fmt::Debug for pedra_aeneas_manifest_kernel::ListedSst}::fmt]:
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 232:9-232:14
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 53:9-53:14
     Visibility: public -/
 def ListedSst.Insts.CoreFmtDebug.fmt
   (self : ListedSst) (f : core.fmt.Formatter) :
@@ -162,42 +162,42 @@ def ListedSst.Insts.CoreFmtDebug.fmt
     core.fmt.Formatter.debug_tuple_field1_finish f (toStr "Missing") __self_01
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::fmt::Debug for pedra_aeneas_manifest_kernel::ListedSst}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 232:9-232:14 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 53:9-53:14 -/
 @[reducible]
 def ListedSst.Insts.CoreFmtDebug : core.fmt.Debug ListedSst := {
   fmt := ListedSst.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_manifest_kernel::{impl core::clone::Clone for pedra_aeneas_manifest_kernel::ListedSst}::clone]:
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 232:16-232:21
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 53:16-53:21
     Visibility: public -/
 def ListedSst.Insts.CoreCloneClone.clone
   (self : ListedSst) : Result ListedSst := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::clone::Clone for pedra_aeneas_manifest_kernel::ListedSst}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 232:16-232:21 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 53:16-53:21 -/
 @[reducible]
 def ListedSst.Insts.CoreCloneClone : core.clone.Clone ListedSst := {
   clone := ListedSst.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::marker::Copy for pedra_aeneas_manifest_kernel::ListedSst}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 232:23-232:27 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 53:23-53:27 -/
 @[reducible]
 def ListedSst.Insts.CoreMarkerCopy : core.marker.Copy ListedSst := {
   cloneInst := ListedSst.Insts.CoreCloneClone
 }
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_manifest_kernel::ListedSst}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 232:29-232:38 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 53:29-53:38 -/
 @[reducible]
 def ListedSst.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq ListedSst := {
 }
 
 /-- [pedra_aeneas_manifest_kernel::{impl core::cmp::PartialEq<pedra_aeneas_manifest_kernel::ListedSst> for pedra_aeneas_manifest_kernel::ListedSst}::eq]:
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 232:29-232:38
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 53:29-53:38
     Visibility: public -/
 def ListedSst.Insts.CoreCmpPartialEqListedSst.eq
   (self : ListedSst) (other : ListedSst) : Result Bool := do
@@ -215,7 +215,7 @@ def ListedSst.Insts.CoreCmpPartialEqListedSst.eq
   else ok false
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::cmp::PartialEq<pedra_aeneas_manifest_kernel::ListedSst> for pedra_aeneas_manifest_kernel::ListedSst}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 232:29-232:38 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 53:29-53:38 -/
 @[reducible]
 def ListedSst.Insts.CoreCmpPartialEqListedSst : core.cmp.PartialEq ListedSst
   ListedSst := {
@@ -223,14 +223,14 @@ def ListedSst.Insts.CoreCmpPartialEqListedSst : core.cmp.PartialEq ListedSst
 }
 
 /-- [pedra_aeneas_manifest_kernel::{impl core::cmp::Eq for pedra_aeneas_manifest_kernel::ListedSst}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 232:40-232:42
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 53:40-53:42
     Visibility: public -/
 def ListedSst.Insts.CoreCmpEq.assert_fields_are_eq
   (self : ListedSst) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::cmp::Eq for pedra_aeneas_manifest_kernel::ListedSst}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 232:40-232:42 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 53:40-53:42 -/
 @[reducible]
 def ListedSst.Insts.CoreCmpEq : core.cmp.Eq ListedSst := {
   partialEqInst := ListedSst.Insts.CoreCmpPartialEqListedSst
@@ -238,7 +238,7 @@ def ListedSst.Insts.CoreCmpEq : core.cmp.Eq ListedSst := {
 }
 
 /-- [pedra_aeneas_manifest_kernel::{impl core::hash::Hash for pedra_aeneas_manifest_kernel::ListedSst}::hash]:
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 232:44-232:48
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 53:44-53:48
     Visibility: public -/
 def ListedSst.Insts.CoreHashHash.hash
   {__H : Type} (corehashHasherInst : core.hash.Hasher __H) (self : ListedSst)
@@ -253,7 +253,7 @@ def ListedSst.Insts.CoreHashHash.hash
     U64.Insts.CoreHashHash.hash corehashHasherInst __self_0 state1
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::hash::Hash for pedra_aeneas_manifest_kernel::ListedSst}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 232:44-232:48 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 53:44-53:48 -/
 @[reducible]
 def ListedSst.Insts.CoreHashHash : core.hash.Hash ListedSst := {
   hash := fun {H : Type} (corehashHasherInst : core.hash.Hasher H) =>
@@ -261,7 +261,7 @@ def ListedSst.Insts.CoreHashHash : core.hash.Hash ListedSst := {
 }
 
 /-- [pedra_aeneas_manifest_kernel::SstRecoverAction]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 243:0-251:1
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 63:0-71:1
     Visibility: public -/
 @[discriminant isize]
 inductive SstRecoverAction where
@@ -270,7 +270,7 @@ inductive SstRecoverAction where
 | RefuseOpen : SstRecoverAction
 
 /-- [pedra_aeneas_manifest_kernel::{impl core::fmt::Debug for pedra_aeneas_manifest_kernel::SstRecoverAction}::fmt]:
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 242:9-242:14
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 62:9-62:14
     Visibility: public -/
 def SstRecoverAction.Insts.CoreFmtDebug.fmt
   (self : SstRecoverAction) (f : core.fmt.Formatter) :
@@ -285,21 +285,21 @@ def SstRecoverAction.Insts.CoreFmtDebug.fmt
     core.fmt.Formatter.write_str f (toStr "RefuseOpen")
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::fmt::Debug for pedra_aeneas_manifest_kernel::SstRecoverAction}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 242:9-242:14 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 62:9-62:14 -/
 @[reducible]
 def SstRecoverAction.Insts.CoreFmtDebug : core.fmt.Debug SstRecoverAction := {
   fmt := SstRecoverAction.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_manifest_kernel::{impl core::clone::Clone for pedra_aeneas_manifest_kernel::SstRecoverAction}::clone]:
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 242:16-242:21
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 62:16-62:21
     Visibility: public -/
 def SstRecoverAction.Insts.CoreCloneClone.clone
   (self : SstRecoverAction) : Result SstRecoverAction := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::clone::Clone for pedra_aeneas_manifest_kernel::SstRecoverAction}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 242:16-242:21 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 62:16-62:21 -/
 @[reducible]
 def SstRecoverAction.Insts.CoreCloneClone : core.clone.Clone SstRecoverAction
   := {
@@ -307,7 +307,7 @@ def SstRecoverAction.Insts.CoreCloneClone : core.clone.Clone SstRecoverAction
 }
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::marker::Copy for pedra_aeneas_manifest_kernel::SstRecoverAction}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 242:23-242:27 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 62:23-62:27 -/
 @[reducible]
 def SstRecoverAction.Insts.CoreMarkerCopy : core.marker.Copy SstRecoverAction
   := {
@@ -315,14 +315,14 @@ def SstRecoverAction.Insts.CoreMarkerCopy : core.marker.Copy SstRecoverAction
 }
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_manifest_kernel::SstRecoverAction}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 242:29-242:38 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 62:29-62:38 -/
 @[reducible]
 def SstRecoverAction.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq SstRecoverAction := {
 }
 
 /-- [pedra_aeneas_manifest_kernel::{impl core::cmp::PartialEq<pedra_aeneas_manifest_kernel::SstRecoverAction> for pedra_aeneas_manifest_kernel::SstRecoverAction}::eq]:
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 242:29-242:38
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 62:29-62:38
     Visibility: public -/
 def SstRecoverAction.Insts.CoreCmpPartialEqSstRecoverAction.eq
   (self : SstRecoverAction) (other : SstRecoverAction) : Result Bool := do
@@ -331,7 +331,7 @@ def SstRecoverAction.Insts.CoreCmpPartialEqSstRecoverAction.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::cmp::PartialEq<pedra_aeneas_manifest_kernel::SstRecoverAction> for pedra_aeneas_manifest_kernel::SstRecoverAction}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 242:29-242:38 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 62:29-62:38 -/
 @[reducible]
 def SstRecoverAction.Insts.CoreCmpPartialEqSstRecoverAction :
   core.cmp.PartialEq SstRecoverAction SstRecoverAction := {
@@ -339,14 +339,14 @@ def SstRecoverAction.Insts.CoreCmpPartialEqSstRecoverAction :
 }
 
 /-- [pedra_aeneas_manifest_kernel::{impl core::cmp::Eq for pedra_aeneas_manifest_kernel::SstRecoverAction}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 242:40-242:42
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 62:40-62:42
     Visibility: public -/
 def SstRecoverAction.Insts.CoreCmpEq.assert_fields_are_eq
   (self : SstRecoverAction) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::cmp::Eq for pedra_aeneas_manifest_kernel::SstRecoverAction}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 242:40-242:42 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 62:40-62:42 -/
 @[reducible]
 def SstRecoverAction.Insts.CoreCmpEq : core.cmp.Eq SstRecoverAction := {
   partialEqInst := SstRecoverAction.Insts.CoreCmpPartialEqSstRecoverAction
@@ -354,7 +354,7 @@ def SstRecoverAction.Insts.CoreCmpEq : core.cmp.Eq SstRecoverAction := {
 }
 
 /-- [pedra_aeneas_manifest_kernel::{impl core::hash::Hash for pedra_aeneas_manifest_kernel::SstRecoverAction}::hash]:
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 242:44-242:48
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 62:44-62:48
     Visibility: public -/
 def SstRecoverAction.Insts.CoreHashHash.hash
   {__H : Type} (corehashHasherInst : core.hash.Hasher __H)
@@ -365,7 +365,7 @@ def SstRecoverAction.Insts.CoreHashHash.hash
   Isize.Insts.CoreHashHash.hash corehashHasherInst self1 state
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::hash::Hash for pedra_aeneas_manifest_kernel::SstRecoverAction}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 242:44-242:48 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 62:44-62:48 -/
 @[reducible]
 def SstRecoverAction.Insts.CoreHashHash : core.hash.Hash SstRecoverAction := {
   hash := fun {H : Type} (corehashHasherInst : core.hash.Hasher H) =>
@@ -373,7 +373,7 @@ def SstRecoverAction.Insts.CoreHashHash : core.hash.Hash SstRecoverAction := {
 }
 
 /-- [pedra_aeneas_manifest_kernel::sst_recover_action]:
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 268:0-276:1
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 87:0-95:1
     Visibility: public -/
 def sst_recover_action
   (obs : ManifestObs) (listed : ListedSst) : Result SstRecoverAction := do
@@ -386,7 +386,7 @@ def sst_recover_action
   | ManifestObs.Corrupt => ok SstRecoverAction.RefuseOpen
 
 /-- [pedra_aeneas_manifest_kernel::sst_recover_action_as_is_scan_on_damage]:
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 284:0-294:1
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 102:0-112:1
     Visibility: public -/
 def sst_recover_action_as_is_scan_on_damage
   (obs : ManifestObs) (listed : ListedSst) : Result SstRecoverAction := do
@@ -401,7 +401,7 @@ def sst_recover_action_as_is_scan_on_damage
   | ManifestObs.Corrupt => ok SstRecoverAction.ScanAndInstall
 
 /-- [pedra_aeneas_manifest_kernel::FirstInstallOutcome]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 299:0-307:1
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 116:0-124:1
     Visibility: public -/
 @[discriminant isize]
 inductive FirstInstallOutcome where
@@ -410,7 +410,7 @@ inductive FirstInstallOutcome where
 | Failed : FirstInstallOutcome
 
 /-- [pedra_aeneas_manifest_kernel::{impl core::fmt::Debug for pedra_aeneas_manifest_kernel::FirstInstallOutcome}::fmt]:
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 298:9-298:14
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 115:9-115:14
     Visibility: public -/
 def FirstInstallOutcome.Insts.CoreFmtDebug.fmt
   (self : FirstInstallOutcome) (f : core.fmt.Formatter) :
@@ -425,7 +425,7 @@ def FirstInstallOutcome.Insts.CoreFmtDebug.fmt
     core.fmt.Formatter.write_str f (toStr "Failed")
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::fmt::Debug for pedra_aeneas_manifest_kernel::FirstInstallOutcome}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 298:9-298:14 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 115:9-115:14 -/
 @[reducible]
 def FirstInstallOutcome.Insts.CoreFmtDebug : core.fmt.Debug FirstInstallOutcome
   := {
@@ -433,14 +433,14 @@ def FirstInstallOutcome.Insts.CoreFmtDebug : core.fmt.Debug FirstInstallOutcome
 }
 
 /-- [pedra_aeneas_manifest_kernel::{impl core::clone::Clone for pedra_aeneas_manifest_kernel::FirstInstallOutcome}::clone]:
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 298:16-298:21
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 115:16-115:21
     Visibility: public -/
 def FirstInstallOutcome.Insts.CoreCloneClone.clone
   (self : FirstInstallOutcome) : Result FirstInstallOutcome := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::clone::Clone for pedra_aeneas_manifest_kernel::FirstInstallOutcome}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 298:16-298:21 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 115:16-115:21 -/
 @[reducible]
 def FirstInstallOutcome.Insts.CoreCloneClone : core.clone.Clone
   FirstInstallOutcome := {
@@ -448,7 +448,7 @@ def FirstInstallOutcome.Insts.CoreCloneClone : core.clone.Clone
 }
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::marker::Copy for pedra_aeneas_manifest_kernel::FirstInstallOutcome}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 298:23-298:27 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 115:23-115:27 -/
 @[reducible]
 def FirstInstallOutcome.Insts.CoreMarkerCopy : core.marker.Copy
   FirstInstallOutcome := {
@@ -456,14 +456,14 @@ def FirstInstallOutcome.Insts.CoreMarkerCopy : core.marker.Copy
 }
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_manifest_kernel::FirstInstallOutcome}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 298:29-298:38 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 115:29-115:38 -/
 @[reducible]
 def FirstInstallOutcome.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq FirstInstallOutcome := {
 }
 
 /-- [pedra_aeneas_manifest_kernel::{impl core::cmp::PartialEq<pedra_aeneas_manifest_kernel::FirstInstallOutcome> for pedra_aeneas_manifest_kernel::FirstInstallOutcome}::eq]:
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 298:29-298:38
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 115:29-115:38
     Visibility: public -/
 def FirstInstallOutcome.Insts.CoreCmpPartialEqFirstInstallOutcome.eq
   (self : FirstInstallOutcome) (other : FirstInstallOutcome) :
@@ -474,7 +474,7 @@ def FirstInstallOutcome.Insts.CoreCmpPartialEqFirstInstallOutcome.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::cmp::PartialEq<pedra_aeneas_manifest_kernel::FirstInstallOutcome> for pedra_aeneas_manifest_kernel::FirstInstallOutcome}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 298:29-298:38 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 115:29-115:38 -/
 @[reducible]
 def FirstInstallOutcome.Insts.CoreCmpPartialEqFirstInstallOutcome :
   core.cmp.PartialEq FirstInstallOutcome FirstInstallOutcome := {
@@ -482,14 +482,14 @@ def FirstInstallOutcome.Insts.CoreCmpPartialEqFirstInstallOutcome :
 }
 
 /-- [pedra_aeneas_manifest_kernel::{impl core::cmp::Eq for pedra_aeneas_manifest_kernel::FirstInstallOutcome}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 298:40-298:42
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 115:40-115:42
     Visibility: public -/
 def FirstInstallOutcome.Insts.CoreCmpEq.assert_fields_are_eq
   (self : FirstInstallOutcome) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::cmp::Eq for pedra_aeneas_manifest_kernel::FirstInstallOutcome}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 298:40-298:42 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 115:40-115:42 -/
 @[reducible]
 def FirstInstallOutcome.Insts.CoreCmpEq : core.cmp.Eq FirstInstallOutcome := {
   partialEqInst :=
@@ -499,7 +499,7 @@ def FirstInstallOutcome.Insts.CoreCmpEq : core.cmp.Eq FirstInstallOutcome := {
 }
 
 /-- [pedra_aeneas_manifest_kernel::{impl core::hash::Hash for pedra_aeneas_manifest_kernel::FirstInstallOutcome}::hash]:
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 298:44-298:48
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 115:44-115:48
     Visibility: public -/
 def FirstInstallOutcome.Insts.CoreHashHash.hash
   {__H : Type} (corehashHasherInst : core.hash.Hasher __H)
@@ -510,7 +510,7 @@ def FirstInstallOutcome.Insts.CoreHashHash.hash
   Isize.Insts.CoreHashHash.hash corehashHasherInst self1 state
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::hash::Hash for pedra_aeneas_manifest_kernel::FirstInstallOutcome}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 298:44-298:48 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 115:44-115:48 -/
 @[reducible]
 def FirstInstallOutcome.Insts.CoreHashHash : core.hash.Hash FirstInstallOutcome
   := {
@@ -519,7 +519,7 @@ def FirstInstallOutcome.Insts.CoreHashHash : core.hash.Hash FirstInstallOutcome
 }
 
 /-- [pedra_aeneas_manifest_kernel::FirstInstallAction]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 312:0-317:1
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 128:0-133:1
     Visibility: public -/
 @[discriminant isize]
 inductive FirstInstallAction where
@@ -527,7 +527,7 @@ inductive FirstInstallAction where
 | RefuseOpen : FirstInstallAction
 
 /-- [pedra_aeneas_manifest_kernel::{impl core::fmt::Debug for pedra_aeneas_manifest_kernel::FirstInstallAction}::fmt]:
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 311:9-311:14
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 127:9-127:14
     Visibility: public -/
 def FirstInstallAction.Insts.CoreFmtDebug.fmt
   (self : FirstInstallAction) (f : core.fmt.Formatter) :
@@ -540,7 +540,7 @@ def FirstInstallAction.Insts.CoreFmtDebug.fmt
     core.fmt.Formatter.write_str f (toStr "RefuseOpen")
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::fmt::Debug for pedra_aeneas_manifest_kernel::FirstInstallAction}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 311:9-311:14 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 127:9-127:14 -/
 @[reducible]
 def FirstInstallAction.Insts.CoreFmtDebug : core.fmt.Debug FirstInstallAction
   := {
@@ -548,14 +548,14 @@ def FirstInstallAction.Insts.CoreFmtDebug : core.fmt.Debug FirstInstallAction
 }
 
 /-- [pedra_aeneas_manifest_kernel::{impl core::clone::Clone for pedra_aeneas_manifest_kernel::FirstInstallAction}::clone]:
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 311:16-311:21
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 127:16-127:21
     Visibility: public -/
 def FirstInstallAction.Insts.CoreCloneClone.clone
   (self : FirstInstallAction) : Result FirstInstallAction := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::clone::Clone for pedra_aeneas_manifest_kernel::FirstInstallAction}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 311:16-311:21 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 127:16-127:21 -/
 @[reducible]
 def FirstInstallAction.Insts.CoreCloneClone : core.clone.Clone
   FirstInstallAction := {
@@ -563,7 +563,7 @@ def FirstInstallAction.Insts.CoreCloneClone : core.clone.Clone
 }
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::marker::Copy for pedra_aeneas_manifest_kernel::FirstInstallAction}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 311:23-311:27 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 127:23-127:27 -/
 @[reducible]
 def FirstInstallAction.Insts.CoreMarkerCopy : core.marker.Copy
   FirstInstallAction := {
@@ -571,14 +571,14 @@ def FirstInstallAction.Insts.CoreMarkerCopy : core.marker.Copy
 }
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_manifest_kernel::FirstInstallAction}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 311:29-311:38 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 127:29-127:38 -/
 @[reducible]
 def FirstInstallAction.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq FirstInstallAction := {
 }
 
 /-- [pedra_aeneas_manifest_kernel::{impl core::cmp::PartialEq<pedra_aeneas_manifest_kernel::FirstInstallAction> for pedra_aeneas_manifest_kernel::FirstInstallAction}::eq]:
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 311:29-311:38
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 127:29-127:38
     Visibility: public -/
 def FirstInstallAction.Insts.CoreCmpPartialEqFirstInstallAction.eq
   (self : FirstInstallAction) (other : FirstInstallAction) : Result Bool := do
@@ -587,7 +587,7 @@ def FirstInstallAction.Insts.CoreCmpPartialEqFirstInstallAction.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::cmp::PartialEq<pedra_aeneas_manifest_kernel::FirstInstallAction> for pedra_aeneas_manifest_kernel::FirstInstallAction}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 311:29-311:38 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 127:29-127:38 -/
 @[reducible]
 def FirstInstallAction.Insts.CoreCmpPartialEqFirstInstallAction :
   core.cmp.PartialEq FirstInstallAction FirstInstallAction := {
@@ -595,14 +595,14 @@ def FirstInstallAction.Insts.CoreCmpPartialEqFirstInstallAction :
 }
 
 /-- [pedra_aeneas_manifest_kernel::{impl core::cmp::Eq for pedra_aeneas_manifest_kernel::FirstInstallAction}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 311:40-311:42
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 127:40-127:42
     Visibility: public -/
 def FirstInstallAction.Insts.CoreCmpEq.assert_fields_are_eq
   (self : FirstInstallAction) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::cmp::Eq for pedra_aeneas_manifest_kernel::FirstInstallAction}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 311:40-311:42 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 127:40-127:42 -/
 @[reducible]
 def FirstInstallAction.Insts.CoreCmpEq : core.cmp.Eq FirstInstallAction := {
   partialEqInst := FirstInstallAction.Insts.CoreCmpPartialEqFirstInstallAction
@@ -611,7 +611,7 @@ def FirstInstallAction.Insts.CoreCmpEq : core.cmp.Eq FirstInstallAction := {
 }
 
 /-- [pedra_aeneas_manifest_kernel::{impl core::hash::Hash for pedra_aeneas_manifest_kernel::FirstInstallAction}::hash]:
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 311:44-311:48
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 127:44-127:48
     Visibility: public -/
 def FirstInstallAction.Insts.CoreHashHash.hash
   {__H : Type} (corehashHasherInst : core.hash.Hasher __H)
@@ -622,7 +622,7 @@ def FirstInstallAction.Insts.CoreHashHash.hash
   Isize.Insts.CoreHashHash.hash corehashHasherInst self1 state
 
 /-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::hash::Hash for pedra_aeneas_manifest_kernel::FirstInstallAction}]
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 311:44-311:48 -/
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 127:44-127:48 -/
 @[reducible]
 def FirstInstallAction.Insts.CoreHashHash : core.hash.Hash FirstInstallAction
   := {
@@ -631,7 +631,7 @@ def FirstInstallAction.Insts.CoreHashHash : core.hash.Hash FirstInstallAction
 }
 
 /-- [pedra_aeneas_manifest_kernel::first_install_action]:
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 331:0-338:1
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 146:0-153:1
     Visibility: public -/
 def first_install_action
   (out : FirstInstallOutcome) : Result FirstInstallAction := do
@@ -641,7 +641,7 @@ def first_install_action
   | FirstInstallOutcome.Failed => ok FirstInstallAction.RefuseOpen
 
 /-- [pedra_aeneas_manifest_kernel::first_install_action_as_is_proceed_always]:
-    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 344:0-346:1
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 158:0-160:1
     Visibility: public -/
 def first_install_action_as_is_proceed_always
   (_out : FirstInstallOutcome) : Result FirstInstallAction := do
