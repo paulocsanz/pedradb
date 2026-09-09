@@ -88,6 +88,29 @@ theorem internal_key_encode_is_encode_into (self : key.InternalKey) :
   unfold key.InternalKey.encode
   rfl
 
+/-- Catalog entry: unpack is nibble `from_u8` then seq `>> 8`. Dual-unfold. -/
+theorem unpack_sequence_and_type_is_from_u8 (packed : U64) :
+    key.unpack_sequence_and_type packed =
+      (do
+        let i ← lift (packed &&& 255#u64)
+        let type_byte ← lift (UScalar.cast .U8 i)
+        let o ← key.ValueType.from_u8 type_byte
+        let r ←
+          core.option.Option.ok_or_else
+            key.unpack_sequence_and_type.closure.Insts.CoreOpsFunctionFnOnceTupleCoreError
+            o type_byte
+        let cf ← core.result.Result.Insts.CoreOpsTry.branch r
+        match cf with
+        | core.ops.control_flow.ControlFlow.Continue val =>
+          let sequence ← packed >>> 8#i32
+          ok (core.result.Result.Ok (sequence, val))
+        | core.ops.control_flow.ControlFlow.Break residual =>
+          core.result.Result.Insts.CoreOpsTryTraitFromResidualResultInfallible.from_residual
+            (U64 × key.ValueType) (core.convert.FromSame error.CoreError)
+            residual) := by
+  unfold key.unpack_sequence_and_type
+  rfl
+
 /-- Catalog entry: `encode_into` is extend user_key, pack trailer, extend BE bytes. Dual-unfold. -/
 theorem internal_key_encode_into_is_extend_packed
     (self : key.InternalKey) (out : alloc.vec.Vec U8) :
