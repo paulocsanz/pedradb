@@ -1637,7 +1637,7 @@ fn main() {
                         "E2 tcp multi-bt ok={ok_all} err={err_all} verified={verified}/{} mismatches={mismatches}",
                         merged.len()
                     );
-                    if mismatches > 0 {
+                    if !pedradb_core::write_admission_kernel::batch_is_empty(mismatches) {
                         notes.push(format!("E2 FAILED mismatches={mismatches}"));
                     }
                     drop(nodes);
