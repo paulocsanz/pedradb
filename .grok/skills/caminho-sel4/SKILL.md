@@ -19,11 +19,11 @@ description: >
 
 ## Grind pressure (one block, overwritten each fire)
 
-- Last fire: worked (`ce7764df` Lean unfold of rustc `prefix_exclusive_end_loop.body` nonempty)
-- Why: "cartoon is not a land" / Bound-helper (`d1f4978f`) skipped the debt; `skip_verus_last_wins` is invalid
-- This fire MUST land: delete the `merge.rs` `verus!` u64/toy-enum stand-in; rustc `&[u8]`/`key::ValueType` stays; Aeneas of those types is the term. Search leftover_next names cartoon remaining.
-- Forbidden this fire: mint u64 twin; `_body!` over u64-vs-bytes; skip cartoon as "not a land"; FACTORY_BAN halt; git checkout of db.rs/concurrent.rs
-- Deeper: Search leftover_next=cartoon remaining; open merge.rs; named cargo `visible_at_put_delete_range_del`; `aeneas_merge.sh` / lake Merge
+- Last fire: worked (`4d925ad8` delete merge.rs Verus cartoon; rustc `&[u8]` is the term)
+- Why: leftover_next_first vote; flattened `vote_decision` u64s ≠ rustc `VoteInputs`
+- This fire MUST land: delete the `vote_kernel.rs` `verus!` stand-in; rustc `VoteInputs` stays; Aeneas of those types is the term
+- Forbidden this fire: mint u64 twin; `_body!` over different types; skip cartoon as "not a land"; FACTORY_BAN halt; git checkout of db.rs/concurrent.rs
+- Deeper: Search leftover_next=cartoon remaining; open vote_kernel.rs; named cargo `grants_when_free_and_log_ok`; `aeneas_vote.sh` / lake VoteKernel
 
 This skill **lands one payable slice per Fire**. Rank 1–10 unpaid first.
 When those boards are 0, Search prints `leftover_next`: cartoon remaining

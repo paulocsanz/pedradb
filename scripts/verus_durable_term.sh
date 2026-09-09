@@ -1,26 +1,16 @@
 #!/usr/bin/env bash
-# Machine-check the durable-term step (RFC-0158 P0.2 / F125/F127).
-# Twin of crates/pedradb-raft/src/vote_kernel.rs — do not link into production.
+# vote_kernel.rs rustc body is the term (Aeneas VoteKernel.lean).
+# A flattened Verus stand-in of VoteInputs is not last-wins. Fail closed if it returns.
 set -euo pipefail
-
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-# RFC-0171 P0.3 / RFC-0174: prove the file rustc links (pair durable_term).
 SRC="$ROOT/crates/pedradb-raft/src/vote_kernel.rs"
-
-# Prefer explicit install location used on this machine; else PATH.
-if [[ -x "${VERUS:-}" ]]; then
-  :
-elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then
-  VERUS="$HOME/.local/verus/verus-arm64-macos/verus"
-elif command -v verus >/dev/null 2>&1; then
-  VERUS="$(command -v verus)"
-else
-  echo "error: verus not found (install to ~/.local/verus/verus-arm64-macos or set VERUS=)" >&2
-  exit 127
+if grep -n 'verus!' "$SRC"; then
+  echo "error: verus_durable_term: verus! stand-in still in vote_kernel.rs (not last-wins of rustc VoteInputs)" >&2
+  exit 1
 fi
-
-echo "verus: $VERUS"
-"$VERUS" --version
-echo "proving: $SRC"
-# Standalone twin is a library crate (no main).
-exec "$VERUS" "$SRC" --crate-type=lib --multiple-errors 10 --time "$@"
+if grep -n 'verus_keep_ghost' "$SRC"; then
+  echo "error: verus_durable_term: cfg(verus_keep_ghost) split still in vote_kernel.rs" >&2
+  exit 1
+fi
+echo "ok: no Verus cartoon in $SRC; term is Aeneas formal/aeneas/lean/VoteKernel.lean"
+exit 0
