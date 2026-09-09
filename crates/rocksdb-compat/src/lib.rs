@@ -1938,7 +1938,8 @@ pub(crate) fn scan_cf_at<E: PedraEnv>(
             (page, i, true)
         }
     };
-    let exhausted = items.is_empty();
+    let exhausted =
+        pedradb_core::write_admission_kernel::batch_is_empty(items.len() as u64);
     let resume_fwd = items
         .last()
         .map(|(k, _)| codec.encode_resume(cf, k))
