@@ -608,7 +608,7 @@ pub fn xor_durable_bits<E: Env>(
     n_bits: u32,
     apply: bool,
 ) -> Option<VerifyFailure> {
-    if n_bits == 0 {
+    if crate::write_admission_kernel::batch_is_empty(n_bits as u64) {
         return None;
     }
     let dir = dir.as_ref();
