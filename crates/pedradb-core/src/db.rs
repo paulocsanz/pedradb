@@ -10213,6 +10213,10 @@ impl<E: Env> Db<E> {
     /// Auto-flush: same SST/WAL path as [`Self::flush`] but does not rewrite
     /// the CHANGELOG cache when `changelog_interval == 0` (RFC-0036).
     fn auto_flush_mem(&mut self) -> Result<()> {
+        let probe = crate::env::probe_available_bytes(&self.env, &self.dir);
+        if let Some((available, need)) = crate::disk_pressure_kernel::compact_refuse(probe) {
+            return Err(CoreError::DiskPressure { available, need });
+        }
         self.ensure_not_fenced()?;
         if self.imm.is_some() {
             self.flush_imm_to_l0()?;
@@ -12635,6 +12639,49 @@ mod tests {
         db.put(b"k3", b"v3").unwrap();
         assert_eq!(db.get(b"k3").as_deref(), Some(b"v3".as_ref()));
 
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0179: auto-flush below the hard floor is DiskPressure (no SST);
+    /// mem still reads; not a durability fence. `put` admits first so the
+    /// test arms auto-flush after inject and calls `maybe_auto_flush`.
+    #[test]
+    fn auto_flush_mem_under_hard_floor_is_disk_pressure() {
+        use crate::disk_pressure_kernel::DISK_HARD_FREE_BYTES;
+        let dir = temp_dir();
+        let available = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(u64::MAX));
+        let env = SpaceEnv {
+            available: std::sync::Arc::clone(&available),
+        };
+        let mut db = Db::open_with_env(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                ..OpenOptions::default()
+            },
+            env,
+        )
+        .unwrap();
+        db.put(b"k", b"v").unwrap();
+        available.store(1024, std::sync::atomic::Ordering::SeqCst);
+        db.auto_flush_bytes = Some(1);
+        let err = db.maybe_auto_flush().unwrap_err();
+        assert!(
+            matches!(
+                err,
+                CoreError::DiskPressure {
+                    available: 1024,
+                    need: DISK_HARD_FREE_BYTES,
+                }
+            ),
+            "expected DiskPressure, got {err:?}"
+        );
+        assert_eq!(db.get(b"k").as_deref(), Some(b"v".as_ref()));
+        assert!(!db.is_durability_fenced());
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

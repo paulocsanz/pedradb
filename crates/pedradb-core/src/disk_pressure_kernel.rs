@@ -432,6 +432,15 @@ mod tests {
             promo.contains("compact_refuse("),
             "compact_vlog_promote must match compact_refuse before rename"
         );
+        let auto = include_str!("db.rs")
+            .split("fn auto_flush_mem(")
+            .nth(1)
+            .and_then(|s| s.split("fn maybe_auto_flush_best_effort(").next())
+            .expect("auto_flush_mem");
+        assert!(
+            auto.contains("compact_refuse("),
+            "auto_flush_mem must match compact_refuse before SST write"
+        );
     }
 
     #[test]

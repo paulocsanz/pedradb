@@ -138,6 +138,7 @@ admitido (não há compact); só o hard recusa.
   - `failing_env_rotate_wal_under_hard_floor_is_disk_pressure`: rotate WAL recusa; chave vive.
   - `failing_env_persist_manifest_under_hard_floor_is_disk_pressure`: MANIFEST recusa; não fence.
   - `failing_env_compact_vlog_promote_under_hard_floor_is_disk_pressure`: rename `.new` recusa; não fence.
+  - `auto_flush_mem_under_hard_floor_is_disk_pressure`: auto-flush recusa SST; mem lê.
 - **Telemetry / Analytics:** `tracing::warn!` na transição (não cada put).
   Sonda 0169 é P1.3.
 - **Documentation:** este RFC; linha em `docs/status.md`. Não reescreve
