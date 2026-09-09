@@ -331,7 +331,7 @@ impl SstTable {
     /// Whether the table has no entries.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.num_entries == 0
+        crate::write_admission_kernel::batch_is_empty(self.num_entries as u64)
     }
 
     /// Whether this table decodes blocks on demand (v2+). Residency of the
