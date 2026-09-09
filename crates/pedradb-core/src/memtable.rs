@@ -2097,8 +2097,9 @@ impl MemTable {
                 continue;
             }
             last = Some(k.user_key.clone());
-            if k.kind == ValueType::Value && !self.range_deleted(&k.user_key, k.sequence, snapshot)
-            {
+            let range_hidden = k.kind == ValueType::Value
+                && self.range_deleted(&k.user_key, k.sequence, snapshot);
+            if crate::merge::visible_at(k.kind, range_hidden) {
                 out.push((k.user_key.clone(), v.clone()));
             }
         }
@@ -2110,6 +2111,24 @@ impl MemTable {
 mod tests {
     use super::*;
     use std::ops::Bound;
+
+    #[test]
+    fn range_snapshot_calls_visible_at() {
+        let src = include_str!("memtable.rs");
+        let body = src
+            .split("pub fn range_snapshot")
+            .nth(1)
+            .and_then(|s| s.split("pub fn ").next())
+            .expect("range_snapshot");
+        assert!(
+            body.contains("visible_at("),
+            "range_snapshot live-version if must call catalog visible_at"
+        );
+        assert!(
+            !body.contains("k.kind == ValueType::Value && !self.range_deleted"),
+            "kind==Value && !range_deleted must not stay inline"
+        );
+    }
 
     #[test]
     fn version_newer_and_ver_cmp_call_ikey_seq_cmp() {
