@@ -292,6 +292,28 @@ mod tests {
             hist.contains("admit_disk_write("),
             "restore_history_from_remote must admit before writing dest"
         );
+        let group = include_str!("db.rs")
+            .split("fn group_admit")
+            .nth(1)
+            .and_then(|s| s.split("fn group_prepare").next())
+            .expect("group_admit");
+        assert!(
+            group.contains("CoreError::DiskPressure"),
+            "group_admit must keep DiskPressure, not map it to Internal"
+        );
+        let submit = include_str!("concurrent.rs")
+            .split("fn submit_inner")
+            .nth(1)
+            .and_then(|s| s.split("fn submit_after_begin").next())
+            .expect("submit_inner");
+        assert!(
+            submit.contains("DiskPressure is not a stall"),
+            "write-group must not park/retry DiskPressure"
+        );
+        assert!(
+            submit.contains("WriteStallMem"),
+            "only WriteStall/WriteStallMem retry"
+        );
     }
 
     #[test]

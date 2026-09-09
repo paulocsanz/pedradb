@@ -3,7 +3,7 @@
 //! not a durability fence).
 
 use pedradb_core::concurrent::ConcurrentDb;
-use pedradb_core::db::{copy_db_directory, Db, OpenOptions};
+use pedradb_core::db::{copy_db_directory, BatchOp, Db, OpenOptions};
 use pedradb_core::env::Env;
 use pedradb_core::disk_pressure_kernel::{
     disk_pressure_admit, disk_probe_or_unknown, DiskPressureAdmit, DISK_HARD_FREE_BYTES,
@@ -214,6 +214,47 @@ fn copy_db_directory_under_hard_floor_does_not_create_dest() {
     assert!(!env.exists(&dest), "refused copy must not create dest");
     let _ = std::fs::remove_dir_all(&src);
     let _ = std::fs::remove_dir_all(&dest_parent);
+}
+
+/// RFC-0179: ConcurrentDb apply_batch (write-group / group_admit) under
+/// the hard floor is DiskPressure, not Internal, not a stall-retry; get Ok.
+#[test]
+fn concurrent_db_apply_batch_under_hard_floor_is_disk_pressure() {
+    let dir = tmp();
+    let env = FailingEnvArc::passing();
+    let handle = env.clone();
+    let db = ConcurrentDb::open_with_env(
+        &dir,
+        OpenOptions {
+            sync: false,
+            auto_flush_bytes: None,
+            auto_compact_sst_count: None,
+            auto_compact_sst_bytes: None,
+            ..OpenOptions::default()
+        },
+        env,
+    )
+    .unwrap();
+    db.put(b"k", b"v").unwrap();
+    handle.set_available_bytes(Some(1024));
+    let err = db
+        .apply_batch([BatchOp::put(b"a", b"1"), BatchOp::put(b"b", b"2")])
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            CoreError::DiskPressure {
+                available: 1024,
+                need: DISK_HARD_FREE_BYTES,
+            }
+        ),
+        "expected DiskPressure from group_admit, got {err:?}"
+    );
+    assert_eq!(db.get(b"k").as_deref(), Some(b"v".as_ref()));
+    assert!(db.get(b"a").is_none());
+    assert!(db.get(b"b").is_none());
+    assert!(!db.is_durability_fenced());
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// RFC-0179: probe Err is unknown, never 0-free. Put still Ok; not a fence.
