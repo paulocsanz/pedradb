@@ -4276,9 +4276,10 @@ impl<E: Env> Db<E> {
                 let seq = head.sequence;
                 // Step even on tombstone heads — visibility and cursor
                 // advance must not be coupled (short-circuit spin).
-                let visible = kind == ValueType::Value
-                    && (crate::write_admission_kernel::batch_is_empty(range_dels.len() as u64)
-                        || !crate::merge::range_deleted(head.user_key.as_ref(), seq, &range_dels));
+                let visible = crate::merge::visible_at(
+                    kind,
+                    crate::merge::range_deleted(head.user_key.as_ref(), seq, &range_dels),
+                );
                 c.step_current_user();
                 if visible {
                     count += 1;
@@ -4308,13 +4309,14 @@ impl<E: Env> Db<E> {
             let Some(bi) = best else { break };
             let visible = {
                 let head = cursors[bi].head().expect("best head");
-                head.kind == ValueType::Value
-                    && (crate::write_admission_kernel::batch_is_empty(range_dels.len() as u64)
-                        || !crate::merge::range_deleted(
-                            head.user_key.as_ref(),
-                            head.sequence,
-                            &range_dels,
-                        ))
+                crate::merge::visible_at(
+                    head.kind,
+                    crate::merge::range_deleted(
+                        head.user_key.as_ref(),
+                        head.sequence,
+                        &range_dels,
+                    ),
+                )
             };
             // Split the winner out so other cursors can step while its
             // user-key borrow is live, then step the winner (RFC-0039 P2.1).
