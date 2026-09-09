@@ -79,6 +79,43 @@ theorem tombstone_reaches_window_unbounded (t_start t_end) :
   unfold scan_kernel.tombstone_reaches_window
   rfl
 
+/-- Exclusive window start, unbounded end: tombstone end must be `>` start. Dual-unfold. -/
+theorem tombstone_reaches_window_excluded_start_unbounded_end
+    (t_start t_end s) :
+    scan_kernel.tombstone_reaches_window t_start t_end
+      (core.ops.range.Bound.Excluded s) core.ops.range.Bound.Unbounded =
+      (do
+        let reaches_start ←
+          Shared1A.Insts.CoreCmpPartialOrdShared0B.gt
+            (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) t_end s
+        if reaches_start then ok true else ok false) := by
+  unfold scan_kernel.tombstone_reaches_window
+  rfl
+
+/-- Exclusive key window: start is slice `>` then unbounded end. Dual-unfold. -/
+theorem key_in_window_excluded_unbounded (user s) :
+    scan_kernel.key_in_window user (core.ops.range.Bound.Excluded s)
+      core.ops.range.Bound.Unbounded =
+      (do
+        let after_start ←
+          Shared1A.Insts.CoreCmpPartialOrdShared0B.gt
+            (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) user s
+        if after_start then ok true else ok false) := by
+  unfold scan_kernel.key_in_window
+  rfl
+
+/-- Inclusive key window: start is slice `>=` then unbounded end. Dual-unfold. -/
+theorem key_in_window_included_unbounded (user s) :
+    scan_kernel.key_in_window user (core.ops.range.Bound.Included s)
+      core.ops.range.Bound.Unbounded =
+      (do
+        let after_start ←
+          Shared1A.Insts.CoreCmpPartialOrdShared0B.ge
+            (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) user s
+        if after_start then ok true else ok false) := by
+  unfold scan_kernel.key_in_window
+  rfl
+
 /-- Catalog entry: unbounded scan window contains every key. -/
 theorem key_in_window_unbounded (user) :
     scan_kernel.key_in_window user
