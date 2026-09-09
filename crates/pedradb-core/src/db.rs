@@ -3170,11 +3170,7 @@ impl<E: Env> Db<E> {
         // value, and the GC below would then destroy the only good copy
         // (replay serves pointer bytes as the value).
         let val = self.resolve_stored_value(stored.clone())?;
-        let kind = match ik.kind {
-            ValueType::Value => 0,
-            ValueType::Deletion => 1,
-            ValueType::RangeDeletion => 2,
-        };
+        let kind = crate::history::archive_kind_tag(ik.kind);
         chunk.push((ik.user_key.to_vec(), val.to_vec(), ik.sequence, kind));
         Ok(())
     }

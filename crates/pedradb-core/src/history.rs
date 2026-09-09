@@ -11,6 +11,7 @@
 
 use crate::env::{Env, EnvFile};
 use crate::error::{CoreError, Result};
+use crate::key::ValueType;
 use crate::wal::crc::crc32c;
 use std::collections::VecDeque;
 use std::io::{Read, Write};
@@ -664,6 +665,25 @@ pub struct HistoryRecord {
     pub kind: u8,
 }
 
+/// Wire tag for [`HistoryRecord::kind`]: 0 = value, 1 = delete, 2 = range delete.
+///
+/// Not [`ValueType::as_u8`] (Rocks nibble: Deletion=0, Value=1) — that swap
+/// is the AS-IS silent-wrong for this wire.
+#[must_use]
+pub fn archive_kind_tag(kind: ValueType) -> u8 {
+    match kind {
+        ValueType::Value => 0,
+        ValueType::Deletion => 1,
+        ValueType::RangeDeletion => 2,
+    }
+}
+
+/// AS-IS: Rocks nibble (`ValueType::as_u8`) — puts and point-deletes swap.
+#[must_use]
+pub fn archive_kind_tag_as_is(kind: ValueType) -> u8 {
+    kind.as_u8()
+}
+
 /// Walk every record of a serialized segment, verifying the per-record CRC.
 /// Returns the records; corrupt or truncated input is a typed error
 /// (fail-closed — used both before upload and at restore time).
@@ -1289,9 +1309,33 @@ impl RemoteTier {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::key::ValueType;
     use std::cell::{Cell, RefCell};
     use std::collections::BTreeMap;
     use std::rc::Rc;
+
+    #[test]
+    fn archive_kind_tag_on_live_note_is_not_ok() {
+        assert_eq!(archive_kind_tag(ValueType::Value), 0);
+        assert_eq!(archive_kind_tag(ValueType::Deletion), 1);
+        assert_eq!(archive_kind_tag(ValueType::RangeDeletion), 2);
+        assert_eq!(archive_kind_tag_as_is(ValueType::Value), 1);
+        assert_eq!(archive_kind_tag_as_is(ValueType::Deletion), 0);
+        let src = include_str!("db.rs");
+        let note = src
+            .split("fn archive_note(")
+            .nth(1)
+            .and_then(|s| s.split("fn archive_flush_chunk").next())
+            .expect("archive_note");
+        assert!(
+            note.contains("archive_kind_tag("),
+            "archive_note must match archive_kind_tag"
+        );
+        assert!(
+            !note.contains("ValueType::Value => 0"),
+            "archive_note must not keep a raw ValueType wire match"
+        );
+    }
 
     /// In-memory `Env` (flat namespace, dir names derived from parents).
     /// Writes commit to the map on sync and on drop.
