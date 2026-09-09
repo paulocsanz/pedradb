@@ -214,7 +214,7 @@ impl PendingTx {
     /// Whether no keys staged.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.ops.is_empty()
+        pedradb_core::write_admission_kernel::batch_is_empty(self.ops.len() as u64)
     }
 
     /// Stage a put (overwrite if key already staged).
