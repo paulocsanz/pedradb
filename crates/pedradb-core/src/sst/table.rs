@@ -3142,7 +3142,7 @@ impl<'a> Cursor<'a> {
     }
 
     fn is_empty(&self) -> bool {
-        self.pos >= self.data.len()
+        crate::write_admission_kernel::batch_is_empty(self.data.len().saturating_sub(self.pos) as u64)
     }
 
     fn read_u32(&mut self) -> Result<u32> {
