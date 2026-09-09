@@ -266,7 +266,7 @@ impl WriteRecord {
 /// Consecutive interned values share a `Bytes` pointer (RFC-0044 P1.1).
 #[cfg(not(verus_keep_ghost))]
 pub(crate) fn value_ptr_eq(a: &WriteOp, b: &WriteOp) -> bool {
-    !a.value.is_empty()
+    !crate::write_admission_kernel::batch_is_empty(a.value.len() as u64)
         && a.value.len() == b.value.len()
         && std::ptr::eq(a.value.as_ptr(), b.value.as_ptr())
 }
