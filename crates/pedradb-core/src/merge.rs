@@ -601,7 +601,7 @@ impl<'a> StreamingVisibleIter<'a> {
         let top = *self.heap.first()?;
         let last = self.heap.pop();
         if let Some(last) = last {
-            if !self.heap.is_empty() {
+            if !crate::write_admission_kernel::batch_is_empty(self.heap.len() as u64) {
                 self.heap[0] = last;
                 self.sift_down(0);
             }
