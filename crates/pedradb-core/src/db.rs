@@ -2408,7 +2408,7 @@ impl<E: Env> Db<E> {
     /// instance. Folding the tail between shapes restores an empty insert
     /// path for the next CF without a flush. No-op if the tail is empty.
     pub fn fold_active_tail(&mut self) {
-        if self.mem.has_tail() {
+        if !crate::write_admission_kernel::batch_is_empty(self.mem.tail_len() as u64) {
             self.mem.spill_tail();
         }
     }
