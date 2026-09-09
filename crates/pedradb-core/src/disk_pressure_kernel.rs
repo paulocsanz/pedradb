@@ -332,6 +332,15 @@ mod tests {
             arc.contains("probe_err"),
             "FailingEnvArc must inject probe Err (unknown, not 0-free)"
         );
+        let compact = include_str!("db.rs")
+            .split("pub fn compact_with(")
+            .nth(1)
+            .and_then(|s| s.split("pub fn compact_reclaim").next())
+            .expect("compact_with");
+        assert!(
+            compact.contains("compact_allowed_under_pressure("),
+            "compact_with must match compact_allowed_under_pressure"
+        );
     }
 
     #[test]

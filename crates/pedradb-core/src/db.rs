@@ -6599,6 +6599,15 @@ impl<E: Env> Db<E> {
     /// # Errors
     /// I/O while writing the compacted SST or deleting old files.
     pub fn compact_with(&mut self, options: CompactOptions) -> Result<()> {
+        let probe = crate::env::probe_available_bytes(&self.env, &self.dir);
+        if !crate::disk_pressure_kernel::compact_allowed_under_pressure(probe) {
+            return match crate::disk_pressure_kernel::disk_pressure_admit(probe) {
+                crate::disk_pressure_kernel::DiskPressureAdmit::Refuse { available, need } => {
+                    Err(CoreError::DiskPressure { available, need })
+                }
+                _ => Ok(()),
+            };
+        }
         self.flush()?;
         crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::BEFORE_COMPACT_WRITE)?;
         match self.compact_with_ssts_only(options) {
