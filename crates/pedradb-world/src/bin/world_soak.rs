@@ -182,7 +182,7 @@ fn main() {
     }
 
     let _ = std::fs::remove_dir_all(&parent_root);
-    if fail > 0 {
+    if !pedradb_core::write_admission_kernel::batch_is_empty(fail as u64) {
         std::process::exit(1);
     }
 }
