@@ -19,11 +19,11 @@ description: >
 
 ## Grind pressure (one block, overwritten each fire)
 
-- Last fire: worked (`f1bb75ae` fold_kernel.rs rustc `&[u8]` is the term)
-- Why: leftover_next cartoon remaining `world_kernel.rs` (cfg split; toy Sample/u8 ≠ rustc TrajectorySample)
-- This fire MUST land: delete `world_kernel.rs` verus stand-in + cfg split; rustc TrajectorySample body stays; Aeneas of that body
+- Last fire: worked (`1c25f0e5` world_kernel.rs rustc TrajectorySample is the term)
+- Why: leftover_next cartoon remaining `properties_kernel.rs` (cfg split; Verus Seq twin of rustc `&[bool]` `d1_holds`)
+- This fire MUST land: delete `properties_kernel.rs` verus stand-in + cfg split; rustc `&[bool]` body stays; Aeneas of that body
 - Forbidden this fire: mint u64/`Seq` twin; leftover_next store/Montanha; leftover is_empty wrap; compact_refuse spray; git checkout of db.rs/concurrent.rs; skip cartoon as "not a land"
-- Deeper: Search leftover_next_first world_trajectory world_kernel.rs; delete stand-in; named cargo; aeneas_world.sh --required; lake World
+- Deeper: Search leftover_next_first d1_durability properties_kernel.rs; delete stand-in; named cargo; aeneas_properties.sh --required; lake Properties
 
 This skill **lands one payable slice per Fire**. Rank 1–10 unpaid first.
 When those boards are 0, Search prints `leftover_next`: cartoon remaining
