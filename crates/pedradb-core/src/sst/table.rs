@@ -408,7 +408,9 @@ impl SstTable {
             return Ok(false);
         }
         self.ensure_payload(&kit)?;
-        Ok(!self.payload.read().img.is_empty())
+        Ok(!crate::write_admission_kernel::batch_is_empty(
+            self.payload.read().img.len() as u64,
+        ))
     }
 
     #[cfg(test)]
