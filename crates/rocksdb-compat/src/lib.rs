@@ -4449,7 +4449,9 @@ fn compat_compact_once<E: PedraEnv>(inner: &ConcurrentDb<E>, gate: &Mutex<()>) -
     if !inner.install_prepared_l0_off_lock(job, tables) {
         return false;
     }
-    inner.with_read(|db| db.level_file_count(0)) > 0
+    !pedradb_core::write_admission_kernel::batch_is_empty(
+        inner.with_read(|db| db.level_file_count(0)) as u64,
+    )
 }
 
 #[cfg(test)]
