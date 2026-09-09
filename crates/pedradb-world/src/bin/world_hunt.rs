@@ -83,7 +83,7 @@ fn main() -> ExitCode {
         }
     }
     println!("world_hunt_ok n={n} interesting={interesting} silent_wrong_seeds={silent}");
-    if silent > 0 {
+    if !pedradb_core::write_admission_kernel::batch_is_empty(silent) {
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS
