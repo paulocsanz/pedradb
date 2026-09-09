@@ -119,7 +119,7 @@ impl FailState {
             return Ok(());
         }
         let left = self.remaining.get();
-        if left == 0 {
+        if pedradb_core::write_admission_kernel::batch_is_empty(left) {
             if self.once.get() && self.fired.get() {
                 return Ok(());
             }
