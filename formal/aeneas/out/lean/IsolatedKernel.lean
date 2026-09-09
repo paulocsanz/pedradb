@@ -15,7 +15,7 @@ set_option maxRecDepth 2048
 namespace pedra_aeneas_isolated_kernel
 
 /-- [pedra_aeneas_isolated_kernel::ISOLATED_CHILD_SEP]
-    Source: '../../../crates/pedradb-fold/src/isolated_kernel.rs', lines 14:0-14:40
+    Source: '../../../crates/pedradb-fold/src/isolated_kernel.rs', lines 15:0-15:40
     Visibility: public -/
 @[global_simps, irreducible] def ISOLATED_CHILD_SEP : Std.U8 := 47#u8
 
@@ -66,7 +66,7 @@ def isolated_id_matches
   else isolated_id_matches_loop key id 0#usize
 
 /-- [pedra_aeneas_isolated_kernel::isolated_id_matches_as_is]: loop body 0:
-    Source: '../../../crates/pedradb-fold/src/isolated_kernel.rs', lines 44:4-51:1
+    Source: '../../../crates/pedradb-fold/src/isolated_kernel.rs', lines 43:4-50:1
     Visibility: public -/
 @[rust_loop_body]
 def isolated_id_matches_as_is_loop.body
@@ -85,7 +85,7 @@ def isolated_id_matches_as_is_loop.body
   else ok (done true)
 
 /-- [pedra_aeneas_isolated_kernel::isolated_id_matches_as_is]: loop 0:
-    Source: '../../../crates/pedradb-fold/src/isolated_kernel.rs', lines 44:4-51:1
+    Source: '../../../crates/pedradb-fold/src/isolated_kernel.rs', lines 43:4-50:1
     Visibility: public -/
 @[rust_loop]
 def isolated_id_matches_as_is_loop
@@ -95,7 +95,7 @@ def isolated_id_matches_as_is_loop
     i
 
 /-- [pedra_aeneas_isolated_kernel::isolated_id_matches_as_is]:
-    Source: '../../../crates/pedradb-fold/src/isolated_kernel.rs', lines 39:0-51:1
+    Source: '../../../crates/pedradb-fold/src/isolated_kernel.rs', lines 38:0-50:1
     Visibility: public -/
 def isolated_id_matches_as_is
   (key : Slice Std.U8) (id : Slice Std.U8) : Result Bool := do
@@ -106,13 +106,13 @@ def isolated_id_matches_as_is
   else isolated_id_matches_as_is_loop key id 0#usize
 
 /-- [pedra_aeneas_isolated_kernel::isolated_child_byte]:
-    Source: '../../../crates/pedradb-fold/src/isolated_kernel.rs', lines 56:0-58:1
+    Source: '../../../crates/pedradb-fold/src/isolated_kernel.rs', lines 54:0-56:1
     Visibility: public -/
 def isolated_child_byte (next : Std.U8) : Result Bool := do
   ok (next = ISOLATED_CHILD_SEP)
 
 /-- [pedra_aeneas_isolated_kernel::isolated_child_byte_as_is]:
-    Source: '../../../crates/pedradb-fold/src/isolated_kernel.rs', lines 63:0-65:1
+    Source: '../../../crates/pedradb-fold/src/isolated_kernel.rs', lines 60:0-62:1
     Visibility: public -/
 def isolated_child_byte_as_is (_next : Std.U8) : Result Bool := do
   ok true

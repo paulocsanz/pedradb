@@ -1,20 +1,16 @@
 #!/usr/bin/env bash
-# Machine-check F83 isolated-id match on the file rustc links
-# (single artifact — not the twin-cópia). RFC-0002 P29.
+# isolated_kernel.rs rustc body is the term (Aeneas Isolated.lean).
+# A Seq view of rustc &[u8] is not last-wins. Fail closed if it returns.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="$ROOT/crates/pedradb-fold/src/isolated_kernel.rs"
-if [[ -x "${VERUS:-}" ]]; then
-  :
-elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then
-  VERUS="$HOME/.local/verus/verus-arm64-macos/verus"
-elif command -v verus >/dev/null 2>&1; then
-  VERUS="$(command -v verus)"
-else
-  echo "error: verus not found" >&2
-  exit 127
+if grep -n 'verus!' "$SRC"; then
+  echo "error: verus_isolated_id: verus! stand-in still in isolated_kernel.rs (not last-wins of rustc &[u8])" >&2
+  exit 1
 fi
-echo "verus: $VERUS"
-"$VERUS" --version
-echo "proving: $SRC"
-exec "$VERUS" "$SRC" --crate-type=lib --multiple-errors 10 --time "$@"
+if grep -n 'verus_keep_ghost' "$SRC"; then
+  echo "error: verus_isolated_id: cfg(verus_keep_ghost) split still in isolated_kernel.rs" >&2
+  exit 1
+fi
+echo "ok: no Verus cartoon in $SRC; term is Aeneas formal/aeneas/lean/Isolated.lean"
+exit 0

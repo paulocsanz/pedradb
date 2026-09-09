@@ -19,11 +19,11 @@ description: >
 
 ## Grind pressure (one block, overwritten each fire)
 
-- Last fire: worked (`9fc51d6c` prefix.rs rustc `&[u8]` is the term)
-- Why: leftover_next cartoon remaining `auth_kernel.rs` (cfg split; Verus u8 fold ≠ rustc `&str` bearer)
-- This fire MUST land: delete `auth_kernel.rs` verus stand-in + cfg split; rustc `&str` body stays; Aeneas of that body
+- Last fire: worked (`361a571a` auth_kernel.rs rustc `&str` is the term)
+- Why: leftover_next cartoon remaining `isolated_kernel.rs` (cfg split; Seq/clone vs rustc `&[u8]` index loop)
+- This fire MUST land: delete `isolated_kernel.rs` verus stand-in + cfg split; rustc `&[u8]` body stays; Aeneas of that body
 - Forbidden this fire: mint u64/`Seq` twin; leftover_next store/Montanha; leftover is_empty wrap; compact_refuse spray; git checkout of db.rs/concurrent.rs; skip cartoon as "not a land"
-- Deeper: Search leftover_next_first bearer auth_kernel.rs; delete stand-in; named cargo; aeneas_auth.sh --required; lake Auth
+- Deeper: Search leftover_next_first isolated isolated_kernel.rs; delete stand-in; named cargo; aeneas_isolated.sh --required; lake Isolated
 
 This skill **lands one payable slice per Fire**. Rank 1–10 unpaid first.
 When those boards are 0, Search prints `leftover_next`: cartoon remaining
