@@ -393,8 +393,10 @@ def print_leftover_next(
         )
         return
     print(
-        "  leftover_next FACTORY_BAN ranks_1_10_empty; "
-        "do not name a production fn; do not edit production .rs"
+        "  leftover_next trampoline data-fate if remaining "
+        "(db.rs/concurrent.rs); pull one if into a named kernel "
+        "the handler calls; never leftover is_empty wrap; "
+        "never compact_refuse spray; skip Montanha"
     )
 
 

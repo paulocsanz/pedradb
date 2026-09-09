@@ -5,8 +5,8 @@ description: >
   the proof term; then the I/O *script* (order of kernel+Env, not the
   syscall); then compose glue callers (ConcurrentDb / commit_ops_with);
   then the four concurrency theorems; then shrink remaining data-fate ifs.
-  Catalog-only single_artifact is not a land. Always implement the first
-  unpaid rank 1–10 item. leftover_next FACTORY_BAN = do not edit production.
+  Catalog-only single_artifact is not a land. Always implement: first
+  unpaid rank 1–10, else one remaining data-fate `if` in the trampoline.
   Research Verus / Iris / Aeneas / DST / fuzzing and persist.
   Triggers: formalize, verificação, seL4, caminho sel4, trampolim, guião,
   concorrência, deadlock, data race, extraia aeneas, va formal,
@@ -17,25 +17,23 @@ description: >
 
 ## Grind pressure (one block, overwritten each fire)
 
-- Last fire: factory_ban (leftover_next no longer names a fn)
-- Why: ranks 1–10 empty; leftover_next as a fn name was the wrap factory
-- This fire MUST land: nothing in production `.rs`; do not restamp fire
-- Forbidden this fire: leftover wrap; compact_refuse spray; DiskPressure on close; naming leftover_next a fn; Recover product; fire++/started rewrite
-- Deeper: leftover_next FACTORY_BAN; last_verdict factory_ban → exit 0 no journal write
+- Last fire: halt (FACTORY_BAN treated empty 4–10 as campaign over)
+- Why: wrap/spray banned; trampoline CAS if still inline in put_if_absent
+- This fire MUST land: cas_absent_put kernel; put_if_absent matches
+- Forbidden this fire: leftover wrap; compact_refuse spray; DiskPressure on close; idle factory_ban
+- Deeper: empty 4–10 → remaining data-fate if in db.rs, not halt
 
-This skill **lands one payable slice per Fire** only if rank 1–10 has an
-unpaid item (`unpaid_compose` / `unpaid_script` / concurrency / scale).
-`leftover_next FACTORY_BAN` = boards empty: **do not edit production
-`.rs`**. Do not invent a `compact_refuse` / `batch_is_empty` site. Do not
-replace `leftover_next` with a function name (that *is* the factory).
-Watchdog: `last_verdict: factory_ban` → exit 0, **do not** rewrite
-`fire`/`started`. Catalog-only `single_artifact` is skip.
-Under `/grind`, a valid land still chains; FACTORY_BAN is a measured stop
-(same class as EXTRACT refuse), not “grow leftover_next and spray”.
+This skill **lands one payable slice per Fire**. Rank 1–10 unpaid first.
+When those boards are 0, the slice is the next data-fate `if` still
+inline in `db.rs` / `concurrent.rs` — pull it into a named kernel the
+handler calls. Do not invent a `compact_refuse` / `batch_is_empty`
+wrap. Do not replace `leftover_next` with a spray-queue fn name.
+Catalog-only `single_artifact` is skip. Under `/grind`, a valid land
+chains. Empty 4–10 is **not** a stop.
 
-**Slogan forbidden:** “somos seL4”, “sem bugs”, “garantia total”, “TSan is a
-proof”, “PCT d=2 = ∀π”, “100% do Pedra”, “trampolim já é assembly”,
-“catalog SA = preço seL4”.
+Pay the seL4-class path this fire (empty the trampoline of data-fate
+`if`s). `never_floor` / disk-not-media / `∀π` refused stay TCB — not
+permission to halt. Wrap/spray is not payment.
 **Price:** the `.rs` rustc links is the Verus/Aeneas term. `db.rs` /
 `concurrent.rs` stay trampoline (`glue.db_rs_extracted=false`) — **empty
 them** of data-fate `if`s and of unpaid *order*, do not dump them.
@@ -72,9 +70,10 @@ python3 .grok/skills/caminho-sel4/scripts/candidates.py
 ```
 
 Then open the files the **UNPAID** rows named (handler body + plant body,
-not grep). `leftover_next FACTORY_BAN` names no production fn — do not
-open `db.rs` to invent a site. Also compute, from catalog +
-`residuals.json` (do not `json.dump` the live catalog):
+not grep). When leftover_next says trampoline remaining, open the
+handler that still has a data-fate `if` without a kernel call. Also
+compute, from catalog + `residuals.json` (do not `json.dump` the live
+catalog):
 
 - script/compose glue the board marked unpaid (`commit_ops_with`,
   `validate_occ_batch`, `lone_commit`, `finish_group_off_lock`, …)
@@ -86,9 +85,8 @@ open `db.rs` to invent a site. Also compute, from catalog +
 
 If script vs RFC disagree, **code + catalog win**.
 
-`leftover_next` is **computed** from unpaid counts. If it names a
-production fn while `unpaid_script=unpaid_compose=unpaid_concurrency=unpaid_scale=0`,
-`candidates.py` is wrong — fix the script, do not implement that fn.
+`leftover_next` is **computed**. Unpaid 4–10 → those boards. Else
+trampoline remaining (not a production fn name, not FACTORY_BAN halt).
 
 ## 2. Rank (first non-empty wins — then implement it)
 
@@ -153,11 +151,12 @@ chains Fires; this bound is not end-of-turn).
     handle). **Never** post-commit finish (`compact_vlog_promote`,
     `rotate_wal_now` after SST durable). **Never** best-effort auto-flush
     (F18). Slapping `compact_refuse` on the next fn is the wrap factory.
-16. **FACTORY_BAN:** if `unpaid_script=unpaid_compose=unpaid_concurrency=unpaid_scale=0`,
-    leftover_next prints `FACTORY_BAN`. This fire **does not** change
-    production `.rs`. RFC P1.3 telemetry is not data-fate. P2.1 fence
-    blast is deferred (open-items §2.6). Inventing a disk `if` to have
-    a SHA is shallow — revert.
+16. **Wrap factory is not a slice** (`is_empty`/`compact_refuse` spray /
+    DiskPressure on `close`/promote/rotate-after-SST/auto-flush). When
+    unpaid 4–10 is 0, **do not halt** — land the next trampoline
+    data-fate `if` (rank 1). RFC P1.3 telemetry is not data-fate. P2.1
+    fence blast is deferred. Inventing a disk `if` to have a SHA is
+    shallow — revert.
 
 Tie-break: open RFC `- [ ] **P0`/`P1` on the same theme, only if it is
 write-admission or unpaid compose/script — not a new `compact_refuse`
@@ -171,7 +170,7 @@ git HEAD if `lib.rs` is dirty). Mutant: wrong `glue.proof_depth.extract` in
 a **copy** of residuals FAILs; restore from bak; never `json.dump` live
 `catalog.json`.
 
-Acceptance **when leftover_next is not FACTORY_BAN**:
+Acceptance (all):
 
 - a production `.rs` that rustc links **changed this turn**, or a new
   Lean/Verus theorem that `unfold`s a production caller **and** callee
@@ -179,11 +178,6 @@ Acceptance **when leftover_next is not FACTORY_BAN**:
 - named `cargo test` calls that **production** fn
 - `scripts/lean_extracts.sh --required` exit 0 if Lean changed
 - `--lint` freeze: extract count matches; `db_rs_extracted` false
-
-**FACTORY_BAN fire:** `candidates.py` printed `leftover_next FACTORY_BAN`.
-Production `.rs` **must not** change. Write `last_verdict: factory_ban`
-**once**. Later watchdog ticks exit 0 without touching the journal —
-incrementing `fire`/`started` is not a land.
 
 **Not a land:** catalog/`residuals` `single_artifact` flag without the rustc
 body change above; cfg/verus wrap on a kernel whose `entry` already has a
@@ -194,14 +188,14 @@ wrapping `is_empty`/`==0` onto `batch_is_empty`; slapping `compact_refuse`
 `DiskPressure` on `close` / `Drop` / promote / rotate-after-SST /
 auto-flush; replacing `leftover_next` with a function name;
 `include_str` of a kernel the handler already calls. If the first rank
-hit is that, fall through **or** FACTORY_BAN — do not invent a site.
+hit is that, fall through to the next trampoline data-fate `if` —
+do not invent a wrap site, do not halt.
 
 ## 4. Output (after the commit, not instead of it)
 
-Under `/grind` this section is **not** permission to stop **unless
-leftover_next is FACTORY_BAN** (measured stop; do not chain product;
-do not restamp `fire` on later ticks). Write it only if the next
-Fire's land tools already follow **or** this fire is FACTORY_BAN.
+Under `/grind` this section is **not** permission to stop. Write it
+only if the next Fire's land tools already follow. Empty 4–10 is
+trampoline remaining, not a stop.
 
 ```markdown
 ## Caminho seL4 — não acabou
