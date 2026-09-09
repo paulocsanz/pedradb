@@ -319,6 +319,8 @@ pub const COMPARE_SHAPES: &[&str] = &[
     "myrocks_read_only_mc4",
     // RFC-0184 P2.58: WBWI overlay-get mc4 — 1c is suite-only.
     "wbwi_read_your_writes_mc4",
+    // RFC-0184 P2.59: mixgraph-like mc4 — 1c is already in COMPARE.
+    "mixgraph_like_mc4",
 ];
 
 /// Length of the RFC-0041 official prefix of [`COMPARE_SHAPES`].
@@ -4410,6 +4412,93 @@ impl YcsbRunner {
         blocks
     }
 
+    /// RFC-0184 P2.59: mixgraph_like at N clients (put + 2 get + seek).
+    pub fn run_mixgraph_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
+        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
+        let full = format!("mixgraph_like_mc{clients}");
+        if !shape_wanted(&full) {
+            return Vec::new();
+        }
+        let records = self.cfg.records;
+        let cfg_ops = self.cfg.ops;
+        let yval = std::sync::Arc::new(vec![b'r'; self.cfg.payload]);
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+        let phase0 = e.write_phase_snapshot();
+        let t0 = Instant::now();
+        let mut lats = Vec::with_capacity(cfg_ops * clients);
+        let mut errors = 0u64;
+        std::thread::scope(|s| {
+            let handles: Vec<_> = (0..clients)
+                .map(|c| {
+                    let barrier = barrier.clone();
+                    let yval = yval.clone();
+                    s.spawn(move || {
+                        let mut rng =
+                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
+                        let mut lats = Vec::with_capacity(cfg_ops);
+                        let mut errors = 0u64;
+                        barrier.wait();
+                        for _ in 0..cfg_ops {
+                            let t = Instant::now();
+                            let u = self.pick(&mut rng, records);
+                            let k = ykey(u);
+                            let k2 = ykey((u + 1) % records);
+                            let ok_put = e.put(&k, yval.as_ref());
+                            let ok_g1 = e.get(&k).is_ok();
+                            let ok_g2 = e.get(&k2).is_ok();
+                            let end = {
+                                let mut ekey = k.clone();
+                                ekey.push(0xff);
+                                ekey
+                            };
+                            let ok_s = e.scan_count(&k, &end, 8).is_ok();
+                            if !(ok_put && ok_g1 && ok_g2 && ok_s) {
+                                errors += 1;
+                            }
+                            lats.push(ms(t));
+                        }
+                        (lats, errors)
+                    })
+                })
+                .collect();
+            for h in handles {
+                let (mut l, err) = h.join().expect("mixgraph client thread");
+                errors += err;
+                lats.append(&mut l);
+            }
+        });
+        let wall = t0.elapsed();
+        eprintln!(
+            "[rocks-parity] {full} done ops={} errors={errors}",
+            cfg_ops * clients
+        );
+        let mut blocks = vec![summarize_mc(
+            &full,
+            cfg_ops * clients,
+            wall,
+            &mut lats,
+            clients,
+            errors,
+        )];
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            // 1 put + 2 get + 1 scan → 75% read (same as 1c mixgraph_like).
+            let d = diagnose_from_phases_n(
+                pct(&lats, 50.0),
+                a,
+                b,
+                clients as u64,
+                0.0,
+                75,
+                (cfg_ops * clients) as u64,
+            );
+            eprint_write_diagnose(&full, &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
+        blocks
+    }
+
     pub fn seed<E: Engine>(&self, e: &E) {
         let val = vec![b'y'; self.cfg.payload];
         for i in 0..self.cfg.records {
@@ -5803,6 +5892,23 @@ mod tests {
     }
 
     #[test]
+    fn rfc0184_mixgraph_like_mc4_in_compare() {
+        assert!(
+            COMPARE_SHAPES.contains(&"mixgraph_like_mc4"),
+            "mixgraph-like mc4 must be on the cartaz"
+        );
+        assert!(shape_wanted_in("mixgraph_like_mc4", Some("mixgraph_like_mc4")));
+        assert!(
+            !shape_wanted_in("mixgraph_like", Some("mixgraph_like_mc4")),
+            "1c mixgraph_like must not leak into ONLY=mixgraph_like_mc4"
+        );
+        assert!(
+            !shape_wanted_in("compaction_filter_drop", Some("mixgraph_like_mc4")),
+            "compact-filter 1c must not leak into ONLY=mixgraph_like_mc4"
+        );
+    }
+
+    #[test]
     fn rfc0178_mc_only_selects_full_mc_name() {
         assert!(shape_wanted_in(
             "deps_cache_overwrite_mc4",
@@ -6296,6 +6402,7 @@ mod tests {
             "bluestore_omap_read_mc4",
             "myrocks_read_only_mc4",
             "wbwi_read_your_writes_mc4",
+            "mixgraph_like_mc4",
         ] {
             assert!(
                 COMPARE_SHAPES.contains(&name),
