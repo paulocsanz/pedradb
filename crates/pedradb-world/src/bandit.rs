@@ -36,7 +36,7 @@ impl Ucb1 {
     #[must_use]
     pub fn select(&self) -> &str {
         for a in &self.arms {
-            if self.pulls.get(a).copied().unwrap_or(0) == 0 {
+            if pedradb_core::write_admission_kernel::batch_is_empty(self.pulls.get(a).copied().unwrap_or(0) as u64) {
                 return a.as_str();
             }
         }
