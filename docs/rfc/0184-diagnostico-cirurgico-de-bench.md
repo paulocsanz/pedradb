@@ -357,6 +357,14 @@ a linha quando há phasesΔ. Sem harness novo.
       (Pedra loses p50; QPS from a shorter tail). Rocks 65 k batch-ops
       ×16 ≈ 1.05 M puts/s is not collapsed. Not Linux cartaz.
       — status: `done`
+- [x] **P2.63** `arango_doc_crud_mc4` (50% get / 30% put / 20% scan, 4
+      clients) in `COMPARE_SHAPES`, `BALANCE_SHAPES`, and
+      `run_arango_crud_clients`. Test
+      `rfc0184_arango_doc_crud_mc4_in_compare`. Darwin DIAG
+      `ratio=0.445` (239 k / 537 k QPS). Same-class async
+      (`peer_policy=rocks-default`, `sync=false`). p50 5.1 vs 2.1 µs.
+      Rocks 537 k mix-ops is not collapsed. Named loss. Not Linux
+      cartaz. — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -433,6 +441,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.60 | p2 | oxigraph_triple_put_mc4 COMPARE+BALANCE | done | Oxigraph triple-put mc4; Darwin DIAG 0.898× named loss | 2026-09-08 |
 | P2.61 | p2 | nebula_insert_edge_mc4 COMPARE+BALANCE | done | Nebula insert-edge mc4; Darwin DIAG 1.091× not Linux cartaz | 2026-09-08 |
 | P2.62 | p2 | solana_shred_append_mc4 COMPARE+BALANCE | done | Solana shred-append mc4; Darwin DIAG 1.296× not Linux cartaz | 2026-09-08 |
+| P2.63 | p2 | arango_doc_crud_mc4 COMPARE+BALANCE | done | Arango document CRUD mc4; Darwin DIAG 0.445× named loss | 2026-09-08 |
 
 ## Acceptance Criteria
 
@@ -504,7 +513,8 @@ a linha quando há phasesΔ. Sem harness novo.
   `rfc0184_mixgraph_like_mc4_in_compare` (P2.59);
   `rfc0184_oxigraph_triple_put_mc4_in_compare` (P2.60);
   `rfc0184_nebula_insert_edge_mc4_in_compare` (P2.61);
-  `rfc0184_solana_shred_append_mc4_in_compare` (P2.62).
+  `rfc0184_solana_shred_append_mc4_in_compare` (P2.62);
+  `rfc0184_arango_doc_crud_mc4_in_compare` (P2.63).
 - **Telemetry / Analytics:** uma linha `diagnose dominant=… lever=…`;
   `benches[].diagnose.lever` no JSON; compare copia para a row.
   scale `get_hit` / `lookup_100` / `probe_hit` imprimem `diagnose get … class=…` (P2.6/P2.7/P2.21).
