@@ -24,6 +24,30 @@ theorem user_key_in_range_unbounded (k) :
   unfold merge.user_key_in_range
   rfl
 
+/-- Exclusive start is slice `>` then unbounded end. Dual-unfold. -/
+theorem user_key_in_range_excluded_unbounded (user s) :
+    merge.user_key_in_range user (core.ops.range.Bound.Excluded s)
+      core.ops.range.Bound.Unbounded =
+      (do
+        let after_start ←
+          Shared1A.Insts.CoreCmpPartialOrdShared0B.gt
+            (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) user s
+        if after_start then ok true else ok false) := by
+  unfold merge.user_key_in_range
+  rfl
+
+/-- Inclusive start is slice `>=` then unbounded end. Dual-unfold. -/
+theorem user_key_in_range_included_unbounded (user s) :
+    merge.user_key_in_range user (core.ops.range.Bound.Included s)
+      core.ops.range.Bound.Unbounded =
+      (do
+        let after_start ←
+          Shared1A.Insts.CoreCmpPartialOrdShared0B.ge
+            (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) user s
+        if after_start then ok true else ok false) := by
+  unfold merge.user_key_in_range
+  rfl
+
 /-- Unbounded end never retires a stream. -/
 theorem past_end_unbounded (k) :
     merge.past_end k core.ops.range.Bound.Unbounded = ok false := by
