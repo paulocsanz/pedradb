@@ -121,6 +121,27 @@ theorem write_op_covers_key_range (start end1 user) :
   unfold merge.write_op_covers_key
   rfl
 
+/-- Catalog entry: rustc `&[u8]` cover is `>= start` then `< end` — not the u64 cartoon. -/
+theorem range_tombstone_covers_is_ge_then_lt (start end1 user) :
+    merge.range_tombstone_covers start end1 user =
+      (do
+        let b ←
+          Shared1A.Insts.CoreCmpPartialOrdShared0B.ge
+            (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) user start
+        if b then
+          Shared1A.Insts.CoreCmpPartialOrdShared0B.lt
+            (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) user end1
+        else ok false) := by
+  unfold merge.range_tombstone_covers
+  rfl
+
+/-- AS-IS F30: rustc cover is start-key equality (misses interior). -/
+theorem range_tombstone_covers_as_is_is_eq (start end1 user) :
+    merge.range_tombstone_covers_as_is start end1 user
+    = core.slice.cmp.PartialEqSlice.eq core.cmp.PartialEqU8 user start := by
+  unfold merge.range_tombstone_covers_as_is
+  rfl
+
 /-- AS-IS dente: point put never conflicts. -/
 theorem write_op_covers_key_as_is_value (start end1 user) :
     merge.write_op_covers_key_as_is key.ValueType.Value start end1 user
