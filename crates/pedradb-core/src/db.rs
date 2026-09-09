@@ -2449,7 +2449,12 @@ impl<E: Env> Db<E> {
             next_seq,
             published_seq: Arc::new(AtomicU64::new(next_seq.saturating_sub(1))),
             sync: opts.sync,
-            auto_flush_bytes: opts.auto_flush_bytes.filter(|n| *n > 0),
+            auto_flush_bytes: opts.auto_flush_bytes.filter(|n| *n > 0).map(|n| {
+                crate::env::write_buffer_for_ram(
+                    n as u64,
+                    crate::env::ram_ceiling_bytes().unwrap_or(0),
+                ) as usize
+            }),
             cf_write_buffer: std::collections::BTreeMap::new(),
             auto_compact_sst_count: opts.auto_compact_sst_count.filter(|n| *n > 0),
             auto_compact_sst_bytes: opts.auto_compact_sst_bytes.filter(|n| *n > 0),
@@ -7518,7 +7523,24 @@ impl<E: Env> Db<E> {
 
     fn drop_sst_page_cache(&self) {
         self.warmed_ssts.lock().clear();
-        for table in &self.ssts {
+        let keep = crate::env::page_cache_keep_bytes(
+            crate::env::ram_ceiling_bytes().unwrap_or(0),
+        );
+        let mut kept = 0u64;
+        let order: Vec<usize> = if self.sst_order_newest.is_empty() {
+            (0..self.ssts.len()).collect()
+        } else {
+            self.sst_order_newest.clone()
+        };
+        for &i in &order {
+            let Some(table) = self.ssts.get(i) else {
+                continue;
+            };
+            let len = self.env.metadata_len(table.path()).unwrap_or(0);
+            if keep > 0 && kept < keep {
+                kept = kept.saturating_add(len);
+                continue;
+            }
             let _ = self
                 .env
                 .advise(table.path(), 0, 0, crate::env::AdviseKind::DontNeed);
