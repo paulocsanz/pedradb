@@ -16,11 +16,26 @@ description: >
 
 ## Grind pressure (one block, overwritten each fire)
 
-- Last fire: worked
-- Why: fc0375b6 / bf57bacf FailingEnv disk inject; this fire RFC-0179 P1.2 reclaim plan
-- This fire MUST land: disk_pressure_reclaim_plan (WAL recycle + vlog GC + SST); db.rs reclaim_disk_for_uptime matches
-- Forbidden this fire: leftover is_empty wrap factory; Montanha; twin=kernel wrap; dump db.rs; rank-7 SA
-- Deeper: named test disk_pressure_reclaim_plan_on_live_reclaim_is_not_ok; skip Montanha
+- Last fire: shallow (compact_refuse factory on close/rotate/promote/persist/auto-flush)
+- Why: DiskPressure is write admission; close takes self (Err drops handle); promote/rotate are post-commit; leftover_next named the next fn
+- This fire MUST land: revert those sites; rank 15 forbids the spray
+- Forbidden this fire: leftover is_empty wrap; Montanha; rank-7 SA; spraying compact_refuse; DiskPressure on close
+- Deeper: contract first; only put/flush/compact/external dest admit
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 This skill **lands one payable slice per Fire**. Under `/grind`, that is
 not the end of the turn: after the commit, Fire again (tools, land).
@@ -138,9 +153,17 @@ chains Fires; this bound is not end-of-turn).
     Already-landed wraps stay.
 14. **Skip leftover `is_empty`/`==0` wrap factory.** Wrapping a collection
     empty-check onto `batch_is_empty` is not a slice (same `n==0` body).
-    Fall through. Next unpaid is a **data-fate plant**: DST/`FailingEnv`
-    inject, script order, compose unfold, or a live `if` that decides
-    WAL/OCC/fence/disk — never Montanha.
+    Fall through.
+15. **DiskPressure is write admission, not a spray.** Only on a **new
+    user/ops write** that would append WAL or write SST/dest: `put` /
+    `delete` / `apply_batch` / `flush` / `compact*` / PITR dest / replica
+    append. **Never** `close` / `Drop` (teardown; `close` takes `self` —
+    Err drops the handle, caller cannot retry). **Never** post-commit
+    finish (`compact_vlog_promote` after `.new` is staged; `rotate_wal_now`
+    after SST is durable — G1 must persist MANIFEST+new WAL). **Never**
+    best-effort auto-flush (F18 swallows; put already admitted). Spraying
+    `compact_refuse` onto the next fn leftover_next names is the same
+    factory as leftover wrap — skip. Never Montanha.
 
 Tie-break: open RFC `- [ ] **P0`/`P1` on the same theme.
 

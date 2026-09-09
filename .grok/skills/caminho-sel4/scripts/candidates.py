@@ -396,7 +396,7 @@ def script_compose_board() -> None:
             print(f"  {glue} plan={plan} UNPAID order still inline{extra}")
     print(f"  unpaid_script={unpaid_script}/{len(GLUE_SCRIPTS)}")
     print(
-        "  leftover_next RFC-0179 blob GC / run_auto_blob_gc below hard; skip leftover is_empty factory; skip Montanha"
+        "  leftover_next DiskPressure only at write-admission entry (put/flush/compact/external dest); never close/Drop/promote/rotate-after-SST; skip leftover is_empty factory; skip Montanha"
     )
     print("== compose glue callers (rank 5: unfold plan AND callee) ==")
     for glue, rel, tokens, callee, plan in GLUE_SCRIPTS:

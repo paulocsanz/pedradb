@@ -405,42 +405,6 @@ mod tests {
             cf.contains("compact_refuse("),
             "compact_ssts_only_cf must match compact_refuse"
         );
-        let rot = include_str!("db.rs")
-            .split("fn rotate_wal_now(")
-            .nth(1)
-            .and_then(|s| s.split("pub fn compact_leveled(").next())
-            .expect("rotate_wal_now");
-        assert!(
-            rot.contains("compact_refuse("),
-            "rotate_wal_now must match compact_refuse"
-        );
-        let man = include_str!("db.rs")
-            .split("pub fn persist_manifest_durable(")
-            .nth(1)
-            .and_then(|s| s.split("pub fn fsync_unsynced_ssts(").next())
-            .expect("persist_manifest_durable");
-        assert!(
-            man.contains("compact_refuse("),
-            "persist_manifest_durable must match compact_refuse"
-        );
-        let promo = include_str!("db.rs")
-            .split("pub fn compact_vlog_promote(")
-            .nth(1)
-            .and_then(|s| s.split("pub fn blob_gc_candidates(").next())
-            .expect("compact_vlog_promote");
-        assert!(
-            promo.contains("compact_refuse("),
-            "compact_vlog_promote must match compact_refuse before rename"
-        );
-        let auto = include_str!("db.rs")
-            .split("fn auto_flush_mem(")
-            .nth(1)
-            .and_then(|s| s.split("fn maybe_auto_flush_best_effort(").next())
-            .expect("auto_flush_mem");
-        assert!(
-            auto.contains("compact_refuse("),
-            "auto_flush_mem must match compact_refuse before SST write"
-        );
     }
 
     #[test]
