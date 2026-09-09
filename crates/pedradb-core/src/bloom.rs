@@ -351,7 +351,11 @@ mod kani_proofs {
 
     /// T3 (residual ≤ 8, k ≤ 8): every header in that F166-accepting slice
     /// decodes without panicking, and querying any 4-byte key never panics.
-    /// The unbounded `k ≤ MAX_K` half is the F166 Verus twin.
+    /// The unbounded `k ≤ MAX_K` half is carried by the Aeneas extract of
+    /// this exact body (`scripts/aeneas_bloom.sh` → `BloomKernel.lean`,
+    /// `with_capacity`/`decode`/`MAX_K` defs sorry-free); the former Verus
+    /// twin `verus/bloom_filter.rs` was deleted 2026-09-09 (it re-proved a
+    /// `Vec<bool>`/`u64` model, not this rustc body).
     #[kani::proof]
     #[kani::unwind(24)]
     fn decode_header_ok_yields_safe_filter() {

@@ -38,10 +38,16 @@ are not***.
    least one false negative each on the same domain — otherwise T1 bites
    nothing. Both mutants are hypothetical (no known occurrence); they exist
    to keep the property suite honest.
-2. **Floor 3 — Verus twin.** `crates/pedradb-core/verus/bloom_filter.rs`
-   (model domain: one bool per bit, non-wrapping probe index), entry
-   `insert_then_may_contain` — the fn contract *is* the ∀ theorem. Run:
-   `./scripts/verus_bloom_filter.sh`.
+2. **Floor 3 — Aeneas extract of the production body (single artifact).**
+   The former Verus twin `crates/pedradb-core/verus/bloom_filter.rs` (model
+   domain: one bool per bit, non-wrapping probe index — **not** the rustc
+   body) was deleted 2026-09-09: the two catalog pairs (`bloom_insert`,
+   `bloom_may_contain`) are single-artifact paid by the Charon+Aeneas
+   whole-file extract of `src/bloom.rs` itself (`./scripts/aeneas_bloom.sh`
+   → `BloomKernel.lean` sorry-free, `with_capacity`/`decode`/`MAX_K` defs;
+   theorems in `formal/aeneas/lean/Bloom.lean`). The ∀ model-domain
+   argument the twin carried stays with the Kani harnesses (Floor 2) and
+   the exhaustive model tests (Floor 4).
 3. **Floor 2 — Kani (first Kani use in pedradb-core).**
    `#[cfg(kani)] mod kani_proofs` in `src/bloom.rs` proves the theorems on
    the **compiled production code**, bit-precise: T1 (symbolic keys ≤ 6

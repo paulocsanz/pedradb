@@ -70,9 +70,12 @@ the production file as a second proof assistant.
       `insert_then_may_contain` (fn contract is the ∀ theorem), `probe_index`
       with `r < nbits`, `may_contain_inactive` (T4) —
       `./scripts/verus_bloom_filter.sh` green: **7 verified, 0 errors** —
-      status: `done`
+      status: `done` (mirror + runner deleted 2026-09-09: the two pairs are
+      single-artifact via `scripts/aeneas_bloom.sh`/`BloomKernel.lean`, the
+      extract of the rustc body itself)
 - [x] **P0.3** `scripts/verus_bloom_filter.sh` + catalog entries
-      (`bloom_insert`, `bloom_may_contain`) — status: `done`
+      (`bloom_insert`, `bloom_may_contain`) — status: `done` (runner deleted
+      2026-09-09; catalog pays via `scripts/aeneas_bloom.sh`)
 
 ### P1 — Tests with teeth + Kani on production (first Kani in the core)
 
@@ -128,10 +131,12 @@ the production file as a second proof assistant.
 - **Tests:** `cargo test -p pedradb-core --test bloom_filter_model` (7 tests:
   T1–T4 exhaustive, 2 mutant-bite teeth, fuzz); existing `bloom` unit tests
   and `bloom_model` (F166) untouched and green.
-- **Proofs:** `./scripts/verus_bloom_filter.sh` exit 0 (no `sorry` analog in
-  Verus: 7 verified / 0 errors); `./scripts/kani_bloom.sh --required` exit 0
-  on a kani-installed host; P2: `./scripts/lean_bloom.sh --required` exit 0
-  with no `sorry` in the Lean file.
+- **Proofs:** `./scripts/aeneas_bloom.sh --required` exit 0 with no `sorry`
+  in `BloomKernel.lean` (single artifact of the rustc body; the former
+  Verus runner was deleted 2026-09-09); `./scripts/kani_bloom.sh
+  --required` exit 0 on a kani-installed host; P2:
+  `./scripts/lean_bloom.sh --required` exit 0 with no `sorry` in the Lean
+  file.
 - **Teeth:** each mutant is caught by at least one named test
   (`teeth_extra_probe_mutant_bites`, `teeth_hash_mismatch_mutant_bites`).
 - **Telemetry:** none — proofs and tests; no runtime code paths changed

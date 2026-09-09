@@ -2749,9 +2749,10 @@
       "id": "bloom_insert",
       "finding": "T1 (docs/formal/bloom-filter-theorems.md)",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-core/src/bloom.rs",
-      "twin": "crates/pedradb-core/verus/bloom_filter.rs",
-      "verus": "scripts/verus_bloom_filter.sh",
+      "twin": "crates/pedradb-core/src/bloom.rs",
+      "aeneas": "scripts/aeneas_bloom.sh",
       "callers": [
         "crates/pedradb-core/src/sst/table.rs"
       ],
@@ -2773,9 +2774,10 @@
       "id": "bloom_may_contain",
       "finding": "T1/T4 (docs/formal/bloom-filter-theorems.md)",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-core/src/bloom.rs",
-      "twin": "crates/pedradb-core/verus/bloom_filter.rs",
-      "verus": "scripts/verus_bloom_filter.sh",
+      "twin": "crates/pedradb-core/src/bloom.rs",
+      "aeneas": "scripts/aeneas_bloom.sh",
       "callers": [
         "crates/pedradb-core/src/sst/table.rs"
       ],
