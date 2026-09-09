@@ -252,6 +252,11 @@ mod tests {
             body.contains("snap_below_watermark("),
             "ensure_snapshot_readable must match snap_below_watermark"
         );
+        let ch = named_fn_src(include_str!("db.rs"), "changes").expect("changes");
+        assert!(
+            ch.contains("snap_below_watermark("),
+            "changes must match snap_below_watermark"
+        );
     }
 
     #[test]

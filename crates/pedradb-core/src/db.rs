@@ -8323,7 +8323,7 @@ impl<E: Env> Db<E> {
         to_seq: SequenceNumber,
     ) -> Result<Vec<ChangeEntry>> {
         let first = from_seq.saturating_add(1);
-        if first < self.earliest_readable_seq {
+        if crate::lookup_kernel::snap_below_watermark(first, self.earliest_readable_seq) {
             return Err(CoreError::SnapshotTooOld {
                 requested: first,
                 earliest: self.earliest_readable_seq,
