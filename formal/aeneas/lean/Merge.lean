@@ -11,6 +11,24 @@ theorem visible_at_deletion :
   unfold merge.visible_at
   rfl
 
+/-- Catalog entry: a Value is live unless a covering range hides it. -/
+theorem visible_at_value_live :
+    merge.visible_at key.ValueType.Value false = ok true := by
+  unfold merge.visible_at
+  rfl
+
+/-- Catalog entry: a Value hidden by a covering range is not live. -/
+theorem visible_at_value_hidden :
+    merge.visible_at key.ValueType.Value true = ok false := by
+  unfold merge.visible_at
+  rfl
+
+/-- Catalog entry: a range deletion is never live. -/
+theorem visible_at_range_deletion :
+    merge.visible_at key.ValueType.RangeDeletion false = ok false := by
+  unfold merge.visible_at
+  rfl
+
 /-- AS-IS dente: a deletion still scans live. -/
 theorem visible_at_as_is_dente :
     merge.visible_at_as_is key.ValueType.Deletion true = ok true := by
