@@ -657,7 +657,7 @@ impl RaftCluster {
     /// # Errors
     /// PedraDB open failures.
     pub fn open(parent_dir: impl AsRef<Path>, n: u64) -> Result<Self> {
-        if n == 0 {
+        if pedradb_core::write_admission_kernel::batch_is_empty(n) {
             return Err(RaftError::EmptyCluster);
         }
         let parent = parent_dir.as_ref();
