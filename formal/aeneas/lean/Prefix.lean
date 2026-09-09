@@ -12,6 +12,31 @@ theorem prefix_exclusive_end_matches_spec
   unfold prefix_exclusive_end_loop.body
   simp [h]
 
+/-- Nonempty prefix: last byte `< 0xff` bumps, else pop and continue. Dual-unfold. -/
+theorem prefix_exclusive_end_loop_body_nonempty
+    (e : alloc.vec.Vec U8)
+    (h : alloc.vec.Vec.len e > 0#usize) :
+    prefix_exclusive_end_loop.body e =
+      (do
+        let i1 := alloc.vec.Vec.len e
+        let i2 ← i1 - 1#usize
+        let i3 ←
+          alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice U8) e i2
+        if i3 < 255#u8 then
+          (do
+            let (i4, index_mut_back) ←
+              alloc.vec.Vec.index_mut (core.slice.index.SliceIndexUsizeSlice U8)
+                e i2
+            let i5 ← i4 + 1#u8
+            let e1 := index_mut_back i5
+            ok (done (some e1)))
+        else
+          (do
+            let (_, e1) ← alloc.vec.Vec.pop Global e
+            ok (cont e1))) := by
+  unfold prefix_exclusive_end_loop.body
+  simp [h]
+
 /-- Extracted production fn is to_vec then the loop. -/
 theorem prefix_exclusive_end_def (p : Slice U8) :
     prefix_exclusive_end p =
