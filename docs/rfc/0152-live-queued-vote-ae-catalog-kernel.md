@@ -173,7 +173,7 @@
 | P2.2.10 | p2 | three-teeth on bearer BEARER scheme | done | `bearer_token_from_value_on_live_http_is_not_ok` | 2026-08-29 |
 | P2.2.11 | p2 | three-teeth on content_length keep body | done | `keep_body_without_cl_on_live_http_is_not_ok` | 2026-08-29 |
 | P2.2.12 | p2 | three-teeth on fail_closed writes 400 | done | `parse_error_writes_status_on_live_http_is_not_ok` | 2026-08-29 |
-| P2.2.13 | p2 | three-teeth on form_plus + is space | done | `form_decode_on_live_http_is_not_ok` | 2026-08-29 |
+| P2.2.13 | p2 | three-teeth on form_plus + is space | done | `form_decode_on_live_http_is_not_ok`; 2026-09-09: mirror `verus/form_plus.rs` deletada, 7 pares pagos pelo extrato Aeneas (`aeneas_form.sh`) | 2026-08-29 |
 | P2.2.14 | p2 | three-teeth on origin_path absolute-form | done | `origin_form_path_on_live_http_is_not_ok`; 2026-09-09: mirror `verus/origin_path.rs` deletada, 8 pares pagos pelo extrato Aeneas (`aeneas_path.sh`) | 2026-08-29 |
 | P2.2.15 | p2 | three-teeth on isolated sibling id | done | `isolated_id_matches_on_live_fold_is_not_ok` | 2026-08-29 |
 | P2.2.16 | p2 | three-teeth on children packed end | done | `packed_children_end_on_live_subspace_is_not_ok` | 2026-08-29 |
