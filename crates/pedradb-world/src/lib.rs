@@ -926,7 +926,7 @@ impl World {
         if !pedradb_core::write_admission_kernel::batch_is_empty(net.sent as u64) {
             cov.hit("N.send");
         }
-        if net.corrupted > 0 {
+        if !pedradb_core::write_admission_kernel::batch_is_empty(net.corrupted as u64) {
             cov.hit("N.corrupt");
         }
         if net.reordered > 0 {
