@@ -25,3 +25,27 @@ theorem pack_sequence_and_type_as_is_dente :
   unfold key.pack_sequence_and_type_as_is
   unfold key.ValueType.as_u8
   rfl
+
+/-- Catalog entry: trailer nibble 0 is Deletion (Rocks layout, not history wire). -/
+theorem value_type_from_u8_deletion :
+    key.ValueType.from_u8 0#u8 = ok (some key.ValueType.Deletion) := by
+  unfold key.ValueType.from_u8
+  rfl
+
+/-- Catalog entry: trailer nibble 1 is Value. -/
+theorem value_type_from_u8_value :
+    key.ValueType.from_u8 1#u8 = ok (some key.ValueType.Value) := by
+  unfold key.ValueType.from_u8
+  rfl
+
+/-- Catalog entry: trailer nibble 2 is RangeDeletion. -/
+theorem value_type_from_u8_range_deletion :
+    key.ValueType.from_u8 2#u8 = ok (some key.ValueType.RangeDeletion) := by
+  unfold key.ValueType.from_u8
+  rfl
+
+/-- Catalog entry: unknown nibble is none. -/
+theorem value_type_from_u8_unknown :
+    key.ValueType.from_u8 3#u8 = ok none := by
+  unfold key.ValueType.from_u8
+  rfl
