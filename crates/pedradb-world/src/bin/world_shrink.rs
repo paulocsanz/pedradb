@@ -43,7 +43,11 @@ fn main() {
 
     let plan = buggify_schedule_from_seed(seed, 3, steps);
     let n = plan.arms.len().min(64);
-    let full_mask = if n == 0 { 0u64 } else { (1u64 << n) - 1 };
+    let full_mask = if pedradb_core::write_admission_kernel::batch_is_empty(n as u64) {
+        0u64
+    } else {
+        (1u64 << n) - 1
+    };
 
     let baseline = run_mask(seed, steps, Some(full_mask));
     let (base_ok, base_hash, base_arms) = match &baseline {
