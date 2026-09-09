@@ -204,7 +204,7 @@ impl<W: Write + Seek> WalWriter<W> {
             left -= fragment_len;
             begin = false;
 
-            if left == 0 {
+            if crate::write_admission_kernel::batch_is_empty(left as u64) {
                 break;
             }
         }
