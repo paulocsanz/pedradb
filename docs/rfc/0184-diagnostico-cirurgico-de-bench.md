@@ -331,6 +331,14 @@ a linha quando há phasesΔ. Sem harness novo.
       (`peer_policy=rocks-default`, `sync=false`). p50 33 vs 22 µs
       (Pedra loses p50; QPS from a shorter tail). Not Linux cartaz.
       — status: `done`
+- [x] **P2.60** `oxigraph_triple_put_mc4` (triple WriteBatch ingest, 4
+      clients) in `COMPARE_SHAPES`, `BALANCE_SHAPES`, and
+      `run_oxigraph_put_clients`. Test
+      `rfc0184_oxigraph_triple_put_mc4_in_compare`. Darwin DIAG
+      `ratio=0.898` (32.2 k / 35.9 k QPS). Same-class async
+      (`peer_policy=rocks-default`, `sync=false`). p50 123 vs 98 µs.
+      Rocks 36 k batch-ops ×32 ≈ 1.15 M puts/s is not collapsed. Named
+      loss. Not Linux cartaz. — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -404,6 +412,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.57 | p2 | myrocks_read_only_mc4 COMPARE+BALANCE | done | MyRocks oltp_read_only mc4; Darwin DIAG 1.870; JSON host-default not a win | 2026-09-08 |
 | P2.58 | p2 | wbwi_read_your_writes_mc4 COMPARE+BALANCE | done | WBWI overlay-get mc4; Darwin DIAG 0.410× named loss | 2026-09-08 |
 | P2.59 | p2 | mixgraph_like_mc4 COMPARE+BALANCE | done | mixgraph put+2get+seek mc4; Darwin DIAG 1.154× not Linux cartaz | 2026-09-08 |
+| P2.60 | p2 | oxigraph_triple_put_mc4 COMPARE+BALANCE | done | Oxigraph triple-put mc4; Darwin DIAG 0.898× named loss | 2026-09-08 |
 
 ## Acceptance Criteria
 
@@ -472,7 +481,8 @@ a linha quando há phasesΔ. Sem harness novo.
   `rfc0184_bluestore_omap_read_mc4_in_compare` (P2.56);
   `rfc0184_myrocks_read_only_mc4_in_compare` (P2.57);
   `rfc0184_wbwi_read_your_writes_mc4_in_compare` (P2.58);
-  `rfc0184_mixgraph_like_mc4_in_compare` (P2.59).
+  `rfc0184_mixgraph_like_mc4_in_compare` (P2.59);
+  `rfc0184_oxigraph_triple_put_mc4_in_compare` (P2.60).
 - **Telemetry / Analytics:** uma linha `diagnose dominant=… lever=…`;
   `benches[].diagnose.lever` no JSON; compare copia para a row.
   scale `get_hit` / `lookup_100` / `probe_hit` imprimem `diagnose get … class=…` (P2.6/P2.7/P2.21).
