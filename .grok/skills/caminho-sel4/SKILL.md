@@ -5,7 +5,8 @@ description: >
   the proof term; then the I/O *script* (order of kernel+Env, not the
   syscall); then compose glue callers (ConcurrentDb / commit_ops_with);
   then the four concurrency theorems; then shrink remaining data-fate ifs.
-  Catalog-only single_artifact is not a land. Always implement.
+  Catalog-only single_artifact is not a land. Always implement the first
+  unpaid rank 1–10 item. leftover_next FACTORY_BAN = do not edit production.
   Research Verus / Iris / Aeneas / DST / fuzzing and persist.
   Triggers: formalize, verificação, seL4, caminho sel4, trampolim, guião,
   concorrência, deadlock, data race, extraia aeneas, va formal,
@@ -16,33 +17,20 @@ description: >
 
 ## Grind pressure (one block, overwritten each fire)
 
-- Last fire: shallow (compact_refuse factory on close/rotate/promote/persist/auto-flush)
-- Why: DiskPressure is write admission; close takes self (Err drops handle); promote/rotate are post-commit; leftover_next named the next fn
-- This fire MUST land: revert those sites; rank 15 forbids the spray
-- Forbidden this fire: leftover is_empty wrap; Montanha; rank-7 SA; spraying compact_refuse; DiskPressure on close
-- Deeper: contract first; only put/flush/compact/external dest admit
+- Last fire: factory_ban (leftover_next no longer names a fn)
+- Why: ranks 1–10 empty; leftover_next as a fn name was the wrap factory
+- This fire MUST land: nothing in production `.rs`; restamp idle
+- Forbidden this fire: leftover wrap; compact_refuse spray; DiskPressure on close; naming leftover_next a fn; Recover product
+- Deeper: leftover_next FACTORY_BAN; do not edit production
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-This skill **lands one payable slice per Fire**. Under `/grind`, that is
-not the end of the turn: after the commit, Fire again (tools, land).
-The §4 output template is status between Fires, never the last action.
-A board-only reply is a failure. Rank continues after D/C/B/A empty.
-Catalog-only `single_artifact` (Verus already last-wins on the file) is
-**skip / fall-through**, never a halt.
+This skill **lands one payable slice per Fire** only if rank 1–10 has an
+unpaid item (`unpaid_compose` / `unpaid_script` / concurrency / scale).
+`leftover_next FACTORY_BAN` = boards empty: **do not edit production
+`.rs`**. Do not invent a `compact_refuse` / `batch_is_empty` site. Do not
+replace `leftover_next` with a function name (that *is* the factory).
+Watchdog: restamp journal idle. Catalog-only `single_artifact` is skip.
+Under `/grind`, a valid land still chains; FACTORY_BAN is a measured stop
+(same class as EXTRACT refuse), not “grow leftover_next and spray”.
 
 **Slogan forbidden:** “somos seL4”, “sem bugs”, “garantia total”, “TSan is a
 proof”, “PCT d=2 = ∀π”, “100% do Pedra”, “trampolim já é assembly”,
@@ -82,8 +70,10 @@ already names the slice. Primary source over abstracts.
 python3 .grok/skills/caminho-sel4/scripts/candidates.py
 ```
 
-Then open the files it named (handler body + plant body, not grep). Also
-compute, from catalog + `residuals.json` (do not `json.dump` the live catalog):
+Then open the files the **UNPAID** rows named (handler body + plant body,
+not grep). `leftover_next FACTORY_BAN` names no production fn — do not
+open `db.rs` to invent a site. Also compute, from catalog +
+`residuals.json` (do not `json.dump` the live catalog):
 
 - script/compose glue the board marked unpaid (`commit_ops_with`,
   `validate_occ_batch`, `lone_commit`, `finish_group_off_lock`, …)
@@ -94,6 +84,10 @@ compute, from catalog + `residuals.json` (do not `json.dump` the live catalog):
   **caller** fn (callee-only unfold is not payment — `concurrency.md`)
 
 If script vs RFC disagree, **code + catalog win**.
+
+`leftover_next` is **computed** from unpaid counts. If it names a
+production fn while `unpaid_script=unpaid_compose=unpaid_concurrency=unpaid_scale=0`,
+`candidates.py` is wrong — fix the script, do not implement that fn.
 
 ## 2. Rank (first non-empty wins — then implement it)
 
@@ -147,25 +141,26 @@ chains Fires; this bound is not end-of-turn).
     that do not exist. Never flip `media_durable_admitted` or
     `forall_schedules_admitted` to true.
 13. **Skip Montanha** until the user lifts this. No leftover wrap in
-    `crates/pedradb-store/**` or `montanha-*` bins (fdb-bench, fdb-compare,
-    perf-gate, tcp). `leftover_next` / journal `next:` must not name those
-    paths. Engine leftover stays Pedra core / sim / world / raft / compat.
-    Already-landed wraps stay.
-14. **Skip leftover `is_empty`/`==0` wrap factory.** Wrapping a collection
-    empty-check onto `batch_is_empty` is not a slice (same `n==0` body).
-    Fall through.
-15. **DiskPressure is write admission, not a spray.** Only on a **new
-    user/ops write** that would append WAL or write SST/dest: `put` /
-    `delete` / `apply_batch` / `flush` / `compact*` / PITR dest / replica
-    append. **Never** `close` / `Drop` (teardown; `close` takes `self` —
-    Err drops the handle, caller cannot retry). **Never** post-commit
-    finish (`compact_vlog_promote` after `.new` is staged; `rotate_wal_now`
-    after SST is durable — G1 must persist MANIFEST+new WAL). **Never**
-    best-effort auto-flush (F18 swallows; put already admitted). Spraying
-    `compact_refuse` onto the next fn leftover_next names is the same
-    factory as leftover wrap — skip. Never Montanha.
+    `crates/pedradb-store/**` or `montanha-*` bins. `leftover_next` must
+    not name those paths.
+14. **Skip leftover `is_empty`/`==0` wrap factory.** Same `n==0` body is
+    not a slice. Fall through is **not** “wrap the next collection”.
+15. **DiskPressure is write admission.** Only a **new user/ops write**
+    that would append WAL or write SST/dest (`put` / `delete` /
+    `apply_batch` / `flush` / `compact*` / PITR dest / replica append).
+    **Never** `close` / `Drop` (`close` takes `self` — Err drops the
+    handle). **Never** post-commit finish (`compact_vlog_promote`,
+    `rotate_wal_now` after SST durable). **Never** best-effort auto-flush
+    (F18). Slapping `compact_refuse` on the next fn is the wrap factory.
+16. **FACTORY_BAN:** if `unpaid_script=unpaid_compose=unpaid_concurrency=unpaid_scale=0`,
+    leftover_next prints `FACTORY_BAN`. This fire **does not** change
+    production `.rs`. RFC P1.3 telemetry is not data-fate. P2.1 fence
+    blast is deferred (open-items §2.6). Inventing a disk `if` to have
+    a SHA is shallow — revert.
 
-Tie-break: open RFC `- [ ] **P0`/`P1` on the same theme.
+Tie-break: open RFC `- [ ] **P0`/`P1` on the same theme, only if it is
+write-admission or unpaid compose/script — not a new `compact_refuse`
+site.
 
 ## 3. Land (same turn)
 
@@ -175,7 +170,7 @@ git HEAD if `lib.rs` is dirty). Mutant: wrong `glue.proof_depth.extract` in
 a **copy** of residuals FAILs; restore from bak; never `json.dump` live
 `catalog.json`.
 
-Acceptance (all):
+Acceptance **when leftover_next is not FACTORY_BAN**:
 
 - a production `.rs` that rustc links **changed this turn**, or a new
   Lean/Verus theorem that `unfold`s a production caller **and** callee
@@ -184,18 +179,28 @@ Acceptance (all):
 - `scripts/lean_extracts.sh --required` exit 0 if Lean changed
 - `--lint` freeze: extract count matches; `db_rs_extracted` false
 
+**FACTORY_BAN fire:** `candidates.py` printed `leftover_next FACTORY_BAN`.
+Production `.rs` **must not** change. Journal idle. That is the fire —
+not a failed land to recover with a wrap.
+
 **Not a land:** catalog/`residuals` `single_artifact` flag without the rustc
 body change above; cfg/verus wrap on a kernel whose `entry` already has a
-Lean `def` (SA factory; extract count unchanged); callee-only unfold billed
-as a ConcurrentDb caller; `native_decide` of a plan without `unfold`;
-board/rank/RFC checkbox only. If the first rank hit is that, fall through
-and land the next unpaid item **this turn**.
+Lean `def`; callee-only unfold billed as a ConcurrentDb caller;
+`native_decide` of a plan without `unfold`; board/rank/RFC checkbox only;
+wrapping `is_empty`/`==0` onto `batch_is_empty`; slapping `compact_refuse`
+(or any paid kernel) onto the next production fn `leftover_next` named;
+`DiskPressure` on `close` / `Drop` / promote / rotate-after-SST /
+auto-flush; replacing `leftover_next` with a function name;
+`include_str` of a kernel the handler already calls. If the first rank
+hit is that, fall through **or** FACTORY_BAN — do not invent a site.
 
-## 4. Output (after the commit, not instead of it; not a stop)
+## 4. Output (after the commit, not instead of it)
 
-Under `/grind` this section is **not** permission to stop. Write it
-only if the next Fire's land tools already follow. Journal + pressure
-+ grep is not that Fire.
+Under `/grind` this section is **not** permission to stop **unless
+leftover_next is FACTORY_BAN** (measured stop; restamp idle; do not
+chain product). Write it only if the next Fire's land tools already
+follow **or** this fire is FACTORY_BAN. Journal + pressure + grep is
+not that Fire.
 
 ```markdown
 ## Caminho seL4 — não acabou

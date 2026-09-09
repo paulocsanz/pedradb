@@ -210,7 +210,12 @@ def main() -> int:
     print("  G never_floor + db_rs_extracted must stay false — not a next proof")
     print("  H L28 TCP / PCT / lock interleavings — campaign not forall")
     print("  I benches/0149/crates.io — not verification")
-    script_compose_board()
+    unpaid_script, unpaid_compose = script_compose_board()
+    unpaid_concurrency = concurrency_board()
+    unpaid_scale = scale_board()
+    print_leftover_next(
+        unpaid_script, unpaid_compose, unpaid_concurrency, unpaid_scale
+    )
     sa_unpaid_board(fate)
     return capacity_board(cat, res)
 
@@ -371,7 +376,29 @@ def lean_has_def(name: str) -> bool:
     return False
 
 
-def script_compose_board() -> None:
+def print_leftover_next(
+    unpaid_script: int,
+    unpaid_compose: int,
+    unpaid_concurrency: int,
+    unpaid_scale: int,
+) -> None:
+    """Do not replace this with a production fn name. That is the factory."""
+    if unpaid_script or unpaid_compose or unpaid_concurrency or unpaid_scale:
+        print(
+            "  leftover_next unpaid board remains "
+            f"script={unpaid_script} compose={unpaid_compose} "
+            f"concurrency={unpaid_concurrency} scale={unpaid_scale}; "
+            "first UNPAID compose then script then rank 6 then rank 10; "
+            "never leftover is_empty wrap; never compact_refuse spray; skip Montanha"
+        )
+        return
+    print(
+        "  leftover_next FACTORY_BAN ranks_1_10_empty; "
+        "do not name a production fn; do not edit production .rs"
+    )
+
+
+def script_compose_board() -> tuple[int, int]:
     print("== script (rank 4: handler calls the named plan) ==")
     unpaid_script = 0
     unpaid_compose = 0
@@ -395,9 +422,6 @@ def script_compose_board() -> None:
             unpaid_script += 1
             print(f"  {glue} plan={plan} UNPAID order still inline{extra}")
     print(f"  unpaid_script={unpaid_script}/{len(GLUE_SCRIPTS)}")
-    print(
-        "  leftover_next DiskPressure only at write-admission entry (put/flush/compact/external dest); never close/Drop/promote/rotate-after-SST; skip leftover is_empty factory; skip Montanha"
-    )
     print("== compose glue callers (rank 5: unfold plan AND callee) ==")
     for glue, rel, tokens, callee, plan in GLUE_SCRIPTS:
         unfold_plan = lean_unfolds(plan)
@@ -416,7 +440,7 @@ def script_compose_board() -> None:
             f"unfold_callee={str(unfold_callee).lower()} {status}"
         )
     print(f"  unpaid_compose={unpaid_compose}/{len(GLUE_SCRIPTS)}")
-    concurrency_board()
+    return unpaid_script, unpaid_compose
 
 
 # Rank 6: named total fn the live handler calls + Lean unfold of that
@@ -461,7 +485,7 @@ CONCURRENCY = [
 ]
 
 
-def concurrency_board() -> None:
+def concurrency_board() -> int:
     print("== concurrency (rank 6: named fn + unfold caller AND callee) ==")
     unpaid = 0
     for label, rel, handler, caller, callee in CONCURRENCY:
@@ -488,7 +512,7 @@ def concurrency_board() -> None:
             f"unfold_callee={str(unfold_callee).lower()} {status}"
         )
     print(f"  unpaid_concurrency={unpaid}/{len(CONCURRENCY)}")
-    scale_board()
+    return unpaid
 
 
 # Rank 10: enrolled scale_kernel on a concrete N. Handler scale_forecast
@@ -518,7 +542,7 @@ SCALE_CLOCKS = [
 ]
 
 
-def scale_board() -> None:
+def scale_board() -> int:
     print("== scale (rank 10: named clock + unfold clock AND callee) ==")
     unpaid = 0
     for label, rel, handler, caller, callee in SCALE_CLOCKS:
@@ -545,6 +569,7 @@ def scale_board() -> None:
             f"unfold_callee={str(unfold_callee).lower()} {status}"
         )
     print(f"  unpaid_scale={unpaid}/{len(SCALE_CLOCKS)}")
+    return unpaid
 
 
 def sa_unpaid_board(fate: list) -> None:
