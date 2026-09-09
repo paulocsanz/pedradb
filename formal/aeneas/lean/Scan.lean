@@ -55,6 +55,17 @@ theorem scan_reads_file_none_smallest
   unfold scan_kernel.point_bounds_overlap
   rfl
 
+/-- Caller: both Unbounded window, both file bounds present ⇒ overlap, read the file. Dual-unfold. -/
+theorem scan_reads_file_both_unbounded
+    (lo hi : Slice U8)
+    (tombs : Slice ((Slice U8) × (Slice U8))) :
+    scan_kernel.scan_reads_file (some lo) (some hi) tombs
+      core.ops.range.Bound.Unbounded core.ops.range.Bound.Unbounded
+    = ok true := by
+  unfold scan_kernel.scan_reads_file
+  unfold scan_kernel.point_bounds_overlap
+  rfl
+
 /-- AS-IS dente: scan is bounds-only (tombs ignored). -/
 theorem scan_reads_file_as_is_dente
     (smallest largest tombs start end1) :
