@@ -948,7 +948,7 @@ fn put_many_until_committed(
     pairs: &[(Vec<u8>, Vec<u8>)],
     rx: &Receiver<Work>,
 ) -> Result<(), StoreError> {
-    if pairs.is_empty() {
+    if pedradb_core::write_admission_kernel::batch_is_empty(pairs.len() as u64) {
         return Ok(());
     }
     if pairs.len() == 1 {
