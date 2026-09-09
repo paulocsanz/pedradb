@@ -398,7 +398,7 @@ def check_three_teeth(root: Path, catalog: dict, r: Report) -> None:
             r.fail(f"three teeth: {pid} missing as_is")
         elif ksrc is None:
             r.fail(f"three teeth: {pid} missing kernel for as_is")
-        elif re.search(r"\bfn\s+" + re.escape(as_is) + r"\s*\(", ksrc) is None:
+        elif re.search(r"\bfn\s+" + re.escape(as_is) + r"(\s*<[^>]*>)?\s*\(", ksrc) is None:
             r.fail(f"three teeth: {pid} as_is {as_is} not in kernel")
         else:
             r.good(f"three teeth: {pid} as_is {as_is}")

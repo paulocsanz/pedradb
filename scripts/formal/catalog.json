@@ -4396,9 +4396,10 @@
       "id": "cf_family_of",
       "finding": "RFC-0150 P0",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/cf_kernel.rs",
-      "twin": "crates/pedradb-core/verus/cf_family_of.rs",
-      "verus": "scripts/verus_cf_family_of.sh",
+      "twin": "crates/pedradb-core/src/cf_kernel.rs",
+      "aeneas": "scripts/aeneas_cf.sh",
       "callers": [
         "crates/pedradb-core/src/cf_kernel.rs"
       ],
@@ -4420,9 +4421,10 @@
       "id": "cf_encode_effective",
       "finding": "RFC-0150 P0",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/cf_kernel.rs",
-      "twin": "crates/pedradb-core/verus/cf_encode_effective.rs",
-      "verus": "scripts/verus_cf_encode_effective.sh",
+      "twin": "crates/pedradb-core/src/cf_kernel.rs",
+      "aeneas": "scripts/aeneas_cf.sh",
       "callers": [
         "crates/pedradb-core/src/cf_kernel.rs",
         "crates/rocksdb-compat/src/lib.rs"
@@ -4445,9 +4447,10 @@
       "id": "encode_cf_key",
       "finding": "RFC-0150 P0",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/cf_kernel.rs",
-      "twin": "crates/pedradb-core/verus/encode_cf_key.rs",
-      "verus": "scripts/verus_encode_cf_key.sh",
+      "twin": "crates/pedradb-core/src/cf_kernel.rs",
+      "aeneas": "scripts/aeneas_cf.sh",
       "callers": [
         "crates/pedradb-core/src/cf_kernel.rs",
         "crates/pedradb-core/src/db.rs",
@@ -4475,9 +4478,10 @@
       "id": "decode_cf_key",
       "finding": "RFC-0150 P0",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/cf_kernel.rs",
-      "twin": "crates/pedradb-core/verus/decode_cf_key.rs",
-      "verus": "scripts/verus_decode_cf_key.sh",
+      "twin": "crates/pedradb-core/src/cf_kernel.rs",
+      "aeneas": "scripts/aeneas_cf.sh",
       "callers": [
         "crates/pedradb-core/src/cf_kernel.rs",
         "crates/rocksdb-compat/src/lib.rs"
@@ -4488,10 +4492,6 @@
         {
           "file": "crates/rocksdb-compat/src/lib.rs",
           "handler": "decode"
-        },
-        {
-          "file": "crates/rocksdb-compat/src/lib.rs",
-          "handler": "ingest_user_key"
         }
       ],
       "as_is": "decode_cf_key_as_is",
@@ -4504,9 +4504,10 @@
       "id": "infer_sst_cf",
       "finding": "RFC-0150 P0",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/cf_kernel.rs",
-      "twin": "crates/pedradb-core/verus/infer_sst_cf.rs",
-      "verus": "scripts/verus_infer_sst_cf.sh",
+      "twin": "crates/pedradb-core/src/cf_kernel.rs",
+      "aeneas": "scripts/aeneas_cf.sh",
       "callers": [
         "crates/pedradb-core/src/cf_kernel.rs",
         "crates/pedradb-core/src/sst/table.rs"
@@ -4529,9 +4530,10 @@
       "id": "compact_rewrites_sst_cf",
       "finding": "RFC-0150 P0",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/cf_kernel.rs",
-      "twin": "crates/pedradb-core/verus/compact_rewrites_sst_cf.rs",
-      "verus": "scripts/verus_compact_rewrites_sst_cf.sh",
+      "twin": "crates/pedradb-core/src/cf_kernel.rs",
+      "aeneas": "scripts/aeneas_cf.sh",
       "callers": [
         "crates/pedradb-core/src/cf_kernel.rs",
         "crates/pedradb-core/src/db.rs"

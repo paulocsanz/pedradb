@@ -29,6 +29,12 @@ pub fn cf_family_of(user_key: &[u8]) -> String {
     }
 }
 
+/// AS-IS family parse: every key reports `default` (named family lost).
+#[must_use]
+pub fn cf_family_of_as_is(_user_key: &[u8]) -> String {
+    "default".into()
+}
+
 /// Whether `user_key` belongs to `family` (`"default"` matches both raw keys
 /// and the `default\0…` prefix).
 #[must_use]
@@ -60,6 +66,12 @@ pub fn cf_encode_effective<'a>(cf: &'a str, default_raw: bool) -> &'a str {
     }
 }
 
+/// AS-IS effective prefix: `default_raw` ignored — default stays prefixed.
+#[must_use]
+pub fn cf_encode_effective_as_is<'a>(_cf: &'a str, _default_raw: bool) -> &'a str {
+    _cf
+}
+
 /// Encode `key` for `cf` (`cf\0key`, or raw when default-raw).
 #[must_use]
 pub fn encode_cf_key(cf: &str, key: &[u8], default_raw: bool) -> Vec<u8> {
@@ -74,6 +86,12 @@ pub fn encode_cf_key(cf: &str, key: &[u8], default_raw: bool) -> Vec<u8> {
     out
 }
 
+/// AS-IS encode: prefix dropped — `(cf, key)` encodes as the bare key.
+#[must_use]
+pub fn encode_cf_key_as_is(_cf: &str, _key: &[u8], _default_raw: bool) -> Vec<u8> {
+    _key.to_vec()
+}
+
 /// Inverse of [`encode_cf_key`]: strip the `cf\0` prefix, or return `encoded`
 /// unchanged when default-raw.
 #[must_use]
@@ -83,6 +101,12 @@ pub fn decode_cf_key<'a>(cf: &str, encoded: &'a [u8], default_raw: bool) -> &'a 
         return encoded;
     }
     encoded.get(effective.len() + 1..).unwrap_or(&[])
+}
+
+/// AS-IS decode: cf prefix leaks into the user key (encoded unchanged).
+#[must_use]
+pub fn decode_cf_key_as_is<'a>(_cf: &str, _encoded: &'a [u8], _default_raw: bool) -> &'a [u8] {
+    _encoded
 }
 
 /// SST CF tag from key bounds. Empty = mixed / prefix-era (more than one family).
@@ -101,6 +125,13 @@ pub fn infer_sst_cf(smallest: Option<&[u8]>, largest: Option<&[u8]>) -> String {
         (Some(s), None) | (None, Some(s)) => cf_family_of(s),
         (None, None) => String::new(),
     }
+}
+
+/// AS-IS tag inference: every file tags `default` (mixed bounds compacted
+/// as default).
+#[must_use]
+pub fn infer_sst_cf_as_is(_smallest: Option<&[u8]>, _largest: Option<&[u8]>) -> String {
+    "default".into()
 }
 
 /// Whether compact of `family` rewrites an SST tagged `sst_cf`.
