@@ -403,7 +403,9 @@ impl BulkLatch {
             }
             prev = Some(key);
         }
-        if inversions > 0 && keys_have_duplicate(ops) {
+        if !crate::write_admission_kernel::batch_is_empty(inversions as u64)
+            && keys_have_duplicate(ops)
+        {
             return Verdict::Kill;
         }
         let Some(first) = ops.iter().map(|&(_, k)| k).min() else {
