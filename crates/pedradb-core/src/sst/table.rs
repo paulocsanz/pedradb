@@ -2980,7 +2980,10 @@ fn write_sst_try_sorted_body(
         }
         let pre_len = block_buf.len();
         encode_entry_into(&ikey, &value, &mut block_buf)?;
-        if !same_user && block_buf.len() > block_target() && pre_len > 0 {
+        if !same_user
+            && block_buf.len() > block_target()
+            && !crate::write_admission_kernel::batch_is_empty(pre_len as u64)
+        {
             // Overflow: the just-encoded entry moves to the fresh block.
             block_buf.truncate(pre_len);
             flush_block(
