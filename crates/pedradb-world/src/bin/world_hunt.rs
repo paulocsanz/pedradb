@@ -55,7 +55,7 @@ fn main() -> ExitCode {
                 reward += t.trajectory_violations as f64;
                 reward += t.disk_tripped_nodes as f64 * 0.2;
                 reward += f64::from(t.coverage_mask.count_ones()) * 0.02;
-                if t.silent_wrong > 0 {
+                if !pedradb_core::write_admission_kernel::batch_is_empty(t.silent_wrong) {
                     reward += 10.0;
                     silent += 1;
                     eprintln!(
