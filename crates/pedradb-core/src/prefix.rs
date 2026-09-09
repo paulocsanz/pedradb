@@ -221,6 +221,27 @@ mod tests {
     }
 
     #[test]
+    fn key_in_prefix_range_on_live_last_is_not_ok() {
+        assert!(key_in_prefix_range(b"ab", b"a", Some(b"b".as_ref())));
+        assert!(!key_in_prefix_range(b"b", b"a", Some(b"b".as_ref())));
+        assert!(key_in_prefix_range(b"z", b"", None));
+        let src = include_str!("db.rs");
+        let last = src
+            .split("pub fn last_under_prefix")
+            .nth(1)
+            .and_then(|s| s.split("pub fn last_under_user_prefix").next())
+            .expect("last_under_prefix");
+        assert!(
+            last.contains("key_in_prefix_range("),
+            "last_under_prefix must match key_in_prefix_range"
+        );
+        assert!(
+            !last.contains("!k.starts_with(prefix)"),
+            "last_under_prefix must not keep a raw starts_with skip"
+        );
+    }
+
+    #[test]
     fn as_is_drops_ff_suffix() {
         let p = b"/host/h1/";
         let mut key = p.to_vec();

@@ -3733,15 +3733,8 @@ impl<E: Env> Db<E> {
         loop {
             let mut cand: Option<Bytes> = None;
             let mut consider = |k: Bytes| {
-                if !crate::write_admission_kernel::batch_is_empty(prefix.len() as u64)
-                    && !k.starts_with(prefix)
-                {
+                if !crate::prefix::key_in_prefix_range(k.as_ref(), prefix, before.as_deref()) {
                     return;
-                }
-                if let Some(h) = before.as_deref() {
-                    if k.as_ref() >= h {
-                        return;
-                    }
                 }
                 if cand.as_ref().is_none_or(|c| k.as_ref() > c.as_ref()) {
                     cand = Some(k);
