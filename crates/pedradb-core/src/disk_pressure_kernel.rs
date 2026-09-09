@@ -350,6 +350,15 @@ mod tests {
             flush.contains("compact_allowed_under_pressure("),
             "flush must match compact_allowed_under_pressure"
         );
+        let ssts_only = include_str!("db.rs")
+            .split("pub fn compact_with_ssts_only(")
+            .nth(1)
+            .and_then(|s| s.split("fn compact_l0_into_l1").next())
+            .expect("compact_with_ssts_only");
+        assert!(
+            ssts_only.contains("compact_allowed_under_pressure("),
+            "compact_with_ssts_only must match compact_allowed_under_pressure"
+        );
     }
 
     #[test]

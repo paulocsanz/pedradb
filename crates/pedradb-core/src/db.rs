@@ -6811,6 +6811,15 @@ impl<E: Env> Db<E> {
         if crate::write_admission_kernel::batch_is_empty(self.ssts.len() as u64) {
             return Ok(());
         }
+        let probe = crate::env::probe_available_bytes(&self.env, &self.dir);
+        if !crate::disk_pressure_kernel::compact_allowed_under_pressure(probe) {
+            return match crate::disk_pressure_kernel::disk_pressure_admit(probe) {
+                crate::disk_pressure_kernel::DiskPressureAdmit::Refuse { available, need } => {
+                    Err(CoreError::DiskPressure { available, need })
+                }
+                _ => Ok(()),
+            };
+        }
         // Pick lowest level that has files and can promote (N → N+1);
         // decided by the pure kernel (RFC-0056 P0.3).
         let lowest = (0..MAX_LSM_LEVEL).find(|&lvl| self.level_file_count(lvl) > 0);

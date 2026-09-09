@@ -130,6 +130,7 @@ admitido (não há compact); só o hard recusa.
   - `concurrent_db_probe_err_does_not_refuse_put`: probe Err no write-group ainda admite.
   - `failing_env_compact_under_hard_floor_is_disk_pressure`: compact recusa; get Ok.
   - `failing_env_flush_under_hard_floor_is_disk_pressure`: flush recusa; mem ainda lê.
+  - `failing_env_compact_ssts_only_under_hard_floor_is_disk_pressure`: merge SST recusa.
 - **Telemetry / Analytics:** `tracing::warn!` na transição (não cada put).
   Sonda 0169 é P1.3.
 - **Documentation:** este RFC; linha em `docs/status.md`. Não reescreve

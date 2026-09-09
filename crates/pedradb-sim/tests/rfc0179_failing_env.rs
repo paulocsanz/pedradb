@@ -295,6 +295,46 @@ fn failing_env_compact_under_hard_floor_is_disk_pressure() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// RFC-0179: `compact_ssts_only` (no mem flush) below hard is DiskPressure;
+/// existing SST stays readable; not a durability fence.
+#[test]
+fn failing_env_compact_ssts_only_under_hard_floor_is_disk_pressure() {
+    use pedradb_core::disk_pressure_kernel::compact_allowed_under_pressure;
+    assert!(!compact_allowed_under_pressure(Some(1024)));
+    let dir = tmp();
+    let env = FailingEnv::passing();
+    let handle = env.clone();
+    let mut db = Db::open_with_env(
+        &dir,
+        OpenOptions {
+            sync: false,
+            auto_flush_bytes: None,
+            auto_compact_sst_count: None,
+            auto_compact_sst_bytes: None,
+            ..OpenOptions::default()
+        },
+        env,
+    )
+    .unwrap();
+    db.put(b"k", b"v").unwrap();
+    db.flush().unwrap();
+    handle.set_available_bytes(Some(1024));
+    let err = db.compact_ssts_only().unwrap_err();
+    assert!(
+        matches!(
+            err,
+            CoreError::DiskPressure {
+                available: 1024,
+                need: DISK_HARD_FREE_BYTES,
+            }
+        ),
+        "expected DiskPressure, got {err:?}"
+    );
+    assert_eq!(db.get(b"k").as_deref(), Some(b"v".as_ref()));
+    assert!(!db.is_durability_fenced());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// RFC-0179: ConcurrentDb + FailingEnvArc probe Err is unknown; put Ok.
 #[test]
 fn concurrent_db_probe_err_does_not_refuse_put() {
