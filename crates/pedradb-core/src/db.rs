@@ -3305,11 +3305,12 @@ impl<E: Env> Db<E> {
             if u.seq <= snapshot {
                 continue;
             }
-            if u.kind == ValueType::RangeDeletion {
-                if range_tombstone_covers(u.key.as_ref(), u.end.as_ref(), key) {
-                    return true;
-                }
-            } else if u.key.as_ref() == key {
+            if crate::merge::write_op_covers_key(
+                u.kind,
+                u.key.as_ref(),
+                u.end.as_ref(),
+                key,
+            ) {
                 return true;
             }
         }

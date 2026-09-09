@@ -209,6 +209,29 @@ pub fn range_tombstone_covers_as_is(start: &[u8], _end: &[u8], key: &[u8]) -> bo
     key == start
 }
 
+/// Whether an unapplied WAL op (RFC-0045 P2.1) covers `key` for OCC.
+///
+/// Range deletes use [`range_tombstone_covers`] (F30). Point put/delete
+/// conflict on the exact user key.
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn write_op_covers_key(kind: ValueType, start: &[u8], end: &[u8], key: &[u8]) -> bool {
+    match kind {
+        ValueType::RangeDeletion => range_tombstone_covers(start, end, key),
+        ValueType::Value | ValueType::Deletion => start == key,
+    }
+}
+
+/// AS-IS F30: range only hits the start key; point ops never conflict.
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn write_op_covers_key_as_is(kind: ValueType, start: &[u8], end: &[u8], key: &[u8]) -> bool {
+    match kind {
+        ValueType::RangeDeletion => range_tombstone_covers_as_is(start, end, key),
+        ValueType::Value | ValueType::Deletion => false,
+    }
+}
+
 /// Whether the winning version at a snapshot is live (RFC-0150 P1).
 ///
 /// Candidate versions already satisfy `sequence <= snapshot` (newest first).
@@ -1541,6 +1564,48 @@ mod tests {
         assert_eq!(got[0].key.as_ref(), b"k00");
         assert_eq!(got[9].key.as_ref(), b"k09");
         assert_eq!(nexts.load(std::sync::atomic::Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn write_op_covers_key_on_live_unapplied_is_not_ok() {
+        assert!(write_op_covers_key(
+            ValueType::Value,
+            b"k",
+            b"",
+            b"k"
+        ));
+        assert!(!write_op_covers_key(
+            ValueType::Value,
+            b"k",
+            b"",
+            b"z"
+        ));
+        assert!(write_op_covers_key(
+            ValueType::RangeDeletion,
+            b"a",
+            b"z",
+            b"m"
+        ));
+        assert!(!write_op_covers_key_as_is(
+            ValueType::RangeDeletion,
+            b"a",
+            b"z",
+            b"m"
+        ));
+        let src = include_str!("db.rs");
+        let body = src
+            .split("pub fn key_has_write_after")
+            .nth(1)
+            .and_then(|s| s.split("fn resolve_stored_value").next())
+            .expect("key_has_write_after");
+        assert!(
+            body.contains("write_op_covers_key("),
+            "key_has_write_after unapplied must match write_op_covers_key"
+        );
+        assert!(
+            !body.contains("u.kind == ValueType::RangeDeletion"),
+            "key_has_write_after unapplied must not keep a raw ValueType if"
+        );
     }
 
     #[test]
