@@ -339,7 +339,7 @@ impl SstTable {
     /// served from file block-by-block instead.
     #[must_use]
     pub fn is_lazy(&self) -> bool {
-        !self.index.is_empty()
+        !crate::write_admission_kernel::batch_is_empty(self.index.len() as u64)
     }
 
     #[cfg(test)]
