@@ -2009,23 +2009,13 @@ impl Iterator for SstRangeIter<'_> {
             Bound::Included(s) => Some((s, true)),
             Bound::Excluded(s) => Some((s, false)),
         };
-        let end_b: Option<(&Bytes, bool)> = match &self.end {
-            Bound::Unbounded => None,
-            Bound::Included(e) => Some((e, true)),
-            Bound::Excluded(e) => Some((e, false)),
-        };
         loop {
             if let Some(ref block) = self.current {
                 while self.idx < block.len() {
                     let (k, v) = &block[self.idx];
                     self.idx += 1;
                     let uk = k.user_key.as_ref();
-                    let past_end = match end_b {
-                        Some((e, true)) => uk > e.as_ref(),
-                        Some((e, false)) => uk >= e.as_ref(),
-                        None => false,
-                    };
-                    if past_end {
+                    if crate::merge::past_end(uk, crate::merge::bound_as_ref(&self.end)) {
                         // Sorted: nothing later can be in range.
                         self.current = None;
                         self.blocks = Vec::new().into_iter();
@@ -3265,6 +3255,24 @@ mod tests {
         assert!(
             !body.contains("file_before_end"),
             "Bound-match if must not stay inline in overlaps_user_range"
+        );
+    }
+
+    #[test]
+    fn sst_range_iter_next_calls_past_end() {
+        let src = include_str!("table.rs");
+        let body = src
+            .split("impl Iterator for SstRangeIter")
+            .nth(1)
+            .and_then(|s| s.split("impl ").next())
+            .expect("SstRangeIter::next");
+        assert!(
+            body.contains("past_end("),
+            "SstRangeIter end-of-window if must call catalog past_end"
+        );
+        assert!(
+            !body.contains("uk > e.as_ref()"),
+            "Bound-match past_end must not stay inline"
         );
     }
 
