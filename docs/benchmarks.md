@@ -331,7 +331,7 @@ ratio row (`diagnose: {"lever":…}` or `null`).
 
 Multi-shape **balance** (RFC-0182 / `/otimizar`): never ship an engine
 cut from one cell. `BALANCE_SHAPES` =
-`overwrite_mc4,ycsb_a_mc4,ycsb_b_mc4,ycsb_c_mc4,ycsb_f_mc4,apply_mc4,1c overwrite,qs_hot_get_mc4,qs_neg_lookup_mc4,qs_batch_write_mc4,rockset_hybrid_mc4,yugabyte_docdb_rmw_mc4,venice_fanout_get_mc4,kvrocks_get_mc4,myrocks_point_select_mc4,nebula_get_neighbors_mc4,arango_traversal_mc4,surreal_tx_get_mc4,oxigraph_spo_lookup_mc4,solana_trailing_read_mc4,kvrocks_scan_mc4,flink_window_state_mc4,kafka_changelog_flush_mc4,bluestore_omap_read_mc4,myrocks_read_only_mc4`.
+`overwrite_mc4,ycsb_a_mc4,ycsb_b_mc4,ycsb_c_mc4,ycsb_f_mc4,apply_mc4,1c overwrite,qs_hot_get_mc4,qs_neg_lookup_mc4,qs_batch_write_mc4,rockset_hybrid_mc4,yugabyte_docdb_rmw_mc4,venice_fanout_get_mc4,kvrocks_get_mc4,myrocks_point_select_mc4,nebula_get_neighbors_mc4,arango_traversal_mc4,surreal_tx_get_mc4,oxigraph_spo_lookup_mc4,solana_trailing_read_mc4,kvrocks_scan_mc4,flink_window_state_mc4,kafka_changelog_flush_mc4,bluestore_omap_read_mc4,myrocks_read_only_mc4,wbwi_read_your_writes_mc4`.
 
 ```sh
 # ycsb A: get, not WAL

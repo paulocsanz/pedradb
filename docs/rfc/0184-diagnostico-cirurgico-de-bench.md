@@ -317,6 +317,13 @@ a linha quando há phasesΔ. Sem harness novo.
       async); JSON suite tag is host-default (`peer_sync=true`), not a
       published win vs Rocks default. p50 0.3 vs 3.6 µs. Not Linux
       cartaz. — status: `done`
+- [x] **P2.58** `wbwi_read_your_writes_mc4` (WBWI overlay get, 4 clients)
+      in `COMPARE_SHAPES`, `BALANCE_SHAPES`, and `run_wbwi_clients`.
+      Test `rfc0184_wbwi_read_your_writes_mc4_in_compare`. Darwin DIAG
+      `ratio=0.410` (6.54 M / 16.0 M QPS). Same-class async
+      (`peer_policy=rocks-default`, `sync=false`). p50 0.4 vs 0.2 µs.
+      Pedra pays real WBWI; Rocks rust-rocksdb 0.22 adapter is last-write-wins
+      overlay then DB get. Named loss. Not Linux cartaz. — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -388,6 +395,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.55 | p2 | kafka_changelog_flush_mc4 COMPARE+BALANCE | done | Kafka changelog mc4; Darwin DIAG 0.897× named loss; no per-op flush | 2026-09-08 |
 | P2.56 | p2 | bluestore_omap_read_mc4 COMPARE+BALANCE | done | Ceph omap-read mc4; Darwin DIAG 0.828×; JSON host-default not a win | 2026-09-08 |
 | P2.57 | p2 | myrocks_read_only_mc4 COMPARE+BALANCE | done | MyRocks oltp_read_only mc4; Darwin DIAG 1.870; JSON host-default not a win | 2026-09-08 |
+| P2.58 | p2 | wbwi_read_your_writes_mc4 COMPARE+BALANCE | done | WBWI overlay-get mc4; Darwin DIAG 0.410× named loss | 2026-09-08 |
 
 ## Acceptance Criteria
 
@@ -454,7 +462,8 @@ a linha quando há phasesΔ. Sem harness novo.
   `rfc0184_flink_window_state_mc4_in_compare` (P2.54);
   `rfc0184_kafka_changelog_flush_mc4_in_compare` (P2.55);
   `rfc0184_bluestore_omap_read_mc4_in_compare` (P2.56);
-  `rfc0184_myrocks_read_only_mc4_in_compare` (P2.57).
+  `rfc0184_myrocks_read_only_mc4_in_compare` (P2.57);
+  `rfc0184_wbwi_read_your_writes_mc4_in_compare` (P2.58).
 - **Telemetry / Analytics:** uma linha `diagnose dominant=… lever=…`;
   `benches[].diagnose.lever` no JSON; compare copia para a row.
   scale `get_hit` / `lookup_100` / `probe_hit` imprimem `diagnose get … class=…` (P2.6/P2.7/P2.21).
