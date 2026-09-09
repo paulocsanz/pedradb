@@ -115,7 +115,7 @@ impl WalShipper {
         let mut stamp = None;
         let offset = if env.exists(&wal_path) {
             let len = env.metadata_len(&wal_path)?;
-            if len > 0 {
+            if !pedradb_core::write_admission_kernel::batch_is_empty(len) {
                 stamp = Some(read_prefix_on(
                     env,
                     &wal_path,
