@@ -3295,8 +3295,9 @@
       "id": "l28_durability",
       "finding": "RFC-0072",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-store/src/l28.rs",
-      "twin": "crates/pedradb-store/verus/l28.rs",
+      "twin": "crates/pedradb-store/src/l28.rs",
       "aeneas": "scripts/aeneas_l28.sh",
       "callers": [
         "crates/pedradb-store/src/bin/cluster_real.rs"
@@ -4772,8 +4773,9 @@
       "id": "l28_napply_retry",
       "finding": "RFC-0155",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-store/src/l28.rs",
-      "twin": "crates/pedradb-store/verus/l28.rs",
+      "twin": "crates/pedradb-store/src/l28.rs",
       "aeneas": "scripts/aeneas_l28.sh",
       "callers": [
         "crates/pedradb-store/src/bin/cluster_real.rs"
@@ -4934,8 +4936,9 @@
       "id": "l28_tcp_add",
       "finding": "RFC-0119",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-store/src/l28.rs",
-      "twin": "crates/pedradb-store/verus/l28.rs",
+      "twin": "crates/pedradb-store/src/l28.rs",
       "aeneas": "scripts/aeneas_l28.sh",
       "callers": [
         "crates/pedradb-store/src/bin/cluster_real.rs"
@@ -4959,8 +4962,9 @@
       "id": "l28_tcp_cnew",
       "finding": "RFC-0119",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-store/src/l28.rs",
-      "twin": "crates/pedradb-store/verus/l28.rs",
+      "twin": "crates/pedradb-store/src/l28.rs",
       "aeneas": "scripts/aeneas_l28.sh",
       "callers": [
         "crates/pedradb-store/src/bin/cluster_real.rs"
@@ -4984,8 +4988,9 @@
       "id": "l28_tcp_svget",
       "finding": "RFC-0119",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-store/src/l28.rs",
-      "twin": "crates/pedradb-store/verus/l28.rs",
+      "twin": "crates/pedradb-store/src/l28.rs",
       "aeneas": "scripts/aeneas_l28.sh",
       "callers": [
         "crates/pedradb-store/src/bin/cluster_real.rs"
@@ -5009,8 +5014,9 @@
       "id": "l28_tcp_newget",
       "finding": "RFC-0119",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-store/src/l28.rs",
-      "twin": "crates/pedradb-store/verus/l28.rs",
+      "twin": "crates/pedradb-store/src/l28.rs",
       "aeneas": "scripts/aeneas_l28.sh",
       "callers": [
         "crates/pedradb-store/src/bin/cluster_real.rs"
@@ -5034,8 +5040,9 @@
       "id": "l28_tcp_jleft",
       "finding": "RFC-0119",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-store/src/l28.rs",
-      "twin": "crates/pedradb-store/verus/l28.rs",
+      "twin": "crates/pedradb-store/src/l28.rs",
       "aeneas": "scripts/aeneas_l28.sh",
       "callers": [
         "crates/pedradb-store/src/bin/cluster_real.rs"
@@ -5061,8 +5068,9 @@
       "id": "l28_tcp_caught",
       "finding": "RFC-0119",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-store/src/l28.rs",
-      "twin": "crates/pedradb-store/verus/l28.rs",
+      "twin": "crates/pedradb-store/src/l28.rs",
       "aeneas": "scripts/aeneas_l28.sh",
       "callers": [
         "crates/pedradb-store/src/bin/cluster_real.rs"
@@ -5088,8 +5096,9 @@
       "id": "l28_tcp_grown",
       "finding": "RFC-0119",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-store/src/l28.rs",
-      "twin": "crates/pedradb-store/verus/l28.rs",
+      "twin": "crates/pedradb-store/src/l28.rs",
       "aeneas": "scripts/aeneas_l28.sh",
       "callers": [
         "crates/pedradb-store/src/bin/cluster_real.rs"

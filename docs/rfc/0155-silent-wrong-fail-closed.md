@@ -65,7 +65,7 @@ Catalog freeze at start of this slice: pairs include `media_durable`, `fdatasync
 | P1.6 | p1 | R-es names 0155 | done | residuals `liveness_claim` | 2026-08-30 |
 | P1.7 | p1 | R-crc never_floor stays | done | residuals `crc_match` | 2026-08-30 |
 | P1.8 | p1 | R-uring names 0155 | done | residuals `cqe_res` | 2026-08-30 |
-| P2.1 | p2 | Verus twins + three_teeth | done | `verus/l28.rs` / `group_commit.rs` / `sst_crc_fate.rs` | 2026-08-30 |
+| P2.1 | p2 | Verus twins + three_teeth | done | l28 paid by Aeneas extract (`aeneas_l28.sh`, mirror deleted); `group_commit.rs` / `sst_crc_fate.rs` | 2026-08-30 |
 | P2.2 | p2 | never_floor + extract + PCT d=2 | done | residuals freeze | 2026-08-30 |
 
 ## Acceptance Criteria

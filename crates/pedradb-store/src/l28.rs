@@ -1036,10 +1036,10 @@ mod tests {
             catalog.contains("\"entry\": \"l28_tcp_left_ok\""),
             "catalog entry must stay l28_tcp_left_ok"
         );
-        let twin = std::fs::read_to_string(crate_root.join("verus/l28.rs")).expect("verus/l28.rs");
+        let twin = std::fs::read_to_string(crate_root.join("src/l28.rs")).expect("src/l28.rs");
         assert!(
             twin.contains("fn l28_tcp_left_ok"),
-            "twin freeze of l28_tcp_left_ok is not a Verus exec claim"
+            "kernel freeze of l28_tcp_left_ok is the term the extract pays"
         );
     }
 
@@ -1069,10 +1069,10 @@ mod tests {
             catalog.contains("\"entry\": \"l28_tcp_hw_ok\""),
             "catalog entry must stay l28_tcp_hw_ok"
         );
-        let twin = std::fs::read_to_string(crate_root.join("verus/l28.rs")).expect("verus/l28.rs");
+        let twin = std::fs::read_to_string(crate_root.join("src/l28.rs")).expect("src/l28.rs");
         assert!(
             twin.contains("fn l28_tcp_hw_ok"),
-            "twin freeze of l28_tcp_hw_ok is not a Verus exec claim"
+            "kernel freeze of l28_tcp_hw_ok is the term the extract pays"
         );
     }
 }

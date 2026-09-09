@@ -38,7 +38,7 @@
 - [x] **P1.2** World `silent_wrong` seed must pass `cluster_real --seed S` — status: `done` (`world_seed_l28_ok`; seed `0x641e28`; `world_l28_seed_silent_wrong_zero_is_not_tcp_clean_alone`)
 
 ### P2 — later
-- [x] **P2.1** Catalog pair + Verus twin — status: `done` (`verus/l28.rs` + catalog `l28_durability`)
+- [x] **P2.1** Catalog pair + Verus twin — status: `done` (payment now the Aeneas extract of the linked kernel `src/l28.rs` — `scripts/aeneas_l28.sh`; the `verus/l28.rs` mirror twin was deleted, catalog `l28_durability`)
 - [x] **P2.2** Leader-kill path named in the kernel (already a bool in the bin) — status: `done` (`l28_leader_kill_ok`; `cluster_real --leader-kill`)
 
 ## Status (living — update with every PR)
@@ -50,7 +50,7 @@
 | P0.3 | p0 | after-kill ∧ restart tooth | done | l28_durability_ok_requires_after_kill_and_restart | 2026-08-27 |
 | P1.1 | p1 | l28_real_tcp uses kernel | done | l28_real_tcp_seed_replay | 2026-08-27 |
 | P1.2 | p1 | World silent_wrong → cluster_real | done | world_seed_l28_ok + seed 0x641e28 | 2026-08-27 |
-| P2.1 | p2 | catalog + Verus | done | verus/l28.rs + catalog l28_durability | 2026-08-27 |
+| P2.1 | p2 | catalog + Aeneas extract | done | aeneas_l28.sh over src/l28.rs (mirror twin deleted) + catalog l28_durability | 2026-08-27 |
 | P2.2 | p2 | leader-kill in kernel | done | l28_leader_kill_ok + cluster_real --leader-kill | 2026-08-27 |
 
 ## Acceptance Criteria
@@ -61,7 +61,7 @@
   - P1.1 `l28_real_tcp_seed_replay` / `l28_real_tcp_leader_kill` assert via `l28_durability_ok` (not only line `contains`).
   - P1.2 `world_seed_l28_ok(0, false)` is false (AS-IS would pass); World seed `0x641e28` has `silent_wrong=0` (`world_l28_seed_silent_wrong_zero_is_not_tcp_clean_alone`) and the same seed’s `cluster_real` is L28-clean.
   - P2.2 `l28_leader_kill_ok` requires get∧after∧restart; AS-IS get-only. `cluster_real --leader-kill` and `l28_real_tcp_leader_kill` call the named gate.
-  - P2.1 catalog pair `l28_durability` entry `l28_durability_ok` with Verus twin `verus/l28.rs`.
+  - P2.1 catalog pair `l28_durability` entry `l28_durability_ok` paid by the Aeneas extract of `crates/pedradb-store/src/l28.rs` (single artifact; `verus/l28.rs` twin deleted).
 - **Telemetry / Analytics:** none — durability invariant. `cluster_real` still prints the fingerprint line.
 - **Documentation:** this RFC; `residuals.json` `R-swarm-real` close-text + owner 0072.
 - **Screenshots:** backend-only.
