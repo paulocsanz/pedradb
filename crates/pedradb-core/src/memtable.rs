@@ -1755,7 +1755,9 @@ impl MemTable {
         end: Bound<&'a [u8]>,
         snapshot: SequenceNumber,
     ) -> MemInternalIter<'a> {
-        if !self.has_tail() || snapshot < self.tail_max_seq {
+        if crate::write_admission_kernel::batch_is_empty(self.tail.len() as u64)
+            || snapshot < self.tail_max_seq
+        {
             return self.iter_internal_iter(start, end);
         }
         // Single CF shard: a non-empty `cf\0` prefix on BOTH bounds pins the
