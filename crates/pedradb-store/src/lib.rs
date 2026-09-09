@@ -5383,7 +5383,7 @@ impl<E: Env> StoreCluster<E> {
                     }
                 }
                 Role::Follower | Role::Candidate => {
-                    if p.election_left == 0 {
+                    if pedradb_core::write_admission_kernel::batch_is_empty(p.election_left as u64) {
                         elect.push(nid);
                     } else {
                         p.election_left -= 1;
