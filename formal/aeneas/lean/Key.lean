@@ -87,3 +87,25 @@ theorem internal_key_encode_is_encode_into (self : key.InternalKey) :
         bytes.bytes.Bytes.Insts.CoreConvertFromVecU8.from buf1) := by
   unfold key.InternalKey.encode
   rfl
+
+/-- Catalog entry: Ord is user-key slice cmp first, then `ikey_seq_cmp`, then kind reverse. Dual-unfold. -/
+theorem internal_key_cmp_user_key_then_seq
+    (self other : key.InternalKey) :
+    key.InternalKey.Insts.CoreCmpOrd.cmp self other =
+      (do
+        let s ←
+          bytes.bytes.Bytes.Insts.CoreConvertAsRefSliceU8.as_ref self.user_key
+        let s1 ←
+          bytes.bytes.Bytes.Insts.CoreConvertAsRefSliceU8.as_ref other.user_key
+        let o ← Slice.Insts.CoreCmpOrd.cmp core.cmp.OrdU8 s s1
+        match o with
+        | Ordering.lt => ok Ordering.lt
+        | Ordering.eq =>
+          let o1 ← key.ikey_seq_cmp self.sequence other.sequence
+          match o1 with
+          | Ordering.lt => ok Ordering.lt
+          | Ordering.eq => key.ValueType.Insts.CoreCmpOrd.cmp other.kind self.kind
+          | Ordering.gt => ok Ordering.gt
+        | Ordering.gt => ok Ordering.gt) := by
+  unfold key.InternalKey.Insts.CoreCmpOrd.cmp
+  rfl
