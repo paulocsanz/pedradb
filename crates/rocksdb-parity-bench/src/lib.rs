@@ -334,6 +334,8 @@ pub const COMPARE_SHAPES: &[&str] = &[
     // RFC-0184 P2.65: Pinterest Rockstore wide-column mc4 — 1c lives in
     // run_venice; concurrent must not mix with venice_fanout_get_mc4.
     "rockstore_widecol_rw_mc4",
+    // RFC-0184 P2.66: Kvrocks BlobDB-sized SET mc4 — 1c is already in COMPARE.
+    "kvrocks_blob_set_mc4",
 ];
 
 /// Length of the RFC-0041 official prefix of [`COMPARE_SHAPES`].
@@ -1846,6 +1848,78 @@ impl YcsbRunner {
                 .collect();
             for h in handles {
                 let (mut l, err) = h.join().expect("kvrocks pipeline client");
+                errors += err;
+                lats.append(&mut l);
+            }
+        });
+        let wall = t0.elapsed();
+        eprintln!(
+            "[rocks-parity] {full} done ops={} errors={errors}",
+            cfg_ops * clients
+        );
+        let mut blocks = vec![summarize_mc(
+            &full,
+            cfg_ops * clients,
+            wall,
+            &mut lats,
+            clients,
+            errors,
+        )];
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, clients as u64, 0.0, 0);
+            eprint_write_diagnose(&full, &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
+        blocks
+    }
+
+    /// RFC-0184 P2.66: kvrocks_blob_set at N clients (16 KiB BlobDB-sized SET).
+    pub fn run_kvrocks_blob_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
+        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
+        let full = format!("kvrocks_blob_set_mc{clients}");
+        if !shape_wanted(&full) {
+            return Vec::new();
+        }
+        e.set_write_sync(write_sync_for_suite("kvrocks"));
+        let records = self.cfg.records;
+        let cfg_ops = self.cfg.ops;
+        let blob_n = records.min(256);
+        let blob = std::sync::Arc::new(vec![b'B'; 16 * 1024]);
+        for i in 0..blob_n {
+            assert!(e.put(&bkey(i), blob.as_ref()), "kvrocks blob mc seed {i}");
+        }
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+        let phase0 = e.write_phase_snapshot();
+        let t0 = Instant::now();
+        let mut lats = Vec::with_capacity(cfg_ops * clients);
+        let mut errors = 0u64;
+        std::thread::scope(|s| {
+            let handles: Vec<_> = (0..clients)
+                .map(|c| {
+                    let barrier = barrier.clone();
+                    let blob = blob.clone();
+                    s.spawn(move || {
+                        let mut rng =
+                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
+                        let mut lats = Vec::with_capacity(cfg_ops);
+                        let mut errors = 0u64;
+                        barrier.wait();
+                        for _ in 0..cfg_ops {
+                            let t = Instant::now();
+                            let k = bkey(self.pick(&mut rng, blob_n));
+                            if !e.put(&k, blob.as_ref()) {
+                                errors += 1;
+                            }
+                            lats.push(ms(t));
+                        }
+                        (lats, errors)
+                    })
+                })
+                .collect();
+            for h in handles {
+                let (mut l, err) = h.join().expect("kvrocks blob client");
                 errors += err;
                 lats.append(&mut l);
             }
@@ -6545,6 +6619,30 @@ mod tests {
     }
 
     #[test]
+    fn rfc0184_kvrocks_blob_set_mc4_in_compare() {
+        assert!(
+            COMPARE_SHAPES.contains(&"kvrocks_blob_set_mc4"),
+            "Kvrocks blob-set mc4 must be on the cartaz"
+        );
+        assert!(shape_wanted_in(
+            "kvrocks_blob_set_mc4",
+            Some("kvrocks_blob_set_mc4")
+        ));
+        assert!(
+            !shape_wanted_in("kvrocks_blob_set", Some("kvrocks_blob_set_mc4")),
+            "1c kvrocks_blob_set must not leak into ONLY=kvrocks_blob_set_mc4"
+        );
+        assert!(
+            !shape_wanted_in("kvrocks_set", Some("kvrocks_blob_set_mc4")),
+            "1c kvrocks_set must not leak into ONLY=kvrocks_blob_set_mc4"
+        );
+        assert!(
+            !shape_wanted_in("kvrocks_pipelined_set_mc4", Some("kvrocks_blob_set_mc4")),
+            "pipelined-set mc4 must not leak into ONLY=kvrocks_blob_set_mc4"
+        );
+    }
+
+    #[test]
     fn rfc0178_mc_only_selects_full_mc_name() {
         assert!(shape_wanted_in(
             "deps_cache_overwrite_mc4",
@@ -7045,6 +7143,7 @@ mod tests {
             "arango_doc_crud_mc4",
             "kvrocks_pipelined_set_mc4",
             "rockstore_widecol_rw_mc4",
+            "kvrocks_blob_set_mc4",
         ] {
             assert!(
                 COMPARE_SHAPES.contains(&name),
