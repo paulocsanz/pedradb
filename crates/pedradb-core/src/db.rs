@@ -11202,12 +11202,7 @@ impl<'a> SstCountCursor<'a> {
                 while self.idx < block.len() {
                     let k = &block[self.idx].0;
                     let uk = k.user_key.as_ref();
-                    let past_end = match self.end {
-                        Bound::Unbounded => false,
-                        Bound::Included(e) => uk > e,
-                        Bound::Excluded(e) => uk >= e,
-                    };
-                    if past_end {
+                    if crate::merge::past_end(uk, self.end) {
                         self.exhausted = true;
                         self.current = None;
                         self.blocks = Vec::new().into_iter();

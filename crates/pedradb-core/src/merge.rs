@@ -1543,6 +1543,28 @@ mod tests {
         assert_eq!(nexts.load(std::sync::atomic::Ordering::Relaxed), 1);
     }
 
+    #[test]
+    fn past_end_on_live_exclusive_is_not_ok() {
+        assert!(past_end(b"z", Bound::Excluded(b"z")));
+        assert!(!past_end(b"y", Bound::Excluded(b"z")));
+        assert!(!past_end(b"z", Bound::Unbounded));
+        assert!(past_end(b"z", Bound::Included(b"y")));
+        let src = include_str!("db.rs");
+        let sst = src
+            .split("impl<'a> SstCountCursor")
+            .nth(1)
+            .and_then(|s| s.split("impl<'a>").next())
+            .expect("SstCountCursor impl");
+        assert!(
+            sst.contains("past_end("),
+            "SstCountCursor::settle must match past_end"
+        );
+        assert!(
+            !sst.contains("Bound::Included(e) => uk > e"),
+            "SstCountCursor::settle must not keep a raw Bound match"
+        );
+    }
+
     /// Interleaved streams with a cross-stream duplicate key: after the
     /// second stream exhausts, the first continues on the single-live fast
     /// path — output still matches the oracle.
