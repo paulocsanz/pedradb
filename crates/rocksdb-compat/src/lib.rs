@@ -4184,7 +4184,12 @@ where
                         // now — do not wait for the 200 ms write-idle window
                         // (that was the scan-vs-apply race).
                         let l0 = inner.with_read(|db| db.level_file_count(0));
-                        if l0 >= pedradb_core::L0_COMPACTION_TRIGGER {
+                        // RFC-0180 P0.69 / RFC-0185 P0.3: skip L0-at-trigger
+                        // compact while recently_multi (mc4 leftover). 1c
+                        // moderate QPS is not recently_multi — drain stays.
+                        if l0 >= pedradb_core::L0_COMPACTION_TRIGGER
+                            && !inner.recently_multi(fold_multi_hold)
+                        {
                             while compat_compact_once(&inner, &gate) {}
                             wait = poll;
                         } else if inner.writes_idle_for(persist_idle) {
@@ -4382,7 +4387,7 @@ fn flush_worker_tick<E: PedraEnv>(inner: &ConcurrentDb<E>) {
     if bound > 0 && inner.parked_unflushed_bytes() >= bound {
         let mut budget = 2usize;
         while !pedradb_core::write_admission_kernel::batch_is_empty(budget as u64)
-            && inner.materialize_parked_once()
+            && inner.materialize_parked_if_not_multi()
             && inner.parked_unflushed_bytes() >= bound / 2
         {
             budget -= 1;

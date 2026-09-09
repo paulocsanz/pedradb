@@ -405,7 +405,9 @@ pub(crate) enum BulkSpan {
     Unknown,
 }
 
-/// Compat CF encoding is `cf\\0user`. Kernel keys without NUL share one shard.
+/// Compat CF encoding is `cf\\0user`. Kernel keys without NUL share the
+/// default CF (bytes / flush). Tail idx may further shard one-slash
+/// prefixes — see [`idx_prefix`].
 pub(crate) fn cf_prefix(key: &[u8]) -> &[u8] {
     match key.iter().position(|&b| b == 0) {
         Some(i) => &key[..i],
@@ -413,14 +415,52 @@ pub(crate) fn cf_prefix(key: &[u8]) -> &[u8] {
     }
 }
 
+/// RFC-0180 P0.66 / RFC-0185 P0.3: `tail_idx` shard for a user key.
+///
+/// NUL CFs unchanged (`cf\0user` → `cf`). Raw keys with **exactly one**
+/// `/` shard on that component including the slash (`c/`, `ycsb/`).
+/// Multi-slash stays empty so F220 `["d/m/", "d/m0")` cannot pin a
+/// single slash shard. Not a HashMap.
+pub(crate) fn idx_prefix(key: &[u8]) -> &[u8] {
+    match key.iter().position(|&b| b == 0) {
+        Some(i) => &key[..i],
+        None => one_slash_idx(key),
+    }
+}
+
+/// Prefix through the first `/` when the key has exactly one slash.
+fn one_slash_idx(key: &[u8]) -> &[u8] {
+    let mut first = None;
+    let mut n = 0u8;
+    for (i, &b) in key.iter().enumerate() {
+        if b == b'/' {
+            n = n.saturating_add(1);
+            if n == 1 {
+                first = Some(i);
+            } else {
+                return b"";
+            }
+        }
+    }
+    match first {
+        Some(i) => &key[..=i],
+        None => b"",
+    }
+}
+
 pub use crate::cf_kernel::{cf_family_of, infer_sst_cf, key_in_cf_family};
 
 fn family_from_prefix(prefix: &[u8]) -> String {
     if crate::write_admission_kernel::batch_is_empty(prefix.len() as u64) {
-        "default".into()
-    } else {
-        String::from_utf8_lossy(prefix).into_owned()
+        return "default".into();
     }
+    // One-slash idx shards (`c/`, `ycsb/`) are still the default CF.
+    // CF names with more than one slash (`d/m/` from `d/m/\0…`) stay.
+    let slashes = prefix.iter().filter(|&&b| b == b'/').count();
+    if slashes == 1 && prefix.last() == Some(&b'/') {
+        return "default".into();
+    }
+    String::from_utf8_lossy(prefix).into_owned()
 }
 
 /// Big-endian `(u128, u128)` of the first `min(32, len)` bytes, zero-padded
@@ -587,7 +627,7 @@ fn packed_bound(b: Bound<&[u8]>) -> Bound<TailIdxKey> {
 
 fn bound_cf_prefix(b: Bound<&[u8]>) -> Option<&[u8]> {
     match b {
-        Bound::Included(k) | Bound::Excluded(k) => Some(cf_prefix(k)),
+        Bound::Included(k) | Bound::Excluded(k) => Some(idx_prefix(k)),
         Bound::Unbounded => None,
     }
 }
@@ -626,6 +666,12 @@ impl MemTable {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         crate::write_admission_kernel::batch_is_empty(self.entries as u64)
+    }
+
+    /// Whether `tail_idx` already holds this [`idx_prefix`] shard.
+    #[must_use]
+    pub(crate) fn has_idx_prefix(&self, pfx: &[u8]) -> bool {
+        self.tail_idx.contains_key(pfx)
     }
 
     /// Approximate memory used by keys and values (for flush thresholds).
@@ -979,7 +1025,7 @@ impl MemTable {
 
     /// Push onto the shared tail and index by CF prefix. Returns the global index.
     fn tail_append(&mut self, key: InternalKey, value: Bytes) -> usize {
-        let pfx = cf_prefix(key.user_key.as_ref());
+        let pfx = idx_prefix(key.user_key.as_ref());
         let pfx_b = Bytes::copy_from_slice(pfx);
         let point = point_cf(pfx);
         let cap = point_reserve(pfx);
@@ -1012,7 +1058,7 @@ impl MemTable {
     }
 
     fn tail_idx_insert(&mut self, key: &[u8], i: usize) {
-        self.tail_idx_insert_at(key, cf_prefix(key), i);
+        self.tail_idx_insert_at(key, idx_prefix(key), i);
     }
 
     fn tail_idx_insert_at(&mut self, key: &[u8], pfx: &[u8], i: usize) {
@@ -1101,7 +1147,7 @@ impl MemTable {
 
     #[allow(dead_code)]
     fn tail_idx_get(&self, user_key: &[u8]) -> Option<usize> {
-        let shard = self.tail_idx.get(cf_prefix(user_key))?;
+        let shard = self.tail_idx.get(idx_prefix(user_key))?;
         Self::shard_lookup(shard, user_key)
     }
 
@@ -1530,7 +1576,7 @@ impl MemTable {
     }
 
     fn tail_best(&self, user_key: &[u8], snapshot: SequenceNumber) -> Option<&Version> {
-        let pfx = cf_prefix(user_key);
+        let pfx = idx_prefix(user_key);
         let shard = self.tail_idx.get(pfx)?;
         let i = Self::shard_lookup(shard, user_key)?;
         let newest = self.tail.get(i)?;
@@ -1900,7 +1946,19 @@ impl MemTable {
         let prefix_end = crate::prefix::prefix_exclusive_end(prefix);
         let mut before_owned: Option<Bytes> = before.map(Bytes::copy_from_slice);
         // RFC-0154 P1.1: a `cf\0…` prefix can only live in that CF shard.
-        let pin = prefix.iter().position(|&b| b == 0).map(|i| &prefix[..i]);
+        // RFC-0180 P0.66: a one-slash raw prefix (`ycsb/…`) pins that idx shard.
+        let pin = prefix
+            .iter()
+            .position(|&b| b == 0)
+            .map(|i| &prefix[..i])
+            .or_else(|| {
+                let p = one_slash_idx(prefix);
+                if crate::write_admission_kernel::batch_is_empty(p.len() as u64) {
+                    None
+                } else {
+                    Some(p)
+                }
+            });
         loop {
             let end_b = match (before_owned.as_deref(), prefix_end.as_deref()) {
                 (Some(b), Some(p)) if b < p => Bound::Excluded(b),
@@ -2621,6 +2679,49 @@ mod tests {
         }
         assert_eq!(n, oracle);
         assert_eq!(n, 25);
+    }
+
+    /// RFC-0180 P0.66 / RFC-0185 P0.3: `c/` and `ycsb/` do not share the
+    /// empty-prefix BTree (Linux overwrite leftover).
+    #[test]
+    fn rfc0180_idx_prefix_one_slash_splits_c_and_ycsb() {
+        assert_eq!(idx_prefix(b"c/000001"), b"c/");
+        assert_eq!(idx_prefix(b"ycsb/000001"), b"ycsb/");
+        assert_ne!(idx_prefix(b"c/000001"), idx_prefix(b"ycsb/000001"));
+        assert_eq!(idx_prefix(b"k0000"), b"");
+        let mut mt = MemTable::new();
+        let val = Bytes::from_static(b"v");
+        mt.insert(
+            InternalKey::new(Bytes::from_static(b"ycsb/000000"), 1, ValueType::Value),
+            val.clone(),
+        );
+        mt.insert(
+            InternalKey::new(Bytes::from_static(b"c/000000"), 2, ValueType::Value),
+            val,
+        );
+        assert!(mt.has_idx_prefix(b"ycsb/"));
+        assert!(mt.has_idx_prefix(b"c/"));
+        assert!(!mt.has_idx_prefix(b""));
+        assert_eq!(mt.tail_idx.len(), 2);
+        assert_eq!(
+            mt.get(b"ycsb/000000", 2),
+            Lookup::Found(Bytes::from_static(b"v"))
+        );
+        assert_eq!(
+            mt.get(b"c/000000", 2),
+            Lookup::Found(Bytes::from_static(b"v"))
+        );
+        assert_eq!(mt.cf_families(), vec!["default".to_string()]);
+    }
+
+    /// F220: multi-slash bounds must not pin a one-slash shard.
+    #[test]
+    fn rfc0180_idx_prefix_f220_bounds_disagree() {
+        assert_eq!(idx_prefix(b"d/m/"), b"");
+        assert_eq!(idx_prefix(b"d/m0"), b"d/");
+        assert_ne!(idx_prefix(b"d/m/"), idx_prefix(b"d/m0"));
+        // NUL CF still shards on the bytes before NUL.
+        assert_eq!(idx_prefix(b"d/m/\x00\x00\x00\x0a/ha/leader"), b"d/m/");
     }
 
     #[test]

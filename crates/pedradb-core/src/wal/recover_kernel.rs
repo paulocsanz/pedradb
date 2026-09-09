@@ -387,7 +387,6 @@ proof fn lemma_prefix_torn_keeps()
 }
 } // verus!
 
-
 #[cfg(not(verus_keep_ghost))]
 use super::format::RecordType;
 
@@ -1021,8 +1020,7 @@ mod kani_proofs {
         // Anti-vacuity at the model level: AS-IS diverges exactly on the
         // orphan shape (CleanEof instead of FailStop) and agrees elsewhere.
         let as_is = fragment_act_as_is(kind, scratch_empty);
-        let orphan = scratch_empty
-            && matches!(kind, FragKind::Middle | FragKind::Last);
+        let orphan = scratch_empty && matches!(kind, FragKind::Middle | FragKind::Last);
         if orphan {
             assert!(as_is == FragAct::CleanEof && as_is != act);
         } else {

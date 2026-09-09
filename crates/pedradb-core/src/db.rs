@@ -63,7 +63,7 @@ use crate::batch::{WriteOp, WriteRecord};
 use crate::cache::{AnswerCache, BlockCache, KeyGenMap, PointCache, TableCache};
 use crate::change_feed::{ChangeEntry, ChangeKind, ChangeLog};
 use crate::changelog_kernel::{changelog_needs_sst_rebuild, changelog_should_store};
-use crate::env::{Env, EnvFile, StdEnv};
+use crate::env::{AdviseKind, Env, EnvFile, StdEnv};
 use crate::error::{CoreError, Result};
 use crate::host::Host;
 use crate::key::{InternalKey, SequenceNumber, ValueType, MAX_SEQUENCE_NUMBER};
@@ -3728,7 +3728,9 @@ impl<E: Env> Db<E> {
         loop {
             let mut cand: Option<Bytes> = None;
             let mut consider = |k: Bytes| {
-                if !crate::write_admission_kernel::batch_is_empty(prefix.len() as u64) && !k.starts_with(prefix) {
+                if !crate::write_admission_kernel::batch_is_empty(prefix.len() as u64)
+                    && !k.starts_with(prefix)
+                {
                     return;
                 }
                 if let Some(h) = before.as_deref() {
@@ -4552,7 +4554,8 @@ impl<E: Env> Db<E> {
                     continue;
                 }
                 if let Some(ptr) = vlog::decode_vlog_ptr(slot.1.as_ref()) {
-                    let path = if crate::write_admission_kernel::batch_is_empty(ptr.file_num as u64) {
+                    let path = if crate::write_admission_kernel::batch_is_empty(ptr.file_num as u64)
+                    {
                         self.dir.join(VLOG_FILE_NAME)
                     } else {
                         vlog::blob_path(&self.dir, ptr.file_num)
@@ -4756,6 +4759,7 @@ impl<E: Env> Db<E> {
     pub fn create_checkpoint(&mut self, dest: impl AsRef<Path>) -> Result<CheckpointMeta> {
         self.flush()?;
         let dest = dest.as_ref();
+        crate::env::admit_disk_write(&self.env, dest)?;
         if self.env.exists(dest) {
             let names = self.env.read_dir_names(dest)?;
             if !crate::write_admission_kernel::batch_is_empty(names.len() as u64) {
@@ -5001,8 +5005,7 @@ impl<E: Env> Db<E> {
             for op in batch {
                 if let BatchOp::Put { key, .. } = op {
                     let item = (true, key.as_ref());
-                    if n < STACK
-                        && crate::write_admission_kernel::batch_is_empty(heap.len() as u64)
+                    if n < STACK && crate::write_admission_kernel::batch_is_empty(heap.len() as u64)
                     {
                         stack[n] = item;
                         n += 1;
@@ -5014,7 +5017,12 @@ impl<E: Env> Db<E> {
                     }
                 }
             }
-            let keys: &[(bool, &[u8])] = if crate::write_admission_kernel::batch_is_empty(heap.len() as u64) { &stack[..n] } else { &heap };
+            let keys: &[(bool, &[u8])] =
+                if crate::write_admission_kernel::batch_is_empty(heap.len() as u64) {
+                    &stack[..n]
+                } else {
+                    &heap
+                };
             if self.bulk_latch.has_high_water(family) {
                 let _ = self
                     .bulk_latch
@@ -5614,6 +5622,26 @@ impl<E: Env> Db<E> {
         Ok(true)
     }
 
+    /// RFC-0180 P0.75 / RFC-0185 P0.3: park non-empty foreign one-slash
+    /// leftover before applying `key` (seed `ycsb/` vs timed `c/`).
+    ///
+    /// Any non-empty leftover (not only ≥ write-buffer/2). Empty-prefix
+    /// keys do not park. Imm already occupied → leave leftover in active
+    /// (worker behind).
+    pub(crate) fn maybe_park_foreign_one_slash(&mut self, key: &[u8]) {
+        if crate::write_admission_kernel::batch_is_empty(self.mem.len() as u64) {
+            return;
+        }
+        let pfx = crate::memtable::idx_prefix(key);
+        if crate::write_admission_kernel::batch_is_empty(pfx.len() as u64) {
+            return;
+        }
+        if self.mem.has_idx_prefix(pfx) {
+            return;
+        }
+        let _ = self.stage_flush_imm();
+    }
+
     /// Switch active mem → imm if free; returns taken imm for out-of-lock SST write.
     ///
     /// Used by [`ConcurrentDb`] to release the write lock during SST I/O.
@@ -6084,10 +6112,10 @@ impl<E: Env> Db<E> {
         // the fold, or a post-fold rewrite is served stale.
         self.scan_mem_layers()
             .chain(self.retired_pending.iter().rev())
-            .chain((!crate::write_admission_kernel::batch_is_empty(
-                self.retired_fold.len() as u64,
-            ))
-            .then_some(&self.retired_fold))
+            .chain(
+                (!crate::write_admission_kernel::batch_is_empty(self.retired_fold.len() as u64))
+                    .then_some(&self.retired_fold),
+            )
     }
 
     /// Layers that have no covering SST: live mems + parked-unflushed.
@@ -8701,9 +8729,7 @@ impl<E: Env> Db<E> {
         // Flush in place — `Db` implements `Drop` (Env unlock), so we cannot move `wal`.
         // Close is not put-Ok: AppendApplyOk ⇒ write the pending frame, no fdatasync.
         match crate::write_admission_kernel::wal_commit_plan(false, false) {
-            crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => {
-                self.wal.lock().flush()
-            }
+            crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => self.wal.lock().flush(),
             crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
             | crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
                 assert!(
@@ -8912,6 +8938,9 @@ impl<E: Env> Db<E> {
         durability: WriteOptions,
     ) -> Result<()> {
         self.ensure_not_fenced()?;
+        if let Some(op) = records.first() {
+            self.maybe_park_foreign_one_slash(op.key.as_ref());
+        }
         let do_sync = crate::write_admission_kernel::wal_sync_required(
             durability.sync.is_some(),
             durability.sync.unwrap_or(false),
@@ -9096,6 +9125,16 @@ impl<E: Env> Db<E> {
     /// (that is G1), no write-group.
     pub(crate) fn commit_async_ops(&mut self, batch: Vec<BatchOp>) -> Result<SequenceNumber> {
         self.ensure_disk_pressure_admitted()?;
+        if let Some(op) = batch.first() {
+            match op {
+                BatchOp::Put { key, .. } | BatchOp::Delete { key } => {
+                    self.maybe_park_foreign_one_slash(key.as_ref());
+                }
+                BatchOp::DeleteRange { start, .. } => {
+                    self.maybe_park_foreign_one_slash(start.as_ref());
+                }
+            }
+        }
         if !self.write_admission_idle() {
             let families = self.batch_families(&batch);
             self.ensure_write_admitted_for(&families)?;
@@ -9192,10 +9231,25 @@ impl<E: Env> Db<E> {
         Ok(seq)
     }
 
-    /// Lone-async 1-op put/delete: no `Vec<BatchOp>` / `Vec<WriteOp>`
-    /// (RFC-0154 P1.6). Same WAL bytes as [`Self::commit_async_ops`].
-    pub(crate) fn commit_async_one(&mut self, batch: BatchOp) -> Result<SequenceNumber> {
+    /// Encode one async op into the WAL pending frame (no `write` syscall).
+    ///
+    /// RFC-0185 P0.3: the caller holds `wal` and may drop the Db write lock
+    /// before [`crate::wal::Wal::write_pending_frame`] so mc4 does not convoy
+    /// on `write()`. Seq assignment stays under the Db write lock.
+    pub(crate) fn encode_async_one(
+        &mut self,
+        wal: &mut crate::wal::Wal<E::File>,
+        batch: BatchOp,
+    ) -> Result<(WriteOp, SequenceNumber)> {
         self.ensure_disk_pressure_admitted()?;
+        match &batch {
+            BatchOp::Put { key, .. } | BatchOp::Delete { key } => {
+                self.maybe_park_foreign_one_slash(key.as_ref());
+            }
+            BatchOp::DeleteRange { start, .. } => {
+                self.maybe_park_foreign_one_slash(start.as_ref());
+            }
+        }
         if !self.write_admission_idle() {
             let families = self.batch_families(std::slice::from_ref(&batch));
             self.ensure_write_admitted_for(&families)?;
@@ -9209,16 +9263,17 @@ impl<E: Env> Db<E> {
                 .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
         }
         self.vlog_prepare_wal(false)?;
-        {
-            let t1 = st.as_ref().map(|_| Instant::now());
-            let mut w = self.wal.lock();
-            w.encode_write_op_batches(&[std::slice::from_ref(&op)])?;
-            w.write_pending_frame()?;
-            if let (Some(st), Some(t1)) = (st.as_ref(), t1) {
-                st.wal_ns
-                    .fetch_add(t1.elapsed().as_nanos() as u64, Ordering::Relaxed);
-            }
-        }
+        wal.encode_write_op_batches(&[std::slice::from_ref(&op)])?;
+        Ok((op, seq))
+    }
+
+    /// Apply + publish after the WAL `write()` (off the Db write lock).
+    pub(crate) fn apply_async_one(
+        &mut self,
+        op: WriteOp,
+        seq: SequenceNumber,
+    ) -> Result<SequenceNumber> {
+        let st = self.phase_stats.clone();
         if !self.feed_is_lazy() {
             self.change_log
                 .extend(std::iter::once(ChangeEntry::from_write_op(&op)));
@@ -9246,6 +9301,25 @@ impl<E: Env> Db<E> {
         Ok(seq)
     }
 
+    /// Lone-async 1-op put/delete: no `Vec<BatchOp>` / `Vec<WriteOp>`
+    /// (RFC-0154 P1.6). Same WAL bytes as [`Self::commit_async_ops`].
+    /// 1c keeps encode+`write` under this guard; mc4 uses
+    /// [`Self::encode_async_one`] + off-lock `write_pending_frame`.
+    pub(crate) fn commit_async_one(&mut self, batch: BatchOp) -> Result<SequenceNumber> {
+        let wal_arc = self.wal_arc();
+        let mut w = wal_arc.lock();
+        let (op, seq) = self.encode_async_one(&mut w, batch)?;
+        let st = self.phase_stats.clone();
+        let t1 = st.as_ref().map(|_| Instant::now());
+        w.write_pending_frame()?;
+        if let (Some(st), Some(t1)) = (st.as_ref(), t1) {
+            st.wal_ns
+                .fetch_add(t1.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
+        drop(w);
+        self.apply_async_one(op, seq)
+    }
+
     /// Sequential G1 client: prepare, one WAL lock (encode + `write` +
     /// `fdatasync`), apply, publish. Skips [`GroupInFlight`] — that path
     /// still encodes under one lock and write+fd under another (RFC-0062
@@ -9256,6 +9330,16 @@ impl<E: Env> Db<E> {
             return Ok(self.last_sequence());
         }
         self.ensure_disk_pressure_admitted()?;
+        if let Some(op) = ops.first() {
+            match op {
+                BatchOp::Put { key, .. } | BatchOp::Delete { key } => {
+                    self.maybe_park_foreign_one_slash(key.as_ref());
+                }
+                BatchOp::DeleteRange { start, .. } => {
+                    self.maybe_park_foreign_one_slash(start.as_ref());
+                }
+            }
+        }
         if !self.write_admission_idle() {
             let families = self.batch_families(&ops);
             self.ensure_write_admitted_for(&families)?;
@@ -9371,15 +9455,25 @@ impl<E: Env> Db<E> {
     }
 
     #[cfg(test)]
-    pub(crate) fn bulk_live_bytes(&self) -> usize { 0 }
+    pub(crate) fn bulk_live_bytes(&self) -> usize {
+        0
+    }
     #[cfg(test)]
-    pub(crate) fn hydrate_resident_bytes(&self) -> usize { 0 }
+    pub(crate) fn hydrate_resident_bytes(&self) -> usize {
+        0
+    }
     #[cfg(test)]
-    pub(crate) fn sst_index_bytes(&self) -> usize { 0 }
+    pub(crate) fn sst_index_bytes(&self) -> usize {
+        0
+    }
     #[cfg(test)]
-    pub(crate) fn lookup_sst_probed(&self) -> usize { 0 }
+    pub(crate) fn lookup_sst_probed(&self) -> usize {
+        0
+    }
     #[cfg(test)]
-    pub(crate) fn sst_collapsed_bounds(&self) -> (Option<Bytes>, Option<Bytes>) { (None, None) }
+    pub(crate) fn sst_collapsed_bounds(&self) -> (Option<Bytes>, Option<Bytes>) {
+        (None, None)
+    }
 
     pub(crate) fn fence_durability(&mut self, io_error: impl std::fmt::Display, class: FenceClass) {
         if self.fence_report.is_none() {
@@ -9470,9 +9564,7 @@ impl<E: Env> Db<E> {
         g: &mut GroupInFlight,
         batches: Vec<(Vec<BatchOp>, bool)>,
     ) {
-        if g.failed
-            || crate::write_admission_kernel::batch_is_empty(batches.len() as u64)
-        {
+        if g.failed || crate::write_admission_kernel::batch_is_empty(batches.len() as u64) {
             return;
         }
         let base = g.next_i;
@@ -9505,6 +9597,13 @@ impl<E: Env> Db<E> {
     }
 
     fn group_admit(&mut self, n: usize) -> std::result::Result<(), Vec<Result<SequenceNumber>>> {
+        if let Err(CoreError::DiskPressure { available, need }) =
+            self.ensure_disk_pressure_admitted()
+        {
+            return Err((0..n)
+                .map(|_| Err(CoreError::DiskPressure { available, need }))
+                .collect());
+        }
         match self.ensure_write_admitted() {
             Ok(()) => Ok(()),
             Err(CoreError::WriteStall { l0_files, limit }) => Err((0..n)
@@ -9512,6 +9611,9 @@ impl<E: Env> Db<E> {
                 .collect()),
             Err(CoreError::WriteStallMem { mem_bytes, limit }) => Err((0..n)
                 .map(|_| Err(CoreError::WriteStallMem { mem_bytes, limit }))
+                .collect()),
+            Err(CoreError::DiskPressure { available, need }) => Err((0..n)
+                .map(|_| Err(CoreError::DiskPressure { available, need }))
                 .collect()),
             Err(e) => {
                 let msg = e.to_string();
@@ -9537,11 +9639,7 @@ impl<E: Env> Db<E> {
             self.observe_bulk_batch(&ops);
             match self.prepare_write_ops(ops) {
                 Ok((write_ops, last_seq)) => {
-                    if crate::write_admission_kernel::wal_sync_required(
-                        true,
-                        do_sync,
-                        false,
-                    ) {
+                    if crate::write_admission_kernel::wal_sync_required(true, do_sync, false) {
                         g.any_sync = true;
                     }
                     g.pending.push((i, write_ops, last_seq));
@@ -9553,9 +9651,7 @@ impl<E: Env> Db<E> {
 
     /// Encode [`GroupInFlight::pending`] into the WAL frame (no `write` syscall).
     fn group_append_ops(&mut self, g: &mut GroupInFlight) {
-        if g.failed
-            || crate::write_admission_kernel::batch_is_empty(g.pending.len() as u64)
-        {
+        if g.failed || crate::write_admission_kernel::batch_is_empty(g.pending.len() as u64) {
             return;
         }
         if let Err(e) = self.ensure_not_fenced() {
@@ -9799,6 +9895,96 @@ impl<E: Env> Db<E> {
         self.ensure_write_admitted_for(&[])
     }
 
+    /// RFC-0179: refuse WAL append below the hard free-space floor.
+    ///
+    /// Unconditional — `write_admission_idle` only skips mem/L0 knobs.
+    /// Unknown probe (`None` / Err) does not refuse. Not a durability fence.
+    fn ensure_disk_pressure_admitted(&mut self) -> Result<()> {
+        let probe = match self.env.available_bytes(&self.dir) {
+            Ok(v) => v,
+            Err(_) => None,
+        };
+        match crate::disk_pressure_kernel::disk_pressure_admit(probe) {
+            crate::disk_pressure_kernel::DiskPressureAdmit::Ok => {
+                self.note_disk_pressure(0, probe);
+                Ok(())
+            }
+            crate::disk_pressure_kernel::DiskPressureAdmit::Reclaim => {
+                self.note_disk_pressure(1, probe);
+                self.reclaim_disk_for_uptime(probe);
+                let again = match self.env.available_bytes(&self.dir) {
+                    Ok(v) => v,
+                    Err(_) => None,
+                };
+                match crate::disk_pressure_kernel::disk_pressure_admit(again) {
+                    crate::disk_pressure_kernel::DiskPressureAdmit::Refuse { available, need } => {
+                        self.note_disk_pressure(2, Some(available));
+                        Err(CoreError::DiskPressure { available, need })
+                    }
+                    crate::disk_pressure_kernel::DiskPressureAdmit::Ok => {
+                        self.note_disk_pressure(0, again);
+                        Ok(())
+                    }
+                    crate::disk_pressure_kernel::DiskPressureAdmit::Reclaim => {
+                        self.note_disk_pressure(1, again);
+                        Ok(())
+                    }
+                }
+            }
+            crate::disk_pressure_kernel::DiskPressureAdmit::Refuse { available, need } => {
+                self.note_disk_pressure(2, Some(available));
+                self.drop_page_cache_best_effort();
+                Err(CoreError::DiskPressure { available, need })
+            }
+        }
+    }
+
+    /// Compact (only while still ≥ hard) + drop page cache. Errors are
+    /// swallowed: compact_ssts_only does not fence; a failed reclaim must
+    /// not take reads down.
+    fn reclaim_disk_for_uptime(&mut self, before: Option<u64>) {
+        self.drop_page_cache_best_effort();
+        if crate::disk_pressure_kernel::compact_allowed_under_pressure(before) {
+            let _ = self.compact_ssts_only();
+        }
+    }
+
+    fn drop_page_cache_best_effort(&self) {
+        let names = match self.env.read_dir_names(&self.dir) {
+            Ok(n) => n,
+            Err(_) => return,
+        };
+        for name in names {
+            if !(name.ends_with(".sst") || name.ends_with(".log") || name.ends_with(".vlog")) {
+                continue;
+            }
+            let path = self.dir.join(&name);
+            let _ = self.env.advise(&path, 0, 0, AdviseKind::DontNeed);
+        }
+    }
+
+    /// `tracing::warn!` only on state transition (RFC-0179 P0.4).
+    fn note_disk_pressure(&self, state: u8, available: Option<u64>) {
+        let prev = self.disk_pressure_log.swap(state, Ordering::Relaxed);
+        if prev == state {
+            return;
+        }
+        match state {
+            1 => tracing::warn!(
+                available,
+                soft = crate::disk_pressure_kernel::DISK_SOFT_FREE_BYTES,
+                hard = crate::disk_pressure_kernel::DISK_HARD_FREE_BYTES,
+                "disk pressure: reclaiming (compact + drop page cache)"
+            ),
+            2 => tracing::warn!(
+                available,
+                need = crate::disk_pressure_kernel::DISK_HARD_FREE_BYTES,
+                "disk pressure: refusing writes (reads stay up; not a durability fence)"
+            ),
+            _ => {}
+        }
+    }
+
     /// Per-CF stall (RFC-0065 P1.2). Empty `families` = global (kernel / mixed group).
     ///
     /// Data-fate (mem/L0 over limit) is `write_admit`. Drain/flush I/O stays
@@ -9939,9 +10125,10 @@ impl<E: Env> Db<E> {
                 self.auto_flush_bytes.is_some(),
                 self.auto_flush_bytes.unwrap_or(0) as u64,
             );
-            let cf_under = self.cf_write_buffer.values().all(|&n| {
-                !crate::flush_kernel::auto_flush_due(mem, n != 0, n as u64)
-            });
+            let cf_under = self
+                .cf_write_buffer
+                .values()
+                .all(|&n| !crate::flush_kernel::auto_flush_due(mem, n != 0, n as u64));
             if crate::flush_kernel::skip_auto_flush(global_under, cf_under) {
                 return Ok(());
             }
@@ -10666,6 +10853,7 @@ pub fn copy_db_directory(
 ) -> Result<()> {
     let src = src.as_ref();
     let dest = dest.as_ref();
+    crate::env::admit_disk_write(env, dest)?;
     if env.exists(dest) {
         let names = env.read_dir_names(dest)?;
         if !crate::write_admission_kernel::batch_is_empty(names.len() as u64) {
@@ -11194,7 +11382,11 @@ fn recover_ssts<E: Env>(
                 let t = table_cache.get_or_open(env, &path)?;
                 max_seq = max_seq.max(t.max_sequence());
                 let mut table = (*t).clone();
-                if let Some(cf) = vs.sst_cfs.get(i).filter(|s| !crate::write_admission_kernel::batch_is_empty(s.len() as u64)) {
+                if let Some(cf) = vs
+                    .sst_cfs
+                    .get(i)
+                    .filter(|s| !crate::write_admission_kernel::batch_is_empty(s.len() as u64))
+                {
                     table = table.with_cf(cf.clone());
                 }
                 tables.push(table);
@@ -12286,6 +12478,138 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pedradb-db-test-{n}-{i}"));
         let _ = fs::remove_dir_all(&dir);
         dir
+    }
+
+    /// RFC-0179: inject free-space via `Env::available_bytes`.
+    /// `u64::MAX` = unknown (`None`).
+    #[derive(Clone)]
+    struct SpaceEnv {
+        available: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    }
+
+    impl crate::env::Env for SpaceEnv {
+        type File = std::fs::File;
+
+        fn create_dir_all(&self, path: &Path) -> std::io::Result<()> {
+            StdEnv.create_dir_all(path)
+        }
+        fn create(&self, path: &Path) -> std::io::Result<Self::File> {
+            StdEnv.create(path)
+        }
+        fn open_append(&self, path: &Path) -> std::io::Result<Self::File> {
+            StdEnv.open_append(path)
+        }
+        fn open_read(&self, path: &Path) -> std::io::Result<Self::File> {
+            StdEnv.open_read(path)
+        }
+        fn sync_dir(&self, path: &Path) -> std::io::Result<()> {
+            StdEnv.sync_dir(path)
+        }
+        fn read_dir_names(&self, path: &Path) -> std::io::Result<Vec<String>> {
+            StdEnv.read_dir_names(path)
+        }
+        fn remove_file(&self, path: &Path) -> std::io::Result<()> {
+            StdEnv.remove_file(path)
+        }
+        fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+            StdEnv.rename(from, to)
+        }
+        fn exists(&self, path: &Path) -> bool {
+            StdEnv.exists(path)
+        }
+        fn metadata_len(&self, path: &Path) -> std::io::Result<u64> {
+            StdEnv.metadata_len(path)
+        }
+        fn advise(
+            &self,
+            path: &Path,
+            offset: u64,
+            len: u64,
+            kind: crate::env::AdviseKind,
+        ) -> std::io::Result<()> {
+            StdEnv.advise(path, offset, len, kind)
+        }
+        fn available_bytes(&self, _path: &Path) -> std::io::Result<Option<u64>> {
+            let n = self.available.load(std::sync::atomic::Ordering::SeqCst);
+            if n == u64::MAX {
+                Ok(None)
+            } else {
+                Ok(Some(n))
+            }
+        }
+    }
+
+    /// RFC-0179 P0.3: put below the hard floor is DiskPressure; get stays
+    /// Ok; the handle is not durability-fenced.
+    #[test]
+    fn put_under_hard_floor_is_disk_pressure_get_ok() {
+        use crate::disk_pressure_kernel::DISK_HARD_FREE_BYTES;
+        let dir = temp_dir();
+        let available = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(u64::MAX));
+        let env = SpaceEnv {
+            available: std::sync::Arc::clone(&available),
+        };
+        let mut db = Db::open_with_env(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                ..OpenOptions::default()
+            },
+            env,
+        )
+        .unwrap();
+        db.put(b"k", b"v").unwrap();
+        assert_eq!(db.get(b"k").as_deref(), Some(b"v".as_ref()));
+
+        available.store(1024, std::sync::atomic::Ordering::SeqCst);
+        let err = db.put(b"k2", b"v2").unwrap_err();
+        assert!(
+            matches!(
+                err,
+                CoreError::DiskPressure {
+                    available: 1024,
+                    need: DISK_HARD_FREE_BYTES,
+                }
+            ),
+            "expected DiskPressure, got {err:?}"
+        );
+        assert_eq!(
+            db.get(b"k").as_deref(),
+            Some(b"v".as_ref()),
+            "reads stay up under disk pressure"
+        );
+        assert!(
+            db.get(b"k2").is_none(),
+            "refused put must not become visible"
+        );
+        assert!(
+            !db.is_durability_fenced(),
+            "DiskPressure is not a durability fence"
+        );
+
+        available.store(DISK_HARD_FREE_BYTES, std::sync::atomic::Ordering::SeqCst);
+        db.put(b"k3", b"v3").unwrap();
+        assert_eq!(db.get(b"k3").as_deref(), Some(b"v3".as_ref()));
+
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0179: unknown probe (None) must not false-refuse a healthy disk.
+    #[test]
+    fn unknown_available_bytes_does_not_refuse_writes() {
+        let dir = temp_dir();
+        let env = SpaceEnv {
+            available: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(u64::MAX)),
+        };
+        let mut db = Db::open_with_env(&dir, OpenOptions::default(), env).unwrap();
+        db.put(b"k", b"v").unwrap();
+        assert_eq!(db.get(b"k").as_deref(), Some(b"v".as_ref()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// RFC-0159 P1.3: the host-worker stage threshold takes the max of the
@@ -15237,6 +15561,66 @@ mod tests {
         db.install_l0_sst(table, num).unwrap();
         assert_eq!(db.sst_count(), 1);
         assert_eq!(db.get(&[b'k', 0]).as_deref(), Some([0u8; 128].as_slice()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0180 P0.75 / RFC-0185 P0.3: seed `ycsb/` leftover parks on the
+    /// first timed `c/` put (any non-empty leftover, not ≥ buffer/2).
+    #[test]
+    fn rfc0180_park_foreign_idx_decision() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(128 * 1024 * 1024),
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        for i in 0..64u32 {
+            db.put(format!("ycsb/{i:06}").as_bytes(), b"seed").unwrap();
+        }
+        assert!(!db.has_imm(), "seed stays in active mem");
+        db.put(b"c/000000", b"timed").unwrap();
+        assert!(
+            db.has_imm(),
+            "foreign one-slash leftover must park into imm"
+        );
+        assert_eq!(db.get(b"ycsb/000000").as_deref(), Some(b"seed".as_ref()));
+        assert_eq!(db.get(b"c/000000").as_deref(), Some(b"timed".as_ref()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// P0.75 dropped the half-buffer gate: 12 MiB leftover (Darwin unique-key
+    /// DIAG) still parks.
+    #[test]
+    fn rfc0180_park_foreign_idx_remainder_below_half_buffer() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(128 * 1024 * 1024),
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        let payload = vec![b'x'; 256];
+        for i in 0..48u32 {
+            db.put(format!("ycsb/{i:06}").as_bytes(), &payload).unwrap();
+        }
+        assert!(db.active_mem_usage() < 64 * 1024 * 1024);
+        db.put(b"c/000000", b"x").unwrap();
+        assert!(db.has_imm(), "remainder below half buffer still parks");
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

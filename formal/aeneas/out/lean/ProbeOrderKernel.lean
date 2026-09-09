@@ -132,7 +132,7 @@ def first_probe_on_equal_lo_as_is
   ok older
 
 /-- [pedra_aeneas_probe_order_kernel::covering_hi_ge]:
-    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 117:0-119:1 -/
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 112:0-114:1 -/
 def covering_hi_ge
   (his : Slice (Slice Std.U8)) (pos : Std.Usize) (key : Slice Std.U8) :
   Result Bool
@@ -146,7 +146,7 @@ def covering_hi_ge
   else ok false
 
 /-- [pedra_aeneas_probe_order_kernel::covering_pos]: loop body 0:
-    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 127:4-134:1 -/
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 122:4-129:1 -/
 @[rust_loop_body]
 def covering_pos_loop.body
   (by_lo : Slice Std.Usize) (i : Std.Usize) (pos : Std.Usize) :
@@ -163,7 +163,7 @@ def covering_pos_loop.body
   else ok (done pos)
 
 /-- [pedra_aeneas_probe_order_kernel::covering_pos]: loop 0:
-    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 127:4-134:1 -/
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 122:4-129:1 -/
 @[rust_loop]
 def covering_pos_loop
   (by_lo : Slice Std.Usize) (i : Std.Usize) (pos : Std.Usize) :
@@ -174,14 +174,14 @@ def covering_pos_loop
     pos
 
 /-- [pedra_aeneas_probe_order_kernel::covering_pos]:
-    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 125:0-134:1 -/
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 120:0-129:1 -/
 @[reducible]
 def covering_pos
   (by_lo : Slice Std.Usize) (i : Std.Usize) : Result Std.Usize := do
   covering_pos_loop by_lo i 0#usize
 
 /-- [pedra_aeneas_probe_order_kernel::probe_order_covering]:
-    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 144:0-162:1 -/
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 139:0-157:1 -/
 @[rust_loop_body]
 def probe_order_covering_loop.body
   (newest_first : Slice Std.Usize) (by_lo : Slice Std.Usize)
@@ -238,7 +238,7 @@ def probe_order_covering
   probe_order_covering_loop newest_first by_lo prefix_end his key out 0#usize
 
 /-- [pedra_aeneas_probe_order_kernel::probe_order_covering_as_is]:
-    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 167:0-186:1 -/
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 162:0-181:1 -/
 @[rust_loop_body]
 def probe_order_covering_as_is_loop.body
   (newest_first : Slice Std.Usize) (by_lo : Slice Std.Usize)
@@ -299,12 +299,12 @@ def probe_order_covering_as_is
     0#usize
 
 /-- [pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los::closure]
-    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 200:25-200:48 -/
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 195:25-195:48 -/
 def run_pairwise_disjoint_los.closure :=
   Slice (Slice Std.U8) × Slice (Slice Std.U8)
 
 /-- [pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los::{impl core::ops::function::FnMut<(usize,), bool> for pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los::closure<'_0, '_1, '_2, '_3>}::call_mut]:
-    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 200:25-200:48 -/
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 195:25-195:48 -/
 def
   run_pairwise_disjoint_los.closure.Insts.CoreOpsFunctionFnMutTupleUsizeBool.call_mut
   (c : run_pairwise_disjoint_los.closure) (tupled_args : Std.Usize) :
@@ -319,7 +319,7 @@ def
   ok (b, c)
 
 /-- [pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los::{impl core::ops::function::FnOnce<(usize,), bool> for pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los::closure<'_0, '_1, '_2, '_3>}::call_once]:
-    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 200:25-200:48 -/
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 195:25-195:48 -/
 def
   run_pairwise_disjoint_los.closure.Insts.CoreOpsFunctionFnOnceTupleUsizeBool.call_once
   (c : run_pairwise_disjoint_los.closure) (i : Std.Usize) : Result Bool := do
@@ -329,7 +329,7 @@ def
   ok b
 
 /-- Trait implementation: [pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los::{impl core::ops::function::FnOnce<(usize,), bool> for pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los::closure<'_0, '_1, '_2, '_3>}]
-    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 200:25-200:48 -/
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 195:25-195:48 -/
 @[reducible]
 def run_pairwise_disjoint_los.closure.Insts.CoreOpsFunctionFnOnceTupleUsizeBool
   : core.ops.function.FnOnce run_pairwise_disjoint_los.closure Std.Usize Bool
@@ -339,7 +339,7 @@ def run_pairwise_disjoint_los.closure.Insts.CoreOpsFunctionFnOnceTupleUsizeBool
 }
 
 /-- Trait implementation: [pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los::{impl core::ops::function::FnMut<(usize,), bool> for pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los::closure<'_0, '_1, '_2, '_3>}]
-    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 200:25-200:48 -/
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 195:25-195:48 -/
 @[reducible]
 def run_pairwise_disjoint_los.closure.Insts.CoreOpsFunctionFnMutTupleUsizeBool
   : core.ops.function.FnMut run_pairwise_disjoint_los.closure Std.Usize Bool
@@ -351,7 +351,7 @@ def run_pairwise_disjoint_los.closure.Insts.CoreOpsFunctionFnMutTupleUsizeBool
 }
 
 /-- [pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los]:
-    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 198:0-201:1
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 193:0-196:1
     Visibility: public -/
 def run_pairwise_disjoint_los
   (los : Slice (Slice Std.U8)) (his : Slice (Slice Std.U8)) : Result Bool := do
@@ -369,12 +369,12 @@ def run_pairwise_disjoint_los
   else ok false
 
 /-- [pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los_as_is::closure]
-    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 212:25-212:49 -/
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 207:25-207:49 -/
 def run_pairwise_disjoint_los_as_is.closure :=
   Slice (Slice Std.U8) × Slice (Slice Std.U8)
 
 /-- [pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los_as_is::{impl core::ops::function::FnMut<(usize,), bool> for pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los_as_is::closure<'_0, '_1, '_2, '_3>}::call_mut]:
-    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 212:25-212:49 -/
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 207:25-207:49 -/
 def
   run_pairwise_disjoint_los_as_is.closure.Insts.CoreOpsFunctionFnMutTupleUsizeBool.call_mut
   (c : run_pairwise_disjoint_los_as_is.closure) (tupled_args : Std.Usize) :
@@ -389,7 +389,7 @@ def
   ok (b, c)
 
 /-- [pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los_as_is::{impl core::ops::function::FnOnce<(usize,), bool> for pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los_as_is::closure<'_0, '_1, '_2, '_3>}::call_once]:
-    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 212:25-212:49 -/
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 207:25-207:49 -/
 def
   run_pairwise_disjoint_los_as_is.closure.Insts.CoreOpsFunctionFnOnceTupleUsizeBool.call_once
   (c : run_pairwise_disjoint_los_as_is.closure) (i : Std.Usize) :
@@ -401,7 +401,7 @@ def
   ok b
 
 /-- Trait implementation: [pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los_as_is::{impl core::ops::function::FnOnce<(usize,), bool> for pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los_as_is::closure<'_0, '_1, '_2, '_3>}]
-    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 212:25-212:49 -/
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 207:25-207:49 -/
 @[reducible]
 def
   run_pairwise_disjoint_los_as_is.closure.Insts.CoreOpsFunctionFnOnceTupleUsizeBool
@@ -412,7 +412,7 @@ def
 }
 
 /-- Trait implementation: [pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los_as_is::{impl core::ops::function::FnMut<(usize,), bool> for pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los_as_is::closure<'_0, '_1, '_2, '_3>}]
-    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 212:25-212:49 -/
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 207:25-207:49 -/
 @[reducible]
 def
   run_pairwise_disjoint_los_as_is.closure.Insts.CoreOpsFunctionFnMutTupleUsizeBool
@@ -425,7 +425,7 @@ def
 }
 
 /-- [pedra_aeneas_probe_order_kernel::run_pairwise_disjoint_los_as_is]:
-    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 210:0-213:1
+    Source: '../../../crates/pedradb-core/src/probe_order_kernel.rs', lines 205:0-208:1
     Visibility: public -/
 def run_pairwise_disjoint_los_as_is
   (los : Slice (Slice Std.U8)) (his : Slice (Slice Std.U8)) : Result Bool := do

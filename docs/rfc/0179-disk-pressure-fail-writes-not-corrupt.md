@@ -1,6 +1,6 @@
 # RFC-0179 — Disk pressure: recusar writes, não corromper
 
-**Status:** in-progress (P0 doing)
+**Status:** in-progress (P0+P1.4+P1.5 done; P1.1–P1.3 / P2 open)
 **Updated:** 2026-09-07
 **ID:** 0179
 **Parents:** [0050](0050-nine-axis-robustness.md) (ENOSPC mid-flush já cerca),
@@ -54,6 +54,13 @@ mem/L0). `DiskPressure` **não** entra no retry de stall do
 Log: `tracing::warn!` na **transição** Ok→Reclaim e Ok/Reclaim→Refuse
 (não em cada put). RFC-0169: sem `println` ungated.
 
+PITR e replica HA **não** passam pelo `put`. Copiam dest / appendam WAL
+cru. O mesmo piso: `admit_disk_write` **antes** de `copy_db_directory`,
+`create_checkpoint`, `ship_wal`, replay WAL do restore, e
+`append_wal_bytes`. `catch_up` admite **antes** do `pull` para o cursor
+não saltar bytes que o replica nunca recebeu. Reclaim no dest vazio é
+admitido (não há compact); só o hard recusa.
+
 ## Delivery slices (mandatory)
 
 ### P0 — recusar write abaixo do hard; get continua; log da transição
@@ -68,12 +75,17 @@ Log: `tracing::warn!` na **transição** Ok→Reclaim e Ok/Reclaim→Refuse
 - [x] **P0.4** `tracing::warn!` na transição reclaim/refuse (rate-limit
       por estado, não por put) — status: `done`
 
-### P1 — inject + mais reclaim
+### P1 — inject + mais reclaim + PITR/HA
 
 - [ ] **P1.1** `FailingEnv` inject de `available_bytes` — status: `todo`
 - [ ] **P1.2** WAL recycle / vlog GC no reclaim (além de compact SST) —
       status: `todo`
 - [ ] **P1.3** sonda de telemetria (RFC-0169, default off) — status: `todo`
+- [x] **P1.4** PITR: `restore_pitr` / `ship_wal` / `create_checkpoint` /
+      `copy_db_directory` / history restore recusam abaixo do hard;
+      dest não fica a meio — status: `done`
+- [x] **P1.5** Replica HA: `append_wal_bytes` + `catch_up` recusam abaixo
+      do hard; cursor não avança se o append não correu — status: `done`
 
 ### P2 — later
 
@@ -92,6 +104,8 @@ Log: `tracing::warn!` na **transição** Ok→Reclaim e Ok/Reclaim→Refuse
 | P1.1 | p1 | FailingEnv inject | todo | — | 2026-09-07 |
 | P1.2 | p1 | WAL/vlog reclaim | todo | — | 2026-09-07 |
 | P1.3 | p1 | telemetry probe | todo | — | 2026-09-07 |
+| P1.4 | p1 | PITR dest/ship recusa hard | done | ops restore_pitr / ship_wal | 2026-09-07 |
+| P1.5 | p1 | HA replica append recusa hard | done | replicate append_wal_bytes | 2026-09-07 |
 | P2.1 | p2 | fence blast (cópia) | todo | §2.6 | 2026-09-07 |
 | P2.2 | p2 | Verus twin | todo | — | 2026-09-07 |
 
@@ -105,6 +119,10 @@ Log: `tracing::warn!` na **transição** Ok→Reclaim e Ok/Reclaim→Refuse
     chave Ok; `!is_durability_fenced()`.
   - `filesystem_available_bytes_temp_dir_nonzero` (posix).
   - `posix_unsafe_rc_sites_all_gated` inclui `statvfs(` e gate `rc != 0`.
+  - `pitr_restore_under_hard_floor_is_disk_pressure`: dest vazio / ausente.
+  - `ship_wal_under_hard_floor_is_disk_pressure`: watermark inalterado, 0 warch.
+  - `replica_append_under_hard_floor_is_disk_pressure`: WAL não cresce.
+  - `catch_up_under_hard_floor_does_not_skip_cursor`: offset igual.
 - **Telemetry / Analytics:** `tracing::warn!` na transição (não cada put).
   Sonda 0169 é P1.3.
 - **Documentation:** este RFC; linha em `docs/status.md`. Não reescreve

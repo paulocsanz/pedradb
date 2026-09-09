@@ -19,6 +19,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod column_a;
 pub mod engines;
 
 use std::time::{Duration, Instant};
@@ -200,6 +201,10 @@ pub const COMPARE_SHAPES: &[&str] = &[
 
 /// Length of the RFC-0041 official prefix of [`COMPARE_SHAPES`].
 pub const OFFICIAL_16: usize = 16;
+
+/// RFC-0185 column A must-win set (22 names). Re-export so the compare
+/// binary and tests share one list. Subset of [`COMPARE_SHAPES`].
+pub const COLUMN_A_SHAPES: &[&str] = column_a::COLUMN_A_SHAPES;
 
 /// Engine adapter. Both sides implement exactly these ops; the runner measures
 /// only through this trait so the schedule cannot drift between engines.
@@ -2276,6 +2281,21 @@ impl YcsbRunner {
     /// the aggregate. Same op mix as the single-client rows so the two are
     /// directly comparable.
     pub fn run_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
+        self.run_clients_only(
+            e,
+            clients,
+            std::env::var("ROCKS_PARITY_ONLY").ok().as_deref(),
+        )
+    }
+
+    /// Like [`Self::run_clients`] with an explicit `ROCKS_PARITY_ONLY` filter
+    /// (tests drive the shipped skip without mutating process env).
+    pub fn run_clients_only<E: Engine + Sync>(
+        &self,
+        e: &E,
+        clients: usize,
+        only: Option<&str>,
+    ) -> Vec<String> {
         assert!(clients >= 2, "multi-client harness needs >= 2 clients");
         let cfg_ops = self.cfg.ops;
         let records = self.cfg.records;
@@ -2290,6 +2310,10 @@ impl YcsbRunner {
             ("deps_cache_overwrite", 0, false, true),
         ];
         for (name, read_pct, rmw, overwrite) in shapes {
+            let mc_name = format!("{name}_mc{clients}");
+            if !shape_wanted_in(&mc_name, only) && !shape_wanted_in(name, only) {
+                continue;
+            }
             let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
             let t0 = Instant::now();
             let mut lats = Vec::with_capacity(cfg_ops * clients);
@@ -2755,6 +2779,11 @@ pub fn peer_anomalies(peer: &std::collections::BTreeMap<String, f64>) -> Vec<Str
             ));
         }
     }
+    if let Some(&qps) = peer.get(column_a::OVERWRITE_MC4_SHAPE) {
+        if column_a::overwrite_mc4_peer_collapsed(qps) {
+            out.push(column_a::overwrite_mc4_collapsed_anomaly(qps));
+        }
+    }
     out
 }
 
@@ -2953,6 +2982,25 @@ mod tests {
             }
             assert!(compat.get(&ykey(0)).unwrap().is_some());
 
+            let mut r_only = YcsbRunner::new(cfg.clone());
+            r_only.seed(&compat);
+            let only_blocks = r_only.run_clients_only(
+                &compat,
+                3,
+                Some("deps_cache_overwrite_mc3"),
+            );
+            assert_eq!(
+                only_blocks
+                    .iter()
+                    .map(|b| b
+                        .split("\"name\": \"")
+                        .nth(1)
+                        .and_then(|s| s.split('"').next()))
+                    .collect::<Vec<_>>(),
+                vec![Some("deps_cache_overwrite_mc3")],
+                "ROCKS_PARITY_ONLY must skip ycsb_a_mc / ycsb_f_mc"
+            );
+
             let cdir = tempfile::tempdir().unwrap();
             let conc = crate::engines::ConcurrentEngine::open(cdir.path());
             let mut r2 = YcsbRunner::new(cfg.clone());
@@ -3080,6 +3128,53 @@ mod tests {
         for b in &blocks {
             assert!(b.contains("\"p50_ms\""), "{b}");
         }
+    }
+
+    #[test]
+    fn rfc0185_column_a_shapes_are_the_gate() {
+        assert_eq!(COLUMN_A_SHAPES.len(), 22);
+        assert_eq!(COLUMN_A_SHAPES, column_a::COLUMN_A_SHAPES);
+        for name in COLUMN_A_SHAPES {
+            assert!(
+                COMPARE_SHAPES.contains(name),
+                "G_A {name} must stay a subset of COMPARE_SHAPES"
+            );
+        }
+        assert_eq!(
+            &COMPARE_SHAPES[..OFFICIAL_16],
+            &[
+                "ycsb_a",
+                "ycsb_b",
+                "ycsb_c",
+                "ycsb_d",
+                "ycsb_e",
+                "ycsb_f",
+                "deps_apply_batch",
+                "deps_mvcc_latest",
+                "deps_scan",
+                "deps_raftlog",
+                "deps_cache_overwrite",
+                "ycsb_a_mc4",
+                "ycsb_f_mc4",
+                "deps_cache_overwrite_mc4",
+                "deps_apply_batch_mc4",
+                "deps_raftlog_mc4",
+            ]
+        );
+    }
+
+    #[test]
+    fn collapsed_overwrite_mc4_peer_is_anomaly() {
+        let mut peer = std::collections::BTreeMap::new();
+        peer.insert("deps_cache_overwrite_mc4".into(), 120_000.0);
+        let a = peer_anomalies(&peer);
+        assert!(a.iter().any(|s| s.contains("collapsed")), "{a:?}");
+        peer.insert("deps_cache_overwrite_mc4".into(), 270_000.0);
+        assert!(
+            peer_anomalies(&peer)
+                .iter()
+                .all(|s| !s.contains("collapsed"))
+        );
     }
 
     #[test]

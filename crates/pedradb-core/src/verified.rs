@@ -360,6 +360,7 @@ pub fn profile_report() -> &'static [ProfileComponent] {
         on!("crc_match", "crc_match", "CRC mismatch is not Ok"),
         on!("sst_crc", "sst_crc", "SST CRC fate fail-closed"),
         on!("sst_block_crc", "sst_block_crc", "SST block CRC admission (RFC-0077 P1.1)"),
+        on!("sst_magic", "sst_magic", "SST magic admission — only PEDRSST\\0 opens; a C++ Rocks header refuses (RFC-0186 P2.2)"),
         on!("tombstone_reaches_window", "tombstone_reaches_window", "range tombstone reaches the window (F167)"),
         on!("key_in_window", "key_in_window", "key inside the scan window (F167)"),
         on!("point_bounds_overlap", "point_bounds_overlap", "point bounds overlap (F167)"),

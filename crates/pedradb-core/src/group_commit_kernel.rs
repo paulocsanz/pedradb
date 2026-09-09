@@ -277,11 +277,7 @@ pub fn occ_member_fate_as_is(_too_old: bool, _conflict: bool) -> OccMemberFate {
 /// (`too_old`, `OccRead`); this fn is the order rustc links.
 #[cfg(not(verus_keep_ghost))]
 #[must_use]
-pub fn occ_batch_plan(
-    too_old: &[bool],
-    reads: &[OccRead],
-    last_seq: u64,
-) -> Vec<OccMemberFate> {
+pub fn occ_batch_plan(too_old: &[bool], reads: &[OccRead], last_seq: u64) -> Vec<OccMemberFate> {
     let n = if too_old.len() <= reads.len() {
         too_old.len()
     } else {
@@ -290,11 +286,7 @@ pub fn occ_batch_plan(
     let mut out = Vec::with_capacity(n);
     let mut i = 0;
     while i < n {
-        let conflict = occ_conflict(
-            reads[i].snap,
-            last_seq,
-            reads[i].touched_key_written_after,
-        );
+        let conflict = occ_conflict(reads[i].snap, last_seq, reads[i].touched_key_written_after);
         out.push(occ_member_fate(too_old[i], conflict));
         i += 1;
     }
@@ -366,12 +358,7 @@ pub fn occ_conflict_as_is_serialized(
     writes_before: u64,
     touched_key_written_after: bool,
 ) -> bool {
-    occ_conflict_as_is_serialized_body!(
-        snap,
-        last_seq,
-        writes_before,
-        touched_key_written_after
-    )
+    occ_conflict_as_is_serialized_body!(snap, last_seq, writes_before, touched_key_written_after)
 }
 
 /// Finite PCT depth never covers ∀ OS interleavings (RFC-0070 / R-pct).
@@ -1095,11 +1082,8 @@ mod tests {
             }
             let flags = group_validate(&reads, last_seq);
             for i in 0..n {
-                let alone = occ_conflict(
-                    reads[i].snap,
-                    last_seq,
-                    reads[i].touched_key_written_after,
-                );
+                let alone =
+                    occ_conflict(reads[i].snap, last_seq, reads[i].touched_key_written_after);
                 if flags[i] != alone {
                     viol = Some(format!(
                         "trial={trial} member {i} flag {} != alone {alone} (group not simultaneous)",
@@ -1177,10 +1161,7 @@ mod tests {
 
     #[test]
     fn occ_member_fate_on_live_conflict_is_not_ok() {
-        assert_eq!(
-            occ_member_fate(false, true),
-            OccMemberFate::Conflict
-        );
+        assert_eq!(occ_member_fate(false, true), OccMemberFate::Conflict);
         assert_eq!(occ_member_fate(true, true), OccMemberFate::TooOld);
         assert_eq!(occ_member_fate(false, false), OccMemberFate::Ok);
         assert_eq!(
@@ -1193,10 +1174,7 @@ mod tests {
             src.contains("occ_batch_plan("),
             "validate_occ_batch must match occ_batch_plan"
         );
-        let lone = src
-            .split("fn lone_commit")
-            .nth(1)
-            .expect("lone_commit");
+        let lone = src.split("fn lone_commit").nth(1).expect("lone_commit");
         assert!(
             lone.contains("occ_batch_plan("),
             "lone_commit must match occ_batch_plan"

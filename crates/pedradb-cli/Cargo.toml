@@ -10,6 +10,12 @@ pedradb-core.workspace = true
 pedradb-io-uring.workspace = true
 pedradb-ops.workspace = true
 
+[features]
+default = []
+# Links RocksDB C++ as a reader for `pedra migrate-from-rocks` (RFC-0186).
+# The kernel still does not open a C++ SST directory.
+from-rocks = ["pedradb-ops/from-rocks"]
+
 [[bin]]
 name = "pedra"
 path = "src/main.rs"

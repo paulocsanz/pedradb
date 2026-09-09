@@ -230,7 +230,10 @@ mod tests {
     #[test]
     fn snap_is_empty_on_live_zero_is_not_ok() {
         assert!(snap_is_empty(0));
-        assert!(!snap_is_empty_as_is(0), "AS-IS dente: empty snap treated live");
+        assert!(
+            !snap_is_empty_as_is(0),
+            "AS-IS dente: empty snap treated live"
+        );
         assert!(!snap_is_empty(1));
     }
 
@@ -248,7 +251,10 @@ mod tests {
     #[test]
     fn mem_point_decides_on_live_hit_is_not_ok() {
         assert!(mem_point_decides(true));
-        assert!(!mem_point_decides_as_is(true), "AS-IS dente: mem never wins");
+        assert!(
+            !mem_point_decides_as_is(true),
+            "AS-IS dente: mem never wins"
+        );
         assert!(!mem_point_decides(false));
     }
 

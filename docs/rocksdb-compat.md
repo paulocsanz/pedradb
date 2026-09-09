@@ -6,6 +6,10 @@
 > still has a deeper correctness model (Titan, UDT, per-CF block cache) — that
 > is engine internals, not a missing method.
 >
+> **On-disk is not drop-in** ([RFC-0186](rfc/0186-rocks-to-pedra-v5-migrate.md)):
+> `DB::open` on a C++ SST directory fails closed. Copy with
+> `pedra migrate-from-rocks <rocks_dir> <pedra_dir>` (feature `from-rocks`).
+>
 > **OOTB = Rocks C++ factory, everywhere.** `Options::default()` is
 > `sync=false`, memtable 64 MiB, blob off. On Darwin, `set_sync(true)` is
 > `F_FULLFSYNC` — what **CMake Rocks** does (`HAVE_FULLFSYNC` from

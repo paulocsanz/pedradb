@@ -1,0 +1,14 @@
+# RFC-0185 P0.3 — Linux 4 vCPU cartaz overwrite_mc4.
+# rust:1-bookworm is pullable on the platform (p149k source-upload
+# never reached first start). Network cargo build; leftover+L0 tree.
+FROM rust:1-bookworm
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends cmake clang llvm-dev pkg-config python3 \
+ && rm -rf /var/lib/apt/lists/*
+COPY crates /src/pedradb/crates
+COPY scripts /src/pedradb/scripts
+COPY Cargo.toml Cargo.lock clippy.toml deny.toml /src/pedradb/
+WORKDIR /src/pedradb
+COPY scripts/rfc0185_p03_entrypoint.sh /usr/local/bin/p04_entrypoint.sh
+RUN chmod +x /usr/local/bin/p04_entrypoint.sh /src/pedradb/scripts/rfc0185_p03_entrypoint.sh
+CMD ["/usr/local/bin/p04_entrypoint.sh"]

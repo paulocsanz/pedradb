@@ -1,0 +1,22 @@
+RFC0176-P22-HOST linux-gate-p149b
+RFC0176-P22-KERNEL 6.12.94-0-virt
+RFC0176-P22-NPROC 4
+MemTotal:        3985628 kB
+
+===== 10M nominal 4GiB =====
+RFC0176-P22 scale-model keys=10000000 ram=4294967296
+S=2450000000 L=2
+P_best=3 P_worst=6
+n_files=10 warm_cap=3221225472
+hot=1 mode=hot
+T_ns best=3300 happy=3630 worst=121500
+eta_happy_bps=1000 eta_worst_bps=5000 happy_hot_bps=10000
+
+===== 10M MemTotal 4081283072 =====
+RFC0176-P22 scale-model keys=10000000 ram=4081283072
+S=2450000000 L=2
+P_best=3 P_worst=6
+n_files=10 warm_cap=3007541248
+hot=1 mode=hot
+T_ns best=3300 happy=3630 worst=121500
+eta_happy_bps=1000 eta_worst_bps=5000 happy_hot_bps=10000

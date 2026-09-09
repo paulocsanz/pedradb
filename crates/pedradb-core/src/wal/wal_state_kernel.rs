@@ -24,8 +24,9 @@
 
 #![forbid(unsafe_code)]
 
-use crate::env_crash_kernel::{crash_legal, crash_legal_as_is, sync as env_sync, CrashModel,
-    SyncHonesty};
+use crate::env_crash_kernel::{
+    crash_legal, crash_legal_as_is, sync as env_sync, CrashModel, SyncHonesty,
+};
 
 /// WAL prefix geometry: bytes acked to callers, made durable by the last
 /// honest barrier, and appended to the (possibly buffered) log.
@@ -176,7 +177,11 @@ mod tests {
         for written in 0..6u64 {
             for synced in 0..=written {
                 for acked in 0..=synced {
-                    let s = WalState { acked, synced, written };
+                    let s = WalState {
+                        acked,
+                        synced,
+                        written,
+                    };
                     assert!(inv_wal(&s));
                     for n in 0..4u64 {
                         let a = wal_append(s, n);
@@ -215,7 +220,11 @@ mod tests {
     fn rotate_refuses_unsynced_tail_while_as_is_drops() {
         // acked=3=synced but 10 written: the unsynced tail keeps the log.
         let s = wal_state_of(10, 3, 3);
-        assert_eq!(wal_rotate(s), s, "rotate with a non-durable tail is refused");
+        assert_eq!(
+            wal_rotate(s),
+            s,
+            "rotate with a non-durable tail is refused"
+        );
         // AS-IS drops everything: the 3 acked bytes vanish from the log.
         let dropped = wal_rotate_as_is(s);
         assert_eq!(dropped, wal_state_of(0, 0, 0));
@@ -326,7 +335,11 @@ mod tests {
             assert_eq!(real.acked, s.acked);
             assert!(inv_wal(&real));
             let as_is = wal_append_as_is(s, add);
-            assert_eq!(as_is.acked, s.acked + add, "AS-IS acks with the write n={add}");
+            assert_eq!(
+                as_is.acked,
+                s.acked + add,
+                "AS-IS acks with the write n={add}"
+            );
             assert_eq!(as_is.written, s.written + add);
             if add > 0 {
                 assert!(!inv_wal(&as_is));
@@ -488,10 +501,7 @@ mod tests {
     /// so a cargo filter for `wal_ack` stays 2/0.
     #[test]
     fn survives_acked_pair_fns_are_exactly_the_catalog() {
-        freeze_pair(&[
-            "acked_survives_every_legal_crash",
-            "acked_survives_as_is",
-        ]);
+        freeze_pair(&["acked_survives_every_legal_crash", "acked_survives_as_is"]);
     }
 
     /// RFC-0166 P1.2: every legal crash cut keeps the acked prefix; AS-IS
@@ -501,10 +511,7 @@ mod tests {
         let s = wal_state_of(10, 3, 3);
         let mut n = 0u32;
         for cut in 0u64..7 {
-            assert!(
-                acked_survives_every_legal_crash(&s, cut),
-                "FIXED cut={cut}"
-            );
+            assert!(acked_survives_every_legal_crash(&s, cut), "FIXED cut={cut}");
             if cut < s.acked && cut <= s.written {
                 assert!(
                     !acked_survives_as_is(&s, cut),

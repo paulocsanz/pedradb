@@ -621,7 +621,9 @@ impl SstTable {
                         drop(g);
                         let mut w = self.payload.write();
                         let p: &Arc<[u8]> = &w.img;
-                        if crate::write_admission_kernel::batch_is_empty(p.len() as u64) || end > p.len() {
+                        if crate::write_admission_kernel::batch_is_empty(p.len() as u64)
+                            || end > p.len()
+                        {
                             // Evicted (or re-installed shorter) between the
                             // guards: serve this block from file.
                             drop(w);
@@ -1283,9 +1285,9 @@ impl SstTable {
 
         let mut c = Cursor::new(payload);
         let magic = c.read_slice(8)?;
-        if magic != SST_MAGIC {
+        if !super::magic_kernel::sst_magic_is_pedra(magic) {
             return Err(CoreError::Internal(format!(
-                "bad SST magic in {}",
+                "bad SST magic in {}: not a Pedra SST (C++ Rocks directory is not drop-in; use `pedra migrate-from-rocks`)",
                 path.display()
             )));
         }
@@ -1321,7 +1323,8 @@ impl SstTable {
         } else {
             max_sequence = file_max;
         }
-        if !crate::write_admission_kernel::batch_is_empty(c.data.len().saturating_sub(c.pos) as u64) {
+        if !crate::write_admission_kernel::batch_is_empty(c.data.len().saturating_sub(c.pos) as u64)
+        {
             return Err(CoreError::Internal(format!(
                 "trailing bytes in SST {}",
                 path.display()
@@ -1389,7 +1392,9 @@ impl SstTable {
             BloomFilter::decode(rest)
                 .map_err(|e| CoreError::Internal(format!("SST bloom in {}: {e}", path.display())))?
         } else {
-            if !crate::write_admission_kernel::batch_is_empty(ic.data.len().saturating_sub(ic.pos) as u64) {
+            if !crate::write_admission_kernel::batch_is_empty(
+                ic.data.len().saturating_sub(ic.pos) as u64
+            ) {
                 return Err(CoreError::Internal(format!(
                     "trailing index bytes in SST {}",
                     path.display()

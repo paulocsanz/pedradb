@@ -368,9 +368,14 @@ pub fn filesystem_available_bytes(path: &Path) -> io::Result<u64> {
         }
         // SAFETY: rc==0 — the kernel initialized `buf`.
         let st = unsafe { buf.assume_init() };
-        let frsize = st.f_frsize as u64;
-        let bavail = st.f_bavail as u64;
-        Ok(bavail.saturating_mul(frsize))
+        // `f_frsize` is `c_ulong`; `f_bavail` is `fsblkcnt_t`. Width is
+        // platform-dependent — keep the `u64` cast even when it is a no-op.
+        #[allow(clippy::unnecessary_cast)]
+        {
+            let frsize = st.f_frsize as u64;
+            let bavail = st.f_bavail as u64;
+            Ok(bavail.saturating_mul(frsize))
+        }
     }
     #[cfg(not(all(unix, not(miri))))]
     {

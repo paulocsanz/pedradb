@@ -503,6 +503,7 @@ impl WriteGroup {
             };
             first = false;
             match r {
+                // DiskPressure is not a stall (RFC-0179): do not park/retry.
                 Err(CoreError::WriteStall { .. }) | Err(CoreError::WriteStallMem { .. }) => {
                     if Instant::now() >= deadline {
                         return r;
@@ -602,7 +603,9 @@ impl WriteGroup {
         loop {
             let active = self.begin_submit();
             match self.submit_after_begin(db, ops.clone(), do_sync, occ.clone(), active) {
-                err @ (Err(CoreError::WriteStall { .. }) | Err(CoreError::WriteStallMem { .. })) => {
+                // DiskPressure is not a stall (RFC-0179): do not park/retry.
+                err
+                @ (Err(CoreError::WriteStall { .. }) | Err(CoreError::WriteStallMem { .. })) => {
                     if Instant::now() >= deadline {
                         // Worker wedged past the park bound — honest error.
                         return err;
@@ -640,11 +643,7 @@ impl WriteGroup {
         // write() still joins the group (RFC-0040 P1.2). Lone async
         // (`do_sync=false`) takes `commit_async_one` / `commit_async_ops`.
         if occ.is_none() && active == 1 && !self.recently_concurrent() {
-            let result = if crate::write_admission_kernel::wal_sync_required(
-                true,
-                do_sync,
-                false,
-            ) {
+            let result = if crate::write_admission_kernel::wal_sync_required(true, do_sync, false) {
                 Self::lone_commit(self, db, ops, do_sync, occ)
             } else if ops.len() == 1 {
                 db.write().commit_async_one(ops.pop().expect("len checked"))
@@ -843,9 +842,9 @@ impl WriteGroup {
             // Async-only group (RFC-0044 P0.5): no fd to share, so the
             // catch-up hold is pure latency — the merge (one encode pass,
             // one `write()` per group) is the whole win.
-            let any_sync = batch.iter().any(|p| {
-                crate::write_admission_kernel::wal_sync_required(true, p.do_sync, false)
-            });
+            let any_sync = batch
+                .iter()
+                .any(|p| crate::write_admission_kernel::wal_sync_required(true, p.do_sync, false));
             if crate::write_admission_kernel::wal_sync_required(true, any_sync, false)
                 && batch_ops < CATCHUP_SKIP_OPS
             {
@@ -1230,10 +1229,7 @@ impl WriteGroup {
         // (no barrier) keep their acked prefix at the old barrier: the
         // ledger never claims durability the class does not have.
         if pinned {
-            let mut ledger = group
-                .write_ack
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
+            let mut ledger = group.write_ack.lock().unwrap_or_else(|e| e.into_inner());
             ledger.on_append(ledger_bytes);
             if crate::write_admission_kernel::wal_sync_required(true, need_sync, false)
                 && io_err.is_none()
@@ -2765,17 +2761,16 @@ impl<E: Env> ConcurrentDb<E> {
             .parent()
             .map(std::path::PathBuf::from)
             .unwrap_or(final_path);
-        let written =
-            match Db::write_bulk_run_sst(&env, &dir, num, run.as_ref(), &fam, sync) {
-                Ok(t) => t,
-                Err(_) => {
-                    let mut g = self.inner.write();
-                    if let Some(pin) = g.take_bulk_encoding() {
-                        g.push_parked_bulk_front(pin);
-                    }
-                    return false;
+        let written = match Db::write_bulk_run_sst(&env, &dir, num, run.as_ref(), &fam, sync) {
+            Ok(t) => t,
+            Err(_) => {
+                let mut g = self.inner.write();
+                if let Some(pin) = g.take_bulk_encoding() {
+                    g.push_parked_bulk_front(pin);
                 }
-            };
+                return false;
+            }
+        };
         // RFC-0159 P1.2: take the MANIFEST job under the write lock, then
         // drop the guard before `persist.write()` (same shape as
         // [`Self::persist_unsynced_l0s_off_lock`]). The match-scrutinee
@@ -2892,12 +2887,22 @@ impl<E: Env> ConcurrentDb<E> {
     #[must_use]
     pub fn materialize_parked_once(&self) -> bool {
         if crate::write_admission_kernel::batch_is_empty(
-            self.inner.read().parked_unflushed_count() as u64,
+            self.inner.read().parked_unflushed_count() as u64
         ) {
             return false;
         }
         let _flush = self.flush_lock.lock();
         self.materialize_parked_holding_flush()
+    }
+
+    /// RFC-0180 P0.75 / RFC-0185 P0.3: skip L0 materialize while multi-writer
+    /// (overwrite_mc4 leftover stays parked). 1c drain stays.
+    #[must_use]
+    pub fn materialize_parked_if_not_multi(&self) -> bool {
+        if self.recently_multi(Duration::from_millis(2)) {
+            return false;
+        }
+        self.materialize_parked_once()
     }
 
     /// [`Self::materialize_parked_once`] without queueing on `flush_lock`.
@@ -2912,7 +2917,7 @@ impl<E: Env> ConcurrentDb<E> {
     #[must_use]
     pub fn materialize_parked_once_try(&self) -> bool {
         if crate::write_admission_kernel::batch_is_empty(
-            self.inner.read().parked_unflushed_count() as u64,
+            self.inner.read().parked_unflushed_count() as u64
         ) {
             return false;
         }
@@ -3044,6 +3049,10 @@ impl<E: Env> ConcurrentDb<E> {
             return;
         };
         if self.parked_unflushed_bytes() < cap {
+            return;
+        }
+        // RFC-0185 P0.3: do not materialize leftover to L0 mid-mc4.
+        if self.recently_multi(Duration::from_millis(2)) {
             return;
         }
         // `#[must_use]`: the bool (did a file get written) is the worker
@@ -4124,6 +4133,70 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// RFC-0180 P0.75 / RFC-0185 P0.3: 1c still materializes parked leftover.
+    #[test]
+    fn rfc0180_flush_worker_skips_materialize_when_recently_multi() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open(&dir).unwrap();
+        db.put(b"ycsb/000000", b"seed").unwrap();
+        assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
+        assert!(db.park_imm_once());
+        assert_eq!(db.parked_unflushed_count(), 1);
+        assert!(
+            !db.recently_multi(Duration::from_millis(2)),
+            "1c is not recently_multi"
+        );
+        assert!(
+            db.materialize_parked_if_not_multi(),
+            "1c drain must still materialize"
+        );
+        assert_eq!(db.parked_unflushed_count(), 0);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Two concurrent writers: materialize_parked_if_not_multi is a no-op.
+    #[test]
+    fn rfc0180_skip_l0_compact_while_recently_multi() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open(&dir).unwrap();
+        db.put(b"ycsb/seed", b"x").unwrap();
+        assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
+        assert!(db.park_imm_once());
+        let parked = db.parked_unflushed_count();
+        assert!(parked > 0);
+        let barrier = std::sync::Barrier::new(3);
+        std::thread::scope(|s| {
+            for t in 0..2u8 {
+                let db = &db;
+                let barrier = &barrier;
+                s.spawn(move || {
+                    barrier.wait();
+                    let t0 = Instant::now();
+                    let mut n = 0u32;
+                    while t0.elapsed() < Duration::from_millis(200) {
+                        let k = format!("c/{t}-{n:06}");
+                        let _ = db.put(k.as_bytes(), b"v");
+                        n = n.wrapping_add(1);
+                    }
+                });
+            }
+            barrier.wait();
+            let wait0 = Instant::now();
+            while !db.recently_multi(Duration::from_millis(2)) {
+                assert!(
+                    wait0.elapsed() < Duration::from_millis(400),
+                    "2 writers must set recently_multi"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            assert!(
+                !db.materialize_parked_if_not_multi(),
+                "must skip materialize while recently_multi"
+            );
+            assert_eq!(db.parked_unflushed_count(), parked);
+        });
+        let _ = fs::remove_dir_all(&dir);
+    }
     /// Flush backpressure + v26 assist: without a flush worker attached a
     /// submit neither waits on parked debt nor drains it (nothing would
     /// drain it); attached, a submit at debt≥cap materializes one parked

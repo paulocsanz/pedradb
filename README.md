@@ -94,7 +94,9 @@ Full walkthrough (durability contract, CAS, change feed, index-layer sketch):
 - **io_uring on Linux** — production opens use `io_uring` for write + fsync,
   with POSIX fallback elsewhere.
 - **RocksDB drop-in** — the `rocksdb-compat` crate mirrors the `rust-rocksdb`
-  API with [documented divergences](docs/rocksdb-compat.md).
+  API with [documented divergences](docs/rocksdb-compat.md). **On-disk is not
+  drop-in** (Pedra does not open a C++ SST directory); copy with
+  `pedra migrate-from-rocks` ([RFC-0186](docs/rfc/0186-rocks-to-pedra-v5-migrate.md)).
 
 Encryption at rest is a non-goal in the engine: use volume encryption
 (LUKS, FileVault) or app-layer AEAD.

@@ -49,6 +49,7 @@
       (primeira medida `P03_FAIL` min=0.745; fechado pelo P0.4)
 - [x] **P0.4** Se P0.3 raftlog min≤1.0: um corte nomeado no p99 (encode WAL **ou** 16 inserts), A/B na mesma VM, até min>1.0 — status: `done`
       (`LAST_CF` write-through; Linux 4 vCPU `RESULT=P04_PASS` min_ratio=**1.014** 17/17. [`findings/2026-08-25-linux-p04`](../../findings/2026-08-25-linux-p04/README.md))
+      **Living floor (2026-09-08):** P04_PASS é pré-class-fix (staging 64 KiB). Coluna A hoje é WAL `write()` por commit. mc4 e o raftlog pós-class-fix vivem em [0185](0185-coluna-a-dropin-1x-tudo.md). Este P0.4 não se reabre; o cartaz “sempre ≥1×” passou para 0185.
 
 ### P1 — next wave (full-sync same-class + compile S1 + knobs S5)
 

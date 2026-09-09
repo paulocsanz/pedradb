@@ -15,7 +15,7 @@ set_option maxRecDepth 2048
 namespace pedra_aeneas_batch_kernel
 
 /-- [pedra_aeneas_batch_kernel::batch::write_record_count_ok]:
-    Source: 'src/../../../../crates/pedradb-core/src/batch.rs', lines 380:0-382:1
+    Source: 'src/../../../../crates/pedradb-core/src/batch.rs', lines 381:0-383:1
     Visibility: public -/
 def batch.write_record_count_ok
   (count : Std.U32) (decoded_len : Std.Usize) : Result Bool := do
@@ -23,7 +23,7 @@ def batch.write_record_count_ok
   ok (decoded_len = i)
 
 /-- [pedra_aeneas_batch_kernel::batch::write_record_count_ok_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/batch.rs', lines 388:0-390:1
+    Source: 'src/../../../../crates/pedradb-core/src/batch.rs', lines 389:0-391:1
     Visibility: public -/
 def batch.write_record_count_ok_as_is
   (_count : Std.U32) (_decoded_len : Std.Usize) : Result Bool := do

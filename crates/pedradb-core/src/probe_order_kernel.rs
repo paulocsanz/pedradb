@@ -98,12 +98,7 @@ proof fn lemma_as_is_picks_oldest_on_tie()
 /// transitional dead-code allow ends there.
 #[cfg(not(verus_keep_ghost))]
 #[cfg_attr(not(test), allow(dead_code))]
-fn probe_order(
-    los: &[&[u8]],
-    his: &[&[u8]],
-    newest_first: &[usize],
-    key: &[u8],
-) -> Vec<usize> {
+fn probe_order(los: &[&[u8]], his: &[&[u8]], newest_first: &[usize], key: &[u8]) -> Vec<usize> {
     newest_first
         .iter()
         .copied()
@@ -275,7 +270,12 @@ mod tests {
     /// newer's — descending-lo still hits the older table first.
     #[test]
     fn overlap_distinct_los_still_inverts_as_is() {
-        let (a, b, m, z) = (b"a".as_slice(), b"b".as_slice(), b"m".as_slice(), b"z".as_slice());
+        let (a, b, m, z) = (
+            b"a".as_slice(),
+            b"b".as_slice(),
+            b"m".as_slice(),
+            b"z".as_slice(),
+        );
         // table 0 (older): [b, z]; table 1 (newer): [a, m]; key = b.
         let los = [b, a];
         let his = [z, m];
@@ -288,7 +288,12 @@ mod tests {
     /// path stays legitimate exactly here).
     #[test]
     fn disjoint_run_agrees() {
-        let (a, b, c, d) = (b"a".as_slice(), b"b".as_slice(), b"c".as_slice(), b"d".as_slice());
+        let (a, b, c, d) = (
+            b"a".as_slice(),
+            b"b".as_slice(),
+            b"c".as_slice(),
+            b"d".as_slice(),
+        );
         let los = [a, c];
         let his = [b, d];
         let newest_first = [1, 0];
@@ -339,7 +344,10 @@ mod tests {
         // newest-first order exactly like the spec.
         let los_tie = [k, k];
         let his_tie = [k, k];
-        assert_eq!(probe_order(&los_tie, &his_tie, &newest_first, k), vec![1, 0]);
+        assert_eq!(
+            probe_order(&los_tie, &his_tie, &newest_first, k),
+            vec![1, 0]
+        );
         let tie = probe_order_covering(&newest_first, &by_lo, 2, &his_tie, k);
         assert_eq!(tie, vec![1, 0]);
         let mutant = probe_order_covering_as_is(&newest_first, &by_lo, 2, &his_tie, k);

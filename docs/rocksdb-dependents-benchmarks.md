@@ -100,7 +100,7 @@ no `summarize`, entrada nova no compare — append, nunca delete ([RFC-0043 §Co
 | **Solana (Agave)** | Blockstore/ledger inteiro (shreds, status, metadata) via crate `rocksdb`; `agave-ledger-tool` para inspecionar/compactar | sem bench oficial público; issues documentam stalls ~40 min, write spikes; **Sig** (Syndica, Zig) tem ledger pluggável (LMDB/mem) e post de engenharia jan/2025 | Issues #16234 etc.; TerarkDB (fork ByteDance) citado como drop-in potencial | **no runner** (`solana`): `solana_shred_append`, `solana_trailing_read` | TerarkDB é fork C++; Sig confirma ledger pluggável |
 | **Venice (LinkedIn)** | engine de storage (desde ~2018; PlainTable p/ serving em memória, BlobDB p/ valores grandes, SSTFileWriter no ingest) | sem suite pública; QCon 2024: 1M ops/s/nó (32c/256GB; ~620k gets + ~680k writes); blog: 175M lookups/s + 230M writes/s cluster, SLA <10 min write | QCon/InfoQ "scalable-low-latency"; blogs LinkedIn (fanout, ingestion pipeline 2025) | **no runner** (`venice`): `venice_fanout_get` (**32** gets/op, scaled-down do 5k+ publicado). `venice_ingest_batch` continua **blocked** (SSTFileWriter) | PlainTable/BlobDB = classe C |
 | **Pinterest Rockstore(+wide column)** | storage de todos os serviços Rocksplicator; chave = row_key+col+ts com comparador ts descendente | sem microbench público | Blogs Pinterest: 300+ casos, milhões rps, PBs, ms single-digit; Rocksplicator: 9 sistemas, dezenas de M qps, 50M+ inferências ML/s | **no runner** (`venice`): `rockstore_widecol_rw` | Rocksplicator é open source (C++); bench não |
-| **Rockset (→OpenAI)** | índice convergido em cima de RocksDB | blogs com bench próprios; TSBS-likes | posts Rockset eng | `rockset_hybrid` (ingest batch + query point/scan misto) | baixa prioridade (fontes esparsas) |
+| **Rockset (→OpenAI)** | índice convergido em cima de RocksDB | blogs com bench próprios; TSBS-likes | posts Rockset eng | **no runner** (`ROCKS_PARITY_SUITE=rockset`): `rockset_hybrid` (ingest batch + point get) | mesma classe async; não SQL |
 | **ZippyDB / Quicksilver (Meta/CF)** | ZippyDB: serviço KV thrift (Titan, sampling do paper Dong 2021 = R010); Quicksilver: config fabric edge | **não públicos** | Paper Dong 2021 (amostragem de 42 apps ZippyDB/MyRocks = R010 no research/); blog CF Quicksilver | já modelado: `qs_hot_get`, `qs_neg_lookup`, `qs_batch_write` (RFC-0043 HL₁) | QS não é open source — shapes são inspiradas em números publicados, não replay |
 | **Twitter Manhattan** | backend RocksDB do KV distribuído | nenhum público | — | fora da fila até existir fonte pública | — |
 
@@ -140,7 +140,8 @@ no `summarize`, entrada nova no compare — append, nunca delete ([RFC-0043 §Co
 5. **P2 — ArangoDB, Ceph, Flink/Kafka, Solana, Venice/Rockstore, Oxigraph**:
    **no runner** (suítes opt-in). Ingest SSTFileWriter / BlobDB-API / PlainTable
    continuam classe C.
-6. **P2 — Rockset**: só com fonte de bench executável.
+6. **P2 — Rockset**: `ROCKS_PARITY_SUITE=rockset` `rockset_hybrid` (WriteBatch + get).
+7. **P2 — YugabyteDB DocDB**: `ROCKS_PARITY_SUITE=yugabyte` `yugabyte_docdb_rmw` (intent overlay + committed).
 
 ## Fontes (lidas 2026-08-18)
 

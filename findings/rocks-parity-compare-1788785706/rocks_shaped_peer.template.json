@@ -1,0 +1,13 @@
+{
+  "bench": "rocks-side-peer-template",
+  "engine": "rocksdb",
+  "sync": false,
+  "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+  "benches": [
+    {
+      "name": "ycsb_a",
+      "qps": null,
+      "note": "fill after compat bench"
+    }
+  ]
+}

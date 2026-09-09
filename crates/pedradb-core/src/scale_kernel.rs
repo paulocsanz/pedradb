@@ -143,12 +143,7 @@ pub fn happy_get_ns(levels: u64, store_bytes: u64, ram_bytes: u64) -> u64 {
 
 /// AS-IS: walk every live file as a cold disk probe (η ignored).
 #[must_use]
-pub fn happy_get_ns_as_is(
-    n_files: u64,
-    _levels: u64,
-    _store_bytes: u64,
-    _ram_bytes: u64,
-) -> u64 {
+pub fn happy_get_ns_as_is(n_files: u64, _levels: u64, _store_bytes: u64, _ram_bytes: u64) -> u64 {
     predict_get_ns_as_is(n_files, SCALE_TAU_RAM_NS, SCALE_TAU_DISK_NS, 0, 0)
 }
 
@@ -348,13 +343,10 @@ mod tests {
         assert_eq!(point_get_probes(u64::from(l1), 1), 5);
         assert_eq!(point_get_probes(u64::from(l10), 1), 6);
         assert_eq!(probes_worst(u64::from(l10), SCALE_L0_WORST), 9);
-        assert_eq!(best_get_ns(u64::from(l10)), predict_get_ns(
-            6,
-            SCALE_TAU_RAM_NS,
-            SCALE_TAU_DISK_NS,
-            SCALE_BPS,
-            0,
-        ));
+        assert_eq!(
+            best_get_ns(u64::from(l10)),
+            predict_get_ns(6, SCALE_TAU_RAM_NS, SCALE_TAU_DISK_NS, SCALE_BPS, 0,)
+        );
     }
 
     #[test]
@@ -438,7 +430,13 @@ mod tests {
     fn worst_get_ns_on_l0_trigger_is_not_ok() {
         assert_eq!(
             worst_get_ns(4, SCALE_L0_WORST),
-            predict_get_ns(8, SCALE_TAU_RAM_NS, SCALE_TAU_DISK_NS, 0, SCALE_WORST_NOISY_BPS)
+            predict_get_ns(
+                8,
+                SCALE_TAU_RAM_NS,
+                SCALE_TAU_DISK_NS,
+                0,
+                SCALE_WORST_NOISY_BPS
+            )
         );
         assert!(
             worst_get_ns_as_is(913, 4, SCALE_L0_WORST) > worst_get_ns(4, SCALE_L0_WORST) * 50,
@@ -465,7 +463,10 @@ mod tests {
             .split("pub fn probes_worst(")
             .nth(1)
             .expect("probes_worst");
-        let body = worst.split("pub fn probes_worst_as_is").next().expect("body");
+        let body = worst
+            .split("pub fn probes_worst_as_is")
+            .next()
+            .expect("body");
         assert!(
             body.contains("point_get_probes("),
             "probes_worst must call point_get_probes"

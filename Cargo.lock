@@ -586,6 +586,7 @@ dependencies = [
  "crc32c",
  "pedradb-core",
  "pedradb-io-uring",
+ "rocksdb 0.22.0",
  "thiserror",
 ]
 
@@ -601,6 +602,9 @@ dependencies = [
 [[package]]
 name = "pedradb-posix"
 version = "0.1.0"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "pedradb-raft"
@@ -673,6 +677,7 @@ dependencies = [
  "bytes",
  "pedradb-core",
  "pedradb-io-uring",
+ "pedradb-journal",
  "stateright",
  "thiserror",
 ]

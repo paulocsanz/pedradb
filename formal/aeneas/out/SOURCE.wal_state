@@ -1,4 +1,4 @@
 path=crates/pedradb-core/src/wal/wal_state_kernel.rs
-sha256=4128fdec3978cd4cae7e1528276a2e467de7fd05f7484495d3c5dd3d42e683ed
+sha256=cb90fe49dada5c506bd3535fdd6f4223e4528757725b5e2acc378fae5d1fba24
 aeneas=daa85d7
 charon=0.1.232

@@ -26,12 +26,10 @@ pub mod changelog_kernel;
 pub mod compact_kernel;
 pub mod concurrent;
 pub mod corrupt;
+pub mod d1_modelo_kernel;
 pub mod db;
 pub mod env;
 pub mod env_crash_kernel;
-pub mod d1_modelo_kernel;
-pub mod lsm_r1_kernel;
-pub mod write_ack_kernel;
 pub mod error;
 pub mod flush_kernel;
 pub mod group_commit_kernel;
@@ -39,8 +37,13 @@ pub mod history;
 pub mod host;
 pub mod key;
 mod leveling;
+pub mod lsm_r1_kernel;
+pub mod write_ack_kernel;
 
+/// Disk-pressure watermarks (RFC-0179): refuse writes before ENOSPC, keep reads up.
+pub mod disk_pressure_kernel;
 pub mod lock;
+pub mod lookup_kernel;
 pub mod manifest;
 pub mod manifest_kernel;
 pub mod memtable;
@@ -51,13 +54,9 @@ pub mod occ;
 pub mod pct_hooks;
 pub mod prefix;
 pub mod probe_order_kernel;
+pub mod rng;
 /// One-process scale model (RFC-0176): probes, WARM cap, spectrum clock.
 pub mod scale_kernel;
-/// Disk-pressure watermarks (RFC-0179): refuse writes before ENOSPC, keep reads up.
-pub mod disk_pressure_kernel;
-pub mod lookup_kernel;
-pub mod write_admission_kernel;
-pub mod rng;
 pub mod sst;
 pub mod time;
 pub mod tx;
@@ -67,6 +66,7 @@ pub mod verify;
 pub mod vlog;
 pub mod vlog_gc_kernel;
 pub mod wal;
+pub mod write_admission_kernel;
 
 pub use batch::{
     write_record_count_ok, write_record_count_ok_as_is, WriteOp, WriteRecord, WRITE_RECORD_VERSION,
@@ -87,14 +87,18 @@ pub use changelog_kernel::{
 };
 pub use concurrent::ConcurrentDb;
 pub use db::{
-    copy_db_directory, read_checkpoint_meta, escape_inline_value, BatchOp, BlobGcCandidate,
+    copy_db_directory, escape_inline_value, read_checkpoint_meta, BatchOp, BlobGcCandidate,
     CheckpointMeta, CompactOptions, Db, DbStats, FenceClass, FenceRecovery, FenceReport,
     HistoryHorizon, HistoryOptions, OpenOptions, PreparedL0Compact, ReadProbeSnap, RecoveryReport,
-    ScanProjection, Snapshot, SnapshotPin, SstLiveMeta, WalRecovery, WriteOptions,
-    WritePhaseStats, CHECKPOINT_META_FILE, DEFAULT_SST_PAYLOAD_BUDGET_BYTES, L0_COMPACTION_TRIGGER,
-    MAX_LSM_LEVEL, WAL_FILE_NAME,
+    ScanProjection, Snapshot, SnapshotPin, SstLiveMeta, WalRecovery, WriteOptions, WritePhaseStats,
+    CHECKPOINT_META_FILE, DEFAULT_SST_PAYLOAD_BUDGET_BYTES, L0_COMPACTION_TRIGGER, MAX_LSM_LEVEL,
+    WAL_FILE_NAME,
 };
-pub use env::{AdviseKind, Env, EnvFile, EnvSource, SstFileSource, StdEnv};
+pub use disk_pressure_kernel::{
+    disk_pressure_admit, external_write_admitted, DiskPressureAdmit, DISK_HARD_FREE_BYTES,
+    DISK_SOFT_FREE_BYTES,
+};
+pub use env::{admit_disk_write, AdviseKind, Env, EnvFile, EnvSource, SstFileSource, StdEnv};
 pub use error::{CoreError, Result};
 pub use host::{DetHost, Host, StdHost};
 pub use key::{

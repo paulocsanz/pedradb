@@ -1,0 +1,17 @@
+===== 25M nominal 4GiB =====
+RFC0176-P22 scale-model keys=25000000 ram=4294967296
+S=6125000000 L=3
+P_best=4 P_worst=7
+n_files=23 warm_cap=3221225472
+hot=0 mode=bounded-cache
+T_ns best=4400 happy=48488 worst=141750
+eta_happy_bps=1000 eta_worst_bps=5000 happy_hot_bps=2000
+
+===== 25M MemTotal 4081283072 =====
+RFC0176-P22 scale-model keys=25000000 ram=4081283072
+S=6125000000 L=3
+P_best=4 P_worst=7
+n_files=23 warm_cap=3007541248
+hot=0 mode=bounded-cache
+T_ns best=4400 happy=48488 worst=141750
+eta_happy_bps=1000 eta_worst_bps=5000 happy_hot_bps=2000

@@ -180,7 +180,11 @@ impl<E: Env> Db<E> {
     /// the tier's `SnapshotTooOld`: the LSM cannot prove a key was never
     /// written (all its versions may have been GC'd and tombstone-cleaned),
     /// so `None` here would be a silent destroy.
-    pub(super) fn get_at_below_watermark_lsm(&self, snap: Snapshot, key: &[u8]) -> Result<Option<Bytes>> {
+    pub(super) fn get_at_below_watermark_lsm(
+        &self,
+        snap: Snapshot,
+        key: &[u8],
+    ) -> Result<Option<Bytes>> {
         let too_old = || CoreError::SnapshotTooOld {
             requested: snap.seq,
             earliest: self.earliest_readable_seq,
@@ -199,5 +203,4 @@ impl<E: Env> Db<E> {
             Lookup::NotFound => Err(too_old()),
         }
     }
-
 }

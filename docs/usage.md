@@ -270,8 +270,9 @@ age out. Restore/checkpoint dirs stay flat until the first archive round.
 | `StoreCluster::write_admission_snap()` | Aggregate L0/stall/pressure counters across local nodes (gates / A-B) |
 | `Db::create_checkpoint(dest)` | Point-in-time copy (flush + file set); openable as a DB |
 | `pedradb_ops::BackupEngine` | Local base backup, `ship_wal`, `restore` / `restore_pitr`, verify |
-| `pedradb_ops::migrate_to_latest` / `inspect_format` | Format inspect + rewrite SSTs/MANIFEST to current writer |
-| CLI `pedra backup\|restore\|pitr\|ship-wal\|migrate\|inspect` | Ops suite from the command line |
+| `pedradb_ops::migrate_to_latest` / `inspect_format` | Format inspect + rewrite **Pedra** SSTs/MANIFEST to current writer |
+| `pedradb_ops::migrate_from_rocks` / CLI `migrate-from-rocks` | RocksDB → new Pedra dir (MANIFEST v5). Copies every CF (default raw, named `cf\0key`). Refuses merge / blob / wide-column / user timestamps. **Not drop-in on-disk**; kernel never opens a C++ SST ([RFC-0186](rfc/0186-rocks-to-pedra-v5-migrate.md)). Feature `from-rocks` links the C++ reader. |
+| CLI `pedra backup\|restore\|pitr\|ship-wal\|migrate\|migrate-from-rocks\|inspect` | Ops suite from the command line |
 | `Db::stats()` → `DbStats` | Mem/SST/WAL + `gc_line()` (`earliest_readable`, pins, `auto_reclaim`) + vlog/amp counters |
 | `CheckpointMeta` | `last_sequence`, `sst_count`, `earliest_readable_seq` (PDBCKP02; v1 still readable) |
 | `ConcurrentDb` | Multi-thread: write group + dual-mem; snapshot get/range fail-closed; `compact_blob`/`compact_vlog`/`blob_gc_candidates` |

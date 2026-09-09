@@ -366,7 +366,12 @@ impl HistoryTier {
         let (key_lo, key_hi) = match key_coverage {
             // An empty segment carries no coverage — keep `None` (always
             // walks; decode of an all-empty tier stays `None` too).
-            Some((lo, hi)) if !crate::write_admission_kernel::batch_is_empty(lo.len() as u64) || !crate::write_admission_kernel::batch_is_empty(hi.len() as u64) => (Some(lo), Some(hi)),
+            Some((lo, hi))
+                if !crate::write_admission_kernel::batch_is_empty(lo.len() as u64)
+                    || !crate::write_admission_kernel::batch_is_empty(hi.len() as u64) =>
+            {
+                (Some(lo), Some(hi))
+            }
             _ => (None, None),
         };
         self.manifest.segs.push_back(SegmentMeta {
@@ -1091,7 +1096,11 @@ impl RemoteTier {
     /// `LATEST` body: `MANIFEST-<n>\n<crc32c hex of that generation>`.
     fn parse_latest_pointer(buf: &str) -> Option<(&str, u32)> {
         let (name, crc_hex) = buf.trim_end().split_once('\n')?;
-        if crate::write_admission_kernel::batch_is_empty(name.len() as u64) || name.contains('/') || name.contains('\\') || name.contains('\0') {
+        if crate::write_admission_kernel::batch_is_empty(name.len() as u64)
+            || name.contains('/')
+            || name.contains('\\')
+            || name.contains('\0')
+        {
             return None;
         }
         let crc = u32::from_str_radix(crc_hex.trim(), 16).ok()?;
@@ -1187,7 +1196,9 @@ impl RemoteTier {
             report.failures.push(("LATEST".into(), "unreadable".into()));
             return;
         };
-        if f.read_to_string(&mut buf).is_err() || crate::write_admission_kernel::batch_is_empty(buf.trim().len() as u64) {
+        if f.read_to_string(&mut buf).is_err()
+            || crate::write_admission_kernel::batch_is_empty(buf.trim().len() as u64)
+        {
             report.errors = report.errors.saturating_add(1);
             report.failures.push(("LATEST".into(), "empty".into()));
             return;
@@ -1232,7 +1243,9 @@ impl RemoteTier {
         if env.exists(&latest) {
             if let Ok(mut f) = env.open_read(&latest) {
                 let mut buf = String::new();
-                if f.read_to_string(&mut buf).is_ok_and(|_| !crate::write_admission_kernel::batch_is_empty(buf.len() as u64)) {
+                if f.read_to_string(&mut buf)
+                    .is_ok_and(|_| !crate::write_admission_kernel::batch_is_empty(buf.len() as u64))
+                {
                     if let Some((name, expect_crc)) = Self::parse_latest_pointer(&buf) {
                         let p = self.segment_path(name);
                         if env.exists(&p) {

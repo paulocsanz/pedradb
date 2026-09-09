@@ -683,12 +683,12 @@ def LevelFile.overlaps
   else ok false
 
 /-- [pedra_aeneas_leveling_kernel::is_disjoint::closure#1]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 736:26-736:69 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 738:13-738:56 -/
 @[reducible]
 def is_disjoint.closure_1 := Unit
 
 /-- [pedra_aeneas_leveling_kernel::is_disjoint::{impl core::ops::function::FnMut<(&'_ [&'_ pedra_aeneas_leveling_kernel::LevelFile],), bool> for pedra_aeneas_leveling_kernel::is_disjoint::closure#1}::call_mut]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 736:26-736:69 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 738:13-738:56 -/
 def
   is_disjoint.closure_1.Insts.CoreOpsFunctionFnMutTupleSharedSliceSharedLevelFileBool.call_mut
   (c : is_disjoint.closure_1) (tupled_args : Slice LevelFile) :
@@ -704,7 +704,7 @@ def
   ok (b, c)
 
 /-- [pedra_aeneas_leveling_kernel::is_disjoint::{impl core::ops::function::FnOnce<(&'_ [&'_ pedra_aeneas_leveling_kernel::LevelFile],), bool> for pedra_aeneas_leveling_kernel::is_disjoint::closure#1}::call_once]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 736:26-736:69 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 738:13-738:56 -/
 def
   is_disjoint.closure_1.Insts.CoreOpsFunctionFnOnceTupleSharedSliceSharedLevelFileBool.call_once
   (c : is_disjoint.closure_1) (s : Slice LevelFile) : Result Bool := do
@@ -714,7 +714,7 @@ def
   ok b
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::is_disjoint::{impl core::ops::function::FnOnce<(&'_ [&'_ pedra_aeneas_leveling_kernel::LevelFile],), bool> for pedra_aeneas_leveling_kernel::is_disjoint::closure#1}]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 736:26-736:69 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 738:13-738:56 -/
 @[reducible]
 def
   is_disjoint.closure_1.Insts.CoreOpsFunctionFnOnceTupleSharedSliceSharedLevelFileBool
@@ -724,7 +724,7 @@ def
 }
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::is_disjoint::{impl core::ops::function::FnMut<(&'_ [&'_ pedra_aeneas_leveling_kernel::LevelFile],), bool> for pedra_aeneas_leveling_kernel::is_disjoint::closure#1}]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 736:26-736:69 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 738:13-738:56 -/
 @[reducible]
 def
   is_disjoint.closure_1.Insts.CoreOpsFunctionFnMutTupleSharedSliceSharedLevelFileBool
@@ -788,7 +788,7 @@ def
 }
 
 /-- [pedra_aeneas_leveling_kernel::is_disjoint]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 733:0-737:1 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 733:0-739:1 -/
 @[rust_loop_body]
 def is_disjoint_inner_loop.body
   (files : Slice LevelFile) (a : LevelFile) (j : Std.Usize) :
@@ -854,12 +854,12 @@ def is_disjoint (files : Slice LevelFile) : Result Bool := do
   is_disjoint_outer_loop files 0#usize
 
 /-- [pedra_aeneas_leveling_kernel::total_bytes::closure]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 743:21-743:32 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 745:21-745:32 -/
 @[reducible]
 def total_bytes.closure := Unit
 
 /-- [pedra_aeneas_leveling_kernel::total_bytes::{impl core::ops::function::FnMut<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), u64> for pedra_aeneas_leveling_kernel::total_bytes::closure}::call_mut]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 743:21-743:32 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 745:21-745:32 -/
 def
   total_bytes.closure.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileU64.call_mut
   (c : total_bytes.closure) (tupled_args : LevelFile) :
@@ -868,7 +868,7 @@ def
   ok (tupled_args.bytes, c)
 
 /-- [pedra_aeneas_leveling_kernel::total_bytes::{impl core::ops::function::FnOnce<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), u64> for pedra_aeneas_leveling_kernel::total_bytes::closure}::call_once]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 743:21-743:32 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 745:21-745:32 -/
 def
   total_bytes.closure.Insts.CoreOpsFunctionFnOnceTupleSharedLevelFileU64.call_once
   (c : total_bytes.closure) (lf : LevelFile) : Result Std.U64 := do
@@ -878,7 +878,7 @@ def
   ok i
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::total_bytes::{impl core::ops::function::FnOnce<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), u64> for pedra_aeneas_leveling_kernel::total_bytes::closure}]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 743:21-743:32 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 745:21-745:32 -/
 @[reducible]
 def total_bytes.closure.Insts.CoreOpsFunctionFnOnceTupleSharedLevelFileU64 :
   core.ops.function.FnOnce total_bytes.closure LevelFile Std.U64 := {
@@ -887,7 +887,7 @@ def total_bytes.closure.Insts.CoreOpsFunctionFnOnceTupleSharedLevelFileU64 :
 }
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::total_bytes::{impl core::ops::function::FnMut<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), u64> for pedra_aeneas_leveling_kernel::total_bytes::closure}]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 743:21-743:32 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 745:21-745:32 -/
 @[reducible]
 def total_bytes.closure.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileU64 :
   core.ops.function.FnMut total_bytes.closure LevelFile Std.U64 := {
@@ -898,7 +898,7 @@ def total_bytes.closure.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileU64 :
 }
 
 /-- [pedra_aeneas_leveling_kernel::total_bytes]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 742:0-744:1 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 744:0-746:1 -/
 def total_bytes (files : Slice LevelFile) : Result Std.U64 := do
   let i ← core.slice.Slice.iter files
   let m ←
@@ -913,12 +913,12 @@ def total_bytes (files : Slice LevelFile) : Result Std.U64 := do
     U64.Insts.CoreIterTraitsAccumSumU64 m
 
 /-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1::closure#4]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 771:23-771:32 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 772:25-772:34 -/
 @[reducible]
 def pick_l0_to_l1.closure_4 := Unit
 
 /-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1::{impl core::ops::function::FnMut<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_l0_to_l1::closure#4}::call_mut]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 771:23-771:32 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 772:25-772:34 -/
 def
   pick_l0_to_l1.closure_4.Insts.CoreOpsFunctionFnMutTupleSharedSharedLevelFileUsize.call_mut
   (c : pick_l0_to_l1.closure_4) (tupled_args : LevelFile) :
@@ -927,7 +927,7 @@ def
   ok (tupled_args.idx, c)
 
 /-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1::{impl core::ops::function::FnOnce<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_l0_to_l1::closure#4}::call_once]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 771:23-771:32 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 772:25-772:34 -/
 def
   pick_l0_to_l1.closure_4.Insts.CoreOpsFunctionFnOnceTupleSharedSharedLevelFileUsize.call_once
   (c : pick_l0_to_l1.closure_4) (lf : LevelFile) : Result Std.Usize := do
@@ -937,7 +937,7 @@ def
   ok i
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_l0_to_l1::{impl core::ops::function::FnOnce<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_l0_to_l1::closure#4}]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 771:23-771:32 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 772:25-772:34 -/
 @[reducible]
 def
   pick_l0_to_l1.closure_4.Insts.CoreOpsFunctionFnOnceTupleSharedSharedLevelFileUsize
@@ -947,7 +947,7 @@ def
 }
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_l0_to_l1::{impl core::ops::function::FnMut<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_l0_to_l1::closure#4}]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 771:23-771:32 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 772:25-772:34 -/
 @[reducible]
 def
   pick_l0_to_l1.closure_4.Insts.CoreOpsFunctionFnMutTupleSharedSharedLevelFileUsize
@@ -959,12 +959,12 @@ def
 }
 
 /-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1::closure#3]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 768:13-768:22 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 770:13-770:22 -/
 @[reducible]
 def pick_l0_to_l1.closure_3 := Unit
 
 /-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1::{impl core::ops::function::FnMut<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_l0_to_l1::closure#3}::call_mut]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 768:13-768:22 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 770:13-770:22 -/
 def
   pick_l0_to_l1.closure_3.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileUsize.call_mut
   (c : pick_l0_to_l1.closure_3) (tupled_args : LevelFile) :
@@ -973,7 +973,7 @@ def
   ok (tupled_args.idx, c)
 
 /-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1::{impl core::ops::function::FnOnce<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_l0_to_l1::closure#3}::call_once]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 768:13-768:22 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 770:13-770:22 -/
 def
   pick_l0_to_l1.closure_3.Insts.CoreOpsFunctionFnOnceTupleSharedLevelFileUsize.call_once
   (c : pick_l0_to_l1.closure_3) (lf : LevelFile) : Result Std.Usize := do
@@ -983,7 +983,7 @@ def
   ok i
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_l0_to_l1::{impl core::ops::function::FnOnce<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_l0_to_l1::closure#3}]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 768:13-768:22 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 770:13-770:22 -/
 @[reducible]
 def
   pick_l0_to_l1.closure_3.Insts.CoreOpsFunctionFnOnceTupleSharedLevelFileUsize
@@ -993,7 +993,7 @@ def
 }
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_l0_to_l1::{impl core::ops::function::FnMut<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_l0_to_l1::closure#3}]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 768:13-768:22 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 770:13-770:22 -/
 @[reducible]
 def pick_l0_to_l1.closure_3.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileUsize
   : core.ops.function.FnMut pick_l0_to_l1.closure_3 LevelFile Std.Usize := {
@@ -1004,11 +1004,11 @@ def pick_l0_to_l1.closure_3.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileUsize
 }
 
 /-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1::closure#2]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 767:16-767:50 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 769:16-769:50 -/
 def pick_l0_to_l1.closure_2 := alloc.vec.Vec Std.U8 × alloc.vec.Vec Std.U8
 
 /-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1::{impl core::ops::function::FnMut<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), bool> for pedra_aeneas_leveling_kernel::pick_l0_to_l1::closure#2<'_0, '_1>}::call_mut]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 767:16-767:50 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 769:16-769:50 -/
 def
   pick_l0_to_l1.closure_2.Insts.CoreOpsFunctionFnMutTupleSharedSharedLevelFileBool.call_mut
   (c : pick_l0_to_l1.closure_2) (tupled_args : LevelFile) :
@@ -1021,7 +1021,7 @@ def
   ok (b, c)
 
 /-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1::{impl core::ops::function::FnOnce<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), bool> for pedra_aeneas_leveling_kernel::pick_l0_to_l1::closure#2<'_0, '_1>}::call_once]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 767:16-767:50 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 769:16-769:50 -/
 def
   pick_l0_to_l1.closure_2.Insts.CoreOpsFunctionFnOnceTupleSharedSharedLevelFileBool.call_once
   (c : pick_l0_to_l1.closure_2) (lf : LevelFile) : Result Bool := do
@@ -1031,7 +1031,7 @@ def
   ok b
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_l0_to_l1::{impl core::ops::function::FnOnce<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), bool> for pedra_aeneas_leveling_kernel::pick_l0_to_l1::closure#2<'_0, '_1>}]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 767:16-767:50 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 769:16-769:50 -/
 @[reducible]
 def
   pick_l0_to_l1.closure_2.Insts.CoreOpsFunctionFnOnceTupleSharedSharedLevelFileBool
@@ -1041,7 +1041,7 @@ def
 }
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_l0_to_l1::{impl core::ops::function::FnMut<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), bool> for pedra_aeneas_leveling_kernel::pick_l0_to_l1::closure#2<'_0, '_1>}]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 767:16-767:50 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 769:16-769:50 -/
 @[reducible]
 def
   pick_l0_to_l1.closure_2.Insts.CoreOpsFunctionFnMutTupleSharedSharedLevelFileBool
@@ -1053,12 +1053,12 @@ def
 }
 
 /-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1::closure#1]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 764:33-764:52 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 766:33-766:52 -/
 @[reducible]
 def pick_l0_to_l1.closure_1 := Unit
 
 /-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1::{impl core::ops::function::FnMut<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), &'_ [u8]> for pedra_aeneas_leveling_kernel::pick_l0_to_l1::closure#1}::call_mut]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 764:33-764:52 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 766:33-766:52 -/
 def
   pick_l0_to_l1.closure_1.Insts.CoreOpsFunctionFnMutTupleSharedSharedLevelFileSharedSliceU8.call_mut
   (c : pick_l0_to_l1.closure_1) (tupled_args : LevelFile) :
@@ -1068,7 +1068,7 @@ def
   ok (s, c)
 
 /-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1::{impl core::ops::function::FnOnce<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), &'_ [u8]> for pedra_aeneas_leveling_kernel::pick_l0_to_l1::closure#1}::call_once]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 764:33-764:52 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 766:33-766:52 -/
 def
   pick_l0_to_l1.closure_1.Insts.CoreOpsFunctionFnOnceTupleSharedSharedLevelFileSharedSliceU8.call_once
   (c : pick_l0_to_l1.closure_1) (lf : LevelFile) : Result (Slice Std.U8) := do
@@ -1078,7 +1078,7 @@ def
   ok s
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_l0_to_l1::{impl core::ops::function::FnOnce<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), &'_ [u8]> for pedra_aeneas_leveling_kernel::pick_l0_to_l1::closure#1}]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 764:33-764:52 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 766:33-766:52 -/
 @[reducible]
 def
   pick_l0_to_l1.closure_1.Insts.CoreOpsFunctionFnOnceTupleSharedSharedLevelFileSharedSliceU8
@@ -1089,7 +1089,7 @@ def
 }
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_l0_to_l1::{impl core::ops::function::FnMut<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), &'_ [u8]> for pedra_aeneas_leveling_kernel::pick_l0_to_l1::closure#1}]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 764:33-764:52 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 766:33-766:52 -/
 @[reducible]
 def
   pick_l0_to_l1.closure_1.Insts.CoreOpsFunctionFnMutTupleSharedSharedLevelFileSharedSliceU8
@@ -1102,12 +1102,12 @@ def
 }
 
 /-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1::closure]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 763:33-763:52 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 765:33-765:52 -/
 @[reducible]
 def pick_l0_to_l1.closure := Unit
 
 /-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1::{impl core::ops::function::FnMut<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), &'_ [u8]> for pedra_aeneas_leveling_kernel::pick_l0_to_l1::closure}::call_mut]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 763:33-763:52 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 765:33-765:52 -/
 def
   pick_l0_to_l1.closure.Insts.CoreOpsFunctionFnMutTupleSharedSharedLevelFileSharedSliceU8.call_mut
   (c : pick_l0_to_l1.closure) (tupled_args : LevelFile) :
@@ -1117,7 +1117,7 @@ def
   ok (s, c)
 
 /-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1::{impl core::ops::function::FnOnce<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), &'_ [u8]> for pedra_aeneas_leveling_kernel::pick_l0_to_l1::closure}::call_once]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 763:33-763:52 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 765:33-765:52 -/
 def
   pick_l0_to_l1.closure.Insts.CoreOpsFunctionFnOnceTupleSharedSharedLevelFileSharedSliceU8.call_once
   (c : pick_l0_to_l1.closure) (lf : LevelFile) : Result (Slice Std.U8) := do
@@ -1127,7 +1127,7 @@ def
   ok s
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_l0_to_l1::{impl core::ops::function::FnOnce<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), &'_ [u8]> for pedra_aeneas_leveling_kernel::pick_l0_to_l1::closure}]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 763:33-763:52 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 765:33-765:52 -/
 @[reducible]
 def
   pick_l0_to_l1.closure.Insts.CoreOpsFunctionFnOnceTupleSharedSharedLevelFileSharedSliceU8
@@ -1138,7 +1138,7 @@ def
 }
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_l0_to_l1::{impl core::ops::function::FnMut<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), &'_ [u8]> for pedra_aeneas_leveling_kernel::pick_l0_to_l1::closure}]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 763:33-763:52 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 765:33-765:52 -/
 @[reducible]
 def
   pick_l0_to_l1.closure.Insts.CoreOpsFunctionFnMutTupleSharedSharedLevelFileSharedSliceU8
@@ -1150,7 +1150,7 @@ def
 }
 
 /-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 754:0-774:1 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 756:0-773:1 -/
 @[rust_loop_body]
 def pick_l0_sel_loop.body
   (l0 : Slice LevelFile) (n : Std.Usize)
@@ -1261,12 +1261,12 @@ def pick_l0_to_l1
       ok (some (sel, slice))
 
 /-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::closure#1]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 789:22-789:31 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 788:22-788:31 -/
 @[reducible]
 def pick_l0_to_l1_as_is_whole_level.closure_1 := Unit
 
 /-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::{impl core::ops::function::FnMut<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::closure#1}::call_mut]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 789:22-789:31 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 788:22-788:31 -/
 def
   pick_l0_to_l1_as_is_whole_level.closure_1.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileUsize.call_mut
   (c : pick_l0_to_l1_as_is_whole_level.closure_1) (tupled_args : LevelFile) :
@@ -1275,7 +1275,7 @@ def
   ok (tupled_args.idx, c)
 
 /-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::{impl core::ops::function::FnOnce<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::closure#1}::call_once]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 789:22-789:31 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 788:22-788:31 -/
 def
   pick_l0_to_l1_as_is_whole_level.closure_1.Insts.CoreOpsFunctionFnOnceTupleSharedLevelFileUsize.call_once
   (c : pick_l0_to_l1_as_is_whole_level.closure_1) (lf : LevelFile) :
@@ -1287,7 +1287,7 @@ def
   ok i
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::{impl core::ops::function::FnOnce<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::closure#1}]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 789:22-789:31 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 788:22-788:31 -/
 @[reducible]
 def
   pick_l0_to_l1_as_is_whole_level.closure_1.Insts.CoreOpsFunctionFnOnceTupleSharedLevelFileUsize
@@ -1298,7 +1298,7 @@ def
 }
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::{impl core::ops::function::FnMut<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::closure#1}]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 789:22-789:31 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 788:22-788:31 -/
 @[reducible]
 def
   pick_l0_to_l1_as_is_whole_level.closure_1.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileUsize
@@ -1311,12 +1311,12 @@ def
 }
 
 /-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::closure]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 788:22-788:31 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 787:22-787:31 -/
 @[reducible]
 def pick_l0_to_l1_as_is_whole_level.closure := Unit
 
 /-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::{impl core::ops::function::FnMut<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::closure}::call_mut]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 788:22-788:31 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 787:22-787:31 -/
 def
   pick_l0_to_l1_as_is_whole_level.closure.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileUsize.call_mut
   (c : pick_l0_to_l1_as_is_whole_level.closure) (tupled_args : LevelFile) :
@@ -1325,7 +1325,7 @@ def
   ok (tupled_args.idx, c)
 
 /-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::{impl core::ops::function::FnOnce<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::closure}::call_once]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 788:22-788:31 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 787:22-787:31 -/
 def
   pick_l0_to_l1_as_is_whole_level.closure.Insts.CoreOpsFunctionFnOnceTupleSharedLevelFileUsize.call_once
   (c : pick_l0_to_l1_as_is_whole_level.closure) (lf : LevelFile) :
@@ -1337,7 +1337,7 @@ def
   ok i
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::{impl core::ops::function::FnOnce<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::closure}]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 788:22-788:31 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 787:22-787:31 -/
 @[reducible]
 def
   pick_l0_to_l1_as_is_whole_level.closure.Insts.CoreOpsFunctionFnOnceTupleSharedLevelFileUsize
@@ -1348,7 +1348,7 @@ def
 }
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::{impl core::ops::function::FnMut<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::closure}]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 788:22-788:31 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 787:22-787:31 -/
 @[reducible]
 def
   pick_l0_to_l1_as_is_whole_level.closure.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileUsize
@@ -1361,7 +1361,7 @@ def
 }
 
 /-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 780:0-791:1 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 779:0-790:1 -/
 @[rust_loop_body]
 def pick_idx_loop.body
   (files : Slice LevelFile) (out : alloc.vec.Vec Std.Usize) (i : Std.Usize) :
@@ -1399,12 +1399,12 @@ def pick_l0_to_l1_as_is_whole_level
     ok (some (v, v1))
 
 /-- [pedra_aeneas_leveling_kernel::pick_pushdown::closure#1]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 822:13-822:22 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 818:13-818:22 -/
 @[reducible]
 def pick_pushdown.closure_1 := Unit
 
 /-- [pedra_aeneas_leveling_kernel::pick_pushdown::{impl core::ops::function::FnMut<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_pushdown::closure#1}::call_mut]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 822:13-822:22 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 818:13-818:22 -/
 def
   pick_pushdown.closure_1.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileUsize.call_mut
   (c : pick_pushdown.closure_1) (tupled_args : LevelFile) :
@@ -1413,7 +1413,7 @@ def
   ok (tupled_args.idx, c)
 
 /-- [pedra_aeneas_leveling_kernel::pick_pushdown::{impl core::ops::function::FnOnce<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_pushdown::closure#1}::call_once]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 822:13-822:22 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 818:13-818:22 -/
 def
   pick_pushdown.closure_1.Insts.CoreOpsFunctionFnOnceTupleSharedLevelFileUsize.call_once
   (c : pick_pushdown.closure_1) (lf : LevelFile) : Result Std.Usize := do
@@ -1423,7 +1423,7 @@ def
   ok i
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_pushdown::{impl core::ops::function::FnOnce<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_pushdown::closure#1}]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 822:13-822:22 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 818:13-818:22 -/
 @[reducible]
 def
   pick_pushdown.closure_1.Insts.CoreOpsFunctionFnOnceTupleSharedLevelFileUsize
@@ -1433,7 +1433,7 @@ def
 }
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_pushdown::{impl core::ops::function::FnMut<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_pushdown::closure#1}]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 822:13-822:22 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 818:13-818:22 -/
 @[reducible]
 def pick_pushdown.closure_1.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileUsize
   : core.ops.function.FnMut pick_pushdown.closure_1 LevelFile Std.Usize := {
@@ -1444,11 +1444,11 @@ def pick_pushdown.closure_1.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileUsize
 }
 
 /-- [pedra_aeneas_leveling_kernel::pick_pushdown::closure]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 821:16-821:54 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 817:16-817:54 -/
 def pick_pushdown.closure := alloc.vec.Vec Std.U8 × alloc.vec.Vec Std.U8
 
 /-- [pedra_aeneas_leveling_kernel::pick_pushdown::{impl core::ops::function::FnMut<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), bool> for pedra_aeneas_leveling_kernel::pick_pushdown::closure<'_0, '_1>}::call_mut]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 821:16-821:54 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 817:16-817:54 -/
 def
   pick_pushdown.closure.Insts.CoreOpsFunctionFnMutTupleSharedSharedLevelFileBool.call_mut
   (c : pick_pushdown.closure) (tupled_args : LevelFile) :
@@ -1461,7 +1461,7 @@ def
   ok (b, c)
 
 /-- [pedra_aeneas_leveling_kernel::pick_pushdown::{impl core::ops::function::FnOnce<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), bool> for pedra_aeneas_leveling_kernel::pick_pushdown::closure<'_0, '_1>}::call_once]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 821:16-821:54 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 817:16-817:54 -/
 def
   pick_pushdown.closure.Insts.CoreOpsFunctionFnOnceTupleSharedSharedLevelFileBool.call_once
   (c : pick_pushdown.closure) (lf : LevelFile) : Result Bool := do
@@ -1471,7 +1471,7 @@ def
   ok b
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_pushdown::{impl core::ops::function::FnOnce<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), bool> for pedra_aeneas_leveling_kernel::pick_pushdown::closure<'_0, '_1>}]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 821:16-821:54 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 817:16-817:54 -/
 @[reducible]
 def
   pick_pushdown.closure.Insts.CoreOpsFunctionFnOnceTupleSharedSharedLevelFileBool
@@ -1481,7 +1481,7 @@ def
 }
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_pushdown::{impl core::ops::function::FnMut<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), bool> for pedra_aeneas_leveling_kernel::pick_pushdown::closure<'_0, '_1>}]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 821:16-821:54 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 817:16-817:54 -/
 @[reducible]
 def
   pick_pushdown.closure.Insts.CoreOpsFunctionFnMutTupleSharedSharedLevelFileBool
@@ -1493,7 +1493,7 @@ def
 }
 
 /-- [pedra_aeneas_leveling_kernel::pick_pushdown]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 811:0-825:1 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 810:0-821:1 -/
 def pick_pushdown
   (src : Slice LevelFile) (dst : Slice LevelFile) :
   Result (Option (Std.Usize × (alloc.vec.Vec Std.Usize)))
@@ -1513,12 +1513,12 @@ def pick_pushdown
     else ok none
 
 /-- [pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::closure#1]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 840:13-840:22 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 836:13-836:22 -/
 @[reducible]
 def pick_pushdown_as_is_blind.closure_1 := Unit
 
 /-- [pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::{impl core::ops::function::FnMut<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::closure#1}::call_mut]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 840:13-840:22 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 836:13-836:22 -/
 def
   pick_pushdown_as_is_blind.closure_1.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileUsize.call_mut
   (c : pick_pushdown_as_is_blind.closure_1) (tupled_args : LevelFile) :
@@ -1527,7 +1527,7 @@ def
   ok (tupled_args.idx, c)
 
 /-- [pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::{impl core::ops::function::FnOnce<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::closure#1}::call_once]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 840:13-840:22 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 836:13-836:22 -/
 def
   pick_pushdown_as_is_blind.closure_1.Insts.CoreOpsFunctionFnOnceTupleSharedLevelFileUsize.call_once
   (c : pick_pushdown_as_is_blind.closure_1) (lf : LevelFile) :
@@ -1539,7 +1539,7 @@ def
   ok i
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::{impl core::ops::function::FnOnce<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::closure#1}]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 840:13-840:22 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 836:13-836:22 -/
 @[reducible]
 def
   pick_pushdown_as_is_blind.closure_1.Insts.CoreOpsFunctionFnOnceTupleSharedLevelFileUsize
@@ -1550,7 +1550,7 @@ def
 }
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::{impl core::ops::function::FnMut<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::closure#1}]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 840:13-840:22 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 836:13-836:22 -/
 @[reducible]
 def
   pick_pushdown_as_is_blind.closure_1.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileUsize
@@ -1563,12 +1563,12 @@ def
 }
 
 /-- [pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::closure]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 839:16-839:54 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 835:16-835:54 -/
 def pick_pushdown_as_is_blind.closure :=
   alloc.vec.Vec Std.U8 × alloc.vec.Vec Std.U8
 
 /-- [pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::{impl core::ops::function::FnMut<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), bool> for pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::closure<'_0, '_1>}::call_mut]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 839:16-839:54 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 835:16-835:54 -/
 def
   pick_pushdown_as_is_blind.closure.Insts.CoreOpsFunctionFnMutTupleSharedSharedLevelFileBool.call_mut
   (c : pick_pushdown_as_is_blind.closure) (tupled_args : LevelFile) :
@@ -1581,7 +1581,7 @@ def
   ok (b, c)
 
 /-- [pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::{impl core::ops::function::FnOnce<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), bool> for pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::closure<'_0, '_1>}::call_once]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 839:16-839:54 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 835:16-835:54 -/
 def
   pick_pushdown_as_is_blind.closure.Insts.CoreOpsFunctionFnOnceTupleSharedSharedLevelFileBool.call_once
   (c : pick_pushdown_as_is_blind.closure) (lf : LevelFile) : Result Bool := do
@@ -1591,7 +1591,7 @@ def
   ok b
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::{impl core::ops::function::FnOnce<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), bool> for pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::closure<'_0, '_1>}]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 839:16-839:54 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 835:16-835:54 -/
 @[reducible]
 def
   pick_pushdown_as_is_blind.closure.Insts.CoreOpsFunctionFnOnceTupleSharedSharedLevelFileBool
@@ -1602,7 +1602,7 @@ def
 }
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::{impl core::ops::function::FnMut<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), bool> for pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::closure<'_0, '_1>}]
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 839:16-839:54 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 835:16-835:54 -/
 @[reducible]
 def
   pick_pushdown_as_is_blind.closure.Insts.CoreOpsFunctionFnMutTupleSharedSharedLevelFileBool
@@ -1615,7 +1615,7 @@ def
 }
 
 /-- [pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind]:
-    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 832:0-843:1 -/
+    Source: '../../../crates/pedradb-core/src/leveling.rs', lines 828:0-839:1 -/
 def pick_pushdown_as_is_blind
   (src : Slice LevelFile) (dst : Slice LevelFile) :
   Result (Option (Std.Usize × (alloc.vec.Vec Std.Usize)))

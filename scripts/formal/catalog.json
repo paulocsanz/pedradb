@@ -5337,6 +5337,35 @@
       "three_teeth": true
     },
     {
+      "id": "sst_magic",
+      "finding": "RFC-0186 P2.2",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/sst/magic_kernel.rs",
+      "twin": "crates/pedradb-core/src/sst/magic_kernel.rs",
+      "verus": "scripts/verus_sst_magic.sh",
+      "callers": [
+        "crates/pedradb-core/src/sst/table.rs",
+        "crates/pedradb-ops/src/dir_kind.rs"
+      ],
+      "entry": "sst_magic_is_pedra",
+      "as_is": "sst_magic_is_pedra_as_is",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/sst/table.rs",
+          "handler": "decode"
+        },
+        {
+          "file": "crates/pedradb-ops/src/dir_kind.rs",
+          "handler": "classify_dir_env"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/sst/magic_kernel.rs",
+        "test": "sst_magic_as_is_admits_cpp_header"
+      }
+    },
+    {
       "id": "is_length_resyncable",
       "finding": "F4",
       "twin_kind": "close",

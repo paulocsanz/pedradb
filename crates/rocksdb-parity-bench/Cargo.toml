@@ -31,3 +31,7 @@ path = "src/bin/rocks_parity_bench.rs"
 [[bin]]
 name = "rocks-parity-compare"
 path = "src/bin/rocks_parity_compare.rs"
+
+[[bin]]
+name = "rocks-parity-column-a"
+path = "src/bin/rocks_parity_column_a.rs"

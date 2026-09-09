@@ -366,7 +366,6 @@ proof fn lemma_pin_keeps_version_as_is_drops(
 }
 } // verus!
 
-
 /// Target size of one merged compaction output SST (the Rocks
 /// `target_file_size_base` role). The SST writer buffers one output
 /// file's compressed bytes in memory before the final write, so merging

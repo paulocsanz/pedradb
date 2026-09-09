@@ -31,6 +31,7 @@
    "crates/pedradb-core/src/group_commit_kernel.rs",
    "crates/pedradb-core/src/leveling.rs",
    "crates/pedradb-core/src/manifest_kernel.rs",
+   "crates/pedradb-core/src/sst/magic_kernel.rs",
    "crates/pedradb-core/src/sst/scan_kernel.rs",
    "crates/pedradb-core/src/vlog_gc_kernel.rs",
    "crates/pedradb-core/src/wal/recover_kernel.rs",
@@ -75,8 +76,8 @@
    "crates/pedradb-raft/src/c1_modelo_kernel.rs",
    "crates/pedradb-world/src/world_kernel.rs"
   ],
-  "kernel_files": 58,
-  "kernel_loc": 26446,
+  "kernel_files": 59,
+  "kernel_loc": 26553,
   "handler_loc": 109964,
   "db_rs_extracted": false,
   "proof_depth": {
@@ -133,7 +134,7 @@
     "tx_state_of"
    ]
   },
-  "single_artifact": 142,
+  "single_artifact": 143,
   "data_fate": 130
  },
  "residuals": [

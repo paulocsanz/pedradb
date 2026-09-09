@@ -11,8 +11,8 @@ use std::time::Instant;
 
 use pedradb_core::scale_kernel::{
     happy_hot_bps, point_get_probes, predict_get_ns, probes_worst, SCALE_BPS,
-    SCALE_BYTES_PER_ENTRY, SCALE_HAPPY_NOISY_BPS, SCALE_L0_BEST, SCALE_L0_WORST,
-    SCALE_TAU_DISK_NS, SCALE_TAU_RAM_NS, SCALE_WORST_NOISY_BPS,
+    SCALE_BYTES_PER_ENTRY, SCALE_HAPPY_NOISY_BPS, SCALE_L0_BEST, SCALE_L0_WORST, SCALE_TAU_DISK_NS,
+    SCALE_TAU_RAM_NS, SCALE_WORST_NOISY_BPS,
 };
 use pedradb_core::{Db, OpenOptions};
 

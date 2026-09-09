@@ -22,8 +22,9 @@
 
 #![forbid(unsafe_code)]
 
-use crate::env_crash_kernel::{crash_legal, crash_legal_as_is, sync as env_sync, CrashModel,
-    SyncHonesty};
+use crate::env_crash_kernel::{
+    crash_legal, crash_legal_as_is, sync as env_sync, CrashModel, SyncHonesty,
+};
 use crate::wal::wal_state_kernel::{inv_wal, wal_ack, wal_append, wal_sync, WalState};
 
 /// Model write path of one put: append `rec_len` bytes, honest sync (the
@@ -116,8 +117,7 @@ mod tests {
         assert_eq!((bad.acked, bad.synced, bad.written), (96, 0, 96));
         assert!(!inv_wal(&bad), "as-is write path violates Inv-WAL");
         assert!(
-            crash_legal(CrashModel::of(bad.written, bad.synced), 0)
-                && 0 < 96,
+            crash_legal(CrashModel::of(bad.written, bad.synced), 0) && 0 < 96,
             "legal torn cut at 0 loses the as-is acked put"
         );
         assert!(d1_modelo(&bad, 96, 0), "corollary is vacuous off-contract");

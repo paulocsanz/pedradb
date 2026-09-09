@@ -713,8 +713,7 @@ mod tests {
             lead.contains("wal_sync_required("),
             "WriteGroup::lead catch-up must match wal_sync_required"
         );
-        let rs = named_fn_src(include_str!("concurrent.rs"), "resolve_sync")
-            .expect("resolve_sync");
+        let rs = named_fn_src(include_str!("concurrent.rs"), "resolve_sync").expect("resolve_sync");
         assert!(
             rs.contains("wal_sync_required("),
             "ConcurrentDb::resolve_sync must match wal_sync_required"
@@ -752,8 +751,8 @@ mod tests {
             absorb.contains("batch_is_empty("),
             "group_absorb must match batch_is_empty"
         );
-        let append = named_fn_src(include_str!("db.rs"), "group_append_ops")
-            .expect("group_append_ops");
+        let append =
+            named_fn_src(include_str!("db.rs"), "group_append_ops").expect("group_append_ops");
         assert!(
             append.contains("batch_is_empty("),
             "group_append_ops must match batch_is_empty"
@@ -763,8 +762,8 @@ mod tests {
             prep.contains("batch_is_empty("),
             "group_prepare must match batch_is_empty"
         );
-        let lone = named_fn_src(include_str!("db.rs"), "lone_sync_commit")
-            .expect("lone_sync_commit");
+        let lone =
+            named_fn_src(include_str!("db.rs"), "lone_sync_commit").expect("lone_sync_commit");
         assert!(
             lone.contains("batch_is_empty("),
             "lone_sync_commit must match batch_is_empty"
@@ -791,8 +790,8 @@ mod tests {
             occ.contains("batch_is_empty("),
             "apply_batch_occ_with must match batch_is_empty"
         );
-        let obs = named_fn_src(include_str!("db.rs"), "observe_bulk_batch")
-            .expect("observe_bulk_batch");
+        let obs =
+            named_fn_src(include_str!("db.rs"), "observe_bulk_batch").expect("observe_bulk_batch");
         assert!(
             obs.contains("batch_is_empty("),
             "observe_bulk_batch must match batch_is_empty"
@@ -814,8 +813,11 @@ mod tests {
             off.contains("batch_is_empty("),
             "finish_group_off_lock must match batch_is_empty"
         );
-        let fold = named_fn_src(include_str!("concurrent.rs"), "fold_retired_pending_off_lock")
-            .expect("fold_retired_pending_off_lock");
+        let fold = named_fn_src(
+            include_str!("concurrent.rs"),
+            "fold_retired_pending_off_lock",
+        )
+        .expect("fold_retired_pending_off_lock");
         assert!(
             fold.contains("batch_is_empty("),
             "fold_retired_pending_off_lock must match batch_is_empty"
@@ -851,8 +853,8 @@ mod tests {
             include_str!("write_admission_kernel.rs").contains("fence_on_sync_fail($need_sync"),
             "wal_commit_plan must call fence_on_sync_fail"
         );
-        let commit = named_fn_src(include_str!("db.rs"), "commit_ops_with")
-            .expect("commit_ops_with");
+        let commit =
+            named_fn_src(include_str!("db.rs"), "commit_ops_with").expect("commit_ops_with");
         assert!(
             commit.contains("wal_commit_plan("),
             "commit_ops_with must match the plan fn"
@@ -898,8 +900,8 @@ mod tests {
             torn.contains("fence_on_sync_fail("),
             "torn-tail WAL cut must match fence_on_sync_fail"
         );
-        let lone_sync = named_fn_src(include_str!("db.rs"), "lone_sync_commit")
-            .expect("lone_sync_commit");
+        let lone_sync =
+            named_fn_src(include_str!("db.rs"), "lone_sync_commit").expect("lone_sync_commit");
         assert!(
             lone_sync.contains("wal_commit_plan("),
             "lone_sync_commit must match the plan fn"
@@ -908,8 +910,7 @@ mod tests {
             lone_sync.contains("fence_on_sync_fail("),
             "lone_sync_commit must match fence_on_sync_fail"
         );
-        let group = named_fn_src(include_str!("db.rs"), "wal_sync_group")
-            .expect("wal_sync_group");
+        let group = named_fn_src(include_str!("db.rs"), "wal_sync_group").expect("wal_sync_group");
         assert!(
             group.contains("wal_commit_plan("),
             "wal_sync_group must match the plan fn"
@@ -930,8 +931,7 @@ mod tests {
             off.contains("wal_commit_plan("),
             "finish_group_off_lock must match wal_commit_plan"
         );
-        let finish = named_fn_src(include_str!("db.rs"), "group_finish")
-            .expect("group_finish");
+        let finish = named_fn_src(include_str!("db.rs"), "group_finish").expect("group_finish");
         assert!(
             finish.contains("wal_commit_plan("),
             "group_finish must match the plan fn"
@@ -940,8 +940,8 @@ mod tests {
             finish.contains("fence_on_sync_fail("),
             "group_finish must match fence_on_sync_fail"
         );
-        let vlog = named_fn_src(include_str!("db.rs"), "vlog_prepare_wal")
-            .expect("vlog_prepare_wal");
+        let vlog =
+            named_fn_src(include_str!("db.rs"), "vlog_prepare_wal").expect("vlog_prepare_wal");
         assert!(
             vlog.contains("wal_commit_plan("),
             "vlog_prepare_wal must match the plan fn"
@@ -950,8 +950,7 @@ mod tests {
             vlog.contains("fence_on_sync_fail("),
             "vlog_prepare_wal must match fence_on_sync_fail"
         );
-        let sst = named_fn_src(include_str!("db.rs"), "fsync_sst_paths")
-            .expect("fsync_sst_paths");
+        let sst = named_fn_src(include_str!("db.rs"), "fsync_sst_paths").expect("fsync_sst_paths");
         assert!(
             sst.contains("wal_commit_plan("),
             "fsync_sst_paths must match the plan fn"
@@ -987,8 +986,7 @@ mod tests {
             close.contains("vlog_prepare_wal("),
             "Db::close must prepare vlog through the plan helper"
         );
-        let rot = named_fn_src(include_str!("db.rs"), "rotate_wal_now")
-            .expect("rotate_wal_now");
+        let rot = named_fn_src(include_str!("db.rs"), "rotate_wal_now").expect("rotate_wal_now");
         assert!(
             rot.contains("wal_commit_plan("),
             "rotate_wal_now must match the plan fn"

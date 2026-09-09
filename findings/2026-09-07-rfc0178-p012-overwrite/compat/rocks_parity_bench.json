@@ -1,0 +1,25 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "compat",
+  "sync": false,
+  "peer_policy": "rocks-default",
+  "durability": "async-wal (PEDRA_PARITY_ASYNC=1; WAL write, no fdatasync — NOT G1, not official)",
+  "changelog_interval": 0,
+  "status": "ok",
+  "notes": ["ycsb records=1024 ops=10000 payload=100 dist=uniform", "engine=compat durability=async-wal (PEDRA_PARITY_ASYNC=1; WAL write, no fdatasync — NOT G1, not official)", "suites: ycsb", "seed: one put per record (not timed)", "clients ladder: [4]", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=0", "peer_policy=rocks-default", "host-default write sync: kvrocks=false myrocks=true surreal=true"],
+  "benches": [
+{
+    "name": "deps_cache_overwrite_mc4",
+    "n": 40000,
+    "qps": 151927.701,
+    "p50_ms": 0.0220,
+    "p95_ms": 0.0455,
+    "p99_ms": 0.0704,
+    "p999_ms": 0.1310,
+    "max_ms": 0.8065,
+    "clients": 4,
+    "errors": 0,
+    "wall_s": 0.2633
+  }
+  ]
+}

@@ -40,6 +40,12 @@ Surface is locked to **exactly two** modes: kernel `FailClosed`, compat `PointIn
 
 `ingest_external_file` **is** implemented (WAL+flush, not a Rocks SST hardlink). Compaction filters run on `DB::compact`.
 
+A Rocks C++ directory is **not** openable as Pedra ([RFC-0186](../rfc/0186-rocks-to-pedra-v5-migrate.md)). Copy the visible snapshot:
+
+```sh
+cargo run -p pedradb-cli --features from-rocks -- migrate-from-rocks /path/to/rocks /path/to/pedra
+```
+
 ## Encrypt at rest
 
 **Permanent:** LUKS, FileVault, or cloud volume encryption. The engine **never** implements encrypt-at-rest inside the LSM (RFC-0062 P2.2 as documentation, not a cipher).

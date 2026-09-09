@@ -9,13 +9,16 @@ use pedradb_core::{
     OpenOptions, SequenceNumber, StdEnv, VlogRewriteStats, PROFILE_VERSION,
 };
 use pedradb_io_uring::{open_with as open_db_with, production_env, IoUringEnv};
-use pedradb_ops::{inspect_format, migrate_to_latest, restore_history_from_remote, BackupEngine};
+use pedradb_ops::{
+    classify_dir, inspect_format, migrate_from_rocks, migrate_to_latest,
+    restore_history_from_remote, BackupEngine, DirKind, NOT_DROPIN,
+};
 
 fn main() -> std::process::ExitCode {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         eprintln!(
-            "usage: pedra <demo|wal|version|backup|restore|pitr|ship-wal|list-backups|verify-backup|verify|archive|inspect|stats|scale-model|compact|reclaim|maintain|compact-vlog|compact-blob|blob-gc|migrate> [args...]"
+            "usage: pedra <demo|wal|version|backup|restore|pitr|ship-wal|list-backups|verify-backup|verify|archive|inspect|stats|scale-model|compact|reclaim|maintain|compact-vlog|compact-blob|blob-gc|migrate|migrate-from-rocks> [args...]"
         );
         eprintln!(
             "env: PEDRA_VERIFIED=1 runs every command on the verified profile (RFC-0058 P2.3)"
@@ -53,6 +56,7 @@ fn main() -> std::process::ExitCode {
         "compact-blob" => compact_blob_cmd(&args[2..]),
         "blob-gc" => blob_gc_cmd(&args[2..]),
         "migrate" => migrate_cmd(&args[2..]),
+        "migrate-from-rocks" => migrate_from_rocks_cmd(&args[2..]),
         other => {
             eprintln!("unknown command: {other}");
             std::process::ExitCode::from(2)
@@ -1028,21 +1032,34 @@ fn inspect_cmd(args: &[String]) -> std::process::ExitCode {
         eprintln!("usage: pedra inspect <db_path>");
         return std::process::ExitCode::from(2);
     }
-    match inspect_format(&args[0]) {
-        Ok(r) => {
-            println!("has_manifest={}", r.has_manifest);
-            println!("sst_count={}", r.sst_count);
-            println!("needs_migration={}", r.needs_migration);
-            println!("current_crc={}", r.current_crc);
-            println!(
-                "earliest_readable={} vlog_use_new={}",
-                r.earliest_readable_seq, r.vlog_use_new
-            );
-            for (num, ver) in &r.sst_versions {
-                println!("  sst {num:06} version={ver}");
-            }
-            std::process::ExitCode::SUCCESS
+    match classify_dir(&args[0]) {
+        Ok(DirKind::Rocks) => {
+            println!("kind=rocks");
+            eprintln!("{NOT_DROPIN}");
+            std::process::ExitCode::FAILURE
         }
+        Ok(_) => match inspect_format(&args[0]) {
+            Ok(r) => {
+                println!("kind={}", r.kind.as_str());
+                println!("manifest_format={}", r.manifest_format);
+                println!("has_manifest={}", r.has_manifest);
+                println!("sst_count={}", r.sst_count);
+                println!("needs_migration={}", r.needs_migration);
+                println!("current_crc={}", r.current_crc);
+                println!(
+                    "earliest_readable={} vlog_use_new={}",
+                    r.earliest_readable_seq, r.vlog_use_new
+                );
+                for (num, ver) in &r.sst_versions {
+                    println!("  sst {num:06} version={ver}");
+                }
+                std::process::ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                std::process::ExitCode::FAILURE
+            }
+        },
         Err(e) => {
             eprintln!("error: {e}");
             std::process::ExitCode::FAILURE
@@ -1053,13 +1070,45 @@ fn inspect_cmd(args: &[String]) -> std::process::ExitCode {
 fn migrate_cmd(args: &[String]) -> std::process::ExitCode {
     if args.is_empty() {
         eprintln!("usage: pedra migrate <db_path>");
+        eprintln!("Pedra→Pedra SST rewrite. Rocks C++ dir: `pedra migrate-from-rocks <src> <dst>`");
         return std::process::ExitCode::from(2);
+    }
+    if let Ok(DirKind::Rocks) = classify_dir(&args[0]) {
+        eprintln!("{NOT_DROPIN}");
+        return std::process::ExitCode::FAILURE;
     }
     match migrate_to_latest(&args[0]) {
         Ok(m) => {
             println!(
                 "migrated ssts_rewritten={} last_seq={} verified={}",
                 m.ssts_rewritten, m.last_sequence, m.verified
+            );
+            std::process::ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+fn migrate_from_rocks_cmd(args: &[String]) -> std::process::ExitCode {
+    if args.len() < 2 {
+        eprintln!("usage: pedra migrate-from-rocks <rocks_dir> <pedra_dir>");
+        eprintln!("{NOT_DROPIN}");
+        return std::process::ExitCode::from(2);
+    }
+    match migrate_from_rocks(&args[0], &args[1]) {
+        Ok(m) => {
+            println!(
+                "migrated-from-rocks keys={} bytes={} ssts_written={} last_seq={} sst_version={} cfs={} verified={}",
+                m.keys,
+                m.bytes,
+                m.ssts_written,
+                m.last_sequence,
+                m.sst_version,
+                m.cfs.join(","),
+                m.verified
             );
             std::process::ExitCode::SUCCESS
         }

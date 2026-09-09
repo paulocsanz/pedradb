@@ -40,5 +40,39 @@ fn pedra_inspect_reports_current_crc_ok() {
         stdout.contains("current_crc=ok"),
         "flushed CURRENT must report crc ok: {stdout}"
     );
+    assert!(
+        stdout.contains("kind=pedra"),
+        "Pedra demo dir must classify as pedra: {stdout}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// RFC-0186 P0.2: inspect of a C++-shaped dir names the not-drop-in contract.
+#[test]
+fn pedra_inspect_refuses_rocks_dir() {
+    let dir = scratch("rocks");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("IDENTITY"), b"cli-rocks").unwrap();
+    std::fs::write(dir.join("CURRENT"), b"MANIFEST-000001\n").unwrap();
+    std::fs::write(dir.join("MANIFEST-000001"), b"RLOG").unwrap();
+    std::fs::write(dir.join("000001.sst"), vec![0xABu8; 32]).unwrap();
+    let out = pedra()
+        .args(["inspect", dir.to_str().unwrap()])
+        .output()
+        .expect("inspect");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success(),
+        "inspect of Rocks dir must fail\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("kind=rocks"),
+        "must label the dir: {stdout}"
+    );
+    assert!(
+        stderr.contains("not drop-in"),
+        "must name the contract: {stderr}"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

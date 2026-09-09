@@ -71,7 +71,6 @@ proof fn lemma_prefix_is_not_ok()
 
 } // verus!
 
-
 #[cfg(not(verus_keep_ghost))]
 use bytes::Bytes;
 
@@ -241,7 +240,9 @@ impl WriteRecord {
                 value,
             });
         }
-        if !crate::write_admission_kernel::batch_is_empty(cur.data.len().saturating_sub(cur.pos) as u64) {
+        if !crate::write_admission_kernel::batch_is_empty(
+            cur.data.len().saturating_sub(cur.pos) as u64
+        ) {
             return Err(CoreError::Internal(
                 "trailing bytes after write record".into(),
             ));

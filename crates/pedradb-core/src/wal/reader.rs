@@ -201,7 +201,10 @@ impl<R: Read> WalReader<R> {
             let payload = &self.block[payload_start..payload_end];
             self.block_cursor = payload_end;
 
-            match fragment_act(FragKind::from_record_type(rtype), crate::write_admission_kernel::batch_is_empty(self.scratch.len() as u64)) {
+            match fragment_act(
+                FragKind::from_record_type(rtype),
+                crate::write_admission_kernel::batch_is_empty(self.scratch.len() as u64),
+            ) {
                 FragAct::Yield => {
                     if rtype == RecordType::Full {
                         self.scratch.clear();

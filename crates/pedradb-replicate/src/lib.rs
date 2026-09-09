@@ -53,6 +53,24 @@ pub enum ShipError {
     /// PedraDB open/recover on the replica failed.
     #[error("replica open: {0}")]
     ReplicaOpen(#[from] pedradb_core::CoreError),
+    /// Replica filesystem is below the hard free-space floor (RFC-0179).
+    /// Not a durability fence on the primary; this append did not run.
+    #[error("disk pressure: {available} bytes free (need {need} to write)")]
+    DiskPressure {
+        /// Bytes the probe reported free.
+        available: u64,
+        /// Hard floor that was missed.
+        need: u64,
+    },
+}
+
+fn ship_from_core(err: pedradb_core::CoreError) -> ShipError {
+    match err {
+        pedradb_core::CoreError::DiskPressure { available, need } => {
+            ShipError::DiskPressure { available, need }
+        }
+        other => ShipError::ReplicaOpen(other),
+    }
 }
 
 /// Result alias for ship operations.
@@ -268,6 +286,7 @@ pub fn append_wal_bytes_on<E: Env>(
         return Ok(());
     }
     let dir = replica_dir.as_ref();
+    pedradb_core::admit_disk_write(env, dir).map_err(ship_from_core)?;
     env.create_dir_all(dir)?;
     let path = dir.join(WAL_FILE_NAME);
     let mut f = env.open_append(&path)?;
@@ -296,7 +315,13 @@ pub fn catch_up_on<E: Env>(
     replica_dir: impl AsRef<Path>,
 ) -> ShipResult<usize> {
     let mut total = 0usize;
-    while let Some(chunk) = shipper.pull_on(env)? {
+    loop {
+        // Admit before pull so a refuse does not skip bytes the cursor
+        // already consumed (RFC-0179 HA replica).
+        pedradb_core::admit_disk_write(env, replica_dir.as_ref()).map_err(ship_from_core)?;
+        let Some(chunk) = shipper.pull_on(env)? else {
+            break;
+        };
         let n = chunk.len();
         append_wal_bytes_on(env, replica_dir.as_ref(), &chunk)?;
         total += n;
@@ -693,6 +718,119 @@ mod tests {
             "expected sync failure, got {err}"
         );
         assert!(env.tripped());
+        let _ = std::fs::remove_dir_all(&replica);
+    }
+
+    /// RFC-0179: inject free-space via `Env::available_bytes`. `u64::MAX` = unknown.
+    #[derive(Clone)]
+    struct SpaceEnv {
+        available: std::sync::Arc<AtomicU64>,
+    }
+
+    impl Env for SpaceEnv {
+        type File = std::fs::File;
+
+        fn create_dir_all(&self, path: &Path) -> std::io::Result<()> {
+            pedradb_core::StdEnv.create_dir_all(path)
+        }
+        fn create(&self, path: &Path) -> std::io::Result<Self::File> {
+            pedradb_core::StdEnv.create(path)
+        }
+        fn open_append(&self, path: &Path) -> std::io::Result<Self::File> {
+            pedradb_core::StdEnv.open_append(path)
+        }
+        fn open_read(&self, path: &Path) -> std::io::Result<Self::File> {
+            pedradb_core::StdEnv.open_read(path)
+        }
+        fn sync_dir(&self, path: &Path) -> std::io::Result<()> {
+            pedradb_core::StdEnv.sync_dir(path)
+        }
+        fn read_dir_names(&self, path: &Path) -> std::io::Result<Vec<String>> {
+            pedradb_core::StdEnv.read_dir_names(path)
+        }
+        fn remove_file(&self, path: &Path) -> std::io::Result<()> {
+            pedradb_core::StdEnv.remove_file(path)
+        }
+        fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+            pedradb_core::StdEnv.rename(from, to)
+        }
+        fn exists(&self, path: &Path) -> bool {
+            pedradb_core::StdEnv.exists(path)
+        }
+        fn metadata_len(&self, path: &Path) -> std::io::Result<u64> {
+            pedradb_core::StdEnv.metadata_len(path)
+        }
+        fn available_bytes(&self, _path: &Path) -> std::io::Result<Option<u64>> {
+            let n = self.available.load(Ordering::SeqCst);
+            if n == u64::MAX {
+                Ok(None)
+            } else {
+                Ok(Some(n))
+            }
+        }
+    }
+
+    /// RFC-0179 P1: HA replica append below the hard floor is DiskPressure;
+    /// the replica WAL is not torn.
+    #[test]
+    fn replica_append_under_hard_floor_is_disk_pressure() {
+        let replica = temp_dir("r-disk");
+        let available = std::sync::Arc::new(AtomicU64::new(u64::MAX));
+        let env = SpaceEnv {
+            available: std::sync::Arc::clone(&available),
+        };
+        append_wal_bytes_on(&env, &replica, b"wal-bytes").unwrap();
+        assert!(replica.join(WAL_FILE_NAME).exists());
+
+        available.store(1024, Ordering::SeqCst);
+        let err = append_wal_bytes_on(&env, &replica, b"more-wal");
+        assert!(
+            matches!(
+                err,
+                Err(ShipError::DiskPressure {
+                    available: 1024,
+                    need: pedradb_core::DISK_HARD_FREE_BYTES,
+                })
+            ),
+            "expected DiskPressure, got {err:?}"
+        );
+        let len = std::fs::metadata(replica.join(WAL_FILE_NAME))
+            .unwrap()
+            .len();
+        assert_eq!(len, b"wal-bytes".len() as u64, "refused append must not grow WAL");
+        let _ = std::fs::remove_dir_all(&replica);
+    }
+
+    /// RFC-0179 P1: catch_up refuses before pull so the shipper cursor does
+    /// not skip bytes the replica never received.
+    #[test]
+    fn catch_up_under_hard_floor_does_not_skip_cursor() {
+        let primary = temp_dir("p-disk");
+        let replica = temp_dir("r-disk-cu");
+        {
+            let mut db = open_primary(&primary);
+            db.put(b"k", b"v").unwrap();
+            db.close().unwrap();
+        }
+        let available = std::sync::Arc::new(AtomicU64::new(1024));
+        let env = SpaceEnv { available };
+        let mut shipper = WalShipper::from_start(&primary);
+        let before = shipper.offset();
+        let err = catch_up_on(&env, &mut shipper, &replica);
+        assert!(
+            matches!(err, Err(ShipError::DiskPressure { .. })),
+            "expected DiskPressure, got {err:?}"
+        );
+        assert_eq!(
+            shipper.offset(),
+            before,
+            "refuse must not advance the shipper cursor"
+        );
+        assert!(
+            !replica.join(WAL_FILE_NAME).exists(),
+            "replica WAL must not be created on refuse"
+        );
+        let _ = std::fs::remove_dir_all(&primary);
         let _ = std::fs::remove_dir_all(&replica);
     }
 }

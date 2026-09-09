@@ -830,7 +830,10 @@ mod tests {
     #[test]
     fn auto_flush_due_on_live_over_limit_is_not_ok() {
         assert!(auto_flush_due(100, true, 50));
-        assert!(!auto_flush_due_as_is(100, true, 50), "AS-IS dente: never fires");
+        assert!(
+            !auto_flush_due_as_is(100, true, 50),
+            "AS-IS dente: never fires"
+        );
         assert!(!auto_flush_due(10, true, 50));
         assert!(!auto_flush_due(100, false, 50), "unarmed never fires");
     }

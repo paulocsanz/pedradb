@@ -1,6 +1,6 @@
 # RFC-0176 — Modelo matemático de escala (um processo)
 
-**Status:** in-progress (P0+P1 done; P2.1 done; P2.2 open — caixa oficial)
+**Status:** done (P0–P2)
 **Updated:** 2026-09-07
 **ID:** 0176
 **Parents:** [0153](0153-ram-scale-block-cache-bytes.md),
@@ -123,7 +123,10 @@ Hot ⇔ \(S \le \mathrm{cap}(R)\), \(\mathrm{cap}(R)=\min(\max(3\,\mathrm{GiB},3
 
 - [x] **P2.1** Aeneas extract + Lean `Scale.lean` (as_is ∀; não mede µs) —
       status: `done` (`lake build Scale` green; `SOURCE.scale`)
-- [ ] **P2.2** Escada por regime na caixa oficial — status: `todo`
+- [x] **P2.2** Escada por regime na caixa oficial — status: `done`
+      (`linux-gate-p149b` 4 GiB: 10M `mode=hot` / 25M `mode=bounded-cache`;
+      [findings/2026-09-07-rfc0176-p22-official](../../findings/2026-09-07-rfc0176-p22-official/README.md);
+      não é DIAG local)
 
 ## Status (living — update with every PR)
 
@@ -135,7 +138,7 @@ Hot ⇔ \(S \le \mathrm{cap}(R)\), \(\mathrm{cap}(R)=\min(\max(3\,\mathrm{GiB},3
 | P1.1 | p1 | espectro + noisy + bench | done | `scale_spectrum` | 2026-09-07 |
 | P1.2 | p1 | CLI | done | `pedra scale-model` → `scale_forecast` | 2026-09-07 |
 | P2.1 | p2 | Aeneas extract + Lean as_is | done | `aeneas_scale.sh` / `Scale.lean` | 2026-09-07 |
-| P2.2 | p2 | escada oficial | todo | — | 2026-09-07 |
+| P2.2 | p2 | escada oficial | done | 10M hot / 25M bounded-cache on p149b | 2026-09-07 |
 
 ## Acceptance Criteria
 
@@ -144,8 +147,9 @@ Hot ⇔ \(S \le \mathrm{cap}(R)\), \(\mathrm{cap}(R)=\min(\max(3\,\mathrm{GiB},3
   `rfc0176_scale_forecast_64gib_one_and_ten_billion`. Example:
   quiet ∈ [best/4, worst×4]; noisy ≥ quiet.
 - **Telemetry:** example imprime λ, η, T. Sem probe novo no engine.
-- **Documentation:** este RFC; `docs/status.md`; finding
-  `findings/2026-09-07-rfc0176-spectrum/`; `formal/aeneas/EXTRACT.md` (Scale).
+- **Documentation:** este RFC; `docs/status.md`; findings
+  `findings/2026-09-07-rfc0176-spectrum/` e
+  `findings/2026-09-07-rfc0176-p22-official/`; `formal/aeneas/EXTRACT.md` (Scale).
 - **Screenshots:** backend-only.
 
 ## Out of scope

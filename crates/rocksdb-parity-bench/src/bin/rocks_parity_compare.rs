@@ -92,22 +92,38 @@ fn main() {
     // Union of both suites — rows absent from a report stay null.
     // RFC-0043: COMPARE_SHAPES only grows. Never delete a shape to lift min_ratio.
     // High-level gate set (ROCKS_PARITY_GATE_SHAPES) is a subset; canaries stay.
+    // RFC-0185: ROCKS_PARITY_COLUMN_A=1 or GATE_SHAPES=column_a → G_A, min > 1.0.
     let shapes = rocksdb_parity_bench::COMPARE_SHAPES;
-    let parity_floor: Option<f64> = std::env::var("ROCKS_PARITY_RATIO_FLOOR")
-        .ok()
-        .filter(|s| s != "none")
-        .and_then(|s| s.parse().ok());
+    let column_a = rocksdb_parity_bench::column_a::column_a_gate_requested();
+    let parity_floor: Option<f64> = if column_a {
+        Some(rocksdb_parity_bench::column_a::COLUMN_A_FLOOR)
+    } else {
+        std::env::var("ROCKS_PARITY_RATIO_FLOOR")
+            .ok()
+            .filter(|s| s != "none")
+            .and_then(|s| s.parse().ok())
+    };
     // Optional subset the gate looks at (csv). Default = every shape with a ratio.
     // RFC-0031: write shapes already meet 2× same-class; read/iter wait on P1.
-    let gate_only: Option<Vec<String>> = std::env::var("ROCKS_PARITY_GATE_SHAPES")
-        .ok()
-        .filter(|s| !s.is_empty() && s != "all")
-        .map(|s| {
-            s.split(',')
-                .map(|x| x.trim().to_string())
-                .filter(|x| !x.is_empty())
-                .collect()
-        });
+    // `column_a` is RFC-0185 G_A (not a CSV of names).
+    let gate_only: Option<Vec<String>> = if column_a {
+        Some(
+            rocksdb_parity_bench::COLUMN_A_SHAPES
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect(),
+        )
+    } else {
+        std::env::var("ROCKS_PARITY_GATE_SHAPES")
+            .ok()
+            .filter(|s| !s.is_empty() && s != "all" && s != "column_a")
+            .map(|s| {
+                s.split(',')
+                    .map(|x| x.trim().to_string())
+                    .filter(|x| !x.is_empty())
+                    .collect()
+            })
+    };
     let gated = |name: &str| match &gate_only {
         None => true,
         Some(list) => list.iter().any(|s| s == name),
@@ -129,8 +145,11 @@ fn main() {
             }
             _ => ("null".into(), None),
         };
-        let meets_floor = match (parity_floor, ratio_v) {
-            (Some(floor), Some(v)) => format!("{}", v >= floor),
+        let meets_floor = match (parity_floor, ratio_v, column_a) {
+            (Some(_), Some(v), true) => {
+                format!("{}", rocksdb_parity_bench::column_a::column_a_ratio_passes(v))
+            }
+            (Some(floor), Some(v), false) => format!("{}", v >= floor),
             _ => "null".into(),
         };
         let c_s = c_kps
@@ -169,7 +188,49 @@ fn main() {
 
     // Parity summary: only meaningful when a real peer produced ratios.
     let shapes_with_peer = real_ratios.len();
-    let parity = if let Some(floor) = parity_floor {
+    let column_a_verdict = if column_a {
+        let mut ratio_map = std::collections::BTreeMap::new();
+        for shape in rocksdb_parity_bench::COLUMN_A_SHAPES {
+            let c_kps = compat_metrics.get(*shape).copied();
+            let r_kps = peer_metrics.get(*shape).copied();
+            if let (Some(a), Some(b)) = (c_kps, r_kps) {
+                if b > 0.0 {
+                    ratio_map.insert((*shape).to_string(), a / b);
+                }
+            }
+        }
+        Some(rocksdb_parity_bench::column_a::column_a_one_round(
+            &ratio_map,
+            peer_metrics
+                .get(rocksdb_parity_bench::column_a::OVERWRITE_MC4_SHAPE)
+                .copied(),
+        ))
+    } else {
+        None
+    };
+    let parity = if let Some(v) = column_a_verdict.as_ref() {
+        let min_s = v
+            .min_ratio
+            .map(|m| format!("{m:.3}"))
+            .unwrap_or_else(|| "null".into());
+        let fail_s: Vec<String> = v.fails.iter().map(|(s, r)| format!("{s}={r:.3}")).collect();
+        let fail_json = if fail_s.is_empty() {
+            "[]".to_string()
+        } else {
+            format!(
+                "[{}]",
+                fail_s
+                    .iter()
+                    .map(|s| format!("\"{}\"", s.replace('"', "'")))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+        };
+        format!(
+            r#"{{"floor": 1.0, "rule": "rfc0185_column_a_min_gt_1", "shapes_with_peer": {shapes_with_peer}, "gated": {}, "min_ratio": {min_s}, "pass": {}, "fails": {fail_json}}}"#,
+            v.gated, v.pass
+        )
+    } else if let Some(floor) = parity_floor {
         if gated_ratios.is_empty() {
             format!(
                 r#"{{"floor": {floor}, "shapes_with_peer": {shapes_with_peer}, "gated": 0, "min_ratio": null, "pass": null, "note": "floor set but no gated peer ratios — template mode"}}"#
@@ -267,7 +328,13 @@ fn main() {
         tmpl.display()
     );
     // Lab parity gate: floor set + real peer + any ratio below floor → nonzero.
-    if let Some(floor) = parity_floor {
+    // RFC-0185 column A: shipped helper (min > 1.0 on every G_A shape; missing = fail).
+    if let Some(v) = column_a_verdict.as_ref() {
+        if !v.pass {
+            eprintln!("parity gate FAILED: {}", v.fail_text());
+            std::process::exit(2);
+        }
+    } else if let Some(floor) = parity_floor {
         if !gated_ratios.is_empty() && !gated_ratios.iter().all(|v| *v >= floor) {
             eprintln!(
                 "parity gate FAILED: floor={floor} min_ratio={:.3} gated={}",

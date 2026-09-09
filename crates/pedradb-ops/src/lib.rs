@@ -1,4 +1,9 @@
-//! PedraDB **ops suite**: local backup, point-in-time restore (PITR), format migration.
+//! PedraDB **ops suite**: local backup, point-in-time restore (PITR), format
+//! migration, and RocksDB → Pedra SST v5 copy (RFC-0186).
+//!
+//! Pedra **does not** open a C++ SST directory (`DirKind::Rocks`). That copy
+//! is [`migrate_from_rocks`]: a live-snapshot rewrite into a **new** Pedra
+//! dir. `rocksdb-compat` is API drop-in, not on-disk.
 //!
 //! # Layout under a backup root
 //! ```text
@@ -36,6 +41,24 @@ use pedradb_core::{
     CoreError, Db, Env, EnvFile, OpenOptions, SequenceNumber, WriteOp, WriteRecord, WAL_FILE_NAME,
 };
 use pedradb_io_uring::IoUringEnv;
+
+mod dir_kind;
+mod from_rocks;
+
+pub use dir_kind::{
+    classify_dir, classify_dir_env, rocks_dest_admitted, rocks_dest_admitted_as_is,
+    rocks_source_admitted, rocks_source_admitted_as_is, sst_magic_is_pedra,
+    sst_magic_is_pedra_as_is, DirKind, NOT_DROPIN,
+};
+#[cfg(feature = "from-rocks")]
+pub use from_rocks::checkpoint_then_err as checkpoint_then_err_for_test;
+pub use from_rocks::{
+    dir_names_have_blob, migrate_from_rocks, migrate_from_rocks_env, options_has_blob,
+    options_has_blob_as_is, options_has_merge_operator, options_has_merge_operator_as_is,
+    options_has_user_timestamps, options_has_user_timestamps_as_is, options_has_wide_column,
+    options_has_wide_column_as_is, refuse_unsupported_rocks_source, unsupported_rocks_feature,
+    RocksMigrateReport,
+};
 
 /// Ops-layer error (wraps core + structured messages).
 #[derive(Debug, thiserror::Error)]
@@ -314,6 +337,7 @@ impl<E: Env> BackupEngine<E> {
                 last_shipped_sequence: self.catalog.last_shipped_seq,
             });
         }
+        pedradb_core::admit_disk_write(&self.env, &self.root)?;
         let seg_id = self.catalog.next_wal_seg;
         let seg_path = self.root.join(WAL_DIR).join(format!("{seg_id:06}.warch"));
         write_warch(&self.env, &seg_path, &to_ship)?;
@@ -517,6 +541,7 @@ impl<E: Env> BackupEngine<E> {
             }
         }
         let dest = dest.as_ref();
+        pedradb_core::admit_disk_write(&self.env, dest)?;
         copy_db_directory(&self.env, &base, dest)?;
 
         // Collect archived WAL records with base < seq <= target (or all after base).
@@ -552,6 +577,7 @@ impl<E: Env> BackupEngine<E> {
         }
 
         if !pedradb_core::write_admission_kernel::batch_is_empty(replay.len() as u64) {
+            pedradb_core::admit_disk_write(&self.env, dest)?;
             // Replace empty/rotated WAL with recovered filtered records.
             let wal_path = dest.join(WAL_FILE_NAME);
             let _ = self.env.remove_file(&wal_path);
@@ -646,6 +672,7 @@ pub fn restore_history_from_remote<E: Env>(
     }
     ops.sort_by_key(|o| o.sequence);
     let dest = dest.as_ref();
+    pedradb_core::admit_disk_write(env, dest)?;
     env.create_dir_all(dest)?;
     let wal_path = dest.join(WAL_FILE_NAME);
     {
@@ -736,6 +763,11 @@ fn read_warch(env: &impl Env, path: &Path) -> Result<Vec<Vec<u8>>> {
 /// On-disk format inspection report.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FormatReport {
+    /// Layout: Pedra / Rocks / empty / unknown (RFC-0186).
+    pub kind: DirKind,
+    /// Pedra MANIFEST format (`PDBM` u32). `0` if absent / unreadable.
+    /// Current writer is **5** (RFC-0065 CFs).
+    pub manifest_format: u32,
     /// Whether a MANIFEST / CURRENT pair exists.
     pub has_manifest: bool,
     /// Live SST count from inventory or scan.
@@ -778,6 +810,16 @@ pub fn inspect_format(path: impl AsRef<Path>) -> Result<FormatReport> {
 /// I/O.
 pub fn inspect_format_env(env: &impl Env, path: impl AsRef<Path>) -> Result<FormatReport> {
     let path = path.as_ref();
+    let kind = classify_dir_env(env, path)?;
+    if kind == DirKind::Rocks {
+        return Err(dir_kind::not_dropin_err(path));
+    }
+    if kind == DirKind::Unknown {
+        return Err(OpsError::Msg(format!(
+            "{}: unknown DB layout (mixed Pedra/Rocks markers); refuse rather than guess (RFC-0186)",
+            path.display()
+        )));
+    }
     let has_manifest = env.exists(&path.join(manifest::CURRENT_FILE));
     let mut sst_versions = Vec::new();
     let mut nums: Vec<u64> = Vec::new();
@@ -806,6 +848,8 @@ pub fn inspect_format_env(env: &impl Env, path: impl AsRef<Path>) -> Result<Form
     let current_writer = pedradb_core::sst::SST_VERSION;
     let needs_migration = sst_versions.iter().any(|&(_, v)| v < current_writer);
     Ok(FormatReport {
+        kind,
+        manifest_format: peek_manifest_format(env, path),
         has_manifest,
         sst_count: sst_versions.len(),
         sst_versions,
@@ -814,6 +858,39 @@ pub fn inspect_format_env(env: &impl Env, path: impl AsRef<Path>) -> Result<Form
         vlog_use_new,
         current_crc: classify_current_crc(env, path),
     })
+}
+
+/// `PDBM` format u32, or `0` if CURRENT/MANIFEST missing or not Pedra.
+fn peek_manifest_format(env: &impl Env, dir: &Path) -> u32 {
+    let cur = dir.join(manifest::CURRENT_FILE);
+    if !env.exists(&cur) {
+        return 0;
+    }
+    let mut text = String::new();
+    let Ok(mut f) = env.open_read(&cur) else {
+        return 0;
+    };
+    if f.read_to_string(&mut text).is_err() {
+        return 0;
+    }
+    let Ok((name, _)) = manifest::parse_current_pointer(&text) else {
+        return 0;
+    };
+    let man = dir.join(name);
+    if !env.exists(&man) {
+        return 0;
+    }
+    let mut hdr = [0u8; 8];
+    let Ok(mut f) = env.open_read(&man) else {
+        return 0;
+    };
+    if f.read_exact(&mut hdr).is_err() {
+        return 0;
+    }
+    if &hdr[0..4] != b"PDBM" {
+        return 0;
+    }
+    u32::from_le_bytes(hdr[4..8].try_into().unwrap_or([0; 4]))
 }
 
 /// RFC-0060 P2.23: classify the optional CURRENT CRC trailer without opening a writer.
@@ -863,12 +940,8 @@ fn peek_sst_version(env: &impl Env, path: &Path) -> Result<u32> {
     let mut f = env.open_read(path)?;
     let mut hdr = [0u8; 12];
     f.read_exact(&mut hdr)?;
-    // PEDRSST\0 magic (same as core sst writer).
-    if &hdr[0..8] != b"PEDRSST\0" {
-        return Err(OpsError::Msg(format!(
-            "bad SST magic in {}",
-            path.display()
-        )));
+    if !sst_magic_is_pedra(&hdr[0..8]) {
+        return Err(dir_kind::not_dropin_err(path));
     }
     Ok(u32::from_le_bytes(hdr[8..12].try_into().unwrap()))
 }
@@ -888,6 +961,10 @@ pub fn migrate_to_latest(path: impl AsRef<Path>) -> Result<MigrateReport> {
 /// Open / compact / verify.
 pub fn migrate_to_latest_env(path: impl AsRef<Path>, env: impl Env) -> Result<MigrateReport> {
     let path = path.as_ref();
+    let kind = classify_dir_env(&env, path)?;
+    if kind == DirKind::Rocks {
+        return Err(dir_kind::not_dropin_err(path));
+    }
     let before = inspect_format_env(&env, path)?;
     let mut db = Db::open_with_env(
         path,
@@ -924,9 +1001,6 @@ pub fn migrate_to_latest_env(path: impl AsRef<Path>, env: impl Env) -> Result<Mi
         verified,
     })
 }
-
-// Fix peek_sst_version - SST_MAGIC might not be re-exported publicly from sst module
-// Use open via SstTable instead if needed.
 
 #[cfg(test)]
 mod tests {
@@ -1657,5 +1731,366 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dest);
         let _ = std::fs::remove_dir_all(&dest2);
         let _ = std::fs::remove_dir_all(&dest3);
+    }
+
+    /// RFC-0179: inject free-space via `Env::available_bytes`. `u64::MAX` = unknown.
+    #[derive(Clone)]
+    struct SpaceEnv {
+        available: std::sync::Arc<AtomicU64>,
+    }
+
+    impl Env for SpaceEnv {
+        type File = std::fs::File;
+
+        fn create_dir_all(&self, path: &Path) -> std::io::Result<()> {
+            StdEnv.create_dir_all(path)
+        }
+        fn create(&self, path: &Path) -> std::io::Result<Self::File> {
+            StdEnv.create(path)
+        }
+        fn open_append(&self, path: &Path) -> std::io::Result<Self::File> {
+            StdEnv.open_append(path)
+        }
+        fn open_read(&self, path: &Path) -> std::io::Result<Self::File> {
+            StdEnv.open_read(path)
+        }
+        fn sync_dir(&self, path: &Path) -> std::io::Result<()> {
+            StdEnv.sync_dir(path)
+        }
+        fn read_dir_names(&self, path: &Path) -> std::io::Result<Vec<String>> {
+            StdEnv.read_dir_names(path)
+        }
+        fn remove_file(&self, path: &Path) -> std::io::Result<()> {
+            StdEnv.remove_file(path)
+        }
+        fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+            StdEnv.rename(from, to)
+        }
+        fn exists(&self, path: &Path) -> bool {
+            StdEnv.exists(path)
+        }
+        fn metadata_len(&self, path: &Path) -> std::io::Result<u64> {
+            StdEnv.metadata_len(path)
+        }
+        fn available_bytes(&self, _path: &Path) -> std::io::Result<Option<u64>> {
+            let n = self.available.load(Ordering::SeqCst);
+            if n == u64::MAX {
+                Ok(None)
+            } else {
+                Ok(Some(n))
+            }
+        }
+    }
+
+    fn open_db_on(path: &Path, env: SpaceEnv) -> Db<SpaceEnv> {
+        Db::open_with_env(
+            path,
+            OpenOptions {
+                wal_full_fsync: true,
+                history: Default::default(),
+                wal_recovery: Default::default(),
+                sync: true,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+                sst_payload_budget_bytes: None,
+            },
+            env,
+        )
+        .unwrap()
+    }
+
+    /// RFC-0179 P1: PITR restore below the hard floor is DiskPressure; dest
+    /// is not a half-copied DB.
+    #[test]
+    fn pitr_restore_under_hard_floor_is_disk_pressure() {
+        let data = temp();
+        let bak = temp();
+        let rest = temp();
+        let available = std::sync::Arc::new(AtomicU64::new(u64::MAX));
+        let env = SpaceEnv {
+            available: std::sync::Arc::clone(&available),
+        };
+        let mut db = open_db_on(&data, env.clone());
+        db.put(b"base", b"0").unwrap();
+        let mut eng = BackupEngine::open_with_env(&bak, env.clone()).unwrap();
+        let base = eng.create_base_backup(&mut db).unwrap();
+        db.put(b"k1", b"v1").unwrap();
+        db.put(b"k2", b"v2").unwrap();
+        let ship = eng.ship_wal(&db).unwrap();
+        assert!(ship.records >= 2);
+        db.close().unwrap();
+
+        available.store(1024, Ordering::SeqCst);
+        let err = eng.restore_pitr(base.id, &rest, Some(ship.last_shipped_sequence));
+        assert!(
+            matches!(
+                err,
+                Err(OpsError::Core(CoreError::DiskPressure {
+                    available: 1024,
+                    need: pedradb_core::DISK_HARD_FREE_BYTES,
+                }))
+            ),
+            "expected DiskPressure, got {err:?}"
+        );
+        assert!(
+            !rest.exists() || std::fs::read_dir(&rest).map(|d| d.count()).unwrap_or(0) == 0,
+            "refused PITR must not leave a half-copied dest"
+        );
+
+        let _ = std::fs::remove_dir_all(&data);
+        let _ = std::fs::remove_dir_all(&bak);
+        let _ = std::fs::remove_dir_all(&rest);
+    }
+
+    /// RFC-0179 P1: ship_wal below the hard floor does not write a torn
+    /// archive or advance the catalog watermark.
+    #[test]
+    fn ship_wal_under_hard_floor_is_disk_pressure() {
+        let data = temp();
+        let bak = temp();
+        let available = std::sync::Arc::new(AtomicU64::new(u64::MAX));
+        let env = SpaceEnv {
+            available: std::sync::Arc::clone(&available),
+        };
+        let mut db = open_db_on(&data, env.clone());
+        db.put(b"base", b"0").unwrap();
+        let mut eng = BackupEngine::open_with_env(&bak, env).unwrap();
+        let _ = eng.create_base_backup(&mut db).unwrap();
+        let watermark = eng.last_shipped_sequence();
+        db.put(b"later", b"1").unwrap();
+
+        available.store(1024, Ordering::SeqCst);
+        let err = eng.ship_wal(&db);
+        assert!(
+            matches!(err, Err(OpsError::Core(CoreError::DiskPressure { .. }))),
+            "expected DiskPressure, got {err:?}"
+        );
+        assert_eq!(eng.last_shipped_sequence(), watermark);
+        assert!(
+            eng.list_increments().unwrap().is_empty(),
+            "refused ship must not leave a warch segment"
+        );
+        db.close().unwrap();
+        let _ = std::fs::remove_dir_all(&data);
+        let _ = std::fs::remove_dir_all(&bak);
+    }
+
+    fn plant_rocks_dir(dir: &Path) {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join("IDENTITY"), b"rfc0186-synthetic-rocks").unwrap();
+        std::fs::write(dir.join("CURRENT"), b"MANIFEST-000001\n").unwrap();
+        std::fs::write(dir.join("MANIFEST-000001"), b"RLOG not PDBM").unwrap();
+        std::fs::write(dir.join("000001.sst"), vec![0xABu8; 64]).unwrap();
+    }
+
+    /// RFC-0186 P0.2: inspect names the not-drop-in contract; never a Pedra table.
+    #[test]
+    fn inspect_refuses_rocks_dir() {
+        let dir = temp();
+        plant_rocks_dir(&dir);
+        assert_eq!(classify_dir(&dir).unwrap(), DirKind::Rocks);
+        let err = inspect_format(&dir).unwrap_err().to_string();
+        assert!(
+            err.contains("not drop-in"),
+            "inspect must name the contract, got {err}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0186 P0.2: Pedra-to-Pedra migrate does not rewrite a C++ dir.
+    #[test]
+    fn migrate_to_latest_refuses_rocks_dir() {
+        let dir = temp();
+        plant_rocks_dir(&dir);
+        let err = migrate_to_latest(&dir).unwrap_err().to_string();
+        assert!(
+            err.contains("not drop-in"),
+            "migrate_to_latest must not open C++ SST, got {err}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0186 P0.2: kernel open of a Rocks-shaped dir is Err, no key served.
+    #[test]
+    fn open_refuses_rocks_sst_dir() {
+        let dir = temp();
+        plant_rocks_dir(&dir);
+        let err = Db::open_with_env(
+            &dir,
+            OpenOptions {
+                wal_full_fsync: true,
+                history: Default::default(),
+                wal_recovery: Default::default(),
+                sync: true,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+                sst_payload_budget_bytes: None,
+            },
+            StdEnv,
+        );
+        assert!(err.is_err(), "Db::open must refuse a C++ SST directory");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0186 P0.3: from-rocks source must be Rocks, not Pedra.
+    #[test]
+    fn migrate_from_rocks_refuses_pedra_source() {
+        let data = temp();
+        let dst = temp();
+        {
+            let mut db = open_db(&data);
+            db.put(b"k", b"v").unwrap();
+            db.flush().unwrap();
+            db.close().unwrap();
+        }
+        assert_eq!(classify_dir(&data).unwrap(), DirKind::Pedra);
+        let err = migrate_from_rocks(&data, &dst).unwrap_err().to_string();
+        assert!(
+            err.contains("Pedra directory"),
+            "must not feed a Pedra dir to the C++ reader: {err}"
+        );
+        let _ = std::fs::remove_dir_all(&data);
+        let _ = std::fs::remove_dir_all(&dst);
+    }
+
+    /// RFC-0186 P0.3: dest must be empty (AS-IS would overwrite).
+    #[test]
+    fn migrate_from_rocks_refuses_nonempty_dest() {
+        let src = temp();
+        let dst = temp();
+        plant_rocks_dir(&src);
+        {
+            let mut db = open_db(&dst);
+            db.put(b"keep", b"me").unwrap();
+            db.flush().unwrap();
+            db.close().unwrap();
+        }
+        assert!(!rocks_dest_admitted(classify_dir(&dst).unwrap()));
+        let err = migrate_from_rocks(&src, &dst).unwrap_err().to_string();
+        assert!(
+            err.contains("not empty"),
+            "must not overwrite a live Pedra dest: {err}"
+        );
+        let db = open_db(&dst);
+        assert_eq!(db.get(b"keep").as_deref(), Some(b"me".as_ref()));
+        db.close().unwrap();
+        let _ = std::fs::remove_dir_all(&src);
+        let _ = std::fs::remove_dir_all(&dst);
+    }
+
+    /// RFC-0186 P1.3: merge-operator OPTIONS marker refuses at the
+    /// `migrate_from_rocks` entry point (no C++).
+    #[test]
+    fn migrate_from_rocks_refuses_merge_operator_options() {
+        let src = temp();
+        let dst = temp();
+        plant_rocks_dir(&src);
+        std::fs::write(
+            src.join("OPTIONS-000001"),
+            b"[CFOptions \"default\"]\n  merge_operator=uint64add;\n",
+        )
+        .unwrap();
+        let err = migrate_from_rocks(&src, &dst).unwrap_err().to_string();
+        assert!(
+            err.contains("merge operator"),
+            "must name merge operator, got {err}"
+        );
+        assert!(
+            !dst.exists() || std::fs::read_dir(&dst).map(|i| i.count()).unwrap_or(0) == 0,
+            "refuse must not leave a usable dest"
+        );
+        let _ = std::fs::remove_dir_all(&src);
+        let _ = std::fs::remove_dir_all(&dst);
+    }
+
+    /// RFC-0186 P1.3: Titan `.blob` file refuses at the entry point.
+    #[test]
+    fn migrate_from_rocks_refuses_titan_blob_file() {
+        let src = temp();
+        let dst = temp();
+        plant_rocks_dir(&src);
+        std::fs::write(src.join("000003.blob"), b"not-a-value").unwrap();
+        let err = migrate_from_rocks(&src, &dst).unwrap_err().to_string();
+        assert!(err.contains("blob"), "must name blob, got {err}");
+        let _ = std::fs::remove_dir_all(&src);
+        let _ = std::fs::remove_dir_all(&dst);
+    }
+
+    /// RFC-0186 P1.3: wide-column OPTIONS marker refuses at the entry point.
+    #[test]
+    fn migrate_from_rocks_refuses_wide_column_options() {
+        let src = temp();
+        let dst = temp();
+        plant_rocks_dir(&src);
+        std::fs::write(src.join("OPTIONS-000001"), b"wide_column=true\n").unwrap();
+        let err = migrate_from_rocks(&src, &dst).unwrap_err().to_string();
+        assert!(
+            err.contains("wide-column"),
+            "must name wide-column, got {err}"
+        );
+        let _ = std::fs::remove_dir_all(&src);
+        let _ = std::fs::remove_dir_all(&dst);
+    }
+
+    /// RFC-0186 P1.3: `.u64ts` comparator refuses at the entry point.
+    #[test]
+    fn migrate_from_rocks_refuses_user_timestamps_options() {
+        let src = temp();
+        let dst = temp();
+        plant_rocks_dir(&src);
+        std::fs::write(
+            src.join("OPTIONS-000001"),
+            b"comparator=leveldb.BytewiseComparator.u64ts;\n",
+        )
+        .unwrap();
+        let err = migrate_from_rocks(&src, &dst).unwrap_err().to_string();
+        assert!(
+            err.contains("user timestamps"),
+            "must name user timestamps, got {err}"
+        );
+        let _ = std::fs::remove_dir_all(&src);
+        let _ = std::fs::remove_dir_all(&dst);
+    }
+
+    /// Without `--features from-rocks` the command exists and names the rebuild.
+    #[test]
+    fn migrate_from_rocks_without_feature_names_rebuild() {
+        let src = temp();
+        let dst = temp();
+        plant_rocks_dir(&src);
+        let err = migrate_from_rocks(&src, &dst).unwrap_err().to_string();
+        #[cfg(not(feature = "from-rocks"))]
+        {
+            assert!(
+                err.contains("from-rocks"),
+                "default build must not link C++; got {err}"
+            );
+        }
+        #[cfg(feature = "from-rocks")]
+        {
+            let _ = err;
+        }
+        let _ = std::fs::remove_dir_all(&src);
+        let _ = std::fs::remove_dir_all(&dst);
+    }
+
+    #[test]
+    fn inspect_pedra_reports_kind() {
+        let data = temp();
+        {
+            let mut db = open_db(&data);
+            db.put(b"k", b"v").unwrap();
+            db.flush().unwrap();
+            db.close().unwrap();
+        }
+        let rep = inspect_format(&data).unwrap();
+        assert_eq!(rep.kind, DirKind::Pedra);
+        let _ = std::fs::remove_dir_all(&data);
     }
 }

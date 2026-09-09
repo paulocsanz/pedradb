@@ -261,6 +261,70 @@ pub trait Env: Clone {
     }
 }
 
+/// Admit an external write (PITR dest, backup sink, HA replica WAL) against
+/// the RFC-0179 watermarks. Unknown/Err probe does not refuse. Reclaim is
+/// admitted (caller cannot compact an empty dest). Refuse is
+/// [`crate::error::CoreError::DiskPressure`].
+///
+/// Logs `tracing::warn!` on state transition (not every call).
+///
+/// # Errors
+/// [`crate::error::CoreError::DiskPressure`] when free space is below the
+/// hard floor.
+pub fn admit_disk_write<E: Env>(env: &E, path: &Path) -> crate::error::Result<()> {
+    let target = if env.exists(path) {
+        path
+    } else {
+        path.parent().unwrap_or(path)
+    };
+    let probe = match env.available_bytes(target) {
+        Ok(v) => v,
+        Err(_) => None,
+    };
+    let admit = crate::disk_pressure_kernel::disk_pressure_admit(probe);
+    note_external_disk_pressure(admit, path);
+    match admit {
+        crate::disk_pressure_kernel::DiskPressureAdmit::Ok
+        | crate::disk_pressure_kernel::DiskPressureAdmit::Reclaim => Ok(()),
+        crate::disk_pressure_kernel::DiskPressureAdmit::Refuse { available, need } => {
+            Err(crate::error::CoreError::DiskPressure { available, need })
+        }
+    }
+}
+
+fn note_external_disk_pressure(admit: crate::disk_pressure_kernel::DiskPressureAdmit, path: &Path) {
+    use std::sync::atomic::{AtomicU8, Ordering};
+    static LOG: AtomicU8 = AtomicU8::new(0);
+    let state = match admit {
+        crate::disk_pressure_kernel::DiskPressureAdmit::Ok => 0,
+        crate::disk_pressure_kernel::DiskPressureAdmit::Reclaim => 1,
+        crate::disk_pressure_kernel::DiskPressureAdmit::Refuse { .. } => 2,
+    };
+    let prev = LOG.swap(state, Ordering::Relaxed);
+    if prev == state {
+        return;
+    }
+    match admit {
+        crate::disk_pressure_kernel::DiskPressureAdmit::Reclaim => {
+            tracing::warn!(
+                path = %path.display(),
+                soft = crate::disk_pressure_kernel::DISK_SOFT_FREE_BYTES,
+                hard = crate::disk_pressure_kernel::DISK_HARD_FREE_BYTES,
+                "disk pressure: reclaim zone on external write (PITR/backup/replica; compact is the live engine's job)"
+            );
+        }
+        crate::disk_pressure_kernel::DiskPressureAdmit::Refuse { available, need } => {
+            tracing::warn!(
+                path = %path.display(),
+                available,
+                need,
+                "disk pressure: refusing external write (PITR/backup/replica; not a durability fence)"
+            );
+        }
+        crate::disk_pressure_kernel::DiskPressureAdmit::Ok => {}
+    }
+}
+
 /// POSIX `fdatasync(2)` on the data of `file`.
 ///
 /// On Apple, [`File::sync_data`] is `fcntl(F_FULLFSYNC)` (~5 ms here). RocksDB
