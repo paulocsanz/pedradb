@@ -369,7 +369,7 @@ impl<F: EnvFile> Write for FailingFile<F> {
             && self.state.op_class.get().matches(OpClass::Write)
         {
             let left = self.state.remaining.get();
-            if left == 0 {
+            if pedradb_core::write_admission_kernel::batch_is_empty(left) {
                 if self.state.once.get() && self.state.fired.get() {
                     return self.inner.write(buf);
                 }
