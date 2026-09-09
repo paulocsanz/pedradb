@@ -834,7 +834,7 @@ impl<V: Clone> AnswerCache<V> {
     /// No cached answers (RFC-0062 P0.4: skip per-key dirty clones).
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.inner.lock().map.is_empty()
+        crate::write_admission_kernel::batch_is_empty(self.inner.lock().map.len() as u64)
     }
 }
 
