@@ -41,3 +41,45 @@ theorem iter_window_keep_as_is_dente :
     merge.iter_window_keep_as_is false = ok true := by
   unfold merge.iter_window_keep_as_is
   rfl
+
+/-- Catalog entry: point put covers the exact start key (rustc `&[u8]`). -/
+theorem write_op_covers_key_value_is_eq (start end1 user) :
+    merge.write_op_covers_key key.ValueType.Value start end1 user
+    = core.slice.cmp.PartialEqSlice.eq core.cmp.PartialEqU8 start user := by
+  unfold merge.write_op_covers_key
+  rfl
+
+/-- Catalog entry: point delete covers the exact start key. -/
+theorem write_op_covers_key_deletion_is_eq (start end1 user) :
+    merge.write_op_covers_key key.ValueType.Deletion start end1 user
+    = core.slice.cmp.PartialEqSlice.eq core.cmp.PartialEqU8 start user := by
+  unfold merge.write_op_covers_key
+  rfl
+
+/-- Range delete covers via `range_tombstone_covers` (F30). Dual-unfold. -/
+theorem write_op_covers_key_range (start end1 user) :
+    merge.write_op_covers_key key.ValueType.RangeDeletion start end1 user
+    = merge.range_tombstone_covers start end1 user := by
+  unfold merge.write_op_covers_key
+  rfl
+
+/-- AS-IS dente: point put never conflicts. -/
+theorem write_op_covers_key_as_is_value (start end1 user) :
+    merge.write_op_covers_key_as_is key.ValueType.Value start end1 user
+    = ok false := by
+  unfold merge.write_op_covers_key_as_is
+  rfl
+
+/-- AS-IS dente: point delete never conflicts. -/
+theorem write_op_covers_key_as_is_deletion (start end1 user) :
+    merge.write_op_covers_key_as_is key.ValueType.Deletion start end1 user
+    = ok false := by
+  unfold merge.write_op_covers_key_as_is
+  rfl
+
+/-- AS-IS dente: range only hits start. Dual-unfold. -/
+theorem write_op_covers_key_as_is_range (start end1 user) :
+    merge.write_op_covers_key_as_is key.ValueType.RangeDeletion start end1 user
+    = merge.range_tombstone_covers_as_is start end1 user := by
+  unfold merge.write_op_covers_key_as_is
+  rfl

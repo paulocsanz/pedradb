@@ -168,6 +168,35 @@ def merge.range_tombstone_covers_as_is
   := do
   core.slice.cmp.PartialEqSlice.eq core.cmp.PartialEqU8 key start
 
+/-- [pedra_aeneas_merge_kernel::merge::write_op_covers_key]:
+    Source: 'src/../../../../crates/pedradb-core/src/merge.rs', lines 218:0-223:1
+    Visibility: public -/
+def merge.write_op_covers_key
+  (kind : key.ValueType) (start : Slice Std.U8) (end1 : Slice Std.U8)
+  (key : Slice Std.U8) :
+  Result Bool
+  :=
+  match kind with
+  | .Deletion =>
+    core.slice.cmp.PartialEqSlice.eq core.cmp.PartialEqU8 start key
+  | .Value =>
+    core.slice.cmp.PartialEqSlice.eq core.cmp.PartialEqU8 start key
+  | .RangeDeletion => merge.range_tombstone_covers start end1 key
+
+/-- [pedra_aeneas_merge_kernel::merge::write_op_covers_key_as_is]:
+    Source: 'src/../../../../crates/pedradb-core/src/merge.rs', lines 228:0-233:1
+    Visibility: public -/
+def merge.write_op_covers_key_as_is
+  (kind : key.ValueType) (start : Slice Std.U8) (end1 : Slice Std.U8)
+  (key : Slice Std.U8) :
+  Result Bool
+  :=
+  match kind with
+  | .Deletion => ok false
+  | .Value => ok false
+  | .RangeDeletion =>
+    merge.range_tombstone_covers_as_is start end1 key
+
 /-- [pedra_aeneas_merge_kernel::merge::visible_at]:
     Source: 'src/../../../../crates/pedradb-core/src/merge.rs', lines 243:0-248:1
     Visibility: public -/

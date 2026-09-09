@@ -395,8 +395,9 @@ def print_leftover_next(
     print(
         "  leftover_next trampoline data-fate if remaining "
         "(db.rs/concurrent.rs); pull one if into a named kernel "
-        "the handler calls; never leftover is_empty wrap; "
-        "never compact_refuse spray; skip Montanha"
+        "rustc links with handler types; Aeneas extract of that body; "
+        "Verus only same tokens; cartoon_twin unpaid not a land; "
+        "never leftover is_empty wrap; never compact_refuse spray; skip Montanha"
     )
 
 
@@ -574,11 +575,21 @@ def scale_board() -> int:
     return unpaid
 
 
+def verus_token_kind(src: str) -> str:
+    """RFC-0171 last-wins = shared macro body. Toy u64/enum in verus! is cartoon."""
+    if "verus_keep_ghost" not in src:
+        return "none"
+    if "macro_rules!" in src and re.search(r"_body!\s*\(", src):
+        return "macro"
+    return "cartoon"
+
+
 def sa_unpaid_board(fate: list) -> None:
-    print("== single_artifact (rank 7: skip if already extracted or Verus last-wins) ==")
+    print("== single_artifact (rank 7: rustc body extract; Verus cartoon ≠ last-wins) ==")
     unpaid = []
     skip_extracted = []
     skip_verus = []
+    cartoon = []
     paid = []
     for p in fate:
         k = p.get("kernel") or ""
@@ -590,10 +601,14 @@ def sa_unpaid_board(fate: list) -> None:
         if t == k:
             continue
         kp = ROOT / k
-        has_verus = kp.is_file() and "verus_keep_ghost" in kp.read_text(
-            encoding="utf-8", errors="replace"
+        src = (
+            kp.read_text(encoding="utf-8", errors="replace") if kp.is_file() else ""
         )
-        if has_verus:
+        kind = verus_token_kind(src)
+        if kind == "cartoon":
+            cartoon.append(p["id"])
+            continue
+        if kind == "macro":
             skip_verus.append(p["id"])
             continue
         if entry and lean_has_def(entry):
@@ -603,11 +618,15 @@ def sa_unpaid_board(fate: list) -> None:
     print("  unpaid_no_extract", " ".join(unpaid) if unpaid else "none")
     print(
         f"  skip_already_extracted={len(skip_extracted)} "
-        "(Lean def of entry exists — SA wrap is not a slice)"
+        "(Lean def of rustc entry exists — SA wrap is not a slice)"
     )
     print(
-        f"  skip_verus_last_wins={len(skip_verus)} "
-        "(production file already has cfg(verus_keep_ghost))"
+        f"  skip_verus_same_tokens={len(skip_verus)} "
+        "(macro_rules! last-wins RFC-0171; same tokens rustc links)"
+    )
+    print(
+        f"  cartoon_twin={len(cartoon)} "
+        "(verus! u64/toy enum ≠ rustc types — unpaid, not a land)"
     )
     print(
         f"  catalog_only_skip={len(paid)} "

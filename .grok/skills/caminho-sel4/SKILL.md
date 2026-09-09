@@ -6,7 +6,8 @@ description: >
   syscall); then compose glue callers (ConcurrentDb / commit_ops_with);
   then the four concurrency theorems; then shrink remaining data-fate ifs.
   Catalog-only single_artifact is not a land. Always implement: first
-  unpaid rank 1–10, else one remaining data-fate `if` in the trampoline.
+  unpaid rank 1–10, else one remaining data-fate `if` in the trampoline
+  (Aeneas of rustc types the handler passes — never a Verus u64 cartoon).
   Research Verus / Iris / Aeneas / DST / fuzzing and persist.
   Triggers: formalize, verificação, seL4, caminho sel4, trampolim, guião,
   concorrência, deadlock, data race, extraia aeneas, va formal,
@@ -17,24 +18,31 @@ description: >
 
 ## Grind pressure (one block, overwritten each fire)
 
-- Last fire: shallow (4c2e38c4 inline_needs_escape = `||` wrap; reverted 356b9457)
-- Why: kernel body `starts_escape || sniffs_ptr` is the live `||`, not a slice
-- This fire MUST land: a data-fate if whose kernel is not identity/`||`/`==`/`!=` on bools the handler already computes
-- Forbidden this fire: leftover wrap; `||`/`==` identity kernel; compact_refuse spray; DiskPressure on close; git checkout of db.rs/concurrent.rs
-- Deeper: trampoline data-fate if (not a renamed operator)
+- Last fire: shallow (Bound-helper after admitting cartoon; FACTORY_BAN halt regression)
+- Why: proving a u64/toy-enum `verus!` is not proving the `&[u8]` rustc links; Bound-helper already `d1f4978f`
+- This fire MUST land: Lean unfold of rustc `write_op_covers_key` (Aeneas of handler types) and a skill that never bills a cartoon as last-wins
+- Forbidden this fire: mint u64 Verus twin; `||` wrap; FACTORY_BAN halt; re-land Bound-helper; git checkout of db.rs/concurrent.rs
+- Deeper: Search leftover_next=trampoline; `write_op_covers_key`; lake Merge; named cargo test
 
 This skill **lands one payable slice per Fire**. Rank 1–10 unpaid first.
-When those boards are 0, the slice is the next data-fate `if` still
-inline in `db.rs` / `concurrent.rs` — pull it into a named kernel the
-handler calls. Do not invent a `compact_refuse` / `batch_is_empty`
-wrap. Do not replace `leftover_next` with a spray-queue fn name.
-Catalog-only `single_artifact` is skip. Under `/grind`, a valid land
-chains. Empty 4–10 is **not** a stop.
+When those boards are 0, Search prints `leftover_next` trampoline
+remaining — **not a halt**. Do not invent a `compact_refuse` /
+`batch_is_empty` wrap. Do not replace `leftover_next` with a spray-queue
+fn name. Catalog-only `single_artifact` is skip. Empty 4–10 is **not**
+a stop. A Verus cartoon is unpaid **and not a land** (do not mint it).
 
 Pay the seL4-class path this fire (empty the trampoline of data-fate
 `if`s). `never_floor` / disk-not-media / `∀π` refused stay TCB — not
-permission to halt. Wrap/spray is not payment.
-**Price:** the `.rs` rustc links is the Verus/Aeneas term. `db.rs` /
+permission to halt. Wrap/spray is not payment. Empty 4–10 is trampoline
+remaining, not permission to wrap the next `if` and not permission to
+mint a u64 twin.
+**Price:** the fn rustc links, with the types the handler passes
+(`key::ValueType`, `&[u8]`, `Bound`), is the term — Aeneas extract of
+**that** body, or Verus on the **same tokens** (`macro_rules!` last-wins,
+RFC-0171/0174). A `verus!` toy enum / `u64` stand-in while rustc has
+bytes is a **model twin**, not the term, not last-wins, **not a land**.
+`skip_verus_last_wins` (any `verus_keep_ghost` = paid) is invalid.
+`db.rs` /
 `concurrent.rs` stay trampoline (`glue.db_rs_extracted=false`) — **empty
 them** of data-fate `if`s and of unpaid *order*, do not dump them.
 `never_floor` stays `R-cpu R-rustc R-verus R-crc R-deps`. Disk/`fdatasync`
@@ -71,7 +79,9 @@ python3 .grok/skills/caminho-sel4/scripts/candidates.py
 
 Then open the files the **UNPAID** rows named (handler body + plant body,
 not grep). When leftover_next says trampoline remaining, open the
-handler that still has a data-fate `if` without a kernel call. Also
+handler that still has a data-fate `if` without a kernel call, or the
+rustc body whose extract has no Lean `unfold`. Never open a u64 Verus
+twin as the slice. Also
 compute, from catalog + `residuals.json` (do not `json.dump` the live
 catalog):
 
@@ -86,7 +96,8 @@ catalog):
 If script vs RFC disagree, **code + catalog win**.
 
 `leftover_next` is **computed**. Unpaid 4–10 → those boards. Else
-trampoline remaining (not a production fn name, not FACTORY_BAN halt).
+trampoline remaining (not a production fn name, not FACTORY_BAN halt,
+not a cartoon twin land).
 
 ## 2. Rank (first non-empty wins — then implement it)
 
@@ -121,13 +132,15 @@ chains Fires; this bound is not end-of-turn).
    `lock_interleavings_admitted = ok false` stays the scheduler theorem.
    Pull glue into a **named total fn**; do not extract `concurrent.rs` /
    `db.rs` whole.
-7. **Single-artifact** — only if the catalog `entry` has **no** Lean `def`
-   yet **and** the production file has no `cfg(verus_keep_ghost)`. Then
-   put Verus on that file. If Lean already extracted the entry, or Verus
-   already last-wins, **skip** — wrapping an already-extracted kernel
-   (`ascii_lower is the file rustc links`) is not a slice. After extract
-   freeze, this rank is empty. Do not fall through here while rank 5
-   `unpaid_compose` is non-zero.
+7. **Single-artifact** — Lean extract of the **rustc** body (same types
+   the handler passes). Verus only if it type-checks **that** body
+   (`macro_rules!` last-wins). A `verus!` toy enum / `u64` stand-in
+   while rustc has `&[u8]` / `Bound` / `key::ValueType` is a **model
+   twin** — unpaid, not last-wins, not a land. Do not mint it. Do not
+   mint `#[cfg(not(verus_keep_ghost))]` as a slice. `skip_verus_last_wins`
+   is invalid. If Lean already has `def` of the rustc entry, skip (SA
+   wrap). If 4–10 empty, trampoline remaining (rank 1) — **not a halt**.
+   Do not fall through here while rank 5 `unpaid_compose` is non-zero.
 8. **atom→close** — one `data_fate` atom, production `entry`.
 9. **F then E** — one clone group / one non-`data_fate` three-teeth pair
    whose `entry` has no Lean `def`. Already-extracted close pairs are
@@ -146,7 +159,8 @@ chains Fires; this bound is not end-of-turn).
     not a slice. Same for a kernel whose body is `a || b`, `a && b`,
     `a == b`, `a != b`, or identity on a bool the handler already
     computed (`inline_needs_escape`, `vlog_closed`, `s >= e` renamed).
-    Fall through is **not** “wrap the next operator”.
+    Same for a Verus cartoon (u64 / toy enum ≠ rustc types) billed as
+    the production fn. Fall through is **not** “wrap the next operator”.
 15. **DiskPressure is write admission.** Only a **new user/ops write**
     that would append WAL or write SST/dest (`put` / `delete` /
     `apply_batch` / `flush` / `compact*` / PITR dest / replica append).
@@ -155,10 +169,12 @@ chains Fires; this bound is not end-of-turn).
     `rotate_wal_now` after SST durable). **Never** best-effort auto-flush
     (F18). Slapping `compact_refuse` on the next fn is the wrap factory.
 16. **Wrap factory is not a slice** (`is_empty`/`compact_refuse` spray /
-    `||`/`==` identity kernel / DiskPressure on
+    `||`/`==` identity kernel / Verus cartoon twin / DiskPressure on
     `close`/promote/rotate-after-SST/auto-flush). When
-    unpaid 4–10 is 0, **do not halt** — land the next trampoline
-    data-fate `if` (rank 1). RFC P1.3 telemetry is not data-fate. P2.1
+    unpaid 4–10 is 0, leftover_next is trampoline remaining — land the
+    next trampoline data-fate `if` (rank 1) or Aeneas of the rustc body
+    without Lean unfold. Do not wrap. Do not halt. Do not mint a u64
+    twin. RFC P1.3 telemetry is not data-fate. P2.1
     fence blast is deferred. Inventing a disk `if` to have a SHA is
     shallow — revert.
 
@@ -177,15 +193,18 @@ a **copy** of residuals FAILs; restore from bak; never `json.dump` live
 Acceptance (all):
 
 - a production `.rs` that rustc links **changed this turn**, or a new
-  Lean/Verus theorem that `unfold`s a production caller **and** callee
-  introduced or first used this turn
+  Lean theorem that `unfold`s a production caller **and** callee
+  introduced or first used this turn (Verus theorem only if it
+  type-checks those rustc types — same tokens, not a u64 cartoon)
 - named `cargo test` calls that **production** fn
 - `scripts/lean_extracts.sh --required` exit 0 if Lean changed
 - `--lint` freeze: extract count matches; `db_rs_extracted` false
 
 **Not a land:** catalog/`residuals` `single_artifact` flag without the rustc
-body change above; cfg/verus wrap on a kernel whose `entry` already has a
-Lean `def`; callee-only unfold billed as a ConcurrentDb caller;
+body change above; Verus `verus!` stand-in whose signature ≠ rustc
+(`u64` vs `&[u8]`); `cfg(verus_keep_ghost)` wrap billed as last-wins;
+cfg/verus wrap on a kernel whose `entry` already has a Lean `def`;
+callee-only unfold billed as a ConcurrentDb caller;
 `native_decide` of a plan without `unfold`; board/rank/RFC checkbox only;
 wrapping `is_empty`/`==0` onto `batch_is_empty`; wrapping a live `||` /
 `==` / `!=` / identity-bool into a kernel whose spec is that operator;
@@ -193,15 +212,16 @@ slapping `compact_refuse`
 (or any paid kernel) onto the next production fn `leftover_next` named;
 `DiskPressure` on `close` / `Drop` / promote / rotate-after-SST /
 auto-flush; replacing `leftover_next` with a function name;
-`include_str` of a kernel the handler already calls. If the first rank
-hit is that, fall through to the next trampoline data-fate `if` —
-do not invent a wrap site, do not halt.
+`include_str` of a kernel the handler already calls; minting a Verus
+u64/toy-enum twin billed as last-wins. If the first rank hit is that,
+fall through to the next trampoline data-fate `if` or rustc-body
+extract — do not invent a wrap site, do not halt, do not mint a cartoon.
 
 ## 4. Output (after the commit, not instead of it)
 
 Under `/grind` this section is **not** permission to stop. Write it
 only if the next Fire's land tools already follow. Empty 4–10 is
-trampoline remaining, not a stop.
+trampoline remaining, not a stop. Cartoon twin is not a land.
 
 ```markdown
 ## Caminho seL4 — não acabou

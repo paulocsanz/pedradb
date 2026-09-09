@@ -16,7 +16,9 @@ theorem files (Aeneas.Std may still have `sorry`).
 `--start-from` catalog entries. `--exclude` non-catalog bottoms (e.g. Pattern).
 `RUSTFLAGS='--cfg test'` if as-is is `#[cfg(test)]`. Partial `.lean` is not
 an extract. `proof_depth`: close + matching SOURCE ⇒ extract; **model stays
-model** even if the file is extracted.
+model** even if the file is extracted. A `verus!` toy enum / `u64` stand-in
+while rustc has `&[u8]` / `Bound` / `key::ValueType` is that model — not the
+extracted rustc body, not last-wins.
 
 Iterator extra generated fields (`map`/`filter`/`collect`/`all`) lake-red —
 strip in `aeneas_*.sh`. Bool `if` over Result can parse as Prop `ite` — use

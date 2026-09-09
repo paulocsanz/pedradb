@@ -29,8 +29,68 @@ echo "      charon=$CHARON"
     --start-from 'crate::merge::past_end' \
     --start-from 'crate::merge::iter_window_keep' \
     --start-from 'crate::merge::iter_window_keep_as_is' \
+    --start-from 'crate::merge::write_op_covers_key' \
+    --start-from 'crate::merge::write_op_covers_key_as_is' \
     --dest-file "$OUT/merge_kernel.llbc" )
 "$AENEAS" -backend lean -dest "$OUT/lean" "$OUT/merge_kernel.llbc"
+# Lean 4 `do` match rejects dotted constructors (`key.ValueType.Deletion`)
+# as pattern variables. Same semantics: drop `do`, use `.Deletion`.
+python3 - "$OUT/lean/MergeKernel.lean" <<'PYEOF'
+import sys
+p = sys.argv[1]
+src = open(p, encoding="utf-8").read()
+old = (
+    "  Result Bool\n"
+    "  := do\n"
+    "  match kind with\n"
+    "  | key.ValueType.Deletion =>\n"
+    "    core.slice.cmp.PartialEqSlice.eq core.cmp.PartialEqU8 start key\n"
+    "  | key.ValueType.Value =>\n"
+    "    core.slice.cmp.PartialEqSlice.eq core.cmp.PartialEqU8 start key\n"
+    "  | key.ValueType.RangeDeletion => merge.range_tombstone_covers start end1 key\n"
+)
+new = (
+    "  Result Bool\n"
+    "  :=\n"
+    "  match kind with\n"
+    "  | .Deletion =>\n"
+    "    core.slice.cmp.PartialEqSlice.eq core.cmp.PartialEqU8 start key\n"
+    "  | .Value =>\n"
+    "    core.slice.cmp.PartialEqSlice.eq core.cmp.PartialEqU8 start key\n"
+    "  | .RangeDeletion => merge.range_tombstone_covers start end1 key\n"
+)
+old2 = (
+    "  Result Bool\n"
+    "  := do\n"
+    "  match kind with\n"
+    "  | key.ValueType.Deletion => ok false\n"
+    "  | key.ValueType.Value => ok false\n"
+    "  | key.ValueType.RangeDeletion =>\n"
+    "    merge.range_tombstone_covers_as_is start end1 key\n"
+)
+new2 = (
+    "  Result Bool\n"
+    "  :=\n"
+    "  match kind with\n"
+    "  | .Deletion => ok false\n"
+    "  | .Value => ok false\n"
+    "  | .RangeDeletion =>\n"
+    "    merge.range_tombstone_covers_as_is start end1 key\n"
+)
+n = 0
+if old in src:
+    src = src.replace(old, new, 1)
+    n += 1
+elif new not in src:
+    sys.exit("write_op_covers_key match patch target not found")
+if old2 in src:
+    src = src.replace(old2, new2, 1)
+    n += 1
+elif new2 not in src:
+    sys.exit("write_op_covers_key_as_is match patch target not found")
+open(p, "w", encoding="utf-8").write(src)
+print(f"      patched write_op_covers_key do-match ({n})")
+PYEOF
 {
   echo "path=crates/pedradb-core/src/merge.rs"
   echo "sha256=$(shasum -a 256 "$SRC" | awk '{print $1}')"
