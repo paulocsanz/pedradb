@@ -1187,7 +1187,7 @@ impl CountCache {
     /// No cached count windows (RFC-0062 P0.4: skip per-key dirty clones).
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.state.lock().map.is_empty()
+        crate::write_admission_kernel::batch_is_empty(self.state.lock().map.len() as u64)
     }
 }
 
