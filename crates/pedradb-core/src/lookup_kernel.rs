@@ -387,6 +387,16 @@ mod tests {
             prefer_newer_seq_as_is(true, 2, 4),
             "AS-IS dente: first candidate always wins"
         );
+        let src = include_str!("sst/table.rs");
+        let body = src
+            .split("fn best_point_in_entry_slice")
+            .nth(1)
+            .and_then(|s| s.split("fn ").next())
+            .expect("best_point_in_entry_slice");
+        assert!(
+            body.contains("prefer_newer_seq("),
+            "SST point newest-wins must call catalog prefer_newer_seq"
+        );
     }
 
     /// RFC-0174 P1.2: data-fate `if`s on get_at / lookup must call a kernel.

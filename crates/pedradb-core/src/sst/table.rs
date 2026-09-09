@@ -967,7 +967,11 @@ impl SstTable {
             if ikey.sequence <= snapshot {
                 // Entries are newest-first for a user key; first hit is best in one block.
                 // Still scan if we ever change order — keep max seq for safety.
-                if best.as_ref().is_none_or(|(s, _)| ikey.sequence > *s) {
+                if crate::lookup_kernel::prefer_newer_seq(
+                    best.is_some(),
+                    ikey.sequence,
+                    best.as_ref().map(|(s, _)| *s).unwrap_or(0),
+                ) {
                     let look = match ikey.kind {
                         ValueType::Deletion => Lookup::Deleted,
                         ValueType::Value => Lookup::Found(value.clone()),
@@ -3201,6 +3205,24 @@ mod tests {
             .as_nanos();
         let seq = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         std::env::temp_dir().join(format!("pedradb-sst-{n}-{seq}.sst"))
+    }
+
+    #[test]
+    fn best_point_in_entry_slice_calls_prefer_newer_seq() {
+        let src = include_str!("table.rs");
+        let body = src
+            .split("fn best_point_in_entry_slice")
+            .nth(1)
+            .and_then(|s| s.split("fn ").next())
+            .expect("best_point_in_entry_slice");
+        assert!(
+            body.contains("prefer_newer_seq("),
+            "SST point newest-wins must call catalog prefer_newer_seq"
+        );
+        assert!(
+            !body.contains("is_none_or"),
+            "newest-wins if must not stay inline in best_point_in_entry_slice"
+        );
     }
 
     #[test]
