@@ -414,6 +414,15 @@ mod tests {
             rot.contains("compact_refuse("),
             "rotate_wal_now must match compact_refuse"
         );
+        let man = include_str!("db.rs")
+            .split("pub fn persist_manifest_durable(")
+            .nth(1)
+            .and_then(|s| s.split("pub fn fsync_unsynced_ssts(").next())
+            .expect("persist_manifest_durable");
+        assert!(
+            man.contains("compact_refuse("),
+            "persist_manifest_durable must match compact_refuse"
+        );
     }
 
     #[test]

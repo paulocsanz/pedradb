@@ -10446,6 +10446,10 @@ impl<E: Env> Db<E> {
     /// # Errors
     /// SST / MANIFEST I/O.
     pub fn persist_manifest_durable(&mut self) -> Result<()> {
+        let probe = crate::env::probe_available_bytes(&self.env, &self.dir);
+        if let Some((available, need)) = crate::disk_pressure_kernel::compact_refuse(probe) {
+            return Err(CoreError::DiskPressure { available, need });
+        }
         self.persist_manifest()
     }
 
