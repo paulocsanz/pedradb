@@ -1207,8 +1207,10 @@ impl World {
                         }
                     }
                     // Majority visibility when fully connected (all online, no membership fault).
-                    let fully_connected =
-                        part == self.cfg.n_nodes as usize && memb.offline_ids().is_empty();
+                    let fully_connected = part == self.cfg.n_nodes as usize
+                        && pedradb_core::write_admission_kernel::batch_is_empty(
+                            memb.offline_ids().len() as u64,
+                        );
                     if fully_connected && seen < maj {
                         self.exchange(cluster, net, trace, step, "put_vis2")?;
                         let (seen2, _, _) = count_seen_participating(cluster, &key, &val);
