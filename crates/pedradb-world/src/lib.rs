@@ -1030,7 +1030,7 @@ impl World {
                 break;
             }
         }
-        if applied > 0 {
+        if !pedradb_core::write_admission_kernel::batch_is_empty(applied as u64) {
             trace.rpc_applied += applied;
             trace.push(step, "rpc", format!("{tag} n={applied}"));
         }
