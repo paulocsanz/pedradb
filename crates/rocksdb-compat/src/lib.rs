@@ -4403,7 +4403,7 @@ fn compat_compact_once<E: PedraEnv>(inner: &ConcurrentDb<E>, gate: &Mutex<()>) -
     // Only invoked when writers are idle — drain every leftover L0 so a
     // mid-loop compact that hits L0=0 cannot leave a sub-trigger remnant.
     let l0 = inner.with_read(|db| db.level_file_count(0));
-    if l0 == 0 {
+    if pedradb_core::write_admission_kernel::batch_is_empty(l0 as u64) {
         return false;
     }
     let _gate = gate.lock();
