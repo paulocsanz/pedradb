@@ -115,7 +115,10 @@ pub fn escape_inline_value(value: Bytes) -> Bytes {
     if crate::write_admission_kernel::batch_is_empty(value.len() as u64) {
         return value;
     }
-    if value[0] == INLINE_ESCAPE || vlog::decode_vlog_ptr(&value).is_some() {
+    if crate::lookup_kernel::inline_needs_escape(
+        value[0] == INLINE_ESCAPE,
+        vlog::decode_vlog_ptr(&value).is_some(),
+    ) {
         let mut escaped = Vec::with_capacity(value.len() + 1);
         escaped.push(INLINE_ESCAPE);
         escaped.extend_from_slice(&value);

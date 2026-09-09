@@ -41,6 +41,12 @@ macro_rules! vlog_ptr_orphaned_body {
     };
 }
 
+macro_rules! inline_needs_escape_body {
+    ($starts_escape:expr, $sniffs_ptr:expr) => {
+        $starts_escape || $sniffs_ptr
+    };
+}
+
 #[cfg(not(verus_keep_ghost))]
 /// Snapshot sequence 0 never observes a version (empty snap → miss).
 #[must_use]
@@ -112,6 +118,21 @@ pub fn vlog_ptr_orphaned(vlog_closed: bool) -> bool {
 /// AS-IS: never orphaned (would lock None / serve pointer bytes).
 #[must_use]
 pub fn vlog_ptr_orphaned_as_is(_vlog_closed: bool) -> bool {
+    false
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// F188: inline value must be escaped iff it already starts with the
+/// marker or would sniff as a vlog pointer.
+#[must_use]
+pub fn inline_needs_escape(starts_escape: bool, sniffs_ptr: bool) -> bool {
+    inline_needs_escape_body!(starts_escape, sniffs_ptr)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: never escape (get would misread the bytes as a vlog pointer).
+#[must_use]
+pub fn inline_needs_escape_as_is(_starts_escape: bool, _sniffs_ptr: bool) -> bool {
     false
 }
 
@@ -272,6 +293,25 @@ proof fn lemma_vlog_ptr_orphaned()
 {
 }
 
+pub open spec fn inline_needs_escape_spec(starts_escape: bool, sniffs_ptr: bool) -> bool {
+    starts_escape || sniffs_ptr
+}
+
+pub fn inline_needs_escape(starts_escape: bool, sniffs_ptr: bool) -> (d: bool)
+    ensures
+        d == inline_needs_escape_spec(starts_escape, sniffs_ptr),
+{
+    inline_needs_escape_body!(starts_escape, sniffs_ptr)
+}
+
+pub fn inline_needs_escape_as_is(starts_escape: bool, sniffs_ptr: bool) -> (d: bool)
+    ensures
+        d == false,
+{
+    let _ = (starts_escape, sniffs_ptr);
+    false
+}
+
 } // verus!
 
 #[cfg(test)]
@@ -375,6 +415,27 @@ mod tests {
         assert!(
             !body.contains("let Some(ref vlog) = self.vlog else"),
             "resolve_stored_value must not keep a raw closed-vlog if"
+        );
+    }
+
+    #[test]
+    fn inline_needs_escape_on_live_sniff_is_not_ok() {
+        assert!(inline_needs_escape(true, false));
+        assert!(inline_needs_escape(false, true));
+        assert!(!inline_needs_escape(false, false));
+        assert!(
+            !inline_needs_escape_as_is(true, true),
+            "AS-IS dente: never escape, get misreads as vlog ptr"
+        );
+        let body = named_fn_src(include_str!("db.rs"), "escape_inline_value")
+            .expect("escape_inline_value");
+        assert!(
+            body.contains("inline_needs_escape("),
+            "escape_inline_value must match inline_needs_escape"
+        );
+        assert!(
+            !body.contains("value[0] == INLINE_ESCAPE ||"),
+            "escape_inline_value must not keep a raw sniff if"
         );
     }
 
@@ -529,5 +590,6 @@ mod tests {
             || cond.contains("mem_point_decides(")
             || cond.contains("prefer_newer_seq(")
             || cond.contains("vlog_ptr_orphaned(")
+            || cond.contains("inline_needs_escape(")
     }
 }
