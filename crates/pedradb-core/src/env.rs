@@ -261,6 +261,16 @@ pub trait Env: Clone {
     }
 }
 
+/// RFC-0179: `available_bytes` Ok/Err → watermark domain. Probe Err is
+/// unknown (`disk_probe_or_unknown(false, _)`), never 0 free.
+#[must_use]
+pub fn probe_available_bytes<E: Env>(env: &E, path: &Path) -> Option<u64> {
+    match env.available_bytes(path) {
+        Ok(v) => crate::disk_pressure_kernel::disk_probe_or_unknown(true, v),
+        Err(_) => crate::disk_pressure_kernel::disk_probe_or_unknown(false, None),
+    }
+}
+
 /// Admit an external write (PITR dest, backup sink, HA replica WAL) against
 /// the RFC-0179 watermarks. Unknown/Err probe does not refuse. Reclaim is
 /// admitted (caller cannot compact an empty dest). Refuse is
@@ -277,10 +287,7 @@ pub fn admit_disk_write<E: Env>(env: &E, path: &Path) -> crate::error::Result<()
     } else {
         path.parent().unwrap_or(path)
     };
-    let probe = match env.available_bytes(target) {
-        Ok(v) => v,
-        Err(_) => None,
-    };
+    let probe = probe_available_bytes(env, target);
     let admit = crate::disk_pressure_kernel::disk_pressure_admit(probe);
     note_external_disk_pressure(admit, path);
     if crate::disk_pressure_kernel::external_write_admitted(probe) {

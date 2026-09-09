@@ -31,6 +31,29 @@ pub enum DiskPressureAdmit {
     },
 }
 
+/// Map an `Env::available_bytes` result onto the watermark domain.
+///
+/// `ok = false` is a failed probe (`statvfs` Err, DST inject). That is
+/// **unknown**, never 0 free — a bad probe must not take writes offline
+/// (RFC-0179). Glue (`admit_disk_write`, `ensure_disk_pressure_admitted`)
+/// matches this fn.
+#[must_use]
+pub fn disk_probe_or_unknown(ok: bool, value: Option<u64>) -> Option<u64> {
+    match ok {
+        true => value,
+        false => None,
+    }
+}
+
+/// AS-IS hole: probe Err is treated as 0 free bytes (false-refuse).
+#[must_use]
+pub fn disk_probe_or_unknown_as_is(ok: bool, value: Option<u64>) -> Option<u64> {
+    match ok {
+        true => value,
+        false => Some(0),
+    }
+}
+
 /// Admit a write given `Env::available_bytes` (`None` = unknown).
 #[must_use]
 pub fn disk_pressure_admit(available: Option<u64>) -> DiskPressureAdmit {
@@ -179,6 +202,48 @@ mod tests {
     }
 
     #[test]
+    fn disk_probe_or_unknown_on_live_probe_is_not_ok() {
+        assert_eq!(disk_probe_or_unknown(true, Some(1024)), Some(1024));
+        assert_eq!(disk_probe_or_unknown(true, None), None);
+        assert_eq!(disk_probe_or_unknown(false, Some(0)), None);
+        assert_eq!(disk_probe_or_unknown(false, None), None);
+        assert_eq!(
+            disk_probe_or_unknown_as_is(false, None),
+            Some(0),
+            "AS-IS dente: probe Err is 0 free (false-refuse)"
+        );
+        assert_eq!(
+            disk_pressure_admit(disk_probe_or_unknown(false, None)),
+            DiskPressureAdmit::Ok
+        );
+        assert_eq!(
+            disk_pressure_admit(disk_probe_or_unknown_as_is(false, None)),
+            DiskPressureAdmit::Refuse {
+                available: 0,
+                need: DISK_HARD_FREE_BYTES,
+            }
+        );
+        let glue = include_str!("env.rs")
+            .split("pub fn probe_available_bytes")
+            .nth(1)
+            .and_then(|s| s.split("pub fn admit_disk_write").next())
+            .expect("probe_available_bytes");
+        assert!(
+            glue.contains("disk_probe_or_unknown("),
+            "probe_available_bytes must match disk_probe_or_unknown"
+        );
+        let admit = include_str!("db.rs")
+            .split("fn ensure_disk_pressure_admitted")
+            .nth(1)
+            .and_then(|s| s.split("fn reclaim_disk_for_uptime").next())
+            .expect("ensure_disk_pressure_admitted");
+        assert!(
+            admit.contains("probe_available_bytes("),
+            "ensure_disk_pressure_admitted must use probe_available_bytes"
+        );
+    }
+
+    #[test]
     fn external_write_admitted_on_live_admit_disk_write_is_not_ok() {
         assert!(external_write_admitted(None));
         assert!(external_write_admitted(Some(DISK_HARD_FREE_BYTES)));
@@ -195,6 +260,10 @@ mod tests {
         assert!(
             glue.contains("external_write_admitted("),
             "admit_disk_write must match external_write_admitted"
+        );
+        assert!(
+            glue.contains("probe_available_bytes("),
+            "admit_disk_write must probe via disk_probe_or_unknown"
         );
         let copy = include_str!("db.rs")
             .split("pub fn copy_db_directory")

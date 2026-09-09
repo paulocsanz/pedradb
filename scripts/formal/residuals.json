@@ -108,6 +108,7 @@
    ],
    "crates/pedradb-core/src/disk_pressure_kernel.rs": [
     "disk_pressure_admit",
+    "disk_probe_or_unknown",
     "compact_allowed_under_pressure",
     "external_write_admitted"
    ],

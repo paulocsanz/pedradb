@@ -35,6 +35,28 @@ theorem disk_pressure_reclaim_plan_as_is_sst_only :
   unfold disk_pressure_reclaim_plan_as_is
   rfl
 
+/-- Failed probe is unknown (`none`), never 0 free. -/
+theorem disk_probe_or_unknown_err_is_none :
+    disk_probe_or_unknown false none = ok none := by
+  unfold disk_probe_or_unknown
+  rfl
+
+/-- AS-IS dente: probe Err is 0 free (false-refuse). -/
+theorem disk_probe_or_unknown_as_is_err_is_zero :
+    disk_probe_or_unknown_as_is false none = ok (some 0#u64) := by
+  unfold disk_probe_or_unknown_as_is
+  rfl
+
+/-- Dual-unfold: failed probe is unknown **and** unknown admits. -/
+theorem disk_probe_err_admits :
+    disk_probe_or_unknown false none = ok none ∧
+      disk_pressure_admit none = ok DiskPressureAdmit.Ok := by
+  constructor
+  · unfold disk_probe_or_unknown
+    rfl
+  · unfold disk_pressure_admit
+    rfl
+
 /-- Dual-unfold: PITR dest glue (`external_write_admitted`) calls
     `disk_pressure_admit`; unknown probe admits. -/
 theorem external_write_admitted_unfolds_disk_pressure_admit :

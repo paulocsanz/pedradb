@@ -106,6 +106,8 @@ struct FailState {
     space_injected: Cell<bool>,
     /// Injected free bytes (`None` = unknown probe). Ignored until injected.
     available: Cell<Option<u64>>,
+    /// RFC-0179: when true, `available_bytes` returns Err (failed probe).
+    probe_err: Cell<bool>,
 }
 
 impl FailState {
@@ -245,6 +247,7 @@ impl<E: Env> FailingEnv<E> {
             delay_per_op: Cell::new(0),
             space_injected: Cell::new(false),
             available: Cell::new(None),
+            probe_err: Cell::new(false),
         };
         Self {
             inner,
@@ -315,8 +318,15 @@ impl<E: Env> FailingEnv<E> {
     /// Shared across clones (`Rc`), so a handle kept outside `Db` can drop
     /// free space after open.
     pub fn set_available_bytes(&self, n: Option<u64>) {
+        self.state.probe_err.set(false);
         self.state.space_injected.set(true);
         self.state.available.set(n);
+    }
+
+    /// RFC-0179: inject `available_bytes` Err (failed `statvfs`). Glue maps
+    /// Err → unknown via `disk_probe_or_unknown`; must not false-refuse.
+    pub fn inject_probe_err(&self) {
+        self.state.probe_err.set(true);
     }
 
     /// Heal even a permanent fault.
@@ -523,6 +533,9 @@ impl<E: Env> Env for FailingEnv<E> {
     }
 
     fn available_bytes(&self, path: &Path) -> io::Result<Option<u64>> {
+        if self.state.probe_err.get() {
+            return Err(io::Error::other("injected statvfs failure"));
+        }
         if self.state.space_injected.get() {
             Ok(self.state.available.get())
         } else {

@@ -9900,10 +9900,7 @@ impl<E: Env> Db<E> {
     /// Unconditional — `write_admission_idle` only skips mem/L0 knobs.
     /// Unknown probe (`None` / Err) does not refuse. Not a durability fence.
     fn ensure_disk_pressure_admitted(&mut self) -> Result<()> {
-        let probe = match self.env.available_bytes(&self.dir) {
-            Ok(v) => v,
-            Err(_) => None,
-        };
+        let probe = crate::env::probe_available_bytes(&self.env, &self.dir);
         match crate::disk_pressure_kernel::disk_pressure_admit(probe) {
             crate::disk_pressure_kernel::DiskPressureAdmit::Ok => {
                 self.note_disk_pressure(0, probe);
@@ -9912,10 +9909,7 @@ impl<E: Env> Db<E> {
             crate::disk_pressure_kernel::DiskPressureAdmit::Reclaim => {
                 self.note_disk_pressure(1, probe);
                 self.reclaim_disk_for_uptime(probe);
-                let again = match self.env.available_bytes(&self.dir) {
-                    Ok(v) => v,
-                    Err(_) => None,
-                };
+                let again = crate::env::probe_available_bytes(&self.env, &self.dir);
                 match crate::disk_pressure_kernel::disk_pressure_admit(again) {
                     crate::disk_pressure_kernel::DiskPressureAdmit::Refuse { available, need } => {
                         self.note_disk_pressure(2, Some(available));

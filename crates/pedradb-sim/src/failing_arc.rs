@@ -24,6 +24,8 @@ struct FailStateArc {
     space_injected: AtomicBool,
     /// Free bytes; `u64::MAX` means unknown (`None`) while injected.
     available: AtomicU64,
+    /// RFC-0179: `available_bytes` returns Err (failed probe).
+    probe_err: AtomicBool,
 }
 
 fn kind_to_u64(k: FaultKind) -> u64 {
@@ -111,6 +113,7 @@ impl FailingEnvArc<StdEnv> {
                 sync_only: AtomicBool::new(kind.is_sync_only()),
                 space_injected: AtomicBool::new(false),
                 available: AtomicU64::new(u64::MAX),
+                probe_err: AtomicBool::new(false),
             }),
         }
     }
@@ -131,6 +134,7 @@ impl<E: Env> FailingEnvArc<E> {
                 sync_only: AtomicBool::new(false),
                 space_injected: AtomicBool::new(false),
                 available: AtomicU64::new(u64::MAX),
+                probe_err: AtomicBool::new(false),
             }),
         }
     }
@@ -165,10 +169,17 @@ impl<E: Env> FailingEnvArc<E> {
 
     /// RFC-0179: inject `Env::available_bytes` (`None` = unknown).
     pub fn set_available_bytes(&self, n: Option<u64>) {
+        self.state.probe_err.store(false, Ordering::Relaxed);
         self.state.space_injected.store(true, Ordering::Relaxed);
         self.state
             .available
             .store(n.unwrap_or(u64::MAX), Ordering::Relaxed);
+    }
+
+    /// RFC-0179: inject `available_bytes` Err (failed probe). Glue maps
+    /// Err → unknown; must not false-refuse.
+    pub fn inject_probe_err(&self) {
+        self.state.probe_err.store(true, Ordering::Relaxed);
     }
 }
 
@@ -293,6 +304,9 @@ impl<E: Env> Env for FailingEnvArc<E> {
     }
 
     fn available_bytes(&self, path: &Path) -> io::Result<Option<u64>> {
+        if self.state.probe_err.load(Ordering::Relaxed) {
+            return Err(io::Error::other("injected statvfs failure"));
+        }
         if self.state.space_injected.load(Ordering::Relaxed) {
             let n = self.state.available.load(Ordering::Relaxed);
             if n == u64::MAX {

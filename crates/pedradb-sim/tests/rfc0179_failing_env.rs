@@ -6,7 +6,7 @@ use pedradb_core::concurrent::ConcurrentDb;
 use pedradb_core::db::{copy_db_directory, Db, OpenOptions};
 use pedradb_core::env::Env;
 use pedradb_core::disk_pressure_kernel::{
-    disk_pressure_admit, DiskPressureAdmit, DISK_HARD_FREE_BYTES,
+    disk_pressure_admit, disk_probe_or_unknown, DiskPressureAdmit, DISK_HARD_FREE_BYTES,
 };
 use pedradb_core::error::CoreError;
 use pedradb_sim::{FailingEnv, FailingEnvArc};
@@ -214,6 +214,38 @@ fn copy_db_directory_under_hard_floor_does_not_create_dest() {
     assert!(!env.exists(&dest), "refused copy must not create dest");
     let _ = std::fs::remove_dir_all(&src);
     let _ = std::fs::remove_dir_all(&dest_parent);
+}
+
+/// RFC-0179: probe Err is unknown, never 0-free. Put still Ok; not a fence.
+#[test]
+fn failing_env_probe_err_does_not_refuse_put() {
+    assert_eq!(disk_probe_or_unknown(false, None), None);
+    assert!(matches!(
+        disk_pressure_admit(disk_probe_or_unknown(false, None)),
+        DiskPressureAdmit::Ok
+    ));
+
+    let dir = tmp();
+    let env = FailingEnv::passing();
+    let handle = env.clone();
+    let mut db = Db::open_with_env(
+        &dir,
+        OpenOptions {
+            sync: false,
+            auto_flush_bytes: None,
+            auto_compact_sst_count: None,
+            auto_compact_sst_bytes: None,
+            ..OpenOptions::default()
+        },
+        env,
+    )
+    .unwrap();
+    db.put(b"k", b"v").unwrap();
+    handle.inject_probe_err();
+    db.put(b"k2", b"v2").unwrap();
+    assert_eq!(db.get(b"k2").as_deref(), Some(b"v2".as_ref()));
+    assert!(!db.is_durability_fenced());
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// RFC-0179: `create_checkpoint` admits before copy; dest is not created
