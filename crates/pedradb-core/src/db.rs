@@ -3803,7 +3803,7 @@ impl<E: Env> Db<E> {
         prefix: &[u8],
     ) -> Result<Option<Bytes>> {
         self.ensure_snapshot_readable(Snapshot::at(snapshot))?;
-        if crate::write_admission_kernel::batch_is_empty(snapshot) {
+        if crate::lookup_kernel::snap_is_empty(snapshot) {
             return Ok(None);
         }
         self.latest_ops.fetch_add(1, Ordering::Relaxed);

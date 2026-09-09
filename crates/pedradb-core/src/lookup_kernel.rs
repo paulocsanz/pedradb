@@ -251,6 +251,12 @@ mod tests {
             last.contains("snap_is_empty("),
             "last_under_prefix must match snap_is_empty"
         );
+        let user = named_fn_src(include_str!("db.rs"), "last_under_user_prefix")
+            .expect("last_under_user_prefix");
+        assert!(
+            user.contains("snap_is_empty("),
+            "last_under_user_prefix must match snap_is_empty"
+        );
     }
 
     #[test]
