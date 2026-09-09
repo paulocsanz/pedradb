@@ -1481,7 +1481,7 @@ fn main() {
     "pass": {pass}
   }}"#,
             ws = wall.as_secs_f64(),
-            pass = mismatches == 0,
+            pass = pedradb_core::write_admission_kernel::batch_is_empty(mismatches),
         ));
         progress!(
             "E1 mini-bt ops={ops} mismatches={mismatches} ok_commit={commits_ok} multi={multi_ok} ww={ww_ok}"
