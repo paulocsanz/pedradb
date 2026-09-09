@@ -1,20 +1,16 @@
 #!/usr/bin/env bash
-# Machine-check F85 Bearer scheme case-fold on the file rustc links
-# (single artifact — not the twin-cópia). RFC-0002 P31.
+# auth_kernel.rs rustc body is the term (Aeneas Auth.lean).
+# A u8-fold view of rustc &str bearer is not last-wins. Fail closed if it returns.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="$ROOT/crates/pedradb-http/src/auth_kernel.rs"
-if [[ -x "${VERUS:-}" ]]; then
-  :
-elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then
-  VERUS="$HOME/.local/verus/verus-arm64-macos/verus"
-elif command -v verus >/dev/null 2>&1; then
-  VERUS="$(command -v verus)"
-else
-  echo "error: verus not found" >&2
-  exit 127
+if grep -n 'verus!' "$SRC"; then
+  echo "error: verus_bearer_scheme: verus! stand-in still in auth_kernel.rs (not last-wins of rustc &str)" >&2
+  exit 1
 fi
-echo "verus: $VERUS"
-"$VERUS" --version
-echo "proving: $SRC"
-exec "$VERUS" "$SRC" --crate-type=lib --multiple-errors 10 --time "$@"
+if grep -n 'verus_keep_ghost' "$SRC"; then
+  echo "error: verus_bearer_scheme: cfg(verus_keep_ghost) split still in auth_kernel.rs" >&2
+  exit 1
+fi
+echo "ok: no Verus cartoon in $SRC; term is Aeneas formal/aeneas/lean/Auth.lean"
+exit 0

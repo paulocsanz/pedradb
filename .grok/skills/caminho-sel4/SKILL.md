@@ -19,11 +19,11 @@ description: >
 
 ## Grind pressure (one block, overwritten each fire)
 
-- Last fire: worked (`cae8835a` memtable `range_snapshot` calls `visible_at`)
-- Why: Search scanned only data_fate; `prefix.rs` twin==kernel + cfg/`Seq<u8>` stand-in billed as last-wins of rustc `&[u8]`
-- This fire MUST land: delete `prefix.rs` verus stand-in + cfg split; rustc `&[u8]` body stays; Aeneas of that body; Search leftover_next scans all catalog kernels
-- Forbidden this fire: mint u64/`Seq` twin; leftover_next store/Montanha; leftover is_empty wrap; compact_refuse spray; git checkout of db.rs/concurrent.rs; skip cartoon as "not a land"; Bound-helper as cartoon payment
-- Deeper: Search leftover_next cartoon remaining prefix.rs; delete stand-in; named cargo; aeneas_prefix.sh --required; lake Prefix
+- Last fire: worked (`9fc51d6c` prefix.rs rustc `&[u8]` is the term)
+- Why: leftover_next cartoon remaining `auth_kernel.rs` (cfg split; Verus u8 fold ≠ rustc `&str` bearer)
+- This fire MUST land: delete `auth_kernel.rs` verus stand-in + cfg split; rustc `&str` body stays; Aeneas of that body
+- Forbidden this fire: mint u64/`Seq` twin; leftover_next store/Montanha; leftover is_empty wrap; compact_refuse spray; git checkout of db.rs/concurrent.rs; skip cartoon as "not a land"
+- Deeper: Search leftover_next_first bearer auth_kernel.rs; delete stand-in; named cargo; aeneas_auth.sh --required; lake Auth
 
 This skill **lands one payable slice per Fire**. Rank 1–10 unpaid first.
 When those boards are 0, Search prints `leftover_next`: cartoon remaining

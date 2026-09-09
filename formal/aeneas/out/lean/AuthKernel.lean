@@ -148,7 +148,7 @@ axiom alloc.string.ToString.Blanket.to_string
   {T : Type} (corefmtDisplayInst : core.fmt.Display T) : T → Result String
 
 /-- [pedra_aeneas_auth_kernel::ascii_lower]:
-    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 20:0-26:1
+    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 19:0-25:1
     Visibility: public -/
 def ascii_lower (b : Std.U8) : Result Std.U8 := do
   let b1 ← core.num.U8.is_ascii_uppercase b
@@ -157,7 +157,7 @@ def ascii_lower (b : Std.U8) : Result Std.U8 := do
   else ok b
 
 /-- [pedra_aeneas_auth_kernel::ascii_upper]:
-    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 31:0-37:1
+    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 29:0-35:1
     Visibility: public -/
 def ascii_upper (b : Std.U8) : Result Std.U8 := do
   let b1 ← core.num.U8.is_ascii_lowercase b
@@ -166,25 +166,25 @@ def ascii_upper (b : Std.U8) : Result Std.U8 := do
   else ok b
 
 /-- [pedra_aeneas_auth_kernel::normalize_http_method]:
-    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 42:0-44:1
+    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 39:0-41:1
     Visibility: public -/
 def normalize_http_method (m : Str) : Result String := do
   alloc.str.Str.to_ascii_uppercase m
 
 /-- [pedra_aeneas_auth_kernel::normalize_http_method_as_is]:
-    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 49:0-51:1
+    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 45:0-47:1
     Visibility: public -/
 def normalize_http_method_as_is (m : Str) : Result String := do
   alloc.string.ToString.Blanket.to_string Str.Insts.CoreFmtDisplay m
 
 /-- [pedra_aeneas_auth_kernel::is_bearer_scheme]:
-    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 56:0-58:1
+    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 51:0-53:1
     Visibility: public -/
 def is_bearer_scheme (scheme : Str) : Result Bool := do
   core.str.Str.eq_ignore_ascii_case scheme (toStr "bearer")
 
 /-- [pedra_aeneas_auth_kernel::is_non_bearer_auth_scheme]:
-    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 64:0-69:1
+    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 58:0-63:1
     Visibility: public -/
 def is_non_bearer_auth_scheme (scheme : Str) : Result Bool := do
   let b ← core.str.Str.eq_ignore_ascii_case scheme (toStr "basic")
@@ -201,7 +201,7 @@ def is_non_bearer_auth_scheme (scheme : Str) : Result Bool := do
       else core.str.Str.eq_ignore_ascii_case scheme (toStr "ntlm")
 
 /-- [pedra_aeneas_auth_kernel::is_bearer_scheme_as_is]:
-    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 74:0-76:1
+    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 67:0-69:1
     Visibility: public -/
 def is_bearer_scheme_as_is (scheme : Str) : Result Bool := do
   let b ← Str.Insts.CoreCmpPartialEqStr.eq scheme (toStr "Bearer")
@@ -210,7 +210,7 @@ def is_bearer_scheme_as_is (scheme : Str) : Result Bool := do
   else Str.Insts.CoreCmpPartialEqStr.eq scheme (toStr "bearer")
 
 /-- [pedra_aeneas_auth_kernel::bearer_token_from_value]:
-    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 89:0-110:1
+    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 81:0-102:1
     Visibility: public -/
 axiom core.str.Str.split_once_ws : Str → Result (Option (Str × Str))
 
@@ -239,7 +239,7 @@ def bearer_token_from_value (value : Str) : Result (Option Str) := do
         if nb then ok none else ok (some v)
 
 /-- [pedra_aeneas_auth_kernel::bearer_token_from_value_as_is]:
-    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 116:0-130:1
+    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 107:0-121:1
     Visibility: public -/
 def bearer_token_from_value_as_is (value : Str) : Result (Option Str) := do
   let v ← core.str.Str.trim value
@@ -271,7 +271,7 @@ def bearer_token_from_value_as_is (value : Str) : Result (Option Str) := do
     else ok (some tok)
 
 /-- [pedra_aeneas_auth_kernel::authorization_matches]:
-    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 137:0-163:1
+    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 127:0-153:1
     Visibility: public -/
 @[rust_loop_body]
 def authorization_matches_loop.body
