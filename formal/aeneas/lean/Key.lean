@@ -62,6 +62,17 @@ theorem value_type_as_u8_range_deletion :
   unfold key.ValueType.as_u8
   rfl
 
+/-- Catalog entry: ValueType Ord is discriminant `u8` cmp (kind reverse in InternalKey). Dual-unfold. -/
+theorem value_type_cmp_is_discriminant_u8
+    (self other : key.ValueType) :
+    key.ValueType.Insts.CoreCmpOrd.cmp self other =
+      (do
+        let self1 := read_discriminant self
+        let other1 := read_discriminant other
+        ok (core.cmp.impls.OrdU8.cmp self1 other1)) := by
+  unfold key.ValueType.Insts.CoreCmpOrd.cmp
+  rfl
+
 /-- Catalog entry: unknown nibble is none. -/
 theorem value_type_from_u8_unknown :
     key.ValueType.from_u8 3#u8 = ok none := by
