@@ -1,4 +1,4 @@
 path=crates/pedradb-store/src/snapshot_kernel.rs
-sha256=cc1ca8bb86d0a5bc681fc8ab3bfccfdff9cba33d72a13bf74606aa900b05a9be
+sha256=a64e0b9be772b132b50b06c41db5946d32c0f5bf3431925296ba3b315b026ba9
 aeneas=daa85d7
 charon=0.1.232

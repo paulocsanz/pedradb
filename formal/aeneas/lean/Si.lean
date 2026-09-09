@@ -1,10 +1,58 @@
 -- Theorems over Aeneas extract of si_kernel.rs
+-- (RFC-0002 P19/P21/P30/F42/F55/F84). Payment is the linked rustc bodies;
+-- the former cfg(verus_keep_ghost) stand-in was deleted. No holes here.
 import Aeneas
 import SiKernel
-open Aeneas.Std Result
+open Aeneas Aeneas.Std Result
 open pedra_aeneas_si_kernel
 
+/-- F42 teeth: a live reader beats a dead one. -/
 theorem si_reader_beats_c_live :
     si_reader_beats true true false 0#u64 false false false 0#u64 = ok true := by
   unfold si_reader_beats
+  rfl
+
+/-- F42 teeth: participation breaks the next tie. -/
+theorem si_reader_beats_participation_breaks_tie :
+    si_reader_beats true true false 0#u64 true false false 0#u64 = ok true := by
+  unfold si_reader_beats
+  rfl
+
+/-- F42 teeth: self breaks the next tie. -/
+theorem si_reader_beats_self_breaks_next_tie :
+    si_reader_beats true true true 0#u64 true true false 0#u64 = ok true := by
+  unfold si_reader_beats
+  rfl
+
+/-- F42 teeth: the applied watermark breaks the last tie. -/
+theorem si_reader_beats_watermark_breaks_last_tie :
+    si_reader_beats true true true 5#u64 true true true 3#u64 = ok true := by
+  unfold si_reader_beats
+  have h : (5#u64 > 3#u64) = true := by native_decide
+  simp [h]
+
+/-- AS-IS F42 dente: the fold never advances the reader. -/
+theorem si_reader_beats_as_is_dente :
+    si_reader_beats_as_is true true false 0#u64 false false false 0#u64
+      = ok false := by
+  rfl
+
+/-- F84 teeth: point get prefers the applied watermark. -/
+theorem point_get_prefer_applied_teeth :
+    point_get_prefer_applied = ok true := by
+  rfl
+
+/-- AS-IS F84 dente: point get rides the global sequence. -/
+theorem point_get_prefer_applied_as_is_dente :
+    point_get_prefer_applied_as_is = ok false := by
+  rfl
+
+/-- F84 teeth: the point-get watermark is the range applied. -/
+theorem point_get_watermark_prefers_range_applied :
+    point_get_watermark (7#u64) (9#u64) = ok 7#u64 := by
+  rfl
+
+/-- AS-IS F84 dente: the watermark is the global sequence instead. -/
+theorem point_get_watermark_as_is_dente :
+    point_get_watermark_as_is (7#u64) (9#u64) = ok 9#u64 := by
   rfl
