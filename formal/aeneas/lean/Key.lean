@@ -58,3 +58,14 @@ theorem internal_key_for_lookup_is_new_value
     = key.InternalKey.new inst user_key snapshot key.ValueType.Value := by
   unfold key.InternalKey.for_lookup
   rfl
+
+/-- Catalog entry: `new` is Into-bytes then the three fields. Dual-unfold. -/
+theorem internal_key_new_into
+    {T0 : Type} (inst : core.convert.Into T0 bytes.bytes.Bytes)
+    (user_key : T0) (sequence : U64) (kind : key.ValueType) :
+    key.InternalKey.new inst user_key sequence kind =
+      (do
+        let b ← inst.into user_key
+        ok { user_key := b, sequence, kind }) := by
+  unfold key.InternalKey.new
+  rfl
