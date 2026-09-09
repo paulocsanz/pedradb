@@ -84,6 +84,16 @@ theorem value_type_eq_is_discriminant
   unfold key.ValueType.Insts.CoreCmpPartialEqValueType.eq
   rfl
 
+/-- Catalog entry: ValueType PartialOrd is `Some(cmp)`. Dual-unfold. -/
+theorem value_type_partial_cmp_is_some_cmp
+    (self other : key.ValueType) :
+    key.ValueType.Insts.CoreCmpPartialOrdValueType.partial_cmp self other =
+      (do
+        let o ← key.ValueType.Insts.CoreCmpOrd.cmp self other
+        ok (some o)) := by
+  unfold key.ValueType.Insts.CoreCmpPartialOrdValueType.partial_cmp
+  rfl
+
 /-- Catalog entry: unknown nibble is none. -/
 theorem value_type_from_u8_unknown :
     key.ValueType.from_u8 3#u8 = ok none := by
