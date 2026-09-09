@@ -1151,7 +1151,7 @@ fn main() {
                         }
                     }
                 }
-                if !lats.is_empty() {
+                if !pedradb_core::write_admission_kernel::batch_is_empty(lats.len() as u64) {
                     benches.push(summarize("D2_tcp_get", gok, t0.elapsed(), &mut lats));
                 }
                 progress!("D2 tcp get ok={gok}");
