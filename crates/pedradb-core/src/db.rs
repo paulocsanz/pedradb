@@ -11226,14 +11226,16 @@ impl<'a> SstCountCursor<'a> {
                 return;
             };
             self.current = self.load.load(bi);
-            self.idx = match (&self.current, self.start) {
-                (Some(block), Bound::Included(s)) => {
-                    block.partition_point(|(k, _)| k.user_key.as_ref() < s)
-                }
-                (Some(block), Bound::Excluded(s)) => {
-                    block.partition_point(|(k, _)| k.user_key.as_ref() <= s)
-                }
-                _ => 0,
+            // !user_key_in_range(uk, start, Unbounded) ≡ before_start
+            self.idx = match &self.current {
+                Some(block) => block.partition_point(|(k, _)| {
+                    !crate::merge::user_key_in_range(
+                        k.user_key.as_ref(),
+                        self.start,
+                        Bound::Unbounded,
+                    )
+                }),
+                None => 0,
             };
         }
     }

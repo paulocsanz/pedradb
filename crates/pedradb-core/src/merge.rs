@@ -1591,6 +1591,10 @@ mod tests {
             !sst.contains("Bound::Included(s) => uk < s"),
             "SstCountCursor::settle must not keep a raw start Bound match"
         );
+        assert!(
+            !sst.contains("k.user_key.as_ref() < s"),
+            "SstCountCursor::settle seek must not keep a raw start Bound partition_point"
+        );
     }
 
     /// Interleaved streams with a cross-stream duplicate key: after the
