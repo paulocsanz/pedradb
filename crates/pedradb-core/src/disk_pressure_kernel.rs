@@ -205,6 +205,15 @@ mod tests {
             copy.contains("admit_disk_write("),
             "copy_db_directory must admit before copy"
         );
+        let ckpt = include_str!("db.rs")
+            .split("pub fn create_checkpoint")
+            .nth(1)
+            .and_then(|s| s.split("\n    pub fn ").next())
+            .expect("create_checkpoint");
+        assert!(
+            ckpt.contains("admit_disk_write("),
+            "create_checkpoint must admit before copy"
+        );
     }
 
     #[test]

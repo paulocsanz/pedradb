@@ -215,3 +215,34 @@ fn copy_db_directory_under_hard_floor_does_not_create_dest() {
     let _ = std::fs::remove_dir_all(&src);
     let _ = std::fs::remove_dir_all(&dest_parent);
 }
+
+/// RFC-0179: `create_checkpoint` admits before copy; dest is not created
+/// below the hard floor (flush may also refuse; dest still absent).
+#[test]
+fn create_checkpoint_under_hard_floor_does_not_create_dest() {
+    let dir = tmp();
+    let dest = tmp().join("ckpt");
+    let env = FailingEnv::passing();
+    let handle = env.clone();
+    let mut db = Db::open_with_env(
+        &dir,
+        OpenOptions {
+            sync: false,
+            auto_flush_bytes: None,
+            auto_compact_sst_count: None,
+            auto_compact_sst_bytes: None,
+            ..OpenOptions::default()
+        },
+        env,
+    )
+    .unwrap();
+    db.put(b"k", b"v").unwrap();
+    handle.set_available_bytes(Some(1024));
+    let err = db.create_checkpoint(&dest).unwrap_err();
+    assert!(
+        matches!(err, CoreError::DiskPressure { available: 1024, .. }),
+        "expected DiskPressure, got {err:?}"
+    );
+    assert!(!handle.exists(&dest), "refused checkpoint must not create dest");
+    let _ = std::fs::remove_dir_all(&dir);
+}
