@@ -15,7 +15,7 @@ use std::sync::{Arc, OnceLock};
 use crate::bloom::BloomFilter;
 
 use bytes::Bytes;
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 
 use crate::env::Env;
 use crate::error::Result;
@@ -636,7 +636,9 @@ impl BlockCache {
 /// [`CountCache`] — range-aware invalidation.)
 #[derive(Debug, Default)]
 pub struct AnswerCache<V> {
-    inner: Mutex<AnswerCacheInner<V>>,
+    /// Read lock on the ycsb_f hit path: 4 clients were serializing on a
+    /// Mutex even after P0.16 refill (sibling get still paid `lock_slow`).
+    inner: RwLock<AnswerCacheInner<V>>,
     /// Set once `map.len() == capacity`. Further unique inserts are no-ops
     /// (freeze, not FIFO). Probe_miss must not take the mutex to learn that.
     frozen: AtomicBool,
@@ -802,7 +804,7 @@ impl<V: Clone> AnswerCache<V> {
     #[must_use]
     pub fn new(capacity: usize) -> Self {
         Self {
-            inner: Mutex::new(AnswerCacheInner {
+            inner: RwLock::new(AnswerCacheInner {
                 map: std::collections::HashMap::default(),
                 order: std::collections::VecDeque::new(),
                 capacity,
@@ -832,7 +834,7 @@ impl<V: Clone> AnswerCache<V> {
                 return None;
             }
         }
-        let g = self.inner.lock();
+        let g = self.inner.read();
         if g.capacity == 0 {
             return None;
         }
@@ -847,7 +849,7 @@ impl<V: Clone> AnswerCache<V> {
         if self.frozen.load(Ordering::Relaxed) {
             return;
         }
-        let mut g = self.inner.lock();
+        let mut g = self.inner.write();
         if g.capacity == 0 {
             self.frozen.store(true, Ordering::Relaxed);
             return;
@@ -883,7 +885,7 @@ impl<V: Clone> AnswerCache<V> {
 
     /// Invalidate every entry without walking the map (write path).
     pub fn clear(&self) {
-        let mut g = self.inner.lock();
+        let mut g = self.inner.write();
         g.gen = g.gen.wrapping_add(1);
         if g.gen == 0 {
             g.map.clear();
@@ -895,13 +897,13 @@ impl<V: Clone> AnswerCache<V> {
 
     /// Drop one key so other latest-snapshot hits stay (YCSB B/D 95/5).
     pub fn invalidate(&self, key: &[u8]) {
-        self.inner.lock().map.remove(key);
+        self.inner.write().map.remove(key);
     }
 
     /// Drop several keys under **one** lock (publish path: one acquire per
     /// written batch instead of one per key).
     pub fn invalidate_many(&self, keys: &[Bytes]) {
-        let mut g = self.inner.lock();
+        let mut g = self.inner.write();
         for k in keys {
             g.map.remove(k);
         }
@@ -910,7 +912,7 @@ impl<V: Clone> AnswerCache<V> {
     /// No cached answers (RFC-0062 P0.4: skip per-key dirty clones).
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.inner.lock().map.is_empty()
+        self.inner.read().map.is_empty()
     }
 }
 
@@ -1635,6 +1637,25 @@ mod tests {
         assert!(!tls_precise_invalidate(false, 0));
         assert!(!tls_precise_invalidate(false, 33));
         assert!(!tls_precise_invalidate(true, 4));
+    }
+
+    /// ycsb_f_mc4: four readers hit the shared cache without exclusive lock.
+    #[test]
+    fn rfc0178_point_cache_get_is_shared_read() {
+        let c = PointCache::new(64);
+        c.insert(b"k", Some(Bytes::from_static(b"v")));
+        std::thread::scope(|s| {
+            for _ in 0..4 {
+                s.spawn(|| {
+                    for _ in 0..1024 {
+                        assert_eq!(
+                            c.get(b"k").as_ref().and_then(|v| v.as_ref()).map(|b| b.as_ref()),
+                            Some(&b"v"[..])
+                        );
+                    }
+                });
+            }
+        });
     }
 
     #[test]
