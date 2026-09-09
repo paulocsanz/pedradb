@@ -1034,6 +1034,9 @@ struct LastGetTable {
     ring: [LastGetSlot; LAST_RING],
     ring_i: u8,
     bloom: BloomFilter,
+    /// Set by a get on this thread. Overwrite never gets, so put skips
+    /// TLS write-through (RFC-0180 P0.79). ycsb_a/f arms on the first get.
+    live: bool,
 }
 
 impl LastGetTable {
@@ -1054,6 +1057,7 @@ impl LastGetTable {
             ring: std::array::from_fn(|_| Self::empty_slot()),
             ring_i: 0,
             bloom: BloomFilter::with_capacity(LAST_N, 10),
+            live: false,
         }
     }
 
@@ -2423,13 +2427,19 @@ impl<E: PedraEnv> DB<E> {
                 self.inner.put(enc, interned.as_ref())
             })
             .map_err(Error::from)?;
-        // RFC-0154 P1.8: small values warm TLS last-get so ycsb_a/f RMW
-        // on this thread hits. RFC-0180 dropped this for overwrite_mc4
-        // (never reads) — that regresses the mixed shapes the floor
-        // actually ships. Blob SET (len > 1024) still skips the copy.
+        // RFC-0154 P1.8 / RFC-0180 P0.35: small values warm TLS last-get
+        // so ycsb_a/f RMW on this thread hits. Overwrite never gets, so
+        // P0.79 skips the store until a get on this thread arms the table
+        // (P0.3 dropped write-through globally and regresses the mixed
+        // floor). Blob SET (len > 1024) still skips the copy.
         if interned.len() <= 1024 {
-            let (epoch, gen) = self.tls_point_ids(DEFAULT_CF, key);
-            LAST_GET.with(|t| t.borrow_mut().store_key(epoch, gen, key, Some(interned)));
+            LAST_GET.with(|t| {
+                let mut g = t.borrow_mut();
+                if g.live {
+                    let (epoch, gen) = self.tls_point_ids(DEFAULT_CF, key);
+                    g.store_key(epoch, gen, key, Some(interned));
+                }
+            });
         }
         Ok(())
     }
@@ -2485,15 +2495,23 @@ impl<E: PedraEnv> DB<E> {
             return Ok(None);
         }
         let (epoch, gen) = self.tls_point_ids(DEFAULT_CF, key);
-        if let Some(hit) = LAST_GET.with(|slot| slot.borrow().get_key(epoch, gen, key)) {
+        if let Some(hit) = LAST_GET.with(|slot| {
+            let mut t = slot.borrow_mut();
+            t.live = true;
+            t.get_key(epoch, gen, key)
+        }) {
             return Ok(hit);
         }
         let got = self
             .codec
             .encode_with(DEFAULT_CF, key, |enc| self.inner.get(enc));
-        if got.is_some() {
-            LAST_GET.with(|slot| slot.borrow_mut().store_key(epoch, gen, key, got.clone()));
-        }
+        LAST_GET.with(|slot| {
+            let mut t = slot.borrow_mut();
+            t.live = true;
+            if got.is_some() {
+                t.store_key(epoch, gen, key, got.clone());
+            }
+        });
         Ok(got)
     }
 
@@ -6610,6 +6628,8 @@ mod tests {
         let db = DB::open_default(&dir).unwrap();
         db.put(b"hot", b"v1").unwrap();
         db.put(b"hot2", b"v2").unwrap();
+        assert_eq!(db.get(b"hot").unwrap().as_deref(), Some(b"v1".as_ref()));
+        assert_eq!(db.get(b"hot2").unwrap().as_deref(), Some(b"v2".as_ref()));
         assert!(db.last_get_is_hot(b"hot"));
         assert!(db.last_get_is_hot(b"hot2"));
         db.put(b"other", b"x").unwrap();
@@ -6629,6 +6649,28 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// RFC-0180 P0.79: overwrite never gets, so put must not hash-store
+    /// TLS last-get. A get arms write-through for mixed ycsb_a/f.
+    #[test]
+    fn rfc0180_put_skips_tls_until_get() {
+        let dir = tmp("tls-until-get");
+        let db = DB::open_default(&dir).unwrap();
+        db.put(b"c/000001", b"v").unwrap();
+        assert!(
+            !db.last_get_is_hot(b"c/000001"),
+            "write-only put must not warm TLS"
+        );
+        assert_eq!(db.get(b"c/000001").unwrap().as_deref(), Some(b"v".as_ref()));
+        assert!(db.last_get_is_hot(b"c/000001"), "get arms TLS");
+        db.put(b"c/000001", b"w").unwrap();
+        assert!(
+            db.last_get_is_hot(b"c/000001"),
+            "after a get, put write-through updates TLS"
+        );
+        assert_eq!(db.get(b"c/000001").unwrap().as_deref(), Some(b"w".as_ref()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn intern_put_value_shares_repeat_payload() {
         let a = intern_put_value(b"yyyy");
@@ -6644,8 +6686,9 @@ mod tests {
         let db = DB::open_default(&dir).unwrap();
         db.put(b"k1", b"yyyy").unwrap();
         db.put(b"k2", b"yyyy").unwrap();
-        assert!(db.last_get_is_hot(b"k2"));
         assert_eq!(db.get(b"k1").unwrap().as_deref(), Some(b"yyyy".as_ref()));
+        assert_eq!(db.get(b"k2").unwrap().as_deref(), Some(b"yyyy".as_ref()));
+        assert!(db.last_get_is_hot(b"k2"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
