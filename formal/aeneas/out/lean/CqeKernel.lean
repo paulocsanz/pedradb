@@ -116,8 +116,15 @@ def cqe_act (user_data : Std.U64) (want : Std.U64) : Result CqeAct := do
   then ok CqeAct.Take
   else ok CqeAct.Discard
 
+/-- [pedra_aeneas_cqe_kernel::cqe_act_as_is]:
+    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 82:0-84:1
+    Visibility: public -/
+def cqe_act_as_is
+  (_user_data : Std.U64) (_want : Std.U64) : Result CqeAct := do
+  ok CqeAct.Take
+
 /-- [pedra_aeneas_cqe_kernel::SubmitCompleteAct]
-    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 81:0-94:1
+    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 88:0-101:1
     Visibility: public -/
 @[discriminant isize]
 inductive SubmitCompleteAct where
@@ -126,7 +133,7 @@ inductive SubmitCompleteAct where
 | ReturnSubmitErr : SubmitCompleteAct
 
 /-- [pedra_aeneas_cqe_kernel::F208_WAITMORE_AFTER_SUBMIT_ERR]
-    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 99:0-100:41
+    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 106:0-107:41
     Visibility: public -/
 @[global_simps, irreducible]
 def F208_WAITMORE_AFTER_SUBMIT_ERR
@@ -137,31 +144,31 @@ def F208_WAITMORE_AFTER_SUBMIT_ERR
   core.sync.atomic.AtomicU64Align8U64.new 0#u64
 
 /-- [pedra_aeneas_cqe_kernel::cqe_res_ok]:
-    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 118:0-120:1
+    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 125:0-127:1
     Visibility: public -/
 def cqe_res_ok (res : Std.I32) : Result Bool := do
   ok (res >= 0#i32)
 
 /-- [pedra_aeneas_cqe_kernel::cqe_res_ok_as_is]:
-    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 125:0-127:1
+    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 132:0-134:1
     Visibility: public -/
 def cqe_res_ok_as_is (_res : Std.I32) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_cqe_kernel::cqe_ring_model_admitted]:
-    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 173:0-175:1
+    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 180:0-182:1
     Visibility: public -/
 def cqe_ring_model_admitted : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_cqe_kernel::cqe_ring_model_admitted_as_is]:
-    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 179:0-181:1
+    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 186:0-188:1
     Visibility: public -/
 def cqe_ring_model_admitted_as_is : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_cqe_kernel::submit_complete_act]:
-    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 189:0-199:1
+    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 196:0-206:1
     Visibility: public -/
 def submit_complete_act
   (_submit_ok : Bool) (harvested : Bool) : Result SubmitCompleteAct := do
@@ -170,7 +177,7 @@ def submit_complete_act
   else ok SubmitCompleteAct.WaitMore
 
 /-- [pedra_aeneas_cqe_kernel::submit_complete_act_as_is]:
-    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 204:0-210:1 -/
+    Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 211:0-217:1 -/
 def submit_complete_act_as_is
   (submit_ok : Bool) (_harvested : Bool) : Result SubmitCompleteAct := do
   if submit_ok

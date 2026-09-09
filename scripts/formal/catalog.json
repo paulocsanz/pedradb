@@ -4239,9 +4239,10 @@
       "id": "cqe_tags",
       "finding": "F203",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-io-uring/src/cqe_kernel.rs",
-      "twin": "crates/pedradb-io-uring/verus/cqe_kernel.rs",
-      "verus": "scripts/verus_cqe_kernel.sh",
+      "twin": "crates/pedradb-io-uring/src/cqe_kernel.rs",
+      "aeneas": "scripts/aeneas_cqe.sh",
       "callers": [
         "crates/pedradb-io-uring/src/ring.rs"
       ],
@@ -4263,9 +4264,10 @@
       "id": "cqe_leftover",
       "finding": "F203/U1",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-io-uring/src/cqe_kernel.rs",
-      "twin": "crates/pedradb-io-uring/verus/cqe_kernel.rs",
-      "verus": "scripts/verus_cqe_kernel.sh",
+      "twin": "crates/pedradb-io-uring/src/cqe_kernel.rs",
+      "aeneas": "scripts/aeneas_cqe.sh",
       "callers": [
         "crates/pedradb-io-uring/src/ring.rs"
       ],
@@ -4287,9 +4289,10 @@
       "id": "cqe_submit",
       "finding": "F208",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-io-uring/src/cqe_kernel.rs",
-      "twin": "crates/pedradb-io-uring/verus/cqe_kernel.rs",
-      "verus": "scripts/verus_cqe_kernel.sh",
+      "twin": "crates/pedradb-io-uring/src/cqe_kernel.rs",
+      "aeneas": "scripts/aeneas_cqe.sh",
       "callers": [
         "crates/pedradb-io-uring/src/ring.rs"
       ],
@@ -4311,9 +4314,10 @@
       "id": "cqe_ring_refusal",
       "finding": "RFC-0074 P2.2",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-io-uring/src/cqe_kernel.rs",
-      "twin": "crates/pedradb-io-uring/verus/cqe_kernel.rs",
-      "verus": "scripts/verus_cqe_kernel.sh",
+      "twin": "crates/pedradb-io-uring/src/cqe_kernel.rs",
+      "aeneas": "scripts/aeneas_cqe.sh",
       "callers": [
         "crates/pedradb-io-uring/src/cqe_kernel.rs"
       ],

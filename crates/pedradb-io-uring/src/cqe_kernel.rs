@@ -76,6 +76,13 @@ pub fn cqe_act(user_data: u64, want: u64) -> CqeAct {
     }
 }
 
+/// AS-IS F203/U1: ownership check dropped — any CQE (a leftover from an op
+/// that already returned) is adopted as this op's result.
+#[must_use]
+pub fn cqe_act_as_is(_user_data: u64, _want: u64) -> CqeAct {
+    CqeAct::Take
+}
+
 /// After `submit_and_wait` on the SQE tagged `want`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SubmitCompleteAct {
@@ -223,6 +230,20 @@ mod tests {
         assert_ne!(a, b);
         assert_eq!(cqe_act(a, b), CqeAct::Discard);
         assert_eq!(cqe_act(a, a), CqeAct::Take);
+    }
+
+    /// Catalog three-teeth plant (cqe_leftover): a leftover CQE from
+    /// another op must be discarded, never adopted.
+    #[test]
+    fn cqe_act_as_is_adopts_leftover() {
+        let leftover = 0x5f5f; // fsync-tagged CQE left in the ring
+        let want = 0x7777; // the write we are waiting for
+        assert_eq!(cqe_act(leftover, want), CqeAct::Discard);
+        assert_eq!(
+            cqe_act_as_is(leftover, want),
+            CqeAct::Take,
+            "AS-IS dente: ownership check dropped — leftover CQE adopted as this op's result"
+        );
     }
 
     #[test]

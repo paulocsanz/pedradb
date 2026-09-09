@@ -1,4 +1,4 @@
 path=crates/pedradb-io-uring/src/cqe_kernel.rs
-sha256=754329499895cbc7ec8d3590ab1c2aa1ced7c2c65ba19a4ac2f1d87603f5e66d
+sha256=8820a3934caabfd873affb5c4f97d53a89df21eb00dc1abc72f672dc3e531eff
 aeneas=daa85d7
 charon=0.1.232

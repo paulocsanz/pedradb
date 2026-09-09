@@ -33,6 +33,7 @@ echo "      charon=$CHARON"
     --start-from 'crate::next_user_data' \
     --start-from 'crate::next_user_data_as_is' \
     --start-from 'crate::cqe_act' \
+    --start-from 'crate::cqe_act_as_is' \
     --start-from 'crate::submit_complete_act' \
     --start-from 'crate::submit_complete_act_as_is' \
     --start-from 'crate::cqe_res_ok' \
