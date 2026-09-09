@@ -16,11 +16,11 @@ description: >
 
 ## Grind pressure (one block, overwritten each fire)
 
-- Last fire: shallow
-- Why: SA factory (extract frozen at 276; 120× "X is the file rustc links")
-- This fire MUST land: Lean `unfold occ_batch_plan` **and** `unfold occ_conflict` / `occ_member_fate` (validate_occ_batch caller, not another SA stamp)
-- Forbidden this fire: twin=kernel wrap; `ascii_lower is the file rustc links`; dump db.rs/concurrent.rs
-- Deeper: GroupCommit.lean unfold the plan fn rustc links; named cargo test `occ_batch_plan_on_live_lagging_is_not_ok`
+- Last fire: worked
+- Why: user skip — Montanha leftover wraps off the path for now
+- This fire MUST land: engine leftover wrap (core/sim/world/raft/compat); never Montanha; never SA wrap; never dump db.rs
+- Forbidden this fire: wrap montanha-* bins / crates/pedradb-store leftover ifs; twin=kernel wrap; dump db.rs/concurrent.rs; rank-7 SA; wrap SOURCE.leveling without extract restamp; wrap SOURCE.bloom kernel file; wrap SOURCE.merge without extract restamp; wrap Cursor is_empty with no len(); wrap store lib test-only pump_queued; wrap leftover if index == 0; wrap bandit assignment let mean = if n == 0
+- Deeper: leftover_next engine empty-check with len(); named cargo test batch_is_empty_on_live_zero_is_not_ok; skip pedradb-store and montanha-* bins
 
 This skill **lands one payable slice per Fire**. Under `/grind`, that is
 not the end of the turn: after the commit, Fire again (tools, land).
@@ -131,6 +131,11 @@ chains Fires; this bound is not end-of-turn).
 12. Never dump `db.rs` / `concurrent.rs`. Never invent `l28_tcp_*_ok` gates
     that do not exist. Never flip `media_durable_admitted` or
     `forall_schedules_admitted` to true.
+13. **Skip Montanha** until the user lifts this. No leftover wrap in
+    `crates/pedradb-store/**` or `montanha-*` bins (fdb-bench, fdb-compare,
+    perf-gate, tcp). `leftover_next` / journal `next:` must not name those
+    paths. Engine leftover stays Pedra core / sim / world / raft / compat.
+    Already-landed wraps stay.
 
 Tie-break: open RFC `- [ ] **P0`/`P1` on the same theme.
 
