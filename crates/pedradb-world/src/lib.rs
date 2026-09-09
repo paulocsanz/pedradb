@@ -1026,7 +1026,9 @@ impl World {
                     }
                 }
             }
-            if got == 0 && cluster.outbound_len() == 0 {
+            if pedradb_core::write_admission_kernel::batch_is_empty(got as u64)
+                && pedradb_core::write_admission_kernel::batch_is_empty(cluster.outbound_len() as u64)
+            {
                 break;
             }
         }
