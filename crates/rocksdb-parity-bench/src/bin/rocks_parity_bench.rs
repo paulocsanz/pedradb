@@ -290,6 +290,7 @@ fn run_and_report<E: Engine + Sync>(e: &E, cfg: &Cfg, suites: &str, out: &Path) 
         benches.extend(r.run_venice(e));
         for clients in rocksdb_parity_bench::clients_from_env() {
             benches.extend(r.run_venice_clients(e, clients));
+            benches.extend(r.run_rockstore_clients(e, clients));
         }
     }
     if suites_enabled("rockset") {
@@ -411,6 +412,7 @@ fn run_and_report_occ<E: rocksdb_parity_bench::OccEngine + Sync>(
         benches.extend(r.run_venice(e));
         for clients in rocksdb_parity_bench::clients_from_env() {
             benches.extend(r.run_venice_clients(e, clients));
+            benches.extend(r.run_rockstore_clients(e, clients));
         }
     }
     if suites_enabled("rockset") {
