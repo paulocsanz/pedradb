@@ -826,7 +826,7 @@ impl SstTable {
     }
 
     pub(crate) fn has_range_tombstones(&self) -> bool {
-        !self.range_tombstones.is_empty()
+        !crate::write_admission_kernel::batch_is_empty(self.range_tombstones.len() as u64)
     }
 
     /// Whether a point version is covered by a range tombstone in this file.
