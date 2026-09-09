@@ -1729,7 +1729,7 @@ impl MemTable {
         end: Bound<&'a [u8]>,
     ) -> MemInternalIter<'a> {
         let map = self.iter_internal_range_cursor(start, end);
-        if !self.has_tail() {
+        if crate::write_admission_kernel::batch_is_empty(self.tail.len() as u64) {
             return MemInternalIter::Map(map);
         }
         let mut tail: Vec<(&InternalKey, &Bytes)> = Vec::with_capacity(self.tail_len());
