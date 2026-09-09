@@ -15,7 +15,7 @@ set_option maxRecDepth 2048
 namespace pedra_aeneas_l28_kernel
 
 /-- [pedra_aeneas_l28_kernel::l28_durability_ok]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 644:0-646:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 19:0-21:1
     Visibility: public -/
 def l28_durability_ok
   (get_ok : Bool) (after_kill_ok : Bool) (restart_ok : Bool) :
@@ -28,7 +28,7 @@ def l28_durability_ok
   else ok false
 
 /-- [pedra_aeneas_l28_kernel::l28_durability_ok_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 652:0-654:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 25:0-27:1
     Visibility: public -/
 def l28_durability_ok_as_is
   (get_ok : Bool) (_after_kill_ok : Bool) (_restart_ok : Bool) :
@@ -37,7 +37,7 @@ def l28_durability_ok_as_is
   ok get_ok
 
 /-- [pedra_aeneas_l28_kernel::l28_leader_kill_ok]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 661:0-663:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 32:0-34:1
     Visibility: public -/
 def l28_leader_kill_ok
   (get_ok : Bool) (after_kill_ok : Bool) (restart_ok : Bool) :
@@ -46,7 +46,7 @@ def l28_leader_kill_ok
   l28_durability_ok get_ok after_kill_ok restart_ok
 
 /-- [pedra_aeneas_l28_kernel::l28_leader_kill_ok_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 669:0-671:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 38:0-40:1
     Visibility: public -/
 def l28_leader_kill_ok_as_is
   (get_ok : Bool) (_after_kill_ok : Bool) (_restart_ok : Bool) :
@@ -55,7 +55,7 @@ def l28_leader_kill_ok_as_is
   ok get_ok
 
 /-- [pedra_aeneas_l28_kernel::world_seed_l28_ok]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 678:0-680:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 45:0-47:1
     Visibility: public -/
 def world_seed_l28_ok
   (world_silent_wrong : Std.U64) (cluster_real_ok : Bool) : Result Bool := do
@@ -64,26 +64,26 @@ def world_seed_l28_ok
   else ok false
 
 /-- [pedra_aeneas_l28_kernel::world_seed_l28_ok_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 686:0-688:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 51:0-53:1
     Visibility: public -/
 def world_seed_l28_ok_as_is
   (world_silent_wrong : Std.U64) (_cluster_real_ok : Bool) : Result Bool := do
   ok (world_silent_wrong = 0#u64)
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_leave_ok]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 694:0-696:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 57:0-59:1
     Visibility: public -/
 def l28_tcp_leave_ok (tcp_ok : Bool) : Result Bool := do
   ok tcp_ok
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_leave_ok_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 702:0-704:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 63:0-65:1
     Visibility: public -/
 def l28_tcp_leave_ok_as_is (_tcp_ok : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_plant_ok]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 710:0-712:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 69:0-71:1
     Visibility: public -/
 def l28_tcp_plant_ok (remove_ok : Bool) (leave_ok : Bool) : Result Bool := do
   if remove_ok
@@ -91,81 +91,81 @@ def l28_tcp_plant_ok (remove_ok : Bool) (leave_ok : Bool) : Result Bool := do
   else ok false
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_plant_ok_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 718:0-720:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 75:0-77:1
     Visibility: public -/
 def l28_tcp_plant_ok_as_is
   (_remove_ok : Bool) (_leave_ok : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_left_ok]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 730:0-732:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 85:0-87:1
     Visibility: public -/
 def l28_tcp_left_ok (left : Bool) : Result Bool := do
   ok left
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_left_ok_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 738:0-740:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 91:0-93:1
     Visibility: public -/
 def l28_tcp_left_ok_as_is (_left : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_hw_ok]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 747:0-749:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 98:0-100:1
     Visibility: public -/
 def l28_tcp_hw_ok (kept : Bool) : Result Bool := do
   ok kept
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_hw_ok_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 755:0-757:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 104:0-106:1
     Visibility: public -/
 def l28_tcp_hw_ok_as_is (_kept : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_part_ok]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 764:0-766:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 111:0-113:1
     Visibility: public -/
 def l28_tcp_part_ok (ok1 : Bool) : Result Bool := do
   ok ok1
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_part_ok_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 772:0-774:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 117:0-119:1
     Visibility: public -/
 def l28_tcp_part_ok_as_is (_ok : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_apply_ok]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 781:0-783:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 124:0-126:1
     Visibility: public -/
 def l28_tcp_apply_ok (ok1 : Bool) : Result Bool := do
   ok ok1
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_apply_ok_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 789:0-791:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 130:0-132:1
     Visibility: public -/
 def l28_tcp_apply_ok_as_is (_ok : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_napply_ok]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 798:0-800:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 137:0-139:1
     Visibility: public -/
 def l28_tcp_napply_ok (ok1 : Bool) : Result Bool := do
   ok ok1
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_napply_ok_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 806:0-808:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 143:0-145:1
     Visibility: public -/
 def l28_tcp_napply_ok_as_is (_ok : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_napply_retry_admitted]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 814:0-816:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 149:0-151:1
     Visibility: public -/
 def l28_tcp_napply_retry_admitted
   (_attempts : Std.U64) (_napply_ok : Bool) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_napply_retry_admitted_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 822:0-824:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 155:0-157:1
     Visibility: public -/
 def l28_tcp_napply_retry_admitted_as_is
   (attempts : Std.U64) (napply_ok : Bool) : Result Bool := do
@@ -174,229 +174,229 @@ def l28_tcp_napply_retry_admitted_as_is
   else ok false
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_trunc_ok]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 831:0-833:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 162:0-164:1
     Visibility: public -/
 def l28_tcp_trunc_ok (ok1 : Bool) : Result Bool := do
   ok ok1
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_trunc_ok_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 839:0-841:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 168:0-170:1
     Visibility: public -/
 def l28_tcp_trunc_ok_as_is (_ok : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_odrop_ok]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 848:0-850:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 175:0-177:1
     Visibility: public -/
 def l28_tcp_odrop_ok (ok1 : Bool) : Result Bool := do
   ok ok1
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_odrop_ok_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 856:0-858:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 181:0-183:1
     Visibility: public -/
 def l28_tcp_odrop_ok_as_is (_ok : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_abort_ok]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 865:0-867:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 188:0-190:1
     Visibility: public -/
 def l28_tcp_abort_ok (ok1 : Bool) : Result Bool := do
   ok ok1
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_abort_ok_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 873:0-875:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 194:0-196:1
     Visibility: public -/
 def l28_tcp_abort_ok_as_is (_ok : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_nowms_ok]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 882:0-884:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 201:0-203:1
     Visibility: public -/
 def l28_tcp_nowms_ok (ok1 : Bool) : Result Bool := do
   ok ok1
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_nowms_ok_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 890:0-892:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 207:0-209:1
     Visibility: public -/
 def l28_tcp_nowms_ok_as_is (_ok : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_dterm_ok]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 900:0-902:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 215:0-217:1
     Visibility: public -/
 def l28_tcp_dterm_ok (ok1 : Bool) : Result Bool := do
   ok ok1
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_dterm_ok_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 908:0-910:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 221:0-223:1
     Visibility: public -/
 def l28_tcp_dterm_ok_as_is (_ok : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_hist_ok]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 917:0-919:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 228:0-230:1
     Visibility: public -/
 def l28_tcp_hist_ok (ok1 : Bool) : Result Bool := do
   ok ok1
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_hist_ok_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 925:0-927:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 234:0-236:1
     Visibility: public -/
 def l28_tcp_hist_ok_as_is (_ok : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_fence_ok]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 934:0-936:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 241:0-243:1
     Visibility: public -/
 def l28_tcp_fence_ok (ok1 : Bool) : Result Bool := do
   ok ok1
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_fence_ok_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 942:0-944:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 247:0-249:1
     Visibility: public -/
 def l28_tcp_fence_ok_as_is (_ok : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_clear_ok]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 951:0-953:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 254:0-256:1
     Visibility: public -/
 def l28_tcp_clear_ok (ok1 : Bool) : Result Bool := do
   ok ok1
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_clear_ok_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 959:0-961:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 260:0-262:1
     Visibility: public -/
 def l28_tcp_clear_ok_as_is (_ok : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_pre_ok]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 968:0-970:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 267:0-269:1
     Visibility: public -/
 def l28_tcp_pre_ok (ok1 : Bool) : Result Bool := do
   ok ok1
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_pre_ok_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 976:0-978:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 273:0-275:1
     Visibility: public -/
 def l28_tcp_pre_ok_as_is (_ok : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_peer_ok]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 985:0-987:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 280:0-282:1
     Visibility: public -/
 def l28_tcp_peer_ok (ok1 : Bool) : Result Bool := do
   ok ok1
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_peer_ok_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 993:0-995:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 286:0-288:1
     Visibility: public -/
 def l28_tcp_peer_ok_as_is (_ok : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_lid_ok]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 1002:0-1004:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 293:0-295:1
     Visibility: public -/
 def l28_tcp_lid_ok (ok1 : Bool) : Result Bool := do
   ok ok1
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_lid_ok_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 1010:0-1012:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 299:0-301:1
     Visibility: public -/
 def l28_tcp_lid_ok_as_is (_ok : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_rdr_ok]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 1019:0-1021:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 306:0-308:1
     Visibility: public -/
 def l28_tcp_rdr_ok (ok1 : Bool) : Result Bool := do
   ok ok1
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_rdr_ok_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 1027:0-1029:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 312:0-314:1
     Visibility: public -/
 def l28_tcp_rdr_ok_as_is (_ok : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_dsc_ok]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 1036:0-1038:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 319:0-321:1
     Visibility: public -/
 def l28_tcp_dsc_ok (ok1 : Bool) : Result Bool := do
   ok ok1
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_dsc_ok_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 1044:0-1046:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 325:0-327:1
     Visibility: public -/
 def l28_tcp_dsc_ok_as_is (_ok : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_pld_ok]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 1053:0-1055:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 332:0-334:1
     Visibility: public -/
 def l28_tcp_pld_ok (ok1 : Bool) : Result Bool := do
   ok ok1
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_pld_ok_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 1061:0-1063:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 338:0-340:1
     Visibility: public -/
 def l28_tcp_pld_ok_as_is (_ok : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_std_ok]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 1070:0-1072:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 345:0-347:1
     Visibility: public -/
 def l28_tcp_std_ok (ok1 : Bool) : Result Bool := do
   ok ok1
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_std_ok_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 1078:0-1080:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 351:0-353:1
     Visibility: public -/
 def l28_tcp_std_ok_as_is (_ok : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_hnt_ok]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 1087:0-1089:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 358:0-360:1
     Visibility: public -/
 def l28_tcp_hnt_ok (ok1 : Bool) : Result Bool := do
   ok ok1
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_hnt_ok_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 1095:0-1097:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 364:0-366:1
     Visibility: public -/
 def l28_tcp_hnt_ok_as_is (_ok : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_slot_ok]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 1104:0-1106:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 371:0-373:1
     Visibility: public -/
 def l28_tcp_slot_ok (ok1 : Bool) : Result Bool := do
   ok ok1
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_slot_ok_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 1112:0-1114:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 377:0-379:1
     Visibility: public -/
 def l28_tcp_slot_ok_as_is (_ok : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_sth_ok]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 1122:0-1124:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 385:0-387:1
     Visibility: public -/
 def l28_tcp_sth_ok (ok1 : Bool) : Result Bool := do
   ok ok1
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_sth_ok_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 1130:0-1132:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 391:0-393:1
     Visibility: public -/
 def l28_tcp_sth_ok_as_is (_ok : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_pj_ok]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 1140:0-1142:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 399:0-401:1
     Visibility: public -/
 def l28_tcp_pj_ok (ok1 : Bool) : Result Bool := do
   ok ok1
 
 /-- [pedra_aeneas_l28_kernel::l28_tcp_pj_ok_as_is]:
-    Source: '../../../crates/pedradb-store/src/l28.rs', lines 1148:0-1150:1
+    Source: '../../../crates/pedradb-store/src/l28.rs', lines 405:0-407:1
     Visibility: public -/
 def l28_tcp_pj_ok_as_is (_ok : Bool) : Result Bool := do
   ok true
