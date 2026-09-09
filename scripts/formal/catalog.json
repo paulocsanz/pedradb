@@ -1492,7 +1492,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-store/src/index_val_kernel.rs",
       "twin": "crates/pedradb-store/src/index_val_kernel.rs",
-      "verus": "scripts/verus_index_val.sh",
+      "aeneas": "scripts/aeneas_index_val.sh",
       "callers": [
         "crates/pedradb-store/src/layers.rs"
       ],
@@ -6188,7 +6188,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-store/src/index_val_kernel.rs",
       "twin": "crates/pedradb-store/verus/index_val.rs",
-      "verus": "scripts/verus_index_val.sh",
+      "aeneas": "scripts/aeneas_index_val.sh",
       "callers": [
         "crates/pedradb-store/src/index_val_kernel.rs"
       ],
@@ -6207,7 +6207,7 @@
       "atom": "value_len_tag",
       "kernel": "crates/pedradb-store/src/index_val_kernel.rs",
       "twin": "crates/pedradb-store/verus/index_val.rs",
-      "verus": "scripts/verus_index_val.sh",
+      "aeneas": "scripts/aeneas_index_val.sh",
       "callers": [
         "crates/pedradb-store/src/index_val_kernel.rs",
         "crates/pedradb-store/src/layers.rs",

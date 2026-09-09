@@ -1,10 +1,10 @@
 //! Exact index-value range (RFC-0002 P26 / F80).
 //!
-//! **Single artifact:** this file is what `rustc` links *and* what Verus
-//! proves (`cfg(verus_keep_ghost)`). Vec encode stays rustc (twin: “Vec
-//! encode is caller”). No twin-cópia of the length-tag theorem.
+//! **Single artifact (Aeneas-paid):** this file is what `rustc` links and
+//! what the Lean theorems run over — Charon+Aeneas extract of these exact
+//! bodies. No Verus twin stands in for them.
 //!
-//!   ./scripts/verus_index_val.sh
+//!   ./scripts/aeneas_index_val.sh
 //!
 //! Production [`crate::layers::table_index_value_range`] and
 //! [`crate::fdb_layers::IdempotentIndex`] call these.
@@ -26,21 +26,18 @@ macro_rules! value_len_tag_as_is_body {
 }
 
 /// Length tag of an index value (FIXED records `|val|`).
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn value_len_tag(len: u32) -> u32 {
     value_len_tag_body!(len)
 }
 
 /// AS-IS F80: no length tag — `red` is a byte prefix of `red\\0foo`.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn value_len_tag_as_is(len: u32) -> u32 {
     value_len_tag_as_is_body!(len)
 }
 
 /// `u32be(|val|) || val`.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn len_pref_value(val: &[u8]) -> Vec<u8> {
     let mut k = Vec::with_capacity(4 + val.len());
@@ -51,14 +48,12 @@ pub fn len_pref_value(val: &[u8]) -> Vec<u8> {
 }
 
 /// AS-IS F80: raw `val` (no length).
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn len_pref_value_as_is(val: &[u8]) -> Vec<u8> {
     val.to_vec()
 }
 
 /// Children of an exact-value prefix: `[p||0x00, p||0x01)`.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn exact_value_children(prefix: &[u8]) -> (Vec<u8>, Vec<u8>) {
     let mut start = prefix.to_vec();
@@ -69,74 +64,12 @@ pub fn exact_value_children(prefix: &[u8]) -> (Vec<u8>, Vec<u8>) {
 }
 
 /// AS-IS F80 range: `[val||0x00, val||0x01)`.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn exact_value_children_as_is(val: &[u8]) -> (Vec<u8>, Vec<u8>) {
     exact_value_children(&len_pref_value_as_is(val))
 }
 
-#[cfg(verus_keep_ghost)]
-use vstd::prelude::*;
 
-#[cfg(verus_keep_ghost)]
-verus! {
-
-pub open spec fn value_len_tag_spec(len: u32) -> u32 {
-    len
-}
-
-pub fn value_len_tag(len: u32) -> (n: u32)
-    ensures
-        n == value_len_tag_spec(len),
-        n == len,
-{
-    value_len_tag_body!(len)
-}
-
-pub open spec fn value_len_tag_as_is_spec(_len: u32) -> u32 {
-    0
-}
-
-pub fn value_len_tag_as_is(len: u32) -> (n: u32)
-    ensures
-        n == 0,
-        n == value_len_tag_as_is_spec(len),
-{
-    value_len_tag_as_is_body!(len)
-}
-
-pub open spec fn exact_value_child_start_byte() -> u8 {
-    0x00
-}
-
-pub open spec fn exact_value_child_end_byte() -> u8 {
-    0x01
-}
-
-proof fn lemma_as_is_collides(a: u32, b: u32)
-    ensures
-        value_len_tag_as_is_spec(a) == value_len_tag_as_is_spec(b),
-        value_len_tag_as_is_spec(a) == 0,
-{
-}
-
-proof fn lemma_fixed_injective(a: u32, b: u32)
-    requires
-        a != b,
-    ensures
-        value_len_tag_spec(a) != value_len_tag_spec(b),
-{
-}
-
-proof fn lemma_child_range_bytes()
-    ensures
-        exact_value_child_start_byte() == 0x00,
-        exact_value_child_end_byte() == 0x01,
-        exact_value_child_start_byte() < exact_value_child_end_byte(),
-{
-}
-
-} // verus!
 
 #[cfg(test)]
 fn in_range(key: &[u8], start: &[u8], end: &[u8]) -> bool {

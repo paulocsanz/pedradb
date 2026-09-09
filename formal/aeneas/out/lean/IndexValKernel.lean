@@ -39,19 +39,19 @@ def core.num.error.TryFromIntError.Insts.CoreFmtDebug : core.fmt.Debug
 }
 
 /-- [pedra_aeneas_index_val_kernel::value_len_tag]:
-    Source: '../../../crates/pedradb-store/src/index_val_kernel.rs', lines 31:0-33:1
+    Source: '../../../crates/pedradb-store/src/index_val_kernel.rs', lines 30:0-32:1
     Visibility: public -/
 def value_len_tag (len : Std.U32) : Result Std.U32 := do
   ok len
 
 /-- [pedra_aeneas_index_val_kernel::value_len_tag_as_is]:
-    Source: '../../../crates/pedradb-store/src/index_val_kernel.rs', lines 38:0-40:1
+    Source: '../../../crates/pedradb-store/src/index_val_kernel.rs', lines 36:0-38:1
     Visibility: public -/
 def value_len_tag_as_is (len : Std.U32) : Result Std.U32 := do
   ok 0#u32
 
 /-- [pedra_aeneas_index_val_kernel::len_pref_value]:
-    Source: '../../../crates/pedradb-store/src/index_val_kernel.rs', lines 45:0-51:1
+    Source: '../../../crates/pedradb-store/src/index_val_kernel.rs', lines 42:0-48:1
     Visibility: public -/
 def len_pref_value (val : Slice Std.U8) : Result (alloc.vec.Vec Std.U8) := do
   let i := Slice.len val
@@ -68,14 +68,14 @@ def len_pref_value (val : Slice Std.U8) : Result (alloc.vec.Vec Std.U8) := do
   alloc.vec.Vec.extend_from_slice core.clone.CloneU8 k1 val
 
 /-- [pedra_aeneas_index_val_kernel::len_pref_value_as_is]:
-    Source: '../../../crates/pedradb-store/src/index_val_kernel.rs', lines 56:0-58:1
+    Source: '../../../crates/pedradb-store/src/index_val_kernel.rs', lines 52:0-54:1
     Visibility: public -/
 def len_pref_value_as_is
   (val : Slice Std.U8) : Result (alloc.vec.Vec Std.U8) := do
   alloc.slice.Slice.to_vec core.clone.CloneU8 val
 
 /-- [pedra_aeneas_index_val_kernel::exact_value_children]:
-    Source: '../../../crates/pedradb-store/src/index_val_kernel.rs', lines 63:0-69:1
+    Source: '../../../crates/pedradb-store/src/index_val_kernel.rs', lines 58:0-64:1
     Visibility: public -/
 def exact_value_children
   (prefix1 : Slice Std.U8) :
@@ -87,7 +87,7 @@ def exact_value_children
   ok (start1, end1)
 
 /-- [pedra_aeneas_index_val_kernel::exact_value_children_as_is]:
-    Source: '../../../crates/pedradb-store/src/index_val_kernel.rs', lines 74:0-76:1
+    Source: '../../../crates/pedradb-store/src/index_val_kernel.rs', lines 68:0-70:1
     Visibility: public -/
 def exact_value_children_as_is
   (val : Slice Std.U8) :
