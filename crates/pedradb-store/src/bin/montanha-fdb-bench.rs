@@ -1130,7 +1130,7 @@ fn main() {
                     }
                 }
                 let wall = t0.elapsed();
-                if lats.is_empty() {
+                if pedradb_core::write_admission_kernel::batch_is_empty(lats.len() as u64) {
                     notes.push("D1 tcp put: zero successes".into());
                 } else {
                     benches.push(summarize("D1_tcp_put", ok, wall, &mut lats));
