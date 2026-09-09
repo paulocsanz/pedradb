@@ -1486,7 +1486,7 @@ fn main() {
         progress!(
             "E1 mini-bt ops={ops} mismatches={mismatches} ok_commit={commits_ok} multi={multi_ok} ww={ww_ok}"
         );
-        if mismatches > 0 {
+        if !pedradb_core::write_admission_kernel::batch_is_empty(mismatches) {
             notes.push(format!("mini-bt FAILED mismatches={mismatches}"));
         }
         drop(c);
