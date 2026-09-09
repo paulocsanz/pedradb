@@ -2794,9 +2794,10 @@
       "id": "scan_guard",
       "finding": "F167",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
-      "twin": "crates/pedradb-core/verus/scan_guard.rs",
-      "verus": "scripts/verus_scan_guard.sh",
+      "twin": "crates/pedradb-core/src/sst/scan_kernel.rs",
+      "aeneas": "scripts/aeneas_scan.sh",
       "callers": [
         "crates/pedradb-core/src/sst/table.rs"
       ],
@@ -5313,9 +5314,10 @@
       "id": "tombstone_reaches_window",
       "finding": "F167",
       "twin_kind": "model",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
-      "twin": "crates/pedradb-core/verus/scan_guard.rs",
-      "verus": "scripts/verus_scan_guard.sh",
+      "twin": "crates/pedradb-core/src/sst/scan_kernel.rs",
+      "aeneas": "scripts/aeneas_scan.sh",
       "callers": [
         "crates/pedradb-core/src/sst/scan_kernel.rs"
       ],
@@ -5331,9 +5333,10 @@
       "id": "key_in_window",
       "finding": "F167",
       "twin_kind": "model",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
-      "twin": "crates/pedradb-core/verus/scan_guard.rs",
-      "verus": "scripts/verus_scan_guard.sh",
+      "twin": "crates/pedradb-core/src/sst/scan_kernel.rs",
+      "aeneas": "scripts/aeneas_scan.sh",
       "callers": [
         "crates/pedradb-core/src/sst/scan_kernel.rs"
       ],
@@ -5349,9 +5352,10 @@
       "id": "point_bounds_overlap",
       "finding": "F167",
       "twin_kind": "model",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
-      "twin": "crates/pedradb-core/verus/scan_guard.rs",
-      "verus": "scripts/verus_scan_guard.sh",
+      "twin": "crates/pedradb-core/src/sst/scan_kernel.rs",
+      "aeneas": "scripts/aeneas_scan.sh",
       "callers": [
         "crates/pedradb-core/src/sst/scan_kernel.rs"
       ],

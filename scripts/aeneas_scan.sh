@@ -31,6 +31,9 @@ echo "      charon=$CHARON"
     --start-from 'crate::scan_kernel::sst_block_crc_ok' \
     --start-from 'crate::scan_kernel::sst_block_crc_ok_as_is' \
     --start-from 'crate::scan_kernel::key_in_window' \
+    --start-from 'crate::scan_kernel::key_in_window_as_is' \
+    --start-from 'crate::scan_kernel::point_bounds_overlap' \
+    --start-from 'crate::scan_kernel::point_bounds_overlap_as_is' \
     --start-from 'crate::scan_kernel::tombstone_reaches_window' \
     --start-from 'crate::scan_kernel::tombstone_reaches_window_as_is' \
     --dest-file "$OUT/scan_kernel.llbc" )

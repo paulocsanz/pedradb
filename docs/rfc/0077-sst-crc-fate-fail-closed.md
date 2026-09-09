@@ -59,7 +59,7 @@
   - `crc_mismatch_on_live_sst_is_not_ok`: production `write_sst` (real file), flip a payload byte, `SstTable::open` is Err naming CRC mismatch. Runs on Darwin.
   - P1.1 `sst_block_crc_ok(1,2)` false; AS-IS true. `crc_mismatch_on_live_sst_block_is_not_ok`: `write_sst` (v5), flip a data-block byte, rewrite the *file* trailer so `sst_crc_fate` is StripTrailer; `SstTable::open` is still CRC mismatch. v4 files stay readable (no per-block CRC). L0 uncompressed remains v3. No new `*_kernel.rs`.
   - P1.2 `crc_mismatch_on_live_sst_db_open_is_not_ok`: `Db::open` + `put` + `flush`; flip an on-disk `*.sst` payload byte; `Db::open` is Err containing `CRC mismatch` (does not serve the key). AS-IS would strip the trailer.
-  - P2.1 catalog pair `sst_crc` entry `sst_crc_fate` with Verus twin (freeze of twin files; `verus` not on PATH). `scan_guard` stays F167 (`scan_reads_file` / `scan_guard.rs`). No new `*_kernel.rs`.
+  - P2.1 catalog pair `sst_crc` entry `sst_crc_fate` with Verus twin (freeze of twin files; `verus` not on PATH). `scan_guard` stays F167 (`scan_reads_file`); its twin `verus/scan_guard.rs` was deleted 2026-09-09 — the 4 F167 pairs are single-artifact paid by the Aeneas extract of the rustc bodies (`scripts/aeneas_scan.sh`, `ScanKernel.lean` sorry-free). No new `*_kernel.rs`.
   - P2.2 `zero_glue_is_a_trajectory`: `zero_glue_admitted()` false; AS-IS true; `src/db.rs` present; `glue.db_rs_extracted` false; `R-glue` remains.
 - **Telemetry / Analytics:** none — integrity invariant.
 - **Documentation:** this RFC; `residuals.json` `R-glue` close-text + owner 0077; `R-hardware` close-text names the SST tooth.
