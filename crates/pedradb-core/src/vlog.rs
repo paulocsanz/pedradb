@@ -495,7 +495,7 @@ impl<F: EnvFile> ValueLog<F> {
     #[must_use]
     pub fn needs_barrier(&self) -> bool {
         !crate::write_admission_kernel::batch_is_empty(self.pending.len() as u64)
-            || !self.pending_large.is_empty()
+            || !crate::write_admission_kernel::batch_is_empty(self.pending_large.len() as u64)
             || self.needs_sync
     }
 
