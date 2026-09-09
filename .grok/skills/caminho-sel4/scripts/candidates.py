@@ -638,7 +638,12 @@ def verus_token_kind(src: str) -> str:
         return "cartoon"
     if "macro_rules!" in src and re.search(r"_body!\s*\(", src):
         return "macro"
-    if "verus_keep_ghost" in src or block:
+    # Comment-only mentions (headers narrating a deleted stand-in) are not
+    # cartoons; only code-visible cfg splits are.
+    code = "\n".join(
+        l for l in src.splitlines() if not l.lstrip().startswith("//")
+    )
+    if "verus_keep_ghost" in code or block:
         return "cartoon"
     return "none"
 
