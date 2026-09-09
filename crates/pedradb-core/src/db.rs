@@ -5248,6 +5248,13 @@ impl<E: Env> Db<E> {
         if crate::write_admission_kernel::batch_is_empty(taken.len() as u64) {
             return Ok(());
         }
+        let probe = crate::env::probe_available_bytes(&self.env, &self.dir);
+        if let Some((available, need)) = crate::disk_pressure_kernel::compact_refuse(probe) {
+            for (k, v) in taken.iter_internal() {
+                self.mem.insert(k.clone(), v.clone());
+            }
+            return Err(CoreError::DiskPressure { available, need });
+        }
         let nums = vec![self.alloc_file_num()];
         let files = match Self::write_imm_l0_files(&self.env, &self.dir, self.sync, &taken, &nums) {
             Ok(f) => f,

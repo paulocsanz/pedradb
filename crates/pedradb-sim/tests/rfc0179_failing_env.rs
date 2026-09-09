@@ -255,6 +255,48 @@ fn failing_env_flush_under_hard_floor_is_disk_pressure() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// RFC-0179: `flush_cf` below hard is DiskPressure (no CF SST); mem still reads.
+#[test]
+fn failing_env_flush_cf_under_hard_floor_is_disk_pressure() {
+    use pedradb_core::disk_pressure_kernel::compact_allowed_under_pressure;
+    assert!(!compact_allowed_under_pressure(Some(1024)));
+    let dir = tmp();
+    let env = FailingEnv::passing();
+    let handle = env.clone();
+    let mut db = Db::open_with_env(
+        &dir,
+        OpenOptions {
+            sync: false,
+            auto_flush_bytes: None,
+            auto_compact_sst_count: None,
+            auto_compact_sst_bytes: None,
+            ..OpenOptions::default()
+        },
+        env,
+    )
+    .unwrap();
+    db.put(b"k", b"v").unwrap();
+    handle.set_available_bytes(Some(1024));
+    let err = db.flush_cf("default").unwrap_err();
+    assert!(
+        matches!(
+            err,
+            CoreError::DiskPressure {
+                available: 1024,
+                need: DISK_HARD_FREE_BYTES,
+            }
+        ),
+        "expected DiskPressure, got {err:?}"
+    );
+    assert_eq!(
+        db.get(b"k").as_deref(),
+        Some(b"v".as_ref()),
+        "refused flush_cf must restore mem"
+    );
+    assert!(!db.is_durability_fenced());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// RFC-0179: compact below the hard floor is DiskPressure (no SST write);
 /// get stays Ok; not a durability fence.
 #[test]

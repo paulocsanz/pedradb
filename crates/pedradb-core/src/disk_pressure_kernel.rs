@@ -387,6 +387,15 @@ mod tests {
             leveled.contains("compact_refuse("),
             "compact_leveled must match compact_refuse"
         );
+        let flush_cf = include_str!("db.rs")
+            .split("pub fn flush_cf(")
+            .nth(1)
+            .and_then(|s| s.split("\n    pub fn ").next())
+            .expect("flush_cf");
+        assert!(
+            flush_cf.contains("compact_refuse("),
+            "flush_cf must match compact_refuse"
+        );
     }
 
     #[test]
