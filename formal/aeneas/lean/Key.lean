@@ -212,3 +212,13 @@ theorem internal_key_eq_is_cmp_equal
         core.cmp.Ordering.Insts.CoreCmpPartialEqOrdering.eq o Ordering.eq) := by
   unfold key.InternalKey.Insts.CoreCmpPartialEqInternalKey.eq
   rfl
+
+/-- Catalog entry: PartialOrd is `Some(cmp)`. Dual-unfold. -/
+theorem internal_key_partial_cmp_is_some_cmp
+    (self other : key.InternalKey) :
+    key.InternalKey.Insts.CoreCmpPartialOrdInternalKey.partial_cmp self other =
+      (do
+        let o ← key.InternalKey.Insts.CoreCmpOrd.cmp self other
+        ok (some o)) := by
+  unfold key.InternalKey.Insts.CoreCmpPartialOrdInternalKey.partial_cmp
+  rfl
