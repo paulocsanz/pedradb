@@ -268,6 +268,36 @@ theorem scan_reads_file_included_start_excluded_end
   unfold scan_kernel.point_bounds_overlap
   rfl
 
+/-- Caller: excluded start + included end. Dual-unfold of `scan_reads_file` and `point_bounds_overlap`. -/
+theorem scan_reads_file_excluded_start_included_end
+    (lo hi s e : Slice U8)
+    (tombs : Slice ((Slice U8) × (Slice U8))) :
+    scan_kernel.scan_reads_file (some lo) (some hi) tombs
+      (core.ops.range.Bound.Excluded s)
+      (core.ops.range.Bound.Included e) =
+      (do
+        let b ←
+          (do
+            let file_before_end ←
+              Shared1A.Insts.CoreCmpPartialOrdShared0B.le
+                (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) lo e
+            let file_after_start ←
+              Shared1A.Insts.CoreCmpPartialOrdShared0B.gt
+                (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) hi s
+            if file_before_end then ok file_after_start else ok false)
+        if b then ok true else
+          (do
+            let i ← core.slice.Slice.iter tombs
+            let (b1, _) ←
+              core.slice.iter.Iter.Insts.CoreIterTraitsIteratorIteratorSharedAT.any
+                scan_kernel.scan_reads_file.closure.Insts.CoreOpsFunctionFnMutTupleSharedPairSharedSliceU8SharedSliceU8Bool
+                i
+                (core.ops.range.Bound.Excluded s, core.ops.range.Bound.Included e)
+            ok b1)) := by
+  unfold scan_kernel.scan_reads_file
+  unfold scan_kernel.point_bounds_overlap
+  rfl
+
 /-- AS-IS dente: scan is bounds-only (tombs ignored). -/
 theorem scan_reads_file_as_is_dente
     (smallest largest tombs start end1) :
