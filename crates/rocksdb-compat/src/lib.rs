@@ -2461,13 +2461,15 @@ impl<E: PedraEnv> DB<E> {
         Ok(())
     }
 
-    /// Get from the default CF.
+    /// Default-CF get as shared [`Bytes`] (no `Vec` copy).
+    ///
+    /// ycsb_f RMW only needs the last byte; [`Self::get`] copies 100 B into
+    /// a `Vec` the rust-rocksdb API requires. TLS / point-cache hits stay
+    /// a refcount bump.
     ///
     /// # Errors
     /// Pedra read errors.
-    pub fn get(&self, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
-        // RFC-0041 YCSB-C: default-CF get hashes the user key only (no
-        // `default` prefix / CF compare). Same bytes as `get_named`.
+    pub fn get_bytes(&self, key: impl AsRef<[u8]>) -> Result<Option<Bytes>> {
         let key = key.as_ref();
         // RFC-0164 envelope gate: a default-raw DB stores default keys
         // unprefixed, so the raw user key probes the envelope; a prefixed
@@ -2484,7 +2486,7 @@ impl<E: PedraEnv> DB<E> {
         }
         let (epoch, gen) = self.tls_point_ids(DEFAULT_CF, key);
         if let Some(hit) = LAST_GET.with(|slot| slot.borrow().get_key(epoch, gen, key)) {
-            return Ok(hit.map(|b| b.to_vec()));
+            return Ok(hit);
         }
         let got = self
             .codec
@@ -2492,7 +2494,15 @@ impl<E: PedraEnv> DB<E> {
         if got.is_some() {
             LAST_GET.with(|slot| slot.borrow_mut().store_key(epoch, gen, key, got.clone()));
         }
-        Ok(got.map(|b| b.to_vec()))
+        Ok(got)
+    }
+
+    /// Get from the default CF.
+    ///
+    /// # Errors
+    /// Pedra read errors.
+    pub fn get(&self, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
+        Ok(self.get_bytes(key)?.map(|b| b.to_vec()))
     }
 
     /// Point lookup without copying the value to `Vec` (RFC-0044 P1.3 GET).
@@ -2500,29 +2510,28 @@ impl<E: PedraEnv> DB<E> {
     /// # Errors
     /// Pedra read errors.
     pub fn contains(&self, key: impl AsRef<[u8]>) -> Result<bool> {
+        Ok(self.get_bytes(key)?.is_some())
+    }
+
+    /// Read-modify-write: bump the last payload byte from the live value,
+    /// then one put. Does not materialize a `Vec` for the old value
+    /// (ycsb_f_mc4).
+    ///
+    /// # Errors
+    /// Pedra read or write errors.
+    pub fn rmw(&self, key: impl AsRef<[u8]>, template: impl AsRef<[u8]>) -> Result<()> {
         let key = key.as_ref();
-        // Same envelope-gate rule as [`Self::get`]: prefixed DBs probe with
-        // the encoded key (RFC-0164).
-        let outside = if self.codec.default_raw {
-            self.inner.fast_outside_sst_miss(key)
-        } else {
-            self.codec
-                .encode_with(DEFAULT_CF, key, |enc| self.inner.fast_outside_sst_miss(enc))
-        };
-        if outside {
-            return Ok(false);
+        let template = template.as_ref();
+        let old_last = self
+            .get_bytes(key)?
+            .as_deref()
+            .and_then(|o| o.last().copied())
+            .unwrap_or(b'x');
+        let mut nv = template.to_vec();
+        if let Some(last) = nv.last_mut() {
+            *last = old_last.wrapping_add(1);
         }
-        let (epoch, gen) = self.tls_point_ids(DEFAULT_CF, key);
-        if let Some(hit) = LAST_GET.with(|slot| slot.borrow().get_key(epoch, gen, key)) {
-            return Ok(hit.is_some());
-        }
-        let got = self
-            .codec
-            .encode_with(DEFAULT_CF, key, |enc| self.inner.get(enc));
-        if got.is_some() {
-            LAST_GET.with(|slot| slot.borrow_mut().store_key(epoch, gen, key, got.clone()));
-        }
-        Ok(got.is_some())
+        self.put(key, &nv)
     }
 
     /// Get from a named CF.
@@ -4363,8 +4372,7 @@ where
                             continue;
                         }
                         let l0 = inner.with_read(|db| db.level_file_count(0));
-                        if l0 >= pedradb_core::L0_COMPACTION_TRIGGER
-                        {
+                        if l0 >= pedradb_core::L0_COMPACTION_TRIGGER {
                             // One job per tick: `while` re-took the gate
                             // between jobs faster than DB::compact's
                             // `lock()` woke (~85 s @100M scale settle).
@@ -5705,6 +5713,25 @@ mod tests {
         assert!(db.contains(b"k").unwrap());
         assert!(!db.contains(b"missing").unwrap());
         assert_eq!(db.get(b"k").unwrap().as_deref(), Some(&b"v"[..]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// ycsb_f RMW must bump the last byte without `get()` copying the old
+    /// value into a `Vec`.
+    #[test]
+    fn rfc0178_rmw_bumps_last_byte_from_bytes() {
+        let dir = tmp("rmw-bytes");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        let db = DB::open(&opts, &dir).unwrap();
+        db.put(b"k", b"va").unwrap();
+        db.rmw(b"k", b"xy").unwrap();
+        assert_eq!(
+            db.get(b"k").unwrap().as_deref(),
+            Some(&b"xb"[..]),
+            "template last byte becomes old_last+1"
+        );
+        assert_eq!(db.get_bytes(b"k").unwrap().as_deref(), Some(&b"xb"[..]));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
