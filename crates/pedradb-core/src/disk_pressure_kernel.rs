@@ -323,6 +323,15 @@ mod tests {
             del.contains("apply_batch_with("),
             "delete_with must go through apply_batch (disk admit)"
         );
+        let arc = include_str!("../../pedradb-sim/src/failing_arc.rs")
+            .split("fn available_bytes")
+            .nth(1)
+            .and_then(|s| s.split("\n}").next())
+            .expect("FailingEnvArc::available_bytes");
+        assert!(
+            arc.contains("probe_err"),
+            "FailingEnvArc must inject probe Err (unknown, not 0-free)"
+        );
     }
 
     #[test]

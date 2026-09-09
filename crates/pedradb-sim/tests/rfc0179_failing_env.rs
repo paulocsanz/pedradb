@@ -216,6 +216,37 @@ fn copy_db_directory_under_hard_floor_does_not_create_dest() {
     let _ = std::fs::remove_dir_all(&dest_parent);
 }
 
+/// RFC-0179: ConcurrentDb + FailingEnvArc probe Err is unknown; put Ok.
+#[test]
+fn concurrent_db_probe_err_does_not_refuse_put() {
+    assert_eq!(disk_probe_or_unknown(false, None), None);
+    assert!(matches!(
+        disk_pressure_admit(disk_probe_or_unknown(false, None)),
+        DiskPressureAdmit::Ok
+    ));
+    let dir = tmp();
+    let env = FailingEnvArc::passing();
+    let handle = env.clone();
+    let db = ConcurrentDb::open_with_env(
+        &dir,
+        OpenOptions {
+            sync: false,
+            auto_flush_bytes: None,
+            auto_compact_sst_count: None,
+            auto_compact_sst_bytes: None,
+            ..OpenOptions::default()
+        },
+        env,
+    )
+    .unwrap();
+    db.put(b"k", b"v").unwrap();
+    handle.inject_probe_err();
+    db.put(b"k2", b"v2").unwrap();
+    assert_eq!(db.get(b"k2").as_deref(), Some(b"v2".as_ref()));
+    assert!(!db.is_durability_fenced());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// RFC-0179: delete below the hard floor is DiskPressure; the live key
 /// stays (no tombstone); not a durability fence.
 #[test]

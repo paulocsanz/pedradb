@@ -127,6 +127,7 @@ admitido (não há compact); só o hard recusa.
   - `restore_history_under_hard_floor_does_not_create_dest`: dest ausente.
   - `concurrent_db_apply_batch_under_hard_floor_is_disk_pressure`: group_admit propaga o tipo, sem retry de stall.
   - `failing_env_delete_under_hard_floor_is_disk_pressure`: sem tombstone.
+  - `concurrent_db_probe_err_does_not_refuse_put`: probe Err no write-group ainda admite.
 - **Telemetry / Analytics:** `tracing::warn!` na transição (não cada put).
   Sonda 0169 é P1.3.
 - **Documentation:** este RFC; linha em `docs/status.md`. Não reescreve
