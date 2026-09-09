@@ -270,6 +270,26 @@ pub fn dir_sync_required_as_is(_sync: bool) -> bool {
     false
 }
 
+/// RFC-0168 hydrate streams live SSTs into page cache. Do that only when
+/// writers are idle: no `submit` / off-lock WAL, not an mc group handoff
+/// (`recently_multi`), and not a 1c put that just Ok'd (`recently_ok` —
+/// the host 200 µs opportunistic hold). Mid-burst warm on a 4 GiB box is
+/// the overwrite_mc4 25M cache hole: P0.70 `checkpoint_wal_if_lone_and_fat`
+/// calls `ConcurrentDb::flush` with inflight=0 between 1c seed puts, each
+/// 256 MiB L0 is under the 3 GiB cap so `take_warm_plan` streams it, then
+/// WAL + mem + warmed SSTs exceed RAM. Settle still warms when idle.
+/// Data-fate is unchanged (SST already installed); this only skips the
+/// read-ahead.
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn flush_warm_allowed(
+    commit_inflight: bool,
+    recently_multi: bool,
+    recently_ok: bool,
+) -> bool {
+    !commit_inflight && !recently_multi && !recently_ok
+}
+
 #[cfg(verus_keep_ghost)]
 use vstd::prelude::*;
 
@@ -566,6 +586,28 @@ mod tests {
             write_admission_idle_as_is(true, true, true),
             "AS-IS dente: stall knobs ignored"
         );
+    }
+
+    /// Mid-burst / mc4 handoff / 1c seed gap must not stream SSTs.
+    #[test]
+    fn rfc0180_flush_warm_skips_inflight_and_multi() {
+        assert!(
+            flush_warm_allowed(false, false, false),
+            "idle explicit flush still warms (RFC-0168 settle)"
+        );
+        assert!(
+            !flush_warm_allowed(true, false, false),
+            "commit_inflight: skip (writer in off-lock WAL / apply)"
+        );
+        assert!(
+            !flush_warm_allowed(false, true, false),
+            "recently_multi: skip (mc4 group handoff)"
+        );
+        assert!(
+            !flush_warm_allowed(false, false, true),
+            "recently_ok: skip (1c seed checkpoint between puts)"
+        );
+        assert!(!flush_warm_allowed(true, true, true));
     }
 
     #[test]
