@@ -69,3 +69,9 @@ theorem internal_key_new_into
         ok { user_key := b, sequence, kind }) := by
   unfold key.InternalKey.new
   rfl
+
+/-- Catalog entry: sequence compare is reversed (`b.cmp(a)`) — newest first. Dual-unfold. -/
+theorem ikey_seq_cmp_is_reverse (a b : U64) :
+    key.ikey_seq_cmp a b = ok (core.cmp.impls.OrdU64.cmp b a) := by
+  unfold key.ikey_seq_cmp
+  rfl
