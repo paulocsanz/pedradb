@@ -216,6 +216,47 @@ fn copy_db_directory_under_hard_floor_does_not_create_dest() {
     let _ = std::fs::remove_dir_all(&dest_parent);
 }
 
+/// RFC-0179: delete below the hard floor is DiskPressure; the live key
+/// stays (no tombstone); not a durability fence.
+#[test]
+fn failing_env_delete_under_hard_floor_is_disk_pressure() {
+    let dir = tmp();
+    let env = FailingEnv::passing();
+    let handle = env.clone();
+    let mut db = Db::open_with_env(
+        &dir,
+        OpenOptions {
+            sync: false,
+            auto_flush_bytes: None,
+            auto_compact_sst_count: None,
+            auto_compact_sst_bytes: None,
+            ..OpenOptions::default()
+        },
+        env,
+    )
+    .unwrap();
+    db.put(b"k", b"v").unwrap();
+    handle.set_available_bytes(Some(1024));
+    let err = db.delete(b"k").unwrap_err();
+    assert!(
+        matches!(
+            err,
+            CoreError::DiskPressure {
+                available: 1024,
+                need: DISK_HARD_FREE_BYTES,
+            }
+        ),
+        "expected DiskPressure, got {err:?}"
+    );
+    assert_eq!(
+        db.get(b"k").as_deref(),
+        Some(b"v".as_ref()),
+        "refused delete must not tombstone"
+    );
+    assert!(!db.is_durability_fenced());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// RFC-0179: ConcurrentDb apply_batch (write-group / group_admit) under
 /// the hard floor is DiskPressure, not Internal, not a stall-retry; get Ok.
 #[test]

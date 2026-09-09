@@ -314,6 +314,15 @@ mod tests {
             submit.contains("WriteStallMem"),
             "only WriteStall/WriteStallMem retry"
         );
+        let del = include_str!("db.rs")
+            .split("pub fn delete_with(")
+            .nth(1)
+            .and_then(|s| s.split("pub fn delete_range(").next())
+            .expect("delete_with");
+        assert!(
+            del.contains("apply_batch_with("),
+            "delete_with must go through apply_batch (disk admit)"
+        );
     }
 
     #[test]
