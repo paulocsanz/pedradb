@@ -19,11 +19,11 @@ description: >
 
 ## Grind pressure (one block, overwritten each fire)
 
-- Last fire: worked (`df3909a7` properties_kernel.rs rustc `&[bool]` is the term)
-- Why: leftover_next cartoon remaining `magic_kernel.rs` (cfg split; Verus u64/bool ≠ rustc `&[u8]`)
-- This fire MUST land: delete `magic_kernel.rs` verus stand-in + cfg split; rustc `&[u8]` body stays
-- Forbidden this fire: mint u64/`Seq` twin; leftover_next store/Montanha; leftover is_empty wrap; compact_refuse spray; git checkout of db.rs/concurrent.rs; skip cartoon as "not a land"
-- Deeper: Search leftover_next_first sst_magic magic_kernel.rs; delete stand-in; named cargo; fail-closed verus_sst_magic.sh
+- Last fire: worked (`e850f28d` magic_kernel.rs rustc `&[u8]` is the term)
+- Why: leftover_next trampoline remaining; `iter_user_range` still inlines Bound `copy_from_slice` instead of catalog `bound_to_owned`
+- This fire MUST land: `iter_user_range` calls `bound_to_owned` (Bound match); no db.rs checkout
+- Forbidden this fire: mint u64 twin; leftover is_empty wrap; compact_refuse spray; leftover_next store/Montanha; git checkout of db.rs/concurrent.rs; ||/== identity kernel
+- Deeper: Search leftover_next=trampoline remaining; open iter_user_range; named cargo; kernel call is the proof
 
 This skill **lands one payable slice per Fire**. Rank 1–10 unpaid first.
 When those boards are 0, Search prints `leftover_next`: cartoon remaining

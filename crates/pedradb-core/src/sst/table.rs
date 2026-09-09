@@ -1165,16 +1165,8 @@ impl SstTable {
         want_values: bool,
         load: Box<dyn FnMut(usize) -> Option<Arc<Vec<(InternalKey, Bytes)>>> + 'a>,
     ) -> SstRangeIter<'a> {
-        let start_b = match start {
-            Bound::Unbounded => Bound::Unbounded,
-            Bound::Included(s) => Bound::Included(Bytes::copy_from_slice(s)),
-            Bound::Excluded(s) => Bound::Excluded(Bytes::copy_from_slice(s)),
-        };
-        let end_b = match end {
-            Bound::Unbounded => Bound::Unbounded,
-            Bound::Included(s) => Bound::Included(Bytes::copy_from_slice(s)),
-            Bound::Excluded(s) => Bound::Excluded(Bytes::copy_from_slice(s)),
-        };
+        let start_b = crate::merge::bound_to_owned(start);
+        let end_b = crate::merge::bound_to_owned(end);
         if !self.overlaps_user_range(start, end) {
             return SstRangeIter {
                 current: None,
@@ -3273,6 +3265,24 @@ mod tests {
         assert!(
             !body.contains("file_before_end"),
             "Bound-match if must not stay inline in overlaps_user_range"
+        );
+    }
+
+    #[test]
+    fn iter_user_range_calls_bound_to_owned() {
+        let src = include_str!("table.rs");
+        let body = src
+            .split("pub fn iter_user_range")
+            .nth(1)
+            .and_then(|s| s.split("pub fn materialize_entries").next())
+            .expect("iter_user_range");
+        assert!(
+            body.contains("bound_to_owned("),
+            "iter_user_range Bound-to-Bytes must call catalog bound_to_owned"
+        );
+        assert!(
+            !body.contains("copy_from_slice"),
+            "Bound match must not stay inline in iter_user_range"
         );
     }
 
