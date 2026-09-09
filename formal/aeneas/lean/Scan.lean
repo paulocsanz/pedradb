@@ -262,6 +262,21 @@ theorem tombstone_reaches_window_included_start_unbounded_end
   unfold scan_kernel.tombstone_reaches_window
   rfl
 
+/-- Unbounded window start, included end: tombstone start must be `<=` e. Dual-unfold. -/
+theorem tombstone_reaches_window_unbounded_start_included_end
+    (t_start t_end e) :
+    scan_kernel.tombstone_reaches_window t_start t_end
+      core.ops.range.Bound.Unbounded
+      (core.ops.range.Bound.Included e) =
+      (do
+        let reaches_start ← ok true
+        let starts_before_end ←
+          Shared1A.Insts.CoreCmpPartialOrdShared0B.le
+            (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) t_start e
+        if reaches_start then ok starts_before_end else ok false) := by
+  unfold scan_kernel.tombstone_reaches_window
+  rfl
+
 /-- Exclusive key window: start is slice `>` then unbounded end. Dual-unfold. -/
 theorem key_in_window_excluded_unbounded (user s) :
     scan_kernel.key_in_window user (core.ops.range.Bound.Excluded s)
