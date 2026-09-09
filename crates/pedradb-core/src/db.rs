@@ -8530,11 +8530,7 @@ impl<E: Env> Db<E> {
             out.push(ChangeEntry {
                 sequence: ik.sequence,
                 key: ik.user_key,
-                kind: match ik.kind {
-                    ValueType::Value => ChangeKind::Put,
-                    ValueType::Deletion => ChangeKind::Delete,
-                    ValueType::RangeDeletion => ChangeKind::DeleteRange,
-                },
+                kind: ChangeKind::from_value_type(ik.kind),
                 value,
             });
         }

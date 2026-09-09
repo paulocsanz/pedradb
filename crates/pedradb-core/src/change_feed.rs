@@ -56,7 +56,7 @@ pub enum ChangeKind {
 }
 
 impl ChangeKind {
-    fn from_value_type(k: ValueType) -> Self {
+    pub(crate) fn from_value_type(k: ValueType) -> Self {
         match k {
             ValueType::Value => Self::Put,
             ValueType::Deletion => Self::Delete,
@@ -357,6 +357,37 @@ mod tests {
         assert_eq!(got.entries, log.entries);
         assert_eq!(got.changes_in(0, 1).len(), 1);
         assert_eq!(got.changes_after(1).len(), 1);
+    }
+
+    #[test]
+    fn from_value_type_on_live_feed_is_not_ok() {
+        use crate::key::ValueType;
+        assert_eq!(
+            ChangeKind::from_value_type(ValueType::Value),
+            ChangeKind::Put
+        );
+        assert_eq!(
+            ChangeKind::from_value_type(ValueType::Deletion),
+            ChangeKind::Delete
+        );
+        assert_eq!(
+            ChangeKind::from_value_type(ValueType::RangeDeletion),
+            ChangeKind::DeleteRange
+        );
+        let src = include_str!("db.rs");
+        let feed = src
+            .split("fn collect_feed_from_live")
+            .nth(1)
+            .and_then(|s| s.split("fn maybe_rebuild_feed_from_live").next())
+            .expect("collect_feed_from_live");
+        assert!(
+            feed.contains("from_value_type("),
+            "collect_feed_from_live must match ChangeKind::from_value_type"
+        );
+        assert!(
+            !feed.contains("ValueType::Value => ChangeKind::Put"),
+            "collect_feed_from_live must not keep a raw ValueType match"
+        );
     }
 
     #[test]
