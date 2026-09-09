@@ -1,9 +1,10 @@
 //! Content-Length framing (RFC-0002 P32 / F86 / F87 / F88).
 //!
-//! **Single artifact:** this file is what `rustc` links *and* what Verus
-//! proves (`cfg(verus_keep_ghost)`). No twin-cópia.
+//! **Single artifact (Aeneas-paid):** this file is what `rustc` links and
+//! what the Lean defs run over — Charon+Aeneas extract of these exact
+//! bodies. No Verus twin stands in for them.
 //!
-//!   ./scripts/verus_content_length.sh
+//!   ./scripts/aeneas_cl.sh
 //!
 //! Production `read_req` calls these. Socket read / `parse::<usize>` are
 //! caller + axiom.
@@ -115,122 +116,6 @@ pub fn short_body_vs_cl_is_error(got: u64, declared: u64) -> bool {
 pub fn short_body_vs_cl_is_error_as_is(got: u64, declared: u64) -> bool {
     short_body_vs_cl_is_error_as_is_body!(got, declared)
 }
-
-#[cfg(verus_keep_ghost)]
-use vstd::prelude::*;
-
-#[cfg(verus_keep_ghost)]
-verus! {
-
-pub open spec fn keep_body_without_cl_spec() -> bool {
-    true
-}
-
-pub fn keep_body_without_cl() -> (d: bool)
-    ensures
-        d == keep_body_without_cl_spec(),
-        d,
-{
-    keep_body_without_cl_body!()
-}
-
-pub open spec fn keep_body_without_cl_as_is_spec() -> bool {
-    false
-}
-
-pub fn keep_body_without_cl_as_is() -> (d: bool)
-    ensures
-        d == false,
-        d == keep_body_without_cl_as_is_spec(),
-{
-    keep_body_without_cl_as_is_body!()
-}
-
-pub open spec fn invalid_cl_as_zero_spec() -> bool {
-    false
-}
-
-pub fn invalid_cl_as_zero() -> (d: bool)
-    ensures
-        d == invalid_cl_as_zero_spec(),
-        !d,
-{
-    invalid_cl_as_zero_body!()
-}
-
-pub open spec fn invalid_cl_as_zero_as_is_spec() -> bool {
-    true
-}
-
-pub fn invalid_cl_as_zero_as_is() -> (d: bool)
-    ensures
-        d == true,
-        d == invalid_cl_as_zero_as_is_spec(),
-{
-    invalid_cl_as_zero_as_is_body!()
-}
-
-pub open spec fn content_length_repeat_ok_spec(first: u64, next: u64) -> bool {
-    first == next
-}
-
-pub fn content_length_repeat_ok(first: u64, next: u64) -> (d: bool)
-    ensures
-        d == content_length_repeat_ok_spec(first, next),
-{
-    content_length_repeat_ok_body!(first, next)
-}
-
-pub open spec fn content_length_repeat_ok_as_is_spec(_first: u64, _next: u64) -> bool {
-    true
-}
-
-pub fn content_length_repeat_ok_as_is(first: u64, next: u64) -> (d: bool)
-    ensures
-        d == true,
-        d == content_length_repeat_ok_as_is_spec(first, next),
-{
-    content_length_repeat_ok_as_is_body!(first, next)
-}
-
-pub fn short_body_vs_cl_is_error(got: u64, declared: u64) -> (d: bool)
-    ensures
-        d == (got < declared),
-{
-    short_body_vs_cl_is_error_body!(got, declared)
-}
-
-pub fn short_body_vs_cl_is_error_as_is(got: u64, declared: u64) -> (d: bool)
-    ensures
-        d == false,
-{
-    short_body_vs_cl_is_error_as_is_body!(got, declared)
-}
-
-proof fn lemma_f86_as_is_truncates()
-    ensures
-        keep_body_without_cl_spec(),
-        !keep_body_without_cl_as_is_spec(),
-{
-}
-
-proof fn lemma_f87_as_is_zero()
-    ensures
-        !invalid_cl_as_zero_spec(),
-        invalid_cl_as_zero_as_is_spec(),
-{
-}
-
-proof fn lemma_f88_as_is_last_wins(a: u64, b: u64)
-    requires
-        a != b,
-    ensures
-        !content_length_repeat_ok_spec(a, b),
-        content_length_repeat_ok_as_is_spec(a, b),
-{
-}
-
-} // verus!
 
 #[cfg(test)]
 mod tests {

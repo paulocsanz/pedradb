@@ -1,10 +1,10 @@
 //! Fail-closed HTTP wire (RFC-0002 P38 / F102 / F104 / F105).
 //!
-//! **Single artifact:** this file is what `rustc` links *and* what Verus
-//! proves (`cfg(verus_keep_ghost)`). Socket write / parse / byte scan stay
-//! rustc. No twin-cópia.
+//! **Single artifact (Aeneas-paid):** this file is what `rustc` links and
+//! what the Lean defs run over — Charon+Aeneas extract of these exact
+//! bodies. No Verus twin stands in for them.
 //!
-//!   ./scripts/verus_fail_closed.sh
+//!   ./scripts/aeneas_fail_closed.sh
 //!
 //! Production `handle_kv` / `handle_dcs` / `read_req` / `query_u64` call these.
 //! Writing the status line and parsing integers are caller + axiom.
@@ -219,114 +219,6 @@ pub fn host_value_ok(value: &str) -> bool {
 pub fn host_value_ok_as_is(_value: &str) -> bool {
     true
 }
-
-#[cfg(verus_keep_ghost)]
-use vstd::prelude::*;
-
-#[cfg(verus_keep_ghost)]
-verus! {
-
-pub open spec fn parse_error_writes_status_spec() -> bool {
-    true
-}
-
-pub fn parse_error_writes_status() -> (d: bool)
-    ensures
-        d == parse_error_writes_status_spec(),
-        d,
-{
-    parse_error_writes_status_body!()
-}
-
-pub open spec fn parse_error_writes_status_as_is_spec() -> bool {
-    false
-}
-
-pub fn parse_error_writes_status_as_is() -> (d: bool)
-    ensures
-        d == false,
-        d == parse_error_writes_status_as_is_spec(),
-{
-    parse_error_writes_status_as_is_body!()
-}
-
-pub fn parse_error_status() -> (c: u16)
-    ensures
-        c == 400u16,
-{
-    parse_error_status_body!()
-}
-
-pub open spec fn reject_transfer_encoding_spec() -> bool {
-    true
-}
-
-pub fn reject_transfer_encoding() -> (d: bool)
-    ensures
-        d == reject_transfer_encoding_spec(),
-        d,
-{
-    reject_transfer_encoding_body!()
-}
-
-pub open spec fn reject_transfer_encoding_as_is_spec() -> bool {
-    false
-}
-
-pub fn reject_transfer_encoding_as_is() -> (d: bool)
-    ensures
-        d == false,
-        d == reject_transfer_encoding_as_is_spec(),
-{
-    reject_transfer_encoding_as_is_body!()
-}
-
-pub open spec fn present_bad_int_is_error_spec() -> bool {
-    true
-}
-
-pub fn present_bad_int_is_error() -> (d: bool)
-    ensures
-        d == present_bad_int_is_error_spec(),
-        d,
-{
-    present_bad_int_is_error_body!()
-}
-
-pub open spec fn present_bad_int_is_error_as_is_spec() -> bool {
-    false
-}
-
-pub fn present_bad_int_is_error_as_is() -> (d: bool)
-    ensures
-        d == false,
-        d == present_bad_int_is_error_as_is_spec(),
-{
-    present_bad_int_is_error_as_is_body!()
-}
-
-proof fn lemma_f102_as_is_mute()
-    ensures
-        parse_error_writes_status_spec(),
-        !parse_error_writes_status_as_is_spec(),
-{
-}
-
-proof fn lemma_f104_as_is_accepts_te()
-    ensures
-        reject_transfer_encoding_spec(),
-        !reject_transfer_encoding_as_is_spec(),
-{
-}
-
-proof fn lemma_f105_as_is_defaults()
-    ensures
-        present_bad_int_is_error_spec(),
-        !present_bad_int_is_error_as_is_spec(),
-{
-}
-
-} // verus!
 
 #[cfg(test)]
 mod tests {

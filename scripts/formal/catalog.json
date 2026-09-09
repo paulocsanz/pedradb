@@ -1680,7 +1680,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-http/src/cl_kernel.rs",
       "twin": "crates/pedradb-http/src/cl_kernel.rs",
-      "verus": "scripts/verus_content_length.sh",
+      "aeneas": "scripts/aeneas_cl.sh",
       "callers": [
         "crates/pedradb-http/src/lib.rs"
       ],
@@ -1702,9 +1702,10 @@
       "id": "invalid_cl_zero",
       "finding": "F87",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-http/src/cl_kernel.rs",
-      "twin": "crates/pedradb-http/verus/content_length.rs",
-      "verus": "scripts/verus_content_length.sh",
+      "twin": "crates/pedradb-http/src/cl_kernel.rs",
+      "aeneas": "scripts/aeneas_cl.sh",
       "callers": [
         "crates/pedradb-http/src/lib.rs"
       ],
@@ -1726,9 +1727,10 @@
       "id": "cl_repeat_conflict",
       "finding": "F88",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-http/src/cl_kernel.rs",
-      "twin": "crates/pedradb-http/verus/content_length.rs",
-      "verus": "scripts/verus_content_length.sh",
+      "twin": "crates/pedradb-http/src/cl_kernel.rs",
+      "aeneas": "scripts/aeneas_cl.sh",
       "callers": [
         "crates/pedradb-http/src/lib.rs"
       ],
@@ -1750,9 +1752,10 @@
       "id": "short_body_vs_cl",
       "finding": "F146",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-http/src/cl_kernel.rs",
-      "twin": "crates/pedradb-http/verus/content_length.rs",
-      "verus": "scripts/verus_content_length.sh",
+      "twin": "crates/pedradb-http/src/cl_kernel.rs",
+      "aeneas": "scripts/aeneas_cl.sh",
       "callers": [
         "crates/pedradb-http/src/lib.rs"
       ],
@@ -1777,7 +1780,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-http/src/fail_closed.rs",
       "twin": "crates/pedradb-http/src/fail_closed.rs",
-      "verus": "scripts/verus_fail_closed.sh",
+      "aeneas": "scripts/aeneas_fail_closed.sh",
       "callers": [
         "crates/pedradb-http/src/lib.rs"
       ],

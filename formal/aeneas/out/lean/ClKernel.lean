@@ -15,52 +15,52 @@ set_option maxRecDepth 2048
 namespace pedra_aeneas_cl_kernel
 
 /-- [pedra_aeneas_cl_kernel::keep_body_without_cl]:
-    Source: '../../../crates/pedradb-http/src/cl_kernel.rs', lines 66:0-68:1
+    Source: '../../../crates/pedradb-http/src/cl_kernel.rs', lines 67:0-69:1
     Visibility: public -/
 def keep_body_without_cl : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_cl_kernel::keep_body_without_cl_as_is]:
-    Source: '../../../crates/pedradb-http/src/cl_kernel.rs', lines 73:0-75:1
+    Source: '../../../crates/pedradb-http/src/cl_kernel.rs', lines 74:0-76:1
     Visibility: public -/
 def keep_body_without_cl_as_is : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_cl_kernel::invalid_cl_as_zero]:
-    Source: '../../../crates/pedradb-http/src/cl_kernel.rs', lines 80:0-82:1
+    Source: '../../../crates/pedradb-http/src/cl_kernel.rs', lines 81:0-83:1
     Visibility: public -/
 def invalid_cl_as_zero : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_cl_kernel::invalid_cl_as_zero_as_is]:
-    Source: '../../../crates/pedradb-http/src/cl_kernel.rs', lines 87:0-89:1
+    Source: '../../../crates/pedradb-http/src/cl_kernel.rs', lines 88:0-90:1
     Visibility: public -/
 def invalid_cl_as_zero_as_is : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_cl_kernel::content_length_repeat_ok]:
-    Source: '../../../crates/pedradb-http/src/cl_kernel.rs', lines 94:0-96:1
+    Source: '../../../crates/pedradb-http/src/cl_kernel.rs', lines 95:0-97:1
     Visibility: public -/
 def content_length_repeat_ok
   (first : Std.U64) (next : Std.U64) : Result Bool := do
   ok (first = next)
 
 /-- [pedra_aeneas_cl_kernel::content_length_repeat_ok_as_is]:
-    Source: '../../../crates/pedradb-http/src/cl_kernel.rs', lines 101:0-103:1
+    Source: '../../../crates/pedradb-http/src/cl_kernel.rs', lines 102:0-104:1
     Visibility: public -/
 def content_length_repeat_ok_as_is
   (first : Std.U64) (next : Std.U64) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_cl_kernel::short_body_vs_cl_is_error]:
-    Source: '../../../crates/pedradb-http/src/cl_kernel.rs', lines 108:0-110:1
+    Source: '../../../crates/pedradb-http/src/cl_kernel.rs', lines 109:0-111:1
     Visibility: public -/
 def short_body_vs_cl_is_error
   (got : Std.U64) (declared : Std.U64) : Result Bool := do
   ok (got < declared)
 
 /-- [pedra_aeneas_cl_kernel::short_body_vs_cl_is_error_as_is]:
-    Source: '../../../crates/pedradb-http/src/cl_kernel.rs', lines 115:0-117:1
+    Source: '../../../crates/pedradb-http/src/cl_kernel.rs', lines 116:0-118:1
     Visibility: public -/
 def short_body_vs_cl_is_error_as_is
   (got : Std.U64) (declared : Std.U64) : Result Bool := do
