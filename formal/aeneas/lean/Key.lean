@@ -99,6 +99,17 @@ theorem value_type_clone_is_self (self : key.ValueType) :
   unfold key.ValueType.Insts.CoreCloneClone.clone
   rfl
 
+/-- Catalog entry: InternalKey Clone clones user_key, sequence, and kind. Dual-unfold. -/
+theorem internal_key_clone_is_fields (self : key.InternalKey) :
+    key.InternalKey.Insts.CoreCloneClone.clone self =
+      (do
+        let b ← bytes.bytes.Bytes.Insts.CoreCloneClone.clone self.user_key
+        let i ← lift (core.clone.impls.CloneU64.clone self.sequence)
+        let vt ← key.ValueType.Insts.CoreCloneClone.clone self.kind
+        ok { user_key := b, sequence := i, kind := vt }) := by
+  unfold key.InternalKey.Insts.CoreCloneClone.clone
+  rfl
+
 /-- Catalog entry: ValueType PartialOrd is `Some(cmp)`. Dual-unfold. -/
 theorem value_type_partial_cmp_is_some_cmp
     (self other : key.ValueType) :
