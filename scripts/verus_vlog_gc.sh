@@ -1,23 +1,16 @@
 #!/usr/bin/env bash
-# Machine-check the vlog GC decision kernel (RFC-0056 P1.4).
+# vlog_gc_kernel.rs rustc body is the term (Aeneas VlogGc.lean).
+# A Verus stand-in is not last-wins. Fail closed if it returns.
 set -euo pipefail
-
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-# RFC-0171 P0.3 / RFC-0174: prove the file rustc links (pair vlog_recover).
 SRC="$ROOT/crates/pedradb-core/src/vlog_gc_kernel.rs"
-
-if [[ -x "${VERUS:-}" ]]; then
-  :
-elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then
-  VERUS="$HOME/.local/verus/verus-arm64-macos/verus"
-elif command -v verus >/dev/null 2>&1; then
-  VERUS="$(command -v verus)"
-else
-  echo "error: verus not found (install to ~/.local/verus/verus-arm64-macos or set VERUS=)" >&2
-  exit 127
+if grep -n 'verus!' "$SRC"; then
+  echo "error: verus_vlog_gc: verus! stand-in still in vlog_gc_kernel.rs" >&2
+  exit 1
 fi
-
-echo "verus: $VERUS"
-"$VERUS" --version
-echo "proving: $SRC"
-exec "$VERUS" "$SRC" --crate-type=lib --multiple-errors 10 --time "$@"
+if grep -n 'verus_keep_ghost' "$SRC"; then
+  echo "error: verus_vlog_gc: cfg(verus_keep_ghost) split still in vlog_gc_kernel.rs" >&2
+  exit 1
+fi
+echo "ok: no Verus cartoon in $SRC; term is Aeneas formal/aeneas/lean/VlogGc.lean"
+exit 0

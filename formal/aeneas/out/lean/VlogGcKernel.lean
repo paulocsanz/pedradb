@@ -15,7 +15,7 @@ set_option maxRecDepth 2048
 namespace pedra_aeneas_vlog_gc_kernel
 
 /-- [pedra_aeneas_vlog_gc_kernel::VlogRecoverAction]
-    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 254:0-271:1
+    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 32:0-49:1
     Visibility: public -/
 @[discriminant isize]
 inductive VlogRecoverAction where
@@ -27,14 +27,14 @@ inductive VlogRecoverAction where
 | NoVlog : VlogRecoverAction
 
 /-- [pedra_aeneas_vlog_gc_kernel::{impl core::clone::Clone for pedra_aeneas_vlog_gc_kernel::VlogRecoverAction}::clone]:
-    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 253:9-253:14
+    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 31:9-31:14
     Visibility: public -/
 def VlogRecoverAction.Insts.CoreCloneClone.clone
   (self : VlogRecoverAction) : Result VlogRecoverAction := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_vlog_gc_kernel::{impl core::clone::Clone for pedra_aeneas_vlog_gc_kernel::VlogRecoverAction}]
-    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 253:9-253:14 -/
+    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 31:9-31:14 -/
 @[reducible]
 def VlogRecoverAction.Insts.CoreCloneClone : core.clone.Clone VlogRecoverAction
   := {
@@ -42,7 +42,7 @@ def VlogRecoverAction.Insts.CoreCloneClone : core.clone.Clone VlogRecoverAction
 }
 
 /-- Trait implementation: [pedra_aeneas_vlog_gc_kernel::{impl core::marker::Copy for pedra_aeneas_vlog_gc_kernel::VlogRecoverAction}]
-    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 253:16-253:20 -/
+    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 31:16-31:20 -/
 @[reducible]
 def VlogRecoverAction.Insts.CoreMarkerCopy : core.marker.Copy VlogRecoverAction
   := {
@@ -50,14 +50,14 @@ def VlogRecoverAction.Insts.CoreMarkerCopy : core.marker.Copy VlogRecoverAction
 }
 
 /-- Trait implementation: [pedra_aeneas_vlog_gc_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_vlog_gc_kernel::VlogRecoverAction}]
-    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 253:22-253:31 -/
+    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 31:22-31:31 -/
 @[reducible]
 def VlogRecoverAction.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq VlogRecoverAction := {
 }
 
 /-- [pedra_aeneas_vlog_gc_kernel::{impl core::cmp::PartialEq<pedra_aeneas_vlog_gc_kernel::VlogRecoverAction> for pedra_aeneas_vlog_gc_kernel::VlogRecoverAction}::eq]:
-    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 253:22-253:31
+    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 31:22-31:31
     Visibility: public -/
 def VlogRecoverAction.Insts.CoreCmpPartialEqVlogRecoverAction.eq
   (self : VlogRecoverAction) (other : VlogRecoverAction) : Result Bool := do
@@ -66,7 +66,7 @@ def VlogRecoverAction.Insts.CoreCmpPartialEqVlogRecoverAction.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_vlog_gc_kernel::{impl core::cmp::PartialEq<pedra_aeneas_vlog_gc_kernel::VlogRecoverAction> for pedra_aeneas_vlog_gc_kernel::VlogRecoverAction}]
-    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 253:22-253:31 -/
+    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 31:22-31:31 -/
 @[reducible]
 def VlogRecoverAction.Insts.CoreCmpPartialEqVlogRecoverAction :
   core.cmp.PartialEq VlogRecoverAction VlogRecoverAction := {
@@ -74,14 +74,14 @@ def VlogRecoverAction.Insts.CoreCmpPartialEqVlogRecoverAction :
 }
 
 /-- [pedra_aeneas_vlog_gc_kernel::{impl core::cmp::Eq for pedra_aeneas_vlog_gc_kernel::VlogRecoverAction}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 253:33-253:35
+    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 31:33-31:35
     Visibility: public -/
 def VlogRecoverAction.Insts.CoreCmpEq.assert_fields_are_eq
   (self : VlogRecoverAction) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_vlog_gc_kernel::{impl core::cmp::Eq for pedra_aeneas_vlog_gc_kernel::VlogRecoverAction}]
-    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 253:33-253:35 -/
+    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 31:33-31:35 -/
 @[reducible]
 def VlogRecoverAction.Insts.CoreCmpEq : core.cmp.Eq VlogRecoverAction := {
   partialEqInst := VlogRecoverAction.Insts.CoreCmpPartialEqVlogRecoverAction
@@ -90,7 +90,7 @@ def VlogRecoverAction.Insts.CoreCmpEq : core.cmp.Eq VlogRecoverAction := {
 }
 
 /-- [pedra_aeneas_vlog_gc_kernel::{impl core::fmt::Debug for pedra_aeneas_vlog_gc_kernel::VlogRecoverAction}::fmt]:
-    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 253:37-253:42
+    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 31:37-31:42
     Visibility: public -/
 def VlogRecoverAction.Insts.CoreFmtDebug.fmt
   (self : VlogRecoverAction) (f : core.fmt.Formatter) :
@@ -110,7 +110,7 @@ def VlogRecoverAction.Insts.CoreFmtDebug.fmt
   | VlogRecoverAction.NoVlog => core.fmt.Formatter.write_str f (toStr "NoVlog")
 
 /-- Trait implementation: [pedra_aeneas_vlog_gc_kernel::{impl core::fmt::Debug for pedra_aeneas_vlog_gc_kernel::VlogRecoverAction}]
-    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 253:37-253:42 -/
+    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 31:37-31:42 -/
 @[reducible]
 def VlogRecoverAction.Insts.CoreFmtDebug : core.fmt.Debug VlogRecoverAction
   := {
@@ -118,7 +118,7 @@ def VlogRecoverAction.Insts.CoreFmtDebug : core.fmt.Debug VlogRecoverAction
 }
 
 /-- [pedra_aeneas_vlog_gc_kernel::vlog_recover_action]:
-    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 279:0-307:1
+    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 56:0-84:1
     Visibility: public -/
 def vlog_recover_action
   (blob_active : Bool) (wants_large : Bool) (primary_exists : Bool)
@@ -154,7 +154,7 @@ def vlog_recover_action
         else ok VlogRecoverAction.NoVlog
 
 /-- [pedra_aeneas_vlog_gc_kernel::vlog_recover_action_as_is_ignore_swing]:
-    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 315:0-323:1
+    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 91:0-99:1
     Visibility: public -/
 def vlog_recover_action_as_is_ignore_swing
   (blob_active : Bool) (wants_large : Bool) (primary_exists : Bool)
@@ -164,7 +164,7 @@ def vlog_recover_action_as_is_ignore_swing
   vlog_recover_action blob_active wants_large primary_exists false false
 
 /-- [pedra_aeneas_vlog_gc_kernel::BlobGcAction]
-    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 328:0-334:1
+    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 103:0-109:1
     Visibility: public -/
 @[discriminant isize]
 inductive BlobGcAction where
@@ -172,35 +172,35 @@ inductive BlobGcAction where
 | Skip : BlobGcAction
 
 /-- [pedra_aeneas_vlog_gc_kernel::{impl core::clone::Clone for pedra_aeneas_vlog_gc_kernel::BlobGcAction}::clone]:
-    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 327:9-327:14
+    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 102:9-102:14
     Visibility: public -/
 def BlobGcAction.Insts.CoreCloneClone.clone
   (self : BlobGcAction) : Result BlobGcAction := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_vlog_gc_kernel::{impl core::clone::Clone for pedra_aeneas_vlog_gc_kernel::BlobGcAction}]
-    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 327:9-327:14 -/
+    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 102:9-102:14 -/
 @[reducible]
 def BlobGcAction.Insts.CoreCloneClone : core.clone.Clone BlobGcAction := {
   clone := BlobGcAction.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [pedra_aeneas_vlog_gc_kernel::{impl core::marker::Copy for pedra_aeneas_vlog_gc_kernel::BlobGcAction}]
-    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 327:16-327:20 -/
+    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 102:16-102:20 -/
 @[reducible]
 def BlobGcAction.Insts.CoreMarkerCopy : core.marker.Copy BlobGcAction := {
   cloneInst := BlobGcAction.Insts.CoreCloneClone
 }
 
 /-- Trait implementation: [pedra_aeneas_vlog_gc_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_vlog_gc_kernel::BlobGcAction}]
-    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 327:22-327:31 -/
+    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 102:22-102:31 -/
 @[reducible]
 def BlobGcAction.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq BlobGcAction := {
 }
 
 /-- [pedra_aeneas_vlog_gc_kernel::{impl core::cmp::PartialEq<pedra_aeneas_vlog_gc_kernel::BlobGcAction> for pedra_aeneas_vlog_gc_kernel::BlobGcAction}::eq]:
-    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 327:22-327:31
+    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 102:22-102:31
     Visibility: public -/
 def BlobGcAction.Insts.CoreCmpPartialEqBlobGcAction.eq
   (self : BlobGcAction) (other : BlobGcAction) : Result Bool := do
@@ -209,7 +209,7 @@ def BlobGcAction.Insts.CoreCmpPartialEqBlobGcAction.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_vlog_gc_kernel::{impl core::cmp::PartialEq<pedra_aeneas_vlog_gc_kernel::BlobGcAction> for pedra_aeneas_vlog_gc_kernel::BlobGcAction}]
-    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 327:22-327:31 -/
+    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 102:22-102:31 -/
 @[reducible]
 def BlobGcAction.Insts.CoreCmpPartialEqBlobGcAction : core.cmp.PartialEq
   BlobGcAction BlobGcAction := {
@@ -217,14 +217,14 @@ def BlobGcAction.Insts.CoreCmpPartialEqBlobGcAction : core.cmp.PartialEq
 }
 
 /-- [pedra_aeneas_vlog_gc_kernel::{impl core::cmp::Eq for pedra_aeneas_vlog_gc_kernel::BlobGcAction}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 327:33-327:35
+    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 102:33-102:35
     Visibility: public -/
 def BlobGcAction.Insts.CoreCmpEq.assert_fields_are_eq
   (self : BlobGcAction) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_vlog_gc_kernel::{impl core::cmp::Eq for pedra_aeneas_vlog_gc_kernel::BlobGcAction}]
-    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 327:33-327:35 -/
+    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 102:33-102:35 -/
 @[reducible]
 def BlobGcAction.Insts.CoreCmpEq : core.cmp.Eq BlobGcAction := {
   partialEqInst := BlobGcAction.Insts.CoreCmpPartialEqBlobGcAction
@@ -232,7 +232,7 @@ def BlobGcAction.Insts.CoreCmpEq : core.cmp.Eq BlobGcAction := {
 }
 
 /-- [pedra_aeneas_vlog_gc_kernel::{impl core::fmt::Debug for pedra_aeneas_vlog_gc_kernel::BlobGcAction}::fmt]:
-    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 327:37-327:42
+    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 102:37-102:42
     Visibility: public -/
 def BlobGcAction.Insts.CoreFmtDebug.fmt
   (self : BlobGcAction) (f : core.fmt.Formatter) :
@@ -243,14 +243,14 @@ def BlobGcAction.Insts.CoreFmtDebug.fmt
   | BlobGcAction.Skip => core.fmt.Formatter.write_str f (toStr "Skip")
 
 /-- Trait implementation: [pedra_aeneas_vlog_gc_kernel::{impl core::fmt::Debug for pedra_aeneas_vlog_gc_kernel::BlobGcAction}]
-    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 327:37-327:42 -/
+    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 102:37-102:42 -/
 @[reducible]
 def BlobGcAction.Insts.CoreFmtDebug : core.fmt.Debug BlobGcAction := {
   fmt := BlobGcAction.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_vlog_gc_kernel::blob_gc_action]:
-    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 342:0-348:1
+    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 116:0-122:1
     Visibility: public -/
 def blob_gc_action
   (is_active : Bool) (bytes : Std.U64) : Result BlobGcAction := do
@@ -261,7 +261,7 @@ def blob_gc_action
        else ok BlobGcAction.Skip
 
 /-- [pedra_aeneas_vlog_gc_kernel::blob_gc_action_as_is_rewrite_active]:
-    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 354:0-360:1
+    Source: '../../../crates/pedradb-core/src/vlog_gc_kernel.rs', lines 127:0-133:1
     Visibility: public -/
 def blob_gc_action_as_is_rewrite_active
   (_is_active : Bool) (bytes : Std.U64) : Result BlobGcAction := do
