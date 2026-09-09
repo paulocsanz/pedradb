@@ -5,157 +5,47 @@
 //! Supports range tombstones ([`ValueType::RangeDeletion`]) and a streaming
 //! merge path that does not require materialising the full keyspace first.
 
-//! **Single artifact (pair `visible_at`):** this file is what `rustc`
-//! links *and* what Verus proves (`cfg(verus_keep_ghost)`). Pair
-//! `range_covers` keeps its model twin until its turn.
+//! **Term:** this file is what `rustc` links. Aeneas extracts that body
+//! (`scripts/aeneas_merge.sh`). A toy-enum / u64 view of `&[u8]` /
+//! `key::ValueType` is a model twin — not last-wins (deleted).
 //!
-//!   ./scripts/verus_visible_at.sh
-//!
-//! rustc `visible_at` stays last-wins (`key::ValueType`). Verus uses a
-//! stand-in enum (same decision: Value is live iff not range-hidden).
+//!   ./scripts/aeneas_merge.sh --required
 
-#[cfg(verus_keep_ghost)]
-use vstd::prelude::*;
 
-#[cfg(verus_keep_ghost)]
-verus! {
-pub enum ValueType {
-    Deletion,
-    Value,
-    RangeDeletion,
-}
-
-pub open spec fn visible_at_spec(kind: ValueType, range_hidden: bool) -> bool {
-    match kind {
-        ValueType::Value => !range_hidden,
-        ValueType::Deletion | ValueType::RangeDeletion => false,
-    }
-}
-
-/// F30-class leak: never hide (deleted keys scan as live).
-pub open spec fn visible_at_as_is_spec(_kind: ValueType, _range_hidden: bool) -> bool {
-    true
-}
-
-pub fn visible_at(kind: ValueType, range_hidden: bool) -> (d: bool)
-    ensures
-        d == visible_at_spec(kind, range_hidden),
-{
-    match kind {
-        ValueType::Value => !range_hidden,
-        ValueType::Deletion | ValueType::RangeDeletion => false,
-    }
-}
-
-pub fn visible_at_as_is(_kind: ValueType, _range_hidden: bool) -> (d: bool)
-    ensures
-        d == true,
-{
-    true
-}
-
-/// Half-open cover (F30) — same tokens as `merge::range_tombstone_covers`.
-pub open spec fn range_covers_spec(start: u64, end: u64, key: u64) -> bool {
-    key >= start && key < end
-}
-
-pub fn range_tombstone_covers(start: u64, end: u64, key: u64) -> (d: bool)
-    ensures
-        d == range_covers_spec(start, end, key),
-        d == (key >= start && key < end),
-{
-    key >= start && key < end
-}
-
-/// AS-IS F30: only the range start conflicts.
-pub open spec fn range_tombstone_covers_as_is_spec(start: u64, _end: u64, key: u64) -> bool {
-    key == start
-}
-
-pub fn range_tombstone_covers_as_is(start: u64, _end: u64, key: u64) -> (d: bool)
-    ensures
-        d == range_tombstone_covers_as_is_spec(start, _end, key),
-        d == (key == start),
-{
-    key == start
-}
-
-proof fn lemma_deletion_is_hidden()
-    ensures
-        !visible_at_spec(ValueType::Deletion, false),
-        visible_at_as_is_spec(ValueType::Deletion, false),
-{
-}
-
-proof fn lemma_range_hidden_value_is_hidden()
-    ensures
-        !visible_at_spec(ValueType::Value, true),
-        visible_at_spec(ValueType::Value, false),
-{
-}
-
-/// Mid-range key is covered; AS-IS only matches the start (F30 tooth).
-proof fn lemma_f30_as_is_misses_interior(start: u64, end: u64, key: u64)
-    requires
-        start < key,
-        key < end,
-    ensures
-        range_covers_spec(start, end, key),
-        !range_tombstone_covers_as_is_spec(start, end, key),
-{
-}
-} // verus!
-
-#[cfg(not(verus_keep_ghost))]
 use std::cmp::Ordering;
-#[cfg(not(verus_keep_ghost))]
 use std::collections::{BTreeMap, BinaryHeap, VecDeque};
-#[cfg(not(verus_keep_ghost))]
 use std::ops::Bound;
-#[cfg(not(verus_keep_ghost))]
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
-#[cfg(not(verus_keep_ghost))]
 use std::sync::OnceLock;
-#[cfg(not(verus_keep_ghost))]
 use std::time::Instant;
 
-#[cfg(not(verus_keep_ghost))]
 use bytes::Bytes;
 
-#[cfg(not(verus_keep_ghost))]
 use crate::error::Result;
-#[cfg(not(verus_keep_ghost))]
 use crate::key::{InternalKey, SequenceNumber, ValueType};
 
 /// `PEDRA_SCAN_DIAG=1` arms [`Db::scan_at_raw`]'s periodic SCANDIAG print;
 /// read once per process.
-#[cfg(not(verus_keep_ghost))]
 pub(crate) fn scan_diag_enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
     *ENABLED.get_or_init(|| std::env::var_os("PEDRA_SCAN_DIAG").is_some())
 }
 
 /// Candidate rows examined by `next_window_kv` (Some returns only).
-#[cfg(not(verus_keep_ghost))]
 pub(crate) static SCAN_DIAG_ROWS: AtomicU64 = AtomicU64::new(0);
 
 /// Nanoseconds spent inside `next_window_kv` (includes block loads on
 /// cache miss, which happen under the stream's `next`).
-#[cfg(not(verus_keep_ghost))]
 pub(crate) static SCAN_DIAG_ROW_NS: AtomicU64 = AtomicU64::new(0);
 
 /// Rows emitted from the single-live-stream fast path (diag only).
-#[cfg(not(verus_keep_ghost))]
 pub(crate) static SCAN_DIAG_SINGLE_ROWS: AtomicU64 = AtomicU64::new(0);
 
 /// Streams retired early because their head passed `end` (diag only).
-#[cfg(not(verus_keep_ghost))]
 pub(crate) static SCAN_DIAG_STREAM_EVICTS: AtomicU64 = AtomicU64::new(0);
 
 /// One user-visible key/value after MVCC filtering.
-#[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg(not(verus_keep_ghost))]
 pub struct VisibleKv {
     /// User key.
     pub key: Bytes,
@@ -168,9 +58,7 @@ pub struct VisibleKv {
 /// `snapshot_live` is [`visible_at`] of that version (`kind` + covering
 /// range tombstone). The iterator window (RFC-0151) calls
 /// [`iter_window_keep`] on this bit — not a constant live-put.
-#[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg(not(verus_keep_ghost))]
 pub struct WindowKv {
     /// User key.
     pub key: Bytes,
@@ -181,9 +69,7 @@ pub struct WindowKv {
 }
 
 /// A range tombstone covering `[start, end)` at `sequence`.
-#[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg(not(verus_keep_ghost))]
 pub struct RangeTombstone {
     /// Inclusive start user key.
     pub start: Bytes,
@@ -194,17 +80,13 @@ pub struct RangeTombstone {
 }
 
 /// Half-open cover `[start, end)` (F30 OCC / range delete).
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
-#[cfg(not(verus_keep_ghost))]
 pub fn range_tombstone_covers(start: &[u8], end: &[u8], key: &[u8]) -> bool {
     key >= start && key < end
 }
 
 /// AS-IS F30: only the range **start** conflicts (misses covering deletes).
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
-#[cfg(not(verus_keep_ghost))]
 pub fn range_tombstone_covers_as_is(start: &[u8], _end: &[u8], key: &[u8]) -> bool {
     key == start
 }
@@ -213,7 +95,6 @@ pub fn range_tombstone_covers_as_is(start: &[u8], _end: &[u8], key: &[u8]) -> bo
 ///
 /// Range deletes use [`range_tombstone_covers`] (F30). Point put/delete
 /// conflict on the exact user key.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn write_op_covers_key(kind: ValueType, start: &[u8], end: &[u8], key: &[u8]) -> bool {
     match kind {
@@ -223,7 +104,6 @@ pub fn write_op_covers_key(kind: ValueType, start: &[u8], end: &[u8], key: &[u8]
 }
 
 /// AS-IS F30: range only hits the start key; point ops never conflict.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn write_op_covers_key_as_is(kind: ValueType, start: &[u8], end: &[u8], key: &[u8]) -> bool {
     match kind {
@@ -237,9 +117,7 @@ pub fn write_op_covers_key_as_is(kind: ValueType, start: &[u8], end: &[u8], key:
 /// Candidate versions already satisfy `sequence <= snapshot` (newest first).
 /// A `Value` is live unless a covering range tombstone with `t.seq > point_seq`
 /// hides it. `Deletion` / `RangeDeletion` are not live.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
-#[cfg(not(verus_keep_ghost))]
 pub fn visible_at(kind: ValueType, range_hidden: bool) -> bool {
     match kind {
         ValueType::Value => !range_hidden,
@@ -248,9 +126,7 @@ pub fn visible_at(kind: ValueType, range_hidden: bool) -> bool {
 }
 
 /// AS-IS: never hide (deleted / range-covered keys scan as live).
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
-#[cfg(not(verus_keep_ghost))]
 pub fn visible_at_as_is(_kind: ValueType, _range_hidden: bool) -> bool {
     true
 }
@@ -259,22 +135,17 @@ pub fn visible_at_as_is(_kind: ValueType, _range_hidden: bool) -> bool {
 ///
 /// Production [`StreamingVisibleIter`] / [`visible_range`] call this with
 /// [`visible_at`]. AS-IS keeps a hidden version (scan leak).
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
-#[cfg(not(verus_keep_ghost))]
 pub fn iter_window_keep(snapshot_live: bool) -> bool {
     snapshot_live
 }
 
 /// AS-IS scan leak: emit a deleted / range-covered version.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
-#[cfg(not(verus_keep_ghost))]
 pub fn iter_window_keep_as_is(_snapshot_live: bool) -> bool {
     true
 }
 
-#[cfg(not(verus_keep_ghost))]
 impl RangeTombstone {
     /// Whether `user_key` is covered by this tombstone.
     #[must_use]
@@ -284,9 +155,7 @@ impl RangeTombstone {
 }
 
 /// Whether `user_key` falls within `[start, end)` style bounds.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
-#[cfg(not(verus_keep_ghost))]
 pub fn user_key_in_range(user_key: &[u8], start: Bound<&[u8]>, end: Bound<&[u8]>) -> bool {
     let after_start = match start {
         Bound::Unbounded => true,
@@ -303,9 +172,7 @@ pub fn user_key_in_range(user_key: &[u8], start: Bound<&[u8]>, end: Bound<&[u8]>
 
 /// True when `user_key` sits past `end`: every later key of a sorted stream
 /// is then out of range too, so the stream can be retired early.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
-#[cfg(not(verus_keep_ghost))]
 pub fn past_end(user_key: &[u8], end: Bound<&[u8]>) -> bool {
     match end {
         Bound::Unbounded => false,
@@ -315,9 +182,7 @@ pub fn past_end(user_key: &[u8], end: Bound<&[u8]>) -> bool {
 }
 
 /// Extract range tombstones visible at `snapshot` from a stream of versions.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
-#[cfg(not(verus_keep_ghost))]
 pub fn collect_range_tombstones(
     entries: impl IntoIterator<Item = (InternalKey, Bytes)>,
     snapshot: SequenceNumber,
@@ -337,9 +202,7 @@ pub fn collect_range_tombstones(
 }
 
 /// Whether a point version at `point_seq` for `user_key` is hidden by a range del.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
-#[cfg(not(verus_keep_ghost))]
 pub fn range_deleted(
     user_key: &[u8],
     point_seq: SequenceNumber,
@@ -355,7 +218,6 @@ pub fn range_deleted(
 /// `entries` must be iterable in any order; they are sorted via [`BTreeMap`].
 /// For each user key, the newest version with `sequence <= snapshot` wins;
 /// deletions and covering range tombstones hide the key.
-#[cfg(not(verus_keep_ghost))]
 pub fn visible_range(
     entries: impl IntoIterator<Item = (InternalKey, Bytes)>,
     snapshot: SequenceNumber,
@@ -366,7 +228,6 @@ pub fn visible_range(
 }
 
 /// Like [`visible_range`], but stops after `limit` live keys when `Some`.
-#[cfg(not(verus_keep_ghost))]
 pub fn visible_range_limited(
     entries: impl IntoIterator<Item = (InternalKey, Bytes)>,
     snapshot: SequenceNumber,
@@ -431,12 +292,10 @@ pub fn visible_range_limited(
 }
 
 /// One sorted point-key stream (RFC-0033: pulled lazily so `limit` cuts I/O).
-#[cfg(not(verus_keep_ghost))]
 pub type LayerStream<'a> = Box<dyn Iterator<Item = (InternalKey, Bytes)> + 'a>;
 
 /// True when head row `a` orders before `b` in [`InternalKey`] order
 /// (user_key asc, newest sequence first). Exhausted heads order last.
-#[cfg(not(verus_keep_ghost))]
 fn head_before(a: &Option<(InternalKey, Bytes)>, b: &Option<(InternalKey, Bytes)>) -> bool {
     match (a, b) {
         (Some((ka, _)), Some((kb, _))) => ka.cmp(kb) == Ordering::Less,
@@ -453,7 +312,6 @@ fn head_before(a: &Option<(InternalKey, Bytes)>, b: &Option<(InternalKey, Bytes)
 /// When `limit` is set, later blocks of a lazy SST stream are never decoded
 /// (RFC-0033 P0.3). Range tombstones must be supplied up front so a deleted
 /// prefix cannot hide later live keys (G2).
-#[cfg(not(verus_keep_ghost))]
 pub struct StreamingVisibleIter<'a> {
     /// Min-heap of **stream indices** ordered by each stream's head row in
     /// `heads`. Sifting moves plain `usize`s; the owned head rows never
@@ -475,7 +333,6 @@ pub struct StreamingVisibleIter<'a> {
     skip_user: Option<Vec<u8>>,
 }
 
-#[cfg(not(verus_keep_ghost))]
 impl StreamingVisibleIter<'static> {
     /// Build from sorted streams (each `Vec` sorted by [`InternalKey`]).
     ///
@@ -516,7 +373,6 @@ impl StreamingVisibleIter<'static> {
     }
 }
 
-#[cfg(not(verus_keep_ghost))]
 impl<'a> StreamingVisibleIter<'a> {
     /// Merge already-filtered point streams. Range tombstones are **not**
     /// taken from the streams — pass every covering tombstone in `range_dels`
@@ -784,12 +640,10 @@ impl<'a> StreamingVisibleIter<'a> {
 /// Iterator adapter over [`StreamingVisibleIter::next_window_kv`].
 ///
 /// Yields hidden rows (`snapshot_live == false`) so a window keep can drop them.
-#[cfg(not(verus_keep_ghost))]
 pub struct WindowKvIter<'a> {
     inner: StreamingVisibleIter<'a>,
 }
 
-#[cfg(not(verus_keep_ghost))]
 impl Iterator for WindowKvIter<'_> {
     type Item = WindowKv;
 
@@ -798,7 +652,6 @@ impl Iterator for WindowKvIter<'_> {
     }
 }
 
-#[cfg(not(verus_keep_ghost))]
 impl Iterator for StreamingVisibleIter<'_> {
     type Item = VisibleKv;
 
@@ -821,7 +674,6 @@ impl Iterator for StreamingVisibleIter<'_> {
     }
 }
 
-#[cfg(not(verus_keep_ghost))]
 pub(crate) fn bound_to_owned(b: Bound<&[u8]>) -> Bound<Bytes> {
     match b {
         Bound::Unbounded => Bound::Unbounded,
@@ -830,7 +682,6 @@ pub(crate) fn bound_to_owned(b: Bound<&[u8]>) -> Bound<Bytes> {
     }
 }
 
-#[cfg(not(verus_keep_ghost))]
 pub(crate) fn bound_as_ref(b: &Bound<Bytes>) -> Bound<&[u8]> {
     match b {
         Bound::Unbounded => Bound::Unbounded,
@@ -840,9 +691,7 @@ pub(crate) fn bound_as_ref(b: &Bound<Bytes>) -> Bound<&[u8]> {
 }
 
 /// Options for version GC during compaction (RFC-0009 P1.3 / open-items §2.1).
-#[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, Copy, Default)]
-#[cfg(not(verus_keep_ghost))]
 pub struct CompactGcOptions {
     /// Drop any version with `sequence < min_sequence` (coarse floor).
     pub min_sequence: SequenceNumber,
@@ -869,7 +718,6 @@ pub struct CompactGcOptions {
     pub bottommost: bool,
 }
 
-#[cfg(not(verus_keep_ghost))]
 impl CompactGcOptions {
     /// Aggressive GC for single-writer DBs with no long-lived snapshots:
     /// keep only the newest version of each user key.
@@ -909,9 +757,7 @@ impl CompactGcOptions {
 /// Input may be unsorted; output is sorted by [`InternalKey`].
 /// Range tombstones are kept (when not GC'd) and applied to drop covered values
 /// when [`CompactGcOptions::keep_only_latest`] is set.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
-#[cfg(not(verus_keep_ghost))]
 pub fn gc_compact_entries(
     entries: impl IntoIterator<Item = (InternalKey, Bytes)>,
     gc: CompactGcOptions,
@@ -994,7 +840,6 @@ pub fn gc_compact_entries(
 }
 
 /// Snapshot-safe point retention + pass-through range tombstones.
-#[cfg(not(verus_keep_ghost))]
 fn gc_snapshot_safe(
     map: BTreeMap<InternalKey, Bytes>,
     range_dels: Vec<(InternalKey, Bytes)>,
@@ -1059,28 +904,23 @@ fn gc_snapshot_safe(
 }
 
 /// Head of one sorted internal stream (min-heap via reversed [`Ord`]).
-#[cfg(not(verus_keep_ghost))]
 struct MergeHead {
     key: InternalKey,
     value: Bytes,
     src: usize,
 }
 
-#[cfg(not(verus_keep_ghost))]
 impl PartialEq for MergeHead {
     fn eq(&self, other: &Self) -> bool {
         self.key == other.key && self.src == other.src
     }
 }
-#[cfg(not(verus_keep_ghost))]
 impl Eq for MergeHead {}
-#[cfg(not(verus_keep_ghost))]
 impl PartialOrd for MergeHead {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
-#[cfg(not(verus_keep_ghost))]
 impl Ord for MergeHead {
     fn cmp(&self, other: &Self) -> Ordering {
         other
@@ -1091,7 +931,6 @@ impl Ord for MergeHead {
 }
 
 /// K-way merge of InternalKey-sorted streams (RFC-0037). Dedups identical keys.
-#[cfg(not(verus_keep_ghost))]
 pub struct KwayInternalMerge<S> {
     streams: Vec<S>,
     heap: BinaryHeap<MergeHead>,
@@ -1099,7 +938,6 @@ pub struct KwayInternalMerge<S> {
 }
 
 /// Pull the next entry from a compact source.
-#[cfg(not(verus_keep_ghost))]
 pub trait CompactSource {
     /// Next internal pair.
     ///
@@ -1108,21 +946,18 @@ pub trait CompactSource {
     fn next_entry(&mut self) -> Result<Option<(InternalKey, Bytes)>>;
 }
 
-#[cfg(not(verus_keep_ghost))]
 impl CompactSource for std::vec::IntoIter<(InternalKey, Bytes)> {
     fn next_entry(&mut self) -> Result<Option<(InternalKey, Bytes)>> {
         Ok(Iterator::next(self))
     }
 }
 
-#[cfg(not(verus_keep_ghost))]
 impl<S: CompactSource> CompactSource for KwayInternalMerge<S> {
     fn next_entry(&mut self) -> Result<Option<(InternalKey, Bytes)>> {
         KwayInternalMerge::next_entry(self)
     }
 }
 
-#[cfg(not(verus_keep_ghost))]
 impl<S: CompactSource> KwayInternalMerge<S> {
     /// Seed the heap from each stream's first entry.
     ///
@@ -1182,7 +1017,6 @@ impl<S: CompactSource> KwayInternalMerge<S> {
 /// ≤ K — i.e. it is already in `tombs` when K's run closes. Run decisions
 /// are therefore identical to the batch map walk, and emitting survivors at
 /// their stream position equals the batch's final global sort.
-#[cfg(not(verus_keep_ghost))]
 pub struct GcMergeSource<S: CompactSource> {
     merge: KwayInternalMerge<S>,
     gc: CompactGcOptions,
@@ -1191,7 +1025,6 @@ pub struct GcMergeSource<S: CompactSource> {
     out: VecDeque<(InternalKey, Bytes)>,
 }
 
-#[cfg(not(verus_keep_ghost))]
 impl<S: CompactSource> GcMergeSource<S> {
     /// Wrap a k-way merge with GC options.
     #[must_use]
@@ -1287,7 +1120,6 @@ impl<S: CompactSource> GcMergeSource<S> {
     }
 }
 
-#[cfg(not(verus_keep_ghost))]
 impl<S: CompactSource> CompactSource for GcMergeSource<S> {
     fn next_entry(&mut self) -> Result<Option<(InternalKey, Bytes)>> {
         loop {
@@ -1321,7 +1153,6 @@ impl<S: CompactSource> CompactSource for GcMergeSource<S> {
     }
 }
 
-#[cfg(not(verus_keep_ghost))]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2028,6 +1859,21 @@ mod tests {
         };
         entries(true);
         entries(false);
+    }
+
+    #[test]
+    fn merge_rs_has_no_verus_cartoon() {
+        let src = include_str!("merge.rs");
+        let block = concat!("verus", "!", " {");
+        let cfg = concat!("cfg(", "verus", "_keep", "_ghost)");
+        assert!(
+            !src.contains(block),
+            "toy-enum/u64 stand-in is not last-wins of rustc &[u8]/key::ValueType"
+        );
+        assert!(
+            !src.contains(cfg),
+            "cfg split hides rustc types from the prover"
+        );
     }
 
     #[test]

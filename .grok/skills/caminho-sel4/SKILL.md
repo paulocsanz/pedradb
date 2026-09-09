@@ -7,7 +7,8 @@ description: >
   then the four concurrency theorems; then shrink remaining data-fate ifs.
   Catalog-only single_artifact is not a land. Always implement: first
   unpaid rank 1–10, else one remaining data-fate `if` in the trampoline
-  (Aeneas of rustc types the handler passes — never a Verus u64 cartoon).
+  (Aeneas of rustc types the handler passes; cartoon remaining = delete
+  the Verus stand-in — never mint a u64 twin, never skip it).
   Research Verus / Iris / Aeneas / DST / fuzzing and persist.
   Triggers: formalize, verificação, seL4, caminho sel4, trampolim, guião,
   concorrência, deadlock, data race, extraia aeneas, va formal,
@@ -18,30 +19,35 @@ description: >
 
 ## Grind pressure (one block, overwritten each fire)
 
-- Last fire: shallow (Bound-helper after admitting cartoon; FACTORY_BAN halt regression)
-- Why: proving a u64/toy-enum `verus!` is not proving the `&[u8]` rustc links; Bound-helper already `d1f4978f`
-- This fire MUST land: Lean unfold of rustc `write_op_covers_key` (Aeneas of handler types) and a skill that never bills a cartoon as last-wins
-- Forbidden this fire: mint u64 Verus twin; `||` wrap; FACTORY_BAN halt; re-land Bound-helper; git checkout of db.rs/concurrent.rs
-- Deeper: Search leftover_next=trampoline; `write_op_covers_key`; lake Merge; named cargo test
+- Last fire: worked (`ce7764df` Lean unfold of rustc `prefix_exclusive_end_loop.body` nonempty)
+- Why: "cartoon is not a land" / Bound-helper (`d1f4978f`) skipped the debt; `skip_verus_last_wins` is invalid
+- This fire MUST land: delete the `merge.rs` `verus!` u64/toy-enum stand-in; rustc `&[u8]`/`key::ValueType` stays; Aeneas of those types is the term. Search leftover_next names cartoon remaining.
+- Forbidden this fire: mint u64 twin; `_body!` over u64-vs-bytes; skip cartoon as "not a land"; FACTORY_BAN halt; git checkout of db.rs/concurrent.rs
+- Deeper: Search leftover_next=cartoon remaining; open merge.rs; named cargo `visible_at_put_delete_range_del`; `aeneas_merge.sh` / lake Merge
 
 This skill **lands one payable slice per Fire**. Rank 1–10 unpaid first.
-When those boards are 0, Search prints `leftover_next` trampoline
-remaining — **not a halt**. Do not invent a `compact_refuse` /
-`batch_is_empty` wrap. Do not replace `leftover_next` with a spray-queue
-fn name. Catalog-only `single_artifact` is skip. Empty 4–10 is **not**
-a stop. A Verus cartoon is unpaid **and not a land** (do not mint it).
+When those boards are 0, Search prints `leftover_next`: cartoon remaining
+if `cartoon_twin>0`, else trampoline remaining — **not a halt**. Do not
+invent a `compact_refuse` / `batch_is_empty` wrap. Do not replace
+`leftover_next` with a spray-queue fn name. Catalog-only `single_artifact`
+is skip. Empty 4–10 is **not** a stop.
 
 Pay the seL4-class path this fire (empty the trampoline of data-fate
 `if`s). `never_floor` / disk-not-media / `∀π` refused stay TCB — not
 permission to halt. Wrap/spray is not payment. Empty 4–10 is trampoline
-remaining, not permission to wrap the next `if` and not permission to
-mint a u64 twin.
+remaining only after cartoon remaining is 0.
 **Price:** the fn rustc links, with the types the handler passes
-(`key::ValueType`, `&[u8]`, `Bound`), is the term — Aeneas extract of
-**that** body, or Verus on the **same tokens** (`macro_rules!` last-wins,
-RFC-0171/0174). A `verus!` toy enum / `u64` stand-in while rustc has
-bytes is a **model twin**, not the term, not last-wins, **not a land**.
-`skip_verus_last_wins` (any `verus_keep_ghost` = paid) is invalid.
+(`key::ValueType`, `&[u8]`, `Bound`), is the term. Pay with Aeneas
+extract of **that** body. Verus last-wins only when it type-checks
+**those types** (`macro_rules!` over types both compilers share: bool,
+u64 counters, enums defined in the same file — RFC-0171 `idle_body!`).
+A `verus!` toy enum / `u64` / `Seq<u8>` stand-in while rustc has bytes
+is a **model twin**, not last-wins. `skip_verus_last_wins` (any
+`verus_keep_ghost` = paid) is invalid. `_body!` over different types is
+the same lie. Cartoon is unpaid. **Payment:** delete the stand-in and
+the `cfg(verus_keep_ghost)` split; rustc body stays; Aeneas of that
+body. Minting a twin is not a land. Skipping as "not a land" is not a
+land. Bound-helper does not pay cartoon debt.
 `db.rs` /
 `concurrent.rs` stay trampoline (`glue.db_rs_extracted=false`) — **empty
 them** of data-fate `if`s and of unpaid *order*, do not dump them.
@@ -78,10 +84,11 @@ python3 .grok/skills/caminho-sel4/scripts/candidates.py
 ```
 
 Then open the files the **UNPAID** rows named (handler body + plant body,
-not grep). When leftover_next says trampoline remaining, open the
-handler that still has a data-fate `if` without a kernel call, or the
-rustc body whose extract has no Lean `unfold`. Never open a u64 Verus
-twin as the slice. Also
+not grep). When leftover_next says cartoon remaining, open that kernel
+file and **delete** the `verus!` stand-in (do not mint a replacement).
+When leftover_next says trampoline remaining, open the handler that
+still has a data-fate `if` without a kernel call, or the rustc body
+whose extract has no Lean `unfold`. Also
 compute, from catalog + `residuals.json` (do not `json.dump` the live
 catalog):
 
@@ -95,9 +102,10 @@ catalog):
 
 If script vs RFC disagree, **code + catalog win**.
 
-`leftover_next` is **computed**. Unpaid 4–10 → those boards. Else
-trampoline remaining (not a production fn name, not FACTORY_BAN halt,
-not a cartoon twin land).
+`leftover_next` is **computed**. Unpaid 4–10 → those boards. Else if
+`cartoon_twin>0` → cartoon remaining (named kernel file: delete the
+stand-in). Else trampoline remaining. Never a production fn name, never
+FACTORY_BAN halt, never mint, never skip cartoon as "not a land".
 
 ## 2. Rank (first non-empty wins — then implement it)
 
@@ -133,14 +141,16 @@ chains Fires; this bound is not end-of-turn).
    Pull glue into a **named total fn**; do not extract `concurrent.rs` /
    `db.rs` whole.
 7. **Single-artifact** — Lean extract of the **rustc** body (same types
-   the handler passes). Verus only if it type-checks **that** body
-   (`macro_rules!` last-wins). A `verus!` toy enum / `u64` stand-in
-   while rustc has `&[u8]` / `Bound` / `key::ValueType` is a **model
-   twin** — unpaid, not last-wins, not a land. Do not mint it. Do not
-   mint `#[cfg(not(verus_keep_ghost))]` as a slice. `skip_verus_last_wins`
-   is invalid. If Lean already has `def` of the rustc entry, skip (SA
-   wrap). If 4–10 empty, trampoline remaining (rank 1) — **not a halt**.
-   Do not fall through here while rank 5 `unpaid_compose` is non-zero.
+   the handler passes). Verus only if it type-checks **those types**.
+   Cartoon (toy enum / `u64` / `Seq<u8>` ≠ rustc) is unpaid. **Land =
+   delete the stand-in and the cfg split**; Aeneas of the rustc body.
+   Do not mint. Do not skip as "not a land". Do not `_body!` over
+   different types. Do not mint `#[cfg(not(verus_keep_ghost))]`.
+   `skip_verus_last_wins` is invalid. If Lean already has `def` of the
+   rustc entry **and the file is not a cartoon**, skip (SA wrap). If
+   4–10 empty, leftover_next is cartoon remaining then trampoline
+   remaining — **not a halt**. Do not fall through here while rank 5
+   `unpaid_compose` is non-zero.
 8. **atom→close** — one `data_fate` atom, production `entry`.
 9. **F then E** — one clone group / one non-`data_fate` three-teeth pair
    whose `entry` has no Lean `def`. Already-extracted close pairs are
@@ -159,8 +169,9 @@ chains Fires; this bound is not end-of-turn).
     not a slice. Same for a kernel whose body is `a || b`, `a && b`,
     `a == b`, `a != b`, or identity on a bool the handler already
     computed (`inline_needs_escape`, `vlog_closed`, `s >= e` renamed).
-    Same for a Verus cartoon (u64 / toy enum ≠ rustc types) billed as
-    the production fn. Fall through is **not** “wrap the next operator”.
+    Same for minting a Verus cartoon (u64 / toy enum / `Seq<u8>` ≠ rustc
+    types) or billing one as last-wins. Fall through is **not** “wrap
+    the next operator” and **not** skip cartoon remaining.
 15. **DiskPressure is write admission.** Only a **new user/ops write**
     that would append WAL or write SST/dest (`put` / `delete` /
     `apply_batch` / `flush` / `compact*` / PITR dest / replica append).
@@ -169,14 +180,12 @@ chains Fires; this bound is not end-of-turn).
     `rotate_wal_now` after SST durable). **Never** best-effort auto-flush
     (F18). Slapping `compact_refuse` on the next fn is the wrap factory.
 16. **Wrap factory is not a slice** (`is_empty`/`compact_refuse` spray /
-    `||`/`==` identity kernel / Verus cartoon twin / DiskPressure on
-    `close`/promote/rotate-after-SST/auto-flush). When
-    unpaid 4–10 is 0, leftover_next is trampoline remaining — land the
-    next trampoline data-fate `if` (rank 1) or Aeneas of the rustc body
-    without Lean unfold. Do not wrap. Do not halt. Do not mint a u64
-    twin. RFC P1.3 telemetry is not data-fate. P2.1
-    fence blast is deferred. Inventing a disk `if` to have a SHA is
-    shallow — revert.
+    `||`/`==` identity kernel / minting a Verus cartoon / DiskPressure on
+    `close`/promote/rotate-after-SST/auto-flush). When unpaid 4–10 is 0,
+    leftover_next is cartoon remaining (delete the stand-in) then
+    trampoline remaining. Do not wrap. Do not halt. Do not mint. Do not
+    skip cartoon. RFC P1.3 telemetry is not data-fate. P2.1 fence blast
+    is deferred. Inventing a disk `if` to have a SHA is shallow — revert.
 
 Tie-break: open RFC `- [ ] **P0`/`P1` on the same theme, only if it is
 write-admission or unpaid compose/script — not a new `compact_refuse`
@@ -195,16 +204,19 @@ Acceptance (all):
 - a production `.rs` that rustc links **changed this turn**, or a new
   Lean theorem that `unfold`s a production caller **and** callee
   introduced or first used this turn (Verus theorem only if it
-  type-checks those rustc types — same tokens, not a u64 cartoon)
+  type-checks those rustc types — same types, not a u64/`Seq<u8>` stand-in).
+  Deleting a cartoon stand-in from that `.rs` **is** this change.
 - named `cargo test` calls that **production** fn
 - `scripts/lean_extracts.sh --required` exit 0 if Lean changed
 - `--lint` freeze: extract count matches; `db_rs_extracted` false
 
 **Not a land:** catalog/`residuals` `single_artifact` flag without the rustc
-body change above; Verus `verus!` stand-in whose signature ≠ rustc
-(`u64` vs `&[u8]`); `cfg(verus_keep_ghost)` wrap billed as last-wins;
-cfg/verus wrap on a kernel whose `entry` already has a Lean `def`;
-callee-only unfold billed as a ConcurrentDb caller;
+body change above; keeping a Verus `verus!` stand-in whose signature ≠
+rustc (`u64`/`Seq<u8>` vs `&[u8]`); `cfg(verus_keep_ghost)` wrap billed
+as last-wins; `_body!` over different types; skipping cartoon remaining
+as "not a land"; Bound-helper billed as cartoon payment; cfg/verus wrap
+on a kernel whose `entry` already has a Lean `def` **and is not a
+cartoon**; callee-only unfold billed as a ConcurrentDb caller;
 `native_decide` of a plan without `unfold`; board/rank/RFC checkbox only;
 wrapping `is_empty`/`==0` onto `batch_is_empty`; wrapping a live `||` /
 `==` / `!=` / identity-bool into a kernel whose spec is that operator;
@@ -213,15 +225,15 @@ slapping `compact_refuse`
 `DiskPressure` on `close` / `Drop` / promote / rotate-after-SST /
 auto-flush; replacing `leftover_next` with a function name;
 `include_str` of a kernel the handler already calls; minting a Verus
-u64/toy-enum twin billed as last-wins. If the first rank hit is that,
-fall through to the next trampoline data-fate `if` or rustc-body
-extract — do not invent a wrap site, do not halt, do not mint a cartoon.
+u64/toy-enum twin. If the first rank hit is mint/wrap/halt, fall through
+to cartoon remaining (delete the stand-in) then trampoline remaining.
 
 ## 4. Output (after the commit, not instead of it)
 
 Under `/grind` this section is **not** permission to stop. Write it
 only if the next Fire's land tools already follow. Empty 4–10 is
-trampoline remaining, not a stop. Cartoon twin is not a land.
+cartoon remaining then trampoline remaining, not a stop. Minting a
+cartoon is not a land; deleting one is.
 
 ```markdown
 ## Caminho seL4 — não acabou

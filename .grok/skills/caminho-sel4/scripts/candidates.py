@@ -213,10 +213,14 @@ def main() -> int:
     unpaid_script, unpaid_compose = script_compose_board()
     unpaid_concurrency = concurrency_board()
     unpaid_scale = scale_board()
+    cartoons = sa_unpaid_board(fate)
     print_leftover_next(
-        unpaid_script, unpaid_compose, unpaid_concurrency, unpaid_scale
+        unpaid_script,
+        unpaid_compose,
+        unpaid_concurrency,
+        unpaid_scale,
+        cartoons,
     )
-    sa_unpaid_board(fate)
     return capacity_board(cat, res)
 
 
@@ -381,6 +385,7 @@ def print_leftover_next(
     unpaid_compose: int,
     unpaid_concurrency: int,
     unpaid_scale: int,
+    cartoons: list[tuple[str, str]],
 ) -> None:
     """Do not replace this with a production fn name. That is the factory."""
     if unpaid_script or unpaid_compose or unpaid_concurrency or unpaid_scale:
@@ -392,12 +397,23 @@ def print_leftover_next(
             "never leftover is_empty wrap; never compact_refuse spray; skip Montanha"
         )
         return
+    if cartoons:
+        cid, cfile = cartoons[0]
+        print(
+            "  leftover_next cartoon remaining; "
+            f"delete verus! stand-in from {cfile}; rustc body stays; "
+            "Aeneas of handler types; Verus only same types; "
+            "never mint; never _body! over u64-vs-bytes; "
+            "never leftover is_empty wrap; never compact_refuse spray; skip Montanha"
+        )
+        print(f"  leftover_next_first {cid} {cfile}")
+        return
     print(
         "  leftover_next trampoline data-fate if remaining "
         "(db.rs/concurrent.rs); pull one if into a named kernel "
         "rustc links with handler types; Aeneas extract of that body; "
-        "Verus only same tokens; cartoon_twin unpaid not a land; "
-        "never leftover is_empty wrap; never compact_refuse spray; skip Montanha"
+        "Verus only same types; never leftover is_empty wrap; "
+        "never compact_refuse spray; skip Montanha"
     )
 
 
@@ -575,38 +591,70 @@ def scale_board() -> int:
     return unpaid
 
 
+def verus_block(src: str) -> str:
+    m = re.search(r"verus!\s*\{(.*)\}\s*// verus!", src, re.S)
+    return m.group(1) if m else ""
+
+
 def verus_token_kind(src: str) -> str:
-    """RFC-0171 last-wins = shared macro body. Toy u64/enum in verus! is cartoon."""
-    if "verus_keep_ghost" not in src:
-        return "none"
+    """Last-wins = same types both compilers see. Toy enum/u64/Seq vs rustc bytes = cartoon."""
+    block = verus_block(src)
+    rustc = src
+    if "verus!" in src and "} // verus!" in src:
+        rustc = src[: src.find("verus!")] + src[src.find("} // verus!") :]
+    standin = bool(re.search(r"\benum\s+ValueType\b", block))
+    if not standin:
+        for m in re.finditer(
+            r"(?:pub\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\((.*?)\)",
+            block,
+            re.S,
+        ):
+            name, params = m.group(1), m.group(2)
+            rm = re.search(
+                r"(?:pub\s+)?fn\s+" + re.escape(name) + r"\s*\((.*?)\)",
+                rustc,
+                re.S,
+            )
+            if not rm:
+                continue
+            rp = rm.group(1)
+            if ("u64" in params or "Seq<" in params) and (
+                "&[u8]" in rp or "Bound<" in rp
+            ):
+                standin = True
+                break
+    if standin:
+        return "cartoon"
     if "macro_rules!" in src and re.search(r"_body!\s*\(", src):
         return "macro"
-    return "cartoon"
+    if "verus_keep_ghost" in src or block:
+        return "cartoon"
+    return "none"
 
 
-def sa_unpaid_board(fate: list) -> None:
+def sa_unpaid_board(fate: list) -> list[tuple[str, str]]:
     print("== single_artifact (rank 7: rustc body extract; Verus cartoon ≠ last-wins) ==")
     unpaid = []
     skip_extracted = []
     skip_verus = []
-    cartoon = []
+    cartoon: list[tuple[str, str]] = []
     paid = []
     for p in fate:
         k = p.get("kernel") or ""
         t = p.get("twin") or ""
         entry = p.get("entry") or ""
-        if t and k and t == k and p.get("single_artifact"):
-            paid.append(p["id"])
-            continue
-        if t == k:
-            continue
         kp = ROOT / k
         src = (
             kp.read_text(encoding="utf-8", errors="replace") if kp.is_file() else ""
         )
         kind = verus_token_kind(src)
         if kind == "cartoon":
-            cartoon.append(p["id"])
+            cartoon.append((p["id"], k))
+            continue
+        if t and k and t == k and p.get("single_artifact"):
+            paid.append(p["id"])
+            continue
+        if t == k:
             continue
         if kind == "macro":
             skip_verus.append(p["id"])
@@ -622,16 +670,26 @@ def sa_unpaid_board(fate: list) -> None:
     )
     print(
         f"  skip_verus_same_tokens={len(skip_verus)} "
-        "(macro_rules! last-wins RFC-0171; same tokens rustc links)"
+        "(macro_rules! last-wins RFC-0171; same types rustc links)"
     )
     print(
         f"  cartoon_twin={len(cartoon)} "
-        "(verus! u64/toy enum ≠ rustc types — unpaid, not a land)"
+        "(verus! u64/toy enum/Seq ≠ rustc types — unpaid; "
+        "delete the stand-in; Aeneas of rustc types; never mint)"
     )
+    if cartoon:
+        print(f"  cartoon_first {cartoon[0][0]} {cartoon[0][1]}")
+        seen: set[str] = set()
+        for cid, cfile in cartoon:
+            if cfile in seen:
+                continue
+            seen.add(cfile)
+            print(f"    cartoon_file {cfile}")
     print(
         f"  catalog_only_skip={len(paid)} "
         "(twin==kernel already; not a slice)"
     )
+    return cartoon
 
 
 # RFC-0157 P2.2 — capacity per residual. The mapping below is id ->
