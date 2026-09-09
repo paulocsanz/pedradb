@@ -1099,7 +1099,10 @@ impl<S: CompactSource> GcMergeSource<S> {
             if let Some(&i) = points.first() {
                 let ikey = &self.run[i].0;
                 keep[i] = match ikey.kind {
-                    ValueType::Value => !range_deleted(user.as_ref(), ikey.sequence, &self.tombs),
+                    ValueType::Value => visible_at(
+                        ValueType::Value,
+                        range_deleted(user.as_ref(), ikey.sequence, &self.tombs),
+                    ),
                     ValueType::Deletion => !self.gc.bottommost,
                     ValueType::RangeDeletion => false,
                 };
@@ -1553,6 +1556,24 @@ mod tests {
         .into_window_kvs()
         .collect();
         assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn gc_merge_close_run_calls_visible_at() {
+        let src = include_str!("merge.rs");
+        let body = src
+            .split("fn close_run(")
+            .nth(1)
+            .and_then(|s| s.split("impl<S: CompactSource> CompactSource for GcMergeSource").next())
+            .expect("GcMergeSource::close_run");
+        assert!(
+            body.contains("visible_at("),
+            "close_run keep_only_latest Value range-hide if must call catalog visible_at"
+        );
+        assert!(
+            !body.contains("ValueType::Value => !range_deleted"),
+            "Value+!range_deleted must not stay inline"
+        );
     }
 
     #[test]
