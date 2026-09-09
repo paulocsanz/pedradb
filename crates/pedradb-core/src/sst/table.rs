@@ -2630,7 +2630,9 @@ fn write_sst_bulk_arrays_body(
             )?;
             block_start = staged.len();
         }
-        if staged.len() == block_start {
+        if crate::write_admission_kernel::batch_is_empty(
+            staged.len().saturating_sub(block_start) as u64,
+        ) {
             block_first_user = Some(keys[i].clone());
         }
         append_bulk_entry(&mut staged, k, seq, v);
