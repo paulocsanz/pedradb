@@ -1736,6 +1736,7 @@ impl WriteGroup {
         let mut pub_seq = inflight.max_appended_seq();
         guard.begin_commit();
         guard.stage_unapplied(&inflight);
+        let wal = guard.wal_arc();
         let mut chunks = vec![Chunk::Fly(inflight)];
         // RFC-0180 P0.46 waited in-flight under db.write(). P0.61: same
         // wait, lock dropped (`commit_inflight` already pinned).
@@ -1745,34 +1746,39 @@ impl WriteGroup {
                 group.wait_in_flight_to_queue(b.len());
             }
         }
-        let t_lock3 = Instant::now();
-        let mut guard = db.write();
-        if let Some(st) = group.phase_stats.as_ref() {
-            st.lock_wait_ns
-                .fetch_add(t_lock3.elapsed().as_nanos() as u64, Ordering::Relaxed);
-        }
-        if let Some(batch) = batch.as_mut() {
-            loop {
-                let mut extra = drain();
-                if extra.is_empty() {
-                    break;
-                }
-                Self::validate_occ_batch(&mut guard, &mut extra);
-                let more: Vec<(Vec<BatchOp>, bool)> = extra
-                    .iter_mut()
-                    .map(|p| (std::mem::take(&mut p.ops), p.do_sync))
-                    .collect();
-                match guard.group_start(more) {
-                    Err(r) => chunks.push(Chunk::Done(r)),
-                    Ok(inf) => {
-                        need_sync |= inf.needs_sync();
-                        pub_seq = pub_seq.max(inf.max_appended_seq());
-                        guard.stage_unapplied(&inf);
-                        chunks.push(Chunk::Fly(inf));
-                    }
-                }
-                batch.extend(extra);
+        // Skip a write-lock round-trip when nobody queued during the wait
+        // (overwrite_mc4 avg_group already paid; this was lock 3 of 4).
+        if group.queued_pending.load(Ordering::Acquire) > 0 {
+            let t_lock3 = Instant::now();
+            let mut guard = db.write();
+            if let Some(st) = group.phase_stats.as_ref() {
+                st.lock_wait_ns
+                    .fetch_add(t_lock3.elapsed().as_nanos() as u64, Ordering::Relaxed);
             }
+            if let Some(batch) = batch.as_mut() {
+                loop {
+                    let mut extra = drain();
+                    if extra.is_empty() {
+                        break;
+                    }
+                    Self::validate_occ_batch(&mut guard, &mut extra);
+                    let more: Vec<(Vec<BatchOp>, bool)> = extra
+                        .iter_mut()
+                        .map(|p| (std::mem::take(&mut p.ops), p.do_sync))
+                        .collect();
+                    match guard.group_start(more) {
+                        Err(r) => chunks.push(Chunk::Done(r)),
+                        Ok(inf) => {
+                            need_sync |= inf.needs_sync();
+                            pub_seq = pub_seq.max(inf.max_appended_seq());
+                            guard.stage_unapplied(&inf);
+                            chunks.push(Chunk::Fly(inf));
+                        }
+                    }
+                    batch.extend(extra);
+                }
+            }
+            drop(guard);
         }
         // RFC-0051 P1.3 forensics: record the assigned-seq range of this
         // atomic group so tests can tell same-group (simultaneous) writes
@@ -1790,8 +1796,6 @@ impl WriteGroup {
                 crate::pct_hooks::record_group_range(lo, hi);
             }
         }
-        let wal = guard.wal_arc();
-        drop(guard);
         #[cfg(test)]
         maybe_test_wal_gap();
         let t_wal = group.phase_stats.as_ref().map(|_| Instant::now());

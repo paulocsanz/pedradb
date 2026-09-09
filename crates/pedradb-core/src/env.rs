@@ -240,6 +240,38 @@ pub fn ram_ceiling_bytes() -> Option<u64> {
     cgroup_memory_max_bytes().or_else(pedradb_posix::physical_ram_bytes)
 }
 
+/// RocksDB default `write_buffer_size`. On a 4 GiB box the parity bench's
+/// 256 MiB mem + parked leftover + WAL is the overwrite_mc4 25M 0.557×
+/// cache hole; clamp to this so Pedra holds the same live mem as the peer.
+pub const ROCKS_DEFAULT_WRITE_BUFFER_BYTES: u64 = 64 << 20;
+
+/// Below this ceiling, [`write_buffer_for_ram`] matches Rocks 64 MiB.
+pub const LOW_RAM_WRITE_BUFFER_CEILING: u64 = 8 << 30;
+
+/// Cap a configured memtable so a 4 GiB box cannot hold 256 MiB live +
+/// leftover + WAL. 8 GiB+ keeps the caller's size (kvrocks_set_mc50 256 MiB
+/// so the timed window does not flush). Never raises a small production
+/// default (4 MiB).
+#[must_use]
+pub fn write_buffer_for_ram(configured: u64, ram_ceiling: u64) -> u64 {
+    if ram_ceiling > 0 && ram_ceiling < LOW_RAM_WRITE_BUFFER_CEILING {
+        configured.min(ROCKS_DEFAULT_WRITE_BUFFER_BYTES)
+    } else {
+        configured
+    }
+}
+
+/// Newest-SST page-cache budget in bounded-cache mode. DONTNEED-all made
+/// prefix_scan @ 100M / 4 GiB disk-bound (0.70×); Rocks `compact_range`
+/// leaves a kernel LRU. Keep `ram/4` (1 GiB on the 4 GiB box).
+#[must_use]
+pub fn page_cache_keep_bytes(ram_ceiling: u64) -> u64 {
+    if ram_ceiling == 0 {
+        return 0;
+    }
+    ram_ceiling / 4
+}
+
 /// Anonymous-RSS cap for index/bloom/mem. `None` = do not fail-closed
 /// (no cgroup and no env). Env `PEDRA_RAM_BUDGET_BYTES` is the cap as-is
 /// (tests). A cgroup limit uses half, leaving file cache + allocator.
@@ -976,6 +1008,36 @@ mod tests {
         f.write_all(b"pedra").unwrap();
         fdatasync_file(&f).unwrap();
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 4 GiB caixa: 256 MiB bench memtable must not exceed Rocks 64 MiB.
+    #[test]
+    fn rfc0180_write_buffer_for_ram_matches_rocks_on_4gib() {
+        let fat = 256 << 20;
+        assert_eq!(
+            write_buffer_for_ram(fat, 4 << 30),
+            ROCKS_DEFAULT_WRITE_BUFFER_BYTES,
+            "4 GiB overwrite_mc4 must not hold 256 MiB live mem"
+        );
+        assert_eq!(
+            write_buffer_for_ram(fat, 16 << 30),
+            fat,
+            "8 GiB+ keeps kvrocks_set_mc50 256 MiB (no timed flush)"
+        );
+        assert_eq!(
+            write_buffer_for_ram(4 << 20, 4 << 30),
+            4 << 20,
+            "must not raise the 4 MiB production default"
+        );
+        assert_eq!(write_buffer_for_ram(fat, 0), fat);
+    }
+
+    /// Bounded-cache keeps ram/4 of newest SST pages (prefix 100M @ 4 GiB).
+    #[test]
+    fn rfc0173_page_cache_keep_is_quarter_ram() {
+        assert_eq!(page_cache_keep_bytes(4 << 30), 1 << 30);
+        assert_eq!(page_cache_keep_bytes(0), 0);
+        assert_eq!(page_cache_keep_bytes(16 << 30), 4 << 30);
     }
 
     /// RFC-0041 P1.2: a lone 1-op write that `fdatasync`s before Ok cannot
