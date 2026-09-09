@@ -21,81 +21,31 @@
 //! Self-describing records support future multi-key commits (one WAL record
 //! per TX) and keep P1.6 export from needing a rewrite of historical logs.
 
-//! **Single artifact (pair `write_record_count`):** this file is what
-//! `rustc` links *and* what Verus proves (`cfg(verus_keep_ghost)`).
+//! **Term:** this file is what `rustc` links. Aeneas extracts that body
+//! (`scripts/aeneas_batch.sh`). A Verus u32-decoded_len stand-in of rustc
+//! `write_record_count_ok(u32, usize)` is a model twin — not last-wins (deleted).
 //!
-//!   ./scripts/verus_write_record_count.sh
+//!   ./scripts/aeneas_batch.sh --required
 //!
-//! rustc `write_record_count_ok` stays last-wins (`usize` decoded_len).
-//! Verus uses a `u32` stand-in (same decision: decoded_len == count).
+//! Aeneas of the rustc body is the term. A Verus stand-in is not last-wins.
 
-#[cfg(verus_keep_ghost)]
-use vstd::prelude::*;
-
-#[cfg(verus_keep_ghost)]
-verus! {
-
-pub open spec fn write_record_count_ok_spec(count: u32, decoded_len: u32) -> bool {
-    decoded_len == count
-}
-
-pub open spec fn write_record_count_ok_as_is_spec(_count: u32, _decoded_len: u32) -> bool {
-    true
-}
-
-/// Decode Ok iff the number of ops equals the encoded count.
-/// RocksDB WriteBatchInternal::Iterate: found != Count => Corruption
-/// ("WriteBatch has wrong count"). AS-IS accepts a silent prefix.
-pub fn write_record_count_ok(count: u32, decoded_len: u32) -> (ok: bool)
-    ensures
-        ok == write_record_count_ok_spec(count, decoded_len),
-        ok ==> decoded_len == count,
-{
-    decoded_len == count
-}
-
-pub fn write_record_count_ok_as_is(_count: u32, _decoded_len: u32) -> (ok: bool)
-    ensures
-        ok == true,
-{
-    true
-}
-
-proof fn lemma_prefix_is_not_ok()
-    ensures
-        write_record_count_ok_spec(3, 3),
-        !write_record_count_ok_spec(3, 2),
-        write_record_count_ok_as_is_spec(3, 2),
-{
-}
-
-} // verus!
-
-#[cfg(not(verus_keep_ghost))]
 use bytes::Bytes;
 
-#[cfg(not(verus_keep_ghost))]
 use crate::error::{CoreError, Result};
-#[cfg(not(verus_keep_ghost))]
 use crate::key::{SequenceNumber, ValueType};
 
 /// Current logical record format version (full key+value per op).
-#[cfg(not(verus_keep_ghost))]
 pub const WRITE_RECORD_VERSION: u8 = 1;
 
 /// Same layout as v1, plus `kind | 0x80` = reuse previous op's value bytes
 /// (RFC-0044 P1.1: interned pipeline payload is stored once per WAL record).
-#[cfg(not(verus_keep_ghost))]
 pub const WRITE_RECORD_VERSION_V2: u8 = 2;
 
 /// OR'd into the kind byte when the value is omitted (v2 only).
-#[cfg(not(verus_keep_ghost))]
 pub(crate) const KIND_REUSE_PREV: u8 = 0x80;
 
 /// One put or delete inside a write record.
-#[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg(not(verus_keep_ghost))]
 pub struct WriteOp {
     /// Put vs deletion.
     pub kind: ValueType,
@@ -107,7 +57,6 @@ pub struct WriteOp {
     pub value: Bytes,
 }
 
-#[cfg(not(verus_keep_ghost))]
 impl WriteOp {
     /// Put `key → value` at `sequence`.
     #[must_use]
@@ -148,15 +97,12 @@ impl WriteOp {
 }
 
 /// A batch of ops written as one logical WAL record.
-#[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-#[cfg(not(verus_keep_ghost))]
 pub struct WriteRecord {
     /// Ordered ops (usually one for auto-commit; many after P0.4 TX commit).
     pub ops: Vec<WriteOp>,
 }
 
-#[cfg(not(verus_keep_ghost))]
 impl WriteRecord {
     /// Empty record.
     #[must_use]
@@ -264,7 +210,6 @@ impl WriteRecord {
 }
 
 /// Consecutive interned values share a `Bytes` pointer (RFC-0044 P1.1).
-#[cfg(not(verus_keep_ghost))]
 pub(crate) fn value_ptr_eq(a: &WriteOp, b: &WriteOp) -> bool {
     !crate::write_admission_kernel::batch_is_empty(a.value.len() as u64)
         && a.value.len() == b.value.len()
@@ -275,7 +220,6 @@ pub(crate) fn value_ptr_eq(a: &WriteOp, b: &WriteOp) -> bool {
 /// 15 copies (RFC-0062 P1.1: `deps_raftlog` is 16× the same 100 B `yval`
 /// via `write_cf_owned`, each `Bytes::from` a fresh alloc — intern never
 /// fired). Content-equal, not just pointer-equal. Deletions skipped.
-#[cfg(not(verus_keep_ghost))]
 pub(crate) fn share_consecutive_equal_values(ops: &mut [WriteOp]) {
     for i in 1..ops.len() {
         let (head, tail) = ops.split_at_mut(i);
@@ -294,13 +238,11 @@ pub(crate) fn share_consecutive_equal_values(ops: &mut [WriteOp]) {
 }
 
 /// v2 when at least one op can omit a repeated interned payload.
-#[cfg(not(verus_keep_ghost))]
 pub(crate) fn record_uses_v2(ops: &[WriteOp]) -> bool {
     ops.windows(2).any(|w| value_ptr_eq(&w[0], &w[1]))
 }
 
 /// Encode `ops` as one logical WAL payload (RFC-0040: no extra `WriteRecord` clone).
-#[cfg(not(verus_keep_ghost))]
 pub fn encode_ops(ops: &[WriteOp], out: &mut Vec<u8>) {
     // One resize, then indexed copies — apply_mc4 is 64 ops / ~32 KiB of
     // values; per-field `extend_from_slice` was a write-lock cost (RFC-0041).
@@ -345,7 +287,6 @@ pub fn encode_ops(ops: &[WriteOp], out: &mut Vec<u8>) {
 
 /// Encoded size of `ops` under [`encode_ops`] — RFC-0042 P1.3: lets the WAL
 /// fragment the record straight into the frame, skipping the scratch copy.
-#[cfg(not(verus_keep_ghost))]
 pub(crate) fn encoded_len(ops: &[WriteOp]) -> usize {
     let v2 = record_uses_v2(ops);
     1 + 4
@@ -362,12 +303,10 @@ pub(crate) fn encoded_len(ops: &[WriteOp]) -> usize {
             .sum::<usize>()
 }
 
-#[cfg(not(verus_keep_ghost))]
 fn op_encoded_len(o: &WriteOp) -> usize {
     1 + 8 + 4 + o.key.len() + 4 + o.value.len()
 }
 
-#[cfg(not(verus_keep_ghost))]
 fn estimate_size(rec: &WriteRecord) -> usize {
     1 + 4 + rec.ops.iter().map(op_encoded_len).sum::<usize>()
 }
@@ -375,29 +314,23 @@ fn estimate_size(rec: &WriteRecord) -> usize {
 /// Decode Ok ⇒ `ops.len() ==` the encoded `count` (RFC-0150 P2a).
 ///
 /// A truncated / hostile header that would apply a silent prefix is not Ok.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
-#[cfg(not(verus_keep_ghost))]
 pub fn write_record_count_ok(count: u32, decoded_len: usize) -> bool {
     decoded_len == count as usize
 }
 
 /// AS-IS: accept a prefix (`k < count`) as a successful decode.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
-#[cfg(not(verus_keep_ghost))]
 pub fn write_record_count_ok_as_is(_count: u32, _decoded_len: usize) -> bool {
     true
 }
 
 /// Minimal little-endian cursor for decoding (no external dep).
-#[cfg(not(verus_keep_ghost))]
 struct Cursor<'a> {
     data: &'a [u8],
     pos: usize,
 }
 
-#[cfg(not(verus_keep_ghost))]
 impl<'a> Cursor<'a> {
     fn new(data: &'a [u8]) -> Self {
         Self { data, pos: 0 }
@@ -441,10 +374,18 @@ impl<'a> Cursor<'a> {
     }
 }
 
-#[cfg(not(verus_keep_ghost))]
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn batch_has_no_verus_cartoon() {
+        let src = include_str!("batch.rs");
+        let block = concat!("verus", "!", " {");
+        let cfg = concat!("cfg(", "verus", "_keep", "_ghost)");
+        assert!(!src.contains(block), "u32 decoded_len stand-in is not last-wins of rustc usize");
+        assert!(!src.contains(cfg), "cfg split hides rustc types from the prover");
+    }
 
     #[test]
     fn round_trip_put_and_delete() {
