@@ -49,6 +49,15 @@ pub(crate) fn leveled_enabled() -> bool {
     }
 }
 
+/// AS-IS (pair `leveled_enabled`): the rollback lever is decor — the
+/// scheduler stays leveled even under `PEDRA_LEVELED=0`, so the emergency
+/// fallback to pre-leveled stacking never engages.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn leveled_enabled_as_is() -> bool {
+    true
+}
+
 /// Byte target of level `level` (1-based). Level 0 has no target (L0 is
 /// drained, not sized); the caller treats the maximum level as unbounded.
 #[must_use]
@@ -107,10 +116,42 @@ pub(crate) fn is_disjoint(files: &[LevelFile]) -> bool {
         .all(|w| w[0].hi.as_slice() < w[1].lo.as_slice())
 }
 
+/// AS-IS (pair `leveling_disjoint`): equal boundary user keys pass as
+/// disjoint (`<=`) — a legacy-stacked set reads disjoint and overlap-sliced
+/// jobs run on it, degrading to the whole-level cascade the gate refuses.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn is_disjoint_as_is(files: &[LevelFile]) -> bool {
+    let mut sorted: Vec<&LevelFile> = files.iter().collect();
+    sorted.sort_by(|a, b| a.lo.cmp(&b.lo));
+    sorted
+        .windows(2)
+        .all(|w| w[0].hi.as_slice() <= w[1].lo.as_slice())
+}
+
 /// Total bytes of a level view.
 #[must_use]
 pub(crate) fn total_bytes(files: &[LevelFile]) -> u64 {
     files.iter().map(|f| f.bytes).sum()
+}
+
+/// AS-IS (pair `leveling_total_bytes`): the file count stands in for bytes —
+/// level pressure is invisible, so an over-target level reads far under
+/// target and pushdown sizing is garbage.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn total_bytes_as_is(files: &[LevelFile]) -> u64 {
+    files.len() as u64
+}
+
+/// AS-IS (pair `leveling_overlaps`): a file whose `lo` equals the hull end
+/// is treated as outside the hull (strict `<`), so the boundary-touching
+/// file stays out of the job slice and the level keeps an overlapping chunk
+/// after the job.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn overlaps_as_is(f: &LevelFile, hull_lo: &[u8], hull_hi: &[u8]) -> bool {
+    f.lo.as_slice() < hull_hi && f.hi.as_slice() >= hull_lo
 }
 
 /// Inputs for an L0→L1 job: the oldest `max_l0` L0 files plus the disjoint-L1
@@ -186,10 +227,11 @@ pub(crate) fn pick_pushdown(src: &[LevelFile], dst: &[LevelFile]) -> Option<(usi
     Some((source.idx, slice))
 }
 
-/// AS-IS (pair `leveling_pick`): the pushdown skips the disjoint-
+/// AS-IS (pair `leveling_pushdown`): the pushdown skips the disjoint-
 /// destination gate, so a stacked level gets rewritten one file at a
-/// time — the unbounded cascade the gate exists to refuse.
-#[cfg(test)]
+/// time — the unbounded cascade the gate exists to refuse. Non-test:
+/// the `leveling_pushdown` close-twin token (the extract covers it).
+#[cfg_attr(not(test), allow(dead_code))]
 #[must_use]
 pub(crate) fn pick_pushdown_as_is_blind(
     src: &[LevelFile],
@@ -325,6 +367,61 @@ mod tests {
                 "hull [{a},{b}] broke disjointness with slice {slice:?}"
             );
         }
+    }
+
+    /// Plant (pair `leveled_enabled`): `PEDRA_LEVELED=0` must disengage the
+    /// leveled scheduler — the as-is mutant keeps leveling (rollback is
+    /// decor). Env is restored before returning (serial tests only).
+    #[test]
+    fn leveled_env_switch_is_not_ok() {
+        std::env::set_var("PEDRA_LEVELED", "0");
+        assert!(!leveled_enabled());
+        assert!(
+            leveled_enabled_as_is(),
+            "AS-IS dente: PEDRA_LEVELED=0 ignored — rollback lever is decor"
+        );
+        std::env::remove_var("PEDRA_LEVELED");
+        assert!(leveled_enabled());
+    }
+
+    /// Plant (pair `leveling_disjoint`): shared boundary user keys mean a
+    /// legacy-stacked set — `is_disjoint` refuses it, the as-is mutant
+    /// (`<=`) lets sliced jobs run on the stack.
+    #[test]
+    fn is_disjoint_on_live_stack_is_not_ok() {
+        let touching = vec![f(0, "a", "d", 1), f(1, "d", "z", 1)];
+        assert!(!is_disjoint(&touching));
+        assert!(
+            is_disjoint_as_is(&touching),
+            "AS-IS dente: shared boundary passes as disjoint — whole-level cascade"
+        );
+    }
+
+    /// Plant (pair `leveling_overlaps`): a chunk whose `lo` equals the hull
+    /// end overlaps the hull (`overlaps` keeps it in the slice); the as-is
+    /// strict side drops it and the level keeps an overlapping chunk.
+    #[test]
+    fn overlaps_on_live_slice_is_not_ok() {
+        let chunk = f(1, "e", "k", 1);
+        let (hull_lo, hull_hi) = (b"a".as_slice(), b"e".as_slice());
+        assert!(chunk.overlaps(hull_lo, hull_hi));
+        assert!(
+            !overlaps_as_is(&chunk, hull_lo, hull_hi),
+            "AS-IS dente: boundary-touching chunk left out of the slice — overlap survives the job"
+        );
+    }
+
+    /// Plant (pair `leveling_total_bytes`): bytes are bytes — the as-is
+    /// count stands in for them and level pressure disappears.
+    #[test]
+    fn total_bytes_on_live_level_is_not_ok() {
+        let level = vec![f(0, "a", "c", 10), f(1, "d", "f", 20)];
+        assert_eq!(total_bytes(&level), 30);
+        assert_eq!(
+            total_bytes_as_is(&level),
+            2,
+            "AS-IS dente: file count standing in for bytes — over-target level reads under target"
+        );
     }
 
     /// Plant (pair `leveling`, entry `level_target_bytes`): on deep levels

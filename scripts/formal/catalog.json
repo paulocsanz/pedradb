@@ -5225,8 +5225,9 @@
       "id": "leveled_enabled",
       "finding": "F-leveling-sweep",
       "twin_kind": "model",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/leveling.rs",
-      "twin": "crates/pedradb-core/verus/leveling.rs",
+      "twin": "crates/pedradb-core/src/leveling.rs",
       "aeneas": "scripts/aeneas_leveling.sh",
       "callers": [
         "crates/pedradb-core/src/concurrent.rs",
@@ -5250,8 +5251,9 @@
       "id": "leveling_disjoint",
       "finding": "F-leveling-sweep",
       "twin_kind": "model",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/leveling.rs",
-      "twin": "crates/pedradb-core/verus/leveling.rs",
+      "twin": "crates/pedradb-core/src/leveling.rs",
       "aeneas": "scripts/aeneas_leveling.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs",
@@ -5275,8 +5277,9 @@
       "id": "leveling_overlaps",
       "finding": "F-leveling-sweep",
       "twin_kind": "model",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/leveling.rs",
-      "twin": "crates/pedradb-core/verus/leveling.rs",
+      "twin": "crates/pedradb-core/src/leveling.rs",
       "aeneas": "scripts/aeneas_leveling.sh",
       "callers": [
         "crates/pedradb-core/src/leveling.rs"
@@ -5293,8 +5296,9 @@
       "id": "leveling_total_bytes",
       "finding": "F-leveling-sweep",
       "twin_kind": "model",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/leveling.rs",
-      "twin": "crates/pedradb-core/verus/leveling.rs",
+      "twin": "crates/pedradb-core/src/leveling.rs",
       "aeneas": "scripts/aeneas_leveling.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs",

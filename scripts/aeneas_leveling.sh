@@ -31,7 +31,12 @@ echo "      charon=$CHARON"
     --start-from 'crate::pick_pushdown' \
     --start-from 'crate::pick_pushdown_as_is_blind' \
     --start-from 'crate::leveled_enabled' \
+    --start-from 'crate::leveled_enabled_as_is' \
+    --start-from 'crate::is_disjoint' \
+    --start-from 'crate::is_disjoint_as_is' \
+    --start-from 'crate::overlaps_as_is' \
     --start-from 'crate::total_bytes' \
+    --start-from 'crate::total_bytes_as_is' \
     --dest-file "$OUT/leveling_kernel.llbc"
 )
 set +e
@@ -117,6 +122,75 @@ def is_disjoint (files : Slice LevelFile) : Result Bool := do
   is_disjoint_outer_loop files 0#usize
 ''',
     "is_disjoint",
+)
+
+repl(
+    "def is_disjoint_as_is (files : Slice LevelFile) : Result Bool := do\n  sorry\n",
+    r'''@[rust_loop_body]
+def is_disjoint_as_is_inner_loop.body
+  (files : Slice LevelFile) (a : LevelFile) (j : Std.Usize) :
+  Result (ControlFlow Std.Usize Bool)
+  := do
+  let n := Slice.len files
+  if j < n
+  then
+    let b ← Slice.index_usize files j
+    let sa ← alloc.vec.Vec.as_slice Global a.lo
+    let sb ← alloc.vec.Vec.as_slice Global b.lo
+    let a_first ←
+      Shared1A.Insts.CoreCmpPartialOrdShared0B.le
+        (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) sa sb
+    let okpair ←
+      if a_first
+      then
+        let ha ← alloc.vec.Vec.as_slice Global a.hi
+        Shared1A.Insts.CoreCmpPartialOrdShared0B.le
+          (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) ha sb
+      else
+        let hb ← alloc.vec.Vec.as_slice Global b.hi
+        Shared1A.Insts.CoreCmpPartialOrdShared0B.le
+          (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) hb sa
+    if okpair
+    then
+      let j1 ← j + 1#usize
+      ok (cont j1)
+    else ok (done false)
+  else ok (done true)
+
+@[rust_loop]
+def is_disjoint_as_is_inner_loop
+  (files : Slice LevelFile) (a : LevelFile) (j : Std.Usize) :
+  Result Bool
+  := do
+  loop (fun j1 => is_disjoint_as_is_inner_loop.body files a j1) j
+
+@[rust_loop_body]
+def is_disjoint_as_is_outer_loop.body
+  (files : Slice LevelFile) (i : Std.Usize) :
+  Result (ControlFlow Std.Usize Bool)
+  := do
+  let n := Slice.len files
+  if i < n
+  then
+    let a ← Slice.index_usize files i
+    let j ← i + 1#usize
+    let b ← is_disjoint_as_is_inner_loop files a j
+    if b
+    then
+      let i1 ← i + 1#usize
+      ok (cont i1)
+    else ok (done false)
+  else ok (done true)
+
+@[rust_loop]
+def is_disjoint_as_is_outer_loop
+  (files : Slice LevelFile) (i : Std.Usize) : Result Bool := do
+  loop (fun i1 => is_disjoint_as_is_outer_loop.body files i1) i
+
+def is_disjoint_as_is (files : Slice LevelFile) : Result Bool := do
+  is_disjoint_as_is_outer_loop files 0#usize
+''',
+    "is_disjoint_as_is",
 )
 
 repl(
