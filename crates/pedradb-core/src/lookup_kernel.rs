@@ -246,6 +246,12 @@ mod tests {
         );
         assert!(!snap_below_watermark(5, 5));
         assert!(!snap_below_watermark(7, 5));
+        let body = named_fn_src(include_str!("db.rs"), "ensure_snapshot_readable")
+            .expect("ensure_snapshot_readable");
+        assert!(
+            body.contains("snap_below_watermark("),
+            "ensure_snapshot_readable must match snap_below_watermark"
+        );
     }
 
     #[test]

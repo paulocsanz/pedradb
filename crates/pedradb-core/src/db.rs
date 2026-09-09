@@ -2870,7 +2870,7 @@ impl<E: Env> Db<E> {
     /// # Errors
     /// [`CoreError::SnapshotTooOld`] when history for `snap` may have been dropped.
     pub fn ensure_snapshot_readable(&self, snap: Snapshot) -> Result<()> {
-        if snap.seq < self.earliest_readable_seq {
+        if crate::lookup_kernel::snap_below_watermark(snap.seq, self.earliest_readable_seq) {
             return Err(CoreError::SnapshotTooOld {
                 requested: snap.seq,
                 earliest: self.earliest_readable_seq,
