@@ -406,7 +406,7 @@ pub fn classify_get(
 
 /// RFC-0182 same-boot set. Any engine cut must diagnose these before
 /// claiming a win. New use-case → add a name here (one home).
-pub const BALANCE_SHAPES: [&str; 27] = [
+pub const BALANCE_SHAPES: [&str; 28] = [
     "deps_cache_overwrite_mc4",
     "ycsb_a_mc4",
     "ycsb_b_mc4",
@@ -434,6 +434,7 @@ pub const BALANCE_SHAPES: [&str; 27] = [
     "myrocks_read_only_mc4",
     "wbwi_read_your_writes_mc4",
     "mixgraph_like_mc4",
+    "oxigraph_triple_put_mc4",
 ];
 
 /// One cell in a multi-shape board (RFC-0182 / /otimizar).
@@ -975,7 +976,7 @@ mod tests {
         assert_eq!(classify_probes(5, 5), GetClass::Best);
         assert_eq!(classify_probes(900, 5), GetClass::AsIsWalk);
         assert_eq!(classify_probes_as_is(900, 5), GetClass::Best);
-        assert_eq!(BALANCE_SHAPES.len(), 27);
+        assert_eq!(BALANCE_SHAPES.len(), 28);
         assert!(BALANCE_SHAPES.contains(&"ycsb_b_mc4"));
         assert!(BALANCE_SHAPES.contains(&"ycsb_c_mc4"));
         assert!(BALANCE_SHAPES.contains(&"qs_hot_get_mc4"));
@@ -998,5 +999,6 @@ mod tests {
         assert!(BALANCE_SHAPES.contains(&"myrocks_read_only_mc4"));
         assert!(BALANCE_SHAPES.contains(&"wbwi_read_your_writes_mc4"));
         assert!(BALANCE_SHAPES.contains(&"mixgraph_like_mc4"));
+        assert!(BALANCE_SHAPES.contains(&"oxigraph_triple_put_mc4"));
     }
 }
