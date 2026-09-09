@@ -1707,7 +1707,7 @@ impl MemTable {
     /// Whether any range tombstone is stored (ranged scan must include them).
     #[must_use]
     pub fn has_range_tombstones(&self) -> bool {
-        self.range_tombstones > 0
+        !crate::write_admission_kernel::batch_is_empty(self.range_tombstones as u64)
     }
 
     /// Internal versions with user key in `[start, end)` (`BTree` range, not a full scan).
