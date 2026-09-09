@@ -1,29 +1,10 @@
 //! Abstract crash semantics of the [`crate::env`] seam (RFC-0166 P1.1).
 //!
-//! **Single artifact (pair `env_crash`):** this file is what `rustc` links
-//! *and* what Verus proves (`cfg(verus_keep_ghost)`). `crash_legal` is the
-//! term. Honest-sync / lying-sync stay rustc (group-commit caller).
-//!
-//!   ./scripts/verus_env_crash.sh
-//!
-//! The live seams are the production `Env`/`EnvFile` (`env.rs`: `sync_data`
-//! is the barrier) and the sim `RecordingEnv` (buffered writes, honest sync
-//! promotes, `SyncPolicy::Lying` returns Ok without promoting). This kernel
-//! is the pure geometry every crash story must respect:
-//!
-//! - a byte log has `written` (appended, maybe buffered) and `synced` (the
-//!   durable barrier floor);
-//! - a crash may keep ANY prefix `cut` with `synced <= cut <= written` —
-//!   the floor is the honest-sync barrier (synced bytes never vanish), the
-//!   ceiling is "no byte is ever invented" (a torn write may keep a
-//!   PREFIX of the unsynced tail, never more than was written);
-//! - honest sync promotes all pending (`synced == written`); a lying sync
-//!   returns Ok and promotes nothing (RFC-0078), via the proved
-//!   [`crate::group_commit_kernel::fsync_promotes_pending`].
-//!
-//! AS-IS mutants drop the floor (an unsynced tail pretends barrier
-//! durability) and pretend lying sync promotes. Teeth witnesses pin both
-//! holes.
+//! **Single artifact (Aeneas-paid):** this file is what `rustc` links and
+//! what the Lean defs run over — Charon+Aeneas extract of these exact
+//! bodies (`scripts/aeneas_env_crash.sh`, `EnvCrashKernel.lean`).
+//! `crash_legal` is the term. Honest-sync / lying-sync stay rustc
+//! (group-commit caller). No Verus twin stands in for them.
 
 #![forbid(unsafe_code)]
 
@@ -151,51 +132,6 @@ pub fn sync_lying_promotes_as_is(m: CrashModel) -> CrashModel {
         synced: m.written,
     }
 }
-
-#[cfg(verus_keep_ghost)]
-use vstd::prelude::*;
-
-#[cfg(verus_keep_ghost)]
-verus! {
-
-pub struct CrashModel {
-    pub written: u64,
-    pub synced: u64,
-}
-
-pub open spec fn crash_legal_spec(m: CrashModel, cut: u64) -> bool {
-    m.synced <= cut && cut <= m.written
-}
-
-pub open spec fn crash_legal_as_is_spec(m: CrashModel, cut: u64) -> bool {
-    cut <= m.written
-}
-
-pub fn crash_legal(m: CrashModel, cut: u64) -> (b: bool)
-    ensures
-        b == crash_legal_spec(m, cut),
-{
-    crash_legal_body!(m.synced, m.written, cut)
-}
-
-pub fn crash_legal_as_is(m: CrashModel, cut: u64) -> (b: bool)
-    ensures
-        b == crash_legal_as_is_spec(m, cut),
-{
-    crash_legal_as_is_body!(m.written, cut)
-}
-
-proof fn lemma_as_is_drops_barrier_floor()
-    ensures
-        !crash_legal_spec(CrashModel { written: 10, synced: 5 }, 3),
-        crash_legal_as_is_spec(CrashModel { written: 10, synced: 5 }, 3),
-        crash_legal_spec(CrashModel { written: 10, synced: 5 }, 5),
-        crash_legal_spec(CrashModel { written: 10, synced: 5 }, 10),
-        !crash_legal_spec(CrashModel { written: 10, synced: 5 }, 11),
-{
-}
-
-} // verus!
 
 #[cfg(test)]
 mod tests {

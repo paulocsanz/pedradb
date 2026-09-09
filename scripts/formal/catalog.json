@@ -5861,7 +5861,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/env_crash_kernel.rs",
       "twin": "crates/pedradb-core/src/env_crash_kernel.rs",
-      "verus": "scripts/verus_env_crash.sh",
+      "aeneas": "scripts/aeneas_env_crash.sh",
       "callers": [
         "crates/pedradb-core/src/env_crash_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -5878,9 +5878,10 @@
       "id": "env_append",
       "finding": "RFC-0166 P1.1",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/env_crash_kernel.rs",
-      "twin": "crates/pedradb-core/verus/env_crash.rs",
-      "verus": "scripts/verus_env_crash.sh",
+      "twin": "crates/pedradb-core/src/env_crash_kernel.rs",
+      "aeneas": "scripts/aeneas_env_crash.sh",
       "callers": [
         "crates/pedradb-core/src/env_crash_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -5897,9 +5898,10 @@
       "id": "env_sync",
       "finding": "RFC-0166 P1.1",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/env_crash_kernel.rs",
-      "twin": "crates/pedradb-core/verus/env_crash.rs",
-      "verus": "scripts/verus_env_crash.sh",
+      "twin": "crates/pedradb-core/src/env_crash_kernel.rs",
+      "aeneas": "scripts/aeneas_env_crash.sh",
       "callers": [
         "crates/pedradb-core/src/env_crash_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -5916,9 +5918,10 @@
       "id": "env_barrier_floor",
       "finding": "RFC-0166 P1.1",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/env_crash_kernel.rs",
-      "twin": "crates/pedradb-core/verus/env_crash.rs",
-      "verus": "scripts/verus_env_crash.sh",
+      "twin": "crates/pedradb-core/src/env_crash_kernel.rs",
+      "aeneas": "scripts/aeneas_env_crash.sh",
       "callers": [
         "crates/pedradb-core/src/env_crash_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -5935,9 +5938,10 @@
       "id": "env_no_invented",
       "finding": "RFC-0166 P1.1",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/env_crash_kernel.rs",
-      "twin": "crates/pedradb-core/verus/env_crash.rs",
-      "verus": "scripts/verus_env_crash.sh",
+      "twin": "crates/pedradb-core/src/env_crash_kernel.rs",
+      "aeneas": "scripts/aeneas_env_crash.sh",
       "callers": [
         "crates/pedradb-core/src/env_crash_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -5954,9 +5958,10 @@
       "id": "env_honest_sync",
       "finding": "RFC-0166 P1.1",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/env_crash_kernel.rs",
-      "twin": "crates/pedradb-core/verus/env_crash.rs",
-      "verus": "scripts/verus_env_crash.sh",
+      "twin": "crates/pedradb-core/src/env_crash_kernel.rs",
+      "aeneas": "scripts/aeneas_env_crash.sh",
       "callers": [
         "crates/pedradb-core/src/env_crash_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
