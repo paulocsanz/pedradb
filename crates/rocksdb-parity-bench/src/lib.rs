@@ -317,6 +317,8 @@ pub const COMPARE_SHAPES: &[&str] = &[
     "bluestore_omap_read_mc4",
     // RFC-0184 P2.57: MyRocks oltp_read_only mc4 — 1c is suite-only.
     "myrocks_read_only_mc4",
+    // RFC-0184 P2.58: WBWI overlay-get mc4 — 1c is suite-only.
+    "wbwi_read_your_writes_mc4",
 ];
 
 /// Length of the RFC-0041 official prefix of [`COMPARE_SHAPES`].
@@ -4197,6 +4199,7 @@ impl YcsbRunner {
         let mut rng = std::mem::take(&mut self.rng);
         let mut blocks = Vec::with_capacity(4);
 
+        if shape_wanted("mixgraph_like") {
         let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut ops_ok, mut errors) = (0u64, 0u64);
@@ -4232,7 +4235,9 @@ impl YcsbRunner {
                 *last = attach_diagnose(std::mem::take(last), Some(&d));
             }
         }
+        }
 
+        if shape_wanted("wbwi_read_your_writes") {
         let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut gets, mut errors) = (0u64, 0u64);
@@ -4261,7 +4266,9 @@ impl YcsbRunner {
                 *last = attach_diagnose(std::mem::take(last), Some(&d));
             }
         }
+        }
 
+        if shape_wanted("compaction_filter_drop") {
         let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut drops, mut errors) = (0u64, 0u64);
@@ -4295,7 +4302,9 @@ impl YcsbRunner {
                 *last = attach_diagnose(std::mem::take(last), Some(&d));
             }
         }
+        }
 
+        if shape_wanted("ingest_sst") {
         let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut ingest, mut errors) = (0u64, 0u64);
@@ -4320,8 +4329,84 @@ impl YcsbRunner {
                 *last = attach_diagnose(std::mem::take(last), Some(&d));
             }
         }
+        }
 
         self.rng = rng;
+        blocks
+    }
+
+    /// RFC-0184 P2.58: wbwi_read_your_writes at N clients (overlay get).
+    pub fn run_wbwi_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
+        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
+        let full = format!("wbwi_read_your_writes_mc{clients}");
+        if !shape_wanted(&full) {
+            return Vec::new();
+        }
+        let cfg_ops = self.cfg.ops;
+        let yval = std::sync::Arc::new(vec![b'r'; self.cfg.payload]);
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+        let phase0 = e.write_phase_snapshot();
+        let t0 = Instant::now();
+        let mut lats = Vec::with_capacity(cfg_ops * clients);
+        let mut errors = 0u64;
+        std::thread::scope(|s| {
+            let handles: Vec<_> = (0..clients)
+                .map(|c| {
+                    let barrier = barrier.clone();
+                    let yval = yval.clone();
+                    s.spawn(move || {
+                        let mut lats = Vec::with_capacity(cfg_ops);
+                        let mut errors = 0u64;
+                        barrier.wait();
+                        for i in 0..cfg_ops {
+                            let t = Instant::now();
+                            let n = c * cfg_ops + i;
+                            let k = format!("wbwi/{n:08}").into_bytes();
+                            let overlay = [(&k[..], yval.as_slice())];
+                            match e.wbwi_overlay_get(&overlay, &k) {
+                                Ok(Some(v)) if v.as_slice() == yval.as_slice() => {}
+                                _ => errors += 1,
+                            }
+                            lats.push(ms(t));
+                        }
+                        (lats, errors)
+                    })
+                })
+                .collect();
+            for h in handles {
+                let (mut l, err) = h.join().expect("wbwi client thread");
+                errors += err;
+                lats.append(&mut l);
+            }
+        });
+        let wall = t0.elapsed();
+        eprintln!(
+            "[rocks-parity] {full} done ops={} errors={errors}",
+            cfg_ops * clients
+        );
+        let mut blocks = vec![summarize_mc(
+            &full,
+            cfg_ops * clients,
+            wall,
+            &mut lats,
+            clients,
+            errors,
+        )];
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases_n(
+                pct(&lats, 50.0),
+                a,
+                b,
+                clients as u64,
+                0.0,
+                100,
+                (cfg_ops * clients) as u64,
+            );
+            eprint_write_diagnose(&full, &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
         blocks
     }
 
@@ -5698,6 +5783,26 @@ mod tests {
     }
 
     #[test]
+    fn rfc0184_wbwi_read_your_writes_mc4_in_compare() {
+        assert!(
+            COMPARE_SHAPES.contains(&"wbwi_read_your_writes_mc4"),
+            "WBWI overlay-get mc4 must be on the cartaz"
+        );
+        assert!(shape_wanted_in(
+            "wbwi_read_your_writes_mc4",
+            Some("wbwi_read_your_writes_mc4")
+        ));
+        assert!(
+            !shape_wanted_in("wbwi_read_your_writes", Some("wbwi_read_your_writes_mc4")),
+            "1c wbwi_read_your_writes must not leak into ONLY=wbwi_read_your_writes_mc4"
+        );
+        assert!(
+            !shape_wanted_in("compaction_filter_drop", Some("wbwi_read_your_writes_mc4")),
+            "compact-filter 1c must not leak into ONLY=wbwi_read_your_writes_mc4"
+        );
+    }
+
+    #[test]
     fn rfc0178_mc_only_selects_full_mc_name() {
         assert!(shape_wanted_in(
             "deps_cache_overwrite_mc4",
@@ -6190,6 +6295,7 @@ mod tests {
             "kafka_changelog_flush_mc4",
             "bluestore_omap_read_mc4",
             "myrocks_read_only_mc4",
+            "wbwi_read_your_writes_mc4",
         ] {
             assert!(
                 COMPARE_SHAPES.contains(&name),
