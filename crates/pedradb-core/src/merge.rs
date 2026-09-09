@@ -804,10 +804,13 @@ pub fn gc_compact_entries(
         let user_key = ikey.user_key.clone();
         let keep = match ikey.kind {
             ValueType::Value => {
-                if range_deleted(user_key.as_ref(), ikey.sequence, &tombs) {
-                    None
-                } else {
+                if visible_at(
+                    ValueType::Value,
+                    range_deleted(user_key.as_ref(), ikey.sequence, &tombs),
+                ) {
                     Some((ikey, value))
+                } else {
+                    None
                 }
             }
             // F177: a newest point Deletion must survive a partial
@@ -1550,6 +1553,24 @@ mod tests {
         .into_window_kvs()
         .collect();
         assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn gc_compact_entries_calls_visible_at() {
+        let src = include_str!("merge.rs");
+        let body = src
+            .split("pub fn gc_compact_entries")
+            .nth(1)
+            .and_then(|s| s.split("fn gc_snapshot_safe").next())
+            .expect("gc_compact_entries");
+        assert!(
+            body.contains("visible_at("),
+            "gc_compact_entries Value range-hide if must call catalog visible_at"
+        );
+        assert!(
+            !body.contains("if range_deleted(user_key.as_ref(), ikey.sequence, &tombs)"),
+            "Value+range_deleted must not stay inline"
+        );
     }
 
     #[test]
