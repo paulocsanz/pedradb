@@ -751,7 +751,7 @@ impl RaftCluster {
             let node = self.nodes.get_mut(id).unwrap();
             match node.role {
                 Role::Leader => {
-                    if node.heartbeat_ticks_left == 0 {
+                    if pedradb_core::write_admission_kernel::batch_is_empty(node.heartbeat_ticks_left) {
                         leader_heartbeats.push(*id);
                         node.heartbeat_ticks_left = node.heartbeat_every;
                     } else {
