@@ -235,6 +235,16 @@ mod tests {
             "AS-IS dente: empty snap treated live"
         );
         assert!(!snap_is_empty(1));
+        let body =
+            named_fn_src(include_str!("db.rs"), "count_in_range").expect("count_in_range");
+        assert!(
+            body.contains("snap_is_empty("),
+            "count_in_range must match snap_is_empty"
+        );
+        assert!(
+            !body.contains("batch_is_empty("),
+            "count_in_range must not wrap seq==0 onto batch_is_empty"
+        );
     }
 
     #[test]
