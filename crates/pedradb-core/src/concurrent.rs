@@ -1459,6 +1459,10 @@ impl WriteGroup {
             let t_lock = Instant::now();
             let mut guard = db.write();
             stall_note("lead_write", t_lock);
+            if let Some(st) = self.phase_stats.as_ref() {
+                st.lock_wait_ns
+                    .fetch_add(t_lock.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            }
             {
                 let extra = {
                     let mut q = self.queue.lock();
@@ -1519,7 +1523,12 @@ impl WriteGroup {
                         }
                         self.wait_in_flight_to_queue(batch.len());
                     }
+                    let t_lock2 = Instant::now();
                     let mut guard = db.write();
+                    if let Some(st) = self.phase_stats.as_ref() {
+                        st.lock_wait_ns
+                            .fetch_add(t_lock2.elapsed().as_nanos() as u64, Ordering::Relaxed);
+                    }
                     loop {
                         let mut extra: Vec<PendingWrite> = {
                             let mut q = self.queue.lock();
@@ -1736,7 +1745,12 @@ impl WriteGroup {
                 group.wait_in_flight_to_queue(b.len());
             }
         }
+        let t_lock3 = Instant::now();
         let mut guard = db.write();
+        if let Some(st) = group.phase_stats.as_ref() {
+            st.lock_wait_ns
+                .fetch_add(t_lock3.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
         if let Some(batch) = batch.as_mut() {
             loop {
                 let mut extra = drain();
@@ -1780,6 +1794,7 @@ impl WriteGroup {
         drop(guard);
         #[cfg(test)]
         maybe_test_wal_gap();
+        let t_wal = group.phase_stats.as_ref().map(|_| Instant::now());
         let io_err = {
             let mut deferred: Vec<&[crate::batch::WriteOp]> = Vec::new();
             for chunk in &chunks {
@@ -1809,6 +1824,10 @@ impl WriteGroup {
                 }
             })
         };
+        if let (Some(st), Some(t)) = (group.phase_stats.as_ref(), t_wal) {
+            st.wal_ns
+                .fetch_add(t.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
         // RFC-0071 P1.2: yield after off-lock fd, before the publish gate
         // (no Db write lock held). PCT can interleave a reader here.
         #[cfg(feature = "pct")]
@@ -1836,10 +1855,16 @@ impl WriteGroup {
                 })
                 .collect();
         }
+        let t_lock4 = Instant::now();
         let mut g = db.write();
+        if let Some(st) = group.phase_stats.as_ref() {
+            st.lock_wait_ns
+                .fetch_add(t_lock4.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
         if need_sync {
             g.note_wal_sync();
         }
+        let t_apply = group.phase_stats.as_ref().map(|_| Instant::now());
         let results: Vec<Result<SequenceNumber>> = chunks
             .into_iter()
             .flat_map(|chunk| match chunk {
@@ -1847,10 +1872,27 @@ impl WriteGroup {
                 Chunk::Done(r) => r,
             })
             .collect();
+        if let (Some(st), Some(t)) = (group.phase_stats.as_ref(), t_apply) {
+            st.mem_ns
+                .fetch_add(t.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
+        let t_pub = group.phase_stats.as_ref().map(|_| Instant::now());
         g.publish_sequence(pub_seq);
+        if let (Some(st), Some(t)) = (group.phase_stats.as_ref(), t_pub) {
+            st.publish_ns
+                .fetch_add(t.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
         g.end_commit();
         if let Some(l) = lone {
             l[3] = 0;
+        }
+        if let Some(st) = group.phase_stats.as_ref() {
+            // Per-member accounting: the engines.rs line divides by commits,
+            // so count every member whose Ok this pipeline delivered.
+            let members = batch.as_ref().map_or(0, |b| b.len() as u64);
+            if members > 0 {
+                st.commits.fetch_add(members, Ordering::Relaxed);
+            }
         }
         results
     }
@@ -3197,6 +3239,13 @@ impl<E: Env> ConcurrentDb<E> {
     /// # Errors
     /// I/O.
     pub fn flush(&self) -> Result<()> {
+        // Snapshot before SST I/O: the 200 µs last-Ok hold expires during
+        // write_imm_l0_files, which is exactly P0.70 1c checkpoint's window.
+        let warm_ok = crate::write_admission_kernel::flush_warm_allowed(
+            self.commit_inflight() > 0,
+            self.recently_multi(Duration::from_millis(2)),
+            !self.writes_idle_for(Duration::from_micros(200)),
+        );
         let t_lock = std::time::Instant::now();
         let _flush = self.flush_lock.lock();
         let lock_s = t_lock.elapsed().as_secs_f64();
@@ -3280,19 +3329,23 @@ impl<E: Env> ConcurrentDb<E> {
         // `if let Some(plan) = self.inner.read().take_warm_plan()` keeps the
         // temporary ReadGuard alive for the whole block; `inner.write()` then
         // self-deadlocks (parking_lot RwLock is not reentrant).
-        let t0 = std::time::Instant::now();
-        let plan = self.inner.read().take_warm_plan();
-        if let Some(plan) = plan {
-            let streamed: u64 = plan.jobs.iter().map(|(_, l)| *l).sum();
-            let n_files = plan.jobs.len();
-            let warmed = plan.run();
-            let ns = u64::try_from(t0.elapsed().as_nanos()).unwrap_or(u64::MAX);
-            eprintln!(
-                "flush_warm: files={n_files} bytes={streamed} warmed={} ns={ns}",
-                warmed.len()
-            );
-            if !warmed.is_empty() {
-                self.inner.write().note_warmed_ssts(&warmed);
+        // Skip mid-burst: P0.70 1c checkpoint flush was streaming every
+        // 256 MiB L0 into page cache on the 4 GiB overwrite_mc4 box.
+        if warm_ok {
+            let t0 = std::time::Instant::now();
+            let plan = self.inner.read().take_warm_plan();
+            if let Some(plan) = plan {
+                let streamed: u64 = plan.jobs.iter().map(|(_, l)| *l).sum();
+                let n_files = plan.jobs.len();
+                let warmed = plan.run();
+                let ns = u64::try_from(t0.elapsed().as_nanos()).unwrap_or(u64::MAX);
+                eprintln!(
+                    "flush_warm: files={n_files} bytes={streamed} warmed={} ns={ns}",
+                    warmed.len()
+                );
+                if !warmed.is_empty() {
+                    self.inner.write().note_warmed_ssts(&warmed);
+                }
             }
         }
         Ok(())

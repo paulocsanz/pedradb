@@ -5612,8 +5612,16 @@ impl<E: Env> Db<E> {
             Ok(()) => {
                 self.maybe_bounded_cache_after_write();
                 // RFC-0168 P2.4: fill the get fd during hydrate (flush),
-                // so settle's compact does not re-stream.
-                self.run_warm_plan();
+                // so settle's compact does not re-stream. Skip while a
+                // commit is inflight (auto-flush under the pin) — the
+                // ConcurrentDb path also gates on recently_multi / last Ok.
+                if crate::write_admission_kernel::flush_warm_allowed(
+                    self.commit_inflight() > 0,
+                    false,
+                    false,
+                ) {
+                    self.run_warm_plan();
+                }
                 Ok(())
             }
             Err(e) => Err(self.fence_io_err(e)),
@@ -10732,6 +10740,11 @@ impl<E: Env> Db<E> {
         if n == 0 {
             return Ok(g);
         }
+        // RFC-0045 P0.1: the group path (admit + prepare + encode) is the
+        // first write-lock hold — attribute it to `prepare_ns` so
+        // WRITEPHASE shows the mc pipeline, not only the 1-op bypass.
+        let st = self.phase_stats.clone();
+        let tp = st.as_ref().map(|_| std::time::Instant::now());
         if let Err(results) = self.group_admit(n) {
             return Err(results);
         }
@@ -10743,6 +10756,10 @@ impl<E: Env> Db<E> {
                 .collect());
         }
         self.group_append_ops(&mut g);
+        if let (Some(st), Some(tp)) = (st.as_ref(), tp) {
+            st.prepare_ns
+                .fetch_add(tp.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
         Ok(g)
     }
 
@@ -10775,6 +10792,11 @@ impl<E: Env> Db<E> {
     }
 
     fn group_admit(&mut self, n: usize) -> std::result::Result<(), Vec<Result<SequenceNumber>>> {
+        // Stall knobs off (parity default): skip the two `level_file_count(0)`
+        // walks. 25M overwrite L0 count is O(files) under the write lock.
+        if self.write_admission_idle() {
+            return Ok(());
+        }
         match self.ensure_write_admitted() {
             Ok(()) => Ok(()),
             Err(CoreError::WriteStall { l0_files, limit }) => Err((0..n)
@@ -13446,9 +13468,12 @@ mod tests {
         }
         crate::env::force_settle_warm(None);
         let _ = crate::env::take_settle_warm_bytes();
+        // Warm is idle-only (overwrite_mc4 4 GiB hole): wait out the 200 µs
+        // last-Ok hold so this explicit flush is settle-class, not seed.
+        std::thread::sleep(std::time::Duration::from_millis(1));
         db.flush().unwrap();
         let flushed = crate::env::take_settle_warm_bytes();
-        assert!(flushed > 0, "flush must stream live SSTs, got {flushed}");
+        assert!(flushed > 0, "idle flush must stream live SSTs, got {flushed}");
         db.compact().unwrap();
         let n = crate::env::take_settle_warm_bytes();
         crate::env::force_settle_warm(None);
@@ -13456,6 +13481,48 @@ mod tests {
             n > 0,
             "explicit compact must re-warm after flush path-skip, got {n}"
         );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// P0.70 1c checkpoint flush must not stream SSTs while the last Ok is
+    /// fresh — that was the 4 GiB overwrite_mc4 page-cache hole.
+    #[test]
+    fn rfc0180_flush_warm_skips_when_recently_ok() {
+        let dir = temp_dir();
+        let env = BulkProbeEnv::new();
+        let db = crate::concurrent::ConcurrentDb::open_with_env_bounded(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(4 * 1024),
+                sst_payload_budget_bytes: Some(1),
+                ..OpenOptions::default()
+            },
+            env,
+        )
+        .unwrap();
+        crate::env::force_settle_warm(Some(true));
+        for i in 0..32u32 {
+            db.put(format!("k{i:04}").as_bytes(), vec![b'v'; 64])
+                .unwrap();
+        }
+        let _ = crate::env::take_settle_warm_bytes();
+        db.flush().unwrap();
+        let mid = crate::env::take_settle_warm_bytes();
+        assert_eq!(
+            mid, 0,
+            "flush during last-Ok hold must not stream SSTs, got {mid}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        assert!(
+            db.writes_idle_for(std::time::Duration::from_micros(200)),
+            "1 ms later last Ok must be idle"
+        );
+        db.flush().unwrap();
+        let idle = crate::env::take_settle_warm_bytes();
+        crate::env::force_settle_warm(None);
+        assert!(idle > 0, "idle flush must warm, got {idle}");
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
