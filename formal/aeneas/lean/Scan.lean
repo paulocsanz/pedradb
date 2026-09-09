@@ -132,6 +132,19 @@ theorem point_bounds_overlap_unbounded_end_excluded_start
   unfold scan_kernel.point_bounds_overlap
   rfl
 
+/-- Both Unbounded: overlap is always true (rustc `&[u8]` + `Bound`). Dual-unfold. -/
+theorem point_bounds_overlap_both_unbounded
+    (lo hi : Slice U8) :
+    scan_kernel.point_bounds_overlap (some lo) (some hi)
+      core.ops.range.Bound.Unbounded
+      core.ops.range.Bound.Unbounded =
+      (do
+        let file_before_end ← ok true
+        let file_after_start ← ok true
+        if file_before_end then ok file_after_start else ok false) := by
+  unfold scan_kernel.point_bounds_overlap
+  rfl
+
 /-- Unbounded end + included start: end side always true, file hi `>=` s. Dual-unfold. -/
 theorem point_bounds_overlap_unbounded_end_included_start
     (lo hi s : Slice U8) :
