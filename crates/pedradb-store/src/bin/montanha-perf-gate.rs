@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 fn pct(sorted: &[f64], p: f64) -> f64 {
-    if sorted.is_empty() {
+    if pedradb_core::write_admission_kernel::batch_is_empty(sorted.len() as u64) {
         return 0.0;
     }
     let idx = ((p / 100.0) * (sorted.len() as f64 - 1.0)).round() as usize;
