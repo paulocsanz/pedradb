@@ -8186,10 +8186,14 @@ impl<E: Env> Db<E> {
     ) -> Result<SequenceNumber> {
         self.ensure_not_fenced()?;
         let k = key.as_ref();
-        match self.get(k) {
-            Some(cur) if cur.as_ref() == expected.as_ref() => self.put_with(k, value, opts),
-            _ => Err(CoreError::CasMismatch),
+        let live_eq = match self.get(k) {
+            Some(cur) => cur.as_ref() == expected.as_ref(),
+            None => false,
+        };
+        if !crate::write_admission_kernel::cas_eq_put(live_eq) {
+            return Err(CoreError::CasMismatch);
         }
+        self.put_with(k, value, opts)
     }
 
     /// Alias for [`put_if_eq`](Self::put_if_eq) (compare-and-swap).

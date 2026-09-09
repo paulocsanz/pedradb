@@ -107,6 +107,15 @@ macro_rules! cas_absent_put_body {
     };
 }
 
+macro_rules! cas_eq_put_body {
+    ($live_eq:expr) => {
+        match $live_eq {
+            true => true,
+            false => false,
+        }
+    };
+}
+
 macro_rules! torn_head_empty_log_body {
     ($len:expr, $tiny_max:expr) => {
         $len < $tiny_max
@@ -342,6 +351,20 @@ pub fn cas_absent_put(has_live: bool) -> bool {
 /// AS-IS: always put (lost-update / clobber).
 #[must_use]
 pub fn cas_absent_put_as_is(_has_live: bool) -> bool {
+    true
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// `put_if_eq`: live == expected ⇒ put; else CasMismatch. Data-fate, not Env.
+#[must_use]
+pub fn cas_eq_put(live_eq: bool) -> bool {
+    cas_eq_put_body!(live_eq)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: always put (ignore expected).
+#[must_use]
+pub fn cas_eq_put_as_is(_live_eq: bool) -> bool {
     true
 }
 
@@ -672,6 +695,25 @@ pub fn cas_absent_put_as_is(has_live: bool) -> (d: bool)
         d == true,
 {
     let _ = has_live;
+    true
+}
+
+pub open spec fn cas_eq_put_spec(live_eq: bool) -> bool {
+    live_eq
+}
+
+pub fn cas_eq_put(live_eq: bool) -> (d: bool)
+    ensures
+        d == cas_eq_put_spec(live_eq),
+{
+    cas_eq_put_body!(live_eq)
+}
+
+pub fn cas_eq_put_as_is(live_eq: bool) -> (d: bool)
+    ensures
+        d == true,
+{
+    let _ = live_eq;
     true
 }
 
@@ -1114,6 +1156,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn cas_eq_put_on_live_mismatch_is_not_ok() {
+        assert!(cas_eq_put(true));
+        assert!(!cas_eq_put(false));
+        assert!(
+            cas_eq_put_as_is(false),
+            "AS-IS dente: mismatch still puts"
+        );
+        let body =
+            named_fn_src(include_str!("db.rs"), "put_if_eq_with").expect("put_if_eq_with");
+        assert!(
+            body.contains("cas_eq_put("),
+            "put_if_eq_with must match cas_eq_put"
+        );
+    }
+
     /// RFC-0171 P1.1/P1.2: data-fate `if`s on put-Ok and recover/reopen
     /// must call a kernel (not a raw predicate in `db.rs`).
     #[test]
@@ -1263,6 +1321,7 @@ mod tests {
             || cond.contains("seq_after_feed(")
             || cond.contains("pit_resync_needs_rewrite(")
             || cond.contains("cas_absent_put(")
+            || cond.contains("cas_eq_put(")
             || cond.contains("reopen_outcome(")
             || cond.contains("feed_is_lazy(")
             || cond.contains("skip_auto_flush(")

@@ -90,3 +90,21 @@ theorem cas_absent_put_as_is_dente :
     cas_absent_put_as_is true = ok true := by
   unfold cas_absent_put_as_is
   rfl
+
+/-- `put_if_eq`: live == expected ⇒ put. -/
+theorem cas_eq_put_match_puts :
+    cas_eq_put true = ok true := by
+  unfold cas_eq_put
+  rfl
+
+/-- Mismatch ⇒ do not put (CasMismatch). -/
+theorem cas_eq_put_mismatch_refuses :
+    cas_eq_put false = ok false := by
+  unfold cas_eq_put
+  rfl
+
+/-- AS-IS dente: mismatch still puts. -/
+theorem cas_eq_put_as_is_dente :
+    cas_eq_put_as_is false = ok true := by
+  unfold cas_eq_put_as_is
+  rfl
