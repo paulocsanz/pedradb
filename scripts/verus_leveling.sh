@@ -1,24 +1,16 @@
 #!/usr/bin/env bash
-# Machine-check the level-size ladder of the leveled-compaction kernel
-# (findings/2026-08-31-leveling-kernel-unenrolled — enrollment round).
+# leveling.rs rustc body is the term (Aeneas Leveling.lean).
+# A Verus stand-in is not last-wins. Fail closed if it returns.
 set -euo pipefail
-
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-# RFC-0171 P0.3 / RFC-0174: prove the file rustc links (pair leveling).
 SRC="$ROOT/crates/pedradb-core/src/leveling.rs"
-
-if [[ -x "${VERUS:-}" ]]; then
-  :
-elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then
-  VERUS="$HOME/.local/verus/verus-arm64-macos/verus"
-elif command -v verus >/dev/null 2>&1; then
-  VERUS="$(command -v verus)"
-else
-  echo "error: verus not found (install to ~/.local/verus/verus-arm64-macos or set VERUS=)" >&2
-  exit 127
+if grep -n 'verus!' "$SRC"; then
+  echo "error: verus_leveling: verus! stand-in still in leveling.rs" >&2
+  exit 1
 fi
-
-echo "verus: $VERUS"
-"$VERUS" --version
-echo "proving: $SRC"
-exec "$VERUS" "$SRC" --crate-type=lib --multiple-errors 10 --time "$@"
+if grep -n 'verus_keep_ghost' "$SRC"; then
+  echo "error: verus_leveling: cfg(verus_keep_ghost) split still in leveling.rs" >&2
+  exit 1
+fi
+echo "ok: no Verus cartoon in $SRC; term is Aeneas formal/aeneas/lean/Leveling.lean"
+exit 0

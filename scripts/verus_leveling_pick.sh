@@ -1,28 +1,16 @@
 #!/usr/bin/env bash
-# Machine-check the leveled-compaction selection atom (L0→L1 slice and
-# pushdown) — findings/2026-08-31-leveling-kernel-unenrolled, pair
-# `leveling_pick`. Split from verus_leveling.sh: the close-tier ladder and
-# this atom live in separate files (recursive spec fns in one crate perturb
-# the other's nonlinear-arithmetic queries; the split is the fix).
-# RFC-0171 P0.3 / RFC-0174: prove the file rustc links
-# (pairs leveling_pick / leveling_pushdown).
+# leveling.rs rustc pick body is the term (Aeneas Leveling.lean).
+# A Verus u64-key stand-in is not last-wins. Fail closed if it returns.
 set -euo pipefail
-
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="$ROOT/crates/pedradb-core/src/leveling.rs"
-
-if [[ -x "${VERUS:-}" ]]; then
-  :
-elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then
-  VERUS="$HOME/.local/verus/verus-arm64-macos/verus"
-elif command -v verus >/dev/null 2>&1; then
-  VERUS="$(command -v verus)"
-else
-  echo "error: verus not found (install to ~/.local/verus/verus-arm64-macos or set VERUS=)" >&2
-  exit 127
+if grep -n 'verus!' "$SRC"; then
+  echo "error: verus_leveling_pick: verus! stand-in still in leveling.rs" >&2
+  exit 1
 fi
-
-echo "verus: $VERUS"
-"$VERUS" --version
-echo "proving: $SRC"
-exec "$VERUS" "$SRC" --crate-type=lib --multiple-errors 10 --time "$@"
+if grep -n 'verus_keep_ghost' "$SRC"; then
+  echo "error: verus_leveling_pick: cfg(verus_keep_ghost) split still in leveling.rs" >&2
+  exit 1
+fi
+echo "ok: no Verus cartoon in $SRC; term is Aeneas formal/aeneas/lean/Leveling.lean"
+exit 0
