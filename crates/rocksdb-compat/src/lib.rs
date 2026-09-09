@@ -4408,7 +4408,7 @@ fn compat_compact_once<E: PedraEnv>(inner: &ConcurrentDb<E>, gate: &Mutex<()>) -
     }
     let _gate = gate.lock();
     let job = inner.with_write(|db| {
-        if db.level_file_count(0) == 0 {
+        if pedradb_core::write_admission_kernel::batch_is_empty(db.level_file_count(0) as u64) {
             return None;
         }
         // Mirror core `maybe_auto_compact`: honor `auto_reclaim` with
