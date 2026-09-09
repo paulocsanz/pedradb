@@ -494,7 +494,9 @@ impl<F: EnvFile> ValueLog<F> {
     /// Whether a G1 `sync_pending` would issue a barrier (tests / probes).
     #[must_use]
     pub fn needs_barrier(&self) -> bool {
-        !self.pending.is_empty() || !self.pending_large.is_empty() || self.needs_sync
+        !crate::write_admission_kernel::batch_is_empty(self.pending.len() as u64)
+            || !self.pending_large.is_empty()
+            || self.needs_sync
     }
 
     /// Bytes staged in userspace (tests / probes).
