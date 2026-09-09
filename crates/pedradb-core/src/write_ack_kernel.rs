@@ -18,8 +18,10 @@
 //!   every torn prefix up to `through`.
 //!
 //! AS-IS tooth: acking the group before the barrier
-//! ([`write_ack_ledger_as_is`]) breaks Inv-WAL on the spot. Verus twin:
-//! `crates/pedradb-core/verus/write_ack.rs` (`scripts/verus_write_ack.sh`).
+//! ([`write_ack_ledger_as_is`]) breaks Inv-WAL on the spot. Single
+//! artifact (Aeneas-paid): the rustc body this crate links IS the proof
+//! term — theorems over the Charon+Aeneas extract
+//! (`./scripts/aeneas_write_ack.sh`).
 
 #![forbid(unsafe_code)]
 

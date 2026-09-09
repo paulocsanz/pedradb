@@ -122,7 +122,7 @@ catálogo separa **proof objects** de **campaign gates** (família `l28_*`).
       para exec Verus (Env injetado; `profile_report` inalterado; sem
       regressão nas células G1 publicadas) — D1 no nível implementação —
       status: `done` (2026-09-06: `write_ack_kernel.rs` prova append→barrier→ack
-      sobre `wal_state_kernel`; twin `verus/write_ack.rs` 12/12 0 err (3×);
+      sobre `wal_state_kernel`; twin `verus/write_ack.rs` 12/12 0 err (3×) — mirror deletado 2026-09-09: single-artifact via `scripts/aeneas_write_ack.sh` (extrato do corpo rustc);
       wiring provado em AMBAS as seções críticas do pin — `finish_group_off_lock`
       e `lone_commit`; planta viva `verified_write_ack_on_live_profile_is_not_ok`
       (ledger avança, Inv-WAL vivo, put acked sobrevive a crash+reopen; seam
