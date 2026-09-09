@@ -1767,7 +1767,12 @@ impl SstTable {
                     return Some(None);
                 }
                 match Self::best_point_in_entry_slice(block, uk, snapshot) {
-                    Some((seq, Lookup::Found(v))) if !self.range_deleted(uk, seq, snapshot) => {
+                    Some((seq, Lookup::Found(v)))
+                        if crate::merge::visible_at(
+                            crate::key::ValueType::Value,
+                            self.range_deleted(uk, seq, snapshot),
+                        ) =>
+                    {
                         Some(Some((uk.clone(), v)))
                     }
                     Some((_, Lookup::Deleted)) => Some(None),
@@ -1802,7 +1807,10 @@ impl SstTable {
                         Some(None) => continue,
                         None => match self.point_in_blocks(&uk, snapshot, &mut load) {
                             Some((seq, Lookup::Found(v)))
-                                if !self.range_deleted(&uk, seq, snapshot) =>
+                                if crate::merge::visible_at(
+                                    crate::key::ValueType::Value,
+                                    self.range_deleted(&uk, seq, snapshot),
+                                ) =>
                             {
                                 return Some((uk, v));
                             }
@@ -3257,6 +3265,24 @@ mod tests {
         assert!(
             !body.contains("if self.range_deleted(user_key, point_seq, snapshot)"),
             "Found+range_deleted must not stay inline"
+        );
+    }
+
+    #[test]
+    fn last_visible_under_prefix_with_calls_visible_at() {
+        let src = include_str!("table.rs");
+        let body = src
+            .split("pub fn last_visible_under_prefix_with")
+            .nth(1)
+            .and_then(|s| s.split("pub(crate) fn blocks_overlapping_range").next())
+            .expect("last_visible_under_prefix_with");
+        assert!(
+            body.contains("visible_at("),
+            "last_visible Found range-hide if must call catalog visible_at"
+        );
+        assert!(
+            !body.contains("if !self.range_deleted"),
+            "Found+!range_deleted must not stay inline"
         );
     }
 
