@@ -818,6 +818,16 @@ mod tests {
         assert!(seq_exhausted(7, 6));
         assert!(!seq_exhausted_as_is(7, 6));
         assert!(!seq_exhausted(6, 6));
+        let bulk = named_fn_src(include_str!("db.rs"), "bulk_append_puts")
+            .expect("bulk_append_puts");
+        assert!(
+            bulk.contains("seq_exhausted("),
+            "bulk_append_puts must match seq_exhausted"
+        );
+        assert!(
+            !bulk.contains("last > MAX_SEQUENCE_NUMBER"),
+            "bulk_append_puts must not keep a raw seq ceiling if"
+        );
     }
 
     #[test]

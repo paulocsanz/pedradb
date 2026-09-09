@@ -5584,7 +5584,7 @@ impl<E: Env> Db<E> {
         let n64 = n as u64;
         let seq0 = self.next_seq.fetch_add(n64, Ordering::Relaxed);
         let last = seq0.saturating_add(n64.saturating_sub(1));
-        if last > MAX_SEQUENCE_NUMBER {
+        if crate::write_admission_kernel::seq_exhausted(last, MAX_SEQUENCE_NUMBER) {
             self.next_seq.fetch_sub(n64, Ordering::Relaxed);
             return Err(CoreError::Internal(
                 "sequence number space exhausted".into(),
