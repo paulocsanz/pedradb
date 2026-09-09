@@ -33,8 +33,12 @@
 //! - [`lsm_reopen_as_is`]: rebuilds the level stack in reverse order —
 //!   Inv-LSM's recency clause breaks and the probe resurrects.
 //!
-//! Verus twin: `crates/pedradb-core/verus/lsm_r1.rs`
-//! (`scripts/verus_lsm_r1.sh`).
+//! Single artifact (Aeneas-paid): the rustc body this crate links IS the
+//! proof term — model tier u64 (scan_guard/probe_order pattern), theorems
+//! over the Charon+Aeneas extract in `formal/aeneas/lean/LsmR1.lean`
+//! (`./scripts/aeneas_lsm_r1.sh`). Close production anchor (RFC-0170
+//! P2.3): R1 compaction selects the overlapping L1 via
+//! `leveling::pick_l0_to_l1`.
 
 #![forbid(unsafe_code)]
 

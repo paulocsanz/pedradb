@@ -37,28 +37,17 @@ set +e
 "$AENEAS" -backend lean -dest "$OUT/lean" "$OUT/lsm_r1_kernel.llbc"
 set -e
 python3 - "$OUT/lean/LsmR1Kernel.lean" <<'PYEOF'
+import re
 import sys
 p = sys.argv[1]
 src = open(p, encoding="utf-8").read()
-old = """axiom lsm_compact : LsmState → Std.Usize → Result (Option LsmState)
-
-/-- [pedra_aeneas_lsm_r1_kernel::lsm_compact_as_is]:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 264:0-290:1
-    Visibility: public -/
-axiom lsm_compact_as_is : LsmState → Std.Usize → Result (Option LsmState)
-
-/-- [pedra_aeneas_lsm_r1_kernel::lsm_reopen]:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 294:0-296:1
-    Visibility: public -/
-def lsm_reopen (s : LsmState) : Result LsmState := do
-  ok s
-
-/-- [pedra_aeneas_lsm_r1_kernel::lsm_reopen_as_is]:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 300:0-308:1
-    Visibility: public -/
-def lsm_reopen_as_is (s : LsmState) : Result LsmState := do
-  sorry
-"""
+old = """axiom lsm_compact : LsmState → Std.Usize → Result (Option LsmState)"""
+pat = re.compile(
+    re.escape(old)
+    + r".*?"
+    + re.escape("def lsm_reopen_as_is (s : LsmState) : Result LsmState := do\n  sorry"),
+    re.S,
+)
 new = r'''@[rust_loop_body]
 def lsm_compact_inner_loop.body
   (drop_all_tombs : Bool) (depth : Std.Usize) (src : LsmLevel)
@@ -177,9 +166,9 @@ def lsm_reopen_as_is (s : LsmState) : Result LsmState := do
   let a ← lsm_reopen_as_is_loop s s.levels 0#usize
   ok { levels := a, next_seq := s.next_seq }
 '''
-if old in src:
-    src = src.replace(old, new, 1)
-    open(p, "w", encoding="utf-8").write(src)
+src2, n = pat.subn(new, src, count=1)
+if n == 1:
+    open(p, "w", encoding="utf-8").write(src2)
     print("      patched lsm_compact / lsm_reopen_as_is")
 elif "def lsm_compact_inner_loop.body" in src:
     print("      lsm_compact already patched")

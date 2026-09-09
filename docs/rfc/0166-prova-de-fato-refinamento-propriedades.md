@@ -134,7 +134,10 @@ catálogo separa **proof objects** de **campaign gates** (família `l28_*`).
       corolário R1 nomeado (a classe do delete ressuscitado vira impossível
       por construção, não apenas detectada) — status: `done`
       (kernel `crates/pedradb-core/src/lsm_r1_kernel.rs` 6/6; twin
-      `verus/lsm_r1.rs` 64/64 0 err (2×): Inv-LSM preservado por
+      `verus/lsm_r1.rs` 64/64 0 err (2×) — **mirror deletado 2026-09-09:
+      os 4 pares são single-artifact pagos pelo extrato Aeneas do corpo
+      rustc (`scripts/aeneas_lsm_r1.sh`, `LsmR1.lean` sem sorry; close
+      citation `pick_l0_to_l1` no header do kernel)**: Inv-LSM preservado por
       write/flush/compact/reopen via fold lemmas + provIn provenance,
       `r1_theorem` probe == newest sob Inv-LSM, dentes exec probe/version,
       testemunhas nos 3 mutantes AS-IS (probe deepest-first, compact que
@@ -194,7 +197,7 @@ catálogo separa **proof objects** de **campaign gates** (família `l28_*`).
 | P1.2 | p1 | Inv-WAL preservado por append/rotate | done | `wal/wal_state_kernel.rs` + twin 18/18 0 err (2×) + planta sim; 6 pares no catálogo | 2026-09-06 |
 | P1.3 | p1 | corolário D1-modelo | done | `d1_modelo_kernel.rs` + twin 14/14 0 err (2×) + planta sim; 2 pares no catálogo | 2026-09-06 |
 | P1.4 | p1 | write→ack em exec Verus (D1 implementação) | done | `write_ack_kernel.rs` + twin 12/12 0 err (3×) + planta sim; 3 pares no catálogo; ledger 25 ns/grupo | 2026-09-06 |
-| P2.1 | p2 | Inv-LSM → R1 | done | `lsm_r1_kernel.rs` 6/6 + twin `verus/lsm_r1.rs` 64/64 0 err (2×) + planta sim; 4 pares no catálogo; exec teeth `lsm_probe`/`lsm_compact`/`lsm_reopen`/`r1_modelo`; bug real de fold-order corrigido no compact | 2026-09-06 |
+| P2.1 | p2 | Inv-LSM → R1 | done | `lsm_r1_kernel.rs` 6/6 + twin `verus/lsm_r1.rs` 64/64 0 err (2×) — mirror deletado 2026-09-09, single-artifact via `aeneas_lsm_r1.sh`/`LsmR1.lean` + planta sim; 4 pares no catálogo; exec teeth `lsm_probe`/`lsm_compact`/`lsm_reopen`/`r1_modelo`; bug real de fold-order corrigido no compact | 2026-09-06 |
 | P2.2 | p2 | T1 refinamento | done | `t1_modelo_kernel.rs` 5/5 + twin `verus/t1_modelo.rs` 8/8 0 err (2×) + planta `t1_modelo_on_live_abort_reopen_is_not_ok`; 3 pares tx_abort/tx_recover/t1_modelo | 2026-09-06 |
 | P2.3 | p2 | C1 refinamento de handlers | done | `c1_modelo_kernel.rs` 4/4 + twin `verus/c1_modelo.rs` 4/4 0 err (2×) + planta `c1_modelo_on_live_joint_is_not_ok`; 2 pares c1_advance_commit/c1_modelo | 2026-09-06 |
 | P2.4 | p2 | contabilidade proof vs campaign | done | catalog `object_kinds`/`campaign_prefixes`; lint proof-vs-campaign; report D1/R1/T1/C1; residuais re-rotulados; `test_proof_vs_campaign.py` | 2026-09-06 |

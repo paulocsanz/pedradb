@@ -6453,9 +6453,10 @@
       "as_is": "lsm_probe_as_is",
       "finding": "RFC-0166 P2.1",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-core/src/lsm_r1_kernel.rs",
-      "twin": "crates/pedradb-core/verus/lsm_r1.rs",
-      "verus": "scripts/verus_lsm_r1.sh",
+      "twin": "crates/pedradb-core/src/lsm_r1_kernel.rs",
+      "aeneas": "scripts/aeneas_lsm_r1.sh",
       "callers": [
         "crates/pedradb-core/src/lsm_r1_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -6472,9 +6473,10 @@
       "as_is": "lsm_compact_as_is",
       "finding": "RFC-0166 P2.1",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-core/src/lsm_r1_kernel.rs",
-      "twin": "crates/pedradb-core/verus/lsm_r1.rs",
-      "verus": "scripts/verus_lsm_r1.sh",
+      "twin": "crates/pedradb-core/src/lsm_r1_kernel.rs",
+      "aeneas": "scripts/aeneas_lsm_r1.sh",
       "callers": [
         "crates/pedradb-core/src/lsm_r1_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -6491,9 +6493,10 @@
       "as_is": "lsm_reopen_as_is",
       "finding": "RFC-0166 P2.1",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-core/src/lsm_r1_kernel.rs",
-      "twin": "crates/pedradb-core/verus/lsm_r1.rs",
-      "verus": "scripts/verus_lsm_r1.sh",
+      "twin": "crates/pedradb-core/src/lsm_r1_kernel.rs",
+      "aeneas": "scripts/aeneas_lsm_r1.sh",
       "callers": [
         "crates/pedradb-core/src/lsm_r1_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -6510,9 +6513,10 @@
       "as_is": "r1_modelo_as_is",
       "finding": "RFC-0166 P2.1",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-core/src/lsm_r1_kernel.rs",
-      "twin": "crates/pedradb-core/verus/lsm_r1.rs",
-      "verus": "scripts/verus_lsm_r1.sh",
+      "twin": "crates/pedradb-core/src/lsm_r1_kernel.rs",
+      "aeneas": "scripts/aeneas_lsm_r1.sh",
       "callers": [
         "crates/pedradb-core/src/lsm_r1_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"

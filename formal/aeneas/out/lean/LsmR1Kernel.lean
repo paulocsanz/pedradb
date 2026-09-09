@@ -28,17 +28,17 @@ axiom core.option.Option.Insts.CoreCmpPartialEqOption.eq
   Option T → Option T → Result Bool
 
 /-- [pedra_aeneas_lsm_r1_kernel::MAX_LEVELS]
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 42:0-42:32
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 46:0-46:32
     Visibility: public -/
 @[global_simps, irreducible] def MAX_LEVELS : Std.Usize := 4#usize
 
 /-- [pedra_aeneas_lsm_r1_kernel::CAP]
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 44:0-44:25
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 48:0-48:25
     Visibility: public -/
 @[global_simps, irreducible] def CAP : Std.Usize := 4#usize
 
 /-- [pedra_aeneas_lsm_r1_kernel::LsmEntry]
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 48:0-52:1
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 52:0-56:1
     Visibility: public -/
 structure LsmEntry where
   key : Std.U64
@@ -46,7 +46,7 @@ structure LsmEntry where
   tomb : Bool
 
 /-- [pedra_aeneas_lsm_r1_kernel::{impl core::cmp::PartialEq<pedra_aeneas_lsm_r1_kernel::LsmEntry> for pedra_aeneas_lsm_r1_kernel::LsmEntry}::eq]:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 47:22-47:31
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 51:22-51:31
     Visibility: public -/
 def LsmEntry.Insts.CoreCmpPartialEqLsmEntry.eq
   (self : LsmEntry) (other : LsmEntry) : Result Bool := do
@@ -57,7 +57,7 @@ def LsmEntry.Insts.CoreCmpPartialEqLsmEntry.eq
   else ok false
 
 /-- Trait implementation: [pedra_aeneas_lsm_r1_kernel::{impl core::cmp::PartialEq<pedra_aeneas_lsm_r1_kernel::LsmEntry> for pedra_aeneas_lsm_r1_kernel::LsmEntry}]
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 47:22-47:31 -/
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 51:22-51:31 -/
 @[reducible]
 def LsmEntry.Insts.CoreCmpPartialEqLsmEntry : core.cmp.PartialEq LsmEntry
   LsmEntry := {
@@ -65,14 +65,14 @@ def LsmEntry.Insts.CoreCmpPartialEqLsmEntry : core.cmp.PartialEq LsmEntry
 }
 
 /-- [pedra_aeneas_lsm_r1_kernel::LsmLevel]
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 56:0-59:1
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 60:0-63:1
     Visibility: public -/
 structure LsmLevel where
   entries : Array LsmEntry 4#usize
   len : Std.Usize
 
 /-- [pedra_aeneas_lsm_r1_kernel::{pedra_aeneas_lsm_r1_kernel::LsmLevel}::empty]:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 63:4-72:5
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 67:4-76:5
     Visibility: public -/
 def LsmLevel.empty : Result LsmLevel := do
   let a :=
@@ -81,14 +81,14 @@ def LsmLevel.empty : Result LsmLevel := do
   ok { entries := a, len := 0#usize }
 
 /-- [pedra_aeneas_lsm_r1_kernel::LsmState]
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 77:0-80:1
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 81:0-84:1
     Visibility: public -/
 structure LsmState where
   levels : Array LsmLevel 4#usize
   next_seq : Std.U64
 
 /-- [pedra_aeneas_lsm_r1_kernel::lsm_state_of]:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 83:0-88:1
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 87:0-92:1
     Visibility: public -/
 def lsm_state_of (next_seq : Std.U64) : Result LsmState := do
   let ll ← LsmLevel.empty
@@ -96,7 +96,7 @@ def lsm_state_of (next_seq : Std.U64) : Result LsmState := do
   ok { levels := a, next_seq }
 
 /-- [pedra_aeneas_lsm_r1_kernel::level_get]: loop body 0:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 94:4-101:1
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 98:4-105:1
     Visibility: public -/
 @[rust_loop_body]
 def level_get_loop.body
@@ -113,7 +113,7 @@ def level_get_loop.body
   else ok (done none)
 
 /-- [pedra_aeneas_lsm_r1_kernel::level_get]: loop 0:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 94:4-101:1
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 98:4-105:1
     Visibility: public -/
 @[rust_loop]
 def level_get_loop
@@ -125,7 +125,7 @@ def level_get_loop
     i
 
 /-- [pedra_aeneas_lsm_r1_kernel::level_get]:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 92:0-101:1
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 96:0-105:1
     Visibility: public -/
 @[reducible]
 def level_get
@@ -133,7 +133,7 @@ def level_get
   level_get_loop level key 0#usize
 
 /-- [pedra_aeneas_lsm_r1_kernel::level_put]: loop body 0:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 1:0-118:1 -/
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 1:0-122:1 -/
 @[rust_loop_body]
 def level_put_loop.body
   (level : LsmLevel) (e : LsmEntry) (i : Std.Usize) :
@@ -158,7 +158,7 @@ def level_put_loop.body
       ok (done (true, a, i1))
 
 /-- [pedra_aeneas_lsm_r1_kernel::level_put]: loop 0:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 1:0-118:1 -/
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 1:0-122:1 -/
 @[rust_loop]
 def level_put_loop
   (level : LsmLevel) (e : LsmEntry) (i : Std.Usize) :
@@ -169,14 +169,14 @@ def level_put_loop
     i
 
 /-- [pedra_aeneas_lsm_r1_kernel::level_put]:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 103:0-118:1 -/
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 107:0-122:1 -/
 def level_put
   (level : LsmLevel) (e : LsmEntry) : Result (Bool × LsmLevel) := do
   let (b, a, i) ← level_put_loop level e 0#usize
   ok (b, { entries := a, len := i })
 
 /-- [pedra_aeneas_lsm_r1_kernel::level_remove]: loop body 0:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 122:4-131:1 -/
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 126:4-135:1 -/
 @[rust_loop_body]
 def level_remove_loop.body
   (level : LsmLevel) (key : Std.U64) (i : Std.Usize) :
@@ -196,7 +196,7 @@ def level_remove_loop.body
   else ok (done (level.entries, level.len))
 
 /-- [pedra_aeneas_lsm_r1_kernel::level_remove]: loop 0:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 122:4-131:1 -/
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 126:4-135:1 -/
 @[rust_loop]
 def level_remove_loop
   (level : LsmLevel) (key : Std.U64) (i : Std.Usize) :
@@ -207,23 +207,23 @@ def level_remove_loop
     i
 
 /-- [pedra_aeneas_lsm_r1_kernel::level_remove]:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 120:0-131:1 -/
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 124:0-135:1 -/
 def level_remove (level : LsmLevel) (key : Std.U64) : Result LsmLevel := do
   let (a, i) ← level_remove_loop level key 0#usize
   ok { entries := a, len := i }
 
 /-- [pedra_aeneas_lsm_r1_kernel::level_distinct]:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 135:0-148:1
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 139:0-152:1
     Visibility: public -/
 axiom level_distinct : LsmLevel → Result Bool
 
 /-- [pedra_aeneas_lsm_r1_kernel::inv_lsm]:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 154:0-179:1
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 158:0-183:1
     Visibility: public -/
 axiom inv_lsm : LsmState → Result Bool
 
 /-- [pedra_aeneas_lsm_r1_kernel::lsm_write]:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 183:0-196:1
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 187:0-200:1
     Visibility: public -/
 def lsm_write
   (s : LsmState) (key : Std.U64) (tomb : Bool) : Result LsmState := do
@@ -235,7 +235,7 @@ def lsm_write
   ok { levels := a, next_seq := i }
 
 /-- [pedra_aeneas_lsm_r1_kernel::lsm_compact]:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 232:0-258:1
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 236:0-262:1
     Visibility: public -/
 @[rust_loop_body]
 def lsm_compact_inner_loop.body
@@ -355,8 +355,9 @@ def lsm_reopen_as_is (s : LsmState) : Result LsmState := do
   let a ← lsm_reopen_as_is_loop s s.levels 0#usize
   ok { levels := a, next_seq := s.next_seq }
 
+
 /-- [pedra_aeneas_lsm_r1_kernel::lsm_probe]: loop body 0:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 314:4-321:1
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 318:4-325:1
     Visibility: public -/
 @[rust_loop_body]
 def lsm_probe_loop.body
@@ -374,7 +375,7 @@ def lsm_probe_loop.body
   else ok (done none)
 
 /-- [pedra_aeneas_lsm_r1_kernel::lsm_probe]: loop 0:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 314:4-321:1
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 318:4-325:1
     Visibility: public -/
 @[rust_loop]
 def lsm_probe_loop
@@ -386,14 +387,14 @@ def lsm_probe_loop
     i
 
 /-- [pedra_aeneas_lsm_r1_kernel::lsm_probe]:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 312:0-321:1
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 316:0-325:1
     Visibility: public -/
 @[reducible]
 def lsm_probe (s : LsmState) (key : Std.U64) : Result (Option LsmEntry) := do
   lsm_probe_loop s key 0#usize
 
 /-- [pedra_aeneas_lsm_r1_kernel::lsm_probe_as_is]: loop body 0:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 328:4-335:1
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 332:4-339:1
     Visibility: public -/
 @[rust_loop_body]
 def lsm_probe_as_is_loop.body
@@ -411,7 +412,7 @@ def lsm_probe_as_is_loop.body
   else ok (done none)
 
 /-- [pedra_aeneas_lsm_r1_kernel::lsm_probe_as_is]: loop 0:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 328:4-335:1
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 332:4-339:1
     Visibility: public -/
 @[rust_loop]
 def lsm_probe_as_is_loop
@@ -423,7 +424,7 @@ def lsm_probe_as_is_loop
     i
 
 /-- [pedra_aeneas_lsm_r1_kernel::lsm_probe_as_is]:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 326:0-335:1
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 330:0-339:1
     Visibility: public -/
 @[reducible]
 def lsm_probe_as_is
@@ -431,7 +432,7 @@ def lsm_probe_as_is
   lsm_probe_as_is_loop s key MAX_LEVELS
 
 /-- [pedra_aeneas_lsm_r1_kernel::r1_newest]: loop body 0:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 342:4-354:5
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 346:4-358:5
     Visibility: public -/
 @[rust_loop_body]
 def r1_newest_loop.body
@@ -463,7 +464,7 @@ def r1_newest_loop.body
   else ok (done best)
 
 /-- [pedra_aeneas_lsm_r1_kernel::r1_newest]: loop 0:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 342:4-354:5
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 346:4-358:5
     Visibility: public -/
 @[rust_loop]
 def r1_newest_loop
@@ -475,14 +476,14 @@ def r1_newest_loop
     (best, i)
 
 /-- [pedra_aeneas_lsm_r1_kernel::r1_newest]:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 339:0-356:1
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 343:0-360:1
     Visibility: public -/
 @[reducible]
 def r1_newest (s : LsmState) (key : Std.U64) : Result (Option LsmEntry) := do
   r1_newest_loop s key none 0#usize
 
 /-- [pedra_aeneas_lsm_r1_kernel::r1_modelo]:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 362:0-364:1
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 366:0-368:1
     Visibility: public -/
 def r1_modelo (s : LsmState) (key : Std.U64) : Result Bool := do
   let b ← inv_lsm s
@@ -495,7 +496,7 @@ def r1_modelo (s : LsmState) (key : Std.U64) : Result Bool := do
   else ok true
 
 /-- [pedra_aeneas_lsm_r1_kernel::r1_modelo_as_is]:
-    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 370:0-372:1
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 374:0-376:1
     Visibility: public -/
 def r1_modelo_as_is (s : LsmState) (key : Std.U64) : Result Bool := do
   let b ← inv_lsm s
