@@ -26,3 +26,24 @@ theorem prefix_exclusive_end_as_is_dente (p : Slice U8) :
         let e ← alloc.slice.Slice.to_vec core.clone.CloneU8 p
         let e1 ← alloc.vec.Vec.push e 255#u8
         ok (some e1)) := rfl
+
+/-- Catalog entry: unbounded prefix end is `starts_with` (rustc `&[u8]`). Dual-unfold. -/
+theorem key_in_prefix_range_unbounded_end (user pref) :
+    key_in_prefix_range user pref none =
+      (do
+        let b ← core.slice.Slice.starts_with core.cmp.PartialEqU8 user pref
+        if b then ok true else ok false) := by
+  unfold key_in_prefix_range
+  rfl
+
+/-- Exclusive end after a prefix hit is slice `<` (F57/F58). Dual-unfold. -/
+theorem key_in_prefix_range_exclusive (user pref e) :
+    key_in_prefix_range user pref (some e) =
+      (do
+        let b ← core.slice.Slice.starts_with core.cmp.PartialEqU8 user pref
+        if b then
+          Shared1A.Insts.CoreCmpPartialOrdShared0B.lt
+            (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) user e
+        else ok false) := by
+  unfold key_in_prefix_range
+  rfl
