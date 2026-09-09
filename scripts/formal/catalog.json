@@ -6176,9 +6176,10 @@
       "id": "d1_put_ok",
       "finding": "RFC-0166 P1.3",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-core/src/d1_modelo_kernel.rs",
-      "twin": "crates/pedradb-core/verus/d1_modelo.rs",
-      "verus": "scripts/verus_d1_modelo.sh",
+      "twin": "crates/pedradb-core/src/d1_modelo_kernel.rs",
+      "aeneas": "scripts/aeneas_d1_modelo.sh",
       "callers": [
         "crates/pedradb-core/src/d1_modelo_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -6195,9 +6196,10 @@
       "id": "d1_modelo",
       "finding": "RFC-0166 P1.3",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-core/src/d1_modelo_kernel.rs",
-      "twin": "crates/pedradb-core/verus/d1_modelo.rs",
-      "verus": "scripts/verus_d1_modelo.sh",
+      "twin": "crates/pedradb-core/src/d1_modelo_kernel.rs",
+      "aeneas": "scripts/aeneas_d1_modelo.sh",
       "callers": [
         "crates/pedradb-core/src/d1_modelo_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"

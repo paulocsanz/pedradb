@@ -17,8 +17,17 @@
 //!
 //! AS-IS mutants ack without the barrier and call torn cuts below the
 //! barrier floor "survivable" — both are witnessed to break the corollary.
-//! Verus twin: `crates/pedradb-core/verus/d1_modelo.rs`
-//! (`scripts/verus_d1_modelo.sh`).
+//!
+//! Single artifact (RFC-0171): the rustc body above **is** the proof
+//! object — extracted whole-file by Charon+Aeneas (`scripts/aeneas_d1_modelo.sh`
+//! → `out/lean/D1ModeloKernel.lean`, sorry-free; theorems
+//! `formal/aeneas/lean/D1Modelo.lean`). RFC-0170 P2.3 close citations:
+//! `put_ok` refines `prefix_exclusive_end` (torn prefix never splits a
+//! record) and the write-ack barrier (`write_ack` family, RFC-0166 P1.4);
+//! Inv-WAL via `wal_state_kernel::inv_wal`. The former Verus twin
+//! `verus/d1_modelo.rs` (and runner `scripts/verus_d1_modelo.sh`) was
+//! deleted 2026-09-09: it re-proved a same-shaped state model, not this
+//! rustc body.
 
 #![forbid(unsafe_code)]
 

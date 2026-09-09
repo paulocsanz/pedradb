@@ -15,7 +15,7 @@ set_option maxRecDepth 2048
 namespace pedra_aeneas_d1_modelo_kernel
 
 /-- [pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::WalState]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 34:0-41:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 35:0-42:1
     Visibility: public -/
 structure wal.wal_state_kernel.WalState where
   acked : Std.U64
@@ -23,7 +23,7 @@ structure wal.wal_state_kernel.WalState where
   written : Std.U64
 
 /-- [pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::wal_ack]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 86:0-96:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 87:0-97:1
     Visibility: public -/
 def wal.wal_state_kernel.wal_ack
   (s : wal.wal_state_kernel.WalState) (n : Std.U64) :
@@ -43,14 +43,14 @@ def group_commit_kernel.fsync_promotes_pending
   ok os_honest
 
 /-- [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::CrashModel]
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 46:0-51:1
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 27:0-32:1
     Visibility: public -/
 structure env_crash_kernel.CrashModel where
   written : Std.U64
   synced : Std.U64
 
 /-- [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::SyncHonesty]
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 36:0-41:1
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 17:0-22:1
     Visibility: public -/
 @[discriminant isize]
 inductive env_crash_kernel.SyncHonesty where
@@ -58,7 +58,7 @@ inductive env_crash_kernel.SyncHonesty where
 | Lying : env_crash_kernel.SyncHonesty
 
 /-- [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::{impl core::cmp::PartialEq<pedra_aeneas_d1_modelo_kernel::env_crash_kernel::SyncHonesty> for pedra_aeneas_d1_modelo_kernel::env_crash_kernel::SyncHonesty}::eq]:
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 35:29-35:38
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 16:29-16:38
     Visibility: public -/
 def env_crash_kernel.SyncHonesty.Insts.CoreCmpPartialEqSyncHonesty.eq
   (self : env_crash_kernel.SyncHonesty) (other : env_crash_kernel.SyncHonesty)
@@ -70,7 +70,7 @@ def env_crash_kernel.SyncHonesty.Insts.CoreCmpPartialEqSyncHonesty.eq
   ok (self1 = other1)
 
 /-- [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::sync]:
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 79:0-88:1
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 60:0-69:1
     Visibility: public -/
 def env_crash_kernel.sync
   (m : env_crash_kernel.CrashModel) (honesty : env_crash_kernel.SyncHonesty) :
@@ -85,7 +85,7 @@ def env_crash_kernel.sync
   else ok m
 
 /-- [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::{pedra_aeneas_d1_modelo_kernel::env_crash_kernel::CrashModel}::of]:
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 57:4-62:5
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 38:4-43:5
     Visibility: public -/
 def env_crash_kernel.CrashModel.of
   (written : Std.U64) (synced : Std.U64) :
@@ -95,7 +95,7 @@ def env_crash_kernel.CrashModel.of
   ok { written, synced := i }
 
 /-- [pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::wal_sync]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 74:0-81:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 75:0-82:1
     Visibility: public -/
 def wal.wal_state_kernel.wal_sync
   (s : wal.wal_state_kernel.WalState) (honesty : env_crash_kernel.SyncHonesty)
@@ -107,7 +107,7 @@ def wal.wal_state_kernel.wal_sync
   ok { s with synced := m.synced, written := m.written }
 
 /-- [pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::wal_append]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 63:0-69:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 64:0-70:1
     Visibility: public -/
 def wal.wal_state_kernel.wal_append
   (s : wal.wal_state_kernel.WalState) (n : Std.U64) :
@@ -117,7 +117,7 @@ def wal.wal_state_kernel.wal_append
   ok { s with written := i }
 
 /-- [pedra_aeneas_d1_modelo_kernel::d1_modelo_kernel::put_ok]:
-    Source: 'src/../../../../crates/pedradb-core/src/d1_modelo_kernel.rs', lines 35:0-39:1
+    Source: 'src/../../../../crates/pedradb-core/src/d1_modelo_kernel.rs', lines 44:0-48:1
     Visibility: public -/
 def d1_modelo_kernel.put_ok
   (s0 : wal.wal_state_kernel.WalState) (rec_len : Std.U64) :
@@ -130,7 +130,7 @@ def d1_modelo_kernel.put_ok
   wal.wal_state_kernel.wal_ack s2 i
 
 /-- [pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::inv_wal]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 57:0-59:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 58:0-60:1
     Visibility: public -/
 def wal.wal_state_kernel.inv_wal
   (s : wal.wal_state_kernel.WalState) : Result Bool := do
@@ -139,7 +139,7 @@ def wal.wal_state_kernel.inv_wal
   else ok false
 
 /-- [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::crash_legal]:
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 107:0-109:1
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 88:0-90:1
     Visibility: public -/
 def env_crash_kernel.crash_legal
   (m : env_crash_kernel.CrashModel) (cut : Std.U64) : Result Bool := do
@@ -148,7 +148,7 @@ def env_crash_kernel.crash_legal
   else ok false
 
 /-- [pedra_aeneas_d1_modelo_kernel::d1_modelo_kernel::d1_modelo]:
-    Source: 'src/../../../../crates/pedradb-core/src/d1_modelo_kernel.rs', lines 45:0-49:1
+    Source: 'src/../../../../crates/pedradb-core/src/d1_modelo_kernel.rs', lines 54:0-58:1
     Visibility: public -/
 def d1_modelo_kernel.d1_modelo
   (s : wal.wal_state_kernel.WalState) (rec_end : Std.U64) (cut : Std.U64) :
@@ -168,7 +168,7 @@ def d1_modelo_kernel.d1_modelo
   else ok true
 
 /-- [pedra_aeneas_d1_modelo_kernel::d1_modelo_kernel::put_lying_never_acks]:
-    Source: 'src/../../../../crates/pedradb-core/src/d1_modelo_kernel.rs', lines 56:0-61:1
+    Source: 'src/../../../../crates/pedradb-core/src/d1_modelo_kernel.rs', lines 65:0-70:1
     Visibility: public -/
 def d1_modelo_kernel.put_lying_never_acks
   (s0 : wal.wal_state_kernel.WalState) (rec_len : Std.U64) : Result Bool := do
@@ -184,7 +184,7 @@ def d1_modelo_kernel.put_lying_never_acks
        else ok false
 
 /-- [pedra_aeneas_d1_modelo_kernel::d1_modelo_kernel::put_ok_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/d1_modelo_kernel.rs', lines 69:0-77:1
+    Source: 'src/../../../../crates/pedradb-core/src/d1_modelo_kernel.rs', lines 78:0-86:1
     Visibility: public -/
 def d1_modelo_kernel.put_ok_as_is
   (s0 : wal.wal_state_kernel.WalState) (rec_len : Std.U64) :
@@ -196,14 +196,14 @@ def d1_modelo_kernel.put_ok_as_is
   ok { s1 with acked := s1.written, synced := m.synced }
 
 /-- [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::crash_legal_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 140:0-142:1
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 121:0-123:1
     Visibility: public -/
 def env_crash_kernel.crash_legal_as_is
   (m : env_crash_kernel.CrashModel) (cut : Std.U64) : Result Bool := do
   ok (cut <= m.written)
 
 /-- [pedra_aeneas_d1_modelo_kernel::d1_modelo_kernel::d1_modelo_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/d1_modelo_kernel.rs', lines 82:0-86:1
+    Source: 'src/../../../../crates/pedradb-core/src/d1_modelo_kernel.rs', lines 91:0-95:1
     Visibility: public -/
 def d1_modelo_kernel.d1_modelo_as_is
   (s : wal.wal_state_kernel.WalState) (rec_end : Std.U64) (cut : Std.U64) :
@@ -223,7 +223,7 @@ def d1_modelo_kernel.d1_modelo_as_is
   else ok true
 
 /-- [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::{impl core::fmt::Debug for pedra_aeneas_d1_modelo_kernel::env_crash_kernel::SyncHonesty}::fmt]:
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 35:9-35:14
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 16:9-16:14
     Visibility: public -/
 def env_crash_kernel.SyncHonesty.Insts.CoreFmtDebug.fmt
   (self : env_crash_kernel.SyncHonesty) (f : core.fmt.Formatter) :
@@ -236,7 +236,7 @@ def env_crash_kernel.SyncHonesty.Insts.CoreFmtDebug.fmt
     core.fmt.Formatter.write_str f (toStr "Lying")
 
 /-- Trait implementation: [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::{impl core::fmt::Debug for pedra_aeneas_d1_modelo_kernel::env_crash_kernel::SyncHonesty}]
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 35:9-35:14 -/
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 16:9-16:14 -/
 @[reducible]
 def env_crash_kernel.SyncHonesty.Insts.CoreFmtDebug : core.fmt.Debug
   env_crash_kernel.SyncHonesty := {
@@ -244,7 +244,7 @@ def env_crash_kernel.SyncHonesty.Insts.CoreFmtDebug : core.fmt.Debug
 }
 
 /-- [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::{impl core::clone::Clone for pedra_aeneas_d1_modelo_kernel::env_crash_kernel::SyncHonesty}::clone]:
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 35:16-35:21
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 16:16-16:21
     Visibility: public -/
 def env_crash_kernel.SyncHonesty.Insts.CoreCloneClone.clone
   (self : env_crash_kernel.SyncHonesty) :
@@ -253,7 +253,7 @@ def env_crash_kernel.SyncHonesty.Insts.CoreCloneClone.clone
   ok self
 
 /-- Trait implementation: [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::{impl core::clone::Clone for pedra_aeneas_d1_modelo_kernel::env_crash_kernel::SyncHonesty}]
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 35:16-35:21 -/
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 16:16-16:21 -/
 @[reducible]
 def env_crash_kernel.SyncHonesty.Insts.CoreCloneClone : core.clone.Clone
   env_crash_kernel.SyncHonesty := {
@@ -261,7 +261,7 @@ def env_crash_kernel.SyncHonesty.Insts.CoreCloneClone : core.clone.Clone
 }
 
 /-- Trait implementation: [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::{impl core::marker::Copy for pedra_aeneas_d1_modelo_kernel::env_crash_kernel::SyncHonesty}]
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 35:23-35:27 -/
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 16:23-16:27 -/
 @[reducible]
 def env_crash_kernel.SyncHonesty.Insts.CoreMarkerCopy : core.marker.Copy
   env_crash_kernel.SyncHonesty := {
@@ -269,14 +269,14 @@ def env_crash_kernel.SyncHonesty.Insts.CoreMarkerCopy : core.marker.Copy
 }
 
 /-- Trait implementation: [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_d1_modelo_kernel::env_crash_kernel::SyncHonesty}]
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 35:29-35:38 -/
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 16:29-16:38 -/
 @[reducible]
 def env_crash_kernel.SyncHonesty.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq env_crash_kernel.SyncHonesty := {
 }
 
 /-- Trait implementation: [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::{impl core::cmp::PartialEq<pedra_aeneas_d1_modelo_kernel::env_crash_kernel::SyncHonesty> for pedra_aeneas_d1_modelo_kernel::env_crash_kernel::SyncHonesty}]
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 35:29-35:38 -/
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 16:29-16:38 -/
 @[reducible]
 def env_crash_kernel.SyncHonesty.Insts.CoreCmpPartialEqSyncHonesty :
   core.cmp.PartialEq env_crash_kernel.SyncHonesty env_crash_kernel.SyncHonesty
@@ -285,14 +285,14 @@ def env_crash_kernel.SyncHonesty.Insts.CoreCmpPartialEqSyncHonesty :
 }
 
 /-- [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::{impl core::cmp::Eq for pedra_aeneas_d1_modelo_kernel::env_crash_kernel::SyncHonesty}::assert_fields_are_eq]:
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 35:40-35:42
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 16:40-16:42
     Visibility: public -/
 def env_crash_kernel.SyncHonesty.Insts.CoreCmpEq.assert_fields_are_eq
   (self : env_crash_kernel.SyncHonesty) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::{impl core::cmp::Eq for pedra_aeneas_d1_modelo_kernel::env_crash_kernel::SyncHonesty}]
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 35:40-35:42 -/
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 16:40-16:42 -/
 @[reducible]
 def env_crash_kernel.SyncHonesty.Insts.CoreCmpEq : core.cmp.Eq
   env_crash_kernel.SyncHonesty := {
@@ -303,7 +303,7 @@ def env_crash_kernel.SyncHonesty.Insts.CoreCmpEq : core.cmp.Eq
 }
 
 /-- [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::{impl core::fmt::Debug for pedra_aeneas_d1_modelo_kernel::env_crash_kernel::CrashModel}::fmt]:
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 45:9-45:14
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 26:9-26:14
     Visibility: public -/
 def env_crash_kernel.CrashModel.Insts.CoreFmtDebug.fmt
   (self : env_crash_kernel.CrashModel) (f : core.fmt.Formatter) :
@@ -315,7 +315,7 @@ def env_crash_kernel.CrashModel.Insts.CoreFmtDebug.fmt
     "written") dyn (toStr "synced") dyn1
 
 /-- Trait implementation: [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::{impl core::fmt::Debug for pedra_aeneas_d1_modelo_kernel::env_crash_kernel::CrashModel}]
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 45:9-45:14 -/
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 26:9-26:14 -/
 @[reducible]
 def env_crash_kernel.CrashModel.Insts.CoreFmtDebug : core.fmt.Debug
   env_crash_kernel.CrashModel := {
@@ -323,7 +323,7 @@ def env_crash_kernel.CrashModel.Insts.CoreFmtDebug : core.fmt.Debug
 }
 
 /-- [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::{impl core::clone::Clone for pedra_aeneas_d1_modelo_kernel::env_crash_kernel::CrashModel}::clone]:
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 45:16-45:21
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 26:16-26:21
     Visibility: public -/
 def env_crash_kernel.CrashModel.Insts.CoreCloneClone.clone
   (self : env_crash_kernel.CrashModel) :
@@ -332,7 +332,7 @@ def env_crash_kernel.CrashModel.Insts.CoreCloneClone.clone
   ok self
 
 /-- Trait implementation: [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::{impl core::clone::Clone for pedra_aeneas_d1_modelo_kernel::env_crash_kernel::CrashModel}]
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 45:16-45:21 -/
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 26:16-26:21 -/
 @[reducible]
 def env_crash_kernel.CrashModel.Insts.CoreCloneClone : core.clone.Clone
   env_crash_kernel.CrashModel := {
@@ -340,7 +340,7 @@ def env_crash_kernel.CrashModel.Insts.CoreCloneClone : core.clone.Clone
 }
 
 /-- Trait implementation: [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::{impl core::marker::Copy for pedra_aeneas_d1_modelo_kernel::env_crash_kernel::CrashModel}]
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 45:23-45:27 -/
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 26:23-26:27 -/
 @[reducible]
 def env_crash_kernel.CrashModel.Insts.CoreMarkerCopy : core.marker.Copy
   env_crash_kernel.CrashModel := {
@@ -348,14 +348,14 @@ def env_crash_kernel.CrashModel.Insts.CoreMarkerCopy : core.marker.Copy
 }
 
 /-- Trait implementation: [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_d1_modelo_kernel::env_crash_kernel::CrashModel}]
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 45:29-45:38 -/
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 26:29-26:38 -/
 @[reducible]
 def env_crash_kernel.CrashModel.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq env_crash_kernel.CrashModel := {
 }
 
 /-- [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::{impl core::cmp::PartialEq<pedra_aeneas_d1_modelo_kernel::env_crash_kernel::CrashModel> for pedra_aeneas_d1_modelo_kernel::env_crash_kernel::CrashModel}::eq]:
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 45:29-45:38
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 26:29-26:38
     Visibility: public -/
 def env_crash_kernel.CrashModel.Insts.CoreCmpPartialEqCrashModel.eq
   (self : env_crash_kernel.CrashModel) (other : env_crash_kernel.CrashModel) :
@@ -366,7 +366,7 @@ def env_crash_kernel.CrashModel.Insts.CoreCmpPartialEqCrashModel.eq
   else ok false
 
 /-- Trait implementation: [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::{impl core::cmp::PartialEq<pedra_aeneas_d1_modelo_kernel::env_crash_kernel::CrashModel> for pedra_aeneas_d1_modelo_kernel::env_crash_kernel::CrashModel}]
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 45:29-45:38 -/
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 26:29-26:38 -/
 @[reducible]
 def env_crash_kernel.CrashModel.Insts.CoreCmpPartialEqCrashModel :
   core.cmp.PartialEq env_crash_kernel.CrashModel env_crash_kernel.CrashModel
@@ -375,14 +375,14 @@ def env_crash_kernel.CrashModel.Insts.CoreCmpPartialEqCrashModel :
 }
 
 /-- [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::{impl core::cmp::Eq for pedra_aeneas_d1_modelo_kernel::env_crash_kernel::CrashModel}::assert_fields_are_eq]:
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 45:40-45:42
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 26:40-26:42
     Visibility: public -/
 def env_crash_kernel.CrashModel.Insts.CoreCmpEq.assert_fields_are_eq
   (self : env_crash_kernel.CrashModel) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::{impl core::cmp::Eq for pedra_aeneas_d1_modelo_kernel::env_crash_kernel::CrashModel}]
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 45:40-45:42 -/
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 26:40-26:42 -/
 @[reducible]
 def env_crash_kernel.CrashModel.Insts.CoreCmpEq : core.cmp.Eq
   env_crash_kernel.CrashModel := {
@@ -392,7 +392,7 @@ def env_crash_kernel.CrashModel.Insts.CoreCmpEq : core.cmp.Eq
 }
 
 /-- [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::append]:
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 68:0-73:1
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 49:0-54:1
     Visibility: public -/
 def env_crash_kernel.append
   (m : env_crash_kernel.CrashModel) (n : Std.U64) :
@@ -402,7 +402,7 @@ def env_crash_kernel.append
   ok { m with written := i }
 
 /-- [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::barrier_floor_holds]:
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 114:0-116:1
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 95:0-97:1
     Visibility: public -/
 def env_crash_kernel.barrier_floor_holds
   (m : env_crash_kernel.CrashModel) (cut : Std.U64) : Result Bool := do
@@ -412,7 +412,7 @@ def env_crash_kernel.barrier_floor_holds
   else ok true
 
 /-- [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::no_invented_bytes_holds]:
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 122:0-124:1
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 103:0-105:1
     Visibility: public -/
 def env_crash_kernel.no_invented_bytes_holds
   (m : env_crash_kernel.CrashModel) (cut : Std.U64) : Result Bool := do
@@ -422,7 +422,7 @@ def env_crash_kernel.no_invented_bytes_holds
   else ok true
 
 /-- [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::honest_sync_protects_all]:
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 130:0-133:1
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 111:0-114:1
     Visibility: public -/
 def env_crash_kernel.honest_sync_protects_all
   (m : env_crash_kernel.CrashModel) (cut : Std.U64) : Result Bool := do
@@ -433,7 +433,7 @@ def env_crash_kernel.honest_sync_protects_all
   else ok true
 
 /-- [pedra_aeneas_d1_modelo_kernel::env_crash_kernel::sync_lying_promotes_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 148:0-153:1
+    Source: 'src/../../../../crates/pedradb-core/src/env_crash_kernel.rs', lines 129:0-134:1
     Visibility: public -/
 def env_crash_kernel.sync_lying_promotes_as_is
   (m : env_crash_kernel.CrashModel) : Result env_crash_kernel.CrashModel := do
@@ -1035,7 +1035,7 @@ def group_commit_kernel.fsync_lie_closes_tcg_guest_as_is : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::{impl core::fmt::Debug for pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::WalState}::fmt]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 33:9-33:14
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 34:9-34:14
     Visibility: public -/
 def wal.wal_state_kernel.WalState.Insts.CoreFmtDebug.fmt
   (self : wal.wal_state_kernel.WalState) (f : core.fmt.Formatter) :
@@ -1048,7 +1048,7 @@ def wal.wal_state_kernel.WalState.Insts.CoreFmtDebug.fmt
     "acked") dyn (toStr "synced") dyn1 (toStr "written") dyn2
 
 /-- Trait implementation: [pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::{impl core::fmt::Debug for pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::WalState}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 33:9-33:14 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 34:9-34:14 -/
 @[reducible]
 def wal.wal_state_kernel.WalState.Insts.CoreFmtDebug : core.fmt.Debug
   wal.wal_state_kernel.WalState := {
@@ -1056,7 +1056,7 @@ def wal.wal_state_kernel.WalState.Insts.CoreFmtDebug : core.fmt.Debug
 }
 
 /-- [pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::{impl core::clone::Clone for pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::WalState}::clone]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 33:16-33:21
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 34:16-34:21
     Visibility: public -/
 def wal.wal_state_kernel.WalState.Insts.CoreCloneClone.clone
   (self : wal.wal_state_kernel.WalState) :
@@ -1065,7 +1065,7 @@ def wal.wal_state_kernel.WalState.Insts.CoreCloneClone.clone
   ok self
 
 /-- Trait implementation: [pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::{impl core::clone::Clone for pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::WalState}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 33:16-33:21 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 34:16-34:21 -/
 @[reducible]
 def wal.wal_state_kernel.WalState.Insts.CoreCloneClone : core.clone.Clone
   wal.wal_state_kernel.WalState := {
@@ -1073,7 +1073,7 @@ def wal.wal_state_kernel.WalState.Insts.CoreCloneClone : core.clone.Clone
 }
 
 /-- Trait implementation: [pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::{impl core::marker::Copy for pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::WalState}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 33:23-33:27 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 34:23-34:27 -/
 @[reducible]
 def wal.wal_state_kernel.WalState.Insts.CoreMarkerCopy : core.marker.Copy
   wal.wal_state_kernel.WalState := {
@@ -1081,14 +1081,14 @@ def wal.wal_state_kernel.WalState.Insts.CoreMarkerCopy : core.marker.Copy
 }
 
 /-- Trait implementation: [pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::WalState}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 33:29-33:38 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 34:29-34:38 -/
 @[reducible]
 def wal.wal_state_kernel.WalState.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq wal.wal_state_kernel.WalState := {
 }
 
 /-- [pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::{impl core::cmp::PartialEq<pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::WalState> for pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::WalState}::eq]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 33:29-33:38
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 34:29-34:38
     Visibility: public -/
 def wal.wal_state_kernel.WalState.Insts.CoreCmpPartialEqWalState.eq
   (self : wal.wal_state_kernel.WalState)
@@ -1103,7 +1103,7 @@ def wal.wal_state_kernel.WalState.Insts.CoreCmpPartialEqWalState.eq
   else ok false
 
 /-- Trait implementation: [pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::{impl core::cmp::PartialEq<pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::WalState> for pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::WalState}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 33:29-33:38 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 34:29-34:38 -/
 @[reducible]
 def wal.wal_state_kernel.WalState.Insts.CoreCmpPartialEqWalState :
   core.cmp.PartialEq wal.wal_state_kernel.WalState
@@ -1112,14 +1112,14 @@ def wal.wal_state_kernel.WalState.Insts.CoreCmpPartialEqWalState :
 }
 
 /-- [pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::{impl core::cmp::Eq for pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::WalState}::assert_fields_are_eq]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 33:40-33:42
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 34:40-34:42
     Visibility: public -/
 def wal.wal_state_kernel.WalState.Insts.CoreCmpEq.assert_fields_are_eq
   (self : wal.wal_state_kernel.WalState) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::{impl core::cmp::Eq for pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::WalState}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 33:40-33:42 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 34:40-34:42 -/
 @[reducible]
 def wal.wal_state_kernel.WalState.Insts.CoreCmpEq : core.cmp.Eq
   wal.wal_state_kernel.WalState := {
@@ -1129,7 +1129,7 @@ def wal.wal_state_kernel.WalState.Insts.CoreCmpEq : core.cmp.Eq
 }
 
 /-- [pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::wal_state_of]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 45:0-52:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 46:0-53:1
     Visibility: public -/
 def wal.wal_state_kernel.wal_state_of
   (written : Std.U64) (synced : Std.U64) (acked : Std.U64) :
@@ -1140,7 +1140,7 @@ def wal.wal_state_kernel.wal_state_of
   ok { acked := i, synced := synced1, written }
 
 /-- [pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::wal_rotate]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 101:0-107:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 102:0-108:1
     Visibility: public -/
 def wal.wal_state_kernel.wal_rotate
   (s : wal.wal_state_kernel.WalState) :
@@ -1154,7 +1154,7 @@ def wal.wal_state_kernel.wal_rotate
   else ok s
 
 /-- [pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::acked_survives_every_legal_crash]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 112:0-114:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 113:0-115:1
     Visibility: public -/
 def wal.wal_state_kernel.acked_survives_every_legal_crash
   (s : wal.wal_state_kernel.WalState) (cut : Std.U64) : Result Bool := do
@@ -1165,14 +1165,14 @@ def wal.wal_state_kernel.acked_survives_every_legal_crash
   else ok true
 
 /-- [pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::inv_wal_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 121:0-123:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 122:0-124:1
     Visibility: public -/
 def wal.wal_state_kernel.inv_wal_as_is
   (s : wal.wal_state_kernel.WalState) : Result Bool := do
   ok (s.synced <= s.written)
 
 /-- [pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::wal_append_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 128:0-134:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 129:0-135:1
     Visibility: public -/
 def wal.wal_state_kernel.wal_append_as_is
   (s : wal.wal_state_kernel.WalState) (n : Std.U64) :
@@ -1183,7 +1183,7 @@ def wal.wal_state_kernel.wal_append_as_is
   ok { s with acked := i, written := i1 }
 
 /-- [pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::wal_sync_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 138:0-144:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 139:0-145:1
     Visibility: public -/
 def wal.wal_state_kernel.wal_sync_as_is
   (s : wal.wal_state_kernel.WalState) (_honesty : env_crash_kernel.SyncHonesty)
@@ -1193,7 +1193,7 @@ def wal.wal_state_kernel.wal_sync_as_is
   ok { s with synced := s.written }
 
 /-- [pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::wal_ack_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 148:0-154:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 149:0-155:1
     Visibility: public -/
 def wal.wal_state_kernel.wal_ack_as_is
   (s : wal.wal_state_kernel.WalState) (n : Std.U64) :
@@ -1203,7 +1203,7 @@ def wal.wal_state_kernel.wal_ack_as_is
   ok { s with acked := i }
 
 /-- [pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::wal_rotate_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 158:0-160:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 159:0-161:1
     Visibility: public -/
 def wal.wal_state_kernel.wal_rotate_as_is
   (_s : wal.wal_state_kernel.WalState) :
@@ -1212,7 +1212,7 @@ def wal.wal_state_kernel.wal_rotate_as_is
   wal.wal_state_kernel.wal_state_of 0#u64 0#u64 0#u64
 
 /-- [pedra_aeneas_d1_modelo_kernel::wal::wal_state_kernel::acked_survives_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 165:0-167:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 166:0-168:1
     Visibility: public -/
 def wal.wal_state_kernel.acked_survives_as_is
   (s : wal.wal_state_kernel.WalState) (cut : Std.U64) : Result Bool := do

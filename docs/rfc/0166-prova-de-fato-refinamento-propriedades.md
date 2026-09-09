@@ -199,7 +199,7 @@ catálogo separa **proof objects** de **campaign gates** (família `l28_*`).
 | P0.4 | p0 | job CI proof-check (Verus+Kani pinados) | done | workflow `proof-check.yml` pinado; 1º run verde waiting-on GitHub spending limit | 2026-09-06 |
 | P1.1 | p1 | Env trait Verus com crash semantics | done | `env_crash_kernel.rs` + twin 15/15 0 err (2×) + planta sim; 6 pares no catálogo | 2026-09-06 |
 | P1.2 | p1 | Inv-WAL preservado por append/rotate | done | `wal/wal_state_kernel.rs` + twin 18/18 0 err (2×) + planta sim; 6 pares no catálogo | 2026-09-06 |
-| P1.3 | p1 | corolário D1-modelo | done | `d1_modelo_kernel.rs` + twin 14/14 0 err (2×) + planta sim; 2 pares no catálogo | 2026-09-06 |
+| P1.3 | p1 | corolário D1-modelo | done | `d1_modelo_kernel.rs` + twin 14/14 0 err (2×) — mirror deletado 2026-09-09, single-artifact via `aeneas_d1_modelo.sh`/`D1Modelo.lean` + planta sim; 2 pares no catálogo | 2026-09-06 |
 | P1.4 | p1 | write→ack em exec Verus (D1 implementação) | done | `write_ack_kernel.rs` + twin 12/12 0 err (3×) + planta sim; 3 pares no catálogo; ledger 25 ns/grupo | 2026-09-06 |
 | P2.1 | p2 | Inv-LSM → R1 | done | `lsm_r1_kernel.rs` 6/6 + twin `verus/lsm_r1.rs` 64/64 0 err (2×) — mirror deletado 2026-09-09, single-artifact via `aeneas_lsm_r1.sh`/`LsmR1.lean` + planta sim; 4 pares no catálogo; exec teeth `lsm_probe`/`lsm_compact`/`lsm_reopen`/`r1_modelo`; bug real de fold-order corrigido no compact | 2026-09-06 |
 | P2.2 | p2 | T1 refinamento | done | `t1_modelo_kernel.rs` 5/5 + twin `verus/t1_modelo.rs` 8/8 0 err (2×) — mirror deletado 2026-09-09, single-artifact via `aeneas_t1_modelo.sh`/`T1Modelo.lean` + planta `t1_modelo_on_live_abort_reopen_is_not_ok`; 3 pares tx_abort/tx_recover/t1_modelo | 2026-09-06 |
