@@ -17,11 +17,11 @@ description: >
 
 ## Grind pressure (one block, overwritten each fire)
 
-- Last fire: halt (FACTORY_BAN treated empty 4–10 as campaign over)
-- Why: wrap/spray banned; trampoline CAS if still inline in put_if_absent
-- This fire MUST land: cas_absent_put kernel; put_if_absent matches
-- Forbidden this fire: leftover wrap; compact_refuse spray; DiskPressure on close; idle factory_ban
-- Deeper: empty 4–10 → remaining data-fate if in db.rs, not halt
+- Last fire: shallow (4c2e38c4 inline_needs_escape = `||` wrap; reverted 356b9457)
+- Why: kernel body `starts_escape || sniffs_ptr` is the live `||`, not a slice
+- This fire MUST land: a data-fate if whose kernel is not identity/`||`/`==`/`!=` on bools the handler already computes
+- Forbidden this fire: leftover wrap; `||`/`==` identity kernel; compact_refuse spray; DiskPressure on close; git checkout of db.rs/concurrent.rs
+- Deeper: trampoline data-fate if (not a renamed operator)
 
 This skill **lands one payable slice per Fire**. Rank 1–10 unpaid first.
 When those boards are 0, the slice is the next data-fate `if` still
@@ -142,8 +142,11 @@ chains Fires; this bound is not end-of-turn).
 13. **Skip Montanha** until the user lifts this. No leftover wrap in
     `crates/pedradb-store/**` or `montanha-*` bins. `leftover_next` must
     not name those paths.
-14. **Skip leftover `is_empty`/`==0` wrap factory.** Same `n==0` body is
-    not a slice. Fall through is **not** “wrap the next collection”.
+14. **Skip leftover wrap factory.** Same `n==0` / `is_empty` body is
+    not a slice. Same for a kernel whose body is `a || b`, `a && b`,
+    `a == b`, `a != b`, or identity on a bool the handler already
+    computed (`inline_needs_escape`, `vlog_closed`, `s >= e` renamed).
+    Fall through is **not** “wrap the next operator”.
 15. **DiskPressure is write admission.** Only a **new user/ops write**
     that would append WAL or write SST/dest (`put` / `delete` /
     `apply_batch` / `flush` / `compact*` / PITR dest / replica append).
@@ -152,7 +155,8 @@ chains Fires; this bound is not end-of-turn).
     `rotate_wal_now` after SST durable). **Never** best-effort auto-flush
     (F18). Slapping `compact_refuse` on the next fn is the wrap factory.
 16. **Wrap factory is not a slice** (`is_empty`/`compact_refuse` spray /
-    DiskPressure on `close`/promote/rotate-after-SST/auto-flush). When
+    `||`/`==` identity kernel / DiskPressure on
+    `close`/promote/rotate-after-SST/auto-flush). When
     unpaid 4–10 is 0, **do not halt** — land the next trampoline
     data-fate `if` (rank 1). RFC P1.3 telemetry is not data-fate. P2.1
     fence blast is deferred. Inventing a disk `if` to have a SHA is
@@ -183,7 +187,9 @@ Acceptance (all):
 body change above; cfg/verus wrap on a kernel whose `entry` already has a
 Lean `def`; callee-only unfold billed as a ConcurrentDb caller;
 `native_decide` of a plan without `unfold`; board/rank/RFC checkbox only;
-wrapping `is_empty`/`==0` onto `batch_is_empty`; slapping `compact_refuse`
+wrapping `is_empty`/`==0` onto `batch_is_empty`; wrapping a live `||` /
+`==` / `!=` / identity-bool into a kernel whose spec is that operator;
+slapping `compact_refuse`
 (or any paid kernel) onto the next production fn `leftover_next` named;
 `DiskPressure` on `close` / `Drop` / promote / rotate-after-SST /
 auto-flush; replacing `leftover_next` with a function name;
