@@ -402,6 +402,23 @@ theorem key_in_window_unbounded_start_excluded_end
   unfold scan_kernel.key_in_window
   rfl
 
+/-- Included start + included end: key `>=` s and key `<=` e. Dual-unfold. -/
+theorem key_in_window_included_start_included_end
+    (user s e : Slice U8) :
+    scan_kernel.key_in_window user
+      (core.ops.range.Bound.Included s)
+      (core.ops.range.Bound.Included e) =
+      (do
+        let after_start ←
+          Shared1A.Insts.CoreCmpPartialOrdShared0B.ge
+            (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) user s
+        let before_end ←
+          Shared1A.Insts.CoreCmpPartialOrdShared0B.le
+            (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) user e
+        if after_start then ok before_end else ok false) := by
+  unfold scan_kernel.key_in_window
+  rfl
+
 /-- Inclusive key window: start is slice `>=` then unbounded end. Dual-unfold. -/
 theorem key_in_window_included_unbounded (user s) :
     scan_kernel.key_in_window user (core.ops.range.Bound.Included s)
