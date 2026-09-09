@@ -5608,8 +5608,9 @@
       "id": "changelog_should_store",
       "finding": "RFC-0031 P0.1",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
-      "twin": "crates/pedradb-core/verus/changelog_rebuild.rs",
+      "twin": "crates/pedradb-core/src/changelog_kernel.rs",
       "verus": "scripts/verus_changelog_rebuild.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs"
@@ -5632,8 +5633,9 @@
       "id": "changelog_budget",
       "finding": "RFC-0039 P0.3",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
-      "twin": "crates/pedradb-core/verus/changelog_rebuild.rs",
+      "twin": "crates/pedradb-core/src/changelog_kernel.rs",
       "verus": "scripts/verus_changelog_rebuild.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs"
