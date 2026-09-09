@@ -32,6 +32,12 @@ theorem value_type_from_u8_deletion :
   unfold key.ValueType.from_u8
   rfl
 
+/-- Catalog entry: rustc `as_u8` of Deletion is nibble 0 (inverse of `from_u8`). -/
+theorem value_type_as_u8_deletion :
+    key.ValueType.as_u8 key.ValueType.Deletion = ok 0#u8 := by
+  unfold key.ValueType.as_u8
+  rfl
+
 /-- Catalog entry: trailer nibble 1 is Value. -/
 theorem value_type_from_u8_value :
     key.ValueType.from_u8 1#u8 = ok (some key.ValueType.Value) := by
