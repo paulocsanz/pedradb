@@ -389,6 +389,15 @@ a linha quando há phasesΔ. Sem harness novo.
       (`peer_policy=rocks-default`, `sync=false`). Rocks 60 k 16 KiB
       SETs is not collapsed. Named loss. Not Linux cartaz.
       — status: `done`
+- [x] **P2.67** `deps_lock_prewrite_mc4` (lock+default WriteBatch, no
+      commit, 4 clients) in `COMPARE_SHAPES`, `BALANCE_SHAPES`, and
+      `run_lock_prewrite_clients`. Test
+      `rfc0184_deps_lock_prewrite_mc4_in_compare`. Darwin DIAG
+      `ratio=1.006` (20.1 k / 20.0 k QPS). Same-class async
+      (`peer_policy=rocks-default`, `sync=false`). p50 121 vs 169 µs
+      (Pedra wins p50). Pedra max 3.6 s vs Rocks 55 ms — not a quiet
+      win. Rocks 20 k batch-ops ×32 ×2 CF ≈ 1.28 M puts/s is not
+      collapsed. Not Linux cartaz. — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -469,6 +478,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.64 | p2 | kvrocks_pipelined_set_mc4 COMPARE+BALANCE | done | Kvrocks pipelined-set mc4; Darwin DIAG 0.807× named loss | 2026-09-08 |
 | P2.65 | p2 | rockstore_widecol_rw_mc4 COMPARE+BALANCE | done | Rockstore wide-column mc4; Darwin DIAG 0.566× named loss | 2026-09-08 |
 | P2.66 | p2 | kvrocks_blob_set_mc4 COMPARE+BALANCE | done | Kvrocks 16 KiB SET mc4; Darwin DIAG 0.766× named loss | 2026-09-08 |
+| P2.67 | p2 | deps_lock_prewrite_mc4 COMPARE+BALANCE | done | TiKV lock-prewrite mc4; Darwin DIAG 1.006× not a quiet win | 2026-09-08 |
 
 ## Acceptance Criteria
 
@@ -544,7 +554,8 @@ a linha quando há phasesΔ. Sem harness novo.
   `rfc0184_arango_doc_crud_mc4_in_compare` (P2.63);
   `rfc0184_kvrocks_pipelined_set_mc4_in_compare` (P2.64);
   `rfc0184_rockstore_widecol_rw_mc4_in_compare` (P2.65);
-  `rfc0184_kvrocks_blob_set_mc4_in_compare` (P2.66).
+  `rfc0184_kvrocks_blob_set_mc4_in_compare` (P2.66);
+  `rfc0184_deps_lock_prewrite_mc4_in_compare` (P2.67).
 - **Telemetry / Analytics:** uma linha `diagnose dominant=… lever=…`;
   `benches[].diagnose.lever` no JSON; compare copia para a row.
   scale `get_hit` / `lookup_100` / `probe_hit` imprimem `diagnose get … class=…` (P2.6/P2.7/P2.21).
