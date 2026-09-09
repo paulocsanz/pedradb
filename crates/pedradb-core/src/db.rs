@@ -7515,6 +7515,10 @@ impl<E: Env> Db<E> {
     /// # Errors
     /// I/O or durability fence.
     pub fn compact_vlog_promote(&mut self) -> Result<()> {
+        let probe = crate::env::probe_available_bytes(&self.env, &self.dir);
+        if let Some((available, need)) = crate::disk_pressure_kernel::compact_refuse(probe) {
+            return Err(CoreError::DiskPressure { available, need });
+        }
         self.ensure_not_fenced()?;
         // Promote on disk, then swap handle without clearing first.
         match ValueLog::promote_new_and_reopen(&self.env, &self.dir) {

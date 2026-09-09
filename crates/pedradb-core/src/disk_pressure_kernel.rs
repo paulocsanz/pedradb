@@ -423,6 +423,15 @@ mod tests {
             man.contains("compact_refuse("),
             "persist_manifest_durable must match compact_refuse"
         );
+        let promo = include_str!("db.rs")
+            .split("pub fn compact_vlog_promote(")
+            .nth(1)
+            .and_then(|s| s.split("pub fn blob_gc_candidates(").next())
+            .expect("compact_vlog_promote");
+        assert!(
+            promo.contains("compact_refuse("),
+            "compact_vlog_promote must match compact_refuse before rename"
+        );
     }
 
     #[test]
