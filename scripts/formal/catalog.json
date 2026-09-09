@@ -2154,8 +2154,9 @@
       "id": "ascii_lower",
       "finding": "F85",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-http/src/auth_kernel.rs",
-      "twin": "crates/pedradb-http/verus/bearer_scheme.rs",
+      "twin": "crates/pedradb-http/src/auth_kernel.rs",
       "aeneas": "scripts/aeneas_auth.sh",
       "callers": [
         "crates/pedradb-http/src/auth_kernel.rs"
@@ -2172,8 +2173,9 @@
       "id": "ascii_upper",
       "finding": "F79",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-http/src/auth_kernel.rs",
-      "twin": "crates/pedradb-http/verus/bearer_scheme.rs",
+      "twin": "crates/pedradb-http/src/auth_kernel.rs",
       "aeneas": "scripts/aeneas_auth.sh",
       "callers": [
         "crates/pedradb-http/src/auth_kernel.rs"
@@ -2190,9 +2192,10 @@
       "id": "is_bearer_scheme",
       "finding": "F85",
       "twin_kind": "close",
+      "single_artifact": true,
       "atom": "ascii_eq_ignore_case",
       "kernel": "crates/pedradb-http/src/auth_kernel.rs",
-      "twin": "crates/pedradb-http/verus/bearer_scheme.rs",
+      "twin": "crates/pedradb-http/src/auth_kernel.rs",
       "aeneas": "scripts/aeneas_auth.sh",
       "callers": [
         "crates/pedradb-http/src/auth_kernel.rs"
@@ -2209,9 +2212,10 @@
       "id": "is_non_bearer_auth_scheme",
       "finding": "F150/F151",
       "twin_kind": "close",
+      "single_artifact": true,
       "atom": "ascii_eq_ignore_case",
       "kernel": "crates/pedradb-http/src/auth_kernel.rs",
-      "twin": "crates/pedradb-http/verus/bearer_scheme.rs",
+      "twin": "crates/pedradb-http/src/auth_kernel.rs",
       "aeneas": "scripts/aeneas_auth.sh",
       "callers": [
         "crates/pedradb-http/src/auth_kernel.rs"
@@ -2228,10 +2232,11 @@
       "id": "normalize_http_method",
       "finding": "F79",
       "twin_kind": "close",
+      "single_artifact": true,
       "atom": "ascii_upper",
       "token_src": "ascii_upper",
       "kernel": "crates/pedradb-http/src/auth_kernel.rs",
-      "twin": "crates/pedradb-http/verus/bearer_scheme.rs",
+      "twin": "crates/pedradb-http/src/auth_kernel.rs",
       "aeneas": "scripts/aeneas_auth.sh",
       "callers": [
         "crates/pedradb-http/src/lib.rs"
@@ -2254,9 +2259,10 @@
       "id": "authorization_matches",
       "finding": "F149/F152",
       "twin_kind": "close",
+      "single_artifact": true,
       "atom": "x_pedra_is_fallback_only",
       "kernel": "crates/pedradb-http/src/auth_kernel.rs",
-      "twin": "crates/pedradb-http/verus/bearer_scheme.rs",
+      "twin": "crates/pedradb-http/src/auth_kernel.rs",
       "aeneas": "scripts/aeneas_auth.sh",
       "callers": [
         "crates/pedradb-http/src/lib.rs"
