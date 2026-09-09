@@ -1176,7 +1176,7 @@ fn main() {
                         thread::sleep(Duration::from_millis(30));
                     }
                 }
-                if !lats.is_empty() {
+                if !pedradb_core::write_admission_kernel::batch_is_empty(lats.len() as u64) {
                     benches.push(summarize(
                         "D3_tcp_commit_tx_2k",
                         cok,
