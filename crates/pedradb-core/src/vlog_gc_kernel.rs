@@ -496,5 +496,35 @@ mod tests {
             BlobGcAction::Rewrite,
             "AS-IS dente: rewrite the live blob"
         );
+        const B_OPEN: u8 = 123;
+        const B_CLOSE: u8 = 125;
+        let src = include_str!("db.rs");
+        let needle = "fn compact_blob(";
+        let start = src.find(needle).expect("compact_blob");
+        let rest = &src[start..];
+        let bytes = rest.as_bytes();
+        let brace = bytes.iter().position(|&b| b == B_OPEN).expect("brace");
+        let mut depth = 0i32;
+        let mut end = 0;
+        for (i, &b) in bytes[brace..].iter().enumerate() {
+            if b == B_OPEN {
+                depth += 1;
+            } else if b == B_CLOSE {
+                depth -= 1;
+                if depth == 0 {
+                    end = brace + i;
+                    break;
+                }
+            }
+        }
+        let body = &rest[brace..=end];
+        assert!(
+            body.contains("blob_gc_action("),
+            "compact_blob must match blob_gc_action"
+        );
+        assert!(
+            !body.contains("if file_num == self.blob_active"),
+            "compact_blob must not keep a raw active-generation if"
+        );
     }
 }

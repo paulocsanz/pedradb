@@ -7660,7 +7660,11 @@ impl<E: Env> Db<E> {
         if crate::write_admission_kernel::batch_is_empty(file_num as u64) {
             return self.compact_vlog();
         }
-        if file_num == self.blob_active {
+        // Bytes tooth lives on `compact_blob_auto`; this handler refuses
+        // the active generation (kernel Skip when `is_active`).
+        if crate::vlog_gc_kernel::blob_gc_action(file_num == self.blob_active, 1)
+            == crate::vlog_gc_kernel::BlobGcAction::Skip
+        {
             return Err(CoreError::Internal(
                 "compact_blob refuses the active append generation (rotate first)".into(),
             ));
