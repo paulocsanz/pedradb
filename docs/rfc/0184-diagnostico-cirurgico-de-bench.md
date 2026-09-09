@@ -381,6 +381,14 @@ a linha quando há phasesΔ. Sem harness novo.
       (`peer_policy=rocks-default`, `sync=false`). p50 15.2 vs 5.5 µs.
       Rocks 353 k mix-ops is not collapsed. Named loss. Not Linux
       cartaz. — status: `done`
+- [x] **P2.66** `kvrocks_blob_set_mc4` (16 KiB BlobDB-sized SET, 4
+      clients) in `COMPARE_SHAPES`, `BALANCE_SHAPES`, and
+      `run_kvrocks_blob_clients`. Test
+      `rfc0184_kvrocks_blob_set_mc4_in_compare`. Darwin DIAG
+      `ratio=0.766` (46.3 k / 60.5 k QPS). Same-class async
+      (`peer_policy=rocks-default`, `sync=false`). Rocks 60 k 16 KiB
+      SETs is not collapsed. Named loss. Not Linux cartaz.
+      — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -460,6 +468,7 @@ a linha quando há phasesΔ. Sem harness novo.
 | P2.63 | p2 | arango_doc_crud_mc4 COMPARE+BALANCE | done | Arango document CRUD mc4; Darwin DIAG 0.445× named loss | 2026-09-08 |
 | P2.64 | p2 | kvrocks_pipelined_set_mc4 COMPARE+BALANCE | done | Kvrocks pipelined-set mc4; Darwin DIAG 0.807× named loss | 2026-09-08 |
 | P2.65 | p2 | rockstore_widecol_rw_mc4 COMPARE+BALANCE | done | Rockstore wide-column mc4; Darwin DIAG 0.566× named loss | 2026-09-08 |
+| P2.66 | p2 | kvrocks_blob_set_mc4 COMPARE+BALANCE | done | Kvrocks 16 KiB SET mc4; Darwin DIAG 0.766× named loss | 2026-09-08 |
 
 ## Acceptance Criteria
 
@@ -534,7 +543,8 @@ a linha quando há phasesΔ. Sem harness novo.
   `rfc0184_solana_shred_append_mc4_in_compare` (P2.62);
   `rfc0184_arango_doc_crud_mc4_in_compare` (P2.63);
   `rfc0184_kvrocks_pipelined_set_mc4_in_compare` (P2.64);
-  `rfc0184_rockstore_widecol_rw_mc4_in_compare` (P2.65).
+  `rfc0184_rockstore_widecol_rw_mc4_in_compare` (P2.65);
+  `rfc0184_kvrocks_blob_set_mc4_in_compare` (P2.66).
 - **Telemetry / Analytics:** uma linha `diagnose dominant=… lever=…`;
   `benches[].diagnose.lever` no JSON; compare copia para a row.
   scale `get_hit` / `lookup_100` / `probe_hit` imprimem `diagnose get … class=…` (P2.6/P2.7/P2.21).
