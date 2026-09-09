@@ -102,7 +102,7 @@ fn main() {
         let _ = std::fs::remove_dir_all(&parent);
         std::process::exit(i32::from(!ok));
     }
-    let workers = if workers == 0 {
+    let workers = if pedradb_core::write_admission_kernel::batch_is_empty(workers as u64) {
         std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(4)
