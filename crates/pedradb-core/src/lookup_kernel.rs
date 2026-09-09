@@ -32,6 +32,15 @@ macro_rules! prefer_newer_seq_body {
     };
 }
 
+macro_rules! vlog_ptr_orphaned_body {
+    ($vlog_closed:expr) => {
+        match $vlog_closed {
+            true => true,
+            false => false,
+        }
+    };
+}
+
 #[cfg(not(verus_keep_ghost))]
 /// Snapshot sequence 0 never observes a version (empty snap → miss).
 #[must_use]
@@ -89,6 +98,21 @@ pub fn prefer_newer_seq(have_best: bool, new_seq: u64, best_seq: u64) -> bool {
 #[must_use]
 pub fn prefer_newer_seq_as_is(_have_best: bool, _new_seq: u64, _best_seq: u64) -> bool {
     true
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// Decoded vlog pointer but `VALUES.vlog` is closed — refuse, never serve
+/// the pointer bytes as the user value (F1).
+#[must_use]
+pub fn vlog_ptr_orphaned(vlog_closed: bool) -> bool {
+    vlog_ptr_orphaned_body!(vlog_closed)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: never orphaned (would lock None / serve pointer bytes).
+#[must_use]
+pub fn vlog_ptr_orphaned_as_is(_vlog_closed: bool) -> bool {
+    false
 }
 
 #[cfg(verus_keep_ghost)]
@@ -221,6 +245,33 @@ proof fn lemma_mem_point_decides()
 {
 }
 
+pub open spec fn vlog_ptr_orphaned_spec(vlog_closed: bool) -> bool {
+    vlog_closed
+}
+
+pub fn vlog_ptr_orphaned(vlog_closed: bool) -> (d: bool)
+    ensures
+        d == vlog_ptr_orphaned_spec(vlog_closed),
+{
+    vlog_ptr_orphaned_body!(vlog_closed)
+}
+
+pub fn vlog_ptr_orphaned_as_is(vlog_closed: bool) -> (d: bool)
+    ensures
+        d == false,
+{
+    let _ = vlog_closed;
+    false
+}
+
+proof fn lemma_vlog_ptr_orphaned()
+    ensures
+        vlog_ptr_orphaned(true),
+        !vlog_ptr_orphaned(false),
+        !vlog_ptr_orphaned_as_is(true),
+{
+}
+
 } // verus!
 
 #[cfg(test)]
@@ -305,6 +356,26 @@ mod tests {
             "AS-IS dente: mem never wins"
         );
         assert!(!mem_point_decides(false));
+    }
+
+    #[test]
+    fn vlog_ptr_orphaned_on_live_closed_is_not_ok() {
+        assert!(vlog_ptr_orphaned(true));
+        assert!(!vlog_ptr_orphaned(false));
+        assert!(
+            !vlog_ptr_orphaned_as_is(true),
+            "AS-IS dente: closed vlog still serves the pointer"
+        );
+        let body = named_fn_src(include_str!("db.rs"), "resolve_stored_value")
+            .expect("resolve_stored_value");
+        assert!(
+            body.contains("vlog_ptr_orphaned("),
+            "resolve_stored_value must match vlog_ptr_orphaned"
+        );
+        assert!(
+            !body.contains("let Some(ref vlog) = self.vlog else"),
+            "resolve_stored_value must not keep a raw closed-vlog if"
+        );
     }
 
     #[test]
@@ -457,5 +528,6 @@ mod tests {
             || cond.contains("snap_below_watermark(")
             || cond.contains("mem_point_decides(")
             || cond.contains("prefer_newer_seq(")
+            || cond.contains("vlog_ptr_orphaned(")
     }
 }

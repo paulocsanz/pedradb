@@ -15,45 +15,45 @@ set_option maxRecDepth 2048
 namespace pedra_aeneas_lookup_kernel
 
 /-- [pedra_aeneas_lookup_kernel::snap_is_empty]:
-    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 38:0-40:1
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 47:0-49:1
     Visibility: public -/
 def snap_is_empty (seq : Std.U64) : Result Bool := do
   ok (seq = 0#u64)
 
 /-- [pedra_aeneas_lookup_kernel::snap_is_empty_as_is]:
-    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 45:0-47:1
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 54:0-56:1
     Visibility: public -/
 def snap_is_empty_as_is (_seq : Std.U64) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_lookup_kernel::snap_below_watermark]:
-    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 53:0-55:1
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 62:0-64:1
     Visibility: public -/
 def snap_below_watermark
   (seq : Std.U64) (earliest : Std.U64) : Result Bool := do
   ok (seq < earliest)
 
 /-- [pedra_aeneas_lookup_kernel::snap_below_watermark_as_is]:
-    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 61:0-63:1
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 70:0-72:1
     Visibility: public -/
 def snap_below_watermark_as_is
   (_seq : Std.U64) (_earliest : Std.U64) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_lookup_kernel::mem_point_decides]:
-    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 68:0-70:1
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 77:0-79:1
     Visibility: public -/
 def mem_point_decides (has_point : Bool) : Result Bool := do
   ok has_point
 
 /-- [pedra_aeneas_lookup_kernel::mem_point_decides_as_is]:
-    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 76:0-78:1
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 85:0-87:1
     Visibility: public -/
 def mem_point_decides_as_is (_has_point : Bool) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_lookup_kernel::prefer_newer_seq]:
-    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 83:0-85:1
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 92:0-94:1
     Visibility: public -/
 def prefer_newer_seq
   (have_best : Bool) (new_seq : Std.U64) (best_seq : Std.U64) :
@@ -64,12 +64,26 @@ def prefer_newer_seq
   else ok true
 
 /-- [pedra_aeneas_lookup_kernel::prefer_newer_seq_as_is]:
-    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 90:0-92:1
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 99:0-101:1
     Visibility: public -/
 def prefer_newer_seq_as_is
   (_have_best : Bool) (_new_seq : Std.U64) (_best_seq : Std.U64) :
   Result Bool
   := do
   ok true
+
+/-- [pedra_aeneas_lookup_kernel::vlog_ptr_orphaned]:
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 107:0-109:1
+    Visibility: public -/
+def vlog_ptr_orphaned (vlog_closed : Bool) : Result Bool := do
+  if vlog_closed
+  then ok true
+  else ok false
+
+/-- [pedra_aeneas_lookup_kernel::vlog_ptr_orphaned_as_is]:
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 114:0-116:1
+    Visibility: public -/
+def vlog_ptr_orphaned_as_is (_vlog_closed : Bool) : Result Bool := do
+  ok false
 
 end pedra_aeneas_lookup_kernel
