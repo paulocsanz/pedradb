@@ -380,6 +380,13 @@ def lean_has_def(name: str) -> bool:
     return False
 
 
+def skip_montanha_path(path: str) -> bool:
+    """Rank 13: leftover_next must not name store/montanha until the user lifts it."""
+    return path.startswith("crates/pedradb-store/") or path.startswith(
+        "crates/montanha"
+    )
+
+
 def print_leftover_next(
     unpaid_script: int,
     unpaid_compose: int,
@@ -397,8 +404,9 @@ def print_leftover_next(
             "never leftover is_empty wrap; never compact_refuse spray; skip Montanha"
         )
         return
-    if cartoons:
-        cid, cfile = cartoons[0]
+    payable = [(i, f) for i, f in cartoons if not skip_montanha_path(f)]
+    if payable:
+        cid, cfile = payable[0]
         print(
             "  leftover_next cartoon remaining; "
             f"delete verus! stand-in from {cfile}; rustc body stays; "
@@ -678,7 +686,9 @@ def sa_unpaid_board(fate: list) -> list[tuple[str, str]]:
         "delete the stand-in; Aeneas of rustc types; never mint)"
     )
     if cartoon:
-        print(f"  cartoon_first {cartoon[0][0]} {cartoon[0][1]}")
+        payable = [(i, f) for i, f in cartoon if not skip_montanha_path(f)]
+        lead = payable[0] if payable else cartoon[0]
+        print(f"  cartoon_first {lead[0]} {lead[1]}")
         seen: set[str] = set()
         for cid, cfile in cartoon:
             if cfile in seen:

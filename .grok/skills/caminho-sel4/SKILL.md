@@ -19,11 +19,11 @@ description: >
 
 ## Grind pressure (one block, overwritten each fire)
 
-- Last fire: worked (`1859f1ad` delete commit_kernel.rs Verus cartoon; rustc watermarks are the term)
-- Why: leftover_next_first joint_election; Verus stand-in ≠ rustc `&[u64]` joint sets
-- This fire MUST land: delete the `membership_kernel.rs` `verus!` stand-in; rustc types stay; Aeneas of those types is the term
-- Forbidden this fire: mint u64 twin; `_body!` over different types; skip cartoon as "not a land"; FACTORY_BAN halt; git checkout of db.rs/concurrent.rs
-- Deeper: Search leftover_next=cartoon remaining; open membership_kernel.rs; named cargo `joint_election_old_majority_is_not_enough_during_add`; `aeneas_membership.sh` / lake Membership
+- Last fire: worked (`34c3c1bf` delete membership_kernel.rs Verus cartoon; rustc joint quorum is the term)
+- Why: leftover_next_first lease; Verus stand-in billed as last-wins of rustc `lease_live`
+- This fire MUST land: delete the `lease_kernel.rs` `verus!` stand-in; rustc types stay; Aeneas of those types is the term
+- Forbidden this fire: mint u64 twin; `_body!` over different types; skip cartoon as "not a land"; leftover_next store/Montanha; FACTORY_BAN halt; git checkout of db.rs/concurrent.rs
+- Deeper: Search leftover_next=cartoon remaining (skip store); open lease_kernel.rs; named cargo `zero_lease_is_immortal`; `aeneas_lease.sh` / lake Lease
 
 This skill **lands one payable slice per Fire**. Rank 1–10 unpaid first.
 When those boards are 0, Search prints `leftover_next`: cartoon remaining

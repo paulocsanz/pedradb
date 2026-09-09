@@ -35,7 +35,7 @@ axiom core.option.Option.unwrap_or_default
   Option T → Result T
 
 /-- [pedra_aeneas_lease_kernel::lease_live]:
-    Source: '../../../crates/pedradb-dcs/src/lease_kernel.rs', lines 178:0-180:1
+    Source: '../../../crates/pedradb-dcs/src/lease_kernel.rs', lines 34:0-36:1
     Visibility: public -/
 def lease_live (lease : Std.U64) (now_ms : Std.U64) : Result Bool := do
   if lease = 0#u64
@@ -43,32 +43,32 @@ def lease_live (lease : Std.U64) (now_ms : Std.U64) : Result Bool := do
   else ok (now_ms < lease)
 
 /-- [pedra_aeneas_lease_kernel::lease_live_as_is]:
-    Source: '../../../crates/pedradb-dcs/src/lease_kernel.rs', lines 185:0-187:1
+    Source: '../../../crates/pedradb-dcs/src/lease_kernel.rs', lines 40:0-42:1
     Visibility: public -/
 def lease_live_as_is (_lease : Std.U64) (_now_ms : Std.U64) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_lease_kernel::lease_table_expired]:
-    Source: '../../../crates/pedradb-dcs/src/lease_kernel.rs', lines 195:0-197:1
+    Source: '../../../crates/pedradb-dcs/src/lease_kernel.rs', lines 49:0-51:1
     Visibility: public -/
 def lease_table_expired (table_hit : Option Bool) : Result Bool := do
   ok (core.option.Option.unwrap_or table_hit true)
 
 /-- [pedra_aeneas_lease_kernel::next_lease_id_after]:
-    Source: '../../../crates/pedradb-dcs/src/lease_kernel.rs', lines 205:0-207:1
+    Source: '../../../crates/pedradb-dcs/src/lease_kernel.rs', lines 58:0-60:1
     Visibility: public -/
 def next_lease_id_after (max_seen_on_disk : Std.U64) : Result Std.U64 := do
   let i ← lift (core.num.U64.saturating_add max_seen_on_disk 1#u64)
   core.cmp.Ord.max.default core.cmp.OrdU64.partialOrdInst.lt i 1#u64
 
 /-- [pedra_aeneas_lease_kernel::lease_table_expired_as_is]:
-    Source: '../../../crates/pedradb-dcs/src/lease_kernel.rs', lines 212:0-214:1
+    Source: '../../../crates/pedradb-dcs/src/lease_kernel.rs', lines 64:0-66:1
     Visibility: public -/
 def lease_table_expired_as_is (table_hit : Option Bool) : Result Bool := do
   core.option.Option.unwrap_or_default Bool.Insts.CoreDefaultDefault table_hit
 
 /-- [pedra_aeneas_lease_kernel::next_lease_id_as_is]:
-    Source: '../../../crates/pedradb-dcs/src/lease_kernel.rs', lines 219:0-221:1
+    Source: '../../../crates/pedradb-dcs/src/lease_kernel.rs', lines 70:0-72:1
     Visibility: public -/
 def next_lease_id_as_is (_max_seen_on_disk : Std.U64) : Result Std.U64 := do
   ok 1#u64
