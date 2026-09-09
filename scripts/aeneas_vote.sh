@@ -43,7 +43,7 @@ SRC="$ROOT/crates/pedradb-raft/src/vote_kernel.rs"
   echo "sha256=$(shasum -a 256 "$SRC" | awk '{print $1}')"
   echo "aeneas=$("$AENEAS" -version 2>/dev/null | awk '{print $NF}')"
   echo "charon=$("$CHARON" version 2>/dev/null | head -1)"
-} > "$OUT/SOURCE"
+} > "$OUT/SOURCE.vote"
 
 # RFC-0053 P40: Aeneas emits Option::eq as an axiom; model it as a match def
 # instead (no new TCB axioms), then keep the lake copy in sync.

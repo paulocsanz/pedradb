@@ -45,7 +45,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/ae_kernel.rs",
       "twin": "crates/pedradb-raft/src/ae_kernel.rs",
-      "verus": "scripts/verus_ae_entry_action.sh",
+      "aeneas": "scripts/aeneas_ae.sh",
       "callers": [
         "crates/pedradb-raft/src/lib.rs"
       ],
@@ -74,7 +74,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/ae_kernel.rs",
       "twin": "crates/pedradb-raft/src/ae_kernel.rs",
-      "verus": "scripts/verus_ae_ack_success.sh",
+      "aeneas": "scripts/aeneas_ae.sh",
       "callers": [
         "crates/pedradb-raft/src/lib.rs"
       ],
@@ -103,7 +103,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/commit_kernel.rs",
       "twin": "crates/pedradb-raft/src/commit_kernel.rs",
-      "verus": "scripts/verus_commit_recover.sh",
+      "aeneas": "scripts/aeneas_commit.sh",
       "callers": [
         "crates/pedradb-raft/src/lib.rs",
         "crates/pedradb-raft/src/net.rs"
@@ -129,7 +129,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/src/membership_kernel.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -157,7 +157,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/src/membership_kernel.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -186,7 +186,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/src/membership_kernel.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -214,7 +214,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/src/membership_kernel.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -242,7 +242,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/src/membership_kernel.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -270,7 +270,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/src/membership_kernel.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -298,7 +298,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/src/membership_kernel.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -326,7 +326,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/src/membership_kernel.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -354,7 +354,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/src/membership_kernel.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -384,7 +384,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/src/membership_kernel.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -416,7 +416,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/src/membership_kernel.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -447,7 +447,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/src/membership_kernel.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -475,7 +475,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/src/membership_kernel.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -506,7 +506,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/src/membership_kernel.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -533,7 +533,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/verus/membership_joint.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -563,7 +563,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/verus/membership_joint.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -590,7 +590,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/verus/membership_joint.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -620,7 +620,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/verus/membership_joint.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -647,7 +647,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/verus/membership_joint.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -674,7 +674,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/verus/membership_joint.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -701,7 +701,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/verus/membership_joint.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -728,7 +728,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/verus/membership_joint.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -755,7 +755,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/verus/membership_joint.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -782,7 +782,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/verus/membership_joint.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -809,7 +809,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/verus/membership_joint.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -838,7 +838,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/src/membership_kernel.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -866,7 +866,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/src/membership_kernel.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -893,7 +893,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/verus/membership_joint.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -920,7 +920,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/verus/membership_joint.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -948,7 +948,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/verus/membership_joint.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -977,7 +977,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/verus/membership_joint.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -1005,7 +1005,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-dcs/src/lease_kernel.rs",
       "twin": "crates/pedradb-dcs/src/lease_kernel.rs",
-      "verus": "scripts/verus_lease_live.sh",
+      "aeneas": "scripts/aeneas_lease.sh",
       "callers": [
         "crates/pedradb-dcs/src/command.rs"
       ],
@@ -1067,7 +1067,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-dcs/src/lease_kernel.rs",
       "twin": "crates/pedradb-dcs/verus/lease_live.rs",
-      "verus": "scripts/verus_lease_live.sh",
+      "aeneas": "scripts/aeneas_lease.sh",
       "callers": [
         "crates/pedradb-dcs/src/lib.rs"
       ],
@@ -1091,7 +1091,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-dcs/src/lease_kernel.rs",
       "twin": "crates/pedradb-dcs/verus/lease_live.rs",
-      "verus": "scripts/verus_lease_live.sh",
+      "aeneas": "scripts/aeneas_lease.sh",
       "callers": [
         "crates/pedradb-dcs/src/lib.rs"
       ],
@@ -1568,7 +1568,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/prefix.rs",
       "twin": "crates/pedradb-core/src/prefix.rs",
-      "verus": "scripts/verus_prefix_exclusive_end.sh",
+      "aeneas": "scripts/aeneas_prefix.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs",
         "crates/pedradb-store/src/layers.rs"
@@ -1640,7 +1640,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-http/src/auth_kernel.rs",
       "twin": "crates/pedradb-http/src/auth_kernel.rs",
-      "verus": "scripts/verus_bearer_scheme.sh",
+      "aeneas": "scripts/aeneas_auth.sh",
       "callers": [
         "crates/pedradb-http/src/lib.rs"
       ],
@@ -2128,7 +2128,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-http/src/auth_kernel.rs",
       "twin": "crates/pedradb-http/verus/bearer_scheme.rs",
-      "verus": "scripts/verus_bearer_scheme.sh",
+      "aeneas": "scripts/aeneas_auth.sh",
       "callers": [
         "crates/pedradb-http/src/auth_kernel.rs"
       ],
@@ -2146,7 +2146,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-http/src/auth_kernel.rs",
       "twin": "crates/pedradb-http/verus/bearer_scheme.rs",
-      "verus": "scripts/verus_bearer_scheme.sh",
+      "aeneas": "scripts/aeneas_auth.sh",
       "callers": [
         "crates/pedradb-http/src/auth_kernel.rs"
       ],
@@ -2165,7 +2165,7 @@
       "atom": "ascii_eq_ignore_case",
       "kernel": "crates/pedradb-http/src/auth_kernel.rs",
       "twin": "crates/pedradb-http/verus/bearer_scheme.rs",
-      "verus": "scripts/verus_bearer_scheme.sh",
+      "aeneas": "scripts/aeneas_auth.sh",
       "callers": [
         "crates/pedradb-http/src/auth_kernel.rs"
       ],
@@ -2184,7 +2184,7 @@
       "atom": "ascii_eq_ignore_case",
       "kernel": "crates/pedradb-http/src/auth_kernel.rs",
       "twin": "crates/pedradb-http/verus/bearer_scheme.rs",
-      "verus": "scripts/verus_bearer_scheme.sh",
+      "aeneas": "scripts/aeneas_auth.sh",
       "callers": [
         "crates/pedradb-http/src/auth_kernel.rs"
       ],
@@ -2204,7 +2204,7 @@
       "token_src": "ascii_upper",
       "kernel": "crates/pedradb-http/src/auth_kernel.rs",
       "twin": "crates/pedradb-http/verus/bearer_scheme.rs",
-      "verus": "scripts/verus_bearer_scheme.sh",
+      "aeneas": "scripts/aeneas_auth.sh",
       "callers": [
         "crates/pedradb-http/src/lib.rs"
       ],
@@ -2229,7 +2229,7 @@
       "atom": "x_pedra_is_fallback_only",
       "kernel": "crates/pedradb-http/src/auth_kernel.rs",
       "twin": "crates/pedradb-http/verus/bearer_scheme.rs",
-      "verus": "scripts/verus_bearer_scheme.sh",
+      "aeneas": "scripts/aeneas_auth.sh",
       "callers": [
         "crates/pedradb-http/src/lib.rs"
       ],
@@ -2255,7 +2255,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-fold/src/isolated_kernel.rs",
       "twin": "crates/pedradb-fold/src/isolated_kernel.rs",
-      "verus": "scripts/verus_isolated_id.sh",
+      "aeneas": "scripts/aeneas_isolated.sh",
       "callers": [
         "crates/pedradb-fold/src/follow.rs"
       ],
@@ -2279,7 +2279,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-fold/src/isolated_kernel.rs",
       "twin": "crates/pedradb-fold/verus/isolated_id.rs",
-      "verus": "scripts/verus_isolated_id.sh",
+      "aeneas": "scripts/aeneas_isolated.sh",
       "callers": [
         "crates/pedradb-fold/src/isolated_kernel.rs"
       ],
@@ -2447,7 +2447,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/wal/recover_kernel.rs",
       "twin": "crates/pedradb-core/src/wal/recover_kernel.rs",
-      "verus": "scripts/verus_wal_recover.sh",
+      "aeneas": "scripts/aeneas_wal_recover.sh",
       "callers": [
         "crates/pedradb-core/src/wal/reader.rs"
       ],
@@ -2668,7 +2668,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-replicate/src/ship_kernel.rs",
       "twin": "crates/pedradb-replicate/src/ship_kernel.rs",
-      "verus": "scripts/verus_ship_stamp.sh",
+      "aeneas": "scripts/aeneas_ship.sh",
       "callers": [
         "crates/pedradb-replicate/src/ship_kernel.rs"
       ],
@@ -2807,7 +2807,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-fold/src/fold_kernel.rs",
       "twin": "crates/pedradb-fold/src/fold_kernel.rs",
-      "verus": "scripts/verus_fold_range.sh",
+      "aeneas": "scripts/aeneas_fold.sh",
       "callers": [
         "crates/pedradb-fold/src/watch.rs",
         "crates/pedradb-fold/src/store.rs"
@@ -2833,7 +2833,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/manifest_kernel.rs",
       "twin": "crates/pedradb-core/src/manifest_kernel.rs",
-      "verus": "scripts/verus_manifest_recover.sh",
+      "aeneas": "scripts/aeneas_manifest.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs"
       ],
@@ -2855,7 +2855,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/wal/reopen_kernel.rs",
       "twin": "crates/pedradb-core/src/wal/reopen_kernel.rs",
-      "verus": "scripts/verus_reopen_outcome.sh",
+      "aeneas": "scripts/aeneas_reopen.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs"
       ],
@@ -2969,7 +2969,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/compact_kernel.rs",
       "twin": "crates/pedradb-core/src/compact_kernel.rs",
-      "verus": "scripts/verus_compact_decision.sh",
+      "aeneas": "scripts/aeneas_compact.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs"
       ],
@@ -2991,7 +2991,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/compact_kernel.rs",
       "twin": "crates/pedradb-core/src/compact_kernel.rs",
-      "verus": "scripts/verus_compact_decision.sh",
+      "aeneas": "scripts/aeneas_compact.sh",
       "callers": [
         "crates/pedradb-core/src/merge.rs"
       ],
@@ -3035,7 +3035,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/apply_kernel.rs",
       "twin": "crates/pedradb-raft/src/apply_kernel.rs",
-      "verus": "scripts/verus_apply_advance.sh",
+      "aeneas": "scripts/aeneas_apply.sh",
       "callers": [
         "crates/pedradb-raft/src/lib.rs"
       ],
@@ -3088,7 +3088,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/vote_kernel.rs",
       "twin": "crates/pedradb-raft/src/vote_kernel.rs",
-      "verus": "scripts/verus_durable_term.sh",
+      "aeneas": "scripts/aeneas_vote.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
@@ -3117,7 +3117,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/vlog_gc_kernel.rs",
       "twin": "crates/pedradb-core/src/vlog_gc_kernel.rs",
-      "verus": "scripts/verus_vlog_gc.sh",
+      "aeneas": "scripts/aeneas_vlog_gc.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs"
       ],
@@ -3139,7 +3139,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/vlog_gc_kernel.rs",
       "twin": "crates/pedradb-core/src/vlog_gc_kernel.rs",
-      "verus": "scripts/verus_vlog_gc.sh",
+      "aeneas": "scripts/aeneas_vlog_gc.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs"
       ],
@@ -3978,7 +3978,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-store/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/verus/membership_joint.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-world/src/lib.rs"
       ],
@@ -4006,7 +4006,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-world/src/world_kernel.rs",
       "twin": "crates/pedradb-world/src/world_kernel.rs",
-      "verus": "scripts/verus_world_trajectory.sh",
+      "aeneas": "scripts/aeneas_world.sh",
       "callers": [
         "crates/pedradb-world/src/lib.rs"
       ],
@@ -4031,7 +4031,7 @@
       "atom": "trajectory_violation",
       "kernel": "crates/pedradb-world/src/world_kernel.rs",
       "twin": "crates/pedradb-world/verus/trajectory.rs",
-      "verus": "scripts/verus_world_trajectory.sh",
+      "aeneas": "scripts/aeneas_world.sh",
       "callers": [
         "crates/pedradb-world/src/world_kernel.rs"
       ],
@@ -4049,7 +4049,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/verus/membership_joint.rs",
-      "verus": "scripts/verus_membership_joint.sh",
+      "aeneas": "scripts/aeneas_membership.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs",
         "crates/pedradb-store/src/bin/cluster_real.rs",
@@ -4370,7 +4370,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/cf_kernel.rs",
       "twin": "crates/pedradb-core/src/cf_kernel.rs",
-      "verus": "scripts/verus_cf_family.sh",
+      "aeneas": "scripts/aeneas_cf.sh",
       "callers": [
         "crates/pedradb-core/src/cf_kernel.rs",
         "crates/pedradb-core/src/memtable.rs",
@@ -4557,7 +4557,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/merge.rs",
       "twin": "crates/pedradb-core/src/merge.rs",
-      "verus": "scripts/verus_visible_at.sh",
+      "aeneas": "scripts/aeneas_merge.sh",
       "callers": [
         "crates/pedradb-core/src/merge.rs",
         "crates/pedradb-core/src/memtable.rs",
@@ -4602,7 +4602,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/batch.rs",
       "twin": "crates/pedradb-core/src/batch.rs",
-      "verus": "scripts/verus_write_record_count.sh",
+      "aeneas": "scripts/aeneas_batch.sh",
       "callers": [
         "crates/pedradb-core/src/batch.rs"
       ],
@@ -4621,7 +4621,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/compact_kernel.rs",
       "twin": "crates/pedradb-core/src/compact_kernel.rs",
-      "verus": "scripts/verus_compact_decision.sh",
+      "aeneas": "scripts/aeneas_compact.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs"
       ],
@@ -4643,7 +4643,7 @@
       "single_artifact": true,
       "kernel": "crates/rocksdb-compat/src/locktab.rs",
       "twin": "crates/rocksdb-compat/src/locktab.rs",
-      "verus": "scripts/verus_wait_for_deadlock.sh",
+      "aeneas": "scripts/aeneas_locktab.sh",
       "callers": [
         "crates/rocksdb-compat/src/locktab.rs"
       ],
@@ -4733,7 +4733,7 @@
       "single_artifact": true,
       "kernel": "crates/rocksdb-compat/src/iter_kernel.rs",
       "twin": "crates/rocksdb-compat/src/iter_kernel.rs",
-      "verus": "scripts/verus_iter_window.sh",
+      "aeneas": "scripts/aeneas_iter.sh",
       "callers": [
         "crates/rocksdb-compat/src/lib.rs"
       ],
@@ -4829,7 +4829,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/leveling.rs",
       "twin": "crates/pedradb-core/src/leveling.rs",
-      "verus": "scripts/verus_leveling.sh",
+      "aeneas": "scripts/aeneas_leveling.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs"
       ],
@@ -4859,7 +4859,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/leveling.rs",
       "twin": "crates/pedradb-core/src/leveling.rs",
-      "verus": "scripts/verus_leveling_pick.sh",
+      "aeneas": "scripts/aeneas_leveling.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs"
       ],
@@ -4890,7 +4890,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/leveling.rs",
       "twin": "crates/pedradb-core/src/leveling.rs",
-      "verus": "scripts/verus_leveling_pick.sh",
+      "aeneas": "scripts/aeneas_leveling.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs"
       ],
@@ -5099,7 +5099,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-spec/src/properties_kernel.rs",
       "twin": "crates/pedradb-spec/src/properties_kernel.rs",
-      "verus": "scripts/verus_spec_properties.sh",
+      "aeneas": "scripts/aeneas_properties.sh",
       "callers": [
         "crates/pedradb-spec/src/properties_kernel.rs"
       ],
@@ -5117,7 +5117,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-spec/src/properties_kernel.rs",
       "twin": "crates/pedradb-spec/verus/properties.rs",
-      "verus": "scripts/verus_spec_properties.sh",
+      "aeneas": "scripts/aeneas_properties.sh",
       "callers": [
         "crates/pedradb-spec/src/properties_kernel.rs"
       ],
@@ -5135,7 +5135,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-spec/src/properties_kernel.rs",
       "twin": "crates/pedradb-spec/verus/properties.rs",
-      "verus": "scripts/verus_spec_properties.sh",
+      "aeneas": "scripts/aeneas_properties.sh",
       "callers": [
         "crates/pedradb-spec/src/properties_kernel.rs"
       ],
@@ -5153,7 +5153,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-spec/src/properties_kernel.rs",
       "twin": "crates/pedradb-spec/verus/properties.rs",
-      "verus": "scripts/verus_spec_properties.sh",
+      "aeneas": "scripts/aeneas_properties.sh",
       "callers": [
         "crates/pedradb-spec/src/properties_kernel.rs"
       ],
@@ -5171,7 +5171,7 @@
       "twin_kind": "model",
       "kernel": "crates/pedradb-core/src/leveling.rs",
       "twin": "crates/pedradb-core/verus/leveling.rs",
-      "verus": "scripts/verus_leveling.sh",
+      "aeneas": "scripts/aeneas_leveling.sh",
       "callers": [
         "crates/pedradb-core/src/concurrent.rs",
         "crates/pedradb-core/src/db.rs"
@@ -5196,7 +5196,7 @@
       "twin_kind": "model",
       "kernel": "crates/pedradb-core/src/leveling.rs",
       "twin": "crates/pedradb-core/verus/leveling.rs",
-      "verus": "scripts/verus_leveling.sh",
+      "aeneas": "scripts/aeneas_leveling.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs",
         "crates/pedradb-core/src/leveling.rs"
@@ -5221,7 +5221,7 @@
       "twin_kind": "model",
       "kernel": "crates/pedradb-core/src/leveling.rs",
       "twin": "crates/pedradb-core/verus/leveling.rs",
-      "verus": "scripts/verus_leveling.sh",
+      "aeneas": "scripts/aeneas_leveling.sh",
       "callers": [
         "crates/pedradb-core/src/leveling.rs"
       ],
@@ -5239,7 +5239,7 @@
       "twin_kind": "model",
       "kernel": "crates/pedradb-core/src/leveling.rs",
       "twin": "crates/pedradb-core/verus/leveling.rs",
-      "verus": "scripts/verus_leveling.sh",
+      "aeneas": "scripts/aeneas_leveling.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs",
         "crates/pedradb-core/src/leveling.rs"
@@ -5371,7 +5371,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-core/src/wal/recover_kernel.rs",
       "twin": "crates/pedradb-core/verus/wal_recover.rs",
-      "verus": "scripts/verus_wal_recover.sh",
+      "aeneas": "scripts/aeneas_wal_recover.sh",
       "callers": [
         "crates/pedradb-core/src/wal/reader.rs"
       ],
@@ -5395,7 +5395,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-core/src/wal/recover_kernel.rs",
       "twin": "crates/pedradb-core/verus/wal_recover.rs",
-      "verus": "scripts/verus_wal_recover.sh",
+      "aeneas": "scripts/aeneas_wal_recover.sh",
       "callers": [
         "crates/pedradb-core/src/wal/reader.rs"
       ],
@@ -5419,7 +5419,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-core/src/wal/recover_kernel.rs",
       "twin": "crates/pedradb-core/verus/wal_recover.rs",
-      "verus": "scripts/verus_wal_recover.sh",
+      "aeneas": "scripts/aeneas_wal_recover.sh",
       "callers": [
         "crates/pedradb-core/src/wal/reader.rs"
       ],
@@ -5443,7 +5443,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-core/src/wal/recover_kernel.rs",
       "twin": "crates/pedradb-core/verus/wal_recover.rs",
-      "verus": "scripts/verus_wal_recover.sh",
+      "aeneas": "scripts/aeneas_wal_recover.sh",
       "callers": [
         "crates/pedradb-core/src/wal/reader.rs"
       ],
@@ -5467,7 +5467,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-core/src/compact_kernel.rs",
       "twin": "crates/pedradb-core/verus/compact_decision.rs",
-      "verus": "scripts/verus_compact_decision.sh",
+      "aeneas": "scripts/aeneas_compact.sh",
       "callers": [
         "crates/pedradb-core/src/compact_kernel.rs"
       ],
@@ -5485,7 +5485,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-core/src/compact_kernel.rs",
       "twin": "crates/pedradb-core/verus/compact_decision.rs",
-      "verus": "scripts/verus_compact_decision.sh",
+      "aeneas": "scripts/aeneas_compact.sh",
       "callers": [
         "crates/pedradb-core/src/compact_kernel.rs"
       ],
@@ -5503,7 +5503,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-core/src/compact_kernel.rs",
       "twin": "crates/pedradb-core/verus/compact_decision.rs",
-      "verus": "scripts/verus_compact_decision.sh",
+      "aeneas": "scripts/aeneas_compact.sh",
       "callers": [
         "crates/pedradb-core/src/compact_kernel.rs",
         "crates/pedradb-core/src/merge.rs"
@@ -5601,7 +5601,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-core/src/manifest_kernel.rs",
       "twin": "crates/pedradb-core/verus/manifest_recover.rs",
-      "verus": "scripts/verus_manifest_recover.sh",
+      "aeneas": "scripts/aeneas_manifest.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs"
       ],
@@ -6039,7 +6039,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-raft/src/ae_kernel.rs",
       "twin": "crates/pedradb-raft/verus/ae_entry_action.rs",
-      "verus": "scripts/verus_ae_entry_action.sh",
+      "aeneas": "scripts/aeneas_ae.sh",
       "callers": [
         "crates/pedradb-raft/src/ae_kernel.rs"
       ],
@@ -6057,7 +6057,7 @@
       "twin_kind": "close",
       "kernel": "crates/pedradb-raft/src/commit_kernel.rs",
       "twin": "crates/pedradb-raft/verus/commit_recover.rs",
-      "verus": "scripts/verus_commit_recover.sh",
+      "aeneas": "scripts/aeneas_commit.sh",
       "callers": [
         "crates/pedradb-raft/src/commit_kernel.rs",
         "crates/pedradb-raft/src/lib.rs"
