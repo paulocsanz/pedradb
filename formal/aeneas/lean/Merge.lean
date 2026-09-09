@@ -200,3 +200,39 @@ theorem bound_as_ref_unbounded :
     = ok core.ops.range.Bound.Unbounded := by
   unfold merge.bound_as_ref
   rfl
+
+/-- Included Bound borrows via `Bytes::as_ref`. Dual-unfold. -/
+theorem bound_as_ref_included (s) :
+    merge.bound_as_ref (core.ops.range.Bound.Included s) =
+      (do
+        let s1 ← bytes.bytes.Bytes.Insts.CoreConvertAsRefSliceU8.as_ref s
+        ok (core.ops.range.Bound.Included s1)) := by
+  unfold merge.bound_as_ref
+  rfl
+
+/-- Excluded Bound borrows via `Bytes::as_ref`. Dual-unfold. -/
+theorem bound_as_ref_excluded (s) :
+    merge.bound_as_ref (core.ops.range.Bound.Excluded s) =
+      (do
+        let s1 ← bytes.bytes.Bytes.Insts.CoreConvertAsRefSliceU8.as_ref s
+        ok (core.ops.range.Bound.Excluded s1)) := by
+  unfold merge.bound_as_ref
+  rfl
+
+/-- Included Bound copies via `Bytes::copy_from_slice`. Dual-unfold. -/
+theorem bound_to_owned_included (s) :
+    merge.bound_to_owned (core.ops.range.Bound.Included s) =
+      (do
+        let b1 ← bytes.bytes.Bytes.copy_from_slice s
+        ok (core.ops.range.Bound.Included b1)) := by
+  unfold merge.bound_to_owned
+  rfl
+
+/-- Excluded Bound copies via `Bytes::copy_from_slice`. Dual-unfold. -/
+theorem bound_to_owned_excluded (s) :
+    merge.bound_to_owned (core.ops.range.Bound.Excluded s) =
+      (do
+        let b1 ← bytes.bytes.Bytes.copy_from_slice s
+        ok (core.ops.range.Bound.Excluded b1)) := by
+  unfold merge.bound_to_owned
+  rfl
