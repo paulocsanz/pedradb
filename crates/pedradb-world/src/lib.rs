@@ -1364,7 +1364,7 @@ impl World {
                     "cu",
                     format!("k={key_tag} ok1={ok1} ok2={ok2} half={half}"),
                 );
-                if half > 0 {
+                if !pedradb_core::write_admission_kernel::batch_is_empty(half as u64) {
                     trace.push(step, "cu_half", format!("k={key_tag} half={half}"));
                 }
             }
