@@ -1756,15 +1756,7 @@ impl SstTable {
             }
         }
         let in_window = |uk: &[u8]| -> bool {
-            if !crate::write_admission_kernel::batch_is_empty(prefix.len() as u64)
-                && !uk.starts_with(prefix)
-            {
-                return false;
-            }
-            match end_owned.as_deref() {
-                Some(e) => uk < e,
-                None => true,
-            }
+            crate::prefix::key_in_prefix_range(uk, prefix, end_owned.as_deref())
         };
         let decide =
             |uk: &Bytes, block: &[(InternalKey, Bytes)]| -> Option<Option<(Bytes, Bytes)>> {
@@ -3244,6 +3236,24 @@ mod tests {
         assert!(
             !body.contains("file_before_end"),
             "Bound-match if must not stay inline in overlaps_user_range"
+        );
+    }
+
+    #[test]
+    fn last_visible_under_prefix_with_calls_key_in_prefix_range() {
+        let src = include_str!("table.rs");
+        let body = src
+            .split("pub fn last_visible_under_prefix_with")
+            .nth(1)
+            .and_then(|s| s.split("pub(crate) fn blocks_overlapping_range").next())
+            .expect("last_visible_under_prefix_with");
+        assert!(
+            body.contains("key_in_prefix_range("),
+            "SST prefix window must call catalog key_in_prefix_range"
+        );
+        assert!(
+            !body.contains("starts_with(prefix)"),
+            "starts_with+end skip must not stay inline"
         );
     }
 

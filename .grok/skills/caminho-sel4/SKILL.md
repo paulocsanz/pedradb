@@ -19,11 +19,11 @@ description: >
 
 ## Grind pressure (one block, overwritten each fire)
 
-- Last fire: worked (`31532062` SstRangeIter::next calls catalog `past_end`)
-- Why: leftover_next trampoline remaining; `SstRangeIter::next` still inlines `before_start` Bound match
-- This fire MUST land: `SstRangeIter::next` calls `user_key_in_range` for start Bound; no db.rs checkout
+- Last fire: worked (`69fb10bb` blocks_overlapping_range calls catalog `user_key_in_range`)
+- Why: leftover_next trampoline remaining; `last_visible_under_prefix_with` still inlines prefix window (`starts_with` + `uk < e`)
+- This fire MUST land: `last_visible_under_prefix_with` calls catalog `key_in_prefix_range`; no db.rs checkout
 - Forbidden this fire: mint u64 twin; leftover is_empty wrap; compact_refuse spray; leftover_next store/Montanha; git checkout of db.rs/concurrent.rs; ||/== identity kernel
-- Deeper: Search leftover_next=trampoline remaining; open SstRangeIter::next; named cargo; kernel call is the proof
+- Deeper: Search leftover_next=trampoline remaining; open last_visible_under_prefix_with; named cargo; kernel call is the proof
 
 This skill **lands one payable slice per Fire**. Rank 1–10 unpaid first.
 When those boards are 0, Search prints `leftover_next`: cartoon remaining
