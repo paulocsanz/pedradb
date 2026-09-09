@@ -7327,7 +7327,7 @@ impl<E: Env> StoreCluster<E> {
     /// No range, split at start/end, empty split key issues.
     pub fn split_range_at(&mut self, split_key: impl AsRef<[u8]>) -> Result<(u64, u64)> {
         let sk = split_key.as_ref().to_vec();
-        if sk.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(sk.len() as u64) {
             return Err(StoreError::Msg("split_key must be non-empty".into()));
         }
         let rid = self.locate(&sk)?;
