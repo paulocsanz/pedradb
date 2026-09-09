@@ -19,16 +19,17 @@ description: >
 
 - Last fire: factory_ban (leftover_next no longer names a fn)
 - Why: ranks 1–10 empty; leftover_next as a fn name was the wrap factory
-- This fire MUST land: nothing in production `.rs`; restamp idle
-- Forbidden this fire: leftover wrap; compact_refuse spray; DiskPressure on close; naming leftover_next a fn; Recover product
-- Deeper: leftover_next FACTORY_BAN; do not edit production
+- This fire MUST land: nothing in production `.rs`; do not restamp fire
+- Forbidden this fire: leftover wrap; compact_refuse spray; DiskPressure on close; naming leftover_next a fn; Recover product; fire++/started rewrite
+- Deeper: leftover_next FACTORY_BAN; last_verdict factory_ban → exit 0 no journal write
 
 This skill **lands one payable slice per Fire** only if rank 1–10 has an
 unpaid item (`unpaid_compose` / `unpaid_script` / concurrency / scale).
 `leftover_next FACTORY_BAN` = boards empty: **do not edit production
 `.rs`**. Do not invent a `compact_refuse` / `batch_is_empty` site. Do not
 replace `leftover_next` with a function name (that *is* the factory).
-Watchdog: restamp journal idle. Catalog-only `single_artifact` is skip.
+Watchdog: `last_verdict: factory_ban` → exit 0, **do not** rewrite
+`fire`/`started`. Catalog-only `single_artifact` is skip.
 Under `/grind`, a valid land still chains; FACTORY_BAN is a measured stop
 (same class as EXTRACT refuse), not “grow leftover_next and spray”.
 
@@ -180,8 +181,9 @@ Acceptance **when leftover_next is not FACTORY_BAN**:
 - `--lint` freeze: extract count matches; `db_rs_extracted` false
 
 **FACTORY_BAN fire:** `candidates.py` printed `leftover_next FACTORY_BAN`.
-Production `.rs` **must not** change. Journal idle. That is the fire —
-not a failed land to recover with a wrap.
+Production `.rs` **must not** change. Write `last_verdict: factory_ban`
+**once**. Later watchdog ticks exit 0 without touching the journal —
+incrementing `fire`/`started` is not a land.
 
 **Not a land:** catalog/`residuals` `single_artifact` flag without the rustc
 body change above; cfg/verus wrap on a kernel whose `entry` already has a
@@ -197,10 +199,9 @@ hit is that, fall through **or** FACTORY_BAN — do not invent a site.
 ## 4. Output (after the commit, not instead of it)
 
 Under `/grind` this section is **not** permission to stop **unless
-leftover_next is FACTORY_BAN** (measured stop; restamp idle; do not
-chain product). Write it only if the next Fire's land tools already
-follow **or** this fire is FACTORY_BAN. Journal + pressure + grep is
-not that Fire.
+leftover_next is FACTORY_BAN** (measured stop; do not chain product;
+do not restamp `fire` on later ticks). Write it only if the next
+Fire's land tools already follow **or** this fire is FACTORY_BAN.
 
 ```markdown
 ## Caminho seL4 — não acabou
