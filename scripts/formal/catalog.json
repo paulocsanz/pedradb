@@ -1638,8 +1638,9 @@
       "id": "stream_next_seq",
       "finding": "F54",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-stream/src/cursor_kernel.rs",
-      "twin": "crates/pedradb-stream/verus/cursor.rs",
+      "twin": "crates/pedradb-stream/src/cursor_kernel.rs",
       "verus": "scripts/verus_stream_cursor.sh",
       "callers": [
         "crates/pedradb-stream/src/cursor_kernel.rs"
