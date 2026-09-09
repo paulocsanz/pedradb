@@ -6410,6 +6410,10 @@ impl<E: Env> Db<E> {
     }
 
     fn rotate_wal_now(&mut self) -> Result<()> {
+        let probe = crate::env::probe_available_bytes(&self.env, &self.dir);
+        if let Some((available, need)) = crate::disk_pressure_kernel::compact_refuse(probe) {
+            return Err(CoreError::DiskPressure { available, need });
+        }
         // SST + MANIFEST must be durable before the WAL that covers those
         // keys is discarded (G1). L0 flush skips file fsync; this is the pay
         // point.

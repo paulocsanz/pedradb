@@ -405,6 +405,15 @@ mod tests {
             cf.contains("compact_refuse("),
             "compact_ssts_only_cf must match compact_refuse"
         );
+        let rot = include_str!("db.rs")
+            .split("fn rotate_wal_now(")
+            .nth(1)
+            .and_then(|s| s.split("pub fn compact_leveled(").next())
+            .expect("rotate_wal_now");
+        assert!(
+            rot.contains("compact_refuse("),
+            "rotate_wal_now must match compact_refuse"
+        );
     }
 
     #[test]

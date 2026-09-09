@@ -135,6 +135,7 @@ admitido (não há compact); só o hard recusa.
   - `compact_refuse_on_live_sst_write_is_not_ok`: flush/compact/leveled/ssts_only match `compact_refuse`.
   - `failing_env_flush_cf_under_hard_floor_is_disk_pressure`: flush_cf recusa; mem restaurado.
   - `failing_env_compact_ssts_only_cf_under_hard_floor_is_disk_pressure`: compact CF recusa.
+  - `failing_env_rotate_wal_under_hard_floor_is_disk_pressure`: rotate WAL recusa; chave vive.
 - **Telemetry / Analytics:** `tracing::warn!` na transição (não cada put).
   Sonda 0169 é P1.3.
 - **Documentation:** este RFC; linha em `docs/status.md`. Não reescreve
