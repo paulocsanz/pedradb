@@ -1776,7 +1776,7 @@ impl MemTable {
         {
             return None;
         }
-        if self.tail_len() == 0 {
+        if crate::write_admission_kernel::batch_is_empty(self.tail_len() as u64) {
             return Some(0);
         }
         let mut pfx_buf = [0u8; 32];
