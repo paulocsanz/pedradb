@@ -5538,8 +5538,9 @@
       "id": "compact_split",
       "finding": "RFC-0160 OOM",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-core/src/compact_kernel.rs",
-      "twin": "crates/pedradb-core/verus/compact_decision.rs",
+      "twin": "crates/pedradb-core/src/compact_kernel.rs",
       "aeneas": "scripts/aeneas_compact.sh",
       "callers": [
         "crates/pedradb-core/src/compact_kernel.rs"
@@ -5556,8 +5557,9 @@
       "id": "compact_split_at",
       "finding": "RFC-0160 OOM",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-core/src/compact_kernel.rs",
-      "twin": "crates/pedradb-core/verus/compact_decision.rs",
+      "twin": "crates/pedradb-core/src/compact_kernel.rs",
       "aeneas": "scripts/aeneas_compact.sh",
       "callers": [
         "crates/pedradb-core/src/compact_kernel.rs"
@@ -5574,8 +5576,9 @@
       "id": "lone_tombstone",
       "finding": "F177",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-core/src/compact_kernel.rs",
-      "twin": "crates/pedradb-core/verus/compact_decision.rs",
+      "twin": "crates/pedradb-core/src/compact_kernel.rs",
       "aeneas": "scripts/aeneas_compact.sh",
       "callers": [
         "crates/pedradb-core/src/compact_kernel.rs",

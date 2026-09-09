@@ -19,8 +19,10 @@
 //!   lowest non-empty level below max; GC-only rewrite of the max level
 //!   happens only when requested.
 //!
-//! Verus twin: `crates/pedradb-core/verus/compact_decision.rs`.
-//! Spec page: `docs/formal/crash-dictionary.md` (compaction section).
+//! Single artifact (Aeneas-paid): the rustc body this crate links IS the
+//! proof term — theorems over the Charon+Aeneas extract
+//! (`./scripts/aeneas_compact.sh`, `CompactKernel.lean` without `sorry`;
+//! spec page: `docs/formal/crash-dictionary.md`, compaction section).
 
 #![forbid(unsafe_code)]
 
@@ -56,6 +58,20 @@ pub fn compact_should_split_at(written_bytes: u64, target: u64) -> bool {
 #[must_use]
 pub fn compact_should_split(written_bytes: u64) -> bool {
     compact_should_split_at(written_bytes, COMPACT_TARGET_FILE_BYTES)
+}
+
+/// AS-IS: never split at the fixed target — the merged output grows
+/// unbounded past [`COMPACT_TARGET_FILE_BYTES`] (one giant file, the
+/// bounded-writer regression the split exists to prevent).
+#[must_use]
+pub fn compact_should_split_as_is(_written_bytes: u64) -> bool {
+    false
+}
+
+/// AS-IS: never split at an explicit target either.
+#[must_use]
+pub fn compact_should_split_at_as_is(_written_bytes: u64, _target: u64) -> bool {
+    false
 }
 
 /// What one compaction run does.
@@ -471,5 +487,21 @@ mod tests {
         assert_eq!(COMPACT_TARGET_FILE_BYTES, 256 * 1024 * 1024);
         assert!(compact_should_split_at(1_024, 1_024));
         assert!(!compact_should_split_at(1_023, 1_024));
+    }
+
+    /// Catalog three-teeth plant (compact_split_at): mutants that never
+    /// split leave the merged output unbounded.
+    #[test]
+    fn compact_split_mutants_never_split_is_not_ok() {
+        assert!(compact_should_split(COMPACT_TARGET_FILE_BYTES));
+        assert!(compact_should_split_at(1_024, 1_024));
+        assert!(
+            !compact_should_split_as_is(u64::MAX),
+            "AS-IS dente: fixed-target mutant never splits — one giant file past the target"
+        );
+        assert!(
+            !compact_should_split_at_as_is(u64::MAX, 1),
+            "AS-IS dente: explicit-target mutant never splits either"
+        );
     }
 }

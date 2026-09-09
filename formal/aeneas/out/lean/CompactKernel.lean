@@ -34,7 +34,7 @@ axiom U32.Insts.CoreHashHash.hash
   {H : Type} (HasherInst : core.hash.Hasher H) : Std.U32 → H → Result H
 
 /-- [pedra_aeneas_compact_kernel::COMPACT_TARGET_FILE_BYTES]
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 44:0-44:61
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 46:0-46:61
     Visibility: public -/
 @[global_simps, irreducible]
 def COMPACT_TARGET_FILE_BYTES : Result Std.U64 := do
@@ -42,21 +42,34 @@ def COMPACT_TARGET_FILE_BYTES : Result Std.U64 := do
   i * 1024#u64
 
 /-- [pedra_aeneas_compact_kernel::compact_should_split_at]:
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 51:0-53:1
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 53:0-55:1
     Visibility: public -/
 def compact_should_split_at
   (written_bytes : Std.U64) (target : Std.U64) : Result Bool := do
   ok (written_bytes >= target)
 
 /-- [pedra_aeneas_compact_kernel::compact_should_split]:
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 57:0-59:1
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 59:0-61:1
     Visibility: public -/
 def compact_should_split (written_bytes : Std.U64) : Result Bool := do
   let i ← COMPACT_TARGET_FILE_BYTES
   compact_should_split_at written_bytes i
 
+/-- [pedra_aeneas_compact_kernel::compact_should_split_as_is]:
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 67:0-69:1
+    Visibility: public -/
+def compact_should_split_as_is (_written_bytes : Std.U64) : Result Bool := do
+  ok false
+
+/-- [pedra_aeneas_compact_kernel::compact_should_split_at_as_is]:
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 73:0-75:1
+    Visibility: public -/
+def compact_should_split_at_as_is
+  (_written_bytes : Std.U64) (_target : Std.U64) : Result Bool := do
+  ok false
+
 /-- [pedra_aeneas_compact_kernel::CompactPlan]
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 63:0-76:1
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 79:0-92:1
     Visibility: public -/
 @[discriminant isize]
 inductive CompactPlan where
@@ -65,7 +78,7 @@ inductive CompactPlan where
 | NoOp : CompactPlan
 
 /-- [pedra_aeneas_compact_kernel::{impl core::fmt::Debug for pedra_aeneas_compact_kernel::CompactPlan}::fmt]:
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 62:9-62:14
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 78:9-78:14
     Visibility: public -/
 def CompactPlan.Insts.CoreFmtDebug.fmt
   (self : CompactPlan) (f : core.fmt.Formatter) :
@@ -82,42 +95,42 @@ def CompactPlan.Insts.CoreFmtDebug.fmt
   | CompactPlan.NoOp => core.fmt.Formatter.write_str f (toStr "NoOp")
 
 /-- Trait implementation: [pedra_aeneas_compact_kernel::{impl core::fmt::Debug for pedra_aeneas_compact_kernel::CompactPlan}]
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 62:9-62:14 -/
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 78:9-78:14 -/
 @[reducible]
 def CompactPlan.Insts.CoreFmtDebug : core.fmt.Debug CompactPlan := {
   fmt := CompactPlan.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_compact_kernel::{impl core::clone::Clone for pedra_aeneas_compact_kernel::CompactPlan}::clone]:
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 62:16-62:21
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 78:16-78:21
     Visibility: public -/
 def CompactPlan.Insts.CoreCloneClone.clone
   (self : CompactPlan) : Result CompactPlan := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_compact_kernel::{impl core::clone::Clone for pedra_aeneas_compact_kernel::CompactPlan}]
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 62:16-62:21 -/
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 78:16-78:21 -/
 @[reducible]
 def CompactPlan.Insts.CoreCloneClone : core.clone.Clone CompactPlan := {
   clone := CompactPlan.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [pedra_aeneas_compact_kernel::{impl core::marker::Copy for pedra_aeneas_compact_kernel::CompactPlan}]
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 62:23-62:27 -/
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 78:23-78:27 -/
 @[reducible]
 def CompactPlan.Insts.CoreMarkerCopy : core.marker.Copy CompactPlan := {
   cloneInst := CompactPlan.Insts.CoreCloneClone
 }
 
 /-- Trait implementation: [pedra_aeneas_compact_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_compact_kernel::CompactPlan}]
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 62:29-62:38 -/
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 78:29-78:38 -/
 @[reducible]
 def CompactPlan.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq CompactPlan := {
 }
 
 /-- [pedra_aeneas_compact_kernel::{impl core::cmp::PartialEq<pedra_aeneas_compact_kernel::CompactPlan> for pedra_aeneas_compact_kernel::CompactPlan}::eq]:
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 62:29-62:38
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 78:29-78:38
     Visibility: public -/
 def CompactPlan.Insts.CoreCmpPartialEqCompactPlan.eq
   (self : CompactPlan) (other : CompactPlan) : Result Bool := do
@@ -140,7 +153,7 @@ def CompactPlan.Insts.CoreCmpPartialEqCompactPlan.eq
   else ok false
 
 /-- Trait implementation: [pedra_aeneas_compact_kernel::{impl core::cmp::PartialEq<pedra_aeneas_compact_kernel::CompactPlan> for pedra_aeneas_compact_kernel::CompactPlan}]
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 62:29-62:38 -/
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 78:29-78:38 -/
 @[reducible]
 def CompactPlan.Insts.CoreCmpPartialEqCompactPlan : core.cmp.PartialEq
   CompactPlan CompactPlan := {
@@ -148,14 +161,14 @@ def CompactPlan.Insts.CoreCmpPartialEqCompactPlan : core.cmp.PartialEq
 }
 
 /-- [pedra_aeneas_compact_kernel::{impl core::cmp::Eq for pedra_aeneas_compact_kernel::CompactPlan}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 62:40-62:42
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 78:40-78:42
     Visibility: public -/
 def CompactPlan.Insts.CoreCmpEq.assert_fields_are_eq
   (self : CompactPlan) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_compact_kernel::{impl core::cmp::Eq for pedra_aeneas_compact_kernel::CompactPlan}]
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 62:40-62:42 -/
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 78:40-78:42 -/
 @[reducible]
 def CompactPlan.Insts.CoreCmpEq : core.cmp.Eq CompactPlan := {
   partialEqInst := CompactPlan.Insts.CoreCmpPartialEqCompactPlan
@@ -163,7 +176,7 @@ def CompactPlan.Insts.CoreCmpEq : core.cmp.Eq CompactPlan := {
 }
 
 /-- [pedra_aeneas_compact_kernel::{impl core::hash::Hash for pedra_aeneas_compact_kernel::CompactPlan}::hash]:
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 62:44-62:48
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 78:44-78:48
     Visibility: public -/
 def CompactPlan.Insts.CoreHashHash.hash
   {__H : Type} (corehashHasherInst : core.hash.Hasher __H) (self : CompactPlan)
@@ -181,7 +194,7 @@ def CompactPlan.Insts.CoreHashHash.hash
   | CompactPlan.NoOp => ok state1
 
 /-- Trait implementation: [pedra_aeneas_compact_kernel::{impl core::hash::Hash for pedra_aeneas_compact_kernel::CompactPlan}]
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 62:44-62:48 -/
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 78:44-78:48 -/
 @[reducible]
 def CompactPlan.Insts.CoreHashHash : core.hash.Hash CompactPlan := {
   hash := fun {H : Type} (corehashHasherInst : core.hash.Hasher H) =>
@@ -189,7 +202,7 @@ def CompactPlan.Insts.CoreHashHash : core.hash.Hash CompactPlan := {
 }
 
 /-- [pedra_aeneas_compact_kernel::compact_pick]:
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 93:0-114:1
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 109:0-130:1
     Visibility: public -/
 def compact_pick
   (lowest_level_with_files : Option Std.U32) (files_at_max_level : Bool)
@@ -208,7 +221,7 @@ def compact_pick
               ok (CompactPlan.Merge l i)
 
 /-- [pedra_aeneas_compact_kernel::compact_pick_as_is]:
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 119:0-126:1
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 135:0-142:1
     Visibility: public -/
 def compact_pick_as_is
   (_lowest_level_with_files : Option Std.U32) (_files_at_max_level : Bool)
@@ -218,7 +231,7 @@ def compact_pick_as_is
   ok CompactPlan.NoOp
 
 /-- [pedra_aeneas_compact_kernel::VersionFate]
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 130:0-135:1
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 146:0-151:1
     Visibility: public -/
 @[discriminant isize]
 inductive VersionFate where
@@ -226,7 +239,7 @@ inductive VersionFate where
 | Drop : VersionFate
 
 /-- [pedra_aeneas_compact_kernel::{impl core::fmt::Debug for pedra_aeneas_compact_kernel::VersionFate}::fmt]:
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 129:9-129:14
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 145:9-145:14
     Visibility: public -/
 def VersionFate.Insts.CoreFmtDebug.fmt
   (self : VersionFate) (f : core.fmt.Formatter) :
@@ -237,42 +250,42 @@ def VersionFate.Insts.CoreFmtDebug.fmt
   | VersionFate.Drop => core.fmt.Formatter.write_str f (toStr "Drop")
 
 /-- Trait implementation: [pedra_aeneas_compact_kernel::{impl core::fmt::Debug for pedra_aeneas_compact_kernel::VersionFate}]
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 129:9-129:14 -/
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 145:9-145:14 -/
 @[reducible]
 def VersionFate.Insts.CoreFmtDebug : core.fmt.Debug VersionFate := {
   fmt := VersionFate.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_compact_kernel::{impl core::clone::Clone for pedra_aeneas_compact_kernel::VersionFate}::clone]:
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 129:16-129:21
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 145:16-145:21
     Visibility: public -/
 def VersionFate.Insts.CoreCloneClone.clone
   (self : VersionFate) : Result VersionFate := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_compact_kernel::{impl core::clone::Clone for pedra_aeneas_compact_kernel::VersionFate}]
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 129:16-129:21 -/
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 145:16-145:21 -/
 @[reducible]
 def VersionFate.Insts.CoreCloneClone : core.clone.Clone VersionFate := {
   clone := VersionFate.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [pedra_aeneas_compact_kernel::{impl core::marker::Copy for pedra_aeneas_compact_kernel::VersionFate}]
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 129:23-129:27 -/
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 145:23-145:27 -/
 @[reducible]
 def VersionFate.Insts.CoreMarkerCopy : core.marker.Copy VersionFate := {
   cloneInst := VersionFate.Insts.CoreCloneClone
 }
 
 /-- Trait implementation: [pedra_aeneas_compact_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_compact_kernel::VersionFate}]
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 129:29-129:38 -/
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 145:29-145:38 -/
 @[reducible]
 def VersionFate.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq VersionFate := {
 }
 
 /-- [pedra_aeneas_compact_kernel::{impl core::cmp::PartialEq<pedra_aeneas_compact_kernel::VersionFate> for pedra_aeneas_compact_kernel::VersionFate}::eq]:
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 129:29-129:38
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 145:29-145:38
     Visibility: public -/
 def VersionFate.Insts.CoreCmpPartialEqVersionFate.eq
   (self : VersionFate) (other : VersionFate) : Result Bool := do
@@ -281,7 +294,7 @@ def VersionFate.Insts.CoreCmpPartialEqVersionFate.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_compact_kernel::{impl core::cmp::PartialEq<pedra_aeneas_compact_kernel::VersionFate> for pedra_aeneas_compact_kernel::VersionFate}]
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 129:29-129:38 -/
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 145:29-145:38 -/
 @[reducible]
 def VersionFate.Insts.CoreCmpPartialEqVersionFate : core.cmp.PartialEq
   VersionFate VersionFate := {
@@ -289,14 +302,14 @@ def VersionFate.Insts.CoreCmpPartialEqVersionFate : core.cmp.PartialEq
 }
 
 /-- [pedra_aeneas_compact_kernel::{impl core::cmp::Eq for pedra_aeneas_compact_kernel::VersionFate}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 129:40-129:42
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 145:40-145:42
     Visibility: public -/
 def VersionFate.Insts.CoreCmpEq.assert_fields_are_eq
   (self : VersionFate) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_compact_kernel::{impl core::cmp::Eq for pedra_aeneas_compact_kernel::VersionFate}]
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 129:40-129:42 -/
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 145:40-145:42 -/
 @[reducible]
 def VersionFate.Insts.CoreCmpEq : core.cmp.Eq VersionFate := {
   partialEqInst := VersionFate.Insts.CoreCmpPartialEqVersionFate
@@ -304,7 +317,7 @@ def VersionFate.Insts.CoreCmpEq : core.cmp.Eq VersionFate := {
 }
 
 /-- [pedra_aeneas_compact_kernel::{impl core::hash::Hash for pedra_aeneas_compact_kernel::VersionFate}::hash]:
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 129:44-129:48
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 145:44-145:48
     Visibility: public -/
 def VersionFate.Insts.CoreHashHash.hash
   {__H : Type} (corehashHasherInst : core.hash.Hasher __H) (self : VersionFate)
@@ -315,7 +328,7 @@ def VersionFate.Insts.CoreHashHash.hash
   Isize.Insts.CoreHashHash.hash corehashHasherInst self1 state
 
 /-- Trait implementation: [pedra_aeneas_compact_kernel::{impl core::hash::Hash for pedra_aeneas_compact_kernel::VersionFate}]
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 129:44-129:48 -/
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 145:44-145:48 -/
 @[reducible]
 def VersionFate.Insts.CoreHashHash : core.hash.Hash VersionFate := {
   hash := fun {H : Type} (corehashHasherInst : core.hash.Hasher H) =>
@@ -323,7 +336,7 @@ def VersionFate.Insts.CoreHashHash : core.hash.Hash VersionFate := {
 }
 
 /-- [pedra_aeneas_compact_kernel::point_version_fate]:
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 155:0-174:1
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 171:0-190:1
     Visibility: public -/
 def point_version_fate
   (this_seq : Std.U64) (newer_kept_seq : Option Std.U64)
@@ -338,7 +351,7 @@ def point_version_fate
     else ok VersionFate.Keep
 
 /-- [pedra_aeneas_compact_kernel::point_version_fate_as_is_drop_under_snapshot]:
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 182:0-197:1
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 198:0-213:1
     Visibility: public -/
 def point_version_fate_as_is_drop_under_snapshot
   (this_seq : Std.U64) (newer_kept_seq : Option Std.U64)
@@ -353,7 +366,7 @@ def point_version_fate_as_is_drop_under_snapshot
     else ok VersionFate.Keep
 
 /-- [pedra_aeneas_compact_kernel::lone_tombstone_fate]:
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 217:0-223:1
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 233:0-239:1
     Visibility: public -/
 def lone_tombstone_fate
   (bottommost : Bool) (lone_newest_tombstone : Bool) : Result VersionFate := do
@@ -365,7 +378,7 @@ def lone_tombstone_fate
   else ok VersionFate.Keep
 
 /-- [pedra_aeneas_compact_kernel::lone_tombstone_fate_as_is_ignore_bottommost]:
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 229:0-238:1
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 245:0-254:1
     Visibility: public -/
 def lone_tombstone_fate_as_is_ignore_bottommost
   (_bottommost : Bool) (lone_newest_tombstone : Bool) :
@@ -376,7 +389,7 @@ def lone_tombstone_fate_as_is_ignore_bottommost
   else ok VersionFate.Keep
 
 /-- [pedra_aeneas_compact_kernel::gc_oldest_from_pin]:
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 246:0-251:1
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 262:0-267:1
     Visibility: public -/
 def gc_oldest_from_pin
   (oldest_pin : Option Std.U64) (last_seq : Std.U64) (visible_seq : Std.U64) :
@@ -387,7 +400,7 @@ def gc_oldest_from_pin
   | some p => ok p
 
 /-- [pedra_aeneas_compact_kernel::gc_oldest_from_pin_as_is]:
-    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 255:0-257:1
+    Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 271:0-273:1
     Visibility: public -/
 def gc_oldest_from_pin_as_is
   (_oldest_pin : Option Std.U64) (last_seq : Std.U64) (visible_seq : Std.U64) :

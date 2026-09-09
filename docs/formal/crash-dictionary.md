@@ -127,8 +127,11 @@ state) with the mutants asserted to diverge on every damaged input.
 
 `Db::compact_with_ssts_only` (trigger / level choice) and
 `merge::gc_snapshot_safe` (version retention) decide through
-`compact_kernel.rs`, with named Verus lemmas
-(`verus/compact_decision.rs`, `10 verified`, no `sorry`):
+`compact_kernel.rs`, with named lemmas
+(twin `verus/compact_decision.rs` deletado 2026-09-09 — single-artifact
+pago pelo extrato Aeneas do corpo rustc, `scripts/aeneas_compact.sh`,
+`CompactKernel.lean` sem `sorry`; the lemma statements below are
+enforced by the kernel teeth + plants):
 
 | Lemma | Statement |
 |-------|-----------|
