@@ -53,7 +53,7 @@
 - **Tests**
   - `unleft_joint_caps_through`: `compact_through_unleft(5, Some(3)) == 2`; AS-IS `== 5`.
   - Catalog pair `compact_unleft` `entry: compact_through_unleft`; freeze twins fail if the exec fn is dropped from the twin.
-  - `./scripts/verus_compact_kernel.sh` when Verus is installed.
+  - `./scripts/aeneas_store_compact.sh` — Charon+Aeneas extract of the rustc bodies (single artifact; the `verus/compact_kernel.rs` twin was deleted 2026-09-09).
 - **Telemetry / Analytics:** none — safety invariant.
 - **Documentation:** this RFC; RFC-0108 P1.1 split (`joint_leave_ok` stays); `residuals.json` `R-joint` owner 0109.
 - **Screenshots:** backend-only.

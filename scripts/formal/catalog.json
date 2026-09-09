@@ -1407,8 +1407,9 @@
       "id": "compact",
       "finding": "F27/F28",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-store/src/compact_kernel.rs",
-      "twin": "crates/pedradb-store/verus/compact_kernel.rs",
+      "twin": "crates/pedradb-store/src/compact_kernel.rs",
       "aeneas": "scripts/aeneas_store_compact.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
@@ -6296,8 +6297,9 @@
       "id": "compact_floor",
       "finding": "F27",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-store/src/compact_kernel.rs",
-      "twin": "crates/pedradb-store/verus/compact_kernel.rs",
+      "twin": "crates/pedradb-store/src/compact_kernel.rs",
       "aeneas": "scripts/aeneas_store_compact.sh",
       "callers": [
         "crates/pedradb-store/src/compact_kernel.rs",
@@ -6321,8 +6323,9 @@
       "id": "compact_ready",
       "finding": "F27",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-store/src/compact_kernel.rs",
-      "twin": "crates/pedradb-store/verus/compact_kernel.rs",
+      "twin": "crates/pedradb-store/src/compact_kernel.rs",
       "aeneas": "scripts/aeneas_store_compact.sh",
       "callers": [
         "crates/pedradb-store/src/compact_kernel.rs",
@@ -6346,8 +6349,9 @@
       "id": "compact_peer_counts",
       "finding": "F28",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-store/src/compact_kernel.rs",
-      "twin": "crates/pedradb-store/verus/compact_kernel.rs",
+      "twin": "crates/pedradb-store/src/compact_kernel.rs",
       "aeneas": "scripts/aeneas_store_compact.sh",
       "callers": [
         "crates/pedradb-store/src/compact_kernel.rs",
