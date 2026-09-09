@@ -472,7 +472,7 @@ impl RecordSource for EncodedOpsSource<'_> {
         while filled < n {
             let run = self.current();
             assert!(
-                !run.is_empty(),
+                !crate::write_admission_kernel::batch_is_empty(run.len() as u64),
                 "EncodedOpsSource exhausted before record end"
             );
             let take = (n - filled).min(run.len());
