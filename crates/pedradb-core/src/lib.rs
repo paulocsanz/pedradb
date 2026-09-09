@@ -95,8 +95,8 @@ pub use db::{
     WAL_FILE_NAME,
 };
 pub use disk_pressure_kernel::{
-    disk_pressure_admit, disk_probe_or_unknown, external_write_admitted, DiskPressureAdmit,
-    DISK_HARD_FREE_BYTES, DISK_SOFT_FREE_BYTES,
+    compact_refuse, disk_pressure_admit, disk_probe_or_unknown, external_write_admitted,
+    DiskPressureAdmit, DISK_HARD_FREE_BYTES, DISK_SOFT_FREE_BYTES,
 };
 pub use env::{
     admit_disk_write, probe_available_bytes, AdviseKind, Env, EnvFile, EnvSource, SstFileSource,

@@ -200,8 +200,26 @@ def compact_allowed_under_pressure_as_is
   (_available : Option Std.U64) : Result Bool := do
   ok true
 
+/-- [pedra_aeneas_disk_pressure_kernel::compact_refuse]:
+    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 98:0-103:1
+    Visibility: public -/
+def compact_refuse
+  (available : Option Std.U64) : Result (Option (Std.U64 × Std.U64)) := do
+  let dpa ← disk_pressure_admit available
+  match dpa with
+  | DiskPressureAdmit.Ok => ok none
+  | DiskPressureAdmit.Reclaim => ok none
+  | DiskPressureAdmit.Refuse available1 need => ok (some (available1, need))
+
+/-- [pedra_aeneas_disk_pressure_kernel::compact_refuse_as_is]:
+    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 107:0-109:1
+    Visibility: public -/
+def compact_refuse_as_is
+  (_available : Option Std.U64) : Result (Option (Std.U64 × Std.U64)) := do
+  ok none
+
 /-- [pedra_aeneas_disk_pressure_kernel::DiskReclaimPlan]
-    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 94:0-101:1
+    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 113:0-120:1
     Visibility: public -/
 structure DiskReclaimPlan where
   compact_sst : Bool
@@ -209,14 +227,14 @@ structure DiskReclaimPlan where
   compact_vlog : Bool
 
 /-- [pedra_aeneas_disk_pressure_kernel::{impl core::clone::Clone for pedra_aeneas_disk_pressure_kernel::DiskReclaimPlan}::clone]:
-    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 93:9-93:14
+    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 112:9-112:14
     Visibility: public -/
 def DiskReclaimPlan.Insts.CoreCloneClone.clone
   (self : DiskReclaimPlan) : Result DiskReclaimPlan := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_disk_pressure_kernel::{impl core::clone::Clone for pedra_aeneas_disk_pressure_kernel::DiskReclaimPlan}]
-    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 93:9-93:14 -/
+    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 112:9-112:14 -/
 @[reducible]
 def DiskReclaimPlan.Insts.CoreCloneClone : core.clone.Clone DiskReclaimPlan
   := {
@@ -224,7 +242,7 @@ def DiskReclaimPlan.Insts.CoreCloneClone : core.clone.Clone DiskReclaimPlan
 }
 
 /-- Trait implementation: [pedra_aeneas_disk_pressure_kernel::{impl core::marker::Copy for pedra_aeneas_disk_pressure_kernel::DiskReclaimPlan}]
-    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 93:16-93:20 -/
+    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 112:16-112:20 -/
 @[reducible]
 def DiskReclaimPlan.Insts.CoreMarkerCopy : core.marker.Copy DiskReclaimPlan
   := {
@@ -232,7 +250,7 @@ def DiskReclaimPlan.Insts.CoreMarkerCopy : core.marker.Copy DiskReclaimPlan
 }
 
 /-- [pedra_aeneas_disk_pressure_kernel::{impl core::fmt::Debug for pedra_aeneas_disk_pressure_kernel::DiskReclaimPlan}::fmt]:
-    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 93:22-93:27
+    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 112:22-112:27
     Visibility: public -/
 def DiskReclaimPlan.Insts.CoreFmtDebug.fmt
   (self : DiskReclaimPlan) (f : core.fmt.Formatter) :
@@ -247,21 +265,21 @@ def DiskReclaimPlan.Insts.CoreFmtDebug.fmt
     dyn2
 
 /-- Trait implementation: [pedra_aeneas_disk_pressure_kernel::{impl core::fmt::Debug for pedra_aeneas_disk_pressure_kernel::DiskReclaimPlan}]
-    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 93:22-93:27 -/
+    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 112:22-112:27 -/
 @[reducible]
 def DiskReclaimPlan.Insts.CoreFmtDebug : core.fmt.Debug DiskReclaimPlan := {
   fmt := DiskReclaimPlan.Insts.CoreFmtDebug.fmt
 }
 
 /-- Trait implementation: [pedra_aeneas_disk_pressure_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_disk_pressure_kernel::DiskReclaimPlan}]
-    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 93:29-93:38 -/
+    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 112:29-112:38 -/
 @[reducible]
 def DiskReclaimPlan.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq DiskReclaimPlan := {
 }
 
 /-- [pedra_aeneas_disk_pressure_kernel::{impl core::cmp::PartialEq<pedra_aeneas_disk_pressure_kernel::DiskReclaimPlan> for pedra_aeneas_disk_pressure_kernel::DiskReclaimPlan}::eq]:
-    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 93:29-93:38
+    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 112:29-112:38
     Visibility: public -/
 def DiskReclaimPlan.Insts.CoreCmpPartialEqDiskReclaimPlan.eq
   (self : DiskReclaimPlan) (other : DiskReclaimPlan) : Result Bool := do
@@ -273,7 +291,7 @@ def DiskReclaimPlan.Insts.CoreCmpPartialEqDiskReclaimPlan.eq
   else ok false
 
 /-- Trait implementation: [pedra_aeneas_disk_pressure_kernel::{impl core::cmp::PartialEq<pedra_aeneas_disk_pressure_kernel::DiskReclaimPlan> for pedra_aeneas_disk_pressure_kernel::DiskReclaimPlan}]
-    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 93:29-93:38 -/
+    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 112:29-112:38 -/
 @[reducible]
 def DiskReclaimPlan.Insts.CoreCmpPartialEqDiskReclaimPlan : core.cmp.PartialEq
   DiskReclaimPlan DiskReclaimPlan := {
@@ -281,14 +299,14 @@ def DiskReclaimPlan.Insts.CoreCmpPartialEqDiskReclaimPlan : core.cmp.PartialEq
 }
 
 /-- [pedra_aeneas_disk_pressure_kernel::{impl core::cmp::Eq for pedra_aeneas_disk_pressure_kernel::DiskReclaimPlan}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 93:40-93:42
+    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 112:40-112:42
     Visibility: public -/
 def DiskReclaimPlan.Insts.CoreCmpEq.assert_fields_are_eq
   (self : DiskReclaimPlan) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_disk_pressure_kernel::{impl core::cmp::Eq for pedra_aeneas_disk_pressure_kernel::DiskReclaimPlan}]
-    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 93:40-93:42 -/
+    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 112:40-112:42 -/
 @[reducible]
 def DiskReclaimPlan.Insts.CoreCmpEq : core.cmp.Eq DiskReclaimPlan := {
   partialEqInst := DiskReclaimPlan.Insts.CoreCmpPartialEqDiskReclaimPlan
@@ -296,20 +314,20 @@ def DiskReclaimPlan.Insts.CoreCmpEq : core.cmp.Eq DiskReclaimPlan := {
 }
 
 /-- [pedra_aeneas_disk_pressure_kernel::disk_pressure_reclaim_plan]:
-    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 106:0-112:1
+    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 125:0-131:1
     Visibility: public -/
 def disk_pressure_reclaim_plan (allowed : Bool) : Result DiskReclaimPlan := do
   ok { compact_sst := allowed, rotate_wal := allowed, compact_vlog := allowed }
 
 /-- [pedra_aeneas_disk_pressure_kernel::disk_pressure_reclaim_plan_as_is]:
-    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 116:0-122:1
+    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 135:0-141:1
     Visibility: public -/
 def disk_pressure_reclaim_plan_as_is
   (allowed : Bool) : Result DiskReclaimPlan := do
   ok { compact_sst := allowed, rotate_wal := false, compact_vlog := false }
 
 /-- [pedra_aeneas_disk_pressure_kernel::external_write_admitted]:
-    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 129:0-134:1
+    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 148:0-153:1
     Visibility: public -/
 def external_write_admitted (available : Option Std.U64) : Result Bool := do
   let dpa ← disk_pressure_admit available
@@ -321,7 +339,7 @@ def external_write_admitted (available : Option Std.U64) : Result Bool := do
   ok (¬ b)
 
 /-- [pedra_aeneas_disk_pressure_kernel::external_write_admitted_as_is]:
-    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 138:0-140:1
+    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 157:0-159:1
     Visibility: public -/
 def external_write_admitted_as_is
   (_available : Option Std.U64) : Result Bool := do

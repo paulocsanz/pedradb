@@ -57,6 +57,23 @@ theorem disk_probe_err_admits :
   · unfold disk_pressure_admit
     rfl
 
+/-- Dual-unfold: SST-write refuse (`compact_refuse`) calls
+    `disk_pressure_admit`; unknown probe admits. -/
+theorem compact_refuse_unfolds_disk_pressure_admit :
+    compact_refuse none = ok none ∧
+      disk_pressure_admit none = ok DiskPressureAdmit.Ok := by
+  constructor
+  · unfold compact_refuse disk_pressure_admit
+    rfl
+  · unfold disk_pressure_admit
+    rfl
+
+/-- AS-IS dente: compact/flush proceeds at zero free. -/
+theorem compact_refuse_as_is_dente :
+    compact_refuse_as_is (some 0#u64) = ok none := by
+  unfold compact_refuse_as_is
+  rfl
+
 /-- Dual-unfold: PITR dest glue (`external_write_admitted`) calls
     `disk_pressure_admit`; unknown probe admits. -/
 theorem external_write_admitted_unfolds_disk_pressure_admit :

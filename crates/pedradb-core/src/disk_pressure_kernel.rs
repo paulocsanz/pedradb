@@ -89,6 +89,25 @@ pub fn compact_allowed_under_pressure_as_is(_available: Option<u64>) -> bool {
     true
 }
 
+/// SST-write refuse payload for flush/compact. `None` = admitted
+/// (unknown, plenty, or reclaim band). `Some` = below hard.
+///
+/// Glue (`flush`, `compact_with`, `compact_with_ssts_only`,
+/// `compact_leveled`) matches this fn instead of inlining the admit arms.
+#[must_use]
+pub fn compact_refuse(available: Option<u64>) -> Option<(u64, u64)> {
+    match disk_pressure_admit(available) {
+        DiskPressureAdmit::Refuse { available, need } => Some((available, need)),
+        DiskPressureAdmit::Ok | DiskPressureAdmit::Reclaim => None,
+    }
+}
+
+/// AS-IS hole: compact/flush proceeds at zero free (ENOSPC mid-SST).
+#[must_use]
+pub fn compact_refuse_as_is(_available: Option<u64>) -> Option<(u64, u64)> {
+    None
+}
+
 /// Which reclaim I/O the live engine runs while still ≥ hard (RFC-0179 P1.2).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DiskReclaimPlan {
@@ -338,8 +357,8 @@ mod tests {
             .and_then(|s| s.split("pub fn compact_reclaim").next())
             .expect("compact_with");
         assert!(
-            compact.contains("compact_allowed_under_pressure("),
-            "compact_with must match compact_allowed_under_pressure"
+            compact.contains("compact_refuse("),
+            "compact_with must match compact_refuse"
         );
         let flush = include_str!("db.rs")
             .split("pub fn flush(")
@@ -347,8 +366,8 @@ mod tests {
             .and_then(|s| s.split("pub(crate) fn bulk_family_of_table").next())
             .expect("flush");
         assert!(
-            flush.contains("compact_allowed_under_pressure("),
-            "flush must match compact_allowed_under_pressure"
+            flush.contains("compact_refuse("),
+            "flush must match compact_refuse"
         );
         let ssts_only = include_str!("db.rs")
             .split("pub fn compact_with_ssts_only(")
@@ -356,8 +375,8 @@ mod tests {
             .and_then(|s| s.split("fn compact_l0_into_l1").next())
             .expect("compact_with_ssts_only");
         assert!(
-            ssts_only.contains("compact_allowed_under_pressure("),
-            "compact_with_ssts_only must match compact_allowed_under_pressure"
+            ssts_only.contains("compact_refuse("),
+            "compact_with_ssts_only must match compact_refuse"
         );
         let leveled = include_str!("db.rs")
             .split("pub fn compact_leveled(")
@@ -365,8 +384,27 @@ mod tests {
             .and_then(|s| s.split("fn dump_level_diag").next())
             .expect("compact_leveled");
         assert!(
-            leveled.contains("compact_allowed_under_pressure("),
-            "compact_leveled must match compact_allowed_under_pressure"
+            leveled.contains("compact_refuse("),
+            "compact_leveled must match compact_refuse"
+        );
+    }
+
+    #[test]
+    fn compact_refuse_on_live_sst_write_is_not_ok() {
+        assert_eq!(compact_refuse(None), None);
+        assert_eq!(compact_refuse(Some(DISK_HARD_FREE_BYTES)), None);
+        assert_eq!(
+            compact_refuse(Some(0)),
+            Some((0, DISK_HARD_FREE_BYTES))
+        );
+        assert_eq!(
+            compact_refuse_as_is(Some(0)),
+            None,
+            "AS-IS dente: SST write proceeds at zero free"
+        );
+        assert!(
+            include_str!("db.rs").matches("compact_refuse(").count() >= 4,
+            "flush + compact_with + ssts_only + leveled must match compact_refuse"
         );
     }
 

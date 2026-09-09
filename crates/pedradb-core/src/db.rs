@@ -4881,13 +4881,8 @@ impl<E: Env> Db<E> {
     /// I/O while writing SST or recreating the WAL.
     pub fn flush(&mut self) -> Result<()> {
         let probe = crate::env::probe_available_bytes(&self.env, &self.dir);
-        if !crate::disk_pressure_kernel::compact_allowed_under_pressure(probe) {
-            return match crate::disk_pressure_kernel::disk_pressure_admit(probe) {
-                crate::disk_pressure_kernel::DiskPressureAdmit::Refuse { available, need } => {
-                    Err(CoreError::DiskPressure { available, need })
-                }
-                _ => Ok(()),
-            };
+        if let Some((available, need)) = crate::disk_pressure_kernel::compact_refuse(probe) {
+            return Err(CoreError::DiskPressure { available, need });
         }
         self.ensure_not_fenced()?;
         self.flush_all_bulk_runs()?;
@@ -6478,13 +6473,8 @@ impl<E: Env> Db<E> {
     /// SST / MANIFEST I/O.
     pub fn compact_leveled(&mut self) -> Result<()> {
         let probe = crate::env::probe_available_bytes(&self.env, &self.dir);
-        if !crate::disk_pressure_kernel::compact_allowed_under_pressure(probe) {
-            return match crate::disk_pressure_kernel::disk_pressure_admit(probe) {
-                crate::disk_pressure_kernel::DiskPressureAdmit::Refuse { available, need } => {
-                    Err(CoreError::DiskPressure { available, need })
-                }
-                _ => Ok(()),
-            };
+        if let Some((available, need)) = crate::disk_pressure_kernel::compact_refuse(probe) {
+            return Err(CoreError::DiskPressure { available, need });
         }
         if !crate::leveling::leveled_enabled() {
             return self.compact_with(CompactOptions::default());
@@ -6618,13 +6608,8 @@ impl<E: Env> Db<E> {
     /// I/O while writing the compacted SST or deleting old files.
     pub fn compact_with(&mut self, options: CompactOptions) -> Result<()> {
         let probe = crate::env::probe_available_bytes(&self.env, &self.dir);
-        if !crate::disk_pressure_kernel::compact_allowed_under_pressure(probe) {
-            return match crate::disk_pressure_kernel::disk_pressure_admit(probe) {
-                crate::disk_pressure_kernel::DiskPressureAdmit::Refuse { available, need } => {
-                    Err(CoreError::DiskPressure { available, need })
-                }
-                _ => Ok(()),
-            };
+        if let Some((available, need)) = crate::disk_pressure_kernel::compact_refuse(probe) {
+            return Err(CoreError::DiskPressure { available, need });
         }
         self.flush()?;
         crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::BEFORE_COMPACT_WRITE)?;
@@ -6821,13 +6806,8 @@ impl<E: Env> Db<E> {
             return Ok(());
         }
         let probe = crate::env::probe_available_bytes(&self.env, &self.dir);
-        if !crate::disk_pressure_kernel::compact_allowed_under_pressure(probe) {
-            return match crate::disk_pressure_kernel::disk_pressure_admit(probe) {
-                crate::disk_pressure_kernel::DiskPressureAdmit::Refuse { available, need } => {
-                    Err(CoreError::DiskPressure { available, need })
-                }
-                _ => Ok(()),
-            };
+        if let Some((available, need)) = crate::disk_pressure_kernel::compact_refuse(probe) {
+            return Err(CoreError::DiskPressure { available, need });
         }
         // Pick lowest level that has files and can promote (N → N+1);
         // decided by the pure kernel (RFC-0056 P0.3).

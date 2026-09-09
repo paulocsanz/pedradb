@@ -110,6 +110,7 @@
     "disk_pressure_admit",
     "disk_probe_or_unknown",
     "compact_allowed_under_pressure",
+    "compact_refuse",
     "external_write_admitted"
    ],
    "crates/pedradb-core/src/lsm_r1_kernel.rs": [
