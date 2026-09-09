@@ -325,6 +325,8 @@ pub const COMPARE_SHAPES: &[&str] = &[
     "oxigraph_triple_put_mc4",
     // RFC-0184 P2.61: Nebula insert-edge mc4 — 1c is already in COMPARE.
     "nebula_insert_edge_mc4",
+    // RFC-0184 P2.62: Solana shred-append mc4 — 1c is already in COMPARE.
+    "solana_shred_append_mc4",
 ];
 
 /// Length of the RFC-0041 official prefix of [`COMPARE_SHAPES`].
@@ -3420,6 +3422,84 @@ impl YcsbRunner {
         blocks
     }
 
+    /// RFC-0184 P2.62: solana_shred_append at N clients (WriteBatch of 16 shreds).
+    pub fn run_solana_append_clients<E: Engine + Sync>(
+        &self,
+        e: &E,
+        clients: usize,
+    ) -> Vec<String> {
+        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
+        let full = format!("solana_shred_append_mc{clients}");
+        if !shape_wanted(&full) {
+            return Vec::new();
+        }
+        e.set_write_sync(write_sync_for_suite("solana"));
+        let records = self.cfg.records;
+        let cfg_ops = self.cfg.ops;
+        let yval = std::sync::Arc::new(vec![b'S'; self.cfg.payload]);
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+        let phase0 = e.write_phase_snapshot();
+        let t0 = Instant::now();
+        let mut lats = Vec::with_capacity(cfg_ops * clients);
+        let mut errors = 0u64;
+        std::thread::scope(|s| {
+            let handles: Vec<_> = (0..clients)
+                .map(|c| {
+                    let barrier = barrier.clone();
+                    let yval = yval.clone();
+                    s.spawn(move || {
+                        let mut lats = Vec::with_capacity(cfg_ops);
+                        let mut errors = 0u64;
+                        barrier.wait();
+                        let base = records + c * cfg_ops * 16;
+                        for i in 0..cfg_ops {
+                            let t = Instant::now();
+                            let mut wb = Vec::with_capacity(16);
+                            for j in 0..16 {
+                                wb.push(CfWrite::Put {
+                                    cf: "default",
+                                    k: shred(base + i * 16 + j),
+                                    v: yval.as_ref().clone(),
+                                });
+                            }
+                            if !e.batch(std::mem::take(&mut wb)) {
+                                errors += 1;
+                            }
+                            lats.push(ms(t));
+                        }
+                        (lats, errors)
+                    })
+                })
+                .collect();
+            for h in handles {
+                let (mut l, err) = h.join().expect("solana append client thread");
+                errors += err;
+                lats.append(&mut l);
+            }
+        });
+        let wall = t0.elapsed();
+        eprintln!(
+            "[rocks-parity] {full} done ops={} errors={errors}",
+            cfg_ops * clients
+        );
+        let mut blocks = vec![summarize_mc(
+            &full,
+            cfg_ops * clients,
+            wall,
+            &mut lats,
+            clients,
+            errors,
+        )];
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, clients as u64, 0.0, 0);
+            eprint_write_diagnose(&full, &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
+        blocks
+    }
+
     /// RFC-0043 P2.6 — ArangoDB document CRUD + k-hop traversal (scan chain).
     pub fn run_arango<E: Engine>(&mut self, e: &E) -> Vec<String> {
         e.set_write_sync(write_sync_for_suite("arango"));
@@ -6113,6 +6193,26 @@ mod tests {
     }
 
     #[test]
+    fn rfc0184_solana_shred_append_mc4_in_compare() {
+        assert!(
+            COMPARE_SHAPES.contains(&"solana_shred_append_mc4"),
+            "Solana shred-append mc4 must be on the cartaz"
+        );
+        assert!(shape_wanted_in(
+            "solana_shred_append_mc4",
+            Some("solana_shred_append_mc4")
+        ));
+        assert!(
+            !shape_wanted_in("solana_shred_append", Some("solana_shred_append_mc4")),
+            "1c solana_shred_append must not leak into ONLY=solana_shred_append_mc4"
+        );
+        assert!(
+            !shape_wanted_in("solana_trailing_read", Some("solana_shred_append_mc4")),
+            "1c trailing_read must not leak into ONLY=solana_shred_append_mc4"
+        );
+    }
+
+    #[test]
     fn rfc0178_mc_only_selects_full_mc_name() {
         assert!(shape_wanted_in(
             "deps_cache_overwrite_mc4",
@@ -6609,6 +6709,7 @@ mod tests {
             "mixgraph_like_mc4",
             "oxigraph_triple_put_mc4",
             "nebula_insert_edge_mc4",
+            "solana_shred_append_mc4",
         ] {
             assert!(
                 COMPARE_SHAPES.contains(&name),
