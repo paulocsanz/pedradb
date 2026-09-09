@@ -70,7 +70,7 @@ use crate::key::{InternalKey, SequenceNumber, ValueType, MAX_SEQUENCE_NUMBER};
 use crate::lock::DirLock;
 use crate::manifest::{self, VersionSet};
 use crate::memtable::{Lookup, MemTable};
-use crate::merge::{range_deleted, range_tombstone_covers, StreamingVisibleIter, VisibleKv};
+use crate::merge::{range_deleted, StreamingVisibleIter, VisibleKv};
 use crate::sst::{
     put_tls_point_seek_scratch, take_tls_point_seek_scratch, write_l0_sst, write_l0_sst_for_family,
     write_sst_bulk_arrays, write_sst_entries_on, PointSeekScratch, SstTable,
@@ -3312,7 +3312,12 @@ impl<E: Env> Db<E> {
                 table.collect_range_tombstones(MAX_SEQUENCE_NUMBER, &mut tombs);
                 for t in tombs {
                     if t.sequence > snapshot
-                        && range_tombstone_covers(t.start.as_ref(), t.end.as_ref(), key)
+                        && crate::merge::write_op_covers_key(
+                            ValueType::RangeDeletion,
+                            t.start.as_ref(),
+                            t.end.as_ref(),
+                            key,
+                        )
                     {
                         return true;
                     }
@@ -3332,7 +3337,12 @@ impl<E: Env> Db<E> {
             table.collect_range_tombstones(MAX_SEQUENCE_NUMBER, &mut tombs);
             for t in tombs {
                 if t.sequence > snapshot
-                    && range_tombstone_covers(t.start.as_ref(), t.end.as_ref(), key)
+                    && crate::merge::write_op_covers_key(
+                        ValueType::RangeDeletion,
+                        t.start.as_ref(),
+                        t.end.as_ref(),
+                        key,
+                    )
                 {
                     return true;
                 }

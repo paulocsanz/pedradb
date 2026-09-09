@@ -1451,6 +1451,14 @@ mod tests {
             !body.contains("u.kind == ValueType::RangeDeletion"),
             "key_has_write_after unapplied must not keep a raw ValueType if"
         );
+        assert!(
+            !body.contains("range_tombstone_covers("),
+            "key_has_write_after mem/sst range tombs must call write_op_covers_key"
+        );
+        assert!(
+            body.matches("write_op_covers_key(").count() >= 3,
+            "unapplied + mem + sst loops must all call write_op_covers_key"
+        );
     }
 
     #[test]
