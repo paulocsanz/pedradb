@@ -1669,7 +1669,7 @@ fn main() {
     }
     let admission_a_json = admission_core_a.unwrap_or_else(|| "null".into());
     let admission_b_json = admission_core_b.unwrap_or_else(|| "null".into());
-    let notes_json = if notes.is_empty() {
+    let notes_json = if pedradb_core::write_admission_kernel::batch_is_empty(notes.len() as u64) {
         "[]".into()
     } else {
         format!(
