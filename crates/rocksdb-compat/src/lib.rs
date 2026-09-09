@@ -1334,7 +1334,7 @@ impl WriteBatch {
     /// Whether the batch is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.ops.is_empty()
+        pedradb_core::write_admission_kernel::batch_is_empty(self.ops.len() as u64)
     }
 
     /// Put into the default CF.
