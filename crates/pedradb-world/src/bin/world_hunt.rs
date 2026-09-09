@@ -63,7 +63,9 @@ fn main() -> ExitCode {
                         t.trace_hash, t.silent_wrong
                     );
                 }
-                if t.membership_events > 0 || t.disk_tripped_nodes > 0 {
+                if !pedradb_core::write_admission_kernel::batch_is_empty(t.membership_events as u64)
+                    || !pedradb_core::write_admission_kernel::batch_is_empty(t.disk_tripped_nodes as u64)
+                {
                     interesting += 1;
                 }
                 bandit.update(&wanted, reward);
