@@ -759,7 +759,7 @@ impl RaftCluster {
                     }
                 }
                 Role::Follower | Role::Candidate => {
-                    if node.election_ticks_left == 0 {
+                    if pedradb_core::write_admission_kernel::batch_is_empty(node.election_ticks_left) {
                         start_election.push(*id);
                     } else {
                         node.election_ticks_left -= 1;
