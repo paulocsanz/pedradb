@@ -2001,14 +2001,9 @@ impl Iterator for SstRangeIter<'_> {
     type Item = (InternalKey, Bytes);
 
     fn next(&mut self) -> Option<Self::Item> {
-        // Bounds hoisted out of the entry loop. Entries are sorted by user
-        // key, so the first key past `end` ends the iterator — no tail walk
-        // of a block whose remaining keys all exceed the window.
-        let start_b: Option<(&Bytes, bool)> = match &self.start {
-            Bound::Unbounded => None,
-            Bound::Included(s) => Some((s, true)),
-            Bound::Excluded(s) => Some((s, false)),
-        };
+        // Entries are sorted by user key, so the first key past `end` ends
+        // the iterator — no tail walk of a block whose remaining keys all
+        // exceed the window.
         loop {
             if let Some(ref block) = self.current {
                 while self.idx < block.len() {
@@ -2030,12 +2025,11 @@ impl Iterator for SstRangeIter<'_> {
                     if self.skip_user.as_ref().is_some_and(|u| u == &k.user_key) {
                         continue;
                     }
-                    let before_start = match start_b {
-                        Some((s, true)) => uk < s.as_ref(),
-                        Some((s, false)) => uk <= s.as_ref(),
-                        None => false,
-                    };
-                    if before_start {
+                    if !user_key_in_range(
+                        uk,
+                        crate::merge::bound_as_ref(&self.start),
+                        Bound::Unbounded,
+                    ) {
                         continue;
                     }
                     self.skip_user = Some(k.user_key.clone());
@@ -3273,6 +3267,14 @@ mod tests {
         assert!(
             !body.contains("uk > e.as_ref()"),
             "Bound-match past_end must not stay inline"
+        );
+        assert!(
+            body.contains("user_key_in_range("),
+            "SstRangeIter start Bound if must call catalog user_key_in_range"
+        );
+        assert!(
+            !body.contains("before_start"),
+            "before_start Bound match must not stay inline"
         );
     }
 
