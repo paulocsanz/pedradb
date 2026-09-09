@@ -79,6 +79,14 @@ theorem point_bounds_overlap_missing_smallest
   unfold scan_kernel.point_bounds_overlap
   rfl
 
+/-- Catalog entry: missing file largest ⇒ overlap (rustc `&[u8]` + `Bound`, not u64 cartoon). Dual-unfold. -/
+theorem point_bounds_overlap_missing_largest
+    (lo : Slice U8)
+    (start end1 : core.ops.range.Bound (Slice U8)) :
+    scan_kernel.point_bounds_overlap (some lo) none start end1 = ok true := by
+  unfold scan_kernel.point_bounds_overlap
+  rfl
+
 /-- Catalog entry: unbounded window is reachable (rustc `&[u8]` + `Bound`). -/
 theorem tombstone_reaches_window_unbounded (t_start t_end) :
     scan_kernel.tombstone_reaches_window t_start t_end
