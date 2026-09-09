@@ -1,10 +1,10 @@
 //! Pure range-tombstone coverage for fold last-per-key / apply (F169).
 //!
-//! **Single artifact:** this file is what `rustc` links *and* what Verus
-//! proves (`cfg(verus_keep_ghost)`). Slice compare is caller; the u64
-//! half-open rule is the term. No twin-cópia.
+//! **Term:** this file is what `rustc` links. Aeneas extracts that body
+//! (`scripts/aeneas_fold.sh`). A u64 view of rustc `&[u8]` bounds is a
+//! model twin — not last-wins (deleted).
 //!
-//!   ./scripts/verus_fold_range.sh
+//!   ./scripts/aeneas_fold.sh --required
 //!
 //! CHANGELOG records a range delete as `ChangeKind::DeleteRange` with the
 //! **start** as the entry key and the exclusive end as the value. Fold used
@@ -19,7 +19,6 @@
 #![forbid(unsafe_code)]
 
 /// F169 kernel: does changelog event `(range, start, end)` hide `key`?
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn fold_event_hides_key(is_range: bool, start: &[u8], end: &[u8], key: &[u8]) -> bool {
     if is_range {
@@ -30,66 +29,30 @@ pub fn fold_event_hides_key(is_range: bool, start: &[u8], end: &[u8], key: &[u8]
 }
 
 /// AS-IS F169: a range delete hides only its start key (covered keys stay live).
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn fold_event_hides_key_as_is(is_range: bool, start: &[u8], _end: &[u8], key: &[u8]) -> bool {
     let _ = is_range;
     key == start
 }
 
-#[cfg(verus_keep_ghost)]
-use vstd::prelude::*;
-
-#[cfg(verus_keep_ghost)]
-verus! {
-
-pub open spec fn fold_event_hides_key_spec(
-    is_range: bool,
-    start: u64,
-    end: u64,
-    key: u64,
-) -> bool {
-    if is_range {
-        key >= start && key < end
-    } else {
-        key == start
-    }
-}
-
-pub fn fold_event_hides_key(is_range: bool, start: u64, end: u64, key: u64) -> (r: bool)
-    ensures
-        r == fold_event_hides_key_spec(is_range, start, end, key),
-        is_range && key >= start && key < end ==> r,
-        is_range && (key < start || key >= end) ==> !r,
-        !is_range ==> r == (key == start),
-{
-    if is_range {
-        key >= start && key < end
-    } else {
-        key == start
-    }
-}
-
-pub fn fold_event_hides_key_as_is(_is_range: bool, start: u64, _end: u64, key: u64) -> (r: bool)
-    ensures
-        r == (key == start),
-{
-    key == start
-}
-
-proof fn lemma_as_is_misses_cover()
-    ensures
-        fold_event_hides_key_spec(true, 2, 4, 3),
-        !fold_event_hides_key_spec(true, 2, 4, 4),
-        fold_event_hides_key_spec(true, 2, 4, 2),
-{
-}
-
-} // verus!
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fold_kernel_has_no_verus_cartoon() {
+        let src = include_str!("fold_kernel.rs");
+        let block = concat!("verus", "!", " {");
+        let cfg = concat!("cfg(", "verus", "_keep", "_ghost)");
+        assert!(
+            !src.contains(block),
+            "u64 stand-in is not last-wins of rustc &[u8] fold range"
+        );
+        assert!(
+            !src.contains(cfg),
+            "cfg split hides rustc types from the prover"
+        );
+    }
 
     #[test]
     fn range_hides_covered_not_outside() {

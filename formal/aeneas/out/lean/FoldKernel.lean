@@ -87,7 +87,7 @@ def Slice.Insts.CoreCmpPartialOrdSlice {T : Type} (cmpPartialOrdInst :
 }
 
 /-- [pedra_aeneas_fold_kernel::fold_event_hides_key]:
-    Source: '../../../crates/pedradb-fold/src/fold_kernel.rs', lines 24:0-30:1
+    Source: '../../../crates/pedradb-fold/src/fold_kernel.rs', lines 23:0-29:1
     Visibility: public -/
 def fold_event_hides_key
   (is_range : Bool) (start : Slice Std.U8) (end1 : Slice Std.U8)
@@ -107,7 +107,7 @@ def fold_event_hides_key
   else core.slice.cmp.PartialEqSlice.eq core.cmp.PartialEqU8 key start
 
 /-- [pedra_aeneas_fold_kernel::fold_event_hides_key_as_is]:
-    Source: '../../../crates/pedradb-fold/src/fold_kernel.rs', lines 35:0-38:1
+    Source: '../../../crates/pedradb-fold/src/fold_kernel.rs', lines 33:0-36:1
     Visibility: public -/
 def fold_event_hides_key_as_is
   (is_range : Bool) (start : Slice Std.U8) (_end : Slice Std.U8)

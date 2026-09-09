@@ -1,20 +1,16 @@
 #!/usr/bin/env bash
-# Machine-check F169 fold range-tombstone coverage on the file rustc links
-# (single artifact — not the twin-cópia).
+# fold_kernel.rs rustc body is the term (Aeneas Fold.lean).
+# A u64 view of rustc &[u8] is not last-wins. Fail closed if it returns.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="$ROOT/crates/pedradb-fold/src/fold_kernel.rs"
-if [[ -x "${VERUS:-}" ]]; then
-  :
-elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then
-  VERUS="$HOME/.local/verus/verus-arm64-macos/verus"
-elif command -v verus >/dev/null 2>&1; then
-  VERUS="$(command -v verus)"
-else
-  echo "error: verus not found" >&2
-  exit 127
+if grep -n 'verus!' "$SRC"; then
+  echo "error: verus_fold_range: verus! stand-in still in fold_kernel.rs (not last-wins of rustc &[u8])" >&2
+  exit 1
 fi
-echo "verus: $VERUS"
-"$VERUS" --version
-echo "proving: $SRC"
-exec "$VERUS" "$SRC" --crate-type=lib --multiple-errors 10 --time "$@"
+if grep -n 'verus_keep_ghost' "$SRC"; then
+  echo "error: verus_fold_range: cfg(verus_keep_ghost) split still in fold_kernel.rs" >&2
+  exit 1
+fi
+echo "ok: no Verus cartoon in $SRC; term is Aeneas formal/aeneas/lean/Fold.lean"
+exit 0
