@@ -30,6 +30,22 @@ theorem past_end_unbounded (k) :
   unfold merge.past_end
   rfl
 
+/-- Exclusive end retires at `>=` (half-open). Dual-unfold to slice `ge`. -/
+theorem past_end_excluded (user e) :
+    merge.past_end user (core.ops.range.Bound.Excluded e)
+    = Shared1A.Insts.CoreCmpPartialOrdShared0B.ge
+        (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) user e := by
+  unfold merge.past_end
+  rfl
+
+/-- Inclusive end retires at `>`. Dual-unfold to slice `gt`. -/
+theorem past_end_included (user e) :
+    merge.past_end user (core.ops.range.Bound.Included e)
+    = Shared1A.Insts.CoreCmpPartialOrdShared0B.gt
+        (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) user e := by
+  unfold merge.past_end
+  rfl
+
 /-- Hidden snapshot version is not emitted. -/
 theorem iter_window_keep_hidden :
     merge.iter_window_keep false = ok false := by
