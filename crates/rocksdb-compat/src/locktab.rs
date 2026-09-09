@@ -1,86 +1,25 @@
 //! Exclusive key-lock table for rust-rocksdb `TransactionDB` (2PL).
 //! OCC [`super::OptimisticTransactionDB`] does not use this.
 //!
-//! **Single artifact (pair `wait_for_deadlock`):** this file is what `rustc`
-//! links *and* what Verus proves (`cfg(verus_keep_ghost)`). `LockTable` I/O
-//! (parking_lot / Condvar) stays rustc-only; the wait-for cycle is the term.
+//! **Term:** this file is what `rustc` links. Aeneas extracts that body
+//! (`scripts/aeneas_locktab.sh`). A Verus flattened `u64` two-cycle stand-in
+//! of rustc `wait_for_deadlock(&HashMap, &HashMap, u64, u64)` is a model twin
+//! — not last-wins (deleted). `LockTable` I/O (parking_lot / Condvar) stays
+//! rustc-only; the wait-for walk is the term.
 //!
-//!   ./scripts/verus_wait_for_deadlock.sh
+//!   ./scripts/aeneas_locktab.sh --required
+//!
+//! Aeneas of the rustc body is the term. A Verus stand-in is not last-wins.
 
 #![forbid(unsafe_code)]
 
-#[cfg(verus_keep_ghost)]
-use vstd::prelude::*;
-
-#[cfg(verus_keep_ghost)]
-verus! {
-
-pub open spec fn wait_for_deadlock_spec(waiter: u64, owner: u64, owner_next: Option<u64>) -> bool {
-    match owner_next {
-        Some(next) => next == waiter,
-        None => false,
-    }
-}
-
-/// Production walk returns `true` on a cycle (two-cycle or longer).
-pub open spec fn wait_for_deadlock_found() -> bool {
-    true
-}
-
-pub open spec fn wait_for_deadlock_as_is_spec(
-    _waiter: u64,
-    _owner: u64,
-    _owner_next: Option<u64>,
-) -> bool {
-    false
-}
-
-pub fn wait_for_deadlock(waiter: u64, owner: u64, owner_next: Option<u64>) -> (d: bool)
-    ensures
-        d == wait_for_deadlock_spec(waiter, owner, owner_next),
-        d ==> owner_next == Some(waiter),
-{
-    match owner_next {
-        Some(next) => next == waiter,
-        None => false,
-    }
-}
-
-pub fn wait_for_deadlock_as_is(_waiter: u64, _owner: u64, _owner_next: Option<u64>) -> (d: bool)
-    ensures
-        d == false,
-{
-    false
-}
-
-/// Conflict-lock (wait-for cycle): owner waits for waiter. AS-IS misses it.
-/// MachCSL / static Rust deadlock detection: a cycle in the wait-for graph
-/// is deadlock; missing it is the second possibility, not a skip.
-proof fn lemma_two_cycle_is_deadlock(a: u64, b: u64)
-    requires
-        a != b,
-    ensures
-        wait_for_deadlock_spec(a, b, Some(a)),
-        !wait_for_deadlock_as_is_spec(a, b, Some(a)),
-        !wait_for_deadlock_spec(a, b, None),
-{
-}
-
-} // verus!
-
-#[cfg(not(verus_keep_ghost))]
 use bytes::Bytes;
-#[cfg(not(verus_keep_ghost))]
 use parking_lot::{Condvar, Mutex};
-#[cfg(not(verus_keep_ghost))]
 use std::collections::{HashMap, HashSet};
-#[cfg(not(verus_keep_ghost))]
 use std::sync::atomic::{AtomicU64, Ordering};
-#[cfg(not(verus_keep_ghost))]
 use std::time::{Duration, Instant};
 
 /// Lock wait outcome (Rocks `Busy` / `TimedOut`).
-#[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LockErr {
     /// Deadlock detected before waiting.
@@ -89,14 +28,12 @@ pub(crate) enum LockErr {
     TimedOut,
 }
 
-#[cfg(not(verus_keep_ghost))]
 pub(crate) struct LockTable {
     inner: Mutex<Inner>,
     cv: Condvar,
     next_id: AtomicU64,
 }
 
-#[cfg(not(verus_keep_ghost))]
 struct Inner {
     /// Encoded key → owner txn id.
     owned: HashMap<Bytes, u64>,
@@ -104,7 +41,6 @@ struct Inner {
     waiting: HashMap<u64, Bytes>,
 }
 
-#[cfg(not(verus_keep_ghost))]
 impl LockTable {
     pub(crate) fn new() -> Self {
         Self {
@@ -181,7 +117,6 @@ impl LockTable {
 }
 
 /// Wait-for cycle ⇒ deadlock (RFC-0150 P2c). Production lock table calls this.
-#[cfg(not(verus_keep_ghost))]
 pub(crate) fn wait_for_deadlock(
     owned: &HashMap<Bytes, u64>,
     waiting: &HashMap<u64, Bytes>,
@@ -205,8 +140,7 @@ pub(crate) fn wait_for_deadlock(
 }
 
 /// AS-IS: miss the cycle (wait forever / grant overlapping locks).
-#[cfg(not(verus_keep_ghost))]
-#[allow(dead_code)] // tests + Verus twin; production never calls the mutant
+#[allow(dead_code)] // tests + catalog as-is dente; production never calls the mutant
 pub(crate) fn wait_for_deadlock_as_is(
     _owned: &HashMap<Bytes, u64>,
     _waiting: &HashMap<u64, Bytes>,
@@ -222,6 +156,15 @@ mod tests {
     use bytes::Bytes;
     use std::collections::HashMap;
     use std::time::Duration;
+
+    #[test]
+    fn locktab_has_no_verus_cartoon() {
+        let src = include_str!("locktab.rs");
+        let block = concat!("verus", "!", " {");
+        let cfg = concat!("cfg(", "verus", "_keep", "_ghost)");
+        assert!(!src.contains(block), "flattened u64 two-cycle is not last-wins of rustc HashMap walk");
+        assert!(!src.contains(cfg), "cfg split hides rustc types from the prover");
+    }
 
     #[test]
     fn wait_for_deadlock_on_live_cycle_is_not_ok() {
