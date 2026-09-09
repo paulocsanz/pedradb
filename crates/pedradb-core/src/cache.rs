@@ -111,7 +111,7 @@ impl TableCache {
     /// Whether the cache is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        crate::write_admission_kernel::batch_is_empty(self.len() as u64)
     }
 
     /// Insert or replace a table (e.g. after flush).
