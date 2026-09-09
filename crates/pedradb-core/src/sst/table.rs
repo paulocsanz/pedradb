@@ -1875,12 +1875,7 @@ impl SstTable {
         let mut out = Vec::new();
         for i in start_i..self.index.len() {
             let block_lo = self.index[i].first_user_key.as_ref();
-            let starts_before_end = match end {
-                Bound::Unbounded => true,
-                Bound::Included(e) => block_lo <= e,
-                Bound::Excluded(e) => block_lo < e,
-            };
-            if !starts_before_end {
+            if !user_key_in_range(block_lo, Bound::Unbounded, end) {
                 break;
             }
             let block_hi_excl = self.index.get(i + 1).map(|n| n.first_user_key.as_ref());
@@ -3249,6 +3244,24 @@ mod tests {
         assert!(
             !body.contains("file_before_end"),
             "Bound-match if must not stay inline in overlaps_user_range"
+        );
+    }
+
+    #[test]
+    fn blocks_overlapping_range_calls_user_key_in_range() {
+        let src = include_str!("table.rs");
+        let body = src
+            .split("pub(crate) fn blocks_overlapping_range")
+            .nth(1)
+            .and_then(|s| s.split("pub(crate) fn overlapping_blocks_for_test").next())
+            .expect("blocks_overlapping_range");
+        assert!(
+            body.contains("user_key_in_range("),
+            "block window end Bound must call catalog user_key_in_range"
+        );
+        assert!(
+            !body.contains("starts_before_end"),
+            "Bound-match if must not stay inline in blocks_overlapping_range"
         );
     }
 
