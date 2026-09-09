@@ -263,6 +263,16 @@ mod tests {
             vis.contains("snap_is_empty("),
             "count_visible must match snap_is_empty"
         );
+        let scan =
+            named_fn_src(include_str!("db.rs"), "scan_at_raw").expect("scan_at_raw");
+        assert!(
+            scan.contains("snap_is_empty("),
+            "scan_at_raw must match snap_is_empty"
+        );
+        assert!(
+            !scan.contains("batch_is_empty("),
+            "scan_at_raw must not wrap seq==0 onto batch_is_empty"
+        );
     }
 
     #[test]

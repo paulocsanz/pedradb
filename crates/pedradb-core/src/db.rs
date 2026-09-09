@@ -4343,7 +4343,7 @@ impl<E: Env> Db<E> {
         limit: Option<usize>,
         resolve_values: bool,
     ) -> StreamingVisibleIter<'_> {
-        if crate::write_admission_kernel::batch_is_empty(snapshot) {
+        if crate::lookup_kernel::snap_is_empty(snapshot) {
             return StreamingVisibleIter::new(Vec::new(), 0, start, end, limit);
         }
         self.scan_ops.fetch_add(1, Ordering::Relaxed);
