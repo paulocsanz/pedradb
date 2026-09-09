@@ -121,7 +121,9 @@ impl<R: Read> WalReader<R> {
             // — legitimate only when the rest of the block is zero. A zero
             // header followed by live bytes is corruption and must fail
             // closed instead of silently swallowing the block's records.
-            if rtype_byte == RecordType::Zero as u8 && length == 0 {
+            if rtype_byte == RecordType::Zero as u8
+                && crate::write_admission_kernel::batch_is_empty(length as u64)
+            {
                 if self.block[self.block_cursor + HEADER_SIZE..self.block_end]
                     .iter()
                     .any(|&b| b != 0)
