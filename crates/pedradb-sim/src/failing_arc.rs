@@ -20,6 +20,10 @@ struct FailStateArc {
     once: AtomicBool,
     kind: AtomicU64, // packs FaultKind as discriminant
     sync_only: AtomicBool,
+    /// RFC-0179: `available_bytes` override is live.
+    space_injected: AtomicBool,
+    /// Free bytes; `u64::MAX` means unknown (`None`) while injected.
+    available: AtomicU64,
 }
 
 fn kind_to_u64(k: FaultKind) -> u64 {
@@ -105,6 +109,8 @@ impl FailingEnvArc<StdEnv> {
                 once: AtomicBool::new(once),
                 kind: AtomicU64::new(kind_to_u64(kind)),
                 sync_only: AtomicBool::new(kind.is_sync_only()),
+                space_injected: AtomicBool::new(false),
+                available: AtomicU64::new(u64::MAX),
             }),
         }
     }
@@ -123,6 +129,8 @@ impl<E: Env> FailingEnvArc<E> {
                 once: AtomicBool::new(false),
                 kind: AtomicU64::new(kind_to_u64(FaultKind::IoError)),
                 sync_only: AtomicBool::new(false),
+                space_injected: AtomicBool::new(false),
+                available: AtomicU64::new(u64::MAX),
             }),
         }
     }
@@ -153,6 +161,14 @@ impl<E: Env> FailingEnvArc<E> {
     #[must_use]
     pub fn tripped(&self) -> bool {
         self.state.fired.load(Ordering::Relaxed)
+    }
+
+    /// RFC-0179: inject `Env::available_bytes` (`None` = unknown).
+    pub fn set_available_bytes(&self, n: Option<u64>) {
+        self.state.space_injected.store(true, Ordering::Relaxed);
+        self.state
+            .available
+            .store(n.unwrap_or(u64::MAX), Ordering::Relaxed);
     }
 }
 
@@ -274,6 +290,19 @@ impl<E: Env> Env for FailingEnvArc<E> {
     fn is_dir(&self, path: &Path) -> io::Result<bool> {
         self.state.gate(false)?;
         self.inner.is_dir(path)
+    }
+
+    fn available_bytes(&self, path: &Path) -> io::Result<Option<u64>> {
+        if self.state.space_injected.load(Ordering::Relaxed) {
+            let n = self.state.available.load(Ordering::Relaxed);
+            if n == u64::MAX {
+                Ok(None)
+            } else {
+                Ok(Some(n))
+            }
+        } else {
+            self.inner.available_bytes(path)
+        }
     }
 }
 
