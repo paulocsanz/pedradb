@@ -1389,7 +1389,7 @@ impl SstTable {
             BloomFilter::decode(rest)
                 .map_err(|e| CoreError::Internal(format!("SST bloom in {}: {e}", path.display())))?
         } else {
-            if !ic.is_empty() {
+            if !crate::write_admission_kernel::batch_is_empty(ic.data.len().saturating_sub(ic.pos) as u64) {
                 return Err(CoreError::Internal(format!(
                     "trailing index bytes in SST {}",
                     path.display()
