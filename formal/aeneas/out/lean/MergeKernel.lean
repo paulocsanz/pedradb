@@ -134,6 +134,30 @@ def Slice.Insts.CoreCmpPartialOrdSlice {T : Type} (cmpPartialOrdInst :
   ge := Slice.Insts.CoreCmpPartialOrdSlice.ge cmpPartialOrdInst
 }
 
+/-- [bytes::bytes::Bytes]
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bytes-1.12.1/src/bytes.rs', lines 101:0-101:16
+    Name pattern: [bytes::bytes::Bytes]
+    Visibility: public -/
+@[rust_type "bytes::bytes::Bytes"]
+axiom bytes.bytes.Bytes : Type
+
+/-- [bytes::bytes::{bytes::bytes::Bytes}::copy_from_slice]:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bytes-1.12.1/src/bytes.rs', lines 347:4-347:47
+    Name pattern: [bytes::bytes::{bytes::bytes::Bytes}::copy_from_slice]
+    Visibility: public -/
+@[rust_fun "bytes::bytes::{bytes::bytes::Bytes}::copy_from_slice"]
+axiom bytes.bytes.Bytes.copy_from_slice
+  : Slice Std.U8 → Result bytes.bytes.Bytes
+
+/-- [bytes::bytes::{impl core::convert::AsRef<[u8]> for bytes::bytes::Bytes}::as_ref]:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bytes-1.12.1/src/bytes.rs', lines 722:4-722:29
+    Name pattern: [bytes::bytes::{core::convert::AsRef<bytes::bytes::Bytes, [u8]>}::as_ref]
+    Visibility: public -/
+@[rust_fun
+  "bytes::bytes::{core::convert::AsRef<bytes::bytes::Bytes, [u8]>}::as_ref"]
+axiom bytes.bytes.Bytes.Insts.CoreConvertAsRefSliceU8.as_ref
+  : bytes.bytes.Bytes → Result (Slice Std.U8)
+
 /-- [pedra_aeneas_merge_kernel::key::ValueType]
     Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 31:0-40:1
     Visibility: public -/
@@ -271,5 +295,35 @@ def merge.past_end
     Shared1A.Insts.CoreCmpPartialOrdShared0B.ge
       (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) user_key e
   | core.ops.range.Bound.Unbounded => ok false
+
+/-- [pedra_aeneas_merge_kernel::merge::bound_to_owned]:
+    Source: 'src/../../../../crates/pedradb-core/src/merge.rs', lines 825:0-831:1 -/
+def merge.bound_to_owned
+  (b : core.ops.range.Bound (Slice Std.U8)) :
+  Result (core.ops.range.Bound bytes.bytes.Bytes)
+  := do
+  match b with
+  | core.ops.range.Bound.Included s =>
+    let b1 ← bytes.bytes.Bytes.copy_from_slice s
+    ok (core.ops.range.Bound.Included b1)
+  | core.ops.range.Bound.Excluded s =>
+    let b1 ← bytes.bytes.Bytes.copy_from_slice s
+    ok (core.ops.range.Bound.Excluded b1)
+  | core.ops.range.Bound.Unbounded => ok core.ops.range.Bound.Unbounded
+
+/-- [pedra_aeneas_merge_kernel::merge::bound_as_ref]:
+    Source: 'src/../../../../crates/pedradb-core/src/merge.rs', lines 834:0-840:1 -/
+def merge.bound_as_ref
+  (b : core.ops.range.Bound bytes.bytes.Bytes) :
+  Result (core.ops.range.Bound (Slice Std.U8))
+  := do
+  match b with
+  | core.ops.range.Bound.Included s =>
+    let s1 ← bytes.bytes.Bytes.Insts.CoreConvertAsRefSliceU8.as_ref s
+    ok (core.ops.range.Bound.Included s1)
+  | core.ops.range.Bound.Excluded s =>
+    let s1 ← bytes.bytes.Bytes.Insts.CoreConvertAsRefSliceU8.as_ref s
+    ok (core.ops.range.Bound.Excluded s1)
+  | core.ops.range.Bound.Unbounded => ok core.ops.range.Bound.Unbounded
 
 end pedra_aeneas_merge_kernel

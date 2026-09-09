@@ -83,3 +83,17 @@ theorem write_op_covers_key_as_is_range (start end1 user) :
     = merge.range_tombstone_covers_as_is start end1 user := by
   unfold merge.write_op_covers_key_as_is
   rfl
+
+/-- Catalog entry: unbounded Bound copies as unbounded (rustc `Bound`). -/
+theorem bound_to_owned_unbounded :
+    merge.bound_to_owned core.ops.range.Bound.Unbounded
+    = ok core.ops.range.Bound.Unbounded := by
+  unfold merge.bound_to_owned
+  rfl
+
+/-- Catalog entry: unbounded Bound borrows as unbounded. -/
+theorem bound_as_ref_unbounded :
+    merge.bound_as_ref core.ops.range.Bound.Unbounded
+    = ok core.ops.range.Bound.Unbounded := by
+  unfold merge.bound_as_ref
+  rfl

@@ -31,6 +31,8 @@ echo "      charon=$CHARON"
     --start-from 'crate::merge::iter_window_keep_as_is' \
     --start-from 'crate::merge::write_op_covers_key' \
     --start-from 'crate::merge::write_op_covers_key_as_is' \
+    --start-from 'crate::merge::bound_as_ref' \
+    --start-from 'crate::merge::bound_to_owned' \
     --dest-file "$OUT/merge_kernel.llbc" )
 "$AENEAS" -backend lean -dest "$OUT/lean" "$OUT/merge_kernel.llbc"
 # Lean 4 `do` match rejects dotted constructors (`key.ValueType.Deletion`)
