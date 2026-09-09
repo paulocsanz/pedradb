@@ -563,10 +563,6 @@ mod tests {
         );
         let crate_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         assert!(
-            crate_dir.join("verus/sst_crc_fate.rs").is_file(),
-            "RFC-0077 P2.1: sst_crc_fate twin must exist"
-        );
-        assert!(
             crate_dir.join("src/sst/scan_kernel.rs").is_file(),
             "RFC-0077 P2.1: scan_guard F167 single artifact — the kernel is the proof body"
         );

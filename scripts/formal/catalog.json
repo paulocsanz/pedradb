@@ -4392,9 +4392,10 @@
       "id": "sst_crc",
       "finding": "RFC-0077",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
-      "twin": "crates/pedradb-core/verus/sst_crc_fate.rs",
-      "verus": "scripts/verus_sst_crc_fate.sh",
+      "twin": "crates/pedradb-core/src/sst/scan_kernel.rs",
+      "aeneas": "scripts/aeneas_scan.sh",
       "callers": [
         "crates/pedradb-core/src/sst/table.rs"
       ],
@@ -4829,9 +4830,10 @@
       "id": "zero_glue",
       "finding": "RFC-0155",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
-      "twin": "crates/pedradb-core/verus/sst_crc_fate.rs",
-      "verus": "scripts/verus_sst_crc_fate.sh",
+      "twin": "crates/pedradb-core/src/sst/scan_kernel.rs",
+      "aeneas": "scripts/aeneas_scan.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs"
       ],
@@ -5382,9 +5384,10 @@
       "id": "sst_block_crc",
       "finding": "RFC-0077 P1.1",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
-      "twin": "crates/pedradb-core/verus/sst_crc_fate.rs",
-      "verus": "scripts/verus_sst_crc_fate.sh",
+      "twin": "crates/pedradb-core/src/sst/scan_kernel.rs",
+      "aeneas": "scripts/aeneas_scan.sh",
       "callers": [
         "crates/pedradb-core/src/sst/table.rs"
       ],

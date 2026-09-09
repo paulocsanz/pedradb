@@ -37,7 +37,7 @@
 - [x] **P1.2** `Db::open` of a flipped live SST is Err / does not serve the flipped key — status: `done` (`crc_mismatch_on_live_sst_db_open_is_not_ok`)
 
 ### P2 — later
-- [x] **P2.1** Catalog pair / Verus token for `sst_crc_fate` (scan_guard stays F167) — status: `done` (`verus/sst_crc_fate.rs` + catalog `sst_crc`)
+- [x] **P2.1** Catalog pair / Verus token for `sst_crc_fate` (scan_guard stays F167) — status: `done` (twin `verus/sst_crc_fate.rs` deletado 2026-09-09, mirror sweep: single-artifact pago pelo extrato Aeneas do corpo rustc `scripts/aeneas_scan.sh`, `ScanKernel.lean` sem sorry + catalog `sst_crc`)
 - [x] **P2.2** Zero-glue remains a trajectory — status: `done` (`zero_glue_admitted`; `zero_glue_is_a_trajectory`)
 
 ## Status (living — update with every PR)
