@@ -795,7 +795,7 @@ fn network_tick(
                 n.heartbeat_ticks_left -= 1;
                 None
             }
-        } else if n.election_ticks_left == 0 {
+        } else if pedradb_core::write_admission_kernel::batch_is_empty(n.election_ticks_left) {
             Some(2u8) // election
         } else {
             n.election_ticks_left -= 1;
