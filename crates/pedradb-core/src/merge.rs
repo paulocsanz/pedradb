@@ -995,7 +995,7 @@ fn gc_snapshot_safe(
         // (decided by `compact_kernel::point_version_fate`, RFC-0056 P0.3).
         let mut keep: Vec<(InternalKey, Bytes)> = Vec::with_capacity(versions.len());
         for (ikey, value) in versions {
-            if keep.is_empty() {
+            if crate::write_admission_kernel::batch_is_empty(keep.len() as u64) {
                 keep.push((ikey, value));
                 continue;
             }

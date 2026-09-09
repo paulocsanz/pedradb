@@ -15,6 +15,9 @@ pub mod key;
 #[path = "../../../../crates/pedradb-core/src/compact_kernel.rs"]
 pub mod compact_kernel;
 
+#[path = "../../../../crates/pedradb-core/src/write_admission_kernel.rs"]
+pub mod write_admission_kernel;
+
 #[path = "../../../../crates/pedradb-core/src/merge.rs"]
 pub mod merge;
 
