@@ -169,7 +169,7 @@ fn main() {
         println!("wrote {}", dir.display());
     }
 
-    if report.failures > 0 {
+    if !pedradb_core::write_admission_kernel::batch_is_empty(report.failures as u64) {
         std::process::exit(1);
     }
 }
