@@ -1014,7 +1014,7 @@ impl MemTable {
     /// Whether any insert is still in the unsorted tail.
     #[must_use]
     pub fn has_tail(&self) -> bool {
-        !self.tail.is_empty()
+        !crate::write_admission_kernel::batch_is_empty(self.tail.len() as u64)
     }
 
     /// Length of the unsorted tail (RFC-0054).
