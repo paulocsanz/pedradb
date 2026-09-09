@@ -53,7 +53,7 @@ impl FailStateArc {
             return Ok(());
         }
         let left = self.remaining.load(Ordering::Relaxed);
-        if left == 0 {
+        if pedradb_core::write_admission_kernel::batch_is_empty(left) {
             if self.once.load(Ordering::Relaxed) && self.fired.load(Ordering::Relaxed) {
                 return Ok(());
             }
