@@ -174,6 +174,9 @@ impl<E: Env> Engine for CompatEngine<E> {
     fn get_probe(&self, k: &[u8]) -> Result<bool, ()> {
         self.db.contains(k).map_err(|_| ())
     }
+    fn rmw(&self, k: &[u8], v: &[u8]) -> bool {
+        self.db.rmw(k, v).is_ok()
+    }
     fn scan_count(&self, start: &[u8], end: &[u8], cap: usize) -> Result<usize, ()> {
         // Same visibility as a forward iterator; KeyOnly count (RFC-0033).
         self.db
