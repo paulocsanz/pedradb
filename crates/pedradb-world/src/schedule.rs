@@ -386,7 +386,7 @@ pub fn splice_plant_committed_joint(actions: &mut Vec<Action>, n_nodes: u64) {
 /// Fold a string into a running FNV-1a 64-bit hash (stable, no extra deps).
 #[must_use]
 pub fn hash_str(mut h: u64, s: &str) -> u64 {
-    if h == 0 {
+    if pedradb_core::write_admission_kernel::batch_is_empty(h) {
         h = 0xcbf2_9ce4_8422_2325;
     }
     for b in s.bytes() {
