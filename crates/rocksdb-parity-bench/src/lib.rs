@@ -323,6 +323,8 @@ pub const COMPARE_SHAPES: &[&str] = &[
     "mixgraph_like_mc4",
     // RFC-0184 P2.60: Oxigraph triple-put mc4 — 1c is already in COMPARE.
     "oxigraph_triple_put_mc4",
+    // RFC-0184 P2.61: Nebula insert-edge mc4 — 1c is already in COMPARE.
+    "nebula_insert_edge_mc4",
 ];
 
 /// Length of the RFC-0041 official prefix of [`COMPARE_SHAPES`].
@@ -2733,6 +2735,88 @@ impl YcsbRunner {
                 100,
                 (cfg_ops * clients) as u64,
             );
+            eprint_write_diagnose(&full, &d);
+            if let Some(last) = blocks.last_mut() {
+                *last = attach_diagnose(std::mem::take(last), Some(&d));
+            }
+        }
+        blocks
+    }
+
+    /// RFC-0184 P2.61: nebula_insert_edge at N clients (WriteBatch ingest).
+    pub fn run_nebula_insert_clients<E: Engine + Sync>(
+        &self,
+        e: &E,
+        clients: usize,
+    ) -> Vec<String> {
+        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
+        let full = format!("nebula_insert_edge_mc{clients}");
+        if !shape_wanted(&full) {
+            return Vec::new();
+        }
+        e.set_write_sync(write_sync_for_suite("nebula"));
+        let records = self.cfg.records;
+        let cfg_ops = self.cfg.ops;
+        let batch = self.cfg.batch;
+        let yval = std::sync::Arc::new(vec![b'n'; self.cfg.payload]);
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+        let phase0 = e.write_phase_snapshot();
+        let t0 = Instant::now();
+        let mut lats = Vec::with_capacity(cfg_ops * clients);
+        let mut errors = 0u64;
+        std::thread::scope(|s| {
+            let handles: Vec<_> = (0..clients)
+                .map(|c| {
+                    let barrier = barrier.clone();
+                    let yval = yval.clone();
+                    s.spawn(move || {
+                        let mut rng =
+                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
+                        let mut lats = Vec::with_capacity(cfg_ops);
+                        let mut errors = 0u64;
+                        barrier.wait();
+                        for _ in 0..cfg_ops {
+                            let t = Instant::now();
+                            let mut wb = Vec::with_capacity(batch);
+                            for _ in 0..batch {
+                                let src = self.pick(&mut rng, records);
+                                let dst = self.pick(&mut rng, records);
+                                wb.push(CfWrite::Put {
+                                    cf: "default",
+                                    k: ekey(src, dst),
+                                    v: yval.as_ref().clone(),
+                                });
+                            }
+                            if !e.batch(std::mem::take(&mut wb)) {
+                                errors += 1;
+                            }
+                            lats.push(ms(t));
+                        }
+                        (lats, errors)
+                    })
+                })
+                .collect();
+            for h in handles {
+                let (mut l, err) = h.join().expect("nebula insert client thread");
+                errors += err;
+                lats.append(&mut l);
+            }
+        });
+        let wall = t0.elapsed();
+        eprintln!(
+            "[rocks-parity] {full} done ops={} errors={errors}",
+            cfg_ops * clients
+        );
+        let mut blocks = vec![summarize_mc(
+            &full,
+            cfg_ops * clients,
+            wall,
+            &mut lats,
+            clients,
+            errors,
+        )];
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, clients as u64, 0.0, 0);
             eprint_write_diagnose(&full, &d);
             if let Some(last) = blocks.last_mut() {
                 *last = attach_diagnose(std::mem::take(last), Some(&d));
@@ -6009,6 +6093,26 @@ mod tests {
     }
 
     #[test]
+    fn rfc0184_nebula_insert_edge_mc4_in_compare() {
+        assert!(
+            COMPARE_SHAPES.contains(&"nebula_insert_edge_mc4"),
+            "Nebula insert-edge mc4 must be on the cartaz"
+        );
+        assert!(shape_wanted_in(
+            "nebula_insert_edge_mc4",
+            Some("nebula_insert_edge_mc4")
+        ));
+        assert!(
+            !shape_wanted_in("nebula_insert_edge", Some("nebula_insert_edge_mc4")),
+            "1c nebula_insert_edge must not leak into ONLY=nebula_insert_edge_mc4"
+        );
+        assert!(
+            !shape_wanted_in("nebula_get_neighbors", Some("nebula_insert_edge_mc4")),
+            "1c get_neighbors must not leak into ONLY=nebula_insert_edge_mc4"
+        );
+    }
+
+    #[test]
     fn rfc0178_mc_only_selects_full_mc_name() {
         assert!(shape_wanted_in(
             "deps_cache_overwrite_mc4",
@@ -6504,6 +6608,7 @@ mod tests {
             "wbwi_read_your_writes_mc4",
             "mixgraph_like_mc4",
             "oxigraph_triple_put_mc4",
+            "nebula_insert_edge_mc4",
         ] {
             assert!(
                 COMPARE_SHAPES.contains(&name),
