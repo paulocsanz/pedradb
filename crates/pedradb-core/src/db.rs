@@ -124,6 +124,23 @@ fn escape_inline_value(value: Bytes) -> Bytes {
     value
 }
 
+/// Small inline put that `get` can serve from the point cache without
+/// resolving a vlog pointer or stripping [`INLINE_ESCAPE`].
+fn cacheable_point_value(op: &crate::batch::WriteOp) -> Option<Bytes> {
+    if op.kind != crate::key::ValueType::Value {
+        return None;
+    }
+    if op.value.len() > 1024 {
+        return None;
+    }
+    if !op.value.is_empty()
+        && (op.value[0] == INLINE_ESCAPE || vlog::decode_vlog_ptr(&op.value).is_some())
+    {
+        return None;
+    }
+    Some(op.value.clone())
+}
+
 /// WAL recovery policy at open (RFC-0047 P0.2).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum WalRecovery {
@@ -1746,7 +1763,10 @@ pub struct Db<E: Env = StdEnv> {
     /// Db read lock (YCSB C hit path).
     point_cache: Arc<PointCache>,
     /// User keys applied since last publish (point-cache drop, not a gen bump).
-    dirty_points: Mutex<Vec<Bytes>>,
+    /// Value is `Some` for a small inline put so publish can refill the
+    /// shared point cache after invalidate — ycsb_f_mc4 sibling gets then
+    /// skip `db.read()` (zipf hot keys were a miss after every RMW).
+    dirty_points: Mutex<Vec<(Bytes, Option<Bytes>)>>,
     /// Fat apply / range-delete: publish must gen-bump, not per-key inval.
     point_cache_reset: AtomicBool,
     /// Latest `last_under_user_prefix` answers; cleared on write.
@@ -2473,6 +2493,7 @@ impl<E: Env> Db<E> {
                 .map(|_| Arc::new(WritePhaseStats::default())),
             last_recovery: point_in_time_report,
             dirty_points: Mutex::new(Vec::new()),
+            // typed as Vec<(Bytes, Option<Bytes>)> at the field
             point_cache_reset: AtomicBool::new(false),
             dir_lock: lock,
             durability_fenced: false,
@@ -2747,7 +2768,7 @@ impl<E: Env> Db<E> {
         // the point-cache OCC double-check (`get_at` with snap == published)
         // accepts any hit while `published` is unchanged, so invalidating
         // after the CAS leaves a window that serves the pre-write value.
-        self.invalidate_read_answers(seq);
+        let refill = self.invalidate_read_answers(seq);
         let mut cur = self.published_seq.load(Ordering::Relaxed);
         while seq > cur {
             match self.published_seq.compare_exchange_weak(
@@ -2759,6 +2780,11 @@ impl<E: Env> Db<E> {
                 Ok(_) => break,
                 Err(actual) => cur = actual,
             }
+        }
+        // After seq is visible: refill so a sibling ycsb_f get hits the
+        // shared cache instead of taking `inner.read()` (zipf RMW).
+        for (k, v) in refill {
+            self.point_cache.insert(&k, Some(v));
         }
         // RFC-0046 P0.1: sample (seq, time) every 32 publishes while a window
         // horizon is active — the cutoff only needs ±32-seq granularity.
@@ -2810,7 +2836,10 @@ impl<E: Env> Db<E> {
             return;
         }
         let mut g = self.dirty_points.lock();
-        g.extend(ops.iter().map(|op| op.key.clone()));
+        g.extend(ops.iter().map(|op| {
+            let val = cacheable_point_value(op);
+            (op.key.clone(), val)
+        }));
     }
 
     /// Zero RFC-0035 latest/scan counters, block-cache stats, and the
@@ -4755,7 +4784,7 @@ impl<E: Env> Db<E> {
         Ok(n)
     }
 
-    fn invalidate_read_answers(&self, seq: SequenceNumber) {
+    fn invalidate_read_answers(&self, seq: SequenceNumber) -> Vec<(Bytes, Bytes)> {
         let reset = self.point_cache_reset.swap(false, Ordering::Relaxed);
         // RFC-0180: overwrite/write-only never fills the read caches, so
         // `note_dirty_points` leaves `dirty_points` empty. Skip that mutex.
@@ -4772,10 +4801,10 @@ impl<E: Env> Db<E> {
             // skips cache invalidation must still drop that flag or
             // ConcurrentDb::get treats every key as an SST-envelope miss.
             self.settled_sst_only.store(false, Ordering::Release);
-            return;
+            return Vec::new();
         }
-        let keys = std::mem::take(&mut *self.dirty_points.lock());
-        // Do not insert WriteOp.value: large values are vlog pointers.
+        let dirty = std::mem::take(&mut *self.dirty_points.lock());
+        let keys: Vec<Bytes> = dirty.iter().map(|(k, _)| k.clone()).collect();
         // Fat apply gen-bumps; small writes drop only the dirty keys.
         if reset || keys.len() > 32 || keys.is_empty() {
             self.point_cache.clear();
@@ -4807,6 +4836,13 @@ impl<E: Env> Db<E> {
             && self.imm.is_none()
             && self.parked_unflushed.is_empty();
         self.settled_sst_only.store(settled, Ordering::Release);
+        if reset || keys.len() > 32 {
+            return Vec::new();
+        }
+        dirty
+            .into_iter()
+            .filter_map(|(k, v)| v.map(|v| (k, v)))
+            .collect()
     }
 
     /// Distinct visible user keys in `[start, end)` at `snapshot`, capped at

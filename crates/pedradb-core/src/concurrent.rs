@@ -6799,6 +6799,24 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// ycsb_f_mc4: after a get has filled the shared point cache, a put
+    /// must refill it with the new value so a sibling get skips `db.read()`.
+    #[test]
+    fn rfc0178_put_refills_point_cache_after_get() {
+        let dir = temp_dir();
+        let db = open_sync(&dir);
+        db.put(b"k", b"v1").unwrap();
+        assert_eq!(db.get(b"k").as_deref(), Some(&b"v1"[..]));
+        db.put(b"k", b"v2").unwrap();
+        assert_eq!(
+            db.point_cache_get(b"k").map(|v| v.map(|b| b.to_vec())),
+            Some(Some(b"v2".to_vec())),
+            "put must refill shared point cache (ycsb_f zipf sibling get)"
+        );
+        assert_eq!(db.get(b"k").as_deref(), Some(&b"v2"[..]));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// RFC-0047 P1.1 test env: one-shot WAL write / sync failures. The full
     /// `FailingEnv` lives in pedradb-sim (not a core dependency); this is
     /// the minimal fault surface the fence path needs.
