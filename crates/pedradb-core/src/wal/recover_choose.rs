@@ -222,7 +222,9 @@ fn next_phys(buf: &[u8], start: usize) -> Option<(usize, usize, u8)> {
         }
         let typ = buf[o + 6];
         let len = decode_length([buf[o + 4], buf[o + 5]]);
-        if typ == RecordType::Zero as u8 && len == 0 {
+        if typ == RecordType::Zero as u8
+            && crate::write_admission_kernel::batch_is_empty(len as u64)
+        {
             let block = o / BLOCK_SIZE;
             let block_end = block.saturating_add(1).saturating_mul(BLOCK_SIZE);
             if block_end >= buf.len() || block_end <= o {
