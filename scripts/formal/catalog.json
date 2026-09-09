@@ -2410,8 +2410,9 @@
       "id": "journal_catch_up_pin",
       "finding": "W4",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-journal/src/pin_kernel.rs",
-      "twin": "crates/pedradb-journal/verus/pin.rs",
+      "twin": "crates/pedradb-journal/src/pin_kernel.rs",
       "verus": "scripts/verus_journal_pin.sh",
       "callers": [
         "crates/pedradb-journal/src/lib.rs"
@@ -2434,8 +2435,9 @@
       "id": "journal_fold_pin",
       "finding": "H1",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-journal/src/pin_kernel.rs",
-      "twin": "crates/pedradb-journal/verus/pin.rs",
+      "twin": "crates/pedradb-journal/src/pin_kernel.rs",
       "verus": "scripts/verus_journal_pin.sh",
       "callers": [
         "crates/pedradb-journal/src/lib.rs"
@@ -2458,8 +2460,9 @@
       "id": "journal_next_pin",
       "finding": "H1",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-journal/src/pin_kernel.rs",
-      "twin": "crates/pedradb-journal/verus/pin.rs",
+      "twin": "crates/pedradb-journal/src/pin_kernel.rs",
       "verus": "scripts/verus_journal_pin.sh",
       "callers": [
         "crates/pedradb-journal/src/lib.rs"

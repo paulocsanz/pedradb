@@ -15,45 +15,57 @@ set_option maxRecDepth 2048
 namespace pedra_aeneas_pin_kernel
 
 /-- [pedra_aeneas_pin_kernel::peek_pins_cursor]:
-    Source: '../../../crates/pedradb-journal/src/pin_kernel.rs', lines 57:0-59:1
+    Source: '../../../crates/pedradb-journal/src/pin_kernel.rs', lines 75:0-77:1
     Visibility: public -/
 def peek_pins_cursor : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_pin_kernel::peek_pins_cursor_as_is]:
-    Source: '../../../crates/pedradb-journal/src/pin_kernel.rs', lines 64:0-66:1
+    Source: '../../../crates/pedradb-journal/src/pin_kernel.rs', lines 82:0-84:1
     Visibility: public -/
 def peek_pins_cursor_as_is : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_pin_kernel::catch_up_pins_on_read]:
-    Source: '../../../crates/pedradb-journal/src/pin_kernel.rs', lines 71:0-73:1
+    Source: '../../../crates/pedradb-journal/src/pin_kernel.rs', lines 89:0-91:1
     Visibility: public -/
 def catch_up_pins_on_read : Result Bool := do
   ok true
 
+/-- [pedra_aeneas_pin_kernel::catch_up_pins_on_read_as_is]:
+    Source: '../../../crates/pedradb-journal/src/pin_kernel.rs', lines 96:0-98:1
+    Visibility: public -/
+def catch_up_pins_on_read_as_is : Result Bool := do
+  ok false
+
 /-- [pedra_aeneas_pin_kernel::fold_pins_on_read]:
-    Source: '../../../crates/pedradb-journal/src/pin_kernel.rs', lines 78:0-80:1
+    Source: '../../../crates/pedradb-journal/src/pin_kernel.rs', lines 103:0-105:1
     Visibility: public -/
 def fold_pins_on_read : Result Bool := do
   ok false
 
+/-- [pedra_aeneas_pin_kernel::fold_pins_on_read_as_is]:
+    Source: '../../../crates/pedradb-journal/src/pin_kernel.rs', lines 110:0-112:1
+    Visibility: public -/
+def fold_pins_on_read_as_is : Result Bool := do
+  ok true
+
 /-- [pedra_aeneas_pin_kernel::may_advance_pin]:
-    Source: '../../../crates/pedradb-journal/src/pin_kernel.rs', lines 85:0-87:1
+    Source: '../../../crates/pedradb-journal/src/pin_kernel.rs', lines 117:0-119:1
     Visibility: public -/
 def may_advance_pin
   (pin : Std.U64) (applied_through : Std.U64) : Result Bool := do
   ok (applied_through > pin)
 
 /-- [pedra_aeneas_pin_kernel::may_advance_pin_as_is]:
-    Source: '../../../crates/pedradb-journal/src/pin_kernel.rs', lines 92:0-94:1
+    Source: '../../../crates/pedradb-journal/src/pin_kernel.rs', lines 124:0-126:1
     Visibility: public -/
 def may_advance_pin_as_is
   (pin : Std.U64) (applied_through : Std.U64) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_pin_kernel::next_pin]:
-    Source: '../../../crates/pedradb-journal/src/pin_kernel.rs', lines 99:0-101:1
+    Source: '../../../crates/pedradb-journal/src/pin_kernel.rs', lines 131:0-133:1
     Visibility: public -/
 def next_pin
   (pin : Std.U64) (batch_max : Option Std.U64) : Result Std.U64 := do
@@ -62,5 +74,14 @@ def next_pin
   | some m => if m > pin
               then ok m
               else ok pin
+
+/-- [pedra_aeneas_pin_kernel::next_pin_as_is]:
+    Source: '../../../crates/pedradb-journal/src/pin_kernel.rs', lines 138:0-140:1
+    Visibility: public -/
+def next_pin_as_is
+  (pin : Std.U64) (batch_max : Option Std.U64) : Result Std.U64 := do
+  match batch_max with
+  | none => ok pin
+  | some m => ok m
 
 end pedra_aeneas_pin_kernel
