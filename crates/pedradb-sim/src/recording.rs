@@ -171,7 +171,7 @@ impl Write for RecordingFile {
         let mut img = self.image.borrow_mut();
         let mut to_write = buf;
         if let Some(left) = img.short_write_left {
-            if left == 0 {
+            if pedradb_core::write_admission_kernel::batch_is_empty(left as u64) {
                 return Err(io::Error::new(
                     io::ErrorKind::WriteZero,
                     "injected short-write exhausted",
