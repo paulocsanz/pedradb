@@ -15,7 +15,7 @@ set_option maxRecDepth 2048
 namespace pedra_aeneas_apply_kernel
 
 /-- [pedra_aeneas_apply_kernel::ApplyAction]
-    Source: '../../../crates/pedradb-raft/src/apply_kernel.rs', lines 127:0-136:1
+    Source: '../../../crates/pedradb-raft/src/apply_kernel.rs', lines 36:0-45:1
     Visibility: public -/
 @[discriminant isize]
 inductive ApplyAction where
@@ -24,7 +24,7 @@ inductive ApplyAction where
 | Apply : ApplyAction
 
 /-- [pedra_aeneas_apply_kernel::{impl core::fmt::Debug for pedra_aeneas_apply_kernel::ApplyAction}::fmt]:
-    Source: '../../../crates/pedradb-raft/src/apply_kernel.rs', lines 126:9-126:14
+    Source: '../../../crates/pedradb-raft/src/apply_kernel.rs', lines 35:9-35:14
     Visibility: public -/
 def ApplyAction.Insts.CoreFmtDebug.fmt
   (self : ApplyAction) (f : core.fmt.Formatter) :
@@ -36,42 +36,42 @@ def ApplyAction.Insts.CoreFmtDebug.fmt
   | ApplyAction.Apply => core.fmt.Formatter.write_str f (toStr "Apply")
 
 /-- Trait implementation: [pedra_aeneas_apply_kernel::{impl core::fmt::Debug for pedra_aeneas_apply_kernel::ApplyAction}]
-    Source: '../../../crates/pedradb-raft/src/apply_kernel.rs', lines 126:9-126:14 -/
+    Source: '../../../crates/pedradb-raft/src/apply_kernel.rs', lines 35:9-35:14 -/
 @[reducible]
 def ApplyAction.Insts.CoreFmtDebug : core.fmt.Debug ApplyAction := {
   fmt := ApplyAction.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_apply_kernel::{impl core::clone::Clone for pedra_aeneas_apply_kernel::ApplyAction}::clone]:
-    Source: '../../../crates/pedradb-raft/src/apply_kernel.rs', lines 126:16-126:21
+    Source: '../../../crates/pedradb-raft/src/apply_kernel.rs', lines 35:16-35:21
     Visibility: public -/
 def ApplyAction.Insts.CoreCloneClone.clone
   (self : ApplyAction) : Result ApplyAction := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_apply_kernel::{impl core::clone::Clone for pedra_aeneas_apply_kernel::ApplyAction}]
-    Source: '../../../crates/pedradb-raft/src/apply_kernel.rs', lines 126:16-126:21 -/
+    Source: '../../../crates/pedradb-raft/src/apply_kernel.rs', lines 35:16-35:21 -/
 @[reducible]
 def ApplyAction.Insts.CoreCloneClone : core.clone.Clone ApplyAction := {
   clone := ApplyAction.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [pedra_aeneas_apply_kernel::{impl core::marker::Copy for pedra_aeneas_apply_kernel::ApplyAction}]
-    Source: '../../../crates/pedradb-raft/src/apply_kernel.rs', lines 126:23-126:27 -/
+    Source: '../../../crates/pedradb-raft/src/apply_kernel.rs', lines 35:23-35:27 -/
 @[reducible]
 def ApplyAction.Insts.CoreMarkerCopy : core.marker.Copy ApplyAction := {
   cloneInst := ApplyAction.Insts.CoreCloneClone
 }
 
 /-- Trait implementation: [pedra_aeneas_apply_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_apply_kernel::ApplyAction}]
-    Source: '../../../crates/pedradb-raft/src/apply_kernel.rs', lines 126:29-126:38 -/
+    Source: '../../../crates/pedradb-raft/src/apply_kernel.rs', lines 35:29-35:38 -/
 @[reducible]
 def ApplyAction.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq ApplyAction := {
 }
 
 /-- [pedra_aeneas_apply_kernel::{impl core::cmp::PartialEq<pedra_aeneas_apply_kernel::ApplyAction> for pedra_aeneas_apply_kernel::ApplyAction}::eq]:
-    Source: '../../../crates/pedradb-raft/src/apply_kernel.rs', lines 126:29-126:38
+    Source: '../../../crates/pedradb-raft/src/apply_kernel.rs', lines 35:29-35:38
     Visibility: public -/
 def ApplyAction.Insts.CoreCmpPartialEqApplyAction.eq
   (self : ApplyAction) (other : ApplyAction) : Result Bool := do
@@ -80,7 +80,7 @@ def ApplyAction.Insts.CoreCmpPartialEqApplyAction.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_apply_kernel::{impl core::cmp::PartialEq<pedra_aeneas_apply_kernel::ApplyAction> for pedra_aeneas_apply_kernel::ApplyAction}]
-    Source: '../../../crates/pedradb-raft/src/apply_kernel.rs', lines 126:29-126:38 -/
+    Source: '../../../crates/pedradb-raft/src/apply_kernel.rs', lines 35:29-35:38 -/
 @[reducible]
 def ApplyAction.Insts.CoreCmpPartialEqApplyAction : core.cmp.PartialEq
   ApplyAction ApplyAction := {
@@ -88,14 +88,14 @@ def ApplyAction.Insts.CoreCmpPartialEqApplyAction : core.cmp.PartialEq
 }
 
 /-- [pedra_aeneas_apply_kernel::{impl core::cmp::Eq for pedra_aeneas_apply_kernel::ApplyAction}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-raft/src/apply_kernel.rs', lines 126:40-126:42
+    Source: '../../../crates/pedradb-raft/src/apply_kernel.rs', lines 35:40-35:42
     Visibility: public -/
 def ApplyAction.Insts.CoreCmpEq.assert_fields_are_eq
   (self : ApplyAction) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_apply_kernel::{impl core::cmp::Eq for pedra_aeneas_apply_kernel::ApplyAction}]
-    Source: '../../../crates/pedradb-raft/src/apply_kernel.rs', lines 126:40-126:42 -/
+    Source: '../../../crates/pedradb-raft/src/apply_kernel.rs', lines 35:40-35:42 -/
 @[reducible]
 def ApplyAction.Insts.CoreCmpEq : core.cmp.Eq ApplyAction := {
   partialEqInst := ApplyAction.Insts.CoreCmpPartialEqApplyAction
@@ -103,7 +103,7 @@ def ApplyAction.Insts.CoreCmpEq : core.cmp.Eq ApplyAction := {
 }
 
 /-- [pedra_aeneas_apply_kernel::apply_advance]:
-    Source: '../../../crates/pedradb-raft/src/apply_kernel.rs', lines 153:0-161:1
+    Source: '../../../crates/pedradb-raft/src/apply_kernel.rs', lines 61:0-69:1
     Visibility: public -/
 def apply_advance
   (last_applied : Std.U64) (commit_index : Std.U64) (entry_present : Bool) :
@@ -116,7 +116,7 @@ def apply_advance
        else ok ApplyAction.Stop
 
 /-- [pedra_aeneas_apply_kernel::apply_advance_as_is_skip_holes]:
-    Source: '../../../crates/pedradb-raft/src/apply_kernel.rs', lines 168:0-178:1
+    Source: '../../../crates/pedradb-raft/src/apply_kernel.rs', lines 75:0-85:1
     Visibility: public -/
 def apply_advance_as_is_skip_holes
   (last_applied : Std.U64) (commit_index : Std.U64) (_entry_present : Bool) :

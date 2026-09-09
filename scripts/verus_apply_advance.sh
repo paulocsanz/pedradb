@@ -1,23 +1,16 @@
 #!/usr/bin/env bash
-# Machine-check the apply-loop kernel (RFC-0053 Y2.2 / F10-apply).
+# apply_kernel.rs rustc body is the term (Aeneas Apply.lean).
+# A Verus stand-in is not last-wins. Fail closed if it returns.
 set -euo pipefail
-
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-# RFC-0171 P0.3 / RFC-0174: prove the file rustc links, not a twin-cópia.
 SRC="$ROOT/crates/pedradb-raft/src/apply_kernel.rs"
-
-if [[ -x "${VERUS:-}" ]]; then
-  :
-elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then
-  VERUS="$HOME/.local/verus/verus-arm64-macos/verus"
-elif command -v verus >/dev/null 2>&1; then
-  VERUS="$(command -v verus)"
-else
-  echo "error: verus not found (install to ~/.local/verus/verus-arm64-macos or set VERUS=)" >&2
-  exit 127
+if grep -n 'verus!' "$SRC"; then
+  echo "error: verus_apply_advance: verus! stand-in still in apply_kernel.rs" >&2
+  exit 1
 fi
-
-echo "verus: $VERUS"
-"$VERUS" --version
-echo "proving: $SRC"
-exec "$VERUS" "$SRC" --crate-type=lib --multiple-errors 10 --time "$@"
+if grep -n 'verus_keep_ghost' "$SRC"; then
+  echo "error: verus_apply_advance: cfg(verus_keep_ghost) split still in apply_kernel.rs" >&2
+  exit 1
+fi
+echo "ok: no Verus cartoon in $SRC; term is Aeneas formal/aeneas/lean/Apply.lean"
+exit 0

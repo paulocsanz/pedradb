@@ -1,4 +1,4 @@
 path=crates/pedradb-raft/src/apply_kernel.rs
-sha256=868e1ed2eeba1408d437a1466564665320eb500db82117e4e861ef7d173e01ce
+sha256=5df59e2c16be0bb7985f013c7977d8a65eaf5b3fdaacd88cb7a47af78a1d0be8
 aeneas=daa85d7
 charon=0.1.232

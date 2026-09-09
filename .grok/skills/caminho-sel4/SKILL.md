@@ -19,11 +19,11 @@ description: >
 
 ## Grind pressure (one block, overwritten each fire)
 
-- Last fire: worked (`fbcc1c13` delete manifest_kernel.rs Verus cartoon; rustc `sst_recover_action` is the term)
-- Why: leftover_next_first reopen_outcome; Verus stand-in billed as last-wins of rustc reopen
-- This fire MUST land: delete the `wal/reopen_kernel.rs` `verus!` stand-in; rustc types stay; Aeneas of those types is the term
+- Last fire: worked (`c56155e3` delete compact_kernel.rs Verus cartoon; rustc 4-arg `compact_pick` is the term)
+- Why: leftover_next_first apply_step; Verus stand-in billed as last-wins of rustc apply
+- This fire MUST land: delete the `apply_kernel.rs` `verus!` stand-in; rustc types stay; Aeneas of those types is the term
 - Forbidden this fire: mint u64 twin; `_body!` over different types; skip cartoon as "not a land"; leftover_next store/Montanha; FACTORY_BAN halt; git checkout of db.rs/concurrent.rs
-- Deeper: Search leftover_next=cartoon remaining (skip store); open reopen_kernel.rs; named cargo; `aeneas_*.sh` / lake
+- Deeper: Search leftover_next=cartoon remaining (skip store); open apply_kernel.rs; inspect WT diff; named cargo; `aeneas_*.sh` / lake
 
 This skill **lands one payable slice per Fire**. Rank 1–10 unpaid first.
 When those boards are 0, Search prints `leftover_next`: cartoon remaining
