@@ -3,7 +3,8 @@
 //! not a durability fence).
 
 use pedradb_core::concurrent::ConcurrentDb;
-use pedradb_core::db::{Db, OpenOptions};
+use pedradb_core::db::{copy_db_directory, Db, OpenOptions};
+use pedradb_core::env::Env;
 use pedradb_core::disk_pressure_kernel::{
     disk_pressure_admit, DiskPressureAdmit, DISK_HARD_FREE_BYTES,
 };
@@ -180,4 +181,37 @@ fn concurrent_db_hard_floor_refuses_put_get_ok() {
     assert!(db.get(b"k2").is_none());
     assert!(!db.is_durability_fenced());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// RFC-0179: `copy_db_directory` admits before copy; dest is not created
+/// when the probe is below the hard floor.
+#[test]
+fn copy_db_directory_under_hard_floor_does_not_create_dest() {
+    use std::io::Write;
+
+    let src = tmp();
+    let dest_parent = tmp();
+    let dest = dest_parent.join("copy");
+    let env = FailingEnv::passing();
+    env.create_dir_all(&src).unwrap();
+    {
+        let mut f = env.create(&src.join("CURRENT")).unwrap();
+        f.write_all(b"x").unwrap();
+    }
+    env.set_available_bytes(Some(1024));
+    assert!(!env.exists(&dest));
+    let err = copy_db_directory(&env, &src, &dest).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            CoreError::DiskPressure {
+                available: 1024,
+                need: DISK_HARD_FREE_BYTES,
+            }
+        ),
+        "expected DiskPressure, got {err:?}"
+    );
+    assert!(!env.exists(&dest), "refused copy must not create dest");
+    let _ = std::fs::remove_dir_all(&src);
+    let _ = std::fs::remove_dir_all(&dest_parent);
 }

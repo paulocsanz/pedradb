@@ -179,6 +179,35 @@ mod tests {
     }
 
     #[test]
+    fn external_write_admitted_on_live_admit_disk_write_is_not_ok() {
+        assert!(external_write_admitted(None));
+        assert!(external_write_admitted(Some(DISK_HARD_FREE_BYTES)));
+        assert!(!external_write_admitted(Some(0)));
+        assert!(
+            external_write_admitted_as_is(Some(0)),
+            "AS-IS dente: dest copy proceeds at zero free"
+        );
+        let glue = include_str!("env.rs")
+            .split("pub fn admit_disk_write")
+            .nth(1)
+            .and_then(|s| s.split("fn note_external_disk_pressure").next())
+            .expect("admit_disk_write");
+        assert!(
+            glue.contains("external_write_admitted("),
+            "admit_disk_write must match external_write_admitted"
+        );
+        let copy = include_str!("db.rs")
+            .split("pub fn copy_db_directory")
+            .nth(1)
+            .and_then(|s| s.split("\npub fn ").next())
+            .expect("copy_db_directory");
+        assert!(
+            copy.contains("admit_disk_write("),
+            "copy_db_directory must admit before copy"
+        );
+    }
+
+    #[test]
     fn disk_pressure_reclaim_plan_on_live_reclaim_is_not_ok() {
         let live = disk_pressure_reclaim_plan(true);
         assert!(live.compact_sst && live.rotate_wal && live.compact_vlog);

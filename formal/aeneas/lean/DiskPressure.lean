@@ -34,3 +34,16 @@ theorem disk_pressure_reclaim_plan_as_is_sst_only :
       ok { compact_sst := true, rotate_wal := false, compact_vlog := false } := by
   unfold disk_pressure_reclaim_plan_as_is
   rfl
+
+/-- Dual-unfold: PITR dest glue (`external_write_admitted`) calls
+    `disk_pressure_admit`; unknown probe admits. -/
+theorem external_write_admitted_unfolds_disk_pressure_admit :
+    external_write_admitted none = ok true := by
+  unfold external_write_admitted disk_pressure_admit
+  rfl
+
+/-- AS-IS dente: dest copy/append proceeds at zero free. -/
+theorem external_write_admitted_as_is_dente :
+    external_write_admitted_as_is (some 0#u64) = ok true := by
+  unfold external_write_admitted_as_is
+  rfl

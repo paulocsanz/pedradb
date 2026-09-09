@@ -283,11 +283,14 @@ pub fn admit_disk_write<E: Env>(env: &E, path: &Path) -> crate::error::Result<()
     };
     let admit = crate::disk_pressure_kernel::disk_pressure_admit(probe);
     note_external_disk_pressure(admit, path);
-    match admit {
-        crate::disk_pressure_kernel::DiskPressureAdmit::Ok
-        | crate::disk_pressure_kernel::DiskPressureAdmit::Reclaim => Ok(()),
-        crate::disk_pressure_kernel::DiskPressureAdmit::Refuse { available, need } => {
-            Err(crate::error::CoreError::DiskPressure { available, need })
+    if crate::disk_pressure_kernel::external_write_admitted(probe) {
+        Ok(())
+    } else {
+        match admit {
+            crate::disk_pressure_kernel::DiskPressureAdmit::Refuse { available, need } => {
+                Err(crate::error::CoreError::DiskPressure { available, need })
+            }
+            _ => Ok(()),
         }
     }
 }
