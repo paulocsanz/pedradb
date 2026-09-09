@@ -2637,7 +2637,9 @@ fn write_sst_bulk_arrays_body(
         }
         append_bulk_entry(&mut staged, k, seq, v);
     }
-    if staged.len() > block_start {
+    if !crate::write_admission_kernel::batch_is_empty(
+        staged.len().saturating_sub(block_start) as u64,
+    ) {
         finish_staged_block(
             &mut file,
             &mut staged,
