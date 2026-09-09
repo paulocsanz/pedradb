@@ -1,9 +1,10 @@
 //! Origin-form path for routing (RFC-0002 P34 / F91 / F92).
 //!
-//! **Single artifact:** this file is what `rustc` links *and* what Verus
-//! proves (`cfg(verus_keep_ghost)`). String slice is caller. No twin-cópia.
+//! **Single artifact (Aeneas-paid):** this file is what `rustc` links and
+//! what the Lean defs run over — Charon+Aeneas extract of these exact
+//! bodies. No Verus twin stands in for them.
 //!
-//!   ./scripts/verus_origin_path.sh
+//!   ./scripts/aeneas_path.sh
 //!
 //! Production `path_only` / `handle_kv` / `handle_dcs` call
 //! [`origin_form_path`]. Query strip after that is the same for FIXED and AS-IS.
@@ -167,78 +168,6 @@ pub fn strip_authority_for_routing(is_authority_form: bool) -> bool {
 pub fn strip_authority_for_routing_as_is(is_authority_form: bool) -> bool {
     strip_authority_for_routing_as_is_body!(is_authority_form)
 }
-
-#[cfg(verus_keep_ghost)]
-use vstd::prelude::*;
-
-#[cfg(verus_keep_ghost)]
-verus! {
-
-pub open spec fn strip_authority_for_routing_spec(is_authority_form: bool) -> bool {
-    is_authority_form
-}
-
-pub fn strip_authority_for_routing(is_authority_form: bool) -> (d: bool)
-    ensures
-        d == strip_authority_for_routing_spec(is_authority_form),
-        d == is_authority_form,
-{
-    strip_authority_for_routing_body!(is_authority_form)
-}
-
-pub open spec fn strip_authority_for_routing_as_is_spec(_is_authority_form: bool) -> bool {
-    false
-}
-
-pub fn strip_authority_for_routing_as_is(is_authority_form: bool) -> (d: bool)
-    ensures
-        d == strip_authority_for_routing_as_is_spec(is_authority_form),
-        !d,
-{
-    strip_authority_for_routing_as_is_body!(is_authority_form)
-}
-
-proof fn lemma_as_is_keeps_authority()
-    ensures
-        strip_authority_for_routing_spec(true),
-        !strip_authority_for_routing_as_is_spec(true),
-{
-}
-
-proof fn lemma_origin_form_untouched()
-    ensures
-        !strip_authority_for_routing_spec(false),
-{
-}
-
-pub open spec fn default_port_equiv_spec(a: Option<u64>, b: Option<u64>) -> bool {
-    match (a, b) {
-        (None, None) => true,
-        (Some(x), Some(y)) => x == y,
-        (None, Some(p)) | (Some(p), None) => p == 80 || p == 443,
-    }
-}
-
-fn default_port_equiv(a: Option<u64>, b: Option<u64>) -> (d: bool)
-    ensures
-        d == default_port_equiv_spec(a, b),
-{
-    match (a, b) {
-        (None, None) => true,
-        (Some(x), Some(y)) => x == y,
-        (None, Some(p)) | (Some(p), None) => p == 80 || p == 443,
-    }
-}
-
-proof fn lemma_default_port_is_not_mismatch()
-    ensures
-        default_port_equiv_spec(None, Some(80)),
-        default_port_equiv_spec(None, Some(443)),
-        !default_port_equiv_spec(None, Some(8080)),
-{
-}
-
-} // verus!
 
 #[cfg(test)]
 mod tests {

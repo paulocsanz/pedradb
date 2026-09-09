@@ -1829,7 +1829,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-http/src/path_kernel.rs",
       "twin": "crates/pedradb-http/src/path_kernel.rs",
-      "verus": "scripts/verus_origin_path.sh",
+      "aeneas": "scripts/aeneas_path.sh",
       "callers": [
         "crates/pedradb-http/src/lib.rs"
       ],
@@ -1853,10 +1853,11 @@
       "id": "path_after_authority",
       "finding": "F91",
       "twin_kind": "close",
+      "single_artifact": true,
       "atom": "has_path_after_authority",
       "kernel": "crates/pedradb-http/src/path_kernel.rs",
-      "twin": "crates/pedradb-http/verus/origin_path.rs",
-      "verus": "scripts/verus_origin_path.sh",
+      "twin": "crates/pedradb-http/src/path_kernel.rs",
+      "aeneas": "scripts/aeneas_path.sh",
       "callers": [
         "crates/pedradb-http/src/path_kernel.rs"
       ],
@@ -1872,10 +1873,11 @@
       "id": "strip_http_authority",
       "finding": "F91/F145",
       "twin_kind": "close",
+      "single_artifact": true,
       "atom": "scheme_prefix_folded_eq",
       "kernel": "crates/pedradb-http/src/path_kernel.rs",
-      "twin": "crates/pedradb-http/verus/origin_path.rs",
-      "verus": "scripts/verus_origin_path.sh",
+      "twin": "crates/pedradb-http/src/path_kernel.rs",
+      "aeneas": "scripts/aeneas_path.sh",
       "callers": [
         "crates/pedradb-http/src/path_kernel.rs"
       ],
@@ -1891,10 +1893,11 @@
       "id": "request_target_authority",
       "finding": "F161",
       "twin_kind": "close",
+      "single_artifact": true,
       "atom": "authority_present",
       "kernel": "crates/pedradb-http/src/path_kernel.rs",
-      "twin": "crates/pedradb-http/verus/origin_path.rs",
-      "verus": "scripts/verus_origin_path.sh",
+      "twin": "crates/pedradb-http/src/path_kernel.rs",
+      "aeneas": "scripts/aeneas_path.sh",
       "callers": [
         "crates/pedradb-http/src/lib.rs",
         "crates/pedradb-http/src/path_kernel.rs"
@@ -1917,10 +1920,11 @@
       "id": "host_authority_mismatch",
       "finding": "F161/F162",
       "twin_kind": "close",
+      "single_artifact": true,
       "atom": "default_port_equiv",
       "kernel": "crates/pedradb-http/src/path_kernel.rs",
-      "twin": "crates/pedradb-http/verus/origin_path.rs",
-      "verus": "scripts/verus_origin_path.sh",
+      "twin": "crates/pedradb-http/src/path_kernel.rs",
+      "aeneas": "scripts/aeneas_path.sh",
       "callers": [
         "crates/pedradb-http/src/lib.rs",
         "crates/pedradb-http/src/path_kernel.rs"
@@ -1943,10 +1947,11 @@
       "id": "split_host_port",
       "finding": "F162",
       "twin_kind": "close",
+      "single_artifact": true,
       "atom": "split_userinfo",
       "kernel": "crates/pedradb-http/src/path_kernel.rs",
-      "twin": "crates/pedradb-http/verus/origin_path.rs",
-      "verus": "scripts/verus_origin_path.sh",
+      "twin": "crates/pedradb-http/src/path_kernel.rs",
+      "aeneas": "scripts/aeneas_path.sh",
       "callers": [
         "crates/pedradb-http/src/path_kernel.rs"
       ],
@@ -1962,10 +1967,11 @@
       "id": "strip_uri_fragment",
       "finding": "F156",
       "twin_kind": "close",
+      "single_artifact": true,
       "atom": "fragment_gate",
       "kernel": "crates/pedradb-http/src/path_kernel.rs",
-      "twin": "crates/pedradb-http/verus/origin_path.rs",
-      "verus": "scripts/verus_origin_path.sh",
+      "twin": "crates/pedradb-http/src/path_kernel.rs",
+      "aeneas": "scripts/aeneas_path.sh",
       "callers": [
         "crates/pedradb-http/src/lib.rs",
         "crates/pedradb-http/src/path_kernel.rs"
@@ -1988,9 +1994,10 @@
       "id": "strip_authority_for_routing",
       "finding": "F91/F92",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-http/src/path_kernel.rs",
-      "twin": "crates/pedradb-http/verus/origin_path.rs",
-      "verus": "scripts/verus_origin_path.sh",
+      "twin": "crates/pedradb-http/src/path_kernel.rs",
+      "aeneas": "scripts/aeneas_path.sh",
       "callers": [
         "crates/pedradb-http/src/path_kernel.rs"
       ],
