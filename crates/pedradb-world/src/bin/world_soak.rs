@@ -32,7 +32,11 @@ fn interest(t: &pedradb_world::Trace, cov: ScheduleCoverage) -> f64 {
     r += f64::from(t.puts_err.min(3)) * 0.15;
     r += f64::from(t.dcs_err.min(3)) * 0.1;
     r += f64::from(t.disk_arms.min(4)) * 0.12;
-    r += if t.rpc_applied > 0 { 0.2 } else { 0.0 };
+    r += if !pedradb_core::write_admission_kernel::batch_is_empty(t.rpc_applied as u64) {
+        0.2
+    } else {
+        0.0
+    };
     r += if t.puts_ok > 0 { 0.15 } else { 0.0 };
     r += if cov.membership { 0.1 } else { 0.0 };
     r += if cov.dcs_ttl { 0.1 } else { 0.0 };
