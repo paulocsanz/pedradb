@@ -690,7 +690,7 @@ impl MemTable {
             };
             return;
         }
-        if add && n > 0 {
+        if add && !crate::write_admission_kernel::batch_is_empty(n as u64) {
             map.insert(Bytes::copy_from_slice(p), n);
         }
     }
