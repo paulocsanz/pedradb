@@ -70,3 +70,19 @@ theorem tombstone_reaches_window_as_is_dente
       = ok false := by
   unfold scan_kernel.tombstone_reaches_window_as_is
   rfl
+
+/-- Catalog entry: unbounded window is reachable (rustc `&[u8]` + `Bound`). -/
+theorem tombstone_reaches_window_unbounded (t_start t_end) :
+    scan_kernel.tombstone_reaches_window t_start t_end
+      core.ops.range.Bound.Unbounded core.ops.range.Bound.Unbounded
+    = ok true := by
+  unfold scan_kernel.tombstone_reaches_window
+  rfl
+
+/-- Catalog entry: unbounded scan window contains every key. -/
+theorem key_in_window_unbounded (user) :
+    scan_kernel.key_in_window user
+      core.ops.range.Bound.Unbounded core.ops.range.Bound.Unbounded
+    = ok true := by
+  unfold scan_kernel.key_in_window
+  rfl
