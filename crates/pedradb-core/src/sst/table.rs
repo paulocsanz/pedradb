@@ -1113,25 +1113,18 @@ impl SstTable {
     }
 
     /// Whether this file's user-key bounds can meet `[start, end)`.
+    ///
+    /// Catalog kernel [`super::scan_kernel::point_bounds_overlap`]: missing
+    /// bounds keep the file (must-read). Point prune only — range tombs are
+    /// collected separately (`scan_at_raw` G2).
     #[must_use]
     pub fn overlaps_user_range(&self, start: Bound<&[u8]>, end: Bound<&[u8]>) -> bool {
-        let (Some(lo), Some(hi)) = (
+        super::scan_kernel::point_bounds_overlap(
             self.smallest_user_key.as_deref(),
             self.largest_user_key.as_deref(),
-        ) else {
-            return false;
-        };
-        let file_before_end = match end {
-            Bound::Unbounded => true,
-            Bound::Included(e) => lo <= e,
-            Bound::Excluded(e) => lo < e,
-        };
-        let file_after_start = match start {
-            Bound::Unbounded => true,
-            Bound::Included(s) => hi >= s,
-            Bound::Excluded(s) => hi > s,
-        };
-        file_before_end && file_after_start
+            start,
+            end,
+        )
     }
 
     /// Point keys in `[start, end)`, one SST block at a time (RFC-0033 P0.3).
@@ -3208,6 +3201,24 @@ mod tests {
             .as_nanos();
         let seq = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         std::env::temp_dir().join(format!("pedradb-sst-{n}-{seq}.sst"))
+    }
+
+    #[test]
+    fn overlaps_user_range_calls_point_bounds_overlap() {
+        let src = include_str!("table.rs");
+        let body = src
+            .split("pub fn overlaps_user_range")
+            .nth(1)
+            .and_then(|s| s.split("pub fn iter_user_range").next())
+            .expect("overlaps_user_range");
+        assert!(
+            body.contains("point_bounds_overlap("),
+            "scan trampoline must call catalog point_bounds_overlap"
+        );
+        assert!(
+            !body.contains("file_before_end"),
+            "Bound-match if must not stay inline in overlaps_user_range"
+        );
     }
 
     /// The bloom is sized by the keys actually written, never by the

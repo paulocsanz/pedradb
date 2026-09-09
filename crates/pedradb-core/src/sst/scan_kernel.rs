@@ -506,6 +506,20 @@ mod tests {
     }
 
     #[test]
+    fn overlaps_user_range_on_live_table_matches_kernel() {
+        let src = include_str!("table.rs");
+        let body = src
+            .split("pub fn overlaps_user_range")
+            .nth(1)
+            .and_then(|s| s.split("pub fn iter_user_range").next())
+            .expect("overlaps_user_range");
+        assert!(
+            body.contains("point_bounds_overlap("),
+            "SstTable::overlaps_user_range must call point_bounds_overlap"
+        );
+    }
+
+    #[test]
     fn unbounded_start_keeps_files_via_point_bounds() {
         // Unbounded start never rejects by the start side.
         assert!(point_bounds_overlap(
