@@ -5,6 +5,7 @@
 //!
 //! This crate is deliberately dependency-free: the specs are the top of
 //! the refinement chain (property → invariant → kernel atom), compiled
-//! like any other Rust and twin-proved in `verus/properties.rs`.
+//! like any other Rust and single-artifact proved — the Charon+Aeneas
+//! extract of `properties_kernel.rs` (`scripts/aeneas_properties.sh`).
 
 pub mod properties_kernel;

@@ -5176,8 +5176,9 @@
       "id": "r1_no_resurrection",
       "finding": "RFC-0166 P0.1",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-spec/src/properties_kernel.rs",
-      "twin": "crates/pedradb-spec/verus/properties.rs",
+      "twin": "crates/pedradb-spec/src/properties_kernel.rs",
       "aeneas": "scripts/aeneas_properties.sh",
       "callers": [
         "crates/pedradb-spec/src/properties_kernel.rs"
@@ -5194,8 +5195,9 @@
       "id": "t1_atomicity",
       "finding": "RFC-0166 P0.1",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-spec/src/properties_kernel.rs",
-      "twin": "crates/pedradb-spec/verus/properties.rs",
+      "twin": "crates/pedradb-spec/src/properties_kernel.rs",
       "aeneas": "scripts/aeneas_properties.sh",
       "callers": [
         "crates/pedradb-spec/src/properties_kernel.rs"
@@ -5212,8 +5214,9 @@
       "id": "c1_quorum",
       "finding": "RFC-0166 P0.1",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-spec/src/properties_kernel.rs",
-      "twin": "crates/pedradb-spec/verus/properties.rs",
+      "twin": "crates/pedradb-spec/src/properties_kernel.rs",
       "aeneas": "scripts/aeneas_properties.sh",
       "callers": [
         "crates/pedradb-spec/src/properties_kernel.rs"
