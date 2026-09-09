@@ -611,7 +611,8 @@ fn handle_append_entries(node: &mut RaftNode, args: &AppendEntriesArgs) -> Appen
     }
     node.log.sort_by_key(|e| e.index);
     node.log.dedup_by_key(|e| e.index);
-    let log_dirty = !args.entries.is_empty();
+    let log_dirty =
+        !pedradb_core::write_admission_kernel::batch_is_empty(args.entries.len() as u64);
     let persist_ok = if log_dirty {
         node.persist_log().is_ok()
     } else {
