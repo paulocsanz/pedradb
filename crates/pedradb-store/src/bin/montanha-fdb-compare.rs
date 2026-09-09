@@ -167,7 +167,7 @@ fn main() {
     // Parity summary: only meaningful when a real peer produced ratios.
     let shapes_with_peer = real_ratios.len();
     let parity = if let Some(floor) = parity_floor {
-        if real_ratios.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(real_ratios.len() as u64) {
             format!(
                 r#"{{"floor": {floor}, "shapes_with_peer": 0, "min_ratio": null, "pass": null, "note": "floor set but no peer ratios — template mode"}}"#
             )
