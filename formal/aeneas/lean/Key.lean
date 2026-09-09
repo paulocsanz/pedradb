@@ -56,6 +56,12 @@ theorem value_type_from_u8_range_deletion :
   unfold key.ValueType.from_u8
   rfl
 
+/-- Catalog entry: rustc `as_u8` of RangeDeletion is nibble 2 (inverse of `from_u8`). -/
+theorem value_type_as_u8_range_deletion :
+    key.ValueType.as_u8 key.ValueType.RangeDeletion = ok 2#u8 := by
+  unfold key.ValueType.as_u8
+  rfl
+
 /-- Catalog entry: unknown nibble is none. -/
 theorem value_type_from_u8_unknown :
     key.ValueType.from_u8 3#u8 = ok none := by
