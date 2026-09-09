@@ -2823,7 +2823,7 @@ fn write_sst_try_sorted_body(
     // filter. Distinct keys are inserted from slices during the encode
     // loop — no `Vec<Bytes>` of every user key.
     const BLOOM_CAP_MAX: usize = 2_097_152;
-    let mut bloom = if bloom_hint == 0 {
+    let mut bloom = if crate::write_admission_kernel::batch_is_empty(bloom_hint as u64) {
         BloomFilter::always_true()
     } else {
         BloomFilter::with_capacity(bloom_hint.min(BLOOM_CAP_MAX), DEFAULT_BITS_PER_KEY)
