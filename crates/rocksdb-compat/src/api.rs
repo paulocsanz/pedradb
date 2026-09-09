@@ -325,7 +325,7 @@ impl WriteBatchWithIndex {
     /// Empty?
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.batch.is_empty()
+        pedradb_core::write_admission_kernel::batch_is_empty(self.batch.len() as u64)
     }
 
     /// Underlying atomic batch for [`DB::write`].
