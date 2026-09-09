@@ -4381,7 +4381,7 @@ fn flush_worker_tick<E: PedraEnv>(inner: &ConcurrentDb<E>) {
         .map_or(0, |t| t);
     if bound > 0 && inner.parked_unflushed_bytes() >= bound {
         let mut budget = 2usize;
-        while budget > 0
+        while !pedradb_core::write_admission_kernel::batch_is_empty(budget as u64)
             && inner.materialize_parked_once()
             && inner.parked_unflushed_bytes() >= bound / 2
         {
