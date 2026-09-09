@@ -4,6 +4,15 @@ import KeyKernel
 open Aeneas.Std Result
 open pedra_aeneas_key_kernel
 
+/-- Catalog entry: rustc `MAX_SEQUENCE_NUMBER` is `(1 << 56) - 1`. Dual-unfold. -/
+theorem max_sequence_number_is_shift_minus_one :
+    key.MAX_SEQUENCE_NUMBER =
+      (do
+        let i ← 1#u64 <<< 56#i32
+        i - 1#u64) := by
+  unfold key.MAX_SEQUENCE_NUMBER
+  rfl
+
 /-- Catalog entry: extracted `pack_sequence_and_type` is assert + shift + OR. -/
 theorem pack_sequence_and_type_def (seq : U64) (kind : key.ValueType) :
     key.pack_sequence_and_type seq kind = (
