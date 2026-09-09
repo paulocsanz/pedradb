@@ -894,9 +894,13 @@ def check_tcb_freeze(root: Path, catalog: dict, r: Report) -> None:
     for pair in catalog["pairs"]:
         if not pair.get("data_fate"):
             continue
+        # Payment is machine-checked by a Verus twin OR an Aeneas extract of
+        # the linked rustc body (RFC-0171 P0.3: a cfg-split Verus stand-in
+        # whose body can drift from the rustc body is not a payment).
+        paid = pair.get("verus") or pair.get("aeneas")
         missing = [
             what
-            for what, val in (("twin", pair.get("twin")), ("verus script", pair.get("verus")))
+            for what, val in (("twin", pair.get("twin")), ("proof script (verus|aeneas)", paid))
             if not val or not (root / val).is_file()
         ]
         if missing:

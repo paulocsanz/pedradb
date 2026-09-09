@@ -282,6 +282,12 @@ name = "StoreCommitKernel"
 name = "StoreCommit"
 
 [[lean_lib]]
+name = "StoreTxnKernel"
+
+[[lean_lib]]
+name = "StoreTxn"
+
+[[lean_lib]]
 name = "StoreAeAckKernel"
 
 [[lean_lib]]

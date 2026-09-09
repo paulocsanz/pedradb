@@ -1,315 +1,19 @@
-//! Pure TX apply / discard / revert decisions (RFC-0002 P9–P10 / F47 / F34 / F52).
+//! Pure TX apply / discard / revert decisions (RFC-0002 P9-P10 / F47 / F34 / F52).
 //!
-//! **Single artifact:** this file is what `rustc` links *and* what Verus
-//! proves (`cfg(verus_keep_ghost)`). All catalog pairs on this file are
-//! `single_artifact` (last: `unreserve_si_gen`).
-//!
-//!   ./scripts/verus_txn_kernel.sh
+//! **Single artifact:** this file is what `rustc` links; the payment is the
+//! Aeneas extract of these bodies (scripts/aeneas_store_txn.sh). The former
+//! `cfg(verus_keep_ghost)` Verus stand-in was deleted: twin bodies can drift
+//! from the rustc bodies, so the proof covered a copy, not the product
+//! (RFC-0171 P0.3 payment without a cartoon).
 //!
 //! Production [`crate::apply_txn_commit`] / [`crate::apply_txn_revert`] /
 //! [`crate::StoreCluster::discard_uncommitted_from`] call these helpers.
 //! Persist and raft majority are **axioms**.
-//!
-//! The rustc bodies stay byte-stable so non-`single_artifact` twins still
-//! token-match. Verus proofs sit in the `cfg(verus_keep_ghost)` block
-//! above them (last-wins for lint is the rustc body).
 
 #![forbid(unsafe_code)]
 
-#[cfg(verus_keep_ghost)]
-use vstd::prelude::*;
-
-#[cfg(verus_keep_ghost)]
-verus! {
-
-pub enum TxnCommitAction {
-    Revert,
-    Materialise,
-}
-
-pub open spec fn txn_commit_action_spec(status_is_abort: bool) -> TxnCommitAction {
-    if status_is_abort {
-        TxnCommitAction::Revert
-    } else {
-        TxnCommitAction::Materialise
-    }
-}
-
-pub fn txn_commit_action(status_is_abort: bool) -> (d: TxnCommitAction)
-    ensures
-        d == txn_commit_action_spec(status_is_abort),
-        status_is_abort ==> d == TxnCommitAction::Revert,
-        !status_is_abort ==> d == TxnCommitAction::Materialise,
-{
-    if status_is_abort {
-        TxnCommitAction::Revert
-    } else {
-        TxnCommitAction::Materialise
-    }
-}
-
-pub open spec fn txn_commit_action_as_is(_status_is_abort: bool) -> TxnCommitAction {
-    TxnCommitAction::Materialise
-}
-
-/// F47 teeth / Khan 2606.17182 SSI abort-step: abort never materialises.
-proof fn lemma_as_is_materialises_abort()
-    ensures
-        txn_commit_action_spec(true) == TxnCommitAction::Revert,
-        txn_commit_action_as_is(true) == TxnCommitAction::Materialise,
-{
-}
-
-pub fn revert_clears_status(status_is_abort: bool, pairs_empty: bool) -> (d: bool)
-    ensures
-        d == (pairs_empty && !status_is_abort),
-        status_is_abort ==> !d,
-{
-    pairs_empty && !status_is_abort
-}
-
-pub open spec fn revert_clears_status_as_is(_abort: bool, pairs_empty: bool) -> bool {
-    pairs_empty
-}
-
-proof fn lemma_as_is_drops_fence()
-    ensures
-        !{ revert_clears_status_as_is(true, true) == false },
-        revert_clears_status_as_is(true, true),
-{
-}
-
-pub open spec fn sat_add1(x: u64) -> u64 {
-    if x == u64::MAX {
-        x
-    } else {
-        (x + 1) as u64
-    }
-}
-
-pub fn discard_cut(from_index: u64, commit: u64) -> (c: u64)
-    ensures
-        c >= from_index,
-        commit < u64::MAX ==> c > commit,
-{
-    let floor = if commit == u64::MAX {
-        commit
-    } else {
-        commit + 1
-    };
-    if from_index >= floor {
-        from_index
-    } else {
-        floor
-    }
-}
-
-pub open spec fn discard_cut_as_is(from_index: u64, _commit: u64) -> u64 {
-    from_index
-}
-
-proof fn lemma_as_is_can_cut_committed(from_index: u64, commit: u64)
-    requires
-        from_index <= commit,
-        commit < u64::MAX,
-    ensures
-        discard_cut_as_is(from_index, commit) <= commit,
-{
-}
-
-pub enum RevertUserAction {
-    RestoreValue,
-    RestoreAbsent,
-    LeaveUntouched,
-}
-
-pub open spec fn revert_user_action_spec(had_pre: bool, pre_absent: bool) -> RevertUserAction {
-    if !had_pre {
-        RevertUserAction::LeaveUntouched
-    } else if pre_absent {
-        RevertUserAction::RestoreAbsent
-    } else {
-        RevertUserAction::RestoreValue
-    }
-}
-
-pub fn revert_user_action(had_pre_record: bool, pre_was_absent: bool) -> (d: RevertUserAction)
-    ensures
-        d == revert_user_action_spec(had_pre_record, pre_was_absent),
-        !had_pre_record ==> d == RevertUserAction::LeaveUntouched,
-{
-    if !had_pre_record {
-        RevertUserAction::LeaveUntouched
-    } else if pre_was_absent {
-        RevertUserAction::RestoreAbsent
-    } else {
-        RevertUserAction::RestoreValue
-    }
-}
-
-pub open spec fn revert_user_action_as_is(_had: bool, _absent: bool) -> RevertUserAction {
-    RevertUserAction::RestoreAbsent
-}
-
-proof fn lemma_as_is_deletes_missing_pre()
-    ensures
-        revert_user_action_spec(false, false) == RevertUserAction::LeaveUntouched,
-        revert_user_action_as_is(false, false) == RevertUserAction::RestoreAbsent,
-{
-}
-
-pub fn should_repair_si_hist(restored: bool, is_reserved: bool) -> (d: bool)
-    ensures
-        d == (restored && !is_reserved),
-{
-    restored && !is_reserved
-}
-
-pub open spec fn should_repair_si_hist_as_is(_r: bool, _res: bool) -> bool {
-    false
-}
-
-proof fn lemma_as_is_skips_hist_repair()
-    ensures
-        should_repair_si_hist_as_is(true, false) == false,
-{
-}
-
-pub fn leftover_txn_is_aborted() -> (d: bool)
-    ensures
-        d,
-{
-    true
-}
-
-pub open spec fn leftover_txn_is_aborted_as_is() -> bool {
-    false
-}
-
-proof fn lemma_as_is_leaves_intents()
-    ensures
-        leftover_txn_is_aborted_as_is() == false,
-{
-}
-
-pub fn next_txn_id_after(max_seen: u64) -> (n: u64)
-    ensures
-        n == (if sat_add1(max_seen) > 1 {
-            sat_add1(max_seen)
-        } else {
-            1
-        }),
-        max_seen < u64::MAX ==> n > max_seen,
-        n >= 1,
-{
-    let s = if max_seen == u64::MAX {
-        max_seen
-    } else {
-        max_seen + 1
-    };
-    if s > 1 {
-        s
-    } else {
-        1
-    }
-}
-
-pub fn recover_si_generation(loaded_max: u64) -> (g: u64)
-    ensures
-        g == loaded_max,
-{
-    loaded_max
-}
-
-pub open spec fn recover_si_generation_as_is(_loaded: u64) -> u64 {
-    0
-}
-
-proof fn lemma_as_is_evaporates_si(loaded: u64)
-    requires
-        loaded > 0,
-    ensures
-        recover_si_generation_as_is(loaded) == 0,
-        recover_si_generation_as_is(loaded) != loaded,
-{
-}
-
-pub fn prepare_error_aborts_earlier() -> (d: bool)
-    ensures
-        d,
-{
-    true
-}
-
-pub open spec fn prepare_error_aborts_earlier_as_is() -> bool {
-    false
-}
-
-proof fn lemma_as_is_skips_prepare_abort()
-    ensures
-        prepare_error_aborts_earlier_as_is() == false,
-{
-}
-
-pub struct SiGenReserve {
-    pub next_current: u64,
-    pub reserved: u64,
-}
-
-pub fn reserve_si_gen(current: u64) -> (r: SiGenReserve)
-    ensures
-        r.next_current == sat_add1(current),
-        r.reserved == r.next_current,
-        current < u64::MAX ==> r.reserved > current,
-{
-    let n = if current == u64::MAX {
-        current
-    } else {
-        current + 1
-    };
-    SiGenReserve {
-        next_current: n,
-        reserved: n,
-    }
-}
-
-pub open spec fn reserve_si_gen_as_is(current: u64) -> (u64, u64) {
-    (current, sat_add1(current))
-}
-
-proof fn lemma_as_is_collides(current: u64)
-    requires
-        current < u64::MAX,
-    ensures
-        reserve_si_gen_as_is(current).0 == current,
-        reserve_si_gen_as_is(current).1 == current + 1,
-        ({
-            let again = reserve_si_gen_as_is(reserve_si_gen_as_is(current).0);
-            again.1 == reserve_si_gen_as_is(current).1
-        }),
-{
-}
-
-pub fn unreserve_si_gen(current: u64, stamped: u64) -> (n: u64)
-    ensures
-        (stamped > 0 && current == stamped) ==> n == (if stamped == 0 {
-            0
-        } else {
-            (stamped - 1) as u64
-        }),
-        !(stamped > 0 && current == stamped) ==> n == current,
-{
-    if stamped > 0 && current == stamped {
-        stamped - 1
-    } else {
-        current
-    }
-}
-
-} // verus!
 
 /// What a raft `TxnCommit` apply must do (F47).
-#[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TxnCommitAction {
     /// Status is abort — restore preimage, keep fence.
@@ -319,7 +23,6 @@ pub enum TxnCommitAction {
 }
 
 /// F47: fenced abort never materialises user keys.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn txn_commit_action(status_is_abort: bool) -> TxnCommitAction {
     if status_is_abort {
@@ -330,7 +33,6 @@ pub fn txn_commit_action(status_is_abort: bool) -> TxnCommitAction {
 }
 
 /// AS-IS F47: ignore abort fence (heal/elect installs the aborted TX).
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn txn_commit_action_as_is(_status_is_abort: bool) -> TxnCommitAction {
     TxnCommitAction::Materialise
@@ -355,35 +57,30 @@ mod three_teeth {
 ///
 /// F47: if the status was abort, keep the fence so a later `TxnCommit` replay
 /// still sees abort.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn revert_clears_status(status_is_abort: bool, pairs_empty: bool) -> bool {
     pairs_empty && !status_is_abort
 }
 
 /// AS-IS: revert always drops status when pairs are gone (fence evaporates).
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn revert_clears_status_as_is(_status_is_abort: bool, pairs_empty: bool) -> bool {
     pairs_empty
 }
 
 /// Lowest index that may be discarded (never at or below commit).
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn discard_cut(from_index: u64, commit: u64) -> u64 {
     from_index.max(commit.saturating_add(1))
 }
 
 /// AS-IS: cut at `from_index` even if that is committed.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn discard_cut_as_is(from_index: u64, _commit: u64) -> u64 {
     from_index
 }
 
 /// How to restore one user key from the prepare-time preimage (F34).
-#[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RevertUserAction {
     /// Preimage was `Some(v)` — put `v` back.
@@ -395,7 +92,6 @@ pub enum RevertUserAction {
 }
 
 /// F34: restore preimage; never blind-delete; missing record is not "absent".
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn revert_user_action(had_pre_record: bool, pre_was_absent: bool) -> RevertUserAction {
     if !had_pre_record {
@@ -408,84 +104,72 @@ pub fn revert_user_action(had_pre_record: bool, pre_was_absent: bool) -> RevertU
 }
 
 /// AS-IS F34: always delete the user key.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn revert_user_action_as_is(_had_pre_record: bool, _pre_was_absent: bool) -> RevertUserAction {
     RevertUserAction::RestoreAbsent
 }
 
 /// F52: rewrite SI hist tip after a successful Pedra restore (not reserved keys).
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn should_repair_si_hist(restored: bool, is_reserved: bool) -> bool {
     restored && !is_reserved
 }
 
 /// AS-IS F52: never touch hist (SI / Pedra split after reopen).
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn should_repair_si_hist_as_is(_restored: bool, _is_reserved: bool) -> bool {
     false
 }
 
 /// F35: leftover prepared TX after crash is aborted (no coordinator log).
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn leftover_txn_is_aborted() -> bool {
     true
 }
 
 /// AS-IS F35: leave intents live (immortal Conflict + id reuse).
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn leftover_txn_is_aborted_as_is() -> bool {
     false
 }
 
 /// F35: never reuse a txn id still on disk / in the durable counter.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn next_txn_id_after(max_seen: u64) -> u64 {
     max_seen.saturating_add(1).max(1)
 }
 
 /// AS-IS F35: always restart the counter at 1.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn next_txn_id_as_is(_max_seen: u64) -> u64 {
     1
 }
 
 /// F36: SI generation / watermark come from durable max, not RAM 0.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn recover_si_generation(loaded_max: u64) -> u64 {
     loaded_max
 }
 
 /// AS-IS F36: generation evaporates on reopen.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn recover_si_generation_as_is(_loaded_max: u64) -> u64 {
     0
 }
 
 /// F50: a failed prepare step must abort already-durable intents on earlier ranges.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn prepare_error_aborts_earlier() -> bool {
     true
 }
 
 /// AS-IS F50: `?` on NotLeader returns without cleanup (immortal Conflict).
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn prepare_error_aborts_earlier_as_is() -> bool {
     false
 }
 
 /// Result of reserving one SI generation (F49).
-#[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SiGenReserve {
     /// New `commit_generation` after the reserve.
@@ -495,7 +179,6 @@ pub struct SiGenReserve {
 }
 
 /// F49: advance the counter **and** return that value (distinct outstanding gens).
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn reserve_si_gen(current: u64) -> SiGenReserve {
     let n = current.saturating_add(1);
@@ -506,7 +189,6 @@ pub fn reserve_si_gen(current: u64) -> SiGenReserve {
 }
 
 /// AS-IS F49: compute `current+1` but leave the counter unmoved (collision).
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn reserve_si_gen_as_is(current: u64) -> SiGenReserve {
     SiGenReserve {
@@ -516,7 +198,6 @@ pub fn reserve_si_gen_as_is(current: u64) -> SiGenReserve {
 }
 
 /// Undo a reserve only if nothing else reserved after us (propose failed).
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn unreserve_si_gen(current: u64, stamped: u64) -> u64 {
     if stamped > 0 && current == stamped {
