@@ -1972,7 +1972,9 @@ impl<E: Env> ConcurrentDb<E> {
     /// returns (RFC-0041: last-submit idle started compact in apply gaps).
     #[must_use]
     pub fn writes_idle_for(&self, idle: Duration) -> bool {
-        if self.writes.active.load(Ordering::Relaxed) > 0 {
+        if !crate::write_admission_kernel::batch_is_empty(
+            self.writes.active.load(Ordering::Relaxed) as u64,
+        ) {
             return false;
         }
         if crate::flush_kernel::occ_snap_uses_published(
