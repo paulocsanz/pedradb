@@ -343,7 +343,8 @@ impl Transaction {
     /// Whether no writes staged.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.ops.is_empty() && self.clears.is_empty()
+        pedradb_core::write_admission_kernel::batch_is_empty(self.ops.len() as u64)
+            && pedradb_core::write_admission_kernel::batch_is_empty(self.clears.len() as u64)
     }
 
     /// Snapshot read (tracks OCC read-set). Own write-set wins.
