@@ -2,7 +2,10 @@
 //!
 //! Work per point get after settle is [`point_get_probes`] = levels + L0
 //! covering files, not the live file count. Clock is [`predict_get_ns`]
-//! (hot fraction × noisy-neighbor tax). Twin: `verus/scale.rs`.
+//! (hot fraction × noisy-neighbor tax). Single artifact (Aeneas-paid):
+//! this file is what `rustc` links and what the Lean defs run over
+//! (`scripts/aeneas_scale.sh`, `ScaleKernel.lean`). No Verus twin stands
+//! in for them.
 
 #![forbid(unsafe_code)]
 

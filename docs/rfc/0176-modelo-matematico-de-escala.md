@@ -99,7 +99,7 @@ Hot ⇔ \(S \le \mathrm{cap}(R)\), \(\mathrm{cap}(R)=\min(\max(3\,\mathrm{GiB},3
 
 - dentes no kernel (`scale_probes`, `scale_warm`, `scale_probes_worst`,
   `scale_predict`, `scale_happy_hot` no `catalog.json`)
-- Verus `scripts/verus_scale.sh` **10 verified / 0 errors**
+- Verus: `verus/scale.rs` deletado 2026-09-09 — os 6 pares são single-artifact pagos pelo extrato Aeneas do corpo rustc (`ScaleKernel.lean` sem sorry)
 - example `scale_spectrum`: quiet vs noisy (bloqueado neste host)
 - Aeneas P2.1: `scripts/aeneas_scale.sh` → `SOURCE.scale`;
   `lake build Scale` verde (`point_get_probes_as_is_is_n_files` ∀).
@@ -134,7 +134,7 @@ Hot ⇔ \(S \le \mathrm{cap}(R)\), \(\mathrm{cap}(R)=\min(\max(3\,\mathrm{GiB},3
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | RFC + status | done | este ficheiro | 2026-09-07 |
 | P0.2 | p0 | kernel P + cap | done | `scale_kernel.rs` | 2026-09-07 |
-| P0.3 | p0 | Verus | done | `verus/scale.rs` 10/0 | 2026-09-07 |
+| P0.3 | p0 | Verus | done | `verus/scale.rs` 10/0; 2026-09-09: mirror deletada, 6 pares aeneas-paid | 2026-09-07 |
 | P1.1 | p1 | espectro + noisy + bench | done | `scale_spectrum` | 2026-09-07 |
 | P1.2 | p1 | CLI | done | `pedra scale-model` → `scale_forecast` | 2026-09-07 |
 | P2.1 | p2 | Aeneas extract + Lean as_is | done | `aeneas_scale.sh` / `Scale.lean` | 2026-09-07 |
