@@ -1288,7 +1288,7 @@ impl<S: CompactSource> CompactSource for GcMergeSource<S> {
                     self.run.push((ikey, value));
                 }
                 None => {
-                    if self.run.is_empty() {
+                    if crate::write_admission_kernel::batch_is_empty(self.run.len() as u64) {
                         return Ok(None);
                     }
                     self.close_run();
