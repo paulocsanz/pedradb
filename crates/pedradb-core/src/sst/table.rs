@@ -1316,7 +1316,7 @@ impl SstTable {
             entries.push((ikey, value));
         }
         let file_max = c.read_u64()?;
-        if n > 0 {
+        if !crate::write_admission_kernel::batch_is_empty(n as u64) {
             max_sequence = max_sequence.max(file_max);
         } else {
             max_sequence = file_max;
