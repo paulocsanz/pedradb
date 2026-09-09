@@ -6288,8 +6288,9 @@
       "id": "len_tag",
       "finding": "F80",
       "twin_kind": "close",
+        "single_artifact": true,
       "kernel": "crates/pedradb-store/src/index_val_kernel.rs",
-      "twin": "crates/pedradb-store/verus/index_val.rs",
+      "twin": "crates/pedradb-store/src/index_val_kernel.rs",
       "aeneas": "scripts/aeneas_index_val.sh",
       "callers": [
         "crates/pedradb-store/src/index_val_kernel.rs"
@@ -6306,9 +6307,10 @@
       "id": "exact_children",
       "finding": "F78/F80",
       "twin_kind": "close",
+        "single_artifact": true,
       "atom": "value_len_tag",
       "kernel": "crates/pedradb-store/src/index_val_kernel.rs",
-      "twin": "crates/pedradb-store/verus/index_val.rs",
+      "twin": "crates/pedradb-store/src/index_val_kernel.rs",
       "aeneas": "scripts/aeneas_index_val.sh",
       "callers": [
         "crates/pedradb-store/src/index_val_kernel.rs",
