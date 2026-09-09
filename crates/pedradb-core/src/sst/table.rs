@@ -615,7 +615,11 @@ impl SstTable {
                             &mut scratch.plain,
                             &self.path,
                         )? {
-                            if best.as_ref().is_none_or(|(s, _)| found.0 > *s) {
+                            if crate::lookup_kernel::prefer_newer_seq(
+                                best.is_some(),
+                                found.0,
+                                best.as_ref().map(|(s, _)| *s).unwrap_or(0),
+                            ) {
                                 best = Some(found);
                             }
                         }
@@ -642,7 +646,11 @@ impl SstTable {
                             )?;
                             w.mark_verified(bi, self.index.len());
                             if let Some(found) = found {
-                                if best.as_ref().is_none_or(|(s, _)| found.0 > *s) {
+                                if crate::lookup_kernel::prefer_newer_seq(
+                                best.is_some(),
+                                found.0,
+                                best.as_ref().map(|(s, _)| *s).unwrap_or(0),
+                            ) {
                                     best = Some(found);
                                 }
                             }
@@ -672,7 +680,11 @@ impl SstTable {
                             &mut scratch.plain,
                             &self.path,
                         )? {
-                            if best.as_ref().is_none_or(|(s, _)| found.0 > *s) {
+                            if crate::lookup_kernel::prefer_newer_seq(
+                                best.is_some(),
+                                found.0,
+                                best.as_ref().map(|(s, _)| *s).unwrap_or(0),
+                            ) {
                                 best = Some(found);
                             }
                         }
@@ -697,7 +709,11 @@ impl SstTable {
                             .insert(cache_key, Arc::from(scratch.raw.as_slice()));
                     });
                     if let Some(found) = found {
-                        if best.as_ref().is_none_or(|(s, _)| found.0 > *s) {
+                        if crate::lookup_kernel::prefer_newer_seq(
+                                best.is_some(),
+                                found.0,
+                                best.as_ref().map(|(s, _)| *s).unwrap_or(0),
+                            ) {
                             best = Some(found);
                         }
                     }
@@ -883,7 +899,11 @@ impl SstTable {
                 continue;
             };
             if let Some((seq, look)) = Self::best_point_in_entry_slice(&block, user_key, snapshot) {
-                if best.as_ref().is_none_or(|(s, _)| seq > *s) {
+                if crate::lookup_kernel::prefer_newer_seq(
+                    best.is_some(),
+                    seq,
+                    best.as_ref().map(|(s, _)| *s).unwrap_or(0),
+                ) {
                     best = Some((seq, look));
                 }
             }
@@ -2184,7 +2204,11 @@ fn seek_point_in_plain_block(
                 let (sequence, kind) =
                     crate::key::unpack_sequence_and_type(u64::from_be_bytes(trailer))?;
                 if kind != ValueType::RangeDeletion && sequence <= snapshot {
-                    if best.as_ref().is_none_or(|(s, _)| sequence > *s) {
+                    if crate::lookup_kernel::prefer_newer_seq(
+                        best.is_some(),
+                        sequence,
+                        best.as_ref().map(|(s, _)| *s).unwrap_or(0),
+                    ) {
                         let look = match kind {
                             ValueType::Deletion => Lookup::Deleted,
                             ValueType::Value => {
@@ -3222,6 +3246,15 @@ mod tests {
         assert!(
             !body.contains("is_none_or"),
             "newest-wins if must not stay inline in best_point_in_entry_slice"
+        );
+        let needle = concat!("is_none_or(|", "(s, _)|");
+        assert!(
+            !src.contains(needle),
+            "SST point newest-wins ifs must call prefer_newer_seq"
+        );
+        assert!(
+            src.matches("prefer_newer_seq(").count() >= 7,
+            "helper + block-merge newest-wins sites"
         );
     }
 
