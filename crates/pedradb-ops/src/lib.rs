@@ -1802,6 +1802,72 @@ mod tests {
         .unwrap()
     }
 
+    /// RFC-0179 P1.4: history restore below the hard floor is DiskPressure;
+    /// dest is not created (admit before `create_dir_all`).
+    #[test]
+    fn restore_history_under_hard_floor_does_not_create_dest() {
+        use pedradb_core::{HistoryHorizon, HistoryOptions};
+        let data = temp();
+        let remote = temp();
+        let dest = temp();
+        let available = std::sync::Arc::new(AtomicU64::new(u64::MAX));
+        let env = SpaceEnv {
+            available: std::sync::Arc::clone(&available),
+        };
+        {
+            let mut db = Db::open_with_env(
+                &data,
+                OpenOptions {
+                    wal_full_fsync: true,
+                    history: HistoryOptions {
+                        horizon: HistoryHorizon::Window(std::time::Duration::from_millis(1)),
+                        cap_bytes: 1 << 30,
+                    },
+                    wal_recovery: Default::default(),
+                    sync: true,
+                    auto_flush_bytes: None,
+                    auto_compact_sst_count: Some(1),
+                    auto_compact_sst_bytes: None,
+                    exclusive: true,
+                    large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
+                },
+                env.clone(),
+            )
+            .unwrap();
+            db.set_remote_history(env.clone(), &remote);
+            for i in 0..40u32 {
+                db.put(b"k", format!("v{i:02}").as_bytes()).unwrap();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(3));
+            db.flush().unwrap();
+            let uploaded = db.upload_history_now().unwrap();
+            assert!(
+                uploaded.segments_uploaded + uploaded.segments_already_present >= 1,
+                "aging + archive must produce a remote segment (uploaded={uploaded:?})"
+            );
+            db.close().unwrap();
+        }
+        available.store(1024, Ordering::SeqCst);
+        let err = restore_history_from_remote(&env, &remote, &dest, None);
+        assert!(
+            matches!(
+                err,
+                Err(OpsError::Core(CoreError::DiskPressure {
+                    available: 1024,
+                    need: pedradb_core::DISK_HARD_FREE_BYTES,
+                }))
+            ),
+            "expected DiskPressure, got {err:?}"
+        );
+        assert!(
+            !dest.exists(),
+            "refused history restore must not create dest"
+        );
+        let _ = std::fs::remove_dir_all(&data);
+        let _ = std::fs::remove_dir_all(&remote);
+    }
+
     /// RFC-0179 P1: PITR restore below the hard floor is DiskPressure; dest
     /// is not a half-copied DB.
     #[test]

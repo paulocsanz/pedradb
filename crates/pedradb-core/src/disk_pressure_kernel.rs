@@ -283,6 +283,15 @@ mod tests {
             ckpt.contains("admit_disk_write("),
             "create_checkpoint must admit before copy"
         );
+        let hist = include_str!("../../pedradb-ops/src/lib.rs")
+            .split("pub fn restore_history_from_remote")
+            .nth(1)
+            .and_then(|s| s.split("\nfn write_warch").next())
+            .expect("restore_history_from_remote");
+        assert!(
+            hist.contains("admit_disk_write("),
+            "restore_history_from_remote must admit before writing dest"
+        );
     }
 
     #[test]

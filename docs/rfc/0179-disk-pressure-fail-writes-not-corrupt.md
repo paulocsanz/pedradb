@@ -123,6 +123,8 @@ admitido (não há compact); só o hard recusa.
   - `ship_wal_under_hard_floor_is_disk_pressure`: watermark inalterado, 0 warch.
   - `replica_append_under_hard_floor_is_disk_pressure`: WAL não cresce.
   - `catch_up_under_hard_floor_does_not_skip_cursor`: offset igual.
+  - `failing_env_probe_err_does_not_refuse_put`: probe Err → unknown → put Ok.
+  - `restore_history_under_hard_floor_does_not_create_dest`: dest ausente.
 - **Telemetry / Analytics:** `tracing::warn!` na transição (não cada put).
   Sonda 0169 é P1.3.
 - **Documentation:** este RFC; linha em `docs/status.md`. Não reescreve
