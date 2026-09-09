@@ -582,7 +582,8 @@ impl BlockCache {
     fn needs_room(g: &BlockCacheInner, extra: u64) -> bool {
         let count_full = g.capacity > 0 && g.map.len() >= g.capacity;
         let bytes_full = g.budget_bytes > 0 && g.used_bytes.saturating_add(extra) > g.budget_bytes;
-        (count_full || bytes_full) && !g.map.is_empty()
+        (count_full || bytes_full)
+            && !crate::write_admission_kernel::batch_is_empty(g.map.len() as u64)
     }
 
     /// O(1)-amortized LRU evict: pop queue entries until one's epoch still
