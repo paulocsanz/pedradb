@@ -245,6 +245,12 @@ mod tests {
             !body.contains("batch_is_empty("),
             "count_in_range must not wrap seq==0 onto batch_is_empty"
         );
+        let last = named_fn_src(include_str!("db.rs"), "last_under_prefix")
+            .expect("last_under_prefix");
+        assert!(
+            last.contains("snap_is_empty("),
+            "last_under_prefix must match snap_is_empty"
+        );
     }
 
     #[test]
