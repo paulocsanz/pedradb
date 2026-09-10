@@ -45,7 +45,7 @@
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | allow_direct_rpc kernel + AS-IS + catalog | done | rpc_mode_kernel.rs | 2026-08-27 |
+| P0.1 | p0 | allow_direct_rpc kernel + AS-IS + catalog | done | rpc_mode_kernel.rs | 2026-08-27 (twin `verus/rpc_mode.rs` deletado 2026-09-09 — fire 788: par single-artifact via `aeneas_rpc_mode.sh`, órfão pós-pagamento) |
 | P0.2 | p0 | pin_dst_queued; World::run pins | done | set_rpc_mode + World::run | 2026-08-27 |
 | P0.3 | p0 | pinned Direct tooth | done | pin_dst_queued_refuses_direct_switch | 2026-08-27 |
 | P1.1 | p1 | World Action Direct-after-pin | done | world_attempt_direct_after_pin_stays_queued | 2026-08-27 |
