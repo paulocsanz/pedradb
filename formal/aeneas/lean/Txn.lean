@@ -125,3 +125,20 @@ theorem revert_user_action_as_is_dente :
       = ok RevertUserAction.RestoreAbsent := by
   unfold revert_user_action_as_is
   rfl
+
+/-- Catalog entry: commit of an aborted txn reverts — forall over the
+    status (F47: the abort fence always wins, never materialises). -/
+theorem txn_commit_action_reverts_iff_abort :
+    ∀ (status_is_abort : Bool),
+      (txn_commit_action status_is_abort
+          = ok TxnCommitAction.Revert)
+        ↔ (status_is_abort = true) := by
+  intro status_is_abort
+  unfold txn_commit_action
+  constructor
+  · intro h
+    split at h
+    · next c1 => exact c1
+    · next c1 => exact absurd h (by simp)
+  · intro hd
+    rw [if_pos hd]

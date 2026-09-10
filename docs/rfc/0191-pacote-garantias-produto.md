@@ -243,7 +243,7 @@ contagens movem no mesmo commit; `lock_interleavings_admitted` e
 | P1.6 | p1 | Gates Lean/depth/product verdes em cada promoção | todo | — | 2026-09-10 |
 | P2.1 | p2 | Inv-WAL preservação (um passo) | done | `wal_append_preserves_inv_wal` + corolário `d1_plan_append_preserves_inv_wal` WalState.lean | 2026-09-10 |
 | P2.2 | p2 | Inv-LSM `visible_at` ∘ probe-order (um passo) | done | `inv_lsm_newest_first_never_non_live` + corolário `r1_get_never_returns_non_live` Merge.lean (R1 segue atom) | 2026-09-10 |
-| P2.3 | p2 | Alvo trampolim cap≤100 / floor_atom≥8 | doing | 4/29 caps pagos (126; P1.5 `si_hist_repair`, P2.3-2 `apply_put_plan`, P2.3-3 `hist_load_fate`, P2.3-4 `revert_user_action` — revert restaura o valor de prepare só com pré-imagem presente; registro ausente não é ausência), atoms 5/8 | 2026-09-10 |
+| P2.3 | p2 | Alvo trampolim cap≤100 / floor_atom≥8 | doing | 5/29 caps pagos (125; P1.5 `si_hist_repair`, P2.3-2 `apply_put_plan`, P2.3-3 `hist_load_fate`, P2.3-4 `revert_user_action`, P2.3-5 `txn` — commit de txn abortado sempre reverta, nunca materializa), atoms 6/8 | 2026-09-10 |
 | P2.4 | p2 | Herdados 0187 (L28 / TCG / N=4) | todo | — | 2026-09-10 |
 
 ## Acceptance Criteria

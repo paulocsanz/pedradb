@@ -18,3 +18,4 @@ atom	catalog:si_hist_repair	si_hist_repair_plan_leave_iff_floor_or_match	formal/
 atom	catalog:apply_put_plan	apply_put_plan_hist_iff_live_and_gen_positive	formal/aeneas/lean/StoreApply.lean	apply_put_plan
 atom	catalog:hist_load_fate	hist_load_fate_merge_new_iff_decoded_and_not_below	formal/aeneas/lean/Txn.lean	hist_load_fate
 atom	catalog:revert_user_action	revert_user_action_restore_value_iff_record_and_present	formal/aeneas/lean/Txn.lean	revert_user_action
+atom	catalog:txn	txn_commit_action_reverts_iff_abort	formal/aeneas/lean/Txn.lean	txn_commit_action
