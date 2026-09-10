@@ -4205,9 +4205,10 @@
       "id": "fdatasync_rc",
       "finding": "RFC-0073",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-posix/src/lib.rs",
-      "twin": "crates/pedradb-posix/verus/fdatasync_rc.rs",
-      "verus": "scripts/verus_fdatasync_rc.sh",
+      "twin": "crates/pedradb-posix/src/lib.rs",
+      "aeneas": "scripts/aeneas_posix.sh",
       "callers": [
         "crates/pedradb-posix/src/lib.rs"
       ],

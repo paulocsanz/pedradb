@@ -37,7 +37,7 @@
 - [x] **P1.2** Miri test of `fdatasync_rc_ok` (safe fn) in `miri-unsafe-islands.sh` — status: `done` (`fdatasync_rc_ok_is_safe_predicate`)
 
 ### P2 — later
-- [x] **P2.1** Catalog pair + Verus twin — status: `done` (`verus/fdatasync_rc.rs` + catalog `fdatasync_rc`)
+- [x] **P2.1** Catalog pair + Verus twin — status: `done` (`verus/fdatasync_rc.rs` + catalog `fdatasync_rc`; mirror + runner deletados 2026-09-09 — fire 780: single-artifact via `aeneas_posix.sh` extract de `lib.rs` (`fdatasync_rc_ok`/`_as_is` no `PosixKernel.lean`, 0 sorry; SOURCE = git HEAD — lib.rs é dirty da sessão de performance))
 - [x] **P2.2** EINTR retry policy named (RFC-0015 H1) — status: `done` (`fdatasync_eintr_retry_admitted`; `fdatasync_eintr_is_not_retried_as_ok`)
 
 ## Status (living — update with every PR)
