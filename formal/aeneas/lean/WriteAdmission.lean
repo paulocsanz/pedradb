@@ -73,6 +73,23 @@ theorem wal_commit_plan_as_is_dente :
   unfold wal_commit_plan_as_is
   rfl
 
+/-- RFC-0191 P1.2 D1-script: the whole Bool×Bool space of the plan rustc
+links (`commit_ops_with` matches it). Required sync that succeeded is
+Sync before Apply/Ok; required sync that failed is Fence (never
+Apply/Ok); no required sync is Apply/Ok without Sync. Concrete
+`wal_commit_plan true false` does **not** pay this — the binder covers
+the space. -/
+theorem d1_wal_commit_plan :
+    ∀ (need_sync sync_fail : Bool),
+      wal_commit_plan need_sync sync_fail
+        = ok (if need_sync then
+                (if sync_fail then WalCommitPlan.AppendSyncFence
+                 else WalCommitPlan.AppendSyncApplyOk)
+              else WalCommitPlan.AppendApplyOk) := by
+  intro need_sync sync_fail
+  unfold wal_commit_plan fence_on_sync_fail
+  cases need_sync <;> cases sync_fail <;> rfl
+
 /-- `put_if_absent`: no live key ⇒ put. -/
 theorem cas_absent_put_empty_puts :
     cas_absent_put false = ok true := by

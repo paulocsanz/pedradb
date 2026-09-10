@@ -11,8 +11,11 @@
 #   entry       the rustc-linked kernel fn the row is about.
 # floor_promoted N pins the minimum number of atom|close rows. Freeze
 # day-1: R1=atom (visible_at_deletion_never_live), D1/T1/C1=model → N=1.
-floor_promoted 1
-D1	model	catalog:d1_modelo	-	-	d1_modelo
+# P1.2: D1=close (`d1_wal_commit_plan` ∀ Bool×Bool of wal_commit_plan) → N=2.
+# Depth-floor close stays 1 pair (merge_sift): registering this already-
+# extracted pair as close would drop proof_depth.extract below floor 276.
+floor_promoted 2
+D1	close	catalog:wal_commit_plan	d1_wal_commit_plan	formal/aeneas/lean/WriteAdmission.lean	wal_commit_plan
 R1	atom	catalog:visible_at	r1_get_atom	formal/aeneas/lean/Merge.lean	visible_at
 T1	model	catalog:leftover_txn_is_aborted	-	-	leftover_txn_is_aborted
 C1	model	catalog:joint_election	-	-	joint_election_ok

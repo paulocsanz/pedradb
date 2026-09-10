@@ -35,7 +35,7 @@ Quatro frases sobre o fn que o rustc liga. Camada só sobe
 | Frase | Camada | Artefato | Piso nomeado (o que NÃO é) |
 |---|---|---|---|
 | R1-deleção + value: `Deletion` nunca live; `Value` live iff not hidden; ∀ `range_hidden` | atom | `catalog:visible_at` teorema `r1_get_atom` (`Merge.lean`, unfold `visible_at` nos dois braços) | Não é o `get` inteiro; o átomo no path de get. RangeDeletion arm fica no kernel. |
-| D1-script: `need_sync ⇒ Sync` antes de Apply/Ok | model | `catalog:d1_modelo` | Modelo WAL; close é P1.2 ∀ Bool da plan fn (`wal_commit_plan`) |
+| D1-script: `need_sync ⇒ Sync` antes de Apply/Ok; sync fail ⇒ Fence | close | `catalog:wal_commit_plan` teorema `d1_wal_commit_plan` (`WriteAdmission.lean`, ∀ Bool×Bool, unfold `wal_commit_plan`) | Não é prova de `fdatasync`/disco (0078). Close de produto, não segundo close de catálogo (`merge_sift` continua o único registado). |
 | T1-leftover: leftover aborta, nunca materializa | model | `catalog:leftover_txn_is_aborted` | Fn constante hoje (`leftover_txn_is_aborted_true` sem ∀); atom é P1.3 |
 | C1-joint: eleição joint exige as duas maiorias | model | `catalog:joint_election` | Inputs concretos hoje; close é P1.4 ∀ contagens |
 

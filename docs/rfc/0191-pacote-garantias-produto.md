@@ -156,11 +156,14 @@ contagens movem no mesmo commit; `lock_interleavings_admitted` e
   não é o sujeito — o átomo é) — status: `done` (`r1_get_atom` unfold
   ambos os braços; TSV R1 aponta para ele; atom de catálogo continua 1
   par `visible_at`)
-- [ ] **P1.2** D1-script `model→close`: teorema `∀ (need_sync sync_fail :
+- [x] **P1.2** D1-script `model→close`: teorema `∀ (need_sync sync_fail :
   Bool)` sobre `wal_commit_plan` (espaço inteiro da plan fn, não o par
   concreto `true false`); `commit_ops_with` continua a matchear; as-is
   Apply/Ok-antes-do-Sync; linha D1 → `close` no mesmo commit —
-  status: `todo`
+  status: `done` (`d1_wal_commit_plan` ∀ Bool×Bool, unfold `wal_commit_plan`
+  + `fence_on_sync_fail`; TSV D1=`close` `catalog:wal_commit_plan`; close
+  de catálogo continua 1 par `merge_sift` — registrar o par já extraído
+  desceria `extract` abaixo do floor 276)
 - [ ] **P1.3** T1-leftover `model→atom`: a fn constante
   `leftover_txn_is_aborted` **não** conta; puxar o `if` de leftover do
   recover para kernel `leftover_fate(status)`; teorema `∀ status`;
@@ -206,7 +209,7 @@ contagens movem no mesmo commit; `lock_interleavings_admitted` e
 | P0.2 | p0 | Corolário R1-deleção (∀, unfold `visible_at`) | done | `r1_deletion_never_live` Merge.lean | 2026-09-10 |
 | P0.3 | p0 | Ledger garantias de produto | done | tabela em `verification-ledger.md` + ponteiros catalog | 2026-09-10 |
 | P1.1 | p1 | R1-value (∀ `range_hidden`, ambos os braços) | done | `r1_get_atom` + `visible_at_value_live_iff_not_hidden` registado | 2026-09-10 |
-| P1.2 | p1 | D1-script `model→close` (∀ Bool da plan fn) | todo | — | 2026-09-10 |
+| P1.2 | p1 | D1-script `model→close` (∀ Bool da plan fn) | done | `d1_wal_commit_plan` WriteAdmission.lean; TSV D1=close | 2026-09-10 |
 | P1.3 | p1 | T1-leftover `model→atom` (fn deixa de ser constante) | todo | — | 2026-09-10 |
 | P1.4 | p1 | C1-joint `model→close` (∀ contagens) | todo | — | 2026-09-10 |
 | P1.5 | p1 | Um `if` do trampolim, cap 130→129 | todo | — | 2026-09-10 |
