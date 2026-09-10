@@ -31,11 +31,25 @@ pub fn path_after_authority(rest: &str) -> &str {
     rest.find('/').map(|i| &rest[i..]).unwrap_or("/")
 }
 
+/// AS-IS F91: the authority text stays in the path (absolute-form never lands on `/kv/…`).
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn path_after_authority_as_is(rest: &str) -> &str {
+    rest
+}
+
 /// Strip `http(s)://authority` (scheme case-insensitive — RFC 9110 / F145).
 #[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn strip_http_authority(target: &str) -> Option<&str> {
     strip_http_authority_rest(target).map(path_after_authority)
+}
+
+/// AS-IS F91/F145: the scheme prefix is never recognized — `http://h/kv/x` routes nowhere.
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn strip_http_authority_as_is(_target: &str) -> Option<&str> {
+    None
 }
 
 /// Authority of an absolute-form or network-path target (`host[:port]`).
@@ -55,6 +69,14 @@ pub fn request_target_authority(target: &str) -> Option<&str> {
     } else {
         Some(auth)
     }
+}
+
+/// AS-IS F161: the authority is never extracted — absolute-form targets are
+/// not inspected, so Host/target disagreement cannot be detected.
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn request_target_authority_as_is(_target: &str) -> Option<&str> {
+    None
 }
 
 #[cfg(not(verus_keep_ghost))]
@@ -100,6 +122,14 @@ pub fn split_host_port(raw: &str) -> (&str, Option<&str>) {
         }
     }
     (s, None)
+}
+
+/// AS-IS F162: the authority atoms (`userinfo@`, `[v6]`, numeric port) are never
+/// separated — the raw string is the host and the port is invisible.
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn split_host_port_as_is(raw: &str) -> (&str, Option<&str>) {
+    (raw, None)
 }
 
 #[cfg(not(verus_keep_ghost))]
@@ -225,5 +255,39 @@ mod tests {
         assert!(strip_authority_for_routing(true));
         assert!(!strip_authority_for_routing(false));
         assert!(!strip_authority_for_routing_as_is(true));
+    }
+
+    /// Three teeth (F91/F145/F161/F162): FIXED and AS-IS part ways on every
+    /// authority atom — scheme recognition, first-`/` after authority, and
+    /// userinfo/`[v6]`/port splitting.
+    #[test]
+    fn authority_atoms_discriminate_as_is() {
+        // path_after_authority (F91): FIXED drops the authority text before `/`.
+        assert_eq!(path_after_authority("h/kv/x"), "/kv/x");
+        assert_eq!(path_after_authority_as_is("h/kv/x"), "h/kv/x");
+        assert_eq!(path_after_authority("only-host"), "/");
+        assert_eq!(path_after_authority_as_is("only-host"), "only-host");
+
+        // strip_http_authority (F91/F145): FIXED folds scheme case.
+        assert_eq!(strip_http_authority("HTTP://H/kv/x"), Some("/kv/x"));
+        assert_eq!(strip_http_authority("https://h/kv/x"), Some("/kv/x"));
+        assert_eq!(strip_http_authority_as_is("HTTP://H/kv/x"), None);
+        assert_eq!(strip_http_authority_as_is("http://h/kv/x"), None);
+
+        // split_host_port (F162): FIXED splits userinfo@, `[v6]`, numeric port.
+        assert_eq!(split_host_port("user:p@h:80"), ("h", Some("80")));
+        assert_eq!(split_host_port_as_is("user:p@h:80"), ("user:p@h:80", None));
+        assert_eq!(split_host_port("[::1]:80"), ("[::1]", Some("80")));
+        assert_eq!(split_host_port_as_is("[::1]:80"), ("[::1]:80", None));
+
+        // request_target_authority (F161): FIXED extracts, AS-IS is blind.
+        assert_eq!(
+            request_target_authority("http://evil.example/kv/x"),
+            Some("evil.example")
+        );
+        assert_eq!(
+            request_target_authority_as_is("http://evil.example/kv/x"),
+            None
+        );
     }
 }

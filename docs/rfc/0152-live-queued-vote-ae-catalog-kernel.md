@@ -174,7 +174,7 @@
 | P2.2.11 | p2 | three-teeth on content_length keep body | done | `keep_body_without_cl_on_live_http_is_not_ok` | 2026-08-29 |
 | P2.2.12 | p2 | three-teeth on fail_closed writes 400 | done | `parse_error_writes_status_on_live_http_is_not_ok` | 2026-08-29 |
 | P2.2.13 | p2 | three-teeth on form_plus + is space | done | `form_decode_on_live_http_is_not_ok`; 2026-09-09: mirror `verus/form_plus.rs` deletada, 7 pares pagos pelo extrato Aeneas (`aeneas_form.sh`) | 2026-08-29 |
-| P2.2.14 | p2 | three-teeth on origin_path absolute-form | done | `origin_form_path_on_live_http_is_not_ok`; 2026-09-09: mirror `verus/origin_path.rs` deletada, 8 pares pagos pelo extrato Aeneas (`aeneas_path.sh`) | 2026-08-29 |
+| P2.2.14 | p2 | three-teeth on origin_path absolute-form | done | `origin_form_path_on_live_http_is_not_ok`; 2026-09-09: mirror `verus/origin_path.rs` deletada, 8 pares pagos pelo extrato Aeneas (`aeneas_path.sh`); 2026-09-09 (fire 790): dentes que faltavam no kernel — 4 as_is (`path_after_authority_as_is`, `strip_http_authority_as_is`, `request_target_authority_as_is`, `split_host_port_as_is`) + teste `authority_atoms_discriminate_as_is` (scheme case-fold, first-`/` após authority, userinfo/`[v6]`/porta); re-extract stamp `4457893b`, `PathKernel.lean` 0 sorry; formal 179→172 | 2026-08-29 |
 | P2.2.15 | p2 | three-teeth on isolated sibling id | done | `isolated_id_matches_on_live_fold_is_not_ok` | 2026-08-29 |
 | P2.2.16 | p2 | three-teeth on children packed end | done | `packed_children_end_on_live_subspace_is_not_ok` | 2026-08-29 |
 | P2.2.17 | p2 | three-teeth on fields NUL zip | done | `encode_fields_on_live_directory_is_not_ok` | 2026-08-29 |

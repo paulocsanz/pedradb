@@ -27,11 +27,15 @@ echo "      charon=$CHARON"
     --start-from-if-exists 'crate::origin_form_path' \
     --start-from-if-exists 'crate::origin_form_path_as_is' \
     --start-from-if-exists 'crate::path_after_authority' \
+    --start-from-if-exists 'crate::path_after_authority_as_is' \
     --start-from-if-exists 'crate::strip_http_authority' \
+    --start-from-if-exists 'crate::strip_http_authority_as_is' \
     --start-from-if-exists 'crate::request_target_authority' \
+    --start-from-if-exists 'crate::request_target_authority_as_is' \
     --start-from-if-exists 'crate::host_authority_mismatch' \
     --start-from-if-exists 'crate::host_authority_mismatch_as_is' \
     --start-from-if-exists 'crate::split_host_port' \
+    --start-from-if-exists 'crate::split_host_port_as_is' \
     --start-from-if-exists 'crate::strip_uri_fragment' \
     --start-from-if-exists 'crate::strip_uri_fragment_as_is' \
     --start-from-if-exists 'crate::strip_authority_for_routing' \
