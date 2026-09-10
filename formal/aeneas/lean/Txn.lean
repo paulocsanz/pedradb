@@ -64,3 +64,36 @@ theorem si_hist_repair_plan_as_is_dente :
     si_hist_repair_plan_as_is 0#u64 false = ok SiHistRepair.Rewrite := by
   unfold si_hist_repair_plan_as_is
   rfl
+
+/-- RFC-0191 P2.3 cadence atom (third if, F119): the hist-load merge —
+    a decoded hist merges only when its tip is not below the best-so-far
+    tip; a corrupt hist never evicts a good copy. The store trampoline
+    (`load_si_from_disk`) matches this. -/
+theorem hist_load_fate_merge_new_iff_decoded_and_not_below :
+    ∀ (decoded_ok : Bool) (best_has_user : Bool) (new_last : U64) (existing : U64),
+      (hist_load_fate decoded_ok best_has_user new_last existing
+          = ok HistLoadFate.MergeNew)
+        ↔ (decoded_ok = true ∧ new_last >= existing) := by
+  intro decoded_ok best_has_user new_last existing
+  unfold hist_load_fate
+  constructor
+  · intro h
+    split at h
+    · next c1 =>
+      split at h
+      · next c2 => exact ⟨c1, c2⟩
+      · next c2 => exact absurd h (by simp)
+    · next c1 =>
+      split at h
+      · next c3 => exact absurd h (by simp)
+      · next c3 => exact absurd h (by simp)
+  · rintro ⟨hd, hm⟩
+    rw [if_pos hd, if_pos hm]
+
+/-- AS-IS dente: the corrupt replica wins (its hist replaces a newer
+    best tip — F119). -/
+theorem hist_load_fate_as_is_dente :
+    hist_load_fate_as_is false true 0#u64 9#u64
+      = ok HistLoadFate.MergeNew := by
+  unfold hist_load_fate_as_is
+  rfl

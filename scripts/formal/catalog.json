@@ -1344,7 +1344,6 @@
         "crates/pedradb-store/src/txn_kernel.rs"
       ],
       "entry": "recover_si_generation",
-      "data_fate": true,
       "live_callers": [
         {
           "file": "crates/pedradb-store/src/lib.rs",
@@ -1355,6 +1354,36 @@
       "dst_plant": {
         "file": "crates/pedradb-store/src/txn_kernel.rs",
         "test": "si_generation_survives"
+      }
+    },
+    {
+      "id": "hist_load_fate",
+      "finding": "F36 / F119",
+      "twin_kind": "atom",
+      "atom": "hist_load_fate",
+      "atom_reason": {
+        "date": "2026-09-10",
+        "why": "RFC-0191 P2.3 cadence (third if): the SI-hist load merge disposition — a decoded hist merges only when its tip is not below the best-so-far tip, and a corrupt hist never evicts a good copy — proven forall over (decoded_ok, best_has_user, new_last, existing) as hist_load_fate_merge_new_iff_decoded_and_not_below in Txn.lean; the store trampoline load_si_from_disk matches the kernel decision"
+      },
+      "single_artifact": true,
+      "kernel": "crates/pedradb-store/src/txn_kernel.rs",
+      "twin": "crates/pedradb-store/src/txn_kernel.rs",
+      "aeneas": "scripts/aeneas_txn.sh",
+      "callers": [
+        "crates/pedradb-store/src/lib.rs"
+      ],
+      "entry": "hist_load_fate",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "load_si_from_disk"
+        }
+      ],
+      "as_is": "hist_load_fate_as_is",
+      "dst_plant": {
+        "file": "crates/pedradb-store/src/txn_kernel.rs",
+        "test": "hist_load_fate_on_live_merge_and_corrupt"
       }
     },
     {

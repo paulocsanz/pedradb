@@ -4182,13 +4182,33 @@ impl<E: Env> StoreCluster<E> {
                             .and_then(|h| h.last().map(|(g, _)| *g))
                             .unwrap_or(0);
                         let new_last = hist.last().map(|(g, _)| *g).unwrap_or(0);
-                        if new_last >= existing {
-                            best.insert(user, hist);
+                        // RFC-0191 P2.3: the merge disposition is the
+                        // kernel's decision, not inline.
+                        match txn_kernel::hist_load_fate(
+                            true,
+                            best.contains_key(&user),
+                            new_last,
+                            existing,
+                        ) {
+                            txn_kernel::HistLoadFate::MergeNew => {
+                                best.insert(user, hist);
+                            }
+                            txn_kernel::HistLoadFate::KeepOld
+                            | txn_kernel::HistLoadFate::TrackCorruptOnly => {}
                         }
                     }
                     Err(_) => {
-                        if !best.contains_key(&user) {
-                            corrupt_only.insert(user);
+                        match txn_kernel::hist_load_fate(
+                            false,
+                            best.contains_key(&user),
+                            0,
+                            0,
+                        ) {
+                            txn_kernel::HistLoadFate::TrackCorruptOnly => {
+                                corrupt_only.insert(user);
+                            }
+                            txn_kernel::HistLoadFate::MergeNew
+                            | txn_kernel::HistLoadFate::KeepOld => {}
                         }
                     }
                 }

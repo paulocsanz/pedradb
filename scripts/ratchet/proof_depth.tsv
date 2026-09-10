@@ -17,6 +17,6 @@
 # SAME commit (a ladder promotion, not a lost extraction).
 floor_extract 275
 floor_close 1
-floor_atom 3
-cap_data_fate 128
+floor_atom 4
+cap_data_fate 127
 handler_loc 111927

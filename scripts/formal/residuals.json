@@ -83,7 +83,7 @@
     "proof_depth": {
       "extract": 275,
       "close": 2,
-      "atom": 3,
+      "atom": 4,
       "model": 17,
       "updated": "2026-09-10"
     },
@@ -136,8 +136,8 @@
         "tx_state_of"
       ]
     },
-    "single_artifact": 290,
-    "data_fate": 128
+    "single_artifact": 291,
+    "data_fate": 127
   },
   "residuals": [
     {

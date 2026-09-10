@@ -150,6 +150,57 @@ pub fn si_hist_repair_plan_as_is(_tip_gen: u64, _tip_matches: bool) -> SiHistRep
     SiHistRepair::Rewrite
 }
 
+/// RFC-0191 P2.3 cadence (third if): the per-record disposition of the
+/// SI-hist load merge (F119) — a decoded hist from a replica replaces
+/// the best-so-far only when its last gen is not below it; a corrupt
+/// hist is ignored when any good copy exists and tracked otherwise
+/// (all-corrupt fails closed in the caller).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HistLoadFate {
+    /// Decoded and not below the best-so-far tip — replace it.
+    MergeNew,
+    /// A better copy stays (or a corrupt hist is ignored because a good
+    /// copy exists).
+    KeepOld,
+    /// Corrupt and no good copy seen yet — track the user as corrupt-only.
+    TrackCorruptOnly,
+}
+
+/// Pure rule for one hist record during `load_si_from_disk`'s replica
+/// merge: `MergeNew` iff decoded and `new_last >= existing`;
+/// `TrackCorruptOnly` iff corrupt and no good copy yet; else `KeepOld`.
+#[must_use]
+pub fn hist_load_fate(
+    decoded_ok: bool,
+    best_has_user: bool,
+    new_last: u64,
+    existing: u64,
+) -> HistLoadFate {
+    if decoded_ok {
+        if new_last >= existing {
+            HistLoadFate::MergeNew
+        } else {
+            HistLoadFate::KeepOld
+        }
+    } else if best_has_user {
+        HistLoadFate::KeepOld
+    } else {
+        HistLoadFate::TrackCorruptOnly
+    }
+}
+
+/// AS-IS P2.3-3: the corrupt replica wins — its hist replaces a newer
+/// best tip (SI snapshots evaporate; F119).
+#[must_use]
+pub fn hist_load_fate_as_is(
+    _decoded_ok: bool,
+    _best_has_user: bool,
+    _new_last: u64,
+    _existing: u64,
+) -> HistLoadFate {
+    HistLoadFate::MergeNew
+}
+
 /// RFC-0191 P1.3 T1: leftover recover fate. `committed` is the on-disk
 /// commit bit the handler classified. Uncommitted leftover aborts;
 /// committed leftover is left alone. Not a constant — the Bool space
@@ -369,6 +420,35 @@ mod tests {
         assert_eq!(si_hist_repair_plan(7, false), SiHistRepair::Rewrite);
         // AS-IS dente: stomps the gen-0 floor.
         assert_eq!(si_hist_repair_plan_as_is(0, false), SiHistRepair::Rewrite);
+    }
+
+    /// RFC-0191 P2.3-3: the hist-load merge — a decoded hist merges only
+    /// when not below the best-so-far tip; corrupt is ignored when a good
+    /// copy exists, tracked corrupt-only otherwise; the AS-IS dente lets a
+    /// corrupt replica replace a newer tip (F119).
+    #[test]
+    fn hist_load_fate_on_live_merge_and_corrupt() {
+        assert_eq!(
+            hist_load_fate(true, true, 5, 5),
+            HistLoadFate::MergeNew,
+            "equal tips: the new replica copy wins"
+        );
+        assert_eq!(
+            hist_load_fate(true, true, 4, 5),
+            HistLoadFate::KeepOld,
+            "older hist never evicts a newer best tip"
+        );
+        assert_eq!(
+            hist_load_fate(false, true, 0, 0),
+            HistLoadFate::KeepOld,
+            "corrupt hist ignored when a good copy exists"
+        );
+        assert_eq!(hist_load_fate(false, false, 0, 0), HistLoadFate::TrackCorruptOnly);
+        assert_eq!(
+            hist_load_fate_as_is(false, true, 0, 9),
+            HistLoadFate::MergeNew,
+            "AS-IS dente: corrupt evicts the good copy"
+        );
     }
 
     #[test]
