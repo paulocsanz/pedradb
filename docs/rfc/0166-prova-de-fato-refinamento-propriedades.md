@@ -174,6 +174,13 @@ catálogo separa **proof objects** de **campaign gates** (família `l28_*`).
       branch F50 do `tx_start` inalcançável sob Queued — todo propose
       retorna NotCommitted antes de popular keys_by_range — só Direct;
       planta dirige o mesmo cleanup de produção); settle/qpropose =
+      2026-09-09 fire 799: dente que faltava do txn_kernel —
+      `unreserve_si_gen_as_is` (rollback cego do contador mesmo com ele
+      já avançado — re-emite a mesma gen p/ um reserve posterior; F49);
+      planta `unreserve_only_if_still_ours` estendida com a
+      discriminação fixo-vs-as_is (5,4→5 vs 3; 4,0→4 vs 0); re-extract
+      `aeneas_store_txn.sh`+`aeneas_txn.sh` (DOIS stamps cobrem
+      txn_kernel.rs), ambos 0 sorry; formal 97→96
       padrão RFC-0059 pump+finish; formal 110→105)
 - [x] **P2.3** C1: refinamento handler↔modelo abstrato para a superfície
       vote/ae/commit/membership (estende RFC-0053) — status: `done`

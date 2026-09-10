@@ -207,6 +207,13 @@ pub fn unreserve_si_gen(current: u64, stamped: u64) -> u64 {
     }
 }
 
+/// AS-IS F49: roll the counter back even when it already moved past our
+/// stamp (or nothing was stamped) — a later reserve re-issues the same gen.
+#[must_use]
+pub fn unreserve_si_gen_as_is(_current: u64, stamped: u64) -> u64 {
+    stamped.saturating_sub(1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -349,7 +356,16 @@ mod tests {
     #[test]
     fn unreserve_only_if_still_ours() {
         assert_eq!(unreserve_si_gen(4, 4), 3);
-        assert_eq!(unreserve_si_gen(5, 4), 5);
-        assert_eq!(unreserve_si_gen(4, 0), 4);
+        assert_eq!(unreserve_si_gen(5, 4), 5, "counter moved: keep current");
+        assert_eq!(unreserve_si_gen(4, 0), 4, "nothing stamped: keep current");
+        // AS-IS dente: blind rollback under a moved counter re-issues gen 4
+        // (double-reserve collision) and rewinds an unstamped reserve.
+        assert_eq!(unreserve_si_gen_as_is(5, 4), 3);
+        assert_ne!(
+            unreserve_si_gen(5, 4),
+            unreserve_si_gen_as_is(5, 4),
+            "teeth: fixed and as-is must disagree"
+        );
+        assert_eq!(unreserve_si_gen_as_is(4, 0), 0);
     }
 }

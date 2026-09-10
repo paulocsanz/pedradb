@@ -442,4 +442,11 @@ def unreserve_si_gen
     else ok current
   else ok current
 
+/-- [pedra_aeneas_txn_kernel::unreserve_si_gen_as_is]:
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 213:0-215:1
+    Visibility: public -/
+def unreserve_si_gen_as_is
+  (_current : Std.U64) (stamped : Std.U64) : Result Std.U64 := do
+  ok (core.num.U64.saturating_sub stamped 1#u64)
+
 end pedra_aeneas_txn_kernel
