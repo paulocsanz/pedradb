@@ -4083,9 +4083,10 @@
       "id": "world_trajectory_fold",
       "finding": "RFC-0059 P2.2",
       "twin_kind": "close",
+      "single_artifact": true,
       "atom": "trajectory_violation",
       "kernel": "crates/pedradb-world/src/world_kernel.rs",
-      "twin": "crates/pedradb-world/verus/trajectory.rs",
+      "twin": "crates/pedradb-world/src/world_kernel.rs",
       "aeneas": "scripts/aeneas_world.sh",
       "callers": [
         "crates/pedradb-world/src/world_kernel.rs"
