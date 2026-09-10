@@ -29,3 +29,4 @@ atom	catalog:lease	lease_live_iff_zero_or_now_below	formal/aeneas/lean/Lease.lea
 atom	catalog:ae_ack	ae_ack_success_ok_iff_clean_or_dirty_persisted	formal/aeneas/lean/Ae.lean	ae_ack_success
 atom	catalog:sched_plant_joint	plant_joint_schedule_ok_iff_opt_in_emits_and_default_omits	formal/aeneas/lean/StoreMembership.lean	plant_joint_schedule_ok
 atom	catalog:blob_gc_pick	blob_gc_action_rewrite_iff_inactive_with_bytes	formal/aeneas/lean/VlogGc.lean	blob_gc_action
+atom	catalog:compact_retention	point_version_fate_drop_iff_newer_kept_at_or_below_oldest_snapshot	formal/aeneas/lean/Compact.lean	point_version_fate

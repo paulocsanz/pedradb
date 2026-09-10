@@ -3199,7 +3199,7 @@
     {
       "id": "compact_retention",
       "finding": "F177/F20",
-      "twin_kind": "close",
+      "twin_kind": "atom",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/compact_kernel.rs",
       "twin": "crates/pedradb-core/src/compact_kernel.rs",
@@ -3208,7 +3208,6 @@
         "crates/pedradb-core/src/merge.rs"
       ],
       "entry": "point_version_fate",
-      "data_fate": true,
       "handlers": [
         "gc_snapshot_safe"
       ],
@@ -3216,7 +3215,13 @@
       "dst_plant": {
         "file": "crates/pedradb-core/src/compact_kernel.rs",
         "test": "point_version_fate_on_live_snapshot_is_not_ok"
-      }
+      },
+      "atom": "point_version_fate",
+      "atom_reason": {
+        "date": "2026-09-10",
+        "why": "RFC-0191 P2.3 cadence (sixteenth if): the point-version retention disposition — a point version is dropped exactly when a newer kept version exists AND it sits at or below the oldest snapshot (a version still visible to the oldest snapshot is never dropped, and a version with no newer kept copy is never dropped either, F177/F20) — proven forall over (this_seq, newer_kept_seq, oldest_snapshot) as point_version_fate_drop_iff_newer_kept_at_or_below_oldest_snapshot in Compact.lean; the merge trampoline (gc_snapshot_safe) matches the kernel decision"
+      },
+      "three_teeth": true
     },
     {
       "id": "dictionary_link",
