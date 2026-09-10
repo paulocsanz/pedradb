@@ -201,7 +201,7 @@
 | P2.2.38 | p2 | three-teeth on c_len oversize is LIMIT | done | `c_len_admitted_on_live_capi_is_not_ok` | 2026-08-29 |
 | P2.2.39 | p2 | three-teeth on crc_match WAL CRC is Crc | done | `crc_match_ok_on_live_wal_is_not_ok` | 2026-08-29 |
 | P2.2.40 | p2 | three-teeth on sst_crc modern trailer Reject | done | `sst_crc_fate_on_live_sst_is_not_ok` | 2026-08-29 |
-| P2.2.41 | p2 | three-teeth on ikey_pack tombstone vs value | done | `pack_sequence_and_type_on_live_db_is_not_ok` | 2026-08-29 |
+| P2.2.41 | p2 | three-teeth on ikey_pack tombstone vs value | done | `pack_sequence_and_type_on_live_db_is_not_ok` (mirror `verus/ikey_pack.rs` + runner deletados 2026-09-09 — fire 781: single-artifact via `aeneas_key.sh` extract de `key.rs`, `key.pack_sequence_and_type`/`_as_is` no `KeyKernel.lean`, 0 sorry) | 2026-08-29 |
 | P2.2 | p2 | remaining non-data_fate three-teeth | done | 0 pairs | 2026-08-29 |
 
 ## Acceptance Criteria

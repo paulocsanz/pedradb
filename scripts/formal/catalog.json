@@ -4640,9 +4640,10 @@
       "id": "ikey_pack",
       "finding": "RFC-0150 P1",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/key.rs",
-      "twin": "crates/pedradb-core/verus/ikey_pack.rs",
-      "verus": "scripts/verus_ikey_pack.sh",
+      "twin": "crates/pedradb-core/src/key.rs",
+      "aeneas": "scripts/aeneas_key.sh",
       "callers": [
         "crates/pedradb-core/src/key.rs"
       ],
