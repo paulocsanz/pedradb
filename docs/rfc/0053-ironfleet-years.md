@@ -123,7 +123,7 @@ Primeira vaga. Sozinha já muda o TCB: 2ª máquina no voto extraído + spec de 
 
 ### P2 — fechar Y1 sem abrir Y3
 
-- [x] **P2.1** Segunda máquina (Aeneas ou Lean+drift) em `ae_entry_action` e `commit` recover — status: `done` (`Ae.lean` / `Commit.lean` over Aeneas extracts; `scripts/lean_ae_commit.sh`; SOURCE.ae / SOURCE.commit sha256)  
+- [x] **P2.1** Segunda máquina (Aeneas ou Lean+drift) em `ae_entry_action` e `commit` recover — status: `done` (`Ae.lean` / `Commit.lean` over Aeneas extracts; `scripts/lean_ae_commit.sh`; SOURCE.ae / SOURCE.commit sha256); 2026-09-09 fire 796: dentes dst_plant vivos Queued no `three_teeth_queued.rs` — `ae_f16_safe_on_live_queued_is_not_ok` (follower settled recusa AE reescrevendo slot já commitado: `ok_append=false`, log/commit intactos, valor comprometido sobrevive no db; achado: o prefixo aplicado é compactado do log RAM — F27 — então o rewrite em index=commit é recusado pela regra do ponto de append do mesmo gate; a janela in-log do conflito de payload não existe num follower settled) e `recover_last_applied_on_live_queued_is_not_ok` (crash entre commit-persist e apply: reopen via `RaftCluster::open` repõe applied=0 e replays o prefixo comprometido; as_is saltaria para log_last e encalharia a entrada); formal 105→103
 - [x] **P2.2** Relatório Y1: LOC impl/prova, lista TCB, o que DST ainda cobre; **sem** claim de dicionário ∀ — status: `done` (`docs/formal/y1-report.md`)  
 - [x] **P2.3** Explicitar no TCB: `ConcurrentDb` e o loop TCP **fora** até Y3 / RFC-0051 — status: `done` (TCB abaixo + Y1 report)
 

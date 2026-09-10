@@ -5567,3 +5567,180 @@ fn prepare_error_aborts_earlier_on_live_queued_is_not_ok() {
     qput(&mut cluster, &k1, b"v2");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ── ae_kernel / commit_kernel three-teeth (F16 / F10) — dst plants on live paths ──
+
+/// F16: the AE safety gate refuses committed rewrites; the live follower
+/// path enforces it (AS-IS gate is vacuous — a committed rewrite passes).
+#[test]
+fn ae_f16_safe_on_live_queued_is_not_ok() {
+    use pedradb_raft::{ae_f16_safe, ae_f16_safe_as_is, AeEntryAction};
+    assert!(
+        !ae_f16_safe(2, 1, Some(1), 5, 5, AeEntryAction::TruncateAndInstall),
+        "truncate/install at or before commit"
+    );
+    assert!(!ae_f16_safe(7, 1, None, 5, 5, AeEntryAction::Append), "hole");
+    assert!(
+        !ae_f16_safe(5, 1, Some(1), 5, 5, AeEntryAction::Append),
+        "append onto occupied index"
+    );
+    assert!(
+        ae_f16_safe(2, 1, Some(9), 5, 5, AeEntryAction::Refuse),
+        "committed conflict must Refuse"
+    );
+    assert!(!ae_f16_safe(2, 1, Some(9), 5, 5, AeEntryAction::Append));
+    assert!(
+        ae_f16_safe_as_is(2, 1, Some(9), 5, 5, AeEntryAction::TruncateAndInstall),
+        "AS-IS dente: vacuous gate"
+    );
+    let mut q = LiveQueued::open();
+    qput(&mut q.cluster, b"rfc0151-f16", b"v");
+    let leader = q.cluster.range_leader(1).unwrap();
+    let follower = q.follower(1);
+    // Commit reaches the follower only in a LATER AppendEntries
+    // (leader_commit field): tick + pump until it exposes one. The applied
+    // prefix is then compacted out of the RAM log (F27) — the committed
+    // payload survives in the node's db, not in `p.log`.
+    for _ in 0..96 {
+        {
+            let p = q
+                .cluster
+                .nodes
+                .get(&follower)
+                .unwrap()
+                .ranges
+                .get(&1)
+                .unwrap();
+            if p.commit >= 1 {
+                break;
+            }
+        }
+        q.cluster.tick().unwrap();
+        pump_queued(&mut q.cluster, 48);
+    }
+    let (term, commit, prev_term, log_before) = {
+        let p = q
+            .cluster
+            .nodes
+            .get(&follower)
+            .unwrap()
+            .ranges
+            .get(&1)
+            .unwrap();
+        (
+            p.term,
+            p.commit,
+            p.term_at(p.commit.saturating_sub(1)),
+            p.log.clone(),
+        )
+    };
+    assert!(commit >= 1, "setup: follower must hold a committed prefix");
+    // Committed rewrite: the very slot the follower already committed (and
+    // compacted), carrying a different payload. For a settled follower the
+    // gate refuses it before any commit advance — the slot is inside the
+    // committed prefix, not the append point: `ok_append=false`, log
+    // restored, reply success=false (the AS-IS gate is vacuous and passes).
+    let evil = PeerMsg::AppendEntries {
+        range_id: 1,
+        term,
+        leader_id: leader,
+        prev_log_index: commit - 1,
+        prev_log_term: prev_term,
+        leader_commit: commit,
+        entries: vec![LogRec {
+            index: commit,
+            term,
+            entry: RangeEntry::Put {
+                key: b"rfc0151-f16".to_vec(),
+                value: b"evil".to_vec(),
+                si_gen: 0,
+            },
+        }],
+    }
+    .encode();
+    let _ = q.cluster.drain_outbound();
+    q.cluster.handle_inbound(leader, follower, &evil).unwrap();
+    let mut refused = false;
+    for (_f, _t, raw) in q.cluster.drain_outbound() {
+        if let Ok(PeerMsg::AppendEntriesReply { success, .. }) = PeerMsg::decode(&raw) {
+            assert!(!success, "live follower must refuse a committed rewrite");
+            refused = true;
+        }
+    }
+    assert!(refused, "expected an AppendEntriesReply");
+    {
+        let n = q.cluster.nodes.get(&follower).unwrap();
+        let p = n.ranges.get(&1).unwrap();
+        assert_eq!(p.log, log_before, "refused AE must not touch the log");
+        assert_eq!(p.commit, commit, "refused AE must not move commit");
+        assert_eq!(
+            n.db.get(b"rfc0151-f16".as_ref()).as_deref(),
+            Some(b"v".as_ref()),
+            "committed value must survive the refused rewrite"
+        );
+    }
+    assert_eq!(
+        q.cluster.get(b"rfc0151-f16").unwrap().as_deref(),
+        Some(b"v".as_ref()),
+        "committed value must survive the refused rewrite"
+    );
+}
+
+/// F10: reopen replays the committed prefix from applied=0 — a committed but
+/// unapplied entry is NOT stranded (AS-IS jumps last_applied to log_last).
+#[test]
+fn recover_last_applied_on_live_queued_is_not_ok() {
+    use pedradb_core::BatchOp;
+    use pedradb_raft::commit_kernel::{recover_last_applied, recover_last_applied_as_is};
+    use pedradb_raft::{persist, RaftCluster, RaftLogEntry};
+    assert_eq!(recover_last_applied(), 0);
+    assert_eq!(
+        recover_last_applied_as_is(9),
+        9,
+        "AS-IS dente: skip re-apply"
+    );
+    let parent = std::env::temp_dir().join(format!(
+        "pedra-queued-rla-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&parent);
+    {
+        let mut rc = RaftCluster::open(&parent, 1).unwrap();
+        let leader = rc.elect_leader(64).unwrap();
+        rc.propose_puts([(b"rfc0151-rla-a".to_vec(), b"v0".to_vec())])
+            .unwrap();
+        assert_eq!(
+            rc.node(leader).unwrap().get(b"rfc0151-rla-a").as_deref(),
+            Some(b"v0".as_ref())
+        );
+    }
+    // Crash between commit persist and apply: entry idx+1 is committed-durable
+    // but was never applied to the state machine.
+    let meta = persist::raft_meta_dir(&RaftCluster::node_dir(&parent, 1));
+    let mut log = persist::load_log(&meta).unwrap();
+    let (idx, term) = (log.last().unwrap().index, log.last().unwrap().term);
+    log.push(RaftLogEntry {
+        index: idx + 1,
+        term,
+        ops: vec![BatchOp::put(b"rfc0151-rla-b", b"v1")],
+    });
+    persist::store_log(&meta, &log).unwrap();
+    persist::store_commit(&meta, idx + 1).unwrap();
+    let rc = RaftCluster::open(&parent, 1).unwrap();
+    let node = rc.node(1).unwrap();
+    assert_eq!(
+        node.last_applied(),
+        idx + 1,
+        "reopen must replay the committed prefix (F10)"
+    );
+    assert_eq!(
+        node.get(b"rfc0151-rla-b").as_deref(),
+        Some(b"v1".as_ref()),
+        "committed-but-unapplied entry must apply on reopen (AS-IS strands it)"
+    );
+    let _ = std::fs::remove_dir_all(&parent);
+}
