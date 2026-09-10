@@ -165,26 +165,38 @@ def ascii_upper (b : Std.U8) : Result Std.U8 := do
   then core.num.U8.to_ascii_uppercase b
   else ok b
 
-/-- [pedra_aeneas_auth_kernel::normalize_http_method]:
+/-- [pedra_aeneas_auth_kernel::ascii_lower_as_is]:
     Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 39:0-41:1
+    Visibility: public -/
+def ascii_lower_as_is (b : Std.U8) : Result Std.U8 := do
+  ok b
+
+/-- [pedra_aeneas_auth_kernel::ascii_upper_as_is]:
+    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 45:0-47:1
+    Visibility: public -/
+def ascii_upper_as_is (b : Std.U8) : Result Std.U8 := do
+  ok b
+
+/-- [pedra_aeneas_auth_kernel::normalize_http_method]:
+    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 51:0-53:1
     Visibility: public -/
 def normalize_http_method (m : Str) : Result String := do
   alloc.str.Str.to_ascii_uppercase m
 
 /-- [pedra_aeneas_auth_kernel::normalize_http_method_as_is]:
-    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 45:0-47:1
+    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 57:0-59:1
     Visibility: public -/
 def normalize_http_method_as_is (m : Str) : Result String := do
   alloc.string.ToString.Blanket.to_string Str.Insts.CoreFmtDisplay m
 
 /-- [pedra_aeneas_auth_kernel::is_bearer_scheme]:
-    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 51:0-53:1
+    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 63:0-65:1
     Visibility: public -/
 def is_bearer_scheme (scheme : Str) : Result Bool := do
   core.str.Str.eq_ignore_ascii_case scheme (toStr "bearer")
 
 /-- [pedra_aeneas_auth_kernel::is_non_bearer_auth_scheme]:
-    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 58:0-63:1
+    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 70:0-75:1
     Visibility: public -/
 def is_non_bearer_auth_scheme (scheme : Str) : Result Bool := do
   let b ← core.str.Str.eq_ignore_ascii_case scheme (toStr "basic")
@@ -200,8 +212,14 @@ def is_non_bearer_auth_scheme (scheme : Str) : Result Bool := do
       then ok true
       else core.str.Str.eq_ignore_ascii_case scheme (toStr "ntlm")
 
+/-- [pedra_aeneas_auth_kernel::is_non_bearer_auth_scheme_as_is]:
+    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 81:0-83:1
+    Visibility: public -/
+def is_non_bearer_auth_scheme_as_is (_scheme : Str) : Result Bool := do
+  ok false
+
 /-- [pedra_aeneas_auth_kernel::is_bearer_scheme_as_is]:
-    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 67:0-69:1
+    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 87:0-89:1
     Visibility: public -/
 def is_bearer_scheme_as_is (scheme : Str) : Result Bool := do
   let b ← Str.Insts.CoreCmpPartialEqStr.eq scheme (toStr "Bearer")
@@ -210,7 +228,7 @@ def is_bearer_scheme_as_is (scheme : Str) : Result Bool := do
   else Str.Insts.CoreCmpPartialEqStr.eq scheme (toStr "bearer")
 
 /-- [pedra_aeneas_auth_kernel::bearer_token_from_value]:
-    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 81:0-102:1
+    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 101:0-122:1
     Visibility: public -/
 axiom core.str.Str.split_once_ws : Str → Result (Option (Str × Str))
 
@@ -239,7 +257,7 @@ def bearer_token_from_value (value : Str) : Result (Option Str) := do
         if nb then ok none else ok (some v)
 
 /-- [pedra_aeneas_auth_kernel::bearer_token_from_value_as_is]:
-    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 107:0-121:1
+    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 127:0-141:1
     Visibility: public -/
 def bearer_token_from_value_as_is (value : Str) : Result (Option Str) := do
   let v ← core.str.Str.trim value
@@ -271,7 +289,7 @@ def bearer_token_from_value_as_is (value : Str) : Result (Option Str) := do
     else ok (some tok)
 
 /-- [pedra_aeneas_auth_kernel::authorization_matches]:
-    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 127:0-153:1
+    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 147:0-173:1
     Visibility: public -/
 @[rust_loop_body]
 def authorization_matches_loop.body

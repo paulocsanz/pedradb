@@ -25,12 +25,15 @@ echo "      charon=$CHARON"
   cd "$CRATE"
   "$CHARON" cargo --preset=aeneas \
     --start-from-if-exists 'crate::ascii_lower' \
+    --start-from-if-exists 'crate::ascii_lower_as_is' \
     --start-from-if-exists 'crate::ascii_upper' \
+    --start-from-if-exists 'crate::ascii_upper_as_is' \
     --start-from-if-exists 'crate::normalize_http_method' \
     --start-from-if-exists 'crate::normalize_http_method_as_is' \
     --start-from-if-exists 'crate::is_bearer_scheme' \
     --start-from-if-exists 'crate::is_bearer_scheme_as_is' \
     --start-from-if-exists 'crate::is_non_bearer_auth_scheme' \
+    --start-from-if-exists 'crate::is_non_bearer_auth_scheme_as_is' \
     --start-from-if-exists 'crate::bearer_token_from_value' \
     --start-from-if-exists 'crate::bearer_token_from_value_as_is' \
     --start-from-if-exists 'crate::authorization_matches' \

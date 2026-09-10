@@ -34,6 +34,18 @@ pub fn ascii_upper(b: u8) -> u8 {
     }
 }
 
+/// AS-IS F85: no fold — `A` stays `A`, so `BEARER` never matches `bearer`.
+#[must_use]
+pub fn ascii_lower_as_is(b: u8) -> u8 {
+    b
+}
+
+/// AS-IS F79: no fold — `a` stays `a`, so `put` never matches `PUT`.
+#[must_use]
+pub fn ascii_upper_as_is(b: u8) -> u8 {
+    b
+}
+
 /// RFC 9110: method token compared in ASCII uppercase.
 #[must_use]
 pub fn normalize_http_method(m: &str) -> String {
@@ -60,6 +72,14 @@ pub fn is_non_bearer_auth_scheme(scheme: &str) -> bool {
         || scheme.eq_ignore_ascii_case("digest")
         || scheme.eq_ignore_ascii_case("negotiate")
         || scheme.eq_ignore_ascii_case("ntlm")
+}
+
+/// AS-IS F150/F151: scheme-blind — every header value is a candidate token, so
+/// a scheme-only `Basic` becomes the token and the first non-bearer scheme
+/// locks out a later Bearer.
+#[must_use]
+pub fn is_non_bearer_auth_scheme_as_is(_scheme: &str) -> bool {
+    false
 }
 
 /// AS-IS F85: only the two literal prefixes that were stripped.
@@ -242,5 +262,44 @@ mod tests {
             normalize_http_method_as_is("put")
         );
         assert_eq!(ascii_upper(b'p'), b'P');
+    }
+
+    /// Three teeth (F79/F85): the fold is what makes case-insensitive tokens
+    /// match — AS-IS leaves every byte untouched.
+    #[test]
+    fn ascii_fold_discriminates_as_is() {
+        assert_eq!(ascii_lower(b'B'), b'b');
+        assert_eq!(ascii_lower_as_is(b'B'), b'B');
+        assert_eq!(ascii_upper(b'b'), b'B');
+        assert_eq!(ascii_upper_as_is(b'b'), b'b');
+        // The fold atoms compose into the scheme/method decisions:
+        // "BEARER" folds onto "bearer", "put" folds onto "PUT".
+        let folded_scheme: Vec<u8> = "BEARER".bytes().map(ascii_lower).collect();
+        assert_eq!(folded_scheme, b"bearer");
+        let unfolded: Vec<u8> = "BEARER".bytes().map(ascii_lower_as_is).collect();
+        assert_eq!(unfolded, b"BEARER");
+        let folded_method: Vec<u8> = "put".bytes().map(ascii_upper).collect();
+        assert_eq!(folded_method, b"PUT");
+        let unfolded_method: Vec<u8> = "put".bytes().map(ascii_upper_as_is).collect();
+        assert_eq!(unfolded_method, b"put");
+    }
+
+    /// Three teeth (F150/F151): the non-bearer gate is what keeps the scan
+    /// alive past `Basic` — AS-IS is scheme-blind.
+    #[test]
+    fn non_bearer_scheme_gate() {
+        assert!(is_non_bearer_auth_scheme("Basic"));
+        assert!(is_non_bearer_auth_scheme("DIGEST"));
+        assert!(is_non_bearer_auth_scheme("Negotiate"));
+        assert!(is_non_bearer_auth_scheme("ntlm"));
+        assert!(!is_non_bearer_auth_scheme("Bearer"));
+        assert!(!is_non_bearer_auth_scheme("bearer"));
+        // AS-IS: scheme-blind — `Basic` is indistinguishable from a token and
+        // the scan never learns to keep going.
+        assert!(!is_non_bearer_auth_scheme_as_is("Basic"));
+        assert_ne!(
+            is_non_bearer_auth_scheme("Basic"),
+            is_non_bearer_auth_scheme_as_is("Basic")
+        );
     }
 }

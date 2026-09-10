@@ -51,7 +51,7 @@ Ordem: data_fate vivo em `db.rs` primeiro, HTTP/FDB depois. Uma fatia = um grupo
 
 - [x] **P1.1** `leveling_pick` + `leveling_pushdown`: close de `pick_l0_to_l1` / `pick_pushdown` (hoje atom `*_model` em u64; o `Db::prepare_*` chama a fn `Vec<u8>`) — status: `done`
 - [x] **P1.2** Família HTTP path/URI (`origin_path`, `path_after_authority`, `strip_http_authority`, `request_target_authority`, `host_authority_mismatch`, `split_host_port`, `strip_uri_fragment`) — um par close por PR se o grupo não couber — status: `done`
-- [x] **P1.3** Família HTTP auth/form (`bearer`, `is_bearer_scheme`, `is_non_bearer_auth_scheme`, `normalize_http_method`, `authorization_matches`, `form_plus`, `query_values_conflict`, `query_part_is_bare_name`) — status: `done`
+- [x] **P1.3** Família HTTP auth/form (`bearer`, `is_bearer_scheme`, `is_non_bearer_auth_scheme`, `normalize_http_method`, `authorization_matches`, `form_plus`, `query_values_conflict`, `query_part_is_bare_name`) — status: `done` (dentes que faltavam pagos 2026-09-09, fire 791: `ascii_lower_as_is`/`ascii_upper_as_is` + teste `ascii_fold_discriminates_as_is` e `is_non_bearer_auth_scheme_as_is` + teste `non_bearer_scheme_gate` no `auth_kernel.rs`; re-extract `aeneas_auth.sh` stamp `477d9ac4`, `AuthKernel.lean` 0 sorry; formal 172→166)
 - [x] **P1.4** FDB pack (`children`, `fields`, `fields_suffix`, `fields_decode`, `fields_pair_nul`, `index_val`, `exact_children`) — status: `done`
 - [x] **P1.5** Restantes (`isolated` child-byte se ainda atom, `world_trajectory_fold`) — status: `done`
 - [x] **P1.6** `--lint` recusa `atom` sem `atom_reason` *e* recusa `atom_reason` mais velho que 30 dias sem RFC filho — status: `done`
