@@ -3296,7 +3296,12 @@
     {
       "id": "durable_term",
       "finding": "F125/F127",
-      "twin_kind": "close",
+      "twin_kind": "atom",
+      "atom": "durable_term_if_newer",
+      "atom_reason": {
+        "date": "2026-09-10",
+        "why": "RFC-0191 P2.3 cadence (eighth if): the durable-term disposition — the term is durably raised exactly when the incoming term is strictly newer AND the persist succeeded (a failed persist restores the old term, never keeps a raised one) — proven forall over (current_term, incoming_term, persist) as durable_term_if_newer_raised_iff_newer_and_persisted in Vote.lean; the store/raft trampolines match the kernel decision"
+      },
       "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/vote_kernel.rs",
       "twin": "crates/pedradb-raft/src/vote_kernel.rs",
@@ -3305,7 +3310,7 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "durable_term_if_newer",
-      "data_fate": true,
+      "three_teeth": true,
       "live_callers": [
         {
           "file": "crates/pedradb-store/src/lib.rs",

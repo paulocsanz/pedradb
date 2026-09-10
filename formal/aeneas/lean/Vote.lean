@@ -126,3 +126,28 @@ theorem as_is_grants_where_fixed_denies :
     simp
   · unfold vote_decision_as_is_ignore_log_and_vote
     simp
+
+/-- Catalog entry: the term is durably raised exactly when the incoming
+    term is strictly newer AND the persist succeeded (RFC-0158 — a
+    failed persist restores the old term, never keeps a raised one). -/
+theorem durable_term_if_newer_raised_iff_newer_and_persisted :
+    ∀ (current_term incoming_term : Std.U64) (persist : PersistOutcome),
+      (durable_term_if_newer current_term incoming_term persist
+          = ok DurableTerm.Raised)
+        ↔ ((incoming_term > current_term)
+            ∧ (persist = PersistOutcome.Ok)) := by
+  intro current_term incoming_term persist
+  unfold durable_term_if_newer
+  constructor
+  · intro h
+    split at h
+    · next c1 =>
+      split at h
+      · next c2 => exact ⟨c1, rfl⟩
+      · next c2 => exact absurd h (by simp)
+    · next c1 => exact absurd h (by simp)
+  · rintro ⟨ht, hp⟩
+    rw [if_pos ht]
+    split
+    · rfl
+    · exact absurd hp (by simp)
