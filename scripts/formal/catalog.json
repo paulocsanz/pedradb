@@ -322,7 +322,7 @@
     {
       "id": "queued_leave_finish",
       "finding": "RFC-0122/0123",
-      "twin_kind": "close",
+      "twin_kind": "atom",
       "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/src/membership_kernel.rs",
@@ -337,7 +337,6 @@
           "handler": "finish_uncommitted_leave"
         }
       ],
-      "data_fate": true,
       "handlers": [
         "finish_uncommitted_leave"
       ],
@@ -345,7 +344,13 @@
       "dst_plant": {
         "file": "crates/pedradb-store/src/three_teeth_queued.rs",
         "test": "queued_leave_finish_ok_on_live_queued_is_not_ok"
-      }
+      },
+      "atom": "queued_leave_finish_ok",
+      "atom_reason": {
+        "date": "2026-09-10",
+        "why": "RFC-0191 P2.3 cadence (ninth if): the uncommitted-leave disposition — a leave finishes exactly when the leave entry is not in the log, or it is already committed (a leave still in the log and uncommitted never finishes, RFC-0122/0123) — proven forall over (leave_in_log, leave_committed) as queued_leave_finish_ok_iff_not_in_log_or_committed in Membership.lean; the store trampoline (finish_uncommitted_leave) matches the kernel decision"
+      },
+      "three_teeth": true
     },
     {
       "id": "disk_membership",
@@ -1081,7 +1086,7 @@
       "id": "lease_table",
       "finding": "F7",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-dcs/src/lease_kernel.rs",
       "twin": "crates/pedradb-dcs/src/lease_kernel.rs",
       "aeneas": "scripts/aeneas_lease.sh",
@@ -1106,7 +1111,7 @@
       "id": "lease_next_id",
       "finding": "F7",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-dcs/src/lease_kernel.rs",
       "twin": "crates/pedradb-dcs/src/lease_kernel.rs",
       "aeneas": "scripts/aeneas_lease.sh",
@@ -2546,7 +2551,7 @@
       "id": "journal_catch_up_pin",
       "finding": "W4",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-journal/src/pin_kernel.rs",
       "twin": "crates/pedradb-journal/src/pin_kernel.rs",
       "verus": "scripts/verus_journal_pin.sh",
@@ -2571,7 +2576,7 @@
       "id": "journal_fold_pin",
       "finding": "H1",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-journal/src/pin_kernel.rs",
       "twin": "crates/pedradb-journal/src/pin_kernel.rs",
       "verus": "scripts/verus_journal_pin.sh",
@@ -2596,7 +2601,7 @@
       "id": "journal_next_pin",
       "finding": "H1",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-journal/src/pin_kernel.rs",
       "twin": "crates/pedradb-journal/src/pin_kernel.rs",
       "verus": "scripts/verus_journal_pin.sh",
@@ -2887,7 +2892,7 @@
       "id": "bloom_insert",
       "finding": "T1 (docs/formal/bloom-filter-theorems.md)",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/bloom.rs",
       "twin": "crates/pedradb-core/src/bloom.rs",
       "aeneas": "scripts/aeneas_bloom.sh",
@@ -2912,7 +2917,7 @@
       "id": "bloom_may_contain",
       "finding": "T1/T4 (docs/formal/bloom-filter-theorems.md)",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/bloom.rs",
       "twin": "crates/pedradb-core/src/bloom.rs",
       "aeneas": "scripts/aeneas_bloom.sh",
@@ -3084,10 +3089,14 @@
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",
       "twin": "crates/pedradb-core/src/flush_kernel.rs",
       "verus": "scripts/verus_flush_decision.sh",
-      "callers": ["crates/pedradb-core/src/concurrent.rs"],
+      "callers": [
+        "crates/pedradb-core/src/concurrent.rs"
+      ],
       "entry": "occ_snap_uses_published",
       "data_fate": true,
-      "handlers": ["occ_snapshot"],
+      "handlers": [
+        "occ_snapshot"
+      ],
       "as_is": "occ_snap_uses_published_as_is",
       "three_teeth": true,
       "dst_plant": {
@@ -3462,10 +3471,14 @@
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
       "verus": "scripts/verus_group_commit_kernel.sh",
-      "callers": ["crates/pedradb-core/src/concurrent.rs"],
+      "callers": [
+        "crates/pedradb-core/src/concurrent.rs"
+      ],
       "entry": "rwlock_client_may_mutate",
       "data_fate": true,
-      "handlers": ["finish_group_off_lock"],
+      "handlers": [
+        "finish_group_off_lock"
+      ],
       "as_is": "rwlock_client_may_mutate_as_is",
       "live_callers": [
         {
@@ -4580,7 +4593,7 @@
       "id": "sst_crc",
       "finding": "RFC-0077",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
       "twin": "crates/pedradb-core/src/sst/scan_kernel.rs",
       "aeneas": "scripts/aeneas_scan.sh",
@@ -4949,7 +4962,7 @@
       "id": "run_disjoint",
       "finding": "RFC-0164 P1.2",
       "twin_kind": "model",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/probe_order_kernel.rs",
       "twin": "crates/pedradb-core/src/probe_order_kernel.rs",
       "verus": "scripts/verus_probe_order.sh",
@@ -5024,7 +5037,7 @@
       "id": "zero_glue",
       "finding": "RFC-0155",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
       "twin": "crates/pedradb-core/src/sst/scan_kernel.rs",
       "aeneas": "scripts/aeneas_scan.sh",
@@ -5370,7 +5383,7 @@
       "id": "r1_no_resurrection",
       "finding": "RFC-0166 P0.1",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-spec/src/properties_kernel.rs",
       "twin": "crates/pedradb-spec/src/properties_kernel.rs",
       "aeneas": "scripts/aeneas_properties.sh",
@@ -5389,7 +5402,7 @@
       "id": "t1_atomicity",
       "finding": "RFC-0166 P0.1",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-spec/src/properties_kernel.rs",
       "twin": "crates/pedradb-spec/src/properties_kernel.rs",
       "aeneas": "scripts/aeneas_properties.sh",
@@ -5408,7 +5421,7 @@
       "id": "c1_quorum",
       "finding": "RFC-0166 P0.1",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-spec/src/properties_kernel.rs",
       "twin": "crates/pedradb-spec/src/properties_kernel.rs",
       "aeneas": "scripts/aeneas_properties.sh",
@@ -5581,7 +5594,7 @@
       "id": "sst_block_crc",
       "finding": "RFC-0077 P1.1",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
       "twin": "crates/pedradb-core/src/sst/scan_kernel.rs",
       "aeneas": "scripts/aeneas_scan.sh",
@@ -5735,7 +5748,7 @@
       "id": "compact_split",
       "finding": "RFC-0160 OOM",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/compact_kernel.rs",
       "twin": "crates/pedradb-core/src/compact_kernel.rs",
       "aeneas": "scripts/aeneas_compact.sh",
@@ -5754,7 +5767,7 @@
       "id": "compact_split_at",
       "finding": "RFC-0160 OOM",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/compact_kernel.rs",
       "twin": "crates/pedradb-core/src/compact_kernel.rs",
       "aeneas": "scripts/aeneas_compact.sh",
@@ -5773,7 +5786,7 @@
       "id": "lone_tombstone",
       "finding": "F177",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/compact_kernel.rs",
       "twin": "crates/pedradb-core/src/compact_kernel.rs",
       "aeneas": "scripts/aeneas_compact.sh",
@@ -5799,7 +5812,7 @@
       "id": "changelog_should_store",
       "finding": "RFC-0031 P0.1",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
       "twin": "crates/pedradb-core/src/changelog_kernel.rs",
       "verus": "scripts/verus_changelog_rebuild.sh",
@@ -5824,7 +5837,7 @@
       "id": "changelog_budget",
       "finding": "RFC-0039 P0.3",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
       "twin": "crates/pedradb-core/src/changelog_kernel.rs",
       "verus": "scripts/verus_changelog_rebuild.sh",
@@ -5899,7 +5912,7 @@
       "id": "probe_order_covering",
       "finding": "RFC-0164 P0.2",
       "twin_kind": "model",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/probe_order_kernel.rs",
       "twin": "crates/pedradb-core/src/probe_order_kernel.rs",
       "verus": "scripts/verus_probe_order.sh",
@@ -5953,10 +5966,14 @@
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
       "verus": "scripts/verus_group_commit_kernel.sh",
-      "callers": ["crates/pedradb-core/src/concurrent.rs"],
+      "callers": [
+        "crates/pedradb-core/src/concurrent.rs"
+      ],
       "entry": "occ_member_fate",
       "data_fate": true,
-      "handlers": ["validate_occ_batch"],
+      "handlers": [
+        "validate_occ_batch"
+      ],
       "as_is": "occ_member_fate_as_is",
       "live_callers": [
         {
@@ -5978,10 +5995,15 @@
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
       "verus": "scripts/verus_group_commit_kernel.sh",
-      "callers": ["crates/pedradb-core/src/concurrent.rs"],
+      "callers": [
+        "crates/pedradb-core/src/concurrent.rs"
+      ],
       "entry": "occ_batch_plan",
       "data_fate": true,
-      "handlers": ["validate_occ_batch", "lone_commit"],
+      "handlers": [
+        "validate_occ_batch",
+        "lone_commit"
+      ],
       "as_is": "occ_batch_plan_as_is",
       "live_callers": [
         {
@@ -6370,7 +6392,7 @@
       "id": "d1_put_ok",
       "finding": "RFC-0166 P1.3",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/d1_modelo_kernel.rs",
       "twin": "crates/pedradb-core/src/d1_modelo_kernel.rs",
       "aeneas": "scripts/aeneas_d1_modelo.sh",
@@ -6390,7 +6412,7 @@
       "id": "d1_modelo",
       "finding": "RFC-0166 P1.3",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/d1_modelo_kernel.rs",
       "twin": "crates/pedradb-core/src/d1_modelo_kernel.rs",
       "aeneas": "scripts/aeneas_d1_modelo.sh",
@@ -6410,7 +6432,7 @@
       "id": "point_get_prefer",
       "finding": "F84",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-store/src/si_kernel.rs",
       "twin": "crates/pedradb-store/src/si_kernel.rs",
       "aeneas": "scripts/aeneas_si.sh",
@@ -6436,7 +6458,7 @@
       "id": "point_get_wm",
       "finding": "F42/F84",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-store/src/si_kernel.rs",
       "twin": "crates/pedradb-store/src/si_kernel.rs",
       "aeneas": "scripts/aeneas_si.sh",
@@ -6481,7 +6503,7 @@
       "id": "len_tag",
       "finding": "F80",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-store/src/index_val_kernel.rs",
       "twin": "crates/pedradb-store/src/index_val_kernel.rs",
       "aeneas": "scripts/aeneas_index_val.sh",
@@ -6500,7 +6522,7 @@
       "id": "exact_children",
       "finding": "F78/F80",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "atom": "value_len_tag",
       "kernel": "crates/pedradb-store/src/index_val_kernel.rs",
       "twin": "crates/pedradb-store/src/index_val_kernel.rs",
@@ -6610,7 +6632,7 @@
       "id": "write_ack_append",
       "finding": "RFC-0166 P1.4",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_ack_kernel.rs",
       "twin": "crates/pedradb-core/src/write_ack_kernel.rs",
       "aeneas": "scripts/aeneas_write_ack.sh",
@@ -6631,7 +6653,7 @@
       "id": "write_ack_barrier",
       "finding": "RFC-0166 P1.4",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_ack_kernel.rs",
       "twin": "crates/pedradb-core/src/write_ack_kernel.rs",
       "aeneas": "scripts/aeneas_write_ack.sh",
@@ -6652,7 +6674,7 @@
       "id": "write_ack_ack",
       "finding": "RFC-0166 P1.4",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_ack_kernel.rs",
       "twin": "crates/pedradb-core/src/write_ack_kernel.rs",
       "aeneas": "scripts/aeneas_write_ack.sh",
@@ -6675,7 +6697,7 @@
       "as_is": "lsm_probe_as_is",
       "finding": "RFC-0166 P2.1",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/lsm_r1_kernel.rs",
       "twin": "crates/pedradb-core/src/lsm_r1_kernel.rs",
       "aeneas": "scripts/aeneas_lsm_r1.sh",
@@ -6695,7 +6717,7 @@
       "as_is": "lsm_compact_as_is",
       "finding": "RFC-0166 P2.1",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/lsm_r1_kernel.rs",
       "twin": "crates/pedradb-core/src/lsm_r1_kernel.rs",
       "aeneas": "scripts/aeneas_lsm_r1.sh",
@@ -6715,7 +6737,7 @@
       "as_is": "lsm_reopen_as_is",
       "finding": "RFC-0166 P2.1",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/lsm_r1_kernel.rs",
       "twin": "crates/pedradb-core/src/lsm_r1_kernel.rs",
       "aeneas": "scripts/aeneas_lsm_r1.sh",
@@ -6735,7 +6757,7 @@
       "as_is": "r1_modelo_as_is",
       "finding": "RFC-0166 P2.1",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/lsm_r1_kernel.rs",
       "twin": "crates/pedradb-core/src/lsm_r1_kernel.rs",
       "aeneas": "scripts/aeneas_lsm_r1.sh",
@@ -6755,7 +6777,7 @@
       "as_is": "tx_abort_as_is",
       "finding": "RFC-0166 P2.2",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-store/src/t1_modelo_kernel.rs",
       "twin": "crates/pedradb-store/src/t1_modelo_kernel.rs",
       "aeneas": "scripts/aeneas_t1_modelo.sh",
@@ -6774,7 +6796,7 @@
       "as_is": "tx_recover_as_is",
       "finding": "RFC-0166 P2.2",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-store/src/t1_modelo_kernel.rs",
       "twin": "crates/pedradb-store/src/t1_modelo_kernel.rs",
       "aeneas": "scripts/aeneas_t1_modelo.sh",
@@ -6793,7 +6815,7 @@
       "as_is": "t1_modelo_as_is",
       "finding": "RFC-0166 P2.2",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-store/src/t1_modelo_kernel.rs",
       "twin": "crates/pedradb-store/src/t1_modelo_kernel.rs",
       "aeneas": "scripts/aeneas_t1_modelo.sh",
@@ -6812,7 +6834,7 @@
       "as_is": "c1_advance_commit_as_is",
       "finding": "RFC-0166 P2.3",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/c1_modelo_kernel.rs",
       "twin": "crates/pedradb-raft/src/c1_modelo_kernel.rs",
       "aeneas": "scripts/aeneas_c1_modelo.sh",
@@ -6831,7 +6853,7 @@
       "as_is": "c1_modelo_as_is",
       "finding": "RFC-0166 P2.3",
       "twin_kind": "close",
-        "single_artifact": true,
+      "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/c1_modelo_kernel.rs",
       "twin": "crates/pedradb-raft/src/c1_modelo_kernel.rs",
       "aeneas": "scripts/aeneas_c1_modelo.sh",
@@ -6898,10 +6920,14 @@
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "verus": "scripts/verus_write_admission.sh",
-      "callers": ["crates/pedradb-core/src/db.rs"],
+      "callers": [
+        "crates/pedradb-core/src/db.rs"
+      ],
       "entry": "wal_sync_required",
       "data_fate": true,
-      "handlers": ["commit_ops_with"],
+      "handlers": [
+        "commit_ops_with"
+      ],
       "as_is": "wal_sync_required_as_is",
       "three_teeth": true,
       "dst_plant": {
@@ -6917,10 +6943,15 @@
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "verus": "scripts/verus_write_admission.sh",
-      "callers": ["crates/pedradb-core/src/db.rs"],
+      "callers": [
+        "crates/pedradb-core/src/db.rs"
+      ],
       "entry": "seq_exhausted",
       "data_fate": true,
-      "handlers": ["alloc_seq", "open_with_env_sourced"],
+      "handlers": [
+        "alloc_seq",
+        "open_with_env_sourced"
+      ],
       "as_is": "seq_exhausted_as_is",
       "three_teeth": true,
       "dst_plant": {
@@ -6936,10 +6967,14 @@
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "verus": "scripts/verus_write_admission.sh",
-      "callers": ["crates/pedradb-core/src/db.rs"],
+      "callers": [
+        "crates/pedradb-core/src/db.rs"
+      ],
       "entry": "batch_is_empty",
       "data_fate": true,
-      "handlers": ["apply_batch_with"],
+      "handlers": [
+        "apply_batch_with"
+      ],
       "as_is": "batch_is_empty_as_is",
       "three_teeth": true,
       "dst_plant": {
@@ -6955,10 +6990,14 @@
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "verus": "scripts/verus_write_admission.sh",
-      "callers": ["crates/pedradb-core/src/db.rs"],
+      "callers": [
+        "crates/pedradb-core/src/db.rs"
+      ],
       "entry": "fence_on_sync_fail",
       "data_fate": true,
-      "handlers": ["commit_ops_with"],
+      "handlers": [
+        "commit_ops_with"
+      ],
       "as_is": "fence_on_sync_fail_as_is",
       "three_teeth": true,
       "dst_plant": {
@@ -6974,10 +7013,14 @@
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "verus": "scripts/verus_write_admission.sh",
-      "callers": ["crates/pedradb-core/src/db.rs"],
+      "callers": [
+        "crates/pedradb-core/src/db.rs"
+      ],
       "entry": "wal_commit_plan",
       "data_fate": true,
-      "handlers": ["commit_ops_with"],
+      "handlers": [
+        "commit_ops_with"
+      ],
       "as_is": "wal_commit_plan_as_is",
       "three_teeth": true,
       "dst_plant": {
@@ -6993,10 +7036,14 @@
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "verus": "scripts/verus_write_admission.sh",
-      "callers": ["crates/pedradb-core/src/db.rs"],
+      "callers": [
+        "crates/pedradb-core/src/db.rs"
+      ],
       "entry": "torn_head_is_empty_log",
       "data_fate": true,
-      "handlers": ["open_with_env_sourced"],
+      "handlers": [
+        "open_with_env_sourced"
+      ],
       "as_is": "torn_head_is_empty_log_as_is",
       "three_teeth": true,
       "dst_plant": {
@@ -7012,10 +7059,14 @@
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "verus": "scripts/verus_write_admission.sh",
-      "callers": ["crates/pedradb-core/src/db.rs"],
+      "callers": [
+        "crates/pedradb-core/src/db.rs"
+      ],
       "entry": "torn_tail_needs_cut",
       "data_fate": true,
-      "handlers": ["open_with_env_sourced"],
+      "handlers": [
+        "open_with_env_sourced"
+      ],
       "as_is": "torn_tail_needs_cut_as_is",
       "three_teeth": true,
       "dst_plant": {
@@ -7031,10 +7082,14 @@
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "verus": "scripts/verus_write_admission.sh",
-      "callers": ["crates/pedradb-core/src/db.rs"],
+      "callers": [
+        "crates/pedradb-core/src/db.rs"
+      ],
       "entry": "seq_after_feed",
       "data_fate": true,
-      "handlers": ["open_with_env_sourced"],
+      "handlers": [
+        "open_with_env_sourced"
+      ],
       "as_is": "seq_after_feed_as_is",
       "three_teeth": true,
       "dst_plant": {
@@ -7050,10 +7105,14 @@
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "verus": "scripts/verus_write_admission.sh",
-      "callers": ["crates/pedradb-core/src/db.rs"],
+      "callers": [
+        "crates/pedradb-core/src/db.rs"
+      ],
       "entry": "pit_resync_needs_rewrite",
       "data_fate": true,
-      "handlers": ["open_with_env_sourced"],
+      "handlers": [
+        "open_with_env_sourced"
+      ],
       "as_is": "pit_resync_needs_rewrite_as_is",
       "three_teeth": true,
       "dst_plant": {
@@ -7069,10 +7128,14 @@
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "verus": "scripts/verus_write_admission.sh",
-      "callers": ["crates/pedradb-core/src/db.rs"],
+      "callers": [
+        "crates/pedradb-core/src/db.rs"
+      ],
       "entry": "dir_sync_required",
       "data_fate": true,
-      "handlers": ["sync_dir_if_required"],
+      "handlers": [
+        "sync_dir_if_required"
+      ],
       "as_is": "dir_sync_required_as_is",
       "three_teeth": true,
       "dst_plant": {

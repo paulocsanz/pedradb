@@ -22,3 +22,4 @@ atom	catalog:txn	txn_commit_action_reverts_iff_abort	formal/aeneas/lean/Txn.lean
 atom	catalog:tx_glue	tx_range_action_majority_reverts_iff_failed_and_committed	formal/aeneas/lean/TxGlue.lean	tx_range_action
 atom	catalog:revert_clears_status	revert_clears_status_clears_iff_pairs_gone_and_live	formal/aeneas/lean/Txn.lean	revert_clears_status
 atom	catalog:durable_term	durable_term_if_newer_raised_iff_newer_and_persisted	formal/aeneas/lean/Vote.lean	durable_term_if_newer
+atom	catalog:queued_leave_finish	queued_leave_finish_ok_iff_not_in_log_or_committed	formal/aeneas/lean/Membership.lean	queued_leave_finish_ok

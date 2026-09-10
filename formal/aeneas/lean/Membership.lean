@@ -148,3 +148,26 @@ theorem c1_as_is_elects_on_old_alone :
   unfold joint_election_ok_as_is
   rw [majority_of_closed]
   simp only [bind_tc_ok]
+
+/-- Catalog entry: an uncommitted leave finishes exactly when the leave
+    entry is not in the log, or it is already committed
+    (RFC-0122/0123 — a leave still in the log and uncommitted does not
+    finish). -/
+theorem queued_leave_finish_ok_iff_not_in_log_or_committed :
+    ∀ (leave_in_log : Bool) (leave_committed : Bool),
+      (queued_leave_finish_ok leave_in_log leave_committed = ok true)
+        ↔ (leave_in_log = false ∨ leave_committed = true) := by
+  intro leave_in_log leave_committed
+  unfold queued_leave_finish_ok
+  constructor
+  · intro h
+    split at h
+    · next c1 =>
+      simp at h
+      exact Or.inr h
+    · next c1 => exact Or.inl (by simp at c1; exact c1)
+  · rintro (h1 | hc)
+    · rw [if_neg (by simp [h1])]
+    · split
+      · next _ => rw [hc]
+      · rfl
