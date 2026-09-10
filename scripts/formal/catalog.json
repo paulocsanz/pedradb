@@ -3381,7 +3381,7 @@
     {
       "id": "blob_gc_pick",
       "finding": "F-active-gen",
-      "twin_kind": "close",
+      "twin_kind": "atom",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/vlog_gc_kernel.rs",
       "twin": "crates/pedradb-core/src/vlog_gc_kernel.rs",
@@ -3390,7 +3390,6 @@
         "crates/pedradb-core/src/db.rs"
       ],
       "entry": "blob_gc_action",
-      "data_fate": true,
       "handlers": [
         "compact_blob_auto"
       ],
@@ -3398,7 +3397,13 @@
       "dst_plant": {
         "file": "crates/pedradb-core/src/vlog_gc_kernel.rs",
         "test": "blob_gc_action_on_live_active_is_not_ok"
-      }
+      },
+      "atom": "blob_gc_action",
+      "atom_reason": {
+        "date": "2026-09-10",
+        "why": "RFC-0191 P2.3 cadence (fifteenth if): the blob-GC disposition — the GC rewrites a blob gen exactly when the gen is inactive AND still carries bytes (an active gen is never rewritten; an empty inactive gen has nothing to rewrite, F-active-gen) — proven forall over (is_active, bytes) as blob_gc_action_rewrite_iff_inactive_with_bytes in VlogGc.lean; the db trampoline (compact_blob_auto) matches the kernel decision"
+      },
+      "three_teeth": true
     },
     {
       "id": "tx_glue",

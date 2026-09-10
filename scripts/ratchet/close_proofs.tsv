@@ -28,3 +28,4 @@ atom	catalog:joint_election	joint_election_ok_elects_iff_old_and_new_majority	fo
 atom	catalog:lease	lease_live_iff_zero_or_now_below	formal/aeneas/lean/Lease.lean	lease_live
 atom	catalog:ae_ack	ae_ack_success_ok_iff_clean_or_dirty_persisted	formal/aeneas/lean/Ae.lean	ae_ack_success
 atom	catalog:sched_plant_joint	plant_joint_schedule_ok_iff_opt_in_emits_and_default_omits	formal/aeneas/lean/StoreMembership.lean	plant_joint_schedule_ok
+atom	catalog:blob_gc_pick	blob_gc_action_rewrite_iff_inactive_with_bytes	formal/aeneas/lean/VlogGc.lean	blob_gc_action
