@@ -5744,3 +5744,50 @@ fn recover_last_applied_on_live_queued_is_not_ok() {
     );
     let _ = std::fs::remove_dir_all(&parent);
 }
+
+/// C1 corollary (RFC-0166 P2.3) on the live Queued path: a served index
+/// is committed by a majority of EVERY active config. Atoms pin the joint
+/// shape (C-old 2/3 + C-new 1/4: the honest step refuses, AS-IS commits
+/// and acks on C-old alone); the live part settles a write over
+/// RpcMode::Queued — commit only advances through pumped AE replies and
+/// every node serves the value strictly after that majority commit.
+#[test]
+fn c1_modelo_on_live_queued_joint_is_not_ok() {
+    use pedradb_raft::c1_modelo_kernel::joint_add_shape;
+    use pedradb_raft::commit_kernel::propose_ack_ok;
+    use pedradb_raft::{c1_advance_commit, c1_advance_commit_as_is, c1_modelo, c1_modelo_as_is};
+
+    let s = joint_add_shape();
+    assert!(!c1_modelo(s), "C-new 1/4 is not a majority of 4: no ack");
+    assert!(c1_modelo_as_is(s), "AS-IS dente: C-old alone commits and acks");
+    let honest = c1_advance_commit(s);
+    assert_eq!(honest.commit_index, 0, "honest step refuses the joint add");
+    assert_eq!(
+        c1_advance_commit_as_is(s).commit_index,
+        5,
+        "AS-IS dente: old majority commits during the joint"
+    );
+
+    let mut q = LiveQueued::open();
+    qput(&mut q.cluster, b"rfc0166-c1", b"v");
+    let leader = q.cluster.range_leader(1).unwrap();
+    let commit = q.cluster.commit_index(leader, 1);
+    assert!(commit >= 1, "write committed via pumped replies");
+    assert!(
+        propose_ack_ok(commit, commit),
+        "served index is covered by the majority commit"
+    );
+    for &nid in &q.cluster.ids.clone() {
+        assert_eq!(
+            q.cluster
+                .nodes
+                .get(&nid)
+                .unwrap()
+                .db
+                .get(b"rfc0166-c1".as_ref())
+                .as_deref(),
+            Some(b"v".as_ref()),
+            "node {nid} serves only committed data"
+        );
+    }
+}

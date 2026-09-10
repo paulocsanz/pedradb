@@ -6642,8 +6642,8 @@
       ],
       "three_teeth": true,
       "dst_plant": {
-        "file": "crates/pedradb-raft/src/c1_modelo_kernel.rs",
-        "test": "c1_modelo_on_live_joint_is_not_ok"
+        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
+        "test": "c1_modelo_on_live_queued_joint_is_not_ok"
       }
     },
     {
@@ -6661,8 +6661,8 @@
       ],
       "three_teeth": true,
       "dst_plant": {
-        "file": "crates/pedradb-raft/src/c1_modelo_kernel.rs",
-        "test": "c1_modelo_on_live_joint_is_not_ok"
+        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
+        "test": "c1_modelo_on_live_queued_joint_is_not_ok"
       }
     },
     {
