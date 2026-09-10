@@ -5186,3 +5186,384 @@ fn l28_real_tcp_is_campaign_not_forall() {
     );
     assert!(world_seed_l28_ok_as_is(0, false));
 }
+
+// ── txn_kernel three-teeth (F34/F35/F47/F50) — dst plants on live Queued ──
+
+/// Resolve a Queued client propose: on NotCommitted, pump World until the
+/// index is majority-committed, then finish (RFC-0059 pattern).
+fn settle(c: &mut StoreCluster, r: Result<(), StoreError>) {
+    match r {
+        Ok(()) => {}
+        Err(StoreError::NotCommitted { range_id, index, .. }) => {
+            for _ in 0..96 {
+                pump_queued(c, 48);
+                let commit = c
+                    .range_leader(range_id)
+                    .map(|lid| c.commit_index(lid, range_id))
+                    .unwrap_or(0);
+                if commit >= index {
+                    assert!(
+                        c.finish_queued_propose(range_id, index, true)
+                            .expect("finish_queued_propose"),
+                        "queued propose must resolve committed"
+                    );
+                    pump_queued(c, 48);
+                    return;
+                }
+            }
+            panic!("queued propose on range {range_id} never committed");
+        }
+        Err(e) => panic!("queued client op: {e}"),
+    }
+}
+
+/// Queued propose of a raw entry (the same broadcast_append the client APIs use).
+fn qpropose(c: &mut StoreCluster, rid: u64, entry: RangeEntry) {
+    let leader = c
+        .range_leader(rid)
+        .expect("Queued cluster must have a leader");
+    let r = c.broadcast_append(rid, leader, Some(entry));
+    settle(c, r);
+    pump_queued(c, 48);
+}
+
+/// Queued user put.
+fn qput(c: &mut StoreCluster, key: &[u8], value: &[u8]) {
+    let r = c.put(key, value);
+    settle(c, r);
+    pump_queued(c, 48);
+}
+
+/// F34/F118: revert restores the preimage; a key with no prepare record is
+/// left untouched (AS-IS blind-deletes it).
+#[test]
+fn revert_user_action_on_live_queued_is_not_ok() {
+    use crate::txn_kernel::{revert_user_action, revert_user_action_as_is, RevertUserAction};
+    assert_eq!(
+        revert_user_action(false, false),
+        RevertUserAction::LeaveUntouched
+    );
+    assert_eq!(revert_user_action(true, true), RevertUserAction::RestoreAbsent);
+    assert_eq!(revert_user_action(true, false), RevertUserAction::RestoreValue);
+    assert_eq!(
+        revert_user_action_as_is(false, false),
+        RevertUserAction::RestoreAbsent,
+        "AS-IS dente: no preimage record still blind-deletes"
+    );
+    let mut q = LiveQueued::open();
+    // Live RestoreValue: TxnRevert after TxnPrepare must put the old value back.
+    qput(&mut q.cluster, b"rfc0151-rev-a", b"v0");
+    qpropose(
+        &mut q.cluster,
+        1,
+        RangeEntry::TxnPrepare {
+            txn_id: 901,
+            pairs: vec![(b"rfc0151-rev-a".to_vec(), b"v1".to_vec())],
+        },
+    );
+    qpropose(
+        &mut q.cluster,
+        1,
+        RangeEntry::TxnRevert {
+            txn_id: 901,
+            keys: vec![b"rfc0151-rev-a".to_vec()],
+        },
+    );
+    assert_eq!(
+        q.cluster.get(b"rfc0151-rev-a").unwrap().as_deref(),
+        Some(b"v0".as_ref()),
+        "live revert must restore the preimage, not blind-delete (AS-IS deletes)"
+    );
+    // Live LeaveUntouched: TxnRevert naming a never-prepared key keeps it.
+    qput(&mut q.cluster, b"rfc0151-rev-b", b"keep");
+    qpropose(
+        &mut q.cluster,
+        1,
+        RangeEntry::TxnRevert {
+            txn_id: 4242,
+            keys: vec![b"rfc0151-rev-b".to_vec()],
+        },
+    );
+    assert_eq!(
+        q.cluster.get(b"rfc0151-rev-b").unwrap().as_deref(),
+        Some(b"keep".as_ref()),
+        "missing preimage must leave the user key untouched (AS-IS deletes)"
+    );
+}
+
+/// F47: an abort-status txn keeps its fence when revert empties the pair
+/// records; a non-abort status is cleared (AS-IS drops even the abort fence
+/// on every node the raft TxnRevert reaches).
+#[test]
+fn revert_clears_status_on_live_queued_is_not_ok() {
+    use crate::txn_kernel::{revert_clears_status, revert_clears_status_as_is};
+    assert!(revert_clears_status(false, true));
+    assert!(!revert_clears_status(true, true));
+    assert!(
+        revert_clears_status_as_is(true, true),
+        "AS-IS dente: revert drops even an abort fence"
+    );
+    let mut q = LiveQueued::open();
+    // Fenced txn: the abort status must survive the raft-applied TxnRevert.
+    qput(&mut q.cluster, b"rfc0151-fen", b"v0");
+    qpropose(
+        &mut q.cluster,
+        1,
+        RangeEntry::TxnPrepare {
+            txn_id: 902,
+            pairs: vec![(b"rfc0151-fen".to_vec(), b"v1".to_vec())],
+        },
+    );
+    q.cluster.fence_txn_aborted(902).unwrap();
+    qpropose(
+        &mut q.cluster,
+        1,
+        RangeEntry::TxnRevert {
+            txn_id: 902,
+            keys: vec![b"rfc0151-fen".to_vec()],
+        },
+    );
+    let sk = crate::txn_status_key(902);
+    for (nid, n) in q.cluster.nodes.iter() {
+        assert_eq!(
+            n.db.get(&sk).as_deref(),
+            Some(b"abort".as_ref()),
+            "abort fence must survive revert on node {nid} (F47; AS-IS deletes it when the raft TxnRevert applies)"
+        );
+    }
+    // Non-abort txn: status is cleared once no pair records remain.
+    qpropose(
+        &mut q.cluster,
+        1,
+        RangeEntry::TxnPrepare {
+            txn_id: 903,
+            pairs: vec![(b"rfc0151-fen2".to_vec(), b"v1".to_vec())],
+        },
+    );
+    qpropose(
+        &mut q.cluster,
+        1,
+        RangeEntry::TxnRevert {
+            txn_id: 903,
+            keys: vec![b"rfc0151-fen2".to_vec()],
+        },
+    );
+    let sk3 = crate::txn_status_key(903);
+    for (nid, n) in q.cluster.nodes.iter() {
+        assert!(
+            n.db.get(&sk3).is_none(),
+            "non-abort status must be cleared by revert on node {nid}"
+        );
+    }
+}
+
+/// F35: a prepared-but-unfinished TX left on disk by a crash is aborted and
+/// reverted on reopen (AS-IS leaves the intents live with no fence).
+#[test]
+fn leftover_txn_is_aborted_on_live_reopen_is_not_ok() {
+    use crate::txn_kernel::{leftover_txn_is_aborted, leftover_txn_is_aborted_as_is};
+    assert!(leftover_txn_is_aborted());
+    assert!(
+        !leftover_txn_is_aborted_as_is(),
+        "AS-IS dente: leftover intents stay live"
+    );
+    let dir = std::env::temp_dir().join(format!(
+        "pedra-queued-leftover-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut cluster = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x0151_00f5)).unwrap();
+    cluster.pin_dst_queued();
+    for _ in 0..120 {
+        cluster.tick().unwrap();
+        pump_queued(&mut cluster, 48);
+        if cluster.range_leader(1).is_some() {
+            break;
+        }
+    }
+    assert!(cluster.range_leader(1).is_some());
+    qput(&mut cluster, b"rfc0151-lo", b"v0");
+    qpropose(
+        &mut cluster,
+        1,
+        RangeEntry::TxnPrepare {
+            txn_id: 903,
+            pairs: vec![(b"rfc0151-lo".to_vec(), b"v1".to_vec())],
+        },
+    );
+    let ik = crate::intent_key(b"rfc0151-lo");
+    drop(cluster);
+    let mut reopened = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x0151_00f6)).unwrap();
+    reopened.pin_dst_queued();
+    let sk = crate::txn_status_key(903);
+    let total = reopened.nodes.len();
+    let fenced = reopened
+        .nodes
+        .values()
+        .filter(|n| n.db.get(&sk).as_deref() == Some(b"abort".as_ref()))
+        .count();
+    let intent_free = reopened
+        .nodes
+        .values()
+        .filter(|n| n.db.get(&ik).is_none())
+        .count();
+    assert_eq!(fenced, total, "reopen must abort-fence the leftover txn (F35)");
+    assert_eq!(intent_free, total, "reopen must revert leftover intents (F35)");
+    for _ in 0..120 {
+        reopened.tick().unwrap();
+        pump_queued(&mut reopened, 48);
+        if reopened.range_leader(1).is_some() {
+            break;
+        }
+    }
+    assert_eq!(
+        reopened.get(b"rfc0151-lo").unwrap().as_deref(),
+        Some(b"v0".as_ref()),
+        "reopen revert must restore the preimage"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// F35: reopen never reuses a txn id that is durable on disk (AS-IS restarts
+/// the counter at 1 and collides with the leftover txn).
+#[test]
+fn next_txn_id_after_on_live_reopen_is_not_ok() {
+    use crate::txn_kernel::{next_txn_id_after, next_txn_id_as_is};
+    assert_eq!(next_txn_id_after(7), 8);
+    assert_eq!(next_txn_id_as_is(7), 1, "AS-IS dente: counter restarts at 1");
+    let dir = std::env::temp_dir().join(format!(
+        "pedra-queued-nextid-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut cluster = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x0151_00f7)).unwrap();
+    cluster.pin_dst_queued();
+    for _ in 0..120 {
+        cluster.tick().unwrap();
+        pump_queued(&mut cluster, 48);
+        if cluster.range_leader(1).is_some() {
+            break;
+        }
+    }
+    assert!(cluster.range_leader(1).is_some());
+    // Two durable txn ids on disk (904, 905) via committed prepares.
+    for (tid, k) in [(904u64, b"rfc0151-id-a".as_ref()), (905u64, b"rfc0151-id-b".as_ref())] {
+        qpropose(
+            &mut cluster,
+            1,
+            RangeEntry::TxnPrepare {
+                txn_id: tid,
+                pairs: vec![(k.to_vec(), b"x".to_vec())],
+            },
+        );
+    }
+    drop(cluster);
+    let mut reopened = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x0151_00f8)).unwrap();
+    reopened.pin_dst_queued();
+    assert_eq!(
+        reopened.next_txn_id, 906,
+        "reopen must continue after the durable max txn id (F35; AS-IS restarts at 1)"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// F50: a prepare that fails on a later range must abort the earlier ranges'
+/// durable intents (AS-IS returns without cleanup → immortal Conflict).
+/// NOTE: `tx_start`'s F50 branch is Direct-mode reachable — under a
+/// Queued-pinned cluster every propose returns NotCommitted before any range
+/// reaches `keys_by_range`, so the plant drives the same production cleanup
+/// (`cleanup_range_keys(Abort)`) on a durably prepared earlier range.
+#[test]
+fn prepare_error_aborts_earlier_on_live_queued_is_not_ok() {
+    use crate::txn_kernel::{prepare_error_aborts_earlier, prepare_error_aborts_earlier_as_is};
+    assert!(prepare_error_aborts_earlier());
+    assert!(
+        !prepare_error_aborts_earlier_as_is(),
+        "AS-IS dente: ? returns without cleanup"
+    );
+    let dir = std::env::temp_dir().join(format!(
+        "pedra-queued-preperr-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut cluster = StoreCluster::open_with_rng(&dir, 3, 2, SeedRng::new(0x0151_00f9)).unwrap();
+    cluster.pin_dst_queued();
+    for _ in 0..240 {
+        cluster.tick().unwrap();
+        pump_queued(&mut cluster, 48);
+        if cluster.range_leader(1).is_some() && cluster.range_leader(2).is_some() {
+            break;
+        }
+    }
+    assert!(cluster.range_leader(1).is_some() && cluster.range_leader(2).is_some());
+    // One key per range: k2 is range 2's first key (byte-range split).
+    let k2 = cluster
+        .ranges
+        .iter()
+        .find(|r| r.id == 2)
+        .map(|r| r.start.clone())
+        .filter(|s| !s.is_empty())
+        .expect("range 2 must have a non-empty start");
+    let mut k1 = None;
+    for i in 0..128u32 {
+        let k = format!("rfc0151-pe-{i}").into_bytes();
+        if cluster.locate(&k).unwrap() == 1 {
+            k1 = Some(k);
+            break;
+        }
+    }
+    let k1 = k1.expect("key in range 1");
+    assert_ne!(cluster.locate(&k1).unwrap(), cluster.locate(&k2).unwrap());
+    // Earlier range durably prepared (the state F50 must clean up).
+    qpropose(
+        &mut cluster,
+        1,
+        RangeEntry::TxnPrepare {
+            txn_id: 906,
+            pairs: vec![(k1.clone(), b"v".to_vec())],
+        },
+    );
+    let ik = crate::intent_key(&k1);
+    let leader1 = cluster.range_leader(1).unwrap();
+    assert!(
+        cluster.nodes.get(&leader1).unwrap().db.get(&ik).is_some(),
+        "setup: earlier range must hold a durable intent"
+    );
+    // Later range fails leaderless: the failure site tx_start hits.
+    let _ = cluster.drain_outbound();
+    for n in cluster.nodes.values_mut() {
+        if let Some(p) = n.ranges.get_mut(&2) {
+            p.role = crate::Role::Follower;
+        }
+    }
+    assert!(cluster.range_leader(2).is_none());
+    // The production F50 cleanup for the earlier range.
+    cluster
+        .cleanup_range_keys(1, 906, &[k1.clone()], crate::CleanupMode::Abort)
+        .unwrap();
+    for _ in 0..4 {
+        cluster.tick().unwrap();
+        pump_queued(&mut cluster, 48);
+    }
+    for (nid, n) in cluster.nodes.iter() {
+        assert!(
+            n.db.get(&ik).is_none(),
+            "F50: failed prepare must abort the earlier range's intents on node {nid} (AS-IS leaves an immortal Conflict)"
+        );
+    }
+    // The same key must be immediately writable again (AS-IS: Conflict).
+    qput(&mut cluster, &k1, b"v2");
+    let _ = std::fs::remove_dir_all(&dir);
+}

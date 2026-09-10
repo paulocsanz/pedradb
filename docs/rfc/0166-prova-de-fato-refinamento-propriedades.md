@@ -162,7 +162,19 @@ catálogo separa **proof objects** de **campaign gates** (família `l28_*`).
       (abort keep fence) e `leftover_txn_is_aborted` (recover); planta viva
       `t1_modelo_on_live_abort_reopen_is_not_ok` (2 keys prepared, reopen
       ambas ausentes + status=abort); 3 pares no catálogo:
-      tx_abort/tx_recover/t1_modelo)
+      tx_abort/tx_recover/t1_modelo; 2026-09-09 fire 795: dentes dst_plant
+      do txn_kernel pagos como plantas vivas Queued no
+      `three_teeth_queued.rs` — `revert_user_action` (RestoreValue via
+      TxnPrepare+TxnRevert; LeaveUntouched em chave sem preimage),
+      `revert_clears_status` (fence abort sobrevive ao TxnRevert raft em
+      todos os nós; não-abort limpa), `leftover_txn_is_aborted` (reopen
+      cerca+reverte+restaura preimage), `next_txn_id_after` (reopen 906
+      após ids 904/905 duráveis), `prepare_error_aborts_earlier`
+      (cleanup_range_keys Abort em range anterior preparado; achado:
+      branch F50 do `tx_start` inalcançável sob Queued — todo propose
+      retorna NotCommitted antes de popular keys_by_range — só Direct;
+      planta dirige o mesmo cleanup de produção); settle/qpropose =
+      padrão RFC-0059 pump+finish; formal 110→105)
 - [x] **P2.3** C1: refinamento handler↔modelo abstrato para a superfície
       vote/ae/commit/membership (estende RFC-0053) — status: `done`
       (kernel `crates/pedradb-raft/src/c1_modelo_kernel.rs` 4/4; twin
