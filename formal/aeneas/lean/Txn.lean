@@ -20,11 +20,21 @@ theorem txn_commit_action_as_is_dente :
 /-- Catalog corollary: leftover TX recovers aborted (T1 shim unfolds this). -/
 theorem leftover_txn_is_aborted_true :
     leftover_txn_is_aborted = ok true := by
-  unfold leftover_txn_is_aborted
+  unfold leftover_txn_is_aborted leftover_fate
   rfl
 
 /-- AS-IS dente: leftover TX is not aborted. -/
 theorem leftover_txn_is_aborted_as_is_dente :
     leftover_txn_is_aborted_as_is = ok false := by
-  unfold leftover_txn_is_aborted_as_is
+  unfold leftover_txn_is_aborted_as_is leftover_fate_as_is
   rfl
+
+/-- RFC-0191 P1.3 T1: leftover aborts iff not committed. Unfolds the
+    rustc-linked `leftover_fate` over the whole Bool space — the
+    constant `leftover_txn_is_aborted` does not pay this. -/
+theorem t1_leftover_fate :
+    ∀ (committed : Bool),
+      leftover_fate committed = ok (!committed) := by
+  intro committed
+  unfold leftover_fate
+  cases committed <;> rfl

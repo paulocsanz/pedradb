@@ -11,7 +11,7 @@ theorem t1_modelo_empty :
         aborted := false, fenced := false } = ok true := by
   unfold t1_modelo_kernel.t1_modelo
   unfold t1_modelo_kernel.tx_recover
-  unfold txn_kernel.leftover_txn_is_aborted
+  unfold txn_kernel.leftover_fate
   unfold t1_modelo_kernel.t1_holds_of
   rfl
 
@@ -23,5 +23,6 @@ theorem t1_modelo_as_is_dente :
   unfold t1_modelo_kernel.t1_modelo_as_is
   unfold t1_modelo_kernel.tx_recover_as_is
   unfold txn_kernel.leftover_txn_is_aborted_as_is
+  unfold txn_kernel.leftover_fate_as_is
   unfold t1_modelo_kernel.t1_holds_of
   rfl

@@ -121,16 +121,32 @@ pub fn should_repair_si_hist_as_is(_restored: bool, _is_reserved: bool) -> bool 
     false
 }
 
+/// RFC-0191 P1.3 T1: leftover recover fate. `committed` is the on-disk
+/// commit bit the handler classified. Uncommitted leftover aborts;
+/// committed leftover is left alone. Not a constant — the Bool space
+/// is the subject of `d1`-class ∀ credit.
+#[must_use]
+pub fn leftover_fate(committed: bool) -> bool {
+    !committed
+}
+
+/// AS-IS T1: leftover never aborts (partial visibility survives recover).
+#[must_use]
+pub fn leftover_fate_as_is(_committed: bool) -> bool {
+    false
+}
+
 /// F35: leftover prepared TX after crash is aborted (no coordinator log).
+/// Uncommitted leftover — `leftover_fate(false)`.
 #[must_use]
 pub fn leftover_txn_is_aborted() -> bool {
-    true
+    leftover_fate(false)
 }
 
 /// AS-IS F35: leave intents live (immortal Conflict + id reuse).
 #[must_use]
 pub fn leftover_txn_is_aborted_as_is() -> bool {
-    false
+    leftover_fate_as_is(false)
 }
 
 /// F35: never reuse a txn id still on disk / in the durable counter.
@@ -318,6 +334,16 @@ mod tests {
     fn leftover_aborted_not_immortal() {
         assert!(leftover_txn_is_aborted());
         assert!(!leftover_txn_is_aborted_as_is());
+    }
+
+    #[test]
+    fn leftover_fate_on_live_committed_is_not_ok() {
+        assert!(leftover_fate(false), "uncommitted leftover aborts");
+        assert!(!leftover_fate(true), "committed leftover is left alone");
+        assert!(
+            !leftover_fate_as_is(false),
+            "AS-IS dente: leftover materialises"
+        );
     }
 
     #[test]

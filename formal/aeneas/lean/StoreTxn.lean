@@ -105,13 +105,13 @@ theorem should_repair_si_hist_as_is_never :
 /-- F35 teeth: leftover prepared TX after crash is aborted. -/
 theorem leftover_txn_is_aborted_true :
     leftover_txn_is_aborted = ok true := by
-  unfold leftover_txn_is_aborted
+  unfold leftover_txn_is_aborted leftover_fate
   rfl
 
 /-- AS-IS F35 dente: intents stay live (immortal Conflict). -/
 theorem leftover_txn_is_aborted_as_is_false :
     leftover_txn_is_aborted_as_is = ok false := by
-  unfold leftover_txn_is_aborted_as_is
+  unfold leftover_txn_is_aborted_as_is leftover_fate_as_is
   rfl
 
 /-- F35: the next id never reuses the durable max. -/

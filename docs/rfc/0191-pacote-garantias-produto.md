@@ -164,11 +164,14 @@ contagens movem no mesmo commit; `lock_interleavings_admitted` e
   + `fence_on_sync_fail`; TSV D1=`close` `catalog:wal_commit_plan`; close
   de catálogo continua 1 par `merge_sift` — registrar o par já extraído
   desceria `extract` abaixo do floor 276)
-- [ ] **P1.3** T1-leftover `model→atom`: a fn constante
+- [x] **P1.3** T1-leftover `model→atom`: a fn constante
   `leftover_txn_is_aborted` **não** conta; puxar o `if` de leftover do
   recover para kernel `leftover_fate(status)`; teorema `∀ status`;
   recover de produção matchea; as-is materializa; linha T1 → `atom`;
-  `cap_data_fate` desce 1 se o `if` saiu do trampolim — status: `todo`
+  `cap_data_fate` desce 1 se o `if` saiu do trampolim — status: `done`
+  (`leftover_fate(committed)`; `t1_leftover_fate` ∀ Bool; `abort_leftover_intents`
+  matchea; as-is `leftover_fate_as_is`; cap 130 intacto — o `if` era store
+  recover, não trampolim `db.rs`)
 - [ ] **P1.4** C1-joint `model→close`: teorema `∀` sobre
   `joint_election_ok` (contagens + `Option` joint) — C-old sozinho
   recusa durante joint, ambas maiorias elegem; as-is elege com C-old;
@@ -210,7 +213,7 @@ contagens movem no mesmo commit; `lock_interleavings_admitted` e
 | P0.3 | p0 | Ledger garantias de produto | done | tabela em `verification-ledger.md` + ponteiros catalog | 2026-09-10 |
 | P1.1 | p1 | R1-value (∀ `range_hidden`, ambos os braços) | done | `r1_get_atom` + `visible_at_value_live_iff_not_hidden` registado | 2026-09-10 |
 | P1.2 | p1 | D1-script `model→close` (∀ Bool da plan fn) | done | `d1_wal_commit_plan` WriteAdmission.lean; TSV D1=close | 2026-09-10 |
-| P1.3 | p1 | T1-leftover `model→atom` (fn deixa de ser constante) | todo | — | 2026-09-10 |
+| P1.3 | p1 | T1-leftover `model→atom` (fn deixa de ser constante) | done | `leftover_fate` + `t1_leftover_fate` Txn.lean; TSV T1=atom | 2026-09-10 |
 | P1.4 | p1 | C1-joint `model→close` (∀ contagens) | todo | — | 2026-09-10 |
 | P1.5 | p1 | Um `if` do trampolim, cap 130→129 | todo | — | 2026-09-10 |
 | P1.6 | p1 | Gates Lean/depth/product verdes em cada promoção | todo | — | 2026-09-10 |

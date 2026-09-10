@@ -4082,9 +4082,6 @@ impl<E: Env> StoreCluster<E> {
 
     /// F122: leftover 2PC cleanup must not swallow corrupt-preimage revert errors.
     fn abort_leftover_intents(&mut self) -> Result<()> {
-        if !txn_kernel::leftover_txn_is_aborted() {
-            return Ok(());
-        }
         let nids: Vec<u64> = self.nodes.keys().copied().collect();
         for nid in nids {
             let in_ids = self.ids.contains(&nid);
@@ -4124,6 +4121,11 @@ impl<E: Env> StoreCluster<E> {
                 }
             }
             for (tid, ks) in by_txn {
+                let st = node.db.get(&txn_status_key(tid));
+                let committed = st.as_deref() == Some(b"commit".as_ref());
+                if !txn_kernel::leftover_fate(committed) {
+                    continue;
+                }
                 // F47/F130/F133: fence must be durable before/after revert — open
                 // recovery must not swallow put errors (same class as fence_txn_aborted).
                 node.db.put(txn_status_key(tid), b"abort")?;

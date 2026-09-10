@@ -12,10 +12,11 @@
 # floor_promoted N pins the minimum number of atom|close rows. Freeze
 # day-1: R1=atom (visible_at_deletion_never_live), D1/T1/C1=model → N=1.
 # P1.2: D1=close (`d1_wal_commit_plan` ∀ Bool×Bool of wal_commit_plan) → N=2.
-# Depth-floor close stays 1 pair (merge_sift): registering this already-
+# P1.3: T1=atom (`t1_leftover_fate` ∀ committed of leftover_fate) → N=3.
+# Depth-floor close stays 1 pair (merge_sift): registering an already-
 # extracted pair as close would drop proof_depth.extract below floor 276.
-floor_promoted 2
+floor_promoted 3
 D1	close	catalog:wal_commit_plan	d1_wal_commit_plan	formal/aeneas/lean/WriteAdmission.lean	wal_commit_plan
 R1	atom	catalog:visible_at	r1_get_atom	formal/aeneas/lean/Merge.lean	visible_at
-T1	model	catalog:leftover_txn_is_aborted	-	-	leftover_txn_is_aborted
+T1	atom	catalog:leftover_txn_is_aborted	t1_leftover_fate	formal/aeneas/lean/Txn.lean	leftover_fate
 C1	model	catalog:joint_election	-	-	joint_election_ok

@@ -35,8 +35,8 @@
 #![forbid(unsafe_code)]
 
 use crate::txn_kernel::{
-    leftover_txn_is_aborted, leftover_txn_is_aborted_as_is, revert_clears_status,
-    txn_commit_action, TxnCommitAction,
+    leftover_fate, leftover_txn_is_aborted, leftover_txn_is_aborted_as_is,
+    revert_clears_status, txn_commit_action, TxnCommitAction,
 };
 
 /// Abstract TX state: staged writes vs currently visible writes, plus
@@ -171,9 +171,7 @@ pub fn tx_abort_as_is(s: TxState) -> TxState {
 /// ([`leftover_txn_is_aborted`]). A committed TX is left alone.
 #[must_use]
 pub fn tx_recover(s: TxState) -> TxState {
-    if s.committed {
-        s
-    } else if leftover_txn_is_aborted() {
+    if leftover_fate(s.committed) {
         TxState {
             staged: s.staged,
             visible: 0,
