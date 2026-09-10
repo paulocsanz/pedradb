@@ -366,4 +366,58 @@ def authorization_matches
   authorization_matches_loop coreconvertAsRefKStrInst
     coreconvertAsRefVStrInst headers expected false none 0#usize
 
+/-- [pedra_aeneas_auth_kernel::authorization_matches_as_is]:
+    Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 178:0-190:1
+    Visibility: public -/
+@[rust_loop_body]
+def authorization_matches_as_is_loop.body
+  (headers : Slice (Str × Str)) (expected : Str) (i : Std.Usize) :
+  Result (ControlFlow Std.Usize Bool)
+  := do
+  let n := Slice.len headers
+  if i < n
+  then
+    let kv ← Slice.index_usize headers i
+    let (k, v) := kv
+    let is_auth ← core.str.Str.eq_ignore_ascii_case k (toStr "authorization")
+    match is_auth with
+    | true =>
+      let tok ← bearer_token_from_value_as_is v
+      match tok with
+      | some t =>
+        let eq ← Str.Insts.CoreCmpPartialEqStr.eq t expected
+        ok (done eq)
+      | none =>
+        let is_xp ←
+          core.str.Str.eq_ignore_ascii_case k (toStr "x-pedra-token")
+        match is_xp with
+        | true =>
+          let eq ← Str.Insts.CoreCmpPartialEqStr.eq v expected
+          ok (done eq)
+        | false =>
+          let i1 ← i + 1#usize
+          ok (cont i1)
+    | false =>
+      let is_xp ←
+        core.str.Str.eq_ignore_ascii_case k (toStr "x-pedra-token")
+      match is_xp with
+      | true =>
+        let eq ← Str.Insts.CoreCmpPartialEqStr.eq v expected
+        ok (done eq)
+      | false =>
+        let i1 ← i + 1#usize
+        ok (cont i1)
+  else ok (done false)
+
+@[rust_loop]
+def authorization_matches_as_is_loop
+  (headers : Slice (Str × Str)) (expected : Str) (i : Std.Usize) :
+  Result Bool
+  := do
+  loop (fun i1 => authorization_matches_as_is_loop.body headers expected i1) i
+
+def authorization_matches_as_is
+  (headers : Slice (Str × Str)) (expected : Str) : Result Bool := do
+  authorization_matches_as_is_loop headers expected 0#usize
+
 end pedra_aeneas_auth_kernel

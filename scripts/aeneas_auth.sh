@@ -37,6 +37,7 @@ echo "      charon=$CHARON"
     --start-from-if-exists 'crate::bearer_token_from_value' \
     --start-from-if-exists 'crate::bearer_token_from_value_as_is' \
     --start-from-if-exists 'crate::authorization_matches' \
+    --start-from-if-exists 'crate::authorization_matches_as_is' \
     --exclude 'core::str::{str}::contains' \
     --exclude 'core::str::{str}::eq_ignore_ascii_case' \
     --exclude 'core::str::{str}::rsplit_once' \
@@ -221,6 +222,65 @@ def authorization_matches
     coreconvertAsRefVStrInst headers expected false none 0#usize
 ''',
     "authorization_matches",
+)
+
+repl(
+    """def authorization_matches_as_is
+  (headers : Slice (Str × Str)) (expected : Str) : Result Bool := do
+  sorry
+""",
+    r'''@[rust_loop_body]
+def authorization_matches_as_is_loop.body
+  (headers : Slice (Str × Str)) (expected : Str) (i : Std.Usize) :
+  Result (ControlFlow Std.Usize Bool)
+  := do
+  let n := Slice.len headers
+  if i < n
+  then
+    let kv ← Slice.index_usize headers i
+    let (k, v) := kv
+    let is_auth ← core.str.Str.eq_ignore_ascii_case k (toStr "authorization")
+    match is_auth with
+    | true =>
+      let tok ← bearer_token_from_value_as_is v
+      match tok with
+      | some t =>
+        let eq ← Str.Insts.CoreCmpPartialEqStr.eq t expected
+        ok (done eq)
+      | none =>
+        let is_xp ←
+          core.str.Str.eq_ignore_ascii_case k (toStr "x-pedra-token")
+        match is_xp with
+        | true =>
+          let eq ← Str.Insts.CoreCmpPartialEqStr.eq v expected
+          ok (done eq)
+        | false =>
+          let i1 ← i + 1#usize
+          ok (cont i1)
+    | false =>
+      let is_xp ←
+        core.str.Str.eq_ignore_ascii_case k (toStr "x-pedra-token")
+      match is_xp with
+      | true =>
+        let eq ← Str.Insts.CoreCmpPartialEqStr.eq v expected
+        ok (done eq)
+      | false =>
+        let i1 ← i + 1#usize
+        ok (cont i1)
+  else ok (done false)
+
+@[rust_loop]
+def authorization_matches_as_is_loop
+  (headers : Slice (Str × Str)) (expected : Str) (i : Std.Usize) :
+  Result Bool
+  := do
+  loop (fun i1 => authorization_matches_as_is_loop.body headers expected i1) i
+
+def authorization_matches_as_is
+  (headers : Slice (Str × Str)) (expected : Str) : Result Bool := do
+  authorization_matches_as_is_loop headers expected 0#usize
+''',
+    "authorization_matches_as_is",
 )
 
 if "sorry" in src:

@@ -28,9 +28,10 @@ mod form_kernel;
 mod path_kernel;
 
 pub use auth_kernel::{
-    ascii_lower, ascii_upper, authorization_matches, bearer_token_from_value,
-    bearer_token_from_value_as_is, is_bearer_scheme, is_bearer_scheme_as_is,
-    is_non_bearer_auth_scheme, normalize_http_method, normalize_http_method_as_is,
+    ascii_lower, ascii_upper, authorization_matches, authorization_matches_as_is,
+    bearer_token_from_value, bearer_token_from_value_as_is, is_bearer_scheme,
+    is_bearer_scheme_as_is, is_non_bearer_auth_scheme, is_non_bearer_auth_scheme_as_is,
+    normalize_http_method, normalize_http_method_as_is,
 };
 pub use cl_kernel::{
     content_length_repeat_ok, content_length_repeat_ok_as_is, invalid_cl_as_zero,
@@ -1118,6 +1119,133 @@ mod tests {
         // If we got a response body path through App error, fine; main check is
         // we did not allocate 1GiB (process still alive, test finishes).
         let _ = resp;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Raw-bytes exchange: send `req`, optionally half-close, read one response.
+    fn raw_http(addr: SocketAddr, req: &[u8], half_close: bool) -> (u16, Vec<u8>) {
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream.write_all(req).unwrap();
+        if half_close {
+            stream.shutdown(std::net::Shutdown::Write).unwrap();
+        }
+        let mut resp = Vec::new();
+        stream.read_to_end(&mut resp).unwrap();
+        let text = String::from_utf8_lossy(&resp);
+        let code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse().ok())
+            .unwrap_or(0);
+        let body = resp
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .map(|i| resp[i + 4..].to_vec())
+            .unwrap_or_default();
+        (code, body)
+    }
+
+    /// F87: invalid Content-Length must 400 — AS-IS parsed it as 0 and
+    /// 200-stored an empty body.
+    #[test]
+    fn invalid_cl_as_zero_on_live_http_is_not_ok() {
+        assert!(!invalid_cl_as_zero());
+        assert!(invalid_cl_as_zero_as_is());
+        let dir = temp("cl-invalid");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let req = b"PUT /kv/x HTTP/1.0\r\nContent-Length: abc\r\nHost: localhost\r\n\r\nhello";
+        let (code, _) = raw_http(addr, req, true);
+        assert_eq!(code, 400, "invalid content-length must fail closed, not store empty");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F88: differing Content-Length fields must 400 — AS-IS let the last one
+    /// win and stored an empty body.
+    #[test]
+    fn content_length_repeat_ok_on_live_http_is_not_ok() {
+        assert!(!content_length_repeat_ok(5, 0));
+        assert!(content_length_repeat_ok_as_is(5, 0));
+        let dir = temp("cl-repeat");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let req =
+            b"PUT /kv/x HTTP/1.0\r\nContent-Length: 5\r\nContent-Length: 0\r\nHost: localhost\r\n\r\nhello";
+        let (code, _) = raw_http(addr, req, true);
+        assert_eq!(code, 400, "conflicting content-length must be rejected");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F146: body shorter than Content-Length must 400 — AS-IS 200-stored the
+    /// prefix.
+    #[test]
+    fn short_body_vs_cl_is_error_on_live_http_is_not_ok() {
+        assert!(short_body_vs_cl_is_error(3, 10));
+        assert!(!short_body_vs_cl_is_error_as_is(3, 10));
+        let dir = temp("cl-short");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let req = b"PUT /kv/x HTTP/1.0\r\nContent-Length: 10\r\nHost: localhost\r\n\r\nabc";
+        let (code, _) = raw_http(addr, req, true);
+        assert_eq!(code, 400, "short body vs declared CL must error, not store prefix");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F161: absolute-form authority must match Host — `http://evil.example`
+    /// with `Host: localhost` must 400. AS-IS never compared them.
+    #[test]
+    fn host_authority_mismatch_on_live_http_is_not_ok() {
+        assert!(host_authority_mismatch("localhost", "evil.example"));
+        assert!(!host_authority_mismatch_as_is("localhost", "evil.example"));
+        let dir = temp("host-mismatch");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let req = b"PUT http://evil.example/kv/x HTTP/1.0\r\nContent-Length: 2\r\nHost: localhost\r\n\r\nhi";
+        let (code, _) = raw_http(addr, req, true);
+        assert_eq!(code, 400, "authority != host must be rejected");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F149/F152: a later valid Bearer must win over an earlier dummy — AS-IS
+    /// let the first Authorization lock the scan out (401).
+    #[test]
+    fn authorization_matches_on_live_http_is_not_ok() {
+        let hs: &[(&str, &str)] = &[
+            ("authorization", "Bearer dummy"),
+            ("authorization", "Bearer sekrit"),
+        ];
+        assert!(authorization_matches(hs, "sekrit"));
+        assert!(!authorization_matches_as_is(hs, "sekrit"));
+        let dir = temp("auth-later-bearer");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open_with_auth(&dir, Some("sekrit".into())).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let req = b"PUT /kv/x HTTP/1.0\r\nContent-Length: 2\r\nHost: localhost\r\nAuthorization: Bearer dummy\r\nAuthorization: Bearer sekrit\r\n\r\nhi";
+        let (code, body) = raw_http(addr, req, true);
+        assert_eq!(code, 200, "later valid Bearer must win, body={body:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

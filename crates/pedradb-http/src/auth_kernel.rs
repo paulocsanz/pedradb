@@ -172,6 +172,23 @@ pub fn authorization_matches<K: AsRef<str>, V: AsRef<str>>(
     x_pedra == Some(expected)
 }
 
+/// AS-IS F149/F152: first Authorization wins and X-Pedra-Token is checked
+/// before the Bearer scan — a dummy Bearer locks out the later valid token.
+#[must_use]
+pub fn authorization_matches_as_is(headers: &[(&str, &str)], expected: &str) -> bool {
+    for (k, v) in headers {
+        if k.eq_ignore_ascii_case("authorization") {
+            if let Some(t) = bearer_token_from_value_as_is(v) {
+                return t == expected;
+            }
+        }
+        if k.eq_ignore_ascii_case("x-pedra-token") {
+            return *v == expected;
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
