@@ -156,14 +156,14 @@ measured Charon/Aeneas failure. Pins stay at Charon `0.1.232` / Aeneas
 | `c1_modelo` | `c1_modelo_kernel.rs` | `c1_modelo_joint_add_refuses` / `_as_is_dente` |
 | `capi_handles` | capi `handles.rs` | `c_len_admitted_oversize` / `_as_is_dente` / `c_path_walk_bytes_4k` / `c_free_table_admitted_false` (Charon `--start-from` len + path-walk + free-table; rest is IterMut) |
 | `batch` | `batch.rs` | `write_record_count_ok_prefix` / `_as_is_dente` (shim `#[path]` key.rs; `--start-from write_record_count_ok`; decode is early-return-in-loop; pair `write_record_count` is single_artifact: production file is the Verus term) |
-| `merge` | `merge.rs` | `visible_at_deletion` / `_as_is_dente` / `user_key_in_range_unbounded` / `past_end_unbounded` / `iter_window_keep_hidden` / `write_op_covers_f30` / `write_op_range_end_some` / `merge_sift_step_repairs_iff` (shim `#[path]` key+compact; `--start-from` visible_at + range + window bounds + keep + covers + range-end + sift_step; WindowKvIter/StreamingVisibleIter stay Iterator-refused — keeps route `iter_window_keep`/`visible_at`; `&[]` arm is an Aeneas bottom refuse → `Option<&[u8]>`; write_op_covers_key do-matches patched; pairs `visible_at`, `range_covers`, `write_op_range_end`, `merge_sift` are single_artifact: production file is the Verus term; `merge_sift` is RFC-0188 P0.2 first `close` — Isolated-method STRUCTURE kernel, production keeps ORDER) |
+| `merge` | `merge.rs` | `visible_at_deletion` / `_as_is_dente` / `user_key_in_range_unbounded` / `past_end_unbounded` / `iter_window_keep_hidden` / `write_op_covers_f30` / `write_op_range_end_some` / `merge_sift_step_repairs_iff` (shim `#[path]` key+compact; `--start-from` visible_at + range + window bounds + keep + covers + range-end + sift_step; WindowKvIter/StreamingVisibleIter stay Iterator-refused — keeps route `iter_window_keep`/`visible_at` (per-item measured negative + repro + upstream aeneas#1343 in the RFC-0188 P2.3 refused table); `&[]` arm is an Aeneas bottom refuse → `Option<&[u8]>`; write_op_covers_key do-matches patched; pairs `visible_at`, `range_covers`, `write_op_range_end`, `merge_sift` are single_artifact: production file is the Verus term; `merge_sift` is RFC-0188 P0.2 first `close` — Isolated-method STRUCTURE kernel, production keeps ORDER) |
 | `fail_closed` | `fail_closed.rs` | `parse_error_writes_status_true` / `reject_transfer_encoding_true` / `present_bad_int_is_error_true` / `parse_error_status_400` / `header_break_len_below_four` (`--start-from` F102 + F104/F105/F157/F158 + header_break + Expect; Windows `position` and Split clauseInst/`all`/`any` patched) |
 | `probe_order` | `probe_order_kernel.rs` | `first_probe_on_equal_lo_newer` / `covering_hi_ge_oob` / `probe_order_covering_is_loop` (index walk; covering loop body patched) |
 | `locktab` | `locktab.rs` | `wait_for_deadlock_is_loop` / `_as_is_dente` (`--start-from wait_for_deadlock`; `--exclude LockTable` nested borrows; HashMap/HashSet stay axioms; pair `wait_for_deadlock` is single_artifact: production file is the Verus term) |
 | `scan` | `sst/scan_kernel.rs` | `sst_crc_fate_modern_mismatch` / `scan_reads_file_none_smallest` / `zero_glue_admitted_false` / `tombstone_reaches_window_as_is_dente` (shim `#[path]` crc; `--start-from` catalog entries including model as_is; closure `call_mut` patched to `tombstone_reaches_window`) |
 | `cf` | `cf_kernel.rs` | `key_in_cf_family_as_is_dente` / `cf_encode_effective_is_if` / `infer_sst_cf_none_none` (`--start-from` catalog entries; `cf_encode_effective`/`decode_cf_key` patched over lifetime bottoms; pair `cf_family` is single_artifact: production file is the Verus term) |
 | `fields` | `fields_kernel.rs` | `field_kept_id` / `_as_is_dente` (`--start-from` catalog entries; `encode_fields` nested-borrows hole patched to an index loop) |
-| `lsm_r1` | `lsm_r1_kernel.rs` | `lsm_reopen_id` / `lsm_compact_depth_zero` / `lsm_state_of_is_def` (`--start-from` catalog + `lsm_state_of`/`lsm_write`; compact nested-loop returns patched to `level_put`/`level_remove`; reopen_as_is reverse-stack; `level_distinct`/`inv_lsm`/`lsm_flush` stay nested-loop refuse) |
+| `lsm_r1` | `lsm_r1_kernel.rs` | `lsm_reopen_id` / `lsm_compact_depth_zero` / `lsm_state_of_is_def` (`--start-from` catalog + `lsm_state_of`/`lsm_write`; compact nested-loop returns patched to `level_put`/`level_remove`; reopen_as_is reverse-stack; `level_distinct`/`inv_lsm`/`lsm_flush` stay nested-loop refuse (each with its re-measured negative in the RFC-0188 P2.3 refused table)) |
 | `leveling` | `leveling.rs` | `level_target_bytes_l0` / `_as_is_l0` (`RUSTFLAGS=--cfg test` so Charon sees as_is; pick Iterator holes patched to index loops; Iterator extra fields stripped; pairs `leveling`, `leveling_pick`, and `leveling_pushdown` are single_artifact: production file is the Verus term) |
 | `posix` | `pedradb-posix/src/lib.rs` | `fdatasync_rc_ok_zero` / `_nonzero` / `_as_is_dente` / `fdatasync_eintr_retry_admitted_false` (`--start-from` rc_ok + EINTR retry; rest of lib.rs is syscall/unsafe). SOURCE sha256 is git HEAD (concurrent clippy on `filesystem_available_bytes` is not in the stamp). |
 | `form` | `form_kernel.rs` | `form_plus_byte_plus` / `query_u64_conflict_diff` (`--exclude str::contains` / `pattern`; contains Pattern hole and `query_values_conflict` Iterator.any patched to an index loop) |
@@ -259,6 +259,25 @@ enrolled via a shim that names `DcsError` without thiserror.
 None remaining: `world_kernel.rs` is production (`[lib] path`) and enrolled.
 
 The unpacked `probe_order` walk is still Iterator (`filter.collect`); the packed covering image is extracted. Do not re-pin unless it widens the set without `sorry`.
+
+### Refused — Iterator / dyn shapes (RFC-0188 P2.3 — each item carries its MEASURED negative; series declared closed)
+
+Re-measured 2026-09-10 on the pin (Aeneas `daa85d7`, Charon `0.1.232`,
+Lean 4.31.0): each refusal below was re-extracted alone
+(`--start-from <fn>`), so the named error is the item's own blocker —
+not inherited. The Isolated-method conversion series (heap-sift
+`sift_step` first, RFC-0187 P1.3 / RFC-0188 P0.2) is CLOSED: every
+remaining Iterator/dyn refusal either has an active formal route around
+it or an upstream voice carrying the repro.
+
+| site (production file) | measured negative (this pin) | active formal route |
+|---|---|---|
+| `StreamingVisibleIter` / `WindowKvIter` hold `Box<dyn Iterator>` (`merge.rs`) | type-decl refused: `[Error] Dynamic trait types are not supported yet` (charon translates the whole crate — 100% Aeneas side; fire 803 + repro `formal/aeneas/repro/dyn-iterator/run.sh` re-verifies it in 2 structs) | `iter_window_keep` / `visible_at` / `sift_step` Isolated-method kernels (order + fate without the `dyn`); upstream [aeneas#1343](https://github.com/AeneasVerif/aeneas/issues/1343) |
+| `level_distinct` (`lsm_r1_kernel.rs`) | body ignored: `[Error] Returns inside of nested loops are not supported yet` | none claimed — the distinctness invariant stays model-side (no Lean theorem names it today); re-open only if a proof need appears or Aeneas lifts the nested-loop limit |
+| `inv_lsm` (`lsm_r1_kernel.rs`) | body ignored: `[Error] Breaks to outer loops are not supported yet` (also transitively `level_distinct`) | same row as above |
+| `lsm_flush` (`lsm_r1_kernel.rs`) | body hole: `[Error] Could not match the contexts` | `lsm_compact` (the extracted patch path over `level_put`/`level_remove`) is the enrolled flush image |
+| unpacked `probe_order` (`filter.collect`) | Iterator chain holes (CFailure); the packed `probe_order_covering` index-`while` extracts after patching the nested `Vec.push` (`Could not match the contexts`) | `probe_order_covering` is the engine-facing packed image — extracted with theorems `covering_hi_ge_oob` / `probe_order_covering_is_loop` |
+| cross-lib merged Kernels | measured cross-lib refuses below — the two generated Kernels do not merge | composed-edge theorems import both libs instead |
 
 ## Composed edges (not only per-kernel atoms)
 

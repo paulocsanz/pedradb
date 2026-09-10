@@ -1,0 +1,10 @@
+[package]
+name = "dyn_iterator_repro"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# RFC-0188 P2.4 — minimal upstream repro for the Aeneas dyn-Trait
+# refusal. Not part of the workspace; extracted standalone by
+# formal/aeneas/repro/dyn-iterator/run.sh.
+[workspace]

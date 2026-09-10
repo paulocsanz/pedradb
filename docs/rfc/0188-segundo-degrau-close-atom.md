@@ -214,14 +214,23 @@ código que as move.
   `E.remove`, `E.meta`, `W.crash` via soak adaptativo; fold no
   `coverage_floor.tsv` (P1.1/0187); remoção de seed → vermelho —
   status: `todo`
-- [ ] **P2.3** Isolated-method completo: toda recusa Iterator do
+- [x] **P2.3** Isolated-method completo: toda recusa Iterator do
   `EXTRACT.md` convertida (heap-sift 0187 P1.3 é a primeira) OU com
   negativa medida por item nomeada no `EXTRACT.md`; fim declarado da
-  série — status: `todo`
-- [ ] **P2.4** Voz upstream dyn-Trait: issue/PR no Aeneas com repro
+  série — status: `done` (tabela "Refused — Iterator / dyn shapes" no
+  `EXTRACT.md`: 6 sítios, cada um com negativa RE-MEDIDA no pin em
+  2026-09-10 — `Returns inside of nested loops`, `Breaks to outer
+  loops`, `Could not match the contexts`, `Dynamic trait types…` —
+  série declarada encerrada na seção)
+- [x] **P2.4** Voz upstream dyn-Trait: issue/PR no Aeneas com repro
   mínima (`Box<dyn Iterator>` → "Dynamic trait types are not supported
   yet"); link no `docs/upstream-watch-protocol.md`; re-pin continua
-  só-com-widen-sem-sorry — status: `todo`
+  só-com-widen-sem-sorry — status: `done` (repro in-repo
+  `formal/aeneas/repro/dyn-iterator/run.sh`: controle extrai, dyn
+  recusa, exit 0 = watch armado; issue
+  [aeneas#1343](https://github.com/AeneasVerif/aeneas/issues/1343)
+  aberta 2026-09-10 com a repro e a pergunta de tracking; watch
+  protocol atualizado com o procedimento de re-teste)
 
 Herdados do [0187](0187-teorema-experimento-tcb.md) — permanecem lá,
 não re-fatiados aqui: P1.3 heap-sift (em andamento), P2.1 série L28
@@ -243,8 +252,8 @@ exaustivo N=4.
 | P1.6 | p1 | Primeiro `atom` (0→1) em handler vivo | done | `visible_at` atom ∀ + registro + `floor_atom 1` | 2026-09-10 |
 | P2.1 | p2 | Crash-injection em família (grid T×S) | todo | — | 2026-09-10 |
 | P2.2 | p2 | Cobertura 15/15 (4 sítios do soak) | todo | — | 2026-09-10 |
-| P2.3 | p2 | Isolated-method completo (fim da série) | todo | — | 2026-09-10 |
-| P2.4 | p2 | Voz upstream dyn-Trait (repro mínima) | todo | — | 2026-09-10 |
+| P2.3 | p2 | Isolated-method completo (fim da série) | done | tabela de negativas re-medidas no `EXTRACT.md` (6 sítios) | 2026-09-10 |
+| P2.4 | p2 | Voz upstream dyn-Trait (repro mínima) | done | repro `dyn-iterator/run.sh` + [aeneas#1343](https://github.com/AeneasVerif/aeneas/issues/1343) | 2026-09-10 |
 
 ## Acceptance Criteria
 

@@ -60,6 +60,16 @@ Cada rodada de watch segue exatamente estes passos (todos medidos em
   enquanto o dyn-Trait não abrir, o heap-sift (`StreamingVisibleIter`)
   não vira kernel Aeneas — o caminho formal dele é Isolated-method
   (RFC-0187 P1.3) que remove o `dyn` do kernel.
+- **Repro mínima + voz upstream (RFC-0188 P2.4):**
+  `formal/aeneas/repro/dyn-iterator/run.sh` reproduz o bloqueio no pin
+  atual com um crate de 2 structs (mesmo crate, mesmo pin): o controle
+  (`Vec<u8>`) extrai; o repro (struct com campo `Box<dyn Iterator>`)
+  recusa com a mensagem exata. Exit 0 = bloqueio presente (watch
+  armado); exit 2 = upstream abriu dyn-Trait (rodar o procedimento de
+  watch completo). Issue upstream com a repro e a pergunta de tracking:
+  [AeneasVerif/aeneas#1343](https://github.com/AeneasVerif/aeneas/issues/1343)
+  (2026-09-10; charon#123 já fechado como feito — o consumo do
+  `TyKind::Dyn` pelo backend Lean é o que falta).
 - `-filter-trait-methods` (`f9a8e33` upstream): testado no fire 803 —
   NÃO alarga o conjunto traduzido para o nosso corpus (negativo medido,
   sem re-pin).
