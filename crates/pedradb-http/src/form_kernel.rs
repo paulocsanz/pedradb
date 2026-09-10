@@ -35,6 +35,21 @@ macro_rules! plus_before_percent_body {
     };
 }
 
+macro_rules! plus_before_percent_as_is_body {
+    () => {
+        false
+    };
+}
+
+macro_rules! from_hex_as_is_body {
+    ($c:expr) => {
+        match $c {
+            b'0'..=b'9' => Some($c - b'0'),
+            _ => None,
+        }
+    };
+}
+
 macro_rules! query_u64_conflict_body {
     ($a:expr, $b:expr) => {
         $a != $b
@@ -69,6 +84,14 @@ pub fn plus_before_percent() -> bool {
     plus_before_percent_body!()
 }
 
+/// AS-IS F101 order: `%HH` happens without the `+`-first rule — the literal
+/// `%2B` escape hatch is gone and ordering no longer discriminates.
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn plus_before_percent_as_is() -> bool {
+    plus_before_percent_as_is_body!()
+}
+
 /// Hex nibble for `%HH`.
 #[cfg(not(verus_keep_ghost))]
 #[must_use]
@@ -79,6 +102,14 @@ pub fn from_hex(c: u8) -> Option<u8> {
         b'A'..=b'F' => Some(c - b'A' + 10),
         _ => None,
     }
+}
+
+/// AS-IS: hex letters never decode — `%41` never becomes `A`, `%2F` never
+/// becomes `/`, so `%HH` with a letter nibble stays literal.
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn from_hex_as_is(c: u8) -> Option<u8> {
+    from_hex_as_is_body!(c)
 }
 
 /// Query-value decode: `+` → space, then `%HH`.
@@ -185,6 +216,37 @@ mod tests {
         assert_eq!(form_plus_byte(b'+'), b' ');
         assert_eq!(form_plus_byte_as_is(b'+'), b'+');
         assert!(plus_before_percent());
+    }
+
+    /// Three teeth: hex letters decode in the FIXED nibble fn and never in
+    /// AS-IS — `%41`/`%2F` only become `A`/`/` when the fold is real.
+    #[test]
+    fn hex_letters_decode_as_is_does_not() {
+        assert_eq!(from_hex(b'0'), Some(0));
+        assert_eq!(from_hex(b'9'), Some(9));
+        assert_eq!(from_hex(b'a'), Some(10));
+        assert_eq!(from_hex(b'f'), Some(15));
+        assert_eq!(from_hex(b'A'), Some(10));
+        assert_eq!(from_hex(b'F'), Some(15));
+        assert_eq!(from_hex(b'g'), None);
+        // AS-IS: digits still decode, every letter nibble does not.
+        assert_eq!(from_hex_as_is(b'0'), Some(0));
+        assert_eq!(from_hex_as_is(b'9'), Some(9));
+        assert_eq!(from_hex_as_is(b'a'), None);
+        assert_eq!(from_hex_as_is(b'A'), None);
+        // Downstream: `%41` becomes `A` only under the FIXED decoder.
+        assert_eq!(form_decode("%41"), b"A");
+    }
+
+    /// Three teeth: the `+`-before-`%HH` ordering flag discriminates —
+    /// FIXED keeps `%2B` a literal plus because `+` was already mapped.
+    #[test]
+    fn plus_order_flag_discriminates_as_is() {
+        assert!(plus_before_percent());
+        assert!(!plus_before_percent_as_is());
+        // The flag is what makes `%2B` a literal plus in the FIXED decoder.
+        assert_eq!(form_decode("plus%2Bsign"), b"plus+sign");
+        assert_eq!(form_plus_byte(b'+'), b' ');
     }
 
     #[test]

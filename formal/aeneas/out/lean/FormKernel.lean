@@ -77,7 +77,7 @@ axiom alloc.vec.Vec.Insts.CoreCmpPartialEqShared0Slice.eq
   alloc.vec.Vec T → Slice U → Result Bool
 
 /-- [pedra_aeneas_form_kernel::form_plus_byte]:
-    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 54:0-56:1
+    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 69:0-71:1
     Visibility: public -/
 def form_plus_byte (b : Std.U8) : Result Std.U8 := do
   if b = 43#u8
@@ -85,19 +85,25 @@ def form_plus_byte (b : Std.U8) : Result Std.U8 := do
   else ok b
 
 /-- [pedra_aeneas_form_kernel::form_plus_byte_as_is]:
-    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 61:0-63:1
+    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 76:0-78:1
     Visibility: public -/
 def form_plus_byte_as_is (b : Std.U8) : Result Std.U8 := do
   ok b
 
 /-- [pedra_aeneas_form_kernel::plus_before_percent]:
-    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 68:0-70:1
+    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 83:0-85:1
     Visibility: public -/
 def plus_before_percent : Result Bool := do
   ok true
 
+/-- [pedra_aeneas_form_kernel::plus_before_percent_as_is]:
+    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 91:0-93:1
+    Visibility: public -/
+def plus_before_percent_as_is : Result Bool := do
+  ok false
+
 /-- [pedra_aeneas_form_kernel::from_hex]:
-    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 75:0-82:1
+    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 98:0-105:1
     Visibility: public -/
 def from_hex (c : Std.U8) : Result (Option Std.U8) := do
   if 48#u8 <= c
@@ -156,8 +162,19 @@ def from_hex (c : Std.U8) : Result (Option Std.U8) := do
         else ok none
       else ok none
 
+/-- [pedra_aeneas_form_kernel::from_hex_as_is]:
+    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 111:0-113:1
+    Visibility: public -/
+def from_hex_as_is (c : Std.U8) : Result (Option Std.U8) := do
+  if 48#u8 <= c
+  then if c <= 57#u8
+       then let i ← c - 48#u8
+            ok (some i)
+       else ok none
+  else ok none
+
 /-- [pedra_aeneas_form_kernel::form_decode]: loop body 0:
-    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 1:0-106:5
+    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 1:0-137:5
     Visibility: public -/
 @[rust_loop_body]
 def form_decode_loop.body
@@ -251,7 +268,7 @@ def form_decode_loop.body
   else ok (done out)
 
 /-- [pedra_aeneas_form_kernel::form_decode]: loop 0:
-    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 1:0-106:5
+    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 1:0-137:5
     Visibility: public -/
 @[rust_loop]
 def form_decode_loop
@@ -263,7 +280,7 @@ def form_decode_loop
     (out, i)
 
 /-- [pedra_aeneas_form_kernel::form_decode]:
-    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 87:0-108:1
+    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 118:0-139:1
     Visibility: public -/
 def form_decode (s : Str) : Result (alloc.vec.Vec Std.U8) := do
   let b ← core.str.Str.as_bytes s
@@ -272,12 +289,12 @@ def form_decode (s : Str) : Result (alloc.vec.Vec Std.U8) := do
   form_decode_loop b out 0#usize
 
 /-- [pedra_aeneas_form_kernel::query_values_conflict::closure]
-    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 116:46-116:62 -/
+    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 147:46-147:62 -/
 @[reducible]
 def query_values_conflict.closure := Str
 
 /-- [pedra_aeneas_form_kernel::query_values_conflict::{impl core::ops::function::FnMut<(&'_ &'_ str,), bool> for pedra_aeneas_form_kernel::query_values_conflict::closure<'_0, '_1>}::call_mut]:
-    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 116:46-116:62 -/
+    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 147:46-147:62 -/
 def
   query_values_conflict.closure.Insts.CoreOpsFunctionFnMutTupleSharedSharedStrBool.call_mut
   (c : query_values_conflict.closure) (tupled_args : Str) :
@@ -289,7 +306,7 @@ def
   ok (b, c)
 
 /-- [pedra_aeneas_form_kernel::query_values_conflict::{impl core::ops::function::FnOnce<(&'_ &'_ str,), bool> for pedra_aeneas_form_kernel::query_values_conflict::closure<'_0, '_1>}::call_once]:
-    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 116:46-116:62 -/
+    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 147:46-147:62 -/
 def
   query_values_conflict.closure.Insts.CoreOpsFunctionFnOnceTupleSharedSharedStrBool.call_once
   (c : query_values_conflict.closure) (s : Str) : Result Bool := do
@@ -299,7 +316,7 @@ def
   ok b
 
 /-- Trait implementation: [pedra_aeneas_form_kernel::query_values_conflict::{impl core::ops::function::FnOnce<(&'_ &'_ str,), bool> for pedra_aeneas_form_kernel::query_values_conflict::closure<'_0, '_1>}]
-    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 116:46-116:62 -/
+    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 147:46-147:62 -/
 @[reducible]
 def
   query_values_conflict.closure.Insts.CoreOpsFunctionFnOnceTupleSharedSharedStrBool
@@ -309,7 +326,7 @@ def
 }
 
 /-- Trait implementation: [pedra_aeneas_form_kernel::query_values_conflict::{impl core::ops::function::FnMut<(&'_ &'_ str,), bool> for pedra_aeneas_form_kernel::query_values_conflict::closure<'_0, '_1>}]
-    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 116:46-116:62 -/
+    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 147:46-147:62 -/
 @[reducible]
 def
   query_values_conflict.closure.Insts.CoreOpsFunctionFnMutTupleSharedSharedStrBool
@@ -321,7 +338,7 @@ def
 }
 
 /-- [pedra_aeneas_form_kernel::query_values_conflict]:
-    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 113:0-118:1
+    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 144:0-149:1
     Visibility: public -/
 @[rust_loop_body]
 def query_values_conflict_loop.body
@@ -354,25 +371,25 @@ def query_values_conflict (values : Slice Str) : Result Bool := do
     query_values_conflict_loop values first 1#usize
 
 /-- [pedra_aeneas_form_kernel::query_values_conflict_as_is]:
-    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 123:0-125:1
+    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 154:0-156:1
     Visibility: public -/
 def query_values_conflict_as_is (_values : Slice Str) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_form_kernel::query_u64_conflict]:
-    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 130:0-132:1
+    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 161:0-163:1
     Visibility: public -/
 def query_u64_conflict (a : Std.U64) (b : Std.U64) : Result Bool := do
   ok (a != b)
 
 /-- [pedra_aeneas_form_kernel::query_u64_conflict_as_is]:
-    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 137:0-139:1
+    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 168:0-170:1
     Visibility: public -/
 def query_u64_conflict_as_is (a : Std.U64) (b : Std.U64) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_form_kernel::query_part_is_bare_name]:
-    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 144:0-146:1
+    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 175:0-177:1
     Visibility: public -/
 def query_part_is_bare_name (part : Str) (key : Str) : Result Bool := do
   let b ← core.str.Str.is_empty part
@@ -390,14 +407,14 @@ def query_part_is_bare_name (part : Str) (key : Str) : Result Bool := do
         core.cmp.PartialEqU8 v s
 
 /-- [pedra_aeneas_form_kernel::query_part_is_bare_name_as_is]:
-    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 151:0-153:1
+    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 182:0-184:1
     Visibility: public -/
 def query_part_is_bare_name_as_is
   (_part : Str) (_key : Str) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_form_kernel::form_decode_as_is]: loop body 0:
-    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 1:0-172:5
+    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 1:0-203:5
     Visibility: public -/
 @[rust_loop_body]
 def form_decode_as_is_loop.body
@@ -444,7 +461,7 @@ def form_decode_as_is_loop.body
   else ok (done out)
 
 /-- [pedra_aeneas_form_kernel::form_decode_as_is]: loop 0:
-    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 1:0-172:5
+    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 1:0-203:5
     Visibility: public -/
 @[rust_loop]
 def form_decode_as_is_loop
@@ -456,7 +473,7 @@ def form_decode_as_is_loop
     (out, i)
 
 /-- [pedra_aeneas_form_kernel::form_decode_as_is]:
-    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 158:0-174:1
+    Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 189:0-205:1
     Visibility: public -/
 def form_decode_as_is (s : Str) : Result (alloc.vec.Vec Std.U8) := do
   let b ← core.str.Str.as_bytes s

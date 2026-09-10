@@ -29,7 +29,9 @@ echo "      charon=$CHARON"
     --start-from-if-exists 'crate::form_plus_byte' \
     --start-from-if-exists 'crate::form_plus_byte_as_is' \
     --start-from-if-exists 'crate::from_hex' \
+    --start-from-if-exists 'crate::from_hex_as_is' \
     --start-from-if-exists 'crate::plus_before_percent' \
+    --start-from-if-exists 'crate::plus_before_percent_as_is' \
     --start-from-if-exists 'crate::query_values_conflict' \
     --start-from-if-exists 'crate::query_values_conflict_as_is' \
     --start-from-if-exists 'crate::query_u64_conflict' \
