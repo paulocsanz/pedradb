@@ -146,6 +146,20 @@ def exec_fns(src: str) -> dict[str, str]:
     return out
 
 
+def clone_exec_fns(src: str) -> dict[str, str]:
+    """Clones mirror comparison: exec fns INCLUDING the _as_is mutant
+    teeth (RFC-0151 — an as_is fn is a production fn rustc links, so
+    both mirror sides must stay token-identical). exec_fns skips
+    _as_is names, so a registered as_is clone fn would otherwise
+    always report 'missing in one side'."""
+    out = {}
+    for kind, name, body in iter_fns(src):
+        if kind != "exec" or name.endswith("_spec"):
+            continue
+        out[name] = body
+    return out
+
+
 def spec_fns(src: str) -> dict[str, str]:
     out = {}
     for kind, name, body in iter_fns(src):
@@ -443,7 +457,7 @@ def check_clones(root: Path, catalog: dict, r: Report) -> None:
         if a is None or b is None:
             r.fail(f"{clone['id']}: missing {clone['a'] if a is None else clone['b']}")
             continue
-        af, bf = exec_fns(a), exec_fns(b)
+        af, bf = clone_exec_fns(a), clone_exec_fns(b)
         for name in clone["fns"]:
             if name not in af or name not in bf:
                 r.fail(f"{clone['id']}: {name} missing in one side")

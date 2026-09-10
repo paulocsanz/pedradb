@@ -161,6 +161,7 @@
 | P1.35 | p1 | inbound drop_sent_through oob remove | done | `drop_sent_through_on_live_queued_is_not_ok` | 2026-08-29 |
 | P1.36 | p1 | inbound apply_step hole stops | done | `apply_advance_on_live_queued_is_not_ok` | 2026-08-29 |
 | P2.1 | p2 | three-teeth on rpc_mode | done | `allow_direct_rpc_on_live_queued_is_not_ok` | 2026-08-29 |
+| P2.2 | p2 | clones mirror gate covers `_as_is` teeth | done | `clone_exec_fns` (fire 794, formal 155→110, mutant-verified) | 2026-09-09 |
 | P2.2.1 | p2 | three-teeth on dcs_apply CasFailed | done | `dcs_apply_should_advance_result_on_live_queued_is_not_ok` | 2026-08-29 |
 | P2.2.2 | p2 | three-teeth on compact missing term | done | `may_compact_through_on_live_queued_is_not_ok` | 2026-08-29 |
 | P2.2.3 | p2 | three-teeth on snapshot skip reserved | done | `snapshot_touches_user_key_on_live_queued_is_not_ok` | 2026-08-29 |
@@ -289,7 +290,7 @@
   - `apply_advance_on_live_queued_is_not_ok`: inbound AE heartbeat with `leader_commit` covering a planted hole; `applied` stays; later Put is not visible; `apply_advance` Stop; AS-IS Apply. Production store `apply_range` calls the catalog kernel (clone freeze).
   - `glue.db_rs_extracted` stays false.
 - **Telemetry / Analytics:** none — safety freeze.
-- **Documentation:** this RFC; catalog `live_callers` (`vote` / `ae_entry` / `grant_persist` / `ae_ack` + raft→store clones); `rpc_mode` `three_teeth`; clones `vote_raft_store` / `ae_ack_raft_store`.
+- **Documentation:** this RFC; catalog `live_callers` (`vote` / `ae_entry` / `grant_persist` / `ae_ack` + raft→store clones); `rpc_mode` `three_teeth`; clones `vote_raft_store` / `ae_ack_raft_store`. 2026-09-09 (fire 794): the clones mirror gate now enforces the `_as_is` mutant teeth too (`clone_exec_fns` in `pedra_formal.py` — `exec_fns`' `SKIP_FN` had made every registered `_as_is` clone fn a permanent phantom "missing in one side", 45 fails masking real drift); mutant-verified (`joint_election_ok_as_is` `>=`→`>` fails); formal 155→110.
 - **Screenshots:** backend-only.
 
 ## Out of scope
