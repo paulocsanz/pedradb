@@ -172,11 +172,17 @@ contagens movem no mesmo commit; `lock_interleavings_admitted` e
   (`leftover_fate(committed)`; `t1_leftover_fate` ∀ Bool; `abort_leftover_intents`
   matchea; as-is `leftover_fate_as_is`; cap 130 intacto — o `if` era store
   recover, não trampolim `db.rs`)
-- [ ] **P1.4** C1-joint `model→close`: teorema `∀` sobre
+- [x] **P1.4** C1-joint `model→close`: teorema `∀` sobre
   `joint_election_ok` (contagens + `Option` joint) — C-old sozinho
   recusa durante joint, ambas maiorias elegem; as-is elege com C-old;
   linha C1 → `close`; N≤3 enumerado continua o ∀ do harness (não
-  substitui este close) — status: `todo`
+  substitui este close) — status: `done`
+  (`c1_joint_election` ∀ contagens+Option contra a maioria pura `maj`;
+  `majority_of_closed` abre div/add via `UScalar.div_bv_spec` /
+  `U64.add_bv_spec`; corolários `c1_old_majority_alone_refuses` e
+  `c1_both_majorities_elect`; as-is ∀ `c1_as_is_elects_on_old_alone`;
+  `Membership.lean`; TSV C1=close, `floor_promoted` 4; sem linha nova em
+  `close_proofs.tsv` — par já extraído, `proof_depth.extract` 276 intacto)
 - [ ] **P1.5** Um `if` data-fate vivo do trampolim (`leftover_next`)
   puxado a kernel nomeado, atom registado, `cap_data_fate` 130→129 no
   mesmo commit; tipos que o handler passa; Aeneas desse corpo —
@@ -214,7 +220,7 @@ contagens movem no mesmo commit; `lock_interleavings_admitted` e
 | P1.1 | p1 | R1-value (∀ `range_hidden`, ambos os braços) | done | `r1_get_atom` + `visible_at_value_live_iff_not_hidden` registado | 2026-09-10 |
 | P1.2 | p1 | D1-script `model→close` (∀ Bool da plan fn) | done | `d1_wal_commit_plan` WriteAdmission.lean; TSV D1=close | 2026-09-10 |
 | P1.3 | p1 | T1-leftover `model→atom` (fn deixa de ser constante) | done | `leftover_fate` + `t1_leftover_fate` Txn.lean; TSV T1=atom | 2026-09-10 |
-| P1.4 | p1 | C1-joint `model→close` (∀ contagens) | todo | — | 2026-09-10 |
+| P1.4 | p1 | C1-joint `model→close` (∀ contagens) | done | `c1_joint_election` + `maj` Membership.lean; TSV C1=close, promoted 4 | 2026-09-10 |
 | P1.5 | p1 | Um `if` do trampolim, cap 130→129 | todo | — | 2026-09-10 |
 | P1.6 | p1 | Gates Lean/depth/product verdes em cada promoção | todo | — | 2026-09-10 |
 | P2.1 | p2 | Inv-WAL preservação (um passo) | todo | — | 2026-09-10 |
