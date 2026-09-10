@@ -5695,8 +5695,9 @@
       "id": "first_install",
       "finding": "F196",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/manifest_kernel.rs",
-      "twin": "crates/pedradb-core/verus/manifest_recover.rs",
+      "twin": "crates/pedradb-core/src/manifest_kernel.rs",
       "aeneas": "scripts/aeneas_manifest.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs"
