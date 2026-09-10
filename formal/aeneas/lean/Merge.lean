@@ -62,6 +62,18 @@ theorem r1_deletion_never_live :
   unfold merge.visible_at
   cases range_hidden <;> rfl
 
+/-- RFC-0191 P1.1 product corollary R1 both arms: deletion never live,
+Value live iff not hidden. Unfolds production `visible_at` twice. -/
+theorem r1_get_atom :
+    ∀ (range_hidden : Bool),
+      (merge.visible_at key.ValueType.Deletion range_hidden = ok false)
+      ∧ (merge.visible_at key.ValueType.Value range_hidden
+          = ok (!range_hidden)) := by
+  intro range_hidden
+  constructor
+  · unfold merge.visible_at; cases range_hidden <;> rfl
+  · unfold merge.visible_at; cases range_hidden <;> rfl
+
 /-- A Value surfaces exactly when no covering range hides it (all inputs). -/
 theorem visible_at_value_live_iff_not_hidden :
     ∀ (range_hidden : Bool),

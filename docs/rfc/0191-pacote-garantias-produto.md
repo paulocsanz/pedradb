@@ -150,10 +150,12 @@ contagens movem no mesmo commit; `lock_interleavings_admitted` e
 
 ### P1 — as outras três frases e o R1 completo, sobre o espaço da fn
 
-- [ ] **P1.1** R1-value: registrar `visible_at_value_live_iff_not_hidden`
+- [x] **P1.1** R1-value: registrar `visible_at_value_live_iff_not_hidden`
   (já é `∀ range_hidden`) + corolário de produto que unfold deletion
   **e** value; R1 permanece `atom` (não close: o get de produção ainda
-  não é o sujeito — o átomo é) — status: `todo`
+  não é o sujeito — o átomo é) — status: `done` (`r1_get_atom` unfold
+  ambos os braços; TSV R1 aponta para ele; atom de catálogo continua 1
+  par `visible_at`)
 - [ ] **P1.2** D1-script `model→close`: teorema `∀ (need_sync sync_fail :
   Bool)` sobre `wal_commit_plan` (espaço inteiro da plan fn, não o par
   concreto `true false`); `commit_ops_with` continua a matchear; as-is
@@ -203,7 +205,7 @@ contagens movem no mesmo commit; `lock_interleavings_admitted` e
 | P0.1 | p0 | Ratchet de produto (4 linhas, camada só sobe) | done | `product_guarantees.tsv` + `check_product_floor.py` + job `product-floor` | 2026-09-10 |
 | P0.2 | p0 | Corolário R1-deleção (∀, unfold `visible_at`) | done | `r1_deletion_never_live` Merge.lean | 2026-09-10 |
 | P0.3 | p0 | Ledger garantias de produto | done | tabela em `verification-ledger.md` + ponteiros catalog | 2026-09-10 |
-| P1.1 | p1 | R1-value (∀ `range_hidden`, ambos os braços) | todo | — | 2026-09-10 |
+| P1.1 | p1 | R1-value (∀ `range_hidden`, ambos os braços) | done | `r1_get_atom` + `visible_at_value_live_iff_not_hidden` registado | 2026-09-10 |
 | P1.2 | p1 | D1-script `model→close` (∀ Bool da plan fn) | todo | — | 2026-09-10 |
 | P1.3 | p1 | T1-leftover `model→atom` (fn deixa de ser constante) | todo | — | 2026-09-10 |
 | P1.4 | p1 | C1-joint `model→close` (∀ contagens) | todo | — | 2026-09-10 |
