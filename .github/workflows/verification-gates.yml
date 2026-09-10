@@ -83,3 +83,31 @@ jobs:
           python3 scripts/check_barrier_floor.py --crash-log /tmp/crash.log
           python3 scripts/check_barrier_floor.py --selftest | tee /tmp/bs.log
           grep -q 'SELFTEST barrier: 2/2 sabotages caught' /tmp/bs.log
+
+  p11-coverage-floor:
+    name: P1.1 interleaving coverage floor (pinned-seed union)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: gate (twice, logs identical) + selftest (3/3)
+        run: |
+          cargo run -q -p pedradb-world --bin gate_coverage_floor | tee /tmp/v1.log
+          cargo run -q -p pedradb-world --bin gate_coverage_floor | tee /tmp/v2.log
+          cmp /tmp/v1.log /tmp/v2.log
+          grep -q 'GATE coverage: GREEN' /tmp/v1.log
+          cargo run -q -p pedradb-world --bin gate_coverage_floor -- --selftest | tee /tmp/vs.log
+          grep -q 'SELFTEST coverage: 3/3 checks caught' /tmp/vs.log
+
+  p12-ledger:
+    name: P1.2 layer ledger consistency vs formal catalog
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: ledger gate + selftest (2/2)
+        run: |
+          python3 scripts/check_ledger_consistency.py
+          python3 scripts/check_ledger_consistency.py --selftest | tee /tmp/ls.log
+          grep -q 'SELFTEST ledger: 2/2 sabotages caught' /tmp/ls.log

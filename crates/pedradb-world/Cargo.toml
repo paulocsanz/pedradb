@@ -58,6 +58,12 @@ name = "gate_crash_injection"
 path = "src/bin/gate_crash_injection.rs"
 required-features = ["pct"]
 
+# RFC-0187 P1.1: interleaving coverage floor (pinned-seed World campaign
+# union vs versioned floor, --selftest redness).
+[[bin]]
+name = "gate_coverage_floor"
+path = "src/bin/gate_coverage_floor.rs"
+
 [features]
 # RFC-0051 P0: PCT runner over the real ConcurrentDb (enables core hooks).
 pct = ["pedradb-core/pct"]

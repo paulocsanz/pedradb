@@ -139,18 +139,29 @@ relógio, seeds fixas.
 
 ### P1 — next wave (piso de cobertura, ledger, primeira conversão)
 
-- [ ] **P1.1** Piso de cobertura de interleavings: métricas do
+- [x] **P1.1** Piso de cobertura de interleavings: métricas do
   `coverage.rs` gravadas em floor versionado; CI falha abaixo do piso —
-  status: `todo`
-- [ ] **P1.2** Ledger de camadas (teorema/experimento/TCB) como doc
-  vivo + gate de consistência contra o catálogo formal — status: `todo`
+  status: `done` (`crates/pedradb-world/src/bin/gate_coverage_floor.rs`
+  + `scripts/ratchet/coverage_floor.tsv`: união das máscaras de 32 seeds
+  pinadas (World real, config do soak) = 11/15 sítios requeridos +
+  floor_pop; os 4 sítios não cobertos ficam nomeados no TSV como
+  território do soak adaptativo; `--selftest` 3/3)
+- [x] **P1.2** Ledger de camadas (teorema/experimento/TCB) como doc
+  vivo + gate de consistência contra o catálogo formal — status: `done`
+  (`docs/verification-ledger.md` +
+  `scripts/check_ledger_consistency.py`: marcador de contagens ==
+  catálogo vivo e todo ponteiro `catalog:<id>` resolve; `--selftest`
+  2/2 — contagem stale, ponteiro solto)
 - [ ] **P1.3** Conversão Isolated-method do heap-sift de
   `StreamingVisibleIter`: kernel three-teeth em `merge.rs` (território
-  limpo, db.rs intocado), extração Aeneas + gates formais — status: `todo`
-- [ ] **P1.4** Protocolo de watch upstream Aeneas/Charon com a regra
+  limpo, db.rs intocado), extração Aeneas + gates formais — status:
+  `todo`
+- [x] **P1.4** Protocolo de watch upstream Aeneas/Charon com a regra
   re-pin-só-se-alargar-sem-sorry e o procedimento sandbox medido do fire
   803 (`--sysroot default`, shim clone com `#[path]` absolutos) —
-  status: `todo`
+  status: `done` (`docs/upstream-watch-protocol.md`: regra permanente,
+  pins como TCB, procedimento sandbox em 6 passos, bloqueios medidos do
+  fire 803 — dyn-Trait nível de TIPO; charon traduz o crate inteiro)
 
 ### P2 — later / polish (experimentos e série L28)
 
@@ -171,10 +182,10 @@ relógio, seeds fixas.
 | P0.2 | p0 | Ratchet de seeds PCT versionado | done | `gate_seed_ratchet.rs` + `scripts/ratchet/pct_seeds.txt` | 2026-09-10 |
 | P0.3 | p0 | Gate exaustivo crash-injection (oracle fail-closed) | done | `gate_crash_injection.rs` | 2026-09-10 |
 | P0.4 | p0 | Piso de sítios de barreira | done | `scripts/check_barrier_floor.py` + `scripts/ratchet/barrier_sites.tsv` | 2026-09-10 |
-| P1.1 | p1 | Piso de cobertura de interleavings | todo | — | 2026-09-10 |
-| P1.2 | p1 | Ledger teorema/experimento/TCB | todo | — | 2026-09-10 |
+| P1.1 | p1 | Piso de cobertura de interleavings | done | `gate_coverage_floor.rs` + `scripts/ratchet/coverage_floor.tsv` | 2026-09-10 |
+| P1.2 | p1 | Ledger teorema/experimento/TCB | done | `docs/verification-ledger.md` + `scripts/check_ledger_consistency.py` | 2026-09-10 |
 | P1.3 | p1 | Heap-sift Isolated-method kernel (three-teeth) | todo | — | 2026-09-10 |
-| P1.4 | p1 | Protocolo watch upstream (re-pin só se widen) | todo | — | 2026-09-10 |
+| P1.4 | p1 | Protocolo watch upstream (re-pin só se widen) | done | `docs/upstream-watch-protocol.md` | 2026-09-10 |
 | P2.1 | p2 | Série L28 user-gated | todo | — | 2026-09-10 |
 | P2.2 | p2 | Nightly TCG power-cut + F_FULLFSYNC | todo | — | 2026-09-10 |
 | P2.3 | p2 | Exaustivo N=4 com poda | todo | — | 2026-09-10 |

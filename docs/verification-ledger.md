@@ -1,0 +1,60 @@
+# Ledger de verificação — Teorema / Experimento / TCB
+
+**Status:** living (atualizado no mesmo commit que o código que move uma linha de camada)
+**ID:** ledger-0187
+**Parents:** [0187](rfc/0187-teorema-experimento-tcb.md)
+**Gate:** `python3 scripts/check_ledger_consistency.py` (bloqueante; vermelho em inconsistência com `scripts/formal/catalog.json`)
+
+Toda garantia do Pedra mora em uma de três camadas. Este ledger é a lista
+autoritativa de qual garantia está em qual camada, com o artefato que a
+sustenta. Uma linha só sobe de camada (`experimento → teorema`) com o
+gate da camada de destino verde no mesmo commit (three-teeth ou
+enumeração completa); nunca por reescrita de ledger.
+
+<!-- ledger-catalog: total=294 proof=261 campaign=33 absent=0 single_artifact=287 aeneas_scripts=227 clones=7 models=34 -->
+
+## Teorema — ∀ sobre código/modelo (machine-checked ou enumeração completa)
+
+| Garantia | Artefato | Piso nomeado (o que NÃO é) |
+|---|---|---|
+| Kernels de produção verificados (Verus twin / Aeneas Lean) | `scripts/formal/catalog.json` — 261 pares proof; exemplares `catalog:vote`, `catalog:ae_entry`, `catalog:ae_ack`, `catalog:commit_raft`, `catalog:joint_election` | O term de prova é o fonte de produção linkado pelo rustc; twin é gêmeo, não substituto |
+| Exaustivo N≤3: todo escalonamento do espaço de grants do harness mantém o invariantes (66/66, 181 nós) | gate P0.1 `crates/pedradb-world/src/bin/gate_exhaustive.rs` | Não é ∀ interleavings do SO (R-pct/R-glue); é ∀ sobre o espaço enumerado do harness |
+| Crash-injection exaustiva: todo índice de op falível de UM workload fixo (contagem medida no mesmo seam) recupera fail-closed | gate P0.3 `crates/pedradb-world/src/bin/gate_crash_injection.rs` | Não é ∀ workloads, nem setor partido/torn write (TCG nightly), nem ∀ timing de grupo |
+| Piso de barreiras: TODO sítio `sync_data`/`sync_all`/`sync_dir` de produção está pinado (igualdade exata por (arquivo,tipo)) | gate P0.4 `scripts/check_barrier_floor.py` + `scripts/ratchet/barrier_sites.tsv` | A amarração dinâmica prova sync≥1 no stream injetado, não que cada sítio foi exercitado neste run |
+| Ratchet de seeds: cada seed pinada reproduz seu desfecho/hash de escalonamento | gate P0.2 `gate_seed_ratchet.rs` + `scripts/ratchet/pct_seeds.txt` | Replay determinístico de seeds pinadas; não é descoberta nem ∀ |
+
+## Experimento — estatística/mecânica (nunca viram um ∀)
+
+| Garantia medida | Artefato | Fronteira honesta |
+|---|---|---|
+| PCT d=2/d=3/d=4 sobre código real (bug cadeia-3 achado a ~1e-3/seed no d=3; d=2 nunca) | `pct_concurrent.rs` campanhas + ratchet P0.2 | Amostragem; `forall_schedules_admitted` sempre false |
+| Lock interleavings / data races | `scripts/race_job.sh` (TSan box no CI) | estatístico, nunca ∀ |
+| World swarm 1024/256/256 seeds exit-1 | job `world-parallel` (`synthetic-field.yml`) | campanha; oráculo por run |
+| Descoberta de cobertura (sítios de seam) | soak adaptativo + `world-nightly` | o piso P1.1 é tripwire, não descoberta |
+| Piso de cobertura pinned-seeds (união 11/15 sítios) | gate P1.1 `gate_coverage_floor.rs` + `scripts/ratchet/coverage_floor.tsv` | 4 sítios (`E.create_open`, `E.remove`, `E.meta`, `W.crash`) ficam com o soak adaptativo |
+| Determinismo TCG guest = native | jobs `tcg-*` (`synthetic-field.yml`) | oráculo trace_hash, não wall-clock |
+| "Persistiu no disco" (power-cut) | TCG power-cut nightly (P2.2, RFC-0187) + F_FULLFSYNC | SEMPRE experimento; a barreira de SO é TCB |
+| Rocks parity (peer default `sync=false`, floor 1.0; G1 fdatasync-antes-do-Ok) | `findings/rocks-parity-floor1x*` | medição; regras de peer do repo |
+| Bug-plants three-teeth (dente DST) | `three_teeth_queued.rs` etc. (catálogo, tier campaign — 33 pares `l28_*`) | planta prova que o dente morde, não ∀; exemplares `catalog:l28_durability`, `catalog:l28_tcp_left`, `catalog:l28_tcp_part` |
+
+## TCB — axiomas nomeados (fora de prova, por decisão registrada)
+
+| Axioma | Onde está nomeado |
+|---|---|
+| Contrato do SO: `fdatasync`/`fsync`/`F_FULLFSYNC` persistem antes de retornar (disk-not-media, never_floor, ∀π fora) | RFC-0187 §TCB; produto G1 assume |
+| Firmware/controladora de disco não mente para o SO | RFC-0187 §Out of scope |
+| rustc linka o kernel de produção — o term de prova é o binário | RFC-0151 (three-teeth) |
+| Pins de toolchain: Verus `0.2026.08.09.92f466f`, Kani sha256, Aeneas `daa85d7`, Charon `0.1.232`/`340b1af`, Lean `4.31.0` | `.github/workflows/proof-check.yml`; re-pin só com widen-sem-sorry medido (P1.4) |
+| Harness PCT controla os grants; threads de SO fora do modelo | RFC-0070 (R-pct / R-glue) |
+| `StdEnv` = filesystem real do host nas campanhas não-sim | `pedradb-core/src/env.rs` |
+
+## Regras de movimento
+
+1. `experimento → teorema`: só com gate da camada teorema verde no mesmo
+   commit (three-teeth completo OU enumeração completa com asserção de
+   contagem). A movimentação edita este ledger no mesmo commit.
+2. `teorema → experimento` (regressão de camada): gate ficou vermelho e
+   o consenso é descer — o commit desce a linha E nomeia o piso perdido.
+   Nunca silencioso.
+3. TCB novo (axioma novo): precisa de linha nesta tabela com dono e
+   motivo; axioma sem nome aqui não existe para o produto.
