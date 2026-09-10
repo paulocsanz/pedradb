@@ -238,7 +238,7 @@
     {
       "id": "election_grant_from",
       "finding": "RFC-0114/0116",
-      "twin_kind": "close",
+      "twin_kind": "atom",
       "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
       "twin": "crates/pedradb-raft/src/membership_kernel.rs",
@@ -253,7 +253,6 @@
           "handler": "on_request_vote_reply"
         }
       ],
-      "data_fate": true,
       "handlers": [
         "on_request_vote_reply"
       ],
@@ -261,7 +260,13 @@
       "dst_plant": {
         "file": "crates/pedradb-store/src/three_teeth_queued.rs",
         "test": "election_grant_from_counts_on_live_queued_is_not_ok"
-      }
+      },
+      "atom": "election_grant_from_counts",
+      "atom_reason": {
+        "date": "2026-09-10",
+        "why": "RFC-0191 P2.3 cadence (tenth if): the election-grant disposition — a vote granted by a node counts exactly when the node is in the voter id set, or it is in the pending old-or-new joint set (a node in neither set never grants, RFC-0114/0116) — proven forall over (in_ids, in_pending_old_or_new) as election_grant_from_counts_ok_iff_ids_or_pending in Membership.lean; the store trampoline (on_request_vote_reply) matches the kernel decision"
+      },
+      "three_teeth": true
     },
     {
       "id": "joint_target",

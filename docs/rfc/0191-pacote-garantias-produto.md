@@ -243,7 +243,7 @@ contagens movem no mesmo commit; `lock_interleavings_admitted` e
 | P1.6 | p1 | Gates Lean/depth/product verdes em cada promoção | todo | — | 2026-09-10 |
 | P2.1 | p2 | Inv-WAL preservação (um passo) | done | `wal_append_preserves_inv_wal` + corolário `d1_plan_append_preserves_inv_wal` WalState.lean | 2026-09-10 |
 | P2.2 | p2 | Inv-LSM `visible_at` ∘ probe-order (um passo) | done | `inv_lsm_newest_first_never_non_live` + corolário `r1_get_never_returns_non_live` Merge.lean (R1 segue atom) | 2026-09-10 |
-| P2.3 | p2 | Alvo trampolim cap≤100 / floor_atom≥8 | doing | 9/29 caps pagos (121; …P2.3-8 `durable_term` — termo sobe durável só com termo novo E persist Ok; persist falho restaura o termo velho; P2.3-9 `queued_leave_finish` — leave pendente termina só fora do log ou já commitado, RFC-0122/0123), atoms 10/8; falta cap 121→≤100 | 2026-09-10 |
+| P2.3 | p2 | Alvo trampolim cap≤100 / floor_atom≥8 | doing | 10/29 caps pagos (120; …P2.3-9 `queued_leave_finish` — leave pendente termina só fora do log ou já commitado, RFC-0122/0123; P2.3-10 `election_grant_from` — voto de nó conta só no id set ou no pending old-or-new, RFC-0114/0116), atoms 11/8; falta cap 120→≤100 | 2026-09-10 |
 | P2.4 | p2 | Herdados 0187 (L28 / TCG / N=4) | todo | — | 2026-09-10 |
 
 ## Acceptance Criteria

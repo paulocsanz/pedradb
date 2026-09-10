@@ -171,3 +171,26 @@ theorem queued_leave_finish_ok_iff_not_in_log_or_committed :
     · split
       · next _ => rw [hc]
       · rfl
+
+/-- Catalog entry: an election grant from a node counts exactly when
+    the node is in the id set, or it is in the pending old-or-new joint
+    set (RFC-0114/0116 — a node in neither set never grants). -/
+theorem election_grant_from_counts_ok_iff_ids_or_pending :
+    ∀ (in_ids : Bool) (in_pending_old_or_new : Bool),
+      (election_grant_from_counts in_ids in_pending_old_or_new = ok true)
+        ↔ (in_ids = true ∨ in_pending_old_or_new = true) := by
+  intro in_ids in_pending
+  unfold election_grant_from_counts
+  constructor
+  · intro h
+    split at h
+    · next c1 =>
+      exact Or.inl c1
+    · next c1 =>
+      simp at h
+      exact Or.inr h
+  · rintro (hc | hc)
+    · rw [if_pos hc]
+    · split
+      · next _ => rfl
+      · next _ => rw [hc]
