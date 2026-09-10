@@ -193,10 +193,17 @@ contagens movem no mesmo commit; `lock_interleavings_admitted` e
 
 ### P2 — invariante indutivo, trampolim com alvo, herdados
 
-- [ ] **P2.1** Inv-WAL (um passo): lema de preservação de
+- [x] **P2.1** Inv-WAL (um passo): lema de preservação de
   `acked ⊆ synced ⊆ prefixo-recuperável` para `wal_append` extraído;
   corolário D1 cita este lema **e** o close P1.2; não reabre D1 como
-  modelo — status: `todo`
+  modelo — status: `done`
+  (`WalState.lean`: `wal_inv_closed` + `wal_append_closed` +
+  `wal_append_preserves_inv_wal` ∀ s s' n (desfecho ok do append
+  preserva o invariant; fail/div do add checado contradizem o `ok s'`);
+  corolário `d1_plan_append_preserves_inv_wal` faz `rw
+  [d1_wal_commit_plan]` (close P1.2) e `exact` o lema — os 3 casos de
+  plano não-SyncApplyOk fecham por contradição; linha D1 permanece
+  `close`)
 - [ ] **P2.2** Inv-LSM (um passo): lema `visible_at` + probe-order
   newest-first (0164 já kernel) ⇒ get não devolve versão não-live;
   corolário R1 cita P0.2/P1.1 **e** este lema — status: `todo`
@@ -223,7 +230,7 @@ contagens movem no mesmo commit; `lock_interleavings_admitted` e
 | P1.4 | p1 | C1-joint `model→close` (∀ contagens) | done | `c1_joint_election` + `maj` Membership.lean; TSV C1=close, promoted 4 | 2026-09-10 |
 | P1.5 | p1 | Um `if` do trampolim, cap 130→129 | todo | — | 2026-09-10 |
 | P1.6 | p1 | Gates Lean/depth/product verdes em cada promoção | todo | — | 2026-09-10 |
-| P2.1 | p2 | Inv-WAL preservação (um passo) | todo | — | 2026-09-10 |
+| P2.1 | p2 | Inv-WAL preservação (um passo) | done | `wal_append_preserves_inv_wal` + corolário `d1_plan_append_preserves_inv_wal` WalState.lean | 2026-09-10 |
 | P2.2 | p2 | Inv-LSM `visible_at` ∘ probe-order (um passo) | todo | — | 2026-09-10 |
 | P2.3 | p2 | Alvo trampolim cap≤100 / floor_atom≥8 | todo | — | 2026-09-10 |
 | P2.4 | p2 | Herdados 0187 (L28 / TCG / N=4) | todo | — | 2026-09-10 |
