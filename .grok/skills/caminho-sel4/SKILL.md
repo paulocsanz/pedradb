@@ -1,43 +1,44 @@
 ---
 name: caminho-sel4
 description: >
-  Pay PedraDB’s seL4-class path this turn: production kernel rustc links is
-  the proof term; then the I/O *script* (order of kernel+Env, not the
-  syscall); then compose glue callers (ConcurrentDb / commit_ops_with);
-  then the four concurrency theorems; then shrink remaining data-fate ifs.
-  Catalog-only single_artifact is not a land. Always implement: first
-  unpaid rank 1–10, else one remaining data-fate `if` in the trampoline
-  (Aeneas of rustc types the handler passes; cartoon remaining = delete
-  the Verus stand-in — never mint a u64 twin, never skip it).
+  Pay PedraDB’s seL4-class path this turn: RFC-0191 product guarantees
+  (D1/R1/T1/C1 ∀ over the rustc-linked fn) after unpaid rank 1–10.
+  Production kernel rustc links is the proof term; then script/compose/
+  concurrency; then product remaining (P0 ratchet, then P1 promotions);
+  then trampoline data-fate ifs (cap down + atom same commit).
+  Catalog-only single_artifact is not a land. Always implement.
   Research Verus / Iris / Aeneas / DST / fuzzing and persist.
   Triggers: formalize, verificação, seL4, caminho sel4, trampolim, guião,
   concorrência, deadlock, data race, extraia aeneas, va formal,
-  verification next, /caminho-sel4, /verificacao-next. Not benches.
+  verification next, /caminho-sel4, /verificacao-next, /grind-caminho-sel4.
+  Not benches.
 ---
 
 # Caminho seL4 (Pedra)
 
 ## Grind pressure (one block, overwritten each fire)
 
-- Last fire: worked (`69fb10bb` blocks_overlapping_range calls catalog `user_key_in_range`)
-- Why: leftover_next trampoline remaining; `last_visible_under_prefix_with` still inlines prefix window (`starts_with` + `uk < e`)
-- This fire MUST land: `last_visible_under_prefix_with` calls catalog `key_in_prefix_range`; no db.rs checkout
-- Forbidden this fire: mint u64 twin; leftover is_empty wrap; compact_refuse spray; leftover_next store/Montanha; git checkout of db.rs/concurrent.rs; ||/== identity kernel
-- Deeper: Search leftover_next=trampoline remaining; open last_visible_under_prefix_with; named cargo; kernel call is the proof
+- Last fire: worked (fire 803 research NEGATIVO, sem commit — artifacts: findings/2026-09-09-aeneas-iterator-widen.md reescrito com as medições; sandbox /tmp/aeneas-new @505b6ca + charon @b104e24 + /tmp/iter-shim, pins intocados e verdes pós-probe; fire 802 cbc0d4cd EXTRACT.md row fix; fire 801 9c2136be write_op_range_end kernel)
+- Why: upstream 89 commits à frente NÃO alarga — bloqueio raiz MEDIDO: `Box<dyn Iterator>` em StreamingVisibleIter → Aeneas "Dynamic trait types are not supported yet" NO NÍVEL DO TIPO, antes de qualquer -filter-trait-methods (f9a8e33 irrelevante até dyn-Trait subir); WindowKvIter transitivo; whole-crate charon novo FUNCIONA (llbc 8.8MB exit 0) então a barreira é 100% lado Aeneas; regra re-pin (alargar sem sorry) NÃO cumprida
+- Result corrections duráveis: old charon start-from em TYPE emite SÓ o decl (sessão anterior errou); "Code failed to compile" do charon = pattern-não-casada (provado c/ nome inexistente) — NÃO é falha de rustc; padrão `{impl Trait for Ty}::next` também não casa; new-charon macOS exige `--sysroot default` (miri sysroot compartilhado stale 2026-05-31 → E0514 nos deps); dune precisa ~/.opam/5.3.0/bin no PATH; setup-charon via nix morre (unsupported system) — construir charon manual (cargo build --bins + cp ../bin)
+- Next fire MUST: RFC-0191 P0.1 — `product_guarantees.tsv` + `check_product_floor.py --selftest` + job `product-floor`; freeze R1=atom (`visible_at_deletion_never_live`), D1/T1/C1=model; flip RFC checkbox same commit. Do not pull a trampoline `if` while leftover_next names P0.* / P1.1–P1.4.
+- Forbidden this fire: mint toy twin verus; stamp over sorry; wrap plumbing theorems; touch /tmp/db.rs.pipeline-ORIGIN; git checkout/stash db.rs/concurrent.rs; touch frozen Montanha files; leftover wrap em pedradb-store/montanha; re-pin Aeneas/charon sem widen medido sem sorry; editar o shim de produção (usar clone /tmp com #[path] absolutos)
+- Deeper: Aeneas Lean recipes: direct bodies `rfl`; decide/if chains `unfold; simp`; saturating chains `have h := by native_decide; simp [h, lift, Ord.max.default, Ord.max_body, PartialOrdU64.lt]`; theorem headers `open Aeneas Aeneas.Std Result`; Result-typed eq/str fns are extract axioms — conditional theorems, not native_decide
 
 This skill **lands one payable slice per Fire**. Rank 1–10 unpaid first.
-When those boards are 0, Search prints `leftover_next`: cartoon remaining
-if `cartoon_twin>0`, else trampoline remaining — **not a halt**. Do not
-invent a `compact_refuse` / `batch_is_empty` wrap. Do not replace
-`leftover_next` with a spray-queue fn name. Catalog-only `single_artifact`
-is skip **only if** Lean has `def` of the rustc entry **and the file is
-not a cartoon**. `twin==kernel` + cfg split is unpaid. Empty 4–10 is
-**not** a stop.
+When those boards are 0, Search prints `leftover_next`: **product
+remaining** (RFC-0191, `references/product.md`) before cartoon remaining
+before trampoline remaining — **not a halt**. Do not invent a
+`compact_refuse` / `batch_is_empty` wrap. Do not replace `leftover_next`
+with a spray-queue fn name. Catalog-only `single_artifact` is skip
+**only if** Lean has `def` of the rustc entry **and the file is not a
+cartoon**. `twin==kernel` + cfg split is unpaid. Empty 4–10 is **not**
+a stop and is **not** permission to skip RFC-0191 P0.
 
-Pay the seL4-class path this fire (empty the trampoline of data-fate
-`if`s). `never_floor` / disk-not-media / `∀π` refused stay TCB — not
-permission to halt. Wrap/spray is not payment. Empty 4–10 is trampoline
-remaining only after cartoon remaining is 0.
+Pay the seL4-class path this fire: RFC-0191 product row, else empty the
+trampoline of data-fate `if`s. `never_floor` / disk-not-media / `∀π`
+refused stay TCB — not permission to halt. Wrap/spray is not payment.
+Empty 4–10 is product remaining, then cartoon remaining, then trampoline.
 **Price:** the fn rustc links, with the types the handler passes
 (`key::ValueType`, `&[u8]`, `Bound`), is the term. Pay with Aeneas
 extract of **that** body. Verus last-wins only when it type-checks
@@ -65,9 +66,9 @@ Pins: Charon `0.1.232` / Aeneas `daa85d7` / Lean `4.31.0`. Re-pin only if it
 **widens** the translated set without `sorry`. Official Rocks peer stays
 `ROCKS_PARITY_SYNC=0` (unrelated).
 
-Recipes: `references/script.md` (order), `references/concurrency.md` (four
-theorems), `references/aeneas.md` (extract/compose). Map:
-`findings/2026-09-07-concurrency-proof-map/`.
+Recipes: `references/product.md` (RFC-0191), `references/script.md` (order),
+`references/concurrency.md` (four theorems), `references/aeneas.md`
+(extract/compose). Map: `findings/2026-09-07-concurrency-proof-map/`.
 
 ## 0. Research (every invocation, bounded)
 
@@ -88,9 +89,11 @@ python3 .grok/skills/caminho-sel4/scripts/candidates.py
 Then open the files the **UNPAID** rows named (handler body + plant body,
 not grep). When leftover_next says cartoon remaining, open that kernel
 file and **delete** the `verus!` stand-in (do not mint a replacement).
-When leftover_next says trampoline remaining, open the handler that
-still has a data-fate `if` without a kernel call, or the rustc body
-whose extract has no Lean `unfold`. Also
+When leftover_next says product remaining, land that RFC-0191 slice
+(`references/product.md`) — P0.1 is the TSV+checker (a land). When it
+says trampoline remaining, open the handler that still has a data-fate
+`if` without a kernel call, or the rustc body whose extract has no Lean
+`unfold`; cap_data_fate down + atom same commit. Also
 compute, from catalog + `residuals.json` (do not `json.dump` the live
 catalog):
 
@@ -106,14 +109,15 @@ catalog):
 
 If script vs RFC disagree, **code + catalog win**.
 
-`leftover_next` is **computed**. Unpaid 4–10 → those boards. Else if
-`cartoon_twin>0` → cartoon remaining (named kernel file: delete the
-stand-in). Search scans **every catalog kernel**, not only `data_fate`.
-`twin==kernel` / `single_artifact: true` with a `verus!` stand-in or
-cfg split is unpaid cartoon (rustc `&[u8]` vs Verus `Seq<u8>` /
-clone_bytes / u64 flattened args is the same lie). Else trampoline
-remaining. Never a production fn name, never FACTORY_BAN halt, never
-mint, never skip cartoon as "not a land".
+`leftover_next` is **computed**. Unpaid 4–10 → those boards. Else
+**product remaining** (RFC-0191 `unpaid_product`, first OPEN in
+`PRODUCT_FIRE_ORDER`). Else if payable `cartoon_twin>0` (not Montanha)
+→ cartoon remaining (delete the stand-in). Else trampoline remaining
+(RFC-0191 P1.5 / P2.3). Search scans **every catalog kernel**, not only
+`data_fate`. `twin==kernel` / `single_artifact: true` with a `verus!`
+stand-in or cfg split is unpaid cartoon. Never a production fn name,
+never FACTORY_BAN halt, never mint, never skip product remaining to
+pull a random trampoline `if`.
 
 ## 2. Rank (first non-empty wins — then implement it)
 
@@ -156,9 +160,10 @@ chains Fires; this bound is not end-of-turn).
    different types. Do not mint `#[cfg(not(verus_keep_ghost))]`.
    `skip_verus_last_wins` is invalid. If Lean already has `def` of the
    rustc entry **and the file is not a cartoon**, skip (SA wrap). If
-   4–10 empty, leftover_next is cartoon remaining then trampoline
-   remaining — **not a halt**. Do not fall through here while rank 5
-   `unpaid_compose` is non-zero.
+   4–10 empty, leftover_next is product remaining then cartoon remaining
+   then trampoline remaining — **not a halt**. Do not fall through here
+   while rank 5 `unpaid_compose` is non-zero or leftover_next names
+   RFC-0191 P0/P1.1–P1.4.
 8. **atom→close** — one `data_fate` atom, production `entry`.
 9. **F then E** — one clone group / one non-`data_fate` three-teeth pair
    whose `entry` has no Lean `def`. Already-extracted close pairs are
@@ -166,6 +171,11 @@ chains Fires; this bound is not end-of-turn).
 10. **Scale / complexity** — only when 1–9 empty: Lean theorem over an
     already-enrolled `scale_kernel` / RFC-0176 model on a concrete N, or a
     DST/PCT plant that names the kernel (campaign ≠ ∀π).
+10b. **Product (RFC-0191)** — when 1–10 empty: `leftover_next product
+    remaining`. Land `references/product.md` in order (P0.1 ratchet is a
+    land; then P0.2 R1 corollary; then P1 promotions; then P2.1/P2.2 Inv
+    lemmas). `rfl` on concrete inputs does not move a product row.
+    Trampoline `if` while this names P0.* or P1.1–P1.4 is **shallow**.
 11. **H** — L28/PCT campaign only if the user asked for that campaign.
 12. Never dump `db.rs` / `concurrent.rs`. Never invent `l28_tcp_*_ok` gates
     that do not exist. Never flip `media_durable_admitted` or
@@ -190,19 +200,21 @@ chains Fires; this bound is not end-of-turn).
 16. **Wrap factory is not a slice** (`is_empty`/`compact_refuse` spray /
     `||`/`==` identity kernel / minting a Verus cartoon / DiskPressure on
     `close`/promote/rotate-after-SST/auto-flush). When unpaid 4–10 is 0,
-    leftover_next is cartoon remaining (delete the stand-in) then
+    leftover_next is product remaining then cartoon remaining then
     trampoline remaining. Do not wrap. Do not halt. Do not mint. Do not
-    skip cartoon. RFC P1.3 telemetry is not data-fate. P2.1 fence blast
-    is deferred. Inventing a disk `if` to have a SHA is shallow — revert.
+    skip product remaining. RFC P1.3 telemetry is not data-fate. P2.1
+    fence blast is deferred. Inventing a disk `if` to have a SHA is
+    shallow — revert.
 
-Tie-break: open RFC `- [ ] **P0`/`P1` on the same theme, only if it is
-write-admission or unpaid compose/script — not a new `compact_refuse`
+Tie-break: open RFC-0191 `- [ ] **P0`/`P1` wins leftover when 4–10 are
+empty (`references/product.md`). Other RFC P0/P1 on the same theme only
+if write-admission or unpaid compose/script — not a new `compact_refuse`
 site.
 
 ## 3. Land (same turn)
 
-Follow `references/aeneas.md` for extract/compose; `references/script.md`
-for a plan fn. Surgical HEAD-only commits on a dirty tree (posix SOURCE =
+Follow `references/product.md` for RFC-0191; `references/aeneas.md` for
+extract/compose; `references/script.md` for a plan fn. Surgical HEAD-only commits on a dirty tree (posix SOURCE =
 git HEAD if `lib.rs` is dirty). Mutant: wrong `glue.proof_depth.extract` in
 a **copy** of residuals FAILs; restore from bak; never `json.dump` live
 `catalog.json`.
@@ -212,11 +224,16 @@ Acceptance (all):
 - a production `.rs` that rustc links **changed this turn**, or a new
   Lean theorem that `unfold`s a production caller **and** callee
   introduced or first used this turn (Verus theorem only if it
-  type-checks those rustc types — same types, not a u64/`Seq<u8>` stand-in).
-  Deleting a cartoon stand-in from that `.rs` **is** this change.
-- named `cargo test` calls that **production** fn
+  type-checks those rustc types — same types, not a u64/`Seq<u8>` stand-in),
+  or **RFC-0191 P0.1**: `check_product_floor.py` GREEN + `--selftest` +
+  TSV freeze + CI job (same class as `depth-floor`). Deleting a cartoon
+  stand-in from a production `.rs` **is** this change. A product
+  corollary land moves the TSV layer in the **same** commit.
+- named `cargo test` calls that **production** fn (P0.1: checker
+  `--selftest` is the named test)
 - `scripts/lean_extracts.sh --required` exit 0 if Lean changed
 - `--lint` freeze: extract count matches; `db_rs_extracted` false
+- RFC-0191 checkbox + status table flipped in the same commit as the slice
 
 **Not a land:** catalog/`residuals` `single_artifact` flag without the rustc
 body change above; keeping a Verus `verus!` stand-in whose signature ≠
@@ -233,20 +250,23 @@ slapping `compact_refuse`
 `DiskPressure` on `close` / `Drop` / promote / rotate-after-SST /
 auto-flush; replacing `leftover_next` with a function name;
 `include_str` of a kernel the handler already calls; minting a Verus
-u64/toy-enum twin. If the first rank hit is mint/wrap/halt, fall through
-to cartoon remaining (delete the stand-in) then trampoline remaining.
+u64/toy-enum twin; `rfl` on concrete inputs billed as a product `close`;
+a trampoline `if` while leftover_next names RFC-0191 P0.* or P1.1–P1.4.
+If the first rank hit is mint/wrap/halt, fall through to product remaining
+then cartoon remaining then trampoline remaining.
 
 ## 4. Output (after the commit, not instead of it)
 
 Under `/grind` this section is **not** permission to stop. Write it
 only if the next Fire's land tools already follow. Empty 4–10 is
-cartoon remaining then trampoline remaining, not a stop. Minting a
-cartoon is not a land; deleting one is.
+product remaining then cartoon remaining then trampoline remaining,
+not a stop. Minting a cartoon is not a land; deleting one is.
 
 ```markdown
 ## Caminho seL4 — não acabou
 
 Freeze: extract=… close=… atom=… model=… | single_artifact=…/data_fate=…
+Product: D1=… R1=… T1=… C1=… (RFC-0191; layer only up)
 TCB: never_floor unchanged; db.rs trampoline; disk not media; ∀π refused.
 
 ### Landed (this turn)

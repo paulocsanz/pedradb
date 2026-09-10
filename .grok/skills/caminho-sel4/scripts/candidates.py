@@ -63,6 +63,9 @@ def rfc_open_slices() -> list[str]:
             p.name.startswith("015")
             or p.name.startswith("016")
             or p.name.startswith("017")
+            or p.name.startswith("0187")
+            or p.name.startswith("0188")
+            or p.name.startswith("0191")
             or p.name.startswith("0061")
             or p.name.startswith("0051")
             or p.name.startswith("0056")
@@ -213,6 +216,7 @@ def main() -> int:
     unpaid_script, unpaid_compose = script_compose_board()
     unpaid_concurrency = concurrency_board()
     unpaid_scale = scale_board()
+    unpaid_product, product_next = product_board()
     # Every catalog kernel, not only data_fate. twin==kernel +
     # single_artifact with a cfg/verus stand-in is still unpaid cartoon
     # (prefix.rs Seq vs rustc &[u8] hid here).
@@ -222,6 +226,8 @@ def main() -> int:
         unpaid_compose,
         unpaid_concurrency,
         unpaid_scale,
+        unpaid_product,
+        product_next,
         cartoons,
     )
     return capacity_board(cat, res)
@@ -383,6 +389,53 @@ def lean_has_def(name: str) -> bool:
     return False
 
 
+# RFC-0191 fire order. P1.6 is per-land hygiene (not a Fire).
+# P2.4 is 0187 inherited / user-gated (not this grind).
+PRODUCT_FIRE_ORDER = (
+    "P0.1",
+    "P0.2",
+    "P0.3",
+    "P1.1",
+    "P1.2",
+    "P1.3",
+    "P1.4",
+    "P2.1",
+    "P2.2",
+    "P1.5",
+    "P2.3",
+)
+PRODUCT_RFC = RFC_DIR / "0191-pacote-garantias-produto.md"
+PRODUCT_TSV = ROOT / "scripts/ratchet/product_guarantees.tsv"
+PRODUCT_CHECKER = ROOT / "scripts/check_product_floor.py"
+
+
+def rfc0191_open() -> list[str]:
+    if not PRODUCT_RFC.is_file():
+        return ["P0.1"]
+    text = PRODUCT_RFC.read_text(encoding="utf-8")
+    return re.findall(r"- \[ \] \*\*(P[012]\.\d+)\*\*", text)
+
+
+def product_board() -> tuple[int, str | None]:
+    """RFC-0191 product rows. Missing ratchet = P0.1 unpaid."""
+    print("== product (RFC-0191: D1/R1/T1/C1 over rustc fn) ==")
+    opens = rfc0191_open()
+    fireable = [s for s in PRODUCT_FIRE_ORDER if s in opens]
+    for s in fireable:
+        print(f"  OPEN {s}")
+    tsv_ok = PRODUCT_TSV.is_file()
+    chk_ok = PRODUCT_CHECKER.is_file()
+    print(f"  tsv={str(tsv_ok).lower()} checker={str(chk_ok).lower()}")
+    if not tsv_ok or not chk_ok:
+        print("  unpaid_product P0.1 ratchet missing")
+        print(f"  unpaid_product={max(len(fireable), 1)} next=P0.1")
+        return max(len(fireable), 1), "P0.1"
+    nxt = fireable[0] if fireable else None
+    unpaid = len(fireable)
+    print(f"  unpaid_product={unpaid} next={nxt or 'none'}")
+    return unpaid, nxt
+
+
 def skip_montanha_path(path: str) -> bool:
     """Rank 13: leftover_next must not name store/montanha until the user lifts it."""
     return path.startswith("crates/pedradb-store/") or path.startswith(
@@ -395,6 +448,8 @@ def print_leftover_next(
     unpaid_compose: int,
     unpaid_concurrency: int,
     unpaid_scale: int,
+    unpaid_product: int,
+    product_next: str | None,
     cartoons: list[tuple[str, str]],
 ) -> None:
     """Do not replace this with a production fn name. That is the factory."""
@@ -406,6 +461,17 @@ def print_leftover_next(
             "first UNPAID compose then script then rank 6 then rank 10; "
             "never leftover is_empty wrap; never compact_refuse spray; skip Montanha"
         )
+        return
+    # RFC-0191: product remaining beats cartoon (Montanha frozen) and
+    # beats a random trampoline if while P0/P1.1–P1.4/P2.1–P2.2 are open.
+    trampoline_ids = {"P1.5", "P2.3"}
+    if unpaid_product and product_next and product_next not in trampoline_ids:
+        print(
+            f"  leftover_next product remaining RFC-0191 {product_next}; "
+            "references/product.md; ∀ credit (not rfl concrete); "
+            "layer model→atom→close only up; skip Montanha"
+        )
+        print(f"  leftover_next_first RFC-0191 {product_next}")
         return
     payable = [(i, f) for i, f in cartoons if not skip_montanha_path(f)]
     if payable:
@@ -419,13 +485,16 @@ def print_leftover_next(
         )
         print(f"  leftover_next_first {cid} {cfile}")
         return
+    slice = product_next if product_next in {"P1.5", "P2.3"} else "P1.5"
     print(
-        "  leftover_next trampoline data-fate if remaining "
+        f"  leftover_next trampoline data-fate if remaining RFC-0191 {slice} "
         "(db.rs/concurrent.rs); pull one if into a named kernel "
         "rustc links with handler types; Aeneas extract of that body; "
+        "cap_data_fate down + atom same commit; "
         "Verus only same types; never leftover is_empty wrap; "
         "never compact_refuse spray; skip Montanha"
     )
+    print(f"  leftover_next_first RFC-0191 {slice}")
 
 
 def script_compose_board() -> tuple[int, int]:
