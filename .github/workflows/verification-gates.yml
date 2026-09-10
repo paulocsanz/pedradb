@@ -12,6 +12,11 @@
 #     pinned exactly; new uninjected or removed site is red.
 # Each gate's --selftest proves its own redness (mutation-blind gate =
 # red job). Hangs die on the step timeout (red), never hang CI forever.
+#
+# RFC-0188 depth ratchet:
+#   - depth-floor: proof ladder floors (extract/close/atom) + data_fate
+#     cap + close/atom registration cross-checked against residuals.json
+#     and catalog.json (stale counts / sorry files / dangling ids = red).
 name: verification-gates
 
 on:
@@ -111,3 +116,18 @@ jobs:
           python3 scripts/check_ledger_consistency.py
           python3 scripts/check_ledger_consistency.py --selftest | tee /tmp/ls.log
           grep -q 'SELFTEST ledger: 2/2 sabotages caught' /tmp/ls.log
+
+  depth-floor:
+    name: RFC-0188 P0.1/P0.3 depth ratchet (floors + data_fate cap)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: gate (twice, logs identical) + selftest (4/4 redness)
+        run: |
+          python3 scripts/check_depth_floor.py | tee /tmp/d1.log
+          python3 scripts/check_depth_floor.py | tee /tmp/d2.log
+          cmp /tmp/d1.log /tmp/d2.log
+          grep -q 'GATE depth-floor: GREEN' /tmp/d1.log
+          python3 scripts/check_depth_floor.py --selftest | tee /tmp/ds.log
+          grep -q 'SELFTEST depth-floor: 4/4 sabotages caught' /tmp/ds.log

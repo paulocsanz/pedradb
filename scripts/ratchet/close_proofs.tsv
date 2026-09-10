@@ -1,0 +1,14 @@
+# RFC-0188 P0.2/P1.6 — close/atom proof registration (the credit registry).
+# Columns (whitespace-separated): kind  catalog_id  theorem  lean_file  entry
+#   kind        close | atom — the ladder step this proof pays.
+#   catalog_id  `catalog:<id>` must resolve in scripts/formal/catalog.json
+#               (the theorem is about a production pair, not a toy).
+#   theorem     must exist as `theorem <name>` in lean_file, its statement
+#               must carry a forall-binder (a named property over all
+#               inputs — NOT a definitional equality over concrete inputs),
+#               and the file must contain zero `sorry`.
+#   entry       the rustc-linked kernel fn the theorem is about.
+# proof_depth.close/.atom in scripts/formal/residuals.json must EQUAL the
+# registry counts; floors in proof_depth.tsv move in the SAME commit as a
+# row. Wrap-factory kernels (a||b / identity / is_empty / ==0) never earn
+# a row — the forall-binder requirement is the mechanical part of that ban.
