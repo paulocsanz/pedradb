@@ -137,11 +137,12 @@ contagens movem no mesmo commit; `lock_interleavings_admitted` e
   `visible_at_deletion_never_live`), D1/T1/C1=`model`; floor ≥1
   `atom|close`; `--selftest` 4/4 (camada desce, sem ∀, dangling,
   freeze honesto passa) — status: `done`
-- [ ] **P0.2** Corolário de produto R1-deleção: teorema `∀` em
+- [x] **P0.2** Corolário de produto R1-deleção: teorema `∀` em
   `formal/aeneas/lean/` que *nomeia* a frase R1 e `unfold`
   `merge.visible_at` (não só o atom já registado — o corolário é o
   objecto de produto); as-is dente; a linha R1 aponta para este
-  teorema no mesmo commit — status: `todo`
+  teorema no mesmo commit — status: `done` (`r1_deletion_never_live`
+  ∀ range_hidden, unfold `merge.visible_at`; TSV R1 aponta para ele)
 - [ ] **P0.3** Ledger: tabela **Garantias de produto** em
   `docs/verification-ledger.md` com as 4 frases + camada + piso
   nomeado; regra de movimento (camada só sobe no mesmo commit que o
@@ -200,7 +201,7 @@ contagens movem no mesmo commit; `lock_interleavings_admitted` e
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | Ratchet de produto (4 linhas, camada só sobe) | done | `product_guarantees.tsv` + `check_product_floor.py` + job `product-floor` | 2026-09-10 |
-| P0.2 | p0 | Corolário R1-deleção (∀, unfold `visible_at`) | todo | — | 2026-09-10 |
+| P0.2 | p0 | Corolário R1-deleção (∀, unfold `visible_at`) | done | `r1_deletion_never_live` Merge.lean | 2026-09-10 |
 | P0.3 | p0 | Ledger garantias de produto | todo | — | 2026-09-10 |
 | P1.1 | p1 | R1-value (∀ `range_hidden`, ambos os braços) | todo | — | 2026-09-10 |
 | P1.2 | p1 | D1-script `model→close` (∀ Bool da plan fn) | todo | — | 2026-09-10 |

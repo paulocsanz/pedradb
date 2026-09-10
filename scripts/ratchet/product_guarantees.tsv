@@ -13,6 +13,6 @@
 # day-1: R1=atom (visible_at_deletion_never_live), D1/T1/C1=model → N=1.
 floor_promoted 1
 D1	model	catalog:d1_modelo	-	-	d1_modelo
-R1	atom	catalog:visible_at	visible_at_deletion_never_live	formal/aeneas/lean/Merge.lean	visible_at
+R1	atom	catalog:visible_at	r1_deletion_never_live	formal/aeneas/lean/Merge.lean	visible_at
 T1	model	catalog:leftover_txn_is_aborted	-	-	leftover_txn_is_aborted
 C1	model	catalog:joint_election	-	-	joint_election_ok
