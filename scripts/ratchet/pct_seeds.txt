@@ -1,0 +1,30 @@
+# RFC-0187 P0.2 — PCT seed ratchet (versioned; only grows).
+# Data lines are TAB-separated: seed  scenario  policy  expect  hash
+#   scenario: engine12 (real ConcurrentDb, N=3, 12 puts/task) | plant3 (RFC-0156 chain-3)
+#   policy:   seq | rr | d2 | d3 | d4
+#   expect:   clean | violator
+#   hash:     bit-stable run_steps_hash of the grant sequence; '-' = not pinned
+# `floor N` pins the minimum data-line count. The gate FAILS if entries
+# shrink below the floor (coverage regression) or if any pinned seed stops
+# reproducing its outcome/hash (scheduler or oracle regression).
+# Intentional coverage changes move entries AND floor in the same commit.
+# Seeds are hex (0x optional). Engine12 hash is deliberately unpinned:
+# real-I/O group timing is process-shaped, so determinism is checked as
+# same-seed replay h1==h2 inside the gate (the shipped test's assertion).
+# Discovered 2026-09-10 via `gate_seed_ratchet --discover`.
+floor 15
+0x00515EED	engine12	d2	clean	-
+0	plant3	seq	clean	efc2b9bac2d9cc5a
+1	plant3	seq	clean	efc2b9bac2d9cc5a
+2	plant3	seq	clean	efc2b9bac2d9cc5a
+0	plant3	d2	clean	efc2b9bac2d9cc5a
+1	plant3	d2	clean	efc2b9bac2d9cc5a
+2	plant3	d2	clean	d5e9513c066dc18
+0x29F	plant3	d3	violator	bff996264909ce0
+0x87F	plant3	d3	violator	9078bf4bde1af537
+0x1372	plant3	d3	violator	cc0423d5dcd436c1
+0x1A2B	plant3	d3	violator	bff996264909ce0
+0x208D	plant3	d3	violator	135c68c19b227460
+0x2CB9	plant3	d3	violator	92f223d6bd79703
+0x3717	plant3	d3	violator	91d2a3017095673b
+0x3CE8	plant3	d3	violator	fe2010c626023e32

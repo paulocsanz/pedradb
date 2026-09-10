@@ -1,0 +1,85 @@
+# RFC-0187 — deterministic verification gates (P0 wave).
+#
+# Every gate here is blocking, self-verifying, and hang-fatal:
+#   - P0.1 exhaustive N<=3: the full 66-schedule grant space enumerated
+#     per scenario, per-schedule oracle, explored-count asserted;
+#   - P0.2 seed ratchet: every pinned PCT seed replayed, file may only
+#     grow (floor), pinned outcomes + schedule hashes reproduced;
+#   - P0.3 crash injection: every fallible-op index of the fixed
+#     workload injected (count measured by the same seam), fail-closed
+#     recovery oracle after each, CRC-corruption phase;
+#   - P0.4 barrier floor: production sync_data/sync_all/sync_dir sites
+#     pinned exactly; new uninjected or removed site is red.
+# Each gate's --selftest proves its own redness (mutation-blind gate =
+# red job). Hangs die on the step timeout (red), never hang CI forever.
+name: verification-gates
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  p01-exhaustive:
+    name: P0.1 exhaustive N<=3 (66 schedules, count-asserted)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: gate (twice, logs identical) + selftest (4/4 redness)
+        run: |
+          cargo run -q -p pedradb-world --features pct --bin gate_exhaustive | tee /tmp/g1.log
+          cargo run -q -p pedradb-world --features pct --bin gate_exhaustive | tee /tmp/g2.log
+          cmp /tmp/g1.log /tmp/g2.log
+          grep -c 'schedules=66/66' /tmp/g1.log | grep -q '^4$'
+          grep -q 'GATE exhaustive: GREEN' /tmp/g1.log
+          cargo run -q -p pedradb-world --features pct --bin gate_exhaustive -- --selftest | tee /tmp/gs.log
+          grep -q 'SELFTEST exhaustive: 4/4 sabotages caught' /tmp/gs.log
+
+  p02-seed-ratchet:
+    name: P0.2 PCT seed ratchet (replay-all, fail-on-shrink)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: gate (twice, logs identical) + selftest (4/4 redness)
+        run: |
+          cargo run -q -p pedradb-world --features pct --bin gate_seed_ratchet | tee /tmp/r1.log
+          cargo run -q -p pedradb-world --features pct --bin gate_seed_ratchet | tee /tmp/r2.log
+          cmp /tmp/r1.log /tmp/r2.log
+          grep -q 'GATE seed-ratchet: GREEN' /tmp/r1.log
+          cargo run -q -p pedradb-world --features pct --bin gate_seed_ratchet -- --selftest | tee /tmp/rs.log
+          grep -q 'SELFTEST seed-ratchet: 4/4 sabotages caught' /tmp/rs.log
+
+  p03-crash-injection:
+    name: P0.3 exhaustive crash injection (fail-closed oracle)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: gate (twice, logs identical) + selftest (6/6 redness)
+        run: |
+          cargo run -q -p pedradb-world --features pct --bin gate_crash_injection | tee /tmp/c1.log
+          cargo run -q -p pedradb-world --features pct --bin gate_crash_injection | tee /tmp/c2.log
+          cmp /tmp/c1.log /tmp/c2.log
+          grep -q 'GATE crash: GREEN' /tmp/c1.log
+          cargo run -q -p pedradb-world --features pct --bin gate_crash_injection -- --selftest | tee /tmp/cs.log
+          grep -q 'SELFTEST crash: 6/6 oracle checks caught' /tmp/cs.log
+
+  p04-barrier-floor:
+    name: P0.4 barrier-site floor (static == pinned; dynamic tie)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: floor check (with crash-gate dynamic tie) + selftest (2/2)
+        run: |
+          cargo run -q -p pedradb-world --features pct --bin gate_crash_injection | tee /tmp/crash.log
+          python3 scripts/check_barrier_floor.py --crash-log /tmp/crash.log
+          python3 scripts/check_barrier_floor.py --selftest | tee /tmp/bs.log
+          grep -q 'SELFTEST barrier: 2/2 sabotages caught' /tmp/bs.log

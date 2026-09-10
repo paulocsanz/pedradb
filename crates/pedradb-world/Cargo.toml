@@ -37,6 +37,27 @@ path = "src/bin/multiproc_trace_smoke.rs"
 name = "world_hunt"
 path = "src/bin/world_hunt.rs"
 
+# RFC-0187 P0.1: exhaustive N≤3 concurrency gate (66-schedule space,
+# per-schedule oracle, explored-count assertion, --selftest redness).
+[[bin]]
+name = "gate_exhaustive"
+path = "src/bin/gate_exhaustive.rs"
+required-features = ["pct"]
+
+# RFC-0187 P0.2: versioned PCT seed ratchet (replay-all, fail-on-shrink,
+# pinned outcomes + schedule hashes, --selftest redness).
+[[bin]]
+name = "gate_seed_ratchet"
+path = "src/bin/gate_seed_ratchet.rs"
+required-features = ["pct"]
+
+# RFC-0187 P0.3: exhaustive crash-injection gate (measured op count,
+# fail-closed recovery oracle, CRC corruption phase, --selftest redness).
+[[bin]]
+name = "gate_crash_injection"
+path = "src/bin/gate_crash_injection.rs"
+required-features = ["pct"]
+
 [features]
 # RFC-0051 P0: PCT runner over the real ConcurrentDb (enables core hooks).
 pct = ["pedradb-core/pct"]

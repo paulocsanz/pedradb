@@ -101,20 +101,41 @@ relógio, seeds fixas.
 
 ### P0 — must ship first (gates determinísticos no CI público)
 
-- [ ] **P0.1** Gate exaustivo de concorrência auto-verificante: job
+- [x] **P0.1** Gate exaustivo de concorrência auto-verificante: job
   bloqueante que roda os 66 escalonamentos N≤3 com oracle por
   escalonamento, `assert explorados == 66`, e `timeout-minutes` (hang =
-  deadlock = vermelho) — status: `todo`
-- [ ] **P0.2** Ratchet de seeds PCT: `pct_seeds.json` versionado; job de
+  deadlock = vermelho) — status: `done`
+  (`crates/pedradb-world/src/bin/gate_exhaustive.rs` + job
+  `p01-exhaustive` em `.github/workflows/verification-gates.yml`;
+  medido: as plantas buggy e clean enumeram o MESMO espaço — 181 nós/66
+  folhas — logo o ∀ limpo cobre o espaço completo onde o bug vive;
+  `--selftest` 4/4: violação, enumeração truncada, encolhimento de
+  cobertura, oracle mentiroso)
+- [x] **P0.2** Ratchet de seeds PCT: `pct_seeds.json` versionado; job de
   PR replaya todas as seeds pinadas; CI falha se o arquivo encolher —
-  status: `todo`
-- [ ] **P0.3** Gate exaustivo de crash-injection: enumerar todos os
+  status: `done` (`crates/pedradb-world/src/bin/gate_seed_ratchet.rs` +
+  `scripts/ratchet/pct_seeds.txt`: 15 seeds, floor 15, 8 violadores d=3
+  pinados com hash de escalonamento; engine12 replay 2× h1==h2 + reopen
+  durável; `--selftest` 4/4: encolhimento, expectativa flipada, oracle
+  cego ao bug, hash adulterado)
+- [x] **P0.3** Gate exaustivo de crash-injection: enumerar todos os
   pontos de crash no run com Env injetor (`pedradb-sim/failing.rs`),
   oracle CRC fail-closed + TX all-or-nothing + sobreviveu-exatamente-o-
-  acked, asserção de contagem de pontos, bloqueante — status: `todo`
-- [ ] **P0.4** Piso de sítios de barreira: script conta `fdatasync`/
+  acked, asserção de contagem de pontos, bloqueante — status: `done`
+  (`crates/pedradb-world/src/bin/gate_crash_injection.rs`; total de ops
+  falháveis medido por busca binária sobre `tripped()` no MESMO seam que
+  injeta — zero drift por construção; 9/9 pontos injetados, cada um
+  `tripped`; morte abrupta via `mem::forget`; fase de corrupção: 7
+  flips de byte no WAL → 7 recusas (fail-closed, nunca silent-wrong);
+  `--selftest` 6/6)
+- [x] **P0.4** Piso de sítios de barreira: script conta `fdatasync`/
   barreiras no código de produção e exige que cada sítio apareça no
-  conjunto injetado do P0.3 — status: `todo`
+  conjunto injetado do P0.3 — status: `done`
+  (`scripts/check_barrier_floor.py` +
+  `scripts/ratchet/barrier_sites.tsv`: 145 sítios pinados em 59 entradas
+  (arquivo, tipo) com igualdade exata — sítio novo não injetado OU
+  barreira removida = vermelho; amarração dinâmica `--crash-log` exige
+  sync≥1 no stream injetado; `--selftest` 2/2)
 
 ### P1 — next wave (piso de cobertura, ledger, primeira conversão)
 
@@ -146,10 +167,10 @@ relógio, seeds fixas.
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | Gate exaustivo concorrência (66, self-verifying, hang=red) | todo | — | 2026-09-10 |
-| P0.2 | p0 | Ratchet de seeds PCT versionado | todo | — | 2026-09-10 |
-| P0.3 | p0 | Gate exaustivo crash-injection (oracle fail-closed) | todo | — | 2026-09-10 |
-| P0.4 | p0 | Piso de sítios de barreira | todo | — | 2026-09-10 |
+| P0.1 | p0 | Gate exaustivo concorrência (66, self-verifying, hang=red) | done | `gate_exhaustive.rs` + `verification-gates.yml` | 2026-09-10 |
+| P0.2 | p0 | Ratchet de seeds PCT versionado | done | `gate_seed_ratchet.rs` + `scripts/ratchet/pct_seeds.txt` | 2026-09-10 |
+| P0.3 | p0 | Gate exaustivo crash-injection (oracle fail-closed) | done | `gate_crash_injection.rs` | 2026-09-10 |
+| P0.4 | p0 | Piso de sítios de barreira | done | `scripts/check_barrier_floor.py` + `scripts/ratchet/barrier_sites.tsv` | 2026-09-10 |
 | P1.1 | p1 | Piso de cobertura de interleavings | todo | — | 2026-09-10 |
 | P1.2 | p1 | Ledger teorema/experimento/TCB | todo | — | 2026-09-10 |
 | P1.3 | p1 | Heap-sift Isolated-method kernel (three-teeth) | todo | — | 2026-09-10 |

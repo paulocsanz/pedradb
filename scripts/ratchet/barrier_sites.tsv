@@ -1,0 +1,64 @@
+# RFC-0187 P0.4 — production barrier-site floor (exact per-(file,kind) counts).
+# A NEW sync_data/sync_all/sync_dir site without a same-commit TSV update is a
+# red gate (uninjected barrier). A REMOVED site is red too (a durability
+# barrier disappeared — review event). Regenerate ONLY via --emit in the same
+# commit as an intentional barrier change; the diff is the review artifact.
+crates/pedradb-cli/src/main.rs	sync_all	1
+crates/pedradb-core/examples/scale_spectrum.rs	sync_data	1
+crates/pedradb-core/src/change_feed.rs	sync_data	1
+crates/pedradb-core/src/change_feed.rs	sync_dir	1
+crates/pedradb-core/src/concurrent.rs	sync_all	1
+crates/pedradb-core/src/concurrent.rs	sync_data	2
+crates/pedradb-core/src/concurrent.rs	sync_dir	2
+crates/pedradb-core/src/corrupt.rs	sync_data	1
+crates/pedradb-core/src/db.rs	sync_all	7
+crates/pedradb-core/src/db.rs	sync_data	12
+crates/pedradb-core/src/db.rs	sync_dir	13
+crates/pedradb-core/src/env.rs	sync_all	3
+crates/pedradb-core/src/env.rs	sync_data	1
+crates/pedradb-core/src/env.rs	sync_dir	1
+crates/pedradb-core/src/history.rs	sync_all	10
+crates/pedradb-core/src/history.rs	sync_dir	5
+crates/pedradb-core/src/lock.rs	sync_all	1
+crates/pedradb-core/src/manifest.rs	sync_data	2
+crates/pedradb-core/src/manifest.rs	sync_dir	2
+crates/pedradb-core/src/occ.rs	sync_all	1
+crates/pedradb-core/src/occ.rs	sync_data	1
+crates/pedradb-core/src/occ.rs	sync_dir	1
+crates/pedradb-core/src/sst/table.rs	sync_data	2
+crates/pedradb-core/src/verify.rs	sync_all	1
+crates/pedradb-core/src/vlog.rs	sync_all	6
+crates/pedradb-core/src/vlog.rs	sync_data	1
+crates/pedradb-core/src/vlog.rs	sync_dir	5
+crates/pedradb-core/src/wal/mod.rs	sync_all	1
+crates/pedradb-core/src/wal/mod.rs	sync_data	1
+crates/pedradb-io-uring/src/lib.rs	sync_all	5
+crates/pedradb-io-uring/src/lib.rs	sync_data	7
+crates/pedradb-io-uring/src/lib.rs	sync_dir	1
+crates/pedradb-ops/src/lib.rs	sync_all	4
+crates/pedradb-ops/src/lib.rs	sync_dir	2
+crates/pedradb-posix/src/lib.rs	sync_all	4
+crates/pedradb-posix/src/lib.rs	sync_data	1
+crates/pedradb-raft/src/persist.rs	sync_all	1
+crates/pedradb-raft/src/persist.rs	sync_dir	1
+crates/pedradb-replicate/src/lib.rs	sync_all	1
+crates/pedradb-replicate/src/lib.rs	sync_dir	2
+crates/pedradb-sim/src/failing.rs	sync_all	2
+crates/pedradb-sim/src/failing.rs	sync_data	1
+crates/pedradb-sim/src/failing.rs	sync_dir	1
+crates/pedradb-sim/src/failing_arc.rs	sync_all	1
+crates/pedradb-sim/src/failing_arc.rs	sync_data	1
+crates/pedradb-sim/src/failing_arc.rs	sync_dir	1
+crates/pedradb-sim/src/lib.rs	sync_all	4
+crates/pedradb-sim/src/lib.rs	sync_data	2
+crates/pedradb-sim/src/lib.rs	sync_dir	2
+crates/pedradb-sim/src/recording.rs	sync_all	1
+crates/pedradb-sim/src/recording.rs	sync_data	1
+crates/pedradb-store/src/lib.rs	sync_all	1
+crates/pedradb-store/src/lib.rs	sync_data	1
+crates/pedradb-store/src/lib.rs	sync_dir	1
+crates/pedradb-world/src/wenv.rs	sync_all	2
+crates/pedradb-world/src/wenv.rs	sync_data	2
+crates/pedradb-world/src/wenv.rs	sync_dir	2
+crates/rocksdb-compat/src/lib.rs	sync_all	2
+crates/rocksdb-parity-bench/src/engines.rs	sync_all	1
