@@ -1,6 +1,6 @@
 # RFC: 0188 — Aprofundamento drástico: o segundo degrau (close, atom, composição, ∀ mais largos)
 
-**Status:** draft
+**Status:** done
 **Updated:** 2026-09-10
 **ID:** 0188
 **Parents:** [0187](0187-teorema-experimento-tcb.md) (teorema/experimento/TCB + circuitos
@@ -20,6 +20,9 @@ este RFC não toca parity.
 > da escada — e cada degrau ganha ratchet para nunca mais descer: primeiro
 > `close`, primeiro `atom`, composição dual-unfold de verdade, os quatro
 > teoremas de concorrência em série, e o alargamento dos ∀ exaustivos.
+>
+> **Pago 2026-09-10 (13/13).** O pacote de *produto* (D1/R1/T1/C1 sobre o
+> código que corre) é o filho [0191](0191-pacote-garantias-produto.md).
 
 ## Background
 
