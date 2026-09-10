@@ -2,8 +2,11 @@
 -- plus user_key_in_range / past_end. WindowKvIter is Iterator-refused.
 -- RFC-0187 P1.3 / RFC-0188 P0.2: the heap-sift STRUCTURE kernel
 -- (sift_step) — first `close` of the depth ladder (RFC-0188).
+-- RFC-0191 P2.2: the one-step Inv-LSM lemma composes this get atom with
+-- the 0164 probe-order kernel (newest-first tie-break).
 import Aeneas
 import MergeKernel
+import ProbeOrder
 open Aeneas.Std Result
 open pedra_aeneas_merge_kernel
 
@@ -81,6 +84,56 @@ theorem visible_at_value_live_iff_not_hidden :
   intro range_hidden
   unfold merge.visible_at
   cases range_hidden <;> rfl
+
+/-- RFC-0191 P2.2 one-step Inv-LSM: with the 0164 newest-first probe
+order (equal-lo ties probe the newer table first), the first covering
+version the get filter answers for is genuinely live — `visible_at`
+never answers live for a Deletion or RangeDeletion (any cover) nor for
+a hidden Value. Unfolds the registered R1 atom and the 0164 kernel. -/
+theorem inv_lsm_newest_first_never_non_live :
+    ∀ (newer older : Usize) (kind : key.ValueType) (range_hidden : Bool),
+      pedra_aeneas_probe_order_kernel.first_probe_on_equal_lo newer older
+        = ok newer →
+      merge.visible_at kind range_hidden = ok true →
+      kind = key.ValueType.Value ∧ range_hidden = false := by
+  intro newer older kind range_hidden hnewest hlive
+  unfold pedra_aeneas_probe_order_kernel.first_probe_on_equal_lo at hnewest
+  unfold merge.visible_at at hlive
+  cases kind with
+  | Deletion => simp at hlive
+  | RangeDeletion => simp at hlive
+  | Value =>
+      cases range_hidden with
+      | true => simp at hlive
+      | false => exact ⟨rfl, rfl⟩
+
+/-- RFC-0191 P2.2 product corollary R1: get never returns a non-live
+version. The Deletion arm is pinned by P0.2 (`r1_deletion_never_live`),
+the hidden-Value arm by P1.1 (`r1_get_atom`), the newest-first premise
+by the 0164 kernel theorem, and the honest arm by the one-step Inv-LSM
+lemma. R1 stays `atom` (no layer move). -/
+theorem r1_get_never_returns_non_live :
+    ∀ (kind : key.ValueType) (range_hidden : Bool),
+      merge.visible_at kind range_hidden = ok true →
+      kind = key.ValueType.Value ∧ range_hidden = false := by
+  intro kind range_hidden hlive
+  have hnew : pedra_aeneas_probe_order_kernel.first_probe_on_equal_lo
+      (1#usize) (0#usize) = ok (1#usize) :=
+    first_probe_on_equal_lo_newer
+  have hdel := r1_deletion_never_live range_hidden
+  have hval := (r1_get_atom range_hidden).2
+  cases kind with
+  | Deletion => rw [hdel] at hlive; simp at hlive
+  | RangeDeletion =>
+      have hkill := inv_lsm_newest_first_never_non_live (1#usize) (0#usize)
+        key.ValueType.RangeDeletion range_hidden hnew hlive
+      exact absurd hkill.1 (by simp)
+  | Value =>
+      cases range_hidden with
+      | true => rw [hval] at hlive; simp at hlive
+      | false =>
+          exact inv_lsm_newest_first_never_non_live (1#usize) (0#usize)
+            key.ValueType.Value false hnew hlive
 
 /-- Catalog entry: a Value is live unless a covering range hides it. -/
 theorem visible_at_value_live :
