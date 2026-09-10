@@ -6165,8 +6165,9 @@
       "id": "raft_recover_applied",
       "finding": "F10",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/commit_kernel.rs",
-      "twin": "crates/pedradb-raft/verus/commit_recover.rs",
+      "twin": "crates/pedradb-raft/src/commit_kernel.rs",
       "aeneas": "scripts/aeneas_commit.sh",
       "callers": [
         "crates/pedradb-raft/src/commit_kernel.rs",
