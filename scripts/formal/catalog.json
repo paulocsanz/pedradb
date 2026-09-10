@@ -6276,8 +6276,9 @@
       "id": "snap_txn_clear",
       "finding": "F40",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-store/src/snapshot_kernel.rs",
-      "twin": "crates/pedradb-store/verus/snapshot_kernel.rs",
+      "twin": "crates/pedradb-store/src/snapshot_kernel.rs",
       "aeneas": "scripts/aeneas_snapshot.sh",
       "callers": [
         "crates/pedradb-store/src/snapshot_kernel.rs",
