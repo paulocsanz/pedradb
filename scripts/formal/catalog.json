@@ -2832,9 +2832,10 @@
       "id": "si_read",
       "finding": "F168",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-store/src/si_kernel.rs",
-      "twin": "crates/pedradb-store/verus/si_read.rs",
-      "verus": "scripts/verus_si_read.sh",
+      "twin": "crates/pedradb-store/src/si_kernel.rs",
+      "aeneas": "scripts/aeneas_si.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
