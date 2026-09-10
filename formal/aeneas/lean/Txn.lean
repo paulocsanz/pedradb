@@ -97,3 +97,31 @@ theorem hist_load_fate_as_is_dente :
       = ok HistLoadFate.MergeNew := by
   unfold hist_load_fate_as_is
   rfl
+
+/-- Catalog entry: revert restores the prepare-time value exactly when a
+    preimage record exists AND records the key as present (F34). -/
+theorem revert_user_action_restore_value_iff_record_and_present :
+    ∀ (had_pre_record : Bool) (pre_was_absent : Bool),
+      (revert_user_action had_pre_record pre_was_absent
+          = ok RevertUserAction.RestoreValue)
+        ↔ (had_pre_record = true ∧ pre_was_absent = false) := by
+  intro had_pre_record pre_was_absent
+  unfold revert_user_action
+  constructor
+  · intro h
+    split at h
+    · next c1 =>
+      split at h
+      · next c2 => exact absurd h (by simp)
+      · next c2 => exact ⟨c1, by simp at c2; exact c2⟩
+    · next c1 => exact absurd h (by simp)
+  · rintro ⟨hd, hp⟩
+    rw [if_pos hd, if_neg (by simp [hp])]
+
+/-- AS-IS dente: a missing preimage record is NOT "absent" — the as-is
+    blind-deletes a user key the peer never prepared (F34). -/
+theorem revert_user_action_as_is_dente :
+    revert_user_action_as_is false false
+      = ok RevertUserAction.RestoreAbsent := by
+  unfold revert_user_action_as_is
+  rfl
