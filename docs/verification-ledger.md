@@ -25,6 +25,20 @@ enumeração completa); nunca por reescrita de ledger.
 | Escada de profundidade (RFC-0188): extracts 276 + 1 close registrado (`merge_sift_step_repairs_iff`) + 1 atom (`visible_at_deletion_never_live` ∀ range_hidden — deleção nunca surfaced live) sobre corpos Aeneas extraídos | gate `depth-floor` `scripts/check_depth_floor.py` + registro `scripts/ratchet/close_proofs.tsv` + floors `scripts/ratchet/proof_depth.tsv` | Crédito de degrau só via registro ∀ sem sorry; twins close não registrados contam só no live count do residuals; wrap-factory nunca ganha linha |
 | Cobertura de interleaving 15/15 (RFC-0188 P2.2): union das 3 seeds irredundantes (0x1, 0x15, 0xc8) cobre os 15 sítios do inventário, incl. `E.create_open`/`E.remove`/`E.meta`/`W.crash`; remoção de qualquer seed → vermelho | gate `gate_coverage_floor.rs` + `scripts/ratchet/coverage_floor.tsv` | Piso sobre ESTE conjunto pinado com `buggify_widen_sites`; não é ∀ do espaço de seams nem descoberta (soak/hunt noturnos) |
 
+## Garantias de produto (RFC-0191)
+
+Quatro frases sobre o fn que o rustc liga. Camada só sobe
+(`model → atom → close`) no **mesmo commit** que o teorema. Gate
+`product-floor` (`scripts/check_product_floor.py` +
+`scripts/ratchet/product_guarantees.tsv`). Floor: ≥1 atom\|close.
+
+| Frase | Camada | Artefato | Piso nomeado (o que NÃO é) |
+|---|---|---|---|
+| R1-deleção: `Deletion` nunca live, ∀ `range_hidden` | atom | `catalog:visible_at` teorema `r1_deletion_never_live` (`Merge.lean`, unfold `visible_at`) | Não é o `get` inteiro; o átomo no path de get. Braço Value é P1.1. |
+| D1-script: `need_sync ⇒ Sync` antes de Apply/Ok | model | `catalog:d1_modelo` | Modelo WAL; close é P1.2 ∀ Bool da plan fn (`wal_commit_plan`) |
+| T1-leftover: leftover aborta, nunca materializa | model | `catalog:leftover_txn_is_aborted` | Fn constante hoje (`leftover_txn_is_aborted_true` sem ∀); atom é P1.3 |
+| C1-joint: eleição joint exige as duas maiorias | model | `catalog:joint_election` | Inputs concretos hoje; close é P1.4 ∀ contagens |
+
 ## Experimento — estatística/mecânica (nunca viram um ∀)
 
 | Garantia medida | Artefato | Fronteira honesta |
