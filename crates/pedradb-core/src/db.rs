@@ -9467,11 +9467,9 @@ impl<E: Env> Db<E> {
                     seq: op.sequence,
                     kind: op.kind,
                     key: op.key.clone(),
-                    end: if op.kind == ValueType::RangeDeletion {
-                        op.value.clone()
-                    } else {
-                        Bytes::new()
-                    },
+                    end: crate::merge::write_op_range_end(op.kind, op.value.as_ref())
+                        .map(Bytes::copy_from_slice)
+                        .unwrap_or_default(),
                 });
             }
         }

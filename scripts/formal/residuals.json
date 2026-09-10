@@ -84,8 +84,8 @@
       "extract": 276,
       "close": 0,
       "atom": 0,
-      "model": 16,
-      "updated": "2026-09-08"
+      "model": 17,
+      "updated": "2026-09-09"
     },
     "kernel_fn_allowlist": {
       "crates/pedradb-core/src/env_crash_kernel.rs": [
@@ -136,7 +136,7 @@
         "tx_state_of"
       ]
     },
-    "single_artifact": 286,
+    "single_artifact": 287,
     "data_fate": 130
   },
   "residuals": [

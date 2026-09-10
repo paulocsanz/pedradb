@@ -1581,6 +1581,32 @@
       }
     },
     {
+      "id": "write_op_range_end",
+      "finding": "F30",
+      "twin_kind": "model",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/merge.rs",
+      "twin": "crates/pedradb-core/src/merge.rs",
+      "aeneas": "scripts/aeneas_merge.sh",
+      "callers": [
+        "crates/pedradb-core/src/merge.rs",
+        "crates/pedradb-core/src/db.rs"
+      ],
+      "entry": "write_op_range_end",
+      "as_is": "write_op_range_end_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/db.rs",
+          "handler": "stage_unapplied"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/merge.rs",
+        "test": "write_op_range_end_on_live_stage_unapplied_is_not_ok"
+      }
+    },
+    {
       "id": "prefix",
       "finding": "F57/F58",
       "twin_kind": "close",

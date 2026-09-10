@@ -112,6 +112,26 @@ pub fn write_op_covers_key_as_is(kind: ValueType, start: &[u8], end: &[u8], key:
     }
 }
 
+/// End key of a WAL-encoded write op. WriteOp contract: a range delete
+/// stores its exclusive end in `value`; point ops carry no end. The
+/// OCC stage (RFC-0045 P2.1) must derive `end` from this, or
+/// [`write_op_covers_key`] loses range coverage for staged ops.
+#[must_use]
+pub fn write_op_range_end<'a>(kind: ValueType, value: &'a [u8]) -> Option<&'a [u8]> {
+    match kind {
+        ValueType::RangeDeletion => Some(value),
+        ValueType::Value | ValueType::Deletion => None,
+    }
+}
+
+/// AS-IS F30: staged op never carries an end — a range tombstone
+/// covers only its start key while the group's `fdatasync` is still
+/// off-lock (lost update inside the deleted range).
+#[must_use]
+pub fn write_op_range_end_as_is(_kind: ValueType, _value: &[u8]) -> Option<&[u8]> {
+    None
+}
+
 /// Whether the winning version at a snapshot is live (RFC-0150 P1).
 ///
 /// Candidate versions already satisfy `sequence <= snapshot` (newest first).
@@ -1464,6 +1484,49 @@ mod tests {
         assert!(
             body.matches("write_op_covers_key(").count() >= 3,
             "unapplied + mem + sst loops must all call write_op_covers_key"
+        );
+    }
+
+    #[test]
+    fn write_op_range_end_on_live_stage_unapplied_is_not_ok() {
+        // Honest WriteOp contract: range delete carries its end in
+        // `value`; point put/delete carry none.
+        assert_eq!(
+            write_op_range_end(ValueType::RangeDeletion, b"z"),
+            Some(b"z".as_slice())
+        );
+        assert_eq!(write_op_range_end(ValueType::Value, b"payload"), None);
+        assert_eq!(write_op_range_end(ValueType::Deletion, b""), None);
+        // Staged range tombstone keeps full coverage (F30): the OCC
+        // window between WAL encode and memtable apply must conflict a
+        // concurrent covered write.
+        assert!(write_op_covers_key(
+            ValueType::RangeDeletion,
+            b"a",
+            write_op_range_end(ValueType::RangeDeletion, b"z").unwrap_or(&[]),
+            b"m"
+        ));
+        // AS-IS: no end staged — coverage collapses to the start key
+        // and the concurrent covered write is lost.
+        assert!(!write_op_covers_key(
+            ValueType::RangeDeletion,
+            b"a",
+            write_op_range_end_as_is(ValueType::RangeDeletion, b"z").unwrap_or(&[]),
+            b"m"
+        ));
+        let src = include_str!("db.rs");
+        let body = src
+            .split("pub(crate) fn stage_unapplied")
+            .nth(1)
+            .and_then(|s| s.split("pub(crate) fn unstage_unapplied").next())
+            .expect("stage_unapplied");
+        assert!(
+            body.contains("write_op_range_end("),
+            "stage_unapplied must derive the staged end via write_op_range_end"
+        );
+        assert!(
+            !body.contains("op.kind == ValueType::RangeDeletion"),
+            "stage_unapplied must not keep the raw ValueType if inline"
         );
     }
 
