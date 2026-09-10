@@ -149,26 +149,53 @@ código que as move.
 
 ### P1 — composição paga (script, glue, concorrência)
 
-- [ ] **P1.1** Script G1 ao vivo: plan fn total que o
+- [x] **P1.1** Script G1 ao vivo: plan fn total que o
   `commit_ops_with` de produção matchea (append → sync se `need_sync` →
   apply/publish → Ok; fence se sync falhou); teorema
   `need_sync ⇒ Sync antes de Apply/Ok` + contrafactual as-is
   (Apply/Ok antes do Sync); `WriteAckLedger` segue report, não choose —
-  status: `todo`
-- [ ] **P1.2** Primeiro compose dual-unfold: Lean `unfold` do plan fn
+  status: `done` (`wal_commit_plan` matcheado em 5 sítios de produção
+  (db.rs:2057/2102/3695/6568/8789 + dentro de `commit_ops_with`
+  db.rs:9158/9167); `wal_commit_plan_need_sync_ok` +
+  `wal_commit_plan_fence_via_fence_on_sync_fail` (dual-unfold com
+  `fence_on_sync_fail`) + `wal_commit_plan_as_is_dente` em
+  `WriteAdmission.lean`; planta on-live `wal_commit_plan_on_live_sync_fail_is_not_ok`
+  verde; pago por fires da campanha grind, verificado 2026-09-10)
+- [x] **P1.2** Primeiro compose dual-unfold: Lean `unfold` do plan fn
   QUE o handler chama (`occ_batch_plan`/`wal_commit_plan`) E do callee
   (`group_validate`/`occ_conflict`) num input representativo + ramo
-  as-is; `native_decide` sem unfold não conta — status: `todo`
-- [ ] **P1.3** Concorrência 1 — lost-update N-way: `group_validate` de
+  as-is; `native_decide` sem unfold não conta — status: `done`
+  (`occ_batch_plan_lagging_conflict` desdobra plan + `occ_member_fate` +
+  `occ_conflict` (GroupCommit.lean); caller de produção
+  `validate_occ_batch` chama `occ_batch_plan` (concurrent.rs:1718/1771);
+  as-is `occ_batch_plan_as_is_dente`)
+- [x] **P1.3** Concorrência 1 — lost-update N-way: `group_validate` de
   N>2 `OccRead`s sobre um `last_seq`; teorema serializável vs as-is
-  serialized; planta DST nomeia o kernel — status: `todo`
-- [ ] **P1.4** Concorrência 2 — data-race (write-lock client):
+  serialized; planta DST nomeia o kernel — status: `done`
+  (`occ_batch_plan_n3_one_lagging`: 3 membros, um `last_seq`, membro
+  lagging → Conflict (serializável), as-is → Ok; `group_validate`
+  desdobrado em `group_validate_lagging_member_conflicts`; planta
+  `occ_batch_plan_on_live_lagging_is_not_ok` verde; catálogo
+  `occ_batch_plan`/`group_validate` com dst_plant)
+- [x] **P1.4** Concorrência 2 — data-race (write-lock client):
   `wal_rotate_decision` + `commit_inflight` mantém o WAL no idle
   rotate; método de tokens da literatura (VerusSync / CapybaraKV
-  OSDI'25) fichado em `findings/` e aplicado — status: `todo`
-- [ ] **P1.5** Concorrência 3 — deadlock: `wait_for_deadlock` sem
+  OSDI'25) fichado em `findings/` e aplicado — status: `done`
+  (`WalPinState.commit_inflight` → `KeepWal` (flush_kernel.rs);
+  as-is `wal_rotate_decision_as_is_ignore_pin`; teoremas em
+  `Flush.lean`; planta `wal_inv_on_live_recording_is_not_ok` verde;
+  token method aplicado: `rwlock_client_may_mutate_needs_write` +
+  `occ_snap_lock_order`; fichamento
+  `findings/2026-09-07-capybarakv-unverified-crate`)
+- [x] **P1.5** Concorrência 3 — deadlock: `wait_for_deadlock` sem
   ciclo no lock-order do ConcurrentDb (inflight vs flush rotate);
-  as-is admite o ciclo — status: `todo`
+  as-is admite o ciclo — status: `done` (`wait_for_deadlock` +
+  as-is em `rocksdb-compat/src/locktab.rs`; `Locktab.lean`
+  `wait_for_deadlock_is_loop` + ciclo 2/3 nós; lock-order client
+  `occ_snap_lock_order` (read_held/inflight); 4 testes locktab verdes
+  incl. `wait_for_deadlock_on_live_cycle_is_not_ok`;
+  `lock_interleavings_admitted` segue false — assert vivo
+  concurrent.rs:4568)
 - [ ] **P1.6** Primeiro `atom` (0→1): `close` sobre o átomo data-fate
   de um handler vivo (o `if` que decide destino do dado já roteado por
   kernel); `proof_depth.atom=1` + registro + floor no MESMO commit —
@@ -205,11 +232,11 @@ exaustivo N=4.
 | P0.1 | p0 | Ratchet de profundidade (floors + cap data_fate) | done | `check_depth_floor.py` + `proof_depth.tsv` + job `depth-floor` | 2026-09-10 |
 | P0.2 | p0 | Primeiro `close` (0→1) com regra de crédito | done | `merge_sift` + `merge_sift_step_repairs_iff` + `close_proofs.tsv` | 2026-09-10 |
 | P0.3 | p0 | Cap do trampolim (data_fate ≤ 130 monotônico) | done | `cap_data_fate`/`handler_loc` em `proof_depth.tsv` | 2026-09-10 |
-| P1.1 | p1 | Script G1 ao vivo (plan fn + teorema de ordem) | todo | — | 2026-09-10 |
-| P1.2 | p1 | Primeiro compose dual-unfold (caller + callee) | todo | — | 2026-09-10 |
-| P1.3 | p1 | Lost-update N-way (`group_validate`) | todo | — | 2026-09-10 |
-| P1.4 | p1 | Data-race write-lock client (`wal_rotate_decision`) | todo | — | 2026-09-10 |
-| P1.5 | p1 | Deadlock (`wait_for_deadlock` sem ciclo) | todo | — | 2026-09-10 |
+| P1.1 | p1 | Script G1 ao vivo (plan fn + teorema de ordem) | done | `wal_commit_plan` + `WriteAdmission.lean` + planta on-live | 2026-09-10 |
+| P1.2 | p1 | Primeiro compose dual-unfold (caller + callee) | done | `occ_batch_plan_lagging_conflict` (GroupCommit.lean) | 2026-09-10 |
+| P1.3 | p1 | Lost-update N-way (`group_validate`) | done | `occ_batch_plan_n3_one_lagging` + planta on-live | 2026-09-10 |
+| P1.4 | p1 | Data-race write-lock client (`wal_rotate_decision`) | done | `WalPinState.commit_inflight` + `Flush.lean` + capybarakv finding | 2026-09-10 |
+| P1.5 | p1 | Deadlock (`wait_for_deadlock` sem ciclo) | done | `locktab.rs` + `Locktab.lean` + 4 testes | 2026-09-10 |
 | P1.6 | p1 | Primeiro `atom` (0→1) em handler vivo | todo | — | 2026-09-10 |
 | P2.1 | p2 | Crash-injection em família (grid T×S) | todo | — | 2026-09-10 |
 | P2.2 | p2 | Cobertura 15/15 (4 sítios do soak) | todo | — | 2026-09-10 |
