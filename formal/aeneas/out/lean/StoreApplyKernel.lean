@@ -126,4 +126,113 @@ def apply_advance_as_is_skip_holes
   then ok ApplyAction.Done
   else ok ApplyAction.Apply
 
+/-- [pedra_aeneas_store_apply_kernel::ApplyPutFate]
+    Source: '../../../crates/pedradb-store/src/apply_kernel.rs', lines 56:0-63:1
+    Visibility: public -/
+@[discriminant isize]
+inductive ApplyPutFate where
+| Skip : ApplyPutFate
+| ApplyOnly : ApplyPutFate
+| ApplyAndHist : ApplyPutFate
+
+/-- [pedra_aeneas_store_apply_kernel::{impl core::fmt::Debug for pedra_aeneas_store_apply_kernel::ApplyPutFate}::fmt]:
+    Source: '../../../crates/pedradb-store/src/apply_kernel.rs', lines 55:9-55:14
+    Visibility: public -/
+def ApplyPutFate.Insts.CoreFmtDebug.fmt
+  (self : ApplyPutFate) (f : core.fmt.Formatter) :
+  Result ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter)
+  := do
+  match self with
+  | ApplyPutFate.Skip => core.fmt.Formatter.write_str f (toStr "Skip")
+  | ApplyPutFate.ApplyOnly =>
+    core.fmt.Formatter.write_str f (toStr "ApplyOnly")
+  | ApplyPutFate.ApplyAndHist =>
+    core.fmt.Formatter.write_str f (toStr "ApplyAndHist")
+
+/-- Trait implementation: [pedra_aeneas_store_apply_kernel::{impl core::fmt::Debug for pedra_aeneas_store_apply_kernel::ApplyPutFate}]
+    Source: '../../../crates/pedradb-store/src/apply_kernel.rs', lines 55:9-55:14 -/
+@[reducible]
+def ApplyPutFate.Insts.CoreFmtDebug : core.fmt.Debug ApplyPutFate := {
+  fmt := ApplyPutFate.Insts.CoreFmtDebug.fmt
+}
+
+/-- [pedra_aeneas_store_apply_kernel::{impl core::clone::Clone for pedra_aeneas_store_apply_kernel::ApplyPutFate}::clone]:
+    Source: '../../../crates/pedradb-store/src/apply_kernel.rs', lines 55:16-55:21
+    Visibility: public -/
+def ApplyPutFate.Insts.CoreCloneClone.clone
+  (self : ApplyPutFate) : Result ApplyPutFate := do
+  ok self
+
+/-- Trait implementation: [pedra_aeneas_store_apply_kernel::{impl core::clone::Clone for pedra_aeneas_store_apply_kernel::ApplyPutFate}]
+    Source: '../../../crates/pedradb-store/src/apply_kernel.rs', lines 55:16-55:21 -/
+@[reducible]
+def ApplyPutFate.Insts.CoreCloneClone : core.clone.Clone ApplyPutFate := {
+  clone := ApplyPutFate.Insts.CoreCloneClone.clone
+}
+
+/-- Trait implementation: [pedra_aeneas_store_apply_kernel::{impl core::marker::Copy for pedra_aeneas_store_apply_kernel::ApplyPutFate}]
+    Source: '../../../crates/pedradb-store/src/apply_kernel.rs', lines 55:23-55:27 -/
+@[reducible]
+def ApplyPutFate.Insts.CoreMarkerCopy : core.marker.Copy ApplyPutFate := {
+  cloneInst := ApplyPutFate.Insts.CoreCloneClone
+}
+
+/-- Trait implementation: [pedra_aeneas_store_apply_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_store_apply_kernel::ApplyPutFate}]
+    Source: '../../../crates/pedradb-store/src/apply_kernel.rs', lines 55:29-55:38 -/
+@[reducible]
+def ApplyPutFate.Insts.CoreMarkerStructuralPartialEq :
+  core.marker.StructuralPartialEq ApplyPutFate := {
+}
+
+/-- [pedra_aeneas_store_apply_kernel::{impl core::cmp::PartialEq<pedra_aeneas_store_apply_kernel::ApplyPutFate> for pedra_aeneas_store_apply_kernel::ApplyPutFate}::eq]:
+    Source: '../../../crates/pedradb-store/src/apply_kernel.rs', lines 55:29-55:38
+    Visibility: public -/
+def ApplyPutFate.Insts.CoreCmpPartialEqApplyPutFate.eq
+  (self : ApplyPutFate) (other : ApplyPutFate) : Result Bool := do
+  let self1 := read_discriminant self
+  let other1 := read_discriminant other
+  ok (self1 = other1)
+
+/-- Trait implementation: [pedra_aeneas_store_apply_kernel::{impl core::cmp::PartialEq<pedra_aeneas_store_apply_kernel::ApplyPutFate> for pedra_aeneas_store_apply_kernel::ApplyPutFate}]
+    Source: '../../../crates/pedradb-store/src/apply_kernel.rs', lines 55:29-55:38 -/
+@[reducible]
+def ApplyPutFate.Insts.CoreCmpPartialEqApplyPutFate : core.cmp.PartialEq
+  ApplyPutFate ApplyPutFate := {
+  eq := ApplyPutFate.Insts.CoreCmpPartialEqApplyPutFate.eq
+}
+
+/-- [pedra_aeneas_store_apply_kernel::{impl core::cmp::Eq for pedra_aeneas_store_apply_kernel::ApplyPutFate}::assert_fields_are_eq]:
+    Source: '../../../crates/pedradb-store/src/apply_kernel.rs', lines 55:40-55:42
+    Visibility: public -/
+def ApplyPutFate.Insts.CoreCmpEq.assert_fields_are_eq
+  (self : ApplyPutFate) : Result Unit := do
+  ok ()
+
+/-- Trait implementation: [pedra_aeneas_store_apply_kernel::{impl core::cmp::Eq for pedra_aeneas_store_apply_kernel::ApplyPutFate}]
+    Source: '../../../crates/pedradb-store/src/apply_kernel.rs', lines 55:40-55:42 -/
+@[reducible]
+def ApplyPutFate.Insts.CoreCmpEq : core.cmp.Eq ApplyPutFate := {
+  partialEqInst := ApplyPutFate.Insts.CoreCmpPartialEqApplyPutFate
+  assert_fields_are_eq := ApplyPutFate.Insts.CoreCmpEq.assert_fields_are_eq
+}
+
+/-- [pedra_aeneas_store_apply_kernel::apply_put_plan]:
+    Source: '../../../crates/pedradb-store/src/apply_kernel.rs', lines 68:0-76:1
+    Visibility: public -/
+def apply_put_plan
+  (is_reserved : Bool) (si_gen : Std.U64) : Result ApplyPutFate := do
+  if is_reserved
+  then ok ApplyPutFate.Skip
+  else
+    if si_gen = 0#u64
+    then ok ApplyPutFate.ApplyOnly
+    else ok ApplyPutFate.ApplyAndHist
+
+/-- [pedra_aeneas_store_apply_kernel::apply_put_plan_as_is]:
+    Source: '../../../crates/pedradb-store/src/apply_kernel.rs', lines 81:0-83:1
+    Visibility: public -/
+def apply_put_plan_as_is
+  (_is_reserved : Bool) (_si_gen : Std.U64) : Result ApplyPutFate := do
+  ok ApplyPutFate.ApplyAndHist
+
 end pedra_aeneas_store_apply_kernel

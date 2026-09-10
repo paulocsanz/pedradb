@@ -48,6 +48,40 @@ pub fn apply_advance_as_is_skip_holes(
     }
 }
 
+/// Where an applied `Put` record lands (RFC-0191 P2.3 cadence, second if:
+/// the record-dispatch fate of the apply path). Reserved keys never
+/// receive user data; the gen-0 floor never persists hist (F52 on the
+/// apply side); any other gen persists hist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApplyPutFate {
+    /// Reserved store key (TX/SI machinery) — the record is dropped.
+    Skip,
+    /// Gen-0 floor — user data only, no hist write.
+    ApplyOnly,
+    /// User data plus the SI-hist entry for this gen.
+    ApplyAndHist,
+}
+
+/// Pure rule for one applied Put record: `Skip` iff reserved,
+/// `ApplyAndHist` iff live and gen > 0, else `ApplyOnly`.
+#[must_use]
+pub fn apply_put_plan(is_reserved: bool, si_gen: u64) -> ApplyPutFate {
+    if is_reserved {
+        ApplyPutFate::Skip
+    } else if si_gen == 0 {
+        ApplyPutFate::ApplyOnly
+    } else {
+        ApplyPutFate::ApplyAndHist
+    }
+}
+
+/// AS-IS: stomp reserved keys with applied user data (drops the TX/SI
+/// key protection and the gen-0 floor).
+#[must_use]
+pub fn apply_put_plan_as_is(_is_reserved: bool, _si_gen: u64) -> ApplyPutFate {
+    ApplyPutFate::ApplyAndHist
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -59,6 +93,26 @@ mod tests {
             apply_advance_as_is_skip_holes(2, 5, false),
             ApplyAction::Apply
         );
+    }
+
+    /// RFC-0191 P2.3: the apply-path Put fate — reserved keys are dropped
+    /// (any gen), the gen-0 floor never persists hist, a live key at
+    /// gen > 0 persists hist; the AS-IS dente stomps reserved keys.
+    #[test]
+    fn apply_put_plan_on_live_reserved_and_floor() {
+        assert_eq!(
+            apply_put_plan(true, 5),
+            ApplyPutFate::Skip,
+            "reserved key never receives applied data"
+        );
+        assert_eq!(apply_put_plan(true, 0), ApplyPutFate::Skip);
+        assert_eq!(
+            apply_put_plan(false, 0),
+            ApplyPutFate::ApplyOnly,
+            "gen-0 floor never persists hist"
+        );
+        assert_eq!(apply_put_plan(false, 7), ApplyPutFate::ApplyAndHist);
+        assert_eq!(apply_put_plan_as_is(true, 5), ApplyPutFate::ApplyAndHist);
     }
 
     /// Clone twin (catalog `apply_raft_store`): both copies must implement

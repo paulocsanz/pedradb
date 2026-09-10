@@ -15,3 +15,4 @@
 close	catalog:merge_sift	merge_sift_step_repairs_iff	formal/aeneas/lean/Merge.lean	sift_step
 atom	catalog:visible_at	visible_at_deletion_never_live	formal/aeneas/lean/Merge.lean	visible_at
 atom	catalog:si_hist_repair	si_hist_repair_plan_leave_iff_floor_or_match	formal/aeneas/lean/Txn.lean	si_hist_repair_plan
+atom	catalog:apply_put_plan	apply_put_plan_hist_iff_live_and_gen_positive	formal/aeneas/lean/StoreApply.lean	apply_put_plan

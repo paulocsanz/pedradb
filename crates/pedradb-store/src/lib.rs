@@ -1772,6 +1772,9 @@ pub fn tcp_node_disk_left_joint(data: impl AsRef<Path>, node_id: u64, removed: u
         exclusive: true,
         large_value_threshold: None,
         sst_payload_budget_bytes: None,
+        // RFC-0194 P0.1: default keeps every page.
+        sst_page_keep_budget: u64::MAX,
+        sst_warm_cap_bytes: pedradb_core::scale_kernel::warm_cap_bytes(0),
     };
     let Ok(db) = Db::open_with_env(&dir, opts, IoUringEnv::default()) else {
         return false;
@@ -1823,6 +1826,9 @@ pub fn tcp_node_disk_high_water(data: impl AsRef<Path>, node_id: u64) -> u64 {
         exclusive: true,
         large_value_threshold: None,
         sst_payload_budget_bytes: None,
+        // RFC-0194 P0.1: default keeps every page.
+        sst_page_keep_budget: u64::MAX,
+        sst_warm_cap_bytes: pedradb_core::scale_kernel::warm_cap_bytes(0),
     };
     let Ok(db) = Db::open_with_env(&dir, opts, IoUringEnv::default()) else {
         return 0;
@@ -2713,6 +2719,9 @@ pub fn tcp_node_removed_durable_term_ok(data: impl AsRef<Path>, self_id: u64, cl
         exclusive: true,
         large_value_threshold: None,
         sst_payload_budget_bytes: None,
+        // RFC-0194 P0.1: default keeps every page.
+        sst_page_keep_budget: u64::MAX,
+        sst_warm_cap_bytes: pedradb_core::scale_kernel::warm_cap_bytes(0),
     };
     let Ok(db) = Db::open_with_env(&dir3, opts, IoUringEnv::default()) else {
         return false;
@@ -3479,6 +3488,9 @@ impl StoreCluster<IoUringEnv> {
                 exclusive: true,
                 large_value_threshold: None,
                 sst_payload_budget_bytes: None,
+                // RFC-0194 P0.1: default keeps every page.
+                sst_page_keep_budget: u64::MAX,
+                sst_warm_cap_bytes: pedradb_core::scale_kernel::warm_cap_bytes(0),
             }
         };
         let dir = parent.join(format!("store-node-{self_id}"));
@@ -3726,6 +3738,9 @@ impl<E: Env> StoreCluster<E> {
                 exclusive: true,
                 large_value_threshold: None,
                 sst_payload_budget_bytes: None,
+                // RFC-0194 P0.1: default keeps every page.
+                sst_page_keep_budget: u64::MAX,
+                sst_warm_cap_bytes: pedradb_core::scale_kernel::warm_cap_bytes(0),
             }
         };
         for (i, env) in envs.into_iter().enumerate() {
@@ -7065,9 +7080,19 @@ impl<E: Env> StoreCluster<E> {
             for rec in &recs {
                 match &rec.entry {
                     RangeEntry::Put { key, value, si_gen } => {
-                        if !is_reserved_store_key(key) {
-                            apply_put_or_delete(&mut node.db, key, value)?;
-                            if *si_gen > 0 {
+                        // RFC-0191 P2.3: the record fate (reserved skip,
+                        // gen-0 floor, hist persist) is the kernel's
+                        // decision, not inline.
+                        match apply_kernel::apply_put_plan(
+                            is_reserved_store_key(key),
+                            *si_gen,
+                        ) {
+                            apply_kernel::ApplyPutFate::Skip => {}
+                            apply_kernel::ApplyPutFate::ApplyOnly => {
+                                apply_put_or_delete(&mut node.db, key, value)?;
+                            }
+                            apply_kernel::ApplyPutFate::ApplyAndHist => {
+                                apply_put_or_delete(&mut node.db, key, value)?;
                                 persist_si_hist_on_db(
                                     &mut node.db,
                                     key,

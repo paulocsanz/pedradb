@@ -3173,7 +3173,6 @@
         "crates/pedradb-raft/src/lib.rs"
       ],
       "entry": "apply_advance",
-      "data_fate": true,
       "handlers": [
         "apply_committed"
       ],
@@ -3187,6 +3186,36 @@
       "dst_plant": {
         "file": "crates/pedradb-store/src/three_teeth_queued.rs",
         "test": "apply_advance_on_live_queued_is_not_ok"
+      }
+    },
+    {
+      "id": "apply_put_plan",
+      "finding": "F10-apply / F52",
+      "twin_kind": "atom",
+      "atom": "apply_put_plan",
+      "atom_reason": {
+        "date": "2026-09-10",
+        "why": "RFC-0191 P2.3 cadence (second if): the apply-path Put record fate — hist persists iff the key is live (not reserved) and gen is above the gen-0 floor — proven forall over (is_reserved, si_gen) as apply_put_plan_hist_iff_live_and_gen_positive in StoreApply.lean; the store trampoline apply_range matches the kernel decision"
+      },
+      "single_artifact": true,
+      "kernel": "crates/pedradb-store/src/apply_kernel.rs",
+      "twin": "crates/pedradb-store/src/apply_kernel.rs",
+      "aeneas": "scripts/aeneas_store_apply.sh",
+      "callers": [
+        "crates/pedradb-store/src/lib.rs"
+      ],
+      "entry": "apply_put_plan",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "apply_range"
+        }
+      ],
+      "as_is": "apply_put_plan_as_is",
+      "dst_plant": {
+        "file": "crates/pedradb-store/src/apply_kernel.rs",
+        "test": "apply_put_plan_on_live_reserved_and_floor"
       }
     },
     {
