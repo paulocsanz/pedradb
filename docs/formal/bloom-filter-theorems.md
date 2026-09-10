@@ -1,7 +1,10 @@
 # Bloom filter theorems (T1–T4) — `pedradb-core/src/bloom.rs`
 
 **Date:** 2026-08-15 · **Scope:** the filter *algorithm* beyond the F166 header
-(`bloom_header_ok` already has its own twin + model). The production module's
+(`bloom_header_ok`'s twin `verus/bloom_header.rs` + runner deleted
+2026-09-09 — fire 777: pair single-artifact via the `aeneas_bloom.sh`
+extract of `bloom.rs`, `bloom_header_ok`/`_as_is` in `BloomKernel.lean`,
+0 sorry). The production module's
 own doc line is the contract: *false positives are allowed; **false negatives
 are not***.
 

@@ -2732,9 +2732,10 @@
       "id": "bloom_header",
       "finding": "F166",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-core/src/bloom.rs",
-      "twin": "crates/pedradb-core/verus/bloom_header.rs",
-      "verus": "scripts/verus_bloom_header.sh",
+      "twin": "crates/pedradb-core/src/bloom.rs",
+      "aeneas": "scripts/aeneas_bloom.sh",
       "callers": [
         "crates/pedradb-core/src/bloom.rs"
       ],
