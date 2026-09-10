@@ -1031,7 +1031,7 @@
     {
       "id": "lease",
       "finding": "F7/F56",
-      "twin_kind": "close",
+      "twin_kind": "atom",
       "single_artifact": true,
       "kernel": "crates/pedradb-dcs/src/lease_kernel.rs",
       "twin": "crates/pedradb-dcs/src/lease_kernel.rs",
@@ -1040,12 +1040,17 @@
         "crates/pedradb-dcs/src/command.rs"
       ],
       "entry": "lease_live",
-      "data_fate": true,
       "as_is": "lease_live_as_is",
       "dst_plant": {
         "file": "crates/pedradb-dcs/src/lease_kernel.rs",
         "test": "lease_live_on_live_expiry_is_not_ok"
-      }
+      },
+      "atom": "lease_live",
+      "atom_reason": {
+        "date": "2026-09-10",
+        "why": "RFC-0191 P2.3 cadence (twelfth if): the lease-liveness disposition — a lease is live exactly when it is zero (never expires) or the clock is still below the expiry (an expired lease is never live, F7/F56) — proven forall over (lease, now_ms) as lease_live_iff_zero_or_now_below in Lease.lean; the dcs command caller matches the kernel decision"
+      },
+      "three_teeth": true
     },
     {
       "id": "dcs_apply",
