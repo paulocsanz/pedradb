@@ -3037,7 +3037,7 @@
     {
       "id": "manifest_recover",
       "finding": "F196/G8",
-      "twin_kind": "close",
+      "twin_kind": "atom",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/manifest_kernel.rs",
       "twin": "crates/pedradb-core/src/manifest_kernel.rs",
@@ -3046,7 +3046,6 @@
         "crates/pedradb-core/src/db.rs"
       ],
       "entry": "sst_recover_action",
-      "data_fate": true,
       "handlers": [
         "recover_ssts"
       ],
@@ -3054,7 +3053,13 @@
       "dst_plant": {
         "file": "crates/pedradb-core/src/manifest_kernel.rs",
         "test": "sst_recover_action_on_live_missing_sst_is_not_ok"
-      }
+      },
+      "atom": "sst_recover_action",
+      "atom_reason": {
+        "date": "2026-09-10",
+        "why": "RFC-0191 P2.3 cadence (seventeenth if): the manifest-recovery disposition — recovery refuses to open exactly when the manifest observation is Corrupt, or it is Inventory while an SST listed in the manifest is missing on disk (an absent manifest rescans and installs; a complete inventory serves; damage or a missing file never serves, F196/G8) — proven forall over (obs, listed) as sst_recover_action_refuse_iff_corrupt_or_inventory_missing in Manifest.lean; the db trampoline (recover_ssts) matches the kernel decision"
+      },
+      "three_teeth": true
     },
     {
       "id": "reopen_outcome",

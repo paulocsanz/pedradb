@@ -243,7 +243,7 @@ contagens movem no mesmo commit; `lock_interleavings_admitted` e
 | P1.6 | p1 | Gates Lean/depth/product verdes em cada promoção | todo | — | 2026-09-10 |
 | P2.1 | p2 | Inv-WAL preservação (um passo) | done | `wal_append_preserves_inv_wal` + corolário `d1_plan_append_preserves_inv_wal` WalState.lean | 2026-09-10 |
 | P2.2 | p2 | Inv-LSM `visible_at` ∘ probe-order (um passo) | done | `inv_lsm_newest_first_never_non_live` + corolário `r1_get_never_returns_non_live` Merge.lean (R1 segue atom) | 2026-09-10 |
-| P2.3 | p2 | Alvo trampolim cap≤100 / floor_atom≥8 | doing | 16/29 caps pagos (114; …P2.3-15 `blob_gc_pick` — GC de blob reescreve só gen inativo com bytes, F-active-gen; P2.3-16 `compact_retention` — versão de ponto cai só com newer mantida ≤ oldest snapshot, F177/F20), atoms 17/8; falta cap 114→≤100 | 2026-09-10 |
+| P2.3 | p2 | Alvo trampolim cap≤100 / floor_atom≥8 | doing | 17/29 caps pagos (113; …P2.3-16 `compact_retention` — versão de ponto cai só com newer mantida ≤ oldest snapshot, F177/F20; P2.3-17 `manifest_recover` — recovery recusa só Corrupt ou Inventory-com-SST-faltando, F196/G8), atoms 18/8; falta cap 113→≤100 | 2026-09-10 |
 | P2.4 | p2 | Herdados 0187 (L28 / TCG / N=4) | todo | — | 2026-09-10 |
 
 ## Acceptance Criteria
