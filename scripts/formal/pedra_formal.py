@@ -1276,6 +1276,31 @@ AENEAS_EXTRACTS = (
 )
 
 
+def registered_depths() -> dict[str, str]:
+    """RFC-0188 depth registry: close/atom proofs registered in
+    scripts/ratchet/close_proofs.tsv (theorem + forall statement + zero
+    sorry, cross-checked by scripts/check_depth_floor.py). The registry
+    is the ladder authority: a registered pair counts at its registered
+    step (close = forall theorem over the extracted rustc body),
+    overriding the twin_kind-derived depth."""
+    path = Path(__file__).resolve().parent.parent / "ratchet" / "close_proofs.tsv"
+    out: dict[str, str] = {}
+    if not path.is_file():
+        return out
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        kind, cid = parts[0], parts[1]
+        if cid.startswith("catalog:"):
+            cid = cid[len("catalog:") :]
+        out[cid] = kind
+    return out
+
+
 def proof_depth_of(pair: dict) -> str:
     kind = pair.get("twin_kind")
     if kind == "atom":
@@ -1296,10 +1321,11 @@ def check_proof_depth(root: Path, catalog: dict, r: Report) -> None:
     from datetime import date, datetime
 
     today = date(2026, 9, 6)
+    registered = registered_depths()
     n_atom = n_close = n_extract = n_model = 0
     for pair in catalog["pairs"]:
         pid = pair["id"]
-        depth = proof_depth_of(pair)
+        depth = registered.get(pid) or proof_depth_of(pair)
         if depth == "atom":
             n_atom += 1
             reason = pair.get("atom_reason")
@@ -1346,6 +1372,10 @@ def check_proof_depth(root: Path, catalog: dict, r: Report) -> None:
         f"atom={n_atom} model={n_model}"
     )
     res_path = root / "scripts/formal/residuals.json"
+    ids = {p["id"] for p in catalog["pairs"]}
+    for pid, kind in registered.items():
+        if pid not in ids:
+            r.fail(f"proof_depth: registered {kind} proof catalog:{pid} not in catalog.json")
     if res_path.is_file():
         res = json.loads(res_path.read_text(encoding="utf-8"))
         pd = (res.get("glue") or {}).get("proof_depth")

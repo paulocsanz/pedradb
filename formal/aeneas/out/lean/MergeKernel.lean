@@ -271,8 +271,43 @@ def merge.iter_window_keep (snapshot_live : Bool) : Result Bool := do
 def merge.iter_window_keep_as_is (_snapshot_live : Bool) : Result Bool := do
   ok true
 
+/-- [pedra_aeneas_merge_kernel::merge::SiftStep]
+    Source: 'src/../../../../crates/pedradb-core/src/merge.rs', lines 174:0-181:1
+    Visibility: public -/
+@[discriminant isize]
+inductive merge.SiftStep where
+| Stay : merge.SiftStep
+| SwapLeft : merge.SiftStep
+| SwapRight : merge.SiftStep
+
+/-- [pedra_aeneas_merge_kernel::merge::sift_step]:
+    Source: 'src/../../../../crates/pedradb-core/src/merge.rs', lines 188:0-196:1
+    Visibility: public -/
+def merge.sift_step
+  (r_exists : Bool) (r_lt_l : Bool) (best_lt_hole : Bool) :
+  Result merge.SiftStep
+  := do
+  if best_lt_hole
+  then
+    if r_exists
+    then
+      if r_lt_l
+      then ok merge.SiftStep.SwapRight
+      else ok merge.SiftStep.SwapLeft
+    else ok merge.SiftStep.SwapLeft
+  else ok merge.SiftStep.Stay
+
+/-- [pedra_aeneas_merge_kernel::merge::sift_step_as_is]:
+    Source: 'src/../../../../crates/pedradb-core/src/merge.rs', lines 201:0-203:1
+    Visibility: public -/
+def merge.sift_step_as_is
+  (_r_exists : Bool) (_r_lt_l : Bool) (_best_lt_hole : Bool) :
+  Result merge.SiftStep
+  := do
+  ok merge.SiftStep.Stay
+
 /-- [pedra_aeneas_merge_kernel::merge::user_key_in_range]:
-    Source: 'src/../../../../crates/pedradb-core/src/merge.rs', lines 179:0-191:1
+    Source: 'src/../../../../crates/pedradb-core/src/merge.rs', lines 215:0-227:1
     Visibility: public -/
 def merge.user_key_in_range
   (user_key : Slice Std.U8) (start : core.ops.range.Bound (Slice Std.U8))
@@ -302,7 +337,7 @@ def merge.user_key_in_range
   else ok false
 
 /-- [pedra_aeneas_merge_kernel::merge::past_end]:
-    Source: 'src/../../../../crates/pedradb-core/src/merge.rs', lines 196:0-202:1
+    Source: 'src/../../../../crates/pedradb-core/src/merge.rs', lines 232:0-238:1
     Visibility: public -/
 def merge.past_end
   (user_key : Slice Std.U8) (end1 : core.ops.range.Bound (Slice Std.U8)) :
@@ -318,7 +353,7 @@ def merge.past_end
   | core.ops.range.Bound.Unbounded => ok false
 
 /-- [pedra_aeneas_merge_kernel::merge::bound_to_owned]:
-    Source: 'src/../../../../crates/pedradb-core/src/merge.rs', lines 697:0-703:1 -/
+    Source: 'src/../../../../crates/pedradb-core/src/merge.rs', lines 740:0-746:1 -/
 def merge.bound_to_owned
   (b : core.ops.range.Bound (Slice Std.U8)) :
   Result (core.ops.range.Bound bytes.bytes.Bytes)
@@ -333,7 +368,7 @@ def merge.bound_to_owned
   | core.ops.range.Bound.Unbounded => ok core.ops.range.Bound.Unbounded
 
 /-- [pedra_aeneas_merge_kernel::merge::bound_as_ref]:
-    Source: 'src/../../../../crates/pedradb-core/src/merge.rs', lines 705:0-711:1 -/
+    Source: 'src/../../../../crates/pedradb-core/src/merge.rs', lines 748:0-754:1 -/
 def merge.bound_as_ref
   (b : core.ops.range.Bound bytes.bytes.Bytes) :
   Result (core.ops.range.Bound (Slice Std.U8))

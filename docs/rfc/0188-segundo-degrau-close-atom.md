@@ -124,13 +124,22 @@ código que as move.
   (floors extract=276/close=0/atom=0, cap data_fate=130, série
   handler_loc=109964; selftest 4/4: floor encolhido, residual stale,
   data_fate crescido, registro quebrado)
-- [ ] **P0.2** Primeiro `close` (0→1): teorema ∀ sem `sorry` sobre
+- [x] **P0.2** Primeiro `close` (0→1): teorema ∀ sem `sorry` sobre
   kernel de produção matriculado, propriedade nomeada; candidatos
   medidos: `sift_step` do heap-sift (0187 P1.3 — "sob ordem total
   consistente, o mínimo de filhos+buraco vai para o topo") ou
   `WriteAckLedger::d1_holds_every_cut`; registro `close_proofs.tsv` +
   `proof_depth.close=1` + floor P0.1 no MESMO commit; dente as_is
-  quebra a propriedade — status: `todo`
+  quebra a propriedade — status: `done`
+  (kernel `merge_sift` (`sift_step`/`sift_step_as_is`, Isolated-method —
+  produção tem a ORDEM, kernel tem a ESTRUTURA); teoremas
+  `merge_sift_step_repairs_iff` (Stay ⟸ nenhum reparo, registrado como
+  primeiro close), `merge_sift_step_swap_right_iff`,
+  `merge_sift_step_as_is_diverges_on_repair`; dente 3 on-live:
+  `merge_heap_sift_kernel_three_teeth` — 4 streams em ordem DESC do head
+  obrigam heapify a reparar; as-is emitiria `b35` antes de `b05`;
+  `proof_depth.close=1` + floor + registro + catálogo (295) no mesmo
+  commit)
 - [x] **P0.3** Cap do trampolim: `data_fate ≤ 130` versionado (linha do
   TSV de P0.1); vermelho se um átomo data-fate novo entrar sem sair
   outro; série `handler_loc` registrada por commit (série, não piso);
@@ -194,7 +203,7 @@ exaustivo N=4.
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | Ratchet de profundidade (floors + cap data_fate) | done | `check_depth_floor.py` + `proof_depth.tsv` + job `depth-floor` | 2026-09-10 |
-| P0.2 | p0 | Primeiro `close` (0→1) com regra de crédito | todo | — | 2026-09-10 |
+| P0.2 | p0 | Primeiro `close` (0→1) com regra de crédito | done | `merge_sift` + `merge_sift_step_repairs_iff` + `close_proofs.tsv` | 2026-09-10 |
 | P0.3 | p0 | Cap do trampolim (data_fate ≤ 130 monotônico) | done | `cap_data_fate`/`handler_loc` em `proof_depth.tsv` | 2026-09-10 |
 | P1.1 | p1 | Script G1 ao vivo (plan fn + teorema de ordem) | todo | — | 2026-09-10 |
 | P1.2 | p1 | Primeiro compose dual-unfold (caller + callee) | todo | — | 2026-09-10 |

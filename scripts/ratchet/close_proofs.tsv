@@ -12,3 +12,4 @@
 # registry counts; floors in proof_depth.tsv move in the SAME commit as a
 # row. Wrap-factory kernels (a||b / identity / is_empty / ==0) never earn
 # a row — the forall-binder requirement is the mechanical part of that ban.
+close	catalog:merge_sift	merge_sift_step_repairs_iff	formal/aeneas/lean/Merge.lean	sift_step

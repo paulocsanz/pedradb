@@ -11,7 +11,7 @@ sustenta. Uma linha só sobe de camada (`experimento → teorema`) com o
 gate da camada de destino verde no mesmo commit (three-teeth ou
 enumeração completa); nunca por reescrita de ledger.
 
-<!-- ledger-catalog: total=294 proof=261 campaign=33 absent=0 single_artifact=287 aeneas_scripts=227 clones=7 models=34 -->
+<!-- ledger-catalog: total=295 proof=262 campaign=33 absent=0 single_artifact=288 aeneas_scripts=228 clones=7 models=34 -->
 
 ## Teorema — ∀ sobre código/modelo (machine-checked ou enumeração completa)
 

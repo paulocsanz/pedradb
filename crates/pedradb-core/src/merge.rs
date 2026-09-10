@@ -166,6 +166,42 @@ pub fn iter_window_keep_as_is(_snapshot_live: bool) -> bool {
     true
 }
 
+/// One min-heap sift-down step decision (RFC-0187 P1.3 heap-sift kernel).
+/// The production heap owns only the ORDER of heads ([`head_before`] over
+/// `(user_key, sequence)`); the STRUCTURE of the repair lives in this
+/// kernel, extracted by `scripts/aeneas_merge.sh`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SiftStep {
+    /// Hole already beats both children — invariant restored.
+    Stay,
+    /// Swap with the left child; keep sifting from there.
+    SwapLeft,
+    /// Swap with the right child; keep sifting from there.
+    SwapRight,
+}
+
+/// Decision core of `StreamingVisibleIter::sift_down`. Inputs are the
+/// caller's pairwise order facts (the caller owns the order semantics):
+/// `r_lt_l` = right child beats left child; `best_lt_hole` = the best
+/// child beats the hole.
+#[must_use]
+pub fn sift_step(r_exists: bool, r_lt_l: bool, best_lt_hole: bool) -> SiftStep {
+    if !best_lt_hole {
+        SiftStep::Stay
+    } else if r_exists && r_lt_l {
+        SiftStep::SwapRight
+    } else {
+        SiftStep::SwapLeft
+    }
+}
+
+/// AS-IS dente (three-teeth): the repair never happens — the heap trusts
+/// slot order and degrades to registration order.
+#[must_use]
+pub fn sift_step_as_is(_r_exists: bool, _r_lt_l: bool, _best_lt_hole: bool) -> SiftStep {
+    SiftStep::Stay
+}
+
 impl RangeTombstone {
     /// Whether `user_key` is covered by this tombstone.
     #[must_use]
@@ -467,15 +503,22 @@ impl<'a> StreamingVisibleIter<'a> {
                 break;
             }
             let r = l + 1;
-            let mut best = l;
-            if r < n && self.head_lt(self.heap[r], self.heap[l]) {
-                best = r;
-            }
-            if self.head_lt(self.heap[best], self.heap[hole]) {
-                self.heap.swap(best, hole);
-                hole = best;
-            } else {
-                break;
+            let r_in = r < n;
+            // Same two comparisons as the pre-kernel code: children first,
+            // then best-vs-hole. The STRUCTURE decision is the kernel's.
+            let r_lt_l = r_in && self.head_lt(self.heap[r], self.heap[l]);
+            let best = if r_lt_l { r } else { l };
+            let best_lt_hole = self.head_lt(self.heap[best], self.heap[hole]);
+            match sift_step(r_in, r_lt_l, best_lt_hole) {
+                SiftStep::Stay => break,
+                SiftStep::SwapLeft => {
+                    self.heap.swap(l, hole);
+                    hole = l;
+                }
+                SiftStep::SwapRight => {
+                    self.heap.swap(r, hole);
+                    hole = r;
+                }
             }
         }
     }
@@ -1292,6 +1335,63 @@ mod tests {
             .wrapping_mul(6364136223846793005)
             .wrapping_add(1442695040888963407);
         *state
+    }
+
+    /// RFC-0188 P0.2 / RFC-0187 P1.3 three-teeth for the heap-sift kernel.
+    /// Dente 1: the full decision table (ORDER facts in, STRUCTURE out).
+    /// Dente 2: `sift_step_as_is` diverges on EVERY repairing input.
+    /// Dente 3 (on-live): 4 sorted streams registered in DESCENDING head
+    /// order — heapify MUST repair, and a Stay-only mutant emits b35
+    /// first while the heap invariant demands b05.
+    #[test]
+    fn merge_heap_sift_kernel_three_teeth() {
+        // Dente 1 — decision table. (r_exists, r_lt_l, best_lt_hole).
+        assert_eq!(sift_step(false, false, false), SiftStep::Stay);
+        assert_eq!(sift_step(true, true, false), SiftStep::Stay);
+        assert_eq!(sift_step(true, true, true), SiftStep::SwapRight);
+        assert_eq!(sift_step(true, false, true), SiftStep::SwapLeft);
+        assert_eq!(sift_step(false, false, true), SiftStep::SwapLeft);
+
+        // Dente 2 — the as-is mutant never repairs: on every input where
+        // the best child beats the hole the kernel swaps, as-is stays.
+        for (r_exists, r_lt_l) in [(true, true), (true, false), (false, false)] {
+            let clean = sift_step(r_exists, r_lt_l, true);
+            assert_ne!(clean, SiftStep::Stay, "kernel must repair");
+            assert_eq!(sift_step_as_is(r_exists, r_lt_l, true), SiftStep::Stay);
+        }
+
+        // Dente 3 — on-live heap repair. Root decision on the initial
+        // registration order: (r_in=true, r_lt_l=false, best_lt_hole=true)
+        // -> kernel SwapLeft vs as-is Stay (would emit b35 first).
+        let stream = |keys: &[&[u8]]| -> LayerStream<'static> {
+            let rows: Vec<(InternalKey, Bytes)> = keys
+                .iter()
+                .map(|k| (ik(k, 1, ValueType::Value), Bytes::copy_from_slice(k)))
+                .collect();
+            Box::new(rows.into_iter())
+        };
+        // Internally sorted, registered D, C, B, A — heads b35, b25, b15, b05.
+        let streams: Vec<LayerStream<'static>> = vec![
+            stream(&[b"b35", b"b75"]),
+            stream(&[b"b25", b"b65"]),
+            stream(&[b"b15", b"b55", b"b95"]),
+            stream(&[b"b05", b"b45", b"b85"]),
+        ];
+        let iter = StreamingVisibleIter::from_point_streams(
+            streams,
+            Vec::new(),
+            u64::MAX,
+            Bound::Unbounded,
+            Bound::Unbounded,
+            None,
+        );
+        let got: Vec<WindowKv> = iter.into_window_kvs().collect();
+        let keys: Vec<&[u8]> = got.iter().map(|w| w.key.as_ref()).collect();
+        assert_eq!(keys.first(), Some(&&b"b05"[..]), "heapify must surface the min head");
+        let mut sorted = keys.clone();
+        sorted.sort_unstable();
+        assert_eq!(keys, sorted, "emission must be ascending after repair");
+        assert_eq!(keys.len(), 10);
     }
 
     /// Randomized oracle for `StreamingVisibleIter::from_point_streams`:

@@ -152,10 +152,15 @@ relógio, seeds fixas.
   `scripts/check_ledger_consistency.py`: marcador de contagens ==
   catálogo vivo e todo ponteiro `catalog:<id>` resolve; `--selftest`
   2/2 — contagem stale, ponteiro solto)
-- [ ] **P1.3** Conversão Isolated-method do heap-sift de
+- [x] **P1.3** Conversão Isolated-method do heap-sift de
   `StreamingVisibleIter`: kernel three-teeth em `merge.rs` (território
   limpo, db.rs intocado), extração Aeneas + gates formais — status:
-  `todo`
+  `done` (kernel `sift_step`/`sift_step_as_is` + `sift_down` roteado com
+  as MESMAS duas comparações; extração via `scripts/aeneas_merge.sh`;
+  teoremas `Merge.lean` `merge_sift_step_repairs_iff` /
+  `_swap_right_iff` / `_as_is_diverges_on_repair`; dente 3 on-live
+  `merge_heap_sift_kernel_three_teeth`; catálogo `merge_sift`
+  single_artifact; promovido a primeiro `close` do ladder RFC-0188 P0.2)
 - [x] **P1.4** Protocolo de watch upstream Aeneas/Charon com a regra
   re-pin-só-se-alargar-sem-sorry e o procedimento sandbox medido do fire
   803 (`--sysroot default`, shim clone com `#[path]` absolutos) —
@@ -184,7 +189,7 @@ relógio, seeds fixas.
 | P0.4 | p0 | Piso de sítios de barreira | done | `scripts/check_barrier_floor.py` + `scripts/ratchet/barrier_sites.tsv` | 2026-09-10 |
 | P1.1 | p1 | Piso de cobertura de interleavings | done | `gate_coverage_floor.rs` + `scripts/ratchet/coverage_floor.tsv` | 2026-09-10 |
 | P1.2 | p1 | Ledger teorema/experimento/TCB | done | `docs/verification-ledger.md` + `scripts/check_ledger_consistency.py` | 2026-09-10 |
-| P1.3 | p1 | Heap-sift Isolated-method kernel (three-teeth) | todo | — | 2026-09-10 |
+| P1.3 | p1 | Heap-sift Isolated-method kernel (three-teeth) | done | `merge.rs` `sift_step` + `Merge.lean` + `merge_sift` | 2026-09-10 |
 | P1.4 | p1 | Protocolo watch upstream (re-pin só se widen) | done | `docs/upstream-watch-protocol.md` | 2026-09-10 |
 | P2.1 | p2 | Série L28 user-gated | todo | — | 2026-09-10 |
 | P2.2 | p2 | Nightly TCG power-cut + F_FULLFSYNC | todo | — | 2026-09-10 |

@@ -1607,6 +1607,31 @@
       }
     },
     {
+      "id": "merge_sift",
+      "finding": "RFC-0187 P1.3 / RFC-0188 P0.2",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/merge.rs",
+      "twin": "crates/pedradb-core/src/merge.rs",
+      "aeneas": "scripts/aeneas_merge.sh",
+      "callers": [
+        "crates/pedradb-core/src/merge.rs"
+      ],
+      "entry": "sift_step",
+      "as_is": "sift_step_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/merge.rs",
+          "handler": "sift_down"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/merge.rs",
+        "test": "merge_heap_sift_kernel_three_teeth"
+      }
+    },
+    {
       "id": "prefix",
       "finding": "F57/F58",
       "twin_kind": "close",

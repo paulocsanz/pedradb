@@ -7,10 +7,12 @@
 #   moves DOWN (trampoline monotonicity; reductions keep landing per fire).
 #   handler_loc is a recorded SERIES (not enforced): move it in the same
 #   commit as a trampoline change; the diff is the review artifact.
-# close/atom proofs are REGISTERED in close_proofs.tsv; residuals.json
-# proof_depth must EQUAL the registry (stale residual = red).
+# close/atom proofs are REGISTERED in close_proofs.tsv (the ladder credit);
+# floor_close/floor_atom count REGISTERED proofs. residuals.json
+# proof_depth counts registered proofs + unregistered close/atom twins
+# without extraction (pedra_formal.py rule) and must EQUAL that live count.
 floor_extract 276
-floor_close 0
+floor_close 1
 floor_atom 0
 cap_data_fate 130
-handler_loc 109964
+handler_loc 111927

@@ -1,9 +1,41 @@
 -- Theorems over Aeneas extract of merge.rs visible_at (RFC-0150 / F30)
 -- plus user_key_in_range / past_end. WindowKvIter is Iterator-refused.
+-- RFC-0187 P1.3 / RFC-0188 P0.2: the heap-sift STRUCTURE kernel
+-- (sift_step) — first `close` of the depth ladder (RFC-0188).
 import Aeneas
 import MergeKernel
 open Aeneas.Std Result
 open pedra_aeneas_merge_kernel
+
+/-- RFC-0188 first `close` (named property, all inputs): the sift kernel
+stays put EXACTLY when no repair is needed — the best child does not
+beat the hole. The as-is mutant stays even when repair is needed. -/
+theorem merge_sift_step_repairs_iff :
+    ∀ (r_exists r_lt_l best_lt_hole : Bool),
+      (merge.sift_step r_exists r_lt_l best_lt_hole
+        = ok merge.SiftStep.Stay) ↔ (best_lt_hole = false) := by
+  intro r_exists r_lt_l best_lt_hole
+  unfold merge.sift_step
+  cases r_exists <;> cases r_lt_l <;> cases best_lt_hole <;> simp
+
+/-- The right child wins the swap EXACTLY when a repair is needed, the
+right child exists, and it beats the left child. -/
+theorem merge_sift_step_swap_right_iff :
+    ∀ (r_exists r_lt_l best_lt_hole : Bool),
+      (merge.sift_step r_exists r_lt_l best_lt_hole
+        = ok merge.SiftStep.SwapRight)
+        ↔ (best_lt_hole = true ∧ r_exists = true ∧ r_lt_l = true) := by
+  intro r_exists r_lt_l best_lt_hole
+  unfold merge.sift_step
+  cases r_exists <;> cases r_lt_l <;> cases best_lt_hole <;> simp
+
+/-- AS-IS dente (Lean side): on every repairing input the mutant stays
+and the kernel does not — the decisions diverge. -/
+theorem merge_sift_step_as_is_diverges_on_repair (r_exists r_lt_l : Bool) :
+    merge.sift_step_as_is r_exists r_lt_l true
+      ≠ merge.sift_step r_exists r_lt_l true := by
+  unfold merge.sift_step merge.sift_step_as_is
+  cases r_exists <;> cases r_lt_l <;> simp
 
 /-- Catalog entry: a deletion is never live. -/
 theorem visible_at_deletion :
