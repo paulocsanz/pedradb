@@ -206,14 +206,17 @@ código que as move.
 
 ### P2 — ∀ mais largos e upstream
 
-- [ ] **P2.1** Crash-injection em família: grid (T,S) até limites
+- [x] **P2.1** Crash-injection em família: grid (T,S) até limites
   medidos, cada workload com contagem medida no mesmo seam, asserção de
   contagens e oracle fail-closed; ∀ sobre a família com fronteira
-  nomeada (o que ficou fora do grid); `--selftest` — status: `todo`
-- [ ] **P2.2** Cobertura 15/15: seeds pinadas cobrindo `E.create_open`,
+  nomeada (o que ficou fora do grid); `--selftest` — status: `done`
+  (família de 4 workloads: T∈{6,9,12} S∈{2,3,4}; 33/33 crash points;
+  `--selftest` 9/9; fronteira max T=12 max S=4 no ledger)
+- [x] **P2.2** Cobertura 15/15: seeds pinadas cobrindo `E.create_open`,
   `E.remove`, `E.meta`, `W.crash` via soak adaptativo; fold no
   `coverage_floor.tsv` (P1.1/0187); remoção de seed → vermelho —
-  status: `todo`
+  status: `done` (3 seeds irredundantes 0x1/0x15/0xc8, union_pop=15,
+  `--selftest` S4 3/3 load-bearing; widen opt-in `buggify_widen_sites`)
 - [x] **P2.3** Isolated-method completo: toda recusa Iterator do
   `EXTRACT.md` convertida (heap-sift 0187 P1.3 é a primeira) OU com
   negativa medida por item nomeada no `EXTRACT.md`; fim declarado da
@@ -250,8 +253,8 @@ exaustivo N=4.
 | P1.4 | p1 | Data-race write-lock client (`wal_rotate_decision`) | done | `WalPinState.commit_inflight` + `Flush.lean` + capybarakv finding | 2026-09-10 |
 | P1.5 | p1 | Deadlock (`wait_for_deadlock` sem ciclo) | done | `locktab.rs` + `Locktab.lean` + 4 testes | 2026-09-10 |
 | P1.6 | p1 | Primeiro `atom` (0→1) em handler vivo | done | `visible_at` atom ∀ + registro + `floor_atom 1` | 2026-09-10 |
-| P2.1 | p2 | Crash-injection em família (grid T×S) | todo | — | 2026-09-10 |
-| P2.2 | p2 | Cobertura 15/15 (4 sítios do soak) | todo | — | 2026-09-10 |
+| P2.1 | p2 | Crash-injection em família (grid T×S) | done | 4 workloads T∈{6,9,12} S∈{2,3,4}; 33/33; selftest 9/9 | 2026-09-10 |
+| P2.2 | p2 | Cobertura 15/15 (4 sítios do soak) | done | floor_pop 15; seeds 0x1/0x15/0xc8; S4 3/3 load-bearing | 2026-09-10 |
 | P2.3 | p2 | Isolated-method completo (fim da série) | done | tabela de negativas re-medidas no `EXTRACT.md` (6 sítios) | 2026-09-10 |
 | P2.4 | p2 | Voz upstream dyn-Trait (repro mínima) | done | repro `dyn-iterator/run.sh` + [aeneas#1343](https://github.com/AeneasVerif/aeneas/issues/1343) | 2026-09-10 |
 

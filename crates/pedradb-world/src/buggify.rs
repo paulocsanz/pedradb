@@ -47,6 +47,7 @@ pub fn buggify_schedule_from_seed(
     seed: u64,
     n_nodes: u64,
     schedule_steps: usize,
+    widen_sites: bool,
 ) -> BuggifySchedule {
     let rng = SeedRng::new(seed ^ 0xB006_1F1E);
     let kmax = 6u64;
@@ -55,7 +56,12 @@ pub fn buggify_schedule_from_seed(
     let steps = schedule_steps.max(1) as u64;
     let mut arms = Vec::with_capacity(k as usize);
     for i in 0..k {
-        let site_roll = rng.gen_range(10);
+        // RFC-0188 P2.2: opt-in widen (coverage-floor campaign) spans
+        // all 15 inventory sites. Default false keeps the RFC-0018
+        // 0..9 mapping so existing World fingerprints replay. Bound
+        // change DOES change `next_u64 % bound`, so this is gated —
+        // not a silent remap of pinned seeds.
+        let site_roll = rng.gen_range(if widen_sites { 14 } else { 10 });
         let at_step = (rng.gen_range(steps) as u32).min(schedule_steps.saturating_sub(1) as u32);
         let node = 1 + rng.gen_range(n_nodes);
         let (site, kind, param) = match site_roll {
@@ -68,7 +74,11 @@ pub fn buggify_schedule_from_seed(
             6 => ("C.tick", "jump", 5 + rng.gen_range(40)),
             7 => ("D.bitrot", "xor1", rng.gen_range(64)),
             8 => ("H.open", "fail_nth", 1 + rng.gen_range(8)),
-            _ => ("B.buggify", "compose", i),
+            9 => ("B.buggify", "compose", i),
+            10 => ("E.create_open", "fail_nth", 1 + rng.gen_range(8)),
+            11 => ("E.remove", "io", 0),
+            12 => ("E.meta", "io", 0),
+            _ => ("W.crash", "crash_reopen", node),
         };
         arms.push(BuggifyArm {
             site: site.to_string(),
@@ -127,8 +137,8 @@ mod tests {
 
     #[test]
     fn buggify_schedule_replayable() {
-        let a = buggify_schedule_from_seed(42, 3, 16);
-        let b = buggify_schedule_from_seed(42, 3, 16);
+        let a = buggify_schedule_from_seed(42, 3, 16, false);
+        let b = buggify_schedule_from_seed(42, 3, 16, false);
         assert_eq!(a.arms, b.arms);
         assert!(!a.arms.is_empty());
         let m = a.coverage_mask();
@@ -136,7 +146,7 @@ mod tests {
         // Sweep until we find a seed with a different plan (deterministic).
         let mut found_diff = false;
         for s in 43..200u64 {
-            let c = buggify_schedule_from_seed(s, 3, 16);
+            let c = buggify_schedule_from_seed(s, 3, 16, false);
             if c.arms != a.arms {
                 found_diff = true;
                 break;

@@ -66,14 +66,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: gate (twice, logs identical) + selftest (6/6 redness)
+      - name: gate (twice, logs identical) + selftest (9/9 redness)
         run: |
           cargo run -q -p pedradb-world --features pct --bin gate_crash_injection | tee /tmp/c1.log
           cargo run -q -p pedradb-world --features pct --bin gate_crash_injection | tee /tmp/c2.log
           cmp /tmp/c1.log /tmp/c2.log
           grep -q 'GATE crash: GREEN' /tmp/c1.log
           cargo run -q -p pedradb-world --features pct --bin gate_crash_injection -- --selftest | tee /tmp/cs.log
-          grep -q 'SELFTEST crash: 6/6 oracle checks caught' /tmp/cs.log
+          grep -q 'SELFTEST crash: 9/9 oracle checks caught' /tmp/cs.log
 
   p04-barrier-floor:
     name: P0.4 barrier-site floor (static == pinned; dynamic tie)
@@ -96,14 +96,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: gate (twice, logs identical) + selftest (3/3)
+      - name: gate (twice, logs identical) + selftest (4/4)
         run: |
           cargo run -q -p pedradb-world --bin gate_coverage_floor | tee /tmp/v1.log
           cargo run -q -p pedradb-world --bin gate_coverage_floor | tee /tmp/v2.log
           cmp /tmp/v1.log /tmp/v2.log
           grep -q 'GATE coverage: GREEN' /tmp/v1.log
           cargo run -q -p pedradb-world --bin gate_coverage_floor -- --selftest | tee /tmp/vs.log
-          grep -q 'SELFTEST coverage: 3/3 checks caught' /tmp/vs.log
+          grep -q 'SELFTEST coverage: 4/4 checks caught' /tmp/vs.log
 
   p12-ledger:
     name: P1.2 layer ledger consistency vs formal catalog

@@ -1,22 +1,29 @@
-# RFC-0187 P1.1 — interleaving coverage floor.
+# RFC-0187 P1.1 / RFC-0188 P2.2 — interleaving coverage floor.
 # Union of `gate_coverage_floor`'s pinned-seed World campaign (buggify
 # site×kind arms, soak config). Every `site 1` line is REQUIRED: the
 # pinned campaign no longer reaching it = coverage regression = red.
 # `floor_pop N` pins the minimum union popcount. The floor may only grow
 # (intentional campaign change => move this file in the same commit).
-# Measured 2026-09-10 via `gate_coverage_floor --measure`:
-#   trials=32 ok=32 union_pop=11
-# Not covered by this pinned set (owned by adaptive soak / nightly hunt,
-# NOT by this floor): E.create_open, E.remove, E.meta, W.crash.
-floor_pop 11
+# Measured 2026-09-10 via `gate_coverage_floor --measure` after the
+# RFC-0188 P2.2 generator widen (site_roll 10→14, W.crash mechanic):
+#   trials=3 ok=3 union_pop=15
+# Irredundant 3-seed set (1, 0x15, 0xc8): removing any seed is red.
+# The four soak-owned sites (E.create_open, E.remove, E.meta, W.crash)
+# are now required — they were owned by adaptive soak / nightly hunt
+# before this fold.
+floor_pop 15
 E.write	1
 E.sync	1
 E.rename	1
+E.create_open	1
+E.remove	1
+E.meta	1
 N.send	1
 N.part	1
 N.corrupt	1
 C.tick	1
 R.rng	1
 H.open	1
+W.crash	1
 D.bitrot	1
 B.buggify	1

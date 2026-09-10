@@ -211,6 +211,12 @@ pub struct WorldConfig {
     pub net_max_delay: u64,
     /// Apply seed-derived buggify multi-fault plan (RFC-0018).
     pub buggify: bool,
+    /// RFC-0188 P2.2: extend the seed-derived buggify site roll to the
+    /// four soak-owned inventory sites (`E.create_open`, `E.remove`,
+    /// `E.meta`, `W.crash`). Default `false` keeps the RFC-0018 10-site
+    /// mapping so pinned World fingerprints (e.g. `0xC0FFEE`) replay.
+    /// The coverage-floor campaign opts in.
+    pub buggify_widen_sites: bool,
     /// Enable net payload corrupt ppm from buggify arms.
     pub net_corrupt_ppm: u32,
     /// Enable message reorder window (0 = off).
@@ -299,6 +305,7 @@ impl Default for WorldConfig {
             net_drop_ppm: 0,
             net_max_delay: 0,
             buggify: false,
+            buggify_widen_sites: false,
             net_corrupt_ppm: 0,
             net_reorder_window: 0,
             clock_skew_ms: Vec::new(),
@@ -473,6 +480,7 @@ impl World {
                 self.seed,
                 self.cfg.n_nodes,
                 self.cfg.schedule_steps,
+                self.cfg.buggify_widen_sites,
             ))
         } else {
             None
@@ -621,6 +629,39 @@ impl World {
                         if let Some(env) = disks.get(&arm.node.max(1).min(self.cfg.n_nodes)) {
                             env.arm_op_class(class, after, transient, kind);
                             cov.hit(&arm.site);
+                        }
+                    }
+                    // RFC-0188 P2.2 — W.crash arm: abrupt worker death
+                    // mid-schedule (engine drop + fail-closed reopen).
+                    // Coverage credit is earned by the mechanic running,
+                    // not by arming. A refused reopen is fail-closed
+                    // (node stays down, schedule continues) — aborting
+                    // the World run would make buggify seeds that roll
+                    // this site unwrap-red in every World test.
+                    if arm.site == "W.crash" {
+                        let n = arm.node.max(1).min(self.cfg.n_nodes);
+                        if let Some(env) = disks.get(&n).cloned() {
+                            // Drain in-flight proposes so the WAL cut is a
+                            // function of the seed, not of the group-commit
+                            // wall clock — otherwise same-seed replay hashes
+                            // diverge (world_seed_replayable).
+                            self.exchange(
+                                &mut cluster,
+                                &mut net,
+                                &mut trace,
+                                step,
+                                "w_crash_quiesce",
+                            )?;
+                            match cluster.crash_reopen_engine_on(n, env) {
+                                Ok(()) => {
+                                    trace.push(step, "w_crash", &format!("reopen@{step}n{n}"));
+                                }
+                                Err(_) => {
+                                    memb.set_offline(n, true);
+                                    trace.push(step, "w_crash", &format!("refused@{step}n{n}"));
+                                }
+                            }
+                            cov.hit("W.crash");
                         }
                     }
                 }
@@ -1939,8 +1980,23 @@ pub fn assert_seed_replayable(seed: u64, cfg: WorldConfig) -> Result<()> {
         || a.silent_wrong != b.silent_wrong
         || a.silent_wrong != 0
     {
+        let n = a.events.len().min(b.events.len());
+        let mut first_diff = String::from("(prefix equal)");
+        for i in 0..n {
+            if a.events[i] != b.events[i] {
+                first_diff = format!(
+                    "evt[{i}] '{}' vs '{}'",
+                    format!("{}|{}|{}", a.events[i].step, a.events[i].kind, a.events[i].detail),
+                    format!("{}|{}|{}", b.events[i].step, b.events[i].kind, b.events[i].detail)
+                );
+                break;
+            }
+        }
+        if a.events.len() != b.events.len() && first_diff.starts_with("(prefix") {
+            first_diff = format!("len {} vs {}", a.events.len(), b.events.len());
+        }
         return Err(WorldError::Msg(format!(
-            "replay mismatch seed={seed}: hash {:x} vs {:x} puts {}/{} vs {}/{} t {} vs {} mask {:x}/{:x} silent_wrong {}/{}",
+            "replay mismatch seed={seed}: hash {:x} vs {:x} puts {}/{} vs {}/{} t {} vs {} mask {:x}/{:x} silent_wrong {}/{} {first_diff}",
             a.trace_hash,
             b.trace_hash,
             a.puts_ok,

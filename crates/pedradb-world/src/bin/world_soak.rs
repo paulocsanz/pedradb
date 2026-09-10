@@ -54,7 +54,7 @@ fn seed_has_site(seed: u64, site: &str) -> bool {
     if WORLD_ARMS.contains(&site) {
         return seed_has_arm(seed, 3, 16, site);
     }
-    let plan = buggify_schedule_from_seed(seed, 3, 16);
+    let plan = buggify_schedule_from_seed(seed, 3, 16, false);
     plan.arms.iter().any(|a| a.site == site)
 }
 

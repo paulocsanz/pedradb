@@ -10,8 +10,9 @@
 //! - `floor_pop N` pins the minimum union popcount.
 //!
 //! `--selftest` proves redness without editing any file: a phantom
-//! required site and an unreachable popcount must each be caught, and
-//! the honest union must pass (an always-red floor is also a bug).
+//! required site and an unreachable popcount must each be caught, the
+//! honest union must pass (an always-red floor is also a bug), and
+//! every pinned seed is load-bearing (S4: drop any one → red).
 //! `--measure` prints the live union for re-freezing after an
 //! INTENTIONAL campaign change (same commit as the TSV move).
 //!
@@ -22,54 +23,73 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use pedradb_world::buggify::buggify_schedule_from_seed;
 use pedradb_world::coverage::{CoverageMask, SEAM_IDS};
 use pedradb_world::{World, WorldConfig};
 
 /// Pinned seed set (fixed order; deterministic union).
+/// RFC-0188 P2.2: irredundant 3-seed cover of all 15 inventory sites
+/// (measured 2026-09-10). Each seed is load-bearing — removing any one
+/// drops a required site (`--selftest` S4). The four soak-owned sites
+/// land on: `0x1` → `W.crash` (+ `E.create_open`/`E.meta`); `0x15` →
+/// `E.remove`; `0xc8` → `D.bitrot` (and `E.meta` with `0x1`).
 const SEEDS: &[u64] = &[
-    0x00C0_FF01, 0x00C0_FF02, 0x00C0_FF03, 0x00C0_FF04, 0x00C0_FF05, 0x00C0_FF06, 0x00C0_FF07,
-    0x00C0_FF08, 0x00C0_FF09, 0x00C0_FF0A, 0x00C0_FF0B, 0x00C0_FF0C, 0x00C0_FF0D, 0x00C0_FF0E,
-    0x00C0_FF0F, 0x00C0_FF10, 0x1871_0001, 0x1871_0002, 0x1871_0003, 0x1871_0004, 0x1871_0005,
-    0x1871_0006, 0x1871_0007, 0x1871_0008, 0x1871_0009, 0x1871_000A, 0x1871_000B, 0x1871_000C,
-    0x1871_000D, 0x1871_000E, 0x1871_000F, 0x1871_0010,
+    0x0000_0001,
+    0x0000_0015,
+    0x0000_00C8,
 ];
 
-fn measure_union() -> (CoverageMask, usize, usize) {
+/// One pinned-seed World trial (soak config). `Some(mask)` on Ok, `None`
+/// on a fail-stop trial (its coverage does not count).
+fn run_trial(parent_root: &Path, seed: u64) -> Option<CoverageMask> {
+    let parent = parent_root.join(format!("t-s{seed:016x}"));
+    let _ = std::fs::create_dir_all(&parent);
+    let cfg = WorldConfig {
+        n_nodes: 3,
+        n_ranges: 1,
+        schedule_steps: 12,
+        parent: parent.clone(),
+        exchange_rounds: 48,
+        buggify: true,
+        buggify_widen_sites: true,
+        net_reorder_window: 2,
+        ..Default::default()
+    };
+    let mask = World::new(seed, cfg).run().ok().map(|t| {
+        let mut m = CoverageMask::new();
+        for (i, site) in SEAM_IDS.iter().enumerate() {
+            if t.coverage_mask & (1u64 << i) != 0 {
+                m.hit(site);
+            }
+        }
+        m
+    });
+    let _ = std::fs::remove_dir_all(&parent);
+    mask
+}
+
+fn measure_union(seeds: &[u64]) -> (CoverageMask, Vec<CoverageMask>, usize, usize) {
     let parent_root = std::env::temp_dir().join(format!("pedra-gate-cov-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&parent_root);
     let mut union = CoverageMask::new();
+    let mut per_seed = Vec::with_capacity(seeds.len());
     let mut ok = 0usize;
     let mut errored = 0usize;
-    for (i, &seed) in SEEDS.iter().enumerate() {
-        let parent = parent_root.join(format!("t{i:03}-s{seed:016x}"));
-        let _ = std::fs::create_dir_all(&parent);
-        let cfg = WorldConfig {
-            n_nodes: 3,
-            n_ranges: 1,
-            schedule_steps: 12,
-            parent: parent.clone(),
-            exchange_rounds: 48,
-            buggify: true,
-            net_reorder_window: 2,
-            ..Default::default()
-        };
-        match World::new(seed, cfg).run() {
-            Ok(t) => {
-                // TrialResult carries the raw mask bits (u64); fold into
-                // the union via the public API.
-                for (i, site) in SEAM_IDS.iter().enumerate() {
-                    if t.coverage_mask & (1u64 << i) != 0 {
-                        union.hit(site);
-                    }
-                }
+    for &seed in seeds {
+        match run_trial(&parent_root, seed) {
+            Some(m) => {
+                union.merge(&m);
+                per_seed.push(m);
                 ok += 1;
             }
-            Err(_) => errored += 1,
+            None => {
+                per_seed.push(CoverageMask::new());
+                errored += 1;
+            }
         }
-        let _ = std::fs::remove_dir_all(&parent);
     }
     let _ = std::fs::remove_dir_all(&parent_root);
-    (union, ok, errored)
+    (union, per_seed, ok, errored)
 }
 
 struct Floor {
@@ -131,7 +151,64 @@ fn repo_floor_path() -> PathBuf {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let (union, ok, errored) = measure_union();
+
+    // RFC-0188 P2.2 — seed hunt for floor growth: per-seed site report
+    // over `start..start+n` (same soak config as the pinned campaign).
+    // Prints one line per trial; Ok trials carry their covered sites.
+    // Plan-only hunt: print sites the seed-derived buggify schedule
+    // *arms* (no World run). Use this to find candidates for the 4
+    // soak sites, then confirm with `--sweep` (real World coverage).
+    if let Some(pos) = args.iter().position(|a| a == "--sweep-plan") {
+        let spec = args.get(pos + 1).cloned().unwrap_or_default();
+        let parts: Vec<&str> = spec.split(':').collect();
+        if let (Ok(start), Ok(n)) = (
+            parts.first().copied().unwrap_or("").parse::<u64>(),
+            parts.get(1).copied().unwrap_or("").parse::<u64>(),
+        ) {
+            for seed in start..start + n {
+                let plan = buggify_schedule_from_seed(seed, 3, 12, true);
+                let mut sites: Vec<&str> = plan
+                    .arms
+                    .iter()
+                    .map(|a| a.site.as_str())
+                    .collect();
+                sites.sort();
+                sites.dedup();
+                println!("PLAN seed={seed:016x} sites={}", sites.join(","));
+            }
+            return;
+        }
+        eprintln!("GATE coverage: FAIL — --sweep-plan needs START:N");
+        std::process::exit(1);
+    }
+
+    if let Some(pos) = args.iter().position(|a| a == "--sweep") {
+        let spec = args.get(pos + 1).cloned().unwrap_or_default();
+        let parts: Vec<&str> = spec.split(':').collect();
+        if let (Ok(start), Ok(n)) = (
+            parts.first().copied().unwrap_or("").parse::<u64>(),
+            parts.get(1).copied().unwrap_or("").parse::<u64>(),
+        ) {
+                let parent_root =
+                    std::env::temp_dir().join(format!("pedra-gate-sweep-{}", std::process::id()));
+                let _ = std::fs::remove_dir_all(&parent_root);
+                for seed in start..start + n {
+                    match run_trial(&parent_root, seed) {
+                        Some(m) => println!(
+                            "SWEEP seed={seed:016x} ok=1 sites={}",
+                            m.hit_ids().join(",")
+                        ),
+                        None => println!("SWEEP seed={seed:016x} ok=0 sites=-"),
+                    }
+                }
+                let _ = std::fs::remove_dir_all(&parent_root);
+                return;
+        }
+        eprintln!("GATE coverage: FAIL — --sweep needs START:N (e.g. --sweep 1:200)");
+        std::process::exit(1);
+    }
+
+    let (union, per_seed, ok, errored) = measure_union(SEEDS);
     let sites: Vec<&str> = union.hit_ids();
 
     if args.iter().any(|a| a == "--measure") {
@@ -160,7 +237,7 @@ fn main() {
     };
 
     if args.iter().any(|a| a == "--selftest") {
-        std::process::exit(selftest(&floor, &union));
+        std::process::exit(selftest(&floor, &union, &per_seed));
     }
 
     println!(
@@ -188,7 +265,9 @@ fn main() {
 }
 
 /// Prove the floor can fail (and pass) without touching any file.
-fn selftest(floor: &Floor, union: &CoverageMask) -> i32 {
+/// S4 (RFC-0188 P2.2): every pinned seed is load-bearing — removing any
+/// one must drop a required site (or the popcount) and go red.
+fn selftest(floor: &Floor, union: &CoverageMask, per_seed: &[CoverageMask]) -> i32 {
     let mut caught = 0;
     let mut total = 0;
 
@@ -243,6 +322,37 @@ fn selftest(floor: &Floor, union: &CoverageMask) -> i32 {
         caught += 1;
     } else {
         eprintln!("SELFTEST coverage: honest floor REJECTED — oracle always-red");
+    }
+
+    // S4: every pinned seed is load-bearing — the union minus any ONE
+    // seed must fail the floor (a redundant seed would mean the pinned
+    // campaign is looser than the floor claims).
+    total += 1;
+    let mut load_bearing = 0usize;
+    for i in 0..per_seed.len() {
+        let mut without = CoverageMask::new();
+        for (j, m) in per_seed.iter().enumerate() {
+            if j != i {
+                without.merge(m);
+            }
+        }
+        if check_floor(floor, &without).is_err() {
+            load_bearing += 1;
+        }
+    }
+    if per_seed.is_empty() {
+        eprintln!("SELFTEST coverage: MISSED seed-removal (no pinned seeds)");
+    } else if load_bearing == per_seed.len() {
+        println!(
+            "SELFTEST coverage: caught=seed-removal-red ({load_bearing}/{} seeds load-bearing)",
+            per_seed.len()
+        );
+        caught += 1;
+    } else {
+        eprintln!(
+            "SELFTEST coverage: MISSED seed-removal ({load_bearing}/{} seeds load-bearing — pin an irredundant set)",
+            per_seed.len()
+        );
     }
 
     println!("SELFTEST coverage: {caught}/{total} checks caught");

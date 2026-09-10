@@ -41,7 +41,7 @@ fn main() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(10);
 
-    let plan = buggify_schedule_from_seed(seed, 3, steps);
+    let plan = buggify_schedule_from_seed(seed, 3, steps, false);
     let n = plan.arms.len().min(64);
     let full_mask = if pedradb_core::write_admission_kernel::batch_is_empty(n as u64) {
         0u64
