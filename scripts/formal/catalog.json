@@ -3364,7 +3364,12 @@
     {
       "id": "tx_glue",
       "finding": "F47/F34",
-      "twin_kind": "close",
+      "twin_kind": "atom",
+      "atom": "tx_range_action",
+      "atom_reason": {
+        "date": "2026-09-10",
+        "why": "RFC-0191 P2.3 cadence (sixth if): the range-vs-tx disposition — the majority must revert exactly when the TX failed AND the range committed (a failed committed TX never stays live on the majority) — proven forall over (range_committed, tx_failed) as tx_range_action_majority_reverts_iff_failed_and_committed in TxGlue.lean; the store trampoline tx_finish matches the kernel decision"
+      },
       "single_artifact": true,
       "kernel": "crates/pedradb-store/src/tx_glue_kernel.rs",
       "twin": "crates/pedradb-store/src/tx_glue_kernel.rs",
@@ -3373,7 +3378,13 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "tx_range_action",
-      "data_fate": true,
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "tx_finish"
+        }
+      ],
       "handlers": [
         "tx_finish"
       ],

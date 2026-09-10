@@ -19,3 +19,4 @@ atom	catalog:apply_put_plan	apply_put_plan_hist_iff_live_and_gen_positive	formal
 atom	catalog:hist_load_fate	hist_load_fate_merge_new_iff_decoded_and_not_below	formal/aeneas/lean/Txn.lean	hist_load_fate
 atom	catalog:revert_user_action	revert_user_action_restore_value_iff_record_and_present	formal/aeneas/lean/Txn.lean	revert_user_action
 atom	catalog:txn	txn_commit_action_reverts_iff_abort	formal/aeneas/lean/Txn.lean	txn_commit_action
+atom	catalog:tx_glue	tx_range_action_majority_reverts_iff_failed_and_committed	formal/aeneas/lean/TxGlue.lean	tx_range_action

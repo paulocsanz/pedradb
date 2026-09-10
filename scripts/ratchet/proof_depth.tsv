@@ -15,8 +15,8 @@
 # extract to atom; the extract freeze went stale there (276 frozen vs 275
 # live) — P1.5 recounts it honestly and moves floor_extract to 275 in the
 # SAME commit (a ladder promotion, not a lost extraction).
-floor_extract 273
+floor_extract 272
 floor_close 1
-floor_atom 6
-cap_data_fate 125
+floor_atom 7
+cap_data_fate 124
 handler_loc 111927

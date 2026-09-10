@@ -30,3 +30,24 @@ theorem tx_range_as_is_local_only_dente :
     tx_range_action_as_is_local_only true true = ok TxRangeAction.LocalRevert := by
   unfold tx_range_action_as_is_local_only
   rfl
+
+/-- Catalog entry: the majority must revert exactly when the TX failed
+    AND the range committed (F47/F34 — forall, subsumes the fixed-input
+    theorems above). -/
+theorem tx_range_action_majority_reverts_iff_failed_and_committed :
+    ∀ (range_committed : Bool) (tx_failed : Bool),
+      (tx_range_action range_committed tx_failed
+          = ok TxRangeAction.MajorityRevert)
+        ↔ (tx_failed = true ∧ range_committed = true) := by
+  intro range_committed tx_failed
+  unfold tx_range_action
+  constructor
+  · intro h
+    split at h
+    · next c1 =>
+      split at h
+      · next c2 => exact ⟨c1, c2⟩
+      · next c2 => exact absurd h (by simp)
+    · next c1 => exact absurd h (by simp)
+  · rintro ⟨hd, hc⟩
+    rw [if_pos hd, if_pos hc]
