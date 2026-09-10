@@ -6146,8 +6146,9 @@
       "id": "ae_f16_gate",
       "finding": "F16",
       "twin_kind": "close",
+      "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/ae_kernel.rs",
-      "twin": "crates/pedradb-raft/verus/ae_entry_action.rs",
+      "twin": "crates/pedradb-raft/src/ae_kernel.rs",
       "aeneas": "scripts/aeneas_ae.sh",
       "callers": [
         "crates/pedradb-raft/src/ae_kernel.rs"
