@@ -17,6 +17,9 @@
 #   - depth-floor: proof ladder floors (extract/close/atom) + data_fate
 #     cap + close/atom registration cross-checked against residuals.json
 #     and catalog.json (stale counts / sorry files / dangling ids = red).
+# RFC-0191 product-guarantee ratchet:
+#   - product-floor: D1/R1/T1/C1 layers (model→atom→close only up);
+#     atom/close rows need ∀ theorem, no sorry, catalog id.
 name: verification-gates
 
 on:
@@ -131,3 +134,18 @@ jobs:
           grep -q 'GATE depth-floor: GREEN' /tmp/d1.log
           python3 scripts/check_depth_floor.py --selftest | tee /tmp/ds.log
           grep -q 'SELFTEST depth-floor: 4/4 sabotages caught' /tmp/ds.log
+
+  product-floor:
+    name: RFC-0191 P0.1 product-guarantee ratchet (D1/R1/T1/C1)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: gate (twice, logs identical) + selftest (4/4)
+        run: |
+          python3 scripts/check_product_floor.py | tee /tmp/p1.log
+          python3 scripts/check_product_floor.py | tee /tmp/p2.log
+          cmp /tmp/p1.log /tmp/p2.log
+          grep -q 'GATE product-floor: GREEN' /tmp/p1.log
+          python3 scripts/check_product_floor.py --selftest | tee /tmp/ps.log
+          grep -q 'SELFTEST product-floor: 4/4 checks caught' /tmp/ps.log

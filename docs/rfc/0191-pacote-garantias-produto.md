@@ -131,12 +131,12 @@ contagens movem no mesmo commit; `lock_interleavings_admitted` e
 
 ### P0 — o pacote existe e uma frase já não é modelo
 
-- [ ] **P0.1** Ratchet de produto: `scripts/ratchet/product_guarantees.tsv`
+- [x] **P0.1** Ratchet de produto: `scripts/ratchet/product_guarantees.tsv`
   (4 linhas D1/R1/T1/C1) + `scripts/check_product_floor.py` + job
   `product-floor`; freeze R1=`atom` (`catalog:visible_at`,
   `visible_at_deletion_never_live`), D1/T1/C1=`model`; floor ≥1
   `atom|close`; `--selftest` 4/4 (camada desce, sem ∀, dangling,
-  freeze honesto passa) — status: `todo`
+  freeze honesto passa) — status: `done`
 - [ ] **P0.2** Corolário de produto R1-deleção: teorema `∀` em
   `formal/aeneas/lean/` que *nomeia* a frase R1 e `unfold`
   `merge.visible_at` (não só o atom já registado — o corolário é o
@@ -199,7 +199,7 @@ contagens movem no mesmo commit; `lock_interleavings_admitted` e
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | Ratchet de produto (4 linhas, camada só sobe) | todo | — | 2026-09-10 |
+| P0.1 | p0 | Ratchet de produto (4 linhas, camada só sobe) | done | `product_guarantees.tsv` + `check_product_floor.py` + job `product-floor` | 2026-09-10 |
 | P0.2 | p0 | Corolário R1-deleção (∀, unfold `visible_at`) | todo | — | 2026-09-10 |
 | P0.3 | p0 | Ledger garantias de produto | todo | — | 2026-09-10 |
 | P1.1 | p1 | R1-value (∀ `range_hidden`, ambos os braços) | todo | — | 2026-09-10 |

@@ -1,0 +1,393 @@
+== board (search; not a winner) ==
+pairs=295 data_fate=130 not_data_fate=165
+glue kernel_files=59 kernel_loc=23189 handler_loc=112092 db_rs_extracted=False
+never_floor R-cpu R-rustc R-verus R-crc R-deps
+== RFC open P0/P1/P2 ==
+0153-ram-scale-block-cache-bytes.md:58:- [ ] **P2.1** Arena / skip-list se P1.1 ainda for CPU-bound no write buffer
+0153-ram-scale-block-cache-bytes.md:60:- [ ] **P2.2** Bateria oficial com flush na janela (64 MiB, não 256) —
+0154-memtable-index-is-an-invariant.md:71:- [ ] **P1.3** Prefixo vazio HashMap — status: `todo`
+0154-memtable-index-is-an-invariant.md:86:- [ ] **P1.7** YCSB-F RMW last-byte sem Vec — status: `todo`
+0154-memtable-index-is-an-invariant.md:94:- [ ] **P1.9** 1c put sem mutex `dirty_points` — status: `todo`
+0154-memtable-index-is-an-invariant.md:101:- [ ] **P2.1a** Versões do tail vivem no shard do CF (`TailShard.versions`),
+0154-memtable-index-is-an-invariant.md:106:- [ ] **P2.1b** `MemTable` vivo por CF não-default no `Db` — status: `todo`
+0154-memtable-index-is-an-invariant.md:110:- [ ] **P2.1** Raftdb segundo `DB` — status: `todo`
+0154-memtable-index-is-an-invariant.md:114:- [ ] **P2.2** Arena / skip-list — status: `todo`
+0154-memtable-index-is-an-invariant.md:119:- [ ] **P2.3** WAL/prepare of apply's two 64-key batches (the ~77% of
+0154-memtable-index-is-an-invariant.md:124:- [ ] **P2.4** Remaining coluna A under 3× after intern: SET / blob / cache
+0154-memtable-index-is-an-invariant.md:130:- [ ] **P2.5** 1c SET/blob WAL encode: skip vlog mutex (async never spills);
+0154-memtable-index-is-an-invariant.md:136:- [ ] **P2.6** Write-only 1c publish skips empty read-cache mutexes
+0159-sorted-ingest-bulk-load.md:202:- [ ] **P2.2** 100M scale rung via bulk mode (disk peak ≈ live set + one
+0160-slipstream-scale-2x.md:102:- [ ] **P0.2** Attribute 25M get_loop: one guest capture that splits
+0160-slipstream-scale-2x.md:105:- [ ] **P0.3** Name the 100M OOM with a guest capture (WAL ring vs
+0160-slipstream-scale-2x.md:107:- [ ] **P0.4** 100M hydrate **prints a line** on `linux-gate-p149b`
+0160-slipstream-scale-2x.md:112:- [ ] **P1.1** 25M lookup_100 get_loop **and** multi_get ≥ 1.0, 3-run
+0160-slipstream-scale-2x.md:115:- [ ] **P1.2** 25M hydrate 3-run median ≥ 1.0 vs contemporaneous Rocks
+0160-slipstream-scale-2x.md:117:- [ ] **P1.3** 10M get_hit ≥ 1.0 (today a tie) — status: `todo`
+0160-slipstream-scale-2x.md:118:- [ ] **P1.4** 100M all six required legs ≥ 1.0, 3-run median —
+0160-slipstream-scale-2x.md:123:- [ ] **P2.1** 1M all six ≥ 2.0 (today multi_get 1.08 is the hole) —
+0160-slipstream-scale-2x.md:125:- [ ] **P2.2** 10M all six ≥ 2.0 — status: `todo`
+0160-slipstream-scale-2x.md:126:- [ ] **P2.3** 25M all six ≥ 2.0 — status: `todo`
+0160-slipstream-scale-2x.md:127:- [ ] **P2.4** 100M all six ≥ 2.0 — status: `todo`
+0160-slipstream-scale-2x.md:128:- [ ] **P2.5** Gate: 3-run median, refuse `sync: true` peer, refuse
+0179-disk-pressure-fail-writes-not-corrupt.md:83:- [ ] **P1.3** sonda de telemetria (RFC-0169, default off) — status: `todo`
+0179-disk-pressure-fail-writes-not-corrupt.md:92:- [ ] **P2.1** blast radius do fence 0050 (cópia vs handle) — **não**
+0179-disk-pressure-fail-writes-not-corrupt.md:94:- [ ] **P2.2** twin Verus do kernel — status: `todo`
+0187-teorema-experimento-tcb.md:173:- [ ] **P2.1** Série L28: primeiro par `l28_*` promovido a teorema
+0187-teorema-experimento-tcb.md:176:- [ ] **P2.2** Nightly experimental de durabilidade física: TCG guest
+0187-teorema-experimento-tcb.md:179:- [ ] **P2.3** Exaustivo N=4 com poda/simetria se o custo do runner
+0191-pacote-garantias-produto.md:134:- [ ] **P0.1** Ratchet de produto: `scripts/ratchet/product_guarantees.tsv`
+0191-pacote-garantias-produto.md:140:- [ ] **P0.2** Corolário de produto R1-deleção: teorema `∀` em
+0191-pacote-garantias-produto.md:145:- [ ] **P0.3** Ledger: tabela **Garantias de produto** em
+0191-pacote-garantias-produto.md:152:- [ ] **P1.1** R1-value: registrar `visible_at_value_live_iff_not_hidden`
+0191-pacote-garantias-produto.md:156:- [ ] **P1.2** D1-script `model→close`: teorema `∀ (need_sync sync_fail :
+0191-pacote-garantias-produto.md:161:- [ ] **P1.3** T1-leftover `model→atom`: a fn constante
+0191-pacote-garantias-produto.md:166:- [ ] **P1.4** C1-joint `model→close`: teorema `∀` sobre
+0191-pacote-garantias-produto.md:171:- [ ] **P1.5** Um `if` data-fate vivo do trampolim (`leftover_next`)
+0191-pacote-garantias-produto.md:175:- [ ] **P1.6** `scripts/lean_extracts.sh --required` + `check_product_floor`
+0191-pacote-garantias-produto.md:181:- [ ] **P2.1** Inv-WAL (um passo): lema de preservação de
+0191-pacote-garantias-produto.md:185:- [ ] **P2.2** Inv-LSM (um passo): lema `visible_at` + probe-order
+0191-pacote-garantias-produto.md:188:- [ ] **P2.3** Campanha trampolim com alvo nomeado: `cap_data_fate ≤
+0191-pacote-garantias-produto.md:192:- [ ] **P2.4** Herdados do [0187](0187-teorema-experimento-tcb.md),
+== A absent twins ==
+none
+== B data_fate freeze holes ==
+missing_as_is none
+missing_dst_plant none
+== C live_callers vs store/raft mentions ==
+  live_callers vote entry=vote_decision store=True raft=True [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'on_request_vote'}]
+  live_callers ae_entry entry=ae_entry_action store=True raft=True [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'on_append_entries'}]
+  live_callers ae_ack entry=ae_ack_success store=True raft=True [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'on_append_entries'}]
+  live_callers commit_raft entry=propose_ack_ok store=True raft=True [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'broadcast_append_after_propose'}]
+  live_callers joint_election entry=joint_election_ok store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'election_has_joint_quorum'}]
+  live_callers joint_leave entry=joint_still_active store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'pending_joint_on'}]
+  live_callers pending_joint_node entry=pending_joint_node_counts store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'pending_joint'}]
+  live_callers joint_leave_ok entry=joint_leave_ok store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'leave_joint'}]
+  live_callers election_grant_from entry=election_grant_from_counts store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'on_request_vote_reply'}]
+  live_callers joint_target entry=joint_target_counts store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'remove_member_joint'}]
+  live_callers joint_add_target entry=joint_add_target_counts store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'add_member_joint'}]
+  live_callers queued_leave_finish entry=queued_leave_finish_ok store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'finish_uncommitted_leave'}]
+  live_callers disk_membership entry=disk_membership_overrides_cli store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'bind_cluster_identity'}]
+  live_callers high_water entry=high_water_at_least store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'open_single_node_with_rng_opts'}]
+  live_callers participating_member entry=participating_if_member store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'is_participating'}]
+  live_callers identity_before_applied entry=membership_identity_before_applied store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'apply_range'}]
+  live_callers recover_apply entry=recover_must_apply store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'recover_apply_committed'}]
+  live_callers recover_apply_node entry=recover_apply_node_counts store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'recover_apply_committed'}]
+  live_callers recover_truncate entry=recover_truncate_node_counts store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'persist_truncated_logs'}]
+  live_callers recover_drop_orphan entry=recover_drop_orphan_seg store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'persist_log_db'}]
+  live_callers recover_abort entry=recover_abort_node_counts store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'abort_leftover_intents'}]
+  live_callers persist_meta entry=persist_meta_node_counts store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'persist_u64_meta_all'}]
+  live_callers persist_hist entry=persist_hist_node_counts store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'persist_si_keys'}]
+  live_callers persist_fence entry=persist_fence_node_counts store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'fence_txn_aborted'}]
+  live_callers force_clear entry=force_clear_node_counts store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'force_local_clear_keys'}]
+  live_callers drop_preimages entry=drop_preimages_node_counts store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'drop_preimages'}]
+  live_callers open_peer_disk entry=open_peer_uses_disk store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'open_with_envs_rng_opts'}]
+  live_callers local_id_member entry=local_id_if_member store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'local_node_id'}]
+  live_callers reader_local entry=reader_id_local store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'ids_first_if_local'}]
+  live_callers discard_uncommitted entry=discard_node_counts store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'discard_uncommitted_from'}]
+  live_callers discard_leader entry=discard_leader_local store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'finish_queued_propose'}]
+  live_callers removed_step_down entry=removed_steps_down store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'install_applied_membership'}]
+  live_callers hint_member entry=hint_if_member store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'leader_hint'}]
+  live_callers drop_repl_slot entry=drop_repl_slot store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'install_applied_membership'}]
+  live_callers drop_sent_through entry=drop_sent_through store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'remove_member'}]
+  live_callers revert_clears_status entry=revert_clears_status store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'apply_txn_revert'}]
+  live_callers revert_user_action entry=revert_user_action store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'apply_txn_revert'}]
+  live_callers should_repair_si_hist entry=should_repair_si_hist store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'apply_txn_revert'}]
+  live_callers discard_cut entry=discard_cut store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'discard_uncommitted_from'}]
+  live_callers leftover_txn_is_aborted entry=leftover_txn_is_aborted store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'abort_leftover_intents'}]
+  live_callers next_txn_id_after entry=next_txn_id_after store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'recover_next_txn_id'}]
+  live_callers recover_si_generation entry=recover_si_generation store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'load_si_from_disk'}]
+  live_callers prepare_error_aborts_earlier entry=prepare_error_aborts_earlier store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'tx_start'}]
+  live_callers reserve_si_gen entry=reserve_si_gen store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'tx_finish'}]
+  live_callers unreserve_si_gen entry=unreserve_si_gen store=True raft=False [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'broadcast_append'}]
+  live_callers apply_step entry=apply_advance store=True raft=True [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'apply_range'}]
+  live_callers grant_persist entry=grant_after_persist store=True raft=True [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'on_request_vote'}]
+  live_callers durable_term entry=durable_term_if_newer store=True raft=True [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'durable_become_follower_if_newer'}, {'file': 'crates/pedradb-raft/src/lib.rs', 'handler': 'handle_request_vote_with_persist'}]
+  live_callers rwlock_client_may_mutate entry=rwlock_client_may_mutate store=False raft=False [{'file': 'crates/pedradb-core/src/concurrent.rs', 'handler': 'finish_group_off_lock'}]
+  live_callers l28_tcp_left entry=l28_tcp_left_ok store=True raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'tcp_node_disk_left_joint'}]
+  live_callers l28_tcp_hw entry=l28_tcp_hw_ok store=True raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'tcp_node_disk_high_water'}]
+  live_callers l28_tcp_part entry=l28_tcp_part_ok store=True raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'tcp_node_removed_not_participating'}]
+  live_callers l28_tcp_apply entry=l28_tcp_apply_ok store=True raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'tcp_node_recover_apply_ok'}]
+  live_callers l28_tcp_napply entry=l28_tcp_napply_ok store=True raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'tcp_node_removed_recover_apply_ok'}]
+  live_callers l28_tcp_trunc entry=l28_tcp_trunc_ok store=True raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'tcp_node_removed_truncate_ok'}]
+  live_callers l28_tcp_odrop entry=l28_tcp_odrop_ok store=True raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'tcp_node_removed_orphan_drop_ok'}]
+  live_callers l28_tcp_abort entry=l28_tcp_abort_ok store=True raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'tcp_node_removed_abort_ok'}]
+  live_callers l28_tcp_nowms entry=l28_tcp_nowms_ok store=True raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'tcp_node_removed_now_ms_ok'}]
+  live_callers l28_tcp_dterm entry=l28_tcp_dterm_ok store=False raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'tcp_node_removed_durable_term_ok'}]
+  live_callers l28_tcp_hist entry=l28_tcp_hist_ok store=True raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'tcp_node_removed_hist_ok'}]
+  live_callers l28_tcp_fence entry=l28_tcp_fence_ok store=True raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'tcp_node_removed_fence_ok'}]
+  live_callers l28_tcp_clear entry=l28_tcp_clear_ok store=True raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'tcp_node_removed_clear_ok'}]
+  live_callers l28_tcp_pre entry=l28_tcp_pre_ok store=True raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'tcp_node_removed_pre_ok'}]
+  live_callers l28_tcp_peer entry=l28_tcp_peer_ok store=True raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'tcp_node_removed_peer_ok'}]
+  live_callers l28_tcp_lid entry=l28_tcp_lid_ok store=True raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'tcp_node_removed_lid_ok'}]
+  live_callers l28_tcp_rdr entry=l28_tcp_rdr_ok store=True raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'tcp_node_removed_rdr_ok'}]
+  live_callers l28_tcp_dsc entry=l28_tcp_dsc_ok store=True raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'tcp_node_removed_dsc_ok'}]
+  live_callers l28_tcp_pld entry=l28_tcp_pld_ok store=True raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'tcp_node_removed_pld_ok'}]
+  live_callers l28_tcp_std entry=l28_tcp_std_ok store=True raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'tcp_node_removed_std_ok'}]
+  live_callers l28_tcp_hnt entry=l28_tcp_hnt_ok store=True raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'tcp_node_hint_ok'}]
+  live_callers l28_tcp_slot entry=l28_tcp_slot_ok store=True raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'tcp_node_drop_repl_ok'}]
+  live_callers l28_tcp_sth entry=l28_tcp_sth_ok store=True raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'tcp_node_drop_st_ok'}]
+  live_callers l28_tcp_pj entry=l28_tcp_pj_ok store=True raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'tcp_node_plant_joint_ok'}]
+  live_callers sched_plant_joint entry=plant_joint_schedule_ok store=False raft=False [{'file': 'crates/pedradb-world/src/lib.rs', 'handler': 'run'}]
+  live_callers cf_family entry=key_in_cf_family store=False raft=False [{'file': 'crates/pedradb-core/src/sst/table.rs', 'handler': 'write_l0_sst_for_family'}]
+  live_callers cf_family_of entry=cf_family_of store=False raft=False [{'file': 'crates/pedradb-core/src/cf_kernel.rs', 'handler': 'infer_sst_cf'}]
+  live_callers cf_encode_effective entry=cf_encode_effective store=False raft=False [{'file': 'crates/rocksdb-compat/src/lib.rs', 'handler': 'encode_pooled'}]
+  live_callers encode_cf_key entry=encode_cf_key store=False raft=False [{'file': 'crates/rocksdb-compat/src/lib.rs', 'handler': 'encode'}, {'file': 'crates/pedradb-core/src/db.rs', 'handler': 'compact_ssts_only_cf'}]
+  live_callers decode_cf_key entry=decode_cf_key store=False raft=False [{'file': 'crates/rocksdb-compat/src/lib.rs', 'handler': 'decode'}]
+  live_callers infer_sst_cf entry=infer_sst_cf store=False raft=False [{'file': 'crates/pedradb-core/src/sst/table.rs', 'handler': 'write_l0_sst_for_family'}]
+  live_callers compact_rewrites_sst_cf entry=compact_rewrites_sst_cf store=False raft=False [{'file': 'crates/pedradb-core/src/db.rs', 'handler': 'compact_ssts_only_cf'}]
+  live_callers leveling entry=level_target_bytes store=False raft=False [{'file': 'crates/pedradb-core/src/db.rs', 'handler': 'prepare_pushdown_compact'}]
+  live_callers leveling_pick entry=pick_l0_to_l1 store=False raft=False [{'file': 'crates/pedradb-core/src/db.rs', 'handler': 'prepare_l0_compact'}]
+  live_callers leveling_pushdown entry=pick_pushdown store=False raft=False [{'file': 'crates/pedradb-core/src/db.rs', 'handler': 'prepare_pushdown_compact'}]
+  live_callers l28_tcp_add entry=l28_tcp_add_ok store=False raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'client_add_member_joint'}]
+  live_callers l28_tcp_cnew entry=l28_tcp_cnew_ok store=False raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'client_status'}]
+  live_callers l28_tcp_svget entry=l28_tcp_svget_ok store=False raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'client_get'}]
+  live_callers l28_tcp_newget entry=l28_tcp_newget_ok store=False raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'client_get'}]
+  live_callers l28_tcp_jleft entry=l28_tcp_jleft_ok store=False raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'tcp_node_disk_added_joint'}]
+  live_callers l28_tcp_caught entry=l28_tcp_caught_ok store=False raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'tcp_node_disk_caught_up'}]
+  live_callers l28_tcp_grown entry=l28_tcp_grown_ok store=False raft=False [{'file': 'crates/pedradb-store/src/bin/cluster_real.rs', 'handler': 'tcp_node_disk_high_water'}]
+  live_callers occ_member_fate entry=occ_member_fate store=False raft=False [{'file': 'crates/pedradb-core/src/concurrent.rs', 'handler': 'validate_occ_batch'}]
+  live_callers occ_batch_plan entry=occ_batch_plan store=False raft=False [{'file': 'crates/pedradb-core/src/concurrent.rs', 'handler': 'validate_occ_batch'}, {'file': 'crates/pedradb-core/src/concurrent.rs', 'handler': 'lone_commit'}]
+== D protocol bits (persist/ack) in store ==
+  grant_after_persist yes
+  ae_ack_success yes
+  persist_hard_db yes
+  grant_persist live_callers [{'file': 'crates/pedradb-store/src/lib.rs', 'handler': 'on_request_vote'}]
+== D/C plants: inbound vs pure-fn cartoon ==
+  inbound vote test=vote_decision_on_live_queued_is_not_ok entry=True inbound=True
+  inbound ae_entry test=ae_entry_action_on_live_queued_is_not_ok entry=True inbound=True
+  inbound ae_ack test=ae_ack_success_on_live_queued_is_not_ok entry=True inbound=True
+  live_core lease test=lease_live_on_live_expiry_is_not_ok entry=True inbound=False
+  live_core txn test=txn_commit_action_on_live_abort_is_not_ok entry=True inbound=False
+  pure_fn revert_clears_status test=revert_clears_status_on_live_queued_is_not_ok entry=True inbound=False
+  pure_fn revert_user_action test=revert_user_action_on_live_queued_is_not_ok entry=True inbound=False
+  live_core should_repair_si_hist test=repair_hist_only_when_restored_user_key entry=True inbound=False
+  live_core discard_cut test=discard_never_cuts_committed entry=True inbound=False
+  pure_fn leftover_txn_is_aborted test=leftover_txn_is_aborted_on_live_reopen_is_not_ok entry=True inbound=False
+  pure_fn next_txn_id_after test=next_txn_id_after_on_live_reopen_is_not_ok entry=True inbound=False
+  live_core recover_si_generation test=si_generation_survives entry=True inbound=False
+  pure_fn prepare_error_aborts_earlier test=prepare_error_aborts_earlier_on_live_queued_is_not_ok entry=True inbound=False
+  live_core reserve_si_gen test=reserve_advances_and_differs entry=True inbound=False
+  live_core unreserve_si_gen test=unreserve_only_if_still_ours entry=True inbound=False
+  live_core compact_unleft test=compact_through_unleft_on_live_joint_is_not_ok entry=True inbound=False
+  live_core wal_recover test=recover_collect_act_on_live_exploded_crc_is_not_ok entry=True inbound=False
+  live_core manifest_recover test=sst_recover_action_on_live_missing_sst_is_not_ok entry=True inbound=False
+  live_core reopen_outcome test=reopen_outcome_on_live_crc_is_not_ok entry=True inbound=False
+  live_core flush_decision test=wal_rotate_decision_on_live_pin_is_not_ok entry=True inbound=False
+  live_core occ_snap_published test=occ_snap_uses_published_on_live_inflight_is_not_ok entry=True inbound=False
+  live_core compact_decision test=compact_pick_on_live_merge_is_not_ok entry=True inbound=False
+  live_core compact_retention test=point_version_fate_on_live_snapshot_is_not_ok entry=True inbound=False
+  live_core dictionary_link test=crash_after_sync_recovers_committed entry=True inbound=False
+  inbound grant_persist test=grant_after_persist_on_live_queued_is_not_ok entry=True inbound=True
+  live_core vlog_recover test=vlog_recover_action_on_live_swing_is_not_ok entry=True inbound=False
+  live_core blob_gc_pick test=blob_gc_action_on_live_active_is_not_ok entry=True inbound=False
+  live_core tx_glue test=tx_range_action_on_live_majority_is_not_ok entry=True inbound=False
+  live_core rwlock_client_may_mutate test=rwlock_client_may_mutate_on_live_off_lock_is_not_ok entry=True inbound=False
+  live_core l28_tcp_left test=l28_real_tcp_remove_member_left_on_disk entry=True inbound=False
+  live_core l28_tcp_hw test=l28_real_tcp_high_water_after_remove entry=True inbound=False
+  live_core l28_tcp_part test=l28_real_tcp_participating_after_remove entry=True inbound=False
+  live_core l28_tcp_apply test=l28_real_tcp_recover_apply entry=True inbound=False
+  live_core l28_tcp_napply test=l28_real_tcp_removed_recover_apply entry=True inbound=False
+  live_core l28_tcp_trunc test=l28_real_tcp_removed_truncate entry=True inbound=False
+  live_core l28_tcp_odrop test=l28_real_tcp_removed_orphan_drop entry=True inbound=False
+  live_core l28_tcp_abort test=l28_real_tcp_removed_abort entry=True inbound=False
+  live_core l28_tcp_nowms test=l28_real_tcp_removed_now_ms entry=True inbound=False
+  live_core l28_tcp_dterm test=l28_real_tcp_removed_durable_term entry=True inbound=False
+  live_core l28_tcp_hist test=l28_real_tcp_removed_hist entry=True inbound=False
+  live_core l28_tcp_fence test=l28_real_tcp_removed_fence entry=True inbound=False
+  live_core l28_tcp_clear test=l28_real_tcp_removed_clear entry=True inbound=False
+  live_core l28_tcp_pre test=l28_real_tcp_removed_pre entry=True inbound=False
+  live_core l28_tcp_peer test=l28_real_tcp_removed_peer entry=True inbound=False
+  live_core l28_tcp_lid test=l28_real_tcp_removed_lid entry=True inbound=False
+  live_core l28_tcp_rdr test=l28_real_tcp_removed_rdr entry=True inbound=False
+  live_core l28_tcp_dsc test=l28_real_tcp_removed_dsc entry=True inbound=False
+  live_core l28_tcp_pld test=l28_real_tcp_removed_pld entry=True inbound=False
+  live_core l28_tcp_std test=l28_real_tcp_removed_std entry=True inbound=False
+  live_core l28_tcp_hnt test=l28_real_tcp_hint entry=True inbound=False
+  live_core l28_tcp_slot test=l28_real_tcp_drop_repl entry=True inbound=False
+  live_core l28_tcp_sth test=l28_real_tcp_drop_st entry=True inbound=False
+  live_core l28_tcp_pj test=l28_real_tcp_plant_joint entry=True inbound=False
+  live_core sched_plant_joint test=world_opt_in_schedule_emits_plant_committed_joint entry=True inbound=False
+  live_core cf_family test=key_in_cf_family_on_live_scan_is_not_ok entry=True inbound=False
+  live_core cf_family_of test=cf_family_of_on_live_sst_bounds_is_not_ok entry=True inbound=False
+  live_core cf_encode_effective test=cf_encode_effective_on_live_default_raw_is_not_ok entry=True inbound=False
+  live_core encode_cf_key test=encode_cf_key_on_live_sst_bounds_is_not_ok entry=True inbound=False
+  live_core decode_cf_key test=decode_cf_key_on_live_sst_bounds_is_not_ok entry=True inbound=False
+  live_core infer_sst_cf test=infer_sst_cf_on_live_flush_tag_is_not_ok entry=True inbound=False
+  live_core compact_rewrites_sst_cf test=compact_rewrites_sst_cf_on_live_meta_is_not_ok entry=True inbound=False
+  live_core visible_at test=visible_at_on_live_range_del_is_not_ok entry=True inbound=False
+  live_core write_record_count test=write_record_count_ok_on_live_torn_batch_is_not_ok entry=True inbound=False
+  live_core pin_gc test=gc_oldest_from_pin_on_live_reclaim_is_not_ok entry=True inbound=False
+  live_core wait_for_deadlock test=wait_for_deadlock_on_live_cycle_is_not_ok entry=True inbound=False
+  live_core flush_publish test=may_publish_manifest_on_live_unsynced_sst_is_not_ok entry=True inbound=False
+  live_core iter_window test=iter_window_keep_on_live_hidden_is_not_ok entry=True inbound=False
+  live_core leveling test=level_target_bytes_on_live_deep_level_is_not_ok entry=True inbound=False
+  live_core leveling_pick test=pick_l0_to_l1_on_live_slice_is_not_ok entry=True inbound=False
+  live_core leveling_pushdown test=pick_pushdown_on_live_pushdown_gate_is_not_ok entry=True inbound=False
+  MISSING_TEST l28_tcp_add crates/pedradb-store/tests/l28_real_tcp.rs l28_real_tcp_add_member_joint_cnew
+  MISSING_TEST l28_tcp_cnew crates/pedradb-store/tests/l28_real_tcp.rs l28_real_tcp_add_member_joint_cnew
+  MISSING_TEST l28_tcp_svget crates/pedradb-store/tests/l28_real_tcp.rs l28_real_tcp_add_member_joint_cnew
+  MISSING_TEST l28_tcp_newget crates/pedradb-store/tests/l28_real_tcp.rs l28_real_tcp_add_member_joint_cnew
+  MISSING_TEST l28_tcp_jleft crates/pedradb-store/tests/l28_real_tcp.rs l28_real_tcp_add_member_joint_cnew
+  MISSING_TEST l28_tcp_caught crates/pedradb-store/tests/l28_real_tcp.rs l28_real_tcp_add_member_joint_cnew
+  MISSING_TEST l28_tcp_grown crates/pedradb-store/tests/l28_real_tcp.rs l28_real_tcp_add_member_joint_cnew
+  live_core occ_member_fate test=occ_member_fate_on_live_conflict_is_not_ok entry=True inbound=False
+  live_core occ_batch_plan test=occ_batch_plan_on_live_lagging_is_not_ok entry=True inbound=False
+  live_core write_admission test=write_admission_idle_on_live_stall_is_not_ok entry=True inbound=False
+  live_core write_admit test=write_admit_on_live_mem_over_is_not_ok entry=True inbound=False
+  live_core wal_sync_required test=wal_sync_required_on_live_client_true_is_not_ok entry=True inbound=False
+  live_core seq_exhausted test=seq_exhausted_on_live_ceiling_is_not_ok entry=True inbound=False
+  live_core batch_is_empty test=batch_is_empty_on_live_zero_is_not_ok entry=True inbound=False
+  live_core fence_on_sync_fail test=fence_on_sync_fail_on_live_required_fail_is_not_ok entry=True inbound=False
+  live_core wal_commit_plan test=wal_commit_plan_on_live_sync_fail_is_not_ok entry=True inbound=False
+  live_core torn_head_empty_log test=torn_head_is_empty_log_on_live_large_wal_is_not_ok entry=True inbound=False
+  live_core torn_tail_needs_cut test=torn_tail_needs_cut_on_live_overhang_is_not_ok entry=True inbound=False
+  live_core seq_after_feed test=seq_after_feed_on_live_newer_is_not_ok entry=True inbound=False
+  live_core pit_resync_rewrite test=pit_resync_needs_rewrite_on_live_resync_is_not_ok entry=True inbound=False
+  live_core dir_sync_required test=dir_sync_required_on_live_sync_is_not_ok entry=True inbound=False
+  live_core auto_flush_due test=auto_flush_due_on_live_over_limit_is_not_ok entry=True inbound=False
+  live_core snap_empty test=snap_is_empty_on_live_zero_is_not_ok entry=True inbound=False
+  live_core snap_below_watermark test=snap_below_watermark_on_live_below_is_not_ok entry=True inbound=False
+  live_core mem_point_decides test=mem_point_decides_on_live_hit_is_not_ok entry=True inbound=False
+  live_core prefer_newer_seq test=prefer_newer_seq_on_live_older_first_is_not_ok entry=True inbound=False
+  cartoon_pure_fn_count=5 inbound_count=38 live_core_count=80
+  cartoon_ids revert_clears_status revert_user_action leftover_txn_is_aborted next_txn_id_after prepare_error_aborts_earlier
+  live_core_ids lease txn should_repair_si_hist discard_cut recover_si_generation reserve_si_gen unreserve_si_gen compact_unleft wal_recover manifest_recover reopen_outcome flush_decision occ_snap_published compact_decision compact_retention dictionary_link vlog_recover blob_gc_pick tx_glue rwlock_client_may_mutate l28_tcp_left l28_tcp_hw l28_tcp_part l28_tcp_apply l28_tcp_napply l28_tcp_trunc l28_tcp_odrop l28_tcp_abort l28_tcp_nowms l28_tcp_dterm l28_tcp_hist l28_tcp_fence l28_tcp_clear l28_tcp_pre l28_tcp_peer l28_tcp_lid l28_tcp_rdr l28_tcp_dsc l28_tcp_pld l28_tcp_std l28_tcp_hnt l28_tcp_slot l28_tcp_sth l28_tcp_pj sched_plant_joint cf_family cf_family_of cf_encode_effective encode_cf_key decode_cf_key infer_sst_cf compact_rewrites_sst_cf visible_at write_record_count pin_gc wait_for_deadlock flush_publish iter_window leveling leveling_pick leveling_pushdown occ_member_fate occ_batch_plan write_admission write_admit wal_sync_required seq_exhausted batch_is_empty fence_on_sync_fail wal_commit_plan torn_head_empty_log torn_tail_needs_cut seq_after_feed pit_resync_rewrite dir_sync_required auto_flush_due snap_empty snap_below_watermark mem_point_decides prefer_newer_seq
+== E non-data_fate three-teeth ==
+  as_is=165/165 dst_plant=165/165
+  ids dcs_apply dcs_advance_bool lease_table lease_next_id compact snapshot si_reader index_val changelog range_covers write_op_range_end merge_sift prefix stream_cursor stream_next_seq bearer content_length invalid_cl_zero cl_repeat_conflict short_body_vs_cl fail_closed form_plus origin_path path_after_authority strip_http_authority request_target_authority host_authority_mismatch split_host_port strip_uri_fragment strip_authority_for_routing form_plus_byte from_hex plus_before_percent query_values_conflict query_u64_conflict query_part_is_bare_name ascii_lower ascii_upper is_bearer_scheme is_non_bearer_auth_scheme normalize_http_method authorization_matches isolated isolated_child children fields journal_pin journal_catch_up_pin journal_fold_pin journal_next_pin pack children_start children_half_open children_next_byte fields_kept fields_suffix fields_decode fields_pair_nul ship_guard ship_stamp bloom_header bloom_insert bloom_may_contain scan_guard si_read fold_range group_commit group_fence rpc_mode group_publish forall_schedules l28_durability world_trajectory world_trajectory_fold liveness_claim fsync_promote media_durable tcg_guest fdatasync_rc cqe_res cqe_tags cqe_leftover cqe_submit cqe_ring_refusal c_len crc_match sst_crc ikey_pack probe_order run_disjoint l28_napply_retry zero_glue lock_interleavings d1_durability r1_no_resurrection t1_atomicity c1_quorum leveled_enabled leveling_disjoint leveling_overlaps leveling_total_bytes tombstone_reaches_window key_in_window point_bounds_overlap sst_block_crc sst_magic is_length_resyncable physical_payload_act fragment_act from_record_type compact_split compact_split_at lone_tombstone changelog_should_store changelog_budget flush_plan first_install probe_order_covering group_validate pct_default_depth default_pct_depth_raised fsync_lie_tcg stacked_liars env_crash env_append env_sync env_barrier_floor env_no_invented env_honest_sync wal_state wal_append wal_sync wal_ack wal_rotate wal_acked_survives ae_f16_gate raft_recover_applied d1_put_ok d1_modelo point_get_prefer point_get_wm snap_txn_clear len_tag exact_children compact_floor compact_ready compact_peer_counts write_ack_append write_ack_barrier write_ack_ack lsm_probe lsm_compact lsm_reopen r1_modelo tx_abort tx_recover t1_modelo c1_advance_commit c1_modelo scale_probes scale_warm scale_probes_worst scale_predict scale_happy_hot scale_forecast
+== RFC-0170 atom→close (above F/E when D/C/B/A empty) ==
+  atom=0 data_fate_atom=0
+  atom_to_close none
+== F clones ==
+  commit_raft_store membership_raft_store ae_ack_raft_store vote_raft_store apply_raft_store iter_window_merge peek_pin_journal_stream
+== G/H/I ==
+  G never_floor + db_rs_extracted must stay false — not a next proof
+  H L28 TCP / PCT / lock interleavings — campaign not forall
+  I benches/0149/crates.io — not verification
+== script (rank 4: handler calls the named plan) ==
+  commit_ops_with plan=wal_commit_plan calls_plan extra=ok
+  wal_sync_group plan=wal_commit_plan calls_plan extra=ok
+  lone_commit plan=occ_member_fate calls_plan extra=ok
+  finish_group_off_lock plan=wal_commit_plan calls_plan extra=ok
+  validate_occ_batch plan=occ_batch_plan calls_plan extra=ok
+  lone_sync_commit plan=wal_commit_plan calls_plan extra=ok
+  sync plan=wal_commit_plan calls_plan extra=ok
+  open_with_env_sourced plan=wal_commit_plan calls_plan extra=ok
+  group_finish plan=wal_commit_plan calls_plan extra=ok
+  vlog_prepare_wal plan=wal_commit_plan calls_plan extra=ok
+  fsync_sst_paths plan=wal_commit_plan calls_plan extra=ok
+  write_checkpoint_meta plan=wal_commit_plan calls_plan extra=ok
+  close plan=wal_commit_plan calls_plan extra=ok
+  rotate_wal_now plan=wal_commit_plan calls_plan extra=ok
+  try_rotate_wal plan=wal_rotate_decision calls_plan extra=ok
+  group_start plan=wal_commit_plan calls_plan extra=ok
+  group_absorb plan=wal_commit_plan calls_plan extra=ok
+  unpaid_script=0/17
+== compose glue callers (rank 5: unfold plan AND callee) ==
+  commit_ops_with plan=wal_commit_plan callee=wal_sync_required unfold_plan=true unfold_callee=true lean_unfold_plan_and_callee
+  wal_sync_group plan=wal_commit_plan callee=fence_on_sync_fail unfold_plan=true unfold_callee=true lean_unfold_plan_and_callee
+  lone_commit plan=occ_member_fate callee=occ_conflict unfold_plan=true unfold_callee=true lean_unfold_plan_and_callee
+  finish_group_off_lock plan=wal_commit_plan callee=may_publish_group unfold_plan=true unfold_callee=true lean_unfold_plan_and_callee
+  validate_occ_batch plan=occ_batch_plan callee=occ_conflict unfold_plan=true unfold_callee=true lean_unfold_plan_and_callee
+  lone_sync_commit plan=wal_commit_plan callee=fence_on_sync_fail unfold_plan=true unfold_callee=true lean_unfold_plan_and_callee
+  sync plan=wal_commit_plan callee=fence_on_sync_fail unfold_plan=true unfold_callee=true lean_unfold_plan_and_callee
+  open_with_env_sourced plan=wal_commit_plan callee=fence_on_sync_fail unfold_plan=true unfold_callee=true lean_unfold_plan_and_callee
+  group_finish plan=wal_commit_plan callee=fence_on_sync_fail unfold_plan=true unfold_callee=true lean_unfold_plan_and_callee
+  vlog_prepare_wal plan=wal_commit_plan callee=fence_on_sync_fail unfold_plan=true unfold_callee=true lean_unfold_plan_and_callee
+  fsync_sst_paths plan=wal_commit_plan callee=fence_on_sync_fail unfold_plan=true unfold_callee=true lean_unfold_plan_and_callee
+  write_checkpoint_meta plan=wal_commit_plan callee=fence_on_sync_fail unfold_plan=true unfold_callee=true lean_unfold_plan_and_callee
+  close plan=wal_commit_plan callee=fence_on_sync_fail unfold_plan=true unfold_callee=true lean_unfold_plan_and_callee
+  rotate_wal_now plan=wal_commit_plan callee=fence_on_sync_fail unfold_plan=true unfold_callee=true lean_unfold_plan_and_callee
+  try_rotate_wal plan=wal_rotate_decision callee=wal_segment_is_empty unfold_plan=true unfold_callee=true lean_unfold_plan_and_callee
+  group_start plan=wal_commit_plan callee=fence_on_sync_fail unfold_plan=true unfold_callee=true lean_unfold_plan_and_callee
+  group_absorb plan=wal_commit_plan callee=fence_on_sync_fail unfold_plan=true unfold_callee=true lean_unfold_plan_and_callee
+  unpaid_compose=0/17
+== concurrency (rank 6: named fn + unfold caller AND callee) ==
+  write-lock client handler=occ_snapshot caller=occ_snap_lock_order callee=occ_snap_uses_published calls=true unfold_caller=true unfold_callee=true lean_unfold_caller_and_callee
+  lost-update handler=validate_occ_batch caller=occ_batch_plan callee=occ_conflict calls=true unfold_caller=true unfold_callee=true lean_unfold_caller_and_callee
+  deadlock 2PL handler=lock caller=wait_for_deadlock callee=wait_for_deadlock calls=true unfold_caller=true unfold_callee=true lean_unfold_caller_and_callee
+  N-way OCC handler=group_validate caller=group_validate callee=occ_conflict calls=true unfold_caller=true unfold_callee=true lean_unfold_caller_and_callee
+  rwlock reader token handler=occ_snapshot caller=rwlock_client_may_read callee=rwlock_client_may_mutate calls=true unfold_caller=true unfold_callee=true lean_unfold_caller_and_callee
+  unpaid_concurrency=0/5
+== scale (rank 10: named clock + unfold clock AND callee) ==
+  best clock handler=scale_forecast caller=best_get_ns callee=point_get_probes calls=true unfold_caller=true unfold_callee=true lean_unfold_caller_and_callee
+  happy clock handler=scale_forecast caller=happy_get_ns callee=point_get_probes calls=true unfold_caller=true unfold_callee=true lean_unfold_caller_and_callee
+  worst clock handler=scale_forecast caller=worst_get_ns callee=probes_worst calls=true unfold_caller=true unfold_callee=true lean_unfold_caller_and_callee
+  unpaid_scale=0/3
+== product (RFC-0191: D1/R1/T1/C1 over rustc fn) ==
+  OPEN P0.1
+  OPEN P0.2
+  OPEN P0.3
+  OPEN P1.1
+  OPEN P1.2
+  OPEN P1.3
+  OPEN P1.4
+  OPEN P2.1
+  OPEN P2.2
+  OPEN P1.5
+  OPEN P2.3
+  tsv=false checker=false
+  unpaid_product P0.1 ratchet missing
+  unpaid_product=11 next=P0.1
+== single_artifact (rank 7: rustc body extract; Verus cartoon ≠ last-wins; all catalog kernels, not only data_fate) ==
+  unpaid_no_extract none
+  skip_already_extracted=0 (Lean def of rustc entry exists — SA wrap is not a slice)
+  skip_verus_same_tokens=4 (macro_rules! last-wins RFC-0171; same types rustc links)
+  cartoon_twin=4 (verus! u64/toy enum/Seq ≠ rustc types — unpaid; delete the stand-in; Aeneas of rustc types; never mint)
+  cartoon_first children crates/montanha-fdb-recipes/src/children_kernel.rs
+    cartoon_file crates/montanha-fdb-recipes/src/children_kernel.rs
+  catalog_only_skip=287 (twin==kernel already; not a slice)
+  leftover_next product remaining RFC-0191 P0.1; references/product.md; ∀ credit (not rfl concrete); layer model→atom→close only up; skip Montanha
+  leftover_next_first RFC-0191 P0.1
+
+== capacity per residual (RFC-0157 P2.2; verified refs) ==
+R-cpu | never | guard=nao | gemeo=nao (never_floor: ferramenta/meio) | campanha=nenhuma | real=nao
+R-rustc | never | guard=nao | gemeo=nao (never_floor: ferramenta/meio) | campanha=nenhuma | real=nao
+R-verus | never | guard=nao | gemeo=sim (corpus verus_check.sh --all 18 runners no checker pinado, RFC-0157 P2.1; checker/Z3 seguem TCB no never_floor) | campanha=nenhuma | real=nao
+R-crc | never | guard=nao | gemeo=sim (crc_match,sst_crc) | campanha=nenhuma | real=nao
+R-deps | never | guard=nao | gemeo=nao (never_floor: ferramenta/meio) | campanha=nenhuma | real=nao
+R-extract | open | guard=nao | gemeo=nao | campanha=nenhuma | real=nao
+R-glue | continuous | guard=nao | gemeo=sim (zero_glue) | campanha=nenhuma | real=nao
+R-group-glue | continuous | guard=sim (planted_chain3_found_by_pct_d3) | gemeo=sim (group_commit,group_fence,group_publish,forall_schedules,fsync_promote,media_durable,lock_interleavings) | campanha=exaustivo N<=3 completo (66 scheds) + disk-fence lower-bound | real=nao
+R-pct | continuous | guard=nao | gemeo=sim (forall_schedules) | campanha=PCT d=3 16384 seeds + d=4 16384 seeds (0157 P2.3) + exaustivo N<=3 (P1.3) | real=nao
+R-fsync-lie | continuous | guard=nao | gemeo=sim (fsync_promote,media_durable) | campanha=nenhuma | real=findings/2026-08-24-tcg-world-smoke/,findings/2026-08-27-upstream-fullfsync/
+R-tcg-guest | continuous | guard=nao | gemeo=sim (tcg_guest) | campanha=nenhuma | real=findings/2026-08-27-tcg-caixote-guest/
+R-uring | continuous | guard=nao | gemeo=nao | campanha=nenhuma | real=nao
+R-hardware | continuous | guard=nao | gemeo=nao | campanha=nenhuma | real=nao
+R-es | continuous | guard=nao | gemeo=sim (liveness_claim) | campanha=nenhuma | real=nao
+R-swarm-real | continuous | guard=nao | gemeo=sim (l28_durability,l28_tcp_apply,l28_tcp_napply,l28_napply_retry) | campanha=TCP REAL K=8 (0156: 3 seeds; 0157: C-campanha + campanhas noturnas) | real=findings/rfc0157-tcp-campaign/,findings/rfc0157-nightly/
+R-unsafe-posix | continuous | guard=sim (posix_unsafe_rc_sites_all_gated) | gemeo=sim (fdatasync_rc) | campanha=nenhuma | real=nao
+R-unsafe-uring | continuous | guard=sim (cqe_leftover_sequence_never_false_ok) | gemeo=sim (cqe_res) | campanha=nenhuma | real=nao
+R-unsafe-capi | continuous | guard=sim (capi_len_boundary_sweep_on_live_tx) | gemeo=sim (c_len) | campanha=nenhuma | real=nao
+R-evacuate | parked | guard=nao | gemeo=nao | campanha=nenhuma | real=nao
+R-vlog-inc | parked | guard=nao | gemeo=nao | campanha=nenhuma | real=nao
+R-vlog-hash | parked | guard=nao | gemeo=nao | campanha=nenhuma | real=nao
+R-remesure | parked | guard=nao | gemeo=nao | campanha=nenhuma | real=nao
+R-blob-scan | parked | guard=nao | gemeo=nao | campanha=nenhuma | real=nao
+R-fd-ceiling | parked | guard=nao | gemeo=nao | campanha=nenhuma | real=nao
+R-pipeline-iff | parked | guard=nao | gemeo=nao | campanha=nenhuma | real=nao
+R-tls | parked | guard=nao | gemeo=nao | campanha=nenhuma | real=nao
+R-direct-rpc | continuous | guard=nao | gemeo=sim (rpc_mode) | campanha=nenhuma | real=findings/2026-08-30-direct-rpc-lab/
+R-joint | continuous | guard=nao | gemeo=sim (joint_election,joint_leave,pending_joint_node,joint_leave_ok,election_grant_from,joint_target,joint_add_target,queued_leave_finish,disk_membership) | campanha=nenhuma | real=nao
+R-fault-grid | continuous | guard=nao | gemeo=nao | campanha=nenhuma | real=nao
+capacity rows: 29
+capacity ERRORS:
+  R-crc: runner missing None
+  R-glue: runner missing None
+  R-es: runner missing None
+  R-swarm-real: runner missing None
+  R-swarm-real: runner missing None
+  R-swarm-real: runner missing None
+  R-swarm-real: runner missing None
+  R-unsafe-posix: runner missing None
+  R-unsafe-uring: runner missing None
+  R-direct-rpc: runner missing None
+  R-joint: runner missing None
+  R-joint: runner missing None
+  R-joint: runner missing None
+  R-joint: runner missing None
+  R-joint: runner missing None
+  R-joint: runner missing None
+  R-joint: runner missing None
+  R-joint: runner missing None
+  R-joint: runner missing None

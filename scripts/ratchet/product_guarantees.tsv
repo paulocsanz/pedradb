@@ -1,0 +1,18 @@
+# RFC-0191 P0.1 — product-guarantee freeze (D1/R1/T1/C1).
+# Columns (whitespace-separated): id  layer  catalog_id  theorem  lean_file  entry
+#   id          D1 | R1 | T1 | C1 — exactly these four, one each.
+#   layer       model | atom | close — only moves UP. Descending a row
+#               so that atom|close count falls below floor_promoted = red.
+#   catalog_id  `catalog:<id>` must resolve in scripts/formal/catalog.json.
+#   theorem     atom/close: must exist as `theorem <name>` in lean_file,
+#               statement carries a forall-binder, file has zero `sorry`.
+#               model rows use `-` (no close credit).
+#   lean_file   path or `-` on model rows.
+#   entry       the rustc-linked kernel fn the row is about.
+# floor_promoted N pins the minimum number of atom|close rows. Freeze
+# day-1: R1=atom (visible_at_deletion_never_live), D1/T1/C1=model → N=1.
+floor_promoted 1
+D1	model	catalog:d1_modelo	-	-	d1_modelo
+R1	atom	catalog:visible_at	visible_at_deletion_never_live	formal/aeneas/lean/Merge.lean	visible_at
+T1	model	catalog:leftover_txn_is_aborted	-	-	leftover_txn_is_aborted
+C1	model	catalog:joint_election	-	-	joint_election_ok
