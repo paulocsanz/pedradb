@@ -183,10 +183,19 @@ contagens movem no mesmo commit; `lock_interleavings_admitted` e
   `c1_both_majorities_elect`; as-is ∀ `c1_as_is_elects_on_old_alone`;
   `Membership.lean`; TSV C1=close, `floor_promoted` 4; sem linha nova em
   `close_proofs.tsv` — par já extraído, `proof_depth.extract` 276 intacto)
-- [ ] **P1.5** Um `if` data-fate vivo do trampolim (`leftover_next`)
-  puxado a kernel nomeado, atom registado, `cap_data_fate` 130→129 no
-  mesmo commit; tipos que o handler passa; Aeneas desse corpo —
-  status: `todo`
+- [x] **P1.5** Um `if` data-fate vivo do trampolim puxado a kernel nomeado,
+  atom registado, `cap_data_fate` 130→129 no mesmo commit — alvo: os `if`s
+  de destino do `repair_si_hist_tip` (F52/F117; o `leftover_next` da
+  fila apontava para o mesmo corpo de decisão). Kernel
+  `si_hist_repair_plan(tip_gen, tip_matches) -> SiHistRepair{Leave,
+  Rewrite}` em `txn_kernel.rs`; trampoline em `store/lib.rs` vira `match`
+  no kernel; par `catalog:si_hist_repair` nasce atom (teorema ∀
+  `si_hist_repair_plan_leave_iff_floor_or_match` em `Txn.lean`: Leave iff
+  piso gen-0 ou tip já bate — `split` sobre o `ite` extraído, 0 sorry) e
+  `should_repair_si_hist` gradua (perde `data_fate`). Recount honesto do
+  freeze: `visible_at` (0085e919) saiu do extract sem baixar o congelado
+  — `floor_extract` 276→275 e residuals `extract` 275 no mesmo commit
+  (promoção de escada, não extração perdida) — status: `done`
 - [ ] **P1.6** `scripts/lean_extracts.sh --required` + `check_product_floor`
   + `check_depth_floor` verdes no commit de cada promoção; nenhum
   `sorry` novo — status: `todo`
@@ -230,7 +239,7 @@ contagens movem no mesmo commit; `lock_interleavings_admitted` e
 | P1.2 | p1 | D1-script `model→close` (∀ Bool da plan fn) | done | `d1_wal_commit_plan` WriteAdmission.lean; TSV D1=close | 2026-09-10 |
 | P1.3 | p1 | T1-leftover `model→atom` (fn deixa de ser constante) | done | `leftover_fate` + `t1_leftover_fate` Txn.lean; TSV T1=atom | 2026-09-10 |
 | P1.4 | p1 | C1-joint `model→close` (∀ contagens) | done | `c1_joint_election` + `maj` Membership.lean; TSV C1=close, promoted 4 | 2026-09-10 |
-| P1.5 | p1 | Um `if` do trampolim, cap 130→129 | todo | — | 2026-09-10 |
+| P1.5 | p1 | Um `if` do trampolim, cap 130→129 | done | `si_hist_repair_plan` + atom `si_hist_repair_plan_leave_iff_floor_or_match` Txn.lean; floor_atom 2; `should_repair_si_hist` gradua; recount extract 275 | 2026-09-10 |
 | P1.6 | p1 | Gates Lean/depth/product verdes em cada promoção | todo | — | 2026-09-10 |
 | P2.1 | p2 | Inv-WAL preservação (um passo) | done | `wal_append_preserves_inv_wal` + corolário `d1_plan_append_preserves_inv_wal` WalState.lean | 2026-09-10 |
 | P2.2 | p2 | Inv-LSM `visible_at` ∘ probe-order (um passo) | done | `inv_lsm_newest_first_never_non_live` + corolário `r1_get_never_returns_non_live` Merge.lean (R1 segue atom) | 2026-09-10 |

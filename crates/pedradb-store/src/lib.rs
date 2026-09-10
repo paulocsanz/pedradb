@@ -1590,13 +1590,15 @@ fn repair_si_hist_tip<E: Env>(db: &mut Db<E>, user_key: &[u8], live: Option<&[u8
         return Ok(());
     }
     let tip_gen = hist.last().map(|(g, _)| *g).unwrap_or(0);
-    if tip_gen == 0 {
-        // Only the gen-0 preimage floor — leave it; nothing committed to unwind.
-        return Ok(());
-    }
     let new_val = live.map(|v| v.to_vec());
-    if hist.last().map(|(_, v)| v.as_ref()) == Some(new_val.as_ref()) {
-        return Ok(());
+    // RFC-0191 P1.5: the tip fate (gen-0 floor stays, matching tip is a
+    // no-op, otherwise rewrite) is the kernel's decision, not inline.
+    match txn_kernel::si_hist_repair_plan(
+        tip_gen,
+        hist.last().map(|(_, v)| v.as_ref()) == Some(new_val.as_ref()),
+    ) {
+        txn_kernel::SiHistRepair::Leave => return Ok(()),
+        txn_kernel::SiHistRepair::Rewrite => {}
     }
     if let Some(last) = hist.last_mut() {
         last.1 = new_val;

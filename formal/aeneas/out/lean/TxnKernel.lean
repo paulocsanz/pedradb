@@ -281,76 +281,180 @@ def should_repair_si_hist_as_is
   (_restored : Bool) (_is_reserved : Bool) : Result Bool := do
   ok false
 
+/-- [pedra_aeneas_txn_kernel::SiHistRepair]
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 130:0-135:1
+    Visibility: public -/
+@[discriminant isize]
+inductive SiHistRepair where
+| Leave : SiHistRepair
+| Rewrite : SiHistRepair
+
+/-- [pedra_aeneas_txn_kernel::{impl core::fmt::Debug for pedra_aeneas_txn_kernel::SiHistRepair}::fmt]:
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 129:9-129:14
+    Visibility: public -/
+def SiHistRepair.Insts.CoreFmtDebug.fmt
+  (self : SiHistRepair) (f : core.fmt.Formatter) :
+  Result ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter)
+  := do
+  match self with
+  | SiHistRepair.Leave => core.fmt.Formatter.write_str f (toStr "Leave")
+  | SiHistRepair.Rewrite => core.fmt.Formatter.write_str f (toStr "Rewrite")
+
+/-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::fmt::Debug for pedra_aeneas_txn_kernel::SiHistRepair}]
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 129:9-129:14 -/
+@[reducible]
+def SiHistRepair.Insts.CoreFmtDebug : core.fmt.Debug SiHistRepair := {
+  fmt := SiHistRepair.Insts.CoreFmtDebug.fmt
+}
+
+/-- [pedra_aeneas_txn_kernel::{impl core::clone::Clone for pedra_aeneas_txn_kernel::SiHistRepair}::clone]:
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 129:16-129:21
+    Visibility: public -/
+def SiHistRepair.Insts.CoreCloneClone.clone
+  (self : SiHistRepair) : Result SiHistRepair := do
+  ok self
+
+/-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::clone::Clone for pedra_aeneas_txn_kernel::SiHistRepair}]
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 129:16-129:21 -/
+@[reducible]
+def SiHistRepair.Insts.CoreCloneClone : core.clone.Clone SiHistRepair := {
+  clone := SiHistRepair.Insts.CoreCloneClone.clone
+}
+
+/-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::marker::Copy for pedra_aeneas_txn_kernel::SiHistRepair}]
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 129:23-129:27 -/
+@[reducible]
+def SiHistRepair.Insts.CoreMarkerCopy : core.marker.Copy SiHistRepair := {
+  cloneInst := SiHistRepair.Insts.CoreCloneClone
+}
+
+/-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_txn_kernel::SiHistRepair}]
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 129:29-129:38 -/
+@[reducible]
+def SiHistRepair.Insts.CoreMarkerStructuralPartialEq :
+  core.marker.StructuralPartialEq SiHistRepair := {
+}
+
+/-- [pedra_aeneas_txn_kernel::{impl core::cmp::PartialEq<pedra_aeneas_txn_kernel::SiHistRepair> for pedra_aeneas_txn_kernel::SiHistRepair}::eq]:
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 129:29-129:38
+    Visibility: public -/
+def SiHistRepair.Insts.CoreCmpPartialEqSiHistRepair.eq
+  (self : SiHistRepair) (other : SiHistRepair) : Result Bool := do
+  let self1 := read_discriminant self
+  let other1 := read_discriminant other
+  ok (self1 = other1)
+
+/-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::cmp::PartialEq<pedra_aeneas_txn_kernel::SiHistRepair> for pedra_aeneas_txn_kernel::SiHistRepair}]
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 129:29-129:38 -/
+@[reducible]
+def SiHistRepair.Insts.CoreCmpPartialEqSiHistRepair : core.cmp.PartialEq
+  SiHistRepair SiHistRepair := {
+  eq := SiHistRepair.Insts.CoreCmpPartialEqSiHistRepair.eq
+}
+
+/-- [pedra_aeneas_txn_kernel::{impl core::cmp::Eq for pedra_aeneas_txn_kernel::SiHistRepair}::assert_fields_are_eq]:
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 129:40-129:42
+    Visibility: public -/
+def SiHistRepair.Insts.CoreCmpEq.assert_fields_are_eq
+  (self : SiHistRepair) : Result Unit := do
+  ok ()
+
+/-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::cmp::Eq for pedra_aeneas_txn_kernel::SiHistRepair}]
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 129:40-129:42 -/
+@[reducible]
+def SiHistRepair.Insts.CoreCmpEq : core.cmp.Eq SiHistRepair := {
+  partialEqInst := SiHistRepair.Insts.CoreCmpPartialEqSiHistRepair
+  assert_fields_are_eq := SiHistRepair.Insts.CoreCmpEq.assert_fields_are_eq
+}
+
+/-- [pedra_aeneas_txn_kernel::si_hist_repair_plan]:
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 138:0-144:1
+    Visibility: public -/
+def si_hist_repair_plan
+  (tip_gen : Std.U64) (tip_matches : Bool) : Result SiHistRepair := do
+  if tip_gen = 0#u64
+  then ok SiHistRepair.Leave
+  else if tip_matches
+       then ok SiHistRepair.Leave
+       else ok SiHistRepair.Rewrite
+
+/-- [pedra_aeneas_txn_kernel::si_hist_repair_plan_as_is]:
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 149:0-151:1
+    Visibility: public -/
+def si_hist_repair_plan_as_is
+  (_tip_gen : Std.U64) (_tip_matches : Bool) : Result SiHistRepair := do
+  ok SiHistRepair.Rewrite
+
 /-- [pedra_aeneas_txn_kernel::leftover_fate]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 129:0-131:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 158:0-160:1
     Visibility: public -/
 def leftover_fate (committed : Bool) : Result Bool := do
   ok (¬ committed)
 
 /-- [pedra_aeneas_txn_kernel::leftover_fate_as_is]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 135:0-137:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 164:0-166:1
     Visibility: public -/
 def leftover_fate_as_is (_committed : Bool) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_txn_kernel::leftover_txn_is_aborted]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 142:0-144:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 171:0-173:1
     Visibility: public -/
 def leftover_txn_is_aborted : Result Bool := do
   leftover_fate false
 
 /-- [pedra_aeneas_txn_kernel::leftover_txn_is_aborted_as_is]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 148:0-150:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 177:0-179:1
     Visibility: public -/
 def leftover_txn_is_aborted_as_is : Result Bool := do
   leftover_fate_as_is false
 
 /-- [pedra_aeneas_txn_kernel::next_txn_id_after]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 154:0-156:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 183:0-185:1
     Visibility: public -/
 def next_txn_id_after (max_seen : Std.U64) : Result Std.U64 := do
   let i ← lift (core.num.U64.saturating_add max_seen 1#u64)
   core.cmp.Ord.max.default core.cmp.OrdU64.partialOrdInst.lt i 1#u64
 
 /-- [pedra_aeneas_txn_kernel::next_txn_id_as_is]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 160:0-162:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 189:0-191:1
     Visibility: public -/
 def next_txn_id_as_is (_max_seen : Std.U64) : Result Std.U64 := do
   ok 1#u64
 
 /-- [pedra_aeneas_txn_kernel::recover_si_generation]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 166:0-168:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 195:0-197:1
     Visibility: public -/
 def recover_si_generation (loaded_max : Std.U64) : Result Std.U64 := do
   ok loaded_max
 
 /-- [pedra_aeneas_txn_kernel::recover_si_generation_as_is]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 172:0-174:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 201:0-203:1
     Visibility: public -/
 def recover_si_generation_as_is (_loaded_max : Std.U64) : Result Std.U64 := do
   ok 0#u64
 
 /-- [pedra_aeneas_txn_kernel::prepare_error_aborts_earlier]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 178:0-180:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 207:0-209:1
     Visibility: public -/
 def prepare_error_aborts_earlier : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_txn_kernel::prepare_error_aborts_earlier_as_is]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 184:0-186:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 213:0-215:1
     Visibility: public -/
 def prepare_error_aborts_earlier_as_is : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_txn_kernel::SiGenReserve]
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 190:0-195:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 219:0-224:1
     Visibility: public -/
 structure SiGenReserve where
   next_current : Std.U64
   reserved : Std.U64
 
 /-- [pedra_aeneas_txn_kernel::{impl core::fmt::Debug for pedra_aeneas_txn_kernel::SiGenReserve}::fmt]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 189:9-189:14
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 218:9-218:14
     Visibility: public -/
 def SiGenReserve.Insts.CoreFmtDebug.fmt
   (self : SiGenReserve) (f : core.fmt.Formatter) :
@@ -362,42 +466,42 @@ def SiGenReserve.Insts.CoreFmtDebug.fmt
     "next_current") dyn (toStr "reserved") dyn1
 
 /-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::fmt::Debug for pedra_aeneas_txn_kernel::SiGenReserve}]
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 189:9-189:14 -/
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 218:9-218:14 -/
 @[reducible]
 def SiGenReserve.Insts.CoreFmtDebug : core.fmt.Debug SiGenReserve := {
   fmt := SiGenReserve.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_txn_kernel::{impl core::clone::Clone for pedra_aeneas_txn_kernel::SiGenReserve}::clone]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 189:16-189:21
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 218:16-218:21
     Visibility: public -/
 def SiGenReserve.Insts.CoreCloneClone.clone
   (self : SiGenReserve) : Result SiGenReserve := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::clone::Clone for pedra_aeneas_txn_kernel::SiGenReserve}]
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 189:16-189:21 -/
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 218:16-218:21 -/
 @[reducible]
 def SiGenReserve.Insts.CoreCloneClone : core.clone.Clone SiGenReserve := {
   clone := SiGenReserve.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::marker::Copy for pedra_aeneas_txn_kernel::SiGenReserve}]
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 189:23-189:27 -/
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 218:23-218:27 -/
 @[reducible]
 def SiGenReserve.Insts.CoreMarkerCopy : core.marker.Copy SiGenReserve := {
   cloneInst := SiGenReserve.Insts.CoreCloneClone
 }
 
 /-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_txn_kernel::SiGenReserve}]
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 189:29-189:38 -/
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 218:29-218:38 -/
 @[reducible]
 def SiGenReserve.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq SiGenReserve := {
 }
 
 /-- [pedra_aeneas_txn_kernel::{impl core::cmp::PartialEq<pedra_aeneas_txn_kernel::SiGenReserve> for pedra_aeneas_txn_kernel::SiGenReserve}::eq]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 189:29-189:38
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 218:29-218:38
     Visibility: public -/
 def SiGenReserve.Insts.CoreCmpPartialEqSiGenReserve.eq
   (self : SiGenReserve) (other : SiGenReserve) : Result Bool := do
@@ -406,7 +510,7 @@ def SiGenReserve.Insts.CoreCmpPartialEqSiGenReserve.eq
   else ok false
 
 /-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::cmp::PartialEq<pedra_aeneas_txn_kernel::SiGenReserve> for pedra_aeneas_txn_kernel::SiGenReserve}]
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 189:29-189:38 -/
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 218:29-218:38 -/
 @[reducible]
 def SiGenReserve.Insts.CoreCmpPartialEqSiGenReserve : core.cmp.PartialEq
   SiGenReserve SiGenReserve := {
@@ -414,14 +518,14 @@ def SiGenReserve.Insts.CoreCmpPartialEqSiGenReserve : core.cmp.PartialEq
 }
 
 /-- [pedra_aeneas_txn_kernel::{impl core::cmp::Eq for pedra_aeneas_txn_kernel::SiGenReserve}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 189:40-189:42
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 218:40-218:42
     Visibility: public -/
 def SiGenReserve.Insts.CoreCmpEq.assert_fields_are_eq
   (self : SiGenReserve) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_txn_kernel::{impl core::cmp::Eq for pedra_aeneas_txn_kernel::SiGenReserve}]
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 189:40-189:42 -/
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 218:40-218:42 -/
 @[reducible]
 def SiGenReserve.Insts.CoreCmpEq : core.cmp.Eq SiGenReserve := {
   partialEqInst := SiGenReserve.Insts.CoreCmpPartialEqSiGenReserve
@@ -429,21 +533,21 @@ def SiGenReserve.Insts.CoreCmpEq : core.cmp.Eq SiGenReserve := {
 }
 
 /-- [pedra_aeneas_txn_kernel::reserve_si_gen]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 199:0-205:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 228:0-234:1
     Visibility: public -/
 def reserve_si_gen (current : Std.U64) : Result SiGenReserve := do
   let n ← lift (core.num.U64.saturating_add current 1#u64)
   ok { next_current := n, reserved := n }
 
 /-- [pedra_aeneas_txn_kernel::reserve_si_gen_as_is]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 209:0-214:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 238:0-243:1
     Visibility: public -/
 def reserve_si_gen_as_is (current : Std.U64) : Result SiGenReserve := do
   let i ← lift (core.num.U64.saturating_add current 1#u64)
   ok { next_current := current, reserved := i }
 
 /-- [pedra_aeneas_txn_kernel::unreserve_si_gen]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 218:0-224:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 247:0-253:1
     Visibility: public -/
 def unreserve_si_gen
   (current : Std.U64) (stamped : Std.U64) : Result Std.U64 := do
@@ -455,7 +559,7 @@ def unreserve_si_gen
   else ok current
 
 /-- [pedra_aeneas_txn_kernel::unreserve_si_gen_as_is]:
-    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 229:0-231:1
+    Source: '../../../crates/pedradb-store/src/txn_kernel.rs', lines 258:0-260:1
     Visibility: public -/
 def unreserve_si_gen_as_is
   (_current : Std.U64) (stamped : Std.U64) : Result Std.U64 := do

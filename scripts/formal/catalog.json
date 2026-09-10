@@ -1211,7 +1211,6 @@
         "crates/pedradb-store/src/txn_kernel.rs"
       ],
       "entry": "should_repair_si_hist",
-      "data_fate": true,
       "live_callers": [
         {
           "file": "crates/pedradb-store/src/lib.rs",
@@ -1222,6 +1221,36 @@
       "dst_plant": {
         "file": "crates/pedradb-store/src/txn_kernel.rs",
         "test": "repair_hist_only_when_restored_user_key"
+      }
+    },
+    {
+      "id": "si_hist_repair",
+      "finding": "F52 / F117",
+      "twin_kind": "atom",
+      "atom": "si_hist_repair_plan",
+      "atom_reason": {
+        "date": "2026-09-10",
+        "why": "RFC-0191 P1.5: the SI-hist repair fate is decided by the kernel — leave iff gen-0 preimage floor or already-matching tip, proven forall over (tip_gen, tip_matches) as si_hist_repair_plan_leave_iff_floor_or_match in Txn.lean; the store trampoline repair_si_hist_tip matches the kernel decision"
+      },
+      "single_artifact": true,
+      "kernel": "crates/pedradb-store/src/txn_kernel.rs",
+      "twin": "crates/pedradb-store/src/txn_kernel.rs",
+      "aeneas": "scripts/aeneas_txn.sh",
+      "callers": [
+        "crates/pedradb-store/src/lib.rs"
+      ],
+      "entry": "si_hist_repair_plan",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "repair_si_hist_tip"
+        }
+      ],
+      "as_is": "si_hist_repair_plan_as_is",
+      "dst_plant": {
+        "file": "crates/pedradb-store/src/txn_kernel.rs",
+        "test": "si_hist_repair_plan_on_live_gen0_floor_leaves"
       }
     },
     {

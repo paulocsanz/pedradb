@@ -38,3 +38,29 @@ theorem t1_leftover_fate :
   intro committed
   unfold leftover_fate
   cases committed <;> rfl
+
+/-- RFC-0191 P1.5 trampoline atom (F52/F117): the SI hist repair fate is
+pinned by (tip_gen, tip_matches) — the gen-0 preimage floor never
+rewrites and an already-matching tip never churns; every other tip
+rewrites. The store trampoline (`repair_si_hist_tip`) matches this. -/
+theorem si_hist_repair_plan_leave_iff_floor_or_match :
+    ∀ (tip_gen : U64) (tip_matches : Bool),
+      (si_hist_repair_plan tip_gen tip_matches = ok SiHistRepair.Leave)
+        ↔ (tip_gen = 0#u64 ∨ tip_matches = true) := by
+  intro tip_gen tip_matches
+  unfold si_hist_repair_plan
+  split <;> rename_i c
+  · exact ⟨fun _ => Or.inl c, fun _ => rfl⟩
+  · split <;> rename_i c2
+    · exact ⟨fun _ => Or.inr c2, fun _ => rfl⟩
+    · refine ⟨fun h => ?_, fun h => ?_⟩
+      · exact absurd h (by simp)
+      · rcases h with h0 | hm
+        · exact absurd h0 c
+        · exact absurd hm c2
+
+/-- AS-IS dente: the repair stomps the gen-0 preimage floor. -/
+theorem si_hist_repair_plan_as_is_dente :
+    si_hist_repair_plan_as_is 0#u64 false = ok SiHistRepair.Rewrite := by
+  unfold si_hist_repair_plan_as_is
+  rfl

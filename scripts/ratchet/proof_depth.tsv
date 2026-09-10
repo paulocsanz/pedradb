@@ -11,8 +11,12 @@
 # floor_close/floor_atom count REGISTERED proofs. residuals.json
 # proof_depth counts registered proofs + unregistered close/atom twins
 # without extraction (pedra_formal.py rule) and must EQUAL that live count.
-floor_extract 276
+# RFC-0188 P1.6 registered visible_at atom (0085e919) moving one pair from
+# extract to atom; the extract freeze went stale there (276 frozen vs 275
+# live) — P1.5 recounts it honestly and moves floor_extract to 275 in the
+# SAME commit (a ladder promotion, not a lost extraction).
+floor_extract 275
 floor_close 1
-floor_atom 1
-cap_data_fate 130
+floor_atom 2
+cap_data_fate 129
 handler_loc 111927

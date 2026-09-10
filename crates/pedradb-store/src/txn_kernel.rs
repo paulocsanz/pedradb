@@ -121,6 +121,35 @@ pub fn should_repair_si_hist_as_is(_restored: bool, _is_reserved: bool) -> bool 
     false
 }
 
+/// RFC-0191 P1.5 (F52/F117): fate of one SI hist tip under revert repair.
+/// The gen-0 preimage floor is left untouched (nothing committed to
+/// unwind) and a tip already showing the restored value is a no-op;
+/// every other tip is rewritten. `repair_si_hist_tip` matches this —
+/// the plan the store trampoline used to decide inline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SiHistRepair {
+    /// Keep the durable hist tip as-is.
+    Leave,
+    /// Rewrite the tip to the restored value.
+    Rewrite,
+}
+
+#[must_use]
+pub fn si_hist_repair_plan(tip_gen: u64, tip_matches: bool) -> SiHistRepair {
+    if tip_gen == 0 || tip_matches {
+        SiHistRepair::Leave
+    } else {
+        SiHistRepair::Rewrite
+    }
+}
+
+/// AS-IS P1.5: repair stomps every tip (rewrites the gen-0 preimage
+/// floor and churns already-matching tips).
+#[must_use]
+pub fn si_hist_repair_plan_as_is(_tip_gen: u64, _tip_matches: bool) -> SiHistRepair {
+    SiHistRepair::Rewrite
+}
+
 /// RFC-0191 P1.3 T1: leftover recover fate. `committed` is the on-disk
 /// commit bit the handler classified. Uncommitted leftover aborts;
 /// committed leftover is left alone. Not a constant — the Bool space
@@ -328,6 +357,18 @@ mod tests {
         assert!(!should_repair_si_hist(true, true));
         assert!(!should_repair_si_hist(false, false));
         assert!(!should_repair_si_hist_as_is(true, false));
+    }
+
+    #[test]
+    fn si_hist_repair_plan_on_live_gen0_floor_leaves() {
+        // Gen-0 preimage floor is never rewritten.
+        assert_eq!(si_hist_repair_plan(0, false), SiHistRepair::Leave);
+        // A tip already showing the restored value is a no-op.
+        assert_eq!(si_hist_repair_plan(7, true), SiHistRepair::Leave);
+        // Any other tip rewrites to the restored value.
+        assert_eq!(si_hist_repair_plan(7, false), SiHistRepair::Rewrite);
+        // AS-IS dente: stomps the gen-0 floor.
+        assert_eq!(si_hist_repair_plan_as_is(0, false), SiHistRepair::Rewrite);
     }
 
     #[test]
