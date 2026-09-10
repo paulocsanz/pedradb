@@ -4237,7 +4237,7 @@
     {
       "id": "sched_plant_joint",
       "finding": "RFC-0068",
-      "twin_kind": "close",
+      "twin_kind": "atom",
       "single_artifact": true,
       "kernel": "crates/pedradb-store/src/membership_kernel.rs",
       "twin": "crates/pedradb-store/src/membership_kernel.rs",
@@ -4246,7 +4246,6 @@
         "crates/pedradb-world/src/lib.rs"
       ],
       "entry": "plant_joint_schedule_ok",
-      "data_fate": true,
       "handlers": [
         "run"
       ],
@@ -4260,7 +4259,13 @@
           "file": "crates/pedradb-world/src/lib.rs",
           "handler": "run"
         }
-      ]
+      ],
+      "atom": "plant_joint_schedule_ok",
+      "atom_reason": {
+        "date": "2026-09-10",
+        "why": "RFC-0191 P2.3 cadence (fourteenth if): the planted-joint schedule disposition — a planted committed-joint schedule is ok exactly when the opt-in world emits it and the default world still omits it (the plant is visible only to the opted-in reader, RFC-0068) — proven forall over (opt_in_emits, default_omits) as plant_joint_schedule_ok_iff_opt_in_emits_and_default_omits in StoreMembership.lean; the world trampoline (run) matches the kernel decision"
+      },
+      "three_teeth": true
     },
     {
       "id": "world_trajectory",

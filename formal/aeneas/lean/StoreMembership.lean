@@ -32,3 +32,22 @@ theorem elect_claim_banner_as_is_dente :
     elect_claim_banner_as_is false false false = ok (toStr "live") := by
   unfold elect_claim_banner_as_is
   simp
+
+/-- Catalog entry: a planted committed-joint schedule is ok exactly
+    when the opt-in world emits it and the default world still omits it
+    (RFC-0068 — the plant is visible only to the opted-in reader). -/
+theorem plant_joint_schedule_ok_iff_opt_in_emits_and_default_omits :
+    ∀ (opt_in_emits : Bool) (default_omits : Bool),
+      (plant_joint_schedule_ok opt_in_emits default_omits = ok true)
+        ↔ (opt_in_emits = true ∧ default_omits = true) := by
+  intro opt_in_emits default_omits
+  unfold plant_joint_schedule_ok
+  constructor
+  · intro h
+    split at h
+    · next c1 =>
+      simp at h
+      exact ⟨c1, h⟩
+    · next c1 => exact absurd h (by simp)
+  · rintro ⟨h1, h2⟩
+    rw [if_pos h1, h2]

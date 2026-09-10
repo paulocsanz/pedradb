@@ -27,3 +27,4 @@ atom	catalog:election_grant_from	election_grant_from_counts_ok_iff_ids_or_pendin
 atom	catalog:joint_election	joint_election_ok_elects_iff_old_and_new_majority	formal/aeneas/lean/Membership.lean	joint_election_ok
 atom	catalog:lease	lease_live_iff_zero_or_now_below	formal/aeneas/lean/Lease.lean	lease_live
 atom	catalog:ae_ack	ae_ack_success_ok_iff_clean_or_dirty_persisted	formal/aeneas/lean/Ae.lean	ae_ack_success
+atom	catalog:sched_plant_joint	plant_joint_schedule_ok_iff_opt_in_emits_and_default_omits	formal/aeneas/lean/StoreMembership.lean	plant_joint_schedule_ok
