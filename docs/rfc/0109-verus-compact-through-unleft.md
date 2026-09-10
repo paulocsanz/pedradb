@@ -42,7 +42,7 @@
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | twin + catalog compact_unleft | done | compact_kernel.rs + catalog.json | 2026-08-28 |
-| P0.2 | p0 | AS-IS compact past un-left joint | done | unleft_joint_caps_through | 2026-08-28 |
+| P0.2 | p0 | AS-IS compact past un-left joint | done | unleft_joint_caps_through; 2026-09-09 fire 797: dentes F27 restantes do kernel pagos — `compact_ready_as_is` (ready em applied 0: passa um compact que não derruba nada e só gera churn de snapshot; planta `as_is_ready_at_zero_compacts_nothing`) e `compact_index_floor_as_is` (floor no próprio índice compactado — o leader re-pede o slot que o follower descartou; planta `as_is_floor_re_requests_compacted_index`); re-extract `aeneas_store_compact.sh` stamp `39542ce4`, `StoreCompactKernel.lean` 0 sorry; formal 103→99 | 2026-09-09 |
 | P1.1 | p1 | joint_leave_ok twin | done | RFC-0110 | 2026-08-28 |
 | P1.2 | p1 | cluster_real leave | todo | — | 2026-08-28 |
 | P2.1 | p2 | not ∀ traces | todo | — | 2026-08-28 |

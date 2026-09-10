@@ -35,6 +35,13 @@ pub fn compact_ready(min_applied: u64) -> bool {
     min_applied > 0
 }
 
+/// AS-IS F27: ready even at applied 0 — the pass then drops nothing (no
+/// durable prefix exists) while still persisting snapshot churn.
+#[must_use]
+pub fn compact_ready_as_is(_min_applied: u64) -> bool {
+    true
+}
+
 /// Whether this peer may drop `index <= through`.
 ///
 /// Refuses when `through` is not in the log or already covered by the snapshot.
@@ -59,6 +66,13 @@ pub fn may_compact_through_as_is(snapshot_index: u64, through: u64, _term_at: u6
 #[must_use]
 pub fn compact_index_floor(through: u64) -> u64 {
     through.saturating_add(1)
+}
+
+/// AS-IS F27: floor at `through` itself — the leader re-requests the very
+/// index the peer just compacted away (AE catch-up cannot make progress).
+#[must_use]
+pub fn compact_index_floor_as_is(through: u64) -> u64 {
+    through
 }
 
 /// Cap compact so an applied still-active joint stays until leave.
@@ -101,6 +115,20 @@ mod tests {
     }
 
     #[test]
+    fn as_is_ready_at_zero_compacts_nothing() {
+        assert!(
+            !compact_ready(0),
+            "F27: nothing durable to drop at applied 0"
+        );
+        assert!(compact_ready_as_is(0), "AS-IS dente: ready at zero");
+        // A pass at zero drops nothing either way — `through=0` is refused
+        // by may_compact_through; the only AS-IS effect is snapshot churn.
+        assert!(!may_compact_through(0, 0, 1));
+        assert!(!may_compact_through(0, 0, 0));
+        assert_ne!(compact_ready(0), compact_ready_as_is(0));
+    }
+
+    #[test]
     fn missing_term_blocks_compact() {
         assert!(!may_compact_through(0, 5, 0));
         assert!(may_compact_through(0, 5, 2));
@@ -112,6 +140,21 @@ mod tests {
     fn floor_after_compact() {
         assert_eq!(compact_index_floor(7), 8);
         assert_eq!(compact_index_floor(u64::MAX), u64::MAX);
+    }
+
+    #[test]
+    fn as_is_floor_re_requests_compacted_index() {
+        assert_eq!(compact_index_floor(7), 8, "F27: ask for the survivor");
+        assert_eq!(
+            compact_index_floor_as_is(7),
+            7,
+            "AS-IS dente: floor at the compacted index"
+        );
+        // After compact_through(7) the peer's RAM log starts at 8 (F27):
+        // an AE built from the AS-IS floor asks for prev_log_index 7 —
+        // the entry is gone; only the snapshot term can answer.
+        assert!(may_compact_through(0, 7, 2));
+        assert_ne!(compact_index_floor(7), compact_index_floor_as_is(7));
     }
 
     #[test]

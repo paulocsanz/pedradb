@@ -32,8 +32,14 @@ def peer_counts_for_compact_as_is (is_participating : Bool) : Result Bool := do
 def compact_ready (min_applied : Std.U64) : Result Bool := do
   ok (min_applied > 0#u64)
 
+/-- [pedra_aeneas_store_compact_kernel::compact_ready_as_is]:
+    Source: '../../../crates/pedradb-store/src/compact_kernel.rs', lines 41:0-43:1
+    Visibility: public -/
+def compact_ready_as_is (_min_applied : Std.U64) : Result Bool := do
+  ok true
+
 /-- [pedra_aeneas_store_compact_kernel::may_compact_through]:
-    Source: '../../../crates/pedradb-store/src/compact_kernel.rs', lines 42:0-50:1
+    Source: '../../../crates/pedradb-store/src/compact_kernel.rs', lines 49:0-57:1
     Visibility: public -/
 def may_compact_through
   (snapshot_index : Std.U64) (through : Std.U64) (term_at_through : Std.U64) :
@@ -49,7 +55,7 @@ def may_compact_through
          else ok true
 
 /-- [pedra_aeneas_store_compact_kernel::may_compact_through_as_is]:
-    Source: '../../../crates/pedradb-store/src/compact_kernel.rs', lines 54:0-56:1
+    Source: '../../../crates/pedradb-store/src/compact_kernel.rs', lines 61:0-63:1
     Visibility: public -/
 def may_compact_through_as_is
   (snapshot_index : Std.U64) (through : Std.U64) (_term_at : Std.U64) :
@@ -60,13 +66,19 @@ def may_compact_through_as_is
   else ok false
 
 /-- [pedra_aeneas_store_compact_kernel::compact_index_floor]:
-    Source: '../../../crates/pedradb-store/src/compact_kernel.rs', lines 60:0-62:1
+    Source: '../../../crates/pedradb-store/src/compact_kernel.rs', lines 67:0-69:1
     Visibility: public -/
 def compact_index_floor (through : Std.U64) : Result Std.U64 := do
   ok (core.num.U64.saturating_add through 1#u64)
 
+/-- [pedra_aeneas_store_compact_kernel::compact_index_floor_as_is]:
+    Source: '../../../crates/pedradb-store/src/compact_kernel.rs', lines 74:0-76:1
+    Visibility: public -/
+def compact_index_floor_as_is (through : Std.U64) : Result Std.U64 := do
+  ok through
+
 /-- [pedra_aeneas_store_compact_kernel::compact_through_unleft]:
-    Source: '../../../crates/pedradb-store/src/compact_kernel.rs', lines 69:0-74:1
+    Source: '../../../crates/pedradb-store/src/compact_kernel.rs', lines 83:0-88:1
     Visibility: public -/
 def compact_through_unleft
   (through : Std.U64) (unleft_joint : Option Std.U64) : Result Std.U64 := do
@@ -81,7 +93,7 @@ def compact_through_unleft
     else ok through
 
 /-- [pedra_aeneas_store_compact_kernel::compact_through_unleft_as_is]:
-    Source: '../../../crates/pedradb-store/src/compact_kernel.rs', lines 78:0-80:1
+    Source: '../../../crates/pedradb-store/src/compact_kernel.rs', lines 92:0-94:1
     Visibility: public -/
 def compact_through_unleft_as_is
   (through : Std.U64) (_unleft_joint : Option Std.U64) : Result Std.U64 := do
