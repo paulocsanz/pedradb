@@ -42,3 +42,25 @@ theorem as_is_rewrites_committed :
   · exact ae_refuse_conflict_at_commit
   · unfold ae_entry_action_as_is_rewrite_committed
     simp
+
+/-- Catalog entry: an AppendEntries ack succeeds exactly when the log
+    is clean, or it is dirty and the persist succeeded (F48 — a dirty
+    log whose persist failed never acks ok). -/
+theorem ae_ack_success_ok_iff_clean_or_dirty_persisted :
+    ∀ (log_dirty : Bool) (persist_ok : Bool),
+      (ae_ack_success log_dirty persist_ok = ok true)
+        ↔ (log_dirty = false ∨ persist_ok = true) := by
+  intro log_dirty persist_ok
+  unfold ae_ack_success
+  constructor
+  · intro h
+    split at h
+    · next c1 =>
+      simp at h
+      exact Or.inr h
+    · next c1 => exact Or.inl (by simp at c1; exact c1)
+  · rintro (h1 | hc)
+    · rw [if_neg (by simp [h1])]
+    · split
+      · next _ => rw [hc]
+      · rfl
