@@ -142,3 +142,23 @@ theorem txn_commit_action_reverts_iff_abort :
     · next c1 => exact absurd h (by simp)
   · intro hd
     rw [if_pos hd]
+
+/-- Catalog entry: revert may drop the txn status key only when every
+    pair is gone AND the status was not abort (F47: the abort fence
+    survives a later TxnCommit replay). -/
+theorem revert_clears_status_clears_iff_pairs_gone_and_live :
+    ∀ (status_is_abort : Bool) (pairs_empty : Bool),
+      (revert_clears_status status_is_abort pairs_empty = ok true)
+        ↔ (pairs_empty = true ∧ status_is_abort = false) := by
+  intro status_is_abort pairs_empty
+  unfold revert_clears_status
+  constructor
+  · intro h
+    split at h
+    · next c1 =>
+      simp at h
+      exact ⟨c1, h⟩
+    · next c1 => exact absurd h (by simp)
+  · rintro ⟨hp, ha⟩
+    rw [if_pos hp, ha]
+    rfl

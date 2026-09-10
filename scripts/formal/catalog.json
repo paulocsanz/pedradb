@@ -1160,17 +1160,22 @@
     {
       "id": "revert_clears_status",
       "finding": "F47",
-      "twin_kind": "close",
+      "twin_kind": "atom",
+      "atom": "revert_clears_status",
+      "atom_reason": {
+        "date": "2026-09-10",
+        "why": "RFC-0191 P2.3 cadence (seventh if): the txn-status-key disposition after revert — the fence key may be dropped only when every pair is gone AND the status was not abort (an abort fence survives a later TxnCommit replay) — proven forall over (status_is_abort, pairs_empty) as revert_clears_status_clears_iff_pairs_gone_and_live in Txn.lean; the store trampoline apply_txn_revert matches the kernel decision"
+      },
       "single_artifact": true,
       "kernel": "crates/pedradb-store/src/txn_kernel.rs",
       "twin": "crates/pedradb-store/src/txn_kernel.rs",
-      "aeneas": "scripts/aeneas_store_txn.sh",
+      "aeneas": "scripts/aeneas_txn.sh",
       "callers": [
         "crates/pedradb-store/src/lib.rs",
         "crates/pedradb-store/src/txn_kernel.rs"
       ],
       "entry": "revert_clears_status",
-      "data_fate": true,
+      "three_teeth": true,
       "live_callers": [
         {
           "file": "crates/pedradb-store/src/lib.rs",
