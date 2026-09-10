@@ -170,7 +170,7 @@
 | P2.2.6 | p2 | three-teeth on changelog SST rebuild | done | `changelog_needs_sst_rebuild_on_live_queued_is_not_ok` | 2026-08-29 |
 | P2.2.7 | p2 | three-teeth on range_covers interior | done | `range_tombstone_covers_on_live_queued_is_not_ok` | 2026-08-29 |
 | P2.2.8 | p2 | three-teeth on prefix exclusive end | done | `prefix_exclusive_end_on_live_queued_is_not_ok` | 2026-08-29 |
-| P2.2.9 | p2 | three-teeth on stream_cursor hole ack | done | `ack_in_order_on_live_stream_is_not_ok` | 2026-08-29 |
+| P2.2.9 | p2 | three-teeth on stream_cursor hole ack | done | `ack_in_order_on_live_stream_is_not_ok`; 2026-09-09 fire 798: dente `next_seq` pago — `next_seq_as_is` (off-by-one: cursor lido como próximo-a-ler — `peek` re-entrega a mensagem já acked ou nada no cursor 0 e o consumidor empaca) com gêmeo verus + `lemma_as_is_stuck`; planta viva `next_seq_on_live_stream_is_not_ok` (Stream real: publish 1/2 → peek seq 1 → ack → peek seq 2 → ack, cursor 2); re-extract `aeneas_cursor.sh` stamp `4a570eff`, `CursorKernel.lean` 0 sorry; verus_stream_cursor 0 err; formal 99→97 | 2026-08-29 |
 | P2.2.10 | p2 | three-teeth on bearer BEARER scheme | done | `bearer_token_from_value_on_live_http_is_not_ok` | 2026-08-29 |
 | P2.2.11 | p2 | three-teeth on content_length keep body | done | `keep_body_without_cl_on_live_http_is_not_ok` | 2026-08-29 |
 | P2.2.12 | p2 | three-teeth on fail_closed writes 400 | done | `parse_error_writes_status_on_live_http_is_not_ok` | 2026-08-29 |

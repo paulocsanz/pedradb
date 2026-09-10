@@ -15,13 +15,19 @@ set_option maxRecDepth 2048
 namespace pedra_aeneas_cursor_kernel
 
 /-- [pedra_aeneas_cursor_kernel::next_seq]:
-    Source: '../../../crates/pedradb-stream/src/cursor_kernel.rs', lines 46:0-48:1
+    Source: '../../../crates/pedradb-stream/src/cursor_kernel.rs', lines 52:0-54:1
     Visibility: public -/
 def next_seq (last_acked : Std.U64) : Result Std.U64 := do
   ok (core.num.U64.saturating_add last_acked 1#u64)
 
+/-- [pedra_aeneas_cursor_kernel::next_seq_as_is]:
+    Source: '../../../crates/pedradb-stream/src/cursor_kernel.rs', lines 61:0-63:1
+    Visibility: public -/
+def next_seq_as_is (last_acked : Std.U64) : Result Std.U64 := do
+  ok last_acked
+
 /-- [pedra_aeneas_cursor_kernel::ack_in_order]:
-    Source: '../../../crates/pedradb-stream/src/cursor_kernel.rs', lines 53:0-55:1
+    Source: '../../../crates/pedradb-stream/src/cursor_kernel.rs', lines 68:0-70:1
     Visibility: public -/
 def ack_in_order (last_acked : Std.U64) (seq : Std.U64) : Result Bool := do
   let i ← next_seq last_acked
@@ -30,20 +36,20 @@ def ack_in_order (last_acked : Std.U64) (seq : Std.U64) : Result Bool := do
   else ok false
 
 /-- [pedra_aeneas_cursor_kernel::ack_in_order_as_is]:
-    Source: '../../../crates/pedradb-stream/src/cursor_kernel.rs', lines 60:0-62:1
+    Source: '../../../crates/pedradb-stream/src/cursor_kernel.rs', lines 75:0-77:1
     Visibility: public -/
 def ack_in_order_as_is
   (last_acked : Std.U64) (seq : Std.U64) : Result Bool := do
   ok (seq > last_acked)
 
 /-- [pedra_aeneas_cursor_kernel::peek_pins_cursor]:
-    Source: '../../../crates/pedradb-stream/src/cursor_kernel.rs', lines 67:0-69:1
+    Source: '../../../crates/pedradb-stream/src/cursor_kernel.rs', lines 82:0-84:1
     Visibility: public -/
 def peek_pins_cursor : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_cursor_kernel::peek_pins_cursor_as_is]:
-    Source: '../../../crates/pedradb-stream/src/cursor_kernel.rs', lines 74:0-76:1
+    Source: '../../../crates/pedradb-stream/src/cursor_kernel.rs', lines 89:0-91:1
     Visibility: public -/
 def peek_pins_cursor_as_is : Result Bool := do
   ok true

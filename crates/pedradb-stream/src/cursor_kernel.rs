@@ -16,6 +16,12 @@ macro_rules! next_seq_body {
     };
 }
 
+macro_rules! next_seq_as_is_body {
+    ($last_acked:expr) => {
+        $last_acked
+    };
+}
+
 macro_rules! ack_in_order_body {
     ($last_acked:expr, $seq:expr) => {
         $seq == next_seq($last_acked) && $seq > $last_acked
@@ -45,6 +51,15 @@ macro_rules! peek_pins_cursor_as_is_body {
 #[must_use]
 pub fn next_seq(last_acked: u64) -> u64 {
     next_seq_body!(last_acked)
+}
+
+/// AS-IS F54: the cursor read as *next-to-read* (off-by-one) — `peek`
+/// re-hands the already-acked message (or nothing at cursor 0) and the
+/// consumer never advances. Used only to prove the fixed rule has teeth.
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn next_seq_as_is(last_acked: u64) -> u64 {
+    next_seq_as_is_body!(last_acked)
 }
 
 /// F54: ack only the immediate next seq (no holes, no skip).
@@ -107,6 +122,27 @@ pub fn ack_in_order(last_acked: u64, seq: u64) -> (d: bool)
 {
     let n = next_seq(last_acked);
     seq == n && seq > last_acked
+}
+
+pub open spec fn next_seq_as_is_spec(last_acked: u64) -> u64 {
+    last_acked
+}
+
+pub fn next_seq_as_is(last_acked: u64) -> (n: u64)
+    ensures
+        n == last_acked,
+        n == next_seq_as_is_spec(last_acked),
+{
+    next_seq_as_is_body!(last_acked)
+}
+
+proof fn lemma_as_is_stuck(last: u64)
+    requires
+        last < u64::MAX,
+    ensures
+        next_seq_as_is_spec(last) == last,
+        next_seq_as_is_spec(last) != sat_add1_spec(last),
+{
 }
 
 pub open spec fn ack_in_order_as_is_spec(last_acked: u64, seq: u64) -> bool {
@@ -174,6 +210,52 @@ mod tests {
     fn peek_does_not_pin() {
         assert!(!peek_pins_cursor());
         assert!(peek_pins_cursor_as_is());
+    }
+
+    /// F54 three-teeth plant: the live stream hands the *next* un-acked
+    /// seq (`next_seq`), never the cursor itself — the AS-IS off-by-one
+    /// re-hands the acked message (or nothing at cursor 0) and stalls.
+    #[test]
+    fn next_seq_on_live_stream_is_not_ok() {
+        use crate::Stream;
+        assert_eq!(next_seq(0), 1);
+        assert_eq!(next_seq(6), 7);
+        assert_eq!(next_seq(u64::MAX), u64::MAX, "saturating at the top");
+        assert_eq!(
+            next_seq_as_is(0),
+            0,
+            "AS-IS dente: cursor read as next-to-read"
+        );
+        assert_eq!(next_seq_as_is(6), 6);
+
+        let dir = std::env::temp_dir().join(format!(
+            "pedra-cursor-next-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        {
+            let mut s = Stream::open(&dir, "events").unwrap();
+            assert_eq!(s.publish(b"m1").unwrap(), 1);
+            assert_eq!(s.publish(b"m2").unwrap(), 2);
+            // Fresh consumer (cursor 0): the live stream hands seq 1; the
+            // AS-IS tooth would `get(0)` and hand NOTHING forever.
+            let m = s.peek("c1").unwrap().expect("first message");
+            assert_eq!((m.seq, m.data.as_slice()), (1, b"m1".as_slice()));
+            s.ack("c1", 1).unwrap();
+            // After acking 1 the live stream hands seq 2; the AS-IS tooth
+            // would re-hand the ALREADY-ACKED seq 1 (ack refuses it).
+            let m = s.peek("c1").unwrap().expect("second message");
+            assert_eq!((m.seq, m.data.as_slice()), (2, b"m2".as_slice()));
+            s.ack("c1", 2).unwrap();
+            assert_eq!(s.consumer_seq("c1"), 2);
+            assert!(s.peek("c1").unwrap().is_none());
+            s.close().unwrap();
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
