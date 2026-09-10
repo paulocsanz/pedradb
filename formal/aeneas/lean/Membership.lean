@@ -194,3 +194,17 @@ theorem election_grant_from_counts_ok_iff_ids_or_pending :
     · split
       · next _ => rfl
       · next _ => rw [hc]
+
+/-- Catalog entry: the joint election elects exactly when C-old has
+    majority AND (no joint is pending, or C-new also has majority)
+    (F-L28/RFC-0064 — one side alone never elects). -/
+theorem joint_election_ok_elects_iff_old_and_new_majority :
+    ∀ (old_yes old_n : U64) (new_yes : Option (U64 × U64)),
+      (joint_election_ok old_yes old_n new_yes = ok true)
+        ↔ (((old_yes >= maj old_n) &&
+            (match new_yes with
+             | none => true
+             | some p => p.1 >= maj p.2)) : Bool) = true := by
+  intro old_yes old_n new_yes
+  rw [c1_joint_election]
+  simp
