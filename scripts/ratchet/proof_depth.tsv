@@ -13,6 +13,6 @@
 # without extraction (pedra_formal.py rule) and must EQUAL that live count.
 floor_extract 276
 floor_close 1
-floor_atom 0
+floor_atom 1
 cap_data_fate 130
 handler_loc 111927

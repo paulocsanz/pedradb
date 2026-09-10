@@ -4670,6 +4670,10 @@
       "id": "visible_at",
       "finding": "RFC-0150 P1 / F30",
       "twin_kind": "close",
+      "atom_reason": {
+        "date": "2026-09-10",
+        "why": "RFC-0188 P1.6 first atom: the data-fate rule 'a deletion never surfaces live' proven forall over range_hidden (visible_at_deletion_never_live, Merge.lean); registered as atom in scripts/ratchet/close_proofs.tsv"
+      },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/merge.rs",
       "twin": "crates/pedradb-core/src/merge.rs",

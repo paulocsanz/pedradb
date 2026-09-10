@@ -22,6 +22,7 @@ enumeração completa); nunca por reescrita de ledger.
 | Crash-injection exaustiva: todo índice de op falível de UM workload fixo (contagem medida no mesmo seam) recupera fail-closed | gate P0.3 `crates/pedradb-world/src/bin/gate_crash_injection.rs` | Não é ∀ workloads, nem setor partido/torn write (TCG nightly), nem ∀ timing de grupo |
 | Piso de barreiras: TODO sítio `sync_data`/`sync_all`/`sync_dir` de produção está pinado (igualdade exata por (arquivo,tipo)) | gate P0.4 `scripts/check_barrier_floor.py` + `scripts/ratchet/barrier_sites.tsv` | A amarração dinâmica prova sync≥1 no stream injetado, não que cada sítio foi exercitado neste run |
 | Ratchet de seeds: cada seed pinada reproduz seu desfecho/hash de escalonamento | gate P0.2 `gate_seed_ratchet.rs` + `scripts/ratchet/pct_seeds.txt` | Replay determinístico de seeds pinadas; não é descoberta nem ∀ |
+| Escada de profundidade (RFC-0188): extracts 276 + 1 close registrado (`merge_sift_step_repairs_iff`) + 1 atom (`visible_at_deletion_never_live` ∀ range_hidden — deleção nunca surfaced live) sobre corpos Aeneas extraídos | gate `depth-floor` `scripts/check_depth_floor.py` + registro `scripts/ratchet/close_proofs.tsv` + floors `scripts/ratchet/proof_depth.tsv` | Crédito de degrau só via registro ∀ sem sorry; twins close não registrados contam só no live count do residuals; wrap-factory nunca ganha linha |
 
 ## Experimento — estatística/mecânica (nunca viram um ∀)
 

@@ -43,6 +43,24 @@ theorem visible_at_deletion :
   unfold merge.visible_at
   rfl
 
+/-- RFC-0188 P1.6 first `atom` (data-fate rule, all inputs): a deletion
+never surfaces live, WHATEVER the covering-range says — the fate of the
+deleted version is decided by the kind alone. -/
+theorem visible_at_deletion_never_live :
+    ∀ (range_hidden : Bool),
+      merge.visible_at key.ValueType.Deletion range_hidden = ok false := by
+  intro range_hidden
+  unfold merge.visible_at
+  cases range_hidden <;> rfl
+
+/-- A Value surfaces exactly when no covering range hides it (all inputs). -/
+theorem visible_at_value_live_iff_not_hidden :
+    ∀ (range_hidden : Bool),
+      merge.visible_at key.ValueType.Value range_hidden = ok (!range_hidden) := by
+  intro range_hidden
+  unfold merge.visible_at
+  cases range_hidden <;> rfl
+
 /-- Catalog entry: a Value is live unless a covering range hides it. -/
 theorem visible_at_value_live :
     merge.visible_at key.ValueType.Value false = ok true := by

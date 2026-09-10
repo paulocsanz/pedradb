@@ -196,10 +196,13 @@ código que as move.
   incl. `wait_for_deadlock_on_live_cycle_is_not_ok`;
   `lock_interleavings_admitted` segue false — assert vivo
   concurrent.rs:4568)
-- [ ] **P1.6** Primeiro `atom` (0→1): `close` sobre o átomo data-fate
+- [x] **P1.6** Primeiro `atom` (0→1): `close` sobre o átomo data-fate
   de um handler vivo (o `if` que decide destino do dado já roteado por
   kernel); `proof_depth.atom=1` + registro + floor no MESMO commit —
-  status: `todo`
+  status: `done` (atom: `visible_at_deletion_never_live` ∀ range_hidden,
+  Merge.lean — deleção nunca surfaced live; par `catalog:visible_at`
+  com `atom_reason`; registro kind=atom em `close_proofs.tsv`;
+  `floor_atom 1` + residuals atom=1 no mesmo commit)
 
 ### P2 — ∀ mais largos e upstream
 
@@ -237,7 +240,7 @@ exaustivo N=4.
 | P1.3 | p1 | Lost-update N-way (`group_validate`) | done | `occ_batch_plan_n3_one_lagging` + planta on-live | 2026-09-10 |
 | P1.4 | p1 | Data-race write-lock client (`wal_rotate_decision`) | done | `WalPinState.commit_inflight` + `Flush.lean` + capybarakv finding | 2026-09-10 |
 | P1.5 | p1 | Deadlock (`wait_for_deadlock` sem ciclo) | done | `locktab.rs` + `Locktab.lean` + 4 testes | 2026-09-10 |
-| P1.6 | p1 | Primeiro `atom` (0→1) em handler vivo | todo | — | 2026-09-10 |
+| P1.6 | p1 | Primeiro `atom` (0→1) em handler vivo | done | `visible_at` atom ∀ + registro + `floor_atom 1` | 2026-09-10 |
 | P2.1 | p2 | Crash-injection em família (grid T×S) | todo | — | 2026-09-10 |
 | P2.2 | p2 | Cobertura 15/15 (4 sítios do soak) | todo | — | 2026-09-10 |
 | P2.3 | p2 | Isolated-method completo (fim da série) | todo | — | 2026-09-10 |
