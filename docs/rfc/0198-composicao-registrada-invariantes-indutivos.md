@@ -106,10 +106,13 @@
   `cap_data_fate` 100→99→… no mesmo commit (mesma receita um-por-commit
   do P2.3/0191; sem alvo numérico novo além da monotonicidade) —
   status: `todo`
-- [ ] **P2.3** Herdados seguem terminais: L28 user-gated, TCG/F_FULLFSYNC
+- [x] **P2.3** Herdados seguem terminais: L28 user-gated, TCG/F_FULLFSYNC
   nightly, N=4 aberto (registro em `verification-ledger.md`
   §"Herdados do 0187" — este RFC NÃO re-abre; alargar fronteira continua
-  sendo movimento de ledger) — status: `todo`
+  sendo movimento de ledger) — status: `done` (citado o registro terminal
+  do 0191 P2.4 em `docs/verification-ledger.md` §"Herdados do 0187",
+  commitado no HEAD; nenhum dos três gates re-aberto, nenhuma reescrita de
+  ledger — este RFC apenas carrega o estado adiante)
 
 ## Status (living — update with every PR)
 
@@ -123,7 +126,7 @@
 | P1.4 | p1 | Tokens write_pending_frame (2 handlers, coordenação concurrent.rs) | todo | — | 2026-09-10 |
 | P2.1 | p2 | Model→concreto: scale_kernel N concreto | todo | — | 2026-09-10 |
 | P2.2 | p2 | Cadência cap monotônica (df atoms) | todo | — | 2026-09-10 |
-| P2.3 | p2 | Herdados 0187 seguem terminais (sem re-abrir) | todo | — | 2026-09-10 |
+| P2.3 | p2 | Herdados 0187 seguem terminais (sem re-abrir) | done | cita ledger §"Herdados do 0187" (0191 P2.4) | 2026-09-11 |
 
 ## Acceptance Criteria
 
