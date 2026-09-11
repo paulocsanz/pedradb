@@ -256,3 +256,63 @@ theorem encode_cf_key_ok_iff_bare_key_or_prefixed_vec :
       refine bind_intro enc1 henc1 ?_
       refine bind_intro enc2 henc2 ?_
       exact hv
+
+/-- Catalog entry: an SST is tagged with the family of its bounds
+    exactly when both bounds share one family; one-sided bounds take
+    their sole family; no bounds yield the empty (mixed/legacy) tag —
+    never a tag that misrepresents mixed contents (RFC-0150 P0). -/
+theorem infer_sst_cf_ok_iff_shared_family_or_empty :
+    ∀ (smallest largest : Option (Slice Std.U8)) (v : String),
+    (infer_sst_cf smallest largest = ok v) ↔
+      ((smallest = none ∧ largest = none ∧
+          alloc.string.String.new = ok v) ∨
+       (∃ s, smallest = none ∧ largest = some s ∧
+          cf_family_of s = ok v) ∨
+       (∃ s, smallest = some s ∧ largest = none ∧
+          cf_family_of s = ok v) ∨
+       (∃ s l a b b1, smallest = some s ∧ largest = some l ∧
+          cf_family_of s = ok a ∧ cf_family_of l = ok b ∧
+          alloc.string.String.Insts.CoreCmpPartialEqString.eq a b = ok b1 ∧
+          ((b1 = true ∧ a = v) ∨
+            (¬(b1 = true) ∧ alloc.string.String.new = ok v)))) := by
+  intro smallest largest v
+  unfold infer_sst_cf
+  constructor
+  · intro hval
+    cases smallest with
+    | none =>
+      cases largest with
+      | none => exact Or.inl ⟨rfl, rfl, hval⟩
+      | some s => exact Or.inr (Or.inl ⟨s, rfl, rfl, hval⟩)
+    | some s =>
+      cases largest with
+      | none => exact Or.inr (Or.inr (Or.inl ⟨s, rfl, rfl, hval⟩))
+      | some l =>
+        obtain ⟨a, ha, hval⟩ := bind_ok_inv _ _ _ hval
+        obtain ⟨b, hb, hval⟩ := bind_ok_inv _ _ _ hval
+        obtain ⟨b1, hb1, hval⟩ := bind_ok_inv _ _ _ hval
+        split at hval
+        · next hbt =>
+          injection hval with hv
+          exact Or.inr (Or.inr (Or.inr
+            ⟨s, l, a, b, b1, rfl, rfl, ha, hb, hb1, Or.inl ⟨hbt, hv⟩⟩))
+        · next hbt =>
+          exact Or.inr (Or.inr (Or.inr
+            ⟨s, l, a, b, b1, rfl, rfl, ha, hb, hb1, Or.inr ⟨hbt, hval⟩⟩))
+  · rintro (⟨h1, h2, h3⟩ | ⟨s, h1, h2, h3⟩ | ⟨s, h1, h2, h3⟩ |
+      ⟨s, l, a, b, b1, h1, h2, h3, h4, h5,
+        (⟨hbt, hva⟩ | ⟨hbt, hnew⟩)⟩)
+    · subst h1; subst h2; exact h3
+    · subst h2; subst h1; exact h3
+    · subst h2; subst h1; exact h3
+    · subst h2; subst h1
+      refine bind_intro a h3 ?_
+      refine bind_intro b h4 ?_
+      refine bind_intro b1 h5 ?_
+      rw [if_pos hbt, hva]
+    · subst h2; subst h1
+      refine bind_intro a h3 ?_
+      refine bind_intro b h4 ?_
+      refine bind_intro b1 h5 ?_
+      rw [if_neg hbt]
+      exact hnew
