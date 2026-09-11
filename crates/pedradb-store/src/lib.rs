@@ -1773,8 +1773,6 @@ pub fn tcp_node_disk_left_joint(data: impl AsRef<Path>, node_id: u64, removed: u
         large_value_threshold: None,
         sst_payload_budget_bytes: None,
         // RFC-0194 P0.1: default keeps every page.
-        sst_page_keep_budget: u64::MAX,
-        sst_warm_cap_bytes: pedradb_core::scale_kernel::warm_cap_bytes(0),
     };
     let Ok(db) = Db::open_with_env(&dir, opts, IoUringEnv::default()) else {
         return false;
@@ -1827,8 +1825,6 @@ pub fn tcp_node_disk_high_water(data: impl AsRef<Path>, node_id: u64) -> u64 {
         large_value_threshold: None,
         sst_payload_budget_bytes: None,
         // RFC-0194 P0.1: default keeps every page.
-        sst_page_keep_budget: u64::MAX,
-        sst_warm_cap_bytes: pedradb_core::scale_kernel::warm_cap_bytes(0),
     };
     let Ok(db) = Db::open_with_env(&dir, opts, IoUringEnv::default()) else {
         return 0;
@@ -2720,8 +2716,6 @@ pub fn tcp_node_removed_durable_term_ok(data: impl AsRef<Path>, self_id: u64, cl
         large_value_threshold: None,
         sst_payload_budget_bytes: None,
         // RFC-0194 P0.1: default keeps every page.
-        sst_page_keep_budget: u64::MAX,
-        sst_warm_cap_bytes: pedradb_core::scale_kernel::warm_cap_bytes(0),
     };
     let Ok(db) = Db::open_with_env(&dir3, opts, IoUringEnv::default()) else {
         return false;
@@ -3489,8 +3483,6 @@ impl StoreCluster<IoUringEnv> {
                 large_value_threshold: None,
                 sst_payload_budget_bytes: None,
                 // RFC-0194 P0.1: default keeps every page.
-                sst_page_keep_budget: u64::MAX,
-                sst_warm_cap_bytes: pedradb_core::scale_kernel::warm_cap_bytes(0),
             }
         };
         let dir = parent.join(format!("store-node-{self_id}"));
@@ -3739,8 +3731,6 @@ impl<E: Env> StoreCluster<E> {
                 large_value_threshold: None,
                 sst_payload_budget_bytes: None,
                 // RFC-0194 P0.1: default keeps every page.
-                sst_page_keep_budget: u64::MAX,
-                sst_warm_cap_bytes: pedradb_core::scale_kernel::warm_cap_bytes(0),
             }
         };
         for (i, env) in envs.into_iter().enumerate() {
