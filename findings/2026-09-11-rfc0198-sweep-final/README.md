@@ -1,8 +1,9 @@
 # RFC-0198 — sweep final (2026-09-11)
 
 Sweep do goal "implementar todos os P0/P1/P2 do RFC-0198 + RFC
-sucessor". Estado: 8/9 fatias done; P2.1 com bloqueio externo datado
-(abaixo). Capturas completas no scratch do goal.
+sucessor". Estado: 9/9 fatias done — P2.1 fechado 2026-09-11 pelo
+commit 750de460 da sessão paralela (abaixo). Capturas completas no
+scratch do goal.
 
 ## Fatias landadas (um commit por promoção)
 
@@ -16,6 +17,7 @@ sucessor". Estado: 8/9 fatias done; P2.1 com bloqueio externo datado
 | P1.4 | b7a9c64b | tokens write_pending_frame pagos (board 0/17, sem editar o voo da paralela) |
 | P0.2 | aa5059bd | close registrado `occ_batch_plan∘occ_conflict` (floor_close 2→3; snippet preservado re-inserido verbatim) |
 | P2.2 | ade73704 | atom `occ_snap_uses_published` (cap_data_fate 100→99, floor_extract 247→246, floor_atom 31→32) |
+| P2.1 | 750de460 (paralela — rfc0199 P0.3) | graduação model→count: `point_get_probes_le_levels_l0_max` (ProbeLadderCount.lean, 0 sorry) + linhas count `scale_predict`/`probe_order_covering` + floor_count 1→3 no MESMO commit |
 
 ## Aceitação do goal — dimensão por dimensão
 
@@ -30,13 +32,15 @@ sucessor". Estado: 8/9 fatias done; P2.1 com bloqueio externo datado
   cinco wrappers tocados.
 - **P1.4 board `unpaid_script=0/17`:** ✓ (b7a9c64b).
 - **P2:** ≥1 atom df com cap −1 no mesmo commit ✓ (ade73704); herdados
-  terminais ✓ (91789eee); **P2.1 BLOQUEIO EXTERNO** — a graduação
-  model→count É o P0.3 do RFC-0199 da sessão paralela ("absorve a P2.1
-  do 0198"), ainda `todo` no RFC dela; bloqueio datado no RFC-0198,
-  monitor armado no registro (count row para scale_predict/
-  probe_order_covering ou flip do P0.3 dela). No momento do sweep a
-  paralela está ATIVAMENTE no P0.3 (ProbeLadderCount.lean não-commitado
-  em voo).
+  terminais ✓ (91789eee); **P2.1 FECHADO 2026-09-11** — a graduação
+  model→count era o P0.3 do RFC-0199 da sessão paralela ("absorve a
+  P2.1 do 0198") e landou no commit 750de460 dela:
+  `point_get_probes_le_levels_l0_max` sobre o extract ScaleKernel
+  (ProbeLadderCount.lean, 0 sorry) com as linhas count +
+  floor_count 1→3 no MESMO commit; o checkbox do RFC-0198 flipou no
+  próprio commit dela — este commit fecha a row da tabela, este
+  findings e o status.md (monitor do bloqueio morto pelo usuário; o
+  assentamento foi visto por checagem manual no fire seguinte).
 - **Todos os flips no mesmo commit do slice:** ✓ (cada commit acima
   carrega checkbox+row do RFC-0198).
 
@@ -62,4 +66,5 @@ completa do WAL (`wal_write_step_reach`: qualquer sequência de
 append/sync/ack a partir do inicial preserva Inv-WAL) + quarto close de
 glue; P1 base de saída do merge + ponte sift↔newest-first; P2 cadência.
 Linha nova em `docs/status.md` apontando para ele (linha do 0198
-refreshada com o estado 8/9).
+refreshada com o estado 8/9 no sweep; agora 9/9 — flip pós-750de460).
+Pós-sweep: P0.1 (7fe497f5) e P1.1 (a2e6f712) do 0200 já landados.

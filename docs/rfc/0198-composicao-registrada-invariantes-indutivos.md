@@ -1,7 +1,7 @@
 # RFC: 0198 — composição registrada e invariantes indutivos (o próximo degrau seL4-class)
 
-**Status:** draft
-**Updated:** 2026-09-10
+**Status:** done
+**Updated:** 2026-09-11
 
 ## Background
 
@@ -146,7 +146,7 @@
 | P1.2 | p1 | Inv-WAL passo sync/fence | done | wal_write_step_preserves_inv_wal | 2026-09-11 |
 | P1.3 | p1 | Inv-LSM corolário indutivo (k merges) | done | merge_chain_preserves_inv_lsm | 2026-09-11 |
 | P1.4 | p1 | Tokens write_pending_frame (2 handlers, coordenação concurrent.rs) | done | board unpaid_script=0/17 (tokens no HEAD) | 2026-09-11 |
-| P2.1 | p2 | Model→concreto: scale_kernel N concreto | blocked (externo: 0199 P0.3) | — | 2026-09-11 |
+| P2.1 | p2 | Model→concreto: scale_kernel N concreto | done (0199 P0.3, 750de460) | point_get_probes_le_levels_l0_max | 2026-09-11 |
 | P2.2 | p2 | Cadência cap monotônica (df atoms) | done | occ_snap_uses_published_ok_iff_inflight (cap 100→99) | 2026-09-11 |
 | P2.3 | p2 | Herdados 0187 seguem terminais (sem re-abrir) | done | cita ledger §"Herdados do 0187" (0191 P2.4) | 2026-09-11 |
 
