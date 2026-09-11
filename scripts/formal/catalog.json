@@ -3846,7 +3846,6 @@
     "crates/pedradb-store/src/bin/cluster_real.rs"
    ],
    "entry": "l28_tcp_odrop_ok",
-   "data_fate": true,
    "handlers": [
     "tcp_node_removed_orphan_drop_ok"
    ],
@@ -3860,7 +3859,11 @@
      "file": "crates/pedradb-store/src/bin/cluster_real.rs",
      "handler": "tcp_node_removed_orphan_drop_ok"
     }
-   ]
+   ],
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0210 P0.2 l28 cadence 2/4: after a real TCP plant + process death recover truncate deletes log_entry_key rows past the new hi on a replica dropped from ids exactly when the orphan rows were dropped (fate forall over the extracted pure-lift body, L28.lean); AS-IS ok-true skips the orphan-segment drop (0132 leftover)"
+   }
   },
   {
    "id": "l28_tcp_abort",

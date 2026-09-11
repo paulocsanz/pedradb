@@ -128,6 +128,10 @@ paralela) — este RFC não os toca.
    `index > commit` na réplica tirada de `ids` ⟺ o truncate
    persistiu), cap 80→79, floor_atom 51→52, floor_extract 227→226;
    planta TCP REAL verde
+   — 2/4 `done`: `l28_tcp_odrop_ok_fate_iff` (L28.lean; linhas
+   `log_entry_key` além do novo hi apagadas ⟺ os órfãos caíram),
+   cap 79→78, floor_atom 52→53, floor_extract 226→225; planta TCP
+   REAL verde
 
 ### P1 — next wave (depends on P0 or clearly deferrable)
 
