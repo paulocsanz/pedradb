@@ -3182,7 +3182,7 @@
     {
       "id": "compact_decision",
       "finding": "F177/F20",
-      "twin_kind": "close",
+      "twin_kind": "atom",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/compact_kernel.rs",
       "twin": "crates/pedradb-core/src/compact_kernel.rs",
@@ -3191,7 +3191,6 @@
         "crates/pedradb-core/src/db.rs"
       ],
       "entry": "compact_pick",
-      "data_fate": true,
       "handlers": [
         "compact_with_ssts_only"
       ],
@@ -3199,7 +3198,13 @@
       "dst_plant": {
         "file": "crates/pedradb-core/src/compact_kernel.rs",
         "test": "compact_pick_on_live_merge_is_not_ok"
-      }
+      },
+      "atom": "compact_pick",
+      "atom_reason": {
+        "date": "2026-09-10",
+        "why": "RFC-0191 P2.3 cadence (eighteenth if): the compaction-pick disposition — a max-level GC rewrite is chosen exactly when no level holds files while GC was requested and files already sit at the max level (a level holding files yields a Merge of it with its successor; without both flags the plan is NoOp, F177/F20) — proven forall over (lowest_level_with_files, files_at_max_level, gc_requested, max_level) as compact_pick_gc_rewrite_max_iff_none_and_gc_and_files_at_max in Compact.lean; the db trampoline (compact_with_ssts_only) matches the kernel decision"
+      },
+      "three_teeth": true
     },
     {
       "id": "compact_retention",

@@ -81,11 +81,10 @@
     "handler_loc": 112092,
     "db_rs_extracted": false,
     "proof_depth": {
-      "extract": 261,
+      "extract": 260,
       "close": 2,
-      "atom": 18,
-      "model": 17,
-      "updated": "2026-09-10"
+      "atom": 19,
+      "model": 17
     },
     "kernel_fn_allowlist": {
       "crates/pedradb-core/src/env_crash_kernel.rs": [
@@ -137,7 +136,7 @@
       ]
     },
     "single_artifact": 291,
-    "data_fate": 113
+    "data_fate": 112
   },
   "residuals": [
     {
