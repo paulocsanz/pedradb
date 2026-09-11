@@ -130,6 +130,14 @@ pool honesto manda sobre a meta numérica).
    floor_atom 79→80, floor_extract 199→198; planta DST verde
    (`recover_abort_node_counts_on_live_queued_is_not_ok`,
    no mesmo lote paralelo)
+
+   — 4/8 `done`: `membership_identity_before_applied_fate_iff`
+   (Membership.lean; identidade C-new persiste exatamente quando
+   o persist de identidade vem ANTES de avançar applied passado
+   o joint), cap 44→43, floor_atom 80→81, floor_extract 198→197;
+   planta DST verde
+   (`membership_identity_before_applied_on_live_queued_is_not_ok`,
+   no mesmo lote paralelo)
 4. **P1.2:** cadências membership 5/6 + 6/6 — `pending_joint_node`,
    `joint_target`, `joint_add_target`, `joint_leave_ok` (joint);
    `drop_repl_slot`, `drop_sent_through` (slot): ×6, cap 39→33,

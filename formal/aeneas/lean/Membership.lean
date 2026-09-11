@@ -540,3 +540,21 @@ theorem recover_abort_node_counts_fate_iff :
   intro is_local in_ids v
   unfold recover_abort_node_counts
   cases is_local <;> cases v <;> simp
+
+/-- RFC-0212 P1.1 (membership cadence 3/6, atom
+    `catalog:identity_before_applied`): the C-new identity is
+    persisted EXACTLY when identity persist comes first — before
+    advancing applied past the joint — fate forall over the
+    extracted pure-lift body; the AS-IS mutant persists applied
+    first (the crash window: applied high while voters are
+    stale — the lie the DST plant
+    `membership_identity_before_applied_on_live_queued_is_not_ok`
+    refutes). -/
+theorem membership_identity_before_applied_fate_iff :
+    ∀ (identity_first : Bool) (v : Bool),
+      (membership_identity_before_applied identity_first = ok v) ↔
+        ((v = true ∧ identity_first = true)
+          ∨ (v = false ∧ identity_first = false)) := by
+  intro identity_first v
+  unfold membership_identity_before_applied
+  cases identity_first <;> cases v <;> simp
