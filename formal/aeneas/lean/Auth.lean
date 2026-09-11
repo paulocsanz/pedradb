@@ -35,3 +35,117 @@ theorem is_bearer_scheme_as_is_is_or (s) :
       else Str.Insts.CoreCmpPartialEqStr.eq s (toStr "bearer")) := by
   unfold is_bearer_scheme_as_is
   rfl
+
+/-- Any ok-valued Result bind forces the bound term to be ok. -/
+private theorem bind_ok_inv {α β} (x : Result α) (f : α → Result β) (v : β)
+    (h : Aeneas.Std.bind x f = ok v) : ∃ a, x = ok a ∧ f a = ok v := by
+  cases x with
+  | ok a => exact ⟨a, rfl, h⟩
+  | fail e => exact absurd h (by simp)
+  | div => exact absurd h (by simp)
+
+/-- An ok chain reassembles into an ok bind. -/
+private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : β}
+    (a : α) (hx : x = ok a) (h : f a = ok v) : Aeneas.Std.bind x f = ok v := by
+  rw [hx]
+  exact h
+
+/- RFC-0202 P1.2 (fifth registered close): the whole-output fate of the
+    `bearer` catalog entry (`bearer_token_from_value`, the extractor the
+    live authorize handler calls) is decided EXACTLY along its callee
+    chain — trim, emptiness, first-whitespace split, then the two
+    pedra-local scheme gates (is_bearer_scheme / is_non_bearer_auth_
+    scheme). Every none/some fate on the RHS pins which callee answered
+    what; the core.str primitives stay axiom-shaped (opaque), the two
+    scheme gates are the composed extract callees. The RFC's first
+    candidate (group_validate, N-way lost-update step) measured refusal
+    — extracted as partial_fixpoint, irreducible to defeq — and fell to
+    this board pair per the 0200 P1.2 re-scope cadence. -/
+theorem bearer_token_from_value_fate_iff :
+    ∀ (value : Str) (t : Option Str),
+      (bearer_token_from_value value = ok t) ↔
+        ∃ v, core.str.Str.trim value = ok v ∧
+          ((core.str.Str.is_empty v = ok true ∧ t = none) ∨
+           (core.str.Str.is_empty v = ok false ∧
+             ((∃ scheme rest,
+                 core.str.Str.split_once_ws v = ok (some (scheme, rest)) ∧
+                 ((is_bearer_scheme scheme = ok true ∧
+                     ∃ tok, core.str.Str.trim rest = ok tok ∧
+                       ((core.str.Str.is_empty tok = ok true ∧ t = none) ∨
+                        (core.str.Str.is_empty tok = ok false ∧ t = some tok))) ∨
+                  (is_bearer_scheme scheme = ok false ∧ t = none))) ∨
+              (core.str.Str.split_once_ws v = ok none ∧
+                 ((is_bearer_scheme v = ok true ∧ t = none) ∨
+                  (is_bearer_scheme v = ok false ∧
+                     ((is_non_bearer_auth_scheme v = ok true ∧ t = none) ∨
+                      (is_non_bearer_auth_scheme v = ok false ∧ t = some v)))))))) := by
+  intro value t
+  constructor
+  · intro hval
+    unfold bearer_token_from_value at hval
+    obtain ⟨v, hw, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨b, hb, hval⟩ := bind_ok_inv _ _ _ hval
+    split at hval
+    · next htrue =>
+      refine ⟨v, hw, Or.inl ⟨by rw [hb, htrue], ?_⟩⟩
+      injection hval with ht
+      exact ht.symm
+    · next hfalse =>
+      simp only [Bool.not_eq_true] at hfalse
+      refine ⟨v, hw, Or.inr ⟨by rw [hb, hfalse], ?_⟩⟩
+      obtain ⟨o, hsp, hval⟩ := bind_ok_inv _ _ _ hval
+      split at hval
+      · next scheme rest =>
+        obtain ⟨br, hbr, hval⟩ := bind_ok_inv _ _ _ hval
+        refine Or.inl ⟨scheme, rest, hsp, ?_⟩
+        split at hval
+        · next hbrtrue =>
+          obtain ⟨tok, htk, hval⟩ := bind_ok_inv _ _ _ hval
+          obtain ⟨e, he, hval⟩ := bind_ok_inv _ _ _ hval
+          refine Or.inl ⟨by rw [hbr, hbrtrue], tok, htk, ?_⟩
+          split at hval
+          · next hetrue =>
+            exact Or.inl ⟨by rw [he, hetrue], by injection hval with ht; exact ht.symm⟩
+          · next hefalse =>
+            simp only [Bool.not_eq_true] at hefalse
+            exact Or.inr ⟨by rw [he, hefalse], by injection hval with ht; exact ht.symm⟩
+        · next hbrfalse =>
+          simp only [Bool.not_eq_true] at hbrfalse
+          refine Or.inr ⟨by rw [hbr, hbrfalse], by injection hval with ht; exact ht.symm⟩
+      · next =>
+        obtain ⟨br, hbr, hval⟩ := bind_ok_inv _ _ _ hval
+        refine Or.inr ⟨hsp, ?_⟩
+        split at hval
+        · next hbrtrue =>
+          exact Or.inl ⟨by rw [hbr, hbrtrue], by injection hval with ht; exact ht.symm⟩
+        · next hbrfalse =>
+          simp only [Bool.not_eq_true] at hbrfalse
+          refine Or.inr ⟨by rw [hbr, hbrfalse], ?_⟩
+          obtain ⟨nb, hnb, hval⟩ := bind_ok_inv _ _ _ hval
+          split at hval
+          · next hnbtrue =>
+            exact Or.inl ⟨by rw [hnb, hnbtrue], by injection hval with ht; exact ht.symm⟩
+          · next hnbfalse =>
+            simp only [Bool.not_eq_true] at hnbfalse
+            exact Or.inr ⟨by rw [hnb, hnbfalse], by injection hval with ht; exact ht.symm⟩
+  · rintro ⟨v, hw, hbranch⟩
+    rcases hbranch with ⟨he, ht⟩ | ⟨he, hsplit⟩
+    · unfold bearer_token_from_value
+      simp [hw, he, ht]
+    · rcases hsplit with ⟨scheme, rest, hsp, hEF⟩ | ⟨hsp, hGH⟩
+      · rcases hEF with ⟨hbr, tok, htk, hIJ⟩ | ⟨hbr, ht⟩
+        · rcases hIJ with ⟨he2, ht⟩ | ⟨he2, ht⟩
+          · unfold bearer_token_from_value
+            simp [hw, he, hsp, hbr, htk, he2, ht]
+          · unfold bearer_token_from_value
+            simp [hw, he, hsp, hbr, htk, he2, ht]
+        · unfold bearer_token_from_value
+          simp [hw, he, hsp, hbr, ht]
+      · rcases hGH with ⟨hbr, ht⟩ | ⟨hbr, hH⟩
+        · unfold bearer_token_from_value
+          simp [hw, he, hsp, hbr, ht]
+        · rcases hH with ⟨hnb, ht⟩ | ⟨hnb, ht⟩
+          · unfold bearer_token_from_value
+            simp [hw, he, hsp, hbr, hnb, ht]
+          · unfold bearer_token_from_value
+            simp [hw, he, hsp, hbr, hnb, ht]

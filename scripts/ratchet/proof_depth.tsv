@@ -21,7 +21,7 @@
 # a pair may carry close AND count. residuals proof_depth.count equals
 # the live count of registered count rows.
 floor_extract 242
-floor_close 4
+floor_close 5
 floor_atom 36
 floor_count 7
 cap_data_fate 95

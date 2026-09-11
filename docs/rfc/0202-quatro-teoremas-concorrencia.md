@@ -135,9 +135,21 @@ sendo Pedra vs RocksDB default `sync=false` (`ROCKS_PARITY_SYNC=0`).
   semântica de mapa (HashMap.get/insert são axiomas no Aeneas) e fica
   TCB; dente as-is já existia (`wait_for_deadlock_as_is_dente`);
   build Locktab verde, sorry 0)
-- [ ] **P1.2** Quinto close registrado (candidato `group_validate`
+- [x] **P1.2** Quinto close registrado (candidato `group_validate`
   N-way; senão próximo par do board; floor_close 4→5 no mesmo commit) —
-  status: `todo`
+  status: `done` (queda medida do candidato: `group_validate` extraído
+  como `partial_fixpoint`, irredutível a defeq — documentado no header
+  de GroupCommit.lean; caiu para o par do board `bearer`
+  (`bearer_token_from_value`, auth_kernel.rs, chamado pelo handler
+  `authorize` em pedradb-http/src/lib.rs):
+  `bearer_token_from_value_fate_iff` (Auth.lean) — fate iff 7-vias do
+  output inteiro sobre a cadeia de callees (trim → is_empty →
+  split_once_ws → is_bearer_scheme/is_non_bearer_auth_scheme), cada
+  destino none/some pinando qual callee respondeu o quê; core.str
+  segue axioma (opaco), os dois gates de scheme são os callees
+  extraídos; floor_close 4→5, residuals close 5→6 no mesmo commit;
+  build Auth verde, sorry 0; planta DST
+  `bearer_token_from_value_on_live_http_is_not_ok` 1/1)
 
 ### P2 — later / cadência + recusa registrada + sweep
 
@@ -154,7 +166,7 @@ sendo Pedra vs RocksDB default `sync=false` (`ROCKS_PARITY_SYNC=0`).
 | P0.1 | p0 | Fila data-race: atom rwlock_client_may_mutate | done | rwlock_client_may_mutate_ok_iff_holding_write (GroupCommit.lean) | 2026-09-11 |
 | P0.2 | p0 | Fila lost-update: atom occ_member_fate | done | occ_member_fate_ok_iff_precedence (GroupCommit.lean) | 2026-09-11 |
 | P1.1 | p1 | Fila deadlock: ponte wait_for_deadlock (ou recusa datada) | done | wait_for_deadlock_step_{nowait_is_alive,cycle_closes,revisit_reports_cycle} (Locktab.lean) + fronteira EXTRACT.md | 2026-09-11 |
-| P1.2 | p1 | Quinto close registrado (candidato group_validate) | todo | — | 2026-09-11 |
+| P1.2 | p1 | Quinto close registrado (candidato group_validate; caiu para o par bearer) | done | bearer_token_from_value_fate_iff (Auth.lean) | 2026-09-11 |
 | P2.1 | p2 | Escalonador: recusa registrada + cadência atoms | todo | — | 2026-09-11 |
 | P2.2 | p2 | Sweep final de gates | todo | — | 2026-09-11 |
 
