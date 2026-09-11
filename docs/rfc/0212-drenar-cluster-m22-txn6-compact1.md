@@ -70,7 +70,7 @@ pool honesto manda sobre a meta numérica).
    floor_extract 209→205 — status: `done`
 2. **P0.2:** cadência membership 2/6 (persist+hint) — `persist_meta`,
    `persist_hist`, `persist_fence`, `hint_member` (0135/0136/0137/0146):
-   cap 51→47, floor_atom 73→77, floor_extract 205→201 — status: `doing`
+   cap 51→47, floor_atom 73→77, floor_extract 205→201 — status: `done`
 
    — 1/4 `done`: `persist_meta_node_counts_fate_iff`
    (Membership.lean; meta SI persiste em TODA réplica local
@@ -92,6 +92,15 @@ pool honesto manda sobre a meta numérica).
    floor_atom 75→76, floor_extract 203→202; planta DST verde
    (`persist_fence_node_counts_on_live_queued_is_not_ok`, 1
    passed via --lib)
+
+   — 4/4 `done` (FECHAMENTO): `hint_if_member_fate_iff`
+   (Membership.lean; hint de roteamento do líder conta
+   exatamente quando o nó apontado está em `ids` — um
+   `leader_id` fora da membresia não é hint), cap 48→47,
+   floor_atom 76→77, floor_extract 202→201; planta DST verde
+   (`hint_if_member_on_live_queued_is_not_ok`, 1 passed via
+   --lib) — P0.2 fechado nos números exatos: cap 51→47,
+   floor_atom 73→77, floor_extract 205→201 — status: `done`
 
 ### P1 — next
 
@@ -135,7 +144,7 @@ pool honesto manda sobre a meta numérica).
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | Cadência membership 1/6 — discard ×4 | done | 365e7c65 + e5c4c346 + 322b2241 + este commit (4 atoms, 4 commits; números exatos) | 2026-09-11 |
-| P0.2 | p0 | Cadência membership 2/6 — persist+hint ×4 | todo | — | 2026-09-11 |
+| P0.2 | p0 | Cadência membership 2/6 — persist+hint ×4 | done | 2b953b9a + c725658a + bc6b6f80 + este commit (4 atoms, 4 commits; números exatos) | 2026-09-11 |
 | P1.1 | p1 | Cadências membership 3/6+4/6 — recover+open ×8 | todo | — | 2026-09-11 |
 | P1.2 | p1 | Cadências membership 5/6+6/6 — joint+slot ×6; ZERO data_fate | todo | — | 2026-09-11 |
 | P1.3 | p1 | Veredito datado dos medidos ausentes | todo | — | 2026-09-11 |

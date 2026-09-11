@@ -469,3 +469,20 @@ theorem persist_fence_node_counts_fate_iff :
   intro is_local in_ids v
   unfold persist_fence_node_counts
   cases is_local <;> cases v <;> simp
+
+/-- RFC-0212 P0.2 (membership cadence 2/6, atom
+    `catalog:hint_member`): the leader routing hint counts EXACTLY
+    when the hinted node is in `ids` — a `leader_id` outside the
+    membership is no hint at all — fate forall over the extracted
+    pure-lift body; the AS-IS mutant returns any `leader_id` (the
+    0145 leftover: leader_hint returns a removed node — the lie
+    the DST plant `hint_if_member_on_live_queued_is_not_ok`
+    refutes). -/
+theorem hint_if_member_fate_iff :
+    ∀ (in_ids : Bool) (v : Bool),
+      (hint_if_member in_ids = ok v) ↔
+        ((v = true ∧ in_ids = true)
+          ∨ (v = false ∧ in_ids = false)) := by
+  intro in_ids v
+  unfold hint_if_member
+  cases in_ids <;> cases v <;> simp

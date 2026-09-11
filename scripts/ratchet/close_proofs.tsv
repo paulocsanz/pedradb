@@ -103,3 +103,4 @@ atom	catalog:force_clear	force_clear_node_counts_fate_iff	formal/aeneas/lean/Mem
 atom	catalog:persist_meta	persist_meta_node_counts_fate_iff	formal/aeneas/lean/Membership.lean	persist_meta_node_counts
 atom	catalog:persist_hist	persist_hist_node_counts_fate_iff	formal/aeneas/lean/Membership.lean	persist_hist_node_counts
 atom	catalog:persist_fence	persist_fence_node_counts_fate_iff	formal/aeneas/lean/Membership.lean	persist_fence_node_counts
+atom	catalog:hint_member	hint_if_member_fate_iff	formal/aeneas/lean/Membership.lean	hint_if_member

@@ -1014,7 +1014,6 @@
      "handler": "leader_hint"
     }
    ],
-   "data_fate": true,
    "handlers": [
     "leader_hint",
     "install_applied_membership"
@@ -1023,6 +1022,10 @@
    "dst_plant": {
     "file": "crates/pedradb-store/src/three_teeth_queued.rs",
     "test": "hint_if_member_on_live_queued_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0146: hint de roteamento do lider so conta se o nó esta em ids; as-is 0145 devolvia qualquer leader_id, inclusive no removido"
    }
   },
   {
