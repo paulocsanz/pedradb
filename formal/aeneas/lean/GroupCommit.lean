@@ -131,6 +131,22 @@ theorem may_publish_group_as_is_dente :
   unfold may_publish_group_as_is
   rfl
 
+/-- RFC-0205 P0.1 (sixth registered close): the group publish gate is
+    the EXACT flip of the WAL I/O outcome — a group is published iff its
+    WAL write succeeded; there is no third fate (pure-lift mold,
+    precedent dir_sync_required_ok_iff_sync). The dente above is the
+    false instance; the AS-IS mutant publishes even on WAL failure. -/
+theorem may_publish_group_ok_iff_wal_io_ok :
+    ∀ (wal_io_ok v : Bool),
+      (may_publish_group wal_io_ok = ok v) ↔ (wal_io_ok = v) := by
+  intro wal_io_ok v
+  unfold may_publish_group
+  constructor
+  · intro h
+    injection h with _
+  · intro h
+    rw [h]
+
 /-- Write-lock client protocol (registered atom, RFC-0202 P0.1):
     mutation of `Db` is permitted EXACTLY while the client holds the
     write guard — the AS-IS (mutate after dropping the guard) is

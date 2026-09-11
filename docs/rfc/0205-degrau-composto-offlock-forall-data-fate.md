@@ -144,6 +144,14 @@ RFC não as toca.
 1. **P0.1:** close registrado `catalog:group_publish`
    (`may_publish_group` iff ∀; `floor_close` 5→6, residuals close
    6→7 no mesmo commit) — molde `bearer_token_from_value_fate_iff`.
+   — status: `done` (pago como `may_publish_group_ok_iff_wal_io_ok`
+   (GroupCommit.lean): o corpo extraído é o lift puro
+   `ok wal_io_ok`, então a forma honesta é o molde pure-lift do
+   `dir_sync_required_ok_iff_sync` — publish ⟺ WAL I/O Ok, sem
+   terceiro destino; molde bearer não se aplica a corpo sem bind;
+   floor_close 5→6, residuals close 6→7 no mesmo commit; build
+   GroupCommit verde, sorry 0; planta DST
+   `may_publish_group_on_live_group_is_not_ok` 1/1)
 2. **P0.2:** atom data-fate `catalog:vote` (`vote_decision`;
    cirurgia de catálogo + cap 95→94 + `floor_atom` 36→37 +
    `floor_extract` 242→241 no mesmo commit).
@@ -171,7 +179,7 @@ RFC não as toca.
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | Close composto: may_publish_group ∀ registrado | todo | — | 2026-09-11 |
+| P0.1 | p0 | Close composto: may_publish_group ∀ registrado | done | may_publish_group_ok_iff_wal_io_ok (GroupCommit.lean) | 2026-09-11 |
 | P0.2 | p0 | Primeiro data-fate do cluster store: vote_decision a atom | todo | — | 2026-09-11 |
 | P1.1 | p1 | Composição ∀ off-lock (publish × rotate; dentes viram corolários) | todo | — | 2026-09-11 |
 | P1.2 | p1 | Cadência data-fate: +2 promoções (cap 94→92) | todo | — | 2026-09-11 |
