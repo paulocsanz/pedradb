@@ -205,6 +205,13 @@ pool honesto manda sobre a meta numérica).
    floor_extract 190→189; planta DST verde
    (`joint_leave_ok_on_live_queued_is_not_ok`,
    no mesmo lote paralelo)
+
+   — 5/6 `done`: `drop_repl_slot_fate_iff`
+   (Membership.lean; slot de replicação `next`/`match` de nó
+   removido de `ids` é ESQUECIDO — corpo invertido `!in_ids`),
+   cap 35→34, floor_atom 89→90, floor_extract 189→188; planta
+   DST verde (`drop_repl_slot_on_live_queued_is_not_ok`,
+   no mesmo lote paralelo)
 5. **P1.3:** veredito datado dos medidos ausentes — SE alguma
    promoção acima medir fn/planta/handler inexistente, veredito por
    par em findings (reescrever para fn viva SE o caminho existir em

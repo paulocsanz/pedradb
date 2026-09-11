@@ -116,3 +116,4 @@ atom	catalog:pending_joint_node	pending_joint_node_counts_fate_iff	formal/aeneas
 atom	catalog:joint_target	joint_target_counts_fate_iff	formal/aeneas/lean/Membership.lean	joint_target_counts
 atom	catalog:joint_add_target	joint_add_target_counts_fate_iff	formal/aeneas/lean/Membership.lean	joint_add_target_counts
 atom	catalog:joint_leave_ok	joint_leave_ok_fate_iff	formal/aeneas/lean/Membership.lean	joint_leave_ok
+atom	catalog:drop_repl_slot	drop_repl_slot_fate_iff	formal/aeneas/lean/Membership.lean	drop_repl_slot

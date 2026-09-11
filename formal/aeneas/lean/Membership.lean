@@ -689,3 +689,20 @@ theorem joint_leave_ok_fate_iff :
   intro leave_in_log v
   unfold joint_leave_ok
   cases leave_in_log <;> cases v <;> simp
+
+/-- RFC-0212 P1.2 (membership cadence 6/6, atom
+    `catalog:drop_repl_slot`): the replication slot
+    (next/match) of a node dropped from `ids` is forgotten
+    EXACTLY when the node is out of `ids` — fate forall over
+    the extracted pure-lift body; the AS-IS mutant keeps
+    replication slots after joint leave (the 0146 leftover —
+    the lie the DST plant
+    `drop_repl_slot_on_live_queued_is_not_ok` refutes). -/
+theorem drop_repl_slot_fate_iff :
+    ∀ (in_ids : Bool) (v : Bool),
+      (drop_repl_slot in_ids = ok v) ↔
+        ((v = true ∧ in_ids = false)
+          ∨ (v = false ∧ in_ids = true)) := by
+  intro in_ids v
+  unfold drop_repl_slot
+  cases in_ids <;> cases v <;> simp
