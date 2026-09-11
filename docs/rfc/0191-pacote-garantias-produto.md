@@ -196,9 +196,9 @@ contagens movem no mesmo commit; `lock_interleavings_admitted` e
   freeze: `visible_at` (0085e919) saiu do extract sem baixar o congelado
   — `floor_extract` 276→275 e residuals `extract` 275 no mesmo commit
   (promoção de escada, não extração perdida) — status: `done`
-- [ ] **P1.6** `scripts/lean_extracts.sh --required` + `check_product_floor`
+- [x] **P1.6** `scripts/lean_extracts.sh --required` + `check_product_floor`
   + `check_depth_floor` verdes no commit de cada promoção; nenhum
-  `sorry` novo — status: `todo`
+  `sorry` novo — status: `done`
 
 ### P2 — invariante indutivo, trampolim com alvo, herdados
 
@@ -240,7 +240,7 @@ contagens movem no mesmo commit; `lock_interleavings_admitted` e
 | P1.3 | p1 | T1-leftover `model→atom` (fn deixa de ser constante) | done | `leftover_fate` + `t1_leftover_fate` Txn.lean; TSV T1=atom | 2026-09-10 |
 | P1.4 | p1 | C1-joint `model→close` (∀ contagens) | done | `c1_joint_election` + `maj` Membership.lean; TSV C1=close, promoted 4 | 2026-09-10 |
 | P1.5 | p1 | Um `if` do trampolim, cap 130→129 | done | `si_hist_repair_plan` + atom `si_hist_repair_plan_leave_iff_floor_or_match` Txn.lean; floor_atom 2; `should_repair_si_hist` gradua; recount extract 275 | 2026-09-10 |
-| P1.6 | p1 | Gates Lean/depth/product verdes em cada promoção | todo | — | 2026-09-10 |
+| P1.6 | p1 | Gates Lean/depth/product verdes em cada promoção | done | sweep final 2026-09-10: `lean_extracts.sh --required` ok (61 libs + 5 compose), lake build dos 16 módulos com prova registrada verde com 0 sorry nos wrappers, depth-floor GREEN (248/1/31, df 100≤100), product-floor GREEN (4/4), ledger GREEN (marker 298), seam-inventory OK (15/15). Vermelhos herdados e nomeados (nenhum desta campanha): barrier RED por 3 sítios novos não-injetados no `concurrent.rs` NÃO-commitado da sessão paralela (sync_all 2/1, sync_data 3/2, sync_dir 4/2); `check_no_prod_time_spawn` 96 violações todas em `three_teeth_queued.rs` (harness commitado fire-800, outra sessão); lint formal 153 FAIL todos herdados (conjuntos idênticos entre fires 787/788; cada delta vs 786 é da paralela) | 2026-09-10 |
 | P2.1 | p2 | Inv-WAL preservação (um passo) | done | `wal_append_preserves_inv_wal` + corolário `d1_plan_append_preserves_inv_wal` WalState.lean | 2026-09-10 |
 | P2.2 | p2 | Inv-LSM `visible_at` ∘ probe-order (um passo) | done | `inv_lsm_newest_first_never_non_live` + corolário `r1_get_never_returns_non_live` Merge.lean (R1 segue atom) | 2026-09-10 |
 | P2.3 | p2 | Alvo trampolim cap≤100 / floor_atom≥8 | done | 30/31 caps pagos (100; …P2.3-27 `encode_cf_key` — encoding devolve a chave nua com encoding efetivo vazio; senão cadeia planejada por capacidade: bytes do cf, um 0 separador, a chave, cada passo ok, RFC-0150 P0; P2.3-28 `infer_sst_cf` — SST tagueado com a família dos bounds exatamente quando os dois compartilham uma família; bound único toma a família dele; sem bounds tag vazia (mista/legacy) — nunca tag que minta sobre conteúdo misto, RFC-0150 P0; P2.3-29 `batch_is_empty` — lote de comprimento n roteia pelo caminho vazio exatamente quando a comparação de máquina de n contra zero cai em v — corpo sem passo monádico, a iff é a regra de computação inteira (primeiro par pago fora da fila cf, `WriteAdmission.lean`, RFC-0171 P1.1; P2.3-30 `dir_sync_required` — rename/create é seguido de fsync de diretório exatamente quando o sync das open-options está ligado — corpo é o lift puro ok sync, a iff é a regra de computação inteira (`WriteAdmission.lean`, RFC-0171 P1.1), atoms 31/8; alvo numérico fechado: cap_data_fate 100 ≤ 100 e floor_atom 31 ≥ 8 (as duas descidas do déficit vieram da fila write_admission, fora do cf) | 2026-09-10 |
