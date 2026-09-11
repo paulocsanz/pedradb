@@ -7057,7 +7057,7 @@
   {
    "id": "batch_is_empty",
    "finding": "RFC-0171 P1.1",
-   "twin_kind": "close",
+   "twin_kind": "atom",
    "single_artifact": true,
    "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
    "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
@@ -7066,7 +7066,6 @@
     "crates/pedradb-core/src/db.rs"
    ],
    "entry": "batch_is_empty",
-   "data_fate": true,
    "handlers": [
     "apply_batch_with"
    ],
@@ -7075,6 +7074,11 @@
    "dst_plant": {
     "file": "crates/pedradb-core/src/write_admission_kernel.rs",
     "test": "batch_is_empty_on_live_zero_is_not_ok"
+   },
+   "atom": "batch_is_empty",
+   "atom_reason": {
+    "date": "2026-09-10",
+    "why": "(twenty-ninth if): the empty-batch disposition — a batch of length n routes through the empty path exactly when the machine comparison of n against zero lands in v — proven forall over (n, v) as batch_is_empty_ok_iff_zero in WriteAdmission.lean; the body holds no monadic step, so the iff is the full computation rule of the extracted do-block; the pedradb-core trampoline (group_start in db.rs) matches the kernel decision."
    }
   },
   {

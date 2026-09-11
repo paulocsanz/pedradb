@@ -42,3 +42,4 @@ atom	catalog:compact_rewrites_sst_cf	compact_rewrites_sst_cf_ok_iff_empty_tag_ne
 atom	catalog:decode_cf_key	decode_cf_key_ok_iff_identity_or_stripped_past_prefix	formal/aeneas/lean/Cf.lean	decode_cf_key
 atom	catalog:encode_cf_key	encode_cf_key_ok_iff_bare_key_or_prefixed_vec	formal/aeneas/lean/Cf.lean	encode_cf_key
 atom	catalog:infer_sst_cf	infer_sst_cf_ok_iff_shared_family_or_empty	formal/aeneas/lean/Cf.lean	infer_sst_cf
+atom	catalog:batch_is_empty	batch_is_empty_ok_iff_zero	formal/aeneas/lean/WriteAdmission.lean	batch_is_empty

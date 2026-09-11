@@ -108,6 +108,21 @@ theorem cas_absent_put_as_is_dente :
   unfold cas_absent_put_as_is
   rfl
 
+/-- RFC-0191 P2.3 (twenty-ninth if): the empty-batch gate returns ok v
+    exactly when v equals the machine comparison of the batch length
+    against zero — the computation rule of the do-block body (the body
+    holds no monadic step, so no disposition can hide behind a bind). -/
+theorem batch_is_empty_ok_iff_zero :
+    ∀ (n : U64) (v : Bool),
+      (batch_is_empty n = ok v) ↔ ((n = 0#u64 : Bool) = v) := by
+  intro n v
+  unfold batch_is_empty
+  constructor
+  · intro h
+    injection h with _
+  · intro h
+    rw [h]
+
 /-- `put_if_eq`: live == expected ⇒ put. -/
 theorem cas_eq_put_match_puts :
     cas_eq_put true = ok true := by
