@@ -86,6 +86,13 @@ pool honesto manda sobre a meta numérica).
    (`persist_hist_node_counts_on_live_queued_is_not_ok`, 1 passed
    via --lib)
 
+   — 3/4 `done`: `persist_fence_node_counts_fate_iff`
+   (Membership.lean; cerca de aborto persiste em TODA réplica
+   local exatamente quando o nó é local), cap 49→48,
+   floor_atom 75→76, floor_extract 203→202; planta DST verde
+   (`persist_fence_node_counts_on_live_queued_is_not_ok`, 1
+   passed via --lib)
+
 ### P1 — next
 
 3. **P1.1:** cadências membership 3/6 + 4/6 — `recover_apply_node`,
