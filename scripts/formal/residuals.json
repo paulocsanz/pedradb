@@ -82,7 +82,7 @@
   "db_rs_extracted": false,
   "proof_depth": {
    "extract": 247,
-   "close": 3,
+   "close": 4,
    "atom": 31,
    "model": 17,
    "count": 1
