@@ -156,10 +156,14 @@ o número 0,37× desta célula é **pre-pipeline** (era 0178/0183/0184) — a
       A/B serial: mesmas 23 falhas do baseline, +5 verdes; musl exit 0 —
       status: `done (meter final P1.1 pendente)`
 - [ ] **P1.1** meter Linux final (cartaz): sweep de regressão group vs
-      default nas 17 formas oficiais (imagem `p201o`, 3 rounds quiet,
-      mesmo boot) + A/B antes/depois do corte com env limpo (default =
-      auto) — status: `in_progress` (sweep rodando 2026-09-11; o flip só
-      conta como cartaz com o min-of-3 da coluna default pós-corte)
+      default nas 20 formas (imagem `p201o`, 3 rounds quiet, mesmo boot) +
+      A/B antes/depois do corte com env limpo (default = auto) — status:
+      `in_progress` (sweep DONE e adjudicado 2026-09-11,
+      `findings/2026-09-11-p201o-sweep/`: os 10 flags paired são todos de
+      formas single-threaded/read-only — braços código-idênticos, ruído da
+      caixa (noise floor 0,561 entre braços idênticos); a única forma onde
+      os braços divergem mecanicamente é mc50: 1,034→**1,894** min-of-3;
+      A/B pós-corte `p201q` auto-vs-pin0 rodando)
 - [ ] **P1.2** re-split quieto pós-0193 + apply_mc4/overwrite na mesma
       janela (0192 P1.1/P1.2) — status: `blocked`
 - [ ] **P1.3** ycsb_f mc4 (0193 P0.5) e o eixo `ratio_hat(L)` do 0197 P1.4
@@ -200,7 +204,7 @@ mediu mc50) e o meter P1.1 é o único caminho para virar cartaz.
 | P0.1 | p0 | drain completo pipeline (ousocap 256) + kernel | re-opened | wipe 2026-09-10 23:49 (`reset --hard` paralela); kernel re-registrado no `lib.rs` | 2026-09-11 |
 | P0.2 | p0 | spin ciente de oversubscription + twins | re-opened | idem; alvo = bypass herd da árvore viva (pós-meter) | 2026-09-11 |
 | P0.3 | p0 | merge assíncrono cliente-eixo (`writers > ncpu`) + pin env | done | kernel + wiring + 5 testes; A/B serial limpo; base = meter de atribuição 2026-09-11 | 2026-09-11 |
-| P1.1 | p1 | sweep regressão 17 formas + A/B antes/depois pós-corte | in_progress | `p201o` rodando (3 rounds × 17 formas × 2 variantes) | 2026-09-11 |
+| P1.1 | p1 | sweep regressão 20 formas + A/B antes/depois pós-corte | in_progress | sweep `p201o` DONE+adjudicado (10 flags = ruído código-idêntico; mc50 1,034→1,894); A/B `p201q` (auto vs pin0) rodando | 2026-09-11 |
 | P1.2 | p1 | re-split quieto + apply/overwrite | blocked | 0192 P1.1/P1.2 | 2026-09-10 |
 | P1.3 | p1 | ycsb_f + ratio_hat(L) | blocked | 0193 P0.5 / 0197 P1.4 | 2026-09-10 |
 | P2.1 | p2 | preallocate WAL off-lock | deferred | 4,1 s/25 s (p99.9+; hydrate 15M) | 2026-09-10 |
