@@ -1607,7 +1607,6 @@
     "crates/pedradb-store/src/txn_kernel.rs"
    ],
    "entry": "unreserve_si_gen",
-   "data_fate": true,
    "live_callers": [
     {
      "file": "crates/pedradb-store/src/lib.rs",
@@ -1618,6 +1617,10 @@
    "dst_plant": {
     "file": "crates/pedradb-store/src/txn_kernel.rs",
     "test": "unreserve_only_if_still_ours"
+   },
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0212 P2.1 (F49): desfaz a reserva sse nada reservou depois (stamped>0 e current==stamped); as-is rolava o contador para tras mesmo gen ja avancada (reemite a mesma gen)"
    }
   },
   {

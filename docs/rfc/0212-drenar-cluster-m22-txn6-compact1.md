@@ -287,6 +287,15 @@ pool honesto manda sobre a meta numérica).
    cap 29→28, floor_atom 95→96, floor_extract 183→182; planta DST
    verde (`reserve_si_gen_on_live_queued_is_not_ok`, no mesmo lote
    paralelo)
+
+   — 6/7 `done`: `unreserve_si_gen_fate_iff`
+   (StoreTxn.lean; desfaz a reserva EXATAMENTE quando nada
+   reservou depois (`stamped>0 ∧ current==stamped` → `stamped−1`,
+   senão `current`); o as-is rolava o contador para trás mesmo
+   com gen já avançada — reemite a mesma gen), cap 28→27,
+   floor_atom 96→97, floor_extract 182→181; planta DST verde
+   (`unreserve_si_gen_on_live_queued_is_not_ok`, no mesmo lote
+   paralelo)
 7. **P2.2:** composição ∀ do protocolo de fim-de-fila queued
    (finish: discard-leader local ∧ persist fence/hist conforme o
    fate) sobre atoms registrados em nova compose lib (zero
@@ -306,7 +315,7 @@ pool honesto manda sobre a meta numérica).
 | P1.1 | p1 | Cadências membership 3/6+4/6 — recover+open ×8 | done | e93c7b0f + 909dfb62 + 4b3c6ee8 + f2497120 + 96001f96 + e3f59f57 + 32b85288 + este commit (8 atoms, 8 commits; números exatos) | 2026-09-11 |
 | P1.2 | p1 | Cadências membership 5/6+6/6 — joint+slot ×6; ZERO data_fate | done | fe29d5d4 + 142b2efb + 1223b824 + 38b468b4 + a8776aa8 + este commit (6 atoms, 6 commits; números exatos; membership 22/22 ZERO) | 2026-09-11 |
 | P1.3 | p1 | Veredito datado dos medidos ausentes | done | este commit (veredito: 0 ausentes nas 22 promoções; âncoras green antes/depois) | 2026-09-11 |
-| P2.1 | p2 | Cadência final — txn ×6 + compact ×1; cluster ZERO | doing | 0e86d730 + 6b8d3454 + de09a2c3 + 11fc86f1 + este commit (5/7) | 2026-09-11 |
+| P2.1 | p2 | Cadência final — txn ×6 + compact ×1; cluster ZERO | doing | 0e86d730 + 6b8d3454 + de09a2c3 + 11fc86f1 + a795d062 + este commit (6/7) | 2026-09-11 |
 | P2.2 | p2 | Composição ∀ fim-de-fila + sweep final + flip done | todo | — | 2026-09-11 |
 
 ## Critérios de aceite

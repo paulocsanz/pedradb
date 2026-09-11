@@ -290,3 +290,28 @@ theorem reserve_si_gen_fate_iff :
   cases r with
   | mk nc rs => simp [eq_comm]
 
+/-- RFC-0212 P2.1 (store-txn cadence, atom `catalog:unreserve_si_gen`):
+    the unreserve rewinds EXACTLY when the stamp is positive and the
+    counter still holds our reservation — otherwise the counter
+    stays — fate forall over the extracted body (F49); the AS-IS
+    mutant blindly rewinds to `stamped - 1` even when the counter
+    moved past our reservation (clobbers a newer reserve — the lie
+    the DST plant `unreserve_si_gen_on_live_queued_is_not_ok`
+    refutes). -/
+theorem unreserve_si_gen_fate_iff :
+    ∀ (current stamped v : U64),
+      (unreserve_si_gen current stamped = ok v) ↔
+        ((v = core.num.U64.saturating_sub stamped 1#u64
+            ∧ stamped > 0#u64 ∧ current = stamped)
+          ∨ (v = current
+            ∧ (¬ (stamped > 0#u64) ∨ ¬ (current = stamped)))) := by
+  intro current stamped v
+  unfold unreserve_si_gen
+  by_cases hgt : stamped > 0#u64
+  · by_cases heq : current = stamped
+    · simp [hgt, heq]
+      exact eq_comm
+    · simp [hgt, heq]
+      exact eq_comm
+  · simp [hgt]
+    exact eq_comm
