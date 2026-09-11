@@ -102,9 +102,12 @@ sendo Pedra vs RocksDB default `sync=false` (`ROCKS_PARITY_SYNC=0`).
 
 ### P1 — next wave (a base do merge e a ponte de estrutura)
 
-- [ ] **P1.1** `merge_output_reach` + corolário da saída alcançável
+- [x] **P1.1** `merge_output_reach` + corolário da saída alcançável
   (composição com `merge_chain_preserves_inv_lsm`) em `Merge.lean` —
-  status: `todo`
+  status: `done` (saída em ordem de EMISSÃO a partir da vazia, um passo
+  por `emit`; ponte `merge_output_reach_chain`: emissão lida de trás
+  pra frente É cadeia `merge_chain`; corolário compõe ponte +
+  corolário da cadeia — duas citações, zero re-prova)
 - [ ] **P1.2** Ponte sift↔newest-first: a premissa estrutural da cadeia
   sobrevive ao `sift_step` (cita `merge_sift_step_repairs_iff`) —
   status: `todo`
@@ -123,7 +126,7 @@ sendo Pedra vs RocksDB default `sync=false` (`ROCKS_PARITY_SYNC=0`).
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | Alcançabilidade da classe write-path (Inv-WAL) | done | inv_wal_write_reachable | 2026-09-11 |
 | P0.2 | p0 | Quarto close de glue registrado | todo | — | 2026-09-11 |
-| P1.1 | p1 | Base de saída do merge + corolário alcançável | todo | — | 2026-09-11 |
+| P1.1 | p1 | Base de saída do merge + corolário alcançável | done | merge_output_reach_preserves_inv_lsm | 2026-09-11 |
 | P1.2 | p1 | Ponte sift_step↔newest-first | todo | — | 2026-09-11 |
 | P2.1 | p2 | Cadência cap/floor_close contínua | todo | — | 2026-09-11 |
 | P2.2 | p2 | Sweep final de gates | todo | — | 2026-09-11 |

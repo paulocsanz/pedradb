@@ -489,3 +489,44 @@ theorem bound_to_owned_excluded (s) :
         ok (core.ops.range.Bound.Excluded b1)) := by
   unfold merge.bound_to_owned
   rfl
+
+/-! ### RFC-0200 P1.1 — saída de merge alcançável (base: saída vazia) -/
+
+/-- Saída produzida pelo merge: começa vazia e recebe um passo por
+vez, EM ORDEM DE EMISSÃO (o passo recém-emissionado entra no fim) —
+cada passo com o topo do heap newest-first (premissa estrutural por
+passo). -/
+inductive merge_output_reach : Nat → List MergeStep → Prop
+  | empty : merge_output_reach 0 []
+  | emit (k : Nat) (s : MergeStep) (out : List MergeStep) :
+      merge_step_newest_first s →
+      merge_output_reach k out →
+      merge_output_reach (k + 1) (out ++ [s])
+
+/-- Ponte produção→cadeia (RFC-0200 P1.1): uma saída alcançável em
+ordem de emissão, lida de trás pra frente, É uma cadeia `merge_chain`
+— o construtor cons da cadeia é a emissão mais recente. -/
+theorem merge_output_reach_chain (k : Nat) (out : List MergeStep)
+    (h : merge_output_reach k out) : merge_chain k out.reverse := by
+  induction h with
+  | empty => exact merge_chain.nil
+  | emit k' s out' hnewest _ IH =>
+      show merge_chain (k' + 1) (out' ++ [s]).reverse
+      rw [List.reverse_append]
+      exact merge_chain.cons s k' out'.reverse hnewest IH
+
+/-- RFC-0200 P1.1 COROLÁRIO: toda saída que o merge produz a partir da
+saída vazia (um passo por emissão, todo topo newest-first) contém
+apenas versões genuinamente live nas que o filtro respondeu live —
+composição da ponte com o corolário da cadeia (RFC-0198 P1.3);
+nada é re-provado. -/
+theorem merge_output_reach_preserves_inv_lsm :
+    ∀ (k : Nat) (out : List MergeStep),
+      merge_output_reach k out →
+      ∀ s ∈ out,
+        merge_step_answers_live s →
+          s.kind = key.ValueType.Value ∧ s.range_hidden = false := by
+  intro k out hreach s hs hlive
+  have hchain := merge_output_reach_chain k out hreach
+  have hmem : s ∈ out.reverse := List.mem_reverse.2 hs
+  exact merge_chain_preserves_inv_lsm k out.reverse hchain s hmem hlive
