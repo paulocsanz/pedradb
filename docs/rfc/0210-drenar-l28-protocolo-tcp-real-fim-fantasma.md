@@ -123,7 +123,7 @@ paralela) — este RFC não os toca.
 2. **P0.2:** cadência l28 2/4 — `l28_tcp_trunc`, `l28_tcp_odrop`,
    `l28_tcp_abort`, `l28_tcp_nowms` (cap 80→76, `floor_atom`
    51→55, `floor_extract` 227→223); plantas `removed_*` verdes —
-   status: `doing`
+status: `done`
    — 1/4 `done`: `l28_tcp_trunc_ok_fate_iff` (L28.lean; disco sem
    `index > commit` na réplica tirada de `ids` ⟺ o truncate
    persistiu), cap 80→79, floor_atom 51→52, floor_extract 227→226;
@@ -135,6 +135,11 @@ paralela) — este RFC não os toca.
    — 3/4 `done`: `l28_tcp_abort_ok_fate_iff` (L28.lean; intents 2PC
    remanescentes apagados ⟺ o abort apagou), cap 78→77,
    floor_atom 53→54, floor_extract 225→224; planta TCP REAL verde
+   — 4/4 `done`: `l28_tcp_nowms_ok_fate_iff` (L28.lean; `now_ms`
+   persistido na réplica tirada de `ids` ⟺ o persist aconteceu),
+   cap 77→76, floor_atom 54→55, floor_extract 224→223; planta TCP
+   REAL verde — cadência 2/4 fechada nos números exatos do RFC (cap
+   80→76, floor_atom 51→55, floor_extract 227→223)
 
 ### P1 — next wave (depends on P0 or clearly deferrable)
 
@@ -172,7 +177,7 @@ paralela) — este RFC não os toca.
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | Cadência l28 1/4 (dterm, part, apply, napply) | done | 9a0869ee + d6ea1e8b + 3d00e259 + este commit (4 atoms, 4 commits) | 2026-09-11 |
-| P0.2 | p0 | Cadência l28 2/4 (trunc, odrop, abort, nowms) | todo | — | 2026-09-11 |
+| P0.2 | p0 | Cadência l28 2/4 (trunc, odrop, abort, nowms) | done | 4b44881b + df80dd90 + a4ef110f + este commit (4 atoms, 4 commits) | 2026-09-11 |
 | P1.1 | p1 | Cadências l28 3/4 + 4/4 (hist…dsc, ×8) | todo | — | 2026-09-11 |
 | P1.2 | p1 | Veredito datado dos 7 fantasmas de catálogo | todo | — | 2026-09-11 |
 | P2.1 | p2 | Cadência final l28 ×6 — bloco ZERO data_fate | todo | — | 2026-09-11 |

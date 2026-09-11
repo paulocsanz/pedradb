@@ -3908,7 +3908,6 @@
     "crates/pedradb-store/src/bin/cluster_real.rs"
    ],
    "entry": "l28_tcp_nowms_ok",
-   "data_fate": true,
    "handlers": [
     "tcp_node_removed_now_ms_ok"
    ],
@@ -3922,7 +3921,11 @@
      "file": "crates/pedradb-store/src/bin/cluster_real.rs",
      "handler": "tcp_node_removed_now_ms_ok"
     }
-   ]
+   ],
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0210 P0.2 l28 cadence 2/4: after a real TCP plant + process death now_ms is persisted on a replica dropped from ids exactly when the persist happened (fate forall over the extracted pure-lift body, L28.lean); AS-IS ok-true skips the now_ms persist (0134 leftover)"
+   }
   },
   {
    "id": "l28_tcp_dterm",
