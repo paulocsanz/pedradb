@@ -24,6 +24,9 @@
 #   - twin-contracts: every registered count row bound to the twin test
 #     that drives the production fn + its work annotation; the TSV is
 #     machine-emitted by the derive tool (hand edit = red).
+#   - inventory-terminal: the ledger "Escada de contagem" table is
+#     terminal — count (theorem registered) or deferido (dated reason);
+#     todo in the ledger is red.
 name: verification-gates
 
 on:
@@ -168,3 +171,18 @@ jobs:
           grep -q 'GATE twin-contracts: GREEN' /tmp/t1.log
           python3 scripts/check_twin_contracts.py --selftest | tee /tmp/ts.log
           grep -q 'SELFTEST twin-contracts: 6/6 sabotages caught' /tmp/ts.log
+
+  inventory-terminal:
+    name: RFC-0203 P0.2 inventory terminality (count | deferido-dated; no todo)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: gate (twice, logs identical) + selftest (5/5 redness)
+        run: |
+          python3 scripts/check_inventory_terminal.py | tee /tmp/i1.log
+          python3 scripts/check_inventory_terminal.py | tee /tmp/i2.log
+          cmp /tmp/i1.log /tmp/i2.log
+          grep -q 'GATE inventory-terminal: GREEN' /tmp/i1.log
+          python3 scripts/check_inventory_terminal.py --selftest | tee /tmp/is.log
+          grep -q 'SELFTEST inventory-terminal: 5/5 sabotages caught' /tmp/is.log

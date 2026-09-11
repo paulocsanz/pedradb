@@ -98,11 +98,16 @@ cartaz. Cartaz continua sendo Pedra vs RocksDB default `sync=false`
   tal — `wal_commit_plan`@WorkIo, `bloom_may_contain`@BloomCount —;
   TSV byte-idêntico à emissão da ferramenta, edição à mão = RED;
   selftest 6/6; job `twin-contracts` no `verification-gates.yml`)
-- [ ] **P0.2** Terminalidade do inventário como gate:
+- [x] **P0.2** Terminalidade do inventário como gate:
   `scripts/check_inventory_terminal.py` — parse da tabela de inventário no
   `docs/verification-ledger.md`; toda linha termina `count` (com teorema
   registrado no ratchet) ou `deferido` com data+motivo; qualquer `todo`
-  falha o gate; selftest com linha `todo` plantada pega — status: `todo`
+  falha o gate; selftest com linha `todo` plantada pega — status: `done`
+  (2026-09-11; 7 linhas count todas registradas, bidirecional — teorema
+  sem linha no inventário também é RED; selftest 5/5 inclui par novo
+  `todo` e par anônimo sem `catalog:`; linha auto_flush_due ganha seu
+  `catalog:auto_flush_due` no MESMO commit; job `inventory-terminal` no
+  `verification-gates.yml`)
 
 ### P1 — next wave (depends on P0 or clearly deferrable)
 
@@ -137,7 +142,7 @@ cartaz. Cartaz continua sendo Pedra vs RocksDB default `sync=false`
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | Contrato de twin derivado + gate (selftest) | done | 2026-09-11 | 2026-09-11 |
-| P0.2 | p0 | Terminalidade do inventário como gate | todo | — | 2026-09-11 |
+| P0.2 | p0 | Terminalidade do inventário como gate | done | 2026-09-11 | 2026-09-11 |
 | P1.1 | p1 | Âncora darwin F_FULLFSYNC medida e datada | todo | — | 2026-09-11 |
 | P1.2 | p1 | Tabela de âncoras por classe consumida por teste | todo | — | 2026-09-11 |
 | P2.1 | p2 | Cadência de novos pares gateada (rito no runbook) | todo | — | 2026-09-11 |
