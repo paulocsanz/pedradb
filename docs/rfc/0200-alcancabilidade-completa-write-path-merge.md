@@ -96,9 +96,17 @@ sendo Pedra vs RocksDB default `sync=false` (`ROCKS_PARITY_SYNC=0`).
   status: `done` (família indutiva Nat-indexada sobre QUALQUER
   construtor de `wal_write_step` a partir de `wal_state_init`; build
   verde primeira tentativa, sorry 0)
-- [ ] **P0.2** Quarto close de glue registrado (par do board compose a
+- [x] **P0.2** Quarto close de glue registrado (par do board compose a
   escolher pelo corpo tratável; iff ∀ ∃-mold, floor_close 3→4 no mesmo
-  commit) — status: `todo`
+  commit) — status: `done` (par `wal_rotate_decision ∘
+  wal_segment_is_empty` — o passo do caller real `try_rotate_wal`
+  (db.rs): decisão, recheck de inflight sob a mutex, segmento vazio
+  pula; teorema `try_rotate_step_rotates_iff_pins_clear_segment_live`
+  em `Flush.lean`: o passo dispara `rotate_wal_now` EXATAMENTE quando
+  decisão = RotateWal ∧ recheck idle ∧ segmento COM dados (nunca
+  reescreve MANIFEST ociosamente); catalog pair novo
+  `wal_rotate_decision` (298→299) + linha close + floor_close 3→4 +
+  residuals close 5 no MESMO commit; build Flush verde, sorry 0)
 
 ### P1 — next wave (a base do merge e a ponte de estrutura)
 
@@ -138,7 +146,7 @@ sendo Pedra vs RocksDB default `sync=false` (`ROCKS_PARITY_SYNC=0`).
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | Alcançabilidade da classe write-path (Inv-WAL) | done | inv_wal_write_reachable | 2026-09-11 |
-| P0.2 | p0 | Quarto close de glue registrado | todo | — | 2026-09-11 |
+| P0.2 | p0 | Quarto close de glue registrado | done | try_rotate_step_rotates_iff_pins_clear_segment_live (Flush.lean) | 2026-09-11 |
 | P1.1 | p1 | Base de saída do merge + corolário alcançável | done | merge_output_reach_preserves_inv_lsm | 2026-09-11 |
 | P1.2 | p1 | Ponte sift_step↔newest-first | done | TaggedSift + tagged_step_stays_iff_no_repair + tagged_stay_extends_chain | 2026-09-11 |
 | P2.1 | p2 | Cadência cap/floor_close contínua | todo | — | 2026-09-11 |

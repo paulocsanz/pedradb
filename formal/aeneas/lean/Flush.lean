@@ -169,3 +169,69 @@ theorem occ_snap_uses_published_ok_iff_inflight :
     injection h with _
   · intro h
     rw [h]
+
+/-- Any ok-valued Result bind forces the bound term to be ok. -/
+private theorem bind_ok_inv {α β} (x : Result α) (f : α → Result β) (v : β)
+    (h : Aeneas.Std.bind x f = ok v) : ∃ a, x = ok a ∧ f a = ok v := by
+  cases x with
+  | ok a => exact ⟨a, rfl, h⟩
+  | fail e => exact absurd h (by simp)
+  | div => exact absurd h (by simp)
+
+/-- An ok chain reassembles into an ok bind. -/
+private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : β}
+    (a : α) (hx : x = ok a) (h : f a = ok v) : Aeneas.Std.bind x f = ok v := by
+  rw [hx]
+  exact h
+
+/-- RFC-0200 P0.2 (fourth registered glue close): the caller step of
+    `try_rotate_wal` (db.rs) composes the plan `wal_rotate_decision`
+    with the callee `wal_segment_is_empty` in exactly this order —
+    decision first (KeepWal skips), inflight recheck under the WAL
+    mutex skips, and an EMPTY segment skips (an idle poll must never
+    rewrite MANIFEST). The step fires `rotate_wal_now` EXACTLY when
+    the decision is RotateWal, the recheck is idle and the segment
+    HAS data. -/
+theorem try_rotate_step_rotates_iff_pins_clear_segment_live :
+    ∀ (s : WalPinState) (recheck_inflight : Bool) (pos : Aeneas.Std.U64),
+      (Aeneas.Std.bind (wal_rotate_decision s)
+        (fun a =>
+          match a with
+          | WalRotateAction.RotateWal =>
+              if recheck_inflight = true then ok false
+              else Aeneas.Std.bind (wal_segment_is_empty pos)
+                (fun e => ok (!e))
+          | WalRotateAction.KeepWal => ok false)) = ok true ↔
+      (wal_rotate_decision s = ok WalRotateAction.RotateWal
+        ∧ recheck_inflight = false
+        ∧ wal_segment_is_empty pos = ok false) := by
+  intro s recheck_inflight pos
+  constructor
+  · intro hval
+    obtain ⟨a, hw, hm⟩ := bind_ok_inv _ _ _ hval
+    split at hm
+    · split at hm
+      · next _ =>
+          injection hm with hm'
+          simp at hm'
+      · next hr =>
+          obtain ⟨e, he, hfin⟩ := bind_ok_inv _ _ _ hm
+          injection hfin with hnot
+          have hef : e = false := by
+            cases e with
+            | true => exact absurd hnot (by simp)
+            | false => rfl
+          rw [hef] at he
+          refine ⟨hw, ?_, he⟩
+          cases recheck_inflight with
+          | true => exact absurd rfl hr
+          | false => rfl
+    · injection hm with hm'
+      simp at hm'
+  · rintro ⟨hw, hr, he⟩
+    refine bind_intro _ hw ?_
+    show (if recheck_inflight = true then ok false
+        else Aeneas.Std.bind (wal_segment_is_empty pos)
+          (fun e => ok (!e))) = ok true
+    rw [hr, if_neg (by simp)]
+    exact bind_intro _ he rfl
