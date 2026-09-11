@@ -1,6 +1,10 @@
-# RFC-0211 — drenar o bloco cluster: membership ×22 + txn ×6 + compact ×1
+# RFC-0212 — drenar o bloco cluster: membership ×22 + txn ×6 + compact ×1
 
 **Status:** draft
+
+> Renumerada de 0211 para 0212 em 2026-09-11: colisão com a
+> `0211-escalonamento-rmw-mc4-drenar-grupo.md` (dela, a262f095) —
+> renumera-se a minha, nunca a dela.
 
 ## Tese
 
