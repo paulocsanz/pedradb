@@ -123,14 +123,20 @@ cartaz. Cartaz continua sendo Pedra vs RocksDB default `sync=false`
   F_FULLFSYNC p50 4,00/4,08 ms, multiplicador 206–227×; loadavg 10–16
   nos dois runs ⇒ rótulo **DIAG** honesto;
   `findings/2026-09-11-rfc0203-p11-darwin-fullfsync-anchor.md`)
-- [ ] **P1.2** Tabela de âncoras por classe consumida:
+- [x] **P1.2** Tabela de âncoras por classe consumida:
   `scripts/ratchet/host_anchors.tsv` (classe, âncora, valor ns, data,
   host, rótulo quiet/DIAG, fonte) com linux = referência à
   `LINUX_QUIET_0189_P01` (sem duplicar valor em Lean) e darwin da P1.1;
   teste de consumo (estende o tie do 0199 ou novo teste): ambas as classes
   presentes e datadas, toda linha tem fonte, e os multiplicadores count
   seguem class-independent citando os teoremas any-class do `WorkIo.lean`
-  — o kernel da 0192 não é editado — status: `todo`
+  — o kernel da 0192 não é editado — status: `done` (2026-09-11; 3 linhas
+  — linux_fdatasync quiet (pino de fases por op, labeled-stale pré-0193
+  na fonte), darwin_fdatasync + darwin_fullfsync DIAG do P1.1; consumo
+  `crates/pedradb-core/tests/host_anchor_table.rs` (2 tests: classes
+  datadas+fontadas+grammar valor; teoremas any-class presentes no
+  WorkIo.lean); ponteiro vivo no ledger §Escada de contagem; nenhum
+  arquivo Lean tocado)
 
 ### P2 — later / polish
 
@@ -148,7 +154,7 @@ cartaz. Cartaz continua sendo Pedra vs RocksDB default `sync=false`
 | P0.1 | p0 | Contrato de twin derivado + gate (selftest) | done | 2026-09-11 | 2026-09-11 |
 | P0.2 | p0 | Terminalidade do inventário como gate | done | 2026-09-11 | 2026-09-11 |
 | P1.1 | p1 | Âncora darwin F_FULLFSYNC medida e datada | done | 2026-09-11 | 2026-09-11 |
-| P1.2 | p1 | Tabela de âncoras por classe consumida por teste | todo | — | 2026-09-11 |
+| P1.2 | p1 | Tabela de âncoras por classe consumida por teste | done | 2026-09-11 | 2026-09-11 |
 | P2.1 | p2 | Cadência de novos pares gateada (rito no runbook) | todo | — | 2026-09-11 |
 
 ## Acceptance Criteria

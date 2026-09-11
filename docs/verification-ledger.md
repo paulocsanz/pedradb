@@ -53,6 +53,19 @@ datada):
 | Bloom probe (`catalog:bloom_may_contain`) | k hashes da política | probes = k por consulta (loop extraído) | **count** (P2.3: `bloom_may_contain_work_bound` — work twin ≤ k, um passo por probe; pontes `bloom_may_contain_body_cont_step` (cada `cont` avança o índice exatamente 1, add sem overflow) + `bloom_may_contain_body_done_true_at_k` (`done true` só ao atingir k — bit claro short-circuita com `done false`, estritamente abaixo); `BloomCount.lean`; twin `tests/bloom_probe_count.rs` — primitivos reais `probe_bit`/`bit_index`/`test_bit`/`hash_pair` agora pub, contador no teste, resposta conferida contra o `may_contain` real) |
 | Scan/range (`catalog:scan_guard`) | arquivos × tombstones | decisão por arquivo ≤ 1 + \|tombs\|; scan linear no emitido | **count** (P1.4: `scan_decision_work_bound` — work ≤ files + Σ tombs; pontes `scan_overlap_short_circuit` (overlap short-circuit no extract) + `scan_closure_one_check_per_call` (1 `tombstone_reaches_window` por chamada do closure gerado); `ScanDecisionCount.lean`; twin `tests/scan_decision_count.rs` — par carrega close E count) |
 
+Âncoras ns por classe de host (medidas datadas — nunca teorema,
+RFC-0187): tabela viva `scripts/ratchet/host_anchors.tsv`, consumida
+pelo teste `crates/pedradb-core/tests/host_anchor_table.rs` — toda
+classe `HostIoClass` (`linux_fdatasync`, `darwin_fullfsync`) presente,
+datada e fontada; rótulo quiet/DIAG honesto (decidido do loadavg do
+run). As contagens seguem class-independent (teoremas any-class do
+`WorkIo.lean`); a âncora só preenche o custo físico ns por classe —
+linux = `LINUX_QUIET_0189_P01` (RFC-0189 P0.1, 2026-09-10, quiet, pino
+de fases por op, labeled-stale pré-0193); darwin =
+`DARWIN_DIAG_0203_P11` (2026-09-11, DIAG honesto — loadavg 10–16:
+fdatasync p50 17,7 µs vs `F_FULLFSYNC` p50 4,0 ms intra-host,
+`findings/2026-09-11-rfc0203-p11-darwin-fullfsync-anchor.md`).
+
 Movimento de linha: `todo → count` exige teorema ∀ sem sorry sobre o
 extract + twin test + linha no registro + `floor_count` no MESMO commit
 (RFC-0199 P0.2 estabelece a receita). A ferramenta própria de derivação
