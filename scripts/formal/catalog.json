@@ -3722,7 +3722,6 @@
     "crates/pedradb-store/src/bin/cluster_real.rs"
    ],
    "entry": "l28_tcp_part_ok",
-   "data_fate": true,
    "handlers": [
     "tcp_node_removed_not_participating"
    ],
@@ -3736,7 +3735,11 @@
      "file": "crates/pedradb-store/src/bin/cluster_real.rs",
      "handler": "tcp_node_removed_not_participating"
     }
-   ]
+   ],
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0210 P0.1 l28 cadence 1/4: after a removal a removed voter is reported participating exactly when the participating scan says so (stale CLI/nodes map must not count it; fate forall over the extracted pure-lift body, L28.lean); AS-IS ok-true skips the scan (0127 leftover)"
+   }
   },
   {
    "id": "l28_tcp_apply",

@@ -75,3 +75,4 @@ atom	catalog:joint_leave	joint_still_active_fate_iff	formal/aeneas/lean/Membersh
 atom	catalog:l28_tcp_left	l28_tcp_left_ok_fate_iff	formal/aeneas/lean/L28.lean	l28_tcp_left_ok
 atom	catalog:l28_tcp_hw	l28_tcp_hw_ok_fate_iff	formal/aeneas/lean/L28.lean	l28_tcp_hw_ok
 atom	catalog:l28_tcp_dterm	l28_tcp_dterm_ok_fate_iff	formal/aeneas/lean/L28.lean	l28_tcp_dterm_ok
+atom	catalog:l28_tcp_part	l28_tcp_part_ok_fate_iff	formal/aeneas/lean/L28.lean	l28_tcp_part_ok

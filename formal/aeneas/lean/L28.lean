@@ -378,3 +378,19 @@ theorem l28_tcp_dterm_ok_fate_iff :
   intro b v
   unfold l28_tcp_dterm_ok
   cases b <;> cases v <;> simp
+
+/-- RFC-0210 P0.1 (l28 cadence 1/4, atom `catalog:l28_tcp_part`):
+    after a removal, a removed voter is reported participating
+    EXACTLY when the participating scan says so — a stale CLI/nodes
+    map must not count it — fate forall over the extracted pure-lift
+    body; the AS-IS `ok true` mutant skips the scan (the 0127
+    leftover: reopen flag only — the lie the real TCP plant
+    `l28_real_tcp_participating_after_remove` refutes). -/
+theorem l28_tcp_part_ok_fate_iff :
+    ∀ (b : Bool) (v : Bool),
+      (l28_tcp_part_ok b = ok v) ↔
+        ((v = true ∧ b = true)
+          ∨ (v = false ∧ b = false)) := by
+  intro b v
+  unfold l28_tcp_part_ok
+  cases b <;> cases v <;> simp
