@@ -164,3 +164,42 @@ theorem d1_plan_append_preserves_inv_wal :
   · cases sync_fail
     · exact wal_append_preserves_inv_wal s s' n hinv happ
     · exact absurd hplan (by intro hh; simp at hh)
+
+/-! ## RFC-0198 P1.1 — base inicial + alcançabilidade indutiva (Inv-WAL) -/
+
+/-- Estado inicial do WAL (log vazio): os três watermarks em zero — o
+que a produção constrói para um log novo (`wal_state_of 0 0 0`: só há o
+prefixo vazio, nada acked, nada synced). -/
+def wal_state_init : wal.wal_state_kernel.WalState :=
+  { acked := 0#u64, synced := 0#u64, written := 0#u64 }
+
+/-- BASE da indução: o log vazio satisfaz Inv-WAL (zero ⊆ zero ⊆ zero). -/
+theorem inv_wal_init :
+    wal.wal_state_kernel.inv_wal wal_state_init = ok true := by
+  unfold wal.wal_state_kernel.inv_wal
+  rfl
+
+/-- Alcançabilidade por n appends ok (forma indutiva seL4): um estado é
+alcançável quando existe uma cadeia de `n` passos `wal_append` que
+retornam ok a partir do estado inicial. -/
+inductive wal_append_reach :
+    Nat → wal.wal_state_kernel.WalState → Prop
+  | zero : wal_append_reach 0 wal_state_init
+  | succ (m : Nat) (s s' : wal.wal_state_kernel.WalState) (k : U64) :
+      wal_append_reach m s →
+      wal.wal_state_kernel.wal_append s k = ok s' →
+      wal_append_reach (m + 1) s'
+
+/-- COROLÁRIO DE ALCANÇABILIDADE (RFC-0198 P1.1): todo estado alcançável
+por n appends satisfaz Inv-WAL. A base é `inv_wal_init`; cada passo é o
+lema um-passo REGISTRADO `wal_append_preserves_inv_wal` (RFC-0191 P2.1)
+— o indutivo apenas encadeia os passos, não os re-prova. -/
+theorem inv_wal_reachable :
+    ∀ (n : Nat) (s : wal.wal_state_kernel.WalState),
+      wal_append_reach n s →
+      wal.wal_state_kernel.inv_wal s = ok true := by
+  intro n s hr
+  induction hr with
+  | zero => exact inv_wal_init
+  | @succ m s s' k _hreach happ ih =>
+      exact wal_append_preserves_inv_wal s s' k ih happ

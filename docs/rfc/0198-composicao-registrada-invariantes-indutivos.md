@@ -72,10 +72,11 @@
 
 ### P1 — next wave (depends on P0 or clearly deferrable)
 
-- [ ] **P1.1** Inv-WAL base indutiva: `inv_wal_init` (estado inicial
+- [x] **P1.1** Inv-WAL base indutiva: `inv_wal_init` (estado inicial
   satisfaz) + corolário `inv_wal_reachable` (todo estado alcançável por
   n appends satisfaz, citando `wal_append_preserves_inv_wal`) em
-  `WalState.lean` — status: `todo`
+  `WalState.lean` — status: `done` (predicado indutivo
+  `wal_append_reach`; passo = lema um-passo registrado, não re-provado)
 - [ ] **P1.2** Inv-WAL passo sync/fence: preservação pela classe de op
   sync/fence (fecha "todo passo do write path que toca o WAL preserva")
   — status: `todo`
@@ -109,7 +110,7 @@
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | Close de glue registrado: wal_commit_plan∘fence_on_sync_fail | done | wal_commit_plan_ok_iff_fence_chain | 2026-09-10 |
 | P0.2 | p0 | Close de glue registrado: occ_batch_plan∘occ_conflict | todo | — | 2026-09-10 |
-| P1.1 | p1 | Inv-WAL base + alcançabilidade | todo | — | 2026-09-10 |
+| P1.1 | p1 | Inv-WAL base + alcançabilidade | done | inv_wal_init + inv_wal_reachable | 2026-09-10 |
 | P1.2 | p1 | Inv-WAL passo sync/fence | todo | — | 2026-09-10 |
 | P1.3 | p1 | Inv-LSM corolário indutivo (k merges) | todo | — | 2026-09-10 |
 | P1.4 | p1 | Tokens write_pending_frame (2 handlers, coordenação concurrent.rs) | todo | — | 2026-09-10 |
