@@ -154,10 +154,17 @@ gateável, não desejo.
   terminam sem ciclo, sintético cobre os seis sabotes; rito executado
   — gate recusou honesto (loadavg 114), linhas DIAG continuam vivas;
   runbook §Re-âncora)
-- [ ] **P2.2** Âncora linux de barreira ISOLADA (ns de `fdatasync(2)`
+- [x] **P2.2** Âncora linux de barreira ISOLADA (ns de `fdatasync(2)`
   sozinho, não o pino de fases): requer caixa linux quiet; se a janela
   não existir, linha `deferido` datada no inventário da âncora via
-  vocabulário do 0203 — status: `todo`
+  vocabulário do 0203 — status: `done` (2026-09-11, desfecho deferido:
+  sem caixa linux quiet disponível — host desta sessão é darwin — a
+  linha `LINUX_ISOL_DEFER_0204_P22` (valor `-`, rótulo `deferido`,
+  datada) vive na tabela com finding que registra o porquê e o rito de
+  fechamento (`--gate-quiet` em linux imprime a linha pronta; supersede
+  a deferral, nunca apaga); consumo verde: linha VIVA medida por classe
+  continua única — o pino de fases quiet segue a âncora corrente de
+  `linux_fdatasync`)
 
 ## Status (living — update with every PR)
 
@@ -167,7 +174,7 @@ gateável, não desejo.
 | P1.1 | p1 | Espelhos restantes dos inscritos aposentados | done | 2026-09-11 | 2026-09-11 |
 | P1.2 | p1 | Bloom inscrito na ferramenta (anotação derivada) | done | 2026-09-11 | 2026-09-11 |
 | P2.1 | p2 | Rito de re-âncora com supersessão datada | done | 2026-09-11 | 2026-09-11 |
-| P2.2 | p2 | Âncora linux de barreira isolada (ou deferido datado) | todo | — | — |
+| P2.2 | p2 | Âncora linux de barreira isolada (ou deferido datado) | done | 2026-09-11 | 2026-09-11 |
 
 ## Acceptance Criteria
 
