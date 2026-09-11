@@ -38,6 +38,7 @@ COMPOSE=(
   ComposeScanCrc
   ComposeC1Membership
   ComposeConcurrent
+  LsmCompactCount
 )
 
 for lib in "${LIBS[@]}"; do

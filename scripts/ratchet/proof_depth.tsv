@@ -15,8 +15,14 @@
 # extract to atom; the extract freeze went stale there (276 frozen vs 275
 # live) — P1.5 recounts it honestly and moves floor_extract to 275 in the
 # SAME commit (a ladder promotion, not a lost extraction).
+# RFC-0199 adds the `count` credit (work-count theorem over an Aeneas
+# extract): floor_count counts REGISTERED count rows and only moves UP,
+# in the SAME commit as the theorem. Count is orthogonal to the ladder —
+# a pair may carry close AND count. residuals proof_depth.count equals
+# the live count of registered count rows.
 floor_extract 247
 floor_close 2
 floor_atom 31
+floor_count 1
 cap_data_fate 100
 handler_loc 111927

@@ -8,18 +8,21 @@ The proof ladder is extract -> close -> atom (RFC-0188). This gate pins it:
   floors only move up, same commit as the proof;
 - cap: `glue.data_fate` ABOVE cap = red — a new data-fate atom without an
   equivalent removal (trampoline monotonicity);
-- registry (`scripts/ratchet/close_proofs.tsv`): every close/atom row must
+- registry (`scripts/ratchet/close_proofs.tsv`): every close/atom/count row must
   resolve — theorem exists in the Lean file, statement carries a
   forall-binder (named property, not definitional equality over concrete
   inputs), file has zero `sorry`, catalog id resolves in catalog.json;
-- `residuals.json` `proof_depth.close/.atom` must EQUAL the LIVE count
+- `floor_count` (RFC-0199): count rows are the work-count credit (one per
+  catalog pair; orthogonal to close/atom — a pair may carry both). Floor
+  counts registered count rows and only moves up;
+- `residuals.json` `proof_depth.close/.atom/.count` must EQUAL the LIVE count
   (registered proofs + unregistered close/atom twins without extraction,
-  same rule as `pedra_formal.py`) — stale residual = red: counts move
-  with the proof, never after.
+  same rule as `pedra_formal.py`; count = registered rows) — stale residual
+  = red: counts move with the proof, never after.
 
 `--selftest` proves redness in memory: raised floor, stale residual,
-grown data_fate, and a broken registration row must each be caught; the
-healthy state must pass.
+grown data_fate, a broken registration row, and a stale count residual
+must each be caught; the healthy state must pass.
 """
 
 from __future__ import annotations
@@ -36,7 +39,7 @@ REGISTRY = REPO / "scripts" / "ratchet" / "close_proofs.tsv"
 RESIDUALS = REPO / "scripts" / "formal" / "residuals.json"
 CATALOG = REPO / "scripts" / "formal" / "catalog.json"
 
-INT_KEYS = ("floor_extract", "floor_close", "floor_atom", "cap_data_fate", "handler_loc")
+INT_KEYS = ("floor_extract", "floor_close", "floor_atom", "floor_count", "cap_data_fate", "handler_loc")
 
 
 def parse_floors(text: str) -> dict[str, int]:
@@ -65,11 +68,20 @@ def parse_registry(text: str) -> list[dict[str, str]]:
         if len(parts) != 5:
             raise SystemExit(f"GATE depth-floor: FAIL — close_proofs.tsv row needs 5 fields: {line!r}")
         kind, catalog_id, theorem, lean_file, entry = parts
-        if kind not in ("close", "atom"):
-            raise SystemExit(f"GATE depth-floor: FAIL — registry kind must be close|atom: {line!r}")
+        if kind not in ("close", "atom", "count"):
+            raise SystemExit(f"GATE depth-floor: FAIL — registry kind must be close|atom|count: {line!r}")
         rows.append(
             {"kind": kind, "catalog_id": catalog_id, "theorem": theorem, "lean_file": lean_file, "entry": entry}
         )
+    seen: set[tuple[str, str]] = set()
+    for row in rows:
+        key = (row["catalog_id"], row["kind"])
+        if key in seen:
+            raise SystemExit(
+                f"GATE depth-floor: FAIL — duplicate registry row {row['kind']} {row['catalog_id']} "
+                "(one credit per pair per kind)"
+            )
+        seen.add(key)
     return rows
 
 
@@ -80,6 +92,7 @@ def load_actual() -> dict[str, int]:
         "extract": depth["extract"],
         "close": depth["close"],
         "atom": depth["atom"],
+        "count": depth["count"],
         "data_fate": r["glue"]["data_fate"],
         "handler_loc": r["glue"]["handler_loc"],
     }
@@ -117,12 +130,30 @@ def registry_errors(rows: list[dict[str, str]], catalog_ids: set[str]) -> list[s
 
 
 def registered_map() -> dict[str, str]:
+    """Ladder depth overrides: close/atom rows only. A `count` row is the
+    RFC-0199 work credit — orthogonal to the correctness ladder, so it never
+    overrides a pair's depth (a pair can carry close AND count)."""
     out: dict[str, str] = {}
     for row in parse_registry(REGISTRY.read_text(encoding="utf-8")):
+        if row["kind"] == "count":
+            continue
         cid = row["catalog_id"]
         if cid.startswith("catalog:"):
             cid = cid[len("catalog:") :]
         out[cid] = row["kind"]
+    return out
+
+
+def registered_count_ids() -> set[str]:
+    """Catalog ids carrying a registered `count` row (RFC-0199 work credit)."""
+    out: set[str] = set()
+    for row in parse_registry(REGISTRY.read_text(encoding="utf-8")):
+        if row["kind"] != "count":
+            continue
+        cid = row["catalog_id"]
+        if cid.startswith("catalog:"):
+            cid = cid[len("catalog:") :]
+        out.add(cid)
     return out
 
 
@@ -132,11 +163,15 @@ def live_counts(catalog: dict, registered: dict[str, str]) -> dict[str, int]:
     extracted body); an UNREGISTERED twin counts at its twin_kind step
     only when its kernel has no Aeneas extract (RFC-0170 twin semantics).
     The kernel-extraction authority (AENEAS_EXTRACTS) is imported from
-    pedra_formal so the two gates agree by construction."""
+    pedra_formal so the two gates agree by construction.
+    RFC-0199 `count`: every registered count row counts once (the work
+    credit is orthogonal to the ladder); a MODEL-tier pair with a count
+    row graduates out of the model stand-in pool into the count tier."""
     sys.path.insert(0, str(REPO / "scripts" / "formal"))
     import pedra_formal
 
-    close = atom = 0
+    count_ids = registered_count_ids()
+    close = atom = count = 0
     for pair in catalog["pairs"]:
         pid = pair["id"]
         reg = registered.get(pid)
@@ -150,7 +185,9 @@ def live_counts(catalog: dict, registered: dict[str, str]) -> dict[str, int]:
             kernel = pair.get("kernel") or ""
             if not any(kernel == k for k, _ in pedra_formal.AENEAS_EXTRACTS):
                 close += 1
-    return {"close": close, "atom": atom}
+        # model + count row → graduated (no longer a stand-in)
+    count = sum(1 for row in parse_registry(REGISTRY.read_text(encoding="utf-8")) if row["kind"] == "count")
+    return {"close": close, "atom": atom, "count": count}
 
 
 def check(
@@ -178,7 +215,13 @@ def check(
             f"registered atom proofs {reg_atom} below floor {floors['floor_atom']} — "
             "a ladder proof regressed; floors only move up (RFC-0188)"
         )
-    for key in ("close", "atom"):
+    reg_count = sum(1 for r in rows if r["kind"] == "count")
+    if reg_count < floors["floor_count"]:
+        errs.append(
+            f"registered count proofs {reg_count} below floor {floors['floor_count']} — "
+            "a work-count proof regressed; floors only move up (RFC-0199)"
+        )
+    for key in ("close", "atom", "count"):
         if actual[key] != live[key]:
             errs.append(
                 f"residuals proof_depth.{key}={actual[key]} but live count is {live[key]} — "
@@ -210,7 +253,7 @@ def selftest() -> int:
         return 1
 
     caught = 0
-    total = 4
+    total = 5
 
     # S1: floor raised beyond the registered ladder proofs.
     tampered_floors = dict(floors)
@@ -255,6 +298,16 @@ def selftest() -> int:
     else:
         print("SELFTEST depth-floor: MISSED broken registration")
 
+    # S5 (RFC-0199): stale count residual — a count row landed without
+    # moving residuals.proof_depth.count in the same commit.
+    tampered_actual = dict(actual)
+    tampered_actual["count"] = live["count"] + 1
+    if check(floors, tampered_actual, rows, reg_errs, live):
+        print("SELFTEST depth-floor: caught=stale-count-residual")
+        caught += 1
+    else:
+        print("SELFTEST depth-floor: MISSED stale count residual")
+
     print(f"SELFTEST depth-floor: {caught}/{total} sabotages caught")
     return 0 if caught == total else 1
 
@@ -282,11 +335,13 @@ def main() -> int:
         return 1
     reg_close = sum(1 for r in rows if r["kind"] == "close")
     reg_atom = sum(1 for r in rows if r["kind"] == "atom")
+    reg_count = sum(1 for r in rows if r["kind"] == "count")
     print(
         f"GATE depth-floor: GREEN — extract={actual['extract']} (floor {floors['floor_extract']}), "
         f"registered ladder close={reg_close} (floor {floors['floor_close']}) / "
         f"atom={reg_atom} (floor {floors['floor_atom']}), residuals close={actual['close']}"
         f"/atom={actual['atom']} == live {live['close']}/{live['atom']}, "
+        f"count={reg_count} (floor {floors['floor_count']}, residual {actual['count']} == live {live['count']}), "
         f"data_fate={actual['data_fate']}<={floors['cap_data_fate']}, "
         f"handler_loc={actual['handler_loc']} (series; TSV {floors['handler_loc']})"
     )

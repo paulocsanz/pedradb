@@ -1282,7 +1282,9 @@ def registered_depths() -> dict[str, str]:
     sorry, cross-checked by scripts/check_depth_floor.py). The registry
     is the ladder authority: a registered pair counts at its registered
     step (close = forall theorem over the extracted rustc body),
-    overriding the twin_kind-derived depth."""
+    overriding the twin_kind-derived depth. RFC-0199 `count` rows are the
+    work credit: orthogonal to the ladder, they never override depth
+    here (check_proof_depth counts them separately below)."""
     path = Path(__file__).resolve().parent.parent / "ratchet" / "close_proofs.tsv"
     out: dict[str, str] = {}
     if not path.is_file():
@@ -1297,7 +1299,11 @@ def registered_depths() -> dict[str, str]:
         kind, cid = parts[0], parts[1]
         if cid.startswith("catalog:"):
             cid = cid[len("catalog:") :]
-        out[cid] = kind
+        # RFC-0199: a pair may carry one ladder row (close|atom) AND one
+        # count row — keep both in the value, comma-separated, so a dict
+        # cid→kind cannot silently drop a credit.
+        prev = out.get(cid)
+        out[cid] = kind if prev is None or prev == kind else f"{prev},{kind}"
     return out
 
 
@@ -1321,12 +1327,29 @@ def check_proof_depth(root: Path, catalog: dict, r: Report) -> None:
     from datetime import date, datetime
 
     today = date(2026, 9, 6)
-    registered = registered_depths()
+    all_registered = registered_depths()
+    # RFC-0199: count rows never override the ladder depth (work credit is
+    # orthogonal; a pair may carry close AND count).
+    registered: dict[str, str] = {}
+    count_ids: set[str] = set()
+    for cid, kinds in all_registered.items():
+        for kind in kinds.split(","):
+            if kind == "count":
+                count_ids.add(cid)
+            else:
+                registered[cid] = kind
+    n_count = len(count_ids)
     n_atom = n_close = n_extract = n_model = 0
     for pair in catalog["pairs"]:
         pid = pair["id"]
         depth = registered.get(pid) or proof_depth_of(pair)
-        if depth == "atom":
+        # RFC-0199: a model stand-in with a registered count theorem
+        # graduates to the count tier (no longer a stand-in).
+        if depth == "model" and pid in count_ids:
+            depth = "count"
+        if depth == "count":
+            r.good(f"{pid}: proof_depth=count (RFC-0199 work credit)")
+        elif depth == "atom":
             n_atom += 1
             reason = pair.get("atom_reason")
             if not isinstance(reason, dict):
@@ -1369,11 +1392,11 @@ def check_proof_depth(root: Path, catalog: dict, r: Report) -> None:
             r.fail(f"{pid}: unknown proof_depth from twin_kind={pair.get('twin_kind')!r}")
     r.good(
         f"proof_depth counts: extract={n_extract} close={n_close} "
-        f"atom={n_atom} model={n_model}"
+        f"atom={n_atom} model={n_model} count={n_count}"
     )
     res_path = root / "scripts/formal/residuals.json"
     ids = {p["id"] for p in catalog["pairs"]}
-    for pid, kind in registered.items():
+    for pid, kind in all_registered.items():
         if pid not in ids:
             r.fail(f"proof_depth: registered {kind} proof catalog:{pid} not in catalog.json")
     if res_path.is_file():
@@ -1384,6 +1407,7 @@ def check_proof_depth(root: Path, catalog: dict, r: Report) -> None:
             "close": n_close,
             "atom": n_atom,
             "model": n_model,
+            "count": n_count,
         }
         if not isinstance(pd, dict):
             r.gap("RFC-0170 P2.5: glue.proof_depth not frozen yet")
