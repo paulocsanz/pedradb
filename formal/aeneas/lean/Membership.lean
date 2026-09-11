@@ -250,3 +250,19 @@ theorem recover_drop_orphan_seg_fate_iff :
   | false =>
     have hnP := of_decide_eq_false hd
     cases v <;> simp [hnP]
+
+/-- RFC-0208 P1.2 (membership cadence promotion 1/4, atom
+    `catalog:removed_step_down`): a node removed from the committed
+    membership steps down EXACTLY when its id left the id set — the
+    node that stayed never steps down, the removed one always does —
+    fate forall over the extracted pure-lift body; the AS-IS
+    `ok false` mutant never steps down (a removed leader keeps
+    leading). -/
+theorem removed_steps_down_fate_iff :
+    ∀ (in_ids : Bool) (v : Bool),
+      (removed_steps_down in_ids = ok v) ↔
+        ((v = true ∧ ¬ (in_ids = true))
+          ∨ (v = false ∧ in_ids = true)) := by
+  intro in_ids v
+  unfold removed_steps_down
+  cases in_ids <;> cases v <;> simp
