@@ -140,11 +140,26 @@ o número 0,37× desta célula é **pre-pipeline** (era 0178/0183/0184) — a
 
 ### P1 — meters do eixo cliente (blocked no host gate)
 
-- [ ] **P1.1** meter de atribuição + antes/depois kvrocks_set_mc50 3-run
-      quieto Linux (min-of-3, peer `sync=false`) — status: `in_progress`
-      (2026-09-11: gate ABERTO via caixote `linux-gate-p149b`; imagem
-      `p201m` deployed com matrix same-boot default/fair/group × 3 rounds
-      para atribuir o gargalo na árvore viva antes do corte)
+- [x] **P0.3** (re-land pós-meter, 2026-09-11) `async_merge_policy(writers,
+      ncpu, forced)` no kernel + wiring: `PEDRA_ASYNC_GROUP` vira pin
+      explícito (`Option<bool>`) e o default é a regra cliente-eixo —
+      escritores async concorrentes mergeiam num frame de grupo **iff
+      `writers > ncpu`**; abaixo disso mantêm o bypass (formato Rocks;
+      regime da falsificação 0044 intacto). Base: meter de atribuição
+      2026-09-11 (`findings/2026-09-11-p201-meter-atribuicao/`) — mc50:
+      merge **1,52× min-of-3 / 2,10× mediana** vs bypass 0,96×; o colapso
+      0,37× era o fair handoff (0,33–0,38×). Testes: kernel
+      `rfc0201_async_merge_policy_boundary_and_pins` + AS-IS twin;
+      integração `rfc0201_auto_async_merge_oversubscribed_herd` (queued>0,
+      amortização), `rfc0201_auto_async_bypass_when_writers_fit_cpus`
+      (queued==0, batches==submits), `rfc0201_async_group_env_pin_overrides_axis`.
+      A/B serial: mesmas 23 falhas do baseline, +5 verdes; musl exit 0 —
+      status: `done (meter final P1.1 pendente)`
+- [ ] **P1.1** meter Linux final (cartaz): sweep de regressão group vs
+      default nas 17 formas oficiais (imagem `p201o`, 3 rounds quiet,
+      mesmo boot) + A/B antes/depois do corte com env limpo (default =
+      auto) — status: `in_progress` (sweep rodando 2026-09-11; o flip só
+      conta como cartaz com o min-of-3 da coluna default pós-corte)
 - [ ] **P1.2** re-split quieto pós-0193 + apply_mc4/overwrite na mesma
       janela (0192 P1.1/P1.2) — status: `blocked`
 - [ ] **P1.3** ycsb_f mc4 (0193 P0.5) e o eixo `ratio_hat(L)` do 0197 P1.4
@@ -184,7 +199,8 @@ mediu mc50) e o meter P1.1 é o único caminho para virar cartaz.
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | drain completo pipeline (ousocap 256) + kernel | re-opened | wipe 2026-09-10 23:49 (`reset --hard` paralela); kernel re-registrado no `lib.rs` | 2026-09-11 |
 | P0.2 | p0 | spin ciente de oversubscription + twins | re-opened | idem; alvo = bypass herd da árvore viva (pós-meter) | 2026-09-11 |
-| P1.1 | p1 | meter mc50 atribuição + antes/depois | in_progress | `p201m` deployed (caixote), matrix default/fair/group × 3 rounds | 2026-09-11 |
+| P0.3 | p0 | merge assíncrono cliente-eixo (`writers > ncpu`) + pin env | done | kernel + wiring + 5 testes; A/B serial limpo; base = meter de atribuição 2026-09-11 | 2026-09-11 |
+| P1.1 | p1 | sweep regressão 17 formas + A/B antes/depois pós-corte | in_progress | `p201o` rodando (3 rounds × 17 formas × 2 variantes) | 2026-09-11 |
 | P1.2 | p1 | re-split quieto + apply/overwrite | blocked | 0192 P1.1/P1.2 | 2026-09-10 |
 | P1.3 | p1 | ycsb_f + ratio_hat(L) | blocked | 0193 P0.5 / 0197 P1.4 | 2026-09-10 |
 | P2.1 | p2 | preallocate WAL off-lock | deferred | 4,1 s/25 s (p99.9+; hydrate 15M) | 2026-09-10 |

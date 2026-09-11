@@ -87,6 +87,43 @@ pub fn oversubscription_spin_policy_as_is(writers: usize, ncpu: usize) -> SpinDe
     SpinDecision::Spin
 }
 
+/// RFC-0201 P0.3 (re-land): do concurrent async writers merge into one
+/// group frame/`write()` (leader encodes for all), or does each keep the
+/// bypass (own write lock — the Rocks shape)?
+///
+/// Client-axis rule, from the 2026-09-11 attribution meter on the 4-vCPU
+/// cartaz box (`findings/2026-09-11-p201-meter-atribuicao/`):
+/// `kvrocks_set_mc50` (50 writers, 12.5× oversubscribed) — bypass 0.96×,
+/// merge **1.52× min-of-3 / 2.10× median** vs Rocks `sync=false`; the
+/// fair handoff is the actual 0.33–0.38× collapse. The 0044 default-off
+/// A/B ran a 50-thread herd on a 12-CPU box against the dead
+/// WriteThread-merge shape — not this regime, not this implementation.
+///
+/// The rule merges ONLY when writers outnumber CPUs: at or below `ncpu`
+/// every writer keeps the bypass (mc1 lone path, mc2, mc4-on-4 — the
+/// 0044 falsification regime untouched). `forced` is the explicit
+/// `PEDRA_ASYNC_GROUP=1|0` pin (A/B escape); `None` is the auto default.
+#[must_use]
+pub fn async_merge_policy(writers: usize, ncpu: usize, forced: Option<bool>) -> bool {
+    match forced {
+        Some(pin) => pin,
+        // A degenerate ncpu == 0 never merges (single-CPU box: the bypass
+        // keeps the lone/mc2 shapes off the leader path).
+        None => ncpu > 0 && writers > ncpu,
+    }
+}
+
+/// AS-IS twin of [`async_merge_policy`] — the 0044-era default: the
+/// merge is env-only, the auto axis does not exist.
+#[must_use]
+pub fn async_merge_policy_as_is(
+    writers: usize,
+    ncpu: usize,
+    forced: Option<bool>,
+) -> bool {
+    forced == Some(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -162,5 +199,27 @@ mod tests {
             oversubscription_spin_policy_as_is(1_000, 1),
             SpinDecision::Spin
         );
+    }
+
+    /// RFC-0201 P0.3: merge only past the oversubscription line; the env
+    /// pin overrides the axis in both directions.
+    #[test]
+    fn rfc0201_async_merge_policy_boundary_and_pins() {
+        assert!(!async_merge_policy(50, 50, None), "writers == ncpu: bypass");
+        assert!(async_merge_policy(51, 50, None), "writers > ncpu: merge");
+        assert!(async_merge_policy(50, 4, None), "mc50 on the 4-vCPU cartaz box");
+        assert!(!async_merge_policy(1, 1, None), "mc2 on a 1-CPU box: bypass");
+        assert!(!async_merge_policy(16, 0, None), "degenerate ncpu=0 never merges");
+        assert!(async_merge_policy(2, 64, Some(true)), "pin=1 merges even on a big box");
+        assert!(!async_merge_policy(50, 4, Some(false)), "pin=0 keeps the herd off the leader");
+    }
+
+    /// RFC-0201 P0.3 dente: the 0044-era default is env-only — the auto
+    /// axis does not exist.
+    #[test]
+    fn rfc0201_async_merge_policy_as_is_env_only() {
+        assert!(!async_merge_policy_as_is(50, 4, None));
+        assert!(!async_merge_policy_as_is(50, 4, Some(false)));
+        assert!(async_merge_policy_as_is(1, 64, Some(true)));
     }
 }

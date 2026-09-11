@@ -129,7 +129,12 @@ struct WriteGroup {
     catchup_wait_ns: AtomicU64,
     catchup_waits: AtomicU64,
     /// RFC-0044 P0.5: merge concurrent async writers into one group.
-    async_group: bool,
+    /// RFC-0201: explicit `PEDRA_ASYNC_GROUP=1|0` pin; `None` = the auto
+    /// client-axis policy (`async_merge_policy`: merge iff writers > ncpu).
+    async_group_forced: Option<bool>,
+    /// CPUs the auto policy compares in-flight writers against
+    /// (`available_parallelism`, computed once at open).
+    axis_ncpu: usize,
     /// RFC-0045 P0.2: bounded spin before parking on the bypass write lock
     /// (`PEDRA_WRITE_SPIN`, default 0 = park immediately).
     write_spin: AtomicUsize,
@@ -175,13 +180,18 @@ const CATCHUP_WINDOW_DEFAULT: Duration = Duration::from_micros(50);
 const MULTI_HOLD: Duration = Duration::from_micros(250);
 
 /// RFC-0044 P0.5: merge concurrent async writers into one group frame/`write()`
-/// (leader encodes for all members, no catch-up wait). **Default off** — A/B
-/// on the bench box (findings/rfc0044-p1, 5 paired rounds) the single leader
-/// is a scheduling single point of failure under 50 threads / 12 CPUs:
-/// merge 44–106 k qps vs bypass 311–636 k. The bypass (every writer takes
-/// the write lock itself — the Rocks shape) is the default;
-/// `PEDRA_ASYNC_GROUP=1` re-enables the merge for quiet-box experiments.
-const ASYNC_GROUP_DEFAULT: bool = false;
+/// (leader encodes for all members, no catch-up wait). RFC-0201 turned the
+/// 0044 env-only default-off into the auto client-axis rule
+/// (`client_axis_kernel::async_merge_policy`): concurrent async writers
+/// merge iff they outnumber the CPUs. The 0044 A/B that kept it off ran a
+/// 50-thread herd on a 12-CPU box against the dead WriteThread-merge
+/// shape; the 2026-09-11 attribution meter on the 4-vCPU cartaz box
+/// (`findings/2026-09-11-p201-meter-atribuicao/`) has the merge at
+/// 1.52× min-of-3 / 2.10× median vs Rocks `sync=false` on
+/// `kvrocks_set_mc50` while the bypass sits at 0.96×. `PEDRA_ASYNC_GROUP=1`
+/// pins the merge on, `=0` pins it off; at or below `ncpu` writers the
+/// bypass (every writer takes the write lock itself — the Rocks shape)
+/// stays the path.
 
 /// Skip the catch-up wait only for apply-sized batches (64 ops). Raftlog is
 /// 16 ops — skipping at 16 left `deps_raftlog_mc4` at ~0.6–0.8× (one fd per
@@ -287,14 +297,16 @@ impl WriteGroup {
             fd_ema_ns: AtomicU64::new(0),
             catchup_wait_ns: AtomicU64::new(0),
             catchup_waits: AtomicU64::new(0),
-            async_group: std::env::var("PEDRA_ASYNC_GROUP")
+            async_group_forced: std::env::var("PEDRA_ASYNC_GROUP")
                 .ok()
                 .and_then(|v| match v.as_str() {
                     "0" | "false" => Some(false),
                     "1" | "true" => Some(true),
                     _ => None,
-                })
-                .unwrap_or(ASYNC_GROUP_DEFAULT),
+                }),
+            axis_ncpu: std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(1),
             write_spin: AtomicUsize::new(
                 std::env::var("PEDRA_WRITE_SPIN")
                     .ok()
@@ -632,7 +644,14 @@ impl WriteGroup {
         // The pin's declared composition lives on: `pin_verified`
         // forces the catch-up window to 0 and keeps async writers on
         // the un-merged bypass below.
-        let async_merged = self.async_group && !self.verified.load(Ordering::Relaxed);
+        // RFC-0201: the auto client-axis rule — concurrent async writers
+        // merge into one frame iff they outnumber the CPUs (env pin
+        // overrides in both directions; at/below ncpu the bypass stands).
+        let async_merged = crate::client_axis_kernel::async_merge_policy(
+            active,
+            self.axis_ncpu,
+            self.async_group_forced,
+        ) && !self.verified.load(Ordering::Relaxed);
 
         // Lone writer (parity bench, sequential client): skip the mpsc hop.
         // G1 keeps the write lock through `fdatasync` (RFC-0062 P1.1
@@ -3870,11 +3889,12 @@ mod tests {
             )
             .unwrap();
             let payload = vec![b'm'; 1024];
-            // Concurrent async writers: default = per-writer `commit_async_ops`
-            // (Rocks shape; RFC-0044 P0.5 A/B killed the single-leader merge).
-            // `PEDRA_ASYNC_GROUP=1` routes them through the group instead.
-            // Both paths must encode before Ok and recover after close with
-            // no `fdatasync` anywhere.
+            // Concurrent async writers: at/below ncpu each writer runs its
+            // own `commit_async_ops` (Rocks shape); an oversubscribed herd
+            // auto-merges into the group (RFC-0201 —
+            // `PEDRA_ASYNC_GROUP=1|0` pins it either way). Both paths must
+            // encode before Ok and recover after close with no `fdatasync`
+            // anywhere.
             std::thread::scope(|s| {
                 for t in 0..THREADS {
                     let db = &db;
@@ -8496,5 +8516,178 @@ mod tests {
         }
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0201 P0.3: the auto client-axis rule on the real submit path —
+    /// an oversubscribed async herd (ncpu+8 writers) merges into groups
+    /// (`queued > 0`, amortized `batches < submits`) and every put is
+    /// visible after reopen. Env unset = the auto policy.
+    #[test]
+    fn rfc0201_auto_async_merge_oversubscribed_herd() {
+        let dir = temp_dir();
+        std::env::remove_var("PEDRA_ASYNC_GROUP");
+        let ncpu = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
+        let herd = ncpu + 8;
+        const PER: u8 = 32;
+        {
+            let db = ConcurrentDb::open(&dir).unwrap();
+            let barrier = Arc::new(std::sync::Barrier::new(herd));
+            let payload = [b'z'; 128];
+            std::thread::scope(|s| {
+                for t in 0..herd {
+                    let db = &db;
+                    let barrier = &barrier;
+                    let payload = &payload;
+                    s.spawn(move || {
+                        barrier.wait();
+                        for i in 0..PER {
+                            db.put_with([b'z', t as u8, i], payload, WriteOptions::no_sync())
+                                .unwrap();
+                        }
+                    });
+                }
+            });
+            let (submits, queued, batches, batch_ops) = db.write_group_stats();
+            assert_eq!(submits, (herd * PER as usize) as u64);
+            assert_eq!(batch_ops, (herd * PER as usize) as u64);
+            assert!(queued > 0, "oversubscribed herd ({herd} > {ncpu}) must merge");
+            assert!(
+                batches < submits,
+                "the merge must amortize (batches={batches} submits={submits})"
+            );
+            db.close().unwrap();
+        }
+        let db = ConcurrentDb::open(&dir).unwrap();
+        let payload = [b'z'; 128];
+        for t in 0..herd {
+            for i in 0..PER {
+                assert_eq!(
+                    db.get(&[b'z', t as u8, i]).as_deref(),
+                    Some(payload.as_slice()),
+                    "lost merged async put t{t}/{i}"
+                );
+            }
+        }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0201 P0.3: writers at/below the CPU count keep the bypass —
+    /// nobody queues behind a leader (`queued == 0`, one batch per submit).
+    #[test]
+    fn rfc0201_auto_async_bypass_when_writers_fit_cpus() {
+        let dir = temp_dir();
+        std::env::remove_var("PEDRA_ASYNC_GROUP");
+        let ncpu = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
+        let threads = ncpu.saturating_sub(1).max(1);
+        const PER: u8 = 32;
+        {
+            let db = ConcurrentDb::open(&dir).unwrap();
+            let barrier = Arc::new(std::sync::Barrier::new(threads));
+            let payload = [b'y'; 128];
+            std::thread::scope(|s| {
+                for t in 0..threads {
+                    let db = &db;
+                    let barrier = &barrier;
+                    let payload = &payload;
+                    s.spawn(move || {
+                        barrier.wait();
+                        for i in 0..PER {
+                            db.put_with([b'y', t as u8, i], payload, WriteOptions::no_sync())
+                                .unwrap();
+                        }
+                    });
+                }
+            });
+            let (submits, queued, batches, batch_ops) = db.write_group_stats();
+            assert_eq!(submits, (threads * PER as usize) as u64);
+            assert_eq!(batch_ops, (threads * PER as usize) as u64);
+            assert_eq!(queued, 0, "writers <= ncpu ({threads} <= {ncpu}) never queue");
+            assert_eq!(batches, submits, "the bypass is per-writer (Rocks shape)");
+            db.close().unwrap();
+        }
+        let db = ConcurrentDb::open(&dir).unwrap();
+        let payload = [b'y'; 128];
+        for t in 0..threads {
+            for i in 0..PER {
+                assert_eq!(
+                    db.get(&[b'y', t as u8, i]).as_deref(),
+                    Some(payload.as_slice()),
+                    "lost bypass async put t{t}/{i}"
+                );
+            }
+        }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0201 P0.3: the explicit env pin overrides the axis in both
+    /// directions — `=0` keeps an oversubscribed herd on the bypass,
+    /// `=1` merges a two-writer herd (below the line).
+    #[test]
+    fn rfc0201_async_group_env_pin_overrides_axis() {
+        let ncpu = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
+        let herd = ncpu + 8;
+        const PER: u8 = 16;
+        let dir0 = temp_dir();
+        {
+            std::env::set_var("PEDRA_ASYNC_GROUP", "0");
+            let db = ConcurrentDb::open(&dir0).unwrap();
+            let barrier = Arc::new(std::sync::Barrier::new(herd));
+            let payload = [b'p'; 128];
+            std::thread::scope(|s| {
+                for t in 0..herd {
+                    let db = &db;
+                    let barrier = &barrier;
+                    let payload = &payload;
+                    s.spawn(move || {
+                        barrier.wait();
+                        for i in 0..PER {
+                            db.put_with([b'p', t as u8, i], payload, WriteOptions::no_sync())
+                                .unwrap();
+                        }
+                    });
+                }
+            });
+            let (submits, queued, batches, _) = db.write_group_stats();
+            assert_eq!(queued, 0, "pin=0: the herd stays on the bypass");
+            assert_eq!(batches, submits, "pin=0: per-writer batches");
+            db.close().unwrap();
+        }
+        std::env::remove_var("PEDRA_ASYNC_GROUP");
+        let _ = fs::remove_dir_all(&dir0);
+
+        let dir1 = temp_dir();
+        {
+            std::env::set_var("PEDRA_ASYNC_GROUP", "1");
+            let db = ConcurrentDb::open(&dir1).unwrap();
+            let barrier = Arc::new(std::sync::Barrier::new(2));
+            let payload = [b'q'; 128];
+            std::thread::scope(|s| {
+                for t in 0..2u8 {
+                    let db = &db;
+                    let barrier = &barrier;
+                    let payload = &payload;
+                    s.spawn(move || {
+                        barrier.wait();
+                        for i in 0..PER {
+                            db.put_with([b'q', t, i], payload, WriteOptions::no_sync())
+                                .unwrap();
+                        }
+                    });
+                }
+            });
+            let (_, queued, _, _) = db.write_group_stats();
+            assert!(queued > 0, "pin=1: two writers merge even below the line");
+            db.close().unwrap();
+        }
+        std::env::remove_var("PEDRA_ASYNC_GROUP");
+        let _ = fs::remove_dir_all(&dir1);
     }
 }
