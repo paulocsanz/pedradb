@@ -44,6 +44,19 @@ theorem wal_sync_required_client_true :
   unfold wal_sync_required
   rfl
 
+/-- Sync-knob resolution is total and single-valued: the extracted gate
+    returns ok on exactly one value — the client's explicit choice when
+    it set one, else the db-level default (registered atom, RFC-0200 P2.1). -/
+theorem wal_sync_required_ok_iff_client_else_db :
+    ∀ (client_set client_sync db_sync v : Bool),
+      (wal_sync_required client_set client_sync db_sync = ok v) ↔
+      (if client_set then v = client_sync else v = db_sync) := by
+  intro client_set client_sync db_sync v
+  unfold wal_sync_required
+  cases client_set with
+  | true => simp [eq_comm]
+  | false => simp [eq_comm]
+
 /-- Open-options sync requires a directory fsync after rename/create. -/
 theorem dir_sync_required_when_sync :
     dir_sync_required true = ok true := by

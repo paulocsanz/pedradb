@@ -135,9 +135,18 @@ sendo Pedra vs RocksDB default `sync=false` (`ROCKS_PARITY_SYNC=0`).
 
 ### P2 — later / cadência
 
-- [ ] **P2.1** Cadência: cada novo atom df desce cap (99→…), cada novo
+- [x] **P2.1** Cadência: cada novo atom df desce cap (99→…), cada novo
   close sobe floor_close, um por commit (régua mecânica herdada) —
-  status: `todo`
+  status: `done` (primeiro atom df do ciclo: par `wal_sync_required`
+  (write_admission_kernel.rs, handler `commit_ops_with`) pago em
+  `wal_sync_required_ok_iff_client_else_db` (WriteAdmission.lean) — a
+  decisão de `fdatasync` por commit é single-valued: a escolha
+  EXPLÍCITA do cliente quando ele setou `sync`, senão o default do db;
+  iff ∀ sobre o corpo extraído, build verde sorry 0; cap_data_fate
+  99→98, floor_atom 32→33, floor_extract 246→245, residuals no MESMO
+  commit; planta DST existente
+  `wal_sync_required_on_live_client_true_is_not_ok` dirigindo o kernel
+  real)
 - [ ] **P2.2** Sweep: todos os gates GREEN no HEAD, zero sorry nos
   wrappers tocados, capturas — status: `todo`
 
@@ -149,7 +158,7 @@ sendo Pedra vs RocksDB default `sync=false` (`ROCKS_PARITY_SYNC=0`).
 | P0.2 | p0 | Quarto close de glue registrado | done | try_rotate_step_rotates_iff_pins_clear_segment_live (Flush.lean) | 2026-09-11 |
 | P1.1 | p1 | Base de saída do merge + corolário alcançável | done | merge_output_reach_preserves_inv_lsm | 2026-09-11 |
 | P1.2 | p1 | Ponte sift_step↔newest-first | done | TaggedSift + tagged_step_stays_iff_no_repair + tagged_stay_extends_chain | 2026-09-11 |
-| P2.1 | p2 | Cadência cap/floor_close contínua | todo | — | 2026-09-11 |
+| P2.1 | p2 | Cadência cap/floor_close contínua | done | wal_sync_required_ok_iff_client_else_db (WriteAdmission.lean) | 2026-09-11 |
 | P2.2 | p2 | Sweep final de gates | todo | — | 2026-09-11 |
 
 ## Acceptance Criteria

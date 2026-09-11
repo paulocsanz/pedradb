@@ -1,6 +1,6 @@
 {
  "rfc": "0061",
- "updated": "2026-09-10",
+ "updated": "2026-09-11",
  "classes": [
   "never",
   "continuous",
@@ -81,9 +81,9 @@
   "handler_loc": 112092,
   "db_rs_extracted": false,
   "proof_depth": {
-   "extract": 246,
+   "extract": 245,
    "close": 5,
-   "atom": 32,
+   "atom": 33,
    "model": 15,
    "count": 6
   },
@@ -137,7 +137,7 @@
    ]
   },
   "single_artifact": 291,
-  "data_fate": 99
+  "data_fate": 98
  },
  "residuals": [
   {
