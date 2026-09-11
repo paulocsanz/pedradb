@@ -6089,7 +6089,6 @@
     "crates/pedradb-core/src/concurrent.rs"
    ],
    "entry": "occ_member_fate",
-   "data_fate": true,
    "handlers": [
     "validate_occ_batch"
    ],
@@ -6104,7 +6103,11 @@
     "file": "crates/pedradb-core/src/group_commit_kernel.rs",
     "test": "occ_member_fate_on_live_conflict_is_not_ok"
    },
-   "three_teeth": true
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0202 P0.2 lost-update row: OCC member fate precedence TooOld > Conflict > Ok (forall-iff over the extracted body, GroupCommit.lean); AS-IS never-abort unreachable; handler validate_occ_batch is the ConcurrentDb caller link"
+   }
   },
   {
    "id": "occ_batch_plan",

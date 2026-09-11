@@ -204,6 +204,19 @@ theorem occ_member_fate_as_is_dente :
   unfold occ_member_fate_as_is
   rfl
 
+/-- OCC member-fate precedence (registered atom, RFC-0202 P0.2):
+    TooOld wins over Conflict over Ok — the AS-IS never-abort (lagging
+    member commits) is unreachable from the real kernel. -/
+theorem occ_member_fate_ok_iff_precedence :
+    ∀ (too_old conflict : Bool) (f : OccMemberFate),
+      (occ_member_fate too_old conflict = ok f) ↔
+      ((too_old = true ∧ f = OccMemberFate.TooOld) ∨
+       (too_old = false ∧ conflict = true ∧ f = OccMemberFate.Conflict) ∨
+       (too_old = false ∧ conflict = false ∧ f = OccMemberFate.Ok)) := by
+  intro too_old conflict f
+  unfold occ_member_fate
+  cases too_old <;> cases conflict <;> simp [eq_comm]
+
 /-- `lone_commit` caller: occ_conflict ⇒ occ_member_fate Conflict. -/
 theorem occ_member_fate_via_occ_conflict :
     occ_conflict (7#u64) (9#u64) true = ok true ∧

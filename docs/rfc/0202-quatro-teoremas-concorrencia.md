@@ -112,9 +112,13 @@ sendo Pedra vs RocksDB default `sync=false` (`ROCKS_PARITY_SYNC=0`).
   write-guard — o AS-IS mutar-após-soltar é inalcançável; build verde
   primeira tentativa, sorry 0; planta DST existente
   `rwlock_client_may_mutate_on_live_off_lock_is_not_ok` no kernel real)
-- [ ] **P0.2** `occ_member_fate` a atom (fila lost-update; handler
+- [x] **P0.2** `occ_member_fate` a atom (fila lost-update; handler
   `validate_occ_batch`; cap 97→96, floor_atom 34→35 no mesmo commit) —
-  status: `todo`
+  status: `done` (teorema `occ_member_fate_ok_iff_precedence` em
+  GroupCommit.lean: o destino do membro OCC é EXATAMENTE a precedência
+  TooOld > Conflict > Ok; o AS-IS nunca-abortar (membro lagando comita)
+  é inalcançável; build verde primeira tentativa, sorry 0; planta DST
+  existente `occ_member_fate_on_live_conflict_is_not_ok` no kernel real)
 
 ### P1 — next wave (deadlock e o quinto close)
 
@@ -138,7 +142,7 @@ sendo Pedra vs RocksDB default `sync=false` (`ROCKS_PARITY_SYNC=0`).
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | Fila data-race: atom rwlock_client_may_mutate | done | rwlock_client_may_mutate_ok_iff_holding_write (GroupCommit.lean) | 2026-09-11 |
-| P0.2 | p0 | Fila lost-update: atom occ_member_fate | todo | — | 2026-09-11 |
+| P0.2 | p0 | Fila lost-update: atom occ_member_fate | done | occ_member_fate_ok_iff_precedence (GroupCommit.lean) | 2026-09-11 |
 | P1.1 | p1 | Fila deadlock: ponte wait_for_deadlock (ou recusa datada) | todo | — | 2026-09-11 |
 | P1.2 | p1 | Quinto close registrado (candidato group_validate) | todo | — | 2026-09-11 |
 | P2.1 | p2 | Escalonador: recusa registrada + cadência atoms | todo | — | 2026-09-11 |
