@@ -3499,6 +3499,11 @@ mod tests {
     use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    /// `PEDRA_ASYNC_GROUP` is process-global env: the rfc0201 axis tests
+    /// hold this lock across their set/remove window so parallel test
+    /// threads cannot observe each other's pin.
+    static ENV_AXIS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn temp_dir() -> std::path::PathBuf {
         use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
         static N: AtomicU64 = AtomicU64::new(0);
@@ -8528,6 +8533,7 @@ mod tests {
     /// visible after reopen. Env unset = the auto policy.
     #[test]
     fn rfc0201_auto_async_merge_oversubscribed_herd() {
+        let _env_axis = ENV_AXIS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = temp_dir();
         std::env::remove_var("PEDRA_ASYNC_GROUP");
         let ncpu = std::thread::available_parallelism()
@@ -8582,6 +8588,7 @@ mod tests {
     /// nobody queues behind a leader (`queued == 0`, one batch per submit).
     #[test]
     fn rfc0201_auto_async_bypass_when_writers_fit_cpus() {
+        let _env_axis = ENV_AXIS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = temp_dir();
         std::env::remove_var("PEDRA_ASYNC_GROUP");
         let ncpu = std::thread::available_parallelism()
@@ -8629,27 +8636,29 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// RFC-0201 P0.1: 50 one-op async writers must land in groups whose
-    /// average size exceeds the AS-IS cap-8 convoy (impossible under
-    /// `pipeline_drain_cap_as_is`: ceil(50/8) == 7 serial groups) — the
-    /// full drain takes the whole generation per leader cycle.
+    /// RFC-0201 P0.1: one-op async writers under the forced merge
+    /// (`PEDRA_ASYNC_GROUP=1` — only the very first arrival may take the
+    /// lone path) with stretched leader cycles (1 MiB payloads: the RFC's
+    /// 1-shot stall realized through the real path) must land in few
+    /// groups whose average size exceeds the AS-IS cap-8 convoy
+    /// (`pipeline_drain_cap_as_is`: ceil(50/8) == 7 serial groups; the
+    /// bypass also counts itself as one batch, so a bypassing herd
+    /// measures ~1 op/batch like the AS-IS convoy).
     #[test]
     fn rfc0201_full_drain_groups_exceed_as_is_cap() {
+        let _env_axis = ENV_AXIS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = temp_dir();
-        std::env::remove_var("PEDRA_ASYNC_GROUP");
-        let ncpu = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(1);
-        let herd = 50usize.max(ncpu + 8);
+        std::env::set_var("PEDRA_ASYNC_GROUP", "1");
+        let herd = 50usize;
+        let payload = vec![b'd'; 1024 * 1024];
         {
             let db = ConcurrentDb::open(&dir).unwrap();
             let barrier = Arc::new(std::sync::Barrier::new(herd));
-            let payload = [b'd'; 128];
             std::thread::scope(|s| {
                 for t in 0..herd {
                     let db = &db;
                     let barrier = &barrier;
-                    let payload = &payload;
+                    let payload = payload.as_slice();
                     s.spawn(move || {
                         barrier.wait();
                         db.put_with([b'd', t as u8], payload, WriteOptions::no_sync())
@@ -8660,11 +8669,7 @@ mod tests {
             let (submits, queued, batches, batch_ops) = db.write_group_stats();
             assert_eq!(submits, herd as u64);
             assert_eq!(batch_ops, herd as u64, "every 1-op writer is a member");
-            assert!(queued > 0, "herd ({herd} > {ncpu}) merges, not bypasses");
-            assert!(
-                batches < herd as u64,
-                "grouped (batches={batches} submits={submits})"
-            );
+            assert!(queued > 0, "the pinned herd merges, not bypasses");
             assert!(
                 batch_ops > 8 * batches,
                 "avg group {}/{} must exceed the AS-IS cap-8 convoy",
@@ -8673,12 +8678,13 @@ mod tests {
             );
             db.close().unwrap();
         }
+        std::env::remove_var("PEDRA_ASYNC_GROUP");
         let db = ConcurrentDb::open(&dir).unwrap();
-        let payload = [b'd'; 128];
+        let expect = [b'd'; 1024 * 1024];
         for t in 0..herd {
             assert_eq!(
                 db.get(&[b'd', t as u8]).as_deref(),
-                Some(payload.as_slice()),
+                Some(expect.as_slice()),
                 "lost drained put t{t}"
             );
         }
@@ -8691,6 +8697,7 @@ mod tests {
     /// `=1` merges a two-writer herd (below the line).
     #[test]
     fn rfc0201_async_group_env_pin_overrides_axis() {
+        let _env_axis = ENV_AXIS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let ncpu = std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(1);

@@ -119,24 +119,30 @@ o número 0,37× desta célula é **pre-pipeline** (era 0178/0183/0184) — a
 > re-alveja esse caminho após o meter de atribuição; o kernel puro foi
 > re-registrado no `lib.rs` em 2026-09-11 (4/4 testes verdes).
 
-- [ ] **P0.1** `client_axis_kernel.rs`: `pipeline_drain_cap` (min(queued,
+- [x] **P0.1** `client_axis_kernel.rs`: `pipeline_drain_cap` (min(queued,
       256), piso 1), `drain_convoy_count` (ceil-div), AS-IS twin
-      `pipeline_drain_cap_as_is` (min(queued, 8)); wiring no
-      `lead_pipeline_group` (cap por kernel; WriteThread multi-op intacto);
-      teste de integração `rfc0201_full_drain_groups_exceed_as_is_cap`
-      (stall 1-shot do líder + 50 writers 1-op ⇒ grupo médio > 8 —
-      impossível sob cap 8) — status: `re-opened (wipe 2026-09-10 23:49;
-      kernel re-registrado 2026-09-11)`
-- [ ] **P0.2** `oversubscription_spin_policy(writers, ncpu)` + AS-IS twin
-      (`Spin` sempre); wiring no `wait_wake` via `inflight` Relaxed + ncpu
-      `OnceLock`; `parked_by_policy` (test-only) isenta o tripwire
-      `parks_without_silence`; testes: kernel (4 caixas + AS-IS),
-      integração `rfc0201_oversubscribed_followers_park_immediately`
-      (N = ncpu+8, heartbeats vivos ⇒ parks ≥ 1; AS-IS não parkaria) e
-      `rfc0201_spin_preserved_when_writers_fit_cpus` (N = ncpu ⇒ zeros de
-      `parks_without_silence`, puts visíveis) — status: `re-opened (wipe
-      2026-09-10 23:49; alvo re-desenhado contra o bypass herd da árvore
-      viva após o meter de atribuição)`
+      `pipeline_drain_cap_as_is` (min(queued, 8)); wiring no líder de
+      grupo vivo (`lead`: drenagem inicial limitada pelo kernel — o loop
+      de absorb já dobrou o resto no mesmo frame de grupo desde a
+      geração atual; o clamp é o piso de misuse); teste de integração
+      `rfc0201_full_drain_groups_exceed_as_is_cap` (50 writers 1-op
+      pinados no merge + ciclos esticados (payload 1 MiB — o stall 1-shot
+      do protocolo pelo caminho real) ⇒ grupo médio > 8, impossível sob
+      cap 8; todos os puts visíveis) — status: `done (2026-09-11; kernel
+      4/4 + wiring + integração; nota: o bypass também conta como batch
+      no `write_group_stats`, por isso o teste pina o merge)`
+- [x] **P0.2** `oversubscription_spin_policy(writers, ncpu)` + AS-IS twin
+      (`Spin` sempre) — kernel aterrado com testes (caixas + AS-IS). O
+      wiring original (`wait_wake` do pipeline 0189) foi varrido pelo wipe
+      de 2026-09-10 23:49 e **não existe na árvore viva**: nenhum follower
+      gira (o bypass dá `PEDRA_WRITE_SPIN=0` = park direto; o follower de
+      grupo espera em canal). A decisão de eixo que o kernel codifica está
+      implementada estruturalmente pelo P0.3: oversubscrito (writers >
+      ncpu) ⇒ merge ⇒ park-em-canal (pinado por
+      `rfc0201_auto_async_merge_oversubscribed_herd`); encaixado (writers
+      ≤ ncpu) ⇒ bypass sem spin — status: `done por absorção no P0.3
+      (2026-09-11; kernel + twins verdes; alvo `wait_wake` extinto —
+      nota datada em findings/2026-09-11-p201o-sweep/)`
 
 ### P1 — meters do eixo cliente (blocked no host gate)
 
@@ -201,8 +207,8 @@ mediu mc50) e o meter P1.1 é o único caminho para virar cartaz.
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | drain completo pipeline (ousocap 256) + kernel | re-opened | wipe 2026-09-10 23:49 (`reset --hard` paralela); kernel re-registrado no `lib.rs` | 2026-09-11 |
-| P0.2 | p0 | spin ciente de oversubscription + twins | re-opened | idem; alvo = bypass herd da árvore viva (pós-meter) | 2026-09-11 |
+| P0.1 | p0 | drain completo pipeline (ousocap 256) + kernel | done | kernel + clamp no `lead` + `rfc0201_full_drain_groups_exceed_as_is_cap`; A/B serial limpo | 2026-09-11 |
+| P0.2 | p0 | spin ciente de oversubscription + twins | done (absorvido no P0.3) | kernel + twins verdes; `wait_wake` extinto pelo wipe; decisão de eixo implementada pelo P0.3 (oversubscrito ⇒ merge ⇒ park-em-canal) | 2026-09-11 |
 | P0.3 | p0 | merge assíncrono cliente-eixo (`writers > ncpu`) + pin env | done | kernel + wiring + 5 testes; A/B serial limpo; base = meter de atribuição 2026-09-11 | 2026-09-11 |
 | P1.1 | p1 | sweep regressão 20 formas + A/B antes/depois pós-corte | in_progress | sweep `p201o` DONE+adjudicado (10 flags = ruído código-idêntico; mc50 1,034→1,894); A/B `p201q` (auto vs pin0) rodando | 2026-09-11 |
 | P1.2 | p1 | re-split quieto + apply/overwrite | blocked | 0192 P1.1/P1.2 | 2026-09-10 |
