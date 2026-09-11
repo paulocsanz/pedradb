@@ -98,3 +98,4 @@ atom	catalog:l28_tcp_sth	l28_tcp_sth_ok_fate_iff	formal/aeneas/lean/L28.lean	l28
 atom	catalog:l28_tcp_pj	l28_tcp_pj_ok_fate_iff	formal/aeneas/lean/L28.lean	l28_tcp_pj_ok
 atom	catalog:discard_uncommitted	discard_node_counts_fate_iff	formal/aeneas/lean/Membership.lean	discard_node_counts
 atom	catalog:discard_leader	discard_leader_local_fate_iff	formal/aeneas/lean/Membership.lean	discard_leader_local
+atom	catalog:drop_preimages	drop_preimages_node_counts_fate_iff	formal/aeneas/lean/Membership.lean	drop_preimages_node_counts

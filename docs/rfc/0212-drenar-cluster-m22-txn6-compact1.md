@@ -54,6 +54,12 @@ pool honesto manda sobre a meta numérica).
    persist aterra), cap 54→53, floor_atom 70→71,
    floor_extract 208→207; planta DST verde
    (`discard_leader_local_on_live_queued_is_not_ok`)
+
+   — 3/4 `done`: `drop_preimages_node_counts_fate_iff`
+   (Membership.lean; preimages de prepare caem em TODA réplica
+   local exatamente quando o nó é local — `ids` não é o portão),
+   cap 53→52, floor_atom 71→72, floor_extract 207→206; planta DST
+   verde (`drop_preimages_node_counts_on_live_queued_is_not_ok`)
 2. **P0.2:** cadência membership 2/6 (persist+hint) — `persist_meta`,
    `persist_hist`, `persist_fence`, `hint_member` (0135/0136/0137/0146):
    cap 51→47, floor_atom 73→77, floor_extract 205→201 — status: `todo`
