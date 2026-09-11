@@ -227,7 +227,14 @@ pool honesto manda sobre a meta numérica).
    promoção acima medir fn/planta/handler inexistente, veredito por
    par em findings (reescrever para fn viva SE o caminho existir em
    produção; senão aposentadoria com recusa datada), espelhos/
-   âncoras do 0203/0204 verdes antes/depois — status: `todo`
+   âncoras do 0203/0204 verdes antes/depois — status: `done`
+
+   — veredito 2026-09-11: ZERO pares medidos ausentes nas 22
+   promoções do bloco membership (22 fns + 22 as_is + 22 plantas
+   DST verdes + 22 defs Lean presentes); nenhuma reescrita, nenhuma
+   aposentadoria; âncoras `check_inventory_terminal` +
+   `check_twin_contracts` GREEN antes (worktree `5db39a2c`,
+   início da rodada) e depois (HEAD `7f733f96`)
 
 ### P2 — later / polish
 
@@ -256,7 +263,7 @@ pool honesto manda sobre a meta numérica).
 | P0.2 | p0 | Cadência membership 2/6 — persist+hint ×4 | done | 2b953b9a + c725658a + bc6b6f80 + este commit (4 atoms, 4 commits; números exatos) | 2026-09-11 |
 | P1.1 | p1 | Cadências membership 3/6+4/6 — recover+open ×8 | done | e93c7b0f + 909dfb62 + 4b3c6ee8 + f2497120 + 96001f96 + e3f59f57 + 32b85288 + este commit (8 atoms, 8 commits; números exatos) | 2026-09-11 |
 | P1.2 | p1 | Cadências membership 5/6+6/6 — joint+slot ×6; ZERO data_fate | done | fe29d5d4 + 142b2efb + 1223b824 + 38b468b4 + a8776aa8 + este commit (6 atoms, 6 commits; números exatos; membership 22/22 ZERO) | 2026-09-11 |
-| P1.3 | p1 | Veredito datado dos medidos ausentes | todo | — | 2026-09-11 |
+| P1.3 | p1 | Veredito datado dos medidos ausentes | done | este commit (veredito: 0 ausentes nas 22 promoções; âncoras green antes/depois) | 2026-09-11 |
 | P2.1 | p2 | Cadência final — txn ×6 + compact ×1; cluster ZERO | todo | — | 2026-09-11 |
 | P2.2 | p2 | Composição ∀ fim-de-fila + sweep final + flip done | todo | — | 2026-09-11 |
 
