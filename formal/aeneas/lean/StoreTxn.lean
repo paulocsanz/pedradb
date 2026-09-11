@@ -255,3 +255,17 @@ theorem next_txn_id_after_fate_iff :
     simp [hd, hnP]
     exact eq_comm
 
+/-- RFC-0212 P2.1 (store-txn cadence, atom
+    `catalog:prepare_error_aborts_earlier`): a failed prepare step
+    aborts the already-durable intents on earlier ranges — the
+    decision is EXACTLY true — fate forall over the extracted body
+    (F50); the AS-IS mutant `?`-returns without cleanup (immortal
+    Conflict — the lie the DST plant
+    `prepare_error_aborts_earlier_on_live_queued_is_not_ok`
+    refutes). -/
+theorem prepare_error_aborts_earlier_fate_iff :
+    ∀ (v : Bool), (prepare_error_aborts_earlier = ok v) ↔ v = true := by
+  intro v
+  unfold prepare_error_aborts_earlier
+  cases v <;> simp
+
