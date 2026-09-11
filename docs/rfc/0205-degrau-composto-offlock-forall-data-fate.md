@@ -171,6 +171,17 @@ RFC não as toca.
    DST; SEM registro — razão documentada em findings). Se o corpo
    medir recusa, registra a recusa datada em `formal/aeneas/EXTRACT.md`
    e cai para a próxima composição tratável (off-lock occ-snap).
+   — status: `done` (pago sem recusa: `concurrent_publish_fate_forall`
+   (a) + `wal_rotate_decision_fate_forall`/as-is (b, disjunção exata
+   vinda do corpo extraído: RotateWal ⟺ registro limpo nos 5 campos;
+   KeepWal complemento; o mutante as-is droppa `pin_live` da disjunção)
+   + ponte `try_rotate_step_rotates_iff_all_clear_record` compondo com
+   o close registrado do Flush (registro→passo), sem duplicar; os 4
+   dentes viram corolários por instanciação; zero sorry; twins DST
+   `may_publish_group_on_live_group_is_not_ok` e
+   `wal_segment_is_empty_on_live_zero_is_not_ok` 1/1; sem linha de
+   registro — motivo documentado no findings: o tier compose atravessa
+   dois kernels, o registro exige par/entry único)
 4. **P1.2:** cadência data-fate: 2 promoções do pool 91 (candidatos
    `recover_must_apply`, `recover_drop_orphan_seg`; um por commit;
    quedas medidas caem para o próximo par) — cap 94→93→92.
@@ -189,7 +200,7 @@ RFC não as toca.
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | Close composto: may_publish_group ∀ registrado | done | may_publish_group_ok_iff_wal_io_ok (GroupCommit.lean) | 2026-09-11 |
 | P0.2 | p0 | Primeiro data-fate do cluster store: vote_decision a atom | done | vote_decision_fate_iff (Vote.lean) | 2026-09-11 |
-| P1.1 | p1 | Composição ∀ off-lock (publish × rotate; dentes viram corolários) | todo | — | 2026-09-11 |
+| P1.1 | p1 | Composição ∀ off-lock (publish × rotate; dentes viram corolários) | done | concurrent_publish_fate_forall + wal_rotate_decision_fate_forall + ponte try_rotate_step_all_clear (ComposeConcurrent.lean) | 2026-09-11 |
 | P1.2 | p1 | Cadência data-fate: +2 promoções (cap 94→92) | todo | — | 2026-09-11 |
 | P2.1 | p2 | Fronteira datada do handler (EXTRACT.md) | todo | — | 2026-09-11 |
 | P2.2 | p2 | Sweep final de gates | todo | — | 2026-09-11 |
