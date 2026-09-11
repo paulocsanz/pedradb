@@ -82,3 +82,27 @@ The rite, in order:
    lean `--required` + the pair's Rust twin test green with the twin
    BYTE-UNEDITED (continuity proof: the registered quota neither
    renamed nor reshaped).
+
+### Re-âncora — supersession rite for anchor rows (RFC-0204 P2.1)
+
+`scripts/ratchet/host_anchors.tsv` rows are NEVER deleted; a newer
+measurement of the same class SUPERSEDES the old row via the last
+column (`<anchor-id> <YYYY-MM-DD>`). Exactly one LIVE measured row
+(supersession empty, label quiet|DIAG) per host class is the current
+anchor — `host_anchor_table.rs` enforces it, plus chain termination,
+no cycles, same-class measured successors, and the `deferido` debt
+shape (value `-`). The rite, in order:
+
+1. **Gate** — run the example with `--gate-quiet[=THRESHOLD]`
+   (default 1.0): the 1-minute loadavg is read BEFORE measuring; a
+   busy (or unreadable) box exits 1 without measuring — that is the
+   honest outcome, the existing row stays (DIAG if that is what it
+   is). On linux the same flag gates the ISOLATED `fdatasync(2)` ns
+   anchor (RFC-0204 P2.2).
+2. **Row** — a quiet run prints TABLE-READY rows (exact TSV shape);
+   record the full output in a dated finding under `findings/`, append
+   the row(s) with that finding as `fonte`.
+3. **Supersede** — fill the old row's last column with
+   `<new-anchor-id> <today>` (never delete); the consumption test
+   turns RED on a missing/older/deferred successor or a second live
+   row of the class, and stays GREEN on the honest table.

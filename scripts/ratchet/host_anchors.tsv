@@ -1,13 +1,23 @@
 # RFC-0203 P1.2 — âncoras ns por classe de host (medidas datadas; nunca teorema, nunca em Lean).
-# Columns (tab-separated): classe  âncora  valor_ns  data  host  rótulo  fonte
+# RFC-0204 P2.1 — supersessão datada: linha velha NUNCA é apagada; a última coluna
+# `supersessao` vaza (`<anchor-id> <YYYY-MM-DD>`) quando a linha foi substituída por
+# uma medição mais nova da MESMA classe. Uma linha VIVA (supersessao vazia,
+# rótulo quiet|DIAG) por classe é a âncora corrente; `deferido` (RFC-0204 P2.2,
+# vocabulário 0203) marca débito de medição datado (valor_ns `-`), substituível
+# pela medição real quando a janela existir.
+# Columns (tab-separated): classe  âncora  valor_ns  data  host  rótulo  fonte  supersessao
 #   classe    construtor HostIoClass (WorkIo.lean): linux_fdatasync | darwin_fullfsync
 #             (+ darwin_fdatasync: a classe G1 no darwin, RFC-0036)
-#   valor_ns  u64 ns OU pino de fases documentado `k=v;k=v` (âncora de fases por op)
-#   rótulo    quiet | DIAG — honesto, decidido do loadavg do run (ver fonte)
+#   valor_ns  u64 ns OU pino de fases documentado `k=v;k=v` (âncora de fases por op);
+#             `-` apenas em linha deferido
+#   rótulo    quiet | DIAG | deferido — honesto, decidido do loadavg do run (ver fonte)
 #   fonte     caminho do finding que registra a medição (deve existir no repo)
-# Consumida por crates/pedradb-core/tests/host_anchor_table.rs (ambas as classes
-# HostIoClass datadas+fontadas; multiplicadores count class-independent —
-# teoremas any-class do WorkIo.lean).
-linux_fdatasync	LINUX_QUIET_0189_P01	enc=350;wr=890;guard=2230;mlock=380;mins=580;publish=820;grp=270;lock_wait=2460	2026-09-10	linux-p149b	quiet	findings/2026-09-10-telemetry-deep-dive.md (último split quieto, labeled-stale pré-0193; pino de FASES por op — sem slice de barreira por op: barreira é por grupo confirmado, ≤1 pelo teorema)
-darwin_fdatasync	DARWIN_DIAG_0203_P11	17667	2026-09-11	macos-aarch64	DIAG	findings/2026-09-11-rfc0203-p11-darwin-fullfsync-anchor.md
-darwin_fullfsync	DARWIN_DIAG_0203_P11	4002000	2026-09-11	macos-aarch64	DIAG	findings/2026-09-11-rfc0203-p11-darwin-fullfsync-anchor.md
+#   supersessao  vazio (linha viva) OU `<anchor-id-sucessora> <data>` — a sucessora
+#             existe na tabela, é da mesma classe e é medida (quiet/DIAG, nunca deferido)
+# Consumida por crates/pedradb-core/tests/host_anchor_table.rs (linha VIVA medida por
+# classe; supersessão coerente sem ciclos; multiplicadores count class-independent —
+# teoremas any-class do WorkIo.lean). Rito de re-âncora: exemplo
+# fullfsync_anchor --gate-quiet (exit 1 se loadavg ≥ limiar; imprime linha pronta).
+linux_fdatasync	LINUX_QUIET_0189_P01	enc=350;wr=890;guard=2230;mlock=380;mins=580;publish=820;grp=270;lock_wait=2460	2026-09-10	linux-p149b	quiet	findings/2026-09-10-telemetry-deep-dive.md (último split quieto, labeled-stale pré-0193; pino de FASES por op — sem slice de barreira por op: barreira é por grupo confirmado, ≤1 pelo teorema)	
+darwin_fdatasync	DARWIN_DIAG_0203_P11	17667	2026-09-11	macos-aarch64	DIAG	findings/2026-09-11-rfc0203-p11-darwin-fullfsync-anchor.md	
+darwin_fullfsync	DARWIN_DIAG_0203_P11	4002000	2026-09-11	macos-aarch64	DIAG	findings/2026-09-11-rfc0203-p11-darwin-fullfsync-anchor.md	

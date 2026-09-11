@@ -139,12 +139,21 @@ gateável, não desejo.
 
 ### P2 — later / polish
 
-- [ ] **P2.1** Rito de re-âncora: `fullfsync_anchor --gate-quiet`
+- [x] **P2.1** Rito de re-âncora: `fullfsync_anchor --gate-quiet`
   (exit 1 se loadavg ≥ limiar; imprime linha pronta para a tabela);
   `host_anchors.tsv` ganha semântica `superseded-by` datada (linha velha
   nunca apagada); teste de consumo exige uma linha VIVA por classe;
   re-medição darwin executada quando houver janela quiet real (senão a
-  linha DIAG continua, honesta) — status: `todo`
+  linha DIAG continua, honesta) — status: `done` (2026-09-11: exemplo
+  com `--gate-quiet[=THRESH]` default 1,0 (loadavg 1-min lido ANTES de
+  medir; caixa ocupada/não-legível = exit 1 sem medir; janela quiet
+  imprime linhas prontas no formato exato da tabela); tabela migra a
+  8 colunas com `supersessão` datada + vocabulário `deferido` (valor
+  `-`, P2.2); consumo estendido: uma linha VIVA medida por classe,
+  sucessora existe/medida/mesma classe/não-mais-velha, cadeias
+  terminam sem ciclo, sintético cobre os seis sabotes; rito executado
+  — gate recusou honesto (loadavg 114), linhas DIAG continuam vivas;
+  runbook §Re-âncora)
 - [ ] **P2.2** Âncora linux de barreira ISOLADA (ns de `fdatasync(2)`
   sozinho, não o pino de fases): requer caixa linux quiet; se a janela
   não existir, linha `deferido` datada no inventário da âncora via
@@ -157,7 +166,7 @@ gateável, não desejo.
 | P0.1 | p0 | Espelho lsm_compact emitido pela ferramenta, hand-mirror aposentado | done | 2026-09-11 | 2026-09-11 |
 | P1.1 | p1 | Espelhos restantes dos inscritos aposentados | done | 2026-09-11 | 2026-09-11 |
 | P1.2 | p1 | Bloom inscrito na ferramenta (anotação derivada) | done | 2026-09-11 | 2026-09-11 |
-| P2.1 | p2 | Rito de re-âncora com supersessão datada | todo | — | — |
+| P2.1 | p2 | Rito de re-âncora com supersessão datada | done | 2026-09-11 | 2026-09-11 |
 | P2.2 | p2 | Âncora linux de barreira isolada (ou deferido datado) | todo | — | — |
 
 ## Acceptance Criteria
