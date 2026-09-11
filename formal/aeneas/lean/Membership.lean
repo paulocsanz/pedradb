@@ -706,3 +706,20 @@ theorem drop_repl_slot_fate_iff :
   intro in_ids v
   unfold drop_repl_slot
   cases in_ids <;> cases v <;> simp
+
+/-- RFC-0212 P1.2 (membership cadence 6/6, atom
+    `catalog:drop_sent_through`): the sent_through bookkeeping of
+    a node dropped from `ids` by an out-of-band remove is
+    forgotten EXACTLY when the node is out of `ids` — fate
+    forall over the extracted pure-lift body; the AS-IS mutant
+    keeps sent_through after oob remove_member (the 0147
+    leftover — the lie the DST plant
+    `drop_sent_through_on_live_queued_is_not_ok` refutes). -/
+theorem drop_sent_through_fate_iff :
+    ∀ (in_ids : Bool) (v : Bool),
+      (drop_sent_through in_ids = ok v) ↔
+        ((v = true ∧ in_ids = false)
+          ∨ (v = false ∧ in_ids = true)) := by
+  intro in_ids v
+  unfold drop_sent_through
+  cases in_ids <;> cases v <;> simp

@@ -1115,7 +1115,6 @@
      "handler": "remove_member"
     }
    ],
-   "data_fate": true,
    "handlers": [
     "remove_member"
    ],
@@ -1123,6 +1122,10 @@
    "dst_plant": {
     "file": "crates/pedradb-store/src/three_teeth_queued.rs",
     "test": "drop_sent_through_on_live_queued_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0148: sent_through de no removido de ids via oob remove_member e esquecido; as-is 0147 mantinha o sent_through depois da remocao"
    }
   },
   {

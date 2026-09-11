@@ -173,7 +173,7 @@ pool honesto manda sobre a meta numérica).
    `joint_target`, `joint_add_target`, `joint_leave_ok` (joint);
    `drop_repl_slot`, `drop_sent_through` (slot): ×6, cap 39→33,
    floor_atom 85→91, floor_extract 193→187 — membership ZERO
-   `data_fate` medido ao vivo — status: `doing`
+   `data_fate` medido ao vivo — status: `done`
 
    — 1/6 `done`: `pending_joint_node_counts_fate_iff`
    (Membership.lean; o joint pendente é definido exatamente pelos
@@ -212,6 +212,17 @@ pool honesto manda sobre a meta numérica).
    cap 35→34, floor_atom 89→90, floor_extract 189→188; planta
    DST verde (`drop_repl_slot_on_live_queued_is_not_ok`,
    no mesmo lote paralelo)
+
+   — 6/6 `done` (FECHAMENTO): `drop_sent_through_fate_iff`
+   (Membership.lean; `sent_through` de nó removido via oob
+   remove_member é ESQUECIDO — corpo invertido `!in_ids`), cap
+   34→33, floor_atom 90→91, floor_extract 188→187; planta DST
+   verde (`drop_sent_through_on_live_queued_is_not_ok`,
+   no mesmo lote paralelo) — P1.2 fechado nos números exatos:
+   cap 39→33, floor_atom 85→91, floor_extract 193→187 —
+   membership ZERO `data_fate` MEDIDO AO VIVO no catálogo pós-
+   cirurgia (bloco membership_kernel = 22/22 drenado) —
+   status: `done`
 5. **P1.3:** veredito datado dos medidos ausentes — SE alguma
    promoção acima medir fn/planta/handler inexistente, veredito por
    par em findings (reescrever para fn viva SE o caminho existir em
@@ -244,7 +255,7 @@ pool honesto manda sobre a meta numérica).
 | P0.1 | p0 | Cadência membership 1/6 — discard ×4 | done | 365e7c65 + e5c4c346 + 322b2241 + este commit (4 atoms, 4 commits; números exatos) | 2026-09-11 |
 | P0.2 | p0 | Cadência membership 2/6 — persist+hint ×4 | done | 2b953b9a + c725658a + bc6b6f80 + este commit (4 atoms, 4 commits; números exatos) | 2026-09-11 |
 | P1.1 | p1 | Cadências membership 3/6+4/6 — recover+open ×8 | done | e93c7b0f + 909dfb62 + 4b3c6ee8 + f2497120 + 96001f96 + e3f59f57 + 32b85288 + este commit (8 atoms, 8 commits; números exatos) | 2026-09-11 |
-| P1.2 | p1 | Cadências membership 5/6+6/6 — joint+slot ×6; ZERO data_fate | todo | — | 2026-09-11 |
+| P1.2 | p1 | Cadências membership 5/6+6/6 — joint+slot ×6; ZERO data_fate | done | fe29d5d4 + 142b2efb + 1223b824 + 38b468b4 + a8776aa8 + este commit (6 atoms, 6 commits; números exatos; membership 22/22 ZERO) | 2026-09-11 |
 | P1.3 | p1 | Veredito datado dos medidos ausentes | todo | — | 2026-09-11 |
 | P2.1 | p2 | Cadência final — txn ×6 + compact ×1; cluster ZERO | todo | — | 2026-09-11 |
 | P2.2 | p2 | Composição ∀ fim-de-fila + sweep final + flip done | todo | — | 2026-09-11 |
