@@ -765,7 +765,6 @@
      "handler": "force_local_clear_keys"
     }
    ],
-   "data_fate": true,
    "handlers": [
     "force_local_clear_keys"
    ],
@@ -773,6 +772,10 @@
    "dst_plant": {
     "file": "crates/pedradb-store/src/three_teeth_queued.rs",
     "test": "force_clear_node_counts_on_live_queued_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0138 force-local TX clear on every local replica even if not in ids; plant force_clear_node_counts_on_live_queued_is_not_ok green"
    }
   },
   {

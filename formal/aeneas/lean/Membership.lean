@@ -397,3 +397,21 @@ theorem drop_preimages_node_counts_fate_iff :
   intro is_local in_ids v
   unfold drop_preimages_node_counts
   cases is_local <;> cases v <;> simp
+
+/-- RFC-0212 P0.1 (membership cadence 1/6, atom
+    `catalog:force_clear`): the force-local TX clear runs on EVERY
+    local replica EXACTLY when the node is local — membership in
+    `ids` is not the gate (a replica dropped from `ids` still
+    clears its stuck intents) — fate forall over the extracted
+    pure-lift body; the AS-IS mutant gates on
+    `is_local && in_ids` (the 0137 leftover: the removed replica
+    keeps intents — the lie the DST plant
+    `force_clear_node_counts_on_live_queued_is_not_ok` refutes). -/
+theorem force_clear_node_counts_fate_iff :
+    ∀ (is_local in_ids : Bool) (v : Bool),
+      (force_clear_node_counts is_local in_ids = ok v) ↔
+        ((v = true ∧ is_local = true)
+          ∨ (v = false ∧ is_local = false)) := by
+  intro is_local in_ids v
+  unfold force_clear_node_counts
+  cases is_local <;> cases v <;> simp

@@ -60,6 +60,14 @@ pool honesto manda sobre a meta numérica).
    local exatamente quando o nó é local — `ids` não é o portão),
    cap 53→52, floor_atom 71→72, floor_extract 207→206; planta DST
    verde (`drop_preimages_node_counts_on_live_queued_is_not_ok`)
+
+   — 4/4 `done` (FECHAMENTO): `force_clear_node_counts_fate_iff`
+   (Membership.lean; clear TX force-local roda em TODA réplica
+   local exatamente quando o nó é local — `ids` não é o portão),
+   cap 52→51, floor_atom 72→73, floor_extract 206→205; planta DST
+   verde (`force_clear_node_counts_on_live_queued_is_not_ok`) —
+   P0.1 fechado nos números exatos: cap 55→51, floor_atom 69→73,
+   floor_extract 209→205 — status: `done`
 2. **P0.2:** cadência membership 2/6 (persist+hint) — `persist_meta`,
    `persist_hist`, `persist_fence`, `hint_member` (0135/0136/0137/0146):
    cap 51→47, floor_atom 73→77, floor_extract 205→201 — status: `todo`
@@ -105,7 +113,7 @@ pool honesto manda sobre a meta numérica).
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | Cadência membership 1/6 — discard ×4 | todo | — | 2026-09-11 |
+| P0.1 | p0 | Cadência membership 1/6 — discard ×4 | done | 365e7c65 + e5c4c346 + 322b2241 + este commit (4 atoms, 4 commits; números exatos) | 2026-09-11 |
 | P0.2 | p0 | Cadência membership 2/6 — persist+hint ×4 | todo | — | 2026-09-11 |
 | P1.1 | p1 | Cadências membership 3/6+4/6 — recover+open ×8 | todo | — | 2026-09-11 |
 | P1.2 | p1 | Cadências membership 5/6+6/6 — joint+slot ×6; ZERO data_fate | todo | — | 2026-09-11 |
