@@ -906,7 +906,6 @@
      "handler": "discard_uncommitted_from"
     }
    ],
-   "data_fate": true,
    "handlers": [
     "discard_uncommitted_from"
    ],
@@ -914,6 +913,10 @@
    "dst_plant": {
     "file": "crates/pedradb-store/src/three_teeth_queued.rs",
     "test": "discard_node_counts_on_live_queued_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0143 live uncommitted-log discard on every local replica even if not in ids; plant discard_node_counts_on_live_queued_is_not_ok green"
    }
   },
   {

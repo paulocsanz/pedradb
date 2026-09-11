@@ -40,7 +40,13 @@ pool honesto manda sobre a meta numérica).
 1. **P0.1:** cadência membership 1/6 (discard) — `discard_uncommitted`,
    `discard_leader`, `drop_preimages`, `force_clear` (0143/0144/0139/0138;
    wrapper `Membership.lean`; plantas DST queued verdes): cap 55→51,
-   floor_atom 69→73, floor_extract 209→205 — status: `todo`
+   floor_atom 69→73, floor_extract 209→205 — status: `doing`
+
+   — 1/4 `done`: `discard_node_counts_fate_iff` (Membership.lean;
+   discard vivo do sufixo não-commitado roda em TODA réplica local
+   exatamente quando o nó é local — `ids` não é o portão), cap
+   55→54, floor_atom 69→70, floor_extract 209→208; planta DST
+   verde (`discard_node_counts_on_live_queued_is_not_ok`)
 2. **P0.2:** cadência membership 2/6 (persist+hint) — `persist_meta`,
    `persist_hist`, `persist_fence`, `hint_member` (0135/0136/0137/0146):
    cap 51→47, floor_atom 73→77, floor_extract 205→201 — status: `todo`
