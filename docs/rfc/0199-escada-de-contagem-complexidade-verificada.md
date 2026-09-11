@@ -155,10 +155,19 @@ vira win, e previsões continuam hat com erro nomeado.
   twin `tests/flush_amort_count.rs` — schedule sim com o gate REAL
   `auto_flush_due` decidindo cada tick; linha `count` no par
   `auto_flush_due`, `floor_count` 4→6 no mesmo commit (com P1.4)
-- [ ] **P1.3** Composição formal×medido: `write_cycle_kernel` consome as
+- [x] **P1.3** Composição formal×medido: `write_cycle_kernel` consome as
   contagens provadas como multiplicadores × âncoras ns datadas — o forecast
   passa a citar os teoremas `count` (sem virar claim de cartaz) —
-  status: `todo`
+  status: `done`
+  Amarrado por `tests/write_cycle_registry_tie.rs`: o kernel (incluído por
+  `#[path]`, arquivo RFC-0192 não editado) é composto contra as 4 linhas
+  `count` que cita (`wal_commit_plan` ≤1 fdatasync/grupo confirmado,
+  `auto_flush_due` ≤1000‰, `scan_guard` ≤1 passada/arquivo,
+  `probe_order_covering` ≤1 degrau/candidato) — teorema renomeado/removido,
+  `sorry` no arquivo Lean, slice extra ou multiplicador acima do registrado
+  falham o teste (`PEDRA_COUNT_REGISTRY` permite demo de mutação sem tocar o
+  TSV compartilhado); `render()` carrega `tier=ceiling` + "not a cartaz qps
+  forecast". Âncora datada: `LINUX_QUIET_0189_P01` (RFC-0189 P0.1).
 - [x] **P1.4** Cota de scan/range: linear no resultado (uma passada por run
   dadas invariantes) sobre `Scan`/`Iter` — `scan_decision_work_bound`
   (`ScanDecisionCount.lean`): work ≤ files + Σ tombs (decisão por
@@ -193,7 +202,7 @@ vira win, e previsões continuam hat com erro nomeado.
 | P0.3 | p0 | Point-get ladder ≤ levels + l0_max (model→count) | done | 2026-09-11 | 2026-09-11 |
 | P1.1 | p1 | `Work.io` + ≤1 fdatasync por grupo confirmado | done | 2026-09-11 | 2026-09-11 |
 | P1.2 | p1 | Amortização memtable→flush (k writes) | done | 2026-09-11 | 2026-09-11 |
-| P1.3 | p1 | write_cycle compõe contagens provadas × âncoras | todo | — | 2026-09-10 |
+| P1.3 | p1 | write_cycle compõe contagens provadas × âncoras | done | `tests/write_cycle_registry_tie.rs` (4 linhas count amarradas, demo de mutação via `PEDRA_COUNT_REGISTRY`) | 2026-09-11 |
 | P1.4 | p1 | Scan linear no resultado | done | 2026-09-11 | 2026-09-11 |
 | P2.1 | p2 | Cost-instrumented extract (ferramenta própria) | todo | — | 2026-09-10 |
 | P2.2 | p2 | fdatasync modelado na álgebra (primitiva nossa) | todo | — | 2026-09-10 |
