@@ -45,7 +45,8 @@ COMPOSE=(
   ScalePredictDerived
   WorkIo
   FlushAmortCount
-  ScanDecisionCount
+  ScanDecisionBridges
+  ScanGuardDerived
   CountDerived
   BloomCount
 )

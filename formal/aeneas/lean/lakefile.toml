@@ -417,7 +417,10 @@ name = "WorkIo"
 name = "FlushAmortCount"
 
 [[lean_lib]]
-name = "ScanDecisionCount"
+name = "ScanDecisionBridges"
+
+[[lean_lib]]
+name = "ScanGuardDerived"
 
 [[lean_lib]]
 name = "CountDerived"
