@@ -131,6 +131,17 @@ theorem may_publish_group_as_is_dente :
   unfold may_publish_group_as_is
   rfl
 
+/-- Write-lock client protocol (registered atom, RFC-0202 P0.1):
+    mutation of `Db` is permitted EXACTLY while the client holds the
+    write guard — the AS-IS (mutate after dropping the guard) is
+    unreachable from the real kernel. -/
+theorem rwlock_client_may_mutate_ok_iff_holding_write :
+    ∀ (holding_write v : Bool),
+      (rwlock_client_may_mutate holding_write = ok v) ↔ (v = holding_write) := by
+  intro holding_write v
+  unfold rwlock_client_may_mutate
+  simp [eq_comm]
+
 /-- PCT depth 2 is not ∀ OS schedules of ConcurrentDb. -/
 theorem forall_schedules_pct2_not_admitted :
     forall_schedules_admitted (2#u64) = ok false := by

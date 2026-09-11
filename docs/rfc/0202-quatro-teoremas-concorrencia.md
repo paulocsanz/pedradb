@@ -104,9 +104,14 @@ sendo Pedra vs RocksDB default `sync=false` (`ROCKS_PARITY_SYNC=0`).
 
 ### P0 — must ship first (as duas filas de cliente que o extract já suporta)
 
-- [ ] **P0.1** `rwlock_client_may_mutate` a atom (fila data-race,
+- [x] **P0.1** `rwlock_client_may_mutate` a atom (fila data-race,
   write-lock client protocol; cap 98→97, floor_atom 33→34 no mesmo
-  commit) — status: `todo`
+  commit) — status: `done` (teorema
+  `rwlock_client_may_mutate_ok_iff_holding_write` em GroupCommit.lean:
+  mutação de `Db` permitida EXATAMENTE enquanto o cliente segura a
+  write-guard — o AS-IS mutar-após-soltar é inalcançável; build verde
+  primeira tentativa, sorry 0; planta DST existente
+  `rwlock_client_may_mutate_on_live_off_lock_is_not_ok` no kernel real)
 - [ ] **P0.2** `occ_member_fate` a atom (fila lost-update; handler
   `validate_occ_batch`; cap 97→96, floor_atom 34→35 no mesmo commit) —
   status: `todo`
@@ -132,7 +137,7 @@ sendo Pedra vs RocksDB default `sync=false` (`ROCKS_PARITY_SYNC=0`).
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | Fila data-race: atom rwlock_client_may_mutate | todo | — | 2026-09-11 |
+| P0.1 | p0 | Fila data-race: atom rwlock_client_may_mutate | done | rwlock_client_may_mutate_ok_iff_holding_write (GroupCommit.lean) | 2026-09-11 |
 | P0.2 | p0 | Fila lost-update: atom occ_member_fate | todo | — | 2026-09-11 |
 | P1.1 | p1 | Fila deadlock: ponte wait_for_deadlock (ou recusa datada) | todo | — | 2026-09-11 |
 | P1.2 | p1 | Quinto close registrado (candidato group_validate) | todo | — | 2026-09-11 |

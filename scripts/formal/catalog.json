@@ -3551,7 +3551,6 @@
     "crates/pedradb-core/src/concurrent.rs"
    ],
    "entry": "rwlock_client_may_mutate",
-   "data_fate": true,
    "handlers": [
     "finish_group_off_lock"
    ],
@@ -3566,7 +3565,11 @@
     "file": "crates/pedradb-core/src/group_commit_kernel.rs",
     "test": "rwlock_client_may_mutate_on_live_off_lock_is_not_ok"
    },
-   "three_teeth": true
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0202 P0.1 data-race row: write-lock client protocol — Db mutation permitted exactly while holding the write guard (forall-iff over the extracted body, GroupCommit.lean); AS-IS mutate-after-drop unreachable"
+   }
   },
   {
    "id": "forall_schedules",
