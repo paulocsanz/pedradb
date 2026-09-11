@@ -3364,7 +3364,6 @@
     "crates/pedradb-raft/src/lib.rs"
    ],
    "entry": "grant_after_persist",
-   "data_fate": true,
    "live_callers": [
     {
      "file": "crates/pedradb-store/src/lib.rs",
@@ -3375,6 +3374,10 @@
    "dst_plant": {
     "file": "crates/pedradb-store/src/three_teeth_queued.rs",
     "test": "grant_after_persist_on_live_queued_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0208 P0.1 seam store/raft promotion (1/8): vote granted exactly when decision=WouldGrant AND durable persist Ok (fate forall over the extracted body, Vote.lean) — Deny never grants, failed persist never grants; AS-IS ignores the persist outcome"
    }
   },
   {

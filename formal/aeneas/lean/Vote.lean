@@ -205,3 +205,22 @@ theorem durable_term_if_newer_raised_iff_newer_and_persisted :
     split
     · rfl
     · exact absurd hp (by simp)
+/-- RFC-0208 P0.1 (seam raft 1/2, atom `catalog:grant_persist`): the
+    vote is granted EXACTLY when the decision is WouldGrant AND the
+    durable persist succeeded — Deny never grants, and a failed persist
+    of a WouldGrant never grants either (the election path never
+    hands out a vote it did not make durable). -/
+theorem grant_after_persist_fate_iff :
+    ∀ (decision : VoteDecision) (persist : PersistOutcome) (v : Bool),
+      (grant_after_persist decision persist = ok v) ↔
+        ((v = true ∧ decision = VoteDecision.WouldGrant
+            ∧ persist = PersistOutcome.Ok)
+          ∨ (v = false ∧ ¬(decision = VoteDecision.WouldGrant
+            ∧ persist = PersistOutcome.Ok))) := by
+  intro decision persist v
+  cases decision with
+  | WouldGrant =>
+    cases persist with
+    | Ok => cases v <;> simp [grant_after_persist]
+    | Err => cases v <;> simp [grant_after_persist]
+  | Deny => cases v <;> simp [grant_after_persist]

@@ -79,6 +79,10 @@ paralela) — este RFC não as toca.
    `atom_reason` datado), cap 92→91, `floor_atom` 39→40,
    `floor_extract` 239→238, residuals no mesmo commit; planta DST
    `grant_after_persist_on_live_queued_is_not_ok` verde.
+   — status: `done` (pago como `grant_after_persist_fate_iff`
+   (Vote.lean): grant ⟺ WouldGrant ∧ persist Ok, Deny e persist
+   falhada nunca concedem; cap 92→91, floor_atom 39→40,
+   floor_extract 239→238 no mesmo commit; planta 1/1; gates 3× GREEN)
 2. **P0.2:** atom `catalog:commit_raft` — `propose_ack_ok` fate ∀
    (ack de propose ⟺ regra de commit; sem ack fantasma); cap 91→90,
    `floor_atom` 40→41, `floor_extract` 238→237, mesmo commit; planta
@@ -128,7 +132,7 @@ paralela) — este RFC não as toca.
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | Seam raft 1/2: grant_after_persist a atom | todo | — | 2026-09-11 |
+| P0.1 | p0 | Seam raft 1/2: grant_after_persist a atom | done | grant_after_persist_fate_iff (Vote.lean) | 2026-09-11 |
 | P0.2 | p0 | Seam raft 2/2: propose_ack_ok a atom (trio raft fechado) | todo | — | 2026-09-11 |
 | P1.1 | p1 | Composição do cluster (recovery/reconfig como ∀ sobre atoms) | todo | — | 2026-09-11 |
 | P1.2 | p1 | Cadência membership ×4 (cap 90→86) | todo | — | 2026-09-11 |
