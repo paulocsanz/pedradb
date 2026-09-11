@@ -1,6 +1,6 @@
 # RFC-0209 — Buffer de WAL em user-space: staging no `WalWriter` com flush por tamanho
 
-**Status:** in-progress (P0.1+P0.2 done 2026-09-11; P0.3 meter pendente)
+**Status:** closing (P0 completo; P1.1/P1.2 adjudicados 2026-09-11 pelo meter p209b)
 **Updated:** 2026-09-11
 **ID:** 0209
 **Parents:** [0193](0193-write-off-lock-pwrite-ticket.md) (ticket off-lock verificado em working tree e perdido PRÉ-COMMIT — forense `2026-09-11-wipe-forense/`; sem ele, TODO write WAL paga `write()` por op: é o alvo daqui),
@@ -126,20 +126,28 @@ grupo continua direto; o 1-op passa a staging) e com o merge-eixo 0201
       `wal_buffer_*` verdes: coalescing 10→1 write, ordem (b) grupo,
       ordem (c) sync-drains-antes-do-fd em arquivo real, ordem (d) close,
       byte-idêntico pós-close em arquivo real, default-off sem env)
-- [ ] **P0.3** Meter no gate caixote (`linux-gate-p149b`, pipeline crane
+- [x] **P0.3** Meter no gate caixote (`linux-gate-p149b`, pipeline crane
       + deploy comprovado): 3 rounds quiet, braços buf/nobuf env-limpo,
       peer `sync=false`, células-alvo + guardiãs + célula 10k; finding
-      datado com min-of-3 — status: `todo`
+      datado com min-of-3 — status: `done`
+      (`findings/2026-09-11-p209-wal-buffer-meter/` — ondas p209a/p209b;
+      10k gate 3/3 ≥1,0 nos dois braços; buf +33% med ycsb_f_mc4, +17% med
+      10k, +15% med kvrocks_set single; piso ycsb_f_mc4 0,532→0,780)
 
 ### P1 — decisão de default e atribuição
 
-- [ ] **P1.1** Flip do default (staging ON sem env) SE o meter P0.3
+- [x] **P1.1** Flip do default (staging ON sem env) SE o meter P0.3
       validar: min-of-3 ≥ alvo nas âncoras SEM regredir guardiãs (regra
       ≥20% na célula do buraco); senão mantém opt-in com finding datado —
-      status: `todo`
-- [ ] **P1.2** Fechar o hat do inventário A3/A7 (ycsb_a write-side):
+      status: `done (decisão: NÃO flipar — min caiu em ycsb_f single
+      1,881→1,094 e ycsb_a_mc4 1,537→1,115; opt-in mantido; finding
+      p209b)`
+- [x] **P1.2** Fechar o hat do inventário A3/A7 (ycsb_a write-side):
       a onda P0.3 mede ycsb_a single/mc4 com/sem buffer; atribuição
-      registrada no finding — status: `todo`
+      registrada no finding — status: `done (ycsb_a single nobuf 2,602
+      min neste boot — perda 0,605 do sweep era boot-specific, não
+      estrutural; buraco estrutural vivo = escalonamento rmw mc4,
+      herança 0201)`
 
 ### P2 — deferrals carregados com número
 
@@ -158,9 +166,9 @@ grupo continua direto; o 1-op passa a staging) e com o merge-eixo 0201
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | kernel should_flush + AS-IS twin | done (4 testes verdes) | este commit | 2026-09-11 |
 | P0.2 | p0 | staging no WalWriter (env opt-in, ordem (a)–(f)) | done (12 testes verdes, byte-idêntico arquivo real) | este commit | 2026-09-11 |
-| P0.3 | p0 | meter 3 rounds quiet (alvo+guardiãs+10k) | todo | — | 2026-09-11 |
-| P1.1 | p1 | flip default pós-meter | todo | — | 2026-09-11 |
-| P1.2 | p1 | atribuição ycsb_a (hat do inventário) | todo | — | 2026-09-11 |
+| P0.3 | p0 | meter 3 rounds quiet (alvo+guardiãs+10k) | done (p209a/p209b; 10k 3/3 ≥1,0 ambos braços) | findings/2026-09-11-p209-wal-buffer-meter | 2026-09-11 |
+| P1.1 | p1 | flip default pós-meter | done — decisão: manter opt-in (min regrediu em 2 células) | findings/2026-09-11-p209-wal-buffer-meter | 2026-09-11 |
+| P1.2 | p1 | atribuição ycsb_a (hat do inventário) | done — perda 0,605 era boot-specific (2,602 neste boot) | findings/2026-09-11-p209-wal-buffer-meter | 2026-09-11 |
 | P2.1 | p2 | U-cells lote Linux 3-run | deferred (herdado) | inventário 2026-09-11 | 2026-09-11 |
 | P2.2 | p2 | meters pesados 100M/15M/25M | deferred (herdado) | inventário 2026-09-11 | 2026-09-11 |
 | P2.3 | p2 | Grid B no corte vencedor | deferred (herdado) | inventário 2026-09-11 | 2026-09-11 |
