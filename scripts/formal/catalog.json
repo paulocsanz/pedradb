@@ -128,11 +128,14 @@
      "handler": "broadcast_append_after_propose"
     }
    ],
-   "data_fate": true,
    "as_is": "propose_ack_ok_as_is",
    "dst_plant": {
     "file": "crates/pedradb-store/src/three_teeth_queued.rs",
     "test": "propose_ack_ok_on_live_queued_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0208 P0.2 seam store/raft promotion (2/8): propose acked exactly when index <= commit_index (fate forall over the extracted pure-lift body, Commit.lean) — no phantom ack for uncommitted index; AS-IS acks everything. Closes vote_kernel.rs and commit_kernel.rs: zero pending data_fate in both"
    }
   },
   {

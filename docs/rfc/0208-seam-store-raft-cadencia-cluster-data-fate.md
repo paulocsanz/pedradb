@@ -89,6 +89,14 @@ paralela) — este RFC não as toca.
    `propose_ack_ok_on_live_queued_is_not_ok` verde. Ao fechar: os
    três kernels raft sem NENHUM data-fate pendente (claim datada no
    findings).
+   — status: `done` (pago como `propose_ack_ok_fate_iff`
+   (Commit.lean): ack ⟺ index ≤ commit_index; cap 91→90,
+   floor_atom 40→41, floor_extract 238→237 no mesmo commit; planta
+   1/1; gates 3× GREEN. Claim datada medida: vote_kernel.rs e
+   commit_kernel.rs com ZERO data_fate pendente; membership segue
+   com 26 nomeados para a cadência P1.2 — o "três kernels" do texto
+   original era overclaim, o mensurável é dois fechados + recovery
+   do membership já pago no 0205)
 
 ### P1 — next wave (a composição do cluster + a banda membership)
 
@@ -133,7 +141,7 @@ paralela) — este RFC não as toca.
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | Seam raft 1/2: grant_after_persist a atom | done | grant_after_persist_fate_iff (Vote.lean) | 2026-09-11 |
-| P0.2 | p0 | Seam raft 2/2: propose_ack_ok a atom (trio raft fechado) | todo | — | 2026-09-11 |
+| P0.2 | p0 | Seam raft 2/2: propose_ack_ok a atom (trio raft fechado) | done | propose_ack_ok_fate_iff (Commit.lean) — vote+commit kernels zero data_fate | 2026-09-11 |
 | P1.1 | p1 | Composição do cluster (recovery/reconfig como ∀ sobre atoms) | todo | — | 2026-09-11 |
 | P1.2 | p1 | Cadência membership ×4 (cap 90→86) | todo | — | 2026-09-11 |
 | P2.1 | p2 | Banda l28 ×2 + plano datado do bloco (cap 86→84) | todo | — | 2026-09-11 |

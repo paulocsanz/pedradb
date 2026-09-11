@@ -41,3 +41,23 @@ theorem as_is_recover_promotes_suffix :
   · unfold recover_commit
     simp [core.cmp.Ord.min.trait_default, core.cmp.Ord.min.default,
       core.cmp.Ord.min_body, core.cmp.impls.PartialOrdU64.lt]
+
+/-- RFC-0208 P0.2 (seam raft 2/2, atom `catalog:commit_raft`): a
+    propose gets its ack EXACTLY when the entry's index is at or below
+    the commit index (already committed) — no phantom ack for an
+    uncommitted index, and a committed one is never left unacked.
+    The AS-IS `ok true` mutant acks everything. -/
+theorem propose_ack_ok_fate_iff :
+    ∀ (index : U64) (commit_index : U64) (v : Bool),
+      (propose_ack_ok index commit_index = ok v) ↔
+        ((v = true ∧ commit_index >= index)
+          ∨ (v = false ∧ ¬(commit_index >= index))) := by
+  intro index commit_index v
+  unfold propose_ack_ok
+  cases hd : decide (commit_index >= index) with
+  | true =>
+    have hP := of_decide_eq_true hd
+    cases v <;> simp [hP]
+  | false =>
+    have hnP := of_decide_eq_false hd
+    cases v <;> simp [hnP]

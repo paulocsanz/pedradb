@@ -67,3 +67,4 @@ atom	catalog:vote	vote_decision_fate_iff	formal/aeneas/lean/Vote.lean	vote_decis
 atom	catalog:recover_apply	recover_must_apply_fate_iff	formal/aeneas/lean/Membership.lean	recover_must_apply
 atom	catalog:recover_drop_orphan	recover_drop_orphan_seg_fate_iff	formal/aeneas/lean/Membership.lean	recover_drop_orphan_seg
 atom	catalog:grant_persist	grant_after_persist_fate_iff	formal/aeneas/lean/Vote.lean	grant_after_persist
+atom	catalog:commit_raft	propose_ack_ok_fate_iff	formal/aeneas/lean/Commit.lean	propose_ack_ok
