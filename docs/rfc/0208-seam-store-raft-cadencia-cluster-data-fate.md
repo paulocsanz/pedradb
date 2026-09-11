@@ -1,4 +1,4 @@
-# RFC: 0206 — fechar o seam store/raft: a cadência do cluster data-fate e a composição do destino
+# RFC: 0208 — fechar o seam store/raft: a cadência do cluster data-fate e a composição do destino
 
 **Status:** draft
 **Updated:** 2026-09-11
