@@ -70,3 +70,4 @@ atom	catalog:grant_persist	grant_after_persist_fate_iff	formal/aeneas/lean/Vote.
 atom	catalog:commit_raft	propose_ack_ok_fate_iff	formal/aeneas/lean/Commit.lean	propose_ack_ok
 atom	catalog:removed_step_down	removed_steps_down_fate_iff	formal/aeneas/lean/Membership.lean	removed_steps_down
 atom	catalog:disk_membership	disk_membership_overrides_cli_fate_iff	formal/aeneas/lean/Membership.lean	disk_membership_overrides_cli
+atom	catalog:high_water	high_water_at_least_fate_iff	formal/aeneas/lean/Membership.lean	high_water_at_least

@@ -429,7 +429,6 @@
      "handler": "open_single_node_with_rng_opts"
     }
    ],
-   "data_fate": true,
    "handlers": [
     "open_single_node_with_rng_opts",
     "bind_cluster_identity",
@@ -441,6 +440,10 @@
    "dst_plant": {
     "file": "crates/pedradb-store/src/three_teeth_queued.rs",
     "test": "high_water_at_least_on_live_queued_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0208 P1.2 membership cadence promotion (3/4): the inventory high-water after reopen is exactly max(disk, ram) via the trait-default Ord::max over the U64 order (fate forall over the extracted body, Membership.lean); AS-IS keeps ram and can lose committed inventory"
    }
   },
   {

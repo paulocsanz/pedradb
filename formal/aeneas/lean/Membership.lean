@@ -281,3 +281,29 @@ theorem disk_membership_overrides_cli_fate_iff :
   intro has_disk v
   unfold disk_membership_overrides_cli
   cases has_disk <;> cases v <;> simp
+
+/-- RFC-0208 P1.2 (membership cadence promotion 3/4, atom
+    `catalog:high_water`): the inventory high-water after reopen is
+    the MAX of disk and ram EXACTLY — the trait-default `Ord::max`
+    over the U64 order — fate forall over the extracted body; the
+    AS-IS mutant keeps the ram value and can LOSE committed
+    inventory (a durable high-water below the in-memory one). -/
+theorem high_water_at_least_fate_iff :
+    ∀ (disk_hw ram_hw : U64) (v : U64),
+      (high_water_at_least disk_hw ram_hw = ok v) ↔
+        ((v = ram_hw ∧ disk_hw < ram_hw)
+          ∨ (v = disk_hw ∧ ¬ (disk_hw < ram_hw))) := by
+  intro disk_hw ram_hw v
+  have hsem : ∀ (x y : U64),
+      core.cmp.OrdU64.partialOrdInst.lt x y = ok (decide (x < y)) := fun x y => rfl
+  unfold high_water_at_least core.cmp.Ord.max.default core.cmp.Ord.max_body
+  rw [hsem]
+  cases hd : decide (disk_hw < ram_hw) with
+  | true =>
+    have hP : disk_hw < ram_hw := of_decide_eq_true hd
+    simp [hd, hP]
+    exact eq_comm
+  | false =>
+    have hnP : ¬ (disk_hw < ram_hw) := of_decide_eq_false hd
+    simp [hd, hnP]
+    exact eq_comm
