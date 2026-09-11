@@ -81,9 +81,9 @@
     "handler_loc": 112092,
     "db_rs_extracted": false,
     "proof_depth": {
-      "extract": 257,
+      "extract": 256,
       "close": 2,
-      "atom": 22,
+      "atom": 23,
       "model": 17
     },
     "kernel_fn_allowlist": {
@@ -136,7 +136,7 @@
       ]
     },
     "single_artifact": 291,
-    "data_fate": 109
+    "data_fate": 108
   },
   "residuals": [
     {

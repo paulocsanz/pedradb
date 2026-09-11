@@ -4731,7 +4731,7 @@
     {
       "id": "cf_encode_effective",
       "finding": "RFC-0150 P0",
-      "twin_kind": "close",
+      "twin_kind": "atom",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/cf_kernel.rs",
       "twin": "crates/pedradb-core/src/cf_kernel.rs",
@@ -4741,7 +4741,6 @@
         "crates/rocksdb-compat/src/lib.rs"
       ],
       "entry": "cf_encode_effective",
-      "data_fate": true,
       "live_callers": [
         {
           "file": "crates/rocksdb-compat/src/lib.rs",
@@ -4752,7 +4751,13 @@
       "dst_plant": {
         "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
         "test": "cf_encode_effective_on_live_default_raw_is_not_ok"
-      }
+      },
+      "atom": "cf_encode_effective",
+      "atom_reason": {
+        "date": "2026-09-10",
+        "why": "RFC-0191 P2.3 cadence (twenty-second if): the effective column-family encoding disposition — the effective encoding is empty exactly when the cf is default and default_raw strips it, or the else-branch kept an already-empty cf; any other cf passes through untouched (RFC-0150 P0; the Str equality is the Aeneas boundary, stated over its Result so a fail/div comparison never fakes an empty encoding) — proven forall over (cf, default_raw) as cf_encode_effective_empty_iff_default_raw_else_identity in Cf.lean; the cf trampoline matches the kernel decision"
+      },
+      "three_teeth": true
     },
     {
       "id": "encode_cf_key",

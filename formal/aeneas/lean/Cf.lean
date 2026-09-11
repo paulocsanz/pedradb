@@ -54,3 +54,36 @@ theorem encode_cf_key_default_raw_is_key
       alloc.slice.Slice.to_vec core.clone.CloneU8 k := by
   unfold encode_cf_key
   simp [cf_encode_effective, heq, hempty]
+
+/-- Catalog entry: the effective column-family encoding is empty
+    exactly when (the cf is "default" and default_raw strips it) or
+    (the else-branch kept an already-empty cf) — any other cf passes
+    through untouched (RFC-0150 P0). The Str equality is the Aeneas
+    boundary: stated over its result, so fail/div of the comparison
+    never fakes an empty encoding. -/
+theorem cf_encode_effective_empty_iff_default_raw_else_identity :
+    ∀ (cf : Str) (default_raw : Bool),
+      (cf_encode_effective cf default_raw = ok (toStr ""))
+        ↔ ((Str.Insts.CoreCmpPartialEqStr.eq cf (toStr "default") = ok true
+            ∧ default_raw = true)
+          ∨ (((Str.Insts.CoreCmpPartialEqStr.eq cf (toStr "default") = ok true
+              ∧ default_raw = false)
+              ∨ Str.Insts.CoreCmpPartialEqStr.eq cf (toStr "default") = ok false)
+            ∧ cf = toStr "")) := by
+  intro cf default_raw
+  unfold cf_encode_effective
+  cases he : Str.Insts.CoreCmpPartialEqStr.eq cf (toStr "default") with
+  | ok b =>
+    cases b <;> cases default_raw <;> simp
+  | fail e =>
+    constructor
+    · intro h
+      simp at h
+    · rintro (⟨h1, _⟩ | ⟨(⟨h1, _⟩ | h1), _⟩) <;>
+      exact absurd h1 (by simp)
+  | div =>
+    constructor
+    · intro h
+      simp at h
+    · rintro (⟨h1, _⟩ | ⟨(⟨h1, _⟩ | h1), _⟩) <;>
+      exact absurd h1 (by simp)
