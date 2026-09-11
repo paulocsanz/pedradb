@@ -108,7 +108,14 @@ pool honesto manda sobre a meta numérica).
    `recover_truncate`, `recover_abort`, `identity_before_applied`
    (recover+identity); `open_peer_disk`, `local_id_member`,
    `reader_local`, `participating_member` (open/reader): ×8, cap
-   47→39, floor_atom 77→85, floor_extract 201→193 — status: `todo`
+   47→39, floor_atom 77→85, floor_extract 201→193 — status: `doing`
+
+   — 1/8 `done`: `recover_apply_node_counts_fate_iff`
+   (Membership.lean; recover aplica em TODA réplica local
+   exatamente quando o nó é local — `ids` não é o portão), cap
+   47→46, floor_atom 77→78, floor_extract 201→200; planta DST
+   verde (`recover_apply_node_counts_on_live_queued_is_not_ok`,
+   8 plantas em paralelo, 1.93s)
 4. **P1.2:** cadências membership 5/6 + 6/6 — `pending_joint_node`,
    `joint_target`, `joint_add_target`, `joint_leave_ok` (joint);
    `drop_repl_slot`, `drop_sent_through` (slot): ×6, cap 39→33,

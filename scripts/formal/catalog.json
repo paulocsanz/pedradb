@@ -560,7 +560,6 @@
      "handler": "recover_apply_committed"
     }
    ],
-   "data_fate": true,
    "handlers": [
     "recover_apply_committed"
    ],
@@ -568,6 +567,10 @@
    "dst_plant": {
     "file": "crates/pedradb-store/src/three_teeth_queued.rs",
     "test": "recover_apply_node_counts_on_live_queued_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0131: recover aplica em toda replica local, mesmo fora de ids; as-is 0130 pulava a replica removida"
    }
   },
   {
