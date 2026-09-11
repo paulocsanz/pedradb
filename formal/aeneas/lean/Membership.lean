@@ -433,3 +433,21 @@ theorem persist_meta_node_counts_fate_iff :
   intro is_local in_ids v
   unfold persist_meta_node_counts
   cases is_local <;> cases v <;> simp
+
+/-- RFC-0212 P0.2 (membership cadence 2/6, atom
+    `catalog:persist_hist`): SI hist is persisted on EVERY local
+    replica EXACTLY when the node is local — membership in `ids`
+    is not the gate (a replica dropped from `ids` still persists
+    its hist) — fate forall over the extracted pure-lift body;
+    the AS-IS mutant gates on `is_local && in_ids` (the 0135
+    leftover: the removed replica's hist is not durable — the
+    lie the DST plant
+    `persist_hist_node_counts_on_live_queued_is_not_ok` refutes). -/
+theorem persist_hist_node_counts_fate_iff :
+    ∀ (is_local in_ids : Bool) (v : Bool),
+      (persist_hist_node_counts is_local in_ids = ok v) ↔
+        ((v = true ∧ is_local = true)
+          ∨ (v = false ∧ is_local = false)) := by
+  intro is_local in_ids v
+  unfold persist_hist_node_counts
+  cases is_local <;> cases v <;> simp

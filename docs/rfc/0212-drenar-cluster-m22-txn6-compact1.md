@@ -79,6 +79,13 @@ pool honesto manda sobre a meta numérica).
    verde (`persist_meta_node_counts_on_live_queued_is_not_ok`,
    1 passed via --lib)
 
+   — 2/4 `done`: `persist_hist_node_counts_fate_iff`
+   (Membership.lean; hist SI persiste em TODA réplica local
+   exatamente quando o nó é local), cap 50→49, floor_atom 74→75,
+   floor_extract 204→203; planta DST verde
+   (`persist_hist_node_counts_on_live_queued_is_not_ok`, 1 passed
+   via --lib)
+
 ### P1 — next
 
 3. **P1.1:** cadências membership 3/6 + 4/6 — `recover_apply_node`,
