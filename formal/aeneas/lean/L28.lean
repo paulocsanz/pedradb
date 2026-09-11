@@ -670,3 +670,20 @@ theorem l28_tcp_hnt_ok_fate_iff :
   intro b v
   unfold l28_tcp_hnt_ok
   cases b <;> cases v <;> simp
+
+/-- RFC-0210 P2.1 (l28 cadence 5/6, atom `catalog:l28_tcp_slot`):
+    after a REAL TCP plant + process death, the TCP ctor of a
+    remaining voter forgets next/match/sent_through of the removed
+    replica EXACTLY when the slot was dropped — fate forall over
+    the extracted pure-lift body; the AS-IS `ok true` mutant skips
+    the slot drop (the 0146 leftover: keep next/match/sent_through
+    — the lie the real TCP plant `l28_real_tcp_drop_repl`
+    refutes). -/
+theorem l28_tcp_slot_ok_fate_iff :
+    ∀ (b : Bool) (v : Bool),
+      (l28_tcp_slot_ok b = ok v) ↔
+        ((v = true ∧ b = true)
+          ∨ (v = false ∧ b = false)) := by
+  intro b v
+  unfold l28_tcp_slot_ok
+  cases b <;> cases v <;> simp

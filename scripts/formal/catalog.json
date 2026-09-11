@@ -4311,7 +4311,6 @@
     "crates/pedradb-store/src/bin/cluster_real.rs"
    ],
    "entry": "l28_tcp_slot_ok",
-   "data_fate": true,
    "handlers": [
     "tcp_node_drop_repl_ok"
    ],
@@ -4325,7 +4324,11 @@
      "file": "crates/pedradb-store/src/bin/cluster_real.rs",
      "handler": "tcp_node_drop_repl_ok"
     }
-   ]
+   ],
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0147 P1.2 REAL TCP remaining-voter repl-slot drop: install forgets next/match/sent_through of the removed replica; plant l28_real_tcp_drop_repl green"
+   }
   },
   {
    "id": "l28_tcp_sth",
