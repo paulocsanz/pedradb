@@ -3660,7 +3660,6 @@
     "crates/pedradb-store/src/bin/cluster_real.rs"
    ],
    "entry": "l28_tcp_left_ok",
-   "data_fate": true,
    "handlers": [
     "tcp_node_disk_left_joint"
    ],
@@ -3674,7 +3673,11 @@
      "file": "crates/pedradb-store/src/bin/cluster_real.rs",
      "handler": "tcp_node_disk_left_joint"
     }
-   ]
+   ],
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0208 P2.1 l28 band promotion (1/2): the real-TCP node reports member-left-on-disk exactly when the disk says so (fate forall over the extracted pure-lift body, L28.lean); AS-IS ok-true reports removal unconditionally — the lie the real TCP plant refutes"
+   }
   },
   {
    "id": "l28_tcp_hw",

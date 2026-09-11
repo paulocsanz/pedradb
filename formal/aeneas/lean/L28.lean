@@ -328,3 +328,20 @@ theorem l28_tcp_pj_propagates :
 theorem l28_tcp_pj_as_is_always_ok :
     l28_tcp_pj_ok_as_is false = ok true := by
   rfl
+
+/-- RFC-0208 P2.1 (l28 band promotion 1/2, atom
+    `catalog:l28_tcp_left`): the real-TCP node reports "member
+    left on disk" EXACTLY when the disk says so — the removal is
+    never reported when it did not happen, and never hidden when it
+    did — fate forall over the extracted pure-lift body; the AS-IS
+    `ok true` mutant reports removal unconditionally (the lie the
+    real TCP plant `l28_real_tcp_remove_member_left_on_disk`
+    refutes). -/
+theorem l28_tcp_left_ok_fate_iff :
+    ∀ (left : Bool) (v : Bool),
+      (l28_tcp_left_ok left = ok v) ↔
+        ((v = true ∧ left = true)
+          ∨ (v = false ∧ left = false)) := by
+  intro left v
+  unfold l28_tcp_left_ok
+  cases left <;> cases v <;> simp

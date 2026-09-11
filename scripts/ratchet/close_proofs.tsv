@@ -72,3 +72,4 @@ atom	catalog:removed_step_down	removed_steps_down_fate_iff	formal/aeneas/lean/Me
 atom	catalog:disk_membership	disk_membership_overrides_cli_fate_iff	formal/aeneas/lean/Membership.lean	disk_membership_overrides_cli
 atom	catalog:high_water	high_water_at_least_fate_iff	formal/aeneas/lean/Membership.lean	high_water_at_least
 atom	catalog:joint_leave	joint_still_active_fate_iff	formal/aeneas/lean/Membership.lean	joint_still_active
+atom	catalog:l28_tcp_left	l28_tcp_left_ok_fate_iff	formal/aeneas/lean/L28.lean	l28_tcp_left_ok
