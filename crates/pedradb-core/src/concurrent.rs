@@ -845,7 +845,11 @@ impl WriteGroup {
                         ))
                     });
                 }
-                g.pending.drain(..).collect()
+                // RFC-0201 P0.1: full drain bounded by the kernel's misuse
+                // floor; the absorb loop below folds the remainder into
+                // this same group frame (no cap-8 convoy).
+                let cap = crate::client_axis_kernel::pipeline_drain_cap(g.pending.len());
+                g.pending.drain(..cap).collect()
             };
 
             // Catch-up window (RFC-0037 P2.2): writers counted in `active`
@@ -8620,6 +8624,63 @@ mod tests {
                     "lost bypass async put t{t}/{i}"
                 );
             }
+        }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0201 P0.1: 50 one-op async writers must land in groups whose
+    /// average size exceeds the AS-IS cap-8 convoy (impossible under
+    /// `pipeline_drain_cap_as_is`: ceil(50/8) == 7 serial groups) — the
+    /// full drain takes the whole generation per leader cycle.
+    #[test]
+    fn rfc0201_full_drain_groups_exceed_as_is_cap() {
+        let dir = temp_dir();
+        std::env::remove_var("PEDRA_ASYNC_GROUP");
+        let ncpu = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
+        let herd = 50usize.max(ncpu + 8);
+        {
+            let db = ConcurrentDb::open(&dir).unwrap();
+            let barrier = Arc::new(std::sync::Barrier::new(herd));
+            let payload = [b'd'; 128];
+            std::thread::scope(|s| {
+                for t in 0..herd {
+                    let db = &db;
+                    let barrier = &barrier;
+                    let payload = &payload;
+                    s.spawn(move || {
+                        barrier.wait();
+                        db.put_with([b'd', t as u8], payload, WriteOptions::no_sync())
+                            .unwrap();
+                    });
+                }
+            });
+            let (submits, queued, batches, batch_ops) = db.write_group_stats();
+            assert_eq!(submits, herd as u64);
+            assert_eq!(batch_ops, herd as u64, "every 1-op writer is a member");
+            assert!(queued > 0, "herd ({herd} > {ncpu}) merges, not bypasses");
+            assert!(
+                batches < herd as u64,
+                "grouped (batches={batches} submits={submits})"
+            );
+            assert!(
+                batch_ops > 8 * batches,
+                "avg group {}/{} must exceed the AS-IS cap-8 convoy",
+                batch_ops,
+                batches
+            );
+            db.close().unwrap();
+        }
+        let db = ConcurrentDb::open(&dir).unwrap();
+        let payload = [b'd'; 128];
+        for t in 0..herd {
+            assert_eq!(
+                db.get(&[b'd', t as u8]).as_deref(),
+                Some(payload.as_slice()),
+                "lost drained put t{t}"
+            );
         }
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
