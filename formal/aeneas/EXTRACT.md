@@ -497,3 +497,40 @@ Estado: 33 pares l28 no catálogo; 2 pagos (`l28_tcp_left`,
   `entry`s with no Lean `def`"). Plano: re-escrever os pares para
   nomear `fn` viva ou aposentá-los no catálogo — nunca inventar
   gate de identidade para agradar o catálogo.
+
+## 2026-09-11 — nota do seam store/raft (RFC-0208 P2.2): fechado nos kernels raft, cluster nomeado
+
+- **Raft fechado.** Os kernels raft (vote/commit/membership-recovery)
+  têm ZERO par `data_fate` pendente no catálogo no HEAD do 0208:
+  `vote` (`vote_decision`, 0205), `recover_apply` +
+  `recover_drop_orphan` (0205), `grant_persist` +
+  `commit_raft` (0208 P0), e a cadência membership ×4 (0208 P1.2:
+  removed_steps_down, disk_membership_overrides_cli,
+  high_water_at_least, joint_still_active) — medido ao vivo: nenhum
+  par `data_fate=True` em vote_kernel.rs / commit_kernel.rs /
+  membership_kernel.rs.
+- **Cluster 8/66 pagos pelo 0208** (2 singletons + 4 membership + 2
+  l28_tcp), mais a composição ∀ do cluster em ComposeStoreRaft.lean
+  (election_grant_chain_fate + recovery_fate_composed, sem registro
+  por não serem par único do catálogo — razão em findings).
+- **Restante vivo do cluster: 58 nomeados** (não 55 — o texto do
+  slice subtraiu também o trio do 0205, que JÁ estava fora dos 66
+  na contagem do board; correção datada aqui):
+  - 22 em `crates/pedradb-raft/src/membership_kernel.rs`:
+    discard_leader, discard_uncommitted, drop_preimages,
+    drop_repl_slot, drop_sent_through, force_clear, hint_member,
+    identity_before_applied, joint_add_target, joint_leave_ok,
+    joint_target, local_id_member, open_peer_disk,
+    participating_member, pending_joint_node, persist_fence,
+    persist_hist, persist_meta, reader_local, recover_abort,
+    recover_apply_node, recover_truncate
+  - 29 em `l28.rs` — plano datado próprio acima (22 pure-lifts +
+    7 fantasmas de conserto de catálogo)
+  - 6 em `txn_kernel.rs`: discard_cut, leftover_txn_is_aborted,
+    next_txn_id_after, prepare_error_aborts_earlier, reserve_si_gen,
+    unreserve_si_gen
+  - 1 singleton: `compact_unleft` (compact_kernel.rs)
+- As três admissions (`media_durable_admitted`,
+  `forall_schedules_admitted`, `lock_interleavings_admitted`)
+  seguem ALWAYS false — recusas plantadas; o TCB nomeado no 0205
+  P2.1 permanece intocado.
