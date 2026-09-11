@@ -681,7 +681,6 @@
      "handler": "persist_u64_meta_all"
     }
    ],
-   "data_fate": true,
    "handlers": [
     "persist_u64_meta_all"
    ],
@@ -689,6 +688,10 @@
    "dst_plant": {
     "file": "crates/pedradb-store/src/three_teeth_queued.rs",
     "test": "persist_meta_node_counts_on_live_queued_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0135 persist SI meta on every local replica even if not in ids; plant persist_meta_node_counts_on_live_queued_is_not_ok green"
    }
   },
   {

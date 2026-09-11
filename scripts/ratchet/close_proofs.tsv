@@ -100,3 +100,4 @@ atom	catalog:discard_uncommitted	discard_node_counts_fate_iff	formal/aeneas/lean
 atom	catalog:discard_leader	discard_leader_local_fate_iff	formal/aeneas/lean/Membership.lean	discard_leader_local
 atom	catalog:drop_preimages	drop_preimages_node_counts_fate_iff	formal/aeneas/lean/Membership.lean	drop_preimages_node_counts
 atom	catalog:force_clear	force_clear_node_counts_fate_iff	formal/aeneas/lean/Membership.lean	force_clear_node_counts
+atom	catalog:persist_meta	persist_meta_node_counts_fate_iff	formal/aeneas/lean/Membership.lean	persist_meta_node_counts

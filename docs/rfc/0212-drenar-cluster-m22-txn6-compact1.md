@@ -70,7 +70,14 @@ pool honesto manda sobre a meta numérica).
    floor_extract 209→205 — status: `done`
 2. **P0.2:** cadência membership 2/6 (persist+hint) — `persist_meta`,
    `persist_hist`, `persist_fence`, `hint_member` (0135/0136/0137/0146):
-   cap 51→47, floor_atom 73→77, floor_extract 205→201 — status: `todo`
+   cap 51→47, floor_atom 73→77, floor_extract 205→201 — status: `doing`
+
+   — 1/4 `done`: `persist_meta_node_counts_fate_iff`
+   (Membership.lean; meta SI persiste em TODA réplica local
+   exatamente quando o nó é local — `ids` não é o portão), cap
+   51→50, floor_atom 73→74, floor_extract 205→204; planta DST
+   verde (`persist_meta_node_counts_on_live_queued_is_not_ok`,
+   1 passed via --lib)
 
 ### P1 — next
 
