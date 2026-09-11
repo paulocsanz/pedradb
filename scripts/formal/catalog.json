@@ -4249,7 +4249,6 @@
     "crates/pedradb-store/src/bin/cluster_real.rs"
    ],
    "entry": "l28_tcp_std_ok",
-   "data_fate": true,
    "handlers": [
     "tcp_node_removed_std_ok"
    ],
@@ -4263,7 +4262,11 @@
      "file": "crates/pedradb-store/src/bin/cluster_real.rs",
      "handler": "tcp_node_removed_std_ok"
     }
-   ]
+   ],
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0145 P1.2 REAL TCP removed-replica Leader step-down: C-new re-install steps a planted Leader down on a replica dropped from ids; plant l28_real_tcp_removed_std green"
+   }
   },
   {
    "id": "l28_tcp_hnt",

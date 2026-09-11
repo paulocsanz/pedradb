@@ -220,6 +220,12 @@ status: `done`
    exatamente quando o persist aconteceu), cap 61→60, floor_atom
    63→64, floor_extract 215→214; planta TCP REAL verde
    (`l28_real_tcp_removed_pld`, 231.81s)
+
+   — 2/6 `done`: `l28_tcp_std_ok_fate_iff` (L28.lean; re-instalação
+   do C-new derruba Leader plantado em réplica fora de `ids`
+   exatamente quando o step-down aconteceu), cap 60→59,
+   floor_atom 64→65, floor_extract 214→213; planta TCP REAL verde
+   (`l28_real_tcp_removed_std`, 368.96s)
 6. **P2.2:** composição ∀ do protocolo de remoção TCP (remove →
    left ∧ high-water preservado) sobre atoms registrados em
    `ComposeL28.lean` (zero sorry; twins DST verdes; razão de

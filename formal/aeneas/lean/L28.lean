@@ -638,3 +638,19 @@ theorem l28_tcp_pld_ok_fate_iff :
   intro b v
   unfold l28_tcp_pld_ok
   cases b <;> cases v <;> simp
+
+/-- RFC-0210 P2.1 (l28 cadence 5/6, atom `catalog:l28_tcp_std`):
+    after a REAL TCP plant + process death, re-install of C-new
+    steps a planted Leader down on a replica dropped from `ids`
+    EXACTLY when the step-down happened — fate forall over the
+    extracted pure-lift body; the AS-IS `ok true` mutant skips the
+    step-down (the 0144 leftover: keep Role::Leader — the lie the
+    real TCP plant `l28_real_tcp_removed_std` refutes). -/
+theorem l28_tcp_std_ok_fate_iff :
+    ∀ (b : Bool) (v : Bool),
+      (l28_tcp_std_ok b = ok v) ↔
+        ((v = true ∧ b = true)
+          ∨ (v = false ∧ b = false)) := by
+  intro b v
+  unfold l28_tcp_std_ok
+  cases b <;> cases v <;> simp
