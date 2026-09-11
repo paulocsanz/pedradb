@@ -24,9 +24,26 @@ pub struct WalWriter<W> {
     /// every successful sink write). Pure in-memory state — querying the
     /// sink mid-commit would `flush`, which fault-injection envs classify
     /// as a Write op and which is a syscall on the hot path.
+    ///
+    /// With RFC-0209 staging enabled, advances at **stage** time (logical
+    /// position): the staged bytes are promised to the sink in order, and
+    /// every sink-facing path (direct write, barrier, close) drains the
+    /// staging buffer first, so the logical order is the file order.
     position: u64,
     /// Reused framing buffer (RFC-0040: no per-record malloc of the payload).
     frame: Vec<u8>,
+    /// RFC-0209 P0.2: user-space staging (opt-in via `PEDRA_WAL_BUFFER`).
+    /// `None` (default) = the pre-0209 path, one sink write per frame.
+    staged: Option<StagedBuf>,
+}
+
+/// Staging state for [`WalWriter`] (RFC-0209 P0.2).
+struct StagedBuf {
+    /// Pending framed bytes not yet handed to the sink.
+    buf: Vec<u8>,
+    /// Flush cap in bytes; `0` is the misuse guard (flush every append —
+    /// byte-for-byte the AS-IS behavior; see `wal_buffer_kernel`).
+    max: u64,
 }
 
 impl<W: Write + Seek> WalWriter<W> {
@@ -51,7 +68,41 @@ impl<W: Write + Seek> WalWriter<W> {
             block_offset: pos % BLOCK_SIZE,
             position: raw_pos,
             frame: Vec::new(),
+            staged: None,
         })
+    }
+
+    /// RFC-0209 P0.2: enable user-space staging with a flush cap of `max`
+    /// bytes. Size-only flush decisions come from
+    /// [`crate::wal_buffer_kernel::should_flush`] — no timer, no waiting
+    /// for writers (0180/0190 vetoes are structural). Staging must be
+    /// enabled before the first write.
+    pub(crate) fn enable_staging(&mut self, max: u64) {
+        self.staged = Some(StagedBuf {
+            buf: Vec::new(),
+            max,
+        });
+    }
+
+    /// Hand the staged bytes to the sink (RFC-0209 P0.2). Order rule (b):
+    /// called before every direct sink write and before every barrier, so
+    /// the file order is always the logical (seq) order. On a sink error
+    /// the bytes return to the buffer — a failed drain is retryable, like
+    /// the direct write path whose frame the caller still holds.
+    fn drain_staged(&mut self) -> Result<()> {
+        let buf = match self.staged.as_mut() {
+            Some(st) if !st.buf.is_empty() => std::mem::take(&mut st.buf),
+            _ => return Ok(()),
+        };
+        match self.out.write_all(&buf) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                if let Some(st) = self.staged.as_mut() {
+                    st.buf = buf;
+                }
+                Err(e.into())
+            }
+        }
     }
 
     /// Append one logical record, fragmenting across blocks as needed.
@@ -67,6 +118,9 @@ impl<W: Write + Seek> WalWriter<W> {
         frame.clear();
         frame.reserve(data.len() + 2 * HEADER_SIZE);
         self.fragment_into(data, &mut frame);
+        // RFC-0209 P0.2 order rule (b): a direct write drains staged bytes
+        // first so the file order stays the logical order.
+        self.drain_staged()?;
         self.out.write_all(&frame)?;
         self.position = self.position.saturating_add(frame.len() as u64);
         // Do not leave the just-written bytes in `frame` — `Wal::sync_data`
@@ -95,6 +149,9 @@ impl<W: Write + Seek> WalWriter<W> {
         for data in datas {
             self.fragment_into(data, &mut frame);
         }
+        // RFC-0209 P0.2 order rule (b): group writes are direct — drain
+        // staged bytes first (same rule as `add_record`).
+        self.drain_staged()?;
         self.out.write_all(&frame)?;
         self.position = self.position.saturating_add(frame.len() as u64);
         frame.clear();
@@ -142,6 +199,20 @@ impl<W: Write + Seek> WalWriter<W> {
 
     pub(crate) fn write_frame(&mut self, buf: &[u8]) -> Result<()> {
         if !crate::write_admission_kernel::batch_is_empty(buf.len() as u64) {
+            // RFC-0209 P0.2: with staging enabled, the framed record goes
+            // to the user-space buffer (memcpy, no syscall) and the kernel
+            // decides the flush by size alone. `position` advances at stage
+            // time — the logical append point — so `reserve_space` still
+            // sees the true frontier. Disabled (default): the pre-0209
+            // single write per frame.
+            if let Some(st) = self.staged.as_mut() {
+                st.buf.extend_from_slice(buf);
+                self.position = self.position.saturating_add(buf.len() as u64);
+                if crate::wal_buffer_kernel::should_flush(st.buf.len() as u64, st.max) {
+                    return self.drain_staged();
+                }
+                return Ok(());
+            }
             self.out.write_all(buf)?;
             self.position = self.position.saturating_add(buf.len() as u64);
         }
@@ -234,11 +305,14 @@ impl<W: Write + Seek> WalWriter<W> {
     }
 
     /// Flush buffered writes to the OS. Does **not** fsync — use a file
-    /// wrapper for crash durability.
+    /// wrapper for crash durability. RFC-0209 P0.2 order rule (c): drains
+    /// the staging buffer first, so every caller that reaches the sink's
+    /// flush (barriers included) has all logical bytes in the OS.
     ///
     /// # Errors
     /// Returns [`std::io::Error`] propagated from the underlying sink.
     pub fn flush(&mut self) -> Result<()> {
+        self.drain_staged()?;
         self.out.flush()?;
         Ok(())
     }
@@ -248,12 +322,16 @@ impl<W: Write + Seek> WalWriter<W> {
     /// # Errors
     /// Returns [`std::io::Error`] if the sink position cannot be queried.
     pub fn stream_position(&mut self) -> Result<u64> {
+        self.drain_staged()?;
         self.out.flush()?;
         Ok(self.out.stream_position()?)
     }
 
-    /// Consume the writer and return the underlying sink.
-    pub fn into_inner(self) -> W {
+    /// Consume the writer and return the underlying sink. Drains staged
+    /// bytes first (best-effort: a drain error is dropped — use the
+    /// `Wal::close` path when it must propagate).
+    pub fn into_inner(mut self) -> W {
+        let _ = self.drain_staged();
         self.out
     }
 
@@ -487,6 +565,192 @@ impl RecordSource for EncodedOpsSource<'_> {
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    /// Shared oracle sink: counts `write` calls and exposes the byte
+    /// stream while the writer still owns the sink — the syscall and
+    /// drain-timing observables for RFC-0209.
+    #[derive(Clone, Default)]
+    struct ProbeShared {
+        writes: std::rc::Rc<std::cell::Cell<usize>>,
+        bytes: std::rc::Rc<std::cell::RefCell<Vec<u8>>>,
+        pos: std::rc::Rc<std::cell::Cell<u64>>,
+    }
+
+    struct ProbeSink {
+        shared: ProbeShared,
+    }
+
+    impl ProbeSink {
+        /// Sink + its shared oracle handle.
+        fn new() -> (Self, ProbeShared) {
+            let shared = ProbeShared::default();
+            (Self { shared: shared.clone() }, shared)
+        }
+    }
+
+    impl std::io::Write for ProbeSink {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.shared.writes.set(self.shared.writes.get() + 1);
+            let mut bytes = self.shared.bytes.borrow_mut();
+            let pos = self.shared.pos.get() as usize;
+            if pos > bytes.len() {
+                bytes.resize(pos, 0);
+            }
+            let end = pos + buf.len();
+            if end > bytes.len() {
+                bytes.resize(end, 0);
+            }
+            bytes.splice(pos..end, buf.iter().copied());
+            self.shared.pos.set(end as u64);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Seek for ProbeSink {
+        fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+            let base = self.shared.pos.get() as i64;
+            let next = match pos {
+                std::io::SeekFrom::Start(s) => s as i64,
+                std::io::SeekFrom::Current(d) => base + d,
+                std::io::SeekFrom::End(d) => self.shared.bytes.borrow().len() as i64 + d,
+            };
+            let next = next.max(0) as u64;
+            self.shared.pos.set(next);
+            Ok(next)
+        }
+    }
+
+    /// Drive the production 1-op path (`fragment_record` + `write_frame`,
+    /// exactly what `Wal::write_pending_frame` does) for each record.
+    fn drive_1op<W: Write + Seek>(w: &mut WalWriter<W>, records: &[Vec<u8>]) {
+        for r in records {
+            let mut frame = w.take_frame();
+            w.fragment_record(r, &mut frame);
+            w.write_frame(&frame).unwrap();
+            frame.clear();
+            w.restore_frame(frame);
+        }
+    }
+
+    /// RFC-0209 P0.2: staged and unstaged writers produce byte-identical
+    /// streams — staging only changes WHEN bytes reach the sink, never the
+    /// bytes or their order (cap small enough to force mid-sequence
+    /// flushes, plus a final partial drain at `flush`).
+    #[test]
+    fn rfc0209_buffered_wal_byte_identical_after_drain() {
+        let b = BLOCK_SIZE;
+        let records: Vec<Vec<u8>> = vec![
+            b"short".to_vec(),
+            vec![0x41; 150],           // exceeds the 100-byte cap → mid-flush
+            b"".to_vec(),
+            vec![0xcd; b + 50],        // spans blocks
+            b"tail".to_vec(),
+        ];
+
+        let mut plain = WalWriter::new(Cursor::new(Vec::new())).unwrap();
+        drive_1op(&mut plain, &records);
+        let plain_bytes = plain.into_inner().into_inner();
+
+        let mut buffered = WalWriter::new(Cursor::new(Vec::new())).unwrap();
+        buffered.enable_staging(100);
+        drive_1op(&mut buffered, &records);
+        assert!(
+            !buffered.staged.as_ref().unwrap().buf.is_empty(),
+            "test shape: final records must still be staged pre-flush"
+        );
+        buffered.flush().unwrap();
+        let buffered_bytes = buffered.into_inner().into_inner();
+
+        assert_eq!(plain_bytes, buffered_bytes);
+        assert_eq!(
+            collect_records(&buffered_bytes),
+            records,
+            "buffered stream must read back as the same logical records"
+        );
+    }
+
+    /// RFC-0209 P0.2 mechanism: staging off = one sink write per frame
+    /// (AS-IS); staging on = frames coalesce into one sink write per flush
+    /// cycle. This is the syscall count the meter pays for.
+    #[test]
+    fn rfc0209_staging_coalesces_sink_writes() {
+        let records: Vec<Vec<u8>> = (0..10).map(|i| vec![0x5a; 20 + i]).collect();
+
+        let (plain_sink, plain_probe) = ProbeSink::new();
+        let mut plain = WalWriter::new(plain_sink).unwrap();
+        drive_1op(&mut plain, &records);
+        plain.flush().unwrap();
+        assert_eq!(plain_probe.writes.get(), 10, "AS-IS: write per frame");
+        assert_eq!(
+            collect_records(&plain_probe.bytes.borrow()),
+            records
+        );
+
+        let (buffered_sink, staged_probe) = ProbeSink::new();
+        let mut buffered = WalWriter::new(buffered_sink).unwrap();
+        buffered.enable_staging(64 * 1024);
+        drive_1op(&mut buffered, &records);
+        assert_eq!(
+            staged_probe.bytes.borrow().len(),
+            0,
+            "staged bytes must not reach the sink before the cap"
+        );
+        buffered.flush().unwrap();
+        assert_eq!(staged_probe.writes.get(), 1, "staging: one write per flush cycle");
+        assert_eq!(
+            collect_records(&staged_probe.bytes.borrow()),
+            records,
+            "coalesced write must read back identically"
+        );
+    }
+
+    /// RFC-0209 P0.2 order rule (b): a direct GROUP write
+    /// (`add_records`, the 0037 P2.2 group path) drains staged bytes
+    /// FIRST — the file order is always the logical order.
+    #[test]
+    fn rfc0209_group_direct_write_drains_staged_first() {
+        let (sink, probe) = ProbeSink::new();
+        let mut w = WalWriter::new(sink).unwrap();
+        w.enable_staging(64 * 1024);
+        drive_1op(&mut w, &[b"staged-1".to_vec(), b"staged-2".to_vec()]);
+        assert_eq!(probe.bytes.borrow().len(), 0);
+        w.add_records(&[b"direct-1".as_slice(), b"direct-2".as_slice()])
+            .unwrap();
+        assert_eq!(
+            probe.writes.get(),
+            2,
+            "drain of staged bytes + the group write, in that order"
+        );
+        assert_eq!(
+            collect_records(&probe.bytes.borrow()),
+            vec![
+                b"staged-1".to_vec(),
+                b"staged-2".to_vec(),
+                b"direct-1".to_vec(),
+                b"direct-2".to_vec()
+            ]
+        );
+    }
+
+    /// RFC-0209 P0.2 order rule (c): the sink-facing flush drains staged
+    /// bytes — every barrier path (`sync_data`, `sync_all`, `close`)
+    /// funnels through here, so no fd ever happens with logical bytes
+    /// still user-side.
+    #[test]
+    fn rfc0209_flush_drains_staged_bytes() {
+        let (sink, probe) = ProbeSink::new();
+        let mut w = WalWriter::new(sink).unwrap();
+        w.enable_staging(64 * 1024);
+        let records: Vec<Vec<u8>> = (0..3).map(|i| vec![0x77; 30 + i]).collect();
+        drive_1op(&mut w, &records);
+        assert_eq!(probe.bytes.borrow().len(), 0);
+        w.flush().unwrap();
+        assert_eq!(collect_records(&probe.bytes.borrow()), records);
+    }
 
     /// RFC-0042 P1.3: the direct-to-frame source must emit byte-identical
     /// frames to the scratch path `fragment_record(&encode_ops(ops))`,

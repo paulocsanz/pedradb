@@ -1,6 +1,6 @@
 # RFC-0209 — Buffer de WAL em user-space: staging no `WalWriter` com flush por tamanho
 
-**Status:** in-progress (P0 aterrissando neste ciclo)
+**Status:** in-progress (P0.1+P0.2 done 2026-09-11; P0.3 meter pendente)
 **Updated:** 2026-09-11
 **ID:** 0209
 **Parents:** [0193](0193-write-off-lock-pwrite-ticket.md) (ticket off-lock verificado em working tree e perdido PRÉ-COMMIT — forense `2026-09-11-wipe-forense/`; sem ele, TODO write WAL paga `write()` por op: é o alvo daqui),
@@ -114,15 +114,18 @@ grupo continua direto; o 1-op passa a staging) e com o merge-eixo 0201
 
 ### P0 — kernel + staging no caminho real + meter
 
-- [ ] **P0.1** Kernel `wal_buffer_kernel.rs`: `should_flush(staged, max)`
+- [x] **P0.1** Kernel `wal_buffer_kernel.rs`: `should_flush(staged, max)`
       inteiro + twin AS-IS (sempre true) + guarda misuse (`max=0` ≡ AS-IS;
       staged > max impossível por construção) — testes nomeados — status:
-      `todo`
-- [ ] **P0.2** Staging no `WalWriter` real: env `PEDRA_WAL_BUFFER=1` /
+      `done` (4 testes `wal_buffer_*` verdes)
+- [x] **P0.2** Staging no `WalWriter` real: env `PEDRA_WAL_BUFFER=1` /
       `PEDRA_WAL_BUF_MAX` (default 64 KiB), regras de ordem (a)–(f) do
       desenho, WAL byte-idêntico após close no modo buffered vs
       não-buffered, caminho G1 intocado, `#![forbid(unsafe_code)]` —
-      testes nomeados (abaixo) — status: `todo`
+      testes nomeados (abaixo) — status: `done` (12 testes `rfc0209_*` +
+      `wal_buffer_*` verdes: coalescing 10→1 write, ordem (b) grupo,
+      ordem (c) sync-drains-antes-do-fd em arquivo real, ordem (d) close,
+      byte-idêntico pós-close em arquivo real, default-off sem env)
 - [ ] **P0.3** Meter no gate caixote (`linux-gate-p149b`, pipeline crane
       + deploy comprovado): 3 rounds quiet, braços buf/nobuf env-limpo,
       peer `sync=false`, células-alvo + guardiãs + célula 10k; finding
@@ -153,8 +156,8 @@ grupo continua direto; o 1-op passa a staging) e com o merge-eixo 0201
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | kernel should_flush + AS-IS twin | todo | — | 2026-09-11 |
-| P0.2 | p0 | staging no WalWriter (env opt-in, ordem (a)–(f)) | todo | — | 2026-09-11 |
+| P0.1 | p0 | kernel should_flush + AS-IS twin | done (4 testes verdes) | este commit | 2026-09-11 |
+| P0.2 | p0 | staging no WalWriter (env opt-in, ordem (a)–(f)) | done (12 testes verdes, byte-idêntico arquivo real) | este commit | 2026-09-11 |
 | P0.3 | p0 | meter 3 rounds quiet (alvo+guardiãs+10k) | todo | — | 2026-09-11 |
 | P1.1 | p1 | flip default pós-meter | todo | — | 2026-09-11 |
 | P1.2 | p1 | atribuição ycsb_a (hat do inventário) | todo | — | 2026-09-11 |
@@ -164,7 +167,9 @@ grupo continua direto; o 1-op passa a staging) e com o merge-eixo 0201
 
 ## Acceptance Criteria
 
-- **Tests (nomeados, caminho real)**
+- **Tests (nomeados, caminho real)** — todos com prefixo `rfc0209_` /
+    `wal_buffer_` por convenção do repo; os dois primeiros níveis:
+    `WalWriter` (sink de sonda) e `Wal` (arquivo real, eixo env serializado).
   - `wal_buffer_kernel` family: `wal_buffer_should_flush_at_threshold`,
     `wal_buffer_as_is_always_flushes`, `wal_buffer_zero_max_is_as_is`,
     `wal_buffer_flush_is_monotonic_in_staged`.

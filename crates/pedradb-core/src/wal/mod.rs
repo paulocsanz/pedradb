@@ -21,6 +21,20 @@ fn walfd_diag_enabled() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ENABLED.get_or_init(|| std::env::var_os("PEDRA_FDSYNC_DIAG").is_some())
 }
+
+/// RFC-0209 P0.2: staging cap for the WAL user-space buffer, from the
+/// opt-in env. `0` = disabled (default — the pre-0209 one-write-per-frame
+/// path). Read per segment construction (open + rotation), never cached:
+/// segment opens are rare and tests flip the env between writers.
+fn wal_staged_max() -> u64 {
+    if std::env::var_os("PEDRA_WAL_BUFFER").is_none() {
+        return 0;
+    }
+    std::env::var_os("PEDRA_WAL_BUF_MAX")
+        .and_then(|v| v.to_str().and_then(|s| s.parse::<u64>().ok()))
+        .filter(|&v| v > 0)
+        .unwrap_or(crate::wal_buffer_kernel::WAL_BUF_MAX_DEFAULT_BYTES)
+}
 use crate::error::{CoreError, Result};
 
 pub mod crc;
@@ -117,8 +131,13 @@ impl<F: EnvFile> Wal<F> {
     /// Env I/O.
     pub fn create_on<E: Env<File = F>, P: AsRef<Path>>(env: &E, path: P) -> Result<Self> {
         let file = env.create(path.as_ref())?;
+        let mut writer = WalWriter::new(file)?;
+        let staged_max = wal_staged_max();
+        if staged_max > 0 {
+            writer.enable_staging(staged_max);
+        }
         Ok(Self {
-            writer: WalWriter::new(file)?,
+            writer,
             logical: Vec::new(),
             prealloc_to: 0,
             full_fsync: false,
@@ -131,8 +150,13 @@ impl<F: EnvFile> Wal<F> {
     /// Env I/O.
     pub fn append_on<E: Env<File = F>, P: AsRef<Path>>(env: &E, path: P) -> Result<Self> {
         let file = env.open_append(path.as_ref())?;
+        let mut writer = WalWriter::new(file)?;
+        let staged_max = wal_staged_max();
+        if staged_max > 0 {
+            writer.enable_staging(staged_max);
+        }
         Ok(Self {
-            writer: WalWriter::new(file)?,
+            writer,
             logical: Vec::new(),
             prealloc_to: 0,
             full_fsync: false,
@@ -451,6 +475,174 @@ mod probe_tests {
         assert_eq!(recs.len(), 8);
         assert_eq!(end, append_end);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0209 env axis: `PEDRA_WAL_BUFFER` is read at segment
+    /// construction, and `cargo test` is one process — serialize the
+    /// env-flipping tests. Restore on drop so a panic cannot leak the
+    /// axis into unrelated tests.
+    static RFC0209_ENV_AXIS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct Rfc0209EnvGuard;
+    impl Drop for Rfc0209EnvGuard {
+        fn drop(&mut self) {
+            std::env::remove_var("PEDRA_WAL_BUFFER");
+            std::env::remove_var("PEDRA_WAL_BUF_MAX");
+        }
+    }
+
+    fn rfc0209_put(seq: u64) -> Vec<crate::batch::WriteOp> {
+        vec![crate::batch::WriteOp::put(
+            seq,
+            format!("k/{seq:04}"),
+            bytes::Bytes::from_static(b"payload-0209"),
+        )]
+    }
+
+    fn rfc0209_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("wal-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// RFC-0209 P0.2 default-off: without `PEDRA_WAL_BUFFER` the
+    /// one-write-per-frame path is unchanged — every `write_pending_frame`
+    /// lands in the file immediately, so a crash-shaped reader sees each
+    /// acked record with no drain call and the logical size tracks the
+    /// append point at every step (AS-IS twin at the real-file level).
+    #[test]
+    fn rfc0209_staging_disabled_without_env() {
+        let _env_axis = RFC0209_ENV_AXIS.lock().unwrap_or_else(|e| e.into_inner());
+        let _restore = Rfc0209EnvGuard;
+        std::env::remove_var("PEDRA_WAL_BUFFER");
+        std::env::remove_var("PEDRA_WAL_BUF_MAX");
+
+        let dir = rfc0209_dir("nostage");
+        let path = dir.join("wal.log");
+        let mut w = Wal::create(&path).unwrap();
+        for seq in 1..=4u64 {
+            let ops = rfc0209_put(seq);
+            w.encode_write_op_batches(&[ops.as_slice()]).unwrap();
+            w.write_pending_frame().unwrap();
+            let (recs, end, _) = Wal::recover_span_on(&StdEnv, &path).unwrap();
+            assert_eq!(recs.len(), seq as usize, "AS-IS: each frame lands immediately");
+            assert!(end > 0);
+            assert_eq!(StdEnv.metadata_len(&path).unwrap(), w.stream_position().unwrap());
+        }
+        drop(w);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0209 P0.2 order rule (c): with a cap above the test's payload
+    /// nothing flushes by size — the logical bytes live only in the
+    /// user-space buffer (a crash-shaped reader sees none of them), and
+    /// `sync_data` drains BEFORE the fd barrier, so every acked record is
+    /// durable-visible right after the barrier.
+    #[test]
+    fn rfc0209_sync_after_staged_flushes_before_fd() {
+        let _env_axis = RFC0209_ENV_AXIS.lock().unwrap_or_else(|e| e.into_inner());
+        let _restore = Rfc0209EnvGuard;
+        std::env::set_var("PEDRA_WAL_BUFFER", "1");
+        std::env::set_var("PEDRA_WAL_BUF_MAX", "1048576");
+
+        let dir = rfc0209_dir("syncdrain");
+        let path = dir.join("wal.log");
+        let mut w = Wal::create(&path).unwrap();
+        for seq in 1..=4u64 {
+            let ops = rfc0209_put(seq);
+            w.encode_write_op_batches(&[ops.as_slice()]).unwrap();
+            w.write_pending_frame().unwrap();
+        }
+        let (recs, end, _) = Wal::recover_span_on(&StdEnv, &path).unwrap();
+        assert_eq!(recs.len(), 0, "staged bytes are user-side only before the barrier");
+        assert_eq!(end, 0);
+        w.sync_data().unwrap();
+        let (recs, end, _) = Wal::recover_span_on(&StdEnv, &path).unwrap();
+        assert_eq!(recs.len(), 4, "the barrier drains before the fd");
+        assert!(end > 0);
+        drop(w);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0209 P0.2 order rule (d): `close` drains the staging buffer —
+    /// no acked record dies in user space when the segment is closed
+    /// without any explicit sync.
+    #[test]
+    fn rfc0209_close_drains_staged_bytes() {
+        let _env_axis = RFC0209_ENV_AXIS.lock().unwrap_or_else(|e| e.into_inner());
+        let _restore = Rfc0209EnvGuard;
+        std::env::set_var("PEDRA_WAL_BUFFER", "1");
+        std::env::set_var("PEDRA_WAL_BUF_MAX", "1048576");
+
+        let dir = rfc0209_dir("closedrain");
+        let path = dir.join("wal.log");
+        let mut w = Wal::create(&path).unwrap();
+        for seq in 1..=3u64 {
+            let ops = rfc0209_put(seq);
+            w.encode_write_op_batches(&[ops.as_slice()]).unwrap();
+            w.write_pending_frame().unwrap();
+        }
+        w.close().unwrap();
+        let (recs, end, _) = Wal::recover_span_on(&StdEnv, &path).unwrap();
+        assert_eq!(recs.len(), 3, "close must drain staged bytes");
+        assert!(end > 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0209 P0.2 acceptance: the same op sequence through the real
+    /// file path produces a byte-identical segment in both modes — with
+    /// `PEDRA_WAL_BUFFER=1` and a 300-byte cap several size-flushes fire
+    /// mid-sequence plus a partial drain at close. Staging changes WHEN
+    /// bytes reach the file, never the bytes (`cmp`-identical pós-close).
+    #[test]
+    fn rfc0209_buffered_wal_byte_identical_after_close() {
+        let _env_axis = RFC0209_ENV_AXIS.lock().unwrap_or_else(|e| e.into_inner());
+        let _restore = Rfc0209EnvGuard;
+
+        let ops: Vec<Vec<crate::batch::WriteOp>> = (0..6u64)
+            .map(|seq| {
+                let payload = vec![0x5a_u8; (90 + seq * 17) as usize]; // ~100-175 B records
+                vec![crate::batch::WriteOp::put(
+                    seq + 1,
+                    format!("k/{seq:04}"),
+                    bytes::Bytes::from(payload),
+                )]
+            })
+            .collect();
+
+        let dir_plain = rfc0209_dir("ident-plain");
+        let path_plain = dir_plain.join("wal.log");
+        std::env::remove_var("PEDRA_WAL_BUFFER");
+        std::env::remove_var("PEDRA_WAL_BUF_MAX");
+        {
+            let mut w = Wal::create(&path_plain).unwrap();
+            for ops in &ops {
+                w.encode_write_op_batches(&[ops.as_slice()]).unwrap();
+                w.write_pending_frame().unwrap();
+            }
+            w.close().unwrap();
+        }
+
+        let dir_staged = rfc0209_dir("ident-staged");
+        let path_staged = dir_staged.join("wal.log");
+        std::env::set_var("PEDRA_WAL_BUFFER", "1");
+        std::env::set_var("PEDRA_WAL_BUF_MAX", "300");
+        {
+            let mut w = Wal::create(&path_staged).unwrap();
+            for ops in &ops {
+                w.encode_write_op_batches(&[ops.as_slice()]).unwrap();
+                w.write_pending_frame().unwrap();
+            }
+            w.close().unwrap();
+        }
+
+        let plain = std::fs::read(&path_plain).unwrap();
+        let staged = std::fs::read(&path_staged).unwrap();
+        assert_eq!(plain, staged, "staged segment must be byte-identical");
+        assert!(plain.len() > 300, "test shape: multiple flush cycles");
+        let _ = std::fs::remove_dir_all(&dir_plain);
+        let _ = std::fs::remove_dir_all(&dir_staged);
     }
 
     /// RFC-0044 P2.2 micro: deps_raftlog WAL floor —
