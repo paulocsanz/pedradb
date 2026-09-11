@@ -4032,7 +4032,6 @@
     "crates/pedradb-store/src/bin/cluster_real.rs"
    ],
    "entry": "l28_tcp_clear_ok",
-   "data_fate": true,
    "handlers": [
     "tcp_node_removed_clear_ok"
    ],
@@ -4046,7 +4045,11 @@
      "file": "crates/pedradb-store/src/bin/cluster_real.rs",
      "handler": "tcp_node_removed_clear_ok"
     }
-   ]
+   ],
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0210 P1.1 l28 cadence 3/4: after a real TCP plant + process death force-local TX clear drops the stuck intents on a replica dropped from ids exactly when the clear dropped them (fate forall over the extracted pure-lift body, L28.lean); AS-IS ok-true skips the force-local clear (0137 leftover)"
+   }
   },
   {
    "id": "l28_tcp_pre",
