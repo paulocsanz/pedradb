@@ -84,7 +84,7 @@ cartaz. Cartaz continua sendo Pedra vs RocksDB default `sync=false`
 
 ### P0 — must ship first (smallest vertical slice that is useful)
 
-- [ ] **P0.1** Contrato de twin derivado: `derive_count_annotations.py`
+- [x] **P0.1** Contrato de twin derivado: `derive_count_annotations.py`
   ganha emissão de `scripts/ratchet/twin_contracts.tsv` — uma linha por
   linha `count` (par, teorema, caminho do twin test, fn de produção
   dirigida — para `lsm_compact` o kernel Rust espelho `lsm_r1_kernel`,
@@ -93,7 +93,11 @@ cartaz. Cartaz continua sendo Pedra vs RocksDB default `sync=false`
   contrato; o twin existe e chama a fn de produção nomeada (nenhum mock da
   unidade sob teste); `CountDerived.lean` em sync; selftest sabota
   (twin renomeado, fn trocada por mock, contrato faltando) e pega tudo —
-  status: `todo`
+  status: `done` (2026-09-11; 7/7 linhas bound — 5 pares com step_work
+  derivado em `CountDerived.lean`, 2 com teorema de mão registrado como
+  tal — `wal_commit_plan`@WorkIo, `bloom_may_contain`@BloomCount —;
+  TSV byte-idêntico à emissão da ferramenta, edição à mão = RED;
+  selftest 6/6; job `twin-contracts` no `verification-gates.yml`)
 - [ ] **P0.2** Terminalidade do inventário como gate:
   `scripts/check_inventory_terminal.py` — parse da tabela de inventário no
   `docs/verification-ledger.md`; toda linha termina `count` (com teorema
@@ -132,7 +136,7 @@ cartaz. Cartaz continua sendo Pedra vs RocksDB default `sync=false`
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | Contrato de twin derivado + gate (selftest) | todo | — | 2026-09-11 |
+| P0.1 | p0 | Contrato de twin derivado + gate (selftest) | done | 2026-09-11 | 2026-09-11 |
 | P0.2 | p0 | Terminalidade do inventário como gate | todo | — | 2026-09-11 |
 | P1.1 | p1 | Âncora darwin F_FULLFSYNC medida e datada | todo | — | 2026-09-11 |
 | P1.2 | p1 | Tabela de âncoras por classe consumida por teste | todo | — | 2026-09-11 |

@@ -20,6 +20,10 @@
 # RFC-0191 product-guarantee ratchet:
 #   - product-floor: D1/R1/T1/C1 layers (model→atom→close only up);
 #     atom/close rows need ∀ theorem, no sorry, catalog id.
+# RFC-0203 count-tier contracts:
+#   - twin-contracts: every registered count row bound to the twin test
+#     that drives the production fn + its work annotation; the TSV is
+#     machine-emitted by the derive tool (hand edit = red).
 name: verification-gates
 
 on:
@@ -149,3 +153,18 @@ jobs:
           grep -q 'GATE product-floor: GREEN' /tmp/p1.log
           python3 scripts/check_product_floor.py --selftest | tee /tmp/ps.log
           grep -q 'SELFTEST product-floor: 4/4 checks caught' /tmp/ps.log
+
+  twin-contracts:
+    name: RFC-0203 P0.1 count twin contracts (machine-emitted, twin-bound)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: gate (twice, logs identical) + selftest (6/6 redness)
+        run: |
+          python3 scripts/check_twin_contracts.py | tee /tmp/t1.log
+          python3 scripts/check_twin_contracts.py | tee /tmp/t2.log
+          cmp /tmp/t1.log /tmp/t2.log
+          grep -q 'GATE twin-contracts: GREEN' /tmp/t1.log
+          python3 scripts/check_twin_contracts.py --selftest | tee /tmp/ts.log
+          grep -q 'SELFTEST twin-contracts: 6/6 sabotages caught' /tmp/ts.log
