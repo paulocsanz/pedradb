@@ -1,6 +1,8 @@
 # RFC: 0205 — o degrau composto: o commit off-lock como ∀ e o encolhimento datado do data-fate
 
-**Status:** draft
+**Status:** done (6/6 — 2026-09-11: close composto + primeiro atom
+store/raft, composição ∀ off-lock, cadência 2/2, fronteira datada,
+sweep GREEN no worktree `93c9434a`)
 **Updated:** 2026-09-11
 **Parents:** [0202](0202-quatro-teoremas-concorrencia.md) (os quatro
 teoremas de concorrência; fechou 6/6 — data-race, lost-update, deadlock
@@ -212,6 +214,12 @@ RFC não as toca.
    `lock_interleavings_admitted` reiteradas com as recusas plantadas)
 6. **P2.2:** sweep: gates GREEN no HEAD final (worktree destacado),
    sorry 0 nos wrappers tocados, capturas, flip `**Status:** done`.
+   — status: `done` (worktree destacado em `93c9434a`: depth/product/
+   ledger 3× GREEN — extract=239, close=6, atom=39, count=7,
+   data_fate=92, ledger 299/266/33; extracts ok 61 libs + 18 compose;
+   sorry 0 em GroupCommit/Vote/ComposeConcurrent/Membership; as 3
+   admissions `always false` no residuals.json; captura em
+   `findings/2026-09-11-rfc0205-p22-sweep/`)
 
 ## Status (living — update with every PR)
 
