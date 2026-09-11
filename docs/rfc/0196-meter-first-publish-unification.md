@@ -154,8 +154,13 @@ P0.1, e só aterrissa nomeado; (c) escala no tamanho do buraco (apply_mc4
       qps; imagem p201r2 digest `sha256:0ec55b38…`, mesmo boot, 3 rounds
       quiet, `PEDRA_PARITY_ASYNC=1`, `ROCKS_PARITY_CLIENTS=4` nos dois
       engines, peer do mesmo round) — a célula 0,47× do 0183 está PAGA
-      acima do floor pelo off-lock 0193 + merge por eixo de cliente 0201;
-      nenhum corte P0.2 foi necessário (`findings/2026-09-11-p201r2-mc4/`)
+      acima do floor pelo merge por eixo de cliente 0201 P0.3 (`f7b2c20f`)
+      + clamp P0.1 (`b2b0295b`). NOTA forense 2026-09-11: a imagem medida
+      NÃO continha o seam off-lock do 0193 (verificado: `write_all_at*`/
+      `reserve_frame` ausentes de f7b2c20f e de todo o histórico em
+      `crates/` — o P0 do 0193 foi perdido pré-commit;
+      `findings/2026-09-11-wipe-forense/`); nenhum corte P0.2 foi
+      necessário (`findings/2026-09-11-p201r2-mc4/`)
 
 ### P1 — a pilha de meters (mesmo gate; P0.1 destrava o host para todas)
 

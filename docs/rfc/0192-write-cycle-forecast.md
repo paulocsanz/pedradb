@@ -1,6 +1,6 @@
 # RFC-0192 — Telemetria de contenção e previsão determinística do ciclo de write
 
-**Status:** in-progress (P0.1–P0.4 done; P1.1/P1.2 re-bloqueados 2026-09-11 — wiring de fatia fina apagada por reset de sessão paralela)
+**Status:** in-progress (P0.1/P0.4 done e vivos; P0.2/P0.3/P2.1 wiped-pre-commit — forense 2026-09-11; P1.1/P1.2 re-bloqueados)
 **Updated:** 2026-09-11
 **ID:** 0192
 **Parents:** [0176](0176-modelo-matematico-de-escala.md) (GET clock; este RFC é o gémeo de write),
@@ -39,8 +39,9 @@
 ### P0 — kernel + dump (útil sozinho)
 
 - [x] **P0.1** `write_cycle_kernel`: `name_cut` / `name_cut_as_is` / CS / QPS / lock_wait previsto / colapso de lane — testes pinados nos ns do Linux quieto 0189 P0.1 — status: `done`
-- [x] **P0.2** Telemetria: `lf_cas` / `pub_cas` / `lane_c` / `wal_hold`; linha WRITEPHASE chama o kernel — status: `done`
-- [x] **P0.3** `pedra scale-model write` imprime `write_cycle_forecast` (mesmo kernel; AS-IS = `lock_hold`) — status: `done`
+- [x] **P0.1** `write_cycle_kernel`: `name_cut` / `name_cut_as_is` / CS / QPS / lock_wait previsto / colapso de lane — testes pinados nos ns do Linux quieto 0189 P0.1 — status: `done` (vivo no tree; 19/19 verdes 2026-09-11)
+- [ ] **P0.2** Telemetria: `lf_cas` / `pub_cas` / `lane_c` / `wal_hold`; linha WRITEPHASE chama o kernel — status: `wiped-pre-commit` (forense 2026-09-11, `findings/2026-09-11-wipe-forense/`: a instrumentação fine-slice + o render via kernel foram verificados em working tree 2026-09-10 e jamais commitados; tree vivo tem as 6 fatias RFC-0159. Reconstruir é pré-requisito do P1.1)
+- [ ] **P0.3** `pedra scale-model write` imprime `write_cycle_forecast` (mesmo kernel; AS-IS = `lock_hold`) — status: `wiped-pre-commit` (subcomando CLI inexistente no tree vivo; kernel P0.1 vivo)
 - [x] **P0.4** Tier calibrado + rótulo de teto (2026-09-10, `findings/2026-09-10-write-forecast-why-it-missed.md`): o hat determinístico errou +1414…+2194‰ nas pernas isoladas por (1) conflação teto↔previsão (`1e9/ciclo` de um pipeline serial ≠ `L/média` do cliente; no pin quieto o "teto" fica −435‰ ABAIXO do medido), (2) variabilidade ausente (caudas p99/p50 52–65× ⇒ scv 17–24, amplificação ~9–12×), (3) trabalho fora-de-fase (43% da média r2), (4) pernas fora do protocolo STOP/CONT warm10 (fator ×7 só na Pedra), (5) pin vintage. Conserto: `calibrated_forecast(leaders, p50, p99, cut_shift, measured)` — lognormal inteira (Q=2^20, ln atanh, exp Taylor, clamp 1024×), `mean_hat = p50·e^{σ̂²/2}`, `qps_hat = L·1e9/mean_hat`, erro P1.2, e **ganho de corte projetado na média calibrada** (0193: +33‰, não +60%); renders carregam `tier=ceiling`/`tier=forecast`; pernas 03:32Z pinadas ±102‰ — status: `done`
 
 ### P1 — o que o kernel decide
@@ -50,20 +51,20 @@
 
 ### P2 — polish
 
-- [x] **P2.1** Histogramas de lane no JSON do compare — status: `done` (`Engine::lane_histogram` → `with_lane_hist` no block; `deps_raftlog` + loop mc, 2026-09-10)
+- [ ] **P2.1** Histogramas de lane no JSON do compare — status: `wiped-pre-commit` (forense 2026-09-11: `lane_histogram` ausente do tree e de todo o histórico em `crates/`; verificado em working tree 2026-09-10)
 - [ ] **P2.2** none yet
 
 ## Status (living — update with every PR)
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | kernel name_cut + CS + QPS | done | `write_cycle_kernel.rs` | 2026-09-10 |
-| P0.2 | p0 | CAS / lane / wal_hold no WRITEPHASE | done | `write_cycle_line` | 2026-09-10 |
-| P0.3 | p0 | CLI write forecast | done | `pedra scale-model write` | 2026-09-10 |
+| P0.1 | p0 | kernel name_cut + CS + QPS | done (vivo; 19/19 verdes 2026-09-11) | `write_cycle_kernel.rs` | 2026-09-11 |
+| P0.2 | p0 | CAS / lane / wal_hold no WRITEPHASE | wiped-pre-commit (forense 2026-09-11) | `2026-09-11-wipe-forense/` | 2026-09-11 |
+| P0.3 | p0 | CLI write forecast | wiped-pre-commit (forense 2026-09-11) | `2026-09-11-wipe-forense/` | 2026-09-11 |
 | P0.4 | p0 | tier calibrado (lognormal p50/p99) + rótulo `tier=ceiling` | done | `calibrated_forecast` + `2026-09-10-write-forecast-why-it-missed.md` | 2026-09-10 |
 | P1.1 | p1 | Linux quieto decide o corte | blocked (wipe da wiring própria, datado 2026-09-11; gate aberto) | verificado in-tree: 6 fatias RFC-0159; kernel intacto `b959428a` | 2026-09-11 |
 | P1.2 | p1 | erro do modelo vs medido | blocked (perna; mesma razão; kernel aterrado nos dois tiers) | `qps_hat_error_permille` | 2026-09-11 |
-| P2.1 | p2 | lane hist no JSON | done | `with_lane_hist` + `lane_histogram` | 2026-09-10 |
+| P2.1 | p2 | lane hist no JSON | wiped-pre-commit (forense 2026-09-11) | `2026-09-11-wipe-forense/` | 2026-09-11 |
 
 ## Acceptance Criteria
 

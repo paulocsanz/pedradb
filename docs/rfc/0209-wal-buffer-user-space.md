@@ -3,8 +3,8 @@
 **Status:** in-progress (P0 aterrissando neste ciclo)
 **Updated:** 2026-09-11
 **ID:** 0209
-**Parents:** [0193](0193-write-off-lock-pwrite-ticket.md) (ticket off-lock aterrissou; o que sobrou no caminho async 1-op é a syscall por op),
-[0201](0201-cliente-drain-cheio-spin-oversub.md) (regime de merge por eixo de cliente — pagou apply_mc4/mc50),
+**Parents:** [0193](0193-write-off-lock-pwrite-ticket.md) (ticket off-lock verificado em working tree e perdido PRÉ-COMMIT — forense `2026-09-11-wipe-forense/`; sem ele, TODO write WAL paga `write()` por op: é o alvo daqui),
+[0201](0201-cliente-drain-cheio-spin-oversub.md) (regime de merge por eixo de cliente — pagou apply_mc4/mc50 SEM o 0193),
 [0196](0196-meter-first-publish-unification.md) (P2.3 mediu o buraco ycsb_f_mc4 e reatribuiu o dono para cá),
 [0037](0037-apply-off-put-and-2x-pedra.md) (P2.2: o grupo já escreve o frame inteiro em UM write — este RFC estende o coalescing para o caminho 1-op)
 **Peer:** RocksDB default `WriteOptions.sync=false` (`ROCKS_PARITY_SYNC=0`). A coluna same-class (`PEDRA_PARITY_ASYNC=1`) é o gate oficial (floor RFC-0041 = 1,0). G1 1c não é win; linhas single-client write da coluna G1 nunca são cotadas como win (as células-alvo deste RFC são da coluna **async**, same-class). Sync-peer não é win. Darwin = DIAG. Linux 3-run quiet min-of-3 = cartaz. Previsões rotuladas **hat**.

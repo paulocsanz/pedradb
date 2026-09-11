@@ -1,6 +1,6 @@
 # RFC-0193 — Write fora do wal.lock: pwrite por ticket nas células multi-cliente
 
-**Status:** in-progress (P0.1–P0.4 landed; P0.5 parcialmente pago 2026-09-11 — mc50 1,678× e apply_mc4 1,086×; célula 10k → RFC-0209)
+**Status:** in-progress (P0.1–P0.4 wiped-pre-commit — verificados em working tree 2026-09-10, jamais commitados, perdidos no reset da sessão paralela; P0.5 parcialmente pago 2026-09-11 SEM o seam: mc50 1,678× e apply_mc4 1,086× pelo 0201; célula 10k → RFC-0209)
 **Updated:** 2026-09-11
 **ID:** 0193
 **Parents:** [0189](0189-ciclo-lider-janela-lenta.md) (P1.1 design aprovado — este RFC executa P1.2/P1.3),
@@ -116,27 +116,34 @@ gatilho); leftover I/O precisa da caixa Linux; cauda GET precisa de Linux 3-run.
 
 ## Delivery slices (mandatory)
 
-### P0 — o corte (executa 0189 P1.2)
+### P0 — o corte (executa 0189 P1.2) — **estado forense 2026-09-11: P0.1–P0.4 wiped-pre-commit**
 
-- [x] **P0.1** Captura de igualdade ANTES de qualquer linha: rodada de shapes
+> As quatro fatias foram EXECUTADAS e VERIFICADAS em working tree em
+> 2026-09-10 (findings abaixo são reais), mas o código **nunca foi
+> commitado** e o reset da sessão paralela (2026-09-10 23:49) o destruiu:
+> `git grep write_all_at* / reserve_frame / positional_writes --all --
+> crates/**` = zero em QUALQUER commit alcançável
+> (`findings/2026-09-11-wipe-forense/`). Os meters p201q/p201r2 mediram
+> árvores SEM este corte — mc50 1,678× e apply_mc4 1,086× foram pagos pelo
+> 0201. Re-land não é exigido por nenhuma célula não paga do board atual
+> (o buraco restante, async 1-op, é atacado pelo staging do 0209,
+> independente do ticket); reabre se voltar a pagar.
+
+- [ ] **P0.1** Captura de igualdade ANTES de qualquer linha: rodada de shapes
       com dump do WAL (`wal-before.bin`) arquivada em `findings/` — gate `cmp`
-      byte-idêntico pós-corte — status: `done`
-      (`findings/2026-09-10-rfc0193-p01-wal-before/wal-before.bin`,
-      sha256 `831d94d6…95c5d`; pós-corte idêntico)
-- [x] **P0.2** Seam `EnvFile::write_all_at` + capability `positional_writes()`
-      (posix pwrite; default portável) com teste nomeado — status: `done`
-      (`env::tests::positional_write_seam_is_pwrite_on_unix` + fallback test)
-- [x] **P0.3** `Wal::encode_group_frame` (buffer do grupo) + `reserve_frame`
+      byte-idêntico pós-corte — status: `wiped-pre-commit`
+      (captura sobrevive: `findings/2026-09-10-rfc0193-p01-wal-before/
+      wal-before.bin`, sha256 `831d94d6…95c5d` — reutilizável num re-land)
+- [ ] **P0.2** Seam `EnvFile::write_all_at` + capability `positional_writes()`
+      (posix pwrite; default portável) com teste nomeado — status:
+      `wiped-pre-commit` (teste citado não existe no tree)
+- [ ] **P0.3** `Wal::encode_group_frame` (buffer do grupo) + `reserve_frame`
       (ticket, dois cursores) + drenagem `inflight_writes` em sync/close;
-      fallback sem capability = caminho de hoje — status: `done`
-      (writer unit tests; `framed_group_len_at` multi-record; board
-      contiguity/drain tests)
-- [x] **P0.4** Líder real (`lead_pipeline_group` e caminho verificado/G1) troca
+      fallback sem capability = caminho de hoje — status: `wiped-pre-commit`
+- [ ] **P0.4** Líder real (`lead_pipeline_group` e caminho verificado/G1) troca
       encode+write in-lock por reserve sob lock curto + `pwrite` off-lock;
       `off_lock_write_order_survives_two_leaders` + `cmp` byte-idêntico +
-      suíte crash/reopen/torn verde — status: `done`
-      (byte-idêntico `$S/wal-after/`; serial 896/21 = baseline exato;
-      regressão de fence corrigida: erro de append entra no plano de fence)
+      suíte crash/reopen/torn verde — status: `wiped-pre-commit`
 - [x] **P0.5** Meter de gate: overwrite_mc4 (0185 P0.3: 3/3 min ≥ 1.0 vs Rocks
       ≳260 k quieto), kvrocks_set_mc50, apply_mc4 antes/depois; Linux p149b
       quieto (STOP/CONT warm10); guest fora ⇒ Darwin DIAG + blocked, nunca
@@ -200,10 +207,10 @@ gatilho); leftover I/O precisa da caixa Linux; cauda GET precisa de Linux 3-run.
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | wal-before.bin gate | done | `findings/2026-09-10-rfc0193-p01-wal-before/` (cmp pós-corte idêntico) | 2026-09-10 |
-| P0.2 | p0 | EnvFile::write_all_at + capability | done | `env::tests` seam tests | 2026-09-10 |
-| P0.3 | p0 | frame do grupo + ticket + drenagem | done | `wal` writer/board unit tests | 2026-09-10 |
-| P0.4 | p0 | líder real off-lock + byte-idêntico | done | `off_lock_write_order_survives_two_leaders`; serial 896/21 = baseline | 2026-09-10 |
+| P0.1 | p0 | wal-before.bin gate | wiped-pre-commit (captura sobrevive em findings) | `2026-09-11-wipe-forense/` | 2026-09-11 |
+| P0.2 | p0 | EnvFile::write_all_at + capability | wiped-pre-commit | `2026-09-11-wipe-forense/` | 2026-09-11 |
+| P0.3 | p0 | frame do grupo + ticket + drenagem | wiped-pre-commit | `2026-09-11-wipe-forense/` | 2026-09-11 |
+| P0.4 | p0 | líder real off-lock + byte-idêntico | wiped-pre-commit | `2026-09-11-wipe-forense/` | 2026-09-11 |
 | P0.5 | p0 | meter 3 células (gate 0185 P0.3) | partial (mc50 1,678× + apply 1,0859× pagas 2026-09-11; 10k → RFC-0209) | `2026-09-11-p201o-sweep/` + `2026-09-11-p201r2-mc4/` | 2026-09-11 |
 | P1.1 | p1 | io_uring ordenado | closed-by-verdict | `2026-09-10-rfc0193-p11-iouring-verdict.md` | 2026-09-10 |
 | P1.2 | p1 | remeter: kernel decide o próximo dono | blocked (Linux; wipe 0192 datado 2026-09-11) / done (vista local) | `2026-09-10-rfc0193-telem-ticket-view.md` | 2026-09-11 |
