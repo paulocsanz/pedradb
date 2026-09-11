@@ -146,6 +146,13 @@ pool honesto manda sobre a meta numérica).
    floor_extract 197→196; planta DST verde
    (`open_peer_uses_disk_on_live_queued_is_not_ok`,
    no mesmo lote paralelo)
+
+   — 6/8 `done`: `local_id_if_member_fate_iff`
+   (Membership.lean; nó local único é identidade deste processo
+   exatamente quando está em `ids`), cap 42→41, floor_atom
+   82→83, floor_extract 196→195; planta DST verde
+   (`local_id_if_member_on_live_queued_is_not_ok`,
+   no mesmo lote paralelo)
 4. **P1.2:** cadências membership 5/6 + 6/6 — `pending_joint_node`,
    `joint_target`, `joint_add_target`, `joint_leave_ok` (joint);
    `drop_repl_slot`, `drop_sent_through` (slot): ×6, cap 39→33,

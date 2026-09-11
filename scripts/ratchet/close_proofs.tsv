@@ -109,3 +109,4 @@ atom	catalog:recover_truncate	recover_truncate_node_counts_fate_iff	formal/aenea
 atom	catalog:recover_abort	recover_abort_node_counts_fate_iff	formal/aeneas/lean/Membership.lean	recover_abort_node_counts
 atom	catalog:identity_before_applied	membership_identity_before_applied_fate_iff	formal/aeneas/lean/Membership.lean	membership_identity_before_applied
 atom	catalog:open_peer_disk	open_peer_uses_disk_fate_iff	formal/aeneas/lean/Membership.lean	open_peer_uses_disk
+atom	catalog:local_id_member	local_id_if_member_fate_iff	formal/aeneas/lean/Membership.lean	local_id_if_member

@@ -574,3 +574,19 @@ theorem open_peer_uses_disk_fate_iff :
   intro has_disk v
   unfold open_peer_uses_disk
   cases has_disk <;> cases v <;> simp
+
+/-- RFC-0212 P1.1 (membership cadence 4/6, atom
+    `catalog:local_id_member`): the sole local node is this
+    process's identity EXACTLY when it is in `ids` — fate
+    forall over the extracted pure-lift body; the AS-IS mutant
+    takes the HashMap first-key even when the node was removed
+    (the 0140 leftover — the lie the DST plant
+    `local_id_if_member_on_live_queued_is_not_ok` refutes). -/
+theorem local_id_if_member_fate_iff :
+    ∀ (in_ids : Bool) (v : Bool),
+      (local_id_if_member in_ids = ok v) ↔
+        ((v = true ∧ in_ids = true)
+          ∨ (v = false ∧ in_ids = false)) := by
+  intro in_ids v
+  unfold local_id_if_member
+  cases in_ids <;> cases v <;> simp
