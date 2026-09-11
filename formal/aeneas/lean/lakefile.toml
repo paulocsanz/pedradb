@@ -429,7 +429,10 @@ name = "ScanGuardDerived"
 name = "CountDerived"
 
 [[lean_lib]]
-name = "BloomCount"
+name = "BloomBridges"
+
+[[lean_lib]]
+name = "BloomMayContainDerived"
 
 [[lean_lib]]
 name = "LevelingKernel"

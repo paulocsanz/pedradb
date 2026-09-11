@@ -126,11 +126,16 @@ gateável, não desejo.
   a emissão; registro anda só em lean_file; twins 6+3+4 do scan + flush
   verdes sem edição; runbook §Movimento de linha ganha o rito de
   aposentadoria)
-- [ ] **P1.2** Bloom inscrito: `bloom_may_contain` entra na ferramenta
+- [x] **P1.2** Bloom inscrito: `bloom_may_contain` entra na ferramenta
   (nova inscrição Aeneas sobre o extract `Bloom` do pin — non-goal do
   0203, agora é o passo); anotação derivada + espelho emitido;
   `BloomCount.lean` aposenta o espelho, pontes ficam; contrato anda no
-  mesmo commit — status: `todo`
+  mesmo commit — status: `done` (2026-09-11: `BloomFilter.may_contain_loop`
+  inscrita (step_work=7, parse existente); shape `one_step_per_remaining`
+  emite `BloomMayContainDerived.lean`; `BloomCount.lean` ->
+  `BloomBridges.lean` (pontes cont/done humanas); registro anda só em
+  lean_file; contrato aponta o emitido; twin `tests/bloom_probe_count.rs`
+  verde sem edição; débito do 0203 fechado no ledger)
 
 ### P2 — later / polish
 
@@ -151,7 +156,7 @@ gateável, não desejo.
 |---|---|---|---|---|---|
 | P0.1 | p0 | Espelho lsm_compact emitido pela ferramenta, hand-mirror aposentado | done | 2026-09-11 | 2026-09-11 |
 | P1.1 | p1 | Espelhos restantes dos inscritos aposentados | done | 2026-09-11 | 2026-09-11 |
-| P1.2 | p1 | Bloom inscrito na ferramenta (anotação derivada) | todo | — | — |
+| P1.2 | p1 | Bloom inscrito na ferramenta (anotação derivada) | done | 2026-09-11 | 2026-09-11 |
 | P2.1 | p2 | Rito de re-âncora com supersessão datada | todo | — | — |
 | P2.2 | p2 | Âncora linux de barreira isolada (ou deferido datado) | todo | — | — |
 

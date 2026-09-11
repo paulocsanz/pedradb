@@ -1,41 +1,22 @@
--- RFC-0199 (P2.3): counting-ladder credit over the bloom probe walk.
--- The twin counts ONE step per probe of the policy; the bridges tie it
--- to the real Aeneas extract: every `cont` step of the probe loop
--- advances the probe index by exactly one (the add must not overflow),
--- and the loop reports a completed pass (`done true`) only once the
--- index has reached the policy count k — a clear bit short-circuits
--- with `done false`, strictly below k.
+-- RFC-0199 (P2.3) → RFC-0204 (P1.2): the semantic bridges of the
+-- bloom probe walk. The Nat count twin and the REGISTERED bound
+-- theorem (`bloom_may_contain_work_bound`) moved to the
+-- MACHINE-EMITTED `BloomMayContainDerived.lean` (single emitter:
+-- scripts/ratchet/derive_count_annotations.py; drift-gated by
+-- lean_extracts.sh --check); the loop is now ENROLLED in the same
+-- parse that derives step_work (RFC-0203's deferral closed). What
+-- stays HERE, human by design, are the bridges that tie the twin to
+-- the real Aeneas extract: every `cont` step of the probe loop
+-- advances the probe index by exactly one (the add must not
+-- overflow), and the loop reports a completed pass (`done true`) only
+-- once the index has reached the policy count k — a clear bit
+-- short-circuits with `done false`, strictly below k.
 import Aeneas
 import BloomKernel
 open Aeneas Aeneas.Std Result ControlFlow
 open pedra_aeneas_bloom_kernel
 
-/-! ## Count twin -/
-
-/-- Work twin of the probe loop: iterations while `remaining` probes are
-left (the loop's own decreasing measure `k - i`) — one step per probe. -/
-def bloom_probe_steps : Nat → Nat
-  | 0 => 0
-  | remaining + 1 => 1 + bloom_probe_steps remaining
-
-/-- Inner twin bound: one iteration per remaining probe, no more. -/
-theorem bloom_probe_steps_le : ∀ (remaining : Nat),
-    bloom_probe_steps remaining ≤ remaining := by
-  intro remaining
-  induction remaining with
-  | zero => simp [bloom_probe_steps]
-  | succ d ih => simp only [bloom_probe_steps]; omega
-
-/-- RFC-0199 count (P2.3): a bloom query's work twin never exceeds the
-policy's probe count k — at most one bit test per probe per query; the
-short-circuit (clear bit ⇒ `done false`) only ever pays LESS than the
-full pass. -/
-theorem bloom_may_contain_work_bound : ∀ (k : Nat),
-    bloom_probe_steps k ≤ k := by
-  intro k
-  exact bloom_probe_steps_le k
-
-/-! ## Bridges to the real extract -/
+/-! ## Bridges to the real extract (human, declared) -/
 
 /-- ok chains: a bind equal to an ok value forces the bound operation
 to have returned ok (Cf.lean's `bind_ok_inv`, restated for this

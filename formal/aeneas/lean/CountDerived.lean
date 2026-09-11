@@ -13,6 +13,7 @@ import ScanKernel
 import LsmR1Kernel
 import ProbeOrderKernel
 import ScaleKernel
+import BloomKernel
 
 namespace pedra_aeneas_count_derived
 
@@ -106,8 +107,23 @@ def level_count_loop_step_work : Nat := 5
 theorem level_count_loop_step_work_eq : level_count_loop_step_work = level_count_loop_leaf_calls + level_count_loop_local_calls + level_count_loop_dispatches + level_count_loop_cmp_ops + level_count_loop_arith_ops := by rfl
 theorem level_count_loop_step_work_positive : 0 < level_count_loop_step_work := by decide
 
+/-- `BloomFilter.may_contain_loop` (BloomKernel.lean, catalog:bloom_may_contain): derived one-unfolding
+     cost — leaf=0 local=3 dispatch=2
+     cmp=1 arith=1 (nested=0,
+     self=0 excluded). AUTO-GENERATED. -/
+def BloomFilter_may_contain_loop_leaf_calls : Nat := 0
+def BloomFilter_may_contain_loop_local_calls : Nat := 3
+def BloomFilter_may_contain_loop_dispatches : Nat := 2
+def BloomFilter_may_contain_loop_cmp_ops : Nat := 1
+def BloomFilter_may_contain_loop_arith_ops : Nat := 1
+def BloomFilter_may_contain_loop_nested_calls : Nat := 0
+def BloomFilter_may_contain_loop_self_calls : Nat := 0
+def BloomFilter_may_contain_loop_step_work : Nat := 7
+theorem BloomFilter_may_contain_loop_step_work_eq : BloomFilter_may_contain_loop_step_work = BloomFilter_may_contain_loop_leaf_calls + BloomFilter_may_contain_loop_local_calls + BloomFilter_may_contain_loop_dispatches + BloomFilter_may_contain_loop_cmp_ops + BloomFilter_may_contain_loop_arith_ops := by rfl
+theorem BloomFilter_may_contain_loop_step_work_positive : 0 < BloomFilter_may_contain_loop_step_work := by decide
+
 /-- Every enrolled extract function does at least one unit of
      mechanically counted work per unfolding. -/
-theorem all_enrolled_step_work_positive : 0 < auto_flush_due_step_work + scan_kernel_scan_reads_file_step_work + lsm_compact_src_loop_step_work + lsm_compact_inner_loop_step_work + probe_order_covering_loop_step_work + level_count_loop_step_work := by decide
+theorem all_enrolled_step_work_positive : 0 < auto_flush_due_step_work + scan_kernel_scan_reads_file_step_work + lsm_compact_src_loop_step_work + lsm_compact_inner_loop_step_work + probe_order_covering_loop_step_work + level_count_loop_step_work + BloomFilter_may_contain_loop_step_work := by decide
 
 end pedra_aeneas_count_derived

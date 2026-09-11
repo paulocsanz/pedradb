@@ -49,7 +49,8 @@ COMPOSE=(
   ScanDecisionBridges
   ScanGuardDerived
   CountDerived
-  BloomCount
+  BloomBridges
+  BloomMayContainDerived
 )
 
 for lib in "${LIBS[@]}"; do
