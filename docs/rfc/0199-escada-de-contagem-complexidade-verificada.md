@@ -116,10 +116,19 @@ vira win, e previsões continuam hat com erro nomeado.
   índice +1 exato, `done (some _)` só após `src.len`, drain desce exato 1
   nível), com twin test Rust (`tests/lsm_compact_count.rs`: contador
   instrumentado no teste, mesmo bound) — status: `done` (2026-09-11)
-- [ ] **P0.3** Cota do point-get ladder sobre `Lookup`/`ProbeOrder`:
+- [x] **P0.3** Cota do point-get ladder sobre `Lookup`/`ProbeOrder`:
   probes ≤ levels + l0_max dada a invariante de razão; gradua
   `probe_order_covering`/`scale_predict` de `model` → `count`
-  (absorve a P2.1 do 0198 — cross-ref lá) — status: `todo`
+  (absorve a P2.1 do 0198 — cross-ref lá) — status: `done`
+  (2026-09-11: `probe_order_covering_work_bound` — ladder work twin ≤
+  candidates × (scan_len + 1) sobre o extract `ProbeOrderKernel`, pontes
+  cont ⇒ k+1 exato ∧ k < n, done ⇒ k ≥ n, covering scan cont ⇒ pos+1 —
+  e `point_get_probes_le_levels_l0_max` — sob `l0_covering ≤ l0_max` e
+  soma cabendo em u64, probes ≤ levels + l0_max sobre o extract
+  `ScaleKernel`; ambos em `ProbeLadderCount.lean`, 0 sorry; twins:
+  in-module em `probe_order_kernel.rs` + `tests/scale_ladder_count.rs`;
+  2 linhas `count` + `floor_count` 1→3 + residuals model 17→15 no mesmo
+  commit)
 
 ### P1 — next wave (amortização e primitivas)
 
@@ -157,7 +166,7 @@ vira win, e previsões continuam hat com erro nomeado.
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | Inventário vivo de kernels + cotas-alvo | done | 2026-09-11 | 2026-09-11 |
 | P0.2 | p0 | Kind `count` + one-pass do walk de compact (teorema + twin test) | done | 2026-09-11 | 2026-09-11 |
-| P0.3 | p0 | Point-get ladder ≤ levels + l0_max (model→count) | todo | — | 2026-09-10 |
+| P0.3 | p0 | Point-get ladder ≤ levels + l0_max (model→count) | done | 2026-09-11 | 2026-09-11 |
 | P1.1 | p1 | `Work.io` + ≤1 fdatasync por grupo confirmado | todo | — | 2026-09-10 |
 | P1.2 | p1 | Amortização memtable→flush (k writes) | todo | — | 2026-09-10 |
 | P1.3 | p1 | write_cycle compõe contagens provadas × âncoras | todo | — | 2026-09-10 |

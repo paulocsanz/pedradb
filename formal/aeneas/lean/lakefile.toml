@@ -399,6 +399,9 @@ name = "LsmR1"
 name = "LsmCompactCount"
 
 [[lean_lib]]
+name = "ProbeLadderCount"
+
+[[lean_lib]]
 name = "LevelingKernel"
 
 [[lean_lib]]

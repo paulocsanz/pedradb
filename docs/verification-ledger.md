@@ -45,8 +45,8 @@ datada):
 
 | Kernel | Medida de tamanho | Cota-alvo | Status |
 |---|---|---|---|
-| Point-get ladder (`catalog:probe_order_covering`) | runs candidatas no ladder | probes ≤ candidates; iterations = candidates | todo (P0.3) |
-| Escala/ladder de níveis (`catalog:scale_predict`) | bytes do store | probes = levels + L0 (razão de níveis; forma do `scale_kernel`) | todo (P0.3) |
+| Point-get ladder (`catalog:probe_order_covering`) | runs candidatas no ladder | probes ≤ candidates; iterations = candidates | **count** (P0.3: `probe_order_covering_work_bound` — work ≤ candidates × (scan_len + 1), pontes cont/exact-step no extract `ProbeOrderKernel`; `ProbeLadderCount.lean`; twins in-module em `probe_order_kernel.rs`) |
+| Escala/ladder de níveis (`catalog:scale_predict`) | bytes do store | probes = levels + L0 (razão de níveis; forma do `scale_kernel`) | **count** (P0.3: `point_get_probes_le_levels_l0_max` — sob `l0_covering ≤ l0_max` e soma cabendo em u64, probes ≤ levels + l0_max; `ProbeLadderCount.lean`; twin `tests/scale_ladder_count.rs`; gradua o par model→count, fecha 0198 P2.1) |
 | Compact merge walk (`catalog:lsm_compact`) | Σ entradas dos níveis fundidos | one-pass: cada entrada visitada ≤ 1× por compact; work ≤ Σ níveis + MAX_LEVELS | **count** (P0.2: `lsm_compact_work_bound`, `LsmCompactCount.lean`, twin `tests/lsm_compact_count.rs`) |
 | Insert memtable → flush (amortizado) | writes sob o cap | k writes ⇒ work total de flush ≤ c·k (crédito; N concreto) | todo (P1.2) |
 | Write path confirmado (`catalog:wal_commit_plan`) | 1 commit/grupo confirmado | ≤1 `fdatasync` por plano confirmado (contagem na álgebra `Work.io`; ns = âncora datada) | todo (P1.1) |

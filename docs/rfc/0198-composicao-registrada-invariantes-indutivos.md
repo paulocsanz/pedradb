@@ -108,17 +108,16 @@
 
 ### P2 — later / polish
 
-- [ ] **P2.1** Primeira graduação model→concreto: teorema sobre N
+- [x] **P2.1** Primeira graduação model→concreto: teorema sobre N
   concreto num `scale_kernel` (`scale_forecast`, callers/callees já
-  unfoldados) + re-tier do par — status: `todo` (a graduação de scale é
-  pague pelo [RFC-0199](0199-escada-de-contagem-complexidade-verificada.md)
-  P0.3, crédito `count`; este item fecha com aquele) — **BLOQUEIO EXTERNO
-  DATADO 2026-09-11**: o P0.3 do 0199 ("gradua
-  `probe_order_covering`/`scale_predict` de model → count — absorve a
-  P2.1 do 0198") ainda é `todo` no RFC dela; a sessão paralela landou
-  P0.1+P0.2 (commit 4df272d5, kind `count` + primeiro teorema) e é dona
-  do P0.3; este item flipa no mesmo commit que registrar o re-tier
-  quando aquele landar (nunca um skip silencioso)
+  unfoldados) + re-tier do par — status: `done` (2026-09-11: paga pelo
+  [RFC-0199](0199-escada-de-contagem-complexidade-verificada.md) P0.3,
+  crédito `count` — `point_get_probes_le_levels_l0_max` sobre o extract
+  `ScaleKernel` (`ProbeLadderCount.lean`, 0 sorry): sob a cap
+  `l0_covering ≤ l0_max` e soma cabendo em u64, probes ≤ levels +
+  l0_max; `scale_predict` e `probe_order_covering` graduaram
+  model→count com linhas `count` + `floor_count` 1→3 + residuals model
+  17→15 no MESMO commit; twin `tests/scale_ladder_count.rs`)
 - [x] **P2.2** Cadência cap continua: cada novo atom df desce
   `cap_data_fate` 100→99→… no mesmo commit (mesma receita um-por-commit
   do P2.3/0191; sem alvo numérico novo além da monotonicidade) —

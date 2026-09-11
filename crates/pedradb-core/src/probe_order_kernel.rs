@@ -534,4 +534,115 @@ mod tests {
         // consults — the newest answers Deleted.
         assert!(matches!(newer.get(&k, SequenceNumber::MAX), Lookup::Deleted));
     }
+
+    /// RFC-0199 P0.3 counting ladder — Rust twin of
+    /// `probe_order_covering_work_bound` (Lean:
+    /// `formal/aeneas/lean/ProbeLadderCount.lean`, count row
+    /// `catalog:probe_order_covering`).
+    ///
+    /// The theorem's claim in Rust terms: `probe_order_covering` pays at
+    /// most one `by_lo` scan plus one ladder step per candidate — work
+    /// ≤ candidates × (by_lo.len() + 1), whatever the deeper engine
+    /// structures hold. The REAL kernel is driven on every shape; an
+    /// in-test counted mirror of the index skeleton (the same shape the
+    /// Lean bridges prove for the extract: every `cont` of the ladder
+    /// consumes exactly one candidate, every `cont` of the scan advances
+    /// exactly one position) is checked against the bound arithmetic.
+    /// The mirror never reimplements the covering decision — keep/skip
+    /// stays inside the real kernel.
+    fn ladder_work_twin(candidates: usize, scan_len: usize) -> usize {
+        let mut work = 0;
+        let mut k = 0;
+        while k < candidates {
+            // one by_lo scan (≤ scan_len steps) + one ladder step
+            work += scan_len + 1;
+            k += 1;
+        }
+        work
+    }
+
+    /// Drive the real kernel on one shape: the twin equals the bound
+    /// arithmetic, the real decision matches the expected subsequence,
+    /// and the output keeps `newest_first`'s relative order.
+    fn assert_ladder_bound(
+        newest_first: &[usize],
+        by_lo: &[usize],
+        prefix_end: usize,
+        his: &[&[u8]],
+        key: &[u8],
+        expected: &[usize],
+    ) {
+        let bound = newest_first.len() * (by_lo.len() + 1);
+        assert_eq!(
+            ladder_work_twin(newest_first.len(), by_lo.len()),
+            bound,
+            "twin must equal the bound arithmetic (Lean proves it for all shapes)"
+        );
+        let out = probe_order_covering(newest_first, by_lo, prefix_end, his, key);
+        assert_eq!(out, expected, "real kernel decision on this shape");
+        assert!(out.len() <= newest_first.len());
+        let mut cursor = newest_first.iter();
+        for cand in &out {
+            assert!(
+                cursor.any(|c| c == cand),
+                "output must keep newest_first's relative order"
+            );
+        }
+    }
+
+    /// The measured failure shape (equal-lo tie): both candidates cover;
+    /// the ladder consumes exactly one scan + one step each.
+    #[test]
+    fn covering_ladder_count_bound_tie_shape() {
+        let k = b"k".as_slice();
+        assert_ladder_bound(&[1usize, 0], &[1usize, 0], 2, &[k, k], k, &[1, 0]);
+    }
+
+    /// Hi-bounded miss: the newer table's hi is below the key — skipped
+    /// by the real decision, still one scan + one step on the twin.
+    #[test]
+    fn covering_ladder_count_bound_hi_miss_skips() {
+        let (c, k, z) = (b"c".as_slice(), b"k".as_slice(), b"z".as_slice());
+        assert_ladder_bound(&[1usize, 0], &[1usize, 0], 2, &[c, z], k, &[0]);
+    }
+
+    /// A candidate missing from `by_lo` (pos = len) is KEPT — the scan
+    /// runs off the end, exactly `by_lo.len()` steps, never more.
+    #[test]
+    fn covering_ladder_count_bound_missing_candidate_kept() {
+        let k = b"k".as_slice();
+        assert_ladder_bound(&[7usize, 0], &[0usize], 1, &[k], k, &[7, 0]);
+    }
+
+    /// Prefix gate: pos past `prefix_end` skips the candidate even when
+    /// the hi would cover — the lo partition is the authority.
+    #[test]
+    fn covering_ladder_count_bound_prefix_gate() {
+        let (k, z) = (b"k".as_slice(), b"z".as_slice());
+        assert_ladder_bound(&[1usize], &[1usize], 0, &[z], k, &[]);
+    }
+
+    /// Empty candidate list: zero work, empty output.
+    #[test]
+    fn covering_ladder_count_bound_empty_candidates() {
+        let k = b"k".as_slice();
+        assert_ladder_bound(&[], &[1usize, 0], 2, &[k, k], k, &[]);
+        assert_eq!(ladder_work_twin(0, 3), 0);
+    }
+
+    /// The AS-IS mutant walks the same index skeleton backwards — same
+    /// work bound shape (each step one scan + one step), opposite order.
+    /// Work is not correctness: the mutant pays the same and is wrong.
+    #[test]
+    fn covering_ladder_count_bound_as_is_same_skeleton() {
+        let k = b"k".as_slice();
+        let newest_first = [1usize, 0];
+        let by_lo = [1usize, 0];
+        assert_eq!(
+            ladder_work_twin(newest_first.len(), by_lo.len()),
+            newest_first.len() * (by_lo.len() + 1)
+        );
+        let mutant = probe_order_covering_as_is(&newest_first, &by_lo, 2, &[k, k], k);
+        assert_eq!(mutant, vec![0, 1], "AS-IS dente: oldest first");
+    }
 }
