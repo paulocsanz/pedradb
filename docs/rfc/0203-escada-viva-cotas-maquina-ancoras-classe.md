@@ -111,14 +111,18 @@ cartaz. Cartaz continua sendo Pedra vs RocksDB default `sync=false`
 
 ### P1 — next wave (depends on P0 or clearly deferrable)
 
-- [ ] **P1.1** Âncora darwin `F_FULLFSYNC` medida e datada: medição do
+- [x] **P1.1** Âncora darwin `F_FULLFSYNC` medida e datada: medição do
   primitivo nesta máquina (darwin arm64) — barreira `fcntl(F_FULLFSYNC)`
   vs `fdatasync` intra-host, N repetições, loadavg registrado no momento,
   rótulo `quiet`/`DIAG` honesto; registrada em findings com data e método;
   nunca teorema de ns (0187 intocado: persistência física segue
   experimento; o crates.io rust-rocksdb continua sem `HAVE_FULLFSYNC` —
   contexto do finding 2026-08-27 citado, sem re-bench do Rocks) —
-  status: `todo`
+  status: `done` (2026-09-11; `crates/pedradb-posix/examples/fullfsync_anchor.rs`
+  re-executável, 2×200 barreiras/sabor: fdatasync p50 17,7/19,8 µs,
+  F_FULLFSYNC p50 4,00/4,08 ms, multiplicador 206–227×; loadavg 10–16
+  nos dois runs ⇒ rótulo **DIAG** honesto;
+  `findings/2026-09-11-rfc0203-p11-darwin-fullfsync-anchor.md`)
 - [ ] **P1.2** Tabela de âncoras por classe consumida:
   `scripts/ratchet/host_anchors.tsv` (classe, âncora, valor ns, data,
   host, rótulo quiet/DIAG, fonte) com linux = referência à
@@ -143,7 +147,7 @@ cartaz. Cartaz continua sendo Pedra vs RocksDB default `sync=false`
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | Contrato de twin derivado + gate (selftest) | done | 2026-09-11 | 2026-09-11 |
 | P0.2 | p0 | Terminalidade do inventário como gate | done | 2026-09-11 | 2026-09-11 |
-| P1.1 | p1 | Âncora darwin F_FULLFSYNC medida e datada | todo | — | 2026-09-11 |
+| P1.1 | p1 | Âncora darwin F_FULLFSYNC medida e datada | done | 2026-09-11 | 2026-09-11 |
 | P1.2 | p1 | Tabela de âncoras por classe consumida por teste | todo | — | 2026-09-11 |
 | P2.1 | p2 | Cadência de novos pares gateada (rito no runbook) | todo | — | 2026-09-11 |
 
