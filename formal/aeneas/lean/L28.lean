@@ -622,3 +622,19 @@ theorem l28_tcp_dsc_ok_fate_iff :
   intro b v
   unfold l28_tcp_dsc_ok
   cases b <;> cases v <;> simp
+
+/-- RFC-0210 P2.1 (l28 cadence 5/6, atom `catalog:l28_tcp_pld`):
+    after a REAL TCP plant + process death, the no-leader abort
+    persist-leader is local (so `next_index` repair runs) EXACTLY
+    when the persist happened — fate forall over the extracted
+    pure-lift body; the AS-IS `ok true` mutant skips persist-leader
+    locality (the 0143 leftover: ids.first — the lie the real TCP
+    plant `l28_real_tcp_removed_pld` refutes). -/
+theorem l28_tcp_pld_ok_fate_iff :
+    ∀ (b : Bool) (v : Bool),
+      (l28_tcp_pld_ok b = ok v) ↔
+        ((v = true ∧ b = true)
+          ∨ (v = false ∧ b = false)) := by
+  intro b v
+  unfold l28_tcp_pld_ok
+  cases b <;> cases v <;> simp

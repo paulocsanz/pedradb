@@ -4218,7 +4218,6 @@
     "crates/pedradb-store/src/bin/cluster_real.rs"
    ],
    "entry": "l28_tcp_pld_ok",
-   "data_fate": true,
    "handlers": [
     "tcp_node_removed_pld_ok"
    ],
@@ -4232,7 +4231,11 @@
      "file": "crates/pedradb-store/src/bin/cluster_real.rs",
      "handler": "tcp_node_removed_pld_ok"
     }
-   ]
+   ],
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0144 P1.2 REAL TCP removed-replica persist-leader locality: no-leader abort persist-leader is local so next_index repair runs; plant l28_real_tcp_removed_pld green"
+   }
   },
   {
    "id": "l28_tcp_std",

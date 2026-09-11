@@ -213,7 +213,13 @@ status: `done`
    `l28_tcp_hnt`, `l28_tcp_slot`, `l28_tcp_sth`, `l28_tcp_pj`
    (cap 68→62, `floor_atom` 63→69, `floor_extract` 215→209; com
    P1.2 aprovada o pool vai a 55); bloco l28 ZERO `data_fate`
-   pendente — status: `todo`
+   pendente — status: `doing`
+
+   — 1/6 `done`: `l28_tcp_pld_ok_fate_iff` (L28.lean; no-leader
+   abort persist-leader é local — `next_index` repair roda —
+   exatamente quando o persist aconteceu), cap 61→60, floor_atom
+   63→64, floor_extract 215→214; planta TCP REAL verde
+   (`l28_real_tcp_removed_pld`, 231.81s)
 6. **P2.2:** composição ∀ do protocolo de remoção TCP (remove →
    left ∧ high-water preservado) sobre atoms registrados em
    `ComposeL28.lean` (zero sorry; twins DST verdes; razão de
