@@ -181,6 +181,8 @@ Not silent close-kernel **files** (`l28.rs` and `probe_order_kernel.rs` stay enr
 
 **No production `fn`.** Close pairs `l28_tcp_add` / `l28_tcp_cnew` / `l28_tcp_svget` / `l28_tcp_newget` / `l28_tcp_jleft` / `l28_tcp_caught` / `l28_tcp_grown` name `l28_tcp_*_ok` on enrolled `crates/pedradb-store/src/l28.rs`. Those `fn`s are not in the live file (TCP kernels end at `l28_tcp_pj_ok`). `git log -S l28_tcp_add_ok -- crates/pedradb-store/src/l28.rs` is empty; the names landed in `36d4f685` on catalog / `verified.rs` / `docs/status.md` only. Verus twin, DST plant `l28_real_tcp_add_member_joint_cnew`, `cluster_real --add-member`, and handlers `tcp_node_disk_added_joint` / `tcp_node_disk_caught_up` are also absent. RFC-0119 itself has no P2.3. Not a Charon refuse: there is nothing to extract. Do not invent identity gates to please the catalog.
 
+**2026-09-11 (RFC-0210 P1.2): verdict — retired.** Fresh measurement at HEAD: `grep 'add_member\|AddMemberJoint' crates/pedradb-store/src/bin/cluster_real.rs` is empty (the real-TCP binary dispatches no add-member path — the wire tag 20 helper in `tcp.rs` is unused there); `tcp_node_disk_added_joint` / `tcp_node_disk_caught_up` exist nowhere under `crates/` (`tcp_node_disk_high_water` exists and is the plant of the paid atom `l28_tcp_hw`); plant `l28_real_tcp_add_member_joint_cnew` is absent from `tests/l28_real_tcp.rs` (31 tests, none so named); zero Lean defs. The 7 pairs left the catalog (299→292; `glue.data_fate` 68→61, cap 61; `single_artifact` 285 — also fixed a stale 291-vs-292 glue count). No anchored count broke: 3 gates + ledger + `host_anchor_table` green before and after. Verdict doc: `findings/2026-09-11-rfc0210-p12-fantasmas-l28/`.
+
 **Iterator CFailure is not a refuse of the covering decision.** Production `probe_order_covering` is now an index `while` returning `Vec` (same keep-rule as the old `filter`+`position` walk; Isolated method). Aeneas still holes the nested `Vec.push` loop (`Could not match the contexts`); `aeneas_probe_order.sh` patches that body to `probe_order_covering_loop` so the catalog entry is a Lean `def`. Theorems: `covering_hi_ge_oob`, `probe_order_covering_is_loop` / `_as_is_is_loop`. `probe_order_covering_as_is` is the oldest-first reverse-index walk (production `fn`, not invented). Unpacked `probe_order` (`filter.collect`) is still the Iterator form — covering is the engine-facing packed image.
 
 **ConcurrentDb is on the proof path.** `concurrent.rs` is glue (`RwLock` / `Env`); the write-group decisions it calls are `group_commit_kernel` (OCC `occ_conflict` / `group_validate`, publish `may_publish_group`, lock-schedule residual `lock_interleavings_admitted`, PCT `forall_schedules_admitted`). Lean: `lock_interleavings_not_a_theorem` (`ok false` — that is the theorem, not “out of scope”), `may_publish_group_needs_wal_ok`, `forall_schedules_pct2_not_admitted`, plus the existing `occ_conflict` closed form / group simultaneity. `ConcurrentDb::claim_lock_interleavings_proven` unfolds `lock_interleavings_admitted`. Glue around the lock stays TCB until more of the group protocol is a named kernel.
@@ -496,7 +498,9 @@ Estado: 33 pares l28 no catálogo; 2 pagos (`l28_tcp_left`,
   vivo (kernels TCP terminam em `l28_tcp_pj_ok`; ver seção "Catalog
   `entry`s with no Lean `def`"). Plano: re-escrever os pares para
   nomear `fn` viva ou aposentá-los no catálogo — nunca inventar
-  gate de identidade para agradar o catálogo.
+  gate de identidade para agradar o catálogo. — **DONE
+  2026-09-11 (0210 P1.2): aposentados, −7** (medição e veredito na
+  seção datada "verdict — retired" acima).
 
 ## 2026-09-11 — nota do seam store/raft (RFC-0208 P2.2): fechado nos kernels raft, cluster nomeado
 
@@ -525,7 +529,7 @@ Estado: 33 pares l28 no catálogo; 2 pagos (`l28_tcp_left`,
     persist_hist, persist_meta, reader_local, recover_abort,
     recover_apply_node, recover_truncate
   - 29 em `l28.rs` — plano datado próprio acima (22 pure-lifts +
-    7 fantasmas de conserto de catálogo)
+    7 fantasmas aposentados em 2026-09-11 pelo 0210 P1.2)
   - 6 em `txn_kernel.rs`: discard_cut, leftover_txn_is_aborted,
     next_txn_id_after, prepare_error_aborts_earlier, reserve_si_gen,
     unreserve_si_gen

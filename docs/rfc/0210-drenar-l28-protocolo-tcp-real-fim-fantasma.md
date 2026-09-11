@@ -185,7 +185,27 @@ status: `done`
    espelhos/âncoras do 0203/0204 verdes no HEAD antes/depois (se a
    aposentadoria quebrar conta ancorada, registrar a recusa e deixar
    o fantasma nomeado como dívida — nunca forçar); pool honesto:
-   −7 SE aprovada — status: `todo`
+   −7 SE aprovada — status: `done`
+
+   — Veredito (2026-09-11, medição a fresco no HEAD): o binário real
+   `cluster_real.rs` NÃO despacha add-member (grep `add_member`
+   `AddMemberJoint` vazio no arquivo; o helper wire tag 20 de
+   `tcp.rs` não é usado lá); `tcp_node_disk_added_joint` /
+   `tcp_node_disk_caught_up` não existem em `crates/` (o
+   `tcp_node_disk_high_water` existe e já é planta do atom pago
+   `l28_tcp_hw`); a planta `l28_real_tcp_add_member_joint_cnew` não
+   existe (31 testes em `tests/l28_real_tcp.rs`, nenhum com esse
+   nome); zero defs Lean. Por fantasma — os 7 APOSENTADOS com
+   recusa datada (`add`, `cnew`, `svget`, `newget`, `jleft`,
+   `caught`, `grown`): nenhum caminho vivo para re-escrita (o
+   produto decide construir, não o catálogo). Cirurgia: catálogo −7
+   (299→292), `glue.data_fate` 68→61, cap 61, `single_artifact` 285
+   (corrigida contagem stale 291 vs live 292), marker do ledger
+   total=292/campaign=26/sa=285/aeneas=224, nota datada na residual
+   R-joint, seção datada no EXTRACT.md. Verdes ANTES e DEPOIS: 3
+   gates + ledger + `host_anchor_table` (0203/0204) +
+   `test_proof_vs_campaign` + `test_twin_mutation`. Veredito em
+   `findings/2026-09-11-rfc0210-p12-fantasmas-l28/`.
 
 ### P2 — later / polish
 
@@ -210,7 +230,7 @@ status: `done`
 | P0.1 | p0 | Cadência l28 1/4 (dterm, part, apply, napply) | done | 9a0869ee + d6ea1e8b + 3d00e259 + este commit (4 atoms, 4 commits) | 2026-09-11 |
 | P0.2 | p0 | Cadência l28 2/4 (trunc, odrop, abort, nowms) | done | 4b44881b + df80dd90 + a4ef110f + este commit (4 atoms, 4 commits) | 2026-09-11 |
 | P1.1 | p1 | Cadências l28 3/4 + 4/4 (hist…dsc, ×8) | done | f6526f0d + e04ab047 + bfba89b5 + 71ef2f8f + 191a4a1a + bc9ad570 + cd508216 + este (8 atoms, 8 commits) | 2026-09-11 |
-| P1.2 | p1 | Veredito datado dos 7 fantasmas de catálogo | todo | — | 2026-09-11 |
+| P1.2 | p1 | Veredito datado dos 7 fantasmas de catálogo | done | este commit (catálogo −7, 299→292; recusa datada em findings; gates+âncoras verdes antes/depois) | 2026-09-11 |
 | P2.1 | p2 | Cadência final l28 ×6 — bloco ZERO data_fate | todo | — | 2026-09-11 |
 | P2.2 | p2 | Composição ∀ do protocolo de remoção + sweep final | todo | — | 2026-09-11 |
 
