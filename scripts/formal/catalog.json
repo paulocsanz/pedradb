@@ -4342,7 +4342,6 @@
     "crates/pedradb-store/src/bin/cluster_real.rs"
    ],
    "entry": "l28_tcp_sth_ok",
-   "data_fate": true,
    "handlers": [
     "tcp_node_drop_st_ok"
    ],
@@ -4356,7 +4355,11 @@
      "file": "crates/pedradb-store/src/bin/cluster_real.rs",
      "handler": "tcp_node_drop_st_ok"
     }
-   ]
+   ],
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0148 P1.2 REAL TCP remaining-voter oob sent_through drop: TCP ctor forgets sent_through of a remote replica on oob remove_member (not the 0147 joint drop_repl_slot tooth); plant l28_real_tcp_drop_st green"
+   }
   },
   {
    "id": "l28_tcp_pj",

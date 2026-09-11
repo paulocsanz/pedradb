@@ -238,6 +238,13 @@ status: `done`
    removida exatamente quando o slot caiu), cap 58→57,
    floor_atom 66→67, floor_extract 212→211; planta TCP REAL verde
    (`l28_real_tcp_drop_repl`, 349.23s)
+
+   — 5/6 `done`: `l28_tcp_sth_ok_fate_iff` (L28.lean; ctor TCP de
+   eleitor 3-nós remanescente esquece `sent_through` de réplica
+   remota em `remove_member` oob exatamente quando o drop
+   aconteceu — o dente 0147 `drop_repl_slot` NÃO é este), cap
+   57→56, floor_atom 67→68, floor_extract 211→210; planta TCP REAL
+   verde (`l28_real_tcp_drop_st`, 22.19s)
 6. **P2.2:** composição ∀ do protocolo de remoção TCP (remove →
    left ∧ high-water preservado) sobre atoms registrados em
    `ComposeL28.lean` (zero sorry; twins DST verdes; razão de

@@ -687,3 +687,20 @@ theorem l28_tcp_slot_ok_fate_iff :
   intro b v
   unfold l28_tcp_slot_ok
   cases b <;> cases v <;> simp
+
+/-- RFC-0210 P2.1 (l28 cadence 6/6, atom `catalog:l28_tcp_sth`):
+    after a REAL TCP process death, the TCP ctor of a remaining
+    3-node voter forgets `sent_through` of a remote replica on oob
+    `remove_member` EXACTLY when the drop happened (the 0147 joint
+    `drop_repl_slot` is not this tooth) — fate forall over the
+    extracted pure-lift body; the AS-IS `ok true` mutant skips the
+    oob sent_through drop (the 0147 leftover: keep sent_through —
+    the lie the real TCP plant `l28_real_tcp_drop_st` refutes). -/
+theorem l28_tcp_sth_ok_fate_iff :
+    ∀ (b : Bool) (v : Bool),
+      (l28_tcp_sth_ok b = ok v) ↔
+        ((v = true ∧ b = true)
+          ∨ (v = false ∧ b = false)) := by
+  intro b v
+  unfold l28_tcp_sth_ok
+  cases b <;> cases v <;> simp
