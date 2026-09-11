@@ -1,78 +1,143 @@
-# Inventário de gargalos — toda célula <1× não paga (2026-09-11)
+# Inventário de gargalos — toda célula <1× não paga (2026-09-11, rev. 2 pós-p209b)
 
-**Data:** 2026-09-11 | **Fontes:** `findings/2026-09-11-p201r2-mc4/`
-(3 rounds quiet, imagem p201r2 digest `sha256:0ec55b38…`),
-`findings/2026-09-11-p201o-sweep/` (20 formas, 3 rounds quiet + A/B p201q
-digest `sha256:18babf02…`), tail do log `caixote logs linux-gate-p149b`
-(recuperação `ycsb_a_mc4` r3). **Protocolo comum:** mesmo boot, coluna
-same-class (`PEDRA_PARITY_ASYNC=1`), peer RocksDB default
-`ROCKS_PARITY_SYNC=0` do mesmo round, min-of-3 = cartaz; Darwin = DIAG.
-**Regra de leitura:** nenhuma linha single-client write é win; nenhum
-ratio sync-peer é win; previsões rotuladas **hat**.
+**Data:** 2026-09-11 (rev. 2: mesma noite do meter p209b) | **Fontes:**
+`findings/2026-09-11-p201r2-mc4/` (3 rounds quiet, imagem p201r2 digest
+`sha256:0ec55b38…`), `findings/2026-09-11-p201o-sweep/` (20 formas, 3 rounds
+quiet + A/B p201q digest `sha256:18babf02…`),
+`findings/2026-09-11-p209-wal-buffer-meter/` (p209a/p209b, same-boot,
+braços buf/nobuf, imagem p209b digest `sha256:449b4b68…`, src = `c064d621`),
+tail do log `caixote logs linux-gate-p149b`. **Protocolo comum:** mesmo boot
+para toda comparação, coluna same-class (`PEDRA_PARITY_ASYNC=1`), peer
+RocksDB default `ROCKS_PARITY_SYNC=0` do MESMO round, min-of-3 = cartaz;
+Darwin = DIAG. **Regra de leitura:** nenhuma linha single-client write é
+win; nenhum ratio sync-peer é win; previsões rotuladas **hat**; cross-boot
+absoluto NÃO é comparável (nota de re-ancoragem do p209b).
 
-## A. Buracos medidos Linux — dono RFC-0209 (ataque async 1-op)
+## A. Buraco estrutural nº 1 — escalonamento rmw mc4 (`ycsb_f_mc4`)
 
-Mecanismo comum **verificado in-tree 2026-09-11** (não é hat): o caminho
-async 1-op (`commit_async_one` db.rs L9358 → `write_pending_frame`
-wal/mod.rs L210 → `write_frame` wal/writer.rs L143: `out.write_all(buf)`)
-faz **uma syscall `write()` por operação**; o Rocks `sync=false` só faz
-memcpy no buffer user-space do WritableFile e escreve quando o buffer
-enche. 4 writers == ncpu ⇒ política 0201 despacha tudo por
-bypass/`commit_async_one`. Ataque = buffer WAL user-space (staging no
-`WalWriter`, flush por tamanho 64 KiB / antes-de-sync / no close;
-**sem wait-to-grow** — 0180/0190 vetados; opt-in por env até meter).
+Mecanismo (código + dois meters independentes, não hat): `ycsb_f_mc4` =
+4 clientes × ops {50% `get_probe` + 50% rmw (`get` + `put` 1-op)}. O `put`
+1-op async no regime writers == ncpu vai pelo **bypass** 0201
+(`client_axis_kernel::async_merge_policy`: merge só quando writers >
+ncpu): cada writer toma a write-lock do Db e corre o commit INTEIRO
+serializado — `encode_async_one` + `write_pending_frame` (syscall) +
+`apply_async_one` (mem+publish+flush-check) — enquanto o Rocks
+`sync=false` só paga memcpy num buffer user-space por writer.
 
-| # | célula | min | mediana | rounds | observação |
-|---|---|---:|---:|---|---|
-| 1 | ycsb_f_mc4 | **0,2947** | 0,3195 | 0,2947/0,6338/0,3195 | rmw = get + write 1-op; get soma em cima do buraco de write |
-| 2 | deps_cache_overwrite_mc4 | **0,3698** | 0,4611 | 0,3698/0,4611/0,4722 | 4 writers 1-op; rocks 173k–349k qps (bufferizado) vs pedra 82k–129k |
-| 3 | ycsb_a single | **0,605** | 0,905 | sweep p201o | 50% write 1-op no mix; lado leitura PAGO (ycsb_c 2,729) ⇒ buraco é write-side (**hat** de atribuição; medidor 0209 confirma) |
-| 4 | deps_cache_overwrite single | **0,512** | 0,647 | sweep p201o | 1-op single-client, mesma classe |
-| 5 | kvrocks_set single | **0,748** | 0,757 | sweep p201o | 1-op single-client (a variante mc50 está PAGA 1,678× — grupo commit fecha; o single não) |
-| 6 | ycsb_f single | **0,804** | 0,956 | sweep p201o | rmw single-client |
-| 7 | ycsb_a_mc4 | **0,336** (1 round) | — | r3=0,3362 (pedra 156 121 vs rocks 464 445 qps) | recuperado do TAIL do log do caixote (janela 500 entradas; r1/r2 rolaram fora) — **rotulado: round único, DIAG-grade**; a onda de meter do 0209 mede 3/3 |
+Dois degraus medidos same-boot (p209b, 3 rounds quiet):
 
-**Dono de A: RFC-0209 P0** (buffer WAL user-space). Células-guardião do
-meter: `deps_cache_overwrite_mc4` + `ycsb_f_mc4` (+ single-client
-`kvrocks_set`, `deps_cache_overwrite`) e a célula 10k pendente (ver C).
+| braço | ycsb_f_mc4 min | leitura |
+|---|---:|---|
+| nobuf (default) | **0,532** | syscall `write()` por op DENTRO da write-lock do Db |
+| buf (`PEDRA_WAL_BUFFER=1`) | **0,780** | syscall sai do caminho; resta a serialização encode+apply+publish sob a lock |
 
-## B. Buraco medido Linux — dono leitura (GET-side)
+O buf **aperta a dispersão** (nobuf 1,882/0,791/0,532; buf 0,963/1,055/0,780)
+e levanta o piso +47% sem fechá-lo ⇒ o dono do resto é o **escalonamento**
+(a lock e a série serializada), não a syscall isolada. Células-irmãs no
+mesmo boot: ycsb_a_mc4 nobuf 1,537 (o mix 50/50 sem dependência get→put
+não afunda), deps_cache_overwrite_mc4 nobuf 1,035 (write puro 1-op
+recupera ≥1 no mesmo boot). **A forma que afunda é rmw**: o `get` do rmw
+toma a read-lock entre duas write-locks do mesmo thread + o `put` paga a
+série serial completa.
 
-| # | célula | min | mediana | dono/ataque |
-|---|---|---:|---:|---|
-| 8 | deps_scan single | **0,831** | 0,922 | scan bounded-cache: 0195 P0.1–P0.3 (WILLNEED janela) aterrizado sem meter 100M; nesta escala (1024 records) o custo por bloco do scan segue > iterator Rocks. Ataque: decompor o ciclo do cursor (decode por bloco vs iterator) — **hat**, precisa perna de telemetria scan-side; deferral-com-número até lá. Não é dono do 0209 |
-
-## C. Células pesadas / sem número — deferral com custo nomeado
-
-| # | célula | número | estado |
+| # | célula | número (rótulo) | dono |
 |---|---|---|---|
-| 9 | prefix 100M @4 GiB | **0,70×** (cartaz 09-10) | corte 0195 aterrizado; meter com/sem (0195 P0.4) **deferred** — custo: dataset 4 GiB + build/bench por braço ≈ horas de gate; reabre quando uma onda de gate tiver orçamento (0196 P1.1) |
-| 10 | overwrite_mc4 25M @4 GiB | **0,557×** 3/3 (quieto 09-09) | mecanismos write (0193) + leftover (0194) aterrizados sem meter; meter 15M+25M **deferred** com o mesmo custo (0196 P1.2) |
-| 11 | overwrite_mc4 10k | min 0,883 (trim7+8, **pre-0193**) | gate 0185 P0.3 (3/3 ≥ 1,0) segue SEM número Linux pós-0193 — **dono: onda de meter do 0209** (`ROCKS_YCSB_RECORDS=10000`) |
-| 12 | Grid B (10–100×, compaction on) | — | deferred; atrás de um corte vencedor vivo (nenhum corte novo aterrizou desde a escrita; 0196 P2.2) |
+| 1 | ycsb_f_mc4 | **0,532** min same-boot p209b nobuf / **0,780** buf / 0,2947 cross-boot p201r2 | **RFC-0211** (escalonamento rmw mc4) |
+| 2 | ycsb_f_mc4 buf-arm residual | 0,780 min (p209b) | RFC-0211 (mesma fatia: serialização pós-syscall) |
+| 3 | ycsb_a_mc4 buf-arm | 1,115 min (p209b; nobuf 1,537) | RFC-0211 guarda — regressão do buf a não propagar |
 
-## D. U-cells DIAG-only (sem Linux 3-run — regra anti-overfit)
+Âncoras do RFC-0211 P0: piso **0,532** (nobuf) / braço buf **0,780** /
+alvo **≥1,0** same-class async same-boot. Mecanismos candidatos a
+adjudicar por meter (todos JÁ existem como env no caminho real, zero
+código para medir): `PEDRA_ASYNC_GROUP=1` (merge do grupo no regime
+writers==ncpu: líder drena a geração — 1 frame/1 write off-lock, pago no
+mc50 1,678×), `PEDRA_WRITE_FAIR=1` (handoff dirigido no unlock do
+bypass), `PEDRA_WRITE_SPIN=N` (spin-then-park), e a composição com
+`PEDRA_WAL_BUFFER=1`.
+
+## B. Buracos medidos — geração de âncoras cross-boot (p201r2/p201o)
+
+Estas âncoras são o cartaz histórico (boot das ondas p201*); o p209b
+re-ancorou same-boot o subconjunto dele (nota de re-ancoragem: overwrite
+single 2,78 vs âncora 0,512; ycsb_a single 2,60 vs 0,605; overwrite_mc4
+1,035 vs 0,370 — cross-boot absoluto não é comparável; a hierarquia
+same-boot viva está na seção A/C):
+
+| # | célula | min | mediana | rounds | estado 2026-09-11 |
+|---|---|---:|---:|---|---|
+| 4 | deps_cache_overwrite_mc4 | 0,3698 (p201r2) | 0,4611 | 0,3698/0,4611/0,4722 | same-boot p209b: 1,035/1,026 — re-ancorado ≥1; vira guarda do 0211 |
+| 5 | ycsb_a single | 0,605 (p201o) | 0,905 | sweep | **hat A3 FECHADO**: 2,602 min neste boot (p209b) — perda era boot-specific |
+| 6 | deps_cache_overwrite single | 0,512 (p201o) | 0,647 | sweep | same-boot 2,783/2,860 — re-ancorado ≥1 |
+| 7 | kvrocks_set single | 0,748 (p201o) | 0,757 | sweep | same-boot 2,158/2,448 — re-ancorado ≥1 (buf +15% med) |
+| 8 | ycsb_f single | 0,804 (p201o) | 0,956 | sweep | same-boot 1,881/1,094 — buf REGREDIU o min (1,881→1,094): razão do P1.1 não-flip |
+| 9 | ycsb_a_mc4 | 0,336 (1 round, DIAG-grade, tail do log) | — | r3 | same-boot 1,537/1,115 — re-ancorado ≥1 |
+
+## C. Células pesadas / sem número Linux — deferral ou gate com nome
+
+| # | célula | número | estado (datado) |
+|---|---|---|---|
+| 10 | prefix 100M @4 GiB | **0,70×** (cartaz 09-10) | corte 0195 aterrizado sem meter; **blocked re-adjudicado 2026-09-11**: gate 09-10 reaberto 01:30, bloqueio = orçamento de onda + custo (dataset 4 GiB + ≈horas/braço; host-check 09-11: Darwin dados 94%/61 GiB livres — ENOSPC 09-06/09-10 não persiste; load1 10,78); onda do ciclo = P0 do 0211; dono 0196 P1.1 |
+| 11 | overwrite_mc4 25M @4 GiB | **0,557×** 3/3 (quieto 09-09) | mecanismos 0193/0194 aterrizados sem meter; mesmo blocked re-adjudicado (dono 0196 P1.2) |
+| 12 | overwrite_mc4 15M @4 GiB | — | idem (mesma onda do 25M) |
+| 13 | overwrite_mc4 10k | min 0,883 (trim7+8, pre-0193) | **PAGA 2026-09-11 (p209b)**: gate 0185 P0.3 3/3 ≥1,0 nos dois braços (nobuf 1,078 / buf 1,268 min; peer 200k–307k saudável) |
+
+## D. U-cells DIAG-only — lote Linux 3-run AGENDADO (anti-overfit)
 
 qs_neg 0,808; point_select 0,430; wbwi 0,410; flink 0,522; venice 0,735;
-arango 0,003; pipelined 0,807 (todos Darwin DIAG). **Nenhuma recebe
-mecanismo sem Linux 3-run** (0196 P2.1 parcial: a família ycsb+unif FOI
-medida no sweep p201o; estas não). Dono: lote futuro de medição; nenhuma
-exceção aberta.
+arango 0,003; pipelined 0,807 (todos Darwin DIAG). **Todas são suítes
+opt-in do próprio harness** (`ROCKS_PARITY_SUITE=qs,myrocks,streaming,
+arango,venice,rocksapi,kvrocks` → `qs_neg_lookup`, `myrocks_point_select`,
+`wbwi_read_your_writes`, `flink_window_state`, `venice_fanout_get`,
+`arango_doc_crud`/`arango_traversal`, `kvrocks_pipelined_set`): lote
+3-run quiet marcado para a onda de gate deste ciclo (junto ao P0 do
+0211). Nenhuma recebe mecanismo sem Linux 3-run; nenhuma exceção aberta.
 
-## E. Contexto — pagas neste ciclo (não são buracos; não re-medir)
+## E. Outras frentes nomeadas (nada ignorado)
 
-apply_mc4 **1,0859×** (p201r2); kvrocks_set_mc50 **1,678×** (p201q A/B);
+- **apply serial / teto 1c** (0183): apply_mc4 PAGO (1,0859 p201r2;
+  1,466/1,473 p209b guards); o teto 1c G1 é por construção (fd antes de
+  Ok) e nunca é win — linha G1 não cotada.
+- **scan_readahead** (0195): kernel+wiring aterrizados; célula 100M
+  blocked (C10). `deps_scan` single 0,831 (p201o) — read-side, decompor
+  cursor é fatia própria (hat), não dono do 0211.
+- **keep_budget / leftover** (0194): aterrizado; célula 25M blocked (C11).
+- **l0 stall** (0167): parks contados (`rfc0167_l0_stall_parks_until_
+  worker_drains`); workspace-test ENOSPC do host (disco 97–100%) era o
+  bloqueio histórico — hoje 94%/61 GiB, re-testável.
+- **ENOSPC-gated**: nenhum meter pesado roda com o host em pressão de
+  disco; re-check datado acima (09-11).
+
+## F. Telemetria viva (o que a onda do 0211 captura por rodada)
+
+- `write_phase_stats` (linha `WRITEPHASE`/snapshot 7 contadores:
+  prepare/wal/mem/publish/flush_check/lock_wait por commit) — separa
+  lock_wait de wal no braço buf vs nobuf.
+- `write_group_stats` (grupos, membros, bytes) — confirma merge vs bypass
+  por braço (`PEDRA_ASYNC_GROUP`).
+- `read_probe` JSON (mem_hit/sst_fallback/l0_files…) — lado leitura do rmw.
+- `PEDRA_IO_ADVISE_STATS` (`scan_readahead=`/`leftover_advise=`) — fora do
+  caminho write, zero por default (0169).
+- Cartazes pagos NÃO re-medidos: apply_mc4 1,0859; kvrocks_set_mc50 1,678
+  (guardas nas ondas novas em nível ≥, sem contradição — ver p209b).
+
+## G. Contexto — pagas neste ciclo (não são buracos; não re-medir)
+
+apply_mc4 **1,0859×** (p201r2); kvrocks_set_mc50 **1,678×** (p201q);
 ycsb_b 1,088 / b_unif 1,394 / c 2,729 / c_unif 3,238 / d 1,122 / e 7,976;
 kvrocks_blob_set 2,351 / kvrocks_get 4,738 / kvrocks_pipelined_set 1,203 /
 kvrocks_scan 26,403; deps_apply_batch 1,302 / deps_lock_prewrite 1,659 /
-deps_raftlog 1,577 / deps_mvcc_latest 3,999 (sweep p201o).
+deps_raftlog 1,577 / deps_mvcc_latest 3,999 (sweep p201o); célula 10k do
+gate 0185 P0.3 (C13, p209b).
 
-## Conclusão
+## Conclusão (rev. 2)
 
-O maior buraco vivo medido é **uma única classe de mecanismo** — syscall
-`write()` por operação no caminho async 1-op — aparecendo em 7 células
-(A1–A7), com âncoras min-of-3 em mc4 (0,295/0,370) e single (0,51–0,80).
-O RFC-0209 ataca essa classe no tamanho dela: staging no `WalWriter`
-(flush por tamanho, antes de sync, no close; ordem global preservada por
-flush-antes-de-escrita-direta; sem espera por writers). O resto do board
-está pago, é read-side (B), pesado-deferred (C) ou DIAG-only (D).
+O buraco estrutural vivo nº 1, medido same-boot em dois degraus
+(0,532 sem syscall no caminho → 0,780 com), é o **escalonamento do grupo
+rmw no regime writers == ncpu** (herança da fronteira 0201): bypass
+serializando o commit inteiro sob a write-lock do Db. O pipeline
+drenável (líder + geração em 1 frame, write off-lock, group apply) já
+existe, está pago no regime oversubscribed (mc50 1,678×) e não alcança o
+regime ==ncpu. O RFC-0211 dimensiona o P0 contra 0,532/0,780/≥1,0 com
+meter 3-run quiet min-of-3 e veredito datado (perda honesta vira fatia).
+O resto do board: pago (G), read-side (E), pesado-blocked-com-gate-datado
+(C) ou DIAG agendado para Linux 3-run (D).
