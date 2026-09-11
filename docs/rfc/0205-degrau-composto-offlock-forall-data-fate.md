@@ -203,6 +203,13 @@ RFC não as toca.
 5. **P2.1:** fronteira datada do handler em `formal/aeneas/EXTRACT.md`
    (o que o proof-term cobre; TCB nomeado: handlers, escalonador,
    HashMap; admissions recusadas reiteradas).
+   — status: `done` (seção datada 2026-09-11 no EXTRACT.md: proof-term
+   cobre os kernels ligados pelo rustc — 239 extraídos, 6 close +
+   39 atom + 7 count registrados, 17 compose; TCB nomeado em 4
+   categorias — composição de handlers db.rs 112092 LOC, escalonador,
+   HashMap do locktab, mídia/schedules; as 3 admissions
+   `media_durable_admitted`/`forall_schedules_admitted`/
+   `lock_interleavings_admitted` reiteradas com as recusas plantadas)
 6. **P2.2:** sweep: gates GREEN no HEAD final (worktree destacado),
    sorry 0 nos wrappers tocados, capturas, flip `**Status:** done`.
 
@@ -214,7 +221,7 @@ RFC não as toca.
 | P0.2 | p0 | Primeiro data-fate do cluster store: vote_decision a atom | done | vote_decision_fate_iff (Vote.lean) | 2026-09-11 |
 | P1.1 | p1 | Composição ∀ off-lock (publish × rotate; dentes viram corolários) | done | concurrent_publish_fate_forall + wal_rotate_decision_fate_forall + ponte try_rotate_step_all_clear (ComposeConcurrent.lean) | 2026-09-11 |
 | P1.2 | p1 | Cadência data-fate: +2 promoções (cap 94→92) | done | recover_must_apply_fate_iff + recover_drop_orphan_seg_fate_iff (Membership.lean) | 2026-09-11 |
-| P2.1 | p2 | Fronteira datada do handler (EXTRACT.md) | todo | — | 2026-09-11 |
+| P2.1 | p2 | Fronteira datada do handler (EXTRACT.md) | done | seção 2026-09-11 (4 categorias TCB + 3 admissions recusadas) | 2026-09-11 |
 | P2.2 | p2 | Sweep final de gates | todo | — | 2026-09-11 |
 
 ## Acceptance Criteria

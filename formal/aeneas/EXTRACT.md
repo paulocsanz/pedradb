@@ -412,3 +412,34 @@ Never: “Lean proved Raft / fold / the Bloom filter.”
   encadeado, `simp [hkey]` normaliza e aí reescreve o lookup exposto.
 - Registrado como atom — o degrau que o extract suporta; a semântica de
   mapa permanece TCB (nunca claim de ciclo sem essa semântica).
+
+## 2026-09-11 — fronteira do handler (RFC-0205 P2.1): o que o proof-term cobre e o que fica TCB
+
+- O PROOF-TERM COBRE os kernels que o rustc de produção liga: 239
+  entradas extraídas, escada registrada 6 close + 39 atom + 7 count,
+  17 libs compose — cada par com twins DST dirigindo a função de
+  produção (`--lib`, nunca cartoon). A ponte compose
+  (`ComposeConcurrent.lean`) liga dois kernels registrados
+  (group_commit × flush) por teorema, não por fé.
+- TCB 1 — composição de handlers (db.rs): o caller-graph de 112.092
+  LOC de `db.rs` (série `handler_loc` no residuals) não é extraído;
+  cada handler (`try_rotate_wal`, `on_request_vote`,
+  `recover_apply_committed`, `persist_log_db`, …) é coberto pelo fate
+  do SEU kernel + pelas plantas DST no caminho ao vivo — a composição
+  COMPLETA dos handlers permanece TCB.
+- TCB 2 — escalonador/interleavings: admission `lock_interleavings_
+  admitted` segue SEMPRE false — recusa registrada e plantada
+  (`claim_lock_interleavings_refused_after_put`,
+  concurrent.rs:3733; AS-IS admitiria). Nenhum ∀π sobre
+  interleavings de ConcurrentDb é claim deste repo (0056 P2.1).
+- TCB 3 — HashMap: o detector de deadlock fica na fronteira datada
+  acima (locktab `wait_for_deadlock`, 2026-09-11): lookups são
+  axiomas do extract; arestas de UM passo provadas, semântica de mapa
+  e existência de ciclo NÃO são claim.
+- TCB 4 — mídia e todos-os-schedules: `media_durable_admitted`
+  (recusa `claim_media_durable_refused_after_fsync_ok`) e
+  `forall_schedules_admitted` (PCT depth segue 2; serial=parallel por
+  hash NÃO é ∀π) seguem SEMPRE false. As três admissions —
+  `media_durable_admitted`, `forall_schedules_admitted`,
+  `lock_interleavings_admitted` — NUNCA flipam; cada uma tem recusa
+  plantada no código de produção.
