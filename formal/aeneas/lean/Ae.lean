@@ -64,3 +64,48 @@ theorem ae_ack_success_ok_iff_clean_or_dirty_persisted :
     · split
       · next _ => rw [hc]
       · rfl
+
+/-- Catalog entry: a conflicting entry truncates and reinstalls exactly
+    when a different term already sits at that slot AND the slot is
+    above the commit index — a conflict at or below commit is refused,
+    never rewritten (F16). -/
+theorem ae_entry_action_truncate_and_install_iff_conflict_above_commit :
+    ∀ (entry_index : U64) (entry_term : U64) (existing_term : Option U64)
+      (commit_index : U64) (last_log_index : U64),
+      (ae_entry_action entry_index entry_term existing_term commit_index last_log_index
+          = ok AeEntryAction.TruncateAndInstall)
+        ↔ (∃ t, existing_term = some t ∧ ¬(t = entry_term)
+            ∧ ¬(entry_index <= commit_index)) := by
+  intro entry_index entry_term existing_term commit_index last_log_index
+  unfold ae_entry_action
+  cases existing_term with
+  | none =>
+    constructor
+    · intro h
+      simp at h
+      have hl : lift (core.num.U64.saturating_add last_log_index 1#u64)
+          = ok (core.num.U64.saturating_add last_log_index 1#u64) := rfl
+      rw [hl] at h
+      simp at h
+      split at h
+      · exact absurd h (by simp)
+      · exact absurd h (by simp)
+    · rintro ⟨t, habsurd, _, _⟩
+      exact absurd habsurd (by simp)
+  | some t =>
+    constructor
+    · intro h
+      simp at h
+      split at h
+      · next hkeep =>
+        exact absurd h (by simp)
+      · next hne =>
+        split at h
+        · next hle =>
+          exact absurd h (by simp)
+        · next hgt =>
+          exact ⟨t, rfl, hne, hgt⟩
+    · rintro ⟨t', hex, hne, hgt⟩
+      simp only [Option.some.injEq] at hex
+      subst hex
+      simp [hne, hgt]
