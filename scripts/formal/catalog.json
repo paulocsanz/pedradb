@@ -4762,7 +4762,7 @@
   {
    "id": "encode_cf_key",
    "finding": "RFC-0150 P0",
-   "twin_kind": "close",
+   "twin_kind": "atom",
    "single_artifact": true,
    "kernel": "crates/pedradb-core/src/cf_kernel.rs",
    "twin": "crates/pedradb-core/src/cf_kernel.rs",
@@ -4773,7 +4773,6 @@
     "crates/rocksdb-compat/src/lib.rs"
    ],
    "entry": "encode_cf_key",
-   "data_fate": true,
    "live_callers": [
     {
      "file": "crates/rocksdb-compat/src/lib.rs",
@@ -4788,7 +4787,13 @@
    "dst_plant": {
     "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
     "test": "encode_cf_key_on_live_sst_bounds_is_not_ok"
-   }
+   },
+   "atom": "encode_cf_key",
+   "atom_reason": {
+    "date": "2026-09-10",
+    "why": "(twenty-seventh if): the encode disposition — encoding yields the bare key exactly when the effective cf encoding is empty; otherwise the output is the capacity-planned chain of effective bytes, one 0 separator, then the key, with every step of the chain ok — proven forall over (cf, key, default_raw, v) as encode_cf_key_ok_iff_bare_key_or_prefixed_vec in Cf.lean; the trampolines (rocksdb-compat encode, compact_ssts_only_cf) match the kernel decision."
+   },
+   "three_teeth": true
   },
   {
    "id": "decode_cf_key",

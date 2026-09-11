@@ -197,3 +197,62 @@ theorem decode_cf_key_ok_iff_identity_or_stripped_past_prefix :
       simp only []
       rw [if_neg hgt]
       exact hidx
+
+/-- Catalog entry: encoding a key yields the bare key exactly when the
+    effective cf encoding is empty; otherwise the output is built by the
+    capacity-planned chain — effective bytes, one 0 separator, then the
+    key — with every step of the chain ok (RFC-0150 P0). -/
+theorem encode_cf_key_ok_iff_bare_key_or_prefixed_vec :
+    ∀ (cf : Str) (key : Slice Std.U8) (default_raw : Bool)
+      (v : alloc.vec.Vec Std.U8),
+    (encode_cf_key cf key default_raw = ok v) ↔
+      ((∃ eff b, cf_encode_effective cf default_raw = ok eff ∧
+          core.str.Str.is_empty eff = ok b ∧ b = true ∧
+          alloc.slice.Slice.to_vec core.clone.CloneU8 key = ok v) ∨
+       (∃ eff b i i1 i3 s enc1 enc2,
+          cf_encode_effective cf default_raw = ok eff ∧
+          core.str.Str.is_empty eff = ok b ∧ ¬(b = true) ∧
+          core.str.Str.len eff = ok i ∧
+          i + 1#usize = ok i1 ∧
+          i1 + Slice.len key = ok i3 ∧
+          core.str.Str.as_bytes eff = ok s ∧
+          alloc.vec.Vec.extend_from_slice core.clone.CloneU8
+            (alloc.vec.Vec.with_capacity Std.U8 i3) s = ok enc1 ∧
+          alloc.vec.Vec.push enc1 0#u8 = ok enc2 ∧
+          alloc.vec.Vec.extend_from_slice core.clone.CloneU8 enc2 key
+            = ok v)) := by
+  intro cf key default_raw v
+  unfold encode_cf_key
+  constructor
+  · intro hval
+    obtain ⟨eff, heff, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨b, hb, hval⟩ := bind_ok_inv _ _ _ hval
+    split at hval
+    · next hbt =>
+      exact Or.inl ⟨eff, b, heff, hb, hbt, hval⟩
+    · next hbt =>
+      obtain ⟨i, hi, hval⟩ := bind_ok_inv _ _ _ hval
+      obtain ⟨i1, hi1, hval⟩ := bind_ok_inv _ _ _ hval
+      obtain ⟨i3, hi3, hval⟩ := bind_ok_inv _ _ _ hval
+      obtain ⟨s, hs, hval⟩ := bind_ok_inv _ _ _ hval
+      obtain ⟨enc1, henc1, hval⟩ := bind_ok_inv _ _ _ hval
+      obtain ⟨enc2, henc2, hval⟩ := bind_ok_inv _ _ _ hval
+      exact Or.inr ⟨eff, b, i, i1, i3, s, enc1, enc2, heff, hb, hbt,
+        hi, hi1, hi3, hs, henc1, henc2, hval⟩
+  · rintro (⟨eff, b, heff, hb, hbt, hv⟩ |
+      ⟨eff, b, i, i1, i3, s, enc1, enc2, heff, hb, hbt, hi, hi1, hi3,
+        hs, henc1, henc2, hv⟩)
+    · refine bind_intro eff heff ?_
+      refine bind_intro b hb ?_
+      rw [if_pos hbt]
+      exact hv
+    · refine bind_intro eff heff ?_
+      refine bind_intro b hb ?_
+      rw [if_neg hbt]
+      refine bind_intro i hi ?_
+      refine bind_intro i1 hi1 ?_
+      refine bind_intro i3 hi3 ?_
+      refine bind_intro s hs ?_
+      refine bind_intro enc1 henc1 ?_
+      refine bind_intro enc2 henc2 ?_
+      exact hv
