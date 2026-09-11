@@ -243,7 +243,7 @@ contagens movem no mesmo commit; `lock_interleavings_admitted` e
 | P1.6 | p1 | Gates Lean/depth/product verdes em cada promoção | todo | — | 2026-09-10 |
 | P2.1 | p2 | Inv-WAL preservação (um passo) | done | `wal_append_preserves_inv_wal` + corolário `d1_plan_append_preserves_inv_wal` WalState.lean | 2026-09-10 |
 | P2.2 | p2 | Inv-LSM `visible_at` ∘ probe-order (um passo) | done | `inv_lsm_newest_first_never_non_live` + corolário `r1_get_never_returns_non_live` Merge.lean (R1 segue atom) | 2026-09-10 |
-| P2.3 | p2 | Alvo trampolim cap≤100 / floor_atom≥8 | doing | 23/29 caps pagos (107; …P2.3-22 `cf_encode_effective` — encoding efetivo vazio só com default+default_raw ou cf já vazio, RFC-0150 P0; P2.3-23 `pin_gc` — fronteira de GC é o pin vivo, sem pin o mínimo visível, RFC-0150 P2b/F20), atoms 24/8; falta cap 107→≤100 | 2026-09-10 |
+| P2.3 | p2 | Alvo trampolim cap≤100 / floor_atom≥8 | doing | 24/29 caps pagos (106; …P2.3-23 `pin_gc` — fronteira de GC é o pin vivo, sem pin o mínimo visível, RFC-0150 P2b/F20; P2.3-24 `leveling` — alvo de nível é 0 exatamente no L0, não-zero é l1_target·FANOUT^min(level−1,18) saturado, F-leveling-sweep), atoms 25/8; falta cap 106→≤100 | 2026-09-10 |
 | P2.4 | p2 | Herdados 0187 (L28 / TCG / N=4) | todo | — | 2026-09-10 |
 
 ## Acceptance Criteria
