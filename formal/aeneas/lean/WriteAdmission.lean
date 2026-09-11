@@ -138,6 +138,61 @@ theorem dir_sync_required_ok_iff_sync :
   · intro h
     rw [h]
 
+/-- Any ok-valued Result bind forces the bound term to be ok. -/
+private theorem bind_ok_inv {α β} (x : Result α) (f : α → Result β) (v : β)
+    (h : Aeneas.Std.bind x f = ok v) : ∃ a, x = ok a ∧ f a = ok v := by
+  cases x with
+  | ok a => exact ⟨a, rfl, h⟩
+  | fail e => exact absurd h (by simp)
+  | div => exact absurd h (by simp)
+
+/-- An ok chain reassembles into an ok bind. -/
+private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : β}
+    (a : α) (hx : x = ok a) (h : f a = ok v) : Aeneas.Std.bind x f = ok v := by
+  rw [hx]
+  exact h
+
+/-- RFC-0198 P0.1 (first registered glue close): the commit plan is ok v
+    exactly along the fence chain — the callee `fence_on_sync_fail` lands
+    ok on some b, and the plan's own two ifs route b/need_sync to the
+    plan value. The iff is the computation rule over BOTH extracted
+    bodies (plan and callee): required sync that failed is Fence; required
+    sync that succeeded is Sync-Apply-Ok; no required sync is Apply-Ok. -/
+theorem wal_commit_plan_ok_iff_fence_chain :
+    ∀ (need_sync sync_failed : Bool) (v : WalCommitPlan),
+      (wal_commit_plan need_sync sync_failed = ok v) ↔
+        (∃ b, fence_on_sync_fail need_sync sync_failed = ok b ∧
+          ((b = true ∧ v = WalCommitPlan.AppendSyncFence) ∨
+            (¬(b = true) ∧ need_sync = true ∧
+              v = WalCommitPlan.AppendSyncApplyOk) ∨
+            (¬(b = true) ∧ ¬(need_sync = true) ∧
+              v = WalCommitPlan.AppendApplyOk))) := by
+  intro need_sync sync_failed v
+  unfold wal_commit_plan
+  constructor
+  · intro hval
+    obtain ⟨b, hw, hval⟩ := bind_ok_inv _ _ _ hval
+    refine ⟨b, hw, ?_⟩
+    split at hval
+    · next hb =>
+      injection hval with hv
+      exact Or.inl ⟨hb, hv.symm⟩
+    · next hb =>
+      split at hval
+      · next hns =>
+        injection hval with hv
+        exact Or.inr (Or.inl ⟨hb, hns, hv.symm⟩)
+      · next hns =>
+        injection hval with hv
+        exact Or.inr (Or.inr ⟨hb, hns, hv.symm⟩)
+  · rintro ⟨b, hw, hb | ⟨hb, hns, hv⟩ | ⟨hb, hns, hv⟩⟩
+    · refine bind_intro b hw ?_
+      rw [if_pos hb.1, hb.2]
+    · refine bind_intro b hw ?_
+      rw [if_neg hb, if_pos hns, hv]
+    · refine bind_intro b hw ?_
+      rw [if_neg hb, if_neg hns, hv]
+
 /-- `put_if_eq`: live == expected ⇒ put. -/
 theorem cas_eq_put_match_puts :
     cas_eq_put true = ok true := by

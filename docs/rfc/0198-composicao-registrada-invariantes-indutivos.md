@@ -60,11 +60,12 @@
 
 ### P0 — must ship first (smallest vertical slice that is useful)
 
-- [ ] **P0.1** Primeiro close de glue REGISTRADO: `wal_commit_plan ∘
+- [x] **P0.1** Primeiro close de glue REGISTRADO: `wal_commit_plan ∘
   fence_on_sync_fail` — iff ∀ (existencial sobre os dois corpos
   extraídos) em `WriteAdmission.lean`; linha `close` em
   `close_proofs.tsv` + `floor_close` 1→2 + residuals no mesmo commit —
-  status: `todo`
+  status: `done` (theorem `wal_commit_plan_ok_iff_fence_chain`; floor
+  247/2, residuals extract 247 / close 3)
 - [ ] **P0.2** Segundo close registrado: `occ_batch_plan ∘ occ_conflict`
   (glue de `validate_occ_batch`/`lone_commit`) — iff ∀ em
   `GroupCommit.lean`; `floor_close` 2→3 no mesmo commit — status: `todo`
@@ -90,7 +91,9 @@
 
 - [ ] **P2.1** Primeira graduação model→concreto: teorema sobre N
   concreto num `scale_kernel` (`scale_forecast`, callers/callees já
-  unfoldados) + re-tier do par — status: `todo`
+  unfoldados) + re-tier do par — status: `todo` (a graduação de scale é
+  pague pelo [RFC-0199](0199-escada-de-contagem-complexidade-verificada.md)
+  P0.3, crédito `count`; este item fecha com aquele)
 - [ ] **P2.2** Cadência cap continua: cada novo atom df desce
   `cap_data_fate` 100→99→… no mesmo commit (mesma receita um-por-commit
   do P2.3/0191; sem alvo numérico novo além da monotonicidade) —
@@ -104,7 +107,7 @@
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | Close de glue registrado: wal_commit_plan∘fence_on_sync_fail | todo | — | 2026-09-10 |
+| P0.1 | p0 | Close de glue registrado: wal_commit_plan∘fence_on_sync_fail | done | wal_commit_plan_ok_iff_fence_chain | 2026-09-10 |
 | P0.2 | p0 | Close de glue registrado: occ_batch_plan∘occ_conflict | todo | — | 2026-09-10 |
 | P1.1 | p1 | Inv-WAL base + alcançabilidade | todo | — | 2026-09-10 |
 | P1.2 | p1 | Inv-WAL passo sync/fence | todo | — | 2026-09-10 |
