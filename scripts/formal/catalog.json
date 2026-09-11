@@ -4940,7 +4940,7 @@
     {
       "id": "pin_gc",
       "finding": "RFC-0150 P2b / F20",
-      "twin_kind": "close",
+      "twin_kind": "atom",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/compact_kernel.rs",
       "twin": "crates/pedradb-core/src/compact_kernel.rs",
@@ -4949,7 +4949,6 @@
         "crates/pedradb-core/src/db.rs"
       ],
       "entry": "gc_oldest_from_pin",
-      "data_fate": true,
       "handlers": [
         "compact_reclaim"
       ],
@@ -4957,7 +4956,13 @@
       "dst_plant": {
         "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
         "test": "gc_oldest_from_pin_on_live_reclaim_is_not_ok"
-      }
+      },
+      "atom": "gc_oldest_from_pin",
+      "atom_reason": {
+        "date": "2026-09-10",
+        "why": "RFC-0191 P2.3 cadence (twenty-third if): the GC oldest-boundary disposition — the boundary is exactly the live pin when one exists; unpinned, it is the visible minimum of last and visible seq, so GC never advances past a pin nor past what is visible (RFC-0150 P2b/F20; the Ord.min is the Aeneas boundary, stated over its Result) — proven forall over (oldest_pin, last_seq, visible_seq, v) as gc_oldest_from_pin_value_iff_pin_or_unpinned_visible_min in Compact.lean; the db trampoline (compact_reclaim) matches the kernel decision"
+      },
+      "three_teeth": true
     },
     {
       "id": "wait_for_deadlock",

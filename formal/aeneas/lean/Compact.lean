@@ -69,3 +69,19 @@ theorem compact_pick_gc_rewrite_max_iff_none_and_gc_and_files_at_max :
       | div => rw [hadd] at h; simp at h
     · rintro ⟨habsurd, _, _⟩
       exact absurd habsurd (by simp)
+
+/-- Catalog entry: the GC oldest-boundary is exactly the live pin
+    when one exists; unpinned, it is the visible minimum of last and
+    visible seq — GC never advances past a pin nor past what is
+    visible (RFC-0150 P2b/F20; the min is the Aeneas Ord boundary,
+    stated over its Result). -/
+theorem gc_oldest_from_pin_value_iff_pin_or_unpinned_visible_min :
+    ∀ (oldest_pin : Option U64) (last_seq : U64) (visible_seq : U64) (v : U64),
+      (gc_oldest_from_pin oldest_pin last_seq visible_seq = ok v)
+        ↔ (oldest_pin = some v
+            ∨ (oldest_pin = none ∧
+                core.cmp.Ord.min.trait_default core.cmp.OrdU64 last_seq visible_seq
+                  = ok v)) := by
+  intro oldest_pin last_seq visible_seq v
+  unfold gc_oldest_from_pin
+  cases oldest_pin <;> simp
