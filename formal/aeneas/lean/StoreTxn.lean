@@ -210,3 +210,16 @@ theorem discard_cut_fate_iff :
     simp [hd, hnP]
     exact eq_comm
 
+/-- RFC-0212 P2.1 (store-txn cadence, atom
+    `catalog:leftover_txn_is_aborted`): a leftover prepared TX with
+    no coordinator log is aborted — the uncommitted leftover's fate
+    is EXACTLY true — fate forall over the extracted body (F35);
+    the AS-IS mutant leaves intents live (immortal Conflict + id
+    reuse — the lie the DST plant
+    `leftover_txn_is_aborted_on_live_reopen_is_not_ok` refutes). -/
+theorem leftover_txn_is_aborted_fate_iff :
+    ∀ (v : Bool), (leftover_txn_is_aborted = ok v) ↔ v = true := by
+  intro v
+  unfold leftover_txn_is_aborted leftover_fate
+  cases v <;> simp
+

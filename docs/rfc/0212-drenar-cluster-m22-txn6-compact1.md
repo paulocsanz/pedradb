@@ -255,6 +255,14 @@ pool honesto manda sobre a meta numérica).
    7) — wrapper `StoreTxn` inscrito no gate de extracts
    (`lean_extracts.sh` LIBS, 62 libs; buraco pré-existente desde
    o RFC-0191 fechado)
+
+   — 2/7 `done`: `leftover_txn_is_aborted_fate_iff`
+   (StoreTxn.lean; TX preparada sobrante sem coordenador é
+   ABORTADA no recovery — fate exatamente `true`; o as-is mantinha
+   intents vivos, Conflito imortal + reuso de id), cap 32→31,
+   floor_atom 92→93, floor_extract 186→185; planta DST verde
+   (`leftover_txn_is_aborted_on_live_reopen_is_not_ok`, no mesmo
+   lote paralelo)
 7. **P2.2:** composição ∀ do protocolo de fim-de-fila queued
    (finish: discard-leader local ∧ persist fence/hist conforme o
    fate) sobre atoms registrados em nova compose lib (zero
@@ -274,7 +282,7 @@ pool honesto manda sobre a meta numérica).
 | P1.1 | p1 | Cadências membership 3/6+4/6 — recover+open ×8 | done | e93c7b0f + 909dfb62 + 4b3c6ee8 + f2497120 + 96001f96 + e3f59f57 + 32b85288 + este commit (8 atoms, 8 commits; números exatos) | 2026-09-11 |
 | P1.2 | p1 | Cadências membership 5/6+6/6 — joint+slot ×6; ZERO data_fate | done | fe29d5d4 + 142b2efb + 1223b824 + 38b468b4 + a8776aa8 + este commit (6 atoms, 6 commits; números exatos; membership 22/22 ZERO) | 2026-09-11 |
 | P1.3 | p1 | Veredito datado dos medidos ausentes | done | este commit (veredito: 0 ausentes nas 22 promoções; âncoras green antes/depois) | 2026-09-11 |
-| P2.1 | p2 | Cadência final — txn ×6 + compact ×1; cluster ZERO | doing | 1/7: este commit | 2026-09-11 |
+| P2.1 | p2 | Cadência final — txn ×6 + compact ×1; cluster ZERO | doing | 0e86d730 + este commit (2/7) | 2026-09-11 |
 | P2.2 | p2 | Composição ∀ fim-de-fila + sweep final + flip done | todo | — | 2026-09-11 |
 
 ## Critérios de aceite
