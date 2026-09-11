@@ -590,3 +590,19 @@ theorem local_id_if_member_fate_iff :
   intro in_ids v
   unfold local_id_if_member
   cases in_ids <;> cases v <;> simp
+
+/-- RFC-0212 P1.1 (membership cadence 4/6, atom
+    `catalog:reader_local`): a LocalApplied `ids.first()` fallback
+    is a local node EXACTLY when the fallback node is local —
+    fate forall over the extracted pure-lift body; the AS-IS
+    mutant takes `ids.first()` even when it is not local (the
+    0141 leftover — the lie the DST plant
+    `reader_id_local_on_live_queued_is_not_ok` refutes). -/
+theorem reader_id_local_fate_iff :
+    ∀ (is_local : Bool) (v : Bool),
+      (reader_id_local is_local = ok v) ↔
+        ((v = true ∧ is_local = true)
+          ∨ (v = false ∧ is_local = false)) := by
+  intro is_local v
+  unfold reader_id_local
+  cases is_local <;> cases v <;> simp

@@ -910,7 +910,6 @@
      "handler": "ids_first_if_local"
     }
    ],
-   "data_fate": true,
    "handlers": [
     "ids_first_if_local",
     "get_fast_replica"
@@ -919,6 +918,10 @@
    "dst_plant": {
     "file": "crates/pedradb-store/src/three_teeth_queued.rs",
     "test": "reader_id_local_on_live_queued_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0142: fallback ids.first() do LocalApplied tem que ser no local; as-is 0141 devolvia qualquer first mesmo remoto"
    }
   },
   {

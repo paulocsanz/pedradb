@@ -153,6 +153,13 @@ pool honesto manda sobre a meta numérica).
    82→83, floor_extract 196→195; planta DST verde
    (`local_id_if_member_on_live_queued_is_not_ok`,
    no mesmo lote paralelo)
+
+   — 7/8 `done`: `reader_id_local_fate_iff`
+   (Membership.lean; fallback `ids.first()` do LocalApplied é nó
+   local exatamente quando é local), cap 41→40, floor_atom
+   83→84, floor_extract 195→194; planta DST verde
+   (`reader_id_local_on_live_queued_is_not_ok`,
+   no mesmo lote paralelo)
 4. **P1.2:** cadências membership 5/6 + 6/6 — `pending_joint_node`,
    `joint_target`, `joint_add_target`, `joint_leave_ok` (joint);
    `drop_repl_slot`, `drop_sent_through` (slot): ×6, cap 39→33,
