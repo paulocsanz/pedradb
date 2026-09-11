@@ -109,6 +109,13 @@ paralela) — este RFC não as toca.
    componhe com o registrado, nunca duplica; zero sorry; twins DST
    do cluster verdes; SEM registro (motivo em findings: atravessa N
    kernels; o registro exige par único).
+   — status: `done` (pago em `ComposeStoreRaft.lean` (19º compose
+   lib): `election_grant_chain_fate` compõe vote×grant_persist no
+   bind (grant ⟺ mesmos-termos ∧ pode-votar ∧ log-atualizado ∧
+   persist Ok; Deny/persist falhada nunca concedem, via
+   `vote_decision_total`) e `recovery_fate_composed` compõe o triplo
+   recover_apply × recover_drop_orphan × node_counts; zero sorry;
+   twins DST 7/7; motivo do não-registro em findings)
 4. **P1.2:** cadência membership ×4 — `joint_leave`
    (`joint_still_active`), `disk_membership`
    (`disk_membership_overrides_cli`), `high_water`
@@ -142,7 +149,7 @@ paralela) — este RFC não as toca.
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | Seam raft 1/2: grant_after_persist a atom | done | grant_after_persist_fate_iff (Vote.lean) | 2026-09-11 |
 | P0.2 | p0 | Seam raft 2/2: propose_ack_ok a atom (trio raft fechado) | done | propose_ack_ok_fate_iff (Commit.lean) — vote+commit kernels zero data_fate | 2026-09-11 |
-| P1.1 | p1 | Composição do cluster (recovery/reconfig como ∀ sobre atoms) | todo | — | 2026-09-11 |
+| P1.1 | p1 | Composição do cluster (recovery/reconfig como ∀ sobre atoms) | done | election_grant_chain_fate + recovery_fate_composed (ComposeStoreRaft.lean) | 2026-09-11 |
 | P1.2 | p1 | Cadência membership ×4 (cap 90→86) | todo | — | 2026-09-11 |
 | P2.1 | p2 | Banda l28 ×2 + plano datado do bloco (cap 86→84) | todo | — | 2026-09-11 |
 | P2.2 | p2 | Sweep final + nota do seam store/raft | todo | — | 2026-09-11 |

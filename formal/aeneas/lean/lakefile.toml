@@ -484,3 +484,6 @@ name = "ComposeC1Membership"
 
 [[lean_lib]]
 name = "ComposeConcurrent"
+
+[[lean_lib]]
+name = "ComposeStoreRaft"

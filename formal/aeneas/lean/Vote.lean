@@ -94,7 +94,7 @@ theorem vote_decision_iff (i : VoteInputs) :
         simp
       · simp_all
 
-private theorem vote_decision_total (i : VoteInputs) : ∃ d, vote_decision i = ok d := by
+theorem vote_decision_total (i : VoteInputs) : ∃ d, vote_decision i = ok d := by
   have h := vote_decision_matches_spec i
   cases hdd : vote_decision i with
   | ok d => exact ⟨d, rfl⟩
