@@ -156,6 +156,14 @@ paralela) — este RFC não as toca.
    — 1/2 `done`: `l28_tcp_left_ok_fate_iff` (L28.lean; reporta
    saída de membro ⟺ o disco diz), cap 86→85, floor_atom 45→46,
    floor_extract 233→232; planta TCP REAL verde (235s)
+   — 2/2 `done`: `l28_tcp_hw_ok_fate_iff` (L28.lean; high-water
+   move ⟺ inventário commitado mantido — progresso durável
+   sobrevive à remoção), cap 85→84, floor_atom 46→47,
+   floor_extract 232→231; planta TCP REAL verde (232s); plano
+   datado das 29 restantes escrito em `formal/aeneas/EXTRACT.md`
+   (22 pure-lifts extraíveis em cadências de 4 com planta real
+   nomeada + 7 fantasmas de catálogo para conserto, não extração)
+   — banda fechada nos números exatos do RFC (cap 86→84)
 6. **P2.2:** sweep final: gates 3× GREEN em worktree destacado do
    HEAD final (DENTRO de `software/` — caminho relativo do backend
    Aeneas), sorry 0 nos wrappers tocados, capturas em findings,
@@ -171,7 +179,7 @@ paralela) — este RFC não as toca.
 | P0.2 | p0 | Seam raft 2/2: propose_ack_ok a atom (trio raft fechado) | done | propose_ack_ok_fate_iff (Commit.lean) — vote+commit kernels zero data_fate | 2026-09-11 |
 | P1.1 | p1 | Composição do cluster (recovery/reconfig como ∀ sobre atoms) | done | election_grant_chain_fate + recovery_fate_composed (ComposeStoreRaft.lean) | 2026-09-11 |
 | P1.2 | p1 | Cadência membership ×4 (cap 90→86) | done | removed_steps_down + disk_membership_overrides_cli + high_water_at_least + joint_still_active _fate_iff (Membership.lean; 4 commits) | 2026-09-11 |
-| P2.1 | p2 | Banda l28 ×2 + plano datado do bloco (cap 86→84) | wip (1/2: l28_tcp_left) | l28_tcp_left_ok_fate_iff (L28.lean) | 2026-09-11 |
+| P2.1 | p2 | Banda l28 ×2 + plano datado do bloco (cap 86→84) | done | l28_tcp_left_ok_fate_iff + l28_tcp_hw_ok_fate_iff (L28.lean; 2 commits) | 2026-09-11 |
 | P2.2 | p2 | Sweep final + nota do seam store/raft | todo | — | 2026-09-11 |
 
 ## Critérios de aceite

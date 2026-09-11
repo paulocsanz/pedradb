@@ -3691,7 +3691,6 @@
     "crates/pedradb-store/src/bin/cluster_real.rs"
    ],
    "entry": "l28_tcp_hw_ok",
-   "data_fate": true,
    "handlers": [
     "tcp_node_disk_high_water"
    ],
@@ -3705,7 +3704,11 @@
      "file": "crates/pedradb-store/src/bin/cluster_real.rs",
      "handler": "tcp_node_disk_high_water"
     }
-   ]
+   ],
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0208 P2.1 l28 band promotion (2/2): after a removal the real-TCP node's high-water moves exactly when the committed inventory was kept (fate forall over the extracted pure-lift body, L28.lean); AS-IS ok-true claims it always moved"
+   }
   },
   {
    "id": "l28_tcp_part",

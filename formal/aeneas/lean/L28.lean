@@ -345,3 +345,19 @@ theorem l28_tcp_left_ok_fate_iff :
   intro left v
   unfold l28_tcp_left_ok
   cases left <;> cases v <;> simp
+
+/-- RFC-0208 P2.1 (l28 band promotion 2/2, atom
+    `catalog:l28_tcp_hw`): after a removal the real-TCP node's
+    high-water moves EXACTLY when the committed inventory was kept
+    — the durable progress survived the removal — fate forall over
+    the extracted pure-lift body; the AS-IS `ok true` mutant claims
+    the high-water always moved (the lie the real TCP plant
+    `l28_real_tcp_high_water_after_remove` refutes). -/
+theorem l28_tcp_hw_ok_fate_iff :
+    ∀ (kept : Bool) (v : Bool),
+      (l28_tcp_hw_ok kept = ok v) ↔
+        ((v = true ∧ kept = true)
+          ∨ (v = false ∧ kept = false)) := by
+  intro kept v
+  unfold l28_tcp_hw_ok
+  cases kept <;> cases v <;> simp

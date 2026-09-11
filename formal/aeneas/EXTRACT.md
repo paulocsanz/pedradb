@@ -443,3 +443,57 @@ Never: “Lean proved Raft / fold / the Bloom filter.”
   `media_durable_admitted`, `forall_schedules_admitted`,
   `lock_interleavings_admitted` — NUNCA flipam; cada uma tem recusa
   plantada no código de produção.
+
+## 2026-09-11 — bloco l28 (RFC-0208 P2.1): plano datado dos 29 `data_fate` restantes
+
+Estado: 33 pares l28 no catálogo; 2 pagos (`l28_tcp_left`,
+`l28_tcp_hw` — L28.lean, plantas TCP reais verdes); 29 com
+`data_fate` pendente. Plano:
+
+- **Molde pure-lift, verificado nos dentes (4×: removed_steps_down,
+  disk_membership, l28_tcp_left, l28_tcp_hw).** Cada corpo Rust é a
+  IDENTIDADE em um Bool (`pub fn l28_tcp_X_ok(ok: bool) -> bool { ok }`);
+  o extract é o pure-lift `ok b` e o teorema é
+
+  ```lean
+  theorem l28_tcp_X_ok_fate_iff :
+      ∀ (b : Bool) (v : Bool),
+        (l28_tcp_X_ok b = ok v) ↔
+          ((v = true ∧ b = true) ∨ (v = false ∧ b = false)) := by
+    intro b v
+    unfold l28_tcp_X_ok
+    cases b <;> cases v <;> simp
+  ```
+
+  Risco de corpo opaco por entrada: NENHUM para as 22 abaixo — o corpo
+  é literalmente `ok b` (linha única), sem trait, sem mapa, sem
+  do-block. O custo real por entrada é a planta TCP real (~4 min cada)
+  e o commit único (critério de aceite 1 do 0208).
+
+- **Ordem — 22 extraíveis, em cadências de 4 (moldura P1.2), cada uma
+  com a planta real nomeada (`tests/l28_real_tcp.rs`):**
+  1. `l28_tcp_dterm` (removed_durable_term), `l28_tcp_part`
+     (participating_after_remove), `l28_tcp_apply` (recover_apply),
+     `l28_tcp_napply` (removed_recover_apply)
+  2. `l28_tcp_trunc`, `l28_tcp_odrop`, `l28_tcp_abort`,
+     `l28_tcp_nowms` (removed_*)
+  3. `l28_tcp_hist`, `l28_tcp_fence`, `l28_tcp_clear`,
+     `l28_tcp_pre` (removed_*)
+  4. `l28_tcp_peer`, `l28_tcp_lid`, `l28_tcp_rdr`,
+     `l28_tcp_dsc` (removed_*)
+  5. `l28_tcp_pld`, `l28_tcp_std` (removed_*), `l28_tcp_hnt`
+     (hint), `l28_tcp_slot` (drop_repl)
+  6. `l28_tcp_sth` (drop_st), `l28_tcp_pj` (plant_joint)
+
+  Meta numérica RELATIVA ao estado de 2026-09-11 (cap 84,
+  floor_atom 47, floor_extract 231): as 22 promoções fecham
+  cap_data_fate 84→62, floor_atom 47→69, floor_extract 231→209.
+
+- **7 fantasmas de catálogo — conserto, NÃO extração:**
+  `l28_tcp_add`, `l28_tcp_cnew`, `l28_tcp_svget`,
+  `l28_tcp_newget`, `l28_tcp_jleft`, `l28_tcp_caught`,
+  `l28_tcp_grown` nomeiam `l28_tcp_*_ok` que NÃO existe no arquivo
+  vivo (kernels TCP terminam em `l28_tcp_pj_ok`; ver seção "Catalog
+  `entry`s with no Lean `def`"). Plano: re-escrever os pares para
+  nomear `fn` viva ou aposentá-los no catálogo — nunca inventar
+  gate de identidade para agradar o catálogo.
