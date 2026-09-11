@@ -573,3 +573,19 @@ theorem l28_tcp_peer_ok_fate_iff :
   intro b v
   unfold l28_tcp_peer_ok
   cases b <;> cases v <;> simp
+
+/-- RFC-0210 P1.1 (l28 cadence 4/4, atom `catalog:l28_tcp_lid`):
+    after a REAL TCP plant + process death, the TCP ctor of a
+    replica dropped from `ids` treats HashMap first-key as identity
+    EXACTLY when it failed the local-id gate — fate forall over the
+    extracted pure-lift body; the AS-IS `ok true` mutant skips the
+    TCP local-id gate (the 0140 leftover: first-key always — the
+    lie the real TCP plant `l28_real_tcp_removed_lid` refutes). -/
+theorem l28_tcp_lid_ok_fate_iff :
+    ∀ (b : Bool) (v : Bool),
+      (l28_tcp_lid_ok b = ok v) ↔
+        ((v = true ∧ b = true)
+          ∨ (v = false ∧ b = false)) := by
+  intro b v
+  unfold l28_tcp_lid_ok
+  cases b <;> cases v <;> simp

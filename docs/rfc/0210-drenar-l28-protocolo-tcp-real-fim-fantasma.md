@@ -165,6 +165,10 @@ status: `done`
    eleição do ctor TCP segue o C-new do disco, não a CLI stale),
    cap 72→71, floor_atom 59→60, floor_extract 219→218; planta TCP
    REAL verde
+   — 6/8 `done`: `l28_tcp_lid_ok_fate_iff` (L28.lean; ctor TCP não
+   trata first-key de HashMap como identidade ⟺ o gate local-id
+   segurou), cap 71→70, floor_atom 60→61, floor_extract 218→217;
+   planta TCP REAL verde
 4. **P1.2:** veredito datado dos 7 fantasmas — por fantasma:
    re-escrever para `fn` viva SE o caminho add-member existir em
    produção; senão aposentadoria com recusa datada EM FINDINGS,

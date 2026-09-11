@@ -4125,7 +4125,6 @@
     "crates/pedradb-store/src/bin/cluster_real.rs"
    ],
    "entry": "l28_tcp_lid_ok",
-   "data_fate": true,
    "handlers": [
     "tcp_node_removed_lid_ok"
    ],
@@ -4139,7 +4138,11 @@
      "file": "crates/pedradb-store/src/bin/cluster_real.rs",
      "handler": "tcp_node_removed_lid_ok"
     }
-   ]
+   ],
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0210 P1.1 l28 cadence 4/4: after a real TCP plant + process death the TCP ctor of a replica dropped from ids must not treat HashMap first-key as identity exactly when the local-id gate holds (fate forall over the extracted pure-lift body, L28.lean); AS-IS ok-true skips the TCP local-id gate (0140 leftover)"
+   }
   },
   {
    "id": "l28_tcp_rdr",
