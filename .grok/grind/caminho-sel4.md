@@ -353,3 +353,13 @@ atom vote_decision (cap 95->94).
 Fire 814-correcao: sucessora renumerada 0204->0205 (commits 0d0b4bdd +
 8b2ffacf) — a sessao paralela aterrissou o propio 0204 (5865aaf4)
 depois do meu b415382b; arquivo dela intocado, meu renumerado.
+
+Fire 815 (2026-09-11, rfc0205 P0.1): sexto close — commit a seguir.
+group_publish pago: may_publish_group_ok_iff_wal_io_ok (GroupCommit.
+lean) — corpo e lift puro ok wal_io_ok, molde honesto =
+dir_sync_required (pure-lift), NAO o molde bearer (corpo sem bind nao
+tem cadeia de callees — diferenca documentada no findings). Escada no
+mesmo commit: floor_close 5->6, residuals close 6->7. Gates 3x GREEN,
+extracts ok (61+12), planta pedradb-core 1/1, build verde sorry 0.
+PROXIMO: P0.2 atom vote_decision (catalog:vote, cirurgia data_fate,
+cap 95->94, floor_atom 36->37, floor_extract 242->241).

@@ -154,7 +154,15 @@ RFC não as toca.
    `may_publish_group_on_live_group_is_not_ok` 1/1)
 2. **P0.2:** atom data-fate `catalog:vote` (`vote_decision`;
    cirurgia de catálogo + cap 95→94 + `floor_atom` 36→37 +
-   `floor_extract` 242→241 no mesmo commit).
+   `floor_extract` 242→241 no mesmo commit). — status: `done`
+   (pago como `vote_decision_fate_iff` (Vote.lean): fate ∀ de dois
+   construtores — WouldGrant ⟺ mesmo-termo ∧ can_vote ∧
+   log_up_to_date, Deny na negação; totalidade derivada do
+   `vote_decision_matches_spec` (o P40 grant-iff pinava só o lado
+   grant); cirurgia de catálogo datada, cap 95→94, floor_atom 36→37,
+   floor_extract 242→241, residuals 7/37 no mesmo commit; build Vote
+   verde, sorry 0; planta DST
+   `vote_decision_on_live_queued_is_not_ok` (pedradb-store) verde)
 
 ### P1 — next wave (composição ∀ + cadência)
 
@@ -180,7 +188,7 @@ RFC não as toca.
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | Close composto: may_publish_group ∀ registrado | done | may_publish_group_ok_iff_wal_io_ok (GroupCommit.lean) | 2026-09-11 |
-| P0.2 | p0 | Primeiro data-fate do cluster store: vote_decision a atom | todo | — | 2026-09-11 |
+| P0.2 | p0 | Primeiro data-fate do cluster store: vote_decision a atom | done | vote_decision_fate_iff (Vote.lean) | 2026-09-11 |
 | P1.1 | p1 | Composição ∀ off-lock (publish × rotate; dentes viram corolários) | todo | — | 2026-09-11 |
 | P1.2 | p1 | Cadência data-fate: +2 promoções (cap 94→92) | todo | — | 2026-09-11 |
 | P2.1 | p2 | Fronteira datada do handler (EXTRACT.md) | todo | — | 2026-09-11 |

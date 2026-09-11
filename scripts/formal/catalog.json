@@ -20,7 +20,6 @@
     "crates/pedradb-raft/src/lib.rs"
    ],
    "entry": "vote_decision",
-   "data_fate": true,
    "handlers": [
     "handle_request_vote",
     "handle_request_vote_with_persist",
@@ -36,6 +35,10 @@
    "dst_plant": {
     "file": "crates/pedradb-store/src/three_teeth_queued.rs",
     "test": "vote_decision_on_live_queued_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0205 P0.2 first store/raft data-fate promotion: vote fate WouldGrant iff same-term AND can_vote AND log_up_to_date, Deny otherwise (forall fate-iff over the extracted body, Vote.lean; totality from the spec match); AS-IS ignore-log-and-vote grants where the real kernel denies"
    }
   },
   {

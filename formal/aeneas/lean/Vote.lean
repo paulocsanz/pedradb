@@ -94,6 +94,60 @@ theorem vote_decision_iff (i : VoteInputs) :
         simp
       · simp_all
 
+private theorem vote_decision_total (i : VoteInputs) : ∃ d, vote_decision i = ok d := by
+  have h := vote_decision_matches_spec i
+  cases hdd : vote_decision i with
+  | ok d => exact ⟨d, rfl⟩
+  | fail e => rw [hdd] at h; exact absurd h (by simp)
+  | div => rw [hdd] at h; exact absurd h (by simp)
+
+/-- RFC-0205 P0.2 (registered atom): the vote fate over ALL inputs —
+    WouldGrant exactly on the conjunction same-term ∧ can_vote ∧
+    log_up_to_date; Deny on its negation (two-constructor decision;
+    totality from the spec match). The P40 grant-iff above pins the
+    grant side; this adds the Deny side and the ∀ form the registry
+    gate requires. -/
+theorem vote_decision_fate_iff :
+    ∀ (i : VoteInputs) (d : VoteDecision),
+      (vote_decision i = ok d) ↔
+        ((d = VoteDecision.WouldGrant ∧
+            i.candidate_term = i.current_term ∧
+            can_vote i.voted_for i.candidate_id = ok true ∧
+            log_up_to_date i.last_log_term i.last_log_index
+                i.candidate_last_log_term i.candidate_last_log_index = ok true) ∨
+         (d = VoteDecision.Deny ∧
+            ¬ (i.candidate_term = i.current_term ∧
+            can_vote i.voted_for i.candidate_id = ok true ∧
+            log_up_to_date i.last_log_term i.last_log_index
+                i.candidate_last_log_term i.candidate_last_log_index = ok true))) := by
+  intro i d
+  have hgrant := vote_decision_iff i
+  have htotal := vote_decision_total i
+  cases d with
+  | WouldGrant =>
+    constructor
+    · intro hval
+      exact Or.inl ⟨rfl, hgrant.1 hval⟩
+    · rintro (⟨_, hconds⟩ | ⟨hne, _⟩)
+      · exact hgrant.2 hconds
+      · simp at hne
+  | Deny =>
+    constructor
+    · intro hval
+      refine Or.inr ⟨rfl, ?_⟩
+      intro hconds
+      have hw := hgrant.2 hconds
+      rw [hw] at hval
+      exact absurd hval (by simp)
+    · rintro (⟨hw, _⟩ | ⟨_, hneg⟩)
+      · simp at hw
+      · have hnotgrant : ¬ (vote_decision i = ok .WouldGrant) :=
+          fun hw => hneg (hgrant.1 hw)
+        obtain ⟨d', hd'⟩ := htotal
+        cases d' with
+        | WouldGrant => exact absurd hd' hnotgrant
+        | Deny => exact hd'
+
 private abbrev staleOther : VoteInputs := {
   current_term := 5#u64
   voted_for := some (2#u64)
