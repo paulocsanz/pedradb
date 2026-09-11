@@ -41,6 +41,8 @@ COMPOSE=(
   LsmCompactCount
   ProbeLadderCount
   WorkIo
+  FlushAmortCount
+  ScanDecisionCount
 )
 
 for lib in "${LIBS[@]}"; do

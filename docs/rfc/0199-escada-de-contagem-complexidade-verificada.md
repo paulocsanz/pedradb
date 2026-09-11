@@ -144,15 +144,31 @@ vira win, e previsões continuam hat com erro nomeado.
   `wal_commit_plan`; twin `tests/wal_commit_work_count.rs` dirigindo o
   plano real + o primitivo; linha `count` no par `wal_commit_plan`
   (carrega close E count), `floor_count` 3→4 no mesmo commit)
-- [ ] **P1.2** Amortização memtable→flush: trabalho total de flush por k
+- [x] **P1.2** Amortização memtable→flush: trabalho total de flush por k
   writes ≤ c·k dado o cap (contagem com crédito; no mínimo N concreto,
-  régua 0198) — status: `todo`
+  régua 0198) — `memtable_flush_amortized` (`FlushAmortCount.lean`):
+  paid ≤ written + initial via invariante `run_paid_plus_mem_le`
+  (cada byte escrito é pago ≤ 1× — ou fica no memtable final ou é
+  flushed); pontes `auto_flush_due_fires_iff` +
+  `auto_flush_due_hold_under_limit` no extract `FlushKernel` (o gate
+  real dispara iff armed ∧ limit ≤ mem; hold certifica mem < limit);
+  twin `tests/flush_amort_count.rs` — schedule sim com o gate REAL
+  `auto_flush_due` decidindo cada tick; linha `count` no par
+  `auto_flush_due`, `floor_count` 4→6 no mesmo commit (com P1.4)
 - [ ] **P1.3** Composição formal×medido: `write_cycle_kernel` consome as
   contagens provadas como multiplicadores × âncoras ns datadas — o forecast
   passa a citar os teoremas `count` (sem virar claim de cartaz) —
   status: `todo`
-- [ ] **P1.4** Cota de scan/range: linear no resultado (uma passada por run
-  dadas invariantes) sobre `Scan`/`Iter` — status: `todo`
+- [x] **P1.4** Cota de scan/range: linear no resultado (uma passada por run
+  dadas invariantes) sobre `Scan`/`Iter` — `scan_decision_work_bound`
+  (`ScanDecisionCount.lean`): work ≤ files + Σ tombs (decisão por
+  arquivo ≤ 1 + |tombs|); pontes `scan_overlap_short_circuit`
+  (overlap ⇒ `ok true` sem tocar o iterador) +
+  `scan_closure_one_check_per_call` (cada chamada do closure gerado =
+  exatamente 1 `tombstone_reaches_window`, devolve o veredito
+  inalterado); twin `tests/scan_decision_count.rs` dirigindo o
+  `scan_reads_file` real; linha `count` no par `scan_guard` (carrega
+  close E count), `floor_count` 4→6 no mesmo commit (com P1.2)
 
 ### P2 — later / ferramenta própria e fronteira
 
@@ -176,9 +192,9 @@ vira win, e previsões continuam hat com erro nomeado.
 | P0.2 | p0 | Kind `count` + one-pass do walk de compact (teorema + twin test) | done | 2026-09-11 | 2026-09-11 |
 | P0.3 | p0 | Point-get ladder ≤ levels + l0_max (model→count) | done | 2026-09-11 | 2026-09-11 |
 | P1.1 | p1 | `Work.io` + ≤1 fdatasync por grupo confirmado | done | 2026-09-11 | 2026-09-11 |
-| P1.2 | p1 | Amortização memtable→flush (k writes) | todo | — | 2026-09-10 |
+| P1.2 | p1 | Amortização memtable→flush (k writes) | done | 2026-09-11 | 2026-09-11 |
 | P1.3 | p1 | write_cycle compõe contagens provadas × âncoras | todo | — | 2026-09-10 |
-| P1.4 | p1 | Scan linear no resultado | todo | — | 2026-09-10 |
+| P1.4 | p1 | Scan linear no resultado | done | 2026-09-11 | 2026-09-11 |
 | P2.1 | p2 | Cost-instrumented extract (ferramenta própria) | todo | — | 2026-09-10 |
 | P2.2 | p2 | fdatasync modelado na álgebra (primitiva nossa) | todo | — | 2026-09-10 |
 | P2.3 | p2 | Cadência: uma cota por fire, floor_count monotônico | todo | — | 2026-09-10 |

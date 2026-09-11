@@ -405,6 +405,12 @@ name = "ProbeLadderCount"
 name = "WorkIo"
 
 [[lean_lib]]
+name = "FlushAmortCount"
+
+[[lean_lib]]
+name = "ScanDecisionCount"
+
+[[lean_lib]]
 name = "LevelingKernel"
 
 [[lean_lib]]
