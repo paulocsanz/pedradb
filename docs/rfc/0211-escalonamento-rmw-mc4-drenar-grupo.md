@@ -113,16 +113,21 @@ novo por construção (`single_op`).
 
 ### P0 — kernel + wiring opt-in + meter com veredito datado
 
-- [ ] **P0.1** Kernel `rmw_sched_kernel.rs`: `SchedDecision` + regra
+- [x] **P0.1** Kernel `rmw_sched_kernel.rs`: `SchedDecision` + regra
       (`writers > ncpu` ∨ (`single_op` ∧ `writers ≥ 2`)) + twin AS-IS
       (fronteira 0201 exata) + guardas misuse (`ncpu == 0`, `writers ≤ 1`
-      ⇒ Bypass) — testes nomeados `rfc0211_*` — status: `todo`
-- [ ] **P0.2** Wiring no caminho real: env `PEDRA_RMW_SCHED=1` opt-in
+      ⇒ Bypass) — testes nomeados `rfc0211_*` — status: `done` (6 testes:
+      fronteira eq-ncpu, twin ≡ 0201 no grid inteiro, multi-op bypass,
+      oversubscribed ambos, pin vence, degenerados)
+- [x] **P0.2** Wiring no caminho real: env `PEDRA_RMW_SCHED=1` opt-in
       (padrão = AS-IS), `single_op = ops.len() == 1` alimentando o kernel,
       multi-op/G1 intocados, teste de eixo env serializado (mutex + 
       drop-guard) provando merge real via `write_group_stats` (grupos
       formados, tamanho médio ≥ 2) com env e bypass sem env — status:
-      `todo`
+      `done` (`rfc0211_env_axis_rmw_sched_forms_groups`: env-limpo
+      `queued == 0`/batch por submit; env=1 `queued > 0`/amortizado;
+      puts duráveis pós-reopen nos dois braços; vizinhos `rfc0201_*` 10/10;
+      musl exit 0)
 - [ ] **P0.3** Meter caixote linux-gate (braços/células do desenho,
       3-run quiet min-of-3, telemetria por braço) + finding datado +
       veredito no RFC — status: `todo`
@@ -149,8 +154,8 @@ novo por construção (`single_op`).
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | kernel SchedDecision + twin AS-IS + guardas | todo | — | 2026-09-11 |
-| P0.2 | p0 | wiring PEDRA_RMW_SCHED opt-in no submit_after_begin | todo | — | 2026-09-11 |
+| P0.1 | p0 | kernel SchedDecision + twin AS-IS + guardas | done (6 testes `rfc0211_*` verdes) | este commit | 2026-09-11 |
+| P0.2 | p0 | wiring PEDRA_RMW_SCHED opt-in no submit_after_begin | done (teste de eixo env no caminho real; 0201 10/10; musl 0) | este commit | 2026-09-11 |
 | P0.3 | p0 | meter 4 braços × células + guardiãs, veredito datado | todo | — | 2026-09-11 |
 | P1.1 | p1 | flip default pós-meter | todo | — | 2026-09-11 |
 | P1.2 | p1 | decomposição do residual (telemetria) | todo | — | 2026-09-11 |

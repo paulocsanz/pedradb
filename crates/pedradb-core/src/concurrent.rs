@@ -132,6 +132,11 @@ struct WriteGroup {
     /// RFC-0201: explicit `PEDRA_ASYNC_GROUP=1|0` pin; `None` = the auto
     /// client-axis policy (`async_merge_policy`: merge iff writers > ncpu).
     async_group_forced: Option<bool>,
+    /// RFC-0211 P0.2: `PEDRA_RMW_SCHED=1` opt-in — the single-op async
+    /// group boundary (`rmw_sched_kernel`: merge also when single-op
+    /// writers ≥ 2, the writers == ncpu rmw regime). Default off = the
+    /// AS-IS twin (0201 boundary byte-exact); read once at open.
+    rmw_sched: bool,
     /// CPUs the auto policy compares in-flight writers against
     /// (`available_parallelism`, computed once at open).
     axis_ncpu: usize,
@@ -304,6 +309,7 @@ impl WriteGroup {
                     "1" | "true" => Some(true),
                     _ => None,
                 }),
+            rmw_sched: matches!(std::env::var("PEDRA_RMW_SCHED").as_deref(), Ok("1" | "true")),
             axis_ncpu: std::thread::available_parallelism()
                 .map(|n| n.get())
                 .unwrap_or(1),
@@ -647,11 +653,24 @@ impl WriteGroup {
         // RFC-0201: the auto client-axis rule — concurrent async writers
         // merge into one frame iff they outnumber the CPUs (env pin
         // overrides in both directions; at/below ncpu the bypass stands).
-        let async_merged = crate::client_axis_kernel::async_merge_policy(
-            active,
-            self.axis_ncpu,
-            self.async_group_forced,
-        ) && !self.verified.load(Ordering::Relaxed);
+        // RFC-0211 P0.2: `PEDRA_RMW_SCHED=1` (opt-in) swaps the decision
+        // for the single-op shape — `rmw_sched_kernel` also merges the
+        // `writers == ncpu` rmw regime; multi-op and the default stay on
+        // the AS-IS twin exactly as before.
+        let async_merged = if self.rmw_sched {
+            crate::rmw_sched_kernel::rmw_group_sched(
+                active,
+                self.axis_ncpu,
+                ops.len() == 1,
+                self.async_group_forced,
+            ) == crate::rmw_sched_kernel::SchedDecision::Merge
+        } else {
+            crate::client_axis_kernel::async_merge_policy(
+                active,
+                self.axis_ncpu,
+                self.async_group_forced,
+            )
+        } && !self.verified.load(Ordering::Relaxed);
 
         // Lone writer (parity bench, sequential client): skip the mpsc hop.
         // G1 keeps the write lock through `fdatasync` (RFC-0062 P1.1
@@ -8756,6 +8775,130 @@ mod tests {
             db.close().unwrap();
         }
         std::env::remove_var("PEDRA_ASYNC_GROUP");
+        let _ = fs::remove_dir_all(&dir1);
+    }
+
+    /// RFC-0211 P0.2 env-axis guard: drop-restores both knobs this test
+    /// touches (serialized under `ENV_AXIS_LOCK`).
+    struct Rfc0211EnvGuard;
+    impl Drop for Rfc0211EnvGuard {
+        fn drop(&mut self) {
+            std::env::remove_var("PEDRA_RMW_SCHED");
+            std::env::remove_var("PEDRA_ASYNC_GROUP");
+        }
+    }
+
+    /// RFC-0211 P0.2: the shipped wiring on the real submit path. Same
+    /// writers == ncpu 1-op async workload twice: env-clean keeps the
+    /// 0201 bypass (`queued == 0`, one batch per submit — the AS-IS twin
+    /// pinned at exactly the boundary), `PEDRA_RMW_SCHED=1` forms real
+    /// drainable groups (`queued > 0`, amortized batches, every put
+    /// durable after reopen).
+    #[test]
+    fn rfc0211_env_axis_rmw_sched_forms_groups() {
+        let _env_axis = ENV_AXIS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _restore = Rfc0211EnvGuard;
+        std::env::remove_var("PEDRA_RMW_SCHED");
+        std::env::remove_var("PEDRA_ASYNC_GROUP");
+        let ncpu = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
+        if ncpu < 2 {
+            // The rmw regime (writers == ncpu >= 2) does not exist on a
+            // single-CPU box; nothing to adjudicate here.
+            return;
+        }
+        let threads = ncpu;
+        const PER: u8 = 32;
+
+        let dir0 = temp_dir();
+        {
+            let db = ConcurrentDb::open(&dir0).unwrap();
+            let barrier = Arc::new(std::sync::Barrier::new(threads));
+            let payload = [b'r'; 128];
+            std::thread::scope(|s| {
+                for t in 0..threads {
+                    let db = &db;
+                    let barrier = &barrier;
+                    let payload = &payload;
+                    s.spawn(move || {
+                        barrier.wait();
+                        for i in 0..PER {
+                            db.put_with([b'r', t as u8, i], payload, WriteOptions::no_sync())
+                                .unwrap();
+                        }
+                    });
+                }
+            });
+            let (submits, queued, batches, batch_ops) = db.write_group_stats();
+            assert_eq!(submits, (threads * PER as usize) as u64);
+            assert_eq!(batch_ops, (threads * PER as usize) as u64);
+            assert_eq!(
+                queued, 0,
+                "env-clean: writers == ncpu ({threads}) keep the 0201 bypass"
+            );
+            assert_eq!(batches, submits, "env-clean: per-writer batches (AS-IS twin)");
+            db.close().unwrap();
+        }
+        let db = ConcurrentDb::open(&dir0).unwrap();
+        let payload = [b'r'; 128];
+        for t in 0..threads {
+            for i in 0..PER {
+                assert_eq!(
+                    db.get(&[b'r', t as u8, i]).as_deref(),
+                    Some(payload.as_slice()),
+                    "lost bypass put t{t}/{i}"
+                );
+            }
+        }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir0);
+
+        let dir1 = temp_dir();
+        std::env::set_var("PEDRA_RMW_SCHED", "1");
+        {
+            let db = ConcurrentDb::open(&dir1).unwrap();
+            let barrier = Arc::new(std::sync::Barrier::new(threads));
+            let payload = [b's'; 128];
+            std::thread::scope(|s| {
+                for t in 0..threads {
+                    let db = &db;
+                    let barrier = &barrier;
+                    let payload = &payload;
+                    s.spawn(move || {
+                        barrier.wait();
+                        for i in 0..PER {
+                            db.put_with([b's', t as u8, i], payload, WriteOptions::no_sync())
+                                .unwrap();
+                        }
+                    });
+                }
+            });
+            let (submits, queued, batches, batch_ops) = db.write_group_stats();
+            assert_eq!(submits, (threads * PER as usize) as u64);
+            assert_eq!(batch_ops, (threads * PER as usize) as u64);
+            assert!(
+                queued > 0,
+                "PEDRA_RMW_SCHED=1: writers == ncpu ({threads}) join the drainable group"
+            );
+            assert!(
+                batches < submits,
+                "PEDRA_RMW_SCHED=1: the group must amortize (batches={batches} submits={submits})"
+            );
+            db.close().unwrap();
+        }
+        let db = ConcurrentDb::open(&dir1).unwrap();
+        let payload = [b's'; 128];
+        for t in 0..threads {
+            for i in 0..PER {
+                assert_eq!(
+                    db.get(&[b's', t as u8, i]).as_deref(),
+                    Some(payload.as_slice()),
+                    "lost merged put t{t}/{i}"
+                );
+            }
+        }
+        db.close().unwrap();
         let _ = fs::remove_dir_all(&dir1);
     }
 }
