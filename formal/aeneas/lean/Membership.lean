@@ -639,3 +639,21 @@ theorem pending_joint_node_counts_fate_iff :
   intro is_member v
   unfold pending_joint_node_counts
   cases is_member <;> cases v <;> simp
+
+/-- RFC-0212 P1.2 (membership cadence 5/6, atom
+    `catalog:joint_target`): a joint-remove target is the
+    membership set `ids` — EXACTLY when the target is in `ids`,
+    never gated on the local `nodes` map (a TCP replica only has
+    itself) — fate forall over the extracted pure-lift body; the
+    AS-IS mutant requires the target in local `nodes` (the 0118
+    leftover: a TCP replica cannot joint-remove a peer — the lie
+    the DST plant
+    `joint_target_counts_on_live_queued_is_not_ok` refutes). -/
+theorem joint_target_counts_fate_iff :
+    ∀ (in_ids in_nodes : Bool) (v : Bool),
+      (joint_target_counts in_ids in_nodes = ok v) ↔
+        ((v = true ∧ in_ids = true)
+          ∨ (v = false ∧ in_ids = false)) := by
+  intro in_ids in_nodes v
+  unfold joint_target_counts
+  cases in_ids <;> cases v <;> simp

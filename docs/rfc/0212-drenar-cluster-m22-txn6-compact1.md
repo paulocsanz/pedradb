@@ -181,6 +181,14 @@ pool honesto manda sobre a meta numérica).
    floor_extract 193→192; planta DST verde
    (`pending_joint_node_counts_on_live_queued_is_not_ok`,
    6 plantas em paralelo, 1.51s)
+
+   — 2/6 `done`: `joint_target_counts_fate_iff`
+   (Membership.lean; alvo de joint-remove é o conjunto de
+   membresia `ids`, exatamente quando o alvo está em `ids` —
+   nunca portado pelo mapa local `nodes`), cap 38→37,
+   floor_atom 86→87, floor_extract 192→191; planta DST verde
+   (`joint_target_counts_on_live_queued_is_not_ok`,
+   no mesmo lote paralelo)
 5. **P1.3:** veredito datado dos medidos ausentes — SE alguma
    promoção acima medir fn/planta/handler inexistente, veredito por
    par em findings (reescrever para fn viva SE o caminho existir em
