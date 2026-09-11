@@ -230,7 +230,7 @@ RFC não as toca.
 | P1.1 | p1 | Composição ∀ off-lock (publish × rotate; dentes viram corolários) | done | concurrent_publish_fate_forall + wal_rotate_decision_fate_forall + ponte try_rotate_step_all_clear (ComposeConcurrent.lean) | 2026-09-11 |
 | P1.2 | p1 | Cadência data-fate: +2 promoções (cap 94→92) | done | recover_must_apply_fate_iff + recover_drop_orphan_seg_fate_iff (Membership.lean) | 2026-09-11 |
 | P2.1 | p2 | Fronteira datada do handler (EXTRACT.md) | done | seção 2026-09-11 (4 categorias TCB + 3 admissions recusadas) | 2026-09-11 |
-| P2.2 | p2 | Sweep final de gates | todo | — | 2026-09-11 |
+| P2.2 | p2 | Sweep final de gates | done | worktree destacado 93c9434a: 3 gates GREEN, extracts 61+18, sorry 0, 3 admissions always false | 2026-09-11 |
 
 ## Acceptance Criteria
 
