@@ -28,3 +28,19 @@ theorem blob_gc_action_rewrite_iff_inactive_with_bytes :
       · next c2 => exact absurd h (by simp)
   · rintro ⟨h1, h2⟩
     rw [if_neg (by simp [h1]), if_pos h2]
+
+/-- Catalog entry: recovery refuses to open exactly when the MANIFEST
+    says the swing committed (use_new) yet neither file is on disk —
+    blob mode is off, large values are wanted, no primary, no new
+    (F51/G-swing: inventing an empty primary would make every large
+    value vanish). -/
+theorem vlog_recover_action_refuse_open_iff_wants_large_use_new_and_nothing_on_disk :
+    ∀ (blob_active wants_large primary_exists use_new new_exists : Bool),
+      (vlog_recover_action blob_active wants_large primary_exists use_new new_exists
+          = ok VlogRecoverAction.RefuseOpen)
+        ↔ (blob_active = false ∧ wants_large = true ∧ primary_exists = false
+            ∧ use_new = true ∧ new_exists = false) := by
+  intro blob_active wants_large primary_exists use_new new_exists
+  unfold vlog_recover_action
+  cases blob_active <;> cases wants_large <;> cases primary_exists <;>
+    cases use_new <;> cases new_exists <;> simp

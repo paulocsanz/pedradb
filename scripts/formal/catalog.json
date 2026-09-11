@@ -3379,7 +3379,7 @@
     {
       "id": "vlog_recover",
       "finding": "F51/G-swing",
-      "twin_kind": "close",
+      "twin_kind": "atom",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/vlog_gc_kernel.rs",
       "twin": "crates/pedradb-core/src/vlog_gc_kernel.rs",
@@ -3388,7 +3388,6 @@
         "crates/pedradb-core/src/db.rs"
       ],
       "entry": "vlog_recover_action",
-      "data_fate": true,
       "handlers": [
         "open_with_env"
       ],
@@ -3396,7 +3395,13 @@
       "dst_plant": {
         "file": "crates/pedradb-core/src/vlog_gc_kernel.rs",
         "test": "vlog_recover_action_on_live_swing_is_not_ok"
-      }
+      },
+      "atom": "vlog_recover_action",
+      "atom_reason": {
+        "date": "2026-09-10",
+        "why": "RFC-0191 P2.3 cadence (twentieth if): the vlog-recovery disposition — recovery refuses to open exactly when the MANIFEST says the swing committed (use_new) while neither file is on disk: blob mode off, large values wanted, no primary, no new (inventing an empty primary would make every large value vanish, F51/G-swing) — proven forall over (blob_active, wants_large, primary_exists, use_new, new_exists) as vlog_recover_action_refuse_open_iff_wants_large_use_new_and_nothing_on_disk in VlogGc.lean; the db trampoline (open_with_env) matches the kernel decision"
+      },
+      "three_teeth": true
     },
     {
       "id": "blob_gc_pick",
