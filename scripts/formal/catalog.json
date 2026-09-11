@@ -937,7 +937,6 @@
      "handler": "finish_queued_propose"
     }
    ],
-   "data_fate": true,
    "handlers": [
     "finish_queued_propose"
    ],
@@ -945,6 +944,10 @@
    "dst_plant": {
     "file": "crates/pedradb-store/src/three_teeth_queued.rs",
     "test": "discard_leader_local_on_live_queued_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0144 no-leader abort persist-leader is a local node so next_index repair runs; plant discard_leader_local_on_live_queued_is_not_ok green"
    }
   },
   {

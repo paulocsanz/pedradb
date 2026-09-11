@@ -47,6 +47,13 @@ pool honesto manda sobre a meta numérica).
    exatamente quando o nó é local — `ids` não é o portão), cap
    55→54, floor_atom 69→70, floor_extract 209→208; planta DST
    verde (`discard_node_counts_on_live_queued_is_not_ok`)
+
+   — 2/4 `done`: `discard_leader_local_fate_iff` (Membership.lean;
+   persist-leader do discard sem líder é nó LOCAL exatamente quando
+   o nó escolhido é local — o repair de `next_index` roda onde o
+   persist aterra), cap 54→53, floor_atom 70→71,
+   floor_extract 208→207; planta DST verde
+   (`discard_leader_local_on_live_queued_is_not_ok`)
 2. **P0.2:** cadência membership 2/6 (persist+hint) — `persist_meta`,
    `persist_hist`, `persist_fence`, `hint_member` (0135/0136/0137/0146):
    cap 51→47, floor_atom 73→77, floor_extract 205→201 — status: `todo`

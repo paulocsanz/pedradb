@@ -361,3 +361,20 @@ theorem discard_node_counts_fate_iff :
   intro is_local in_ids v
   unfold discard_node_counts
   cases is_local <;> cases v <;> simp
+
+/-- RFC-0212 P0.1 (membership cadence 1/6, atom
+    `catalog:discard_leader`): the no-leader discard
+    persist-leader is a LOCAL node EXACTLY when the chosen node is
+    local — `next_index` repair runs where the persist lands —
+    fate forall over the extracted pure-lift body; the AS-IS
+    `ok true` mutant accepts `ids.first()` even when remote (the
+    0143 leftover — the lie the DST plant
+    `discard_leader_local_on_live_queued_is_not_ok` refutes). -/
+theorem discard_leader_local_fate_iff :
+    ∀ (is_local : Bool) (v : Bool),
+      (discard_leader_local is_local = ok v) ↔
+        ((v = true ∧ is_local = true)
+          ∨ (v = false ∧ is_local = false)) := by
+  intro is_local v
+  unfold discard_leader_local
+  cases is_local <;> cases v <;> simp
