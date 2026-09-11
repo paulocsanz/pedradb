@@ -402,6 +402,9 @@ name = "LsmCompactCount"
 name = "ProbeLadderCount"
 
 [[lean_lib]]
+name = "WorkIo"
+
+[[lean_lib]]
 name = "LevelingKernel"
 
 [[lean_lib]]

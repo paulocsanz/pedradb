@@ -40,6 +40,7 @@ COMPOSE=(
   ComposeConcurrent
   LsmCompactCount
   ProbeLadderCount
+  WorkIo
 )
 
 for lib in "${LIBS[@]}"; do

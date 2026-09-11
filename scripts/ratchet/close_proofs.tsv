@@ -52,3 +52,4 @@ close	catalog:occ_batch_plan	occ_batch_plan_member_fate_iff	formal/aeneas/lean/G
 atom	catalog:occ_snap_published	occ_snap_uses_published_ok_iff_inflight	formal/aeneas/lean/Flush.lean	occ_snap_uses_published
 count	catalog:probe_order_covering	probe_order_covering_work_bound	formal/aeneas/lean/ProbeLadderCount.lean	probe_order_covering
 count	catalog:scale_predict	point_get_probes_le_levels_l0_max	formal/aeneas/lean/ProbeLadderCount.lean	point_get_probes
+count	catalog:wal_commit_plan	wal_commit_plan_at_most_one_fdatasync	formal/aeneas/lean/WorkIo.lean	wal_commit_plan

@@ -85,7 +85,7 @@
    "close": 4,
    "atom": 32,
    "model": 15,
-   "count": 3
+   "count": 4
   },
   "kernel_fn_allowlist": {
    "crates/pedradb-core/src/env_crash_kernel.rs": [

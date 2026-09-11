@@ -132,10 +132,18 @@ vira win, e previsões continuam hat com erro nomeado.
 
 ### P1 — next wave (amortização e primitivas)
 
-- [ ] **P1.1** Álgebra `Work.io` (pwrite/fdatasync/pread/fadvise como
+- [x] **P1.1** Álgebra `Work.io` (pwrite/fdatasync/pread/fadvise como
   construtores contáveis no modelo Lean) + teorema: caminho de write
   confirmado executa ≤1 `fdatasync` por grupo — sobre os extracts
-  `WriteAdmission`/`GroupCommit` — status: `todo`
+  `WriteAdmission`/`GroupCommit` — status: `done` (2026-09-11:
+  `WorkIo.lean` — `Work` (ret/pwrite/fdatasync/pread/fadvise/seq) +
+  `fdatasync_count`; primitivo posix `fdatasync_rc_ok` (rc=0 único ok)
+  amarrado; `wal_commit_plan_committed_sync_count` (grupo confirmado:
+  exatamente 1 barreira se pediu sync, 0 senão) e o registrado
+  `wal_commit_plan_at_most_one_fdatasync` sobre o extract
+  `wal_commit_plan`; twin `tests/wal_commit_work_count.rs` dirigindo o
+  plano real + o primitivo; linha `count` no par `wal_commit_plan`
+  (carrega close E count), `floor_count` 3→4 no mesmo commit)
 - [ ] **P1.2** Amortização memtable→flush: trabalho total de flush por k
   writes ≤ c·k dado o cap (contagem com crédito; no mínimo N concreto,
   régua 0198) — status: `todo`
@@ -167,7 +175,7 @@ vira win, e previsões continuam hat com erro nomeado.
 | P0.1 | p0 | Inventário vivo de kernels + cotas-alvo | done | 2026-09-11 | 2026-09-11 |
 | P0.2 | p0 | Kind `count` + one-pass do walk de compact (teorema + twin test) | done | 2026-09-11 | 2026-09-11 |
 | P0.3 | p0 | Point-get ladder ≤ levels + l0_max (model→count) | done | 2026-09-11 | 2026-09-11 |
-| P1.1 | p1 | `Work.io` + ≤1 fdatasync por grupo confirmado | todo | — | 2026-09-10 |
+| P1.1 | p1 | `Work.io` + ≤1 fdatasync por grupo confirmado | done | 2026-09-11 | 2026-09-11 |
 | P1.2 | p1 | Amortização memtable→flush (k writes) | todo | — | 2026-09-10 |
 | P1.3 | p1 | write_cycle compõe contagens provadas × âncoras | todo | — | 2026-09-10 |
 | P1.4 | p1 | Scan linear no resultado | todo | — | 2026-09-10 |
