@@ -123,6 +123,13 @@ pool honesto manda sobre a meta numérica).
    floor_atom 78→79, floor_extract 200→199; planta DST verde
    (`recover_truncate_node_counts_on_live_queued_is_not_ok`,
    no mesmo lote paralelo)
+
+   — 3/8 `done`: `recover_abort_node_counts_fate_iff`
+   (Membership.lean; leftover 2PC é abortado no recover em TODA
+   réplica local exatamente quando o nó é local), cap 45→44,
+   floor_atom 79→80, floor_extract 199→198; planta DST verde
+   (`recover_abort_node_counts_on_live_queued_is_not_ok`,
+   no mesmo lote paralelo)
 4. **P1.2:** cadências membership 5/6 + 6/6 — `pending_joint_node`,
    `joint_target`, `joint_add_target`, `joint_leave_ok` (joint);
    `drop_repl_slot`, `drop_sent_through` (slot): ×6, cap 39→33,

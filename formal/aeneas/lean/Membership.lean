@@ -522,3 +522,21 @@ theorem recover_truncate_node_counts_fate_iff :
   intro is_local in_ids v
   unfold recover_truncate_node_counts
   cases is_local <;> cases v <;> simp
+
+/-- RFC-0212 P1.1 (membership cadence 3/6, atom
+    `catalog:recover_abort`): leftover 2PC intents are aborted on
+    EVERY local replica EXACTLY when the node is local —
+    membership in `ids` is not the gate — fate forall over the
+    extracted pure-lift body; the AS-IS mutant gates on
+    `is_local && in_ids` (the 0133 leftover: the removed replica
+    keeps intents — the lie the DST plant
+    `recover_abort_node_counts_on_live_queued_is_not_ok`
+    refutes). -/
+theorem recover_abort_node_counts_fate_iff :
+    ∀ (is_local in_ids : Bool) (v : Bool),
+      (recover_abort_node_counts is_local in_ids = ok v) ↔
+        ((v = true ∧ is_local = true)
+          ∨ (v = false ∧ is_local = false)) := by
+  intro is_local in_ids v
+  unfold recover_abort_node_counts
+  cases is_local <;> cases v <;> simp
