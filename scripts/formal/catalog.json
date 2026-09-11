@@ -4156,7 +4156,6 @@
     "crates/pedradb-store/src/bin/cluster_real.rs"
    ],
    "entry": "l28_tcp_rdr_ok",
-   "data_fate": true,
    "handlers": [
     "tcp_node_removed_rdr_ok"
    ],
@@ -4170,7 +4169,11 @@
      "file": "crates/pedradb-store/src/bin/cluster_real.rs",
      "handler": "tcp_node_removed_rdr_ok"
     }
-   ]
+   ],
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0210 P1.1 l28 cadence 4/4: after a real TCP plant + process death the TCP ctor must not pick remote ids.first() as a LocalApplied reader (empty, not bad node) exactly when the reader-local gate held (fate forall over the extracted pure-lift body, L28.lean); AS-IS ok-true skips the TCP reader-local gate (0141 leftover)"
+   }
   },
   {
    "id": "l28_tcp_dsc",

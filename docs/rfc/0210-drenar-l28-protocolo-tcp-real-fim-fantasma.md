@@ -169,6 +169,10 @@ status: `done`
    trata first-key de HashMap como identidade ⟺ o gate local-id
    segurou), cap 71→70, floor_atom 60→61, floor_extract 218→217;
    planta TCP REAL verde
+   — 7/8 `done`: `l28_tcp_rdr_ok_fate_iff` (L28.lean; ctor TCP não
+   escolhe `ids.first()` remoto como leitor LocalApplied — `empty`,
+   não `bad node`), cap 70→69, floor_atom 61→62, floor_extract
+   217→216; planta TCP REAL verde
 4. **P1.2:** veredito datado dos 7 fantasmas — por fantasma:
    re-escrever para `fn` viva SE o caminho add-member existir em
    produção; senão aposentadoria com recusa datada EM FINDINGS,
