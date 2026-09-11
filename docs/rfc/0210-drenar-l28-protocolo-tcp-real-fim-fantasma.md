@@ -147,7 +147,7 @@ status: `done`
    `l28_tcp_fence`, `l28_tcp_clear`, `l28_tcp_pre`,
    `l28_tcp_peer`, `l28_tcp_lid`, `l28_tcp_rdr`, `l28_tcp_dsc`
    (cap 76→68, `floor_atom` 55→63, `floor_extract` 223→215);
-   plantas verdes — status: `doing`
+   plantas verdes — status: `done`
    — 1/8 `done`: `l28_tcp_hist_ok_fate_iff` (L28.lean; SI hist
    persistido na réplica tirada de `ids` ⟺ o persist aconteceu),
    cap 76→75, floor_atom 55→56, floor_extract 223→222; planta TCP
@@ -173,6 +173,12 @@ status: `done`
    escolhe `ids.first()` remoto como leitor LocalApplied — `empty`,
    não `bad node`), cap 70→69, floor_atom 61→62, floor_extract
    217→216; planta TCP REAL verde
+   — 8/8 `done`: `l28_tcp_dsc_ok_fate_iff` (L28.lean; descarte vivo
+   derruba o sufixo não-commitado ⟺ derrubou), cap 69→68,
+   floor_atom 62→63, floor_extract 216→215; planta TCP REAL verde
+   — P1.1 fechado nos números exatos do RFC (cap 76→68,
+   floor_atom 55→63, floor_extract 223→215; 8 atoms, 8 commits,
+   plantas 8/8 verdes em paralelo)
 4. **P1.2:** veredito datado dos 7 fantasmas — por fantasma:
    re-escrever para `fn` viva SE o caminho add-member existir em
    produção; senão aposentadoria com recusa datada EM FINDINGS,
@@ -203,7 +209,7 @@ status: `done`
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | Cadência l28 1/4 (dterm, part, apply, napply) | done | 9a0869ee + d6ea1e8b + 3d00e259 + este commit (4 atoms, 4 commits) | 2026-09-11 |
 | P0.2 | p0 | Cadência l28 2/4 (trunc, odrop, abort, nowms) | done | 4b44881b + df80dd90 + a4ef110f + este commit (4 atoms, 4 commits) | 2026-09-11 |
-| P1.1 | p1 | Cadências l28 3/4 + 4/4 (hist…dsc, ×8) | todo | — | 2026-09-11 |
+| P1.1 | p1 | Cadências l28 3/4 + 4/4 (hist…dsc, ×8) | done | f6526f0d + e04ab047 + bfba89b5 + 71ef2f8f + 191a4a1a + bc9ad570 + cd508216 + este (8 atoms, 8 commits) | 2026-09-11 |
 | P1.2 | p1 | Veredito datado dos 7 fantasmas de catálogo | todo | — | 2026-09-11 |
 | P2.1 | p2 | Cadência final l28 ×6 — bloco ZERO data_fate | todo | — | 2026-09-11 |
 | P2.2 | p2 | Composição ∀ do protocolo de remoção + sweep final | todo | — | 2026-09-11 |

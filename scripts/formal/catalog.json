@@ -4187,7 +4187,6 @@
     "crates/pedradb-store/src/bin/cluster_real.rs"
    ],
    "entry": "l28_tcp_dsc_ok",
-   "data_fate": true,
    "handlers": [
     "tcp_node_removed_dsc_ok"
    ],
@@ -4201,7 +4200,11 @@
      "file": "crates/pedradb-store/src/bin/cluster_real.rs",
      "handler": "tcp_node_removed_dsc_ok"
     }
-   ]
+   ],
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0210 P1.1 l28 cadence 4/4: after a real TCP plant + process death live discard drops the uncommitted suffix on a replica dropped from ids exactly when the discard dropped it (fate forall over the extracted pure-lift body, L28.lean); AS-IS ok-true skips live discard (0142 leftover)"
+   }
   },
   {
    "id": "l28_tcp_pld",

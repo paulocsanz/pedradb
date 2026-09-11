@@ -606,3 +606,19 @@ theorem l28_tcp_rdr_ok_fate_iff :
   intro b v
   unfold l28_tcp_rdr_ok
   cases b <;> cases v <;> simp
+
+/-- RFC-0210 P1.1 (l28 cadence 4/4, atom `catalog:l28_tcp_dsc`):
+    after a REAL TCP plant + process death, live discard drops the
+    uncommitted suffix on a replica dropped from `ids` EXACTLY when
+    the discard dropped it — fate forall over the extracted
+    pure-lift body; the AS-IS `ok true` mutant skips live discard
+    (the 0142 leftover: ids only — the lie the real TCP plant
+    `l28_real_tcp_removed_dsc` refutes). -/
+theorem l28_tcp_dsc_ok_fate_iff :
+    ∀ (b : Bool) (v : Bool),
+      (l28_tcp_dsc_ok b = ok v) ↔
+        ((v = true ∧ b = true)
+          ∨ (v = false ∧ b = false)) := by
+  intro b v
+  unfold l28_tcp_dsc_ok
+  cases b <;> cases v <;> simp
