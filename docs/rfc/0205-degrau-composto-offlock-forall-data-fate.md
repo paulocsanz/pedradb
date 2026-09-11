@@ -185,6 +185,12 @@ RFC não as toca.
 4. **P1.2:** cadência data-fate: 2 promoções do pool 91 (candidatos
    `recover_must_apply`, `recover_drop_orphan_seg`; um por commit;
    quedas medidas caem para o próximo par) — cap 94→93→92.
+   — status: 1/2 `done` (`recover_must_apply` pago como
+   `recover_must_apply_fate_iff` (Membership.lean): re-apply
+   EXATAMENTE quando commit > applied, mutante as-is pula tudo;
+   cap 94→93, floor_atom 37→38, floor_extract 241→240 no mesmo
+   commit; planta DST `recover_must_apply_on_live_queued_is_not_ok`
+   1/1; gates 3× GREEN)
 
 ### P2 — later / fronteira + sweep
 

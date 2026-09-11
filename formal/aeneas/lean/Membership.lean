@@ -208,3 +208,24 @@ theorem joint_election_ok_elects_iff_old_and_new_majority :
   intro old_yes old_n new_yes
   rw [c1_joint_election]
   simp
+
+/-- RFC-0205 P1.2 (first data-fate cadence promotion, atom
+    `catalog:recover_apply`): recovery re-applies EXACTLY when the
+    commit index is beyond applied (a committed entry not yet applied
+    is never skipped, and an already-applied one is never replayed) —
+    the fate forall over the extracted pure-lift body; the AS-IS
+    `ok false` mutant skips everything. -/
+theorem recover_must_apply_fate_iff :
+    ∀ (applied : U64) (commit : U64) (v : Bool),
+      (recover_must_apply applied commit = ok v) ↔
+        ((v = true ∧ commit > applied)
+          ∨ (v = false ∧ ¬(commit > applied))) := by
+  intro applied commit v
+  unfold recover_must_apply
+  cases hd : decide (commit > applied) with
+  | true =>
+    have hP := of_decide_eq_true hd
+    cases v <;> simp [hP]
+  | false =>
+    have hnP := of_decide_eq_false hd
+    cases v <;> simp [hnP]

@@ -514,7 +514,6 @@
      "handler": "recover_apply_committed"
     }
    ],
-   "data_fate": true,
    "handlers": [
     "recover_apply_committed",
     "recover_after_open",
@@ -525,6 +524,10 @@
    "dst_plant": {
     "file": "crates/pedradb-store/src/three_teeth_queued.rs",
     "test": "recover_must_apply_on_live_queued_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0205 P1.2 data-fate cadence promotion (1/2): recovery re-applies exactly when commit > applied (fate forall over the extracted pure-lift body, Membership.lean); AS-IS ok-false skips committed-but-unapplied entries"
    }
   },
   {
