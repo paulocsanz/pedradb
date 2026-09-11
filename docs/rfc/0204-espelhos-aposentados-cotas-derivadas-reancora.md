@@ -97,7 +97,7 @@ gateável, não desejo.
 
 ### P0 — must ship first (smallest vertical slice that is useful)
 
-- [ ] **P0.1** Primeiro espelho aposentado (`lsm_compact`, o nome da
+- [x] **P0.1** Primeiro espelho aposentado (`lsm_compact`, o nome da
   dívida): a ferramenta emite a função Nat de iteração dos dois loops
   (`lsm_compact_src_loop`/`lsm_compact_inner_loop`) + cota
   `iterações × step_work` em arquivo derivado; teorema registrado
@@ -105,7 +105,13 @@ gateável, não desejo.
   `LsmCompactCount.lean` vira `LsmCompactBridges.lean` (só as pontes
   semânticas, declaradas como humanas); contrato twin-contracts troca
   anotação mão→derivada no MESMO commit; gates + lean `--required` +
-  twin test `lsm_compact_count.rs` (intocado) verdes — status: `todo`
+  twin test `lsm_compact_count.rs` (intocado) verdes — status: `done`
+  (2026-09-11; `LsmCompactDerived.lean` AUTO-GENERATED (template
+  `drain_over_levels` validado contra o parse: fns inscritas, drain com
+  exatamente 1 nested call, teorema emitido == registrado); lake build
+  verde 61 libs + 13 compose; registro anda só na coluna lean_file;
+  twin test 7/7 byte-intocado; contrato anota `lsm_compact_work_bound`
+  @ arquivo gerado)
 
 ### P1 — next wave (depends on P0 or clearly deferrable)
 
@@ -136,7 +142,7 @@ gateável, não desejo.
 
 | Slice | Band | Outcome | Status | Start | End |
 |---|---|---|---|---|---|
-| P0.1 | p0 | Espelho lsm_compact emitido pela ferramenta, hand-mirror aposentado | todo | 2026-09-11 | — |
+| P0.1 | p0 | Espelho lsm_compact emitido pela ferramenta, hand-mirror aposentado | done | 2026-09-11 | 2026-09-11 |
 | P1.1 | p1 | Espelhos restantes dos inscritos aposentados | todo | — | — |
 | P1.2 | p1 | Bloom inscrito na ferramenta (anotação derivada) | todo | — | — |
 | P2.1 | p2 | Rito de re-âncora com supersessão datada | todo | — | — |

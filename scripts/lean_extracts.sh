@@ -38,7 +38,8 @@ COMPOSE=(
   ComposeScanCrc
   ComposeC1Membership
   ComposeConcurrent
-  LsmCompactCount
+  LsmCompactBridges
+  LsmCompactDerived
   ProbeLadderCount
   WorkIo
   FlushAmortCount
