@@ -134,3 +134,67 @@ theorem wal_commit_plan_at_most_one_fdatasync :
       subst hv
       simp only [wal_commit_work]
       decide
+
+/-! ## Host classes (P2.2) — barrier COUNT is class-independent -/
+
+/-- The host IO class selects WHICH posix barrier the machine executes:
+`fdatasync` (Linux) or `fcntl F_FULLFSYNC` (Darwin — what CMake Rocks
+does, `findings/2026-08-27-upstream-fullfsync/`). In the Work.io
+COUNT algebra both are the same one constructor; the class exists
+only to index the DATED MEASURED ns anchor living outside the proof
+(`write_cycle_kernel` anchors; RFC-0187: physical persistence stays
+experiment/TCG — never a theorem of ns). -/
+inductive HostIoClass where
+  | linux_fdatasync : HostIoClass
+  | darwin_fullfsync : HostIoClass
+
+/-- One barrier per request on every host class — the countable
+primitive is class-blind. -/
+def barrier_work : HostIoClass → Work
+  | HostIoClass.linux_fdatasync => Work.fdatasync
+  | HostIoClass.darwin_fullfsync => Work.fdatasync
+
+theorem barrier_work_is_the_counted_constructor : ∀ c : HostIoClass,
+    barrier_work c = Work.fdatasync := by
+  intro c
+  cases c <;> rfl
+
+theorem barrier_count_class_independent : ∀ c : HostIoClass,
+    (barrier_work c).fdatasync_count = 1 := by
+  intro c
+  cases c <;> rfl
+
+/-- Class-indexed plan work — identical counts on every host class. -/
+def wal_commit_work_on (c : HostIoClass) : WalCommitPlan → Work
+  | WalCommitPlan.AppendApplyOk => Work.ret
+  | WalCommitPlan.AppendSyncApplyOk => barrier_work c
+  | WalCommitPlan.AppendSyncFence => barrier_work c
+
+theorem wal_commit_work_on_eq : ∀ (c : HostIoClass) (p : WalCommitPlan),
+    wal_commit_work_on c p = wal_commit_work p := by
+  intro c p
+  cases p <;> cases c <;> rfl
+
+/-- The P1.1 sharp count holds verbatim under either host class: a
+committed group pays exactly one barrier when it asked for sync, zero
+when it did not — Darwin pays the same COUNT (a different, dated, MEASURED
+ns anchor — never a theorem). -/
+theorem wal_commit_plan_committed_sync_count_any_class :
+    ∀ (c : HostIoClass) (need_sync sync_failed : Bool) (p : WalCommitPlan),
+      wal_commit_plan need_sync sync_failed = ok p →
+      wal_commit_applies_ok p = true →
+      (wal_commit_work_on c p).fdatasync_count = if need_sync = true then 1 else 0 := by
+  intro c need_sync sync_failed p hval hap
+  rw [wal_commit_work_on_eq]
+  exact wal_commit_plan_committed_sync_count need_sync sync_failed p hval hap
+
+/-- RFC-0199 P2.2: at most one barrier per committed group on EVERY
+host class — the count theorem is class-independent; only the dated ns
+anchor differs per class (measured, never proved). -/
+theorem wal_commit_plan_at_most_one_fdatasync_any_class :
+    ∀ (c : HostIoClass) (need_sync sync_failed : Bool) (p : WalCommitPlan),
+      wal_commit_plan need_sync sync_failed = ok p →
+      (wal_commit_work_on c p).fdatasync_count ≤ 1 := by
+  intro c need_sync sync_failed p hval
+  rw [wal_commit_work_on_eq]
+  exact wal_commit_plan_at_most_one_fdatasync need_sync sync_failed p hval

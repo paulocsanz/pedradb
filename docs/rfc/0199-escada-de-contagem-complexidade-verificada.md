@@ -181,14 +181,33 @@ vira win, e previsões continuam hat com erro nomeado.
 
 ### P2 — later / ferramenta própria e fronteira
 
-- [ ] **P2.1** Cost-instrumented extract: se a mão não escalar, estender a
+- [x] **P2.1** Cost-instrumented extract: se a mão não escalar, estender a
   tradução Aeneas (fork pinnado) para emitir funções com anotação de custo
-  automática — ferramenta nossa, mantida no repo — status: `todo`
-- [ ] **P2.2** Fronteira fdatasync no modelo: quando a extração não modelar
+  automática — ferramenta nossa, mantida no repo — status: `done`
+  Sem forkar o pin: pós-processador `scripts/ratchet/derive_count_annotations.py`
+  deriva anotações de custo por expansão das 6 fns inscritas (leaf/local/
+  dispatch/cmp/arith; loops aninhados e self EMITIDOS mas excluídos do
+  step_work) e emite `CountDerived.lean` (defs Nat + teoremas rfl/decide) no
+  mesmo build lake (COMPOSE, 11 compose); `--check` dentro de
+  `lean_extracts.sh` falha o gate se a anotação dessincronizar do extract;
+  verificação à mão dos 6 corpos + demo de mordida (cópia scratch mutada →
+  step_work 10→11). Twin hand-escrito segue obrigatório (dirige a fn de
+  produção Rust; a ferramenta lê o extract Lean — artefatos distintos).
+- [x] **P2.2** Fronteira fdatasync no modelo: quando a extração não modelar
   a primitiva, modelá-la nós mesmos na álgebra `Work.io` (semântica de
   barreira contável; a âncora ns por classe de host — `F_FULLFSYNC` darwin
   vs `fdatasync` linux — continua medida e datada; nunca teorema de ns) —
-  status: `todo`
+  status: `done`
+  `WorkIo.lean`: `HostIoClass` (linux_fdatasync | darwin_fullfsync) +
+  `barrier_work` (o construtor contável é class-blind:
+  `barrier_count_class_independent` = 1 em toda classe) +
+  `wal_commit_work_on`/`_eq` + os teoremas P1.1 restated any-class
+  (`wal_commit_plan_committed_sync_count_any_class`,
+  `wal_commit_plan_at_most_one_fdatasync_any_class`). Registro de âncoras
+  datadas em `findings/2026-09-11-rfc0199-p21-p22-derive-hostclass.md`:
+  linux = `LINUX_QUIET_0189_P01` (RFC-0189 P0.1, 2026-09-10); darwin
+  `F_FULLFSYNC` semântica datada 2026-08-27, âncora ns quiet OPEN (veículo
+  0187 P2.2 nightly) — os teoremas any-class não dependem dela.
 - [ ] **P2.3** Cadência contínua: cada kernel novo do inventário ganha cota
   (um por fire); `floor_count` só sobe; inventário atualizado no mesmo
   commit — status: `todo`
@@ -204,8 +223,8 @@ vira win, e previsões continuam hat com erro nomeado.
 | P1.2 | p1 | Amortização memtable→flush (k writes) | done | 2026-09-11 | 2026-09-11 |
 | P1.3 | p1 | write_cycle compõe contagens provadas × âncoras | done | `tests/write_cycle_registry_tie.rs` (4 linhas count amarradas, demo de mutação via `PEDRA_COUNT_REGISTRY`) | 2026-09-11 |
 | P1.4 | p1 | Scan linear no resultado | done | 2026-09-11 | 2026-09-11 |
-| P2.1 | p2 | Cost-instrumented extract (ferramenta própria) | todo | — | 2026-09-10 |
-| P2.2 | p2 | fdatasync modelado na álgebra (primitiva nossa) | todo | — | 2026-09-10 |
+| P2.1 | p2 | Cost-instrumented extract (ferramenta própria) | done | `scripts/ratchet/derive_count_annotations.py` → `CountDerived.lean` (6 fns, `--check` no gate lean) | 2026-09-11 |
+| P2.2 | p2 | fdatasync modelado na álgebra (primitiva nossa) | done | `WorkIo.lean` `HostIoClass` + teoremas any-class; âncoras datadas no findings 2026-09-11 (darwin ns OPEN) | 2026-09-11 |
 | P2.3 | p2 | Cadência: uma cota por fire, floor_count monotônico | todo | — | 2026-09-10 |
 
 ## Acceptance Criteria

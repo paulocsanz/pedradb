@@ -56,8 +56,12 @@ datada):
 Movimento de linha: `todo → count` exige teorema ∀ sem sorry sobre o
 extract + twin test + linha no registro + `floor_count` no MESMO commit
 (RFC-0199 P0.2 estabelece a receita). A ferramenta própria de derivação
-mecânica de contadores (P2.1) substitui o gêmeo de contagem escrito à
-mão módulo a módulo — o hand-twin é dívida declarada até lá.
+mecânica de contadores (P2.1) — `scripts/ratchet/derive_count_annotations.py`,
+emissora de `CountDerived.lean` (6 fns inscritas, anotações por expansão:
+leaf/local/dispatch/cmp/arith; loops aninhados e self excluídos) com gate
+`--check` dentro de `lean_extracts.sh` — deriva as anotações que o twin
+hand-escrito passa a CONFIRMAR módulo a módulo; o hand-twin continua
+obrigatório (dirige a fn de produção Rust, não o extract).
 
 ## Garantias de produto (RFC-0191)
 

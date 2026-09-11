@@ -411,6 +411,9 @@ name = "FlushAmortCount"
 name = "ScanDecisionCount"
 
 [[lean_lib]]
+name = "CountDerived"
+
+[[lean_lib]]
 name = "LevelingKernel"
 
 [[lean_lib]]

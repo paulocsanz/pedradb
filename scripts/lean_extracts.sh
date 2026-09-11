@@ -43,6 +43,7 @@ COMPOSE=(
   WorkIo
   FlushAmortCount
   ScanDecisionCount
+  CountDerived
 )
 
 for lib in "${LIBS[@]}"; do
@@ -59,6 +60,11 @@ for lib in "${LIBS[@]}"; do
     exit 1
   fi
 done
+
+# RFC-0199 P2.1: derived cost annotations must stay in sync with the
+# extracts they are derived from.
+echo "      derive-count check"
+python3 "$ROOT/scripts/ratchet/derive_count_annotations.py" --check
 
 for lib in "${COMPOSE[@]}"; do
   if [[ ! -f "$LEAN_DIR/${lib}.lean" ]]; then
