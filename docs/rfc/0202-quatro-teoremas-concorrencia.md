@@ -122,9 +122,19 @@ sendo Pedra vs RocksDB default `sync=false` (`ROCKS_PARITY_SYNC=0`).
 
 ### P1 — next wave (deadlock e o quinto close)
 
-- [ ] **P1.1** Ponte `wait_for_deadlock` (corpo do loop + hipóteses de
+- [x] **P1.1** Ponte `wait_for_deadlock` (corpo do loop + hipóteses de
   lookup + dente as-is) OU recusa medida com re-escopo datado —
-  status: `todo`
+  status: `done` (ponte PAGA: as três arestas de saída de um passo do
+  detector em Locktab.lean — `wait_for_deadlock_step_nowait_is_alive`
+  (espera de ninguém ⇒ `done false`), `wait_for_deadlock_step_cycle_closes`
+  (cadeia fecha no waiter ⇒ `done true`), `wait_for_deadlock_step_revisit_reports_cycle`
+  (revisit ⇒ `done true`) — com hipóteses de lookup fixando as
+  chamadas-axioma; par promovido a atom (cap 96→95, floor_atom 35→36,
+  floor_extract 243→242); fronteira datada em
+  `formal/aeneas/EXTRACT.md`: o iff completo do ciclo precisa de
+  semântica de mapa (HashMap.get/insert são axiomas no Aeneas) e fica
+  TCB; dente as-is já existia (`wait_for_deadlock_as_is_dente`);
+  build Locktab verde, sorry 0)
 - [ ] **P1.2** Quinto close registrado (candidato `group_validate`
   N-way; senão próximo par do board; floor_close 4→5 no mesmo commit) —
   status: `todo`
@@ -143,7 +153,7 @@ sendo Pedra vs RocksDB default `sync=false` (`ROCKS_PARITY_SYNC=0`).
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | Fila data-race: atom rwlock_client_may_mutate | done | rwlock_client_may_mutate_ok_iff_holding_write (GroupCommit.lean) | 2026-09-11 |
 | P0.2 | p0 | Fila lost-update: atom occ_member_fate | done | occ_member_fate_ok_iff_precedence (GroupCommit.lean) | 2026-09-11 |
-| P1.1 | p1 | Fila deadlock: ponte wait_for_deadlock (ou recusa datada) | todo | — | 2026-09-11 |
+| P1.1 | p1 | Fila deadlock: ponte wait_for_deadlock (ou recusa datada) | done | wait_for_deadlock_step_{nowait_is_alive,cycle_closes,revisit_reports_cycle} (Locktab.lean) + fronteira EXTRACT.md | 2026-09-11 |
 | P1.2 | p1 | Quinto close registrado (candidato group_validate) | todo | — | 2026-09-11 |
 | P2.1 | p2 | Escalonador: recusa registrada + cadência atoms | todo | — | 2026-09-11 |
 | P2.2 | p2 | Sweep final de gates | todo | — | 2026-09-11 |

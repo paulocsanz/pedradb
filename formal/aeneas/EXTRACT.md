@@ -396,3 +396,19 @@ Never: “Lean proved Raft / fold / the Bloom filter.”
   (`rfc0176_10b_is_six_probes`). Clock \(T\) / noisy neighbor stay measured.
 - Run: `./scripts/aeneas_scale.sh` then `lake build Scale` in `formal/aeneas/lean`.
 
+
+## 2026-09-11 — locktab `wait_for_deadlock` (RFC-0202 P1.1): fronteira datada
+
+- O corpo do loop extraído chama `HashMap.get` / `HashSet.insert` como
+  AXIOMAS (Aeneas não extrai semântica de mapa) — o iff completo
+  "detector dispara ↔ existe ciclo" NÃO é provável do extract.
+- Pago (Locktab.lean): as três arestas de saída de UM passo do detector,
+  com hipóteses de lookup fixando os resultados das chamadas-axioma:
+  nowait⇒`done false` (`wait_for_deadlock_step_nowait_is_alive`),
+  ciclo-fecha-no-waiter⇒`done true` (`wait_for_deadlock_step_cycle_closes`),
+  revisit⇒`done true` (`wait_for_deadlock_step_revisit_reports_cycle`).
+- Lição de prova: `rw` sozinho não reduz os binds do do-block
+  (transparência do rfl automático); `simp` fecha as arestas sem lookup
+  encadeado, `simp [hkey]` normaliza e aí reescreve o lookup exposto.
+- Registrado como atom — o degrau que o extract suporta; a semântica de
+  mapa permanece TCB (nunca claim de ciclo sem essa semântica).
