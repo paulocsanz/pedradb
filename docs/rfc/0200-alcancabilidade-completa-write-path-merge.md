@@ -1,6 +1,6 @@
 # RFC: 0200 — alcançabilidade completa: estados do write path e saídas de merge (o degrau indutivo seguinte)
 
-**Status:** draft
+**Status:** done
 **Updated:** 2026-09-11
 **Parents:** [0191](0191-pacote-garantias-produto.md) (lemas um-passo),
 [0198](0198-composicao-registrada-invariantes-indutivos.md) (composição
@@ -147,8 +147,13 @@ sendo Pedra vs RocksDB default `sync=false` (`ROCKS_PARITY_SYNC=0`).
   commit; planta DST existente
   `wal_sync_required_on_live_client_true_is_not_ok` dirigindo o kernel
   real)
-- [ ] **P2.2** Sweep: todos os gates GREEN no HEAD, zero sorry nos
-  wrappers tocados, capturas — status: `todo`
+- [x] **P2.2** Sweep: todos os gates GREEN no HEAD, zero sorry nos
+  wrappers tocados, capturas — status: `done` (HEAD `6cc06468` varrido
+  em worktree destacado: depth/product/ledger GREEN — extract 245/atom
+  33/close 4/count 6/cap 98, total=299 proof=266; sorry 0 em
+  WalState/Merge/WriteAdmission/Flush; captura em
+  `findings/2026-09-11-rfc0200-p22-sweep-final/`; as três admissions
+  recusadas seguem `always false`)
 
 ## Status (living — update with every PR)
 
@@ -159,7 +164,7 @@ sendo Pedra vs RocksDB default `sync=false` (`ROCKS_PARITY_SYNC=0`).
 | P1.1 | p1 | Base de saída do merge + corolário alcançável | done | merge_output_reach_preserves_inv_lsm | 2026-09-11 |
 | P1.2 | p1 | Ponte sift_step↔newest-first | done | TaggedSift + tagged_step_stays_iff_no_repair + tagged_stay_extends_chain | 2026-09-11 |
 | P2.1 | p2 | Cadência cap/floor_close contínua | done | wal_sync_required_ok_iff_client_else_db (WriteAdmission.lean) | 2026-09-11 |
-| P2.2 | p2 | Sweep final de gates | todo | — | 2026-09-11 |
+| P2.2 | p2 | Sweep final de gates | done | findings/2026-09-11-rfc0200-p22-sweep-final/ | 2026-09-11 |
 
 ## Acceptance Criteria
 
