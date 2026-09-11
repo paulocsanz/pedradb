@@ -135,6 +135,67 @@ theorem r1_get_never_returns_non_live :
           exact inv_lsm_newest_first_never_non_live (1#usize) (0#usize)
             key.ValueType.Value false hnew hlive
 
+/-! ### RFC-0198 P1.3 — corolário indutivo Inv-LSM (cadeia de k merges)
+
+A forma seL4 do Inv-LSM: o lema um-passo registrado cobre um topo de
+heap; o corolário encadeia k passos por indução sobre a cadeia. O passo
+CITA `inv_lsm_newest_first_never_non_live` (RFC-0191 P2.2) — nada é
+re-provado aqui. -/
+
+/-- Um passo da cadeia de merges: o par de idades no topo do heap
+(newest primeiro no empate de chaves), o kind da versão que sobe e o
+bool de range cobrindo a chave. -/
+structure MergeStep where
+  newer : Usize
+  older : Usize
+  kind : key.ValueType
+  range_hidden : Bool
+
+/-- Premissa estrutural do passo: o heap mantém a ordem newest-first —
+no empate de chaves, o probe 0164 responde o mais novo primeiro. -/
+def merge_step_newest_first (s : MergeStep) : Prop :=
+  pedra_aeneas_probe_order_kernel.first_probe_on_equal_lo s.newer s.older
+    = ok s.newer
+
+/-- O filtro do get respondeu "live" para a versão que subiu neste
+passo. -/
+def merge_step_answers_live (s : MergeStep) : Prop :=
+  merge.visible_at s.kind s.range_hidden = ok true
+
+/-- Cadeia de k passos de merge. Base: cadeia vazia (k = 0 — nenhuma
+versão subiu, vale trivialmente). Passo: um topo newest-first seguido
+de uma cadeia de k passos — a premissa estrutural é do passo (o heap é
+restaurado newest-first a cada saída), não de um par fixo. -/
+inductive merge_chain : Nat → List MergeStep → Prop
+  | nil : merge_chain 0 []
+  | cons (s : MergeStep) (k : Nat) (rest : List MergeStep) :
+      merge_step_newest_first s →
+      merge_chain k rest →
+      merge_chain (k + 1) (s :: rest)
+
+/-- RFC-0198 P1.3 COROLÁRIO INDUTIVO: numa cadeia de k merges em que
+todo topo permaneceu newest-first (premissa estrutural da cadeia),
+TODO passo cujo filtro respondeu live é genuinamente live — Value não
+escondido por range. Indução sobre a cadeia; o caso do passo CITA o
+lema um-passo REGISTRADO `inv_lsm_newest_first_never_non_live`
+(RFC-0191 P2.2). -/
+theorem merge_chain_preserves_inv_lsm :
+    ∀ (k : Nat) (chain : List MergeStep),
+      merge_chain k chain →
+      ∀ s ∈ chain,
+        merge_step_answers_live s →
+          s.kind = key.ValueType.Value ∧ s.range_hidden = false := by
+  intro k chain hchain
+  induction hchain with
+  | nil => intro s hs; cases hs
+  | cons s k' rest hnewest _ IH =>
+      intro s hs hlive
+      cases hs with
+      | head =>
+          exact inv_lsm_newest_first_never_non_live s.newer s.older s.kind
+            s.range_hidden hnewest hlive
+      | tail _ hs => exact IH s hs hlive
+
 /-- Catalog entry: a Value is live unless a covering range hides it. -/
 theorem visible_at_value_live :
     merge.visible_at key.ValueType.Value false = ok true := by

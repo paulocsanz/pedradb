@@ -84,9 +84,12 @@
   lemas um-passo novos `wal_sync_preserves_inv_wal` /
   `wal_ack_preserves_inv_wal`; corolário
   `wal_write_step_preserves_inv_wal` cobre os três)
-- [ ] **P1.3** Inv-LSM corolário indutivo: cadeia de k merges preserva
+- [x] **P1.3** Inv-LSM corolário indutivo: cadeia de k merges preserva
   newest-first-never-non-live, citando `inv_lsm_newest_first_never_non_live`
-  — status: `todo`
+  — status: `done` (estrutura `MergeStep` + premissas `merge_step_newest_first`
+  / `merge_step_answers_live`; predicado indutivo `merge_chain` Nat-indexado
+  (base = cadeia vazia); corolário `merge_chain_preserves_inv_lsm` por indução
+  sobre a cadeia — o passo CITA o lema um-passo registrado, não re-prova)
 - [ ] **P1.4** Tokens de script `write_pending_frame` em
   `finish_group_off_lock` + `group_finish` (COORDENAÇÃO: `concurrent.rs`
   pertence à sessão paralela; só landar depois do commit dela ou em
@@ -116,7 +119,7 @@
 | P0.2 | p0 | Close de glue registrado: occ_batch_plan∘occ_conflict | todo | — | 2026-09-10 |
 | P1.1 | p1 | Inv-WAL base + alcançabilidade | done | inv_wal_init + inv_wal_reachable | 2026-09-10 |
 | P1.2 | p1 | Inv-WAL passo sync/fence | done | wal_write_step_preserves_inv_wal | 2026-09-11 |
-| P1.3 | p1 | Inv-LSM corolário indutivo (k merges) | todo | — | 2026-09-10 |
+| P1.3 | p1 | Inv-LSM corolário indutivo (k merges) | done | merge_chain_preserves_inv_lsm | 2026-09-11 |
 | P1.4 | p1 | Tokens write_pending_frame (2 handlers, coordenação concurrent.rs) | todo | — | 2026-09-10 |
 | P2.1 | p2 | Model→concreto: scale_kernel N concreto | todo | — | 2026-09-10 |
 | P2.2 | p2 | Cadência cap monotônica (df atoms) | todo | — | 2026-09-10 |
