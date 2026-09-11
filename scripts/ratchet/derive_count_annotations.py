@@ -92,6 +92,18 @@ CONTRACTS_TSV = REPO / "scripts" / "ratchet" / "twin_contracts.tsv"
 # Shape vocabulary (proof templates: induction/omega, rfl):
 #   drain_over_levels — inner consume loop (one step per remaining
 #   entry) + outer drain (per level: consume(level_len) + 1 bookkeeping).
+#   ladder_over_candidates — inner covering scan (one step per
+#   remaining position) + outer ladder (per candidate: scan + 1 step).
+#   saturating_sum_le — REGISTERED semantic bound: probes = exact
+#   saturating sum; proof composes the HUMAN bridge lemma named in the
+#   shape (imported from the pair's bridges file).
+#   per_file_decision — per-file constant decision + tombstone walk
+#   only when the overlap does not short-circuit.
+#   amortized_flush_credit — firing tick pays the current memtable
+#   (paid ≤ written + initial; each byte charged at most once).
+# Non-drain shapes carry `anchor_defs`: def names that must still
+# exist in the pair's extracts (a rename breaks emission →
+# re-adjudication), on top of the registered-name tie every shape has.
 TWIN_SHAPES: dict[str, dict[str, str]] = {
     "catalog:lsm_compact": {
         "shape": "drain_over_levels",
@@ -108,6 +120,28 @@ TWIN_SHAPES: dict[str, dict[str, str]] = {
         "steps_le_thm": "lsm_compact_steps_le",
         "bound_thm": "lsm_compact_work_bound",
         "bridges_file": "LsmCompactBridges.lean",
+    },
+    "catalog:probe_order_covering": {
+        "shape": "ladder_over_candidates",
+        "out": "ProbeOrderCoveringDerived.lean",
+        "kernel_lib": "ProbeOrderKernel",
+        "kernel_ns": "pedra_aeneas_probe_order_kernel",
+        "scan_steps_def": "covering_pos_steps",
+        "work_def": "probe_ladder_work",
+        "steps_le_thm": "covering_pos_steps_le",
+        "bound_thm": "probe_order_covering_work_bound",
+        "bridges_file": "ProbeLadderBridges.lean",
+        "anchor_defs": ["covering_pos_loop"],
+    },
+    "catalog:scale_predict": {
+        "shape": "saturating_sum_le",
+        "out": "ScalePredictDerived.lean",
+        "kernel_lib": "ScaleKernel",
+        "kernel_ns": "pedra_aeneas_scale_kernel",
+        "bridge_thm": "saturating_add_val_le",
+        "bound_thm": "point_get_probes_le_levels_l0_max",
+        "bridges_file": "ProbeLadderBridges.lean",
+        "anchor_defs": ["point_get_probes"],
     },
 }
 BLOCK_END_RE = re.compile(
@@ -184,6 +218,19 @@ def derive(lean_dir: Path) -> list[dict]:
 
 def sanitize(fn: str) -> str:
     return fn.replace(".", "_")
+
+
+def extract_def_names(lean_dir: Path) -> dict[str, set[str]]:
+    """Top-level declaration names per enrolled extract file — the
+    anchor-def tie of retired mirrors (a renamed anchor def fails
+    emission, so the mirror cannot outlive the extract's shape)."""
+    out: dict[str, set[str]] = {}
+    for extract, _, _ in ENROLLED:
+        if extract in out:
+            continue
+        clean = strip_comments((lean_dir / extract).read_text())
+        out[extract] = set(re.findall(DECL_RE, clean))
+    return out
 
 
 def render(rows: list[dict]) -> str:
@@ -289,19 +336,30 @@ def render_contracts(rows: list[dict[str, str]]) -> str:
     return "\n".join(out) + "\n"
 
 
-def validate_shape(pair: str, shape: dict, rows: list[dict], count_rows: list[dict]) -> None:
+def validate_shape(pair: str, shape: dict, rows: list[dict], count_rows: list[dict],
+                   defs_by_extract: dict[str, set[str]]) -> None:
     enrolled = {fn for (_, fn, p) in ENROLLED if p == pair}
     for key in ("drain_fn", "consume_fn"):
-        if shape[key] not in enrolled:
+        if key in shape and shape[key] not in enrolled:
             raise SystemExit(f"FAIL  twin shape {pair}: {key}={shape[key]!r} is not an ENROLLED fn of this pair")
-    drain = next((r for r in rows if r["fn"] == shape["drain_fn"]), None)
-    if drain is None:
-        raise SystemExit(f"FAIL  twin shape {pair}: drain fn {shape['drain_fn']} not parsed from the extract")
-    if drain["nested"] != 1:
-        raise SystemExit(
-            f"FAIL  twin shape {pair}: drain loop makes {drain['nested']} nested enrolled calls "
-            "(shape declares 1 — the extract changed shape; re-adjudicate the twin)"
-        )
+    if shape["shape"] == "drain_over_levels":
+        drain = next((r for r in rows if r["fn"] == shape["drain_fn"]), None)
+        if drain is None:
+            raise SystemExit(f"FAIL  twin shape {pair}: drain fn {shape['drain_fn']} not parsed from the extract")
+        if drain["nested"] != 1:
+            raise SystemExit(
+                f"FAIL  twin shape {pair}: drain loop makes {drain['nested']} nested enrolled calls "
+                "(shape declares 1 — the extract changed shape; re-adjudicate the twin)"
+            )
+    pair_defs: set[str] = set()
+    for extract in {e for (e, _, p) in ENROLLED if p == pair}:
+        pair_defs |= defs_by_extract.get(extract, set())
+    for anchor in shape.get("anchor_defs", ()):
+        if anchor not in pair_defs:
+            raise SystemExit(
+                f"FAIL  twin shape {pair}: anchor def {anchor!r} not found in the pair's "
+                "extracts — the extract changed; re-adjudicate the twin"
+            )
     reg = next((r for r in count_rows if r["catalog_id"] == pair), None)
     if reg is None:
         raise SystemExit(f"FAIL  twin shape {pair}: no registered count row in {REGISTRY.name}")
@@ -312,12 +370,11 @@ def validate_shape(pair: str, shape: dict, rows: list[dict], count_rows: list[di
         )
 
 
-def render_mirror(shape: dict) -> str:
+def _render_drain_over_levels(s: dict) -> str:
     """drain_over_levels template: the Nat layer the hand mirror carried
     (twins + steps_le + the REGISTERED bound theorem), now emitted."""
-    if shape["shape"] != "drain_over_levels":
-        raise SystemExit(f"FAIL  unknown twin shape {shape['shape']!r}")
-    s = shape
+    if s["shape"] != "drain_over_levels":
+        raise SystemExit(f"FAIL  unknown twin shape {s['shape']!r}")
     return f"""-- AUTO-GENERATED by scripts/ratchet/derive_count_annotations.py
 -- RFC-0204 P0.1 — retired mirror: the Nat count-twin layer of the
 -- lsm_compact walk is MACHINE-EMITTED from the declared twin shape,
@@ -384,11 +441,126 @@ theorem {s['bound_thm']} : ∀ (s : {s['state_type']}) (depth : Nat),
 """
 
 
-def render_all_mirrors(rows: list[dict], count_rows: list[dict]) -> dict[str, str]:
+def _render_ladder_over_candidates(s: dict) -> str:
+    """ladder_over_candidates template: covering-scan twin + ladder
+    twin + the REGISTERED bound (candidates × (scan_len + 1))."""
+    return f"""-- AUTO-GENERATED by scripts/ratchet/derive_count_annotations.py
+-- RFC-0204 P1.1 — retired mirror: the Nat count-twin layer of the
+-- probe ladder is MACHINE-EMITTED from the declared twin shape,
+-- validated against the same parse that derives step_work (anchor
+-- defs still present in the extract; emitted theorem name equals the
+-- registered count row). DO NOT EDIT: regenerate with
+--   python3 scripts/ratchet/derive_count_annotations.py
+-- (scripts/lean_extracts.sh gates on --check before building). The
+-- semantic bridges to the real extract stay HUMAN, by design, in
+-- {s['bridges_file']}.
+import Aeneas
+import {s['kernel_lib']}
+open Aeneas Aeneas.Std Result ControlFlow
+open {s['kernel_ns']}
+
+/-! ## Count twins (pure Nat, machine-emitted) -/
+
+/-- Work twin of the covering scan: iterations while `remaining`
+positions are left to scan — one step per position. -/
+def {s['scan_steps_def']} : Nat → Nat
+  | 0 => 0
+  | remaining + 1 => 1 + {s['scan_steps_def']} remaining
+
+/-- Work twin of the probe ladder: one fresh covering scan of `by_lo`
+plus one ladder step per remaining candidate. -/
+def {s['work_def']} : Nat → Nat → Nat
+  | 0, _ => 0
+  | candidates + 1, scan_len =>
+      {s['scan_steps_def']} scan_len + 1 + {s['work_def']} candidates scan_len
+
+/-- Scan twin bound: one iteration per remaining position, no more. -/
+theorem {s['steps_le_thm']} : ∀ (remaining : Nat),
+    {s['scan_steps_def']} remaining ≤ remaining := by
+  intro remaining
+  induction remaining with
+  | zero => simp [{s['scan_steps_def']}]
+  | succ d ih => simp only [{s['scan_steps_def']}]; omega
+
+/-- RFC-0199 count (P0.3), machine-emitted since RFC-0204 P1.1: the
+probe ladder's work twin never exceeds one `by_lo` scan plus one
+ladder step per candidate — work linear in candidates × scan length,
+independent of how large the deeper engine structures are. -/
+theorem {s['bound_thm']} : ∀ (candidates scan_len : Nat),
+    {s['work_def']} candidates scan_len ≤ candidates * (scan_len + 1) := by
+  intro candidates scan_len
+  induction candidates with
+  | zero => simp [{s['work_def']}]
+  | succ c ih =>
+      have h := {s['steps_le_thm']} scan_len
+      simp only [{s['work_def']}, Nat.succ_mul]
+      omega
+"""
+
+
+def _render_saturating_sum_le(s: dict) -> str:
+    """saturating_sum_le template: the REGISTERED semantic bound of the
+    scale side; the proof composes the HUMAN bridge lemma declared in
+    the shape (imported from the pair's bridges file)."""
+    bridges_stem = s["bridges_file"].removesuffix(".lean")
+    return f"""-- AUTO-GENERATED by scripts/ratchet/derive_count_annotations.py
+-- RFC-0204 P1.1 — retired mirror: the REGISTERED bound of the scale
+-- side (`point_get_probes` = exact saturating levels + l0_covering)
+-- is MACHINE-EMITTED from the declared twin shape, validated against
+-- the same parse that derives step_work (anchor def still present in
+-- the extract; emitted theorem name equals the registered count row).
+-- DO NOT EDIT: regenerate with
+--   python3 scripts/ratchet/derive_count_annotations.py
+-- (scripts/lean_extracts.sh gates on --check before building). The
+-- semantic bridge (`{s['bridge_thm']}`) stays HUMAN, by design, in
+-- {s['bridges_file']}.
+import Aeneas
+import {s['kernel_lib']}
+import {bridges_stem}
+open Aeneas Aeneas.Std Result
+open {s['kernel_ns']}
+
+/-- RFC-0199 count (P0.3), machine-emitted since RFC-0204 P1.1: under
+the L0-covering cap invariant (`l0_covering ≤ l0_max`) and a
+`levels + l0_max` that fits in u64, the probes a point get pays never
+exceed `levels + l0_max` — the level-ratio shape: probes grow with
+the level count, not with the file count. -/
+theorem {s['bound_thm']} :
+    ∀ (levels l0_covering l0_max : Std.U64),
+      l0_covering.val ≤ l0_max.val →
+      levels.val + l0_max.val ≤ 18446744073709551615 →
+      ∃ v, point_get_probes levels l0_covering = ok v ∧
+        v.val ≤ levels.val + l0_max.val := by
+  intro levels l0_covering l0_max hcap hfit
+  have h : point_get_probes levels l0_covering
+      = ok (core.num.U64.saturating_add levels l0_covering) := rfl
+  refine ⟨_, h, ?_⟩
+  have hle := {s['bridge_thm']} levels l0_covering
+  omega
+"""
+
+
+SHAPE_RENDERERS = {
+    "drain_over_levels": _render_drain_over_levels,
+    "ladder_over_candidates": _render_ladder_over_candidates,
+    "saturating_sum_le": _render_saturating_sum_le,
+}
+
+
+def render_mirror(shape: dict) -> str:
+    """Emit a retired pair's Nat layer from its declared twin shape."""
+    renderer = SHAPE_RENDERERS.get(shape["shape"])
+    if renderer is None:
+        raise SystemExit(f"FAIL  unknown twin shape {shape['shape']!r}")
+    return renderer(shape)
+
+
+def render_all_mirrors(rows: list[dict], count_rows: list[dict],
+                       defs_by_extract: dict[str, set[str]]) -> dict[str, str]:
     """out-file name -> generated content, one per retired pair."""
     out: dict[str, str] = {}
     for pair, shape in TWIN_SHAPES.items():
-        validate_shape(pair, shape, rows, count_rows)
+        validate_shape(pair, shape, rows, count_rows, defs_by_extract)
         out[shape["out"]] = render_mirror(shape)
     return out
 
@@ -407,7 +579,8 @@ def main() -> int:
     content = render(rows)
     count_rows = count_registry_rows()
     contracts = render_contracts(count_rows)
-    mirrors = render_all_mirrors(rows, count_rows)
+    defs_by_extract = extract_def_names(lean_dir)
+    mirrors = render_all_mirrors(rows, count_rows, defs_by_extract)
     if check:
         ok = True
         on_disk = out_file.read_text() if out_file.is_file() else ""

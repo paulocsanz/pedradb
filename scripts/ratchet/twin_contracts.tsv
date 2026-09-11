@@ -10,8 +10,8 @@
 # Gate: scripts/check_twin_contracts.py (missing / mocking twin / stale
 # annotation / hand-edited TSV = RED).
 catalog:lsm_compact	lsm_compact_work_bound	formal/aeneas/lean/LsmCompactDerived.lean	crates/pedradb-core/tests/lsm_compact_count.rs	lsm_compact	lsm_compact_work_bound	formal/aeneas/lean/LsmCompactDerived.lean
-catalog:probe_order_covering	probe_order_covering_work_bound	formal/aeneas/lean/ProbeLadderCount.lean	crates/pedradb-core/src/probe_order_kernel.rs	probe_order_covering	probe_order_covering_loop_step_work	formal/aeneas/lean/CountDerived.lean
-catalog:scale_predict	point_get_probes_le_levels_l0_max	formal/aeneas/lean/ProbeLadderCount.lean	crates/pedradb-core/tests/scale_ladder_count.rs	point_get_probes	level_count_loop_step_work	formal/aeneas/lean/CountDerived.lean
+catalog:probe_order_covering	probe_order_covering_work_bound	formal/aeneas/lean/ProbeOrderCoveringDerived.lean	crates/pedradb-core/src/probe_order_kernel.rs	probe_order_covering	probe_order_covering_work_bound	formal/aeneas/lean/ProbeOrderCoveringDerived.lean
+catalog:scale_predict	point_get_probes_le_levels_l0_max	formal/aeneas/lean/ScalePredictDerived.lean	crates/pedradb-core/tests/scale_ladder_count.rs	point_get_probes	point_get_probes_le_levels_l0_max	formal/aeneas/lean/ScalePredictDerived.lean
 catalog:wal_commit_plan	wal_commit_plan_at_most_one_fdatasync	formal/aeneas/lean/WorkIo.lean	crates/pedradb-core/tests/wal_commit_work_count.rs	wal_commit_plan	wal_commit_plan_at_most_one_fdatasync	formal/aeneas/lean/WorkIo.lean
 catalog:auto_flush_due	memtable_flush_amortized	formal/aeneas/lean/FlushAmortCount.lean	crates/pedradb-core/tests/flush_amort_count.rs	auto_flush_due	auto_flush_due_step_work	formal/aeneas/lean/CountDerived.lean
 catalog:scan_guard	scan_decision_work_bound	formal/aeneas/lean/ScanDecisionCount.lean	crates/pedradb-core/tests/scan_decision_count.rs	scan_reads_file	scan_kernel_scan_reads_file_step_work	formal/aeneas/lean/CountDerived.lean

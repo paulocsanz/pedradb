@@ -402,7 +402,13 @@ name = "LsmCompactBridges"
 name = "LsmCompactDerived"
 
 [[lean_lib]]
-name = "ProbeLadderCount"
+name = "ProbeLadderBridges"
+
+[[lean_lib]]
+name = "ProbeOrderCoveringDerived"
+
+[[lean_lib]]
+name = "ScalePredictDerived"
 
 [[lean_lib]]
 name = "WorkIo"

@@ -40,7 +40,9 @@ COMPOSE=(
   ComposeConcurrent
   LsmCompactBridges
   LsmCompactDerived
-  ProbeLadderCount
+  ProbeLadderBridges
+  ProbeOrderCoveringDerived
+  ScalePredictDerived
   WorkIo
   FlushAmortCount
   ScanDecisionCount

@@ -1,63 +1,29 @@
--- RFC-0199 (P0.3): counting-ladder credits for the point-get ladder.
--- Count twins are hand-written Nat mirrors of the loop iteration counts
--- (declared debt until the P2.1 cost tool derives them mechanically).
--- The bridges tie the twins to the real Aeneas extracts: every `cont`
--- step of the probe ladder consumes exactly one candidate (index += 1,
--- and the add must not overflow) and only happens while candidates
--- remain; the ladder only reports `done` once the candidate index has
--- passed `newest_first.len`; every `cont` step of the covering scan
--- advances exactly one position (and only while positions remain), so
--- each candidate pays at most one `by_lo` scan — the ladder's work is
--- candidates × scan length, never a walk over the store. The scale side
--- pins the probe count itself: `point_get_probes` is the exact
--- saturating sum `levels + l0_covering`, so under the L0-covering cap
--- invariant (`l0_covering ≤ l0_max`) probes never exceed
--- `levels + l0_max` — the shape the engine's level-ratio invariant
--- keeps true.
+-- RFC-0199 (P0.3) → RFC-0204 (P1.1): the semantic bridges of the
+-- point-get probe ladder. The Nat count twins and the REGISTERED
+-- bound theorems (`probe_order_covering_work_bound`,
+-- `point_get_probes_le_levels_l0_max`) moved to the MACHINE-EMITTED
+-- `ProbeOrderCoveringDerived.lean` / `ScalePredictDerived.lean`
+-- (single emitter: scripts/ratchet/derive_count_annotations.py;
+-- drift-gated by lean_extracts.sh --check). What stays HERE, human
+-- by design, are the bridges that tie the twins to the real Aeneas
+-- extracts: every `cont` step of the probe ladder consumes exactly
+-- one candidate (index += 1, and the add must not overflow) and only
+-- happens while candidates remain; the ladder only reports `done`
+-- once the candidate index has passed `newest_first.len`; every
+-- `cont` step of the covering scan advances exactly one position
+-- (and only while positions remain), so each candidate pays at most
+-- one `by_lo` scan — the ladder's work is candidates × scan length,
+-- never a walk over the store. The scale side pins the probe count
+-- itself: `point_get_probes` is the exact saturating sum
+-- `levels + l0_covering`, so the saturating-add bridge below (now
+-- public) carries the emitted `ScalePredictDerived.lean` bound.
 import Aeneas
 import ProbeOrderKernel
 import ScaleKernel
 open Aeneas Aeneas.Std Result ControlFlow
 open pedra_aeneas_probe_order_kernel pedra_aeneas_scale_kernel
 
-/-! ## Count twins (pure Nat) -/
-
-/-- Work twin of the covering scan: iterations while `remaining`
-positions are left to scan — one step per position. -/
-def covering_pos_steps : Nat → Nat
-  | 0 => 0
-  | remaining + 1 => 1 + covering_pos_steps remaining
-
-/-- Work twin of the probe ladder: one fresh covering scan of `by_lo`
-plus one ladder step per remaining candidate. -/
-def probe_ladder_work : Nat → Nat → Nat
-  | 0, _ => 0
-  | candidates + 1, scan_len =>
-      covering_pos_steps scan_len + 1 + probe_ladder_work candidates scan_len
-
-/-- Scan twin bound: one iteration per remaining position, no more. -/
-theorem covering_pos_steps_le : ∀ (remaining : Nat),
-    covering_pos_steps remaining ≤ remaining := by
-  intro remaining
-  induction remaining with
-  | zero => simp [covering_pos_steps]
-  | succ d ih => simp only [covering_pos_steps]; omega
-
-/-- RFC-0199 count (P0.3): the probe ladder's work twin never exceeds
-one `by_lo` scan plus one ladder step per candidate — work linear in
-candidates × scan length, independent of how large the deeper engine
-structures are. -/
-theorem probe_order_covering_work_bound : ∀ (candidates scan_len : Nat),
-    probe_ladder_work candidates scan_len ≤ candidates * (scan_len + 1) := by
-  intro candidates scan_len
-  induction candidates with
-  | zero => simp [probe_ladder_work]
-  | succ c ih =>
-      have h := covering_pos_steps_le scan_len
-      simp only [probe_ladder_work, Nat.succ_mul]
-      omega
-
-/-! ## Bridges to the real extract -/
+/-! ## Bridges to the real extract (human, declared) -/
 
 /-- ok chains: a bind equal to an ok value forces the bound operation to
 have returned ok (Cf.lean's `bind_ok_inv`, restated for this module). -/
@@ -211,29 +177,12 @@ theorem probe_ladder_body_done_at_len :
   · rename_i hge
     exact fun hlt => hge (UScalar.lt_imp _ _ hlt)
 
-/-! ## Scale side: the probe count itself -/
+/-! ## Scale side: the saturating-add bridge (public — the emitted
+`ScalePredictDerived.lean` composes it) -/
 
 /-- The extracted saturating add never exceeds the plain sum. -/
-private theorem saturating_add_val_le (x y : Std.U64) :
+theorem saturating_add_val_le (x y : Std.U64) :
     (core.num.U64.saturating_add x y).val ≤ x.val + y.val := by
   unfold core.num.U64.saturating_add UScalar.saturating_add
   simp only [UScalar.val, UScalarTy.numBits, UScalar.max, BitVec.toNat_ofNat]
-  omega
-
-/-- RFC-0199 count (P0.3), `catalog:scale_predict` graduation: under the
-L0-covering cap invariant (`l0_covering ≤ l0_max`) and a
-`levels + l0_max` that fits in u64, the probes a point get pays never
-exceed `levels + l0_max` — the level-ratio shape: probes grow with the
-level count, not with the file count. -/
-theorem point_get_probes_le_levels_l0_max :
-    ∀ (levels l0_covering l0_max : Std.U64),
-      l0_covering.val ≤ l0_max.val →
-      levels.val + l0_max.val ≤ 18446744073709551615 →
-      ∃ v, point_get_probes levels l0_covering = ok v ∧
-        v.val ≤ levels.val + l0_max.val := by
-  intro levels l0_covering l0_max hcap hfit
-  have h : point_get_probes levels l0_covering
-      = ok (core.num.U64.saturating_add levels l0_covering) := rfl
-  refine ⟨_, h, ?_⟩
-  have hle := saturating_add_val_le levels l0_covering
   omega
