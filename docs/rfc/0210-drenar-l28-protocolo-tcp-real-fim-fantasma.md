@@ -123,7 +123,11 @@ paralela) — este RFC não os toca.
 2. **P0.2:** cadência l28 2/4 — `l28_tcp_trunc`, `l28_tcp_odrop`,
    `l28_tcp_abort`, `l28_tcp_nowms` (cap 80→76, `floor_atom`
    51→55, `floor_extract` 227→223); plantas `removed_*` verdes —
-   status: `todo`
+   status: `doing`
+   — 1/4 `done`: `l28_tcp_trunc_ok_fate_iff` (L28.lean; disco sem
+   `index > commit` na réplica tirada de `ids` ⟺ o truncate
+   persistiu), cap 80→79, floor_atom 51→52, floor_extract 227→226;
+   planta TCP REAL verde
 
 ### P1 — next wave (depends on P0 or clearly deferrable)
 

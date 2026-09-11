@@ -3815,7 +3815,6 @@
     "crates/pedradb-store/src/bin/cluster_real.rs"
    ],
    "entry": "l28_tcp_trunc_ok",
-   "data_fate": true,
    "handlers": [
     "tcp_node_removed_truncate_ok"
    ],
@@ -3829,7 +3828,11 @@
      "file": "crates/pedradb-store/src/bin/cluster_real.rs",
      "handler": "tcp_node_removed_truncate_ok"
     }
-   ]
+   ],
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0210 P0.2 l28 cadence 2/4: after a real TCP plant + process death recover truncate persists so disk has no index>commit on a replica dropped from ids exactly when the truncate persisted (fate forall over the extracted pure-lift body, L28.lean); AS-IS ok-true skips the removed-replica truncate persist (0131 leftover)"
+   }
   },
   {
    "id": "l28_tcp_odrop",
