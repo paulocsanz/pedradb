@@ -123,6 +123,21 @@ theorem batch_is_empty_ok_iff_zero :
   · intro h
     rw [h]
 
+/-- RFC-0191 P2.3 (thirtieth if): the directory-sync gate returns ok v
+    exactly when v is the sync flag itself — the computation rule of the
+    do-block body (a pure lift; rename/create is followed by a dir fsync
+    precisely when open-options sync is on). -/
+theorem dir_sync_required_ok_iff_sync :
+    ∀ (sync v : Bool),
+      (dir_sync_required sync = ok v) ↔ (sync = v) := by
+  intro sync v
+  unfold dir_sync_required
+  constructor
+  · intro h
+    injection h with _
+  · intro h
+    rw [h]
+
 /-- `put_if_eq`: live == expected ⇒ put. -/
 theorem cas_eq_put_match_puts :
     cas_eq_put true = ok true := by

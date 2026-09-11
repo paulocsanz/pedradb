@@ -7222,7 +7222,7 @@
   {
    "id": "dir_sync_required",
    "finding": "RFC-0171 P1.1",
-   "twin_kind": "close",
+   "twin_kind": "atom",
    "single_artifact": true,
    "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
    "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
@@ -7231,7 +7231,6 @@
     "crates/pedradb-core/src/db.rs"
    ],
    "entry": "dir_sync_required",
-   "data_fate": true,
    "handlers": [
     "sync_dir_if_required"
    ],
@@ -7240,6 +7239,11 @@
    "dst_plant": {
     "file": "crates/pedradb-core/src/write_admission_kernel.rs",
     "test": "dir_sync_required_on_live_sync_is_not_ok"
+   },
+   "atom": "dir_sync_required",
+   "atom_reason": {
+    "date": "2026-09-10",
+    "why": "(thirtieth if): the dir-sync disposition — a rename/create is followed by a directory fsync exactly when open-options sync is on and the flag lands in v — proven forall over (sync, v) as dir_sync_required_ok_iff_sync in WriteAdmission.lean; the body is the pure lift ok sync, so the iff is the full computation rule of the extracted do-block; the pedradb-core trampoline (sync_dir_if_required) matches the kernel decision."
    }
   },
   {
