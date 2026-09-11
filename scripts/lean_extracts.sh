@@ -39,6 +39,7 @@ COMPOSE=(
   ComposeC1Membership
   ComposeConcurrent
   ComposeStoreRaft
+  ComposeL28
   LsmCompactBridges
   LsmCompactDerived
   ProbeLadderBridges

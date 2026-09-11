@@ -538,3 +538,19 @@ Estado: 33 pares l28 no catálogo; 2 pagos (`l28_tcp_left`,
   `forall_schedules_admitted`, `lock_interleavings_admitted`)
   seguem ALWAYS false — recusas plantadas; o TCB nomeado no 0205
   P2.1 permanece intocado.
+
+## 2026-09-11 — bloco l28 DRENADO (RFC-0210): ZERO `data_fate` pendente
+
+Medido ao vivo no HEAD do 0210: 26 pares l28 no catálogo, ZERO com
+`data_fate` pendente — 22 pure-lifts promovidos a atoms registrados
+(L28.lean, 22 teoremas `_ok_fate_iff`; plantas TCP reais verdes) +
+7 fantasmas aposentados no P1.2 (fe236f91, recusa datada). Escada
+final do 0210: cap 84→55, floor_atom 47→69, floor_extract 231→209.
+Composição ∀ do protocolo de remoção TCP em `ComposeL28.lean` (20ª
+compose lib; remove → left ∧ high-water preservado sobre os atoms
+`catalog:l28_tcp_left` × `catalog:l28_tcp_hw`; SEM registro no
+TSV — não é par único do catálogo, mesma regra das demais compose
+libs). Restam nomeados no cluster: 29 (22 em
+`crates/pedradb-raft/src/membership_kernel.rs`, 6 em
+`crates/pedradb-store/src/txn_kernel.rs`, 1 singleton
+`compact_unleft` em `compact_kernel.rs`).

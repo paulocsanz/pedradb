@@ -263,7 +263,17 @@ status: `done`
    de `software/`, gates 3× GREEN, extracts ok, sorry 0, capturas
    em findings, nota datada em EXTRACT.md: l28 drenado; 29 do
    cluster restantes nomeados) + flip `**Status:** done` —
-   status: `todo`
+   status: `doing`
+
+   — Composição `done`: `ComposeL28.lean` (20ª compose lib;
+   `l28_removal_protocol_fate_composed` + `l28_removal_protocol_fused`
+   — remove → left ∧ high-water preservado sobre os atoms
+   `catalog:l28_tcp_left` × `catalog:l28_tcp_hw`); zero buracos;
+   build verde (1700 jobs); extracts "61 libs + 20 compose"; SEM
+   registro no TSV (não é par único — razão em findings); plantas
+   DST verdes (left 250.48s; hw ver findings); nota datada no
+   EXTRACT.md (l28 drenado; 29 do cluster restantes nomeados).
+   Sweep final + flip Status: pendente
 
 ## Status (living — update with every PR)
 
