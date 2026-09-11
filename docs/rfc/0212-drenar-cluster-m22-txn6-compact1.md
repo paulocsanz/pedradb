@@ -138,6 +138,14 @@ pool honesto manda sobre a meta numérica).
    planta DST verde
    (`membership_identity_before_applied_on_live_queued_is_not_ok`,
    no mesmo lote paralelo)
+
+   — 5/8 `done`: `open_peer_uses_disk_fate_iff`
+   (Membership.lean; open in-process carrega peers do disco de
+   membership, exatamente quando há membership em disco — nunca
+   do CLI `n_nodes`), cap 43→42, floor_atom 81→82,
+   floor_extract 197→196; planta DST verde
+   (`open_peer_uses_disk_on_live_queued_is_not_ok`,
+   no mesmo lote paralelo)
 4. **P1.2:** cadências membership 5/6 + 6/6 — `pending_joint_node`,
    `joint_target`, `joint_add_target`, `joint_leave_ok` (joint);
    `drop_repl_slot`, `drop_sent_through` (slot): ×6, cap 39→33,

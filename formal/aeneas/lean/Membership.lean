@@ -558,3 +558,19 @@ theorem membership_identity_before_applied_fate_iff :
   intro identity_first v
   unfold membership_identity_before_applied
   cases identity_first <;> cases v <;> simp
+
+/-- RFC-0212 P1.1 (membership cadence 4/6, atom
+    `catalog:open_peer_disk`): in-process open loads raft peers
+    from EXACTLY the on-disk membership — never from the CLI
+    `n_nodes` — fate forall over the extracted pure-lift body;
+    the AS-IS mutant trusts CLI `1..=n_nodes` (the 0125
+    leftover: only TCP peeked at disk — the lie the DST plant
+    `open_peer_uses_disk_on_live_queued_is_not_ok` refutes). -/
+theorem open_peer_uses_disk_fate_iff :
+    ∀ (has_disk : Bool) (v : Bool),
+      (open_peer_uses_disk has_disk = ok v) ↔
+        ((v = true ∧ has_disk = true)
+          ∨ (v = false ∧ has_disk = false)) := by
+  intro has_disk v
+  unfold open_peer_uses_disk
+  cases has_disk <;> cases v <;> simp
