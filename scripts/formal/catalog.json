@@ -252,7 +252,6 @@
      "handler": "leave_joint"
     }
    ],
-   "data_fate": true,
    "handlers": [
     "leave_joint"
    ],
@@ -260,6 +259,10 @@
    "dst_plant": {
     "file": "crates/pedradb-store/src/three_teeth_queued.rs",
     "test": "joint_leave_ok_on_live_queued_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0096: joint commitado nao e config unica ate um leave (old==new) estar no log; as-is 0066 pulava o leave-joint no caminho vivo de add"
    }
   },
   {

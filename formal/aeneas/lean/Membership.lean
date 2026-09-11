@@ -672,3 +672,20 @@ theorem joint_add_target_counts_fate_iff :
   intro in_nodes v
   unfold joint_add_target_counts
   cases v <;> simp
+
+/-- RFC-0212 P1.2 (membership cadence 5/6, atom
+    `catalog:joint_leave_ok`): a committed joint is not a single
+    config until a leave (`old == new`) is in the log — the
+    joint finish counts EXACTLY when the leave entry is in the
+    log — fate forall over the extracted pure-lift body; the
+    AS-IS mutant skips the leave-joint (the 0066 leftover on
+    the live add path — the lie the DST plant
+    `joint_leave_ok_on_live_queued_is_not_ok` refutes). -/
+theorem joint_leave_ok_fate_iff :
+    ∀ (leave_in_log : Bool) (v : Bool),
+      (joint_leave_ok leave_in_log = ok v) ↔
+        ((v = true ∧ leave_in_log = true)
+          ∨ (v = false ∧ leave_in_log = false)) := by
+  intro leave_in_log v
+  unfold joint_leave_ok
+  cases leave_in_log <;> cases v <;> simp
