@@ -1,6 +1,6 @@
 # RFC-0209 — Buffer de WAL em user-space: staging no `WalWriter` com flush por tamanho
 
-**Status:** closing (P0 completo; P1.1/P1.2 adjudicados 2026-09-11 pelo meter p209b)
+**Status:** closing (P0 completo; P1.1/P1.2 adjudicados 2026-09-11 pelo meter p209b; P2.2/P2.3 terminais 2026-09-11; P2.1 meter na onda deste ciclo)
 **Updated:** 2026-09-11
 **ID:** 0209
 **Parents:** [0193](0193-write-off-lock-pwrite-ticket.md) (ticket off-lock verificado em working tree e perdido PRÉ-COMMIT — forense `2026-09-11-wipe-forense/`; sem ele, TODO write WAL paga `write()` por op: é o alvo daqui),
@@ -153,12 +153,31 @@ grupo continua direto; o 1-op passa a staging) e com o merge-eixo 0201
 
 - [ ] **P2.1** U-cells lote Linux 3-run (qs, point_select, wbwi, flink,
       venice, arango, pipelined) — anti-overfit: nenhum mecanismo sem
-      Linux 3-run — status: `deferred` (herdado 0196 P2.1)
-- [ ] **P2.2** Meters pesados: prefix 100M @4GiB (0195 P0.4) e 15M/25M
-      (0194 P0.4) — custo nomeado no inventário — status: `deferred`
-      (herdado 0196 P1.1/P1.2)
-- [ ] **P2.3** Grid B anti-overfit no corte vencedor (se P0 validar) —
-      status: `deferred` (herdado 0196 P2.2)
+      Linux 3-run — status: `meter agendado` (2026-09-11: as 7 células são
+      suítes opt-in do próprio harness — `ROCKS_PARITY_SUITE=
+      qs,myrocks,streaming,arango,venice,rocksapi,kvrocks`; lote 3-run
+      quiet marcado para a onda de gate deste ciclo, junto ao meter P0 do
+      RFC-0211; veredito terminal datado aqui quando a onda rodar)
+- [x] **P2.2** Meters pesados: prefix 100M @4GiB (0195 P0.4) e 15M/25M
+      (0194 P0.4) — custo nomeado no inventário — status:
+      `blocked (re-adjudicado 2026-09-11)` — o gate de
+      `2026-09-10-host-gate-blocked-meter.md` foi **reaberto às 01:30**
+      (adendo no próprio finding; as ondas p201o/q/r2/p209a/p209b rodaram
+      por ele); o que bloqueia hoje é o **orçamento de onda + custo
+      nomeado** (dataset 4 GiB + ≈horas por braço; host-check 2026-09-11:
+      Darwin dados 94% usado / 61 GiB livres — o ENOSPC 97–100% de
+      09-06/09-10 **não persiste**, registrado; load1 10,78 com a sessão
+      paralela viva) e a alocação da onda deste ciclo ao meter P0 do
+      RFC-0211 (rank 1 do inventário). Reabrir = onda dedicada com
+      orçamento; donos seguem 0196 P1.1/P1.2
+- [x] **P2.3** Grid B anti-overfit no corte vencedor (se P0 validar) —
+      status: `done (non-condition, adjudicado 2026-09-11)` — o corte
+      vencedor da P1.1 é **não flipar o default** (opt-in mantido; min
+      regrediu em 2 células): nenhum default mudou, não há corte default
+      para gridar; evidência parcial da perna 10× com compaction on =
+      célula 10k do gate 0185 medida nos dois braços 3/3 ≥ 1,0 (p209b:
+      nobuf min 1,078 / buf min 1,268); o grid 10–100× completo volta a
+      ser pré-condição de qualquer flip futuro de default
 
 ## Status (living — update with every PR)
 
@@ -169,9 +188,9 @@ grupo continua direto; o 1-op passa a staging) e com o merge-eixo 0201
 | P0.3 | p0 | meter 3 rounds quiet (alvo+guardiãs+10k) | done (p209a/p209b; 10k 3/3 ≥1,0 ambos braços) | findings/2026-09-11-p209-wal-buffer-meter | 2026-09-11 |
 | P1.1 | p1 | flip default pós-meter | done — decisão: manter opt-in (min regrediu em 2 células) | findings/2026-09-11-p209-wal-buffer-meter | 2026-09-11 |
 | P1.2 | p1 | atribuição ycsb_a (hat do inventário) | done — perda 0,605 era boot-specific (2,602 neste boot) | findings/2026-09-11-p209-wal-buffer-meter | 2026-09-11 |
-| P2.1 | p2 | U-cells lote Linux 3-run | deferred (herdado) | inventário 2026-09-11 | 2026-09-11 |
-| P2.2 | p2 | meters pesados 100M/15M/25M | deferred (herdado) | inventário 2026-09-11 | 2026-09-11 |
-| P2.3 | p2 | Grid B no corte vencedor | deferred (herdado) | inventário 2026-09-11 | 2026-09-11 |
+| P2.1 | p2 | U-cells lote Linux 3-run | meter agendado (onda deste ciclo, junto ao P0 do 0211) | inventário 2026-09-11 | 2026-09-11 |
+| P2.2 | p2 | meters pesados 100M/15M/25M | blocked (re-adjudicado 2026-09-11: gate 09-10 reaberto 01:30; bloqueio = orçamento de onda + custo nomeado; host-check datado no RFC) | inventário 2026-09-11 | 2026-09-11 |
+| P2.3 | p2 | Grid B no corte vencedor | done (non-condition: P1.1 não flipou default; perna 10× compaction-on medida 3/3 ≥1,0 nos 2 braços p209b) | findings/2026-09-11-p209-wal-buffer-meter | 2026-09-11 |
 
 ## Acceptance Criteria
 
