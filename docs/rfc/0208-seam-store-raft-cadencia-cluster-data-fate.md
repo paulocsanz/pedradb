@@ -1,6 +1,6 @@
 # RFC: 0208 — fechar o seam store/raft: a cadência do cluster data-fate e a composição do destino
 
-**Status:** draft
+**Status:** done
 **Updated:** 2026-09-11
 **Parents:** [0205](0205-degrau-composto-offlock-forall-data-fate.md)
 (o degrau composto: primeiro atom do cluster store/raft
@@ -170,6 +170,16 @@ paralela) — este RFC não as toca.
    nota datada do seam em `EXTRACT.md` (raft fechado; cluster
    8+3/66 pagos; 55 restantes nomeados para a próxima cadência),
    flip `**Status:** done`.
+   — `done`: worktree destacado DENTRO de `software/` no HEAD final
+   do P2.1 (`98d7b960`): gates 3× GREEN, extracts `--required` ok
+   (61 libs + 19 compose, 1929 jobs), sorry 0 nos wrappers tocados,
+   admissions always false; capturas em
+   `findings/2026-09-11-rfc0208-p22-sweep-final/`. Nota datada do
+   seam em `EXTRACT.md`: raft fechado (zero `data_fate` nos kernels
+   vote/commit/membership), cluster 8/66 pago pelo 0208, restante
+   vivo nomeado = 58 (correção datada: o "55" do texto subtraía o
+   trio do 0205 já fora dos 66; são 22 membership + 29 l28 + 6 txn
+   + 1 compact_unleft).
 
 ## Status (living — update with every PR)
 
@@ -180,7 +190,7 @@ paralela) — este RFC não as toca.
 | P1.1 | p1 | Composição do cluster (recovery/reconfig como ∀ sobre atoms) | done | election_grant_chain_fate + recovery_fate_composed (ComposeStoreRaft.lean) | 2026-09-11 |
 | P1.2 | p1 | Cadência membership ×4 (cap 90→86) | done | removed_steps_down + disk_membership_overrides_cli + high_water_at_least + joint_still_active _fate_iff (Membership.lean; 4 commits) | 2026-09-11 |
 | P2.1 | p2 | Banda l28 ×2 + plano datado do bloco (cap 86→84) | done | l28_tcp_left_ok_fate_iff + l28_tcp_hw_ok_fate_iff (L28.lean; 2 commits) | 2026-09-11 |
-| P2.2 | p2 | Sweep final + nota do seam store/raft | todo | — | 2026-09-11 |
+| P2.2 | p2 | Sweep final + nota do seam store/raft | done | 9a20cb25 (sweep + nota) + flip deste commit | 2026-09-11 |
 
 ## Critérios de aceite
 
