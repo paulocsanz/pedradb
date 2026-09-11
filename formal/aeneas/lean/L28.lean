@@ -557,3 +557,19 @@ theorem l28_tcp_pre_ok_fate_iff :
   intro b v
   unfold l28_tcp_pre_ok
   cases b <;> cases v <;> simp
+
+/-- RFC-0210 P1.1 (l28 cadence 4/4, atom `catalog:l28_tcp_peer`):
+    after a REAL TCP plant + process death, the TCP ctor election
+    timeout follows disk C-new EXACTLY when it read the disk
+    membership — not the stale CLI — fate forall over the extracted
+    pure-lift body; the AS-IS `ok true` mutant skips the TCP
+    disk-peer timeout (the 0139 leftover: CLI n_nodes — the lie the
+    real TCP plant `l28_real_tcp_removed_peer` refutes). -/
+theorem l28_tcp_peer_ok_fate_iff :
+    ∀ (b : Bool) (v : Bool),
+      (l28_tcp_peer_ok b = ok v) ↔
+        ((v = true ∧ b = true)
+          ∨ (v = false ∧ b = false)) := by
+  intro b v
+  unfold l28_tcp_peer_ok
+  cases b <;> cases v <;> simp

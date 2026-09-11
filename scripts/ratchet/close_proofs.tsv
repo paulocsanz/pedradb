@@ -86,3 +86,4 @@ atom	catalog:l28_tcp_hist	l28_tcp_hist_ok_fate_iff	formal/aeneas/lean/L28.lean	l
 atom	catalog:l28_tcp_fence	l28_tcp_fence_ok_fate_iff	formal/aeneas/lean/L28.lean	l28_tcp_fence_ok
 atom	catalog:l28_tcp_clear	l28_tcp_clear_ok_fate_iff	formal/aeneas/lean/L28.lean	l28_tcp_clear_ok
 atom	catalog:l28_tcp_pre	l28_tcp_pre_ok_fate_iff	formal/aeneas/lean/L28.lean	l28_tcp_pre_ok
+atom	catalog:l28_tcp_peer	l28_tcp_peer_ok_fate_iff	formal/aeneas/lean/L28.lean	l28_tcp_peer_ok

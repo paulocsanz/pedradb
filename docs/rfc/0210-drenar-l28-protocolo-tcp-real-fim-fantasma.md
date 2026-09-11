@@ -161,6 +161,10 @@ status: `done`
    — 4/8 `done`: `l28_tcp_pre_ok_fate_iff` (L28.lean; preimages de
    TX caídas ⟺ a queda aconteceu), cap 73→72, floor_atom 58→59,
    floor_extract 220→219; planta TCP REAL verde
+   — 5/8 `done`: `l28_tcp_peer_ok_fate_iff` (L28.lean; timeout de
+   eleição do ctor TCP segue o C-new do disco, não a CLI stale),
+   cap 72→71, floor_atom 59→60, floor_extract 219→218; planta TCP
+   REAL verde
 4. **P1.2:** veredito datado dos 7 fantasmas — por fantasma:
    re-escrever para `fn` viva SE o caminho add-member existir em
    produção; senão aposentadoria com recusa datada EM FINDINGS,

@@ -4094,7 +4094,6 @@
     "crates/pedradb-store/src/bin/cluster_real.rs"
    ],
    "entry": "l28_tcp_peer_ok",
-   "data_fate": true,
    "handlers": [
     "tcp_node_removed_peer_ok"
    ],
@@ -4108,7 +4107,11 @@
      "file": "crates/pedradb-store/src/bin/cluster_real.rs",
      "handler": "tcp_node_removed_peer_ok"
     }
-   ]
+   ],
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0210 P1.1 l28 cadence 4/4: after a real TCP plant + process death the TCP ctor election timeout follows disk C-new exactly when it read the disk membership, not the stale CLI (fate forall over the extracted pure-lift body, L28.lean); AS-IS ok-true skips the TCP disk-peer timeout (0139 leftover)"
+   }
   },
   {
    "id": "l28_tcp_lid",
