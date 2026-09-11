@@ -120,3 +120,4 @@ atom	catalog:drop_repl_slot	drop_repl_slot_fate_iff	formal/aeneas/lean/Membershi
 atom	catalog:drop_sent_through	drop_sent_through_fate_iff	formal/aeneas/lean/Membership.lean	drop_sent_through
 atom	catalog:discard_cut	discard_cut_fate_iff	formal/aeneas/lean/StoreTxn.lean	discard_cut
 atom	catalog:leftover_txn_is_aborted	leftover_txn_is_aborted_fate_iff	formal/aeneas/lean/StoreTxn.lean	leftover_txn_is_aborted
+atom	catalog:next_txn_id_after	next_txn_id_after_fate_iff	formal/aeneas/lean/StoreTxn.lean	next_txn_id_after

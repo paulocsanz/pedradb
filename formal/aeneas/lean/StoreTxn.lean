@@ -223,3 +223,35 @@ theorem leftover_txn_is_aborted_fate_iff :
   unfold leftover_txn_is_aborted leftover_fate
   cases v <;> simp
 
+/-- RFC-0212 P2.1 (store-txn cadence, atom `catalog:next_txn_id_after`):
+    the next txn id is EXACTLY max(max_seen ⊕ 1, 1) — never a reuse
+    of a durable id, floored at 1 — fate forall over the extracted
+    body (F35); the AS-IS mutant restarts the counter at 1 (id
+    collision with the leftover txn on disk — the lie the DST plant
+    `next_txn_id_after_on_live_reopen_is_not_ok` refutes). -/
+theorem next_txn_id_after_fate_iff :
+    ∀ (max_seen v : U64),
+      (next_txn_id_after max_seen = ok v) ↔
+        ((v = 1#u64
+            ∧ core.num.U64.saturating_add max_seen 1#u64 < 1#u64)
+          ∨ (v = core.num.U64.saturating_add max_seen 1#u64
+            ∧ ¬ (core.num.U64.saturating_add max_seen 1#u64 < 1#u64))) := by
+  intro max_seen v
+  have hreduce : next_txn_id_after max_seen
+      = core.cmp.Ord.max.default core.cmp.OrdU64.partialOrdInst.lt
+          (core.num.U64.saturating_add max_seen 1#u64) 1#u64 := rfl
+  rw [hreduce]
+  have hsem : ∀ (x y : U64),
+      core.cmp.OrdU64.partialOrdInst.lt x y = ok (decide (x < y)) := fun x y => rfl
+  unfold core.cmp.Ord.max.default core.cmp.Ord.max_body
+  rw [hsem]
+  cases hd : decide (core.num.U64.saturating_add max_seen 1#u64 < 1#u64) with
+  | true =>
+    have hP : core.num.U64.saturating_add max_seen 1#u64 < 1#u64 := of_decide_eq_true hd
+    simp [hd, hP]
+    exact eq_comm
+  | false =>
+    have hnP : ¬ (core.num.U64.saturating_add max_seen 1#u64 < 1#u64) := of_decide_eq_false hd
+    simp [hd, hnP]
+    exact eq_comm
+
