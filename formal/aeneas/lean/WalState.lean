@@ -386,3 +386,31 @@ theorem wal_write_step_preserves_inv_wal :
   | append n happ => exact wal_append_preserves_inv_wal _ _ n hinv happ
   | sync h hs => exact wal_sync_preserves_inv_wal h _ _ hinv hs
   | ack n hack => exact wal_ack_preserves_inv_wal _ _ n hinv hack
+
+/-- RFC-0200 P0.1: cadeia de k passos do write path a partir do estado
+inicial — QUALQUER construtor da família (append, sync, ack), em
+qualquer ordem. Esta é a física real do group commit, não só
+append-contas. -/
+inductive wal_write_step_reach :
+    Nat → wal.wal_state_kernel.WalState → Prop
+  | init : wal_write_step_reach 0 wal_state_init
+  | step (k : Nat) (s s' : wal.wal_state_kernel.WalState) :
+      wal_write_step s s' →
+      wal_write_step_reach k s →
+      wal_write_step_reach (k + 1) s'
+
+/-- RFC-0200 P0.1 COROLÁRIO: TODO estado alcançável por qualquer
+sequência de passos do write path (append/sync/ack intercalados, a
+partir do log vazio) satisfaz Inv-WAL — a frase seL4 completa do WAL.
+Indução sobre a cadeia; base = `inv_wal_init` (RFC-0198 P1.1), passo =
+CITA `wal_write_step_preserves_inv_wal` (RFC-0198 P1.2, registrado);
+nada é re-provado aqui. -/
+theorem inv_wal_write_reachable :
+    ∀ (k : Nat) (s : wal.wal_state_kernel.WalState),
+      wal_write_step_reach k s →
+        wal.wal_state_kernel.inv_wal s = ok true := by
+  intro k s hreach
+  induction hreach with
+  | init => exact inv_wal_init
+  | step k' s0 s1 hstep _ IH =>
+      exact wal_write_step_preserves_inv_wal _ _ IH hstep

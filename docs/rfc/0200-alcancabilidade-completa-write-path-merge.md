@@ -90,10 +90,12 @@ sendo Pedra vs RocksDB default `sync=false` (`ROCKS_PARITY_SYNC=0`).
 
 ### P0 — must ship first (a frase completa do WAL + o próximo close)
 
-- [ ] **P0.1** `wal_write_step_reach` + `inv_wal_write_reachable` em
+- [x] **P0.1** `wal_write_step_reach` + `inv_wal_write_reachable` em
   `WalState.lean` — corolário por indução citando `inv_wal_init` (base)
   e `wal_write_step_preserves_inv_wal` (passo, registrado 0198) —
-  status: `todo`
+  status: `done` (família indutiva Nat-indexada sobre QUALQUER
+  construtor de `wal_write_step` a partir de `wal_state_init`; build
+  verde primeira tentativa, sorry 0)
 - [ ] **P0.2** Quarto close de glue registrado (par do board compose a
   escolher pelo corpo tratável; iff ∀ ∃-mold, floor_close 3→4 no mesmo
   commit) — status: `todo`
@@ -119,7 +121,7 @@ sendo Pedra vs RocksDB default `sync=false` (`ROCKS_PARITY_SYNC=0`).
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | Alcançabilidade da classe write-path (Inv-WAL) | todo | — | 2026-09-11 |
+| P0.1 | p0 | Alcançabilidade da classe write-path (Inv-WAL) | done | inv_wal_write_reachable | 2026-09-11 |
 | P0.2 | p0 | Quarto close de glue registrado | todo | — | 2026-09-11 |
 | P1.1 | p1 | Base de saída do merge + corolário alcançável | todo | — | 2026-09-11 |
 | P1.2 | p1 | Ponte sift_step↔newest-first | todo | — | 2026-09-11 |
