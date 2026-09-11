@@ -154,3 +154,18 @@ theorem wal_segment_is_empty_as_is_dente :
     wal_segment_is_empty_as_is 0#u64 = ok false := by
   unfold wal_segment_is_empty_as_is
   rfl
+
+/-- RFC-0198 P2.2 (first cap-descent if): the OCC snapshot reads the
+    published seq exactly when a commit is inflight — the computation
+    rule of the do-block body (a pure lift; the caller's off-lock window
+    decides the snapshot's visibility base). -/
+theorem occ_snap_uses_published_ok_iff_inflight :
+    ∀ (commit_inflight v : Bool),
+      (occ_snap_uses_published commit_inflight = ok v) ↔ (commit_inflight = v) := by
+  intro commit_inflight v
+  unfold occ_snap_uses_published
+  constructor
+  · intro h
+    injection h with _
+  · intro h
+    rw [h]

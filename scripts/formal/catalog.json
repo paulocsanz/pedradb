@@ -3128,7 +3128,6 @@
     "crates/pedradb-core/src/concurrent.rs"
    ],
    "entry": "occ_snap_uses_published",
-   "data_fate": true,
    "handlers": [
     "occ_snapshot"
    ],
