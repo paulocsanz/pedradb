@@ -112,7 +112,13 @@
   concreto num `scale_kernel` (`scale_forecast`, callers/callees já
   unfoldados) + re-tier do par — status: `todo` (a graduação de scale é
   pague pelo [RFC-0199](0199-escada-de-contagem-complexidade-verificada.md)
-  P0.3, crédito `count`; este item fecha com aquele)
+  P0.3, crédito `count`; este item fecha com aquele) — **BLOQUEIO EXTERNO
+  DATADO 2026-09-11**: o P0.3 do 0199 ("gradua
+  `probe_order_covering`/`scale_predict` de model → count — absorve a
+  P2.1 do 0198") ainda é `todo` no RFC dela; a sessão paralela landou
+  P0.1+P0.2 (commit 4df272d5, kind `count` + primeiro teorema) e é dona
+  do P0.3; este item flipa no mesmo commit que registrar o re-tier
+  quando aquele landar (nunca um skip silencioso)
 - [x] **P2.2** Cadência cap continua: cada novo atom df desce
   `cap_data_fate` 100→99→… no mesmo commit (mesma receita um-por-commit
   do P2.3/0191; sem alvo numérico novo além da monotonicidade) —
@@ -141,7 +147,7 @@
 | P1.2 | p1 | Inv-WAL passo sync/fence | done | wal_write_step_preserves_inv_wal | 2026-09-11 |
 | P1.3 | p1 | Inv-LSM corolário indutivo (k merges) | done | merge_chain_preserves_inv_lsm | 2026-09-11 |
 | P1.4 | p1 | Tokens write_pending_frame (2 handlers, coordenação concurrent.rs) | done | board unpaid_script=0/17 (tokens no HEAD) | 2026-09-11 |
-| P2.1 | p2 | Model→concreto: scale_kernel N concreto | todo | — | 2026-09-10 |
+| P2.1 | p2 | Model→concreto: scale_kernel N concreto | blocked (externo: 0199 P0.3) | — | 2026-09-11 |
 | P2.2 | p2 | Cadência cap monotônica (df atoms) | done | occ_snap_uses_published_ok_iff_inflight (cap 100→99) | 2026-09-11 |
 | P2.3 | p2 | Herdados 0187 seguem terminais (sem re-abrir) | done | cita ledger §"Herdados do 0187" (0191 P2.4) | 2026-09-11 |
 
