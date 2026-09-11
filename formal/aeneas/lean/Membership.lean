@@ -622,3 +622,20 @@ theorem participating_if_member_fate_iff :
   intro in_ids v
   unfold participating_if_member
   cases in_ids <;> cases v <;> simp
+
+/-- RFC-0212 P1.2 (membership cadence 5/6, atom
+    `catalog:pending_joint_node`): the pending joint is defined
+    EXACTLY by the logs of current members — fate forall over
+    the extracted pure-lift body; the AS-IS mutant scans every
+    opened node including removed ones (the 0104 leftover — the
+    lie the DST plant
+    `pending_joint_node_counts_on_live_queued_is_not_ok`
+    refutes). -/
+theorem pending_joint_node_counts_fate_iff :
+    ∀ (is_member : Bool) (v : Bool),
+      (pending_joint_node_counts is_member = ok v) ↔
+        ((v = true ∧ is_member = true)
+          ∨ (v = false ∧ is_member = false)) := by
+  intro is_member v
+  unfold pending_joint_node_counts
+  cases is_member <;> cases v <;> simp

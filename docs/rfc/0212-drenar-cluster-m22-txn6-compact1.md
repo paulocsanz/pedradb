@@ -173,7 +173,14 @@ pool honesto manda sobre a meta numérica).
    `joint_target`, `joint_add_target`, `joint_leave_ok` (joint);
    `drop_repl_slot`, `drop_sent_through` (slot): ×6, cap 39→33,
    floor_atom 85→91, floor_extract 193→187 — membership ZERO
-   `data_fate` medido ao vivo — status: `todo`
+   `data_fate` medido ao vivo — status: `doing`
+
+   — 1/6 `done`: `pending_joint_node_counts_fate_iff`
+   (Membership.lean; o joint pendente é definido exatamente pelos
+   logs dos membros atuais), cap 39→38, floor_atom 85→86,
+   floor_extract 193→192; planta DST verde
+   (`pending_joint_node_counts_on_live_queued_is_not_ok`,
+   6 plantas em paralelo, 1.51s)
 5. **P1.3:** veredito datado dos medidos ausentes — SE alguma
    promoção acima medir fn/planta/handler inexistente, veredito por
    par em findings (reescrever para fn viva SE o caminho existir em

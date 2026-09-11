@@ -221,7 +221,6 @@
      "handler": "pending_joint"
     }
    ],
-   "data_fate": true,
    "handlers": [
     "pending_joint"
    ],
@@ -229,6 +228,10 @@
    "dst_plant": {
     "file": "crates/pedradb-store/src/three_teeth_queued.rs",
     "test": "pending_joint_node_counts_on_live_queued_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0105: o joint pendente e definido so pelos logs dos membros atuais; as-is 0104 escaneava todo no aberto, inclusive removido"
    }
   },
   {
