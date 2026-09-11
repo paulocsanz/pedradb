@@ -243,7 +243,7 @@ contagens movem no mesmo commit; `lock_interleavings_admitted` e
 | P1.6 | p1 | Gates Lean/depth/product verdes em cada promoção | todo | — | 2026-09-10 |
 | P2.1 | p2 | Inv-WAL preservação (um passo) | done | `wal_append_preserves_inv_wal` + corolário `d1_plan_append_preserves_inv_wal` WalState.lean | 2026-09-10 |
 | P2.2 | p2 | Inv-LSM `visible_at` ∘ probe-order (um passo) | done | `inv_lsm_newest_first_never_non_live` + corolário `r1_get_never_returns_non_live` Merge.lean (R1 segue atom) | 2026-09-10 |
-| P2.3 | p2 | Alvo trampolim cap≤100 / floor_atom≥8 | doing | 24/29 caps pagos (106; …P2.3-23 `pin_gc` — fronteira de GC é o pin vivo, sem pin o mínimo visível, RFC-0150 P2b/F20; P2.3-24 `leveling` — alvo de nível é 0 exatamente no L0, não-zero é l1_target·FANOUT^min(level−1,18) saturado, F-leveling-sweep), atoms 25/8; falta cap 106→≤100 | 2026-09-10 |
+| P2.3 | p2 | Alvo trampolim cap≤100 / floor_atom≥8 | doing | 25/29 caps pagos (105; …P2.3-24 `leveling` — alvo de nível é 0 exatamente no L0, não-zero é l1_target·FANOUT^min(level−1,18) saturado, F-leveling-sweep; P2.3-25 `compact_rewrites_sst_cf` — tag vazia (mista/legacy) nunca é reescrita; tag não-vazia é decidida pelo teste in-family sobre a chave representativa codificada, RFC-0150 P0), atoms 26/8; falta cap 105→≤100 | 2026-09-10 |
 | P2.4 | p2 | Herdados 0187 (L28 / TCG / N=4) | todo | — | 2026-09-10 |
 
 ## Acceptance Criteria

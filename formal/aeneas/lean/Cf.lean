@@ -87,3 +87,52 @@ theorem cf_encode_effective_empty_iff_default_raw_else_identity :
       simp at h
     · rintro (⟨h1, _⟩ | ⟨(⟨h1, _⟩ | h1), _⟩) <;>
       exact absurd h1 (by simp)
+
+/-- Any ok-valued Result bind forces the bound term to be ok. -/
+private theorem bind_ok_inv {α β} (x : Result α) (f : α → Result β) (v : β)
+    (h : Aeneas.Std.bind x f = ok v) : ∃ a, x = ok a ∧ f a = ok v := by
+  cases x with
+  | ok a => exact ⟨a, rfl, h⟩
+  | fail e => exact absurd h (by simp)
+  | div => exact absurd h (by simp)
+
+/-- An ok chain reassembles into an ok bind. -/
+private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : β}
+    (a : α) (hx : x = ok a) (h : f a = ok v) : Aeneas.Std.bind x f = ok v := by
+  rw [hx]
+  exact h
+
+/-- Catalog entry: a compact of `family` rewrites an SST tagged `sst_cf`
+    exactly along the encode-representative route — an empty (mixed /
+    legacy) tag is never rewritten (the value is false); a non-empty tag
+    is decided by the in-family test over the representative encoded key
+    of that tag, with every monadic step of the route ok (RFC-0150 P0). -/
+theorem compact_rewrites_sst_cf_ok_iff_empty_tag_never_or_representative_in_family :
+    ∀ (sst_cf : Str) (family : Str) (v : Bool),
+    (compact_rewrites_sst_cf sst_cf family = ok v) ↔
+      ((∃ b, core.str.Str.is_empty sst_cf = ok b ∧ b = true ∧ v = false) ∨
+       (∃ b s enc, core.str.Str.is_empty sst_cf = ok b ∧ ¬(b = true) ∧
+          lift (Array.to_slice (Std.Array.empty Std.U8)) = ok s ∧
+          encode_cf_key sst_cf s false = ok enc ∧
+          key_in_cf_family (alloc.vec.Vec.deref enc) family = ok v)) := by
+  intro sst_cf family v
+  unfold compact_rewrites_sst_cf
+  constructor
+  · intro hval
+    obtain ⟨b, hb, hval⟩ := bind_ok_inv _ _ _ hval
+    split at hval
+    · next hbt =>
+      injection hval with hv
+      exact Or.inl ⟨b, hb, hbt, hv.symm⟩
+    · next hbt =>
+      obtain ⟨s, hlift, hval⟩ := bind_ok_inv _ _ _ hval
+      obtain ⟨enc, henc, hval⟩ := bind_ok_inv _ _ _ hval
+      exact Or.inr ⟨b, s, enc, hb, hbt, hlift, henc, hval⟩
+  · rintro (⟨b, hb, hbt, hv⟩ | ⟨b, s, enc, hb, hbf, hlift, henc, hkin⟩)
+    · refine bind_intro b hb ?_
+      rw [if_pos hbt, hv]
+    · refine bind_intro b hb ?_
+      rw [if_neg hbf]
+      refine bind_intro s hlift ?_
+      refine bind_intro enc henc ?_
+      exact hkin

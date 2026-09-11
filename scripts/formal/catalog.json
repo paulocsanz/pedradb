@@ -4845,7 +4845,7 @@
   {
    "id": "compact_rewrites_sst_cf",
    "finding": "RFC-0150 P0",
-   "twin_kind": "close",
+   "twin_kind": "atom",
    "single_artifact": true,
    "kernel": "crates/pedradb-core/src/cf_kernel.rs",
    "twin": "crates/pedradb-core/src/cf_kernel.rs",
@@ -4855,7 +4855,6 @@
     "crates/pedradb-core/src/db.rs"
    ],
    "entry": "compact_rewrites_sst_cf",
-   "data_fate": true,
    "live_callers": [
     {
      "file": "crates/pedradb-core/src/db.rs",
@@ -4866,7 +4865,13 @@
    "dst_plant": {
     "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
     "test": "compact_rewrites_sst_cf_on_live_meta_is_not_ok"
-   }
+   },
+   "atom": "compact_rewrites_sst_cf",
+   "atom_reason": {
+    "date": "2026-09-10",
+    "why": "(twenty-fifth if): the compact-rewrite disposition — an empty (mixed/legacy) SST tag is never rewritten; a non-empty tag is decided by the in-family test over the representative encoded key of that tag with every monadic step of the route ok — proven forall over (sst_cf, family, v) as compact_rewrites_sst_cf_ok_iff_empty_tag_never_or_representative_in_family in Cf.lean; the pedradb-core trampoline (compact_ssts_only_cf) matches the kernel decision."
+   },
+   "three_teeth": true
   },
   {
    "id": "visible_at",
