@@ -3918,7 +3918,6 @@
     "crates/pedradb-store/src/bin/cluster_real.rs"
    ],
    "entry": "l28_tcp_dterm_ok",
-   "data_fate": true,
    "handlers": [
     "tcp_node_removed_durable_term_ok"
    ],
@@ -3932,7 +3931,11 @@
      "file": "crates/pedradb-store/src/bin/cluster_real.rs",
      "handler": "tcp_node_removed_durable_term_ok"
     }
-   ]
+   ],
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0210 P0.1 l28 cadence 1/4: on the removed replica's real dir a newer-term RequestVote whose hard-state persist fails rolls the term back exactly when the rollback held (fate forall over the extracted pure-lift body, L28.lean); AS-IS ok-true keeps the undurable raise (memory term above disk hard state)"
+   }
   },
   {
    "id": "l28_tcp_hist",

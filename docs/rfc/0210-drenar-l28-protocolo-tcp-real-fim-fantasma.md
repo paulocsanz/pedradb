@@ -100,7 +100,12 @@ paralela) — este RFC não os toca.
    `l28_real_tcp_removed_durable_term`,
    `l28_real_tcp_participating_after_remove`,
    `l28_real_tcp_recover_apply`,
-   `l28_real_tcp_removed_recover_apply` verdes — status: `todo`
+   `l28_real_tcp_removed_recover_apply` verdes — status: `doing`
+   — 1/4 `done`: `l28_tcp_dterm_ok_fate_iff` (L28.lean; RequestVote
+   de termo novo com persist de hard state falhando rola o termo de
+   volta ⟺ o rollback segurou — memória e disco ficam no termo
+   anterior), cap 84→83, floor_atom 47→48, floor_extract 231→230;
+   planta TCP REAL verde
 2. **P0.2:** cadência l28 2/4 — `l28_tcp_trunc`, `l28_tcp_odrop`,
    `l28_tcp_abort`, `l28_tcp_nowms` (cap 80→76, `floor_atom`
    51→55, `floor_extract` 227→223); plantas `removed_*` verdes —
