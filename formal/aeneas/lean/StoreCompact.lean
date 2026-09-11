@@ -120,3 +120,36 @@ theorem compact_through_unleft_zero_joint_no_cap :
 theorem compact_through_unleft_as_is_past_joint :
     compact_through_unleft_as_is (5#u64) (some 3#u64) = ok 5#u64 := by
   rfl
+
+/-- RFC-0212 P2.1 (store-compact cadence, atom `catalog:compact_unleft`):
+    compaction NEVER goes past an applied-but-un-left joint — the
+    through index is EXACTLY `joint - 1` when a live joint sits at
+    or below it, and `through` otherwise — fate forall over the
+    extracted body (RFC-0100: a hidden C-old,new lies to later
+    readers); the AS-IS mutant compacts straight through the joint
+    (the lie the DST plant
+    `compact_through_unleft_on_live_queued_is_not_ok` refutes). -/
+theorem compact_through_unleft_fate_iff :
+    ∀ (through : U64) (unleft_joint : Option U64) (v : U64),
+      (compact_through_unleft through unleft_joint = ok v) ↔
+        ((unleft_joint = none ∧ v = through)
+          ∨ (∃ j : U64, unleft_joint = some j ∧ j > 0#u64 ∧ j <= through
+              ∧ v = core.num.U64.saturating_sub j 1#u64)
+          ∨ (∃ j : U64, unleft_joint = some j
+              ∧ (¬ (j > 0#u64) ∨ ¬ (j <= through))
+              ∧ v = through)) := by
+  intro through unleft_joint v
+  cases unleft_joint with
+  | none =>
+    simp [compact_through_unleft]
+    exact eq_comm
+  | some j =>
+    unfold compact_through_unleft
+    by_cases hpos : j > 0#u64
+    · by_cases hle : j <= through
+      · simp [hpos, hle]
+        scalar_tac
+      · simp [hpos, hle]
+        scalar_tac
+    · simp [hpos]
+      scalar_tac

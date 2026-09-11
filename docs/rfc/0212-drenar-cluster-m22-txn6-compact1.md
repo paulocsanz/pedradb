@@ -296,6 +296,21 @@ pool honesto manda sobre a meta numérica).
    floor_atom 96→97, floor_extract 182→181; planta DST verde
    (`unreserve_si_gen_on_live_queued_is_not_ok`, no mesmo lote
    paralelo)
+
+   — 7/7 `done` (FECHAMENTO): `compact_through_unleft_fate_iff`
+   (StoreCompact.lean; compacta até `j−1` EXATAMENTE quando um
+   joint vivo (`old≠new` sem leave) está em ou abaixo de
+   `through` — o C-old,new nunca fica escondido de leitores
+   futuros; o as-is compactava direto pelo joint, buraco
+   0096/0100), cap 27→26, floor_atom 97→98,
+   floor_extract 181→180; planta DST verde
+   (`compact_through_unleft_on_live_queued_is_not_ok`, no mesmo
+   lote paralelo) — P2.1 fechado nos números exatos: cap 33→26,
+   floor_atom 91→98, floor_extract 187→180 — bloco cluster
+   (membership ×22 + txn ×6 + compact ×1 = 29/29) ZERO
+   `data_fate` MEDIDO AO VIVO no catálogo pós-cirurgia (26
+   restantes, todos storage: write_admission 9, lookup 4,
+   flush 3, cf 2, leveling 2 + 6 singletons) — status: `done`
 7. **P2.2:** composição ∀ do protocolo de fim-de-fila queued
    (finish: discard-leader local ∧ persist fence/hist conforme o
    fate) sobre atoms registrados em nova compose lib (zero
@@ -315,7 +330,7 @@ pool honesto manda sobre a meta numérica).
 | P1.1 | p1 | Cadências membership 3/6+4/6 — recover+open ×8 | done | e93c7b0f + 909dfb62 + 4b3c6ee8 + f2497120 + 96001f96 + e3f59f57 + 32b85288 + este commit (8 atoms, 8 commits; números exatos) | 2026-09-11 |
 | P1.2 | p1 | Cadências membership 5/6+6/6 — joint+slot ×6; ZERO data_fate | done | fe29d5d4 + 142b2efb + 1223b824 + 38b468b4 + a8776aa8 + este commit (6 atoms, 6 commits; números exatos; membership 22/22 ZERO) | 2026-09-11 |
 | P1.3 | p1 | Veredito datado dos medidos ausentes | done | este commit (veredito: 0 ausentes nas 22 promoções; âncoras green antes/depois) | 2026-09-11 |
-| P2.1 | p2 | Cadência final — txn ×6 + compact ×1; cluster ZERO | doing | 0e86d730 + 6b8d3454 + de09a2c3 + 11fc86f1 + a795d062 + este commit (6/7) | 2026-09-11 |
+| P2.1 | p2 | Cadência final — txn ×6 + compact ×1; cluster ZERO | done | 0e86d730 + 6b8d3454 + de09a2c3 + 11fc86f1 + a795d062 + 4185c2fc + este commit (7 atoms, 7 commits; números exatos; cluster 29/29 ZERO) | 2026-09-11 |
 | P2.2 | p2 | Composição ∀ fim-de-fila + sweep final + flip done | todo | — | 2026-09-11 |
 
 ## Critérios de aceite
