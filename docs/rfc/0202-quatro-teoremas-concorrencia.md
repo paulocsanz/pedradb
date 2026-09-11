@@ -1,6 +1,7 @@
 # RFC: 0202 — os quatro teoremas de concorrência: a faixa do ConcurrentDb que a campanha não prova
 
-**Status:** draft
+**Status:** done (6/6 — P0.1/P0.2 atoms, P1.1 ponte deadlock, P1.2
+quinto close, P2.1 recusa do escalonador registrada, P2.2 sweep)
 **Updated:** 2026-09-11
 **Parents:** [0200](0200-alcancabilidade-completa-write-path-merge.md)
 (alcançabilidade completa + cadência atom; fechou 6/6),
@@ -153,11 +154,29 @@ sendo Pedra vs RocksDB default `sync=false` (`ROCKS_PARITY_SYNC=0`).
 
 ### P2 — later / cadência + recusa registrada + sweep
 
-- [ ] **P2.1** Fila do escalonador registrada como RECUSA
+- [x] **P2.1** Fila do escalonador registrada como RECUSA
   (`lock_interleavings_admitted` segue `ok false`; nenhum flip) +
-  cadência atoms contínua — status: `todo`
-- [ ] **P2.2** Sweep: gates GREEN no HEAD, zero sorry nos wrappers
-  tocados, capturas — status: `todo`
+  cadência atoms contínua — status: `done` (RECUSA REGISTRADA, nenhum
+  admission flipado: o par de catálogo `lock_interleavings`
+  (group_commit_kernel.rs, entry `lock_interleavings_admitted`) segue
+  `ok false` — a admissão ∀π dos interleavings de lock/OS-scheduler do
+  ConcurrentDb fica TCB (0056 P2.1); a recusa tem teorema de recusa em
+  produção: `claim_lock_interleavings_refused_after_put`
+  (concurrent.rs, planta DST do par) 1/1 verde no HEAD final; as outras
+  duas admissions seguem false (`media_durable_admitted`:
+  claim_media_durable_refused_after_fsync_ok;
+  `forall_schedules_admitted(3)` false). Cadência atoms paga neste
+  RFC: 3 promoções (rwlock_client_may_mutate 7634cd77,
+  occ_member_fate 85309685, wait_for_deadlock 6bab9882 — cap_data_fate
+  98→95, floor_atom 33→36))
+- [x] **P2.2** Sweep: gates GREEN no HEAD, zero sorry nos wrappers
+  tocados, capturas — status: `done` (sweep em worktree destacado do
+  HEAD final 5f676964+: depth-floor GREEN — extract=242 (floor 242),
+  close=5 (floor 5) residuals 6/atom 36 == live, count=7,
+  data_fate=95≤95; product-floor GREEN promoted=4≥4; ledger GREEN
+  299/266/33; wrappers tocados GroupCommit/Locktab/Auth sorry 0;
+  extracts ok 61 libs + 12 compose; capturas em
+  findings/2026-09-11-rfc0202-final-sweep/)
 
 ## Status (living — update with every PR)
 
@@ -167,8 +186,8 @@ sendo Pedra vs RocksDB default `sync=false` (`ROCKS_PARITY_SYNC=0`).
 | P0.2 | p0 | Fila lost-update: atom occ_member_fate | done | occ_member_fate_ok_iff_precedence (GroupCommit.lean) | 2026-09-11 |
 | P1.1 | p1 | Fila deadlock: ponte wait_for_deadlock (ou recusa datada) | done | wait_for_deadlock_step_{nowait_is_alive,cycle_closes,revisit_reports_cycle} (Locktab.lean) + fronteira EXTRACT.md | 2026-09-11 |
 | P1.2 | p1 | Quinto close registrado (candidato group_validate; caiu para o par bearer) | done | bearer_token_from_value_fate_iff (Auth.lean) | 2026-09-11 |
-| P2.1 | p2 | Escalonador: recusa registrada + cadência atoms | todo | — | 2026-09-11 |
-| P2.2 | p2 | Sweep final de gates | todo | — | 2026-09-11 |
+| P2.1 | p2 | Escalonador: recusa registrada + cadência atoms | done | RECUSA: lock_interleavings_admitted ok false + claim_lock_interleavings_refused_after_put 1/1; 3 atoms (cap 98→95) | 2026-09-11 |
+| P2.2 | p2 | Sweep final de gates | done | worktree destacado HEAD: depth/product/ledger GREEN, sorry 0, capturas findings/2026-09-11-rfc0202-final-sweep | 2026-09-11 |
 
 ## Acceptance Criteria
 
