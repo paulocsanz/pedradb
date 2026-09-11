@@ -1,10 +1,11 @@
 # RFC-0201 — Eixo cliente: drain completo no pipeline 1-op e spin ciente de oversubscription
 
-**Status:** open (P0 completo — P0.1 clamp + P0.2 absorvido + P0.3 auto;
-P1.1 meter DONE com cartaz mc50 default 1,678×; P1.2/P1.3 blocked;
-P2.1 deferral com número, P2.2 blocked)
-**Next:** P1.2 re-split quieto + apply_mc4/overwrite na mesma janela;
-P1.3 ycsb_f mc4
+**Status:** open→closing (P0 completo; P1.1–P1.3 meters DONE: mc50 default
+1,678× e apply_mc4 1,086× pagos; overwrite_mc4 0,370× e ycsb_f_mc4 0,295×
+nomeados como buracos com dono; P2.1 deferral com número, P2.2 blocked)
+**Next:** próximo RFC de escala ataca o caminho async 1-op (buffer WAL
+user-space, flush por tamanho/idle — sem wait-to-grow) nas âncoras medidas
+overwrite_mc4/ycsb_f_mc4/single-client
 **Updated:** 2026-09-11
 **ID:** 0201
 **Parents:** [0185](0185-coluna-a-dropin-1x-tudo.md) (o alvo-produto: coluna A ≥1× em **tudo**),
@@ -173,17 +174,22 @@ o número 0,37× desta célula é **pre-pipeline** (era 0178/0183/0184) — a
       (pin0) 0,668× min (mediana 0,901×); flip pareado min 1,925 /
       mediana 2,194 — o buraco 0,37× do cartaz (fair handoff, pré-pipeline)
       está pago: a célula agora mede **acima** de 1× na coluna default
-- [ ] **P1.2** re-split quieto pós-0193 + apply_mc4/overwrite na mesma
-      janela (0192 P1.1/P1.2) — status: `meter p201r rodando (2026-09-11)`;
-      o re-split fica **delegado ao 0192** (dívida própria datada: o
-      render WRITEPHASE `cut=`/`qps_hat` e a instrumentação de fatias
-      finas (wal_encode/wal_write, mem_guard/lock/insert, grp) foram
-      varridos pelo wipe 2026-09-10 23:49 — kernel puro re-registrado e
-      testado 18/18; re-aterrissar o render é slice do 0192, não do
-      eixo cliente)
-- [ ] **P1.3** ycsb_f mc4 (0193 P0.5) e o eixo `ratio_hat(L)` do 0197 P1.4
-      com o CS re-medido — status: `meter p201r rodando (ycsb_f_mc4)`;
-      `ratio_hat(L)` permanece do 0197
+- [x] **P1.2** re-split quieto pós-0193 + apply_mc4/overwrite na mesma
+      janela (0192 P1.1/P1.2) — status: `meter DONE (p201r2, 2026-09-11,
+      findings/2026-09-11-p201r2-mc4/): apply_mc4 1,086× min-of-3`
+      (célula 0,47× de 0183 PAGA, acima do floor 0041);
+      `overwrite_mc4 0,370× min` — buraco real nomeado (bypass 1-op paga
+      `write()` por op vs WAL bufferizado do Rocks; dono = próximo RFC,
+      hipótese hat no finding). O re-split fica **delegado ao 0192**
+      (dívida própria datada: o render WRITEPHASE `cut=`/`qps_hat` e a
+      instrumentação de fatias finas foram varridos pelo wipe
+      2026-09-10 23:49 — kernel puro re-registrado e testado 18/18;
+      re-aterrissar o render é slice do 0192, não do eixo cliente)
+- [x] **P1.3** ycsb_f mc4 (0193 P0.5) e o eixo `ratio_hat(L)` do 0197 P1.4
+      com o CS re-medido — status: `meter DONE (p201r2): ycsb_f_mc4
+      0,295× min` — buraco real nomeado (mesma classe do overwrite_mc4:
+      rmw = get + write 1-op, `write()` por op vs buffer; dono = próximo
+      RFC); `ratio_hat(L)` permanece do 0197
 
 ### P2 — deferrals com número
 
@@ -221,8 +227,8 @@ mediu mc50) e o meter P1.1 é o único caminho para virar cartaz.
 | P0.2 | p0 | spin ciente de oversubscription + twins | done (absorvido no P0.3) | kernel + twins verdes; `wait_wake` extinto pelo wipe; decisão de eixo implementada pelo P0.3 (oversubscrito ⇒ merge ⇒ park-em-canal) | 2026-09-11 |
 | P0.3 | p0 | merge assíncrono cliente-eixo (`writers > ncpu`) + pin env | done | kernel + wiring + 5 testes; A/B serial limpo; base = meter de atribuição 2026-09-11 | 2026-09-11 |
 | P1.1 | p1 | sweep regressão 20 formas + A/B antes/depois pós-corte | done | sweep `p201o` (10 flags = ruído código-idêntico) + A/B `p201q`: **mc50 default 1,678× min-of-3** (pré 0,668×; flip min 1,925) | 2026-09-11 |
-| P1.2 | p1 | re-split quieto + apply/overwrite | blocked | 0192 P1.1/P1.2 | 2026-09-10 |
-| P1.3 | p1 | ycsb_f + ratio_hat(L) | blocked | 0193 P0.5 / 0197 P1.4 | 2026-09-10 |
+| P1.2 | p1 | re-split quieto + apply/overwrite mc4 | done (meter) | `p201r2`: apply_mc4 **1,086×** (0,47× pago); overwrite_mc4 0,370× = buraco nomeado; re-split delegado ao 0192 | 2026-09-11 |
+| P1.3 | p1 | ycsb_f mc4 + ratio_hat(L) | done (meter; ratio_hat fica no 0197) | `p201r2`: ycsb_f_mc4 0,295× = buraco nomeado (mesma classe) | 2026-09-11 |
 | P2.1 | p2 | preallocate WAL off-lock | deferred | 4,1 s/25 s (p99.9+; hydrate 15M) | 2026-09-10 |
 | P2.2 | p2 | grid B re-ancora | blocked | 0196 P2.2 | 2026-09-10 |
 
