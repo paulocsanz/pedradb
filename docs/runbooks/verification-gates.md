@@ -53,3 +53,32 @@ red. The rite, in order:
 
 `todo` lives in the RFC's slice list, never in the ledger: the ledger is
 the terminal record, the RFC is the plan.
+
+### Mirror retirement — rite for retiring a hand count mirror (RFC-0204)
+
+An enrolled pair's hand mirror (`*Count.lean`) retires to a
+machine-emitted `*Derived.lean` in ONE commit, or the gates are red.
+The rite, in order:
+
+1. **Twin shape** — declare the pair in `TWIN_SHAPES` of
+   `scripts/ratchet/derive_count_annotations.py`: shape vocabulary
+   (proof template), out file, kernel lib/ns, twin def names, the
+   REGISTERED bound theorem (name byte-stable), the bridges file, and
+   `anchor_defs` (def names that must still exist in the pair's
+   extracts). Emission validates shape fns are ENROLLED, anchors are
+   present, and the emitted theorem name equals the registered count
+   row — a stale shape fails `--check`, so the mirror cannot rot.
+2. **Registry moves lean_file only** — the theorem name and entry stay
+   byte-stable; only the `lean_file` column walks to the generated
+   `*Derived.lean`.
+3. **Bridges file** — `git mv` the old `*Count.lean` to
+   `*Bridges.lean` and strip the moved twins; the semantic bridges
+   stay HUMAN (zero `sorry`, ≥1 `^theorem`). A bridge the emitted
+   bound composes (e.g. `saturating_add_val_le`) becomes PUBLIC.
+4. **Build wiring** — swap the old lib name for `*Bridges` +
+   `*Derived` in BOTH `formal/aeneas/lean/lakefile.toml` and the
+   `COMPOSE` list of `scripts/lean_extracts.sh`; rerun the tool
+   (emits the derived file + flips the contract annotation); gates +
+   lean `--required` + the pair's Rust twin test green with the twin
+   BYTE-UNEDITED (continuity proof: the registered quota neither
+   renamed nor reshaped).

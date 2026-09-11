@@ -115,10 +115,17 @@ gateável, não desejo.
 
 ### P1 — next wave (depends on P0 or clearly deferrable)
 
-- [ ] **P1.1** Espelhos restantes dos inscritos: `probe_order_covering` +
+- [x] **P1.1** Espelhos restantes dos inscritos: `probe_order_covering` +
   `scale_predict` (ProbeLadder), `scan_guard`, `auto_flush_due` — mesma
   receita da P0.1, um kernel por commit, registro byte-stável —
-  status: `todo`
+  status: `done` (2026-09-11: 3 commits — ProbeLadder com shapes
+  `ladder_over_candidates`/`saturating_sum_le` (ponte pública
+  `saturating_add_val_le` composta pelo emitido), ScanDecision com
+  `per_file_decision`, FlushAmort com `amortized_flush_credit`; formas
+  não-drain validadas por `anchor_defs` — def que some do extract quebra
+  a emissão; registro anda só em lean_file; twins 6+3+4 do scan + flush
+  verdes sem edição; runbook §Movimento de linha ganha o rito de
+  aposentadoria)
 - [ ] **P1.2** Bloom inscrito: `bloom_may_contain` entra na ferramenta
   (nova inscrição Aeneas sobre o extract `Bloom` do pin — non-goal do
   0203, agora é o passo); anotação derivada + espelho emitido;
@@ -143,7 +150,7 @@ gateável, não desejo.
 | Slice | Band | Outcome | Status | Start | End |
 |---|---|---|---|---|---|
 | P0.1 | p0 | Espelho lsm_compact emitido pela ferramenta, hand-mirror aposentado | done | 2026-09-11 | 2026-09-11 |
-| P1.1 | p1 | Espelhos restantes dos inscritos aposentados | todo | — | — |
+| P1.1 | p1 | Espelhos restantes dos inscritos aposentados | done | 2026-09-11 | 2026-09-11 |
 | P1.2 | p1 | Bloom inscrito na ferramenta (anotação derivada) | todo | — | — |
 | P2.1 | p2 | Rito de re-âncora com supersessão datada | todo | — | — |
 | P2.2 | p2 | Âncora linux de barreira isolada (ou deferido datado) | todo | — | — |

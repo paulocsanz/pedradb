@@ -414,7 +414,10 @@ name = "ScalePredictDerived"
 name = "WorkIo"
 
 [[lean_lib]]
-name = "FlushAmortCount"
+name = "FlushAmortBridges"
+
+[[lean_lib]]
+name = "AutoFlushDueDerived"
 
 [[lean_lib]]
 name = "ScanDecisionBridges"

@@ -44,7 +44,8 @@ COMPOSE=(
   ProbeOrderCoveringDerived
   ScalePredictDerived
   WorkIo
-  FlushAmortCount
+  FlushAmortBridges
+  AutoFlushDueDerived
   ScanDecisionBridges
   ScanGuardDerived
   CountDerived

@@ -53,7 +53,7 @@ atom	catalog:occ_snap_published	occ_snap_uses_published_ok_iff_inflight	formal/a
 count	catalog:probe_order_covering	probe_order_covering_work_bound	formal/aeneas/lean/ProbeOrderCoveringDerived.lean	probe_order_covering
 count	catalog:scale_predict	point_get_probes_le_levels_l0_max	formal/aeneas/lean/ScalePredictDerived.lean	point_get_probes
 count	catalog:wal_commit_plan	wal_commit_plan_at_most_one_fdatasync	formal/aeneas/lean/WorkIo.lean	wal_commit_plan
-count	catalog:auto_flush_due	memtable_flush_amortized	formal/aeneas/lean/FlushAmortCount.lean	auto_flush_due
+count	catalog:auto_flush_due	memtable_flush_amortized	formal/aeneas/lean/AutoFlushDueDerived.lean	auto_flush_due
 count	catalog:scan_guard	scan_decision_work_bound	formal/aeneas/lean/ScanGuardDerived.lean	scan_reads_file
 count	catalog:bloom_may_contain	bloom_may_contain_work_bound	formal/aeneas/lean/BloomCount.lean	bloom_may_contain
 close	catalog:wal_rotate_decision	try_rotate_step_rotates_iff_pins_clear_segment_live	formal/aeneas/lean/Flush.lean	wal_rotate_decision
@@ -64,3 +64,4 @@ atom	catalog:wait_for_deadlock	wait_for_deadlock_step_cycle_closes	formal/aeneas
 close	catalog:bearer	bearer_token_from_value_fate_iff	formal/aeneas/lean/Auth.lean	bearer_token_from_value
 close	catalog:group_publish	may_publish_group_ok_iff_wal_io_ok	formal/aeneas/lean/GroupCommit.lean	may_publish_group
 atom	catalog:vote	vote_decision_fate_iff	formal/aeneas/lean/Vote.lean	vote_decision
+atom	catalog:recover_apply	recover_must_apply_fate_iff	formal/aeneas/lean/Membership.lean	recover_must_apply
