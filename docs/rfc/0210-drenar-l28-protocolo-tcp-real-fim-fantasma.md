@@ -158,6 +158,9 @@ status: `done`
    — 3/8 `done`: `l28_tcp_clear_ok_fate_iff` (L28.lean; clear
    force-local derruba intents presos ⟺ derrubou), cap 74→73,
    floor_atom 57→58, floor_extract 221→220; planta TCP REAL verde
+   — 4/8 `done`: `l28_tcp_pre_ok_fate_iff` (L28.lean; preimages de
+   TX caídas ⟺ a queda aconteceu), cap 73→72, floor_atom 58→59,
+   floor_extract 220→219; planta TCP REAL verde
 4. **P1.2:** veredito datado dos 7 fantasmas — por fantasma:
    re-escrever para `fn` viva SE o caminho add-member existir em
    produção; senão aposentadoria com recusa datada EM FINDINGS,
