@@ -245,6 +245,17 @@ status: `done`
    aconteceu — o dente 0147 `drop_repl_slot` NÃO é este), cap
    57→56, floor_atom 67→68, floor_extract 211→210; planta TCP REAL
    verde (`l28_real_tcp_drop_st`, 22.19s)
+
+   — 6/6 `done` (FECHAMENTO): `l28_tcp_pj_ok_fate_iff` (L28.lean;
+   ctor TCP de eleitor 3-nós com C-old,new comprometido plantado
+   (sem leave) recusa eleição por maioria C-old exatamente quando a
+   recusa aconteceu), cap 56→55, floor_atom 68→69,
+   floor_extract 210→209; planta TCP REAL verde
+   (`l28_real_tcp_plant_joint`, 1.80s). Medido ao vivo no HEAD:
+   bloco l28 com ZERO `data_fate` pendente (26 pares l28, 0
+   pendentes) — números finais exatos: cap 84→55 (22 promoções +
+   aposentadoria −7 do P1.2), floor_atom 47→69, floor_extract
+   231→209 — status: `done`
 6. **P2.2:** composição ∀ do protocolo de remoção TCP (remove →
    left ∧ high-water preservado) sobre atoms registrados em
    `ComposeL28.lean` (zero sorry; twins DST verdes; razão de
@@ -262,7 +273,7 @@ status: `done`
 | P0.2 | p0 | Cadência l28 2/4 (trunc, odrop, abort, nowms) | done | 4b44881b + df80dd90 + a4ef110f + este commit (4 atoms, 4 commits) | 2026-09-11 |
 | P1.1 | p1 | Cadências l28 3/4 + 4/4 (hist…dsc, ×8) | done | f6526f0d + e04ab047 + bfba89b5 + 71ef2f8f + 191a4a1a + bc9ad570 + cd508216 + este (8 atoms, 8 commits) | 2026-09-11 |
 | P1.2 | p1 | Veredito datado dos 7 fantasmas de catálogo | done | este commit (catálogo −7, 299→292; recusa datada em findings; gates+âncoras verdes antes/depois) | 2026-09-11 |
-| P2.1 | p2 | Cadência final l28 ×6 — bloco ZERO data_fate | todo | — | 2026-09-11 |
+| P2.1 | p2 | Cadência final l28 ×6 — bloco ZERO data_fate | done | fafbbfa4 + 554695b5 + 0a0c202b + d74acac8 + c9604f2b + este commit (6 atoms, 6 commits; cap 55, atom 69, extract 209; l28 ZERO data_fate medido) | 2026-09-11 |
 | P2.2 | p2 | Composição ∀ do protocolo de remoção + sweep final | todo | — | 2026-09-11 |
 
 ## Acceptance Criteria

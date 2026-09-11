@@ -4373,7 +4373,6 @@
     "crates/pedradb-store/src/bin/cluster_real.rs"
    ],
    "entry": "l28_tcp_pj_ok",
-   "data_fate": true,
    "handlers": [
     "tcp_node_plant_joint_ok"
    ],
@@ -4387,7 +4386,11 @@
      "file": "crates/pedradb-store/src/bin/cluster_real.rs",
      "handler": "tcp_node_plant_joint_ok"
     }
-   ]
+   ],
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0068 P2.2 REAL TCP planted committed joint: TCP ctor of a 3-node voter with planted committed C-old,new (no leave) refuses a C-old majority elect; plant l28_real_tcp_plant_joint green"
+   }
   },
   {
    "id": "sched_plant_joint",

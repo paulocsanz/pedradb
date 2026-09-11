@@ -704,3 +704,20 @@ theorem l28_tcp_sth_ok_fate_iff :
   intro b v
   unfold l28_tcp_sth_ok
   cases b <;> cases v <;> simp
+
+/-- RFC-0210 P2.1 (l28 cadence 6/6, atom `catalog:l28_tcp_pj`):
+    after a REAL TCP process death, the TCP ctor of a 3-node voter
+    with a planted committed C-old,new (no leave) refuses a C-old
+    majority elect EXACTLY when the refusal happened — fate
+    forall over the extracted pure-lift body; the AS-IS `ok true`
+    mutant skips the planted joint (the 0148 leftover: elect on
+    C-old — the lie the real TCP plant `l28_real_tcp_plant_joint`
+    refutes). -/
+theorem l28_tcp_pj_ok_fate_iff :
+    ∀ (b : Bool) (v : Bool),
+      (l28_tcp_pj_ok b = ok v) ↔
+        ((v = true ∧ b = true)
+          ∨ (v = false ∧ b = false)) := by
+  intro b v
+  unfold l28_tcp_pj_ok
+  cases b <;> cases v <;> simp
