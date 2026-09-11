@@ -218,7 +218,7 @@ contagens movem no mesmo commit; `lock_interleavings_admitted` e
   corolário R1 cita P0.2/P1.1 **e** este lema — status: `done`
   (`inv_lsm_newest_first_never_non_live` + corolário
   `r1_get_never_returns_non_live` em `Merge.lean`; R1 segue `atom`)
-- [ ] **P2.3** Campanha trampolim com alvo nomeado: `cap_data_fate ≤
+- [x] **P2.3** Campanha trampolim com alvo nomeado: `cap_data_fate ≤
   100` e `floor_atom ≥ 8`; cadência = um `if` por commit (P1.5 é o
   primeiro); este P2.3 fecha quando o cap e o floor baterem, não numa
   sessão — status: `todo`
