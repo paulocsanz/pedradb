@@ -37,9 +37,13 @@ rotativa por round (kvrocks/deps/ycsb), 2 variantes Pedra por round
 | ycsb_e | 7,976 | 9,517 | 9,014 | 10,046 | 0,947 REGRESS |
 | ycsb_f | 0,804 | 0,956 | 0,950 | 0,972 | 1,013 flat |
 
-(kvrocks_set e deps_cache_overwrite single-client write-per-op são teto-fd
-por construção — coluna G1-style da tabela publicada, nunca cotados como
-win; o sweep os lista pelo corte de regressão, não como claim.)
+(Correção 2026-09-11: o sweep correu a coluna **async**
+(`PEDRA_PARITY_ASYNC=1`, sem fdatasync) — as linhas single-client abaixo
+não são teto-fd por construção. `kvrocks_set` 0,67–0,75 e
+`deps_cache_overwrite` 0,51–0,54 são **buracos abertos na coluna async**:
+Pedra paga `write()` por op (ticket pwrite 0193) enquanto o Rocks
+`sync=false` só faz memcpy no buffer do WAL — hipótese **hat**, precisa de
+meter de atribuição próprio; never quote como win nem esconder.)
 
 ## Auditoria de writers (fonte: `crates/rocksdb-parity-bench/src/lib.rs`)
 

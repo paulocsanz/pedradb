@@ -24,6 +24,7 @@ pub mod cf_kernel;
 pub mod change_feed;
 pub mod changelog_kernel;
 pub mod client_axis_kernel;
+pub mod write_cycle_kernel;
 pub mod compact_kernel;
 pub mod concurrent;
 pub mod corrupt;

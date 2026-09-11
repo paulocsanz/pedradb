@@ -174,9 +174,16 @@ o número 0,37× desta célula é **pre-pipeline** (era 0178/0183/0184) — a
       mediana 2,194 — o buraco 0,37× do cartaz (fair handoff, pré-pipeline)
       está pago: a célula agora mede **acima** de 1× na coluna default
 - [ ] **P1.2** re-split quieto pós-0193 + apply_mc4/overwrite na mesma
-      janela (0192 P1.1/P1.2) — status: `blocked`
+      janela (0192 P1.1/P1.2) — status: `meter p201r rodando (2026-09-11)`;
+      o re-split fica **delegado ao 0192** (dívida própria datada: o
+      render WRITEPHASE `cut=`/`qps_hat` e a instrumentação de fatias
+      finas (wal_encode/wal_write, mem_guard/lock/insert, grp) foram
+      varridos pelo wipe 2026-09-10 23:49 — kernel puro re-registrado e
+      testado 18/18; re-aterrissar o render é slice do 0192, não do
+      eixo cliente)
 - [ ] **P1.3** ycsb_f mc4 (0193 P0.5) e o eixo `ratio_hat(L)` do 0197 P1.4
-      com o CS re-medido — status: `blocked`
+      com o CS re-medido — status: `meter p201r rodando (ycsb_f_mc4)`;
+      `ratio_hat(L)` permanece do 0197
 
 ### P2 — deferrals com número
 
