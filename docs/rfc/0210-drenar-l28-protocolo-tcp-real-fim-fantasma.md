@@ -132,6 +132,9 @@ paralela) — este RFC não os toca.
    `log_entry_key` além do novo hi apagadas ⟺ os órfãos caíram),
    cap 79→78, floor_atom 52→53, floor_extract 226→225; planta TCP
    REAL verde
+   — 3/4 `done`: `l28_tcp_abort_ok_fate_iff` (L28.lean; intents 2PC
+   remanescentes apagados ⟺ o abort apagou), cap 78→77,
+   floor_atom 53→54, floor_extract 225→224; planta TCP REAL verde
 
 ### P1 — next wave (depends on P0 or clearly deferrable)
 

@@ -461,3 +461,19 @@ theorem l28_tcp_odrop_ok_fate_iff :
   intro b v
   unfold l28_tcp_odrop_ok
   cases b <;> cases v <;> simp
+
+/-- RFC-0210 P0.2 (l28 cadence 2/4, atom `catalog:l28_tcp_abort`):
+    after a REAL TCP plant + process death, recover abort deletes
+    the leftover 2PC intents on a replica dropped from `ids`
+    EXACTLY when the abort deleted them — fate forall over the
+    extracted pure-lift body; the AS-IS `ok true` mutant skips the
+    leftover abort (the 0133 leftover: ids only — the lie the real
+    TCP plant `l28_real_tcp_removed_abort` refutes). -/
+theorem l28_tcp_abort_ok_fate_iff :
+    ∀ (b : Bool) (v : Bool),
+      (l28_tcp_abort_ok b = ok v) ↔
+        ((v = true ∧ b = true)
+          ∨ (v = false ∧ b = false)) := by
+  intro b v
+  unfold l28_tcp_abort_ok
+  cases b <;> cases v <;> simp

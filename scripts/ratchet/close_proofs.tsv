@@ -80,3 +80,4 @@ atom	catalog:l28_tcp_apply	l28_tcp_apply_ok_fate_iff	formal/aeneas/lean/L28.lean
 atom	catalog:l28_tcp_napply	l28_tcp_napply_ok_fate_iff	formal/aeneas/lean/L28.lean	l28_tcp_napply_ok
 atom	catalog:l28_tcp_trunc	l28_tcp_trunc_ok_fate_iff	formal/aeneas/lean/L28.lean	l28_tcp_trunc_ok
 atom	catalog:l28_tcp_odrop	l28_tcp_odrop_ok_fate_iff	formal/aeneas/lean/L28.lean	l28_tcp_odrop_ok
+atom	catalog:l28_tcp_abort	l28_tcp_abort_ok_fate_iff	formal/aeneas/lean/L28.lean	l28_tcp_abort_ok

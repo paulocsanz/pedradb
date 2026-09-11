@@ -3877,7 +3877,6 @@
     "crates/pedradb-store/src/bin/cluster_real.rs"
    ],
    "entry": "l28_tcp_abort_ok",
-   "data_fate": true,
    "handlers": [
     "tcp_node_removed_abort_ok"
    ],
@@ -3891,7 +3890,11 @@
      "file": "crates/pedradb-store/src/bin/cluster_real.rs",
      "handler": "tcp_node_removed_abort_ok"
     }
-   ]
+   ],
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0210 P0.2 l28 cadence 2/4: after a real TCP plant + process death recover abort deletes the leftover 2PC intents on a replica dropped from ids exactly when the abort deleted them (fate forall over the extracted pure-lift body, L28.lean); AS-IS ok-true skips the leftover abort (0133 leftover)"
+   }
   },
   {
    "id": "l28_tcp_nowms",
