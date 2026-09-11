@@ -26,8 +26,8 @@ o nó é local — pertencer a `ids` NÃO é o portão. O mutante AS-IS
 
 - Teorema ∀ fate sobre o extract Aeneas do corpo de produção.
 - Planta DST verde ANTES do commit:
-  `cargo test --test three_teeth_queued --
-  force_clear_node_counts_on_live_queued_is_not_ok` (captura no
-  scratch do round 6).
+  `cargo test --lib --
+  force_clear_node_counts_on_live_queued_is_not_ok` (módulo three_teeth_queued, roda via --lib;
+  captura no scratch do round 6).
 - Gates 3× GREEN após a cirurgia (depth 205/73/6, data_fate
   51<=51, ledger 292/266/26).

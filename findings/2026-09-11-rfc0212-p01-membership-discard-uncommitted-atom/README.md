@@ -27,8 +27,8 @@ AS-IS `is_local && in_ids` deixa a réplica removida com o sufixo
 
 - Teorema ∀ fate sobre o extract Aeneas do corpo de produção.
 - Planta DST verde ANTES do commit:
-  `cargo test --test three_teeth_queued --
-  discard_node_counts_on_live_queued_is_not_ok` (captura no
-  scratch do round 6).
+  `cargo test --lib --
+  discard_node_counts_on_live_queued_is_not_ok` (módulo three_teeth_queued, roda via --lib;
+  captura no scratch do round 6).
 - Gates 3× GREEN após a cirurgia (depth 208/70/6, data_fate
   54<=54).
