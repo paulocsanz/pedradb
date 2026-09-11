@@ -1,10 +1,11 @@
 # RFC-0201 — Eixo cliente: drain completo no pipeline 1-op e spin ciente de oversubscription
 
-**Status:** open (P0 implementado; meters P1 blocked no gate datado; P2.1
-deferral com número)
-**Next:** desbloquear o host gate ⇒ P1.1 meter mc50 (confirma/refuta o mecanismo
-composto no buraco 0,37×)
-**Updated:** 2026-09-10
+**Status:** open (P0 completo — P0.1 clamp + P0.2 absorvido + P0.3 auto;
+P1.1 meter DONE com cartaz mc50 default 1,678×; P1.2/P1.3 blocked;
+P2.1 deferral com número, P2.2 blocked)
+**Next:** P1.2 re-split quieto + apply_mc4/overwrite na mesma janela;
+P1.3 ycsb_f mc4
+**Updated:** 2026-09-11
 **ID:** 0201
 **Parents:** [0185](0185-coluna-a-dropin-1x-tudo.md) (o alvo-produto: coluna A ≥1× em **tudo**),
 [0197](0197-ratio-curve-same-class.md) (a curva que ranqueou o buraco; ranking linha 5),
@@ -161,15 +162,17 @@ o número 0,37× desta célula é **pre-pipeline** (era 0178/0183/0184) — a
       (queued==0, batches==submits), `rfc0201_async_group_env_pin_overrides_axis`.
       A/B serial: mesmas 23 falhas do baseline, +5 verdes; musl exit 0 —
       status: `done (meter final P1.1 pendente)`
-- [ ] **P1.1** meter Linux final (cartaz): sweep de regressão group vs
-      default nas 20 formas (imagem `p201o`, 3 rounds quiet, mesmo boot) +
-      A/B antes/depois do corte com env limpo (default = auto) — status:
-      `in_progress` (sweep DONE e adjudicado 2026-09-11,
-      `findings/2026-09-11-p201o-sweep/`: os 10 flags paired são todos de
-      formas single-threaded/read-only — braços código-idênticos, ruído da
-      caixa (noise floor 0,561 entre braços idênticos); a única forma onde
-      os braços divergem mecanicamente é mc50: 1,034→**1,894** min-of-3;
-      A/B pós-corte `p201q` auto-vs-pin0 rodando)
+- [x] **P1.1** meter Linux final (cartaz): sweep de regressão group vs
+      default nas 20 formas (imagem `p201o`) + A/B antes/depois do corte
+      com env limpo — status: `done (2026-09-11,
+      findings/2026-09-11-p201o-sweep/)`. Sweep: os 10 flags paired são
+      formas single-threaded/read-only — braços código-idênticos, ruído
+      da caixa (noise floor 0,561); a única forma mecanicamente afetada é
+      mc50. A/B same-boot (`p201q`): **default pós-corte = 1,678×
+      min-of-3 (mediana 1,734×) vs Rocks `sync=false`**; pré-corte
+      (pin0) 0,668× min (mediana 0,901×); flip pareado min 1,925 /
+      mediana 2,194 — o buraco 0,37× do cartaz (fair handoff, pré-pipeline)
+      está pago: a célula agora mede **acima** de 1× na coluna default
 - [ ] **P1.2** re-split quieto pós-0193 + apply_mc4/overwrite na mesma
       janela (0192 P1.1/P1.2) — status: `blocked`
 - [ ] **P1.3** ycsb_f mc4 (0193 P0.5) e o eixo `ratio_hat(L)` do 0197 P1.4
@@ -210,7 +213,7 @@ mediu mc50) e o meter P1.1 é o único caminho para virar cartaz.
 | P0.1 | p0 | drain completo pipeline (ousocap 256) + kernel | done | kernel + clamp no `lead` + `rfc0201_full_drain_groups_exceed_as_is_cap`; A/B serial limpo | 2026-09-11 |
 | P0.2 | p0 | spin ciente de oversubscription + twins | done (absorvido no P0.3) | kernel + twins verdes; `wait_wake` extinto pelo wipe; decisão de eixo implementada pelo P0.3 (oversubscrito ⇒ merge ⇒ park-em-canal) | 2026-09-11 |
 | P0.3 | p0 | merge assíncrono cliente-eixo (`writers > ncpu`) + pin env | done | kernel + wiring + 5 testes; A/B serial limpo; base = meter de atribuição 2026-09-11 | 2026-09-11 |
-| P1.1 | p1 | sweep regressão 20 formas + A/B antes/depois pós-corte | in_progress | sweep `p201o` DONE+adjudicado (10 flags = ruído código-idêntico; mc50 1,034→1,894); A/B `p201q` (auto vs pin0) rodando | 2026-09-11 |
+| P1.1 | p1 | sweep regressão 20 formas + A/B antes/depois pós-corte | done | sweep `p201o` (10 flags = ruído código-idêntico) + A/B `p201q`: **mc50 default 1,678× min-of-3** (pré 0,668×; flip min 1,925) | 2026-09-11 |
 | P1.2 | p1 | re-split quieto + apply/overwrite | blocked | 0192 P1.1/P1.2 | 2026-09-10 |
 | P1.3 | p1 | ycsb_f + ratio_hat(L) | blocked | 0193 P0.5 / 0197 P1.4 | 2026-09-10 |
 | P2.1 | p2 | preallocate WAL off-lock | deferred | 4,1 s/25 s (p99.9+; hydrate 15M) | 2026-09-10 |

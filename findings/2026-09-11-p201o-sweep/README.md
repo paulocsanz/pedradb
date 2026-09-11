@@ -89,12 +89,27 @@ formas flagadas são código-idênticas entre braços (ruído) e o regime da
 falsificação 0044 (bypass em writers ≤ ncpu) permanece intacto por
 construção.
 
-## A/B pós-corte (mesma disciplina, imagem `p201q`)
+## A/B pós-corte (imagem `p201q`, digest `sha256:18babf02…`, mesmo boot)
 
-Braços `auto` (env limpo = default pós-corte) vs `pin0`
-(`PEDRA_ASYNC_GROUP=0` ≡ default pré-corte) vs rocks, mc50, 3 rounds
-quiet, mesmo boot. Resultado: ver seção seguinte / atualização.
+Braços `auto` (env limpo = default pós-corte P0.3) vs `pin0`
+(`PEDRA_ASYNC_GROUP=0` ≡ default pré-corte, code-identico ao bypass) vs
+rocks, mc50, 3 rounds quiet, peer `ROCKS_PARITY_SYNC=0`, coluna same-class
+(`PEDRA_PARITY_ASYNC=1`). Src = código @ 8b2ffacf (corte f7b2c20f
+presente; o clamp P0.1 b2b0295b é posterior e não muda grupos ≤50 —
+absorb loop dobra o resto no mesmo frame).
 
-Serial bruto: `caixote logs linux-gate-p149b` (P201O_SHAPE/P201O_REGRESS
-acima; captura completa em scratch `p201o-full.log`). Entry: scratch
-`p201o_entrypoint.sh`.
+| round | rocks qps | auto qps | auto ratio | pin0 qps | pin0 ratio | flip auto/pin0 |
+|---|---|---|---|---|---|---|
+| 1 | 123 152 | 213 585 | 1,7343 | 110 942 | 0,9009 | 1,925 |
+| 2 | 102 889 | 220 701 | 2,1451 | 100 611 | 0,9779 | 2,194 |
+| 3 | 107 840 | 180 974 | 1,6782 | 72 017 | 0,6678 | 2,513 |
+
+**Cartaz (Linux 3-run quiet min-of-3): kvrocks_set_mc50 default =
+1,678× vs RocksDB default `sync=false`** (mediana 1,734×); pré-corte o
+mesmo braço media 0,668× (mediana 0,901×). O flip pareado auto/pin0:
+min 1,925 / mediana 2,194. Consistente com o meter de atribuição
+(group 1,52–2,57×) — o auto default reproduz o braço group.
+
+Serial bruto: `caixote logs linux-gate-p149b` (P201Q_CELL /
+P201Q_METER_RESULT / P201Q_FLIP acima; captura `p201o-full.log` +
+monitor). Entry: scratch `p201q_entrypoint.sh`.
