@@ -1,7 +1,7 @@
 # RFC-0193 — Write fora do wal.lock: pwrite por ticket nas células multi-cliente
 
-**Status:** in-progress (P0 landed; meter 0185 P0.3 aberto — gate Linux bloqueado)
-**Updated:** 2026-09-10
+**Status:** in-progress (P0.1–P0.4 landed; P0.5 parcialmente pago 2026-09-11 — mc50 1,678× e apply_mc4 1,086×; célula 10k → RFC-0209)
+**Updated:** 2026-09-11
 **ID:** 0193
 **Parents:** [0189](0189-ciclo-lider-janela-lenta.md) (P1.1 design aprovado — este RFC executa P1.2/P1.3),
 [0190](0190-apply-concorrente-despark.md) (apply desparkado; o que sobrou do ciclo é o WAL),
@@ -140,9 +140,15 @@ gatilho); leftover I/O precisa da caixa Linux; cauda GET precisa de Linux 3-run.
 - [x] **P0.5** Meter de gate: overwrite_mc4 (0185 P0.3: 3/3 min ≥ 1.0 vs Rocks
       ≳260 k quieto), kvrocks_set_mc50, apply_mc4 antes/depois; Linux p149b
       quieto (STOP/CONT warm10); guest fora ⇒ Darwin DIAG + blocked, nunca
-      cartaz — status: `blocked` com veredito datado
-      (`findings/2026-09-10-rfc0193-p05-meter-blocked.md`; cross-target musl
-      check exit=0 `$S/xcheck-linux-musl.txt`)
+      cartaz — status: `partial` (adjudicado 2026-09-11, gate aberto):
+      **2/3 células PAGAS** — kvrocks_set_mc50 **1,678× min-of-3**
+      (1,7343/2,1451/1,6782; A/B p201q digest `sha256:18babf02…`, mesmo
+      boot, peer `sync=false`; pré-corte o mesmo braço media 0,668×) e
+      apply_mc4 **1,0859× min-of-3** (p201r2; `findings/
+      2026-09-11-p201o-sweep/`, `findings/2026-09-11-p201r2-mc4/`);
+      overwrite 10k (`ROCKS_YCSB_RECORDS=10000`, gate 3/3 ≥ 1,0) segue sem
+      número Linux — carregada na onda de meter do RFC-0209. Cross-target
+      musl check exit=0 `$S/xcheck-linux-musl.txt`
 
 ### P1 — composição e próximo dono
 
@@ -154,15 +160,21 @@ gatilho); leftover I/O precisa da caixa Linux; cauda GET precisa de Linux 3-run.
 - [x] **P1.2** Remeter Linux quieto pós-P0 com o kernel 0192: `name_cut` decide
       o próximo dono (`mins`/`mlock` ⇒ re-avaliar skiplist TCB 0190 P1.1;
       publish residual ⇒ 0189; erro do modelo `off_wr_qps_hat` vs medido
-      nomeado no finding, não escondido) — status: `blocked` (perna Linux) +
-      `done` (vista local)
+      nomeado no finding, não escondido) — status: `blocked` (perna Linux,
+      re-bloqueado 2026-09-11: a wiring de fatia fina do 0192 P0.2 foi
+      apagada pelo `git reset --hard` de sessão paralela em 2026-09-10
+      23:49 — tree vivo tem `WritePhaseStats` 6 fatias RFC-0159, render
+      pré-kernel; kernel intacto 18/18 @ `b959428a`; reconstrução é fatia
+      do 0192, pré-requisito do re-pin deste P1.2) + `done` (vista local)
       (`findings/2026-09-10-rfc0193-telem-ticket-view.md` — kernel ganhou a
       vista ticket pós-P0: `ticket_cut=publish ticket_cs_ns=2050
       ticket_qps_hat=278784` no pin guard=0 L=4; fixture NÃO re-pinado,
       rotulado; erro do modelo não computável sem meter)
 - [x] **P1.3** Perna 25M write-phase: o mesmo corte no piso 4,2 µs/op
       (`findings/` floor-cut-package); I/O leftover é P2.1, não este — status:
-      `blocked` (`2026-09-10-rfc0193-p05-meter-blocked.md`)
+      `blocked` (mesma razão datada 2026-09-11 do P1.2: re-pin exige a
+      wiring 0192 re-construída; `2026-09-10-rfc0193-p05-meter-blocked.md`
+      para o histórico do gate)
 
 ### P2 — ataques nomeados, adiados com número
 
@@ -172,8 +184,11 @@ gatilho); leftover I/O precisa da caixa Linux; cauda GET precisa de Linux 3-run.
 - [x] **P2.2** prefix 100M @ 4 GiB (0,70×) — scan bounded-cache; Linux 3-run
       primeiro — status: `deferred` com número (`p05-meter-blocked`)
 - [x] **P2.3** ycsb_f rmw (run2 0,766; DIAG 0,530) — `template.to_vec+put` no
-      caminho rmw — status: `deferred` com número (`p05-meter-blocked`;
-      dono medido `2026-09-09-rmw-get-bytes.md`)
+      caminho rmw — status: meter `done` 2026-09-11: **ycsb_f_mc4 0,2947×
+      min-of-3** (0,2947/0,6338/0,3195; pedra 146k–189k vs rocks 247k–640k;
+      `findings/2026-09-11-p201r2-mc4/`) + single 0,804 min / 0,956 med
+      (sweep p201o) — buraco REAL; dono reatribuído ao RFC-0209 (ataque
+      async 1-op; dono medido `2026-09-09-rmw-get-bytes.md`)
 - [x] **P2.4** Cauda GET / U-cells DIAG (ycsb_b 0,060, ycsb_c 0,909, qs_neg,
       point_select, wbwi, arango, flink, venice) — Linux 3-run antes de cortar;
       nenhum P0 persegue cauda 100k — status: `deferred` (`p05-meter-blocked`)
@@ -189,13 +204,13 @@ gatilho); leftover I/O precisa da caixa Linux; cauda GET precisa de Linux 3-run.
 | P0.2 | p0 | EnvFile::write_all_at + capability | done | `env::tests` seam tests | 2026-09-10 |
 | P0.3 | p0 | frame do grupo + ticket + drenagem | done | `wal` writer/board unit tests | 2026-09-10 |
 | P0.4 | p0 | líder real off-lock + byte-idêntico | done | `off_lock_write_order_survives_two_leaders`; serial 896/21 = baseline | 2026-09-10 |
-| P0.5 | p0 | meter 3 células (gate 0185 P0.3) | blocked | `2026-09-10-rfc0193-p05-meter-blocked.md` (+ musl cross-check) | 2026-09-10 |
+| P0.5 | p0 | meter 3 células (gate 0185 P0.3) | partial (mc50 1,678× + apply 1,0859× pagas 2026-09-11; 10k → RFC-0209) | `2026-09-11-p201o-sweep/` + `2026-09-11-p201r2-mc4/` | 2026-09-11 |
 | P1.1 | p1 | io_uring ordenado | closed-by-verdict | `2026-09-10-rfc0193-p11-iouring-verdict.md` | 2026-09-10 |
-| P1.2 | p1 | remeter: kernel decide o próximo dono | blocked (Linux) / done (vista local) | `2026-09-10-rfc0193-telem-ticket-view.md` | 2026-09-10 |
-| P1.3 | p1 | perna 25M write-phase | blocked | `2026-09-10-rfc0193-p05-meter-blocked.md` | 2026-09-10 |
+| P1.2 | p1 | remeter: kernel decide o próximo dono | blocked (Linux; wipe 0192 datado 2026-09-11) / done (vista local) | `2026-09-10-rfc0193-telem-ticket-view.md` | 2026-09-11 |
+| P1.3 | p1 | perna 25M write-phase | blocked (mesma razão do P1.2) | wipe 0192 datado 2026-09-11 | 2026-09-11 |
 | P2.1 | p2 | leftover/L0 I/O 25M (0,557) | deferred (número) | `p05-meter-blocked` | 2026-09-10 |
 | P2.2 | p2 | prefix 100M (0,70) | deferred (número) | `p05-meter-blocked` | 2026-09-10 |
-| P2.3 | p2 | ycsb_f rmw (0,766) | deferred (número) | `p05-meter-blocked` + `2026-09-09-rmw-get-bytes.md` | 2026-09-10 |
+| P2.3 | p2 | ycsb_f rmw (0,2947 min medido) | done (meter; buraco real → dono RFC-0209) | `2026-09-11-p201r2-mc4/` + `2026-09-09-rmw-get-bytes.md` | 2026-09-11 |
 | P2.4 | p2 | cauda GET / U-cells (medir Linux) | deferred | `p05-meter-blocked` | 2026-09-10 |
 | P2.5 | p2 | Grid B anti-overfit | blocked | `p05-meter-blocked` (carrega 0190 P2.2) | 2026-09-10 |
 

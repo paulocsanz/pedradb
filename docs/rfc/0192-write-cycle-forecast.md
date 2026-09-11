@@ -1,7 +1,7 @@
 # RFC-0192 — Telemetria de contenção e previsão determinística do ciclo de write
 
-**Status:** in-progress
-**Updated:** 2026-09-10
+**Status:** in-progress (P0.1–P0.4 done; P1.1/P1.2 re-bloqueados 2026-09-11 — wiring de fatia fina apagada por reset de sessão paralela)
+**Updated:** 2026-09-11
 **ID:** 0192
 **Parents:** [0176](0176-modelo-matematico-de-escala.md) (GET clock; este RFC é o gémeo de write),
 [0189](0189-ciclo-lider-janela-lenta.md) (modelo lock_wait = ciclo dos outros líderes),
@@ -45,8 +45,8 @@
 
 ### P1 — o que o kernel decide
 
-- [ ] **P1.1** Perna Linux quieta do 0190: `name_cut` pós-guarda; se `WalWrite` ⇒ 0189 P1.2; se `MemLock` + `lane_collapsed` ⇒ 0190 P1.1 TCB — status: `blocked` (gate 2026-09-10 18:32, `findings/2026-09-10-host-gate-blocked-meter.md`)
-- [ ] **P1.2** `off_wr_qps_hat` vs QPS medido na mesma perna (erro do modelo nomeado, não escondido) — status: `blocked` na perna — aritmética `qps_hat_error_permille` aterrizada no kernel (3 testes); medir exige o gate
+- [ ] **P1.1** Perna Linux quieta do 0190: `name_cut` pós-guarda; se `WalWrite` ⇒ 0189 P1.2; se `MemLock` + `lane_collapsed` ⇒ 0190 P1.1 TCB — status: `blocked` (re-bloqueado 2026-09-11, razão NOVA: gate aberto, mas a wiring desta fatia — as 8 fatias finas enc/wr, guard/mlock/mins, grp walk/complete/settle + o render WRITEPHASE chamando o kernel — foi apagada pelo `git reset --hard` de sessão paralela em 2026-09-10 23:49; tree vivo 2026-09-11 tem `WritePhaseStats` com as 6 fatias RFC-0159 e render pré-kernel, kernel intacto 18/18 @ `b959428a`. Reconstruir o P0.2 é fatia própria deste RFC e pré-requisito do re-pin)
+- [ ] **P1.2** `off_wr_qps_hat` vs QPS medido na mesma perna (erro do modelo nomeado, não escondido) — status: `blocked` na perna (re-bloqueado 2026-09-11, mesma razão do P1.1: sem a wiring re-construída não há perna; a aritmética `qps_hat_error_permille` segue aterrada no kernel, 3 testes)
 
 ### P2 — polish
 
@@ -61,8 +61,8 @@
 | P0.2 | p0 | CAS / lane / wal_hold no WRITEPHASE | done | `write_cycle_line` | 2026-09-10 |
 | P0.3 | p0 | CLI write forecast | done | `pedra scale-model write` | 2026-09-10 |
 | P0.4 | p0 | tier calibrado (lognormal p50/p99) + rótulo `tier=ceiling` | done | `calibrated_forecast` + `2026-09-10-write-forecast-why-it-missed.md` | 2026-09-10 |
-| P1.1 | p1 | Linux quieto decide o corte | blocked | gate 2026-09-10 (finding datado) | 2026-09-10 |
-| P1.2 | p1 | erro do modelo vs medido | blocked (perna; kernel aterrissado nos dois tiers) | `qps_hat_error_permille` | 2026-09-10 |
+| P1.1 | p1 | Linux quieto decide o corte | blocked (wipe da wiring própria, datado 2026-09-11; gate aberto) | verificado in-tree: 6 fatias RFC-0159; kernel intacto `b959428a` | 2026-09-11 |
+| P1.2 | p1 | erro do modelo vs medido | blocked (perna; mesma razão; kernel aterrado nos dois tiers) | `qps_hat_error_permille` | 2026-09-11 |
 | P2.1 | p2 | lane hist no JSON | done | `with_lane_hist` + `lane_histogram` | 2026-09-10 |
 
 ## Acceptance Criteria

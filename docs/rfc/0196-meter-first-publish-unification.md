@@ -2,8 +2,8 @@
 
 **Next:** [0197](0197-ratio-curve-same-class.md) (curva de razão same-class por escala — a previsão determinística que dá a cada meter daqui o seu hat; nomeia o 100M write 0,417 hat)
 
-**Status:** draft
-**Updated:** 2026-09-10
+**Status:** closing — adjudicado 2026-09-11 (P0.3/P1.4/P2.3 pagos, P1.3 2/3, P2.1 parcial; P0.1 re-bloqueado por wipe datado; P1.1/P1.2/P2.2 deferred com custo)
+**Updated:** 2026-09-11
 **ID:** 0196
 **Parents:** [0195](0195-scan-readahead-bounded-cache.md) (GET-side aterrissado; este é o próximo dono),
 [0194](0194-leftover-bounded-cache-25m.md) (P2.1 publish unification é carregado para cá como P0 condicionado),
@@ -129,55 +129,97 @@ P0.1, e só aterrissa nomeado; (c) escala no tamanho do buraco (apply_mc4
 
 - [ ] **P0.1** Re-split quieto pós-0193 (0192 P1.1): 3-run no guest quieto,
       re-pin do fixture, `name_cut` pós-guarda-pós-ticket, erro do modelo
-      (`qps_hat_error_permille`) computável — status: `blocked` (gate
-      2026-09-10 19:33, `findings/2026-09-10-host-gate-blocked-meter.md`)
+      (`qps_hat_error_permille`) computável — status: `blocked`
+      (re-bloqueado 2026-09-11 com razão NOVA: o gate está ABERTO, mas a
+      wiring de fatia fina do 0192 P0.2 foi apagada pelo `git reset --hard`
+      de sessão paralela em 2026-09-10 23:49 — o tree vivo tem
+      `WritePhaseStats` com as 6 fatias RFC-0159 e o render WRITEPHASE
+      pré-kernel; o kernel `write_cycle_kernel.rs` sobreviveu intacto,
+      18/18 @ `b959428a`. Reconstruir a instrumentação é fatia do 0192,
+      pré-requisito do re-pin; verificado in-tree 2026-09-11)
 - [ ] **P0.2** Publish epoch unification: um epoch compartilhado + latches
       por cache (estende 0189 P0.3 + floor-cut hints), tests nomeados
       (`publish_unified_skips_cache_mutexes_until_each_first_fill`,
       `publish_unified_fill_is_monotonic_under_puts` por cache,
       `publish_unified_ycsb_c_no_regress`, `fills_zero_path_unchanged`);
       **só aterrissa se P0.1 nomear publish > ~0,4 µs/op em fills>0** —
-      status: `non-condition` (disparador bloqueado no gate, datado)
-- [ ] **P0.3** Meter apply_mc4 com/sem P0.2, 3-run quieto, peer
+      status: `non-condition` (2026-09-11: o disparador P0.1 segue bloqueado
+      pelo wipe datado acima; e a célula-alvo apply_mc4 está PAGA 1,086×
+      min-of-3 sem o corte — `findings/2026-09-11-p201r2-mc4/` — condição
+      moot; só revive se uma célula fills>0 <1× voltar ao board)
+- [x] **P0.3** Meter apply_mc4 com/sem P0.2, 3-run quieto, peer
       `sync=false`, min-of-3, regra ≥20% no número do buraco — status:
-      `blocked` (mesmo gate/finding)
+      `done` SEM o corte (P0.2 non-condition): **apply_mc4 = 1,0859×
+      min-of-3** (1,0859/1,1160/1,3308; pedra 7,7k–9,3k vs rocks 6,5k–8,6k
+      qps; imagem p201r2 digest `sha256:0ec55b38…`, mesmo boot, 3 rounds
+      quiet, `PEDRA_PARITY_ASYNC=1`, `ROCKS_PARITY_CLIENTS=4` nos dois
+      engines, peer do mesmo round) — a célula 0,47× do 0183 está PAGA
+      acima do floor pelo off-lock 0193 + merge por eixo de cliente 0201;
+      nenhum corte P0.2 foi necessário (`findings/2026-09-11-p201r2-mc4/`)
 
 ### P1 — a pilha de meters (mesmo gate; P0.1 destrava o host para todas)
 
 - [ ] **P1.1** Meter 0195 P0.4: prefix 100M @4GiB com/sem a condição
       WILLNEED + regressão point-get quente (lookup_100, get_hit 25M,
-      point_select) — status: `blocked` (gate datado)
+      point_select) — status: `deferred` com custo (2026-09-11: gate
+      aberto — o bloqueio de host caducou; a perna é pesada: dataset 100M
+      @4 GiB, ~horas de guest-build + bench por braço, e nenhuma célula
+      viva do board depende dela; reabrível pelo inventário
+      `findings/2026-09-11-gargalos-inventario/`)
 - [ ] **P1.2** Meter 0194 P0.4: 15M **e** 25M @4GiB leftover overwrite —
-      status: `blocked`
+      status: `deferred` com custo (mesma adjudicação do P1.1; pernas
+      15M+25M @4 GiB; dono no inventário 2026-09-11)
 - [ ] **P1.3** Meter 0193 P0.5: overwrite 10k (gate 0185 P0.3, 3/3 ≥ 1,0),
-      kvrocks_set_mc50, apply_mc4 pre-P0.2 — status: `blocked`
-- [ ] **P1.4** ycsb_b_mc4 primeiro Linux 3-run (BALANCE_SHAPES) — status:
-      `blocked`
+      kvrocks_set_mc50, apply_mc4 pre-P0.2 — status: `partial` (2026-09-11,
+      2/3 pagas): **kvrocks_set_mc50 = 1,678× min-of-3**
+      (1,7343/2,1451/1,6782; A/B p201q digest `sha256:18babf02…`, mesmo
+      boot, peer `sync=false` — `findings/2026-09-11-p201o-sweep/`) e
+      **apply_mc4 = 1,0859×** (P0.3 acima); overwrite 10k
+      (`ROCKS_YCSB_RECORDS=10000`) segue sem número Linux — carregada na
+      onda de meter do RFC-0209
+- [x] **P1.4** ycsb_b primeiro Linux 3-run (BALANCE_SHAPES) — status:
+      `done` pelo sweep p201o (3-run quiet, peer `sync=false`, coluna
+      async): **ycsb_b single = 1,088 min / 1,276 med** — acima do floor.
+      A variante `_mc` não existe no harness (`run_clients` emite
+      a/f/c/unif_mcN; ycsb_b nunca teve suíte mc) — não há shape a medir
+      (`findings/2026-09-11-p201o-sweep/`)
 
 ### P2 — atrás dos meters
 
 - [ ] **P2.1** U-cells lote 3-run (ycsb_c, point_select, wbwi, flink,
-      venice, qs_neg, pipelined, arango) — status: `blocked`
+      venice, qs_neg, pipelined, arango) — status: `partial` (2026-09-11):
+      a família ycsb+unif FOI medida no sweep p201o 3-run quiet (pagas:
+      ycsb_b 1,088, b_unif 1,394, c 2,729, c_unif 3,238, d 1,122, e 7,976;
+      buracos agora medidos em Linux: ycsb_a 0,605, ycsb_f 0,804,
+      deps_scan 0,831 — dono RFC-0209/inventário); qs_neg, point_select,
+      wbwi, flink, venice, arango, pipelined seguem DIAG-only (anti-overfit:
+      sem Linux 3-run nenhum mecanismo)
 - [ ] **P2.2** Grid B anti-overfit (10–100× dataset, compaction on) no
-      corte vencedor — status: `blocked`
-- [ ] **P2.3** ycsb_f rmw restante (pós-meter 0193; dono medido
-      rmw-get-bytes: metade put do rmw) — status: `todo-condicional`
-      (atrás do meter P1.3; gate fechado — não medível)
+      corte vencedor — status: `deferred` (custo: grid 10–100× com
+      compaction ligada = pernas mais caras do board; precisa de um corte
+      vencedor vivo primeiro — nenhum corte novo aterrizou desde a escrita;
+      dono no inventário 2026-09-11)
+- [x] **P2.3** ycsb_f rmw restante (pós-meter 0193; dono medido
+      rmw-get-bytes: metade put do rmw) — status: `done` (meter,
+      2026-09-11): **ycsb_f_mc4 = 0,2947× min-of-3** (0,2947/0,6338/0,3195;
+      pedra 146k–189k vs rocks 247k–640k; `findings/2026-09-11-p201r2-mc4/`)
+      e single 0,804 min / 0,956 med (sweep p201o) — buraco REAL, dono
+      reatribuído ao ataque async 1-op do RFC-0209 (buffer WAL user-space)
 
 ## Status (living — update with every PR)
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | re-split quieto pós-0193 + erro do modelo | blocked | gate 19:33 (`2026-09-10-host-gate-blocked-meter.md`) | 2026-09-10 |
-| P0.2 | p0 | publish unification (condicionada ao P0.1) | non-condition (disparador gated, datado) | desenho 0194 P2.1 + 0189 P0.3 | 2026-09-10 |
-| P0.3 | p0 | meter apply_mc4 com/sem | blocked | mesmo gate/finding | 2026-09-10 |
-| P1.1 | p1 | meter 0195 P0.4 (prefix 100M) | blocked | mesmo gate/finding | 2026-09-10 |
-| P1.2 | p1 | meter 0194 P0.4 (15M/25M) | blocked | mesmo gate/finding | 2026-09-10 |
-| P1.3 | p1 | meter 0193 P0.5 (10k/mc50/apply) | blocked | mesmo gate/finding | 2026-09-10 |
-| P1.4 | p1 | ycsb_b Linux 3-run | blocked | mesmo gate/finding | 2026-09-10 |
-| P2.1 | p2 | U-cells lote 3-run | blocked | mesmo gate/finding | 2026-09-10 |
-| P2.2 | p2 | Grid B | blocked | mesmo gate/finding | 2026-09-10 |
-| P2.3 | p2 | ycsb_f rmw restante | todo-condicional (atrás do meter) | `2026-09-10-host-gate-blocked-meter.md` | 2026-09-10 |
+| P0.1 | p0 | re-split quieto pós-0193 + erro do modelo | blocked (wipe da wiring 0192, datado 2026-09-11) | verificado in-tree: `WritePhaseStats` 6 fatias RFC-0159; kernel intacto `b959428a` | 2026-09-11 |
+| P0.2 | p0 | publish unification (condicionada ao P0.1) | non-condition (disparador bloqueado + apply_mc4 paga sem o corte) | `2026-09-11-p201r2-mc4/` | 2026-09-11 |
+| P0.3 | p0 | meter apply_mc4 com/sem | done (sem corte: 1,0859× min-of-3) | `findings/2026-09-11-p201r2-mc4/` | 2026-09-11 |
+| P1.1 | p1 | meter 0195 P0.4 (prefix 100M) | deferred (custo; gate aberto) | inventário 2026-09-11 | 2026-09-11 |
+| P1.2 | p1 | meter 0194 P0.4 (15M/25M) | deferred (custo; gate aberto) | inventário 2026-09-11 | 2026-09-11 |
+| P1.3 | p1 | meter 0193 P0.5 (10k/mc50/apply) | partial (mc50 1,678× + apply 1,0859× pagas; 10k → RFC-0209) | `2026-09-11-p201o-sweep/` + `2026-09-11-p201r2-mc4/` | 2026-09-11 |
+| P1.4 | p1 | ycsb_b Linux 3-run | done (single 1,088 min; `_mc` não existe no harness) | `findings/2026-09-11-p201o-sweep/` | 2026-09-11 |
+| P2.1 | p2 | U-cells lote 3-run | partial (ycsb-família medida; qs/wbwi/flink/venice/arango/pipelined DIAG-only) | sweep p201o + inventário | 2026-09-11 |
+| P2.2 | p2 | Grid B | deferred (custo; atrás de corte vencedor) | inventário 2026-09-11 | 2026-09-11 |
+| P2.3 | p2 | ycsb_f rmw restante | done (meter 0,2947× min; buraco real → dono RFC-0209) | `findings/2026-09-11-p201r2-mc4/` | 2026-09-11 |
 
 ## Acceptance Criteria
 
