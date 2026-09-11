@@ -414,6 +414,9 @@ name = "ScanDecisionCount"
 name = "CountDerived"
 
 [[lean_lib]]
+name = "BloomCount"
+
+[[lean_lib]]
 name = "LevelingKernel"
 
 [[lean_lib]]

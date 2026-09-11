@@ -208,9 +208,15 @@ vira win, e previsões continuam hat com erro nomeado.
   linux = `LINUX_QUIET_0189_P01` (RFC-0189 P0.1, 2026-09-10); darwin
   `F_FULLFSYNC` semântica datada 2026-08-27, âncora ns quiet OPEN (veículo
   0187 P2.2 nightly) — os teoremas any-class não dependem dela.
-- [ ] **P2.3** Cadência contínua: cada kernel novo do inventário ganha cota
+- [x] **P2.3** Cadência contínua: cada kernel novo do inventário ganha cota
   (um por fire); `floor_count` só sobe; inventário atualizado no mesmo
-  commit — status: `todo`
+  commit — status: `done`
+  Sweep terminal 2026-09-11: inventário sem `todo` — última linha aberta
+  (Bloom probe) fechada com `bloom_may_contain_work_bound` (`BloomCount.lean`,
+  twin `tests/bloom_probe_count.rs`, count row `catalog:bloom_may_contain`,
+  floor_count 6→7, residuals 7 no mesmo commit); cadência registrada no
+  ledger (Movimento de linha: todo→count exige teorema ∀ sem sorry + twin +
+  linha + floor no MESMO commit).
 
 ## Status (living — update with every PR)
 
@@ -225,7 +231,7 @@ vira win, e previsões continuam hat com erro nomeado.
 | P1.4 | p1 | Scan linear no resultado | done | 2026-09-11 | 2026-09-11 |
 | P2.1 | p2 | Cost-instrumented extract (ferramenta própria) | done | `scripts/ratchet/derive_count_annotations.py` → `CountDerived.lean` (6 fns, `--check` no gate lean) | 2026-09-11 |
 | P2.2 | p2 | fdatasync modelado na álgebra (primitiva nossa) | done | `WorkIo.lean` `HostIoClass` + teoremas any-class; âncoras datadas no findings 2026-09-11 (darwin ns OPEN) | 2026-09-11 |
-| P2.3 | p2 | Cadência: uma cota por fire, floor_count monotônico | todo | — | 2026-09-10 |
+| P2.3 | p2 | Cadência: uma cota por fire, floor_count monotônico | done | inventário sem `todo` (Bloom fechado, floor 7); sweep + gates verdes 2026-09-11 | 2026-09-11 |
 
 ## Acceptance Criteria
 

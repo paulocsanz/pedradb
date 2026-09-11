@@ -247,7 +247,7 @@ impl BloomFilter {
 /// so the Aeneas extract of this file is axiom-free on the T1 path
 /// (`try_from`/`unwrap_or` extract as axioms otherwise; see
 /// `formal/aeneas/EXTRACT.md`).
-fn bit_index(bit: u64) -> usize {
+pub fn bit_index(bit: u64) -> usize {
     if bit > u64::from(u32::MAX) {
         0
     } else {
@@ -259,20 +259,20 @@ fn bit_index(bit: u64) -> usize {
 }
 
 /// Kirsch–Mitzenmacher probe. `nbits` is the active filter width (`> 0`).
-fn probe_bit(h1: u64, h2: u64, i: u32, nbits: u64) -> u64 {
+pub fn probe_bit(h1: u64, h2: u64, i: u32, nbits: u64) -> u64 {
     h1.wrapping_add(u64::from(i).wrapping_mul(h2)) % nbits
 }
 
-fn set_bit(bits: &mut [u8], i: usize) {
+pub fn set_bit(bits: &mut [u8], i: usize) {
     bits[i / 8] |= 1 << (i % 8);
 }
 
-fn test_bit(bits: &[u8], i: usize) -> bool {
+pub fn test_bit(bits: &[u8], i: usize) -> bool {
     (bits[i / 8] & (1 << (i % 8))) != 0
 }
 
 /// FNV-1a 64 + mix for a second independent hash.
-fn hash_pair(key: &[u8]) -> (u64, u64) {
+pub fn hash_pair(key: &[u8]) -> (u64, u64) {
     let h1 = fnv1a64(key);
     // Second hash must be non-zero for double hashing.
     let mut h2 = fnv1a64_seed(key, 0x9e37_79b9_7f4a_7c15);

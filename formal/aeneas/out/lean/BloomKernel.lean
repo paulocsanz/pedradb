@@ -356,7 +356,8 @@ def fnv1a64 (data : Slice Std.U8) : Result Std.U64 := do
   fnv1a64_seed data 14695981039346656037#u64
 
 /-- [pedra_aeneas_bloom_kernel::hash_pair]:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 275:0-283:1 -/
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 275:0-283:1
+    Visibility: public -/
 def hash_pair (key : Slice Std.U8) : Result (Std.U64 × Std.U64) := do
   let h1 ← fnv1a64 key
   let h2 ← fnv1a64_seed key 11400714819323198485#u64
@@ -365,7 +366,8 @@ def hash_pair (key : Slice Std.U8) : Result (Std.U64 × Std.U64) := do
   else ok (h1, h2)
 
 /-- [pedra_aeneas_bloom_kernel::set_bit]:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 266:0-268:1 -/
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 266:0-268:1
+    Visibility: public -/
 def set_bit (bits : Slice Std.U8) (i : Std.Usize) : Result (Slice Std.U8) := do
   let i1 ← i % 8#usize
   let i2 ← 1#u8 <<< i1
@@ -375,7 +377,8 @@ def set_bit (bits : Slice Std.U8) (i : Std.Usize) : Result (Slice Std.U8) := do
   Slice.update bits i3 i5
 
 /-- [pedra_aeneas_bloom_kernel::probe_bit]:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 262:0-264:1 -/
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 262:0-264:1
+    Visibility: public -/
 def probe_bit
   (h1 : Std.U64) (h2 : Std.U64) (i : Std.U32) (nbits : Std.U64) :
   Result Std.U64
@@ -386,7 +389,8 @@ def probe_bit
   i3 % nbits
 
 /-- [pedra_aeneas_bloom_kernel::bit_index]:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 250:0-259:1 -/
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 250:0-259:1
+    Visibility: public -/
 def bit_index (bit : Std.U64) : Result Std.Usize := do
   let i ← lift (core.convert.num.FromU64U32.from core.num.U32.MAX)
   if bit > i
@@ -450,7 +454,8 @@ def BloomFilter.insert_as_is
   ok self
 
 /-- [pedra_aeneas_bloom_kernel::test_bit]:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 270:0-272:1 -/
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 270:0-272:1
+    Visibility: public -/
 def test_bit (bits : Slice Std.U8) (i : Std.Usize) : Result Bool := do
   let i1 ← i / 8#usize
   let i2 ← Slice.index_usize bits i1

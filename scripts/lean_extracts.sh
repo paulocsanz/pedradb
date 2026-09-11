@@ -44,6 +44,7 @@ COMPOSE=(
   FlushAmortCount
   ScanDecisionCount
   CountDerived
+  BloomCount
 )
 
 for lib in "${LIBS[@]}"; do
