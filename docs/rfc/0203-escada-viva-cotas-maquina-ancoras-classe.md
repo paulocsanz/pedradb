@@ -140,12 +140,17 @@ cartaz. Cartaz continua sendo Pedra vs RocksDB default `sync=false`
 
 ### P2 — later / polish
 
-- [ ] **P2.1** Cadência de novos pares gateada: a regra do ledger
+- [x] **P2.1** Cadência de novos pares gateada: a regra do ledger
   ("Movimento de linha") vira enforcement — um par novo no inventário sem
   linha `count` ou `deferido` datado no MESMO commit falha o
   `check_inventory_terminal` (gate já pago na P0.2; aqui documenta-se o
   rito no runbook de gates e no texto do ledger, e o selftest cobre o caso
-  do par novo) — status: `todo`
+  do par novo) — status: `done` (2026-09-11; runbook novo
+  `docs/runbooks/verification-gates.md` §Movimento de linha — suíte de
+  gates + rito em 5 passos; ledger ganha o parágrafo de enforcement
+  (teorema sem linha / linha sem teorema / todo = RED; twin sem contrato
+  = emissão recusada); selftest do gate 6/6 com o caso novo
+  `new-pair-without-row` (par registrado sem linha no mesmo commit))
 
 ## Status (living — update with every PR)
 
@@ -155,7 +160,7 @@ cartaz. Cartaz continua sendo Pedra vs RocksDB default `sync=false`
 | P0.2 | p0 | Terminalidade do inventário como gate | done | 2026-09-11 | 2026-09-11 |
 | P1.1 | p1 | Âncora darwin F_FULLFSYNC medida e datada | done | 2026-09-11 | 2026-09-11 |
 | P1.2 | p1 | Tabela de âncoras por classe consumida por teste | done | 2026-09-11 | 2026-09-11 |
-| P2.1 | p2 | Cadência de novos pares gateada (rito no runbook) | todo | — | 2026-09-11 |
+| P2.1 | p2 | Cadência de novos pares gateada (rito no runbook) | done | 2026-09-11 | 2026-09-11 |
 
 ## Acceptance Criteria
 

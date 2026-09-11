@@ -68,7 +68,13 @@ fdatasync p50 17,7 µs vs `F_FULLFSYNC` p50 4,0 ms intra-host,
 
 Movimento de linha: `todo → count` exige teorema ∀ sem sorry sobre o
 extract + twin test + linha no registro + `floor_count` no MESMO commit
-(RFC-0199 P0.2 estabelece a receita). A ferramenta própria de derivação
+(RFC-0199 P0.2 estabelece a receita). Enforcement (RFC-0203): um par
+novo sem linha `count`/`deferido` datada no MESMO commit falha o gate
+`check_inventory_terminal.py` (teorema sem linha, linha sem teorema,
+`todo` no ledger — tudo RED); o contrato de twin falha o
+`check_twin_contracts.py` se a ferramenta de derivação não souber o
+twin do par (emissão recusada). Rito completo no runbook
+`docs/runbooks/verification-gates.md` §Movimento de linha. A ferramenta própria de derivação
 mecânica de contadores (P2.1) — `scripts/ratchet/derive_count_annotations.py`,
 emissora de `CountDerived.lean` (6 fns inscritas, anotações por expansão:
 leaf/local/dispatch/cmp/arith; loops aninhados e self excluídos) com gate

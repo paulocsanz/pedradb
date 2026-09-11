@@ -178,11 +178,11 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: gate (twice, logs identical) + selftest (5/5 redness)
+      - name: gate (twice, logs identical) + selftest (6/6 redness)
         run: |
           python3 scripts/check_inventory_terminal.py | tee /tmp/i1.log
           python3 scripts/check_inventory_terminal.py | tee /tmp/i2.log
           cmp /tmp/i1.log /tmp/i2.log
           grep -q 'GATE inventory-terminal: GREEN' /tmp/i1.log
           python3 scripts/check_inventory_terminal.py --selftest | tee /tmp/is.log
-          grep -q 'SELFTEST inventory-terminal: 5/5 sabotages caught' /tmp/is.log
+          grep -q 'SELFTEST inventory-terminal: 6/6 sabotages caught' /tmp/is.log

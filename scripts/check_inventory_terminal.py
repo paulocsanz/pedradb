@@ -16,8 +16,8 @@ terminality:
 
 `--selftest` proves redness in memory: a planted `todo` row, a registered
 pair that lost its row, a `deferido` without a date, a `count` row for an
-unregistered pair, and an anonymous row must each be caught; the healthy
-state must pass.
+unregistered pair, an anonymous row, and a new pair whose row did not
+land in the SAME commit must each be caught; the healthy state must pass.
 """
 
 from __future__ import annotations
@@ -123,7 +123,7 @@ def selftest() -> int:
         return 1
 
     caught = 0
-    total = 5
+    total = 6
 
     # S1: planted `todo` row (an open slice leaking into the ledger).
     todo = [list(c) for c in rows] + [["Kernel novo (`catalog:new_pair`)", "medida", "cota", "**todo**"]]
@@ -167,6 +167,14 @@ def selftest() -> int:
         caught += 1
     else:
         print("SELFTEST inventory-terminal: MISSED anonymous row")
+
+    # S6 (RFC-0203 P2.1): new pair whose count theorem landed but whose
+    # inventory row did not land in the SAME commit.
+    if check([list(c) for c in rows], registered | {"catalog:new_pair"}):
+        print("SELFTEST inventory-terminal: caught=new-pair-without-row")
+        caught += 1
+    else:
+        print("SELFTEST inventory-terminal: MISSED new pair without row")
 
     print(f"SELFTEST inventory-terminal: {caught}/{total} sabotages caught")
     return 0 if caught == total else 1
