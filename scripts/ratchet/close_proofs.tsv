@@ -122,3 +122,4 @@ atom	catalog:discard_cut	discard_cut_fate_iff	formal/aeneas/lean/StoreTxn.lean	d
 atom	catalog:leftover_txn_is_aborted	leftover_txn_is_aborted_fate_iff	formal/aeneas/lean/StoreTxn.lean	leftover_txn_is_aborted
 atom	catalog:next_txn_id_after	next_txn_id_after_fate_iff	formal/aeneas/lean/StoreTxn.lean	next_txn_id_after
 atom	catalog:prepare_error_aborts_earlier	prepare_error_aborts_earlier_fate_iff	formal/aeneas/lean/StoreTxn.lean	prepare_error_aborts_earlier
+atom	catalog:reserve_si_gen	reserve_si_gen_fate_iff	formal/aeneas/lean/StoreTxn.lean	reserve_si_gen

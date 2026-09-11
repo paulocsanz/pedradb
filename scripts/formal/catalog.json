@@ -1578,7 +1578,6 @@
     "crates/pedradb-store/src/txn_kernel.rs"
    ],
    "entry": "reserve_si_gen",
-   "data_fate": true,
    "live_callers": [
     {
      "file": "crates/pedradb-store/src/lib.rs",
@@ -1589,6 +1588,10 @@
    "dst_plant": {
     "file": "crates/pedradb-store/src/txn_kernel.rs",
     "test": "reserve_advances_and_differs"
+   },
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0212 P2.1 (F49): reservar SI gen avanca o contador E devolve o novo valor (gens pendentes distintas); as-is devolvia current+1 sem avancar o contador (colisao de gen)"
    }
   },
   {

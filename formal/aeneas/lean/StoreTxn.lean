@@ -269,3 +269,24 @@ theorem prepare_error_aborts_earlier_fate_iff :
   unfold prepare_error_aborts_earlier
   cases v <;> simp
 
+/-- RFC-0212 P2.1 (store-txn cadence, atom `catalog:reserve_si_gen`):
+    a reserve advances the counter AND stamps that value —
+    `next_current` and `reserved` are EXACTLY the saturating
+    successor of `current` — fate forall over the extracted body
+    (F49: distinct outstanding gens); the AS-IS mutant leaves the
+    counter unmoved (the next reserve collides — the lie the DST
+    plant `reserve_si_gen_on_live_queued_is_not_ok` refutes). -/
+theorem reserve_si_gen_fate_iff :
+    ∀ (current : U64) (r : SiGenReserve),
+      (reserve_si_gen current = ok r) ↔
+        (r.next_current = core.num.U64.saturating_add current 1#u64
+          ∧ r.reserved = core.num.U64.saturating_add current 1#u64) := by
+  intro current r
+  have hreduce : reserve_si_gen current
+      = ok ({ next_current := core.num.U64.saturating_add current 1#u64
+             , reserved := core.num.U64.saturating_add current 1#u64 :
+             SiGenReserve }) := rfl
+  rw [hreduce]
+  cases r with
+  | mk nc rs => simp [eq_comm]
+
