@@ -222,11 +222,11 @@ contagens movem no mesmo commit; `lock_interleavings_admitted` e
   100` e `floor_atom ≥ 8`; cadência = um `if` por commit (P1.5 é o
   primeiro); este P2.3 fecha quando o cap e o floor baterem, não numa
   sessão — status: `todo`
-- [ ] **P2.4** Herdados do [0187](0187-teorema-experimento-tcb.md),
+- [x] **P2.4** Herdados do [0187](0187-teorema-experimento-tcb.md),
   **não re-fatiados**: P2.1 L28 user-gated, P2.2 TCG power-cut +
   `F_FULLFSYNC` nightly, P2.3 exaustivo N=4. Fronteira crash-injection
   T≤12/S≤4 permanece nomeada (alargar é movimento de ledger, não
-  silêncio) — status: `todo`
+  silêncio) — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -244,7 +244,7 @@ contagens movem no mesmo commit; `lock_interleavings_admitted` e
 | P2.1 | p2 | Inv-WAL preservação (um passo) | done | `wal_append_preserves_inv_wal` + corolário `d1_plan_append_preserves_inv_wal` WalState.lean | 2026-09-10 |
 | P2.2 | p2 | Inv-LSM `visible_at` ∘ probe-order (um passo) | done | `inv_lsm_newest_first_never_non_live` + corolário `r1_get_never_returns_non_live` Merge.lean (R1 segue atom) | 2026-09-10 |
 | P2.3 | p2 | Alvo trampolim cap≤100 / floor_atom≥8 | done | 30/31 caps pagos (100; …P2.3-27 `encode_cf_key` — encoding devolve a chave nua com encoding efetivo vazio; senão cadeia planejada por capacidade: bytes do cf, um 0 separador, a chave, cada passo ok, RFC-0150 P0; P2.3-28 `infer_sst_cf` — SST tagueado com a família dos bounds exatamente quando os dois compartilham uma família; bound único toma a família dele; sem bounds tag vazia (mista/legacy) — nunca tag que minta sobre conteúdo misto, RFC-0150 P0; P2.3-29 `batch_is_empty` — lote de comprimento n roteia pelo caminho vazio exatamente quando a comparação de máquina de n contra zero cai em v — corpo sem passo monádico, a iff é a regra de computação inteira (primeiro par pago fora da fila cf, `WriteAdmission.lean`, RFC-0171 P1.1; P2.3-30 `dir_sync_required` — rename/create é seguido de fsync de diretório exatamente quando o sync das open-options está ligado — corpo é o lift puro ok sync, a iff é a regra de computação inteira (`WriteAdmission.lean`, RFC-0171 P1.1), atoms 31/8; alvo numérico fechado: cap_data_fate 100 ≤ 100 e floor_atom 31 ≥ 8 (as duas descidas do déficit vieram da fila write_admission, fora do cf) | 2026-09-10 |
-| P2.4 | p2 | Herdados 0187 (L28 / TCG / N=4) | todo | — | 2026-09-10 |
+| P2.4 | p2 | Herdados 0187 (L28 / TCG / N=4) | done | registro terminal `verification-ledger.md` §"Herdados do 0187": L28 user-gated (rank H, sem decisão não inicia), TCG power-cut + `F_FULLFSYNC` sempre experimento (nightly; barreira de SO é TCB), exaustivo N=4 aberto por custo do runner (o registrado segue N≤3); fronteira crash-injection T≤12/S≤4 nomeada na linha do grid; marker do ledger recontado 294→298 no mesmo commit (dívida `merge_sift`/`si_hist_repair`/`apply_put_plan`/`hist_load_fate`) | 2026-09-10 |
 
 ## Acceptance Criteria
 

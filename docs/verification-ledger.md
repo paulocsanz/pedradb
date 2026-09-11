@@ -11,7 +11,7 @@ sustenta. Uma linha só sobe de camada (`experimento → teorema`) com o
 gate da camada de destino verde no mesmo commit (three-teeth ou
 enumeração completa); nunca por reescrita de ledger.
 
-<!-- ledger-catalog: total=295 proof=262 campaign=33 absent=0 single_artifact=288 aeneas_scripts=228 clones=7 models=34 -->
+<!-- ledger-catalog: total=298 proof=265 campaign=33 absent=0 single_artifact=291 aeneas_scripts=231 clones=7 models=34 -->
 
 ## Teorema — ∀ sobre código/modelo (machine-checked ou enumeração completa)
 
@@ -52,6 +52,32 @@ Quatro frases sobre o fn que o rustc liga. Camada só sobe
 | "Persistiu no disco" (power-cut) | TCG power-cut nightly (P2.2, RFC-0187) + F_FULLFSYNC | SEMPRE experimento; a barreira de SO é TCB |
 | Rocks parity (peer default `sync=false`, floor 1.0; G1 fdatasync-antes-do-Ok) | `findings/rocks-parity-floor1x*` | medição; regras de peer do repo |
 | Bug-plants three-teeth (dente DST) | `three_teeth_queued.rs` etc. (catálogo, tier campaign — 33 pares `l28_*`) | planta prova que o dente morde, não ∀; exemplares `catalog:l28_durability`, `catalog:l28_tcp_left`, `catalog:l28_tcp_part` |
+
+### Herdados do 0187 — estado terminal (RFC-0191 P2.4)
+
+Os três gates herdados do [0187](rfc/0187-teorema-experimento-tcb.md) NÃO
+foram re-fatiados para o RFC-0191 e NÃO foram descartados — permanecem
+exatamente onde o 0187 os deixou:
+
+- **Série L28** (33 pares `l28_*`, tier campaign): **user-gated** — não
+  iniciar a promoção a teorema three-teeth sem decisão registrada (rank H).
+- **Nightly experimental de durabilidade física** (TCG guest power-cut por
+  barreira + `F_FULLFSYNC` no macOS): permanece nightly, **sempre
+  experimento** — "persistiu no disco" além da barreira de SO não vira
+  claim de teorema; a barreira de SO é TCB (tabela abaixo).
+- **Exaustivo N=4 com poda/simetria**: aberto no 0187 por custo do runner;
+  o exaustivo registrado segue N≤3 (gate P0.1).
+
+A fronteira do grid de crash-injection permanece NOMEADA: max T=12,
+max S=4 (coluna "Piso nomeado" da linha de crash-injection, acima).
+Fora dela: T>12, S>4, setor partido/torn write (TCG nightly), ∀π, timing
+de grupo. Alargar a fronteira é movimento de ledger com gate verde no
+mesmo commit — nunca silêncio.
+
+Recount do marker nesta mesma edição (dívida da própria campanha): os pares
+`merge_sift` (59738caa), `si_hist_repair`, `apply_put_plan`, `hist_load_fate`
+(2d60af11–f42d17ed) entraram no catálogo sem mover o marker — total
+294→298, proof 262→265, single_artifact 288→291, aeneas_scripts 228→231.
 
 ## TCB — axiomas nomeados (fora de prova, por decisão registrada)
 
