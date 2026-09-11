@@ -229,3 +229,24 @@ theorem recover_must_apply_fate_iff :
   | false =>
     have hnP := of_decide_eq_false hd
     cases v <;> simp [hnP]
+
+/-- RFC-0205 P1.2 (second data-fate cadence promotion, atom
+    `catalog:recover_drop_orphan`): recovery drops an orphan segment
+    EXACTLY when its index is beyond the new inventory high-water (a
+    segment outside the committed inventory is never kept; one inside
+    is never dropped) — fate forall over the extracted pure-lift body;
+    the AS-IS `ok false` mutant keeps every orphan. -/
+theorem recover_drop_orphan_seg_fate_iff :
+    ∀ (seg_index : U64) (new_hi : U64) (v : Bool),
+      (recover_drop_orphan_seg seg_index new_hi = ok v) ↔
+        ((v = true ∧ seg_index > new_hi)
+          ∨ (v = false ∧ ¬(seg_index > new_hi))) := by
+  intro seg_index new_hi v
+  unfold recover_drop_orphan_seg
+  cases hd : decide (seg_index > new_hi) with
+  | true =>
+    have hP := of_decide_eq_true hd
+    cases v <;> simp [hP]
+  | false =>
+    have hnP := of_decide_eq_false hd
+    cases v <;> simp [hnP]

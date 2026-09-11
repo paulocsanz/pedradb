@@ -185,12 +185,18 @@ RFC não as toca.
 4. **P1.2:** cadência data-fate: 2 promoções do pool 91 (candidatos
    `recover_must_apply`, `recover_drop_orphan_seg`; um por commit;
    quedas medidas caem para o próximo par) — cap 94→93→92.
-   — status: 1/2 `done` (`recover_must_apply` pago como
+   — status: `done` 2/2 (1/2 `recover_must_apply` pago como
    `recover_must_apply_fate_iff` (Membership.lean): re-apply
    EXATAMENTE quando commit > applied, mutante as-is pula tudo;
    cap 94→93, floor_atom 37→38, floor_extract 241→240 no mesmo
    commit; planta DST `recover_must_apply_on_live_queued_is_not_ok`
-   1/1; gates 3× GREEN)
+   1/1; gates 3× GREEN; 2/2 `recover_drop_orphan` pago como
+   `recover_drop_orphan_seg_fate_iff` (Membership.lean): drop de
+   órfão EXATAMENTE quando seg_index > new_hi, mutante as-is preserva
+   todo órfão; cap 93→92, floor_atom 38→39, floor_extract 240→239 no
+   mesmo commit; planta DST `recover_drop_orphan_seg_on_live_queued_
+   is_not_ok` 1/1; gates 3× GREEN; uma promoção por commit, sem
+   quedas medidas)
 
 ### P2 — later / fronteira + sweep
 
@@ -207,7 +213,7 @@ RFC não as toca.
 | P0.1 | p0 | Close composto: may_publish_group ∀ registrado | done | may_publish_group_ok_iff_wal_io_ok (GroupCommit.lean) | 2026-09-11 |
 | P0.2 | p0 | Primeiro data-fate do cluster store: vote_decision a atom | done | vote_decision_fate_iff (Vote.lean) | 2026-09-11 |
 | P1.1 | p1 | Composição ∀ off-lock (publish × rotate; dentes viram corolários) | done | concurrent_publish_fate_forall + wal_rotate_decision_fate_forall + ponte try_rotate_step_all_clear (ComposeConcurrent.lean) | 2026-09-11 |
-| P1.2 | p1 | Cadência data-fate: +2 promoções (cap 94→92) | todo | — | 2026-09-11 |
+| P1.2 | p1 | Cadência data-fate: +2 promoções (cap 94→92) | done | recover_must_apply_fate_iff + recover_drop_orphan_seg_fate_iff (Membership.lean) | 2026-09-11 |
 | P2.1 | p2 | Fronteira datada do handler (EXTRACT.md) | todo | — | 2026-09-11 |
 | P2.2 | p2 | Sweep final de gates | todo | — | 2026-09-11 |
 
