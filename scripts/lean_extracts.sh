@@ -21,7 +21,7 @@ if [[ -z "$LAKE" ]]; then
 fi
 
 LIBS=(
-  Lookup RpcMode StoreCompact Snapshot Si IndexVal Changelog
+  Lookup RpcMode StoreCompact StoreTxn Snapshot Si IndexVal Changelog
   Cursor Cl Children Pin Pack Ship Fold Manifest Compact VlogGc TxGlue
   L28 Tcg Cqe Iter Properties Scale DiskPressure Crc
   EnvCrash WalState D1Modelo WriteAck WriteAdmission GroupCommit Flush

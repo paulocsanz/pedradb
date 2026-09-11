@@ -176,3 +176,37 @@ theorem unreserve_si_gen_only_if_still_ours :
   have hdiff : (5#u64 = 4#u64) = false := by native_decide
   have hsub : core.num.U64.saturating_sub 4#u64 1#u64 = 3#u64 := by native_decide
   simp [hpos, hdiff, hsub]
+
+/-- RFC-0212 P2.1 (store-txn cadence, atom `catalog:discard_cut`):
+    the discard cut is EXACTLY max(from_index, commit ⊕ 1) under the
+    U64 order — never at or below a committed index — fate forall
+    over the extracted body (F47); the AS-IS mutant cuts at
+    `from_index` even when committed (committed data loss — the
+    lie the DST plant `discard_cut_on_live_queued_is_not_ok`
+    refutes). -/
+theorem discard_cut_fate_iff :
+    ∀ (from_index commit v : U64),
+      (discard_cut from_index commit = ok v) ↔
+        ((v = core.num.U64.saturating_add commit 1#u64
+            ∧ from_index < core.num.U64.saturating_add commit 1#u64)
+          ∨ (v = from_index
+            ∧ ¬ (from_index < core.num.U64.saturating_add commit 1#u64))) := by
+  intro from_index commit v
+  have hreduce : discard_cut from_index commit
+      = core.cmp.Ord.max.default core.cmp.OrdU64.partialOrdInst.lt
+          from_index (core.num.U64.saturating_add commit 1#u64) := rfl
+  rw [hreduce]
+  have hsem : ∀ (x y : U64),
+      core.cmp.OrdU64.partialOrdInst.lt x y = ok (decide (x < y)) := fun x y => rfl
+  unfold core.cmp.Ord.max.default core.cmp.Ord.max_body
+  rw [hsem]
+  cases hd : decide (from_index < core.num.U64.saturating_add commit 1#u64) with
+  | true =>
+    have hP : from_index < core.num.U64.saturating_add commit 1#u64 := of_decide_eq_true hd
+    simp [hd, hP]
+    exact eq_comm
+  | false =>
+    have hnP : ¬ (from_index < core.num.U64.saturating_add commit 1#u64) := of_decide_eq_false hd
+    simp [hd, hnP]
+    exact eq_comm
+

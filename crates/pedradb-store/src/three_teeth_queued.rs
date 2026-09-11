@@ -5568,6 +5568,197 @@ fn prepare_error_aborts_earlier_on_live_queued_is_not_ok() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// ── txn_kernel / compact_kernel three-teeth (F47 / F49 / RFC-0100) — dst plants on live paths ──
+
+/// F47: the discard cut is never at or below commit — a leader-side discard
+/// of the uncommitted suffix keeps the committed prefix on every local node
+/// (AS-IS cuts at `from_index` even when committed → committed data loss).
+#[test]
+fn discard_cut_on_live_queued_is_not_ok() {
+    use crate::txn_kernel::{discard_cut, discard_cut_as_is};
+    assert_eq!(discard_cut(3, 5), 6);
+    assert_eq!(discard_cut(8, 5), 8);
+    assert_eq!(
+        discard_cut_as_is(3, 5),
+        3,
+        "AS-IS dente: cut lands on a committed index"
+    );
+    let mut q = LiveQueued::open();
+    qput(&mut q.cluster, b"rfc0212-dc", b"v0");
+    let leader = q.cluster.range_leader(1).unwrap();
+    // A committed-but-uncompacted prepare entry stays in the RAM log —
+    // the exact state the discard path walks.
+    let _ = q.cluster.broadcast_append(
+        1,
+        leader,
+        Some(RangeEntry::TxnPrepare { txn_id: 909001, pairs: vec![(b"rfc0212-dc2".to_vec(), b"x".to_vec())] }),
+    );
+    let mut commit = 0;
+    for _ in 0..96 {
+        q.cluster.tick().unwrap();
+        pump_queued(&mut q.cluster, 48);
+        let p = q.cluster.nodes.get(&leader).unwrap().ranges.get(&1).unwrap();
+        commit = p.commit;
+        if p.log.iter().any(|e| e.index == commit) {
+            break;
+        }
+    }
+    let cut_from = commit;
+    assert!(
+        q.cluster.nodes.get(&leader).unwrap().ranges.get(&1).unwrap().log.iter().any(|e| e.index == cut_from),
+        "prepare entry must sit in the leader log at the commit index"
+    );
+    // Production discard from the committed index: the cut must stay ABOVE
+    // commit, so the committed entry survives; the mutant cuts at the
+    // committed index itself and deletes it.
+    q.cluster.discard_uncommitted_from(1, leader, cut_from).unwrap();
+    assert!(
+        q.cluster.nodes.get(&leader).unwrap().ranges.get(&1).unwrap().log.iter().any(|e| e.index == cut_from),
+        "committed entry must survive the discard (cut > commit)"
+    );
+}
+
+/// F49: a reserve advances the durable counter AND stamps that value — two
+/// outstanding Queued proposes never embed the same si_gen (AS-IS leaves the
+/// counter unmoved, so the next reserve collides).
+#[test]
+fn reserve_si_gen_on_live_queued_is_not_ok() {
+    use crate::txn_kernel::{reserve_si_gen, reserve_si_gen_as_is};
+    let r = reserve_si_gen(3);
+    assert_eq!((r.next_current, r.reserved), (4, 4));
+    let bad = reserve_si_gen_as_is(3);
+    assert_eq!(
+        (bad.next_current, bad.reserved),
+        (3, 4),
+        "AS-IS dente: counter unmoved while a gen is stamped"
+    );
+    assert_eq!(
+        reserve_si_gen(bad.next_current).reserved,
+        bad.reserved,
+        "AS-IS collides: two outstanding proposes embed the same si_gen"
+    );
+    let mut q = LiveQueued::open();
+    let leader = q.cluster.range_leader(1).unwrap();
+    // Two leader proposes: with_si_gen reserves a durable gen per entry; the
+    // stamped values are readable in the RAM log before compaction.
+    let _ = q.cluster.broadcast_append(
+        1,
+        leader,
+        Some(RangeEntry::Put { key: b"rfc0212-rsg-a".to_vec(), value: b"v1".to_vec(), si_gen: 0 }),
+    );
+    let _ = q.cluster.broadcast_append(
+        1,
+        leader,
+        Some(RangeEntry::Put { key: b"rfc0212-rsg-b".to_vec(), value: b"v2".to_vec(), si_gen: 0 }),
+    );
+    let gens: Vec<u64> = q
+        .cluster
+        .nodes
+        .get(&leader)
+        .unwrap()
+        .ranges
+        .get(&1)
+        .unwrap()
+        .log
+        .iter()
+        .filter_map(|e| match &e.entry {
+            RangeEntry::Put { key, si_gen, .. }
+                if key.as_slice() == b"rfc0212-rsg-a" || key.as_slice() == b"rfc0212-rsg-b" =>
+            {
+                Some(*si_gen)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(gens.len(), 2, "both proposes must stamp a gen in the leader log");
+    assert!(
+        gens[1] == gens[0] + 1 && gens[0] >= 1,
+        "F49: consecutive reserves advance the counter and stamp the advanced value ({gens:?})"
+    );
+}
+
+/// F49: the unreserve only rewinds when the counter still holds OUR stamp —
+/// a stale stamp (someone else reserved after us) leaves the counter alone
+/// (AS-IS blindly rewinds to stamped-1 and clobbers the newer reservation).
+#[test]
+fn unreserve_si_gen_on_live_queued_is_not_ok() {
+    use crate::txn_kernel::{unreserve_si_gen, unreserve_si_gen_as_is};
+    assert_eq!(unreserve_si_gen(4, 4), 3);
+    assert_eq!(unreserve_si_gen(5, 4), 5);
+    assert_eq!(unreserve_si_gen(3, 0), 3);
+    assert_eq!(
+        unreserve_si_gen_as_is(5, 4),
+        3,
+        "AS-IS dente: rewinds a counter it no longer owns"
+    );
+    let mut q = LiveQueued::open();
+    let leader = q.cluster.range_leader(1).unwrap();
+    let _ = q.cluster.broadcast_append(
+        1,
+        leader,
+        Some(RangeEntry::Put { key: b"rfc0212-urg-a".to_vec(), value: b"v1".to_vec(), si_gen: 0 }),
+    );
+    let _ = q.cluster.broadcast_append(
+        1,
+        leader,
+        Some(RangeEntry::Put { key: b"rfc0212-urg-b".to_vec(), value: b"v2".to_vec(), si_gen: 0 }),
+    );
+    let gens: Vec<u64> = q
+        .cluster
+        .nodes
+        .get(&leader)
+        .unwrap()
+        .ranges
+        .get(&1)
+        .unwrap()
+        .log
+        .iter()
+        .filter_map(|e| match &e.entry {
+            RangeEntry::Put { key, si_gen, .. }
+                if key.as_slice() == b"rfc0212-urg-a" || key.as_slice() == b"rfc0212-urg-b" =>
+            {
+                Some(*si_gen)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(gens.len(), 2, "both proposes must stamp a gen in the leader log");
+    // Live state: the first propose's stamp is stale after the second
+    // reserve — the production unreserve KEEPS the current counter; the
+    // mutant rewinds below a reservation it no longer owns.
+    let (stale, current) = (gens[0].min(gens[1]), gens[0].max(gens[1]));
+    assert_eq!(unreserve_si_gen(current, stale), current);
+    assert_ne!(unreserve_si_gen_as_is(current, stale), current);
+}
+
+/// RFC-0100: compaction never goes past an applied-but-un-left joint — the
+/// through index is clamped to `joint - 1` (AS-IS compacts straight through
+/// and hides C-old,new from later readers).
+#[test]
+fn compact_through_unleft_on_live_queued_is_not_ok() {
+    use crate::compact_kernel::{compact_through_unleft, compact_through_unleft_as_is};
+    assert_eq!(compact_through_unleft(5, Some(3)), 2);
+    assert_eq!(compact_through_unleft(5, None), 5);
+    assert_eq!(compact_through_unleft(5, Some(7)), 5);
+    assert_eq!(compact_through_unleft(2, Some(0)), 2);
+    assert_eq!(
+        compact_through_unleft_as_is(5, Some(3)),
+        5,
+        "AS-IS dente: compacts past the un-left joint"
+    );
+    let mut q = LiveQueued::open();
+    qput(&mut q.cluster, b"rfc0212-ctu", b"v0");
+    let leader = q.cluster.range_leader(1).unwrap();
+    // Live joint scan: a log with no applied joint must leave `through` alone,
+    // exactly as the production compact path computes it.
+    let (through, unleft) = {
+        let p = q.cluster.nodes.get(&leader).unwrap().ranges.get(&1).unwrap();
+        (p.applied, StoreCluster::<pedradb_io_uring::IoUringEnv>::unleft_applied_joint_index(p))
+    };
+    assert_eq!(unleft, None, "no membership joint in this log");
+    assert_eq!(compact_through_unleft(through, unleft), through);
+}
+
 // ── ae_kernel / commit_kernel three-teeth (F16 / F10) — dst plants on live paths ──
 
 /// F16: the AE safety gate refuses committed rewrites; the live follower
@@ -5791,3 +5982,4 @@ fn c1_modelo_on_live_queued_joint_is_not_ok() {
         );
     }
 }
+

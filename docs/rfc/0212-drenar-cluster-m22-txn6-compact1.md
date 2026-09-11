@@ -244,7 +244,17 @@ pool honesto manda sobre a meta numérica).
    `unreserve_si_gen`; wrapper `StoreTxn.lean`) + `compact_unleft`
    (wrapper `StoreCompact.lean`): ×7, cap 33→26, floor_atom
    91→98, floor_extract 187→180 — bloco cluster ZERO `data_fate`
-   medido ao vivo — status: `todo`
+   medido ao vivo — status: `doing`
+
+   — 1/7 `done`: `discard_cut_fate_iff`
+   (StoreTxn.lean; o corte do discard é EXATAMENTE
+   `max(from, commit+1)` — nunca corta em índice cometido; o
+   as-is cortava em `from` mesmo com commit acima), cap 33→32,
+   floor_atom 91→92, floor_extract 187→186; planta DST verde
+   (`discard_cut_on_live_queued_is_not_ok`, no lote paralelo das
+   7) — wrapper `StoreTxn` inscrito no gate de extracts
+   (`lean_extracts.sh` LIBS, 62 libs; buraco pré-existente desde
+   o RFC-0191 fechado)
 7. **P2.2:** composição ∀ do protocolo de fim-de-fila queued
    (finish: discard-leader local ∧ persist fence/hist conforme o
    fate) sobre atoms registrados em nova compose lib (zero
@@ -264,7 +274,7 @@ pool honesto manda sobre a meta numérica).
 | P1.1 | p1 | Cadências membership 3/6+4/6 — recover+open ×8 | done | e93c7b0f + 909dfb62 + 4b3c6ee8 + f2497120 + 96001f96 + e3f59f57 + 32b85288 + este commit (8 atoms, 8 commits; números exatos) | 2026-09-11 |
 | P1.2 | p1 | Cadências membership 5/6+6/6 — joint+slot ×6; ZERO data_fate | done | fe29d5d4 + 142b2efb + 1223b824 + 38b468b4 + a8776aa8 + este commit (6 atoms, 6 commits; números exatos; membership 22/22 ZERO) | 2026-09-11 |
 | P1.3 | p1 | Veredito datado dos medidos ausentes | done | este commit (veredito: 0 ausentes nas 22 promoções; âncoras green antes/depois) | 2026-09-11 |
-| P2.1 | p2 | Cadência final — txn ×6 + compact ×1; cluster ZERO | todo | — | 2026-09-11 |
+| P2.1 | p2 | Cadência final — txn ×6 + compact ×1; cluster ZERO | doing | 1/7: este commit | 2026-09-11 |
 | P2.2 | p2 | Composição ∀ fim-de-fila + sweep final + flip done | todo | — | 2026-09-11 |
 
 ## Critérios de aceite

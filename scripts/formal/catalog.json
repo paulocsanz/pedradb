@@ -1407,7 +1407,6 @@
     "crates/pedradb-store/src/txn_kernel.rs"
    ],
    "entry": "discard_cut",
-   "data_fate": true,
    "live_callers": [
     {
      "file": "crates/pedradb-store/src/lib.rs",
@@ -1418,6 +1417,10 @@
    "dst_plant": {
     "file": "crates/pedradb-store/src/txn_kernel.rs",
     "test": "discard_never_cuts_committed"
+   },
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0212 P2.1 (F47): o corte do discard e exatamente max(from, commit+1) — nunca corta em indice cometido; as-is cortava em from_index mesmo com commit acima (perda cometida)"
    }
   },
   {
