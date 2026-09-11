@@ -108,8 +108,12 @@ paralela) — este RFC não os toca.
    planta TCP REAL verde
    — 2/4 `done`: `l28_tcp_part_ok_fate_iff` (L28.lean; votante
    removido participa ⟺ o scan diz — mapa CLI/nodes stale não
-   conta), cap 83→82, floor_atom 47→49, floor_extract 231→229;
+   conta), cap 83→82, floor_atom 48→49, floor_extract 230→229;
    planta TCP REAL verde
+   — 3/4 `done`: `l28_tcp_apply_ok_fate_iff` (L28.lean; recover
+   apply fecha `commit > applied` ⟺ a recuperação aplicou — ctor
+   TCP de produção), cap 82→81, floor_atom 49→50, floor_extract
+   229→228; planta TCP REAL verde
 2. **P0.2:** cadência l28 2/4 — `l28_tcp_trunc`, `l28_tcp_odrop`,
    `l28_tcp_abort`, `l28_tcp_nowms` (cap 80→76, `floor_atom`
    51→55, `floor_extract` 227→223); plantas `removed_*` verdes —

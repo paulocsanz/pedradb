@@ -3753,7 +3753,6 @@
     "crates/pedradb-store/src/bin/cluster_real.rs"
    ],
    "entry": "l28_tcp_apply_ok",
-   "data_fate": true,
    "handlers": [
     "tcp_node_recover_apply_ok"
    ],
@@ -3767,7 +3766,11 @@
      "file": "crates/pedradb-store/src/bin/cluster_real.rs",
      "handler": "tcp_node_recover_apply_ok"
     }
-   ]
+   ],
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0210 P0.1 l28 cadence 1/4: after a real TCP plant + process death the recover-apply closes commit>applied exactly when the recovery applied it (production TCP ctor; fate forall over the extracted pure-lift body, L28.lean); AS-IS ok-true skips recover apply (0129 leftover)"
+   }
   },
   {
    "id": "l28_tcp_napply",

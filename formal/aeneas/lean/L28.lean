@@ -394,3 +394,19 @@ theorem l28_tcp_part_ok_fate_iff :
   intro b v
   unfold l28_tcp_part_ok
   cases b <;> cases v <;> simp
+
+/-- RFC-0210 P0.1 (l28 cadence 1/4, atom `catalog:l28_tcp_apply`):
+    after a REAL TCP plant + process death, the recover-apply closes
+    `commit > applied` EXACTLY when the recovery applied it
+    (production TCP ctor) — fate forall over the extracted pure-lift
+    body; the AS-IS `ok true` mutant skips recover apply (the 0129
+    leftover: committed joint stays C-old — the lie the real TCP
+    plant `l28_real_tcp_recover_apply` refutes). -/
+theorem l28_tcp_apply_ok_fate_iff :
+    ∀ (b : Bool) (v : Bool),
+      (l28_tcp_apply_ok b = ok v) ↔
+        ((v = true ∧ b = true)
+          ∨ (v = false ∧ b = false)) := by
+  intro b v
+  unfold l28_tcp_apply_ok
+  cases b <;> cases v <;> simp
