@@ -4280,7 +4280,6 @@
     "crates/pedradb-store/src/bin/cluster_real.rs"
    ],
    "entry": "l28_tcp_hnt_ok",
-   "data_fate": true,
    "handlers": [
     "tcp_node_hint_ok"
    ],
@@ -4294,7 +4293,11 @@
      "file": "crates/pedradb-store/src/bin/cluster_real.rs",
      "handler": "tcp_node_hint_ok"
     }
-   ]
+   ],
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0146 P1.2 REAL TCP remaining-voter leader-hint: TCP ctor does not route leader_hint to the removed replica; plant l28_real_tcp_hint green"
+   }
   },
   {
    "id": "l28_tcp_slot",

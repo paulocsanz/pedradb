@@ -92,3 +92,4 @@ atom	catalog:l28_tcp_rdr	l28_tcp_rdr_ok_fate_iff	formal/aeneas/lean/L28.lean	l28
 atom	catalog:l28_tcp_dsc	l28_tcp_dsc_ok_fate_iff	formal/aeneas/lean/L28.lean	l28_tcp_dsc_ok
 atom	catalog:l28_tcp_pld	l28_tcp_pld_ok_fate_iff	formal/aeneas/lean/L28.lean	l28_tcp_pld_ok
 atom	catalog:l28_tcp_std	l28_tcp_std_ok_fate_iff	formal/aeneas/lean/L28.lean	l28_tcp_std_ok
+atom	catalog:l28_tcp_hnt	l28_tcp_hnt_ok_fate_iff	formal/aeneas/lean/L28.lean	l28_tcp_hnt_ok

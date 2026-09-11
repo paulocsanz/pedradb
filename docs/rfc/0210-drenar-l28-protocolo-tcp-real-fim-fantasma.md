@@ -226,6 +226,12 @@ status: `done`
    exatamente quando o step-down aconteceu), cap 60→59,
    floor_atom 64→65, floor_extract 214→213; planta TCP REAL verde
    (`l28_real_tcp_removed_std`, 368.96s)
+
+   — 3/6 `done`: `l28_tcp_hnt_ok_fate_iff` (L28.lean; ctor TCP de
+   eleitor remanescente não roteia `leader_hint` à réplica
+   removida exatamente quando o hint foi filtrado), cap 59→58,
+   floor_atom 65→66, floor_extract 213→212; planta TCP REAL verde
+   (`l28_real_tcp_hint`, 366.61s)
 6. **P2.2:** composição ∀ do protocolo de remoção TCP (remove →
    left ∧ high-water preservado) sobre atoms registrados em
    `ComposeL28.lean` (zero sorry; twins DST verdes; razão de
