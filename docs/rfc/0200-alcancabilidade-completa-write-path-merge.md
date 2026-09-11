@@ -108,9 +108,22 @@ sendo Pedra vs RocksDB default `sync=false` (`ROCKS_PARITY_SYNC=0`).
   por `emit`; ponte `merge_output_reach_chain`: emissão lida de trás
   pra frente É cadeia `merge_chain`; corolário compõe ponte +
   corolário da cadeia — duas citações, zero re-prova)
-- [ ] **P1.2** Ponte sift↔newest-first: a premissa estrutural da cadeia
+- [x] **P1.2** Ponte sift↔newest-first: a premissa estrutural da cadeia
   sobrevive ao `sift_step` (cita `merge_sift_step_repairs_iff`) —
-  status: `todo`
+  status: `done` (camada `TaggedSift` em `Merge.lean`: a decisão `s` É
+  a do kernel (`tagged_kernel_decision`); `tagged_step_stays_iff_no_repair`
+  re-exporta o close registrado 0188 Stay↔não-reparo;
+  `merge_step_newest_first_congr` — a premissa é LOCAL ao par (não lê
+  kind/range_hidden); `tagged_stay_preserves_newest_first` +
+  `tagged_stay_extends_chain` — o Stay preserva/estende a cadeia por
+  par; `tagged_repair_kernel_moves_as_is_stays` — em reparo o kernel
+  move e o as-is fica (com `merge_sift_step_as_is_stays_on_repair`).
+  **RE-ESCOPO DATADO 2026-09-11**: "o Swap restaura newest-first"
+  não é provável do extract — o comparador é axioma
+  (`CoreCmpPartialOrdShared0B.lt`) e o sift extraído não carrega
+  estado de heap (só os três bools); a ponte cobre o núcleo provável
+  (Stay = não-reparo preserva a premissa por par; divergência as-is
+  em reparo). Build verde, sorry 0, zero re-prova)
 
 ### P2 — later / cadência
 
@@ -127,7 +140,7 @@ sendo Pedra vs RocksDB default `sync=false` (`ROCKS_PARITY_SYNC=0`).
 | P0.1 | p0 | Alcançabilidade da classe write-path (Inv-WAL) | done | inv_wal_write_reachable | 2026-09-11 |
 | P0.2 | p0 | Quarto close de glue registrado | todo | — | 2026-09-11 |
 | P1.1 | p1 | Base de saída do merge + corolário alcançável | done | merge_output_reach_preserves_inv_lsm | 2026-09-11 |
-| P1.2 | p1 | Ponte sift_step↔newest-first | todo | — | 2026-09-11 |
+| P1.2 | p1 | Ponte sift_step↔newest-first | done | TaggedSift + tagged_step_stays_iff_no_repair + tagged_stay_extends_chain | 2026-09-11 |
 | P2.1 | p2 | Cadência cap/floor_close contínua | todo | — | 2026-09-11 |
 | P2.2 | p2 | Sweep final de gates | todo | — | 2026-09-11 |
 

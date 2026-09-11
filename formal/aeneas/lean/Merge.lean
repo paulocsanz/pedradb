@@ -530,3 +530,110 @@ theorem merge_output_reach_preserves_inv_lsm :
   have hchain := merge_output_reach_chain k out hreach
   have hmem : s ∈ out.reverse := List.mem_reverse.2 hs
   exact merge_chain_preserves_inv_lsm k out.reverse hchain s hmem hlive
+
+/-! ### RFC-0200 P1.2 — ponte sift_step↔newest-first (camada tagged)
+
+RE-ESCOPO DATADO 2026-09-11: o extract do sift não carrega estado de
+heap (só os três bools) e o comparador é axioma
+(`CoreCmpPartialOrdShared0B.lt`) — "o Swap restaura newest-first" não
+é provável dos booleanos. A ponte honesta cobre o núcleo provável: a
+decisão É a do kernel, o Stay é não-reparo (close registrado 0188) e
+preserva a premissa por par, e em reparo o as-is fica onde o kernel
+move. -/
+
+/-- Um passo de sift com a decisão TOMADA PELO KERNEL sobre as três
+entradas booleanas do extract (existe filho direito; direito <
+esquerdo; melhor filho < buraco). -/
+structure TaggedSift where
+  r_exists : Bool
+  r_lt_l : Bool
+  best_lt_hole : Bool
+  s : merge.SiftStep
+
+/-- O campo `s` É a decisão do kernel sobre as entradas — não um valor
+arbitrário. -/
+def tagged_kernel_decision (t : TaggedSift) : Prop :=
+  merge.sift_step t.r_exists t.r_lt_l t.best_lt_hole = ok t.s
+
+/-- PONTE (Stay = não-reparo): a decisão do kernel é Stay exatamente
+quando nenhum reparo é necessário — corolário DIRETO do close
+REGISTRADO `merge_sift_step_repairs_iff` (RFC-0188 P0.2); nada é
+re-provado. -/
+theorem tagged_step_stays_iff_no_repair (t : TaggedSift)
+    (ht : tagged_kernel_decision t) :
+    (t.s = merge.SiftStep.Stay) ↔ (t.best_lt_hole = false) := by
+  constructor
+  · intro hstay
+    unfold tagged_kernel_decision at ht
+    rw [hstay] at ht
+    exact (merge_sift_step_repairs_iff t.r_exists t.r_lt_l
+      t.best_lt_hole).1 ht
+  · intro hno
+    have hk := (merge_sift_step_repairs_iff t.r_exists t.r_lt_l
+      t.best_lt_hole).2 hno
+    rw [ht] at hk
+    simp only [Result.ok.injEq] at hk
+    exact hk
+
+/-- PONTE (par): a premissa estrutural da cadeia é LOCAL ao par de
+idades — não lê `kind` nem `range_hidden`. -/
+theorem merge_step_newest_first_congr (s s' : MergeStep)
+    (hnew : s.newer = s'.newer) (hold : s.older = s'.older) :
+    merge_step_newest_first s → merge_step_newest_first s' := by
+  intro hprem
+  unfold merge_step_newest_first at hprem ⊢
+  rw [hnew, hold] at hprem
+  exact hprem
+
+/-- PONTE (Stay preserva): o kernel que fica não repara (iff
+registrado) e a premissa estrutural carrega para o próximo passo de
+MESMO par (o Stay não move ninguém) — composição das duas pontes. -/
+theorem tagged_stay_preserves_newest_first (t : TaggedSift)
+    (s s' : MergeStep) (ht : tagged_kernel_decision t)
+    (hstay : t.s = merge.SiftStep.Stay)
+    (hpair : s'.newer = s.newer ∧ s'.older = s.older)
+    (hprem : merge_step_newest_first s) :
+    t.best_lt_hole = false ∧ merge_step_newest_first s' :=
+  ⟨(tagged_step_stays_iff_no_repair t ht).1 hstay,
+    merge_step_newest_first_congr s s' hpair.1.symm hpair.2.symm hprem⟩
+
+/-- O mutante as-is fica em TODO input de reparo — fato definicional
+do dente (mesma forma de prova da divergência registrada). -/
+theorem merge_sift_step_as_is_stays_on_repair :
+    ∀ (r_exists r_lt_l : Bool),
+      merge.sift_step_as_is r_exists r_lt_l true
+        = ok merge.SiftStep.Stay := by
+  intro r_exists r_lt_l
+  unfold merge.sift_step_as_is
+  cases r_exists <;> cases r_lt_l <;> simp
+
+/-- PONTE (divergência em reparo): em todo input de reparo o kernel
+NÃO devolve Stay (move o melhor filho para o buraco) enquanto o as-is
+FICA — deixaria no topo o par que o kernel teria consertado. Cita o
+close registrado e o fato definicional do as-is. -/
+theorem tagged_repair_kernel_moves_as_is_stays (t : TaggedSift)
+    (ht : tagged_kernel_decision t) (hrep : t.best_lt_hole = true) :
+    t.s ≠ merge.SiftStep.Stay
+    ∧ merge.sift_step_as_is t.r_exists t.r_lt_l t.best_lt_hole
+        = ok merge.SiftStep.Stay := by
+  constructor
+  · intro hstay
+    have hno := (tagged_step_stays_iff_no_repair t ht).1 hstay
+    rw [hrep] at hno
+    simp at hno
+  · rw [hrep]
+    exact merge_sift_step_as_is_stays_on_repair t.r_exists t.r_lt_l
+
+/-- COROLÁRIO da ponte na cadeia: um passo Stay do kernel estende a
+cadeia — o próximo passo de mesmo par continua newest-first (o cons é
+a emissão mais recente, lendo a cabeça como o topo atual). -/
+theorem tagged_stay_extends_chain (t : TaggedSift) (s s' : MergeStep)
+    (k : Nat) (rest : List MergeStep) (ht : tagged_kernel_decision t)
+    (hstay : t.s = merge.SiftStep.Stay)
+    (hpair : s'.newer = s.newer ∧ s'.older = s.older)
+    (hprem : merge_step_newest_first s)
+    (hchain : merge_chain k (s :: rest)) :
+    merge_chain (k + 1) (s' :: s :: rest) := by
+  have hbridge := tagged_stay_preserves_newest_first t s s' ht hstay
+    hpair hprem
+  exact merge_chain.cons s' k (s :: rest) hbridge.2 hchain
