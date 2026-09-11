@@ -111,3 +111,4 @@ atom	catalog:identity_before_applied	membership_identity_before_applied_fate_iff
 atom	catalog:open_peer_disk	open_peer_uses_disk_fate_iff	formal/aeneas/lean/Membership.lean	open_peer_uses_disk
 atom	catalog:local_id_member	local_id_if_member_fate_iff	formal/aeneas/lean/Membership.lean	local_id_if_member
 atom	catalog:reader_local	reader_id_local_fate_iff	formal/aeneas/lean/Membership.lean	reader_id_local
+atom	catalog:participating_member	participating_if_member_fate_iff	formal/aeneas/lean/Membership.lean	participating_if_member

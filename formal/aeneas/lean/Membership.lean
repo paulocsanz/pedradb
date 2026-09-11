@@ -606,3 +606,19 @@ theorem reader_id_local_fate_iff :
   intro is_local v
   unfold reader_id_local
   cases is_local <;> cases v <;> simp
+
+/-- RFC-0212 P1.1 (membership cadence 4/6, atom
+    `catalog:participating_member`): a node participates EXACTLY
+    when it is in the current voter set — fate forall over the
+    extracted pure-lift body; the AS-IS mutant keeps the captured
+    participating flag (the 0126 leftover: the removed node still
+    counts — the lie the DST plant
+    `participating_if_member_on_live_queued_is_not_ok` refutes). -/
+theorem participating_if_member_fate_iff :
+    ∀ (in_ids : Bool) (v : Bool),
+      (participating_if_member in_ids = ok v) ↔
+        ((v = true ∧ in_ids = true)
+          ∨ (v = false ∧ in_ids = false)) := by
+  intro in_ids v
+  unfold participating_if_member
+  cases in_ids <;> cases v <;> simp
