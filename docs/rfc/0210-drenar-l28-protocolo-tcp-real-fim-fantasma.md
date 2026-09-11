@@ -147,7 +147,11 @@ status: `done`
    `l28_tcp_fence`, `l28_tcp_clear`, `l28_tcp_pre`,
    `l28_tcp_peer`, `l28_tcp_lid`, `l28_tcp_rdr`, `l28_tcp_dsc`
    (cap 76→68, `floor_atom` 55→63, `floor_extract` 223→215);
-   plantas verdes — status: `todo`
+   plantas verdes — status: `doing`
+   — 1/8 `done`: `l28_tcp_hist_ok_fate_iff` (L28.lean; SI hist
+   persistido na réplica tirada de `ids` ⟺ o persist aconteceu),
+   cap 76→75, floor_atom 55→56, floor_extract 223→222; planta TCP
+   REAL verde
 4. **P1.2:** veredito datado dos 7 fantasmas — por fantasma:
    re-escrever para `fn` viva SE o caminho add-member existir em
    produção; senão aposentadoria com recusa datada EM FINDINGS,

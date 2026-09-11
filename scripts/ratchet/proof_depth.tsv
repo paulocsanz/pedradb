@@ -20,9 +20,9 @@
 # in the SAME commit as the theorem. Count is orthogonal to the ladder —
 # a pair may carry close AND count. residuals proof_depth.count equals
 # the live count of registered count rows.
-floor_extract 223
+floor_extract 222
 floor_close 6
-floor_atom 55
+floor_atom 56
 floor_count 7
-cap_data_fate 76
+cap_data_fate 75
 handler_loc 111927

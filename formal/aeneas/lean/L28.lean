@@ -493,3 +493,19 @@ theorem l28_tcp_nowms_ok_fate_iff :
   intro b v
   unfold l28_tcp_nowms_ok
   cases b <;> cases v <;> simp
+
+/-- RFC-0210 P1.1 (l28 cadence 3/4, atom `catalog:l28_tcp_hist`):
+    after a REAL TCP plant + process death, SI hist is persisted on
+    a replica dropped from `ids` EXACTLY when the persist happened —
+    fate forall over the extracted pure-lift body; the AS-IS
+    `ok true` mutant skips the SI hist persist (the 0135 leftover:
+    ids only — the lie the real TCP plant
+    `l28_real_tcp_removed_hist` refutes). -/
+theorem l28_tcp_hist_ok_fate_iff :
+    ∀ (b : Bool) (v : Bool),
+      (l28_tcp_hist_ok b = ok v) ↔
+        ((v = true ∧ b = true)
+          ∨ (v = false ∧ b = false)) := by
+  intro b v
+  unfold l28_tcp_hist_ok
+  cases b <;> cases v <;> simp
