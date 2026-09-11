@@ -135,6 +135,12 @@ paralela) — este RFC não as toca.
    high-water = max(disk, ram) via trait-default Ord::max sobre a
    ordem U64), cap 88→87, floor_atom 43→44, floor_extract 235→234;
    planta DST 1/1
+   — 4/4 `done`: `joint_still_active_fate_iff` (Membership.lean;
+   joint ativo ⟺ fatias de ids diferentes — igualdade elementwise
+   U64 via PONTE DE SPECS da Aeneas: `PartialEqSlice.eq_homo_spec` +
+   `spec_imp_exists`, primeiro uso no repo), cap 87→86,
+   floor_atom 44→45, floor_extract 234→233; planta DST 1/1 —
+   cadência ×4 fechada nos números exatos do RFC
 
 ### P2 — later (o bloco l28 abre + sweep)
 
@@ -161,7 +167,7 @@ paralela) — este RFC não as toca.
 | P0.1 | p0 | Seam raft 1/2: grant_after_persist a atom | done | grant_after_persist_fate_iff (Vote.lean) | 2026-09-11 |
 | P0.2 | p0 | Seam raft 2/2: propose_ack_ok a atom (trio raft fechado) | done | propose_ack_ok_fate_iff (Commit.lean) — vote+commit kernels zero data_fate | 2026-09-11 |
 | P1.1 | p1 | Composição do cluster (recovery/reconfig como ∀ sobre atoms) | done | election_grant_chain_fate + recovery_fate_composed (ComposeStoreRaft.lean) | 2026-09-11 |
-| P1.2 | p1 | Cadência membership ×4 (cap 90→86) | wip (3/4: removed_step_down, disk_membership, high_water) | removed_steps_down + disk_membership_overrides_cli + high_water_at_least _fate_iff (Membership.lean) | 2026-09-11 |
+| P1.2 | p1 | Cadência membership ×4 (cap 90→86) | done | removed_steps_down + disk_membership_overrides_cli + high_water_at_least + joint_still_active _fate_iff (Membership.lean; 4 commits) | 2026-09-11 |
 | P2.1 | p2 | Banda l28 ×2 + plano datado do bloco (cap 86→84) | todo | — | 2026-09-11 |
 | P2.2 | p2 | Sweep final + nota do seam store/raft | todo | — | 2026-09-11 |
 

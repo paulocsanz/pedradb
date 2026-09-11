@@ -307,3 +307,39 @@ theorem high_water_at_least_fate_iff :
     have hnP : ¬ (disk_hw < ram_hw) := of_decide_eq_false hd
     simp [hd, hnP]
     exact eq_comm
+
+/-- RFC-0208 P1.2 (membership cadence promotion 4/4, atom
+    `catalog:joint_leave`): the joint configuration is still active
+    EXACTLY when the old and new id slices DIFFER (elementwise
+    U64 equality) — a joint that already converged to the new set is
+    gone — fate forall over the extracted body, bridged through the
+    Aeneas spec theorems (`PartialEqSlice.eq_homo_spec` +
+    `spec_imp_exists`; the scalar `ne` is a pure lift); the AS-IS
+    `ok false` mutant declares every joint dead on sight. -/
+theorem joint_still_active_fate_iff :
+    ∀ (old new : Slice U64) (v : Bool),
+      (joint_still_active old new = ok v) ↔
+        ((v = true ∧ old ≠ new)
+          ∨ (v = false ∧ old = new)) := by
+  intro old new v
+  have hNe : ∀ (x y : U64), WP.spec (core.cmp.PartialEqU64.ne x y)
+      (fun b => b ↔ ¬ (x = y)) := by
+    intro x y
+    simp only [core.cmp.PartialEqU64, liftFun2]
+    exact (WP.spec_ok _).2 (by simp)
+  have heq := core.slice.cmp.PartialEqSlice.eq_homo_spec
+    core.cmp.PartialEqU64 old new hNe
+  obtain ⟨beq, rheq, hbeq⟩ := WP.spec_imp_exists heq
+  unfold joint_still_active
+  simp only [core.cmp.impls.PartialEqShared.ne,
+             Slice.Insts.CoreCmpPartialEqSlice,
+             core.cmp.PartialEq.ne.trait_default,
+             core.cmp.PartialEq.ne.default]
+  rw [rheq]
+  cases beq with
+  | true =>
+    have he : old = new := hbeq.mp rfl
+    cases v <;> simp [he]
+  | false =>
+    have hne : ¬ (old = new) := fun h => absurd (hbeq.mpr h) (by simp)
+    cases v <;> simp [hne]

@@ -189,7 +189,6 @@
      "handler": "pending_joint_on"
     }
    ],
-   "data_fate": true,
    "handlers": [
     "pending_joint_on",
     "election_has_joint_quorum"
@@ -198,6 +197,10 @@
    "dst_plant": {
     "file": "crates/pedradb-store/src/three_teeth_queued.rs",
     "test": "joint_still_active_on_live_queued_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0208 P1.2 membership cadence promotion (4/4): the joint configuration is active exactly when old and new id slices differ (elementwise U64 eq) — fate forall over the extracted body bridged through Aeneas spec theorems (PartialEqSlice.eq_homo_spec + spec_imp_exists, Membership.lean); AS-IS ok-false declares every joint dead"
    }
   },
   {
