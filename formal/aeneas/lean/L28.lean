@@ -410,3 +410,20 @@ theorem l28_tcp_apply_ok_fate_iff :
   intro b v
   unfold l28_tcp_apply_ok
   cases b <;> cases v <;> simp
+
+/-- RFC-0210 P0.1 (l28 cadence 1/4, atom `catalog:l28_tcp_napply`):
+    after a REAL TCP plant + process death, recover apply closes
+    `commit > applied` on a replica ALREADY DROPPED from `ids`
+    EXACTLY when the recovery applied it — fate forall over the
+    extracted pure-lift body; the AS-IS `ok true` mutant skips the
+    removed-replica recover apply (the 0130 leftover: ids only —
+    the lie the real TCP plant `l28_real_tcp_removed_recover_apply`
+    refutes). -/
+theorem l28_tcp_napply_ok_fate_iff :
+    ∀ (b : Bool) (v : Bool),
+      (l28_tcp_napply_ok b = ok v) ↔
+        ((v = true ∧ b = true)
+          ∨ (v = false ∧ b = false)) := by
+  intro b v
+  unfold l28_tcp_napply_ok
+  cases b <;> cases v <;> simp

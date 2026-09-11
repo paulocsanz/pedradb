@@ -100,7 +100,7 @@ paralela) — este RFC não os toca.
    `l28_real_tcp_removed_durable_term`,
    `l28_real_tcp_participating_after_remove`,
    `l28_real_tcp_recover_apply`,
-   `l28_real_tcp_removed_recover_apply` verdes — status: `doing`
+   `l28_real_tcp_removed_recover_apply` verdes — status: `done`
    — 1/4 `done`: `l28_tcp_dterm_ok_fate_iff` (L28.lean; RequestVote
    de termo novo com persist de hard state falhando rola o termo de
    volta ⟺ o rollback segurou — memória e disco ficam no termo
@@ -114,6 +114,12 @@ paralela) — este RFC não os toca.
    apply fecha `commit > applied` ⟺ a recuperação aplicou — ctor
    TCP de produção), cap 82→81, floor_atom 49→50, floor_extract
    229→228; planta TCP REAL verde
+   — 4/4 `done`: `l28_tcp_napply_ok_fate_iff` (L28.lean; recover
+   apply fecha `commit > applied` numa réplica JÁ TIRADA de `ids`
+   ⟺ a recuperação aplicou), cap 81→80, floor_atom 50→51,
+   floor_extract 228→227; planta TCP REAL verde — cadência 1/4
+   fechada nos números exatos do RFC (cap 84→80, floor_atom
+   47→51, floor_extract 231→227)
 2. **P0.2:** cadência l28 2/4 — `l28_tcp_trunc`, `l28_tcp_odrop`,
    `l28_tcp_abort`, `l28_tcp_nowms` (cap 80→76, `floor_atom`
    51→55, `floor_extract` 227→223); plantas `removed_*` verdes —
@@ -154,7 +160,7 @@ paralela) — este RFC não os toca.
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | Cadência l28 1/4 (dterm, part, apply, napply) | todo | — | 2026-09-11 |
+| P0.1 | p0 | Cadência l28 1/4 (dterm, part, apply, napply) | done | 9a0869ee + d6ea1e8b + 3d00e259 + este commit (4 atoms, 4 commits) | 2026-09-11 |
 | P0.2 | p0 | Cadência l28 2/4 (trunc, odrop, abort, nowms) | todo | — | 2026-09-11 |
 | P1.1 | p1 | Cadências l28 3/4 + 4/4 (hist…dsc, ×8) | todo | — | 2026-09-11 |
 | P1.2 | p1 | Veredito datado dos 7 fantasmas de catálogo | todo | — | 2026-09-11 |
