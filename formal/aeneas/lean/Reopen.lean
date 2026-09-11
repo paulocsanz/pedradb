@@ -45,3 +45,41 @@ theorem as_is_swallows_damage (d : ReopenDamage) (h : d ≠ ReopenDamage.None) :
   · exact ⟨rfl, rfl⟩
   · exact ⟨rfl, rfl⟩
   · exact ⟨rfl, rfl⟩
+
+/-- Catalog entry: a reopen serves all records exactly when the WAL
+    carries no damage — any damage (truncated head, CRC mismatch, zero
+    header, resync) is refused or served as a reported prefix, never
+    silently served whole (F170/F171/G8). -/
+theorem reopen_outcome_serve_all_iff_damage_none :
+    ∀ (damage : ReopenDamage) (point_in_time : Bool) (escalated : Bool),
+      (reopen_outcome damage point_in_time escalated
+          = ok ReopenOutcome.ServeAll)
+        ↔ (damage = ReopenDamage.None) := by
+  intro damage point_in_time escalated
+  unfold reopen_outcome
+  cases damage with
+  | None => exact ⟨fun _ => rfl, fun _ => rfl⟩
+  | TruncatedHead =>
+    constructor
+    · intro h
+      cases point_in_time <;> cases escalated <;> simp at h
+    · rintro habsurd
+      exact absurd habsurd (by simp)
+  | Crc =>
+    constructor
+    · intro h
+      cases point_in_time <;> cases escalated <;> simp at h
+    · rintro habsurd
+      exact absurd habsurd (by simp)
+  | ZeroHeader =>
+    constructor
+    · intro h
+      cases point_in_time <;> cases escalated <;> simp at h
+    · rintro habsurd
+      exact absurd habsurd (by simp)
+  | Resync =>
+    constructor
+    · intro h
+      cases point_in_time <;> cases escalated <;> simp at h
+    · rintro habsurd
+      exact absurd habsurd (by simp)

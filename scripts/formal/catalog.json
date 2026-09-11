@@ -3064,7 +3064,7 @@
     {
       "id": "reopen_outcome",
       "finding": "F170/F171/G8",
-      "twin_kind": "close",
+      "twin_kind": "atom",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/wal/reopen_kernel.rs",
       "twin": "crates/pedradb-core/src/wal/reopen_kernel.rs",
@@ -3073,7 +3073,6 @@
         "crates/pedradb-core/src/db.rs"
       ],
       "entry": "reopen_outcome",
-      "data_fate": true,
       "handlers": [
         "open_with_env"
       ],
@@ -3081,7 +3080,13 @@
       "dst_plant": {
         "file": "crates/pedradb-core/src/wal/reopen_kernel.rs",
         "test": "reopen_outcome_on_live_crc_is_not_ok"
-      }
+      },
+      "atom": "reopen_outcome",
+      "atom_reason": {
+        "date": "2026-09-10",
+        "why": "RFC-0191 P2.3 cadence (nineteenth if): the reopen disposition — a WAL reopen serves all records exactly when the log carries no damage; any damage (truncated head, CRC mismatch, zero header, resync) is refused or served only as a reported prefix, never silently served whole, F170/F171/G8 — proven forall over (damage, point_in_time, escalated) as reopen_outcome_serve_all_iff_damage_none in Reopen.lean; the db trampoline (open_with_env) matches the kernel decision"
+      },
+      "three_teeth": true
     },
     {
       "id": "flush_decision",

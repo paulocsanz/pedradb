@@ -243,7 +243,7 @@ contagens movem no mesmo commit; `lock_interleavings_admitted` e
 | P1.6 | p1 | Gates Lean/depth/product verdes em cada promoção | todo | — | 2026-09-10 |
 | P2.1 | p2 | Inv-WAL preservação (um passo) | done | `wal_append_preserves_inv_wal` + corolário `d1_plan_append_preserves_inv_wal` WalState.lean | 2026-09-10 |
 | P2.2 | p2 | Inv-LSM `visible_at` ∘ probe-order (um passo) | done | `inv_lsm_newest_first_never_non_live` + corolário `r1_get_never_returns_non_live` Merge.lean (R1 segue atom) | 2026-09-10 |
-| P2.3 | p2 | Alvo trampolim cap≤100 / floor_atom≥8 | doing | 18/29 caps pagos (112; …P2.3-17 `manifest_recover` — recovery recusa só Corrupt ou Inventory-com-SST-faltando, F196/G8; P2.3-18 `compact_decision` — reescrita GC do nível máximo só sem nível com arquivos E gc pedido E arquivos no máximo, F177/F20), atoms 19/8; falta cap 112→≤100 | 2026-09-10 |
+| P2.3 | p2 | Alvo trampolim cap≤100 / floor_atom≥8 | doing | 19/29 caps pagos (111; …P2.3-18 `compact_decision` — reescrita GC do nível máximo só sem nível com arquivos E gc pedido E arquivos no máximo, F177/F20; P2.3-19 `reopen_outcome` — reopen serve tudo só sem dano no WAL, F170/F171/G8), atoms 20/8; falta cap 111→≤100 | 2026-09-10 |
 | P2.4 | p2 | Herdados 0187 (L28 / TCG / N=4) | todo | — | 2026-09-10 |
 
 ## Acceptance Criteria
