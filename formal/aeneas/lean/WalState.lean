@@ -203,3 +203,186 @@ theorem inv_wal_reachable :
   | zero => exact inv_wal_init
   | @succ m s s' k _hreach happ ih =>
       exact wal_append_preserves_inv_wal s s' k ih happ
+
+/-! ## RFC-0198 P1.2 — passo sync/fence preserva Inv-WAL -/
+
+/-- Forma fechada do passo de barreira honesto (∀ estados): o sync
+Honest promove `synced` a `written` — o min de `CrashModel.of` é
+discartado pelo próprio passo (só decide se o bind falha, e as duas
+pernas do min são `ok`). -/
+private theorem wal_sync_honest_closed :
+    ∀ (s : wal.wal_state_kernel.WalState),
+      wal.wal_state_kernel.wal_sync s env_crash_kernel.SyncHonesty.Honest
+        = ok { s with synced := s.written, written := s.written } := by
+  intro s
+  unfold wal.wal_state_kernel.wal_sync
+  unfold env_crash_kernel.CrashModel.of
+  unfold env_crash_kernel.sync
+  unfold env_crash_kernel.SyncHonesty.Insts.CoreCmpPartialEqSyncHonesty.eq
+  unfold group_commit_kernel.fsync_promotes_pending
+  simp only [core.cmp.Ord.min.trait_default, core.cmp.Ord.min.default,
+    core.cmp.Ord.min_body, core.cmp.impls.PartialOrdU64.lt,
+    env_crash_kernel.SyncHonesty.read_discriminant, bind_tc_ok]
+  split_ifs <;> simp_all
+
+/-- Forma fechada do passo de barreira mentiroso (∀ estados): as
+watermarks ficam onde estão — `CrashModel.of` só recorta `synced` pelo
+min com `written` (nunca amplia), e o sync Lying devolve o próprio
+modelo. -/
+private theorem wal_sync_lying_closed :
+    ∀ (s : wal.wal_state_kernel.WalState),
+      wal.wal_state_kernel.wal_sync s env_crash_kernel.SyncHonesty.Lying
+        = ok { s with
+            synced :=
+              (if s.synced.val < s.written.val then s.synced else s.written),
+            written := s.written } := by
+  intro s
+  unfold wal.wal_state_kernel.wal_sync
+  unfold env_crash_kernel.CrashModel.of
+  unfold env_crash_kernel.sync
+  unfold env_crash_kernel.SyncHonesty.Insts.CoreCmpPartialEqSyncHonesty.eq
+  unfold group_commit_kernel.fsync_promotes_pending
+  simp only [core.cmp.Ord.min.trait_default, core.cmp.Ord.min.default,
+    core.cmp.Ord.min_body, core.cmp.impls.PartialOrdU64.lt,
+    env_crash_kernel.SyncHonesty.read_discriminant, bind_tc_ok]
+  split_ifs <;> simp_all
+
+/-- Inv-WAL (passo sync, RFC-0198 P1.2): qualquer desfecho `ok` de
+`wal_sync` preserva Inv-WAL, nas duas honestidades do Env — o sync
+honest promove a barreira até `written` (nunca além); o sync mentiroso
+deixa as watermarks onde estão (o min só recorta, nunca amplia). -/
+theorem wal_sync_preserves_inv_wal :
+    ∀ (h : env_crash_kernel.SyncHonesty)
+      (s s' : wal.wal_state_kernel.WalState),
+      wal.wal_state_kernel.inv_wal s = ok true →
+      wal.wal_state_kernel.wal_sync s h = ok s' →
+        wal.wal_state_kernel.inv_wal s' = ok true := by
+  intro h s s' hinv happ
+  rw [wal_inv_closed] at hinv
+  have hAB := Result.ok.inj hinv
+  rw [Bool.and_eq_true] at hAB
+  obtain ⟨hA, hB⟩ := hAB
+  have hAval : s.acked.val ≤ s.synced.val := by
+    simpa [decide_eq_true_eq, UScalar.le_equiv] using hA
+  have hBval : s.synced.val ≤ s.written.val := by
+    simpa [decide_eq_true_eq, UScalar.le_equiv] using hB
+  have finish : ∀ w : U64, s.synced.val ≤ w.val → w.val ≤ s.written.val →
+      wal.wal_state_kernel.inv_wal
+        { s with synced := w, written := s.written } = ok true := by
+    intro w hw1 hw2
+    rw [wal_inv_closed]
+    have hle1 : s.acked ≤ w := by
+      rw [UScalar.le_equiv]; omega
+    have hle2 : w ≤ s.written := by
+      rw [UScalar.le_equiv]; omega
+    simp only [decide_eq_true hle1, decide_eq_true hle2, Bool.true_and]
+  cases h with
+  | Honest =>
+      rw [wal_sync_honest_closed] at happ
+      have hs' : s' = { s with synced := s.written, written := s.written } :=
+        (Result.ok.inj happ).symm
+      rw [hs']
+      exact finish s.written hBval (Nat.le_refl _)
+  | Lying =>
+      rw [wal_sync_lying_closed] at happ
+      have hs' : s' = { s with
+          synced :=
+            (if s.synced.val < s.written.val then s.synced else s.written),
+          written := s.written } := (Result.ok.inj happ).symm
+      rw [hs']
+      split
+      · next hlt =>
+          exact finish s.synced (Nat.le_refl _) hBval
+      · next hlt =>
+          exact finish s.written hBval (Nat.le_refl _)
+
+/-- Inv-WAL (passo ack, RFC-0198 P1.2): qualquer desfecho `ok` de
+`wal_ack` preserva Inv-WAL — o ack só avança `acked` quando o valor
+saturado cabe em `synced`; quando o add checado estoura o passo nem é
+`ok`, logo o Ok do cliente nunca quebra `acked ⊆ synced`. -/
+theorem wal_ack_preserves_inv_wal :
+    ∀ (s s' : wal.wal_state_kernel.WalState) (n : U64),
+      wal.wal_state_kernel.inv_wal s = ok true →
+      wal.wal_state_kernel.wal_ack s n = ok s' →
+        wal.wal_state_kernel.inv_wal s' = ok true := by
+  intro s s' n hinv happ
+  rw [wal_inv_closed] at hinv
+  have hAB := Result.ok.inj hinv
+  rw [Bool.and_eq_true] at hAB
+  obtain ⟨hA, hB⟩ := hAB
+  unfold wal.wal_state_kernel.wal_ack at happ
+  simp only [lift, bind_tc_ok] at happ
+  split at happ
+  · next hle =>
+      -- hle (após split): a contenção do valor saturado, já em coerção
+      cases hadd : s.acked + n with
+      | ok a =>
+          rw [hadd] at happ
+          simp only [bind_tc_ok] at happ
+          have hs' : s' = { s with acked := a } := (Result.ok.inj happ).symm
+          subst hs'
+          have hz := UScalar.add_equiv s.acked n
+          rw [hadd] at hz
+          obtain ⟨hbound, hval, _⟩ := hz
+          have hleval : (core.num.U64.saturating_add s.acked n).val
+              ≤ s.synced.val := by
+            simpa [UScalar.le_equiv] using hle
+          have hbits : (2 : Nat) ^ UScalarTy.U64.numBits
+              = 18446744073709551616 := by native_decide
+          rw [hbits] at hbound
+          have hsat : (core.num.U64.saturating_add s.acked n).val
+              = s.acked.val + n.val := by
+            have hmax : ((UScalar.max UScalarTy.U64 : Nat)) + 1
+                = 18446744073709551616 := by native_decide
+            show (Nat.min ((UScalar.max UScalarTy.U64 : Nat))
+                (s.acked.val + n.val)
+                % 18446744073709551616) = _
+            have hminlt : Nat.min ((UScalar.max UScalarTy.U64 : Nat))
+                (s.acked.val + n.val)
+                < 18446744073709551616 :=
+              Nat.lt_of_le_of_lt (Nat.min_le_left _ _) (by omega)
+            rw [Nat.mod_eq_of_lt hminlt]
+            exact Nat.min_eq_right (by omega)
+          rw [wal_inv_closed]
+          have hale : a ≤ s.synced := by
+            rw [UScalar.le_equiv]
+            omega
+          simp only [decide_eq_true hale, Bool.true_and, hB]
+      | fail e =>
+          rw [hadd] at happ
+          simp at happ
+      | div =>
+          rw [hadd] at happ
+          simp at happ
+  · next _ =>
+      have hs' : s' = s := (Result.ok.inj happ).symm
+      subst hs'
+      rw [wal_inv_closed]
+      exact hinv
+
+/-- Classe de passo do write path que toca o WAL: append, sync ou ack. -/
+inductive wal_write_step :
+    wal.wal_state_kernel.WalState → wal.wal_state_kernel.WalState → Prop
+  | append (s s' : wal.wal_state_kernel.WalState) (n : U64) :
+      wal.wal_state_kernel.wal_append s n = ok s' → wal_write_step s s'
+  | sync (s s' : wal.wal_state_kernel.WalState)
+      (h : env_crash_kernel.SyncHonesty) :
+      wal.wal_state_kernel.wal_sync s h = ok s' → wal_write_step s s'
+  | ack (s s' : wal.wal_state_kernel.WalState) (n : U64) :
+      wal.wal_state_kernel.wal_ack s n = ok s' → wal_write_step s s'
+
+/-- Corolário da classe completa (RFC-0198 P1.2, fecha a frase): TODO
+passo do write path que toca o WAL preserva Inv-WAL — cada construtor
+cita o lema um-passo correspondente (`wal_append_preserves_inv_wal`
+RFC-0191 P2.1; `wal_sync_preserves_inv_wal` e `wal_ack_preserves_inv_wal`
+P1.2); nada é re-provado aqui. -/
+theorem wal_write_step_preserves_inv_wal :
+    ∀ (s s' : wal.wal_state_kernel.WalState),
+      wal.wal_state_kernel.inv_wal s = ok true →
+      wal_write_step s s' →
+        wal.wal_state_kernel.inv_wal s' = ok true := by
+  intro s s' hinv hstep
+  cases hstep with
+  | append n happ => exact wal_append_preserves_inv_wal _ _ n hinv happ
+  | sync h hs => exact wal_sync_preserves_inv_wal h _ _ hinv hs
+  | ack n hack => exact wal_ack_preserves_inv_wal _ _ n hinv hack
