@@ -24,9 +24,21 @@ Data: 2026-09-11
 ## Plantas DST dos atoms compostos (TCP reais, verdes)
 
 - `l28_real_tcp_remove_member_left_on_disk` — 1 passed, 250.48s.
-- `l28_real_tcp_high_water_after_remove` — ver captura abaixo.
+- `l28_real_tcp_high_water_after_remove` — 1 passed, 233.43s.
 
 ## Sweep final (worktree destacado DENTRO de software/)
 
-Capturas adicionadas após o commit da composição (ver histórico
-deste diretório): gates 3× GREEN no HEAD, extracts ok, sorry 0.
+- `git worktree add --detach /Users/paulo/software/pedradb-wt-r0210
+  80f2344f` (HEAD do commit da composição):
+  - depth-floor: GREEN — extract=209 (floor 209), ladder close=6
+    (floor 6) / atom=69 (floor 69), residuals close=7/atom=69 ==
+    live, count=7, data_fate=55<=55.
+  - product-floor: GREEN — D1=close R1=atom T1=atom C1=close,
+    promoted=4>=floor 4.
+  - ledger: GREEN — 19 pointers resolvem, total=292 proof=266
+    campaign=26.
+  - `test_proof_vs_campaign` — ok.
+- Worktree removido após a captura (`git worktree remove --force`).
+- Árvore principal: `bash scripts/lean_extracts.sh --required` —
+  ok (61 libs + 20 compose); `rg -c sorry` nos wrappers tocados
+  (L28.lean, ComposeL28.lean) = 0.

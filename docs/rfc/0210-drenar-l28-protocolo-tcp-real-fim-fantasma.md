@@ -1,6 +1,6 @@
 # RFC: 0210 — drenar o L28: o protocolo TCP real inteiro no registro e o fim dos fantasmas
 
-**Status:** draft
+**Status:** done
 **Updated:** 2026-09-11
 **Parents:** [0208](0208-seam-store-raft-cadencia-cluster-data-fate.md)
 (o seam store/raft: kernels raft fechados, banda l28 ×2 aberta com
@@ -213,7 +213,7 @@ status: `done`
    `l28_tcp_hnt`, `l28_tcp_slot`, `l28_tcp_sth`, `l28_tcp_pj`
    (cap 68→62, `floor_atom` 63→69, `floor_extract` 215→209; com
    P1.2 aprovada o pool vai a 55); bloco l28 ZERO `data_fate`
-   pendente — status: `doing`
+   pendente — status: `done`
 
    — 1/6 `done`: `l28_tcp_pld_ok_fate_iff` (L28.lean; no-leader
    abort persist-leader é local — `next_index` repair roda —
@@ -263,7 +263,7 @@ status: `done`
    de `software/`, gates 3× GREEN, extracts ok, sorry 0, capturas
    em findings, nota datada em EXTRACT.md: l28 drenado; 29 do
    cluster restantes nomeados) + flip `**Status:** done` —
-   status: `doing`
+   status: `done`
 
    — Composição `done`: `ComposeL28.lean` (20ª compose lib;
    `l28_removal_protocol_fate_composed` + `l28_removal_protocol_fused`
@@ -275,6 +275,18 @@ status: `done`
    EXTRACT.md (l28 drenado; 29 do cluster restantes nomeados).
    Sweep final + flip Status: pendente
 
+   — Sweep `done`: worktree destacado DENTRO de `software/` no HEAD
+   `80f2344f` — gates 3× GREEN (extract 209/atom 69/close 6,
+   data_fate 55<=55; ledger total=292 proof=266 campaign=26;
+   product-floor 4>=4), `test_proof_vs_campaign` ok, worktree
+   removido após a captura; árvore principal extracts "61 libs +
+   20 compose", sorry 0 nos wrappers tocados; plantas DST verdes
+   (left 250.48s, hw 233.43s); capturas em
+   `findings/2026-09-11-rfc0210-p22-composel28-sweep/` — RFC-0210
+   FECHADO: 23 commits, cap 84→55, floor_atom 47→69,
+   floor_extract 231→209, 22 atoms, 7 fantasmas aposentados, 1
+   composição — status: `done`
+
 ## Status (living — update with every PR)
 
 | ID | Band | Title | Status | Task / PR | Updated |
@@ -284,7 +296,7 @@ status: `done`
 | P1.1 | p1 | Cadências l28 3/4 + 4/4 (hist…dsc, ×8) | done | f6526f0d + e04ab047 + bfba89b5 + 71ef2f8f + 191a4a1a + bc9ad570 + cd508216 + este (8 atoms, 8 commits) | 2026-09-11 |
 | P1.2 | p1 | Veredito datado dos 7 fantasmas de catálogo | done | este commit (catálogo −7, 299→292; recusa datada em findings; gates+âncoras verdes antes/depois) | 2026-09-11 |
 | P2.1 | p2 | Cadência final l28 ×6 — bloco ZERO data_fate | done | fafbbfa4 + 554695b5 + 0a0c202b + d74acac8 + c9604f2b + este commit (6 atoms, 6 commits; cap 55, atom 69, extract 209; l28 ZERO data_fate medido) | 2026-09-11 |
-| P2.2 | p2 | Composição ∀ do protocolo de remoção + sweep final | todo | — | 2026-09-11 |
+| P2.2 | p2 | Composição ∀ do protocolo de remoção + sweep final | done | 80f2344f + este commit (ComposeL28 20ª compose lib; sweep verde no worktree; Status done) | 2026-09-11 |
 
 ## Acceptance Criteria
 
