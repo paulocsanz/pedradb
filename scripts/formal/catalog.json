@@ -396,7 +396,6 @@
      "handler": "bind_cluster_identity"
     }
    ],
-   "data_fate": true,
    "handlers": [
     "bind_cluster_identity",
     "reopen_engine_on",
@@ -406,6 +405,10 @@
    "dst_plant": {
     "file": "crates/pedradb-store/src/three_teeth_queued.rs",
     "test": "disk_membership_overrides_cli_on_live_queued_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0208 P1.2 membership cadence promotion (2/4): the persisted membership wins exactly when it exists — the CLI flag never overrides the disk identity on reopen (fate forall over the extracted pure-lift body, Membership.lean); AS-IS ok-false always lets the CLI win"
    }
   },
   {

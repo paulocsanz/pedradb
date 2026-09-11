@@ -266,3 +266,18 @@ theorem removed_steps_down_fate_iff :
   intro in_ids v
   unfold removed_steps_down
   cases in_ids <;> cases v <;> simp
+
+/-- RFC-0208 P1.2 (membership cadence promotion 2/4, atom
+    `catalog:disk_membership`): the cluster identity bound at reopen
+    is the DISK one EXACTLY when a disk membership exists — the CLI
+    flag never overrides a persisted membership — fate forall over
+    the extracted pure-lift body; the AS-IS `ok false` mutant always
+    lets the CLI win (split-brain on reopen). -/
+theorem disk_membership_overrides_cli_fate_iff :
+    ∀ (has_disk : Bool) (v : Bool),
+      (disk_membership_overrides_cli has_disk = ok v) ↔
+        ((v = true ∧ has_disk = true)
+          ∨ (v = false ∧ has_disk = false)) := by
+  intro has_disk v
+  unfold disk_membership_overrides_cli
+  cases has_disk <;> cases v <;> simp

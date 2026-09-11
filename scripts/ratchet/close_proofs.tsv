@@ -69,3 +69,4 @@ atom	catalog:recover_drop_orphan	recover_drop_orphan_seg_fate_iff	formal/aeneas/
 atom	catalog:grant_persist	grant_after_persist_fate_iff	formal/aeneas/lean/Vote.lean	grant_after_persist
 atom	catalog:commit_raft	propose_ack_ok_fate_iff	formal/aeneas/lean/Commit.lean	propose_ack_ok
 atom	catalog:removed_step_down	removed_steps_down_fate_iff	formal/aeneas/lean/Membership.lean	removed_steps_down
+atom	catalog:disk_membership	disk_membership_overrides_cli_fate_iff	formal/aeneas/lean/Membership.lean	disk_membership_overrides_cli
