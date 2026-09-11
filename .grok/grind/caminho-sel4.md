@@ -363,3 +363,85 @@ mesmo commit: floor_close 5->6, residuals close 6->7. Gates 3x GREEN,
 extracts ok (61+12), planta pedradb-core 1/1, build verde sorry 0.
 PROXIMO: P0.2 atom vote_decision (catalog:vote, cirurgia data_fate,
 cap 95->94, floor_atom 36->37, floor_extract 242->241).
+
+Fire 816 (2026-09-11, rfc0205 P0.2): primeiro atom do cluster
+store/raft — vote_decision_fate_iff (Vote.lean): fate forall dos DOIS
+construtores (WouldGrant iff mesmo-termo E can_vote E log_up_to_date;
+Deny c.c.), totality derivada do spec-match, grant-side reusado do
+P40 (vote_decision_iff). Escada: cap 95->94, floor_atom 36->37,
+floor_extract 242->241. Planta DST pedradb-store 1/1
+(vote_decision_on_live_queued_is_not_ok), gates 3x GREEN no HEAD,
+extracts ok (61+13). ATENCAO povo do index compartilhado: a linha do
+registro caiu no commit da sessao paralela 392280e3 e o resto do
+pacote no snapshot dela 07b6acad (que tambem commitou este journal —
+violacao dela, nao minha); meu commit proprio foi so o reparo de
+build c2d1ab65 (10 linhas mortas de OpenOptions no pedradb-store,
+campos removidos pelo snapshot a5ccc131 dela). PROXIMO: P1.1
+composicao forall off-lock em ComposeConcurrent.lean (sem registro;
+compor com o close registrado do Flush, nao duplicar).
+
+Fire 817 (2026-09-11, rfc0205 P1.1): composicao forall off-lock
+commitada 9962a302. Pago: (a) concurrent_publish_fate_forall; (b)
+wal_rotate_decision_fate_forall + as-is (disjuncao EXATA do corpo:
+RotateWal iff registro limpo nos 5 campos; mutante droppa pin_live);
+ponte try_rotate_step_rotates_iff_all_clear_record COMPNDO com o close
+registrado do Flush (registro->passo), sem duplicar; 4 dentes ->
+corolarios por instanciacao. Licao Lean nova: cases sobre campo de
+registro so reescreve o goal SE o def ja estiver desdobrado (simp
+only [def] ANTES dos cases — senao o campo nao ocorre sintaticamente e
+os cases nao substituem nada; sintoma: sobras com cadeias de
+implicacoes). rw de padrao grande com bind/match falha casamento —
+usar Iff.trans com args explicitos e rw so da equacao pequena.
+SEM registro (compose atravessa 2 kernels; registro exige par unico) —
+motivo em findings. Twins 1/1, gates 3x GREEN, escada intocada.
+PROXIMO: P1.2 primeira promocao recover_must_apply (pure-lift Bool,
+molde dir_sync_required).
+
+Fire 818 (2026-09-11, rfc0205 P1.2): cadencia data-fate 2/2 FECHADA.
+1/2 e356a071 atom catalog:recover_apply (recover_must_apply_fate_iff:
+re-apply iff commit>applied; as-is pula tudo), 2/2 34dbb666 atom
+catalog:recover_drop_orphan (recover_drop_orphan_seg_fate_iff: drop
+iff seg_index>new_hi; as-is preserva orfaos). Escada no alvo: cap
+94->92, floor_atom 37->39, floor_extract 241->239, residuals
+7/39, data_fate 92. Licao Lean: '>' de U64 no extrato Aeneas e
+Prop-valued (corpo = ok (decide (a > b))) — enunciar RHS como Prop
+pura e casoar o decide com of_decide_eq_true/false; (a > b) = true
+no enunciado QUEBRA o parser/elaborador. proof_depth.tsv e
+espacado (floor_atom 37), NAO tabulado. Plantas DST 1/1 cada
+(three_teeth_queued). Gates 3x GREEN apos cada commit. PROXIMO:
+P2.1 fronteira datada do handler em EXTRACT.md (TCB nomeado, 3
+admissions recusadas).
+
+Fire 819 (2026-09-11, rfc0205 P2.1+P2.2): RFC-0205 DONE 6/6 no commit
+79ea30d5. P2.1 = 93c9434a (secao datada EXTRACT.md: proof-term cobre
+239/6+39+7/18 compose; TCB 4 categorias; 3 admissions reiteradas).
+P2.2 = worktree destacado em 93c9434a: 3 gates GREEN, extracts ok
+61+18, sorry 0 nos 4 wrappers, admissions always false; captura em
+findings/2026-09-11-rfc0205-p22-sweep/. Licao de metodo: worktree de
+sweep precisa ficar DENTRO de software/ (lean_extracts.sh resolve o
+backend aeneas por caminho RELATIVO; de /var/folders nao resolve).
+PROXIMO: RFC sucessora 0206 — fechar o seam store/raft: 66 dos 92
+data_fate pendentes sao do cluster (31 l28.rs, 26 membership_kernel,
+6 txn_kernel, + commit_raft/grant_persist/compact_unleft).
+
+Fire 820 (2026-09-11, rfc0205 auditoria final + sucessora): ROUND 3
+FECHADO. RFC-0205 done 6/6 (tabela 6/6 apos flip cirurgico 159bb3f9
+pego na auditoria). Auditoria: promocoes d4ea73f4/e356a071/34dbb666
+cada uma com teorema+registro+floors no mesmo commit (verificado por
+CONTEUDO do git show, nao stat truncado); meus 8 commits sem
+journal/paths dela; plantas de recusa 3/3 verdes no HEAD 4a598c3e
+(lock_interleavings, media_durable, forall_schedules@depth2);
+capturas no scratch (promo-commits/gates-sweep/plants/rfc0205-final/
+board-after). Sucessora: DUPLA colisao de numero (minha 0206
+e88377b5; dela 0206->286fb7bb->renumerou a dela para 0207 3ad7f06e;
+minha renumerada 0206->0208 4a598c3e, conteudo intocado). RFC-0208
+"fechar o seam store/raft": 66 dos 92 data_fate pendentes sao do
+cluster (31 l28, 26 membership, 6 txn, grant_persist, commit_raft,
+compact_unleft); P0 fecha o trio raft, P1 composicao do cluster +
+cadencia membership x4, P2 abre o bloco l28 x2 + plano datado; alvo
+cap 92->84, floor_atom 39->47, floor_extract 239->231. Licoes do
+round: cases sobre campo so reescreve com def desdobrado ANTES;
+Iff.trans explicito no lugar de rw de padrao bind/match; '>' U64 e
+decide de Prop; proof_depth.tsv e espacado; worktree de sweep dentro
+de software/ (aeneas relativo); colisao de RFC: renumerar A MINHA
+cirurgicamente, dela intocada.
