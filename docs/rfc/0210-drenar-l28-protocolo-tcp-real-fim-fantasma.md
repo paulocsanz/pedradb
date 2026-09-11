@@ -152,6 +152,9 @@ status: `done`
    persistido na réplica tirada de `ids` ⟺ o persist aconteceu),
    cap 76→75, floor_atom 55→56, floor_extract 223→222; planta TCP
    REAL verde
+   — 2/8 `done`: `l28_tcp_fence_ok_fate_iff` (L28.lean; abort fence
+   persistido ⟺ o persist aconteceu), cap 75→74, floor_atom 56→57,
+   floor_extract 222→221; planta TCP REAL verde
 4. **P1.2:** veredito datado dos 7 fantasmas — por fantasma:
    re-escrever para `fn` viva SE o caminho add-member existir em
    produção; senão aposentadoria com recusa datada EM FINDINGS,
