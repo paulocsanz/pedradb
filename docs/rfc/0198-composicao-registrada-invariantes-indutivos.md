@@ -90,10 +90,16 @@
   / `merge_step_answers_live`; predicado indutivo `merge_chain` Nat-indexado
   (base = cadeia vazia); corolário `merge_chain_preserves_inv_lsm` por indução
   sobre a cadeia — o passo CITA o lema um-passo registrado, não re-prova)
-- [ ] **P1.4** Tokens de script `write_pending_frame` em
+- [x] **P1.4** Tokens de script `write_pending_frame` em
   `finish_group_off_lock` + `group_finish` (COORDENAÇÃO: `concurrent.rs`
   pertence à sessão paralela; só landar depois do commit dela ou em
-  janela acordada; bloqueio nomeado aqui, não silenciado) — status: `todo`
+  janela acordada; bloqueio nomeado aqui, não silenciado) — status:
+  `done` (o oráculo do board lê `unpaid_script=0/17` com os DOIS tokens
+  commitados no HEAD (`concurrent.rs` `finish_group_off_lock`;
+  `db.rs` `group_finish`), nenhum arquivo dela editado por este goal — o
+  2/17 do background era leitura do worktree em voo dela em 2026-09-10;
+  tests nomeados `failed_wal_sync_does_not_publish_group` +
+  `multi_writer_failed_sync_does_not_publish_group` passam)
 
 ### P2 — later / polish
 
@@ -123,7 +129,7 @@
 | P1.1 | p1 | Inv-WAL base + alcançabilidade | done | inv_wal_init + inv_wal_reachable | 2026-09-10 |
 | P1.2 | p1 | Inv-WAL passo sync/fence | done | wal_write_step_preserves_inv_wal | 2026-09-11 |
 | P1.3 | p1 | Inv-LSM corolário indutivo (k merges) | done | merge_chain_preserves_inv_lsm | 2026-09-11 |
-| P1.4 | p1 | Tokens write_pending_frame (2 handlers, coordenação concurrent.rs) | todo | — | 2026-09-10 |
+| P1.4 | p1 | Tokens write_pending_frame (2 handlers, coordenação concurrent.rs) | done | board unpaid_script=0/17 (tokens no HEAD) | 2026-09-11 |
 | P2.1 | p2 | Model→concreto: scale_kernel N concreto | todo | — | 2026-09-10 |
 | P2.2 | p2 | Cadência cap monotônica (df atoms) | todo | — | 2026-09-10 |
 | P2.3 | p2 | Herdados 0187 seguem terminais (sem re-abrir) | done | cita ledger §"Herdados do 0187" (0191 P2.4) | 2026-09-11 |
