@@ -189,6 +189,14 @@ pool honesto manda sobre a meta numérica).
    floor_atom 86→87, floor_extract 192→191; planta DST verde
    (`joint_target_counts_on_live_queued_is_not_ok`,
    no mesmo lote paralelo)
+
+   — 3/6 `done`: `joint_add_target_counts_fate_iff`
+   (Membership.lean; alvo de joint-add é SEMPRE aceito — o
+   joiner é outro pid do SO, não precisa estar no mapa local
+   `nodes`; corpo constante `true`, iff com `v = true`), cap
+   37→36, floor_atom 87→88, floor_extract 191→190; planta DST
+   verde (`joint_add_target_counts_on_live_queued_is_not_ok`,
+   no mesmo lote paralelo)
 5. **P1.3:** veredito datado dos medidos ausentes — SE alguma
    promoção acima medir fn/planta/handler inexistente, veredito por
    par em findings (reescrever para fn viva SE o caminho existir em

@@ -114,3 +114,4 @@ atom	catalog:reader_local	reader_id_local_fate_iff	formal/aeneas/lean/Membership
 atom	catalog:participating_member	participating_if_member_fate_iff	formal/aeneas/lean/Membership.lean	participating_if_member
 atom	catalog:pending_joint_node	pending_joint_node_counts_fate_iff	formal/aeneas/lean/Membership.lean	pending_joint_node_counts
 atom	catalog:joint_target	joint_target_counts_fate_iff	formal/aeneas/lean/Membership.lean	joint_target_counts
+atom	catalog:joint_add_target	joint_add_target_counts_fate_iff	formal/aeneas/lean/Membership.lean	joint_add_target_counts

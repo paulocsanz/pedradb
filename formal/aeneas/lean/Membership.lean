@@ -657,3 +657,18 @@ theorem joint_target_counts_fate_iff :
   intro in_ids in_nodes v
   unfold joint_target_counts
   cases in_ids <;> cases v <;> simp
+
+/-- RFC-0212 P1.2 (membership cadence 5/6, atom
+    `catalog:joint_add_target`): a joint-add target is ALWAYS
+    accepted — the joiner is another OS pid that need not live
+    in the local `nodes` map — fate forall over the extracted
+    pure-lift body (the returned decision is constantly true);
+    the AS-IS mutant requires the joiner in local `nodes` (the
+    0119 P0 leftover — the lie the DST plant
+    `joint_add_target_counts_on_live_queued_is_not_ok` refutes). -/
+theorem joint_add_target_counts_fate_iff :
+    ∀ (in_nodes : Bool) (v : Bool),
+      (joint_add_target_counts in_nodes = ok v) ↔ v = true := by
+  intro in_nodes v
+  unfold joint_add_target_counts
+  cases v <;> simp
