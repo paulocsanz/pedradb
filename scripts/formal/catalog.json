@@ -591,7 +591,6 @@
      "handler": "persist_truncated_logs"
     }
    ],
-   "data_fate": true,
    "handlers": [
     "persist_truncated_logs",
     "recover_after_open",
@@ -602,6 +601,10 @@
    "dst_plant": {
     "file": "crates/pedradb-store/src/three_teeth_queued.rs",
     "test": "recover_truncate_node_counts_on_live_queued_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0132: log truncado no recover persiste em toda replica local, mesmo fora de ids; as-is 0131 mantinha o sufixo na replica removida"
    }
   },
   {

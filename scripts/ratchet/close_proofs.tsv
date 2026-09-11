@@ -105,3 +105,4 @@ atom	catalog:persist_hist	persist_hist_node_counts_fate_iff	formal/aeneas/lean/M
 atom	catalog:persist_fence	persist_fence_node_counts_fate_iff	formal/aeneas/lean/Membership.lean	persist_fence_node_counts
 atom	catalog:hint_member	hint_if_member_fate_iff	formal/aeneas/lean/Membership.lean	hint_if_member
 atom	catalog:recover_apply_node	recover_apply_node_counts_fate_iff	formal/aeneas/lean/Membership.lean	recover_apply_node_counts
+atom	catalog:recover_truncate	recover_truncate_node_counts_fate_iff	formal/aeneas/lean/Membership.lean	recover_truncate_node_counts
