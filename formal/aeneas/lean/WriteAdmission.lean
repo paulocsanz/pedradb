@@ -275,3 +275,16 @@ theorem seq_exhausted_fate_iff :
   unfold seq_exhausted
   simp
   exact eq_comm
+
+/-- RFC-0213 P0.1 (storage cadence, atom `catalog:fence_on_sync_fail`):
+    the fence trips EXACTLY when a sync was required and that sync
+    failed — fate forall over the extracted body (RFC-0170 P2.4);
+    the AS-IS mutant never fences (the lie the DST plant
+    `fence_on_sync_fail_on_live_required_fail_is_not_ok` refutes). -/
+theorem fence_on_sync_fail_fate_iff :
+    ∀ (sync_required sync_failed v : Bool),
+      (fence_on_sync_fail sync_required sync_failed = ok v) ↔
+        v = (sync_required && sync_failed) := by
+  intro sync_required sync_failed v
+  unfold fence_on_sync_fail
+  cases sync_required <;> cases sync_failed <;> cases v <;> simp

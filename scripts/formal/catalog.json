@@ -7133,7 +7133,6 @@
     "crates/pedradb-core/src/db.rs"
    ],
    "entry": "fence_on_sync_fail",
-   "data_fate": true,
    "handlers": [
     "commit_ops_with"
    ],
@@ -7142,6 +7141,10 @@
    "dst_plant": {
     "file": "crates/pedradb-core/src/write_admission_kernel.rs",
     "test": "fence_on_sync_fail_on_live_required_fail_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "fence verdict fully fated: trips exactly when sync required and sync failed; as-is never fences, refused by DST plant"
    }
   },
   {

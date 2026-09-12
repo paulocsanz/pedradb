@@ -128,3 +128,4 @@ atom	catalog:compact_unleft	compact_through_unleft_fate_iff	formal/aeneas/lean/S
 atom	catalog:write_admission	write_admission_idle_fate_iff	formal/aeneas/lean/WriteAdmission.lean	write_admission_idle
 atom	catalog:write_admit	write_admit_fate_iff	formal/aeneas/lean/WriteAdmission.lean	write_admit
 atom	catalog:seq_exhausted	seq_exhausted_fate_iff	formal/aeneas/lean/WriteAdmission.lean	seq_exhausted
+atom	catalog:fence_on_sync_fail	fence_on_sync_fail_fate_iff	formal/aeneas/lean/WriteAdmission.lean	fence_on_sync_fail
