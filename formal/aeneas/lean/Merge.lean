@@ -637,3 +637,20 @@ theorem tagged_stay_extends_chain (t : TaggedSift) (s s' : MergeStep)
   have hbridge := tagged_stay_preserves_newest_first t s s' ht hstay
     hpair hprem
   exact merge_chain.cons s' k (s :: rest) hbridge.2 hchain
+
+/-- RFC-0213 P1.2 (storage cadence, atom `catalog:visible_at`): the
+    merge get-filter answers live EXACTLY along the extracted route —
+    a plain Value is live iff no covering range hides it; Deletion and
+    RangeDeletion are never live, whatever the cover (fate forall over
+    the extracted body, RFC-0170 P2.4). The AS-IS mutant answers live
+    for every version (the lie the DST plant
+    `visible_at_on_live_range_del_is_not_ok` refutes). -/
+theorem visible_at_fate_iff :
+    ∀ (kind : key.ValueType) (range_hidden : Bool) (v : Bool),
+    (merge.visible_at kind range_hidden = ok v) ↔
+      ((kind = key.ValueType.Value ∧ v = !range_hidden) ∨
+       ((kind = key.ValueType.Deletion ∨ kind = key.ValueType.RangeDeletion)
+          ∧ v = false)) := by
+  intro kind range_hidden v
+  unfold merge.visible_at
+  cases kind <;> cases range_hidden <;> simp

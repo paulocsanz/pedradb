@@ -5112,8 +5112,8 @@
    "finding": "RFC-0150 P1 / F30",
    "twin_kind": "close",
    "atom_reason": {
-    "date": "2026-09-10",
-    "why": "RFC-0188 P1.6 first atom: the data-fate rule 'a deletion never surfaces live' proven forall over range_hidden (visible_at_deletion_never_live, Merge.lean); registered as atom in scripts/ratchet/close_proofs.tsv"
+    "date": "2026-09-12",
+    "why": "filtro de get do merge decide exatamente pela rota extraida: Value live se e so se nenhum range cobre a chave; Deletion e RangeDeletion nunca live, qualquer cobertura; as-is responde live para toda versao e a planta DST refuta"
    },
    "single_artifact": true,
    "kernel": "crates/pedradb-core/src/merge.rs",
@@ -5125,7 +5125,6 @@
     "crates/pedradb-core/src/db.rs"
    ],
    "entry": "visible_at",
-   "data_fate": true,
    "as_is": "visible_at_as_is",
    "dst_plant": {
     "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
