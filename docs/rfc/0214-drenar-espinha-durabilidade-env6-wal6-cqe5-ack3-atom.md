@@ -224,7 +224,17 @@ planta DST verde ANTES do commit, gate GREEN no commit)
 4. **P1.2** veredito datado dos medidos ausentes (SE houver: par
    cujo entry/planta não existe ou cuja classe é campanha/capacidade,
    ex. liar-campaign — recusa/aposentadoria datada SEM quebrar
-   âncoras 0203/0204; nunca gate inventado) — status: `todo`
+   âncoras 0203/0204; nunca gate inventado) — status: `done`
+
+   — veredito (2026-09-12): NENHUM medido recusado. Os 20/20 pares
+   do escopo pousaram no alvo exato (atom=142, extract=136, close=6,
+   data_fate=0 — gate GREEN no HEAD de cada promoção). A única
+   ameaça mensurável do round (planta `verified_write_ack_on_live
+   profile_is_not_ok` vermelha, vermelha pré-existente em toda
+   bisseca) foi resolvida como CORREÇÃO LIVE do caminho lone G1
+   (commit 6/8 `0d7324da`), não como recusa. Âncoras 0203/0204
+   intactas: nenhum commit do round tocou maquinária de âncora;
+   nenhum gate inventado.
 5. **P2.1** composição ∀ da espinha de durabilidade (env → wal →
    ack sobre atoms registrados) em NOVA compose lib (zero buracos;
    twins kernel/planta DST verdes; SEM registro TSV — razão datada em
@@ -243,7 +253,7 @@ planta DST verde ANTES do commit, gate GREEN no commit)
 | P0.1 | p0 | wal_state ×6 no degrau átomo | done | 6/6: este commit (FECHAMENTO) | 2026-09-12 |
 | P0.2 | p0 | env_crash ×6 no degrau átomo | done | 6/6: este commit (FECHAMENTO) | 2026-09-12 |
 | P1.1 | p1 | cqe ×5 + write_ack ×3 no degrau átomo | done | 8/8: este commit (FECHAMENTO) | 2026-09-12 |
-| P1.2 | p1 | Veredito datado dos medidos ausentes | todo | — | 2026-09-12 |
+| P1.2 | p1 | Veredito datado dos medidos ausentes | done | nenhum recusado; planta resolvida como correção live (0d7324da) | 2026-09-12 |
 | P2.1 | p2 | Composição ∀ env→wal→ack + twins DST | todo | — | 2026-09-12 |
 | P2.2 | p2 | Sweep final + nota EXTRACT.md + flip done | todo | — | 2026-09-12 |
 
