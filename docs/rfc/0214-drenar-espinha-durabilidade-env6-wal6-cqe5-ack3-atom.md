@@ -173,6 +173,12 @@ planta DST verde ANTES do commit, gate GREEN no commit)
    `cqe_res_ok_on_live_uring_is_not_ok`, 1 passed), floor_atom
    134→135, floor_extract 144→143; planta DST verde
    (`cqe_res_ok_on_live_uring_is_not_ok`, 1 passed)
+   — 2/8 `done`: `next_user_data_fate_iff` (Cqe.lean; tags
+   únicas por SQE — c≠0: `(c, c+1)` wrapping; c=0: pula o zero
+   reservado e devolve `(1, 2)`; loop real via `loop.spec_decr_nat`;
+   as-is `next_user_data_as_is` recusado pela planta DST
+   `unique_tags_discard_leftover_same_opcode`, 1 passed), floor_atom
+   135→136, floor_extract 143→142
 4. **P1.2** veredito datado dos medidos ausentes (SE houver: par
    cujo entry/planta não existe ou cuja classe é campanha/capacidade,
    ex. liar-campaign — recusa/aposentadoria datada SEM quebrar
@@ -194,7 +200,7 @@ planta DST verde ANTES do commit, gate GREEN no commit)
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | wal_state ×6 no degrau átomo | done | 6/6: este commit (FECHAMENTO) | 2026-09-12 |
 | P0.2 | p0 | env_crash ×6 no degrau átomo | done | 6/6: este commit (FECHAMENTO) | 2026-09-12 |
-| P1.1 | p1 | cqe ×5 + write_ack ×3 no degrau átomo | doing | 1/8: este commit | 2026-09-12 |
+| P1.1 | p1 | cqe ×5 + write_ack ×3 no degrau átomo | doing | 2/8: este commit | 2026-09-12 |
 | P1.2 | p1 | Veredito datado dos medidos ausentes | todo | — | 2026-09-12 |
 | P2.1 | p2 | Composição ∀ env→wal→ack + twins DST | todo | — | 2026-09-12 |
 | P2.2 | p2 | Sweep final + nota EXTRACT.md + flip done | todo | — | 2026-09-12 |

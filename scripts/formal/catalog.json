@@ -4724,6 +4724,10 @@
   },
   {
    "id": "cqe_tags",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "2026-09-12 RFC-0214 P1.1: fate ∀ sobre next_user_data no degrau átomo — tags únicas por SQE (c≠0: (c,c+1) wrapping; c=0: pula o zero reservado, (1,2)); as-is next_user_data_as_is (tag constante por opcode) recusado pela planta DST unique_tags_discard_leftover_same_opcode"
+   },
    "finding": "F203",
    "twin_kind": "close",
    "single_artifact": true,

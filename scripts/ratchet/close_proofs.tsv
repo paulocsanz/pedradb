@@ -162,3 +162,4 @@ atom	catalog:env_barrier_floor	barrier_floor_fate_iff	formal/aeneas/lean/EnvCras
 atom	catalog:env_no_invented	no_invented_bytes_fate_iff	formal/aeneas/lean/EnvCrash.lean	no_invented_bytes_holds
 atom	catalog:env_honest_sync	honest_sync_fate_iff	formal/aeneas/lean/EnvCrash.lean	honest_sync_protects_all
 atom	catalog:cqe_res	cqe_res_ok_fate_iff	formal/aeneas/lean/Cqe.lean	cqe_res_ok
+atom	catalog:cqe_tags	next_user_data_fate_iff	formal/aeneas/lean/Cqe.lean	next_user_data
