@@ -437,3 +437,34 @@ theorem inv_wal_fate_iff :
     exact (Result.ok.inj h).symm
   · intro h
     rw [h]
+
+/-- RFC-0214 P0.1 (atom `catalog:wal_append`): o append tem desfecho
+ok EXATAMENTE quando a soma dos bytes não estoura — e nesse caso o
+único futuro possível é `{s with written := w}` (barreira e prefixo
+acked não se movem; o log só cresce). Fate forall sobre o corpo
+extraído; a rota ← CITA o fechado ∀ `wal_append_closed`
+(RFC-0191 P2.1). O mutante AS-IS acka os mesmos bytes junto com o
+write — antes de qualquer barreira. -/
+theorem wal_append_fate_iff :
+    ∀ (s : wal.wal_state_kernel.WalState) (n w : U64),
+      (wal.wal_state_kernel.wal_append s n = ok { s with written := w }) ↔
+        (s.written + n = ok w) := by
+  intro s n w
+  constructor
+  · intro h
+    unfold wal.wal_state_kernel.wal_append at h
+    cases hadd : s.written + n with
+    | ok w' =>
+        rw [hadd] at h
+        simp only [bind_tc_ok] at h
+        have hw : w' = w :=
+          congrArg wal.wal_state_kernel.WalState.written (Result.ok.inj h)
+        rw [hw]
+    | fail e =>
+        rw [hadd] at h
+        simp at h
+    | div =>
+        rw [hadd] at h
+        simp at h
+  · intro h
+    exact wal_append_closed s n w h

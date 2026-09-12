@@ -6404,6 +6404,10 @@
   },
   {
    "id": "wal_append",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "RFC-0214 P0.1: fate ∀ do append — ok {s with written := w} exatamente quando a soma written+n não estoura (ok w); perna citada wal_append_closed (RFC-0191 P2.1)."
+   },
    "finding": "RFC-0166 P1.2",
    "twin_kind": "close",
    "single_artifact": true,

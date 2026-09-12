@@ -62,6 +62,14 @@ planta DST verde ANTES do commit, gate GREEN no commit)
    acked⊆synced — dente `inv_wal_as_is_dente`), floor_atom 122→123,
    floor_extract 156→155; planta DST verde
    (`wal_inv_on_live_recording_is_not_ok`, 1 passed)
+
+   — 2/6 `done`: `wal_append_fate_iff`
+   (WalState.lean; o append é ok EXATAMENTE quando a soma `written+n`
+   não estoura — único futuro `{s with written := w}`, barreira e
+   acked não se movem; perna citada `wal_append_closed`,
+   RFC-0191 P2.1; o as-is acka os bytes junto com o write, antes da
+   barreira), floor_atom 123→124, floor_extract 155→154; planta DST
+   verde (`wal_inv_on_live_recording_is_not_ok`, 1 passed)
 2. **P0.2** env_crash ×6: `env_crash`, `env_append`, `env_sync`,
    `env_barrier_floor`, `env_no_invented`, `env_honest_sync` (wrapper
    `EnvCrash.lean`) — floor_atom 128→134, floor_extract 150→144 —
@@ -90,7 +98,7 @@ planta DST verde ANTES do commit, gate GREEN no commit)
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | wal_state ×6 no degrau átomo | doing | 1/6 | 2026-09-12 |
+| P0.1 | p0 | wal_state ×6 no degrau átomo | doing | 2/6 | 2026-09-12 |
 | P0.2 | p0 | env_crash ×6 no degrau átomo | todo | — | 2026-09-12 |
 | P1.1 | p1 | cqe ×5 + write_ack ×3 no degrau átomo | todo | — | 2026-09-12 |
 | P1.2 | p1 | Veredito datado dos medidos ausentes | todo | — | 2026-09-12 |
