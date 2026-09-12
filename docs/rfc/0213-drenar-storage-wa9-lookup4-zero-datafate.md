@@ -84,6 +84,18 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
    sync_failed`; o as-is nunca cerca, RFC-0170 P2.4), cap 23→22,
    floor_atom 101→102, floor_extract 177→176; planta DST verde
    (`fence_on_sync_fail_on_live_required_fail_is_not_ok`, 1 passed)
+
+   — 5/9 `done`: `wal_commit_plan_fate_iff`
+   (WriteAdmission.lean; o plano de append do WAL é
+   AppendSyncFence EXATAMENTE em sync exigido+falhado,
+   AppendSyncApplyOk EXATAMENTE em sync exigido+bem-sucedido,
+   AppendApplyOk EXATAMENTE sem sync exigido; o as-is devolve o
+   plano errado, RFC-0170 P2.4), cap 22→21, floor_atom 102→103,
+   floor_extract 176→175; planta DST verde
+   (`wal_commit_plan_on_live_sync_fail_is_not_ok`, 1 passed). O par
+   já tinha linha `close` registrada: subiu o degrau
+   close→atom (linha close mantida, residual close 7→6 no mesmo
+   commit — a escada conta o par no degrau mais fundo)
 2. **P0.2:** cadência lookup ×4 (wrapper `Lookup.lean`):
    `snap_empty`, `snap_below_watermark`, `mem_point_decides`,
    `prefer_newer_seq` — cap 17→13, floor_atom 107→111,
@@ -127,7 +139,7 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | Cadência write_admission ×9 | doing | 4/9: este commit | 2026-09-12 |
+| P0.1 | p0 | Cadência write_admission ×9 | doing | 5/9: este commit | 2026-09-12 |
 | P0.2 | p0 | Cadência lookup ×4 | todo | — | 2026-09-11 |
 | P1.1 | p1 | Cadência flush ×3 + cf ×2 | todo | — | 2026-09-11 |
 | P1.2 | p1 | Cadência leveling ×2 + singletons ×4 | todo | — | 2026-09-11 |

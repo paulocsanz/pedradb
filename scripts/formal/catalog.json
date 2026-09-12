@@ -7159,7 +7159,6 @@
     "crates/pedradb-core/src/db.rs"
    ],
    "entry": "wal_commit_plan",
-   "data_fate": true,
    "handlers": [
     "commit_ops_with"
    ],
@@ -7168,6 +7167,10 @@
    "dst_plant": {
     "file": "crates/pedradb-core/src/write_admission_kernel.rs",
     "test": "wal_commit_plan_on_live_sync_fail_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "WAL append plan fully fated: AppendSyncFence on sync-needed+failed, AppendSyncApplyOk on sync-needed+ok, AppendApplyOk otherwise; as-is wrong plan, refused by DST plant"
    }
   },
   {

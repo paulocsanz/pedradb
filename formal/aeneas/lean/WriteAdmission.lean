@@ -288,3 +288,22 @@ theorem fence_on_sync_fail_fate_iff :
   intro sync_required sync_failed v
   unfold fence_on_sync_fail
   cases sync_required <;> cases sync_failed <;> cases v <;> simp
+
+/-- RFC-0213 P0.1 (storage cadence, atom `catalog:wal_commit_plan`):
+    the WAL append plan is AppendSyncFence EXACTLY when sync was
+    needed and failed, AppendSyncApplyOk EXACTLY when sync was
+    needed and succeeded, and AppendApplyOk EXACTLY when no sync was
+    needed — fate forall over the extracted body (RFC-0170 P2.4);
+    the AS-IS mutant returns the wrong plan (the lie the DST plant
+    `wal_commit_plan_on_live_sync_fail_is_not_ok` refutes). -/
+theorem wal_commit_plan_fate_iff :
+    ∀ (need_sync sync_failed : Bool) (r : WalCommitPlan),
+      (wal_commit_plan need_sync sync_failed = ok r) ↔
+        ((r = WalCommitPlan.AppendSyncFence
+            ∧ need_sync = true ∧ sync_failed = true)
+          ∨ (r = WalCommitPlan.AppendSyncApplyOk
+            ∧ need_sync = true ∧ sync_failed = false)
+          ∨ (r = WalCommitPlan.AppendApplyOk ∧ need_sync = false)) := by
+  intro need_sync sync_failed r
+  unfold wal_commit_plan fence_on_sync_fail
+  cases need_sync <;> cases sync_failed <;> simp <;> exact eq_comm

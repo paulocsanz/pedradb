@@ -129,3 +129,4 @@ atom	catalog:write_admission	write_admission_idle_fate_iff	formal/aeneas/lean/Wr
 atom	catalog:write_admit	write_admit_fate_iff	formal/aeneas/lean/WriteAdmission.lean	write_admit
 atom	catalog:seq_exhausted	seq_exhausted_fate_iff	formal/aeneas/lean/WriteAdmission.lean	seq_exhausted
 atom	catalog:fence_on_sync_fail	fence_on_sync_fail_fate_iff	formal/aeneas/lean/WriteAdmission.lean	fence_on_sync_fail
+atom	catalog:wal_commit_plan	wal_commit_plan_fate_iff	formal/aeneas/lean/WriteAdmission.lean	wal_commit_plan
