@@ -6878,6 +6878,10 @@
   },
   {
    "id": "write_ack_barrier",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "átomo write_ack_barrier: o Ok da barreira Honest é exatamente o estado promovido (synced := written) — wal_sync com fsync_promotes_pending; sem Ok com pendências (RFC-0214 P1.1 7/8)"
+   },
    "finding": "RFC-0166 P1.4",
    "twin_kind": "close",
    "single_artifact": true,

@@ -174,3 +174,40 @@ theorem on_append_fate_iff :
     unfold wal.wal_state_kernel.wal_append
     rw [h]
     simp only [bind_tc_ok]
+
+/-- RFC-0214 P1.1 (atom `catalog:write_ack_barrier`): o passo barrier
+do ledger é o átomo `wal_sync` Honest — o Ok é EXATAMENTE o estado
+promovido (`synced := written` via `fsync_promotes_pending`; o min de
+`CrashModel.of` é sobrescrito pelo ramo Honest): não existe Ok que
+deixe `synced` atrás de `written`. Fate forall sobre o corpo extraído.
+O mutante AS-IS que pula a barreira (`write_ack_ledger_as_is`) é
+recusado pela planta DST `verified_write_ack_on_live_profile_is_not_ok`. -/
+theorem on_barrier_fate_iff :
+    ∀ (l l' : write_ack_kernel.WriteAckLedger),
+      (write_ack_kernel.WriteAckLedger.on_barrier l = ok l') ↔
+        (l' = { l with state := { l.state with synced := l.state.written, written := l.state.written } }) := by
+  intro l l'
+  constructor
+  · intro h
+    unfold write_ack_kernel.WriteAckLedger.on_barrier at h
+    unfold wal.wal_state_kernel.wal_sync at h
+    unfold env_crash_kernel.CrashModel.of at h
+    unfold env_crash_kernel.sync at h
+    unfold env_crash_kernel.SyncHonesty.Insts.CoreCmpPartialEqSyncHonesty.eq at h
+    unfold group_commit_kernel.fsync_promotes_pending at h
+    simp [core.cmp.Ord.min.trait_default, core.cmp.Ord.min.default,
+      core.cmp.Ord.min_body, core.cmp.impls.PartialOrdU64.lt,
+      env_crash_kernel.SyncHonesty.read_discriminant] at h
+    split at h <;> simp only [bind_tc_ok] at h <;> exact (Result.ok.inj h).symm
+  · intro h
+    subst h
+    unfold write_ack_kernel.WriteAckLedger.on_barrier
+    unfold wal.wal_state_kernel.wal_sync
+    unfold env_crash_kernel.CrashModel.of
+    unfold env_crash_kernel.sync
+    unfold env_crash_kernel.SyncHonesty.Insts.CoreCmpPartialEqSyncHonesty.eq
+    unfold group_commit_kernel.fsync_promotes_pending
+    simp [core.cmp.Ord.min.trait_default, core.cmp.Ord.min.default,
+      core.cmp.Ord.min_body, core.cmp.impls.PartialOrdU64.lt,
+      env_crash_kernel.SyncHonesty.read_discriminant]
+    split <;> simp only [bind_tc_ok]
