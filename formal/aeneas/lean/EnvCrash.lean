@@ -243,3 +243,69 @@ theorem no_invented_bytes_fate_iff :
     exact (Result.ok.inj h).symm
   · intro h
     rw [h]
+
+/-- RFC-0214 P0.2 (atom `catalog:env_honest_sync`): a corolária do
+sync honesto vale SEMPRE — o desfecho é `ok v` com `v = true`
+exato: após a barreira honesta (`synced := written`), a janela
+legal colapsa num ponto (`written ≤ cut ≤ written` força
+`cut = written`, pernas `sync_fate_iff` + `crash_legal_fate_iff`,
+átomos 3/6 e 1/6 desta fatia) — todo crash legal preserva o log
+INTEIRO. Fate forall sobre o corpo extraído. O mutante AS-IS
+promove sync mentiroso — a barreira prometida não existe. -/
+theorem honest_sync_fate_iff :
+    ∀ (m : env_crash_kernel.CrashModel) (cut : U64) (v : Bool),
+      (env_crash_kernel.honest_sync_protects_all m cut = ok v) ↔
+        (v = true) := by
+  intro m cut v
+  have hs : env_crash_kernel.sync m env_crash_kernel.SyncHonesty.Honest
+      = ok { m with synced := m.written } := by
+    unfold env_crash_kernel.sync
+    unfold env_crash_kernel.SyncHonesty.Insts.CoreCmpPartialEqSyncHonesty.eq
+    unfold group_commit_kernel.fsync_promotes_pending
+    simp [env_crash_kernel.SyncHonesty.read_discriminant]
+  have key : env_crash_kernel.honest_sync_protects_all m cut
+      = ok true := by
+    unfold env_crash_kernel.honest_sync_protects_all
+    rw [hs]
+    simp only [bind_tc_ok]
+    cases hb : env_crash_kernel.crash_legal
+        { m with synced := m.written } cut with
+    | ok b =>
+        simp only [bind_tc_ok]
+        cases b with
+        | true =>
+            have hwin := ((crash_legal_fate_iff
+              { m with synced := m.written } cut true).mp hb).symm
+            rw [Bool.and_eq_true] at hwin
+            obtain ⟨hle, hwe⟩ := hwin
+            have h1 : m.written <= cut := of_decide_eq_true hle
+            have h2 : cut <= m.written := of_decide_eq_true hwe
+            have heq : cut = m.written := le_antisymm h2 h1
+            simp [heq]
+        | false => simp
+    | fail e =>
+        have hf := (crash_legal_fate_iff
+            { m with synced := m.written } cut
+            (((({ m with synced := m.written } : env_crash_kernel.CrashModel).synced
+                <= cut) : Bool) &&
+             ((cut <=
+                ({ m with synced := m.written } : env_crash_kernel.CrashModel).written)
+               : Bool))).mpr rfl
+        rw [hb] at hf
+        simp at hf
+    | div =>
+        have hf := (crash_legal_fate_iff
+            { m with synced := m.written } cut
+            (((({ m with synced := m.written } : env_crash_kernel.CrashModel).synced
+                <= cut) : Bool) &&
+             ((cut <=
+                ({ m with synced := m.written } : env_crash_kernel.CrashModel).written)
+               : Bool))).mpr rfl
+        rw [hb] at hf
+        simp at hf
+  rw [key]
+  constructor
+  · intro h
+    exact (Result.ok.inj h).symm
+  · intro h
+    rw [h]

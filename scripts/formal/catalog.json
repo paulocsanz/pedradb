@@ -6380,6 +6380,10 @@
   },
   {
    "id": "env_honest_sync",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "RFC-0214 P0.2: fate ∀ do sync honesto — ok v com v = true exato: após a barreira honesta a janela legal colapsa num ponto (written ≤ cut ≤ written força cut = written); todo crash legal preserva o log inteiro; pernas sync_fate_iff + crash_legal_fate_iff."
+   },
    "finding": "RFC-0166 P1.1",
    "twin_kind": "close",
    "single_artifact": true,
