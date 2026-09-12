@@ -237,6 +237,15 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
    reabsorve o L1 inteiro, RFC-0170 P2.4), cap 8→7,
    floor_atom 116→117, floor_extract 162→161; planta DST verde
    (`pick_l0_to_l1_on_live_slice_is_not_ok`, 1 passed)
+
+   — 2/6 `done`: `pick_pushdown_fate_iff`
+   (Leveling.lean; o job de pushdown é decidido EXATAMENTE pela
+   rota extraída — nível fonte vazio ⇒ sem job; destino não-disjunto
+   é RECUSADO pelo gate (o que detém a cascata deslimitada); senão o
+   arquivo mais antigo + o slice por overlap decidem o job com cada
+   passo ok; o as-is pula o gate, RFC-0170 P2.4), cap 7→6,
+   floor_atom 117→118, floor_extract 161→160; planta DST verde
+   (`pick_pushdown_on_live_pushdown_gate_is_not_ok`, 1 passed)
 5. **P1.3:** veredito datado dos medidos ausentes — SE alguma
    promoção acima medir fn/planta/handler inexistente, veredito
    por par em findings (reescrever para fn viva SE o caminho
@@ -267,7 +276,7 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
 | P0.1 | p0 | Cadência write_admission ×9 | done | 9/9: este commit (FECHAMENTO) | 2026-09-12 |
 | P0.2 | p0 | Cadência lookup ×4 | done | 4/4: este commit (FECHAMENTO) | 2026-09-12 |
 | P1.1 | p1 | Cadência flush ×3 + cf ×2 | done | 5/5: este commit (FECHAMENTO) | 2026-09-12 |
-| P1.2 | p1 | Cadência leveling ×2 + singletons ×4 | doing | 1/6: este commit | 2026-09-12 |
+| P1.2 | p1 | Cadência leveling ×2 + singletons ×4 | doing | 2/6: este commit | 2026-09-12 |
 | P1.3 | p1 | Veredito datado dos medidos ausentes | todo | — | 2026-09-11 |
 | P2.1 | p2 | Wal finais ×2 — CATÁLOGO ZERO data_fate | todo | — | 2026-09-11 |
 | P2.2 | p2 | Composição ∀ storage + sweep final + flip done | todo | — | 2026-09-11 |

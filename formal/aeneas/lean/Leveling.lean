@@ -141,3 +141,61 @@ theorem pick_l0_to_l1_fate_iff :
       refine bind_intro (sel, hull_lo1, hull_hi1) hloop ?_
       refine bind_intro slice hslice ?_
       exact congrArg ok hv.symm
+
+/-- RFC-0213 P1.2 (storage cadence, atom `catalog:leveling_pushdown`):
+    one pushdown job from level n to n+1 is picked EXACTLY along the
+    extracted route — an empty source level yields no job; a
+    non-disjoint destination view is refused (the gate that stops the
+    unbounded cascade); otherwise the oldest source file plus the
+    destination files overlapping its bounds decide the job, with the
+    slice loop and every monadic step ok (fate forall over the
+    extracted body, RFC-0170 P2.4). The AS-IS mutant skips the
+    disjoint gate (the lie the DST plant
+    `pick_pushdown_on_live_pushdown_gate_is_not_ok` refutes). -/
+theorem pick_pushdown_fate_iff :
+    ∀ (src dst : Slice LevelFile)
+      (v : Option (Usize × (alloc.vec.Vec Usize))),
+    (pick_pushdown src dst = ok v) ↔
+      ((∃ b, core.slice.Slice.is_empty src = ok b ∧ b = true ∧ v = none) ∨
+       (∃ b d, core.slice.Slice.is_empty src = ok b ∧ ¬(b = true) ∧
+          is_disjoint dst = ok d ∧
+          ((d = true ∧
+            (∃ source slice,
+              Slice.index_usize src 0#usize = ok source ∧
+              pick_l0_slice_loop dst source.lo source.hi
+                (alloc.vec.Vec.new Usize) 0#usize = ok slice ∧
+              v = some (source.idx, slice)))
+           ∨ (¬(d = true) ∧ v = none)))) := by
+  intro src dst v
+  unfold pick_pushdown
+  constructor
+  · intro hval
+    obtain ⟨b, hb, hval⟩ := bind_ok_inv _ _ _ hval
+    split at hval
+    · next hbt =>
+      exact Or.inl ⟨b, hb, hbt, by injection hval with hv; exact hv.symm⟩
+    · next hbt =>
+      obtain ⟨d, hd, hval⟩ := bind_ok_inv _ _ _ hval
+      refine Or.inr ⟨b, d, hb, hbt, hd, ?_⟩
+      split at hval
+      · next hdt =>
+        obtain ⟨source, hsource, hval⟩ := bind_ok_inv _ _ _ hval
+        obtain ⟨slice, hslice, hval⟩ := bind_ok_inv _ _ _ hval
+        exact Or.inl ⟨hdt, source, slice, hsource, hslice,
+          by injection hval with hv; exact hv.symm⟩
+      · next hdt =>
+        exact Or.inr ⟨hdt, by injection hval with hv; exact hv.symm⟩
+  · rintro (⟨b, hb, hbt, hv⟩ | ⟨b, d, hb, hbt, hd, hlast⟩)
+    · refine bind_intro b hb ?_
+      rw [if_pos hbt, hv]
+    · refine bind_intro b hb ?_
+      rw [if_neg hbt]
+      refine bind_intro d hd ?_
+      rcases hlast with ⟨hdt, source, slice, hsource, hslice, hv⟩ |
+        ⟨hdt, hv⟩
+      · rw [if_pos hdt]
+        refine bind_intro source hsource ?_
+        refine bind_intro slice hslice ?_
+        exact congrArg ok hv.symm
+      · rw [if_neg hdt]
+        exact congrArg ok hv.symm

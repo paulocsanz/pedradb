@@ -144,3 +144,4 @@ atom	catalog:flush_decision	flush_decision_fate_iff	formal/aeneas/lean/Flush.lea
 atom	catalog:cf_family	cf_family_fate_iff	formal/aeneas/lean/Cf.lean	key_in_cf_family
 atom	catalog:cf_family_of	cf_family_of_fate_iff	formal/aeneas/lean/Cf.lean	cf_family_of
 atom	catalog:leveling_pick	pick_l0_to_l1_fate_iff	formal/aeneas/lean/Leveling.lean	pick_l0_to_l1
+atom	catalog:leveling_pushdown	pick_pushdown_fate_iff	formal/aeneas/lean/Leveling.lean	pick_pushdown

@@ -5479,7 +5479,6 @@
     "crates/pedradb-core/src/db.rs"
    ],
    "entry": "pick_pushdown",
-   "data_fate": true,
    "handlers": [
     "prepare_pushdown_compact"
    ],
@@ -5493,6 +5492,10 @@
    "dst_plant": {
     "file": "crates/pedradb-core/src/leveling.rs",
     "test": "pick_pushdown_on_live_pushdown_gate_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "job de pushdown decidido exatamente pela rota extraida: nivel fonte vazio => sem job; destino nao-disjunto e recusado pelo gate; senao arquivo mais antigo + slice por overlap decidem, com cada passo ok; as-is pula o gate e a planta DST refuta"
    }
   },
   {
