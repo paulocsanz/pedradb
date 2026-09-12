@@ -155,3 +155,4 @@ atom	catalog:wal_sync	wal_sync_fate_iff	formal/aeneas/lean/WalState.lean	wal_syn
 atom	catalog:wal_ack	wal_ack_fate_iff	formal/aeneas/lean/WalState.lean	wal_ack
 atom	catalog:wal_rotate	wal_rotate_fate_iff	formal/aeneas/lean/WalState.lean	wal_rotate
 atom	catalog:wal_acked_survives	acked_survives_fate_iff	formal/aeneas/lean/WalState.lean	acked_survives_every_legal_crash
+atom	catalog:env_crash	crash_legal_fate_iff	formal/aeneas/lean/EnvCrash.lean	crash_legal

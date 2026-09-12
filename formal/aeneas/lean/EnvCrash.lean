@@ -41,3 +41,36 @@ theorem sync_lying_does_not_promote :
   unfold env_crash_kernel.SyncHonesty.Insts.CoreCmpPartialEqSyncHonesty.eq
   unfold group_commit_kernel.fsync_promotes_pending
   simp [env_crash_kernel.SyncHonesty.read_discriminant]
+
+/-! ## RFC-0214 P0.2 — costura Env no degrau átomo (fate ∀) -/
+
+/-- RFC-0214 P0.2 (atom `catalog:env_crash`): um corte é legal
+EXATAMENTE quando sobrevive entre o piso da barreira e o teto
+escrito — `synced ⊆ cut ⊆ written` (caudas tornadas podem manter
+prefixo; bytes synced nunca somem; nenhum byte é inventado).
+Fate forall sobre o corpo extraído. O mutante AS-IS ignora o piso
+da barreira — um corte abaixo de `synced` é chamado de legal e
+come bytes que a barreira prometeu. -/
+theorem crash_legal_fate_iff :
+    ∀ (m : env_crash_kernel.CrashModel) (cut : U64) (v : Bool),
+      (env_crash_kernel.crash_legal m cut = ok v) ↔
+        (v = (((m.synced <= cut) : Bool) &&
+              ((cut <= m.written) : Bool))) := by
+  intro m cut v
+  unfold env_crash_kernel.crash_legal
+  split
+  · next hle =>
+      rw [decide_eq_true hle, Bool.true_and]
+      constructor
+      · intro h
+        exact (Result.ok.inj h).symm
+      · intro h
+        rw [h]
+  · next hgt =>
+      rw [decide_eq_false (by simpa [UScalar.le_equiv] using hgt),
+        Bool.false_and]
+      constructor
+      · intro h
+        exact (Result.ok.inj h).symm
+      · intro h
+        rw [h]

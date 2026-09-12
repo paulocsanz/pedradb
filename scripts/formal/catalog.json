@@ -6260,6 +6260,10 @@
   },
   {
    "id": "env_crash",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "RFC-0214 P0.2: fate ∀ do crash_legal — corte legal exatamente quando synced ≤ cut ≤ written (piso da barreira e teto escrito); as-is ignora o piso e come bytes prometidos."
+   },
    "finding": "RFC-0166 P1.1",
    "twin_kind": "close",
    "single_artifact": true,
