@@ -6332,6 +6332,10 @@
   },
   {
    "id": "env_barrier_floor",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "RFC-0214 P0.2: fate ∀ do piso da barreira — ok v com v = true exato: corte ilegal não perde nada; corte legal mantém cut ≥ synced (perna crash_legal_fate_iff, átomo 1/6 da fatia)."
+   },
    "finding": "RFC-0166 P1.1",
    "twin_kind": "close",
    "single_artifact": true,

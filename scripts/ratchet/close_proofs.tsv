@@ -158,3 +158,4 @@ atom	catalog:wal_acked_survives	acked_survives_fate_iff	formal/aeneas/lean/WalSt
 atom	catalog:env_crash	crash_legal_fate_iff	formal/aeneas/lean/EnvCrash.lean	crash_legal
 atom	catalog:env_append	append_fate_iff	formal/aeneas/lean/EnvCrash.lean	append
 atom	catalog:env_sync	sync_fate_iff	formal/aeneas/lean/EnvCrash.lean	sync
+atom	catalog:env_barrier_floor	barrier_floor_fate_iff	formal/aeneas/lean/EnvCrash.lean	barrier_floor_holds
