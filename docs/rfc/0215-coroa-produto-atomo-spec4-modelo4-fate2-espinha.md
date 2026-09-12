@@ -80,7 +80,8 @@ planta DST verde ANTES do commit, gate GREEN no commit).
 3. **P1.1** fate ×2: `d1_put_ok` (`D1Modelo.lean` — o put confirma
    exatamente quando o ledger cruza a barreira), `c1_advance_commit`
    (`C1Modelo.lean` — o commit avança exatamente na maioria) —
-   floor_atom 150→152, floor_extract 128→126 — status: `todo`
+   floor_atom 150→152, floor_extract 128→126 — status: `todo` (1/2:
+   `d1_put_ok` feito 2026-09-12)
 
 4. **P1.2** coroa↔espinha composta: nova compose lib
    `ComposeProductCrown.lean` (11ª do array COMPOSE) — para todo

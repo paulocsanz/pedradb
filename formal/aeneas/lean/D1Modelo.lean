@@ -209,3 +209,39 @@ theorem d1_modelo_fate_iff :
             omega
           simpa [ge_iff_le] using hN
         rw [decide_eq_false_iff_not.mpr hNG]
+
+/-! ## RFC-0215 P1.1 — coroa de produto no degrau átomo (fate ×2) -/
+
+/-- RFC-0215 P1.1 1/2 (atom `catalog:d1_put_ok`, entry `put_ok`):
+o put confirma exatamente quando o ledger cruza a barreira — a
+confirmação `ok s'` do put é exatamente a cadeia honesta
+append→sync→ack com o vão acked→synced (`wal_append`/`wal_sync`/
+`wal_ack` citados, corpos não reabertos). O mutante AS-IS
+(`put_ok_as_is`) promove synced sem barreira e acka o vão inteiro
+(`put_ok_as_is_acks_unsynced`); planta três-dentes recusa. -/
+theorem put_ok_fate_iff :
+    ∀ (s0 : wal.wal_state_kernel.WalState) (rec_len : U64)
+      (s' : wal.wal_state_kernel.WalState),
+      (d1_modelo_kernel.put_ok s0 rec_len = ok s') ↔
+        ∃ s1 s2 i, wal.wal_state_kernel.wal_append s0 rec_len = ok s1 ∧
+          wal.wal_state_kernel.wal_sync s1
+            env_crash_kernel.SyncHonesty.Honest = ok s2 ∧
+          (s2.synced - s2.acked) = ok i ∧
+          wal.wal_state_kernel.wal_ack s2 i = ok s' := by
+  intro s0 rec_len s'
+  constructor
+  · intro hval
+    unfold d1_modelo_kernel.put_ok at hval
+    obtain ⟨ s1, hs1, hval ⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨ s2, hs2, hval ⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨ i, hi, hval ⟩ := bind_ok_inv _ _ _ hval
+    exact ⟨ s1, s2, i, hs1, hs2, hi, hval ⟩
+  · rintro ⟨ s1, s2, i, hs1, hs2, hi, hack ⟩
+    unfold d1_modelo_kernel.put_ok
+    rw [hs1]
+    simp only [Aeneas.Std.bind_tc_ok]
+    rw [hs2]
+    simp only [Aeneas.Std.bind_tc_ok]
+    rw [hi]
+    simp only [Aeneas.Std.bind_tc_ok]
+    exact hack

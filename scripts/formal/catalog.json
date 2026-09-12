@@ -6645,6 +6645,10 @@
    "dst_plant": {
     "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
     "test": "d1_modelo_on_live_recording_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "O put confirma exatamente quando o ledger cruza a barreira: ok s' e exatamente a cadeia honesta append->sync->ack com o vao acked->synced, citando os corpos sem reabrir"
    }
   },
   {
