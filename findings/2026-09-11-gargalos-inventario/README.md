@@ -81,16 +81,21 @@ same-boot viva está na seção A/C):
 | 12 | overwrite_mc4 15M @4 GiB | — | idem (mesma onda do 25M) |
 | 13 | overwrite_mc4 10k | min 0,883 (trim7+8, pre-0193) | **PAGA 2026-09-11 (p209b)**: gate 0185 P0.3 3/3 ≥1,0 nos dois braços (nobuf 1,078 / buf 1,268 min; peer 200k–307k saudável) |
 
-## D. U-cells DIAG-only — lote Linux 3-run AGENDADO (anti-overfit)
+## D. U-cells DIAG-only — lote Linux 3-run MEDIDO 2026-09-11/12 (p211u3, atualização pós-gate)
 
-qs_neg 0,808; point_select 0,430; wbwi 0,410; flink 0,522; venice 0,735;
-arango 0,003; pipelined 0,807 (todos Darwin DIAG). **Todas são suítes
-opt-in do próprio harness** (`ROCKS_PARITY_SUITE=qs,myrocks,streaming,
-arango,venice,rocksapi,kvrocks` → `qs_neg_lookup`, `myrocks_point_select`,
-`wbwi_read_your_writes`, `flink_window_state`, `venice_fanout_get`,
-`arango_doc_crud`/`arango_traversal`, `kvrocks_pipelined_set`): lote
-3-run quiet marcado para a onda de gate deste ciclo (junto ao P0 do
-0211). Nenhuma recebe mecanismo sem Linux 3-run; nenhuma exceção aberta.
+Predecessores Darwin DIAG: qs_neg 0,808; point_select 0,430; wbwi 0,410;
+flink 0,522; venice 0,735; arango 0,003; pipelined 0,807. **Lote Linux
+3-run quiet min-of-3 aterrissou** (`findings/2026-09-11-p209-ucells-gate/`,
+suítes opt-in do harness, 21/21 células): **15 ≥1,0** (qs 1,345–1,763;
+myrocks_point_select 1,162; read_only 4,123; flink 1,544; arango
+1,237/3,346; venice 3,431; mixgraph 1,394; kvrocks 2,26–29,1) — o DIAG
+Darwin subestimava todas as que viraram win; **6 perdas honestas nomeadas**:
+kafka_changelog_flush 0,036 (flush-por-op: pipeline completo por flush —
+parente medido do observável de contenção `compact_gate` do diagnóstico
+p211u2), ingest_sst 0,069 e compaction_filter_drop 0,081 (rocksapi: APIs
+nativas Rocks emuladas no compat), linkbench_mix 0,236, wbwi 0,494,
+myrocks_write_tx 0,751. Dono de fatia futura se atacadas; nenhuma exceção
+aberta.
 
 ## E. Outras frentes nomeadas (nada ignorado)
 

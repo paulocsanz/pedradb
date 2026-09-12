@@ -151,13 +151,21 @@ grupo continua direto; o 1-op passa a staging) e com o merge-eixo 0201
 
 ### P2 — deferrals carregados com número
 
-- [ ] **P2.1** U-cells lote Linux 3-run (qs, point_select, wbwi, flink,
+- [x] **P2.1** U-cells lote Linux 3-run (qs, point_select, wbwi, flink,
       venice, arango, pipelined) — anti-overfit: nenhum mecanismo sem
-      Linux 3-run — status: `meter agendado` (2026-09-11: as 7 células são
-      suítes opt-in do próprio harness — `ROCKS_PARITY_SUITE=
-      qs,myrocks,streaming,arango,venice,rocksapi,kvrocks`; lote 3-run
-      quiet marcado para a onda de gate deste ciclo, junto ao meter P0 do
-      RFC-0211; veredito terminal datado aqui quando a onda rodar)
+      Linux 3-run — status: `done 2026-09-11/12` (onda `p211u3` no
+      `linux-gate-p149b`, 3 rounds quiet, 42/42 invocações rc=0, pedra
+      async same-class vs rocks default `sync=false`, uniform,
+      min-of-3): **21/21 células medidas; 15 min-of-3 ≥1,0** (qs
+      1,345–1,763; myrocks_point_select 1,162; myrocks_read_only 4,123;
+      flink 1,544; arango 1,237/3,346; venice 3,431; mixgraph 1,394;
+      kvrocks_get 4,141 / set 2,547 / pipelined 3,504 / scan 29,125 /
+      blob 2,263); **6 perdas honestas nomeadas**: kafka_changelog_flush
+      0,036 (flush-por-op), ingest_sst 0,069 + compaction_filter_drop
+      0,081 (rocksapi, APIs nativas Rocks emuladas), linkbench_mix
+      0,236, wbwi 0,494, myrocks_write_tx 0,751. O DIAG Darwin
+      subestimava (qs 0,808→1,38; arango 0,003→1,24/3,35; nenhuma célula
+      win virou perda). Evidência: `findings/2026-09-11-p209-ucells-gate/`
 - [x] **P2.2** Meters pesados: prefix 100M @4GiB (0195 P0.4) e 15M/25M
       (0194 P0.4) — custo nomeado no inventário — status:
       `blocked (re-adjudicado 2026-09-11)` — o gate de
@@ -188,7 +196,7 @@ grupo continua direto; o 1-op passa a staging) e com o merge-eixo 0201
 | P0.3 | p0 | meter 3 rounds quiet (alvo+guardiãs+10k) | done (p209a/p209b; 10k 3/3 ≥1,0 ambos braços) | findings/2026-09-11-p209-wal-buffer-meter | 2026-09-11 |
 | P1.1 | p1 | flip default pós-meter | done — decisão: manter opt-in (min regrediu em 2 células) | findings/2026-09-11-p209-wal-buffer-meter | 2026-09-11 |
 | P1.2 | p1 | atribuição ycsb_a (hat do inventário) | done — perda 0,605 era boot-specific (2,602 neste boot) | findings/2026-09-11-p209-wal-buffer-meter | 2026-09-11 |
-| P2.1 | p2 | U-cells lote Linux 3-run | meter agendado (onda deste ciclo, junto ao P0 do 0211) | inventário 2026-09-11 | 2026-09-11 |
+| P2.1 | p2 | U-cells lote Linux 3-run | done — 21/21 medidas (p211u3): 15 ≥1,0 min-of-3; 6 perdas honestas nomeadas (kafka_flush 0,036; ingest_sst 0,069; compaction_filter 0,081; linkbench 0,236; wbwi 0,494; write_tx 0,751) | findings/2026-09-11-p209-ucells-gate | 2026-09-12 |
 | P2.2 | p2 | meters pesados 100M/15M/25M | blocked (re-adjudicado 2026-09-11: gate 09-10 reaberto 01:30; bloqueio = orçamento de onda + custo nomeado; host-check datado no RFC) | inventário 2026-09-11 | 2026-09-11 |
 | P2.3 | p2 | Grid B no corte vencedor | done (non-condition: P1.1 não flipou default; perna 10× compaction-on medida 3/3 ≥1,0 nos 2 braços p209b) | findings/2026-09-11-p209-wal-buffer-meter | 2026-09-11 |
 
