@@ -178,3 +178,13 @@ verde antes do commit, exatamente 1 teorema público por commit).
   reaberta. O mutante AS-IS só casa os dois literais; planta DST
   `bearer_case_insensitive` (pedradb-http, exit 0, 1 passed).
   Gate GREEN: floor_atom 152→153, floor_extract 126→125.
+
+## P2.1 — http ×6 átomo (2/6)
+
+- **is_non_bearer_auth_scheme (2/6)**: o gate dos outros
+  auth-schemes decide exatamente na cadeia case-fold
+  (basic → digest → negotiate → ntlm) — verdadeiro no primeiro que
+  casa, senão o veredito da última comparação; cada ramo carrega a
+  igualdade habilitante. O mutante AS-IS recusa tudo (scheme-blind);
+  planta DST `non_bearer_scheme_gate` (pedradb-http, exit 0,
+  1 passed). Gate GREEN: floor_atom 153→154, floor_extract 125→124.

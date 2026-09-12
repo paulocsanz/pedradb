@@ -163,3 +163,84 @@ theorem is_bearer_scheme_fate_iff :
   intro scheme v
   unfold is_bearer_scheme
   rfl
+
+/- RFC-0215 P2.1 2/6 (átomo `catalog:ascii_eq_ignore_case`, entrada
+`is_non_bearer_auth_scheme`): o gate dos outros auth-schemes decide
+exatamente na cadeia de comparações case-fold (basic → digest →
+negotiate → ntlm) — verdadeiro no primeiro que casa, senão o
+veredito da última comparação; cada ramo carrega a igualdade
+habilitante. O mutante AS-IS recusa tudo (scheme-blind, F150/F151);
+planta `non_bearer_scheme_gate` recusa. -/
+theorem is_non_bearer_auth_scheme_fate_iff :
+    ∀ (scheme : Str) (v : Bool),
+      (is_non_bearer_auth_scheme scheme = ok v) ↔
+        ∃ b0, core.str.Str.eq_ignore_ascii_case scheme (toStr "basic") = ok b0 ∧
+          ((b0 = true ∧ v = true) ∨
+            (b0 = false ∧
+              ∃ b1, core.str.Str.eq_ignore_ascii_case scheme (toStr "digest") = ok b1 ∧
+                ((b1 = true ∧ v = true) ∨
+                  (b1 = false ∧
+                    ∃ b2, core.str.Str.eq_ignore_ascii_case scheme (toStr "negotiate") = ok b2 ∧
+                      ((b2 = true ∧ v = true) ∨
+                        (b2 = false ∧
+                          core.str.Str.eq_ignore_ascii_case scheme (toStr "ntlm") = ok v)))))) := by
+  intro scheme v
+  constructor
+  · intro hval
+    unfold is_non_bearer_auth_scheme at hval
+    obtain ⟨b, hb, hval⟩ := bind_ok_inv _ _ _ hval
+    split at hval
+    · next hbt =>
+        exact ⟨b, hb, Or.inl ⟨hbt, (Result.ok.inj hval).symm⟩⟩
+    · next hbf =>
+        simp only [Bool.not_eq_true] at hbf
+        obtain ⟨b1, hb1, hval⟩ := bind_ok_inv _ _ _ hval
+        split at hval
+        · next hb1t =>
+            exact ⟨b, hb, Or.inr ⟨hbf, b1, hb1,
+              Or.inl ⟨hb1t, (Result.ok.inj hval).symm⟩⟩⟩
+        · next hb1f =>
+            simp only [Bool.not_eq_true] at hb1f
+            obtain ⟨b2, hb2, hval⟩ := bind_ok_inv _ _ _ hval
+            split at hval
+            · next hb2t =>
+                exact ⟨b, hb, Or.inr ⟨hbf, b1, hb1, Or.inr ⟨hb1f, b2, hb2,
+                  Or.inl ⟨hb2t, (Result.ok.inj hval).symm⟩⟩⟩⟩
+            · next hb2f =>
+                simp only [Bool.not_eq_true] at hb2f
+                exact ⟨b, hb, Or.inr ⟨hbf, b1, hb1, Or.inr ⟨hb1f, b2, hb2,
+                  Or.inr ⟨hb2f, hval⟩⟩⟩⟩
+  · rintro ⟨b, hb, ⟨hbt, hv⟩ | ⟨hbf, b1, hb1,
+      ⟨hb1t, hv⟩ | ⟨hb1f, b2, hb2, ⟨hb2t, hv⟩ | ⟨hb2f, hnt⟩⟩⟩⟩
+    · unfold is_non_bearer_auth_scheme
+      rw [hb]
+      simp only [Aeneas.Std.bind_tc_ok]
+      rw [hbt, if_pos rfl, hv]
+    · unfold is_non_bearer_auth_scheme
+      rw [hb]
+      simp only [Aeneas.Std.bind_tc_ok]
+      rw [hbf, if_neg (by simp)]
+      rw [hb1]
+      simp only [Aeneas.Std.bind_tc_ok]
+      rw [hb1t, if_pos rfl, hv]
+    · unfold is_non_bearer_auth_scheme
+      rw [hb]
+      simp only [Aeneas.Std.bind_tc_ok]
+      rw [hbf, if_neg (by simp)]
+      rw [hb1]
+      simp only [Aeneas.Std.bind_tc_ok]
+      rw [hb1f, if_neg (by simp)]
+      rw [hb2]
+      simp only [Aeneas.Std.bind_tc_ok]
+      rw [hb2t, if_pos rfl, hv]
+    · unfold is_non_bearer_auth_scheme
+      rw [hb]
+      simp only [Aeneas.Std.bind_tc_ok]
+      rw [hbf, if_neg (by simp)]
+      rw [hb1]
+      simp only [Aeneas.Std.bind_tc_ok]
+      rw [hb1f, if_neg (by simp)]
+      rw [hb2]
+      simp only [Aeneas.Std.bind_tc_ok]
+      rw [hb2f, if_neg (by simp)]
+      exact hnt

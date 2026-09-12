@@ -2510,6 +2510,10 @@
    "dst_plant": {
     "file": "crates/pedradb-http/src/auth_kernel.rs",
     "test": "non_bearer_scheme_gate"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "o gate dos outros auth-schemes decide exatamente na cadeia case-fold (basic -> digest -> negotiate -> ntlm), verdadeiro no primeiro que casa, senao o veredito da ultima comparacao; cada ramo carrega a igualdade habilitante; mutante AS-IS recusa tudo (planta non_bearer_scheme_gate recusa)"
    }
   },
   {
