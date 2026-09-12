@@ -140,6 +140,22 @@ pub fn disk_pressure_reclaim_plan_as_is(allowed: bool) -> DiskReclaimPlan {
     }
 }
 
+/// Reclaim plan for callers that already hold the WAL mutex (RFC-0185 P0.3
+/// `encode_async_one` contract): WAL rotate re-locks `wal`, and SST compact /
+/// vlog GC re-enter the Db write path. Lock-free reclaim only (the db.rs
+/// page-cache drop still runs). Soft-band pressure there otherwise
+/// self-deadlocks on the held lock (:p211s wave hang — first async put on an
+/// empty DB whose dir sits under a 256 MiB tmpfs, i.e. always in the
+/// reclaim band vs `DISK_SOFT_FREE_BYTES`).
+#[must_use]
+pub fn disk_pressure_reclaim_plan_wal_held() -> DiskReclaimPlan {
+    DiskReclaimPlan {
+        compact_sst: false,
+        rotate_wal: false,
+        compact_vlog: false,
+    }
+}
+
 /// PITR dest / backup sink / HA replica WAL: same hard floor as live `put`.
 ///
 /// Reclaim is still admitted — those callers have nothing to compact on an

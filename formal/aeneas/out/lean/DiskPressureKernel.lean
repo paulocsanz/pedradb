@@ -326,8 +326,14 @@ def disk_pressure_reclaim_plan_as_is
   (allowed : Bool) : Result DiskReclaimPlan := do
   ok { compact_sst := allowed, rotate_wal := false, compact_vlog := false }
 
+/-- [pedra_aeneas_disk_pressure_kernel::disk_pressure_reclaim_plan_wal_held]:
+    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 151:0-157:1
+    Visibility: public -/
+def disk_pressure_reclaim_plan_wal_held : Result DiskReclaimPlan := do
+  ok { compact_sst := false, rotate_wal := false, compact_vlog := false }
+
 /-- [pedra_aeneas_disk_pressure_kernel::external_write_admitted]:
-    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 148:0-153:1
+    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 164:0-169:1
     Visibility: public -/
 def external_write_admitted (available : Option Std.U64) : Result Bool := do
   let dpa ← disk_pressure_admit available
@@ -339,7 +345,7 @@ def external_write_admitted (available : Option Std.U64) : Result Bool := do
   ok (¬ b)
 
 /-- [pedra_aeneas_disk_pressure_kernel::external_write_admitted_as_is]:
-    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 157:0-159:1
+    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 173:0-175:1
     Visibility: public -/
 def external_write_admitted_as_is
   (_available : Option Std.U64) : Result Bool := do

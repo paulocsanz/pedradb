@@ -5320,7 +5320,7 @@ impl<E: Env> Db<E> {
                 "latched bulk keys/values length mismatch".into(),
             ));
         }
-        self.ensure_disk_pressure_admitted()?;
+        self.ensure_disk_pressure_admitted(false)?;
         if !self.write_admission_idle() {
             let fams = [family.to_string()];
             self.ensure_write_admitted_for(&fams)?;
@@ -8586,7 +8586,7 @@ impl<E: Env> Db<E> {
         durability: WriteOptions,
     ) -> Result<SequenceNumber> {
         let batch: Vec<BatchOp> = batch.into_iter().collect();
-        self.ensure_disk_pressure_admitted()?;
+        self.ensure_disk_pressure_admitted(false)?;
         if !self.write_admission_idle() {
             let families = self.batch_families(&batch);
             self.ensure_write_admitted_for(&families)?;
@@ -9174,7 +9174,7 @@ impl<E: Env> Db<E> {
     /// `manual_wal_flush=false` flushes per record). No `fdatasync`
     /// (that is G1), no write-group.
     pub(crate) fn commit_async_ops(&mut self, batch: Vec<BatchOp>) -> Result<SequenceNumber> {
-        self.ensure_disk_pressure_admitted()?;
+        self.ensure_disk_pressure_admitted(false)?;
         if let Some(op) = batch.first() {
             match op {
                 BatchOp::Put { key, .. } | BatchOp::Delete { key } => {
@@ -9291,7 +9291,8 @@ impl<E: Env> Db<E> {
         wal: &mut crate::wal::Wal<E::File>,
         batch: BatchOp,
     ) -> Result<(WriteOp, SequenceNumber)> {
-        self.ensure_disk_pressure_admitted()?;
+        // Caller holds `wal` (RFC-0185 P0.3): the admit must stay lock-free.
+        self.ensure_disk_pressure_admitted(true)?;
         match &batch {
             BatchOp::Put { key, .. } | BatchOp::Delete { key } => {
                 self.maybe_park_foreign_one_slash(key.as_ref());
@@ -9379,7 +9380,7 @@ impl<E: Env> Db<E> {
         if crate::write_admission_kernel::batch_is_empty(ops.len() as u64) {
             return Ok(self.last_sequence());
         }
-        self.ensure_disk_pressure_admitted()?;
+        self.ensure_disk_pressure_admitted(false)?;
         if let Some(op) = ops.first() {
             match op {
                 BatchOp::Put { key, .. } | BatchOp::Delete { key } => {
@@ -9646,7 +9647,7 @@ impl<E: Env> Db<E> {
 
     fn group_admit(&mut self, n: usize) -> std::result::Result<(), Vec<Result<SequenceNumber>>> {
         if let Err(CoreError::DiskPressure { available, need }) =
-            self.ensure_disk_pressure_admitted()
+            self.ensure_disk_pressure_admitted(false)
         {
             return Err((0..n)
                 .map(|_| Err(CoreError::DiskPressure { available, need }))
@@ -9953,7 +9954,14 @@ impl<E: Env> Db<E> {
     ///
     /// Unconditional — `write_admission_idle` only skips mem/L0 knobs.
     /// Unknown probe (`None` / Err) does not refuse. Not a durability fence.
-    fn ensure_disk_pressure_admitted(&mut self) -> Result<()> {
+    ///
+    /// `wal_held` (async pipeline, RFC-0185 P0.3 `encode_async_one` runs
+    /// under the caller's WAL mutex) downgrades reclaim to its lock-free
+    /// part: `try_rotate_wal`'s `wal.lock()` on the held lock deadlocked
+    /// the first async put on an empty DB under soft-band pressure
+    /// (:p211s wave hang — overlay upperdir tmpfs sits under
+    /// `DISK_SOFT_FREE_BYTES`, so every first put was in the reclaim band).
+    fn ensure_disk_pressure_admitted(&mut self, wal_held: bool) -> Result<()> {
         let probe = crate::env::probe_available_bytes(&self.env, &self.dir);
         match crate::disk_pressure_kernel::disk_pressure_admit(probe) {
             crate::disk_pressure_kernel::DiskPressureAdmit::Ok => {
@@ -9962,7 +9970,7 @@ impl<E: Env> Db<E> {
             }
             crate::disk_pressure_kernel::DiskPressureAdmit::Reclaim => {
                 self.note_disk_pressure(1, probe);
-                self.reclaim_disk_for_uptime(probe);
+                self.reclaim_disk_for_uptime(probe, wal_held);
                 let again = crate::env::probe_available_bytes(&self.env, &self.dir);
                 match crate::disk_pressure_kernel::disk_pressure_admit(again) {
                     crate::disk_pressure_kernel::DiskPressureAdmit::Refuse { available, need } => {
@@ -9990,10 +9998,17 @@ impl<E: Env> Db<E> {
     /// Compact + WAL recycle + vlog GC (only while still ≥ hard) + drop
     /// page cache. Errors are swallowed: reclaim I/O does not fence; a
     /// failed reclaim must not take reads down (RFC-0179 P1.2).
-    fn reclaim_disk_for_uptime(&mut self, before: Option<u64>) {
+    ///
+    /// `wal_held` (async pipeline under the WAL mutex) downgrades the plan
+    /// to the lock-free page-cache drop only.
+    fn reclaim_disk_for_uptime(&mut self, before: Option<u64>, wal_held: bool) {
         self.drop_page_cache_best_effort();
         let allowed = crate::disk_pressure_kernel::compact_allowed_under_pressure(before);
-        let plan = crate::disk_pressure_kernel::disk_pressure_reclaim_plan(allowed);
+        let plan = if wal_held {
+            crate::disk_pressure_kernel::disk_pressure_reclaim_plan_wal_held()
+        } else {
+            crate::disk_pressure_kernel::disk_pressure_reclaim_plan(allowed)
+        };
         if plan.compact_sst {
             let _ = self.compact_ssts_only();
         }
