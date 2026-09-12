@@ -144,7 +144,9 @@ novo por construção (`single_op`).
 
 - [ ] **P1.1** Flip do default da fronteira SE P0.3 validar: min-of-3
       ≥1,0 na célula-alvo SEM regredir guardiãs (regra ≥5%); senão
-      mantém opt-in com finding datado — status: `todo`
+      mantém opt-in com finding datado — status: `todo` (dado do meter
+      P0.3 já em: 0,836 <1,0 ⇒ ramo "senão"; decisão formalizada no
+      próximo ciclo, pode revisar com o sweep P2.1)
 - [ ] **P1.2** Decomposição do residual do braço vencedor
       (`write_phase_stats`: lock_wait vs wal vs publish por commit) —
       nomeia o dono da próxima fatia (ou fecha com número) — status:
