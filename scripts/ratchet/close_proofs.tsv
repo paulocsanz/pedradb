@@ -159,3 +159,4 @@ atom	catalog:env_crash	crash_legal_fate_iff	formal/aeneas/lean/EnvCrash.lean	cra
 atom	catalog:env_append	append_fate_iff	formal/aeneas/lean/EnvCrash.lean	append
 atom	catalog:env_sync	sync_fate_iff	formal/aeneas/lean/EnvCrash.lean	sync
 atom	catalog:env_barrier_floor	barrier_floor_fate_iff	formal/aeneas/lean/EnvCrash.lean	barrier_floor_holds
+atom	catalog:env_no_invented	no_invented_bytes_fate_iff	formal/aeneas/lean/EnvCrash.lean	no_invented_bytes_holds

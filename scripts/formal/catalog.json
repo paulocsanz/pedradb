@@ -6356,6 +6356,10 @@
   },
   {
    "id": "env_no_invented",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "RFC-0214 P0.2: fate ∀ do teto — ok v com v = true exato: corte ilegal ou cut ≤ written (teto da janela do crash_legal_fate_iff); a recuperação nunca inventa byte."
+   },
    "finding": "RFC-0166 P1.1",
    "twin_kind": "close",
    "single_artifact": true,

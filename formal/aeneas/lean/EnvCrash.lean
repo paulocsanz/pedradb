@@ -198,3 +198,48 @@ theorem barrier_floor_fate_iff :
     exact (Result.ok.inj h).symm
   · intro h
     rw [h]
+
+/-- RFC-0214 P0.2 (atom `catalog:env_no_invented`): a corolária do
+teto vale SEMPRE — o desfecho é `ok v` com `v = true` exato: ou o
+corte é ilegal, ou é legal e então `cut ≤ written` (o teto da
+janela do `crash_legal_fate_iff`). A recuperação nunca observa um
+byte que o writer não escreveu. Fate forall sobre o corpo
+extraído; CITA `crash_legal_fate_iff`. O mutante AS-IS é o
+`crash_legal` sem piso. -/
+theorem no_invented_bytes_fate_iff :
+    ∀ (m : env_crash_kernel.CrashModel) (cut : U64) (v : Bool),
+      (env_crash_kernel.no_invented_bytes_holds m cut = ok v) ↔
+        (v = true) := by
+  intro m cut v
+  have key : env_crash_kernel.no_invented_bytes_holds m cut
+      = ok true := by
+    unfold env_crash_kernel.no_invented_bytes_holds
+    cases hb : env_crash_kernel.crash_legal m cut with
+    | ok b =>
+        simp only [bind_tc_ok]
+        cases b with
+        | true =>
+            have hwin := ((crash_legal_fate_iff m cut true).mp hb).symm
+            rw [Bool.and_eq_true] at hwin
+            obtain ⟨_, hwe⟩ := hwin
+            simp
+            exact decide_eq_true_eq.mp hwe
+        | false => simp
+    | fail e =>
+        have hf := (crash_legal_fate_iff m cut
+            (((m.synced <= cut) : Bool) &&
+             ((cut <= m.written) : Bool))).mpr rfl
+        rw [hb] at hf
+        simp at hf
+    | div =>
+        have hf := (crash_legal_fate_iff m cut
+            (((m.synced <= cut) : Bool) &&
+             ((cut <= m.written) : Bool))).mpr rfl
+        rw [hb] at hf
+        simp at hf
+  rw [key]
+  constructor
+  · intro h
+    exact (Result.ok.inj h).symm
+  · intro h
+    rw [h]

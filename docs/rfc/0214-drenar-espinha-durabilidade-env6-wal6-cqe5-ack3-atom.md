@@ -142,6 +142,14 @@ planta DST verde ANTES do commit, gate GREEN no commit)
    átomo 1/6 da fatia; o as-is é o `crash_legal` sem piso),
    floor_atom 131→132, floor_extract 147→146; planta DST verde
    (`env_crash_on_live_recording_is_not_ok`, 1 passed)
+
+   — 5/6 `done`: `no_invented_bytes_fate_iff`
+   (EnvCrash.lean; a corolária do teto vale SEMPRE — `ok v` com
+   `v = true` exato: corte ilegal ou `cut ≤ written` (teto da
+   janela do `crash_legal_fate_iff`); a recuperação nunca inventa
+   byte; o as-is é o `crash_legal` sem piso), floor_atom 132→133,
+   floor_extract 146→145; planta DST verde
+   (`env_crash_on_live_recording_is_not_ok`, 1 passed)
 3. **P1.1** cqe ×5 + write_ack ×3: `cqe_res`, `cqe_tags`,
    `cqe_leftover`, `cqe_submit`, `cqe_ring_refusal` (wrapper
    `Cqe.lean`) + `write_ack_append`, `write_ack_barrier`,
@@ -167,7 +175,7 @@ planta DST verde ANTES do commit, gate GREEN no commit)
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | wal_state ×6 no degrau átomo | done | 6/6: este commit (FECHAMENTO) | 2026-09-12 |
-| P0.2 | p0 | env_crash ×6 no degrau átomo | doing | 4/6 | 2026-09-12 |
+| P0.2 | p0 | env_crash ×6 no degrau átomo | doing | 5/6 | 2026-09-12 |
 | P1.1 | p1 | cqe ×5 + write_ack ×3 no degrau átomo | todo | — | 2026-09-12 |
 | P1.2 | p1 | Veredito datado dos medidos ausentes | todo | — | 2026-09-12 |
 | P2.1 | p2 | Composição ∀ env→wal→ack + twins DST | todo | — | 2026-09-12 |
