@@ -2486,6 +2486,10 @@
    "dst_plant": {
     "file": "crates/pedradb-http/src/auth_kernel.rs",
     "test": "bearer_case_insensitive"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "o gate do scheme Bearer decide exatamente na comparacao case-fold ASCII contra o token bearer (RFC 9110); corpo e a chamada unica, citada nao reaberta; mutante AS-IS so casa os literais (planta bearer_case_insensitive recusa)"
    }
   },
   {

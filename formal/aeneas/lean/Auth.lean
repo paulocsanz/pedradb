@@ -149,3 +149,17 @@ theorem bearer_token_from_value_fate_iff :
             simp [hw, he, hsp, hbr, hnb, ht]
           · unfold bearer_token_from_value
             simp [hw, he, hsp, hbr, hnb, ht]
+
+/- RFC-0215 P2.1 1/6 (átomo `catalog:ascii_eq_ignore_case`, entrada
+`is_bearer_scheme`): o gate do scheme Bearer decide exatamente na
+comparação case-fold ASCII contra o token `bearer` (RFC 9110) — o
+corpo é a chamada única, citada não reaberta. O mutante AS-IS
+(`is_bearer_scheme_as_is`) só casa os dois literais; planta
+`bearer_case_insensitive` recusa. -/
+theorem is_bearer_scheme_fate_iff :
+    ∀ (scheme : Str) (v : Bool),
+      (is_bearer_scheme scheme = ok v) ↔
+        core.str.Str.eq_ignore_ascii_case scheme (toStr "bearer") = ok v := by
+  intro scheme v
+  unfold is_bearer_scheme
+  rfl

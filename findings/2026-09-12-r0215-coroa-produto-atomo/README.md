@@ -169,3 +169,12 @@ verde antes do commit, exatamente 1 teorema público por commit).
   múltiplos átomos (espinha RFC-0214 + d1_modelo + d1_holds), não um
   par único do catálogo — escada permanece floor_atom 152 /
   floor_extract 126.
+
+## P2.1 — http ×6 átomo (1/6)
+
+- **is_bearer_scheme (1/6)**: o gate do scheme Bearer decide
+  exatamente na comparação case-fold ASCII contra o token `bearer`
+  (RFC 9110) — o corpo extraído é a chamada única, citada não
+  reaberta. O mutante AS-IS só casa os dois literais; planta DST
+  `bearer_case_insensitive` (pedradb-http, exit 0, 1 passed).
+  Gate GREEN: floor_atom 152→153, floor_extract 126→125.

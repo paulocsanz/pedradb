@@ -83,9 +83,9 @@
   "handler_loc": 112092,
   "db_rs_extracted": false,
   "proof_depth": {
-   "extract": 126,
+   "extract": 125,
    "close": 5,
-   "atom": 152,
+   "atom": 153,
    "model": 15,
    "count": 7
   },

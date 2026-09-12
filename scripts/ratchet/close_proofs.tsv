@@ -179,3 +179,4 @@ atom	catalog:t1_modelo	t1_modelo_fate_iff	formal/aeneas/lean/T1Modelo.lean	t1_mo
 atom	catalog:c1_modelo	c1_modelo_fate_iff	formal/aeneas/lean/C1Modelo.lean	c1_modelo
 atom	catalog:d1_put_ok	put_ok_fate_iff	formal/aeneas/lean/D1Modelo.lean	put_ok
 atom	catalog:c1_advance_commit	c1_advance_commit_fate_iff	formal/aeneas/lean/C1Modelo.lean	c1_advance_commit
+atom	catalog:is_bearer_scheme	is_bearer_scheme_fate_iff	formal/aeneas/lean/Auth.lean	is_bearer_scheme
