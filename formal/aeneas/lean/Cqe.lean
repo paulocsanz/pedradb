@@ -245,3 +245,22 @@ theorem submit_complete_act_fate_iff :
             exact Bool.noConfusion hh.1
         | inr hh =>
             rw [hh.2]
+
+/-- RFC-0214 P1.1 (atom `catalog:cqe_ring_refusal`): o modelo
+de anel Verus NÃO é admitido — a porta fica fechada (F:
+RFC-0074 P2.2). Fate forall sobre o corpo extraído
+(`cqe_ring_model_admitted`). O mutante AS-IS
+(`cqe_ring_model_admitted_as_is`) abre a porta — a planta DST
+`cqe_ring_model_is_not_admitted` recusa. -/
+theorem cqe_ring_model_admitted_fate_iff :
+    ∀ (v : Bool), (cqe_ring_model_admitted = ok v) ↔ (v = false) := by
+  intro v
+  have key : cqe_ring_model_admitted = ok false := by
+    unfold cqe_ring_model_admitted
+    rfl
+  rw [key]
+  constructor
+  · intro h
+    exact (Result.ok.inj h).symm
+  · intro h
+    rw [h]

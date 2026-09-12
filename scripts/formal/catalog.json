@@ -4811,6 +4811,10 @@
   },
   {
    "id": "cqe_ring_refusal",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "2026-09-12 RFC-0214 P1.1: fate ∀ sobre cqe_ring_model_admitted no degrau átomo — o modelo de anel Verus não é admitido, a porta fica fechada (RFC-0074 P2.2); as-is cqe_ring_model_admitted_as_is (porta aberta) recusado pela planta DST cqe_ring_model_is_not_admitted"
+   },
    "finding": "RFC-0074 P2.2",
    "twin_kind": "close",
    "single_artifact": true,

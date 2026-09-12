@@ -165,3 +165,4 @@ atom	catalog:cqe_res	cqe_res_ok_fate_iff	formal/aeneas/lean/Cqe.lean	cqe_res_ok
 atom	catalog:cqe_tags	next_user_data_fate_iff	formal/aeneas/lean/Cqe.lean	next_user_data
 atom	catalog:cqe_leftover	cqe_act_fate_iff	formal/aeneas/lean/Cqe.lean	cqe_act
 atom	catalog:cqe_submit	submit_complete_act_fate_iff	formal/aeneas/lean/Cqe.lean	submit_complete_act
+atom	catalog:cqe_ring_refusal	cqe_ring_model_admitted_fate_iff	formal/aeneas/lean/Cqe.lean	cqe_ring_model_admitted
