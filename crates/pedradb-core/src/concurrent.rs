@@ -1137,6 +1137,15 @@ impl WriteGroup {
             Fly(crate::db::GroupInFlight),
             Done(Vec<Result<SequenceNumber>>),
         }
+        // RFC-0211 P1.2: group-path phase split, same counters as the
+        // bypass/batch twins (`PEDRA_WRITE_PHASE_STATS=1` only). `t0` spans
+        // the FIRST write-lock hold (stage + drain + encode) — the window
+        // that blocks readers on the Db RwLock; `wal` covers the off-lock
+        // `write()`/fd section; `t2` re-arms for the leader's SECOND lock
+        // acquisition (counted as `lock_wait`, same semantic as the
+        // bypass's blocked-on-write-lock wait).
+        let pstat = group.phase_stats.clone();
+        let t0 = pstat.as_ref().map(|_| Instant::now());
         let mut need_sync = inflight.needs_sync();
         let mut pub_seq = inflight.max_appended_seq();
         guard.begin_commit();
@@ -1183,6 +1192,11 @@ impl WriteGroup {
         }
         let wal = guard.wal_arc();
         drop(guard);
+        if let (Some(st), Some(t0)) = (pstat.as_ref(), t0) {
+            st.prepare_ns
+                .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
+        let t1 = pstat.as_ref().map(|_| Instant::now());
         assert!(
             !crate::group_commit_kernel::rwlock_client_may_mutate(false),
             "off-lock fd must not mutate Db (data-race token)"
@@ -1215,6 +1229,11 @@ impl WriteGroup {
             }
             e
         };
+        if let (Some(st), Some(t1)) = (pstat.as_ref(), t1) {
+            st.wal_ns
+                .fetch_add(t1.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
+        let t2 = pstat.as_ref().map(|_| Instant::now());
         // RFC-0071 P1.2: yield after off-lock fd, before the publish gate
         // (no Db write lock held). PCT can interleave a reader here.
         #[cfg(feature = "pct")]
@@ -1259,6 +1278,10 @@ impl WriteGroup {
                 .collect();
         }
         let mut g = db.write();
+        if let (Some(st), Some(t2)) = (pstat.as_ref(), t2) {
+            st.lock_wait_ns
+                .fetch_add(t2.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
         assert!(
             crate::group_commit_kernel::rwlock_client_may_mutate(true),
             "apply/publish holds the write guard (data-race token)"
@@ -1288,7 +1311,15 @@ impl WriteGroup {
                 Chunk::Done(r) => r,
             })
             .collect();
+        let tp = pstat.as_ref().map(|_| Instant::now());
         g.publish_sequence(pub_seq);
+        if let (Some(st), Some(tp)) = (pstat.as_ref(), tp) {
+            st.publish_ns
+                .fetch_add(tp.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
+        if let Some(st) = pstat.as_ref() {
+            st.commits.fetch_add(1, Ordering::Relaxed);
+        }
         g.end_commit();
         if let Some(l) = lone {
             l[3] = 0;
@@ -8899,6 +8930,122 @@ mod tests {
             }
         }
         db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir1);
+    }
+
+    /// RFC-0211 P1.2 env-axis guard: drop-restores the three knobs.
+    struct Rfc0211PhaseEnvGuard;
+    impl Drop for Rfc0211PhaseEnvGuard {
+        fn drop(&mut self) {
+            std::env::remove_var("PEDRA_RMW_SCHED");
+            std::env::remove_var("PEDRA_ASYNC_GROUP");
+            std::env::remove_var("PEDRA_WRITE_PHASE_STATS");
+        }
+    }
+
+    /// RFC-0211 P1.2: `PEDRA_WRITE_PHASE_STATS=1` fills the GROUP-path
+    /// phases on the real submit path. Merged arm (`PEDRA_RMW_SCHED=1`,
+    /// writers == ncpu): `queued > 0` (groups formed) and every group
+    /// phase counter positive (prepare = first lock hold, wal = off-lock
+    /// write, mem = group apply, publish), `commits` inside the commit
+    /// units. Pinned bypass twin (`PEDRA_ASYNC_GROUP=0`): `queued == 0`,
+    /// one commit per submit, phases filled by the bypass twins —
+    /// `lock_wait` is the counted wait there. Reads the shipped counters
+    /// after a real workload; nothing re-implemented.
+    #[test]
+    fn rfc0211_group_phase_stats_fill() {
+        let _env_axis = ENV_AXIS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _restore = Rfc0211PhaseEnvGuard;
+        let ncpu = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
+        if ncpu < 2 {
+            // The rmw regime (writers == ncpu >= 2) does not exist on a
+            // single-CPU box; nothing to adjudicate here.
+            return;
+        }
+        let threads = ncpu;
+        const PER: u8 = 32;
+
+        // Merged arm: the drainable group path carries the phase split.
+        let dir0 = temp_dir();
+        std::env::set_var("PEDRA_WRITE_PHASE_STATS", "1");
+        std::env::set_var("PEDRA_RMW_SCHED", "1");
+        {
+            let db = ConcurrentDb::open(&dir0).unwrap();
+            let barrier = Arc::new(std::sync::Barrier::new(threads));
+            let payload = [b'p'; 128];
+            std::thread::scope(|s| {
+                for t in 0..threads {
+                    let db = &db;
+                    let barrier = &barrier;
+                    let payload = &payload;
+                    s.spawn(move || {
+                        barrier.wait();
+                        for i in 0..PER {
+                            db.put_with([b'p', t as u8, i], payload, WriteOptions::no_sync())
+                                .unwrap();
+                        }
+                    });
+                }
+            });
+            let (_, queued, batches, batch_ops) = db.write_group_stats();
+            assert_eq!(batch_ops, (threads * PER as usize) as u64);
+            assert!(queued > 0, "merged arm must form drainable groups");
+            let st = db
+                .write_phase_stats()
+                .expect("PEDRA_WRITE_PHASE_STATS=1 set at open");
+            let r = Ordering::Relaxed;
+            assert!(st.commits.load(r) > 0, "group commits counted");
+            assert!(
+                st.commits.load(r) <= batches,
+                "commits ({}) ≤ commit units ({batches})",
+                st.commits.load(r)
+            );
+            assert!(st.prepare_ns.load(r) > 0, "group first hold timed");
+            assert!(st.wal_ns.load(r) > 0, "group off-lock WAL write timed");
+            assert!(st.mem_ns.load(r) > 0, "group apply timed");
+            assert!(st.publish_ns.load(r) > 0, "group publish timed");
+            db.close().unwrap();
+        }
+        let _ = fs::remove_dir_all(&dir0);
+
+        // Bypass twin: every async writer takes the write lock itself.
+        let dir1 = temp_dir();
+        std::env::remove_var("PEDRA_RMW_SCHED");
+        std::env::set_var("PEDRA_ASYNC_GROUP", "0");
+        {
+            let db = ConcurrentDb::open(&dir1).unwrap();
+            let barrier = Arc::new(std::sync::Barrier::new(threads));
+            let payload = [b'q'; 128];
+            std::thread::scope(|s| {
+                for t in 0..threads {
+                    let db = &db;
+                    let barrier = &barrier;
+                    let payload = &payload;
+                    s.spawn(move || {
+                        barrier.wait();
+                        for i in 0..PER {
+                            db.put_with([b'q', t as u8, i], payload, WriteOptions::no_sync())
+                                .unwrap();
+                        }
+                    });
+                }
+            });
+            let (submits, queued, batches, batch_ops) = db.write_group_stats();
+            assert_eq!(batch_ops, (threads * PER as usize) as u64);
+            assert_eq!(queued, 0, "bypass twin never queues");
+            assert_eq!(batches, submits, "one bypass commit unit per submit");
+            let st = db
+                .write_phase_stats()
+                .expect("PEDRA_WRITE_PHASE_STATS=1 set at open");
+            let r = Ordering::Relaxed;
+            assert_eq!(st.commits.load(r), submits, "bypass: a commit per submit");
+            assert!(st.prepare_ns.load(r) > 0, "bypass encode timed");
+            assert!(st.mem_ns.load(r) > 0, "bypass apply timed");
+            assert!(st.publish_ns.load(r) > 0, "bypass publish timed");
+            db.close().unwrap();
+        }
         let _ = fs::remove_dir_all(&dir1);
     }
 }

@@ -9804,10 +9804,16 @@ impl<E: Env> Db<E> {
             self.maybe_persist_changelog_after_durable_commit();
         }
 
+        let st = self.phase_stats.clone();
+        let tm = st.as_ref().map(|_| Instant::now());
         for (i, write_ops, last_seq) in appended {
             self.note_dirty_points(&write_ops);
             apply_ops_owned(&mut self.mem, write_ops);
             results[i] = Some(Ok(last_seq));
+        }
+        if let (Some(st), Some(tm)) = (st.as_ref(), tm) {
+            st.mem_ns
+                .fetch_add(tm.elapsed().as_nanos() as u64, Ordering::Relaxed);
         }
         // Caches bump on [`Self::publish_sequence`] after WAL is durable so
         // a failed fd cannot leave a stale miss for an unpublished key.

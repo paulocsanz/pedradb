@@ -1049,6 +1049,10 @@ impl YcsbRunner {
         let cfg_ops = self.cfg.ops;
         let records = self.cfg.records;
         let yval = std::sync::Arc::new(vec![b'k'; self.cfg.payload]);
+        // RFC-0211 P1.2: per-shape deltas (cumulative counters; the single
+        // kvrocks_set cell may have run earlier in the same process).
+        let wg0 = e.write_group_stats();
+        let phase0 = e.write_phase_snapshot();
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
         let t0 = Instant::now();
         let mut lats = Vec::with_capacity(cfg_ops * clients);
@@ -1095,7 +1099,13 @@ impl YcsbRunner {
             "[rocks-parity] {name} done ops={} errors={errors}",
             cfg_ops * clients
         );
-        if let Some((sub, queued, groups, gops)) = e.write_group_stats() {
+        if let (Some(a), Some(b)) = (wg0, e.write_group_stats()) {
+            let (sub, queued, groups, gops) = (
+                b.0.saturating_sub(a.0),
+                b.1.saturating_sub(a.1),
+                b.2.saturating_sub(a.2),
+                b.3.saturating_sub(a.3),
+            );
             let avg = if groups == 0 {
                 0.0
             } else {
@@ -1103,6 +1113,19 @@ impl YcsbRunner {
             };
             eprintln!(
                 "[rocks-parity] write_group submits={sub} queued={queued} groups={groups} ops={gops} avg_group={avg:.2}"
+            );
+        }
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let n = b[0].saturating_sub(a[0]).max(1);
+            let us = |d: u64| d as f64 / n as f64 / 1000.0;
+            eprintln!(
+                "[rocks-parity] {name} phasesΔ (per commit) prepare={:.2}µs wal={:.2}µs mem={:.2}µs publish={:.2}µs flsh={:.2}µs lock_wait={:.2}µs n={n}",
+                us(b[1].saturating_sub(a[1])),
+                us(b[2].saturating_sub(a[2])),
+                us(b[3].saturating_sub(a[3])),
+                us(b[4].saturating_sub(a[4])),
+                us(b[5].saturating_sub(a[5])),
+                us(b[6].saturating_sub(a[6])),
             );
         }
         vec![block]
@@ -2314,6 +2337,10 @@ impl YcsbRunner {
             if !shape_wanted_in(&mc_name, only) && !shape_wanted_in(name, only) {
                 continue;
             }
+            // RFC-0211 P1.2: per-shape deltas (the counters are cumulative
+            // across the process, and one invocation runs several shapes).
+            let wg0 = e.write_group_stats();
+            let phase0 = e.write_phase_snapshot();
             let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
             let t0 = Instant::now();
             let mut lats = Vec::with_capacity(cfg_ops * clients);
@@ -2370,6 +2397,35 @@ impl YcsbRunner {
                 "[rocks-parity] {name} mc{clients} done ops={} errors={errors}",
                 cfg_ops * clients
             );
+            if let (Some(a), Some(b)) = (wg0, e.write_group_stats()) {
+                let (sub, queued, groups, gops) = (
+                    b.0.saturating_sub(a.0),
+                    b.1.saturating_sub(a.1),
+                    b.2.saturating_sub(a.2),
+                    b.3.saturating_sub(a.3),
+                );
+                let avg = if groups == 0 {
+                    0.0
+                } else {
+                    gops as f64 / groups as f64
+                };
+                eprintln!(
+                    "[rocks-parity] {name} mc{clients} wgΔ submits={sub} queued={queued} groups={groups} ops={gops} avg_group={avg:.2}"
+                );
+            }
+            if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+                let n = b[0].saturating_sub(a[0]).max(1);
+                let us = |d: u64| d as f64 / n as f64 / 1000.0;
+                eprintln!(
+                "[rocks-parity] {name} mc{clients} phasesΔ (per commit) prepare={:.2}µs wal={:.2}µs mem={:.2}µs publish={:.2}µs flsh={:.2}µs lock_wait={:.2}µs n={n}",
+                us(b[1].saturating_sub(a[1])),
+                us(b[2].saturating_sub(a[2])),
+                us(b[3].saturating_sub(a[3])),
+                us(b[4].saturating_sub(a[4])),
+                us(b[5].saturating_sub(a[5])),
+                us(b[6].saturating_sub(a[6])),
+            );
+            }
             blocks.push(block);
         }
         blocks
@@ -2391,6 +2447,9 @@ impl YcsbRunner {
 
         // deps_apply_batch_mcN
         {
+            // RFC-0211 P1.2: per-shape deltas (cumulative counters).
+            let wg0 = e.write_group_stats();
+            let phase0 = e.write_phase_snapshot();
             let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
             let t0 = Instant::now();
             let mut lats = Vec::with_capacity(cfg_ops * clients);
@@ -2464,7 +2523,13 @@ impl YcsbRunner {
                 "[rocks-parity] deps_apply_batch mc{clients} done ops={} errors={errors}",
                 cfg_ops * clients
             );
-            if let Some((sub, queued, groups, gops)) = e.write_group_stats() {
+            if let (Some(a), Some(b)) = (wg0, e.write_group_stats()) {
+                let (sub, queued, groups, gops) = (
+                    b.0.saturating_sub(a.0),
+                    b.1.saturating_sub(a.1),
+                    b.2.saturating_sub(a.2),
+                    b.3.saturating_sub(a.3),
+                );
                 let avg = if groups == 0 {
                     0.0
                 } else {
@@ -2474,10 +2539,26 @@ impl YcsbRunner {
                     "[rocks-parity] write_group submits={sub} queued={queued} groups={groups} ops={gops} avg_group={avg:.2}"
                 );
             }
+            if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+                let n = b[0].saturating_sub(a[0]).max(1);
+                let us = |d: u64| d as f64 / n as f64 / 1000.0;
+                eprintln!(
+                "[rocks-parity] deps_apply_batch mc{clients} phasesΔ (per commit) prepare={:.2}µs wal={:.2}µs mem={:.2}µs publish={:.2}µs flsh={:.2}µs lock_wait={:.2}µs n={n}",
+                us(b[1].saturating_sub(a[1])),
+                us(b[2].saturating_sub(a[2])),
+                us(b[3].saturating_sub(a[3])),
+                us(b[4].saturating_sub(a[4])),
+                us(b[5].saturating_sub(a[5])),
+                us(b[6].saturating_sub(a[6])),
+            );
+            }
         }
 
         // deps_raftlog_mcN
         {
+            // RFC-0211 P1.2: per-shape deltas (cumulative counters).
+            let wg0 = e.write_group_stats();
+            let phase0 = e.write_phase_snapshot();
             let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
             let t0 = Instant::now();
             let mut lats = Vec::with_capacity(cfg_ops * clients);
@@ -2538,6 +2619,35 @@ impl YcsbRunner {
                 "[rocks-parity] deps_raftlog mc{clients} done ops={} errors={errors}",
                 cfg_ops * clients
             );
+            if let (Some(a), Some(b)) = (wg0, e.write_group_stats()) {
+                let (sub, queued, groups, gops) = (
+                    b.0.saturating_sub(a.0),
+                    b.1.saturating_sub(a.1),
+                    b.2.saturating_sub(a.2),
+                    b.3.saturating_sub(a.3),
+                );
+                let avg = if groups == 0 {
+                    0.0
+                } else {
+                    gops as f64 / groups as f64
+                };
+                eprintln!(
+                    "[rocks-parity] write_group submits={sub} queued={queued} groups={groups} ops={gops} avg_group={avg:.2}"
+                );
+            }
+            if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+                let n = b[0].saturating_sub(a[0]).max(1);
+                let us = |d: u64| d as f64 / n as f64 / 1000.0;
+                eprintln!(
+                "[rocks-parity] deps_raftlog mc{clients} phasesΔ (per commit) prepare={:.2}µs wal={:.2}µs mem={:.2}µs publish={:.2}µs flsh={:.2}µs lock_wait={:.2}µs n={n}",
+                us(b[1].saturating_sub(a[1])),
+                us(b[2].saturating_sub(a[2])),
+                us(b[3].saturating_sub(a[3])),
+                us(b[4].saturating_sub(a[4])),
+                us(b[5].saturating_sub(a[5])),
+                us(b[6].saturating_sub(a[6])),
+            );
+            }
         }
         blocks
     }
