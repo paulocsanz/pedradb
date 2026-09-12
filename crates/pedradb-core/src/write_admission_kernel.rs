@@ -391,6 +391,59 @@ pub fn range_inverted_as_is(_start_ge_end: bool) -> bool {
     false
 }
 
+#[cfg(not(verus_keep_ghost))]
+/// RFC-0213 P2.2: the storage write path COMPOSED over the three
+/// registered kernels — admission gates the append (no Ok ⇒ the write
+/// never reaches the WAL), the plan fences a failed required sync
+/// (Fence ⇒ no publish), and recovery cuts the torn tail. Verdict:
+/// the write is present after recovery.
+#[must_use]
+pub fn storage_write_recovered(
+    mem_bytes: u64,
+    mem_armed: bool,
+    mem_limit: u64,
+    l0: u64,
+    l0_armed: bool,
+    l0_limit: u64,
+    need_sync: bool,
+    sync_failed: bool,
+    len: u64,
+    last_good: u64,
+) -> bool {
+    match write_admit(mem_bytes, mem_armed, mem_limit, l0, l0_armed, l0_limit) {
+        WriteAdmit::Ok => match wal_commit_plan(need_sync, sync_failed) {
+            WalCommitPlan::AppendSyncFence => false,
+            _ => !torn_tail_needs_cut(len, last_good),
+        },
+        _ => false,
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS dente composto: admission sempre admite, o plano nunca cerca,
+/// recovery nunca corta — o write está "sempre presente" após crash.
+#[must_use]
+pub fn storage_write_recovered_as_is(
+    mem_bytes: u64,
+    mem_armed: bool,
+    mem_limit: u64,
+    l0: u64,
+    l0_armed: bool,
+    l0_limit: u64,
+    need_sync: bool,
+    sync_failed: bool,
+    len: u64,
+    last_good: u64,
+) -> bool {
+    match write_admit_as_is(mem_bytes, mem_armed, mem_limit, l0, l0_armed, l0_limit) {
+        WriteAdmit::Ok => match wal_commit_plan_as_is(need_sync, sync_failed) {
+            WalCommitPlan::AppendSyncFence => false,
+            _ => !torn_tail_needs_cut_as_is(len, last_good),
+        },
+        _ => false,
+    }
+}
+
 #[cfg(verus_keep_ghost)]
 use vstd::prelude::*;
 
@@ -1241,6 +1294,25 @@ mod tests {
         assert!(
             !body.contains("if s >= e"),
             "delete_range_with must not keep a raw inverted-range if"
+        );
+    }
+
+    /// RFC-0213 P2.2: the composed storage path over the three
+    /// registered kernels — the AS-IS composed twin lies on every leg
+    /// at once (stall ignored, fence skipped, torn tail never cut).
+    #[test]
+    fn storage_write_recovered_on_live_stall_fence_torn_is_not_ok() {
+        // admitted + published + intact tail ⇒ present after recovery
+        assert!(storage_write_recovered(10, false, 50, 3, false, 8, false, false, 40, 40));
+        // mem over an armed limit ⇒ refused before the WAL
+        assert!(!storage_write_recovered(100, true, 50, 3, false, 8, false, false, 40, 40));
+        // required sync failed ⇒ fenced — no publish
+        assert!(!storage_write_recovered(10, false, 50, 3, false, 8, true, true, 40, 40));
+        // torn tail past last-good ⇒ cut on recovery
+        assert!(!storage_write_recovered(10, false, 50, 3, false, 8, false, false, 90, 40));
+        assert!(
+            storage_write_recovered_as_is(100, true, 50, 3, false, 8, true, true, 90, 40),
+            "AS-IS dente: stall + fence + torn tail still 'present'"
         );
     }
 

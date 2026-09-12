@@ -438,4 +438,53 @@ def range_inverted (start_ge_end : Bool) : Result Bool := do
 def range_inverted_as_is (_start_ge_end : Bool) : Result Bool := do
   ok false
 
+/-- [pedra_aeneas_write_admission_kernel::storage_write_recovered]:
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 401:0-420:1
+    Visibility: public -/
+def storage_write_recovered
+  (mem_bytes : Std.U64) (mem_armed : Bool) (mem_limit : Std.U64) (l0 : Std.U64)
+  (l0_armed : Bool) (l0_limit : Std.U64) (need_sync : Bool)
+  (sync_failed : Bool) (len : Std.U64) (last_good : Std.U64) :
+  Result Bool
+  := do
+  let wa ← write_admit mem_bytes mem_armed mem_limit l0 l0_armed l0_limit
+  match wa with
+  | WriteAdmit.Ok =>
+    let wcp ← wal_commit_plan need_sync sync_failed
+    match wcp with
+    | WalCommitPlan.AppendApplyOk =>
+      let b ← torn_tail_needs_cut len last_good
+      ok (¬ b)
+    | WalCommitPlan.AppendSyncApplyOk =>
+      let b ← torn_tail_needs_cut len last_good
+      ok (¬ b)
+    | WalCommitPlan.AppendSyncFence => ok false
+  | WriteAdmit.StallMem => ok false
+  | WriteAdmit.StallL0 => ok false
+
+/-- [pedra_aeneas_write_admission_kernel::storage_write_recovered_as_is]:
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 426:0-445:1
+    Visibility: public -/
+def storage_write_recovered_as_is
+  (mem_bytes : Std.U64) (mem_armed : Bool) (mem_limit : Std.U64) (l0 : Std.U64)
+  (l0_armed : Bool) (l0_limit : Std.U64) (need_sync : Bool)
+  (sync_failed : Bool) (len : Std.U64) (last_good : Std.U64) :
+  Result Bool
+  := do
+  let wa ←
+    write_admit_as_is mem_bytes mem_armed mem_limit l0 l0_armed l0_limit
+  match wa with
+  | WriteAdmit.Ok =>
+    let wcp ← wal_commit_plan_as_is need_sync sync_failed
+    match wcp with
+    | WalCommitPlan.AppendApplyOk =>
+      let b ← torn_tail_needs_cut_as_is len last_good
+      ok (¬ b)
+    | WalCommitPlan.AppendSyncApplyOk =>
+      let b ← torn_tail_needs_cut_as_is len last_good
+      ok (¬ b)
+    | WalCommitPlan.AppendSyncFence => ok false
+  | WriteAdmit.StallMem => ok false
+  | WriteAdmit.StallL0 => ok false
+
 end pedra_aeneas_write_admission_kernel

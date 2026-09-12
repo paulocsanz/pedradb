@@ -492,4 +492,7 @@ name = "ComposeStoreRaft"
 name = "ComposeStoreFinish"
 
 [[lean_lib]]
+name = "ComposeStorageWrite"
+
+[[lean_lib]]
 name = "ComposeL28"

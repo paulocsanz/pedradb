@@ -40,6 +40,7 @@ COMPOSE=(
   ComposeConcurrent
   ComposeStoreRaft
   ComposeStoreFinish
+  ComposeStorageWrite
   ComposeL28
   LsmCompactBridges
   LsmCompactDerived

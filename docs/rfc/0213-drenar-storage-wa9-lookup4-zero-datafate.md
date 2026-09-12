@@ -361,7 +361,25 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
    (worktree destacado DENTRO de `software/`, gates 3× GREEN,
    extracts ok, sorry 0, capturas em findings, nota datada em
    EXTRACT.md: catálogo inteiro drenado — ZERO `data_fate`) +
-   flip `**Status:** done` — status: `todo`
+   flip `**Status:** done` — status: `doing`
+
+   — composição `done`: `storage_write_path_recovered_iff`
+   (ComposeStorageWrite.lean, 22ª compose lib): o caminho COMPOSTO —
+   admission portão do append (sem Ok o write nunca chega ao WAL),
+   plano cercando o sync requerido que falhou (Fence ⇒ sem
+   publish), recovery cortando a cauda torn — landa `ok v` com `v`
+   true EXATAMENTE sob a conjunção quádrupla (sem stall mem, sem
+   stall L0, sem cerca, fora da cauda torn), para TODO input; cada
+   perna deriva do seu atom registrado (`write_admit_fate_iff` ×
+   `wal_commit_plan_fate_iff` × `torn_tail_needs_cut_fate_iff`),
+   corpos extraídos não abertos, sorry 0, build verde; SEM linha
+   TSV (a composição atravessa três kernels — razão datada em
+   findings); planta DST verde
+   (`storage_write_recovered_on_live_stall_fence_torn_is_not_ok`,
+   1 passed, pedradb-core: os quatro quadrantes do veredito + o
+   as-is composto mentindo nos três eixos — stall ignorado, cerca
+   pulada, cauda torn nunca cortada); wiring: lakefile + COMPOSE no
+   `lean_extracts.sh` — "ok lean extracts (64 libs + 22 compose)"
 
 ## Status (living — update with every PR)
 
