@@ -238,3 +238,26 @@ theorem write_admission_idle_fate_iff :
   intro mem_stall pressure_l0 stall_l0 v
   unfold write_admission_idle
   cases mem_stall <;> cases pressure_l0 <;> cases stall_l0 <;> cases v <;> simp
+
+/-- RFC-0213 P0.1 (storage cadence, atom `catalog:write_admit`):
+    the hard-admit verdict is StallMem EXACTLY when the armed mem
+    axis is over its limit, StallL0 exactly when mem passed but the
+    armed L0 axis is over, and Ok exactly when neither axis stalls —
+    fate forall over the extracted body (RFC-0170 P2.4); the AS-IS
+    mutant always admits (the lie the DST plant
+    `write_admit_on_live_mem_over_is_not_ok` refutes). -/
+theorem write_admit_fate_iff :
+    ∀ (mem_bytes : U64) (mem_armed : Bool) (mem_limit l0 : U64)
+      (l0_armed : Bool) (l0_limit : U64) (r : WriteAdmit),
+      (write_admit mem_bytes mem_armed mem_limit l0 l0_armed l0_limit = ok r) ↔
+        ((r = WriteAdmit.StallMem ∧ mem_armed = true ∧ mem_bytes >= mem_limit)
+          ∨ (r = WriteAdmit.StallL0 ∧ l0_armed = true ∧ l0 >= l0_limit
+              ∧ ¬ (mem_armed = true ∧ mem_bytes >= mem_limit))
+          ∨ (r = WriteAdmit.Ok
+              ∧ ¬ (mem_armed = true ∧ mem_bytes >= mem_limit)
+              ∧ ¬ (l0_armed = true ∧ l0 >= l0_limit))) := by
+  intro mem_bytes mem_armed mem_limit l0 l0_armed l0_limit r
+  unfold write_admit
+  cases mem_armed <;> cases l0_armed <;>
+    by_cases hmem : mem_bytes >= mem_limit <;>
+    by_cases hl0 : l0 >= l0_limit <;> simp [hmem, hl0] <;> exact eq_comm

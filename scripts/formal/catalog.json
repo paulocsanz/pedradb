@@ -7027,7 +7027,6 @@
     "crates/pedradb-core/src/db.rs"
    ],
    "entry": "write_admit",
-   "data_fate": true,
    "handlers": [
     "ensure_write_admitted_for"
    ],
@@ -7036,6 +7035,10 @@
    "dst_plant": {
     "file": "crates/pedradb-core/src/write_admission_kernel.rs",
     "test": "write_admit_on_live_mem_over_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "hard-admit verdict fully fated over extracted body: StallMem/StallL0/Ok exactly on armed-axis limits; as-is twin refused by DST plant"
    }
   },
   {
