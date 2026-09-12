@@ -142,11 +142,14 @@ novo por construção (`single_op`).
 
 ### P1 — decisão de default e residual
 
-- [ ] **P1.1** Flip do default da fronteira SE P0.3 validar: min-of-3
+- [x] **P1.1** Flip do default da fronteira SE P0.3 validar: min-of-3
       ≥1,0 na célula-alvo SEM regredir guardiãs (regra ≥5%); senão
-      mantém opt-in com finding datado — status: `todo` (dado do meter
-      P0.3 já em: 0,836 <1,0 ⇒ ramo "senão"; decisão formalizada no
-      próximo ciclo, pode revisar com o sweep P2.1)
+      mantém opt-in com finding datado — status: `done` (2026-09-12,
+      regra do próprio RFC aplicada ao meter P0.3: alvo 0,836 min <
+      1,0 com guardiãs todas ≥ clean ⇒ ramo "senão" — **opt-in
+      mantido, zero mudança de default**; finding
+      `findings/2026-09-11-rfc0211-p0-meter/`; revisável apenas por
+      meter futuro min-of-3 ≥1,0 sem regressão de guarda)
 - [ ] **P1.2** Decomposição do residual do braço vencedor
       (`write_phase_stats`: lock_wait vs wal vs publish por commit) —
       nomeia o dono da próxima fatia (ou fecha com número) — status:
@@ -167,7 +170,7 @@ novo por construção (`single_op`).
 | P0.1 | p0 | kernel SchedDecision + twin AS-IS + guardas | done (6 testes `rfc0211_*` verdes) | este commit | 2026-09-11 |
 | P0.2 | p0 | wiring PEDRA_RMW_SCHED opt-in no submit_after_begin | done (teste de eixo env no caminho real; 0201 10/10; musl 0) | este commit | 2026-09-11 |
 | P0.3 | p0 | meter 4 braços × células + guardiãs, veredito datado | done (p211m 2026-09-12: alvo 0,491→0,836 min +70%, guardiãs todas ≥ clean; 0,836<1,0 = perda honesta, opt-in mantido) | findings/2026-09-11-rfc0211-p0-meter | 2026-09-12 |
-| P1.1 | p1 | flip default pós-meter | todo (meter P0.3 negou o flip: min 0,836 <1,0; opt-in mantido por regra) | — | 2026-09-12 |
+| P1.1 | p1 | flip default pós-meter | done (2026-09-12: regra aplicada — min 0,836 <1,0 ⇒ opt-in mantido, zero default mudado) | findings/2026-09-11-rfc0211-p0-meter | 2026-09-12 |
 | P1.2 | p1 | decomposição do residual (telemetria) | todo | — | 2026-09-11 |
 | P2.1 | p2 | sweep eixo writers | todo | — | 2026-09-11 |
 | P2.2 | p2 | Grid B quando default mudar | todo | — | 2026-09-11 |
