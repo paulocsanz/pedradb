@@ -316,3 +316,127 @@ theorem infer_sst_cf_ok_iff_shared_family_or_empty :
       refine bind_intro b1 h5 ?_
       rw [if_neg hbt]
       exact hnew
+
+/-- RFC-0213 P1.1 (storage cadence, atom `catalog:cf_family`): a key
+    belongs to a column family EXACTLY along the extracted route —
+    for the default family, no separator or a leading separator is
+    in-family and any other prefix must equal the "default" bytes;
+    for a named family, the key must strictly overhang the family
+    bytes, start with them, and carry the 0 separator right after
+    (fate forall over the extracted body, RFC-0170 P2.4). The AS-IS
+    mutant answers in-family for every key (the lie the DST plant
+    `key_in_cf_family_on_live_scan_is_not_ok` refutes). -/
+theorem cf_family_fate_iff :
+    ∀ (user_key : Slice Std.U8) (family : Str) (v : Bool),
+    (key_in_cf_family user_key family = ok v) ↔
+      ((∃ b i o u,
+          Str.Insts.CoreCmpPartialEqStr.eq family (toStr "default") = ok b ∧
+          b = true ∧
+          core.slice.Slice.iter user_key = ok i ∧
+          core.slice.iter.Iter.Insts.CoreIterTraitsIteratorIteratorSharedAT.position
+            key_in_cf_family.closure.Insts.CoreOpsFunctionFnMutTupleSharedU8Bool i ()
+            = ok (o, u) ∧
+          ((o = none ∧ v = true) ∨
+           (∃ i1, o = some i1 ∧
+              ((i1.val = 0 ∧ v = true) ∨
+               (∃ s, ¬(i1.val = 0) ∧
+                  core.slice.index.Slice.index
+                    (core.slice.index.SliceIndexRangeToUsizeSlice Std.U8) user_key
+                    { «end» := i1 } = ok s ∧
+                  Slice.Insts.CoreCmpPartialEqArray.eq core.cmp.PartialEqU8 s
+                    (Array.make 7#usize
+                      [100#u8, 101#u8, 102#u8, 97#u8, 117#u8, 108#u8, 116#u8])
+                    = ok v)))))
+        ∨ (∃ b p,
+          Str.Insts.CoreCmpPartialEqStr.eq family (toStr "default") = ok b ∧
+          ¬(b = true) ∧
+          core.str.Str.as_bytes family = ok p ∧
+          ((Slice.len user_key > Slice.len p ∧
+            ((∃ b1, core.slice.Slice.starts_with core.cmp.PartialEqU8 user_key p
+                = ok b1 ∧
+                ((b1 = true ∧
+                  (∃ i3, Slice.index_usize user_key (Slice.len p) = ok i3 ∧
+                    v = decide (i3 = 0#u8)))
+                  ∨ (¬(b1 = true) ∧ v = false))))
+            ∨ (¬(Slice.len user_key > Slice.len p) ∧ v = false))))) := by
+  intro user_key family v
+  unfold key_in_cf_family
+  constructor
+  · intro hval
+    obtain ⟨b, hb, hval⟩ := bind_ok_inv _ _ _ hval
+    split at hval
+    · next hbt =>
+      obtain ⟨i, hi, hval⟩ := bind_ok_inv _ _ _ hval
+      obtain ⟨pair, hpair, hval⟩ := bind_ok_inv _ _ _ hval
+      obtain ⟨o, u⟩ := pair
+      refine Or.inl ⟨b, i, o, u, hb, hbt, hi, hpair, ?_⟩
+      cases o with
+      | none =>
+        refine Or.inl ⟨rfl, ?_⟩
+        injection hval with hv
+        exact hv.symm
+      | some i1 =>
+        refine Or.inr ⟨i1, rfl, ?_⟩
+        conv at hval => lhs; whnf
+        split at hval
+        · next hz =>
+          exact Or.inl ⟨hz, by injection hval with hv; exact hv.symm⟩
+        · next hz =>
+          obtain ⟨s, hs, hval⟩ := bind_ok_inv _ _ _ hval
+          exact Or.inr ⟨s, hz, hs, hval⟩
+    · next hbt =>
+      obtain ⟨p, hp, hval⟩ := bind_ok_inv _ _ _ hval
+      refine Or.inr ⟨b, p, hb, hbt, hp, ?_⟩
+      simp only [] at hval
+      split at hval
+      · next hgt =>
+        obtain ⟨b1, hb1, hval⟩ := bind_ok_inv _ _ _ hval
+        refine Or.inl ⟨hgt, b1, hb1, ?_⟩
+        split at hval
+        · next hbt1 =>
+          obtain ⟨i3, hi3, hval⟩ := bind_ok_inv _ _ _ hval
+          exact Or.inl ⟨hbt1, i3, hi3, by injection hval with hv; exact hv.symm⟩
+        · next hbt1 =>
+          exact Or.inr ⟨hbt1, by injection hval with hv; exact hv.symm⟩
+      · next hgt =>
+        exact Or.inr ⟨hgt, by injection hval with hv; exact hv.symm⟩
+  · rintro (⟨b, i, o, u, hb, hbt, hi, hpos, hlast⟩ |
+      ⟨b, p, hb, hbt, hp, hlast⟩)
+    · refine bind_intro b hb ?_
+      rw [if_pos hbt]
+      refine bind_intro i hi ?_
+      refine bind_intro (o, u) hpos ?_
+      cases o with
+      | none =>
+        rcases hlast with ⟨-, hv⟩ | ⟨i1, hbad, -⟩
+        · exact congrArg ok hv.symm
+        · exact absurd hbad (by simp)
+      | some i1 =>
+        rcases hlast with ⟨hbad, -⟩ | ⟨i1', heqo, hzvh⟩
+        · exact absurd hbad (by simp)
+        · injection heqo with e
+          subst e
+          conv => lhs; whnf
+          rcases hzvh with ⟨hz, hv⟩ | ⟨s, hz, hidx, heq⟩
+          · rw [hz]
+            exact congrArg ok hv.symm
+          · split
+            · next hz' => exact absurd hz' hz
+            · refine bind_intro s hidx ?_
+              exact heq
+    · refine bind_intro b hb ?_
+      rw [if_neg hbt]
+      refine bind_intro p hp ?_
+      simp only []
+      rcases hlast with ⟨hgt, hrest⟩ | ⟨hgt, hv⟩
+      · rw [if_pos hgt]
+        rcases hrest with ⟨b1, hb1, hzvh⟩
+        refine bind_intro b1 hb1 ?_
+        rcases hzvh with ⟨hbt1, i3, hi3, hv⟩ | ⟨hbt1, hv⟩
+        · rw [if_pos hbt1]
+          refine bind_intro i3 hi3 ?_
+          rw [hv]
+        · rw [if_neg hbt1]
+          exact congrArg ok hv.symm
+      · rw [if_neg hgt]
+        exact congrArg ok hv.symm

@@ -141,3 +141,4 @@ atom	catalog:prefer_newer_seq	prefer_newer_seq_fate_iff	formal/aeneas/lean/Looku
 atom	catalog:flush_publish	flush_publish_fate_iff	formal/aeneas/lean/Flush.lean	may_publish_manifest
 atom	catalog:auto_flush_due	auto_flush_due_fate_iff	formal/aeneas/lean/Flush.lean	auto_flush_due
 atom	catalog:flush_decision	flush_decision_fate_iff	formal/aeneas/lean/Flush.lean	wal_rotate_decision
+atom	catalog:cf_family	cf_family_fate_iff	formal/aeneas/lean/Cf.lean	key_in_cf_family

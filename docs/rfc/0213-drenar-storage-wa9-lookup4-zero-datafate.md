@@ -200,6 +200,16 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
    mantém o WAL; o as-is ignora o pin vivo, RFC-0170 P2.4),
    cap 11→10, floor_atom 113→114, floor_extract 165→164; planta
    DST verde (`wal_rotate_decision_on_live_pin_is_not_ok`, 1 passed)
+
+   — 4/5 `done`: `cf_family_fate_iff`
+   (Cf.lean; a familia é decidida EXATAMENTE pela rota extraída
+   — default: sem separador ou com o prefixo byte-a-byte
+   "default", com `position` decidindo o primeiro 0; nomeada:
+   overhang estrito dos bytes da familia + `starts_with` + 0
+   logo após; o as-is responde in-family para toda chave,
+   RFC-0170 P2.4), cap 10→9, floor_atom 114→115,
+   floor_extract 164→163; planta DST verde
+   (`key_in_cf_family_on_live_scan_is_not_ok`, 1 passed)
 4. **P1.2:** cadência leveling ×2 (`Leveling.lean`) + os 4
    singletons com wrapper no LIBS: `visible_at` (`Merge.lean`),
    `write_record_count` (`Batch.lean`), `iter_window`
@@ -235,7 +245,7 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | Cadência write_admission ×9 | done | 9/9: este commit (FECHAMENTO) | 2026-09-12 |
 | P0.2 | p0 | Cadência lookup ×4 | done | 4/4: este commit (FECHAMENTO) | 2026-09-12 |
-| P1.1 | p1 | Cadência flush ×3 + cf ×2 | doing | 3/5: este commit | 2026-09-12 |
+| P1.1 | p1 | Cadência flush ×3 + cf ×2 | doing | 4/5: este commit | 2026-09-12 |
 | P1.2 | p1 | Cadência leveling ×2 + singletons ×4 | todo | — | 2026-09-11 |
 | P1.3 | p1 | Veredito datado dos medidos ausentes | todo | — | 2026-09-11 |
 | P2.1 | p2 | Wal finais ×2 — CATÁLOGO ZERO data_fate | todo | — | 2026-09-11 |

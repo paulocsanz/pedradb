@@ -4903,7 +4903,6 @@
     "crates/rocksdb-compat/src/lib.rs"
    ],
    "entry": "key_in_cf_family",
-   "data_fate": true,
    "live_callers": [
     {
      "file": "crates/pedradb-core/src/sst/table.rs",
@@ -4914,6 +4913,10 @@
    "dst_plant": {
     "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
     "test": "key_in_cf_family_on_live_scan_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "familia decidida exatamente pela rota extraida: default = sem separador ou com prefixo 'default', nomeada = overhang estrito + starts_with + 0 separador; o mutante as-is responde in-family para toda chave e a planta DST refuta"
    }
   },
   {
