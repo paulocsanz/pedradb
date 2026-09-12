@@ -163,3 +163,38 @@ theorem next_user_data_fate_iff :
             exact absurd rfl hh.1
         | inr hh =>
             rw [hh.2.1, hh.2.2]
+
+/-- RFC-0214 P1.1 (atom `catalog:cqe_leftover`): um CQE é
+tomado se, e somente se, sua tag casa com a esperada; CQE
+leftover de outra operação é descartado. Fate forall sobre o
+corpo extraído (`cqe_act`). O mutante AS-IS
+(`cqe_act_as_is`) toma qualquer CQE — a planta DST
+`cqe_act_as_is_adopts_leftover` recusa. -/
+theorem cqe_act_fate_iff :
+    ∀ (user_data want : U64) (act : CqeAct),
+      (cqe_act user_data want = ok act) ↔
+        ((user_data = want ∧ act = CqeAct.Take)
+          ∨ (user_data ≠ want ∧ act = CqeAct.Discard)) := by
+  intro user_data want act
+  unfold cqe_act
+  split
+  · next h =>
+      constructor
+      · intro he
+        exact Or.inl ⟨h, (Result.ok.inj he).symm⟩
+      · intro hdisj
+        cases hdisj with
+        | inl hh =>
+            rw [hh.2]
+        | inr hh =>
+            exact absurd h hh.1
+  · next hn =>
+      constructor
+      · intro he
+        exact Or.inr ⟨hn, (Result.ok.inj he).symm⟩
+      · intro hdisj
+        cases hdisj with
+        | inl hh =>
+            exact absurd hh.1 hn
+        | inr hh =>
+            rw [hh.2]

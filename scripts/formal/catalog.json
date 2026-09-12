@@ -4753,6 +4753,10 @@
   },
   {
    "id": "cqe_leftover",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "2026-09-12 RFC-0214 P1.1: fate ∀ sobre cqe_act no degrau átomo — CQE tomado iff user_data = want; leftover descartado; as-is cqe_act_as_is (toma qualquer CQE) recusado pela planta DST cqe_act_as_is_adopts_leftover"
+   },
    "finding": "F203/U1",
    "twin_kind": "close",
    "single_artifact": true,
