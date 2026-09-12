@@ -6665,6 +6665,10 @@
    "dst_plant": {
     "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
     "test": "d1_modelo_on_live_recording_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "O desfecho da maquina D1 e exatamente a decisao do spec: ok false so na vereda ackado+crash-legal+corte-antes-do-fim (o buraco do mutante AS-IS); forma de ramos construtiva cita inv_wal/CrashModel.of/crash_legal sem reabrir corpos"
    }
   },
   {

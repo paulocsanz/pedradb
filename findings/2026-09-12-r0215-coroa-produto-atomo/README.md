@@ -53,3 +53,29 @@ verde antes do commit, exatamente 1 teorema público por commit).
   `r1_as_is_does_not_imply_r1` (exit 0, 1 passed). Fechamento:
   floor_atom 142→146, floor_extract 136→132, gate GREEN no HEAD de
   cada uma das 4 promoções, 1 teorema público por commit.
+
+## P0.2 — modelo ×4 átomo (1/4)
+
+- **d1_modelo (1/4)**: o desfecho da máquina D1 é exatamente a decisão
+  que o spec nomeia — `ok false` somente na vereda ackado + crash
+  legal + corte antes do fim do registro; `ok true` pelas demais
+  veredas ok. Forma de ramos construtiva (`d1m_ok_true`/`d1m_loses`):
+  cada disjunto que alcança código interno carrega a igualdade que o
+  habilita (`b = true`, `rec_end ≤ s.acked`, `b1 = true`), cita
+  `inv_wal`/`CrashModel.of`/`crash_legal` sem reabrir corpos; o corpo
+  `ok (cut >= rec_end)` é `ok (decide …)` e as pontes usam
+  `of_decide_eq_true/false` + `UScalar.le_equiv/lt_equiv` + omega.
+  Planta DST `d1_modelo_on_live_recording_is_not_ok` (pedradb-sim,
+  exit 0, 1 passed). Axiomas: [propext, Quot.sound]. Gate GREEN:
+  floor_atom 146→147, floor_extract 132→131.
+
+- **Bug do motor achado pela planta**: o compact pode emitir um SST
+  v5 vazio (0 entradas, 0 blocos) — no reopen ele caía no ramo
+  fail-closed de `materialize_entries` ("no entries cache and no
+  index") e o point-seek panicava `fail_stop_corrupt_block` com
+  corrupção inventada. Fix 30e572db: tabela vazia com índice vazio
+  devolve vazio (v1 corrompido continua erro). As 4 falhas pré-
+  existentes do suite `sst` (prefix_era_mixed_sst_opens,
+  last_under_user_prefix_mem_hit…, evicted_payload_without_kit…,
+  write_sst_bloom_is_sized…) falham igual no HEAD anterior — não são
+  regressão deste fix.

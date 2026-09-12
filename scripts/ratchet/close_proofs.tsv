@@ -173,3 +173,4 @@ atom	catalog:c1_quorum	c1_holds_fate_iff	formal/aeneas/lean/Properties.lean	c1_h
 atom	catalog:d1_durability	d1_holds_fate_iff	formal/aeneas/lean/Properties.lean	d1_holds
 atom	catalog:t1_atomicity	t1_holds_fate_iff	formal/aeneas/lean/Properties.lean	t1_holds
 atom	catalog:r1_no_resurrection	r1_answer_ok_fate_iff	formal/aeneas/lean/Properties.lean	r1_answer_ok
+atom	catalog:d1_modelo	d1_modelo_fate_iff	formal/aeneas/lean/D1Modelo.lean	d1_modelo
