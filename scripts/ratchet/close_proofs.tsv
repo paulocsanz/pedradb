@@ -136,3 +136,4 @@ atom	catalog:seq_after_feed	seq_after_feed_fate_iff	formal/aeneas/lean/WriteAdmi
 atom	catalog:pit_resync_rewrite	pit_resync_rewrite_fate_iff	formal/aeneas/lean/WriteAdmission.lean	pit_resync_needs_rewrite
 atom	catalog:snap_empty	snap_empty_fate_iff	formal/aeneas/lean/Lookup.lean	snap_is_empty
 atom	catalog:snap_below_watermark	snap_below_watermark_fate_iff	formal/aeneas/lean/Lookup.lean	snap_below_watermark
+atom	catalog:mem_point_decides	mem_point_decides_fate_iff	formal/aeneas/lean/Lookup.lean	mem_point_decides

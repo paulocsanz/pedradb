@@ -152,6 +152,12 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
    floor_extract 170→169; planta DST verde
    (`snap_below_watermark_on_live_below_is_not_ok`, 1 passed)
 
+   — 3/4 `done`: `mem_point_decides_fate_iff`
+   (Lookup.lean; o veredito de ponto na memtable É a própria flag de
+   hit — identidade; o as-is sempre reporta miss, RFC-0170 P2.4),
+   cap 15→14, floor_atom 109→110, floor_extract 169→168; planta
+   DST verde (`mem_point_decides_on_live_hit_is_not_ok`, 1 passed)
+
 ### P1 — core
 
 3. **P1.1:** cadência flush ×3 (wrapper `Flush.lean`) + cf ×2
@@ -191,7 +197,7 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | Cadência write_admission ×9 | done | 9/9: este commit (FECHAMENTO) | 2026-09-12 |
-| P0.2 | p0 | Cadência lookup ×4 | doing | 2/4: este commit | 2026-09-12 |
+| P0.2 | p0 | Cadência lookup ×4 | doing | 3/4: este commit | 2026-09-12 |
 | P1.1 | p1 | Cadência flush ×3 + cf ×2 | todo | — | 2026-09-11 |
 | P1.2 | p1 | Cadência leveling ×2 + singletons ×4 | todo | — | 2026-09-11 |
 | P1.3 | p1 | Veredito datado dos medidos ausentes | todo | — | 2026-09-11 |

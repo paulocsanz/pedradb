@@ -7391,7 +7391,6 @@
     "crates/pedradb-core/src/db.rs"
    ],
    "entry": "mem_point_decides",
-   "data_fate": true,
    "handlers": [
     "lookup"
    ],
@@ -7400,6 +7399,10 @@
    "dst_plant": {
     "file": "crates/pedradb-core/src/lookup_kernel.rs",
     "test": "mem_point_decides_on_live_hit_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "memtable point verdict fully fated: decision is the hit flag itself; as-is always reports miss, refused by DST plant"
    }
   },
   {
