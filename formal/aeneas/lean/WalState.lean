@@ -468,3 +468,44 @@ theorem wal_append_fate_iff :
         simp at h
   · intro h
     exact wal_append_closed s n w h
+
+/-- RFC-0214 P0.1 (atom `catalog:wal_sync`): o sync tem desfecho ok
+com EXATAMENTE dois futuros, um por honestidade do Env — Honest
+promove a barreira a `written`; Lying devolve as watermarks
+recortadas pelo min de `CrashModel.of` (nunca amplia). Fate forall
+sobre o corpo extraído; ambas as rotas CITAM os fechados ∀ privados
+`wal_sync_honest_closed`/`wal_sync_lying_closed` (RFC-0198 P1.2).
+O mutante AS-IS promove sempre — mesmo sync mentiroso. -/
+theorem wal_sync_fate_iff :
+    ∀ (s : wal.wal_state_kernel.WalState)
+      (h : env_crash_kernel.SyncHonesty)
+      (s' : wal.wal_state_kernel.WalState),
+      (wal.wal_state_kernel.wal_sync s h = ok s') ↔
+        ((h = env_crash_kernel.SyncHonesty.Honest ∧
+            s' = { s with synced := s.written, written := s.written })
+          ∨ (h = env_crash_kernel.SyncHonesty.Lying ∧
+            s' = { s with
+                synced :=
+                  (if s.synced.val < s.written.val then s.synced
+                   else s.written),
+                written := s.written })) := by
+  intro s h s'
+  cases h with
+  | Honest =>
+      rw [wal_sync_honest_closed]
+      constructor
+      · intro ho
+        exact Or.inl ⟨rfl, (Result.ok.inj ho).symm⟩
+      · rintro (⟨_, he⟩ | ⟨hf, _⟩)
+        · rw [he]
+        · exact absurd hf
+            (fun hh => env_crash_kernel.SyncHonesty.noConfusion hh)
+  | Lying =>
+      rw [wal_sync_lying_closed]
+      constructor
+      · intro ho
+        exact Or.inr ⟨rfl, (Result.ok.inj ho).symm⟩
+      · rintro (⟨hf, _⟩ | ⟨_, he⟩)
+        · exact absurd hf
+            (fun hh => env_crash_kernel.SyncHonesty.noConfusion hh)
+        · rw [he]

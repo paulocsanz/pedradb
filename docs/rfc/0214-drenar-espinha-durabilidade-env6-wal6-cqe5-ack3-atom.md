@@ -70,6 +70,15 @@ planta DST verde ANTES do commit, gate GREEN no commit)
    RFC-0191 P2.1; o as-is acka os bytes junto com o write, antes da
    barreira), floor_atom 123→124, floor_extract 155→154; planta DST
    verde (`wal_inv_on_live_recording_is_not_ok`, 1 passed)
+
+   — 3/6 `done`: `wal_sync_fate_iff`
+   (WalState.lean; o sync tem EXATAMENTE dois futuros ok, um por
+   honestidade do Env — Honest promove a barreira a `written`; Lying
+   devolve as watermarks recortadas pelo min de `CrashModel.of`;
+   pernas citadas `wal_sync_honest_closed`/`wal_sync_lying_closed`,
+   RFC-0198 P1.2; o as-is promove sempre, mesmo sync mentiroso),
+   floor_atom 124→125, floor_extract 154→153; planta DST verde
+   (`wal_inv_on_live_recording_is_not_ok`, 1 passed)
 2. **P0.2** env_crash ×6: `env_crash`, `env_append`, `env_sync`,
    `env_barrier_floor`, `env_no_invented`, `env_honest_sync` (wrapper
    `EnvCrash.lean`) — floor_atom 128→134, floor_extract 150→144 —
@@ -98,7 +107,7 @@ planta DST verde ANTES do commit, gate GREEN no commit)
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | wal_state ×6 no degrau átomo | doing | 2/6 | 2026-09-12 |
+| P0.1 | p0 | wal_state ×6 no degrau átomo | doing | 3/6 | 2026-09-12 |
 | P0.2 | p0 | env_crash ×6 no degrau átomo | todo | — | 2026-09-12 |
 | P1.1 | p1 | cqe ×5 + write_ack ×3 no degrau átomo | todo | — | 2026-09-12 |
 | P1.2 | p1 | Veredito datado dos medidos ausentes | todo | — | 2026-09-12 |

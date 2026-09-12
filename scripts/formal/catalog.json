@@ -6428,6 +6428,10 @@
   },
   {
    "id": "wal_sync",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "RFC-0214 P0.1: fate ∀ do sync — exatamente dois futuros ok, um por honestidade (Honest promove a barreira a written; Lying devolve as watermarks recortadas pelo min); pernas citadas wal_sync_honest_closed/wal_sync_lying_closed (RFC-0198 P1.2)."
+   },
    "finding": "RFC-0166 P1.2",
    "twin_kind": "close",
    "single_artifact": true,
