@@ -83,3 +83,26 @@ theorem reopen_outcome_serve_all_iff_damage_none :
       cases point_in_time <;> cases escalated <;> simp at h
     · rintro habsurd
       exact absurd habsurd (by simp)
+
+/-- RFC-0213 P2.1 2/2 (cap-only; the pair has carried a registered
+    atom since RFC-0191 P2.3): the reopen fate for EVERY outcome value —
+    no damage serves everything; damage with PointInTime not escalated
+    serves the reported prefix; anything else refuses. The one-fate
+    atom above (`reopen_outcome_serve_all_iff_damage_none`) pinned only
+    ServeAll; this iff pins all three fates, so the AS-IS silent mutant
+    (always ServeAll) is unreachable from the real kernel on every
+    branch. -/
+theorem reopen_outcome_fate_iff :
+    ∀ (damage : ReopenDamage) (point_in_time escalated : Bool)
+      (v : ReopenOutcome),
+      (reopen_outcome damage point_in_time escalated = ok v) ↔
+        ((damage = ReopenDamage.None ∧ v = ReopenOutcome.ServeAll) ∨
+         (¬(damage = ReopenDamage.None) ∧ point_in_time = true ∧
+            ¬(escalated = true) ∧
+            v = ReopenOutcome.ServePrefixReport) ∨
+         (¬(damage = ReopenDamage.None) ∧
+            (¬(point_in_time = true) ∨ escalated = true) ∧
+            v = ReopenOutcome.RefuseOpen)) := by
+  intro damage point_in_time escalated v
+  cases damage <;> cases point_in_time <;> cases escalated <;>
+    simp [reopen_outcome, eq_comm]

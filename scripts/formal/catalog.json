@@ -3393,7 +3393,6 @@
     "crates/pedradb-core/src/db.rs"
    ],
    "entry": "reopen_outcome",
-   "data_fate": true,
    "handlers": [
     "open_with_env"
    ],
@@ -3401,6 +3400,10 @@
    "dst_plant": {
     "file": "crates/pedradb-sim/src/lib.rs",
     "test": "crash_after_sync_recovers_committed"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "fate do reopen para TODO valor de saida: sem dano serve tudo; dano com PointInTime nao escalado serve o prefixo reportado; todo o resto recusa abrir — as-is silencioso (sempre ServeAll) e inalcancavel do kernel real em todos os ramos; atom desde 2026-09-10 (b26c0ebf), fortalecido ao fate-iff e cap-only nesta data"
    }
   },
   {

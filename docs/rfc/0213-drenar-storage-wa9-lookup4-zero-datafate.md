@@ -340,6 +340,20 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
    refuta), cap 2→1, floor_atom 121→122, floor_extract 157→156;
    planta DST verde (`recover_collect_act_on_live_exploded_crc_is_not_ok`,
    1 passed, pedradb-sim)
+
+   — 2/2 `done`: `reopen_outcome_fate_iff`
+   (Reopen.lean, INSCRITO no LIBS nesta fatia; extrato re-carimbado
+   byte-idêntico via `aeneas_reopen.sh`, diff vazio em
+   `formal/aeneas/out/`; CAP-ONLY pela correção datada acima — o par
+   é atom desde 2026-09-10, sem nova linha TSV): o fate do reopen
+   para TODO valor de saída — sem dano serve tudo; dano com
+   PointInTime não escalado serve o prefixo reportado; todo o resto
+   recusa abrir; o as-is silencioso (sempre ServeAll) é inalcançável
+   do kernel real em todos os ramos; planta DST verde
+   (`crash_after_sync_recovers_committed`, 1 passed, pedradb-sim)
+   FECHAMENTO P2.1: cap 2→0 (CATÁLOGO ZERO `data_fate` medido ao
+   vivo — 292 pares, restantes ZERO), floor_atom 121→122,
+   floor_extract 157→156 (metas corrigidas pela nota datada acima)
 7. **P2.2:** composição ∀ do caminho de storage (write-admission:
    admission → wal plan → torn-tail cut sobre atoms registrados)
    em nova compose lib (zero buracos; twins DST verdes; razão de
@@ -358,7 +372,7 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
 | P1.1 | p1 | Cadência flush ×3 + cf ×2 | done | 5/5: este commit (FECHAMENTO) | 2026-09-12 |
 | P1.2 | p1 | Cadência leveling ×2 + singletons ×4 | done | 6/6: este commit (FECHAMENTO) | 2026-09-12 |
 | P1.3 | p1 | Veredito datado dos medidos ausentes | done | este commit (veredito: 0 ausentes nas 24 promoções; âncoras green antes/depois) | 2026-09-12 |
-| P2.1 | p2 | Wal finais ×2 — CATÁLOGO ZERO data_fate | doing | 1/2: este commit | 2026-09-12 |
+| P2.1 | p2 | Wal finais ×2 — CATÁLOGO ZERO data_fate | done | 2/2: este commit (FECHAMENTO; catálogo 292 pares, ZERO data_fate) | 2026-09-12 |
 | P2.2 | p2 | Composição ∀ storage + sweep final + flip done | todo | — | 2026-09-11 |
 
 ## Critérios de aceite
