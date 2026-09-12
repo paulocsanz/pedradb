@@ -294,7 +294,16 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
    promoção acima medir fn/planta/handler inexistente, veredito
    por par em findings (reescrever para fn viva SE o caminho
    existir em produção; senão aposentadoria com recusa datada),
-   espelhos/âncoras verdes antes/depois — status: `todo`
+   espelhos/âncoras verdes antes/depois — status: `done`
+
+   — veredito 2026-09-12: ZERO pares medidos ausentes nas 24
+   promoções drenadas (24 fns entry + 24 as_is presentes nos
+   kernels + 24 plantas DST verdes recontadas no HEAD `44bd1b67`
+   — core ×19, sim ×4, compat ×1; capturas em findings); os 2
+   restantes (`wal_recover`, `dictionary_link`) são a fatia P2.1,
+   não ausentes; nenhuma reescrita, nenhuma aposentadoria; âncoras
+   `check_inventory_terminal` + `check_twin_contracts` GREEN antes
+   (worktree `9df25b47`, autoria do RFC) e depois (HEAD `44bd1b67`)
 
 ### P2 — core
 
@@ -321,7 +330,7 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
 | P0.2 | p0 | Cadência lookup ×4 | done | 4/4: este commit (FECHAMENTO) | 2026-09-12 |
 | P1.1 | p1 | Cadência flush ×3 + cf ×2 | done | 5/5: este commit (FECHAMENTO) | 2026-09-12 |
 | P1.2 | p1 | Cadência leveling ×2 + singletons ×4 | done | 6/6: este commit (FECHAMENTO) | 2026-09-12 |
-| P1.3 | p1 | Veredito datado dos medidos ausentes | todo | — | 2026-09-11 |
+| P1.3 | p1 | Veredito datado dos medidos ausentes | done | este commit (veredito: 0 ausentes nas 24 promoções; âncoras green antes/depois) | 2026-09-12 |
 | P2.1 | p2 | Wal finais ×2 — CATÁLOGO ZERO data_fate | todo | — | 2026-09-11 |
 | P2.2 | p2 | Composição ∀ storage + sweep final + flip done | todo | — | 2026-09-11 |
 
