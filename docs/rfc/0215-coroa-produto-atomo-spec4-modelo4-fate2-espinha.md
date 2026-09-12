@@ -73,8 +73,9 @@ planta DST verde ANTES do commit, gate GREEN no commit).
    (`LsmR1.lean`), `t1_modelo` (`T1Modelo.lean`), `c1_modelo`
    (`C1Modelo.lean`) — o desfecho de cada máquina de garantia é
    EXATAMENTE a conjunção/decisão que o spec nomeia — floor_atom
-   146→150, floor_extract 132→128 — status: `todo` (3/4: `d1_modelo`,
-   `r1_modelo`, `t1_modelo` feitos 2026-09-12)
+   146→150, floor_extract 132→128 — status: `done` (2026-09-12;
+   floor_atom 150, floor_extract 128; bug do motor achado pela
+   planta r1: SST vazio reaberto panicava fail-stop — fix 30e572db)
 
 3. **P1.1** fate ×2: `d1_put_ok` (`D1Modelo.lean` — o put confirma
    exatamente quando o ledger cruza a barreira), `c1_advance_commit`
@@ -130,7 +131,7 @@ planta DST verde ANTES do commit, gate GREEN no commit).
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | spec ×4 átomo (`Properties.lean`): d1_holds, r1_answer_ok, t1_holds, c1_holds | done | `c1_holds_fate_iff`/`d1_holds_fate_iff`/`t1_holds_fate_iff`/`r1_answer_ok_fate_iff` | 2026-09-12 |
-| P0.2 | p0 | modelo ×4 átomo: d1_modelo, r1_modelo, t1_modelo, c1_modelo | todo | — | 2026-09-12 |
+| P0.2 | p0 | modelo ×4 átomo: d1_modelo, r1_modelo, t1_modelo, c1_modelo | done | `d1_modelo_fate_iff`/`r1_modelo_fate_iff`/`t1_modelo_fate_iff`/`c1_modelo_fate_iff` | 2026-09-12 |
 | P1.1 | p1 | fate ×2 átomo: d1_put_ok, c1_advance_commit | todo | — | 2026-09-12 |
 | P1.2 | p1 | coroa↔espinha composta (`ComposeProductCrown.lean` + twin + DST, sem TSV) | todo | — | 2026-09-12 |
 | P2.1 | p2 | http ×6 átomo: bearer/auth/method/ascii | todo | — | 2026-09-12 |

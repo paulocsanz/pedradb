@@ -33,3 +33,73 @@ theorem c1_modelo_as_is_dente :
   unfold commit_kernel.may_commit_at_as_is
   unfold commit_kernel.propose_ack_ok_as_is
   rfl
+
+/-! ## RFC-0215 P0.2 — coroa de produto no degrau átomo (modelo ×4) -/
+
+/-- Any ok-valued Result bind forces the bound term to be ok
+(Cf.lean's `bind_ok_inv`, restated for this module). -/
+private theorem bind_ok_inv {α β} (x : Result α) (f : α → Result β) (v : β)
+    (h : Aeneas.Std.bind x f = ok v) : ∃ a, x = ok a ∧ f a = ok v := by
+  cases x with
+  | ok a => exact ⟨a, rfl, h⟩
+  | fail e => exact absurd h (by simp)
+  | div => exact absurd h (by simp)
+
+/-- C1 modelo mantém: não serve, ou o ack proposto é legítimo
+(`c1_advance_commit`/`propose_ack_ok` citados, corpos não reabertos). -/
+def c1m_ok_true (s : c1_modelo_kernel.C1State) : Prop :=
+  ∃ t, c1_modelo_kernel.c1_advance_commit s = ok t ∧
+    (t.served = false ∨ t.served = true ∧
+      commit_kernel.propose_ack_ok t.proposed t.commit_index = ok true)
+
+/-- C1 modelo falha: serve um ack que o commit não sustenta. -/
+def c1m_acks_uncommitted (s : c1_modelo_kernel.C1State) : Prop :=
+  ∃ t, c1_modelo_kernel.c1_advance_commit s = ok t ∧ t.served = true ∧
+    commit_kernel.propose_ack_ok t.proposed t.commit_index = ok false
+
+/-- RFC-0215 P0.2 4/4 (atom `catalog:c1_modelo`, entry `c1_modelo`):
+o desfecho da máquina C1 é exatamente a decisão que o spec nomeia —
+`ok false` somente quando o modelo serve um ack que o commit não
+sustenta (o buraco do mutante AS-IS, que aceita qualquer ack);
+`ok true` pelos demais caminhos ok. -/
+theorem c1_modelo_fate_iff :
+    ∀ (s : c1_modelo_kernel.C1State) (v : Bool),
+      (c1_modelo_kernel.c1_modelo s = ok v) ↔
+        ((v = true ∧ c1m_ok_true s) ∨
+          (v = false ∧ c1m_acks_uncommitted s)) := by
+  intro s v
+  constructor
+  · intro hval
+    unfold c1_modelo_kernel.c1_modelo at hval
+    obtain ⟨ t, ht, hval ⟩ := bind_ok_inv _ _ _ hval
+    split at hval
+    · next hserved =>
+        cases v with
+        | true =>
+            exact Or.inl ⟨rfl, ⟨t, ht, Or.inr ⟨hserved, hval⟩⟩⟩
+        | false =>
+            exact Or.inr ⟨rfl, ⟨t, ht, hserved, hval⟩⟩
+    · next hns =>
+        have hsf : t.served = false := by simpa [Bool.not_eq_true] using hns
+        have hv : v = true := (Result.ok.inj hval).symm
+        exact Or.inl ⟨hv, ⟨t, ht, Or.inl hsf⟩⟩
+  · intro hdisj
+    cases hdisj with
+    | inl hh =>
+        obtain ⟨hv, t, ht, hbr⟩ := hh
+        subst hv
+        unfold c1_modelo_kernel.c1_modelo
+        rw [ht]
+        simp only [Aeneas.Std.bind_tc_ok]
+        rcases hbr with hsf | ⟨hserved, hcall⟩
+        · rw [hsf, if_neg (by simp)]
+        · rw [hserved, if_pos rfl]
+          exact hcall
+    | inr hh =>
+        obtain ⟨hv, t, ht, hserved, hcall⟩ := hh
+        subst hv
+        unfold c1_modelo_kernel.c1_modelo
+        rw [ht]
+        simp only [Aeneas.Std.bind_tc_ok]
+        rw [hserved, if_pos rfl]
+        exact hcall

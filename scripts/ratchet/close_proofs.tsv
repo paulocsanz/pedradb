@@ -176,3 +176,4 @@ atom	catalog:r1_no_resurrection	r1_answer_ok_fate_iff	formal/aeneas/lean/Propert
 atom	catalog:d1_modelo	d1_modelo_fate_iff	formal/aeneas/lean/D1Modelo.lean	d1_modelo
 atom	catalog:r1_modelo	r1_modelo_fate_iff	formal/aeneas/lean/LsmR1.lean	r1_modelo
 atom	catalog:t1_modelo	t1_modelo_fate_iff	formal/aeneas/lean/T1Modelo.lean	t1_modelo
+atom	catalog:c1_modelo	c1_modelo_fate_iff	formal/aeneas/lean/C1Modelo.lean	c1_modelo

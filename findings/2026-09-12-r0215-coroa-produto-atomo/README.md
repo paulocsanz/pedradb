@@ -105,3 +105,17 @@ verde antes do commit, exatamente 1 teorema público por commit).
   `t1_modelo_on_live_abort_reopen_is_not_ok` (pedradb-store, exit 0,
   1 passed). Axiomas: os 3 padrão do Lean. Gate GREEN: floor_atom
   148→149, floor_extract 130→129.
+
+## P0.2 — modelo ×4 átomo (4/4, FECHAMENTO P0.2)
+
+- **c1_modelo (4/4, FECHAMENTO P0.2)**: o desfecho da máquina C1 é
+  exatamente a decisão que o spec nomeia — `ok false` somente quando
+  o modelo serve um ack que o commit não sustenta (o buraco do
+  mutante AS-IS, que aceita qualquer ack); `ok true` pelas demais
+  veredas ok. Ramos construtivos (`c1m_ok_true`/`c1m_acks_uncommitted`)
+  carregam `t.served = true` no disjunto que chama `propose_ack_ok` e
+  citam `c1_advance_commit`/`propose_ack_ok` sem reabrir corpos.
+  Planta DST `c1_modelo_on_live_queued_joint_is_not_ok` (pedradb-store,
+  exit 0, 1 passed). Axiomas: os 3 padrão do Lean. Fechamento:
+  floor_atom 146→150, floor_extract 132→128, gate GREEN no HEAD de
+  cada uma das 4 promoções, 1 teorema público por commit.
