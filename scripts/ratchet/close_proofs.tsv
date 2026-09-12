@@ -152,3 +152,4 @@ atom	catalog:wal_recover	recover_collect_act_fate_iff	formal/aeneas/lean/WalReco
 atom	catalog:wal_state	inv_wal_fate_iff	formal/aeneas/lean/WalState.lean	inv_wal
 atom	catalog:wal_append	wal_append_fate_iff	formal/aeneas/lean/WalState.lean	wal_append
 atom	catalog:wal_sync	wal_sync_fate_iff	formal/aeneas/lean/WalState.lean	wal_sync
+atom	catalog:wal_ack	wal_ack_fate_iff	formal/aeneas/lean/WalState.lean	wal_ack

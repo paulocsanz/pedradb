@@ -79,6 +79,14 @@ planta DST verde ANTES do commit, gate GREEN no commit)
    RFC-0198 P1.2; o as-is promove sempre, mesmo sync mentiroso),
    floor_atom 124→125, floor_extract 154→153; planta DST verde
    (`wal_inv_on_live_recording_is_not_ok`, 1 passed)
+
+   — 4/6 `done`: `wal_ack_fate_iff`
+   (WalState.lean; o ack tem EXATAMENTE dois futuros ok — dentro da
+   barreira (valor saturado contido em `synced`): `{s with acked :=
+   a}`; fora dela: recusado fail-closed, o estado volta inteiro; o
+   as-is acka incondicionalmente — `acked` passa da barreira),
+   floor_atom 125→126, floor_extract 153→152; planta DST verde
+   (`wal_inv_on_live_recording_is_not_ok`, 1 passed)
 2. **P0.2** env_crash ×6: `env_crash`, `env_append`, `env_sync`,
    `env_barrier_floor`, `env_no_invented`, `env_honest_sync` (wrapper
    `EnvCrash.lean`) — floor_atom 128→134, floor_extract 150→144 —
@@ -107,7 +115,7 @@ planta DST verde ANTES do commit, gate GREEN no commit)
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | wal_state ×6 no degrau átomo | doing | 3/6 | 2026-09-12 |
+| P0.1 | p0 | wal_state ×6 no degrau átomo | doing | 4/6 | 2026-09-12 |
 | P0.2 | p0 | env_crash ×6 no degrau átomo | todo | — | 2026-09-12 |
 | P1.1 | p1 | cqe ×5 + write_ack ×3 no degrau átomo | todo | — | 2026-09-12 |
 | P1.2 | p1 | Veredito datado dos medidos ausentes | todo | — | 2026-09-12 |

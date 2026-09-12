@@ -509,3 +509,53 @@ theorem wal_sync_fate_iff :
         · exact absurd hf
             (fun hh => env_crash_kernel.SyncHonesty.noConfusion hh)
         · rw [he]
+
+/-- RFC-0214 P0.1 (atom `catalog:wal_ack`): o ack tem EXATAMENTE
+dois futuros ok — dentro da barreira (`acked+n = ok a` com o valor
+saturado contido em `synced`): `{s with acked := a}`; fora dela:
+recusado, o estado inteiro volta (`s' = s`). O Ok do cliente nunca
+avança `acked` além do que a barreira tornou durável — fail-closed.
+Fate forall sobre o corpo extraído (a contenção é a do corpo: o
+valor SATURADO contra `synced`). O mutante AS-IS acka
+incondicionalmente — `acked` passa da barreira. -/
+theorem wal_ack_fate_iff :
+    ∀ (s : wal.wal_state_kernel.WalState) (n : U64)
+      (s' : wal.wal_state_kernel.WalState),
+      (wal.wal_state_kernel.wal_ack s n = ok s') ↔
+        ((∃ a : U64, core.num.U64.saturating_add s.acked n ≤ s.synced
+            ∧ s.acked + n = ok a ∧ s' = { s with acked := a })
+          ∨ (¬ core.num.U64.saturating_add s.acked n ≤ s.synced
+              ∧ s' = s)) := by
+  intro s n s'
+  constructor
+  · intro h
+    unfold wal.wal_state_kernel.wal_ack at h
+    simp only [lift, bind_tc_ok] at h
+    split at h
+    · next hle =>
+        cases hadd : s.acked + n with
+        | ok a =>
+            rw [hadd] at h
+            simp only [bind_tc_ok] at h
+            refine Or.inl ⟨a, hle, rfl, (Result.ok.inj h).symm⟩
+        | fail e =>
+            rw [hadd] at h
+            simp at h
+        | div =>
+            rw [hadd] at h
+            simp at h
+    · next hle =>
+        exact Or.inr ⟨hle, (Result.ok.inj h).symm⟩
+  · rintro (⟨a, hle, hadd, rfl⟩ | ⟨hle, rfl⟩)
+    · unfold wal.wal_state_kernel.wal_ack
+      simp only [lift, bind_tc_ok]
+      rw [hadd]
+      simp only [bind_tc_ok]
+      split
+      · rfl
+      · next hbad => exact absurd hle hbad
+    · unfold wal.wal_state_kernel.wal_ack
+      simp only [lift, bind_tc_ok]
+      split
+      · next hbad => exact absurd hbad hle
+      · rfl

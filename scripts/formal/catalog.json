@@ -6452,6 +6452,10 @@
   },
   {
    "id": "wal_ack",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "RFC-0214 P0.1: fate ∀ do ack — exatamente dois futuros ok: dentro da barreira {s with acked := a} (valor saturado contido em synced), fora dela recusa fail-closed (estado volta inteiro); o Ok nunca avança acked além da barreira."
+   },
    "finding": "RFC-0166 P1.2",
    "twin_kind": "close",
    "single_artifact": true,
