@@ -132,3 +132,4 @@ atom	catalog:fence_on_sync_fail	fence_on_sync_fail_fate_iff	formal/aeneas/lean/W
 atom	catalog:wal_commit_plan	wal_commit_plan_fate_iff	formal/aeneas/lean/WriteAdmission.lean	wal_commit_plan
 atom	catalog:torn_head_empty_log	torn_head_empty_log_fate_iff	formal/aeneas/lean/WriteAdmission.lean	torn_head_is_empty_log
 atom	catalog:torn_tail_needs_cut	torn_tail_needs_cut_fate_iff	formal/aeneas/lean/WriteAdmission.lean	torn_tail_needs_cut
+atom	catalog:seq_after_feed	seq_after_feed_fate_iff	formal/aeneas/lean/WriteAdmission.lean	seq_after_feed

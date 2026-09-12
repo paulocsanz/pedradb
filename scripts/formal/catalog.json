@@ -7237,7 +7237,6 @@
     "crates/pedradb-core/src/db.rs"
    ],
    "entry": "seq_after_feed",
-   "data_fate": true,
    "handlers": [
     "open_with_env_sourced"
    ],
@@ -7246,6 +7245,10 @@
    "dst_plant": {
     "file": "crates/pedradb-core/src/write_admission_kernel.rs",
     "test": "seq_after_feed_on_live_newer_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "seq-after-feed verdict fully fated: sequence past feed exactly when seq overhangs feed ceiling; as-is never sees past feed, refused by DST plant"
    }
   },
   {

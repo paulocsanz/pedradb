@@ -336,3 +336,17 @@ theorem torn_tail_needs_cut_fate_iff :
   unfold torn_tail_needs_cut
   simp
   exact eq_comm
+
+/-- RFC-0213 P0.1 (storage cadence, atom `catalog:seq_after_feed`):
+    a sequence is after the feed EXACTLY when it overhangs the feed
+    ceiling — fate forall over the extracted body (RFC-0170 P2.4);
+    the AS-IS mutant never sees past the feed (the lie the DST
+    plant `seq_after_feed_on_live_newer_is_not_ok` refutes). -/
+theorem seq_after_feed_fate_iff :
+    ∀ (seq feed_max : U64) (v : Bool),
+      (seq_after_feed seq feed_max = ok v) ↔
+        v = decide (seq > feed_max) := by
+  intro seq feed_max v
+  unfold seq_after_feed
+  simp
+  exact eq_comm
