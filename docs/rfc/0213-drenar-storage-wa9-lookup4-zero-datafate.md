@@ -51,7 +51,15 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
 1. **P0.1:** cadência write_admission ×9 (wrapper
    `WriteAdmission.lean`; entry `wal_commit_plan` até
    `pit_resync_rewrite`): ×9, cap 26→17, floor_atom 98→107,
-   floor_extract 180→171 — status: `todo`
+   floor_extract 180→171 — status: `doing`
+
+   — 1/9 `done`: `write_admission_idle_fate_iff`
+   (WriteAdmission.lean; o gate idle é EXATAMENTE "nenhum knob de
+   stall armado" — mem, pressure-l0 e stall-l0 todos off; o as-is
+   respondia idle com knobs armados, RFC-0170 P2.4), cap 26→25,
+   floor_atom 98→99, floor_extract 180→179; planta DST verde
+   (`write_admission_idle_on_live_stall_is_not_ok`, no lote
+   paralelo das 9: 9 passed)
 2. **P0.2:** cadência lookup ×4 (wrapper `Lookup.lean`):
    `snap_empty`, `snap_below_watermark`, `mem_point_decides`,
    `prefer_newer_seq` — cap 17→13, floor_atom 107→111,
@@ -95,7 +103,7 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | Cadência write_admission ×9 | todo | — | 2026-09-11 |
+| P0.1 | p0 | Cadência write_admission ×9 | doing | 1/9: este commit | 2026-09-12 |
 | P0.2 | p0 | Cadência lookup ×4 | todo | — | 2026-09-11 |
 | P1.1 | p1 | Cadência flush ×3 + cf ×2 | todo | — | 2026-09-11 |
 | P1.2 | p1 | Cadência leveling ×2 + singletons ×4 | todo | — | 2026-09-11 |

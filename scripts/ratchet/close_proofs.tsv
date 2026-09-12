@@ -125,3 +125,4 @@ atom	catalog:prepare_error_aborts_earlier	prepare_error_aborts_earlier_fate_iff	
 atom	catalog:reserve_si_gen	reserve_si_gen_fate_iff	formal/aeneas/lean/StoreTxn.lean	reserve_si_gen
 atom	catalog:unreserve_si_gen	unreserve_si_gen_fate_iff	formal/aeneas/lean/StoreTxn.lean	unreserve_si_gen
 atom	catalog:compact_unleft	compact_through_unleft_fate_iff	formal/aeneas/lean/StoreCompact.lean	compact_through_unleft
+atom	catalog:write_admission	write_admission_idle_fate_iff	formal/aeneas/lean/WriteAdmission.lean	write_admission_idle

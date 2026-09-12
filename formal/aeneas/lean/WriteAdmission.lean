@@ -223,3 +223,18 @@ theorem cas_eq_put_as_is_dente :
     cas_eq_put_as_is false = ok true := by
   unfold cas_eq_put_as_is
   rfl
+
+/-- RFC-0213 P0.1 (storage cadence, atom `catalog:write_admission`):
+    the write-admission idle gate is true EXACTLY when every stall
+    knob is off — fate forall over the extracted body (RFC-0170
+    P2.4); the AS-IS mutant answers idle with knobs armed (the lie
+    the DST plant `write_admission_idle_on_live_stall_is_not_ok`
+    refutes). -/
+theorem write_admission_idle_fate_iff :
+    ∀ (mem_stall pressure_l0 stall_l0 v : Bool),
+      (write_admission_idle mem_stall pressure_l0 stall_l0 = ok v) ↔
+        ((v = true ∧ ¬mem_stall ∧ ¬pressure_l0 ∧ ¬stall_l0)
+          ∨ (v = false ∧ (mem_stall ∨ pressure_l0 ∨ stall_l0))) := by
+  intro mem_stall pressure_l0 stall_l0 v
+  unfold write_admission_idle
+  cases mem_stall <;> cases pressure_l0 <;> cases stall_l0 <;> cases v <;> simp
