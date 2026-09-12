@@ -1095,6 +1095,13 @@ impl WriteGroup {
         // straggler a leader waits out on the sequential host sits right
         // here, mid-off-lock fd).
         guard.begin_commit();
+        // RFC-0166 P1.4 (lone path): a lone G1 commit is a durable group
+        // of one — advance the pinned ledger through the same proved
+        // kernels as the group path (append → barrier on the Ok fd → ack)
+        // and check Inv-WAL fail-closed. Fence (Err) records the append
+        // but never the barrier, exactly like the group's io_err seam.
+        let pinned = group.verified.load(std::sync::atomic::Ordering::Acquire);
+        let before = if pinned { guard.wal_arc().lock().position() } else { 0 };
         let committed = match guard.lone_sync_commit(ops) {
             Ok(seq) => {
                 guard.end_commit();
@@ -1105,6 +1112,16 @@ impl WriteGroup {
                 Err(e)
             }
         };
+        if pinned {
+            let bytes = guard.wal_arc().lock().position().saturating_sub(before);
+            let mut ledger = group.write_ack.lock().unwrap_or_else(|e| e.into_inner());
+            ledger.on_append(bytes);
+            if bytes > 0 && committed.is_ok() {
+                ledger.on_barrier();
+            }
+            ledger.on_ack();
+            ledger.assert_inv();
+        }
         let (seq, fd_ns) = committed?;
         if fd_ns > 0 {
             group.update_fd_ema(fd_ns);

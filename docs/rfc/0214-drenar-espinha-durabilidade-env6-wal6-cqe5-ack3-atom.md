@@ -194,6 +194,16 @@ planta DST verde ANTES do commit, gate GREEN no commit)
    P2.2; as-is `cqe_ring_model_admitted_as_is` recusado pela
    planta DST `cqe_ring_model_is_not_admitted`, 1 passed),
    floor_atom 138→139, floor_extract 140→139
+   — 6/8 `done`: `on_append_fate_iff` (WriteAck.lean; o ledger
+   avança `written` iff a soma checada `written + bytes = ok w` —
+   append sem overflow; as-is `write_ack_ledger_as_is` recusado
+   pela planta DST `verified_write_ack_on_live_profile_is_not_ok`,
+   1 passed), floor_atom 139→140, floor_extract 139→138. A planta
+   expôs regressão live real: o caminho lone G1 (`lone_commit`)
+   não avançava o ledger — puts sync de cliente único no perfil
+   verificado deixavam o ledger frio; corrigido no mesmo commit
+   (append → barreira no fd Ok → ack + assert Inv-WAL, espelhando
+   o caminho de grupo)
 4. **P1.2** veredito datado dos medidos ausentes (SE houver: par
    cujo entry/planta não existe ou cuja classe é campanha/capacidade,
    ex. liar-campaign — recusa/aposentadoria datada SEM quebrar
@@ -215,7 +225,7 @@ planta DST verde ANTES do commit, gate GREEN no commit)
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | wal_state ×6 no degrau átomo | done | 6/6: este commit (FECHAMENTO) | 2026-09-12 |
 | P0.2 | p0 | env_crash ×6 no degrau átomo | done | 6/6: este commit (FECHAMENTO) | 2026-09-12 |
-| P1.1 | p1 | cqe ×5 + write_ack ×3 no degrau átomo | doing | 5/8: este commit | 2026-09-12 |
+| P1.1 | p1 | cqe ×5 + write_ack ×3 no degrau átomo | doing | 6/8: este commit | 2026-09-12 |
 | P1.2 | p1 | Veredito datado dos medidos ausentes | todo | — | 2026-09-12 |
 | P2.1 | p2 | Composição ∀ env→wal→ack + twins DST | todo | — | 2026-09-12 |
 | P2.2 | p2 | Sweep final + nota EXTRACT.md + flip done | todo | — | 2026-09-12 |

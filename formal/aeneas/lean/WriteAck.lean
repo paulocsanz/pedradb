@@ -137,3 +137,40 @@ theorem d1_holds_as_is_cut_below_barrier :
   unfold env_crash_kernel.crash_legal_as_is
   simp [core.cmp.Ord.min.trait_default, core.cmp.Ord.min.default,
     core.cmp.Ord.min_body, core.cmp.impls.PartialOrdU64.lt]
+
+/-! ## RFC-0214 P1.1 — costura WriteAck no degrau átomo (fate ∀) -/
+
+/-- RFC-0214 P1.1 (atom `catalog:write_ack_append`): o passo append
+do ledger é o átomo `wal_append` — `written` cresce por `bytes`,
+`acked`/`synced` intocados (o append nunca fabrica barreira nem
+ack). Fate forall sobre o corpo extraído. O mutante AS-IS
+(`write_ack_ledger_as_is`) acka sem barreira — a planta DST
+`verified_write_ack_on_live_profile_is_not_ok` recusa. -/
+theorem on_append_fate_iff :
+    ∀ (l : write_ack_kernel.WriteAckLedger) (bytes w : U64),
+      (write_ack_kernel.WriteAckLedger.on_append l bytes
+        = ok { l with state := { l.state with written := w } }) ↔
+          (l.state.written + bytes = ok w) := by
+  intro l bytes w
+  constructor
+  · intro h
+    unfold write_ack_kernel.WriteAckLedger.on_append at h
+    unfold wal.wal_state_kernel.wal_append at h
+    cases hadd : l.state.written + bytes with
+    | ok w' =>
+        rw [hadd] at h
+        simp only [bind_tc_ok] at h
+        have hw : w' = w :=
+          congrArg (fun s => s.state.written) (Result.ok.inj h)
+        rw [hw]
+    | fail e =>
+        rw [hadd] at h
+        simp at h
+    | div =>
+        rw [hadd] at h
+        simp at h
+  · intro h
+    unfold write_ack_kernel.WriteAckLedger.on_append
+    unfold wal.wal_state_kernel.wal_append
+    rw [h]
+    simp only [bind_tc_ok]
