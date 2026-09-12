@@ -160,8 +160,13 @@ novo por construção (`single_op`).
 - [ ] **P2.1** Sweep do eixo writers (mc2/mc3/mc6/mc8) no regime
       vencedor — a fronteira nova não pode ser hat além do ponto medido —
       status: `todo`
-- [ ] **P2.2** Grid B completo (10–100×, compaction on) quando um corte
-      mudar default (herda a pré-condição do 0209 P2.3) — status: `todo`
+- [x] **P2.2** Grid B completo (10–100×, compaction on) quando um corte
+      mudar default (herda a pré-condição do 0209 P2.3) — status:
+      `blocked (condicional-datado)` (2026-09-12: P1.1 aplicou o ramo
+      "senão" — opt-in mantido, zero default mudado no 0211; nenhuma
+      fatia restante do RFC muda default ⇒ pré-condição do Grid B
+      não-satisfeita; abre apenas por meter futuro min-of-3 quiet
+      ≥1,0 no alvo sem regressão de guardiãs que flip um default)
 
 ## Status (living — update with every PR)
 
@@ -173,7 +178,7 @@ novo por construção (`single_op`).
 | P1.1 | p1 | flip default pós-meter | done (2026-09-12: regra aplicada — min 0,836 <1,0 ⇒ opt-in mantido, zero default mudado) | findings/2026-09-11-rfc0211-p0-meter | 2026-09-12 |
 | P1.2 | p1 | decomposição do residual (telemetria) | todo | — | 2026-09-11 |
 | P2.1 | p2 | sweep eixo writers | todo | — | 2026-09-11 |
-| P2.2 | p2 | Grid B quando default mudar | todo | — | 2026-09-11 |
+| P2.2 | p2 | Grid B quando default mudar | blocked (condicional-datado 2026-09-12: P1.1 opt-in mantido, zero default mudado; abre só por meter futuro que flip default) | P1.1 acima | 2026-09-12 |
 
 ## Acceptance Criteria
 
