@@ -2470,6 +2470,10 @@
    "dst_plant": {
     "file": "crates/pedradb-http/src/auth_kernel.rs",
     "test": "ascii_fold_discriminates_as_is"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "a dobra de byte para caixa alta decide exatamente no teste is_ascii_lowercase — minusculo vira o veredito da dobra to_ascii_uppercase, qualquer outro e ele mesmo; ramo carrega a igualdade habilitante; mutante AS-IS nao dobra (planta ascii_fold_discriminates_as_is recusa)"
    }
   },
   {

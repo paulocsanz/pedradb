@@ -292,3 +292,37 @@ theorem ascii_lower_fate_iff :
       rw [hb1]
       simp only [Aeneas.Std.bind_tc_ok]
       rw [hbf, if_neg (by simp), hcb]
+
+/- RFC-0215 P2.1 5/6 (átomo `catalog:ascii_upper`, entrada
+`ascii_upper`): a dobra de byte para caixa alta decide exatamente
+no teste `is_ascii_lowercase` — byte minúsculo vira o veredito da
+dobra `to_ascii_uppercase`, qualquer outro é ele mesmo; cada ramo
+carrega a igualdade habilitante. O mutante AS-IS não dobra (`put`
+nunca casa `PUT`, F79); planta `ascii_fold_discriminates_as_is`
+recusa. -/
+theorem ascii_upper_fate_iff :
+    ∀ (b c : U8),
+      (ascii_upper b = ok c) ↔
+        ∃ b1, core.num.U8.is_ascii_lowercase b = ok b1 ∧
+          ((b1 = true ∧ core.num.U8.to_ascii_uppercase b = ok c) ∨
+            (b1 = false ∧ c = b)) := by
+  intro b c
+  constructor
+  · intro hval
+    unfold ascii_upper at hval
+    obtain ⟨b1, hb1, hval⟩ := bind_ok_inv _ _ _ hval
+    split at hval
+    · next hbt => exact ⟨b1, hb1, Or.inl ⟨hbt, hval⟩⟩
+    · next hbf =>
+        simp only [Bool.not_eq_true] at hbf
+        exact ⟨b1, hb1, Or.inr ⟨hbf, (Result.ok.inj hval).symm⟩⟩
+  · rintro ⟨b1, hb1, ⟨hbt, hfold⟩ | ⟨hbf, hcb⟩⟩
+    · unfold ascii_upper
+      rw [hb1]
+      simp only [Aeneas.Std.bind_tc_ok]
+      rw [hbt, if_pos rfl]
+      exact hfold
+    · unfold ascii_upper
+      rw [hb1]
+      simp only [Aeneas.Std.bind_tc_ok]
+      rw [hbf, if_neg (by simp), hcb]

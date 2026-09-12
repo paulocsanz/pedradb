@@ -208,3 +208,13 @@ verde antes do commit, exatamente 1 teorema público por commit).
   não dobra (`BEARER` nunca casa `bearer`, F85); planta DST
   `ascii_fold_discriminates_as_is` (pedradb-http, exit 0,
   1 passed). Gate GREEN: floor_atom 155→156, floor_extract 123→122.
+
+## P2.1 — http ×6 átomo (5/6)
+
+- **ascii_upper (5/6)**: a dobra de byte para caixa alta decide
+  exatamente no teste `is_ascii_lowercase` — byte minúsculo vira o
+  veredito da dobra `to_ascii_uppercase`, qualquer outro é ele
+  mesmo; cada ramo carrega a igualdade habilitante. O mutante AS-IS
+  não dobra (`put` nunca casa `PUT`, F79); planta DST
+  `ascii_fold_discriminates_as_is` (pedradb-http, exit 0,
+  1 passed). Gate GREEN: floor_atom 156→157, floor_extract 122→121.
