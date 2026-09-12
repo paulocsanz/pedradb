@@ -139,3 +139,4 @@ atom	catalog:snap_below_watermark	snap_below_watermark_fate_iff	formal/aeneas/le
 atom	catalog:mem_point_decides	mem_point_decides_fate_iff	formal/aeneas/lean/Lookup.lean	mem_point_decides
 atom	catalog:prefer_newer_seq	prefer_newer_seq_fate_iff	formal/aeneas/lean/Lookup.lean	prefer_newer_seq
 atom	catalog:flush_publish	flush_publish_fate_iff	formal/aeneas/lean/Flush.lean	may_publish_manifest
+atom	catalog:auto_flush_due	auto_flush_due_fate_iff	formal/aeneas/lean/Flush.lean	auto_flush_due

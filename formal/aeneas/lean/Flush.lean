@@ -41,6 +41,21 @@ theorem flush_publish_fate_iff :
   unfold may_publish_manifest
   cases sst_durable <;> cases v <;> simp
 
+/-- RFC-0213 P1.1 (storage cadence, atom `catalog:auto_flush_due`):
+    the auto-flush is due EXACTLY when the axis is armed and the
+    bytes reached the limit — fate forall over the extracted body
+    (RFC-0170 P2.4); the AS-IS mutant never flushes on its own (the
+    lie the DST plant `auto_flush_due_on_live_over_limit_is_not_ok`
+    refutes). -/
+theorem auto_flush_due_fate_iff :
+    ∀ (mem_bytes : U64) (armed : Bool) (limit : U64) (v : Bool),
+      (auto_flush_due mem_bytes armed limit = ok v) ↔
+        ((v = decide (mem_bytes >= limit) ∧ armed = true)
+          ∨ (v = false ∧ armed = false)) := by
+  intro mem_bytes armed limit v
+  unfold auto_flush_due
+  cases armed <;> simp <;> exact eq_comm
+
 /-- Live flush read pin keeps the WAL. -/
 theorem wal_rotate_pin_live_keeps :
     wal_rotate_decision
