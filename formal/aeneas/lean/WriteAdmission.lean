@@ -322,3 +322,17 @@ theorem torn_head_empty_log_fate_iff :
   unfold torn_head_is_empty_log
   simp
   exact eq_comm
+
+/-- RFC-0213 P0.1 (storage cadence, atom `catalog:torn_tail_needs_cut`):
+    a torn tail needs the cut EXACTLY when the length overhangs the
+    last good offset — fate forall over the extracted body
+    (RFC-0170 P2.4); the AS-IS mutant never cuts (the lie the DST
+    plant `torn_tail_needs_cut_on_live_overhang_is_not_ok` refutes). -/
+theorem torn_tail_needs_cut_fate_iff :
+    ∀ (len last_good : U64) (v : Bool),
+      (torn_tail_needs_cut len last_good = ok v) ↔
+        v = decide (len > last_good) := by
+  intro len last_good v
+  unfold torn_tail_needs_cut
+  simp
+  exact eq_comm

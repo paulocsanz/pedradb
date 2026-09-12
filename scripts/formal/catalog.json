@@ -7211,7 +7211,6 @@
     "crates/pedradb-core/src/db.rs"
    ],
    "entry": "torn_tail_needs_cut",
-   "data_fate": true,
    "handlers": [
     "open_with_env_sourced"
    ],
@@ -7220,6 +7219,10 @@
    "dst_plant": {
     "file": "crates/pedradb-core/src/write_admission_kernel.rs",
     "test": "torn_tail_needs_cut_on_live_overhang_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "torn-tail verdict fully fated: cut needed exactly when length overhangs last good offset; as-is never cuts, refused by DST plant"
    }
   },
   {
