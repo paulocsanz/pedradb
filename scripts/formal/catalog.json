@@ -2770,11 +2770,14 @@
     "crates/pedradb-core/src/wal/reader.rs"
    ],
    "entry": "recover_collect_act",
-   "data_fate": true,
    "as_is": "recover_collect_act_as_is",
    "dst_plant": {
     "file": "crates/pedradb-sim/src/lib.rs",
     "test": "recover_collect_act_on_live_exploded_crc_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "o coletor de recovery decide exatamente pelo match extraido — cada um dos nove framing kinds mapeia ao seu fate pela rota que o rustc liga (torn trio: fail-stop em prefixo vazio, keep-prefix vivo, ou resync sob o budget do MAX extraido; crc/zero-header mid-walk resync ou keep-prefix, fail-stop em alinhamento fresco)"
    }
   },
   {

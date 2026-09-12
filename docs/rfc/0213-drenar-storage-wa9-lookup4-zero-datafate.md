@@ -312,7 +312,34 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
    AMBOS inscritos no LIBS do `lean_extracts.sh` nesta fatia
    (buraco pré-existente; extratos re-carimbados): cap 2→0,
    floor_atom 122→124, floor_extract 156→154 — CATÁLOGO ZERO
-   `data_fate` medido ao vivo — status: `todo`
+   `data_fate` medido ao vivo — status: `doing`
+
+   CORREÇÃO DATADA 2026-09-12 (mesma classe da nota do 3/6): o par
+   `dictionary_link` JÁ está no degrau atom desde 2026-09-10
+   (RFC-0191 P2.3, `reopen_outcome_serve_all_iff_damage_none`,
+   `b26c0ebf`) com a flag `data_fate` esquecida — sua parte na
+   fatia é fortalecer o átomo ao fate-iff do valor universal e
+   pagar SÓ o cap 1→0; as metas da fatia caem para floor_atom
+   121→122 e floor_extract 157→156 (o `wal_recover` é o único
+   átomo fresco), cap 2→0 inalterado
+
+   — 1/2 `done`: `recover_collect_act_fate_iff`
+   (WalRecover.lean, INSCRITO no LIBS nesta fatia; extrato
+   re-carimbado — regenerado byte-idêntico via
+   `aeneas_wal_recover.sh`, charon+aeneas no PATH, diff vazio em
+   `formal/aeneas/out/`): o coletor de recovery decide
+   EXATAMENTE pelo match extraído — cada um dos nove framing
+   kinds mapeia ao seu fate pela rota que o rustc liga (Record
+   sempre kept; CleanEof stop; o trio torn fail-stopa prefixo
+   vazio, mantém prefixo vivo ou resynca sob o budget medido pelo
+   `MAX_CONSECUTIVE_SKIPS` extraído — fail-stop além dele; Crc e
+   ZeroHeaderTail mid-walk resyncam/mantêm o prefixo e
+   fail-stopam em alinhamento fresco; Orphan/Other sempre
+   fail-stop); o as-is chama o torn-tail de CleanEof (perda
+   silenciosa de prefixo) e resynca um CRC ruim — a planta DST
+   refuta), cap 2→1, floor_atom 121→122, floor_extract 157→156;
+   planta DST verde (`recover_collect_act_on_live_exploded_crc_is_not_ok`,
+   1 passed, pedradb-sim)
 7. **P2.2:** composição ∀ do caminho de storage (write-admission:
    admission → wal plan → torn-tail cut sobre atoms registrados)
    em nova compose lib (zero buracos; twins DST verdes; razão de
@@ -331,7 +358,7 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
 | P1.1 | p1 | Cadência flush ×3 + cf ×2 | done | 5/5: este commit (FECHAMENTO) | 2026-09-12 |
 | P1.2 | p1 | Cadência leveling ×2 + singletons ×4 | done | 6/6: este commit (FECHAMENTO) | 2026-09-12 |
 | P1.3 | p1 | Veredito datado dos medidos ausentes | done | este commit (veredito: 0 ausentes nas 24 promoções; âncoras green antes/depois) | 2026-09-12 |
-| P2.1 | p2 | Wal finais ×2 — CATÁLOGO ZERO data_fate | todo | — | 2026-09-11 |
+| P2.1 | p2 | Wal finais ×2 — CATÁLOGO ZERO data_fate | doing | 1/2: este commit | 2026-09-12 |
 | P2.2 | p2 | Composição ∀ storage + sweep final + flip done | todo | — | 2026-09-11 |
 
 ## Critérios de aceite

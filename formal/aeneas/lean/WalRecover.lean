@@ -75,3 +75,265 @@ theorem as_is_crc_not_length_resyncable :
       recover_kernel.is_length_resyncable_as_is recover_kernel.RecoverKind.Crc = ok true := by
   constructor <;> rfl
 
+
+/-- Any ok-valued Result bind forces the bound term to be ok. -/
+private theorem bind_ok_inv {α β} (x : Result α) (f : α → Result β) (v : β)
+    (h : Aeneas.Std.bind x f = ok v) : ∃ a, x = ok a ∧ f a = ok v := by
+  cases x with
+  | ok a => exact ⟨a, rfl, h⟩
+  | fail e => exact absurd h (by simp)
+  | div => exact absurd h (by simp)
+
+/-- An ok chain reassembles into an ok bind. -/
+private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : β}
+    (a : α) (hx : x = ok a) (h : f a = ok v) : Aeneas.Std.bind x f = ok v := by
+  rw [hx]
+  exact h
+/-- RFC-0213 P2.1 (wal finais 1/2): the recovery collector's action is
+    decided EXACTLY by the extracted match — every one of the nine
+    framing kinds maps to its fate along the route rustc links: a
+    record is always kept, a clean EOF stops, the torn trio
+    (Truncated/LengthCorrupt/UnknownType) fail-stops an empty prefix,
+    keeps a live prefix, or resyncs under the skip budget measured by
+    the extracted MAX_CONSECUTIVE_SKIPS (fail-stop past it), a CRC or
+    zero-header tail mid-resync-walk resyncs/keeps the prefix and
+    fail-stops at a fresh alignment, orphan fragments and unknown
+    damage always fail-stop. The AS-IS mutant calls a torn tail a
+    clean EOF (silent prefix loss) and resyncs a bad CRC — refuted
+    live by `recover_collect_act_on_live_exploded_crc_is_not_ok`. -/
+theorem recover_collect_act_fate_iff :
+    ∀ (kind : recover_kernel.RecoverKind) (prefix_n : Std.U64)
+      (can_skip : Bool) (consecutive_skips : Std.U64) (in_resync : Bool)
+      (v : recover_kernel.RecoverAct),
+      (recover_kernel.recover_collect_act kind prefix_n can_skip
+          consecutive_skips in_resync = ok v) ↔
+        ((kind = recover_kernel.RecoverKind.Record ∧
+            v = recover_kernel.RecoverAct.KeepRecord) ∨
+          (kind = recover_kernel.RecoverKind.CleanEof ∧
+            v = recover_kernel.RecoverAct.Stop) ∨
+          ((kind = recover_kernel.RecoverKind.Truncated ∨
+              kind = recover_kernel.RecoverKind.LengthCorrupt ∨
+              kind = recover_kernel.RecoverKind.UnknownType) ∧
+            ((¬(can_skip = true) ∧
+                ((prefix_n = 0#u64 ∧ v = recover_kernel.RecoverAct.FailStop) ∨
+                  (¬(prefix_n = 0#u64) ∧
+                    v = recover_kernel.RecoverAct.KeepPrefix))) ∨
+              (can_skip = true ∧
+                ∃ i, recover_kernel.MAX_CONSECUTIVE_SKIPS = ok i ∧
+                  ((consecutive_skips > i ∧
+                      v = recover_kernel.RecoverAct.FailStop) ∨
+                    (¬(consecutive_skips > i) ∧
+                      v = recover_kernel.RecoverAct.Resync))))) ∨
+          (kind = recover_kernel.RecoverKind.OrphanFragment ∧
+            v = recover_kernel.RecoverAct.FailStop) ∨
+          ((kind = recover_kernel.RecoverKind.Crc ∨
+              kind = recover_kernel.RecoverKind.ZeroHeaderTail) ∧
+            ((in_resync = true ∧
+                ((can_skip = true ∧ v = recover_kernel.RecoverAct.Resync) ∨
+                  (¬(can_skip = true) ∧
+                    ((prefix_n = 0#u64 ∧
+                        v = recover_kernel.RecoverAct.FailStop) ∨
+                      (¬(prefix_n = 0#u64) ∧
+                        v = recover_kernel.RecoverAct.KeepPrefix))))) ∨
+              (¬(in_resync = true) ∧
+                v = recover_kernel.RecoverAct.FailStop))) ∨
+          (kind = recover_kernel.RecoverKind.Other ∧
+            v = recover_kernel.RecoverAct.FailStop)) := by
+  intro kind prefix_n can_skip consecutive_skips in_resync v
+  cases kind with
+  | Record =>
+    constructor
+    · intro hval
+      injection hval with hv
+      exact Or.inl ⟨rfl, hv.symm⟩
+    · rintro (⟨-, hv⟩ | ⟨heq, -⟩ | ⟨htrio, -⟩ | ⟨heq, -⟩ | ⟨hcrc, -⟩ |
+        ⟨heq, -⟩)
+      · subst hv
+        rfl
+      · exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · rcases htrio with heq | heq | heq <;>
+        exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · rcases hcrc with heq | heq <;>
+        exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+  | CleanEof =>
+    constructor
+    · intro hval
+      injection hval with hv
+      exact Or.inr (Or.inl ⟨rfl, hv.symm⟩)
+    · rintro (⟨heq, -⟩ | ⟨-, hv⟩ | ⟨htrio, -⟩ | ⟨heq, -⟩ | ⟨hcrc, -⟩ |
+        ⟨heq, -⟩)
+      · exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · subst hv
+        rfl
+      · rcases htrio with heq | heq | heq <;>
+        exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · rcases hcrc with heq | heq <;>
+        exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+  | Truncated | LengthCorrupt | UnknownType =>
+    constructor
+    · intro hval
+      unfold recover_kernel.recover_collect_act at hval
+      split at hval
+      all_goals first
+        | next heq =>
+          exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+        | next _ =>
+          split at hval
+          · next hcs =>
+            obtain ⟨i, hmax, hval⟩ := bind_ok_inv _ _ _ hval
+            refine Or.inr (Or.inr (Or.inl ⟨?_, Or.inr ⟨hcs, i, hmax, ?_⟩⟩))
+            · first
+              | exact Or.inl rfl
+              | exact Or.inr (Or.inl rfl)
+              | exact Or.inr (Or.inr rfl)
+            · split at hval
+              · next hgt =>
+                injection hval with hv
+                exact Or.inl ⟨hgt, hv.symm⟩
+              · next hgt =>
+                injection hval with hv
+                exact Or.inr ⟨hgt, hv.symm⟩
+          · next hns =>
+            refine Or.inr (Or.inr (Or.inl ⟨?_, Or.inl ⟨hns, ?_⟩⟩))
+            · first
+              | exact Or.inl rfl
+              | exact Or.inr (Or.inl rfl)
+              | exact Or.inr (Or.inr rfl)
+            · split at hval
+              · next hp =>
+                injection hval with hv
+                exact Or.inl ⟨hp, hv.symm⟩
+              · next hp =>
+                injection hval with hv
+                exact Or.inr ⟨hp, hv.symm⟩
+    · rintro (⟨heq, -⟩ | ⟨heq, -⟩ | ⟨htrio, hlast⟩ | ⟨heq, -⟩ |
+        ⟨hcrc, -⟩ | ⟨heq, -⟩)
+      · exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · rcases htrio with heq | heq | heq
+        all_goals first
+          | exact absurd heq
+              (fun h => recover_kernel.RecoverKind.noConfusion h)
+          | unfold recover_kernel.recover_collect_act
+            split
+            all_goals first
+              | next heq =>
+          exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+              | next _ =>
+                rcases hlast with ⟨hns, hp⟩ | ⟨hcs, i, hmax, hgt⟩
+                · rcases hp with ⟨hp, hv⟩ | ⟨hp, hv⟩
+                  · rw [if_neg hns, if_pos hp, hv]
+                  · rw [if_neg hns, if_neg hp, hv]
+                · rw [if_pos hcs]
+                  refine bind_intro i hmax ?_
+                  rcases hgt with ⟨hgt, hv⟩ | ⟨hgt, hv⟩
+                  · rw [if_pos hgt, hv]
+                  · rw [if_neg hgt, hv]
+      · exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · rcases hcrc with heq | heq <;>
+        exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+  | OrphanFragment =>
+    constructor
+    · intro hval
+      injection hval with hv
+      exact Or.inr (Or.inr (Or.inr (Or.inl ⟨rfl, hv.symm⟩)))
+    · rintro (⟨heq, -⟩ | ⟨heq, -⟩ | ⟨htrio, -⟩ | ⟨-, hv⟩ | ⟨hcrc, -⟩ |
+        ⟨heq, -⟩)
+      · exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · rcases htrio with heq | heq | heq <;>
+        exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · subst hv
+        rfl
+      · rcases hcrc with heq | heq <;>
+        exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+  | Crc | ZeroHeaderTail =>
+    constructor
+    · intro hval
+      unfold recover_kernel.recover_collect_act at hval
+      split at hval
+      all_goals first
+        | next heq =>
+          exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+        | next _ =>
+          split at hval
+          · next hrs =>
+            refine Or.inr (Or.inr (Or.inr (Or.inr
+                (Or.inl ⟨?_, Or.inl ⟨hrs, ?_⟩⟩))))
+            · first
+              | exact Or.inl rfl
+              | exact Or.inr rfl
+            · split at hval
+              · next hcs =>
+                injection hval with hv
+                exact Or.inl ⟨hcs, hv.symm⟩
+              · next hns =>
+                refine Or.inr ⟨hns, ?_⟩
+                split at hval
+                · next hp =>
+                  injection hval with hv
+                  exact Or.inl ⟨hp, hv.symm⟩
+                · next hp =>
+                  injection hval with hv
+                  exact Or.inr ⟨hp, hv.symm⟩
+          · next hrs =>
+            injection hval with hv
+            refine Or.inr (Or.inr (Or.inr (Or.inr
+              (Or.inl ⟨?_, Or.inr ⟨hrs, hv.symm⟩⟩))))
+            first
+            | exact Or.inl rfl
+            | exact Or.inr rfl
+    · rintro (⟨heq, -⟩ | ⟨heq, -⟩ | ⟨htrio, -⟩ | ⟨heq, -⟩ |
+        ⟨hcrc, hlast⟩ | ⟨heq, -⟩)
+      · exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · rcases htrio with heq | heq | heq <;>
+        exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · rcases hcrc with heq | heq
+        all_goals first
+          | exact absurd heq
+              (fun h => recover_kernel.RecoverKind.noConfusion h)
+          | unfold recover_kernel.recover_collect_act
+            split
+            all_goals first
+              | next heq =>
+          exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+              | next _ =>
+                rcases hlast with ⟨hrs, hlast⟩ | ⟨hrs, hv⟩
+                · rw [if_pos hrs]
+                  rcases hlast with ⟨hcs, hv⟩ | ⟨hns, hp⟩
+                  · rw [if_pos hcs, hv]
+                  · rw [if_neg hns]
+                    rcases hp with ⟨hp, hv⟩ | ⟨hp, hv⟩
+                    · rw [if_pos hp, hv]
+                    · rw [if_neg hp, hv]
+                · rw [if_neg hrs, hv]
+      · exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+  | Other =>
+    constructor
+    · intro hval
+      injection hval with hv
+      exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr ⟨rfl, hv.symm⟩))))
+    · rintro h
+      rcases h with h1 | h1
+      · exact absurd h1.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      rcases h1 with h2 | h2
+      · exact absurd h2.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      rcases h2 with h3 | h3
+      · rcases h3.1 with heq | heq | heq <;>
+        exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+      rcases h3 with h4 | h4
+      · exact absurd h4.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      rcases h4 with h5 | h6
+      · rcases h5.1 with heq | heq <;>
+        exact absurd heq (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · rcases h6 with ⟨_, hv⟩
+        subst hv
+        rfl
