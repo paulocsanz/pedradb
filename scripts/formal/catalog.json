@@ -5603,6 +5603,10 @@
    "dst_plant": {
     "file": "crates/pedradb-spec/src/properties_kernel.rs",
     "test": "c1_as_is_does_not_imply_c1"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "spec ×4 P0.1 1/4: valor servido passa C1 exatamente quando a maioria de TODA config ativa replica (joint exige antiga E nova); mutante as-is (só maioria antiga) recusado pela planta"
    }
   },
   {
