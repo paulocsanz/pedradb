@@ -51,7 +51,7 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
 1. **P0.1:** cadência write_admission ×9 (wrapper
    `WriteAdmission.lean`; entry `wal_commit_plan` até
    `pit_resync_rewrite`): ×9, cap 26→17, floor_atom 98→107,
-   floor_extract 180→171 — status: `doing`
+   floor_extract 180→171 — status: `done`
 
    — 1/9 `done`: `write_admission_idle_fate_iff`
    (WriteAdmission.lean; o gate idle é EXATAMENTE "nenhum knob de
@@ -119,6 +119,19 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
    decidido; o as-is nunca vê além do feed, RFC-0170 P2.4),
    cap 19→18, floor_atom 105→106, floor_extract 173→172; planta
    DST verde (`seq_after_feed_on_live_newer_is_not_ok`, 1 passed)
+
+   — 9/9 `done`: `pit_resync_rewrite_fate_iff`
+   (WriteAdmission.lean; um resync point-in-time precisa do rewrite
+   EXATAMENTE quando o registro é um resync — identidade decidida;
+   o as-is pula o rewrite, RFC-0170 P2.4), cap 18→17,
+   floor_atom 106→107, floor_extract 172→171; planta DST verde
+   (`pit_resync_needs_rewrite_on_live_resync_is_not_ok`, 1 passed)
+
+   — (FECHAMENTO) P0.1 completa: 9/9 átomos, cap_data_fate 26→17,
+   floor_atom 98→107, floor_extract 180→171; residual close 7→6
+   (wal_commit_plan subiu o degrau close→atom no mesmo commit);
+   wrapper WriteAdmission.lean com 9 teoremas `_fate_iff` novos,
+   1 por commit; plantas DST do write_admission_kernel todas verdes
 2. **P0.2:** cadência lookup ×4 (wrapper `Lookup.lean`):
    `snap_empty`, `snap_below_watermark`, `mem_point_decides`,
    `prefer_newer_seq` — cap 17→13, floor_atom 107→111,
@@ -162,7 +175,7 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | Cadência write_admission ×9 | doing | 8/9: este commit | 2026-09-12 |
+| P0.1 | p0 | Cadência write_admission ×9 | done | 9/9: este commit (FECHAMENTO) | 2026-09-12 |
 | P0.2 | p0 | Cadência lookup ×4 | todo | — | 2026-09-11 |
 | P1.1 | p1 | Cadência flush ×3 + cf ×2 | todo | — | 2026-09-11 |
 | P1.2 | p1 | Cadência leveling ×2 + singletons ×4 | todo | — | 2026-09-11 |

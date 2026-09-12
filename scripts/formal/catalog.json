@@ -7263,7 +7263,6 @@
     "crates/pedradb-core/src/db.rs"
    ],
    "entry": "pit_resync_needs_rewrite",
-   "data_fate": true,
    "handlers": [
     "open_with_env_sourced"
    ],
@@ -7272,6 +7271,10 @@
    "dst_plant": {
     "file": "crates/pedradb-core/src/write_admission_kernel.rs",
     "test": "pit_resync_needs_rewrite_on_live_resync_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "pit resync verdict fully fated: rewrite needed exactly when entry is a resync; as-is skips the rewrite, refused by DST plant"
    }
   },
   {

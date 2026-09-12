@@ -350,3 +350,15 @@ theorem seq_after_feed_fate_iff :
   unfold seq_after_feed
   simp
   exact eq_comm
+
+/-- RFC-0213 P0.1 (storage cadence, atom `catalog:pit_resync_rewrite`):
+    a point-in-time resync needs the rewrite EXACTLY when the entry
+    is a resync — fate forall over the extracted body (RFC-0170
+    P2.4); the AS-IS mutant skips the rewrite (the lie the DST plant
+    `pit_resync_needs_rewrite_on_live_resync_is_not_ok` refutes). -/
+theorem pit_resync_rewrite_fate_iff :
+    ∀ (is_resync v : Bool),
+      (pit_resync_needs_rewrite is_resync = ok v) ↔ v = is_resync := by
+  intro is_resync v
+  unfold pit_resync_needs_rewrite
+  cases is_resync <;> cases v <;> simp

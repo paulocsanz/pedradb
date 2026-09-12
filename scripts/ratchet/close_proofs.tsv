@@ -133,3 +133,4 @@ atom	catalog:wal_commit_plan	wal_commit_plan_fate_iff	formal/aeneas/lean/WriteAd
 atom	catalog:torn_head_empty_log	torn_head_empty_log_fate_iff	formal/aeneas/lean/WriteAdmission.lean	torn_head_is_empty_log
 atom	catalog:torn_tail_needs_cut	torn_tail_needs_cut_fate_iff	formal/aeneas/lean/WriteAdmission.lean	torn_tail_needs_cut
 atom	catalog:seq_after_feed	seq_after_feed_fate_iff	formal/aeneas/lean/WriteAdmission.lean	seq_after_feed
+atom	catalog:pit_resync_rewrite	pit_resync_rewrite_fate_iff	formal/aeneas/lean/WriteAdmission.lean	pit_resync_needs_rewrite
