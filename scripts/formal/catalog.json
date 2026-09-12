@@ -7112,6 +7112,10 @@
    "dst_plant": {
     "file": "crates/pedradb-store/src/three_teeth_queued.rs",
     "test": "c1_modelo_on_live_queued_joint_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "O commit avanca exatamente na maioria: ok t e exatamente quorum b, may_commit_at b1, sem maioria t=s, com maioria t leva o maximo proposto; corpos citados sem reabrir"
    }
   },
   {

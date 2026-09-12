@@ -131,3 +131,16 @@ verde antes do commit, exatamente 1 teorema público por commit).
   `d1_modelo_on_live_recording_is_not_ok` (pedradb-sim, exit 0,
   1 passed). Axiomas: os 3 padrão do Lean. Gate GREEN: floor_atom
   150→151, floor_extract 128→127.
+
+## P1.1 — fate ×2 átomo (2/2, FECHAMENTO P1.1)
+
+- **c1_advance_commit (2/2, FECHAMENTO P1.1)**: o commit avança
+  exatamente na maioria — `c1_advance_commit s = ok t` é exatamente
+  ∃ `c1_quorum s = ok b` → `may_commit_at s.index_term
+  s.current_term b = ok b1` → sem maioria `t = s`, com maioria ∃
+  `Ord.max s.proposed s.commit_index = ok i` e `t = {s with
+  commit_index := i}` (corpos citados, não reabertos). Planta DST
+  `c1_modelo_on_live_queued_joint_is_not_ok` (pedradb-store, exit 0,
+  1 passed). Axiomas: os 3 padrão do Lean. Fechamento: floor_atom
+  150→152, floor_extract 128→126, gate GREEN nas 2 promoções,
+  1 teorema público por commit.

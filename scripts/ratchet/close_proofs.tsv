@@ -178,3 +178,4 @@ atom	catalog:r1_modelo	r1_modelo_fate_iff	formal/aeneas/lean/LsmR1.lean	r1_model
 atom	catalog:t1_modelo	t1_modelo_fate_iff	formal/aeneas/lean/T1Modelo.lean	t1_modelo
 atom	catalog:c1_modelo	c1_modelo_fate_iff	formal/aeneas/lean/C1Modelo.lean	c1_modelo
 atom	catalog:d1_put_ok	put_ok_fate_iff	formal/aeneas/lean/D1Modelo.lean	put_ok
+atom	catalog:c1_advance_commit	c1_advance_commit_fate_iff	formal/aeneas/lean/C1Modelo.lean	c1_advance_commit

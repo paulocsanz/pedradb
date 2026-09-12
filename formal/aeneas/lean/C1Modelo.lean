@@ -103,3 +103,53 @@ theorem c1_modelo_fate_iff :
         simp only [Aeneas.Std.bind_tc_ok]
         rw [hserved, if_pos rfl]
         exact hcall
+
+/-! ## RFC-0215 P1.1 — coroa de produto no degrau átomo (fate ×2) -/
+
+/-- RFC-0215 P1.1 2/2 (atom `catalog:c1_advance_commit`, entry
+`c1_advance_commit`): o commit avança exatamente na maioria — `ok t` é
+exatamente: `c1_quorum` computa `b`, `may_commit_at` decide `b1`; sem
+maioria `t = s`, com maioria `t` leva o máximo proposto
+(`c1_quorum`/`may_commit_at`/`Ord.max` citados, corpos não reabertos).
+O mutante AS-IS (`c1_advance_commit_as_is`) aceita commit sem maioria;
+planta três-dentes recusa. -/
+theorem c1_advance_commit_fate_iff :
+    ∀ (s t : c1_modelo_kernel.C1State),
+      (c1_modelo_kernel.c1_advance_commit s = ok t) ↔
+        ∃ b, c1_modelo_kernel.c1_quorum s = ok b ∧
+          ∃ b1, commit_kernel.may_commit_at
+              s.index_term s.current_term b = ok b1 ∧
+            ((b1 = false ∧ t = s) ∨
+              (b1 = true ∧
+                ∃ i, core.cmp.Ord.max.default
+                    core.cmp.OrdU64.partialOrdInst.lt
+                    s.proposed s.commit_index = ok i ∧
+                  t = { s with commit_index := i })) := by
+  intro s t
+  constructor
+  · intro hval
+    unfold c1_modelo_kernel.c1_advance_commit at hval
+    obtain ⟨ b, hb, hval ⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨ b1, hb1, hval ⟩ := bind_ok_inv _ _ _ hval
+    split at hval
+    · next hb1' =>
+        obtain ⟨ i, hi, hval ⟩ := bind_ok_inv _ _ _ hval
+        have ht : t = { s with commit_index := i } :=
+          (Result.ok.inj hval).symm
+        exact ⟨ b, hb, b1, hb1, Or.inr ⟨hb1', i, hi, ht⟩⟩
+    · next hb1n =>
+        have hb1F : b1 = false := by simpa [Bool.not_eq_true] using hb1n
+        have ht : t = s := (Result.ok.inj hval).symm
+        exact ⟨ b, hb, b1, hb1, Or.inl ⟨hb1F, ht⟩⟩
+  · rintro ⟨ b, hb, b1, hb1, hbr ⟩
+    unfold c1_modelo_kernel.c1_advance_commit
+    rw [hb]
+    simp only [Aeneas.Std.bind_tc_ok]
+    rw [hb1]
+    simp only [Aeneas.Std.bind_tc_ok]
+    rcases hbr with ⟨hb1F, ht⟩ | ⟨hb1T, i, hi, ht⟩
+    · rw [hb1F, if_neg (by simp), ht]
+    · rw [hb1T, if_pos rfl]
+      rw [hi]
+      simp only [Aeneas.Std.bind_tc_ok]
+      rw [ht]

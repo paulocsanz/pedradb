@@ -80,8 +80,8 @@ planta DST verde ANTES do commit, gate GREEN no commit).
 3. **P1.1** fate ×2: `d1_put_ok` (`D1Modelo.lean` — o put confirma
    exatamente quando o ledger cruza a barreira), `c1_advance_commit`
    (`C1Modelo.lean` — o commit avança exatamente na maioria) —
-   floor_atom 150→152, floor_extract 128→126 — status: `todo` (1/2:
-   `d1_put_ok` feito 2026-09-12)
+   floor_atom 150→152, floor_extract 128→126 — status: `done`
+   (2026-09-12; floor_atom 152, floor_extract 126)
 
 4. **P1.2** coroa↔espinha composta: nova compose lib
    `ComposeProductCrown.lean` (11ª do array COMPOSE) — para todo
@@ -133,7 +133,7 @@ planta DST verde ANTES do commit, gate GREEN no commit).
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | spec ×4 átomo (`Properties.lean`): d1_holds, r1_answer_ok, t1_holds, c1_holds | done | `c1_holds_fate_iff`/`d1_holds_fate_iff`/`t1_holds_fate_iff`/`r1_answer_ok_fate_iff` | 2026-09-12 |
 | P0.2 | p0 | modelo ×4 átomo: d1_modelo, r1_modelo, t1_modelo, c1_modelo | done | `d1_modelo_fate_iff`/`r1_modelo_fate_iff`/`t1_modelo_fate_iff`/`c1_modelo_fate_iff` | 2026-09-12 |
-| P1.1 | p1 | fate ×2 átomo: d1_put_ok, c1_advance_commit | todo | — | 2026-09-12 |
+| P1.1 | p1 | fate ×2 átomo: d1_put_ok, c1_advance_commit | done | `put_ok_fate_iff`/`c1_advance_commit_fate_iff` | 2026-09-12 |
 | P1.2 | p1 | coroa↔espinha composta (`ComposeProductCrown.lean` + twin + DST, sem TSV) | todo | — | 2026-09-12 |
 | P2.1 | p2 | http ×6 átomo: bearer/auth/method/ascii | todo | — | 2026-09-12 |
 | P2.2 | p2 | Sweep final + nota EXTRACT.md + flip done | todo | — | 2026-09-12 |
