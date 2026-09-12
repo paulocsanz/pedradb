@@ -6308,6 +6308,10 @@
   },
   {
    "id": "env_sync",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "RFC-0214 P0.2: fate ∀ do sync do Env — dois futuros ok exatos: Honest promove a barreira ao comprimento todo; Lying devolve Ok e o modelo volta inteiro (RFC-0078); as-is promove sempre."
+   },
    "finding": "RFC-0166 P1.1",
    "twin_kind": "close",
    "single_artifact": true,

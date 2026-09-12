@@ -106,3 +106,50 @@ theorem append_fate_iff :
     unfold env_crash_kernel.append
     rw [h]
     simp only [bind_tc_ok]
+
+/-- RFC-0214 P0.2 (atom `catalog:env_sync`): o sync do Env tem
+desfecho ok com EXATAMENTE dois futuros, um por honestidade —
+Honest promove a barreira ao comprimento todo; Lying devolve Ok e
+o modelo volta inteiro (a barreira não mente — RFC-0078). Fate
+forall sobre o corpo extraído. O mutante AS-IS promove sempre —
+um sync mentiroso é tratado como barreira feita. -/
+theorem sync_fate_iff :
+    ∀ (m : env_crash_kernel.CrashModel)
+      (h : env_crash_kernel.SyncHonesty)
+      (m' : env_crash_kernel.CrashModel),
+      (env_crash_kernel.sync m h = ok m') ↔
+        ((h = env_crash_kernel.SyncHonesty.Honest ∧
+            m' = { m with synced := m.written })
+          ∨ (h = env_crash_kernel.SyncHonesty.Lying ∧ m' = m)) := by
+  intro m h m'
+  have hc : env_crash_kernel.sync m env_crash_kernel.SyncHonesty.Honest
+      = ok { m with synced := m.written } := by
+    unfold env_crash_kernel.sync
+    unfold env_crash_kernel.SyncHonesty.Insts.CoreCmpPartialEqSyncHonesty.eq
+    unfold group_commit_kernel.fsync_promotes_pending
+    simp [env_crash_kernel.SyncHonesty.read_discriminant]
+  have hl : env_crash_kernel.sync m env_crash_kernel.SyncHonesty.Lying
+      = ok m := by
+    unfold env_crash_kernel.sync
+    unfold env_crash_kernel.SyncHonesty.Insts.CoreCmpPartialEqSyncHonesty.eq
+    unfold group_commit_kernel.fsync_promotes_pending
+    simp [env_crash_kernel.SyncHonesty.read_discriminant]
+  cases h with
+  | Honest =>
+      rw [hc]
+      constructor
+      · intro ho
+        exact Or.inl ⟨rfl, (Result.ok.inj ho).symm⟩
+      · rintro (⟨_, he⟩ | ⟨hf, _⟩)
+        · rw [he]
+        · exact absurd hf
+            (fun hh => env_crash_kernel.SyncHonesty.noConfusion hh)
+  | Lying =>
+      rw [hl]
+      constructor
+      · intro ho
+        exact Or.inr ⟨rfl, (Result.ok.inj ho).symm⟩
+      · rintro (⟨hf, _⟩ | ⟨_, he⟩)
+        · exact absurd hf
+            (fun hh => env_crash_kernel.SyncHonesty.noConfusion hh)
+        · rw [he]
