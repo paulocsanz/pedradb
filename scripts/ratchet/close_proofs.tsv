@@ -171,3 +171,4 @@ atom	catalog:write_ack_barrier	on_barrier_fate_iff	formal/aeneas/lean/WriteAck.l
 atom	catalog:write_ack_ack	on_ack_fate_iff	formal/aeneas/lean/WriteAck.lean	on_ack
 atom	catalog:c1_quorum	c1_holds_fate_iff	formal/aeneas/lean/Properties.lean	c1_holds
 atom	catalog:d1_durability	d1_holds_fate_iff	formal/aeneas/lean/Properties.lean	d1_holds
+atom	catalog:t1_atomicity	t1_holds_fate_iff	formal/aeneas/lean/Properties.lean	t1_holds

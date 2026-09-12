@@ -10,7 +10,8 @@ verde antes do commit, exatamente 1 teorema público por commit).
 | # | par | teorema | entry | commit | floor atom/extract | planta DST | quando |
 |---|-----|---------|-------|--------|--------------------|------------|--------|
 | 1/4 | `catalog:c1_quorum` | `c1_holds_fate_iff` | `c1_holds` | `1ae394dc` | 143/135 | `c1_as_is_does_not_imply_c1` ok | 2026-09-12 |
-| 2/4 | `catalog:d1_durability` | `d1_holds_fate_iff` | `d1_holds` | (este commit) | 144/134 | `d1_as_is_does_not_imply_d1` ok | 2026-09-12 |
+| 2/4 | `catalog:d1_durability` | `d1_holds_fate_iff` | `d1_holds` | `491ff82e` | 144/134 | `d1_as_is_does_not_imply_d1` ok | 2026-09-12 |
+| 3/4 | `catalog:t1_atomicity` | `t1_holds_fate_iff` | `t1_holds` | (este commit) | 145/133 | `t1_as_is_does_not_imply_t1` ok | 2026-09-12 |
 
 - **c1_holds (1/4)**: valor servido passa C1 exatamente quando a
   maioria de TODA config ativa replica — joint exige antiga E nova
@@ -28,3 +29,12 @@ verde antes do commit, exatamente 1 teorema público por commit).
   mutante AS-IS (barreira só para synced) recusado por
   `d1_as_is_does_not_imply_d1` (exit 0, 1 passed). Axiomas: os 3
   padrão do Lean.
+
+- **t1_holds (3/4)**: T1 aceita `(committed, aborted, staged_n,
+  visible)` exatamente quando a tx é all-or-nothing — nunca ambos os
+  flags, índices visíveis nomeiam writes staged, committed ⇒ todos
+  visíveis, senão nenhum (`t1_ok` 4-conjuntiva). Dois loops reais
+  (loop0 dos visíveis, loop1 do is_empty) via `spec_decr_nat`; mutante
+  AS-IS (só integridade de bytes; tx abortada com efeito parcial
+  passa) recusado por `t1_as_is_does_not_imply_t1` (exit 0, 1
+  passed). Axiomas: os 3 padrão do Lean.

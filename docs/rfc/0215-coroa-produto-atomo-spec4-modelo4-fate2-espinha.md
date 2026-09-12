@@ -67,7 +67,7 @@ planta DST verde ANTES do commit, gate GREEN no commit).
    `t1_holds`, `c1_holds` — iff-∀ sobre o corpo extraído de cada
    preditor de spec (o placeholder `: True` do wrapper é substituído
    pelo teorema real) — floor_atom 142→146, floor_extract 136→132 —
-   status: `todo` (2/4: `c1_holds`, `d1_holds` feitos 2026-09-12)
+   status: `todo` (3/4: `c1_holds`, `d1_holds`, `t1_holds` feitos 2026-09-12)
 
 2. **P0.2** modelo ×4: `d1_modelo` (`D1Modelo.lean`), `r1_modelo`
    (`LsmR1.lean`), `t1_modelo` (`T1Modelo.lean`), `c1_modelo`

@@ -5588,6 +5588,10 @@
    "dst_plant": {
     "file": "crates/pedradb-spec/src/properties_kernel.rs",
     "test": "t1_as_is_does_not_imply_t1"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "spec ×4 P0.1 3/4: T1 aceita exatamente quando a tx é all-or-nothing (nunca ambos flags, visíveis nomeiam staged, committed⇒todos, senão nenhum); dois loops reais via spec_decr_nat; mutante as-is (só integridade de bytes) recusado"
    }
   },
   {

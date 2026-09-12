@@ -267,3 +267,287 @@ theorem d1_holds_fate_iff :
           | false => rfl
         rw [hbf]
 
+/-- T1 semântica: all-or-nothing — nunca ambos flags, índices visíveis
+nomeiam writes staged, committed ⇒ todos visíveis, senão nada. -/
+def t1_ok (committed aborted : Bool) (staged_n : Usize)
+    (visible : Slice Usize) : Prop :=
+  (committed = true → aborted = false) ∧
+  (∀ j : Nat, (hj : j < visible.val.length) →
+    (visible.val[j]).val < staged_n.val) ∧
+  (committed = true → visible.val.length = staged_n.val) ∧
+  (committed = false → visible.val.length = 0)
+
+private theorem t1_loop0_spec (staged_n : Usize) (visible : Slice Usize)
+    (j0 : Usize) (hInv : j0.val ≤ visible.val.length)
+    (hpre : ∀ k : Nat, (hk : k < j0.val) →
+      (hkl : k < visible.val.length) →
+      (visible.val[k]).val < staged_n.val) :
+    spec (t1_holds_loop0 staged_n visible j0)
+      (fun b => (b = true) ↔
+        ((∀ j : Nat, (hj : j < visible.val.length) →
+            (visible.val[j]).val < staged_n.val) ∧
+          visible.val.length = staged_n.val)) := by
+  unfold t1_holds_loop0
+  refine loop.spec_decr_nat
+    (fun j => visible.val.length - j.val)
+    (fun j => j.val ≤ visible.val.length ∧
+      ∀ k : Nat, (hk : k < j.val) →
+        (hkl : k < visible.val.length) →
+        (visible.val[k]).val < staged_n.val)
+    (fun b => (b = true) ↔
+      ((∀ j : Nat, (hj : j < visible.val.length) →
+          (visible.val[j]).val < staged_n.val) ∧
+        visible.val.length = staged_n.val))
+    (t1_holds_loop0.body staged_n visible) j0 ?body
+    ⟨hInv, hpre⟩
+  intro j ⟨hjle, hclean⟩
+  unfold t1_holds_loop0.body
+  dsimp +zeta only
+  split
+  · -- j < len
+    rename_i hltU
+    have hlt : j.val < visible.val.length := by
+      simpa [UScalar.lt_equiv, Aeneas.Std.Slice.len_val] using hltU
+    step as ⟨ x, hx ⟩
+    have hxv : x = visible.val[j.val] := hx
+    split
+    · -- x >= staged_n : done false
+      rename_i hgeU
+      have hge : ¬ ((visible.val[j.val]).val < staged_n.val) := by
+        rw [← hxv]
+        have hN : (↑staged_n : Nat) ≤ (↑x : Nat) := by
+          simpa [ge_iff_le, UScalar.le_equiv] using hgeU
+        omega
+      simp only [spec_ok, Bool.false_eq_true, false_iff]
+      intro hall
+      exact hge (hall.1 j.val hlt)
+    · -- x < staged_n : cont
+      rename_i hltU2
+      have hlt2 : (visible.val[j.val]).val < staged_n.val := by
+        rw [← hxv]
+        simpa [UScalar.lt_equiv] using hltU2
+      step as ⟨ j', hj' ⟩
+      have hjv : (↑j' : Nat) = (↑j : Nat) + 1 := by simpa using hj'
+      refine ⟨?le, ?clean, ?meas⟩
+      · omega
+      · intro k hk hkl
+        rcases Nat.lt_or_ge k j.val with hkj | hkj
+        · exact hclean k hkj hkl
+        · have hk : k = j.val := by omega
+          subst hk
+          exact hlt2
+      · omega
+  · -- j >= len : done (Slice.len visible = staged_n)
+    rename_i hgeU
+    have hge : ¬ (j.val < visible.val.length) := by
+      simpa [UScalar.lt_equiv, Aeneas.Std.Slice.len_val] using hgeU
+    have hj_eq : j.val = visible.val.length :=
+      Nat.le_antisymm hjle (Nat.le_of_not_lt hge)
+    simp only [spec_ok]
+    constructor
+    · intro hbeq
+      refine ⟨fun j' hj' => hclean j' (by omega) hj', ?_⟩
+      have hEq : Slice.len visible = staged_n := by simpa using hbeq
+      have hN := UScalar.eq_equiv _ _ |>.mp hEq
+      rw [Aeneas.Std.Slice.len_val] at hN
+      exact hN
+    · intro ⟨_, hlen⟩
+      have hEq : Slice.len visible = staged_n :=
+        UScalar.eq_imp _ _ (by
+          rw [Aeneas.Std.Slice.len_val]; exact hlen)
+      exact decide_eq_true hEq
+
+private theorem t1_loop1_spec (staged_n : Usize) (visible : Slice Usize)
+    (j0 : Usize) (hInv : j0.val ≤ visible.val.length)
+    (hpre : ∀ k : Nat, (hk : k < j0.val) →
+      (hkl : k < visible.val.length) →
+      (visible.val[k]).val < staged_n.val) :
+    spec (t1_holds_loop1 staged_n visible j0)
+      (fun b => (b = true) ↔
+        ((∀ j : Nat, (hj : j < visible.val.length) →
+            (visible.val[j]).val < staged_n.val) ∧
+          visible.val.length = 0)) := by
+  unfold t1_holds_loop1
+  refine loop.spec_decr_nat
+    (fun j => visible.val.length - j.val)
+    (fun j => j.val ≤ visible.val.length ∧
+      ∀ k : Nat, (hk : k < j.val) →
+        (hkl : k < visible.val.length) →
+        (visible.val[k]).val < staged_n.val)
+    (fun b => (b = true) ↔
+      ((∀ j : Nat, (hj : j < visible.val.length) →
+          (visible.val[j]).val < staged_n.val) ∧
+        visible.val.length = 0))
+    (t1_holds_loop1.body staged_n visible) j0 ?body
+    ⟨hInv, hpre⟩
+  intro j ⟨hjle, hclean⟩
+  unfold t1_holds_loop1.body
+  dsimp +zeta only
+  split
+  · -- j < len
+    rename_i hltU
+    have hlt : j.val < visible.val.length := by
+      simpa [UScalar.lt_equiv, Aeneas.Std.Slice.len_val] using hltU
+    step as ⟨ x, hx ⟩
+    have hxv : x = visible.val[j.val] := hx
+    split
+    · -- x >= staged_n : done false
+      rename_i hgeU
+      have hge : ¬ ((visible.val[j.val]).val < staged_n.val) := by
+        rw [← hxv]
+        have hN : (↑staged_n : Nat) ≤ (↑x : Nat) := by
+          simpa [ge_iff_le, UScalar.le_equiv] using hgeU
+        omega
+      simp only [spec_ok, Bool.false_eq_true, false_iff]
+      intro hall
+      exact hge (hall.1 j.val hlt)
+    · -- x < staged_n : cont
+      rename_i hltU2
+      have hlt2 : (visible.val[j.val]).val < staged_n.val := by
+        rw [← hxv]
+        simpa [UScalar.lt_equiv] using hltU2
+      step as ⟨ j', hj' ⟩
+      have hjv : (↑j' : Nat) = (↑j : Nat) + 1 := by simpa using hj'
+      refine ⟨?le, ?clean, ?meas⟩
+      · omega
+      · intro k hk hkl
+        rcases Nat.lt_or_ge k j.val with hkj | hkj
+        · exact hclean k hkj hkl
+        · have hk : k = j.val := by omega
+          subst hk
+          exact hlt2
+      · omega
+  · -- j >= len : done (is_empty visible)
+    rename_i hgeU
+    have hge : ¬ (j.val < visible.val.length) := by
+      simpa [UScalar.lt_equiv, Aeneas.Std.Slice.len_val] using hgeU
+    have hj_eq : j.val = visible.val.length :=
+      Nat.le_antisymm hjle (Nat.le_of_not_lt hge)
+    step as ⟨ beq, hbe ⟩
+    have hbeT : (beq = true) ↔ visible.val.length = 0 := by
+      rw [hbe]
+    rw [hbeT]
+    constructor
+    · intro h0
+      exact ⟨fun j' hj' => hclean j' (by omega) hj', h0⟩
+    · intro ⟨_, hlen⟩
+      exact hlen
+
+/-- RFC-0215 P0.1 3/4 (atom `catalog:t1_atomicity`, entry `t1_holds`):
+T1 aceita exatamente quando a tx é all-or-nothing — nunca ambos os
+flags, visíveis nomeiam staged, committed ⇒ todos, senão nenhum. O
+mutante AS-IS (`t1_holds_as_is`) só confere integridade de bytes (tx
+abortada com efeito parcial passa); planta `t1_as_is_does_not_imply_t1`
+recusa. Fate forall sobre o corpo extraído (dois loops reais via
+`loop.spec_decr_nat`). -/
+theorem t1_holds_fate_iff :
+    ∀ (committed aborted : Bool) (staged_n : Usize)
+      (visible : Slice Usize) (v : Bool),
+      (t1_holds committed aborted staged_n visible = ok v) ↔
+        ((v = true ∧ t1_ok committed aborted staged_n visible) ∨
+          (v = false ∧ ¬ t1_ok committed aborted staged_n visible)) := by
+  intro committed aborted staged_n visible v
+  unfold t1_holds
+  split
+  · -- committed = true
+    rename_i hcommitted
+    have hcfalse : ¬ (committed = false) := by
+      rw [hcommitted]; simp
+    split
+    · -- aborted = true : ok false
+      next haborted =>
+        constructor
+        · intro hval
+          rw [(Result.ok.inj hval).symm]
+          exact Or.inr ⟨rfl,
+            fun hp => absurd haborted (by simp [hp.1 hcommitted])⟩
+        · intro hdisj
+          rcases hdisj with ⟨hv, hp⟩ | ⟨hv, _⟩
+          · exact absurd haborted (by simp [hp.1 hcommitted])
+          · subst hv; rfl
+    · -- aborted = false : loop0
+      next haborted =>
+        simp only [Bool.not_eq_true] at haborted
+        obtain ⟨ b, hb, hpost ⟩ := (spec_equiv_exists _ _).mp
+          (t1_loop0_spec staged_n visible 0#usize (Nat.zero_le _)
+            (fun _ hk _ => absurd hk (Nat.not_lt.2 (Nat.zero_le _))))
+        rw [hb]
+        constructor
+        · intro hval
+          rw [(Result.ok.inj hval).symm]
+          cases b with
+          | true =>
+              obtain ⟨hall, hlen⟩ := hpost.mp rfl
+              exact Or.inl ⟨rfl, ⟨fun _ => haborted, hall,
+                fun _ => hlen, fun hc => (hcfalse hc).elim⟩⟩
+          | false =>
+              refine Or.inr ⟨rfl, fun hp => ?_⟩
+              obtain ⟨_, hall, hlen, _⟩ := hp
+              exact absurd (hpost.mpr ⟨hall, hlen hcommitted⟩) (by simp)
+        · intro hdisj
+          cases hdisj with
+          | inl hh =>
+              obtain ⟨hv, _, hall, hlen, _⟩ := hh
+              subst hv
+              have hbt : b = true := by
+                cases b with
+                | true => rfl
+                | false => exact absurd (hpost.mpr ⟨hall, hlen hcommitted⟩) (by simp)
+              rw [hbt]
+          | inr hh =>
+              obtain ⟨hv, hneg⟩ := hh
+              subst hv
+              have hbf : b = false := by
+                cases b with
+                | true =>
+                    exact absurd (hpost.mp rfl) (by
+                      intro hp
+                      obtain ⟨hall, hlen⟩ := hp
+                      exact hneg ⟨fun _ => haborted, hall, fun _ => hlen,
+                        fun hc => (hcfalse hc).elim⟩)
+                | false => rfl
+              rw [hbf]
+  · -- committed = false : loop1
+    next hctrue =>
+      have hcf : committed = false := by
+        simpa [Bool.not_eq_true] using hctrue
+      obtain ⟨ b, hb, hpost ⟩ := (spec_equiv_exists _ _).mp
+        (t1_loop1_spec staged_n visible 0#usize (Nat.zero_le _)
+          (fun _ hk _ => absurd hk (Nat.not_lt.2 (Nat.zero_le _))))
+      rw [hb]
+      constructor
+      · intro hval
+        rw [(Result.ok.inj hval).symm]
+        cases b with
+        | true =>
+            obtain ⟨hall, hlen0⟩ := hpost.mp rfl
+            exact Or.inl ⟨rfl, ⟨fun hc => absurd hc hctrue, hall,
+              fun hc => absurd hc hctrue, fun _ => hlen0⟩⟩
+        | false =>
+            refine Or.inr ⟨rfl, fun hp => ?_⟩
+            obtain ⟨_, hall, _, hnone⟩ := hp
+            exact absurd (hpost.mpr ⟨hall, hnone hcf⟩) (by simp)
+      · intro hdisj
+        cases hdisj with
+        | inl hh =>
+            obtain ⟨hv, _, hall, _, hnone⟩ := hh
+            subst hv
+            have hbt : b = true := by
+              cases b with
+              | true => rfl
+              | false => exact absurd (hpost.mpr ⟨hall, hnone hcf⟩) (by simp)
+            rw [hbt]
+        | inr hh =>
+            obtain ⟨hv, hneg⟩ := hh
+            subst hv
+            have hbf : b = false := by
+              cases b with
+              | true =>
+                  exact absurd (hpost.mp rfl) (by
+                    intro hp
+                    obtain ⟨hall, hnone⟩ := hp
+                    exact hneg ⟨fun hc => absurd hc hctrue, hall,
+                      fun hc => absurd hc hctrue, fun _ => hnone⟩)
+              | false => rfl
+            rw [hbf]
+
