@@ -1,6 +1,6 @@
 # RFC-0214 — Drenar a espinha de durabilidade: env ×6 + wal_state ×6 + cqe ×5 + write_ack ×3 no degrau átomo
 
-**Status:** draft
+**Status:** done
 **Data:** 2026-09-12
 **Autoria:** agente grind (round 8), sucessora direta do RFC-0213
 (catálogo ZERO `data_fate`)
@@ -260,7 +260,17 @@ planta DST verde ANTES do commit, gate GREEN no commit)
    + `test_proof_vs_campaign` ok, extracts `ok` com a contagem nova,
    sorry 0, capturas em findings, nota datada em EXTRACT.md:
    espinha de durabilidade no degrau átomo) + flip
-   `**Status:** done` — status: `todo`
+   `**Status:** done` — status: `done`
+
+   — `done` (2026-09-12): sweep no worktree `pedradb-wt-r0214`
+   (removido após): depth-floor GREEN (extract=136/atom=142,
+   close=6, data_fate=0), inventory-terminal GREEN (7/7 terminal),
+   twin-contracts GREEN (7/7 bound, TSV machine-emitted),
+   `test_proof_vs_campaign` ok (3 ok), `lean_extracts.sh
+   --required` ok (64 libs + 23 compose, 1946 jobs no worktree),
+   sorry 0 nos wrappers do round; nota datada em
+   `formal/aeneas/EXTRACT.md`; capturas em
+   `{SCRATCH}/r0214_sweep_*`; `**Status:** done`
 
 ## Status (living — update with every PR)
 
@@ -271,7 +281,7 @@ planta DST verde ANTES do commit, gate GREEN no commit)
 | P1.1 | p1 | cqe ×5 + write_ack ×3 no degrau átomo | done | 8/8: este commit (FECHAMENTO) | 2026-09-12 |
 | P1.2 | p1 | Veredito datado dos medidos ausentes | done | nenhum recusado; planta resolvida como correção live (0d7324da) | 2026-09-12 |
 | P2.1 | p2 | Composição ∀ env→wal→ack + twins DST | done | ComposeDurabilitySpine + twin kernel + planta (1 passed) | 2026-09-12 |
-| P2.2 | p2 | Sweep final + nota EXTRACT.md + flip done | todo | — | 2026-09-12 |
+| P2.2 | p2 | Sweep final + nota EXTRACT.md + flip done | done | worktree: gates 3× GREEN + campaign ok + extracts ok + sorry 0 | 2026-09-12 |
 
 ## Critérios de aceite
 

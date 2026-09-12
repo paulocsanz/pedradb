@@ -596,3 +596,33 @@ sobre os atoms `catalog:write_admit` × `catalog:wal_commit_plan` ×
 único do catálogo, mesma regra das demais compose libs). Restam
 nomeados: ZERO — os três blocos (membership 0211, cluster 0212,
 storage 0213) drenados; catálogo fechado sem `data_fate` pendente.
+
+## 2026-09-12 — espinha de durabilidade no degrau átomo (RFC-0214): env ×6 + wal_state ×6 + cqe ×5 + write_ack ×3
+
+Medido ao vivo no HEAD do 0214: os 20 pares da espinha de
+durabilidade — wal_state ×6 (WalState.lean: `inv_wal_fate_iff`,
+`wal_append_fate_iff`, `wal_sync_fate_iff`, `wal_ack_fate_iff`,
+`wal_rotate_fate_iff`, `acked_survives_fate_iff`), env_crash ×6
+(EnvCrash.lean: `crash_legal_fate_iff`, `append_fate_iff`,
+`sync_fate_iff`, `barrier_floor_fate_iff`,
+`no_invented_bytes_fate_iff`, `honest_sync_protects_all_fate_iff`),
+cqe ×5 (Cqe.lean: `cqe_res_ok_fate_iff`, `next_user_data_fate_iff`,
+`cqe_act_fate_iff`, `submit_complete_act_fate_iff`,
+`cqe_ring_model_admitted_fate_iff`) e write_ack ×3 (WriteAck.lean:
+`on_append_fate_iff`, `on_barrier_fate_iff`, `on_ack_fate_iff`) —
+todos promovidos ao degrau átomo com teorema iff-∀ sobre o corpo
+extraído, 1 promoção = 1 commit. Escada final do 0214: floor_atom
+122→142, floor_extract 156→136 (close=6, data_fate=0 imutáveis);
+gate GREEN no HEAD de cada promoção. A planta DST do write_ack
+exigiu correção live real (commit 0d7324da): o caminho lone G1
+(`lone_commit`) não avançava o ledger pinado — puts sync de cliente
+único no perfil verificado deixavam o ledger frio. Composição ∀ da
+espinha em `ComposeDurabilitySpine.lean` (23ª compose lib;
+Inv-WAL invariante de todo caminho append/barrier/ack + coroa D1
+sobre todo corte torn, sobre os atoms `catalog:write_ack_append` ×
+`catalog:write_ack_barrier` × `catalog:write_ack_ack`; SEM registro
+no TSV — não é par único, mesma regra das demais compose libs);
+twin kernel `durability_spine_kernel.rs` + planta DST
+`durability_spine_compose_on_live_profile_is_not_ok`. Restam no
+degrau extrato: 136 (nenhum `data_fate` pendente, catálogo
+fechado).
