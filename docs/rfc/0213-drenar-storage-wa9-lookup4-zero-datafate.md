@@ -144,6 +144,14 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
    floor_extract 171→170; planta DST verde
    (`snap_is_empty_on_live_zero_is_not_ok`, 1 passed)
 
+   — 2/4 `done`: `snap_below_watermark_fate_iff`
+   (Lookup.lean; um snapshot está abaixo da marca d'água EXATAMENTE
+   quando sua sequência é mais velha que a mínima visível —
+   `seq < earliest` decidido; o as-is nunca cai abaixo,
+   RFC-0170 P2.4), cap 16→15, floor_atom 108→109,
+   floor_extract 170→169; planta DST verde
+   (`snap_below_watermark_on_live_below_is_not_ok`, 1 passed)
+
 ### P1 — core
 
 3. **P1.1:** cadência flush ×3 (wrapper `Flush.lean`) + cf ×2
@@ -183,7 +191,7 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | Cadência write_admission ×9 | done | 9/9: este commit (FECHAMENTO) | 2026-09-12 |
-| P0.2 | p0 | Cadência lookup ×4 | doing | 1/4: este commit | 2026-09-12 |
+| P0.2 | p0 | Cadência lookup ×4 | doing | 2/4: este commit | 2026-09-12 |
 | P1.1 | p1 | Cadência flush ×3 + cf ×2 | todo | — | 2026-09-11 |
 | P1.2 | p1 | Cadência leveling ×2 + singletons ×4 | todo | — | 2026-09-11 |
 | P1.3 | p1 | Veredito datado dos medidos ausentes | todo | — | 2026-09-11 |
