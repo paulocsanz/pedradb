@@ -41,4 +41,19 @@ Data: 2026-09-11
 
 ## Sweep final (worktree destacado DENTRO de software/)
 
-(preenchido no commit 2/2)
+- `git worktree add --detach /Users/paulo/software/pedradb-wt-r0212
+  9f94b167` (HEAD do commit 1/2 da composição):
+  - depth-floor: GREEN — extract=180 (floor 180), ladder close=6
+    (floor 6) / atom=98 (floor 98), residuals close=7/atom=98 ==
+    live 7/98, count=7, data_fate=26<=26.
+  - product-floor: GREEN — D1=close R1=atom T1=atom C1=close,
+    promoted=4>=floor 4.
+  - ledger: GREEN — 19 pointers resolvem, total=292 proof=266
+    campaign=26.
+  - `test_proof_vs_campaign` — ok.
+- Worktree removido após a captura (`git worktree remove --force`).
+- Árvore principal: `bash scripts/lean_extracts.sh --required` —
+  "ok lean extracts (62 libs + 21 compose)" (StoreTxn incluído no
+  LIBS neste RFC; ComposeStoreFinish incluída no COMPOSE);
+  `grep -c sorry` nos wrappers tocados (Membership.lean,
+  StoreTxn.lean, StoreCompact.lean, ComposeStoreFinish.lean) = 0.

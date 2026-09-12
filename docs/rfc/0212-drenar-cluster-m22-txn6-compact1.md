@@ -1,6 +1,6 @@
 # RFC-0212 — drenar o bloco cluster: membership ×22 + txn ×6 + compact ×1
 
-**Status:** draft
+**Status:** done
 
 > Renumerada de 0211 para 0212 em 2026-09-11: colisão com a
 > `0211-escalonamento-rmw-mc4-drenar-grupo.md` (dela, a262f095) —
@@ -335,6 +335,14 @@ pool honesto manda sobre a meta numérica).
    1/7; nota datada em EXTRACT.md (cluster drenado, 26 storage
    nomeados)
 
+   — 2/2 `done` (FECHAMENTO): sweep final no worktree destacado
+   DENTRO de `software/` no HEAD 9f94b167 — gates 3× GREEN
+   (depth extract=180/atom=98/close=6, data_fate 26<=26; product
+   promoted=4>=4; ledger 292/266/26), `test_proof_vs_campaign`
+   ok, worktree removido; árvore principal extracts
+   `62 libs + 21 compose`, sorry 0 nos wrappers tocados —
+   capturas em findings — status: `done`
+
 ## Status (living — update with every PR)
 
 | ID | Band | Title | Status | Task / PR | Updated |
@@ -345,7 +353,7 @@ pool honesto manda sobre a meta numérica).
 | P1.2 | p1 | Cadências membership 5/6+6/6 — joint+slot ×6; ZERO data_fate | done | fe29d5d4 + 142b2efb + 1223b824 + 38b468b4 + a8776aa8 + este commit (6 atoms, 6 commits; números exatos; membership 22/22 ZERO) | 2026-09-11 |
 | P1.3 | p1 | Veredito datado dos medidos ausentes | done | este commit (veredito: 0 ausentes nas 22 promoções; âncoras green antes/depois) | 2026-09-11 |
 | P2.1 | p2 | Cadência final — txn ×6 + compact ×1; cluster ZERO | done | 0e86d730 + 6b8d3454 + de09a2c3 + 11fc86f1 + a795d062 + 4185c2fc + este commit (7 atoms, 7 commits; números exatos; cluster 29/29 ZERO) | 2026-09-11 |
-| P2.2 | p2 | Composição ∀ fim-de-fila + sweep final + flip done | doing | 1/2: este commit (ComposeStoreFinish; sweep a seguir) | 2026-09-11 |
+| P2.2 | p2 | Composição ∀ fim-de-fila + sweep final + flip done | done | 9f94b167 + este commit (compose + sweep verde + capturas em findings) | 2026-09-11 |
 
 ## Critérios de aceite
 
