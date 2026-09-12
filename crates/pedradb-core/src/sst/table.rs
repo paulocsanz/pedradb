@@ -1230,11 +1230,18 @@ impl SstTable {
             }
         }
         let all = if crate::write_admission_kernel::batch_is_empty(self.index.len() as u64) {
-            // v1 should already have cache filled at open.
-            return Err(CoreError::Internal(format!(
-                "SST {} has no entries cache and no index",
-                self.path.display()
-            )));
+            if self.is_empty() {
+                // A legal empty v2+ table reopens with zero blocks and no
+                // eager cache (compaction can emit an empty output); an
+                // empty answer is not corruption.
+                Vec::new()
+            } else {
+                // v1 should already have cache filled at open.
+                return Err(CoreError::Internal(format!(
+                    "SST {} has no entries cache and no index",
+                    self.path.display()
+                )));
+            }
         } else {
             let mut out = Vec::with_capacity(self.num_entries);
             for i in 0..self.index.len() {
