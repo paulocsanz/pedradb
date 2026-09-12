@@ -5569,6 +5569,10 @@
    "dst_plant": {
     "file": "crates/pedradb-spec/src/properties_kernel.rs",
     "test": "r1_as_is_does_not_imply_r1"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "spec ×4 P0.1 4/4: a resposta de leitura passa R1 exatamente quando bate com o primeiro hit na ordem de probe (r1_first_hit_fate caracteriza IsFirstHit; igualdade Option é axioma de extrato citado); mutante as-is (qualquer hit cobridor, delete resurrected) recusado"
    }
   },
   {

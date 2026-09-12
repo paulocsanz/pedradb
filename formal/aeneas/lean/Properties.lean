@@ -551,3 +551,139 @@ theorem t1_holds_fate_iff :
               | false => rfl
             rw [hbf]
 
+/-- R1 semântica do primeiro hit a partir de `i0`: testemunha `k`
+com `l[k] = some s`, todo anterior (≥ i0, < k) `none`; ou tudo `none`
+e resposta `none`. Bounds viajam como ∃-provas (indexação plain
+elabora com eles no contexto). -/
+def IsFirstHitFrom (i0 : Nat) (l : List (Option Slot)) (o : Option Slot) :
+    Prop :=
+  (∃ (k : Nat) (s : Slot) (hk0 : i0 ≤ k) (hk : k < l.length),
+      l[k] = some s ∧ o = some s ∧
+        (∀ k' (hk0' : i0 ≤ k') (hk' : k' < k), l[k'] = none)) ∨
+  (o = none ∧ ∀ k' (hk0' : i0 ≤ k') (hkl' : k' < l.length),
+      l[k'] = none)
+
+/-- R1 no vetor inteiro (i0 = 0, índice 0 = fonte mais nova). -/
+def IsFirstHit (l : List (Option Slot)) (o : Option Slot) : Prop :=
+  IsFirstHitFrom 0 l o
+
+private theorem isFirstHitFrom_unique {i0 : Nat} {l : List (Option Slot)}
+    {o o' : Option Slot} (h : IsFirstHitFrom i0 l o)
+    (h' : IsFirstHitFrom i0 l o') : o = o' := by
+  unfold IsFirstHitFrom at h h'
+  rcases h with ⟨k, s, hk0, hk, hval, hoe, hpre⟩ | ⟨hone, hall⟩
+  · rcases h' with ⟨k', s', hk0', hk', hval', hoe', hpre'⟩ | ⟨hone', hall'⟩
+    · rcases Nat.lt_trichotomy k k' with hlt | heq | hgt
+      · rw [hpre' k hk0 hlt] at hval
+        simp at hval
+      · subst heq
+        rw [hoe, hoe', ← hval, hval']
+      · rw [hpre k' hk0' hgt] at hval'
+        simp at hval'
+    · rw [hall' k hk0 hk] at hval
+      simp at hval
+  · rcases h' with ⟨k', s', hk0', hk', hval', hoe', hpre'⟩ | ⟨hone', hall'⟩
+    · rw [hall k' hk0' hk'] at hval'
+      simp at hval'
+    · exact hone.trans hone'.symm
+
+private theorem r1_loop_spec (probes : Slice (Option Slot)) (i0 : Usize)
+    (hInv : i0.val ≤ probes.val.length) :
+    spec (r1_first_hit_loop probes i0)
+      (fun o => IsFirstHitFrom i0.val probes.val o) := by
+  unfold r1_first_hit_loop
+  refine loop.spec_decr_nat
+    (fun j => probes.val.length - j.val)
+    (fun j => i0.val ≤ j.val ∧ j.val ≤ probes.val.length ∧
+      ∀ k : Nat, i0.val ≤ k → (hk : k < j.val) →
+        (hkl : k < probes.val.length) → probes.val[k] = none)
+    (fun o => IsFirstHitFrom i0.val probes.val o)
+    (r1_first_hit_loop.body probes) i0 ?body
+    ⟨Nat.le_refl _, hInv,
+      fun _ hk0 hk _ => absurd hk (Nat.not_lt.mpr hk0)⟩
+  intro j ⟨hj0, hjle, hnone⟩
+  unfold r1_first_hit_loop.body
+  dsimp +zeta only
+  split
+  · -- j < len
+    rename_i hltU
+    have hlt : j.val < probes.val.length := by
+      simpa [UScalar.lt_equiv, Aeneas.Std.Slice.len_val] using hltU
+    step as ⟨ o, ho ⟩
+    split
+    · -- is_some : done o
+      rename_i hsome
+      rcases o with _ | s
+      · simp at hsome
+      · refine Or.inl ⟨j.val, s, hj0, hlt, ho.symm, rfl,
+          fun k' hk0' hk' => hnone k' hk0' hk' (by omega)⟩
+    · -- none : cont
+      rename_i hnos
+      rcases o with _ | s
+      · have hon : probes.val[j.val] = none := by rw [← ho]
+        step as ⟨ j', hj' ⟩
+        have hjv : (↑j' : Nat) = (↑j : Nat) + 1 := by simpa using hj'
+        refine ⟨?le, ?le2, ?clean, ?meas⟩
+        · omega
+        · omega
+        · intro k' hk0' hk' hkl
+          rcases Nat.lt_or_ge k' j.val with hkj | hkj
+          · exact hnone k' hk0' hkj hkl
+          · have hk : k' = j.val := by omega
+            subst hk
+            exact hon
+        · omega
+      · simp at hnos
+  · -- j >= len : done none
+    rename_i hgeU
+    have hge : ¬ (j.val < probes.val.length) := by
+      simpa [UScalar.lt_equiv, Aeneas.Std.Slice.len_val] using hgeU
+    have hj_eq : j.val = probes.val.length :=
+      Nat.le_antisymm hjle (Nat.le_of_not_lt hge)
+    refine Or.inr ⟨rfl, ?_⟩
+    intro k' hk0' hkl'
+    exact hnone k' hk0' (by omega) hkl'
+
+/-- RFC-0215 P0.1 4/4, perna semântica: o primeiro hit é exatamente o
+primeiro `some` na ordem de probe a partir do início (índice 0 =
+fonte mais nova), com todos os anteriores `none`. -/
+private theorem r1_first_hit_fate :
+    ∀ (probes : Slice (Option Slot)) (o : Option Slot),
+      (r1_first_hit probes = ok o) ↔ IsFirstHit probes.val o := by
+  intro probes o
+  obtain ⟨ b, hb, hpost ⟩ := (spec_equiv_exists _ _).mp
+    (r1_loop_spec probes 0#usize (Nat.zero_le _))
+  unfold r1_first_hit
+  rw [hb]
+  constructor
+  · intro h
+    rw [(Result.ok.inj h).symm]
+    exact hpost
+  · intro h
+    have hob : o = b := isFirstHitFrom_unique h hpost
+    rw [hob]
+
+/-- RFC-0215 P0.1 4/4 (atom `catalog:r1_no_resumption`, entry
+`r1_answer_ok`): a resposta de leitura passa R1 exatamente quando
+bate com o primeiro hit (`r1_first_hit_fate` caracteriza o hit como
+`IsFirstHit`; a igualdade de `Option` é axioma de extrato, citado não
+reaberto). O mutante AS-IS (`r1_answer_ok_as_is`) aceita qualquer hit
+cobridor (a ressurreição do delete de
+findings/2026-09-04-reopen-delete-resurrected); planta
+`r1_as_is_does_not_imply_r1` recusa. -/
+theorem r1_answer_ok_fate_iff :
+    ∀ (probes : Slice (Option Slot)) (answer : Option Slot) (v : Bool),
+      (r1_answer_ok probes answer = ok v) ↔
+        ∃ o, r1_first_hit probes = ok o ∧
+          core.option.Option.Insts.CoreCmpPartialEqOption.eq
+            Slot.Insts.CoreCmpPartialEqSlot answer o = ok v := by
+  intro probes answer v
+  constructor
+  · intro hval
+    unfold r1_answer_ok at hval
+    obtain ⟨ o, ho, hval ⟩ := bind_ok_inv _ _ _ hval
+    exact ⟨ o, ho, hval ⟩
+  · rintro ⟨ o, ho, hval ⟩
+    unfold r1_answer_ok
+    rw [ho]
+    exact hval

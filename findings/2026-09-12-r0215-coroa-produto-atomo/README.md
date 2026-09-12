@@ -11,7 +11,8 @@ verde antes do commit, exatamente 1 teorema público por commit).
 |---|-----|---------|-------|--------|--------------------|------------|--------|
 | 1/4 | `catalog:c1_quorum` | `c1_holds_fate_iff` | `c1_holds` | `1ae394dc` | 143/135 | `c1_as_is_does_not_imply_c1` ok | 2026-09-12 |
 | 2/4 | `catalog:d1_durability` | `d1_holds_fate_iff` | `d1_holds` | `491ff82e` | 144/134 | `d1_as_is_does_not_imply_d1` ok | 2026-09-12 |
-| 3/4 | `catalog:t1_atomicity` | `t1_holds_fate_iff` | `t1_holds` | (este commit) | 145/133 | `t1_as_is_does_not_imply_t1` ok | 2026-09-12 |
+| 3/4 | `catalog:t1_atomicity` | `t1_holds_fate_iff` | `t1_holds` | `96377d9c` | 145/133 | `t1_as_is_does_not_imply_t1` ok | 2026-09-12 |
+| 4/4 | `catalog:r1_no_resurrection` | `r1_answer_ok_fate_iff` | `r1_answer_ok` | (este commit) | 146/132 | `r1_as_is_does_not_imply_r1` ok | 2026-09-12 |
 
 - **c1_holds (1/4)**: valor servido passa C1 exatamente quando a
   maioria de TODA config ativa replica — joint exige antiga E nova
@@ -38,3 +39,17 @@ verde antes do commit, exatamente 1 teorema público por commit).
   AS-IS (só integridade de bytes; tx abortada com efeito parcial
   passa) recusado por `t1_as_is_does_not_imply_t1` (exit 0, 1
   passed). Axiomas: os 3 padrão do Lean.
+
+- **r1_answer_ok (4/4, FECHAMENTO P0.1)**: a resposta de leitura
+  passa R1 exatamente quando bate com o primeiro hit na ordem de
+  probe a partir do índice 0 (fonte mais nova). Perna semântica
+  `r1_first_hit_fate` (private) caracteriza `r1_first_hit` como
+  `IsFirstHit` via `IsFirstHitFrom` (∃-testemunha com prefixo `none`;
+  unicidade por `isFirstHitFrom_unique`); a perna de resposta usa a
+  igualdade de `Option` do extrato (axioma citado, não reaberto).
+  Mutante AS-IS (aceita qualquer hit cobridor — a ressurreição do
+  delete de
+  `findings/2026-09-04-reopen-delete-resurrected`) recusado por
+  `r1_as_is_does_not_imply_r1` (exit 0, 1 passed). Fechamento:
+  floor_atom 142→146, floor_extract 136→132, gate GREEN no HEAD de
+  cada uma das 4 promoções, 1 teorema público por commit.

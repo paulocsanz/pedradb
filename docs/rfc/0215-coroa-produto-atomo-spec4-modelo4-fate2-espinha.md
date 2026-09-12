@@ -67,7 +67,7 @@ planta DST verde ANTES do commit, gate GREEN no commit).
    `t1_holds`, `c1_holds` — iff-∀ sobre o corpo extraído de cada
    preditor de spec (o placeholder `: True` do wrapper é substituído
    pelo teorema real) — floor_atom 142→146, floor_extract 136→132 —
-   status: `todo` (3/4: `c1_holds`, `d1_holds`, `t1_holds` feitos 2026-09-12)
+   status: `done` (2026-09-12; floor_atom 146, floor_extract 132)
 
 2. **P0.2** modelo ×4: `d1_modelo` (`D1Modelo.lean`), `r1_modelo`
    (`LsmR1.lean`), `t1_modelo` (`T1Modelo.lean`), `c1_modelo`
@@ -128,7 +128,7 @@ planta DST verde ANTES do commit, gate GREEN no commit).
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | spec ×4 átomo (`Properties.lean`): d1_holds, r1_answer_ok, t1_holds, c1_holds | todo | — | 2026-09-12 |
+| P0.1 | p0 | spec ×4 átomo (`Properties.lean`): d1_holds, r1_answer_ok, t1_holds, c1_holds | done | `c1_holds_fate_iff`/`d1_holds_fate_iff`/`t1_holds_fate_iff`/`r1_answer_ok_fate_iff` | 2026-09-12 |
 | P0.2 | p0 | modelo ×4 átomo: d1_modelo, r1_modelo, t1_modelo, c1_modelo | todo | — | 2026-09-12 |
 | P1.1 | p1 | fate ×2 átomo: d1_put_ok, c1_advance_commit | todo | — | 2026-09-12 |
 | P1.2 | p1 | coroa↔espinha composta (`ComposeProductCrown.lean` + twin + DST, sem TSV) | todo | — | 2026-09-12 |
