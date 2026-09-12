@@ -142,3 +142,4 @@ atom	catalog:flush_publish	flush_publish_fate_iff	formal/aeneas/lean/Flush.lean	
 atom	catalog:auto_flush_due	auto_flush_due_fate_iff	formal/aeneas/lean/Flush.lean	auto_flush_due
 atom	catalog:flush_decision	flush_decision_fate_iff	formal/aeneas/lean/Flush.lean	wal_rotate_decision
 atom	catalog:cf_family	cf_family_fate_iff	formal/aeneas/lean/Cf.lean	key_in_cf_family
+atom	catalog:cf_family_of	cf_family_of_fate_iff	formal/aeneas/lean/Cf.lean	cf_family_of

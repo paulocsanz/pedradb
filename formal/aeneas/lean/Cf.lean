@@ -440,3 +440,100 @@ theorem cf_family_fate_iff :
           exact congrArg ok hv.symm
       · rw [if_neg hgt]
         exact congrArg ok hv.symm
+
+/-- RFC-0213 P1.1 (storage cadence, atom `catalog:cf_family_of`): the
+    family of a user key is decided EXACTLY along the extracted route
+    — no NUL or a leading NUL yields the "default" string; otherwise
+    the family is the lossy-UTF8 decode of the bytes strictly before
+    the first NUL, owned by the Cow (fate forall over the extracted
+    body, RFC-0170 P2.4). The AS-IS mutant answers "default" for
+    every key (the lie the DST plant
+    `cf_family_of_on_live_sst_bounds_is_not_ok` refutes). -/
+theorem cf_family_of_fate_iff :
+    ∀ (user_key : Slice Std.U8) (v : String),
+    (cf_family_of user_key = ok v) ↔
+      (∃ i o u,
+          core.slice.Slice.iter user_key = ok i ∧
+          core.slice.iter.Iter.Insts.CoreIterTraitsIteratorIteratorSharedAT.position
+            cf_family_of.closure.Insts.CoreOpsFunctionFnMutTupleSharedU8Bool i ()
+            = ok (o, u) ∧
+          ((o = none ∧
+              core.convert.IntoFrom.into
+                alloc.string.String.Insts.CoreConvertFromShared0Str
+                (toStr "default") = ok v) ∨
+            (∃ i1, o = some i1 ∧
+              ((i1 > 0#usize ∧
+                  ∃ s c,
+                    core.slice.index.Slice.index
+                      (core.slice.index.SliceIndexRangeToUsizeSlice Std.U8) user_key
+                      { «end» := i1 } = ok s ∧
+                    alloc.string.String.from_utf8_lossy s = ok c ∧
+                    alloc.borrow.Cow.into_owned
+                      Str.Insts.AllocBorrowToOwnedString c = ok v) ∨
+                (¬(i1 > 0#usize) ∧
+                  core.convert.IntoFrom.into
+                    alloc.string.String.Insts.CoreConvertFromShared0Str
+                    (toStr "default") = ok v))))) := by
+  intro user_key v
+  unfold cf_family_of
+  constructor
+  · intro hval
+    obtain ⟨i, hi, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨pair, hpair, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨o, u⟩ := pair
+    refine ⟨i, o, u, hi, hpair, ?_⟩
+    cases o with
+    | none =>
+      exact Or.inl ⟨rfl, hval⟩
+    | some i1 =>
+      refine Or.inr ⟨i1, rfl, ?_⟩
+      have h2 : (if i1 > 0#usize then
+              (do
+                let s ← core.slice.index.Slice.index
+                  (core.slice.index.SliceIndexRangeToUsizeSlice Std.U8) user_key
+                  { «end» := i1 }
+                let c ← alloc.string.String.from_utf8_lossy s
+                alloc.borrow.Cow.into_owned Str.Insts.AllocBorrowToOwnedString c)
+            else
+              core.convert.IntoFrom.into
+                alloc.string.String.Insts.CoreConvertFromShared0Str
+                (toStr "default")) = ok v := hval
+      by_cases hgt : i1 > 0#usize
+      · refine Or.inl ⟨hgt, ?_⟩
+        rw [if_pos hgt] at h2
+        obtain ⟨s, hs, h2⟩ := bind_ok_inv _ _ _ h2
+        obtain ⟨c, hc, h2⟩ := bind_ok_inv _ _ _ h2
+        exact ⟨s, c, hs, hc, h2⟩
+      · refine Or.inr ⟨hgt, ?_⟩
+        rw [if_neg hgt] at h2
+        exact h2
+  · rintro ⟨i, o, u, hi, hpos, hlast⟩
+    refine bind_intro i hi ?_
+    refine bind_intro (o, u) hpos ?_
+    cases o with
+    | none =>
+      rcases hlast with ⟨-, hval⟩ | ⟨i1, hbad, -⟩
+      · exact hval
+      · exact absurd hbad (by simp)
+    | some i1 =>
+      rcases hlast with ⟨hbad, -⟩ | ⟨i1', heqo, hzvh⟩
+      · exact absurd hbad (by simp)
+      · injection heqo with e
+        subst e
+        have h2 : (if i1 > 0#usize then
+              (do
+                let s ← core.slice.index.Slice.index
+                  (core.slice.index.SliceIndexRangeToUsizeSlice Std.U8) user_key
+                  { «end» := i1 }
+                let c ← alloc.string.String.from_utf8_lossy s
+                alloc.borrow.Cow.into_owned Str.Insts.AllocBorrowToOwnedString c)
+            else
+              core.convert.IntoFrom.into
+                alloc.string.String.Insts.CoreConvertFromShared0Str
+                (toStr "default")) = ok v := by
+          rcases hzvh with ⟨hgt, s, c, hs, hc, hv⟩ | ⟨hgt, hv⟩
+          · rw [if_pos hgt]
+            exact bind_intro s hs (bind_intro c hc hv)
+          · rw [if_neg hgt]
+            exact hv
+        exact h2

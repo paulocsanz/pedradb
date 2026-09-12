@@ -4931,7 +4931,6 @@
     "crates/pedradb-core/src/cf_kernel.rs"
    ],
    "entry": "cf_family_of",
-   "data_fate": true,
    "live_callers": [
     {
      "file": "crates/pedradb-core/src/cf_kernel.rs",
@@ -4942,6 +4941,10 @@
    "dst_plant": {
     "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
     "test": "cf_family_of_on_live_sst_bounds_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "familia da chave decidida exatamente pela rota extraida: sem NUL ou NUL lider -> 'default'; senao decode lossy dos bytes antes do primeiro NUL, owned pelo Cow; as-is responde 'default' para toda chave e a planta DST refuta"
    }
   },
   {
