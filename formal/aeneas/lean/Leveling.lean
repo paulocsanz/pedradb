@@ -70,3 +70,74 @@ theorem level_target_bytes_ok_iff_zero_or_fanout_chain :
         refine bind_intro e hmin ?_
         refine bind_intro f hpow ?_
         exact hmul
+
+/-- RFC-0213 P1.2 (storage cadence, atom `catalog:leveling_pick`): the
+    L0→L1 compaction job is picked EXACTLY along the extracted route —
+    an empty L0 or a zero input cap yields no job; otherwise the cap
+    `min(len l0, max_l0)` bounds the selection walk, the first file
+    seeds the hull, and the sel/slice loops (loop atoms) decide the
+    job with every monadic step ok (fate forall over the extracted
+    body, RFC-0170 P2.4). The AS-IS mutant reabsorbs the whole L1
+    (the lie the DST plant `pick_l0_to_l1_on_live_slice_is_not_ok`
+    refutes). -/
+theorem pick_l0_to_l1_fate_iff :
+    ∀ (l0 l1 : Slice LevelFile) (max_l0 : Usize)
+      (v : Option ((alloc.vec.Vec Usize) × (alloc.vec.Vec Usize))),
+    (pick_l0_to_l1 l0 l1 max_l0 = ok v) ↔
+      ((∃ b, core.slice.Slice.is_empty l0 = ok b ∧ b = true ∧ v = none) ∨
+       (∃ b, core.slice.Slice.is_empty l0 = ok b ∧ ¬(b = true) ∧
+          max_l0 = 0#usize ∧ v = none) ∨
+       (∃ b f0 hull_lo hull_hi sel1 sel hull_lo1 hull_hi1 slice,
+          core.slice.Slice.is_empty l0 = ok b ∧ ¬(b = true) ∧
+          ¬(max_l0 = 0#usize) ∧
+          Slice.index_usize l0 0#usize = ok f0 ∧
+          alloc.vec.CloneVec.clone core.clone.CloneU8 f0.lo = ok hull_lo ∧
+          alloc.vec.CloneVec.clone core.clone.CloneU8 f0.hi = ok hull_hi ∧
+          alloc.vec.Vec.push (alloc.vec.Vec.new Usize) f0.idx = ok sel1 ∧
+          pick_l0_sel_loop l0
+            (if Slice.len l0 < max_l0 then Slice.len l0 else max_l0)
+            sel1 hull_lo hull_hi 1#usize = ok (sel, hull_lo1, hull_hi1) ∧
+          pick_l0_slice_loop l1 hull_lo1 hull_hi1
+            (alloc.vec.Vec.new Usize) 0#usize = ok slice ∧
+          v = some (sel, slice))) := by
+  intro l0 l1 max_l0 v
+  unfold pick_l0_to_l1
+  constructor
+  · intro hval
+    obtain ⟨b, hb, hval⟩ := bind_ok_inv _ _ _ hval
+    split at hval
+    · next hbt =>
+      exact Or.inl ⟨b, hb, hbt, by injection hval with hv; exact hv.symm⟩
+    · next hbt =>
+      split at hval
+      · next hzt =>
+        exact Or.inr (Or.inl
+          ⟨b, hb, hbt, hzt, by injection hval with hv; exact hv.symm⟩)
+      · next hzt =>
+        obtain ⟨f0, hf0, hval⟩ := bind_ok_inv _ _ _ hval
+        obtain ⟨hull_lo, hlo, hval⟩ := bind_ok_inv _ _ _ hval
+        obtain ⟨hull_hi, hhi, hval⟩ := bind_ok_inv _ _ _ hval
+        obtain ⟨sel1, hsel1, hval⟩ := bind_ok_inv _ _ _ hval
+        obtain ⟨triple, hloop, hval⟩ := bind_ok_inv _ _ _ hval
+        obtain ⟨sel, hull_lo1, hull_hi1⟩ := triple
+        obtain ⟨slice, hslice, hval⟩ := bind_ok_inv _ _ _ hval
+        exact Or.inr (Or.inr ⟨b, f0, hull_lo, hull_hi, sel1, sel, hull_lo1,
+          hull_hi1, slice, hb, hbt, hzt, hf0, hlo, hhi, hsel1, hloop,
+          hslice, by injection hval with hv; exact hv.symm⟩)
+  · rintro (⟨b, hb, hbt, hv⟩ |
+      ⟨b, hb, hbt, hzt, hv⟩ |
+      ⟨b, f0, hull_lo, hull_hi, sel1, sel, hull_lo1, hull_hi1, slice,
+        hb, hbt, hzt, hf0, hlo, hhi, hsel1, hloop, hslice, hv⟩)
+    · refine bind_intro b hb ?_
+      rw [if_pos hbt, hv]
+    · refine bind_intro b hb ?_
+      rw [if_neg hbt, if_pos hzt, hv]
+    · refine bind_intro b hb ?_
+      rw [if_neg hbt, if_neg hzt]
+      refine bind_intro f0 hf0 ?_
+      refine bind_intro hull_lo hlo ?_
+      refine bind_intro hull_hi hhi ?_
+      refine bind_intro sel1 hsel1 ?_
+      refine bind_intro (sel, hull_lo1, hull_hi1) hloop ?_
+      refine bind_intro slice hslice ?_
+      exact congrArg ok hv.symm

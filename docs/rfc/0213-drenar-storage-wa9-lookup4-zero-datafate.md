@@ -226,7 +226,17 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
    `write_record_count` (`Batch.lean`), `iter_window`
    (`Iter.lean`), `occ_batch_plan` (`GroupCommit.lean`): ×6, cap
    8→2, floor_atom 116→122, floor_extract 162→156 — status:
-   `todo`
+   `doing`
+
+   — 1/6 `done`: `pick_l0_to_l1_fate_iff`
+   (Leveling.lean; o job L0→L1 é decidido EXATAMENTE pela rota
+   extraída — L0 vazio ou cap 0 ⇒ sem job; senão o cap
+   `min(len l0, max_l0)` limita a caminhada de seleção, o
+   primeiro arquivo semeia o hull e os loops de sel/slice (átomos
+   de loop) decidem o job com cada passo monádico ok; o as-is
+   reabsorve o L1 inteiro, RFC-0170 P2.4), cap 8→7,
+   floor_atom 116→117, floor_extract 162→161; planta DST verde
+   (`pick_l0_to_l1_on_live_slice_is_not_ok`, 1 passed)
 5. **P1.3:** veredito datado dos medidos ausentes — SE alguma
    promoção acima medir fn/planta/handler inexistente, veredito
    por par em findings (reescrever para fn viva SE o caminho
@@ -257,7 +267,7 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
 | P0.1 | p0 | Cadência write_admission ×9 | done | 9/9: este commit (FECHAMENTO) | 2026-09-12 |
 | P0.2 | p0 | Cadência lookup ×4 | done | 4/4: este commit (FECHAMENTO) | 2026-09-12 |
 | P1.1 | p1 | Cadência flush ×3 + cf ×2 | done | 5/5: este commit (FECHAMENTO) | 2026-09-12 |
-| P1.2 | p1 | Cadência leveling ×2 + singletons ×4 | todo | — | 2026-09-11 |
+| P1.2 | p1 | Cadência leveling ×2 + singletons ×4 | doing | 1/6: este commit | 2026-09-12 |
 | P1.3 | p1 | Veredito datado dos medidos ausentes | todo | — | 2026-09-11 |
 | P2.1 | p2 | Wal finais ×2 — CATÁLOGO ZERO data_fate | todo | — | 2026-09-11 |
 | P2.2 | p2 | Composição ∀ storage + sweep final + flip done | todo | — | 2026-09-11 |
