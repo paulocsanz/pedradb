@@ -3637,6 +3637,171 @@ fn persist_fence_node_counts_on_live_queued_is_not_ok() {
 }
 
 #[test]
+fn queued_finish_from_counts_on_live_queued_is_not_ok() {
+    // RFC-0212 P2.2: the FINISH chain composed over the four registered
+    // atoms (discard_leader × discard_uncommitted × persist_fence ×
+    // persist_hist) — the AS-IS mutant gates the fence/hist legs on ids
+    // too (0136): a local replica removed from ids finishes without its
+    // abort fence.
+    assert!(queued_finish_from_counts(true, false));
+    assert!(queued_finish_from_counts(true, true));
+    assert!(!queued_finish_from_counts(false, false));
+    assert!(
+        !queued_finish_from_counts_as_is(true, false),
+        "AS-IS dente: finish sem cerca na réplica local removida de ids"
+    );
+    let dir = std::env::temp_dir().join(format!(
+        "pedra-queued-finish-chain-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut cluster = StoreCluster::open_with_rng(&dir, 4, 1, SeedRng::new(0x0152_0141)).unwrap();
+    cluster.pin_dst_queued();
+    for _ in 0..120 {
+        cluster.tick().unwrap();
+        pump_queued(&mut cluster, 48);
+        if cluster.range_leader(1).is_some() {
+            break;
+        }
+    }
+    let leader = cluster
+        .range_leader(1)
+        .expect("Queued 4-node must elect via handle_inbound");
+    let follower = cluster
+        .ids
+        .iter()
+        .copied()
+        .find(|&id| id != leader && id != 4)
+        .expect("remaining-voter follower");
+    assert!(cluster.is_local_node(4), "node 4 is a local node");
+    // An uncommitted entry on the replica while it is still a member,
+    // delivered with ITS OWN prev state (proven technique of the
+    // discard_uncommitted plant) — it is still there when the leave lands.
+    let (term4, last_idx4, last_term4) = {
+        let p = cluster.nodes.get(&4).unwrap().ranges.get(&1).unwrap();
+        (p.term, p.last_index(), p.last_term())
+    };
+    let put_idx = last_idx4.saturating_add(1);
+    let _ = cluster.drain_outbound();
+    let put = PeerMsg::AppendEntries {
+        range_id: 1,
+        term: term4,
+        leader_id: leader,
+        prev_log_index: last_idx4,
+        prev_log_term: last_term4,
+        leader_commit: 0,
+        entries: vec![LogRec {
+            index: put_idx,
+            term: term4,
+            entry: RangeEntry::Put {
+                key: b"rfc0212-finish".to_vec(),
+                value: b"uncommitted".to_vec(),
+                si_gen: 0,
+            },
+        }],
+    }
+    .encode();
+    cluster.handle_inbound(leader, 4, &put).unwrap();
+    let mut saw_put = false;
+    for (_from, _to, raw) in cluster.drain_outbound() {
+        if let Ok(PeerMsg::AppendEntriesReply { success, .. }) = PeerMsg::decode(&raw) {
+            assert!(success, "inbound put AE on 4 must append");
+            saw_put = true;
+        }
+    }
+    assert!(saw_put, "expected AppendEntriesReply for put");
+    let has_put = cluster
+        .nodes
+        .get(&4)
+        .unwrap()
+        .ranges
+        .get(&1)
+        .map(|p| p.log.iter().any(|r| r.index == put_idx))
+        .unwrap_or(false);
+    assert!(has_put, "replica must append the uncommitted put");
+    // NOW remove node 4 via the joint leave on a remaining voter.
+    let (term, last_idx, last_term) = {
+        let p = cluster
+            .nodes
+            .get(&follower)
+            .unwrap()
+            .ranges
+            .get(&1)
+            .unwrap();
+        (p.term, p.last_index(), p.last_term())
+    };
+    let leave_idx = last_idx.saturating_add(1);
+    let cfg = vec![1u64, 2, 3];
+    let _ = cluster.drain_outbound();
+    let leave = PeerMsg::AppendEntries {
+        range_id: 1,
+        term,
+        leader_id: leader,
+        prev_log_index: last_idx,
+        prev_log_term: last_term,
+        leader_commit: leave_idx,
+        entries: vec![LogRec {
+            index: leave_idx,
+            term,
+            entry: RangeEntry::MembershipJoint {
+                old: cfg.clone(),
+                new: cfg,
+            },
+        }],
+    }
+    .encode();
+    cluster.handle_inbound(leader, follower, &leave).unwrap();
+    for (_from, _to, raw) in cluster.drain_outbound() {
+        if let Ok(PeerMsg::AppendEntriesReply { success, .. }) = PeerMsg::decode(&raw) {
+            assert!(success, "inbound leave AE must append+commit");
+        }
+    }
+    assert!(!cluster.is_member(4), "inbound leave apply must drop 4");
+    // Composed finish on the removed local replica: the fence/hist legs
+    // still fire (the AS-IS chain would skip them: no abort on node 4).
+    let tid = 0x0152_0141u64;
+    cluster.fence_txn_aborted(tid).unwrap();
+    let got = cluster
+        .nodes
+        .get(&4)
+        .unwrap()
+        .db
+        .get(&crate::txn_status_key(tid));
+    assert_eq!(
+        got.as_deref(),
+        Some(b"abort".as_slice()),
+        "removed replica must persist abort fence (fence/hist legs of the composed finish)"
+    );
+    // Discard leg still visits the removed local replica: the uncommitted
+    // suffix leaves its log (RAM), with F-found sent_through neutralized.
+    for n in cluster.nodes.values_mut() {
+        for p in n.ranges.values_mut() {
+            p.sent_through.clear();
+        }
+    }
+    cluster
+        .discard_uncommitted_from(1, leader, put_idx)
+        .expect("discard leg on removed replica");
+    let put_survives = cluster
+        .nodes
+        .get(&4)
+        .unwrap()
+        .ranges
+        .get(&1)
+        .map(|p| p.log.iter().any(|r| r.index == put_idx))
+        .unwrap_or(false);
+    assert!(
+        !put_survives,
+        "discard leg must drop the uncommitted suffix on removed replica 4"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn force_clear_node_counts_on_live_queued_is_not_ok() {
     assert!(force_clear_node_counts(true, false));
     assert!(

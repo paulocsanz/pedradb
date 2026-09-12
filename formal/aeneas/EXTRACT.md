@@ -554,3 +554,24 @@ libs). Restam nomeados no cluster: 29 (22 em
 `crates/pedradb-raft/src/membership_kernel.rs`, 6 em
 `crates/pedradb-store/src/txn_kernel.rs`, 1 singleton
 `compact_unleft` em `compact_kernel.rs`).
+
+## 2026-09-11 — bloco cluster DRENADO (RFC-0212): ZERO `data_fate` pendente
+
+Medido ao vivo no HEAD do 0212: os 29 pares do bloco cluster — 22 em
+`crates/pedradb-raft/src/membership_kernel.rs`, 6 em
+`crates/pedradb-store/src/txn_kernel.rs`, 1 singleton `compact_unleft`
+em `compact_kernel.rs` — ZERO com `data_fate` pendente: 29 atoms
+registrados (Membership.lean ×22; StoreTxn.lean ×6 com o wrapper
+inscrito no gate de extracts — LIBS 62 libs, buraco pré-existente
+desde o RFC-0191 fechado; StoreCompact.lean ×1). Escada final do
+0212: cap 55→26, floor_atom 69→98, floor_extract 209→180.
+Composição ∀ do protocolo de fim-de-fila queued em
+`ComposeStoreFinish.lean` (21ª compose lib; discard-leader local ∧
+discard conta ∧ cerca/hist persistem conforme o fate sobre os atoms
+`catalog:discard_leader` × `catalog:discard_uncommitted` ×
+`catalog:persist_fence` × `catalog:persist_hist`; SEM registro no
+TSV — não é par único do catálogo, mesma regra das demais compose
+libs). Restam nomeados, todos storage: 26 (write_admission 9,
+lookup 4, flush 3, cf 2, leveling 2 + 6 singletons: wal_recover,
+dictionary_link, visible_at, write_record_count, iter_window,
+occ_batch_plan).

@@ -305,6 +305,29 @@ pub fn discard_leader_local_as_is(_is_local: bool) -> bool {
     true
 }
 
+/// RFC-0212 P2.2: the queued FINISH chain composed over the four
+/// registered atoms (`catalog:discard_leader`, `catalog:discard_uncommitted`,
+/// `catalog:persist_fence`, `catalog:persist_hist`) — the discard counts
+/// only where it runs (local), the persist-leader is a local node, and
+/// the fence/hist persist on every LOCAL replica regardless of `ids`.
+#[must_use]
+pub fn queued_finish_from_counts(is_local: bool, in_ids: bool) -> bool {
+    discard_leader_local(is_local)
+        && discard_node_counts(is_local, in_ids)
+        && persist_fence_node_counts(is_local, in_ids)
+        && persist_hist_node_counts(is_local, in_ids)
+}
+
+/// AS-IS: gate the fence/hist on `ids` too (the 0136 leftover — a
+/// replica removed from `ids` finishes without its abort fence).
+#[must_use]
+pub fn queued_finish_from_counts_as_is(is_local: bool, in_ids: bool) -> bool {
+    discard_leader_local(is_local)
+        && discard_node_counts(is_local, in_ids)
+        && persist_fence_node_counts(is_local && in_ids, in_ids)
+        && persist_hist_node_counts(is_local && in_ids, in_ids)
+}
+
 /// RFC-0145: a node dropped from `ids` must step down from Leader.
 #[must_use]
 pub fn removed_steps_down(in_ids: bool) -> bool {

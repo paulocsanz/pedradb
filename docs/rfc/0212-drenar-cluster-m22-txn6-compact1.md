@@ -319,7 +319,21 @@ pool honesto manda sobre a meta numérica).
    `software/`, gates 3× GREEN, extracts ok, sorry 0, capturas em
    findings, nota datada em EXTRACT.md: cluster drenado; 26 de
    storage restantes nomeados) + flip `**Status:** done` —
-   status: `todo`
+   status: `doing`
+
+   — 1/2 `done`: `ComposeStoreFinish.lean` (21ª compose lib) —
+   `queued_finish_chain_fate`: o encadeamento discard-leader →
+   discard → cerca → hist landa `ok v` com `v` exatamente a
+   localidade do nó para TODO `in_ids` (a cerca/hist dispara na
+   réplica removida — 0136 sobrevive à composição), cada perna é
+   o atom registrado (corpos não abertos); twin kernel
+   `queued_finish_from_counts` + planta DST verde
+   (`queued_finish_from_counts_on_live_queued_is_not_ok`,
+   regressão 150 passed); SEM registro no TSV (razão datada em
+   findings — não é par único); wiring lakefile + COMPOSE no
+   `lean_extracts.sh`; StoreTxn inscrito no LIBS (62 libs) no
+   1/7; nota datada em EXTRACT.md (cluster drenado, 26 storage
+   nomeados)
 
 ## Status (living — update with every PR)
 
@@ -331,7 +345,7 @@ pool honesto manda sobre a meta numérica).
 | P1.2 | p1 | Cadências membership 5/6+6/6 — joint+slot ×6; ZERO data_fate | done | fe29d5d4 + 142b2efb + 1223b824 + 38b468b4 + a8776aa8 + este commit (6 atoms, 6 commits; números exatos; membership 22/22 ZERO) | 2026-09-11 |
 | P1.3 | p1 | Veredito datado dos medidos ausentes | done | este commit (veredito: 0 ausentes nas 22 promoções; âncoras green antes/depois) | 2026-09-11 |
 | P2.1 | p2 | Cadência final — txn ×6 + compact ×1; cluster ZERO | done | 0e86d730 + 6b8d3454 + de09a2c3 + 11fc86f1 + a795d062 + 4185c2fc + este commit (7 atoms, 7 commits; números exatos; cluster 29/29 ZERO) | 2026-09-11 |
-| P2.2 | p2 | Composição ∀ fim-de-fila + sweep final + flip done | todo | — | 2026-09-11 |
+| P2.2 | p2 | Composição ∀ fim-de-fila + sweep final + flip done | doing | 1/2: este commit (ComposeStoreFinish; sweep a seguir) | 2026-09-11 |
 
 ## Critérios de aceite
 

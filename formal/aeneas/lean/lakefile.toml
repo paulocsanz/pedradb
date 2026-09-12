@@ -489,4 +489,7 @@ name = "ComposeConcurrent"
 name = "ComposeStoreRaft"
 
 [[lean_lib]]
+name = "ComposeStoreFinish"
+
+[[lean_lib]]
 name = "ComposeL28"
