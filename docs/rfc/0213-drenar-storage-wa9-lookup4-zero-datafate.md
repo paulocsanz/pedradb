@@ -175,7 +175,15 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
 
 3. **P1.1:** cadência flush ×3 (wrapper `Flush.lean`) + cf ×2
    (wrapper `Cf.lean`): ×5, cap 13→8, floor_atom 111→116,
-   floor_extract 167→162 — status: `todo`
+   floor_extract 167→162 — status: `doing`
+
+   — 1/5 `done`: `flush_publish_fate_iff`
+   (Flush.lean; o manifesto pode publicar EXATAMENTE quando o SST
+   está durável — identidade sobre `sst_durable`; o as-is publica
+   SST sem sync, RFC-0170 P2.4), cap 13→12, floor_atom 111→112,
+   floor_extract 167→166; planta DST verde
+   (`may_publish_manifest_on_live_unsynced_sst_is_not_ok`, no
+   pedradb-sim, 1 passed)
 4. **P1.2:** cadência leveling ×2 (`Leveling.lean`) + os 4
    singletons com wrapper no LIBS: `visible_at` (`Merge.lean`),
    `write_record_count` (`Batch.lean`), `iter_window`
@@ -211,7 +219,7 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | Cadência write_admission ×9 | done | 9/9: este commit (FECHAMENTO) | 2026-09-12 |
 | P0.2 | p0 | Cadência lookup ×4 | done | 4/4: este commit (FECHAMENTO) | 2026-09-12 |
-| P1.1 | p1 | Cadência flush ×3 + cf ×2 | todo | — | 2026-09-11 |
+| P1.1 | p1 | Cadência flush ×3 + cf ×2 | doing | 1/5: este commit | 2026-09-12 |
 | P1.2 | p1 | Cadência leveling ×2 + singletons ×4 | todo | — | 2026-09-11 |
 | P1.3 | p1 | Veredito datado dos medidos ausentes | todo | — | 2026-09-11 |
 | P2.1 | p2 | Wal finais ×2 — CATÁLOGO ZERO data_fate | todo | — | 2026-09-11 |

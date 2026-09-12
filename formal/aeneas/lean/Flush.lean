@@ -29,6 +29,18 @@ theorem flush_plan_as_is_lose_tail_dente :
   unfold flush_plan_as_is_lose_tail
   rfl
 
+/-- RFC-0213 P1.1 (storage cadence, atom `catalog:flush_publish`):
+    the manifest may publish EXACTLY when the SST is durable — fate
+    forall over the extracted body (RFC-0170 P2.4); the AS-IS mutant
+    publishes unsynced SSTs (the lie the DST plant
+    `may_publish_manifest_on_live_unsynced_sst_is_not_ok` refutes). -/
+theorem flush_publish_fate_iff :
+    ∀ (sst_durable v : Bool),
+      (may_publish_manifest sst_durable = ok v) ↔ v = sst_durable := by
+  intro sst_durable v
+  unfold may_publish_manifest
+  cases sst_durable <;> cases v <;> simp
+
 /-- Live flush read pin keeps the WAL. -/
 theorem wal_rotate_pin_live_keeps :
     wal_rotate_decision

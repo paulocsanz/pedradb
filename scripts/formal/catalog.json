@@ -5228,7 +5228,6 @@
     "crates/pedradb-core/src/db.rs"
    ],
    "entry": "may_publish_manifest",
-   "data_fate": true,
    "handlers": [
     "persist_manifest",
     "persist_bulk_manifest"
@@ -5237,6 +5236,10 @@
    "dst_plant": {
     "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
     "test": "may_publish_manifest_on_live_unsynced_sst_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "manifest-publish verdict fully fated: publish exactly when SST durable; as-is publishes unsynced SSTs, refused by DST plant"
    }
   },
   {
