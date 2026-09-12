@@ -94,3 +94,14 @@ verde antes do commit, exatamente 1 teorema público por commit).
   Axiomas: os 3 padrão + os 2 axiomas de extrato documentados
   (`inv_lsm`, eq de Option). Gate GREEN: floor_atom 147→148,
   floor_extract 131→130.
+
+## P0.2 — modelo ×4 átomo (3/4)
+
+- **t1_modelo (3/4)**: o desfecho da máquina T1 é exatamente a
+  decisão que o spec nomeia — `ok true` quando a tx recuperada passa
+  o preditor `t1_holds_of`, `ok false` quando a quebra. Ramos
+  construtivos (`t1m_holds`/`t1m_violates`) citam
+  `tx_recover`/`t1_holds_of` sem reabrir corpos. Planta DST
+  `t1_modelo_on_live_abort_reopen_is_not_ok` (pedradb-store, exit 0,
+  1 passed). Axiomas: os 3 padrão do Lean. Gate GREEN: floor_atom
+  148→149, floor_extract 130→129.

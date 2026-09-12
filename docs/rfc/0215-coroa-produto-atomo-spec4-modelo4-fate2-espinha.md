@@ -73,8 +73,8 @@ planta DST verde ANTES do commit, gate GREEN no commit).
    (`LsmR1.lean`), `t1_modelo` (`T1Modelo.lean`), `c1_modelo`
    (`C1Modelo.lean`) — o desfecho de cada máquina de garantia é
    EXATAMENTE a conjunção/decisão que o spec nomeia — floor_atom
-   146→150, floor_extract 132→128 — status: `todo` (2/4: `d1_modelo`,
-   `r1_modelo` feitos 2026-09-12)
+   146→150, floor_extract 132→128 — status: `todo` (3/4: `d1_modelo`,
+   `r1_modelo`, `t1_modelo` feitos 2026-09-12)
 
 3. **P1.1** fate ×2: `d1_put_ok` (`D1Modelo.lean` — o put confirma
    exatamente quando o ledger cruza a barreira), `c1_advance_commit`

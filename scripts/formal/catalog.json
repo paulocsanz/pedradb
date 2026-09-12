@@ -7085,6 +7085,10 @@
    "dst_plant": {
     "file": "crates/pedradb-store/src/t1_modelo_kernel.rs",
     "test": "t1_modelo_on_live_abort_reopen_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "O desfecho da maquina T1 e exatamente a decisao do spec: ok true quando a tx recuperada passa t1_holds_of, ok false quando a quebra; ramos construtivos citam tx_recover/t1_holds_of sem reabrir corpos"
    }
   },
   {
