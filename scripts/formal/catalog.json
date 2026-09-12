@@ -5168,11 +5168,14 @@
     "crates/pedradb-core/src/batch.rs"
    ],
    "entry": "write_record_count_ok",
-   "data_fate": true,
    "as_is": "write_record_count_ok_as_is",
    "dst_plant": {
     "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
     "test": "write_record_count_ok_on_live_torn_batch_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "comprimento decodificado do batch confere com o count do prefixo exatamente pela rota extraida: cast u32->usize honesto e o decide da comparacao; as-is admite qualquer comprimento e a planta DST do batch torcido refuta"
    }
   },
   {
