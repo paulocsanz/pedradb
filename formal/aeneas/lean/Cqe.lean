@@ -29,3 +29,22 @@ theorem next_user_data_as_is_dente :
     next_user_data_as_is (1#u64) (0x77#u64) = ok (0x77#u64, 1#u64) := by
   unfold next_user_data_as_is
   rfl
+
+/-! ## RFC-0214 P1.1 — costura CQE no degrau átomo (fate ∀) -/
+
+/-- RFC-0214 P1.1 (atom `catalog:cqe_res`): um CQE é sucesso
+se, e somente se, `res >= 0` — res negativo é erro, o kernel não
+inventa sucesso. Fate forall sobre o corpo extraído
+(`cqe_res_ok`, res-gate do fsync no ring). O mutante AS-IS
+(`cqe_res_ok_as_is`) promove todo CQE a sucesso — planta DST
+`cqe_res_ok_on_live_uring_is_not_ok` recusa. -/
+theorem cqe_res_ok_fate_iff :
+    ∀ (res : I32) (v : Bool),
+      (cqe_res_ok res = ok v) ↔ (v = ((res >= 0#i32) : Bool)) := by
+  intro res v
+  unfold cqe_res_ok
+  constructor
+  · intro h
+    exact (Result.ok.inj h).symm
+  · intro h
+    rw [h]

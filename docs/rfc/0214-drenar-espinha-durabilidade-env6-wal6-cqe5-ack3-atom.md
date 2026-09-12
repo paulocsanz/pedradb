@@ -166,7 +166,13 @@ planta DST verde ANTES do commit, gate GREEN no commit)
    `cqe_leftover`, `cqe_submit`, `cqe_ring_refusal` (wrapper
    `Cqe.lean`) + `write_ack_append`, `write_ack_barrier`,
    `write_ack_ack` (wrapper `WriteAck.lean`) — floor_atom 134→142,
-   floor_extract 144→136 — status: `todo`
+   floor_extract 144→136 — status: `doing`
+   — 1/8 `done`: `cqe_res_ok_fate_iff` (Cqe.lean; CQE é
+   sucesso iff `res >= 0`; res-gate do fsync no ring; as-is
+   `cqe_res_ok_as_is` recusado pela planta DST
+   `cqe_res_ok_on_live_uring_is_not_ok`, 1 passed), floor_atom
+   134→135, floor_extract 144→143; planta DST verde
+   (`cqe_res_ok_on_live_uring_is_not_ok`, 1 passed)
 4. **P1.2** veredito datado dos medidos ausentes (SE houver: par
    cujo entry/planta não existe ou cuja classe é campanha/capacidade,
    ex. liar-campaign — recusa/aposentadoria datada SEM quebrar
@@ -188,7 +194,7 @@ planta DST verde ANTES do commit, gate GREEN no commit)
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | wal_state ×6 no degrau átomo | done | 6/6: este commit (FECHAMENTO) | 2026-09-12 |
 | P0.2 | p0 | env_crash ×6 no degrau átomo | done | 6/6: este commit (FECHAMENTO) | 2026-09-12 |
-| P1.1 | p1 | cqe ×5 + write_ack ×3 no degrau átomo | todo | — | 2026-09-12 |
+| P1.1 | p1 | cqe ×5 + write_ack ×3 no degrau átomo | doing | 1/8: este commit | 2026-09-12 |
 | P1.2 | p1 | Veredito datado dos medidos ausentes | todo | — | 2026-09-12 |
 | P2.1 | p2 | Composição ∀ env→wal→ack + twins DST | todo | — | 2026-09-12 |
 | P2.2 | p2 | Sweep final + nota EXTRACT.md + flip done | todo | — | 2026-09-12 |
