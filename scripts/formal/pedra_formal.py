@@ -585,6 +585,13 @@ def check_clones(root: Path, catalog: dict, r: Report) -> None:
 TCB_FREEZE_ALLOWLIST: dict[str, str] = {
     "crates/pedradb-core/src/disk_pressure_kernel.rs":
         "RFC-0179 Aeneas extract SOURCE.disk_pressure (catalog twin pending)",
+    # 2026-09-12: perf-lane heuristic kernels — scheduling/buffering decisions
+    # with cargo-test AS-IS twins (rfc0209_*/rfc0211_*), no Verus twin by
+    # design (precedent: scan_readahead 0195 pending the same graduation).
+    "crates/pedradb-core/src/wal_buffer_kernel.rs":
+        "RFC-0209 P0.1 heuristic kernel (should_flush; twin cargo-test)",
+    "crates/pedradb-core/src/rmw_sched_kernel.rs":
+        "RFC-0211 P0.1 heuristic kernel (rmw_group_sched; twin cargo-test)",
 }
 
 # RFC-0166 P2.4: catalog accounting. `l28_*` is a campaign gate (named

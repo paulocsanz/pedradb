@@ -1,6 +1,6 @@
 {
  "rfc": "0061",
- "updated": "2026-09-11",
+ "updated": "2026-09-12",
  "classes": [
   "never",
   "continuous",
@@ -36,6 +36,8 @@
    "crates/pedradb-core/src/vlog_gc_kernel.rs",
    "crates/pedradb-core/src/wal/recover_kernel.rs",
    "crates/pedradb-core/src/wal/reopen_kernel.rs",
+   "crates/pedradb-core/src/rmw_sched_kernel.rs",
+   "crates/pedradb-core/src/wal_buffer_kernel.rs",
    "crates/pedradb-dcs/src/apply_kernel.rs",
    "crates/pedradb-dcs/src/lease_kernel.rs",
    "crates/pedradb-fold/src/fold_kernel.rs",
@@ -105,6 +107,12 @@
    ],
    "crates/pedradb-core/src/flush_kernel.rs": [
     "skip_auto_flush"
+   ],
+   "crates/pedradb-core/src/rmw_sched_kernel.rs": [
+    "rmw_group_sched"
+   ],
+   "crates/pedradb-core/src/wal_buffer_kernel.rs": [
+    "should_flush"
    ],
    "crates/pedradb-core/src/disk_pressure_kernel.rs": [
     "disk_pressure_admit",
