@@ -44,4 +44,26 @@ Data: 2026-09-12
 
 ## Sweep final (worktree destacado DENTRO de software/)
 
-(preenchido no commit de sweep — capturas em `{SCRATCH}/r0213_p22_*.txt`)
+- `git worktree add --detach /Users/paulo/software/pedradb-wt-r0213
+  3782ced7` (HEAD do commit 1/2 da composição):
+  - depth-floor: GREEN — extract=156 (floor 156), ladder close=6
+    (floor 6) / atom=122 (floor 122), residuals close=5/atom=122 ==
+    live 5/122, count=7, data_fate=0<=0.
+  - inventory-terminal: GREEN — 7 rows terminal (7 count, 0
+    deferido, 0 todo).
+  - twin-contracts: GREEN — 7/7 count rows bound.
+  - `test_proof_vs_campaign` — ok.
+  - `bash scripts/lean_extracts.sh --required` — "ok lean extracts
+    (64 libs + 22 compose)", "Build completed successfully (1944
+    jobs)" (build completo do zero no worktree).
+  - sorry 0: `grep -c sorry ComposeStorageWrite.lean` = 0; zero
+    `sorry` nos wrappers (excl. StringIter da dependência Aeneas e
+    `*Kernel.lean` gerados).
+- Capturas em `{SCRATCH}/r0213_p22_sweep_{depth,inv,twin,campaign,
+  extracts}.txt` + `r0213_p22_gate_pre.txt`.
+- Worktree removido após a captura (`git worktree remove --force`).
+- Nota datada em `formal/aeneas/EXTRACT.md` — "bloco storage
+  DRENADO (RFC-0213): catálogo inteiro, ZERO `data_fate` pendente"
+  (292 pares; escada final cap 26→0, floor_atom 98→122,
+  floor_extract 180→156; restam nomeados: ZERO — os três blocos
+  0211/0212/0213 drenados).

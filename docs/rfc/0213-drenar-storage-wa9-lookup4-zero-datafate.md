@@ -1,6 +1,6 @@
 # RFC-0213 — drenar o storage: write_admission ×9 + lookup ×4 + flush ×3 + cf ×2 + leveling ×2 + singletons ×6 — ZERO `data_fate`
 
-**Status:** draft
+**Status:** done
 
 ## Tese
 
@@ -381,6 +381,18 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
    pulada, cauda torn nunca cortada); wiring: lakefile + COMPOSE no
    `lean_extracts.sh` — "ok lean extracts (64 libs + 22 compose)"
 
+   — sweep `done`: worktree destacado DENTRO de `software/`
+   (`pedradb-wt-r0213` @ `3782ced7`, HEAD do commit 1/2, removido
+   após a captura): depth-floor GREEN (extract=156/atom=122,
+   residuals == live, data_fate=0<=0), inventory-terminal GREEN
+   (7/7 terminal), twin-contracts GREEN (7/7 bound),
+   `test_proof_vs_campaign` ok, extracts "ok lean extracts (64
+   libs + 22 compose)" (build completo do zero, 1944 jobs), sorry 0
+   nos wrappers (capturas em findings + `{SCRATCH}/r0213_p22_*`);
+   nota datada em `formal/aeneas/EXTRACT.md` — catálogo inteiro
+   drenado: 292 pares, ZERO `data_fate` (restam nomeados: ZERO —
+   os três blocos 0211/0212/0213 drenados) — status: `done`
+
 ## Status (living — update with every PR)
 
 | ID | Band | Title | Status | Task / PR | Updated |
@@ -391,7 +403,7 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
 | P1.2 | p1 | Cadência leveling ×2 + singletons ×4 | done | 6/6: este commit (FECHAMENTO) | 2026-09-12 |
 | P1.3 | p1 | Veredito datado dos medidos ausentes | done | este commit (veredito: 0 ausentes nas 24 promoções; âncoras green antes/depois) | 2026-09-12 |
 | P2.1 | p2 | Wal finais ×2 — CATÁLOGO ZERO data_fate | done | 2/2: este commit (FECHAMENTO; catálogo 292 pares, ZERO data_fate) | 2026-09-12 |
-| P2.2 | p2 | Composição ∀ storage + sweep final + flip done | todo | — | 2026-09-11 |
+| P2.2 | p2 | Composição ∀ storage + sweep final + flip done | done | 2/2: 3782ced7 + este commit (sweep verde no worktree; EXTRACT.md datado — catálogo ZERO data_fate) | 2026-09-12 |
 
 ## Critérios de aceite
 

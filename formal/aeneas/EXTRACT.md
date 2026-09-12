@@ -575,3 +575,24 @@ libs). Restam nomeados, todos storage: 26 (write_admission 9,
 lookup 4, flush 3, cf 2, leveling 2 + 6 singletons: wal_recover,
 dictionary_link, visible_at, write_record_count, iter_window,
 occ_batch_plan).
+
+## 2026-09-12 — bloco storage DRENADO (RFC-0213): catálogo inteiro, ZERO `data_fate` pendente
+
+Medido ao vivo no HEAD do 0213: os 26 pares do bloco storage —
+write_admission 9 (WriteAdmission.lean), lookup 4 (Lookup.lean),
+flush 3 (Flush.lean), cf 2 (Cf.lean), leveling 2 (Leveling.lean) +
+singletons wal_recover (WalRecover.lean, inscrito no LIBS nesta
+data), dictionary_link (Reopen.lean, inscrito no LIBS; atom desde
+2026-09-10, fatia P2.1 fortaleceu ao fate-iff e pagou só o cap),
+visible_at, write_record_count, iter_window, occ_batch_plan — ZERO
+com `data_fate` pendente: 292 pares no catálogo, ZERO `data_fate`
+no conjunto. Escada final do 0213: cap 26→0, floor_atom 98→122,
+floor_extract 180→156; LIBS 62→64 (WalRecover + Reopen, buracos
+pré-existentes fechados com extratos re-carimbados byte-idênticos).
+Composição ∀ do caminho de storage em `ComposeStorageWrite.lean`
+(22ª compose lib; admission portão → plano cerca → recovery corta
+sobre os atoms `catalog:write_admit` × `catalog:wal_commit_plan` ×
+`catalog:torn_tail_needs_cut`; SEM registro no TSV — não é par
+único do catálogo, mesma regra das demais compose libs). Restam
+nomeados: ZERO — os três blocos (membership 0211, cluster 0212,
+storage 0213) drenados; catálogo fechado sem `data_fate` pendente.
