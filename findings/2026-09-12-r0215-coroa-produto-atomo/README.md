@@ -79,3 +79,18 @@ verde antes do commit, exatamente 1 teorema público por commit).
   last_under_user_prefix_mem_hit…, evicted_payload_without_kit…,
   write_sst_bloom_is_sized…) falham igual no HEAD anterior — não são
   regressão deste fix.
+
+## P0.2 — modelo ×4 átomo (2/4)
+
+- **r1_modelo (2/4)**: o desfecho da máquina R1 é exatamente a
+  decisão que o spec nomeia — `ok true` quando sonda e mais-novo
+  concordam na mesma entrada (ou o inventário nem passa) e `ok false`
+  quando discordam. Ramos construtivos (`r1m_ok_true`/`r1m_mismatch`)
+  carregam `b = true` no disjunto que alcança as chamadas e citam
+  `inv_lsm`/`lsm_probe`/`r1_newest` sem reabrir corpos; a igualdade
+  de `Option` do extrato é axioma citado. Planta DST
+  `r1_modelo_on_live_delete_shape_is_not_ok` (pedradb-sim, exit 0,
+  1 passed — a perna live dependia do fix 30e572db do SST vazio).
+  Axiomas: os 3 padrão + os 2 axiomas de extrato documentados
+  (`inv_lsm`, eq de Option). Gate GREEN: floor_atom 147→148,
+  floor_extract 131→130.

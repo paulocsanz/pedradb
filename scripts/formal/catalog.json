@@ -7024,6 +7024,10 @@
    "dst_plant": {
     "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
     "test": "r1_modelo_on_live_delete_shape_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "O desfecho da maquina R1 e exatamente a decisao do spec: ok true quando sonda e mais-novo concordam (ou o inventario nem passa), ok false quando discordam; ramos construtivos citam inv_lsm/lsm_probe/r1_newest sem reabrir corpos"
    }
   },
   {
