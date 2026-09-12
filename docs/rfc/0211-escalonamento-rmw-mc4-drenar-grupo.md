@@ -1,7 +1,8 @@
 # RFC-0211 — Escalonamento rmw mc4: drenar o grupo de writers no regime writers == ncpu
 
-**Status:** in-progress (P0 em aterrizamento)
-**Updated:** 2026-09-11
+**Status:** in-progress (P0 done 2026-09-12 — meter p211m validou o
+mecanismo, alvo ≥1,0 não fechado no min; P1.2 é a próxima fatia)
+**Updated:** 2026-09-12
 **ID:** 0211
 **Parents:** [0201](0201-cliente-drain-cheio-spin-oversub.md) (a fronteira
 `async_merge_policy`: merge só quando writers > ncpu — pagou mc50 1,678× e
@@ -128,9 +129,16 @@ novo por construção (`single_op`).
       `queued == 0`/batch por submit; env=1 `queued > 0`/amortizado;
       puts duráveis pós-reopen nos dois braços; vizinhos `rfc0201_*` 10/10;
       musl exit 0)
-- [ ] **P0.3** Meter caixote linux-gate (braços/células do desenho,
+- [x] **P0.3** Meter caixote linux-gate (braços/células do desenho,
       3-run quiet min-of-3, telemetria por braço) + finding datado +
-      veredito no RFC — status: `todo`
+      veredito no RFC — status: `done` (2026-09-12T00:25:56Z, onda
+      `p211m`, finding `findings/2026-09-11-rfc0211-p0-meter/`:
+      `PEDRA_RMW_SCHED=1` sobe o piso do alvo 0,491→**0,836** min
+      (+70%; med 0,622→1,352) com TODAS as guardiãs ≥ clean no min
+      (ycsb_a +2,9%, cache_overwrite +42,5%, apply_batch +5,1%, mc50
+      +17,3%) — mecanismo validado, mas **0,836 < 1,0 = perda honesta
+      vs o gate**; rmwbuf não fecha (0,552); P1.2 decomposição do
+      residual é a próxima fatia)
 
 ### P1 — decisão de default e residual
 
@@ -156,8 +164,8 @@ novo por construção (`single_op`).
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | kernel SchedDecision + twin AS-IS + guardas | done (6 testes `rfc0211_*` verdes) | este commit | 2026-09-11 |
 | P0.2 | p0 | wiring PEDRA_RMW_SCHED opt-in no submit_after_begin | done (teste de eixo env no caminho real; 0201 10/10; musl 0) | este commit | 2026-09-11 |
-| P0.3 | p0 | meter 4 braços × células + guardiãs, veredito datado | todo | — | 2026-09-11 |
-| P1.1 | p1 | flip default pós-meter | todo | — | 2026-09-11 |
+| P0.3 | p0 | meter 4 braços × células + guardiãs, veredito datado | done (p211m 2026-09-12: alvo 0,491→0,836 min +70%, guardiãs todas ≥ clean; 0,836<1,0 = perda honesta, opt-in mantido) | findings/2026-09-11-rfc0211-p0-meter | 2026-09-12 |
+| P1.1 | p1 | flip default pós-meter | todo (meter P0.3 negou o flip: min 0,836 <1,0; opt-in mantido por regra) | — | 2026-09-12 |
 | P1.2 | p1 | decomposição do residual (telemetria) | todo | — | 2026-09-11 |
 | P2.1 | p2 | sweep eixo writers | todo | — | 2026-09-11 |
 | P2.2 | p2 | Grid B quando default mudar | todo | — | 2026-09-11 |

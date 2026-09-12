@@ -42,9 +42,9 @@ série serial completa.
 
 | # | célula | número (rótulo) | dono |
 |---|---|---|---|
-| 1 | ycsb_f_mc4 | **0,532** min same-boot p209b nobuf / **0,780** buf / 0,2947 cross-boot p201r2 | **RFC-0211** (escalonamento rmw mc4) |
-| 2 | ycsb_f_mc4 buf-arm residual | 0,780 min (p209b) | RFC-0211 (mesma fatia: serialização pós-syscall) |
-| 3 | ycsb_a_mc4 buf-arm | 1,115 min (p209b; nobuf 1,537) | RFC-0211 guarda — regressão do buf a não propagar |
+| 1 | ycsb_f_mc4 | **0,532** p209b nobuf / **0,780** buf / **0,836** rmw p211m (2026-09-12, +70% vs clean 0,491) / 0,2947 cross-boot p201r2 | **RFC-0211 P0 done** — residual do braço rmw é a P1.2 |
+| 2 | ycsb_f_mc4 residual pós-rmw | 0,836 min (p211m 2026-09-12; buf-arm 0,780 p209b) | RFC-0211 P1.2 (decomposição write_phase; rmwbuf não fecha: 0,552) |
+| 3 | ycsb_a_mc4 | 1,115 buf p209b (nobuf 1,537); p211m 2026-09-12: clean 0,871 → rmw 0,896 min (guarda íntegra) | RFC-0211 guarda — sem regressão no meter |
 
 Âncoras do RFC-0211 P0: piso **0,532** (nobuf) / braço buf **0,780** /
 alvo **≥1,0** same-class async same-boot. Mecanismos candidatos a
@@ -144,5 +144,10 @@ drenável (líder + geração em 1 frame, write off-lock, group apply) já
 existe, está pago no regime oversubscribed (mc50 1,678×) e não alcança o
 regime ==ncpu. O RFC-0211 dimensiona o P0 contra 0,532/0,780/≥1,0 com
 meter 3-run quiet min-of-3 e veredito datado (perda honesta vira fatia).
+**Veredito P0.3 (p211m, 2026-09-12T00:25:56Z):** `PEDRA_RMW_SCHED=1`
+leva o alvo a 0,836 min (+70% vs clean 0,491 do mesmo boot; med 1,352)
+com todas as guardiãs ≥ clean — mecanismo validado, **alvo ≥1,0 não
+fechado no min** (r3 caiu com load1 4,55; r1/r2 1,390/1,352) ⇒ opt-in
+mantido, residual é dono da P1.2.
 O resto do board: pago (G), read-side (E), pesado-blocked-com-gate-datado
 (C) ou DIAG agendado para Linux 3-run (D).
