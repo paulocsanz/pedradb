@@ -166,7 +166,7 @@ planta DST verde ANTES do commit, gate GREEN no commit)
    `cqe_leftover`, `cqe_submit`, `cqe_ring_refusal` (wrapper
    `Cqe.lean`) + `write_ack_append`, `write_ack_barrier`,
    `write_ack_ack` (wrapper `WriteAck.lean`) — floor_atom 134→142,
-   floor_extract 144→136 — status: `doing`
+   floor_extract 144→136 — status: `done`
    — 1/8 `done`: `cqe_res_ok_fate_iff` (Cqe.lean; CQE é
    sucesso iff `res >= 0`; res-gate do fsync no ring; as-is
    `cqe_res_ok_as_is` recusado pela planta DST
@@ -211,6 +211,16 @@ planta DST verde ANTES do commit, gate GREEN no commit)
    as-is `write_ack_ledger_as_is` recusado pela planta DST
    `verified_write_ack_on_live_profile_is_not_ok`, 1 passed),
    floor_atom 140→141, floor_extract 138→137
+   — 8/8 `done`: `on_ack_fate_iff` (WriteAck.lean; o Ok do ack
+   existe iff `acked ≤ synced` (o passo exige a invariante) e é
+   EXATAMENTE `acked := synced` — o gap vira acknowledged, nada
+   além: o saturado do corpo promove só até a barreira; fora da
+   invariante a subtração checada do gap falha, sem Ok; as-is
+   `write_ack_ledger_as_is` recusado pela planta DST
+   `verified_write_ack_on_live_profile_is_not_ok`, 1 passed),
+   floor_atom 141→142, floor_extract 137→136
+   FECHAMENTO P1.1: 8/8 átomos, floor_atom 134→142,
+   floor_extract 144→136, gate GREEN
 4. **P1.2** veredito datado dos medidos ausentes (SE houver: par
    cujo entry/planta não existe ou cuja classe é campanha/capacidade,
    ex. liar-campaign — recusa/aposentadoria datada SEM quebrar
@@ -232,7 +242,7 @@ planta DST verde ANTES do commit, gate GREEN no commit)
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | wal_state ×6 no degrau átomo | done | 6/6: este commit (FECHAMENTO) | 2026-09-12 |
 | P0.2 | p0 | env_crash ×6 no degrau átomo | done | 6/6: este commit (FECHAMENTO) | 2026-09-12 |
-| P1.1 | p1 | cqe ×5 + write_ack ×3 no degrau átomo | doing | 7/8: este commit | 2026-09-12 |
+| P1.1 | p1 | cqe ×5 + write_ack ×3 no degrau átomo | done | 8/8: este commit (FECHAMENTO) | 2026-09-12 |
 | P1.2 | p1 | Veredito datado dos medidos ausentes | todo | — | 2026-09-12 |
 | P2.1 | p2 | Composição ∀ env→wal→ack + twins DST | todo | — | 2026-09-12 |
 | P2.2 | p2 | Sweep final + nota EXTRACT.md + flip done | todo | — | 2026-09-12 |

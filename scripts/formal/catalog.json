@@ -6903,6 +6903,10 @@
   },
   {
    "id": "write_ack_ack",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "átomo write_ack_ack: o Ok do ack existe iff acked ≤ synced e é exatamente acked := synced (gap vira acknowledged, saturado promove só até a barreira); fora da invariante a sub checada falha (RFC-0214 P1.1 8/8)"
+   },
    "finding": "RFC-0166 P1.4",
    "twin_kind": "close",
    "single_artifact": true,

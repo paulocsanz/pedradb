@@ -211,3 +211,148 @@ theorem on_barrier_fate_iff :
       core.cmp.Ord.min_body, core.cmp.impls.PartialOrdU64.lt,
       env_crash_kernel.SyncHonesty.read_discriminant]
     split <;> simp only [bind_tc_ok]
+
+/-- RFC-0214 P1.1 (atom `catalog:write_ack_ack`): o passo ack do
+ledger é o átomo `wal_ack` sobre o gap synced−acked — o Ok existe
+iff `acked ≤ synced` (o passo exige a invariante) e é EXATAMENTE o
+estado com `acked := synced`: o gap vira acknowledged, nada além
+(o saturado do corpo promove só até a barreira). Fora da
+invariante a subtração checada do gap falha — sem Ok, o ack nunca
+fabrica durabilidade. Fate forall sobre o corpo extraído. O
+mutante AS-IS (`write_ack_ledger_as_is`) acka sem barreira —
+recusado pela planta DST
+`verified_write_ack_on_live_profile_is_not_ok`. -/
+theorem on_ack_fate_iff :
+    ∀ (l l' : write_ack_kernel.WriteAckLedger),
+      (write_ack_kernel.WriteAckLedger.on_ack l = ok l') ↔
+        (l.state.acked ≤ l.state.synced ∧
+          l' = { l with state := { l.state with acked := l.state.synced } }) := by
+  intro l l'
+  constructor
+  · intro h
+    unfold write_ack_kernel.WriteAckLedger.on_ack at h
+    cases hsub : l.state.synced - l.state.acked with
+    | ok pending =>
+        rw [hsub] at h
+        simp only [bind_tc_ok] at h
+        have hz := UScalar.sub_equiv l.state.synced l.state.acked
+        rw [hsub] at hz
+        obtain ⟨hAleS, hSval, _⟩ := hz
+        have hbits : (2 : Nat) ^ UScalarTy.U64.numBits
+            = 18446744073709551616 := by native_decide
+        have hmax : ((UScalar.max UScalarTy.U64 : Nat)) + 1
+            = 18446744073709551616 := by native_decide
+        have hbound : l.state.synced.val < 18446744073709551616 :=
+          U64.lt_succ_max l.state.synced
+        have hle : l.state.acked ≤ l.state.synced := by
+          rw [UScalar.le_equiv]
+          omega
+        have hmp : l.state.acked.val + pending.val = l.state.synced.val := by
+          omega
+        have hval : (core.num.U64.saturating_add l.state.acked pending).val
+            = l.state.synced.val := by
+          show (Nat.min ((UScalar.max UScalarTy.U64 : Nat))
+              (l.state.acked.val + pending.val)
+              % 18446744073709551616) = _
+          have hminlt : Nat.min ((UScalar.max UScalarTy.U64 : Nat))
+              (l.state.acked.val + pending.val)
+              < 18446744073709551616 :=
+            Nat.lt_of_le_of_lt (Nat.min_le_left _ _) (by omega)
+          rw [Nat.mod_eq_of_lt hminlt]
+          rw [hmp]
+          exact Nat.min_eq_right (by omega)
+        have hsat : core.num.U64.saturating_add l.state.acked pending
+            = l.state.synced := UScalar.eq_imp _ _ hval
+        have hadd : l.state.acked + pending = ok l.state.synced := by
+          have hza := UScalar.add_equiv l.state.acked pending
+          cases haddc : l.state.acked + pending with
+          | ok a =>
+              rw [haddc] at hza
+              obtain ⟨_, haval, _⟩ := hza
+              exact congrArg ok (UScalar.eq_imp a l.state.synced (by rw [haval, hmp]))
+          | fail e =>
+              rw [haddc] at hza
+              exfalso
+              rw [hmp, hbits] at hza
+              omega
+          | div =>
+              rw [haddc] at hza
+              cases hza
+        unfold wal.wal_state_kernel.wal_ack at h
+        simp only [lift, bind_tc_ok] at h
+        rw [hsat, hadd] at h
+        simp only [bind_tc_ok] at h
+        split at h
+        · exact ⟨hle, (Result.ok.inj h).symm⟩
+        · next hbad =>
+            exact absurd (by simp [UScalar.le_equiv]) hbad
+    | fail e =>
+        rw [hsub] at h
+        simp at h
+    | div =>
+        rw [hsub] at h
+        simp at h
+  · rintro ⟨hle, hl'⟩
+    subst hl'
+    unfold write_ack_kernel.WriteAckLedger.on_ack
+    cases hsub : l.state.synced - l.state.acked with
+    | ok pending =>
+        have hz := UScalar.sub_equiv l.state.synced l.state.acked
+        rw [hsub] at hz
+        obtain ⟨hAleS, hSval, _⟩ := hz
+        have hbits : (2 : Nat) ^ UScalarTy.U64.numBits
+            = 18446744073709551616 := by native_decide
+        have hmax : ((UScalar.max UScalarTy.U64 : Nat)) + 1
+            = 18446744073709551616 := by native_decide
+        have hbound : l.state.synced.val < 18446744073709551616 :=
+          U64.lt_succ_max l.state.synced
+        have hmp : l.state.acked.val + pending.val = l.state.synced.val := by
+          omega
+        have hval : (core.num.U64.saturating_add l.state.acked pending).val
+            = l.state.synced.val := by
+          show (Nat.min ((UScalar.max UScalarTy.U64 : Nat))
+              (l.state.acked.val + pending.val)
+              % 18446744073709551616) = _
+          have hminlt : Nat.min ((UScalar.max UScalarTy.U64 : Nat))
+              (l.state.acked.val + pending.val)
+              < 18446744073709551616 :=
+            Nat.lt_of_le_of_lt (Nat.min_le_left _ _) (by omega)
+          rw [Nat.mod_eq_of_lt hminlt]
+          rw [hmp]
+          exact Nat.min_eq_right (by omega)
+        have hsat : core.num.U64.saturating_add l.state.acked pending
+            = l.state.synced := UScalar.eq_imp _ _ hval
+        have hadd : l.state.acked + pending = ok l.state.synced := by
+          have hza := UScalar.add_equiv l.state.acked pending
+          cases haddc : l.state.acked + pending with
+          | ok a =>
+              rw [haddc] at hza
+              obtain ⟨_, haval, _⟩ := hza
+              exact congrArg ok (UScalar.eq_imp a l.state.synced (by rw [haval, hmp]))
+          | fail e =>
+              rw [haddc] at hza
+              exfalso
+              rw [hmp, hbits] at hza
+              omega
+          | div =>
+              rw [haddc] at hza
+              cases hza
+        simp only [bind_tc_ok]
+        unfold wal.wal_state_kernel.wal_ack
+        simp only [lift, bind_tc_ok]
+        rw [hsat, hadd]
+        simp only [bind_tc_ok]
+        split
+        · rfl
+        · next hbad =>
+            exact absurd (by simp [UScalar.le_equiv]) hbad
+    | fail e =>
+        have hzf := UScalar.sub_equiv l.state.synced l.state.acked
+        rw [hsub] at hzf
+        have hAval : l.state.acked.val ≤ l.state.synced.val := by
+          simpa [UScalar.le_equiv] using hle
+        omega
+    | div =>
+        have hzf := UScalar.sub_equiv l.state.synced l.state.acked
+        rw [hsub] at hzf
+        cases hzf

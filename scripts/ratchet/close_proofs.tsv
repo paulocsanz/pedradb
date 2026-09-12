@@ -168,3 +168,4 @@ atom	catalog:cqe_submit	submit_complete_act_fate_iff	formal/aeneas/lean/Cqe.lean
 atom	catalog:cqe_ring_refusal	cqe_ring_model_admitted_fate_iff	formal/aeneas/lean/Cqe.lean	cqe_ring_model_admitted
 atom	catalog:write_ack_append	on_append_fate_iff	formal/aeneas/lean/WriteAck.lean	on_append
 atom	catalog:write_ack_barrier	on_barrier_fate_iff	formal/aeneas/lean/WriteAck.lean	on_barrier
+atom	catalog:write_ack_ack	on_ack_fate_iff	formal/aeneas/lean/WriteAck.lean	on_ack
