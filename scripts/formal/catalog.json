@@ -2541,6 +2541,10 @@
    "dst_plant": {
     "file": "crates/pedradb-http/src/lib.rs",
     "test": "kv_http_method_case_insensitive"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "o token do metodo HTTP normaliza exatamente na dobra ASCII-upcase do extrato (RFC 9110 compara o metodo em caixa alta); corpo e a chamada unica, citada nao reaberta; mutante AS-IS devolve o token cru (planta kv_http_method_case_insensitive recusa)"
    }
   },
   {

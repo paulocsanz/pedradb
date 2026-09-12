@@ -188,3 +188,13 @@ verde antes do commit, exatamente 1 teorema público por commit).
   igualdade habilitante. O mutante AS-IS recusa tudo (scheme-blind);
   planta DST `non_bearer_scheme_gate` (pedradb-http, exit 0,
   1 passed). Gate GREEN: floor_atom 153→154, floor_extract 125→124.
+
+## P2.1 — http ×6 átomo (3/6)
+
+- **normalize_http_method (3/6)**: o token do método HTTP normaliza
+  exatamente na dobra ASCII-upcase do extrato (RFC 9110 compara o
+  método em caixa alta) — o corpo é a chamada única, citada não
+  reaberta. O mutante AS-IS devolve o token cru (`put` ≠ `PUT`);
+  planta DST `kv_http_method_case_insensitive` (pedradb-http,
+  exit 0, 1 passed). Gate GREEN: floor_atom 154→155,
+  floor_extract 124→123.

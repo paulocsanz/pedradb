@@ -244,3 +244,17 @@ theorem is_non_bearer_auth_scheme_fate_iff :
       simp only [Aeneas.Std.bind_tc_ok]
       rw [hb2f, if_neg (by simp)]
       exact hnt
+
+/- RFC-0215 P2.1 3/6 (átomo `catalog:ascii_upper`, entrada
+`normalize_http_method`): o token do método HTTP normaliza
+exatamente na dobra ASCII-upcase do extrato (RFC 9110 compara o
+método em caixa alta) — o corpo é a chamada única, citada não
+reaberta. O mutante AS-IS devolve o token cru (`put` ≠ `PUT`);
+planta `kv_http_method_case_insensitive` recusa. -/
+theorem normalize_http_method_fate_iff :
+    ∀ (m : Str) (r : String),
+      (normalize_http_method m = ok r) ↔
+        alloc.str.Str.to_ascii_uppercase m = ok r := by
+  intro m r
+  unfold normalize_http_method
+  rfl
