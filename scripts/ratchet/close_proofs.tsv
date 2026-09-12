@@ -137,3 +137,4 @@ atom	catalog:pit_resync_rewrite	pit_resync_rewrite_fate_iff	formal/aeneas/lean/W
 atom	catalog:snap_empty	snap_empty_fate_iff	formal/aeneas/lean/Lookup.lean	snap_is_empty
 atom	catalog:snap_below_watermark	snap_below_watermark_fate_iff	formal/aeneas/lean/Lookup.lean	snap_below_watermark
 atom	catalog:mem_point_decides	mem_point_decides_fate_iff	formal/aeneas/lean/Lookup.lean	mem_point_decides
+atom	catalog:prefer_newer_seq	prefer_newer_seq_fate_iff	formal/aeneas/lean/Lookup.lean	prefer_newer_seq

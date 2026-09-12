@@ -7417,7 +7417,6 @@
     "crates/pedradb-core/src/db.rs"
    ],
    "entry": "prefer_newer_seq",
-   "data_fate": true,
    "handlers": [
     "lookup"
    ],
@@ -7426,6 +7425,10 @@
    "dst_plant": {
     "file": "crates/pedradb-core/src/lookup_kernel.rs",
     "test": "prefer_newer_seq_on_live_older_first_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "prefer-newer verdict fully fated: candidate wins exactly when no incumbent or newer seq beats best; as-is prefers everything older included, refused by DST plant"
    }
   },
   {

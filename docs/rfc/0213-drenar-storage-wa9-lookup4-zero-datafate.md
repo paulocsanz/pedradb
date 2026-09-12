@@ -135,7 +135,7 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
 2. **P0.2:** cadência lookup ×4 (wrapper `Lookup.lean`):
    `snap_empty`, `snap_below_watermark`, `mem_point_decides`,
    `prefer_newer_seq` — cap 17→13, floor_atom 107→111,
-   floor_extract 171→167 — status: `doing`
+   floor_extract 171→167 — status: `done`
 
    — 1/4 `done`: `snap_empty_fate_iff`
    (Lookup.lean; um snapshot está vazio EXATAMENTE quando sua
@@ -157,6 +157,19 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
    hit — identidade; o as-is sempre reporta miss, RFC-0170 P2.4),
    cap 15→14, floor_atom 109→110, floor_extract 169→168; planta
    DST verde (`mem_point_decides_on_live_hit_is_not_ok`, 1 passed)
+
+   — 4/4 `done`: `prefer_newer_seq_fate_iff`
+   (Lookup.lean; um candidato vence EXATAMENTE quando não há
+   incumbente, ou há incumbente e a sequência do candidato é mais
+   nova — `new_seq > best_seq` decidido no ramo com best; o as-is
+   prefere tudo, velho incluso, RFC-0170 P2.4), cap 14→13,
+   floor_atom 110→111, floor_extract 168→167; planta DST verde
+   (`prefer_newer_seq_on_live_older_first_is_not_ok`, 1 passed)
+
+   — (FECHAMENTO) P0.2 completa: 4/4 átomos, cap_data_fate 17→13,
+   floor_atom 107→111, floor_extract 171→167; wrapper Lookup.lean
+   com 4 teoremas `_fate_iff` novos, 1 por commit; plantas DST do
+   lookup_kernel todas verdes
 
 ### P1 — core
 
@@ -197,7 +210,7 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | Cadência write_admission ×9 | done | 9/9: este commit (FECHAMENTO) | 2026-09-12 |
-| P0.2 | p0 | Cadência lookup ×4 | doing | 3/4: este commit | 2026-09-12 |
+| P0.2 | p0 | Cadência lookup ×4 | done | 4/4: este commit (FECHAMENTO) | 2026-09-12 |
 | P1.1 | p1 | Cadência flush ×3 + cf ×2 | todo | — | 2026-09-11 |
 | P1.2 | p1 | Cadência leveling ×2 + singletons ×4 | todo | — | 2026-09-11 |
 | P1.3 | p1 | Veredito datado dos medidos ausentes | todo | — | 2026-09-11 |

@@ -53,3 +53,18 @@ theorem mem_point_decides_fate_iff :
   intro has_point v
   unfold mem_point_decides
   cases has_point <;> cases v <;> simp
+
+/-- RFC-0213 P0.2 (storage cadence, atom `catalog:prefer_newer_seq`):
+    a candidate wins EXACTLY when there is no incumbent best, or the
+    incumbent exists and the candidate sequence is newer — fate
+    forall over the extracted body (RFC-0170 P2.4); the AS-IS mutant
+    prefers everything, older included (the lie the DST plant
+    `prefer_newer_seq_on_live_older_first_is_not_ok` refutes). -/
+theorem prefer_newer_seq_fate_iff :
+    ∀ (have_best : Bool) (new_seq best_seq : U64) (v : Bool),
+      (prefer_newer_seq have_best new_seq best_seq = ok v) ↔
+        ((v = decide (new_seq > best_seq) ∧ have_best = true)
+          ∨ (v = true ∧ have_best = false)) := by
+  intro have_best new_seq best_seq v
+  unfold prefer_newer_seq
+  cases have_best <;> simp <;> exact eq_comm
