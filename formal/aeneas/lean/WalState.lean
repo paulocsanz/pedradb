@@ -605,3 +605,78 @@ theorem wal_rotate_fate_iff :
       · rintro (⟨ha, _, _⟩ | ⟨_, he⟩)
         · exact absurd ha h1
         · rw [he]
+
+/-- RFC-0214 P0.1 (atom `catalog:wal_acked_survives`): a corolária de
+sobrevivência tem desfecho ok com EXATAMENTE dois futuros, decididos
+pela costura Env (`CrashModel.of` + `crash_legal`): corte legal →
+`v = (cut ≥ acked)`; corte ilegal → `v = true` (nada a perder). O
+prefixo acked só é julgado PERDÍVEL por cortes que a costura chama
+legais — a legalidade é a do Env, não re-provada aqui (P0.2 do
+RFC-0214 pinará o `crash_legal`). Fate forall sobre o corpo
+extraído. O mutante AS-IS chama sobrevivável um corte abaixo do
+piso da barreira — e perde bytes acked. -/
+theorem acked_survives_fate_iff :
+    ∀ (s : wal.wal_state_kernel.WalState) (cut : U64) (v : Bool),
+      (wal.wal_state_kernel.acked_survives_every_legal_crash s cut
+        = ok v) ↔
+        (∃ cm : env_crash_kernel.CrashModel,
+          ∃ b : Bool,
+            env_crash_kernel.CrashModel.of s.written s.synced = ok cm
+            ∧ env_crash_kernel.crash_legal cm cut = ok b
+            ∧ ((b = true ∧ v = ((cut >= s.acked) : Bool))
+                ∨ (b = false ∧ v = true))) := by
+  intro s cut v
+  constructor
+  · intro h
+    unfold wal.wal_state_kernel.acked_survives_every_legal_crash at h
+    cases hcm : env_crash_kernel.CrashModel.of s.written s.synced with
+    | ok cm =>
+        rw [hcm] at h
+        simp only [bind_tc_ok] at h
+        rw [← hcm]
+        cases hb : env_crash_kernel.crash_legal cm cut with
+        | ok b =>
+            rw [hb] at h
+            simp only [bind_tc_ok] at h
+            split at h
+            · next hbT =>
+                exact ⟨cm, b, hcm, hb,
+                  Or.inl ⟨hbT, (Result.ok.inj h).symm⟩⟩
+            · next hbF =>
+                refine ⟨cm, b, hcm, hb,
+                  Or.inr ⟨?_, (Result.ok.inj h).symm⟩⟩
+                cases b with
+                | false => rfl
+                | true => exact absurd rfl hbF
+        | fail e =>
+            rw [hb] at h
+            simp at h
+        | div =>
+            rw [hb] at h
+            simp at h
+    | fail e =>
+        rw [hcm] at h
+        simp at h
+    | div =>
+        rw [hcm] at h
+        simp at h
+  · rintro ⟨cm, b, hcm, hb, hb' | hb'⟩
+    · obtain ⟨rfl, hv⟩ := hb'
+      unfold wal.wal_state_kernel.acked_survives_every_legal_crash
+      rw [hcm]
+      simp only [bind_tc_ok]
+      rw [hb]
+      simp only [bind_tc_ok]
+      rw [hv]
+      split
+      · rfl
+      · next hbad => exact False.elim (hbad trivial)
+    · obtain ⟨rfl, hv⟩ := hb'
+      unfold wal.wal_state_kernel.acked_survives_every_legal_crash
+      rw [hcm]
+      simp only [bind_tc_ok]
+      rw [hb]
+      simp only [bind_tc_ok]
+      split
+      · next hbad => exact Bool.noConfusion hbad
+      · rw [hv]

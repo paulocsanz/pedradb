@@ -6500,6 +6500,10 @@
   },
   {
    "id": "wal_acked_survives",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "RFC-0214 P0.1: fate ∀ da corolária de sobrevivência — dois futuros ok decididos pela costura Env (corte legal: v = cut ≥ acked; corte ilegal: v = true); a legalidade é a do Env, não re-provada (P0.2 pinará crash_legal)."
+   },
    "finding": "RFC-0166 P1.2",
    "twin_kind": "close",
    "single_artifact": true,

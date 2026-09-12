@@ -53,7 +53,7 @@ planta DST verde ANTES do commit, gate GREEN no commit)
 1. **P0.1** wal_state ×6: `wal_state`, `wal_append`, `wal_sync`,
    `wal_ack`, `wal_rotate`, `wal_acked_survives` (wrapper
    `WalState.lean`) — floor_atom 122→128, floor_extract 156→150 —
-   status: `todo`
+   status: `done`
 
    — 1/6 `done`: `inv_wal_fate_iff`
    (WalState.lean; o desfecho de `inv_wal` é EXATAMENTE a conjunção
@@ -95,6 +95,18 @@ planta DST verde ANTES do commit, gate GREEN no commit)
    o log sempre — bytes acked somem), floor_atom 126→127,
    floor_extract 152→151; planta DST verde
    (`wal_inv_on_live_recording_is_not_ok`, 1 passed)
+
+   — 6/6 `done` (FECHAMENTO): `acked_survives_fate_iff`
+   (WalState.lean; a corolária de sobrevivência tem EXATAMENTE dois
+   futuros ok, decididos pela costura Env — corte legal
+   (`crash_legal cm cut = ok true`): `v = cut ≥ acked`; corte
+   ilegal: `v = true`; a legalidade é a do Env, não re-provada —
+   P0.2 pinará o `crash_legal`; o as-is chama sobrevivável um corte
+   abaixo do piso da barreira), floor_atom 127→128,
+   floor_extract 151→150; planta DST verde
+   (`wal_inv_on_live_recording_is_not_ok`, 1 passed). FECHAMENTO
+   P0.1: 6/6 átomos, floor_atom 122→128, floor_extract 156→150,
+   gate GREEN
 2. **P0.2** env_crash ×6: `env_crash`, `env_append`, `env_sync`,
    `env_barrier_floor`, `env_no_invented`, `env_honest_sync` (wrapper
    `EnvCrash.lean`) — floor_atom 128→134, floor_extract 150→144 —
@@ -123,7 +135,7 @@ planta DST verde ANTES do commit, gate GREEN no commit)
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | wal_state ×6 no degrau átomo | doing | 5/6 | 2026-09-12 |
+| P0.1 | p0 | wal_state ×6 no degrau átomo | done | 6/6: este commit (FECHAMENTO) | 2026-09-12 |
 | P0.2 | p0 | env_crash ×6 no degrau átomo | todo | — | 2026-09-12 |
 | P1.1 | p1 | cqe ×5 + write_ack ×3 no degrau átomo | todo | — | 2026-09-12 |
 | P1.2 | p1 | Veredito datado dos medidos ausentes | todo | — | 2026-09-12 |
