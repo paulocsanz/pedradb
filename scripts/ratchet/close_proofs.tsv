@@ -182,3 +182,4 @@ atom	catalog:c1_advance_commit	c1_advance_commit_fate_iff	formal/aeneas/lean/C1M
 atom	catalog:is_bearer_scheme	is_bearer_scheme_fate_iff	formal/aeneas/lean/Auth.lean	is_bearer_scheme
 atom	catalog:is_non_bearer_auth_scheme	is_non_bearer_auth_scheme_fate_iff	formal/aeneas/lean/Auth.lean	is_non_bearer_auth_scheme
 atom	catalog:normalize_http_method	normalize_http_method_fate_iff	formal/aeneas/lean/Auth.lean	normalize_http_method
+atom	catalog:ascii_lower	ascii_lower_fate_iff	formal/aeneas/lean/Auth.lean	ascii_lower

@@ -99,9 +99,9 @@ planta DST verde ANTES do commit, gate GREEN no commit).
    já inscritos): `is_bearer_scheme`, `is_non_bearer_auth_scheme`,
    `authorization_matches`, `normalize_http_method`, `ascii_lower`,
    `ascii_upper` — floor_atom 152→158, floor_extract 126→120 —
-   status: `todo` (3/6: `is_bearer_scheme`,
-   `is_non_bearer_auth_scheme`, `normalize_http_method` feitos
-   2026-09-12)
+   status: `todo` (4/6: `is_bearer_scheme`,
+   `is_non_bearer_auth_scheme`, `normalize_http_method`,
+   `ascii_lower` feitos 2026-09-12)
 
 6. **P2.2** sweep final em worktree DENTRO de `software/` (gates 3×
    GREEN + campaign ok + extracts ok + sorry 0, capturas
