@@ -198,3 +198,50 @@ theorem cqe_act_fate_iff :
             exact absurd hh.1 hn
         | inr hh =>
             rw [hh.2]
+
+/-- RFC-0214 P1.1 (atom `catalog:cqe_submit`): depois de um
+submit, a decisão usa o CQE colhido se houver (`UseHarvested`)
+e senão espera (`WaitMore`) — o SQE já está no anel, voltar
+Err no submit solta o buffer sob DMA (F208). Fate forall
+sobre o corpo extraído (`submit_complete_act`). O mutante
+AS-IS (`submit_complete_act_as_is`) volta Err no submit
+com CQE pendente — a planta DST
+`harvest_on_submit_err_uses_cqe` recusa. -/
+theorem submit_complete_act_fate_iff :
+    ∀ (submit_ok harvested : Bool) (act : SubmitCompleteAct),
+      (submit_complete_act submit_ok harvested = ok act) ↔
+        ((harvested = true ∧ act = SubmitCompleteAct.UseHarvested)
+          ∨ (harvested = false ∧
+              act = SubmitCompleteAct.WaitMore)) := by
+  intro submit_ok harvested act
+  cases harvested with
+  | true =>
+      have key : submit_complete_act submit_ok true
+          = ok SubmitCompleteAct.UseHarvested := by
+        unfold submit_complete_act
+        rfl
+      rw [key]
+      constructor
+      · intro he
+        exact Or.inl ⟨rfl, (Result.ok.inj he).symm⟩
+      · intro hdisj
+        cases hdisj with
+        | inl hh =>
+            rw [hh.2]
+        | inr hh =>
+            exact Bool.noConfusion hh.1
+  | false =>
+      have key : submit_complete_act submit_ok false
+          = ok SubmitCompleteAct.WaitMore := by
+        unfold submit_complete_act
+        rfl
+      rw [key]
+      constructor
+      · intro he
+        exact Or.inr ⟨rfl, (Result.ok.inj he).symm⟩
+      · intro hdisj
+        cases hdisj with
+        | inl hh =>
+            exact Bool.noConfusion hh.1
+        | inr hh =>
+            rw [hh.2]
