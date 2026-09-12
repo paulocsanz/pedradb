@@ -443,3 +443,42 @@ theorem occ_batch_plan_member_fate_iff :
       unfold occ_member_fate
       rw [if_neg ht, if_neg hc, hv]
 
+/-- RFC-0213 P1.2 (sixth registered atom; close→atom ladder, precedent
+    wal_commit_plan): the WHOLE extracted plan `occ_batch_plan` decides
+    EXACTLY along the min-length route — n is the shorter input (the only
+    branch the extract takes) and every member fate comes from the
+    extracted loop `occ_batch_plan_loop` seeded with the empty capacity-n
+    vector. The RFC-0198 close pinned the per-member glue
+    (occ_batch_plan_member_fate_iff above); this iff pins the extract
+    itself — the batch fate is the loop's measured answer, not data
+    folklore. -/
+theorem occ_batch_plan_fate_iff :
+    ∀ (too_old : Aeneas.Std.Slice Bool) (reads : Aeneas.Std.Slice OccRead)
+      (last_seq : Std.U64) (v : alloc.vec.Vec OccMemberFate),
+      (occ_batch_plan too_old reads last_seq = ok v) ↔
+        ∃ (n : Std.Usize),
+          ((Slice.len too_old <= Slice.len reads ∧ n = Slice.len too_old) ∨
+            (¬(Slice.len too_old <= Slice.len reads) ∧ n = Slice.len reads)) ∧
+          occ_batch_plan_loop too_old reads last_seq n
+            (alloc.vec.Vec.with_capacity OccMemberFate n) 0#usize = ok v := by
+  intro too_old reads last_seq v
+  constructor
+  · intro hval
+    unfold occ_batch_plan at hval
+    obtain ⟨n, hn, hval⟩ := bind_ok_inv _ _ _ hval
+    refine ⟨n, ?_, hval⟩
+    split at hn
+    · next hle =>
+      injection hn with hn'
+      exact Or.inl ⟨hle, hn'.symm⟩
+    · next hle =>
+      injection hn with hn'
+      exact Or.inr ⟨hle, hn'.symm⟩
+  · rintro ⟨n, (⟨hle, hn⟩ | ⟨hle, hn⟩), hloop⟩
+    · unfold occ_batch_plan
+      refine bind_intro n ?_ hloop
+      rw [if_pos hle, hn]
+    · unfold occ_batch_plan
+      refine bind_intro n ?_ hloop
+      rw [if_neg hle, hn]
+

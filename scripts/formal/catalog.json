@@ -6145,7 +6145,6 @@
     "crates/pedradb-core/src/concurrent.rs"
    ],
    "entry": "occ_batch_plan",
-   "data_fate": true,
    "handlers": [
     "validate_occ_batch",
     "lone_commit"
@@ -6165,7 +6164,11 @@
     "file": "crates/pedradb-core/src/group_commit_kernel.rs",
     "test": "occ_batch_plan_on_live_lagging_is_not_ok"
    },
-   "three_teeth": true
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "o plano do grupo decide exatamente pela rota min-len: n e o menor input e todo fate vem do loop extraido — upgrade do close RFC-0198 (glue por membro) para o extrato inteiro"
+   }
   },
   {
    "id": "pct_default_depth",

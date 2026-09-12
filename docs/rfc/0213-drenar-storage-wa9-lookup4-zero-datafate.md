@@ -276,6 +276,20 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
    depois que o snapshot morreu, RFC-0170 P2.4), cap 4→3,
    floor_atom 119→120, floor_extract 159→158; planta DST verde
    (`iter_window_keep_on_live_hidden_is_not_ok`, 1 passed)
+
+   — 6/6 `done`: `occ_batch_plan_fate_iff`
+   (GroupCommit.lean; o plano do grupo decide EXATAMENTE pela rota
+   min-len extraída — n é o menor dos inputs e todo fate do membro vem
+   do `occ_batch_plan_loop` semeado com o vetor vazio de capacidade n;
+   upgrade do close RFC-0198 `occ_batch_plan_member_fate_iff` (glue por
+   membro) para o extrato inteiro — a escada close→atom do par, com o
+   crédito migrando no residual close 6→5 no MESMO commit, precedente
+   `wal_commit_plan` P0.1; o as-is comete o membro lagging que a
+   planta DST refuta), cap 3→2, floor_atom 120→121,
+   floor_extract 158→157; planta DST verde
+   (`occ_batch_plan_on_live_lagging_is_not_ok`, 1 passed)
+   FECHAMENTO P1.2: cap 8→2, floor_atom 116→121,
+   floor_extract 162→157 (metas corrigidas pela nota datada do 3/6)
 5. **P1.3:** veredito datado dos medidos ausentes — SE alguma
    promoção acima medir fn/planta/handler inexistente, veredito
    por par em findings (reescrever para fn viva SE o caminho
@@ -306,7 +320,7 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
 | P0.1 | p0 | Cadência write_admission ×9 | done | 9/9: este commit (FECHAMENTO) | 2026-09-12 |
 | P0.2 | p0 | Cadência lookup ×4 | done | 4/4: este commit (FECHAMENTO) | 2026-09-12 |
 | P1.1 | p1 | Cadência flush ×3 + cf ×2 | done | 5/5: este commit (FECHAMENTO) | 2026-09-12 |
-| P1.2 | p1 | Cadência leveling ×2 + singletons ×4 | doing | 5/6: este commit | 2026-09-12 |
+| P1.2 | p1 | Cadência leveling ×2 + singletons ×4 | done | 6/6: este commit (FECHAMENTO) | 2026-09-12 |
 | P1.3 | p1 | Veredito datado dos medidos ausentes | todo | — | 2026-09-11 |
 | P2.1 | p2 | Wal finais ×2 — CATÁLOGO ZERO data_fate | todo | — | 2026-09-11 |
 | P2.2 | p2 | Composição ∀ storage + sweep final + flip done | todo | — | 2026-09-11 |
