@@ -7079,7 +7079,6 @@
     "crates/pedradb-core/src/db.rs"
    ],
    "entry": "seq_exhausted",
-   "data_fate": true,
    "handlers": [
     "alloc_seq",
     "open_with_env_sourced"
@@ -7089,6 +7088,10 @@
    "dst_plant": {
     "file": "crates/pedradb-core/src/write_admission_kernel.rs",
     "test": "seq_exhausted_on_live_ceiling_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "exhaustion verdict fully fated: seq burned past ceiling exactly on seq > max; as-is never reports exhaustion, refused by DST plant"
    }
   },
   {

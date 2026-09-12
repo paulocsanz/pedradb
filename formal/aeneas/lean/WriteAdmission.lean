@@ -261,3 +261,17 @@ theorem write_admit_fate_iff :
   cases mem_armed <;> cases l0_armed <;>
     by_cases hmem : mem_bytes >= mem_limit <;>
     by_cases hl0 : l0 >= l0_limit <;> simp [hmem, hl0] <;> exact eq_comm
+
+/-- RFC-0213 P0.1 (storage cadence, atom `catalog:seq_exhausted`):
+    the sequence counter is exhausted EXACTLY when it has burned past
+    the ceiling — fate forall over the extracted body (RFC-0170 P2.4);
+    the AS-IS mutant never reports exhaustion (wrap / burn past the
+    ceiling — the lie the DST plant
+    `seq_exhausted_on_live_ceiling_is_not_ok` refutes). -/
+theorem seq_exhausted_fate_iff :
+    ∀ (seq max : U64) (v : Bool),
+      (seq_exhausted seq max = ok v) ↔ v = decide (seq > max) := by
+  intro seq max v
+  unfold seq_exhausted
+  simp
+  exact eq_comm
