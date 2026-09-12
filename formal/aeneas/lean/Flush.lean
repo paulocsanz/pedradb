@@ -56,6 +56,30 @@ theorem auto_flush_due_fate_iff :
   unfold auto_flush_due
   cases armed <;> simp <;> exact eq_comm
 
+/-- RFC-0213 P1.1 (storage cadence, atom `catalog:flush_decision`):
+    the WAL rotates EXACTLY when the pipeline is fully quiescent —
+    memtable empty and no imm, no live pin, nothing parked
+    unflushed, no commit in flight; any hold keeps the WAL (fate
+    forall over the extracted body, RFC-0170 P2.4). The AS-IS
+    mutant ignores the live pin (the lie the DST plant
+    `wal_rotate_decision_on_live_pin_is_not_ok` refutes). -/
+theorem flush_decision_fate_iff :
+    ∀ (s : WalPinState) (r : WalRotateAction),
+      (wal_rotate_decision s = ok r) ↔
+        ((r = WalRotateAction.RotateWal
+            ∧ s.mem_empty = true ∧ s.imm_present = false
+            ∧ s.pin_live = false ∧ s.parked_unflushed = false
+            ∧ s.commit_inflight = false)
+          ∨ (r = WalRotateAction.KeepWal
+            ∧ ¬ (s.mem_empty = true ∧ s.imm_present = false
+              ∧ s.pin_live = false ∧ s.parked_unflushed = false
+              ∧ s.commit_inflight = false))) := by
+  intro s r
+  unfold wal_rotate_decision
+  rcases s with ⟨me, ip, pl, pu, ci⟩
+  cases me <;> cases ip <;> cases pl <;> cases pu <;> cases ci <;>
+    simp <;> exact eq_comm
+
 /-- Live flush read pin keeps the WAL. -/
 theorem wal_rotate_pin_live_keeps :
     wal_rotate_decision
