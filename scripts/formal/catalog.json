@@ -7339,7 +7339,6 @@
     "crates/pedradb-core/src/db.rs"
    ],
    "entry": "snap_is_empty",
-   "data_fate": true,
    "handlers": [
     "get_at"
    ],
@@ -7348,6 +7347,10 @@
    "dst_plant": {
     "file": "crates/pedradb-core/src/lookup_kernel.rs",
     "test": "snap_is_empty_on_live_zero_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "snapshot-empty verdict fully fated: empty exactly when snapshot seq is zero; as-is never sees empty snapshot, refused by DST plant"
    }
   },
   {

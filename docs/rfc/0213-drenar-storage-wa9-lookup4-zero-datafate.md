@@ -135,7 +135,14 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
 2. **P0.2:** cadência lookup ×4 (wrapper `Lookup.lean`):
    `snap_empty`, `snap_below_watermark`, `mem_point_decides`,
    `prefer_newer_seq` — cap 17→13, floor_atom 107→111,
-   floor_extract 171→167 — status: `todo`
+   floor_extract 171→167 — status: `doing`
+
+   — 1/4 `done`: `snap_empty_fate_iff`
+   (Lookup.lean; um snapshot está vazio EXATAMENTE quando sua
+   sequência é zero — `seq = 0` decidido; o as-is nunca vê snapshot
+   vazio, RFC-0170 P2.4), cap 17→16, floor_atom 107→108,
+   floor_extract 171→170; planta DST verde
+   (`snap_is_empty_on_live_zero_is_not_ok`, 1 passed)
 
 ### P1 — core
 
@@ -176,7 +183,7 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | Cadência write_admission ×9 | done | 9/9: este commit (FECHAMENTO) | 2026-09-12 |
-| P0.2 | p0 | Cadência lookup ×4 | todo | — | 2026-09-11 |
+| P0.2 | p0 | Cadência lookup ×4 | doing | 1/4: este commit | 2026-09-12 |
 | P1.1 | p1 | Cadência flush ×3 + cf ×2 | todo | — | 2026-09-11 |
 | P1.2 | p1 | Cadência leveling ×2 + singletons ×4 | todo | — | 2026-09-11 |
 | P1.3 | p1 | Veredito datado dos medidos ausentes | todo | — | 2026-09-11 |
