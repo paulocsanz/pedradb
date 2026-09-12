@@ -96,6 +96,14 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
    já tinha linha `close` registrada: subiu o degrau
    close→atom (linha close mantida, residual close 7→6 no mesmo
    commit — a escada conta o par no degrau mais fundo)
+
+   — 6/9 `done`: `torn_head_empty_log_fate_iff`
+   (WriteAdmission.lean; uma cabeça tornada conta como log vazio
+   EXATAMENTE quando o comprimento está abaixo do limite tiny —
+   `len < tiny_max` decidido; o as-is chama toda cabeça de vazia,
+   RFC-0170 P2.4), cap 21→20, floor_atom 103→104,
+   floor_extract 175→174; planta DST verde
+   (`torn_head_is_empty_log_on_live_large_wal_is_not_ok`, 1 passed)
 2. **P0.2:** cadência lookup ×4 (wrapper `Lookup.lean`):
    `snap_empty`, `snap_below_watermark`, `mem_point_decides`,
    `prefer_newer_seq` — cap 17→13, floor_atom 107→111,
@@ -139,7 +147,7 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | Cadência write_admission ×9 | doing | 5/9: este commit | 2026-09-12 |
+| P0.1 | p0 | Cadência write_admission ×9 | doing | 6/9: este commit | 2026-09-12 |
 | P0.2 | p0 | Cadência lookup ×4 | todo | — | 2026-09-11 |
 | P1.1 | p1 | Cadência flush ×3 + cf ×2 | todo | — | 2026-09-11 |
 | P1.2 | p1 | Cadência leveling ×2 + singletons ×4 | todo | — | 2026-09-11 |

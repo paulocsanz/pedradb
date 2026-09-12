@@ -307,3 +307,18 @@ theorem wal_commit_plan_fate_iff :
   intro need_sync sync_failed r
   unfold wal_commit_plan fence_on_sync_fail
   cases need_sync <;> cases sync_failed <;> simp <;> exact eq_comm
+
+/-- RFC-0213 P0.1 (storage cadence, atom `catalog:torn_head_empty_log`):
+    a torn head counts as an empty log EXACTLY when the length is
+    below the tiny-log bound — fate forall over the extracted body
+    (RFC-0170 P2.4); the AS-IS mutant calls every head empty (the
+    lie the DST plant `torn_head_is_empty_log_on_live_large_wal_is_not_ok`
+    refutes). -/
+theorem torn_head_empty_log_fate_iff :
+    ∀ (len tiny_max : U64) (v : Bool),
+      (torn_head_is_empty_log len tiny_max = ok v) ↔
+        v = decide (len < tiny_max) := by
+  intro len tiny_max v
+  unfold torn_head_is_empty_log
+  simp
+  exact eq_comm

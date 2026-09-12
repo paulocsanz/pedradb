@@ -7185,7 +7185,6 @@
     "crates/pedradb-core/src/db.rs"
    ],
    "entry": "torn_head_is_empty_log",
-   "data_fate": true,
    "handlers": [
     "open_with_env_sourced"
    ],
@@ -7194,6 +7193,10 @@
    "dst_plant": {
     "file": "crates/pedradb-core/src/write_admission_kernel.rs",
     "test": "torn_head_is_empty_log_on_live_large_wal_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "torn-head verdict fully fated: head is empty log exactly when len below tiny bound; as-is calls every head empty, refused by DST plant"
    }
   },
   {
