@@ -87,6 +87,14 @@ planta DST verde ANTES do commit, gate GREEN no commit)
    as-is acka incondicionalmente — `acked` passa da barreira),
    floor_atom 125→126, floor_extract 153→152; planta DST verde
    (`wal_inv_on_live_recording_is_not_ok`, 1 passed)
+
+   — 5/6 `done`: `wal_rotate_fate_iff`
+   (WalState.lean; o rotate zera o log EXATAMENTE quando tudo é
+   durável e acked — `acked = synced = written`; qualquer cauda
+   não-durável é recusada e o estado volta inteiro; o as-is derruba
+   o log sempre — bytes acked somem), floor_atom 126→127,
+   floor_extract 152→151; planta DST verde
+   (`wal_inv_on_live_recording_is_not_ok`, 1 passed)
 2. **P0.2** env_crash ×6: `env_crash`, `env_append`, `env_sync`,
    `env_barrier_floor`, `env_no_invented`, `env_honest_sync` (wrapper
    `EnvCrash.lean`) — floor_atom 128→134, floor_extract 150→144 —
@@ -115,7 +123,7 @@ planta DST verde ANTES do commit, gate GREEN no commit)
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | wal_state ×6 no degrau átomo | doing | 4/6 | 2026-09-12 |
+| P0.1 | p0 | wal_state ×6 no degrau átomo | doing | 5/6 | 2026-09-12 |
 | P0.2 | p0 | env_crash ×6 no degrau átomo | todo | — | 2026-09-12 |
 | P1.1 | p1 | cqe ×5 + write_ack ×3 no degrau átomo | todo | — | 2026-09-12 |
 | P1.2 | p1 | Veredito datado dos medidos ausentes | todo | — | 2026-09-12 |

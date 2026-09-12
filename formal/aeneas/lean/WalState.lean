@@ -559,3 +559,49 @@ theorem wal_ack_fate_iff :
       split
       · next hbad => exact absurd hbad hle
       · rfl
+
+/-- RFC-0214 P0.1 (atom `catalog:wal_rotate`): o rotate tem
+EXATAMENTE dois futuros ok — log todo durável e acked
+(`acked = synced = written`): o log é zerado; qualquer cauda
+não-durável: recusado, o estado volta inteiro (bytes acked não
+somem). Fate forall sobre o corpo extraído. O mutante AS-IS
+derruba o log sempre — mesmo com cauda não durável. -/
+theorem wal_rotate_fate_iff :
+    ∀ (s s' : wal.wal_state_kernel.WalState),
+      (wal.wal_state_kernel.wal_rotate s = ok s') ↔
+        ((s.acked = s.synced ∧ s.synced = s.written ∧
+            s' = { acked := 0#u64, synced := 0#u64, written := 0#u64 })
+          ∨ (¬(s.acked = s.synced ∧ s.synced = s.written) ∧ s' = s)) := by
+  intro s s'
+  have hz : wal.wal_state_kernel.wal_state_of 0#u64 0#u64 0#u64
+      = ok { acked := 0#u64, synced := 0#u64, written := 0#u64 } := by
+    unfold wal.wal_state_kernel.wal_state_of
+    simp [core.cmp.Ord.min.trait_default, core.cmp.Ord.min.default,
+      core.cmp.Ord.min_body]
+  unfold wal.wal_state_kernel.wal_rotate
+  rw [hz]
+  split
+  · split
+    · next h1 h2 =>
+        constructor
+        · intro ho
+          exact Or.inl ⟨h1, h2, (Result.ok.inj ho).symm⟩
+        · rintro (⟨_, _, he⟩ | ⟨hn, _⟩)
+          · rw [he]
+          · exact absurd ⟨h1, h2⟩ hn
+    · next h1 h2 =>
+        constructor
+        · intro ho
+          refine Or.inr ⟨?_, (Result.ok.inj ho).symm⟩
+          exact fun hc => h2 hc.2
+        · rintro (⟨_, hb, _⟩ | ⟨_, he⟩)
+          · exact absurd hb h2
+          · rw [he]
+  · next h1 =>
+      constructor
+      · intro ho
+        refine Or.inr ⟨?_, (Result.ok.inj ho).symm⟩
+        exact fun hc => h1 hc.1
+      · rintro (⟨ha, _, _⟩ | ⟨_, he⟩)
+        · exact absurd ha h1
+        · rw [he]
