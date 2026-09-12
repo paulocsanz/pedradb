@@ -936,3 +936,75 @@ fn verified_write_ack_on_live_profile_is_not_ok() {
     }
     let _ = fs::remove_dir_all(&dir);
 }
+
+/// RFC-0214 P2.1: the COMPOSED durability spine — any
+/// append/barrier/ack sequence through the real ledger keeps Inv-WAL
+/// (replay asserts per step) and D1 holds over every torn cut. The
+/// as-is replay (ack without barrier) breaks the invariant on the
+/// first group. Live: the pinned profile runs the composed path per
+/// durable group (both lone and group seams advance the ledger) and
+/// every acked put survives the crash.
+#[test]
+fn durability_spine_compose_on_live_profile_is_not_ok() {
+    use pedradb_core::durability_spine_kernel::{spine_replay, spine_replay_as_is, SpineStep};
+    use pedradb_core::write_ack_kernel::WriteAckLedger;
+
+    // --- model side: the composed sentence over any sequence -------
+    let mut l = WriteAckLedger::new();
+    spine_replay(
+        &mut l,
+        &[
+            SpineStep::Append(64),
+            SpineStep::Append(32),
+            SpineStep::Barrier,
+            SpineStep::Ack,
+            SpineStep::Append(16),
+            SpineStep::Barrier,
+            SpineStep::Ack,
+            SpineStep::Append(8),
+        ],
+    );
+    assert_eq!(l.snapshot(), (112, 112, 120), "groups ack, tail stays pending");
+    assert!(l.d1_holds_every_cut(120), "D1 over every torn prefix");
+
+    // --- model side: the as-is twin breaks the invariant -----------
+    let mut bad = WriteAckLedger::new();
+    let snap = spine_replay_as_is(
+        &mut bad,
+        &[SpineStep::Append(64), SpineStep::Barrier, SpineStep::Ack],
+    );
+    assert_eq!(snap, (64, 0, 64), "as-is acks with no barrier");
+    assert!(snap.0 > snap.1, "Inv-WAL broken: unsynced acked prefix");
+
+    // --- live side: the pinned profile runs the composed path ------
+    let dir = fresh_dir("spine-compose");
+    let rec = crate::RecordingEnv::new();
+    {
+        let db = pedradb_core::VerifiedProfile::open_with_env(&dir, rec.clone()).unwrap();
+        assert!(db.is_verified());
+        db.put(b"sk1", b"sv1").unwrap();
+        db.put(b"sk2", b"sv2").unwrap();
+        let (acked, synced, written) = db
+            .verified_write_ack()
+            .expect("ledger alive while pinned");
+        assert!(acked > 0, "the Ok acked a durable group");
+        assert!(acked <= synced && synced <= written, "Inv-WAL live");
+        db.close().unwrap();
+    }
+    rec.crash();
+    {
+        let db = pedradb_core::VerifiedProfile::open_with_env(&dir, rec).unwrap();
+        assert_eq!(
+            db.get(b"sk1").as_deref(),
+            Some(b"sv1".as_ref()),
+            "composed spine: acked put 1 survives the crash"
+        );
+        assert_eq!(
+            db.get(b"sk2").as_deref(),
+            Some(b"sv2".as_ref()),
+            "composed spine: acked put 2 survives the crash"
+        );
+        db.close().unwrap();
+    }
+    let _ = fs::remove_dir_all(&dir);
+}

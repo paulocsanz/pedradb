@@ -496,3 +496,6 @@ name = "ComposeStorageWrite"
 
 [[lean_lib]]
 name = "ComposeL28"
+
+[[lean_lib]]
+name = "ComposeDurabilitySpine"

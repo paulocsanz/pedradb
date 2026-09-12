@@ -42,6 +42,7 @@ COMPOSE=(
   ComposeStoreFinish
   ComposeStorageWrite
   ComposeL28
+  ComposeDurabilitySpine
   LsmCompactBridges
   LsmCompactDerived
   ProbeLadderBridges

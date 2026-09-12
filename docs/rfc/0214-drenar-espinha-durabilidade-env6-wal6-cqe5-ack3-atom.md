@@ -238,7 +238,23 @@ planta DST verde ANTES do commit, gate GREEN no commit)
 5. **P2.1** composição ∀ da espinha de durabilidade (env → wal →
    ack sobre atoms registrados) em NOVA compose lib (zero buracos;
    twins kernel/planta DST verdes; SEM registro TSV — razão datada em
-   findings, não é par único) — status: `todo`
+   findings, não é par único) — status: `done`
+
+   — `done`: compose lib `ComposeDurabilitySpine.lean` (23ª da fila
+   COMPOSE): pontes `*_ok_step` (cada passo É o futuro Ok do seu
+   átomo — corpos não abertos nos futuros ok), `spine_step`/
+   `spine_reach` (qualquer caminho append/barrier/ack do ledger
+   frio), `spine_inv_every_reach` (Inv-WAL invariante de TODO
+   caminho), coroa `spine_d1_every_reach` (D1 vale para o prefixo
+   acked sobre TODO corte torn — costura env composta via
+   `d1_modelo`). Twin kernel `durability_spine_kernel.rs`
+   (`spine_replay` com assert_inv por passo; as-is quebra no
+   primeiro grupo, 2 testes verdes) + planta DST
+   `durability_spine_compose_on_live_profile_is_not_ok` (1 passed,
+   live: 2 puts no perfil pinado, Inv-WAL live, crash, acked
+   sobrevivem). SEM TSV (razão datada em findings — atravessa 3
+   átomos, não é par único); lakefile + COMPOSE inscritos (64 libs
+   + 23 compose, 1939 jobs verde); gate imutável GREEN
 6. **P2.2** sweep final (worktree destacado DENTRO de `software/`,
    gates 3× GREEN — depth-floor, inventory-terminal, twin-contracts —
    + `test_proof_vs_campaign` ok, extracts `ok` com a contagem nova,
@@ -254,7 +270,7 @@ planta DST verde ANTES do commit, gate GREEN no commit)
 | P0.2 | p0 | env_crash ×6 no degrau átomo | done | 6/6: este commit (FECHAMENTO) | 2026-09-12 |
 | P1.1 | p1 | cqe ×5 + write_ack ×3 no degrau átomo | done | 8/8: este commit (FECHAMENTO) | 2026-09-12 |
 | P1.2 | p1 | Veredito datado dos medidos ausentes | done | nenhum recusado; planta resolvida como correção live (0d7324da) | 2026-09-12 |
-| P2.1 | p2 | Composição ∀ env→wal→ack + twins DST | todo | — | 2026-09-12 |
+| P2.1 | p2 | Composição ∀ env→wal→ack + twins DST | done | ComposeDurabilitySpine + twin kernel + planta (1 passed) | 2026-09-12 |
 | P2.2 | p2 | Sweep final + nota EXTRACT.md + flip done | todo | — | 2026-09-12 |
 
 ## Critérios de aceite
