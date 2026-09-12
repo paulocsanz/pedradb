@@ -6284,6 +6284,10 @@
   },
   {
    "id": "env_append",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "RFC-0214 P0.2: fate ∀ do append do Env — ok {m with written := w} exatamente quando written+n não estoura (ok w); a barreira não se move."
+   },
    "finding": "RFC-0166 P1.1",
    "twin_kind": "close",
    "single_artifact": true,

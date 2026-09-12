@@ -74,3 +74,35 @@ theorem crash_legal_fate_iff :
         exact (Result.ok.inj h).symm
       · intro h
         rw [h]
+
+/-- RFC-0214 P0.2 (atom `catalog:env_append`): o append do Env tem
+desfecho ok EXATAMENTE quando a soma dos bytes não estoura — e
+nesse caso o único futuro é `{m with written := w}` (a barreira
+não se move; o comprimento lógico só cresce). Fate forall sobre o
+corpo extraído. O mutante AS-IS da costura é o do `crash_legal`
+(sem piso) — o append real não tem mutant próprio no par. -/
+theorem append_fate_iff :
+    ∀ (m : env_crash_kernel.CrashModel) (n w : U64),
+      (env_crash_kernel.append m n = ok { m with written := w }) ↔
+        (m.written + n = ok w) := by
+  intro m n w
+  constructor
+  · intro h
+    unfold env_crash_kernel.append at h
+    cases hadd : m.written + n with
+    | ok w' =>
+        rw [hadd] at h
+        simp only [bind_tc_ok] at h
+        have hw : w' = w :=
+          congrArg env_crash_kernel.CrashModel.written (Result.ok.inj h)
+        rw [hw]
+    | fail e =>
+        rw [hadd] at h
+        simp at h
+    | div =>
+        rw [hadd] at h
+        simp at h
+  · intro h
+    unfold env_crash_kernel.append
+    rw [h]
+    simp only [bind_tc_ok]
