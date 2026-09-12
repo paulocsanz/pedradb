@@ -54,6 +54,14 @@ planta DST verde ANTES do commit, gate GREEN no commit)
    `wal_ack`, `wal_rotate`, `wal_acked_survives` (wrapper
    `WalState.lean`) — floor_atom 122→128, floor_extract 156→150 —
    status: `todo`
+
+   — 1/6 `done`: `inv_wal_fate_iff`
+   (WalState.lean; o desfecho de `inv_wal` é EXATAMENTE a conjunção
+   Booleana `acked ⊆ synced ∧ synced ⊆ written`; perna citada
+   `wal_inv_closed`, RFC-0191 P2.1; o as-is esquece o braço
+   acked⊆synced — dente `inv_wal_as_is_dente`), floor_atom 122→123,
+   floor_extract 156→155; planta DST verde
+   (`wal_inv_on_live_recording_is_not_ok`, 1 passed)
 2. **P0.2** env_crash ×6: `env_crash`, `env_append`, `env_sync`,
    `env_barrier_floor`, `env_no_invented`, `env_honest_sync` (wrapper
    `EnvCrash.lean`) — floor_atom 128→134, floor_extract 150→144 —
@@ -82,7 +90,7 @@ planta DST verde ANTES do commit, gate GREEN no commit)
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | wal_state ×6 no degrau átomo | todo | — | 2026-09-12 |
+| P0.1 | p0 | wal_state ×6 no degrau átomo | doing | 1/6 | 2026-09-12 |
 | P0.2 | p0 | env_crash ×6 no degrau átomo | todo | — | 2026-09-12 |
 | P1.1 | p1 | cqe ×5 + write_ack ×3 no degrau átomo | todo | — | 2026-09-12 |
 | P1.2 | p1 | Veredito datado dos medidos ausentes | todo | — | 2026-09-12 |

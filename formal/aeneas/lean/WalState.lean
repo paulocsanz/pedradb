@@ -414,3 +414,26 @@ theorem inv_wal_write_reachable :
   | init => exact inv_wal_init
   | step k' s0 s1 hstep _ IH =>
       exact wal_write_step_preserves_inv_wal _ _ IH hstep
+
+/-! ## RFC-0214 P0.1 — espinha de durabilidade no degrau átomo (fate ∀) -/
+
+/-- RFC-0214 P0.1 (atom `catalog:wal_state`): o desfecho de `inv_wal`
+é EXATAMENTE a conjunção Booleana das duas contenções — `acked ⊆
+synced` e `synced ⊆ written` (o teto de um crash legal é `written`,
+logo `synced ≤ written` é "synced está no prefixo-recuperável").
+Fate forall sobre o corpo extraído (padrão `fate_iff` dos RFCs
+0205–0213); CITA o fechado ∀ `wal_inv_closed` (RFC-0191 P2.1) como
+perna — nada é re-provado. O mutante AS-IS esquece o braço
+acked⊆synced (dente `inv_wal_as_is_dente`). -/
+theorem inv_wal_fate_iff :
+    ∀ (s : wal.wal_state_kernel.WalState) (v : Bool),
+      (wal.wal_state_kernel.inv_wal s = ok v) ↔
+        (v = (((s.acked <= s.synced) : Bool) &&
+              ((s.synced <= s.written) : Bool))) := by
+  intro s v
+  rw [wal_inv_closed]
+  constructor
+  · intro h
+    exact (Result.ok.inj h).symm
+  · intro h
+    rw [h]

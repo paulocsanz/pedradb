@@ -149,3 +149,4 @@ atom	catalog:write_record_count	write_record_count_ok_fate_iff	formal/aeneas/lea
 atom	catalog:iter_window	iter_window_keep_fate_iff	formal/aeneas/lean/Iter.lean	iter_window_keep
 atom	catalog:occ_batch_plan	occ_batch_plan_fate_iff	formal/aeneas/lean/GroupCommit.lean	occ_batch_plan
 atom	catalog:wal_recover	recover_collect_act_fate_iff	formal/aeneas/lean/WalRecover.lean	recover_collect_act
+atom	catalog:wal_state	inv_wal_fate_iff	formal/aeneas/lean/WalState.lean	inv_wal

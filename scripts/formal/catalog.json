@@ -6380,6 +6380,10 @@
   },
   {
    "id": "wal_state",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "RFC-0214 P0.1: fate ∀ de inv_wal — ok v exatamente quando v decide (acked ⊆ synced ∧ synced ⊆ written); perna citada wal_inv_closed (RFC-0191 P2.1)."
+   },
    "finding": "RFC-0166 P1.2",
    "twin_kind": "close",
    "single_artifact": true,
