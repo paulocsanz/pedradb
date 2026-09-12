@@ -1008,3 +1008,83 @@ fn durability_spine_compose_on_live_profile_is_not_ok() {
     }
     let _ = fs::remove_dir_all(&dir);
 }
+
+/// RFC-0215 P1.2: the COMPOSED product crown — over every
+/// spine-reachable ledger, both real kernels agree: the model leg
+/// (`d1_modelo`, atom of RFC-0215 P0.2) and the spec leg (`d1_holds`
+/// over the positional acked view, atom of P0.1) hold together at
+/// every legal torn cut. The as-is crown (barrier-less ack) is caught
+/// by the spec leg. Live: the pinned profile's post-ack ledger state
+/// satisfies the crown and every acked put survives the crash.
+#[test]
+fn product_crown_compose_on_live_profile_is_not_ok() {
+    use pedradb_core::durability_spine_kernel::{spine_replay, SpineStep};
+    use pedradb_core::product_crown_kernel::{product_crown, product_crown_as_is};
+    use pedradb_core::wal::wal_state_kernel::WalState;
+    use pedradb_core::write_ack_kernel::WriteAckLedger;
+
+    // --- model side: the crown holds after EVERY spine prefix ------
+    let steps = [
+        SpineStep::Append(64),
+        SpineStep::Append(32),
+        SpineStep::Barrier,
+        SpineStep::Ack,
+        SpineStep::Append(16),
+        SpineStep::Barrier,
+        SpineStep::Ack,
+        SpineStep::Append(8),
+    ];
+    for n in 1..=steps.len() {
+        let mut li = WriteAckLedger::new();
+        spine_replay(&mut li, &steps[..n]);
+        let (acked, synced, written) = li.snapshot();
+        let s = WalState { acked, synced, written };
+        assert!(
+            product_crown(&s),
+            "crown holds after {n} spine steps ({acked},{synced},{written})"
+        );
+    }
+
+    // --- model side: the as-is crown is caught by the spec leg -----
+    let unsynced = WalState { acked: 64, synced: 0, written: 64 };
+    assert!(
+        !product_crown_as_is(&unsynced),
+        "spec leg refuses the unsynced acked prefix"
+    );
+
+    // --- live side: the pinned profile's ledger satisfies the crown -
+    let dir = fresh_dir("product-crown");
+    let rec = crate::RecordingEnv::new();
+    {
+        let db = pedradb_core::VerifiedProfile::open_with_env(&dir, rec.clone()).unwrap();
+        assert!(db.is_verified());
+        db.put(b"ck1", b"cv1").unwrap();
+        db.put(b"ck2", b"cv2").unwrap();
+        let (acked, synced, written) = db
+            .verified_write_ack()
+            .expect("ledger alive while pinned");
+        assert!(acked > 0, "the Ok acked a durable group");
+        let s = WalState { acked, synced, written };
+        assert!(
+            product_crown(&s),
+            "live post-ack ledger ({acked},{synced},{written}) satisfies the crown"
+        );
+        db.close().unwrap();
+    }
+    rec.crash();
+    {
+        let db = pedradb_core::VerifiedProfile::open_with_env(&dir, rec).unwrap();
+        assert_eq!(
+            db.get(b"ck1").as_deref(),
+            Some(b"cv1".as_ref()),
+            "product crown: acked put 1 survives the crash"
+        );
+        assert_eq!(
+            db.get(b"ck2").as_deref(),
+            Some(b"cv2".as_ref()),
+            "product crown: acked put 2 survives the crash"
+        );
+        db.close().unwrap();
+    }
+    let _ = fs::remove_dir_all(&dir);
+}

@@ -50,6 +50,7 @@ rust-version = "1.75"
 # Internal
 pedradb-posix = { path = "crates/pedradb-posix" }
 pedradb-core = { path = "crates/pedradb-core" }
+pedradb-spec = { path = "crates/pedradb-spec" }
 pedradb-sim = { path = "crates/pedradb-sim" }
 pedradb-oracle = { path = "crates/pedradb-oracle" }
 pedradb-apply = { path = "crates/pedradb-apply" }

@@ -32,6 +32,7 @@ pub mod concurrent;
 pub mod corrupt;
 pub mod d1_modelo_kernel;
 pub mod durability_spine_kernel;
+pub mod product_crown_kernel;
 pub mod db;
 pub mod env;
 pub mod env_crash_kernel;

@@ -499,3 +499,6 @@ name = "ComposeL28"
 
 [[lean_lib]]
 name = "ComposeDurabilitySpine"
+
+[[lean_lib]]
+name = "ComposeProductCrown"

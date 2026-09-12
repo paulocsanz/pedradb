@@ -91,7 +91,9 @@ planta DST verde ANTES do commit, gate GREEN no commit).
    `product_crown_kernel.rs` + planta DST on live; inscrição
    COMPOSE/lakefile; **SEM TSV** — razão datada em findings (a composição
    atravessa múltiplos átomos: espinha + d1_modelo + d1_holds, não um
-   par único do catálogo) — status: `todo`
+   par único do catálogo) — status: `done` (2026-09-12; compose lib
+   verde via twin iff `wa_d1_modelo_fate_iff` sobre a cópia wa de
+   `d1_modelo`, twin 2 testes, planta DST verde, COMPOSE 24)
 
 5. **P2.1** http ×6 primeira fileira (wrappers `Auth.lean`/`Form.lean`
    já inscritos): `is_bearer_scheme`, `is_non_bearer_auth_scheme`,
@@ -134,7 +136,7 @@ planta DST verde ANTES do commit, gate GREEN no commit).
 | P0.1 | p0 | spec ×4 átomo (`Properties.lean`): d1_holds, r1_answer_ok, t1_holds, c1_holds | done | `c1_holds_fate_iff`/`d1_holds_fate_iff`/`t1_holds_fate_iff`/`r1_answer_ok_fate_iff` | 2026-09-12 |
 | P0.2 | p0 | modelo ×4 átomo: d1_modelo, r1_modelo, t1_modelo, c1_modelo | done | `d1_modelo_fate_iff`/`r1_modelo_fate_iff`/`t1_modelo_fate_iff`/`c1_modelo_fate_iff` | 2026-09-12 |
 | P1.1 | p1 | fate ×2 átomo: d1_put_ok, c1_advance_commit | done | `put_ok_fate_iff`/`c1_advance_commit_fate_iff` | 2026-09-12 |
-| P1.2 | p1 | coroa↔espinha composta (`ComposeProductCrown.lean` + twin + DST, sem TSV) | todo | — | 2026-09-12 |
+| P1.2 | p1 | coroa↔espinha composta (`ComposeProductCrown.lean` + twin + DST, sem TSV) | done | `product_crown_every_reach`/`wa_d1_modelo_fate_iff` | 2026-09-12 |
 | P2.1 | p2 | http ×6 átomo: bearer/auth/method/ascii | todo | — | 2026-09-12 |
 | P2.2 | p2 | Sweep final + nota EXTRACT.md + flip done | todo | — | 2026-09-12 |
 

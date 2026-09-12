@@ -144,3 +144,28 @@ verde antes do commit, exatamente 1 teorema público por commit).
   1 passed). Axiomas: os 3 padrão do Lean. Fechamento: floor_atom
   150→152, floor_extract 128→126, gate GREEN nas 2 promoções,
   1 teorema público por commit.
+
+## P1.2 — coroa↔espinha composta (SEM TSV, 2026-09-12)
+
+- **ComposeProductCrown (11ª do array COMPOSE, agora 24 libs)**: a
+  composição existe — `product_crown_every_reach` prova, sobre todo
+  ledger `spine_reach` do RFC-0214, as duas pernas juntas: o modelo
+  `d1_modelo = ok true` (via a iff; corpo extraído NÃO reaberto) e a
+  spec `d1_holds = ok true` (perna P0.1 `d1_holds_fate_iff`). A perna
+  modelo cita o twin `wa_d1_modelo_fate_iff` provado em
+  `WriteAck.lean` sobre a cópia wa do `d1_modelo` — resolução datada
+  para o choque de import (`ComposeDurabilitySpine` + `D1Modelo`
+  carregam cópias geradas dos subsistemas env/wal e os nomes aux
+  raiz do Aeneas colidem; a cópia textualmente idêntica já vive em
+  `WriteAckKernel`, então a iff geminada fecha o corpo sem
+  reescrever nada gerado). Twin kernel `product_crown_kernel.rs`
+  (2 testes: coroa em todo prefixo da espinha; as-is quebrado pela
+  perna spec) + planta DST
+  `product_crown_compose_on_live_profile_is_not_ok` (pedradb-sim,
+  exit 0, 1 passed — ledger vivo pós-ack satisfaz a coroa e os puts
+  acked sobrevivem ao crash). Inscrições: `[[lean_lib]]
+  ComposeProductCrown` no lakefile + array COMPOSE do
+  `scripts/lean_extracts.sh`. **SEM TSV**: a composição atravessa
+  múltiplos átomos (espinha RFC-0214 + d1_modelo + d1_holds), não um
+  par único do catálogo — escada permanece floor_atom 152 /
+  floor_extract 126.
