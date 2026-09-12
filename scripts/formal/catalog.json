@@ -5546,6 +5546,10 @@
    "dst_plant": {
     "file": "crates/pedradb-spec/src/properties_kernel.rs",
     "test": "d1_as_is_does_not_imply_d1"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "spec ×4 P0.1 2/4: D1 aceita (acked, survives) exatamente quando nenhum índice ackado cai em ou além do prefixo sobrevivente (put→Ok durável, promessa G1); loop real via spec_decr_nat; mutante as-is (só synced) recusado pela planta"
    }
   },
   {
