@@ -5314,7 +5314,6 @@
     "crates/rocksdb-compat/src/lib.rs"
    ],
    "entry": "iter_window_keep",
-   "data_fate": true,
    "handlers": [
     "page_forward",
     "page_last_n"
@@ -5323,6 +5322,10 @@
    "dst_plant": {
     "file": "crates/rocksdb-compat/src/lib.rs",
     "test": "iter_window_keep_on_live_hidden_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "janela do iterador de compat mantem a entrada se e so se o snapshot ainda esta vivo — identidade sobre o corpo extraido; as-is mantem tudo e ressuscita entradas escondidas, a planta DST refuta"
    }
   },
   {

@@ -268,6 +268,14 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
    planta DST refuta, RFC-0170 P2.4), cap 5→4, floor_atom 118→119,
    floor_extract 160→159; planta DST verde
    (`write_record_count_ok_on_live_torn_batch_is_not_ok`, 1 passed)
+
+   — 5/6 `done`: `iter_window_keep_fate_iff`
+   (Iter.lean; a janela do iterador de compat mantém uma entrada se
+   e só se o snapshot ainda está vivo — a identidade sobre o corpo
+   extraído; o as-is mantém tudo e ressuscita entradas escondidas
+   depois que o snapshot morreu, RFC-0170 P2.4), cap 4→3,
+   floor_atom 119→120, floor_extract 159→158; planta DST verde
+   (`iter_window_keep_on_live_hidden_is_not_ok`, 1 passed)
 5. **P1.3:** veredito datado dos medidos ausentes — SE alguma
    promoção acima medir fn/planta/handler inexistente, veredito
    por par em findings (reescrever para fn viva SE o caminho
@@ -298,7 +306,7 @@ tocam o kernel + wrapper + ratchets, nada de edits fora do meu.
 | P0.1 | p0 | Cadência write_admission ×9 | done | 9/9: este commit (FECHAMENTO) | 2026-09-12 |
 | P0.2 | p0 | Cadência lookup ×4 | done | 4/4: este commit (FECHAMENTO) | 2026-09-12 |
 | P1.1 | p1 | Cadência flush ×3 + cf ×2 | done | 5/5: este commit (FECHAMENTO) | 2026-09-12 |
-| P1.2 | p1 | Cadência leveling ×2 + singletons ×4 | doing | 4/6: este commit | 2026-09-12 |
+| P1.2 | p1 | Cadência leveling ×2 + singletons ×4 | doing | 5/6: este commit | 2026-09-12 |
 | P1.3 | p1 | Veredito datado dos medidos ausentes | todo | — | 2026-09-11 |
 | P2.1 | p2 | Wal finais ×2 — CATÁLOGO ZERO data_fate | todo | — | 2026-09-11 |
 | P2.2 | p2 | Composição ∀ storage + sweep final + flip done | todo | — | 2026-09-11 |

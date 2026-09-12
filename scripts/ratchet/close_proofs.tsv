@@ -146,3 +146,4 @@ atom	catalog:cf_family_of	cf_family_of_fate_iff	formal/aeneas/lean/Cf.lean	cf_fa
 atom	catalog:leveling_pick	pick_l0_to_l1_fate_iff	formal/aeneas/lean/Leveling.lean	pick_l0_to_l1
 atom	catalog:leveling_pushdown	pick_pushdown_fate_iff	formal/aeneas/lean/Leveling.lean	pick_pushdown
 atom	catalog:write_record_count	write_record_count_ok_fate_iff	formal/aeneas/lean/Batch.lean	write_record_count_ok
+atom	catalog:iter_window	iter_window_keep_fate_iff	formal/aeneas/lean/Iter.lean	iter_window_keep
