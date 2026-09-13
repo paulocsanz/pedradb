@@ -151,7 +151,21 @@ board**, estendendo este RFC a cada etapa nova descoberta.
   observados == attached, ou janela ≤ voo da barreira in-flight), sem
   wait-to-grow (veto 0180/0190); alvo: window ≥ clean em mc2–mc4 DIAG
   (hoje 0,100–0,960 vs 0,331–1,130) mantendo mc6+ e mc50 ≥ clean;
-  depois e4b Linux. — status: `todo`
+  depois e4b Linux. **Adjudicado DIAG 2026-09-13** (`cw=` probes,
+  commit `0ba886fe`; ycsb_f mc2/mc4 × 2 rounds quiet): o
+  quiescence-break JÁ faz o early-exit — `cw=42–51µs/grupo` (não os
+  1000µs; absorve o peer + 20µs de silêncio). O colapso 0,33→0,10 é
+  estrutural no regime DIAG: a coluna async do Darwin não tem barreira
+  em voo para sobrepor a espera, então os ~45µs são latência pura
+  (≈25µs/op vs 6,7µs/op do clean serial-pipelined; conta fecha em 3,3×
+  = razão medida). Encolher mais o early-exit arrisca esfomear o grupo
+  sem recuperar o fator 3. A condição vencedora em baixa concorrência
+  é **janela ≤ barreira in-flight** — que só existe no Linux/e4b (lá o
+  async paga fdatasync real por grupo; a janela cavalga o voo). Fatia
+  re-escopoada: implementar a janela-limitada-ao-voo É o P0.4 (mesma
+  onda e4b); DIAG Darwin não pode validá-la (sem barreira). — status:
+  `blocked e4b` (condicional-datado; mecanismo de early-exit já
+  comprovado `cw=42–51µs`)
 - [ ] **P0.4** Meter Linux gate 3-run quiet min-of-3 (âncora p149):
   `ycsb_f_mc4` default 0,491 → **≥1,0** com janela on; guardas ≥ nível
   p211m (ycsb_a_mc4, overwrite_mc4, apply_mc4, mc50); cartazes pagos em
@@ -332,7 +346,7 @@ dono.
 | P0.1 | p0 | Kernel janela de coleta + wiring real + testes `rfc0217_group_window_*` | done | `010f61fe` + P0.1b `234001f7` | 2026-09-13 |
 | P0.2 | p0 | Attach in-flight: adjudicado — fundido em P2.2 (encode member-side; voos já cheios) | done | `234001f7` | 2026-09-13 |
 | P0.3 | p0 | Meter DIAG Darwin: avg_grp ok; ratio janela fixa PERDE mc2–4 (0,100–0,960 vs clean), GANHA mc6+; default fica off | done | veredito 09-13T09:51Z (perda→P0.3b) | 2026-09-13 |
-| P0.3b | p0 | Early-exit da janela (writers observados==attached ou janela ≤ voo da barreira) | todo | — | 2026-09-13 |
+| P0.3b | p0 | Early-exit da janela: quiescence JÁ fecha em cw=42–51µs; colapso mc2–4 = sem barreira in-flight no DIAG; janela-≤-voo = e4b | blocked e4b | probes 09-13 (`0ba886fe`) | 2026-09-13 |
 | P0.4 | p0 | Meter Linux 3-run quiet: gate-blocked 04:42Z (p149 desconectado); binário+driver prontos | doing | — | 2026-09-13 |
 | P0.5 | p0 | Re-adjudicação do dono no Linux: mesmo block do P0.4 | doing | — | 2026-09-13 |
 | P1.1 | p1 | kafka_changelog_flush: flush amortizado | done | `ded231ab` (ratio ≥1,0 = meter Linux e4b) | 2026-09-13 |
