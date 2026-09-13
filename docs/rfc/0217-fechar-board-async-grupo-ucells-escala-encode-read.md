@@ -262,6 +262,14 @@ board**, estendendo este RFC a cada etapa nova descoberta.
   pré-existentes em HEAD `52afb58c`). DIAG Darwin n=300 (não-claim):
   filter 434→835 qps (0,47→0,935 do twin rocks 893; p99 21,3→7,8ms);
   ingest p50 0,83→0,60ms. Cartaz Linux 3-run = meter e4b (p149).
+  Follow-up `f04d98af` (2026-09-13): o native install do `92a76a97`
+  rodava com a condição invertida (`!default_raw`) — instalava o arquivo
+  de raw user keys num default CF `default\0`-prefixado (DBs com CFs,
+  ex. suíte deps/myrocks) e o read path decodificava o bloco sem achar a
+  key (read-back None). Corrigido para `codec.default_raw`; DBs com CFs
+  voltam ao replay por WriteBatch. Teste `rfc0217_p12_ingest_readback`
+  promovido de `#[ignore]` para verde; assert de read-back devolvido à
+  suíte rocksapi (bench 31/0/0).
 - [ ] **P1.3** wbwi 0,494 + myrocks_write_tx 0,751: batch indexado nativo
   + tx single-writer real (`begin_occ`/commit já existem) no lugar do
   WriteBatch emulado. **DIAG micro 2026-09-13** (Darwin, rocksapi,
@@ -433,7 +441,7 @@ dono.
 | P0.4 | p0 | Meter Linux 3-run quiet: braço flightcap no driver; imagem `p211z` publicada; gate re-estreado em `linux-gate-p211z` (deploy `6f509017` pending, host Brasil ainda down; onda encadeada P0.5→P0.4) | doing | — | 2026-09-13 |
 | P0.5 | p0 | Re-adjudicação do dono no Linux: parte 1 da onda encadeada `p04chain` (p211p PHASE no ext4) | doing | — | 2026-09-13 |
 | P1.1 | p1 | kafka_changelog_flush: flush amortizado | done | `ded231ab` (ratio ≥1,0 = meter Linux e4b) | 2026-09-13 |
-| P1.2 | p1 | ingest_sst + compaction_filter: caminhos nativos | done | `92a76a97` (cartaz Linux = e4b; DIAG filter 0,47→0,935) | 2026-09-13 |
+| P1.2 | p1 | ingest_sst + compaction_filter: caminhos nativos | done | `92a76a97` + read-back fix `f04d98af` (cartaz Linux = e4b; DIAG filter 0,47→0,935) | 2026-09-13 |
 | P1.3 | p1 | wbwi + write_tx: batch indexado + tx nativos | doing | `5c1f5b43` + DIAG micro 09-13: 0,307→0,317–0,349 (perda honesta; cartaz = e4b) | 2026-09-13 |
 | P1.4 | p1 | linkbench_mix: decompor + atacar dono | doing | `2f083efb` (point_ord_btree incremental; DIAG p50 −52%; cartaz = e4b) | 2026-09-13 |
 | P2.1 | p2 | Escala pesada 4GiB: meter + fechar (0,70/0,557) | todo | — | 2026-09-13 |
