@@ -6257,7 +6257,11 @@
     "file": "crates/pedradb-core/src/group_commit_kernel.rs",
     "test": "group_members_are_simultaneous"
    },
-   "three_teeth": true
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 4/4 P0.1: group_validate como cadeia citada do loop extraído (index→occ_conflict→push, combustível = membros); floor_atom 181→182"
+   }
   },
   {
    "id": "occ_member_fate",

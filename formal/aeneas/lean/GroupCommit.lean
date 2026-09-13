@@ -752,3 +752,240 @@ theorem fence_publish_seq_fate_iff :
   rw [hloop]
   exact fence_publish_seq_loop_fate member_seqs (member_seqs.val).length _ 0#usize
     (Nat.zero_le _) (Nat.sub_le _ _) v
+
+/-! ### RFC-0218 P0.1 4/4 — `group_validate` (átomo `catalog:group_validate`)
+
+Mesmo molde do fence: cada passo `cont` lê um OccRead, decide pelo
+`occ_conflict` extraído (candidato a átomo 1/4), empurra no out e avança
+i estritamente; o fim é `i = len` com out = v. -/
+
+/-- No fim (i = len) o corpo devolve exatamente `done out`. -/
+private theorem gv_body_at_end (reads : Aeneas.Std.Slice OccRead)
+    (last_seq : Std.U64) (out : alloc.vec.Vec Bool) (i : Usize)
+    (hlen : (↑i : Nat) = (reads.val).length) :
+    group_validate_loop.body reads last_seq out i
+      = ok (ControlFlow.done out) := by
+  have hge : ¬ (i < Aeneas.Std.Slice.len reads) := by
+    intro hlt
+    have hn0 := (UScalar.lt_equiv i (Aeneas.Std.Slice.len reads)).mp hlt
+    rw [Aeneas.Std.Slice.len_val] at hn0
+    rw [hlen] at hn0
+    exact absurd hn0 (Nat.lt_irrefl _)
+  unfold group_validate_loop.body
+  dsimp +zeta only
+  rw [if_neg hge]
+
+/-- No fim o corpo nunca dá cont. -/
+private theorem gv_body_no_cont_at_end (reads : Aeneas.Std.Slice OccRead)
+    (last_seq : Std.U64) (out : alloc.vec.Vec Bool) (i : Usize)
+    (st : alloc.vec.Vec Bool × Usize)
+    (hlen : (↑i : Nat) = (reads.val).length)
+    (hB : group_validate_loop.body reads last_seq out i
+            = ok (ControlFlow.cont st)) : False := by
+  have hge : ¬ (i < Aeneas.Std.Slice.len reads) := by
+    intro hlt
+    have hn0 := (UScalar.lt_equiv i (Aeneas.Std.Slice.len reads)).mp hlt
+    rw [Aeneas.Std.Slice.len_val] at hn0
+    rw [hlen] at hn0
+    exact absurd hn0 (Nat.lt_irrefl _)
+  unfold group_validate_loop.body at hB
+  dsimp +zeta only at hB
+  rw [if_neg hge] at hB
+  injection hB with hB2
+  contradiction
+
+/-- Sob i < len o corpo é exatamente `cont (out', i')` com o índice
+estritamente crescente e limitado — index/occ_conflict/push consumidos
+pelos bind_ok_inv (todos os ramos ok). -/
+private theorem gv_body_inv (reads : Aeneas.Std.Slice OccRead)
+    (last_seq : Std.U64) (out : alloc.vec.Vec Bool) (i : Usize)
+    (hlt : (↑i : Nat) < (reads.val).length)
+    (cf : ControlFlow (alloc.vec.Vec Bool × Usize) (alloc.vec.Vec Bool))
+    (hB : group_validate_loop.body reads last_seq out i = ok cf) :
+    ∃ (out' : alloc.vec.Vec Bool) (i' : Usize),
+      cf = ControlFlow.cont (out', i') ∧
+        (↑i : Nat) < (↑i' : Nat) ∧ (↑i' : Nat) ≤ (reads.val).length := by
+  have hlt' : i < Aeneas.Std.Slice.len reads := by
+    refine (UScalar.lt_equiv i (Aeneas.Std.Slice.len reads)).mpr ?_
+    rw [Aeneas.Std.Slice.len_val]
+    exact hlt
+  unfold group_validate_loop.body at hB
+  dsimp +zeta only at hB
+  rw [if_pos hlt'] at hB
+  obtain ⟨or, hor, hB⟩ := bind_ok_inv _ _ _ hB
+  obtain ⟨b, hb, hB⟩ := bind_ok_inv _ _ _ hB
+  obtain ⟨out1, hout1, hB⟩ := bind_ok_inv _ _ _ hB
+  obtain ⟨i2, hi2, hB⟩ := bind_ok_inv _ _ _ hB
+  have hv := gc_usize_succ_val i i2 hi2
+  exact ⟨out1, i2, (Result.ok.inj hB).symm, by omega, by omega⟩
+
+/-- Payload de um cont sob i < len progride: i < i' ≤ len. -/
+private theorem gv_body_cont_progress (reads : Aeneas.Std.Slice OccRead)
+    (last_seq : Std.U64) (out : alloc.vec.Vec Bool) (i : Usize)
+    (out' : alloc.vec.Vec Bool) (i' : Usize)
+    (hlt : (↑i : Nat) < (reads.val).length)
+    (hB : group_validate_loop.body reads last_seq out i
+            = ok (ControlFlow.cont (out', i'))) :
+    (↑i : Nat) < (↑i' : Nat) ∧ (↑i' : Nat) ≤ (reads.val).length := by
+  obtain ⟨out2, i2, hcf, hlt2, hle2⟩ :=
+    gv_body_inv reads last_seq out i hlt (ControlFlow.cont (out', i')) hB
+  have hp := ControlFlow.cont.inj hcf
+  obtain ⟨-, hii⟩ := Prod.mk.inj hp
+  subst hii
+  exact ⟨hlt2, hle2⟩
+
+/-- Done só no fim, com o out intacto. -/
+private theorem gv_body_done_end (reads : Aeneas.Std.Slice OccRead)
+    (last_seq : Std.U64) (out : alloc.vec.Vec Bool) (i : Usize)
+    (r : alloc.vec.Vec Bool)
+    (hle : (↑i : Nat) ≤ (reads.val).length)
+    (hB : group_validate_loop.body reads last_seq out i
+            = ok (ControlFlow.done r)) :
+    (↑i : Nat) = (reads.val).length ∧ out = r := by
+  by_cases hlt : (↑i : Nat) < (reads.val).length
+  · obtain ⟨out2, i2, hcf, -, -⟩ :=
+      gv_body_inv reads last_seq out i hlt (ControlFlow.done r) hB
+    exact absurd hcf (by intro hh; contradiction)
+  · have hlen : (↑i : Nat) = (reads.val).length := by omega
+    refine ⟨hlen, ?_⟩
+    have h := (gv_body_at_end reads last_seq out i hlen).symm.trans hB
+    exact ControlFlow.done.inj (Result.ok.inj h)
+
+/-- O fate da validação como cadeia: combustível = membros restantes. -/
+private def ValidateFate (reads : Aeneas.Std.Slice OccRead)
+    (last_seq : Std.U64) :
+    Nat → alloc.vec.Vec Bool → Usize → alloc.vec.Vec Bool → Prop
+  | 0, out, i, v =>
+      (↑i : Nat) = (reads.val).length ∧ out = v
+  | fuel + 1, out, i, v =>
+      (∃ (out' : alloc.vec.Vec Bool) (i' : Usize),
+          group_validate_loop.body reads last_seq out i
+            = ok (ControlFlow.cont (out', i')) ∧
+            ValidateFate reads last_seq fuel out' i' v) ∨
+        ((↑i : Nat) = (reads.val).length ∧ out = v)
+
+/-- O fate do loop por indução no combustível. -/
+private theorem group_validate_loop_fate (reads : Aeneas.Std.Slice OccRead)
+    (last_seq : Std.U64) :
+    ∀ (fuel : Nat) (out : alloc.vec.Vec Bool) (i : Usize),
+      (↑i : Nat) ≤ (reads.val).length →
+      (reads.val).length - (↑i : Nat) ≤ fuel →
+      ∀ v : alloc.vec.Vec Bool,
+        (group_validate_loop reads last_seq out i = ok v) ↔
+          ValidateFate reads last_seq fuel out i v := by
+  intro fuel
+  induction fuel with
+  | zero =>
+    intro out i hile hfuel v
+    have hlen : (↑i : Nat) = (reads.val).length := by omega
+    constructor
+    · intro h
+      refine ⟨hlen, ?_⟩
+      unfold group_validate_loop at h
+      rw [loop.eq_def] at h
+      dsimp only at h
+      cases hB : group_validate_loop.body reads last_seq out i with
+      | ok cf =>
+        cases cf with
+        | done r =>
+          rw [hB] at h
+          dsimp only at h
+          rw [Result.ok.inj h] at hB
+          exact (gv_body_done_end reads last_seq out i v hile hB).2
+        | cont st =>
+          exact absurd hB (gv_body_no_cont_at_end reads last_seq out i st hlen)
+      | fail e =>
+        rw [hB] at h
+        dsimp only at h
+        exact absurd h (by simp)
+      | div =>
+        rw [hB] at h
+        dsimp only at h
+        exact absurd h (by simp)
+    · rintro ⟨-, hout⟩
+      unfold group_validate_loop
+      rw [loop.eq_def]
+      dsimp only
+      rw [gv_body_at_end reads last_seq out i hlen, hout]
+  | succ fuel ih =>
+    intro out i hile hfuel v
+    unfold group_validate_loop
+    rw [loop.eq_def]
+    dsimp only
+    cases hB : group_validate_loop.body reads last_seq out i with
+    | ok cf =>
+      cases cf with
+      | cont st =>
+        obtain ⟨out', i'⟩ := st
+        dsimp only
+        by_cases hlt : (↑i : Nat) < (reads.val).length
+        · obtain ⟨hprog1, hprog2⟩ :=
+            gv_body_cont_progress reads last_seq out i out' i' hlt hB
+          constructor
+          · intro h
+            exact Or.inl ⟨out', i', hB,
+              (ih out' i' hprog2 (by omega) v).mp h⟩
+          · rintro (⟨out2, i2, hbody, hfate⟩ | ⟨hlen, hout⟩)
+            · have hu : ControlFlow.cont (out', i')
+                  = ControlFlow.cont (out2, i2) :=
+                  Result.ok.inj (hB.symm.trans hbody)
+              obtain ⟨hoo, hii⟩ := Prod.mk.inj (ControlFlow.cont.inj hu)
+              subst hoo
+              subst hii
+              exact (ih out' i' hprog2 (by omega) v).mpr hfate
+            · exact absurd hlt (by omega)
+        · have hlen : (↑i : Nat) = (reads.val).length := by omega
+          exact absurd hB (gv_body_no_cont_at_end reads last_seq out i (out', i') hlen)
+      | done r =>
+        dsimp only
+        obtain ⟨hlen, hout⟩ := gv_body_done_end reads last_seq out i r hile hB
+        constructor
+        · intro h
+          have hrv : r = v := Result.ok.inj h
+          exact Or.inr ⟨hlen, hrv ▸ hout⟩
+        · rintro (⟨out2, i2, hbody, -⟩ | ⟨hlen2, hout2⟩)
+          · have hne := hbody.symm.trans hB
+            injection hne with hne2
+            contradiction
+          · exact congrArg ok (hout.symm.trans hout2)
+    | fail e =>
+      dsimp only
+      constructor
+      · intro h
+        exact absurd h (by simp)
+      · rintro (⟨out2, i2, hbody, -⟩ | ⟨hlen2, hout2⟩)
+        · exact absurd (hbody.symm.trans hB) (by simp)
+        · exact absurd ((gv_body_at_end reads last_seq out i hlen2).symm.trans hB) (by simp)
+    | div =>
+      dsimp only
+      constructor
+      · intro h
+        exact absurd h (by simp)
+      · rintro (⟨out2, i2, hbody, -⟩ | ⟨hlen2, hout2⟩)
+        · exact absurd (hbody.symm.trans hB) (by simp)
+        · exact absurd ((gv_body_at_end reads last_seq out i hlen2).symm.trans hB) (by simp)
+
+/-- RFC-0218 P0.1 4/4 (átomo `catalog:group_validate`): a validação OCC
+    do grupo inteiro é exatamente a cadeia citada do loop extraído —
+    cada membro é lido (`Slice.index_usize`), decidido pelo
+    `occ_conflict` extraído (átomo 1/4) e empurrado no out, i cresce
+    estritamente; o fim é `i = len` com o vetor de vereditos `out = v`;
+    sem terceiro destino. A simultaneidade (janela vazia por membro) é o
+    dente que o AS-IS serializado perde. -/
+theorem group_validate_fate_iff :
+    ∀ (reads : Aeneas.Std.Slice OccRead) (last_seq : Std.U64)
+      (v : alloc.vec.Vec Bool),
+      (group_validate reads last_seq = ok v) ↔
+        ValidateFate reads last_seq (reads.val).length
+          (alloc.vec.Vec.with_capacity Bool (Aeneas.Std.Slice.len reads))
+          0#usize v := by
+  intro reads last_seq v
+  have hloop : group_validate reads last_seq
+      = group_validate_loop reads last_seq
+          (alloc.vec.Vec.with_capacity Bool (Aeneas.Std.Slice.len reads))
+          0#usize := by
+    unfold group_validate
+    rfl
+  rw [hloop]
+  exact group_validate_loop_fate reads last_seq (reads.val).length _ 0#usize
+    (Nat.zero_le _) (Nat.sub_le _ _) v

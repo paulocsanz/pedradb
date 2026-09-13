@@ -38,3 +38,14 @@ gates GREEN no commit).
   Build verde (1699 jobs). Planta DST `fence_publish_seq_on_live_group_
   is_not_ok` + `fence_is_max_member_seq` (pedradb-core, exit 0, 5
   passed). Gate: floor_atom 180→181, floor_extract 99→97 (com o 2/4).
+
+- **group_validate (4/4, entrada `group_validate`)**: mesmo molde —
+  `ValidateFate` com combustível = membros restantes; o passo `cont`
+  cita index→occ_conflict→push (todos ok-ramos consumidos pelo
+  bind_ok_inv). `group_validate_fate_iff`: `(group_validate reads
+  last_seq = ok v) ↔ ValidateFate reads last_seq (len) (with_capacity)
+  0 v`. A entrada com dois lets puros fecha por `unfold group_validate;
+  rfl`. Planta DST: módulo group_commit_kernel inteiro (pedradb-core,
+  exit 0, 16 passed — inclui `group_members_are_simultaneous` e o
+  property sweep rfc0157). Gate: floor_atom 181→182, floor_extract
+  97→96. **P0.1 fechada: group_commit ×4 átomo, 4/4.**

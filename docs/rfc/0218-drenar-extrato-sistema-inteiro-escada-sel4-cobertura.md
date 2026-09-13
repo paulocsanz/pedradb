@@ -77,9 +77,12 @@ nunca por promoção silenciosa.
 1. **P0.1** group_commit ×4 (`GroupCommit.lean`): `group_validate`
    (loop de validação OCC — molde de indução dos loops Form/DecodeFate),
    `group_commit`, `group_fence`, `fsync_promote` — floor_atom
-   178→182 — status: `todo` (3/4: `group_commit`/`occ_conflict
-   _fate_iff`, `fsync_promote`/`fsync_promotes_pending_fate_iff`,
-   `group_fence`/`fence_publish_seq_fate_iff` feitos 2026-09-13)
+   178→182 — status: `done` (2026-09-13; 4/4: `group_commit`/
+   `occ_conflict_fate_iff`, `fsync_promote`/
+   `fsync_promotes_pending_fate_iff`, `group_fence`/
+   `fence_publish_seq_fate_iff`, `group_validate`/
+   `group_validate_fate_iff` — molde Form/DecodeFate nos 2 loops;
+   floor_atom 182, floor_extract 96)
 
 2. **P0.2** wal/recover ×4 (`WalRecover.lean`): `fragment_act`,
    `from_record_type`, `is_length_resyncable`, `physical_payload_act` —
@@ -175,7 +178,7 @@ nunca por promoção silenciosa.
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | group_commit ×4 átomo (validação OCC/fence) | todo | — | 2026-09-13 |
+| P0.1 | p0 | group_commit ×4 átomo (validação OCC/fence) | done | `occ_conflict_fate_iff`/`fsync_promotes_pending_fate_iff`/`fence_publish_seq_fate_iff`/`group_validate_fate_iff` | 2026-09-13 |
 | P0.2 | p0 | wal/recover ×4 átomo (parse fail-closed) | todo | — | 2026-09-13 |
 | P0.3 | p0 | changelog+flush+manifest+reopen ×6 átomo | todo | — | 2026-09-13 |
 | P0.4 | p0 | crc/magic/scan ×9 átomo (integridade) | todo | — | 2026-09-13 |
