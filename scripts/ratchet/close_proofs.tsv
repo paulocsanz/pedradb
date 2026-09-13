@@ -239,3 +239,4 @@ atom	catalog:lsm_compact	lsm_compact_fate_iff	formal/aeneas/lean/LsmR1.lean	lsm_
 atom	catalog:lsm_probe	lsm_probe_fate_iff	formal/aeneas/lean/LsmR1.lean	lsm_probe
 atom	catalog:lsm_reopen	lsm_reopen_fate_iff	formal/aeneas/lean/LsmR1.lean	lsm_reopen
 atom	catalog:len_tag	value_len_tag_fate_iff	formal/aeneas/lean/IndexVal.lean	value_len_tag
+atom	catalog:write_op_range_end	write_op_range_end_fate_iff	formal/aeneas/lean/Merge.lean	merge.write_op_range_end

@@ -1810,6 +1810,10 @@
   },
   {
    "id": "write_op_range_end",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.2: fate ∀ sobre write_op_range_end no degrau átomo — despacho citado: Deletion/Value sem fim, RangeDeletion carrega o valor; planta DST write_op_range_end_on_live_stage_unapplied_is_not_ok"
+   },
    "finding": "F30",
    "twin_kind": "model",
    "single_artifact": true,

@@ -654,3 +654,30 @@ theorem visible_at_fate_iff :
   intro kind range_hidden v
   unfold merge.visible_at
   cases kind <;> cases range_hidden <;> simp
+
+/-- RFC-0218 P1.2 2/11 (átomo `catalog:write_op_range_end`, entrada
+    `merge.write_op_range_end`): o fim do range é EXATAMENTE o despacho
+    citado — Deletion e Value não têm fim (none); RangeDeletion carrega
+    o próprio valor (some value). O AS-IS devolve sempre none (fim de
+    range engolido — dente plantado). -/
+theorem write_op_range_end_fate_iff :
+    ∀ (kind : key.ValueType) (value : Slice U8)
+      (r : Option (Slice U8)),
+      (merge.write_op_range_end kind value = ok r) ↔
+      ((kind = key.ValueType.Deletion ∧ r = none) ∨
+       (kind = key.ValueType.Value ∧ r = none) ∨
+       (kind = key.ValueType.RangeDeletion ∧ r = some value)) := by
+  intro kind value r
+  constructor
+  · intro hval
+    unfold merge.write_op_range_end at hval
+    cases kind with
+    | Deletion => injection hval with hv; exact Or.inl ⟨rfl, hv.symm⟩
+    | Value => injection hval with hv; exact Or.inr (Or.inl ⟨rfl, hv.symm⟩)
+    | RangeDeletion =>
+      injection hval with hv
+      exact Or.inr (Or.inr ⟨rfl, hv.symm⟩)
+  · rintro (⟨hk, hv⟩ | ⟨hk, hv⟩ | ⟨hk, hv⟩)
+    · subst hk; subst hv; rfl
+    · subst hk; subst hv; rfl
+    · subst hk; subst hv; rfl

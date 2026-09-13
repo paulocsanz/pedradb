@@ -316,6 +316,8 @@ gates GREEN no commit).
   77→76.
 ## P1.2 — leveling ×4 + merge ×2 + index_val ×3 + key + prefix ×11 átomo
 
+- **merge / write_op_range_end (2/11)**: fim do range como o despacho citado — Deletion e Value sem fim (none); RangeDeletion carrega o valor (some) — `write_op_range_end_fate_iff` em `Merge.lean`. Forward: cases kind + injection; reverso: rintro + subst + rfl. Build verde. Planta DST `write_op_range_end_on_live_stage_unapplied_is_not_ok` (pedradb-core, exit 0 no worktree). Gate: floor_atom 212→213, floor_extract 66→65.
+
 - **index_val / value_len_tag (1/11)**: etiqueta de comprimento como o
   lift citado `len` (identidade — injetiva em len; as-is colapsa a 0) —
   `value_len_tag_fate_iff` em `IndexVal.lean`. Forward: unfold +
