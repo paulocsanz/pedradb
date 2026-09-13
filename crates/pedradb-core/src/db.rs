@@ -10461,8 +10461,11 @@ impl<E: Env> Db<E> {
             self.observe_bulk_batch(&ops);
             match self.prepare_write_ops(ops) {
                 Ok((write_ops, last_seq)) => {
-                    if crate::write_admission_kernel::wal_sync_required(true, do_sync, false) {
-                        g.any_sync = true;
+                    match crate::write_admission_kernel::group_batch_sync_plan(do_sync) {
+                        crate::write_admission_kernel::GroupSyncPlan::BatchForcesSync => {
+                            g.any_sync = true;
+                        }
+                        crate::write_admission_kernel::GroupSyncPlan::BatchRidesGroup => {}
                     }
                     g.pending.push((i, write_ops, last_seq));
                 }

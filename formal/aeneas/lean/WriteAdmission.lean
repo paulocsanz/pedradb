@@ -403,3 +403,17 @@ theorem fence_record_plan_fate_iff :
   intro has_report plan
   unfold fence_record_plan
   cases has_report <;> simp_all <;> exact eq_comm
+
+/-- RFC-0219 P1.2 (átomo `catalog:group_batch_sync`): um batch com flag
+    de sync EXATAMENTE força a barreira única do grupo (one fsync
+    compartilhado); batch async apenas viaja no agregado. O AS-IS deixa
+    tudo viajar (client que pediu sync é ackado sem barreira — dente
+    plantado). -/
+theorem group_batch_sync_plan_fate_iff :
+    ∀ (client_sync : Bool) (plan : GroupSyncPlan),
+      (group_batch_sync_plan client_sync = ok plan) ↔
+        ((client_sync = true ∧ plan = GroupSyncPlan.BatchForcesSync) ∨
+          (client_sync = false ∧ plan = GroupSyncPlan.BatchRidesGroup)) := by
+  intro client_sync plan
+  unfold group_batch_sync_plan
+  cases client_sync <;> simp_all <;> exact eq_comm

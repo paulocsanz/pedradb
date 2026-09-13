@@ -134,7 +134,7 @@ início 270/292 = **92,47%**. Alvos DATADOS:
 | P0.2 | p0 | +1 if db.rs (272/294) | done | `wal_archive_delete` — delete_wal_archives casa `wal_archive_delete_plan` (contador 73) | 2026-09-13 |
 | P0.3 | p0 | +1 if db.rs (273/295 = 92,54%) | done | bulk_manifest_persist (manifest_kernel) | 2026-09-13 |
 | P1.1 | p1 | +3 ifs db.rs | done | `point_cache_validity` (3 portões F198/F207, −4 sítios) + `point_tombstone` (4 portões RFC-0150, −4) + `dir_sync_plan` (5 portões dir-fsync, −5); contador 72→59 | 2026-09-13 |
-| P1.2 | p1 | +3 ifs db.rs | todo | — | 2026-09-13 |
+| P1.2 | p1 | +3 ifs db.rs | done | `fence_admission` (ensure_not_fenced) + `fence_record` (fence_durability) + `group_batch_sync` (group_prepare); contador 59→56 | 2026-09-13 |
 | P1.3 | p1 | +3 ifs db.rs | todo | — | 2026-09-13 |
 | P1.4 | p1 | +3 ifs db.rs (285/307 = 92,83%) | todo | — | 2026-09-13 |
 | P2.1 | p2 | fila db.rs restante medida (53−15) | todo | — | 2026-09-13 |

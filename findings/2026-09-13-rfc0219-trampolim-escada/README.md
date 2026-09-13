@@ -202,3 +202,20 @@ decidia inline se o fence novo registra o relatório.
 - **Par nasce átomo**: `catalog:fence_record`. floor_atom 273→274,
   residuals atom 274, single_artifact 293.
 - **Contador**: 58 → **57** (db.rs 36→35).
+
+## P1.2-c — `group_batch_sync` (write_admission_kernel) — P1.2 fechado
+
+Sítio: `group_prepare` — o portão
+`if wal_sync_required(true, do_sync, false)` decidia inline se o batch
+força a barreira do grupo.
+
+- **Kernel**: `write_admission_kernel::group_batch_sync_plan(client_sync)`
+  → `GroupSyncPlan{BatchForcesSync, BatchRidesGroup}`.
+- **AS-IS dente**: `group_batch_sync_plan_as_is` — tudo viaja; client
+  que pediu sync é ackado sem barreira.
+- **Teorema**: `group_batch_sync_plan_fate_iff` (∀ sobre o bool) em
+  `WriteAdmission.lean`.
+- **Planta DST**: `group_batch_sync_plan_on_live_sync_batch_forces_group`.
+- **Par nasce átomo**: `catalog:group_batch_sync`. floor_atom 274→275,
+  residuals atom 275, single_artifact 294.
+- **Contador**: 57 → **56** (db.rs 35→34). P1.2 fechado: 3 pares.

@@ -444,6 +444,37 @@ pub fn fence_record_plan_as_is(_has_report: bool) -> FenceRecordPlan {
     FenceRecordPlan::RecordFirst
 }
 
+/// RFC-0219 P1.2: whether one group-commit batch forces the group's
+/// sync barrier. Inside the DB group context the batch's explicit
+/// client flag decides: a sync-flagged batch makes the whole group pay
+/// one fsync; an async batch rides the group's aggregate.
+#[cfg(not(verus_keep_ghost))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GroupSyncPlan {
+    /// Client asked sync — the group pays one shared fsync for it.
+    BatchForcesSync,
+    /// Async batch — rides whatever the group's other batches force.
+    BatchRidesGroup,
+}
+
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn group_batch_sync_plan(client_sync: bool) -> GroupSyncPlan {
+    if client_sync {
+        GroupSyncPlan::BatchForcesSync
+    } else {
+        GroupSyncPlan::BatchRidesGroup
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: every batch rides — a client that asked sync is acked without
+/// any barrier (lost acked-durability dente).
+#[must_use]
+pub fn group_batch_sync_plan_as_is(_client_sync: bool) -> GroupSyncPlan {
+    GroupSyncPlan::BatchRidesGroup
+}
+
 #[cfg(not(verus_keep_ghost))]
 /// `put_if_absent`: live key ⇒ CasMismatch; else put. Data-fate, not Env.
 #[must_use]
@@ -1379,6 +1410,35 @@ mod tests {
         assert!(
             !fd.contains("fence_report.is_none()"),
             "the raw first-fence gate left the trampoline"
+        );
+    }
+
+    #[test]
+    fn group_batch_sync_plan_on_live_sync_batch_forces_group() {
+        // RFC-0219 P1.2: a sync-flagged batch forces the group's single
+        // fsync; AS-IS lets every batch ride (sync client acked without
+        // barrier).
+        assert_eq!(
+            group_batch_sync_plan(true),
+            GroupSyncPlan::BatchForcesSync
+        );
+        assert_eq!(
+            group_batch_sync_plan(false),
+            GroupSyncPlan::BatchRidesGroup
+        );
+        assert_eq!(
+            group_batch_sync_plan_as_is(true),
+            GroupSyncPlan::BatchRidesGroup,
+            "AS-IS dente: sync batch rides the group"
+        );
+        let gp = named_fn_src(include_str!("db.rs"), "group_prepare").expect("group_prepare");
+        assert!(
+            gp.contains("match crate::write_admission_kernel::group_batch_sync_plan("),
+            "group_prepare must match group_batch_sync_plan"
+        );
+        assert!(
+            !gp.contains("wal_sync_required(true, do_sync, false)"),
+            "the raw client-sync gate left the trampoline"
         );
     }
 
