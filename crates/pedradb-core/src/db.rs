@@ -475,6 +475,12 @@ pub struct ReadProbeSnap {
     pub scan_ops: u64,
     /// Nanos inside `count_visible` (RFC-0217 P1.4 read-side probe).
     pub scan_ns: u64,
+    /// Nanos inside `count_visible` building cursors (SST block-window +
+    /// load; RFC-0217 P2.3 decomposition).
+    pub scan_sst_setup_ns: u64,
+    /// Nanos inside `count_visible` in the merge/emit loops after the
+    /// cursors exist (RFC-0217 P2.3 decomposition).
+    pub scan_merge_ns: u64,
     /// Lazy ordered-view builds of point shards (one per shard lifetime).
     pub ord_builds: u64,
     /// Nanos spent building those views.
@@ -1577,6 +1583,8 @@ pub struct Db<E: Env = StdEnv> {
     latest_sst_probed: AtomicU64,
     scan_ops: AtomicU64,
     scan_ns: AtomicU64,
+    scan_sst_setup_ns: AtomicU64,
+    scan_merge_ns: AtomicU64,
     scan_sst_probed: AtomicU64,
     get_mem_hit: AtomicU64,
     get_sst_fallback: AtomicU64,
@@ -2372,6 +2380,8 @@ impl<E: Env> Db<E> {
             latest_sst_probed: AtomicU64::new(0),
             scan_ops: AtomicU64::new(0),
             scan_ns: AtomicU64::new(0),
+            scan_sst_setup_ns: AtomicU64::new(0),
+            scan_merge_ns: AtomicU64::new(0),
             scan_sst_probed: AtomicU64::new(0),
             get_mem_hit: AtomicU64::new(0),
             get_sst_fallback: AtomicU64::new(0),
@@ -2728,6 +2738,8 @@ impl<E: Env> Db<E> {
             latest_sst_probed: self.latest_sst_probed.load(Ordering::Relaxed),
             scan_ops: self.scan_ops.load(Ordering::Relaxed),
             scan_ns: self.scan_ns.load(Ordering::Relaxed),
+            scan_sst_setup_ns: self.scan_sst_setup_ns.load(Ordering::Relaxed),
+            scan_merge_ns: self.scan_merge_ns.load(Ordering::Relaxed),
             ord_builds: self.mem.ord_probe().0,
             ord_build_ns: self.mem.ord_probe().1,
             scan_sst_probed: self.scan_sst_probed.load(Ordering::Relaxed),
@@ -4616,6 +4628,7 @@ impl<E: Env> Db<E> {
                 single = Some(c);
             }
         }
+        let t_setup = std::time::Instant::now();
         for table in self.ssts.iter() {
             table.collect_range_tombstones(snapshot, &mut range_dels);
             if !table.overlaps_user_range(start, end) {
@@ -4638,6 +4651,17 @@ impl<E: Env> Db<E> {
                 cursors.push(c);
             }
         }
+        self.scan_sst_setup_ns.fetch_add(
+            u64::try_from(t_setup.elapsed().as_nanos()).unwrap_or(u64::MAX),
+            Ordering::Relaxed,
+        );
+        let t_merge = std::time::Instant::now();
+        let merge_done = |me: &Self| {
+            me.scan_merge_ns.fetch_add(
+                u64::try_from(t_merge.elapsed().as_nanos()).unwrap_or(u64::MAX),
+                Ordering::Relaxed,
+            );
+        };
         let mut count = 0usize;
         // Single-cursor fast path: the k-way min-head scan is pure overhead
         // when only one layer overlaps the window (deps-scan state: one
@@ -4658,6 +4682,7 @@ impl<E: Env> Db<E> {
                     count += 1;
                 }
             }
+            merge_done(self);
             return count;
         }
         while count < cap {
@@ -4708,6 +4733,7 @@ impl<E: Env> Db<E> {
                 count += 1;
             }
         }
+        merge_done(self);
         count
     }
 
