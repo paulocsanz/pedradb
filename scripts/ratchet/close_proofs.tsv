@@ -292,3 +292,4 @@ atom	catalog:ae_f16_gate	ae_f16_safe_fate_iff	formal/aeneas/lean/Ae.lean	ae_f16_
 atom	catalog:dcs_apply	dcs_apply_should_advance_result_fate_iff	formal/aeneas/lean/DcsApply.lean	dcs_apply_should_advance_result
 atom	catalog:dcs_advance_bool	dcs_apply_should_advance_fate_iff	formal/aeneas/lean/DcsApply.lean	dcs_apply_should_advance
 atom	catalog:lease_next_id	next_lease_id_after_fate_iff	formal/aeneas/lean/Lease.lean	next_lease_id_after
+atom	catalog:lease_table	lease_table_expired_fate_iff	formal/aeneas/lean/Lease.lean	lease_table_expired

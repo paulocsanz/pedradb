@@ -1207,6 +1207,10 @@
   },
   {
    "id": "lease_table",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "o veredito da tabela e exatamente o unwrap_or true citado — entrada ausente nao e lease expirado (fail-open so para ausencia); as-is defaulta desconhecido para false e mata a tabela"
+   },
    "finding": "F7",
    "twin_kind": "close",
    "single_artifact": true,

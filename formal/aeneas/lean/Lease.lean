@@ -74,3 +74,22 @@ theorem next_lease_id_after_fate_iff :
   · rintro ⟨i, hi, h⟩
     unfold next_lease_id_after
     exact bind_intro i hi h
+
+/-- Catalog entry (RFC-0218 P2.2, átomo `lease_table`): the table
+    verdict is exactly the cited unwrap_or true — a missing entry is
+    NOT an expired lease (fail-open only for absence, never for a live
+    hit); the AS-IS default flips unknown to false and kills the table
+    (F7). -/
+theorem lease_table_expired_fate_iff :
+    ∀ (table_hit : Option Bool) (v : Bool),
+      (lease_table_expired table_hit = ok v) ↔
+        (v = core.option.Option.unwrap_or table_hit true) := by
+  intro table_hit v
+  constructor
+  · intro h
+    have h' : ok (core.option.Option.unwrap_or table_hit true) = ok v := h
+    injection h' with hv
+    exact hv.symm
+  · intro h
+    show ok (core.option.Option.unwrap_or table_hit true) = ok v
+    rw [h]
