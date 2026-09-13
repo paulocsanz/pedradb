@@ -715,3 +715,17 @@ sem embrulhar `is_some`/`is_ok` (anti-padrões do RFC). O alvo datado
 do P2 ajusta com o número: teto sem recusa em concurrent.rs =
 310/332 = 93,37% (era 345/367 = 94,01% assumindo 75 pares; medido:
 db.rs rendeu 18 pares em 34 sítios resolvidos).
+
+## 2026-09-13 — RFC-0219 P2.2 fecha: concurrent.rs 19 sítios = 2 pares + 9 drenos + 3 recusas
+
+A fila de `concurrent.rs` foi resolvida: `flusher_gate_plan` (5
+portões workerless/worker) e `parked_debt_plan` (2 portões de dívida)
+nascem átomos com teoremas iff-∀ (`Flush.lean`); 9 portões drenam a
+kernels já pareados (changelog_durable_commit_fate, occ bools,
+fence_admission_plan, manifest_publish_plan — commit f0671326); 3
+recusas medidas publicadas (R4 local derivado do match pareado, R5
+wrap-is_empty anti-padrão, R1 Err de I/O — detalhe e captura datada
+em `findings/2026-09-13-rfc0219-p22-recusas/README.md`). Contador
+concurrent.rs 22→6 (3 linhas de doc). Fim do RFC-0219 medido:
+**290/312 = 92,95%** (início 270/292 = 92,47%; +20 pares, alvo P2
+re-datado fechado com número publicado).

@@ -55,7 +55,11 @@ início 270/292 = **92,47%**. Alvos DATADOS:
   15 recusas publicadas em
   `findings/2026-09-13-rfc0219-p21-recusas/`); fim =
   (288+P₂.₂)/(310+P₂.₂), teto 310/332 = **93,37%** (R_c de
-  concurrent.rs ajusta de novo, número publicado);
+  concurrent.rs ajusta de novo, número publicado) — **FECHADO
+  2026-09-13: P₂.₂ = 2 pares, 9 drenos, R_c = 3
+  (`findings/2026-09-13-rfc0219-p22-recusas/`); fim medido
+  290/312 = 92,95%** (o teto pressupunha 1 sítio = 1 par; 7 portões
+  pagos por 2 planos e 9 sítios já tinham kernel);
 - contador trampolim: 75 → ≤72 (P0) → ≤60 (P1) → 0 medido ou recusa
   nomeada por sítio (P2);
 - portão Montanha (decisão DO USUÁRIO, registrada em ledger, não é
@@ -142,7 +146,7 @@ início 270/292 = **92,47%**. Alvos DATADOS:
 | P1.3 | p1 | +3 ifs db.rs | done | `parked_pair` (parked_oldest_pair_arcs) + `auto_flush_gate` + `mem_auto_flush` (maybe_auto_flush, ambos); contador 56→53 | 2026-09-13 |
 | P1.4 | p1 | +3 ifs db.rs (285/307 = 92,83%) | done | `pit_resync_rewrite_plan` (open_with_env_sourced) + `manifest_publish_plan` (persist_manifest) + `changelog_store_plan` (changelog_store_point); contador 53→50 | 2026-09-13 |
 | P2.1 | p2 | fila db.rs restante medida (53−15) | done | 34 sítios resolvidos: 18 pares (P0 3, P1 12, P2.1 3: parked_pop, group_ack, cf_flush) + 6 drenos em kernels já pareados + **15 recusas medidas publicadas** (`findings/2026-09-13-rfc0219-p21-recusas/`; alvo P2 re-datado: teto 310/332 = 93,37% sem recusa concurrent.rs) | 2026-09-13 |
-| P2.2 | p2 | fila concurrent.rs (22; pausa na paralela) | todo | — | 2026-09-13 |
+| P2.2 | p2 | fila concurrent.rs (22; pausa na paralela) | done | 19 sítios de código resolvidos: 2 pares (`flusher_gate_plan` ×5 portões workerless/worker; `parked_debt_plan` ×2) + 9 drenos (changelog_durable_commit_fate ×4, occ bools ×2, fence_admission_plan, manifest_publish_plan ×2) + **3 recusas medidas publicadas** (`findings/2026-09-13-rfc0219-p22-recusas/`; R4 local derivado, R5 wrap-is_empty, R1 Err); contador concurrent.rs 22→6 (3 doc); 290/312 = 92,95% | 2026-09-13 |
 | P2.3 | p2 | sweep final + EXTRACT.md + done | todo | — | 2026-09-13 |
 
 ## Critérios de aceite
