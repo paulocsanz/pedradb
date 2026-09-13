@@ -788,3 +788,59 @@ theorem zero_glue_admitted_fate_iff :
   · rintro hv
     subst hv
     rfl
+/-- RFC-0218 P0.4 4/9 (átomo `catalog:sst_crc`): o destino do CRC
+    de SST é EXATAMENTE a árvore citada — checksum casa →
+    StripTrailer; mismatch em arquivo legado (menor que o teto sem
+    CRC) → WholeBuffer; mismatch moderno → Reject (fail-closed). O
+    AS-IS sempre StripTrailer (trailer da sorte — dente plantado). -/
+theorem sst_crc_fate_flat_fate_iff :
+    ∀ (stored : U32) (computed : U32) (buf_len : Usize)
+      (fate : scan_kernel.SstCrcFate),
+      (scan_kernel.sst_crc_fate stored computed buf_len = ok fate) ↔
+        (((decide (stored = computed) : Bool) = true ∧
+            fate = scan_kernel.SstCrcFate.StripTrailer) ∨
+          ((decide (stored = computed) : Bool) = false ∧
+            buf_len < scan_kernel.SST_LEGACY_NO_CRC_MAX ∧
+            fate = scan_kernel.SstCrcFate.WholeBuffer) ∨
+          ((decide (stored = computed) : Bool) = false ∧
+            ¬(buf_len < scan_kernel.SST_LEGACY_NO_CRC_MAX) ∧
+            fate = scan_kernel.SstCrcFate.Reject)) := by
+  intro stored computed buf_len fate
+  constructor
+  · intro hval
+    unfold scan_kernel.sst_crc_fate at hval
+    obtain ⟨b, hb, hval⟩ := bind_ok_inv _ _ _ hval
+    unfold wal.crc.crc_match_ok at hb
+    injection hb with hbb
+    subst hbb
+    split at hval
+    · next hc =>
+      exact Or.inl ⟨hc, by injection hval with hv; exact hv.symm⟩
+    · next hc =>
+      simp only [Bool.not_eq_true] at hc
+      split at hval
+      · next hleg =>
+        exact Or.inr (Or.inl ⟨hc, hleg,
+          by injection hval with hv; exact hv.symm⟩)
+      · next hleg =>
+        exact Or.inr (Or.inr ⟨hc, hleg,
+          by injection hval with hv; exact hv.symm⟩)
+  · rintro (⟨hc, hv⟩ | ⟨hc, hleg, hv⟩ | ⟨hc, hleg, hv⟩)
+    · unfold scan_kernel.sst_crc_fate
+      show (if (decide (stored = computed) : Bool) then
+          ok scan_kernel.SstCrcFate.StripTrailer else _) = ok fate
+      rw [if_pos hc]
+      subst hv
+      rfl
+    · unfold scan_kernel.sst_crc_fate
+      show (if (decide (stored = computed) : Bool) then
+          ok scan_kernel.SstCrcFate.StripTrailer else _) = ok fate
+      rw [if_neg (by simp only [Bool.not_eq_true]; exact hc), if_pos hleg]
+      subst hv
+      rfl
+    · unfold scan_kernel.sst_crc_fate
+      show (if (decide (stored = computed) : Bool) then
+          ok scan_kernel.SstCrcFate.StripTrailer else _) = ok fate
+      rw [if_neg (by simp only [Bool.not_eq_true]; exact hc), if_neg hleg]
+      subst hv
+      rfl

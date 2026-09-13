@@ -222,3 +222,4 @@ atom	catalog:dictionary_link	reopen_outcome_flat_fate_iff	formal/aeneas/lean/Reo
 atom	catalog:crc_match	crc_match_ok_fate_iff	formal/aeneas/lean/Crc.lean	crc_match_ok
 atom	catalog:sst_block_crc	sst_block_crc_ok_fate_iff	formal/aeneas/lean/Scan.lean	sst_block_crc_ok
 atom	catalog:zero_glue	zero_glue_admitted_fate_iff	formal/aeneas/lean/Scan.lean	zero_glue_admitted
+atom	catalog:sst_crc	sst_crc_fate_flat_fate_iff	formal/aeneas/lean/Scan.lean	sst_crc_fate

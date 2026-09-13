@@ -160,3 +160,12 @@ gates GREEN no commit).
   `zero_glue_admitted_fate_iff` em `Scan.lean`. Build verde. Planta
   DST `zero_glue_admitted_on_live_db_is_not_ok` (pedradb-core, exit 0
   no worktree). Gate: floor_atom 194→195, floor_extract 84→83.
+
+- **sst_crc (4/9)**: árvore citada — checksum casa → StripTrailer;
+  mismatch em arquivo legado (< SST_LEGACY_NO_CRC_MAX) →
+  WholeBuffer; mismatch moderno → Reject (as-is sempre StripTrailer)
+  — `sst_crc_fate_flat_fate_iff` em `Scan.lean` (bind_ok_inv no
+  crc_match_ok, split at hval duplo, reverso show defeq + rw
+  if_pos/if_neg). Build verde. Planta DST
+  `sst_crc_fate_on_live_sst_is_not_ok` (pedradb-core, exit 0 no
+  worktree). Gate: floor_atom 195→196, floor_extract 83→82.
