@@ -252,3 +252,4 @@ atom	catalog:leveled_enabled	leveled_enabled_fate_iff	formal/aeneas/lean/Levelin
 atom	catalog:point_get_prefer	point_get_prefer_applied_fate_iff	formal/aeneas/lean/Si.lean	point_get_prefer_applied
 atom	catalog:snap_txn_clear	snapshot_needs_txn_meta_clear_fate_iff	formal/aeneas/lean/Snapshot.lean	snapshot_needs_txn_meta_clear
 atom	catalog:recover_si_generation	recover_si_generation_fate_iff	formal/aeneas/lean/StoreTxn.lean	recover_si_generation
+atom	catalog:rpc_mode	allow_direct_rpc_fate_iff	formal/aeneas/lean/RpcMode.lean	allow_direct_rpc

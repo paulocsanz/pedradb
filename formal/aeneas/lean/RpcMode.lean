@@ -29,3 +29,35 @@ theorem allow_direct_rpc_as_is_dente :
     allow_direct_rpc_as_is true true = ok true := by
   unfold allow_direct_rpc_as_is
   rfl
+
+/-- RFC-0218 P1.3 4/11 (átomo `catalog:rpc_mode`, entrada
+    `allow_direct_rpc`): o RPC direto é EXATAMENTE o despacho citado
+    — sem pedido direto, sempre true; com pedido direto, só se o pin
+    de destino não for liderado. O AS-IS não olha dst_pin (RPC direto
+    contra o líder — dente plantado). -/
+theorem allow_direct_rpc_fate_iff :
+    ∀ (dst_pin : Bool) (want_direct : Bool) (v : Bool),
+      (allow_direct_rpc dst_pin want_direct = ok v) ↔
+      ((want_direct = true ∧ dst_pin = true ∧ v = false) ∨
+       (want_direct = true ∧ dst_pin = false ∧ v = true) ∨
+       (want_direct = false ∧ v = true)) := by
+  intro dst_pin want_direct v
+  constructor
+  · intro hval
+    unfold allow_direct_rpc at hval
+    split at hval
+    · next hw =>
+      split at hval
+      · next hd => injection hval with hv; exact Or.inl ⟨hw, hd, hv.symm⟩
+      · next hd =>
+        simp only [Bool.not_eq_true] at hd
+        injection hval with hv
+        exact Or.inr (Or.inl ⟨hw, hd, hv.symm⟩)
+    · next hw =>
+      simp only [Bool.not_eq_true] at hw
+      injection hval with hv
+      exact Or.inr (Or.inr ⟨hw, hv.symm⟩)
+  · rintro (⟨hw, hd, hv⟩ | ⟨hw, hd, hv⟩ | ⟨hw, hv⟩)
+    · subst hw; subst hd; subst hv; rfl
+    · subst hw; subst hd; subst hv; rfl
+    · subst hw; subst hv; rfl
