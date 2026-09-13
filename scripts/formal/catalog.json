@@ -1716,6 +1716,10 @@
   },
   {
    "id": "si_reader",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.3: fate ∀ sobre si_reader_beats no degrau átomo — a cascata citada liveness/participação/self/applied decide o leitor; planta DST si_reader_beats_on_live_queued_is_not_ok"
+   },
    "finding": "F42/F84",
    "twin_kind": "close",
    "single_artifact": true,

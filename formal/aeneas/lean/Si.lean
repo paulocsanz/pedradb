@@ -139,3 +139,71 @@ theorem snapshot_read_plan_fate_iff :
       refine bind_intro i hgate ?_
       subst hv
       rw [if_neg hc]
+
+/-- RFC-0218 P1.3 9/11 (átomo `catalog:si_reader`, entrada
+    `si_reader_beats`): eleger o leitor SI é EXATAMENTE a cascata
+    citada — liveness (líder+participante) decide primeiro; empatada,
+    participação; empatada, self; empatada, o watermark applied
+    decide. O AS-IS nunca avança o leitor (dente plantado). -/
+theorem si_reader_beats_fate_iff :
+    ∀ (c_leader c_part c_self : Bool) (c_applied : U64)
+      (b_leader b_part b_self : Bool) (b_applied : U64) (v : Bool),
+      (si_reader_beats c_leader c_part c_self c_applied
+          b_leader b_part b_self b_applied = ok v) ↔
+        (∃ c_live b_live : Bool,
+          ((if c_leader = true then ok c_part else ok false) = ok c_live ∧
+           (if b_leader = true then ok b_part else ok false) = ok b_live ∧
+          (((c_live != b_live) = true ∧ v = c_live) ∨
+           ((c_live != b_live) = false ∧
+            (((c_part != b_part) = true ∧ v = c_part) ∨
+             ((c_part != b_part) = false ∧
+              (((c_self != b_self) = true ∧ v = c_self) ∨
+               ((c_self != b_self) = false ∧
+                v = decide (c_applied > b_applied))))))))) := by
+  intro c_leader c_part c_self c_applied b_leader b_part b_self b_applied v
+  constructor
+  · intro hval
+    unfold si_reader_beats at hval
+    obtain ⟨c_live, hcl, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨b_live, hbl, hval⟩ := bind_ok_inv _ _ _ hval
+    refine ⟨c_live, b_live, hcl, hbl, ?_⟩
+    split at hval
+    · next hc =>
+      injection hval with hv
+      exact Or.inl ⟨hc, hv.symm⟩
+    · next hc =>
+      simp only [Bool.not_eq_true] at hc
+      split at hval
+      · next hc2 =>
+        injection hval with hv
+        exact Or.inr ⟨hc, Or.inl ⟨hc2, hv.symm⟩⟩
+      · next hc2 =>
+        simp only [Bool.not_eq_true] at hc2
+        split at hval
+        · next hc3 =>
+          injection hval with hv
+          exact Or.inr ⟨hc, Or.inr ⟨hc2, Or.inl ⟨hc3, hv.symm⟩⟩⟩
+        · next hc3 =>
+          simp only [Bool.not_eq_true] at hc3
+          injection hval with hv
+          exact Or.inr ⟨hc, Or.inr ⟨hc2, Or.inr ⟨hc3, hv.symm⟩⟩⟩
+  · rintro ⟨c_live, b_live, hcl, hbl, htree⟩
+    unfold si_reader_beats
+    refine bind_intro c_live hcl (bind_intro b_live hbl ?_)
+    rcases htree with ⟨hc, hv⟩ | ⟨hc, h2⟩
+    · subst hv
+      rw [if_pos hc]
+    · rcases h2 with ⟨hc2, hv⟩ | ⟨hc2, h3⟩
+      · subst hv
+        have h1 : ¬((c_live != b_live) = true) := by simp [hc]
+        rw [if_neg h1, if_pos hc2]
+      · rcases h3 with ⟨hc3, hv⟩ | ⟨hc3, hv⟩
+        · subst hv
+          have h1 : ¬((c_live != b_live) = true) := by simp [hc]
+          have h2 : ¬((c_part != b_part) = true) := by simp [hc2]
+          rw [if_neg h1, if_neg h2, if_pos hc3]
+        · subst hv
+          have h1 : ¬((c_live != b_live) = true) := by simp [hc]
+          have h2 : ¬((c_part != b_part) = true) := by simp [hc2]
+          have h3 : ¬((c_self != b_self) = true) := by simp [hc3]
+          rw [if_neg h1, if_neg h2, if_neg h3]

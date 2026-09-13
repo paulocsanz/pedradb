@@ -257,3 +257,4 @@ atom	catalog:point_get_wm	point_get_watermark_fate_iff	formal/aeneas/lean/Si.lea
 atom	catalog:snapshot	snapshot_touches_user_key_fate_iff	formal/aeneas/lean/Snapshot.lean	snapshot_touches_user_key
 atom	catalog:should_repair_si_hist	should_repair_si_hist_fate_iff	formal/aeneas/lean/StoreTxn.lean	should_repair_si_hist
 atom	catalog:si_read	snapshot_read_plan_fate_iff	formal/aeneas/lean/Si.lean	snapshot_read_plan
+atom	catalog:si_reader	si_reader_beats_fate_iff	formal/aeneas/lean/Si.lean	si_reader_beats
