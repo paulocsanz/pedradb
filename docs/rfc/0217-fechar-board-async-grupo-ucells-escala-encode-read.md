@@ -243,9 +243,18 @@ board**, estendendo este RFC a cada etapa nova descoberta.
   re-checada) e ela foi corrigida. A/B: core `--lib` 937/23 = baseline
   idêntico (1 flaky `rfc0167_l0_stall` falhou só no baseline); bench
   `compat_vs_rocks` 6/6; lib bench 28/2 = falhas pré-existentes idem no
-  worktree baseline. Faltam: DIAG `mem=` A/B (base vs patch, intercalado,
-  gate quiet) e o cartaz Linux (e4b). Encode member-side (pré-grupo no
-  cliente) fica como follow-up se o DIAG mostrar `mem=` ainda ≥1µs/op.
+  worktree baseline. **DIAG `mem=` A/B 2026-09-13** (Darwin, kvrocks
+  n=3000, 2 rounds intercalados, gate quiet, baseline `9b5ca0f5^` vs
+  patch): `kvrocks_set_mc50` mem= **4,63→4,63µs (r1) / 4,82→4,96µs (r2)**
+  — neutro (Δ≤3%, ruído; lock_wait 8,7–28,5µs domina a variância).
+  Controle: lone `kvrocks_set` não emite `phasesΔ` (só shapes
+  ycsb/deps/myrocks/mc) — ausência esperada. Leitura honesta: no Darwin o
+  memo batch-local é neutro; o dono do `mem=` aqui não é o lookup que o
+  memo mata (BTree-insert/encode por op permanece ~0,19µs/op no grupo
+  mc50). O veredito do alvo (−0,180 do déficit kvrocks_set_mc50, mem=
+  3,13–14,2µs) é Linux: **meter e4b**; se lá também for neutro, a fatia
+  reabre como encode member-side (pré-grupo no cliente), follow-up
+  nomeado abaixo. — status: `doing` (código landed; cartaz = e4b)
 - [ ] **P2.3** Read-side −18%: decompor cursor do scan (`deps_scan`
   single 0,831 DIAG p201o → ≥1,0 no cartaz Linux). — status: `todo`
 - [ ] **P2.4** Escada de admissão (produto): probe com histerese/cache
@@ -295,7 +304,7 @@ dono.
 | P1.3 | p1 | wbwi + write_tx: batch indexado + tx nativos | doing | `5c1f5b43` + DIAG micro 09-13: 0,307→0,317–0,349 (perda honesta; cartaz = e4b) | 2026-09-13 |
 | P1.4 | p1 | linkbench_mix: decompor + atacar dono | doing | `2f083efb` (point_ord_btree incremental; DIAG p50 −52%; cartaz = e4b) | 2026-09-13 |
 | P2.1 | p2 | Escala pesada 4GiB: meter + fechar (0,70/0,557) | todo | — | 2026-09-13 |
-| P2.2 | p2 | Encode memtable off-path | doing | `9b5ca0f5` (memo batch-local no apply; DIAG fase + cartaz = e4b) | 2026-09-13 |
+| P2.2 | p2 | Encode memtable off-path | doing | `9b5ca0f5`; DIAG 09-13 mem= neutro no Darwin (4,63→4,63/4,82→4,96µs); veredito alvo = e4b | 2026-09-13 |
 | P2.3 | p2 | Read-side: cursor de scan | todo | — | 2026-09-13 |
 | P2.4 | p2 | Escada de admissão: histerese (produto) | doing | `c4fe195d` (knob opt-in; meter disco pequeno p/ flip default = e4b) | 2026-09-13 |
 | P2.5 | p2 | Cobertura: delete-heavy, mc9–49, 1GiB, p99 | todo | — | 2026-09-13 |
