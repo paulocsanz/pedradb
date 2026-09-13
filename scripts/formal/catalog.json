@@ -1341,6 +1341,10 @@
   },
   {
    "id": "should_repair_si_hist",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.3: fate ∀ sobre should_repair_si_hist no degrau átomo — repara hist SI exatamente quando restaurada e não reservada; planta DST repair_hist_only_when_restored_user_key"
+   },
    "finding": "F52",
    "twin_kind": "close",
    "single_artifact": true,

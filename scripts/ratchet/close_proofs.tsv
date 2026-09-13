@@ -255,3 +255,4 @@ atom	catalog:recover_si_generation	recover_si_generation_fate_iff	formal/aeneas/
 atom	catalog:rpc_mode	allow_direct_rpc_fate_iff	formal/aeneas/lean/RpcMode.lean	allow_direct_rpc
 atom	catalog:point_get_wm	point_get_watermark_fate_iff	formal/aeneas/lean/Si.lean	point_get_watermark
 atom	catalog:snapshot	snapshot_touches_user_key_fate_iff	formal/aeneas/lean/Snapshot.lean	snapshot_touches_user_key
+atom	catalog:should_repair_si_hist	should_repair_si_hist_fate_iff	formal/aeneas/lean/StoreTxn.lean	should_repair_si_hist

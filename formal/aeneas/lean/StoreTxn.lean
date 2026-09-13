@@ -332,3 +332,26 @@ theorem recover_si_generation_fate_iff :
   · rintro hv
     subst hv
     rfl
+
+/-- RFC-0218 P1.3 7/11 (átomo `catalog:should_repair_si_hist`, entrada
+    `should_repair_si_hist`): reparar o hist SI EXATAMENTE quando a
+    chave foi restaurada E não é reservada — senão nunca. O AS-IS é
+    a constante false (hist nunca reparado — dente plantado). -/
+theorem should_repair_si_hist_fate_iff :
+    ∀ (restored : Bool) (is_reserved : Bool) (v : Bool),
+      (should_repair_si_hist restored is_reserved = ok v) ↔
+      ((restored = true ∧ v = decide (¬ (is_reserved = true))) ∨
+       (restored = false ∧ v = false)) := by
+  intro restored is_reserved v
+  constructor
+  · intro hval
+    unfold should_repair_si_hist at hval
+    split at hval
+    · next hr => injection hval with hv; exact Or.inl ⟨hr, hv.symm⟩
+    · next hr =>
+      simp only [Bool.not_eq_true] at hr
+      injection hval with hv
+      exact Or.inr ⟨hr, hv.symm⟩
+  · rintro (⟨hr, hv⟩ | ⟨hr, hv⟩)
+    · subst hr; subst hv; rfl
+    · subst hr; subst hv; rfl
