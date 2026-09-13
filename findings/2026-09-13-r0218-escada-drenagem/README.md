@@ -342,3 +342,11 @@ gates GREEN no commit).
   injection + hv.symm; reverso: rintro + subst + rfl. Build verde.
   Planta DST `len_tag_is_injective` (pedradb-store, exit 0 no
   worktree). Gate: floor_atom 211→212, floor_extract 67→66.
+## P1.3 — si/snapshot/txn/rpc ×11 átomo
+
+- **si / point_get_prefer_applied (1/11)**: point-get prefere o índice
+  applied como a constante citada true (as-is false ignora o applied) —
+  `point_get_prefer_applied_fate_iff` em `Si.lean`. Forward: unfold +
+  injection + hv.symm; reverso: rintro + subst + rfl. Build verde.
+  Planta DST `point_get_uses_range_applied` (pedradb-store, exit 0 no
+  worktree). Gate: floor_atom 222→223, floor_extract 56→55.

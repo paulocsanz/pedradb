@@ -139,6 +139,7 @@ nunca por promoção silenciosa.
    `recover_si_generation`, `should_repair_si_hist`, `tx_abort`,
    `tx_recover`, `rpc_mode` — floor_atom 222→233, sel4_coverage
    **81,16%** — status: `todo`
+   (1/11: `point_get_prefer_applied_fate_iff` feito 2026-09-13)
 
 8. **P2.1** periferia ×12: `journal_pin`, `journal_catch_up_pin`,
    `journal_fold_pin`, `journal_next_pin`, `stream_cursor`,

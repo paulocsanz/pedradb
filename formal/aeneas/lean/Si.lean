@@ -56,3 +56,20 @@ theorem point_get_watermark_prefers_range_applied :
 theorem point_get_watermark_as_is_dente :
     point_get_watermark_as_is (7#u64) (9#u64) = ok 9#u64 := by
   rfl
+
+/-- RFC-0218 P1.3 1/11 (átomo `catalog:point_get_prefer`, entrada
+    `point_get_prefer_applied`): o point-get prefere o índice applied
+    — EXATAMENTE a constante citada true. O AS-IS é false (applied
+    ignorado — dente plantado). -/
+theorem point_get_prefer_applied_fate_iff :
+    ∀ (v : Bool),
+      (point_get_prefer_applied = ok v) ↔ (v = true) := by
+  intro v
+  constructor
+  · intro hval
+    unfold point_get_prefer_applied at hval
+    injection hval with hv
+    exact hv.symm
+  · rintro hv
+    subst hv
+    rfl

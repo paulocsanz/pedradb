@@ -6922,6 +6922,10 @@
   },
   {
    "id": "point_get_prefer",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.3: fate ∀ sobre point_get_prefer_applied no degrau átomo — constante citada true (point-get prefere o índice applied); planta DST point_get_uses_range_applied"
+   },
    "finding": "F84",
    "twin_kind": "close",
    "single_artifact": true,
