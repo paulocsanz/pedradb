@@ -101,3 +101,40 @@ commit_inflight) × settle eager do SstCountCursor (setup 97%).
 **Veredito (P2.7):** dono = wal write() 4,74µs (async, esperado —
 ataque é o P0.4/grouping no meter oficial) + flush_check 2,69µs
 (ataque novo, fatia própria). DIAG Darwin; ratios oficiais = e4b.
+
+## Correção rev. 2 (2026-09-13, mesmo dia): o dono P2.6 não é o
+skip `commit_inflight` — é o trabalho de flush do SEED adiado para
+dentro da janela medida
+
+Probe de refutação (`rfc0217_p26_l0_debt_probe`, release, Darwin,
+solo-async via `put` 4KiB, 1.194.927 ops ≈ 4,6 GiB em ~13 s):
+
+```
+during: l0 oscila 0→4 (max 4), parked=0, inflight=0 SEMPRE, multi=false
+idle:   l0 1→0 em ≤1,5 s
+```
+
+- O bypass async (solo) **não incrementa `commit_inflight`**; o
+  lone-sync segura o Db write lock pelo fdatasync (inobservável via
+  `with_read`); grupo contínuo ⇒ `recently_multi` ⇒ o guard já existia.
+  Ou seja: o skip quase nunca é o portão que mata o drain — o regime
+  solo **se auto-drena** (branch RFC-0039 P2.2).
+- Dono corrigido: o seed dos deps (10M records × 2 versões, flush por
+  CF a 256 MiB) deixa L0 files não compactados — Rocks compacta durante
+  o próprio seed (background), Pedra parka/defere e os 54 files estão
+  vivos nos PRIMEIROS ops do scan (setup 231 µs/op × 4 tables/janela).
+  O bench não tinha settle entre seed e fase medida.
+- Fix no harness (mesmo commit desta rev.): **settle pós-seed default**
+  (`ROCKS_PARITY_SETTLE=0` para A/B): compat = `flush()` + espera
+  bounded 30 s até `l0 < L0_COMPACTION_TRIGGER`; rocks = `flush()` +
+  `wait_for_compact`. E **simetria de memtable**: o lado Rocks agora
+  honra o mesmo `ROCKS_PARITY_COMPAT_MEMTABLE`/256 MiB default (antes
+  ficava no default 64 MiB — toda suíte >64 MiB flusheava Rocks dentro
+  da janela e não o Pedra: assimetria pró-Pedra, ex. kvrocks_set_mc50
+  ~100 MiB).
+- O `settle` eager do `SstCountCursor` (1º bloco no construtor)
+  segue real (3,4 blocks/op, 76% miss) — segunda metade do dono, ainda
+  aberto.
+- Pendente: re-meter deps_scan/ycsb_e @10M com settle (DIAG) e no gate
+  Linux; kvrocks_set_mc50 1,678 fica **config-suspeito** até re-run
+  com a simetria.

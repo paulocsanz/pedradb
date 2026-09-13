@@ -152,6 +152,20 @@ fn push_ycsb<E: Engine>(r: &mut YcsbRunner, e: &E, records: usize, benches: &mut
         "[rocks-parity] seed {records} records in {:.1}s",
         t0.elapsed().as_secs_f64()
     );
+    if rocksdb_parity_bench::settle_enabled() {
+        let ts = std::time::Instant::now();
+        if e.settle() {
+            eprintln!(
+                "[rocks-parity] settle {:.1}s (L0 drained)",
+                ts.elapsed().as_secs_f64()
+            );
+        } else {
+            eprintln!(
+                "[rocks-parity] settle INCOMPLETE after {:.1}s (debt carries into the timed window)",
+                ts.elapsed().as_secs_f64()
+            );
+        }
+    }
     if shape_wanted("ycsb_a") {
         benches.push(r.run(e, "ycsb_a", 50, 0, false, false));
     }

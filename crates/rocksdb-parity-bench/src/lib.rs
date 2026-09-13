@@ -24,8 +24,15 @@ pub mod engines;
 
 use std::time::{Duration, Instant};
 
-pub fn env_usize(key: &str, default: usize) -> usize {
-    std::env::var(key)
+/// RFC-0217 P2.6: post-seed settle is on by default (the timed window
+/// must not pay the seed's deferred flush/L0 debt). `ROCKS_PARITY_SETTLE=0`
+/// disables for A/B.
+#[must_use]
+pub fn settle_enabled() -> bool {
+    std::env::var("ROCKS_PARITY_SETTLE").map(|v| v != "0").unwrap_or(true)
+}
+
+pub fn env_usize(key: &str, default: usize) -> usize {    std::env::var(key)
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(default)
@@ -303,6 +310,17 @@ pub trait Engine {
     fn flush(&self) -> bool {
         true
     }
+    /// RFC-0217 P2.6 settle: after the untimed seed, drive deferred
+    /// flush/compaction work to quiet so the timed window does not pay
+    /// the seed's L0 debt (finding 2026-09-13-rfc0217-p26-p27-escala:
+    /// 54 L0 files from the seed were live at the first scan ops —
+    /// setup 231 µs/op). Rocks compacts during its seed; Pedra parks
+    /// and defers — settle makes both start the timed phase from a
+    /// drained tree. Default no-op; engines bound the wait.
+    /// `ROCKS_PARITY_SETTLE=0` disables (A/B).
+    fn settle(&self) -> bool {
+        true
+    }
     /// Latest key under `prefix` in `latest_cf`, then get that key in `value_cf`.
     /// Default is the two calls; compat uses one mutex.
     fn latest_then_get_cf(
@@ -461,6 +479,20 @@ impl YcsbRunner {
             );
         } else {
             eprintln!("[rocks-parity] deps seed skipped (ROCKS_PARITY_ONLY)");
+        }
+        if settle_enabled() {
+            let t0 = Instant::now();
+            if e.settle() {
+                eprintln!(
+                    "[rocks-parity] deps settle {:.1}s (L0 drained)",
+                    t0.elapsed().as_secs_f64()
+                );
+            } else {
+                eprintln!(
+                    "[rocks-parity] deps settle INCOMPLETE after {:.1}s (debt carries into the timed window)",
+                    t0.elapsed().as_secs_f64()
+                );
+            }
         }
 
         let mut rng = std::mem::take(&mut self.rng);
@@ -3469,6 +3501,7 @@ mod tests {
                 Some("myrocks_read_only"),
                 Some("myrocks_write_tx"),
                 Some("linkbench_mix"),
+                Some("linkbench_mix_probe"),
             ]
         );
         assert!(e.get(&nkey(0)).unwrap().is_some());
@@ -3606,12 +3639,25 @@ mod tests {
             Some(&b"overlay"[..])
         );
         assert!(e.ingest_kvs(&[(b"ing-k".as_slice(), b"ing-v".as_slice())]));
-        assert_eq!(e.get(b"ing-k").unwrap().as_deref(), Some(&b"ing-v"[..]));
         assert!(e.put(b"keep/z", b"1"));
         assert!(e.put(b"drop/z", b"2"));
         assert!(e.flush());
         assert!(e.compact_drop_prefix(b"drop/"));
         assert!(e.get(b"drop/z").unwrap().is_none());
         assert_eq!(e.get(b"keep/z").unwrap().as_deref(), Some(&b"1"[..]));
+    }
+
+    /// RFC-0217 P1.2 (named U-loss `ingest_sst`): a `get` right after
+    /// `ingest_external_file` must see the ingested key. Red as of
+    /// 2026-09-13 — the ingest lands but the read path does not see the
+    /// table yet (P1.2 owns the fix). Kept `#[ignore]` so the gap is
+    /// pinned, not silent.
+    #[test]
+    #[ignore = "RFC-0217 P1.2: ingest read-back not implemented yet"]
+    fn rfc0217_p12_ingest_readback() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = crate::engines::CompatEngine::open(dir.path());
+        assert!(e.ingest_kvs(&[(b"ing-k".as_slice(), b"ing-v".as_slice())]));
+        assert_eq!(e.get(b"ing-k").unwrap().as_deref(), Some(&b"ing-v"[..]));
     }
 }

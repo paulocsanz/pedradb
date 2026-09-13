@@ -381,11 +381,24 @@ board**, estendendo este RFC a cada etapa nova descoberta.
 - [ ] **P2.6** (aberto por P2.5) scan-at-scale — novo dono nº 1 do
   board de leitura: decompor ycsb_e/deps_scan em 10M records com os
   probes `scan_sst_setup_ns`/`scan_merge_ns` já no código (`0eb0f25e`);
-  nomear o dono do colapso (suspeitos **hat**: k-way merge por miss sem
-  skip de bloco; decode de blocos em working set 1 GiB; sem sumário de
-  range); ataque candidado = single-pass min-head com stepped cursors
-  (citado no P2.3) + skip por bloco; alvo cartaz Linux 1 GiB ≥1,0.
-  — status: `todo` (finding P2.5 datado)
+  nomear o dono do colapso; ataque candidado = single-pass min-head com
+  stepped cursors (citado no P2.3) + skip por bloco; alvo cartaz Linux
+  1 GiB ≥1,0.
+  — status: `in-progress` — decomposição FEITA (finding
+  `2026-09-13-rfc0217-p26-p27-escala/`): setup 231µs/op = 97% (merge
+  4,75µs), 3,4 blocks/op com 76% miss, `SstCountCursor::settle` eager.
+  **Dono rev.2 (corrigido por probe)**: NÃO é o skip `commit_inflight`
+  (solo-async auto-drena: probe `rfc0217_p26_l0_debt_probe` 1,19M ops
+  l0≤4, bypass não conta commit_inflight); o dono é o **flush do seed
+  adiado para dentro da janela medida** (54 L0 files vivos nos
+  primeiros scan-ops; Rocks compacta no seed, Pedra parka) × settle
+  eager do cursor. Fix LANDED no harness: settle pós-seed default
+  (`ROCKS_PARITY_SETTLE=0` A/B; compat flush+drain≤30s, rocks
+  flush+wait_for_compact) + **simetria de write_buffer 256MiB nos dois
+  engines** (Rocks estava no default 64MiB — assimetria pró-Pedra em
+  suítes >64MiB; kvrocks_set_mc50 1,678 config-suspeito até re-run).
+  Falta: re-meter @10M com settle (DIAG) + gate Linux; cursor settle
+  eager segue aberto.
 - [ ] **P2.7** (aberto por P2.5) write-at-scale: meter de atribuição
   `write_phase_stats`/PHASE na célula 10M (g1) para raftlog 0,250 /
   mvcc_latest 0,281 / cache_overwrite 0,037 / ycsb_a 0,656 — o dono
@@ -428,7 +441,7 @@ dono.
 | P2.3 | p2 | Read-side: cursor de scan | done | DIAG 09-13: ratio 1,023–1,419 (0,831 não reproduz); dono residual = merge k-way 2,5–3µs/miss; cartaz = e4b | 2026-09-13 |
 | P2.4 | p2 | Escada de admissão: histerese (produto) | doing | `c4fe195d` (knob opt-in; meter disco pequeno p/ flip default = e4b) | 2026-09-13 |
 | P2.5 | p2 | Cobertura: delete-heavy, mc9–49, 1GiB, p99/p999 | done | finding 09-13 `p25-cobertura` (abriu P2.6/P2.7/P2.8) | 2026-09-13 |
-| P2.6 | p2 | scan-at-scale: ycsb_e 0,001 / deps_scan 0,045 @10M (WIN @1024) — decompor + atacar | todo | — | 2026-09-13 |
+| P2.6 | p2 | scan-at-scale: ycsb_e 0,001 / deps_scan 0,045 @10M (WIN @1024) — dono rev.2 = seed flush deferido × settle eager; settle+simetria landed | in-progress | finding 09-13 rev.2 (probe refuta skip) | 2026-09-13 |
 | P2.7 | p2 | write-at-scale: raftlog 0,250 / mvcc_latest 0,281 / cache_overwrite 0,037 / ycsb_a 0,656 @10M — PHASE na célula g1 | todo | — | 2026-09-13 |
 | P2.8 | p2 | Banda mc9–49 DIAG 0,29–0,60 (fronteira contínua; veredito = P0.4/e4b) | todo | — | 2026-09-13 |
 

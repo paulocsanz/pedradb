@@ -5751,8 +5751,72 @@ mod tests {
                 "acked key {i} must survive the drain"
             );
         }
+    drop(db);
+    let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0217 P2.6 probe: which gate starves the L0 drain under a
+    /// sustained solo-async writer (bypass — no `commit_inflight`), and
+    /// whether idle ever drains the debt. Samples `read_probe` during
+    /// the write and after quiesce. Run with:
+    /// `cargo test -p rocksdb-compat --lib --release --ignored rfc0217_p26_l0_debt_probe -- --nocapture`
+    #[test]
+    #[ignore]
+    fn rfc0217_p26_l0_debt_probe() {
+        let dir = tmp("rfc0217-p26-debt-probe");
+        let db = std::sync::Arc::new(DB::open_default(&dir).unwrap());
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let writer = {
+            let db = std::sync::Arc::clone(&db);
+            let stop = std::sync::Arc::clone(&stop);
+            std::thread::spawn(move || {
+                let mut n = 0u32;
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    let key = [
+                        b'w',
+                        (n >> 24) as u8,
+                        (n >> 16) as u8,
+                        (n >> 8) as u8,
+                        n as u8,
+                    ];
+                    db.put(key, [b'p'; 4096]).unwrap();
+                    n = n.wrapping_add(1);
+                }
+                n
+            })
+        };
+        for round in 0..8 {
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+            let p = db.read_probe();
+            println!(
+                "P26PROBE during round={round} wrote~{} l0={} parked_unflushed={} ssts={} inflight={} multi={}",
+                writer_is_running(&stop),
+                p.l0_files,
+                db.inner.parked_unflushed_count(),
+                p.sst_count,
+                db.inner.commit_inflight(),
+                db.inner.recently_multi(std::time::Duration::from_millis(2)),
+            );
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        let wrote = writer.join().unwrap();
+        println!("P26PROBE writer stopped after {wrote} ops");
+        for round in 0..4 {
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+            let p = db.read_probe();
+            println!(
+                "P26PROBE idle round={round} l0={} parked_unflushed={} ssts={}",
+                p.l0_files,
+                db.inner.parked_unflushed_count(),
+                p.sst_count,
+            );
+        }
         drop(db);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn writer_is_running(stop: &std::sync::atomic::AtomicBool) -> u8 {
+        !stop.load(std::sync::atomic::Ordering::Relaxed) as u8
     }
 
     #[test]

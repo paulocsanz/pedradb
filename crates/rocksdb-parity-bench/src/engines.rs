@@ -66,13 +66,13 @@ impl CompatEngine<pedradb_core::StdEnv> {
 fn compat_bench_opts() -> rocksdb_compat::Options {
     let mut opts = rocksdb_compat::Options::default();
     opts.create_if_missing(true);
-    // Match RocksDB default memtable (64 MiB). 4 MiB was for apply_mc4;
-    // kvrocks_set_mc50 at 4 MiB flushed ~25× per timed run.
-    // Larger than any timed suite's write volume (mc50 100k×1 KiB) so
-    // auto-flush does not run in the measured window. Rocks default is
-    // 64 MiB — 4 MiB was flushing ~25× during set_mc50.
-    // `ROCKS_PARITY_COMPAT_MEMTABLE` (bytes) overrides for long-window
-    // experiments that want the same flush pressure as Rocks default.
+    // Both engines bench at 256 MiB so no timed suite auto-flushes inside
+    // the measured window (the Rocks side honors this same env/default —
+    // RFC-0217 audit 2026-09-13). 4 MiB flushed ~25× during set_mc50 and
+    // poisoned the ratio; at 256 MiB neither side flushes (suites write
+    // <256 MiB), so the comparison is symmetric and flush-free.
+    // `ROCKS_PARITY_COMPAT_MEMTABLE` (bytes) overrides BOTH sides for
+    // long-window experiments that want real flush pressure.
     opts.write_buffer_size = std::env::var("ROCKS_PARITY_COMPAT_MEMTABLE")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
@@ -270,6 +270,24 @@ impl<E: Env> Engine for CompatEngine<E> {
     }
     fn flush(&self) -> bool {
         self.db.flush().is_ok()
+    }
+    fn settle(&self) -> bool {
+        if !self.db.flush().is_ok() {
+            return false;
+        }
+        // Bounded drain wait: the host worker needs a write-idle window
+        // to materialize parked mems and merge L0 down. 30 s covers the
+        // 10M-record seed debt (54 files); past the bound the timed
+        // phase runs on the remaining debt and the ratios say so
+        // honestly.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while std::time::Instant::now() < deadline {
+            if self.db.read_probe().l0_files < pedradb_core::L0_COMPACTION_TRIGGER {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        self.db.read_probe().l0_files < pedradb_core::L0_COMPACTION_TRIGGER
     }
     fn wbwi_overlay_get(&self, puts: &[(&[u8], &[u8])], key: &[u8]) -> Result<Option<Vec<u8>>, ()> {
         let mut b = rocksdb_compat::WriteBatchWithIndex::new();
@@ -483,6 +501,20 @@ impl RocksEngine {
         let mut opts = rocksdb::Options::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
+        // RFC-0217 audit (2026-09-13): the compat side defaults its bench
+        // memtable to 256 MiB so no timed suite flushes mid-window; Rocks
+        // was left at the engine default 64 MiB, so any suite writing
+        // >64 MiB (kvrocks_set_mc50 ~100 MiB) flushed Rocks inside the
+        // measured window while Pedra parked in memory — an asymmetry in
+        // Pedra's favor. Both sides must honor the same window: the same
+        // env override, the same 256 MiB default. `open_cf` creates the
+        // missing CFs from these same Options, so one set covers all.
+        opts.set_write_buffer_size(
+            std::env::var("ROCKS_PARITY_COMPAT_MEMTABLE")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(256 * 1024 * 1024),
+        );
         let db = rocksdb::DB::open_cf(&opts, path, DEPS_CFS).expect("rocksdb open_cf");
         let wopts_async = rocksdb::WriteOptions::default();
         let mut wopts_sync = rocksdb::WriteOptions::default();
@@ -791,6 +823,17 @@ impl Engine for RocksOccEngine {
     }
     fn flush(&self) -> bool {
         self.db.flush().is_ok()
+    }
+    fn settle(&self) -> bool {
+        // Symmetric with the compat settle: Rocks' background compaction
+        // has been draining the seed all along; flush the memtables and
+        // wait for compaction quiet so both engines start the timed
+        // window from a drained tree (RFC-0217 P2.6).
+        if !self.db.flush().is_ok() {
+            return false;
+        }
+        let wo = rocksdb::WaitForCompactOptions::default();
+        self.db.wait_for_compact(&wo).is_ok()
     }
     fn put(&self, k: &[u8], v: &[u8]) -> bool {
         self.db.put_opt(k, v, self.wopts()).is_ok()
