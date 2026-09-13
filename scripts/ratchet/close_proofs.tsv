@@ -215,3 +215,4 @@ atom	catalog:physical_payload_act	physical_payload_act_fate_iff	formal/aeneas/le
 atom	catalog:fragment_act	fragment_act_fate_iff	formal/aeneas/lean/WalRecover.lean	fragment_act
 atom	catalog:changelog	changelog_needs_sst_rebuild_fate_iff	formal/aeneas/lean/Changelog.lean	changelog_needs_sst_rebuild
 atom	catalog:changelog_should_store	changelog_should_store_fate_iff	formal/aeneas/lean/Changelog.lean	changelog_should_store
+atom	catalog:changelog_budget	changelog_rebuild_within_budget_fate_iff	formal/aeneas/lean/Changelog.lean	changelog_rebuild_within_budget

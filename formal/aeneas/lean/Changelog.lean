@@ -71,3 +71,20 @@ theorem changelog_should_store_fate_iff :
       rw [if_neg hg]
       subst hv
       rfl
+/-- RFC-0218 P0.3 3/6 (átomo `catalog:changelog_budget`): o
+    orçamento de rebuild é EXATAMENTE a comparação citada —
+    materializar cabe no orçamento sse live_entries ≤ budget_entries.
+    O AS-IS devolve sempre true (materialização sem freio — dente
+    plantado). -/
+theorem changelog_rebuild_within_budget_fate_iff :
+    ∀ (live_entries : U64) (budget_entries : U64) (v : Bool),
+      (changelog_rebuild_within_budget live_entries budget_entries = ok v) ↔
+        (v = decide (live_entries ≤ budget_entries)) := by
+  intro live_entries budget_entries v
+  constructor
+  · intro hval
+    injection hval with hv
+    exact hv.symm
+  · rintro hv
+    subst hv
+    rfl

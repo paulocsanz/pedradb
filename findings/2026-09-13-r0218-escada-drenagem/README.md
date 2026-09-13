@@ -101,3 +101,10 @@ gates GREEN no commit).
   no if Prop; reverso rw if_pos/if_neg). Build verde. Planta DST
   `debounce_as_is_ignores_interval` (pedradb-core, exit 0). Gate:
   floor_atom 187→188, floor_extract 91→90.
+
+- **changelog_budget (3/6)**: lift puro da comparação citada —
+  materializa sse live_entries ≤ budget_entries —
+  `changelog_rebuild_within_budget_fate_iff` em `Changelog.lean`
+  (injection direta; as-is devolve true sem freio). Build verde.
+  Planta DST `rebuild_budget_bounds_materialization` (pedradb-core,
+  exit 0). Gate: floor_atom 188→189, floor_extract 90→89.

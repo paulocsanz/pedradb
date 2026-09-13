@@ -6181,7 +6181,11 @@
     "file": "crates/pedradb-core/src/changelog_kernel.rs",
     "test": "rebuild_budget_bounds_materialization"
    },
-   "three_teeth": true
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 3/6 P0.3: changelog_rebuild_within_budget como lift puro da comparação citada live_entries ≤ budget_entries; floor_atom 188→189"
+   }
   },
   {
    "id": "flush_plan",
