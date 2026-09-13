@@ -892,7 +892,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_match_ok(1, 2));
         assert!(
             crate::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS dente: any changelog crc would match"
+            "AS-IS tooth: any changelog crc would match"
         );
         let dir = temp_dir();
         {
@@ -975,7 +975,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_match_ok(1, 2));
         assert!(
             crate::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS dente: any checkpoint crc would match"
+            "AS-IS tooth: any checkpoint crc would match"
         );
         let dir = temp_dir();
         seed_closed_db(&dir);
@@ -1016,7 +1016,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_collision_admitted());
         assert!(
             crate::wal::crc::crc_collision_admitted_as_is(),
-            "AS-IS dente: matching CRC looks collision-free"
+            "AS-IS tooth: matching CRC looks collision-free"
         );
         let dir = temp_dir();
         fs::create_dir_all(&dir).unwrap();

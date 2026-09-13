@@ -64,7 +64,7 @@ fn key_in_cf_family_on_live_scan_is_not_ok() {
     assert!(!key_in_cf_family(b"lock\0k", "default"));
     assert!(
         key_in_cf_family_as_is(b"lock\0k", "default"),
-        "AS-IS dente: CF scan leak — lock key treated as default"
+        "AS-IS tooth: CF scan leak — lock key treated as default"
     );
     let dir = fresh_dir("cf");
     let env = FailingEnv::passing();
@@ -107,7 +107,7 @@ fn cf_family_of_on_live_sst_bounds_is_not_ok() {
     assert_eq!(
         cf_family_of_as_is(b"lock\0k"),
         "default",
-        "AS-IS dente: named family lost — every key reports default"
+        "AS-IS tooth: named family lost — every key reports default"
     );
     let dir = fresh_dir("cffam");
     let env = FailingEnv::passing();
@@ -138,7 +138,7 @@ fn cf_encode_effective_on_live_default_raw_is_not_ok() {
     assert_eq!(
         cf_encode_effective_as_is("default", true),
         "default",
-        "AS-IS dente: raw-default layout lost — default keys stored prefixed"
+        "AS-IS tooth: raw-default layout lost — default keys stored prefixed"
     );
     let dir = fresh_dir("cfeff");
     let env = FailingEnv::passing();
@@ -173,7 +173,7 @@ fn encode_cf_key_on_live_sst_bounds_is_not_ok() {
     assert_eq!(
         encode_cf_key_as_is("lock", b"k", false),
         b"k".to_vec(),
-        "AS-IS dente: prefix dropped — lock k collides with default k"
+        "AS-IS tooth: prefix dropped — lock k collides with default k"
     );
     let lock_prefix = encode_cf_key("lock", &[], false);
     let dir = fresh_dir("cfenc");
@@ -207,7 +207,7 @@ fn decode_cf_key_on_live_sst_bounds_is_not_ok() {
     assert_eq!(
         decode_cf_key_as_is("lock", &enc, false),
         enc.as_slice(),
-        "AS-IS dente: cf prefix leaks into the user key"
+        "AS-IS tooth: cf prefix leaks into the user key"
     );
     let dir = fresh_dir("cfdec");
     let env = FailingEnv::passing();
@@ -244,7 +244,7 @@ fn infer_sst_cf_on_live_flush_tag_is_not_ok() {
     assert_eq!(
         infer_sst_cf_as_is(Some(b"aaa".as_slice()), Some(b"lock\0z".as_slice())),
         "default",
-        "AS-IS dente: mixed file tagged default — compacted as default"
+        "AS-IS tooth: mixed file tagged default — compacted as default"
     );
     let dir = fresh_dir("cfinf");
     let env = FailingEnv::passing();
@@ -273,7 +273,7 @@ fn compact_rewrites_sst_cf_on_live_meta_is_not_ok() {
     assert!(!compact_rewrites_sst_cf("default", "lock"));
     assert!(
         compact_rewrites_sst_cf_as_is("default", "lock"),
-        "AS-IS dente: lock compact rewrites the default-tagged SST"
+        "AS-IS tooth: lock compact rewrites the default-tagged SST"
     );
     let dir = fresh_dir("cfcpt");
     let env = FailingEnv::passing();
@@ -317,7 +317,7 @@ fn visible_at_on_live_range_del_is_not_ok() {
     assert!(!visible_at(ValueType::Value, true));
     assert!(
         visible_at_as_is(ValueType::Value, true),
-        "AS-IS dente: hidden value scans live"
+        "AS-IS tooth: hidden value scans live"
     );
     assert!(!iter_window_keep(visible_at(ValueType::Value, true)));
     assert!(iter_window_keep_as_is(visible_at(ValueType::Value, true)));
@@ -357,7 +357,7 @@ fn write_record_count_ok_on_live_torn_batch_is_not_ok() {
     assert!(!write_record_count_ok(3, 2));
     assert!(
         write_record_count_ok_as_is(3, 2),
-        "AS-IS dente: silent prefix"
+        "AS-IS tooth: silent prefix"
     );
     db.close().unwrap();
     let _ = fs::remove_dir_all(&dir);
@@ -390,7 +390,7 @@ fn gc_oldest_from_pin_on_live_reclaim_is_not_ok() {
             gc_oldest_from_pin_as_is(Some(pin.sequence()), 10, 9)
         ),
         VersionFate::Drop,
-        "AS-IS dente: compact over pin"
+        "AS-IS tooth: compact over pin"
     );
     db.release_snapshot_pin(pin);
     db.close().unwrap();
@@ -433,7 +433,7 @@ fn may_publish_manifest_on_live_unsynced_sst_is_not_ok() {
     );
     assert!(
         may_publish_manifest_as_is(sst_durable),
-        "AS-IS dente: CURRENT names a torn/missing SST"
+        "AS-IS tooth: CURRENT names a torn/missing SST"
     );
     std::mem::forget(db);
     let env2 = FailingEnv::passing();
@@ -485,7 +485,7 @@ fn probe_order_on_live_equal_lo_is_not_ok() {
     assert_eq!(
         first_probe_on_equal_lo_as_is(newer, older),
         older,
-        "AS-IS dente: descending-lo walk probes the older put first — deleted value resurrected"
+        "AS-IS tooth: descending-lo walk probes the older put first — deleted value resurrected"
     );
     db.close().unwrap();
     let _ = fs::remove_dir_all(&dir);
@@ -527,7 +527,7 @@ fn run_disjoint_on_live_equal_lo_is_not_ok() {
     );
     assert!(
         run_pairwise_disjoint_los_as_is(&los, &his),
-        "AS-IS dente: the non-strict arm takes the bisect path onto the older put"
+        "AS-IS tooth: the non-strict arm takes the bisect path onto the older put"
     );
     assert_eq!(
         db.get(b"k"),
@@ -711,7 +711,7 @@ fn wal_inv_on_live_recording_is_not_ok() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// RFC-0166 P1.3: the named D1-modelo corollary — put Ok ⇒ survives every
+/// RFC-0166 P1.3: the named D1-model corollary — put Ok ⇒ survives every
 /// torn prefix — holds on the model for every cut, the as-is write path
 /// breaks it, and two acked puts survive the real crash+reopen.
 #[test]
@@ -805,7 +805,7 @@ fn r1_modelo_on_live_delete_shape_is_not_ok() {
     // deepest-first probe: the deep value shadows the newer tombstone.
     assert!(
         !lsm_probe_as_is(&s4, 7).unwrap().tomb,
-        "AS-IS dente: deepest-first probe resurrects the value"
+        "AS-IS tooth: deepest-first probe resurrects the value"
     );
     // the AS-IS corollary catches the same break against the newest.
     assert!(!r1_modelo_as_is(&s4, 7));
@@ -815,7 +815,7 @@ fn r1_modelo_on_live_delete_shape_is_not_ok() {
     assert_eq!(
         lsm_probe(&m, 7).map(|e| e.tomb),
         Some(false),
-        "AS-IS dente: dropped tombstone resurrects the deep value"
+        "AS-IS tooth: dropped tombstone resurrects the deep value"
     );
     let honest_c = lsm_compact(&s4, 1).expect("compact");
     assert_eq!(
@@ -836,7 +836,7 @@ fn r1_modelo_on_live_delete_shape_is_not_ok() {
     assert_eq!(
         lsm_probe(&bad, 7).map(|e| e.tomb),
         Some(false),
-        "AS-IS dente: reversed reopen resurrects the value"
+        "AS-IS tooth: reversed reopen resurrects the value"
     );
     // R1 is vacuous off-contract: the guard is the invariant itself.
     assert!(r1_modelo(&bad, 7));

@@ -2250,7 +2250,7 @@ def check_extract(
             "./scripts/aeneas_t1_modelo.sh",
             "crates/pedradb-store/src/t1_modelo_kernel.rs",
             "formal/aeneas/lean/T1Modelo.lean",
-            ("theorem t1_modelo_empty", "theorem t1_modelo_as_is_dente"),
+            ("theorem t1_modelo_empty", "theorem t1_modelo_as_is_tooth"),
         ),
         (
             "d1_modelo",
@@ -2259,7 +2259,7 @@ def check_extract(
             "./scripts/aeneas_d1_modelo.sh",
             "crates/pedradb-core/src/d1_modelo_kernel.rs",
             "formal/aeneas/lean/D1Modelo.lean",
-            ("theorem d1_modelo_unacked_vacuous", "theorem d1_modelo_as_is_dente"),
+            ("theorem d1_modelo_unacked_vacuous", "theorem d1_modelo_as_is_tooth"),
         ),
         (
             "c1_modelo",
@@ -2268,7 +2268,7 @@ def check_extract(
             "./scripts/aeneas_c1_modelo.sh",
             "crates/pedradb-raft/src/c1_modelo_kernel.rs",
             "formal/aeneas/lean/C1Modelo.lean",
-            ("theorem c1_modelo_joint_add_refuses", "theorem c1_modelo_as_is_dente"),
+            ("theorem c1_modelo_joint_add_refuses", "theorem c1_modelo_as_is_tooth"),
         ),
     ]:
         art = root / artifact

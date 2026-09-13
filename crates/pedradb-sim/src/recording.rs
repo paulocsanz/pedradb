@@ -497,7 +497,7 @@ mod tests {
         ));
         assert!(
             pedradb_core::group_commit_kernel::fsync_promotes_pending_as_is(false),
-            "AS-IS dente: fsync Ok always promotes"
+            "AS-IS tooth: fsync Ok always promotes"
         );
         let env = RecordingEnv::lying();
         let dir = PathBuf::from("/virt/db-lie-0152");

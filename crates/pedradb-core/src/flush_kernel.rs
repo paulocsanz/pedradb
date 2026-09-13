@@ -1,7 +1,7 @@
 //! Pure flush-pipeline decisions (RFC-0056 P0.2 / RFC-0174 P0.3).
 //!
 //! **Single artifact:** this file is what `rustc` links *and* what Verus
-//! proves (`cfg(verus_keep_ghost)`). No twin-cópia.
+//! proves (`cfg(verus_keep_ghost)`). No twin copy.
 //!
 //!   ./scripts/verus_flush_decision.sh
 //!
@@ -179,7 +179,7 @@ pub fn manifest_publish_plan(sst_durable: bool) -> ManifestPublishPlan {
 
 #[cfg(not(verus_keep_ghost))]
 /// AS-IS: publishes while an SST is still unsynced (CURRENT names a
-/// torn file after crash — dente).
+/// torn file after crash — tooth).
 #[must_use]
 pub fn manifest_publish_plan_as_is(_sst_durable: bool) -> ManifestPublishPlan {
     ManifestPublishPlan::PublishManifest
@@ -210,7 +210,7 @@ pub fn cf_flush_plan(mem_bytes: u64, limit: u64) -> CfFlushPlan {
 
 #[cfg(not(verus_keep_ghost))]
 /// AS-IS: skips every family (armed CFs over the limit keep growing —
-/// dente).
+/// tooth).
 #[must_use]
 pub fn cf_flush_plan_as_is(_mem_bytes: u64, _limit: u64) -> CfFlushPlan {
     CfFlushPlan::CfNotDueSkip
@@ -357,7 +357,7 @@ pub fn parked_pair_plan(parked_len: u64) -> ParkedPairPlan {
 
 #[cfg(not(verus_keep_ghost))]
 /// AS-IS: hand out regardless — a queue shorter than the pair loses or
-/// mangles the single parked table (parked-pipeline data-loss dente).
+/// mangles the single parked table (parked-pipeline data-loss tooth).
 #[must_use]
 pub fn parked_pair_plan_as_is(_parked_len: u64) -> ParkedPairPlan {
     ParkedPairPlan::HandOutOldestPair
@@ -388,7 +388,7 @@ pub fn auto_flush_gate(global_under: bool, cf_under: bool) -> AutoFlushGate {
 
 #[cfg(not(verus_keep_ghost))]
 /// AS-IS: never skip the scan — SST writes fire even when both axes are
-/// under (pointless flush churn dente).
+/// under (pointless flush churn tooth).
 #[must_use]
 pub fn auto_flush_gate_as_is(_global_under: bool, _cf_under: bool) -> AutoFlushGate {
     AutoFlushGate::ScanColumnFamilies
@@ -418,7 +418,7 @@ pub fn mem_auto_flush_plan(mem_bytes: u64, armed: bool, limit: u64) -> MemAutoFl
 
 #[cfg(not(verus_keep_ghost))]
 /// AS-IS: never flush — the armed limit is ignored and the memtable
-/// grows until the host stalls (unbounded-mem dente).
+/// grows until the host stalls (unbounded-mem tooth).
 #[must_use]
 pub fn mem_auto_flush_plan_as_is(_mem_bytes: u64, _armed: bool, _limit: u64) -> MemAutoFlushPlan {
     MemAutoFlushPlan::NotDueKeepMem
@@ -881,7 +881,7 @@ mod tests {
         assert!(!may_publish_manifest(false));
         assert!(
             may_publish_manifest_as_is(false),
-            "AS-IS dente: MANIFEST names unsynced SST"
+            "AS-IS tooth: MANIFEST names unsynced SST"
         );
         assert!(may_publish_manifest(true));
     }
@@ -901,7 +901,7 @@ mod tests {
         assert_eq!(
             manifest_publish_plan_as_is(false),
             ManifestPublishPlan::PublishManifest,
-            "AS-IS dente: publishes with unsynced SST"
+            "AS-IS tooth: publishes with unsynced SST"
         );
         let pm = named_fn_src(include_str!("db.rs"), "persist_manifest").expect("persist_manifest");
         assert!(
@@ -918,14 +918,14 @@ mod tests {
     fn cf_flush_plan_on_live_over_limit_flushes() {
         // RFC-0219 P2.1: inside the armed scan, a family at/over its
         // limit flushes now; below the limit skips. AS-IS skips every
-        // family (armed CFs keep growing — dente).
+        // family (armed CFs keep growing — tooth).
         assert_eq!(cf_flush_plan(10, 10), CfFlushPlan::FlushCfNow);
         assert_eq!(cf_flush_plan(11, 10), CfFlushPlan::FlushCfNow);
         assert_eq!(cf_flush_plan(9, 10), CfFlushPlan::CfNotDueSkip);
         assert_eq!(
             cf_flush_plan_as_is(10, 10),
             CfFlushPlan::CfNotDueSkip,
-            "AS-IS dente: armed family over the limit never flushes"
+            "AS-IS tooth: armed family over the limit never flushes"
         );
         let maf =
             named_fn_src(include_str!("db.rs"), "maybe_auto_flush").expect("maybe_auto_flush");
@@ -946,7 +946,7 @@ mod tests {
         assert!(!occ_snap_uses_published(false));
         assert!(
             !occ_snap_uses_published_as_is(true),
-            "AS-IS dente: last_seq while inflight"
+            "AS-IS tooth: last_seq while inflight"
         );
         let src = include_str!("concurrent.rs");
         assert!(
@@ -976,7 +976,7 @@ mod tests {
         );
         assert!(
             !occ_snap_lock_order_as_is(false, true),
-            "AS-IS dente: last_seq while write lock held"
+            "AS-IS tooth: last_seq while write lock held"
         );
         let snap = include_str!("concurrent.rs")
             .split("fn occ_snapshot(")
@@ -1001,7 +1001,7 @@ mod tests {
         assert_eq!(
             wal_rotate_decision_as_is_ignore_pin(s),
             WalRotateAction::RotateWal,
-            "AS-IS dente: rotate while pin live"
+            "AS-IS tooth: rotate while pin live"
         );
     }
 
@@ -1010,7 +1010,7 @@ mod tests {
         assert!(wal_segment_is_empty(0));
         assert!(
             !wal_segment_is_empty_as_is(0),
-            "AS-IS dente: rotate empty segment"
+            "AS-IS tooth: rotate empty segment"
         );
         assert!(!wal_segment_is_empty(1));
         let rot = include_str!("db.rs")
@@ -1039,7 +1039,7 @@ mod tests {
         assert!(auto_flush_due(100, true, 50));
         assert!(
             !auto_flush_due_as_is(100, true, 50),
-            "AS-IS dente: never fires"
+            "AS-IS tooth: never fires"
         );
         assert!(!auto_flush_due(10, true, 50));
         assert!(!auto_flush_due(100, false, 50), "unarmed never fires");
@@ -1085,7 +1085,7 @@ mod tests {
         assert_eq!(
             parked_pair_plan_as_is(1),
             ParkedPairPlan::HandOutOldestPair,
-            "AS-IS dente: pair handed out of a short queue"
+            "AS-IS tooth: pair handed out of a short queue"
         );
         let popa = named_fn_src(include_str!("db.rs"), "parked_oldest_pair_arcs")
             .expect("parked_oldest_pair_arcs");
@@ -1116,7 +1116,7 @@ mod tests {
         assert_eq!(
             auto_flush_gate_as_is(true, true),
             AutoFlushGate::ScanColumnFamilies,
-            "AS-IS dente: scan even when both axes are under"
+            "AS-IS tooth: scan even when both axes are under"
         );
         let maf =
             named_fn_src(include_str!("db.rs"), "maybe_auto_flush").expect("maybe_auto_flush");
@@ -1151,7 +1151,7 @@ mod tests {
         assert_eq!(
             mem_auto_flush_plan_as_is(100, true, 50),
             MemAutoFlushPlan::NotDueKeepMem,
-            "AS-IS dente: armed limit ignored, mem grows unbounded"
+            "AS-IS tooth: armed limit ignored, mem grows unbounded"
         );
         let maf =
             named_fn_src(include_str!("db.rs"), "maybe_auto_flush").expect("maybe_auto_flush");

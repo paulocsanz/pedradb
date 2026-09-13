@@ -140,7 +140,7 @@ pub(crate) fn wait_for_deadlock(
 }
 
 /// AS-IS: miss the cycle (wait forever / grant overlapping locks).
-#[allow(dead_code)] // tests + catalog as-is dente; production never calls the mutant
+#[allow(dead_code)] // tests + catalog as-is tooth; production never calls the mutant
 pub(crate) fn wait_for_deadlock_as_is(
     _owned: &HashMap<Bytes, u64>,
     _waiting: &HashMap<u64, Bytes>,
@@ -183,7 +183,7 @@ mod tests {
         assert!(wait_for_deadlock(&owned, &waiting, 1, 2));
         assert!(
             !wait_for_deadlock_as_is(&owned, &waiting, 1, 2),
-            "AS-IS dente: miss the cycle"
+            "AS-IS tooth: miss the cycle"
         );
 
         // Production `LockTable::lock` (the path TransactionDB put takes).
@@ -222,7 +222,7 @@ mod tests {
         assert!(wait_for_deadlock(&owned, &waiting, 1, 2));
         assert!(
             !wait_for_deadlock_as_is(&owned, &waiting, 1, 2),
-            "AS-IS dente: miss the cycle"
+            "AS-IS tooth: miss the cycle"
         );
         waiting.remove(&2);
         assert!(!wait_for_deadlock(&owned, &waiting, 1, 2));
@@ -244,7 +244,7 @@ mod tests {
         );
         assert!(
             !wait_for_deadlock_as_is(&owned, &waiting, 1, 2),
-            "AS-IS dente: miss the 3-cycle"
+            "AS-IS tooth: miss the 3-cycle"
         );
     }
 }

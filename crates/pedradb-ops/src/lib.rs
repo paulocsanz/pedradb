@@ -1056,7 +1056,7 @@ mod tests {
         assert!(!pedradb_core::wal::crc::crc_match_ok(1, 2));
         assert!(
             pedradb_core::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS dente: any catalog crc would match"
+            "AS-IS tooth: any catalog crc would match"
         );
         let bak = temp();
         BackupEngine::open_with_env(&bak, StdEnv).unwrap();
@@ -1095,7 +1095,7 @@ mod tests {
         assert!(!pedradb_core::wal::crc::crc_match_ok(1, 2));
         assert!(
             pedradb_core::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS dente: any warch crc would match"
+            "AS-IS tooth: any warch crc would match"
         );
         let data = temp();
         let bak = temp();
@@ -1182,7 +1182,7 @@ mod tests {
         assert!(!pedradb_core::wal::crc::crc_match_ok(1, 2));
         assert!(
             pedradb_core::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS dente: any CURRENT crc would match"
+            "AS-IS tooth: any CURRENT crc would match"
         );
         let data = temp();
         {
@@ -1219,7 +1219,7 @@ mod tests {
         assert!(!pedradb_core::wal::crc::crc_match_ok(1, 2));
         assert!(
             pedradb_core::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS dente: any warch crc would match"
+            "AS-IS tooth: any warch crc would match"
         );
         let data = temp();
         let bak = temp();

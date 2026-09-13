@@ -18,27 +18,27 @@ theorem submit_complete_act_harvested :
   unfold submit_complete_act
   rfl
 
-/-- AS-IS dente: failed submit returns Err (releases the buffer). -/
-theorem submit_complete_act_as_is_dente :
+/-- AS-IS tooth: failed submit returns Err (releases the buffer). -/
+theorem submit_complete_act_as_is_tooth :
     submit_complete_act_as_is false false =
       ok SubmitCompleteAct.ReturnSubmitErr := by
   unfold submit_complete_act_as_is
   rfl
 
-/-- AS-IS dente: constant per-opcode tag. -/
-theorem next_user_data_as_is_dente :
+/-- AS-IS tooth: constant per-opcode tag. -/
+theorem next_user_data_as_is_tooth :
     next_user_data_as_is (1#u64) (0x77#u64) = ok (0x77#u64, 1#u64) := by
   unfold next_user_data_as_is
   rfl
 
-/-! ## RFC-0214 P1.1 — costura CQE no degrau átomo (fate ∀) -/
+/-! ## RFC-0214 P1.1 — stitch CQE in the atom rung (fate ∀) -/
 
-/-- RFC-0214 P1.1 (atom `catalog:cqe_res`): um CQE é sucesso
-se, e somente se, `res >= 0` — res negativo é erro, o kernel não
-inventa sucesso. Fate forall sobre o corpo extraído
-(`cqe_res_ok`, res-gate do fsync no ring). O mutante AS-IS
-(`cqe_res_ok_as_is`) promove todo CQE a sucesso — planta DST
-`cqe_res_ok_on_live_uring_is_not_ok` recusa. -/
+/-- RFC-0214 P1.1 (atom `catalog:cqe_res`): the CQE is success
+if, and only if, `res >= 0` — a negative res is error, the kernel not
+invents success. Fate forall over the body extracted
+(`cqe_res_ok`, res-gate of the fsync in the ring). The mutant AS-IS
+(`cqe_res_ok_as_is`) promotes every CQE to success — the DST plant
+`cqe_res_ok_on_live_uring_is_not_ok` refuses. -/
 theorem cqe_res_ok_fate_iff :
     ∀ (res : I32) (v : Bool),
       (cqe_res_ok res = ok v) ↔ (v = ((res >= 0#i32) : Bool)) := by
@@ -50,12 +50,12 @@ theorem cqe_res_ok_fate_iff :
   · intro h
     rw [h]
 
-/-- RFC-0214 P1.1 (atom `catalog:cqe_tags`): a próxima tag por
-operação — de um contador `c ≠ 0` devolve `(c, c+1)` (wrapping);
-de `c = 0` pula o zero reservado e devolve `(1, 2)`. Tags únicas
-por SQE. Fate forall sobre o corpo extraído (`next_user_data`,
-loop real do kernel via `loop.spec_decr_nat`). O mutante AS-IS
-(`next_user_data_as_is`) devolve tag constante por opcode —
+/-- RFC-0214 P1.1 (atom `catalog:cqe_tags`): the next tag by
+operation — of the contador `c ≠ 0` returns `(c, c+1)` (wrapping);
+of `c = 0` skips the zero reservado and returns `(1, 2)`. Tags unique
+by SQE. Fate forall over the body extracted (`next_user_data`,
+loop real of the kernel via `loop.spec_decr_nat`). The mutant AS-IS
+(`next_user_data_as_is`) returns tag constante by opcode —
 plantas DST `unique_tags_discard_leftover_same_opcode` e
 `cqe_act_as_is_adopts_leftover` recusam. -/
 theorem next_user_data_fate_iff :
@@ -106,7 +106,7 @@ theorem next_user_data_fate_iff :
       unfold next_user_data_loop.body
       rw [hlift j, bind_tc_ok]
       split
-      · -- j != 0: done — só pode ser j = 1
+      · -- j != 0: done — only can be j = 1
         next hne =>
           simp only [spec_ok]
           cases hj with
@@ -164,12 +164,12 @@ theorem next_user_data_fate_iff :
         | inr hh =>
             rw [hh.2.1, hh.2.2]
 
-/-- RFC-0214 P1.1 (atom `catalog:cqe_leftover`): um CQE é
-tomado se, e somente se, sua tag casa com a esperada; CQE
-leftover de outra operação é descartado. Fate forall sobre o
-corpo extraído (`cqe_act`). O mutante AS-IS
-(`cqe_act_as_is`) toma qualquer CQE — a planta DST
-`cqe_act_as_is_adopts_leftover` recusa. -/
+/-- RFC-0214 P1.1 (atom `catalog:cqe_leftover`): the CQE is
+taken if, and only if, its tag matches with the esperada; CQE
+leftover of other operation is descartado. Fate forall over the
+body extracted (`cqe_act`). The mutant AS-IS
+(`cqe_act_as_is`) takes any CQE — the DST plant
+`cqe_act_as_is_adopts_leftover` refuses. -/
 theorem cqe_act_fate_iff :
     ∀ (user_data want : U64) (act : CqeAct),
       (cqe_act user_data want = ok act) ↔
@@ -199,14 +199,14 @@ theorem cqe_act_fate_iff :
         | inr hh =>
             rw [hh.2]
 
-/-- RFC-0214 P1.1 (atom `catalog:cqe_submit`): depois de um
-submit, a decisão usa o CQE colhido se houver (`UseHarvested`)
-e senão espera (`WaitMore`) — o SQE já está no anel, voltar
+/-- RFC-0214 P1.1 (atom `catalog:cqe_submit`): after of the
+submit, the decision uses the the harvested CQE if houver (`UseHarvested`)
+and otherwise waits (`WaitMore`) — the SQE already is in the ring, go back
 Err no submit solta o buffer sob DMA (F208). Fate forall
-sobre o corpo extraído (`submit_complete_act`). O mutante
-AS-IS (`submit_complete_act_as_is`) volta Err no submit
-com CQE pendente — a planta DST
-`harvest_on_submit_err_uses_cqe` recusa. -/
+over the body extracted (`submit_complete_act`). The mutant
+AS-IS (`submit_complete_act_as_is`) rolls back Err no submit
+with CQE pending — the plants DST
+`harvest_on_submit_err_uses_cqe` refuses. -/
 theorem submit_complete_act_fate_iff :
     ∀ (submit_ok harvested : Bool) (act : SubmitCompleteAct),
       (submit_complete_act submit_ok harvested = ok act) ↔
@@ -246,12 +246,12 @@ theorem submit_complete_act_fate_iff :
         | inr hh =>
             rw [hh.2]
 
-/-- RFC-0214 P1.1 (atom `catalog:cqe_ring_refusal`): o modelo
-de anel Verus NÃO é admitido — a porta fica fechada (F:
-RFC-0074 P2.2). Fate forall sobre o corpo extraído
-(`cqe_ring_model_admitted`). O mutante AS-IS
-(`cqe_ring_model_admitted_as_is`) abre a porta — a planta DST
-`cqe_ring_model_is_not_admitted` recusa. -/
+/-- RFC-0214 P1.1 (atom `catalog:cqe_ring_refusal`): the model
+of ring Verus is not admitted — the door stays closed (F:
+RFC-0074 P2.2). Fate forall over the body extracted
+(`cqe_ring_model_admitted`). The mutant AS-IS
+(`cqe_ring_model_admitted_as_is`) opens a door — a planta DST
+`cqe_ring_model_is_not_admitted` refuses. -/
 theorem cqe_ring_model_admitted_fate_iff :
     ∀ (v : Bool), (cqe_ring_model_admitted = ok v) ↔ (v = false) := by
   intro v

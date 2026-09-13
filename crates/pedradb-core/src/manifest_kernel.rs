@@ -346,7 +346,7 @@ mod tests {
         assert_eq!(
             sst_recover_action_as_is_scan_on_damage(ManifestObs::Inventory, ListedSst::Missing(1)),
             SstRecoverAction::ScanAndInstall,
-            "AS-IS dente: missing SST silently scanned"
+            "AS-IS tooth: missing SST silently scanned"
         );
     }
 
@@ -386,7 +386,7 @@ mod tests {
         assert_eq!(
             bulk_manifest_persist_fate_as_is(true),
             BulkManifestFate::AmortizeDebt,
-            "AS-IS dente: sync mode amortizes forever (publish window open)"
+            "AS-IS tooth: sync mode amortizes forever (publish window open)"
         );
     }
 

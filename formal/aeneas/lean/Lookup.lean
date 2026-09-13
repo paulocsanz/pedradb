@@ -9,7 +9,7 @@ theorem snap_is_empty_zero :
   unfold snap_is_empty
   rfl
 
-theorem snap_is_empty_as_is_dente :
+theorem snap_is_empty_as_is_tooth :
     snap_is_empty_as_is 0#u64 = ok false := by
   unfold snap_is_empty_as_is
   rfl
@@ -69,11 +69,11 @@ theorem prefer_newer_seq_fate_iff :
   unfold prefer_newer_seq
   cases have_best <;> simp <;> exact eq_comm
 
-/-- RFC-0219 P1.1 (átomo `catalog:point_cache_validity`): o fill/hit do
-    point/prefix cache é admissível EXATAMENTE enquanto o published seq
-    ainda é igual ao seq em que a resposta foi computada — publish
-    avançou ⇒ resposta pré-publish é velha e não entra (F198/F207). O
-    AS-IS cacheia sempre (resposta velha congelada — dente plantado). -/
+/-- RFC-0219 P1.1 (atom `catalog:point_cache_validity`): the fill/hit of the
+    point/prefix cache is admissible EXACTLY while the published seq
+    is still equal to the seq at which the answer was computed — publish
+    advanced ⇒ answer pre-publish is old and does not enter (F198/F207). The
+    AS-IS caches always (frozen old answer — tooth planted). -/
 theorem point_cache_validity_fate_iff :
     ∀ (published answer : U64) (plan : PointCachePlan),
       (point_cache_validity published answer = ok plan) ↔
@@ -99,10 +99,10 @@ theorem point_cache_validity_fate_iff :
       · subst hv
         rfl
 
-/-- RFC-0219 P1.1 (átomo `catalog:point_tombstone`): um ponto achado é
-    servido EXATAMENTE quando nenhum range tombstone cobre — tombstone
-    cobrindo (t.seq > point_seq) sombreia o valor e o caller lê Deleted
-    (RFC-0150). O AS-IS nunca sombreia (ressurreição — dente plantado). -/
+/-- RFC-0219 P1.1 (atom `catalog:point_tombstone`): the point found is
+    servido EXACTLY when none range tombstone covers — tombstone
+    covering (t.seq > point_seq) shadows the value and the caller reads Deleted
+    (RFC-0150). The AS-IS never shadows (resurrection — tooth planted). -/
 theorem point_tombstone_plan_fate_iff :
     ∀ (range_hidden : Bool) (plan : PointTombstonePlan),
       (point_tombstone_plan range_hidden = ok plan) ↔

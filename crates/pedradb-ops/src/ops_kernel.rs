@@ -12,9 +12,9 @@ pub fn pitr_record_in_window(ms: u64, base: u64, target: u64) -> bool {
     ms > base && ms <= target
 }
 
-/// Mutante honesto: só o bound inferior (`ms > base`).
+/// Honest mutant: only the lower bound (`ms > base`).
 ///
-/// Sem teto, seqs depois do target entram no restore — PITR mente.
+/// Without the ceiling, seqs past the target enter the restore — PITR lies.
 #[must_use]
 pub fn pitr_record_in_window_as_is(ms: u64, base: u64, _target: u64) -> bool {
     ms > base
@@ -26,7 +26,7 @@ mod tests {
 
     #[test]
     fn pitr_record_in_window_on_future_seq_is_not_ok() {
-        // seq 4 at target 3, base 1: FIXED recusa, AS-IS abençoa.
+        // seq 4 at target 3, base 1: FIXED refuses, AS-IS accepts.
         assert!(!pitr_record_in_window(4, 1, 3));
         assert!(pitr_record_in_window_as_is(4, 1, 3));
     }

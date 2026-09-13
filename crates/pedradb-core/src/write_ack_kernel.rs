@@ -14,7 +14,7 @@
 //! - [`WriteAckLedger::on_ack`]: the group published — every durable
 //!   pending byte acked (group-commit semantics, `put_ok` shape);
 //! - [`WriteAckLedger::assert_inv`]: fail-closed Inv-WAL check;
-//! - [`WriteAckLedger::d1_holds_every_cut`]: the D1-modelo corollary over
+//! - [`WriteAckLedger::d1_holds_every_cut`]: the D1-model corollary over
 //!   every torn prefix up to `through`.
 //!
 //! AS-IS tooth: acking the group before the barrier
@@ -76,7 +76,7 @@ impl WriteAckLedger {
         assert!(inv_wal(&self.state), "verified write→ack left Inv-WAL");
     }
 
-    /// D1-modelo over every torn prefix up to and past `through` (the
+    /// D1-model over every torn prefix up to and past `through` (the
     /// record = the whole acked prefix).
     #[must_use]
     pub fn d1_holds_every_cut(&self, through: u64) -> bool {

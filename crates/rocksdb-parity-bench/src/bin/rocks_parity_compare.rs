@@ -53,7 +53,7 @@ fn main() {
         .as_deref()
         .and_then(|s| extract_string_field(s, "durability"));
 
-    // Official cartaz: Rocks default (sync=false). A blanket sync=true peer
+    // Official board: Rocks default (sync=false). A blanket sync=true peer
     // is not a win — unless this run is host-default (MyRocks commit-sync /
     // Surreal sync=every), which is the upper DB's own factory setting.
     let peer_policy = peer_raw

@@ -1,5 +1,5 @@
 //! Inductive WAL state invariant (RFC-0166 P1.2): `acked ⊆ synced ⊆
-//! prefixo-recuperável`.
+//! prefix-recoverable`.
 //!
 //! The live seam is [`crate::wal::writer`] + [`crate::group_commit_kernel`]
 //! (fdatasync before Ok) over the [`crate::env`] barrier. This kernel is the
@@ -307,7 +307,7 @@ mod tests {
                 assert!(!as_is, "AS-IS rejects ceiling {acked}/{synced}/{written}");
             }
             if acked > synced && synced <= written {
-                assert!(!fixed && as_is, "AS-IS dente: acked without barrier");
+                assert!(!fixed && as_is, "AS-IS tooth: acked without barrier");
             }
             n += 1;
         }
@@ -376,7 +376,7 @@ mod tests {
         let fake = wal_sync_as_is(s, SyncHonesty::Lying);
         assert_eq!(
             fake.synced, s.written,
-            "AS-IS dente: lying Ok pretended to promote"
+            "AS-IS tooth: lying Ok pretended to promote"
         );
         assert_ne!(lying, fake);
         let cases: &[SyncHonesty] = &[
@@ -516,7 +516,7 @@ mod tests {
             if cut < s.acked && cut <= s.written {
                 assert!(
                     !acked_survives_as_is(&s, cut),
-                    "AS-IS dente: below-floor cut={cut}"
+                    "AS-IS tooth: below-floor cut={cut}"
                 );
             }
             n += 1;

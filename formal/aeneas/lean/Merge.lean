@@ -32,7 +32,7 @@ theorem merge_sift_step_swap_right_iff :
   unfold merge.sift_step
   cases r_exists <;> cases r_lt_l <;> cases best_lt_hole <;> simp
 
-/-- AS-IS dente (Lean side): on every repairing input the mutant stays
+/-- AS-IS tooth (Lean side): on every repairing input the mutant stays
 and the kernel does not — the decisions diverge. -/
 theorem merge_sift_step_as_is_diverges_on_repair (r_exists r_lt_l : Bool) :
     merge.sift_step_as_is r_exists r_lt_l true
@@ -135,37 +135,37 @@ theorem r1_get_never_returns_non_live :
           exact inv_lsm_newest_first_never_non_live (1#usize) (0#usize)
             key.ValueType.Value false hnew hlive
 
-/-! ### RFC-0198 P1.3 — corolário indutivo Inv-LSM (cadeia de k merges)
+/-! ### RFC-0198 P1.3 — corollary inductive Inv-LSM (chain of k merges)
 
-A forma seL4 do Inv-LSM: o lema um-passo registrado cobre um topo de
-heap; o corolário encadeia k passos por indução sobre a cadeia. O passo
-CITA `inv_lsm_newest_first_never_non_live` (RFC-0191 P2.2) — nada é
-re-provado aqui. -/
+A forma seL4 do Inv-LSM: o lemma one-step registered cobre um top de
+heap; the corollary chains k steps by induction over the chain. The step
+CITA `inv_lsm_newest_first_never_non_live` (RFC-0191 P2.2) — nothing is
+re-proved here. -/
 
-/-- Um passo da cadeia de merges: o par de idades no topo do heap
-(newest primeiro no empate de chaves), o kind da versão que sobe e o
-bool de range cobrindo a chave. -/
+/-- One step of the merge chain: the pair of ages at the top of the heap
+(newest first in the tie of keys), the kind of the version that goes up and the
+bool de range covering a key. -/
 structure MergeStep where
   newer : Usize
   older : Usize
   kind : key.ValueType
   range_hidden : Bool
 
-/-- Premissa estrutural do passo: o heap mantém a ordem newest-first —
-no empate de chaves, o probe 0164 responde o mais novo primeiro. -/
+/-- Structural premise of the step: the heap keeps the newest-first order —
+on a tie of keys, probe 0164 answers the newest first. -/
 def merge_step_newest_first (s : MergeStep) : Prop :=
   pedra_aeneas_probe_order_kernel.first_probe_on_equal_lo s.newer s.older
     = ok s.newer
 
-/-- O filtro do get respondeu "live" para a versão que subiu neste
-passo. -/
+/-- The get filter answered "live" for the version that rose in this
+step. -/
 def merge_step_answers_live (s : MergeStep) : Prop :=
   merge.visible_at s.kind s.range_hidden = ok true
 
-/-- Cadeia de k passos de merge. Base: cadeia vazia (k = 0 — nenhuma
-versão subiu, vale trivialmente). Passo: um topo newest-first seguido
-de uma cadeia de k passos — a premissa estrutural é do passo (o heap é
-restaurado newest-first a cada saída), não de um par fixo. -/
+/-- Chain of k merge steps. Base: empty chain (k = 0 — no
+version rose, holds trivially). Step: the newest-first top followed
+by the chain of k steps — the structural premise belongs to the step (the heap is
+restored newest-first at each output), not to the fixed pair. -/
 inductive merge_chain : Nat → List MergeStep → Prop
   | nil : merge_chain 0 []
   | cons (s : MergeStep) (k : Nat) (rest : List MergeStep) :
@@ -173,11 +173,11 @@ inductive merge_chain : Nat → List MergeStep → Prop
       merge_chain k rest →
       merge_chain (k + 1) (s :: rest)
 
-/-- RFC-0198 P1.3 COROLÁRIO INDUTIVO: numa cadeia de k merges em que
-todo topo permaneceu newest-first (premissa estrutural da cadeia),
-TODO passo cujo filtro respondeu live é genuinamente live — Value não
-escondido por range. Indução sobre a cadeia; o caso do passo CITA o
-lema um-passo REGISTRADO `inv_lsm_newest_first_never_non_live`
+/-- RFC-0198 P1.3 INDUCTIVE COROLLARY: in a chain of k merges where
+every top remained newest-first (structural premise of the chain),
+every step whose filter answered live is genuinely live — Value not
+hidden by range. Induction over the chain; the matches of the step CITA the
+lemma one-step REGISTRADO `inv_lsm_newest_first_never_non_live`
 (RFC-0191 P2.2). -/
 theorem merge_chain_preserves_inv_lsm :
     ∀ (k : Nat) (chain : List MergeStep),
@@ -214,8 +214,8 @@ theorem visible_at_range_deletion :
   unfold merge.visible_at
   rfl
 
-/-- AS-IS dente: a deletion still scans live. -/
-theorem visible_at_as_is_dente :
+/-- AS-IS tooth: a deletion still scans live. -/
+theorem visible_at_as_is_tooth :
     merge.visible_at_as_is key.ValueType.Deletion true = ok true := by
   unfold merge.visible_at_as_is
   rfl
@@ -371,8 +371,8 @@ theorem iter_window_keep_hidden :
   unfold merge.iter_window_keep
   rfl
 
-/-- AS-IS dente: a hidden version still emits. -/
-theorem iter_window_keep_as_is_dente :
+/-- AS-IS tooth: a hidden version still emits. -/
+theorem iter_window_keep_as_is_tooth :
     merge.iter_window_keep_as_is false = ok true := by
   unfold merge.iter_window_keep_as_is
   rfl
@@ -419,21 +419,21 @@ theorem range_tombstone_covers_as_is_is_eq (start end1 user) :
   unfold merge.range_tombstone_covers_as_is
   rfl
 
-/-- AS-IS dente: point put never conflicts. -/
+/-- AS-IS tooth: point put never conflicts. -/
 theorem write_op_covers_key_as_is_value (start end1 user) :
     merge.write_op_covers_key_as_is key.ValueType.Value start end1 user
     = ok false := by
   unfold merge.write_op_covers_key_as_is
   rfl
 
-/-- AS-IS dente: point delete never conflicts. -/
+/-- AS-IS tooth: point delete never conflicts. -/
 theorem write_op_covers_key_as_is_deletion (start end1 user) :
     merge.write_op_covers_key_as_is key.ValueType.Deletion start end1 user
     = ok false := by
   unfold merge.write_op_covers_key_as_is
   rfl
 
-/-- AS-IS dente: range only hits start. Dual-unfold. -/
+/-- AS-IS tooth: range only hits start. Dual-unfold. -/
 theorem write_op_covers_key_as_is_range (start end1 user) :
     merge.write_op_covers_key_as_is key.ValueType.RangeDeletion start end1 user
     = merge.range_tombstone_covers_as_is start end1 user := by
@@ -490,12 +490,12 @@ theorem bound_to_owned_excluded (s) :
   unfold merge.bound_to_owned
   rfl
 
-/-! ### RFC-0200 P1.1 — saída de merge alcançável (base: saída vazia) -/
+/-! ### RFC-0200 P1.1 — output of merge reachable (base: output empty) -/
 
-/-- Saída produzida pelo merge: começa vazia e recebe um passo por
-vez, EM ORDEM DE EMISSÃO (o passo recém-emissionado entra no fim) —
-cada passo com o topo do heap newest-first (premissa estrutural por
-passo). -/
+/-- Output produced by the merge: starts empty and receives one step at a
+time, IN EMISSION ORDER (the newly emitted step enters at the end) —
+each step with the top of the heap newest-first (structural premise per
+step). -/
 inductive merge_output_reach : Nat → List MergeStep → Prop
   | empty : merge_output_reach 0 []
   | emit (k : Nat) (s : MergeStep) (out : List MergeStep) :
@@ -503,9 +503,9 @@ inductive merge_output_reach : Nat → List MergeStep → Prop
       merge_output_reach k out →
       merge_output_reach (k + 1) (out ++ [s])
 
-/-- Ponte produção→cadeia (RFC-0200 P1.1): uma saída alcançável em
-ordem de emissão, lida de trás pra frente, É uma cadeia `merge_chain`
-— o construtor cons da cadeia é a emissão mais recente. -/
+/-- BRIDGE production→chain (RFC-0200 P1.1): the reachable output in
+emission order, read back to front, is the chain `merge_chain`
+— the constructor cons of the chain is the most recent emission. -/
 theorem merge_output_reach_chain (k : Nat) (out : List MergeStep)
     (h : merge_output_reach k out) : merge_chain k out.reverse := by
   induction h with
@@ -515,11 +515,11 @@ theorem merge_output_reach_chain (k : Nat) (out : List MergeStep)
       rw [List.reverse_append]
       exact merge_chain.cons s k' out'.reverse hnewest IH
 
-/-- RFC-0200 P1.1 COROLÁRIO: toda saída que o merge produz a partir da
-saída vazia (um passo por emissão, todo topo newest-first) contém
-apenas versões genuinamente live nas que o filtro respondeu live —
-composição da ponte com o corolário da cadeia (RFC-0198 P1.3);
-nada é re-provado. -/
+/-- RFC-0200 P1.1 COROLLARY: every output the merge produces starting from the
+empty output (one step per emission, every top newest-first) contains
+only versions genuinely live in what the filter answered live —
+composition of the bridge with the corollary of the chain (RFC-0198 P1.3);
+nothing is re-proved. -/
 theorem merge_output_reach_preserves_inv_lsm :
     ∀ (k : Nat) (out : List MergeStep),
       merge_output_reach k out →
@@ -531,34 +531,34 @@ theorem merge_output_reach_preserves_inv_lsm :
   have hmem : s ∈ out.reverse := List.mem_reverse.2 hs
   exact merge_chain_preserves_inv_lsm k out.reverse hchain s hmem hlive
 
-/-! ### RFC-0200 P1.2 — ponte sift_step↔newest-first (camada tagged)
+/-! ### RFC-0200 P1.2 — bridge sift_step↔newest-first (camada tagged)
 
-RE-ESCOPO DATADO 2026-09-11: o extract do sift não carrega estado de
-heap (só os três bools) e o comparador é axioma
-(`CoreCmpPartialOrdShared0B.lt`) — "o Swap restaura newest-first" não
-é provável dos booleanos. A ponte honesta cobre o núcleo provável: a
-decisão É a do kernel, o Stay é não-reparo (close registrado 0188) e
-preserva a premissa por par, e em reparo o as-is fica onde o kernel
-move. -/
+RE-SCOPED 2026-09-11: the extract of the sift does not load state of
+heap (only the three bools) and the comparador is an axiom
+(`CoreCmpPartialOrdShared0B.lt`) — "the Swap restores newest-first" is
+not provable from the booleans. An honest bridge covers the provable core: the
+decision is the kernel's, the Stay is no-repair (close registered 0188) and
+preserves the premise per pair, and in repair the as-is stays where the kernel
+moves. -/
 
-/-- Um passo de sift com a decisão TOMADA PELO KERNEL sobre as três
-entradas booleanas do extract (existe filho direito; direito <
-esquerdo; melhor filho < buraco). -/
+/-- One step of sift with the decision TOMADA BY THE KERNEL over the three
+entradas booleanas do extract (existe child direito; direito <
+esquerdo; better child < hole). -/
 structure TaggedSift where
   r_exists : Bool
   r_lt_l : Bool
   best_lt_hole : Bool
   s : merge.SiftStep
 
-/-- O campo `s` É a decisão do kernel sobre as entradas — não um valor
-arbitrário. -/
+/-- The field `s` Is the decision of the kernel over the entries — not the value
+arbitrary. -/
 def tagged_kernel_decision (t : TaggedSift) : Prop :=
   merge.sift_step t.r_exists t.r_lt_l t.best_lt_hole = ok t.s
 
-/-- PONTE (Stay = não-reparo): a decisão do kernel é Stay exatamente
-quando nenhum reparo é necessário — corolário DIRETO do close
-REGISTRADO `merge_sift_step_repairs_iff` (RFC-0188 P0.2); nada é
-re-provado. -/
+/-- BRIDGE (Stay = no-repair): the kernel decision is Stay exactly
+when no repair is necessary — DIRECT corollary of the close
+REGISTRADO `merge_sift_step_repairs_iff` (RFC-0188 P0.2); nothing is
+re-proved. -/
 theorem tagged_step_stays_iff_no_repair (t : TaggedSift)
     (ht : tagged_kernel_decision t) :
     (t.s = merge.SiftStep.Stay) ↔ (t.best_lt_hole = false) := by
@@ -575,8 +575,8 @@ theorem tagged_step_stays_iff_no_repair (t : TaggedSift)
     simp only [Result.ok.injEq] at hk
     exact hk
 
-/-- PONTE (par): a premissa estrutural da cadeia é LOCAL ao par de
-idades — não lê `kind` nem `range_hidden`. -/
+/-- BRIDGE (pair): the structural premise of the chain is LOCAL to the pair of
+ages — does not read `kind` nor `range_hidden`. -/
 theorem merge_step_newest_first_congr (s s' : MergeStep)
     (hnew : s.newer = s'.newer) (hold : s.older = s'.older) :
     merge_step_newest_first s → merge_step_newest_first s' := by
@@ -585,9 +585,9 @@ theorem merge_step_newest_first_congr (s s' : MergeStep)
   rw [hnew, hold] at hprem
   exact hprem
 
-/-- PONTE (Stay preserva): o kernel que fica não repara (iff
-registrado) e a premissa estrutural carrega para o próximo passo de
-MESMO par (o Stay não move ninguém) — composição das duas pontes. -/
+/-- BRIDGE (Stay preserves): the kernel that stays does not repair (iff
+registered) and the structural premise carries to the next step of the
+SAME pair (the Stay moves nobody) — composition of the two bridges. -/
 theorem tagged_stay_preserves_newest_first (t : TaggedSift)
     (s s' : MergeStep) (ht : tagged_kernel_decision t)
     (hstay : t.s = merge.SiftStep.Stay)
@@ -597,8 +597,8 @@ theorem tagged_stay_preserves_newest_first (t : TaggedSift)
   ⟨(tagged_step_stays_iff_no_repair t ht).1 hstay,
     merge_step_newest_first_congr s s' hpair.1.symm hpair.2.symm hprem⟩
 
-/-- O mutante as-is fica em TODO input de reparo — fato definicional
-do dente (mesma forma de prova da divergência registrada). -/
+/-- The as-is mutant stays in every repair input — definitional fact
+of the tooth (same shape as the proof of the registered divergence). -/
 theorem merge_sift_step_as_is_stays_on_repair :
     ∀ (r_exists r_lt_l : Bool),
       merge.sift_step_as_is r_exists r_lt_l true
@@ -607,10 +607,10 @@ theorem merge_sift_step_as_is_stays_on_repair :
   unfold merge.sift_step_as_is
   cases r_exists <;> cases r_lt_l <;> simp
 
-/-- PONTE (divergência em reparo): em todo input de reparo o kernel
-NÃO devolve Stay (move o melhor filho para o buraco) enquanto o as-is
-FICA — deixaria no topo o par que o kernel teria consertado. Cita o
-close registrado e o fato definicional do as-is. -/
+/-- BRIDGE (divergence in repair): in every repair input the kernel
+does not return Stay (moves the better child into the hole) while the as-is
+STAYS — it would leave on top the pair the kernel would have fixed. Cites the
+close registered e o fato definicional do as-is. -/
 theorem tagged_repair_kernel_moves_as_is_stays (t : TaggedSift)
     (ht : tagged_kernel_decision t) (hrep : t.best_lt_hole = true) :
     t.s ≠ merge.SiftStep.Stay
@@ -624,9 +624,9 @@ theorem tagged_repair_kernel_moves_as_is_stays (t : TaggedSift)
   · rw [hrep]
     exact merge_sift_step_as_is_stays_on_repair t.r_exists t.r_lt_l
 
-/-- COROLÁRIO da ponte na cadeia: um passo Stay do kernel estende a
-cadeia — o próximo passo de mesmo par continua newest-first (o cons é
-a emissão mais recente, lendo a cabeça como o topo atual). -/
+/-- COROLLARY of the bridge in the chain: one step Stay of the kernel extends the
+chain — the next step of same par continues newest-first (the cons is
+the most recent emission, reading the head the the top current). -/
 theorem tagged_stay_extends_chain (t : TaggedSift) (s s' : MergeStep)
     (k : Nat) (rest : List MergeStep) (ht : tagged_kernel_decision t)
     (hstay : t.s = merge.SiftStep.Stay)
@@ -655,11 +655,11 @@ theorem visible_at_fate_iff :
   unfold merge.visible_at
   cases kind <;> cases range_hidden <;> simp
 
-/-- RFC-0218 P1.2 2/11 (átomo `catalog:write_op_range_end`, entrada
-    `merge.write_op_range_end`): o fim do range é EXATAMENTE o despacho
-    citado — Deletion e Value não têm fim (none); RangeDeletion carrega
-    o próprio valor (some value). O AS-IS devolve sempre none (fim de
-    range engolido — dente plantado). -/
+/-- RFC-0218 P1.2 2/11 (atom `catalog:write_op_range_end`, entry
+    `merge.write_op_range_end`): the end of the range is EXACTLY the dispatch
+    cited — Deletion and Value do not have end (none); RangeDeletion loads
+    the own value (some value). The AS-IS always returns none (end of
+    range engolido — tooth planted). -/
 theorem write_op_range_end_fate_iff :
     ∀ (kind : key.ValueType) (value : Slice U8)
       (r : Option (Slice U8)),
@@ -695,10 +695,10 @@ private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : �
   rw [hx]
   exact h
 
-/-- RFC-0218 P1.2 6/11 (átomo `catalog:range_covers`, entrada
-    `merge.range_tombstone_covers`): cobrir por túmulo de range é
-    EXATAMENTE o par citado — `key >= start` E `key < end`. O AS-IS
-    testa só igualdade com start (fim ignorado — dente plantado). -/
+/-- RFC-0218 P1.2 6/11 (atom `catalog:range_covers`, entry
+    `merge.range_tombstone_covers`): cover by range tombstone is
+    EXACTLY the cited pair — `key >= start` E `key < end`. The AS-IS
+    testa only equality with start (end ignorado — tooth planted). -/
 theorem range_tombstone_covers_fate_iff :
     ∀ (start : Slice U8) (end1 : Slice U8) (key : Slice U8) (v : Bool),
       (merge.range_tombstone_covers start end1 key = ok v) ↔

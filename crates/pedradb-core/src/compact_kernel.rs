@@ -436,7 +436,7 @@ mod tests {
         assert_eq!(
             point_version_fate(1, Some(8), as_is),
             VersionFate::Drop,
-            "AS-IS dente: ignore pin ⇒ drop the pinned version"
+            "AS-IS tooth: ignore pin ⇒ drop the pinned version"
         );
         assert_eq!(gc_oldest_from_pin(None, last, vis), last.min(vis));
     }
@@ -450,7 +450,7 @@ mod tests {
         assert_eq!(
             point_version_fate(1, Some(8), gc_oldest_from_pin_as_is(Some(pin), 10, 9)),
             VersionFate::Drop,
-            "AS-IS dente: compact over pin"
+            "AS-IS tooth: compact over pin"
         );
     }
 
@@ -463,7 +463,7 @@ mod tests {
         assert_eq!(
             compact_pick_as_is(Some(0), false, false, 3),
             CompactPlan::NoOp,
-            "AS-IS dente: skip merge"
+            "AS-IS tooth: skip merge"
         );
     }
 
@@ -474,7 +474,7 @@ mod tests {
         assert_eq!(
             point_version_fate_as_is_drop_under_snapshot(1, Some(8), 5),
             VersionFate::Drop,
-            "AS-IS dente: drop a version a snapshot still reads"
+            "AS-IS tooth: drop a version a snapshot still reads"
         );
     }
 
@@ -502,11 +502,11 @@ mod tests {
         assert!(compact_should_split_at(1_024, 1_024));
         assert!(
             !compact_should_split_as_is(u64::MAX),
-            "AS-IS dente: fixed-target mutant never splits — one giant file past the target"
+            "AS-IS tooth: fixed-target mutant never splits — one giant file past the target"
         );
         assert!(
             !compact_should_split_at_as_is(u64::MAX, 1),
-            "AS-IS dente: explicit-target mutant never splits either"
+            "AS-IS tooth: explicit-target mutant never splits either"
         );
     }
 }

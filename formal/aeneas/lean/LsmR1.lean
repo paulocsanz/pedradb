@@ -30,7 +30,7 @@ theorem lsm_state_of_is_def : True := by
   have _ := @lsm_write
   trivial
 
-/-! ## RFC-0215 P0.2 — coroa de produto no degrau átomo (modelo ×4) -/
+/-! ## RFC-0215 P0.2 — product crown in the atom rung (model ×4) -/
 
 /-- Any ok-valued Result bind forces the bound term to be ok
 (Cf.lean's `bind_ok_inv`, restated for this module). -/
@@ -41,9 +41,9 @@ private theorem bind_ok_inv {α β} (x : Result α) (f : α → Result β) (v : 
   | fail e => exact absurd h (by simp)
   | div => exact absurd h (by simp)
 
-/-- R1 modelo mantém: o inventário é consistente — sonda e mais-novo
-concordam na mesma entrada para a chave (`inv_lsm`/`lsm_probe`/
-`r1_newest` citados, corpos não reabertos). -/
+/-- R1 model maintains: the inventory is consistente — probe and newest
+concordam nthe same entry for the key (`inv_lsm`/`lsm_probe`/
+`r1_newest` cited, bodies not reopened). -/
 def r1m_ok_true (s : LsmState) (key : U64) : Prop :=
   ∃ b, inv_lsm s = ok b ∧
     (b = false ∨ b = true ∧
@@ -52,8 +52,8 @@ def r1m_ok_true (s : LsmState) (key : U64) : Prop :=
           core.option.Option.Insts.CoreCmpPartialEqOption.eq
             LsmEntry.Insts.CoreCmpPartialEqLsmEntry o o1 = ok true)
 
-/-- R1 modelo viola: inventário quebrado — a sonda e o mais-novo
-discordam sobre a chave. -/
+/-- R1 model viola: inventory broken — the probe and the newest
+discordam over the key. -/
 def r1m_mismatch (s : LsmState) (key : U64) : Prop :=
   ∃ b, inv_lsm s = ok b ∧ b = true ∧
     ∃ o, lsm_probe s key = ok o ∧
@@ -62,12 +62,12 @@ def r1m_mismatch (s : LsmState) (key : U64) : Prop :=
           LsmEntry.Insts.CoreCmpPartialEqLsmEntry o o1 = ok false
 
 /-- RFC-0215 P0.2 2/4 (atom `catalog:r1_modelo`, entry `r1_modelo`):
-o desfecho da máquina R1 é exatamente a decisão que o spec nomeia —
-`ok true` quando sonda e mais-novo concordam (ou o inventário nem
-passa), `ok false` quando discordam. O mutante AS-IS
-(`r1_modelo_as_is`) sonda com `lsm_probe_as_is` (a ressurreição do
+the outcome of the R1 machine is exactly the decision the spec names —
+`ok true` when probe and newest concordam (or the inventory nem
+passes), `ok false` when discordam. The mutant AS-IS
+(`r1_modelo_as_is`) probe with `lsm_probe_as_is` (the resurrection of the
 delete de findings/2026-09-04-reopen-delete-resurrected); planta
-três-dentes recusa. -/
+three-teeth refuses. -/
 theorem r1_modelo_fate_iff :
     ∀ (s : LsmState) (key : U64) (v : Bool),
       (r1_modelo s key = ok v) ↔
@@ -120,12 +120,12 @@ theorem r1_modelo_fate_iff :
         simp only [Aeneas.Std.bind_tc_ok]
         exact heq
 
-/-- RFC-0218 P1.1 8/10 (átomo `catalog:lsm_compact`, entrada
-    `lsm_compact`): despacho de compactação R1 é EXATAMENTE o
-    encaminhamento citado — nível 0 não compacta (ok none), nível
-    dentro de MAX_LEVELS entra no loop citado com drop_all_tombs
-    false, nível além de MAX_LEVELS não compacta. O AS-IS passa
-    drop_all_tombs true (derruba túmulos vivos — dente plantado). -/
+/-- RFC-0218 P1.1 8/10 (atom `catalog:lsm_compact`, entry
+    `lsm_compact`): dispatch of compaction R1 is EXACTLY the
+    cited dispatch — level 0 does not compact (ok none), level
+    inside MAX_LEVELS enters the cited loop with drop_all_tombs
+    false, level beyond MAX_LEVELS does not compact. The AS-IS passes
+    drop_all_tombs true (derruba tombstones live — tooth planted). -/
 theorem lsm_compact_fate_iff :
     ∀ (s : LsmState) (depth : Usize) (r : Option LsmState),
       (lsm_compact s depth = ok r) ↔
@@ -156,11 +156,11 @@ theorem lsm_compact_fate_iff :
     · unfold lsm_compact
       rw [if_neg hz, if_neg hm, hv]
 
-/-- RFC-0218 P1.1 9/10 (átomo `catalog:lsm_probe`, entrada
-    `lsm_probe`): provar R1 é EXATAMENTE um passo do loop citado —
-    o corpo no nível 0 ou termina (done o) ou desce um nível
-    (cont i', resto citado). O AS-IS ignora o nível (dente
-    plantado). -/
+/-- RFC-0218 P1.1 9/10 (atom `catalog:lsm_probe`, entry
+    `lsm_probe`): prove R1 is EXACTLY one step of the cited loop —
+    the body in the level 0 or ends (done the) or goes down the level
+    (cont i', resto cited). The AS-IS ignora the level (tooth
+    planted). -/
 theorem lsm_probe_fate_iff :
     ∀ (s : LsmState) (key : U64) (o : Option LsmEntry),
       (lsm_probe s key = ok o) ↔
@@ -195,10 +195,10 @@ theorem lsm_probe_fate_iff :
       rw [hb, hcont]
       exact hloop
 
-/-- RFC-0218 P1.1 10/10 (átomo `catalog:lsm_reopen`, entrada
-    `lsm_reopen`): reabrir R1 é EXATAMENTE a identidade citada — o
-    estado sai intacto (`r = s`). O AS-IS reabre pelo loop que
-    esvazia níveis (dente plantado). -/
+/-- RFC-0218 P1.1 10/10 (atom `catalog:lsm_reopen`, entry
+    `lsm_reopen`): reabrir R1 is EXACTLY the identidade cited — the
+    state exits intacto (`r = s`). The AS-IS reabre by the loop that
+    empties levels (tooth planted). -/
 theorem lsm_reopen_fate_iff :
     ∀ (s : LsmState) (r : LsmState),
       (lsm_reopen s = ok r) ↔ (r = s) := by

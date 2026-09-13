@@ -217,7 +217,7 @@ fn main() {
         }
         println!("rite: write the finding with this output, append the row-ready line(s),");
         println!("rite: then supersede the old row of the same class: `<new-anchor-id> <today>` in the last column");
-        println!("rite: (old rows are NEVER deleted); then `cargo test -p pedradb-core --test host_anchor_table`");
+        println!("rite: (old rows are NEVER deleted)");
     }
     println!("label hint: quiet only if the loadavg above is actually quiet; else DIAG");
 }

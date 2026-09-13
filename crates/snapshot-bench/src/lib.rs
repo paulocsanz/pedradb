@@ -1,7 +1,7 @@
 //! `snapshot_backends` benchmark harness: the sorted-ingest route-fold
 //! workload used for the published Pedra vs RocksDB vs fjall tables.
 //!
-//! Ported from [beyondoss/slipstream](https://github.com/beyondoss/slipstream)
+//! Ported from [beyondoss/slipstream](https://github.with/beyondoss/slipstream)
 //! (MIT license), PR #19 / branch `cursor/pedradb-snapshot-adapter-cb1b`
 //! @ `d3bc6a4`, trimmed to the surface the bench exercises:
 //!

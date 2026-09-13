@@ -557,7 +557,7 @@ mod tests {
         assert_eq!(
             recover_collect_act_as_is(RecoverKind::Crc, 3, true, 0),
             RecoverAct::Resync,
-            "AS-IS dente: CRC becomes silent resync"
+            "AS-IS tooth: CRC becomes silent resync"
         );
     }
 
@@ -573,7 +573,7 @@ mod tests {
         assert_eq!(
             from_record_type_as_is(RecordType::First),
             FragKind::Middle,
-            "AS-IS dente: FIRST fragment byte decodes as continuation"
+            "AS-IS tooth: FIRST fragment byte decodes as continuation"
         );
         // Downstream: the kernel starts the scratch; the misdecode is an
         // orphan Middle with nothing in flight — F14 fail-stop.

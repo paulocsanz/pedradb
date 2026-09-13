@@ -9032,7 +9032,7 @@ impl<E: Env> Db<E> {
     ///
     /// # Errors
     /// [`CoreError::CorruptValue`] when a live entry's vlog payload fails
-    /// CRC/I-O during a lazy rebuild (F1: corruption is an error, never a
+    /// CRC/I-The during a lazy rebuild (F1: corruption is an error, never a
     /// raw pointer served as the user value).
     /// [`CoreError::SnapshotTooOld`] when the window starts below the
     /// retention watermark (RFC-0046): versions below it — including lone
@@ -9802,7 +9802,7 @@ impl<E: Env> Db<E> {
     }
 
     /// Assign sequences. `spill` rewrites large values into the vlog (G1).
-    /// Async coluna A (`commit_async_ops`) keeps the payload in the WAL —
+    /// Async column A (`commit_async_ops`) keeps the payload in the WAL —
     /// same class as Rocks `sync=false` (RFC-0149 P2.1 blob).
     pub(crate) fn prepare_write_ops_spill(
         &mut self,
@@ -12948,7 +12948,7 @@ mod tests {
         );
         assert!(
             crate::group_commit_kernel::media_durable_admitted_as_is(true),
-            "AS-IS dente: fsync Ok would claim the drive"
+            "AS-IS tooth: fsync Ok would claim the drive"
         );
         assert!(!crate::group_commit_kernel::media_durable_admitted(true));
         db.close().unwrap();
@@ -12962,7 +12962,7 @@ mod tests {
         assert!(!crate::group_commit_kernel::media_durable_admitted(true));
         assert!(
             crate::group_commit_kernel::media_durable_admitted_as_is(true),
-            "AS-IS dente: fsync Ok is rounded to a media theorem"
+            "AS-IS tooth: fsync Ok is rounded to a media theorem"
         );
         let dir = temp_dir();
         let mut db = Db::open_with(
@@ -12990,7 +12990,7 @@ mod tests {
         assert!(!crate::sst::zero_glue_admitted());
         assert!(
             crate::sst::zero_glue_admitted_as_is(),
-            "AS-IS dente: extracting sst_crc_fate looks like glue is gone"
+            "AS-IS tooth: extracting sst_crc_fate looks like glue is gone"
         );
         let dir = temp_dir();
         let mut db = Db::open_with(
@@ -13883,7 +13883,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_match_ok(1, 2));
         assert!(
             crate::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS dente: any WAL crc would match"
+            "AS-IS tooth: any WAL crc would match"
         );
         let dir = temp_dir();
         {
@@ -13921,7 +13921,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_collision_admitted());
         assert!(
             crate::wal::crc::crc_collision_admitted_as_is(),
-            "AS-IS dente: matching CRC looks collision-free"
+            "AS-IS tooth: matching CRC looks collision-free"
         );
         assert!(
             crate::wal::crc::crc_match_ok(1, 1),
@@ -13959,7 +13959,7 @@ mod tests {
         assert_eq!(
             reopen_outcome_as_is_silent(ReopenDamage::Crc, true, false),
             ReopenOutcome::ServeAll,
-            "AS-IS dente: PIT CRC lie would look like a clean open"
+            "AS-IS tooth: PIT CRC lie would look like a clean open"
         );
         let dir = temp_dir();
         let wal = dir.join(WAL_FILE_NAME);
@@ -14011,7 +14011,7 @@ mod tests {
         assert_eq!(
             crate::sst::sst_crc_fate_as_is(1, 2, 100),
             crate::sst::SstCrcFate::StripTrailer,
-            "AS-IS dente: flipped SST would open as a table"
+            "AS-IS tooth: flipped SST would open as a table"
         );
         let dir = temp_dir();
         {
@@ -14064,7 +14064,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_match_ok(1, 2));
         assert!(
             crate::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS dente: any vlog crc would match"
+            "AS-IS tooth: any vlog crc would match"
         );
         let dir = temp_dir();
         let payload = vec![b'L'; 800];
@@ -18220,7 +18220,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_match_ok(1, 2));
         assert!(
             crate::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS dente: any checkpoint crc would match"
+            "AS-IS tooth: any checkpoint crc would match"
         );
         let dir = temp_dir();
         let ckpt = temp_dir();
@@ -18259,7 +18259,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_collision_admitted());
         assert!(
             crate::wal::crc::crc_collision_admitted_as_is(),
-            "AS-IS dente: matching CRC looks collision-free"
+            "AS-IS tooth: matching CRC looks collision-free"
         );
         assert!(
             crate::wal::crc::crc_match_ok(1, 1),
@@ -18905,7 +18905,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_match_ok(1, 2));
         assert!(
             crate::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS dente: any CURRENT crc would match"
+            "AS-IS tooth: any CURRENT crc would match"
         );
         let dir = temp_dir();
         {
