@@ -143,3 +143,91 @@ theorem bit_index_of_le_u32max (bit : U64)
     have hr : U32.rMax = U32.max := by native_decide
     omega
   simp [this]
+
+/-- Any ok-valued Result bind forces the bound term to be ok. -/
+private theorem bind_ok_inv {α β} (x : Result α) (f : α → Result β) (v : β)
+    (h : Aeneas.Std.bind x f = ok v) : ∃ a, x = ok a ∧ f a = ok v := by
+  cases x with
+  | ok a => exact ⟨a, rfl, h⟩
+  | fail e => exact absurd h (by simp)
+  | div => exact absurd h (by simp)
+
+/-- An ok chain reassembles into an ok bind. -/
+private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : β}
+    (a : α) (hx : x = ok a) (h : f a = ok v) : Aeneas.Std.bind x f = ok v := by
+  rw [hx]
+  exact h
+
+/-- RFC-0218 P2.2 (átomo `catalog:bloom_header`, entrada
+    `bloom_header_ok`): o cabeçalho admite EXATAMENTE a conjunção
+    citada — k dentro de [1, MAX_K], nbytes cobre div_ceil nbits 8
+    e nbytes cabe no residual. O AS-IS aceita qualquer k (probe
+    sem borne — dente plantado). -/
+theorem bloom_header_fate_iff :
+    ∀ (nbits k nbytes : U32) (residual : U64) (v : Bool),
+      (bloom_header_ok nbits k nbytes residual = ok v) ↔
+        (∃ ri : core.ops.range.RangeInclusive U32,
+           core.ops.range.RangeInclusive.new 1#u32 MAX_K = ok ri ∧
+           ∃ b : Bool,
+             core.ops.range.RangeInclusive.contains core.cmp.PartialOrdU32
+               core.cmp.PartialOrdU32 core.cmp.PartialOrdU32 ri k = ok b ∧
+             ((b = true ∧
+               ∃ i i1 i2 : U64,
+                 lift (core.convert.num.FromU64U32.from nbytes) = ok i ∧
+                 lift (core.convert.num.FromU64U32.from nbits) = ok i1 ∧
+                 core.num.U64.div_ceil i1 8#u64 = ok i2 ∧
+                 ((i >= i2 ∧
+                   ∃ i3 : U64,
+                     lift (core.convert.num.FromU64U32.from nbytes) = ok i3 ∧
+                     v = decide (i3 <= residual))
+                  ∨ (¬ (i >= i2) ∧ v = false)))
+              ∨ (b = false ∧ v = false))) := by
+  intro nbits k nbytes residual v
+  constructor
+  · intro hval
+    unfold bloom_header_ok at hval
+    obtain ⟨ri, hri, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨b, hb, hval⟩ := bind_ok_inv _ _ _ hval
+    refine ⟨ri, hri, b, hb, ?_⟩
+    cases b with
+    | false =>
+      split at hval
+      · next hc => exact absurd hc (by simp)
+      · next hc =>
+        injection hval with hv
+        exact Or.inr ⟨rfl, hv.symm⟩
+    | true =>
+      split at hval
+      · next hc =>
+        obtain ⟨i, hi, hval⟩ := bind_ok_inv _ _ _ hval
+        obtain ⟨i1, hi1, hval⟩ := bind_ok_inv _ _ _ hval
+        obtain ⟨i2, hi2, hval⟩ := bind_ok_inv _ _ _ hval
+        refine Or.inl ⟨rfl, i, i1, i2, hi, hi1, hi2, ?_⟩
+        split at hval
+        · next hc =>
+          obtain ⟨i3, hi3, hval⟩ := bind_ok_inv _ _ _ hval
+          injection hval with hv
+          exact Or.inl ⟨hc, i3, hi3, hv.symm⟩
+        · next hc =>
+          injection hval with hv
+          exact Or.inr ⟨hc, hv.symm⟩
+      · next hc => exact absurd hc (by simp)
+  · rintro ⟨ri, hri, b, hb,
+      (⟨rfl, i, i1, i2, hi, hi1, hi2, hbr⟩ | ⟨rfl, hv⟩)⟩
+    · unfold bloom_header_ok
+      refine bind_intro ri hri (bind_intro true hb ?_)
+      rw [if_pos rfl]
+      refine bind_intro i hi (bind_intro i1 hi1 (bind_intro i2 hi2 ?_))
+      cases hbr with
+      | inl hbrl =>
+        obtain ⟨hc, i3, hi3, hv⟩ := hbrl
+        rw [if_pos hc]
+        exact bind_intro i3 hi3 (by rw [hv])
+      | inr hbrr =>
+        obtain ⟨hc, hv⟩ := hbrr
+        rw [if_neg hc]
+        rw [hv]
+    · unfold bloom_header_ok
+      refine bind_intro ri hri (bind_intro false hb ?_)
+      rw [if_neg (by simp)]
+      rw [hv]

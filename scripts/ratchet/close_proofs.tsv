@@ -272,3 +272,4 @@ atom	catalog:fold_range	fold_event_hides_key_fate_iff	formal/aeneas/lean/Fold.le
 atom	catalog:ship_stamp	stamp_changed_fate_iff	formal/aeneas/lean/Ship.lean	stamp_changed
 atom	catalog:ship_guard	pull_plan_fate_iff	formal/aeneas/lean/Ship.lean	pull_plan
 atom	catalog:c_len	c_len_fate_iff	formal/aeneas/lean/CapiHandles.lean	c_len_admitted
+atom	catalog:bloom_header	bloom_header_fate_iff	formal/aeneas/lean/Bloom.lean	bloom_header_ok

@@ -3188,6 +3188,10 @@
   },
   {
    "id": "bloom_header",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "cabecalho do bloom admite exatamente a conjuncao citada — k em [1, MAX_K], nbytes cobre div_ceil nbits 8 e nbytes cabe no residual; as-is aceita k ate u32::MAX (probe sem borne)"
+   },
    "finding": "F166",
    "twin_kind": "close",
    "single_artifact": true,
