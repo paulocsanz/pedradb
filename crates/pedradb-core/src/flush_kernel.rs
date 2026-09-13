@@ -1080,6 +1080,54 @@ mod tests {
     }
 
     #[test]
+    fn trampoline_drains_p22_match_kernel_plans() {
+        // RFC-0219 P2.2 drains: the already-paired kernel decisions
+        // leave the `if` shape in concurrent.rs — the trampoline matches
+        // the kernel (or its plan).
+        let cc = include_str!("concurrent.rs");
+        let fate_drains = [
+            ("submit_after_begin", "lone/async 3-way"),
+            ("lead", "catchup bound"),
+            ("finish_group_off_lock", "wal-sync note + ledger barrier"),
+        ];
+        for (name, what) in fate_drains {
+            let body = named_fn_src(cc, name).unwrap_or_else(|| panic!("{name}"));
+            assert_eq!(
+                body.matches("match crate::changelog_kernel::changelog_durable_commit_fate(")
+                    .count(),
+                if name == "finish_group_off_lock" { 2 } else { 1 },
+                "{name} ({what}) must match changelog_durable_commit_fate"
+            );
+        }
+        let occ = named_fn_src(cc, "occ_snapshot").expect("occ_snapshot");
+        assert!(
+            occ.contains("match crate::flush_kernel::occ_snap_lock_order("),
+            "occ_snapshot matches occ_snap_lock_order"
+        );
+        let idle = named_fn_src(cc, "writes_idle_for").expect("writes_idle_for");
+        assert!(
+            idle.contains("match crate::flush_kernel::occ_snap_uses_published("),
+            "writes_idle_for matches occ_snap_uses_published"
+        );
+        let rec = named_fn_src(cc, "recover_from_fence").expect("recover_from_fence");
+        assert!(
+            rec.contains("match crate::write_admission_kernel::fence_admission_plan("),
+            "recover_from_fence matches fence_admission_plan"
+        );
+        for name in ["persist_unsynced_l0s_off_lock", "install_prepared_one"] {
+            let body = named_fn_src(cc, name).unwrap_or_else(|| panic!("{name}"));
+            assert!(
+                body.contains("match crate::flush_kernel::manifest_publish_plan("),
+                "{name} matches manifest_publish_plan"
+            );
+            assert!(
+                !body.contains("may_publish_manifest("),
+                "{name}: the raw publish gate left the trampoline"
+            );
+        }
+    }
+
+    #[test]
     fn cf_flush_plan_on_live_over_limit_flushes() {
         // RFC-0219 P2.1: inside the armed scan, a family at/over its
         // limit flushes now; below the limit skips. AS-IS skips every

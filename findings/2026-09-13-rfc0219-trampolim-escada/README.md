@@ -469,3 +469,28 @@ usize→u64 no trampolim (`as u64`, precedente batch_is_empty). Par:
 `catalog:parked_debt_plan`, teorema `parked_debt_plan_fate_iff`
 (Flush.lean, ∀ sobre (parked, cap)), planta DST
 `parked_debt_plan_on_live_at_cap_parks`. 290/312 = 92,95%.
+
+## P2.2 drenos — 9 portões em kernels já pareados (2026-09-13)
+
+Sem par novo (os pares/teoremas existem; mesmo formato do dreno P2.1):
+
+- `submit_after_begin` (771) — `match changelog_durable_commit_fate(true,
+  do_sync, false)` Count/Skip (a mesma sorte do P0.1 commit_ops_with; o
+  3-way lone/async-one/async-many fica dentro do Skip).
+- `lead` (979) — catchup bound idem Count/Skip.
+- `finish_group_off_lock` (1457/1467) — `note_wal_sync` e
+  `ledger.on_barrier` (o barrier com guarda `io_err.is_none()` —
+  desfecho Env, não decisão de fate).
+- `occ_snapshot` (2113) — `match occ_snap_lock_order(...)` bool.
+- `writes_idle_for` (2217) — `match occ_snap_uses_published(...)` bool.
+- `recover_from_fence` (2685) — `match fence_admission_plan(...)`
+  (o mesmo plano do db.rs ensure_not_fenced, P1.2).
+- `persist_unsynced_l0s_off_lock` (3379) e `install_prepared_one`
+  (3464) — `match manifest_publish_plan(...)` (pull 14; o portão cru
+  `may_publish_manifest` sai).
+
+Planta: `trampoline_drains_p22_match_kernel_plans`. Contador
+concurrent.rs: 15 → **6** (3 comentários de doc + as 3 recusas abaixo).
+Sem par novo: 290/312 inalterado. Vermelhos: conjunto idêntico ao
+capturado pré-dreno (`p22_with.txt`); `put_ok_and_recover_path_data_
+ifs_call_kernels` é o vermelho herdado pré-objetivo documentado.

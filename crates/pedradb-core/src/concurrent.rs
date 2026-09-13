@@ -774,13 +774,22 @@ impl WriteGroup {
         // write() still joins the group (RFC-0040 P1.2). Lone async
         // (`do_sync=false`) takes `commit_async_one` / `commit_async_ops`.
         if occ.is_none() && active == 1 && !self.recently_concurrent() {
-            let result = if crate::write_admission_kernel::wal_sync_required(true, do_sync, false) {
-                Self::lone_commit(self, db, ops, do_sync, occ)
-            } else if ops.len() == 1 {
-                db.write().commit_async_one(ops.pop().expect("len checked"))
-            } else {
-                db.write().commit_async_ops(ops)
-            };
+            // RFC-0219 P2.2 drain: same fate as the P0.1 commit_ops_with —
+            // Count ⇔ wal_sync_required(true, do_sync, false).
+            let result =
+                match crate::changelog_kernel::changelog_durable_commit_fate(true, do_sync, false)
+                {
+                    crate::changelog_kernel::ChangelogCommitFate::Count => {
+                        Self::lone_commit(self, db, ops, do_sync, occ)
+                    }
+                    crate::changelog_kernel::ChangelogCommitFate::Skip => {
+                        if ops.len() == 1 {
+                            db.write().commit_async_one(ops.pop().expect("len checked"))
+                        } else {
+                            db.write().commit_async_ops(ops)
+                        }
+                    }
+                };
             self.finish_lone();
             return result;
         }
@@ -982,27 +991,34 @@ impl WriteGroup {
                 .any(|p| crate::write_admission_kernel::wal_sync_required(true, p.do_sync, false));
             let mut collect_mode = false;
             let bound = if batch_ops < CATCHUP_SKIP_OPS {
-                if crate::write_admission_kernel::wal_sync_required(true, any_sync, false) {
-                    catchup_wait_bound(window, self.fd_ema(), batch.len(), active, batch_ops)
-                } else {
-                    // RFC-0217 P0.1/P0.1b: async-only group — no fd to
-                    // break even against (the 0044 P0.5 reason this hold
-                    // was skipped), so the flat clamped window buys one
-                    // write()/encode pass per group. P0.1b: the missing
-                    // writer is usually in its client-side gap, invisible
-                    // to `active` (the counter drops at reply consumption),
-                    // so a recent peer opens the collect through the gap.
-                    // RFC-0217 P0.4: with the flight cap on, the window
-                    // never exceeds the previous group's measured flight
-                    // (Darwin-async ≈0 flight collapses it to off).
-                    let us = crate::group_window_kernel::async_catchup_bound_us(
-                        self.effective_group_window_us(),
-                        active,
-                        batch.len(),
-                        self.recently_concurrent(),
-                    );
-                    collect_mode = us > 0;
-                    (us > 0).then(|| Duration::from_micros(us))
+                // RFC-0219 P2.2 drain: Count ⇔ wal_sync_required(true,
+                // any_sync, false) — a sync in the group shares an fd, so
+                // the catch-up hold pays for itself.
+                match crate::changelog_kernel::changelog_durable_commit_fate(true, any_sync, false)
+                {
+                    crate::changelog_kernel::ChangelogCommitFate::Count => {
+                        catchup_wait_bound(window, self.fd_ema(), batch.len(), active, batch_ops)
+                    }
+                    crate::changelog_kernel::ChangelogCommitFate::Skip => {
+                        // RFC-0217 P0.1/P0.1b: async-only group — no fd to
+                        // break even against (the 0044 P0.5 reason this hold
+                        // was skipped), so the flat clamped window buys one
+                        // write()/encode pass per group. P0.1b: the missing
+                        // writer is usually in its client-side gap, invisible
+                        // to `active` (the counter drops at reply consumption),
+                        // so a recent peer opens the collect through the gap.
+                        // RFC-0217 P0.4: with the flight cap on, the window
+                        // never exceeds the previous group's measured flight
+                        // (Darwin-async ≈0 flight collapses it to off).
+                        let us = crate::group_window_kernel::async_catchup_bound_us(
+                            self.effective_group_window_us(),
+                            active,
+                            batch.len(),
+                            self.recently_concurrent(),
+                        );
+                        collect_mode = us > 0;
+                        (us > 0).then(|| Duration::from_micros(us))
+                    }
                 }
             } else {
                 None
@@ -1460,8 +1476,13 @@ impl WriteGroup {
             crate::group_commit_kernel::rwlock_client_may_mutate(true),
             "apply/publish holds the write guard (data-race token)"
         );
-        if crate::write_admission_kernel::wal_sync_required(true, need_sync, false) {
-            g.note_wal_sync();
+        // RFC-0219 P2.2 drain: Count ⇔ wal_sync_required(true, need_sync,
+        // false) — the same fate the P0.1 commit path matches.
+        match crate::changelog_kernel::changelog_durable_commit_fate(true, need_sync, false) {
+            crate::changelog_kernel::ChangelogCommitFate::Count => {
+                g.note_wal_sync();
+            }
+            crate::changelog_kernel::ChangelogCommitFate::Skip => {}
         }
         // RFC-0166 P1.4: publish passed — advance the pinned ledger through
         // the proved kernels and check Inv-WAL fail-closed. Async groups
@@ -1470,10 +1491,14 @@ impl WriteGroup {
         if pinned {
             let mut ledger = group.write_ack.lock().unwrap_or_else(|e| e.into_inner());
             ledger.on_append(ledger_bytes);
-            if crate::write_admission_kernel::wal_sync_required(true, need_sync, false)
-                && io_err.is_none()
-            {
-                ledger.on_barrier();
+            // RFC-0219 P2.2 drain: the barrier follows the kernel fate;
+            // the io_err guard is the Env outcome (not provable, not a
+            // data-fate decision).
+            match crate::changelog_kernel::changelog_durable_commit_fate(true, need_sync, false) {
+                crate::changelog_kernel::ChangelogCommitFate::Count if io_err.is_none() => {
+                    ledger.on_barrier();
+                }
+                _ => {}
             }
             ledger.on_ack();
             ledger.assert_inv();
@@ -2116,13 +2141,14 @@ impl<E: Env> ConcurrentDb<E> {
                     crate::group_commit_kernel::rwlock_client_may_read(true, false),
                     "try_read holds the read guard"
                 );
-                if crate::flush_kernel::occ_snap_lock_order(
+                // RFC-0219 P2.2 drain: the paired lock-order kernel
+                // decides which watermark the OCC snapshot reads.
+                match crate::flush_kernel::occ_snap_lock_order(
                     true,
                     !crate::write_admission_kernel::batch_is_empty(g.commit_inflight() as u64),
                 ) {
-                    self.published_seq.load(Ordering::Acquire)
-                } else {
-                    g.last_sequence()
+                    true => self.published_seq.load(Ordering::Acquire),
+                    false => g.last_sequence(),
                 }
             }
             None => {
@@ -2220,10 +2246,13 @@ impl<E: Env> ConcurrentDb<E> {
         ) {
             return false;
         }
-        if crate::flush_kernel::occ_snap_uses_published(
+        // RFC-0219 P2.2 drain: the paired kernel decides — a commit in the
+        // off-lock window means the writer is not idle.
+        match crate::flush_kernel::occ_snap_uses_published(
             !crate::write_admission_kernel::batch_is_empty(self.commit_inflight() as u64),
         ) {
-            return false;
+            true => return false,
+            false => {}
         }
         let last = self.writes.last_complete_ns.load(Ordering::Relaxed);
         let last = if last == 0 {
@@ -2688,8 +2717,13 @@ impl<E: Env> ConcurrentDb<E> {
     /// Drain timeout (a commit is still in flight) or reopen I/O — then
     /// the Db is unusable; drop this handle.
     pub fn recover_from_fence(&self) -> Result<Option<crate::db::FenceRecovery>> {
-        if !self.inner.read().is_durability_fenced() {
-            return Ok(None);
+        // RFC-0219 P2.2 drain: same paired plan as db.rs ensure_not_fenced
+        // — no fence recorded means there is nothing to recover.
+        match crate::write_admission_kernel::fence_admission_plan(
+            self.inner.read().is_durability_fenced(),
+        ) {
+            crate::write_admission_kernel::FenceAdmission::AdmitOps => return Ok(None),
+            crate::write_admission_kernel::FenceAdmission::RefuseFenced => {}
         }
         // Post-fence commits fail fast at ensure_not_fenced; bounded drain
         // so the reopen never races a mid-write WAL handle.
@@ -3386,8 +3420,12 @@ impl<E: Env> ConcurrentDb<E> {
             // this publish. Their debt stays for the next drain tick. Same
             // kernel gate as `persist_manifest` / `persist_bulk_manifest`
             // (db.rs) and `install_prepared_one` (below).
-            if !crate::flush_kernel::may_publish_manifest(g.unsynced_sst_count() == 0) {
-                return Ok(());
+            // RFC-0219 P2.2 drain: the paired publish plan (pull 14).
+            match crate::flush_kernel::manifest_publish_plan(g.unsynced_sst_count() == 0) {
+                crate::flush_kernel::ManifestPublishPlan::PublishManifest => {}
+                crate::flush_kernel::ManifestPublishPlan::HoldUnsyncedFailClosed => {
+                    return Ok(());
+                }
             }
             match g.take_manifest_persist() {
                 Ok(p) => p,
@@ -3469,11 +3507,15 @@ impl<E: Env> ConcurrentDb<E> {
             let old_paths = undo.old_paths().to_vec();
             // RFC-0151 P1.3: publish gate, measured — fsync must succeed and
             // leave no unsynced debt, else the compact install is undone.
+            // RFC-0219 P2.2 drain: the paired publish plan (pull 14).
             let sst_durable = g.fsync_unsynced_ssts().is_ok()
                 && crate::write_admission_kernel::batch_is_empty(g.unsynced_sst_count() as u64);
-            if !crate::flush_kernel::may_publish_manifest(sst_durable) {
-                g.undo_prepared_l0_compact(undo);
-                return false;
+            match crate::flush_kernel::manifest_publish_plan(sst_durable) {
+                crate::flush_kernel::ManifestPublishPlan::PublishManifest => {}
+                crate::flush_kernel::ManifestPublishPlan::HoldUnsyncedFailClosed => {
+                    g.undo_prepared_l0_compact(undo);
+                    return false;
+                }
             }
             match g.take_manifest_persist() {
                 Ok(persist) => Some((undo, persist, old_paths)),
