@@ -6795,6 +6795,36 @@
    }
   },
   {
+   "id": "manifest_publish_plan",
+   "finding": "RFC-0219 P1.4",
+   "twin_kind": "atom",
+   "atom": "manifest_publish_plan",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P1.4: publicar MANIFEST/CURRENT é decisão do kernel — publica EXATAMENTE quando todo SST listado está durable (may_publish_manifest segue vivo e provado no corpo), provado ∀ sobre sst_durable como manifest_publish_plan_fate_iff em Flush.lean; o AS-IS publica com SST unsynced (CURRENT nomeia arquivo tornado pós-crash — dente); o trampolim db.rs persist_manifest faz match no plano"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/flush_kernel.rs",
+   "twin": "crates/pedradb-core/src/flush_kernel.rs",
+   "aeneas": "scripts/aeneas_flush.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "manifest_publish_plan",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "persist_manifest"
+    }
+   ],
+   "as_is": "manifest_publish_plan_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/flush_kernel.rs",
+    "test": "manifest_publish_plan_on_live_unsynced_sst_holds"
+   }
+  },
+  {
    "id": "flush_plan",
    "finding": "F2/F43",
    "twin_kind": "close",

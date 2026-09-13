@@ -293,3 +293,22 @@ do prefixo recuperado.
 - **Par nasce átomo**: `catalog:pit_resync_rewrite_plan`. floor_atom
   278→279, residuals atom 279, single_artifact 298.
 - **Contador**: 53 → **52** (db.rs 31→30).
+
+## P1.4-b — `manifest_publish_plan` (flush_kernel)
+
+Sítio: `persist_manifest` — o portão `if !
+may_publish_manifest(sst_durable)` decidia inline segurar o publish
+fail-closed.
+
+- **Kernel**: `flush_kernel::manifest_publish_plan(sst_durable)` →
+  `ManifestPublishPlan{PublishManifest, HoldUnsyncedFailClosed}` (chama
+  `may_publish_manifest`, que segue vivo e provado no corpo).
+- **AS-IS dente**: `manifest_publish_plan_as_is` — publica com SST
+  unsynced; o CURRENT nomeia um arquivo tornado pós-crash.
+- **Teorema**: `manifest_publish_plan_fate_iff` (∀ sobre o bool) em
+  `Flush.lean`.
+- **Extrato**: `aeneas_flush.sh --required` verde.
+- **Planta DST**: `manifest_publish_plan_on_live_unsynced_sst_holds`.
+- **Par nasce átomo**: `catalog:manifest_publish_plan`. floor_atom
+  279→280, residuals atom 280, single_artifact 299.
+- **Contador**: 52 → **51** (db.rs 30→29).

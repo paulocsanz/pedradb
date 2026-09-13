@@ -155,6 +155,36 @@ pub fn may_publish_manifest_as_is(_sst_durable: bool) -> bool {
     true
 }
 
+#[cfg(not(verus_keep_ghost))]
+/// Fate of the MANIFEST/CURRENT publish after the SST sync pass.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ManifestPublishPlan {
+    /// Every listed SST is durable — write MANIFEST + CURRENT.
+    PublishManifest,
+    /// Some SST is not durable — fail closed, hold the publish.
+    HoldUnsyncedFailClosed,
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// Publish EXACTLY when every listed SST is durable
+/// (may_publish_manifest stays live and proved in the body).
+#[must_use]
+pub fn manifest_publish_plan(sst_durable: bool) -> ManifestPublishPlan {
+    if may_publish_manifest(sst_durable) {
+        ManifestPublishPlan::PublishManifest
+    } else {
+        ManifestPublishPlan::HoldUnsyncedFailClosed
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: publishes while an SST is still unsynced (CURRENT names a
+/// torn file after crash — dente).
+#[must_use]
+pub fn manifest_publish_plan_as_is(_sst_durable: bool) -> ManifestPublishPlan {
+    ManifestPublishPlan::PublishManifest
+}
+
 /// Every way acked keys can still depend on the WAL.
 #[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -827,6 +857,34 @@ mod tests {
             "AS-IS dente: MANIFEST names unsynced SST"
         );
         assert!(may_publish_manifest(true));
+    }
+
+    #[test]
+    fn manifest_publish_plan_on_live_unsynced_sst_holds() {
+        // RFC-0219 P1.4: unsynced SST holds the MANIFEST publish
+        // fail-closed; AS-IS publishes (CURRENT names a torn file).
+        assert_eq!(
+            manifest_publish_plan(true),
+            ManifestPublishPlan::PublishManifest
+        );
+        assert_eq!(
+            manifest_publish_plan(false),
+            ManifestPublishPlan::HoldUnsyncedFailClosed
+        );
+        assert_eq!(
+            manifest_publish_plan_as_is(false),
+            ManifestPublishPlan::PublishManifest,
+            "AS-IS dente: publishes with unsynced SST"
+        );
+        let pm = named_fn_src(include_str!("db.rs"), "persist_manifest").expect("persist_manifest");
+        assert!(
+            pm.contains("match crate::flush_kernel::manifest_publish_plan("),
+            "persist_manifest must match manifest_publish_plan"
+        );
+        assert!(
+            !pm.contains("may_publish_manifest("),
+            "the raw publish gate left the trampoline"
+        );
     }
 
     #[test]

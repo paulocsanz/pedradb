@@ -11283,12 +11283,15 @@ impl<E: Env> Db<E> {
         let fsync_result = self.fsync_unsynced_ssts();
         let sst_durable = fsync_result.is_ok()
             && crate::write_admission_kernel::batch_is_empty(self.unsynced_ssts.len() as u64);
-        if !crate::flush_kernel::may_publish_manifest(sst_durable) {
-            // Kernel is the write gate: AS-IS always-true would fall through
-            // and publish CURRENT naming an unsynced/torn SST.
-            return fsync_result.and(Err(CoreError::Internal(
-                "MANIFEST publish without durable SST".into(),
-            )));
+        match crate::flush_kernel::manifest_publish_plan(sst_durable) {
+            crate::flush_kernel::ManifestPublishPlan::HoldUnsyncedFailClosed => {
+                // Kernel is the write gate: AS-IS always-true would fall through
+                // and publish CURRENT naming an unsynced/torn SST.
+                return fsync_result.and(Err(CoreError::Internal(
+                    "MANIFEST publish without durable SST".into(),
+                )));
+            }
+            crate::flush_kernel::ManifestPublishPlan::PublishManifest => {}
         }
         match self.take_manifest_persist()?.write() {
             Ok(()) => {

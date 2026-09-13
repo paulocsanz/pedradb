@@ -420,3 +420,19 @@ theorem mem_auto_flush_plan_fate_iff :
             exact Or.inl ⟨by simpa using hnot, rfl⟩
         | false => exact Or.inr ⟨rfl, rfl⟩
       · simp [hplan]
+
+/-- RFC-0219 P1.4 (átomo `catalog:manifest_publish_plan`): o MANIFEST e o
+    CURRENT só publicam EXATAMENTE quando todo SST listado está durable;
+    algum SST sem sync segura o publish fail-closed. O AS-IS publica com
+    SST unsynced (o CURRENT nomeia um arquivo tornado pós-crash — dente
+    plantado). -/
+theorem manifest_publish_plan_fate_iff :
+    ∀ (sst_durable : Bool) (plan : ManifestPublishPlan),
+      (manifest_publish_plan sst_durable = ok plan) ↔
+        ((sst_durable = true ∧
+            plan = ManifestPublishPlan.PublishManifest) ∨
+          (sst_durable = false ∧
+            plan = ManifestPublishPlan.HoldUnsyncedFailClosed)) := by
+  intro sst_durable plan
+  unfold manifest_publish_plan may_publish_manifest
+  cases sst_durable <;> simp_all <;> exact eq_comm

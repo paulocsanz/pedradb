@@ -306,3 +306,4 @@ atom	catalog:parked_pair	parked_pair_plan_fate_iff	formal/aeneas/lean/Flush.lean
 atom	catalog:auto_flush_gate	auto_flush_gate_fate_iff	formal/aeneas/lean/Flush.lean	auto_flush_gate
 atom	catalog:mem_auto_flush	mem_auto_flush_plan_fate_iff	formal/aeneas/lean/Flush.lean	mem_auto_flush_plan
 atom	catalog:pit_resync_rewrite_plan	pit_resync_rewrite_plan_fate_iff	formal/aeneas/lean/WriteAdmission.lean	pit_resync_rewrite_plan
+atom	catalog:manifest_publish_plan	manifest_publish_plan_fate_iff	formal/aeneas/lean/Flush.lean	manifest_publish_plan
