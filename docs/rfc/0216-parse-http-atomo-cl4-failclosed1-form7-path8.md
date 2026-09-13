@@ -99,10 +99,8 @@ no wrapper, planta DST verde ANTES do commit, gate GREEN no commit).
    `split_host_port`, `strip_uri_fragment`,
    `strip_authority_for_routing` — autoridade e rota em teorema;
    família http 27/27 em átomo — floor_atom 170→178, floor_extract
-   108→100 — status: `todo` (7/8: `strip_authority_for_routing`,
-   `strip_uri_fragment`, `path_after_authority`,
-   `strip_http_authority`, `host_authority_mismatch`,
-   `origin_form_path`, `split_host_port` feitos 2026-09-13)
+   108→100 — status: `done` (2026-09-13; 8/8: os 7 anteriores +
+   `request_target_authority`; floor_atom 178, floor_extract 100)
 
 6. **P2.2** sweep final em worktree DENTRO de `software/` (gates 3×
    GREEN + campaign ok + extracts ok + sorry 0, capturas
@@ -142,7 +140,7 @@ no wrapper, planta DST verde ANTES do commit, gate GREEN no commit).
 | P0.2 | p0 | fail_closed ×1 átomo (veredito de erro) | done | `parse_error_writes_status_fate_iff` | 2026-09-13 |
 | P1.1 | p1 | form ×4 átomo (decode/hex) | done | `form_plus_byte_fate_iff`/`plus_before_percent_fate_iff`/`from_hex_fate_iff`/`form_decode_fate_iff` | 2026-09-13 |
 | P1.2 | p1 | form ×3 átomo (conflitos de query) | done | `query_u64_conflict_fate_iff`/`query_part_is_bare_name_fate_iff`/`query_values_conflict_fate_iff` | 2026-09-13 |
-| P2.1 | p2 | path ×8 átomo (autoridade/rota; http 27/27) | todo | — | 2026-09-12 |
+| P2.1 | p2 | path ×8 átomo (autoridade/rota; http 27/27) | done | `strip_authority_for_routing_fate_iff`/`strip_uri_fragment_fate_iff`/`path_after_authority_fate_iff`/`strip_http_authority_fate_iff`/`host_authority_mismatch_fate_iff`/`origin_form_path_fate_iff`/`split_host_port_fate_iff`/`request_target_authority_fate_iff` | 2026-09-13 |
 | P2.2 | p2 | Sweep final + nota EXTRACT.md + flip done | todo | — | 2026-09-12 |
 
 ## Critérios de aceite

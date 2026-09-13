@@ -245,3 +245,26 @@ verde antes do commit, exatamente 1 teorema público por commit).
   `authority_atoms_discriminate_as_is` (pedradb-http, exit 0,
   1 passed). Gate GREEN: floor_atom 176→177, floor_extract
   102→101.
+
+## P2.1 — path ×8 átomo (8/8, fechada)
+
+- **request_target_authority (8/8)**: a autoridade da request-target
+  como iff de destino (fate) — strip do fragmento, o `rest` da
+  autoridade HTTP (ramo `some`), ou o fallback `//` quando não há
+  scheme; em ambos o corte é no primeiro `/`/`?` (`find` com padrão
+  array de 2 chars, `unwrap_or` do `len`), e autoridade vazia rejeita
+  (`is_empty` → none). O `?` do `strip_prefix("//")` desagua no par
+  `branch`/`from_residual` do Charon — axiomas opacos no extrato, o
+  teorema cita os dois construtores do `ControlFlow` explicitamente
+  (Continue carrega a cauda semântica, Break fecha com o
+  `from_residual`). 5 folhas no reverso (2 some × 2 Continue × 1
+  Break). Achados da prova: (1) `lift (unwrap_or o i)` fecha
+  literal como conjunto (`lift x = ok x` por definição no
+  Primitives.lean) — sem desdobrar; (2) o `refine`/`rintro` precisa
+  de `left`/`right` ANTES da construção anônima nas duas disjunções
+  (a âncora `⟨target1, ht1, ?_⟩` antes da disjunção externa, senão o
+  rcases tenta case na Eq `ht1`); (3) `rw [hcf]; dsimp only` reduz o
+  match do `ControlFlow` no reverso. Planta DST
+  `host_authority_mismatch_on_live_http_is_not_ok` (pedradb-http,
+  exit 0, 1 passed). Gate GREEN: floor_atom 177→178, floor_extract
+  101→100. Família http 27/27 em átomo; P2.1 fechada.

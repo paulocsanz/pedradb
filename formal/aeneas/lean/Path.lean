@@ -579,3 +579,156 @@ theorem split_host_port_fate_iff :
       rw [hro]; simp only [Aeneas.Std.bind_tc_ok]
       rw [hbr]; simp only [Aeneas.Std.bind_tc_ok]
       exact hcol
+
+/-- RFC-0216 P2.1 8/8 (átomo `catalog:request_target_authority`): a
+  autoridade da request-target é exatamente a cadeia citada — strip do
+  fragmento, o rest da autoridade HTTP (ou o fallback `//` quando não há
+  scheme), e o corte no primeiro `/`/`?` (ou o fim); autoridade vazia
+  rejeita (none). O `?` do strip_prefix fica citado pelo par opaco
+  (branch/from_residual) do extrato Charon. -/
+theorem request_target_authority_fate_iff :
+    ∀ (t : Str) (r : Option Str),
+      (request_target_authority t = ok r) ↔
+        (∃ (target1 : Str),
+            strip_uri_fragment t = ok target1 ∧
+              ((∃ (rest : Str) (o : Option Usize) (i : Usize) (end1 : Usize) (auth : Str),
+                    strip_http_authority_rest target1 = ok (some rest) ∧
+                      core.str.Str.find rest (Array.make 2#usize [ '/', '?' ]) = ok o ∧
+                        core.str.Str.len rest = ok i ∧
+                          lift (core.option.Option.unwrap_or o i) = ok end1 ∧
+                            Str.Insts.CoreOpsIndexIndex.index
+                                core.ops.range.RangeToUsize.Insts.CoreSliceIndexSliceIndexStrStr
+                                rest { «end» := end1 } = ok auth ∧
+                              ((core.str.Str.is_empty auth = ok true ∧ r = none) ∨
+                                (core.str.Str.is_empty auth = ok false ∧ r = some auth))) ∨
+                (strip_http_authority_rest target1 = ok none ∧
+                  ∃ (o : Option Str)
+                      (cf : core.ops.control_flow.ControlFlow
+                          (Option core.convert.Infallible) Str),
+                    core.str.Str.strip_prefix target1
+                        (toStr "//" request_target_authority._proof_1) =
+                      ok o ∧
+                      core.option.Option.Insts.CoreOpsTry_traitTry.branch o = ok cf ∧
+                        ((∃ (val : Str) (o2 : Option Usize) (i : Usize) (end1 : Usize) (auth : Str),
+                              cf = core.ops.control_flow.ControlFlow.Continue val ∧
+                                core.str.Str.find val (Array.make 2#usize [ '/', '?' ]) =
+                                  ok o2 ∧
+                                  core.str.Str.len val = ok i ∧
+                                    lift (core.option.Option.unwrap_or o2 i) = ok end1 ∧
+                                      Str.Insts.CoreOpsIndexIndex.index
+                                          core.ops.range.RangeToUsize.Insts.CoreSliceIndexSliceIndexStrStr
+                                          val { «end» := end1 } = ok auth ∧
+                                        ((core.str.Str.is_empty auth = ok true ∧ r = none) ∨
+                                          (core.str.Str.is_empty auth = ok false ∧
+                                            r = some auth))) ∨
+                          (∃ (res : Option core.convert.Infallible),
+                              cf = core.ops.control_flow.ControlFlow.Break res ∧
+                                core.option.Option.Insts.CoreOpsTry_traitFromResidualOptionInfallible.from_residual
+                                  Str res = ok r))))) := by
+  intro t r
+  constructor
+  · intro hval
+    unfold request_target_authority at hval
+    obtain ⟨target1, ht1, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨o, ho, hval⟩ := bind_ok_inv _ _ _ hval
+    cases o with
+    | some rest =>
+      dsimp only at hval
+      obtain ⟨o1, hf, hval⟩ := bind_ok_inv _ _ _ hval
+      obtain ⟨i, hl, hval⟩ := bind_ok_inv _ _ _ hval
+      obtain ⟨end1, he, hval⟩ := bind_ok_inv _ _ _ hval
+      obtain ⟨auth, ha, hval⟩ := bind_ok_inv _ _ _ hval
+      obtain ⟨b, hb, hval⟩ := bind_ok_inv _ _ _ hval
+      refine ⟨target1, ht1, ?_⟩
+      left
+      refine ⟨rest, o1, i, end1, auth, ho, hf, hl, he, ha, ?_⟩
+      split at hval
+      · next hbt =>
+        rw [hbt] at hb
+        left; exact ⟨hb, (Result.ok.inj hval).symm⟩
+      · next hbf =>
+        have hbf' : b = false := by simp at hbf; exact hbf
+        rw [hbf'] at hb
+        right; exact ⟨hb, (Result.ok.inj hval).symm⟩
+    | none =>
+      dsimp only at hval
+      obtain ⟨o1, hsp, hval⟩ := bind_ok_inv _ _ _ hval
+      obtain ⟨cf, hbr, hval⟩ := bind_ok_inv _ _ _ hval
+      refine ⟨target1, ht1, ?_⟩
+      right
+      refine ⟨ho, o1, cf, hsp, hbr, ?_⟩
+      cases cf with
+      | Continue val =>
+        dsimp only at hval
+        obtain ⟨o2, hf, hval⟩ := bind_ok_inv _ _ _ hval
+        obtain ⟨i, hl, hval⟩ := bind_ok_inv _ _ _ hval
+        obtain ⟨end1, he, hval⟩ := bind_ok_inv _ _ _ hval
+        obtain ⟨auth, ha, hval⟩ := bind_ok_inv _ _ _ hval
+        obtain ⟨b, hb, hval⟩ := bind_ok_inv _ _ _ hval
+        left
+        refine ⟨val, o2, i, end1, auth, rfl, hf, hl, he, ha, ?_⟩
+        split at hval
+        · next hbt =>
+          rw [hbt] at hb
+          left; exact ⟨hb, (Result.ok.inj hval).symm⟩
+        · next hbf =>
+          have hbf' : b = false := by simp at hbf; exact hbf
+          rw [hbf'] at hb
+          right; exact ⟨hb, (Result.ok.inj hval).symm⟩
+      | Break res =>
+        dsimp only at hval
+        right; exact ⟨res, rfl, hval⟩
+  · rintro ⟨target1, ht1,
+      (⟨rest, o, i, end1, auth, ho, hf, hl, he, ha, (⟨hbt, rfl⟩ | ⟨hbf, rfl⟩)⟩ |
+        ⟨ho, o, cf, hsp, hbr,
+          (⟨val, o2, i, end1, auth, hcf, hf, hl, he, ha, (⟨hbt, rfl⟩ | ⟨hbf, rfl⟩)⟩ |
+            ⟨res, hcf, hres⟩)⟩)⟩
+    · unfold request_target_authority
+      rw [ht1]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [ho]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hf]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hl]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [he]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [ha]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hbt]; simp only [Aeneas.Std.bind_tc_ok]
+      simp
+    · unfold request_target_authority
+      rw [ht1]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [ho]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hf]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hl]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [he]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [ha]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hbf]; simp only [Aeneas.Std.bind_tc_ok]
+      simp
+    · unfold request_target_authority
+      rw [ht1]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [ho]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hsp]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hbr]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hcf]; dsimp only
+      rw [hf]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hl]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [he]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [ha]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hbt]; simp only [Aeneas.Std.bind_tc_ok]
+      simp
+    · unfold request_target_authority
+      rw [ht1]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [ho]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hsp]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hbr]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hcf]; dsimp only
+      rw [hf]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hl]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [he]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [ha]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hbf]; simp only [Aeneas.Std.bind_tc_ok]
+      simp
+    · unfold request_target_authority
+      rw [ht1]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [ho]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hsp]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hbr]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hcf]
+      exact hres
