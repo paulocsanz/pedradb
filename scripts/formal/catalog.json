@@ -5608,6 +5608,10 @@
   },
   {
    "id": "l28_napply_retry",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "retries do harness nao sao for-all de tracos TCP — admissao e a constante citada false; as-is arredonda um napply com sucesso apos >= 1 tentativa para for-all TCP"
+   },
    "finding": "RFC-0155",
    "twin_kind": "close",
    "single_artifact": true,

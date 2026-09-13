@@ -756,3 +756,22 @@ theorem l28_durability_ok_fate_iff :
     · rfl
     · rfl
     · rfl
+
+/-- RFC-0218 P2.2 (átomo `catalog:l28_napply_retry`, entrada
+    `l28_tcp_napply_retry_admitted`): retries do harness NÃO são ∀
+    traços TCP — admissão é a constante citada false. O AS-IS arredonda
+    um napply com sucesso após >= 1 tentativa para ∀ TCP (dente
+    plantado). -/
+theorem l28_tcp_napply_retry_admitted_fate_iff :
+    ∀ (attempts : U64) (napply_ok : Bool) (v : Bool),
+      (l28_tcp_napply_retry_admitted attempts napply_ok = ok v) ↔
+        (v = false) := by
+  intro attempts napply_ok v
+  constructor
+  · intro hval
+    unfold l28_tcp_napply_retry_admitted at hval
+    injection hval with hv
+    exact hv.symm
+  · rintro rfl
+    unfold l28_tcp_napply_retry_admitted
+    rfl
