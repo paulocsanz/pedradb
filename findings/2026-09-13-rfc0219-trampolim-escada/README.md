@@ -219,3 +219,20 @@ força a barreira do grupo.
 - **Par nasce átomo**: `catalog:group_batch_sync`. floor_atom 274→275,
   residuals atom 275, single_artifact 294.
 - **Contador**: 57 → **56** (db.rs 35→34). P1.2 fechado: 3 pares.
+
+## P1.3-a — `parked_pair` (flush_kernel)
+
+Sítio: `parked_oldest_pair_arcs` — o portão `if parked_unflushed.len() <
+2` decidia inline entregar o par para fold.
+
+- **Kernel**: `flush_kernel::parked_pair_plan(parked_len)` →
+  `ParkedPairPlan{WaitForPair, HandOutOldestPair}` (u64 `< 2`).
+- **AS-IS dente**: `parked_pair_plan_as_is` — entrega sempre; fila curta
+  perde/mutila a tabela única estacionada.
+- **Teorema**: `parked_pair_plan_fate_iff` (∀ sobre o u64) em
+  `Flush.lean`.
+- **Extrato**: `aeneas_flush.sh --required` verde.
+- **Planta DST**: `parked_pair_plan_on_live_short_queue_waits`.
+- **Par nasce átomo**: `catalog:parked_pair`. floor_atom 275→276,
+  residuals atom 276, single_artifact 295.
+- **Contador**: 56 → **55** (db.rs 34→33).

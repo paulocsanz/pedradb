@@ -520,4 +520,126 @@ def skip_auto_flush_as_is
   (_global_under : Bool) (_cf_under : Bool) : Result Bool := do
   ok false
 
+/-- [pedra_aeneas_flush_kernel::ParkedPairPlan]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 280:0-285:1
+    Visibility: public -/
+@[discriminant isize]
+inductive ParkedPairPlan where
+| WaitForPair : ParkedPairPlan
+| HandOutOldestPair : ParkedPairPlan
+
+/-- [pedra_aeneas_flush_kernel::{impl core::fmt::Debug for pedra_aeneas_flush_kernel::ParkedPairPlan}::fmt]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 279:9-279:14
+    Visibility: public -/
+def ParkedPairPlan.Insts.CoreFmtDebug.fmt
+  (self : ParkedPairPlan) (f : core.fmt.Formatter) :
+  Result ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter)
+  := do
+  match self with
+  | ParkedPairPlan.WaitForPair =>
+    core.fmt.Formatter.write_str f (toStr "WaitForPair")
+  | ParkedPairPlan.HandOutOldestPair =>
+    core.fmt.Formatter.write_str f (toStr "HandOutOldestPair")
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::fmt::Debug for pedra_aeneas_flush_kernel::ParkedPairPlan}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 279:9-279:14 -/
+@[reducible]
+def ParkedPairPlan.Insts.CoreFmtDebug : core.fmt.Debug ParkedPairPlan := {
+  fmt := ParkedPairPlan.Insts.CoreFmtDebug.fmt
+}
+
+/-- [pedra_aeneas_flush_kernel::{impl core::clone::Clone for pedra_aeneas_flush_kernel::ParkedPairPlan}::clone]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 279:16-279:21
+    Visibility: public -/
+def ParkedPairPlan.Insts.CoreCloneClone.clone
+  (self : ParkedPairPlan) : Result ParkedPairPlan := do
+  ok self
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::clone::Clone for pedra_aeneas_flush_kernel::ParkedPairPlan}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 279:16-279:21 -/
+@[reducible]
+def ParkedPairPlan.Insts.CoreCloneClone : core.clone.Clone ParkedPairPlan := {
+  clone := ParkedPairPlan.Insts.CoreCloneClone.clone
+}
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::marker::Copy for pedra_aeneas_flush_kernel::ParkedPairPlan}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 279:23-279:27 -/
+@[reducible]
+def ParkedPairPlan.Insts.CoreMarkerCopy : core.marker.Copy ParkedPairPlan := {
+  cloneInst := ParkedPairPlan.Insts.CoreCloneClone
+}
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_flush_kernel::ParkedPairPlan}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 279:29-279:38 -/
+@[reducible]
+def ParkedPairPlan.Insts.CoreMarkerStructuralPartialEq :
+  core.marker.StructuralPartialEq ParkedPairPlan := {
+}
+
+/-- [pedra_aeneas_flush_kernel::{impl core::cmp::PartialEq<pedra_aeneas_flush_kernel::ParkedPairPlan> for pedra_aeneas_flush_kernel::ParkedPairPlan}::eq]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 279:29-279:38
+    Visibility: public -/
+def ParkedPairPlan.Insts.CoreCmpPartialEqParkedPairPlan.eq
+  (self : ParkedPairPlan) (other : ParkedPairPlan) : Result Bool := do
+  let self1 := read_discriminant self
+  let other1 := read_discriminant other
+  ok (self1 = other1)
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::cmp::PartialEq<pedra_aeneas_flush_kernel::ParkedPairPlan> for pedra_aeneas_flush_kernel::ParkedPairPlan}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 279:29-279:38 -/
+@[reducible]
+def ParkedPairPlan.Insts.CoreCmpPartialEqParkedPairPlan : core.cmp.PartialEq
+  ParkedPairPlan ParkedPairPlan := {
+  eq := ParkedPairPlan.Insts.CoreCmpPartialEqParkedPairPlan.eq
+}
+
+/-- [pedra_aeneas_flush_kernel::{impl core::cmp::Eq for pedra_aeneas_flush_kernel::ParkedPairPlan}::assert_fields_are_eq]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 279:40-279:42
+    Visibility: public -/
+def ParkedPairPlan.Insts.CoreCmpEq.assert_fields_are_eq
+  (self : ParkedPairPlan) : Result Unit := do
+  ok ()
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::cmp::Eq for pedra_aeneas_flush_kernel::ParkedPairPlan}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 279:40-279:42 -/
+@[reducible]
+def ParkedPairPlan.Insts.CoreCmpEq : core.cmp.Eq ParkedPairPlan := {
+  partialEqInst := ParkedPairPlan.Insts.CoreCmpPartialEqParkedPairPlan
+  assert_fields_are_eq := ParkedPairPlan.Insts.CoreCmpEq.assert_fields_are_eq
+}
+
+/-- [pedra_aeneas_flush_kernel::{impl core::hash::Hash for pedra_aeneas_flush_kernel::ParkedPairPlan}::hash]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 279:44-279:48
+    Visibility: public -/
+def ParkedPairPlan.Insts.CoreHashHash.hash
+  {__H : Type} (corehashHasherInst : core.hash.Hasher __H)
+  (self : ParkedPairPlan) (state : __H) :
+  Result __H
+  := do
+  let self1 := read_discriminant self
+  Isize.Insts.CoreHashHash.hash corehashHasherInst self1 state
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::hash::Hash for pedra_aeneas_flush_kernel::ParkedPairPlan}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 279:44-279:48 -/
+@[reducible]
+def ParkedPairPlan.Insts.CoreHashHash : core.hash.Hash ParkedPairPlan := {
+  hash := fun {H : Type} (corehashHasherInst : core.hash.Hasher H) =>
+    ParkedPairPlan.Insts.CoreHashHash.hash corehashHasherInst
+}
+
+/-- [pedra_aeneas_flush_kernel::parked_pair_plan]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 289:0-295:1
+    Visibility: public -/
+def parked_pair_plan (parked_len : Std.U64) : Result ParkedPairPlan := do
+  if parked_len < 2#u64
+  then ok ParkedPairPlan.WaitForPair
+  else ok ParkedPairPlan.HandOutOldestPair
+
+/-- [pedra_aeneas_flush_kernel::parked_pair_plan_as_is]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 301:0-303:1
+    Visibility: public -/
+def parked_pair_plan_as_is
+  (_parked_len : Std.U64) : Result ParkedPairPlan := do
+  ok ParkedPairPlan.HandOutOldestPair
+
 end pedra_aeneas_flush_kernel

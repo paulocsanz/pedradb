@@ -6782,8 +6782,9 @@ impl<E: Env> Db<E> {
     /// the in-flight fold pair (validated at swap time — F174). Fold
     /// deep-clones off the Db lock, then [`Self::replace_oldest_parked_pair`].
     pub fn parked_oldest_pair_arcs(&mut self) -> Option<(Arc<MemTable>, Arc<MemTable>)> {
-        if self.parked_unflushed.len() < 2 {
-            return None;
+        match crate::flush_kernel::parked_pair_plan(self.parked_unflushed.len() as u64) {
+            crate::flush_kernel::ParkedPairPlan::WaitForPair => return None,
+            crate::flush_kernel::ParkedPairPlan::HandOutOldestPair => {}
         }
         let pair = (
             Arc::clone(&self.parked_unflushed[0]),

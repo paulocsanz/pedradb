@@ -329,3 +329,33 @@ theorem flush_plan_fate_iff :
           if_neg (by simp only [Bool.not_eq_true]; exact hm)]
       subst hv
       rfl
+
+/-- RFC-0219 P1.3 (átomo `catalog:parked_pair`): a fila parked-unflushed
+    entrega o par mais velho para fold EXATAMENTE quando tem dois ou
+    mais — fila curta espera (nada a foldar; F174 revalida no swap). O
+    AS-IS entrega sempre (fila curta perde/mutila a tabela única —
+    dente plantado). -/
+theorem parked_pair_plan_fate_iff :
+    ∀ (parked_len : U64) (plan : ParkedPairPlan),
+      (parked_pair_plan parked_len = ok plan) ↔
+        ((parked_len < 2#u64 ∧ plan = ParkedPairPlan.WaitForPair) ∨
+          (¬(parked_len < 2#u64) ∧ plan = ParkedPairPlan.HandOutOldestPair)) := by
+  intro parked_len plan
+  simp only [parked_pair_plan]
+  split <;> rename_i c
+  · constructor
+    · intro hval
+      injection hval with hv
+      exact Or.inl ⟨c, hv.symm⟩
+    · rintro (⟨-, hv⟩ | h2)
+      · subst hv
+        rfl
+      · exact absurd c h2.1
+  · constructor
+    · intro hval
+      injection hval with hv
+      exact Or.inr ⟨c, hv.symm⟩
+    · rintro (h1 | ⟨-, hv⟩)
+      · exact absurd h1.1 c
+      · subst hv
+        rfl

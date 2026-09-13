@@ -6675,6 +6675,36 @@
    }
   },
   {
+   "id": "parked_pair",
+   "finding": "RFC-0219 P1.3",
+   "twin_kind": "atom",
+   "atom": "parked_pair_plan",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P1.3: se a fila parked-unflushed entrega o par mais velho para fold é decisão do kernel — dois ou mais entrega (F174 revalida no swap), fila curta espera, provado ∀ sobre parked_len como parked_pair_plan_fate_iff em Flush.lean; o trampolim db.rs parked_oldest_pair_arcs faz match no plano"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/flush_kernel.rs",
+   "twin": "crates/pedradb-core/src/flush_kernel.rs",
+   "aeneas": "scripts/aeneas_flush.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "parked_pair_plan",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "parked_oldest_pair_arcs"
+    }
+   ],
+   "as_is": "parked_pair_plan_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/flush_kernel.rs",
+    "test": "parked_pair_plan_on_live_short_queue_waits"
+   }
+  },
+  {
    "id": "flush_plan",
    "finding": "F2/F43",
    "twin_kind": "close",

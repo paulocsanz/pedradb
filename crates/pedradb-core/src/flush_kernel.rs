@@ -271,6 +271,37 @@ pub fn skip_auto_flush_as_is(_global_under: bool, _cf_under: bool) -> bool {
     false
 }
 
+/// RFC-0219 P1.3: whether the parked-unflushed queue can hand out its
+/// two oldest tables as a fold pair (F174: the pair is validated again
+/// at swap time). The trampoline `db.rs parked_oldest_pair_arcs`
+/// matches this plan.
+#[cfg(not(verus_keep_ghost))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ParkedPairPlan {
+    /// Fewer than two parked tables — nothing to fold yet.
+    WaitForPair,
+    /// Two or more parked — hand out the two oldest as the fold pair.
+    HandOutOldestPair,
+}
+
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn parked_pair_plan(parked_len: u64) -> ParkedPairPlan {
+    if parked_len < 2 {
+        ParkedPairPlan::WaitForPair
+    } else {
+        ParkedPairPlan::HandOutOldestPair
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: hand out regardless — a queue shorter than the pair loses or
+/// mangles the single parked table (parked-pipeline data-loss dente).
+#[must_use]
+pub fn parked_pair_plan_as_is(_parked_len: u64) -> ParkedPairPlan {
+    ParkedPairPlan::HandOutOldestPair
+}
+
 #[cfg(verus_keep_ghost)]
 use vstd::prelude::*;
 
@@ -844,5 +875,51 @@ mod tests {
         assert!(!skip_auto_flush_as_is(true, true));
         assert!(!skip_auto_flush(true, false));
         assert!(!skip_auto_flush(false, true));
+    }
+
+    /// Balanced-brace slice of one `fn` from a source file (plant lens).
+    fn named_fn_src(src: &str, name: &str) -> Option<String> {
+        let needle = format!("fn {name}(");
+        let start = src.find(&needle)?;
+        let rest = &src[start..];
+        let bytes = rest.as_bytes();
+        let brace = bytes.iter().position(|&b| b == b'{')?;
+        let mut depth = 0i32;
+        for (i, &b) in bytes[brace..].iter().enumerate() {
+            if b == b'{' {
+                depth += 1;
+            } else if b == b'}' {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(rest[brace..=brace + i].to_string());
+                }
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn parked_pair_plan_on_live_short_queue_waits() {
+        // RFC-0219 P1.3: fewer than two parked tables wait; two or more
+        // hand out the oldest pair (F174 revalidates at swap). AS-IS
+        // hands out regardless (short queue loses a parked table).
+        assert_eq!(parked_pair_plan(0), ParkedPairPlan::WaitForPair);
+        assert_eq!(parked_pair_plan(1), ParkedPairPlan::WaitForPair);
+        assert_eq!(parked_pair_plan(2), ParkedPairPlan::HandOutOldestPair);
+        assert_eq!(
+            parked_pair_plan_as_is(1),
+            ParkedPairPlan::HandOutOldestPair,
+            "AS-IS dente: pair handed out of a short queue"
+        );
+        let popa = named_fn_src(include_str!("db.rs"), "parked_oldest_pair_arcs")
+            .expect("parked_oldest_pair_arcs");
+        assert!(
+            popa.contains("match crate::flush_kernel::parked_pair_plan("),
+            "parked_oldest_pair_arcs must match parked_pair_plan"
+        );
+        assert!(
+            !popa.contains("parked_unflushed.len() < 2"),
+            "the raw queue-length gate left the trampoline"
+        );
     }
 }
