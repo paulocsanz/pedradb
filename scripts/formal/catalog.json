@@ -2253,6 +2253,10 @@
    "dst_plant": {
     "file": "crates/pedradb-http/src/lib.rs",
     "test": "host_authority_mismatch_on_live_http_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "Host nunca diverge sem detecção: hosts diferentes true; iguais, negação da equivalência de portas"
    }
   },
   {

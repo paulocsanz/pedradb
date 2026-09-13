@@ -193,3 +193,21 @@ verde antes do commit, exatamente 1 teorema público por commit).
   `authority_atoms_discriminate_as_is` (pedradb-http, exit 0,
   1 passed). Gate GREEN: floor_atom 173→174, floor_extract
   105→104.
+
+## P2.1 — path ×8 átomo (5/8)
+
+- **host_authority_mismatch (5/8)**: o Host nunca diverge da
+  autoridade sem detecção — hosts diferentes (case-insensitive)
+  ⇒ true; hosts iguais ⇒ veredito é `decide ¬(b1 = true)` sobre a
+  equivalência de portas. Achados da prova: (1) os lets de par do
+  Charon são redexes `uncurry F (h1, p1)` — `simp only [uncurry]`
+  reduz onde `dsimp only`/`dsimp +zeta only`/`beta_reduce` todos
+  falham no-progress; (2) `Or.inX ⟨...⟩` em term-mode NÃO
+  elabora (β meta do Or bloqueia a notação anônima) — usar
+  táticas `left`/`right` e ⟨...⟩ só no topo do goal; (3)
+  `Result.ok.inj` sobre `ok (decide ...) = ok r` dá `DECIDE = r`
+  (direção contrária à intuível) — `.symm.trans rfl` fecha com o
+  decide computando. Planta DST
+  `host_authority_mismatch_on_live_http_is_not_ok` (pedradb-http,
+  exit 0, 1 passed). Gate GREEN: floor_atom 174→175, floor_extract
+  104→103.

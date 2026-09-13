@@ -152,3 +152,75 @@ theorem strip_http_authority_fate_iff :
       simp only [Aeneas.Std.bind_tc_ok]
       rw [hp]
       simp only [Aeneas.Std.bind_tc_ok]
+
+/-- RFC-0216 P2.1 5/8 (átomo `catalog:host_authority_mismatch`): o
+  Host nunca diverge do authority sem ser detectado — hosts
+  diferentes (case-insensitive) ⇒ true; hosts iguais ⇒ o veredito é
+  a negação da equivalência de portas. -/
+theorem host_authority_mismatch_fate_iff :
+    ∀ (host authority : Str) (r : Bool),
+      (host_authority_mismatch host authority = ok r) ↔
+        (∃ (h1 : Str) (p1 : Option Str) (h2 : Str) (p2 : Option Str),
+            split_host_port host = ok (h1, p1) ∧
+              split_host_port authority = ok (h2, p2) ∧
+                ((core.str.Str.eq_ignore_ascii_case h1 h2 = ok false ∧
+                    r = true) ∨
+                  (core.str.Str.eq_ignore_ascii_case h1 h2 = ok true ∧
+                    ((ports_equivalent p1 p2 = ok true ∧ r = false) ∨
+                      (ports_equivalent p1 p2 = ok false ∧ r = true))))) := by
+  intro host authority r
+  constructor
+  · intro hval
+    unfold host_authority_mismatch at hval
+    obtain ⟨⟨h1, p1⟩, hp1, hval⟩ := bind_ok_inv _ _ _ hval
+    simp only [uncurry] at hval
+    obtain ⟨⟨h2, p2⟩, hp2, hval⟩ := bind_ok_inv _ _ _ hval
+    simp only [uncurry] at hval
+    obtain ⟨b, hb, hval⟩ := bind_ok_inv _ _ _ hval
+    split at hval
+    · next hbt =>
+      rw [hbt] at hb
+      obtain ⟨b1, hb1, hval⟩ := bind_ok_inv _ _ _ hval
+      have hr := Result.ok.inj hval
+      cases b1 with
+      | true =>
+        refine ⟨h1, p1, h2, p2, hp1, hp2, ?_⟩
+        right
+        refine ⟨hb, ?_⟩
+        left
+        exact ⟨hb1, hr.symm.trans rfl⟩
+      | false =>
+        refine ⟨h1, p1, h2, p2, hp1, hp2, ?_⟩
+        right
+        refine ⟨hb, ?_⟩
+        right
+        exact ⟨hb1, hr.symm.trans rfl⟩
+    · next hbf =>
+      have hbf' : b = false := by simp at hbf; exact hbf
+      rw [hbf'] at hb
+      refine ⟨h1, p1, h2, p2, hp1, hp2, ?_⟩
+      left
+      exact ⟨hb, (Result.ok.inj hval).symm⟩
+  · rintro ⟨h1, p1, h2, p2, hp1, hp2,
+      (⟨hb, rfl⟩ | ⟨hb, (⟨hb1, rfl⟩ | ⟨hb1, rfl⟩)⟩)⟩
+    · unfold host_authority_mismatch
+      rw [hp1, hp2]
+      simp only [Aeneas.Std.bind_tc_ok]
+      simp only [uncurry]
+      rw [hb]
+      simp only [Aeneas.Std.bind_tc_ok]
+      simp
+    · unfold host_authority_mismatch
+      rw [hp1, hp2]
+      simp only [Aeneas.Std.bind_tc_ok]
+      simp only [uncurry]
+      rw [hb, hb1]
+      simp only [Aeneas.Std.bind_tc_ok]
+      simp
+    · unfold host_authority_mismatch
+      rw [hp1, hp2]
+      simp only [Aeneas.Std.bind_tc_ok]
+      simp only [uncurry]
+      rw [hb, hb1]
+      simp only [Aeneas.Std.bind_tc_ok]
+      simp
