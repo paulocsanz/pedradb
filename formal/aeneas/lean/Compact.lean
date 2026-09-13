@@ -85,3 +85,35 @@ theorem gc_oldest_from_pin_value_iff_pin_or_unpinned_visible_min :
   intro oldest_pin last_seq visible_seq v
   unfold gc_oldest_from_pin
   cases oldest_pin <;> simp
+
+private theorem bind_ok_inv {α β} (x : Result α) (f : α → Result β) (v : β)
+    (h : Aeneas.Std.bind x f = ok v) : ∃ a, x = ok a ∧ f a = ok v := by
+  cases x with
+  | ok a => exact ⟨a, rfl, h⟩
+  | fail e => exact absurd h (by simp)
+  | div => exact absurd h (by simp)
+
+/-- An ok chain reassembles into an ok bind. -/
+private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : β}
+    (a : α) (hx : x = ok a) (h : f a = ok v) : Aeneas.Std.bind x f = ok v := by
+  rw [hx]
+  exact h
+
+/-- RFC-0218 P1.1 5/10 (átomo `catalog:compact_split`, entrada
+    `compact_should_split`): dividir é EXATAMENTE comparar contra o
+    alvo citado COMPACT_TARGET_FILE_BYTES (bind citado: o gate
+    produz um índice e a comparação decide). O AS-IS nunca divide
+    (ok false — arquivo de saída sem borne; dente plantado). -/
+theorem compact_should_split_fate_iff :
+    ∀ (w : U64) (v : Bool),
+      (compact_should_split w = ok v) ↔
+      (∃ i, COMPACT_TARGET_FILE_BYTES = ok i ∧
+            compact_should_split_at w i = ok v) := by
+  intro w v
+  constructor
+  · intro hval
+    unfold compact_should_split at hval
+    exact bind_ok_inv _ _ _ hval
+  · rintro ⟨i, hT, hs⟩
+    unfold compact_should_split
+    exact bind_intro i hT hs

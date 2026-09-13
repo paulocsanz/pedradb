@@ -6108,6 +6108,10 @@
   },
   {
    "id": "compact_split",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.1: fate ∀ sobre compact_should_split no degrau átomo — bind citado: o gate COMPACT_TARGET_FILE_BYTES produz o alvo e a comparação decide; planta DST compact_should_split_bounds_one_output_file"
+   },
    "finding": "RFC-0160 OOM",
    "twin_kind": "close",
    "single_artifact": true,

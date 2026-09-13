@@ -228,6 +228,15 @@ gates GREEN no commit).
 
 ## P1.1 — compact ×7 + lsm_r1 ×3 átomo
 
+- **compact_split / compact_should_split (5/10)**: dividir como o
+  bind citado — o gate `COMPACT_TARGET_FILE_BYTES` produz o alvo `i` e
+  `compact_should_split_at w i` decide —
+  `compact_should_split_fate_iff` em `Compact.lean` (moldes
+  `bind_ok_inv`/`bind_intro` locais). Forward: unfold + bind_ok_inv;
+  reverso: bind_intro. Build verde. Planta DST
+  `compact_should_split_bounds_one_output_file` (pedradb-core, exit 0
+  no worktree). Gate: floor_atom 205→206, floor_extract 73→72.
+
 - **compact / compact_ready (4/10)**: pronto-para-compactar como o
   lift citado `decide (min_applied > 0)` — zero aplicado não compacta
   nada — `compact_ready_fate_iff` em `StoreCompact.lean`. Forward:

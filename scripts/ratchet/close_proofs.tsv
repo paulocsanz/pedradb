@@ -232,3 +232,4 @@ atom	catalog:compact	may_compact_through_fate_iff	formal/aeneas/lean/StoreCompac
 atom	catalog:compact_floor	compact_index_floor_fate_iff	formal/aeneas/lean/StoreCompact.lean	compact_index_floor
 atom	catalog:compact_peer_counts	peer_counts_for_compact_fate_iff	formal/aeneas/lean/StoreCompact.lean	peer_counts_for_compact
 atom	catalog:compact_ready	compact_ready_fate_iff	formal/aeneas/lean/StoreCompact.lean	compact_ready
+atom	catalog:compact_split	compact_should_split_fate_iff	formal/aeneas/lean/Compact.lean	compact_should_split
