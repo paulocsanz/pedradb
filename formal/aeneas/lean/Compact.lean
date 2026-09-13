@@ -134,3 +134,37 @@ theorem compact_should_split_at_fate_iff :
   · rintro hv
     subst hv
     rfl
+
+/-- RFC-0218 P1.1 7/10 (átomo `catalog:lone_tombstone`, entrada
+    `lone_tombstone_fate`): o túmulo solitário cai SÓ no nível mais
+    baixo — Drop exige bottommost E único-mais-novo; todo o resto
+    Keep. O AS-IS ignora bottommost (Drop fora do fundo — dente
+    plantado). -/
+theorem lone_tombstone_fate_iff :
+    ∀ (bottommost : Bool) (lone_newest : Bool) (r : VersionFate),
+      (lone_tombstone_fate bottommost lone_newest = ok r) ↔
+      ((bottommost = true ∧ lone_newest = true ∧ r = VersionFate.Drop) ∨
+       (bottommost = true ∧ lone_newest = false ∧ r = VersionFate.Keep) ∨
+       (bottommost = false ∧ r = VersionFate.Keep)) := by
+  intro bottommost lone_newest r
+  constructor
+  · intro hval
+    unfold lone_tombstone_fate at hval
+    split at hval
+    · next hb =>
+      split at hval
+      · next hl =>
+        injection hval with hv
+        exact Or.inl ⟨hb, hl, hv.symm⟩
+      · next hl =>
+        simp only [Bool.not_eq_true] at hl
+        injection hval with hv
+        exact Or.inr (Or.inl ⟨hb, hl, hv.symm⟩)
+    · next hb =>
+      simp only [Bool.not_eq_true] at hb
+      injection hval with hv
+      exact Or.inr (Or.inr ⟨hb, hv.symm⟩)
+  · rintro (⟨hb, hl, hv⟩ | ⟨hb, hl, hv⟩ | ⟨hb, hv⟩)
+    · subst hb; subst hl; subst hv; rfl
+    · subst hb; subst hl; subst hv; rfl
+    · subst hb; subst hv; rfl

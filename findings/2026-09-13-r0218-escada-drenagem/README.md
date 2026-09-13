@@ -228,6 +228,14 @@ gates GREEN no commit).
 
 ## P1.1 — compact ×7 + lsm_r1 ×3 átomo
 
+- **lone_tombstone / lone_tombstone_fate (7/10)**: o túmulo
+  solitário cai só no nível mais baixo — Drop exige `bottommost` E
+  `lone_newest`; todo o resto Keep (3 disjunctos flat) —
+  `lone_tombstone_fate_iff` em `Compact.lean`. Forward: duplo split +
+  injection + hv.symm; reverso: rintro + subst + rfl. Build verde.
+  Planta DST `theorem_lone_tombstone_on_finite_domain` (pedradb-core,
+  exit 0 no worktree). Gate: floor_atom 207→208, floor_extract 71→70.
+
 - **compact_split_at / compact_should_split_at (6/10)**:
   dividir-no-ponto como o lift citado `decide (written_bytes >=
   target)` — mutantes nunca dividem —

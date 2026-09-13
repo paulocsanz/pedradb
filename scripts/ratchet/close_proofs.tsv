@@ -234,3 +234,4 @@ atom	catalog:compact_peer_counts	peer_counts_for_compact_fate_iff	formal/aeneas/
 atom	catalog:compact_ready	compact_ready_fate_iff	formal/aeneas/lean/StoreCompact.lean	compact_ready
 atom	catalog:compact_split	compact_should_split_fate_iff	formal/aeneas/lean/Compact.lean	compact_should_split
 atom	catalog:compact_split_at	compact_should_split_at_fate_iff	formal/aeneas/lean/Compact.lean	compact_should_split_at
+atom	catalog:lone_tombstone	lone_tombstone_fate_iff	formal/aeneas/lean/Compact.lean	lone_tombstone_fate

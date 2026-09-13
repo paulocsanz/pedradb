@@ -6154,6 +6154,10 @@
   },
   {
    "id": "lone_tombstone",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.1: fate ∀ sobre lone_tombstone_fate no degrau átomo — Drop exige bottommost e único-mais-novo; resto Keep; planta DST theorem_lone_tombstone_on_finite_domain"
+   },
    "finding": "F177",
    "twin_kind": "close",
    "single_artifact": true,
