@@ -29,3 +29,27 @@ theorem host_authority_mismatch_as_is_dente (h a) :
     host_authority_mismatch_as_is h a = ok false := by
   unfold host_authority_mismatch_as_is
   rfl
+
+/-! ### RFC-0216 P2.1 — path ×8 átomo -/
+
+private theorem bind_ok_inv {α β} (x : Result α) (f : α → Result β) (v : β)
+    (h : Aeneas.Std.bind x f = ok v) : ∃ a, x = ok a ∧ f a = ok v := by
+  cases x with
+  | ok a => exact ⟨a, rfl, h⟩
+  | fail e => exact absurd h (by simp)
+  | div => exact absurd h (by simp)
+
+/-- RFC-0216 P2.1 1/8 (átomo `catalog:strip_authority_for_routing`):
+  o roteador da forma-authority repassa exatamente a bandeira de
+  forma-authority; o AS-IS nunca strips (dente já provado acima). -/
+theorem strip_authority_for_routing_fate_iff :
+    ∀ (b : Bool) (r : Bool),
+      (strip_authority_for_routing b = ok r) ↔ r = b := by
+  intro b r
+  constructor
+  · intro hval
+    unfold strip_authority_for_routing at hval
+    exact (Result.ok.inj hval).symm
+  · intro hr
+    unfold strip_authority_for_routing
+    rw [hr]

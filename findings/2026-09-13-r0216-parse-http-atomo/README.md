@@ -147,3 +147,13 @@ verde antes do commit, exatamente 1 teorema público por commit).
   Planta DST `f155_query_conflict` (pedradb-http, exit 0,
   1 passed). Gate GREEN: floor_atom 169→170, floor_extract
   109→108.
+
+## P2.1 — path ×8 átomo (1/8)
+
+- **strip_authority_for_routing (1/8)**: o corpo extraído é
+  `fun b => ok b` — repassa exatamente a bandeira de
+  forma-authority; o AS-IS dente (`ok false` constante) já estava
+  provado no Path.lean. Copiado o `bind_ok_inv` privado para o
+  Path.lean (file-scoped, mesmo molde do Form.lean). Planta DST
+  `strip_flag` (pedradb-http, exit 0, 1 passed). Gate GREEN:
+  floor_atom 170→171, floor_extract 108→107.

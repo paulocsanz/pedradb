@@ -2311,6 +2311,10 @@
    "dst_plant": {
     "file": "crates/pedradb-http/src/path_kernel.rs",
     "test": "strip_flag"
+   },
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "roteador da forma-authority repassa exatamente a bandeira"
    }
   },
   {

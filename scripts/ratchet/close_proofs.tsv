@@ -197,3 +197,4 @@ atom	catalog:form_plus	form_decode_fate_iff	formal/aeneas/lean/Form.lean	form_de
 atom	catalog:query_u64_conflict	query_u64_conflict_fate_iff	formal/aeneas/lean/Form.lean	query_u64_conflict
 atom	catalog:query_part_is_bare_name	query_part_is_bare_name_fate_iff	formal/aeneas/lean/Form.lean	query_part_is_bare_name
 atom	catalog:query_values_conflict	query_values_conflict_fate_iff	formal/aeneas/lean/Form.lean	query_values_conflict
+atom	catalog:strip_authority_for_routing	strip_authority_for_routing_fate_iff	formal/aeneas/lean/Path.lean	strip_authority_for_routing
