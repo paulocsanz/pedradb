@@ -196,3 +196,4 @@ atom	catalog:from_hex	from_hex_fate_iff	formal/aeneas/lean/Form.lean	from_hex
 atom	catalog:form_plus	form_decode_fate_iff	formal/aeneas/lean/Form.lean	form_decode
 atom	catalog:query_u64_conflict	query_u64_conflict_fate_iff	formal/aeneas/lean/Form.lean	query_u64_conflict
 atom	catalog:query_part_is_bare_name	query_part_is_bare_name_fate_iff	formal/aeneas/lean/Form.lean	query_part_is_bare_name
+atom	catalog:query_values_conflict	query_values_conflict_fate_iff	formal/aeneas/lean/Form.lean	query_values_conflict

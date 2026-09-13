@@ -125,3 +125,25 @@ verde antes do commit, exatamente 1 teorema público por commit).
   simp)` nas condições falsas casa normal. Planta DST
   `f155_query_conflict` (pedradb-http, exit 0, 1 passed). Gate
   GREEN: floor_atom 168→169, floor_extract 110→109.
+
+## P1.2 — form ×3 átomo (3/3 — slice fechado)
+
+- **query_values_conflict (3/3)**: segundo LOOP da família fechado.
+  O conflito de valores repetidos é a cadeia citada: menos de 2
+  valores ⇒ falso; senão o primeiro é fixado pelo index e o scan
+  `ValuesFate` (fuel = len−1, começa em 1) decide — cada igual
+  avança exatamente 1 (`cont i'` com `i < i' ≤ len`), o primeiro
+  diferente responde true, varrer até o fim responde false. Molde
+  do form_decode reusado (body_cases + body_at_end + indução em
+  combustível). Armadilhas novas: o corpo do loop é uma lambda
+  DIRETA (`fun i1 => body values first i1`), então o `dsimp only`
+  pós-`rw [loop.eq_def]` NÃO progride (já beta-reduzido) — só nos
+  ramos; o `cases hB :` substitui o body no `h`, então a
+  contradição do zero/cont fecha direto no `hB` (ok (done false) =
+  ok (cont st)), não no `h`; `subst hii : i' = i2` elimina o `i2`
+ (var local do rcases) — usar `i'` depois. Coerções: ponte iff
+  `hgate` entre `Slice.len < 2#usize` e `.length < 2` (via
+  `Slice.len_val` + `UScalar.lt_equiv`) unifica os átomos do omega.
+  Planta DST `f155_query_conflict` (pedradb-http, exit 0,
+  1 passed). Gate GREEN: floor_atom 169→170, floor_extract
+  109→108.

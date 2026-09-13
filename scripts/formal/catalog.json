@@ -2413,6 +2413,10 @@
    "dst_plant": {
     "file": "crates/pedradb-http/src/form_kernel.rs",
     "test": "f155_query_conflict"
+   },
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "conflito de valores repetidos: menos de 2 falso, senão scan ValuesFate — igual avança, diferente true, fim false"
    }
   },
   {

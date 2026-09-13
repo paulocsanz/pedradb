@@ -627,3 +627,249 @@ theorem query_part_is_bare_name_fate_iff :
       simp only [Aeneas.Std.bind_tc_ok]
       exact hval
 
+/-- A cara do corpo do scan de conflitos: cont progride o índice em
+exatamente 1; done true só com um valor diferente sob i < len; done
+false só no fim. -/
+private theorem values_body_cases (values : Slice Str) (first : Str)
+    (i : Usize) (hle : (↑i : Nat) ≤ (values.val).length)
+    (cf : ControlFlow Usize Bool)
+    (hB : query_values_conflict_loop.body values first i = ok cf) :
+    (∃ (i' : Usize), cf = ControlFlow.cont i' ∧
+        (↑i : Nat) < (↑i' : Nat) ∧ (↑i' : Nat) ≤ (values.val).length) ∨
+      ((↑i : Nat) < (values.val).length ∧ cf = ControlFlow.done true) ∨
+      ((↑i : Nat) = (values.val).length ∧ cf = ControlFlow.done false) := by
+  by_cases hlt : (↑i : Nat) < (values.val).length
+  · have hlt' : i < Slice.len values := by
+      refine (UScalar.lt_equiv i (Slice.len values)).mpr ?_
+      rw [Aeneas.Std.Slice.len_val]
+      exact hlt
+    unfold query_values_conflict_loop.body at hB
+    dsimp +zeta only at hB
+    rw [if_pos hlt'] at hB
+    obtain ⟨w, hw, hB⟩ := bind_ok_inv _ _ _ hB
+    obtain ⟨eqb, heqb, hB⟩ := bind_ok_inv _ _ _ hB
+    cases eqb with
+    | true =>
+      dsimp only at hB
+      obtain ⟨i1, hi1, hB⟩ := bind_ok_inv _ _ _ hB
+      have hv1 := usize_succ_val i i1 hi1
+      exact Or.inl ⟨i1, (Result.ok.inj hB).symm, by omega, by omega⟩
+    | false =>
+      dsimp only at hB
+      exact Or.inr (Or.inl ⟨hlt, (Result.ok.inj hB).symm⟩)
+  · have hlen : (↑i : Nat) = (values.val).length := by omega
+    have hge : ¬ (i < Slice.len values) := by
+      intro hltU
+      have hn0 := (UScalar.lt_equiv i (Slice.len values)).mp hltU
+      rw [Aeneas.Std.Slice.len_val] at hn0
+      rw [hlen] at hn0
+      exact absurd hn0 (Nat.lt_irrefl _)
+    unfold query_values_conflict_loop.body at hB
+    dsimp +zeta only at hB
+    rw [if_neg hge] at hB
+    exact Or.inr (Or.inr ⟨hlen, (Result.ok.inj hB).symm⟩)
+
+/-- No fim o corpo devolve exatamente done false. -/
+private theorem values_body_at_end (values : Slice Str) (first : Str)
+    (i : Usize) (hlen : (↑i : Nat) = (values.val).length) :
+    query_values_conflict_loop.body values first i
+      = ok (ControlFlow.done false) := by
+  have hge : ¬ (i < Slice.len values) := by
+    intro hltU
+    have hn0 := (UScalar.lt_equiv i (Slice.len values)).mp hltU
+    rw [Aeneas.Std.Slice.len_val] at hn0
+    rw [hlen] at hn0
+    exact absurd hn0 (Nat.lt_irrefl _)
+  unfold query_values_conflict_loop.body
+  dsimp +zeta only
+  rw [if_neg hge]
+
+/-- O fate do scan de conflitos: cada cont consome um valor igual ao
+primeiro; done true = achou um valor diferente; done false = varreu
+até o fim sem achar. -/
+private def ValuesFate (values : Slice Str) (first : Str) :
+    Nat → Usize → Bool → Prop
+  | 0, i, v =>
+      (↑i : Nat) = (values.val).length ∧ v = false
+  | fuel + 1, i, v =>
+      (∃ (i' : Usize),
+          query_values_conflict_loop.body values first i
+            = ok (ControlFlow.cont i') ∧
+            (↑i : Nat) < (↑i' : Nat) ∧ (↑i' : Nat) ≤ (values.val).length ∧
+              ValuesFate values first fuel i' v) ∨
+        (query_values_conflict_loop.body values first i
+           = ok (ControlFlow.done v))
+
+private theorem values_loop_fate (values : Slice Str) (first : Str) :
+    ∀ (fuel : Nat) (i : Usize),
+      (↑i : Nat) ≤ (values.val).length →
+      (values.val).length - (↑i : Nat) ≤ fuel →
+      ∀ v : Bool,
+        (query_values_conflict_loop values first i = ok v) ↔
+          ValuesFate values first fuel i v := by
+  intro fuel
+  induction fuel with
+  | zero =>
+    intro i hile hfuel v
+    have hlen : (↑i : Nat) = (values.val).length := by omega
+    constructor
+    · intro h
+      refine ⟨hlen, ?_⟩
+      unfold query_values_conflict_loop at h
+      rw [loop.eq_def] at h
+      cases hB : query_values_conflict_loop.body values first i with
+      | ok cf =>
+        cases cf with
+        | done r =>
+          rw [hB] at h
+          dsimp only at h
+          rw [Result.ok.inj h] at hB
+          rcases values_body_cases values first i hile (ControlFlow.done v) hB
+            with ⟨i', hcf, -, -⟩ | ⟨hlt, hcf⟩ | ⟨hlen2, hcf2⟩
+          · exact absurd hcf (by intro hh; exact nomatch hh)
+          · exact absurd hlen (by omega)
+          · exact ControlFlow.done.inj hcf2
+        | cont st =>
+          have hge : ¬ (i < Slice.len values) := by
+            intro hltU
+            have hn0 := (UScalar.lt_equiv i (Slice.len values)).mp hltU
+            rw [Aeneas.Std.Slice.len_val] at hn0
+            rw [hlen] at hn0
+            exact absurd hn0 (Nat.lt_irrefl _)
+          unfold query_values_conflict_loop.body at hB
+          dsimp +zeta only at hB
+          rw [if_neg hge] at hB
+          exact absurd hB (by simp)
+      | fail e =>
+        rw [hB] at h
+        dsimp only at h
+        exact absurd h (by simp)
+      | div =>
+        rw [hB] at h
+        dsimp only at h
+        exact absurd h (by simp)
+    · rintro ⟨-, rfl⟩
+      unfold query_values_conflict_loop
+      rw [loop.eq_def]
+      rw [values_body_at_end values first i hlen]
+  | succ fuel ih =>
+    intro i hile hfuel v
+    unfold query_values_conflict_loop
+    rw [loop.eq_def]
+    cases hB : query_values_conflict_loop.body values first i with
+    | ok cf =>
+      cases cf with
+      | cont i' =>
+        dsimp only
+        rcases values_body_cases values first i hile (ControlFlow.cont i') hB
+          with ⟨i2, hcf, hprog1, hprog2⟩ | ⟨hlt, hcf⟩ | ⟨hlen, hcf⟩
+        · have hii : i' = i2 := ControlFlow.cont.inj hcf
+          subst hii
+          constructor
+          · intro h
+            exact Or.inl ⟨i', hB, hprog1, hprog2,
+              (ih i' hprog2 (by omega) v).mp h⟩
+          · rintro (⟨i3, hbody, hlt3, hle3, hfate⟩ | hdone)
+            · have hu : ControlFlow.cont i' = ControlFlow.cont i3 :=
+                Result.ok.inj (hB.symm.trans hbody)
+              have hii3 : i' = i3 := ControlFlow.cont.inj hu
+              subst hii3
+              exact (ih i' hprog2 (by omega) v).mpr hfate
+            · have hne := hdone.symm.trans hB
+              injection hne with hne2
+              contradiction
+        · exact absurd hcf (by intro hh; exact nomatch hh)
+        · exact absurd hcf (by intro hh; exact nomatch hh)
+      | done r =>
+        dsimp only
+        constructor
+        · intro h
+          have hrv : r = v := Result.ok.inj h
+          exact Or.inr (by rw [← hrv]; exact hB)
+        · rintro (⟨i2, hbody, -, -, -⟩ | hdone)
+          · have hne := hB.symm.trans hbody
+            injection hne with hne2
+            contradiction
+          · have hrv : r = v :=
+              ControlFlow.done.inj (Result.ok.inj (hB.symm.trans hdone))
+            rw [hrv]
+    | fail e =>
+      dsimp only
+      constructor
+      · intro h
+        exact absurd h (by simp)
+      · rintro (⟨i2, hbody, -, -, -⟩ | hdone)
+        · exact absurd (hbody.symm.trans hB) (by simp)
+        · exact absurd (hdone.symm.trans hB) (by simp)
+    | div =>
+      dsimp only
+      constructor
+      · intro h
+        exact absurd h (by simp)
+      · rintro (⟨i2, hbody, -, -, -⟩ | hdone)
+        · exact absurd (hbody.symm.trans hB) (by simp)
+        · exact absurd (hdone.symm.trans hB) (by simp)
+
+/-- RFC-0216 P1.2 3/3 (átomo `catalog:query_values_conflict`, entrada
+`query_values_conflict`): o conflito de valores repetidos é exatamente
+a cadeia citada — menos de 2 valores ⇒ falso; senão o primeiro valor
+é fixado pelo index e o scan decide: cada igual avança um, o primeiro
+diferente responde true, varrer até o fim responde false. O mutante
+AS-IS sempre responde falso; planta `f155_query_conflict` recusa. -/
+theorem query_values_conflict_fate_iff :
+    ∀ (values : Slice Str) (r : Bool),
+      (query_values_conflict values = ok r) ↔
+        ((values.val).length < 2 ∧ r = false) ∨
+          (∃ (first : Str),
+              Slice.index_usize values 0#usize = ok first ∧
+                ValuesFate values first ((values.val).length - 1) 1#usize r) := by
+  intro values r
+  have h2 : (↑(2#usize) : Nat) = 2 := rfl
+  have h1 : (↑(1#usize) : Nat) = 1 := rfl
+  have hlen : (↑(Slice.len values) : Nat) = (values.val).length :=
+    Aeneas.Std.Slice.len_val values
+  have hgate : (Slice.len values < 2#usize) ↔ ((values.val).length < 2) := by
+    constructor
+    · intro h
+      have hx := (UScalar.lt_equiv (Slice.len values) (2#usize)).mp h
+      omega
+    · intro h
+      refine (UScalar.lt_equiv (Slice.len values) (2#usize)).mpr ?_
+      omega
+  constructor
+  · intro hval
+    unfold query_values_conflict at hval
+    dsimp +zeta only at hval
+    split at hval
+    · next hnlt =>
+      exact Or.inl ⟨hgate.mp hnlt, (Result.ok.inj hval).symm⟩
+    · next hge =>
+      obtain ⟨first, hfirst, hval⟩ := bind_ok_inv _ _ _ hval
+      refine Or.inr ⟨first, hfirst, ?_⟩
+      have hlen2 : 2 ≤ (values.val).length := by
+        by_contra hcon
+        exact hge (hgate.mpr (by omega))
+      exact (values_loop_fate values first ((values.val).length - 1) 1#usize
+        (by omega) (by omega) r).mp hval
+  · rintro (⟨hlt2, rfl⟩ | ⟨first, hfirst, hfate⟩)
+    · unfold query_values_conflict
+      dsimp +zeta only
+      rw [if_pos (hgate.mpr hlt2)]
+    · by_cases hnlt : Slice.len values < 2#usize
+      · have hlen1 : (values.val).length ≤ 1 := by
+          by_contra hcon
+          exact absurd (hgate.mp hnlt) (by omega)
+        rw [Nat.sub_eq_zero_of_le hlen1] at hfate
+        have hrfalse : r = false := hfate.2
+        unfold query_values_conflict
+        dsimp +zeta only
+        rw [if_pos hnlt, hrfalse]
+      · have hlen2 : 2 ≤ (values.val).length := by
+          by_contra hcon
+          exact hnlt (hgate.mpr (by omega))
+        unfold query_values_conflict
+        dsimp +zeta only
+        rw [if_neg hnlt, hfirst]
+        simp only [Aeneas.Std.bind_tc_ok]
+        exact (values_loop_fate values first ((values.val).length - 1) 1#usize
+          (by omega) (by omega) r).mpr hfate
