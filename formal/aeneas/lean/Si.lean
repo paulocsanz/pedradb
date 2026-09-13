@@ -73,3 +73,21 @@ theorem point_get_prefer_applied_fate_iff :
   · rintro hv
     subst hv
     rfl
+
+/-- RFC-0218 P1.3 5/11 (átomo `catalog:point_get_wm`, entrada
+    `point_get_watermark`): o watermark do point-get é EXATAMENTE o
+    lift citado `range_applied` — o global_seq não entra. O AS-IS
+    devolve global_seq (ler não-aplicado — dente plantado). -/
+theorem point_get_watermark_fate_iff :
+    ∀ (range_applied : U64) (global_seq : U64) (r : U64),
+      (point_get_watermark range_applied global_seq = ok r) ↔
+      (r = range_applied) := by
+  intro range_applied global_seq r
+  constructor
+  · intro hval
+    unfold point_get_watermark at hval
+    injection hval with hv
+    exact hv.symm
+  · rintro hv
+    subst hv
+    rfl

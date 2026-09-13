@@ -350,6 +350,8 @@ gates GREEN no commit).
 
 - **snapshot / snapshot_needs_txn_meta_clear (2/11)**: restaurar snapshot SEMPRE exige limpar o metadado de txn — constante citada true (as-is false vaza txn meta) — `snapshot_needs_txn_meta_clear_fate_iff` em `Snapshot.lean`. Forward: unfold + injection + hv.symm; reverso: rintro + subst + rfl. Build verde. Planta DST `always_clear_txn_meta` (pedradb-store, exit 0 no worktree). Gate: floor_atom 223→224, floor_extract 55→54.
 
+- **si / point_get_watermark (5/11)**: watermark do point-get como o lift citado `range_applied` — o global_seq não entra (as-is devolve global_seq e lê não-aplicado) — `point_get_watermark_fate_iff` em `Si.lean`. Forward: unfold + injection + hv.symm; reverso: rintro + subst + rfl. Build verde. Planta DST `point_get_uses_range_applied` (pedradb-store, exit 0 no worktree). Gate: floor_atom 226→227, floor_extract 52→51.
+
 - **si / point_get_prefer_applied (1/11)**: point-get prefere o índice
   applied como a constante citada true (as-is false ignora o applied) —
   `point_get_prefer_applied_fate_iff` em `Si.lean`. Forward: unfold +
