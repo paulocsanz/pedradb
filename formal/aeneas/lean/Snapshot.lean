@@ -27,3 +27,21 @@ theorem snapshot_needs_txn_meta_clear_teeth :
 theorem snapshot_needs_txn_meta_clear_as_is_dente :
     snapshot_needs_txn_meta_clear_as_is = ok false := by
   rfl
+
+/-- RFC-0218 P1.3 2/11 (átomo `catalog:snap_txn_clear`, entrada
+    `snapshot_needs_txn_meta_clear`): restaurar snapshot SEMPRE exige
+    limpar o metadado de txn — EXATAMENTE a constante citada true.
+    O AS-IS é false (txn meta vaza entre snapshots — dente
+    plantado). -/
+theorem snapshot_needs_txn_meta_clear_fate_iff :
+    ∀ (v : Bool),
+      (snapshot_needs_txn_meta_clear = ok v) ↔ (v = true) := by
+  intro v
+  constructor
+  · intro hval
+    unfold snapshot_needs_txn_meta_clear at hval
+    injection hval with hv
+    exact hv.symm
+  · rintro hv
+    subst hv
+    rfl

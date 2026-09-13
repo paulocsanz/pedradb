@@ -6971,6 +6971,10 @@
   },
   {
    "id": "snap_txn_clear",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.3: fate ∀ sobre snapshot_needs_txn_meta_clear no degrau átomo — constante citada true (restaurar snapshot sempre exige limpar txn meta); planta DST always_clear_txn_meta"
+   },
    "finding": "F40",
    "twin_kind": "close",
    "single_artifact": true,

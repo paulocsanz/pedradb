@@ -250,3 +250,4 @@ atom	catalog:leveling_total_bytes	total_bytes_fate_iff	formal/aeneas/lean/Leveli
 atom	catalog:index_val	len_pref_value_fate_iff	formal/aeneas/lean/IndexVal.lean	len_pref_value
 atom	catalog:leveled_enabled	leveled_enabled_fate_iff	formal/aeneas/lean/Leveling.lean	leveled_enabled
 atom	catalog:point_get_prefer	point_get_prefer_applied_fate_iff	formal/aeneas/lean/Si.lean	point_get_prefer_applied
+atom	catalog:snap_txn_clear	snapshot_needs_txn_meta_clear_fate_iff	formal/aeneas/lean/Snapshot.lean	snapshot_needs_txn_meta_clear
