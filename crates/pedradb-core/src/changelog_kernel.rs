@@ -433,13 +433,28 @@ pub fn changelog_rebuild_within_budget_as_is(live_entries: u64, budget_entries: 
     changelog_rebuild_within_budget_as_is_body!(live_entries, budget_entries)
 }
 
+pub open spec fn changelog_flush_store_now_spec(
+    disk_behind: bool, flushes_since_store: u64, debounce_flushes: u64,
+    archives: u64, archive_cap: u64,
+) -> bool {
+    disk_behind
+        && (flushes_since_store >= debounce_flushes || archives >= archive_cap)
+}
+
+pub open spec fn wal_rotate_archives_spec(
+    disk_behind: bool, archives: u64, archive_cap: u64,
+) -> bool {
+    disk_behind && archives < archive_cap
+}
+
 pub fn changelog_flush_store_now(
     disk_behind: bool, flushes_since_store: u64, debounce_flushes: u64,
     archives: u64, archive_cap: u64,
 ) -> (d: bool)
     ensures
-        d == (disk_behind
-            && (flushes_since_store >= debounce_flushes || archives >= archive_cap)),
+        d == changelog_flush_store_now_spec(
+            disk_behind, flushes_since_store, debounce_flushes, archives, archive_cap
+        ),
         d ==> disk_behind,
 {
     changelog_flush_store_now_body!(
@@ -449,7 +464,7 @@ pub fn changelog_flush_store_now(
 
 pub fn wal_rotate_archives(disk_behind: bool, archives: u64, archive_cap: u64) -> (d: bool)
     ensures
-        d == (disk_behind && archives < archive_cap),
+        d == wal_rotate_archives_spec(disk_behind, archives, archive_cap),
         d ==> disk_behind,
         d ==> archives < archive_cap,
 {
@@ -458,18 +473,18 @@ pub fn wal_rotate_archives(disk_behind: bool, archives: u64, archive_cap: u64) -
 
 proof fn lemma_archive_chain_forces_store()
     ensures
-        changelog_flush_store_now(true, 0, 64, 64, 64),
-        changelog_flush_store_now(true, 64, 64, 0, 64),
-        !changelog_flush_store_now(true, 63, 64, 63, 64),
-        !changelog_flush_store_now(false, u64::MAX, 64, u64::MAX, 64),
+        changelog_flush_store_now_spec(true, 0, 64, 64, 64),
+        changelog_flush_store_now_spec(true, 64, 64, 0, 64),
+        !changelog_flush_store_now_spec(true, 63, 64, 63, 64),
+        !changelog_flush_store_now_spec(false, u64::MAX, 64, u64::MAX, 64),
 {
 }
 
 proof fn lemma_full_chain_never_archives()
     ensures
-        !wal_rotate_archives(true, 64, 64),
-        wal_rotate_archives(true, 63, 64),
-        !wal_rotate_archives(false, 0, 64),
+        !wal_rotate_archives_spec(true, 64, 64),
+        wal_rotate_archives_spec(true, 63, 64),
+        !wal_rotate_archives_spec(false, 0, 64),
 {
 }
 

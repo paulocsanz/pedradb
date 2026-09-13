@@ -1,6 +1,6 @@
 # RFC-0222: Escada até o par seL4 — gap por eixo com denominador nomeado, medido por máquina
 
-**Status:** draft
+**Status:** active (2026-09-13: P0.1–P0.5 done; P0.6 em andamento)
 **Updated:** 2026-09-13
 
 ## Background
@@ -29,11 +29,11 @@ Frase de venda permitida (cânone): *"programa de verificação na classe de cla
 
 ### P0 — métrica + piso verde (cada fatia = 1 commit, gates verdes no mesmo commit)
 
-- [ ] **P0.1** `scripts/sel4_gap.py` + baseline datado em findings + modo `--gate` com pisos por eixo — status: `todo`
-- [ ] **P0.2** barrier floor: 3 sítios (db.rs sync_dir 13→15, wal/mod.rs sync_data 1→2, fullfsync_anchor sync_all 0→2) com `--crash-log` no mesmo commit (a amarração dinâmica que a regra manda) — status: `todo`
-- [ ] **P0.3** clock gate: falso-positivo do harness — `three_teeth_queued.rs` é `#[cfg(test)]`-gated no `lib.rs`; o gate aprende a honrar gating de módulo no pai (não exempt-list: correção do heurístico documentado no próprio docstring) — status: `todo`
-- [ ] **P0.4** coverage-map.md re-medido (69 kernels/28.464 LOC/312 pares; a regra própria do mapa) + os 4 sorries da stdlib Aeneas nomeados na tabela TCB do ledger — status: `todo`
-- [ ] **P0.5** 4 scripts Verus: `vote_decision`/`dictionary_link` (arquivos perderam o bloco `verus!` — restaura in-file twin ou migra a rota do par para Aeneas onde o teorema já existe) e `changelog_rebuild`/`lookup` (lemmas chamam fns exec no `ensures` — restatear em spec/`when_used_as_spec`) — status: `todo`
+- [x] **P0.1** `scripts/sel4_gap.py` + baseline datado em findings + modo `--gate` com pisos por eixo — status: done (`11cb107c`)
+- [x] **P0.2** barrier floor: 3 sítios (db.rs sync_dir 13→15, wal/mod.rs sync_data 1→2, fullfsync_anchor sync_all 0→2) com `--crash-log` no mesmo commit (a amarração dinâmica que a regra manda) — status: done (`73399698`)
+- [x] **P0.3** clock gate: falso-positivo do harness — `three_teeth_queued.rs` é `#[cfg(test)]`-gated no `lib.rs`; o gate aprende a honrar gating de módulo no pai (não exempt-list: correção do heurístico documentado no próprio docstring) — status: done (`2b37ef71`)
+- [x] **P0.4** coverage-map.md re-medido (69 kernels/28.464 LOC/312 pares; a regra própria do mapa) + os 4 sorries da stdlib Aeneas nomeados na tabela TCB do ledger — status: done (re-medição por máquina `sel4_gap.py` 68 kernels/27.960 LOC; sorries verificados no pin `daa85d7`; junto com P0.5 neste commit)
+- [x] **P0.5** 4 scripts Verus: `vote_decision`/`dictionary_link` (arquivos perderam o bloco `verus!` — restaura in-file twin ou migra a rota do par para Aeneas onde o teorema já existe) e `changelog_rebuild`/`lookup` (lemmas chamam fns exec no `ensures` — restatear em spec/`when_used_as_spec`) — status: done (2 runners órfãos deletados + 3 pares migrados p/ Aeneas; 2 runners reparados verde: 13/14 verified 0 errors)
 - [ ] **P0.6** 12 caller-lints: cada um ou a produção volta a chamar o kernel ou o catalog aponta o caller real (trampolim pós-0219) — status: `todo`
 - [ ] **P0.7** onda de enrollment (8 kernels sem rota + ~53 pub fns fora da superfície): kernel+twin+script no padrão dos 73 — fan-out, converge com 0221 P0.6 — status: `todo`
 - [ ] **P0.8** push: `proof-check` + `verification-gates` verdes no GitHub (portão do usuário: o push é dele) — status: `todo`
@@ -62,11 +62,11 @@ Frase de venda permitida (cânone): *"programa de verificação na classe de cla
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | sel4_gap.py + baseline + --gate | todo | — | 2026-09-13 |
-| P0.2 | p0 | barrier floor 3 sítios + crash-log | todo | — | 2026-09-13 |
-| P0.3 | p0 | clock gate honra gating de módulo | todo | — | 2026-09-13 |
-| P0.4 | p0 | coverage-map re-medido + 4 sorries no TCB | todo | — | 2026-09-13 |
-| P0.5 | p0 | 4 scripts Verus consertados | todo | — | 2026-09-13 |
+| P0.1 | p0 | sel4_gap.py + baseline + --gate | done | `11cb107c` | 2026-09-13 |
+| P0.2 | p0 | barrier floor 3 sítios + crash-log | done | `73399698` | 2026-09-13 |
+| P0.3 | p0 | clock gate honra gating de módulo | done | `2b37ef71` | 2026-09-13 |
+| P0.4 | p0 | coverage-map re-medido + 4 sorries no TCB | done | este commit | 2026-09-13 |
+| P0.5 | p0 | 4 scripts Verus consertados | done | este commit | 2026-09-13 |
 | P0.6 | p0 | 12 caller-lints fechados | todo | — | 2026-09-13 |
 | P0.7 | p0 | onda de enrollment (fan-out) | todo | — | 2026-09-13 |
 | P0.8 | p0 | CI verde no GitHub (push) | todo | — | 2026-09-13 |

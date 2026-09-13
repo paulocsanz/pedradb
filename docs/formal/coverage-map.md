@@ -1,6 +1,25 @@
 # Mapa de cobertura formal — inventário final kernel×glue (RFC-0057 P2.3)
 
-**Data:** 2026-08-24
+**Data:** 2026-08-24 · **Re-medido:** 2026-09-13 (RFC-0222 P0.4 — a regra
+própria de re-medir "quando um par entra/sai do catálogo" não foi cumprida
+por 3 semanas; achado da auditoria independente de 2026-09-13).
+
+## Re-medição 2026-09-13 (medida por máquina: `python3 scripts/sel4_gap.py`)
+
+- **Kernels:** 68 arquivos `*_kernel.rs` sob `crates/*/src`: **27.960 LOC**
+  (era 36 arquivos / 6.285 LOC em 2026-08-24 — a superfície cresceu 4,4×).
+- **Pares no catálogo:** 312 (286 proof / 26 campaign); degraus ∀
+  registrados 290/312 = 92,95% (RFC-0218/0219).
+- **Superfície formalizada:** 16 crates com kernel no catálogo:
+  **164.359 LOC** de src; **glue restante ≈ 136.399 LOC** (TCB declarado,
+  RFC-0056 P2.5).
+- **Dentro dos kernels:** 61/68 arquivos enrolados no freeze; 801/857 pub
+  fns na superfície provada/allowlist (93,47%) — os 7 arquivos e 56 fns
+  fora são a fila de enrollment do RFC-0221/0222 P0.7.
+- A tabela kernel×glue de 46 pares abaixo é o **snapshot 2026-08-24** (a
+  superfície viva por par é `scripts/formal/catalog.json`; o gap por eixo
+  é `scripts/sel4_gap.py`).
+
 **Fonte:** `scripts/formal/catalog.json` (46 pares) + freeze verde
 (`python3 scripts/formal/pedra_formal.py --ci`: 223 ok / 0 fail, incl. o par novo
 `group_commit`/`group_fence` desta data).

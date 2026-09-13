@@ -15,7 +15,6 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/vote_kernel.rs",
       "twin": "crates/pedradb-raft/src/vote_kernel.rs",
-      "verus": "scripts/verus_vote_decision.sh",
       "callers": [
         "crates/pedradb-raft/src/lib.rs"
       ],
@@ -39,7 +38,8 @@
       "atom_reason": {
         "date": "2026-09-11",
         "why": "RFC-0205 P0.2 first store/raft data-fate promotion: vote fate WouldGrant iff same-term AND can_vote AND log_up_to_date, Deny otherwise (forall fate-iff over the extracted body, Vote.lean; totality from the spec match); AS-IS ignore-log-and-vote grants where the real kernel denies"
-      }
+      },
+      "aeneas": "scripts/aeneas_vote.sh"
     },
     {
       "id": "ae_entry",
@@ -3620,7 +3620,6 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/wal/reopen_kernel.rs",
       "twin": "crates/pedradb-core/src/wal/reopen_kernel.rs",
-      "verus": "scripts/verus_dictionary_link.sh",
       "callers": [
         "crates/pedradb-core/src/db.rs"
       ],
@@ -3636,7 +3635,8 @@
       "atom_reason": {
         "date": "2026-09-13",
         "why": "átomo 6/6 P0.3: reopen_outcome_flat_fate_iff — tabela completa 4 linhas (sem dano serve tudo; PIT não escalado serve prefixo; escalado ou sem PIT recusa), mais fina que a iff agrupada prévia; floor_atom 191→192"
-      }
+      },
+      "aeneas": "scripts/aeneas_reopen.sh"
     },
     {
       "id": "apply_step",
@@ -3706,7 +3706,6 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-raft/src/vote_kernel.rs",
       "twin": "crates/pedradb-raft/src/vote_kernel.rs",
-      "verus": "scripts/verus_vote_decision.sh",
       "callers": [
         "crates/pedradb-raft/src/lib.rs"
       ],
@@ -3725,7 +3724,8 @@
       "atom_reason": {
         "date": "2026-09-11",
         "why": "RFC-0208 P0.1 seam store/raft promotion (1/8): vote granted exactly when decision=WouldGrant AND durable persist Ok (fate forall over the extracted body, Vote.lean) — Deny never grants, failed persist never grants; AS-IS ignores the persist outcome"
-      }
+      },
+      "aeneas": "scripts/aeneas_vote.sh"
     },
     {
       "id": "durable_term",

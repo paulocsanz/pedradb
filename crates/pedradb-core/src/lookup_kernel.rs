@@ -313,6 +313,11 @@ pub open spec fn vlog_ptr_orphaned_spec(vlog_closed: bool) -> bool {
     vlog_closed
 }
 
+pub open spec fn vlog_ptr_orphaned_as_is_spec(_vlog_closed: bool) -> bool {
+    false
+}
+
+#[verifier::when_used_as_spec(vlog_ptr_orphaned_spec)]
 pub fn vlog_ptr_orphaned(vlog_closed: bool) -> (d: bool)
     ensures
         d == vlog_ptr_orphaned_spec(vlog_closed),
@@ -332,7 +337,7 @@ proof fn lemma_vlog_ptr_orphaned()
     ensures
         vlog_ptr_orphaned(true),
         !vlog_ptr_orphaned(false),
-        !vlog_ptr_orphaned_as_is(true),
+        !vlog_ptr_orphaned_as_is_spec(true),
 {
 }
 

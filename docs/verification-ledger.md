@@ -11,7 +11,7 @@ sustenta. Uma linha só sobe de camada (`experimento → teorema`) com o
 gate da camada de destino verde no mesmo commit (three-teeth ou
 enumeração completa); nunca por reescrita de ledger.
 
-<!-- ledger-catalog: total=312 proof=286 campaign=26 absent=0 single_artifact=305 aeneas_scripts=245 clones=7 models=34 -->
+<!-- ledger-catalog: total=312 proof=286 campaign=26 absent=0 single_artifact=305 aeneas_scripts=248 clones=7 models=34 -->
 
 ## Teorema — ∀ sobre código/modelo (machine-checked ou enumeração completa)
 
@@ -142,6 +142,16 @@ auditoria independente de 2026-09-13): as 20 promoções átomo do 0219
 marker — total 292→312, proof 266→286, single_artifact 285→305,
 aeneas_scripts 224→245.
 
+Migração de rota 2026-09-13 (RFC-0222 P0.5): os runners `verus_vote_decision.sh`
+e `verus_dictionary_link.sh` ficaram órfãos pós-pagamento — os kernels perderam
+o bloco `verus!` (`3c91d402`, `b27fe284`) e o Verus aborta com "verus_builtin
+not imported" antes de provar nada. Os 3 pares (`vote`, `grant_persist` →
+`aeneas_vote.sh`; `dictionary_link` → `aeneas_reopen.sh`) migram para a rota
+Aeneas dos irmãos de kernel (`durable_term`, `reopen_outcome` já eram
+aeneas-only); átomos pagos em `close_proofs.tsv`. `verus_changelog_rebuild.sh`
+e `verus_lookup.sh` voltaram ao verde no mesmo commit (spec twins +
+`when_used_as_spec`, 13/14 verified 0 errors). aeneas_scripts 245→248.
+
 ## TCB — axiomas nomeados (fora de prova, por decisão registrada)
 
 | Axioma | Onde está nomeado |
@@ -149,6 +159,7 @@ aeneas_scripts 224→245.
 | Contrato do SO: `fdatasync`/`fsync`/`F_FULLFSYNC` persistem antes de retornar (disk-not-media, never_floor, ∀π fora) | RFC-0187 §TCB; produto G1 assume |
 | Firmware/controladora de disco não mente para o SO | RFC-0187 §Out of scope |
 | rustc linka o kernel de produção — o term de prova é o binário | RFC-0151 (three-teeth) |
+| Stdlib Aeneas (suporte da extração) tem 4 `sorry`: `backends/lean/Aeneas/Std/StringIter.lean:12,18` e `Slice.lean:368,590` no pin `daa85d7e89400` — parte do TCB de prova, nunca "zero sorry" absoluto (o corpus próprio segue 0) | verificado 2026-09-13 (RFC-0222 P0.4); achado da auditoria independente |
 | Pins de toolchain: Verus `0.2026.08.09.92f466f`, Kani sha256, Aeneas `daa85d7`, Charon `0.1.232`/`340b1af`, Lean `4.31.0` | `.github/workflows/proof-check.yml`; re-pin só com widen-sem-sorry medido (P1.4) |
 | Harness PCT controla os grants; threads de SO fora do modelo | RFC-0070 (R-pct / R-glue) |
 | `StdEnv` = filesystem real do host nas campanhas não-sim | `pedradb-core/src/env.rs` |
