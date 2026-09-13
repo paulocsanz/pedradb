@@ -6424,6 +6424,10 @@
   },
   {
    "id": "probe_order_covering",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "a lista de candidatos e exatamente o loop citado — newest_first com capacidade len, do zero, porte covering_pos e gate covering_hi_ge decidindo push ou skip"
+   },
    "finding": "RFC-0164 P0.2",
    "twin_kind": "model",
    "single_artifact": true,

@@ -276,3 +276,4 @@ atom	catalog:bloom_header	bloom_header_fate_iff	formal/aeneas/lean/Bloom.lean	bl
 atom	catalog:bloom_insert	insert_fate_iff	formal/aeneas/lean/Bloom.lean	insert
 atom	catalog:bloom_may_contain	may_contain_fate_iff	formal/aeneas/lean/Bloom.lean	may_contain
 atom	catalog:probe_order	probe_order_fate_iff	formal/aeneas/lean/ProbeOrder.lean	first_probe_on_equal_lo
+atom	catalog:probe_order_covering	probe_order_covering_fate_iff	formal/aeneas/lean/ProbeOrder.lean	probe_order_covering

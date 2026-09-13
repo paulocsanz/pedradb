@@ -72,3 +72,19 @@ theorem probe_order_fate_iff :
     unfold first_probe_on_equal_lo
     rfl
 
+/-- RFC-0218 P2.2 (átomo `catalog:probe_order_covering`, entrada
+    `probe_order_covering`): a lista de candidatos é EXATAMENTE o loop
+    citado — newest_first com capacidade len newest_first, do zero, com
+    o porte covering_pos e o gate covering_hi_ge decidindo push/skip. -/
+theorem probe_order_covering_fate_iff :
+    ∀ (newest_first : Slice Usize) (by_lo : Slice Usize)
+      (prefix_end : Usize) (his : Slice (Slice U8)) (key : Slice U8)
+      (out : alloc.vec.Vec Usize),
+      (probe_order_covering newest_first by_lo prefix_end his key = ok out) ↔
+        (probe_order_covering_loop newest_first by_lo prefix_end his key
+           (alloc.vec.Vec.with_capacity Usize (Slice.len newest_first))
+             0#usize = ok out) := by
+  intro newest_first by_lo prefix_end his key out
+  unfold probe_order_covering
+  exact Iff.rfl
+
