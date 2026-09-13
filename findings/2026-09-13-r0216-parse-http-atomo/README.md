@@ -59,3 +59,12 @@ verde antes do commit, exatamente 1 teorema público por commit).
   exit 0, 1 passed). Axiomas: os 3 padrão do Lean. Gate GREEN:
   floor_atom 162→163, floor_extract 116→115. P0 completo: todo
   veredito de admissão de request (corpo + erro) em teorema.
+
+## P1.1 — form ×4 átomo (1/4)
+
+- **form_plus_byte (1/4)**: a decodificação de byte de form decide
+  exatamente no `if` extraído — `+` (43) vira espaço (32), qualquer
+  outro byte é ele mesmo; cada ramo carrega a igualdade habilitante.
+  O mutante AS-IS não converte. Planta DST
+  `plus_is_space_before_percent` (pedradb-http, exit 0, 1 passed).
+  Gate GREEN: floor_atom 163→164, floor_extract 115→114.

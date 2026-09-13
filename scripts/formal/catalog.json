@@ -2326,6 +2326,10 @@
    "dst_plant": {
     "file": "crates/pedradb-http/src/form_kernel.rs",
     "test": "plus_is_space_before_percent"
+   },
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "Byte de form decodifica exatamente no if extraido — '+' (43) vira espaco (32), qualquer outro e ele mesmo; cada ramo carrega a igualdade habilitante; planta prova o dente no HTTP vivo."
    }
   },
   {

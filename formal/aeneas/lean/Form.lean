@@ -35,3 +35,20 @@ theorem query_u64_conflict_as_is_dente :
     query_u64_conflict_as_is (1#u64) (0#u64) = ok false := by
   unfold query_u64_conflict_as_is
   rfl
+
+theorem form_plus_byte_fate_iff :
+    ∀ (b r : Aeneas.Std.U8),
+      (form_plus_byte b = ok r) ↔
+        ((b = 43#u8 ∧ r = 32#u8) ∨ (¬(b = 43#u8) ∧ r = b)) := by
+  intro b r
+  constructor
+  · intro hval
+    unfold form_plus_byte at hval
+    split at hval
+    · next hbt => exact Or.inl ⟨hbt, (Result.ok.inj hval).symm⟩
+    · next hbf => exact Or.inr ⟨hbf, (Result.ok.inj hval).symm⟩
+  · rintro (⟨hbt, hr⟩ | ⟨hbf, hr⟩)
+    · unfold form_plus_byte
+      rw [if_pos hbt, hr]
+    · unfold form_plus_byte
+      rw [if_neg hbf, hr]
