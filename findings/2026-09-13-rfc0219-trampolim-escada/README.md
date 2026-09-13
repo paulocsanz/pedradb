@@ -391,3 +391,35 @@ auto_flush_due(mem_cf, true, limit)` decidia inline pular a família.
 - **Par nasce átomo**: `catalog:cf_flush_plan`. floor_atom 283→284,
   residuals atom 284, single_artifact 303.
 - **Contador**: 48 → **47** (db.rs 27→26).
+
+## P2.1-d — drenos (pares já provados; o `if` sai do trampolim)
+
+6 sítios convertidos a `match` no kernel já pareado — sem par novo
+(o par e o teorema existem; a composição do try_rotate_wal é o
+teorema RFC-0200 `try_rotate_step_rotates_iff_pins_clear_segment_live`):
+
+- `count_visible` ×2 — `match visible` (resultado de `visible_at`,
+  par `catalog:visible_at`).
+- `try_rotate_wal` ×2 — `match wal_rotate_decision(...)` +
+  `match wal_segment_is_empty(...)`.
+- `ensure_wal_rotated_for_gc` — `match wal_rotate_decision(...)`.
+- `group_apply` — `match changelog_durable_commit_fate(true, any_sync,
+  false)` (a mesma sorte do P0.1 `commit_ops_with`; o portão cru
+  `wal_sync_required(true, any_sync, false)` sai).
+
+- **Contador**: 47 → **41** (db.rs 26→19; −6 sítios, −1 comentário
+  varrido no caminho? não: 26−6=20 medido 19 — o `if let Err(e)` do
+  grupo recontado abaixo; ver P2.1-e).
+- **Plantas**: `trampoline_drains_match_kernel_plans` (flush) + assert
+  do drain no plant do changelog.
+- **Vermelho causado pelo objetivo, CORRIGIDO aqui**: o plant antigo
+  `wal_commit_plan_on_live_sync_fail_is_not_ok` ainda exigia
+  `dir_sync_required(` em `fsync_sst_paths` — puxado pelo P1.1c
+  (dir_sync_plan, 48a5efd6); assert atualizado ao shape do plano.
+  Também atualizados os asserts de `group_prepare`/`group_apply` no
+  plant `wal_sync_required_on_live_client_true_is_not_ok` (P1.2c
+  group_batch_sync_plan + este dreno).
+- **Flaky documentado**: `maybe_auto_flush_physical_cf_is_not_linear_
+  in_keys` (teste de tempo-de-relógio RFC-0149) falha sob carga
+  concorrente de cargo e passa 8/8 em máquina ociosa — em 80782f6c
+  também só com máquina ociosa; não é regressão do objetivo.

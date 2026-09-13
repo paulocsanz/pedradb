@@ -741,6 +741,18 @@ mod tests {
             !csp.contains("persist_manifest_durable().is_ok() {"),
             "the raw publish gate left the trampoline"
         );
+        // RFC-0219 P2.1 drain: the group_apply debounce matches the
+        // same kernel fate as commit_ops_with (P0.1), no raw
+        // wal_sync_required gate left in the trampoline.
+        let ga = named_fn_src(include_str!("db.rs"), "group_apply").expect("group_apply");
+        assert!(
+            ga.contains("match crate::changelog_kernel::changelog_durable_commit_fate("),
+            "group_apply matches changelog_durable_commit_fate"
+        );
+        assert!(
+            !ga.contains("wal_sync_required(true, any_sync, false)"),
+            "the raw debounce gate left the group_apply trampoline"
+        );
     }
 
     #[test]

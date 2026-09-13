@@ -919,6 +919,33 @@ mod tests {
     }
 
     #[test]
+    fn trampoline_drains_match_kernel_plans() {
+        // RFC-0219 P2.1 drains: the already-paired kernel decisions
+        // leave the `if` shape — the trampoline matches the kernel.
+        let trw = named_fn_src(include_str!("db.rs"), "try_rotate_wal").expect("try_rotate_wal");
+        assert!(
+            trw.contains("match crate::flush_kernel::wal_rotate_decision("),
+            "try_rotate_wal matches wal_rotate_decision"
+        );
+        assert!(
+            trw.contains("match crate::flush_kernel::wal_segment_is_empty("),
+            "try_rotate_wal matches wal_segment_is_empty"
+        );
+        let ewr = named_fn_src(include_str!("db.rs"), "ensure_wal_rotated_for_gc")
+            .expect("ensure_wal_rotated_for_gc");
+        assert!(
+            ewr.contains("match crate::flush_kernel::wal_rotate_decision("),
+            "ensure_wal_rotated_for_gc matches wal_rotate_decision"
+        );
+        let cv = named_fn_src(include_str!("db.rs"), "count_visible").expect("count_visible");
+        assert_eq!(
+            cv.matches("match visible").count(),
+            2,
+            "both scan-count sites match the visible_at result"
+        );
+    }
+
+    #[test]
     fn cf_flush_plan_on_live_over_limit_flushes() {
         // RFC-0219 P2.1: inside the armed scan, a family at/over its
         // limit flushes now; below the limit skips. AS-IS skips every

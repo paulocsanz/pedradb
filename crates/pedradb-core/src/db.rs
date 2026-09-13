@@ -4714,8 +4714,11 @@ impl<E: Env> Db<E> {
                     crate::merge::range_deleted(head.user_key.as_ref(), seq, &range_dels),
                 );
                 c.step_current_user();
-                if visible {
-                    count += 1;
+                match visible {
+                    true => {
+                        count += 1;
+                    }
+                    false => {}
                 }
             }
             merge_done(self);
@@ -4765,8 +4768,11 @@ impl<E: Env> Db<E> {
                 }
             }
             win[0].step_current_user();
-            if visible {
-                count += 1;
+            match visible {
+                true => {
+                    count += 1;
+                }
+                false => {}
             }
         }
         merge_done(self);
@@ -6952,10 +6958,9 @@ impl<E: Env> Db<E> {
     /// pin (and an in-flight SST). Truncating WAL here leaves a checkpoint or
     /// crash with nothing to replay.
     fn try_rotate_wal(&mut self) -> Result<()> {
-        if crate::flush_kernel::wal_rotate_decision(self.wal_pin_state())
-            == crate::flush_kernel::WalRotateAction::KeepWal
-        {
-            return Ok(());
+        match crate::flush_kernel::wal_rotate_decision(self.wal_pin_state()) {
+            crate::flush_kernel::WalRotateAction::KeepWal => return Ok(()),
+            crate::flush_kernel::WalRotateAction::RotateWal => {}
         }
         // Pipeline mints seq + appends under wal.lock() without db.write().
         // Recheck inflight while holding the WAL mutex so rotate cannot
@@ -6965,8 +6970,9 @@ impl<E: Env> Db<E> {
             if self.commit_inflight.load(Ordering::Acquire) > 0 {
                 return Ok(());
             }
-            if crate::flush_kernel::wal_segment_is_empty(w.position()) {
-                return Ok(());
+            match crate::flush_kernel::wal_segment_is_empty(w.position()) {
+                true => return Ok(()),
+                false => {}
             }
         }
         self.rotate_wal_now()
@@ -7000,13 +7006,14 @@ impl<E: Env> Db<E> {
     /// evaluated after a completed flush) is equivalent to "the WAL was
     /// rotated".
     fn ensure_wal_rotated_for_gc(&self) -> Result<()> {
-        if crate::flush_kernel::wal_rotate_decision(self.wal_pin_state())
-            == crate::flush_kernel::WalRotateAction::KeepWal
-        {
-            return Err(CoreError::Internal(
-                "vlog gc refused: wal not rotated (commits in flight or mem staged) — retry when idle"
-                    .into(),
-            ));
+        match crate::flush_kernel::wal_rotate_decision(self.wal_pin_state()) {
+            crate::flush_kernel::WalRotateAction::KeepWal => {
+                return Err(CoreError::Internal(
+                    "vlog gc refused: wal not rotated (commits in flight or mem staged) — retry when idle"
+                        .into(),
+                ));
+            }
+            crate::flush_kernel::WalRotateAction::RotateWal => {}
         }
         Ok(())
     }
@@ -10592,8 +10599,11 @@ impl<E: Env> Db<E> {
             }
             self.change_log.extend(feed_batch);
         }
-        if crate::write_admission_kernel::wal_sync_required(true, any_sync, false) {
-            self.maybe_persist_changelog_after_durable_commit();
+        match crate::changelog_kernel::changelog_durable_commit_fate(true, any_sync, false) {
+            crate::changelog_kernel::ChangelogCommitFate::Count => {
+                self.maybe_persist_changelog_after_durable_commit();
+            }
+            crate::changelog_kernel::ChangelogCommitFate::Skip => {}
         }
 
         let st = self.phase_stats.clone();
