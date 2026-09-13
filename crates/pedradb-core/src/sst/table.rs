@@ -661,10 +661,42 @@ impl SstTable {
             if served_from_file {
                 let kit = self.kit.read().clone();
                 let Some(kit) = kit else {
-                    return Err(CoreError::Internal(format!(
-                        "SST {} payload evicted without a file source (free-standing table)",
-                        self.path.display()
-                    )));
+                    // Source-less opens (free-standing installs, `open_with`)
+                    // carry no kit: load the CRC-verified body from the path
+                    // once — the same fallback `decode_block_on_file` takes.
+                    // Installs residency, so later probes hit the
+                    // verified-resident fast path instead of re-reading.
+                    let payload = self.ensure_payload_from_path()?;
+                    let start = usize::try_from(h.offset)
+                        .map_err(|_| CoreError::Internal("SST block offset overflow".into()))?;
+                    let Some(end) = start.checked_add(len) else {
+                        return Err(CoreError::Internal("SST block length overflow".into()));
+                    };
+                    if end > payload.len() {
+                        return Err(CoreError::Internal(format!(
+                            "SST block past EOF in {}",
+                            self.path.display()
+                        )));
+                    }
+                    SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
+                    let found = seek_point_in_block_image(
+                        &payload[start..end],
+                        self.compressed_blocks,
+                        user_key,
+                        snapshot,
+                        &mut scratch.plain,
+                        &self.path,
+                    )?;
+                    if let Some(found) = found {
+                        if crate::lookup_kernel::prefer_newer_seq(
+                            best.is_some(),
+                            found.0,
+                            best.as_ref().map(|(s, _)| *s).unwrap_or(0),
+                        ) {
+                            best = Some(found);
+                        }
+                    }
+                    continue;
                 };
                 let cache_key = (crate::cache::path_id(&self.path), h.offset);
                 let cached = RAW_BLOCKS.with(|c| c.borrow_mut().get(&cache_key));

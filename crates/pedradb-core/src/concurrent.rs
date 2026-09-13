@@ -2901,6 +2901,7 @@ impl<E: Env> ConcurrentDb<E> {
                     g.fence_durability(&e, crate::db::FenceClass::of_core(&e));
                     return Err(e);
                 }
+                g.stage_changelog_delta_from_imm(&imm);
             }
         }
         let mut g = self.inner.write();

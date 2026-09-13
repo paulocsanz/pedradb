@@ -109,9 +109,16 @@ impl ChangeEntry {
 }
 
 /// In-memory + durable changelog.
+///
+/// `entries` keeps one entry per key (last-per-key). `index` maps key →
+/// slot so a flush can merge its immutable-memtable delta in O(delta)
+/// (RFC-0217 P1.1) without re-walking the whole live set. `max_seq` tracks
+/// the highest sequence because in-place merges can bump a mid-vec slot.
 #[derive(Debug, Default, Clone)]
 pub struct ChangeLog {
     entries: Vec<ChangeEntry>,
+    index: std::collections::HashMap<Bytes, usize>,
+    max_seq: SequenceNumber,
 }
 
 impl ChangeLog {
@@ -121,10 +128,20 @@ impl ChangeLog {
         Self::default()
     }
 
+    fn reindex(&mut self) {
+        self.index.clear();
+        self.index.reserve(self.entries.len());
+        for (i, e) in self.entries.iter().enumerate() {
+            self.index.insert(e.key.clone(), i);
+        }
+        self.max_seq = self.entries.last().map(|e| e.sequence).unwrap_or(0);
+    }
+
     /// Replace contents with `entries` sorted by sequence (SST last-per-key rebuild).
     pub fn replace_sorted(&mut self, mut entries: Vec<ChangeEntry>) {
         entries.sort_by_key(|e| e.sequence);
         self.entries = entries;
+        self.reindex();
     }
 
     /// Number of recorded changes.
@@ -142,7 +159,7 @@ impl ChangeLog {
     /// Highest sequence in the log, if any.
     #[must_use]
     pub fn max_sequence(&self) -> Option<SequenceNumber> {
-        self.entries.last().map(|e| e.sequence)
+        self.entries.last().map(|_| self.max_seq)
     }
 
     /// Append entries (must be non-decreasing by sequence).
@@ -151,7 +168,32 @@ impl ChangeLog {
             if let Some(max) = self.max_sequence() {
                 debug_assert!(e.sequence > max);
             }
+            self.index.insert(e.key.clone(), self.entries.len());
+            self.max_seq = self.max_seq.max(e.sequence);
             self.entries.push(e);
+        }
+    }
+
+    /// Merge a flush delta (latest-per-key of the immutable memtable) into
+    /// the cache in O(delta): replace the cached entry for a known key when
+    /// the delta is newer, push unknown keys. Keeps `changes_after` a
+    /// last-per-key set identical to a full `replace_sorted` rebuild —
+    /// only the vec order can differ (a replaced slot keeps its position).
+    pub fn merge_latest(&mut self, delta: impl IntoIterator<Item = ChangeEntry>) {
+        for e in delta {
+            match self.index.get(&e.key) {
+                Some(&pos) => {
+                    if self.entries[pos].sequence < e.sequence {
+                        self.max_seq = self.max_seq.max(e.sequence);
+                        self.entries[pos] = e;
+                    }
+                }
+                None => {
+                    self.index.insert(e.key.clone(), self.entries.len());
+                    self.max_seq = self.max_seq.max(e.sequence);
+                    self.entries.push(e);
+                }
+            }
         }
     }
 
@@ -326,7 +368,9 @@ pub fn decode_changelog(buf: &[u8]) -> Result<ChangeLog> {
     if off != payload.len() {
         return Err(CoreError::Internal("changelog trailing garbage".into()));
     }
-    Ok(ChangeLog { entries })
+    let mut log = ChangeLog::new();
+    log.replace_sorted(entries);
+    Ok(log)
 }
 
 #[cfg(test)]
@@ -416,6 +460,85 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    fn ent(seq: u64, key: &[u8], val: &[u8]) -> ChangeEntry {
+        ChangeEntry {
+            sequence: seq,
+            key: Bytes::copy_from_slice(key),
+            kind: ChangeKind::Put,
+            value: Bytes::copy_from_slice(val),
+        }
+    }
+
+    /// RFC-0217 P1.1: a flush delta merges last-per-key in O(delta) and the
+    /// resulting set equals a full `replace_sorted` rebuild.
+    #[test]
+    fn merge_latest_matches_full_rebuild_set() {
+        let mut log = ChangeLog::new();
+        log.replace_sorted(vec![ent(1, b"a", b"1"), ent(2, b"b", b"2")]);
+        // Delta from a later imm: new key + overwritten key + stale echo of
+        // a known key (imm is newer than the cache, so an echo only loses).
+        log.merge_latest([ent(3, b"c", b"3"), ent(4, b"a", b"1b"), ent(1, b"b", b"echo")]);
+        assert_eq!(log.len(), 3);
+        assert_eq!(log.max_sequence(), Some(4));
+        let mut rebuilt = ChangeLog::new();
+        // Full-rebuild equivalent: last-per-key of the union (a's @1 gone).
+        rebuilt.replace_sorted(vec![
+            ent(2, b"b", b"2"),
+            ent(3, b"c", b"3"),
+            ent(4, b"a", b"1b"),
+        ]);
+        // Both hold last-per-key sets; compare as key-sorted sets.
+        let mut m: Vec<_> = log.entries.clone();
+        m.sort_by_key(|e| e.key.clone());
+        let mut r: Vec<_> = rebuilt.entries.clone();
+        r.sort_by_key(|e| e.key.clone());
+        assert_eq!(m, r);
+        // Stale delta for a known key never regresses the cached version.
+        log.merge_latest([ent(2, b"c", b"regress")]);
+        assert_eq!(
+            log.entries.iter().find(|e| e.key == &Bytes::from_static(b"c")).map(|e| (e.sequence, e.value.clone())),
+            Some((3, Bytes::from_static(b"3")))
+        );
+        // changes_after stays a correct last-per-key set.
+        let after: Vec<_> = log.changes_after(0).into_iter().map(|e| (e.key.clone(), e.sequence)).collect();
+        assert!(after.contains(&(Bytes::from_static(b"a"), 4)));
+        assert!(after.contains(&(Bytes::from_static(b"b"), 2)));
+        assert!(after.contains(&(Bytes::from_static(b"c"), 3)));
+    }
+
+    /// Store/load round-trips a merged (unsorted-slot) log.
+    #[test]
+    fn merged_log_store_load_round_trip() {
+        let dir = std::env::temp_dir().join(format!(
+            "pedradb-changelog-merge-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let env = StdEnv;
+        let mut log = ChangeLog::new();
+        log.replace_sorted(vec![ent(1, b"a", b"1"), ent(2, b"b", b"2")]);
+        log.merge_latest([ent(9, b"a", b"1z"), ent(10, b"q", b"10")]);
+        log.store_on(&env, &dir).unwrap();
+        let loaded = ChangeLog::load_on(&env, &dir).unwrap();
+        assert_eq!(loaded.len(), 3);
+        assert_eq!(loaded.max_sequence(), Some(10));
+        let find = |k: &[u8]| {
+            loaded
+                .entries
+                .iter()
+                .find(|e| e.key.as_ref() == k)
+                .map(|e| (e.sequence, e.value.clone()))
+        };
+        assert_eq!(find(b"a"), Some((9, Bytes::from_static(b"1z"))));
+        assert_eq!(find(b"b"), Some((2, Bytes::from_static(b"2"))));
+        assert_eq!(find(b"q"), Some((10, Bytes::from_static(b"10"))));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// F53: missing CHANGELOG after flush rebuilds last-per-key from SST (not empty).
     #[test]
     fn changelog_missing_post_flush_rebuilds_feed_from_sst() {
@@ -446,7 +569,9 @@ mod tests {
             }
             assert_eq!(db.changes_after(0).len(), 5);
             db.flush().unwrap();
-            drop(db);
+            // RFC-0217 P1.1: the flush defers the CHANGELOG store (archived
+            // WAL carries the feed); close is the synchronous store point.
+            db.close().unwrap();
         }
         let path = dir.join(CHANGELOG_FILE_NAME);
         assert!(path.exists());
@@ -619,7 +744,9 @@ mod tests {
             let mut db = Db::open_with(&dir, opts).unwrap();
             db.put(b"k", b"v").unwrap();
             db.flush().unwrap();
-            drop(db);
+            // RFC-0217 P1.1: close stores the (deferred) feed so the file
+            // exists to corrupt below.
+            db.close().unwrap();
         }
         let path = dir.join(CHANGELOG_FILE_NAME);
         let mut bytes = fs::read(&path).unwrap();

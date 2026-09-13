@@ -98,6 +98,27 @@ pub const HORIZON_SAMPLE_RING_CAP: usize = 4096;
 /// Default WAL file name inside the DB directory.
 pub const WAL_FILE_NAME: &str = "CURRENT.log";
 
+/// File-name prefix of an archived WAL segment inside the DB directory
+/// (RFC-0217 P1.1). Naming helpers live here, not in `changelog_kernel`:
+/// they are I/O naming, not decision logic, and `str::pattern`/`format!`
+/// machinery is outside what the aeneas/charon extraction lane translates.
+const WAL_ARCHIVE_FILE_PREFIX: &str = "WAL.arch";
+
+/// On-disk name of archived segment `idx` (`WAL.arch0007`).
+fn wal_archive_slot_name(idx: u64) -> String {
+    format!("{WAL_ARCHIVE_FILE_PREFIX}{idx:04}")
+}
+
+/// Inverse of [`wal_archive_slot_name`]: the segment index encoded in a
+/// directory entry name, `None` for any other file.
+fn wal_archive_slot_of(name: &str) -> Option<u64> {
+    let digits = name.strip_prefix(WAL_ARCHIVE_FILE_PREFIX)?;
+    if digits.len() != 4 || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse::<u64>().ok()
+}
+
 /// F188: marker byte prepended to inline values that would otherwise sniff
 /// as a vlog pointer (`VLG1…`/`VLG3…`) or that already start with the marker,
 /// so [`Db::resolve_stored_value`] strips exactly one byte unconditionally.
@@ -1660,6 +1681,51 @@ pub struct Db<E: Env = StdEnv> {
     /// stale and the feed is rebuilt on demand (RFC-0019: on-disk CHANGELOG
     /// is a cache).
     changelog_rebuild_budget_entries: u64,
+    /// RFC-0217 P1.1: explicit flushes since the last CHANGELOG store
+    /// (lazy feed). Store fires at the debounce while the rotated WAL
+    /// segments stay archived as the crash rebuild source.
+    changelog_flushes_since_store: u64,
+    /// Highest sequence covered by the on-disk CHANGELOG cache. Rotates
+    /// archive instead of truncating while `last_sequence()` is above it.
+    changelog_disk_watermark: SequenceNumber,
+    /// Highest sequence whose data is in MANIFEST-published SSTs
+    /// (RFC-0217 P1.1). While a rotate defers the manifest publish, the
+    /// archived segments — not the manifest — are the only durable copy of
+    /// the window above this floor; archives above it must survive every
+    /// store/cleanup that would otherwise delete them.
+    manifest_published_seq: SequenceNumber,
+    /// True when the live SST inventory changed since the last successful
+    /// MANIFEST publish (RFC-0217 P1.1). A rotate may only truncate when
+    /// this is false — unpublished SSTs are orphans a reopen sweeps, and
+    /// the WAL frames are the only other copy of their entries.
+    manifest_dirty: bool,
+    /// True when an installed-but-unpublished SST holds entries at or
+    /// below `manifest_published_seq` (RFC-0217 P1.1). Archive replay
+    /// drops frames at or below the floor (a memtable entry from replay
+    /// would shadow newer published data — `lookup` trusts mem-first),
+    /// so such a window must publish, never archive. Bulk-run sequences
+    /// interleaved with normal puts are the source (put below a published
+    /// run's max).
+    unpublished_below_floor: bool,
+    /// Highest sequence of an acked op that has no WAL frame (RFC-0217
+    /// P1.1): the bulk run arrays and the 1-key hydrate meta tail
+    /// (disableWAL class). Archives cannot replay these — a rotate that
+    /// would drop or archive the segment while they sit above the
+    /// published floor must publish instead.
+    walless_seq_high: SequenceNumber,
+    /// Highest sequence held by any archived WAL segment. Deletion is safe
+    /// only once `manifest_published_seq` covers it.
+    wal_archive_max_seq: SequenceNumber,
+    /// Next archived WAL segment slot (`WAL.archNNNN`); `0` = none live.
+    wal_archive_next: u64,
+    /// First archived slot not yet unlinked (RFC-0217 P1.1 budgeted
+    /// cleanup). Segments `[0, wal_archive_unlinked)` are gone;
+    /// `[wal_archive_unlinked, wal_archive_next)` are live.
+    wal_archive_unlinked: u64,
+    /// Archived segments kept before a rotate forces a synchronous store.
+    wal_archive_cap: u64,
+    /// Explicit-flush store debounce (kernel default 64).
+    changelog_flush_debounce: u64,
     /// Merged compaction output splits into multiple SSTs at this many
     /// bytes (the SST writer buffers one output file in memory — see
     /// [`crate::compact_kernel::COMPACT_TARGET_FILE_BYTES`]). Rocks
@@ -1854,6 +1920,82 @@ impl<E: Env> Db<E> {
         let wal_path = dir.join(WAL_FILE_NAME);
         let mut mem = MemTable::new();
         let mut change_log = ChangeLog::load_on(&env, &dir)?;
+        // RFC-0217 P1.1: archived WAL segments (rename-instead-of-truncate
+        // while the lazy CHANGELOG cache lags). Their keys are durable in
+        // SSTs listed by the MANIFEST **up to `manifest_floor`** — but the
+        // deferred rotate publishes the MANIFEST only at the debounce
+        // gate, so ops above the floor exist only in the archives
+        // (unpublished SSTs are orphans, swept by `gc_orphan_ssts`).
+        // Replay ops above the floor into the memtable as data; ops at or
+        // below it are already in live SSTs and re-applying them would
+        // resurrect superseded versions. The feed extension covers both.
+        let manifest_floor = max_seq;
+        let feed_max_loaded = change_log.max_sequence().unwrap_or(0);
+        let mut wal_archives: Vec<u64> = env
+            .read_dir_names(&dir)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|n| wal_archive_slot_of(n))
+            .collect();
+        wal_archives.sort_unstable();
+        let mut archive_max_seq_seen = 0u64;
+        for slot in &wal_archives {
+            let path = dir.join(wal_archive_slot_name(*slot));
+            let (records, _last_good, _resync) = match Wal::recover_span_on(&env, &path) {
+                Ok(r) => r,
+                Err(e) => {
+                    // A segment may be the only durable copy of the window
+                    // above the manifest floor — torn frames are
+                    // corruption, loud (never a silent skip).
+                    return Err(crate::corrupt::escalate_or_fail(
+                        &env,
+                        &dir,
+                        "arch",
+                        0,
+                        CoreError::Internal(format!(
+                            "torn archived WAL segment {} ({e})",
+                            path.display()
+                        )),
+                    ));
+                }
+            };
+            for raw in records {
+                let rec = WriteRecord::decode(&raw)?;
+                if let Some(s) = rec.max_sequence() {
+                    archive_max_seq_seen = archive_max_seq_seen.max(s);
+                }
+                // RFC-0217 P1.1: archived segments replay as data only
+                // above the manifest floor — the rotate never archives a
+                // below-floor window (see `unpublished_below_floor`), so
+                // every dropped frame's entry is in a published SST, and a
+                // replayed frame can never shadow newer published data
+                // (`lookup` trusts mem-first).
+                let data_ops: Vec<_> = rec
+                    .ops
+                    .iter()
+                    .filter(|op| op.sequence > manifest_floor)
+                    .cloned()
+                    .collect();
+                if !crate::write_admission_kernel::batch_is_empty(data_ops.len() as u64) {
+                    apply_ops_owned(&mut mem, data_ops);
+                    if let Some(s) = rec.max_sequence() {
+                        max_seq = max_seq.max(s);
+                    }
+                }
+                let mut missing = Vec::new();
+                for op in &rec.ops {
+                    if crate::write_admission_kernel::seq_after_feed(
+                        op.sequence,
+                        change_log.max_sequence().unwrap_or(0),
+                    ) {
+                        missing.push(ChangeEntry::from_write_op(op));
+                    }
+                }
+                if !crate::write_admission_kernel::batch_is_empty(missing.len() as u64) {
+                    change_log.extend(missing);
+                }
+            }
+        }
         // RFC-0047 P0.2: set when a PointInTime open discards a WAL suffix.
         let mut point_in_time_report: Option<RecoveryReport> = None;
 
@@ -2042,12 +2184,6 @@ impl<E: Env> Db<E> {
                     change_log.extend(missing);
                 }
             }
-            if crate::write_admission_kernel::seq_after_feed(
-                change_log.max_sequence().unwrap_or(0),
-                feed_max,
-            ) {
-                change_log.store_on(&env, &dir)?;
-            }
             let wal_len = env.metadata_len(&wal_path).unwrap_or(0);
             if crate::write_admission_kernel::torn_tail_needs_cut(wal_len, last_good) {
                 let mut wal_file = env.open_append(&wal_path)?;
@@ -2064,6 +2200,34 @@ impl<E: Env> Db<E> {
                     crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
                     | crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => {}
                 }
+            }
+        }
+
+        // RFC-0217 P1.1: archives left behind by a debounced store are now
+        // covered — the replay above folded every new archive op into the
+        // feed (an unchanged feed means each archive op was already
+        // last-per-key covered). Store once when anything extended.
+        if crate::write_admission_kernel::seq_after_feed(
+            change_log.max_sequence().unwrap_or(0),
+            feed_max_loaded,
+        ) {
+            change_log.store_on(&env, &dir)?;
+        }
+        // RFC-0217 P1.1: the segments whose data the MANIFEST already
+        // publishes (≤ manifest_floor) are redundant — delete now. Any
+        // segment above the floor is the only durable copy of its window
+        // (the memtable replay is volatile): keep the files; the running
+        // db clears them at the next store point after the deferred
+        // publish catches up.
+        let keep_wal_archives =
+            !wal_archives.is_empty() && manifest_floor < archive_max_seq_seen;
+        if !keep_wal_archives {
+            for slot in &wal_archives {
+                let path = dir.join(wal_archive_slot_name(*slot));
+                let _ = env.remove_file(&path);
+            }
+            if !wal_archives.is_empty() {
+                let _ = env.sync_dir(&dir);
             }
         }
 
@@ -2227,10 +2391,32 @@ impl<E: Env> Db<E> {
             bytes_written_sst: 0,
             compact_count: 0,
             vlog_gc_count: 0,
+            changelog_disk_watermark: change_log.max_sequence().unwrap_or(0),
+            manifest_published_seq: manifest_floor,
+            // Recovery published (or adopted) exactly this inventory; the
+            // WAL-less watermarks start clean (RFC-0217 P1.1).
+            manifest_dirty: false,
+            unpublished_below_floor: false,
+            walless_seq_high: 0,
+            wal_archive_max_seq: if keep_wal_archives {
+                archive_max_seq_seen
+            } else {
+                0
+            },
+            wal_archive_next: if keep_wal_archives {
+                wal_archives.last().map_or(0, |s| s.saturating_add(1))
+            } else {
+                0
+            },
+            wal_archive_unlinked: 0,
             change_log,
             changelog_interval: changelog_interval_from_env(),
             changelog_rebuild_budget_entries:
                 crate::changelog_kernel::DEFAULT_CHANGELOG_REBUILD_BUDGET_ENTRIES,
+            changelog_flushes_since_store: 0,
+            wal_archive_cap: crate::changelog_kernel::DEFAULT_WAL_ARCHIVE_SEGMENT_CAP,
+            changelog_flush_debounce:
+                crate::changelog_kernel::DEFAULT_CHANGELOG_FLUSH_DEBOUNCE_FLUSHES,
             compact_target_file_bytes: crate::compact_kernel::COMPACT_TARGET_FILE_BYTES,
             l1_target_bytes: crate::compact_kernel::COMPACT_TARGET_FILE_BYTES,
             parallel_merge: None,
@@ -2548,6 +2734,20 @@ impl<E: Env> Db<E> {
         self.ssts.len()
     }
 
+    /// File numbers of the live SST inventory (from each table's path).
+    #[must_use]
+    pub fn sst_file_nums(&self) -> Vec<u64> {
+        self.ssts
+            .iter()
+            .filter_map(|t| {
+                t.path()
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .and_then(|s| s.parse().ok())
+            })
+            .collect()
+    }
+
     /// Persist CHANGELOG at most every `n` durable commits (RFC-0031).
     ///
     /// `0` disables the commit-path store (flush / close / checkpoint still
@@ -2570,6 +2770,33 @@ impl<E: Env> Db<E> {
     pub fn set_changelog_rebuild_budget_entries(&mut self, n: u64) -> &mut Self {
         self.changelog_rebuild_budget_entries = n;
         self
+    }
+
+    /// Explicit-flush CHANGELOG store debounce in flushes (RFC-0217 P1.1).
+    /// `0` stores on every explicit flush (F212-legacy synchronous tail).
+    pub fn set_changelog_flush_debounce(&mut self, n: u64) -> &mut Self {
+        self.changelog_flush_debounce = n;
+        self
+    }
+
+    /// Archived WAL segments kept before a rotate forces a synchronous
+    /// CHANGELOG store (RFC-0217 P1.1). Bounds crash replay and disk.
+    pub fn set_wal_archive_cap(&mut self, n: u64) -> &mut Self {
+        self.wal_archive_cap = n;
+        self
+    }
+
+    /// Live archived WAL segments (RFC-0217 P1.1 diagnostics/tests).
+    #[must_use]
+    pub fn wal_archive_count(&self) -> u64 {
+        self.wal_archive_live()
+    }
+
+    /// Highest sequence covered by the on-disk CHANGELOG cache (RFC-0217
+    /// P1.1 diagnostics/tests).
+    #[must_use]
+    pub fn changelog_disk_watermark(&self) -> SequenceNumber {
+        self.changelog_disk_watermark
     }
 
     /// Merged compaction output file split target in bytes (Rocks
@@ -2612,6 +2839,13 @@ impl<E: Env> Db<E> {
             Ok(()) => {
                 self.changelog_store_count = self.changelog_store_count.saturating_add(1);
                 self.commits_since_changelog = 0;
+                self.changelog_flushes_since_store = 0;
+                // Watermark = what the file covers (a skipped over-budget
+                // rebuild stores a stale cache; the archives must stay).
+                self.changelog_disk_watermark = self.change_log.max_sequence().unwrap_or(0);
+                if self.changelog_disk_watermark >= self.last_sequence() {
+                    self.delete_wal_archives(false);
+                }
             }
             Err(e) => {
                 tracing::warn!(
@@ -2622,6 +2856,49 @@ impl<E: Env> Db<E> {
         }
     }
 
+    /// Delete archived WAL segments (callers only run this after a
+    /// successful CHANGELOG store that covers their content, or at open
+    /// when the loaded cache already covers them). Budgeted: a gate that
+    /// just paid the publish + store also unlinks at most
+    /// [`WAL_ARCHIVE_UNLINK_BUDGET`] segments; the rest drains on the
+    /// following stores so no single flush absorbs the whole chain's
+    /// unlink cost. `force` sweeps the chain at once (close).
+    fn delete_wal_archives(&mut self, force: bool) {
+        if self.wal_archive_next == 0 {
+            return;
+        }
+        // RFC-0217 P1.1: a CHANGELOG watermark only proves the *cache* is
+        // current — not that the data underneath is MANIFEST-published.
+        // While the deferred publish lags the archives (the rotate skipped
+        // it), the segments above `manifest_published_seq` are the only
+        // durable copy of their window: keep them.
+        if self.manifest_published_seq < self.wal_archive_max_seq {
+            return;
+        }
+        let mut unlinked_now: u64 = 0;
+        while self.wal_archive_unlinked < self.wal_archive_next {
+            if !force && unlinked_now >= crate::changelog_kernel::WAL_ARCHIVE_UNLINK_BUDGET {
+                return;
+            }
+            let path = self.dir.join(wal_archive_slot_name(
+                self.wal_archive_unlinked,
+            ));
+            self.wal_archive_unlinked += 1;
+            unlinked_now += 1;
+            let _ = self.env.remove_file(&path);
+        }
+        self.wal_archive_next = 0;
+        self.wal_archive_unlinked = 0;
+        let _ = self.env.sync_dir(&self.dir);
+    }
+
+    /// Archived segments still on disk (created minus already-unlinked) —
+    /// the live chain length the cap bounds (RFC-0217 P1.1).
+    fn wal_archive_live(&self) -> u64 {
+        self.wal_archive_next
+            .saturating_sub(self.wal_archive_unlinked)
+    }
+
     /// Debounced persist after a durable (synced) commit (RFC-0031 P0.1).
     fn maybe_persist_changelog_after_durable_commit(&mut self) {
         self.commits_since_changelog = self.commits_since_changelog.saturating_add(1);
@@ -2630,14 +2907,85 @@ impl<E: Env> Db<E> {
         }
     }
 
-    /// Explicit-flush tail (`ConcurrentDb::flush`): persist the CHANGELOG
-    /// cache even when the debounce interval is 0 — the flush rotated the
-    /// WAL, so reopen cannot rebuild the flushed keys from it (mirrors the
-    /// `Db::flush` tail).
+    /// Explicit-flush tail (`ConcurrentDb::flush` / `Db::flush`): store the
+    /// CHANGELOG cache when the debounce/cap gate fires — between stores the
+    /// rotate archived the WAL segment as the crash rebuild source (RFC-0217
+    /// P1.1), so the on-disk cache may lag without losing feed content. The
+    /// flush-time `stage_changelog_delta_from_imm` keeps the in-memory feed
+    /// complete for runtime readers either way.
     pub(crate) fn persist_changelog_after_explicit_flush(&mut self) {
         if self.changelog_interval == 0 {
+            self.changelog_flushes_since_store = self.changelog_flushes_since_store.saturating_add(1);
+            if self.changelog_store_gate_fires() {
+                self.changelog_store_point();
+            }
+        }
+    }
+
+    /// RFC-0217 P1.1 store gate: debounce flushes or a full archive chain
+    /// while the on-disk cache lags.
+    fn changelog_store_gate_fires(&self) -> bool {
+        self.changelog_interval == 0
+            && crate::changelog_kernel::changelog_flush_store_now(
+                self.changelog_disk_watermark < self.last_sequence(),
+                self.changelog_flushes_since_store,
+                self.changelog_flush_debounce,
+                self.wal_archive_live(),
+                self.wal_archive_cap,
+            )
+    }
+
+    /// Highest sequence held by any live SST — the data floor a published
+    /// MANIFEST actually covers (RFC-0217 P1.1). Every archived op at or
+    /// below this is in a listed SST (flushes move contiguous mem ranges,
+    /// so a table's max bounds its entries).
+    fn sst_max_sequence_floor(&self) -> SequenceNumber {
+        self.ssts.iter().map(|t| t.max_sequence()).max().unwrap_or(0)
+    }
+
+    /// Synchronous store point (RFC-0217 P1.1): publish the MANIFEST
+    /// durably first — the rotate defers that publish while it archives,
+    /// so the archived segments above `manifest_published_seq` are the
+    /// only durable copy of their window; the store below may delete
+    /// them, which is safe only after the publish covers them.
+    fn changelog_store_point(&mut self) {
+        if self.persist_manifest_durable().is_ok() {
             self.persist_changelog_best_effort();
         }
+    }
+
+    /// RFC-0217 P1.1: merge the flushed immutable memtable's latest-per-key
+    /// into the lazy feed cache in O(imm). Without this, a deferred store
+    /// plus the archived (rotated) WAL would leave runtime feed readers
+    /// missing the flushed keys between stores. Eager feeds extend on the
+    /// commit path already.
+    pub(crate) fn stage_changelog_delta_from_imm(&mut self, imm: &MemTable) {
+        if !self.feed_is_lazy() {
+            return;
+        }
+        let mut latest: std::collections::BTreeMap<Bytes, (InternalKey, Bytes)> =
+            std::collections::BTreeMap::new();
+        for (ik, v) in imm.iter_internal() {
+            match latest.get(&ik.user_key) {
+                Some((old, _)) if old.sequence >= ik.sequence => {}
+                _ => {
+                    latest.insert(ik.user_key.clone(), (ik.clone(), v.clone()));
+                }
+            }
+        }
+        let mut delta = Vec::with_capacity(latest.len());
+        for (key, (ik, v)) in latest {
+            let Ok(value) = self.resolve_stored_value(v) else {
+                continue;
+            };
+            delta.push(ChangeEntry {
+                sequence: ik.sequence,
+                key,
+                kind: ChangeKind::from_value_type(ik.kind),
+                value,
+            });
+        }
+        self.change_log.merge_latest(delta);
     }
 
     /// LSM level of each live SST (parallel to inventory order).
@@ -3901,6 +4249,9 @@ impl<E: Env> Db<E> {
     }
 
     fn note_sst_inventory_changed(&mut self) {
+        // RFC-0217 P1.1: the on-disk MANIFEST no longer lists this
+        // inventory — a rotate must not treat the segment as settled.
+        self.manifest_dirty = true;
         self.rebuild_sst_order();
         self.sync_retired_to_l0();
     }
@@ -4702,9 +5053,17 @@ impl<E: Env> Db<E> {
     /// Corrupt SST/MANIFEST or I/O.
     pub fn verify_checksums(&self) -> Result<()> {
         if let Some(vs) = manifest::load(&self.env, &self.dir)? {
-            if vs.sst_file_nums.len() != self.ssts.len() {
+            // RFC-0217 P1.1: with the deferred publish the in-memory
+            // inventory may legitimately run AHEAD of the on-disk MANIFEST
+            // (dirty window). The F196 invariant is the other direction —
+            // the manifest may never name a file memory does not hold.
+            let live: std::collections::HashSet<u64> = self
+                .sst_file_nums()
+                .into_iter()
+                .collect();
+            if vs.sst_file_nums.iter().any(|n| !live.contains(n)) {
                 return Err(CoreError::CorruptManifest(format!(
-                    "in-memory SST count {} != MANIFEST {}",
+                    "MANIFEST names SSTs memory does not hold (live {}, manifest {})",
                     self.ssts.len(),
                     vs.sst_file_nums.len()
                 )));
@@ -4764,6 +5123,10 @@ impl<E: Env> Db<E> {
             self.env.create_dir_all(dest)?;
         }
 
+        // RFC-0217 P1.1: publish the deferred MANIFEST first so the copy
+        // lists every SST below (the archive copies further down carry any
+        // still-unpublished window either way).
+        self.persist_manifest_durable()?;
         // Copy live inventory files.
         let current = self.dir.join(manifest::CURRENT_FILE);
         if self.env.exists(&current) {
@@ -4835,6 +5198,16 @@ impl<E: Env> Db<E> {
         if self.env.exists(&chlog) {
             self.env
                 .copy_file(&chlog, &dest.join(crate::change_feed::CHANGELOG_FILE_NAME))?;
+        }
+        // RFC-0217 P1.1: archived WAL segments still carry feed content when
+        // the store could not cover them (e.g. over-budget rebuild) — the
+        // checkpoint replays them feed-only at open, exactly like the source.
+        for slot in 0..self.wal_archive_next {
+            let name = wal_archive_slot_name(slot);
+            let src = self.dir.join(&name);
+            if self.env.exists(&src) {
+                self.env.copy_file(&src, &dest.join(&name))?;
+            }
         }
 
         // F175: after horizon GC, archived versions exist only in `history/`
@@ -4908,10 +5281,9 @@ impl<E: Env> Db<E> {
                 return Ok(());
             }
         }
-        // Explicit flush: persist the cache even when interval is 0 (WAL gone).
-        if self.changelog_interval == 0 {
-            self.persist_changelog_best_effort();
-        }
+        // Explicit flush: CHANGELOG store on the debounce/cap gate (RFC-0217
+        // P1.1 — the rotate archived the WAL as the crash source).
+        self.persist_changelog_after_explicit_flush();
         Ok(())
     }
 
@@ -5357,6 +5729,9 @@ impl<E: Env> Db<E> {
             match tail.into_iter().next().unwrap() {
                 BatchOp::Put { key, value } => {
                     let seq = self.alloc_seq()?;
+                    // RFC-0217 P1.1: no WAL frame — a rotate may only drop
+                    // the segment once a publish covers this sequence.
+                    self.walless_seq_high = self.walless_seq_high.max(seq);
                     self.mem
                         .insert(InternalKey::new(key, seq, ValueType::Value), value);
                     self.publish_sequence(seq);
@@ -5393,6 +5768,9 @@ impl<E: Env> Db<E> {
     }
 
     pub(crate) fn flush_all_bulk_runs(&mut self) -> Result<()> {
+        let had_bulk = !crate::write_admission_kernel::batch_is_empty(self.parked_bulk.len() as u64)
+            || !crate::write_admission_kernel::batch_is_empty(self.bulk_runs.len() as u64)
+            || self.bulk_manifest_debt > 0;
         while let Some((fam, run)) = self.parked_bulk.pop_front() {
             self.install_bulk_run(&fam, run.as_ref())?;
         }
@@ -5400,8 +5778,14 @@ impl<E: Env> Db<E> {
         for f in fams {
             self.flush_bulk_run(&f)?;
         }
-        if let Some(persist) = self.persist_bulk_manifest(true)? {
-            persist.write()?;
+        // RFC-0217 P1.1: settle only actual bulk work. A plain put+flush
+        // workload must not pay a MANIFEST publish here on every explicit
+        // flush — the WAL rotate below owns that publish (deferred to the
+        // debounce/cap gate while it archives).
+        if had_bulk {
+            if let Some(persist) = self.persist_bulk_manifest(true)? {
+                persist.write()?;
+            }
         }
         Ok(())
     }
@@ -5580,6 +5964,9 @@ impl<E: Env> Db<E> {
         }
         let mut seq = seq0;
         let cap = self.bulk_chunk_cap();
+        // RFC-0217 P1.1: the run arrays carry no WAL frames — the rotate
+        // treats this whole sequence range as WAL-less until published.
+        self.walless_seq_high = self.walless_seq_high.max(last);
         let over = {
             let run = self.bulk_runs.entry(family.to_string()).or_default();
             run.reserve(n);
@@ -6320,6 +6707,17 @@ impl<E: Env> Db<E> {
             return Ok(());
         }
         let nums = self.alloc_file_nums_for_imm(&imm);
+        // RFC-0217 P1.1: entries at or below the published floor leave the
+        // replay-safe window — until a publish covers them the rotate must
+        // publish, never archive (replay drops frames ≤ floor).
+        if imm
+            .iter_internal()
+            .map(|(ik, _)| ik.sequence)
+            .min()
+            .is_some_and(|min| min <= self.manifest_published_seq)
+        {
+            self.unpublished_below_floor = true;
+        }
         let files = match Self::write_imm_l0_files(&self.env, &self.dir, self.sync, &imm, &nums) {
             Ok(f) => f,
             Err(e) => {
@@ -6338,6 +6736,9 @@ impl<E: Env> Db<E> {
             self.imm = Some(imm);
             return Err(self.fence_io_err(e));
         }
+        // RFC-0217 P1.1: O(imm) feed merge keeps lazy-feed readers complete
+        // between the debounced CHANGELOG stores.
+        self.stage_changelog_delta_from_imm(&imm);
         Ok(())
     }
 
@@ -6407,17 +6808,46 @@ impl<E: Env> Db<E> {
     }
 
     fn rotate_wal_now(&mut self) -> Result<()> {
-        // SST + MANIFEST must be durable before the WAL that covers those
-        // keys is discarded (G1). L0 flush skips file fsync; this is the pay
-        // point.
-        if let Err(e) = self.persist_manifest_durable() {
-            return Err(self.fence_io_err(e));
+        // RFC-0217 P1.1 rotate contract:
+        // - The WAL-less window (bulk run arrays + the 1-key hydrate meta
+        //   tail) above the published floor has no archive copy: that
+        //   rotate must publish, never archive.
+        // - A below-floor unpublished window must publish too: replay drops
+        //   frames ≤ floor, so the segment is not a recovery source for it.
+        // - Unpublished-but-above-floor frames may archive — reopen replays
+        //   them as data.
+        // - Truncate only when everything is settled (inventory published,
+        //   no WAL-less debt, lazy feed current): the feed then rebuilds
+        //   from the published SSTs (F53) and no publish is needed.
+        let walless_covered = self.manifest_published_seq >= self.walless_seq_high;
+        let feed_needs_segment = self.changelog_interval == 0
+            && self.changelog_disk_watermark < self.last_sequence();
+        let settled = !self.manifest_dirty && walless_covered && !feed_needs_segment;
+        let archive_now = walless_covered
+            && !self.unpublished_below_floor
+            && crate::changelog_kernel::wal_rotate_archives(
+                !settled,
+                self.wal_archive_live(),
+                self.wal_archive_cap,
+            );
+        let store_now = self.changelog_store_gate_fires();
+        if !settled && (!archive_now || store_now) {
+            // SST + MANIFEST must be durable before the WAL that covers
+            // those keys is discarded (G1). L0 flush skips file fsync;
+            // this is the pay point.
+            if let Err(e) = self.persist_manifest_durable() {
+                return Err(self.fence_io_err(e));
+            }
         }
         // WAL truncate drops the rebuild source for the CHANGELOG cache.
         // Persist first when debounce is on. interval 0: skip on auto-flush
         // (RFC-0036) — F53 SST rebuild covers crash+reopen; explicit flush
         // / close still store.
         if self.changelog_interval > 0 {
+            self.persist_changelog_best_effort();
+        } else if store_now {
+            // Gate point: the durable publish above covers every archived
+            // segment, so this store may also clear them.
             self.persist_changelog_best_effort();
         }
         if self.commit_inflight.load(Ordering::Acquire) > 0 {
@@ -6441,6 +6871,48 @@ impl<E: Env> Db<E> {
                     "rotate discards WAL after SST durable ⇒ not required sync"
                 );
                 self.wal.lock().sync_data()?;
+            }
+        }
+        // RFC-0217 P1.1: unpublished window or lazy-feed debt → the drained
+        // segment becomes the crash rebuild source for the debounced
+        // store/publish. Rename keeps the frames; reopen replays archives
+        // as data (unconditional, like the live WAL). Re-evaluated after
+        // the gate publish/store above so a settled segment truncates.
+        let walless_covered = self.manifest_published_seq >= self.walless_seq_high;
+        let feed_needs_segment = self.changelog_interval == 0
+            && self.changelog_disk_watermark < self.last_sequence();
+        let settled = !self.manifest_dirty && walless_covered && !feed_needs_segment;
+        if walless_covered
+            && !self.unpublished_below_floor
+            && crate::changelog_kernel::wal_rotate_archives(
+                !settled,
+                self.wal_archive_live(),
+                self.wal_archive_cap,
+            )
+        {
+            let arch = self
+                .dir
+                .join(wal_archive_slot_name(self.wal_archive_next));
+            match self.env.rename(&wal_path, &arch) {
+                Ok(()) => {
+                    self.wal_archive_next += 1;
+                    self.wal_archive_max_seq = self.wal_archive_max_seq.max(self.last_sequence());
+                    let mut new = Wal::create_on(&self.env, &wal_path)?;
+                    new.set_full_fsync(self.wal.lock().full_fsync());
+                    let old = std::mem::replace(&mut *self.wal.lock(), new);
+                    old.close()?;
+                    return self.sync_dir_if_required(&self.dir);
+                }
+                Err(e) => {
+                    // Rename failed: the legacy truncate below discards the
+                    // segment, so publish the deferred MANIFEST first, then
+                    // store (best-effort) and fall through.
+                    tracing::warn!(error = %e, "WAL archive rename failed; storing CHANGELOG");
+                    if let Err(me) = self.persist_manifest_durable() {
+                        return Err(self.fence_io_err(me));
+                    }
+                    self.persist_changelog_best_effort();
+                }
             }
         }
         let mut new = Wal::create_on(&self.env, &wal_path)?;
@@ -8753,8 +9225,15 @@ impl<E: Env> Db<E> {
     /// # Errors
     /// I/O from WAL flush or lock release.
     pub fn close(mut self) -> Result<()> {
+        // RFC-0217 P1.1: close is a durability point — publish the
+        // deferred MANIFEST before the CHANGELOG store below may clear
+        // the archived segments that carry the unpublished window.
+        self.persist_manifest_durable()?;
         // RFC-0031: close is a persist point for the CHANGELOG cache.
         self.persist_changelog_best_effort();
+        // Sweep the whole covered chain (the budgeted drain would leave
+        // tail segments behind).
+        self.delete_wal_archives(true);
         self.vlog_prepare_wal(true)?;
         self.release_lock()?;
         // Flush in place — `Db` implements `Drop` (Env unlock), so we cannot move `wal`.
@@ -10466,13 +10945,25 @@ impl<E: Env> Db<E> {
             )));
         }
         match self.take_manifest_persist()?.write() {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                // Floor = data actually in MANIFEST-listed SSTs. `last_sequence()`
+                // would wrongly cover memtable-only data (e.g. the archive
+                // replay at open) whose durable copy is the archived segment.
+                self.manifest_published_seq = self
+                    .sst_max_sequence_floor();
+                // The published generation lists this exact inventory.
+                self.manifest_dirty = false;
+                self.unpublished_below_floor = false;
+                Ok(())
+            }
             // F196: CURRENT already names the new MANIFEST — the version on
             // disk IS the new one (unsynced). Undoing here would put memory
             // behind disk and delete files the manifest references; fence
             // and treat the persist as landed (promote/fence shape).
             Err(CoreError::ManifestCommittedUnsynced { .. }) => {
                 self.durability_fenced = true;
+                self.manifest_dirty = false;
+                self.unpublished_below_floor = false;
                 Ok(())
             }
             Err(e) => Err(e),
@@ -14328,7 +14819,7 @@ mod tests {
             db.put(b"tail", b"T").unwrap();
             std::mem::forget(db);
         }
-        let db = Db::open(&dir).unwrap();
+        let mut db = Db::open(&dir).unwrap();
         assert_eq!(
             db.get(b"flushed").as_deref(),
             Some(b"F".as_ref()),
@@ -14339,6 +14830,15 @@ mod tests {
             Some(b"T".as_ref()),
             "acked key on the WAL-replay path"
         );
+        // RFC-0217 P1.1: the crash lands inside the deferred-publish
+        // window, so this reopen serves "flushed" from the archive replay
+        // (mem) — the inventory path returns after a flush+close pushes
+        // the window into a published SST.
+        db.flush().unwrap();
+        db.close().unwrap();
+        let db = Db::open(&dir).unwrap();
+        assert_eq!(db.get(b"flushed").as_deref(), Some(b"F".as_ref()));
+        assert_eq!(db.get(b"tail").as_deref(), Some(b"T".as_ref()));
         assert!(db.sst_count() >= 1, "reopen served the committed inventory");
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
@@ -16916,7 +17416,9 @@ mod tests {
             let mut db = Db::open(&dir).unwrap();
             db.put(b"k", b"v").unwrap();
             db.flush().unwrap();
-            // Flush pipeline rotated the non-empty WAL once.
+            // RFC-0217 P1.1: the flush archived the segment and deferred
+            // the publish — below the debounce the MANIFEST does not
+            // advance on a flush either.
             let after_flush = current_manifest_num(&dir);
             assert!(after_flush >= 1);
             for _ in 0..8 {
@@ -16927,18 +17429,45 @@ mod tests {
                 after_flush,
                 "idle polls must not rewrite MANIFEST for an empty segment"
             );
-            // A new append re-arms rotation exactly once.
+            // A new append re-arms rotation (as an archive) exactly once —
+            // still no publish below the debounce.
             db.put(b"k2", b"v2").unwrap();
             db.flush().unwrap();
             let after_second_flush = current_manifest_num(&dir);
-            assert!(after_second_flush > after_flush);
+            assert_eq!(
+                after_second_flush, after_flush,
+                "deferred publish: a below-debounce flush archives, it does not publish"
+            );
             for _ in 0..8 {
                 db.try_rotate_wal_if_idle().unwrap();
             }
             assert_eq!(current_manifest_num(&dir), after_second_flush);
             db.close().unwrap();
+            assert!(
+                current_manifest_num(&dir) > after_flush,
+                "close is the durability point: the deferred publish lands"
+            );
         }
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn wal_archive_slot_names_round_trip() {
+        // RFC-0217 P1.1: naming lives in db.rs (I/O naming, not kernel
+        // decisions — the aeneas lane cannot translate str::pattern).
+        assert_eq!(wal_archive_slot_name(0), "WAL.arch0000");
+        assert_eq!(wal_archive_slot_name(7), "WAL.arch0007");
+        assert_eq!(wal_archive_slot_name(9999), "WAL.arch9999");
+        assert_eq!(wal_archive_slot_of("WAL.arch0007"), Some(7));
+        assert_eq!(wal_archive_slot_of("WAL.arch0000"), Some(0));
+        assert_eq!(wal_archive_slot_of("WAL"), None);
+        assert_eq!(wal_archive_slot_of("WAL.archiving"), None);
+        assert_eq!(wal_archive_slot_of("WAL.arch7"), None);
+        assert_eq!(wal_archive_slot_of("CHANGELOG"), None);
+        assert_eq!(wal_archive_slot_of("WAL.repair"), None);
+        for i in [0u64, 1, 9, 63, 999, 9999] {
+            assert_eq!(wal_archive_slot_of(&wal_archive_slot_name(i)), Some(i));
+        }
     }
 
     #[test]
@@ -17276,6 +17805,9 @@ mod tests {
         let ckpt = temp_dir();
         {
             let mut db = Db::open(&dir).unwrap();
+            // RFC-0217 P1.1: debounce 1 keeps the flush a store point, so the
+            // file exists for the checkpoint copy assertion below.
+            db.set_changelog_flush_debounce(1);
             db.put(b"a", b"1").unwrap();
             db.put(b"b", b"2").unwrap();
             db.flush().unwrap();
@@ -18410,16 +18942,30 @@ mod tests {
                 "lazy feed still answers last-per-key from mem"
             );
             db.flush().unwrap();
-            assert!(
-                db.changelog_store_count() >= 1,
-                "flush must persist CHANGELOG before WAL rotate"
+            // RFC-0217 P1.1: the flush defers the store (debounce 64) and
+            // archives the rotated WAL; the staged imm delta keeps the
+            // in-memory feed complete without the WAL tail.
+            assert_eq!(
+                db.changelog_store_count(),
+                0,
+                "below the debounce the flush must not pay the O(live) store"
             );
-            assert!(chlog.exists());
+            assert_eq!(db.wal_archive_count(), 1, "rotate archived the segment");
+            assert_eq!(
+                db.changes_after(0).len(),
+                32,
+                "staged imm delta keeps the feed complete after rotate"
+            );
             db.close().unwrap();
         }
         let db = Db::open(&dir).unwrap();
         assert_eq!(db.get(&[b'k', 0]).as_deref(), Some([b'v', 0].as_slice()));
         assert_eq!(db.get(&[b'k', 31]).as_deref(), Some([b'v', 31].as_slice()));
+        assert_eq!(
+            db.changes_after(0).len(),
+            32,
+            "reopen replays the archived segment into the feed"
+        );
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
@@ -18474,6 +19020,9 @@ mod tests {
         {
             let mut db = Db::open(&dir).unwrap();
             db.set_changelog_interval(0);
+            // RFC-0217 P1.1: debounce 1 = the legacy synchronous flush tail,
+            // so the within-budget rebuild still fires on the flush itself.
+            db.set_changelog_flush_debounce(1);
             for i in 0..3u8 {
                 db.put([b'k', i], [b'v', i]).unwrap();
             }

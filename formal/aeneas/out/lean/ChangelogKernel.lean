@@ -71,4 +71,66 @@ def changelog_rebuild_within_budget_as_is
   (live_entries : Std.U64) (budget_entries : Std.U64) : Result Bool := do
   ok true
 
+/-- [pedra_aeneas_changelog_kernel::DEFAULT_CHANGELOG_FLUSH_DEBOUNCE_FLUSHES]
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 134:0-134:61
+    Visibility: public -/
+@[global_simps, irreducible]
+def DEFAULT_CHANGELOG_FLUSH_DEBOUNCE_FLUSHES : Std.U64 := 64#u64
+
+/-- [pedra_aeneas_changelog_kernel::DEFAULT_WAL_ARCHIVE_SEGMENT_CAP]
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 138:0-138:52
+    Visibility: public -/
+@[global_simps, irreducible]
+def DEFAULT_WAL_ARCHIVE_SEGMENT_CAP : Std.U64 := 64#u64
+
+/-- [pedra_aeneas_changelog_kernel::WAL_ARCHIVE_UNLINK_BUDGET]
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 143:0-143:45
+    Visibility: public -/
+@[global_simps, irreducible] def WAL_ARCHIVE_UNLINK_BUDGET : Std.U64 := 4#u64
+
+/-- [pedra_aeneas_changelog_kernel::changelog_flush_store_now]:
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 179:0-193:1
+    Visibility: public -/
+def changelog_flush_store_now
+  (disk_behind : Bool) (flushes_since_store : Std.U64)
+  (debounce_flushes : Std.U64) (archives : Std.U64) (archive_cap : Std.U64) :
+  Result Bool
+  := do
+  if disk_behind
+  then
+    if flushes_since_store >= debounce_flushes
+    then ok true
+    else ok (archives >= archive_cap)
+  else ok false
+
+/-- [pedra_aeneas_changelog_kernel::changelog_flush_store_now_as_is]:
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 198:0-212:1
+    Visibility: public -/
+def changelog_flush_store_now_as_is
+  (disk_behind : Bool) (flushes_since_store : Std.U64)
+  (debounce_flushes : Std.U64) (archives : Std.U64) (archive_cap : Std.U64) :
+  Result Bool
+  := do
+  ok disk_behind
+
+/-- [pedra_aeneas_changelog_kernel::wal_rotate_archives]:
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 220:0-222:1
+    Visibility: public -/
+def wal_rotate_archives
+  (disk_behind : Bool) (archives : Std.U64) (archive_cap : Std.U64) :
+  Result Bool
+  := do
+  if disk_behind
+  then ok (archives < archive_cap)
+  else ok false
+
+/-- [pedra_aeneas_changelog_kernel::wal_rotate_archives_as_is]:
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 228:0-230:1
+    Visibility: public -/
+def wal_rotate_archives_as_is
+  (disk_behind : Bool) (archives : Std.U64) (archive_cap : Std.U64) :
+  Result Bool
+  := do
+  ok false
+
 end pedra_aeneas_changelog_kernel

@@ -116,6 +116,124 @@ pub fn changelog_rebuild_within_budget_as_is(live_entries: u64, budget_entries: 
     changelog_rebuild_within_budget_as_is_body!(live_entries, budget_entries)
 }
 
+// ── RFC-0217 P1.1: amortized explicit-flush store (WAL archive) ──────────
+//
+// The lazy feed (interval 0) made every explicit flush an O(live-set)
+// CHANGELOG rebuild + full-file rewrite (kafka_changelog_flush 0.036×).
+// Amortization: while the on-disk cache lags, a WAL rotate **archives** the
+// segment (`WAL.archNNNN`) instead of truncating it, so reopen can extend
+// the feed from the archives (same WAL-frame replay, feed-only). The full
+// store then fires only on the debounce/cap gate below — flush stays
+// O(write buffer) on every path, and feed content after a crash is exactly
+// what a synchronous store would have written.
+
+/// Explicit flushes between forced CHANGELOG stores when the feed is lazy
+/// (interval 0). Between stores the rotated WAL segments are archived as
+/// the crash rebuild source, so this bounds cache staleness, not
+/// durability (the archive is the source).
+pub const DEFAULT_CHANGELOG_FLUSH_DEBOUNCE_FLUSHES: u64 = 64;
+
+/// Archived WAL segments kept before a rotate forces a synchronous store.
+/// Bounds crash-recovery replay cost and archived bytes on disk.
+pub const DEFAULT_WAL_ARCHIVE_SEGMENT_CAP: u64 = 64;
+
+/// Archived segments one store point may unlink (RFC-0217 P1.1). The gate
+/// already pays the publish + store; the chain's unlink cost drains over
+/// the following stores instead of landing as one burst.
+pub const WAL_ARCHIVE_UNLINK_BUDGET: u64 = 4;
+
+macro_rules! changelog_flush_store_now_body {
+    ($disk_behind:expr, $flushes_since_store:expr, $debounce_flushes:expr, $archives:expr, $archive_cap:expr) => {
+        $disk_behind
+            && ($flushes_since_store >= $debounce_flushes || $archives >= $archive_cap)
+    };
+}
+
+macro_rules! changelog_flush_store_now_as_is_body {
+    ($disk_behind:expr, $flushes_since_store:expr, $debounce_flushes:expr, $archives:expr, $archive_cap:expr) => {{
+        let _ = ($flushes_since_store, $debounce_flushes, $archives, $archive_cap);
+        $disk_behind
+    }};
+}
+
+macro_rules! wal_rotate_archives_body {
+    ($disk_behind:expr, $archives:expr, $archive_cap:expr) => {
+        $disk_behind && $archives < $archive_cap
+    };
+}
+
+macro_rules! wal_rotate_archives_as_is_body {
+    ($disk_behind:expr, $archives:expr, $archive_cap:expr) => {{
+        let _ = ($disk_behind, $archives, $archive_cap);
+        false
+    }};
+}
+
+/// Whether an explicit flush must store the CHANGELOG cache now (lazy
+/// feed). `disk_behind` is `changelog_disk_watermark < last_sequence`.
+/// Stores at the flush debounce or when the archive chain is full — both
+/// bounds are amortization knobs; the archived segments already carry the
+/// feed content through a crash.
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn changelog_flush_store_now(
+    disk_behind: bool,
+    flushes_since_store: u64,
+    debounce_flushes: u64,
+    archives: u64,
+    archive_cap: u64,
+) -> bool {
+    changelog_flush_store_now_body!(
+        disk_behind,
+        flushes_since_store,
+        debounce_flushes,
+        archives,
+        archive_cap
+    )
+}
+
+/// AS-IS F212: every behind explicit flush stores synchronously.
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn changelog_flush_store_now_as_is(
+    disk_behind: bool,
+    flushes_since_store: u64,
+    debounce_flushes: u64,
+    archives: u64,
+    archive_cap: u64,
+) -> bool {
+    changelog_flush_store_now_as_is_body!(
+        disk_behind,
+        flushes_since_store,
+        debounce_flushes,
+        archives,
+        archive_cap
+    )
+}
+
+/// Whether a WAL rotate (feed lazy, on-disk cache behind) archives the
+/// segment instead of truncating. False at the cap: the caller then stores
+/// the CHANGELOG synchronously (covering every archived segment), deletes
+/// the archives and truncates.
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn wal_rotate_archives(disk_behind: bool, archives: u64, archive_cap: u64) -> bool {
+    wal_rotate_archives_body!(disk_behind, archives, archive_cap)
+}
+
+/// AS-IS: rotate always truncates — the rebuild source is dropped and the
+/// flush must pay the synchronous store (kafka_changelog_flush 0.036×).
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn wal_rotate_archives_as_is(disk_behind: bool, archives: u64, archive_cap: u64) -> bool {
+    wal_rotate_archives_as_is_body!(disk_behind, archives, archive_cap)
+}
+
+// RFC-0217 P1.1: the archived-segment file names (`WAL.archNNNN`) live in
+// db.rs (`wal_archive_slot_name`/`wal_archive_slot_of`) — they are I/O
+// naming, not decision logic, and `str::pattern`/`format!` machinery is
+// outside what the aeneas/charon extraction lane translates.
+
 #[cfg(verus_keep_ghost)]
 use vstd::prelude::*;
 
@@ -194,6 +312,46 @@ pub fn changelog_rebuild_within_budget_as_is(live_entries: u64, budget_entries: 
     changelog_rebuild_within_budget_as_is_body!(live_entries, budget_entries)
 }
 
+pub fn changelog_flush_store_now(
+    disk_behind: bool, flushes_since_store: u64, debounce_flushes: u64,
+    archives: u64, archive_cap: u64,
+) -> (d: bool)
+    ensures
+        d == (disk_behind
+            && (flushes_since_store >= debounce_flushes || archives >= archive_cap)),
+        d ==> disk_behind,
+{
+    changelog_flush_store_now_body!(
+        disk_behind, flushes_since_store, debounce_flushes, archives, archive_cap
+    )
+}
+
+pub fn wal_rotate_archives(disk_behind: bool, archives: u64, archive_cap: u64) -> (d: bool)
+    ensures
+        d == (disk_behind && archives < archive_cap),
+        d ==> disk_behind,
+        d ==> archives < archive_cap,
+{
+    wal_rotate_archives_body!(disk_behind, archives, archive_cap)
+}
+
+proof fn lemma_archive_chain_forces_store()
+    ensures
+        changelog_flush_store_now(true, 0, 64, 64, 64),
+        changelog_flush_store_now(true, 64, 64, 0, 64),
+        !changelog_flush_store_now(true, 63, 64, 63, 64),
+        !changelog_flush_store_now(false, u64::MAX, 64, u64::MAX, 64),
+{
+}
+
+proof fn lemma_full_chain_never_archives()
+    ensures
+        !wal_rotate_archives(true, 64, 64),
+        wal_rotate_archives(true, 63, 64),
+        !wal_rotate_archives(false, 0, 64),
+{
+}
+
 } // verus!
 
 #[cfg(test)]
@@ -255,6 +413,70 @@ mod tests {
             25_000_000,
             DEFAULT_CHANGELOG_REBUILD_BUDGET_ENTRIES
         ));
+    }
+
+    #[test]
+    fn flush_store_debounces_until_gate() {
+        // Fresh disk cache: nothing to store even at the debounce.
+        assert!(!changelog_flush_store_now(false, 100, 64, 0, 64));
+        // Behind, below both bounds: defer (the archive carries the feed).
+        assert!(!changelog_flush_store_now(true, 63, 64, 63, 64));
+        // Debounce hit.
+        assert!(changelog_flush_store_now(true, 64, 64, 0, 64));
+        // Archive chain full forces the store even at flush 1.
+        assert!(changelog_flush_store_now(true, 1, 64, 64, 64));
+    }
+
+    #[test]
+    fn flush_store_as_is_stores_every_behind_flush() {
+        assert!(changelog_flush_store_now_as_is(true, 1, 64, 0, 64));
+        assert!(!changelog_flush_store_now_as_is(false, 99, 64, 63, 64));
+    }
+
+    #[test]
+    fn rotate_archives_only_while_chain_has_room() {
+        assert!(wal_rotate_archives(true, 0, 64));
+        assert!(wal_rotate_archives(true, 63, 64));
+        assert!(!wal_rotate_archives(true, 64, 64));
+        assert!(!wal_rotate_archives(false, 0, 64));
+        assert!(!wal_rotate_archives_as_is(true, 0, 64));
+    }
+
+    #[test]
+    fn wal_rotate_and_store_gate_decisions() {
+        // Naming helpers live in db.rs (I/O naming, not kernel decisions —
+        // RFC-0217 P1.1); this pins the decisions that use them.
+        for i in [0u64, 1, 9, 63, 999, 9999] {
+            assert!(wal_rotate_archives(true, i, 64) == (i < 64));
+            assert!(changelog_flush_store_now(true, 63, 64, i, 64) == (i >= 64));
+        }
+    }
+
+    #[test]
+    fn flush_store_theorem_on_small_domain() {
+        for disk_behind in [false, true] {
+            for flushes in 0u64..4 {
+                for debounce in 1u64..4 {
+                    for archives in 0u64..4 {
+                        for cap in 1u64..4 {
+                            let d = changelog_flush_store_now(
+                                disk_behind, flushes, debounce, archives, cap,
+                            );
+                            assert_eq!(
+                                d,
+                                disk_behind
+                                    && (flushes >= debounce || archives >= cap)
+                            );
+                            if d {
+                                assert!(disk_behind);
+                            }
+                            let a = wal_rotate_archives(disk_behind, archives, cap);
+                            assert_eq!(a, disk_behind && archives < cap);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]
