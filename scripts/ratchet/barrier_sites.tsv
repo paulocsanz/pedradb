@@ -13,7 +13,7 @@ crates/pedradb-core/src/concurrent.rs	sync_dir	2
 crates/pedradb-core/src/corrupt.rs	sync_data	1
 crates/pedradb-core/src/db.rs	sync_all	7
 crates/pedradb-core/src/db.rs	sync_data	12
-crates/pedradb-core/src/db.rs	sync_dir	13
+crates/pedradb-core/src/db.rs	sync_dir	15
 crates/pedradb-core/src/env.rs	sync_all	3
 crates/pedradb-core/src/env.rs	sync_data	1
 crates/pedradb-core/src/env.rs	sync_dir	1
@@ -31,12 +31,13 @@ crates/pedradb-core/src/vlog.rs	sync_all	6
 crates/pedradb-core/src/vlog.rs	sync_data	1
 crates/pedradb-core/src/vlog.rs	sync_dir	5
 crates/pedradb-core/src/wal/mod.rs	sync_all	1
-crates/pedradb-core/src/wal/mod.rs	sync_data	1
+crates/pedradb-core/src/wal/mod.rs	sync_data	2
 crates/pedradb-io-uring/src/lib.rs	sync_all	5
 crates/pedradb-io-uring/src/lib.rs	sync_data	7
 crates/pedradb-io-uring/src/lib.rs	sync_dir	1
 crates/pedradb-ops/src/lib.rs	sync_all	4
 crates/pedradb-ops/src/lib.rs	sync_dir	2
+crates/pedradb-posix/examples/fullfsync_anchor.rs	sync_all	2
 crates/pedradb-posix/src/lib.rs	sync_all	4
 crates/pedradb-posix/src/lib.rs	sync_data	1
 crates/pedradb-raft/src/persist.rs	sync_all	1
