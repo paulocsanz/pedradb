@@ -91,3 +91,51 @@ theorem point_get_watermark_fate_iff :
   · rintro hv
     subst hv
     rfl
+
+/-- Any ok-valued Result bind forces the bound term to be ok. -/
+private theorem bind_ok_inv {α β} (x : Result α) (f : α → Result β) (v : β)
+    (h : Aeneas.Std.bind x f = ok v) : ∃ a, x = ok a ∧ f a = ok v := by
+  cases x with
+  | ok a => exact ⟨a, rfl, h⟩
+  | fail e => exact absurd h (by simp)
+  | div => exact absurd h (by simp)
+
+/-- An ok chain reassembles into an ok bind. -/
+private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : β}
+    (a : α) (hx : x = ok a) (h : f a = ok v) : Aeneas.Std.bind x f = ok v := by
+  rw [hx]
+  exact h
+
+/-- RFC-0218 P1.3 8/11 (átomo `catalog:si_read`, entrada
+    `snapshot_read_plan`): servir ou recusar um snapshot é EXATAMENTE
+    compará-lo contra o piso citado `watermark - 1` (saturating) —
+    abaixo do piso, TooOld (fail closed); no piso ou acima, Serve. O
+    AS-IS serve todo mundo (ausência fabricada — dente plantado). -/
+theorem snapshot_read_plan_fate_iff :
+    ∀ (snapshot : U64) (watermark : U64) (r : SnapshotRead),
+      (snapshot_read_plan snapshot watermark = ok r) ↔
+        (∃ i : U64, lift (core.num.U64.saturating_sub watermark 1#u64) = ok i ∧
+          ((i > snapshot ∧ r = SnapshotRead.TooOld) ∨
+           (¬ (i > snapshot) ∧ r = SnapshotRead.Serve))) := by
+  intro snapshot watermark r
+  constructor
+  · intro hval
+    unfold snapshot_read_plan at hval
+    obtain ⟨i, hgate, hval⟩ := bind_ok_inv _ _ _ hval
+    refine ⟨i, hgate, ?_⟩
+    split at hval
+    · next hc =>
+      injection hval with hv
+      exact Or.inl ⟨hc, hv.symm⟩
+    · next hc =>
+      injection hval with hv
+      exact Or.inr ⟨hc, hv.symm⟩
+  · rintro ⟨i, hgate, (⟨hc, hv⟩ | ⟨hc, hv⟩)⟩
+    · unfold snapshot_read_plan
+      refine bind_intro i hgate ?_
+      subst hv
+      rw [if_pos hc]
+    · unfold snapshot_read_plan
+      refine bind_intro i hgate ?_
+      subst hv
+      rw [if_neg hc]

@@ -3248,6 +3248,10 @@
   },
   {
    "id": "si_read",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.3: fate ∀ sobre snapshot_read_plan no degrau átomo — TooOld exatamente abaixo do piso citado watermark-1, Serve senão; planta DST snapshot_read_plan_on_live_queued_is_not_ok"
+   },
    "finding": "F168",
    "twin_kind": "close",
    "single_artifact": true,
