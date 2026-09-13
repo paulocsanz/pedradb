@@ -5783,6 +5783,10 @@
   },
   {
    "id": "leveled_enabled",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.2: fate ∀ sobre leveled_enabled no degrau átomo — leitura citada de PEDRA_LEVELED: ausente/erro liga, presente liga exceto valor aparado 0; planta DST leveled_env_switch_is_not_ok"
+   },
    "finding": "F-leveling-sweep",
    "twin_kind": "model",
    "single_artifact": true,

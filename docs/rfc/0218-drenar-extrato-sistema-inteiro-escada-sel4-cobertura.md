@@ -127,11 +127,12 @@ nunca por promoção silenciosa.
    JÁ têm teorema — ficam de fora), `range_covers`, `write_op_range_end`,
    `exact_children`, `index_val`, `len_tag`, `ikey_pack`, `prefix` —
    floor_atom 211→222 — status: `todo`
-   (10/11: `value_len_tag_fate_iff`, `write_op_range_end_fate_iff`,
-   `pack_sequence_and_type_fate_iff`, `prefix_exclusive_end_fate_iff`,
-   `exact_value_children_fate_iff`, `range_tombstone_covers_fate_iff`,
-   `is_disjoint_fate_iff`, `overlaps_fate_iff`, `total_bytes_fate_iff` e
-   `len_pref_value_fate_iff` feitos 2026-09-13)
+   (11/11 feitos 2026-09-13: `value_len_tag_fate_iff`,
+   `write_op_range_end_fate_iff`, `pack_sequence_and_type_fate_iff`,
+   `prefix_exclusive_end_fate_iff`, `exact_value_children_fate_iff`,
+   `range_tombstone_covers_fate_iff`, `is_disjoint_fate_iff`,
+   `overlaps_fate_iff`, `total_bytes_fate_iff`, `len_pref_value_fate_iff` e
+   `leveled_enabled_fate_iff`)
 
 7. **P1.3** si/snapshot/txn ×11: `si_read`, `si_reader`,
    `point_get_prefer`, `point_get_wm`, `snapshot`, `snap_txn_clear`,
@@ -204,7 +205,7 @@ nunca por promoção silenciosa.
 | P0.3 | p0 | changelog+flush+manifest+reopen ×6 átomo | done | r0218 p0.3 átomos 1-6/6 (c6e9e586→) | 2026-09-13 |
 | P0.4 | p0 | crc/magic/scan ×9 átomo (integridade) | done | r0218 p0.4 átomos 1-9/9 (f8a0b0d2→) | 2026-09-13 |
 | P1.1 | p1 | compact ×7 + lsm_r1 ×3 átomo | done | 10/10 átomo (floor_atom 201→211) | 2026-09-13 |
-| P1.2 | p1 | leveling/merge/index_val/key/prefix ×11 átomo | todo | — | 2026-09-13 |
+| P1.2 | p1 | leveling/merge/index_val/key/prefix ×11 átomo | done | 11/11 átomo (floor_atom 211→222) | 2026-09-13 |
 | P1.3 | p1 | si/snapshot/txn/rpc ×11 átomo | todo | — | 2026-09-13 |
 | P2.1 | p2 | journal/stream/fold/ship/capi ×12 átomo | todo | — | 2026-09-13 |
 | P2.2 | p2 | raft/dcs/l28/scale/bloom/probe ×21 átomo | todo | — | 2026-09-13 |

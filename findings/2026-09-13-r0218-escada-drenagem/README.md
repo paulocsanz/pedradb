@@ -316,6 +316,8 @@ gates GREEN no commit).
   77→76.
 ## P1.2 — leveling ×4 + merge ×2 + index_val ×3 + key + prefix ×11 átomo
 
+- **leveling / leveled_enabled (11/11, fecha P1.2)**: modo leveled como a leitura citada de `PEDRA_LEVELED` — gate `std.env.var` cotado; `Err` liga (true); `Ok` deref + trim + `ne "0"` (as-is engole o desligamento) — `leveled_enabled_fate_iff` em `Leveling.lean`. Forward: bind_ok_inv + cases r (Ok/Err do core Result) + 2× bind_ok_inv; reverso: bind_intro ×3. Build verde. Planta DST `leveled_env_switch_is_not_ok` (pedradb-core, exit 0 no worktree). Gate: floor_atom 221→222, floor_extract 57→56. Com este, P1.2 fecha 11/11 (floor_atom 211→222).
+
 - **index_val / len_pref_value (10/11)**: valor com prefixo de comprimento como a cadeia citada — capacidade `len+4`, `try_from`+`expect` do len (u32), `to_be_bytes`, `to_slice`, `extend` do prefixo e do valor (7 binds citados) — `len_pref_value_fate_iff` em `IndexVal.lean`. Forward: 6× bind_ok_inv + hval final; reverso: bind_intro ×6. Build verde. Planta DST `len_pref_value_on_live_queued_is_not_ok` (pedradb-store, exit 0 no worktree). Gate: floor_atom 220→221, floor_extract 58→57.
 
 - **leveling / total_bytes (9/11)**: total do nível como a soma citada — `Slice.iter`, `Iterator.map` com a closure que extrai `bytes`, `Iterator.sum` u64 (as-is devolve contagem de arquivos) — `total_bytes_fate_iff` em `Leveling.lean`. Forward: 2× bind_ok_inv; reverso: bind_intro ×2. Build verde. Planta DST `total_bytes_on_live_level_is_not_ok` (pedradb-core, exit 0 no worktree). Gate: floor_atom 219→220, floor_extract 59→58.

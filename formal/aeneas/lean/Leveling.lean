@@ -285,3 +285,42 @@ theorem total_bytes_fate_iff :
   · rintro ⟨i, m, hi, hm, hv⟩
     unfold total_bytes
     exact bind_intro i hi (bind_intro m hm hv)
+
+/-- RFC-0218 P1.2 11/11 (átomo `catalog:leveled_enabled`, entrada
+    `leveled_enabled`): o modo leveled é EXATAMENTE a leitura citada
+    da variável PEDRA_LEVELED — ausente/erro liga (true); presente,
+    liga exceto quando o valor aparado é "0". O AS-IS é a constante
+    true (o desligamento por env é engolido — dente plantado). -/
+theorem leveled_enabled_fate_iff :
+    ∀ (b : Bool),
+      (leveled_enabled = ok b) ↔
+      (∃ r, std.env.var
+          (Shared0T.Insts.CoreConvertAsRef
+            Str.Insts.CoreConvertAsRefOsStr) (toStr "PEDRA_LEVELED") = ok r ∧
+        ((∃ ov, r = core.result.Result.Ok ov ∧
+          ∃ s s1, alloc.string.String.Insts.CoreOpsDerefDerefStr.deref ov = ok s ∧
+            core.str.Str.trim s = ok s1 ∧
+            core.cmp.impls.PartialEqShared.ne
+              Str.Insts.CoreCmpPartialEqStr s1 (toStr "0") = ok b) ∨
+         (∃ ev, r = core.result.Result.Err ev ∧ b = true))) := by
+  intro b
+  constructor
+  · intro hval
+    unfold leveled_enabled at hval
+    obtain ⟨r, hgate, hval⟩ := bind_ok_inv _ _ _ hval
+    cases r with
+    | Ok ov =>
+      obtain ⟨s, hd, hval⟩ := bind_ok_inv _ _ _ hval
+      obtain ⟨s1, ht, hval⟩ := bind_ok_inv _ _ _ hval
+      exact ⟨core.result.Result.Ok ov, hgate, Or.inl ⟨ov, rfl, s, s1, hd, ht, hval⟩⟩
+    | Err ev =>
+      injection hval with hv
+      exact ⟨core.result.Result.Err ev, hgate, Or.inr ⟨ev, rfl, hv.symm⟩⟩
+  · rintro ⟨r, hgate, (⟨ov, hok, s, s1, hd, ht, hn⟩ | ⟨ev, herr, hv⟩)⟩
+    · subst hok
+      unfold leveled_enabled
+      exact bind_intro _ hgate (bind_intro s hd (bind_intro s1 ht hn))
+    · subst herr
+      subst hv
+      unfold leveled_enabled
+      exact bind_intro _ hgate rfl
