@@ -9734,12 +9734,19 @@ impl<E: Env> Db<E> {
             self.change_log
                 .extend(records.iter().map(ChangeEntry::from_write_op));
         }
-        if crate::write_admission_kernel::wal_sync_required(
+        // RFC-0219 P0.1: the durable-commit CHANGELOG fate (count toward
+        // the debounce iff the commit was synced) is the kernel's decision
+        // — the write-admission sync resolution the trampoline used to
+        // make inline. The store itself stays here (I/O is trampoline).
+        match crate::changelog_kernel::changelog_durable_commit_fate(
             durability.sync.is_some(),
             durability.sync.unwrap_or(false),
             self.sync,
         ) {
-            self.maybe_persist_changelog_after_durable_commit();
+            crate::changelog_kernel::ChangelogCommitFate::Count => {
+                self.maybe_persist_changelog_after_durable_commit();
+            }
+            crate::changelog_kernel::ChangelogCommitFate::Skip => {}
         }
         self.apply_ops_to_mem(records);
         Ok(())

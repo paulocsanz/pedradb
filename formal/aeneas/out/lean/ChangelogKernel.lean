@@ -133,4 +133,123 @@ def wal_rotate_archives_as_is
   := do
   ok false
 
+/-- [pedra_aeneas_changelog_kernel::ChangelogCommitFate]
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 248:0-254:1
+    Visibility: public -/
+@[discriminant isize]
+inductive ChangelogCommitFate where
+| Count : ChangelogCommitFate
+| Skip : ChangelogCommitFate
+
+/-- [pedra_aeneas_changelog_kernel::{impl core::clone::Clone for pedra_aeneas_changelog_kernel::ChangelogCommitFate}::clone]:
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 247:9-247:14
+    Visibility: public -/
+def ChangelogCommitFate.Insts.CoreCloneClone.clone
+  (self : ChangelogCommitFate) : Result ChangelogCommitFate := do
+  ok self
+
+/-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::clone::Clone for pedra_aeneas_changelog_kernel::ChangelogCommitFate}]
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 247:9-247:14 -/
+@[reducible]
+def ChangelogCommitFate.Insts.CoreCloneClone : core.clone.Clone
+  ChangelogCommitFate := {
+  clone := ChangelogCommitFate.Insts.CoreCloneClone.clone
+}
+
+/-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::marker::Copy for pedra_aeneas_changelog_kernel::ChangelogCommitFate}]
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 247:16-247:20 -/
+@[reducible]
+def ChangelogCommitFate.Insts.CoreMarkerCopy : core.marker.Copy
+  ChangelogCommitFate := {
+  cloneInst := ChangelogCommitFate.Insts.CoreCloneClone
+}
+
+/-- [pedra_aeneas_changelog_kernel::{impl core::fmt::Debug for pedra_aeneas_changelog_kernel::ChangelogCommitFate}::fmt]:
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 247:22-247:27
+    Visibility: public -/
+def ChangelogCommitFate.Insts.CoreFmtDebug.fmt
+  (self : ChangelogCommitFate) (f : core.fmt.Formatter) :
+  Result ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter)
+  := do
+  match self with
+  | ChangelogCommitFate.Count => core.fmt.Formatter.write_str f (toStr "Count")
+  | ChangelogCommitFate.Skip => core.fmt.Formatter.write_str f (toStr "Skip")
+
+/-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::fmt::Debug for pedra_aeneas_changelog_kernel::ChangelogCommitFate}]
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 247:22-247:27 -/
+@[reducible]
+def ChangelogCommitFate.Insts.CoreFmtDebug : core.fmt.Debug ChangelogCommitFate
+  := {
+  fmt := ChangelogCommitFate.Insts.CoreFmtDebug.fmt
+}
+
+/-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_changelog_kernel::ChangelogCommitFate}]
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 247:29-247:38 -/
+@[reducible]
+def ChangelogCommitFate.Insts.CoreMarkerStructuralPartialEq :
+  core.marker.StructuralPartialEq ChangelogCommitFate := {
+}
+
+/-- [pedra_aeneas_changelog_kernel::{impl core::cmp::PartialEq<pedra_aeneas_changelog_kernel::ChangelogCommitFate> for pedra_aeneas_changelog_kernel::ChangelogCommitFate}::eq]:
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 247:29-247:38
+    Visibility: public -/
+def ChangelogCommitFate.Insts.CoreCmpPartialEqChangelogCommitFate.eq
+  (self : ChangelogCommitFate) (other : ChangelogCommitFate) :
+  Result Bool
+  := do
+  let self1 := read_discriminant self
+  let other1 := read_discriminant other
+  ok (self1 = other1)
+
+/-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::cmp::PartialEq<pedra_aeneas_changelog_kernel::ChangelogCommitFate> for pedra_aeneas_changelog_kernel::ChangelogCommitFate}]
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 247:29-247:38 -/
+@[reducible]
+def ChangelogCommitFate.Insts.CoreCmpPartialEqChangelogCommitFate :
+  core.cmp.PartialEq ChangelogCommitFate ChangelogCommitFate := {
+  eq := ChangelogCommitFate.Insts.CoreCmpPartialEqChangelogCommitFate.eq
+}
+
+/-- [pedra_aeneas_changelog_kernel::{impl core::cmp::Eq for pedra_aeneas_changelog_kernel::ChangelogCommitFate}::assert_fields_are_eq]:
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 247:40-247:42
+    Visibility: public -/
+def ChangelogCommitFate.Insts.CoreCmpEq.assert_fields_are_eq
+  (self : ChangelogCommitFate) : Result Unit := do
+  ok ()
+
+/-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::cmp::Eq for pedra_aeneas_changelog_kernel::ChangelogCommitFate}]
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 247:40-247:42 -/
+@[reducible]
+def ChangelogCommitFate.Insts.CoreCmpEq : core.cmp.Eq ChangelogCommitFate := {
+  partialEqInst :=
+    ChangelogCommitFate.Insts.CoreCmpPartialEqChangelogCommitFate
+  assert_fields_are_eq :=
+    ChangelogCommitFate.Insts.CoreCmpEq.assert_fields_are_eq
+}
+
+/-- [pedra_aeneas_changelog_kernel::changelog_durable_commit_fate]:
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 258:0-274:1
+    Visibility: public -/
+def changelog_durable_commit_fate
+  (client_set : Bool) (client_sync : Bool) (db_sync : Bool) :
+  Result ChangelogCommitFate
+  := do
+  if client_set
+  then
+    if client_sync
+    then ok ChangelogCommitFate.Count
+    else ok ChangelogCommitFate.Skip
+  else
+    if db_sync
+    then ok ChangelogCommitFate.Count
+    else ok ChangelogCommitFate.Skip
+
+/-- [pedra_aeneas_changelog_kernel::changelog_durable_commit_fate_as_is]:
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 280:0-286:1
+    Visibility: public -/
+def changelog_durable_commit_fate_as_is
+  (_client_set : Bool) (_client_sync : Bool) (_db_sync : Bool) :
+  Result ChangelogCommitFate
+  := do
+  ok ChangelogCommitFate.Skip
+
 end pedra_aeneas_changelog_kernel

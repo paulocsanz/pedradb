@@ -64,10 +64,10 @@ início 270/292 = **92,47%**. Alvos DATADOS:
 
 ## Fatias
 
-- [ ] **P0.1** Rito do pull registrado e primeiro `if` do caminho de
+- [x] **P0.1** Rito do pull registrado e primeiro `if` do caminho de
   escrita (`db.rs`; corpo lido, kernel nomeado pelo corpo — o board
   aponta `wal_commit_plan` como plano dominante com 14 handlers) —
-  par nasce átomo, contador 75→74 — status: `todo`
+  par nasce átomo, contador 75→74 — status: `done`
 - [ ] **P0.2** +1 `if` do caminho de escrita (`db.rs`) — 272/294 —
   status: `todo`
 - [ ] **P0.3** +1 `if` do caminho de escrita (`db.rs`) — 273/295 =
@@ -130,7 +130,7 @@ início 270/292 = **92,47%**. Alvos DATADOS:
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | rito do pull + 1º if db.rs (75→74) | todo | — | 2026-09-13 |
+| P0.1 | p0 | rito do pull + 1º if db.rs (75→74) | done | `changelog_durable_commit` — commit_ops_with casa `changelog_durable_commit_fate` (Changelog.lean iff-∀; contador 74) | 2026-09-13 |
 | P0.2 | p0 | +1 if db.rs (272/294) | todo | — | 2026-09-13 |
 | P0.3 | p0 | +1 if db.rs (273/295 = 92,54%) | todo | — | 2026-09-13 |
 | P1.1 | p1 | +3 ifs db.rs | todo | — | 2026-09-13 |

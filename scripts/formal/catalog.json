@@ -6397,6 +6397,36 @@
    }
   },
   {
+   "id": "changelog_durable_commit",
+   "finding": "RFC-0219 P0.1",
+   "twin_kind": "atom",
+   "atom": "changelog_durable_commit_fate",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P0.1: o destino do debounce de CHANGELOG num commit terminado é decisão do kernel — conta sse a resolução de sync do write-admission (flag do cliente vence, senão default do DB) tornou o commit durável, provado ∀ sobre (client_set, client_sync, db_sync) como changelog_durable_commit_fate_fate_iff em Changelog.lean; o trampolim db.rs commit_ops_with faz match no plano do kernel"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
+   "twin": "crates/pedradb-core/src/changelog_kernel.rs",
+   "aeneas": "scripts/aeneas_changelog.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "changelog_durable_commit_fate",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "commit_ops_with"
+    }
+   ],
+   "as_is": "changelog_durable_commit_fate_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/changelog_kernel.rs",
+    "test": "changelog_durable_commit_fate_on_live_client_sync_counts"
+   }
+  },
+  {
    "id": "flush_plan",
    "finding": "F2/F43",
    "twin_kind": "close",

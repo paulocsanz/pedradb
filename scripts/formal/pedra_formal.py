@@ -2021,7 +2021,10 @@ def check_extract(
             "./scripts/aeneas_changelog.sh",
             "crates/pedradb-core/src/changelog_kernel.rs",
             "formal/aeneas/lean/Changelog.lean",
-            ("theorem changelog_should_store_due",),
+            (
+                "theorem changelog_should_store_due",
+                "theorem changelog_durable_commit_fate_fate_iff",
+            ),
         ),
         (
             "cursor",

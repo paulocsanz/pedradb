@@ -234,6 +234,57 @@ pub fn wal_rotate_archives_as_is(disk_behind: bool, archives: u64, archive_cap: 
 // naming, not decision logic, and `str::pattern`/`format!` machinery is
 // outside what the aeneas/charon extraction lane translates.
 
+// ── RFC-0219 P0.1: durable-commit CHANGELOG fate (trampoline pull) ──────
+//
+// `commit_ops_with` used to resolve inline whether a finished WAL commit
+// was made durable and only then count it toward the CHANGELOG debounce.
+// That fate is now this named kernel — the write-admission sync
+// resolution (client flag wins, else the DB default) decided HERE; the
+// store itself is trampoline I/O. The db.rs caller `match`es the plan.
+
+/// Fate of the CHANGELOG debounce for one finished WAL commit.
+#[cfg(not(verus_keep_ghost))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChangelogCommitFate {
+    /// Durable commit: count it toward the debounce (may store the cache).
+    Count,
+    /// No barrier: skip the count — the cache lags and reopen rebuilds
+    /// the feed from the WAL (the CHANGELOG is a cache, RFC-0019).
+    Skip,
+}
+
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn changelog_durable_commit_fate(
+    client_set: bool,
+    client_sync: bool,
+    db_sync: bool,
+) -> ChangelogCommitFate {
+    if client_set {
+        if client_sync {
+            ChangelogCommitFate::Count
+        } else {
+            ChangelogCommitFate::Skip
+        }
+    } else if db_sync {
+        ChangelogCommitFate::Count
+    } else {
+        ChangelogCommitFate::Skip
+    }
+}
+
+/// AS-IS: durable commits never count — the cache only ever stores at
+/// flush/close, so every crash pays the full WAL replay (dente).
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn changelog_durable_commit_fate_as_is(
+    _client_set: bool,
+    _client_sync: bool,
+    _db_sync: bool,
+) -> ChangelogCommitFate {
+    ChangelogCommitFate::Skip
+}
+
 #[cfg(verus_keep_ghost)]
 use vstd::prelude::*;
 
@@ -523,5 +574,75 @@ mod tests {
             }
         }
         assert_eq!(n, 8 * 16);
+    }
+
+    const B_OPEN: u8 = 123;
+    const B_CLOSE: u8 = 125;
+
+    fn named_fn_src(src: &str, name: &str) -> Option<String> {
+        let needle = format!("fn {}(", name);
+        let start = src.find(&needle)?;
+        let rest = &src[start..];
+        let bytes = rest.as_bytes();
+        let brace = bytes.iter().position(|&b| b == B_OPEN)?;
+        let mut depth = 0i32;
+        for (i, &b) in bytes[brace..].iter().enumerate() {
+            if b == B_OPEN {
+                depth += 1;
+            } else if b == B_CLOSE {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(rest[brace..=brace + i].to_string());
+                }
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn changelog_durable_commit_fate_on_live_client_sync_counts() {
+        // RFC-0219 P0.1: client flag wins — explicit sync counts, explicit
+        // async skips even when the DB default would sync.
+        assert_eq!(
+            changelog_durable_commit_fate(true, true, false),
+            ChangelogCommitFate::Count
+        );
+        assert_eq!(
+            changelog_durable_commit_fate(true, false, true),
+            ChangelogCommitFate::Skip
+        );
+        // No client flag: the DB default decides.
+        assert_eq!(
+            changelog_durable_commit_fate(false, false, true),
+            ChangelogCommitFate::Count
+        );
+        assert_eq!(
+            changelog_durable_commit_fate(false, true, false),
+            ChangelogCommitFate::Skip
+        );
+        // AS-IS dente: durable commits never count — every crash pays the
+        // full WAL replay.
+        assert_eq!(
+            changelog_durable_commit_fate_as_is(true, true, true),
+            ChangelogCommitFate::Skip
+        );
+        // Live: commit_ops_with matches the kernel plan; the changelog
+        // debounce gate is no longer an inline sync-resolution if (the
+        // do_sync resolution feeding wal_commit_plan stays — that is the
+        // write-admission family's own call).
+        let coc = named_fn_src(include_str!("db.rs"), "commit_ops_with").expect("commit_ops_with");
+        assert!(
+            coc.contains("match crate::changelog_kernel::changelog_durable_commit_fate("),
+            "commit_ops_with must match changelog_durable_commit_fate"
+        );
+        assert!(
+            coc.contains("ChangelogCommitFate::Count =>"),
+            "the debounce count must live in the Count arm"
+        );
+        assert_eq!(
+            coc.matches("maybe_persist_changelog_after_durable_commit").count(),
+            1,
+            "exactly one debounce call, inside the kernel arm"
+        );
     }
 }

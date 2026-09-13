@@ -88,3 +88,69 @@ theorem changelog_rebuild_within_budget_fate_iff :
   · rintro hv
     subst hv
     rfl
+/-- RFC-0219 P0.1 (átomo `catalog:changelog_durable_commit`): o destino
+    do debounce de CHANGELOG num commit terminado é EXATAMENTE a resolução
+    de sync — conta sse o cliente pediu sync ou, sem flag do cliente, o
+    default do DB sincroniza; todo o resto pula (o cache atrasa e o
+    reopen reconstrói o feed do WAL — RFC-0019). O AS-IS nunca conta:
+    todo crash paga o replay integral do WAL (dente plantado no kernel). -/
+theorem changelog_durable_commit_fate_fate_iff :
+    ∀ (client_set : Bool) (client_sync : Bool) (db_sync : Bool)
+      (v : ChangelogCommitFate),
+      (changelog_durable_commit_fate client_set client_sync db_sync = ok v) ↔
+        ((client_set = true ∧ client_sync = true ∧
+            v = ChangelogCommitFate.Count) ∨
+          (client_set = true ∧ client_sync = false ∧
+            v = ChangelogCommitFate.Skip) ∨
+          (client_set = false ∧ db_sync = true ∧
+            v = ChangelogCommitFate.Count) ∨
+          (client_set = false ∧ db_sync = false ∧
+            v = ChangelogCommitFate.Skip)) := by
+  intro client_set client_sync db_sync v
+  simp only [changelog_durable_commit_fate]
+  split <;> rename_i c
+  · split <;> rename_i c2
+    · constructor
+      · intro hval
+        injection hval with hv
+        exact Or.inl ⟨c, c2, hv.symm⟩
+      · rintro (⟨-, -, hv⟩ | h2 | h3 | h4)
+        · subst hv
+          rfl
+        · exact absurd h2.2.1 (by simp [*])
+        · exact absurd h3.1 (by simp [*])
+        · exact absurd h4.1 (by simp [*])
+    · rw [Bool.not_eq_true] at c2
+      constructor
+      · intro hval
+        injection hval with hv
+        exact Or.inr (Or.inl ⟨c, c2, hv.symm⟩)
+      · rintro (h1 | ⟨-, -, hv⟩ | h3 | h4)
+        · exact absurd h1.2.1 (by simp [*])
+        · subst hv
+          rfl
+        · exact absurd h3.1 (by simp [*])
+        · exact absurd h4.1 (by simp [*])
+  · rw [Bool.not_eq_true] at c
+    split <;> rename_i c2
+    · constructor
+      · intro hval
+        injection hval with hv
+        exact Or.inr (Or.inr (Or.inl ⟨c, c2, hv.symm⟩))
+      · rintro (h1 | h2 | ⟨-, -, hv⟩ | h4)
+        · exact absurd h1.1 (by simp [*])
+        · exact absurd h2.1 (by simp [*])
+        · subst hv
+          rfl
+        · exact absurd h4.2.1 (by simp [*])
+    · rw [Bool.not_eq_true] at c2
+      constructor
+      · intro hval
+        injection hval with hv
+        exact Or.inr (Or.inr (Or.inr ⟨c, c2, hv.symm⟩))
+      · rintro (h1 | h2 | h3 | ⟨-, -, hv⟩)
+        · exact absurd h1.1 (by simp [*])
+        · exact absurd h2.1 (by simp [*])
+        · exact absurd h3.2.1 (by simp [*])
+        · subst hv
+          rfl
