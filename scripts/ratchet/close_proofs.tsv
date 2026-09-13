@@ -296,3 +296,4 @@ atom	catalog:lease_table	lease_table_expired_fate_iff	formal/aeneas/lean/Lease.l
 atom	catalog:changelog_durable_commit	changelog_durable_commit_fate_fate_iff	formal/aeneas/lean/Changelog.lean	changelog_durable_commit_fate
 atom	catalog:wal_archive_delete	wal_archive_delete_plan_fate_iff	formal/aeneas/lean/Changelog.lean	wal_archive_delete_plan
 atom	catalog:bulk_manifest_persist	bulk_manifest_persist_fate_fate_iff	formal/aeneas/lean/Manifest.lean	bulk_manifest_persist_fate
+atom	catalog:point_cache_validity	point_cache_validity_fate_iff	formal/aeneas/lean/Lookup.lean	point_cache_validity

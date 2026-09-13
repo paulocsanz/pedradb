@@ -115,6 +115,39 @@ pub fn vlog_ptr_orphaned_as_is(_vlog_closed: bool) -> bool {
     false
 }
 
+/// RFC-0219 P1.1: fate of a point/prefix cache fill or hit (F198/F207).
+/// The fill runs under the read lock, which does not exclude
+/// `publish_sequence` — only while the published seq still equals the
+/// seq the answer was computed at is the answer admissible for the
+/// cache.
+#[cfg(not(verus_keep_ghost))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PointCachePlan {
+    /// Published still equals the answer's seq — fill / hit admissible.
+    CacheCurrent,
+    /// A publish landed mid-read — the pre-publish answer is stale; skip
+    /// the fill / hit (the next read recomputes at the newer seq).
+    PublishAdvanced,
+}
+
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn point_cache_validity(published_seq: u64, answer_seq: u64) -> PointCachePlan {
+    if published_seq == answer_seq {
+        PointCachePlan::CacheCurrent
+    } else {
+        PointCachePlan::PublishAdvanced
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: fill / hit regardless of a racing publish — the stale
+/// pre-publish answer is cached indefinitely (silent-wrong; F198).
+#[must_use]
+pub fn point_cache_validity_as_is(_published_seq: u64, _answer_seq: u64) -> PointCachePlan {
+    PointCachePlan::CacheCurrent
+}
+
 #[cfg(verus_keep_ghost)]
 use vstd::prelude::*;
 
@@ -397,6 +430,40 @@ mod tests {
             body.contains("prefer_newer_seq("),
             "SST point newest-wins must call catalog prefer_newer_seq"
         );
+    }
+
+    #[test]
+    fn point_cache_validity_on_live_publish_advanced_skips_fill() {
+        // RFC-0219 P1.1: the F198/F207 fill/hit gates are the kernel's
+        // plan — fill only while published still equals the answer's seq.
+        assert_eq!(point_cache_validity(7, 7), PointCachePlan::CacheCurrent);
+        assert_eq!(point_cache_validity(7, 6), PointCachePlan::PublishAdvanced);
+        assert_eq!(
+            point_cache_validity_as_is(7, 6),
+            PointCachePlan::CacheCurrent,
+            "AS-IS dente: stale pre-publish answer cached indefinitely"
+        );
+        // Live: all three gates match the kernel plan; the raw seq
+        // equality left the trampoline.
+        for (fn_name, raw) in [
+            ("get_after_point_miss", "published_seq.load(Ordering::Acquire) == snap.seq"),
+            ("get_at", "published_seq.load(Ordering::Acquire) == snap.seq"),
+            (
+                "last_under_user_prefix",
+                "published_seq.load(Ordering::Acquire) == snapshot",
+            ),
+        ] {
+            let body = named_fn_src(include_str!("db.rs"), fn_name)
+                .unwrap_or_else(|| panic!("missing fn {fn_name}"));
+            assert!(
+                body.contains("match crate::lookup_kernel::point_cache_validity("),
+                "{fn_name} must match point_cache_validity"
+            );
+            assert!(
+                !body.contains(raw),
+                "{fn_name} must not keep the raw published==answer if"
+            );
+        }
     }
 
     /// RFC-0174 P1.2: data-fate `if`s on get_at / lookup must call a kernel.

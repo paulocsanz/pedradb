@@ -6487,6 +6487,44 @@
    }
   },
   {
+   "id": "point_cache_validity",
+   "finding": "RFC-0219 P1.1",
+   "twin_kind": "atom",
+   "atom": "point_cache_validity",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P1.1: o gate F198/F207 de fill/hit do point/prefix cache é decisão do kernel — fill admissível só enquanto published seq ainda é igual ao seq da resposta (publish em curso invalida a resposta pré-publish), provado ∀ sobre (published, answer) como point_cache_validity_fate_iff em Lookup.lean; os três trampolins db.rs (get_after_point_miss, get_at double-check, last_under_user_prefix) fazem match no plano do kernel"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/lookup_kernel.rs",
+   "twin": "crates/pedradb-core/src/lookup_kernel.rs",
+   "aeneas": "scripts/aeneas_lookup.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "point_cache_validity",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "get_after_point_miss"
+    },
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "get_at"
+    },
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "last_under_user_prefix"
+    }
+   ],
+   "as_is": "point_cache_validity_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/lookup_kernel.rs",
+    "test": "point_cache_validity_on_live_publish_advanced_skips_fill"
+   }
+  },
+  {
    "id": "flush_plan",
    "finding": "F2/F43",
    "twin_kind": "close",

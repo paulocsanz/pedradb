@@ -86,4 +86,112 @@ def vlog_ptr_orphaned (vlog_closed : Bool) : Result Bool := do
 def vlog_ptr_orphaned_as_is (_vlog_closed : Bool) : Result Bool := do
   ok false
 
+/-- [pedra_aeneas_lookup_kernel::PointCachePlan]
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 125:0-131:1
+    Visibility: public -/
+@[discriminant isize]
+inductive PointCachePlan where
+| CacheCurrent : PointCachePlan
+| PublishAdvanced : PointCachePlan
+
+/-- [pedra_aeneas_lookup_kernel::{impl core::clone::Clone for pedra_aeneas_lookup_kernel::PointCachePlan}::clone]:
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 124:9-124:14
+    Visibility: public -/
+def PointCachePlan.Insts.CoreCloneClone.clone
+  (self : PointCachePlan) : Result PointCachePlan := do
+  ok self
+
+/-- Trait implementation: [pedra_aeneas_lookup_kernel::{impl core::clone::Clone for pedra_aeneas_lookup_kernel::PointCachePlan}]
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 124:9-124:14 -/
+@[reducible]
+def PointCachePlan.Insts.CoreCloneClone : core.clone.Clone PointCachePlan := {
+  clone := PointCachePlan.Insts.CoreCloneClone.clone
+}
+
+/-- Trait implementation: [pedra_aeneas_lookup_kernel::{impl core::marker::Copy for pedra_aeneas_lookup_kernel::PointCachePlan}]
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 124:16-124:20 -/
+@[reducible]
+def PointCachePlan.Insts.CoreMarkerCopy : core.marker.Copy PointCachePlan := {
+  cloneInst := PointCachePlan.Insts.CoreCloneClone
+}
+
+/-- [pedra_aeneas_lookup_kernel::{impl core::fmt::Debug for pedra_aeneas_lookup_kernel::PointCachePlan}::fmt]:
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 124:22-124:27
+    Visibility: public -/
+def PointCachePlan.Insts.CoreFmtDebug.fmt
+  (self : PointCachePlan) (f : core.fmt.Formatter) :
+  Result ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter)
+  := do
+  match self with
+  | PointCachePlan.CacheCurrent =>
+    core.fmt.Formatter.write_str f (toStr "CacheCurrent")
+  | PointCachePlan.PublishAdvanced =>
+    core.fmt.Formatter.write_str f (toStr "PublishAdvanced")
+
+/-- Trait implementation: [pedra_aeneas_lookup_kernel::{impl core::fmt::Debug for pedra_aeneas_lookup_kernel::PointCachePlan}]
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 124:22-124:27 -/
+@[reducible]
+def PointCachePlan.Insts.CoreFmtDebug : core.fmt.Debug PointCachePlan := {
+  fmt := PointCachePlan.Insts.CoreFmtDebug.fmt
+}
+
+/-- Trait implementation: [pedra_aeneas_lookup_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_lookup_kernel::PointCachePlan}]
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 124:29-124:38 -/
+@[reducible]
+def PointCachePlan.Insts.CoreMarkerStructuralPartialEq :
+  core.marker.StructuralPartialEq PointCachePlan := {
+}
+
+/-- [pedra_aeneas_lookup_kernel::{impl core::cmp::PartialEq<pedra_aeneas_lookup_kernel::PointCachePlan> for pedra_aeneas_lookup_kernel::PointCachePlan}::eq]:
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 124:29-124:38
+    Visibility: public -/
+def PointCachePlan.Insts.CoreCmpPartialEqPointCachePlan.eq
+  (self : PointCachePlan) (other : PointCachePlan) : Result Bool := do
+  let self1 := read_discriminant self
+  let other1 := read_discriminant other
+  ok (self1 = other1)
+
+/-- Trait implementation: [pedra_aeneas_lookup_kernel::{impl core::cmp::PartialEq<pedra_aeneas_lookup_kernel::PointCachePlan> for pedra_aeneas_lookup_kernel::PointCachePlan}]
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 124:29-124:38 -/
+@[reducible]
+def PointCachePlan.Insts.CoreCmpPartialEqPointCachePlan : core.cmp.PartialEq
+  PointCachePlan PointCachePlan := {
+  eq := PointCachePlan.Insts.CoreCmpPartialEqPointCachePlan.eq
+}
+
+/-- [pedra_aeneas_lookup_kernel::{impl core::cmp::Eq for pedra_aeneas_lookup_kernel::PointCachePlan}::assert_fields_are_eq]:
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 124:40-124:42
+    Visibility: public -/
+def PointCachePlan.Insts.CoreCmpEq.assert_fields_are_eq
+  (self : PointCachePlan) : Result Unit := do
+  ok ()
+
+/-- Trait implementation: [pedra_aeneas_lookup_kernel::{impl core::cmp::Eq for pedra_aeneas_lookup_kernel::PointCachePlan}]
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 124:40-124:42 -/
+@[reducible]
+def PointCachePlan.Insts.CoreCmpEq : core.cmp.Eq PointCachePlan := {
+  partialEqInst := PointCachePlan.Insts.CoreCmpPartialEqPointCachePlan
+  assert_fields_are_eq := PointCachePlan.Insts.CoreCmpEq.assert_fields_are_eq
+}
+
+/-- [pedra_aeneas_lookup_kernel::point_cache_validity]:
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 135:0-141:1
+    Visibility: public -/
+def point_cache_validity
+  (published_seq : Std.U64) (answer_seq : Std.U64) :
+  Result PointCachePlan
+  := do
+  if published_seq = answer_seq
+  then ok PointCachePlan.CacheCurrent
+  else ok PointCachePlan.PublishAdvanced
+
+/-- [pedra_aeneas_lookup_kernel::point_cache_validity_as_is]:
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 147:0-149:1
+    Visibility: public -/
+def point_cache_validity_as_is
+  (_published_seq : Std.U64) (_answer_seq : Std.U64) :
+  Result PointCachePlan
+  := do
+  ok PointCachePlan.CacheCurrent
+
 end pedra_aeneas_lookup_kernel

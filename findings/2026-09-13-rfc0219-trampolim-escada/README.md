@@ -106,3 +106,24 @@ paralelo `ded231ab` (RFC-0217 P1.1, ancestral do pai pré-goal df11b725)
 sem chamada de kernel — território da sessão RFC-0217, não tocar.
 `commit_ops_with: let Some(op) = records.first()` é if-let pré-existente
 no mesmo teste. Documentado, não corrigido aqui.
+
+## P1.1-a — `point_cache_validity` (lookup_kernel)
+
+Sítios: os três portões F198/F207 de cache — `get_after_point_miss`
+(fill), `get_at` (double-check hit), `last_under_user_prefix` (fill) —
+decidiam inline `published_seq == snap/snapshot`.
+
+- **Kernel**: `lookup_kernel::point_cache_validity(published, answer)` →
+  `PointCachePlan{CacheCurrent, PublishAdvanced}` — fill/hit admissível
+  só enquanto published == seq da resposta.
+- **AS-IS dente**: `point_cache_validity_as_is` — cacheia sempre; a
+  resposta pré-publish fica congelada no cache (silent-wrong F198).
+- **Trampolim**: os três sítios fazem `match` no plano (4 linhas `if`
+  saem do contador).
+- **Teorema**: `point_cache_validity_fate_iff` (∀ sobre os dois u64) em
+  `Lookup.lean`.
+- **Extrato**: `aeneas_lookup.sh --required` verde.
+- **Planta DST**: `point_cache_validity_on_live_publish_advanced_skips_fill`.
+- **Par nasce átomo**: `catalog:point_cache_validity`. floor_atom
+  269→270, residuals atom 270, single_artifact 289.
+- **Contador**: 72 → **68** (db.rs 50→46; −4 sítios num pull só).

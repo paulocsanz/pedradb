@@ -68,3 +68,33 @@ theorem prefer_newer_seq_fate_iff :
   intro have_best new_seq best_seq v
   unfold prefer_newer_seq
   cases have_best <;> simp <;> exact eq_comm
+
+/-- RFC-0219 P1.1 (átomo `catalog:point_cache_validity`): o fill/hit do
+    point/prefix cache é admissível EXATAMENTE enquanto o published seq
+    ainda é igual ao seq em que a resposta foi computada — publish
+    avançou ⇒ resposta pré-publish é velha e não entra (F198/F207). O
+    AS-IS cacheia sempre (resposta velha congelada — dente plantado). -/
+theorem point_cache_validity_fate_iff :
+    ∀ (published answer : U64) (plan : PointCachePlan),
+      (point_cache_validity published answer = ok plan) ↔
+        ((published = answer ∧ plan = PointCachePlan.CacheCurrent) ∨
+          (published ≠ answer ∧ plan = PointCachePlan.PublishAdvanced)) := by
+  intro published answer plan
+  simp only [point_cache_validity]
+  split <;> rename_i c
+  · constructor
+    · intro hval
+      injection hval with hv
+      exact Or.inl ⟨c, hv.symm⟩
+    · rintro (⟨-, hv⟩ | h2)
+      · subst hv
+        rfl
+      · exact absurd c h2.1
+  · constructor
+    · intro hval
+      injection hval with hv
+      exact Or.inr ⟨c, hv.symm⟩
+    · rintro (h1 | ⟨-, hv⟩)
+      · exact absurd h1.1 c
+      · subst hv
+        rfl

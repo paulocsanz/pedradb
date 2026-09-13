@@ -3618,9 +3618,15 @@ impl<E: Env> Db<E> {
         // `key` between the snapshot above and this insert, caching a stale
         // answer indefinitely. Only insert while `published` still matches
         // the seq the answer was computed at. At capacity the cache freezes
-        // (no FIFO churn on unique keys).
-        if self.published_seq.load(Ordering::Acquire) == snap.seq {
-            self.point_cache.insert(key, got.clone());
+        // (no FIFO churn on unique keys). Kernel owns the fate.
+        match crate::lookup_kernel::point_cache_validity(
+            self.published_seq.load(Ordering::Acquire),
+            snap.seq,
+        ) {
+            crate::lookup_kernel::PointCachePlan::CacheCurrent => {
+                self.point_cache.insert(key, got.clone());
+            }
+            crate::lookup_kernel::PointCachePlan::PublishAdvanced => {}
         }
         got
     }
@@ -3653,13 +3659,24 @@ impl<E: Env> Db<E> {
         // invalidates dirty keys before new inserts can refill them).
         // Double-checked `published_seq`: a racing publish bumps it before any
         // newer value can enter the cache, so the recheck rejects the hit and
-        // falls to the full walk (OCC rmw reads become cache hits).
-        if self.published_seq.load(Ordering::Acquire) == snap.seq {
-            if let Some(v) = self.point_cache.get(key) {
-                if self.published_seq.load(Ordering::Acquire) == snap.seq {
-                    return Ok(v);
+        // falls to the full walk (OCC rmw reads become cache hits). Kernel
+        // owns both F198 gates.
+        match crate::lookup_kernel::point_cache_validity(
+            self.published_seq.load(Ordering::Acquire),
+            snap.seq,
+        ) {
+            crate::lookup_kernel::PointCachePlan::CacheCurrent => {
+                if let Some(v) = self.point_cache.get(key) {
+                    match crate::lookup_kernel::point_cache_validity(
+                        self.published_seq.load(Ordering::Acquire),
+                        snap.seq,
+                    ) {
+                        crate::lookup_kernel::PointCachePlan::CacheCurrent => return Ok(v),
+                        crate::lookup_kernel::PointCachePlan::PublishAdvanced => {}
+                    }
                 }
             }
+            crate::lookup_kernel::PointCachePlan::PublishAdvanced => {}
         }
         Ok(match self.lookup(key, snap.seq) {
             Lookup::Found(v) => {
@@ -4234,9 +4251,15 @@ impl<E: Env> Db<E> {
             // and this insert; the pre-publish answer would then carry the
             // post-clear generation and validate until the next write. Only
             // fill while `published` still matches the seq the answer was
-            // computed at.
-            if self.published_seq.load(Ordering::Acquire) == snapshot {
-                self.last_prefix_cache.insert(prefix, out.clone());
+            // computed at. Kernel owns the fate.
+            match crate::lookup_kernel::point_cache_validity(
+                self.published_seq.load(Ordering::Acquire),
+                snapshot,
+            ) {
+                crate::lookup_kernel::PointCachePlan::CacheCurrent => {
+                    self.last_prefix_cache.insert(prefix, out.clone());
+                }
+                crate::lookup_kernel::PointCachePlan::PublishAdvanced => {}
             }
         }
         Ok(out)

@@ -1967,7 +1967,10 @@ def check_extract(
             "./scripts/aeneas_lookup.sh",
             "crates/pedradb-core/src/lookup_kernel.rs",
             "formal/aeneas/lean/Lookup.lean",
-            ("theorem snap_is_empty_zero",),
+            (
+                "theorem snap_is_empty_zero",
+                "theorem point_cache_validity_fate_iff",
+            ),
         ),
         (
             "rpc_mode",
