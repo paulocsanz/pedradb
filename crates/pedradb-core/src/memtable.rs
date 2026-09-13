@@ -700,6 +700,32 @@ impl MemTable {
         Self::bump_cf_bytes_map(&mut self.cf_bytes, user_key, n, add);
     }
 
+    /// Apply one accumulated CF delta (`insert_many`'s batch-local memo,
+    /// RFC-0217 P2.2). `pfx` is already a `cf_prefix` (no NUL), so a
+    /// missing family with a positive net inserts the net — identical to
+    /// `bump_cf_bytes_map` for every reachable sequence (a sub on a
+    /// missing family never happens: replace implies the family exists).
+    #[inline]
+    fn flush_cf_delta(cf_bytes: &mut BTreeMap<Bytes, usize>, pfx: Option<&Bytes>, delta: i64) {
+        let Some(pfx) = pfx else { return };
+        if delta == 0 {
+            return;
+        }
+        match cf_bytes.get_mut(pfx) {
+            Some(slot) => {
+                *slot = if delta > 0 {
+                    slot.saturating_add(delta as usize)
+                } else {
+                    slot.saturating_sub(delta.unsigned_abs() as usize)
+                };
+            }
+            None if delta > 0 => {
+                cf_bytes.insert(pfx.clone(), delta as usize);
+            }
+            None => {}
+        }
+    }
+
     /// Approximate memory of one CF family (RFC-0065 P1.1).
     ///
     /// `"default"` sums the empty prefix (raw keys) and the `default\0` prefix.
@@ -1027,38 +1053,59 @@ impl MemTable {
 
     /// Push onto the shared tail and index by CF prefix. Returns the global index.
     fn tail_append(&mut self, key: InternalKey, value: Bytes) -> usize {
+        let MemTable {
+            tail,
+            tail_idx,
+            point_ord_btree,
+            point_ord_btree_live,
+            ..
+        } = self;
         let pfx = idx_prefix(key.user_key.as_ref());
         let pfx_b = Bytes::copy_from_slice(pfx);
-        let point = point_cf(pfx);
         let cap = point_reserve(pfx);
-        let s = self.tail_idx.entry(pfx_b).or_insert_with(|| {
+        let s = tail_idx.entry(pfx_b).or_insert_with(|| {
             let mut s = TailShard::default();
             if cap > 0 {
                 s.point.reserve(cap);
             }
             s
         });
-        let i = self.tail.len();
-        if key.user_key.len() <= 32 {
-            let (p0, p1) = pack32(key.user_key.as_ref());
-            let sk = (p0, p1, key.user_key.len() as u16);
-            if point {
+        let i = tail.len();
+        Self::shard_insert(
+            s,
+            point_ord_btree,
+            point_ord_btree_live,
+            pfx,
+            &key.user_key,
+            i,
+        );
+        tail.push(Version { key, value });
+        i
+    }
+
+    /// Pack + index one tail entry into its shard (shared by the single-op
+    /// `tail_append` and the batched `insert_many` fast path).
+    #[inline]
+    fn shard_insert(
+        s: &mut TailShard,
+        ord_bt: &Mutex<BTreeMap<Bytes, BTreeMap<PackKey, usize>>>,
+        ord_live: &AtomicBool,
+        pfx: &[u8],
+        user_key: &Bytes,
+        i: usize,
+    ) {
+        if user_key.len() <= 32 {
+            let (p0, p1) = pack32(user_key);
+            let sk = (p0, p1, user_key.len() as u16);
+            if point_cf(pfx) {
                 s.point.insert(sk, i);
-                Self::point_ord_btree_insert_at(
-                    &self.point_ord_btree,
-                    &self.point_ord_btree_live,
-                    pfx,
-                    sk,
-                    i,
-                );
+                Self::point_ord_btree_insert_at(ord_bt, ord_live, pfx, sk, i);
             } else {
                 s.short.insert(sk, i);
             }
         } else {
-            s.long.insert(key.user_key.clone(), i);
+            s.long.insert(user_key.clone(), i);
         }
-        self.tail.push(Version { key, value });
-        i
     }
 
     fn invalidate_tail_ord(&self) {
@@ -1325,11 +1372,46 @@ impl MemTable {
         let hint = iter.size_hint().0;
         let skip_replace = hint >= 16;
         let mut any = false;
+        // RFC-0217 P2.2: batch-local prefix memo. Group-apply shapes are
+        // prefix-uniform (one CF per op), and the leader was paying per op
+        // a fresh `Bytes` copy of the shard prefix plus three BTreeMap
+        // walks (`tail_idx`, `cf_bytes`, `cf_span`). Field-split borrows
+        // hold the last prefix's slots across the loop; a prefix change
+        // re-walks (correct for every shape, fast for the uniform one).
+        let MemTable {
+            tail,
+            tail_idx,
+            point_ord_btree,
+            point_ord_btree_live,
+            entries,
+            approx_bytes,
+            cf_bytes,
+            cf_span,
+            span_stale,
+            range_tombstones,
+            tail_max_seq,
+            ..
+        } = self;
+        let span_active = !*span_stale;
+        let mut idx_pfx: Option<Bytes> = None;
+        let mut idx_slot: Option<&mut TailShard> = None;
+        let mut cf_acc_pfx: Option<Bytes> = None;
+        let mut cf_acc_delta: i64 = 0;
+        let mut span_pfx: Option<Bytes> = None;
+        let mut span_slot: Option<&mut SpanState> = None;
         for (key, value) in iter {
             let entry_bytes = key.user_key.len() + value.len() + 8;
             let is_rd = key.kind == ValueType::RangeDeletion;
+            // cf_bytes delta accumulates per prefix (one flush on change /
+            // after the loop) — no per-op tree walk.
+            let cf_p = cf_prefix(key.user_key.as_ref());
+            if cf_acc_pfx.as_deref() != Some(cf_p) {
+                Self::flush_cf_delta(cf_bytes, cf_acc_pfx.as_ref(), cf_acc_delta);
+                cf_acc_pfx = Some(Bytes::copy_from_slice(cf_p));
+                cf_acc_delta = 0;
+            }
             if !skip_replace {
-                if let Some(v) = self.tail.last_mut() {
+                if let Some(v) = tail.last_mut() {
                     if v.key.sequence == key.sequence
                         && v.key.kind == key.kind
                         && v.key.user_key == key.user_key
@@ -1337,40 +1419,97 @@ impl MemTable {
                         let old = std::mem::replace(&mut v.value, value);
                         let old_n = old.len();
                         let new_n = v.value.len();
-                        self.approx_bytes = self
-                            .approx_bytes
+                        *approx_bytes = approx_bytes
                             .saturating_sub(old_n)
                             .saturating_add(new_n);
                         if new_n >= old_n {
-                            Self::bump_cf_bytes_map(
-                                &mut self.cf_bytes,
-                                v.key.user_key.as_ref(),
-                                new_n - old_n,
-                                true,
-                            );
+                            cf_acc_delta += (new_n - old_n) as i64;
                         } else {
-                            Self::bump_cf_bytes_map(
-                                &mut self.cf_bytes,
-                                v.key.user_key.as_ref(),
-                                old_n - new_n,
-                                false,
-                            );
+                            cf_acc_delta -= (old_n - new_n) as i64;
                         }
                         continue;
                     }
                 }
             }
-            self.entries = self.entries.saturating_add(1);
-            self.approx_bytes = self.approx_bytes.saturating_add(entry_bytes);
-            self.bump_cf_bytes(key.user_key.as_ref(), entry_bytes, true);
-            self.bump_span(&key.user_key, key.kind);
-            if is_rd {
-                self.range_tombstones = self.range_tombstones.saturating_add(1);
+            *entries = entries.saturating_add(1);
+            *approx_bytes = approx_bytes.saturating_add(entry_bytes);
+            cf_acc_delta += entry_bytes as i64;
+            // `bump_span` inline (field-split): same semantics as the
+            // `&mut self` original. A freshly created span entry is NOT
+            // re-checked (the original only checks pre-existing entries).
+            if span_active {
+                let pfx = cf_prefix(key.user_key.as_ref());
+                let mut update_span = span_pfx.as_deref() == Some(pfx);
+                if !update_span {
+                    span_pfx = Some(Bytes::copy_from_slice(pfx));
+                    span_slot = cf_span.get_mut(pfx);
+                    if span_slot.is_none() {
+                        let s = if key.kind == ValueType::Value {
+                            SpanState {
+                                impure: false,
+                                lo: key.user_key.clone(),
+                                hi: key.user_key.clone(),
+                            }
+                        } else {
+                            SpanState {
+                                impure: true,
+                                ..SpanState::default()
+                            }
+                        };
+                        cf_span.insert(span_pfx.clone().expect("just set"), s);
+                        span_slot = cf_span.get_mut(pfx);
+                    } else {
+                        update_span = true;
+                    }
+                }
+                if update_span {
+                    if let Some(s) = span_slot.as_mut() {
+                        if !s.impure {
+                            if key.kind != ValueType::Value
+                                || key.user_key.as_ref() <= s.hi.as_ref()
+                            {
+                                s.impure = true;
+                                s.lo = Bytes::new();
+                                s.hi = Bytes::new();
+                            } else {
+                                s.hi = key.user_key.clone();
+                            }
+                        }
+                    }
+                }
             }
-            self.tail_max_seq = self.tail_max_seq.max(key.sequence);
-            self.tail_append(key, value);
+            if is_rd {
+                *range_tombstones = range_tombstones.saturating_add(1);
+            }
+            *tail_max_seq = (*tail_max_seq).max(key.sequence);
+            // `tail_append` inline with the shard memo.
+            let pfx = idx_prefix(key.user_key.as_ref());
+            if idx_pfx.as_deref() != Some(pfx) {
+                let owned = Bytes::copy_from_slice(pfx);
+                let cap = point_reserve(pfx);
+                let s = tail_idx.entry(owned.clone()).or_insert_with(|| {
+                    let mut s = TailShard::default();
+                    if cap > 0 {
+                        s.point.reserve(cap);
+                    }
+                    s
+                });
+                idx_pfx = Some(owned);
+                idx_slot = Some(s);
+            }
+            let i = tail.len();
+            Self::shard_insert(
+                idx_slot.as_deref_mut().expect("memo hit or just set"),
+                point_ord_btree,
+                point_ord_btree_live,
+                pfx,
+                &key.user_key,
+                i,
+            );
+            tail.push(Version { key, value });
             any = true;
         }
+        Self::flush_cf_delta(cf_bytes, cf_acc_pfx.as_ref(), cf_acc_delta);
         if any {
             self.invalidate_tail_ord();
         }
@@ -2932,6 +3071,174 @@ mod tests {
         assert_eq!(a.len(), b.len());
         assert_eq!(a.get(b"k1", 3), b.get(b"k1", 3));
         assert_eq!(a.approx_memory_usage(), b.approx_memory_usage());
+    }
+
+    /// RFC-0217 P2.2: the batch-local prefix memo (idx shard slot, cf_bytes
+    /// delta accumulator, cf_span slot) must leave the memtable observably
+    /// identical to the per-op `insert` path across prefix switches, point /
+    /// short / long shards, tombstones, range deletions, and same-seq
+    /// replaces — for both the hint<16 (replace scan on) and hint≥16 arms.
+    #[test]
+    fn insert_many_prefix_memo_matches_per_op_insert() {
+        let key = |cf: &str, i: usize, seq: u64, kind: ValueType| {
+            InternalKey::new(
+                Bytes::from(format!("{cf}\x00key{i:04}")),
+                seq,
+                kind,
+            )
+        };
+        let mut items: Vec<(InternalKey, Bytes)> = Vec::new();
+        for i in 0..12 {
+            items.push((
+                key("default", i, i as u64 + 1, ValueType::Value),
+                Bytes::from(format!("v{i}")),
+            ));
+        }
+        // Prefix switch into the other point shard; the out-of-order last
+        // op must flip the span impure on both arms.
+        for i in 0..6 {
+            items.push((
+                key("lock", i + 3, 40 + i as u64, ValueType::Value),
+                Bytes::from(format!("l{i}")),
+            ));
+        }
+        items.push((
+            key("lock", 0, 46, ValueType::Value),
+            Bytes::from_static(b"l-old"),
+        ));
+        // Raw one-slash shard (idx prefix differs from cf prefix shape).
+        items.push((
+            InternalKey::new(Bytes::from_static(b"c/a"), 50, ValueType::Value),
+            Bytes::from_static(b"va"),
+        ));
+        // >32 B key (long shard).
+        let long = format!("write\x00{}", "L".repeat(40));
+        items.push((
+            InternalKey::new(Bytes::from(long), 51, ValueType::Value),
+            Bytes::from_static(b"vl"),
+        ));
+        // Tombstone + range deletion back in the first prefix.
+        items.push((key("default", 7, 52, ValueType::Deletion), Bytes::new()));
+        items.push((
+            key("default", 8, 53, ValueType::RangeDeletion),
+            Bytes::new(),
+        ));
+
+        let mut a = MemTable::new();
+        let mut b = MemTable::new();
+        for (k, v) in items.clone() {
+            a.insert(k, v);
+        }
+        b.insert_many(items.clone());
+        b.insert_many(Vec::new());
+
+        let snap = 100;
+        assert_eq!(a.len(), b.len(), "entries");
+        assert_eq!(a.approx_memory_usage(), b.approx_memory_usage());
+        for cf in ["default", "lock", "write", "c", ""] {
+            assert_eq!(
+                a.approx_memory_usage_cf(cf),
+                b.approx_memory_usage_cf(cf),
+                "cf_bytes for {cf:?}"
+            );
+            assert_eq!(a.bulk_span(cf), b.bulk_span(cf), "cf_span for {cf:?}");
+        }
+        for (k, _) in &items {
+            assert_eq!(
+                a.get(k.user_key.as_ref(), snap),
+                b.get(k.user_key.as_ref(), snap),
+                "get {:?}",
+                k.user_key
+            );
+        }
+        let cnt = |m: &MemTable, lo: &[u8], hi: &[u8]| {
+            m.count_latest_in_range(
+                std::ops::Bound::Included(lo),
+                std::ops::Bound::Excluded(hi),
+                usize::MAX,
+                snap,
+            )
+        };
+        assert_eq!(
+            cnt(&a, b"default\x00key", b"default\x00kez"),
+            cnt(&b, b"default\x00key", b"default\x00kez"),
+            "point range count"
+        );
+        assert_eq!(
+            cnt(&a, b"lock\x00key", b"lock\x00kez"),
+            cnt(&b, b"lock\x00key", b"lock\x00kez"),
+            "point range count (lock)"
+        );
+        assert_eq!(
+            a.last_visible_under_prefix(b"default\x00key0000", snap, None),
+            b.last_visible_under_prefix(b"default\x00key0000", snap, None),
+        );
+        // b drained the same items again through a SECOND batch — the memo
+        // must also be correct when shards already exist (entry() hit path).
+        let mut c = MemTable::new();
+        for (k, v) in items.clone() {
+            c.insert(k, v);
+        }
+        for (k, v) in items.clone() {
+            c.insert(k, v);
+        }
+        b.insert_many(items);
+        assert_eq!(c.len(), b.len(), "entries after re-insert");
+        assert_eq!(c.approx_memory_usage(), b.approx_memory_usage());
+        for cf in ["default", "lock", "write", "c", ""] {
+            assert_eq!(
+                c.approx_memory_usage_cf(cf),
+                b.approx_memory_usage_cf(cf),
+                "cf_bytes re-insert {cf:?}"
+            );
+        }
+        assert_eq!(
+            c.get(b"default\x00key0000", snap),
+            b.get(b"default\x00key0000", snap)
+        );
+
+        // hint<16 arm with a same-seq consecutive replace (value swap):
+        // replace bookkeeping (approx + cf delta) must match per-op insert.
+        let small: Vec<(InternalKey, Bytes)> = vec![
+            (
+                InternalKey::new(Bytes::from_static(b"default\x00r0"), 1, ValueType::Value),
+                Bytes::from_static(b"one"),
+            ),
+            (
+                InternalKey::new(Bytes::from_static(b"default\x00r1"), 2, ValueType::Value),
+                Bytes::from_static(b"two"),
+            ),
+            (
+                InternalKey::new(Bytes::from_static(b"lock\x00r0"), 3, ValueType::Value),
+                Bytes::from_static(b"three"),
+            ),
+            // same seq + key + kind as the previous op → replace, value shrinks
+            (
+                InternalKey::new(Bytes::from_static(b"lock\x00r0"), 3, ValueType::Value),
+                Bytes::from_static(b"3"),
+            ),
+        ];
+        let mut d = MemTable::new();
+        let mut e = MemTable::new();
+        for (k, v) in small.clone() {
+            d.insert(k, v);
+        }
+        e.insert_many(small);
+        assert_eq!(d.len(), e.len(), "replace arm entries");
+        assert_eq!(d.approx_memory_usage(), e.approx_memory_usage());
+        assert_eq!(
+            d.get(b"lock\x00r0", 9),
+            Lookup::Found(Bytes::from_static(b"3"))
+        );
+        assert_eq!(d.get(b"lock\x00r0", 9), e.get(b"lock\x00r0", 9));
+        for cf in ["default", "lock"] {
+            assert_eq!(
+                d.approx_memory_usage_cf(cf),
+                e.approx_memory_usage_cf(cf),
+                "replace arm cf_bytes {cf:?}"
+            );
+            assert_eq!(d.bulk_span(cf), e.bulk_span(cf));
+        }
     }
 
     #[test]
