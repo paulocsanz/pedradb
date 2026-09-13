@@ -1,6 +1,12 @@
 //! vlog GC decision kernel (RFC-0056 P1.4 — crash dictionary on the
 //! value-log MANIFEST swing and the sealed-blob rewrite guard).
 //!
+//! **Term:** this file is what `rustc` links. Aeneas extracts that body
+//! (`scripts/aeneas_vlog_gc.sh`). A Verus stand-in of vlog_recover_action
+//! billed as last-wins of a cfg-split file is a model twin (deleted).
+//!
+//!   ./scripts/aeneas_vlog_gc.sh --required
+//!
 //! Pure decision functions only. Production (`db.rs`) calls
 //! [`vlog_recover_action`] on `open_with_env` and [`blob_gc_action`] inside
 //! `compact_blob_auto`; the durable effects (open handles, rename, rewrite)
@@ -14,6 +20,10 @@
 //!   MANIFEST commit) so an uncommitted swing cannot hijack reads.
 //! - The sealed-blob rewrite guard never rewrites the active append
 //!   generation (writers may still be appending into it).
+//!
+//! Aeneas of the rustc body is the term. A Verus stand-in is not last-wins.
+
+#![forbid(unsafe_code)]
 
 /// What the vlog open path must do, given the recovered MANIFEST flag and
 /// what actually exists on disk after a crash.
@@ -124,6 +134,21 @@ pub fn blob_gc_action_as_is_rewrite_active(_is_active: bool, bytes: u64) -> Blob
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vlog_gc_kernel_has_no_verus_cartoon() {
+        let src = include_str!("vlog_gc_kernel.rs");
+        let block = concat!("verus", "!", " {");
+        let cfg = concat!("cfg(", "verus", "_keep", "_ghost)");
+        assert!(
+            !src.contains(block),
+            "stand-in is not last-wins of rustc vlog_recover_action"
+        );
+        assert!(
+            !src.contains(cfg),
+            "cfg split hides rustc types from the prover"
+        );
+    }
 
     #[test]
     fn swing_committed_opens_new() {
@@ -257,6 +282,36 @@ mod tests {
             blob_gc_action_as_is_rewrite_active(true, 4096),
             BlobGcAction::Rewrite,
             "AS-IS dente: rewrite the live blob"
+        );
+        const B_OPEN: u8 = 123;
+        const B_CLOSE: u8 = 125;
+        let src = include_str!("db.rs");
+        let needle = "fn compact_blob(";
+        let start = src.find(needle).expect("compact_blob");
+        let rest = &src[start..];
+        let bytes = rest.as_bytes();
+        let brace = bytes.iter().position(|&b| b == B_OPEN).expect("brace");
+        let mut depth = 0i32;
+        let mut end = 0;
+        for (i, &b) in bytes[brace..].iter().enumerate() {
+            if b == B_OPEN {
+                depth += 1;
+            } else if b == B_CLOSE {
+                depth -= 1;
+                if depth == 0 {
+                    end = brace + i;
+                    break;
+                }
+            }
+        }
+        let body = &rest[brace..=end];
+        assert!(
+            body.contains("blob_gc_action("),
+            "compact_blob must match blob_gc_action"
+        );
+        assert!(
+            !body.contains("if file_num == self.blob_active"),
+            "compact_blob must not keep a raw active-generation if"
         );
     }
 }

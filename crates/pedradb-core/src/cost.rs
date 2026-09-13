@@ -19,9 +19,7 @@ static ENABLED: OnceLock<bool> = OnceLock::new();
 /// `true` when `PEDRA_COST_TRACE` is set to anything but `0`.
 #[must_use]
 pub fn enabled() -> bool {
-    *ENABLED.get_or_init(|| {
-        std::env::var("PEDRA_COST_TRACE").is_ok_and(|v| v != "0")
-    })
+    *ENABLED.get_or_init(|| std::env::var("PEDRA_COST_TRACE").is_ok_and(|v| v != "0"))
 }
 
 macro_rules! counters {
@@ -135,7 +133,9 @@ pub fn point_block_tls() {
 pub fn point_block_file(bytes: u64) {
     if enabled() {
         COUNTERS.point_block_file.fetch_add(1, Ordering::Relaxed);
-        COUNTERS.point_file_bytes.fetch_add(bytes, Ordering::Relaxed);
+        COUNTERS
+            .point_file_bytes
+            .fetch_add(bytes, Ordering::Relaxed);
     }
 }
 
@@ -175,7 +175,9 @@ pub fn scan_block_hit() {
 pub fn scan_block_load(bytes: u64) {
     if enabled() {
         COUNTERS.scan_block_loads.fetch_add(1, Ordering::Relaxed);
-        COUNTERS.scan_block_bytes.fetch_add(bytes, Ordering::Relaxed);
+        COUNTERS
+            .scan_block_bytes
+            .fetch_add(bytes, Ordering::Relaxed);
     }
 }
 
@@ -228,20 +230,30 @@ impl Snapshot {
             point_sst_considered: self
                 .point_sst_considered
                 .saturating_sub(earlier.point_sst_considered),
-            point_sst_rejected: self.point_sst_rejected.saturating_sub(earlier.point_sst_rejected),
+            point_sst_rejected: self
+                .point_sst_rejected
+                .saturating_sub(earlier.point_sst_rejected),
             point_block_resident: self
                 .point_block_resident
                 .saturating_sub(earlier.point_block_resident),
             point_block_tls: self.point_block_tls.saturating_sub(earlier.point_block_tls),
-            point_block_file: self.point_block_file.saturating_sub(earlier.point_block_file),
-            point_file_bytes: self.point_file_bytes.saturating_sub(earlier.point_file_bytes),
+            point_block_file: self
+                .point_block_file
+                .saturating_sub(earlier.point_block_file),
+            point_file_bytes: self
+                .point_file_bytes
+                .saturating_sub(earlier.point_file_bytes),
             point_pread_ns: self.point_pread_ns.saturating_sub(earlier.point_pread_ns),
             point_image_ns: self.point_image_ns.saturating_sub(earlier.point_image_ns),
             scan_ops: self.scan_ops.saturating_sub(earlier.scan_ops),
             scan_sst_probed: self.scan_sst_probed.saturating_sub(earlier.scan_sst_probed),
-            scan_block_loads: self.scan_block_loads.saturating_sub(earlier.scan_block_loads),
+            scan_block_loads: self
+                .scan_block_loads
+                .saturating_sub(earlier.scan_block_loads),
             scan_block_hits: self.scan_block_hits.saturating_sub(earlier.scan_block_hits),
-            scan_block_bytes: self.scan_block_bytes.saturating_sub(earlier.scan_block_bytes),
+            scan_block_bytes: self
+                .scan_block_bytes
+                .saturating_sub(earlier.scan_block_bytes),
         }
     }
 

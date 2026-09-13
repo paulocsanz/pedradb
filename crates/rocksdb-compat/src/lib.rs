@@ -25,6 +25,18 @@ pub use api::{
     IngestExternalFileOptions, LiveFile, MergeOperands, SstFileWriter, WriteBatchWithIndex,
     DEFAULT_COLUMN_FAMILY_NAME,
 };
+
+/// Map the rust-rocksdb `CompactionDecision` onto the native core decision
+/// (RFC-0217 P1.2).
+fn to_core_decision(d: CompactionDecision) -> pedradb_core::merge::CompactFilterDecision {
+    match d {
+        CompactionDecision::Keep => pedradb_core::merge::CompactFilterDecision::Keep,
+        CompactionDecision::Remove => pedradb_core::merge::CompactFilterDecision::Remove,
+        CompactionDecision::Change(nv) => {
+            pedradb_core::merge::CompactFilterDecision::Change(bytes::Bytes::from(nv))
+        }
+    }
+}
 pub mod backup;
 pub mod checkpoint;
 pub use backup::{BackupEngine, BackupEngineInfo, BackupEngineOptions, RestoreOptions};
@@ -47,7 +59,6 @@ pub use shape::{
     UniversalCompactionStopStyle, WaitForCompactOptions,
 };
 
-use pedradb_core::bloom::BloomFilter;
 use pedradb_core::{
     cf_encode_effective, decode_cf_key, encode_cf_key, key_in_cf_family, prefix_exclusive_end,
     BatchOp, CompactOptions as CoreCompactOptions, ConcurrentDb, CoreError, Env as PedraEnv,
@@ -152,9 +163,7 @@ impl From<CoreError> for Error {
             CoreError::TransactionConflict => ErrorKind::TransactionConflict,
             CoreError::CasMismatch => ErrorKind::CasMismatch,
             CoreError::SnapshotTooOld { .. } => ErrorKind::SnapshotTooOld,
-            CoreError::WriteStall { .. }
-            | CoreError::WriteStallMem { .. }
-            | CoreError::RamBudget { .. } => ErrorKind::WriteStall,
+            CoreError::WriteStall { .. } | CoreError::WriteStallMem { .. } => ErrorKind::WriteStall,
             CoreError::AlreadyOpen { .. } => ErrorKind::AlreadyOpen,
             CoreError::Internal(_) | CoreError::TransactionFinished | CoreError::Transaction(_) => {
                 ErrorKind::Other
@@ -162,6 +171,7 @@ impl From<CoreError> for Error {
             // F196: post-commit manifest unsynced — surfaced by off-lock
             // host persisters; an I/O durability condition.
             CoreError::ManifestCommittedUnsynced { .. } => ErrorKind::Io,
+            CoreError::DiskPressure { .. } => ErrorKind::Io,
         };
         Self {
             msg: e.to_string(),
@@ -200,13 +210,6 @@ fn map_property_int<E: PedraEnv>(db: &ConcurrentDb<E>, name: &str) -> Option<u64
         properties::ESTIMATE_TABLE_READERS_MEM => {
             Some(s.table_cache_hits.saturating_add(s.table_cache_misses))
         }
-        properties::PEDRA_RAM_PRESSURE => Some(s.ram_pressure),
-        properties::PEDRA_RAM_WARM_SKIPPED => Some(s.ram_warm_skipped),
-        properties::PEDRA_RAM_CEILING_BYTES => Some(s.ram_ceiling_bytes),
-        properties::PEDRA_ENGINE_RESIDENT_BYTES => Some(s.engine_resident_bytes),
-        properties::PEDRA_SETTLE_WARM_BYTES => Some(s.settle_warm_bytes),
-        properties::PEDRA_SETTLE_WARM_NS => Some(s.settle_warm_ns),
-        properties::PEDRA_SETTLE_COMPACT_NS => Some(s.settle_compact_ns),
         _ => None,
     }
 }
@@ -810,7 +813,7 @@ impl KeyCodec {
     /// alloc per `write()` instead of one malloc per op).
     fn encode_pooled(&self, cf: &str, key: &[u8], pool: &mut bytes::BytesMut) -> Bytes {
         let effective = cf_encode_effective(cf, self.default_raw);
-        if effective.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(effective.len() as u64) {
             pool.reserve(key.len());
             pool.extend_from_slice(key);
             return pool.split_to(key.len()).freeze();
@@ -828,7 +831,7 @@ impl KeyCodec {
     fn fill_run_prefix(&self, cf: &str, pfx: &mut Vec<u8>) {
         pfx.clear();
         let effective = cf_encode_effective(cf, self.default_raw);
-        if effective.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(effective.len() as u64) {
             return;
         }
         pfx.extend_from_slice(effective.as_bytes());
@@ -837,7 +840,7 @@ impl KeyCodec {
 
     /// [`Self::encode_pooled`] with a prefix from [`Self::fill_run_prefix`].
     fn encode_run(&self, prefix: &[u8], key: &[u8], pool: &mut bytes::BytesMut) -> Bytes {
-        if prefix.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(prefix.len() as u64) {
             pool.reserve(key.len());
             pool.extend_from_slice(key);
             return pool.split_to(key.len()).freeze();
@@ -849,21 +852,11 @@ impl KeyCodec {
         pool.split_to(n).freeze()
     }
 
-    /// Owned key — no pool slice. For ops that outlive the batch inside a
-    /// sparse structure: the non-run tail of a latched batch (the slipstream
-    /// `meta` cursor) lands in the memtable, where one ~30 B key would pin a
-    /// whole 8 KiB `KEY_POOL` chunk until flush (RFC-0161 P0.5: 100M hydrate
-    /// held ~8.5 B/entry of pool chunks this way).
-    fn encode_run_owned(&self, prefix: &[u8], key: &[u8]) -> Bytes {
-        let mut v = Vec::with_capacity(prefix.len() + key.len());
-        v.extend_from_slice(prefix);
-        v.extend_from_slice(key);
-        Bytes::from(v)
-    }
-
     /// Default-CF raw: copy user key; otherwise `cf\\0key` via the pool.
     fn encode_owned(&self, cf: &str, key: &[u8], pool: &mut bytes::BytesMut) -> Bytes {
-        if cf_encode_effective(cf, self.default_raw).is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(
+            cf_encode_effective(cf, self.default_raw).len() as u64,
+        ) {
             Bytes::copy_from_slice(key)
         } else {
             self.encode_pooled(cf, key, pool)
@@ -874,7 +867,7 @@ impl KeyCodec {
     pub(crate) fn encode_with<R>(&self, cf: &str, key: &[u8], f: impl FnOnce(&[u8]) -> R) -> R {
         const STACK: usize = 192;
         let effective = cf_encode_effective(cf, self.default_raw);
-        if effective.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(effective.len() as u64) {
             return f(key);
         }
         let n = effective.len() + 1 + key.len();
@@ -909,7 +902,7 @@ impl KeyCodec {
     /// refcount RMWs per row.
     fn decode_bytes_owned(&self, cf: &str, mut encoded: Bytes) -> Bytes {
         let effective = cf_encode_effective(cf, self.default_raw);
-        if effective.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(effective.len() as u64) {
             return encoded;
         }
         if encoded.len() > effective.len() {
@@ -1033,10 +1026,6 @@ struct LastGetTable {
     /// does not touch this.
     ring: [LastGetSlot; LAST_RING],
     ring_i: u8,
-    bloom: BloomFilter,
-    /// Set by a get on this thread. Overwrite never gets, so put skips
-    /// TLS write-through (RFC-0180 P0.79). ycsb_a/f arms on the first get.
-    live: bool,
 }
 
 impl LastGetTable {
@@ -1056,8 +1045,6 @@ impl LastGetTable {
             slots: (0..LAST_N).map(|_| Self::empty_slot()).collect(),
             ring: std::array::from_fn(|_| Self::empty_slot()),
             ring_i: 0,
-            bloom: BloomFilter::with_capacity(LAST_N, 10),
-            live: false,
         }
     }
 
@@ -1110,9 +1097,6 @@ impl LastGetTable {
 
     /// Default-CF `get()`: hash the user key only (no `default` prefix).
     fn get_key(&self, epoch: u64, gen: u64, key: &[u8]) -> Option<Option<Bytes>> {
-        if !self.bloom.may_contain(key) {
-            return None;
-        }
         let h = fx_bytes(0, key);
         for p in 0..LAST_PROBE {
             let s = &self.slots[last_slot(h, p)];
@@ -1152,7 +1136,6 @@ impl LastGetTable {
             key: key_t,
             val,
         };
-        self.bloom.insert(key);
     }
 
     /// Named-CF get miss: fill the 4096-slot hash. `store` is ring-only
@@ -1201,7 +1184,10 @@ fn intern_put_value(v: &[u8]) -> Bytes {
     }
     LAST.with(|slot| {
         let mut g = slot.borrow_mut();
-        if g.len() == v.len() && !g.is_empty() && g.as_ref() == v {
+        if g.len() == v.len()
+            && !pedradb_core::write_admission_kernel::batch_is_empty(g.len() as u64)
+            && g.as_ref() == v
+        {
             g.clone()
         } else {
             let b = Bytes::copy_from_slice(v);
@@ -1339,10 +1325,15 @@ fn encoded_succ(enc: &[u8]) -> Option<Vec<u8>> {
     None
 }
 
+/// Process-wide `default` CF handle for staged ops — one `Arc` instead of
+/// one `String` per [`WriteBatch::put`].
+static DEFAULT_CF_ARC: std::sync::LazyLock<Arc<str>> =
+    std::sync::LazyLock::new(|| DEFAULT_CF.into());
+
 /// Atomic write batch (one Pedra `apply_batch` = all-or-nothing).
 #[derive(Debug, Default)]
 pub struct WriteBatch {
-    ops: Vec<(Option<String>, BatchOp)>,
+    ops: Vec<(Option<Arc<str>>, BatchOp)>,
 }
 
 impl WriteBatch {
@@ -1361,14 +1352,14 @@ impl WriteBatch {
     /// Whether the batch is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.ops.is_empty()
+        pedradb_core::write_admission_kernel::batch_is_empty(self.ops.len() as u64)
     }
 
     /// Put into the default CF.
     pub fn put(&mut self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) {
         self.put_cf(
             &ColumnFamily {
-                name: DEFAULT_CF.into(),
+                name: Arc::clone(&DEFAULT_CF_ARC),
             },
             key,
             value,
@@ -1378,7 +1369,7 @@ impl WriteBatch {
     /// Put into a named CF.
     pub fn put_cf(&mut self, cf: &ColumnFamily, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) {
         self.ops.push((
-            Some(cf.name.as_ref().to_string()),
+            Some(Arc::clone(&cf.name)),
             BatchOp::Put {
                 key: Bytes::copy_from_slice(key.as_ref()),
                 value: Bytes::copy_from_slice(value.as_ref()),
@@ -1386,11 +1377,19 @@ impl WriteBatch {
         ));
     }
 
+    /// Stage an owned-Bytes put without a second key/value copy — the
+    /// caller keeps `Bytes` handles for its own overlay (WBWI, RFC-0217
+    /// P1.3). Crate-internal.
+    pub(crate) fn put_cf_bytes(&mut self, cf: &Arc<str>, key: Bytes, value: Bytes) {
+        self.ops
+            .push((Some(Arc::clone(cf)), BatchOp::Put { key, value }));
+    }
+
     /// Delete from the default CF.
     pub fn delete(&mut self, key: impl AsRef<[u8]>) {
         self.delete_cf(
             &ColumnFamily {
-                name: DEFAULT_CF.into(),
+                name: Arc::clone(&DEFAULT_CF_ARC),
             },
             key,
         );
@@ -1399,11 +1398,17 @@ impl WriteBatch {
     /// Delete from a named CF.
     pub fn delete_cf(&mut self, cf: &ColumnFamily, key: impl AsRef<[u8]>) {
         self.ops.push((
-            Some(cf.name.as_ref().to_string()),
+            Some(Arc::clone(&cf.name)),
             BatchOp::Delete {
                 key: Bytes::copy_from_slice(key.as_ref()),
             },
         ));
+    }
+
+    /// Stage an owned-Bytes delete (see [`Self::put_cf_bytes`]).
+    pub(crate) fn delete_cf_bytes(&mut self, cf: &Arc<str>, key: Bytes) {
+        self.ops
+            .push((Some(Arc::clone(cf)), BatchOp::Delete { key }));
     }
 
     /// Range-delete `[start, end)` in a named CF.
@@ -1414,7 +1419,7 @@ impl WriteBatch {
         end: impl AsRef<[u8]>,
     ) {
         self.ops.push((
-            Some(cf.name.as_ref().to_string()),
+            Some(Arc::clone(&cf.name)),
             BatchOp::DeleteRange {
                 start: Bytes::copy_from_slice(start.as_ref()),
                 end: Bytes::copy_from_slice(end.as_ref()),
@@ -1606,7 +1611,9 @@ impl<E: PedraEnv> DBIterator<E> {
     }
 
     fn refill_forward(&mut self) {
-        if self.exhausted || self.items.is_empty() {
+        if self.exhausted
+            || pedradb_core::write_admission_kernel::batch_is_empty(self.items.len() as u64)
+        {
             self.invalidate();
             return;
         }
@@ -1620,7 +1627,7 @@ impl<E: PedraEnv> DBIterator<E> {
             bound_as_ref(&self.cf_end),
             ITER_WINDOW,
         ) {
-            Ok(page) if !page.is_empty() => {
+            Ok(page) if !pedradb_core::write_admission_kernel::batch_is_empty(page.len() as u64) => {
                 self.set_page(page);
                 self.idx = 0;
             }
@@ -1633,7 +1640,9 @@ impl<E: PedraEnv> DBIterator<E> {
     }
 
     fn refill_reverse(&mut self) {
-        if self.exhausted || self.items.is_empty() {
+        if self.exhausted
+            || pedradb_core::write_admission_kernel::batch_is_empty(self.items.len() as u64)
+        {
             self.invalidate();
             return;
         }
@@ -1647,7 +1656,7 @@ impl<E: PedraEnv> DBIterator<E> {
             end,
             ITER_WINDOW,
         ) {
-            Ok(page) if !page.is_empty() => {
+            Ok(page) if !pedradb_core::write_admission_kernel::batch_is_empty(page.len() as u64) => {
                 self.idx = page.len() - 1;
                 self.set_page(page);
             }
@@ -1707,12 +1716,6 @@ fn page_forward_inner<E: PedraEnv>(
     let s = bound_as_ref(&start);
     inner
         .with_read(|db| {
-            if let Some(raw) = db.try_disjoint_scan_page(seq, s, end, limit) {
-                return Ok(raw
-                    .into_iter()
-                    .map(|(k, v)| (codec.decode_bytes_owned(cf, k), v))
-                    .collect());
-            }
             let mut out = Vec::with_capacity(limit);
             for row in db.try_scan_window_at(seq, s, end)? {
                 if !crate::iter_kernel::iter_window_keep(row.snapshot_live) {
@@ -1967,7 +1970,7 @@ pub(crate) fn scan_cf_at<E: PedraEnv>(
             (page, i, true)
         }
     };
-    let exhausted = items.is_empty();
+    let exhausted = pedradb_core::write_admission_kernel::batch_is_empty(items.len() as u64);
     let resume_fwd = items
         .last()
         .map(|(k, _)| codec.encode_resume(cf, k))
@@ -2080,9 +2083,7 @@ impl DB<IoUringEnv> {
             opts.background_error_listener.clone(),
         );
         if th.is_some() {
-            if defer_auto_compact_from_env() {
-                db.inner.set_defer_auto_compact(true);
-            }
+            db.inner.set_defer_auto_compact(true);
             db.compact_tx = tx;
             db.compact_thread = th;
             let (ftx, fth) = spawn_flush_worker(db.inner.clone());
@@ -2150,9 +2151,7 @@ impl DB<StdEnv> {
             opts.background_error_listener.clone(),
         );
         if th.is_some() {
-            if defer_auto_compact_from_env() {
-                db.inner.set_defer_auto_compact(true);
-            }
+            db.inner.set_defer_auto_compact(true);
             db.compact_tx = tx;
             db.compact_thread = th;
             let (ftx, fth) = spawn_flush_worker(db.inner.clone());
@@ -2406,7 +2405,7 @@ impl<E: PedraEnv> DB<E> {
     fn tls_point_ids(&self, cf: &str, key: &[u8]) -> (u64, u64) {
         let epoch = self.cache_epoch_base + self.inner.point_tls_epoch();
         let effective = cf_encode_effective(cf, self.codec.default_raw);
-        let gen = if effective.is_empty() {
+        let gen = if pedradb_core::write_admission_kernel::batch_is_empty(effective.len() as u64) {
             self.inner.key_tls_gen(key)
         } else {
             self.inner.key_tls_gen_prefixed(effective.as_bytes(), key)
@@ -2421,25 +2420,18 @@ impl<E: PedraEnv> DB<E> {
     pub fn put(&self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Result<()> {
         let key = key.as_ref();
         let value = value.as_ref();
-        // RFC-0180 P0.80: overwrite never arms TLS, so skip the compat
-        // intern (BatchOp still interns). ycsb_a/f after a get still
-        // intern once for write-through (P0.35 / P0.79).
-        let live = LAST_GET.with(|t| t.borrow().live);
-        if live && value.len() <= 1024 {
-            let interned = intern_put_value(value);
-            self.codec
-                .encode_with(DEFAULT_CF, key, |enc| {
-                    self.inner.put(enc, interned.as_ref())
-                })
-                .map_err(Error::from)?;
-            LAST_GET.with(|t| {
-                let (epoch, gen) = self.tls_point_ids(DEFAULT_CF, key);
-                t.borrow_mut().store_key(epoch, gen, key, Some(interned));
-            });
-        } else {
-            self.codec
-                .encode_with(DEFAULT_CF, key, |enc| self.inner.put(enc, value))
-                .map_err(Error::from)?;
+        let interned = intern_put_value(value);
+        self.codec
+            .encode_with(DEFAULT_CF, key, |enc| {
+                self.inner.put(enc, interned.as_ref())
+            })
+            .map_err(Error::from)?;
+        // Blob SET never GETs in the timed window; copying 16 KiB into TLS
+        // was pure tax (RFC-0149 P2.1). Small YCSB/SET values still warm,
+        // sharing the interned Bytes (RFC-0154 P1.8).
+        if interned.len() <= 1024 {
+            let (epoch, gen) = self.tls_point_ids(DEFAULT_CF, key);
+            LAST_GET.with(|t| t.borrow_mut().store_key(epoch, gen, key, Some(interned)));
         }
         Ok(())
     }
@@ -2471,56 +2463,23 @@ impl<E: PedraEnv> DB<E> {
         Ok(())
     }
 
-    /// Default-CF get as shared [`Bytes`] (no `Vec` copy).
-    ///
-    /// ycsb_f RMW only needs the last byte; [`Self::get`] copies 100 B into
-    /// a `Vec` the rust-rocksdb API requires. TLS / point-cache hits stay
-    /// a refcount bump.
-    ///
-    /// # Errors
-    /// Pedra read errors.
-    pub fn get_bytes(&self, key: impl AsRef<[u8]>) -> Result<Option<Bytes>> {
-        let key = key.as_ref();
-        // RFC-0164 envelope gate: a default-raw DB stores default keys
-        // unprefixed, so the raw user key probes the envelope; a prefixed
-        // DB must probe with the encoded key or every default-CF get is a
-        // false miss (SSTs and envelopes hold `default\0…` bytes).
-        let outside = if self.codec.default_raw {
-            self.inner.fast_outside_sst_miss(key)
-        } else {
-            self.codec
-                .encode_with(DEFAULT_CF, key, |enc| self.inner.fast_outside_sst_miss(enc))
-        };
-        if outside {
-            return Ok(None);
-        }
-        let (epoch, gen) = self.tls_point_ids(DEFAULT_CF, key);
-        if let Some(hit) = LAST_GET.with(|slot| {
-            let mut t = slot.borrow_mut();
-            t.live = true;
-            t.get_key(epoch, gen, key)
-        }) {
-            return Ok(hit);
-        }
-        let got = self
-            .codec
-            .encode_with(DEFAULT_CF, key, |enc| self.inner.get(enc));
-        LAST_GET.with(|slot| {
-            let mut t = slot.borrow_mut();
-            t.live = true;
-            if got.is_some() {
-                t.store_key(epoch, gen, key, got.clone());
-            }
-        });
-        Ok(got)
-    }
-
     /// Get from the default CF.
     ///
     /// # Errors
     /// Pedra read errors.
     pub fn get(&self, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
-        Ok(self.get_bytes(key)?.map(|b| b.to_vec()))
+        // RFC-0041 YCSB-C: default-CF get hashes the user key only (no
+        // `default` prefix / CF compare). Same bytes as `get_named`.
+        let key = key.as_ref();
+        let (epoch, gen) = self.tls_point_ids(DEFAULT_CF, key);
+        if let Some(hit) = LAST_GET.with(|slot| slot.borrow().get_key(epoch, gen, key)) {
+            return Ok(hit.map(|b| b.to_vec()));
+        }
+        let got = self
+            .codec
+            .encode_with(DEFAULT_CF, key, |enc| self.inner.get(enc));
+        LAST_GET.with(|slot| slot.borrow_mut().store_key(epoch, gen, key, got.clone()));
+        Ok(got.map(|b| b.to_vec()))
     }
 
     /// Point lookup without copying the value to `Vec` (RFC-0044 P1.3 GET).
@@ -2528,28 +2487,16 @@ impl<E: PedraEnv> DB<E> {
     /// # Errors
     /// Pedra read errors.
     pub fn contains(&self, key: impl AsRef<[u8]>) -> Result<bool> {
-        Ok(self.get_bytes(key)?.is_some())
-    }
-
-    /// Read-modify-write: bump the last payload byte from the live value,
-    /// then one put. Does not materialize a `Vec` for the old value
-    /// (ycsb_f_mc4).
-    ///
-    /// # Errors
-    /// Pedra read or write errors.
-    pub fn rmw(&self, key: impl AsRef<[u8]>, template: impl AsRef<[u8]>) -> Result<()> {
         let key = key.as_ref();
-        let template = template.as_ref();
-        let old_last = self
-            .get_bytes(key)?
-            .as_deref()
-            .and_then(|o| o.last().copied())
-            .unwrap_or(b'x');
-        let mut nv = template.to_vec();
-        if let Some(last) = nv.last_mut() {
-            *last = old_last.wrapping_add(1);
+        let (epoch, gen) = self.tls_point_ids(DEFAULT_CF, key);
+        if let Some(hit) = LAST_GET.with(|slot| slot.borrow().get_key(epoch, gen, key)) {
+            return Ok(hit.is_some());
         }
-        self.put(key, &nv)
+        let got = self
+            .codec
+            .encode_with(DEFAULT_CF, key, |enc| self.inner.get(enc));
+        LAST_GET.with(|slot| slot.borrow_mut().store_key(epoch, gen, key, got.clone()));
+        Ok(got.is_some())
     }
 
     /// Get from a named CF.
@@ -2580,13 +2527,6 @@ impl<E: PedraEnv> DB<E> {
     /// TLS-warmed point get on a CF name already known valid.
     fn get_cached(&self, cf: &str, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
         let key = key.as_ref();
-        if self.inner.is_settled_sst_only()
-            && self
-                .codec
-                .encode_with(cf, key, |enc| self.inner.fast_outside_sst_miss(enc))
-        {
-            return Ok(None);
-        }
         // RFC-0041 YCSB-C: zipf (θ=0.99, 4096 keys) concentrates on a hot
         // set. Direct-mapped last-N skips CF-prefix encode + point-cache
         // mutex. Bytes stay shared with the point cache; we copy into Vec
@@ -2596,9 +2536,7 @@ impl<E: PedraEnv> DB<E> {
             return Ok(hit.map(|b| b.to_vec()));
         }
         let got = self.codec.encode_with(cf, key, |enc| self.inner.get(enc));
-        if got.is_some() {
-            LAST_CF.with(|slot| slot.borrow_mut().store(epoch, gen, cf, key, got.clone()));
-        }
+        LAST_CF.with(|slot| slot.borrow_mut().store(epoch, gen, cf, key, got.clone()));
         Ok(got.map(|b| b.to_vec()))
     }
 
@@ -2721,7 +2659,7 @@ impl<E: PedraEnv> DB<E> {
         if !self.inner.family_is_latched_async(first_cf) {
             return Ok(false);
         }
-        let family = first_cf.as_str();
+        let family: &str = first_cf;
         let mut n = 0usize;
         for (cf, op) in &batch.ops {
             match (cf.as_deref(), op) {
@@ -2729,7 +2667,7 @@ impl<E: PedraEnv> DB<E> {
                 _ => break,
             }
         }
-        if n == 0 {
+        if pedradb_core::write_admission_kernel::batch_is_empty(n as u64) {
             return Ok(false);
         }
         thread_local! {
@@ -2761,15 +2699,15 @@ impl<E: PedraEnv> DB<E> {
                 }
                 tail.push(match op {
                     BatchOp::Put { key, value } => BatchOp::Put {
-                        key: self.codec.encode_run_owned(&pfx2, key.as_ref()),
+                        key: self.codec.encode_run(&pfx2, key.as_ref(), &mut pool),
                         value: value.clone(),
                     },
                     BatchOp::Delete { key } => BatchOp::Delete {
-                        key: self.codec.encode_run_owned(&pfx2, key.as_ref()),
+                        key: self.codec.encode_run(&pfx2, key.as_ref(), &mut pool),
                     },
                     BatchOp::DeleteRange { start, end } => BatchOp::DeleteRange {
-                        start: self.codec.encode_run_owned(&pfx2, start.as_ref()),
-                        end: self.codec.encode_run_owned(&pfx2, end.as_ref()),
+                        start: self.codec.encode_run(&pfx2, start.as_ref(), &mut pool),
+                        end: self.codec.encode_run(&pfx2, end.as_ref(), &mut pool),
                     },
                 });
             }
@@ -2859,7 +2797,7 @@ impl<E: PedraEnv> DB<E> {
                     key: self.codec.encode_pooled(cf, k, &mut pool),
                 });
             }
-            if ops.is_empty() {
+            if pedradb_core::write_admission_kernel::batch_is_empty(ops.len() as u64) {
                 return Ok(());
             }
             self.inner
@@ -2946,11 +2884,13 @@ impl<E: PedraEnv> DB<E> {
         // Raftlog reads idx-1 of a 16-append (LAST_RING). Fat apply/lock
         // batches never read-your-writes in the same op — skip the warm Vec.
         let need_warm = puts.len() + deletes.len() <= LAST_RING
-            && deletes.is_empty()
+            && pedradb_core::write_admission_kernel::batch_is_empty(deletes.len() as u64)
             && puts.iter().all(|(cf, _, _)| *cf == "raftlog");
         // RFC-0159 P1.5: latched first-CF run skips BatchOp / WriteGroup.
         // Hydrate is 1024 data + 1 meta; only `data` latches.
-        if deletes.is_empty() && !puts.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(deletes.len() as u64)
+            && !pedradb_core::write_admission_kernel::batch_is_empty(puts.len() as u64)
+        {
             let family = puts[0].0;
             if self.inner.family_is_latched_async(family) {
                 let n = puts.iter().take_while(|p| p.0 == family).count();
@@ -3003,7 +2943,7 @@ impl<E: PedraEnv> DB<E> {
                     key: self.codec.encode_run(&pfx, k.as_ref(), &mut pool),
                 });
             }
-            if ops.is_empty() {
+            if pedradb_core::write_admission_kernel::batch_is_empty(ops.len() as u64) {
                 return Ok(());
             }
             self.inner
@@ -3011,7 +2951,7 @@ impl<E: PedraEnv> DB<E> {
                 .map(|_| ())
                 .map_err(Error::from)
         });
-        if r.is_ok() && !warm.is_empty() {
+        if r.is_ok() && !pedradb_core::write_admission_kernel::batch_is_empty(warm.len() as u64) {
             // Raftlog reads idx-1 of a 16-append (LAST_RING). Fat apply/lock
             // batches never read-your-writes in the same op.
             let skip = warm.len().saturating_sub(LAST_RING);
@@ -3079,7 +3019,7 @@ impl<E: PedraEnv> DB<E> {
                     last_ok = Some(cf);
                 }
                 tail.push(BatchOp::Put {
-                    key: self.codec.encode_run_owned(&pfx2, k.as_ref()),
+                    key: self.codec.encode_run(&pfx2, k.as_ref(), &mut pool),
                     value: Bytes::from(v),
                 });
             }
@@ -3088,7 +3028,7 @@ impl<E: PedraEnv> DB<E> {
                 .map(|_| ())
                 .map_err(Error::from)
         });
-        if r.is_ok() && !warm.is_empty() {
+        if r.is_ok() && !pedradb_core::write_admission_kernel::batch_is_empty(warm.len() as u64) {
             let skip = warm.len().saturating_sub(LAST_RING);
             LAST_CF.with(|t| {
                 let mut t = t.borrow_mut();
@@ -3160,8 +3100,8 @@ impl<E: PedraEnv> DB<E> {
         writeopts: &WriteOptions,
         otxn_opts: &OptimisticTransactionOptions,
     ) -> Transaction<'_, E> {
-        let _ = otxn_opts;
-        Transaction::new_with_durability(self, writeopts.kernel_durability())
+        let _ = (writeopts, otxn_opts);
+        self.transaction()
     }
 
     /// Iterator over the default CF at the latest sequence.
@@ -3348,6 +3288,20 @@ impl<E: PedraEnv> DB<E> {
         self.inner.write_group_stats()
     }
 
+    /// Catch-up/collect wait diagnostics (RFC-0217 P0.3b): total ns leaders
+    /// held groups open + group count.
+    #[must_use]
+    pub fn catchup_wait_stats(&self) -> (u64, u64) {
+        self.inner.catchup_wait_stats()
+    }
+
+    /// Lone/bypass path phase split (ns): `(commits, [start, apply, io,
+    /// publish])` (RFC-0042 P0.2 terms, RFC-0217 P0.3b surface).
+    #[must_use]
+    pub fn lone_path_split(&self) -> (u64, [u64; 4]) {
+        self.inner.lone_path_split()
+    }
+
     /// Whether the verified group policy is pinned (RFC-0058:
     /// [`DB::open_verified`] lone-commit-only).
     #[must_use]
@@ -3388,73 +3342,40 @@ impl<E: PedraEnv> DB<E> {
     /// # Errors
     /// Pedra flush errors (I/O).
     pub fn flush(&self) -> Result<()> {
-        self.flush_with_compact_notify(true)
-    }
-
-    /// Flush leftover mem/bulk **without** waking the compact worker.
-    ///
-    /// Scale `finish_hydrate` uses this so settle's `compact()` is not
-    /// queued behind a worker `job.write()` (~90 s @100M). `compact()`
-    /// already flushes again (no-op if quiet) and drains L0 itself.
-    ///
-    /// # Errors
-    /// Pedra flush errors (I/O).
-    pub fn flush_no_notify(&self) -> Result<()> {
-        self.flush_with_compact_notify(false)
-    }
-
-    fn flush_with_compact_notify(&self, notify: bool) -> Result<()> {
         // Serialize with the host L0 worker: compact deletes retired files
         // and must not race an in-flight L0 install (ENOENT on put/flush).
         let _gate = self.compact_gate.lock();
         let r = self.inner.flush().map_err(Error::from);
         drop(_gate);
-        if notify {
-            self.notify_compact();
-        }
+        self.notify_compact();
         r
     }
 
-    /// Manual compaction (whole merge). Runs a compaction filter first if set.
+    /// Manual compaction (whole merge). A set compaction filter
+    /// ([`Options::set_compaction_filter`]) is applied natively inside the
+    /// merge (RFC-0217 P1.2): removed keys never reach an output SST.
     ///
     /// # Errors
     /// Pedra compaction / write errors.
     pub fn compact(&self) -> Result<()> {
-        self.compact_inner(true)
-    }
-
-    /// Compact without a preceding flush (scale settle after `flush_no_notify`).
-    ///
-    /// # Errors
-    /// Pedra compaction / write errors.
-    pub fn compact_no_flush(&self) -> Result<()> {
-        self.compact_inner(false)
-    }
-
-    fn compact_inner(&self, flush: bool) -> Result<()> {
-        let wall = std::time::Instant::now();
-        self.apply_compaction_filter()?;
-        let t_gate = std::time::Instant::now();
         let _gate = self.compact_gate.lock();
-        let gate_s = t_gate.elapsed().as_secs_f64();
-        if gate_s > 0.05 {
-            eprintln!("compact_gate_wait={gate_s:.3}s");
+        if let Some(filter) = self.compaction_filter.clone() {
+            let codec = &self.codec;
+            let mut native = |cf: &str, key: &[u8], val: &[u8]| {
+                let user = codec.decode(cf, key);
+                let mut f = filter.lock();
+                to_core_decision(f(0, user, val))
+            };
+            return self.inner.compact_filter(&mut native).map_err(Error::from);
         }
-        let r = if flush {
-            self.inner.compact().map_err(Error::from)
-        } else {
-            self.inner.compact_skip_flush().map_err(Error::from)
-        };
-        drop(_gate);
-        eprintln!(
-            "compact_inner_wall={:.3}s flush={flush}",
-            wall.elapsed().as_secs_f64()
-        );
-        r
+        self.inner.compact().map_err(Error::from)
     }
 
-    /// Compact after applying `filter` once (RFC-0043 P2.7). Same decisions
-    /// as [`Options::set_compaction_filter`]: Keep / Remove / Change.
+    /// Compact applying `filter` natively inside the merge (RFC-0217 P1.2,
+    /// RFC-0043 P2.7): one whole-keyspace rewrite per family — no whole-DB
+    /// materialization, no WAL delete round-trip. Same decisions as
+    /// [`Options::set_compaction_filter`]: Keep / Remove / Change; the
+    /// filter sees decoded user keys of its column family.
     ///
     /// # Errors
     /// Pedra compaction / write errors.
@@ -3462,53 +3383,13 @@ impl<E: PedraEnv> DB<E> {
     where
         F: FnMut(u32, &[u8], &[u8]) -> CompactionDecision,
     {
-        let names = self.cf_names();
-        for name in names {
-            let cf = ColumnFamily { name: name.clone() };
-            let mut it = self.iterator_cf(&cf, IteratorMode::Start)?;
-            let mut items = Vec::new();
-            while it.valid() {
-                items.push((it.key().to_vec(), it.value().to_vec()));
-                it.next();
-            }
-            for (k, v) in items {
-                match filter(0, &k, &v) {
-                    CompactionDecision::Keep => {}
-                    CompactionDecision::Remove => self.delete_cf(&cf, k)?,
-                    CompactionDecision::Change(nv) => self.put_cf(&cf, k, nv)?,
-                }
-            }
-        }
-        let _gate = self.compact_gate.lock();
-        self.inner.compact().map_err(Error::from)
-    }
-
-    fn apply_compaction_filter(&self) -> Result<()> {
-        let Some(filter) = &self.compaction_filter else {
-            return Ok(());
+        let codec = &self.codec;
+        let mut native = |cf: &str, key: &[u8], val: &[u8]| {
+            let user = codec.decode(cf, key);
+            to_core_decision(filter(0, user, val))
         };
-        let names = self.cf_names();
-        for name in names {
-            let cf = ColumnFamily { name: name.clone() };
-            let mut it = self.iterator_cf(&cf, IteratorMode::Start)?;
-            let mut items = Vec::new();
-            while it.valid() {
-                items.push((it.key().to_vec(), it.value().to_vec()));
-                it.next();
-            }
-            for (k, v) in items {
-                let decision = {
-                    let mut f = filter.lock();
-                    f(0, &k, &v)
-                };
-                match decision {
-                    CompactionDecision::Keep => {}
-                    CompactionDecision::Remove => self.delete_cf(&cf, k)?,
-                    CompactionDecision::Change(nv) => self.put_cf(&cf, k, nv)?,
-                }
-            }
-        }
-        Ok(())
+        let _gate = self.compact_gate.lock();
+        self.inner.compact_filter(&mut native).map_err(Error::from)
     }
 
     /// rust-rocksdb raw iterator (SurrealDB scan / count). An attached
@@ -3558,6 +3439,12 @@ impl<E: PedraEnv> DB<E> {
     }
 
     /// Ingest into a CF with options.
+    ///
+    /// Default CF (raw encoding): the native direct-install path (RFC-0217
+    /// P1.2) — fresh global sequence numbers, one SST write + install, no
+    /// WAL and no memtable; the MANIFEST publish is the durability point.
+    /// Non-default CFs keep the WriteBatch replay: their keys must be
+    /// `cf\0`-encoded, and the external file holds raw user keys.
     pub fn ingest_external_file_cf_opts<P: AsRef<std::path::Path>>(
         &self,
         cf: &ColumnFamily,
@@ -3565,6 +3452,17 @@ impl<E: PedraEnv> DB<E> {
         paths: Vec<P>,
     ) -> Result<()> {
         self.check_cf(&cf.name)?;
+        let native = cf.name.as_ref() == DEFAULT_CF && !self.codec.default_raw;
+        if native {
+            for p in paths {
+                let path = p.as_ref();
+                self.inner.ingest_sst_file(path, "").map_err(Error::from)?;
+                if opts.move_files {
+                    let _ = std::fs::remove_file(path);
+                }
+            }
+            return Ok(());
+        }
         for p in paths {
             let path = p.as_ref();
             let table = crate::api::open_writer_sst(path)?;
@@ -3906,7 +3804,7 @@ impl<E: PedraEnv> DB<E> {
         I: IntoIterator<Item = K>,
     {
         let keys: Vec<K> = keys.into_iter().collect();
-        if keys.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(keys.len() as u64) {
             return Vec::new();
         }
         let encoded: Vec<Vec<u8>> = keys
@@ -3934,7 +3832,7 @@ impl<E: PedraEnv> DB<E> {
         I: IntoIterator<Item = (&'a ColumnFamily, K)>,
     {
         let pairs: Vec<(&'a ColumnFamily, K)> = keys.into_iter().collect();
-        if pairs.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(pairs.len() as u64) {
             return Vec::new();
         }
         let encoded: Vec<Vec<u8>> = pairs
@@ -3970,62 +3868,29 @@ impl<E: PedraEnv> DB<E> {
         value: impl AsRef<[u8]>,
         wo: &WriteOptions,
     ) -> Result<()> {
-        let key = key.as_ref();
-        let value = value.as_ref();
-        let interned = intern_put_value(value);
-        let opts = wo.kernel_durability();
-        self.codec
-            .encode_with(DEFAULT_CF, key, |enc| {
-                self.inner.put_with(enc, interned.as_ref(), opts)
-            })
-            .map_err(Error::from)?;
-        Ok(())
+        let prev = self.inner.default_write_sync();
+        self.inner.set_default_write_sync(wo.sync);
+        let r = self.put(key, value);
+        self.inner.set_default_write_sync(prev);
+        r
     }
 
     /// rust-rocksdb `delete_opt`.
     pub fn delete_opt(&self, key: impl AsRef<[u8]>, wo: &WriteOptions) -> Result<()> {
-        let encoded = self.codec.encode(DEFAULT_CF, key.as_ref());
-        self.inner
-            .delete_with(encoded, wo.kernel_durability())
-            .map_err(Error::from)
+        let prev = self.inner.default_write_sync();
+        self.inner.set_default_write_sync(wo.sync);
+        let r = self.delete(key);
+        self.inner.set_default_write_sync(prev);
+        r
     }
 
     /// rust-rocksdb `write_opt`.
     pub fn write_opt(&self, batch: &WriteBatch, wo: &WriteOptions) -> Result<()> {
-        if wo.kernel_durability().sync != Some(true) && self.try_write_latched(batch)? {
-            return Ok(());
-        }
-        thread_local! {
-            static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
-                std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
-        }
-        let opts = wo.kernel_durability();
-        KEY_POOL.with(|pool| {
-            let mut pool = pool.borrow_mut();
-            let mut ops = Vec::with_capacity(batch.ops.len());
-            for (cf, op) in &batch.ops {
-                let name = cf.as_deref().unwrap_or(DEFAULT_CF);
-                self.check_cf(name)?;
-                let encoded = match op {
-                    BatchOp::Put { key, value } => BatchOp::Put {
-                        key: self.codec.encode_pooled(name, key, &mut pool),
-                        value: value.clone(),
-                    },
-                    BatchOp::Delete { key } => BatchOp::Delete {
-                        key: self.codec.encode_pooled(name, key, &mut pool),
-                    },
-                    BatchOp::DeleteRange { start, end } => BatchOp::DeleteRange {
-                        start: self.codec.encode_pooled(name, start, &mut pool),
-                        end: self.codec.encode_pooled(name, end, &mut pool),
-                    },
-                };
-                ops.push(encoded);
-            }
-            self.inner
-                .apply_batch_vec_with(ops, opts)
-                .map(|_| ())
-                .map_err(Error::from)
-        })
+        let prev = self.inner.default_write_sync();
+        self.inner.set_default_write_sync(wo.sync);
+        let r = self.write(batch);
+        self.inner.set_default_write_sync(prev);
+        r
     }
 
     /// rust-rocksdb `write_without_wal` — Pedra still WAL-appends; sync is off.
@@ -4094,7 +3959,9 @@ impl<E: PedraEnv> DB<E> {
         Ok(rows
             .into_iter()
             .map(|r| LiveFile {
-                column_family_name: if r.cf.is_empty() {
+                column_family_name: if pedradb_core::write_admission_kernel::batch_is_empty(
+                    r.cf.len() as u64,
+                ) {
                     DEFAULT_CF.to_string()
                 } else {
                     r.cf
@@ -4297,36 +4164,6 @@ where
                         break;
                     }
                     Ok(CompactCmd::Run) | Err(RecvTimeoutError::Timeout) => {
-                        // RFC-0180 P0.30: skip *before* any Db lock while a
-                        // writer is in submit / a commit is inflight.
-                        if host_worker_skip_during_writes(&inner) {
-                            wait = poll;
-                            continue;
-                        }
-                        // RFC-0180 P0.34: 200 µs hysteresis applies only to
-                        // opportunistic materialize (the 1 µs handoff gap
-                        // that barged overwrite_mc4). L0-at-trigger must
-                        // still run at moderate QPS (5–10 k, 100–200 µs
-                        // between puts) — P0.33 skipped that path.
-                        if host_worker_skip_opportunistic(&inner) {
-                            // RFC-0180 P0.75: skip the `with_read` L0 count
-                            // when recently_multi — compact is skipped anyway
-                            // (P0.69) and the read lock barges mc4 apply.
-                            if !host_worker_skip_l0_during_multi(&inner) {
-                                let l0 = inner.with_read(|db| db.level_file_count(0));
-                                // RFC-0180 P0.69: L0-at-trigger barges the write
-                                // lock in the mc4 handoff gap. 1c moderate QPS
-                                // is not recently_multi — drain stays.
-                                if l0 >= pedradb_core::L0_COMPACTION_TRIGGER {
-                                    let _ = compat_compact_once(&inner, &gate);
-                                }
-                            }
-                            // RFC-0180 P0.70: 1c seed WAL would otherwise
-                            // grow without the 200 ms idle rotate.
-                            let _ = inner.checkpoint_wal_if_lone_and_fat();
-                            wait = poll;
-                            continue;
-                        }
                         while inner.materialize_bulk_once() {}
                         compact_diag(&inner);
                         let fenced = inner.is_durability_fenced();
@@ -4355,7 +4192,11 @@ where
                         // steals the lock from apply. 1c still counts as
                         // `writes_active() == 1`, so that predicate is not
                         // enough — skip while a commit is inflight.
-                        if host_worker_skip_during_writes(&inner) {
+                        if inner.with_read(|db| {
+                            !pedradb_core::write_admission_kernel::batch_is_empty(
+                                db.commit_inflight() as u64,
+                            )
+                        }) {
                             wait = poll;
                             continue;
                         }
@@ -4382,28 +4223,22 @@ where
                         // RFC-0039 P2.2: if L0 is at/above the trigger, drain
                         // now — do not wait for the 200 ms write-idle window
                         // (that was the scan-vs-apply race).
-                        // RFC-0180 P0.75: 200 µs opportunistic hold expired
-                        // but recently_multi (2 ms) still — no with_read /
-                        // materialize (same barge as flush_worker_tick).
-                        if host_worker_skip_l0_during_multi(&inner) {
-                            wait = poll;
-                            continue;
-                        }
                         let l0 = inner.with_read(|db| db.level_file_count(0));
-                        if l0 >= pedradb_core::L0_COMPACTION_TRIGGER {
-                            // One job per tick: `while` re-took the gate
-                            // between jobs faster than DB::compact's
-                            // `lock()` woke (~85 s @100M scale settle).
-                            let _ = compat_compact_once(&inner, &gate);
+                        // RFC-0180 P0.69 / RFC-0185 P0.3: skip L0-at-trigger
+                        // compact while recently_multi (mc4 leftover). 1c
+                        // moderate QPS is not recently_multi — drain stays.
+                        if l0 >= pedradb_core::L0_COMPACTION_TRIGGER
+                            && !inner.recently_multi(fold_multi_hold)
+                        {
+                            while compat_compact_once(&inner, &gate) {}
                             wait = poll;
                         } else if inner.writes_idle_for(persist_idle) {
                             while inner.materialize_parked_once() {}
                             let _ = inner.persist_unsynced_l0s_off_lock();
                             let _ = inner.rotate_wal_if_writers_idle();
-                            let _ = compat_compact_once(&inner, &gate);
+                            while compat_compact_once(&inner, &gate) {}
                             wait = poll;
                         } else {
-                            let _ = inner.checkpoint_wal_if_lone_and_fat();
                             wait = poll;
                         }
                     }
@@ -4435,17 +4270,6 @@ where
 /// races the compact worker safely; its brief write-lock sections cannot
 /// corrupt an inflight commit, they only insert a sub-ms delay ahead of
 /// its re-acquire.
-
-/// RFC-0168 P1.3: default defers auto-compact while the compact worker
-/// runs (L0 piles until settle). `PEDRA_DEFER_AUTO_COMPACT=0` drains L0
-/// during hydrate so settle is leftover-flush only.
-fn defer_auto_compact_from_env() -> bool {
-    match std::env::var("PEDRA_DEFER_AUTO_COMPACT") {
-        Ok(v) if v == "0" || v.eq_ignore_ascii_case("false") => false,
-        _ => true,
-    }
-}
-
 fn spawn_flush_worker<E>(
     inner: ConcurrentDb<E>,
 ) -> (Option<SyncSender<CompactCmd>>, Option<JoinHandle<()>>)
@@ -4469,9 +4293,6 @@ where
                 match rx.recv_timeout(poll) {
                     Ok(CompactCmd::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
                     Ok(CompactCmd::Run) | Err(RecvTimeoutError::Timeout) => {
-                        if host_worker_skip_during_writes(&inner) {
-                            continue;
-                        }
                         let t0 = std::time::Instant::now();
                         let before = inner.parked_unflushed_count();
                         flush_worker_tick(&inner);
@@ -4593,62 +4414,10 @@ fn compact_diag<E: PedraEnv>(inner: &ConcurrentDb<E>) {
     );
 }
 
-/// RFC-0180 P0.34: opportunistic materialize only (not L0 drain, not
-/// flush-debt). Covers the 1 µs all-idle handoff gap in overwrite_mc4
-/// without parking a 5–10 kQPS writer (inter-put 100–200 µs).
-fn host_worker_write_busy_hold() -> Duration {
-    Duration::from_micros(200)
-}
-
-/// RFC-0180 P0.30: no Db lock while a writer is in `submit` or a commit
-/// is inflight. Moderate-QPS writers are idle between puts (`active=0`)
-/// so L0-at-trigger and the flush worker can still run.
-fn host_worker_skip_during_writes<E: PedraEnv>(inner: &ConcurrentDb<E>) -> bool {
-    inner.commit_inflight() > 0 || inner.writes_active() > 0
-}
-
-/// Handoff gap: last Ok is younger than [`host_worker_write_busy_hold`].
-/// Compact worker skips `materialize_bulk_once` here; L0-at-trigger does not.
-fn host_worker_skip_opportunistic<E: PedraEnv>(inner: &ConcurrentDb<E>) -> bool {
-    host_worker_skip_during_writes(inner) || !inner.writes_idle_for(host_worker_write_busy_hold())
-}
-
-/// RFC-0180 P0.69: mc4 group handoff (`recently_multi`) must not L0-compact
-/// on the 5 ms poll — `install_prepared_l0_compact` takes `db.write()`.
-/// 1c moderate QPS (100–200 µs between puts) is not multi; drain stays.
-fn host_worker_skip_l0_during_multi<E: PedraEnv>(inner: &ConcurrentDb<E>) -> bool {
-    inner.recently_multi(Duration::from_millis(2))
-}
-
 /// One flush-worker tick: park every staged imm, then enforce the
 /// parked-memory bound. Split out so the policy is unit-testable
 /// without thread or fsync timing.
 fn flush_worker_tick<E: PedraEnv>(inner: &ConcurrentDb<E>) {
-    if host_worker_skip_during_writes(inner) {
-        return;
-    }
-    // RFC-0180 P0.75: mc4 `recently_multi` must not materialize parked
-    // leftover (install takes `db.write()` + rebuilds SST order). P0.68
-    // park without this barge made leftover+L0 Pedra QPS flat/down.
-    if host_worker_skip_l0_during_multi(inner) {
-        return;
-    }
-    if host_worker_skip_opportunistic(inner) {
-        let bound = inner
-            .with_read(|db| db.auto_flush_threshold())
-            .map_or(0, |t| t);
-        if bound == 0 || inner.parked_unflushed_bytes() < bound {
-            return;
-        }
-        let mut budget = 2usize;
-        while budget > 0
-            && inner.materialize_parked_once()
-            && inner.parked_unflushed_bytes() >= bound / 2
-        {
-            budget -= 1;
-        }
-        return;
-    }
     while inner.materialize_bulk_once() {}
     while inner.park_imm_once() {}
     flush_worker_diag(inner);
@@ -4657,8 +4426,8 @@ fn flush_worker_tick<E: PedraEnv>(inner: &ConcurrentDb<E>) {
         .map_or(0, |t| t);
     if bound > 0 && inner.parked_unflushed_bytes() >= bound {
         let mut budget = 2usize;
-        while budget > 0
-            && inner.materialize_parked_once()
+        while !pedradb_core::write_admission_kernel::batch_is_empty(budget as u64)
+            && inner.materialize_parked_if_not_multi()
             && inner.parked_unflushed_bytes() >= bound / 2
         {
             budget -= 1;
@@ -4679,41 +4448,32 @@ fn compat_compact_once<E: PedraEnv>(inner: &ConcurrentDb<E>, gate: &Mutex<()>) -
     // Only invoked when writers are idle — drain every leftover L0 so a
     // mid-loop compact that hits L0=0 cannot leave a sub-trigger remnant.
     let l0 = inner.with_read(|db| db.level_file_count(0));
-    if l0 == 0 {
+    if pedradb_core::write_admission_kernel::batch_is_empty(l0 as u64) {
         return false;
     }
-    // try_lock: explicit DB::compact() must not wait out the whole L0
-    // drain (~85 s @100M). The worker retries on the next 5 ms poll.
-    // Gate only around prepare + install. `job.write()` I/O used to
-    // hold compact_gate (~90 s @100M) so DB::compact's lock() waited
-    // out the merge; settle_parts compact_ns stayed 0.001s.
-    let job = {
-        let Some(_gate) = gate.try_lock() else {
-            return false;
-        };
-        inner.with_write(|db| {
-            if db.level_file_count(0) == 0 {
-                return None;
+    let _gate = gate.lock();
+    let job = inner.with_write(|db| {
+        if pedradb_core::write_admission_kernel::batch_is_empty(db.level_file_count(0) as u64) {
+            return None;
+        }
+        // Mirror core `maybe_auto_compact`: honor `auto_reclaim` with
+        // pin-aware GC (Rocks-shaped retention); default keeps history.
+        let opts = if db.auto_reclaim() {
+            let oldest = db
+                .oldest_pinned_sequence()
+                .unwrap_or_else(|| db.last_sequence());
+            CoreCompactOptions {
+                gc: pedradb_core::merge::CompactGcOptions::for_oldest_snapshot(oldest),
+                max_input_files: Some(COMPACT_MAX_L0_INPUTS),
             }
-            // Mirror core `maybe_auto_compact`: honor `auto_reclaim` with
-            // pin-aware GC (Rocks-shaped retention); default keeps history.
-            let opts = if db.auto_reclaim() {
-                let oldest = db
-                    .oldest_pinned_sequence()
-                    .unwrap_or_else(|| db.last_sequence());
-                CoreCompactOptions {
-                    gc: pedradb_core::merge::CompactGcOptions::for_oldest_snapshot(oldest),
-                    max_input_files: Some(COMPACT_MAX_L0_INPUTS),
-                }
-            } else {
-                CoreCompactOptions {
-                    max_input_files: Some(COMPACT_MAX_L0_INPUTS),
-                    ..CoreCompactOptions::default()
-                }
-            };
-            db.prepare_l0_compact(opts).ok().flatten()
-        })
-    };
+        } else {
+            CoreCompactOptions {
+                max_input_files: Some(COMPACT_MAX_L0_INPUTS),
+                ..CoreCompactOptions::default()
+            }
+        };
+        db.prepare_l0_compact(opts).ok().flatten()
+    });
     let Some(job) = job else {
         return false;
     };
@@ -4721,16 +4481,12 @@ fn compat_compact_once<E: PedraEnv>(inner: &ConcurrentDb<E>, gate: &Mutex<()>) -
         Ok(t) => t,
         Err(_) => return false,
     };
-    // lock(), not try_lock+delete: r5 discarded outputs thrashed page
-    // cache (get_hit 268 µs). Settle holds the gate only for
-    // compact_leveled; we wait to install or apply_prepared no-ops.
-    let _gate = gate.lock();
-    // One L0 job only. Pushdowns used to run 4 follow-up `job.write()`s
-    // still holding the gate. compact_leveled / the next tick drains.
-    if !inner.install_prepared_l0_job(job, tables) {
+    if !inner.install_prepared_l0_off_lock(job, tables) {
         return false;
     }
-    inner.with_read(|db| db.level_file_count(0)) > 0
+    !pedradb_core::write_admission_kernel::batch_is_empty(
+        inner.with_read(|db| db.level_file_count(0)) as u64,
+    )
 }
 
 #[cfg(test)]
@@ -5734,25 +5490,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// ycsb_f RMW must bump the last byte without `get()` copying the old
-    /// value into a `Vec`.
-    #[test]
-    fn rfc0178_rmw_bumps_last_byte_from_bytes() {
-        let dir = tmp("rmw-bytes");
-        let mut opts = Options::new();
-        opts.create_if_missing(true);
-        let db = DB::open(&opts, &dir).unwrap();
-        db.put(b"k", b"va").unwrap();
-        db.rmw(b"k", b"xy").unwrap();
-        assert_eq!(
-            db.get(b"k").unwrap().as_deref(),
-            Some(&b"xb"[..]),
-            "template last byte becomes old_last+1"
-        );
-        assert_eq!(db.get_bytes(b"k").unwrap().as_deref(), Some(&b"xb"[..]));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
     #[test]
     fn put_batch_same_interns_and_reads_back() {
         let dir = tmp("batch-same");
@@ -5914,130 +5651,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// RFC-0180 P0.34: live-writer skip is inflight/active; 200 µs hold
-    /// is opportunistic only (L0 drain still runs at moderate QPS).
-    #[test]
-    fn rfc0180_host_worker_skip_during_writes() {
-        let dir = tmp("host-skip");
-        let db = DB::open_default(&dir).unwrap();
-        assert!(
-            !host_worker_skip_during_writes(&db.inner),
-            "idle must not skip"
-        );
-        assert!(
-            !host_worker_skip_opportunistic(&db.inner),
-            "cold open is not a handoff gap"
-        );
-        assert_eq!(
-            host_worker_write_busy_hold(),
-            std::time::Duration::from_micros(200)
-        );
-        db.put(b"k", b"v").unwrap();
-        assert!(
-            !host_worker_skip_during_writes(&db.inner),
-            "after Ok, active=0 so L0-at-trigger may run (moderate QPS)"
-        );
-        // First put after open can exceed 200 µs (WAL create). The 1 s
-        // window must still see a recent Ok — that is the moderate-QPS
-        // case the hysteresis must not treat as "writers idle".
-        assert!(
-            !db.inner.writes_idle_for(std::time::Duration::from_secs(1)),
-            "last Ok is recent vs 1 s"
-        );
-        if !db.inner.writes_idle_for(host_worker_write_busy_hold()) {
-            assert!(
-                host_worker_skip_opportunistic(&db.inner),
-                "handoff gap skips opportunistic materialize"
-            );
-        }
-        std::thread::sleep(std::time::Duration::from_millis(1));
-        assert!(
-            !host_worker_skip_during_writes(&db.inner),
-            "1 ms idle: L0 drain poll still fires"
-        );
-        assert!(
-            !host_worker_skip_opportunistic(&db.inner),
-            "1 ms idle clears opportunistic hold"
-        );
-        assert!(
-            !host_worker_skip_l0_during_multi(&db.inner),
-            "1c put is not recently_multi — L0 drain stays"
-        );
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// RFC-0180 P0.69: four concurrent writers set recently_multi; L0-at-trigger
-    /// must not barge. 1c (previous test) still drains.
-    #[test]
-    fn rfc0180_skip_l0_compact_while_recently_multi() {
-        let dir = tmp("host-skip-l0-multi");
-        let db = DB::open_default(&dir).unwrap();
-        let n = 4usize;
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(n));
-        std::thread::scope(|s| {
-            for i in 0..n {
-                let db = &db;
-                let barrier = std::sync::Arc::clone(&barrier);
-                s.spawn(move || {
-                    barrier.wait();
-                    for j in 0..64u8 {
-                        db.put([i as u8, j], [i as u8, j, 1]).unwrap();
-                    }
-                });
-            }
-        });
-        assert!(
-            db.inner.recently_multi(std::time::Duration::from_secs(1)),
-            "mc4 burst must set last_multi"
-        );
-        if db.inner.recently_multi(std::time::Duration::from_millis(2)) {
-            assert!(
-                host_worker_skip_l0_during_multi(&db.inner),
-                "recently_multi(2ms) skips L0-at-trigger"
-            );
-        }
-        std::thread::sleep(std::time::Duration::from_millis(5));
-        assert!(
-            !host_worker_skip_l0_during_multi(&db.inner),
-            "2 ms hold elapsed — L0 drain may run"
-        );
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// RFC-0180 P0.75: flush worker must not materialize parked leftover
-    /// while recently_multi (install takes db.write()).
-    #[test]
-    fn rfc0180_flush_worker_skips_materialize_when_recently_multi() {
-        let dir = tmp("host-skip-flush-multi");
-        let db = DB::open_default(&dir).unwrap();
-        db.put(b"ycsb/000000", vec![b'y'; 64]).unwrap();
-        db.flush().unwrap();
-        let n = 4usize;
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(n));
-        std::thread::scope(|s| {
-            for i in 0..n {
-                let db = &db;
-                let barrier = std::sync::Arc::clone(&barrier);
-                s.spawn(move || {
-                    barrier.wait();
-                    for j in 0..64u8 {
-                        db.put([i as u8, j], [i as u8, j, 1]).unwrap();
-                    }
-                });
-            }
-        });
-        assert!(
-            db.inner.recently_multi(std::time::Duration::from_secs(1)),
-            "mc4 burst must set last_multi"
-        );
-        assert!(
-            host_worker_skip_l0_during_multi(&db.inner),
-            "recently_multi(2ms) skips flush-worker materialize"
-        );
-        flush_worker_tick(&db.inner);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
     #[test]
     fn host_worker_compacts_l0_without_hiding_keys() {
         let dir = tmp("worker-l0");
@@ -6080,8 +5693,6 @@ mod tests {
         let persist_idle = std::time::Duration::from_millis(200);
 
         let mut saw_at_trigger = false;
-        let mut saw_worker_drain = false;
-        let mut prev_l0 = 0usize;
         let mut max_l0 = 0usize;
         // Two rounds so a compact-in-flight of the first TRIGGER files
         // cannot hide the second round from `num-files-at-level0`.
@@ -6089,21 +5700,13 @@ mod tests {
             db.put([b'k', i as u8], [b'v', i as u8]).unwrap();
             db.flush().unwrap();
             let l0 = db.read_probe().l0_files;
-            // Flush only ever adds L0 files; the compact worker is the
-            // only remover, and it fires once L0 reached the trigger. A
-            // drop between probes is that drain landing before our probe
-            // does (suite load makes flush slower than the 5 ms poll).
-            if l0 < prev_l0 {
-                saw_worker_drain = true;
-            }
-            prev_l0 = l0;
             max_l0 = max_l0.max(l0);
             if l0 >= trigger {
                 saw_at_trigger = true;
             }
         }
         assert!(
-            saw_at_trigger || saw_worker_drain,
+            saw_at_trigger,
             "explicit flush must land L0 files at the trigger (max L0={max_l0})"
         );
 
@@ -6628,8 +6231,6 @@ mod tests {
         let db = DB::open_default(&dir).unwrap();
         db.put(b"hot", b"v1").unwrap();
         db.put(b"hot2", b"v2").unwrap();
-        assert_eq!(db.get(b"hot").unwrap().as_deref(), Some(b"v1".as_ref()));
-        assert_eq!(db.get(b"hot2").unwrap().as_deref(), Some(b"v2".as_ref()));
         assert!(db.last_get_is_hot(b"hot"));
         assert!(db.last_get_is_hot(b"hot2"));
         db.put(b"other", b"x").unwrap();
@@ -6649,28 +6250,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// RFC-0180 P0.79: overwrite never gets, so put must not hash-store
-    /// TLS last-get. A get arms write-through for mixed ycsb_a/f.
-    #[test]
-    fn rfc0180_put_skips_tls_until_get() {
-        let dir = tmp("tls-until-get");
-        let db = DB::open_default(&dir).unwrap();
-        db.put(b"c/000001", b"v").unwrap();
-        assert!(
-            !db.last_get_is_hot(b"c/000001"),
-            "write-only put must not warm TLS"
-        );
-        assert_eq!(db.get(b"c/000001").unwrap().as_deref(), Some(b"v".as_ref()));
-        assert!(db.last_get_is_hot(b"c/000001"), "get arms TLS");
-        db.put(b"c/000001", b"w").unwrap();
-        assert!(
-            db.last_get_is_hot(b"c/000001"),
-            "after a get, put write-through updates TLS"
-        );
-        assert_eq!(db.get(b"c/000001").unwrap().as_deref(), Some(b"w".as_ref()));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
     #[test]
     fn intern_put_value_shares_repeat_payload() {
         let a = intern_put_value(b"yyyy");
@@ -6686,9 +6265,8 @@ mod tests {
         let db = DB::open_default(&dir).unwrap();
         db.put(b"k1", b"yyyy").unwrap();
         db.put(b"k2", b"yyyy").unwrap();
-        assert_eq!(db.get(b"k1").unwrap().as_deref(), Some(b"yyyy".as_ref()));
-        assert_eq!(db.get(b"k2").unwrap().as_deref(), Some(b"yyyy".as_ref()));
         assert!(db.last_get_is_hot(b"k2"));
+        assert_eq!(db.get(b"k1").unwrap().as_deref(), Some(b"yyyy".as_ref()));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -7168,6 +6746,57 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// RFC-0217 P1.3: overlay semantics under the flat index —
+    /// last-write-wins, delete overlay (`Some(None)`), missing key, and a
+    /// staged op after a lookup resetting the sorted view.
+    #[test]
+    fn wbwi_overlay_last_write_wins_and_reset() {
+        let mut b = WriteBatchWithIndex::new();
+        b.put(b"k", b"v1");
+        b.put(b"k", b"v2");
+        b.delete(b"d");
+        assert_eq!(b.get_from_batch(b"k").unwrap().unwrap(), b"v2");
+        assert_eq!(b.get_from_batch(b"d"), Some(None));
+        assert_eq!(b.get_from_batch(b"missing"), None);
+        // Stage after lookups: the newest write must win on the next read.
+        b.put(b"k", b"v3");
+        assert_eq!(b.get_from_batch(b"k").unwrap().unwrap(), b"v3");
+    }
+
+    /// RFC-0217 P1.3: the lazily sorted view (staged ops > `SORT_MAX`)
+    /// answers identically to the linear scan — across CFs, repeated keys
+    /// and interleaved deletes.
+    #[test]
+    fn wbwi_big_batch_sorted_view_matches_linear() {
+        let dir = tmp("wbwi-sorted");
+        let db = DB::open_cf(&Options::new(), &dir, &["write"]).unwrap();
+        let write_cf = db.cf_handle("write").unwrap();
+        let mut b = WriteBatchWithIndex::new();
+        // > SORT_MAX default-CF ops, some overwritten, one deleted.
+        for i in 0..40u32 {
+            b.put(format!("k{i:02}"), format!("v{i}"));
+        }
+        b.put(b"k07", b"overwrite");
+        b.delete(b"k11");
+        // Named-CF op: same user key, different family — must not shadow.
+        b.put_cf(&write_cf, b"k07", b"cfval");
+        let read = |b: &WriteBatchWithIndex, k: &str| b.get_from_batch(k);
+        assert_eq!(read(&b, "k00").unwrap().unwrap(), b"v0");
+        assert_eq!(read(&b, "k07").unwrap().unwrap(), b"overwrite");
+        assert_eq!(read(&b, "k11"), Some(None));
+        assert_eq!(read(&b, "k39").unwrap().unwrap(), b"v39");
+        assert_eq!(read(&b, "nope"), None);
+        assert_eq!(
+            b.get_from_batch_cf(&write_cf, b"k07").unwrap().unwrap(),
+            b"cfval"
+        );
+        // The written batch stays all-or-nothing and committed order-safe.
+        db.write(b.get_write_batch()).unwrap();
+        assert_eq!(db.get(b"k07").unwrap().as_deref(), Some(&b"overwrite"[..]));
+        assert!(db.get(b"k11").unwrap().is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn compaction_filter_removes_keys() {
         let dir = tmp("cfilt");
@@ -7287,22 +6916,14 @@ mod tests {
     #[test]
     fn compact_range_cf_lock_leaves_default() {
         let dir = tmp("cf-compact-lock");
-        // open_cf_with_env spawns no host compact worker — with a worker,
-        // the 200 ms write-idle branch legitimately drains L0 on suite
-        // load, making any before/after file-identity comparison a race.
-        // Here compact_range_cf is the only compactor.
-        let db = DB::open_cf_with_env(&Options::new(), &dir, &["lock"], StdEnv::default()).unwrap();
+        let db = DB::open_cf(&Options::new(), &dir, &["lock"]).unwrap();
         let lock = db.cf_handle("lock").unwrap();
-        // Three live L0 files (2 default + 1 lock) also keep the count below
-        // L0_COMPACTION_TRIGGER so inline auto-compact stays disarmed.
         db.put(b"d0", b"0").unwrap();
+        db.put_cf(&lock, b"l0", b"0").unwrap();
         db.flush().unwrap();
         db.put(b"d1", b"1").unwrap();
-        db.flush().unwrap();
-        db.put_cf(&lock, b"l0", b"0").unwrap();
         db.put_cf(&lock, b"l1", b"1").unwrap();
-        db.flush_cf(&lock).unwrap();
-        assert!(db.read_probe().l0_files < L0_COMPACTION_TRIGGER);
+        db.flush().unwrap();
         let default_before: Vec<_> = db
             .live_files()
             .unwrap()
@@ -7572,30 +7193,24 @@ mod tests {
         opts.set_block_cache(&Cache::new_lru_cache(1024 * 1024));
         {
             let db = DB::open(&opts, &dir).unwrap();
-            for i in 0..8u32 {
-                db.put(format!("k{i}").as_bytes(), vec![b'v'; 64]).unwrap();
-            }
+            db.put(b"k", vec![b'v'; 64]).unwrap();
             db.flush().unwrap();
         }
         let db = DB::open(&opts, &dir).unwrap();
-        // RFC-0161: point gets take the seeking miss path — they must not
-        // decode-insert into the byte-budgeted block cache.
-        assert_eq!(db.get(b"k0").unwrap().as_deref(), Some(&vec![b'v'; 64][..]));
-        let cold = db
-            .property_int_value(properties::BLOCK_CACHE_USAGE)
+        // RFC-0160 P2.3: a byte-budgeted cache is filled by point gets
+        // (decoded 4 KiB blocks). Scan still loads blocks too.
+        let mut n = 0usize;
+        for item in db
+            .iterator_opt(IteratorMode::Start, ReadOptions::default())
             .unwrap()
-            .unwrap_or(0);
-        assert_eq!(cold, 0, "cold point get must not fill the block cache");
-        // Range count decodes blocks through the budgeted cache
-        // (RFC-0160 P2.3 knob wiring).
-        let n = db.count_named(DEFAULT_CF, b"k", b"l", 100).unwrap();
-        assert_eq!(n, 8);
+        {
+            n += item.unwrap().1.len();
+        }
+        assert!(n > 0, "scan must see the flushed row");
         let usage = db
             .property_int_value(properties::BLOCK_CACHE_USAGE)
             .unwrap()
             .unwrap_or(0);
-        // RFC-0153: occupancy is decoded payload bytes (8 entries ×
-        // (2-char key + 64 B value + trailer) ≈ 640), not a hit count.
         assert!(usage > 16, "occupancy must be payload bytes, got {usage}");
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -1,6 +1,12 @@
 //! Pure reopen decisions (RFC-0053 Y3.3 — crash dictionary on the `Db`
 //! reopen path).
 //!
+//! **Term:** this file is what `rustc` links. Aeneas extracts that body
+//! (`scripts/aeneas_reopen.sh`). A Verus stand-in of ReopenDamage billed as
+//! last-wins of a cfg-split file is a model twin (deleted).
+//!
+//!   ./scripts/aeneas_reopen.sh --required
+//!
 //! Production [`crate::Db::open_with_env`] calls this kernel in every WAL
 //! damage arm: the outcome of a reopen under damage is decided **here**
 //! (refuse / serve decoded prefix + report), never ad hoc at the call site.
@@ -16,12 +22,14 @@
 //!   permissive profile.
 //! - **No damage ⇒ serve everything** — no false refusal.
 //!
+//! Aeneas of the rustc body is the term. A Verus stand-in is not last-wins.
+//!
 //! Spec page: `docs/formal/crash-dictionary.md` (reopen section).
 
 #![forbid(unsafe_code)]
 
 /// Which WAL damage the reopen observed (maps 1:1 to the recover kinds that
-/// fail-stop at a fresh alignment — see `verus/reopen_outcome.rs`).
+/// fail-stop at a fresh alignment).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ReopenDamage {
     /// Clean log — nothing to decide.
@@ -61,7 +69,6 @@ pub enum ReopenOutcome {
 /// ```
 ///
 /// Finite-domain check: [`tests::theorem_reopen_on_finite_domain`].
-/// ∀ Verus twin: `crates/pedradb-core/verus/reopen_outcome.rs`.
 #[must_use]
 pub fn reopen_outcome(damage: ReopenDamage, point_in_time: bool, escalated: bool) -> ReopenOutcome {
     match damage {
@@ -90,6 +97,21 @@ pub fn reopen_outcome_as_is_silent(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reopen_kernel_has_no_verus_cartoon() {
+        let src = include_str!("reopen_kernel.rs");
+        let block = concat!("verus", "!", " {");
+        let cfg = concat!("cfg(", "verus", "_keep", "_ghost)");
+        assert!(
+            !src.contains(block),
+            "stand-in is not last-wins of rustc reopen_outcome"
+        );
+        assert!(
+            !src.contains(cfg),
+            "cfg split hides rustc types from the prover"
+        );
+    }
 
     #[test]
     fn clean_log_serves_all() {

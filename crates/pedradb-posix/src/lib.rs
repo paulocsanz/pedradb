@@ -18,6 +18,7 @@
 
 use std::fs::File;
 use std::io;
+use std::path::Path;
 
 /// Kernel readahead / cache-drop hint ([`advise_file`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -342,57 +343,47 @@ pub fn trim_process_heap() {
     }
 }
 
-/// Physical RAM in bytes (best-effort). Used to size the SST page-cache
-/// warm so get_hit stays RAM-speed while the store fits, without
-/// streaming 24 GiB into a 4 GiB box.
-#[must_use]
-pub fn physical_ram_bytes() -> Option<u64> {
-    #[cfg(target_os = "macos")]
+/// Unprivileged free bytes on the filesystem that holds `path`
+/// (`statvfs` `f_bavail * f_frsize`).
+///
+/// Probe, not a durability barrier. Callers map `Err` to unknown and must
+/// not treat a failed probe as disk-full (RFC-0179).
+///
+/// # Errors
+/// `statvfs` failed, `path` contains an interior NUL, or the platform has
+/// no `statvfs` (Windows / Miri).
+pub fn filesystem_available_bytes(path: &Path) -> io::Result<u64> {
+    #[cfg(all(unix, not(miri)))]
     {
-        let mut size: u64 = 0;
-        let mut len = std::mem::size_of::<u64>();
-        let name = b"hw.memsize\0";
-        extern "C" {
-            fn sysctlbyname(
-                name: *const i8,
-                oldp: *mut u8,
-                oldlenp: *mut usize,
-                newp: *mut u8,
-                newlen: usize,
-            ) -> i32;
+        use std::os::unix::ffi::OsStrExt;
+        let c_path = std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(|_| {
+            io::Error::new(io::ErrorKind::InvalidInput, "path contains interior NUL")
+        })?;
+        let mut buf = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+        // SAFETY: `c_path` is a live CString; `buf` is written only on rc==0.
+        // Signature is POSIX `int statvfs(const char *, struct statvfs *)`.
+        let rc = unsafe { libc::statvfs(c_path.as_ptr(), buf.as_mut_ptr()) };
+        if rc != 0 {
+            return Err(io::Error::last_os_error());
         }
-        // SAFETY: `name` is a NUL-terminated C string; `oldp`/`oldlenp`
-        // point at a u64 out-param for `hw.memsize`. `newp` is null (read).
-        let rc = unsafe {
-            sysctlbyname(
-                name.as_ptr().cast::<i8>(),
-                (&mut size as *mut u64).cast(),
-                &mut len,
-                std::ptr::null_mut(),
-                0,
-            )
-        };
-        if rc == 0 && size > 0 {
-            Some(size)
-        } else {
-            None
+        // SAFETY: rc==0 — the kernel initialized `buf`.
+        let st = unsafe { buf.assume_init() };
+        // `f_frsize` is `c_ulong`; `f_bavail` is `fsblkcnt_t`. Width is
+        // platform-dependent — keep the `u64` cast even when it is a no-op.
+        #[allow(clippy::unnecessary_cast)]
+        {
+            let frsize = st.f_frsize as u64;
+            let bavail = st.f_bavail as u64;
+            Ok(bavail.saturating_mul(frsize))
         }
     }
-    #[cfg(target_os = "linux")]
+    #[cfg(not(all(unix, not(miri))))]
     {
-        let s = std::fs::read_to_string("/proc/meminfo").ok()?;
-        for line in s.lines() {
-            let Some(rest) = line.strip_prefix("MemTotal:") else {
-                continue;
-            };
-            let kb: u64 = rest.split_whitespace().next()?.parse().ok()?;
-            return Some(kb.saturating_mul(1024));
-        }
-        None
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    {
-        None
+        let _ = path;
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "statvfs not available on this platform",
+        ))
     }
 }
 
@@ -451,6 +442,21 @@ mod tests {
         let mut f = File::create(&path).unwrap();
         f.write_all(b"wal").unwrap();
         fdatasync_file(&f).expect("production path is one syscall, then rc gate");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn filesystem_available_bytes_temp_dir_nonzero() {
+        let dir = temp_dir();
+        match filesystem_available_bytes(&dir) {
+            Ok(n) => assert!(n > 0, "temp fs reported 0 free bytes"),
+            Err(e) => {
+                #[cfg(all(unix, not(miri)))]
+                panic!("statvfs on temp dir failed: {e}");
+                #[cfg(not(all(unix, not(miri))))]
+                let _ = e;
+            }
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -612,11 +618,6 @@ mod tests {
         let path = dir.join("wal.bin");
         let mut f = File::create(&path).unwrap();
         f.write_all(&[0u8; 4096]).unwrap();
-        // Open the dirfd up front: the ~80 F_FULLFSYNC calls below take
-        // hundreds of ms, and an external TMPDIR sweep can unlink the dir
-        // mid-test (observed ENOENT under full-suite load). A held fd
-        // stays valid on an unlinked directory.
-        let d = File::open(&dir).unwrap();
 
         let mut fd = Vec::with_capacity(80);
         let mut ff = Vec::with_capacity(80);
@@ -639,6 +640,7 @@ mod tests {
             "G1 must be fdatasync-class, not F_FULLFSYNC: fdatasync p50={fd_p50}ns sync_all p50={ff_p50}ns"
         );
 
+        let d = File::open(&dir).unwrap();
         let mut dir_fd = Vec::with_capacity(40);
         let mut dir_ff = Vec::with_capacity(40);
         for _ in 0..40 {
@@ -684,6 +686,7 @@ mod tests {
             "fallocate(",
             "fsync(",
             "posix_fadvise(",
+            "statvfs(",
         ];
         let mut sites = 0usize;
         for (i, line) in lines[..cut].iter().enumerate() {
@@ -704,8 +707,8 @@ mod tests {
             assert!(gated, "ungated unsafe FFI rc at line {}: {line}", i + 1);
         }
         assert!(
-            sites >= 5,
-            "expected the 5 known production FFI rc sites, found {sites}"
+            sites >= 6,
+            "expected the 6 known production FFI rc sites, found {sites}"
         );
     }
 }

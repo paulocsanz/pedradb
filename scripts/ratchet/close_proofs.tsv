@@ -1,0 +1,166 @@
+# RFC-0188 P0.2/P1.6 — close/atom proof registration (the credit registry).
+# Columns (whitespace-separated): kind  catalog_id  theorem  lean_file  entry
+#   kind        close | atom | count — the ladder step this proof pays.
+#               count (RFC-0199) pays no ladder step: it is a work-count
+#               credit over the extract, additive to close/atom.
+#   catalog_id  `catalog:<id>` must resolve in scripts/formal/catalog.json
+#               (the theorem is about a production pair, not a toy).
+#   theorem     must exist as `theorem <name>` in lean_file, its statement
+#               must carry a forall-binder (a named property over all
+#               inputs — NOT a definitional equality over concrete inputs),
+#               and the file must contain zero `sorry`.
+#   entry       the rustc-linked kernel fn the theorem is about.
+# proof_depth.close/.atom in scripts/formal/residuals.json must EQUAL the
+# registry counts; floors in proof_depth.tsv move in the SAME commit as a
+# row. Wrap-factory kernels (a||b / identity / is_empty / ==0) never earn
+# a row — the forall-binder requirement is the mechanical part of that ban.
+close	catalog:merge_sift	merge_sift_step_repairs_iff	formal/aeneas/lean/Merge.lean	sift_step
+atom	catalog:visible_at	visible_at_deletion_never_live	formal/aeneas/lean/Merge.lean	visible_at
+atom	catalog:blob_gc_pick	blob_gc_action_rewrite_iff_inactive_with_bytes	formal/aeneas/lean/VlogGc.lean	blob_gc_action
+atom	catalog:compact_retention	point_version_fate_drop_iff_newer_kept_at_or_below_oldest_snapshot	formal/aeneas/lean/Compact.lean	point_version_fate
+atom	catalog:manifest_recover	sst_recover_action_refuse_iff_corrupt_or_inventory_missing	formal/aeneas/lean/Manifest.lean	sst_recover_action
+atom	catalog:compact_decision	compact_pick_gc_rewrite_max_iff_none_and_gc_and_files_at_max	formal/aeneas/lean/Compact.lean	compact_pick
+atom	catalog:reopen_outcome	reopen_outcome_serve_all_iff_damage_none	formal/aeneas/lean/Reopen.lean	reopen_outcome
+atom	catalog:vlog_recover	vlog_recover_action_refuse_open_iff_wants_large_use_new_and_nothing_on_disk	formal/aeneas/lean/VlogGc.lean	vlog_recover_action
+atom	catalog:cf_encode_effective	cf_encode_effective_empty_iff_default_raw_else_identity	formal/aeneas/lean/Cf.lean	cf_encode_effective
+atom	catalog:pin_gc	gc_oldest_from_pin_value_iff_pin_or_unpinned_visible_min	formal/aeneas/lean/Compact.lean	gc_oldest_from_pin
+atom	catalog:leveling	level_target_bytes_ok_iff_zero_or_fanout_chain	formal/aeneas/lean/Leveling.lean	level_target_bytes
+atom	catalog:compact_rewrites_sst_cf	compact_rewrites_sst_cf_ok_iff_empty_tag_never_or_representative_in_family	formal/aeneas/lean/Cf.lean	compact_rewrites_sst_cf
+atom	catalog:decode_cf_key	decode_cf_key_ok_iff_identity_or_stripped_past_prefix	formal/aeneas/lean/Cf.lean	decode_cf_key
+atom	catalog:encode_cf_key	encode_cf_key_ok_iff_bare_key_or_prefixed_vec	formal/aeneas/lean/Cf.lean	encode_cf_key
+atom	catalog:infer_sst_cf	infer_sst_cf_ok_iff_shared_family_or_empty	formal/aeneas/lean/Cf.lean	infer_sst_cf
+atom	catalog:batch_is_empty	batch_is_empty_ok_iff_zero	formal/aeneas/lean/WriteAdmission.lean	batch_is_empty
+atom	catalog:dir_sync_required	dir_sync_required_ok_iff_sync	formal/aeneas/lean/WriteAdmission.lean	dir_sync_required
+close	catalog:wal_commit_plan	wal_commit_plan_ok_iff_fence_chain	formal/aeneas/lean/WriteAdmission.lean	wal_commit_plan
+count	catalog:lsm_compact	lsm_compact_work_bound	formal/aeneas/lean/LsmCompactDerived.lean	lsm_compact
+close	catalog:occ_batch_plan	occ_batch_plan_member_fate_iff	formal/aeneas/lean/GroupCommit.lean	occ_batch_plan
+atom	catalog:occ_snap_published	occ_snap_uses_published_ok_iff_inflight	formal/aeneas/lean/Flush.lean	occ_snap_uses_published
+count	catalog:probe_order_covering	probe_order_covering_work_bound	formal/aeneas/lean/ProbeOrderCoveringDerived.lean	probe_order_covering
+count	catalog:scale_predict	point_get_probes_le_levels_l0_max	formal/aeneas/lean/ScalePredictDerived.lean	point_get_probes
+count	catalog:wal_commit_plan	wal_commit_plan_at_most_one_fdatasync	formal/aeneas/lean/WorkIo.lean	wal_commit_plan
+count	catalog:auto_flush_due	memtable_flush_amortized	formal/aeneas/lean/AutoFlushDueDerived.lean	auto_flush_due
+count	catalog:scan_guard	scan_decision_work_bound	formal/aeneas/lean/ScanGuardDerived.lean	scan_reads_file
+count	catalog:bloom_may_contain	bloom_may_contain_work_bound	formal/aeneas/lean/BloomMayContainDerived.lean	bloom_may_contain
+close	catalog:wal_rotate_decision	try_rotate_step_rotates_iff_pins_clear_segment_live	formal/aeneas/lean/Flush.lean	wal_rotate_decision
+atom	catalog:wal_sync_required	wal_sync_required_ok_iff_client_else_db	formal/aeneas/lean/WriteAdmission.lean	wal_sync_required
+atom	catalog:rwlock_client_may_mutate	rwlock_client_may_mutate_ok_iff_holding_write	formal/aeneas/lean/GroupCommit.lean	rwlock_client_may_mutate
+atom	catalog:occ_member_fate	occ_member_fate_ok_iff_precedence	formal/aeneas/lean/GroupCommit.lean	occ_member_fate
+atom	catalog:wait_for_deadlock	wait_for_deadlock_step_cycle_closes	formal/aeneas/lean/Locktab.lean	wait_for_deadlock
+close	catalog:group_publish	may_publish_group_ok_iff_wal_io_ok	formal/aeneas/lean/GroupCommit.lean	may_publish_group
+atom	catalog:write_admission	write_admission_idle_fate_iff	formal/aeneas/lean/WriteAdmission.lean	write_admission_idle
+atom	catalog:write_admit	write_admit_fate_iff	formal/aeneas/lean/WriteAdmission.lean	write_admit
+atom	catalog:seq_exhausted	seq_exhausted_fate_iff	formal/aeneas/lean/WriteAdmission.lean	seq_exhausted
+atom	catalog:fence_on_sync_fail	fence_on_sync_fail_fate_iff	formal/aeneas/lean/WriteAdmission.lean	fence_on_sync_fail
+atom	catalog:wal_commit_plan	wal_commit_plan_fate_iff	formal/aeneas/lean/WriteAdmission.lean	wal_commit_plan
+atom	catalog:torn_head_empty_log	torn_head_empty_log_fate_iff	formal/aeneas/lean/WriteAdmission.lean	torn_head_is_empty_log
+atom	catalog:torn_tail_needs_cut	torn_tail_needs_cut_fate_iff	formal/aeneas/lean/WriteAdmission.lean	torn_tail_needs_cut
+atom	catalog:seq_after_feed	seq_after_feed_fate_iff	formal/aeneas/lean/WriteAdmission.lean	seq_after_feed
+atom	catalog:pit_resync_rewrite	pit_resync_rewrite_fate_iff	formal/aeneas/lean/WriteAdmission.lean	pit_resync_needs_rewrite
+atom	catalog:snap_empty	snap_empty_fate_iff	formal/aeneas/lean/Lookup.lean	snap_is_empty
+atom	catalog:snap_below_watermark	snap_below_watermark_fate_iff	formal/aeneas/lean/Lookup.lean	snap_below_watermark
+atom	catalog:mem_point_decides	mem_point_decides_fate_iff	formal/aeneas/lean/Lookup.lean	mem_point_decides
+atom	catalog:prefer_newer_seq	prefer_newer_seq_fate_iff	formal/aeneas/lean/Lookup.lean	prefer_newer_seq
+atom	catalog:flush_publish	flush_publish_fate_iff	formal/aeneas/lean/Flush.lean	may_publish_manifest
+atom	catalog:auto_flush_due	auto_flush_due_fate_iff	formal/aeneas/lean/Flush.lean	auto_flush_due
+atom	catalog:flush_decision	flush_decision_fate_iff	formal/aeneas/lean/Flush.lean	wal_rotate_decision
+atom	catalog:cf_family	cf_family_fate_iff	formal/aeneas/lean/Cf.lean	key_in_cf_family
+atom	catalog:cf_family_of	cf_family_of_fate_iff	formal/aeneas/lean/Cf.lean	cf_family_of
+atom	catalog:leveling_pick	pick_l0_to_l1_fate_iff	formal/aeneas/lean/Leveling.lean	pick_l0_to_l1
+atom	catalog:leveling_pushdown	pick_pushdown_fate_iff	formal/aeneas/lean/Leveling.lean	pick_pushdown
+atom	catalog:write_record_count	write_record_count_ok_fate_iff	formal/aeneas/lean/Batch.lean	write_record_count_ok
+atom	catalog:iter_window	iter_window_keep_fate_iff	formal/aeneas/lean/Iter.lean	iter_window_keep
+atom	catalog:occ_batch_plan	occ_batch_plan_fate_iff	formal/aeneas/lean/GroupCommit.lean	occ_batch_plan
+atom	catalog:wal_recover	recover_collect_act_fate_iff	formal/aeneas/lean/WalRecover.lean	recover_collect_act
+atom	catalog:wal_state	inv_wal_fate_iff	formal/aeneas/lean/WalState.lean	inv_wal
+atom	catalog:wal_append	wal_append_fate_iff	formal/aeneas/lean/WalState.lean	wal_append
+atom	catalog:wal_sync	wal_sync_fate_iff	formal/aeneas/lean/WalState.lean	wal_sync
+atom	catalog:wal_ack	wal_ack_fate_iff	formal/aeneas/lean/WalState.lean	wal_ack
+atom	catalog:wal_rotate	wal_rotate_fate_iff	formal/aeneas/lean/WalState.lean	wal_rotate
+atom	catalog:wal_acked_survives	acked_survives_fate_iff	formal/aeneas/lean/WalState.lean	acked_survives_every_legal_crash
+atom	catalog:env_crash	crash_legal_fate_iff	formal/aeneas/lean/EnvCrash.lean	crash_legal
+atom	catalog:env_append	append_fate_iff	formal/aeneas/lean/EnvCrash.lean	append
+atom	catalog:env_sync	sync_fate_iff	formal/aeneas/lean/EnvCrash.lean	sync
+atom	catalog:env_barrier_floor	barrier_floor_fate_iff	formal/aeneas/lean/EnvCrash.lean	barrier_floor_holds
+atom	catalog:env_no_invented	no_invented_bytes_fate_iff	formal/aeneas/lean/EnvCrash.lean	no_invented_bytes_holds
+atom	catalog:env_honest_sync	honest_sync_fate_iff	formal/aeneas/lean/EnvCrash.lean	honest_sync_protects_all
+atom	catalog:cqe_res	cqe_res_ok_fate_iff	formal/aeneas/lean/Cqe.lean	cqe_res_ok
+atom	catalog:cqe_tags	next_user_data_fate_iff	formal/aeneas/lean/Cqe.lean	next_user_data
+atom	catalog:cqe_leftover	cqe_act_fate_iff	formal/aeneas/lean/Cqe.lean	cqe_act
+atom	catalog:cqe_submit	submit_complete_act_fate_iff	formal/aeneas/lean/Cqe.lean	submit_complete_act
+atom	catalog:cqe_ring_refusal	cqe_ring_model_admitted_fate_iff	formal/aeneas/lean/Cqe.lean	cqe_ring_model_admitted
+atom	catalog:write_ack_append	on_append_fate_iff	formal/aeneas/lean/WriteAck.lean	on_append
+atom	catalog:write_ack_barrier	on_barrier_fate_iff	formal/aeneas/lean/WriteAck.lean	on_barrier
+atom	catalog:write_ack_ack	on_ack_fate_iff	formal/aeneas/lean/WriteAck.lean	on_ack
+atom	catalog:c1_quorum	c1_holds_fate_iff	formal/aeneas/lean/Properties.lean	c1_holds
+atom	catalog:d1_durability	d1_holds_fate_iff	formal/aeneas/lean/Properties.lean	d1_holds
+atom	catalog:t1_atomicity	t1_holds_fate_iff	formal/aeneas/lean/Properties.lean	t1_holds
+atom	catalog:r1_no_resurrection	r1_answer_ok_fate_iff	formal/aeneas/lean/Properties.lean	r1_answer_ok
+atom	catalog:d1_modelo	d1_modelo_fate_iff	formal/aeneas/lean/D1Modelo.lean	d1_modelo
+atom	catalog:r1_modelo	r1_modelo_fate_iff	formal/aeneas/lean/LsmR1.lean	r1_modelo
+atom	catalog:d1_put_ok	put_ok_fate_iff	formal/aeneas/lean/D1Modelo.lean	put_ok
+atom	catalog:group_commit	occ_conflict_fate_iff	formal/aeneas/lean/GroupCommit.lean	occ_conflict
+atom	catalog:fsync_promote	fsync_promotes_pending_fate_iff	formal/aeneas/lean/GroupCommit.lean	fsync_promotes_pending
+atom	catalog:group_fence	fence_publish_seq_fate_iff	formal/aeneas/lean/GroupCommit.lean	fence_publish_seq
+atom	catalog:group_validate	group_validate_fate_iff	formal/aeneas/lean/GroupCommit.lean	group_validate
+atom	catalog:from_record_type	from_record_type_fate_iff	formal/aeneas/lean/WalRecover.lean	from_record_type
+atom	catalog:is_length_resyncable	is_length_resyncable_fate_iff	formal/aeneas/lean/WalRecover.lean	is_length_resyncable
+atom	catalog:physical_payload_act	physical_payload_act_fate_iff	formal/aeneas/lean/WalRecover.lean	physical_payload_act
+atom	catalog:fragment_act	fragment_act_fate_iff	formal/aeneas/lean/WalRecover.lean	fragment_act
+atom	catalog:changelog	changelog_needs_sst_rebuild_fate_iff	formal/aeneas/lean/Changelog.lean	changelog_needs_sst_rebuild
+atom	catalog:changelog_should_store	changelog_should_store_fate_iff	formal/aeneas/lean/Changelog.lean	changelog_should_store
+atom	catalog:changelog_budget	changelog_rebuild_within_budget_fate_iff	formal/aeneas/lean/Changelog.lean	changelog_rebuild_within_budget
+atom	catalog:flush_plan	flush_plan_fate_iff	formal/aeneas/lean/Flush.lean	flush_plan
+atom	catalog:first_install	first_install_action_fate_iff	formal/aeneas/lean/Manifest.lean	first_install_action
+atom	catalog:dictionary_link	reopen_outcome_flat_fate_iff	formal/aeneas/lean/Reopen.lean	reopen_outcome
+atom	catalog:crc_match	crc_match_ok_fate_iff	formal/aeneas/lean/Crc.lean	crc_match_ok
+atom	catalog:sst_block_crc	sst_block_crc_ok_fate_iff	formal/aeneas/lean/Scan.lean	sst_block_crc_ok
+atom	catalog:zero_glue	zero_glue_admitted_fate_iff	formal/aeneas/lean/Scan.lean	zero_glue_admitted
+atom	catalog:sst_crc	sst_crc_fate_flat_fate_iff	formal/aeneas/lean/Scan.lean	sst_crc_fate
+atom	catalog:key_in_window	key_in_window_fate_iff	formal/aeneas/lean/Scan.lean	key_in_window
+atom	catalog:point_bounds_overlap	point_bounds_overlap_fate_iff	formal/aeneas/lean/Scan.lean	point_bounds_overlap
+atom	catalog:tombstone_reaches_window	tombstone_reaches_window_fate_iff	formal/aeneas/lean/Scan.lean	tombstone_reaches_window
+atom	catalog:scan_guard	scan_reads_file_fate_iff	formal/aeneas/lean/Scan.lean	scan_reads_file
+atom	catalog:sst_magic	sst_magic_is_pedra_fate_iff	formal/aeneas/lean/Magic.lean	sst_magic_is_pedra
+atom	catalog:compact_split	compact_should_split_fate_iff	formal/aeneas/lean/Compact.lean	compact_should_split
+atom	catalog:compact_split_at	compact_should_split_at_fate_iff	formal/aeneas/lean/Compact.lean	compact_should_split_at
+atom	catalog:lone_tombstone	lone_tombstone_fate_iff	formal/aeneas/lean/Compact.lean	lone_tombstone_fate
+atom	catalog:lsm_compact	lsm_compact_fate_iff	formal/aeneas/lean/LsmR1.lean	lsm_compact
+atom	catalog:lsm_probe	lsm_probe_fate_iff	formal/aeneas/lean/LsmR1.lean	lsm_probe
+atom	catalog:lsm_reopen	lsm_reopen_fate_iff	formal/aeneas/lean/LsmR1.lean	lsm_reopen
+atom	catalog:write_op_range_end	write_op_range_end_fate_iff	formal/aeneas/lean/Merge.lean	merge.write_op_range_end
+atom	catalog:ikey_pack	pack_sequence_and_type_fate_iff	formal/aeneas/lean/Key.lean	key.pack_sequence_and_type
+atom	catalog:prefix	prefix_exclusive_end_fate_iff	formal/aeneas/lean/Prefix.lean	prefix_exclusive_end
+atom	catalog:range_covers	range_tombstone_covers_fate_iff	formal/aeneas/lean/Merge.lean	merge.range_tombstone_covers
+atom	catalog:leveling_disjoint	is_disjoint_fate_iff	formal/aeneas/lean/Leveling.lean	is_disjoint
+atom	catalog:leveling_overlaps	overlaps_fate_iff	formal/aeneas/lean/Leveling.lean	overlaps
+atom	catalog:leveling_total_bytes	total_bytes_fate_iff	formal/aeneas/lean/Leveling.lean	total_bytes
+atom	catalog:leveled_enabled	leveled_enabled_fate_iff	formal/aeneas/lean/Leveling.lean	leveled_enabled
+atom	catalog:bloom_header	bloom_header_fate_iff	formal/aeneas/lean/Bloom.lean	bloom_header_ok
+atom	catalog:bloom_insert	insert_fate_iff	formal/aeneas/lean/Bloom.lean	insert
+atom	catalog:bloom_may_contain	may_contain_fate_iff	formal/aeneas/lean/Bloom.lean	may_contain
+atom	catalog:probe_order	probe_order_fate_iff	formal/aeneas/lean/ProbeOrder.lean	first_probe_on_equal_lo
+atom	catalog:probe_order_covering	probe_order_covering_fate_iff	formal/aeneas/lean/ProbeOrder.lean	probe_order_covering
+atom	catalog:run_disjoint	run_disjoint_fate_iff	formal/aeneas/lean/ProbeOrder.lean	run_pairwise_disjoint_los
+atom	catalog:scale_probes	point_get_probes_fate_iff	formal/aeneas/lean/Scale.lean	point_get_probes
+atom	catalog:scale_probes_worst	probes_worst_fate_iff	formal/aeneas/lean/Scale.lean	probes_worst
+atom	catalog:scale_happy_hot	happy_hot_bps_fate_iff	formal/aeneas/lean/Scale.lean	happy_hot_bps
+atom	catalog:scale_warm	warm_cap_bytes_fate_iff	formal/aeneas/lean/Scale.lean	warm_cap_bytes
+atom	catalog:scale_predict	predict_get_ns_fate_iff	formal/aeneas/lean/Scale.lean	predict_get_ns
+atom	catalog:scale_forecast	scale_forecast_fate_iff	formal/aeneas/lean/Scale.lean	scale_forecast
+atom	catalog:changelog_durable_commit	changelog_durable_commit_fate_fate_iff	formal/aeneas/lean/Changelog.lean	changelog_durable_commit_fate
+atom	catalog:wal_archive_delete	wal_archive_delete_plan_fate_iff	formal/aeneas/lean/Changelog.lean	wal_archive_delete_plan
+atom	catalog:bulk_manifest_persist	bulk_manifest_persist_fate_fate_iff	formal/aeneas/lean/Manifest.lean	bulk_manifest_persist_fate
+atom	catalog:point_cache_validity	point_cache_validity_fate_iff	formal/aeneas/lean/Lookup.lean	point_cache_validity
+atom	catalog:point_tombstone	point_tombstone_plan_fate_iff	formal/aeneas/lean/Lookup.lean	point_tombstone_plan
+atom	catalog:dir_sync_plan	dir_sync_plan_fate_iff	formal/aeneas/lean/WriteAdmission.lean	dir_sync_plan
+atom	catalog:fence_admission	fence_admission_plan_fate_iff	formal/aeneas/lean/WriteAdmission.lean	fence_admission_plan
+atom	catalog:fence_record	fence_record_plan_fate_iff	formal/aeneas/lean/WriteAdmission.lean	fence_record_plan
+atom	catalog:group_batch_sync	group_batch_sync_plan_fate_iff	formal/aeneas/lean/WriteAdmission.lean	group_batch_sync_plan
+atom	catalog:parked_pair	parked_pair_plan_fate_iff	formal/aeneas/lean/Flush.lean	parked_pair_plan
+atom	catalog:auto_flush_gate	auto_flush_gate_fate_iff	formal/aeneas/lean/Flush.lean	auto_flush_gate
+atom	catalog:mem_auto_flush	mem_auto_flush_plan_fate_iff	formal/aeneas/lean/Flush.lean	mem_auto_flush_plan
+atom	catalog:pit_resync_rewrite_plan	pit_resync_rewrite_plan_fate_iff	formal/aeneas/lean/WriteAdmission.lean	pit_resync_rewrite_plan
+atom	catalog:manifest_publish_plan	manifest_publish_plan_fate_iff	formal/aeneas/lean/Flush.lean	manifest_publish_plan
+atom	catalog:changelog_store_plan	changelog_store_plan_fate_iff	formal/aeneas/lean/Changelog.lean	changelog_store_plan
+atom	catalog:parked_pop_plan	parked_pop_plan_fate_iff	formal/aeneas/lean/WriteAdmission.lean	parked_pop_plan
+atom	catalog:group_ack_plan	group_ack_plan_fate_iff	formal/aeneas/lean/GroupCommit.lean	group_ack_plan

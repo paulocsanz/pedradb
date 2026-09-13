@@ -5,6 +5,12 @@
 //! Supports range tombstones ([`ValueType::RangeDeletion`]) and a streaming
 //! merge path that does not require materialising the full keyspace first.
 
+//! **Term:** this file is what `rustc` links. Aeneas extracts that body
+//! (`scripts/aeneas_merge.sh`). A toy-enum / u64 view of `&[u8]` /
+//! `key::ValueType` is a model twin — not last-wins (deleted).
+//!
+//!   ./scripts/aeneas_merge.sh --required
+
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BinaryHeap, VecDeque};
 use std::ops::Bound;
@@ -84,6 +90,47 @@ pub fn range_tombstone_covers_as_is(start: &[u8], _end: &[u8], key: &[u8]) -> bo
     key == start
 }
 
+/// Whether an unapplied WAL op (RFC-0045 P2.1) covers `key` for OCC.
+///
+/// Range deletes use [`range_tombstone_covers`] (F30). Point put/delete
+/// conflict on the exact user key.
+#[must_use]
+pub fn write_op_covers_key(kind: ValueType, start: &[u8], end: &[u8], key: &[u8]) -> bool {
+    match kind {
+        ValueType::RangeDeletion => range_tombstone_covers(start, end, key),
+        ValueType::Value | ValueType::Deletion => start == key,
+    }
+}
+
+/// AS-IS F30: range only hits the start key; point ops never conflict.
+#[must_use]
+pub fn write_op_covers_key_as_is(kind: ValueType, start: &[u8], end: &[u8], key: &[u8]) -> bool {
+    match kind {
+        ValueType::RangeDeletion => range_tombstone_covers_as_is(start, end, key),
+        ValueType::Value | ValueType::Deletion => false,
+    }
+}
+
+/// End key of a WAL-encoded write op. WriteOp contract: a range delete
+/// stores its exclusive end in `value`; point ops carry no end. The
+/// OCC stage (RFC-0045 P2.1) must derive `end` from this, or
+/// [`write_op_covers_key`] loses range coverage for staged ops.
+#[must_use]
+pub fn write_op_range_end<'a>(kind: ValueType, value: &'a [u8]) -> Option<&'a [u8]> {
+    match kind {
+        ValueType::RangeDeletion => Some(value),
+        ValueType::Value | ValueType::Deletion => None,
+    }
+}
+
+/// AS-IS F30: staged op never carries an end — a range tombstone
+/// covers only its start key while the group's `fdatasync` is still
+/// off-lock (lost update inside the deleted range).
+#[must_use]
+pub fn write_op_range_end_as_is(_kind: ValueType, _value: &[u8]) -> Option<&[u8]> {
+    None
+}
+
 /// Whether the winning version at a snapshot is live (RFC-0150 P1).
 ///
 /// Candidate versions already satisfy `sequence <= snapshot` (newest first).
@@ -116,6 +163,42 @@ pub fn iter_window_keep(snapshot_live: bool) -> bool {
 #[must_use]
 pub fn iter_window_keep_as_is(_snapshot_live: bool) -> bool {
     true
+}
+
+/// One min-heap sift-down step decision (RFC-0187 P1.3 heap-sift kernel).
+/// The production heap owns only the ORDER of heads ([`head_before`] over
+/// `(user_key, sequence)`); the STRUCTURE of the repair lives in this
+/// kernel, extracted by `scripts/aeneas_merge.sh`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SiftStep {
+    /// Hole already beats both children — invariant restored.
+    Stay,
+    /// Swap with the left child; keep sifting from there.
+    SwapLeft,
+    /// Swap with the right child; keep sifting from there.
+    SwapRight,
+}
+
+/// Decision core of `StreamingVisibleIter::sift_down`. Inputs are the
+/// caller's pairwise order facts (the caller owns the order semantics):
+/// `r_lt_l` = right child beats left child; `best_lt_hole` = the best
+/// child beats the hole.
+#[must_use]
+pub fn sift_step(r_exists: bool, r_lt_l: bool, best_lt_hole: bool) -> SiftStep {
+    if !best_lt_hole {
+        SiftStep::Stay
+    } else if r_exists && r_lt_l {
+        SiftStep::SwapRight
+    } else {
+        SiftStep::SwapLeft
+    }
+}
+
+/// AS-IS dente (three-teeth): the repair never happens — the heap trusts
+/// slot order and degrades to registration order.
+#[must_use]
+pub fn sift_step_as_is(_r_exists: bool, _r_lt_l: bool, _best_lt_hole: bool) -> SiftStep {
+    SiftStep::Stay
 }
 
 impl RangeTombstone {
@@ -419,15 +502,22 @@ impl<'a> StreamingVisibleIter<'a> {
                 break;
             }
             let r = l + 1;
-            let mut best = l;
-            if r < n && self.head_lt(self.heap[r], self.heap[l]) {
-                best = r;
-            }
-            if self.head_lt(self.heap[best], self.heap[hole]) {
-                self.heap.swap(best, hole);
-                hole = best;
-            } else {
-                break;
+            let r_in = r < n;
+            // Same two comparisons as the pre-kernel code: children first,
+            // then best-vs-hole. The STRUCTURE decision is the kernel's.
+            let r_lt_l = r_in && self.head_lt(self.heap[r], self.heap[l]);
+            let best = if r_lt_l { r } else { l };
+            let best_lt_hole = self.head_lt(self.heap[best], self.heap[hole]);
+            match sift_step(r_in, r_lt_l, best_lt_hole) {
+                SiftStep::Stay => break,
+                SiftStep::SwapLeft => {
+                    self.heap.swap(l, hole);
+                    hole = l;
+                }
+                SiftStep::SwapRight => {
+                    self.heap.swap(r, hole);
+                    hole = r;
+                }
             }
         }
     }
@@ -452,7 +542,7 @@ impl<'a> StreamingVisibleIter<'a> {
         let top = *self.heap.first()?;
         let last = self.heap.pop();
         if let Some(last) = last {
-            if !self.heap.is_empty() {
+            if !crate::write_admission_kernel::batch_is_empty(self.heap.len() as u64) {
                 self.heap[0] = last;
                 self.sift_down(0);
             }
@@ -662,6 +752,26 @@ pub(crate) fn bound_as_ref(b: &Bound<Bytes>) -> Bound<&[u8]> {
     }
 }
 
+/// Decision of a native compaction filter (RFC-0217 P1.2): applied per
+/// user-key run on the newest version while merging, so removed keys never
+/// reach the output SST.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CompactFilterDecision {
+    /// Emit the run unchanged.
+    Keep,
+    /// Remove the user key: the run is replaced by ONE point tombstone at
+    /// its newest sequence (older versions drop). The tombstone keeps the
+    /// manifest seq floor above the WAL frames of the removed key — a
+    /// traceless drop would let WAL replay resurrect it on reopen. Safe on
+    /// a rewrite whose inputs cover the key's whole keyspace (the F177
+    /// [`CompactGcOptions::bottommost`] condition) — a partial job would
+    /// resurrect an older version from a file outside the input.
+    Remove,
+    /// Replace the newest value of the key (older versions pass through;
+    /// retention GC handles them).
+    Change(Bytes),
+}
+
 /// Options for version GC during compaction (RFC-0009 P1.3 / open-items §2.1).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CompactGcOptions {
@@ -776,10 +886,13 @@ pub fn gc_compact_entries(
         let user_key = ikey.user_key.clone();
         let keep = match ikey.kind {
             ValueType::Value => {
-                if range_deleted(user_key.as_ref(), ikey.sequence, &tombs) {
-                    None
-                } else {
+                if visible_at(
+                    ValueType::Value,
+                    range_deleted(user_key.as_ref(), ikey.sequence, &tombs),
+                ) {
                     Some((ikey, value))
+                } else {
+                    None
                 }
             }
             // F177: a newest point Deletion must survive a partial
@@ -835,7 +948,7 @@ fn gc_snapshot_safe(
         // (decided by `compact_kernel::point_version_fate`, RFC-0056 P0.3).
         let mut keep: Vec<(InternalKey, Bytes)> = Vec::with_capacity(versions.len());
         for (ikey, value) in versions {
-            if keep.is_empty() {
+            if crate::write_admission_kernel::batch_is_empty(keep.len() as u64) {
                 keep.push((ikey, value));
                 continue;
             }
@@ -1068,7 +1181,10 @@ impl<S: CompactSource> GcMergeSource<S> {
             if let Some(&i) = points.first() {
                 let ikey = &self.run[i].0;
                 keep[i] = match ikey.kind {
-                    ValueType::Value => !range_deleted(user.as_ref(), ikey.sequence, &self.tombs),
+                    ValueType::Value => visible_at(
+                        ValueType::Value,
+                        range_deleted(user.as_ref(), ikey.sequence, &self.tombs),
+                    ),
                     ValueType::Deletion => !self.gc.bottommost,
                     ValueType::RangeDeletion => false,
                 };
@@ -1115,7 +1231,7 @@ impl<S: CompactSource> CompactSource for GcMergeSource<S> {
                     self.run.push((ikey, value));
                 }
                 None => {
-                    if self.run.is_empty() {
+                    if crate::write_admission_kernel::batch_is_empty(self.run.len() as u64) {
                         return Ok(None);
                     }
                     self.close_run();
@@ -1238,6 +1354,67 @@ mod tests {
             .wrapping_mul(6364136223846793005)
             .wrapping_add(1442695040888963407);
         *state
+    }
+
+    /// RFC-0188 P0.2 / RFC-0187 P1.3 three-teeth for the heap-sift kernel.
+    /// Dente 1: the full decision table (ORDER facts in, STRUCTURE out).
+    /// Dente 2: `sift_step_as_is` diverges on EVERY repairing input.
+    /// Dente 3 (on-live): 4 sorted streams registered in DESCENDING head
+    /// order — heapify MUST repair, and a Stay-only mutant emits b35
+    /// first while the heap invariant demands b05.
+    #[test]
+    fn merge_heap_sift_kernel_three_teeth() {
+        // Dente 1 — decision table. (r_exists, r_lt_l, best_lt_hole).
+        assert_eq!(sift_step(false, false, false), SiftStep::Stay);
+        assert_eq!(sift_step(true, true, false), SiftStep::Stay);
+        assert_eq!(sift_step(true, true, true), SiftStep::SwapRight);
+        assert_eq!(sift_step(true, false, true), SiftStep::SwapLeft);
+        assert_eq!(sift_step(false, false, true), SiftStep::SwapLeft);
+
+        // Dente 2 — the as-is mutant never repairs: on every input where
+        // the best child beats the hole the kernel swaps, as-is stays.
+        for (r_exists, r_lt_l) in [(true, true), (true, false), (false, false)] {
+            let clean = sift_step(r_exists, r_lt_l, true);
+            assert_ne!(clean, SiftStep::Stay, "kernel must repair");
+            assert_eq!(sift_step_as_is(r_exists, r_lt_l, true), SiftStep::Stay);
+        }
+
+        // Dente 3 — on-live heap repair. Root decision on the initial
+        // registration order: (r_in=true, r_lt_l=false, best_lt_hole=true)
+        // -> kernel SwapLeft vs as-is Stay (would emit b35 first).
+        let stream = |keys: &[&[u8]]| -> LayerStream<'static> {
+            let rows: Vec<(InternalKey, Bytes)> = keys
+                .iter()
+                .map(|k| (ik(k, 1, ValueType::Value), Bytes::copy_from_slice(k)))
+                .collect();
+            Box::new(rows.into_iter())
+        };
+        // Internally sorted, registered D, C, B, A — heads b35, b25, b15, b05.
+        let streams: Vec<LayerStream<'static>> = vec![
+            stream(&[b"b35", b"b75"]),
+            stream(&[b"b25", b"b65"]),
+            stream(&[b"b15", b"b55", b"b95"]),
+            stream(&[b"b05", b"b45", b"b85"]),
+        ];
+        let iter = StreamingVisibleIter::from_point_streams(
+            streams,
+            Vec::new(),
+            u64::MAX,
+            Bound::Unbounded,
+            Bound::Unbounded,
+            None,
+        );
+        let got: Vec<WindowKv> = iter.into_window_kvs().collect();
+        let keys: Vec<&[u8]> = got.iter().map(|w| w.key.as_ref()).collect();
+        assert_eq!(
+            keys.first(),
+            Some(&&b"b05"[..]),
+            "heapify must surface the min head"
+        );
+        let mut sorted = keys.clone();
+        sorted.sort_unstable();
+        assert_eq!(keys, sorted, "emission must be ascending after repair");
+        assert_eq!(keys.len(), 10);
     }
 
     /// Randomized oracle for `StreamingVisibleIter::from_point_streams`:
@@ -1369,6 +1546,156 @@ mod tests {
         assert_eq!(nexts.load(std::sync::atomic::Ordering::Relaxed), 1);
     }
 
+    #[test]
+    fn bound_as_ref_on_live_level_run_is_not_ok() {
+        let src = include_str!("db.rs");
+        assert!(
+            src.contains("bound_as_ref(&self.start)") && src.contains("bound_to_owned(start)"),
+            "LevelRunStream must match merge bound_as_ref / bound_to_owned"
+        );
+        assert!(
+            !src.contains("fn bound_slice"),
+            "db.rs must not keep a duplicate Bound copy helper"
+        );
+    }
+
+    #[test]
+    fn write_op_covers_key_on_live_unapplied_is_not_ok() {
+        assert!(write_op_covers_key(ValueType::Value, b"k", b"", b"k"));
+        assert!(!write_op_covers_key(ValueType::Value, b"k", b"", b"z"));
+        assert!(write_op_covers_key(
+            ValueType::RangeDeletion,
+            b"a",
+            b"z",
+            b"m"
+        ));
+        assert!(!write_op_covers_key_as_is(
+            ValueType::RangeDeletion,
+            b"a",
+            b"z",
+            b"m"
+        ));
+        let src = include_str!("db.rs");
+        let body = src
+            .split("pub fn key_has_write_after")
+            .nth(1)
+            .and_then(|s| s.split("fn resolve_stored_value").next())
+            .expect("key_has_write_after");
+        assert!(
+            body.contains("write_op_covers_key("),
+            "key_has_write_after unapplied must match write_op_covers_key"
+        );
+        assert!(
+            !body.contains("u.kind == ValueType::RangeDeletion"),
+            "key_has_write_after unapplied must not keep a raw ValueType if"
+        );
+        assert!(
+            !body.contains("range_tombstone_covers("),
+            "key_has_write_after mem/sst range tombs must call write_op_covers_key"
+        );
+        assert!(
+            body.matches("write_op_covers_key(").count() >= 3,
+            "unapplied + mem + sst loops must all call write_op_covers_key"
+        );
+    }
+
+    #[test]
+    fn write_op_range_end_on_live_stage_unapplied_is_not_ok() {
+        // Honest WriteOp contract: range delete carries its end in
+        // `value`; point put/delete carry none.
+        assert_eq!(
+            write_op_range_end(ValueType::RangeDeletion, b"z"),
+            Some(b"z".as_slice())
+        );
+        assert_eq!(write_op_range_end(ValueType::Value, b"payload"), None);
+        assert_eq!(write_op_range_end(ValueType::Deletion, b""), None);
+        // Staged range tombstone keeps full coverage (F30): the OCC
+        // window between WAL encode and memtable apply must conflict a
+        // concurrent covered write.
+        assert!(write_op_covers_key(
+            ValueType::RangeDeletion,
+            b"a",
+            write_op_range_end(ValueType::RangeDeletion, b"z").unwrap_or(&[]),
+            b"m"
+        ));
+        // AS-IS: no end staged — coverage collapses to the start key
+        // and the concurrent covered write is lost.
+        assert!(!write_op_covers_key(
+            ValueType::RangeDeletion,
+            b"a",
+            write_op_range_end_as_is(ValueType::RangeDeletion, b"z").unwrap_or(&[]),
+            b"m"
+        ));
+        let src = include_str!("db.rs");
+        let body = src
+            .split("pub(crate) fn stage_unapplied")
+            .nth(1)
+            .and_then(|s| s.split("pub(crate) fn unstage_unapplied").next())
+            .expect("stage_unapplied");
+        assert!(
+            body.contains("write_op_range_end("),
+            "stage_unapplied must derive the staged end via write_op_range_end"
+        );
+        assert!(
+            !body.contains("op.kind == ValueType::RangeDeletion"),
+            "stage_unapplied must not keep the raw ValueType if inline"
+        );
+    }
+
+    #[test]
+    fn past_end_on_live_exclusive_is_not_ok() {
+        assert!(past_end(b"z", Bound::Excluded(b"z")));
+        assert!(!past_end(b"y", Bound::Excluded(b"z")));
+        assert!(!past_end(b"z", Bound::Unbounded));
+        assert!(past_end(b"z", Bound::Included(b"y")));
+        let src = include_str!("db.rs");
+        let sst = src
+            .split("impl<'a> SstCountCursor")
+            .nth(1)
+            .and_then(|s| s.split("impl<'a>").next())
+            .expect("SstCountCursor impl");
+        assert!(
+            sst.contains("past_end("),
+            "SstCountCursor::settle must match past_end"
+        );
+        assert!(
+            !sst.contains("Bound::Included(e) => uk > e"),
+            "SstCountCursor::settle must not keep a raw Bound match"
+        );
+    }
+
+    #[test]
+    fn user_key_in_range_on_live_cursor_is_not_ok() {
+        assert!(user_key_in_range(
+            b"m",
+            Bound::Included(b"a"),
+            Bound::Excluded(b"z")
+        ));
+        assert!(!user_key_in_range(
+            b"a",
+            Bound::Excluded(b"a"),
+            Bound::Unbounded
+        ));
+        let src = include_str!("db.rs");
+        let sst = src
+            .split("impl<'a> SstCountCursor")
+            .nth(1)
+            .and_then(|s| s.split("impl<'a>").next())
+            .expect("SstCountCursor impl");
+        assert!(
+            sst.contains("user_key_in_range("),
+            "SstCountCursor::settle must match user_key_in_range"
+        );
+        assert!(
+            !sst.contains("Bound::Included(s) => uk < s"),
+            "SstCountCursor::settle must not keep a raw start Bound match"
+        );
+        assert!(
+            !sst.contains("k.user_key.as_ref() < s"),
+            "SstCountCursor::settle seek must not keep a raw start Bound partition_point"
+        );
+    }
+
     /// Interleaved streams with a cross-stream duplicate key: after the
     /// second stream exhausts, the first continues on the single-live fast
     /// path — output still matches the oracle.
@@ -1404,6 +1731,45 @@ mod tests {
         .into_window_kvs()
         .collect();
         assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn gc_merge_close_run_calls_visible_at() {
+        let src = include_str!("merge.rs");
+        let body = src
+            .split("fn close_run(")
+            .nth(1)
+            .and_then(|s| {
+                s.split("impl<S: CompactSource> CompactSource for GcMergeSource")
+                    .next()
+            })
+            .expect("GcMergeSource::close_run");
+        assert!(
+            body.contains("visible_at("),
+            "close_run keep_only_latest Value range-hide if must call catalog visible_at"
+        );
+        assert!(
+            !body.contains("ValueType::Value => !range_deleted"),
+            "Value+!range_deleted must not stay inline"
+        );
+    }
+
+    #[test]
+    fn gc_compact_entries_calls_visible_at() {
+        let src = include_str!("merge.rs");
+        let body = src
+            .split("pub fn gc_compact_entries")
+            .nth(1)
+            .and_then(|s| s.split("fn gc_snapshot_safe").next())
+            .expect("gc_compact_entries");
+        assert!(
+            body.contains("visible_at("),
+            "gc_compact_entries Value range-hide if must call catalog visible_at"
+        );
+        assert!(
+            !body.contains("if range_deleted(user_key.as_ref(), ikey.sequence, &tombs)"),
+            "Value+range_deleted must not stay inline"
+        );
     }
 
     #[test]
@@ -1724,6 +2090,21 @@ mod tests {
     }
 
     #[test]
+    fn merge_rs_has_no_verus_cartoon() {
+        let src = include_str!("merge.rs");
+        let block = concat!("verus", "!", " {");
+        let cfg = concat!("cfg(", "verus", "_keep", "_ghost)");
+        assert!(
+            !src.contains(block),
+            "toy-enum/u64 stand-in is not last-wins of rustc &[u8]/key::ValueType"
+        );
+        assert!(
+            !src.contains(cfg),
+            "cfg split hides rustc types from the prover"
+        );
+    }
+
+    #[test]
     fn visible_at_put_delete_range_del() {
         assert!(visible_at(ValueType::Value, false));
         assert!(!visible_at(ValueType::Value, true));
@@ -1775,6 +2156,36 @@ mod tests {
         );
         assert!(hidden);
         assert!(!visible_at(ValueType::Value, hidden));
+        const B_OPEN: u8 = 123;
+        const B_CLOSE: u8 = 125;
+        let src = include_str!("db.rs");
+        let needle = "fn count_visible(";
+        let start = src.find(needle).expect("count_visible");
+        let rest = &src[start..];
+        let bytes = rest.as_bytes();
+        let brace = bytes.iter().position(|&b| b == B_OPEN).expect("brace");
+        let mut depth = 0i32;
+        let mut end = 0;
+        for (i, &b) in bytes[brace..].iter().enumerate() {
+            if b == B_OPEN {
+                depth += 1;
+            } else if b == B_CLOSE {
+                depth -= 1;
+                if depth == 0 {
+                    end = brace + i;
+                    break;
+                }
+            }
+        }
+        let body = &rest[brace..=end];
+        assert!(
+            body.contains("visible_at("),
+            "count_visible must match visible_at"
+        );
+        assert!(
+            !body.contains("kind == ValueType::Value"),
+            "count_visible must not keep a raw Value-kind visibility if"
+        );
     }
 
     #[test]

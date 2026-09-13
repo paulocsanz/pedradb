@@ -1,0 +1,15 @@
+[workspace]
+
+[package]
+name = "pedra-aeneas-key-kernel"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "Shim exposing production key.rs (CoreError without thiserror) to Charon"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+bytes = "1"

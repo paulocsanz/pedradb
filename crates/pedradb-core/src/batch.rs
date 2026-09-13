@@ -21,6 +21,14 @@
 //! Self-describing records support future multi-key commits (one WAL record
 //! per TX) and keep P1.6 export from needing a rewrite of historical logs.
 
+//! **Term:** this file is what `rustc` links. Aeneas extracts that body
+//! (`scripts/aeneas_batch.sh`). A Verus u32-decoded_len stand-in of rustc
+//! `write_record_count_ok(u32, usize)` is a model twin — not last-wins (deleted).
+//!
+//!   ./scripts/aeneas_batch.sh --required
+//!
+//! Aeneas of the rustc body is the term. A Verus stand-in is not last-wins.
+
 use bytes::Bytes;
 
 use crate::error::{CoreError, Result};
@@ -178,7 +186,9 @@ impl WriteRecord {
                 value,
             });
         }
-        if !cur.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(
+            cur.data.len().saturating_sub(cur.pos) as u64
+        ) {
             return Err(CoreError::Internal(
                 "trailing bytes after write record".into(),
             ));
@@ -201,7 +211,7 @@ impl WriteRecord {
 
 /// Consecutive interned values share a `Bytes` pointer (RFC-0044 P1.1).
 pub(crate) fn value_ptr_eq(a: &WriteOp, b: &WriteOp) -> bool {
-    !a.value.is_empty()
+    !crate::write_admission_kernel::batch_is_empty(a.value.len() as u64)
         && a.value.len() == b.value.len()
         && std::ptr::eq(a.value.as_ptr(), b.value.as_ptr())
 }
@@ -217,7 +227,7 @@ pub(crate) fn share_consecutive_equal_values(ops: &mut [WriteOp]) {
         let cur = &mut tail[0];
         if cur.kind != ValueType::Value
             || prev.kind != ValueType::Value
-            || cur.value.is_empty()
+            || crate::write_admission_kernel::batch_is_empty(cur.value.len() as u64)
             || std::ptr::eq(prev.value.as_ptr(), cur.value.as_ptr())
             || prev.value.as_ref() != cur.value.as_ref()
         {
@@ -293,15 +303,8 @@ pub(crate) fn encoded_len(ops: &[WriteOp]) -> usize {
             .sum::<usize>()
 }
 
-pub(crate) fn op_encoded_len(o: &WriteOp) -> usize {
+fn op_encoded_len(o: &WriteOp) -> usize {
     1 + 8 + 4 + o.key.len() + 4 + o.value.len()
-}
-
-/// Logical WAL payload of a 1-op record (version + count + op). v1: 1-op
-/// never sets the v2 reuse bit (RFC-0180 Full-record fast path).
-#[must_use]
-pub(crate) fn one_op_logical_len(op: &WriteOp) -> usize {
-    5 + op_encoded_len(op)
 }
 
 fn estimate_size(rec: &WriteRecord) -> usize {
@@ -334,7 +337,9 @@ impl<'a> Cursor<'a> {
     }
 
     fn is_empty(&self) -> bool {
-        self.pos >= self.data.len()
+        crate::write_admission_kernel::batch_is_empty(
+            self.data.len().saturating_sub(self.pos) as u64
+        )
     }
 
     fn read_u8(&mut self) -> Result<u8> {
@@ -376,6 +381,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn batch_has_no_verus_cartoon() {
+        let src = include_str!("batch.rs");
+        let block = concat!("verus", "!", " {");
+        let cfg = concat!("cfg(", "verus", "_keep", "_ghost)");
+        assert!(
+            !src.contains(block),
+            "u32 decoded_len stand-in is not last-wins of rustc usize"
+        );
+        assert!(
+            !src.contains(cfg),
+            "cfg split hides rustc types from the prover"
+        );
+    }
+
+    #[test]
     fn round_trip_put_and_delete() {
         let rec = WriteRecord {
             ops: vec![
@@ -390,6 +410,24 @@ mod tests {
         let mut into = Vec::new();
         rec.encode_into(&mut into);
         assert_eq!(into, encoded);
+    }
+
+    #[test]
+    fn apply_record_matches_apply_ops_owned() {
+        let src = include_str!("db.rs");
+        let body = src
+            .split("fn apply_record(")
+            .nth(1)
+            .and_then(|s| s.split("fn apply_ops_owned").next())
+            .expect("apply_record");
+        assert!(
+            body.contains("apply_ops_owned("),
+            "WAL recover apply_record must match apply_ops_owned"
+        );
+        assert!(
+            !body.contains("ValueType::Value =>"),
+            "apply_record must not keep a raw ValueType match"
+        );
     }
 
     #[test]

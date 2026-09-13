@@ -13,7 +13,6 @@
 #![warn(clippy::pedantic)]
 
 pub mod batch;
-/// RFC-0184: static WRITEPHASE / scale-clock attribution (surgical cut).
 pub mod bench_gap_kernel;
 pub mod bloom;
 /// Optional DST buggify annotation sites (RFC-0018 P2.5; no-op unless feature).
@@ -25,24 +24,37 @@ pub mod cache;
 pub mod cf_kernel;
 pub mod change_feed;
 pub mod changelog_kernel;
+pub mod client_axis_kernel;
 pub mod compact_kernel;
 pub mod concurrent;
 pub mod corrupt;
 pub mod cost;
+pub mod d1_modelo_kernel;
 pub mod db;
+pub mod durability_spine_kernel;
 pub mod env;
+pub mod env_crash_kernel;
 pub mod error;
 pub mod flush_kernel;
 pub mod group_commit_kernel;
+pub mod group_window_kernel;
 pub mod history;
 pub mod host;
 pub mod key;
 mod leveling;
-pub mod write_admission_kernel;
+pub mod lsm_r1_kernel;
+pub mod product_crown_kernel;
+pub mod rmw_sched_kernel;
+pub mod wal_buffer_kernel;
+pub mod write_ack_kernel;
+pub mod write_cycle_kernel;
 
-/// RFC-0184 P2.35: GetWork × MachineSpec (spec lower bound, not \(P\cdot\tau\)).
+/// Disk-pressure watermarks (RFC-0179): refuse writes before ENOSPC, keep reads up.
+pub mod disk_pressure_kernel;
 pub mod get_cost_kernel;
+pub mod leftover_page_kernel;
 pub mod lock;
+pub mod lookup_kernel;
 pub mod manifest;
 pub mod manifest_kernel;
 pub mod memtable;
@@ -53,9 +65,11 @@ pub mod occ;
 pub mod pct_hooks;
 pub mod prefix;
 pub mod probe_order_kernel;
+pub mod ratio_curve_kernel;
 pub mod rng;
-/// RFC-0176: one-process scale clock \(P\) / \(\mathrm{cap}(R)\) / \(T\).
+/// One-process scale model (RFC-0176): probes, WARM cap, spectrum clock.
 pub mod scale_kernel;
+pub mod scan_readahead_kernel;
 pub mod sst;
 pub mod time;
 pub mod tx;
@@ -65,6 +79,7 @@ pub mod verify;
 pub mod vlog;
 pub mod vlog_gc_kernel;
 pub mod wal;
+pub mod write_admission_kernel;
 
 pub use batch::{
     write_record_count_ok, write_record_count_ok_as_is, WriteOp, WriteRecord, WRITE_RECORD_VERSION,
@@ -92,14 +107,21 @@ pub use changelog_kernel::{
 };
 pub use concurrent::ConcurrentDb;
 pub use db::{
-    copy_db_directory, read_cache_invalidate_needed, read_checkpoint_meta, BatchOp,
-    BlobGcCandidate, CheckpointMeta, CompactOptions, Db, DbStats, FenceClass, FenceRecovery,
-    FenceReport, HistoryHorizon, HistoryOptions, OpenOptions, PreparedL0Compact, ReadProbeSnap,
-    RecoveryReport, ScanProjection, Snapshot, SnapshotPin, SstLiveMeta, WalRecovery, WriteOptions,
-    WritePhaseStats, CHECKPOINT_META_FILE, DEFAULT_SST_PAYLOAD_BUDGET_BYTES, L0_COMPACTION_TRIGGER,
-    MAX_LSM_LEVEL, WAL_FILE_NAME,
+    copy_db_directory, escape_inline_value, read_checkpoint_meta, BatchOp, BlobGcCandidate,
+    CheckpointMeta, CompactOptions, Db, DbStats, FenceClass, FenceRecovery, FenceReport,
+    HistoryHorizon, HistoryOptions, OpenOptions, PreparedL0Compact, ReadProbeSnap, RecoveryReport,
+    ScanProjection, Snapshot, SnapshotPin, SstLiveMeta, WalRecovery, WriteOptions, WritePhaseStats,
+    CHECKPOINT_META_FILE, DEFAULT_SST_PAYLOAD_BUDGET_BYTES, L0_COMPACTION_TRIGGER, MAX_LSM_LEVEL,
+    WAL_FILE_NAME,
 };
-pub use env::{AdviseKind, Env, EnvFile, EnvSource, SstFileSource, StdEnv};
+pub use disk_pressure_kernel::{
+    compact_refuse, disk_pressure_admit, disk_probe_or_unknown, external_write_admitted,
+    DiskPressureAdmit, DISK_HARD_FREE_BYTES, DISK_SOFT_FREE_BYTES,
+};
+pub use env::{
+    admit_disk_write, probe_available_bytes, AdviseKind, Env, EnvFile, EnvSource, SstFileSource,
+    StdEnv,
+};
 pub use error::{CoreError, Result};
 pub use get_cost_kernel::{
     cache_level, cache_level_as_is, cost_of, get_work, mix_ns, predict_get_composed,
@@ -135,6 +157,6 @@ pub use verified::{
 pub use verify::{verify_at_rest, xor_durable_bits, VerifyFailure, VerifyReport};
 pub use vlog::{
     blob_path, decode_vlog_ptr, decode_vlog_ref, encode_vlog_ptr, encode_vlog_ref, list_blob_nums,
-    vlog_prepare_needed, ValueLog, VlogPtr, VlogRewriteStats, VLOG_BLOB_PREFIX, VLOG_FILE_NAME,
+    ValueLog, VlogPtr, VlogRewriteStats, VLOG_BLOB_PREFIX, VLOG_FILE_NAME, VLOG_NEW_NAME,
     VLOG_VALUE_PREFIX,
 };

@@ -612,7 +612,7 @@ impl ScaleStore for PedraScale {
         // settle's compact_leveled sees a disjoint max-level run set.
         // No compact-worker notify: a worker job.write() held compact_gate
         // ~90 s @100M before settle compact() (compact_ns stayed 0.001).
-        self.db.flush_no_notify().is_ok()
+        self.db.flush().is_ok()
     }
     fn settle(&mut self) -> bool {
         // compact() already flushes. A second flush re-ran WARM / waited
@@ -620,34 +620,15 @@ impl ScaleStore for PedraScale {
         // finish_hydrate already flushed. A second flush waited on
         // flush_lock (~90 s @100M, compact_ns stayed 0.001).
         let t_c = Instant::now();
-        let ok = self.db.compact_no_flush().is_ok();
+        let ok = self.db.compact().is_ok();
         eprintln!("settle_compact_call={:.3}s", t_c.elapsed().as_secs_f64());
-        // One stats() snapshot: seven property_int_value calls each ran
-        // ConcurrentDb::stats() (read lock + vlog_size_stats). r8: compact
-        // 1.745 s, settle 82 s — the leftover was this.
         let t_s = Instant::now();
         let s = self.db.stats();
         eprintln!("settle_stats_wall={:.3}s", t_s.elapsed().as_secs_f64());
-        let compact_ns = s.settle_compact_ns;
-        let warm_ns = s.settle_warm_ns;
-        let warm_bytes = s.settle_warm_bytes;
-        eprintln!(
-            "settle_parts/pedradb: compact={:.3}s warm={:.3}s warm_bytes={warm_bytes}",
-            compact_ns as f64 / 1e9,
-            warm_ns as f64 / 1e9,
-        );
-        let pressure = s.ram_pressure;
-        self.ram_mode = Some(ram_mode_label(pressure));
         let sst = s.sst_bytes;
-        let cap = s.ram_ceiling_bytes;
-        let skip = s.ram_warm_skipped;
+        self.ram_mode = Some("hot");
         let mode = self.ram_mode.unwrap_or("hot");
-        eprintln!("ram_mode/pedradb: mode={mode} sst_bytes={sst} cap={cap} warm_skipped={skip}");
-        if pressure == 1 {
-            eprintln!(
-                "ram_pressure/pedradb: sst_bytes={sst} cap={cap} warm_skipped={skip} mode=bounded-cache (page cache dropped; grow RAM/cgroup)"
-            );
-        }
+        eprintln!("ram_mode/pedradb: mode={mode} sst_bytes={sst}");
         ok
     }
     fn ram_mode(&self) -> Option<&'static str> {

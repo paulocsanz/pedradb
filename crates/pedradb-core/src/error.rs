@@ -154,17 +154,16 @@ pub enum CoreError {
         limit: usize,
     },
 
-    /// Installing this SST would push engine-resident metadata (index +
-    /// bloom + bulk tail + mem) past the cgroup / `PEDRA_RAM_BUDGET_BYTES`
-    /// cap. Fail closed — do not malloc into SIGKILL.
-    #[error("ram budget: used {used}B + {need}B > cap {cap}B")]
-    RamBudget {
-        /// `hydrate_resident_bytes` before the install.
-        used: usize,
-        /// Metadata bytes of the SST(s) being installed.
-        need: usize,
-        /// Engine cap (cgroup/2 or `PEDRA_RAM_BUDGET_BYTES`).
-        cap: usize,
+    /// Write refused: filesystem free space is below the hard floor (RFC-0179).
+    ///
+    /// Not a durability fence: reads stay up. Do not retry as L0/mem stall.
+    /// Mid-write ENOSPC still fences (RFC-0050).
+    #[error("disk pressure: {available} bytes free (need {need} to write)")]
+    DiskPressure {
+        /// Bytes the probe reported free.
+        available: u64,
+        /// Hard floor that was missed.
+        need: u64,
     },
 }
 

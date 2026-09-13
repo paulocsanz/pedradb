@@ -15,7 +15,7 @@ pub trait Rng: Clone {
 
     /// Uniform in `0..bound` (bound > 0).
     fn gen_range(&self, bound: u64) -> u64 {
-        if bound == 0 {
+        if crate::write_admission_kernel::batch_is_empty(bound) {
             return 0;
         }
         self.next_u64() % bound

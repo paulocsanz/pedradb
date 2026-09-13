@@ -1,8 +1,8 @@
 # PedraDB by example
 
 A ladder, not a dump. Each program is a complete binary: copy one file, or run
-it from this repo. The kernel examples use only `pedradb-core`. The last three
-are layers on the same directory (`pedradb-ops`, `rocksdb-compat`).
+it from this repo. The kernel examples use only `pedradb-core`. The last four
+are layers on the same directory.
 
 ```sh
 cargo run -p pedradb-examples --example hello
@@ -28,7 +28,9 @@ surface. Everything below is that loop, composed.
 | 10 | [`bank`](bank.rs) | **Capstone.** Accounts, unique emails, transfers, ordered ledger, feed, reopen. |
 | 11 | [`large_values`](large_values.rs) | Opt-in value log. Compact old SST versions, then `compact_vlog`. |
 | 12 | [`backup`](backup.rs) | Base checkpoint + WAL ship + PITR restore. |
-| 13 | [`rocksdb_dropin`](rocksdb_dropin.rs) | rust-rocksdb `DB::open_default` + `WriteBatch` + iterator, on Pedra. |
+| 13 | [`durable_stream`](durable_stream.rs) | Publish / peek / ack. At-least-once until you pin the cursor. |
+| 14 | [`sql`](sql.rs) | `CREATE` / `INSERT` / `SELECT` / `DELETE` over table prefixes. |
+| 15 | [`rocksdb_dropin`](rocksdb_dropin.rs) | rust-rocksdb `DB::open_default` + `WriteBatch` + iterator, on Pedra. |
 
 Read them in order once. After that, steal the file that matches the layer
 you are writing.
@@ -57,4 +59,4 @@ a consumer cursor — they are all keys you designed. The discipline is:
 - Not a claim that a 40-line ledger is a product. It is the *shape* of a
   product: you can build the rest without a second storage engine.
 
-The engine contract is in the root [`README.md`](../README.md).
+Full contract: [`docs/usage.md`](../docs/usage.md).

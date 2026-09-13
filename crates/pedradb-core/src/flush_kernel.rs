@@ -1,33 +1,120 @@
-//! Pure flush-pipeline decisions (RFC-0056 P0.2 — crash dictionary on the
-//! memtable → SST → WAL-rotate path).
+//! Pure flush-pipeline decisions (RFC-0056 P0.2 / RFC-0174 P0.3).
+//!
+//! **Single artifact:** this file is what `rustc` links *and* what Verus
+//! proves (`cfg(verus_keep_ghost)`). No twin-cópia.
+//!
+//!   ./scripts/verus_flush_decision.sh
 //!
 //! Production [`crate::Db::flush`] and [`crate::Db::try_rotate_wal`] route
-//! their decisions through this kernel: which flush step runs (finish the
-//! pending imm / write the mem tail to an SST / rotate only), and whether
-//! the WAL may be truncated at all. The invariant that makes it
-//! data-fate: **the WAL may only be rotated once every copy of acked keys
-//! lives in an installed SST** — mem, imm, the off-lock flush read pin,
-//! parked-unflushed tables, and in-flight commits all pin the WAL.
+//! their decisions through this kernel. Data-fate: the WAL may only be
+//! rotated once every copy of acked keys lives in an installed SST.
 //!
-//! Named decisions (the ones that were `SilentWrong` when inverted):
-//! - **Mem tail is never dropped** — `flush` with a non-empty mem always
-//!   writes the SST before any WAL rotate; rotating instead loses every
-//!   acked key that lived only in mem (crash ⇒ data loss).
-//! - **Pin live ⇒ WAL kept** — after `prepare_flush_imm` the only copy of
-//!   acked keys may be the flush read pin (and an in-flight SST);
-//!   truncating the WAL there is the pre-fix hole
-//!   (`Db::rotate_wal_ignoring_pin` replays it).
-//! - **Commit in flight ⇒ WAL kept** — a writer parked in the off-lock
-//!   fsync window still owns WAL bytes (F2).
-//! - **Pending imm finishes first** — single-flight: a previous flush's
-//!   imm is completed before mem is staged.
-//!
-//! Verus twin: `crates/pedradb-core/verus/flush_decision.rs`.
 //! Spec page: `docs/formal/crash-dictionary.md` (flush section).
 
 #![forbid(unsafe_code)]
 
+macro_rules! flush_plan_body {
+    ($mem_empty:expr, $imm_present:expr) => {
+        if $imm_present {
+            FlushPlan::FinishImmThenFlush
+        } else if !$mem_empty {
+            FlushPlan::WriteSstThenRotate
+        } else {
+            FlushPlan::RotateOnly
+        }
+    };
+}
+
+macro_rules! flush_plan_as_is_body {
+    ($mem_empty:expr, $imm_present:expr) => {{
+        let _ = ($mem_empty, $imm_present);
+        FlushPlan::RotateOnly
+    }};
+}
+
+macro_rules! may_publish_body {
+    ($sst_durable:expr) => {
+        $sst_durable
+    };
+}
+
+macro_rules! wal_rotate_body {
+    ($s:expr) => {
+        if $s.mem_empty
+            && !$s.imm_present
+            && !$s.pin_live
+            && !$s.parked_unflushed
+            && !$s.commit_inflight
+        {
+            WalRotateAction::RotateWal
+        } else {
+            WalRotateAction::KeepWal
+        }
+    };
+}
+
+macro_rules! wal_rotate_as_is_body {
+    ($s:expr) => {
+        if $s.mem_empty && !$s.imm_present && !$s.parked_unflushed && !$s.commit_inflight {
+            WalRotateAction::RotateWal
+        } else {
+            WalRotateAction::KeepWal
+        }
+    };
+}
+
+macro_rules! auto_flush_due_body {
+    ($mem_bytes:expr, $armed:expr, $limit:expr) => {
+        $armed && $mem_bytes >= $limit
+    };
+}
+
+/// Empty current WAL segment: rotate would only rewrite MANIFEST (idle poll).
+macro_rules! wal_segment_is_empty_body {
+    ($pos:expr) => {
+        $pos == 0u64
+    };
+}
+
+/// OCC snap uses published seq while a commit owns the WAL (lock-order).
+macro_rules! occ_snap_uses_published_body {
+    ($inflight:expr) => {
+        $inflight
+    };
+}
+
+macro_rules! occ_snap_uses_published_as_is_body {
+    ($inflight:expr) => {{
+        let _ = $inflight;
+        false
+    }};
+}
+
+/// Write-lock client: published snap if the read lock is not held (writer
+/// exclusive) **or** a commit owns the WAL. Always calls the inflight
+/// callee so Lean can unfold both.
+macro_rules! occ_snap_lock_order_body {
+    ($read_held:expr, $inflight:expr) => {{
+        let inflight_pub = occ_snap_uses_published($inflight);
+        !$read_held || inflight_pub
+    }};
+}
+
+macro_rules! occ_snap_lock_order_as_is_body {
+    ($read_held:expr, $inflight:expr) => {{
+        let _ = ($read_held, $inflight);
+        false
+    }};
+}
+
+macro_rules! skip_auto_flush_body {
+    ($global_under:expr, $cf_under:expr) => {
+        $global_under && $cf_under
+    };
+}
+
 /// One step of the flush pipeline (RFC-0056 P0.2).
+#[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FlushPlan {
     /// A previous flush's imm is pending — finish it first (single-flight),
@@ -40,50 +127,97 @@ pub enum FlushPlan {
     RotateOnly,
 }
 
+#[cfg(not(verus_keep_ghost))]
 /// Pure rule for which flush step runs.
-///
-/// # Post-condition (theorem-ready)
-///
-/// ```text
-/// ensures
-///   (plan == RotateOnly)          ==> mem_empty && !imm_present
-///   !mem_empty                    ==> plan != RotateOnly   // tail never dropped
-///   imm_present                   ==> plan == FinishImmThenFlush
-/// ```
-///
-/// Finite-domain check: [`tests::theorem_flush_plan_on_finite_domain`].
 #[must_use]
 pub fn flush_plan(mem_empty: bool, imm_present: bool) -> FlushPlan {
-    match (imm_present, mem_empty) {
-        (true, _) => FlushPlan::FinishImmThenFlush,
-        (false, false) => FlushPlan::WriteSstThenRotate,
-        (false, true) => FlushPlan::RotateOnly,
-    }
+    flush_plan_body!(mem_empty, imm_present)
 }
 
-/// AS-IS data loss: flush "succeeds" without writing the mem tail — the
-/// WAL rotate then truncates the only durable copy of acked keys that
-/// lived in mem (crash ⇒ every unflushed acked write is gone). Mutant
-/// must fail every theorem above.
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS data loss: flush "succeeds" without writing the mem tail.
 #[must_use]
-pub fn flush_plan_as_is_lose_tail(_mem_empty: bool, _imm_present: bool) -> FlushPlan {
-    FlushPlan::RotateOnly
+pub fn flush_plan_as_is_lose_tail(mem_empty: bool, imm_present: bool) -> FlushPlan {
+    flush_plan_as_is_body!(mem_empty, imm_present)
 }
 
+#[cfg(not(verus_keep_ghost))]
 /// MANIFEST / CURRENT may name an SST only after that file is durable.
 #[must_use]
 pub fn may_publish_manifest(sst_durable: bool) -> bool {
-    sst_durable
+    may_publish_body!(sst_durable)
 }
 
-/// AS-IS: publish MANIFEST while the SST is still unsynced (crash → CURRENT
-/// points at a torn/missing file).
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: publish MANIFEST while the SST is still unsynced.
 #[must_use]
 pub fn may_publish_manifest_as_is(_sst_durable: bool) -> bool {
     true
 }
 
+#[cfg(not(verus_keep_ghost))]
+/// Fate of the MANIFEST/CURRENT publish after the SST sync pass.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ManifestPublishPlan {
+    /// Every listed SST is durable — write MANIFEST + CURRENT.
+    PublishManifest,
+    /// Some SST is not durable — fail closed, hold the publish.
+    HoldUnsyncedFailClosed,
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// Publish EXACTLY when every listed SST is durable
+/// (may_publish_manifest stays live and proved in the body).
+#[must_use]
+pub fn manifest_publish_plan(sst_durable: bool) -> ManifestPublishPlan {
+    if may_publish_manifest(sst_durable) {
+        ManifestPublishPlan::PublishManifest
+    } else {
+        ManifestPublishPlan::HoldUnsyncedFailClosed
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: publishes while an SST is still unsynced (CURRENT names a
+/// torn file after crash — dente).
+#[must_use]
+pub fn manifest_publish_plan_as_is(_sst_durable: bool) -> ManifestPublishPlan {
+    ManifestPublishPlan::PublishManifest
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// Fate of one column family inside the auto-flush scan.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CfFlushPlan {
+    /// CF armed and at/over its limit — flush this family now.
+    FlushCfNow,
+    /// CF not due — skip to the next family.
+    CfNotDueSkip,
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// Flush the family EXACTLY when armed and at/over its limit
+/// (auto_flush_due stays live and proved in the body; the scan reached
+/// the family, so the axis is armed).
+#[must_use]
+pub fn cf_flush_plan(mem_bytes: u64, limit: u64) -> CfFlushPlan {
+    if auto_flush_due(mem_bytes, true, limit) {
+        CfFlushPlan::FlushCfNow
+    } else {
+        CfFlushPlan::CfNotDueSkip
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: skips every family (armed CFs over the limit keep growing —
+/// dente).
+#[must_use]
+pub fn cf_flush_plan_as_is(_mem_bytes: u64, _limit: u64) -> CfFlushPlan {
+    CfFlushPlan::CfNotDueSkip
+}
+
 /// Every way acked keys can still depend on the WAL.
+#[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WalPinState {
     /// Active memtable empty (empty ⇒ nothing depends on the WAL).
@@ -99,6 +233,7 @@ pub struct WalPinState {
 }
 
 /// Whether the flush pipeline may truncate the WAL.
+#[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WalRotateAction {
     /// Every copy of acked keys lives in an installed SST: the WAL may be
@@ -108,39 +243,523 @@ pub enum WalRotateAction {
     KeepWal,
 }
 
+#[cfg(not(verus_keep_ghost))]
 /// Pure rule for the WAL rotate (G1 tail of the flush pipeline).
-///
-/// # Post-condition (theorem-ready)
-///
-/// ```text
-/// ensures
-///   (a == RotateWal) <==> (mem_empty && !imm_present && !pin_live
-///        && !parked_unflushed && !commit_inflight)
-///   pin_live || commit_inflight || imm_present || parked_unflushed
-///        || !mem_empty  ==> a == KeepWal   // never truncate a live WAL
-/// ```
-///
-/// Finite-domain check: [`tests::theorem_wal_rotate_on_finite_domain`].
 #[must_use]
 pub fn wal_rotate_decision(s: WalPinState) -> WalRotateAction {
-    if s.mem_empty && !s.imm_present && !s.pin_live && !s.parked_unflushed && !s.commit_inflight {
+    wal_rotate_body!(s)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS pre-fix hole: decide the rotate ignoring the flush read pin.
+#[must_use]
+pub fn wal_rotate_decision_as_is_ignore_pin(s: WalPinState) -> WalRotateAction {
+    wal_rotate_as_is_body!(s)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// Lock-order client: OCC snapshot must not take `last_sequence` while a
+/// group is in the off-lock fd window (`commit_inflight`). That seq is
+/// unapplied; a snap equal to it misses the write and skips OCC conflict.
+#[must_use]
+pub fn occ_snap_uses_published(commit_inflight: bool) -> bool {
+    occ_snap_uses_published_body!(commit_inflight)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: always last_sequence (TOCTOU vs unapplied group).
+#[must_use]
+pub fn occ_snap_uses_published_as_is(_commit_inflight: bool) -> bool {
+    occ_snap_uses_published_as_is_body!(_commit_inflight)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// Write-lock client protocol: OCC snap uses published seq when the read
+/// lock is not held (writer exclusive) **or** `commit_inflight`.
+/// `ConcurrentDb::occ_snapshot` matches this — not an inline nest of
+/// `try_read` / inflight. Calls [`occ_snap_uses_published`].
+#[must_use]
+pub fn occ_snap_lock_order(read_held: bool, inflight: bool) -> bool {
+    occ_snap_lock_order_body!(read_held, inflight)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: last_sequence even when the write lock is held (TOCTOU).
+#[must_use]
+pub fn occ_snap_lock_order_as_is(_read_held: bool, _inflight: bool) -> bool {
+    occ_snap_lock_order_as_is_body!(_read_held, _inflight)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// Fire auto-flush when the armed byte limit is reached (RFC-0170 P2.4).
+#[must_use]
+pub fn auto_flush_due(mem_bytes: u64, armed: bool, limit: u64) -> bool {
+    auto_flush_due_body!(mem_bytes, armed, limit)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: never auto-flush.
+#[must_use]
+pub fn auto_flush_due_as_is(_mem_bytes: u64, _armed: bool, _limit: u64) -> bool {
+    false
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// Current WAL segment has no framed payload — rotate is a no-op rewrite.
+#[must_use]
+pub fn wal_segment_is_empty(pos: u64) -> bool {
+    wal_segment_is_empty_body!(pos)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: never skip (idle poll rotates empty, two fdatasyncs per tick).
+#[must_use]
+pub fn wal_segment_is_empty_as_is(_pos: u64) -> bool {
+    false
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// Both mem axes under their limits ⇒ skip auto-flush (no SST write).
+#[must_use]
+pub fn skip_auto_flush(global_under: bool, cf_under: bool) -> bool {
+    skip_auto_flush_body!(global_under, cf_under)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: never skip — would flush even when both axes are under.
+#[must_use]
+pub fn skip_auto_flush_as_is(_global_under: bool, _cf_under: bool) -> bool {
+    false
+}
+
+/// RFC-0219 P1.3: whether the parked-unflushed queue can hand out its
+/// two oldest tables as a fold pair (F174: the pair is validated again
+/// at swap time). The trampoline `db.rs parked_oldest_pair_arcs`
+/// matches this plan.
+#[cfg(not(verus_keep_ghost))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ParkedPairPlan {
+    /// Fewer than two parked tables — nothing to fold yet.
+    WaitForPair,
+    /// Two or more parked — hand out the two oldest as the fold pair.
+    HandOutOldestPair,
+}
+
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn parked_pair_plan(parked_len: u64) -> ParkedPairPlan {
+    if parked_len < 2 {
+        ParkedPairPlan::WaitForPair
+    } else {
+        ParkedPairPlan::HandOutOldestPair
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: hand out regardless — a queue shorter than the pair loses or
+/// mangles the single parked table (parked-pipeline data-loss dente).
+#[must_use]
+pub fn parked_pair_plan_as_is(_parked_len: u64) -> ParkedPairPlan {
+    ParkedPairPlan::HandOutOldestPair
+}
+
+/// RFC-0219 P1.3: whether `maybe_auto_flush` scans the column families
+/// at all. Both mem axes under their limits ⇒ nothing due anywhere —
+/// skip the scan; anything over ⇒ scan (the per-CF due gate applies).
+/// Calls [`skip_auto_flush`].
+#[cfg(not(verus_keep_ghost))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AutoFlushGate {
+    /// Both axes under — nothing due anywhere, skip the whole scan.
+    SkipAllNotDue,
+    /// At least one axis over — scan each CF for its own due gate.
+    ScanColumnFamilies,
+}
+
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn auto_flush_gate(global_under: bool, cf_under: bool) -> AutoFlushGate {
+    if skip_auto_flush(global_under, cf_under) {
+        AutoFlushGate::SkipAllNotDue
+    } else {
+        AutoFlushGate::ScanColumnFamilies
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: never skip the scan — SST writes fire even when both axes are
+/// under (pointless flush churn dente).
+#[must_use]
+pub fn auto_flush_gate_as_is(_global_under: bool, _cf_under: bool) -> AutoFlushGate {
+    AutoFlushGate::ScanColumnFamilies
+}
+
+/// RFC-0219 P1.3: whether the mem-level auto-flush fires now. Armed and
+/// at/over the limit ⇒ flush (or stage `imm` for the host worker); else
+/// keep accumulating. Calls [`auto_flush_due`].
+#[cfg(not(verus_keep_ghost))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MemAutoFlushPlan {
+    /// Armed and at/over the armed limit — flush the memtable now.
+    FlushMemNow,
+    /// Not due (unarmed or under the limit) — keep accumulating.
+    NotDueKeepMem,
+}
+
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn mem_auto_flush_plan(mem_bytes: u64, armed: bool, limit: u64) -> MemAutoFlushPlan {
+    if auto_flush_due(mem_bytes, armed, limit) {
+        MemAutoFlushPlan::FlushMemNow
+    } else {
+        MemAutoFlushPlan::NotDueKeepMem
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: never flush — the armed limit is ignored and the memtable
+/// grows until the host stalls (unbounded-mem dente).
+#[must_use]
+pub fn mem_auto_flush_plan_as_is(_mem_bytes: u64, _armed: bool, _limit: u64) -> MemAutoFlushPlan {
+    MemAutoFlushPlan::NotDueKeepMem
+}
+
+#[cfg(verus_keep_ghost)]
+use vstd::prelude::*;
+
+#[cfg(verus_keep_ghost)]
+verus! {
+
+pub enum FlushPlan {
+    FinishImmThenFlush,
+    WriteSstThenRotate,
+    RotateOnly,
+}
+
+pub open spec fn flush_plan_spec(mem_empty: bool, imm_present: bool) -> FlushPlan {
+    if imm_present {
+        FlushPlan::FinishImmThenFlush
+    } else if !mem_empty {
+        FlushPlan::WriteSstThenRotate
+    } else {
+        FlushPlan::RotateOnly
+    }
+}
+
+pub open spec fn flush_plan_as_is(_mem_empty: bool, _imm_present: bool) -> FlushPlan {
+    FlushPlan::RotateOnly
+}
+
+#[verifier::when_used_as_spec(flush_plan_spec)]
+pub fn flush_plan(mem_empty: bool, imm_present: bool) -> (p: FlushPlan)
+    ensures
+        p == flush_plan_spec(mem_empty, imm_present),
+        (p == FlushPlan::RotateOnly) ==> (mem_empty && !imm_present),
+        !mem_empty ==> p != FlushPlan::RotateOnly,
+        imm_present ==> p == FlushPlan::FinishImmThenFlush,
+{
+    flush_plan_body!(mem_empty, imm_present)
+}
+
+pub fn flush_plan_as_is_lose_tail(mem_empty: bool, imm_present: bool) -> (p: FlushPlan)
+    ensures
+        p == flush_plan_as_is(mem_empty, imm_present),
+{
+    flush_plan_as_is_body!(mem_empty, imm_present)
+}
+
+pub struct WalPinState {
+    pub mem_empty: bool,
+    pub imm_present: bool,
+    pub pin_live: bool,
+    pub parked_unflushed: bool,
+    pub commit_inflight: bool,
+}
+
+pub enum WalRotateAction {
+    RotateWal,
+    KeepWal,
+}
+
+pub open spec fn wal_rotate_spec(s: WalPinState) -> WalRotateAction {
+    if s.mem_empty
+        && !s.imm_present
+        && !s.pin_live
+        && !s.parked_unflushed
+        && !s.commit_inflight
+    {
         WalRotateAction::RotateWal
     } else {
         WalRotateAction::KeepWal
     }
 }
 
-/// AS-IS pre-fix hole: decide the rotate ignoring the flush read pin —
-/// truncates the WAL while the pin (and an in-flight SST) holds the only
-/// copy of acked keys (`Db::rotate_wal_ignoring_pin` replays this).
-#[must_use]
-pub fn wal_rotate_decision_as_is_ignore_pin(s: WalPinState) -> WalRotateAction {
+pub open spec fn wal_rotate_as_is_ignore_pin(s: WalPinState) -> WalRotateAction {
     if s.mem_empty && !s.imm_present && !s.parked_unflushed && !s.commit_inflight {
         WalRotateAction::RotateWal
     } else {
         WalRotateAction::KeepWal
     }
 }
+
+#[verifier::when_used_as_spec(wal_rotate_spec)]
+pub fn wal_rotate_decision(s: WalPinState) -> (a: WalRotateAction)
+    ensures
+        a == wal_rotate_spec(s),
+        (a == WalRotateAction::RotateWal)
+            ==> (s.mem_empty && !s.imm_present && !s.pin_live && !s.parked_unflushed && !s.commit_inflight),
+        (s.pin_live || s.commit_inflight || s.imm_present || s.parked_unflushed || !s.mem_empty)
+            ==> a == WalRotateAction::KeepWal,
+{
+    wal_rotate_body!(s)
+}
+
+pub fn wal_rotate_decision_as_is_ignore_pin(s: WalPinState) -> (a: WalRotateAction)
+    ensures
+        a == wal_rotate_as_is_ignore_pin(s),
+{
+    wal_rotate_as_is_body!(s)
+}
+
+pub open spec fn occ_snap_uses_published_spec(commit_inflight: bool) -> bool {
+    commit_inflight
+}
+
+pub fn occ_snap_uses_published(commit_inflight: bool) -> (d: bool)
+    ensures
+        d == occ_snap_uses_published_spec(commit_inflight),
+        d == commit_inflight,
+{
+    occ_snap_uses_published_body!(commit_inflight)
+}
+
+pub fn occ_snap_uses_published_as_is(commit_inflight: bool) -> (d: bool)
+    ensures
+        d == false,
+{
+    occ_snap_uses_published_as_is_body!(commit_inflight)
+}
+
+pub open spec fn occ_snap_lock_order_spec(read_held: bool, inflight: bool) -> bool {
+    !read_held || occ_snap_uses_published_spec(inflight)
+}
+
+pub fn occ_snap_lock_order(read_held: bool, inflight: bool) -> (d: bool)
+    ensures
+        d == occ_snap_lock_order_spec(read_held, inflight),
+        !read_held ==> d,
+        read_held ==> d == occ_snap_uses_published_spec(inflight),
+{
+    occ_snap_lock_order_body!(read_held, inflight)
+}
+
+pub fn occ_snap_lock_order_as_is(_read_held: bool, _inflight: bool) -> (d: bool)
+    ensures
+        d == false,
+{
+    occ_snap_lock_order_as_is_body!(_read_held, _inflight)
+}
+
+proof fn lemma_write_held_snap_published(inflight: bool)
+    ensures
+        occ_snap_lock_order_spec(false, inflight),
+{
+}
+
+pub open spec fn may_publish_manifest_spec(sst_durable: bool) -> bool {
+    sst_durable
+}
+
+pub open spec fn may_publish_manifest_as_is_spec(_sst_durable: bool) -> bool {
+    true
+}
+
+pub fn may_publish_manifest(sst_durable: bool) -> (d: bool)
+    ensures
+        d == may_publish_manifest_spec(sst_durable),
+{
+    may_publish_body!(sst_durable)
+}
+
+pub fn may_publish_manifest_as_is(_sst_durable: bool) -> (d: bool)
+    ensures
+        d == true,
+{
+    true
+}
+
+pub open spec fn auto_flush_due_spec(mem_bytes: u64, armed: bool, limit: u64) -> bool {
+    armed && mem_bytes >= limit
+}
+
+pub fn auto_flush_due(mem_bytes: u64, armed: bool, limit: u64) -> (d: bool)
+    ensures
+        d == auto_flush_due_spec(mem_bytes, armed, limit),
+{
+    auto_flush_due_body!(mem_bytes, armed, limit)
+}
+
+pub open spec fn auto_flush_due_as_is_spec(_mem_bytes: u64, _armed: bool, _limit: u64) -> bool {
+    false
+}
+
+pub fn auto_flush_due_as_is(mem_bytes: u64, armed: bool, limit: u64) -> (d: bool)
+    ensures
+        d == auto_flush_due_as_is_spec(mem_bytes, armed, limit),
+        d == false,
+{
+    let _ = (mem_bytes, armed, limit);
+    false
+}
+
+pub open spec fn wal_segment_is_empty_spec(pos: u64) -> bool {
+    pos == 0
+}
+
+pub fn wal_segment_is_empty(pos: u64) -> (d: bool)
+    ensures
+        d == wal_segment_is_empty_spec(pos),
+{
+    wal_segment_is_empty_body!(pos)
+}
+
+pub fn wal_segment_is_empty_as_is(pos: u64) -> (d: bool)
+    ensures
+        d == false,
+{
+    let _ = pos;
+    false
+}
+
+pub open spec fn skip_auto_flush_spec(global_under: bool, cf_under: bool) -> bool {
+    global_under && cf_under
+}
+
+pub fn skip_auto_flush(global_under: bool, cf_under: bool) -> (d: bool)
+    ensures
+        d == skip_auto_flush_spec(global_under, cf_under),
+{
+    skip_auto_flush_body!(global_under, cf_under)
+}
+
+pub open spec fn skip_auto_flush_as_is_spec(_global_under: bool, _cf_under: bool) -> bool {
+    false
+}
+
+pub fn skip_auto_flush_as_is(global_under: bool, cf_under: bool) -> (d: bool)
+    ensures
+        d == skip_auto_flush_as_is_spec(global_under, cf_under),
+        d == false,
+{
+    let _ = (global_under, cf_under);
+    false
+}
+
+proof fn lemma_tail_never_dropped(mem_empty: bool, imm_present: bool)
+    requires
+        !mem_empty,
+    ensures
+        flush_plan(mem_empty, imm_present) != FlushPlan::RotateOnly,
+        flush_plan(mem_empty, imm_present) == FlushPlan::WriteSstThenRotate
+            || flush_plan(mem_empty, imm_present) == FlushPlan::FinishImmThenFlush,
+{
+}
+
+proof fn lemma_pending_imm_finishes_first(mem_empty: bool)
+    requires
+        true,
+    ensures
+        flush_plan(mem_empty, true) == FlushPlan::FinishImmThenFlush,
+{
+}
+
+proof fn lemma_clean_pipeline_rotates()
+    ensures
+        flush_plan(true, false) == FlushPlan::RotateOnly,
+        wal_rotate_decision(WalPinState {
+            mem_empty: true,
+            imm_present: false,
+            pin_live: false,
+            parked_unflushed: false,
+            commit_inflight: false,
+        }) == WalRotateAction::RotateWal,
+{
+}
+
+proof fn lemma_pin_keeps_wal(s: WalPinState)
+    requires
+        s.pin_live,
+    ensures
+        wal_rotate_decision(s) == WalRotateAction::KeepWal,
+{
+}
+
+proof fn lemma_commit_inflight_keeps_wal(s: WalPinState)
+    requires
+        s.commit_inflight,
+    ensures
+        wal_rotate_decision(s) == WalRotateAction::KeepWal,
+{
+}
+
+proof fn lemma_unflushed_mem_keeps_wal(s: WalPinState)
+    requires
+        !s.mem_empty,
+    ensures
+        wal_rotate_decision(s) == WalRotateAction::KeepWal,
+{
+}
+
+proof fn lemma_mutant_loses_tail(mem_empty: bool, imm_present: bool)
+    requires
+        !mem_empty,
+    ensures
+        flush_plan(mem_empty, imm_present) != FlushPlan::RotateOnly,
+        flush_plan_as_is(mem_empty, imm_present) == FlushPlan::RotateOnly,
+{
+}
+
+proof fn lemma_as_is_publishes_unsynced()
+    ensures
+        !may_publish_manifest_spec(false),
+        may_publish_manifest_as_is_spec(false),
+{
+}
+
+proof fn lemma_as_is_never_auto_flushes()
+    ensures
+        auto_flush_due_spec(100, true, 50),
+        !auto_flush_due_as_is_spec(100, true, 50),
+{
+}
+
+proof fn lemma_as_is_never_skips_auto_flush()
+    ensures
+        skip_auto_flush_spec(true, true),
+        !skip_auto_flush_as_is_spec(true, true),
+{
+}
+
+proof fn lemma_mutant_ignores_pin()
+    ensures
+        wal_rotate_decision(WalPinState {
+            mem_empty: true,
+            imm_present: false,
+            pin_live: true,
+            parked_unflushed: false,
+            commit_inflight: false,
+        }) == WalRotateAction::KeepWal,
+        wal_rotate_as_is_ignore_pin(WalPinState {
+            mem_empty: true,
+            imm_present: false,
+            pin_live: true,
+            parked_unflushed: false,
+            commit_inflight: false,
+        }) == WalRotateAction::RotateWal,
+{
+}
+
+} // verus!
 
 #[cfg(test)]
 mod tests {
@@ -268,6 +887,108 @@ mod tests {
     }
 
     #[test]
+    fn manifest_publish_plan_on_live_unsynced_sst_holds() {
+        // RFC-0219 P1.4: unsynced SST holds the MANIFEST publish
+        // fail-closed; AS-IS publishes (CURRENT names a torn file).
+        assert_eq!(
+            manifest_publish_plan(true),
+            ManifestPublishPlan::PublishManifest
+        );
+        assert_eq!(
+            manifest_publish_plan(false),
+            ManifestPublishPlan::HoldUnsyncedFailClosed
+        );
+        assert_eq!(
+            manifest_publish_plan_as_is(false),
+            ManifestPublishPlan::PublishManifest,
+            "AS-IS dente: publishes with unsynced SST"
+        );
+        let pm = named_fn_src(include_str!("db.rs"), "persist_manifest").expect("persist_manifest");
+        assert!(
+            pm.contains("match crate::flush_kernel::manifest_publish_plan("),
+            "persist_manifest must match manifest_publish_plan"
+        );
+        assert!(
+            !pm.contains("may_publish_manifest("),
+            "the raw publish gate left the trampoline"
+        );
+    }
+
+    #[test]
+    fn cf_flush_plan_on_live_over_limit_flushes() {
+        // RFC-0219 P2.1: inside the armed scan, a family at/over its
+        // limit flushes now; below the limit skips. AS-IS skips every
+        // family (armed CFs keep growing — dente).
+        assert_eq!(cf_flush_plan(10, 10), CfFlushPlan::FlushCfNow);
+        assert_eq!(cf_flush_plan(11, 10), CfFlushPlan::FlushCfNow);
+        assert_eq!(cf_flush_plan(9, 10), CfFlushPlan::CfNotDueSkip);
+        assert_eq!(
+            cf_flush_plan_as_is(10, 10),
+            CfFlushPlan::CfNotDueSkip,
+            "AS-IS dente: armed family over the limit never flushes"
+        );
+        let maf =
+            named_fn_src(include_str!("db.rs"), "maybe_auto_flush").expect("maybe_auto_flush");
+        assert!(
+            maf.contains("match crate::flush_kernel::cf_flush_plan("),
+            "maybe_auto_flush must match cf_flush_plan"
+        );
+        assert_eq!(
+            maf.matches("auto_flush_due(").count(),
+            2,
+            "only the two axis probes remain (global_under/cf_under feeding auto_flush_gate); the per-CF gate is the kernel match"
+        );
+    }
+
+    #[test]
+    fn occ_snap_uses_published_on_live_inflight_is_not_ok() {
+        assert!(occ_snap_uses_published(true));
+        assert!(!occ_snap_uses_published(false));
+        assert!(
+            !occ_snap_uses_published_as_is(true),
+            "AS-IS dente: last_seq while inflight"
+        );
+        let src = include_str!("concurrent.rs");
+        assert!(
+            src.contains("occ_snap_uses_published("),
+            "occ_snapshot must match occ_snap_uses_published"
+        );
+        assert!(
+            src.split("fn writes_idle_for")
+                .nth(1)
+                .expect("writes_idle_for")
+                .contains("occ_snap_uses_published("),
+            "writes_idle_for must not treat inflight as idle"
+        );
+    }
+
+    #[test]
+    fn occ_snap_lock_order_on_write_held_is_not_ok() {
+        assert!(
+            occ_snap_lock_order(false, false),
+            "write lock held, idle pipeline ⇒ published"
+        );
+        assert!(occ_snap_lock_order(false, true));
+        assert!(occ_snap_lock_order(true, true));
+        assert!(
+            !occ_snap_lock_order(true, false),
+            "read lock held, idle ⇒ last_seq"
+        );
+        assert!(
+            !occ_snap_lock_order_as_is(false, true),
+            "AS-IS dente: last_seq while write lock held"
+        );
+        let snap = include_str!("concurrent.rs")
+            .split("fn occ_snapshot(")
+            .nth(1)
+            .expect("occ_snapshot");
+        assert!(
+            snap.contains("occ_snap_lock_order("),
+            "occ_snapshot must match occ_snap_lock_order"
+        );
+    }
+
+    #[test]
     fn wal_rotate_decision_on_live_pin_is_not_ok() {
         let s = WalPinState {
             mem_empty: true,
@@ -281,6 +1002,162 @@ mod tests {
             wal_rotate_decision_as_is_ignore_pin(s),
             WalRotateAction::RotateWal,
             "AS-IS dente: rotate while pin live"
+        );
+    }
+
+    #[test]
+    fn wal_segment_is_empty_on_live_zero_is_not_ok() {
+        assert!(wal_segment_is_empty(0));
+        assert!(
+            !wal_segment_is_empty_as_is(0),
+            "AS-IS dente: rotate empty segment"
+        );
+        assert!(!wal_segment_is_empty(1));
+        let rot = include_str!("db.rs")
+            .split("fn try_rotate_wal(&mut self)")
+            .nth(1)
+            .and_then(|s| s.split("fn wal_pin_state").next())
+            .expect("try_rotate_wal");
+        assert!(
+            rot.contains("wal_segment_is_empty("),
+            "try_rotate_wal must match wal_segment_is_empty"
+        );
+        assert!(
+            rot.contains("wal_rotate_decision("),
+            "try_rotate_wal must match wal_rotate_decision"
+        );
+        let flush_th = include_str!("../../../formal/aeneas/lean/Flush.lean");
+        assert!(
+            flush_th.contains("unfold wal_rotate_decision")
+                && flush_th.contains("unfold wal_segment_is_empty"),
+            "Flush.lean must dual-unfold plan and wal_segment_is_empty"
+        );
+    }
+
+    #[test]
+    fn auto_flush_due_on_live_over_limit_is_not_ok() {
+        assert!(auto_flush_due(100, true, 50));
+        assert!(
+            !auto_flush_due_as_is(100, true, 50),
+            "AS-IS dente: never fires"
+        );
+        assert!(!auto_flush_due(10, true, 50));
+        assert!(!auto_flush_due(100, false, 50), "unarmed never fires");
+    }
+
+    #[test]
+    fn skip_auto_flush_on_live_both_under_is_not_ok() {
+        assert!(skip_auto_flush(true, true));
+        assert!(!skip_auto_flush_as_is(true, true));
+        assert!(!skip_auto_flush(true, false));
+        assert!(!skip_auto_flush(false, true));
+    }
+
+    /// Balanced-brace slice of one `fn` from a source file (plant lens).
+    fn named_fn_src(src: &str, name: &str) -> Option<String> {
+        let needle = format!("fn {name}(");
+        let start = src.find(&needle)?;
+        let rest = &src[start..];
+        let bytes = rest.as_bytes();
+        let brace = bytes.iter().position(|&b| b == b'{')?;
+        let mut depth = 0i32;
+        for (i, &b) in bytes[brace..].iter().enumerate() {
+            if b == b'{' {
+                depth += 1;
+            } else if b == b'}' {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(rest[brace..=brace + i].to_string());
+                }
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn parked_pair_plan_on_live_short_queue_waits() {
+        // RFC-0219 P1.3: fewer than two parked tables wait; two or more
+        // hand out the oldest pair (F174 revalidates at swap). AS-IS
+        // hands out regardless (short queue loses a parked table).
+        assert_eq!(parked_pair_plan(0), ParkedPairPlan::WaitForPair);
+        assert_eq!(parked_pair_plan(1), ParkedPairPlan::WaitForPair);
+        assert_eq!(parked_pair_plan(2), ParkedPairPlan::HandOutOldestPair);
+        assert_eq!(
+            parked_pair_plan_as_is(1),
+            ParkedPairPlan::HandOutOldestPair,
+            "AS-IS dente: pair handed out of a short queue"
+        );
+        let popa = named_fn_src(include_str!("db.rs"), "parked_oldest_pair_arcs")
+            .expect("parked_oldest_pair_arcs");
+        assert!(
+            popa.contains("match crate::flush_kernel::parked_pair_plan("),
+            "parked_oldest_pair_arcs must match parked_pair_plan"
+        );
+        assert!(
+            !popa.contains("parked_unflushed.len() < 2"),
+            "the raw queue-length gate left the trampoline"
+        );
+    }
+
+    #[test]
+    fn auto_flush_gate_on_live_both_under_skips_scan() {
+        // RFC-0219 P1.3: both axes under ⇒ skip the whole auto-flush
+        // scan; anything over ⇒ scan. AS-IS always scans (flush churn
+        // with nothing due).
+        assert_eq!(auto_flush_gate(true, true), AutoFlushGate::SkipAllNotDue);
+        assert_eq!(
+            auto_flush_gate(true, false),
+            AutoFlushGate::ScanColumnFamilies
+        );
+        assert_eq!(
+            auto_flush_gate(false, true),
+            AutoFlushGate::ScanColumnFamilies
+        );
+        assert_eq!(
+            auto_flush_gate_as_is(true, true),
+            AutoFlushGate::ScanColumnFamilies,
+            "AS-IS dente: scan even when both axes are under"
+        );
+        let maf =
+            named_fn_src(include_str!("db.rs"), "maybe_auto_flush").expect("maybe_auto_flush");
+        assert!(
+            maf.contains("match crate::flush_kernel::auto_flush_gate("),
+            "maybe_auto_flush must match auto_flush_gate"
+        );
+        assert!(
+            !maf.contains("skip_auto_flush(global_under, cf_under)"),
+            "the raw both-under gate left the trampoline"
+        );
+    }
+
+    #[test]
+    fn mem_auto_flush_plan_on_live_armed_over_limit_flushes() {
+        // RFC-0219 P1.3: armed and at/over the limit flushes the mem
+        // now; unarmed or under keeps accumulating. AS-IS never flushes
+        // (unbounded mem until the host stalls).
+        assert_eq!(
+            mem_auto_flush_plan(100, true, 50),
+            MemAutoFlushPlan::FlushMemNow
+        );
+        assert_eq!(
+            mem_auto_flush_plan(10, true, 50),
+            MemAutoFlushPlan::NotDueKeepMem
+        );
+        assert_eq!(
+            mem_auto_flush_plan(100, false, 50),
+            MemAutoFlushPlan::NotDueKeepMem,
+            "unarmed never fires"
+        );
+        assert_eq!(
+            mem_auto_flush_plan_as_is(100, true, 50),
+            MemAutoFlushPlan::NotDueKeepMem,
+            "AS-IS dente: armed limit ignored, mem grows unbounded"
+        );
+        let maf =
+            named_fn_src(include_str!("db.rs"), "maybe_auto_flush").expect("maybe_auto_flush");
+        assert!(
+            maf.contains("match crate::flush_kernel::mem_auto_flush_plan("),
+            "maybe_auto_flush must match mem_auto_flush_plan on the mem gate"
         );
     }
 }

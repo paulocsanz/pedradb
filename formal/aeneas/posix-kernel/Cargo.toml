@@ -1,0 +1,15 @@
+[workspace]
+
+[package]
+name = "pedra-aeneas-posix-kernel"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "Standalone crate whose [lib] path is production pedradb-posix/src/lib.rs"
+
+[lib]
+path = "../../../crates/pedradb-posix/src/lib.rs"
+
+[dependencies]
+libc = "0.2"

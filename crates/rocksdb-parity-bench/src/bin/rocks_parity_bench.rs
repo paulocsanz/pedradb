@@ -7,7 +7,7 @@
 //!            rocksdb (needs --features real; real RocksDB via the rocksdb crate)
 //!   suites: ROCKS_PARITY_SUITE (default "ycsb,deps"; csv; "all" = every
 //!            suite). Opt-in: qs, kvrocks, myrocks, surreal, nebula,
-//!            streaming, ceph, solana, arango, venice, rockset, yugabyte, oxigraph, rocksapi (RFC-0043).
+//!            streaming, ceph, solana, arango, venice, oxigraph, rocksapi (RFC-0043).
 //!
 //! Env: ROCKS_YCSB_RECORDS/OPS/PAYLOAD/DIST (uniform|zipfian), ROCKS_DEPS_BATCH
 //! (ops per apply commit), ROCKS_PARITY_SYNC (rocksdb engine only; **0 = default
@@ -68,12 +68,6 @@ fn main() {
         }
         if suites_enabled("venice") {
             v.push("venice");
-        }
-        if suites_enabled("rockset") {
-            v.push("rockset");
-        }
-        if suites_enabled("yugabyte") {
-            v.push("yugabyte");
         }
         if suites_enabled("oxigraph") {
             v.push("oxigraph");
@@ -143,25 +137,8 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        "fjall" => {
-            #[cfg(feature = "fjall")]
-            {
-                if suites_enabled("deps") || suites_enabled("surreal") {
-                    eprintln!("engine 'fjall' is ycsb-only (no named CFs / OCC)");
-                    std::process::exit(1);
-                }
-                let e = rocksdb_parity_bench::engines::FjallEngine::open(&dbdir);
-                run_and_report(&e, &cfg, suites.as_str(), &out);
-            }
-            #[cfg(not(feature = "fjall"))]
-            {
-                let _ = suites;
-                eprintln!("engine 'fjall' needs --features fjall");
-                std::process::exit(1);
-            }
-        }
         other => {
-            eprintln!("unknown engine {other:?} (want compat|rocksdb|fjall)");
+            eprintln!("unknown engine {other:?} (want compat|rocksdb)");
             std::process::exit(1);
         }
     }
@@ -170,14 +147,7 @@ fn main() {
 fn push_ycsb<E: Engine>(r: &mut YcsbRunner, e: &E, records: usize, benches: &mut Vec<String>) {
     use rocksdb_parity_bench::shape_wanted;
     let t0 = std::time::Instant::now();
-    // RFC-0163 P1.2: untimed seed may run WAL-async (env-gated) so the G1
-    // column doesn't pay per-put fdatasync at 25M records; every timed
-    // write shape keeps the column sync.
-    rocksdb_parity_bench::seed_under_async_barrier(
-        e,
-        rocksdb_parity_bench::seed_async_enabled(),
-        || r.seed(e),
-    );
+    r.seed(e);
     eprintln!(
         "[rocks-parity] seed {records} records in {:.1}s",
         t0.elapsed().as_secs_f64()
@@ -218,15 +188,16 @@ fn run_and_report<E: Engine + Sync>(e: &E, cfg: &Cfg, suites: &str, out: &Path) 
     let mut benches = Vec::new();
     if suites_enabled("ycsb") {
         push_ycsb(&mut r, e, cfg.records, &mut benches);
-        for clients in rocksdb_parity_bench::clients_from_env() {
+        let clients = rocksdb_parity_bench::env_usize("ROCKS_PARITY_CLIENTS", 1);
+        if clients >= 2 {
             benches.extend(r.run_clients(e, clients));
         }
     }
     if suites_enabled("deps") {
         benches.extend(r.run_deps(e));
-        for clients in rocksdb_parity_bench::clients_from_env() {
+        let clients = rocksdb_parity_bench::env_usize("ROCKS_PARITY_CLIENTS", 1);
+        if clients >= 2 {
             benches.extend(r.run_deps_clients(e, clients));
-            benches.extend(r.run_lock_prewrite_clients(e, clients));
         }
     }
     if suites_enabled("qs") {
@@ -234,92 +205,36 @@ fn run_and_report<E: Engine + Sync>(e: &E, cfg: &Cfg, suites: &str, out: &Path) 
             r.seed(e);
         }
         benches.extend(r.run_qs(e));
-        for clients in rocksdb_parity_bench::clients_from_env() {
-            benches.extend(r.run_qs_clients(e, clients));
-        }
     }
     if suites_enabled("kvrocks") {
         benches.extend(r.run_kvrocks(e));
-        for clients in rocksdb_parity_bench::clients_from_env() {
-            benches.extend(r.run_kvrocks_get_clients(e, clients));
-            benches.extend(r.run_kvrocks_scan_clients(e, clients));
-            benches.extend(r.run_kvrocks_pipelined_clients(e, clients));
-            benches.extend(r.run_kvrocks_blob_clients(e, clients));
-        }
     }
     if suites_enabled("myrocks") {
         benches.extend(r.run_myrocks(e));
-        for clients in rocksdb_parity_bench::clients_from_env() {
-            benches.extend(r.run_myrocks_clients(e, clients));
-            benches.extend(r.run_myrocks_range_clients(e, clients));
-        }
     }
     if suites_enabled("nebula") {
         benches.extend(r.run_nebula(e));
-        for clients in rocksdb_parity_bench::clients_from_env() {
-            benches.extend(r.run_nebula_clients(e, clients));
-            benches.extend(r.run_nebula_insert_clients(e, clients));
-        }
     }
     if suites_enabled("streaming") {
         benches.extend(r.run_streaming(e));
-        for clients in rocksdb_parity_bench::clients_from_env() {
-            benches.extend(r.run_flink_clients(e, clients));
-            benches.extend(r.run_kafka_clients(e, clients));
-        }
     }
     if suites_enabled("ceph") {
         benches.extend(r.run_ceph(e));
-        for clients in rocksdb_parity_bench::clients_from_env() {
-            benches.extend(r.run_ceph_read_clients(e, clients));
-        }
     }
     if suites_enabled("solana") {
         benches.extend(r.run_solana(e));
-        for clients in rocksdb_parity_bench::clients_from_env() {
-            benches.extend(r.run_solana_clients(e, clients));
-            benches.extend(r.run_solana_append_clients(e, clients));
-        }
     }
     if suites_enabled("arango") {
         benches.extend(r.run_arango(e));
-        for clients in rocksdb_parity_bench::clients_from_env() {
-            benches.extend(r.run_arango_clients(e, clients));
-            benches.extend(r.run_arango_crud_clients(e, clients));
-        }
     }
     if suites_enabled("venice") {
         benches.extend(r.run_venice(e));
-        for clients in rocksdb_parity_bench::clients_from_env() {
-            benches.extend(r.run_venice_clients(e, clients));
-            benches.extend(r.run_rockstore_clients(e, clients));
-        }
-    }
-    if suites_enabled("rockset") {
-        benches.extend(r.run_rockset(e));
-        for clients in rocksdb_parity_bench::clients_from_env() {
-            benches.extend(r.run_rockset_clients(e, clients));
-        }
-    }
-    if suites_enabled("yugabyte") {
-        benches.extend(r.run_yugabyte(e));
-        for clients in rocksdb_parity_bench::clients_from_env() {
-            benches.extend(r.run_yugabyte_clients(e, clients));
-        }
     }
     if suites_enabled("oxigraph") {
         benches.extend(r.run_oxigraph(e));
-        for clients in rocksdb_parity_bench::clients_from_env() {
-            benches.extend(r.run_oxigraph_clients(e, clients));
-            benches.extend(r.run_oxigraph_put_clients(e, clients));
-        }
     }
     if suites_enabled("rocksapi") {
         benches.extend(r.run_rocksapi(e));
-        for clients in rocksdb_parity_bench::clients_from_env() {
-            benches.extend(r.run_wbwi_clients(e, clients));
-            benches.extend(r.run_mixgraph_clients(e, clients));
-        }
     }
     if suites_enabled("surreal") {
         eprintln!(
@@ -342,15 +257,16 @@ fn run_and_report_occ<E: rocksdb_parity_bench::OccEngine + Sync>(
     let mut benches = Vec::new();
     if suites_enabled("ycsb") {
         push_ycsb(&mut r, e, cfg.records, &mut benches);
-        for clients in rocksdb_parity_bench::clients_from_env() {
+        let clients = rocksdb_parity_bench::env_usize("ROCKS_PARITY_CLIENTS", 1);
+        if clients >= 2 {
             benches.extend(r.run_clients(e, clients));
         }
     }
     if suites_enabled("deps") {
         benches.extend(r.run_deps(e));
-        for clients in rocksdb_parity_bench::clients_from_env() {
+        let clients = rocksdb_parity_bench::env_usize("ROCKS_PARITY_CLIENTS", 1);
+        if clients >= 2 {
             benches.extend(r.run_deps_clients(e, clients));
-            benches.extend(r.run_lock_prewrite_clients(e, clients));
         }
     }
     if suites_enabled("qs") {
@@ -358,98 +274,39 @@ fn run_and_report_occ<E: rocksdb_parity_bench::OccEngine + Sync>(
             r.seed(e);
         }
         benches.extend(r.run_qs(e));
-        for clients in rocksdb_parity_bench::clients_from_env() {
-            benches.extend(r.run_qs_clients(e, clients));
-        }
     }
     if suites_enabled("kvrocks") {
         benches.extend(r.run_kvrocks(e));
-        for clients in rocksdb_parity_bench::clients_from_env() {
-            benches.extend(r.run_kvrocks_get_clients(e, clients));
-            benches.extend(r.run_kvrocks_scan_clients(e, clients));
-            benches.extend(r.run_kvrocks_pipelined_clients(e, clients));
-            benches.extend(r.run_kvrocks_blob_clients(e, clients));
-        }
     }
     if suites_enabled("myrocks") {
         benches.extend(r.run_myrocks(e));
-        for clients in rocksdb_parity_bench::clients_from_env() {
-            benches.extend(r.run_myrocks_clients(e, clients));
-            benches.extend(r.run_myrocks_range_clients(e, clients));
-        }
     }
     if suites_enabled("nebula") {
         benches.extend(r.run_nebula(e));
-        for clients in rocksdb_parity_bench::clients_from_env() {
-            benches.extend(r.run_nebula_clients(e, clients));
-            benches.extend(r.run_nebula_insert_clients(e, clients));
-        }
     }
     if suites_enabled("streaming") {
         benches.extend(r.run_streaming(e));
-        for clients in rocksdb_parity_bench::clients_from_env() {
-            benches.extend(r.run_flink_clients(e, clients));
-            benches.extend(r.run_kafka_clients(e, clients));
-        }
     }
     if suites_enabled("ceph") {
         benches.extend(r.run_ceph(e));
-        for clients in rocksdb_parity_bench::clients_from_env() {
-            benches.extend(r.run_ceph_read_clients(e, clients));
-        }
     }
     if suites_enabled("solana") {
         benches.extend(r.run_solana(e));
-        for clients in rocksdb_parity_bench::clients_from_env() {
-            benches.extend(r.run_solana_clients(e, clients));
-            benches.extend(r.run_solana_append_clients(e, clients));
-        }
     }
     if suites_enabled("arango") {
         benches.extend(r.run_arango(e));
-        for clients in rocksdb_parity_bench::clients_from_env() {
-            benches.extend(r.run_arango_clients(e, clients));
-            benches.extend(r.run_arango_crud_clients(e, clients));
-        }
     }
     if suites_enabled("venice") {
         benches.extend(r.run_venice(e));
-        for clients in rocksdb_parity_bench::clients_from_env() {
-            benches.extend(r.run_venice_clients(e, clients));
-            benches.extend(r.run_rockstore_clients(e, clients));
-        }
-    }
-    if suites_enabled("rockset") {
-        benches.extend(r.run_rockset(e));
-        for clients in rocksdb_parity_bench::clients_from_env() {
-            benches.extend(r.run_rockset_clients(e, clients));
-        }
-    }
-    if suites_enabled("yugabyte") {
-        benches.extend(r.run_yugabyte(e));
-        for clients in rocksdb_parity_bench::clients_from_env() {
-            benches.extend(r.run_yugabyte_clients(e, clients));
-        }
     }
     if suites_enabled("oxigraph") {
         benches.extend(r.run_oxigraph(e));
-        for clients in rocksdb_parity_bench::clients_from_env() {
-            benches.extend(r.run_oxigraph_clients(e, clients));
-            benches.extend(r.run_oxigraph_put_clients(e, clients));
-        }
     }
     if suites_enabled("rocksapi") {
         benches.extend(r.run_rocksapi(e));
-        for clients in rocksdb_parity_bench::clients_from_env() {
-            benches.extend(r.run_wbwi_clients(e, clients));
-            benches.extend(r.run_mixgraph_clients(e, clients));
-        }
     }
     if suites_enabled("surreal") {
         benches.extend(r.run_surreal(e));
-        for clients in rocksdb_parity_bench::clients_from_env() {
-            benches.extend(r.run_surreal_get_clients(e, clients));
-        }
     }
 
     finish_report(e, cfg, suites, out, benches);

@@ -1,0 +1,15 @@
+[workspace]
+
+[package]
+name = "pedra-aeneas-crc-kernel"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "Standalone crate whose [lib] path is production wal/crc.rs"
+
+[lib]
+path = "../../../crates/pedradb-core/src/wal/crc.rs"
+
+[dependencies]
+crc32c = "0.6"

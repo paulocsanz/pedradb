@@ -5,7 +5,6 @@
 //! without changing engine code. Tests and `pedradb-sim` inject faults via a
 //! wrapping [`Env`] (e.g. `FailingEnv`) without rewriting the engine.
 
-use std::cell::Cell;
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -78,7 +77,7 @@ pub trait EnvFile: Read + Write + Seek {
     /// # Errors
     /// Underlying I/O.
     fn is_empty(&mut self) -> io::Result<bool> {
-        Ok(self.len()? == 0)
+        Ok(crate::write_admission_kernel::batch_is_empty(self.len()?))
     }
 
     /// Positioned read that fills `buf` exactly from `offset` without
@@ -126,212 +125,6 @@ pub enum AdviseKind {
     WillNeed,
     /// Drop pages from cache (Linux `POSIX_FADV_DONTNEED`).
     DontNeed,
-}
-
-thread_local! {
-    static SETTLE_WILLNEED: Cell<Option<bool>> = const { Cell::new(None) };
-}
-
-/// RFC-0168 P1.1: after settle/compact, `POSIX_FADV_WILLNEED` every live
-/// SST so the first read wave can hit the page cache. Rocks gets this as
-/// a side effect of `compact_range` rewriting the store. Pedra's compact
-/// is O(residual) and leaves hydrate-era pages cold. Default **off** (a
-/// store larger than RAM must not pin pages). Two-state:
-/// `PEDRA_SETTLE_WILLNEED=1` or [`force_settle_willneed`].
-#[must_use]
-pub fn settle_willneed_on() -> bool {
-    if let Some(v) = SETTLE_WILLNEED.with(Cell::get) {
-        return v;
-    }
-    matches!(
-        std::env::var("PEDRA_SETTLE_WILLNEED").as_deref(),
-        Ok("1") | Ok("true") | Ok("TRUE")
-    )
-}
-
-/// Test-only override of [`settle_willneed_on`]. `None` restores env.
-pub fn force_settle_willneed(on: Option<bool>) {
-    SETTLE_WILLNEED.with(|c| c.set(on));
-}
-
-thread_local! {
-    static SETTLE_WARM: Cell<Option<bool>> = const { Cell::new(None) };
-    static SETTLE_WARM_BYTES: Cell<u64> = const { Cell::new(0) };
-}
-
-/// RFC-0168 P1.1: after settle, **read** every live SST through the
-/// cached fd (256 KiB chunks) so page cache is populated on the same
-/// handle `get` will pread. `PEDRA_SETTLE_WILLNEED` only hinted on a
-/// fresh fd and did not move get_hit@10M.
-///
-/// Default **on**, gated by [`settle_warm_max_bytes`]: 10M settled is
-/// ~2.4 GiB (fillin4) and fits; 25M (~6 GiB) / 100M (~24 GiB) skip so a
-/// 4 GiB box does not thrash and settle vs Fjall stays O(1). Rocks
-/// `compact_range` at 10M leaves that working set in page cache as a
-/// side effect; Pedra's leveled settle is a no-op on sequential bulk.
-/// `PEDRA_SETTLE_WARM=0` forces off; `=1` warms regardless of cap.
-#[must_use]
-pub fn settle_warm_on() -> bool {
-    if let Some(v) = SETTLE_WARM.with(Cell::get) {
-        return v;
-    }
-    match std::env::var("PEDRA_SETTLE_WARM").as_deref() {
-        Ok("0") | Ok("false") | Ok("FALSE") => false,
-        _ => true,
-    }
-}
-
-/// Floor for the default warm cap (10M ~2.4 GiB on the 4 GiB box).
-pub const DEFAULT_SETTLE_WARM_MAX_BYTES: u64 = 3 * (1 << 30);
-
-/// Cap applied when warm is on but not forced unlimited.
-///
-/// `PEDRA_SETTLE_WARM_MAX_BYTES` wins. Otherwise `max(3 GiB, 3/4 RAM)` so
-/// 10M fits the 4 GiB box and 100M (~23 GiB) still warms on a 32+ GiB
-/// host — get_hit stays RAM-speed (linear µs/op) without streaming the
-/// store into a machine that cannot hold it.
-#[must_use]
-pub fn settle_warm_max_bytes() -> u64 {
-    if let Ok(v) = std::env::var("PEDRA_SETTLE_WARM_MAX_BYTES") {
-        return v.parse().unwrap_or(DEFAULT_SETTLE_WARM_MAX_BYTES);
-    }
-    let ceiling = ram_ceiling_bytes().unwrap_or(0);
-    let ram_share = ceiling.saturating_mul(3) / 4;
-    let cap = DEFAULT_SETTLE_WARM_MAX_BYTES.max(ram_share);
-    // Leave 1 GiB for engine RSS so cgroup file-cache + heap cannot
-    // sum past memory.max (Linux charges both).
-    if ceiling > 0 {
-        cap.min(ceiling.saturating_sub(1 << 30))
-    } else {
-        cap
-    }
-}
-
-/// Cgroup `memory.max` (v2) or v1 `memory.limit_in_bytes`. `None` if
-/// unlimited / not in a cgroup (Darwin).
-#[must_use]
-pub fn cgroup_memory_max_bytes() -> Option<u64> {
-    if let Ok(s) = std::fs::read_to_string("/sys/fs/cgroup/memory.max") {
-        let t = s.trim();
-        if t != "max" {
-            return t.parse().ok().filter(|n| *n > 0);
-        }
-    }
-    if let Ok(s) = std::fs::read_to_string("/sys/fs/cgroup/memory/memory.limit_in_bytes") {
-        let n: u64 = s.trim().parse().ok()?;
-        // v1 "unlimited" is 2^63-1-ish.
-        if n > 0 && n < (1u64 << 62) {
-            return Some(n);
-        }
-    }
-    None
-}
-
-/// Hard ceiling: `PEDRA_RAM_BUDGET_BYTES`, else cgroup max, else physical RAM.
-#[must_use]
-pub fn ram_ceiling_bytes() -> Option<u64> {
-    if let Ok(v) = std::env::var("PEDRA_RAM_BUDGET_BYTES") {
-        if let Ok(n) = v.parse::<u64>() {
-            if n > 0 {
-                return Some(n);
-            }
-        }
-    }
-    cgroup_memory_max_bytes().or_else(pedradb_posix::physical_ram_bytes)
-}
-
-/// RocksDB default `write_buffer_size`. On a 4 GiB box the parity bench's
-/// 256 MiB mem + parked leftover + WAL is the overwrite_mc4 25M 0.557×
-/// cache hole; clamp to this so Pedra holds the same live mem as the peer.
-pub const ROCKS_DEFAULT_WRITE_BUFFER_BYTES: u64 = 64 << 20;
-
-/// Below this ceiling, [`write_buffer_for_ram`] matches Rocks 64 MiB.
-pub const LOW_RAM_WRITE_BUFFER_CEILING: u64 = 8 << 30;
-
-/// Cap a configured memtable so a 4 GiB box cannot hold 256 MiB live +
-/// leftover + WAL. 8 GiB+ keeps the caller's size (kvrocks_set_mc50 256 MiB
-/// so the timed window does not flush). Never raises a small production
-/// default (4 MiB).
-#[must_use]
-pub fn write_buffer_for_ram(configured: u64, ram_ceiling: u64) -> u64 {
-    if ram_ceiling > 0 && ram_ceiling < LOW_RAM_WRITE_BUFFER_CEILING {
-        configured.min(ROCKS_DEFAULT_WRITE_BUFFER_BYTES)
-    } else {
-        configured
-    }
-}
-
-/// Newest-SST page-cache budget in bounded-cache mode. DONTNEED-all made
-/// prefix_scan @ 100M / 4 GiB disk-bound (0.70×); Rocks `compact_range`
-/// leaves a kernel LRU. Keep `ram/4` (1 GiB on the 4 GiB box).
-#[must_use]
-pub fn page_cache_keep_bytes(ram_ceiling: u64) -> u64 {
-    if ram_ceiling == 0 {
-        return 0;
-    }
-    ram_ceiling / 4
-}
-
-/// Anonymous-RSS cap for index/bloom/mem. `None` = do not fail-closed
-/// (no cgroup and no env). Env `PEDRA_RAM_BUDGET_BYTES` is the cap as-is
-/// (tests). A cgroup limit uses half, leaving file cache + allocator.
-#[must_use]
-pub fn engine_ram_cap_bytes() -> Option<usize> {
-    if let Ok(v) = std::env::var("PEDRA_RAM_BUDGET_BYTES") {
-        return v.parse::<usize>().ok().filter(|n| *n > 0);
-    }
-    cgroup_memory_max_bytes().map(|n| (n / 2) as usize)
-}
-
-/// `PEDRA_SETTLE_WARM=1` / `true`: warm even when live SSTs exceed the cap.
-#[must_use]
-pub fn settle_warm_unlimited() -> bool {
-    if let Some(true) = SETTLE_WARM.with(Cell::get) {
-        return true;
-    }
-    matches!(
-        std::env::var("PEDRA_SETTLE_WARM").as_deref(),
-        Ok("1") | Ok("true") | Ok("TRUE")
-    )
-}
-
-/// Test-only override of [`settle_warm_on`]. `None` restores env.
-pub fn force_settle_warm(on: Option<bool>) {
-    SETTLE_WARM.with(|c| c.set(on));
-}
-
-/// Bytes streamed by the last settle warm (test counter).
-#[must_use]
-pub fn take_settle_warm_bytes() -> u64 {
-    SETTLE_WARM_STREAMED.store(0, std::sync::atomic::Ordering::Relaxed);
-    SETTLE_WARM_BYTES.with(Cell::take)
-}
-
-pub(crate) fn add_settle_warm_bytes(n: u64) {
-    SETTLE_WARM_BYTES.with(|c| c.set(c.get().saturating_add(n)));
-    SETTLE_WARM_STREAMED.fetch_add(n, std::sync::atomic::Ordering::Relaxed);
-}
-
-/// Process-wide bytes already streamed through the get fd (ingest or settle).
-static SETTLE_WARM_STREAMED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-/// SST paths to stream through the get fd (collected under a short lock).
-pub(crate) struct WarmPlan {
-    pub src: std::sync::Arc<dyn SstFileSource>,
-    pub jobs: Vec<(PathBuf, u64)>,
-}
-
-impl WarmPlan {
-    pub(crate) fn run(self) -> Vec<PathBuf> {
-        let mut ok = Vec::with_capacity(self.jobs.len());
-        for (path, len) in self.jobs {
-            if self.src.warm(&path, len).is_ok() {
-                add_settle_warm_bytes(len);
-                ok.push(path);
-            }
-        }
-        ok
-    }
 }
 
 /// Directory + file namespace the engine uses.
@@ -452,6 +245,94 @@ pub trait Env: Clone {
         let _ = (path, offset, len, kind);
         Ok(())
     }
+
+    /// Free bytes on the filesystem that holds `path` (`f_bavail * f_frsize`).
+    ///
+    /// `Ok(None)` = unknown (sim / DST / probe failed). Unknown must **not**
+    /// proactive-refuse writes (RFC-0179); mid-write ENOSPC still fences
+    /// (RFC-0050). Default is unknown.
+    ///
+    /// # Errors
+    /// Underlying I/O when the platform implements the probe. Callers map
+    /// `Err` to unknown — they must not treat a failed probe as "full".
+    fn available_bytes(&self, path: &Path) -> io::Result<Option<u64>> {
+        let _ = path;
+        Ok(None)
+    }
+}
+
+/// RFC-0179: `available_bytes` Ok/Err → watermark domain. Probe Err is
+/// unknown (`disk_probe_or_unknown(false, _)`), never 0 free.
+#[must_use]
+pub fn probe_available_bytes<E: Env>(env: &E, path: &Path) -> Option<u64> {
+    match env.available_bytes(path) {
+        Ok(v) => crate::disk_pressure_kernel::disk_probe_or_unknown(true, v),
+        Err(_) => crate::disk_pressure_kernel::disk_probe_or_unknown(false, None),
+    }
+}
+
+/// Admit an external write (PITR dest, backup sink, HA replica WAL) against
+/// the RFC-0179 watermarks. Unknown/Err probe does not refuse. Reclaim is
+/// admitted (caller cannot compact an empty dest). Refuse is
+/// [`crate::error::CoreError::DiskPressure`].
+///
+/// Logs `tracing::warn!` on state transition (not every call).
+///
+/// # Errors
+/// [`crate::error::CoreError::DiskPressure`] when free space is below the
+/// hard floor.
+pub fn admit_disk_write<E: Env>(env: &E, path: &Path) -> crate::error::Result<()> {
+    let target = if env.exists(path) {
+        path
+    } else {
+        path.parent().unwrap_or(path)
+    };
+    let probe = probe_available_bytes(env, target);
+    let admit = crate::disk_pressure_kernel::disk_pressure_admit(probe);
+    note_external_disk_pressure(admit, path);
+    if crate::disk_pressure_kernel::external_write_admitted(probe) {
+        Ok(())
+    } else {
+        match admit {
+            crate::disk_pressure_kernel::DiskPressureAdmit::Refuse { available, need } => {
+                Err(crate::error::CoreError::DiskPressure { available, need })
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
+fn note_external_disk_pressure(admit: crate::disk_pressure_kernel::DiskPressureAdmit, path: &Path) {
+    use std::sync::atomic::{AtomicU8, Ordering};
+    static LOG: AtomicU8 = AtomicU8::new(0);
+    let state = match admit {
+        crate::disk_pressure_kernel::DiskPressureAdmit::Ok => 0,
+        crate::disk_pressure_kernel::DiskPressureAdmit::Reclaim => 1,
+        crate::disk_pressure_kernel::DiskPressureAdmit::Refuse { .. } => 2,
+    };
+    let prev = LOG.swap(state, Ordering::Relaxed);
+    if prev == state {
+        return;
+    }
+    match admit {
+        crate::disk_pressure_kernel::DiskPressureAdmit::Reclaim => {
+            tracing::warn!(
+                path = %path.display(),
+                soft = crate::disk_pressure_kernel::DISK_SOFT_FREE_BYTES,
+                hard = crate::disk_pressure_kernel::DISK_HARD_FREE_BYTES,
+                "disk pressure: reclaim zone on external write (PITR/backup/replica; compact is the live engine's job)"
+            );
+        }
+        crate::disk_pressure_kernel::DiskPressureAdmit::Refuse { available, need } => {
+            tracing::warn!(
+                path = %path.display(),
+                available,
+                need,
+                "disk pressure: refusing external write (PITR/backup/replica; not a durability fence)"
+            );
+        }
+        crate::disk_pressure_kernel::DiskPressureAdmit::Ok => {}
+    }
 }
 
 /// POSIX `fdatasync(2)` on the data of `file`.
@@ -485,25 +366,6 @@ pub trait SstFileSource: Send + Sync {
     /// # Errors
     /// Underlying I/O.
     fn read_all(&self, path: &Path) -> io::Result<Vec<u8>>;
-
-    /// Stream `len` bytes of `path` through [`read_range`] so the kernel
-    /// page cache holds them on the same fd later point-gets reuse.
-    ///
-    /// # Errors
-    /// Underlying I/O.
-    fn warm(&self, path: &Path, len: u64) -> io::Result<()> {
-        if len == 0 {
-            return Ok(());
-        }
-        let mut buf = vec![0u8; 1 << 18];
-        let mut off = 0u64;
-        while off < len {
-            let n = core::cmp::min(buf.len() as u64, len - off) as usize;
-            self.read_range(path, off, &mut buf[..n])?;
-            off += n as u64;
-        }
-        Ok(())
-    }
 }
 
 impl std::fmt::Debug for dyn SstFileSource {
@@ -585,9 +447,9 @@ impl FileHandleCache {
         }
     }
 
-    /// Cached handle for `path`. No LRU bump: 100M settle is ~347 SSTs
-    /// and the default cap is 1024, so get_loop's 100 preads never evict.
-    /// A write lock + tick on every miss-path get was exclusive-mutex tax
+    /// Cached handle for `path`. No LRU bump: 25M settle is ~90 SSTs and
+    /// the default cap is 256, so get_loop's 100 preads never evict. A
+    /// write lock + tick on every miss-path get was exclusive-mutex tax
     /// (lookup_100 calm-1 0.87× vs in-band Rocks).
     fn get(&self, path: &Path) -> Option<Arc<Mutex<Box<dyn EnvFile + Send>>>> {
         self.inner.read().map.get(path).map(|h| Arc::clone(&h.file))
@@ -807,6 +669,13 @@ impl Env for StdEnv {
     fn metadata_len(&self, path: &Path) -> io::Result<u64> {
         Ok(fs::metadata(path)?.len())
     }
+
+    fn available_bytes(&self, path: &Path) -> io::Result<Option<u64>> {
+        match pedradb_posix::filesystem_available_bytes(path) {
+            Ok(n) => Ok(Some(n)),
+            Err(_) => Ok(None),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1008,36 +877,6 @@ mod tests {
         f.write_all(b"pedra").unwrap();
         fdatasync_file(&f).unwrap();
         let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// 4 GiB caixa: 256 MiB bench memtable must not exceed Rocks 64 MiB.
-    #[test]
-    fn rfc0180_write_buffer_for_ram_matches_rocks_on_4gib() {
-        let fat = 256 << 20;
-        assert_eq!(
-            write_buffer_for_ram(fat, 4 << 30),
-            ROCKS_DEFAULT_WRITE_BUFFER_BYTES,
-            "4 GiB overwrite_mc4 must not hold 256 MiB live mem"
-        );
-        assert_eq!(
-            write_buffer_for_ram(fat, 16 << 30),
-            fat,
-            "8 GiB+ keeps kvrocks_set_mc50 256 MiB (no timed flush)"
-        );
-        assert_eq!(
-            write_buffer_for_ram(4 << 20, 4 << 30),
-            4 << 20,
-            "must not raise the 4 MiB production default"
-        );
-        assert_eq!(write_buffer_for_ram(fat, 0), fat);
-    }
-
-    /// Bounded-cache keeps ram/4 of newest SST pages (prefix 100M @ 4 GiB).
-    #[test]
-    fn rfc0173_page_cache_keep_is_quarter_ram() {
-        assert_eq!(page_cache_keep_bytes(4 << 30), 1 << 30);
-        assert_eq!(page_cache_keep_bytes(0), 0);
-        assert_eq!(page_cache_keep_bytes(16 << 30), 4 << 30);
     }
 
     /// RFC-0041 P1.2: a lone 1-op write that `fdatasync`s before Ok cannot

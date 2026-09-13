@@ -42,7 +42,7 @@ impl UringState {
     /// `pwrite` at `offset`. Short writes (`res` as `u32` SQE length) are
     /// the `Write` contract, not UB.
     pub(crate) fn pwrite(&mut self, file: &File, buf: &[u8], offset: u64) -> io::Result<usize> {
-        if buf.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(buf.len() as u64) {
             return Ok(0);
         }
         let fd = io_uring::types::Fd(file.as_raw_fd());

@@ -9,13 +9,11 @@ use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::hash::Hasher;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
-
-use crate::bloom::BloomFilter;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use bytes::Bytes;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::Mutex;
 
 use crate::env::Env;
 use crate::error::Result;
@@ -113,7 +111,7 @@ impl TableCache {
     /// Whether the cache is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        crate::write_admission_kernel::batch_is_empty(self.len() as u64)
     }
 
     /// Insert or replace a table (e.g. after flush).
@@ -317,7 +315,7 @@ impl SstPayloadPool {
         if let Some(old) = g.map.remove(path) {
             g.total = g.total.saturating_sub(old.bytes);
         }
-        if bytes == 0 {
+        if crate::write_admission_kernel::batch_is_empty(bytes) {
             self.total.store(g.total, Ordering::Relaxed);
             return;
         }
@@ -339,7 +337,7 @@ impl SstPayloadPool {
         let Some(budget) = self.budget else {
             return false;
         };
-        if bytes == 0 || bytes > budget {
+        if crate::write_admission_kernel::batch_is_empty(bytes) || bytes > budget {
             return false;
         }
         if self.total.load(Ordering::Relaxed).saturating_add(bytes) > budget {
@@ -512,24 +510,6 @@ impl BlockCache {
         self.get_or_insert_with_id(path_id(path), block_idx, load)
     }
 
-    /// Hit-only probe (RFC-0160 P2.3). Miss does not invoke a loader, so
-    /// the caller can `decode_block` (fail-closed) and insert only on Ok.
-    pub fn get(&self, path: &Path, block_idx: usize) -> Option<CachedBlock> {
-        self.get_id(path_id(path), block_idx)
-    }
-
-    /// [`Self::get`] keyed by a precomputed path id.
-    pub fn get_id(&self, id: u64, block_idx: usize) -> Option<CachedBlock> {
-        let key = (id, block_idx);
-        let mut guard = self.inner.lock();
-        let g = &mut *guard;
-        let live = g.map.len();
-        let slot = g.map.get_mut(&key)?;
-        g.hits = g.hits.saturating_add(1);
-        Self::touch(&mut g.order, &mut g.epoch, live, &key, slot);
-        Some(Arc::clone(&slot.block))
-    }
-
     /// [`Self::get_or_insert_with`] keyed by a precomputed path id, so a
     /// stream hashes its path once instead of once per block fetch. Ids from
     /// different tag domains (e.g. value-resolved slots) share the same map;
@@ -602,7 +582,8 @@ impl BlockCache {
     fn needs_room(g: &BlockCacheInner, extra: u64) -> bool {
         let count_full = g.capacity > 0 && g.map.len() >= g.capacity;
         let bytes_full = g.budget_bytes > 0 && g.used_bytes.saturating_add(extra) > g.budget_bytes;
-        (count_full || bytes_full) && !g.map.is_empty()
+        (count_full || bytes_full)
+            && !crate::write_admission_kernel::batch_is_empty(g.map.len() as u64)
     }
 
     /// O(1)-amortized LRU evict: pop queue entries until one's epoch still
@@ -636,15 +617,7 @@ impl BlockCache {
 /// [`CountCache`] — range-aware invalidation.)
 #[derive(Debug, Default)]
 pub struct AnswerCache<V> {
-    /// Read lock on the ycsb_f hit path: 4 clients were serializing on a
-    /// Mutex even after P0.16 refill (sibling get still paid `lock_slow`).
-    inner: RwLock<AnswerCacheInner<V>>,
-    /// Set once `map.len() == capacity`. Further unique inserts are no-ops
-    /// (freeze, not FIFO). Probe_miss must not take the mutex to learn that.
-    frozen: AtomicBool,
-    /// Snapshot of the fill-set bloom, published before `frozen`. Unique
-    /// misses (probe_miss) skip the mutex when this rejects the key.
-    frozen_neg: OnceLock<BloomFilter>,
+    inner: Mutex<AnswerCacheInner<V>>,
 }
 
 /// Latest-snapshot point get (`None` = cached absence).
@@ -728,7 +701,7 @@ impl KeyGenMap {
 
     /// Hash of `pfx || 0 || key`, same bytes as a CF-prefixed user key.
     fn bucket_prefixed(pfx: &[u8], key: &[u8]) -> usize {
-        if pfx.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(pfx.len() as u64) {
             return Self::bucket_of(key);
         }
         const STACK: usize = 192;
@@ -764,39 +737,20 @@ impl KeyGenMap {
     }
 }
 
-/// Precise TLS invalidation (touch dirty keys) vs process-wide epoch bump.
-///
-/// Same bound as `point_cache.invalidate_many` (≤32). RFC-0154 P1.5 did
-/// n=1 only; Adaptive merge n=2–8 then wiped zipf last-get every group
-/// (`ycsb_a/f_mc4` get_path). Reset / empty / fat still epoch-bump.
-#[must_use]
-pub(crate) fn tls_precise_invalidate(reset: bool, n_dirty: usize) -> bool {
-    !reset && n_dirty >= 1 && n_dirty <= 32
-}
-
 type FxBuild = std::hash::BuildHasherDefault<FxHasher>;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct AnswerCacheInner<V> {
     map: std::collections::HashMap<Bytes, (u64, u64, V), FxBuild>,
+    /// Insertion order of the frozen working set. Once `map.len() ==
+    /// capacity`, further unique inserts are dropped (uniform get_hit /
+    /// lookup_100 must not FIFO-churn). `clear` on write starts a new fill.
     order: std::collections::VecDeque<(Bytes, u64)>,
     capacity: usize,
+    /// Bumped on [`AnswerCache::clear`] so stale entries miss without a walk.
     gen: u64,
+    /// Monotonic insertion epoch (FIFO pop correctness, F178).
     epoch: u64,
-    bloom: BloomFilter,
-}
-
-impl<V> Default for AnswerCacheInner<V> {
-    fn default() -> Self {
-        Self {
-            map: std::collections::HashMap::default(),
-            order: std::collections::VecDeque::new(),
-            capacity: 0,
-            gen: 0,
-            epoch: 0,
-            bloom: BloomFilter::always_true(),
-        }
-    }
 }
 
 impl<V: Clone> AnswerCache<V> {
@@ -804,38 +758,21 @@ impl<V: Clone> AnswerCache<V> {
     #[must_use]
     pub fn new(capacity: usize) -> Self {
         Self {
-            inner: RwLock::new(AnswerCacheInner {
+            inner: Mutex::new(AnswerCacheInner {
                 map: std::collections::HashMap::default(),
                 order: std::collections::VecDeque::new(),
                 capacity,
                 gen: 0,
                 epoch: 0,
-                bloom: if capacity == 0 {
-                    BloomFilter::always_true()
-                } else {
-                    BloomFilter::with_capacity(capacity, 10)
-                },
             }),
-            frozen: AtomicBool::new(capacity == 0),
-            frozen_neg: OnceLock::new(),
         }
-    }
-
-    fn publish_frozen_neg(&self, bloom: BloomFilter) {
-        let _ = self.frozen_neg.set(bloom);
-        self.frozen.store(true, Ordering::Release);
     }
 
     /// `None` = miss.
     #[must_use]
     pub fn get(&self, key: &[u8]) -> Option<V> {
-        if let Some(b) = self.frozen_neg.get() {
-            if !b.may_contain(key) {
-                return None;
-            }
-        }
-        let g = self.inner.read();
-        if g.capacity == 0 {
+        let g = self.inner.lock();
+        if crate::write_admission_kernel::batch_is_empty(g.capacity as u64) {
             return None;
         }
         match g.map.get(key) {
@@ -846,12 +783,8 @@ impl<V: Clone> AnswerCache<V> {
 
     /// Store a latest-snapshot answer.
     pub fn insert(&self, key: &[u8], value: V) {
-        if self.frozen.load(Ordering::Relaxed) {
-            return;
-        }
-        let mut g = self.inner.write();
-        if g.capacity == 0 {
-            self.frozen.store(true, Ordering::Relaxed);
+        let mut g = self.inner.lock();
+        if crate::write_admission_kernel::batch_is_empty(g.capacity as u64) {
             return;
         }
         let now = g.gen;
@@ -865,45 +798,35 @@ impl<V: Clone> AnswerCache<V> {
             // over 25M keys: FIFO evict + `Bytes` copy on every miss was
             // the fill tax (8192-cap never hits). Zipf's hot set fits in
             // 8192 so the first fill stays; writes `clear()`.
-            let snap = g.bloom.clone();
-            drop(g);
-            self.publish_frozen_neg(snap);
             return;
         }
-        g.bloom.insert(key);
         let epoch = g.epoch;
         g.epoch = g.epoch.wrapping_add(1);
         let owned = Bytes::copy_from_slice(key);
         g.order.push_back((owned.clone(), epoch));
         g.map.insert(owned, (now, epoch, value));
-        if g.map.len() >= g.capacity {
-            let snap = g.bloom.clone();
-            drop(g);
-            self.publish_frozen_neg(snap);
-        }
     }
 
     /// Invalidate every entry without walking the map (write path).
     pub fn clear(&self) {
-        let mut g = self.inner.write();
+        let mut g = self.inner.lock();
         g.gen = g.gen.wrapping_add(1);
         if g.gen == 0 {
             g.map.clear();
             g.order.clear();
             g.gen = 1;
-            self.frozen.store(g.capacity == 0, Ordering::Relaxed);
         }
     }
 
     /// Drop one key so other latest-snapshot hits stay (YCSB B/D 95/5).
     pub fn invalidate(&self, key: &[u8]) {
-        self.inner.write().map.remove(key);
+        self.inner.lock().map.remove(key);
     }
 
     /// Drop several keys under **one** lock (publish path: one acquire per
     /// written batch instead of one per key).
     pub fn invalidate_many(&self, keys: &[Bytes]) {
-        let mut g = self.inner.write();
+        let mut g = self.inner.lock();
         for k in keys {
             g.map.remove(k);
         }
@@ -912,7 +835,7 @@ impl<V: Clone> AnswerCache<V> {
     /// No cached answers (RFC-0062 P0.4: skip per-key dirty clones).
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.inner.read().map.is_empty()
+        crate::write_admission_kernel::batch_is_empty(self.inner.lock().map.len() as u64)
     }
 }
 
@@ -1127,7 +1050,7 @@ impl CountCache {
     ) -> Option<usize> {
         let ck = crate::db::count_cache_key(start, end, limit);
         let g = self.state.lock();
-        if g.capacity == 0 {
+        if crate::write_admission_kernel::batch_is_empty(g.capacity as u64) {
             return None;
         }
         let e = g.map.get(ck.as_slice())?;
@@ -1150,7 +1073,7 @@ impl CountCache {
     ) {
         let ck = crate::db::count_cache_key(start, end, limit);
         let mut g = self.state.lock();
-        if g.capacity == 0 {
+        if crate::write_admission_kernel::batch_is_empty(g.capacity as u64) {
             return;
         }
         // RFC-0054: an answer observed before an envelope-dropped publish
@@ -1190,7 +1113,7 @@ impl CountCache {
         // still inserts one observed earlier will carry `seq <
         // skipped_below` and miss in `get`. Skipping keeps write-only
         // shapes from allocating two Boxes per written key per publish.
-        if g.map.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(g.map.len() as u64) {
             g.skipped_below = g.skipped_below.max(seq);
             return;
         }
@@ -1200,7 +1123,7 @@ impl CountCache {
         // a "past" write for the entry that reader is about to insert —
         // without this record the pre-write answer validates forever,
         // because `get` only checks the dirty log.
-        if g.dirty.capacity == 0 {
+        if crate::write_admission_kernel::batch_is_empty(g.dirty.capacity as u64) {
             return;
         }
         for k in keys {
@@ -1265,7 +1188,7 @@ impl CountCache {
     /// No cached count windows (RFC-0062 P0.4: skip per-key dirty clones).
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.state.lock().map.is_empty()
+        crate::write_admission_kernel::batch_is_empty(self.state.lock().map.len() as u64)
     }
 }
 
@@ -1307,23 +1230,6 @@ mod tests {
             crate::memtable::Lookup::Found(Bytes::from_static(b"v"))
         );
         let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn block_cache_get_is_hit_only() {
-        let cache = BlockCache::with_budget_bytes(64 * 1024);
-        let path = Path::new("/tmp/hit-only.sst");
-        assert!(cache.get(path, 0).is_none());
-        cache.get_or_insert_with(path, 0, || {
-            vec![(
-                InternalKey::new(Bytes::from_static(b"a"), 1, ValueType::Value),
-                Bytes::from_static(b"1"),
-            )]
-        });
-        assert!(cache.get(path, 0).is_some());
-        assert_eq!(cache.hits(), 1);
-        assert!(cache.get(path, 1).is_none(), "unknown block is not a load");
-        assert_eq!(cache.misses(), 1, "get-miss must not count as a load miss");
     }
 
     #[test]
@@ -1626,36 +1532,6 @@ mod tests {
         m.touch(&encoded);
         assert_eq!(other, m.gen(b"untouched"));
         assert_ne!(m.gen(&encoded), other);
-    }
-
-    #[test]
-    fn tls_precise_invalidate_matches_point_cache_bound() {
-        assert!(tls_precise_invalidate(false, 1));
-        assert!(tls_precise_invalidate(false, 4));
-        assert!(tls_precise_invalidate(false, 8));
-        assert!(tls_precise_invalidate(false, 32));
-        assert!(!tls_precise_invalidate(false, 0));
-        assert!(!tls_precise_invalidate(false, 33));
-        assert!(!tls_precise_invalidate(true, 4));
-    }
-
-    /// ycsb_f_mc4: four readers hit the shared cache without exclusive lock.
-    #[test]
-    fn rfc0178_point_cache_get_is_shared_read() {
-        let c = PointCache::new(64);
-        c.insert(b"k", Some(Bytes::from_static(b"v")));
-        std::thread::scope(|s| {
-            for _ in 0..4 {
-                s.spawn(|| {
-                    for _ in 0..1024 {
-                        assert_eq!(
-                            c.get(b"k").as_ref().and_then(|v| v.as_ref()).map(|b| b.as_ref()),
-                            Some(&b"v"[..])
-                        );
-                    }
-                });
-            }
-        });
     }
 
     #[test]

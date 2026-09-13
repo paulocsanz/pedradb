@@ -115,12 +115,6 @@ pub fn encode_vlog_ptr(ptr: VlogPtr) -> Bytes {
     Bytes::from(v)
 }
 
-/// RFC-0180: flush vlog before WAL only when a pointer could outrun the file.
-#[must_use]
-pub fn vlog_prepare_needed(vlog_open: bool, unwritten_tail: bool) -> bool {
-    vlog_open && unwritten_tail
-}
-
 /// Path of blob generation `num` (`000001.blob`).
 #[must_use]
 pub fn blob_path(dir: &Path, num: u32) -> PathBuf {
@@ -253,7 +247,7 @@ impl<F: EnvFile> ValueLog<F> {
     /// # Errors
     /// I/O.
     pub fn open_blob<E: Env<File = F>>(env: &E, dir: &Path, num: u32) -> Result<Self> {
-        if num == 0 {
+        if crate::write_admission_kernel::batch_is_empty(num as u64) {
             return Self::open_on(env, dir);
         }
         let path = blob_path(dir, num);
@@ -445,15 +439,17 @@ impl<F: EnvFile> ValueLog<F> {
     /// # Errors
     /// I/O.
     pub fn flush_pending(&mut self) -> Result<()> {
-        if self.pending.is_empty() && self.pending_large.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.pending.len() as u64)
+            && crate::write_admission_kernel::batch_is_empty(self.pending_large.len() as u64)
+        {
             return Ok(());
         }
         self.reserve_space(self.staged_len() as u64);
-        if !self.pending.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(self.pending.len() as u64) {
             Write::write_all(&mut self.file, &self.pending)?;
             self.pending.clear();
         }
-        if !self.pending_large.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(self.pending_large.len() as u64) {
             // One contiguous write — `writev` on an O_APPEND handle was
             // dropping the payload (get read UnexpectedEof). Concat is
             // once per 64 KiB, not once per 16 KiB put.
@@ -483,7 +479,10 @@ impl<F: EnvFile> ValueLog<F> {
     /// # Errors
     /// I/O.
     pub fn sync_pending(&mut self) -> Result<()> {
-        if self.pending.is_empty() && self.pending_large.is_empty() && !self.needs_sync {
+        if crate::write_admission_kernel::batch_is_empty(self.pending.len() as u64)
+            && crate::write_admission_kernel::batch_is_empty(self.pending_large.len() as u64)
+            && !self.needs_sync
+        {
             return Ok(());
         }
         self.flush_pending()?;
@@ -495,7 +494,9 @@ impl<F: EnvFile> ValueLog<F> {
     /// Whether a G1 `sync_pending` would issue a barrier (tests / probes).
     #[must_use]
     pub fn needs_barrier(&self) -> bool {
-        !self.pending.is_empty() || !self.pending_large.is_empty() || self.needs_sync
+        !crate::write_admission_kernel::batch_is_empty(self.pending.len() as u64)
+            || !crate::write_admission_kernel::batch_is_empty(self.pending_large.len() as u64)
+            || self.needs_sync
     }
 
     /// Bytes staged in userspace (tests / probes).
@@ -591,7 +592,7 @@ impl<F: EnvFile> ValueLog<F> {
             }
             return Ok(Some(rec.data.clone()));
         }
-        if self.pending.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.pending.len() as u64) {
             return Ok(None);
         }
         let rec_len = 8u64.saturating_add(u64::from(len));
@@ -698,7 +699,7 @@ impl<F: EnvFile> ValueLog<F> {
         live: &[(u64, Bytes)],
         bytes_before: u64,
     ) -> Result<(VlogRewriteStats, std::collections::HashMap<u64, Bytes>)> {
-        if dest_num == 0 {
+        if crate::write_admission_kernel::batch_is_empty(dest_num as u64) {
             return Err(CoreError::Internal(
                 "rewrite_live_to_blob dest must be a numbered blob".into(),
             ));
@@ -875,14 +876,6 @@ mod tests {
     use super::*;
     use crate::env::StdEnv;
     use std::fs;
-
-    #[test]
-    fn rfc0180_vlog_prepare_needed_skips_idle_inline() {
-        assert!(!vlog_prepare_needed(false, true));
-        assert!(!vlog_prepare_needed(true, false));
-        assert!(vlog_prepare_needed(true, true));
-        assert!(!vlog_prepare_needed(false, false));
-    }
 
     #[test]
     fn append_read_round_trip() {

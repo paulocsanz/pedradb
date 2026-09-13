@@ -174,9 +174,6 @@ impl<E: Env> Engine for CompatEngine<E> {
     fn get_probe(&self, k: &[u8]) -> Result<bool, ()> {
         self.db.contains(k).map_err(|_| ())
     }
-    fn rmw(&self, k: &[u8], v: &[u8]) -> bool {
-        self.db.rmw(k, v).is_ok()
-    }
     fn scan_count(&self, start: &[u8], end: &[u8], cap: usize) -> Result<usize, ()> {
         // Same visibility as a forward iterator; KeyOnly count (RFC-0033).
         self.db
@@ -250,6 +247,11 @@ impl<E: Env> Engine for CompatEngine<E> {
             st.lock_wait_ns.load(r),
         ])
     }
+    fn commit_wait_snapshot(&self) -> Option<[u64; 7]> {
+        let (cw_ns, cw_groups) = self.db.catchup_wait_stats();
+        let (lone_n, p) = self.db.lone_path_split();
+        Some([cw_ns, cw_groups, lone_n, p[0], p[1], p[2], p[3]])
+    }
     fn write_phase_line(&self) -> Option<String> {
         let st = self.db.write_phase_stats()?;
         let n = st.commits.load(std::sync::atomic::Ordering::Relaxed).max(1);
@@ -319,12 +321,17 @@ impl<E: Env> Engine for CompatEngine<E> {
     fn read_probe_json(&self) -> Option<String> {
         let p = self.db.read_probe();
         Some(format!(
-            r#"{{"latest_ops":{lo},"latest_mem_hit":{mh},"latest_sst_fallback":{fb},"latest_sst_probed":{sp},"scan_ops":{so},"scan_sst_probed":{ssp},"sst_count":{sc},"l0_files":{l0},"level1_files":{l1},"mem_entries":{me},"block_cache_hits":{ch},"block_cache_misses":{cm},"blocks_decoded":{bd},"get_mem_hit":{gm},"get_sst_fallback":{gs},"get_inline":{gi},"get_vlog":{gv},"mvcc_split_ops":{so2},"mvcc_ns_encode":{ne},"mvcc_ns_last":{nl},"mvcc_ns_get":{ng},"mvcc_ns_copy":{nc}}}"#,
+            r#"{{"latest_ops":{lo},"latest_mem_hit":{mh},"latest_sst_fallback":{fb},"latest_sst_probed":{sp},"scan_ops":{so},"scan_ns":{sn},"scan_sst_setup_ns":{ssu},"scan_merge_ns":{smg},"ord_builds":{ob},"ord_build_ns":{obn},"scan_sst_probed":{ssp},"sst_count":{sc},"l0_files":{l0},"level1_files":{l1},"mem_entries":{me},"block_cache_hits":{ch},"block_cache_misses":{cm},"blocks_decoded":{bd},"get_mem_hit":{gm},"get_sst_fallback":{gs},"get_inline":{gi},"get_vlog":{gv},"mvcc_split_ops":{so2},"mvcc_ns_encode":{ne},"mvcc_ns_last":{nl},"mvcc_ns_get":{ng},"mvcc_ns_copy":{nc}}}"#,
             lo = p.latest_ops,
             mh = p.latest_mem_hit,
             fb = p.latest_sst_fallback,
             sp = p.latest_sst_probed,
             so = p.scan_ops,
+            sn = p.scan_ns,
+            ssu = p.scan_sst_setup_ns,
+            smg = p.scan_merge_ns,
+            ob = p.ord_builds,
+            obn = p.ord_build_ns,
             ssp = p.scan_sst_probed,
             sc = p.sst_count,
             l0 = p.l0_files,
@@ -915,99 +922,5 @@ impl OccEngine for RocksOccEngine {
         let tx = self.db.transaction_opt(self.wopts(), &to);
         let mut wrap = RocksOccTxn { inner: Some(tx) };
         f(&mut wrap)
-    }
-}
-
-/// Fjall LSM peer. YCSB/point shapes only — no named CFs, so `deps` is refused
-/// at the bin. Same-class async (journal to OS, no fsync per put).
-#[cfg(feature = "fjall")]
-pub struct FjallEngine {
-    db: fjall::Database,
-    ks: fjall::Keyspace,
-}
-
-#[cfg(feature = "fjall")]
-impl FjallEngine {
-    pub fn open(path: &Path) -> Self {
-        let db = fjall::Database::builder(path).open().expect("fjall open");
-        let ks = db
-            .keyspace("default", fjall::KeyspaceCreateOptions::default)
-            .expect("fjall keyspace");
-        Self { db, ks }
-    }
-}
-
-#[cfg(feature = "fjall")]
-impl Engine for FjallEngine {
-    fn label(&self) -> &'static str {
-        "fjall"
-    }
-    fn durability(&self) -> &'static str {
-        "async-journal (fjall default persist-on-drop; not G1)"
-    }
-    fn sync(&self) -> bool {
-        false
-    }
-    fn put(&self, k: &[u8], v: &[u8]) -> bool {
-        self.ks.insert(k, v).is_ok()
-    }
-    fn get(&self, k: &[u8]) -> Result<Option<Vec<u8>>, ()> {
-        self.ks
-            .get(k)
-            .map(|o| o.map(|v| v.to_vec()))
-            .map_err(|_| ())
-    }
-    fn scan_count(&self, start: &[u8], end: &[u8], cap: usize) -> Result<usize, ()> {
-        Ok(self
-            .ks
-            .range(start.to_vec()..end.to_vec())
-            .take(cap)
-            .count())
-    }
-    fn put_cf(&self, cf: &str, k: &[u8], v: &[u8]) -> bool {
-        if cf == "default" || cf.is_empty() {
-            self.put(k, v)
-        } else {
-            false
-        }
-    }
-    fn get_cf(&self, cf: &str, k: &[u8]) -> Result<Option<Vec<u8>>, ()> {
-        if cf == "default" || cf.is_empty() {
-            self.get(k)
-        } else {
-            Err(())
-        }
-    }
-    fn batch(&self, ops: Vec<CfWrite>) -> bool {
-        let mut wb = self.db.batch();
-        for op in ops {
-            match op {
-                CfWrite::Put { cf, k, v } if cf == "default" || cf.is_empty() => {
-                    wb.insert(&self.ks, k, v);
-                }
-                _ => return false,
-            }
-        }
-        wb.commit().is_ok()
-    }
-    fn latest_cf(&self, cf: &str, prefix: &[u8]) -> Result<Option<Vec<u8>>, ()> {
-        if cf != "default" && !cf.is_empty() {
-            return Err(());
-        }
-        Ok(self
-            .ks
-            .prefix(prefix)
-            .last()
-            .and_then(|g| g.key().ok())
-            .map(|k| k.to_vec()))
-    }
-    fn scan_count_cf(&self, cf: &str, start: &[u8], end: &[u8], cap: usize) -> Result<usize, ()> {
-        if cf != "default" && !cf.is_empty() {
-            return Err(());
-        }
-        self.scan_count(start, end, cap)
-    }
-    fn flush(&self) -> bool {
-        self.db.persist(fjall::PersistMode::SyncAll).is_ok()
     }
 }

@@ -49,15 +49,13 @@ use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU8, Ordering as AtomicOrdering};
 use std::sync::{Arc, OnceLock};
-use std::time::Instant;
 
 use bytes::Bytes;
 use parking_lot::{Mutex, RwLock};
 
 use crate::bloom::{BloomFilter, DEFAULT_BITS_PER_KEY};
-use crate::cache::{BlockCache, PayloadKit, PayloadSlot};
+use crate::cache::{PayloadKit, PayloadSlot};
 use crate::env::{Env, EnvFile, StdEnv};
 use crate::error::{CoreError, Result};
 use crate::key::{pack_sequence_and_type, InternalKey, SequenceNumber, ValueType};
@@ -86,47 +84,6 @@ pub const BLOCK_TARGET: usize = 4_096;
 /// Bulk-run SST block target: same 4 KiB as Rocks so evicted get_hit
 /// is one block, not a 256 KiB (or whole-file v3) read.
 pub const BULK_BLOCK_TARGET: usize = BLOCK_TARGET;
-
-/// Absolute cap on a decompressed SST block. Matches [`block_target`]'s
-/// upper clamp (256 KiB). PEDRA-001: a forged lz4 size prefix of tens of
-/// MiB used to allocate on GET (`plain_scratch.resize`) / open
-/// (`decompress_size_prepended`) after the block CRC was rewritten; the
-/// engine never writes a block larger than this.
-const LZ4_MAX_PLAIN_BLOCK: usize = 256 * 1024;
-/// Expansion ratio cap (PEDRA-001). A 200-byte frame claiming the full
-/// 256 KiB cap is still a bomb; the absolute cap alone would admit it.
-/// 4 KiB of zeros compresses well under 256× (~20 B frame).
-const LZ4_MAX_EXPANSION: usize = 256;
-
-/// `true` iff `plain` is a size we could have written for `compressed_len`.
-fn lz4_plain_size_ok(plain: usize, compressed_len: usize) -> bool {
-    if plain == 0 || plain > LZ4_MAX_PLAIN_BLOCK {
-        return false;
-    }
-    // Default-target blocks (≤ 4 KiB) may be all zeros — lz4 of 4 KiB
-    // zeros is ~20 B, ratio ~200×, still under 256×. Larger blocks are
-    // bounded by the absolute cap.
-    if plain <= BLOCK_TARGET {
-        return plain <= compressed_len.saturating_mul(LZ4_MAX_EXPANSION);
-    }
-    true
-}
-
-fn lz4_size_rejected(path: &Path, plain: usize, compressed_len: usize) -> CoreError {
-    // PEDRA-003: the two rejections share this formatter — say which one
-    // fired, a cap rejection mislabeled as a ratio cost an hour of
-    // debugging on the 10M fill-in.
-    let why = if plain > LZ4_MAX_PLAIN_BLOCK {
-        format!(
-            "SST lz4 uncompressed size {plain} exceeds the {LZ4_MAX_PLAIN_BLOCK}-byte block cap (compressed length {compressed_len})"
-        )
-    } else {
-        format!(
-            "SST lz4 uncompressed size {plain} exceeds 256x compressed length ({compressed_len})"
-        )
-    };
-    CoreError::Internal(format!("{why} in {}", path.display()))
-}
 
 /// Effective block target for new writes: `PEDRA_BLOCK_TARGET` (bytes,
 /// clamped 1 KiB–256 KiB) when set, else [`BLOCK_TARGET`].
@@ -192,109 +149,6 @@ impl RawBlockCache {
 
 thread_local! {
     static RAW_BLOCKS: RefCell<RawBlockCache> = RefCell::new(RawBlockCache::default());
-}
-
-const SCAN_BLOCK_CACHE_CAP: usize = RAW_BLOCK_CACHE_CAP;
-
-#[derive(Default)]
-struct ScanBlockCache {
-    map: HashMap<(u64, u64), Arc<Vec<(InternalKey, Bytes)>>>,
-    order: VecDeque<(u64, u64)>,
-}
-
-impl ScanBlockCache {
-    fn get(&mut self, key: &(u64, u64)) -> Option<Arc<Vec<(InternalKey, Bytes)>>> {
-        self.map.get(key).cloned()
-    }
-
-    fn insert(&mut self, key: (u64, u64), img: Arc<Vec<(InternalKey, Bytes)>>) {
-        if self.map.contains_key(&key) {
-            return;
-        }
-        while self.map.len() >= SCAN_BLOCK_CACHE_CAP {
-            if let Some(old) = self.order.pop_front() {
-                self.map.remove(&old);
-            } else {
-                break;
-            }
-        }
-        self.order.push_back(key);
-        self.map.insert(key, img);
-    }
-}
-
-thread_local! {
-    static SCAN_BLOCKS: RefCell<ScanBlockCache> = RefCell::new(ScanBlockCache::default());
-}
-
-pub(crate) fn scan_block_get_or_insert(
-    path_id: u64,
-    block_idx: usize,
-    fill: impl FnOnce() -> Vec<(InternalKey, Bytes)>,
-) -> Arc<Vec<(InternalKey, Bytes)>> {
-    let key = (path_id, block_idx as u64);
-    SCAN_BLOCKS.with(|c| {
-        let mut c = c.borrow_mut();
-        if let Some(hit) = c.get(&key) {
-            crate::cost::scan_block_hit();
-            return hit;
-        }
-        let v = Arc::new(fill());
-        if crate::cost::enabled() {
-            crate::cost::scan_block_load(crate::cost::entries_bytes(&v));
-        }
-        c.insert(key, Arc::clone(&v));
-        v
-    })
-}
-
-/// RFC-0160 P0.2: split point-get wall into pread / block CRC / block walk.
-/// `PEDRA_GET_STAGES=1` arms it for a guest capture; tests call
-/// [`force_get_stages`].
-static GET_STAGES: AtomicU8 = AtomicU8::new(0);
-
-thread_local! {
-    static GET_PREAD_NS: Cell<u64> = const { Cell::new(0) };
-    static GET_CRC_NS: Cell<u64> = const { Cell::new(0) };
-    static GET_WALK_NS: Cell<u64> = const { Cell::new(0) };
-}
-
-fn get_stages_enabled() -> bool {
-    match GET_STAGES.load(AtomicOrdering::Relaxed) {
-        2 => true,
-        1 => false,
-        _ => {
-            let on = std::env::var_os("PEDRA_GET_STAGES").is_some();
-            GET_STAGES.store(if on { 2 } else { 1 }, AtomicOrdering::Relaxed);
-            on
-        }
-    }
-}
-
-/// Test/guest knob: pin get-stage clocks on or off (`PEDRA_GET_STAGES`).
-pub fn force_get_stages(on: bool) {
-    GET_STAGES.store(if on { 2 } else { 1 }, AtomicOrdering::Relaxed);
-}
-
-/// Zero the thread-local get-stage clocks.
-pub fn reset_get_stages() {
-    GET_PREAD_NS.with(|c| c.set(0));
-    GET_CRC_NS.with(|c| c.set(0));
-    GET_WALK_NS.with(|c| c.set(0));
-}
-
-/// Take pread / CRC / walk nanoseconds since the last reset (RFC-0160 P0.2).
-#[must_use]
-pub fn take_get_stages() -> (u64, u64, u64) {
-    (
-        GET_PREAD_NS.with(Cell::take),
-        GET_CRC_NS.with(Cell::take),
-        GET_WALK_NS.with(Cell::take),
-    )
-}
-
-fn add_stage(cell: &Cell<u64>, ns: u128) {
-    cell.set(cell.get().saturating_add(ns as u64));
 }
 
 /// Reset the thread-local CRC-skip counter (verified-residency tests).
@@ -381,391 +235,6 @@ struct BlockHandle {
     p8: u64,
 }
 
-/// Blocks per index page (RFC-0167 P2.4).
-const INDEX_PAGE_BLOCKS: usize = 4;
-/// File-backed handle fanout (RFC-0173 P2.3): RAM keeps one sample per
-/// this many blocks; the run is pread from the on-disk index tail.
-const INDEX_HANDLE_FANOUT: usize = 32;
-
-/// Sparse index with LRU-decoded first-keys under a byte budget.
-///
-/// File-backed (kit present, `index_file_off > 0`): two-level handles
-/// (RFC-0173 P2.3) — one sample per [`INDEX_HANDLE_FANOUT`] blocks in RAM;
-/// a run is one pread of the on-disk index tail. Blob fallback is tests
-/// without a file offset (RFC-0167 / RFC-0173 P2.1).
-#[derive(Debug)]
-struct PagedIndex {
-    p8s: Arc<[u64]>,
-    sample_p8s: Arc<[u64]>,
-    sample_file_rel: Arc<[u32]>,
-    fanout: usize,
-    key_cp: usize,
-    index_file_off: u64,
-    path: PathBuf,
-    src: Option<Arc<dyn crate::env::SstFileSource>>,
-    blob: Option<Arc<[u8]>>,
-    blob_key_off: Arc<[u32]>,
-    n: usize,
-    lru: Mutex<IndexPageLru>,
-    runs: Mutex<HandleRunLru>,
-}
-
-#[derive(Debug, Clone)]
-struct SlimHandle {
-    offset: u64,
-    length: u32,
-    p8: u64,
-}
-
-#[derive(Debug, Clone)]
-struct HandleRun {
-    handles: Arc<[SlimHandle]>,
-    keys: Arc<[Bytes]>,
-}
-
-#[derive(Debug)]
-struct HandleRunLru {
-    runs: HashMap<usize, HandleRun>,
-    order: VecDeque<usize>,
-    used: usize,
-    budget: usize,
-}
-
-#[derive(Debug)]
-struct IndexPageLru {
-    pages: HashMap<usize, Arc<[Bytes]>>,
-    order: VecDeque<usize>,
-    used: usize,
-    budget: usize,
-}
-
-impl PagedIndex {
-    fn from_handles(
-        index: &[BlockHandle],
-        budget: usize,
-        src: Option<Arc<dyn crate::env::SstFileSource>>,
-        index_file_off: u64,
-        path: PathBuf,
-        key_cp: usize,
-    ) -> Self {
-        let n = index.len();
-        let file_backed = src.is_some() && index_file_off > 0;
-        let (blob, blob_key_off, p8s, sample_p8s, sample_file_rel, fanout) = if file_backed {
-            let fanout = INDEX_HANDLE_FANOUT.max(1);
-            let mut sample_p8s = Vec::new();
-            let mut sample_file_rel = Vec::new();
-            let mut rel = 0u32;
-            for (i, h) in index.iter().enumerate() {
-                if i % fanout == 0 {
-                    sample_p8s.push(h.p8);
-                    sample_file_rel.push(rel);
-                }
-                let kl = u32::try_from(h.first_user_key.len()).unwrap_or(u32::MAX);
-                rel = rel.saturating_add(16).saturating_add(kl);
-            }
-            sample_file_rel.push(rel);
-            (
-                None,
-                Arc::from([]),
-                Arc::from([]),
-                sample_p8s.into(),
-                sample_file_rel.into(),
-                fanout,
-            )
-        } else {
-            let mut blob = Vec::new();
-            let mut key_off = Vec::with_capacity(n);
-            let mut p8s = Vec::with_capacity(n);
-            for h in index {
-                key_off.push(blob.len() as u32);
-                let k = h.first_user_key.as_ref();
-                let len = u32::try_from(k.len()).unwrap_or(u32::MAX);
-                blob.extend_from_slice(&len.to_le_bytes());
-                let take = (len as usize).min(k.len());
-                blob.extend_from_slice(&k[..take]);
-                p8s.push(h.p8);
-            }
-            (
-                Some(blob.into()),
-                key_off.into(),
-                p8s.into(),
-                Arc::from([]),
-                Arc::from([]),
-                0,
-            )
-        };
-        Self {
-            p8s,
-            sample_p8s,
-            sample_file_rel,
-            fanout,
-            key_cp,
-            index_file_off,
-            path,
-            src,
-            blob,
-            blob_key_off,
-            n,
-            lru: Mutex::new(IndexPageLru {
-                pages: HashMap::new(),
-                order: VecDeque::new(),
-                used: 0,
-                budget: budget.max(1),
-            }),
-            runs: Mutex::new(HandleRunLru {
-                runs: HashMap::new(),
-                order: VecDeque::new(),
-                used: 0,
-                budget: budget.max(1),
-            }),
-        }
-    }
-
-    fn file_backed(&self) -> bool {
-        self.blob.is_none() && self.src.is_some()
-    }
-
-    fn two_level(&self) -> bool {
-        self.file_backed() && self.fanout > 0 && !self.sample_p8s.is_empty()
-    }
-
-    fn meta_bytes(&self) -> usize {
-        self.p8s
-            .len()
-            .saturating_mul(8)
-            .saturating_add(self.sample_p8s.len().saturating_mul(8))
-            .saturating_add(self.sample_file_rel.len().saturating_mul(4))
-            .saturating_add(self.blob.as_ref().map(|b| b.len()).unwrap_or(0))
-            .saturating_add(self.blob_key_off.len().saturating_mul(4))
-            .saturating_add(std::mem::size_of::<Self>())
-    }
-
-    fn resident_bytes(&self) -> usize {
-        let keys = self.lru.lock().used;
-        let runs = self.runs.lock().used;
-        if self.file_backed() {
-            keys.saturating_add(runs).saturating_add(self.meta_bytes())
-        } else {
-            keys.saturating_add(self.blob_key_off.len().saturating_mul(4))
-                .saturating_add(std::mem::size_of::<Self>())
-        }
-    }
-
-    fn handle_at(&self, i: usize) -> Option<BlockHandle> {
-        if i >= self.n {
-            return None;
-        }
-        if self.two_level() {
-            let run = self.load_run(i / self.fanout);
-            let local = i % self.fanout;
-            return run.handles.get(local).map(|s| BlockHandle {
-                offset: s.offset,
-                length: s.length,
-                first_user_key: Bytes::new(),
-                p8: s.p8,
-            });
-        }
-        None
-    }
-
-    fn page_of(i: usize) -> usize {
-        i / INDEX_PAGE_BLOCKS
-    }
-
-    fn load_page(&self, page: usize) -> Arc<[Bytes]> {
-        {
-            let mut g = self.lru.lock();
-            if let Some(p) = g.pages.get(&page).cloned() {
-                g.order.retain(|x| *x != page);
-                g.order.push_back(page);
-                return p;
-            }
-        }
-        let start = page * INDEX_PAGE_BLOCKS;
-        let end = (start + INDEX_PAGE_BLOCKS).min(self.n);
-        let mut keys = Vec::with_capacity(end.saturating_sub(start));
-        let mut bytes = 0usize;
-        for i in start..end {
-            let k = self.load_key(i);
-            bytes = bytes.saturating_add(k.len());
-            keys.push(k);
-        }
-        let arc: Arc<[Bytes]> = keys.into();
-        let mut g = self.lru.lock();
-        while g.used.saturating_add(bytes) > g.budget && !g.pages.is_empty() {
-            if let Some(old) = g.order.pop_front() {
-                if let Some(p) = g.pages.remove(&old) {
-                    let drop_n: usize = p.iter().map(|k| k.len()).sum();
-                    g.used = g.used.saturating_sub(drop_n);
-                }
-            } else {
-                break;
-            }
-        }
-        g.used = g.used.saturating_add(bytes);
-        g.pages.insert(page, Arc::clone(&arc));
-        g.order.push_back(page);
-        arc
-    }
-
-    fn key_from_blob(&self, i: usize) -> Bytes {
-        let Some(blob) = &self.blob else {
-            return Bytes::new();
-        };
-        let off = self.blob_key_off[i] as usize;
-        let len = u32::from_le_bytes(blob[off..off + 4].try_into().unwrap()) as usize;
-        Bytes::copy_from_slice(&blob[off + 4..off + 4 + len])
-    }
-
-    fn load_key(&self, i: usize) -> Bytes {
-        self.key_from_blob(i)
-    }
-
-    fn load_run(&self, sample: usize) -> HandleRun {
-        {
-            let mut g = self.runs.lock();
-            if let Some(run) = g.runs.get(&sample).cloned() {
-                g.order.retain(|x| *x != sample);
-                g.order.push_back(sample);
-                return run;
-            }
-        }
-        let Some(src) = &self.src else {
-            panic!(
-                "pedradb: two-level index run {} has no file source in {}",
-                sample,
-                self.path.display()
-            );
-        };
-        let start_rel = self.sample_file_rel[sample];
-        let end_rel = self.sample_file_rel[sample + 1];
-        let nbytes = end_rel.saturating_sub(start_rel) as usize;
-        let mut buf = vec![0u8; nbytes];
-        let off = self.index_file_off.saturating_add(u64::from(start_rel));
-        if nbytes > 0 {
-            if let Err(e) = src.read_range(&self.path, off, &mut buf) {
-                panic!(
-                    "pedradb: two-level index run read failed in {} @ {off}: {e}",
-                    self.path.display()
-                );
-            }
-        }
-        let expect = (self.n - sample * self.fanout).min(self.fanout);
-        let mut handles = Vec::with_capacity(expect);
-        let mut keys = Vec::with_capacity(expect);
-        let mut pos = 0usize;
-        for _ in 0..expect {
-            if pos + 16 > buf.len() {
-                panic!(
-                    "pedradb: two-level index run truncated in {} sample {sample}",
-                    self.path.display()
-                );
-            }
-            let offset = u64::from_le_bytes(buf[pos..pos + 8].try_into().unwrap());
-            let length = u32::from_le_bytes(buf[pos + 8..pos + 12].try_into().unwrap());
-            let kl = u32::from_le_bytes(buf[pos + 12..pos + 16].try_into().unwrap()) as usize;
-            pos += 16;
-            if pos + kl > buf.len() {
-                panic!(
-                    "pedradb: two-level index key truncated in {} sample {sample}",
-                    self.path.display()
-                );
-            }
-            let key = Bytes::copy_from_slice(&buf[pos..pos + kl]);
-            pos += kl;
-            let p8 = SstTable::p8_window(key.as_ref(), self.key_cp);
-            handles.push(SlimHandle { offset, length, p8 });
-            keys.push(key);
-        }
-        let run = HandleRun {
-            handles: handles.into(),
-            keys: keys.into(),
-        };
-        let bytes: usize = run
-            .keys
-            .iter()
-            .map(|k| k.len())
-            .sum::<usize>()
-            .saturating_add(
-                run.handles
-                    .len()
-                    .saturating_mul(std::mem::size_of::<SlimHandle>()),
-            );
-        let mut g = self.runs.lock();
-        while g.used.saturating_add(bytes) > g.budget && !g.runs.is_empty() {
-            if let Some(old) = g.order.pop_front() {
-                if let Some(drop_run) = g.runs.remove(&old) {
-                    let drop_n: usize = drop_run
-                        .keys
-                        .iter()
-                        .map(|k| k.len())
-                        .sum::<usize>()
-                        .saturating_add(
-                            drop_run
-                                .handles
-                                .len()
-                                .saturating_mul(std::mem::size_of::<SlimHandle>()),
-                        );
-                    g.used = g.used.saturating_sub(drop_n);
-                }
-            } else {
-                break;
-            }
-        }
-        g.used = g.used.saturating_add(bytes);
-        g.runs.insert(sample, run.clone());
-        g.order.push_back(sample);
-        run
-    }
-
-    fn p8_at(&self, i: usize) -> u64 {
-        if self.two_level() {
-            if i % self.fanout == 0 {
-                return self.sample_p8s.get(i / self.fanout).copied().unwrap_or(0);
-            }
-            let run = self.load_run(i / self.fanout);
-            return run.handles.get(i % self.fanout).map(|s| s.p8).unwrap_or(0);
-        }
-        self.p8s.get(i).copied().unwrap_or(0)
-    }
-
-    fn key_at(&self, i: usize) -> Bytes {
-        if self.two_level() {
-            let run = self.load_run(i / self.fanout);
-            return run.keys.get(i % self.fanout).cloned().unwrap_or_default();
-        }
-        let page = Self::page_of(i);
-        let local = i - page * INDEX_PAGE_BLOCKS;
-        let p = self.load_page(page);
-        p.get(local).cloned().unwrap_or_default()
-    }
-
-    fn blocks_for_point(&self, user_key: &[u8], key_cp: usize) -> std::ops::Range<usize> {
-        if self.n == 0 {
-            return 0..0;
-        }
-        let t8 = SstTable::p8_window(user_key, key_cp);
-        let mut lo = 0usize;
-        let mut hi = self.n;
-        while lo < hi {
-            let mid = (lo + hi) / 2;
-            let p8 = self.p8_at(mid);
-            if p8 < t8 || (p8 == t8 && self.key_at(mid).as_ref() < user_key) {
-                lo = mid + 1;
-            } else {
-                hi = mid;
-            }
-        }
-        let ge = lo;
-        let start = ge.saturating_sub(1);
-        let mut end = ge;
-        while end < self.n && self.key_at(end).as_ref() <= user_key {
-            end += 1;
-        }
-        start..end
-    }
-}
-
 /// Cached full entry materialization for an SST (shared across clones).
 type EntriesCache = Arc<Mutex<Option<Vec<(InternalKey, Bytes)>>>>;
 
@@ -809,13 +278,6 @@ pub struct SstTable {
     payload: Arc<PayloadSlot>,
     /// Byte length of the (possibly evicted) file body; 0 for v1/eager.
     payload_len: usize,
-    /// RFC-0159 streaming bulk writer contract: this table was created with
-    /// its body deliberately left on disk (empty payload slot, no kit yet
-    /// — hydrate attaches one at install). Only such a table may reload its
-    /// payload from `path` without a kit; any other kit-less table with an
-    /// empty payload slot fails loud instead of silently re-reading a path
-    /// the owner never vouched for (RFC-0042 v18 fail-closed contract).
-    body_on_disk: bool,
     /// Whether data blocks are lz4 (SST v4+).
     compressed_blocks: bool,
     /// Whether each data block carries a trailing CRC32C (SST v5).
@@ -832,10 +294,7 @@ pub struct SstTable {
     num_entries: usize,
     max_sequence: SequenceNumber,
     /// Sparse index (v2+); empty for v1.
-    /// Sparse block index, shared across clones: every installed table is
-    /// held twice (`ssts` + `table_cache`), and a `Vec` clone doubled the
-    /// 100M index (~350 MB) plus one `Bytes` promote per handle.
-    index: Arc<[BlockHandle]>,
+    index: Vec<BlockHandle>,
     /// Longest prefix shared by every `index` key — the offset the `p8`
     /// windows start at. Derived with the index (`derive_index_accel`).
     key_cp: usize,
@@ -847,11 +306,6 @@ pub struct SstTable {
     largest_user_key: Option<Bytes>,
     /// Column-family name (RFC-0065). Empty = mixed / prefix-era.
     cf: String,
-    /// RFC-0167 P2.4: paged first-keys under a byte budget (`None` = full
-    /// resident index, the default).
-    paged: Option<Arc<PagedIndex>>,
-    /// File offset of the on-disk index tail (0 = unknown; blob fallback).
-    index_file_off: u64,
 }
 
 impl SstTable {
@@ -871,13 +325,13 @@ impl SstTable {
     /// sparse index — they count as one file-level block after the CRC check.
     #[must_use]
     pub fn data_block_count(&self) -> usize {
-        self.n_blocks().max(1)
+        self.index.len().max(1)
     }
 
     /// Whether the table has no entries.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.num_entries == 0
+        crate::write_admission_kernel::batch_is_empty(self.num_entries as u64)
     }
 
     /// Whether this table decodes blocks on demand (v2+). Residency of the
@@ -885,30 +339,7 @@ impl SstTable {
     /// served from file block-by-block instead.
     #[must_use]
     pub fn is_lazy(&self) -> bool {
-        !self.index.is_empty() || self.paged.is_some()
-    }
-
-    fn n_blocks(&self) -> usize {
-        self.paged.as_ref().map_or(self.index.len(), |p| p.n)
-    }
-
-    fn handle_at(&self, i: usize) -> Option<BlockHandle> {
-        if let Some(p) = &self.paged {
-            if p.file_backed() {
-                return p.handle_at(i);
-            }
-        }
-        self.index.get(i).cloned()
-    }
-
-    fn first_key_at(&self, i: usize) -> Bytes {
-        if let Some(p) = &self.paged {
-            return p.key_at(i);
-        }
-        self.index
-            .get(i)
-            .map(|h| h.first_user_key.clone())
-            .unwrap_or_default()
+        !crate::write_admission_kernel::batch_is_empty(self.index.len() as u64)
     }
 
     #[cfg(test)]
@@ -946,14 +377,14 @@ impl SstTable {
         source: &Arc<dyn crate::env::SstFileSource>,
         pool: &Arc<crate::cache::SstPayloadPool>,
     ) {
-        if self.payload_len == 0 {
+        if crate::write_admission_kernel::batch_is_empty(self.payload_len as u64) {
             return;
         }
         *self.kit.write() = Some(PayloadKit {
             source: Arc::clone(source),
             pool: Arc::clone(pool),
         });
-        if !self.payload.read().img.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(self.payload.read().img.len() as u64) {
             pool.register(
                 &self.path,
                 self.payload_slot_weak(),
@@ -967,7 +398,7 @@ impl SstTable {
     /// `pread`+CRC). No-op when the budget is full — evicted v6 stays one
     /// 4 KiB `read_range`. Does not run during hydrate (no gets).
     fn try_promote_payload(&self) -> Result<bool> {
-        if !self.payload.read().img.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(self.payload.read().img.len() as u64) {
             return Ok(true);
         }
         let Some(kit) = self.kit.read().clone() else {
@@ -977,7 +408,9 @@ impl SstTable {
             return Ok(false);
         }
         self.ensure_payload(&kit)?;
-        Ok(!self.payload.read().img.is_empty())
+        Ok(!crate::write_admission_kernel::batch_is_empty(
+            self.payload.read().img.len() as u64,
+        ))
     }
 
     #[cfg(test)]
@@ -998,7 +431,7 @@ impl SstTable {
         snapshot: SequenceNumber,
         out: &mut Vec<crate::merge::RangeTombstone>,
     ) {
-        if self.range_tombstones.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.range_tombstones.len() as u64) {
             return;
         }
         for (ikey, end) in &self.range_tombstones {
@@ -1115,36 +548,27 @@ impl SstTable {
             let block = self.materialize_entries()?;
             return Ok(Self::best_point_in_entry_slice(&block, user_key, snapshot));
         }
-        if self.n_blocks() == 0 {
+        if crate::write_admission_kernel::batch_is_empty(self.index.len() as u64) {
             return Ok(None);
         }
         if !self.block_crc {
-            // ≤v4: file-level CRC re-runs on eviction. Propagate decode
-            // errors — `.ok()` used to turn bitrot into a silent miss.
-            let mut best: Option<(SequenceNumber, Lookup)> = None;
-            for bi in self.blocks_for_point(user_key) {
-                let block = self.decode_block(bi)?;
-                if let Some((seq, look)) =
-                    Self::best_point_in_entry_slice(&block, user_key, snapshot)
-                {
-                    if best.as_ref().is_none_or(|(s, _)| seq > *s) {
-                        best = Some((seq, look));
-                    }
-                }
-            }
-            return Ok(best);
+            // ≤v4 carries no per-block CRC: reuse the whole-body path so the
+            // file-level CRC gate re-runs before any block decodes.
+            return Ok(self.point_in_blocks(user_key, snapshot, &mut |bi| {
+                self.decode_block(bi).ok().map(Arc::new)
+            }));
         }
         // Bulk hydrate leaves the slot empty (100M RAM). If the 256 MiB
         // pool still has room, promote now so get_hit is a slice+CRC-skip
         // (v55 1M was 0.79× vs Rocks because every probe was pread+CRC).
-        if self.payload.read().img.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.payload.read().img.len() as u64) {
             self.try_promote_payload()?;
         }
         // v5: each block carries its own CRC, so one image suffices — a
         // resident-payload slice or a single positioned read via the kit.
         let mut best: Option<(SequenceNumber, Lookup)> = None;
         for bi in self.blocks_for_point(user_key) {
-            let Some(h) = self.handle_at(bi) else {
+            let Some(h) = self.index.get(bi) else {
                 continue;
             };
             let len = usize::try_from(h.length)
@@ -1153,7 +577,7 @@ impl SstTable {
             {
                 let g = self.payload.read();
                 let p: &Arc<[u8]> = &g.img;
-                if p.is_empty() {
+                if crate::write_admission_kernel::batch_is_empty(p.len() as u64) {
                     served_from_file = true;
                 } else {
                     let start = usize::try_from(h.offset)
@@ -1176,8 +600,6 @@ impl SstTable {
                     if g.is_verified(bi) {
                         SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
                         SST_BLOCK_CRC_SKIPPED.with(|c| c.set(c.get().saturating_add(1)));
-                        crate::cost::point_block_resident();
-                        let cost_t0 = crate::cost::enabled().then(Instant::now);
                         let img = &p[start..end];
                         if img.len() < 4 {
                             return Err(CoreError::Internal(format!(
@@ -1185,19 +607,19 @@ impl SstTable {
                                 self.path.display()
                             )));
                         }
-                        let found = seek_point_in_block_body(
+                        if let Some(found) = seek_point_in_block_body(
                             &img[..img.len() - 4],
                             self.compressed_blocks,
                             user_key,
                             snapshot,
                             &mut scratch.plain,
                             &self.path,
-                        )?;
-                        if let Some(t0) = cost_t0 {
-                            crate::cost::point_image_ns(t0.elapsed().as_nanos() as u64);
-                        }
-                        if let Some(found) = found {
-                            if best.as_ref().is_none_or(|(s, _)| found.0 > *s) {
+                        )? {
+                            if crate::lookup_kernel::prefer_newer_seq(
+                                best.is_some(),
+                                found.0,
+                                best.as_ref().map(|(s, _)| *s).unwrap_or(0),
+                            ) {
                                 best = Some(found);
                             }
                         }
@@ -1205,15 +627,15 @@ impl SstTable {
                         drop(g);
                         let mut w = self.payload.write();
                         let p: &Arc<[u8]> = &w.img;
-                        if p.is_empty() || end > p.len() {
+                        if crate::write_admission_kernel::batch_is_empty(p.len() as u64)
+                            || end > p.len()
+                        {
                             // Evicted (or re-installed shorter) between the
                             // guards: serve this block from file.
                             drop(w);
                             served_from_file = true;
                         } else {
                             SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
-                            crate::cost::point_block_resident();
-                            let cost_t0 = crate::cost::enabled().then(Instant::now);
                             let found = seek_point_in_block_image(
                                 &p[start..end],
                                 self.compressed_blocks,
@@ -1222,12 +644,13 @@ impl SstTable {
                                 &mut scratch.plain,
                                 &self.path,
                             )?;
-                            if let Some(t0) = cost_t0 {
-                                crate::cost::point_image_ns(t0.elapsed().as_nanos() as u64);
-                            }
-                            w.mark_verified(bi, self.n_blocks());
+                            w.mark_verified(bi, self.index.len());
                             if let Some(found) = found {
-                                if best.as_ref().is_none_or(|(s, _)| found.0 > *s) {
+                                if crate::lookup_kernel::prefer_newer_seq(
+                                    best.is_some(),
+                                    found.0,
+                                    best.as_ref().map(|(s, _)| *s).unwrap_or(0),
+                                ) {
                                     best = Some(found);
                                 }
                             }
@@ -1238,32 +661,62 @@ impl SstTable {
             if served_from_file {
                 let kit = self.kit.read().clone();
                 let Some(kit) = kit else {
-                    return Err(CoreError::Internal(format!(
-                        "SST {} payload evicted without a file source (free-standing table)",
-                        self.path.display()
-                    )));
+                    // Source-less opens (free-standing installs, `open_with`)
+                    // carry no kit: load the CRC-verified body from the path
+                    // once — the same fallback `decode_block_on_file` takes.
+                    // Installs residency, so later probes hit the
+                    // verified-resident fast path instead of re-reading.
+                    let payload = self.ensure_payload_from_path()?;
+                    let start = usize::try_from(h.offset)
+                        .map_err(|_| CoreError::Internal("SST block offset overflow".into()))?;
+                    let Some(end) = start.checked_add(len) else {
+                        return Err(CoreError::Internal("SST block length overflow".into()));
+                    };
+                    if end > payload.len() {
+                        return Err(CoreError::Internal(format!(
+                            "SST block past EOF in {}",
+                            self.path.display()
+                        )));
+                    }
+                    SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
+                    let found = seek_point_in_block_image(
+                        &payload[start..end],
+                        self.compressed_blocks,
+                        user_key,
+                        snapshot,
+                        &mut scratch.plain,
+                        &self.path,
+                    )?;
+                    if let Some(found) = found {
+                        if crate::lookup_kernel::prefer_newer_seq(
+                            best.is_some(),
+                            found.0,
+                            best.as_ref().map(|(s, _)| *s).unwrap_or(0),
+                        ) {
+                            best = Some(found);
+                        }
+                    }
+                    continue;
                 };
                 let cache_key = (crate::cache::path_id(&self.path), h.offset);
                 let cached = RAW_BLOCKS.with(|c| c.borrow_mut().get(&cache_key));
                 if let Some(raw) = cached {
                     SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
                     SST_BLOCK_CRC_SKIPPED.with(|c| c.set(c.get().saturating_add(1)));
-                    crate::cost::point_block_tls();
                     if raw.len() >= 4 {
-                        let cost_t0 = crate::cost::enabled().then(Instant::now);
-                        let found = seek_point_in_block_body(
+                        if let Some(found) = seek_point_in_block_body(
                             &raw[..raw.len() - 4],
                             self.compressed_blocks,
                             user_key,
                             snapshot,
                             &mut scratch.plain,
                             &self.path,
-                        )?;
-                        if let Some(t0) = cost_t0 {
-                            crate::cost::point_image_ns(t0.elapsed().as_nanos() as u64);
-                        }
-                        if let Some(found) = found {
-                            if best.as_ref().is_none_or(|(s, _)| found.0 > *s) {
+                        )? {
+                            if crate::lookup_kernel::prefer_newer_seq(
+                                best.is_some(),
+                                found.0,
+                                best.as_ref().map(|(s, _)| *s).unwrap_or(0),
+                            ) {
                                 best = Some(found);
                             }
                         }
@@ -1271,24 +724,10 @@ impl SstTable {
                 } else {
                     scratch.raw.clear();
                     scratch.raw.resize(len, 0);
-                    let cost_t0 = crate::cost::enabled().then(Instant::now);
-                    if get_stages_enabled() {
-                        let t = Instant::now();
-                        kit.source
-                            .read_range(&self.path, h.offset, &mut scratch.raw)
-                            .map_err(CoreError::Io)?;
-                        GET_PREAD_NS.with(|c| add_stage(c, t.elapsed().as_nanos()));
-                    } else {
-                        kit.source
-                            .read_range(&self.path, h.offset, &mut scratch.raw)
-                            .map_err(CoreError::Io)?;
-                    }
-                    if let Some(t0) = cost_t0 {
-                        crate::cost::point_pread_ns(t0.elapsed().as_nanos() as u64);
-                    }
+                    kit.source
+                        .read_range(&self.path, h.offset, &mut scratch.raw)
+                        .map_err(CoreError::Io)?;
                     SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
-                    crate::cost::point_block_file(len as u64);
-                    let cost_t1 = crate::cost::enabled().then(Instant::now);
                     let found = seek_point_in_block_image(
                         &scratch.raw,
                         self.compressed_blocks,
@@ -1297,69 +736,19 @@ impl SstTable {
                         &mut scratch.plain,
                         &self.path,
                     )?;
-                    if let Some(t1) = cost_t1 {
-                        crate::cost::point_image_ns(t1.elapsed().as_nanos() as u64);
-                    }
                     RAW_BLOCKS.with(|c| {
                         c.borrow_mut()
                             .insert(cache_key, Arc::from(scratch.raw.as_slice()));
                     });
                     if let Some(found) = found {
-                        if best.as_ref().is_none_or(|(s, _)| found.0 > *s) {
+                        if crate::lookup_kernel::prefer_newer_seq(
+                            best.is_some(),
+                            found.0,
+                            best.as_ref().map(|(s, _)| *s).unwrap_or(0),
+                        ) {
                             best = Some(found);
                         }
                     }
-                }
-            }
-        }
-        Ok(best)
-    }
-
-    /// Point seek through a byte-budgeted [`BlockCache`] (RFC-0160 P2.3).
-    ///
-    /// First load CRC-verifies via [`Self::decode_block`] and only then
-    /// inserts; a fault is `Err`, never an empty cached block (silent miss).
-    /// Hits skip CRC — Rocks checksum-on-read-into-cache.
-    ///
-    /// # Errors
-    /// Corrupt block payload/framing or I/O on an evicted table.
-    pub fn point_at_cached(
-        &self,
-        user_key: &[u8],
-        snapshot: SequenceNumber,
-        cache: &BlockCache,
-    ) -> Result<Option<(SequenceNumber, Lookup)>> {
-        if let (Some(lo), Some(hi)) = (
-            self.smallest_user_key.as_deref(),
-            self.largest_user_key.as_deref(),
-        ) {
-            if user_key < lo || user_key > hi {
-                return Ok(None);
-            }
-        }
-        if !self.bloom.may_contain(user_key) {
-            return Ok(None);
-        }
-        if !self.is_lazy() {
-            let block = self.materialize_entries()?;
-            return Ok(Self::best_point_in_entry_slice(&block, user_key, snapshot));
-        }
-        if self.n_blocks() == 0 {
-            return Ok(None);
-        }
-        let path = self.path();
-        let id = crate::cache::path_id(path);
-        let mut best: Option<(SequenceNumber, Lookup)> = None;
-        for bi in self.blocks_for_point(user_key) {
-            let block = if let Some(hit) = cache.get_id(id, bi) {
-                hit
-            } else {
-                let decoded = self.decode_block(bi)?;
-                cache.get_or_insert_with_id(id, bi, || decoded)
-            };
-            if let Some((seq, look)) = Self::best_point_in_entry_slice(&block, user_key, snapshot) {
-                if best.as_ref().is_none_or(|(s, _)| seq > *s) {
-                    best = Some((seq, look));
                 }
             }
         }
@@ -1375,101 +764,7 @@ impl SstTable {
     /// Number of data blocks in the sparse index (0 for legacy v1).
     #[must_use]
     pub fn block_count(&self) -> usize {
-        self.n_blocks()
-    }
-
-    /// RAM of the sparse index (handles + first-key bytes). Bulk 100M is
-    /// O(blocks) here, not O(values) — payload must stay empty.
-    ///
-    /// With a paged index (RFC-0173 P2.1) this is the SoA + decoded-page LRU,
-    /// not the first-key `Bytes` array.
-    #[must_use]
-    pub fn index_memory_bytes(&self) -> usize {
-        if let Some(p) = &self.paged {
-            let mut n = p.resident_bytes();
-            if !p.file_backed() {
-                n = n.saturating_add(
-                    self.index
-                        .len()
-                        .saturating_mul(std::mem::size_of::<BlockHandle>()),
-                );
-                for h in self.index.iter() {
-                    n = n.saturating_add(h.first_user_key.len());
-                }
-            }
-            return n;
-        }
-        let mut n = self
-            .index
-            .len()
-            .saturating_mul(std::mem::size_of::<BlockHandle>());
-        for h in self.index.iter() {
-            n = n.saturating_add(h.first_user_key.len());
-        }
-        n
-    }
-
-    /// RFC-0167 P2.4 / RFC-0173 P2.1: drop the resident first-key array and
-    /// serve point lookups from a byte-capped page LRU. With a file source
-    /// the packed blob is not kept — keys are pread from the SST tail.
-    pub fn page_index(&mut self, budget: usize) {
-        if self.paged.is_some() || self.index.is_empty() {
-            return;
-        }
-        let src = self.kit.read().as_ref().map(|k| Arc::clone(&k.source));
-        let file_backed = src.is_some() && self.index_file_off > 0;
-        let paged = PagedIndex::from_handles(
-            &self.index,
-            budget,
-            src,
-            self.index_file_off,
-            self.path.clone(),
-            self.key_cp,
-        );
-        if file_backed {
-            self.index = Arc::from([]);
-        } else {
-            let mut handles = Vec::with_capacity(self.index.len());
-            for (i, h) in self.index.iter().enumerate() {
-                let keep = i % INDEX_PAGE_BLOCKS == 0;
-                handles.push(BlockHandle {
-                    offset: h.offset,
-                    length: h.length,
-                    first_user_key: if keep {
-                        h.first_user_key.clone()
-                    } else {
-                        Bytes::new()
-                    },
-                    p8: h.p8,
-                });
-            }
-            self.index = handles.into();
-        }
-        self.paged = Some(Arc::new(paged));
-    }
-
-    /// Drop the in-process bloom (always-true). Point hits stay correct;
-    /// misses probe the SST. RFC-0173 P2.1 bounded-cache degrade.
-    pub fn release_bloom(&mut self) {
-        self.bloom = BloomFilter::always_true();
-    }
-
-    #[cfg(test)]
-    pub(crate) fn paged_file_backed(&self) -> bool {
-        self.paged.as_ref().is_some_and(|p| p.file_backed())
-    }
-
-    /// Heap bytes of the bloom bit array.
-    #[must_use]
-    pub fn bloom_memory_bytes(&self) -> usize {
-        self.bloom.memory_bytes()
-    }
-
-    /// Index + bloom — the SST metadata that stays in process RSS.
-    #[must_use]
-    pub fn metadata_memory_bytes(&self) -> usize {
-        self.index_memory_bytes()
-            .saturating_add(self.bloom.memory_bytes())
+        self.index.len()
     }
 
     /// Whether the on-disk / rebuilt bloom is active.
@@ -1499,7 +794,7 @@ impl SstTable {
     /// Overlay the MANIFEST CF tag (empty leaves the inferred value).
     #[must_use]
     pub fn with_cf(mut self, cf: String) -> Self {
-        if !cf.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(cf.len() as u64) {
             self.cf = cf;
         }
         self
@@ -1563,10 +858,13 @@ impl SstTable {
 
         match point {
             Lookup::Found(v) => {
-                if self.range_deleted(user_key, point_seq, snapshot) {
-                    Lookup::Deleted
-                } else {
+                if crate::merge::visible_at(
+                    crate::key::ValueType::Value,
+                    self.range_deleted(user_key, point_seq, snapshot),
+                ) {
                     Lookup::Found(v)
+                } else {
+                    Lookup::Deleted
                 }
             }
             Lookup::Deleted => Lookup::Deleted,
@@ -1581,7 +879,7 @@ impl SstTable {
     }
 
     pub(crate) fn has_range_tombstones(&self) -> bool {
-        !self.range_tombstones.is_empty()
+        !crate::write_admission_kernel::batch_is_empty(self.range_tombstones.len() as u64)
     }
 
     /// Whether a point version is covered by a range tombstone in this file.
@@ -1627,7 +925,7 @@ impl SstTable {
             let block = self.materialize_entries().ok()?;
             return Self::best_point_in_entry_slice(&block, user_key, snapshot);
         }
-        if self.n_blocks() == 0 {
+        if crate::write_admission_kernel::batch_is_empty(self.index.len() as u64) {
             return None;
         }
         let mut best: Option<(SequenceNumber, Lookup)> = None;
@@ -1636,7 +934,11 @@ impl SstTable {
                 continue;
             };
             if let Some((seq, look)) = Self::best_point_in_entry_slice(&block, user_key, snapshot) {
-                if best.as_ref().is_none_or(|(s, _)| seq > *s) {
+                if crate::lookup_kernel::prefer_newer_seq(
+                    best.is_some(),
+                    seq,
+                    best.as_ref().map(|(s, _)| *s).unwrap_or(0),
+                ) {
                     best = Some((seq, look));
                 }
             }
@@ -1685,11 +987,8 @@ impl SstTable {
     /// older writer split mid-key, versions also sit in the previous block
     /// and in any following run with `first_user_key == user_key`.
     fn blocks_for_point(&self, user_key: &[u8]) -> std::ops::Range<usize> {
-        if self.n_blocks() == 0 {
+        if crate::write_admission_kernel::batch_is_empty(self.index.len() as u64) {
             return 0..0;
-        }
-        if let Some(p) = &self.paged {
-            return p.blocks_for_point(user_key, self.key_cp);
         }
         let t8 = Self::p8_window(user_key, self.key_cp);
         let ge = self
@@ -1697,7 +996,7 @@ impl SstTable {
             .partition_point(|h| h.p8 < t8 || (h.p8 == t8 && h.first_user_key.as_ref() < user_key));
         let start = ge.saturating_sub(1);
         let mut end = ge;
-        while end < self.n_blocks() && self.first_key_at(end).as_ref() <= user_key {
+        while end < self.index.len() && self.index[end].first_user_key.as_ref() <= user_key {
             end += 1;
         }
         start..end
@@ -1723,7 +1022,11 @@ impl SstTable {
             if ikey.sequence <= snapshot {
                 // Entries are newest-first for a user key; first hit is best in one block.
                 // Still scan if we ever change order — keep max seq for safety.
-                if best.as_ref().is_none_or(|(s, _)| ikey.sequence > *s) {
+                if crate::lookup_kernel::prefer_newer_seq(
+                    best.is_some(),
+                    ikey.sequence,
+                    best.as_ref().map(|(s, _)| *s).unwrap_or(0),
+                ) {
                     let look = match ikey.kind {
                         ValueType::Deletion => Lookup::Deleted,
                         ValueType::Value => Lookup::Found(value.clone()),
@@ -1747,7 +1050,7 @@ impl SstTable {
     /// # Errors
     /// Corrupt block payload, invalid index, or I/O on an evicted table.
     pub fn decode_block(&self, block_idx: usize) -> Result<Vec<(InternalKey, Bytes)>> {
-        let h = self.handle_at(block_idx).ok_or_else(|| {
+        let h = self.index.get(block_idx).ok_or_else(|| {
             CoreError::Internal(format!(
                 "SST block index {block_idx} out of range in {}",
                 self.path.display()
@@ -1756,30 +1059,24 @@ impl SstTable {
         {
             let g = self.payload.read();
             let p: &Arc<[u8]> = &g.img;
-            if !p.is_empty() {
+            if !crate::write_admission_kernel::batch_is_empty(p.len() as u64) {
                 SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
                 return decode_block_from_payload(
                     p,
-                    &h,
+                    h,
                     self.compressed_blocks,
                     self.block_crc,
                     &self.path,
                 );
             }
         }
-        self.decode_block_on_file(&h)
+        self.decode_block_on_file(h)
     }
 
     /// Serve one block of an evicted payload through the attached source.
     fn decode_block_on_file(&self, h: &BlockHandle) -> Result<Vec<(InternalKey, Bytes)>> {
         let kit = self.kit.read().clone();
         let Some(kit) = kit else {
-            if !self.body_on_disk {
-                return Err(CoreError::Internal(format!(
-                    "SST {} payload evicted without a file source (free-standing table)",
-                    self.path.display()
-                )));
-            }
             // Streaming bulk writer leaves the body on disk and the
             // in-memory slot empty. Tests use `open_with` (no kit);
             // hydrate attaches a kit at install.
@@ -1824,7 +1121,7 @@ impl SstTable {
         {
             let g = self.payload.read();
             let p: &Arc<[u8]> = &g.img;
-            if !p.is_empty() {
+            if !crate::write_admission_kernel::batch_is_empty(p.len() as u64) {
                 return Ok(Arc::clone(p));
             }
         }
@@ -1853,7 +1150,7 @@ impl SstTable {
     fn ensure_payload_from_path(&self) -> Result<Arc<[u8]>> {
         {
             let g = self.payload.read();
-            if !g.img.is_empty() {
+            if !crate::write_admission_kernel::batch_is_empty(g.img.len() as u64) {
                 return Ok(Arc::clone(&g.img));
             }
         }
@@ -1875,25 +1172,18 @@ impl SstTable {
     }
 
     /// Whether this file's user-key bounds can meet `[start, end)`.
+    ///
+    /// Catalog kernel [`super::scan_kernel::point_bounds_overlap`]: missing
+    /// bounds keep the file (must-read). Point prune only — range tombs are
+    /// collected separately (`scan_at_raw` G2).
     #[must_use]
     pub fn overlaps_user_range(&self, start: Bound<&[u8]>, end: Bound<&[u8]>) -> bool {
-        let (Some(lo), Some(hi)) = (
+        super::scan_kernel::point_bounds_overlap(
             self.smallest_user_key.as_deref(),
             self.largest_user_key.as_deref(),
-        ) else {
-            return false;
-        };
-        let file_before_end = match end {
-            Bound::Unbounded => true,
-            Bound::Included(e) => lo <= e,
-            Bound::Excluded(e) => lo < e,
-        };
-        let file_after_start = match start {
-            Bound::Unbounded => true,
-            Bound::Included(s) => hi >= s,
-            Bound::Excluded(s) => hi > s,
-        };
-        file_before_end && file_after_start
+            start,
+            end,
+        )
     }
 
     /// Point keys in `[start, end)`, one SST block at a time (RFC-0033 P0.3).
@@ -1910,16 +1200,8 @@ impl SstTable {
         want_values: bool,
         load: Box<dyn FnMut(usize) -> Option<Arc<Vec<(InternalKey, Bytes)>>> + 'a>,
     ) -> SstRangeIter<'a> {
-        let start_b = match start {
-            Bound::Unbounded => Bound::Unbounded,
-            Bound::Included(s) => Bound::Included(Bytes::copy_from_slice(s)),
-            Bound::Excluded(s) => Bound::Excluded(Bytes::copy_from_slice(s)),
-        };
-        let end_b = match end {
-            Bound::Unbounded => Bound::Unbounded,
-            Bound::Included(s) => Bound::Included(Bytes::copy_from_slice(s)),
-            Bound::Excluded(s) => Bound::Excluded(Bytes::copy_from_slice(s)),
-        };
+        let start_b = crate::merge::bound_to_owned(start);
+        let end_b = crate::merge::bound_to_owned(end);
         if !self.overlaps_user_range(start, end) {
             return SstRangeIter {
                 current: None,
@@ -1929,7 +1211,7 @@ impl SstTable {
                 start: start_b,
                 end: end_b,
                 snapshot,
-                skip_user: Vec::new(),
+                skip_user: None,
                 want_values,
             };
         }
@@ -1942,18 +1224,12 @@ impl SstTable {
                 start: start_b,
                 end: end_b,
                 snapshot,
-                skip_user: Vec::new(),
+                skip_user: None,
                 want_values,
             }
         } else {
             let leftover: Vec<_> = self
                 .entries_cloned()
-                .unwrap_or_else(|e| {
-                    panic!(
-                        "pedradb: corrupt SST in {} on range: {e}",
-                        self.path.display()
-                    )
-                })
                 .into_iter()
                 .filter(|(k, _)| {
                     k.kind != ValueType::RangeDeletion
@@ -1968,7 +1244,7 @@ impl SstTable {
                 start: start_b,
                 end: end_b,
                 snapshot,
-                skip_user: Vec::new(),
+                skip_user: None,
                 want_values,
             }
         }
@@ -1985,15 +1261,22 @@ impl SstTable {
                 return Ok(e.clone());
             }
         }
-        let all = if self.n_blocks() == 0 {
-            // v1 should already have cache filled at open.
-            return Err(CoreError::Internal(format!(
-                "SST {} has no entries cache and no index",
-                self.path.display()
-            )));
+        let all = if crate::write_admission_kernel::batch_is_empty(self.index.len() as u64) {
+            if self.is_empty() {
+                // A legal empty v2+ table reopens with zero blocks and no
+                // eager cache (compaction can emit an empty output); an
+                // empty answer is not corruption.
+                Vec::new()
+            } else {
+                // v1 should already have cache filled at open.
+                return Err(CoreError::Internal(format!(
+                    "SST {} has no entries cache and no index",
+                    self.path.display()
+                )));
+            }
         } else {
             let mut out = Vec::with_capacity(self.num_entries);
-            for i in 0..self.n_blocks() {
+            for i in 0..self.index.len() {
                 out.extend(self.decode_block(i)?);
             }
             if out.len() != self.num_entries {
@@ -2016,22 +1299,14 @@ impl SstTable {
     /// Which index block would contain `user_key` (for tests / future lazy load).
     #[must_use]
     pub fn block_for_user_key(&self, user_key: &[u8]) -> Option<usize> {
-        if self.n_blocks() == 0 {
+        if crate::write_admission_kernel::batch_is_empty(self.index.len() as u64) {
             return None;
         }
         // Last block whose first_user_key <= user_key (same as the linear scan).
-        let n = self.n_blocks();
-        let mut lo = 0usize;
-        let mut hi = n;
-        while lo < hi {
-            let mid = (lo + hi) / 2;
-            if self.first_key_at(mid).as_ref() <= user_key {
-                lo = mid + 1;
-            } else {
-                hi = mid;
-            }
-        }
-        Some(lo.saturating_sub(1))
+        let gt = self
+            .index
+            .partition_point(|h| h.first_user_key.as_ref() <= user_key);
+        Some(gt.saturating_sub(1))
     }
 
     /// Load an SST from disk (real filesystem).
@@ -2063,9 +1338,9 @@ impl SstTable {
 
         let mut c = Cursor::new(payload);
         let magic = c.read_slice(8)?;
-        if magic != SST_MAGIC {
+        if !super::magic_kernel::sst_magic_is_pedra(magic) {
             return Err(CoreError::Internal(format!(
-                "bad SST magic in {}",
+                "bad SST magic in {}: not a Pedra SST (C++ Rocks directory is not drop-in; use `pedra migrate-from-rocks`)",
                 path.display()
             )));
         }
@@ -2096,12 +1371,13 @@ impl SstTable {
             entries.push((ikey, value));
         }
         let file_max = c.read_u64()?;
-        if n > 0 {
+        if !crate::write_admission_kernel::batch_is_empty(n as u64) {
             max_sequence = max_sequence.max(file_max);
         } else {
             max_sequence = file_max;
         }
-        if !c.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(c.data.len().saturating_sub(c.pos) as u64)
+        {
             return Err(CoreError::Internal(format!(
                 "trailing bytes in SST {}",
                 path.display()
@@ -2169,7 +1445,9 @@ impl SstTable {
             BloomFilter::decode(rest)
                 .map_err(|e| CoreError::Internal(format!("SST bloom in {}: {e}", path.display())))?
         } else {
-            if !ic.is_empty() {
+            if !crate::write_admission_kernel::batch_is_empty(
+                ic.data.len().saturating_sub(ic.pos) as u64
+            ) {
                 return Err(CoreError::Internal(format!(
                     "trailing index bytes in SST {}",
                     path.display()
@@ -2246,7 +1524,6 @@ impl SstTable {
                 crate::cache::ResidentBody::from_image(payload),
             )),
             payload_len,
-            body_on_disk: false,
             compressed_blocks,
             block_crc,
             // Lazy: do not retain full entry vec after open verification.
@@ -2255,14 +1532,12 @@ impl SstTable {
             range_tombstones,
             num_entries: n,
             max_sequence,
-            index: index.into(),
+            index,
             key_cp,
             bloom,
             smallest_user_key,
             largest_user_key,
             cf,
-            paged: None,
-            index_file_off: data_end as u64,
         })
     }
 
@@ -2296,7 +1571,6 @@ impl SstTable {
                 crate::cache::ResidentBody::from_image(payload),
             )),
             payload_len,
-            body_on_disk: false,
             compressed_blocks,
             block_crc,
             entries: Arc::new(Mutex::new(Some(entries))),
@@ -2304,37 +1578,31 @@ impl SstTable {
             range_tombstones,
             num_entries,
             max_sequence,
-            index: index.into(),
+            index,
             key_cp,
             bloom,
             smallest_user_key,
             largest_user_key,
             cf,
-            paged: None,
-            index_file_off: 0,
         }
     }
 
     /// All internal versions in sorted order (materializes lazy tables).
     ///
     /// # Panics
-    /// Corrupt re-decode — never an empty stand-in.
+    /// Does not panic; corrupt re-decode yields empty iterator after logging via empty vec.
     pub fn iter_internal(&self) -> impl Iterator<Item = (InternalKey, Bytes)> + '_ {
-        self.entries_cloned()
-            .unwrap_or_else(|e| {
-                panic!(
-                    "pedradb: corrupt SST in {} on iter_internal: {e}",
-                    self.path.display()
-                )
-            })
-            .into_iter()
+        self.entries_cloned().into_iter()
     }
 
-    /// First user key of every data block. Unpaged: in-memory (no I/O).
-    /// Paged: loads keys through the page LRU (may pread the SST tail).
+    /// First user key of every data block, from the in-memory index (no I/O).
+    /// Used to sample key-space split points for the parallel merge.
     #[must_use]
-    pub fn block_first_user_keys(&self) -> Vec<Bytes> {
-        (0..self.n_blocks()).map(|i| self.first_key_at(i)).collect()
+    pub fn block_first_user_keys(&self) -> Vec<&[u8]> {
+        self.index
+            .iter()
+            .map(|h| h.first_user_key.as_ref())
+            .collect()
     }
 
     /// Internal versions one block at a time (RFC-0037 compact). Does **not**
@@ -2367,18 +1635,8 @@ impl SstTable {
         // ends below lo (entries are sorted by user key).
         let block_i = lo
             .map(|lo| {
-                let n = self.n_blocks();
-                let mut lo_i = 0usize;
-                let mut hi_i = n;
-                while lo_i < hi_i {
-                    let mid = (lo_i + hi_i) / 2;
-                    if self.first_key_at(mid).as_ref() < lo {
-                        lo_i = mid + 1;
-                    } else {
-                        hi_i = mid;
-                    }
-                }
-                lo_i
+                self.index
+                    .partition_point(|h| h.first_user_key.as_ref() < lo)
             })
             .unwrap_or(0);
         SstInternalStream {
@@ -2392,12 +1650,9 @@ impl SstTable {
     }
 
     /// Clone all entries (for compaction merge). Materializes lazy tables.
-    ///
-    /// # Errors
-    /// Block CRC / decode fault. Compact/GC must fail-stop — an empty
-    /// stand-in would rewrite the file as if it had no keys.
-    pub fn entries_cloned(&self) -> Result<Vec<(InternalKey, Bytes)>> {
-        self.materialize_entries()
+    #[must_use]
+    pub fn entries_cloned(&self) -> Vec<(InternalKey, Bytes)> {
+        self.materialize_entries().unwrap_or_default()
     }
 
     /// Clone only internal entries whose user key falls in `[start, end)`.
@@ -2479,12 +1734,7 @@ impl SstTable {
             return out;
         }
 
-        let entries = self.entries_cloned().unwrap_or_else(|e| {
-            panic!(
-                "pedradb: corrupt SST in {} on entries_in_user_range: {e}",
-                self.path.display()
-            )
-        });
+        let entries = self.entries_cloned();
         entries
             .into_iter()
             .filter(|(ikey, _)| {
@@ -2538,7 +1788,7 @@ impl SstTable {
             self.smallest_user_key.as_deref(),
             self.largest_user_key.as_deref(),
         ) {
-            if !prefix.is_empty() && hi < prefix {
+            if !crate::write_admission_kernel::batch_is_empty(prefix.len() as u64) && hi < prefix {
                 return None;
             }
             if let Some(e) = end_owned.as_deref() {
@@ -2548,13 +1798,7 @@ impl SstTable {
             }
         }
         let in_window = |uk: &[u8]| -> bool {
-            if !prefix.is_empty() && !uk.starts_with(prefix) {
-                return false;
-            }
-            match end_owned.as_deref() {
-                Some(e) => uk < e,
-                None => true,
-            }
+            crate::prefix::key_in_prefix_range(uk, prefix, end_owned.as_deref())
         };
         let decide =
             |uk: &Bytes, block: &[(InternalKey, Bytes)]| -> Option<Option<(Bytes, Bytes)>> {
@@ -2562,7 +1806,12 @@ impl SstTable {
                     return Some(None);
                 }
                 match Self::best_point_in_entry_slice(block, uk, snapshot) {
-                    Some((seq, Lookup::Found(v))) if !self.range_deleted(uk, seq, snapshot) => {
+                    Some((seq, Lookup::Found(v)))
+                        if crate::merge::visible_at(
+                            crate::key::ValueType::Value,
+                            self.range_deleted(uk, seq, snapshot),
+                        ) =>
+                    {
                         Some(Some((uk.clone(), v)))
                     }
                     Some((_, Lookup::Deleted)) => Some(None),
@@ -2597,7 +1846,10 @@ impl SstTable {
                         Some(None) => continue,
                         None => match self.point_in_blocks(&uk, snapshot, &mut load) {
                             Some((seq, Lookup::Found(v)))
-                                if !self.range_deleted(&uk, seq, snapshot) =>
+                                if crate::merge::visible_at(
+                                    crate::key::ValueType::Value,
+                                    self.range_deleted(&uk, seq, snapshot),
+                                ) =>
                             {
                                 return Some((uk, v));
                             }
@@ -2608,12 +1860,7 @@ impl SstTable {
             }
             None
         } else {
-            let entries = self.entries_cloned().unwrap_or_else(|e| {
-                panic!(
-                    "pedradb: corrupt SST in {} on last_visible: {e}",
-                    self.path.display()
-                )
-            });
+            let entries = self.entries_cloned();
             let mut last: Option<Bytes> = None;
             let mut users = Vec::new();
             for (k, _) in entries.iter().rev() {
@@ -2648,7 +1895,7 @@ impl SstTable {
         start: Bound<&[u8]>,
         end: Bound<&[u8]>,
     ) -> Vec<usize> {
-        if self.n_blocks() == 0 {
+        if crate::write_admission_kernel::batch_is_empty(self.index.len() as u64) {
             return Vec::new();
         }
         let start_i = match start {
@@ -2661,44 +1908,25 @@ impl SstTable {
                 // `first_user_key == s` can still hold trailing versions of
                 // `s`. Partition on `< s` (not `<= s`) so that previous
                 // block stays in the window.
-                let n = self.n_blocks();
-                let mut lo_i = 0usize;
-                let mut hi_i = n;
-                while lo_i < hi_i {
-                    let mid = (lo_i + hi_i) / 2;
-                    if self.first_key_at(mid).as_ref() < s {
-                        lo_i = mid + 1;
-                    } else {
-                        hi_i = mid;
-                    }
-                }
-                lo_i.saturating_sub(1)
+                let ge = self
+                    .index
+                    .partition_point(|h| h.first_user_key.as_ref() < s);
+                ge.saturating_sub(1)
             }
         };
         let mut out = Vec::new();
-        for i in start_i..self.n_blocks() {
-            let block_lo = self.first_key_at(i);
-            let starts_before_end = match end {
-                Bound::Unbounded => true,
-                Bound::Included(e) => block_lo.as_ref() <= e,
-                Bound::Excluded(e) => block_lo.as_ref() < e,
-            };
-            if !starts_before_end {
+        for i in start_i..self.index.len() {
+            let block_lo = self.index[i].first_user_key.as_ref();
+            if !user_key_in_range(block_lo, Bound::Unbounded, end) {
                 break;
             }
-            let block_hi = if i + 1 < self.n_blocks() {
-                Some(self.first_key_at(i + 1))
-            } else {
-                None
-            };
+            let block_hi_excl = self.index.get(i + 1).map(|n| n.first_user_key.as_ref());
             let ends_after_start = match start {
                 Bound::Unbounded => true,
                 // `hi == s` means the next block starts at `s`; this block
                 // may hold trailing versions of `s` from a mid-key split —
                 // keep it (same window rule as `blocks_for_point`).
-                Bound::Included(s) | Bound::Excluded(s) => {
-                    block_hi.as_ref().is_none_or(|hi| hi.as_ref() >= s)
-                }
+                Bound::Included(s) | Bound::Excluded(s) => block_hi_excl.is_none_or(|hi| hi >= s),
             };
             if ends_after_start {
                 out.push(i);
@@ -2767,7 +1995,7 @@ impl SstInternalStream<'_> {
                 if self.block.is_some() {
                     return Ok(None);
                 }
-                self.block = Some(self.table.entries_cloned()?);
+                self.block = Some(self.table.entries_cloned());
                 self.entry_i = 0;
                 continue;
             }
@@ -2800,9 +2028,8 @@ pub struct SstRangeIter<'a> {
     start: Bound<Bytes>,
     end: Bound<Bytes>,
     snapshot: SequenceNumber,
-    /// Newest visible user already yielded (skip older seqs). Reused buffer
-    /// — a `Bytes` clone here was a third refcount RMW per prefix row.
-    skip_user: Vec<u8>,
+    /// Newest visible version per user already yielded (skip older seqs).
+    skip_user: Option<Bytes>,
     /// When false, yield empty values (`KeyOnly` / count).
     want_values: bool,
 }
@@ -2811,31 +2038,16 @@ impl Iterator for SstRangeIter<'_> {
     type Item = (InternalKey, Bytes);
 
     fn next(&mut self) -> Option<Self::Item> {
-        // Bounds hoisted out of the entry loop. Entries are sorted by user
-        // key, so the first key past `end` ends the iterator — no tail walk
-        // of a block whose remaining keys all exceed the window.
-        let start_b: Option<(&Bytes, bool)> = match &self.start {
-            Bound::Unbounded => None,
-            Bound::Included(s) => Some((s, true)),
-            Bound::Excluded(s) => Some((s, false)),
-        };
-        let end_b: Option<(&Bytes, bool)> = match &self.end {
-            Bound::Unbounded => None,
-            Bound::Included(e) => Some((e, true)),
-            Bound::Excluded(e) => Some((e, false)),
-        };
+        // Entries are sorted by user key, so the first key past `end` ends
+        // the iterator — no tail walk of a block whose remaining keys all
+        // exceed the window.
         loop {
             if let Some(ref block) = self.current {
                 while self.idx < block.len() {
                     let (k, v) = &block[self.idx];
                     self.idx += 1;
                     let uk = k.user_key.as_ref();
-                    let past_end = match end_b {
-                        Some((e, true)) => uk > e.as_ref(),
-                        Some((e, false)) => uk >= e.as_ref(),
-                        None => false,
-                    };
-                    if past_end {
+                    if crate::merge::past_end(uk, crate::merge::bound_as_ref(&self.end)) {
                         // Sorted: nothing later can be in range.
                         self.current = None;
                         self.blocks = Vec::new().into_iter();
@@ -2847,28 +2059,23 @@ impl Iterator for SstRangeIter<'_> {
                     if k.sequence > self.snapshot {
                         continue;
                     }
-                    if !self.skip_user.is_empty() && self.skip_user == uk {
+                    if self.skip_user.as_ref().is_some_and(|u| u == &k.user_key) {
                         continue;
                     }
-                    let before_start = match start_b {
-                        Some((s, true)) => uk < s.as_ref(),
-                        Some((s, false)) => uk <= s.as_ref(),
-                        None => false,
-                    };
-                    if before_start {
+                    if !user_key_in_range(
+                        uk,
+                        crate::merge::bound_as_ref(&self.start),
+                        Bound::Unbounded,
+                    ) {
                         continue;
                     }
-                    self.skip_user.clear();
-                    self.skip_user.extend_from_slice(uk);
+                    self.skip_user = Some(k.user_key.clone());
                     let value = if self.want_values {
                         v.clone()
                     } else {
                         Bytes::new()
                     };
-                    return Some((
-                        InternalKey::new(k.user_key.clone(), k.sequence, k.kind),
-                        value,
-                    ));
+                    return Some((k.clone(), value));
                 }
             }
             let bi = self.blocks.next()?;
@@ -2900,15 +2107,7 @@ fn seek_point_in_block_image(
     path: &Path,
 ) -> Result<Option<(SequenceNumber, Lookup)>> {
     let body = split_block_crc(raw, path)?;
-    if get_stages_enabled() {
-        let t = Instant::now();
-        let found =
-            seek_point_in_block_body(body, compressed, user_key, snapshot, plain_scratch, path)?;
-        GET_WALK_NS.with(|c| add_stage(c, t.elapsed().as_nanos()));
-        Ok(found)
-    } else {
-        seek_point_in_block_body(body, compressed, user_key, snapshot, plain_scratch, path)
-    }
+    seek_point_in_block_body(body, compressed, user_key, snapshot, plain_scratch, path)
 }
 
 /// Seek a CRC-stripped block body the caller already verified: decompress
@@ -2928,9 +2127,6 @@ fn seek_point_in_block_body(
                 path.display()
             ))
         })?;
-        if !lz4_plain_size_ok(size, body.len()) {
-            return Err(lz4_size_rejected(path, size, body.len()));
-        }
         plain_scratch.clear();
         plain_scratch.resize(size, 0);
         let written = lz4_flex::block::decompress_into(input, plain_scratch).map_err(|e| {
@@ -3021,7 +2217,11 @@ fn seek_point_in_plain_block(
                 let (sequence, kind) =
                     crate::key::unpack_sequence_and_type(u64::from_be_bytes(trailer))?;
                 if kind != ValueType::RangeDeletion && sequence <= snapshot {
-                    if best.as_ref().is_none_or(|(s, _)| sequence > *s) {
+                    if crate::lookup_kernel::prefer_newer_seq(
+                        best.is_some(),
+                        sequence,
+                        best.as_ref().map(|(s, _)| *s).unwrap_or(0),
+                    ) {
                         let look = match kind {
                             ValueType::Deletion => Lookup::Deleted,
                             ValueType::Value => {
@@ -3074,14 +2274,7 @@ fn split_block_crc<'a>(raw: &'a [u8], path: &Path) -> Result<&'a [u8]> {
     }
     let (body, crc_bytes) = raw.split_at(raw.len() - 4);
     let stored = u32::from_le_bytes(crc_bytes.try_into().unwrap());
-    let computed = if get_stages_enabled() {
-        let t = Instant::now();
-        let c = crc32c::crc32c(body);
-        GET_CRC_NS.with(|cell| add_stage(cell, t.elapsed().as_nanos()));
-        c
-    } else {
-        crc32c::crc32c(body)
-    };
+    let computed = crc32c::crc32c(body);
     if !crate::sst::sst_block_crc_ok(stored, computed) {
         return Err(CoreError::Internal(format!(
             "SST block CRC mismatch in {}",
@@ -3105,15 +2298,6 @@ fn decode_block_bytes(
         raw
     };
     let plain: Vec<u8> = if compressed_blocks {
-        let (size, _) = lz4_flex::block::uncompressed_size(raw).map_err(|e| {
-            CoreError::Internal(format!(
-                "SST lz4 decompress failed in {}: {e}",
-                path.display()
-            ))
-        })?;
-        if !lz4_plain_size_ok(size, raw.len()) {
-            return Err(lz4_size_rejected(path, size, raw.len()));
-        }
         lz4_flex::decompress_size_prepended(raw).map_err(|e| {
             CoreError::Internal(format!(
                 "SST lz4 decompress failed in {}: {e}",
@@ -3125,7 +2309,8 @@ fn decode_block_bytes(
     };
     let mut bc = Cursor::new(&plain);
     let mut entries = Vec::new();
-    while !bc.is_empty() {
+    while !crate::write_admission_kernel::batch_is_empty(bc.data.len().saturating_sub(bc.pos) as u64)
+    {
         entries.push(read_entry(&mut bc)?);
     }
     Ok(entries)
@@ -3187,7 +2372,7 @@ fn v6_file_crc(head: &[u8]) -> Option<u32> {
 }
 
 fn user_key_bounds(entries: &[(InternalKey, Bytes)]) -> (Option<Bytes>, Option<Bytes>) {
-    if entries.is_empty() {
+    if crate::write_admission_kernel::batch_is_empty(entries.len() as u64) {
         return (None, None);
     }
     let first = entries[0].0.user_key.clone();
@@ -3196,7 +2381,7 @@ fn user_key_bounds(entries: &[(InternalKey, Bytes)]) -> (Option<Bytes>, Option<B
 }
 
 fn rebuild_bloom(entries: &[(InternalKey, Bytes)]) -> BloomFilter {
-    if entries.is_empty() {
+    if crate::write_admission_kernel::batch_is_empty(entries.len() as u64) {
         return BloomFilter::always_true();
     }
     // Distinct user keys ≈ entries (upper bound is fine for sizing).
@@ -3398,19 +2583,9 @@ pub fn write_sst_try_sorted_with(
 }
 
 /// Bulk-run SST: trusted-sorted `(key, val, seq)` arrays, SST **v6**
-/// (uncompressed 4 KiB blocks + per-block CRC + bloom). No `InternalKey`,
-/// no per-entry `Result`, no lz4. v3 evicted gets re-read the whole file;
+/// (uncompressed 4 KiB blocks + per-block CRC). No `InternalKey`, no
+/// per-entry `Result`, no lz4. v3 evicted gets re-read the whole file;
 /// v6 is a Rocks-shaped 4 KiB `read_range`.
-///
-/// The filter is sized by the distinct keys written (same 10 bits/key
-/// as the sorted writer). An always-true bloom made absent-key
-/// `probe_miss` a hidden loss; bulk files skip the filter only if the
-/// key set is empty, which this writer rejects.
-///
-/// Always `fdatasync`s before returning (RFC-0162 P1.1): the chunk
-/// install is a durability + page-cache hygiene point, not the DB
-/// `sync` default — an unsynced 64 MiB chunk leaves writeback debt that
-/// throttles later chunks.
 ///
 /// # Errors
 /// Length mismatch, oversized field, or I/O.
@@ -3420,31 +2595,14 @@ pub fn write_sst_bulk_arrays(
     keys: &[Bytes],
     vals: &[Bytes],
     seqs: &[SequenceNumber],
+    sync: bool,
 ) -> Result<SstTable> {
-    write_sst_bulk_arrays_body(env, path.as_ref(), keys, vals, seqs)
+    write_sst_bulk_arrays_body(env, path.as_ref(), keys, vals, seqs, sync)
 }
 
 const BULK_SST_HEADER_LEN: usize = 40;
 /// Stage this many encoded bytes before a `write` (hot cache, few syscalls).
 const BULK_STREAM_BATCH: usize = 4 * 1024 * 1024;
-/// Bitset cap shared with the sorted writer: inserts past this raise
-/// FPR; the bitset does not grow. One 64 MiB bulk chunk is ~2.5e5 keys
-/// at 200 B values, well under 2M.
-const BLOOM_CAP_MAX: usize = 2_097_152;
-
-/// Bloom for a bulk file: sized by distinct written keys, 10 bits/key.
-fn bulk_bloom(keys: &[Bytes]) -> BloomFilter {
-    let mut bloom = BloomFilter::with_capacity(keys.len().min(BLOOM_CAP_MAX), DEFAULT_BITS_PER_KEY);
-    let mut last: Option<&[u8]> = None;
-    for k in keys {
-        let uk = k.as_ref();
-        if last != Some(uk) {
-            bloom.insert(uk);
-            last = Some(uk);
-        }
-    }
-    bloom
-}
 
 fn write_sst_bulk_arrays_body(
     env: &impl Env,
@@ -3452,6 +2610,7 @@ fn write_sst_bulk_arrays_body(
     keys: &[Bytes],
     vals: &[Bytes],
     seqs: &[SequenceNumber],
+    sync: bool,
 ) -> Result<SstTable> {
     if keys.len() != vals.len() || keys.len() != seqs.len() {
         return Err(CoreError::Internal(
@@ -3459,7 +2618,7 @@ fn write_sst_bulk_arrays_body(
         ));
     }
     let n_entries = keys.len();
-    if n_entries == 0 {
+    if crate::write_admission_kernel::batch_is_empty(n_entries as u64) {
         return Err(CoreError::Internal("bulk SST empty".into()));
     }
     let mut stages = StageTotals {
@@ -3490,7 +2649,10 @@ fn write_sst_bulk_arrays_body(
             max_sequence = seq;
         }
         let need = k.len() + v.len() + 16;
-        if staged.len() - block_start > 0 && staged.len() - block_start + need > target {
+        if !crate::write_admission_kernel::batch_is_empty(
+            staged.len().saturating_sub(block_start) as u64
+        ) && staged.len() - block_start + need > target
+        {
             finish_staged_block(
                 &mut file,
                 &mut staged,
@@ -3501,12 +2663,16 @@ fn write_sst_bulk_arrays_body(
             )?;
             block_start = staged.len();
         }
-        if staged.len() == block_start {
+        if crate::write_admission_kernel::batch_is_empty(
+            staged.len().saturating_sub(block_start) as u64
+        ) {
             block_first_user = Some(keys[i].clone());
         }
         append_bulk_entry(&mut staged, k, seq, v);
     }
-    if staged.len() > block_start {
+    if !crate::write_admission_kernel::batch_is_empty(
+        staged.len().saturating_sub(block_start) as u64
+    ) {
         finish_staged_block(
             &mut file,
             &mut staged,
@@ -3516,28 +2682,15 @@ fn write_sst_bulk_arrays_body(
             &mut index,
         )?;
     }
-    if !staged.is_empty() {
+    if !crate::write_admission_kernel::batch_is_empty(staged.len() as u64) {
         file.write_all(&staged)?;
         staged.clear();
     }
-    // Owned copies: `keys[i]` are slices of the caller's pooled key buffer
-    // (compat `KEY_POOL`, 8 KiB chunks). Retaining a slice pins the whole
-    // chunk; the table must not keep the ingest pool alive (100M RSS).
-    let smallest_user_key = Some(Bytes::copy_from_slice(&keys[0]));
-    let largest_user_key = Some(Bytes::copy_from_slice(&keys[n_entries - 1]));
+    let smallest_user_key = Some(keys[0].clone());
+    let largest_user_key = Some(keys[n_entries - 1].clone());
     let data_len = pos - BULK_SST_HEADER_LEN as u64;
     let key_cp = SstTable::derive_index_accel(&mut index);
-    let bloom_bytes = n_entries
-        .saturating_mul(DEFAULT_BITS_PER_KEY)
-        .saturating_div(8)
-        .saturating_add(16);
-    let mut tail = Vec::with_capacity(
-        index
-            .len()
-            .saturating_mul(48)
-            .saturating_add(64)
-            .saturating_add(bloom_bytes),
-    );
+    let mut tail = Vec::with_capacity(index.len().saturating_mul(48).saturating_add(64));
     for h in &index {
         tail.extend_from_slice(&h.offset.to_le_bytes());
         tail.extend_from_slice(&h.length.to_le_bytes());
@@ -3545,14 +2698,12 @@ fn write_sst_bulk_arrays_body(
         tail.extend_from_slice(&kl.to_le_bytes());
         tail.extend_from_slice(&h.first_user_key);
     }
-    stages.add(|s| &mut s.enc_ns, t_enc);
-    let t_bloom = std::time::Instant::now();
-    let bloom = bulk_bloom(keys);
+    let bloom = BloomFilter::always_true();
     tail.extend_from_slice(&bloom.encode());
-    stages.add(|s| &mut s.bloom_ns, t_bloom);
     let n = n_entries as u64;
     let num_blocks = index.len() as u32;
     write_bulk_header(&mut header, n, max_sequence, num_blocks, data_len);
+    stages.add(|s| &mut s.enc_ns, t_enc);
 
     let t_crc = std::time::Instant::now();
     let hdr_crc = crc32c::crc32c(&header);
@@ -3564,16 +2715,16 @@ fn write_sst_bulk_arrays_body(
     file.write_all(&file_crc.to_le_bytes())?;
     file.seek(SeekFrom::Start(0))?;
     file.write_all(&header)?;
-    // RFC-0162 P1.1: unconditional — see `write_sst_bulk_arrays` docs.
-    file.sync_data()?;
+    if sync {
+        file.sync_data()?;
+    }
     drop(file);
     stages.add(|s| &mut s.write_ns, t_write);
     if stages.enabled {
         println!(
             "FLUSHSTAGES entries={n_entries} bytes={payload_len_hint} enc_ms={:.1} \
-             lz4_ms=0.0 bloom_ms={:.1} crc_ms={:.1} write_ms={:.1} lz4=false",
+             lz4_ms=0.0 bloom_ms=0.0 crc_ms={:.1} write_ms={:.1} lz4=false",
             stages.enc_ns as f64 / 1e6,
-            stages.bloom_ns as f64 / 1e6,
             stages.crc_ns as f64 / 1e6,
             stages.write_ns as f64 / 1e6,
             payload_len_hint = payload_len + 4,
@@ -3585,9 +2736,6 @@ fn write_sst_bulk_arrays_body(
         path: path.to_path_buf(),
         payload: Arc::new(parking_lot::RwLock::new(crate::cache::ResidentBody::empty())),
         payload_len,
-        // Body stays on disk: this table may path-reload without a kit
-        // until hydrate attaches one at install (RFC-0159).
-        body_on_disk: true,
         compressed_blocks: false,
         block_crc: true,
         entries: Arc::new(Mutex::new(None)),
@@ -3595,14 +2743,12 @@ fn write_sst_bulk_arrays_body(
         range_tombstones: Vec::new(),
         num_entries: n_entries,
         max_sequence,
-        index: index.into(),
+        index,
         key_cp,
         bloom,
         smallest_user_key,
         largest_user_key,
         cf,
-        paged: None,
-        index_file_off: (BULK_SST_HEADER_LEN as u64).saturating_add(data_len),
     })
 }
 
@@ -3628,15 +2774,10 @@ fn finish_staged_block(
     let crc = crc32c::crc32c(&staged[block_start..]);
     let crc_bytes = crc.to_le_bytes();
     let stored = (staged.len() - block_start + 4) as u32;
-    // Copy, do not slice: `first` shares the ingest key pool chunk. One
-    // sparse-index entry per block would otherwise pin every pooled key of
-    // the run for the table's lifetime (measured ~37 B/entry resident at
-    // 4M–100M; the 3.9 GiB guest SIGKILLs at 100M).
-    let first = first.expect("bulk block missing first key");
     index.push(BlockHandle {
         offset: *pos,
         length: stored,
-        first_user_key: Bytes::copy_from_slice(&first),
+        first_user_key: first.expect("bulk block missing first key"),
         p8: 0,
     });
     *pos += u64::from(stored);
@@ -3718,21 +2859,25 @@ fn write_sst_try_sorted_body(
         enabled: std::env::var_os("PEDRA_FLUSH_STAGES").is_some(),
         ..StageTotals::default()
     };
-    // The bloom is built AFTER the entry loop, sized by the distinct user
-    // keys actually written. `with_capacity(bloom_hint)` sized every output
-    // file by the caller's TOTAL: whole-levels rewrites pass the sum over
-    // all inputs (25M keys), so every 64 MiB chunk carried a ~31 MB
-    // mostly-zero bloom — retained per opened table (a plain field, never
-    // payload-evictable) and shipped on disk. Distinct user keys are
-    // retained through the encode loop and inserted once at the end:
-    // `Bytes` clones share the source allocation, and the retention is
-    // bounded by the keys of one output file, whose full image this writer
-    // already assembles in memory. `bloom_hint == 0` still means no
-    // filter; the cap only bounds the bitset when a single file holds
-    // tens of millions of keys (inserts past capacity raise FPR; the
-    // bitset does not grow).
-    let bloom_active = bloom_hint != 0;
-    let mut bloom_keys: Vec<Bytes> = Vec::new();
+    // Bloom is built AFTER the entry loop from the distinct user keys
+    // actually written. The old `with_capacity(bloom_hint)` sized every
+    // output file by the caller's TOTAL: whole-levels rewrites pass the
+    // sum over all inputs (25M keys), so every 64 MiB chunk carried a
+    // ~31 MB mostly-zero bloom — retained per opened table (a plain
+    // field, never payload-evictable) and shipped on disk. `bloom_hint`
+    // now only gates whether the file gets a filter at all.
+    // Cap so a whole-level rewrite hint (25M keys) cannot size every
+    // 64 MiB chunk's filter at 31 MB. Inserts past capacity only raise
+    // FPR; the bitset does not grow. `bloom_hint == 0` still means no
+    // filter. Distinct keys are inserted from slices during the encode
+    // loop — no `Vec<Bytes>` of every user key.
+    const BLOOM_CAP_MAX: usize = 2_097_152;
+    let mut bloom = if crate::write_admission_kernel::batch_is_empty(bloom_hint as u64) {
+        BloomFilter::always_true()
+    } else {
+        BloomFilter::with_capacity(bloom_hint.min(BLOOM_CAP_MAX), DEFAULT_BITS_PER_KEY)
+    };
+    let bloom_active = bloom.is_active();
     let mut data = Vec::new();
     let mut index: Vec<BlockHandle> = Vec::new();
     let mut block_buf = Vec::new();
@@ -3774,7 +2919,7 @@ fn write_sst_try_sorted_body(
         policy_decided: &mut bool,
         lz4_scratch: &mut Vec<u8>,
     ) -> Result<()> {
-        if block_buf.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(block_buf.len() as u64) {
             return Ok(());
         }
         let t0 = std::time::Instant::now();
@@ -3793,7 +2938,7 @@ fn write_sst_try_sorted_body(
         }
         let offset = data.len() as u64;
         if *policy_compress {
-            if lz4_scratch.is_empty() {
+            if crate::write_admission_kernel::batch_is_empty(lz4_scratch.len() as u64) {
                 lz4_into(block_buf, lz4_scratch)?;
                 stages.add(|s| &mut s.lz4_ns, t0);
             }
@@ -3810,8 +2955,7 @@ fn write_sst_try_sorted_body(
             index.push(BlockHandle {
                 offset,
                 length,
-                // Owned copy — never pin the memtable / pool buffer.
-                first_user_key: Bytes::copy_from_slice(&first),
+                first_user_key: first,
                 p8: 0,
             });
             return Ok(());
@@ -3827,8 +2971,7 @@ fn write_sst_try_sorted_body(
         index.push(BlockHandle {
             offset,
             length,
-            // Owned copy — never pin the memtable / pool buffer.
-            first_user_key: Bytes::copy_from_slice(&first),
+            first_user_key: first,
             p8: 0,
         });
         Ok(())
@@ -3855,7 +2998,7 @@ fn write_sst_try_sorted_body(
         max_sequence = max_sequence.max(ikey.sequence);
         n_entries = n_entries.saturating_add(1);
         if smallest_user_key.is_none() {
-            smallest_user_key = Some(Bytes::copy_from_slice(&ikey.user_key));
+            smallest_user_key = Some(ikey.user_key.clone());
         }
         if ikey.kind == ValueType::RangeDeletion {
             range_tombstones.push((ikey.clone(), value.clone()));
@@ -3867,37 +3010,17 @@ fn write_sst_try_sorted_body(
             .as_ref()
             .is_some_and(|p| p.user_key.as_ref() == uk);
         if !same_user && bloom_active {
-            // Refcount clone; the key bytes are inserted into the filter
-            // after the loop, when their count is known.
-            bloom_keys.push(ikey.user_key.clone());
+            bloom.insert(uk);
         }
-        if block_buf.is_empty() {
-            block_first_user = Some(ikey.user_key.clone());
-        }
-        // PEDRA-003: a same-user run (a hot key rewritten every batch —
-        // e.g. a changelog cursor) must not grow a block past the
-        // reader's absolute plain cap. Readers already join consecutive
-        // blocks that share a first_user_key, so splitting mid-user is
-        // format-legal; an unsplittable run wrote a block the reader
-        // rejects on open.
-        if !block_buf.is_empty()
-            && block_buf.len() + uk.len() + value.len() + 64 >= LZ4_MAX_PLAIN_BLOCK
-        {
-            flush_block(
-                &mut data,
-                &mut block_buf,
-                &mut block_first_user,
-                &mut index,
-                &mut stages,
-                &mut policy_compress,
-                &mut policy_decided,
-                &mut lz4_scratch,
-            )?;
+        if crate::write_admission_kernel::batch_is_empty(block_buf.len() as u64) {
             block_first_user = Some(ikey.user_key.clone());
         }
         let pre_len = block_buf.len();
         encode_entry_into(&ikey, &value, &mut block_buf)?;
-        if !same_user && block_buf.len() > block_target() && pre_len > 0 {
+        if !same_user
+            && block_buf.len() > block_target()
+            && !crate::write_admission_kernel::batch_is_empty(pre_len as u64)
+        {
             // Overflow: the just-encoded entry moves to the fresh block.
             block_buf.truncate(pre_len);
             flush_block(
@@ -3919,9 +3042,7 @@ fn write_sst_try_sorted_body(
     }
     // The file's largest user key is the last entry's — derived from
     // `prev_ikey` by move, not tracked with a per-entry clone.
-    let largest_user_key = prev_ikey
-        .as_ref()
-        .map(|k| Bytes::copy_from_slice(&k.user_key));
+    let largest_user_key = prev_ikey.as_ref().map(|k| k.user_key.clone());
     flush_block(
         &mut data,
         &mut block_buf,
@@ -3934,21 +3055,10 @@ fn write_sst_try_sorted_body(
     )?;
     let key_cp = SstTable::derive_index_accel(&mut index);
     stages.add(|s| &mut s.enc_ns, t_enc);
-    // Size by the distinct keys written, then insert them all. `bloom_hint`
-    // only decided whether the file gets a filter at all.
-    let t_bloom = std::time::Instant::now();
-    let bloom = if bloom_active && !bloom_keys.is_empty() {
-        let mut b =
-            BloomFilter::with_capacity(bloom_keys.len().min(BLOOM_CAP_MAX), DEFAULT_BITS_PER_KEY);
-        for key in &bloom_keys {
-            b.insert(key);
-        }
-        b
-    } else {
-        BloomFilter::always_true()
-    };
-    drop(bloom_keys);
-    stages.add(|s| &mut s.bloom_ns, t_bloom);
+    // Bloom inserts ran inside the encode loop (slice, no key clone).
+    if crate::write_admission_kernel::batch_is_empty(n_entries as u64) {
+        bloom = BloomFilter::always_true();
+    }
 
     // Header: magic version num_entries max_seq num_blocks data_len (fixed 40 B)
     let mut header = Vec::with_capacity(40);
@@ -4003,7 +3113,6 @@ fn write_sst_try_sorted_body(
     // first read, so torn files fail closed exactly as before.
     let mut image = header;
     image.append(&mut data);
-    let index_file_off = image.len() as u64;
     image.append(&mut index_bytes);
     image.append(&mut bloom_bytes);
     image.extend_from_slice(&file_crc.to_le_bytes());
@@ -4058,7 +3167,6 @@ fn write_sst_try_sorted_body(
             crate::cache::ResidentBody::from_image(payload),
         )),
         payload_len,
-        body_on_disk: false,
         compressed_blocks: policy_compress,
         block_crc: policy_compress,
         entries: Arc::new(Mutex::new(None)),
@@ -4066,14 +3174,12 @@ fn write_sst_try_sorted_body(
         range_tombstones,
         num_entries: n_entries,
         max_sequence,
-        index: index.into(),
+        index,
         key_cp,
         bloom,
         smallest_user_key,
         largest_user_key,
         cf,
-        paged: None,
-        index_file_off,
     })
 }
 
@@ -4088,7 +3194,9 @@ impl<'a> Cursor<'a> {
     }
 
     fn is_empty(&self) -> bool {
-        self.pos >= self.data.len()
+        crate::write_admission_kernel::batch_is_empty(
+            self.data.len().saturating_sub(self.pos) as u64
+        )
     }
 
     fn read_u32(&mut self) -> Result<u32> {
@@ -4123,7 +3231,6 @@ impl<'a> Cursor<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::env::EnvSource;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_path() -> PathBuf {
@@ -4136,6 +3243,167 @@ mod tests {
             .as_nanos();
         let seq = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         std::env::temp_dir().join(format!("pedradb-sst-{n}-{seq}.sst"))
+    }
+
+    #[test]
+    fn best_point_in_entry_slice_calls_prefer_newer_seq() {
+        let src = include_str!("table.rs");
+        let body = src
+            .split("fn best_point_in_entry_slice")
+            .nth(1)
+            .and_then(|s| s.split("fn ").next())
+            .expect("best_point_in_entry_slice");
+        assert!(
+            body.contains("prefer_newer_seq("),
+            "SST point newest-wins must call catalog prefer_newer_seq"
+        );
+        assert!(
+            !body.contains("is_none_or"),
+            "newest-wins if must not stay inline in best_point_in_entry_slice"
+        );
+        let needle = concat!("is_none_or(|", "(s, _)|");
+        assert!(
+            !src.contains(needle),
+            "SST point newest-wins ifs must call prefer_newer_seq"
+        );
+        assert!(
+            src.matches("prefer_newer_seq(").count() >= 7,
+            "helper + block-merge newest-wins sites"
+        );
+    }
+
+    #[test]
+    fn overlaps_user_range_calls_point_bounds_overlap() {
+        let src = include_str!("table.rs");
+        let body = src
+            .split("pub fn overlaps_user_range")
+            .nth(1)
+            .and_then(|s| s.split("pub fn iter_user_range").next())
+            .expect("overlaps_user_range");
+        assert!(
+            body.contains("point_bounds_overlap("),
+            "scan trampoline must call catalog point_bounds_overlap"
+        );
+        assert!(
+            !body.contains("file_before_end"),
+            "Bound-match if must not stay inline in overlaps_user_range"
+        );
+    }
+
+    #[test]
+    fn sst_get_found_calls_visible_at() {
+        let src = include_str!("table.rs");
+        let body = src
+            .split("pub fn get(")
+            .nth(1)
+            .and_then(|s| s.split("pub(crate) fn has_range_tombstones").next())
+            .expect("SstTable::get");
+        assert!(
+            body.contains("visible_at("),
+            "SST get Found range-hide if must call catalog visible_at"
+        );
+        assert!(
+            !body.contains("if self.range_deleted(user_key, point_seq, snapshot)"),
+            "Found+range_deleted must not stay inline"
+        );
+    }
+
+    #[test]
+    fn last_visible_under_prefix_with_calls_visible_at() {
+        let src = include_str!("table.rs");
+        let body = src
+            .split("pub fn last_visible_under_prefix_with")
+            .nth(1)
+            .and_then(|s| s.split("pub(crate) fn blocks_overlapping_range").next())
+            .expect("last_visible_under_prefix_with");
+        assert!(
+            body.contains("visible_at("),
+            "last_visible Found range-hide if must call catalog visible_at"
+        );
+        assert!(
+            !body.contains("if !self.range_deleted"),
+            "Found+!range_deleted must not stay inline"
+        );
+    }
+
+    #[test]
+    fn last_visible_under_prefix_with_calls_key_in_prefix_range() {
+        let src = include_str!("table.rs");
+        let body = src
+            .split("pub fn last_visible_under_prefix_with")
+            .nth(1)
+            .and_then(|s| s.split("pub(crate) fn blocks_overlapping_range").next())
+            .expect("last_visible_under_prefix_with");
+        assert!(
+            body.contains("key_in_prefix_range("),
+            "SST prefix window must call catalog key_in_prefix_range"
+        );
+        assert!(
+            !body.contains("starts_with(prefix)"),
+            "starts_with+end skip must not stay inline"
+        );
+    }
+
+    #[test]
+    fn blocks_overlapping_range_calls_user_key_in_range() {
+        let src = include_str!("table.rs");
+        let body = src
+            .split("pub(crate) fn blocks_overlapping_range")
+            .nth(1)
+            .and_then(|s| s.split("pub(crate) fn overlapping_blocks_for_test").next())
+            .expect("blocks_overlapping_range");
+        assert!(
+            body.contains("user_key_in_range("),
+            "block window end Bound must call catalog user_key_in_range"
+        );
+        assert!(
+            !body.contains("starts_before_end"),
+            "Bound-match if must not stay inline in blocks_overlapping_range"
+        );
+    }
+
+    #[test]
+    fn sst_range_iter_next_calls_past_end() {
+        let src = include_str!("table.rs");
+        let body = src
+            .split("impl Iterator for SstRangeIter")
+            .nth(1)
+            .and_then(|s| s.split("impl ").next())
+            .expect("SstRangeIter::next");
+        assert!(
+            body.contains("past_end("),
+            "SstRangeIter end-of-window if must call catalog past_end"
+        );
+        assert!(
+            !body.contains("uk > e.as_ref()"),
+            "Bound-match past_end must not stay inline"
+        );
+        assert!(
+            body.contains("user_key_in_range("),
+            "SstRangeIter start Bound if must call catalog user_key_in_range"
+        );
+        assert!(
+            !body.contains("before_start"),
+            "before_start Bound match must not stay inline"
+        );
+    }
+
+    #[test]
+    fn iter_user_range_calls_bound_to_owned() {
+        let src = include_str!("table.rs");
+        let body = src
+            .split("pub fn iter_user_range")
+            .nth(1)
+            .and_then(|s| s.split("pub fn materialize_entries").next())
+            .expect("iter_user_range");
+        assert!(
+            body.contains("bound_to_owned("),
+            "iter_user_range Bound-to-Bytes must call catalog bound_to_owned"
+        );
+        assert!(
+            !body.contains("copy_from_slice"),
+            "Bound match must not stay inline in iter_user_range"
+        );
     }
 
     /// The bloom is sized by the keys actually written, never by the
@@ -4174,31 +3442,6 @@ mod tests {
     }
 
     #[test]
-    fn same_user_run_splits_at_block_cap_and_reads_back() {
-        // PEDRA-003: ~12k versions of one key (a changelog cursor
-        // rewritten every batch) must split into cap-bounded blocks, not
-        // land in one block the reader rejects. The oldest version lives
-        // in the final block — that is the read that failed pre-fix.
-        let path = temp_path();
-        let n = 12_000u64;
-        let entries: Vec<(InternalKey, Bytes)> = (0..n)
-            .map(|i| {
-                (
-                    InternalKey::new(b"meta\0cursor".to_vec(), n - i, ValueType::Value),
-                    Bytes::from(vec![0x5a; 200]),
-                )
-            })
-            .collect();
-        let table =
-            write_sst_try_sorted_on(&StdEnv, &path, entries.into_iter().map(Ok), 1).unwrap();
-        assert_eq!(table.len(), n as usize);
-        assert_eq!(table.point_at(b"meta\0cursor", u64::MAX).unwrap().0, n);
-        assert_eq!(table.point_at(b"meta\0cursor", n / 2).unwrap().0, n / 2);
-        assert_eq!(table.point_at(b"meta\0cursor", 1).unwrap().0, 1);
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
     fn write_sst_bulk_arrays_is_v6_and_roundtrips() {
         let path = temp_path();
         let n = 64usize;
@@ -4209,47 +3452,21 @@ mod tests {
             .map(|i| Bytes::from(format!("v{i:04}").into_bytes()))
             .collect();
         let seqs: Vec<u64> = (1..=n as u64).collect();
-        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs).unwrap();
+        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs, true).unwrap();
         assert!(!table.compressed_blocks);
         assert!(table.block_crc);
-        assert!(table.has_bloom());
+        assert!(!table.has_bloom());
         assert_eq!(table.len(), n);
-        for i in 0..n {
-            let k = format!("k{i:04}");
-            assert!(
-                table.key_may_match(k.as_bytes()),
-                "bloom must not false-negative written key {k}"
-            );
-        }
-        // In-range absents (between existing keys). Bloom FP ~1%; eight
-        // probes is enough to prove the filter is live, not always-true.
-        let misses: [&[u8]; 8] = [
-            b"k0003x",
-            b"k0010x",
-            b"k0020x",
-            b"k0030x",
-            b"k0040x",
-            b"k0050x",
-            b"k0060x",
-            b"k0025-gone",
-        ];
-        let rejected = misses.iter().filter(|k| !table.key_may_match(k)).count();
-        assert!(
-            rejected >= 6,
-            "bulk bloom must reject in-range misses, rejected={rejected}/8"
-        );
         assert!(
             !table.payload_resident(),
             "streaming writer must not keep the file body resident"
         );
         drop(table);
         let re = SstTable::open_on(&StdEnv, &path).unwrap();
-        assert!(re.has_bloom());
         assert!(matches!(
             re.get(b"k0003", u64::MAX),
             Lookup::Found(v) if v.as_ref() == b"v0003"
         ));
-        assert!(matches!(re.get(b"k0003x", u64::MAX), Lookup::NotFound));
         assert!(matches!(re.get(b"missing", u64::MAX), Lookup::NotFound));
         let _ = std::fs::remove_file(&path);
     }
@@ -4266,7 +3483,7 @@ mod tests {
             .map(|i| Bytes::from(format!("v{i:04}").into_bytes()))
             .collect();
         let seqs: Vec<u64> = (1..=n as u64).collect();
-        write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs).unwrap();
+        write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs, true).unwrap();
         let orig = std::fs::read(&path).unwrap();
         assert!(orig.len() > BULK_SST_HEADER_LEN + 8);
 
@@ -4295,83 +3512,6 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// PEDRA-001: a forged lz4 size prefix must not allocate.
-    #[test]
-    fn lz4_plain_size_ok_rejects_prefix_bomb_admits_zero_block() {
-        assert!(!lz4_plain_size_ok(64 * 1024 * 1024, 106));
-        assert!(!lz4_plain_size_ok(0, 16));
-        assert!(lz4_plain_size_ok(16, 20));
-        let src = vec![0u8; BLOCK_TARGET];
-        let max = 4usize.saturating_add(lz4_flex::block::get_maximum_output_size(src.len()));
-        let mut frame = vec![0u8; max];
-        frame[..4].copy_from_slice(&(src.len() as u32).to_le_bytes());
-        let n = lz4_flex::block::compress_into(&src, &mut frame[4..]).expect("lz4 zeros");
-        frame.truncate(4 + n);
-        let (size, _) = lz4_flex::block::uncompressed_size(&frame).expect("size prefix");
-        assert!(
-            lz4_plain_size_ok(size, frame.len()),
-            "4 KiB zeros compressed to {} bytes must pass the 256x gate",
-            frame.len()
-        );
-        let src_max = vec![0u8; LZ4_MAX_PLAIN_BLOCK];
-        let max = 4usize.saturating_add(lz4_flex::block::get_maximum_output_size(src_max.len()));
-        let mut frame = vec![0u8; max];
-        frame[..4].copy_from_slice(&(src_max.len() as u32).to_le_bytes());
-        let n = lz4_flex::block::compress_into(&src_max, &mut frame[4..]).expect("lz4 256k zeros");
-        frame.truncate(4 + n);
-        let (size, _) = lz4_flex::block::uncompressed_size(&frame).expect("size prefix");
-        assert!(
-            lz4_plain_size_ok(size, frame.len()),
-            "256 KiB zeros compressed to {} bytes must pass via the absolute cap",
-            frame.len()
-        );
-    }
-
-    #[test]
-    fn lz4_size_prefix_bomb_rejected_on_decode_and_seek() {
-        let src = [b'x'; 16];
-        let max = 4usize.saturating_add(lz4_flex::block::get_maximum_output_size(src.len()));
-        let mut frame = vec![0u8; max];
-        frame[..4].copy_from_slice(&16u32.to_le_bytes());
-        let n = lz4_flex::block::compress_into(&src, &mut frame[4..]).expect("lz4");
-        frame.truncate(4 + n);
-        frame[..4].copy_from_slice(&(64 * 1024 * 1024u32).to_le_bytes());
-        let path = Path::new("bomb.sst");
-        let err = decode_block_bytes(&frame, true, false, path)
-            .unwrap_err()
-            .to_string();
-        // 64 MiB > LZ4_MAX_PLAIN_BLOCK: the absolute-cap arm fires (the
-        // ratio arm only sees sizes under the cap).
-        assert!(
-            err.contains("exceeds the 262144-byte block cap"),
-            "decode must name the ceiling, got {err}"
-        );
-        let mut scratch = Vec::new();
-        let err = seek_point_in_block_body(&frame, true, b"k", u64::MAX, &mut scratch, path)
-            .unwrap_err()
-            .to_string();
-        assert!(
-            err.contains("exceeds the 262144-byte block cap"),
-            "seek must name the ceiling, got {err}"
-        );
-        assert!(
-            scratch.len() < 64 * 1024,
-            "seek must not allocate the forged 64 MiB, scratch={}",
-            scratch.len()
-        );
-
-        // Ratio arm: a claim under the absolute cap but above 256x the
-        // frame (4 KiB claimed, ~15 B frame) must name the ratio.
-        frame[..4].copy_from_slice(&4096u32.to_le_bytes());
-        let err = decode_block_bytes(&frame, true, false, path)
-            .unwrap_err()
-            .to_string();
-        assert!(
-            err.contains("exceeds 256x compressed length"),
-            "decode must name the ratio, got {err}"
-        );
-    }
-
     #[test]
     fn write_sst_bulk_arrays_large_blocks_roundtrip() {
         let path = temp_path();
@@ -4381,7 +3521,7 @@ mod tests {
             .collect();
         let vals: Vec<Bytes> = (0..n).map(|_| Bytes::from(vec![b'v'; 80])).collect();
         let seqs: Vec<u64> = (1..=n as u64).collect();
-        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs).unwrap();
+        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs, true).unwrap();
         let blocks = table.data_block_count();
         // ~160 KiB of values at 4 KiB → tens of blocks (not one 256 KiB).
         assert!(
@@ -4420,7 +3560,7 @@ mod tests {
             .map(|i| Bytes::from(format!("v{i:04}").into_bytes()))
             .collect();
         let seqs: Vec<u64> = (1..=n as u64).collect();
-        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs).unwrap();
+        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs, true).unwrap();
         assert!(!table.payload_resident());
         let source: Arc<dyn crate::env::SstFileSource> = Arc::new(crate::env::EnvSource(StdEnv));
         let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(1 << 20)));
@@ -4470,7 +3610,7 @@ mod tests {
             .collect();
         let vals: Vec<Bytes> = (0..n).map(|_| Bytes::from(vec![b'v'; 80])).collect();
         let seqs: Vec<u64> = (1..=n as u64).collect();
-        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs).unwrap();
+        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs, true).unwrap();
         let source: Arc<dyn crate::env::SstFileSource> = Arc::new(crate::env::EnvSource(StdEnv));
         let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(1)));
         pool.arm();
@@ -4499,7 +3639,7 @@ mod tests {
             .map(|i| Bytes::from(format!("v{i:04}").into_bytes()))
             .collect();
         let seqs: Vec<u64> = (1..=n as u64).collect();
-        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs).unwrap();
+        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs, true).unwrap();
         let source: Arc<dyn crate::env::SstFileSource> = Arc::new(crate::env::EnvSource(StdEnv));
         let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(1)));
         pool.arm();
@@ -4518,141 +3658,6 @@ mod tests {
             sst_block_crc_skipped() >= 1,
             "repeat evicted seek must skip CRC"
         );
-        let _ = std::fs::remove_file(&path);
-    }
-
-    /// RFC-0160 P0.2: evicted v6 point seek splits into pread / CRC / walk.
-    #[test]
-    fn get_stages_split_pread_crc_walk_on_evicted_v6() {
-        let path = temp_path();
-        let n = 32usize;
-        let keys: Vec<Bytes> = (0..n)
-            .map(|i| Bytes::from(format!("k{i:04}").into_bytes()))
-            .collect();
-        let vals: Vec<Bytes> = (0..n)
-            .map(|i| Bytes::from(format!("v{i:04}").into_bytes()))
-            .collect();
-        let seqs: Vec<u64> = (1..=n as u64).collect();
-        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs).unwrap();
-        let source: Arc<dyn crate::env::SstFileSource> = Arc::new(crate::env::EnvSource(StdEnv));
-        let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(1)));
-        pool.arm();
-        table.attach_payload_kit(&source, &pool);
-        force_get_stages(true);
-        reset_get_stages();
-        let mut scratch = PointSeekScratch::default();
-        let found = table
-            .point_at_seeking(b"k0003", u64::MAX, &mut scratch)
-            .unwrap();
-        assert!(matches!(&found, Some((_, Lookup::Found(v))) if v.as_ref() == b"v0003"));
-        let (pread, crc, walk) = take_get_stages();
-        force_get_stages(false);
-        assert!(pread > 0, "evicted v6 must pread, pread_ns={pread}");
-        assert!(crc > 0, "first probe must CRC, crc_ns={crc}");
-        assert!(walk > 0, "first probe must walk the block, walk_ns={walk}");
-        let _ = std::fs::remove_file(&path);
-    }
-
-    /// RFC-0161: number the v73b miss-path tax. `point_at_cached` fully
-    /// `decode_block`s every entry (`InternalKey` + `Bytes` per record) and
-    /// mutex-inserts into `BlockCache`. `point_at_seeking` preads 4 KiB,
-    /// CRC-verifies, and walks encoded bytes with no per-entry alloc.
-    /// lookup_100's keys never repeat, so the insert never hits. Guest v73b
-    /// was 5.25–5.30 ms vs v71 seeking 3.868 ms.
-    #[test]
-    fn cold_point_cached_miss_is_slower_than_seeking_on_evicted_v6() {
-        let path = temp_path();
-        let n = 1024usize;
-        let val = Bytes::from(vec![b'v'; 200]);
-        let keys: Vec<Bytes> = (0..n)
-            .map(|i| Bytes::from(format!("k{i:06}").into_bytes()))
-            .collect();
-        let vals: Vec<Bytes> = vec![val; n];
-        let seqs: Vec<u64> = (1..=n as u64).collect();
-        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs).unwrap();
-        let source: Arc<dyn crate::env::SstFileSource> = Arc::new(crate::env::EnvSource(StdEnv));
-        let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(1)));
-        pool.arm();
-        table.attach_payload_kit(&source, &pool);
-        assert!(
-            table.payload.read().img.is_empty(),
-            "payload must be evicted so both paths pread"
-        );
-
-        let mut pread_ns = Vec::with_capacity(200);
-        let mut buf = vec![0u8; 4096];
-        let off = table.index.first().map(|h| h.offset).unwrap_or(40);
-        let len = table
-            .index
-            .first()
-            .map(|h| h.length as usize)
-            .unwrap_or(4096)
-            .min(4096);
-        buf.truncate(len.max(1));
-        for _ in 0..200 {
-            let t = Instant::now();
-            source.read_range(&path, off, &mut buf).unwrap();
-            pread_ns.push(t.elapsed().as_nanos() as u64);
-        }
-        pread_ns.sort_unstable();
-        let pread_p50 = pread_ns[pread_ns.len() / 2];
-
-        // Stride past one 4 KiB block (~15 × 200 B values) so each probe is a
-        // distinct block — lookup_100's shape.
-        let seek_keys: Vec<&[u8]> = (0..32).map(|i| keys[i * 20].as_ref()).collect();
-        let cached_keys: Vec<&[u8]> = (0..32).map(|i| keys[i * 20 + 10].as_ref()).collect();
-
-        let mut scratch = PointSeekScratch::default();
-        force_get_stages(true);
-        reset_get_stages();
-        for k in &seek_keys {
-            assert!(table
-                .point_at_seeking(k, u64::MAX, &mut scratch)
-                .unwrap()
-                .is_some());
-        }
-        let stages = take_get_stages();
-        force_get_stages(false);
-
-        let mut scratch = PointSeekScratch::default();
-        let t_seek = Instant::now();
-        for k in &seek_keys {
-            assert!(table
-                .point_at_seeking(k, u64::MAX, &mut scratch)
-                .unwrap()
-                .is_some());
-        }
-        let seek_ns = t_seek.elapsed().as_nanos() as u64;
-
-        // Tiny budget: every decoded insert evicts (guest 1 GiB cache is full
-        // after the first Criterion samples of unique keys).
-        let cache = BlockCache::with_budget_bytes(256);
-        let t_cached = Instant::now();
-        for k in &cached_keys {
-            assert!(table
-                .point_at_cached(k, u64::MAX, &cache)
-                .unwrap()
-                .is_some());
-        }
-        let cached_ns = t_cached.elapsed().as_nanos() as u64;
-
-        eprintln!(
-            "RFC-0161 miss-path: isolated_4kib_pread_p50_ns={pread_p50} \
-             seeking_32_ns={seek_ns} cached_32_ns={cached_ns} \
-             stages_pread_crc_walk={stages:?} cache_used={} cache_misses={} \
-             n_blocks={}",
-            cache.used_bytes(),
-            cache.misses(),
-            table.index.len()
-        );
-        assert!(
-            cache.used_bytes() > 0 && cache.misses() > 0,
-            "cached miss must decode+insert, used={} misses={}",
-            cache.used_bytes(),
-            cache.misses()
-        );
-        assert!(stages.0 > 0 && stages.1 > 0 && stages.2 > 0);
-        assert!(pread_p50 > 0, "isolated pread must run");
         let _ = std::fs::remove_file(&path);
     }
 
@@ -4810,7 +3815,7 @@ mod tests {
             }
             out
         };
-        assert_eq!(streamed, table.entries_cloned().unwrap());
+        assert_eq!(streamed, table.entries_cloned());
         // Streaming must not fill the materialize cache.
         drop(streamed);
         // Re-open so the cache from entries_cloned() above is gone.
@@ -5069,7 +4074,6 @@ mod tests {
             path: PathBuf::from("/tmp/hand-made-mid-key-split.sst"),
             payload: Arc::new(parking_lot::RwLock::new(crate::cache::ResidentBody::empty())),
             payload_len: 0,
-            body_on_disk: false,
             compressed_blocks: false,
             block_crc: false,
             entries: Arc::new(Mutex::new(Some(entries))),
@@ -5077,14 +4081,12 @@ mod tests {
             range_tombstones: Vec::new(),
             num_entries: 5,
             max_sequence: 5,
-            index: index.into(),
+            index,
             key_cp: 0,
             bloom: BloomFilter::always_true(),
             smallest_user_key: Some(Bytes::copy_from_slice(b"a")),
             largest_user_key: Some(Bytes::copy_from_slice(b"z")),
             cf: String::new(),
-            paged: None,
-            index_file_off: 0,
         };
 
         // Reference: the point path already defends the split.
@@ -5116,159 +4118,6 @@ mod tests {
             vec![0, 1],
             "range ending at k covers both k blocks"
         );
-    }
-
-    /// RFC-0167 P2.4: paging the sparse index drops per-block first-key
-    /// `Bytes`; point gets still hit, resident pages stay under the budget
-    /// (plus one page of slack).
-    #[test]
-    fn rfc0167_index_pages_evict_under_budget() {
-        let path = temp_path();
-        let n = 512usize;
-        let keys: Vec<Bytes> = (0..n)
-            .map(|i| Bytes::from(format!("idx{i:05}-{}", "k".repeat(40)).into_bytes()))
-            .collect();
-        let vals: Vec<Bytes> = (0..n)
-            .map(|i| Bytes::from(format!("v{i:05}").into_bytes()))
-            .collect();
-        let entries: Vec<(InternalKey, Bytes)> = keys
-            .iter()
-            .zip(vals.iter())
-            .enumerate()
-            .map(|(i, (k, v))| {
-                (
-                    InternalKey::new(k.clone(), (i as u64) + 1, ValueType::Value),
-                    v.clone(),
-                )
-            })
-            .collect();
-        let mut table = write_sst_entries(&path, &entries).unwrap();
-        assert!(
-            table.block_count() >= INDEX_PAGE_BLOCKS,
-            "need multiple index pages, got {}",
-            table.block_count()
-        );
-        let before = table.index_memory_bytes();
-        table.page_index(1024);
-        let after = table.index_memory_bytes();
-        assert!(
-            after <= before.saturating_add(256),
-            "paged index must not grow the resident first-key array: after={after} before={before}"
-        );
-        for i in [0usize, n / 3, n / 2, n - 1] {
-            let got = table.point_at(keys[i].as_ref(), u64::MAX);
-            assert!(
-                matches!(&got, Some((_, Lookup::Found(v))) if v.as_ref() == vals[i].as_ref()),
-                "paged point get missed key {i}"
-            );
-        }
-        let live = table
-            .paged
-            .as_ref()
-            .map(|p| p.resident_bytes())
-            .unwrap_or(0);
-        assert!(
-            live <= 1024 + 8 * 1024,
-            "decoded index pages must stay near the budget, live={live}"
-        );
-        let _ = std::fs::remove_file(&path);
-    }
-
-    /// RFC-0173 P2.1: with a file source the packed first-key blob is
-    /// dropped; point gets still hit via pread of the on-disk index tail.
-    #[test]
-    fn rfc0173_paged_index_loads_keys_from_file() {
-        let path = temp_path();
-        let n = 512usize;
-        let keys: Vec<Bytes> = (0..n)
-            .map(|i| Bytes::from(format!("idx{i:05}-{}", "k".repeat(40)).into_bytes()))
-            .collect();
-        let vals: Vec<Bytes> = (0..n)
-            .map(|i| Bytes::from(format!("v{i:05}").into_bytes()))
-            .collect();
-        let entries: Vec<(InternalKey, Bytes)> = keys
-            .iter()
-            .zip(vals.iter())
-            .enumerate()
-            .map(|(i, (k, v))| {
-                (
-                    InternalKey::new(k.clone(), (i as u64) + 1, ValueType::Value),
-                    v.clone(),
-                )
-            })
-            .collect();
-        let mut table = write_sst_entries(&path, &entries).unwrap();
-        let src: Arc<dyn crate::env::SstFileSource> = Arc::new(EnvSource(StdEnv));
-        let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(1)));
-        table.attach_payload_kit(&src, &pool);
-        assert!(
-            table.index_file_off > 0,
-            "sorted writer must record index tail offset"
-        );
-        let before = table.index_memory_bytes();
-        table.page_index(1024);
-        assert!(
-            table.paged_file_backed(),
-            "kit + index_file_off must drop the in-RAM key blob"
-        );
-        let after = table.index_memory_bytes();
-        assert!(
-            after < before,
-            "file-backed page must drop first-key Bytes: after={after} before={before}"
-        );
-        for i in [0usize, n / 3, n / 2, n - 1] {
-            let got = table.point_at(keys[i].as_ref(), u64::MAX);
-            assert!(
-                matches!(&got, Some((_, Lookup::Found(v))) if v.as_ref() == vals[i].as_ref()),
-                "file-backed paged point get missed key {i}"
-            );
-        }
-        let _ = std::fs::remove_file(&path);
-    }
-
-    /// RFC-0173 P2.3: file-backed paging keeps O(blocks/fanout) samples, not
-    /// a 28 B/block SoA. Point gets still hit.
-    #[test]
-    fn rfc0173_two_level_handles_are_sublinear() {
-        let path = temp_path();
-        let n = 2048usize;
-        let keys: Vec<Bytes> = (0..n)
-            .map(|i| Bytes::from(format!("idx{i:05}-{}", "k".repeat(24)).into_bytes()))
-            .collect();
-        let vals: Vec<Bytes> = (0..n)
-            .map(|i| Bytes::from(format!("v{i:05}").into_bytes()))
-            .collect();
-        let entries: Vec<(InternalKey, Bytes)> = keys
-            .iter()
-            .zip(vals.iter())
-            .enumerate()
-            .map(|(i, (k, v))| {
-                (
-                    InternalKey::new(k.clone(), (i as u64) + 1, ValueType::Value),
-                    v.clone(),
-                )
-            })
-            .collect();
-        let mut table = write_sst_entries(&path, &entries).unwrap();
-        let src: Arc<dyn crate::env::SstFileSource> = Arc::new(EnvSource(StdEnv));
-        let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(1)));
-        table.attach_payload_kit(&src, &pool);
-        let blocks = table.block_count();
-        table.page_index(4096);
-        assert!(table.paged_file_backed());
-        let mem = table.index_memory_bytes();
-        assert!(
-            blocks < INDEX_HANDLE_FANOUT || mem < blocks.saturating_mul(20),
-            "two-level must beat 28 B/block SoA: mem={mem} blocks={blocks}"
-        );
-        for i in [0usize, n / 5, n / 2, n - 1] {
-            let got = table.point_at(keys[i].as_ref(), u64::MAX);
-            assert!(
-                matches!(&got, Some((_, Lookup::Found(v))) if v.as_ref() == vals[i].as_ref()),
-                "two-level point get missed key {i}"
-            );
-        }
-        let _ = std::fs::remove_file(&path);
     }
 
     /// Oracle: the accelerated `blocks_for_point` (u64 window past the
@@ -5308,7 +4157,6 @@ mod tests {
                 path: PathBuf::from("/tmp/accel-oracle.sst"),
                 payload: Arc::new(parking_lot::RwLock::new(crate::cache::ResidentBody::empty())),
                 payload_len: 0,
-                body_on_disk: false,
                 compressed_blocks: false,
                 block_crc: false,
                 entries: Arc::new(Mutex::new(None)),
@@ -5316,14 +4164,12 @@ mod tests {
                 range_tombstones: Vec::new(),
                 num_entries: 0,
                 max_sequence: 0,
-                index: index.into(),
+                index,
                 key_cp,
                 bloom: BloomFilter::always_true(),
                 smallest_user_key: None,
                 largest_user_key: None,
                 cf: String::new(),
-                paged: None,
-                index_file_off: 0,
             }
         }
 
@@ -5589,7 +4435,7 @@ mod tests {
         let table = write_sst(&path, &mem).unwrap();
         assert!(table.block_count() >= 3, "need multiple blocks");
         assert!(table.block_crc, "v5 writer default");
-        let expected_all = table.entries_cloned().unwrap();
+        let expected_all = table.entries_cloned();
         let Lookup::Found(expected_get) = table.get(b"key-00150", 1_000) else {
             panic!("baseline get must hit");
         };
@@ -5824,7 +4670,7 @@ mod tests {
         .unwrap();
         assert!(table.is_lazy());
         assert!(!table.block_crc, "v3 has no per-block CRC");
-        let expected = table.entries_cloned().unwrap();
+        let expected = table.entries_cloned();
         // Drop the decoded-entries cache warmed above so the reload test
         // actually walks the payload path instead of answering from cache.
         *table.entries.lock() = None;

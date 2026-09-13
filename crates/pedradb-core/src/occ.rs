@@ -168,9 +168,9 @@ impl<E: Env> OccTransaction<E> {
     /// Conflict, [`CoreError::SnapshotTooOld`], WAL I/O, or finished.
     pub fn commit_with(mut self, durability: WriteOptions) -> Result<()> {
         self.ensure_open()?;
-        if self.staging.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.staging.len() as u64) {
             self.finished = true;
-            if self.read_set.is_empty() {
+            if crate::write_admission_kernel::batch_is_empty(self.read_set.len() as u64) {
                 return Ok(());
             }
             // Read-only commits still honour the documented read-set contract:

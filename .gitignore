@@ -1,2 +1,4 @@
 /target
 findings/
+--engine/
+rank-harness.json

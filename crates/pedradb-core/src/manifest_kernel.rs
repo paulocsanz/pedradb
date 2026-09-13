@@ -1,6 +1,12 @@
 //! Pure MANIFEST-recovery decisions (RFC-0056 P0.1 — crash dictionary on
 //! the SST-inventory reopen path).
 //!
+//! **Term:** this file is what `rustc` links. Aeneas extracts that body
+//! (`scripts/aeneas_manifest.sh`). A Verus stand-in of ManifestObs billed as
+//! last-wins of a cfg-split file is a model twin (deleted).
+//!
+//!   ./scripts/aeneas_manifest.sh --required
+//!
 //! Production `recover_ssts` (called by [`crate::Db::open_with_env`])
 //! routes every decision through this kernel: given what `manifest::load`
 //! observed (absent inventory / committed inventory / damaged
@@ -23,8 +29,9 @@
 //!   first open the installed inventory IS committed (nothing acked is at
 //!   risk yet); every other install failure refuses.
 //!
+//! Aeneas of the rustc body is the term. A Verus stand-in is not last-wins.
+//!
 //! Spec page: `docs/formal/crash-dictionary.md` (MANIFEST recovery section).
-//! Verus twin: `crates/pedradb-core/verus/manifest_recover.rs`.
 
 #![forbid(unsafe_code)]
 
@@ -75,7 +82,6 @@ pub enum SstRecoverAction {
 /// ```
 ///
 /// Finite-domain check: [`tests::theorem_sst_recover_on_finite_domain`].
-/// ∀ Verus twin: `crates/pedradb-core/verus/manifest_recover.rs`.
 #[must_use]
 pub fn sst_recover_action(obs: ManifestObs, listed: ListedSst) -> SstRecoverAction {
     match (obs, listed) {
@@ -152,9 +158,68 @@ pub fn first_install_action_as_is_proceed_always(_out: FirstInstallOutcome) -> F
     FirstInstallAction::Proceed
 }
 
+/// Fate of one bulk-run MANIFEST persist (RFC-0219 P0.3). The trampoline
+/// `db.rs::persist_bulk_manifest` owns no fate: it matches this plan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BulkManifestFate {
+    /// Sync mode (`dir_sync_required`): fsync the unsynced SSTs and
+    /// publish the MANIFEST inline before returning — the publish window
+    /// is closed under the caller's barrier; no debt accrues.
+    PersistNow,
+    /// Async mode: amortize — clear the unsynced set, accrue
+    /// `bulk_manifest_debt`, and hand back a deferred `ManifestPersist`
+    /// every `BULK_MANIFEST_EVERY` installs (`force` settles leftover).
+    AmortizeDebt,
+}
+
+/// Pure rule: the DB sync default alone decides how a bulk install's
+/// MANIFEST publish is paid (inline durable vs amortized debt).
+///
+/// # Post-condition (theorem-ready)
+///
+/// ```text
+/// ensures
+///   action == PersistNow  <=> sync == true
+///   action == AmortizeDebt <=> sync == false
+/// ```
+///
+/// Finite-domain check: [`tests::bulk_manifest_fate_on_finite_domain`].
+#[must_use]
+pub fn bulk_manifest_persist_fate(sync: bool) -> BulkManifestFate {
+    if sync {
+        BulkManifestFate::PersistNow
+    } else {
+        BulkManifestFate::AmortizeDebt
+    }
+}
+
+/// AS-IS swallow: amortize forever — even in sync mode the MANIFEST
+/// publish window stays open across installs, so a crash reopens an
+/// inventory that predates acked installs (silent-wrong in sync mode).
+/// Mutant must fail every theorem above.
+#[must_use]
+pub fn bulk_manifest_persist_fate_as_is(_sync: bool) -> BulkManifestFate {
+    BulkManifestFate::AmortizeDebt
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn manifest_kernel_has_no_verus_cartoon() {
+        let src = include_str!("manifest_kernel.rs");
+        let block = concat!("verus", "!", " {");
+        let cfg = concat!("cfg(", "verus", "_keep", "_ghost)");
+        assert!(
+            !src.contains(block),
+            "stand-in is not last-wins of rustc sst_recover_action"
+        );
+        assert!(
+            !src.contains(cfg),
+            "cfg split hides rustc types from the prover"
+        );
+    }
 
     #[test]
     fn absent_inventory_scans_and_installs() {
@@ -282,6 +347,67 @@ mod tests {
             sst_recover_action_as_is_scan_on_damage(ManifestObs::Inventory, ListedSst::Missing(1)),
             SstRecoverAction::ScanAndInstall,
             "AS-IS dente: missing SST silently scanned"
+        );
+    }
+
+    /// Balanced-brace slice of one `fn` from a source file (plant lens).
+    fn named_fn_src(src: &str, name: &str) -> Option<String> {
+        let needle = format!("fn {name}(");
+        let start = src.find(&needle)?;
+        let rest = &src[start..];
+        let bytes = rest.as_bytes();
+        let brace = bytes.iter().position(|&b| b == b'{')?;
+        let mut depth = 0i32;
+        for (i, &b) in bytes[brace..].iter().enumerate() {
+            if b == b'{' {
+                depth += 1;
+            } else if b == b'}' {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(rest[brace..=brace + i].to_string());
+                }
+            }
+        }
+        None
+    }
+
+    /// Finite-domain theorem: sync pays inline, async amortizes, and the
+    /// AS-IS mutant swallows exactly the sync-mode publish window.
+    #[test]
+    fn bulk_manifest_fate_on_finite_domain() {
+        assert_eq!(
+            bulk_manifest_persist_fate(true),
+            BulkManifestFate::PersistNow
+        );
+        assert_eq!(
+            bulk_manifest_persist_fate(false),
+            BulkManifestFate::AmortizeDebt
+        );
+        assert_eq!(
+            bulk_manifest_persist_fate_as_is(true),
+            BulkManifestFate::AmortizeDebt,
+            "AS-IS dente: sync mode amortizes forever (publish window open)"
+        );
+    }
+
+    #[test]
+    fn bulk_manifest_persist_fate_on_live_sync_persists_now() {
+        // RFC-0219 P0.3: the DB sync default alone picks inline-durable
+        // vs amortized; persist_bulk_manifest matches the kernel plan and
+        // keeps no inline dir-sync gate of its own.
+        let pbm = named_fn_src(include_str!("db.rs"), "persist_bulk_manifest")
+            .expect("persist_bulk_manifest");
+        assert!(
+            pbm.contains("match crate::manifest_kernel::bulk_manifest_persist_fate("),
+            "persist_bulk_manifest must match bulk_manifest_persist_fate"
+        );
+        assert!(
+            pbm.contains("BulkManifestFate::PersistNow =>"),
+            "the inline durable publish must live in the PersistNow arm"
+        );
+        assert!(
+            !pbm.contains("write_admission_kernel::dir_sync_required(self.sync)"),
+            "the dir-sync gate left the trampoline (write-admission family keeps its own calls)"
         );
     }
 }

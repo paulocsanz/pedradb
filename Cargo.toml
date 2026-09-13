@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/pedradb-posix",
+    "crates/pedradb-spec",
     "crates/pedradb-core",
     "crates/pedradb-io-uring",
     "crates/pedradb-ops",
@@ -25,6 +26,7 @@ readme = "README.md"
 # Internal
 pedradb-posix = { path = "crates/pedradb-posix" }
 pedradb-core = { path = "crates/pedradb-core" }
+pedradb-spec = { path = "crates/pedradb-spec" }
 pedradb-sim = { path = "crates/pedradb-sim" }
 pedradb-io-uring = { path = "crates/pedradb-io-uring" }
 pedradb-ops = { path = "crates/pedradb-ops" }

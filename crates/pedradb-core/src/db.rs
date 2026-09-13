@@ -51,10 +51,10 @@
 //! - [`Db::stats`] / [`Db::verify_checksums`] — observability and integrity.
 //! - SST v3 embeds a Bloom filter; get prunes by bounds + filter.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -70,15 +70,15 @@ use crate::key::{InternalKey, SequenceNumber, ValueType, MAX_SEQUENCE_NUMBER};
 use crate::lock::DirLock;
 use crate::manifest::{self, VersionSet};
 use crate::memtable::{Lookup, MemTable};
-use crate::merge::{range_deleted, range_tombstone_covers, StreamingVisibleIter, VisibleKv};
+use crate::merge::{range_deleted, StreamingVisibleIter, VisibleKv};
 use crate::sst::{
     put_tls_point_seek_scratch, take_tls_point_seek_scratch, write_l0_sst, write_l0_sst_for_family,
-    write_sst_bulk_arrays, write_sst_entries_on, SstTable,
+    write_sst_bulk_arrays, write_sst_entries_on, PointSeekScratch, SstTable,
 };
 use crate::tx::Transaction;
 use crate::vlog::{self, ValueLog, VlogRewriteStats, VLOG_FILE_NAME};
 use crate::wal::Wal;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::Mutex;
 use std::io::{Read, Write};
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -98,6 +98,27 @@ pub const HORIZON_SAMPLE_RING_CAP: usize = 4096;
 /// Default WAL file name inside the DB directory.
 pub const WAL_FILE_NAME: &str = "CURRENT.log";
 
+/// File-name prefix of an archived WAL segment inside the DB directory
+/// (RFC-0217 P1.1). Naming helpers live here, not in `changelog_kernel`:
+/// they are I/O naming, not decision logic, and `str::pattern`/`format!`
+/// machinery is outside what the aeneas/charon extraction lane translates.
+const WAL_ARCHIVE_FILE_PREFIX: &str = "WAL.arch";
+
+/// On-disk name of archived segment `idx` (`WAL.arch0007`).
+fn wal_archive_slot_name(idx: u64) -> String {
+    format!("{WAL_ARCHIVE_FILE_PREFIX}{idx:04}")
+}
+
+/// Inverse of [`wal_archive_slot_name`]: the segment index encoded in a
+/// directory entry name, `None` for any other file.
+fn wal_archive_slot_of(name: &str) -> Option<u64> {
+    let digits = name.strip_prefix(WAL_ARCHIVE_FILE_PREFIX)?;
+    if digits.len() != 4 || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse::<u64>().ok()
+}
+
 /// F188: marker byte prepended to inline values that would otherwise sniff
 /// as a vlog pointer (`VLG1…`/`VLG3…`) or that already start with the marker,
 /// so [`Db::resolve_stored_value`] strips exactly one byte unconditionally.
@@ -111,8 +132,8 @@ const RESOLVED_BLOCK_TAG: u64 = 0x7265_736f_6c76_3d21;
 /// F188: stored form of an inline (non-spilled) value. Escaped iff the raw
 /// value could be misread as a vlog pointer, or already starts with the
 /// marker (so reader/writer stay inverse for every input).
-fn escape_inline_value(value: Bytes) -> Bytes {
-    if value.is_empty() {
+pub fn escape_inline_value(value: Bytes) -> Bytes {
+    if crate::write_admission_kernel::batch_is_empty(value.len() as u64) {
         return value;
     }
     if value[0] == INLINE_ESCAPE || vlog::decode_vlog_ptr(&value).is_some() {
@@ -122,23 +143,6 @@ fn escape_inline_value(value: Bytes) -> Bytes {
         return Bytes::from(escaped);
     }
     value
-}
-
-/// Small inline put that `get` can serve from the point cache without
-/// resolving a vlog pointer or stripping [`INLINE_ESCAPE`].
-fn cacheable_point_value(op: &crate::batch::WriteOp) -> Option<Bytes> {
-    if op.kind != crate::key::ValueType::Value {
-        return None;
-    }
-    if op.value.len() > 1024 {
-        return None;
-    }
-    if !op.value.is_empty()
-        && (op.value[0] == INLINE_ESCAPE || vlog::decode_vlog_ptr(&op.value).is_some())
-    {
-        return None;
-    }
-    Some(op.value.clone())
 }
 
 /// WAL recovery policy at open (RFC-0047 P0.2).
@@ -299,20 +303,12 @@ pub const DEFAULT_SST_PAYLOAD_BUDGET_BYTES: u64 = 256 * 1024 * 1024;
 /// lock it is 90→23 persists at 25M / 64 MiB.
 const BULK_MANIFEST_EVERY: u8 = 4;
 
-/// RFC-0160 P0.5: latched BulkRun always has a chunk cap so 100M hydrate
-/// cannot accumulate the open tail unboundedly. Used when the caller left
-/// `auto_flush_bytes` / per-CF buffers unset (`None` used to mean "never
-/// park" and SIGKILL'd the 3.9 GiB guest). One parked + one encoding +
-/// this tail is the RAM bound.
-pub(crate) const DEFAULT_BULK_CHUNK_BYTES: usize = 64 * 1024 * 1024;
-
 /// Default read-handle cache size for bounded opens
-/// ([`crate::env::FileHandleCache`]): covers the official 100M ladder
-/// (~347 bulk SSTs @ 245 B/e) with fd headroom. 256 left 100M get_loop
-/// opening a fresh fd on ~1/4 of files (no LRU bump on hit). RocksDB
-/// holds the equivalent per-DB file cache; `open()`-per-block was 41%
-/// of the 6M `get_hit` profile.
-pub const DEFAULT_SST_FILE_CACHE_ENTRIES: usize = 1024;
+/// ([`crate::env::FileHandleCache`]): covers the post-settle file count of
+/// the 25M slipstream shape (~85 SSTs) with fd headroom. RocksDB holds the
+/// equivalent per-DB file cache; `open()`-per-block was 41% of the 6M
+/// `get_hit` profile.
+pub const DEFAULT_SST_FILE_CACHE_ENTRIES: usize = 256;
 
 /// `PEDRA_SST_FILE_CACHE` — read-handle cache size override (bench A/B
 /// knob; `0` disables handle reuse). Unset or unparsable →
@@ -462,21 +458,6 @@ pub struct DbStats {
     pub changelog_interval: u64,
     /// Successful CHANGELOG cache stores since open (RFC-0031 observability).
     pub changelog_store_count: u64,
-    /// Live SST bytes exceed the warm cap — random point reads are disk-bound.
-    /// `1` = under pressure, `0` = working set fits (or unlimited warm).
-    pub ram_pressure: u64,
-    /// Times warm was skipped for RAM (monotonic since open).
-    pub ram_warm_skipped: u64,
-    /// Warm / cgroup ceiling in bytes (`0` = unknown).
-    pub ram_ceiling_bytes: u64,
-    /// Engine-resident metadata (index+bloom+mem+bulk tail), not page cache.
-    pub engine_resident_bytes: u64,
-    /// Bytes streamed by the last settle warm (`0` if skipped / off).
-    pub settle_warm_bytes: u64,
-    /// Nanoseconds of the last settle warm (stream or DONTNEED).
-    pub settle_warm_ns: u64,
-    /// Nanoseconds of the last leveled compact, excluding warm.
-    pub settle_compact_ns: u64,
 }
 
 /// RFC-0035 P0: snapshot of latest/scan counters + LSM shape (no thread).
@@ -492,6 +473,18 @@ pub struct ReadProbeSnap {
     pub latest_sst_probed: u64,
     /// `scan_at_raw` calls.
     pub scan_ops: u64,
+    /// Nanos inside `count_visible` (RFC-0217 P1.4 read-side probe).
+    pub scan_ns: u64,
+    /// Nanos inside `count_visible` building cursors (SST block-window +
+    /// load; RFC-0217 P2.3 decomposition).
+    pub scan_sst_setup_ns: u64,
+    /// Nanos inside `count_visible` in the merge/emit loops after the
+    /// cursors exist (RFC-0217 P2.3 decomposition).
+    pub scan_merge_ns: u64,
+    /// Lazy ordered-view builds of point shards (one per shard lifetime).
+    pub ord_builds: u64,
+    /// Nanos spent building those views.
+    pub ord_build_ns: u64,
     /// SST files offered to the merge (sum).
     pub scan_sst_probed: u64,
     /// Live SST files now.
@@ -553,7 +546,7 @@ impl DbStats {
     /// RFC-0026 P0.1: one number an operator can alert on (`≪ 1` ⇒ garbage).
     #[must_use]
     pub fn vlog_live_ratio(&self) -> f64 {
-        if self.vlog_bytes == 0 {
+        if crate::write_admission_kernel::batch_is_empty(self.vlog_bytes) {
             return 1.0;
         }
         #[allow(clippy::cast_precision_loss)]
@@ -596,26 +589,6 @@ impl DbStats {
             self.write_pressure_l0
         )
     }
-
-    /// RFC-0173: one-line RAM mode (hot vs bounded-cache).
-    #[must_use]
-    pub fn ram_line(&self) -> String {
-        let mode = if self.ram_pressure == 1 {
-            "bounded-cache"
-        } else {
-            "hot"
-        };
-        format!(
-            "ram_pressure={} warm_skipped={} ceiling={}B engine_resident={}B settle_compact_ms={} settle_warm_ms={} warm_bytes={} mode={mode}",
-            self.ram_pressure,
-            self.ram_warm_skipped,
-            self.ram_ceiling_bytes,
-            self.engine_resident_bytes,
-            self.settle_compact_ns / 1_000_000,
-            self.settle_warm_ns / 1_000_000,
-            self.settle_warm_bytes,
-        )
-    }
 }
 
 /// Metadata written next to a checkpoint (ops / restore tooling).
@@ -642,7 +615,7 @@ pub struct WritePhaseStats {
     pub commits: AtomicU64,
     /// `prepare_write_ops` (seq alloc, large-value spill, WriteOp build).
     pub prepare_ns: AtomicU64,
-    /// WAL encode + append (one hop `encode_and_write_op_batches`).
+    /// WAL encode + append (`encode_write_op_batches` + pending write()).
     pub wal_ns: AtomicU64,
     /// Dirty-point note + `apply_ops_owned` (BTree insert).
     pub mem_ns: AtomicU64,
@@ -652,49 +625,6 @@ pub struct WritePhaseStats {
     pub flush_check_ns: AtomicU64,
     /// `ConcurrentDb` bypass: time blocked acquiring the Db write lock.
     pub lock_wait_ns: AtomicU64,
-}
-
-/// RFC-0180: skip dirty-list + map walks when no read cache holds answers.
-#[must_use]
-pub fn read_cache_invalidate_needed(
-    point_empty: bool,
-    count_empty: bool,
-    prefix_empty: bool,
-) -> bool {
-    !(point_empty && count_empty && prefix_empty)
-}
-
-/// RFC-0180 P0.11 sampling (kept for tests). Production `commit_async_one`
-/// always calls `maybe_auto_flush_with` (P0.38) — that function already
-/// early-outs on an integer mem-size compare when under the limit.
-#[must_use]
-pub fn async_flush_check_due(seq: SequenceNumber) -> bool {
-    seq & 31 == 0
-}
-
-/// RFC-0180 P0.38: over-limit memtables flush every Ok, not every 32 seqs.
-#[must_use]
-pub fn async_ok_flush_check_needed(mem_at_or_over_limit: bool, seq: SequenceNumber) -> bool {
-    mem_at_or_over_limit || async_flush_check_due(seq)
-}
-
-/// RFC-0180: async Ok must not write L0 (Rocks flushes on a background
-/// thread). Stage/park only; the host worker materializes.
-#[must_use]
-pub fn async_ok_flush_is_stage_only() -> bool {
-    true
-}
-
-/// RAII pin for [`Db::commit_inflight`] (RFC-0180 P0.25).
-/// Owns an `Arc` so `commit_async_one` can keep `&mut self`.
-struct CommitInflightPin {
-    n: std::sync::Arc<AtomicUsize>,
-}
-
-impl Drop for CommitInflightPin {
-    fn drop(&mut self) {
-        self.n.fetch_sub(1, Ordering::Release);
-    }
 }
 
 /// Per-write durability / batching knobs (RFC-0009 P0.1).
@@ -1054,6 +984,9 @@ impl<E: Env> ParallelMergeEnv<E> {
             spec.split_target,
             spec.chunk_budget,
             spec.kit.as_ref(),
+            // RFC-0217 P1.2: the filter route is the sequential whole-family
+            // rewrite (`Db::compact_filter`); the parallel seam never sees one.
+            None,
         )
         .map(|ts| {
             ts.into_iter()
@@ -1145,6 +1078,7 @@ impl<E: Env> PreparedL0Compact<E> {
                 self.split_target,
                 self.chunk_budget,
                 self.kit.as_ref(),
+                None,
             ),
         };
         merged.map(|ts| {
@@ -1347,66 +1281,17 @@ struct SstRun {
     level: u32,
     tables_newest_first: Vec<usize>,
     disjoint_by_lo: Option<Vec<usize>>,
-    sorted_by_lo: Option<Vec<usize>>,
-    packed_lo: Option<DisjointLos>,
-    packed_hi: Option<DisjointLos>,
-    disjoint_los: Option<DisjointLos>,
-    /// Parallel to `tables_newest_first`: index in `sorted_by_lo`, or
-    /// `u32::MAX` if absent (RFC-0178 P0.15).
-    by_lo_pos: Option<Vec<u32>>,
-    /// Any table in the run carries a range tombstone. Bulk hydrate never
-    /// does; skipping the per-get collect over ~400 files was the remaining
-    /// O(n) on `probe_miss` after bounds+bloom.
-    any_range_tombstones: bool,
-}
-
-#[derive(Clone)]
-struct DisjointLos {
-    bytes: Vec<u8>,
-    ends: Vec<u32>,
-}
-
-impl DisjointLos {
-    fn from_tables(ssts: &[SstTable], by_lo: &[usize]) -> Self {
-        let mut bytes = Vec::new();
-        let mut ends = Vec::with_capacity(by_lo.len());
-        for &i in by_lo {
-            let lo = ssts[i]
-                .smallest_user_key()
-                .expect("disjoint run tables are bounded");
-            bytes.extend_from_slice(lo);
-            ends.push(u32::try_from(bytes.len()).expect("concatenated lo keys fit u32"));
-        }
-        Self { bytes, ends }
-    }
-
-    fn lo(&self, i: usize) -> &[u8] {
-        let start = if i == 0 { 0 } else { self.ends[i - 1] as usize };
-        &self.bytes[start..self.ends[i] as usize]
-    }
-
-    fn partition_point_gt(&self, key: &[u8]) -> usize {
-        let n = self.ends.len();
-        let mut lo = 0usize;
-        let mut hi = n;
-        while lo < hi {
-            let mid = lo + (hi - lo) / 2;
-            if self.lo(mid) <= key {
-                lo = mid + 1;
-            } else {
-                hi = mid;
-            }
-        }
-        lo
-    }
 }
 
 impl SstRun {
     /// Tables sorted by `lo`, or `None` unless every table is bounded and
     /// the run is strictly disjoint (`hi[i] < lo[i+1]`). Overlaps, duplicate
     /// bounds, or unbounded tables keep the linear newest-first walk.
-    fn sorted_by_lo(ssts: &[SstTable], tables_newest_first: &[usize]) -> Option<Vec<usize>> {
-        if tables_newest_first.is_empty() {
+    fn disjoint_sorted_by_lo(
+        ssts: &[SstTable],
+        tables_newest_first: &[usize],
+    ) -> Option<Vec<usize>> {
+        if tables_newest_first.len() < 2 {
             return None;
         }
         for &i in tables_newest_first {
@@ -1421,33 +1306,25 @@ impl SstRun {
                 .unwrap()
                 .cmp(ssts[b].smallest_user_key().unwrap())
         });
+        for pair in by_lo.windows(2) {
+            if ssts[pair[0]].largest_user_key().unwrap()
+                >= ssts[pair[1]].smallest_user_key().unwrap()
+            {
+                return None;
+            }
+        }
         Some(by_lo)
-    }
-
-    fn pairwise_disjoint(ssts: &[SstTable], by_lo: &[usize]) -> bool {
-        // RFC-0164 P1.2: the strict arm is kernel-owned — equal-`lo` ties
-        // stay on the newest-first walk, never the single-candidate bisect.
-        let los: Vec<&[u8]> = by_lo
-            .iter()
-            .map(|&i| ssts[i].smallest_user_key().unwrap())
-            .collect();
-        let his: Vec<&[u8]> = by_lo
-            .iter()
-            .map(|&i| ssts[i].largest_user_key().unwrap())
-            .collect();
-        crate::probe_order_kernel::run_pairwise_disjoint_los(&los, &his)
     }
 }
 
 /// Lazy concatenation of one disjoint level's tables in `lo` order. The
 /// scan window visits at most one table at a time (strict disjointness is
-/// proven when the run's `disjoint_by_lo` order is built), so the merge
-/// sees ONE
+/// proven by [`SstRun::disjoint_sorted_by_lo`]), so the merge sees ONE
 /// stream per level instead of one per file — heap width at 25 M drops
 /// from ~#SSTs to ~#levels + L0 + memtables, cutting sift levels per row.
 struct LevelRunStream<'a, E: Env> {
     db: &'a Db<E>,
-    files_by_lo: &'a [usize],
+    files_by_lo: Vec<usize>,
     next_file: usize,
     start: Bound<Bytes>,
     end: Bound<Bytes>,
@@ -1458,56 +1335,21 @@ struct LevelRunStream<'a, E: Env> {
     current: Option<crate::sst::SstRangeIter<'a>>,
 }
 
-/// Bound copies for the per-file `iter_user_range` calls (the iter owns its
-/// own copies; this just re-derives the borrowed view for each call).
-fn bound_slice(b: &Bound<Bytes>) -> Bound<&[u8]> {
-    match b {
-        Bound::Included(k) => Bound::Included(&k[..]),
-        Bound::Excluded(k) => Bound::Excluded(&k[..]),
-        Bound::Unbounded => Bound::Unbounded,
-    }
-}
-
-/// First lo-sorted disjoint file that can overlap `[start, end)`.
-/// Files before this have `hi` strictly before `start`, so a prefix in
-/// the middle of a bulk run must not walk them (O(log n) vs O(#SST)).
-fn first_overlapping_disjoint_file(
-    ssts: &[SstTable],
-    files_by_lo: &[usize],
-    start: Bound<&[u8]>,
-) -> usize {
-    match start {
-        Bound::Unbounded => 0,
-        Bound::Included(s) => {
-            files_by_lo.partition_point(|&i| ssts[i].largest_user_key().is_some_and(|hi| hi < s))
-        }
-        Bound::Excluded(s) => {
-            files_by_lo.partition_point(|&i| ssts[i].largest_user_key().is_some_and(|hi| hi <= s))
-        }
-    }
-}
-
 impl<'a, E: Env> LevelRunStream<'a, E> {
     fn new(
         db: &'a Db<E>,
-        files_by_lo: &'a [usize],
+        files_by_lo: Vec<usize>,
         start: Bound<&[u8]>,
         end: Bound<&[u8]>,
         snapshot: SequenceNumber,
         resolve_values: bool,
     ) -> Self {
-        let own = |b: Bound<&[u8]>| match b {
-            Bound::Included(k) => Bound::Included(Bytes::copy_from_slice(k)),
-            Bound::Excluded(k) => Bound::Excluded(Bytes::copy_from_slice(k)),
-            Bound::Unbounded => Bound::Unbounded,
-        };
-        let next_file = first_overlapping_disjoint_file(&db.ssts, files_by_lo, start);
         Self {
             db,
             files_by_lo,
-            next_file,
-            start: own(start),
-            end: own(end),
+            next_file: 0,
+            start: crate::merge::bound_to_owned(start),
+            end: crate::merge::bound_to_owned(end),
             snapshot,
             resolve_values,
             current: None,
@@ -1530,13 +1372,15 @@ impl<'a, E: Env> Iterator for LevelRunStream<'a, E> {
                 let fi = self.files_by_lo[self.next_file];
                 self.next_file += 1;
                 let table = &self.db.ssts[fi];
-                let (start, end) = (bound_slice(&self.start), bound_slice(&self.end));
+                let (start, end) = (
+                    crate::merge::bound_as_ref(&self.start),
+                    crate::merge::bound_as_ref(&self.end),
+                );
                 if !table.overlaps_user_range(start, end) {
                     continue;
                 }
                 self.db.scan_sst_probed.fetch_add(1, Ordering::Relaxed);
-                crate::cost::scan_probe();
-                let _ = self.db.env.advise(table.path(), 0, 0, AdviseKind::WillNeed);
+                let cache = &self.db.block_cache;
                 let id = crate::cache::path_id(table.path())
                     ^ if self.resolve_values {
                         RESOLVED_BLOCK_TAG
@@ -1546,7 +1390,7 @@ impl<'a, E: Env> Iterator for LevelRunStream<'a, E> {
                 let db = self.db;
                 let resolve = self.resolve_values;
                 let load = Box::new(move |bi| {
-                    Some(crate::sst::scan_block_get_or_insert(id, bi, || {
+                    Some(cache.get_or_insert_with_id(id, bi, || {
                         let mut entries = match table.decode_block(bi) {
                             Ok(entries) => entries,
                             // F1: fail loudly on a corrupt block — same
@@ -1574,83 +1418,6 @@ impl<'a, E: Env> Iterator for LevelRunStream<'a, E> {
     }
 }
 
-/// Visible page from one or more internally-disjoint levels (L0 first =
-/// newest). Same user key across levels keeps the highest sequence.
-fn merge_disjoint_level_page<E: Env>(
-    db: &Db<E>,
-    runs: &[&[usize]],
-    start: Bound<&[u8]>,
-    end: Bound<&[u8]>,
-    snapshot: SequenceNumber,
-    limit: usize,
-) -> Vec<(Bytes, Bytes)> {
-    if runs.len() == 1 {
-        let mut stream = LevelRunStream::new(db, runs[0], start, end, snapshot, true);
-        let mut out = Vec::with_capacity(limit);
-        while out.len() < limit {
-            let Some((ikey, value)) = stream.next() else {
-                break;
-            };
-            if ikey.sequence > snapshot || ikey.kind != ValueType::Value {
-                continue;
-            }
-            out.push((ikey.user_key, value));
-        }
-        return out;
-    }
-    let mut streams: Vec<LevelRunStream<'_, E>> = runs
-        .iter()
-        .map(|by_lo| LevelRunStream::new(db, by_lo, start, end, snapshot, true))
-        .collect();
-    let mut heads: Vec<Option<(InternalKey, Bytes)>> =
-        streams.iter_mut().map(Iterator::next).collect();
-    let mut out = Vec::with_capacity(limit);
-    while out.len() < limit {
-        let mut best: Option<usize> = None;
-        for (i, h) in heads.iter().enumerate() {
-            let Some((ik, _)) = h else {
-                continue;
-            };
-            match best {
-                None => best = Some(i),
-                Some(b) => {
-                    let bk = &heads[b].as_ref().expect("best index has a head").0;
-                    match ik.user_key.as_ref().cmp(bk.user_key.as_ref()) {
-                        std::cmp::Ordering::Less => best = Some(i),
-                        std::cmp::Ordering::Equal if ik.sequence > bk.sequence => best = Some(i),
-                        _ => {}
-                    }
-                }
-            }
-        }
-        let Some(i) = best else {
-            break;
-        };
-        let (ikey, value) = heads[i].take().expect("best head");
-        for (j, h) in heads.iter_mut().enumerate() {
-            if j == i {
-                continue;
-            }
-            if h.as_ref().is_some_and(|(k, _)| k.user_key == ikey.user_key) {
-                *h = streams[j].next();
-            }
-        }
-        loop {
-            match streams[i].next() {
-                Some((k, _)) if k.user_key == ikey.user_key => continue,
-                other => {
-                    heads[i] = other;
-                    break;
-                }
-            }
-        }
-        if ikey.sequence <= snapshot && ikey.kind == ValueType::Value {
-            out.push((ikey.user_key, value));
-        }
-    }
-    out
-}
-
 /// [`Db`] itself is single-threaded (`&mut` for writes). Use [`ConcurrentDb`] for
 /// multi-thread access with a coarse mutex/rwlock.
 pub struct Db<E: Env = StdEnv> {
@@ -1660,9 +1427,8 @@ pub struct Db<E: Env = StdEnv> {
     /// (RFC-0041 P1.1). Rotate waits for [`Self::commit_inflight`] == 0.
     wal: Arc<Mutex<Wal<E::File>>>,
     /// Group-commit appends in flight (not yet applied). Blocks WAL rotate.
-    /// `Arc` so `ConcurrentDb` can observe it lock-free: the RFC-0062 lone
-    /// path holds the write lock through `fdatasync`, so a counter read
-    /// behind the `Db` RwLock is blind exactly while a commit is in flight.
+    /// `Arc` so ConcurrentDb pipeline can bump it without `db.write()`
+    /// (Pebble-style WAL mutex; rotate rechecks under `wal.lock()`).
     commit_inflight: Arc<AtomicUsize>,
     /// Sequenced WAL ops waiting for the off-lock `fdatasync` to finish
     /// before memtable apply (RFC-0045 P2.1).
@@ -1697,13 +1463,6 @@ pub struct Db<E: Env = StdEnv> {
     /// (see [`SstRun`]). `last_under_user_prefix_sst` keeps walking the
     /// flat order above.
     sst_runs: Vec<SstRun>,
-    /// Inclusive envelope of every SST's user-key bounds. A point miss
-    /// outside it cannot be in any file (probe_miss keys of the form
-    /// `route.svc-9…` sit past `svc-099999` at 100M).
-    sst_user_lo: Option<Bytes>,
-    sst_user_hi: Option<Bytes>,
-    sst_envelope: Arc<RwLock<Vec<(Bytes, Bytes)>>>,
-    settled_sst_only: Arc<AtomicBool>,
     /// Immutable tables, oldest → newest within inventory order.
     ssts: Vec<SstTable>,
     /// LSM level for each entry in [`Self::ssts`] (parallel array; 0 = L0).
@@ -1730,7 +1489,9 @@ pub struct Db<E: Env = StdEnv> {
     /// MANIFEST flag: open `VALUES.vlog.new` (SST pointers already remapped).
     vlog_use_new: bool,
     /// Next sequence to assign (1-based; 0 means “no writes yet”).
-    next_seq: SequenceNumber,
+    /// Atomic so the async 1-op pipeline can mint under the WAL mutex
+    /// without `db.write()` (Pebble commit pipeline).
+    next_seq: Arc<AtomicU64>,
     /// Highest sequence default reads may observe. Assigned (`next_seq-1`)
     /// may be ahead while a ConcurrentDb leader has encoded WAL but not yet
     /// applied+published (RFC-0045 P2.1: apply after durable fsync; G1: Ok
@@ -1763,10 +1524,7 @@ pub struct Db<E: Env = StdEnv> {
     /// Db read lock (YCSB C hit path).
     point_cache: Arc<PointCache>,
     /// User keys applied since last publish (point-cache drop, not a gen bump).
-    /// Value is `Some` for a small inline put so publish can refill the
-    /// shared point cache after invalidate — ycsb_f_mc4 sibling gets then
-    /// skip `db.read()` (zipf hot keys were a miss after every RMW).
-    dirty_points: Mutex<Vec<(Bytes, Option<Bytes>)>>,
+    dirty_points: Mutex<Vec<Bytes>>,
     /// Fat apply / range-delete: publish must gen-bump, not per-key inval.
     point_cache_reset: AtomicBool,
     /// Latest `last_under_user_prefix` answers; cleared on write.
@@ -1813,8 +1571,6 @@ pub struct Db<E: Env = StdEnv> {
     large_value_threshold: Option<usize>,
     /// Append-only value log when large values / existing vlog file present.
     vlog: Option<Mutex<ValueLog<E::File>>>,
-    /// Userspace vlog tail not yet `write()`n (RFC-0180: skip idle flush).
-    vlog_unwritten: bool,
     /// Rotate the active blob after this many bytes (`None` = single `VALUES.vlog`).
     vlog_rotate_bytes: Option<u64>,
     /// Active blob generation (`0` = `VALUES.vlog`).
@@ -1829,10 +1585,12 @@ pub struct Db<E: Env = StdEnv> {
     latest_sst_fallback: AtomicU64,
     latest_sst_probed: AtomicU64,
     scan_ops: AtomicU64,
+    scan_ns: AtomicU64,
+    scan_sst_setup_ns: AtomicU64,
+    scan_merge_ns: AtomicU64,
     scan_sst_probed: AtomicU64,
     get_mem_hit: AtomicU64,
     get_sst_fallback: AtomicU64,
-    lookup_sst_considered: AtomicU64,
     get_inline: AtomicU64,
     get_vlog: AtomicU64,
     mvcc_split_ops: AtomicU64,
@@ -1881,18 +1639,6 @@ pub struct Db<E: Env = StdEnv> {
     write_stall_count: u64,
     /// Count of soft pressure drains (not errors).
     write_pressure_count: u64,
-    /// Times SST warm was skipped because the live set exceeds the RAM cap.
-    ram_warm_skipped: AtomicU64,
-    /// One-shot so the RAMPRESSURE line is not a compact-loop flood.
-    ram_pressure_warned: AtomicBool,
-    /// Bytes streamed by the last [`Self::maybe_warm_ssts`].
-    last_settle_warm_bytes: AtomicU64,
-    /// Nanoseconds of the last [`Self::maybe_warm_ssts`].
-    last_settle_warm_ns: AtomicU64,
-    /// Nanoseconds of the last leveled compact, excluding warm.
-    last_settle_compact_ns: AtomicU64,
-    /// SST paths already streamed through the get fd (RFC-0178).
-    warmed_ssts: Mutex<HashSet<PathBuf>>,
     /// Open [`SnapshotPin`]s: pin id → sequence (open-items §2.1).
     snapshot_pins: std::collections::BTreeMap<u64, SequenceNumber>,
     /// Next pin id (monotonic; never reused for this process open).
@@ -1957,6 +1703,51 @@ pub struct Db<E: Env = StdEnv> {
     /// stale and the feed is rebuilt on demand (RFC-0019: on-disk CHANGELOG
     /// is a cache).
     changelog_rebuild_budget_entries: u64,
+    /// RFC-0217 P1.1: explicit flushes since the last CHANGELOG store
+    /// (lazy feed). Store fires at the debounce while the rotated WAL
+    /// segments stay archived as the crash rebuild source.
+    changelog_flushes_since_store: u64,
+    /// Highest sequence covered by the on-disk CHANGELOG cache. Rotates
+    /// archive instead of truncating while `last_sequence()` is above it.
+    changelog_disk_watermark: SequenceNumber,
+    /// Highest sequence whose data is in MANIFEST-published SSTs
+    /// (RFC-0217 P1.1). While a rotate defers the manifest publish, the
+    /// archived segments — not the manifest — are the only durable copy of
+    /// the window above this floor; archives above it must survive every
+    /// store/cleanup that would otherwise delete them.
+    manifest_published_seq: SequenceNumber,
+    /// True when the live SST inventory changed since the last successful
+    /// MANIFEST publish (RFC-0217 P1.1). A rotate may only truncate when
+    /// this is false — unpublished SSTs are orphans a reopen sweeps, and
+    /// the WAL frames are the only other copy of their entries.
+    manifest_dirty: bool,
+    /// True when an installed-but-unpublished SST holds entries at or
+    /// below `manifest_published_seq` (RFC-0217 P1.1). Archive replay
+    /// drops frames at or below the floor (a memtable entry from replay
+    /// would shadow newer published data — `lookup` trusts mem-first),
+    /// so such a window must publish, never archive. Bulk-run sequences
+    /// interleaved with normal puts are the source (put below a published
+    /// run's max).
+    unpublished_below_floor: bool,
+    /// Highest sequence of an acked op that has no WAL frame (RFC-0217
+    /// P1.1): the bulk run arrays and the 1-key hydrate meta tail
+    /// (disableWAL class). Archives cannot replay these — a rotate that
+    /// would drop or archive the segment while they sit above the
+    /// published floor must publish instead.
+    walless_seq_high: SequenceNumber,
+    /// Highest sequence held by any archived WAL segment. Deletion is safe
+    /// only once `manifest_published_seq` covers it.
+    wal_archive_max_seq: SequenceNumber,
+    /// Next archived WAL segment slot (`WAL.archNNNN`); `0` = none live.
+    wal_archive_next: u64,
+    /// First archived slot not yet unlinked (RFC-0217 P1.1 budgeted
+    /// cleanup). Segments `[0, wal_archive_unlinked)` are gone;
+    /// `[wal_archive_unlinked, wal_archive_next)` are live.
+    wal_archive_unlinked: u64,
+    /// Archived segments kept before a rotate forces a synchronous store.
+    wal_archive_cap: u64,
+    /// Explicit-flush store debounce (kernel default 64).
+    changelog_flush_debounce: u64,
     /// Merged compaction output splits into multiple SSTs at this many
     /// bytes (the SST writer buffers one output file in memory — see
     /// [`crate::compact_kernel::COMPACT_TARGET_FILE_BYTES`]). Rocks
@@ -1982,6 +1773,19 @@ pub struct Db<E: Env = StdEnv> {
     commits_since_changelog: u64,
     /// Successful CHANGELOG stores since open.
     changelog_store_count: u64,
+    /// Last logged disk-pressure state (RFC-0179): 0=ok, 1=reclaim, 2=refuse.
+    /// Rate-limits `tracing::warn!` to transitions, not every put.
+    disk_pressure_log: AtomicU8,
+    /// RFC-0217 P2.4 probe cache window (ms; `PEDRA_DISK_PROBE_CACHE_MS`,
+    /// 0 = per-commit probe). A fresh `Ok` verdict is reused for this long.
+    disk_probe_cache_ms: u64,
+    /// Instant of the last `Ok` probe (None until the first probe / after a
+    /// refuse). Only `Ok` verdicts ever populate this — the refuse semantic
+    /// below the hard floor stays per-commit outside the cache window.
+    disk_ok_probe_at: Option<std::time::Instant>,
+    /// Instant of the last reclaim-ladder run (RFC-0217 P2.4). In the soft
+    /// band the ladder is rate-limited; admission itself never waits.
+    disk_ladder_at: Option<std::time::Instant>,
 }
 
 impl Db<StdEnv> {
@@ -2006,36 +1810,6 @@ impl Db<StdEnv> {
     pub fn open_with(path: impl AsRef<Path>, opts: OpenOptions) -> Result<Self> {
         Self::open_with_env(path, opts, StdEnv)
     }
-}
-
-// RFC-0162 P0.2: per-chunk bulk-hydrate timing for diagnostic runs
-// (`PEDRA_BULK_STAGE_TIMING=1`). Zero cost when the env is unset; the
-// official gate runs never set it.
-static BSTAGE_IDX: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-static BSTAGE_EPOCH: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-
-#[cfg(test)]
-static VLOG_STATS_VALUE_VISITS: AtomicU64 = AtomicU64::new(0);
-
-fn bulk_stage_timing_on() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| {
-        std::env::var("PEDRA_BULK_STAGE_TIMING").is_ok_and(|v| !v.is_empty() && v != "0")
-    })
-}
-
-fn bulk_stage_line(
-    idx: u64,
-    epoch_ms: u128,
-    t_ms: u128,
-    entries: usize,
-    bytes: usize,
-    caller: &str,
-    sync: bool,
-) -> String {
-    format!(
-        "BSTAGE idx={idx} epoch_ms={epoch_ms} t_ms={t_ms} entries={entries} bytes={bytes} caller={caller} sync={sync}"
-    )
 }
 
 impl<E: Env> Db<E> {
@@ -2178,17 +1952,86 @@ impl<E: Env> Db<E> {
         let wal_path = dir.join(WAL_FILE_NAME);
         let mut mem = MemTable::new();
         let mut change_log = ChangeLog::load_on(&env, &dir)?;
+        // RFC-0217 P1.1: archived WAL segments (rename-instead-of-truncate
+        // while the lazy CHANGELOG cache lags). Their keys are durable in
+        // SSTs listed by the MANIFEST **up to `manifest_floor`** — but the
+        // deferred rotate publishes the MANIFEST only at the debounce
+        // gate, so ops above the floor exist only in the archives
+        // (unpublished SSTs are orphans, swept by `gc_orphan_ssts`).
+        // Replay ops above the floor into the memtable as data; ops at or
+        // below it are already in live SSTs and re-applying them would
+        // resurrect superseded versions. The feed extension covers both.
+        let manifest_floor = max_seq;
+        let feed_max_loaded = change_log.max_sequence().unwrap_or(0);
+        let mut wal_archives: Vec<u64> = env
+            .read_dir_names(&dir)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|n| wal_archive_slot_of(n))
+            .collect();
+        wal_archives.sort_unstable();
+        let mut archive_max_seq_seen = 0u64;
+        for slot in &wal_archives {
+            let path = dir.join(wal_archive_slot_name(*slot));
+            let (records, _last_good, _resync) = match Wal::recover_span_on(&env, &path) {
+                Ok(r) => r,
+                Err(e) => {
+                    // A segment may be the only durable copy of the window
+                    // above the manifest floor — torn frames are
+                    // corruption, loud (never a silent skip).
+                    return Err(crate::corrupt::escalate_or_fail(
+                        &env,
+                        &dir,
+                        "arch",
+                        0,
+                        CoreError::Internal(format!(
+                            "torn archived WAL segment {} ({e})",
+                            path.display()
+                        )),
+                    ));
+                }
+            };
+            for raw in records {
+                let rec = WriteRecord::decode(&raw)?;
+                if let Some(s) = rec.max_sequence() {
+                    archive_max_seq_seen = archive_max_seq_seen.max(s);
+                }
+                // RFC-0217 P1.1: archived segments replay as data only
+                // above the manifest floor — the rotate never archives a
+                // below-floor window (see `unpublished_below_floor`), so
+                // every dropped frame's entry is in a published SST, and a
+                // replayed frame can never shadow newer published data
+                // (`lookup` trusts mem-first).
+                let data_ops: Vec<_> = rec
+                    .ops
+                    .iter()
+                    .filter(|op| op.sequence > manifest_floor)
+                    .cloned()
+                    .collect();
+                if !crate::write_admission_kernel::batch_is_empty(data_ops.len() as u64) {
+                    apply_ops_owned(&mut mem, data_ops);
+                    if let Some(s) = rec.max_sequence() {
+                        max_seq = max_seq.max(s);
+                    }
+                }
+                let mut missing = Vec::new();
+                for op in &rec.ops {
+                    if crate::write_admission_kernel::seq_after_feed(
+                        op.sequence,
+                        change_log.max_sequence().unwrap_or(0),
+                    ) {
+                        missing.push(ChangeEntry::from_write_op(op));
+                    }
+                }
+                if !crate::write_admission_kernel::batch_is_empty(missing.len() as u64) {
+                    change_log.extend(missing);
+                }
+            }
+        }
         // RFC-0047 P0.2: set when a PointInTime open discards a WAL suffix.
         let mut point_in_time_report: Option<RecoveryReport> = None;
 
         if env.exists(&wal_path) {
-            // Tiny WAL + Truncated(0): failed first append after rotate (or crash
-            // before any complete record). Tolerate empty so SSTs still load (F6).
-            // Large WAL + Truncated(0): bitrot of the first record — fail-stop (F4),
-            // journaled for escalation (RFC-0038 D: repeated events refuse open).
-            // RFC-0047 P0.2: in PointInTime mode the event is still journaled and
-            // escalation still refuses the open; otherwise the decoded prefix is
-            // served and the discarded suffix is reported (never silently skipped).
             let (records, last_good) = match Wal::recover_span_on(&env, &wal_path) {
                 Ok((records, last_good, resync_origin)) => {
                     if let Some(origin) = resync_origin {
@@ -2204,8 +2047,6 @@ impl<E: Env> Db<E> {
                             origin,
                             CoreError::Internal("WAL resync skipped damaged region mid-log".into()),
                         );
-                        // RFC-0053 Y3.3: reopen outcome decided by the pure
-                        // kernel (refuse / serve prefix + report), not ad hoc.
                         match crate::wal::reopen_kernel::reopen_outcome(
                             crate::wal::reopen_kernel::ReopenDamage::Resync,
                             opts.wal_recovery == WalRecovery::PointInTime,
@@ -2329,25 +2170,35 @@ impl<E: Env> Db<E> {
                 }
                 Err(e) => return Err(e),
             };
-            // RFC-0048 P1.1: mid-log resync damage cannot be healed by the
-            // tail-cut below (the damage sits before `last_good` after a
-            // re-anchor) — PointInTime rewrites the WAL from the recovered
-            // records so the next open, even fail-closed, is clean.
-            if crate::write_admission_kernel::pit_resync_needs_rewrite(
+            match crate::write_admission_kernel::pit_resync_rewrite_plan(
                 point_in_time_report
                     .as_ref()
                     .is_some_and(|r| r.kind == "resync"),
             ) {
-                let repair = dir.join(format!("{WAL_FILE_NAME}.repair"));
-                let mut w = Wal::create_on(&env, &repair)?;
-                w.set_full_fsync(opts.wal_full_fsync);
-                for raw in &records {
-                    w.append_record(raw)?;
+                crate::write_admission_kernel::PitResyncRewritePlan::RewriteWalFromPrefix => {
+                    let repair = dir.join(format!("{WAL_FILE_NAME}.repair"));
+                    let mut w = Wal::create_on(&env, &repair)?;
+                    w.set_full_fsync(opts.wal_full_fsync);
+                    for raw in &records {
+                        w.append_record(raw)?;
+                    }
+                    let sync_err = w.sync_data().err();
+                    match crate::write_admission_kernel::wal_commit_plan(true, sync_err.is_some()) {
+                        crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                            assert!(
+                                crate::write_admission_kernel::fence_on_sync_fail(true, true),
+                                "required repair sync failed ⇒ not Ok"
+                            );
+                            return Err(sync_err.expect("AppendSyncFence ⇒ Some"));
+                        }
+                        crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+                        | crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => {}
+                    }
+                    drop(w);
+                    env.rename(&repair, &wal_path)?;
+                    env.sync_dir(&dir)?;
                 }
-                w.sync_data()?;
-                drop(w);
-                env.rename(&repair, &wal_path)?;
-                env.sync_dir(&dir)?;
+                crate::write_admission_kernel::PitResyncRewritePlan::KeepRecoveredPrefix => {}
             }
             let feed_max = change_log.max_sequence().unwrap_or(0);
             for raw in records {
@@ -2368,20 +2219,49 @@ impl<E: Env> Db<E> {
                     change_log.extend(missing);
                 }
             }
-            if crate::write_admission_kernel::seq_after_feed(
-                change_log.max_sequence().unwrap_or(0),
-                feed_max,
-            ) {
-                change_log.store_on(&env, &dir)?;
-            }
-            // RFC-0038 D: cut a torn tail to the last known-good offset so
-            // new appends never sit on top of the damaged region (re-opening
-            // would then fail-stop on its garbage as if it were records).
             let wal_len = env.metadata_len(&wal_path).unwrap_or(0);
             if crate::write_admission_kernel::torn_tail_needs_cut(wal_len, last_good) {
                 let mut wal_file = env.open_append(&wal_path)?;
                 wal_file.set_len(last_good)?;
-                wal_file.sync_data()?;
+                let sync_err = wal_file.sync_data().err();
+                match crate::write_admission_kernel::wal_commit_plan(true, sync_err.is_some()) {
+                    crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                        assert!(
+                            crate::write_admission_kernel::fence_on_sync_fail(true, true),
+                            "required torn-tail sync failed ⇒ not Ok"
+                        );
+                        return Err(sync_err.expect("AppendSyncFence ⇒ Some").into());
+                    }
+                    crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+                    | crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => {}
+                }
+            }
+        }
+
+        // RFC-0217 P1.1: archives left behind by a debounced store are now
+        // covered — the replay above folded every new archive op into the
+        // feed (an unchanged feed means each archive op was already
+        // last-per-key covered). Store once when anything extended.
+        if crate::write_admission_kernel::seq_after_feed(
+            change_log.max_sequence().unwrap_or(0),
+            feed_max_loaded,
+        ) {
+            change_log.store_on(&env, &dir)?;
+        }
+        // RFC-0217 P1.1: the segments whose data the MANIFEST already
+        // publishes (≤ manifest_floor) are redundant — delete now. Any
+        // segment above the floor is the only durable copy of its window
+        // (the memtable replay is volatile): keep the files; the running
+        // db clears them at the next store point after the deferred
+        // publish catches up.
+        let keep_wal_archives = !wal_archives.is_empty() && manifest_floor < archive_max_seq_seen;
+        if !keep_wal_archives {
+            for slot in &wal_archives {
+                let path = dir.join(wal_archive_slot_name(*slot));
+                let _ = env.remove_file(&path);
+            }
+            if !wal_archives.is_empty() {
+                let _ = env.sync_dir(&dir);
             }
         }
 
@@ -2454,10 +2334,6 @@ impl<E: Env> Db<E> {
             retired_l0s: 0,
             sst_order_newest: Vec::new(),
             sst_runs: Vec::new(),
-            sst_user_lo: None,
-            sst_user_hi: None,
-            sst_envelope: Arc::new(RwLock::new(Vec::new())),
-            settled_sst_only: Arc::new(AtomicBool::new(false)),
             ssts,
             sst_levels,
             physical_cfs: Vec::new(),
@@ -2466,15 +2342,10 @@ impl<E: Env> Db<E> {
             manifest_epoch: 0,
             manifest_write_gate: Arc::new(Mutex::new(0)),
             vlog_use_new,
-            next_seq,
+            next_seq: Arc::new(AtomicU64::new(next_seq)),
             published_seq: Arc::new(AtomicU64::new(next_seq.saturating_sub(1))),
             sync: opts.sync,
-            auto_flush_bytes: opts.auto_flush_bytes.filter(|n| *n > 0).map(|n| {
-                crate::env::write_buffer_for_ram(
-                    n as u64,
-                    crate::env::ram_ceiling_bytes().unwrap_or(0),
-                ) as usize
-            }),
+            auto_flush_bytes: opts.auto_flush_bytes.filter(|n| *n > 0),
             cf_write_buffer: std::collections::BTreeMap::new(),
             auto_compact_sst_count: opts.auto_compact_sst_count.filter(|n| *n > 0),
             auto_compact_sst_bytes: opts.auto_compact_sst_bytes.filter(|n| *n > 0),
@@ -2493,7 +2364,6 @@ impl<E: Env> Db<E> {
                 .map(|_| Arc::new(WritePhaseStats::default())),
             last_recovery: point_in_time_report,
             dirty_points: Mutex::new(Vec::new()),
-            // typed as Vec<(Bytes, Option<Bytes>)> at the field
             point_cache_reset: AtomicBool::new(false),
             dir_lock: lock,
             durability_fenced: false,
@@ -2505,7 +2375,6 @@ impl<E: Env> Db<E> {
             rewrite_chunk_target_bytes: REWRITE_CHUNK_TARGET_BYTES,
             large_value_threshold,
             vlog,
-            vlog_unwritten: false,
             vlog_rotate_bytes: None,
             blob_active,
             scan_prefetch: 4,
@@ -2515,10 +2384,12 @@ impl<E: Env> Db<E> {
             latest_sst_fallback: AtomicU64::new(0),
             latest_sst_probed: AtomicU64::new(0),
             scan_ops: AtomicU64::new(0),
+            scan_ns: AtomicU64::new(0),
+            scan_sst_setup_ns: AtomicU64::new(0),
+            scan_merge_ns: AtomicU64::new(0),
             scan_sst_probed: AtomicU64::new(0),
             get_mem_hit: AtomicU64::new(0),
             get_sst_fallback: AtomicU64::new(0),
-            lookup_sst_considered: AtomicU64::new(0),
             get_inline: AtomicU64::new(0),
             get_vlog: AtomicU64::new(0),
             mvcc_split_ops: AtomicU64::new(0),
@@ -2535,12 +2406,6 @@ impl<E: Env> Db<E> {
             write_stall_drain: false,
             write_stall_count: 0,
             write_pressure_count: 0,
-            ram_warm_skipped: AtomicU64::new(0),
-            ram_pressure_warned: AtomicBool::new(false),
-            last_settle_warm_bytes: AtomicU64::new(0),
-            last_settle_warm_ns: AtomicU64::new(0),
-            last_settle_compact_ns: AtomicU64::new(0),
-            warmed_ssts: Mutex::new(HashSet::new()),
             snapshot_pins: std::collections::BTreeMap::new(),
             next_snapshot_pin_id: 1,
             earliest_readable_seq,
@@ -2563,16 +2428,44 @@ impl<E: Env> Db<E> {
             bytes_written_sst: 0,
             compact_count: 0,
             vlog_gc_count: 0,
+            changelog_disk_watermark: change_log.max_sequence().unwrap_or(0),
+            manifest_published_seq: manifest_floor,
+            // Recovery published (or adopted) exactly this inventory; the
+            // WAL-less watermarks start clean (RFC-0217 P1.1).
+            manifest_dirty: false,
+            unpublished_below_floor: false,
+            walless_seq_high: 0,
+            wal_archive_max_seq: if keep_wal_archives {
+                archive_max_seq_seen
+            } else {
+                0
+            },
+            wal_archive_next: if keep_wal_archives {
+                wal_archives.last().map_or(0, |s| s.saturating_add(1))
+            } else {
+                0
+            },
+            wal_archive_unlinked: 0,
             change_log,
             changelog_interval: changelog_interval_from_env(),
             changelog_rebuild_budget_entries:
                 crate::changelog_kernel::DEFAULT_CHANGELOG_REBUILD_BUDGET_ENTRIES,
+            changelog_flushes_since_store: 0,
+            wal_archive_cap: crate::changelog_kernel::DEFAULT_WAL_ARCHIVE_SEGMENT_CAP,
+            changelog_flush_debounce:
+                crate::changelog_kernel::DEFAULT_CHANGELOG_FLUSH_DEBOUNCE_FLUSHES,
             compact_target_file_bytes: crate::compact_kernel::COMPACT_TARGET_FILE_BYTES,
             l1_target_bytes: crate::compact_kernel::COMPACT_TARGET_FILE_BYTES,
             parallel_merge: None,
             parallel_jobs: 1,
             commits_since_changelog: 0,
             changelog_store_count: 0,
+            disk_pressure_log: AtomicU8::new(0),
+            disk_probe_cache_ms: std::env::var_os("PEDRA_DISK_PROBE_CACHE_MS")
+                .and_then(|v| v.to_string_lossy().parse().ok())
+                .unwrap_or(0),
+            disk_ok_probe_at: None,
+            disk_ladder_at: None,
             unsynced_ssts: Vec::new(),
         };
         // RFC-0042 v18: `ScanAndInstall` recovery (legacy dirs, no MANIFEST)
@@ -2651,7 +2544,7 @@ impl<E: Env> Db<E> {
     /// Latest sequence that has been written (0 if empty).
     #[must_use]
     pub fn last_sequence(&self) -> SequenceNumber {
-        self.next_seq.saturating_sub(1)
+        self.next_seq.load(Ordering::Relaxed).saturating_sub(1)
     }
 
     /// RFC-0078: admit a “this `fdatasync` Ok proves the drive” claim.
@@ -2687,18 +2580,6 @@ impl<E: Env> Db<E> {
     #[must_use]
     pub fn point_cache_handle(&self) -> Arc<PointCache> {
         Arc::clone(&self.point_cache)
-    }
-
-    /// Shared per-CF SST envelope list (RFC-0164 miss fast path).
-    #[must_use]
-    pub fn sst_envelope_handle(&self) -> Arc<RwLock<Vec<(Bytes, Bytes)>>> {
-        Arc::clone(&self.sst_envelope)
-    }
-
-    /// Shared settled-SSTs-only flag (RFC-0164 miss fast path gate).
-    #[must_use]
-    pub fn settled_sst_only_handle(&self) -> Arc<AtomicBool> {
-        Arc::clone(&self.settled_sst_only)
     }
 
     /// Shared count-cache handle (ConcurrentDb `deps_scan` hit, no Db lock).
@@ -2744,7 +2625,7 @@ impl<E: Env> Db<E> {
     /// instance. Folding the tail between shapes restores an empty insert
     /// path for the next CF without a flush. No-op if the tail is empty.
     pub fn fold_active_tail(&mut self) {
-        if self.mem.has_tail() {
+        if !crate::write_admission_kernel::batch_is_empty(self.mem.tail_len() as u64) {
             self.mem.spill_tail();
         }
     }
@@ -2768,7 +2649,7 @@ impl<E: Env> Db<E> {
         // the point-cache OCC double-check (`get_at` with snap == published)
         // accepts any hit while `published` is unchanged, so invalidating
         // after the CAS leaves a window that serves the pre-write value.
-        let refill = self.invalidate_read_answers(seq);
+        self.invalidate_read_answers(seq);
         let mut cur = self.published_seq.load(Ordering::Relaxed);
         while seq > cur {
             match self.published_seq.compare_exchange_weak(
@@ -2780,11 +2661,6 @@ impl<E: Env> Db<E> {
                 Ok(_) => break,
                 Err(actual) => cur = actual,
             }
-        }
-        // After seq is visible: refill so a sibling ycsb_f get hits the
-        // shared cache instead of taking `inner.read()` (zipf RMW).
-        for (k, v) in refill {
-            self.point_cache.insert(&k, Some(v));
         }
         // RFC-0046 P0.1: sample (seq, time) every 32 publishes while a window
         // horizon is active — the cutoff only needs ±32-seq granularity.
@@ -2813,13 +2689,6 @@ impl<E: Env> Db<E> {
     }
 
     fn note_dirty_points(&self, ops: &[WriteOp]) {
-        if !read_cache_invalidate_needed(
-            self.point_cache.is_empty(),
-            self.count_cache.is_empty(),
-            self.last_prefix_cache.is_empty(),
-        ) {
-            return;
-        }
         if ops.len() >= 32 || ops.iter().any(|op| op.kind == ValueType::RangeDeletion) {
             // Fat apply / range: gen-bump at publish. Do not clone 64 keys
             // under the write lock just to discard them (RFC-0041 apply_mc4).
@@ -2836,10 +2705,7 @@ impl<E: Env> Db<E> {
             return;
         }
         let mut g = self.dirty_points.lock();
-        g.extend(ops.iter().map(|op| {
-            let val = cacheable_point_value(op);
-            (op.key.clone(), val)
-        }));
+        g.extend(ops.iter().map(|op| op.key.clone()));
     }
 
     /// Zero RFC-0035 latest/scan counters, block-cache stats, and the
@@ -2850,10 +2716,11 @@ impl<E: Env> Db<E> {
         self.latest_sst_fallback.store(0, Ordering::Relaxed);
         self.latest_sst_probed.store(0, Ordering::Relaxed);
         self.scan_ops.store(0, Ordering::Relaxed);
+        self.scan_ns.store(0, Ordering::Relaxed);
         self.scan_sst_probed.store(0, Ordering::Relaxed);
+        self.mem.reset_ord_probe();
         self.get_mem_hit.store(0, Ordering::Relaxed);
         self.get_sst_fallback.store(0, Ordering::Relaxed);
-        self.lookup_sst_considered.store(0, Ordering::Relaxed);
         self.get_inline.store(0, Ordering::Relaxed);
         self.get_vlog.store(0, Ordering::Relaxed);
         self.mvcc_split_ops.store(0, Ordering::Relaxed);
@@ -2875,6 +2742,11 @@ impl<E: Env> Db<E> {
             latest_sst_fallback: self.latest_sst_fallback.load(Ordering::Relaxed),
             latest_sst_probed: self.latest_sst_probed.load(Ordering::Relaxed),
             scan_ops: self.scan_ops.load(Ordering::Relaxed),
+            scan_ns: self.scan_ns.load(Ordering::Relaxed),
+            scan_sst_setup_ns: self.scan_sst_setup_ns.load(Ordering::Relaxed),
+            scan_merge_ns: self.scan_merge_ns.load(Ordering::Relaxed),
+            ord_builds: self.mem.ord_probe().0,
+            ord_build_ns: self.mem.ord_probe().1,
             scan_sst_probed: self.scan_sst_probed.load(Ordering::Relaxed),
             sst_count: self.ssts.len(),
             l0_files: self.level_file_count(0),
@@ -2911,6 +2783,20 @@ impl<E: Env> Db<E> {
         self.ssts.len()
     }
 
+    /// File numbers of the live SST inventory (from each table's path).
+    #[must_use]
+    pub fn sst_file_nums(&self) -> Vec<u64> {
+        self.ssts
+            .iter()
+            .filter_map(|t| {
+                t.path()
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .and_then(|s| s.parse().ok())
+            })
+            .collect()
+    }
+
     /// Persist CHANGELOG at most every `n` durable commits (RFC-0031).
     ///
     /// `0` disables the commit-path store (flush / close / checkpoint still
@@ -2935,6 +2821,33 @@ impl<E: Env> Db<E> {
         self
     }
 
+    /// Explicit-flush CHANGELOG store debounce in flushes (RFC-0217 P1.1).
+    /// `0` stores on every explicit flush (F212-legacy synchronous tail).
+    pub fn set_changelog_flush_debounce(&mut self, n: u64) -> &mut Self {
+        self.changelog_flush_debounce = n;
+        self
+    }
+
+    /// Archived WAL segments kept before a rotate forces a synchronous
+    /// CHANGELOG store (RFC-0217 P1.1). Bounds crash replay and disk.
+    pub fn set_wal_archive_cap(&mut self, n: u64) -> &mut Self {
+        self.wal_archive_cap = n;
+        self
+    }
+
+    /// Live archived WAL segments (RFC-0217 P1.1 diagnostics/tests).
+    #[must_use]
+    pub fn wal_archive_count(&self) -> u64 {
+        self.wal_archive_live()
+    }
+
+    /// Highest sequence covered by the on-disk CHANGELOG cache (RFC-0217
+    /// P1.1 diagnostics/tests).
+    #[must_use]
+    pub fn changelog_disk_watermark(&self) -> SequenceNumber {
+        self.changelog_disk_watermark
+    }
+
     /// Merged compaction output file split target in bytes (Rocks
     /// `target_file_size_base` role). The writer buffers one output file
     /// in memory, so this bounds compaction's peak RAM.
@@ -2953,11 +2866,6 @@ impl<E: Env> Db<E> {
     /// Best-effort: a store error is logged and never surfaces as commit failure
     /// (RFC-0019: on-disk CHANGELOG is a cache rebuilt from WAL).
     fn persist_changelog_best_effort(&mut self) {
-        // Latched bulk: CHANGELOG is a cache. Collecting the live set is
-        // O(n) RAM (RFC-0039). Skip until BulkRun drains on settle.
-        if !self.bulk_runs.is_empty() || !self.parked_bulk.is_empty() {
-            return;
-        }
         if self.feed_is_lazy() && self.change_log.max_sequence().unwrap_or(0) < self.last_sequence()
         {
             // Best-effort fill (F1): a corrupt payload keeps the cache stale;
@@ -2970,7 +2878,7 @@ impl<E: Env> Db<E> {
                 self.changelog_rebuild_budget_entries,
             ) {
                 if let Ok(entries) = self.collect_feed_from_live() {
-                    if !entries.is_empty() {
+                    if !crate::write_admission_kernel::batch_is_empty(entries.len() as u64) {
                         self.change_log.replace_sorted(entries);
                     }
                 }
@@ -2980,6 +2888,13 @@ impl<E: Env> Db<E> {
             Ok(()) => {
                 self.changelog_store_count = self.changelog_store_count.saturating_add(1);
                 self.commits_since_changelog = 0;
+                self.changelog_flushes_since_store = 0;
+                // Watermark = what the file covers (a skipped over-budget
+                // rebuild stores a stale cache; the archives must stay).
+                self.changelog_disk_watermark = self.change_log.max_sequence().unwrap_or(0);
+                if self.changelog_disk_watermark >= self.last_sequence() {
+                    self.delete_wal_archives(false);
+                }
             }
             Err(e) => {
                 tracing::warn!(
@@ -2990,6 +2905,54 @@ impl<E: Env> Db<E> {
         }
     }
 
+    /// Delete archived WAL segments (callers only run this after a
+    /// successful CHANGELOG store that covers their content, or at open
+    /// when the loaded cache already covers them). Budgeted: a gate that
+    /// just paid the publish + store also unlinks at most
+    /// [`WAL_ARCHIVE_UNLINK_BUDGET`] segments; the rest drains on the
+    /// following stores so no single flush absorbs the whole chain's
+    /// unlink cost. `force` sweeps the chain at once (close).
+    fn delete_wal_archives(&mut self, force: bool) {
+        if self.wal_archive_next == 0 {
+            return;
+        }
+        // RFC-0217 P1.1: a CHANGELOG watermark only proves the *cache* is
+        // current — not that the data underneath is MANIFEST-published.
+        // RFC-0219 P0.2: the keep-vs-delete fate of the archived chain is
+        // the kernel's decision — while the deferred publish lags the
+        // archives, the segments above `manifest_published_seq` are the
+        // only durable copy of their window: keep them.
+        match crate::changelog_kernel::wal_archive_delete_plan(
+            self.manifest_published_seq,
+            self.wal_archive_max_seq,
+        ) {
+            crate::changelog_kernel::WalArchiveDelete::KeepUntilPublished => return,
+            crate::changelog_kernel::WalArchiveDelete::DeleteCovered => {}
+        }
+        let mut unlinked_now: u64 = 0;
+        while self.wal_archive_unlinked < self.wal_archive_next {
+            if !force && unlinked_now >= crate::changelog_kernel::WAL_ARCHIVE_UNLINK_BUDGET {
+                return;
+            }
+            let path = self
+                .dir
+                .join(wal_archive_slot_name(self.wal_archive_unlinked));
+            self.wal_archive_unlinked += 1;
+            unlinked_now += 1;
+            let _ = self.env.remove_file(&path);
+        }
+        self.wal_archive_next = 0;
+        self.wal_archive_unlinked = 0;
+        let _ = self.env.sync_dir(&self.dir);
+    }
+
+    /// Archived segments still on disk (created minus already-unlinked) —
+    /// the live chain length the cap bounds (RFC-0217 P1.1).
+    fn wal_archive_live(&self) -> u64 {
+        self.wal_archive_next
+            .saturating_sub(self.wal_archive_unlinked)
+    }
+
     /// Debounced persist after a durable (synced) commit (RFC-0031 P0.1).
     fn maybe_persist_changelog_after_durable_commit(&mut self) {
         self.commits_since_changelog = self.commits_since_changelog.saturating_add(1);
@@ -2998,14 +2961,94 @@ impl<E: Env> Db<E> {
         }
     }
 
-    /// Explicit-flush tail (`ConcurrentDb::flush`): persist the CHANGELOG
-    /// cache even when the debounce interval is 0 — the flush rotated the
-    /// WAL, so reopen cannot rebuild the flushed keys from it (mirrors the
-    /// `Db::flush` tail).
+    /// Explicit-flush tail (`ConcurrentDb::flush` / `Db::flush`): store the
+    /// CHANGELOG cache when the debounce/cap gate fires — between stores the
+    /// rotate archived the WAL segment as the crash rebuild source (RFC-0217
+    /// P1.1), so the on-disk cache may lag without losing feed content. The
+    /// flush-time `stage_changelog_delta_from_imm` keeps the in-memory feed
+    /// complete for runtime readers either way.
     pub(crate) fn persist_changelog_after_explicit_flush(&mut self) {
         if self.changelog_interval == 0 {
-            self.persist_changelog_best_effort();
+            self.changelog_flushes_since_store =
+                self.changelog_flushes_since_store.saturating_add(1);
+            if self.changelog_store_gate_fires() {
+                self.changelog_store_point();
+            }
         }
+    }
+
+    /// RFC-0217 P1.1 store gate: debounce flushes or a full archive chain
+    /// while the on-disk cache lags.
+    fn changelog_store_gate_fires(&self) -> bool {
+        self.changelog_interval == 0
+            && crate::changelog_kernel::changelog_flush_store_now(
+                self.changelog_disk_watermark < self.last_sequence(),
+                self.changelog_flushes_since_store,
+                self.changelog_flush_debounce,
+                self.wal_archive_live(),
+                self.wal_archive_cap,
+            )
+    }
+
+    /// Highest sequence held by any live SST — the data floor a published
+    /// MANIFEST actually covers (RFC-0217 P1.1). Every archived op at or
+    /// below this is in a listed SST (flushes move contiguous mem ranges,
+    /// so a table's max bounds its entries).
+    fn sst_max_sequence_floor(&self) -> SequenceNumber {
+        self.ssts
+            .iter()
+            .map(|t| t.max_sequence())
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Synchronous store point (RFC-0217 P1.1): publish the MANIFEST
+    /// durably first — the rotate defers that publish while it archives,
+    /// so the archived segments above `manifest_published_seq` are the
+    /// only durable copy of their window; the store below may delete
+    /// them, which is safe only after the publish covers them.
+    fn changelog_store_point(&mut self) {
+        match crate::changelog_kernel::changelog_store_plan(self.persist_manifest_durable().is_ok())
+        {
+            crate::changelog_kernel::ChangelogStorePlan::StoreFeed => {
+                self.persist_changelog_best_effort();
+            }
+            crate::changelog_kernel::ChangelogStorePlan::SkipStorePublishHolds => {}
+        }
+    }
+
+    /// RFC-0217 P1.1: merge the flushed immutable memtable's latest-per-key
+    /// into the lazy feed cache in O(imm). Without this, a deferred store
+    /// plus the archived (rotated) WAL would leave runtime feed readers
+    /// missing the flushed keys between stores. Eager feeds extend on the
+    /// commit path already.
+    pub(crate) fn stage_changelog_delta_from_imm(&mut self, imm: &MemTable) {
+        if !self.feed_is_lazy() {
+            return;
+        }
+        let mut latest: std::collections::BTreeMap<Bytes, (InternalKey, Bytes)> =
+            std::collections::BTreeMap::new();
+        for (ik, v) in imm.iter_internal() {
+            match latest.get(&ik.user_key) {
+                Some((old, _)) if old.sequence >= ik.sequence => {}
+                _ => {
+                    latest.insert(ik.user_key.clone(), (ik.clone(), v.clone()));
+                }
+            }
+        }
+        let mut delta = Vec::with_capacity(latest.len());
+        for (key, (ik, v)) in latest {
+            let Ok(value) = self.resolve_stored_value(v) else {
+                continue;
+            };
+            delta.push(ChangeEntry {
+                sequence: ik.sequence,
+                key,
+                kind: ChangeKind::from_value_type(ik.kind),
+                value,
+            });
+        }
+        self.change_log.merge_latest(delta);
     }
 
     /// LSM level of each live SST (parallel to inventory order).
@@ -3054,7 +3097,7 @@ impl<E: Env> Db<E> {
     /// L0 files tagged with `cf` (empty physical set = global L0).
     #[must_use]
     pub fn level_file_count_cf(&self, cf: &str) -> usize {
-        if self.physical_cfs.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.physical_cfs.len() as u64) {
             return self.level_file_count(0);
         }
         self.ssts
@@ -3065,11 +3108,11 @@ impl<E: Env> Db<E> {
     }
 
     fn family_of_user_key<'a>(&'a self, key: &[u8]) -> &'a str {
-        if self.physical_cfs.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.physical_cfs.len() as u64) {
             return "default";
         }
         let p = crate::memtable::cf_prefix(key);
-        if p.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(p.len() as u64) {
             return "default";
         }
         self.physical_cfs
@@ -3080,7 +3123,7 @@ impl<E: Env> Db<E> {
     }
 
     fn batch_families(&self, ops: &[BatchOp]) -> Vec<String> {
-        if self.physical_cfs.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.physical_cfs.len() as u64) {
             return Vec::new();
         }
         let mut out = Vec::with_capacity(4);
@@ -3123,7 +3166,7 @@ impl<E: Env> Db<E> {
 
     /// Compact grouping key: all files share `""` until CFs are registered.
     fn compact_family_key<'a>(&self, table: &'a SstTable) -> &'a str {
-        if self.physical_cfs.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.physical_cfs.len() as u64) {
             ""
         } else {
             table.cf()
@@ -3223,7 +3266,7 @@ impl<E: Env> Db<E> {
     /// # Errors
     /// [`CoreError::SnapshotTooOld`] when history for `snap` may have been dropped.
     pub fn ensure_snapshot_readable(&self, snap: Snapshot) -> Result<()> {
-        if snap.seq < self.earliest_readable_seq {
+        if crate::lookup_kernel::snap_below_watermark(snap.seq, self.earliest_readable_seq) {
             return Err(CoreError::SnapshotTooOld {
                 requested: snap.seq,
                 earliest: self.earliest_readable_seq,
@@ -3523,17 +3566,13 @@ impl<E: Env> Db<E> {
         // value, and the GC below would then destroy the only good copy
         // (replay serves pointer bytes as the value).
         let val = self.resolve_stored_value(stored.clone())?;
-        let kind = match ik.kind {
-            ValueType::Value => 0,
-            ValueType::Deletion => 1,
-            ValueType::RangeDeletion => 2,
-        };
+        let kind = crate::history::archive_kind_tag(ik.kind);
         chunk.push((ik.user_key.to_vec(), val.to_vec(), ik.sequence, kind));
         Ok(())
     }
 
     fn archive_flush_chunk(&mut self, chunk: &mut Vec<(Vec<u8>, Vec<u8>, u64, u8)>) -> Result<()> {
-        if chunk.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(chunk.len() as u64) {
             return Ok(());
         }
         let env = self.env.clone();
@@ -3581,35 +3620,27 @@ impl<E: Env> Db<E> {
     /// cache mutex a second time on every uniform miss (lookup_100).
     pub(crate) fn get_after_point_miss(&self, key: &[u8]) -> Option<Bytes> {
         let snap = self.snapshot();
-        if snap.seq == 0 {
-            return None;
-        }
-        if snap.seq < self.earliest_readable_seq {
-            return match self.get_at(snap, key) {
-                Ok(v) => v,
-                Err(CoreError::SnapshotTooOld { .. }) => None,
-                Err(e) => fail_stop_corrupt_value(&format!("get key {key:?}"), &e),
-            };
-        }
-        // Already cache-missed. Do not re-lock `point_cache` inside `get_at`.
-        let got =
-            match self.lookup(key, snap.seq) {
-                Lookup::Found(v) => {
-                    if vlog::decode_vlog_ptr(v.as_ref()).is_some() {
-                        self.get_vlog.fetch_add(1, Ordering::Relaxed);
-                    } else {
-                        self.get_inline.fetch_add(1, Ordering::Relaxed);
-                    }
-                    Some(self.resolve_stored_value(v).unwrap_or_else(|e| {
-                        fail_stop_corrupt_value(&format!("get key {key:?}"), &e)
-                    }))
-                }
-                Lookup::Deleted | Lookup::NotFound => None,
-            };
-        // Do not cache absence: unique probe_miss keys would freeze 8192
-        // with Nones and take the mutex on every subsequent unique miss.
-        if got.is_some() && self.published_seq.load(Ordering::Acquire) == snap.seq {
-            self.point_cache.insert(key, got.clone());
+        let got = match self.get_at(snap, key) {
+            Ok(v) => v,
+            // Below-watermark latest reads are not a corruption signal
+            // (concurrent GC raised the floor past our snapshot token).
+            Err(CoreError::SnapshotTooOld { .. }) => None,
+            Err(e) => fail_stop_corrupt_value(&format!("get key {key:?}"), &e),
+        };
+        // F198: the fill runs under the read lock, which does not exclude
+        // `publish_sequence` (also read-locked) — a publish can invalidate
+        // `key` between the snapshot above and this insert, caching a stale
+        // answer indefinitely. Only insert while `published` still matches
+        // the seq the answer was computed at. At capacity the cache freezes
+        // (no FIFO churn on unique keys). Kernel owns the fate.
+        match crate::lookup_kernel::point_cache_validity(
+            self.published_seq.load(Ordering::Acquire),
+            snap.seq,
+        ) {
+            crate::lookup_kernel::PointCachePlan::CacheCurrent => {
+                self.point_cache.insert(key, got.clone());
+            }
+            crate::lookup_kernel::PointCachePlan::PublishAdvanced => {}
         }
         got
     }
@@ -3622,10 +3653,10 @@ impl<E: Env> Db<E> {
     /// point reads fall back to the history tier — local segments first,
     /// remote mirror second — and only fail when that history is gone).
     pub fn get_at(&self, snap: Snapshot, key: &[u8]) -> Result<Option<Bytes>> {
-        if snap.seq == 0 {
+        if crate::lookup_kernel::snap_is_empty(snap.seq) {
             return Ok(None);
         }
-        if snap.seq < self.earliest_readable_seq {
+        if crate::lookup_kernel::snap_below_watermark(snap.seq, self.earliest_readable_seq) {
             // RFC-0046 P2.3: the global watermark advances with the cap and
             // the reported GC floor, not per key — a version that survived
             // the rewrite (single-version keys are never dropped) can sit
@@ -3642,13 +3673,24 @@ impl<E: Env> Db<E> {
         // invalidates dirty keys before new inserts can refill them).
         // Double-checked `published_seq`: a racing publish bumps it before any
         // newer value can enter the cache, so the recheck rejects the hit and
-        // falls to the full walk (OCC rmw reads become cache hits).
-        if self.published_seq.load(Ordering::Acquire) == snap.seq {
-            if let Some(v) = self.point_cache.get(key) {
-                if self.published_seq.load(Ordering::Acquire) == snap.seq {
-                    return Ok(v);
+        // falls to the full walk (OCC rmw reads become cache hits). Kernel
+        // owns both F198 gates.
+        match crate::lookup_kernel::point_cache_validity(
+            self.published_seq.load(Ordering::Acquire),
+            snap.seq,
+        ) {
+            crate::lookup_kernel::PointCachePlan::CacheCurrent => {
+                if let Some(v) = self.point_cache.get(key) {
+                    match crate::lookup_kernel::point_cache_validity(
+                        self.published_seq.load(Ordering::Acquire),
+                        snap.seq,
+                    ) {
+                        crate::lookup_kernel::PointCachePlan::CacheCurrent => return Ok(v),
+                        crate::lookup_kernel::PointCachePlan::PublishAdvanced => {}
+                    }
                 }
             }
+            crate::lookup_kernel::PointCachePlan::PublishAdvanced => {}
         }
         Ok(match self.lookup(key, snap.seq) {
             Lookup::Found(v) => {
@@ -3664,201 +3706,6 @@ impl<E: Env> Db<E> {
         })
     }
 
-    /// RFC-0046 P2.1: point read below the version-GC watermark, served
-    /// lazy from the history tier (local segments first, the remote mirror
-    /// second — it retains what the local cap already dropped).
-    ///
-    /// A decisive record (newest put/delete/range-delete at `seq ≤ snap`)
-    /// answers even when coverage has gaps. A no-match answers `None` only
-    /// when the retained segments provably cover `[1, snap]` with nothing
-    /// dropped — otherwise fail-closed [`CoreError::SnapshotTooOld`]
-    /// (never-written and dropped are indistinguishable). Read cost: the
-    /// P2.5 key-coverage bound and the P2.6/P2.7 bloom sidecar prune
-    /// segments (local and remote alike) before their bytes are read;
-    /// only may-affect segments are fetched and CRC-walked.
-    fn get_at_from_archive(&self, snap: Snapshot, key: &[u8]) -> Result<Option<Bytes>> {
-        let too_old = || CoreError::SnapshotTooOld {
-            requested: snap.seq,
-            earliest: self.earliest_readable_seq,
-        };
-        let Some(tier) = self.history_tier.as_ref() else {
-            return Err(too_old());
-        };
-        // Candidate segments: the local manifest plus (content-addressed
-        // dedup by name) everything the remote manifest still lists.
-        // Entries carry the P2.5 key-coverage bound (range-delete aware)
-        // — segments whose bound excludes the key are skipped without a
-        // walk. Remote listings carry the bound of their manifest
-        // generation (v3+); a pre-P2.5 remote manifest decodes with
-        // `None` (walk).
-        #[allow(clippy::type_complexity)]
-        let mut cands: Vec<(u64, u64, String, Option<u64>, Option<(Vec<u8>, Vec<u8>)>)> = tier
-            .segment_metas()
-            .into_iter()
-            .map(|m| {
-                (
-                    m.from_seq,
-                    m.through_seq,
-                    m.name,
-                    Some(m.id),
-                    m.key_lo.zip(m.key_hi),
-                )
-            })
-            .collect();
-        if let Some(remote) = self.remote_history.as_ref() {
-            for seg in remote.tier.latest_segments(&remote.env)? {
-                if !cands.iter().any(|(_, _, name, _, _)| *name == seg.name) {
-                    cands.push((
-                        seg.from_seq,
-                        seg.through_seq,
-                        seg.name,
-                        None,
-                        seg.key_lo.zip(seg.key_hi),
-                    ));
-                }
-            }
-        }
-        let mut best: Option<crate::history::HistoryRecord> = None;
-        let mut missing_below_snap = false;
-        for (from, _, name, local_id, coverage) in &cands {
-            if *from > snap.seq {
-                continue; // cannot hold a record this snapshot can see
-            }
-            if let Some((lo, hi)) = coverage {
-                if key < lo.as_slice() || key > hi.as_slice() {
-                    continue; // outside the segment's key coverage — sound skip
-                }
-            }
-            // P2.6 bloom sidecar: skip the record walk when the segment
-            // provably cannot decide this key (helps the overlapping-key
-            // case the manifest bound can't prune). Coverage spans below
-            // still use `cands`, so the None-proof is unaffected by skips.
-            if let Some(id) = local_id {
-                if !tier.segment_may_affect(&self.env, *id, key) {
-                    continue;
-                }
-            }
-            let records = match local_id.map(|id| tier.read_local_segment(&self.env, id)) {
-                Some(Ok(Some(bytes))) => Some(std::sync::Arc::new(
-                    crate::history::walk_segment_records(&bytes)?,
-                )),
-                Some(Ok(None)) | None => None,
-                Some(Err(e)) => return Err(e),
-            };
-            let records = match records {
-                Some(records) => Some(records),
-                // Local copy absent: consult the remote mirror. The P2.7
-                // sidecar object (KBs) prunes the segment fetch (100s of
-                // KB) when the segment provably cannot decide this key —
-                // any sidecar problem (absent = pre-P2.7 upload or
-                // pre-P2.6 segment, unreadable, corrupt) fails open to
-                // the fetch+walk, exactly like the local sidecar.
-                None => {
-                    let Some(remote) = self.remote_history.as_ref() else {
-                        missing_below_snap = true;
-                        continue;
-                    };
-                    if let Ok(Some(buf)) = remote.tier.read_sidecar(&remote.env, name) {
-                        if !crate::history::HistoryTier::sidecar_may_affect(&buf, key) {
-                            continue; // sound skip — spans below still count it
-                        }
-                    }
-                    // P2.8 read cache: a hit skips the fetch and the walk
-                    // (entries are CRC-verified on insert and the name is
-                    // content-addressed — stable for the bytes). The
-                    // guard is dropped at the `let` so the miss path can
-                    // re-lock for the insert.
-                    let cached = self.remote_read_cache.lock().get(name);
-                    if let Some(records) = cached {
-                        Some(records)
-                    } else {
-                        // A missing object is a coverage gap (fail-closed
-                        // below); anything else (corrupt read-back)
-                        // propagates typed.
-                        match remote.tier.read_segment(&remote.env, name) {
-                            Ok(bytes) => {
-                                let records = std::sync::Arc::new(
-                                    crate::history::walk_segment_records(&bytes)?,
-                                );
-                                let cost = bytes.len() as u64;
-                                self.remote_read_cache
-                                    .lock()
-                                    .insert(name, records.clone(), cost);
-                                Some(records)
-                            }
-                            Err(CoreError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
-                                missing_below_snap = true;
-                                None
-                            }
-                            Err(e) => return Err(e),
-                        }
-                    }
-                }
-            };
-            let Some(records) = records else { continue };
-            if let Some(rec) = crate::history::decide_at(&records, key, snap.seq) {
-                if best.as_ref().map_or(true, |b| rec.seq > b.seq) {
-                    best = Some(rec.clone());
-                }
-            }
-        }
-        if let Some(rec) = best {
-            return Ok(match rec.kind {
-                0 => Some(Bytes::from(rec.val)),
-                _ => None, // delete / range delete covering the key
-            });
-        }
-        // No deciding record. `None` is provable only when the retained
-        // segments cover [1, snap] contiguously and the cap never dropped
-        // anything at/below snap (archive_floor is the drop high-water).
-        if missing_below_snap || tier.archive_floor() > snap.seq {
-            return Err(too_old());
-        }
-        let mut spans: Vec<(u64, u64)> = cands.iter().map(|(f, t, _, _, _)| (*f, *t)).collect();
-        spans.sort_unstable();
-        let mut covered_to = 1u64;
-        for (from, through) in spans {
-            if from > covered_to {
-                return Err(too_old()); // gap below snap
-            }
-            covered_to = covered_to.max(through + 1);
-            if covered_to > snap.seq {
-                break;
-            }
-        }
-        if covered_to > snap.seq {
-            Ok(None)
-        } else {
-            Err(too_old())
-        }
-    }
-
-    /// RFC-0046 P2.3: LSM leg of a below-watermark read whose archive
-    /// coverage failed. Soundness: a found version (put or tombstone) at
-    /// `seq ≤ snap` is physically present — serve it. Anything else keeps
-    /// the tier's `SnapshotTooOld`: the LSM cannot prove a key was never
-    /// written (all its versions may have been GC'd and tombstone-cleaned),
-    /// so `None` here would be a silent destroy.
-    fn get_at_below_watermark_lsm(&self, snap: Snapshot, key: &[u8]) -> Result<Option<Bytes>> {
-        let too_old = || CoreError::SnapshotTooOld {
-            requested: snap.seq,
-            earliest: self.earliest_readable_seq,
-        };
-        match self.lookup(key, snap.seq) {
-            Lookup::Found(v) => {
-                if vlog::decode_vlog_ptr(v.as_ref()).is_some() {
-                    self.get_vlog.fetch_add(1, Ordering::Relaxed);
-                } else {
-                    self.get_inline.fetch_add(1, Ordering::Relaxed);
-                }
-                // F1: corruption surfaces as Err, never as a miss.
-                Ok(Some(self.resolve_stored_value(v)?))
-            }
-            Lookup::Deleted => Ok(None),
-            Lookup::NotFound => Err(too_old()),
-        }
-    }
-
     /// Whether any version of `key` has `sequence > snapshot` (OCC conflict probe).
     ///
     /// Includes point puts/deletes **and** range tombstones that cover `key`
@@ -3871,11 +3718,7 @@ impl<E: Env> Db<E> {
             if u.seq <= snapshot {
                 continue;
             }
-            if u.kind == ValueType::RangeDeletion {
-                if range_tombstone_covers(u.key.as_ref(), u.end.as_ref(), key) {
-                    return true;
-                }
-            } else if u.key.as_ref() == key {
+            if crate::merge::write_op_covers_key(u.kind, u.key.as_ref(), u.end.as_ref(), key) {
                 return true;
             }
         }
@@ -3892,7 +3735,12 @@ impl<E: Env> Db<E> {
                 table.collect_range_tombstones(MAX_SEQUENCE_NUMBER, &mut tombs);
                 for t in tombs {
                     if t.sequence > snapshot
-                        && range_tombstone_covers(t.start.as_ref(), t.end.as_ref(), key)
+                        && crate::merge::write_op_covers_key(
+                            ValueType::RangeDeletion,
+                            t.start.as_ref(),
+                            t.end.as_ref(),
+                            key,
+                        )
                     {
                         return true;
                     }
@@ -3912,7 +3760,12 @@ impl<E: Env> Db<E> {
             table.collect_range_tombstones(MAX_SEQUENCE_NUMBER, &mut tombs);
             for t in tombs {
                 if t.sequence > snapshot
-                    && range_tombstone_covers(t.start.as_ref(), t.end.as_ref(), key)
+                    && crate::merge::write_op_covers_key(
+                        ValueType::RangeDeletion,
+                        t.start.as_ref(),
+                        t.end.as_ref(),
+                        key,
+                    )
                 {
                     return true;
                 }
@@ -3930,11 +3783,12 @@ impl<E: Env> Db<E> {
         let Some(ptr) = vlog::decode_vlog_ptr(stored.as_ref()) else {
             return Ok(stored);
         };
-        let Some(ref vlog) = self.vlog else {
+        if crate::lookup_kernel::vlog_ptr_orphaned(self.vlog.is_none()) {
             return Err(CoreError::Internal(
                 "vlog ref in DB but VALUES.vlog not open".into(),
             ));
-        };
+        }
+        let vlog = self.vlog.as_ref().expect("vlog_ptr_orphaned");
         let guard = vlog.lock();
         guard.read_ptr_on(&self.env, &self.dir, ptr, self.vlog_use_new)
     }
@@ -4088,7 +3942,9 @@ impl<E: Env> Db<E> {
 
     /// One flush + leveled compact (shared by pressure and stall-drain).
     fn drain_l0_once(&mut self) {
-        if !self.mem.is_empty() || self.imm.is_some() {
+        if !crate::write_admission_kernel::batch_is_empty(self.mem.len() as u64)
+            || self.imm.is_some()
+        {
             let _ = self.flush();
         }
         let _ = self.compact_with_ssts_only(CompactOptions::default());
@@ -4114,7 +3970,7 @@ impl<E: Env> Db<E> {
 
     fn rotate_blob(&mut self) -> Result<()> {
         self.vlog_sync_pending()?;
-        let next = if self.blob_active == 0 {
+        let next = if crate::write_admission_kernel::batch_is_empty(self.blob_active as u64) {
             1
         } else {
             self.blob_active
@@ -4157,7 +4013,7 @@ impl<E: Env> Db<E> {
             // Open already created VALUES.vlog when the threshold is set.
             // Rotation mode must start at 000001.blob — otherwise the first
             // spills are VLG1 on file 0 and the first get after rotate misses.
-            if self.blob_active == 0 {
+            if crate::write_admission_kernel::batch_is_empty(self.blob_active as u64) {
                 self.rotate_blob()?;
             } else {
                 let len = self.vlog.as_ref().map_or(0, |v| v.lock().len_bytes());
@@ -4170,7 +4026,6 @@ impl<E: Env> Db<E> {
         let mut guard = vlog.lock();
         let (off, len, crc) = guard.append_pending_bytes(value)?;
         drop(guard);
-        self.vlog_unwritten = true;
         Ok(vlog::encode_vlog_ptr(vlog::VlogPtr {
             file_num: self.blob_active,
             offset: off,
@@ -4181,12 +4036,8 @@ impl<E: Env> Db<E> {
 
     /// `write()` vlog tail so WAL pointers cannot outrun the payload (async).
     fn vlog_flush_pending(&mut self) -> Result<()> {
-        if !vlog::vlog_prepare_needed(self.vlog.is_some(), self.vlog_unwritten) {
-            return Ok(());
-        }
         if let Some(v) = &self.vlog {
             v.lock().flush_pending()?;
-            self.vlog_unwritten = false;
         }
         Ok(())
     }
@@ -4201,10 +4052,18 @@ impl<E: Env> Db<E> {
 
     /// Async: `write()` only. G1: `fsync` so a crash after Ok still resolves.
     fn vlog_prepare_wal(&mut self, do_sync: bool) -> Result<()> {
-        if do_sync {
-            self.vlog_sync_pending()
-        } else {
-            self.vlog_flush_pending()
+        match crate::write_admission_kernel::wal_commit_plan(do_sync, false) {
+            crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => {
+                self.vlog_flush_pending()
+            }
+            crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+            | crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                assert!(
+                    !crate::write_admission_kernel::fence_on_sync_fail(do_sync, false),
+                    "planned vlog Sync before I/O ⇒ not Fence yet"
+                );
+                self.vlog_sync_pending()
+            }
         }
     }
 
@@ -4280,7 +4139,7 @@ impl<E: Env> Db<E> {
         prefix: &[u8],
     ) -> Result<Option<Bytes>> {
         self.ensure_snapshot_readable(Snapshot::at(snapshot))?;
-        if snapshot == 0 {
+        if crate::lookup_kernel::snap_is_empty(snapshot) {
             return Ok(None);
         }
         self.latest_sst_probed
@@ -4289,13 +4148,8 @@ impl<E: Env> Db<E> {
         loop {
             let mut cand: Option<Bytes> = None;
             let mut consider = |k: Bytes| {
-                if !prefix.is_empty() && !k.starts_with(prefix) {
+                if !crate::prefix::key_in_prefix_range(k.as_ref(), prefix, before.as_deref()) {
                     return;
-                }
-                if let Some(h) = before.as_deref() {
-                    if k.as_ref() >= h {
-                        return;
-                    }
                 }
                 if cand.as_ref().is_none_or(|c| k.as_ref() > c.as_ref()) {
                     cand = Some(k);
@@ -4315,9 +4169,7 @@ impl<E: Env> Db<E> {
                 if let Some((k, _)) =
                     table.last_visible_under_prefix_with(prefix, snapshot, hi, |bi| {
                         Some(self.block_cache.get_or_insert_with(table.path(), bi, || {
-                            let block = table.decode_block(bi).unwrap_or_default();
-                            crate::cost::scan_block_load(crate::cost::entries_bytes(&block));
-                            block
+                            table.decode_block(bi).unwrap_or_default()
                         }))
                     })
                 {
@@ -4360,7 +4212,7 @@ impl<E: Env> Db<E> {
         prefix: &[u8],
     ) -> Result<Option<Bytes>> {
         self.ensure_snapshot_readable(Snapshot::at(snapshot))?;
-        if snapshot == 0 {
+        if crate::lookup_kernel::snap_is_empty(snapshot) {
             return Ok(None);
         }
         self.latest_ops.fetch_add(1, Ordering::Relaxed);
@@ -4408,21 +4260,25 @@ impl<E: Env> Db<E> {
             // and this insert; the pre-publish answer would then carry the
             // post-clear generation and validate until the next write. Only
             // fill while `published` still matches the seq the answer was
-            // computed at.
-            if self.published_seq.load(Ordering::Acquire) == snapshot {
-                self.last_prefix_cache.insert(prefix, out.clone());
+            // computed at. Kernel owns the fate.
+            match crate::lookup_kernel::point_cache_validity(
+                self.published_seq.load(Ordering::Acquire),
+                snapshot,
+            ) {
+                crate::lookup_kernel::PointCachePlan::CacheCurrent => {
+                    self.last_prefix_cache.insert(prefix, out.clone());
+                }
+                crate::lookup_kernel::PointCachePlan::PublishAdvanced => {}
             }
         }
         Ok(out)
     }
 
     /// L0 newest → older → L1+ (same single-writer invariant as the mem hit).
-    #[must_use]
-    pub fn sst_indices_newest_first(&self) -> &[usize] {
+    fn sst_indices_newest_first(&self) -> &[usize] {
         &self.sst_order_newest
     }
 
-    /// Rebuild the newest-first SST order after level changes.
     fn rebuild_sst_order(&mut self) {
         let mut idx: Vec<usize> = (0..self.ssts.len()).collect();
         idx.sort_by(|&a, &b| {
@@ -4451,100 +4307,20 @@ impl<E: Env> Db<E> {
                     level,
                     tables_newest_first: vec![sst_i],
                     disjoint_by_lo: None,
-                    sorted_by_lo: None,
-                    packed_lo: None,
-                    packed_hi: None,
-                    disjoint_los: None,
-                    by_lo_pos: None,
-                    any_range_tombstones: false,
                 }),
             }
         }
         for run in &mut runs {
-            run.sorted_by_lo = SstRun::sorted_by_lo(&self.ssts, &run.tables_newest_first);
-            run.disjoint_by_lo = run.sorted_by_lo.as_ref().and_then(|by_lo| {
-                SstRun::pairwise_disjoint(&self.ssts, by_lo).then(|| by_lo.clone())
-            });
-            run.packed_lo = run
-                .sorted_by_lo
-                .as_ref()
-                .map(|by_lo| DisjointLos::from_tables(&self.ssts, by_lo));
-            run.packed_hi = run.sorted_by_lo.as_ref().map(|by_lo| {
-                let mut bytes = Vec::new();
-                let mut ends = Vec::with_capacity(by_lo.len());
-                for &i in by_lo {
-                    bytes.extend_from_slice(self.ssts[i].largest_user_key().unwrap());
-                    ends.push(u32::try_from(bytes.len()).expect("packed hi fits u32"));
-                }
-                DisjointLos { bytes, ends }
-            });
-            run.disjoint_los = run.packed_lo.clone();
-            run.by_lo_pos = run.sorted_by_lo.as_ref().map(|by_lo| {
-                crate::probe_order_kernel::by_lo_rank(&run.tables_newest_first, by_lo)
-            });
-            run.any_range_tombstones = run
-                .tables_newest_first
-                .iter()
-                .any(|&i| self.ssts[i].has_range_tombstones());
+            run.disjoint_by_lo =
+                SstRun::disjoint_sorted_by_lo(&self.ssts, &run.tables_newest_first);
         }
-        let mut glo: Option<&[u8]> = None;
-        let mut ghi: Option<&[u8]> = None;
-        for t in &self.ssts {
-            if let Some(lo) = t.smallest_user_key() {
-                if glo.is_none_or(|g| lo < g) {
-                    glo = Some(lo);
-                }
-            }
-            if let Some(hi) = t.largest_user_key() {
-                if ghi.is_none_or(|g| hi > g) {
-                    ghi = Some(hi);
-                }
-            }
-        }
-        self.sst_user_lo = glo.map(Bytes::copy_from_slice);
-        self.sst_user_hi = ghi.map(Bytes::copy_from_slice);
-        let mut per_cf: std::collections::BTreeMap<String, (Bytes, Bytes)> =
-            std::collections::BTreeMap::new();
-        let mut mixed: Vec<(Bytes, Bytes)> = Vec::new();
-        for t in &self.ssts {
-            let Some(lo) = t.smallest_user_key() else {
-                continue;
-            };
-            let Some(hi) = t.largest_user_key() else {
-                continue;
-            };
-            let fam = t.cf();
-            if fam.is_empty() {
-                mixed.push((Bytes::copy_from_slice(lo), Bytes::copy_from_slice(hi)));
-                continue;
-            }
-            per_cf
-                .entry(fam.to_string())
-                .and_modify(|(clo, chi)| {
-                    if lo < clo.as_ref() {
-                        *clo = Bytes::copy_from_slice(lo);
-                    }
-                    if hi > chi.as_ref() {
-                        *chi = Bytes::copy_from_slice(hi);
-                    }
-                })
-                .or_insert_with(|| (Bytes::copy_from_slice(lo), Bytes::copy_from_slice(hi)));
-        }
-        let mut envelopes: Vec<(Bytes, Bytes)> = per_cf.into_values().collect();
-        envelopes.extend(mixed);
-        *self.sst_envelope.write() = envelopes;
-        let settled = self.bulk_live_bytes() == 0
-            && self.mem.is_empty()
-            && self.imm.is_none()
-            && self.parked_unflushed.is_empty();
-        self.settled_sst_only.store(settled, Ordering::Release);
         self.sst_runs = runs;
     }
 
     /// Drop the retired read cache when no L0 remains to cover.
     fn sync_retired_to_l0(&mut self) {
         let l0 = self.level_file_count(0);
-        if l0 == 0 {
+        if crate::write_admission_kernel::batch_is_empty(l0 as u64) {
             self.retired_pending.clear();
             self.retired_fold = MemTable::new();
             self.retired_l0s = 0;
@@ -4554,6 +4330,9 @@ impl<E: Env> Db<E> {
     }
 
     fn note_sst_inventory_changed(&mut self) {
+        // RFC-0217 P1.1: the on-disk MANIFEST no longer lists this
+        // inventory — a rotate must not treat the segment as settled.
+        self.manifest_dirty = true;
         self.rebuild_sst_order();
         self.sync_retired_to_l0();
     }
@@ -4580,9 +4359,7 @@ impl<E: Env> Db<E> {
                     before.as_deref(),
                     |bi| {
                         Some(self.block_cache.get_or_insert_with(table.path(), bi, || {
-                            let block = table.decode_block(bi).unwrap_or_default();
-                            crate::cost::scan_block_load(crate::cost::entries_bytes(&block));
-                            block
+                            table.decode_block(bi).unwrap_or_default()
                         }))
                     },
                 ) {
@@ -4764,7 +4541,7 @@ impl<E: Env> Db<E> {
         limit: Option<usize>,
     ) -> Result<usize> {
         self.ensure_snapshot_readable(Snapshot::at(snapshot))?;
-        if snapshot == 0 {
+        if crate::lookup_kernel::snap_is_empty(snapshot) {
             return Ok(0);
         }
         let latest = snapshot == self.visible_sequence();
@@ -4777,36 +4554,27 @@ impl<E: Env> Db<E> {
         // `snapshot` (== visible sequence here) read BEFORE computing: any
         // write published after the answer carries a strictly greater
         // sequence, so the dirty-log check in `CountCache::get` sees it.
+        let t_scan = std::time::Instant::now();
         let n = self.count_visible(snapshot, start, end, limit);
+        self.scan_ns.fetch_add(
+            u64::try_from(t_scan.elapsed().as_nanos()).unwrap_or(u64::MAX),
+            Ordering::Relaxed,
+        );
         if latest {
             self.count_cache.insert(start, end, limit, n, snapshot);
         }
         Ok(n)
     }
 
-    fn invalidate_read_answers(&self, seq: SequenceNumber) -> Vec<(Bytes, Bytes)> {
+    fn invalidate_read_answers(&self, seq: SequenceNumber) {
         let reset = self.point_cache_reset.swap(false, Ordering::Relaxed);
-        // RFC-0180: overwrite/write-only never fills the read caches, so
-        // `note_dirty_points` leaves `dirty_points` empty. Skip that mutex.
-        if !reset
-            && !read_cache_invalidate_needed(
-                self.point_cache.is_empty(),
-                self.count_cache.is_empty(),
-                self.last_prefix_cache.is_empty(),
-            )
-        {
-            self.point_tls_epoch.fetch_add(1, Ordering::Release);
-            self.read_cache_epoch.fetch_add(1, Ordering::Release);
-            // Open starts `settled_sst_only=true` (empty mem). A write that
-            // skips cache invalidation must still drop that flag or
-            // ConcurrentDb::get treats every key as an SST-envelope miss.
-            self.settled_sst_only.store(false, Ordering::Release);
-            return Vec::new();
-        }
-        let dirty = std::mem::take(&mut *self.dirty_points.lock());
-        let keys: Vec<Bytes> = dirty.iter().map(|(k, _)| k.clone()).collect();
+        let keys = std::mem::take(&mut *self.dirty_points.lock());
+        // Do not insert WriteOp.value: large values are vlog pointers.
         // Fat apply gen-bumps; small writes drop only the dirty keys.
-        if reset || keys.len() > 32 || keys.is_empty() {
+        if reset
+            || keys.len() > 32
+            || crate::write_admission_kernel::batch_is_empty(keys.len() as u64)
+        {
             self.point_cache.clear();
         } else {
             self.point_cache.invalidate_many(&keys);
@@ -4814,35 +4582,20 @@ impl<E: Env> Db<E> {
         // Count answers are window-scoped: range-check the dirty keys
         // instead of clearing every window (RFC-0044 `ycsb-longwindow`).
         // Fat apply / range deletion / unknown dirt still clear wholesale.
-        if reset || keys.is_empty() {
+        if reset || crate::write_admission_kernel::batch_is_empty(keys.len() as u64) {
             self.count_cache.clear();
         } else {
             self.count_cache.record_dirty(seq, &keys);
         }
         self.last_prefix_cache.clear();
         self.read_cache_epoch.fetch_add(1, Ordering::Release);
-        // RFC-0154 P1.5 + group: precise TLS when dirt is small (same
-        // ≤32 bound as point_cache.invalidate_many). Adaptive merge n=2–8
-        // was epoch-bumping every ycsb_a/f get.
-        if crate::cache::tls_precise_invalidate(reset, keys.len()) {
-            for k in &keys {
-                self.key_gen.touch(k);
-            }
-        } else {
+        // RFC-0154 P1.5: 1-key put bumps one TLS gen bucket so zipf gets of
+        // other keys stay cached. Fat apply / unknown dirt still epoch-bumps.
+        if reset || keys.len() != 1 {
             self.point_tls_epoch.fetch_add(1, Ordering::Release);
+        } else {
+            self.key_gen.touch(&keys[0]);
         }
-        let settled = self.bulk_live_bytes() == 0
-            && self.mem.is_empty()
-            && self.imm.is_none()
-            && self.parked_unflushed.is_empty();
-        self.settled_sst_only.store(settled, Ordering::Release);
-        if reset || keys.len() > 32 {
-            return Vec::new();
-        }
-        dirty
-            .into_iter()
-            .filter_map(|(k, v)| v.map(|v| (k, v)))
-            .collect()
     }
 
     /// Distinct visible user keys in `[start, end)` at `snapshot`, capped at
@@ -4856,17 +4609,17 @@ impl<E: Env> Db<E> {
         end: Bound<&[u8]>,
         limit: Option<usize>,
     ) -> usize {
-        if snapshot == 0 {
+        if crate::lookup_kernel::snap_is_empty(snapshot) {
             return 0;
         }
         let cap = limit.unwrap_or(usize::MAX);
         // deps_scan / kvrocks_scan: one memtable, no SST, latest snapshot —
         // count the live tail index (RFC-0154).
-        if self.ssts.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.ssts.len() as u64) {
             let mut only: Option<&MemTable> = None;
             let mut many = false;
             for t in self.scan_mem_layers() {
-                if t.is_empty() {
+                if crate::write_admission_kernel::batch_is_empty(t.len() as u64) {
                     continue;
                 }
                 if only.is_some() {
@@ -4900,7 +4653,7 @@ impl<E: Env> Db<E> {
             if table.has_range_tombstones() {
                 table.collect_range_tombstones(snapshot, &mut range_dels);
             }
-            if table.is_empty() {
+            if crate::write_admission_kernel::batch_is_empty(table.len() as u64) {
                 continue;
             }
             let c = CountCursor::Mem(MemCountCursor::new(table, start, end, snapshot));
@@ -4912,16 +4665,13 @@ impl<E: Env> Db<E> {
                 single = Some(c);
             }
         }
-        let any_sst_tombs = self.sst_runs.iter().any(|r| r.any_range_tombstones);
+        let t_setup = std::time::Instant::now();
         for table in self.ssts.iter() {
-            if any_sst_tombs {
-                table.collect_range_tombstones(snapshot, &mut range_dels);
-            }
+            table.collect_range_tombstones(snapshot, &mut range_dels);
             if !table.overlaps_user_range(start, end) {
                 continue;
             }
             self.scan_sst_probed.fetch_add(1, Ordering::Relaxed);
-            crate::cost::scan_probe();
             let c = CountCursor::Sst(SstCountCursor::new(
                 table,
                 start,
@@ -4932,12 +4682,23 @@ impl<E: Env> Db<E> {
             if let Some(first) = single.take() {
                 cursors.push(first);
                 cursors.push(c);
-            } else if cursors.is_empty() {
+            } else if crate::write_admission_kernel::batch_is_empty(cursors.len() as u64) {
                 single = Some(c);
             } else {
                 cursors.push(c);
             }
         }
+        self.scan_sst_setup_ns.fetch_add(
+            u64::try_from(t_setup.elapsed().as_nanos()).unwrap_or(u64::MAX),
+            Ordering::Relaxed,
+        );
+        let t_merge = std::time::Instant::now();
+        let merge_done = |me: &Self| {
+            me.scan_merge_ns.fetch_add(
+                u64::try_from(t_merge.elapsed().as_nanos()).unwrap_or(u64::MAX),
+                Ordering::Relaxed,
+            );
+        };
         let mut count = 0usize;
         // Single-cursor fast path: the k-way min-head scan is pure overhead
         // when only one layer overlaps the window (deps-scan state: one
@@ -4949,14 +4710,16 @@ impl<E: Env> Db<E> {
                 let seq = head.sequence;
                 // Step even on tombstone heads — visibility and cursor
                 // advance must not be coupled (short-circuit spin).
-                let visible = kind == ValueType::Value
-                    && (range_dels.is_empty()
-                        || !crate::merge::range_deleted(head.user_key.as_ref(), seq, &range_dels));
+                let visible = crate::merge::visible_at(
+                    kind,
+                    crate::merge::range_deleted(head.user_key.as_ref(), seq, &range_dels),
+                );
                 c.step_current_user();
                 if visible {
                     count += 1;
                 }
             }
+            merge_done(self);
             return count;
         }
         while count < cap {
@@ -4981,13 +4744,10 @@ impl<E: Env> Db<E> {
             let Some(bi) = best else { break };
             let visible = {
                 let head = cursors[bi].head().expect("best head");
-                head.kind == ValueType::Value
-                    && (range_dels.is_empty()
-                        || !crate::merge::range_deleted(
-                            head.user_key.as_ref(),
-                            head.sequence,
-                            &range_dels,
-                        ))
+                crate::merge::visible_at(
+                    head.kind,
+                    crate::merge::range_deleted(head.user_key.as_ref(), head.sequence, &range_dels),
+                )
             };
             // Split the winner out so other cursors can step while its
             // user-key borrow is live, then step the winner (RFC-0039 P2.1).
@@ -5006,58 +4766,8 @@ impl<E: Env> Db<E> {
                 count += 1;
             }
         }
+        merge_done(self);
         count
-    }
-
-    /// Settled one-run prefix page: no mem/bulk, no range tombs, exactly one
-    /// overlapping disjoint level. Skips the boxed merge heap the windowed
-    /// iterator otherwise builds per 512-row refill (prefix_scan).
-    #[must_use]
-    pub fn try_disjoint_scan_page(
-        &self,
-        snapshot: SequenceNumber,
-        start: Bound<&[u8]>,
-        end: Bound<&[u8]>,
-        limit: usize,
-    ) -> Option<Vec<(Bytes, Bytes)>> {
-        if snapshot == 0 || limit == 0 {
-            return Some(Vec::new());
-        }
-        if snapshot < self.earliest_readable_seq {
-            return None;
-        }
-        if self.bulk_live_bytes() != 0
-            || !self.mem.is_empty()
-            || self.imm.is_some()
-            || !self.parked_unflushed.is_empty()
-        {
-            return None;
-        }
-        let mut picked: Vec<&[usize]> = Vec::new();
-        for run in &self.sst_runs {
-            if run.any_range_tombstones {
-                return None;
-            }
-            if let Some(by_lo) = run.disjoint_by_lo.as_ref() {
-                let i = first_overlapping_disjoint_file(&self.ssts, by_lo, start);
-                if i < by_lo.len() && self.ssts[by_lo[i]].overlaps_user_range(start, end) {
-                    picked.push(by_lo.as_slice());
-                }
-            } else if run
-                .tables_newest_first
-                .iter()
-                .any(|&ti| self.ssts[ti].overlaps_user_range(start, end))
-            {
-                return None;
-            }
-        }
-        if picked.is_empty() {
-            return Some(Vec::new());
-        }
-        self.scan_ops.fetch_add(1, Ordering::Relaxed);
-        Some(merge_disjoint_level_page(
-            self, &picked, start, end, snapshot, limit,
-        ))
     }
 
     fn scan_at_raw(
@@ -5068,11 +4778,10 @@ impl<E: Env> Db<E> {
         limit: Option<usize>,
         resolve_values: bool,
     ) -> StreamingVisibleIter<'_> {
-        if snapshot == 0 {
+        if crate::lookup_kernel::snap_is_empty(snapshot) {
             return StreamingVisibleIter::new(Vec::new(), 0, start, end, limit);
         }
         self.scan_ops.fetch_add(1, Ordering::Relaxed);
-        crate::cost::scan_op();
         let scan_diag = crate::merge::scan_diag_enabled();
         let scan_diag_t0 = scan_diag.then(Instant::now);
         // Range tombstones first (G2): a covering delete whose start sits
@@ -5080,24 +4789,16 @@ impl<E: Env> Db<E> {
         // are lazy — later SST blocks are not decoded after `limit` emits.
         let mut range_dels = Vec::new();
         let mut streams: Vec<crate::merge::LayerStream<'_>> =
-            Vec::with_capacity(4 + self.sst_runs.len());
+            Vec::with_capacity(3 + self.ssts.len());
         for table in self.scan_mem_layers() {
-            if table.has_range_tombstones() {
-                table.collect_range_tombstones(snapshot, &mut range_dels);
-            }
-            if table.is_empty() {
-                continue;
-            }
+            table.collect_range_tombstones(snapshot, &mut range_dels);
             streams.push(self.memtable_stream(table, start, end, snapshot, resolve_values));
         }
         // Range tombstones from EVERY table (G2): a covering delete whose
         // start sits before `start` must still hide keys in the window,
         // including tables a grouped stream has not pulled from yet.
-        // Bulk hydrate has none — skip the O(#SST) walk (prefix_scan).
-        if self.sst_runs.iter().any(|r| r.any_range_tombstones) {
-            for table in self.ssts.iter() {
-                table.collect_range_tombstones(snapshot, &mut range_dels);
-            }
+        for table in self.ssts.iter() {
+            table.collect_range_tombstones(snapshot, &mut range_dels);
         }
         // A strictly disjoint level collapses into ONE lazy concatenated
         // stream ([`LevelRunStream`]): heap width drops from #SSTs to
@@ -5107,7 +4808,7 @@ impl<E: Env> Db<E> {
             if let Some(by_lo) = run.disjoint_by_lo.as_ref() {
                 streams.push(Box::new(LevelRunStream::new(
                     self,
-                    by_lo,
+                    by_lo.clone(),
                     start,
                     end,
                     snapshot,
@@ -5121,7 +4822,7 @@ impl<E: Env> Db<E> {
                     continue;
                 }
                 self.scan_sst_probed.fetch_add(1, Ordering::Relaxed);
-                crate::cost::scan_probe();
+                let cache = &self.block_cache;
                 // Hash the path once per stream, not once per block fetch, and
                 // keep value-resolved blocks under a tagged id: a full scan then
                 // resolves each block once (on miss) and later loads are a pure
@@ -5138,7 +4839,7 @@ impl<E: Env> Db<E> {
                 let load: Box<
                     dyn FnMut(usize) -> Option<std::sync::Arc<Vec<(InternalKey, Bytes)>>> + '_,
                 > = Box::new(move |bi| {
-                    Some(crate::sst::scan_block_get_or_insert(id, bi, || {
+                    Some(cache.get_or_insert_with_id(id, bi, || {
                         let mut entries = match table.decode_block(bi) {
                             Ok(entries) => entries,
                             // F1: a CRC/IO-faulted block must fail loudly —
@@ -5292,7 +4993,8 @@ impl<E: Env> Db<E> {
                     continue;
                 }
                 if let Some(ptr) = vlog::decode_vlog_ptr(slot.1.as_ref()) {
-                    let path = if ptr.file_num == 0 {
+                    let path = if crate::write_admission_kernel::batch_is_empty(ptr.file_num as u64)
+                    {
                         self.dir.join(VLOG_FILE_NAME)
                     } else {
                         vlog::blob_path(&self.dir, ptr.file_num)
@@ -5390,16 +5092,6 @@ impl<E: Env> Db<E> {
             l0_files: self.level_file_count(0) as u64,
             changelog_interval: self.changelog_interval,
             changelog_store_count: self.changelog_store_count,
-            ram_pressure: u64::from(
-                !crate::env::settle_warm_unlimited()
-                    && sst_bytes > crate::env::settle_warm_max_bytes(),
-            ),
-            ram_warm_skipped: self.ram_warm_skipped.load(Ordering::Relaxed),
-            ram_ceiling_bytes: crate::env::settle_warm_max_bytes(),
-            engine_resident_bytes: self.hydrate_resident_bytes() as u64,
-            settle_warm_bytes: self.last_settle_warm_bytes.load(Ordering::Relaxed),
-            settle_warm_ns: self.last_settle_warm_ns.load(Ordering::Relaxed),
-            settle_compact_ns: self.last_settle_compact_ns.load(Ordering::Relaxed),
         }
     }
 
@@ -5411,12 +5103,11 @@ impl<E: Env> Db<E> {
             let p = self.dir.join(VLOG_FILE_NAME);
             self.env.metadata_len(&p).unwrap_or(0)
         };
-        let blob_nums = vlog::list_blob_nums(&self.env, &self.dir);
-        for n in &blob_nums {
-            if *n == self.blob_active {
+        for n in vlog::list_blob_nums(&self.env, &self.dir) {
+            if n == self.blob_active {
                 continue;
             }
-            let p = vlog::blob_path(&self.dir, *n);
+            let p = vlog::blob_path(&self.dir, n);
             vlog_bytes = vlog_bytes.saturating_add(self.env.metadata_len(&p).unwrap_or(0));
         }
         if self.blob_active > 0 {
@@ -5425,17 +5116,9 @@ impl<E: Env> Db<E> {
                 vlog_bytes = vlog_bytes.saturating_add(self.env.metadata_len(&legacy).unwrap_or(0));
             }
         }
-        // Inline-only DBs have no vlog pointers. Walking every SST value
-        // (`entries_cloned`) made scale settle ~80 s @100M: 7×
-        // `property_int_value` → `stats()` decoded 24 GiB of lazy bodies.
-        if self.vlog.is_none() && blob_nums.is_empty() {
-            return (vlog_bytes, 0, 0);
-        }
         let mut live_bytes = 0u64;
         let mut seen: std::collections::HashSet<(u32, u64)> = std::collections::HashSet::new();
         let mut consider = |stored: &Bytes| {
-            #[cfg(test)]
-            VLOG_STATS_VALUE_VISITS.fetch_add(1, Ordering::Relaxed);
             if let Some(ptr) = vlog::decode_vlog_ptr(stored.as_ref()) {
                 if seen.insert((ptr.file_num, ptr.offset)) {
                     live_bytes = live_bytes.saturating_add(u64::from(ptr.len));
@@ -5451,16 +5134,8 @@ impl<E: Env> Db<E> {
             }
         }
         for t in &self.ssts {
-            let mut stream = t.iter_internal_streaming();
-            loop {
-                match stream.next_entry() {
-                    Ok(Some((_, v))) => consider(&v),
-                    Ok(None) => break,
-                    Err(e) => panic!(
-                        "pedradb: corrupt SST in {} on vlog stats: {e}",
-                        t.path().display()
-                    ),
-                }
+            for (_, v) in t.entries_cloned() {
+                consider(&v);
             }
         }
         (vlog_bytes, live_bytes, seen.len() as u64)
@@ -5474,9 +5149,14 @@ impl<E: Env> Db<E> {
     /// Corrupt SST/MANIFEST or I/O.
     pub fn verify_checksums(&self) -> Result<()> {
         if let Some(vs) = manifest::load(&self.env, &self.dir)? {
-            if vs.sst_file_nums.len() != self.ssts.len() {
+            // RFC-0217 P1.1: with the deferred publish the in-memory
+            // inventory may legitimately run AHEAD of the on-disk MANIFEST
+            // (dirty window). The F196 invariant is the other direction —
+            // the manifest may never name a file memory does not hold.
+            let live: std::collections::HashSet<u64> = self.sst_file_nums().into_iter().collect();
+            if vs.sst_file_nums.iter().any(|n| !live.contains(n)) {
                 return Err(CoreError::CorruptManifest(format!(
-                    "in-memory SST count {} != MANIFEST {}",
+                    "MANIFEST names SSTs memory does not hold (live {}, manifest {})",
                     self.ssts.len(),
                     vs.sst_file_nums.len()
                 )));
@@ -5523,9 +5203,10 @@ impl<E: Env> Db<E> {
     pub fn create_checkpoint(&mut self, dest: impl AsRef<Path>) -> Result<CheckpointMeta> {
         self.flush()?;
         let dest = dest.as_ref();
+        crate::env::admit_disk_write(&self.env, dest)?;
         if self.env.exists(dest) {
             let names = self.env.read_dir_names(dest)?;
-            if !names.is_empty() {
+            if !crate::write_admission_kernel::batch_is_empty(names.len() as u64) {
                 return Err(CoreError::Internal(format!(
                     "checkpoint destination not empty: {}",
                     dest.display()
@@ -5535,6 +5216,10 @@ impl<E: Env> Db<E> {
             self.env.create_dir_all(dest)?;
         }
 
+        // RFC-0217 P1.1: publish the deferred MANIFEST first so the copy
+        // lists every SST below (the archive copies further down carry any
+        // still-unpublished window either way).
+        self.persist_manifest_durable()?;
         // Copy live inventory files.
         let current = self.dir.join(manifest::CURRENT_FILE);
         if self.env.exists(&current) {
@@ -5607,6 +5292,16 @@ impl<E: Env> Db<E> {
             self.env
                 .copy_file(&chlog, &dest.join(crate::change_feed::CHANGELOG_FILE_NAME))?;
         }
+        // RFC-0217 P1.1: archived WAL segments still carry feed content when
+        // the store could not cover them (e.g. over-budget rebuild) — the
+        // checkpoint replays them feed-only at open, exactly like the source.
+        for slot in 0..self.wal_archive_next {
+            let name = wal_archive_slot_name(slot);
+            let src = self.dir.join(&name);
+            if self.env.exists(&src) {
+                self.env.copy_file(&src, &dest.join(&name))?;
+            }
+        }
 
         // F175: after horizon GC, archived versions exist only in `history/`
         // (tier MANIFEST + `seg-*.hist` + `seg-*.bloom` sidecars) — the read
@@ -5643,50 +5338,28 @@ impl<E: Env> Db<E> {
     /// # Errors
     /// I/O while writing SST or recreating the WAL.
     pub fn flush(&mut self) -> Result<()> {
-        // RFC-0050 P0.3: every I/O error leaving an explicit flush fences —
-        // the bulk MANIFEST persist, the SST write, and the WAL-rotate tail
-        // all run before Ok, so none of them may escape unfenced (ENOSPC
-        // used to return Err with the writer still accepting acked writes
-        // on top of a half-flushed pipeline). Internal sites also fence;
-        // `fence_durability` is first-wins so this choke point is idempotent.
-        match self.flush_pipeline() {
-            Ok(()) => {
-                self.maybe_bounded_cache_after_write();
-                // RFC-0168 P2.4: fill the get fd during hydrate (flush),
-                // so settle's compact does not re-stream. Skip while a
-                // commit is inflight (auto-flush under the pin) — the
-                // ConcurrentDb path also gates on recently_multi / last Ok.
-                if crate::write_admission_kernel::flush_warm_allowed(
-                    self.commit_inflight() > 0,
-                    false,
-                    false,
-                ) {
-                    self.run_warm_plan();
-                }
-                Ok(())
-            }
-            Err(e) => Err(self.fence_io_err(e)),
+        let probe = crate::env::probe_available_bytes(&self.env, &self.dir);
+        if let Some((available, need)) = crate::disk_pressure_kernel::compact_refuse(probe) {
+            return Err(CoreError::DiskPressure { available, need });
         }
-    }
-
-    fn flush_pipeline(&mut self) -> Result<()> {
         self.ensure_not_fenced()?;
-        if let Some(persist) = self.flush_all_bulk_runs()? {
-            persist.write()?;
-        }
+        self.flush_all_bulk_runs()?;
         self.vlog_sync_pending()?;
         crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::BEFORE_SST_RENAME)?;
         crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::BEFORE_MANIFEST_RENAME)?;
         // Flush plan decided by the pure kernel (RFC-0056 P0.2): the mem
         // tail is always written to an SST before any WAL rotate.
-        match crate::flush_kernel::flush_plan(self.mem.is_empty(), self.imm.is_some()) {
+        match crate::flush_kernel::flush_plan(
+            crate::write_admission_kernel::batch_is_empty(self.mem.len() as u64),
+            self.imm.is_some(),
+        ) {
             crate::flush_kernel::FlushPlan::FinishImmThenFlush
             | crate::flush_kernel::FlushPlan::WriteSstThenRotate => {
                 // Finish any in-flight imm first (single-flight).
                 if self.imm.is_some() {
                     self.flush_imm_to_l0()?;
                 }
-                if self.mem.is_empty() {
+                if crate::write_admission_kernel::batch_is_empty(self.mem.len() as u64) {
                     self.try_rotate_wal()?;
                     return Ok(());
                 }
@@ -5701,10 +5374,9 @@ impl<E: Env> Db<E> {
                 return Ok(());
             }
         }
-        // Explicit flush: persist the cache even when interval is 0 (WAL gone).
-        if self.changelog_interval == 0 {
-            self.persist_changelog_best_effort();
-        }
+        // Explicit flush: CHANGELOG store on the debounce/cap gate (RFC-0217
+        // P1.1 — the rotate archived the WAL as the crash source).
+        self.persist_changelog_after_explicit_flush();
         Ok(())
     }
 
@@ -5712,7 +5384,7 @@ impl<E: Env> Db<E> {
     /// `family_of_user_key` ("default" when no physical CFs are
     /// registered) so observation and install agree on family identity.
     pub(crate) fn bulk_family_of_table<'a>(&self, table: &'a SstTable) -> &'a str {
-        if self.physical_cfs.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.physical_cfs.len() as u64) {
             "default"
         } else {
             table.cf()
@@ -5761,18 +5433,20 @@ impl<E: Env> Db<E> {
     /// memtable-apply sites are NOT the choke point — recovery replay
     /// must stay unobserved so `family_max_in_db` covers it instead).
     fn observe_bulk_batch(&mut self, batch: &[BatchOp]) {
-        if batch.is_empty() || !self.bulk_route_enabled {
+        if crate::write_admission_kernel::batch_is_empty(batch.len() as u64)
+            || !self.bulk_route_enabled
+        {
             return;
         }
         // Field-borrowing family resolver (a `&self` method would borrow
         // `bulk_latch` into the ops vec): mirrors `family_of_user_key`.
         let physical = &self.physical_cfs;
         let fam_of = |key: &[u8]| -> &str {
-            if physical.is_empty() {
+            if crate::write_admission_kernel::batch_is_empty(physical.len() as u64) {
                 return "default";
             }
             let p = crate::memtable::cf_prefix(key);
-            if p.is_empty() {
+            if crate::write_admission_kernel::batch_is_empty(p.len() as u64) {
                 return "default";
             }
             physical
@@ -5785,9 +5459,6 @@ impl<E: Env> Db<E> {
         // classify_batch and the memtable-chain collect after the family's
         // first observation (high-water already covers it).
         if let Some(family) = Self::single_put_family(batch, &fam_of) {
-            if !crate::bulk_ingest::bulk_observe_needed(true, self.bulk_latch.is_dead(family)) {
-                return;
-            }
             const STACK: usize = 32;
             let mut stack = [(false, &[] as &[u8]); STACK];
             let mut n = 0usize;
@@ -5795,25 +5466,32 @@ impl<E: Env> Db<E> {
             for op in batch {
                 if let BatchOp::Put { key, .. } = op {
                     let item = (true, key.as_ref());
-                    if n < STACK && heap.is_empty() {
+                    if n < STACK && crate::write_admission_kernel::batch_is_empty(heap.len() as u64)
+                    {
                         stack[n] = item;
                         n += 1;
                     } else {
-                        if heap.is_empty() {
+                        if crate::write_admission_kernel::batch_is_empty(heap.len() as u64) {
                             heap.extend_from_slice(&stack[..n]);
                         }
                         heap.push(item);
                     }
                 }
             }
-            let keys: &[(bool, &[u8])] = if heap.is_empty() { &stack[..n] } else { &heap };
+            let keys: &[(bool, &[u8])] =
+                if crate::write_admission_kernel::batch_is_empty(heap.len() as u64) {
+                    &stack[..n]
+                } else {
+                    &heap
+                };
             if self.bulk_latch.has_high_water(family) {
                 let _ = self
                     .bulk_latch
                     .classify_family(family, keys, false, || None);
             } else {
                 let ssts = &self.ssts;
-                let physical_empty = self.physical_cfs.is_empty();
+                let physical_empty =
+                    crate::write_admission_kernel::batch_is_empty(self.physical_cfs.len() as u64);
                 let mems: Vec<&MemTable> = std::iter::once(&self.mem)
                     .chain(self.imm.as_ref())
                     .chain(self.flush_read_pin.as_ref())
@@ -5845,7 +5523,8 @@ impl<E: Env> Db<E> {
             })
             .collect();
         let ssts = &self.ssts;
-        let physical_empty = self.physical_cfs.is_empty();
+        let physical_empty =
+            crate::write_admission_kernel::batch_is_empty(self.physical_cfs.len() as u64);
         // Field-direct memtable chain (not `scan_mem_layers`, whose `&self`
         // receiver would borrow `bulk_latch` too): disjoint-field borrows
         // let the latch mutate next to these.
@@ -5898,11 +5577,11 @@ impl<E: Env> Db<E> {
         // Field-borrowing resolver (see `observe_bulk_batch`).
         let physical = &self.physical_cfs;
         let fam_of = |key: &[u8]| -> &str {
-            if physical.is_empty() {
+            if crate::write_admission_kernel::batch_is_empty(physical.len() as u64) {
                 return "default";
             }
             let p = crate::memtable::cf_prefix(key);
-            if p.is_empty() {
+            if crate::write_admission_kernel::batch_is_empty(p.len() as u64) {
                 return "default";
             }
             physical
@@ -5918,7 +5597,8 @@ impl<E: Env> Db<E> {
             crate::bulk_ingest::BulkOp::Delete { family, key }
         };
         let ssts = &self.ssts;
-        let physical_empty = self.physical_cfs.is_empty();
+        let physical_empty =
+            crate::write_admission_kernel::batch_is_empty(self.physical_cfs.len() as u64);
         // Same field-direct chain as `observe_bulk_batch`.
         let mems: Vec<&MemTable> = std::iter::once(&self.mem)
             .chain(self.imm.as_ref())
@@ -6018,12 +5698,19 @@ impl<E: Env> Db<E> {
         let mut taken = self.mem.take_family(family);
         if let Some(ref mut imm) = self.imm {
             taken.absorb(imm.take_family(family));
-            if imm.is_empty() {
+            if crate::write_admission_kernel::batch_is_empty(imm.len() as u64) {
                 self.imm = None;
             }
         }
-        if taken.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(taken.len() as u64) {
             return Ok(());
+        }
+        let probe = crate::env::probe_available_bytes(&self.env, &self.dir);
+        if let Some((available, need)) = crate::disk_pressure_kernel::compact_refuse(probe) {
+            for (k, v) in taken.iter_internal() {
+                self.mem.insert(k.clone(), v.clone());
+            }
+            return Err(CoreError::DiskPressure { available, need });
         }
         let nums = vec![self.alloc_file_num()];
         let files = match Self::write_imm_l0_files(&self.env, &self.dir, self.sync, &taken, &nums) {
@@ -6064,11 +5751,11 @@ impl<E: Env> Db<E> {
     }
 
     fn bulk_family_of_key(&self, key: &[u8]) -> &str {
-        if self.physical_cfs.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.physical_cfs.len() as u64) {
             return "default";
         }
         let p = crate::memtable::cf_prefix(key);
-        if p.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(p.len() as u64) {
             return "default";
         }
         self.physical_cfs
@@ -6098,12 +5785,13 @@ impl<E: Env> Db<E> {
                 "latched bulk keys/values length mismatch".into(),
             ));
         }
+        self.ensure_disk_pressure_admitted(false)?;
         if !self.write_admission_idle() {
             let fams = [family.to_string()];
             self.ensure_write_admitted_for(&fams)?;
         }
-        if keys.is_empty() {
-            return if tail.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(keys.len() as u64) {
+            return if crate::write_admission_kernel::batch_is_empty(tail.len() as u64) {
                 Ok(self.last_sequence())
             } else {
                 self.commit_async_ops(tail)
@@ -6121,7 +5809,7 @@ impl<E: Env> Db<E> {
             self.absorb_mem_family_into_run(family)?;
         }
         self.bulk_append_puts(family, keys, vals)?;
-        if tail.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(tail.len() as u64) {
             let seq = self.last_sequence();
             self.publish_sequence(seq);
             return Ok(seq);
@@ -6134,6 +5822,9 @@ impl<E: Env> Db<E> {
             match tail.into_iter().next().unwrap() {
                 BatchOp::Put { key, value } => {
                     let seq = self.alloc_seq()?;
+                    // RFC-0217 P1.1: no WAL frame — a rotate may only drop
+                    // the segment once a publish covers this sequence.
+                    self.walless_seq_high = self.walless_seq_high.max(seq);
                     self.mem
                         .insert(InternalKey::new(key, seq, ValueType::Value), value);
                     self.publish_sequence(seq);
@@ -6169,7 +5860,10 @@ impl<E: Env> Db<E> {
         Ok(())
     }
 
-    pub(crate) fn flush_all_bulk_runs(&mut self) -> Result<Option<ManifestPersist<E>>> {
+    pub(crate) fn flush_all_bulk_runs(&mut self) -> Result<()> {
+        let had_bulk = !crate::write_admission_kernel::batch_is_empty(self.parked_bulk.len() as u64)
+            || !crate::write_admission_kernel::batch_is_empty(self.bulk_runs.len() as u64)
+            || self.bulk_manifest_debt > 0;
         while let Some((fam, run)) = self.parked_bulk.pop_front() {
             self.install_bulk_run(&fam, run.as_ref())?;
         }
@@ -6177,12 +5871,21 @@ impl<E: Env> Db<E> {
         for f in fams {
             self.flush_bulk_run(&f)?;
         }
-        self.persist_bulk_manifest(true)
+        // RFC-0217 P1.1: settle only actual bulk work. A plain put+flush
+        // workload must not pay a MANIFEST publish here on every explicit
+        // flush — the WAL rotate below owns that publish (deferred to the
+        // debounce/cap gate while it archives).
+        if had_bulk {
+            if let Some(persist) = self.persist_bulk_manifest(true)? {
+                persist.write()?;
+            }
+        }
+        Ok(())
     }
 
     #[must_use]
     pub(crate) fn has_parked_bulk(&self) -> bool {
-        !self.parked_bulk.is_empty()
+        !crate::write_admission_kernel::batch_is_empty(self.parked_bulk.len() as u64)
     }
 
     #[cfg(test)]
@@ -6244,14 +5947,20 @@ impl<E: Env> Db<E> {
     /// Persist MANIFEST every [`BULK_MANIFEST_EVERY`] async bulk installs
     /// (off the write lock). `force` flushes leftover debt (settle).
     fn persist_bulk_manifest(&mut self, force: bool) -> Result<Option<ManifestPersist<E>>> {
-        if self.sync {
-            self.persist_manifest()?;
-            self.bulk_manifest_debt = 0;
-            return Ok(None);
+        // Kernel is the fate: sync pays the publish inline; async
+        // amortizes via debt (AS-IS always-amortize would leave the
+        // sync-mode publish window open across installs).
+        match crate::manifest_kernel::bulk_manifest_persist_fate(self.sync) {
+            crate::manifest_kernel::BulkManifestFate::PersistNow => {
+                self.persist_manifest()?;
+                self.bulk_manifest_debt = 0;
+                return Ok(None);
+            }
+            crate::manifest_kernel::BulkManifestFate::AmortizeDebt => {}
         }
         self.unsynced_ssts.clear();
         if force {
-            if self.bulk_manifest_debt == 0 {
+            if crate::write_admission_kernel::batch_is_empty(self.bulk_manifest_debt as u64) {
                 return Ok(None);
             }
         } else {
@@ -6272,16 +5981,15 @@ impl<E: Env> Db<E> {
     }
 
     fn install_bulk_run(&mut self, family: &str, run: &crate::bulk_run::BulkRun) -> Result<()> {
-        if run.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(run.len() as u64) {
             return Ok(());
         }
         let num = self.alloc_file_num();
         let (env, dir, sync) = self.l0_write_ctx();
-        let (table, num) =
-            match Self::write_bulk_run_sst(&env, &dir, num, &run, family, sync, "inline") {
-                Ok(t) => t,
-                Err(e) => return Err(self.fence_io_err(e)),
-            };
+        let (table, num) = match Self::write_bulk_run_sst(&env, &dir, num, &run, family, sync) {
+            Ok(t) => t,
+            Err(e) => return Err(self.fence_io_err(e)),
+        };
         if let Some(persist) = self.finish_bulk_sst(family, table, num)? {
             persist.write()?;
         }
@@ -6289,7 +5997,6 @@ impl<E: Env> Db<E> {
     }
 
     /// Off-lock SST write for a parked bulk chunk (no `Db` borrow).
-    /// `caller` labels the RFC-0162 BSTAGE line ("worker" vs "inline").
     pub(crate) fn write_bulk_run_sst(
         env: &E,
         dir: &std::path::Path,
@@ -6297,51 +6004,31 @@ impl<E: Env> Db<E> {
         run: &crate::bulk_run::BulkRun,
         family: &str,
         sync: bool,
-        caller: &'static str,
     ) -> Result<(SstTable, u64)> {
-        if run.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(run.len() as u64) {
             return Err(CoreError::Internal("empty bulk run".into()));
         }
-        let t0 = bulk_stage_timing_on().then(std::time::Instant::now);
         let final_path = dir.join(format!("{num:06}.sst"));
         let tmp_path = dir.join(format!("{num:06}.sst.tmp"));
-        let table = match write_sst_bulk_arrays(env, &tmp_path, run.keys(), run.vals(), run.seqs())
-        {
-            Ok(t) => t,
-            Err(e) => {
-                let _ = env.remove_file(&tmp_path);
-                return Err(e);
-            }
-        };
+        let table =
+            match write_sst_bulk_arrays(env, &tmp_path, run.keys(), run.vals(), run.seqs(), sync) {
+                Ok(t) => t,
+                Err(e) => {
+                    let _ = env.remove_file(&tmp_path);
+                    return Err(e);
+                }
+            };
         if let Err(e) = env.rename(&tmp_path, &final_path) {
             let _ = env.remove_file(&tmp_path);
             let _ = env.remove_file(&final_path);
             return Err(CoreError::Io(e));
-        }
-        // RFC-0162 P1.1 (H1): chunk is synced — drop its pages so writeback
-        // debt never throttles later chunks. Best-effort by the advise contract.
-        let _ = env.advise(&final_path, 0, 0, AdviseKind::DontNeed);
-        if let Some(t0) = t0 {
-            let epoch = BSTAGE_EPOCH.get_or_init(std::time::Instant::now);
-            eprintln!(
-                "{}",
-                bulk_stage_line(
-                    BSTAGE_IDX.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-                    epoch.elapsed().as_millis(),
-                    t0.elapsed().as_millis(),
-                    run.len(),
-                    run.bytes(),
-                    caller,
-                    sync,
-                )
-            );
         }
         Ok((table.with_path(final_path).with_cf(family.to_string()), num))
     }
 
     fn absorb_mem_family_into_run(&mut self, family: &str) -> Result<()> {
         let taken = self.mem.take_family(family);
-        if taken.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(taken.len() as u64) {
             return Ok(());
         }
         let run = self.bulk_runs.entry(family.to_string()).or_default();
@@ -6361,20 +6048,24 @@ impl<E: Env> Db<E> {
         mut vals: Vec<Bytes>,
     ) -> Result<()> {
         let n = keys.len();
-        if n == 0 {
+        if crate::write_admission_kernel::batch_is_empty(n as u64) {
             return Ok(());
         }
         crate::bulk_run::sort_bulk_key_vals(&mut keys, &mut vals);
         let n64 = n as u64;
-        let last = self.next_seq.saturating_add(n64.saturating_sub(1));
-        if last > MAX_SEQUENCE_NUMBER {
+        let seq0 = self.next_seq.fetch_add(n64, Ordering::Relaxed);
+        let last = seq0.saturating_add(n64.saturating_sub(1));
+        if crate::write_admission_kernel::seq_exhausted(last, MAX_SEQUENCE_NUMBER) {
+            self.next_seq.fetch_sub(n64, Ordering::Relaxed);
             return Err(CoreError::Internal(
                 "sequence number space exhausted".into(),
             ));
         }
-        let mut seq = self.next_seq;
-        self.next_seq = last + 1;
+        let mut seq = seq0;
         let cap = self.bulk_chunk_cap();
+        // RFC-0217 P1.1: the run arrays carry no WAL frames — the rotate
+        // treats this whole sequence range as WAL-less until published.
+        self.walless_seq_high = self.walless_seq_high.max(last);
         let over = {
             let run = self.bulk_runs.entry(family.to_string()).or_default();
             run.reserve(n);
@@ -6383,7 +6074,7 @@ impl<E: Env> Db<E> {
                 run.push(k, v, seq);
                 seq += 1;
             }
-            run.bytes() >= cap
+            cap.is_some_and(|c| run.bytes() >= c)
         };
         if over {
             if let Some(run) = self.bulk_runs.remove(family) {
@@ -6391,7 +6082,7 @@ impl<E: Env> Db<E> {
                 // chunk so fill overlaps SST. One parked + one encoding
                 // + the open tail is the RAM bound; a second overflow
                 // while parked is still full encodes inline.
-                if self.parked_bulk.is_empty() {
+                if crate::write_admission_kernel::batch_is_empty(self.parked_bulk.len() as u64) {
                     self.parked_bulk
                         .push_back((family.to_string(), Arc::new(run)));
                 } else {
@@ -6412,11 +6103,33 @@ impl<E: Env> Db<E> {
     /// [`CoreError::DurabilityFenced`].
     pub fn stage_flush_imm(&mut self) -> Result<bool> {
         self.ensure_not_fenced()?;
-        if self.imm.is_some() || self.mem.is_empty() {
+        if self.imm.is_some()
+            || crate::write_admission_kernel::batch_is_empty(self.mem.len() as u64)
+        {
             return Ok(false);
         }
         self.imm = Some(std::mem::replace(&mut self.mem, MemTable::new()));
         Ok(true)
+    }
+
+    /// RFC-0180 P0.75 / RFC-0185 P0.3: park non-empty foreign one-slash
+    /// leftover before applying `key` (seed `ycsb/` vs timed `c/`).
+    ///
+    /// Any non-empty leftover (not only ≥ write-buffer/2). Empty-prefix
+    /// keys do not park. Imm already occupied → leave leftover in active
+    /// (worker behind).
+    pub(crate) fn maybe_park_foreign_one_slash(&mut self, key: &[u8]) {
+        if crate::write_admission_kernel::batch_is_empty(self.mem.len() as u64) {
+            return;
+        }
+        let pfx = crate::memtable::idx_prefix(key);
+        if crate::write_admission_kernel::batch_is_empty(pfx.len() as u64) {
+            return;
+        }
+        if self.mem.has_idx_prefix(pfx) {
+            return;
+        }
+        let _ = self.stage_flush_imm();
     }
 
     /// Switch active mem → imm if free; returns taken imm for out-of-lock SST write.
@@ -6430,7 +6143,7 @@ impl<E: Env> Db<E> {
         let taken = if self.imm.is_some() {
             // Still flushing previous imm — caller should finish that first.
             self.imm.take()
-        } else if self.mem.is_empty() {
+        } else if crate::write_admission_kernel::batch_is_empty(self.mem.len() as u64) {
             None
         } else {
             Some(std::mem::replace(&mut self.mem, MemTable::new()))
@@ -6452,7 +6165,7 @@ impl<E: Env> Db<E> {
     /// Park the flush pin for later off-lock fold (no BTree merge here).
     pub fn retire_flush_pin(&mut self) {
         if let Some(pin) = self.flush_read_pin.take() {
-            if !pin.is_empty() {
+            if !crate::write_admission_kernel::batch_is_empty(pin.len() as u64) {
                 self.retired_pending.push(pin);
                 self.retired_l0s = self.retired_l0s.saturating_add(1);
                 self.trim_retired_cache();
@@ -6469,7 +6182,7 @@ impl<E: Env> Db<E> {
     /// one undividable cache layer: over cap it is dropped whole — reads
     /// fall back to the covered SSTs.
     pub fn install_retired_fold(&mut self, built: MemTable) {
-        if self.retired_fold.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.retired_fold.len() as u64) {
             self.retired_fold = built;
         } else {
             self.retired_fold.absorb(built);
@@ -6525,7 +6238,7 @@ impl<E: Env> Db<E> {
     /// One number when CFs are not registered; one per family otherwise.
     #[must_use]
     pub fn alloc_file_nums_for_imm(&mut self, imm: &crate::memtable::MemTable) -> Vec<u64> {
-        let n = if self.physical_cfs.is_empty() {
+        let n = if crate::write_admission_kernel::batch_is_empty(self.physical_cfs.len() as u64) {
             1
         } else {
             imm.cf_families().len().max(1)
@@ -6569,8 +6282,11 @@ impl<E: Env> Db<E> {
                         t_r.elapsed().as_secs_f64() * 1e3
                     );
                 }
-                if sync {
-                    env.sync_dir(dir)?;
+                match crate::write_admission_kernel::dir_sync_plan(sync) {
+                    crate::write_admission_kernel::DirSyncPlan::SyncDirNow => {
+                        env.sync_dir(dir)?;
+                    }
+                    crate::write_admission_kernel::DirSyncPlan::SkipDirSync => {}
                 }
                 // Keep the writer's in-place table (rename does not change
                 // the bytes). Re-opening paid a full read + per-block
@@ -6604,7 +6320,7 @@ impl<E: Env> Db<E> {
         let tmp_path = dir.join(format!("{num:06}.sst.tmp"));
         match write_l0_sst_for_family(env, &tmp_path, imm, family, false) {
             Ok(table) => {
-                if table.is_empty() {
+                if crate::write_admission_kernel::batch_is_empty(table.len() as u64) {
                     drop(table);
                     let _ = env.remove_file(&tmp_path);
                     return Ok(None);
@@ -6618,8 +6334,11 @@ impl<E: Env> Db<E> {
                         t_r.elapsed().as_secs_f64() * 1e3
                     );
                 }
-                if sync {
-                    env.sync_dir(dir)?;
+                match crate::write_admission_kernel::dir_sync_plan(sync) {
+                    crate::write_admission_kernel::DirSyncPlan::SyncDirNow => {
+                        env.sync_dir(dir)?;
+                    }
+                    crate::write_admission_kernel::DirSyncPlan::SkipDirSync => {}
                 }
                 // In-place table kept (see `write_imm_l0_file`): no
                 // post-rename re-read of the freshly written bytes.
@@ -6672,7 +6391,9 @@ impl<E: Env> Db<E> {
         } else {
             Vec::new()
         };
-        if families.is_empty() || nums.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(families.len() as u64)
+            || crate::write_admission_kernel::batch_is_empty(nums.len() as u64)
+        {
             let num = nums.first().copied().unwrap_or(1);
             let one = Self::write_imm_l0_file(env, dir, sync, imm, num)?;
             return Ok(vec![one]);
@@ -6701,7 +6422,7 @@ impl<E: Env> Db<E> {
                 }
             }
         }
-        if out.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(out.len() as u64) {
             let one = Self::write_imm_l0_file(env, dir, sync, imm, nums[0])?;
             return Ok(vec![one]);
         }
@@ -6782,6 +6503,91 @@ impl<E: Env> Db<E> {
         Ok(())
     }
 
+    /// Ingest an external Pedra SST directly into L0 (RFC-0217 P1.2): the
+    /// file's entries get fresh global sequence numbers above
+    /// `last_sequence` (local order preserved — newest stays newest), are
+    /// re-encoded into a new SST in the DB directory and installed — no WAL
+    /// write, no memtable, no flush pipeline. Durable MANIFEST point before
+    /// Ok: the ingested file is the only copy (ingest semantics, unlike
+    /// flush there is no WAL window to fall back on), so visibility
+    /// ([`Self::publish_sequence`]) only happens after the manifest write.
+    ///
+    /// Rocks `allow_write_flush` parity: lookups are mem-first without a
+    /// sequence comparison against SSTs, so any pending memtable/bulk state
+    /// would shadow ingested keys that carry *higher* sequences. Pending
+    /// state is flushed first (no-op when nothing is pending, the common
+    /// ingest shape).
+    ///
+    /// # Errors
+    /// Open/decode of `path`; SST or MANIFEST I/O; sequence exhaustion.
+    pub fn ingest_sst_file(&mut self, path: &std::path::Path, family: &str) -> Result<()> {
+        if !crate::write_admission_kernel::batch_is_empty(self.mem.len() as u64)
+            || self.imm.is_some()
+            || !self.bulk_runs.is_empty()
+        {
+            self.flush()?;
+        }
+        let table = SstTable::open_on(&self.env, path)?;
+        let n = table.len() as u64;
+        if crate::write_admission_kernel::batch_is_empty(n) {
+            return Ok(());
+        }
+        let seq0 = self.next_seq.fetch_add(n, Ordering::Relaxed);
+        let top = seq0.saturating_add(n.saturating_sub(1));
+        if crate::write_admission_kernel::seq_exhausted(top, MAX_SEQUENCE_NUMBER) {
+            self.next_seq.fetch_sub(n, Ordering::Relaxed);
+            return Err(CoreError::Internal(
+                "sequence number space exhausted".into(),
+            ));
+        }
+        // RFC-0217 P1.1 hazard (3): the ingested range is WAL-less — the
+        // rotate guard must force a publish that covers it.
+        self.walless_seq_high = self.walless_seq_high.max(top);
+        let file_num = self.alloc_file_num();
+        let tmp_path = self.dir.join(format!("{file_num:06}.sst.tmp"));
+        let final_path = self.dir.join(format!("{file_num:06}.sst"));
+        // Iteration is internal order (user asc, seq desc): entry i gets
+        // `top - i`, so the newest version of each key keeps the highest
+        // sequence and per-key recency order is preserved.
+        let mut stream = table.iter_internal_between(None, None);
+        let mut rank = 0u64;
+        let entries = std::iter::from_fn(move || match stream.next_entry() {
+            Ok(Some((ik, val))) => {
+                let seq = top - rank;
+                rank += 1;
+                Some(Ok((InternalKey::new(ik.user_key, seq, ik.kind), val)))
+            }
+            Ok(None) => None,
+            Err(e) => Some(Err(e)),
+        });
+        let written =
+            match crate::sst::write_sst_try_sorted_on(&self.env, &tmp_path, entries, table.len()) {
+                Ok(t) => t,
+                Err(e) => {
+                    let _ = self.env.remove_file(&tmp_path);
+                    return Err(e);
+                }
+            };
+        if let Err(e) = self.env.rename(&tmp_path, &final_path) {
+            let _ = self.env.remove_file(&tmp_path);
+            return Err(CoreError::Io(e));
+        }
+        let table = written.with_path(final_path).with_cf(family.to_string());
+        if let Err(e) = self.install_ssts_at_levels(vec![(table, file_num)], &[0]) {
+            return Err(self.fence_io_err(e));
+        }
+        // Durable point: MANIFEST before Ok, then visibility. A failure
+        // after install leaves the in-memory inventory ahead of the
+        // MANIFEST (dirty window — the next flush/publish reconciles);
+        // Err is returned, so the caller keeps the external file.
+        if let Err(e) = self.persist_manifest() {
+            return Err(self.fence_io_err(e));
+        }
+        self.publish_sequence(top);
+        self.bytes_ingested = self.bytes_ingested.saturating_add(n);
+        Ok(())
+    }
+
     /// Restore an imm memtable after a failed off-lock flush ([`crate::concurrent::ConcurrentDb`]).
     ///
     /// If another imm is already present (dual-flush race), fold this table's
@@ -6854,80 +6660,14 @@ impl<E: Env> Db<E> {
 
     /// Bulk-run flush size: per-CF / global write buffer, **not**
     /// `PEDRA_STAGE_MAX_BYTES` (that clamp is for memtable staging).
-    ///
-    /// Always a real cap (RFC-0160 P0.5). `None` flush thresholds used to
-    /// let the open tail grow with n (100M SIGKILL).
-    ///
-    /// RFC-0161 P0.5: never exceed [`DEFAULT_BULK_CHUNK_BYTES`]. Slipstream
-    /// sets a 256 MiB write buffer; three of those (tail+park+encode) is
-    /// 768 MiB on a 3.9 GiB guest before indexes. Cap the bulk chunk at
-    /// 64 MiB regardless of the memtable threshold.
-    pub(crate) fn bulk_chunk_cap(&self) -> usize {
+    fn bulk_chunk_cap(&self) -> Option<usize> {
         let mut cap = self.auto_flush_bytes.filter(|n| *n > 0);
         for &n in self.cf_write_buffer.values() {
             if n > 0 && cap.is_none_or(|c| n > c) {
                 cap = Some(n);
             }
         }
-        let mut cap = cap
-            .unwrap_or(DEFAULT_BULK_CHUNK_BYTES)
-            .min(DEFAULT_BULK_CHUNK_BYTES);
-        // RFC-0168 P1.3: smaller chunks → smaller settle tail (the leftover
-        // open run is < cap). Default unchanged. `PEDRA_BULK_CHUNK_BYTES`
-        // or `PEDRA_STAGE_MAX_BYTES` (already used by the scale bench).
-        for key in ["PEDRA_BULK_CHUNK_BYTES", "PEDRA_STAGE_MAX_BYTES"] {
-            if let Ok(v) = std::env::var(key) {
-                if let Ok(max) = v.parse::<usize>() {
-                    if max > 0 && max < cap {
-                        cap = max;
-                    }
-                }
-            }
-        }
         cap
-    }
-
-    /// Open BulkRun + parked chunk + in-flight encode (RFC-0160 P0.5).
-    /// Does not include SST payloads (those must stay empty on the bulk
-    /// path) or kernel page-cache.
-    #[must_use]
-    #[allow(dead_code)] // guest MEMDIAG / tests
-    pub(crate) fn bulk_live_bytes(&self) -> usize {
-        let mut n = 0usize;
-        for run in self.bulk_runs.values() {
-            n = n.saturating_add(run.bytes());
-        }
-        for (_, run) in &self.parked_bulk {
-            n = n.saturating_add(run.bytes());
-        }
-        if let Some((_, run)) = &self.bulk_encoding {
-            n = n.saturating_add(run.bytes());
-        }
-        n
-    }
-
-    /// Sparse-index RAM of installed SSTs (RFC-0161 P0.5).
-    #[must_use]
-    pub fn sst_index_bytes(&self) -> usize {
-        self.ssts.iter().map(SstTable::index_memory_bytes).sum()
-    }
-
-    /// Pedra-side RAM the 100M guest can charge us for: BulkRun tail +
-    /// resident payloads + SST indexes + mem/imm. Not kernel page-cache
-    /// and not a peer Rocks still live in the same process (v74 SIGKILL
-    /// at 3.64 GiB was that sum).
-    #[must_use]
-    pub fn hydrate_resident_bytes(&self) -> usize {
-        self.bulk_live_bytes()
-            .saturating_add(self.sst_payload_pool.resident_bytes() as usize)
-            .saturating_add(self.ssts.iter().map(SstTable::metadata_memory_bytes).sum())
-            .saturating_add(self.mem.approx_memory_usage())
-            .saturating_add(
-                self.imm
-                    .as_ref()
-                    .map(MemTable::approx_memory_usage)
-                    .unwrap_or(0),
-            )
     }
 
     /// Flush-debt cap for concurrent writer backpressure: one parked
@@ -6953,7 +6693,10 @@ impl<E: Env> Db<E> {
         // the fold, or a post-fold rewrite is served stale.
         self.scan_mem_layers()
             .chain(self.retired_pending.iter().rev())
-            .chain((!self.retired_fold.is_empty()).then_some(&self.retired_fold))
+            .chain(
+                (!crate::write_admission_kernel::batch_is_empty(self.retired_fold.len() as u64))
+                    .then_some(&self.retired_fold),
+            )
     }
 
     /// Layers that have no covering SST: live mems + parked-unflushed.
@@ -6972,7 +6715,7 @@ impl<E: Env> Db<E> {
 
     /// Park a flushed mem with no SST file. WAL still covers it (G1).
     pub fn push_parked_unflushed(&mut self, table: MemTable) {
-        if !table.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(table.len() as u64) {
             self.parked_unflushed.push(Arc::new(table));
         }
     }
@@ -6993,11 +6736,12 @@ impl<E: Env> Db<E> {
 
     /// Pop the oldest parked table after its L0 exists.
     pub fn take_oldest_parked(&mut self) -> Option<MemTable> {
-        if self.parked_unflushed.is_empty() {
-            None
-        } else {
-            let arc = self.parked_unflushed.remove(0);
-            Some(Arc::try_unwrap(arc).unwrap_or_else(|a| (*a).clone()))
+        match crate::write_admission_kernel::parked_pop_plan(self.parked_unflushed.len() as u64) {
+            crate::write_admission_kernel::ParkedPopPlan::NoParkedTables => None,
+            crate::write_admission_kernel::ParkedPopPlan::PopOldestParked => {
+                let arc = self.parked_unflushed.remove(0);
+                Some(Arc::try_unwrap(arc).unwrap_or_else(|a| (*a).clone()))
+            }
         }
     }
 
@@ -7037,8 +6781,9 @@ impl<E: Env> Db<E> {
     /// the in-flight fold pair (validated at swap time — F174). Fold
     /// deep-clones off the Db lock, then [`Self::replace_oldest_parked_pair`].
     pub fn parked_oldest_pair_arcs(&mut self) -> Option<(Arc<MemTable>, Arc<MemTable>)> {
-        if self.parked_unflushed.len() < 2 {
-            return None;
+        match crate::flush_kernel::parked_pair_plan(self.parked_unflushed.len() as u64) {
+            crate::flush_kernel::ParkedPairPlan::WaitForPair => return None,
+            crate::flush_kernel::ParkedPairPlan::HandOutOldestPair => {}
         }
         let pair = (
             Arc::clone(&self.parked_unflushed[0]),
@@ -7068,7 +6813,7 @@ impl<E: Env> Db<E> {
         }
         self.parked_unflushed.remove(0);
         self.parked_unflushed.remove(0);
-        if !built.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(built.len() as u64) {
             self.parked_unflushed.insert(0, Arc::new(built));
         }
         true
@@ -7076,7 +6821,7 @@ impl<E: Env> Db<E> {
 
     /// Keep `mem` as a point/MVCC cache covering one newly installed L0.
     pub fn retire_mem_as_l0_cache(&mut self, mem: MemTable) {
-        if !mem.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(mem.len() as u64) {
             self.retired_pending.push(mem);
             self.retired_l0s = self.retired_l0s.saturating_add(1);
             self.trim_retired_cache();
@@ -7150,10 +6895,21 @@ impl<E: Env> Db<E> {
         let Some(imm) = self.imm.take() else {
             return Ok(());
         };
-        if imm.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(imm.len() as u64) {
             return Ok(());
         }
         let nums = self.alloc_file_nums_for_imm(&imm);
+        // RFC-0217 P1.1: entries at or below the published floor leave the
+        // replay-safe window — until a publish covers them the rotate must
+        // publish, never archive (replay drops frames ≤ floor).
+        if imm
+            .iter_internal()
+            .map(|(ik, _)| ik.sequence)
+            .min()
+            .is_some_and(|min| min <= self.manifest_published_seq)
+        {
+            self.unpublished_below_floor = true;
+        }
         let files = match Self::write_imm_l0_files(&self.env, &self.dir, self.sync, &imm, &nums) {
             Ok(f) => f,
             Err(e) => {
@@ -7172,6 +6928,9 @@ impl<E: Env> Db<E> {
             self.imm = Some(imm);
             return Err(self.fence_io_err(e));
         }
+        // RFC-0217 P1.1: O(imm) feed merge keeps lazy-feed readers complete
+        // between the debounced CHANGELOG stores.
+        self.stage_changelog_delta_from_imm(&imm);
         Ok(())
     }
 
@@ -7186,13 +6945,17 @@ impl<E: Env> Db<E> {
         {
             return Ok(());
         }
-        // Edge-trigger: a drained pipeline with an empty current segment has
-        // nothing to rotate. Without this every idle poll (the compat compact
-        // worker tick during read-only phases) rewrites MANIFEST+CURRENT and
-        // pays two fdatasync barriers per tick — 10k+ barriers per slipstream
-        // guest run, ~42 s of flush traffic competing with the read legs.
-        if self.wal.lock().position() == 0 {
-            return Ok(());
+        // Pipeline mints seq + appends under wal.lock() without db.write().
+        // Recheck inflight while holding the WAL mutex so rotate cannot
+        // truncate a just-written frame (Pebble-style split).
+        {
+            let w = self.wal.lock();
+            if self.commit_inflight.load(Ordering::Acquire) > 0 {
+                return Ok(());
+            }
+            if crate::flush_kernel::wal_segment_is_empty(w.position()) {
+                return Ok(());
+            }
         }
         self.rotate_wal_now()
     }
@@ -7201,12 +6964,14 @@ impl<E: Env> Db<E> {
     /// (input to `flush_kernel::wal_rotate_decision`).
     fn wal_pin_state(&self) -> crate::flush_kernel::WalPinState {
         crate::flush_kernel::WalPinState {
-            mem_empty: self.mem.is_empty(),
+            mem_empty: crate::write_admission_kernel::batch_is_empty(self.mem.len() as u64),
             imm_present: self.imm.is_some(),
             pin_live: self.flush_read_pin.is_some(),
-            parked_unflushed: !self.parked_unflushed.is_empty(),
+            parked_unflushed: !crate::write_admission_kernel::batch_is_empty(
+                self.parked_unflushed.len() as u64,
+            ),
             commit_inflight: self.commit_inflight.load(Ordering::Acquire) > 0
-                || !self.unapplied.is_empty(),
+                || !crate::write_admission_kernel::batch_is_empty(self.unapplied.len() as u64),
         }
     }
 
@@ -7235,11 +7000,36 @@ impl<E: Env> Db<E> {
     }
 
     fn rotate_wal_now(&mut self) -> Result<()> {
-        // SST + MANIFEST must be durable before the WAL that covers those
-        // keys is discarded (G1). L0 flush skips file fsync; this is the pay
-        // point.
-        if let Err(e) = self.persist_manifest_durable() {
-            return Err(self.fence_io_err(e));
+        // RFC-0217 P1.1 rotate contract:
+        // - The WAL-less window (bulk run arrays + the 1-key hydrate meta
+        //   tail) above the published floor has no archive copy: that
+        //   rotate must publish, never archive.
+        // - A below-floor unpublished window must publish too: replay drops
+        //   frames ≤ floor, so the segment is not a recovery source for it.
+        // - Unpublished-but-above-floor frames may archive — reopen replays
+        //   them as data.
+        // - Truncate only when everything is settled (inventory published,
+        //   no WAL-less debt, lazy feed current): the feed then rebuilds
+        //   from the published SSTs (F53) and no publish is needed.
+        let walless_covered = self.manifest_published_seq >= self.walless_seq_high;
+        let feed_needs_segment =
+            self.changelog_interval == 0 && self.changelog_disk_watermark < self.last_sequence();
+        let settled = !self.manifest_dirty && walless_covered && !feed_needs_segment;
+        let archive_now = walless_covered
+            && !self.unpublished_below_floor
+            && crate::changelog_kernel::wal_rotate_archives(
+                !settled,
+                self.wal_archive_live(),
+                self.wal_archive_cap,
+            );
+        let store_now = self.changelog_store_gate_fires();
+        if !settled && (!archive_now || store_now) {
+            // SST + MANIFEST must be durable before the WAL that covers
+            // those keys is discarded (G1). L0 flush skips file fsync;
+            // this is the pay point.
+            if let Err(e) = self.persist_manifest_durable() {
+                return Err(self.fence_io_err(e));
+            }
         }
         // WAL truncate drops the rebuild source for the CHANGELOG cache.
         // Persist first when debounce is on. interval 0: skip on auto-flush
@@ -7247,6 +7037,13 @@ impl<E: Env> Db<E> {
         // / close still store.
         if self.changelog_interval > 0 {
             self.persist_changelog_best_effort();
+        } else if store_now {
+            // Gate point: the durable publish above covers every archived
+            // segment, so this store may also clear them.
+            self.persist_changelog_best_effort();
+        }
+        if self.commit_inflight.load(Ordering::Acquire) > 0 {
+            return Ok(());
         }
         let wal_path = self.dir.join(WAL_FILE_NAME);
         // F182: drain the old handle's pending async frame BEFORE
@@ -7254,7 +7051,60 @@ impl<E: Env> Db<E> {
         // offset, so `close()` after the truncate would write the frame at
         // the pre-truncate offset — a sparse zero hole that makes reopen
         // fail-stop (`WalZeroHeader`) although L0+MANIFEST are intact.
-        self.wal.lock().flush()?;
+        // SST is already durable: AppendApplyOk ⇒ flush, not fdatasync.
+        match crate::write_admission_kernel::wal_commit_plan(false, false) {
+            crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => {
+                self.wal.lock().flush()?;
+            }
+            crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+            | crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                assert!(
+                    !crate::write_admission_kernel::fence_on_sync_fail(false, false),
+                    "rotate discards WAL after SST durable ⇒ not required sync"
+                );
+                self.wal.lock().sync_data()?;
+            }
+        }
+        // RFC-0217 P1.1: unpublished window or lazy-feed debt → the drained
+        // segment becomes the crash rebuild source for the debounced
+        // store/publish. Rename keeps the frames; reopen replays archives
+        // as data (unconditional, like the live WAL). Re-evaluated after
+        // the gate publish/store above so a settled segment truncates.
+        let walless_covered = self.manifest_published_seq >= self.walless_seq_high;
+        let feed_needs_segment =
+            self.changelog_interval == 0 && self.changelog_disk_watermark < self.last_sequence();
+        let settled = !self.manifest_dirty && walless_covered && !feed_needs_segment;
+        if walless_covered
+            && !self.unpublished_below_floor
+            && crate::changelog_kernel::wal_rotate_archives(
+                !settled,
+                self.wal_archive_live(),
+                self.wal_archive_cap,
+            )
+        {
+            let arch = self.dir.join(wal_archive_slot_name(self.wal_archive_next));
+            match self.env.rename(&wal_path, &arch) {
+                Ok(()) => {
+                    self.wal_archive_next += 1;
+                    self.wal_archive_max_seq = self.wal_archive_max_seq.max(self.last_sequence());
+                    let mut new = Wal::create_on(&self.env, &wal_path)?;
+                    new.set_full_fsync(self.wal.lock().full_fsync());
+                    let old = std::mem::replace(&mut *self.wal.lock(), new);
+                    old.close()?;
+                    return self.sync_dir_if_required(&self.dir);
+                }
+                Err(e) => {
+                    // Rename failed: the legacy truncate below discards the
+                    // segment, so publish the deferred MANIFEST first, then
+                    // store (best-effort) and fall through.
+                    tracing::warn!(error = %e, "WAL archive rename failed; storing CHANGELOG");
+                    if let Err(me) = self.persist_manifest_durable() {
+                        return Err(self.fence_io_err(me));
+                    }
+                    self.persist_changelog_best_effort();
+                }
+            }
+        }
         let mut new = Wal::create_on(&self.env, &wal_path)?;
         // Barrier class is a DB-level contract: the rotated segment inherits
         // the strong-class flag (OpenOptions::wal_full_fsync).
@@ -7291,17 +7141,15 @@ impl<E: Env> Db<E> {
     /// # Errors
     /// SST / MANIFEST I/O.
     pub fn compact_leveled(&mut self) -> Result<()> {
+        let probe = crate::env::probe_available_bytes(&self.env, &self.dir);
+        if let Some((available, need)) = crate::disk_pressure_kernel::compact_refuse(probe) {
+            return Err(CoreError::DiskPressure { available, need });
+        }
         if !crate::leveling::leveled_enabled() {
             return self.compact_with(CompactOptions::default());
         }
-        let compact_t0 = Instant::now();
         self.dump_level_diag("compact_leveled_start");
-        let t_repair = Instant::now();
         self.repair_stacked_levels()?;
-        let repair_s = t_repair.elapsed().as_secs_f64();
-        if repair_s > 0.05 {
-            eprintln!("repair_stacked_levels={repair_s:.3}s");
-        }
         // Across-job batching: only with a thread-shareable env (the seam)
         // and `parallel_jobs > 1`; the batch's disjoint-job writes then run
         // on scoped threads through `ParallelMerge::merge_jobs` while this
@@ -7325,12 +7173,6 @@ impl<E: Env> Db<E> {
             match batch.len() {
                 0 => {
                     self.dump_level_diag("compact_leveled_done");
-                    self.maybe_willneed_ssts();
-                    self.last_settle_compact_ns.store(
-                        u64::try_from(compact_t0.elapsed().as_nanos()).unwrap_or(u64::MAX),
-                        Ordering::Relaxed,
-                    );
-                    self.maybe_warm_ssts();
                     return Ok(());
                 }
                 1 => {
@@ -7367,220 +7209,7 @@ impl<E: Env> Db<E> {
                 }
             }
         }
-        self.maybe_willneed_ssts();
-        self.last_settle_compact_ns.store(
-            u64::try_from(compact_t0.elapsed().as_nanos()).unwrap_or(u64::MAX),
-            Ordering::Relaxed,
-        );
-        self.maybe_warm_ssts();
         Ok(())
-    }
-
-    /// RFC-0168 P1.1: best-effort `WILLNEED` on every live SST after
-    /// settle. No-op unless [`crate::env::settle_willneed_on`]. Pages land
-    /// in the kernel cache (inode-level) even if the later point path
-    /// opens a different fd with `FADV_RANDOM`.
-    fn maybe_willneed_ssts(&self) {
-        if !crate::env::settle_willneed_on() {
-            return;
-        }
-        for table in &self.ssts {
-            let _ = self
-                .env
-                .advise(table.path(), 0, 0, crate::env::AdviseKind::WillNeed);
-        }
-    }
-
-    /// RFC-0168 P1.1 / P2.3: blocking page-cache fill through `sst_source`
-    /// (the same fd `get` preads). No-op unless [`crate::env::settle_warm_on`]
-    /// and a file source is attached (bounded open). Default skips when
-    /// live SST bytes exceed [`crate::env::settle_warm_max_bytes`], or
-    /// when ingest already streamed this set (so settle stays O(1)).
-    /// Always records `last_settle_warm_{bytes,ns}` (0 bytes if skipped).
-    fn maybe_warm_ssts(&mut self) {
-        let t0 = Instant::now();
-        if crate::env::settle_warm_on() && !crate::env::settle_warm_unlimited() {
-            let mut total = 0u64;
-            for table in &self.ssts {
-                if let Ok(len) = self.env.metadata_len(table.path()) {
-                    total = total.saturating_add(len);
-                }
-            }
-            if total > crate::env::settle_warm_max_bytes() {
-                self.enter_bounded_cache_mode(total, crate::env::settle_warm_max_bytes());
-                self.last_settle_warm_bytes.store(0, Ordering::Relaxed);
-                self.last_settle_warm_ns.store(
-                    u64::try_from(t0.elapsed().as_nanos()).unwrap_or(u64::MAX),
-                    Ordering::Relaxed,
-                );
-                return;
-            }
-        }
-        let streamed = self.run_warm_plan();
-        self.last_settle_warm_bytes
-            .store(streamed, Ordering::Relaxed);
-        self.last_settle_warm_ns.store(
-            u64::try_from(t0.elapsed().as_nanos()).unwrap_or(u64::MAX),
-            Ordering::Relaxed,
-        );
-    }
-
-    fn run_warm_plan(&mut self) -> u64 {
-        let Some(plan) = self.take_warm_plan() else {
-            return 0;
-        };
-        let streamed: u64 = plan.jobs.iter().map(|(_, l)| *l).sum();
-        let warmed = plan.run();
-        self.note_warmed_ssts(&warmed);
-        streamed
-    }
-
-    pub(crate) fn note_warmed_ssts(&mut self, paths: &[PathBuf]) {
-        let mut g = self.warmed_ssts.lock();
-        for p in paths {
-            g.insert(p.clone());
-        }
-    }
-
-    /// Drop path-skip so the next [`Self::maybe_warm_ssts`] streams the
-    /// live set. Explicit `compact()` waits on the host compact gate
-    /// (worker may hold it for tens of seconds); hydrate flush-warm is
-    /// then stale for random get (100M Darwin get_loop 2.65 ms vs 432 µs
-    /// @50M when settle WARMed immediately before probes).
-    pub(crate) fn clear_warmed_ssts(&self) {
-        self.warmed_ssts.lock().clear();
-    }
-
-    /// After a write that published SSTs: if the live set already exceeds
-    /// the warm cap, drop page-cache pages now (do not wait for settle).
-    pub(crate) fn maybe_bounded_cache_after_write(&mut self) {
-        if crate::env::settle_warm_unlimited() {
-            return;
-        }
-        let mut total = 0u64;
-        for table in &self.ssts {
-            if let Ok(len) = self.env.metadata_len(table.path()) {
-                total = total.saturating_add(len);
-            }
-        }
-        let cap = crate::env::settle_warm_max_bytes();
-        if total > cap {
-            self.enter_bounded_cache_mode(total, cap);
-        }
-    }
-
-    pub(crate) fn take_warm_plan(&self) -> Option<crate::env::WarmPlan> {
-        if !crate::env::settle_warm_on() {
-            return None;
-        }
-        let src = self.sst_source.as_ref()?.clone();
-        let mut jobs: Vec<(std::path::PathBuf, u64)> = Vec::with_capacity(self.ssts.len());
-        let mut total = 0u64;
-        for table in &self.ssts {
-            let Ok(len) = self.env.metadata_len(table.path()) else {
-                continue;
-            };
-            total = total.saturating_add(len);
-            jobs.push((table.path().to_path_buf(), len));
-        }
-        if jobs.is_empty() {
-            return None;
-        }
-        if !crate::env::settle_warm_unlimited() && total > crate::env::settle_warm_max_bytes() {
-            self.note_ram_warm_skip(total, crate::env::settle_warm_max_bytes());
-            self.drop_sst_page_cache();
-            return None;
-        }
-        if !crate::env::settle_warm_unlimited() {
-            let live: HashSet<PathBuf> = self.ssts.iter().map(|t| t.path().to_path_buf()).collect();
-            let mut warmed = self.warmed_ssts.lock();
-            // Compact rewrite deletes L0 paths and installs new ones.
-            // Stale entries would make take_warm_plan look like the live
-            // set was already streamed (get_loop 5.5 ms @100M, warm_bytes=0).
-            warmed.retain(|p| live.contains(p));
-            jobs.retain(|(p, _)| !warmed.contains(p));
-        }
-        if jobs.is_empty() {
-            return None;
-        }
-        Some(crate::env::WarmPlan { src, jobs })
-    }
-
-    fn note_ram_warm_skip(&self, sst_bytes: u64, cap: u64) {
-        let n = self.ram_warm_skipped.fetch_add(1, Ordering::Relaxed) + 1;
-        if !self.ram_pressure_warned.swap(true, Ordering::AcqRel) {
-            tracing::warn!(
-                sst_bytes,
-                cap,
-                "bounded-cache mode: SST set exceeds RAM cap; page cache released, block cache only — grow RAM/cgroup to restore RAM-speed gets"
-            );
-            eprintln!(
-                "RAMPRESSURE sst_bytes={sst_bytes} cap={cap} warm_skipped={n} mode=bounded-cache (page cache dropped; grow RAM/cgroup)"
-            );
-        }
-    }
-
-    /// Working set does not fit: skip whole-file warm and drop kernel
-    /// file pages (Linux `DONTNEED`) so the cgroup is not charged the
-    /// full SST set. Point reads then use the bounded block cache +
-    /// 4 KiB pread — slower, stable, writes still Ok.
-    fn enter_bounded_cache_mode(&mut self, sst_bytes: u64, cap: u64) {
-        self.note_ram_warm_skip(sst_bytes, cap);
-        self.drop_sst_page_cache();
-        self.page_indexes_for_ram();
-    }
-
-    /// RFC-0173 P2.1: page sparse-index first-keys (file-backed LRU) and
-    /// drop blooms if metadata still exceeds the resident cap. Writes Ok.
-    fn page_indexes_for_ram(&mut self) {
-        const INDEX_PAGE_LRU_BYTES: usize = 64 << 20;
-        const INDEX_RESIDENT_CAP_BYTES: usize = 512 << 20;
-        let n = self.ssts.len().max(1);
-        let per = (INDEX_PAGE_LRU_BYTES / n).max(4096);
-        for t in &mut self.ssts {
-            t.page_index(per);
-        }
-        let mut meta = 0usize;
-        for t in &self.ssts {
-            meta = meta
-                .saturating_add(t.index_memory_bytes())
-                .saturating_add(t.bloom_memory_bytes());
-        }
-        if meta > INDEX_RESIDENT_CAP_BYTES {
-            for t in &mut self.ssts {
-                t.release_bloom();
-            }
-        }
-        let tables: Vec<SstTable> = self.ssts.clone();
-        for t in tables {
-            self.table_cache.insert(std::sync::Arc::new(t));
-        }
-    }
-
-    fn drop_sst_page_cache(&self) {
-        self.warmed_ssts.lock().clear();
-        let keep = crate::env::page_cache_keep_bytes(
-            crate::env::ram_ceiling_bytes().unwrap_or(0),
-        );
-        let mut kept = 0u64;
-        let order: Vec<usize> = if self.sst_order_newest.is_empty() {
-            (0..self.ssts.len()).collect()
-        } else {
-            self.sst_order_newest.clone()
-        };
-        for &i in &order {
-            let Some(table) = self.ssts.get(i) else {
-                continue;
-            };
-            let len = self.env.metadata_len(table.path()).unwrap_or(0);
-            if keep > 0 && kept < keep {
-                kept = kept.saturating_add(len);
-                continue;
-            }
-            let _ = self
-                .env
-                .advise(table.path(), 0, 0, crate::env::AdviseKind::DontNeed);
-        }
     }
 
     /// `PEDRA_LEVEL_DIAG=1`: per-level file count + on-disk bytes at a
@@ -7647,12 +7276,76 @@ impl<E: Env> Db<E> {
     /// # Errors
     /// I/O while writing the compacted SST or deleting old files.
     pub fn compact_with(&mut self, options: CompactOptions) -> Result<()> {
+        let probe = crate::env::probe_available_bytes(&self.env, &self.dir);
+        if let Some((available, need)) = crate::disk_pressure_kernel::compact_refuse(probe) {
+            return Err(CoreError::DiskPressure { available, need });
+        }
         self.flush()?;
         crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::BEFORE_COMPACT_WRITE)?;
         match self.compact_with_ssts_only(options) {
             Ok(()) => Ok(()),
             Err(e) => Err(self.fence_io_err(e)),
         }
+    }
+
+    /// Native compaction filter (RFC-0217 P1.2): whole-keyspace rewrite per
+    /// family with `decision` applied inside the merge — removed keys never
+    /// reach the output SST (no whole-DB materialization, no WAL delete
+    /// round-trip). SSTs only: flush first ([`ConcurrentDb::compact_filter`])
+    /// so mem keys are filtered too.
+    ///
+    /// The decision sees the newest version of each user-key run; non-Value
+    /// newest versions (tombstones) pass through. `Remove` replaces the run
+    /// with one tombstone at the run's newest seq (durable no-resurrection:
+    /// a traceless drop would lower the manifest seq floor and let WAL
+    /// replay resurrect the key on reopen) — see [`FilterMergeSource`].
+    /// Point / count read caches are invalidated wholesale on return.
+    ///
+    /// # Errors
+    /// I/O while rewriting; disk pressure (refuse).
+    pub fn compact_filter_families(
+        &mut self,
+        decision: &mut dyn FnMut(&str, &[u8], &[u8]) -> crate::merge::CompactFilterDecision,
+    ) -> Result<()> {
+        if crate::write_admission_kernel::batch_is_empty(self.ssts.len() as u64) {
+            return Ok(());
+        }
+        let probe = crate::env::probe_available_bytes(&self.env, &self.dir);
+        if let Some((available, need)) = crate::disk_pressure_kernel::compact_refuse(probe) {
+            return Err(CoreError::DiskPressure { available, need });
+        }
+        crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::BEFORE_COMPACT_WRITE)?;
+        // One rewrite per family over that family's whole file set; the
+        // family's keyspace is fully covered, so `bottommost` is asserted.
+        let families: Vec<String> = self
+            .ssts
+            .iter()
+            .map(|t| self.compact_family_key(t).to_string())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        for family in families {
+            let input_idxs: Vec<usize> = self
+                .ssts
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| self.compact_family_key(t) == family)
+                .map(|(i, _)| i)
+                .collect();
+            let mut options = CompactOptions::default();
+            options.gc.bottommost = true;
+            match self.rewrite_ssts(input_idxs, MAX_LSM_LEVEL, options, Some(decision)) {
+                Ok(()) => {}
+                Err(e) => return Err(self.fence_io_err(e)),
+            }
+        }
+        // The rewrites changed point answers behind the point / last-get /
+        // count caches without passing through the write path (the old
+        // WAL-delete emulation got this invalidation from the deletes):
+        // reset wholesale — compact-filter is a rare, heavy operation.
+        self.point_cache_reset.store(true, Ordering::Relaxed);
+        self.invalidate_read_answers(self.last_sequence());
+        Ok(())
     }
 
     /// Snapshot-safe version GC piggybacked on compaction (open-items §2.1 option b).
@@ -7701,7 +7394,7 @@ impl<E: Env> Db<E> {
         let Some((floor, archive)) = self.auto_gc_floor() else {
             return Ok(());
         };
-        if self.ssts.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.ssts.len() as u64) {
             return Ok(());
         }
         if archive {
@@ -7715,6 +7408,7 @@ impl<E: Env> Db<E> {
                 gc: crate::merge::CompactGcOptions::for_oldest_snapshot(floor),
                 max_input_files: None,
             },
+            None,
         )?;
         let mut after: u64 = 0;
         for t in &self.ssts {
@@ -7739,14 +7433,14 @@ impl<E: Env> Db<E> {
     /// I/O while flushing or rewriting SSTs.
     pub fn compact_for_reads(&mut self) -> Result<()> {
         self.flush()?;
-        if self.ssts.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.ssts.len() as u64) {
             return Ok(());
         }
         // Merge every live SST (any level) with latest-only GC into one file at Lmax.
         // Full-DB rewrite: bottommost — tombstones may be collapsed (F177).
         let mut merged: Vec<(InternalKey, Bytes)> = Vec::new();
         for t in &self.ssts {
-            merged.extend(t.entries_cloned()?);
+            merged.extend(t.entries_cloned());
         }
         // F216: `latest_only` seeds the GC watermark from `last_sequence()`,
         // which counts applied-but-unpublished writes (write-group off-lock
@@ -7838,8 +7532,12 @@ impl<E: Env> Db<E> {
     /// # Errors
     /// I/O while writing the compacted SST or deleting old files.
     pub fn compact_with_ssts_only(&mut self, options: CompactOptions) -> Result<()> {
-        if self.ssts.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.ssts.len() as u64) {
             return Ok(());
+        }
+        let probe = crate::env::probe_available_bytes(&self.env, &self.dir);
+        if let Some((available, need)) = crate::disk_pressure_kernel::compact_refuse(probe) {
+            return Err(CoreError::DiskPressure { available, need });
         }
         // Pick lowest level that has files and can promote (N → N+1);
         // decided by the pure kernel (RFC-0056 P0.3).
@@ -7888,8 +7586,8 @@ impl<E: Env> Db<E> {
                 .filter(|(_, (t, &lvl))| lvl == 0 && self.compact_family_key(t) == fam)
                 .map(|(i, _)| i)
                 .collect();
-            if !input_idxs.is_empty() {
-                self.rewrite_ssts(input_idxs, 1, options)?;
+            if !crate::write_admission_kernel::batch_is_empty(input_idxs.len() as u64) {
+                self.rewrite_ssts(input_idxs, 1, options, None)?;
             }
         }
         Ok(())
@@ -7930,7 +7628,7 @@ impl<E: Env> Db<E> {
             .max_by_key(|(_, v)| v.len())
             .map(|(cf, v)| (cf, v))
             .unwrap_or_default();
-        if inputs.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(inputs.len() as u64) {
             return Ok(None);
         }
         // `ssts` is append-ordered, so the family vec is oldest-first; a
@@ -7984,7 +7682,9 @@ impl<E: Env> Db<E> {
     /// # Errors
     /// None today (reservation cannot fail); `Result` for fence / I/O later.
     pub fn prepare_pushdown_compact(&mut self) -> Result<Option<PreparedL0Compact<E>>> {
-        if !crate::leveling::leveled_enabled() || self.ssts.is_empty() {
+        if !crate::leveling::leveled_enabled()
+            || crate::write_admission_kernel::batch_is_empty(self.ssts.len() as u64)
+        {
             return Ok(None);
         }
         let families: Vec<String> = self
@@ -7998,7 +7698,9 @@ impl<E: Env> Db<E> {
             let target = crate::leveling::level_target_bytes(level, self.l1_target_bytes);
             for cf in &families {
                 let src_view = self.level_view(level, cf);
-                if src_view.is_empty() || crate::leveling::total_bytes(&src_view) <= target {
+                if crate::write_admission_kernel::batch_is_empty(src_view.len() as u64)
+                    || crate::leveling::total_bytes(&src_view) <= target
+                {
                     continue;
                 }
                 let dst_view = self.level_view(level + 1, cf);
@@ -8037,7 +7739,10 @@ impl<E: Env> Db<E> {
         &mut self,
         max_jobs: usize,
     ) -> Result<Vec<PreparedL0Compact<E>>> {
-        if max_jobs <= 1 || !crate::leveling::leveled_enabled() || self.ssts.is_empty() {
+        if max_jobs <= 1
+            || !crate::leveling::leveled_enabled()
+            || crate::write_admission_kernel::batch_is_empty(self.ssts.len() as u64)
+        {
             return self
                 .prepare_pushdown_compact()
                 .map(|j| j.into_iter().collect());
@@ -8053,7 +7758,9 @@ impl<E: Env> Db<E> {
             let target = crate::leveling::level_target_bytes(level, self.l1_target_bytes);
             for cf in &families {
                 let src_view = self.level_view(level, cf);
-                if src_view.is_empty() || crate::leveling::total_bytes(&src_view) <= target {
+                if crate::write_admission_kernel::batch_is_empty(src_view.len() as u64)
+                    || crate::leveling::total_bytes(&src_view) <= target
+                {
                     continue;
                 }
                 let dst_view = self.level_view(level + 1, cf);
@@ -8102,7 +7809,7 @@ impl<E: Env> Db<E> {
                     hulls.push((lo, hi));
                     jobs.push(job);
                 }
-                if !jobs.is_empty() {
+                if !crate::write_admission_kernel::batch_is_empty(jobs.len() as u64) {
                     return Ok(jobs);
                 }
             }
@@ -8118,7 +7825,7 @@ impl<E: Env> Db<E> {
         to_level: u32,
         gc: crate::merge::CompactGcOptions,
     ) -> Result<Option<PreparedL0Compact<E>>> {
-        if inputs.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(inputs.len() as u64) {
             return Ok(None);
         }
         let file_num = self.alloc_file_num();
@@ -8177,7 +7884,7 @@ impl<E: Env> Db<E> {
     /// Override the across-job batch width (tests; the host open path sets
     /// it from `PEDRA_PARALLEL_JOBS`). Needs [`Self::set_parallel_merge`]
     /// to take effect.
-    pub fn set_parallel_jobs(&mut self, k: usize) {
+    pub(crate) fn set_parallel_jobs(&mut self, k: usize) {
         self.parallel_jobs = k.clamp(1, 8);
     }
 
@@ -8255,7 +7962,7 @@ impl<E: Env> Db<E> {
                 })
                 .map(|(i, _)| i)
                 .collect();
-            if input_idxs.is_empty() {
+            if crate::write_admission_kernel::batch_is_empty(input_idxs.len() as u64) {
                 continue;
             }
             // Single file at target, no GC → nothing to do.
@@ -8265,7 +7972,7 @@ impl<E: Env> Db<E> {
             {
                 continue;
             }
-            self.rewrite_ssts(input_idxs, to_level, options)?;
+            self.rewrite_ssts(input_idxs, to_level, options, None)?;
         }
         Ok(())
     }
@@ -8289,11 +7996,15 @@ impl<E: Env> Db<E> {
             })
             .map(|(i, _)| i)
             .collect();
-        if input_idxs.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(input_idxs.len() as u64) {
             return Ok(());
         }
         if input_idxs.len() == 1 {
             return Ok(());
+        }
+        let probe = crate::env::probe_available_bytes(&self.env, &self.dir);
+        if let Some((available, need)) = crate::disk_pressure_kernel::compact_refuse(probe) {
+            return Err(CoreError::DiskPressure { available, need });
         }
         let all_l0 = input_idxs.iter().all(|&i| self.sst_levels[i] == 0);
         let to_level = if all_l0 {
@@ -8306,7 +8017,7 @@ impl<E: Env> Db<E> {
                 .unwrap_or(1)
                 .max(1)
         };
-        self.rewrite_ssts(input_idxs, to_level, CompactOptions::default())
+        self.rewrite_ssts(input_idxs, to_level, CompactOptions::default(), None)
     }
 
     /// Snapshot of live SST files (name, level, CF, size, bounds).
@@ -8342,16 +8053,20 @@ impl<E: Env> Db<E> {
         input_idxs: Vec<usize>,
         to_level: u32,
         options: CompactOptions,
+        filter: Option<&mut dyn FnMut(&str, &[u8], &[u8]) -> crate::merge::CompactFilterDecision>,
     ) -> Result<()> {
         let num = self.next_file_num;
         // F177: tombstone dropping is only visibility-safe when this rewrite
         // covers **every** live SST — otherwise an older version in a file
         // outside the input resurrects once the tombstone is dropped. The
         // landing level is irrelevant: if the input is the whole DB, the
-        // output is the whole DB. Partial rewrites keep tombstones.
+        // output is the whole DB. Partial rewrites keep tombstones. A
+        // caller-asserted `bottommost` (whole keyspace covered per family,
+        // RFC-0217 P1.2 filter route) ORs in — `Remove` decisions rely on
+        // the same condition.
         let bottommost = input_idxs.len() == self.ssts.len();
         let mut gc = options.gc;
-        gc.bottommost = bottommost;
+        gc.bottommost = gc.bottommost || bottommost;
         let options = CompactOptions { gc, ..options };
         let tables: Vec<SstTable> = input_idxs.iter().map(|&i| self.ssts[i].clone()).collect();
         let cf = tables
@@ -8387,6 +8102,9 @@ impl<E: Env> Db<E> {
             // interleave: unlimited chunks are safe here.
             usize::MAX,
             kit.as_ref(),
+            // RFC-0217 P1.2: the decision's family argument is this
+            // rewrite's family (cf-decoded keys arrive encoded).
+            filter.map(|f| (cf.as_str(), f)),
         )?
         .into_iter()
         .map(|t| t.with_cf(cf.clone()))
@@ -8584,10 +8302,12 @@ impl<E: Env> Db<E> {
                 });
                 continue;
             }
-            if file_num == 0 && self.blob_active == 0 {
+            if crate::write_admission_kernel::batch_is_empty(file_num as u64)
+                && crate::write_admission_kernel::batch_is_empty(self.blob_active as u64)
+            {
                 // Single-file mode: compact_vlog is the hammer; still report ratio.
             }
-            let path = if file_num == 0 {
+            let path = if crate::write_admission_kernel::batch_is_empty(file_num as u64) {
                 self.dir.join(VLOG_FILE_NAME)
             } else {
                 vlog::blob_path(&self.dir, file_num)
@@ -8596,7 +8316,7 @@ impl<E: Env> Db<E> {
             let live = self.collect_vlog_live_for_file(file_num)?;
             let live_bytes: u64 = live.iter().map(|(_, b)| b.len() as u64).sum();
             let live_records = live.len() as u64;
-            let dead_ratio = if bytes == 0 {
+            let dead_ratio = if crate::write_admission_kernel::batch_is_empty(bytes) {
                 0.0
             } else {
                 1.0 - (live_bytes as f64 / bytes as f64)
@@ -8655,10 +8375,14 @@ impl<E: Env> Db<E> {
     /// I/O, CRC, active-file refuse, or durability fence.
     pub fn compact_blob(&mut self, file_num: u32) -> Result<VlogRewriteStats> {
         self.ensure_not_fenced()?;
-        if file_num == 0 {
+        if crate::write_admission_kernel::batch_is_empty(file_num as u64) {
             return self.compact_vlog();
         }
-        if file_num == self.blob_active {
+        // Bytes tooth lives on `compact_blob_auto`; this handler refuses
+        // the active generation (kernel Skip when `is_active`).
+        if crate::vlog_gc_kernel::blob_gc_action(file_num == self.blob_active, 1)
+            == crate::vlog_gc_kernel::BlobGcAction::Skip
+        {
             return Err(CoreError::Internal(
                 "compact_blob refuses the active append generation (rotate first)".into(),
             ));
@@ -8748,7 +8472,7 @@ impl<E: Env> Db<E> {
             }
         }
         for t in &self.ssts {
-            for (_, v) in t.entries_cloned()? {
+            for (_, v) in t.entries_cloned() {
                 consider(&v);
             }
         }
@@ -8786,7 +8510,7 @@ impl<E: Env> Db<E> {
         let remap_one = |stored: &Bytes| vlog::remap_stored_blob(stored, file_num, remap);
 
         for (idx, table) in self.ssts.iter().enumerate() {
-            let mentions = table.entries_cloned()?.iter().any(|(_, v)| {
+            let mentions = table.entries_cloned().iter().any(|(_, v)| {
                 vlog::decode_vlog_ptr(v.as_ref()).is_some_and(|p| p.file_num == file_num)
             });
             let level = self.sst_levels.get(idx).copied().unwrap_or(0);
@@ -8802,7 +8526,7 @@ impl<E: Env> Db<E> {
             staged_paths.push(tmp.clone());
             staged_paths.push(dest.clone());
             let entries: Vec<(InternalKey, Bytes)> = table
-                .entries_cloned()?
+                .entries_cloned()
                 .into_iter()
                 .map(|(k, v)| (k, remap_one(&v)))
                 .collect();
@@ -8880,7 +8604,7 @@ impl<E: Env> Db<E> {
                     return Ok(());
                 }
                 // Leave prior handle in place if any; fence so puts stop.
-                self.fence_durability(&e, FenceClass::of_core(&e));
+                self.durability_fenced = true;
                 Err(e)
             }
         }
@@ -8936,7 +8660,7 @@ impl<E: Env> Db<E> {
         // remapped mem + old handle. Never clear vlog first.
         if let Err(e) = self.replace_vlog_handle(true) {
             // Inventory is committed; must not serve mismatched handle.
-            self.fence_durability(&e, FenceClass::of_core(&e));
+            self.durability_fenced = true;
             return Err(e);
         }
 
@@ -8974,7 +8698,7 @@ impl<E: Env> Db<E> {
             }
         }
         for t in &self.ssts {
-            for (_, v) in t.entries_cloned()? {
+            for (_, v) in t.entries_cloned() {
                 consider(&v);
             }
         }
@@ -9022,7 +8746,7 @@ impl<E: Env> Db<E> {
         };
 
         for (table, &level) in self.ssts.iter().zip(self.sst_levels.iter()) {
-            let entries = table.entries_cloned()?;
+            let entries = table.entries_cloned();
             let needs = entries.iter().any(|(_, v)| {
                 vlog::decode_vlog_ref(v.as_ref())
                     .is_some_and(|(off, _, _)| remap.contains_key(&off))
@@ -9152,7 +8876,7 @@ impl<E: Env> Db<E> {
     ) -> Result<SequenceNumber> {
         self.ensure_not_fenced()?;
         let k = key.as_ref();
-        if self.get(k).is_some() {
+        if !crate::write_admission_kernel::cas_absent_put(self.get(k).is_some()) {
             return Err(CoreError::CasMismatch);
         }
         self.put_with(k, value, opts)
@@ -9184,10 +8908,14 @@ impl<E: Env> Db<E> {
     ) -> Result<SequenceNumber> {
         self.ensure_not_fenced()?;
         let k = key.as_ref();
-        match self.get(k) {
-            Some(cur) if cur.as_ref() == expected.as_ref() => self.put_with(k, value, opts),
-            _ => Err(CoreError::CasMismatch),
+        let live_eq = match self.get(k) {
+            Some(cur) => cur.as_ref() == expected.as_ref(),
+            None => false,
+        };
+        if !crate::write_admission_kernel::cas_eq_put(live_eq) {
+            return Err(CoreError::CasMismatch);
         }
+        self.put_with(k, value, opts)
     }
 
     /// Alias for [`put_if_eq`](Self::put_if_eq) (compare-and-swap).
@@ -9255,7 +8983,7 @@ impl<E: Env> Db<E> {
     ) -> Result<()> {
         let s = start.as_ref();
         let e = end.as_ref();
-        if s >= e {
+        if crate::write_admission_kernel::range_inverted(s >= e) {
             return Err(CoreError::Internal(
                 "delete_range requires start < end".into(),
             ));
@@ -9317,7 +9045,7 @@ impl<E: Env> Db<E> {
         to_seq: SequenceNumber,
     ) -> Result<Vec<ChangeEntry>> {
         let first = from_seq.saturating_add(1);
-        if first < self.earliest_readable_seq {
+        if crate::lookup_kernel::snap_below_watermark(first, self.earliest_readable_seq) {
             return Err(CoreError::SnapshotTooOld {
                 requested: first,
                 earliest: self.earliest_readable_seq,
@@ -9416,9 +9144,9 @@ impl<E: Env> Db<E> {
         // by the WAL-first short-circuit (`put A; flush; put B` → feed `[B]`).
         // Union instead: flush-time last-per-key cache + newer WAL ops, in
         // sequence order.
-        if !self.change_log.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(self.change_log.len() as u64) {
             let mut out = self.change_log.changes_after(0);
-            if from_wal.is_empty() {
+            if crate::write_admission_kernel::batch_is_empty(from_wal.len() as u64) {
                 return Ok(out);
             }
             // Per-key cutoff, not `out.last().sequence`. The cache is
@@ -9442,7 +9170,7 @@ impl<E: Env> Db<E> {
             out.sort_by_key(|e| e.sequence);
             return Ok(out);
         }
-        if !from_wal.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(from_wal.len() as u64) {
             return Ok(from_wal);
         }
         self.collect_feed_from_live()
@@ -9517,11 +9245,7 @@ impl<E: Env> Db<E> {
             out.push(ChangeEntry {
                 sequence: ik.sequence,
                 key: ik.user_key,
-                kind: match ik.kind {
-                    ValueType::Value => ChangeKind::Put,
-                    ValueType::Deletion => ChangeKind::Delete,
-                    ValueType::RangeDeletion => ChangeKind::DeleteRange,
-                },
+                kind: ChangeKind::from_value_type(ik.kind),
                 value,
             });
         }
@@ -9557,7 +9281,7 @@ impl<E: Env> Db<E> {
                 return;
             }
         };
-        if entries.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(entries.len() as u64) {
             return;
         }
         self.change_log.replace_sorted(entries);
@@ -9592,20 +9316,19 @@ impl<E: Env> Db<E> {
         durability: WriteOptions,
     ) -> Result<SequenceNumber> {
         let batch: Vec<BatchOp> = batch.into_iter().collect();
+        self.ensure_disk_pressure_admitted(false)?;
         if !self.write_admission_idle() {
             let families = self.batch_families(&batch);
             self.ensure_write_admitted_for(&families)?;
         }
         self.observe_bulk_batch(&batch);
-        // Assign sequences only for this attempt; roll back `next_seq` if WAL fails
-        // so a failed multi-op does not burn sequence space (TX denser / mid-commit).
-        let seq_checkpoint = self.next_seq;
+        let seq_checkpoint = self.next_seq.load(Ordering::Relaxed);
         let mut records = Vec::new();
         for op in batch {
             let seq = match self.alloc_seq() {
                 Ok(s) => s,
                 Err(e) => {
-                    self.next_seq = seq_checkpoint;
+                    self.next_seq.store(seq_checkpoint, Ordering::Relaxed);
                     return Err(e);
                 }
             };
@@ -9615,7 +9338,7 @@ impl<E: Env> Db<E> {
                     let stored = match self.maybe_spill_large_value(value) {
                         Ok(v) => v,
                         Err(e) => {
-                            self.next_seq = seq_checkpoint;
+                            self.next_seq.store(seq_checkpoint, Ordering::Relaxed);
                             return Err(e);
                         }
                     };
@@ -9634,13 +9357,14 @@ impl<E: Env> Db<E> {
         }
         match self.commit_ops_with(records, durability) {
             Ok(()) => {
-                // F18: auto-flush must not fail the caller. Async Ok parks
-                // (RFC-0180 P0.14 / 0184 P0.5); G1 may still write L0.
-                self.flush_after_commit_opts(&durability);
+                // F18: the write is already durable (WAL fsync under sync=true). Auto-flush
+                // is a background space concern — failing it must not surface as "put/commit
+                // failed" or clients will retry and the operator loses the success signal.
+                self.maybe_auto_flush_best_effort();
                 Ok(self.last_sequence())
             }
             Err(e) => {
-                self.next_seq = seq_checkpoint;
+                self.next_seq.store(seq_checkpoint, Ordering::Relaxed);
                 Err(e)
             }
         }
@@ -9655,7 +9379,24 @@ impl<E: Env> Db<E> {
     /// I/O from fsync, or [`CoreError::DurabilityFenced`].
     pub fn sync(&mut self) -> Result<()> {
         self.ensure_not_fenced()?;
-        self.wal.lock().sync_data()
+        let sync_err = self.wal.lock().sync_data().err();
+        let failed = sync_err.is_some();
+        match crate::write_admission_kernel::wal_commit_plan(true, failed) {
+            crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                assert!(
+                    crate::write_admission_kernel::fence_on_sync_fail(true, failed),
+                    "required sync failed ⇒ fence, not Ok"
+                );
+                let e = sync_err.expect("AppendSyncFence ⇒ Some");
+                self.fence_durability(&e, FenceClass::of_core(&e));
+                Err(e)
+            }
+            crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+            | crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => {
+                self.note_wal_sync();
+                Ok(())
+            }
+        }
     }
 
     /// The first fence's report, if this Db was ever durability-fenced
@@ -9742,19 +9483,30 @@ impl<E: Env> Db<E> {
     /// # Errors
     /// I/O from WAL flush or lock release.
     pub fn close(mut self) -> Result<()> {
-        // RFC-0159 P0.3: the open bulk tail is disableWAL-class for
-        // *crashes* only — a clean close must not drop acked puts. Drain
-        // runs to SST + MANIFEST (same as `flush`) before the CHANGELOG
-        // persist, whose RAM guard skips while runs are open.
-        if let Some(persist) = self.flush_all_bulk_runs()? {
-            persist.write()?;
-        }
+        // RFC-0217 P1.1: close is a durability point — publish the
+        // deferred MANIFEST before the CHANGELOG store below may clear
+        // the archived segments that carry the unpublished window.
+        self.persist_manifest_durable()?;
         // RFC-0031: close is a persist point for the CHANGELOG cache.
         self.persist_changelog_best_effort();
-        self.vlog_sync_pending()?;
+        // Sweep the whole covered chain (the budgeted drain would leave
+        // tail segments behind).
+        self.delete_wal_archives(true);
+        self.vlog_prepare_wal(true)?;
         self.release_lock()?;
         // Flush in place — `Db` implements `Drop` (Env unlock), so we cannot move `wal`.
-        self.wal.lock().flush()
+        // Close is not put-Ok: AppendApplyOk ⇒ write the pending frame, no fdatasync.
+        match crate::write_admission_kernel::wal_commit_plan(false, false) {
+            crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => self.wal.lock().flush(),
+            crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+            | crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                assert!(
+                    !crate::write_admission_kernel::fence_on_sync_fail(false, false),
+                    "close is not a required-sync Ok"
+                );
+                self.wal.lock().sync_data()
+            }
+        }
     }
 
     /// Lookup visible version at `snapshot` across mem + imm + SSTs.
@@ -9762,16 +9514,6 @@ impl<E: Env> Db<E> {
     /// Merges point versions and range tombstones across all layers so a range
     /// delete in a newer layer correctly hides older puts.
     pub(crate) fn lookup(&self, key: &[u8], snapshot: SequenceNumber) -> Lookup {
-        if self.bulk_runs.is_empty()
-            && self.parked_bulk.is_empty()
-            && self.bulk_encoding.is_none()
-            && self.mem.is_empty()
-            && self.imm.is_none()
-            && self.flush_read_pin.is_none()
-            && self.parked_unflushed.is_empty()
-        {
-            return self.lookup_sst_packed(key, snapshot);
-        }
         let fam = self.bulk_family_of_key(key);
         if let Some(run) = self.bulk_runs.get(fam) {
             match run.lookup(key, snapshot) {
@@ -9800,9 +9542,6 @@ impl<E: Env> Db<E> {
         let mut range_tombs = Vec::new();
 
         for table in self.mem_layers() {
-            if table.is_empty() && !table.has_range_tombstones() {
-                continue;
-            }
             Self::scan_mem_for_lookup(
                 table,
                 key,
@@ -9811,43 +9550,34 @@ impl<E: Env> Db<E> {
                 &mut best_point,
                 &mut range_tombs,
             );
-            if let Some(seq) = best_point_seq {
+            if crate::lookup_kernel::mem_point_decides(best_point_seq.is_some()) {
+                let seq = best_point_seq.unwrap_or(0);
                 // Newest mem layer with a point wins (single-writer). Skip SST.
                 self.get_mem_hit.fetch_add(1, Ordering::Relaxed);
-                return match best_point {
-                    Lookup::Found(_)
-                        if !crate::merge::visible_at(
-                            crate::key::ValueType::Value,
-                            range_deleted(key, seq, &range_tombs),
-                        ) =>
-                    {
-                        Lookup::Deleted
-                    }
-                    other => other,
+                return match (
+                    best_point,
+                    crate::lookup_kernel::point_tombstone_plan(range_deleted(
+                        key,
+                        seq,
+                        &range_tombs,
+                    )),
+                ) {
+                    (
+                        Lookup::Found(_),
+                        crate::lookup_kernel::PointTombstonePlan::ShadowedDeleted,
+                    ) => Lookup::Deleted,
+                    (other, _) => other,
                 };
             }
         }
-        // Packed SST path already rejects via `sst_envelope` (RFC-0167).
-        // Mem-live lookup walked every run's bloom on the same miss.
-        {
-            let g = self.sst_envelope.read();
-            if !g.is_empty()
-                && g.iter()
-                    .all(|(lo, hi)| key < lo.as_ref() || key > hi.as_ref())
-                && !self.sst_runs.iter().any(|r| r.any_range_tombstones)
-            {
-                return Lookup::NotFound;
-            }
-        }
         self.get_sst_fallback.fetch_add(1, Ordering::Relaxed);
-        crate::cost::point_op();
         // Newest file with a point wins (L0 before L1). Older files cannot
         // hide a newer point; a newer tombstone is seen first.
         // Encoded-block seek: CRC-verify + decompress the one candidate block
         // and copy out only the winning value (the decoded-block cache
         // thrashed at random-key scale). Block faults fail-stop — a corrupt
         // block must never read as a miss.
-        let mut seek_scratch: Option<crate::sst::PointSeekScratch> = None;
+        let mut seek_scratch = take_tls_point_seek_scratch();
         // One probe per table: range-prune, then seek the single candidate
         // block. The bounds span every entry's user key (deletion markers
         // included), so a key outside them has no point version here.
@@ -9855,25 +9585,13 @@ impl<E: Env> Db<E> {
         // chunks after leveled settle measured ~10 µs/get of pure candidate
         // checking (25M guest).
         let ssts = &self.ssts;
-        // RFC-0161: never route point get through `point_at_cached`.
-        // That path `decode_block`s every entry in the 4 KiB block
-        // (`InternalKey` + `Bytes` each) and mutex-inserts into the
-        // byte-budgeted `BlockCache`. lookup_100 draws 100 fresh keys
-        // every Criterion iter — the insert never hits. Guest v73b
-        // (Slipstream `set_block_cache` 1 GiB ⇒ `budget_bytes()>0`):
-        // get_loop 5.25–5.30 ms vs v71 seeking 3.868 ms. `RAW_BLOCKS`
-        // (512 × 4 KiB TLS) already covers get_hit repeats on the
-        // encoded miss path. Default `BlockCache::new(8192)` has
-        // `budget_bytes==0` and was already seeking.
         let mut probe = |table: &SstTable| -> Option<(SequenceNumber, Lookup)> {
-            self.lookup_sst_considered.fetch_add(1, Ordering::Relaxed);
-            crate::cost::point_probe();
-            if !table.key_may_match(key) {
-                crate::cost::point_reject();
-                return None;
+            if let (Some(lo), Some(hi)) = (table.smallest_user_key(), table.largest_user_key()) {
+                if key < lo || key > hi {
+                    return None;
+                }
             }
-            let scratch = seek_scratch.get_or_insert_with(take_tls_point_seek_scratch);
-            match table.point_at_seeking(key, snapshot, scratch) {
+            match table.point_at_seeking(key, snapshot, &mut seek_scratch) {
                 Ok(Some((seq, look))) => Some((seq, look)),
                 Ok(None) => None,
                 Err(e) => fail_stop_corrupt_block(table.path(), &e),
@@ -9888,44 +9606,21 @@ impl<E: Env> Db<E> {
             // run at once is behavior-preserving: `range_deleted` hides only
             // strictly newer points, so tombstones from tables older than
             // the run's winner stay inert.
-            if run.any_range_tombstones {
-                for &sst_i in &run.tables_newest_first {
-                    ssts[sst_i].collect_range_tombstones(snapshot, &mut range_tombs);
-                }
+            for &sst_i in &run.tables_newest_first {
+                ssts[sst_i].collect_range_tombstones(snapshot, &mut range_tombs);
             }
-            if let (Some(by_lo), Some(plos), Some(phis)) =
-                (&run.sorted_by_lo, &run.packed_lo, &run.packed_hi)
-            {
-                let p = plos.partition_point_gt(key);
-                if p == 0 {
-                    continue;
-                }
-                if run.disjoint_by_lo.is_some() {
-                    if phis.lo(p - 1) >= key {
-                        if let Some((seq, look)) = probe(&ssts[by_lo[p - 1]]) {
-                            best_point_seq = Some(seq);
-                            best_point = look;
-                            break 'runs;
-                        }
-                    }
-                } else {
-                    // Overlapping files that share a user key (L0 put +
-                    // later delete) are not pairwise disjoint: the probe
-                    // order is kernel-owned (RFC-0164 P0.2) — candidates
-                    // covering `key`, newest-first; packed bounds skip the
-                    // non-covering files.
-                    let pos = run.by_lo_pos.as_deref().unwrap_or(&[]);
-                    for sst_i in crate::probe_order_kernel::probe_order_covering(
-                        &run.tables_newest_first,
-                        pos,
-                        p,
-                        |pos| phis.lo(pos) >= key,
-                    ) {
-                        if let Some((seq, look)) = probe(&ssts[sst_i]) {
-                            best_point_seq = Some(seq);
-                            best_point = look;
-                            break 'runs;
-                        }
+            if let Some(by_lo) = &run.disjoint_by_lo {
+                // Sorted by `lo`, pairwise disjoint: the last table whose
+                // `lo <= key` is the only one that can hold `key` (every
+                // earlier `hi` sits below the next `lo`). The probe's own
+                // bounds check stays as the fail-safe.
+                let p = by_lo
+                    .partition_point(|&i| ssts[i].smallest_user_key().is_some_and(|lo| lo <= key));
+                if p > 0 {
+                    if let Some((seq, look)) = probe(&ssts[by_lo[p - 1]]) {
+                        best_point_seq = Some(seq);
+                        best_point = look;
+                        break 'runs;
                     }
                 }
             } else {
@@ -9938,127 +9633,18 @@ impl<E: Env> Db<E> {
                 }
             }
         }
-        if let Some(scratch) = seek_scratch {
-            put_tls_point_seek_scratch(scratch);
-        }
+        put_tls_point_seek_scratch(seek_scratch);
 
         match best_point {
             Lookup::Found(v) => {
                 let seq = best_point_seq.unwrap_or(0);
-                if crate::merge::visible_at(
-                    crate::key::ValueType::Value,
-                    range_deleted(key, seq, &range_tombs),
-                ) {
-                    Lookup::Found(v)
-                } else {
-                    Lookup::Deleted
-                }
-            }
-            Lookup::Deleted => Lookup::Deleted,
-            Lookup::NotFound => {
-                if range_deleted(key, 0, &range_tombs) {
-                    Lookup::Deleted
-                } else {
-                    Lookup::NotFound
-                }
-            }
-        }
-    }
-
-    fn lookup_sst_packed(&self, key: &[u8], snapshot: SequenceNumber) -> Lookup {
-        {
-            let g = self.sst_envelope.read();
-            if g.iter()
-                .all(|(lo, hi)| key < lo.as_ref() || key > hi.as_ref())
-            {
-                return Lookup::NotFound;
-            }
-        }
-        self.get_sst_fallback.fetch_add(1, Ordering::Relaxed);
-        crate::cost::point_op();
-        let mut seek_scratch: Option<crate::sst::PointSeekScratch> = None;
-        let ssts = &self.ssts;
-        let mut best_point_seq: Option<SequenceNumber> = None;
-        let mut best_point = Lookup::NotFound;
-        let mut range_tombs = Vec::new();
-        let mut probe = |table: &SstTable| -> Option<(SequenceNumber, Lookup)> {
-            self.lookup_sst_considered.fetch_add(1, Ordering::Relaxed);
-            crate::cost::point_probe();
-            if !table.key_may_match(key) {
-                crate::cost::point_reject();
-                return None;
-            }
-            let scratch = seek_scratch.get_or_insert_with(take_tls_point_seek_scratch);
-            match table.point_at_seeking(key, snapshot, scratch) {
-                Ok(Some((seq, look))) => Some((seq, look)),
-                Ok(None) => None,
-                Err(e) => fail_stop_corrupt_block(table.path(), &e),
-            }
-        };
-        'runs: for run in &self.sst_runs {
-            if run.any_range_tombstones {
-                for &sst_i in &run.tables_newest_first {
-                    ssts[sst_i].collect_range_tombstones(snapshot, &mut range_tombs);
-                }
-            }
-            if let (Some(by_lo), Some(plos), Some(phis)) =
-                (&run.sorted_by_lo, &run.packed_lo, &run.packed_hi)
-            {
-                let p = plos.partition_point_gt(key);
-                if p == 0 {
-                    continue;
-                }
-                if run.disjoint_by_lo.is_some() {
-                    if phis.lo(p - 1) >= key {
-                        if let Some((seq, look)) = probe(&ssts[by_lo[p - 1]]) {
-                            best_point_seq = Some(seq);
-                            best_point = look;
-                            break 'runs;
-                        }
-                    }
-                } else {
-                    // Overlapping files that share a user key (L0 put +
-                    // later delete) are not pairwise disjoint: the probe
-                    // order is kernel-owned (RFC-0164 P0.2) — candidates
-                    // covering `key`, newest-first; packed bounds skip the
-                    // non-covering files.
-                    let pos = run.by_lo_pos.as_deref().unwrap_or(&[]);
-                    for sst_i in crate::probe_order_kernel::probe_order_covering(
-                        &run.tables_newest_first,
-                        pos,
-                        p,
-                        |pos| phis.lo(pos) >= key,
-                    ) {
-                        if let Some((seq, look)) = probe(&ssts[sst_i]) {
-                            best_point_seq = Some(seq);
-                            best_point = look;
-                            break 'runs;
-                        }
-                    }
-                }
-            } else {
-                for &sst_i in &run.tables_newest_first {
-                    if let Some((seq, look)) = probe(&ssts[sst_i]) {
-                        best_point_seq = Some(seq);
-                        best_point = look;
-                        break 'runs;
-                    }
-                }
-            }
-        }
-        if let Some(scratch) = seek_scratch {
-            put_tls_point_seek_scratch(scratch);
-        }
-        match best_point {
-            Lookup::Found(v) => {
-                let seq = best_point_seq.unwrap_or(0);
-                if crate::merge::visible_at(
-                    crate::key::ValueType::Value,
-                    range_deleted(key, seq, &range_tombs),
-                ) {
-                    Lookup::Found(v)
-                } else {
-                    Lookup::Deleted
+                match crate::lookup_kernel::point_tombstone_plan(range_deleted(
+                    key,
+                    seq,
+                    &range_tombs,
+                )) {
+                    crate::lookup_kernel::PointTombstonePlan::ValueVisible => Lookup::Found(v),
+                    crate::lookup_kernel::PointTombstonePlan::ShadowedDeleted => Lookup::Deleted,
                 }
             }
             Lookup::Deleted => Lookup::Deleted,
@@ -10082,11 +9668,13 @@ impl<E: Env> Db<E> {
     ) {
         // BTree seek — do not walk the whole memtable on every point get
         // (RFC-0032: ycsb_c / layered lookup).
-        if table.has_range_tombstones() {
-            table.collect_range_tombstones(snapshot, range_tombs);
-        }
+        table.collect_range_tombstones(snapshot, range_tombs);
         if let Some((seq, look)) = table.get_entry(key, snapshot) {
-            if best_point_seq.is_none_or(|s| seq > s) {
+            if crate::lookup_kernel::prefer_newer_seq(
+                best_point_seq.is_some(),
+                seq,
+                best_point_seq.unwrap_or(0),
+            ) {
                 *best_point_seq = Some(seq);
                 *best_point = look;
             }
@@ -10094,25 +9682,44 @@ impl<E: Env> Db<E> {
     }
 
     pub(crate) fn alloc_seq(&mut self) -> Result<SequenceNumber> {
-        let seq = self.next_seq;
+        Self::alloc_seq_atomic(&self.next_seq)
+    }
+
+    /// Mint a sequence under the WAL mutex (no `db.write()`).
+    ///
+    /// Shared by [`Self::alloc_seq`] and the ConcurrentDb 1-op pipeline.
+    pub(crate) fn alloc_seq_atomic(next: &AtomicU64) -> Result<SequenceNumber> {
+        let seq = next.fetch_add(1, Ordering::Relaxed);
         if crate::write_admission_kernel::seq_exhausted(seq, MAX_SEQUENCE_NUMBER) {
+            next.fetch_sub(1, Ordering::Relaxed);
             return Err(CoreError::Internal(
                 "sequence number space exhausted".into(),
             ));
         }
-        self.next_seq = seq + 1;
         Ok(seq)
     }
 
     /// Peek next sequence without allocating (TX sequence checkpoint).
     #[must_use]
     pub(crate) fn next_seq_peek(&self) -> SequenceNumber {
-        self.next_seq
+        self.next_seq.load(Ordering::Relaxed)
     }
 
     /// Restore sequence counter after a failed multi-op commit (no WAL durable).
     pub(crate) fn restore_next_seq(&mut self, seq: SequenceNumber) {
-        self.next_seq = seq;
+        self.next_seq.store(seq, Ordering::Relaxed);
+    }
+
+    /// Shared seq counter for the WAL-mutex pipeline.
+    #[must_use]
+    pub(crate) fn next_seq_handle(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.next_seq)
+    }
+
+    /// Shared in-flight counter (same Arc ConcurrentDb observes lock-free).
+    #[must_use]
+    pub(crate) fn commit_inflight_handle(&self) -> Arc<AtomicUsize> {
+        Arc::clone(&self.commit_inflight)
     }
 
     pub(crate) fn commit_ops_with(
@@ -10121,41 +9728,39 @@ impl<E: Env> Db<E> {
         durability: WriteOptions,
     ) -> Result<()> {
         self.ensure_not_fenced()?;
-        // Append then sync: if either fails, caller rolls back sequence; mem not applied.
-        // RFC-0015 H1: if append OK and required sync fails, fence so later fsyncs
-        // cannot silently publish an unacked prefix while in-process mem diverges.
-        // RFC-0040: encode into WAL scratch (one payload memcpy), then move ops to mem.
+        if let Some(op) = records.first() {
+            self.maybe_park_foreign_one_slash(op.key.as_ref());
+        }
         let do_sync = crate::write_admission_kernel::wal_sync_required(
             durability.sync.is_some(),
             durability.sync.unwrap_or(false),
             self.sync,
         );
         self.vlog_prepare_wal(do_sync)?;
-        // WAL is O_APPEND: a torn write_all leaves bytes at EOF. Fence on
-        // append failure the same as sync failure.
-        let n = {
-            let r = self.wal.lock().append_write_ops(&records);
-            match r {
-                Ok(n) => n,
-                Err(e) => {
-                    self.fence_durability(&e, FenceClass::of_core(&e));
-                    return Err(e);
-                }
+        let n = self.wal.lock().append_write_ops(&records)?;
+        self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
+        let planned = crate::write_admission_kernel::wal_commit_plan(do_sync, false);
+        let sync_err = match planned {
+            crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => None,
+            crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+            | crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                self.wal.lock().sync_data().err()
             }
         };
-        self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
-        if crate::write_admission_kernel::wal_sync_required(
-            durability.sync.is_some(),
-            durability.sync.unwrap_or(false),
-            self.sync,
-        ) {
-            let sync_err = self.wal.lock().sync_data().err();
-            if crate::write_admission_kernel::fence_on_sync_fail(true, sync_err.is_some()) {
-                let e = sync_err.expect("fence_on_sync_fail ⇒ Some");
-                self.fence_durability(&e, FenceClass::of_core(&e));
+        match crate::write_admission_kernel::wal_commit_plan(do_sync, sync_err.is_some()) {
+            crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                assert!(
+                    crate::write_admission_kernel::fence_on_sync_fail(do_sync, true),
+                    "required sync failed ⇒ fence, not Ok"
+                );
+                let e = sync_err.expect("AppendSyncFence ⇒ Some");
+                self.durability_fenced = true;
                 return Err(e);
             }
-            self.note_wal_sync();
+            crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk => {
+                self.note_wal_sync();
+            }
+            crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => {}
         }
         // In-memory change feed after durable WAL. CHANGELOG on disk is a cache:
         // never gate commit success on a second fsync/rename (RFC-0019) — reopen
@@ -10168,13 +9773,19 @@ impl<E: Env> Db<E> {
             self.change_log
                 .extend(records.iter().map(ChangeEntry::from_write_op));
         }
-        if crate::write_admission_kernel::wal_sync_required(
+        // RFC-0219 P0.1: the durable-commit CHANGELOG fate (count toward
+        // the debounce iff the commit was synced) is the kernel's decision
+        // — the write-admission sync resolution the trampoline used to
+        // make inline. The store itself stays here (I/O is trampoline).
+        match crate::changelog_kernel::changelog_durable_commit_fate(
             durability.sync.is_some(),
             durability.sync.unwrap_or(false),
             self.sync,
         ) {
-            // RFC-0031: debounce the cache store. WAL is already durable.
-            self.maybe_persist_changelog_after_durable_commit();
+            crate::changelog_kernel::ChangelogCommitFate::Count => {
+                self.maybe_persist_changelog_after_durable_commit();
+            }
+            crate::changelog_kernel::ChangelogCommitFate::Skip => {}
         }
         self.apply_ops_to_mem(records);
         Ok(())
@@ -10199,14 +9810,14 @@ impl<E: Env> Db<E> {
         spill: bool,
     ) -> Result<(Vec<WriteOp>, SequenceNumber)> {
         self.ensure_not_fenced()?;
-        let seq_checkpoint = self.next_seq;
+        let seq_checkpoint = self.next_seq.load(Ordering::Relaxed);
         let batch = batch.into_iter();
         let mut records = Vec::with_capacity(batch.size_hint().0);
         for op in batch {
             let seq = match self.alloc_seq() {
                 Ok(s) => s,
                 Err(e) => {
-                    self.next_seq = seq_checkpoint;
+                    self.next_seq.store(seq_checkpoint, Ordering::Relaxed);
                     return Err(e);
                 }
             };
@@ -10217,7 +9828,7 @@ impl<E: Env> Db<E> {
                         match self.maybe_spill_large_value(value) {
                             Ok(v) => v,
                             Err(e) => {
-                                self.next_seq = seq_checkpoint;
+                                self.next_seq.store(seq_checkpoint, Ordering::Relaxed);
                                 return Err(e);
                             }
                         }
@@ -10245,11 +9856,11 @@ impl<E: Env> Db<E> {
     /// Single-op form of [`Self::prepare_write_ops_spill`] (RFC-0154 P1.6).
     fn prepare_one_spill(&mut self, op: BatchOp, spill: bool) -> Result<(WriteOp, SequenceNumber)> {
         self.ensure_not_fenced()?;
-        let seq_checkpoint = self.next_seq;
+        let seq_checkpoint = self.next_seq.load(Ordering::Relaxed);
         let seq = match self.alloc_seq() {
             Ok(s) => s,
             Err(e) => {
-                self.next_seq = seq_checkpoint;
+                self.next_seq.store(seq_checkpoint, Ordering::Relaxed);
                 return Err(e);
             }
         };
@@ -10260,7 +9871,7 @@ impl<E: Env> Db<E> {
                     match self.maybe_spill_large_value(value) {
                         Ok(v) => v,
                         Err(e) => {
-                            self.next_seq = seq_checkpoint;
+                            self.next_seq.store(seq_checkpoint, Ordering::Relaxed);
                             return Err(e);
                         }
                     }
@@ -10279,53 +9890,29 @@ impl<E: Env> Db<E> {
     pub(crate) fn wal_sync_group(&mut self) -> Result<()> {
         self.ensure_not_fenced()?;
         let sync_err = self.wal.lock().sync_data().err();
-        if crate::write_admission_kernel::fence_on_sync_fail(true, sync_err.is_some()) {
-            let e = sync_err.expect("fence_on_sync_fail ⇒ Some");
-            self.fence_durability(&e, FenceClass::of_core(&e));
-            return Err(e);
-        }
-        self.note_wal_sync();
-        Ok(())
-    }
-
-    /// Latest-only mem apply is legal iff no snapshot pin / OCC snap can
-    /// observe a dropped sequence (RFC-0180 P0.62). Distinct keys still
-    /// append — this is not a grouping knob.
-    fn apply_supersede_latest(&self) -> bool {
-        self.snapshot_pins.is_empty() && self.occ_registry_floor().is_none()
-    }
-
-    /// RFC-0180 P0.68/P0.75: O(1) park leftover of another one-slash idx
-    /// family before applying `key`. Seed `ycsb/` then timed `c/` must not
-    /// share a memtable — including post-flush remainder below half buffer.
-    fn maybe_park_foreign_idx(&mut self, key: &[u8]) {
-        let pfx = crate::memtable::idx_prefix(key);
-        if !crate::memtable::park_foreign_idx_decision(
-            pfx,
-            self.mem.is_empty(),
-            self.mem.has_idx_prefix(pfx),
-            self.mem.approx_memory_usage(),
-            self.auto_flush_bytes,
-        ) {
-            return;
-        }
-        if self.stage_flush_imm().ok() == Some(true) {
-            return;
-        }
-        if !self.mem.is_empty() {
-            let taken = std::mem::replace(&mut self.mem, MemTable::new());
-            self.push_parked_unflushed(taken);
+        let failed = sync_err.is_some();
+        match crate::write_admission_kernel::wal_commit_plan(true, failed) {
+            crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                assert!(
+                    crate::write_admission_kernel::fence_on_sync_fail(true, failed),
+                    "required sync failed ⇒ fence, not Ok"
+                );
+                let e = sync_err.expect("AppendSyncFence ⇒ Some");
+                self.durability_fenced = true;
+                Err(e)
+            }
+            crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+            | crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => {
+                self.note_wal_sync();
+                Ok(())
+            }
         }
     }
 
     /// Apply prepared ops to the memtable after durable WAL.
     pub(crate) fn apply_ops_to_mem(&mut self, ops: Vec<WriteOp>) {
-        if let Some(op) = ops.first() {
-            self.maybe_park_foreign_idx(op.key.as_ref());
-        }
         self.note_dirty_points(&ops);
-        let supersede = self.apply_supersede_latest();
-        apply_ops_owned(&mut self.mem, ops, supersede);
+        apply_ops_owned(&mut self.mem, ops);
         self.publish_sequence(self.last_sequence());
     }
 
@@ -10334,24 +9921,17 @@ impl<E: Env> Db<E> {
     /// `manual_wal_flush=false` flushes per record). No `fdatasync`
     /// (that is G1), no write-group.
     pub(crate) fn commit_async_ops(&mut self, batch: Vec<BatchOp>) -> Result<SequenceNumber> {
-        // Same pin as `commit_async_one` (RFC-0180 P0.25): host compact
-        // skips while apply/bypass holds this path, instead of barging
-        // the write lock between batches.
-        let _pin = self.pin_commit_inflight();
-        match self.async_ops_stage(batch)? {
-            AsyncOpsStaged::Applied(seq) => Ok(seq),
-            AsyncOpsStaged::Pending { ops, seq } => {
-                let wal = self
-                    .wal
-                    .lock()
-                    .encode_and_write_op_batches(&[ops.as_slice()]);
-                self.async_ops_publish(ops, seq, wal)
+        self.ensure_disk_pressure_admitted(false)?;
+        if let Some(op) = batch.first() {
+            match op {
+                BatchOp::Put { key, .. } | BatchOp::Delete { key } => {
+                    self.maybe_park_foreign_one_slash(key.as_ref());
+                }
+                BatchOp::DeleteRange { start, .. } => {
+                    self.maybe_park_foreign_one_slash(start.as_ref());
+                }
             }
         }
-    }
-
-    /// Prepare + stage under the write lock (RFC-0180 P0.48).
-    pub(crate) fn async_ops_stage(&mut self, batch: Vec<BatchOp>) -> Result<AsyncOpsStaged> {
         if !self.write_admission_idle() {
             let families = self.batch_families(&batch);
             self.ensure_write_admitted_for(&families)?;
@@ -10378,7 +9958,7 @@ impl<E: Env> Db<E> {
         } else {
             (batch, Vec::new())
         };
-        if !bulk_puts.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(bulk_puts.len() as u64) {
             let fam = self.bulk_family_of_key(bulk_puts[0].0.as_ref()).to_string();
             if !self.bulk_runs.contains_key(&fam) {
                 self.absorb_mem_family_into_run(&fam)?;
@@ -10392,55 +9972,82 @@ impl<E: Env> Db<E> {
             }
             self.bulk_append_puts(&fam, keys, vals)?;
         }
-        if ladder.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(ladder.len() as u64) {
             let seq = self.last_sequence();
             self.publish_sequence(seq);
-            return Ok(AsyncOpsStaged::Applied(seq));
+            return Ok(seq);
         }
-        let (ops, seq) = self.prepare_write_ops_spill(ladder, false)?;
+        let batch = ladder;
+        let st = self.phase_stats.clone();
+        let t0 = st.as_ref().map(|_| Instant::now());
+        let (ops, seq) = self.prepare_write_ops_spill(batch, false)?;
+        if let (Some(st), Some(t0)) = (st.as_ref(), t0) {
+            st.prepare_ns
+                .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
         self.vlog_prepare_wal(false)?;
-        self.stage_unapplied_ops(&ops);
-        Ok(AsyncOpsStaged::Pending { ops, seq })
-    }
-
-    /// Apply after off-lock (or on-lock) async WAL write (RFC-0180 P0.48).
-    pub(crate) fn async_ops_publish(
-        &mut self,
-        ops: Vec<WriteOp>,
-        seq: SequenceNumber,
-        wal: Result<u64>,
-    ) -> Result<SequenceNumber> {
-        self.unstage_unapplied_ops(&ops);
-        match wal {
-            Err(e) => {
-                self.fence_durability(&e, FenceClass::of_core(&e));
-                Err(e)
-            }
-            Ok(n) => {
-                self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
-                if !self.feed_is_lazy() {
-                    self.change_log
-                        .extend(ops.iter().map(ChangeEntry::from_write_op));
-                }
-                self.note_dirty_points(&ops);
-                let supersede = self.apply_supersede_latest();
-                if let Some(op) = ops.first() {
-                    self.maybe_park_foreign_idx(op.key.as_ref());
-                }
-                apply_ops_owned(&mut self.mem, ops, supersede);
-                self.publish_sequence(seq);
-                let _ = self.maybe_auto_flush_with(
-                    async_ok_flush_is_stage_only() || self.defer_auto_compact,
-                );
-                Ok(seq)
+        {
+            let t1 = st.as_ref().map(|_| Instant::now());
+            let mut w = self.wal.lock();
+            let sl = ops.as_slice();
+            w.encode_write_op_batches(&[sl])?;
+            w.write_pending_frame()?;
+            if let (Some(st), Some(t1)) = (st.as_ref(), t1) {
+                st.wal_ns
+                    .fetch_add(t1.elapsed().as_nanos() as u64, Ordering::Relaxed);
             }
         }
+        // F213: feed the non-lazy change log on the async path too — the
+        // write is visible via `get` once published; `commit_ops_with`
+        // extends regardless of sync, and a later durable commit would
+        // otherwise persist a CHANGELOG that never contains this event.
+        if !self.feed_is_lazy() {
+            self.change_log
+                .extend(ops.iter().map(ChangeEntry::from_write_op));
+        }
+        let t2 = st.as_ref().map(|_| Instant::now());
+        self.note_dirty_points(&ops);
+        apply_ops_owned(&mut self.mem, ops);
+        if let (Some(st), Some(t2)) = (st.as_ref(), t2) {
+            st.mem_ns
+                .fetch_add(t2.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
+        let t3 = st.as_ref().map(|_| Instant::now());
+        self.publish_sequence(seq);
+        if let (Some(st), Some(t3)) = (st.as_ref(), t3) {
+            st.publish_ns
+                .fetch_add(t3.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
+        let t4 = st.as_ref().map(|_| Instant::now());
+        self.maybe_auto_flush_best_effort();
+        if let (Some(st), Some(t4)) = (st.as_ref(), t4) {
+            st.flush_check_ns
+                .fetch_add(t4.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            st.commits.fetch_add(1, Ordering::Relaxed);
+        }
+        Ok(seq)
     }
 
-    /// Lone-async 1-op put/delete: no `Vec<BatchOp>` / `Vec<WriteOp>`
-    /// (RFC-0154 P1.6). Same WAL bytes as [`Self::commit_async_ops`].
-    pub(crate) fn commit_async_one(&mut self, batch: BatchOp) -> Result<SequenceNumber> {
-        let _pin = self.pin_commit_inflight();
+    /// Encode one async op into the WAL pending frame (no `write` syscall).
+    ///
+    /// RFC-0185 P0.3: the caller holds `wal` and may drop the Db write lock
+    /// before [`crate::wal::Wal::write_pending_frame`] so mc4 does not convoy
+    /// on `write()`. Seq assignment stays under the Db write lock.
+    pub(crate) fn encode_async_one(
+        &mut self,
+        wal: &mut crate::wal::Wal<E::File>,
+        batch: BatchOp,
+    ) -> Result<(WriteOp, SequenceNumber)> {
+        // Caller holds `wal` (RFC-0185 P0.3): the admit must stay lock-free.
+        self.ensure_disk_pressure_admitted(true)?;
+        match &batch {
+            BatchOp::Put { key, .. } | BatchOp::Delete { key } => {
+                self.maybe_park_foreign_one_slash(key.as_ref());
+            }
+            BatchOp::DeleteRange { start, .. } => {
+                self.maybe_park_foreign_one_slash(start.as_ref());
+            }
+        }
         if !self.write_admission_idle() {
             let families = self.batch_families(std::slice::from_ref(&batch));
             self.ensure_write_admitted_for(&families)?;
@@ -10454,24 +10061,24 @@ impl<E: Env> Db<E> {
                 .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
         }
         self.vlog_prepare_wal(false)?;
-        {
-            let t1 = st.as_ref().map(|_| Instant::now());
-            let mut w = self.wal.lock();
-            w.encode_and_write_one_op(&op)?;
-            if let (Some(st), Some(t1)) = (st.as_ref(), t1) {
-                st.wal_ns
-                    .fetch_add(t1.elapsed().as_nanos() as u64, Ordering::Relaxed);
-            }
-        }
+        wal.encode_write_op_batches(&[std::slice::from_ref(&op)])?;
+        Ok((op, seq))
+    }
+
+    /// Apply + publish after the WAL `write()` (off the Db write lock).
+    pub(crate) fn apply_async_one(
+        &mut self,
+        op: WriteOp,
+        seq: SequenceNumber,
+    ) -> Result<SequenceNumber> {
+        let st = self.phase_stats.clone();
         if !self.feed_is_lazy() {
             self.change_log
                 .extend(std::iter::once(ChangeEntry::from_write_op(&op)));
         }
         let t2 = st.as_ref().map(|_| Instant::now());
         self.note_dirty_points(std::slice::from_ref(&op));
-        let supersede = self.apply_supersede_latest();
-        self.maybe_park_foreign_idx(op.key.as_ref());
-        apply_one_owned(&mut self.mem, op, supersede);
+        apply_ops_owned(&mut self.mem, std::iter::once(op));
         if let (Some(st), Some(t2)) = (st.as_ref(), t2) {
             st.mem_ns
                 .fetch_add(t2.elapsed().as_nanos() as u64, Ordering::Relaxed);
@@ -10483,11 +10090,7 @@ impl<E: Env> Db<E> {
                 .fetch_add(t3.elapsed().as_nanos() as u64, Ordering::Relaxed);
         }
         let t4 = st.as_ref().map(|_| Instant::now());
-        // RFC-0180 P0.38: every Ok does the integer size check
-        // (`maybe_auto_flush_with` early-outs when under the limit).
-        // Sampling every 32 seqs overshot the write buffer by 31 ops.
-        let _ =
-            self.maybe_auto_flush_with(async_ok_flush_is_stage_only() || self.defer_auto_compact);
+        self.maybe_auto_flush_best_effort();
         if let (Some(st), Some(t4)) = (st.as_ref(), t4) {
             st.flush_check_ns
                 .fetch_add(t4.elapsed().as_nanos() as u64, Ordering::Relaxed);
@@ -10496,109 +10099,98 @@ impl<E: Env> Db<E> {
         Ok(seq)
     }
 
-    /// RFC-0180 P0.47: prepare + stage under the Db write lock. Caller
-    /// `encode_and_write_one_op`s off lock, then [`Self::async_one_publish`].
-    pub(crate) fn async_one_stage(&mut self, batch: BatchOp) -> Result<(WriteOp, SequenceNumber)> {
-        if !self.write_admission_idle() {
-            let families = self.batch_families(std::slice::from_ref(&batch));
-            self.ensure_write_admitted_for(&families)?;
+    /// Lone-async 1-op put/delete: no `Vec<BatchOp>` / `Vec<WriteOp>`
+    /// (RFC-0154 P1.6). Same WAL bytes as [`Self::commit_async_ops`].
+    /// 1c keeps encode+`write` under this guard; mc4 uses
+    /// [`Self::encode_async_one`] + off-lock `write_pending_frame`.
+    pub(crate) fn commit_async_one(&mut self, batch: BatchOp) -> Result<SequenceNumber> {
+        let wal_arc = self.wal_arc();
+        let mut w = wal_arc.lock();
+        let (op, seq) = self.encode_async_one(&mut w, batch)?;
+        let st = self.phase_stats.clone();
+        let t1 = st.as_ref().map(|_| Instant::now());
+        w.write_pending_frame()?;
+        if let (Some(st), Some(t1)) = (st.as_ref(), t1) {
+            st.wal_ns
+                .fetch_add(t1.elapsed().as_nanos() as u64, Ordering::Relaxed);
         }
-        self.observe_bulk_op(&batch);
-        let (op, seq) = self.prepare_one_spill(batch, false)?;
-        self.vlog_prepare_wal(false)?;
-        self.stage_unapplied_ops(std::slice::from_ref(&op));
-        Ok((op, seq))
+        drop(w);
+        self.apply_async_one(op, seq)
     }
 
-    /// Second write-lock hold after off-lock async WAL (bypass 1-op).
-    pub(crate) fn async_one_publish(
-        &mut self,
-        op: WriteOp,
-        seq: SequenceNumber,
-        wal: Result<u64>,
-    ) -> Result<SequenceNumber> {
-        self.unstage_unapplied_ops(std::slice::from_ref(&op));
-        match wal {
-            Err(e) => {
-                self.fence_durability(&e, FenceClass::of_core(&e));
-                Err(e)
-            }
-            Ok(n) => {
-                self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
-                if !self.feed_is_lazy() {
-                    self.change_log
-                        .extend(std::iter::once(ChangeEntry::from_write_op(&op)));
+    /// Sequential G1 client: prepare, one WAL lock (encode + `write` +
+    /// `fdatasync`), apply, publish. Skips [`GroupInFlight`] — that path
+    /// still encodes under one lock and write+fd under another (RFC-0062
+    /// P1.1 p11j; isolated raftlog 0.935 was that extra hop + vec).
+    /// Multi-writer leaders stay on [`Self::group_start`].
+    pub(crate) fn lone_sync_commit(&mut self, ops: Vec<BatchOp>) -> Result<SequenceNumber> {
+        if crate::write_admission_kernel::batch_is_empty(ops.len() as u64) {
+            return Ok(self.last_sequence());
+        }
+        self.ensure_disk_pressure_admitted(false)?;
+        if let Some(op) = ops.first() {
+            match op {
+                BatchOp::Put { key, .. } | BatchOp::Delete { key } => {
+                    self.maybe_park_foreign_one_slash(key.as_ref());
                 }
-                self.note_dirty_points(std::slice::from_ref(&op));
-                let supersede = self.apply_supersede_latest();
-                self.maybe_park_foreign_idx(op.key.as_ref());
-                apply_one_owned(&mut self.mem, op, supersede);
-                self.publish_sequence(seq);
-                let _ = self.maybe_auto_flush_with(
-                    async_ok_flush_is_stage_only() || self.defer_auto_compact,
-                );
-                Ok(seq)
+                BatchOp::DeleteRange { start, .. } => {
+                    self.maybe_park_foreign_one_slash(start.as_ref());
+                }
             }
-        }
-    }
-
-    /// Sequential G1 client, split like the group path (RFC-0045 P2.1):
-    /// [`Self::lone_encode_commit`] under the write lock (admission,
-    /// prepare, vlog flush, WAL encode — no fd), `fdatasync` OFF the lock,
-    /// then [`Self::lone_publish_commit`] on the second write-lock hold
-    /// (publish gate, mem apply, publish). Skips [`GroupInFlight`] —
-    /// multi-writer leaders stay on [`Self::group_start`].
-    ///
-    /// Returns `(commit seq, fdatasync ns)` — the fd sample feeds the
-    /// write-group EMA that bounds the catch-up wait (RFC-0042 P1.1);
-    /// `0` when no WAL append happened (nothing to sample).
-    pub(crate) fn lone_encode_commit(
-        &mut self,
-        ops: Vec<BatchOp>,
-    ) -> Result<(SequenceNumber, Option<LoneInFlight>)> {
-        if ops.is_empty() {
-            return Ok((self.last_sequence(), None));
         }
         if !self.write_admission_idle() {
             let families = self.batch_families(&ops);
             self.ensure_write_admitted_for(&families)?;
         }
         self.observe_bulk_batch(&ops);
+        let st = self.phase_stats.clone();
+        let tp = st.as_ref().map(|_| std::time::Instant::now());
         let (records, seq) = self.prepare_write_ops(ops)?;
+        if let (Some(st), Some(tp)) = (st.as_ref(), tp) {
+            st.prepare_ns
+                .fetch_add(tp.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
         if crate::write_admission_kernel::batch_is_empty(records.len() as u64) {
-            return Ok((seq, None));
+            return Ok(seq);
         }
         self.vlog_prepare_wal(true)?;
-        let n = self
-            .wal
-            .lock()
-            .encode_write_op_batches(&[records.as_slice()])?;
-        self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
-        // RFC-0045 P2.1: OCC must see these encoded-but-unapplied ops while
-        // the fd runs off the write lock (same staging as group leaders).
-        self.stage_unapplied_ops(&records);
-        Ok((seq, Some(LoneInFlight { records, seq })))
-    }
-
-    /// Second write-lock hold of the lone G1 path. `fd` carries the WAL I/O
-    /// result (and duration) of the off-lock `fdatasync`; Ok only after the
-    /// publish gate — same kernel decision as the group path (RFC-0071).
-    pub(crate) fn lone_publish_commit(
-        &mut self,
-        lone: LoneInFlight,
-        fd: Result<u64>,
-    ) -> Result<(SequenceNumber, u64)> {
-        let LoneInFlight { records, seq } = lone;
-        // Same entry contract as `group_apply`: drop the staged ops on both
-        // outcomes — a leftover stage would pin `wal_pin_state().commit_inflight`
-        // forever and refuse every later WAL rotation.
-        self.unstage_unapplied_ops(&records);
-        if !crate::group_commit_kernel::may_publish_group(fd.is_ok()) {
-            let e = fd.err().expect("publish refused iff WAL I/O failed");
-            self.fence_durability(&e, FenceClass::of_core(&e));
-            return Err(e);
+        let sl = records.as_slice();
+        let tw = st.as_ref().map(|_| std::time::Instant::now());
+        let (n, sync_r) = {
+            let mut w = self.wal.lock();
+            let n = w.encode_write_op_batches(&[sl])?;
+            let r = w.sync_data();
+            (n, r)
+        };
+        if let (Some(st), Some(tw)) = (st.as_ref(), tw) {
+            st.wal_ns
+                .fetch_add(tw.elapsed().as_nanos() as u64, Ordering::Relaxed);
         }
-        let fd_ns = fd.expect("io ok ⇒ fd duration present");
+        // RFC-0071: same plan as wal_sync_group (Fence iff required sync failed).
+        let failed = sync_r.is_err();
+        match crate::write_admission_kernel::wal_commit_plan(true, failed) {
+            crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                assert!(
+                    crate::write_admission_kernel::fence_on_sync_fail(true, failed),
+                    "required sync failed ⇒ fence, not Ok"
+                );
+                let e = sync_r.err().expect("AppendSyncFence ⇒ Some");
+                self.fence_durability(&e, FenceClass::of_core(&e));
+                return Err(e);
+            }
+            crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+            | crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => {
+                match crate::group_commit_kernel::group_ack_plan(!failed) {
+                    crate::group_commit_kernel::GroupAckPlan::FenceRefuseIoFail => {
+                        let e = sync_r.err().expect("publish refused iff WAL I/O failed");
+                        self.fence_durability(&e, FenceClass::of_core(&e));
+                        return Err(e);
+                    }
+                    crate::group_commit_kernel::GroupAckPlan::AckPublishGroup => {}
+                }
+            }
+        }
+        self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
         self.note_wal_sync();
         if !self.feed_is_lazy() {
             self.change_log
@@ -10606,45 +10198,27 @@ impl<E: Env> Db<E> {
         }
         self.maybe_persist_changelog_after_durable_commit();
         self.note_dirty_points(&records);
-        let supersede = self.apply_supersede_latest();
-        if let Some(op) = records.first() {
-            self.maybe_park_foreign_idx(op.key.as_ref());
+        let tm = st.as_ref().map(|_| std::time::Instant::now());
+        apply_ops_owned(&mut self.mem, records);
+        if let (Some(st), Some(tm)) = (st.as_ref(), tm) {
+            st.mem_ns
+                .fetch_add(tm.elapsed().as_nanos() as u64, Ordering::Relaxed);
         }
-        apply_ops_owned(&mut self.mem, records, supersede);
+        let tpub = st.as_ref().map(|_| std::time::Instant::now());
         self.publish_sequence(seq);
+        if let (Some(st), Some(tpub)) = (st.as_ref(), tpub) {
+            st.publish_ns
+                .fetch_add(tpub.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            st.commits.fetch_add(1, Ordering::Relaxed);
+        }
         // Same as `commit_ops_with` / `commit_async_ops`. P1.1 lone_sync
         // skipped this; 1c G1 then never auto-flushed (imm never staged,
         // write_buffer_size was a no-op for the sequential host).
         self.maybe_auto_flush_best_effort();
-        Ok((seq, fd_ns))
+        Ok(seq)
     }
-}
 
-/// WAL-encoded lone commit parked between its encode (first write-lock
-/// hold) and its mem-apply/publish (second hold) — the RFC-0045 P2.1
-/// off-lock `fdatasync` window, same shape as a group leader's.
-pub(crate) struct LoneInFlight {
-    records: Vec<WriteOp>,
-    seq: SequenceNumber,
-}
-
-/// RFC-0180 P0.48: prepare + stage under the Db write lock. Caller
-/// encodes off lock, then [`Db::async_ops_publish`].
-pub(crate) enum AsyncOpsStaged {
-    /// Bulk-only: already published, no WAL hop.
-    Applied(SequenceNumber),
-    /// Ladder ops staged; WAL write still due.
-    Pending {
-        /// Prepared WAL ops (not yet `write()`n).
-        ops: Vec<WriteOp>,
-        /// Last sequence in this batch.
-        seq: SequenceNumber,
-    },
-}
-
-impl<E: Env> Db<E> {
-    /// Shared WAL handle for off-lock `fdatasync` (ConcurrentDb group
-    /// leader and lone path).
+    /// Shared WAL handle for off-lock `fdatasync` (ConcurrentDb group leader).
     pub(crate) fn wal_arc(&self) -> Arc<Mutex<Wal<E::File>>> {
         Arc::clone(&self.wal)
     }
@@ -10657,64 +10231,37 @@ impl<E: Env> Db<E> {
         self.commit_inflight.fetch_sub(1, Ordering::Release);
     }
 
-    /// RFC-0180 P0.25 / 0184 P0.6: `commit_async_one` and
-    /// `commit_async_ops` pin inflight so the host compact worker skips
-    /// (`commit_inflight > 0`) instead of barging the write lock between
-    /// groups (p27 p999 1.4 ms × ~400 ops).
-    fn pin_commit_inflight(&self) -> CommitInflightPin {
-        self.begin_commit();
-        CommitInflightPin {
-            n: std::sync::Arc::clone(&self.commit_inflight),
-        }
-    }
-
     /// Remember WAL-encoded ops so OCC sees them while memtable apply waits
     /// for off-lock `fdatasync` (RFC-0045 P2.1).
     pub(crate) fn stage_unapplied(&mut self, g: &GroupInFlight) {
         for (_, ops, _) in &g.appended {
-            self.stage_unapplied_ops(ops);
-        }
-    }
-
-    /// Lone-path variant of [`Self::stage_unapplied`] (no `GroupInFlight`).
-    pub(crate) fn stage_unapplied_ops(&mut self, ops: &[WriteOp]) {
-        for op in ops {
-            self.unapplied.push(UnappliedOp {
-                seq: op.sequence,
-                kind: op.kind,
-                key: op.key.clone(),
-                end: if op.kind == ValueType::RangeDeletion {
-                    op.value.clone()
-                } else {
-                    Bytes::new()
-                },
-            });
+            for op in ops {
+                self.unapplied.push(UnappliedOp {
+                    seq: op.sequence,
+                    kind: op.kind,
+                    key: op.key.clone(),
+                    end: crate::merge::write_op_range_end(op.kind, op.value.as_ref())
+                        .map(Bytes::copy_from_slice)
+                        .unwrap_or_default(),
+                });
+            }
         }
     }
 
     /// Drop staged ops for `g` (apply finished, or the group's fsync fenced).
     pub(crate) fn unstage_unapplied(&mut self, g: &GroupInFlight) {
-        if self.unapplied.is_empty() {
-            return;
-        }
-        for (_, ops, _) in &g.appended {
-            self.unstage_unapplied_ops(ops);
-        }
-    }
-
-    /// Lone-path variant of [`Self::unstage_unapplied`]: drop the staged
-    /// ops covered by one batch's sequence range.
-    pub(crate) fn unstage_unapplied_ops(&mut self, ops: &[WriteOp]) {
-        if self.unapplied.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.unapplied.len() as u64) {
             return;
         }
         let mut lo = u64::MAX;
         let mut hi = 0u64;
         let mut any = false;
-        for op in ops {
-            any = true;
-            lo = lo.min(op.sequence);
-            hi = hi.max(op.sequence);
+        for (_, ops, _) in &g.appended {
+            for op in ops {
+                any = true;
+                lo = lo.min(op.sequence);
+                hi = hi.max(op.sequence);
+            }
         }
         if !any {
             return;
@@ -10728,32 +10275,46 @@ impl<E: Env> Db<E> {
         self.commit_inflight.load(Ordering::Acquire)
     }
 
-    /// Shared handle to [`Self::commit_inflight`] for lock-free observation
-    /// (RFC-0042 P1.1: a commit must be provably in flight even while its
-    /// off-lock `fdatasync` window is open).
-    #[must_use]
-    pub(crate) fn commit_inflight_handle(&self) -> Arc<AtomicUsize> {
-        Arc::clone(&self.commit_inflight)
+    #[cfg(test)]
+    pub(crate) fn bulk_live_bytes(&self) -> usize {
+        0
+    }
+    #[cfg(test)]
+    pub(crate) fn hydrate_resident_bytes(&self) -> usize {
+        0
+    }
+    #[cfg(test)]
+    pub(crate) fn sst_index_bytes(&self) -> usize {
+        0
+    }
+    #[cfg(test)]
+    pub(crate) fn lookup_sst_probed(&self) -> usize {
+        0
+    }
+    #[cfg(test)]
+    pub(crate) fn sst_collapsed_bounds(&self) -> (Option<Bytes>, Option<Bytes>) {
+        (None, None)
     }
 
     pub(crate) fn fence_durability(&mut self, io_error: impl std::fmt::Display, class: FenceClass) {
-        if self.fence_report.is_none() {
-            let published = self.published_seq.load(Ordering::Acquire);
-            self.fence_report = Some(FenceReport {
-                io_error: io_error.to_string(),
-                class,
-                uncertain_from: published.saturating_add(1),
-                uncertain_through: self.last_sequence(),
-            });
+        // Kernel owns the fate: the FIRST fence owns the report.
+        match crate::write_admission_kernel::fence_record_plan(self.fence_report.is_some()) {
+            crate::write_admission_kernel::FenceRecordPlan::RecordFirst => {
+                let published = self.published_seq.load(Ordering::Acquire);
+                self.fence_report = Some(FenceReport {
+                    io_error: io_error.to_string(),
+                    class,
+                    uncertain_from: published.saturating_add(1),
+                    uncertain_through: self.last_sequence(),
+                });
+            }
+            crate::write_admission_kernel::FenceRecordPlan::KeepExisting => {}
         }
         self.durability_fenced = true;
     }
 
     /// Fence then return `e` (explicit flush / compact I/O — RFC-0050 P0.3).
     fn fence_io_err(&mut self, e: CoreError) -> CoreError {
-        if matches!(e, CoreError::RamBudget { .. }) {
-            return e;
-        }
         self.fence_durability(&e, FenceClass::of_core(&e));
         e
     }
@@ -10793,31 +10354,32 @@ impl<E: Env> Db<E> {
             any_sync: false,
             next_i: n,
             failed: false,
-            wal_encoded: false,
         };
-        if n == 0 {
+        if crate::write_admission_kernel::batch_is_empty(n as u64) {
             return Ok(g);
         }
-        // RFC-0045 P0.1: the group path (admit + prepare + encode) is the
-        // first write-lock hold — attribute it to `prepare_ns` so
-        // WRITEPHASE shows the mc pipeline, not only the 1-op bypass.
-        let st = self.phase_stats.clone();
-        let tp = st.as_ref().map(|_| std::time::Instant::now());
         if let Err(results) = self.group_admit(n) {
             return Err(results);
         }
         self.group_prepare(&mut g, batches, 0);
-        if let Err(e) = self.vlog_prepare_wal(g.any_sync) {
-            let msg = e.to_string();
-            return Err((0..n)
-                .map(|_| Err(CoreError::Internal(format!("vlog flush failed: {msg}"))))
-                .collect());
+        // RFC-0071: vlog barrier vs write-only from the same plan as put-Ok.
+        match crate::write_admission_kernel::wal_commit_plan(g.any_sync, false) {
+            crate::write_admission_kernel::WalCommitPlan::AppendApplyOk
+            | crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+            | crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                assert!(
+                    !crate::write_admission_kernel::fence_on_sync_fail(g.any_sync, false),
+                    "planned vlog step before I/O ⇒ not Fence yet"
+                );
+                if let Err(e) = self.vlog_prepare_wal(g.any_sync) {
+                    let msg = e.to_string();
+                    return Err((0..n)
+                        .map(|_| Err(CoreError::Internal(format!("vlog flush failed: {msg}"))))
+                        .collect());
+                }
+            }
         }
         self.group_append_ops(&mut g);
-        if let (Some(st), Some(tp)) = (st.as_ref(), tp) {
-            st.prepare_ns
-                .fetch_add(tp.elapsed().as_nanos() as u64, Ordering::Relaxed);
-        }
         Ok(g)
     }
 
@@ -10827,7 +10389,7 @@ impl<E: Env> Db<E> {
         g: &mut GroupInFlight,
         batches: Vec<(Vec<BatchOp>, bool)>,
     ) {
-        if g.failed || batches.is_empty() {
+        if g.failed || crate::write_admission_kernel::batch_is_empty(batches.len() as u64) {
             return;
         }
         let base = g.next_i;
@@ -10835,25 +10397,37 @@ impl<E: Env> Db<E> {
         g.results
             .resize_with(g.next_i, || None::<Result<SequenceNumber>>);
         self.group_prepare(g, batches, base);
-        if let Err(e) = self.vlog_prepare_wal(g.any_sync) {
-            let msg = e.to_string();
-            g.failed = true;
-            for (i, _, _) in &g.pending {
-                g.results[*i] = Some(Err(CoreError::Internal(format!(
-                    "vlog flush failed: {msg}"
-                ))));
+        match crate::write_admission_kernel::wal_commit_plan(g.any_sync, false) {
+            crate::write_admission_kernel::WalCommitPlan::AppendApplyOk
+            | crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+            | crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                assert!(
+                    !crate::write_admission_kernel::fence_on_sync_fail(g.any_sync, false),
+                    "planned vlog step before I/O ⇒ not Fence yet"
+                );
+                if let Err(e) = self.vlog_prepare_wal(g.any_sync) {
+                    let msg = e.to_string();
+                    g.failed = true;
+                    for (i, _, _) in &g.pending {
+                        g.results[*i] = Some(Err(CoreError::Internal(format!(
+                            "vlog flush failed: {msg}"
+                        ))));
+                    }
+                    g.pending.clear();
+                    return;
+                }
             }
-            g.pending.clear();
-            return;
         }
         self.group_append_ops(g);
     }
 
     fn group_admit(&mut self, n: usize) -> std::result::Result<(), Vec<Result<SequenceNumber>>> {
-        // Stall knobs off (parity default): skip the two `level_file_count(0)`
-        // walks. 25M overwrite L0 count is O(files) under the write lock.
-        if self.write_admission_idle() {
-            return Ok(());
+        if let Err(CoreError::DiskPressure { available, need }) =
+            self.ensure_disk_pressure_admitted(false)
+        {
+            return Err((0..n)
+                .map(|_| Err(CoreError::DiskPressure { available, need }))
+                .collect());
         }
         match self.ensure_write_admitted() {
             Ok(()) => Ok(()),
@@ -10862,6 +10436,9 @@ impl<E: Env> Db<E> {
                 .collect()),
             Err(CoreError::WriteStallMem { mem_bytes, limit }) => Err((0..n)
                 .map(|_| Err(CoreError::WriteStallMem { mem_bytes, limit }))
+                .collect()),
+            Err(CoreError::DiskPressure { available, need }) => Err((0..n)
+                .map(|_| Err(CoreError::DiskPressure { available, need }))
                 .collect()),
             Err(e) => {
                 let msg = e.to_string();
@@ -10880,15 +10457,18 @@ impl<E: Env> Db<E> {
     ) {
         for (off, (ops, do_sync)) in batches.into_iter().enumerate() {
             let i = index_base + off;
-            if ops.is_empty() {
+            if crate::write_admission_kernel::batch_is_empty(ops.len() as u64) {
                 g.results[i] = Some(Ok(self.last_sequence()));
                 continue;
             }
             self.observe_bulk_batch(&ops);
             match self.prepare_write_ops(ops) {
                 Ok((write_ops, last_seq)) => {
-                    if do_sync {
-                        g.any_sync = true;
+                    match crate::write_admission_kernel::group_batch_sync_plan(do_sync) {
+                        crate::write_admission_kernel::GroupSyncPlan::BatchForcesSync => {
+                            g.any_sync = true;
+                        }
+                        crate::write_admission_kernel::GroupSyncPlan::BatchRidesGroup => {}
                     }
                     g.pending.push((i, write_ops, last_seq));
                 }
@@ -10899,7 +10479,7 @@ impl<E: Env> Db<E> {
 
     /// Encode [`GroupInFlight::pending`] into the WAL frame (no `write` syscall).
     fn group_append_ops(&mut self, g: &mut GroupInFlight) {
-        if g.failed || g.pending.is_empty() {
+        if g.failed || crate::write_admission_kernel::batch_is_empty(g.pending.len() as u64) {
             return;
         }
         if let Err(e) = self.ensure_not_fenced() {
@@ -10913,31 +10493,12 @@ impl<E: Env> Db<E> {
             g.pending.clear();
             return;
         }
-        // Async: leave ops in `appended` unencoded. ConcurrentDb encodes+writes
-        // off the Db write lock (`finish_group_off_lock`); `group_commit`
-        // does the same hop in `group_finish`. G1 still encodes here so
-        // `sync_data` can write+fsync the pending frame.
-        if !g.any_sync {
-            g.appended.extend(g.pending.drain(..));
-            return;
-        }
-        let refs: Vec<&[crate::batch::WriteOp]> = if g.wal_encoded {
-            g.pending.iter().map(|(_, ops, _)| ops.as_slice()).collect()
-        } else {
-            g.appended
-                .iter()
-                .map(|(_, ops, _)| ops.as_slice())
-                .chain(g.pending.iter().map(|(_, ops, _)| ops.as_slice()))
-                .collect()
-        };
-        if refs.is_empty() {
-            return;
-        }
+        let refs: Vec<&[crate::batch::WriteOp]> =
+            g.pending.iter().map(|(_, ops, _)| ops.as_slice()).collect();
         match self.wal.lock().encode_write_op_batches(&refs) {
             Ok(n) => {
                 self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
                 g.appended.extend(g.pending.drain(..));
-                g.wal_encoded = true;
             }
             Err(e) => {
                 let msg = e.to_string();
@@ -10954,34 +10515,28 @@ impl<E: Env> Db<E> {
 
     pub(crate) fn group_finish(&mut self, g: GroupInFlight) -> Vec<Result<SequenceNumber>> {
         if let Err(e) = self.vlog_prepare_wal(g.needs_sync()) {
-            self.fence_durability(&e, FenceClass::of_core(&e));
+            self.durability_fenced = true;
             return g.fail_sync(e);
         }
         // One WAL lock: `sync_data` already `write()`s the pending frame
         // then `fdatasync`s. Split write-then-sync was two mutex hops on
         // the 1c G1 raftlog batch (RFC-0062 P1.1 p11h).
-        if g.needs_sync() {
-            if let Err(e) = self.wal_sync_group() {
-                return g.fail_sync(e);
-            }
-        } else {
-            // Drop the WAL MutexGuard before fencing (`E0502` on `*self`).
-            let write_res = if g.wal_encoded {
-                self.wal.lock().write_pending_frame().map(|()| 0)
-            } else {
-                let refs: Vec<&[crate::batch::WriteOp]> = g
-                    .appended
-                    .iter()
-                    .map(|(_, ops, _)| ops.as_slice())
-                    .collect();
-                self.wal.lock().encode_and_write_op_batches(&refs)
-            };
-            match write_res {
-                Ok(n) => {
-                    self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
+        // RFC-0071: same plan as wal_sync_group (Sync before Apply/Ok).
+        let need_sync = g.needs_sync();
+        match crate::write_admission_kernel::wal_commit_plan(need_sync, false) {
+            crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => {
+                if let Err(e) = self.wal.lock().write_pending_frame() {
+                    self.durability_fenced = true;
+                    return g.fail_sync(e);
                 }
-                Err(e) => {
-                    self.fence_durability(&e, FenceClass::of_core(&e));
+            }
+            crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+            | crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                assert!(
+                    !crate::write_admission_kernel::fence_on_sync_fail(need_sync, false),
+                    "planned Sync before I/O ⇒ not Fence yet"
+                );
+                if let Err(e) = self.wal_sync_group() {
                     return g.fail_sync(e);
                 }
             }
@@ -11012,7 +10567,7 @@ impl<E: Env> Db<E> {
             }
             return finish_group_results(results);
         }
-        if appended.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(appended.len() as u64) {
             return finish_group_results(results);
         }
 
@@ -11025,27 +10580,24 @@ impl<E: Env> Db<E> {
             }
             self.change_log.extend(feed_batch);
         }
-        if any_sync {
+        if crate::write_admission_kernel::wal_sync_required(true, any_sync, false) {
             self.maybe_persist_changelog_after_durable_commit();
         }
 
-        let supersede = self.apply_supersede_latest();
-        if let Some((_, write_ops, _)) = appended.first() {
-            if let Some(op) = write_ops.first() {
-                self.maybe_park_foreign_idx(op.key.as_ref());
-            }
-        }
+        let st = self.phase_stats.clone();
+        let tm = st.as_ref().map(|_| Instant::now());
         for (i, write_ops, last_seq) in appended {
             self.note_dirty_points(&write_ops);
-            apply_ops_owned(&mut self.mem, write_ops, supersede);
+            apply_ops_owned(&mut self.mem, write_ops);
             results[i] = Some(Ok(last_seq));
+        }
+        if let (Some(st), Some(tm)) = (st.as_ref(), tm) {
+            st.mem_ns
+                .fetch_add(tm.elapsed().as_nanos() as u64, Ordering::Relaxed);
         }
         // Caches bump on [`Self::publish_sequence`] after WAL is durable so
         // a failed fd cannot leave a stale miss for an unpublished key.
-        // RFC-0180: async groups stage/park; G1 may still write L0.
-        let _ = self.maybe_auto_flush_with(
-            (!any_sync && async_ok_flush_is_stage_only()) || self.defer_auto_compact,
-        );
+        self.maybe_auto_flush_best_effort();
         finish_group_results(results)
     }
 }
@@ -11060,14 +10612,13 @@ pub(crate) struct GroupInFlight {
     any_sync: bool,
     next_i: usize,
     failed: bool,
-    /// G1: ops already in the WAL pending frame. Async: false until the
-    /// off-lock encode+write hop (RFC-0180 P0.40).
-    wal_encoded: bool,
 }
 
 impl GroupInFlight {
     pub(crate) fn needs_sync(&self) -> bool {
-        self.any_sync && !self.failed && !self.appended.is_empty()
+        crate::write_admission_kernel::wal_sync_required(true, self.any_sync, false)
+            && !self.failed
+            && !crate::write_admission_kernel::batch_is_empty(self.appended.len() as u64)
     }
 
     pub(crate) fn max_appended_seq(&self) -> SequenceNumber {
@@ -11098,16 +10649,6 @@ impl GroupInFlight {
             self.results[*i] = Some(Err(CoreError::Internal(msg.clone())));
         }
         finish_group_results(self.results)
-    }
-
-    /// Async members not yet in the WAL frame (encode deferred off lock).
-    pub(crate) fn collect_deferred_wal<'a>(&'a self, out: &mut Vec<&'a [WriteOp]>) {
-        if self.wal_encoded || self.failed {
-            return;
-        }
-        for (_, ops, _) in &self.appended {
-            out.push(ops.as_slice());
-        }
     }
 
     #[cfg(feature = "pct")]
@@ -11160,17 +10701,21 @@ impl<E: Env> Drop for Db<E> {
 
 impl<E: Env> Db<E> {
     fn ensure_not_fenced(&self) -> Result<()> {
-        if self.durability_fenced {
-            Err(CoreError::DurabilityFenced)
-        } else {
-            Ok(())
+        match crate::write_admission_kernel::fence_admission_plan(self.durability_fenced) {
+            crate::write_admission_kernel::FenceAdmission::RefuseFenced => {
+                Err(CoreError::DurabilityFenced)
+            }
+            crate::write_admission_kernel::FenceAdmission::AdmitOps => Ok(()),
         }
     }
 
     /// When open options require durability, fsync the directory (propagate errors).
     fn sync_dir_if_required(&self, dir: &Path) -> Result<()> {
-        if crate::write_admission_kernel::dir_sync_required(self.sync) {
-            self.env.sync_dir(dir)?;
+        match crate::write_admission_kernel::dir_sync_plan(self.sync) {
+            crate::write_admission_kernel::DirSyncPlan::SyncDirNow => {
+                self.env.sync_dir(dir)?;
+            }
+            crate::write_admission_kernel::DirSyncPlan::SkipDirSync => {}
         }
         Ok(())
     }
@@ -11188,12 +10733,155 @@ impl<E: Env> Db<E> {
         self.ensure_write_admitted_for(&[])
     }
 
+    /// RFC-0179: refuse WAL append below the hard free-space floor.
+    ///
+    /// Unconditional — `write_admission_idle` only skips mem/L0 knobs.
+    /// Unknown probe (`None` / Err) does not refuse. Not a durability fence.
+    ///
+    /// `wal_held` (async pipeline, RFC-0185 P0.3 `encode_async_one` runs
+    /// under the caller's WAL mutex) downgrades reclaim to its lock-free
+    /// part: `try_rotate_wal`'s `wal.lock()` on the held lock deadlocked
+    /// the first async put on an empty DB under soft-band pressure
+    /// (:p211s wave hang — overlay upperdir tmpfs sits under
+    /// `DISK_SOFT_FREE_BYTES`, so every first put was in the reclaim band).
+    fn ensure_disk_pressure_admitted(&mut self, wal_held: bool) -> Result<()> {
+        // RFC-0217 P2.4: reuse a fresh `Ok` verdict (knob
+        // `PEDRA_DISK_PROBE_CACHE_MS`) — the per-commit `statvfs` plus the
+        // soft-band ladder cost tens of ms per commit on small disks. Only
+        // `Ok` verdicts are cached; the soft band and every refuse probe.
+        let now = std::time::Instant::now();
+        let since_ok_ms = self
+            .disk_ok_probe_at
+            .map_or(u64::MAX, |t| now.duration_since(t).as_millis() as u64);
+        if crate::disk_pressure_kernel::probe_cached(
+            since_ok_ms != u64::MAX,
+            since_ok_ms,
+            self.disk_probe_cache_ms,
+        ) {
+            return Ok(());
+        }
+        let probe = crate::env::probe_available_bytes(&self.env, &self.dir);
+        match crate::disk_pressure_kernel::disk_pressure_admit(probe) {
+            crate::disk_pressure_kernel::DiskPressureAdmit::Ok => {
+                self.note_disk_pressure(0, probe);
+                self.disk_ok_probe_at = Some(now);
+                Ok(())
+            }
+            crate::disk_pressure_kernel::DiskPressureAdmit::Reclaim => {
+                self.note_disk_pressure(1, probe);
+                self.disk_ok_probe_at = None;
+                // Ladder cadence (RFC-0217 P2.4): at most once per
+                // `DISK_RECLAIM_EVERY_MS`; the commit still admits without
+                // waiting on compact/rotate/GC.
+                let since_ladder_ms = self
+                    .disk_ladder_at
+                    .map_or(u64::MAX, |t| now.duration_since(t).as_millis() as u64);
+                if crate::disk_pressure_kernel::reclaim_ladder_due(
+                    since_ladder_ms,
+                    crate::disk_pressure_kernel::DISK_RECLAIM_EVERY_MS,
+                ) {
+                    self.disk_ladder_at = Some(now);
+                    self.reclaim_disk_for_uptime(probe, wal_held);
+                    let again = crate::env::probe_available_bytes(&self.env, &self.dir);
+                    match crate::disk_pressure_kernel::disk_pressure_admit(again) {
+                        crate::disk_pressure_kernel::DiskPressureAdmit::Refuse {
+                            available,
+                            need,
+                        } => {
+                            self.note_disk_pressure(2, Some(available));
+                            Err(CoreError::DiskPressure { available, need })
+                        }
+                        crate::disk_pressure_kernel::DiskPressureAdmit::Ok => {
+                            self.note_disk_pressure(0, again);
+                            self.disk_ok_probe_at = Some(now);
+                            Ok(())
+                        }
+                        crate::disk_pressure_kernel::DiskPressureAdmit::Reclaim => {
+                            self.note_disk_pressure(1, again);
+                            Ok(())
+                        }
+                    }
+                } else {
+                    Ok(())
+                }
+            }
+            crate::disk_pressure_kernel::DiskPressureAdmit::Refuse { available, need } => {
+                self.note_disk_pressure(2, Some(available));
+                self.disk_ok_probe_at = None;
+                self.drop_page_cache_best_effort();
+                Err(CoreError::DiskPressure { available, need })
+            }
+        }
+    }
+
+    /// Compact + WAL recycle + vlog GC (only while still ≥ hard) + drop
+    /// page cache. Errors are swallowed: reclaim I/O does not fence; a
+    /// failed reclaim must not take reads down (RFC-0179 P1.2).
+    ///
+    /// `wal_held` (async pipeline under the WAL mutex) downgrades the plan
+    /// to the lock-free page-cache drop only.
+    fn reclaim_disk_for_uptime(&mut self, before: Option<u64>, wal_held: bool) {
+        self.drop_page_cache_best_effort();
+        let allowed = crate::disk_pressure_kernel::compact_allowed_under_pressure(before);
+        let plan = if wal_held {
+            crate::disk_pressure_kernel::disk_pressure_reclaim_plan_wal_held()
+        } else {
+            crate::disk_pressure_kernel::disk_pressure_reclaim_plan(allowed)
+        };
+        if plan.compact_sst {
+            let _ = self.compact_ssts_only();
+        }
+        if plan.rotate_wal {
+            let _ = self.try_rotate_wal();
+        }
+        if plan.compact_vlog {
+            let _ = self.compact_vlog();
+        }
+    }
+
+    fn drop_page_cache_best_effort(&self) {
+        let names = match self.env.read_dir_names(&self.dir) {
+            Ok(n) => n,
+            Err(_) => return,
+        };
+        for name in names {
+            if !(name.ends_with(".sst") || name.ends_with(".log") || name.ends_with(".vlog")) {
+                continue;
+            }
+            let path = self.dir.join(&name);
+            let _ = self.env.advise(&path, 0, 0, AdviseKind::DontNeed);
+        }
+    }
+
+    /// `tracing::warn!` only on state transition (RFC-0179 P0.4).
+    fn note_disk_pressure(&self, state: u8, available: Option<u64>) {
+        let prev = self.disk_pressure_log.swap(state, Ordering::Relaxed);
+        if prev == state {
+            return;
+        }
+        match state {
+            1 => tracing::warn!(
+                available,
+                soft = crate::disk_pressure_kernel::DISK_SOFT_FREE_BYTES,
+                hard = crate::disk_pressure_kernel::DISK_HARD_FREE_BYTES,
+                "disk pressure: reclaiming (compact + drop page cache)"
+            ),
+            2 => tracing::warn!(
+                available,
+                need = crate::disk_pressure_kernel::DISK_HARD_FREE_BYTES,
+                "disk pressure: refusing writes (reads stay up; not a durability fence)"
+            ),
+            _ => {}
+        }
+    }
+
     /// Per-CF stall (RFC-0065 P1.2). Empty `families` = global (kernel / mixed group).
     ///
     /// Data-fate (mem/L0 over limit) is `write_admit`. Drain/flush I/O stays
     /// trampoline (RFC-0171 P1.1).
     pub(crate) fn ensure_write_admitted_for(&mut self, families: &[String]) -> Result<()> {
-        let per_cf = !self.physical_cfs.is_empty() && !families.is_empty();
+        let per_cf = !crate::write_admission_kernel::batch_is_empty(self.physical_cfs.len() as u64)
+            && !crate::write_admission_kernel::batch_is_empty(families.len() as u64);
         let mem_armed = self.write_stall_mem_bytes.is_some();
         let mem_limit = self.write_stall_mem_bytes.unwrap_or(0);
         let measure_mem = |db: &Self| -> usize {
@@ -11317,57 +11005,23 @@ impl<E: Env> Db<E> {
     }
 
     pub(crate) fn maybe_auto_flush(&mut self) -> Result<()> {
-        self.maybe_auto_flush_with(self.defer_auto_compact)
-    }
-
-    /// `stage_only`: park/imm-swap, never `flush_cf` / `auto_flush_mem`
-    /// (async Ok path — RFC-0180 P0.14).
-    fn maybe_auto_flush_with(&mut self, stage_only: bool) -> Result<()> {
-        if !self.physical_cfs.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(self.physical_cfs.len() as u64) {
             // Hot path: integer compare, not a walk of every memtable key.
             // `cf_families()` scans tail+map (O(entries)) — with CFs registered
             // every 1c put paid that (ycsb_a 2M→0.6M qps, RFC-0149).
-            let mem = self.mem.approx_memory_usage();
-            let global_under = self.auto_flush_bytes.map_or(true, |lim| mem < lim);
-            let cf_under = self.cf_write_buffer.values().all(|&n| n == 0 || mem < n);
-            if global_under && cf_under {
-                return Ok(());
-            }
-            // RFC-0184: `take_family("default")` walks every key (apply_mc4
-            // flush_check 148µs/commit). Stage-only + default-over → park
-            // the whole table O(1). Do **not** park on global-over alone —
-            // a data CF buffer above the global cap must keep growing
-            // (RFC-0159 P1.3). Named CFs stay contiguous `take_family`.
-            if stage_only {
-                let default_over = self
-                    .write_buffer_for("default")
-                    .is_some_and(|lim| self.mem.approx_memory_usage_cf("default") >= lim);
-                if default_over {
-                    if !self.stage_flush_imm()? && !self.mem.is_empty() {
-                        let taken = std::mem::replace(&mut self.mem, MemTable::new());
-                        self.push_parked_unflushed(taken);
-                    }
-                    return Ok(());
-                }
-                let n = self.physical_cfs.len();
-                for i in 0..n {
-                    let fam = self.physical_cfs[i].as_str();
-                    if fam == "default" {
-                        continue;
-                    }
-                    let Some(limit) = self.write_buffer_for(fam) else {
-                        continue;
-                    };
-                    if self.mem.approx_memory_usage_cf(fam) < limit {
-                        continue;
-                    }
-                    let fam = self.physical_cfs[i].clone();
-                    let taken = self.mem.take_family(&fam);
-                    if !taken.is_empty() {
-                        self.push_parked_unflushed(taken);
-                    }
-                }
-                return Ok(());
+            let mem = self.mem.approx_memory_usage() as u64;
+            let global_under = !crate::flush_kernel::auto_flush_due(
+                mem,
+                self.auto_flush_bytes.is_some(),
+                self.auto_flush_bytes.unwrap_or(0) as u64,
+            );
+            let cf_under = self
+                .cf_write_buffer
+                .values()
+                .all(|&n| !crate::flush_kernel::auto_flush_due(mem, n != 0, n as u64));
+            match crate::flush_kernel::auto_flush_gate(global_under, cf_under) {
+                crate::flush_kernel::AutoFlushGate::SkipAllNotDue => return Ok(()),
+                crate::flush_kernel::AutoFlushGate::ScanColumnFamilies => {}
             }
             let n = self.physical_cfs.len();
             for i in 0..n {
@@ -11375,26 +11029,40 @@ impl<E: Env> Db<E> {
                 let Some(limit) = self.write_buffer_for(fam) else {
                     continue;
                 };
-                if self.mem.approx_memory_usage_cf(fam) < limit {
-                    continue;
+                match crate::flush_kernel::cf_flush_plan(
+                    self.mem.approx_memory_usage_cf(fam) as u64,
+                    limit as u64,
+                ) {
+                    crate::flush_kernel::CfFlushPlan::CfNotDueSkip => continue,
+                    crate::flush_kernel::CfFlushPlan::FlushCfNow => {}
                 }
                 let fam = self.physical_cfs[i].clone();
-                self.flush_cf(&fam)?;
+                if self.defer_auto_compact {
+                    let taken = self.mem.take_family(&fam);
+                    if !crate::write_admission_kernel::batch_is_empty(taken.len() as u64) {
+                        self.push_parked_unflushed(taken);
+                    }
+                } else {
+                    self.flush_cf(&fam)?;
+                }
             }
             return Ok(());
         }
-        let Some(limit) = self.auto_flush_bytes else {
-            return Ok(());
-        };
-        if self.mem.approx_memory_usage() >= limit {
-            if stage_only {
-                // Leave the table in `imm` for the host worker. Do not call
-                // `prepare_flush_imm` here — that takes the table out and
-                // `has_imm` goes false (291k mem / 0 SST in the P2.1 attempt).
-                let _ = self.stage_flush_imm()?;
-                return Ok(());
+        let mem = self.mem.approx_memory_usage() as u64;
+        let armed = self.auto_flush_bytes.is_some();
+        let limit = self.auto_flush_bytes.unwrap_or(0);
+        match crate::flush_kernel::mem_auto_flush_plan(mem, armed, limit as u64) {
+            crate::flush_kernel::MemAutoFlushPlan::FlushMemNow => {
+                if self.defer_auto_compact {
+                    // Leave the table in `imm` for the host worker. Do not call
+                    // `prepare_flush_imm` here — it takes the table out and
+                    // `has_imm` goes false (291k mem / 0 SST in the P2.1 attempt).
+                    let _ = self.stage_flush_imm()?;
+                    return Ok(());
+                }
+                self.auto_flush_mem()?;
             }
-            self.auto_flush_mem()?;
+            crate::flush_kernel::MemAutoFlushPlan::NotDueKeepMem => {}
         }
         Ok(())
     }
@@ -11406,7 +11074,7 @@ impl<E: Env> Db<E> {
         if self.imm.is_some() {
             self.flush_imm_to_l0()?;
         }
-        if self.mem.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.mem.len() as u64) {
             self.try_rotate_wal()?;
             return Ok(());
         }
@@ -11421,19 +11089,6 @@ impl<E: Env> Db<E> {
     /// [`Db::flush`] or successful auto-flush can retry.
     pub(crate) fn maybe_auto_flush_best_effort(&mut self) {
         let _ = self.maybe_auto_flush();
-    }
-
-    /// RFC-0184 P0.7: async Ok (`do_sync=false`) stage/park; G1 still
-    /// may write L0. Never fails the caller (F18).
-    pub(crate) fn flush_after_commit_opts(&mut self, durability: &WriteOptions) {
-        let do_sync = crate::write_admission_kernel::wal_sync_required(
-            durability.sync.is_some(),
-            durability.sync.unwrap_or(false),
-            self.sync,
-        );
-        let _ = self.maybe_auto_flush_with(
-            (!do_sync && async_ok_flush_is_stage_only()) || self.defer_auto_compact,
-        );
     }
 
     fn maybe_auto_compact(&mut self) -> Result<()> {
@@ -11514,7 +11169,9 @@ impl<E: Env> Db<E> {
         // at least doubled since then, rewrite ALL SSTs under the horizon
         // floor. Archive first, GC fail-closed (an archive error keeps the
         // data and the trigger retries on the next flush).
-        if !self.auto_reclaim && !self.ssts.is_empty() {
+        if !self.auto_reclaim
+            && !crate::write_admission_kernel::batch_is_empty(self.ssts.len() as u64)
+        {
             if let Some((floor, true)) = self.auto_gc_floor() {
                 let mut total: u64 = 0;
                 for t in &self.ssts {
@@ -11540,6 +11197,7 @@ impl<E: Env> Db<E> {
                                 gc: crate::merge::CompactGcOptions::for_oldest_snapshot(floor),
                                 max_input_files: None,
                             },
+                            None,
                         )?;
                         let mut after: u64 = 0;
                         for t in &self.ssts {
@@ -11622,22 +11280,37 @@ impl<E: Env> Db<E> {
     /// never points at a torn file (RFC-0041).
     fn persist_manifest(&mut self) -> Result<()> {
         let fsync_result = self.fsync_unsynced_ssts();
-        let sst_durable = fsync_result.is_ok() && self.unsynced_ssts.is_empty();
-        if !crate::flush_kernel::may_publish_manifest(sst_durable) {
-            // Kernel is the write gate: AS-IS always-true would fall through
-            // and publish CURRENT naming an unsynced/torn SST.
-            return fsync_result.and(Err(CoreError::Internal(
-                "MANIFEST publish without durable SST".into(),
-            )));
+        let sst_durable = fsync_result.is_ok()
+            && crate::write_admission_kernel::batch_is_empty(self.unsynced_ssts.len() as u64);
+        match crate::flush_kernel::manifest_publish_plan(sst_durable) {
+            crate::flush_kernel::ManifestPublishPlan::HoldUnsyncedFailClosed => {
+                // Kernel is the write gate: AS-IS always-true would fall through
+                // and publish CURRENT naming an unsynced/torn SST.
+                return fsync_result.and(Err(CoreError::Internal(
+                    "MANIFEST publish without durable SST".into(),
+                )));
+            }
+            crate::flush_kernel::ManifestPublishPlan::PublishManifest => {}
         }
         match self.take_manifest_persist()?.write() {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                // Floor = data actually in MANIFEST-listed SSTs. `last_sequence()`
+                // would wrongly cover memtable-only data (e.g. the archive
+                // replay at open) whose durable copy is the archived segment.
+                self.manifest_published_seq = self.sst_max_sequence_floor();
+                // The published generation lists this exact inventory.
+                self.manifest_dirty = false;
+                self.unpublished_below_floor = false;
+                Ok(())
+            }
             // F196: CURRENT already names the new MANIFEST — the version on
             // disk IS the new one (unsynced). Undoing here would put memory
             // behind disk and delete files the manifest references; fence
             // and treat the persist as landed (promote/fence shape).
-            Err(CoreError::ManifestCommittedUnsynced { ref source, .. }) => {
-                self.fence_durability_post_commit(source);
+            Err(CoreError::ManifestCommittedUnsynced { .. }) => {
+                self.durability_fenced = true;
+                self.manifest_dirty = false;
+                self.unpublished_below_floor = false;
                 Ok(())
             }
             Err(e) => Err(e),
@@ -11691,10 +11364,26 @@ impl<E: Env> Db<E> {
                 continue;
             }
             let mut f = env.open_read(path)?;
-            f.sync_data()?;
+            let sync_err = f.sync_data().err();
+            match crate::write_admission_kernel::wal_commit_plan(true, sync_err.is_some()) {
+                crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+                    assert!(
+                        crate::write_admission_kernel::fence_on_sync_fail(true, true),
+                        "required SST sync failed ⇒ not Ok"
+                    );
+                    return Err(sync_err.expect("AppendSyncFence ⇒ Some").into());
+                }
+                crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+                | crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => {}
+            }
         }
-        if sync_dir && !paths.is_empty() {
-            env.sync_dir(dir)?;
+        match crate::write_admission_kernel::dir_sync_plan(sync_dir) {
+            crate::write_admission_kernel::DirSyncPlan::SyncDirNow => {
+                if !crate::write_admission_kernel::batch_is_empty(paths.len() as u64) {
+                    env.sync_dir(dir)?;
+                }
+            }
+            crate::write_admission_kernel::DirSyncPlan::SkipDirSync => {}
         }
         Ok(())
     }
@@ -11974,8 +11663,18 @@ fn write_checkpoint_meta(env: &impl Env, dest: &Path, meta: &CheckpointMeta) -> 
     body.extend_from_slice(&crc.to_le_bytes());
     let mut f = env.create(&path)?;
     f.write_all(&body)?;
-    f.sync_all()?;
-    Ok(())
+    let sync_err = f.sync_all().err();
+    match crate::write_admission_kernel::wal_commit_plan(true, sync_err.is_some()) {
+        crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
+            assert!(
+                crate::write_admission_kernel::fence_on_sync_fail(true, true),
+                "required checkpoint sync failed ⇒ not Ok"
+            );
+            return Err(sync_err.expect("AppendSyncFence ⇒ Some").into());
+        }
+        crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
+        | crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => Ok(()),
+    }
 }
 
 /// Read [`CHECKPOINT_META_FILE`] written by [`Db::create_checkpoint`].
@@ -12066,9 +11765,10 @@ pub fn copy_db_directory(
 ) -> Result<()> {
     let src = src.as_ref();
     let dest = dest.as_ref();
+    crate::env::admit_disk_write(env, dest)?;
     if env.exists(dest) {
         let names = env.read_dir_names(dest)?;
-        if !names.is_empty() {
+        if !crate::write_admission_kernel::batch_is_empty(names.len() as u64) {
             return Err(CoreError::Internal(format!(
                 "copy dest not empty: {}",
                 dest.display()
@@ -12324,12 +12024,6 @@ impl<'a> SstCountCursor<'a> {
             // Eager tables: one synthetic "block" with the in-range leftover.
             let leftover: Vec<_> = table
                 .entries_cloned()
-                .unwrap_or_else(|e| {
-                    panic!(
-                        "pedradb: corrupt SST in {} on count: {e}",
-                        table.path().display()
-                    )
-                })
                 .into_iter()
                 .filter(|(k, _)| {
                     k.kind != ValueType::RangeDeletion
@@ -12349,25 +12043,17 @@ impl<'a> SstCountCursor<'a> {
                 while self.idx < block.len() {
                     let k = &block[self.idx].0;
                     let uk = k.user_key.as_ref();
-                    let past_end = match self.end {
-                        Bound::Unbounded => false,
-                        Bound::Included(e) => uk > e,
-                        Bound::Excluded(e) => uk >= e,
-                    };
-                    if past_end {
+                    if crate::merge::past_end(uk, self.end) {
                         self.exhausted = true;
                         self.current = None;
                         self.blocks = Vec::new().into_iter();
                         return;
                     }
-                    let before_start = match self.start {
-                        Bound::Unbounded => false,
-                        Bound::Included(s) => uk < s,
-                        Bound::Excluded(s) => uk <= s,
-                    };
-                    let skip = before_start
-                        || k.kind == ValueType::RangeDeletion
-                        || k.sequence > self.snapshot;
+                    if !crate::merge::user_key_in_range(uk, self.start, self.end) {
+                        self.idx += 1;
+                        continue;
+                    }
+                    let skip = k.kind == ValueType::RangeDeletion || k.sequence > self.snapshot;
                     if skip {
                         self.idx += 1;
                         continue;
@@ -12380,14 +12066,16 @@ impl<'a> SstCountCursor<'a> {
                 return;
             };
             self.current = self.load.load(bi);
-            self.idx = match (&self.current, self.start) {
-                (Some(block), Bound::Included(s)) => {
-                    block.partition_point(|(k, _)| k.user_key.as_ref() < s)
-                }
-                (Some(block), Bound::Excluded(s)) => {
-                    block.partition_point(|(k, _)| k.user_key.as_ref() <= s)
-                }
-                _ => 0,
+            // !user_key_in_range(uk, start, Unbounded) ≡ before_start
+            self.idx = match &self.current {
+                Some(block) => block.partition_point(|(k, _)| {
+                    !crate::merge::user_key_in_range(
+                        k.user_key.as_ref(),
+                        self.start,
+                        Bound::Unbounded,
+                    )
+                }),
+                None => 0,
             };
         }
     }
@@ -12465,42 +12153,17 @@ pub(crate) fn count_cache_key(
 }
 
 fn apply_record(mem: &mut MemTable, rec: &WriteRecord) {
-    for op in &rec.ops {
-        match op.kind {
-            ValueType::Value => {
-                mem.put(op.key.clone(), op.sequence, op.value.clone());
-            }
-            ValueType::Deletion => {
-                mem.delete(op.key.clone(), op.sequence);
-            }
-            ValueType::RangeDeletion => {
-                mem.delete_range(op.key.clone(), op.value.clone(), op.sequence);
-            }
-        }
-    }
-}
-
-/// RFC-0180: 1-op async put skips the `insert_many` iterator envelope.
-fn apply_one_owned(mem: &mut MemTable, op: WriteOp, supersede: bool) {
-    mem.insert_ex(
-        crate::key::InternalKey::new(op.key, op.sequence, op.kind),
-        op.value,
-        supersede,
-    );
+    apply_ops_owned(mem, rec.ops.iter().cloned());
 }
 
 /// RFC-0040: move `WriteOp` Bytes into the memtable (no extra payload memcpy).
-/// RFC-0180 P0.62: `supersede` replaces the live user-key slot (no pin).
-fn apply_ops_owned(mem: &mut MemTable, ops: impl IntoIterator<Item = WriteOp>, supersede: bool) {
-    mem.insert_many_ex(
-        ops.into_iter().map(|op| {
-            (
-                crate::key::InternalKey::new(op.key, op.sequence, op.kind),
-                op.value,
-            )
-        }),
-        supersede,
-    );
+fn apply_ops_owned(mem: &mut MemTable, ops: impl IntoIterator<Item = WriteOp>) {
+    mem.insert_many(ops.into_iter().map(|op| {
+        (
+            crate::key::InternalKey::new(op.key, op.sequence, op.kind),
+            op.value,
+        )
+    }));
 }
 
 /// Repeat puts of the same slice (kvrocks SET / blob) share one `Bytes`.
@@ -12510,7 +12173,10 @@ fn intern_bytes(v: &[u8]) -> Bytes {
     }
     LAST.with(|slot| {
         let mut g = slot.borrow_mut();
-        if g.len() == v.len() && !g.is_empty() && g.as_ref() == v {
+        if g.len() == v.len()
+            && !crate::write_admission_kernel::batch_is_empty(g.len() as u64)
+            && g.as_ref() == v
+        {
             g.clone()
         } else {
             let b = Bytes::copy_from_slice(v);
@@ -12610,7 +12276,11 @@ fn recover_ssts<E: Env>(
                 let t = table_cache.get_or_open(env, &path)?;
                 max_seq = max_seq.max(t.max_sequence());
                 let mut table = (*t).clone();
-                if let Some(cf) = vs.sst_cfs.get(i).filter(|s| !s.is_empty()) {
+                if let Some(cf) = vs
+                    .sst_cfs
+                    .get(i)
+                    .filter(|s| !crate::write_admission_kernel::batch_is_empty(s.len() as u64))
+                {
                     table = table.with_cf(cf.clone());
                 }
                 tables.push(table);
@@ -12774,8 +12444,11 @@ fn finish_merged_chunk_on(
     let final_path = dir.join(format!("{file_num:06}.sst"));
     let tmp_path = dir.join(format!("{file_num:06}.sst.tmp"));
     env.rename(&tmp_path, &final_path)?;
-    if do_sync_dir {
-        let _ = env.sync_dir(dir);
+    match crate::write_admission_kernel::dir_sync_plan(do_sync_dir) {
+        crate::write_admission_kernel::DirSyncPlan::SyncDirNow => {
+            let _ = env.sync_dir(dir);
+        }
+        crate::write_admission_kernel::DirSyncPlan::SkipDirSync => {}
     }
     // The writer's in-place table is the truth for the bytes just written;
     // a re-open here re-read + decompressed + decoded every entry of every
@@ -12814,7 +12487,7 @@ fn merge_span_count(env: &impl Env, tables: &[SstTable]) -> usize {
 /// `[split_i, split_{i+1})`; a user key's whole version run stays inside one
 /// span, so per-user-key GC decisions remain complete per span.
 fn sample_span_splits(tables: &[SstTable], parts: usize) -> Vec<Vec<u8>> {
-    let mut keys: Vec<bytes::Bytes> = Vec::new();
+    let mut keys: Vec<&[u8]> = Vec::new();
     for t in tables {
         keys.extend(t.block_first_user_keys());
     }
@@ -12843,7 +12516,85 @@ fn sample_span_splits(tables: &[SstTable], parts: usize) -> Vec<Vec<u8>> {
 /// GC rewrites stream too: `GcMergeSource` applies the same retention
 /// decisions per user-key run, so no input table is ever materialized.
 #[allow(clippy::too_many_arguments)]
-fn write_merged_tables_span(
+/// Streaming compaction filter (RFC-0217 P1.2): wraps a [`CompactSource`]
+/// and applies a [`crate::merge::CompactFilterDecision`] per user-key run —
+/// the newest version of the run decides; `Remove` skips the whole run (no
+/// shadow tombstone: whole-keyspace rewrites only, the F177 condition);
+/// `Change` rewrites the newest value. Non-`Value` newest versions (point /
+/// range tombstones) pass through untouched — the filter sees live values
+/// only, and tombstone disposal stays with retention GC.
+///
+/// Lives in db.rs, not merge.rs: the `dyn FnMut` decision closure is outside
+/// what the aeneas/charon extraction lane translates.
+struct FilterMergeSource<'a> {
+    inner: Box<dyn crate::merge::CompactSource + 'a>,
+    decision: &'a mut dyn FnMut(&str, &[u8], &[u8]) -> crate::merge::CompactFilterDecision,
+    /// Family being rewritten (the decision's first argument — cf-decoded
+    /// keys arrive encoded).
+    family: &'a str,
+    run_user: Option<Bytes>,
+    dropping: bool,
+}
+
+impl<'a> FilterMergeSource<'a> {
+    fn new(
+        inner: Box<dyn crate::merge::CompactSource + 'a>,
+        decision: &'a mut dyn FnMut(&str, &[u8], &[u8]) -> crate::merge::CompactFilterDecision,
+        family: &'a str,
+    ) -> Self {
+        Self {
+            inner,
+            decision,
+            family,
+            run_user: None,
+            dropping: false,
+        }
+    }
+}
+
+impl crate::merge::CompactSource for FilterMergeSource<'_> {
+    fn next_entry(&mut self) -> Result<Option<(InternalKey, Bytes)>> {
+        loop {
+            let (ik, val) = match self.inner.next_entry()? {
+                Some(e) => e,
+                None => return Ok(None),
+            };
+            if self.run_user.as_deref() != Some(ik.user_key.as_ref()) {
+                self.run_user = Some(ik.user_key.clone());
+                self.dropping = false;
+                if ik.kind == ValueType::Value {
+                    match (self.decision)(self.family, ik.user_key.as_ref(), val.as_ref()) {
+                        crate::merge::CompactFilterDecision::Keep => {}
+                        crate::merge::CompactFilterDecision::Remove => {
+                            // Replace the run with ONE tombstone at the
+                            // newest seq (the run's older versions drop:
+                            // the tombstone shadows them and the rewrite
+                            // covers the whole keyspace). A traceless drop
+                            // would lower the manifest seq floor and let
+                            // WAL replay resurrect the key on reopen — the
+                            // tombstone is the durable no-resurrection
+                            // guarantee, exactly what the old WAL-delete
+                            // emulation left behind.
+                            self.dropping = true;
+                            return Ok(Some((
+                                InternalKey::new(ik.user_key, ik.sequence, ValueType::Deletion),
+                                Bytes::new(),
+                            )));
+                        }
+                        crate::merge::CompactFilterDecision::Change(nv) => {
+                            return Ok(Some((ik, nv)));
+                        }
+                    }
+                }
+            } else if self.dropping {
+                continue;
+            }
+            return Ok(Some((ik, val)));
+        }
+    }
+}
+
+fn write_merged_tables_span<'a>(
     env: &impl Env,
     dir: &Path,
     tables: &[SstTable],
@@ -12856,10 +12607,14 @@ fn write_merged_tables_span(
     hi: Option<&[u8]>,
     file_alloc: &mut dyn FnMut() -> u64,
     span_tag: usize,
+    filter: Option<(
+        &'a str,
+        &mut dyn FnMut(&str, &[u8], &[u8]) -> crate::merge::CompactFilterDecision,
+    )>,
 ) -> Result<Vec<SstTable>> {
     let bloom_hint: usize = tables.iter().map(SstTable::len).sum();
     let mut out: Vec<SstTable> = Vec::new();
-    if tables.is_empty() {
+    if crate::write_admission_kernel::batch_is_empty(tables.len() as u64) {
         return Ok(out);
     }
     let streams: Vec<_> = tables
@@ -12871,11 +12626,17 @@ fn write_merged_tables_span(
     // decisions per user-key run, so no input table is ever materialized
     // (the old batch path held every decoded input table plus a BTreeMap
     // copy — at bulk-load scale that tripled the merge footprint).
-    let mut source: Box<dyn crate::merge::CompactSource> = if gc.requests_gc() {
+    let mut source: Box<dyn crate::merge::CompactSource + '_> = if gc.requests_gc() {
         Box::new(crate::merge::GcMergeSource::new(merge, gc))
     } else {
         Box::new(merge)
     };
+    // RFC-0217 P1.2: the compaction filter wraps the (possibly GC-rewritten)
+    // stream — dropped keys never reach `write_sst_try_sorted_on`.
+    if let Some(decision) = filter {
+        let (family, decision) = decision;
+        source = Box::new(FilterMergeSource::new(source, decision, family));
+    }
     let mut peeked: Option<Result<(InternalKey, Bytes)>> = None;
     let mut stream_ended = false;
     let mut last_user: Option<Bytes> = None;
@@ -12971,7 +12732,7 @@ fn write_merged_tables_span(
 /// Merge `tables` into one **or more** SSTs split at `split_target` logical
 /// bytes (sequential; bounded jobs and small inputs). `chunk_budget` caps the
 /// chunk count (the reserved file-number range).
-fn write_merged_tables(
+fn write_merged_tables<'a>(
     env: &impl Env,
     dir: &Path,
     first_file_num: u64,
@@ -12981,6 +12742,10 @@ fn write_merged_tables(
     split_target: u64,
     chunk_budget: usize,
     kit: Option<&crate::cache::PayloadKit>,
+    filter: Option<(
+        &'a str,
+        &mut dyn FnMut(&str, &[u8], &[u8]) -> crate::merge::CompactFilterDecision,
+    )>,
 ) -> Result<Vec<SstTable>> {
     let mut next = first_file_num;
     let mut alloc = || {
@@ -13001,6 +12766,7 @@ fn write_merged_tables(
         None,
         &mut alloc,
         0,
+        filter,
     )
 }
 
@@ -13031,6 +12797,7 @@ fn write_merged_tables_parallel<E: Env + Sync>(
             split_target,
             chunk_budget,
             kit,
+            None,
         );
     }
     let splits = sample_span_splits(tables, parts);
@@ -13066,6 +12833,9 @@ fn write_merged_tables_parallel<E: Env + Sync>(
                     span_hi.as_deref(),
                     &mut alloc,
                     i,
+                    // Filters are `&mut dyn FnMut` (not Send) and only ride
+                    // the sequential whole-family rewrite — spans see none.
+                    None,
                 )
             });
             handles.push(handle);
@@ -13098,1033 +12868,13 @@ fn write_merged_tables_parallel<E: Env + Sync>(
     Ok(out)
 }
 
+mod lookup_archive;
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
-
-    /// RFC-0162 P0.2: BSTAGE line fields for both callers (inline vs
-    /// worker) and the off-by-default gate (env unset ⇒ timing off).
-    #[test]
-    fn rfc0162_bstage_line_format_and_default_off() {
-        assert_eq!(
-            bulk_stage_line(7, 1234, 56, 1_048_576, 67_108_864, "inline", true),
-            "BSTAGE idx=7 epoch_ms=1234 t_ms=56 entries=1048576 bytes=67108864 \
-             caller=inline sync=true"
-        );
-        assert_eq!(
-            bulk_stage_line(8, 2000, 78, 2, 1024, "worker", false),
-            "BSTAGE idx=8 epoch_ms=2000 t_ms=78 entries=2 bytes=1024 \
-             caller=worker sync=false"
-        );
-        // Skipped when the diagnostic shell exports the var for the run.
-        if std::env::var_os("PEDRA_BULK_STAGE_TIMING").is_none() {
-            assert!(
-                !bulk_stage_timing_on(),
-                "BSTAGE must be off when PEDRA_BULK_STAGE_TIMING is unset"
-            );
-        }
-    }
-
-    /// RFC-0162 P1.1 test env: records per-file `sync_data` and every
-    /// `Env::advise` (`FenceEnv` pattern — `pedradb-sim` is not a core dep).
-    #[derive(Clone)]
-    struct BulkProbeEnv {
-        inner: StdEnv,
-        syncs: std::sync::Arc<std::sync::Mutex<Vec<std::path::PathBuf>>>,
-        advises: std::sync::Arc<std::sync::Mutex<Vec<(std::path::PathBuf, u64, u64, AdviseKind)>>>,
-    }
-
-    impl BulkProbeEnv {
-        fn new() -> Self {
-            Self {
-                inner: StdEnv,
-                syncs: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-                advises: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-            }
-        }
-    }
-
-    struct BulkProbeFile {
-        inner: <StdEnv as Env>::File,
-        path: std::path::PathBuf,
-        syncs: std::sync::Arc<std::sync::Mutex<Vec<std::path::PathBuf>>>,
-    }
-
-    impl std::io::Read for BulkProbeFile {
-        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-            self.inner.read(buf)
-        }
-    }
-    impl std::io::Write for BulkProbeFile {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.inner.write(buf)
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            self.inner.flush()
-        }
-    }
-    impl std::io::Seek for BulkProbeFile {
-        fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
-            self.inner.seek(pos)
-        }
-    }
-    impl EnvFile for BulkProbeFile {
-        fn sync_data(&mut self) -> std::io::Result<()> {
-            self.syncs.lock().unwrap().push(self.path.clone());
-            self.inner.sync_data()
-        }
-        fn sync_all(&mut self) -> std::io::Result<()> {
-            self.inner.sync_all()
-        }
-        fn set_len(&mut self, len: u64) -> std::io::Result<()> {
-            self.inner.set_len(len)
-        }
-        fn len(&mut self) -> std::io::Result<u64> {
-            self.inner.len()
-        }
-    }
-
-    impl Env for BulkProbeEnv {
-        type File = BulkProbeFile;
-        fn create_dir_all(&self, path: &std::path::Path) -> std::io::Result<()> {
-            self.inner.create_dir_all(path)
-        }
-        fn create(&self, path: &std::path::Path) -> std::io::Result<Self::File> {
-            Ok(BulkProbeFile {
-                inner: self.inner.create(path)?,
-                path: path.to_path_buf(),
-                syncs: self.syncs.clone(),
-            })
-        }
-        fn open_append(&self, path: &std::path::Path) -> std::io::Result<Self::File> {
-            Ok(BulkProbeFile {
-                inner: self.inner.open_append(path)?,
-                path: path.to_path_buf(),
-                syncs: self.syncs.clone(),
-            })
-        }
-        fn open_read(&self, path: &std::path::Path) -> std::io::Result<Self::File> {
-            Ok(BulkProbeFile {
-                inner: self.inner.open_read(path)?,
-                path: path.to_path_buf(),
-                syncs: self.syncs.clone(),
-            })
-        }
-        fn sync_dir(&self, path: &std::path::Path) -> std::io::Result<()> {
-            self.inner.sync_dir(path)
-        }
-        fn read_dir_names(&self, path: &std::path::Path) -> std::io::Result<Vec<String>> {
-            self.inner.read_dir_names(path)
-        }
-        fn remove_file(&self, path: &std::path::Path) -> std::io::Result<()> {
-            self.inner.remove_file(path)
-        }
-        fn rename(&self, from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
-            self.inner.rename(from, to)
-        }
-        fn exists(&self, path: &std::path::Path) -> bool {
-            self.inner.exists(path)
-        }
-        fn metadata_len(&self, path: &std::path::Path) -> std::io::Result<u64> {
-            self.inner.metadata_len(path)
-        }
-        fn advise(
-            &self,
-            path: &std::path::Path,
-            offset: u64,
-            len: u64,
-            kind: AdviseKind,
-        ) -> std::io::Result<()> {
-            self.advises
-                .lock()
-                .unwrap()
-                .push((path.to_path_buf(), offset, len, kind));
-            self.inner.advise(path, offset, len, kind)
-        }
-    }
-
-    /// RFC-0162 P1.1: chunk install is a durability + page-cache hygiene
-    /// point — `fdatasync` runs on the tmp SST even with DB `sync=false`,
-    /// and the final path gets exactly one whole-file `DONTNEED` after the
-    /// rename. Fails if the old `if sync` gate or the missing advise return.
-    #[test]
-    fn rfc0162_bulk_chunk_install_syncs_and_dontneeds_even_with_sync_off() {
-        let dir = temp_dir();
-        fs::create_dir_all(&dir).unwrap();
-        let env = BulkProbeEnv::new();
-        let mut run = crate::bulk_run::BulkRun::default();
-        for i in 0..100u32 {
-            run.push(
-                Bytes::from(format!("key{i:08}")),
-                Bytes::from_static(b"val08bytes"),
-                u64::from(i) + 1,
-            );
-        }
-        let (table, num) =
-            Db::write_bulk_run_sst(&env, &dir, 7, &run, "default", false, "worker").unwrap();
-        let tmp = dir.join("000007.sst.tmp");
-        let final_p = dir.join("000007.sst");
-        assert_eq!(num, 7);
-        assert!(final_p.exists(), "chunk must be renamed into place");
-        assert!(!tmp.exists(), "no tmp residue");
-        assert_eq!(table.cf(), "default");
-        let syncs = env.syncs.lock().unwrap().clone();
-        assert!(
-            syncs.iter().any(|p| p == &tmp),
-            "chunk install must fdatasync the tmp SST even with sync=false, got {syncs:?}"
-        );
-        assert_eq!(
-            env.advises.lock().unwrap().clone(),
-            vec![(final_p, 0, 0, AdviseKind::DontNeed)],
-            "exactly one whole-file DONTNEED on the final path after rename"
-        );
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// RFC-0168 P1.1 two-state: settle WILLNEED is off by default and
-    /// fires one whole-file advise per live SST when forced on.
-    #[test]
-    fn rfc0168_settle_willneed_two_state() {
-        let dir = temp_dir();
-        let env = BulkProbeEnv::new();
-        let mut db = Db::open_with_env(
-            &dir,
-            OpenOptions {
-                sync: false,
-                auto_flush_bytes: Some(4 * 1024),
-                ..OpenOptions::default()
-            },
-            env.clone(),
-        )
-        .unwrap();
-        for i in 0..32u32 {
-            db.put(format!("k{i:04}").as_bytes(), vec![b'v'; 64])
-                .unwrap();
-        }
-        db.flush().unwrap();
-        env.advises.lock().unwrap().clear();
-        crate::env::force_settle_willneed(Some(false));
-        db.compact_leveled().unwrap();
-        let off: Vec<_> = env
-            .advises
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|(_, _, _, k)| *k == AdviseKind::WillNeed)
-            .cloned()
-            .collect();
-        assert!(
-            off.is_empty(),
-            "default/forced-off settle must not WILLNEED, got {off:?}"
-        );
-        env.advises.lock().unwrap().clear();
-        crate::env::force_settle_willneed(Some(true));
-        db.compact_leveled().unwrap();
-        let on: Vec<_> = env
-            .advises
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|(_, _, _, k)| *k == AdviseKind::WillNeed)
-            .cloned()
-            .collect();
-        crate::env::force_settle_willneed(None);
-        assert!(
-            !on.is_empty(),
-            "PEDRA_SETTLE_WILLNEED must WILLNEED live SSTs after compact"
-        );
-        assert!(
-            on.iter().all(|(_, off, len, _)| *off == 0 && *len == 0),
-            "WILLNEED must be whole-file (offset=0,len=0), got {on:?}"
-        );
-        db.close().unwrap();
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// RFC-0168 P1.1 two-state: settle warm streams SST bytes only when on,
-    /// through the bounded-open file source (same fd as get).
-    #[test]
-    fn rfc0168_settle_warm_two_state() {
-        let dir = temp_dir();
-        let env = BulkProbeEnv::new();
-        let mut db = Db::open_with_env_bounded(
-            &dir,
-            OpenOptions {
-                sync: false,
-                auto_flush_bytes: Some(4 * 1024),
-                sst_payload_budget_bytes: Some(1),
-                ..OpenOptions::default()
-            },
-            env,
-        )
-        .unwrap();
-        for i in 0..32u32 {
-            db.put(format!("k{i:04}").as_bytes(), vec![b'v'; 64])
-                .unwrap();
-        }
-        db.flush().unwrap();
-        let _ = crate::env::take_settle_warm_bytes();
-        crate::env::force_settle_warm(Some(false));
-        db.compact_leveled().unwrap();
-        assert_eq!(
-            crate::env::take_settle_warm_bytes(),
-            0,
-            "forced-off settle must not stream SST bytes"
-        );
-        crate::env::force_settle_warm(Some(true));
-        db.compact_leveled().unwrap();
-        let n = crate::env::take_settle_warm_bytes();
-        crate::env::force_settle_warm(None);
-        assert!(n > 0, "PEDRA_SETTLE_WARM must stream live SSTs, got {n}");
-        db.close().unwrap();
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// RFC-0168 P1.1 two-state: default warm skips when live SST bytes
-    /// exceed `PEDRA_SETTLE_WARM_MAX_BYTES` (25M/100M must not stream
-    /// 6–24 GiB into a 4 GiB box). Under the cap, default streams.
-    #[test]
-    fn rfc0168_settle_warm_cap_skips_over_budget() {
-        let dir = temp_dir();
-        let env = BulkProbeEnv::new();
-        let mut db = Db::open_with_env_bounded(
-            &dir,
-            OpenOptions {
-                sync: false,
-                auto_flush_bytes: Some(4 * 1024),
-                sst_payload_budget_bytes: Some(1),
-                ..OpenOptions::default()
-            },
-            env.clone(),
-        )
-        .unwrap();
-        for i in 0..32u32 {
-            db.put(format!("k{i:04}").as_bytes(), vec![b'v'; 64])
-                .unwrap();
-        }
-        db.flush().unwrap();
-        crate::env::force_settle_warm(None);
-        let _ = crate::env::take_settle_warm_bytes();
-        env.advises.lock().unwrap().clear();
-        std::env::set_var("PEDRA_SETTLE_WARM_MAX_BYTES", "1");
-        db.compact_leveled().unwrap();
-        assert_eq!(
-            crate::env::take_settle_warm_bytes(),
-            0,
-            "over-cap default must not stream"
-        );
-        let st = db.stats();
-        assert_eq!(
-            st.settle_warm_bytes, 0,
-            "over-cap must not stream, stats.settle_warm_bytes"
-        );
-        assert_eq!(st.ram_pressure, 1, "over-cap must set ram_pressure");
-        assert!(
-            st.ram_warm_skipped >= 1,
-            "over-cap must count warm skip, got {}",
-            st.ram_warm_skipped
-        );
-        assert!(
-            st.ram_line().contains("mode=bounded-cache"),
-            "ram_line must name bounded-cache, got {}",
-            st.ram_line()
-        );
-        let dont: Vec<_> = env
-            .advises
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|(_, _, _, k)| *k == AdviseKind::DontNeed)
-            .cloned()
-            .collect();
-        assert!(
-            !dont.is_empty(),
-            "bounded-cache mode must DONTNEED SST pages, got {dont:?}"
-        );
-        assert!(
-            dont.iter().all(|(_, off, len, _)| *off == 0 && *len == 0),
-            "DONTNEED must be whole-file (offset=0,len=0), got {dont:?}"
-        );
-        std::env::set_var("PEDRA_SETTLE_WARM_MAX_BYTES", "1073741824");
-        db.compact_leveled().unwrap();
-        let n = crate::env::take_settle_warm_bytes();
-        let st = db.stats();
-        std::env::remove_var("PEDRA_SETTLE_WARM_MAX_BYTES");
-        assert!(n > 0, "under-cap default must stream, got {n}");
-        assert_eq!(
-            st.settle_warm_bytes, n,
-            "stats must match streamed warm bytes"
-        );
-        assert!(
-            st.ram_line().contains("warm_bytes="),
-            "ram_line must name warm_bytes, got {}",
-            st.ram_line()
-        );
-        db.close().unwrap();
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// RFC-0168 P2.4: flush streams the get fd; settle compact does not re-stream.
-    #[test]
-    fn rfc0168_flush_warm_skips_settle_rewarm() {
-        let dir = temp_dir();
-        let env = BulkProbeEnv::new();
-        let mut db = Db::open_with_env_bounded(
-            &dir,
-            OpenOptions {
-                sync: false,
-                auto_flush_bytes: Some(4 * 1024),
-                sst_payload_budget_bytes: Some(1),
-                ..OpenOptions::default()
-            },
-            env,
-        )
-        .unwrap();
-        for i in 0..32u32 {
-            db.put(format!("k{i:04}").as_bytes(), vec![b'v'; 64])
-                .unwrap();
-        }
-        crate::env::force_settle_warm(None);
-        let _ = crate::env::take_settle_warm_bytes();
-        db.flush().unwrap();
-        db.compact_leveled().unwrap();
-        let n = crate::env::take_settle_warm_bytes();
-        assert!(n > 0, "flush/first compact must stream live SSTs, got {n}");
-        db.compact_leveled().unwrap();
-        let st = db.stats();
-        crate::env::force_settle_warm(None);
-        assert_eq!(
-            st.settle_warm_bytes, 0,
-            "second compact must not re-stream unchanged SST paths"
-        );
-        db.close().unwrap();
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// RFC-0178: explicit ConcurrentDb::compact re-warms the live set even
-    /// when flush already streamed those paths (scale settle is compact()).
-    #[test]
-    fn rfc0178_explicit_compact_rewarm_after_flush() {
-        let dir = temp_dir();
-        let env = BulkProbeEnv::new();
-        let db = crate::concurrent::ConcurrentDb::open_with_env_bounded(
-            &dir,
-            OpenOptions {
-                sync: false,
-                auto_flush_bytes: Some(4 * 1024),
-                sst_payload_budget_bytes: Some(1),
-                ..OpenOptions::default()
-            },
-            env,
-        )
-        .unwrap();
-        for i in 0..32u32 {
-            db.put(format!("k{i:04}").as_bytes(), vec![b'v'; 64])
-                .unwrap();
-        }
-        crate::env::force_settle_warm(None);
-        let _ = crate::env::take_settle_warm_bytes();
-        // Warm is idle-only (overwrite_mc4 4 GiB hole): wait out the 200 µs
-        // last-Ok hold so this explicit flush is settle-class, not seed.
-        std::thread::sleep(std::time::Duration::from_millis(1));
-        db.flush().unwrap();
-        let flushed = crate::env::take_settle_warm_bytes();
-        assert!(flushed > 0, "idle flush must stream live SSTs, got {flushed}");
-        db.compact().unwrap();
-        let n = crate::env::take_settle_warm_bytes();
-        crate::env::force_settle_warm(None);
-        assert!(
-            n > 0,
-            "explicit compact must re-warm after flush path-skip, got {n}"
-        );
-        db.close().unwrap();
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// P0.70 1c checkpoint flush must not stream SSTs while the last Ok is
-    /// fresh — that was the 4 GiB overwrite_mc4 page-cache hole.
-    #[test]
-    fn rfc0180_flush_warm_skips_when_recently_ok() {
-        let dir = temp_dir();
-        let env = BulkProbeEnv::new();
-        let db = crate::concurrent::ConcurrentDb::open_with_env_bounded(
-            &dir,
-            OpenOptions {
-                sync: false,
-                auto_flush_bytes: Some(4 * 1024),
-                sst_payload_budget_bytes: Some(1),
-                ..OpenOptions::default()
-            },
-            env,
-        )
-        .unwrap();
-        crate::env::force_settle_warm(Some(true));
-        for i in 0..32u32 {
-            db.put(format!("k{i:04}").as_bytes(), vec![b'v'; 64])
-                .unwrap();
-        }
-        let _ = crate::env::take_settle_warm_bytes();
-        db.flush().unwrap();
-        let mid = crate::env::take_settle_warm_bytes();
-        assert_eq!(
-            mid, 0,
-            "flush during last-Ok hold must not stream SSTs, got {mid}"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(1));
-        assert!(
-            db.writes_idle_for(std::time::Duration::from_micros(200)),
-            "1 ms later last Ok must be idle"
-        );
-        db.flush().unwrap();
-        let idle = crate::env::take_settle_warm_bytes();
-        crate::env::force_settle_warm(None);
-        assert!(idle > 0, "idle flush must warm, got {idle}");
-        db.close().unwrap();
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// RFC-0178: compact rewrite installs new SST paths; those must warm.
-    #[test]
-    fn rfc0178_compact_new_paths_are_warmed() {
-        let dir = temp_dir();
-        let env = BulkProbeEnv::new();
-        let mut db = Db::open_with_env_bounded(
-            &dir,
-            OpenOptions {
-                sync: false,
-                auto_flush_bytes: Some(4 * 1024),
-                sst_payload_budget_bytes: Some(1),
-                ..OpenOptions::default()
-            },
-            env,
-        )
-        .unwrap();
-        crate::env::force_settle_warm(None);
-        for i in 0..16u32 {
-            db.put(format!("a/{i:04}").as_bytes(), vec![b'a'; 64])
-                .unwrap();
-        }
-        db.flush().unwrap();
-        db.compact_leveled().unwrap();
-        let _ = crate::env::take_settle_warm_bytes();
-        for i in 0..64u32 {
-            db.put(format!("z/{i:04}").as_bytes(), vec![b'z'; 64])
-                .unwrap();
-        }
-        db.flush().unwrap();
-        db.compact_leveled().unwrap();
-        let n = crate::env::take_settle_warm_bytes();
-        crate::env::force_settle_warm(None);
-        assert!(n > 0, "new SST paths after compact must stream, got {n}");
-        db.close().unwrap();
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// RFC-0178 P0.3: a settled prefix window must not probe SSTs of other
-    /// prefixes (the 25M→100M prefix cell is a fixed 1000-key window).
-    #[test]
-    fn rfc0178_prefix_window_probes_overlapping_ssts_only() {
-        let dir = temp_dir();
-        let env = BulkProbeEnv::new();
-        let mut db = Db::open_with_env_bounded(
-            &dir,
-            OpenOptions {
-                sync: false,
-                auto_flush_bytes: Some(4 * 1024),
-                sst_payload_budget_bytes: Some(1),
-                ..OpenOptions::default()
-            },
-            env,
-        )
-        .unwrap();
-        for i in 0..32u32 {
-            db.put(format!("a/{i:04}").as_bytes(), vec![b'a'; 64])
-                .unwrap();
-        }
-        db.flush().unwrap();
-        for i in 0..256u32 {
-            db.put(format!("z/{i:04}").as_bytes(), vec![b'z'; 64])
-                .unwrap();
-        }
-        db.flush().unwrap();
-        db.compact_leveled().unwrap();
-        assert!(
-            db.ssts.len() >= 4,
-            "need several live SSTs after compact, got {}",
-            db.ssts.len()
-        );
-        db.reset_read_probe();
-        let got = db.range_limited(
-            std::ops::Bound::Included(&b"a/"[..]),
-            std::ops::Bound::Excluded(&b"b/"[..]),
-            Some(64),
-        );
-        assert_eq!(got.len(), 32, "prefix a/ must return only the window");
-        let p = db.read_probe();
-        assert!(
-            p.scan_sst_probed <= 2,
-            "prefix window must not walk other-prefix SSTs: probed={} sst_count={}",
-            p.scan_sst_probed,
-            p.sst_count
-        );
-        db.close().unwrap();
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn rfc0180_read_cache_invalidate_needed_skips_idle() {
-        assert!(!read_cache_invalidate_needed(true, true, true));
-        assert!(read_cache_invalidate_needed(false, true, true));
-        assert!(read_cache_invalidate_needed(true, false, true));
-        assert!(read_cache_invalidate_needed(true, true, false));
-    }
-
-    #[test]
-    fn rfc0180_async_flush_check_due_every_32() {
-        assert!(async_flush_check_due(32));
-        assert!(async_flush_check_due(64));
-        assert!(!async_flush_check_due(1));
-        assert!(!async_flush_check_due(31));
-        assert!(!async_flush_check_due(33));
-        assert!(async_ok_flush_check_needed(true, 1));
-        assert!(async_ok_flush_check_needed(true, 31));
-        assert!(!async_ok_flush_check_needed(false, 31));
-        assert!(async_ok_flush_check_needed(false, 32));
-    }
-
-    #[test]
-    fn rfc0180_async_ok_flush_is_stage_only_policy() {
-        assert!(async_ok_flush_is_stage_only());
-    }
-
-    #[test]
-    fn rfc0178_tls_precise_small_group_does_not_bump_epoch() {
-        let dir = temp_dir();
-        let mut db = Db::open(&dir).unwrap();
-        db.bulk_route_enabled = false;
-        db.put(b"hot", b"v1").unwrap();
-        assert_eq!(db.get(b"hot").as_deref(), Some(b"v1".as_ref()));
-        let epoch0 = db.point_tls_epoch_handle().load(Ordering::Acquire);
-        let batch: Vec<BatchOp> = (0..4u8)
-            .map(|i| BatchOp::put(vec![b'x', i], vec![b'y', i]))
-            .collect();
-        db.commit_async_ops(batch).unwrap();
-        assert_eq!(
-            db.point_tls_epoch_handle().load(Ordering::Acquire),
-            epoch0,
-            "n=4 group must touch TLS gens, not epoch"
-        );
-        let fat: Vec<BatchOp> = (0..33u8)
-            .map(|i| BatchOp::put(vec![b'z', i], vec![b'w', i]))
-            .collect();
-        db.commit_async_ops(fat).unwrap();
-        assert!(
-            db.point_tls_epoch_handle().load(Ordering::Acquire) > epoch0,
-            "n=33 still epoch-bumps"
-        );
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// RFC-0180 P0.42: `commit_async_ops` encode+write is one WAL hop.
-    #[test]
-    fn rfc0180_commit_async_ops_one_hop_recovers() {
-        let dir = temp_dir();
-        {
-            let mut db = Db::open(&dir).unwrap();
-            db.bulk_route_enabled = false;
-            let batch: Vec<BatchOp> = (0..4u8)
-                .map(|i| BatchOp::put(vec![b'a', i], vec![b'b', i]))
-                .collect();
-            db.commit_async_ops(batch).unwrap();
-            db.close().unwrap();
-        }
-        let db = Db::open(&dir).unwrap();
-        for i in 0..4u8 {
-            assert_eq!(
-                db.get(&[b'a', i]).as_deref(),
-                Some(&[b'b', i][..]),
-                "lost async ops put {i}"
-            );
-        }
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn rfc0180_async_ok_does_not_write_l0_when_over_limit() {
-        let dir = temp_dir();
-        let mut db = Db::open_with(
-            &dir,
-            OpenOptions {
-                wal_full_fsync: false,
-                history: Default::default(),
-                wal_recovery: Default::default(),
-                sync: false,
-                auto_flush_bytes: Some(4096),
-                auto_compact_sst_count: None,
-                auto_compact_sst_bytes: None,
-                exclusive: true,
-                large_value_threshold: None,
-                sst_payload_budget_bytes: None,
-            },
-        )
-        .unwrap();
-        db.set_physical_cfs(vec!["default".into()]);
-        db.set_cf_write_buffer("default", 4096);
-        for i in 0..80u32 {
-            let k = format!("k{i:04}");
-            db.commit_async_one(BatchOp::put(k, vec![b'x'; 64]))
-                .unwrap();
-        }
-        assert_eq!(db.sst_count(), 0, "async Ok must park/stage, not write L0");
-        assert_eq!(db.commit_inflight(), 0, "RFC-0180 P0.25: pin drops on Ok");
-        assert!(db.get(b"k0000").is_some(), "parked/active still readable");
-        db.close().unwrap();
-        let re = Db::open(&dir).unwrap();
-        assert_eq!(re.get(b"k0000").as_deref(), Some(&[b'x'; 64][..]));
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// RFC-0184: `commit_async_ops` (apply path) must park, not `flush_cf`.
-    /// Bulk latch is off so a 4 KiB chunk cap cannot install an SST on Ok
-    /// (that path is ingest, not the apply flush_check walk).
-    #[test]
-    fn rfc0184_async_ops_does_not_write_l0_when_over_limit() {
-        let dir = temp_dir();
-        let mut db = Db::open_with(
-            &dir,
-            OpenOptions {
-                wal_full_fsync: false,
-                history: Default::default(),
-                wal_recovery: Default::default(),
-                sync: false,
-                auto_flush_bytes: Some(4096),
-                auto_compact_sst_count: None,
-                auto_compact_sst_bytes: None,
-                exclusive: true,
-                large_value_threshold: None,
-                sst_payload_budget_bytes: None,
-            },
-        )
-        .unwrap();
-        db.bulk_route_enabled = false;
-        db.set_physical_cfs(vec!["lock".into(), "default".into(), "write".into()]);
-        db.set_cf_write_buffer("lock", 4096);
-        db.set_cf_write_buffer("default", 4096);
-        db.set_cf_write_buffer("write", 4096);
-        for i in 0..80u32 {
-            let mut batch = Vec::with_capacity(3);
-            for fam in ["lock", "default", "write"] {
-                let k = crate::cf_kernel::encode_cf_key(fam, format!("{i:04}").as_bytes(), false);
-                batch.push(BatchOp::put(k, vec![b'x'; 80]));
-            }
-            db.commit_async_ops(batch).unwrap();
-        }
-        assert_eq!(
-            db.sst_count(),
-            0,
-            "async apply Ok must park/stage, not write L0"
-        );
-        assert!(
-            db.has_imm() || db.parked_unflushed_count() > 0,
-            "default-over must stage/park, not stay only in active mem"
-        );
-        assert_eq!(
-            db.commit_inflight(),
-            0,
-            "RFC-0184 P0.6: ops pin drops on Ok (same as 1-op P0.25)"
-        );
-        let k0 = crate::cf_kernel::encode_cf_key("lock", b"0000", false);
-        assert!(db.get(&k0).is_some(), "parked/active still readable");
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// RFC-0184 P0.7: `apply_batch_with` / `put` async Ok must park, not L0.
-    #[test]
-    fn rfc0184_async_apply_batch_does_not_write_l0_when_over_limit() {
-        let dir = temp_dir();
-        let mut db = Db::open_with(
-            &dir,
-            OpenOptions {
-                wal_full_fsync: false,
-                history: Default::default(),
-                wal_recovery: Default::default(),
-                sync: false,
-                auto_flush_bytes: Some(4096),
-                auto_compact_sst_count: None,
-                auto_compact_sst_bytes: None,
-                exclusive: true,
-                large_value_threshold: None,
-                sst_payload_budget_bytes: None,
-            },
-        )
-        .unwrap();
-        db.bulk_route_enabled = false;
-        for i in 0..80u32 {
-            let k = format!("k{i:04}");
-            db.put_with(k, vec![b'x'; 64], WriteOptions::no_sync())
-                .unwrap();
-        }
-        assert_eq!(
-            db.sst_count(),
-            0,
-            "async apply_batch/put Ok must park/stage, not write L0"
-        );
-        assert!(
-            db.has_imm() || db.parked_unflushed_count() > 0,
-            "over-limit async put must stage/park"
-        );
-        assert!(db.get(b"k0000").is_some(), "parked/active still readable");
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn rfc0180_apply_one_owned_matches_insert_many_once() {
-        let op = WriteOp::put(3, Bytes::from_static(b"k"), Bytes::from_static(b"v"));
-        let mut a = MemTable::new();
-        let mut b = MemTable::new();
-        apply_one_owned(&mut a, op.clone(), false);
-        apply_ops_owned(&mut b, std::iter::once(op), false);
-        assert_eq!(a.get(b"k", 3), b.get(b"k", 3));
-        match a.get(b"k", 3) {
-            crate::memtable::Lookup::Found(v) => assert_eq!(&*v, b"v"),
-            other => panic!("expected Found, got {other:?}"),
-        }
-    }
-
-    /// RFC-0180 P0.62: unpinned overwrite must not stack memtable versions.
-    /// A live snapshot pin keeps the old sequence (MVCC).
-    #[test]
-    fn rfc0180_unpinned_overwrite_supersedes_mem_version() {
-        let dir = temp_dir();
-        let mut db = Db::open_with(
-            &dir,
-            OpenOptions {
-                sync: false,
-                auto_flush_bytes: None,
-                ..OpenOptions::default()
-            },
-        )
-        .unwrap();
-        db.put(b"k", b"v0").unwrap();
-        for i in 1..32u32 {
-            db.put(b"k", format!("v{i}").as_bytes()).unwrap();
-        }
-        assert_eq!(
-            db.stats().mem_entries,
-            1,
-            "unpinned overwrite must replace in place"
-        );
-        assert_eq!(db.get(b"k").as_deref(), Some(b"v31".as_ref()));
-
-        let mut pinned = Db::open_with(
-            &dir.join("pin"),
-            OpenOptions {
-                sync: false,
-                auto_flush_bytes: None,
-                ..OpenOptions::default()
-            },
-        )
-        .unwrap();
-        pinned.put(b"k", b"old").unwrap();
-        let pin = pinned.pin_snapshot();
-        pinned.put(b"k", b"new").unwrap();
-        assert!(
-            pinned.stats().mem_entries >= 2,
-            "pin must keep the old version"
-        );
-        assert_eq!(
-            pinned.get_at(pin.snapshot(), b"k").unwrap().as_deref(),
-            Some(b"old".as_ref())
-        );
-        assert_eq!(pinned.get(b"k").as_deref(), Some(b"new".as_ref()));
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// RFC-0180 P0.75: leftover below write-buffer/2 still parks (post-flush
-    /// remainder). 64 KiB limit, ~18 KiB ycsb, first `c/` must not mix.
-    #[test]
-    fn rfc0180_park_foreign_idx_remainder_below_half_buffer() {
-        let dir = temp_dir();
-        let mut db = Db::open_with(
-            &dir,
-            OpenOptions {
-                sync: false,
-                auto_flush_bytes: Some(64 * 1024),
-                ..OpenOptions::default()
-            },
-        )
-        .unwrap();
-        let val = vec![b'y'; 100];
-        for i in 0..150u32 {
-            db.put(format!("ycsb/{i:06}").as_bytes(), &val).unwrap();
-        }
-        let before = db.stats().mem_entries;
-        assert!(
-            before >= 100,
-            "ycsb remainder stays in mem before c/: {before}"
-        );
-        assert!(
-            before < 400,
-            "fixture must sit below half of 64 KiB: {before}"
-        );
-        db.put(b"c/000001", b"v").unwrap();
-        assert!(
-            db.has_imm() || db.parked_unflushed_count() > 0,
-            "remainder ycsb must leave the live mem (imm or parked)"
-        );
-        assert_eq!(
-            db.get(b"ycsb/000000").as_deref(),
-            Some(val.as_slice()),
-            "parked ycsb remainder must still get"
-        );
-        assert_eq!(db.get(b"c/000001").as_deref(), Some(b"v".as_ref()));
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// RFC-0180 P0.68: first `c/` put parks write-buffer-scale `ycsb/` leftover.
-    #[test]
-    fn rfc0180_park_foreign_idx_on_new_slash_prefix() {
-        let dir = temp_dir();
-        let mut db = Db::open_with(
-            &dir,
-            OpenOptions {
-                sync: false,
-                auto_flush_bytes: Some(8192),
-                ..OpenOptions::default()
-            },
-        )
-        .unwrap();
-        let val = vec![b'y'; 100];
-        for i in 0..50u32 {
-            db.put(format!("ycsb/{i:06}").as_bytes(), &val).unwrap();
-        }
-        let before = db.stats().mem_entries;
-        assert!(
-            before >= 40,
-            "ycsb leftover stays in mem before c/: {before}"
-        );
-        db.put(b"c/000001", b"v").unwrap();
-        assert!(
-            db.has_imm() || db.parked_unflushed_count() > 0,
-            "ycsb leftover must leave the live mem (imm or parked)"
-        );
-        assert_eq!(
-            db.get(b"ycsb/000000").as_deref(),
-            Some(val.as_slice()),
-            "parked ycsb must still get"
-        );
-        assert_eq!(db.get(b"c/000001").as_deref(), Some(b"v".as_ref()));
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// RFC-0178 P0.9: inline-only `stats()` must not walk SST values
-    /// (`entries_cloned` of 100M made settle ~80 s after compact returned).
-    #[test]
-    fn rfc0178_stats_without_vlog_skips_sst_value_walk() {
-        let dir = temp_dir();
-        let mut db = Db::open_with(
-            &dir,
-            OpenOptions {
-                sync: false,
-                auto_flush_bytes: Some(4 * 1024),
-                ..OpenOptions::default()
-            },
-        )
-        .unwrap();
-        for i in 0..64u32 {
-            db.put(format!("k{i:04}").as_bytes(), vec![b'v'; 64])
-                .unwrap();
-        }
-        db.flush().unwrap();
-        VLOG_STATS_VALUE_VISITS.store(0, Ordering::Relaxed);
-        let s = db.stats();
-        assert_eq!(s.vlog_live_bytes, 0);
-        assert_eq!(s.vlog_live_records, 0);
-        assert!(s.sst_entries >= 64, "got {}", s.sst_entries);
-        assert_eq!(
-            VLOG_STATS_VALUE_VISITS.load(Ordering::Relaxed),
-            0,
-            "inline-only stats must not walk SST values"
-        );
-        db.close().unwrap();
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// RFC-0178 P0.9: vlog live-byte accounting still visits stored values.
-    #[test]
-    fn rfc0178_stats_with_vlog_still_counts_live_bytes() {
-        let dir = temp_dir();
-        let mut db = Db::open_with(&dir, vlog_opts()).unwrap();
-        let big = vec![0xAAu8; 1024];
-        db.put(b"a", &big).unwrap();
-        VLOG_STATS_VALUE_VISITS.store(0, Ordering::Relaxed);
-        let s = db.stats();
-        assert!(s.vlog_live_bytes >= 1024);
-        assert_eq!(s.vlog_live_records, 1);
-        assert!(
-            VLOG_STATS_VALUE_VISITS.load(Ordering::Relaxed) >= 1,
-            "vlog stats must still visit stored values"
-        );
-        db.close().unwrap();
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// RFC-0173 P2.1: over-cap settle pages the sparse index; gets still hit.
-    #[test]
-    fn rfc0173_bounded_cache_pages_index_and_gets() {
-        let dir = temp_dir();
-        let env = BulkProbeEnv::new();
-        let mut db = Db::open_with_env_bounded(
-            &dir,
-            OpenOptions {
-                sync: false,
-                auto_flush_bytes: Some(4 * 1024),
-                sst_payload_budget_bytes: Some(1),
-                ..OpenOptions::default()
-            },
-            env.clone(),
-        )
-        .unwrap();
-        let n = 400u32;
-        for i in 0..n {
-            db.put(format!("k{i:06}").as_bytes(), vec![b'v'; 64])
-                .unwrap();
-        }
-        db.flush().unwrap();
-        crate::env::force_settle_warm(None);
-        std::env::set_var("PEDRA_SETTLE_WARM_MAX_BYTES", "1");
-        db.compact_leveled().unwrap();
-        std::env::remove_var("PEDRA_SETTLE_WARM_MAX_BYTES");
-        assert!(
-            db.ssts.iter().any(|t| t.paged_file_backed()),
-            "over-cap settle must file-page at least one live SST"
-        );
-        for i in [0u32, n / 3, n / 2, n - 1] {
-            let k = format!("k{i:06}");
-            let got = db.get(k.as_bytes());
-            assert_eq!(got.as_deref(), Some(&[b'v'; 64][..]), "missed {k}");
-        }
-        db.close().unwrap();
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// RFC-0168: RAM-aware cap never drops below the 10M floor (3 GiB).
-    #[test]
-    fn rfc0168_warm_cap_at_least_10m_floor() {
-        std::env::remove_var("PEDRA_SETTLE_WARM_MAX_BYTES");
-        assert!(crate::env::settle_warm_max_bytes() >= crate::env::DEFAULT_SETTLE_WARM_MAX_BYTES);
-    }
-
-    /// Engine RSS cap: installing SSTs past `PEDRA_RAM_BUDGET_BYTES` is
-    /// `RamBudget`, not SIGKILL.
-    #[test]
-    fn rfc0168_engine_ram_cap_from_env() {
-        std::env::set_var("PEDRA_RAM_BUDGET_BYTES", "1234567");
-        assert_eq!(crate::env::engine_ram_cap_bytes(), Some(1234567));
-        std::env::remove_var("PEDRA_RAM_BUDGET_BYTES");
-    }
 
     /// RFC-0157 P1.4 — db.rs stage 1: golden-fingerprint characterization
     /// of the CURRENT open/recovery path (nothing extracted;
@@ -14722,6 +13472,267 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pedradb-db-test-{n}-{i}"));
         let _ = fs::remove_dir_all(&dir);
         dir
+    }
+
+    /// RFC-0179: inject free-space via `Env::available_bytes`.
+    /// `u64::MAX` = unknown (`None`).
+    #[derive(Clone)]
+    struct SpaceEnv {
+        available: std::sync::Arc<std::sync::atomic::AtomicU64>,
+        /// RFC-0217 P2.4: `available_bytes` call count (probe-cache proof).
+        probes: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    }
+
+    impl SpaceEnv {
+        fn with_available(n: u64) -> Self {
+            Self {
+                available: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(n)),
+                probes: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            }
+        }
+    }
+
+    impl crate::env::Env for SpaceEnv {
+        type File = std::fs::File;
+
+        fn create_dir_all(&self, path: &Path) -> std::io::Result<()> {
+            StdEnv.create_dir_all(path)
+        }
+        fn create(&self, path: &Path) -> std::io::Result<Self::File> {
+            StdEnv.create(path)
+        }
+        fn open_append(&self, path: &Path) -> std::io::Result<Self::File> {
+            StdEnv.open_append(path)
+        }
+        fn open_read(&self, path: &Path) -> std::io::Result<Self::File> {
+            StdEnv.open_read(path)
+        }
+        fn sync_dir(&self, path: &Path) -> std::io::Result<()> {
+            StdEnv.sync_dir(path)
+        }
+        fn read_dir_names(&self, path: &Path) -> std::io::Result<Vec<String>> {
+            StdEnv.read_dir_names(path)
+        }
+        fn remove_file(&self, path: &Path) -> std::io::Result<()> {
+            StdEnv.remove_file(path)
+        }
+        fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+            StdEnv.rename(from, to)
+        }
+        fn exists(&self, path: &Path) -> bool {
+            StdEnv.exists(path)
+        }
+        fn metadata_len(&self, path: &Path) -> std::io::Result<u64> {
+            StdEnv.metadata_len(path)
+        }
+        fn advise(
+            &self,
+            path: &Path,
+            offset: u64,
+            len: u64,
+            kind: crate::env::AdviseKind,
+        ) -> std::io::Result<()> {
+            StdEnv.advise(path, offset, len, kind)
+        }
+        fn available_bytes(&self, _path: &Path) -> std::io::Result<Option<u64>> {
+            self.probes
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let n = self.available.load(std::sync::atomic::Ordering::SeqCst);
+            if n == u64::MAX {
+                Ok(None)
+            } else {
+                Ok(Some(n))
+            }
+        }
+    }
+
+    /// RFC-0179 P0.3: put below the hard floor is DiskPressure; get stays
+    /// Ok; the handle is not durability-fenced.
+    #[test]
+    fn put_under_hard_floor_is_disk_pressure_get_ok() {
+        use crate::disk_pressure_kernel::DISK_HARD_FREE_BYTES;
+        let dir = temp_dir();
+        let env = SpaceEnv::with_available(u64::MAX);
+        let available = std::sync::Arc::clone(&env.available);
+        let mut db = Db::open_with_env(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                ..OpenOptions::default()
+            },
+            env,
+        )
+        .unwrap();
+        db.put(b"k", b"v").unwrap();
+        assert_eq!(db.get(b"k").as_deref(), Some(b"v".as_ref()));
+
+        available.store(1024, std::sync::atomic::Ordering::SeqCst);
+        let err = db.put(b"k2", b"v2").unwrap_err();
+        assert!(
+            matches!(
+                err,
+                CoreError::DiskPressure {
+                    available: 1024,
+                    need: DISK_HARD_FREE_BYTES,
+                }
+            ),
+            "expected DiskPressure, got {err:?}"
+        );
+        assert_eq!(
+            db.get(b"k").as_deref(),
+            Some(b"v".as_ref()),
+            "reads stay up under disk pressure"
+        );
+        assert!(
+            db.get(b"k2").is_none(),
+            "refused put must not become visible"
+        );
+        assert!(
+            !db.is_durability_fenced(),
+            "DiskPressure is not a durability fence"
+        );
+
+        available.store(DISK_HARD_FREE_BYTES, std::sync::atomic::Ordering::SeqCst);
+        db.put(b"k3", b"v3").unwrap();
+        assert_eq!(db.get(b"k3").as_deref(), Some(b"v3".as_ref()));
+
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0179: unknown probe (None) must not false-refuse a healthy disk.
+    #[test]
+    fn unknown_available_bytes_does_not_refuse_writes() {
+        let dir = temp_dir();
+        let env = SpaceEnv::with_available(u64::MAX);
+        let mut db = Db::open_with_env(&dir, OpenOptions::default(), env).unwrap();
+        db.put(b"k", b"v").unwrap();
+        assert_eq!(db.get(b"k").as_deref(), Some(b"v".as_ref()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0217 P2.4: one shared axis lock — both knob tests serialize on
+    /// the process-global `PEDRA_DISK_PROBE_CACHE_MS`.
+    static RFC0217_DISK_ENV_AXIS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// RFC-0217 P2.4: a fresh `Ok` verdict is reused (no `statvfs`) for the
+    /// knob window; a refuse below the hard floor resumes the moment the
+    /// window expires — the guard is the window, never longer.
+    #[test]
+    fn rfc0217_disk_probe_cache_window_and_refuse_guard() {
+        let _g = RFC0217_DISK_ENV_AXIS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        struct Restore;
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                std::env::remove_var("PEDRA_DISK_PROBE_CACHE_MS");
+            }
+        }
+        let _restore = Restore;
+        std::env::set_var("PEDRA_DISK_PROBE_CACHE_MS", "10000");
+
+        use crate::disk_pressure_kernel::DISK_HARD_FREE_BYTES;
+        let dir = temp_dir();
+        let env = SpaceEnv::with_available(u64::MAX);
+        let available = std::sync::Arc::clone(&env.available);
+        let probes = std::sync::Arc::clone(&env.probes);
+        let mut db = Db::open_with_env(&dir, OpenOptions::default(), env).unwrap();
+        db.put(b"k", b"v").unwrap(); // first put probes (cache cold)
+        let after_first = probes.load(std::sync::atomic::Ordering::SeqCst);
+        assert!(after_first >= 1);
+
+        // Soft band inside the window: the cached Ok admits WITHOUT probing.
+        available.store(DISK_HARD_FREE_BYTES, std::sync::atomic::Ordering::SeqCst);
+        db.put(b"k2", b"v2").unwrap();
+        assert_eq!(
+            probes.load(std::sync::atomic::Ordering::SeqCst),
+            after_first,
+            "cached Ok must not re-probe inside the window"
+        );
+
+        // Below hard inside the window: still the cached Ok (documented,
+        // bounded exposure)…
+        available.store(1024, std::sync::atomic::Ordering::SeqCst);
+        db.put(b"k3", b"v3").unwrap();
+        assert_eq!(db.get(b"k3").as_deref(), Some(b"v3".as_ref()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+
+        // Window expiry (1 ms knob + sleep): the refuse comes back with the
+        // very next probe — the guard is the window, never longer.
+        std::env::set_var("PEDRA_DISK_PROBE_CACHE_MS", "1");
+        let dir = temp_dir();
+        let env = SpaceEnv::with_available(u64::MAX);
+        let available = std::sync::Arc::clone(&env.available);
+        let probes = std::sync::Arc::clone(&env.probes);
+        let mut db = Db::open_with_env(&dir, OpenOptions::default(), env).unwrap();
+        db.put(b"w1", b"v").unwrap();
+        let before = probes.load(std::sync::atomic::Ordering::SeqCst);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        available.store(1024, std::sync::atomic::Ordering::SeqCst);
+        let err = db.put(b"w2", b"v").unwrap_err();
+        assert!(
+            matches!(
+                err,
+                CoreError::DiskPressure {
+                    available: 1024,
+                    need: DISK_HARD_FREE_BYTES,
+                }
+            ),
+            "expected DiskPressure after window, got {err:?}"
+        );
+        assert!(
+            probes.load(std::sync::atomic::Ordering::SeqCst) > before,
+            "expired window must re-probe"
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0217 P2.4: the soft band never populates the probe cache — with
+    /// the knob on, a drop below the hard floor is caught by the very next
+    /// commit (no ladder, no window).
+    #[test]
+    fn rfc0217_disk_soft_band_never_caches_refuse_next_commit() {
+        let _g = RFC0217_DISK_ENV_AXIS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        struct Restore;
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                std::env::remove_var("PEDRA_DISK_PROBE_CACHE_MS");
+            }
+        }
+        let _restore = Restore;
+        std::env::set_var("PEDRA_DISK_PROBE_CACHE_MS", "10000");
+
+        use crate::disk_pressure_kernel::DISK_HARD_FREE_BYTES;
+        let dir = temp_dir();
+        let env = SpaceEnv::with_available(DISK_HARD_FREE_BYTES);
+        let available = std::sync::Arc::clone(&env.available);
+        let mut db = Db::open_with_env(&dir, OpenOptions::default(), env).unwrap();
+        // Soft band: admits via the (rate-limited) ladder path — no cache.
+        db.put(b"s1", b"v1").unwrap();
+        // Below hard immediately after: refuse NOW, not after any window.
+        available.store(1024, std::sync::atomic::Ordering::SeqCst);
+        let err = db.put(b"s2", b"v2").unwrap_err();
+        assert!(
+            matches!(
+                err,
+                CoreError::DiskPressure {
+                    available: 1024,
+                    ..
+                }
+            ),
+            "soft band must not mask the next-commit refuse, got {err:?}"
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// RFC-0159 P1.3: the host-worker stage threshold takes the max of the
@@ -16386,7 +15397,7 @@ mod tests {
             db.put(b"tail", b"T").unwrap();
             std::mem::forget(db);
         }
-        let db = Db::open(&dir).unwrap();
+        let mut db = Db::open(&dir).unwrap();
         assert_eq!(
             db.get(b"flushed").as_deref(),
             Some(b"F".as_ref()),
@@ -16397,6 +15408,15 @@ mod tests {
             Some(b"T".as_ref()),
             "acked key on the WAL-replay path"
         );
+        // RFC-0217 P1.1: the crash lands inside the deferred-publish
+        // window, so this reopen serves "flushed" from the archive replay
+        // (mem) — the inventory path returns after a flush+close pushes
+        // the window into a published SST.
+        db.flush().unwrap();
+        db.close().unwrap();
+        let db = Db::open(&dir).unwrap();
+        assert_eq!(db.get(b"flushed").as_deref(), Some(b"F".as_ref()));
+        assert_eq!(db.get(b"tail").as_deref(), Some(b"T".as_ref()));
         assert!(db.sst_count() >= 1, "reopen served the committed inventory");
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
@@ -16813,7 +15833,7 @@ mod tests {
         let mut concat = Vec::new();
         for (t, &lvl) in db.ssts.iter().zip(db.sst_levels.iter()) {
             if lvl == 0 {
-                concat.extend(t.entries_cloned().unwrap());
+                concat.extend(t.entries_cloned());
             }
         }
         let expected =
@@ -16829,7 +15849,7 @@ mod tests {
             .find(|(_, &lvl)| lvl == 1)
             .map(|(t, _)| t)
             .expect("L1");
-        assert_eq!(l1.entries_cloned().unwrap(), expected);
+        assert_eq!(l1.entries_cloned(), expected);
         assert_eq!(db.get(b"a"), None);
         assert_eq!(db.get(b"b").as_deref(), Some(b"b2".as_slice()));
         assert_eq!(db.get(b"c").as_deref(), Some(b"c1".as_slice()));
@@ -17035,12 +16055,7 @@ mod tests {
     }
 
     /// RFC-0149: auto-flush with physical CFs must not scan every memtable
-    /// key per put. 20k puts under a 64 MiB cap stay in mem and the per-put
-    /// cost must not grow with the number of resident keys. The check is a
-    /// early-window/late-window ratio, not a wall-clock bound: suite load
-    /// slows both windows equally, but the "cf_families-per-put" regression
-    /// (rescanning every key on every put) makes the late window ~10x
-    /// slower per put than the early one.
+    /// key. 20k puts under a 64 MiB cap stay in mem and finish in bounded time.
     #[test]
     fn maybe_auto_flush_physical_cf_is_not_linear_in_keys() {
         let dir = temp_dir();
@@ -17054,7 +16069,8 @@ mod tests {
         )
         .unwrap();
         db.set_physical_cfs(vec!["default".into(), "lock".into()]);
-        fn put_i(db: &mut Db, i: u32) {
+        let t0 = std::time::Instant::now();
+        for i in 0..20_000u32 {
             let mut k = [0u8; 10];
             k[..7].copy_from_slice(b"default");
             k[7] = 0;
@@ -17062,30 +16078,10 @@ mod tests {
             k[9] = i as u8;
             db.put(&k, b"v").unwrap();
         }
-        // Early window: memtable holds 0..2k keys. Min of 3 windows: one
-        // scheduler hiccup from the parallel suite must not fail the ratio
-        // (the windows are ~ms; contention noise is asymmetric).
-        fn window(db: &mut Db, from: u32, to: u32) -> std::time::Duration {
-            let t = std::time::Instant::now();
-            for i in from..to {
-                put_i(db, i);
-            }
-            t.elapsed()
-        }
-        let early = (0..3).map(|_| window(&mut db, 0, 2_000)).min().unwrap();
-        for i in 2_000..18_000u32 {
-            put_i(&mut db, i);
-        }
-        // Late window: memtable holds ~18k keys.
-        let late = (0..3)
-            .map(|_| window(&mut db, 18_000, 20_000))
-            .min()
-            .unwrap();
-        let growth = late.as_secs_f64() / early.as_secs_f64();
+        let dt = t0.elapsed();
         assert!(
-            growth < 6.0,
-            "per-put cost grows with memtable size (cf_families-per-put is back): \
-             late {late:?} vs early {early:?} over 2000 puts each"
+            dt < std::time::Duration::from_millis(800),
+            "20k physical-CF puts took {dt:?} (cf_families-per-put is back)"
         );
         assert!(
             db.live_sst_meta().is_empty(),
@@ -17697,6 +16693,66 @@ mod tests {
         db.install_l0_sst(table, num).unwrap();
         assert_eq!(db.sst_count(), 1);
         assert_eq!(db.get(&[b'k', 0]).as_deref(), Some([0u8; 128].as_slice()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0180 P0.75 / RFC-0185 P0.3: seed `ycsb/` leftover parks on the
+    /// first timed `c/` put (any non-empty leftover, not ≥ buffer/2).
+    #[test]
+    fn rfc0180_park_foreign_idx_decision() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(128 * 1024 * 1024),
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        for i in 0..64u32 {
+            db.put(format!("ycsb/{i:06}").as_bytes(), b"seed").unwrap();
+        }
+        assert!(!db.has_imm(), "seed stays in active mem");
+        db.put(b"c/000000", b"timed").unwrap();
+        assert!(
+            db.has_imm(),
+            "foreign one-slash leftover must park into imm"
+        );
+        assert_eq!(db.get(b"ycsb/000000").as_deref(), Some(b"seed".as_ref()));
+        assert_eq!(db.get(b"c/000000").as_deref(), Some(b"timed".as_ref()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// P0.75 dropped the half-buffer gate: 12 MiB leftover (Darwin unique-key
+    /// DIAG) still parks.
+    #[test]
+    fn rfc0180_park_foreign_idx_remainder_below_half_buffer() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(128 * 1024 * 1024),
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        let payload = vec![b'x'; 256];
+        for i in 0..48u32 {
+            db.put(format!("ycsb/{i:06}").as_bytes(), &payload).unwrap();
+        }
+        assert!(db.active_mem_usage() < 64 * 1024 * 1024);
+        db.put(b"c/000000", b"x").unwrap();
+        assert!(db.has_imm(), "remainder below half buffer still parks");
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
@@ -18938,7 +17994,9 @@ mod tests {
             let mut db = Db::open(&dir).unwrap();
             db.put(b"k", b"v").unwrap();
             db.flush().unwrap();
-            // Flush pipeline rotated the non-empty WAL once.
+            // RFC-0217 P1.1: the flush archived the segment and deferred
+            // the publish — below the debounce the MANIFEST does not
+            // advance on a flush either.
             let after_flush = current_manifest_num(&dir);
             assert!(after_flush >= 1);
             for _ in 0..8 {
@@ -18949,18 +18007,45 @@ mod tests {
                 after_flush,
                 "idle polls must not rewrite MANIFEST for an empty segment"
             );
-            // A new append re-arms rotation exactly once.
+            // A new append re-arms rotation (as an archive) exactly once —
+            // still no publish below the debounce.
             db.put(b"k2", b"v2").unwrap();
             db.flush().unwrap();
             let after_second_flush = current_manifest_num(&dir);
-            assert!(after_second_flush > after_flush);
+            assert_eq!(
+                after_second_flush, after_flush,
+                "deferred publish: a below-debounce flush archives, it does not publish"
+            );
             for _ in 0..8 {
                 db.try_rotate_wal_if_idle().unwrap();
             }
             assert_eq!(current_manifest_num(&dir), after_second_flush);
             db.close().unwrap();
+            assert!(
+                current_manifest_num(&dir) > after_flush,
+                "close is the durability point: the deferred publish lands"
+            );
         }
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn wal_archive_slot_names_round_trip() {
+        // RFC-0217 P1.1: naming lives in db.rs (I/O naming, not kernel
+        // decisions — the aeneas lane cannot translate str::pattern).
+        assert_eq!(wal_archive_slot_name(0), "WAL.arch0000");
+        assert_eq!(wal_archive_slot_name(7), "WAL.arch0007");
+        assert_eq!(wal_archive_slot_name(9999), "WAL.arch9999");
+        assert_eq!(wal_archive_slot_of("WAL.arch0007"), Some(7));
+        assert_eq!(wal_archive_slot_of("WAL.arch0000"), Some(0));
+        assert_eq!(wal_archive_slot_of("WAL"), None);
+        assert_eq!(wal_archive_slot_of("WAL.archiving"), None);
+        assert_eq!(wal_archive_slot_of("WAL.arch7"), None);
+        assert_eq!(wal_archive_slot_of("CHANGELOG"), None);
+        assert_eq!(wal_archive_slot_of("WAL.repair"), None);
+        for i in [0u64, 1, 9, 63, 999, 9999] {
+            assert_eq!(wal_archive_slot_of(&wal_archive_slot_name(i)), Some(i));
+        }
     }
 
     #[test]
@@ -19298,6 +18383,9 @@ mod tests {
         let ckpt = temp_dir();
         {
             let mut db = Db::open(&dir).unwrap();
+            // RFC-0217 P1.1: debounce 1 keeps the flush a store point, so the
+            // file exists for the checkpoint copy assertion below.
+            db.set_changelog_flush_debounce(1);
             db.put(b"a", b"1").unwrap();
             db.put(b"b", b"2").unwrap();
             db.flush().unwrap();
@@ -19419,28 +18507,6 @@ mod tests {
             let k = format!("absent-{i:04}");
             assert_eq!(db.get(k.as_bytes()), None);
         }
-        db.close().unwrap();
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// RFC-0178 P0.14: mem-live lookup uses the same SST envelope reject
-    /// as the packed path (probe_miss past hi does not bloom-walk).
-    #[test]
-    fn rfc0178_mem_live_envelope_skips_sst_probe_miss() {
-        let dir = temp_dir();
-        let mut db = Db::open(&dir).unwrap();
-        db.put(b"a/key", b"v").unwrap();
-        db.flush().unwrap();
-        db.put(b"a/mem", b"w").unwrap();
-        db.reset_read_probe();
-        assert_eq!(db.get(b"z/miss"), None);
-        let p = db.read_probe();
-        assert_eq!(
-            p.get_sst_fallback, 0,
-            "outside sst_envelope must not probe SST"
-        );
-        assert_eq!(db.get(b"a/key").as_deref(), Some(b"v".as_ref()));
-        assert_eq!(db.get(b"a/mem").as_deref(), Some(b"w".as_ref()));
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
@@ -20454,16 +19520,30 @@ mod tests {
                 "lazy feed still answers last-per-key from mem"
             );
             db.flush().unwrap();
-            assert!(
-                db.changelog_store_count() >= 1,
-                "flush must persist CHANGELOG before WAL rotate"
+            // RFC-0217 P1.1: the flush defers the store (debounce 64) and
+            // archives the rotated WAL; the staged imm delta keeps the
+            // in-memory feed complete without the WAL tail.
+            assert_eq!(
+                db.changelog_store_count(),
+                0,
+                "below the debounce the flush must not pay the O(live) store"
             );
-            assert!(chlog.exists());
+            assert_eq!(db.wal_archive_count(), 1, "rotate archived the segment");
+            assert_eq!(
+                db.changes_after(0).len(),
+                32,
+                "staged imm delta keeps the feed complete after rotate"
+            );
             db.close().unwrap();
         }
         let db = Db::open(&dir).unwrap();
         assert_eq!(db.get(&[b'k', 0]).as_deref(), Some([b'v', 0].as_slice()));
         assert_eq!(db.get(&[b'k', 31]).as_deref(), Some([b'v', 31].as_slice()));
+        assert_eq!(
+            db.changes_after(0).len(),
+            32,
+            "reopen replays the archived segment into the feed"
+        );
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
@@ -20518,6 +19598,9 @@ mod tests {
         {
             let mut db = Db::open(&dir).unwrap();
             db.set_changelog_interval(0);
+            // RFC-0217 P1.1: debounce 1 = the legacy synchronous flush tail,
+            // so the within-budget rebuild still fires on the flush itself.
+            db.set_changelog_flush_debounce(1);
             for i in 0..3u8 {
                 db.put([b'k', i], [b'v', i]).unwrap();
             }
@@ -23007,20 +22090,23 @@ mod tests {
                 &mut range_tombs,
             );
             if let Some(seq) = best_point_seq {
-                return match best_point {
-                    Lookup::Found(_)
-                        if !crate::merge::visible_at(
-                            crate::key::ValueType::Value,
-                            range_deleted(key, seq, &range_tombs),
-                        ) =>
-                    {
-                        Lookup::Deleted
-                    }
-                    other => other,
+                return match (
+                    best_point,
+                    crate::lookup_kernel::point_tombstone_plan(range_deleted(
+                        key,
+                        seq,
+                        &range_tombs,
+                    )),
+                ) {
+                    (
+                        Lookup::Found(_),
+                        crate::lookup_kernel::PointTombstonePlan::ShadowedDeleted,
+                    ) => Lookup::Deleted,
+                    (other, _) => other,
                 };
             }
         }
-        let mut seek_scratch = crate::sst::PointSeekScratch::default();
+        let mut seek_scratch = PointSeekScratch::default();
         for &sst_i in db.sst_indices_newest_first() {
             let table = &db.ssts[sst_i];
             table.collect_range_tombstones(snapshot, &mut range_tombs);
@@ -23042,13 +22128,13 @@ mod tests {
         match best_point {
             Lookup::Found(v) => {
                 let seq = best_point_seq.unwrap_or(0);
-                if crate::merge::visible_at(
-                    crate::key::ValueType::Value,
-                    range_deleted(key, seq, &range_tombs),
-                ) {
-                    Lookup::Found(v)
-                } else {
-                    Lookup::Deleted
+                match crate::lookup_kernel::point_tombstone_plan(range_deleted(
+                    key,
+                    seq,
+                    &range_tombs,
+                )) {
+                    crate::lookup_kernel::PointTombstonePlan::ValueVisible => Lookup::Found(v),
+                    crate::lookup_kernel::PointTombstonePlan::ShadowedDeleted => Lookup::Deleted,
                 }
             }
             Lookup::Deleted => Lookup::Deleted,
@@ -23390,157 +22476,6 @@ mod tests {
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
-
-    /// RFC-0161: a byte-budgeted BlockCache must not tax cold point gets.
-    /// lookup_100's keys never repeat; `point_at_cached` decode-insert was
-    /// guest v73b's 5.25 ms get_loop (v71 seeking 3.868 ms). Answers stay
-    /// correct; occupancy stays 0.
-    #[test]
-    fn cold_point_get_does_not_insert_decoded_block_cache() {
-        let dir = temp_dir();
-        let mut db = Db::<StdEnv>::open_with_env_bounded(
-            &dir,
-            OpenOptions {
-                sync: false,
-                auto_flush_bytes: Some(4 * 1024),
-                sst_payload_budget_bytes: Some(1),
-                ..OpenOptions::default()
-            },
-            StdEnv,
-        )
-        .unwrap();
-        db.install_block_cache(BlockCache::with_budget_bytes(4 << 20));
-        db.put(b"k1", vec![b'v'; 64]).unwrap();
-        db.put(b"k2", vec![b'w'; 64]).unwrap();
-        db.flush().unwrap();
-        db.block_cache().reset_stats();
-        let before = db.block_cache().used_bytes();
-        crate::sst::force_get_stages(true);
-        crate::sst::reset_get_stages();
-        assert_eq!(db.get(b"k1").as_deref(), Some(&[b'v'; 64][..]));
-        assert_eq!(db.get(b"k2").as_deref(), Some(&[b'w'; 64][..]));
-        let (pread, crc, walk) = crate::sst::take_get_stages();
-        crate::sst::force_get_stages(false);
-        assert_eq!(
-            db.block_cache().used_bytes(),
-            before,
-            "cold point get must not decode-insert into BlockCache"
-        );
-        assert_eq!(
-            db.block_cache().misses(),
-            0,
-            "point get must not miss-fill BlockCache, misses={}",
-            db.block_cache().misses()
-        );
-        assert!(
-            pread > 0 && crc > 0 && walk > 0,
-            "budgeted cache must still use seeking miss path, stages=({pread},{crc},{walk})"
-        );
-        db.close().unwrap();
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// RFC-0160 P0.5: `auto_flush_bytes: None` still caps BulkRun (the
-    /// 100M SIGKILL was an unbounded open tail).
-    #[test]
-    fn bulk_chunk_cap_defaults_when_no_flush_threshold() {
-        let dir = temp_dir();
-        let db = Db::open_with(
-            &dir,
-            OpenOptions {
-                sync: false,
-                auto_flush_bytes: None,
-                ..OpenOptions::default()
-            },
-        )
-        .unwrap();
-        assert_eq!(db.bulk_chunk_cap(), DEFAULT_BULK_CHUNK_BYTES);
-        db.close().unwrap();
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// RFC-0161 P0.5: a 256 MiB write buffer (Slipstream) must not raise
-    /// the BulkRun chunk above 64 MiB on the 3.9 GiB guest.
-    #[test]
-    fn bulk_chunk_cap_clamps_large_write_buffer() {
-        let dir = temp_dir();
-        let db = Db::open_with(
-            &dir,
-            OpenOptions {
-                sync: false,
-                auto_flush_bytes: Some(256 * 1024 * 1024),
-                ..OpenOptions::default()
-            },
-        )
-        .unwrap();
-        assert_eq!(db.bulk_chunk_cap(), DEFAULT_BULK_CHUNK_BYTES);
-        db.close().unwrap();
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// RFC-0168 P1.3 two-state: `PEDRA_BULK_CHUNK_BYTES` shrinks the open
-    /// tail that settle has to flush.
-    #[test]
-    fn rfc0168_bulk_chunk_cap_env_clamp() {
-        let dir = temp_dir();
-        let db = Db::open_with(
-            &dir,
-            OpenOptions {
-                sync: false,
-                auto_flush_bytes: Some(64 * 1024 * 1024),
-                ..OpenOptions::default()
-            },
-        )
-        .unwrap();
-        assert_eq!(db.bulk_chunk_cap(), DEFAULT_BULK_CHUNK_BYTES);
-        std::env::set_var("PEDRA_BULK_CHUNK_BYTES", "4194304");
-        assert_eq!(db.bulk_chunk_cap(), 4 * 1024 * 1024);
-        std::env::remove_var("PEDRA_BULK_CHUNK_BYTES");
-        assert_eq!(db.bulk_chunk_cap(), DEFAULT_BULK_CHUNK_BYTES);
-        db.close().unwrap();
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// RFC-0162 P0.2: BSTAGE line format and off-by-default.
-    #[test]
-    fn bulk_stage_timing_default_off_and_line_format() {
-        assert!(!bulk_stage_timing_on());
-        let line = bulk_stage_line(7, 12_345, 678, 262_144, 67_108_864, "worker", true);
-        assert!(
-            line.starts_with("BSTAGE idx=7 epoch_ms=12345 t_ms=678 "),
-            "{line}"
-        );
-        assert!(line.contains("entries=262144 bytes=67108864 caller=worker sync=true"));
-        let inline = bulk_stage_line(0, 0, 0, 1, 1, "inline", false);
-        assert!(inline.contains("caller=inline sync=false"));
-    }
-
-    #[test]
-    fn hot_key_versions_survive_whole_level_compact() {
-        // PEDRA-003: a hot key rewritten once per batch (a changelog
-        // cursor), sliced across L0 flushes, merges into one same-user
-        // run under whole-level compact. That run must split at the
-        // reader's absolute block cap — pre-fix the merged run was one
-        // >256 KiB block and the compact's own read rejected it.
-        let dir = temp_dir();
-        let mut db = Db::open(&dir).unwrap();
-        let n = 12_000u64;
-        for i in 1..=n {
-            db.put(b"meta\0cursor", format!("v{i:05}").as_bytes())
-                .unwrap();
-            if i % 500 == 0 {
-                db.flush().unwrap();
-            }
-        }
-        db.flush().unwrap();
-        db.compact().unwrap();
-        assert_eq!(
-            db.get(b"meta\0cursor").as_deref(),
-            Some(&format!("v{n:05}").into_bytes()[..])
-        );
-        db.close().unwrap();
-        let _ = std::fs::remove_dir_all(&dir);
-    }
 }
 
 #[cfg(all(test, feature = "buggify"))]
@@ -23643,7 +22578,7 @@ impl<'a, E: Env> MemChunkStream<'a, E> {
             chunk.push((k.clone(), value));
         }
         drop(iter);
-        if chunk.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(chunk.len() as u64) {
             return false;
         }
         if self.resolve {

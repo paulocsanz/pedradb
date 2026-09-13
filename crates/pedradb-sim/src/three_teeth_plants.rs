@@ -45,6 +45,7 @@ fn opts() -> OpenOptions {
         exclusive: true,
         large_value_threshold: None,
         sst_payload_budget_bytes: None,
+        ..Default::default()
     }
 }
 
@@ -569,5 +570,521 @@ fn cold_cache_live_get_agrees_with_reopen() {
         "cold live get == reopen get (RFC-0164 P1.1)"
     );
     reopened.close().unwrap();
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// RFC-0166 P1.1 plant: the crash geometry of the live Env seam must agree
+/// with `env_crash_kernel`. Honest barrier: `WriteOptions::sync` puts the
+/// WAL record behind `sync_data` before Ok, so the model's floor says the
+/// put survives any crash. Lying env: the model says the barrier never
+/// moved; the live crash drops the put and refutes `crash_legal_as_is`
+/// (which has no floor — it would call the loss "legal" while the app was
+/// told the write was synced).
+#[test]
+fn env_crash_on_live_recording_is_not_ok() {
+    use pedradb_core::env_crash_kernel::{
+        append, barrier_floor_holds, crash_legal, crash_legal_as_is,
+        honest_sync_protects_all, no_invented_bytes_holds, sync as sync_model, CrashModel,
+        SyncHonesty,
+    };
+
+    // --- model side: honest barrier covers the append -----------------
+    let m0 = CrashModel::of(0, 0);
+    let m1 = append(m0, 64);
+    let honest = sync_model(m1, SyncHonesty::Honest);
+    assert_eq!((honest.written, honest.synced), (64, 64));
+    assert!(crash_legal(honest, 64));
+    assert!(barrier_floor_holds(honest, 64) && barrier_floor_holds(CrashModel::of(64, 10), 3));
+    assert!(no_invented_bytes_holds(honest, 64));
+    assert!(no_invented_bytes_holds(m1, 65), "cut past written is illegal; the corollary is vacuous");
+    assert!(honest_sync_protects_all(m1, 64) && honest_sync_protects_all(m1, 63));
+    // AS-IS has no floor: it calls cut=3 on a 10-byte barrier "legal".
+    let with_barrier = CrashModel::of(64, 10);
+    assert!(crash_legal_as_is(with_barrier, 3));
+    assert!(!crash_legal(with_barrier, 3));
+
+    // --- live side: honest RecordingEnv keeps the synced put ---------
+    let dir = fresh_dir("env-crash-honest");
+    let rec = crate::RecordingEnv::new();
+    {
+        let mut db = Db::open_with_env(&dir, opts(), rec.clone()).unwrap();
+        db.put(b"ek", b"ev").unwrap();
+        db.close().unwrap();
+    }
+    rec.crash();
+    let db = Db::open_with_env(&dir, opts(), rec).unwrap();
+    assert_eq!(
+        db.get(b"ek").as_deref(),
+        Some(b"ev".as_ref()),
+        "honest barrier: the synced put survives the crash"
+    );
+    db.close().unwrap();
+    let _ = fs::remove_dir_all(&dir);
+
+    // --- live side: lying env drops it; AS-IS said it was durable ----
+    let m_lying = sync_model(m1, SyncHonesty::Lying);
+    assert_eq!(m_lying.synced, 0, "lying sync promotes nothing");
+    assert!(crash_legal(m_lying, 0), "cut at the old floor is a legal crash");
+
+    let dir = fresh_dir("env-crash-lying");
+    let rec = crate::RecordingEnv::lying();
+    {
+        let mut db = Db::open_with_env(&dir, opts(), rec.clone()).unwrap();
+        db.put(b"ek", b"ev").unwrap();
+        db.close().unwrap();
+    }
+    rec.crash();
+    let db = Db::open_with_env(&dir, opts(), rec).unwrap();
+    let live = db.get(b"ek");
+    db.close().unwrap();
+    let _ = fs::remove_dir_all(&dir);
+    assert_eq!(live, None, "lying env: the put is gone");
+    // AS-IS pretends the lying barrier promoted; live reality shows the
+    // loss HAPPENS — the as-is geometry is refuted on the live seam.
+    let as_is_promoted = pedradb_core::env_crash_kernel::sync_lying_promotes_as_is(m1);
+    assert_ne!(as_is_promoted, m_lying, "AS-IS pretends the lying barrier promoted");
+}
+
+/// RFC-0166 P1.2: Inv-WAL (`acked ⊆ synced ⊆ recoverable prefix`) preserved
+/// by every WAL atom; as-is ack/rotate break it; the acked put survives the
+/// real crash+reopen on the live seam.
+#[test]
+fn wal_inv_on_live_recording_is_not_ok() {
+    use pedradb_core::env_crash_kernel::SyncHonesty;
+    use pedradb_core::wal::wal_state_kernel::{
+        acked_survives_as_is, acked_survives_every_legal_crash, inv_wal, inv_wal_as_is,
+        wal_ack, wal_ack_as_is, wal_append, wal_append_as_is, wal_rotate, wal_rotate_as_is,
+        wal_state_of, wal_sync,
+    };
+
+    // --- model side: the full atom chain preserves Inv-WAL -------------
+    let s0 = wal_state_of(0, 0, 0);
+    assert!(inv_wal(&s0));
+    let s1 = wal_append(s0, 96); // put("wk", "wv") lands in the log
+    assert!(inv_wal(&s1) && s1.written == 96 && s1.acked == 0);
+    let s2 = wal_sync(s1, SyncHonesty::Honest); // fdatasync before Ok
+    assert!(inv_wal(&s2) && s2.synced == 96);
+    let s3 = wal_ack(s2, 96); // Ok returned to the caller
+    assert!(inv_wal(&s3) && s3.acked == 96);
+    // Every legal crash cut keeps the acked prefix.
+    for cut in 0..=s3.written + 2 {
+        assert!(acked_survives_every_legal_crash(&s3, cut));
+    }
+    // Fully durable+acked: rotate may drop the log, Inv-WAL holds.
+    let s4 = wal_rotate(s3);
+    assert!(inv_wal(&s4) && s4 == wal_state_of(0, 0, 0));
+
+    // --- model teeth: every as-is hole is witnessed -------------------
+    // append-as-is acks before the barrier.
+    let bad_append = wal_append_as_is(s0, 96);
+    assert!(inv_wal_as_is(&bad_append) && !inv_wal(&bad_append));
+    // ack-as-is acks past the barrier (synced=32 of 96 written).
+    let partial = wal_state_of(96, 32, 32);
+    assert_eq!(wal_ack(partial, 64), partial, "ack past the barrier is refused");
+    let bad_ack = wal_ack_as_is(partial, 64);
+    assert!(inv_wal_as_is(&bad_ack) && !inv_wal(&bad_ack));
+    assert!(!acked_survives_every_legal_crash(&bad_ack, 32));
+    // rotate-as-is drops a log with a non-durable tail.
+    let tailed = wal_state_of(96, 32, 32);
+    assert_eq!(wal_rotate(tailed), tailed, "rotate with a non-durable tail is refused");
+    assert!(wal_rotate_as_is(tailed).acked < tailed.acked);
+    // floor-less survival legality diverges (cut below the barrier).
+    assert!(acked_survives_every_legal_crash(&tailed, 8));
+    assert!(!acked_survives_as_is(&tailed, 8));
+
+    // --- live side: the acked put survives the real crash+reopen ------
+    let dir = fresh_dir("wal-inv-honest");
+    let rec = crate::RecordingEnv::new();
+    {
+        let mut db = Db::open_with_env(&dir, opts(), rec.clone()).unwrap();
+        db.put(b"wk", b"wv").unwrap();
+        db.close().unwrap();
+    }
+    rec.crash();
+    let db = Db::open_with_env(&dir, opts(), rec).unwrap();
+    assert_eq!(
+        db.get(b"wk").as_deref(),
+        Some(b"wv".as_ref()),
+        "Inv-WAL: the acked put survives the crash"
+    );
+    db.close().unwrap();
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// RFC-0166 P1.3: the named D1-modelo corollary — put Ok ⇒ survives every
+/// torn prefix — holds on the model for every cut, the as-is write path
+/// breaks it, and two acked puts survive the real crash+reopen.
+#[test]
+fn d1_modelo_on_live_recording_is_not_ok() {
+    use pedradb_core::d1_modelo_kernel::{
+        d1_modelo, d1_modelo_as_is, put_ok, put_ok_as_is, put_lying_never_acks,
+    };
+    use pedradb_core::env_crash_kernel::{crash_legal, CrashModel};
+    use pedradb_core::wal::wal_state_kernel::{inv_wal, wal_state_of};
+
+    // --- model side: the corollary holds for every torn prefix ---------
+    let s0 = wal_state_of(0, 0, 0);
+    let s = put_ok(s0, 96);
+    assert!(inv_wal(&s) && s.acked == 96 && s.synced == 96);
+    for cut in 0..=s.written + 2 {
+        assert!(d1_modelo(&s, 96, cut));
+    }
+    // A second acked put on top: both records covered, still every cut.
+    let s2 = put_ok(s, 64);
+    assert_eq!(s2.acked, 160);
+    for cut in 0..=s2.written + 2 {
+        assert!(d1_modelo(&s2, 96, cut));
+        assert!(d1_modelo(&s2, 160, cut));
+    }
+
+    // --- model teeth ---------------------------------------------------
+    // AS-IS write path: Ok returned with the barrier unmoved — the legal
+    // cut at 0 drops the "acked" record; the corollary refuses the state
+    // (Inv-WAL broken, vacuous) which is the contract boundary.
+    let bad = put_ok_as_is(wal_state_of(0, 0, 0), 96);
+    assert!(!inv_wal(&bad));
+    assert!(crash_legal(CrashModel::of(bad.written, bad.synced), 0) && 0 < 96);
+    assert!(d1_modelo(&bad, 96, 0));
+    // Floor-less legality diverges: cut below the barrier floor is
+    // "survivable" per as-is and loses the record ending at 96.
+    let honest = wal_state_of(160, 160, 160);
+    assert!(d1_modelo(&honest, 96, 64));
+    assert!(!d1_modelo_as_is(&honest, 96, 64));
+    // Lying barrier suspends the premise: old slack may be acked, the new
+    // record never is.
+    assert!(put_lying_never_acks(wal_state_of(10, 10, 4), 96));
+    assert!(put_lying_never_acks(wal_state_of(0, 0, 0), 96));
+
+    // --- live side: two acked puts survive the real crash+reopen -------
+    let dir = fresh_dir("d1-modelo-honest");
+    let rec = crate::RecordingEnv::new();
+    {
+        let mut db = Db::open_with_env(&dir, opts(), rec.clone()).unwrap();
+        db.put(b"dk1", b"dv1").unwrap();
+        db.put(b"dk2", b"dv2").unwrap();
+        db.close().unwrap();
+    }
+    rec.crash();
+    let db = Db::open_with_env(&dir, opts(), rec).unwrap();
+    assert_eq!(db.get(b"dk1").as_deref(), Some(b"dv1".as_ref()));
+    assert_eq!(db.get(b"dk2").as_deref(), Some(b"dv2".as_ref()));
+    db.close().unwrap();
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// RFC-0166 P2.1: the named R1 corollary on the model and the LIVE
+/// delete-resurrect shape. Model side: every atom cut of the
+/// write→flush→compact→delete chain keeps Inv-LSM and the probe answers
+/// the NEWEST version (the tombstone). Mutant teeth: deepest-first
+/// probe, tombstone-dropping compact, and reversed reopen each
+/// resurrect the deleted value on the same shape. Live side: the real
+/// engine answers None across flush, compact and reopen — no
+/// resurrection (findings/2026-09-04-reopen-delete-resurrected).
+#[test]
+fn r1_modelo_on_live_delete_shape_is_not_ok() {
+    use pedradb_core::lsm_r1_kernel::{
+        inv_lsm, lsm_compact, lsm_compact_as_is, lsm_flush, lsm_probe, lsm_probe_as_is,
+        lsm_reopen, lsm_reopen_as_is, lsm_state_of, lsm_write, r1_modelo, r1_modelo_as_is,
+        r1_newest,
+    };
+
+    // --- model side: Inv-LSM at every atom cut; probe == newest --------
+    let s0 = lsm_state_of(1);
+    let s1 = lsm_write(&s0, 7, false);
+    let s2 = lsm_flush(&s1).expect("flush");
+    let s3 = lsm_compact(&s2, 2).expect("compact to level 2");
+    let s4 = lsm_write(&s3, 7, true); // the delete mints the newest seq
+    for s in [&s0, &s1, &s2, &s3, &s4] {
+        assert!(inv_lsm(s), "Inv-LSM at every cut: {s:?}");
+        assert_eq!(lsm_probe(s, 7), r1_newest(s, 7));
+        assert!(r1_modelo(s, 7));
+    }
+    assert_eq!(lsm_probe(&s4, 7).map(|e| e.tomb), Some(true));
+
+    // --- mutant teeth on the same shape --------------------------------
+    // deepest-first probe: the deep value shadows the newer tombstone.
+    assert!(
+        !lsm_probe_as_is(&s4, 7).unwrap().tomb,
+        "AS-IS dente: deepest-first probe resurrects the value"
+    );
+    // the AS-IS corollary catches the same break against the newest.
+    assert!(!r1_modelo_as_is(&s4, 7));
+    // tombstone-dropping compact at depth 1: the tombstone dies in the
+    // merge while the deep value (level 2, outside the fold) survives.
+    let m = lsm_compact_as_is(&s4, 1).expect("compact as-is");
+    assert_eq!(
+        lsm_probe(&m, 7).map(|e| e.tomb),
+        Some(false),
+        "AS-IS dente: dropped tombstone resurrects the deep value"
+    );
+    let honest_c = lsm_compact(&s4, 1).expect("compact");
+    assert_eq!(
+        lsm_probe(&honest_c, 7).map(|e| e.tomb),
+        Some(true),
+        "kernel keeps the tombstone at the fold level"
+    );
+    // reversed reopen: the stack loses recency and the value wins.
+    let honest_r = lsm_reopen(&s4);
+    assert!(inv_lsm(&honest_r), "honest reopen preserves Inv-LSM");
+    assert_eq!(
+        lsm_probe(&honest_r, 7).map(|e| e.tomb),
+        Some(true),
+        "honest reopen keeps the tombstone newest"
+    );
+    let bad = lsm_reopen_as_is(&s4);
+    assert!(!inv_lsm(&bad), "reversed stack breaks recency");
+    assert_eq!(
+        lsm_probe(&bad, 7).map(|e| e.tomb),
+        Some(false),
+        "AS-IS dente: reversed reopen resurrects the value"
+    );
+    // R1 is vacuous off-contract: the guard is the invariant itself.
+    assert!(r1_modelo(&bad, 7));
+
+    // --- live side: the real delete survives flush, compact, reopen ----
+    let dir = fresh_dir("lsm-r1-delete");
+    let env = FailingEnv::passing();
+    {
+        let mut db = Db::open_with_env(&dir, opts(), env).unwrap();
+        db.set_defer_auto_compact(true);
+        db.put(b"k", b"v").unwrap();
+        db.flush().unwrap();
+        db.delete(b"k").unwrap();
+        db.flush().unwrap();
+        assert_eq!(db.get(b"k"), None, "delete answers None before compact");
+        db.compact_reclaim().unwrap();
+        assert_eq!(db.get(b"k"), None, "delete answers None after compact");
+        db.close().unwrap();
+    }
+    let env2 = FailingEnv::passing();
+    let db = Db::open_with_env(&dir, opts(), env2).unwrap();
+    assert_eq!(
+        db.get(b"k"),
+        None,
+        "delete answers None after reopen — the live engine keeps the R1 answer"
+    );
+    db.close().unwrap();
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// RFC-0166 P1.4: the verified profile's write→ack runs through the proved
+/// ledger — Inv-WAL live-asserted per durable group; D1 holds over every
+/// cut; the acked puts survive the real crash+reopen. The lying seam shows
+/// the conditional premise (barrier honesty) — the ledger models the
+/// honest barrier, the lying env drops the put anyway.
+#[test]
+fn verified_write_ack_on_live_profile_is_not_ok() {
+    use pedradb_core::write_ack_kernel::{write_ack_ledger_as_is, WriteAckLedger};
+
+    // --- model side: the ledger tooth ---------------------------------
+    let mut l = WriteAckLedger::new();
+    l.on_append(64);
+    l.on_barrier();
+    l.on_ack();
+    assert_eq!(l.snapshot(), (64, 64, 64));
+    assert!(l.d1_holds_every_cut(64));
+    let bad = write_ack_ledger_as_is(WriteAckLedger::new(), 64);
+    let (acked, synced, written) = bad.snapshot();
+    assert_eq!((acked, synced, written), (64, 0, 64), "as-is acks with no barrier");
+
+    // --- live side: pinned profile, honest seam -----------------------
+    let dir = fresh_dir("write-ack-verified");
+    let rec = crate::RecordingEnv::new();
+    {
+        let db = pedradb_core::VerifiedProfile::open_with_env(&dir, rec.clone()).unwrap();
+        assert!(db.is_verified());
+        assert_eq!(db.verified_write_ack(), Some((0, 0, 0)));
+        db.put(b"vk", b"vv").unwrap();
+        let (acked, synced, written) = db
+            .verified_write_ack()
+            .expect("ledger alive while pinned");
+        assert!(acked > 0, "the Ok acked a durable group");
+        assert!(acked <= synced && synced <= written, "Inv-WAL holds live");
+        db.close().unwrap();
+    }
+    rec.crash();
+    {
+        let db = pedradb_core::VerifiedProfile::open_with_env(&dir, rec).unwrap();
+        assert_eq!(
+            db.get(b"vk").as_deref(),
+            Some(b"vv".as_ref()),
+            "pinned write→ack: the acked put survives the crash"
+        );
+        assert_eq!(db.verified_write_ack(), Some((0, 0, 0)), "fresh open, cold ledger");
+        db.close().unwrap();
+    }
+    let _ = fs::remove_dir_all(&dir);
+
+    // --- live side: lying seam suspends the premise -------------------
+    // The ledger models the honest barrier (D1's conditional premise);
+    // the lying env returns Ok and drops the bytes — the guarantee is
+    // suspended, not broken, exactly as `put_lying_never_acks` models.
+    let dir = fresh_dir("write-ack-lying");
+    let rec = crate::RecordingEnv::lying();
+    {
+        let db = pedradb_core::VerifiedProfile::open_with_env(&dir, rec.clone()).unwrap();
+        db.put(b"vk", b"vv").unwrap();
+        let (acked, _synced, written) = db.verified_write_ack().unwrap();
+        assert!(acked > 0 && written > 0, "the ledger advanced on the lying Ok");
+        db.close().unwrap();
+    }
+    rec.crash();
+    {
+        let db = pedradb_core::VerifiedProfile::open_with_env(&dir, rec).unwrap();
+        assert_eq!(db.get(b"vk"), None, "lying seam: the put is gone — premise suspended");
+        db.close().unwrap();
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// RFC-0214 P2.1: the COMPOSED durability spine — any
+/// append/barrier/ack sequence through the real ledger keeps Inv-WAL
+/// (replay asserts per step) and D1 holds over every torn cut. The
+/// as-is replay (ack without barrier) breaks the invariant on the
+/// first group. Live: the pinned profile runs the composed path per
+/// durable group (both lone and group seams advance the ledger) and
+/// every acked put survives the crash.
+#[test]
+fn durability_spine_compose_on_live_profile_is_not_ok() {
+    use pedradb_core::durability_spine_kernel::{spine_replay, spine_replay_as_is, SpineStep};
+    use pedradb_core::write_ack_kernel::WriteAckLedger;
+
+    // --- model side: the composed sentence over any sequence -------
+    let mut l = WriteAckLedger::new();
+    spine_replay(
+        &mut l,
+        &[
+            SpineStep::Append(64),
+            SpineStep::Append(32),
+            SpineStep::Barrier,
+            SpineStep::Ack,
+            SpineStep::Append(16),
+            SpineStep::Barrier,
+            SpineStep::Ack,
+            SpineStep::Append(8),
+        ],
+    );
+    assert_eq!(l.snapshot(), (112, 112, 120), "groups ack, tail stays pending");
+    assert!(l.d1_holds_every_cut(120), "D1 over every torn prefix");
+
+    // --- model side: the as-is twin breaks the invariant -----------
+    let mut bad = WriteAckLedger::new();
+    let snap = spine_replay_as_is(
+        &mut bad,
+        &[SpineStep::Append(64), SpineStep::Barrier, SpineStep::Ack],
+    );
+    assert_eq!(snap, (64, 0, 64), "as-is acks with no barrier");
+    assert!(snap.0 > snap.1, "Inv-WAL broken: unsynced acked prefix");
+
+    // --- live side: the pinned profile runs the composed path ------
+    let dir = fresh_dir("spine-compose");
+    let rec = crate::RecordingEnv::new();
+    {
+        let db = pedradb_core::VerifiedProfile::open_with_env(&dir, rec.clone()).unwrap();
+        assert!(db.is_verified());
+        db.put(b"sk1", b"sv1").unwrap();
+        db.put(b"sk2", b"sv2").unwrap();
+        let (acked, synced, written) = db
+            .verified_write_ack()
+            .expect("ledger alive while pinned");
+        assert!(acked > 0, "the Ok acked a durable group");
+        assert!(acked <= synced && synced <= written, "Inv-WAL live");
+        db.close().unwrap();
+    }
+    rec.crash();
+    {
+        let db = pedradb_core::VerifiedProfile::open_with_env(&dir, rec).unwrap();
+        assert_eq!(
+            db.get(b"sk1").as_deref(),
+            Some(b"sv1".as_ref()),
+            "composed spine: acked put 1 survives the crash"
+        );
+        assert_eq!(
+            db.get(b"sk2").as_deref(),
+            Some(b"sv2".as_ref()),
+            "composed spine: acked put 2 survives the crash"
+        );
+        db.close().unwrap();
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// RFC-0215 P1.2: the COMPOSED product crown — over every
+/// spine-reachable ledger, both real kernels agree: the model leg
+/// (`d1_modelo`, atom of RFC-0215 P0.2) and the spec leg (`d1_holds`
+/// over the positional acked view, atom of P0.1) hold together at
+/// every legal torn cut. The as-is crown (barrier-less ack) is caught
+/// by the spec leg. Live: the pinned profile's post-ack ledger state
+/// satisfies the crown and every acked put survives the crash.
+#[test]
+fn product_crown_compose_on_live_profile_is_not_ok() {
+    use pedradb_core::durability_spine_kernel::{spine_replay, SpineStep};
+    use pedradb_core::product_crown_kernel::{product_crown, product_crown_as_is};
+    use pedradb_core::wal::wal_state_kernel::WalState;
+    use pedradb_core::write_ack_kernel::WriteAckLedger;
+
+    // --- model side: the crown holds after EVERY spine prefix ------
+    let steps = [
+        SpineStep::Append(64),
+        SpineStep::Append(32),
+        SpineStep::Barrier,
+        SpineStep::Ack,
+        SpineStep::Append(16),
+        SpineStep::Barrier,
+        SpineStep::Ack,
+        SpineStep::Append(8),
+    ];
+    for n in 1..=steps.len() {
+        let mut li = WriteAckLedger::new();
+        spine_replay(&mut li, &steps[..n]);
+        let (acked, synced, written) = li.snapshot();
+        let s = WalState { acked, synced, written };
+        assert!(
+            product_crown(&s),
+            "crown holds after {n} spine steps ({acked},{synced},{written})"
+        );
+    }
+
+    // --- model side: the as-is crown is caught by the spec leg -----
+    let unsynced = WalState { acked: 64, synced: 0, written: 64 };
+    assert!(
+        !product_crown_as_is(&unsynced),
+        "spec leg refuses the unsynced acked prefix"
+    );
+
+    // --- live side: the pinned profile's ledger satisfies the crown -
+    let dir = fresh_dir("product-crown");
+    let rec = crate::RecordingEnv::new();
+    {
+        let db = pedradb_core::VerifiedProfile::open_with_env(&dir, rec.clone()).unwrap();
+        assert!(db.is_verified());
+        db.put(b"ck1", b"cv1").unwrap();
+        db.put(b"ck2", b"cv2").unwrap();
+        let (acked, synced, written) = db
+            .verified_write_ack()
+            .expect("ledger alive while pinned");
+        assert!(acked > 0, "the Ok acked a durable group");
+        let s = WalState { acked, synced, written };
+        assert!(
+            product_crown(&s),
+            "live post-ack ledger ({acked},{synced},{written}) satisfies the crown"
+        );
+        db.close().unwrap();
+    }
+    rec.crash();
+    {
+        let db = pedradb_core::VerifiedProfile::open_with_env(&dir, rec).unwrap();
+        assert_eq!(
+            db.get(b"ck1").as_deref(),
+            Some(b"cv1".as_ref()),
+            "product crown: acked put 1 survives the crash"
+        );
+        assert_eq!(
+            db.get(b"ck2").as_deref(),
+            Some(b"cv2".as_ref()),
+            "product crown: acked put 2 survives the crash"
+        );
+        db.close().unwrap();
+    }
     let _ = fs::remove_dir_all(&dir);
 }

@@ -8,7 +8,7 @@
 //! cargo run -p pedradb-examples --example bank
 //! ```
 //!
-//! Layers on the same kernel: `backup`, `rocksdb_dropin`.
+//! Layers on the same kernel: `backup`, `durable_stream`, `sql`, `rocksdb_dropin`.
 
 use std::ops::Bound;
 
