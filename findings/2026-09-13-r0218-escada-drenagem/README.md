@@ -314,3 +314,11 @@ gates GREEN no commit).
   `may_compact_through_on_live_queued_is_not_ok` (pedradb-store,
   exit 0 no worktree). Gate: floor_atom 201→202, floor_extract
   77→76.
+## P1.2 — leveling ×4 + merge ×2 + index_val ×3 + key + prefix ×11 átomo
+
+- **index_val / value_len_tag (1/11)**: etiqueta de comprimento como o
+  lift citado `len` (identidade — injetiva em len; as-is colapsa a 0) —
+  `value_len_tag_fate_iff` em `IndexVal.lean`. Forward: unfold +
+  injection + hv.symm; reverso: rintro + subst + rfl. Build verde.
+  Planta DST `len_tag_is_injective` (pedradb-store, exit 0 no
+  worktree). Gate: floor_atom 211→212, floor_extract 67→66.

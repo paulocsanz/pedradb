@@ -238,3 +238,4 @@ atom	catalog:lone_tombstone	lone_tombstone_fate_iff	formal/aeneas/lean/Compact.l
 atom	catalog:lsm_compact	lsm_compact_fate_iff	formal/aeneas/lean/LsmR1.lean	lsm_compact
 atom	catalog:lsm_probe	lsm_probe_fate_iff	formal/aeneas/lean/LsmR1.lean	lsm_probe
 atom	catalog:lsm_reopen	lsm_reopen_fate_iff	formal/aeneas/lean/LsmR1.lean	lsm_reopen
+atom	catalog:len_tag	value_len_tag_fate_iff	formal/aeneas/lean/IndexVal.lean	value_len_tag

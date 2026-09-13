@@ -30,3 +30,20 @@ theorem value_len_tag_as_is_always_zero :
     ∀ len : Std.U32, value_len_tag_as_is len = ok 0#u32 := by
   intro len
   rfl
+
+/-- RFC-0218 P1.2 1/11 (átomo `catalog:len_tag`, entrada
+    `value_len_tag`): a etiqueta de comprimento é EXATAMENTE o lift
+    citado `len` (identidade — por isso injetiva em len). O AS-IS é
+    a constante 0 (etiqueta colapsada — dente plantado). -/
+theorem value_len_tag_fate_iff :
+    ∀ (len : U32) (r : U32),
+      (value_len_tag len = ok r) ↔ (r = len) := by
+  intro len r
+  constructor
+  · intro hval
+    unfold value_len_tag at hval
+    injection hval with hv
+    exact hv.symm
+  · rintro hv
+    subst hv
+    rfl

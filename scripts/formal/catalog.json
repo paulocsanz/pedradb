@@ -6957,6 +6957,10 @@
   },
   {
    "id": "len_tag",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.2: fate ∀ sobre value_len_tag no degrau átomo — lift citado len (identidade, injetiva); planta DST len_tag_is_injective"
+   },
    "finding": "F80",
    "twin_kind": "close",
    "single_artifact": true,
