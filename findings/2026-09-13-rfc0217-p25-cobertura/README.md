@@ -2,9 +2,10 @@
 
 **Data:** 2026-09-13 (sweep 07:01–10:26 local) | **Caixa:** Darwin local
 (**DIAG — nunca cartaz**) | **Binário:** árvore viva head `0ba886fe`
-(com probes `0eb0f25e` scan_sst_setup/scan_merge + cw/lone), build
-`$SCR/p25-target`, braço rocks sempre `--features real` em target próprio
-(`$SCR/p25-rocks-target`).
+(build 07:01; **não inclui** `0eb0f25e` — probes de sub-fase do scan não
+afetam comportamento, e os ratios acima não dependem deles; a emissão
+ssu/smg vem de re-run com binário rebuilt no finding P2.6), braço rocks
+sempre `--features real` em target próprio (`$SCR/p25-rocks-target`).
 
 **Protocolo** (`$SCR/p25-sweep.sh`, quiet-gated load<4.0, 1 round por
 célula — DIAG): (a) eixo mc 9/16/32/49 (`ROCKS_PARITY_CLIENTS=c`,
