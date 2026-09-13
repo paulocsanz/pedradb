@@ -6675,6 +6675,36 @@
    }
   },
   {
+   "id": "pit_resync_rewrite_plan",
+   "finding": "RFC-0219 P1.4",
+   "twin_kind": "atom",
+   "atom": "pit_resync_rewrite_plan",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P1.4: reescrever o WAL a partir do prefixo recuperado é decisão do kernel — reescreve EXATAMENTE quando o relatório de recuperação é um resync (pit_resync_needs_rewrite segue vivo e provado no corpo), provado ∀ sobre is_resync como pit_resync_rewrite_plan_fate_iff em WriteAdmission.lean; o AS-IS nunca reescreve (o dano mid-log sobrevive ao próximo open fail-closed — dente); o trampolim db.rs open_with_env_sourced faz match no plano"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "aeneas": "scripts/aeneas_write_admission.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "pit_resync_rewrite_plan",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "open_with_env_sourced"
+    }
+   ],
+   "as_is": "pit_resync_rewrite_plan_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+    "test": "pit_resync_rewrite_plan_on_live_resync_rewrites"
+   }
+  },
+  {
    "id": "parked_pair",
    "finding": "RFC-0219 P1.3",
    "twin_kind": "atom",

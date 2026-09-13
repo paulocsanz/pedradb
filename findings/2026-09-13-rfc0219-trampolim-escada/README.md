@@ -273,3 +273,23 @@ n != 0, n as u64)` decidia inline flushar a mem agora.
 - **Par nasce átomo**: `catalog:mem_auto_flush`. floor_atom 277→278,
   residuals atom 278, single_artifact 297.
 - **Contador**: 54 → **53** (db.rs 32→31). P1.3 fechado: 3 pares.
+
+## P1.4-a — `pit_resync_rewrite_plan` (write_admission_kernel)
+
+Sítio: `open_with_env_sourced` — o portão `if
+pit_resync_needs_rewrite(...)` decidia inline reescrever o WAL a partir
+do prefixo recuperado.
+
+- **Kernel**: `write_admission_kernel::pit_resync_rewrite_plan
+  (is_resync)` → `PitResyncRewritePlan{RewriteWalFromPrefix,
+  KeepRecoveredPrefix}` (chama `pit_resync_needs_rewrite`, que segue
+  vivo e provado no corpo).
+- **AS-IS dente**: `pit_resync_rewrite_plan_as_is` — nunca reescreve;
+  o dano mid-log sobrevive ao próximo open fail-closed.
+- **Teorema**: `pit_resync_rewrite_plan_fate_iff` (∀ sobre o bool) em
+  `WriteAdmission.lean`.
+- **Extrato**: `aeneas_write_admission.sh --required` verde.
+- **Planta DST**: `pit_resync_rewrite_plan_on_live_resync_rewrites`.
+- **Par nasce átomo**: `catalog:pit_resync_rewrite_plan`. floor_atom
+  278→279, residuals atom 279, single_artifact 298.
+- **Contador**: 53 → **52** (db.rs 31→30).

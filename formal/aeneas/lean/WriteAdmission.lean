@@ -417,3 +417,19 @@ theorem group_batch_sync_plan_fate_iff :
   intro client_sync plan
   unfold group_batch_sync_plan
   cases client_sync <;> simp_all <;> exact eq_comm
+
+/-- RFC-0219 P1.4 (átomo `catalog:pit_resync_rewrite`): o open reescreve
+    o WAL a partir do prefixo recuperado EXATAMENTE quando o relatório
+    de recuperação é um resync; sem resync o prefixo fica no disco
+    como-is. O AS-IS nunca reescreve (o dano mid-log sobrevive ao
+    próximo open fail-closed — dente plantado). -/
+theorem pit_resync_rewrite_plan_fate_iff :
+    ∀ (is_resync : Bool) (plan : PitResyncRewritePlan),
+      (pit_resync_rewrite_plan is_resync = ok plan) ↔
+        ((is_resync = true ∧
+            plan = PitResyncRewritePlan.RewriteWalFromPrefix) ∨
+          (is_resync = false ∧
+            plan = PitResyncRewritePlan.KeepRecoveredPrefix)) := by
+  intro is_resync plan
+  unfold pit_resync_rewrite_plan pit_resync_needs_rewrite
+  cases is_resync <;> simp_all <;> exact eq_comm

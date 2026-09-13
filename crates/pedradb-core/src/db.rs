@@ -2167,11 +2167,12 @@ impl<E: Env> Db<E> {
                 }
                 Err(e) => return Err(e),
             };
-            if crate::write_admission_kernel::pit_resync_needs_rewrite(
+            match crate::write_admission_kernel::pit_resync_rewrite_plan(
                 point_in_time_report
                     .as_ref()
                     .is_some_and(|r| r.kind == "resync"),
             ) {
+                crate::write_admission_kernel::PitResyncRewritePlan::RewriteWalFromPrefix => {
                 let repair = dir.join(format!("{WAL_FILE_NAME}.repair"));
                 let mut w = Wal::create_on(&env, &repair)?;
                 w.set_full_fsync(opts.wal_full_fsync);
@@ -2193,6 +2194,8 @@ impl<E: Env> Db<E> {
                 drop(w);
                 env.rename(&repair, &wal_path)?;
                 env.sync_dir(&dir)?;
+                }
+                crate::write_admission_kernel::PitResyncRewritePlan::KeepRecoveredPrefix => {}
             }
             let feed_max = change_log.max_sequence().unwrap_or(0);
             for raw in records {

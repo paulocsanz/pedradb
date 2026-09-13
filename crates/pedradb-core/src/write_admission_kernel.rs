@@ -334,6 +334,35 @@ pub fn pit_resync_needs_rewrite_as_is(_is_resync: bool) -> bool {
 }
 
 #[cfg(not(verus_keep_ghost))]
+/// Fate of the recovered WAL prefix when open sourced a resync report.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PitResyncRewritePlan {
+    /// Resync report ⇒ rewrite the WAL from the recovered prefix.
+    RewriteWalFromPrefix,
+    /// No resync ⇒ keep the recovered prefix on disk as-is.
+    KeepRecoveredPrefix,
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// Rewrite EXACTLY when the report is a resync (pit_resync_needs_rewrite
+/// stays live and proved in the body).
+#[must_use]
+pub fn pit_resync_rewrite_plan(is_resync: bool) -> PitResyncRewritePlan {
+    if pit_resync_needs_rewrite(is_resync) {
+        PitResyncRewritePlan::RewriteWalFromPrefix
+    } else {
+        PitResyncRewritePlan::KeepRecoveredPrefix
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: never rewrite (mid-log damage survives the reopen — dente).
+#[must_use]
+pub fn pit_resync_rewrite_plan_as_is(_is_resync: bool) -> PitResyncRewritePlan {
+    PitResyncRewritePlan::KeepRecoveredPrefix
+}
+
+#[cfg(not(verus_keep_ghost))]
 /// Open-options `sync` requires a directory fsync after rename/create
 /// (CURRENT, MANIFEST, SST publish).
 #[must_use]
@@ -1471,6 +1500,35 @@ mod tests {
         assert!(pit_resync_needs_rewrite(true));
         assert!(!pit_resync_needs_rewrite_as_is(true));
         assert!(!pit_resync_needs_rewrite(false));
+    }
+
+    #[test]
+    fn pit_resync_rewrite_plan_on_live_resync_rewrites() {
+        // RFC-0219 P1.4: a resync report rewrites the WAL from the
+        // recovered prefix; AS-IS keeps the damaged log (dente).
+        assert_eq!(
+            pit_resync_rewrite_plan(true),
+            PitResyncRewritePlan::RewriteWalFromPrefix
+        );
+        assert_eq!(
+            pit_resync_rewrite_plan(false),
+            PitResyncRewritePlan::KeepRecoveredPrefix
+        );
+        assert_eq!(
+            pit_resync_rewrite_plan_as_is(true),
+            PitResyncRewritePlan::KeepRecoveredPrefix,
+            "AS-IS dente: resync report never rewrites"
+        );
+        let open = named_fn_src(include_str!("db.rs"), "open_with_env_sourced")
+            .expect("open_with_env_sourced");
+        assert!(
+            open.contains("match crate::write_admission_kernel::pit_resync_rewrite_plan("),
+            "open_with_env_sourced must match pit_resync_rewrite_plan"
+        );
+        assert!(
+            !open.contains("pit_resync_needs_rewrite("),
+            "the raw resync gate left the trampoline"
+        );
     }
 
     #[test]
