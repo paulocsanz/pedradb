@@ -200,3 +200,4 @@ atom	catalog:query_values_conflict	query_values_conflict_fate_iff	formal/aeneas/
 atom	catalog:strip_authority_for_routing	strip_authority_for_routing_fate_iff	formal/aeneas/lean/Path.lean	strip_authority_for_routing
 atom	catalog:strip_uri_fragment	strip_uri_fragment_fate_iff	formal/aeneas/lean/Path.lean	strip_uri_fragment
 atom	catalog:path_after_authority	path_after_authority_fate_iff	formal/aeneas/lean/Path.lean	path_after_authority
+atom	catalog:strip_http_authority	strip_http_authority_fate_iff	formal/aeneas/lean/Path.lean	strip_http_authority

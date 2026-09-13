@@ -181,3 +181,15 @@ verde antes do commit, exatamente 1 teorema público por commit).
   `authority_atoms_discriminate_as_is` (pedradb-http, exit 0,
   1 passed). Gate GREEN: floor_atom 172→173, floor_extract
   106→105.
+
+## P2.1 — path ×8 átomo (4/8)
+
+- **strip_http_authority (4/8)**: a autoridade HTTP é descartada
+  exatamente pelo `strip_http_authority_rest` — sem `//` prefixo a
+  resposta é none; com `//` é o `path_after_authority` do rest.
+  Duplo bind no some (rest → p); o `bind_ok_inv` do segundo bind
+  já entrega `ok (some p) = ok r` beta-reduzido (o `dsimp` ali é
+  no-progress). Planta DST
+  `authority_atoms_discriminate_as_is` (pedradb-http, exit 0,
+  1 passed). Gate GREEN: floor_atom 173→174, floor_extract
+  105→104.

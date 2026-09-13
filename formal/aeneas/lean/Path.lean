@@ -118,3 +118,37 @@ theorem path_after_authority_fate_iff :
       rw [ho]
       simp only [Aeneas.Std.bind_tc_ok]
       exact hindex
+
+/-- RFC-0216 P2.1 4/8 (átomo `catalog:strip_http_authority`): a
+  autoridade HTTP é descartada exatamente pelo rest extraído — sem
+  `//` prefixo nada a fazer (none), com `//` o path é o
+  path_after_authority do rest. -/
+theorem strip_http_authority_fate_iff :
+    ∀ (t : Str) (r : Option Str),
+      (strip_http_authority t = ok r) ↔
+        ((strip_http_authority_rest t = ok none ∧ r = none) ∨
+          (∃ (rest : Str) (p : Str),
+              strip_http_authority_rest t = ok (some rest) ∧
+                path_after_authority rest = ok p ∧ r = some p)) := by
+  intro t r
+  constructor
+  · intro hval
+    unfold strip_http_authority at hval
+    obtain ⟨o, ho, hval⟩ := bind_ok_inv _ _ _ hval
+    cases o with
+    | none =>
+      dsimp only at hval
+      exact Or.inl ⟨ho, (Result.ok.inj hval).symm⟩
+    | some rest =>
+      dsimp only at hval
+      obtain ⟨p, hp, hval⟩ := bind_ok_inv _ _ _ hval
+      exact Or.inr ⟨rest, p, ho, hp, (Result.ok.inj hval).symm⟩
+  · rintro (⟨ho, rfl⟩ | ⟨rest, p, ho, hp, rfl⟩)
+    · unfold strip_http_authority
+      rw [ho]
+      simp only [Aeneas.Std.bind_tc_ok]
+    · unfold strip_http_authority
+      rw [ho]
+      simp only [Aeneas.Std.bind_tc_ok]
+      rw [hp]
+      simp only [Aeneas.Std.bind_tc_ok]
