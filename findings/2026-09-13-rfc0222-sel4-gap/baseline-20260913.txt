@@ -1,0 +1,36 @@
+seL4 gap por eixo (RFC-0222; audit 2026-09-13 §6) — denominador nomeado
+  A1 refinamento topo (teorema único): 0
+  A2a superfície kernel LOC: 27960/164359 = 17.01%
+  A2b superfície kernel fns: 801/857 = 93.47% (arquivos enrolados 61/68)
+  A3 confinamento (2º teorema): 0
+  A4 espinha de recovery: 0/11
+  A6 ∀-concorrência: 0
+  A8 classe de claim (TCB escrito): 1 (cânone RFC-0061; never-list no residuals.json)
+  A9a gates baratos verdes: 6
+  A9b CI GitHub verde: 0
+  A10 cadeia nomeada (stdlib sorries no TCB): 0
+  escada 0188 (contexto): 290/312 = 92.95%
+  composição m2 (contexto, RFC-0220): 33/286 = 11.54%
+bloco DEFINING (o que define o seL4): 18.41%
+bloco CLAIM+EVIDÊNCIA (piso verde):   43.75%
+{
+ "atom_fns": 286,
+ "atom_fns_chained": 33,
+ "ci_github_green": 0,
+ "concurrency_forall_theorems": 0,
+ "confinement_theorems": 0,
+ "formalized_src_loc": 164359,
+ "gates_green": 6,
+ "gates_total": 8,
+ "kernel_files_enrolled": 61,
+ "kernel_files_total": 68,
+ "kernel_loc": 27960,
+ "kernel_pub_fns": 857,
+ "kernel_pub_fns_on_surface": 801,
+ "pairs_covered": 290,
+ "pairs_total": 312,
+ "recovery_atoms": 11,
+ "recovery_atoms_chained": 0,
+ "stdlib_sorries_named_in_tcb": 0,
+ "top_theorems": 0
+}
