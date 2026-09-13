@@ -316,6 +316,8 @@ gates GREEN no commit).
   77→76.
 ## P1.2 — leveling ×4 + merge ×2 + index_val ×3 + key + prefix ×11 átomo
 
+- **index_val / len_pref_value (10/11)**: valor com prefixo de comprimento como a cadeia citada — capacidade `len+4`, `try_from`+`expect` do len (u32), `to_be_bytes`, `to_slice`, `extend` do prefixo e do valor (7 binds citados) — `len_pref_value_fate_iff` em `IndexVal.lean`. Forward: 6× bind_ok_inv + hval final; reverso: bind_intro ×6. Build verde. Planta DST `len_pref_value_on_live_queued_is_not_ok` (pedradb-store, exit 0 no worktree). Gate: floor_atom 220→221, floor_extract 58→57.
+
 - **leveling / total_bytes (9/11)**: total do nível como a soma citada — `Slice.iter`, `Iterator.map` com a closure que extrai `bytes`, `Iterator.sum` u64 (as-is devolve contagem de arquivos) — `total_bytes_fate_iff` em `Leveling.lean`. Forward: 2× bind_ok_inv; reverso: bind_intro ×2. Build verde. Planta DST `total_bytes_on_live_level_is_not_ok` (pedradb-core, exit 0 no worktree). Gate: floor_atom 219→220, floor_extract 59→58.
 
 - **leveling / overlaps (8/11)**: sobrepor o hull como o par citado — `as_slice` do `lo` + `le hull_hi` abre a porta; `as_slice` do `hi` + `ge hull_lo` confirma — `overlaps_fate_iff` em `Leveling.lean`. Forward: 2× bind_ok_inv + split + bind_ok_inv; reverso: bind_intro ×3 com if defeq. Build verde. Planta DST `overlaps_on_live_slice_is_not_ok` (pedradb-core, exit 0 no worktree). Gate: floor_atom 218→219, floor_extract 60→59.

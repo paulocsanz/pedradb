@@ -1729,6 +1729,10 @@
   },
   {
    "id": "index_val",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.2: fate ∀ sobre len_pref_value no degrau átomo — cadeia citada: aloca len+4, try_from+expect do len, be_bytes, to_slice, extend prefixo e valor; planta DST len_pref_value_on_live_queued_is_not_ok"
+   },
    "finding": "F80",
    "twin_kind": "close",
    "atom": "value_len_tag",

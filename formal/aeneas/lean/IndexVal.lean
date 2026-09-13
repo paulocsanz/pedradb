@@ -85,3 +85,39 @@ theorem exact_value_children_fate_iff :
     subst hv
     unfold exact_value_children
     exact bind_intro st hst (bind_intro s1 hs1 (bind_intro e he rfl))
+
+/-- RFC-0218 P1.2 10/11 (átomo `catalog:index_val`, entrada
+    `len_pref_value`): o valor com prefixo de comprimento é
+    EXATAMENTE a cadeia citada — aloca len+4, converte o len a u32
+    (expect), serializa be_bytes, copia o prefixo e o valor. O AS-IS
+    copia só o valor (prefixo ausente — dente plantado). -/
+theorem len_pref_value_fate_iff :
+    ∀ (val : Slice U8) (r : alloc.vec.Vec U8),
+      (len_pref_value val = ok r) ↔
+      (∃ i1 rr n a s k1,
+        (4#usize + Slice.len val) = ok i1 ∧
+        core.convert.num.ptr_try_from_impls.TryFromU32Usize.try_from
+          (Slice.len val) = ok rr ∧
+        core.result.Result.expect
+          core.num.error.TryFromIntError.Insts.CoreFmtDebug rr
+          (toStr "value len fits u32") = ok n ∧
+        lift (core.num.U32.to_be_bytes n) = ok a ∧
+        lift (Array.to_slice a) = ok s ∧
+        alloc.vec.Vec.extend_from_slice core.clone.CloneU8
+          (alloc.vec.Vec.with_capacity Std.U8 i1) s = ok k1 ∧
+        alloc.vec.Vec.extend_from_slice core.clone.CloneU8 k1 val = ok r) := by
+  intro val r
+  constructor
+  · intro hval
+    unfold len_pref_value at hval
+    obtain ⟨i1, h1, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨rr, hrr, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨n, hn, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨a, ha, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨s, hs, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨k1, hk1, hval⟩ := bind_ok_inv _ _ _ hval
+    exact ⟨i1, rr, n, a, s, k1, h1, hrr, hn, ha, hs, hk1, hval⟩
+  · rintro ⟨i1, rr, n, a, s, k1, h1, hrr, hn, ha, hs, hk1, hv⟩
+    unfold len_pref_value
+    exact bind_intro i1 h1 (bind_intro rr hrr (bind_intro n hn
+      (bind_intro a ha (bind_intro s hs (bind_intro k1 hk1 hv)))))
