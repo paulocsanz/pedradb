@@ -48,3 +48,16 @@ theorem content_length_repeat_ok_fate_iff :
   · intro hr
     unfold content_length_repeat_ok
     rw [hr]
+
+theorem short_body_vs_cl_is_error_fate_iff :
+    ∀ (got declared : Aeneas.Std.U64) (r : Bool),
+      (short_body_vs_cl_is_error got declared = ok r) ↔
+        r = decide (got < declared) := by
+  intro got declared r
+  constructor
+  · intro hval
+    unfold short_body_vs_cl_is_error at hval
+    exact (Result.ok.inj hval).symm
+  · intro hr
+    unfold short_body_vs_cl_is_error
+    rw [hr]

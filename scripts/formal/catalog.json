@@ -2060,6 +2060,10 @@
    "dst_plant": {
     "file": "crates/pedradb-http/src/lib.rs",
     "test": "short_body_vs_cl_is_error_on_live_http_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "Corpo curto vs CL decide exatamente na comparacao U64 extraida — ok r e exatamente r = decide (got < declared); AS-IS aceita corpo curto silenciosamente e a planta prova o dente."
    }
   },
   {

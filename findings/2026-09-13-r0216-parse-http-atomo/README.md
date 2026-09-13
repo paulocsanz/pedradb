@@ -34,3 +34,16 @@ verde antes do commit, exatamente 1 teorema público por commit).
   Planta DST `content_length_repeat_ok_on_live_http_is_not_ok`
   (pedradb-http, exit 0, 1 passed). Gate GREEN: floor_atom 160→161,
   floor_extract 118→117.
+
+## P0.1 — cl ×4 átomo (4/4, FECHAMENTO P0.1)
+
+- **short_body_vs_cl (4/4, FECHAMENTO P0.1)**: o gate de corpo curto
+  contra o Content-Length declarado decide exatamente na comparação
+  U64 extraída — `short_body_vs_cl_is_error got declared = ok r` é
+  exatamente `r = decide (got < declared)` (o kernel marca erro
+  somente quando o corpo recebido é estritamente menor que o
+  declarado; o mutante AS-IS nunca marca). Planta DST
+  `short_body_vs_cl_is_error_on_live_http_is_not_ok` (pedradb-http,
+  exit 0, 1 passed). Axiomas: os 3 padrão do Lean. Fechamento:
+  floor_atom 158→162, floor_extract 120→116, gate GREEN no HEAD de
+  cada uma das 4 promoções, 1 teorema público por commit.

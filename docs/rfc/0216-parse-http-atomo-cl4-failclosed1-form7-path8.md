@@ -72,8 +72,8 @@ no wrapper, planta DST verde ANTES do commit, gate GREEN no commit).
    `invalid_cl_as_zero`, `content_length_repeat_ok`,
    `short_body_vs_cl_is_error` — iff-∀ sobre os corpos extraídos dos
    gates de Content-Length — floor_atom 158→162, floor_extract
-   120→116 — status: `todo` (3/4: `content_length`, `invalid_cl_zero`,
-   `cl_repeat_conflict` feitos 2026-09-13)
+   120→116 — status: `done` (2026-09-13; floor_atom 162,
+   floor_extract 116)
 
 2. **P0.2** fail_closed ×1 (`FailClosed.lean`):
    `parse_error_writes_status` — a perna de erro do parse em átomo;
@@ -132,7 +132,7 @@ no wrapper, planta DST verde ANTES do commit, gate GREEN no commit).
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | cl ×4 átomo (Content-Length) | todo | — | 2026-09-12 |
+| P0.1 | p0 | cl ×4 átomo (Content-Length) | done | `keep_body_without_cl_fate_iff`/`invalid_cl_as_zero_fate_iff`/`content_length_repeat_ok_fate_iff`/`short_body_vs_cl_is_error_fate_iff` | 2026-09-13 |
 | P0.2 | p0 | fail_closed ×1 átomo (veredito de erro) | todo | — | 2026-09-12 |
 | P1.1 | p1 | form ×4 átomo (decode/hex) | todo | — | 2026-09-12 |
 | P1.2 | p1 | form ×3 átomo (conflitos de query) | todo | — | 2026-09-12 |
