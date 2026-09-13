@@ -220,3 +220,4 @@ atom	catalog:flush_plan	flush_plan_fate_iff	formal/aeneas/lean/Flush.lean	flush_
 atom	catalog:first_install	first_install_action_fate_iff	formal/aeneas/lean/Manifest.lean	first_install_action
 atom	catalog:dictionary_link	reopen_outcome_flat_fate_iff	formal/aeneas/lean/Reopen.lean	reopen_outcome
 atom	catalog:crc_match	crc_match_ok_fate_iff	formal/aeneas/lean/Crc.lean	crc_match_ok
+atom	catalog:sst_block_crc	sst_block_crc_ok_fate_iff	formal/aeneas/lean/Scan.lean	sst_block_crc_ok

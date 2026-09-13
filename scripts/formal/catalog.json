@@ -5922,7 +5922,11 @@
     "file": "crates/pedradb-core/src/sst/scan_kernel.rs",
     "test": "sst_block_crc_uses_crc_match_ok"
    },
-   "three_teeth": true
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 2/9 P0.4: sst_block_crc_ok como lift da igualdade citada stored = computed (encadeia crc_match_ok); floor_atom 193→194"
+   }
   },
   {
    "id": "sst_magic",

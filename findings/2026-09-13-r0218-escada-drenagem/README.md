@@ -146,3 +146,11 @@ gates GREEN no commit).
   intocada aqui por cânone; captura
   r0218_p04_plants_worktree.txt). Gate: floor_atom 192→193,
   floor_extract 86→85.
+
+- **sst_block_crc (2/9)**: lift da igualdade citada através do
+  crc_match_ok — bloco casa sse stored = computed (as-is admite
+  sempre) — `sst_block_crc_ok_fate_iff` em `Scan.lean` (helpers
+  bind_ok_inv/bind_intro privados copiados do molde WalRecover).
+  Build verde. Planta DST `sst_block_crc_uses_crc_match_ok`
+  (pedradb-core, exit 0 no worktree). Gate: floor_atom 193→194,
+  floor_extract 85→84.

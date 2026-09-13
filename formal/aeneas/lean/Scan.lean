@@ -741,3 +741,35 @@ theorem key_in_window_unbounded (user) :
     = ok true := by
   unfold scan_kernel.key_in_window
   rfl
+/-- Any ok-valued Result bind forces the bound term to be ok. -/
+private theorem bind_ok_inv {α β} (x : Result α) (f : α → Result β) (v : β)
+    (h : Aeneas.Std.bind x f = ok v) : ∃ a, x = ok a ∧ f a = ok v := by
+  cases x with
+  | ok a => exact ⟨a, rfl, h⟩
+  | fail e => exact absurd h (by simp)
+  | div => exact absurd h (by simp)
+
+/-- An ok chain reassembles into an ok bind. -/
+private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : β}
+    (a : α) (hx : x = ok a) (h : f a = ok v) : Aeneas.Std.bind x f = ok v := by
+  rw [hx]
+  exact h
+
+/-- RFC-0218 P0.4 2/9 (átomo `catalog:sst_block_crc`): o CRC de
+    bloco é EXATAMENTE a igualdade citada — casa sse stored =
+    computed (sem segunda opinião). O AS-IS admite sempre (bloco
+    corrompido entra — dente plantado). -/
+theorem sst_block_crc_ok_fate_iff :
+    ∀ (stored : U32) (computed : U32) (v : Bool),
+      (scan_kernel.sst_block_crc_ok stored computed = ok v) ↔
+        (v = (decide (stored = computed) : Bool)) := by
+  intro stored computed v
+  constructor
+  · intro hval
+    unfold scan_kernel.sst_block_crc_ok wal.crc.crc_match_ok at hval
+    injection hval with hv
+    exact hv.symm
+  · rintro hv
+    subst hv
+    unfold scan_kernel.sst_block_crc_ok wal.crc.crc_match_ok
+    rfl
