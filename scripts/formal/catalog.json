@@ -4724,6 +4724,10 @@
    "dst_plant": {
     "file": "crates/pedradb-sim/src/recording.rs",
     "test": "fsync_promotes_pending_on_live_sim_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 2/4 P0.1: fsync_promotes_pending como lift puro — pending promove iff OS honesto; floor_atom 179→180"
    }
   },
   {

@@ -504,3 +504,19 @@ theorem occ_conflict_fate_iff :
     · rw [occ_conflict_closed_form, if_pos hgt, hv]
     · rw [occ_conflict_closed_form, if_neg hgt, hv]
 
+/-- RFC-0218 P0.1 2/4 (átomo `catalog:fsync_promote`, entrada
+    `fsync_promotes_pending`): pending vira durável EXATAMENTE quando o
+    OS/Env é honesto — o corpo é o lift puro `ok os_honest`; sem
+    terceiro destino. O AS-IS promove mesmo com fsync mentiroso (dente
+    RFC-0078: planta `fsync_promotes_pending_on_live_sim_is_not_ok`). -/
+theorem fsync_promotes_pending_fate_iff :
+    ∀ (os_honest v : Bool),
+      (fsync_promotes_pending os_honest = ok v) ↔ (os_honest = v) := by
+  intro os_honest v
+  constructor
+  · intro hval
+    exact Result.ok.inj hval
+  · intro h
+    unfold fsync_promotes_pending
+    rw [h]
+

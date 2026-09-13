@@ -17,3 +17,11 @@ gates GREEN no commit).
   Build `lake build GroupCommit` verde (1699 jobs). Planta DST
   `occ_conflict_on_live_group_is_not_ok` (pedradb-core, exit 0,
   1 passed). Gate: floor_atom 178→179, floor_extract 100→99.
+
+- **fsync_promote (2/4, entrada `fsync_promotes_pending`)**: lift puro
+  — `fsync_promotes_pending_fate_iff`: `(fsync_promotes_pending
+  os_honest = ok v) ↔ (os_honest = v)`; pending promove exatamente
+  quando o OS/Env é honesto. Build verde. Planta DST
+  `fsync_promotes_pending_on_live_sim_is_not_ok` (pedradb-sim,
+  exit 0, 9 passed no módulo recording). Gate: floor_atom 179→180,
+  floor_extract 99→98.

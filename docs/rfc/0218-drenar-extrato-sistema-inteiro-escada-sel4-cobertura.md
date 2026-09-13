@@ -77,8 +77,9 @@ nunca por promoção silenciosa.
 1. **P0.1** group_commit ×4 (`GroupCommit.lean`): `group_validate`
    (loop de validação OCC — molde de indução dos loops Form/DecodeFate),
    `group_commit`, `group_fence`, `fsync_promote` — floor_atom
-   178→182 — status: `todo` (1/4: `group_commit`/`occ_conflict`
-   `occ_conflict_fate_iff` feito 2026-09-13)
+   178→182 — status: `todo` (2/4: `group_commit`/`occ_conflict`
+   `occ_conflict_fate_iff` e `fsync_promote`/
+   `fsync_promotes_pending_fate_iff` feitos 2026-09-13)
 
 2. **P0.2** wal/recover ×4 (`WalRecover.lean`): `fragment_act`,
    `from_record_type`, `is_length_resyncable`, `physical_payload_act` —
