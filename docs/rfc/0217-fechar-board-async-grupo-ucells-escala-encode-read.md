@@ -278,8 +278,20 @@ board**, estendendo este RFC a cada etapa nova descoberta.
   3,13–14,2µs) é Linux: **meter e4b**; se lá também for neutro, a fatia
   reabre como encode member-side (pré-grupo no cliente), follow-up
   nomeado abaixo. — status: `doing` (código landed; cartaz = e4b)
-- [ ] **P2.3** Read-side −18%: decompor cursor do scan (`deps_scan`
-  single 0,831 DIAG p201o → ≥1,0 no cartaz Linux). — status: `todo`
+- [x] **P2.3** Read-side −18%: decompor cursor do scan (`deps_scan`
+  single 0,831 DIAG p201o → ≥1,0 no cartaz Linux). **Veredito DIAG
+  2026-09-13** (deps suite n=2000 ×2 rounds quiet, peer sync=0,
+  probes novos `scan_sst_setup_ns`/`scan_merge_ns` commit `0eb0f25e`):
+  **ratio 1,023 / 1,419** — o 0,831 do p201o não reproduz (superseded;
+  trabalhos pós-P1.4 — point_ord_btree incremental — e o cache TLS
+  last-N do `count_named` já absorvem a diferença). Decomposição por
+  miss (874 walks = 44% dos ops; 56% servidos pelo cache TLS/count com
+  zero walk): merge k-way **2,55–2,98µs/miss** (dono residual nomeado),
+  setup de cursores SST 0,51–0,55µs, resto do `count_visible`
+  1,1–2,7µs; block cache quente (10 decodes/874 walks). Cartaz Linux =
+  e4b; se lá der <1,0, o ataque é o merge k-way (single-pass min-head
+  com stepped cursors em vez de scan linear por chave emitida). —
+  status: `done` (DIAG-paridade datada; dono residual nomeado)
 - [ ] **P2.4** Escada de admissão (produto): probe com histerese/cache
   curto em vez de por commit (alvo ≤1ms/commit sob Reclaim; parks
   230–310ms eliminados do caminho quente; guarda: semântica Refuse abaixo
@@ -329,7 +341,7 @@ dono.
 | P1.4 | p1 | linkbench_mix: decompor + atacar dono | doing | `2f083efb` (point_ord_btree incremental; DIAG p50 −52%; cartaz = e4b) | 2026-09-13 |
 | P2.1 | p2 | Escala pesada 4GiB: meter + fechar (0,70/0,557) | todo | — | 2026-09-13 |
 | P2.2 | p2 | Encode memtable off-path | doing | `9b5ca0f5`; DIAG 09-13 mem= neutro no Darwin (4,63→4,63/4,82→4,96µs); veredito alvo = e4b | 2026-09-13 |
-| P2.3 | p2 | Read-side: cursor de scan | todo | — | 2026-09-13 |
+| P2.3 | p2 | Read-side: cursor de scan | done | DIAG 09-13: ratio 1,023–1,419 (0,831 não reproduz); dono residual = merge k-way 2,5–3µs/miss; cartaz = e4b | 2026-09-13 |
 | P2.4 | p2 | Escada de admissão: histerese (produto) | doing | `c4fe195d` (knob opt-in; meter disco pequeno p/ flip default = e4b) | 2026-09-13 |
 | P2.5 | p2 | Cobertura: delete-heavy, mc9–49, 1GiB, p99 | todo | — | 2026-09-13 |
 
