@@ -193,11 +193,24 @@ board**, estendendo este RFC a cada etapa nova descoberta.
   PEDRA_GROUP_WINDOW_CAP_TO_FLIGHT=1`), janela-≤-voo implementada no
   P0.3b; o braço `window` (flat) fica como perdedor documentado do P0.3
   para contraste no mesmo gate. Binário amd64 rebuildado com o knob
-  (musl zigbuild `--features real`). — status: `doing`
+  (zigbuild gnu `--features real`, 153MB). **Gate re-estreado
+  2026-09-13T16:0xZ**: `deploy-image` no p149 devolvia 500 (platform:
+  serviço sem recurso ativo + deploy pendente) — p149 soft-deletado
+  (mata o pendente `0caaac0b`), serviço novo **`linux-gate-p211z`**
+  (region brasil, 4 vCPU/4GB, worker) com imagem
+  `ghcr.io/paulocsanz/pedradb-linux-gate:p211z` (digest `19fd77ea`),
+  deploy **`6f509017` pending**, `WAVE=p04chain` — a onda encadeia no
+  MESMO boot: parte 1 = p211p PHASE (P0.5), parte 2 = gate 3-run
+  clean/window/flightcap (P0.4). Monitor `p211z-monitor` no ar
+  (terminal = `P0217_P04_DONE`). — status: `doing`
 - [ ] **P0.5** Re-adjudicação do dono no Linux (errata `426272f4`): onda
   admission-clean com PHASE distribuindo a seção serial no âncora ext4
   (wal/mem/publish/lwait por commit); finding datado. **Mesmo block do
-  P0.4** (mesma onda, mesmo host; 2026-09-13T04:42Z). — status: `doing`
+  P0.4** (mesma onda, mesmo host; 2026-09-13T04:42Z). **Re-estreada
+  2026-09-13**: parte 1 da onda encadeada `p04chain` no
+  `linux-gate-p211z` (deploy `6f509017` pending; o PHASE Darwin
+  write10m @10M já mediu wal=4,74µs/commit como referência — finding
+  `2026-09-13-rfc0217-p26-p27-escala`). — status: `doing`
 
 ### P1 — U-cells nativas (ranking nº 2; cada fatia: ≥1,0 OU teto datado com número)
 
@@ -404,8 +417,8 @@ dono.
 | P0.2 | p0 | Attach in-flight: adjudicado — fundido em P2.2 (encode member-side; voos já cheios) | done | `234001f7` | 2026-09-13 |
 | P0.3 | p0 | Meter DIAG Darwin: avg_grp ok; ratio janela fixa PERDE mc2–4 (0,100–0,960 vs clean), GANHA mc6+; default fica off | done | veredito 09-13T09:51Z (perda→P0.3b) | 2026-09-13 |
 | P0.3b | p0 | Early-exit: quiescence fecha cw=42–51µs; janela-≤-voo IMPLEMENTADA (`flight_capped_window_us`, knob default off, EMA do voo, colapso <20µs, twins ok) | blocked e4b | probes 09-13 (`0ba886fe`) + impl 09-13 (`9f361642`) | 2026-09-13 |
-| P0.4 | p0 | Meter Linux 3-run quiet: gate-blocked 04:42Z (p149 desconectado); braço flightcap no driver; binário amd64 rebuildado com o knob | doing | — | 2026-09-13 |
-| P0.5 | p0 | Re-adjudicação do dono no Linux: mesmo block do P0.4 | doing | — | 2026-09-13 |
+| P0.4 | p0 | Meter Linux 3-run quiet: braço flightcap no driver; imagem `p211z` publicada; gate re-estreado em `linux-gate-p211z` (deploy `6f509017` pending, host Brasil ainda down; onda encadeada P0.5→P0.4) | doing | — | 2026-09-13 |
+| P0.5 | p0 | Re-adjudicação do dono no Linux: parte 1 da onda encadeada `p04chain` (p211p PHASE no ext4) | doing | — | 2026-09-13 |
 | P1.1 | p1 | kafka_changelog_flush: flush amortizado | done | `ded231ab` (ratio ≥1,0 = meter Linux e4b) | 2026-09-13 |
 | P1.2 | p1 | ingest_sst + compaction_filter: caminhos nativos | done | `92a76a97` (cartaz Linux = e4b; DIAG filter 0,47→0,935) | 2026-09-13 |
 | P1.3 | p1 | wbwi + write_tx: batch indexado + tx nativos | doing | `5c1f5b43` + DIAG micro 09-13: 0,307→0,317–0,349 (perda honesta; cartaz = e4b) | 2026-09-13 |

@@ -1,0 +1,61 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "compat",
+  "sync": false,
+  "peer_policy": "rocks-default",
+  "durability": "async-wal (PEDRA_PARITY_ASYNC=1; WAL write, no fdatasync — NOT G1, not official)",
+  "changelog_interval": 0,
+  "status": "ok",
+  "notes": ["ycsb records=10000000 ops=3000 payload=100 dist=uniform", "engine=compat durability=async-wal (PEDRA_PARITY_ASYNC=1; WAL write, no fdatasync — NOT G1, not official)", "suites: ycsb,deps", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=0", "peer_policy=rocks-default", "host-default write sync: kvrocks=false myrocks=true surreal=true"],
+  "benches": [
+{
+    "name": "ycsb_a",
+    "n": 3000,
+    "qps": 201008.392,
+    "p50_ms": 0.0060,
+    "p95_ms": 0.0076,
+    "p99_ms": 0.0112,
+    "p999_ms": 0.0347,
+    "max_ms": 0.3001,
+    "wall_s": 0.0149
+  },
+{
+    "name": "deps_mvcc_latest",
+    "n": 3000,
+    "qps": 8487.829,
+    "p50_ms": 0.1197,
+    "p95_ms": 0.2826,
+    "p99_ms": 0.3773,
+    "p999_ms": 1.7492,
+    "max_ms": 2.2270,
+    "wall_s": 0.3534
+  },
+{
+    "name": "deps_mvcc_latest_split",
+    "combined": true,
+    "probe": {"latest_ops":3000,"latest_mem_hit":1188,"latest_sst_fallback":1812,"latest_sst_probed":8805,"scan_ops":0,"scan_ns":0,"scan_sst_setup_ns":0,"scan_merge_ns":0,"ord_builds":0,"ord_build_ns":0,"scan_sst_probed":0,"sst_count":830,"l0_files":773,"level1_files":56,"mem_entries":6255488,"block_cache_hits":24,"block_cache_misses":1788,"blocks_decoded":6169,"get_mem_hit":1188,"get_sst_fallback":4272,"get_inline":3000,"get_vlog":0,"mvcc_split_ops":3000,"mvcc_ns_encode":139778,"mvcc_ns_last":153643748,"mvcc_ns_get":198495472,"mvcc_ns_copy":149203}
+  },
+{
+    "name": "deps_raftlog",
+    "n": 3000,
+    "qps": 14009.284,
+    "p50_ms": 0.0046,
+    "p95_ms": 0.0060,
+    "p99_ms": 0.0078,
+    "p999_ms": 0.0610,
+    "max_ms": 124.8638,
+    "wall_s": 0.2141
+  },
+{
+    "name": "deps_cache_overwrite",
+    "n": 3000,
+    "qps": 6973.974,
+    "p50_ms": 0.0067,
+    "p95_ms": 0.0101,
+    "p99_ms": 0.0146,
+    "p999_ms": 0.0303,
+    "max_ms": 408.1600,
+    "wall_s": 0.4302
+  }
+  ]
+}
