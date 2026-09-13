@@ -226,3 +226,22 @@ verde antes do commit, exatamente 1 teorema público por commit).
   `origin_form_path_on_live_http_is_not_ok` (pedradb-http, exit 0,
   1 passed). Gate GREEN: floor_atom 175→176, floor_extract
   103→102.
+
+## P2.1 — path ×8 átomo (7/8)
+
+- **split_host_port (7/8)**: o parser de autoridade `[host]:port` como
+  iff de destino (fate) — o match do `rsplit_once '@'` (usuário vs
+  bruto), o caminho de colchetes (find `]` → index inclusivo →
+  strip `:` → port vira none se is_empty) e o fallback
+  `split_host_port_colon` num só teorema com 10 folhas no reverso
+  (2 de rsplit × 5 de bracket/find/port). Táticas: `«end» := end2`
+  no RangeToInclusive (end é keyword), padrões rcases sem tuplas
+  com vírgula dentro de parênteses (achatar), `Result.ok.inj` +
+  `Prod.mk.injEq` + `subst` para alinhar o par final, e no match do
+  port `cases oport` + `split at hvalM` para o `if e = true`. O
+  `uncurry` do par do Charon NÃO aparece no reverso — o
+  `rw [hro]; simp only [bind_tc_ok]` já reduz o match; tática
+  falhando aborta o resto do bullet (erro mascarado). Planta DST
+  `authority_atoms_discriminate_as_is` (pedradb-http, exit 0,
+  1 passed). Gate GREEN: floor_atom 176→177, floor_extract
+  102→101.

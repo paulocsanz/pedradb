@@ -339,3 +339,243 @@ theorem origin_form_path_fate_iff :
       rw [ho]; simp only [Aeneas.Std.bind_tc_ok]
       rw [hsp]; simp only [Aeneas.Std.bind_tc_ok]
       rw [ho2]; simp only [Aeneas.Std.bind_tc_ok]
+
+/-- RFC-0216 P2.1 7/8 (átomo `catalog:split_host_port`): o par
+  host/porta é exatamente a cadeia citada — o `@` descarta o usuário,
+  `[...]` marca um host IPv6 literal com a porta depois de `:`, e
+  fora disso o veredito é o `split_host_port_colon`. -/
+theorem split_host_port_fate_iff :
+    ∀ (raw : Str) (h : Str) (p : Option Str),
+      (split_host_port raw = ok (h, p)) ↔
+        (∃ (s : Str),
+            ((core.str.Str.rsplit_once raw '@' = ok none ∧ s = raw) ∨
+              (∃ (user : Str) (s2 : Str),
+                  core.str.Str.rsplit_once raw '@' = ok (some (user, s2)) ∧
+                    s = s2)) ∧
+              ((∃ (rest : Str),
+                  core.str.Str.strip_prefix s
+                      (toStr "[" split_host_port._proof_1) = ok (some rest) ∧
+                    ((∃ (end1 : Usize) (end2 : Usize) (after : Str),
+                        core.str.Str.find rest ']' = ok (some end1) ∧
+                          (end1 + 1#usize) = ok end2 ∧
+                            Str.Insts.CoreOpsIndexIndex.index
+                                core.ops.range.RangeToInclusiveUsize.Insts.CoreSliceIndexSliceIndexStrStr
+                                s { «end» := end2 } = ok h ∧
+                              Str.Insts.CoreOpsIndexIndex.index
+                                  core.ops.range.RangeFromUsize.Insts.CoreSliceIndexSliceIndexStrStr
+                                  rest { start := end2 } = ok after ∧
+                                ((core.str.Str.strip_prefix after
+                                      (toStr ":" split_host_port._proof_2) =
+                                    ok none ∧ p = none) ∨
+                                  (∃ (p' : Str),
+                                      core.str.Str.strip_prefix after
+                                          (toStr ":" split_host_port._proof_2) =
+                                        ok (some p') ∧
+                                        ((core.str.Str.is_empty p' = ok true ∧
+                                            p = none) ∨
+                                          (core.str.Str.is_empty p' = ok false ∧
+                                            p = some p')))))
+                      ∨ (core.str.Str.find rest ']' = ok none ∧
+                          split_host_port_colon s = ok (h, p))))
+                ∨ (core.str.Str.strip_prefix s
+                      (toStr "[" split_host_port._proof_1) = ok none ∧
+                    split_host_port_colon s = ok (h, p)))) := by
+  intro raw h p
+  constructor
+  · intro hval
+    unfold split_host_port at hval
+    obtain ⟨o, hro, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨s, hsO, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨obr, hbrO, hval⟩ := bind_ok_inv _ _ _ hval
+    cases o with
+    | none =>
+      simp only at hsO
+      have hs : s = raw := (Result.ok.inj hsO).symm
+      refine ⟨s, ?_, ?_⟩
+      · left; exact ⟨hro, hs⟩
+      · cases obr with
+        | some rest =>
+          simp only at hval
+          obtain ⟨oend, hfind, hval⟩ := bind_ok_inv _ _ _ hval
+          cases oend with
+          | some end1 =>
+            simp only at hval
+            obtain ⟨end2, hend2, hval⟩ := bind_ok_inv _ _ _ hval
+            obtain ⟨host, hhost, hval⟩ := bind_ok_inv _ _ _ hval
+            obtain ⟨after, hafter, hval⟩ := bind_ok_inv _ _ _ hval
+            obtain ⟨oport, hport, hval⟩ := bind_ok_inv _ _ _ hval
+            obtain ⟨port, hportM, hval⟩ := bind_ok_inv _ _ _ hval
+            have hp2 := Result.ok.inj hval
+            simp only [Prod.mk.injEq] at hp2
+            obtain ⟨hh, hpq⟩ := hp2
+            subst hh
+            subst hpq
+            left
+            refine ⟨rest, hbrO, ?_⟩
+            · left
+              refine ⟨end1, end2, after, hfind, hend2, hhost, hafter, ?_⟩
+              cases oport with
+              | none =>
+                simp only at hportM
+                have hpn : port = none := (Result.ok.inj hportM).symm
+                subst hpn
+                left; exact ⟨hport, rfl⟩
+              | some p' =>
+                simp only at hportM
+                obtain ⟨e, he, hvalM⟩ := bind_ok_inv _ _ _ hportM
+                split at hvalM
+                · next het =>
+                  rw [het] at he
+                  have hpn : port = none := (Result.ok.inj hvalM).symm
+                  subst hpn
+                  right; refine ⟨p', hport, ?_⟩; left; exact ⟨he, rfl⟩
+                · next hef =>
+                  have hef' : e = false := by simp at hef; exact hef
+                  rw [hef'] at he
+                  have hpn : port = some p' := (Result.ok.inj hvalM).symm
+                  subst hpn
+                  right; refine ⟨p', hport, ?_⟩; right; exact ⟨he, rfl⟩
+          | none =>
+            simp only at hval
+            left
+            refine ⟨rest, hbrO, ?_⟩
+            right; exact ⟨hfind, hval⟩
+        | none =>
+          simp only at hval
+          right; exact ⟨hbrO, hval⟩
+    | some pair =>
+      obtain ⟨user, s2⟩ := pair
+      simp only at hsO
+      have hs : s = s2 := (Result.ok.inj hsO).symm
+      refine ⟨s, ?_, ?_⟩
+      · right; exact ⟨user, s2, hro, hs⟩
+      · cases obr with
+        | some rest =>
+          simp only at hval
+          obtain ⟨oend, hfind, hval⟩ := bind_ok_inv _ _ _ hval
+          cases oend with
+          | some end1 =>
+            simp only at hval
+            obtain ⟨end2, hend2, hval⟩ := bind_ok_inv _ _ _ hval
+            obtain ⟨host, hhost, hval⟩ := bind_ok_inv _ _ _ hval
+            obtain ⟨after, hafter, hval⟩ := bind_ok_inv _ _ _ hval
+            obtain ⟨oport, hport, hval⟩ := bind_ok_inv _ _ _ hval
+            obtain ⟨port, hportM, hval⟩ := bind_ok_inv _ _ _ hval
+            have hp2 := Result.ok.inj hval
+            simp only [Prod.mk.injEq] at hp2
+            obtain ⟨hh, hpq⟩ := hp2
+            subst hh
+            subst hpq
+            left
+            refine ⟨rest, hbrO, ?_⟩
+            · left
+              refine ⟨end1, end2, after, hfind, hend2, hhost, hafter, ?_⟩
+              cases oport with
+              | none =>
+                simp only at hportM
+                have hpn : port = none := (Result.ok.inj hportM).symm
+                subst hpn
+                left; exact ⟨hport, rfl⟩
+              | some p' =>
+                simp only at hportM
+                obtain ⟨e, he, hvalM⟩ := bind_ok_inv _ _ _ hportM
+                split at hvalM
+                · next het =>
+                  rw [het] at he
+                  have hpn : port = none := (Result.ok.inj hvalM).symm
+                  subst hpn
+                  right; refine ⟨p', hport, ?_⟩; left; exact ⟨he, rfl⟩
+                · next hef =>
+                  have hef' : e = false := by simp at hef; exact hef
+                  rw [hef'] at he
+                  have hpn : port = some p' := (Result.ok.inj hvalM).symm
+                  subst hpn
+                  right; refine ⟨p', hport, ?_⟩; right; exact ⟨he, rfl⟩
+          | none =>
+            simp only at hval
+            left
+            refine ⟨rest, hbrO, ?_⟩
+            right; exact ⟨hfind, hval⟩
+        | none =>
+          simp only at hval
+          right; exact ⟨hbrO, hval⟩
+  · rintro ⟨s, (⟨hro, rfl⟩ | ⟨user, s2, hro, rfl⟩),
+      (⟨rest, hbr,
+        (⟨end1, end2, after, hfind, hend2, hhost, hafter,
+            (⟨hpo, rfl⟩ | ⟨p', hpo, (⟨he, rfl⟩ | ⟨he, rfl⟩)⟩)⟩ |
+          ⟨hf, hcol⟩)⟩ |
+        ⟨hbr, hcol⟩)⟩
+    · unfold split_host_port
+      rw [hro]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hbr]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hfind]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hend2]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hhost]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hafter]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hpo]; simp only [Aeneas.Std.bind_tc_ok]
+    · unfold split_host_port
+      rw [hro]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hbr]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hfind]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hend2]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hhost]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hafter]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hpo]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [he]; simp only [Aeneas.Std.bind_tc_ok]
+      simp
+    · unfold split_host_port
+      rw [hro]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hbr]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hfind]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hend2]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hhost]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hafter]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hpo]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [he]; simp only [Aeneas.Std.bind_tc_ok]
+      simp
+    · unfold split_host_port
+      rw [hro]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hbr]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hf]; simp only [Aeneas.Std.bind_tc_ok]
+      exact hcol
+    · unfold split_host_port
+      rw [hro]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hbr]; simp only [Aeneas.Std.bind_tc_ok]
+      exact hcol
+    · unfold split_host_port
+      rw [hro]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hbr]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hfind]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hend2]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hhost]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hafter]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hpo]; simp only [Aeneas.Std.bind_tc_ok]
+    · unfold split_host_port
+      rw [hro]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hbr]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hfind]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hend2]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hhost]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hafter]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hpo]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [he]; simp only [Aeneas.Std.bind_tc_ok]
+      simp
+    · unfold split_host_port
+      rw [hro]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hbr]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hfind]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hend2]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hhost]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hafter]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hpo]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [he]; simp only [Aeneas.Std.bind_tc_ok]
+      simp
+    · unfold split_host_port
+      rw [hro]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hbr]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hf]; simp only [Aeneas.Std.bind_tc_ok]
+      exact hcol
+    · unfold split_host_port
+      rw [hro]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hbr]; simp only [Aeneas.Std.bind_tc_ok]
+      exact hcol

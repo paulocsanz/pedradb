@@ -203,3 +203,4 @@ atom	catalog:path_after_authority	path_after_authority_fate_iff	formal/aeneas/le
 atom	catalog:strip_http_authority	strip_http_authority_fate_iff	formal/aeneas/lean/Path.lean	strip_http_authority
 atom	catalog:host_authority_mismatch	host_authority_mismatch_fate_iff	formal/aeneas/lean/Path.lean	host_authority_mismatch
 atom	catalog:origin_path	origin_form_path_fate_iff	formal/aeneas/lean/Path.lean	origin_form_path
+atom	catalog:split_host_port	split_host_port_fate_iff	formal/aeneas/lean/Path.lean	split_host_port

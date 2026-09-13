@@ -2281,6 +2281,10 @@
    "dst_plant": {
     "file": "crates/pedradb-http/src/path_kernel.rs",
     "test": "authority_atoms_discriminate_as_is"
+   },
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 7/8: split_host_port como iff de destino (fate) — forwards e reverso nos 10 caminhos (bracket, find, port); floor_atom 176→177"
    }
   },
   {
