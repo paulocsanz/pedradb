@@ -136,6 +136,16 @@ gates GREEN no commit).
 
 ## P0.4 — crc/magic/scan ×9 átomo
 
+- **point_bounds_overlap (6/9)**: gate de arquivo como bounds citados —
+  sem smallest/largest lê (true); com ambos, lê sse lo passou no fim E
+  hi passou no start (três disjunctos, o terceiro `∃ a b, v = a && b`
+  com gates privados DEFEQ aos lets) —
+  `point_bounds_overlap_fate_iff` em `Scan.lean`. Forward cases
+  smallest/largest + simp only (iota) + duplo bind_ok_inv; reverso
+  subst + rfl / cadeia bind_intro. Build verde. Planta DST
+  `point_bounds_overlap_on_live_bounds_is_not_ok` (pedradb-core, exit 0
+  no worktree). Gate: floor_atom 197→198, floor_extract 81→80.
+
 - **key_in_window (5/9)**: janela booleana como os dois gates citados
   — a chave entra sse passou no start E passou no fim
   (`∃ a b, gate_start = ok a ∧ gate_end = ok b ∧ v = a && b`,

@@ -900,3 +900,80 @@ theorem key_in_window_fate_iff :
     subst hv
     unfold scan_kernel.key_in_window
     exact bind_intro a hA (bind_intro b hB (by cases a <;> rfl))
+
+/-- Gate before_end of `point_bounds_overlap` (DEFEQ to the kernel let). -/
+private noncomputable def pbo_file_before_end (lo : Slice U8)
+    (end1 : core.ops.range.Bound (Slice U8)) : Result Bool :=
+  match end1 with
+  | core.ops.range.Bound.Included e =>
+    Shared1A.Insts.CoreCmpPartialOrdShared0B.le
+      (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) lo e
+  | core.ops.range.Bound.Excluded e =>
+    Shared1A.Insts.CoreCmpPartialOrdShared0B.lt
+      (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) lo e
+  | core.ops.range.Bound.Unbounded => ok true
+
+/-- Gate after_start of `point_bounds_overlap` (DEFEQ to the kernel let). -/
+private noncomputable def pbo_file_after_start (hi : Slice U8)
+    (start : core.ops.range.Bound (Slice U8)) : Result Bool :=
+  match start with
+  | core.ops.range.Bound.Included s =>
+    Shared1A.Insts.CoreCmpPartialOrdShared0B.ge
+      (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) hi s
+  | core.ops.range.Bound.Excluded s =>
+    Shared1A.Insts.CoreCmpPartialOrdShared0B.gt
+      (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) hi s
+  | core.ops.range.Bound.Unbounded => ok true
+
+/-- RFC-0218 P0.4 6/9 (átomo `catalog:point_bounds_overlap`): o gate
+    de leitura de arquivo é EXATAMENTE os bounds citados — sem
+    smallest/largest lê (true); com ambos, lê sse lo passou no fim E
+    hi passou no start (v = a && b). O AS-IS delega com bounds
+    estourados (dente plantado). -/
+theorem point_bounds_overlap_fate_iff :
+    ∀ (smallest : Option (Slice U8)) (largest : Option (Slice U8))
+      (start : core.ops.range.Bound (Slice U8))
+      (end1 : core.ops.range.Bound (Slice U8)) (v : Bool),
+      (scan_kernel.point_bounds_overlap smallest largest start end1 = ok v) ↔
+        ((smallest = none ∧ v = true) ∨
+          (∃ lo, smallest = some lo ∧ largest = none ∧ v = true) ∨
+          (∃ lo hi, smallest = some lo ∧ largest = some hi ∧
+            ∃ a b, pbo_file_before_end lo end1 = ok a ∧
+                    pbo_file_after_start hi start = ok b ∧
+                    v = (a && b))) := by
+  intro smallest largest start end1 v
+  constructor
+  · intro hval
+    cases smallest with
+    | none =>
+      simp only [scan_kernel.point_bounds_overlap] at hval
+      injection hval with hv
+      exact Or.inl ⟨rfl, hv.symm⟩
+    | some lo =>
+      cases largest with
+      | none =>
+        simp only [scan_kernel.point_bounds_overlap] at hval
+        injection hval with hv
+        exact Or.inr (Or.inl ⟨lo, rfl, rfl, hv.symm⟩)
+      | some hi =>
+        simp only [scan_kernel.point_bounds_overlap] at hval
+        obtain ⟨a, hA, hval⟩ := bind_ok_inv _ _ _ hval
+        obtain ⟨b, hB, hval⟩ := bind_ok_inv _ _ _ hval
+        split at hval
+        · next hc =>
+          rw [hc] at hA
+          injection hval with hv
+          exact Or.inr (Or.inr ⟨lo, hi, rfl, rfl, true, b, hA, hB, hv.symm⟩)
+        · next hc =>
+          simp only [Bool.not_eq_true] at hc
+          rw [hc] at hA
+          injection hval with hv
+          exact Or.inr (Or.inr ⟨lo, hi, rfl, rfl, false, b, hA, hB, hv.symm⟩)
+  · rintro (⟨hn, hv⟩ | ⟨lo, hs, hn, hv⟩ |
+      ⟨lo, hi, hs, hh, a, b, hA, hB, hv⟩)
+    · subst hv; subst hn
+      rfl
+    · subst hv; subst hs; subst hn
+      rfl
+    · subst hv; subst hs; subst hh
+      exact bind_intro a hA (bind_intro b hB (by cases a <;> rfl))

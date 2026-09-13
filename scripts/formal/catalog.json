@@ -5909,7 +5909,11 @@
     "file": "crates/pedradb-core/src/sst/scan_kernel.rs",
     "test": "point_bounds_overlap_on_live_bounds_is_not_ok"
    },
-   "three_teeth": true
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 6/9 P0.4: point_bounds_overlap como bounds citados — sem smallest/largest lê; com ambos lê sse lo≤fim E hi≥start; as-is 0240 delega com bounds estourados (dente plantado)"
+   }
   },
   {
    "id": "sst_block_crc",
