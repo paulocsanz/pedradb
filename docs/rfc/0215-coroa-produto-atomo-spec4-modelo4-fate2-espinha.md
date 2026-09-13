@@ -99,9 +99,7 @@ planta DST verde ANTES do commit, gate GREEN no commit).
    já inscritos): `is_bearer_scheme`, `is_non_bearer_auth_scheme`,
    `authorization_matches`, `normalize_http_method`, `ascii_lower`,
    `ascii_upper` — floor_atom 152→158, floor_extract 126→120 —
-   status: `todo` (5/6: `is_bearer_scheme`,
-   `is_non_bearer_auth_scheme`, `normalize_http_method`,
-   `ascii_lower`, `ascii_upper` feitos 2026-09-12)
+   status: `done` (2026-09-12; floor_atom 158, floor_extract 120)
 
 6. **P2.2** sweep final em worktree DENTRO de `software/` (gates 3×
    GREEN + campaign ok + extracts ok + sorry 0, capturas
@@ -139,7 +137,7 @@ planta DST verde ANTES do commit, gate GREEN no commit).
 | P0.2 | p0 | modelo ×4 átomo: d1_modelo, r1_modelo, t1_modelo, c1_modelo | done | `d1_modelo_fate_iff`/`r1_modelo_fate_iff`/`t1_modelo_fate_iff`/`c1_modelo_fate_iff` | 2026-09-12 |
 | P1.1 | p1 | fate ×2 átomo: d1_put_ok, c1_advance_commit | done | `put_ok_fate_iff`/`c1_advance_commit_fate_iff` | 2026-09-12 |
 | P1.2 | p1 | coroa↔espinha composta (`ComposeProductCrown.lean` + twin + DST, sem TSV) | done | `product_crown_every_reach`/`wa_d1_modelo_fate_iff` | 2026-09-12 |
-| P2.1 | p2 | http ×6 átomo: bearer/auth/method/ascii | todo | — | 2026-09-12 |
+| P2.1 | p2 | http ×6 átomo: bearer/auth/method/ascii | done | `is_bearer_scheme_fate_iff`/`is_non_bearer_auth_scheme_fate_iff`/`authorization_matches_fate_iff`/`normalize_http_method_fate_iff`/`ascii_lower_fate_iff`/`ascii_upper_fate_iff` | 2026-09-12 |
 | P2.2 | p2 | Sweep final + nota EXTRACT.md + flip done | todo | — | 2026-09-12 |
 
 ## Critérios de aceite

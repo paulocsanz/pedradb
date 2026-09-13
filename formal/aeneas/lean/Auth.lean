@@ -326,3 +326,593 @@ theorem ascii_upper_fate_iff :
       rw [hb1]
       simp only [Aeneas.Std.bind_tc_ok]
       rw [hbf, if_neg (by simp), hcb]
+
+/-! ## RFC-0215 P2.1 6/6 — `authorization_matches` (loop real do extrato)
+
+O fate do scan inteiro é a CADEIA dos passos citados: cada header
+varrido entra com suas chamadas ok (index, `as_ref` ×2, eqig e o
+ramo — igualdades habilitantes, corpos não reabertos); o fim é o hit
+Bearer, ou (no fim do vetor) o veredito — um reject trava `saw`,
+senão o fallback `Option.eq` sobre o primeiro X-Pedra-Token. Ramos
+fail do corpo quebram os dois lados (a cadeia exige ok). -/
+
+/-- Veredito final do fallback: a chamada `Option.eq` do corpo,
+citada não reaberta, sobre o x acumulado (nenhum X-Pedra-Token ou o
+primeiro). -/
+private def FinalVerdict (expected : Str) (x : Option Str) (v : Bool) : Prop :=
+  (x = none ∧
+      core.option.Option.Insts.CoreCmpPartialEqOption.eq
+        Str.Insts.CoreCmpPartialEqStr none (some expected) = ok v) ∨
+    (∃ w, x = some w ∧
+      core.option.Option.Insts.CoreCmpPartialEqOption.eq
+        Str.Insts.CoreCmpPartialEqStr (some w) (some expected) = ok v)
+
+/-- Um passo `cont` do corpo no header j: a cadeia de chamados ok
+(index, `as_ref` ×2, eqig e o ramo), com o estado (saw, x) que sai. -/
+private def ScanStep {K : Type} {V : Type}
+    (iK : core.convert.AsRef K Str) (iV : core.convert.AsRef V Str)
+    (headers : Slice (K × V)) (expected : Str)
+    (saw : Bool) (x : Option Str) (j : Nat)
+    (hj : j < headers.val.length) (saw' : Bool) (x' : Option Str) : Prop :=
+  ∃ (k1 v1 : Str),
+    iK.as_ref (headers.val[j]).1 = ok k1 ∧
+      iV.as_ref (headers.val[j]).2 = ok v1 ∧
+      ((core.str.Str.eq_ignore_ascii_case k1 (toStr "authorization") = ok true ∧
+          ((bearer_token_from_value v1 = ok none ∧ saw' = saw ∧ x' = x) ∨
+            (∃ t, bearer_token_from_value v1 = ok (some t) ∧
+              Str.Insts.CoreCmpPartialEqStr.eq t expected = ok false ∧
+              saw' = true ∧ x' = x))) ∨
+        (core.str.Str.eq_ignore_ascii_case k1 (toStr "authorization") = ok false ∧
+          ((core.str.Str.eq_ignore_ascii_case k1 (toStr "x-pedra-token") = ok false ∧
+              saw' = saw ∧ x' = x) ∨
+            (core.str.Str.eq_ignore_ascii_case k1 (toStr "x-pedra-token") = ok true ∧
+              saw' = saw ∧
+              (x = none ∧ x' = some v1 ∨ ∃ w, x = some w ∧ x' = some w)))))
+
+/-- O passo terminal Bearer: o header j (Authorization) entrega um
+token que casa o esperado. -/
+private def HitStep {K : Type} {V : Type}
+    (iK : core.convert.AsRef K Str) (iV : core.convert.AsRef V Str)
+    (headers : Slice (K × V)) (expected : Str) (j : Nat)
+    (hj : j < headers.val.length) : Prop :=
+  ∃ (k1 v1 t : Str),
+    iK.as_ref (headers.val[j]).1 = ok k1 ∧
+      iV.as_ref (headers.val[j]).2 = ok v1 ∧
+      core.str.Str.eq_ignore_ascii_case k1 (toStr "authorization") = ok true ∧
+        bearer_token_from_value v1 = ok (some t) ∧
+        Str.Insts.CoreCmpPartialEqStr.eq t expected = ok true
+
+/-- O fate do scan como cadeia: combustível = headers restantes; cada
+passo `cont` consume um header (com seu `i+1` ok) e o fim é o hit ou
+o veredito final. -/
+private def LoopFate {K : Type} {V : Type}
+    (iK : core.convert.AsRef K Str) (iV : core.convert.AsRef V Str)
+    (headers : Slice (K × V)) (expected : Str) :
+    Nat → Bool → Option Str → Usize → Bool → Prop
+  | 0, saw, x, i, v =>
+      i.val = headers.val.length ∧
+        ((saw = true ∧ v = false) ∨ (saw = false ∧ FinalVerdict expected x v))
+  | fuel + 1, saw, x, i, v =>
+      ((∃ (hj : i.val < headers.val.length),
+            HitStep iK iV headers expected i.val hj) ∧
+          v = true) ∨
+        (i.val = headers.val.length ∧
+          ((saw = true ∧ v = false) ∨ (saw = false ∧ FinalVerdict expected x v))) ∨
+        (∃ (hj : i.val < headers.val.length) (saw' : Bool) (x' : Option Str) (i' : Usize),
+            ScanStep iK iV headers expected saw x i.val hj saw' x' ∧
+              (i + 1#usize) = ok i' ∧
+                LoopFate iK iV headers expected fuel saw' x' i' v)
+
+/-- O `+1#usize` do corpo vale exatamente `i.val + 1` em Nat. -/
+private theorem usize_succ_val (i i1 : Usize) (h : (i + 1#usize) = ok i1) :
+    (↑i1 : Nat) = (↑i : Nat) + 1 := by
+  have he := UScalar.add_equiv i 1#usize
+  rw [h] at he
+  dsimp only at he
+  exact he.2.1
+
+/-- Análise forward de um passo cont: a igualdade do corpo produz o
+ScanStep e as duas equações do sucessor. -/
+private theorem scan_step_of_body {K : Type} {V : Type}
+    (iK : core.convert.AsRef K Str) (iV : core.convert.AsRef V Str)
+    (headers : Slice (K × V)) (expected : Str)
+    (saw : Bool) (x : Option Str) (i i' : Usize)
+    (saw' : Bool) (x' : Option Str)
+    (hi : i.val < headers.val.length)
+    (h : authorization_matches_loop.body iK iV headers expected saw x i
+          = ok (ControlFlow.cont (saw', x', i'))) :
+    ScanStep iK iV headers expected saw x i.val hi saw' x' ∧
+      i'.val = i.val + 1 ∧ (i + 1#usize) = ok i' := by
+  unfold authorization_matches_loop.body at h
+  dsimp +zeta only at h
+  split at h
+  · rename_i hltU
+    obtain ⟨kv, hkv, h⟩ := bind_ok_inv _ _ _ h
+    obtain ⟨kv0, hkveq, hkvv0⟩ := (Aeneas.Std.WP.spec_equiv_exists _ _).mp
+      (Slice.index_usize_spec headers i hi)
+    have hkvv : kv = headers.val[i.val] :=
+      (Result.ok.inj (hkv.symm.trans hkveq)).trans hkvv0
+    obtain ⟨k, v⟩ := kv
+    obtain ⟨k1, hk1, h⟩ := bind_ok_inv _ _ _ h
+    obtain ⟨v1, hv1, h⟩ := bind_ok_inv _ _ _ h
+    obtain ⟨is_auth, hauth, h⟩ := bind_ok_inv _ _ _ h
+    have hk1' : iK.as_ref (headers.val[i.val]).1 = ok k1 := by
+      rw [← hkvv]; exact hk1
+    have hv1' : iV.as_ref (headers.val[i.val]).2 = ok v1 := by
+      rw [← hkvv]; exact hv1
+    cases is_auth with
+    | true =>
+      obtain ⟨tok, htok, h⟩ := bind_ok_inv _ _ _ h
+      cases tok with
+      | none =>
+        obtain ⟨i1, hi1, h⟩ := bind_ok_inv _ _ _ h
+        have hinj := Result.ok.inj h
+        simp only [ControlFlow.cont.injEq, Prod.mk.injEq] at hinj
+        obtain ⟨hs, hx, hi1i'⟩ := hinj
+        rw [hi1i'] at hi1
+        subst hs; subst hx
+        exact ⟨⟨k1, v1, hk1', hv1',
+          Or.inl ⟨hauth, Or.inl ⟨htok, rfl, rfl⟩⟩⟩,
+          usize_succ_val i i' hi1, hi1⟩
+      | some t =>
+        obtain ⟨eq, heq, h⟩ := bind_ok_inv _ _ _ h
+        cases eq with
+        | true =>
+          dsimp only at h
+          injection h with h2
+          contradiction
+        | false =>
+          obtain ⟨i1, hi1, h⟩ := bind_ok_inv _ _ _ h
+          have hinj := Result.ok.inj h
+          simp only [ControlFlow.cont.injEq, Prod.mk.injEq] at hinj
+          obtain ⟨hs, hx, hi1i'⟩ := hinj
+          rw [hi1i'] at hi1
+          subst hs; subst hx
+          exact ⟨⟨k1, v1, hk1', hv1',
+            Or.inl ⟨hauth, Or.inr ⟨t, htok, heq, rfl, rfl⟩⟩⟩,
+            usize_succ_val i i' hi1, hi1⟩
+    | false =>
+      obtain ⟨is_xp, hxp, h⟩ := bind_ok_inv _ _ _ h
+      obtain ⟨x2, hx2, h⟩ := bind_ok_inv _ _ _ h
+      obtain ⟨i1, hi1, h⟩ := bind_ok_inv _ _ _ h
+      have hinj := Result.ok.inj h
+      simp only [ControlFlow.cont.injEq, Prod.mk.injEq] at hinj
+      obtain ⟨hs, hx2i', hi1i'⟩ := hinj
+      rw [hi1i'] at hi1
+      subst hs
+      cases is_xp with
+      | true =>
+        cases x with
+        | none =>
+          dsimp only at hx2
+          have hx2v : x2 = some v1 := Result.ok.inj hx2.symm
+          subst hx2v; subst hx2i'
+          exact ⟨⟨k1, v1, hk1', hv1',
+            Or.inr ⟨hauth, Or.inr ⟨hxp, rfl, Or.inl ⟨rfl, rfl⟩⟩⟩⟩,
+            usize_succ_val i i' hi1, hi1⟩
+        | some w =>
+          dsimp only at hx2
+          have hx2x : x2 = some w := Result.ok.inj hx2.symm
+          subst hx2x; subst hx2i'
+          exact ⟨⟨k1, v1, hk1', hv1',
+            Or.inr ⟨hauth, Or.inr ⟨hxp, rfl, Or.inr ⟨w, rfl, rfl⟩⟩⟩⟩,
+            usize_succ_val i i' hi1, hi1⟩
+      | false =>
+        dsimp only at hx2
+        have hx2x : x2 = x := Result.ok.inj hx2.symm
+        subst hx2x; subst hx2i'
+        exact ⟨⟨k1, v1, hk1', hv1',
+          Or.inr ⟨hauth, Or.inl ⟨hxp, rfl, rfl⟩⟩⟩,
+          usize_succ_val i i' hi1, hi1⟩
+  · rename_i hgeU
+    have hlt' : i < Slice.len headers := by
+      refine (UScalar.lt_equiv i (Slice.len headers)).mpr ?_
+      rw [Aeneas.Std.Slice.len_val]
+      exact hi
+    exact absurd hlt' hgeU
+
+/-- Reassembly: o ScanStep reconstrói o valor do corpo. -/
+private theorem body_of_scan_step {K : Type} {V : Type}
+    (iK : core.convert.AsRef K Str) (iV : core.convert.AsRef V Str)
+    (headers : Slice (K × V)) (expected : Str)
+    (saw : Bool) (x : Option Str) (i i' : Usize)
+    (saw' : Bool) (x' : Option Str)
+    (hi : i.val < headers.val.length)
+    (hStep : ScanStep iK iV headers expected saw x i.val hi saw' x')
+    (hAdd : (i + 1#usize) = ok i') :
+    authorization_matches_loop.body iK iV headers expected saw x i
+      = ok (ControlFlow.cont (saw', x', i')) := by
+  obtain ⟨k1, v1, hk1, hv1, hbranch⟩ := hStep
+  obtain ⟨kv, hkveq, hkvv⟩ := (Aeneas.Std.WP.spec_equiv_exists _ _).mp
+    (Slice.index_usize_spec headers i hi)
+  obtain ⟨k, v⟩ := kv
+  have hk1k : iK.as_ref k = ok k1 := by rw [← hkvv] at hk1; exact hk1
+  have hv1v : iV.as_ref v = ok v1 := by rw [← hkvv] at hv1; exact hv1
+  unfold authorization_matches_loop.body
+  dsimp +zeta only
+  split
+  · rw [hkveq]
+    simp only [Aeneas.Std.bind_tc_ok]
+    conv => lhs; whnf
+    rw [hk1k]
+    split
+    · next r a heq =>
+      injection heq with hka
+      subst hka
+      dsimp only
+      rw [hv1v]
+      simp only [Aeneas.Std.bind_tc_ok]
+      rcases hbranch with ⟨hauth, ⟨htok, hsaw, hx⟩ | ⟨t, htok, heqf, hsaw, hx⟩⟩ |
+        ⟨hauth, ⟨hxp, hsaw, hx⟩ | ⟨hxp, hsaw, ⟨hx1n, hx1⟩ | ⟨w, hx1w, hx1⟩⟩⟩
+      · simp [hauth, htok, hAdd, hsaw, hx]
+      · simp [hauth, htok, heqf, hAdd, hsaw, hx]
+      · simp [hauth, hxp, hAdd, hsaw, hx]
+      · cases x with
+        | none => simp [hauth, hxp, hAdd, hsaw, hx1]
+        | some w' => simp at hx1n
+      · cases x with
+        | none => simp at hx1w
+        | some w' =>
+          injection hx1w with hw
+          subst hw
+          simp [hauth, hxp, hAdd, hsaw, hx1]
+    · next r1 e heq => contradiction
+    · next r2 heq => contradiction
+  · rename_i hgeU
+    have hlt' : i < Slice.len headers := by
+      refine (UScalar.lt_equiv i (Slice.len headers)).mpr ?_
+      rw [Aeneas.Std.Slice.len_val]
+      exact hi
+    exact absurd hlt' hgeU
+
+/-- Análise forward do hit: done só sai com r = true no passo Bearer. -/
+private theorem hit_of_body {K : Type} {V : Type}
+    (iK : core.convert.AsRef K Str) (iV : core.convert.AsRef V Str)
+    (headers : Slice (K × V)) (expected : Str)
+    (saw : Bool) (x : Option Str) (i : Usize) (r : Bool)
+    (hi : i.val < headers.val.length)
+    (h : authorization_matches_loop.body iK iV headers expected saw x i
+          = ok (ControlFlow.done r)) :
+    r = true ∧ HitStep iK iV headers expected i.val hi := by
+  have hlt : i < Slice.len headers := by
+    refine (UScalar.lt_equiv i (Slice.len headers)).mpr ?_
+    rw [Aeneas.Std.Slice.len_val]
+    exact hi
+  unfold authorization_matches_loop.body at h
+  dsimp +zeta only at h
+  split at h
+  · rename_i hltU
+    obtain ⟨kv, hkv, h⟩ := bind_ok_inv _ _ _ h
+    obtain ⟨kv0, hkveq, hkvv0⟩ := (Aeneas.Std.WP.spec_equiv_exists _ _).mp
+      (Slice.index_usize_spec headers i hi)
+    have hkvv : kv = headers.val[i.val] :=
+      (Result.ok.inj (hkv.symm.trans hkveq)).trans hkvv0
+    obtain ⟨k, v⟩ := kv
+    obtain ⟨k1, hk1, h⟩ := bind_ok_inv _ _ _ h
+    obtain ⟨v1, hv1, h⟩ := bind_ok_inv _ _ _ h
+    obtain ⟨is_auth, hauth, h⟩ := bind_ok_inv _ _ _ h
+    have hk1' : iK.as_ref (headers.val[i.val]).1 = ok k1 := by
+      rw [← hkvv]; exact hk1
+    have hv1' : iV.as_ref (headers.val[i.val]).2 = ok v1 := by
+      rw [← hkvv]; exact hv1
+    cases is_auth with
+    | true =>
+      obtain ⟨tok, htok, h⟩ := bind_ok_inv _ _ _ h
+      cases tok with
+      | some t =>
+        obtain ⟨eq, heq, h⟩ := bind_ok_inv _ _ _ h
+        cases eq with
+        | true =>
+          dsimp only at h
+          exact ⟨(ControlFlow.done.inj (Result.ok.inj h)).symm,
+            ⟨k1, v1, t, hk1', hv1', hauth, htok, heq⟩⟩
+        | false =>
+          obtain ⟨i1, -, hb⟩ := bind_ok_inv _ _ _ h
+          injection hb with hb2
+          contradiction
+      | none =>
+        obtain ⟨i1, -, hb⟩ := bind_ok_inv _ _ _ h
+        injection hb with hb2
+        contradiction
+    | false =>
+      obtain ⟨is_xp, -, h⟩ := bind_ok_inv _ _ _ h
+      obtain ⟨x2, -, h⟩ := bind_ok_inv _ _ _ h
+      obtain ⟨i1, -, hb⟩ := bind_ok_inv _ _ _ h
+      injection hb with hb2
+      contradiction
+  · rename_i hgeU
+    exact absurd hlt hgeU
+
+/-- Reassembly do hit: o HitStep reconstrói done true. -/
+private theorem body_of_hit {K : Type} {V : Type}
+    (iK : core.convert.AsRef K Str) (iV : core.convert.AsRef V Str)
+    (headers : Slice (K × V)) (expected : Str)
+    (saw : Bool) (x : Option Str) (i : Usize)
+    (hi : i.val < headers.val.length)
+    (hhit : HitStep iK iV headers expected i.val hi) :
+    authorization_matches_loop.body iK iV headers expected saw x i
+      = ok (ControlFlow.done true) := by
+  obtain ⟨k1, v1, t, hk1, hv1, hauth, htok, heq⟩ := hhit
+  obtain ⟨kv, hkveq, hkvv⟩ := (Aeneas.Std.WP.spec_equiv_exists _ _).mp
+    (Slice.index_usize_spec headers i hi)
+  obtain ⟨k, v⟩ := kv
+  have hk1k : iK.as_ref k = ok k1 := by rw [← hkvv] at hk1; exact hk1
+  have hv1v : iV.as_ref v = ok v1 := by rw [← hkvv] at hv1; exact hv1
+  unfold authorization_matches_loop.body
+  dsimp +zeta only
+  split
+  · rw [hkveq]
+    simp only [Aeneas.Std.bind_tc_ok]
+    conv => lhs; whnf
+    rw [hk1k]
+    split
+    · next r a hok =>
+      injection hok with hka
+      subst hka
+      dsimp only
+      rw [hv1v]
+      simp only [Aeneas.Std.bind_tc_ok]
+      simp [hauth, htok, heq]
+    · next r1 e heq => contradiction
+    · next r2 heq => contradiction
+  · rename_i hgeU
+    have hlt' : i < Slice.len headers := by
+      refine (UScalar.lt_equiv i (Slice.len headers)).mpr ?_
+      rw [Aeneas.Std.Slice.len_val]
+      exact hi
+    exact absurd hlt' hgeU
+
+/-- No fim (i = len) o corpo nunca dá cont. -/
+private theorem body_no_cont_at_end {K : Type} {V : Type}
+    (iK : core.convert.AsRef K Str) (iV : core.convert.AsRef V Str)
+    (headers : Slice (K × V)) (expected : Str)
+    (saw : Bool) (x : Option Str) (i : Usize) (st : Bool × Option Str × Usize)
+    (heq : i.val = headers.val.length)
+    (hB : authorization_matches_loop.body iK iV headers expected saw x i
+          = ok (ControlFlow.cont st)) : False := by
+  have hge : ¬ (i < Slice.len headers) := by
+    intro hlt
+    have hn0 := (UScalar.lt_equiv i (Slice.len headers)).mp hlt
+    rw [Aeneas.Std.Slice.len_val] at hn0
+    have hn : i.val < headers.val.length := hn0
+    rw [heq] at hn
+    exact absurd hn (Nat.lt_irrefl _)
+  unfold authorization_matches_loop.body at hB
+  dsimp +zeta only at hB
+  rw [if_neg hge] at hB
+  cases saw with
+  | true =>
+    dsimp only at hB
+    injection hB with hB2
+    contradiction
+  | false =>
+    dsimp only at hB
+    obtain ⟨b, -, hb⟩ := bind_ok_inv _ _ _ hB
+    injection hb with hb2
+    contradiction
+
+/-- O ramo final (i = len) sem loop: veredito exatamente per saw/x. -/
+private theorem body_final_iff {K : Type} {V : Type}
+    (iK : core.convert.AsRef K Str) (iV : core.convert.AsRef V Str)
+    (headers : Slice (K × V)) (expected : Str)
+    (saw : Bool) (x : Option Str) (i : Usize) (v : Bool)
+    (heq : i.val = headers.val.length) :
+    (authorization_matches_loop.body iK iV headers expected saw x i
+        = ok (ControlFlow.done v)) ↔
+      ((saw = true ∧ v = false) ∨ (saw = false ∧ FinalVerdict expected x v)) := by
+  have hge : ¬ (i < Slice.len headers) := by
+    intro hlt
+    have hn0 := (UScalar.lt_equiv i (Slice.len headers)).mp hlt
+    rw [Aeneas.Std.Slice.len_val] at hn0
+    have hn : i.val < headers.val.length := hn0
+    rw [heq] at hn
+    exact absurd hn (Nat.lt_irrefl _)
+  unfold authorization_matches_loop.body
+  dsimp +zeta only
+  rw [if_neg hge]
+  cases saw with
+  | true =>
+    dsimp only
+    constructor
+    · intro h
+      exact Or.inl ⟨rfl, (ControlFlow.done.inj (Result.ok.inj h)).symm⟩
+    · intro hf
+      rcases hf with ⟨-, hv⟩ | ⟨hs, -⟩
+      · rw [hv]
+      · exact Bool.noConfusion hs
+  | false =>
+    dsimp only
+    constructor
+    · intro h
+      obtain ⟨b, hb, h'⟩ := bind_ok_inv _ _ _ h
+      have hbv : b = v := ControlFlow.done.inj (Result.ok.inj h')
+      refine Or.inr ⟨rfl, ?_⟩
+      cases x with
+      | none => exact Or.inl ⟨rfl, by rw [← hbv]; exact hb⟩
+      | some w => exact Or.inr ⟨w, rfl, by rw [← hbv]; exact hb⟩
+    · intro hf
+      rcases hf with ⟨hs, -⟩ | ⟨-, hfin⟩
+      · exact Bool.noConfusion hs
+      · rcases hfin with ⟨hx, hopt⟩ | ⟨w, hx, hopt⟩
+        · subst hx
+          rw [hopt]
+          simp only [Aeneas.Std.bind_tc_ok]
+        · subst hx
+          rw [hopt]
+          simp only [Aeneas.Std.bind_tc_ok]
+
+/-- O fate do loop por indução no combustível. -/
+private theorem auth_loop_fate {K : Type} {V : Type}
+    (iK : core.convert.AsRef K Str) (iV : core.convert.AsRef V Str)
+    (headers : Slice (K × V)) (expected : Str) :
+    ∀ (fuel : Nat) (saw : Bool) (x : Option Str) (i : Usize),
+      i.val ≤ headers.val.length →
+      headers.val.length - i.val ≤ fuel →
+      ∀ v : Bool,
+        (authorization_matches_loop iK iV headers expected saw x i = ok v) ↔
+          LoopFate iK iV headers expected fuel saw x i v := by
+  intro fuel
+  induction fuel with
+  | zero =>
+    intro saw x i hile hfuel v
+    have hlen : i.val = headers.val.length := by omega
+    constructor
+    · intro h
+      refine ⟨hlen, ?_⟩
+      unfold authorization_matches_loop at h
+      rw [loop.eq_def] at h
+      dsimp only at h
+      cases hB : authorization_matches_loop.body iK iV headers expected saw x i with
+      | ok cf =>
+        cases cf with
+        | done r =>
+          rw [hB] at h
+          dsimp only at h
+          rw [Result.ok.inj h] at hB
+          exact (body_final_iff iK iV headers expected saw x i v hlen).mp hB
+        | cont st =>
+          exact absurd hB (body_no_cont_at_end iK iV headers expected saw x i st hlen)
+      | fail e =>
+        rw [hB] at h
+        dsimp only at h
+        exact absurd h (by simp)
+      | div =>
+        rw [hB] at h
+        dsimp only at h
+        exact absurd h (by simp)
+    · rintro ⟨-, hverdict⟩
+      have hbody := (body_final_iff iK iV headers expected saw x i v hlen).mpr hverdict
+      unfold authorization_matches_loop
+      rw [loop.eq_def]
+      dsimp only
+      rw [hbody]
+  | succ fuel ih =>
+    intro saw x i hile hfuel v
+    unfold authorization_matches_loop
+    rw [loop.eq_def]
+    dsimp only
+    cases hB : authorization_matches_loop.body iK iV headers expected saw x i with
+    | ok cf =>
+      cases cf with
+      | cont st =>
+        obtain ⟨saw', x', i'⟩ := st
+        dsimp only
+        by_cases hlt : i.val < headers.val.length
+        · obtain ⟨hstep, hval, hAdd⟩ :=
+            scan_step_of_body iK iV headers expected saw x i i' saw' x' hlt hB
+          constructor
+          · intro h
+            refine Or.inr (Or.inr ⟨hlt, saw', x', i', hstep, hAdd, ?_⟩)
+            exact (ih saw' x' i' (by omega) (by omega) v).mp h
+          · intro hf
+            rcases hf with ⟨⟨hj, hhit⟩, hv⟩ |
+              (⟨hlen, hverdict⟩ |
+                ⟨hj, saw2, x2, i2, hstep2, hAdd2, hfate⟩)
+            · exact absurd (hB.symm.trans (body_of_hit iK iV headers expected saw x i hj hhit))
+                (by simp)
+            · exact absurd hlt (by omega)
+            · have hval2 : i2.val = i.val + 1 := usize_succ_val i i2 hAdd2
+              have hbody2 := body_of_scan_step iK iV headers expected saw x i i2 saw2 x2 hj
+                hstep2 hAdd2
+              have hst : (saw', x', i') = (saw2, x2, i2) := by
+                have hc := Result.ok.inj (hB.symm.trans hbody2)
+                simpa [ControlFlow.cont.injEq, Prod.mk.injEq] using hc
+              rw [hst]
+              exact (ih saw2 x2 i2 (by omega) (by omega) v).mpr hfate
+        · have hlen : i.val = headers.val.length := by omega
+          have hfalse := body_no_cont_at_end iK iV headers expected saw x i
+            (saw', x', i') hlen hB
+          constructor
+          · intro h
+            exact hfalse.elim
+          · intro hf
+            exact hfalse.elim
+      | done r =>
+        dsimp only
+        by_cases hlt : i.val < headers.val.length
+        · obtain ⟨hr, hhit⟩ := hit_of_body iK iV headers expected saw x i r hlt hB
+          constructor
+          · intro h
+            exact Or.inl ⟨⟨hlt, hhit⟩, (Result.ok.inj h).symm.trans hr⟩
+          · intro hf
+            rcases hf with ⟨⟨hj, hhit⟩, hv⟩ |
+              (⟨hlen, hverdict⟩ |
+                ⟨hj, saw2, x2, i2, hstep2, hAdd2, -⟩)
+            · rw [hr, hv]
+            · exact absurd hlt (by omega)
+            · exact absurd (hB.symm.trans
+                (body_of_scan_step iK iV headers expected saw x i i2 saw2 x2 hj hstep2 hAdd2))
+                (by simp)
+        · have hlen : i.val = headers.val.length := by omega
+          have hfin := (body_final_iff iK iV headers expected saw x i r hlen).mp hB
+          constructor
+          · intro h
+            have hrv : r = v := Result.ok.inj h
+            refine Or.inr (Or.inl ⟨hlen, ?_⟩)
+            rcases hfin with ⟨hs, hv⟩ | ⟨hs, hf⟩
+            · exact Or.inl ⟨hs, hrv ▸ hv⟩
+            · exact Or.inr ⟨hs, hrv ▸ hf⟩
+          · intro hf
+            rcases hf with ⟨⟨hj, hhit⟩, -⟩ |
+              (⟨hlen2, hverdict⟩ |
+                ⟨hj, saw2, x2, i2, hstep2, hAdd2, -⟩)
+            · exact absurd hlt (by omega)
+            · have hbody := (body_final_iff iK iV headers expected saw x i v hlen).mpr hverdict
+              have hr2 : r = v := by
+                have hu := hB.symm.trans hbody
+                injection hu with hu2
+                injection hu2 with hrv
+              rw [hr2]
+            · exact absurd (hB.symm.trans
+                (body_of_scan_step iK iV headers expected saw x i i2 saw2 x2 hj hstep2 hAdd2))
+                (by simp)
+    | fail e =>
+      dsimp only
+      constructor
+      · intro h
+        exact absurd h (by simp)
+      · intro hf
+        rcases hf with ⟨⟨hj, hhit⟩, -⟩ |
+          (⟨hlen, hverdict⟩ |
+            ⟨hj, saw2, x2, i2, hstep2, hAdd2, -⟩)
+        · exact absurd (hB.symm.trans (body_of_hit iK iV headers expected saw x i hj hhit))
+            (by simp)
+        · exact absurd (hB.symm.trans
+            ((body_final_iff iK iV headers expected saw x i v hlen).mpr hverdict)) (by simp)
+        · exact absurd (hB.symm.trans
+            (body_of_scan_step iK iV headers expected saw x i i2 saw2 x2 hj hstep2 hAdd2))
+            (by simp)
+    | div =>
+      dsimp only
+      constructor
+      · intro h
+        exact absurd h (by simp)
+      · intro hf
+        rcases hf with ⟨⟨hj, hhit⟩, -⟩ |
+          (⟨hlen, hverdict⟩ |
+            ⟨hj, saw2, x2, i2, hstep2, hAdd2, -⟩)
+        · exact absurd (hB.symm.trans (body_of_hit iK iV headers expected saw x i hj hhit))
+            (by simp)
+        · exact absurd (hB.symm.trans
+            ((body_final_iff iK iV headers expected saw x i v hlen).mpr hverdict)) (by simp)
+        · exact absurd (hB.symm.trans
+            (body_of_scan_step iK iV headers expected saw x i i2 saw2 x2 hj hstep2 hAdd2))
+            (by simp)
+
+/-- RFC-0215 P2.1 6/6 (átomo `catalog:x_pedra_is_fallback_only`,
+entrada `authorization_matches`): o veredito do cabeçalho é exatamente
+a cadeia citada do scan — hit Bearer no primeiro Authorization com
+token que casa; um reject trava o fallback; senão o primeiro
+X-Pedra-Token decide via a chamada `Option.eq` (fallback only, F149).
+O mutante AS-IS deixa um Bearer dummy trancar o token válido;
+planta `authorization_matches_on_live_http_is_not_ok` recusa. -/
+theorem authorization_matches_fate_iff :
+    ∀ {K : Type} {V : Type} (iK : core.convert.AsRef K Str)
+      (iV : core.convert.AsRef V Str) (headers : Slice (K × V))
+      (expected : Str) (v : Bool),
+      (authorization_matches iK iV headers expected = ok v) ↔
+        LoopFate iK iV headers expected headers.val.length false none 0#usize v := by
+  intro K V iK iV headers expected v
+  unfold authorization_matches
+  exact auth_loop_fate iK iV headers expected headers.val.length false none 0#usize
+    (Nat.zero_le _) (by omega) v

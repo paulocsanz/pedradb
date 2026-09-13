@@ -2579,6 +2579,10 @@
    "dst_plant": {
     "file": "crates/pedradb-http/src/lib.rs",
     "test": "authorization_matches_on_live_http_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "Loop de scan de Authorization fechado como fate-iff completo (hit/end/cont nos dois sentidos); DST plant em authorize no HTTP vivo confirma o contrato não-Ok."
    }
   },
   {

@@ -218,3 +218,22 @@ verde antes do commit, exatamente 1 teorema público por commit).
   não dobra (`put` nunca casa `PUT`, F79); planta DST
   `ascii_fold_discriminates_as_is` (pedradb-http, exit 0,
   1 passed). Gate GREEN: floor_atom 156→157, floor_extract 122→121.
+
+## P2.1 — http ×6 átomo (6/6, FECHAMENTO P2.1)
+
+- **authorization_matches (6/6, FECHAMENTO P2.1)**: o loop de scan
+  do header Authorization decide exatamente no fate do loop — hit
+  quando o par `(k, v)` atual casa scheme+token esperados, end
+  quando `i = headers.len` com o veredito final (parece-mas-não-casa
+  separado de casa), cont quando sobra par e não casa. Ambas as
+  direções do passo (`body_of_scan_step` hit/fail/div via
+  `scan_step_of_body` + `body_of_hit`, corpos citados não reabertos)
+  portadas ao wrapper; o caso `let (k, v) := (k, v)` elaborado
+  reduz só por `conv => lhs; whnf`; a recursão fecha por indução
+  forte no fuel (sucessor desdobra em `A ∨ (B ∨ C)` — `∨` é
+  associativo à direita em Lean 4). Planta DST
+  `authorization_matches_on_live_http_is_not_ok` (pedradb-http,
+  exit 0, 1 passed — o AS-IS sem scan casa scheme estranho).
+  Axiomas: os 3 padrão do Lean. Fechamento: floor_atom 152→158,
+  floor_extract 126→120, gate GREEN no HEAD de cada uma das 6
+  promoções, 1 teorema público por commit.

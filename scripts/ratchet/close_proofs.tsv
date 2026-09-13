@@ -184,3 +184,4 @@ atom	catalog:is_non_bearer_auth_scheme	is_non_bearer_auth_scheme_fate_iff	formal
 atom	catalog:normalize_http_method	normalize_http_method_fate_iff	formal/aeneas/lean/Auth.lean	normalize_http_method
 atom	catalog:ascii_lower	ascii_lower_fate_iff	formal/aeneas/lean/Auth.lean	ascii_lower
 atom	catalog:ascii_upper	ascii_upper_fate_iff	formal/aeneas/lean/Auth.lean	ascii_upper
+atom	catalog:authorization_matches	authorization_matches_fate_iff	formal/aeneas/lean/Auth.lean	authorization_matches
