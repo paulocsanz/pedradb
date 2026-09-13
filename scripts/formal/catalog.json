@@ -5997,7 +5997,11 @@
     "file": "crates/pedradb-core/src/wal/recover_kernel.rs",
     "test": "physical_oversize_and_torn"
    },
-   "three_teeth": true
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 3/4 P0.2: physical_payload_act como árvore de três ifs citada — oversize → FailStop, payload além do bloco → FailStop/Truncated por alinhamento, dentro → Continue; floor_atom 184→185"
+   }
   },
   {
    "id": "fragment_act",

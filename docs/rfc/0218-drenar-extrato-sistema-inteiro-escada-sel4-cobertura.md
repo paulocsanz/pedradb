@@ -87,8 +87,8 @@ nunca por promoção silenciosa.
 2. **P0.2** wal/recover ×4 (`WalRecover.lean`): `fragment_act`,
    `from_record_type`, `is_length_resyncable`, `physical_payload_act` —
    o parse fail-closed do WAL — floor_atom 182→186 — status: `todo`
-   (2/4: `from_record_type_fate_iff` e `is_length_resyncable_fate_iff`
-   feitos 2026-09-13)
+   (3/4: `from_record_type_fate_iff`, `is_length_resyncable_fate_iff` e
+   `physical_payload_act_fate_iff` feitos 2026-09-13)
 
 3. **P0.3** changelog ×3 + flush ×1 + manifest ×1 + reopen ×1
    (`Changelog.lean`/`Flush.lean`/`Manifest.lean`/`Reopen.lean`):

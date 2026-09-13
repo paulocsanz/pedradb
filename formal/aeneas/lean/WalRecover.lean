@@ -579,3 +579,59 @@ theorem is_length_resyncable_fate_iff :
       · exact absurd h8.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
       · subst hv
         rfl
+/-- RFC-0218 P0.2 3/4 (átomo `catalog:physical_payload_act`): o
+    guarda físico do payload é EXATAMENTE a árvore de três ifs —
+    comprimento além do máximo → FailStop; fim além do bloco →
+    FailStop no fim físico do bloco, Truncated no meio; dentro do
+    bloco → Continue. O AS-IS devolve CleanEof no lugar do FailStop
+    (EOF silencioso de dano físico — dente plantado). -/
+theorem physical_payload_act_fate_iff :
+    ∀ (length max_payload payload_end block_end block_size : Std.U64)
+      (act : recover_kernel.PhysicalAct),
+      (recover_kernel.physical_payload_act length max_payload payload_end block_end
+          block_size = ok act) ↔
+        ((length > max_payload ∧ act = recover_kernel.PhysicalAct.FailStop) ∨
+          (¬(length > max_payload) ∧ payload_end > block_end ∧
+            block_end = block_size ∧ act = recover_kernel.PhysicalAct.FailStop) ∨
+          (¬(length > max_payload) ∧ payload_end > block_end ∧
+            ¬(block_end = block_size) ∧ act = recover_kernel.PhysicalAct.Truncated) ∨
+          (¬(length > max_payload) ∧ ¬(payload_end > block_end) ∧
+            act = recover_kernel.PhysicalAct.Continue)) := by
+  intro length max_payload payload_end block_end block_size act
+  constructor
+  · intro hval
+    unfold recover_kernel.physical_payload_act at hval
+    split at hval
+    · next hov =>
+      exact Or.inl ⟨hov, by injection hval with hv; exact hv.symm⟩
+    · next hov =>
+      split at hval
+      · next hmid =>
+        split at hval
+        · next hbs =>
+          exact Or.inr (Or.inl ⟨hov, hmid, hbs,
+            by injection hval with hv; exact hv.symm⟩)
+        · next hbs =>
+          exact Or.inr (Or.inr (Or.inl ⟨hov, hmid, hbs,
+            by injection hval with hv; exact hv.symm⟩))
+      · next hmid =>
+        exact Or.inr (Or.inr (Or.inr ⟨hov, hmid,
+          by injection hval with hv; exact hv.symm⟩))
+  · rintro (⟨h1, hv⟩ | ⟨h1, h2, h3, hv⟩ | ⟨h1, h2, h3, hv⟩ | ⟨h1, h2, hv⟩)
+    · unfold recover_kernel.physical_payload_act
+      rw [if_pos h1]
+      subst hv
+      rfl
+    · unfold recover_kernel.physical_payload_act
+      rw [if_neg h1, if_pos h2, if_pos h3]
+      subst hv
+      rfl
+    · unfold recover_kernel.physical_payload_act
+      rw [if_neg h1, if_pos h2, if_neg h3]
+      subst hv
+      rfl
+    · unfold recover_kernel.physical_payload_act
+      rw [if_neg h1, if_neg h2]
+      subst hv
+      rfl
+

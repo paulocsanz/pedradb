@@ -64,3 +64,11 @@ gates GREEN no commit).
   (9 ramos disjuntos planos, reverso refuta por noConfusion). Build
   verde. Planta DST `resync_only_length_class` (pedradb-core, exit 0).
   Gate: floor_atom 183→184, floor_extract 95→94.
+
+- **physical_payload_act (3/4)**: guarda físico do payload — árvore de
+  três ifs citada (oversize → FailStop; payload além do bloco →
+  FailStop no fim físico, Truncated no meio; dentro → Continue) —
+  `physical_payload_act_fate_iff` em `WalRecover.lean` (forward split
+  at hval; reverso rw if_pos/if_neg). Build verde. Planta DST
+  `physical_oversize_and_torn` (pedradb-core, exit 0). Gate:
+  floor_atom 184→185, floor_extract 94→93.
