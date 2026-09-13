@@ -43,3 +43,22 @@ theorem fold_pins_on_read_fate_iff :
   · rintro hv
     subst hv
     rfl
+
+/-- RFC-0218 P2.1 3/12 (átomo `catalog:journal_pin`, entrada
+    `may_advance_pin`): avançar o pin é EXATAMENTE o lift citado
+    `applied_through > pin` — o journal só solta o que já foi
+    aplicado. O AS-IS nunca segura (pin anda antes do applied —
+    dente plantado). -/
+theorem may_advance_pin_fate_iff :
+    ∀ (pin : U64) (applied_through : U64) (v : Bool),
+      (may_advance_pin pin applied_through = ok v) ↔
+      (v = core.cmp.impls.PartialOrdU64.gt applied_through pin) := by
+  intro pin applied_through v
+  constructor
+  · intro hval
+    unfold may_advance_pin at hval
+    injection hval with hv
+    exact hv.symm
+  · rintro hv
+    subst hv
+    rfl

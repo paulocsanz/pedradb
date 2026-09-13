@@ -2804,6 +2804,10 @@
   },
   {
    "id": "journal_pin",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P2.1: fate ∀ sobre may_advance_pin no degrau átomo — avançar o pin é exatamente applied_through maior que pin; planta DST may_advance_pin_on_live_journal_is_not_ok"
+   },
    "finding": "H1/F54",
    "twin_kind": "close",
    "single_artifact": true,
