@@ -228,6 +228,14 @@ gates GREEN no commit).
 
 ## P1.1 — compact ×7 + lsm_r1 ×3 átomo
 
+- **compact_floor / compact_index_floor (2/10)**: piso pós-compactação
+  como a soma saturada citada through + 1 (u64::MAX satura — nunca
+  envolve a zero) — `compact_index_floor_fate_iff` em
+  `StoreCompact.lean`. Forward: unfold + injection (fecha sozinho);
+  reverso: rw. Build verde. Planta DST
+  `as_is_floor_re_requests_compacted_index` (pedradb-store, exit 0 no
+  worktree). Gate: floor_atom 202→203, floor_extract 76→75.
+
 - **compact / may_compact_through (1/10)**: permissão de compactar
   como árvore citada de 3 gates — recusa through zero, recusa coberto
   pelo snapshot, recusa term zero; autoriza só com os três abertos

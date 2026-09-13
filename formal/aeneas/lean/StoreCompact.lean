@@ -205,3 +205,21 @@ theorem may_compact_through_fate_iff :
     · subst hv
       unfold may_compact_through
       rw [if_neg h1, if_neg h2, if_neg h3]
+
+/-- RFC-0218 P1.1 2/10 (átomo `catalog:compact_floor`, entrada
+    `compact_index_floor`): o piso pós-compactação é EXATAMENTE a
+    soma saturada citada — through + 1 sem nunca envolver para zero
+    (o AS-IS devolve through e re-requisita o índice já compactado —
+    dente plantado). -/
+theorem compact_index_floor_fate_iff :
+    ∀ (through : U64) (r : U64),
+      (compact_index_floor through = ok r) ↔
+        (core.num.U64.saturating_add through 1#u64 = r) := by
+  intro through r
+  constructor
+  · intro hval
+    unfold compact_index_floor at hval
+    injection hval with hv
+  · intro hv
+    unfold compact_index_floor
+    rw [hv]

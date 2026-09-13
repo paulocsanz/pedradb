@@ -229,3 +229,4 @@ atom	catalog:tombstone_reaches_window	tombstone_reaches_window_fate_iff	formal/a
 atom	catalog:scan_guard	scan_reads_file_fate_iff	formal/aeneas/lean/Scan.lean	scan_reads_file
 atom	catalog:sst_magic	sst_magic_is_pedra_fate_iff	formal/aeneas/lean/Magic.lean	sst_magic_is_pedra
 atom	catalog:compact	may_compact_through_fate_iff	formal/aeneas/lean/StoreCompact.lean	may_compact_through
+atom	catalog:compact_floor	compact_index_floor_fate_iff	formal/aeneas/lean/StoreCompact.lean	compact_index_floor

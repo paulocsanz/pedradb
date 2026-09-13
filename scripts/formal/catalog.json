@@ -7018,6 +7018,10 @@
    "dst_plant": {
     "file": "crates/pedradb-store/src/compact_kernel.rs",
     "test": "as_is_floor_re_requests_compacted_index"
+   },
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 2/10 P1.1: compact_index_floor como a soma saturada citada through+1 (nunca envolve a zero); as-is devolve through e re-requisita o compactado (dente plantado)"
    }
   },
   {
