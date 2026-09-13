@@ -6280,8 +6280,11 @@ impl<E: Env> Db<E> {
                         t_r.elapsed().as_secs_f64() * 1e3
                     );
                 }
-                if crate::write_admission_kernel::dir_sync_required(sync) {
-                    env.sync_dir(dir)?;
+                match crate::write_admission_kernel::dir_sync_plan(sync) {
+                    crate::write_admission_kernel::DirSyncPlan::SyncDirNow => {
+                        env.sync_dir(dir)?;
+                    }
+                    crate::write_admission_kernel::DirSyncPlan::SkipDirSync => {}
                 }
                 // Keep the writer's in-place table (rename does not change
                 // the bytes). Re-opening paid a full read + per-block
@@ -6329,8 +6332,11 @@ impl<E: Env> Db<E> {
                         t_r.elapsed().as_secs_f64() * 1e3
                     );
                 }
-                if crate::write_admission_kernel::dir_sync_required(sync) {
-                    env.sync_dir(dir)?;
+                match crate::write_admission_kernel::dir_sync_plan(sync) {
+                    crate::write_admission_kernel::DirSyncPlan::SyncDirNow => {
+                        env.sync_dir(dir)?;
+                    }
+                    crate::write_admission_kernel::DirSyncPlan::SkipDirSync => {}
                 }
                 // In-place table kept (see `write_imm_l0_file`): no
                 // post-rename re-read of the freshly written bytes.
@@ -10694,8 +10700,11 @@ impl<E: Env> Db<E> {
 
     /// When open options require durability, fsync the directory (propagate errors).
     fn sync_dir_if_required(&self, dir: &Path) -> Result<()> {
-        if crate::write_admission_kernel::dir_sync_required(self.sync) {
-            self.env.sync_dir(dir)?;
+        match crate::write_admission_kernel::dir_sync_plan(self.sync) {
+            crate::write_admission_kernel::DirSyncPlan::SyncDirNow => {
+                self.env.sync_dir(dir)?;
+            }
+            crate::write_admission_kernel::DirSyncPlan::SkipDirSync => {}
         }
         Ok(())
     }
@@ -11351,10 +11360,13 @@ impl<E: Env> Db<E> {
                 | crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => {}
             }
         }
-        if crate::write_admission_kernel::dir_sync_required(sync_dir)
-            && !crate::write_admission_kernel::batch_is_empty(paths.len() as u64)
-        {
-            env.sync_dir(dir)?;
+        match crate::write_admission_kernel::dir_sync_plan(sync_dir) {
+            crate::write_admission_kernel::DirSyncPlan::SyncDirNow => {
+                if !crate::write_admission_kernel::batch_is_empty(paths.len() as u64) {
+                    env.sync_dir(dir)?;
+                }
+            }
+            crate::write_admission_kernel::DirSyncPlan::SkipDirSync => {}
         }
         Ok(())
     }
@@ -12416,8 +12428,11 @@ fn finish_merged_chunk_on(
     let final_path = dir.join(format!("{file_num:06}.sst"));
     let tmp_path = dir.join(format!("{file_num:06}.sst.tmp"));
     env.rename(&tmp_path, &final_path)?;
-    if crate::write_admission_kernel::dir_sync_required(do_sync_dir) {
-        let _ = env.sync_dir(dir);
+    match crate::write_admission_kernel::dir_sync_plan(do_sync_dir) {
+        crate::write_admission_kernel::DirSyncPlan::SyncDirNow => {
+            let _ = env.sync_dir(dir);
+        }
+        crate::write_admission_kernel::DirSyncPlan::SkipDirSync => {}
     }
     // The writer's in-place table is the truth for the bytes just written;
     // a re-open here re-read + decompressed + decoded every entry of every

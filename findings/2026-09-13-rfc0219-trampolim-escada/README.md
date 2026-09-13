@@ -147,3 +147,25 @@ inline `merge::visible_at(Value, range_deleted(...))`.
 - **Par nasce átomo**: `catalog:point_tombstone`. floor_atom 270→271,
   residuals atom 271, single_artifact 290.
 - **Contador**: 68 → **64** (db.rs 46→42; −4 sítios num pull só).
+
+## P1.1-c — `dir_sync_plan` (write_admission_kernel) — P1.1 fechado
+
+Sítios: os cinco portões de dir-fsync pós-arquivo — rename SST `.tmp`
+(x2 em write_imm_l0_file / cf), `sync_dir_if_required` (portão dir do
+DB), `fsync_sst_paths` (conjunto com batch_is_empty aninhado no braço) e
+`finish_merged_chunk_on`.
+
+- **Kernel**: `write_admission_kernel::dir_sync_plan(sync)` →
+  `DirSyncPlan{SyncDirNow, SkipDirSync}` — chama `dir_sync_required`
+  (predicado segue vivo e provado no corpo do plano).
+- **AS-IS dente**: `dir_sync_plan_as_is` — nunca paga; dentry do rename
+  some pós-crash mesmo em sync.
+- **Trampolim**: os cinco sítios fazem `match` no plano.
+- **Teorema**: `dir_sync_plan_fate_iff` (∀ sobre o bool) em
+  `WriteAdmission.lean`.
+- **Extrato**: `aeneas_write_admission.sh --required` verde.
+- **Planta DST**: `dir_sync_plan_on_live_sync_mode_pays_now`.
+- **Par nasce átomo**: `catalog:dir_sync_plan`. floor_atom 271→272,
+  residuals atom 272, single_artifact 291.
+- **Contador**: 64 → **59** (db.rs 42→37; −5 sítios). P1.1 fechado:
+  3 pares, −13 sítios.

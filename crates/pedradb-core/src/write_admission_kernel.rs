@@ -349,6 +349,39 @@ pub fn dir_sync_required_as_is(_sync: bool) -> bool {
     false
 }
 
+/// RFC-0219 P1.1: site-level fate of the directory fsync after a file
+/// lands (`.tmp` SST rename, merged chunk rename, or the DB-wide dir
+/// gate). The trampoline `db.rs` sites `match` this plan; the predicate
+/// itself stays [`dir_sync_required`].
+#[cfg(not(verus_keep_ghost))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DirSyncPlan {
+    /// Sync mode: dir-fsync now — the dentry rename is durable before
+    /// returning.
+    SyncDirNow,
+    /// Async mode: skip the dir fsync (amortized; the caller's barrier
+    /// class owns recovery of a vanished tmp-name dentry).
+    SkipDirSync,
+}
+
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn dir_sync_plan(sync: bool) -> DirSyncPlan {
+    if dir_sync_required(sync) {
+        DirSyncPlan::SyncDirNow
+    } else {
+        DirSyncPlan::SkipDirSync
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: never pay the dir fsync — the rename dentry can vanish after a
+/// crash even in sync mode (site-level dente).
+#[must_use]
+pub fn dir_sync_plan_as_is(_sync: bool) -> DirSyncPlan {
+    DirSyncPlan::SkipDirSync
+}
+
 #[cfg(not(verus_keep_ghost))]
 /// `put_if_absent`: live key ⇒ CasMismatch; else put. Data-fate, not Env.
 #[must_use]
@@ -1212,6 +1245,33 @@ mod tests {
             "AS-IS dente: never dir-fsync"
         );
         assert!(!dir_sync_required(false));
+    }
+
+    #[test]
+    fn dir_sync_plan_on_live_sync_mode_pays_now() {
+        // RFC-0219 P1.1: the site-level fate — sync mode pays the dir
+        // fsync inline; async skips. AS-IS never pays (dentry can vanish
+        // in sync mode).
+        assert_eq!(dir_sync_plan(true), DirSyncPlan::SyncDirNow);
+        assert_eq!(dir_sync_plan(false), DirSyncPlan::SkipDirSync);
+        assert_eq!(
+            dir_sync_plan_as_is(true),
+            DirSyncPlan::SkipDirSync,
+            "AS-IS dente: rename dentry vanishes after crash in sync mode"
+        );
+        // Live: every rename/dir gate matches the plan; the raw
+        // dir_sync_required if left the trampoline (the predicate stays
+        // the fate's own body).
+        let src = include_str!("db.rs");
+        assert_eq!(
+            src.matches("match crate::write_admission_kernel::dir_sync_plan(").count(),
+            5,
+            "exactly five dir-sync gates match the plan"
+        );
+        assert!(
+            !src.contains("if crate::write_admission_kernel::dir_sync_required("),
+            "no inline dir_sync_required if remains in db.rs"
+        );
     }
 
     #[test]

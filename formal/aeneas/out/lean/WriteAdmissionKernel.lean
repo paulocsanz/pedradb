@@ -396,8 +396,111 @@ def dir_sync_required (sync : Bool) : Result Bool := do
 def dir_sync_required_as_is (_sync : Bool) : Result Bool := do
   ok false
 
+/-- [pedra_aeneas_write_admission_kernel::DirSyncPlan]
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 358:0-365:1
+    Visibility: public -/
+@[discriminant isize]
+inductive DirSyncPlan where
+| SyncDirNow : DirSyncPlan
+| SkipDirSync : DirSyncPlan
+
+/-- [pedra_aeneas_write_admission_kernel::{impl core::clone::Clone for pedra_aeneas_write_admission_kernel::DirSyncPlan}::clone]:
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 357:9-357:14
+    Visibility: public -/
+def DirSyncPlan.Insts.CoreCloneClone.clone
+  (self : DirSyncPlan) : Result DirSyncPlan := do
+  ok self
+
+/-- Trait implementation: [pedra_aeneas_write_admission_kernel::{impl core::clone::Clone for pedra_aeneas_write_admission_kernel::DirSyncPlan}]
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 357:9-357:14 -/
+@[reducible]
+def DirSyncPlan.Insts.CoreCloneClone : core.clone.Clone DirSyncPlan := {
+  clone := DirSyncPlan.Insts.CoreCloneClone.clone
+}
+
+/-- Trait implementation: [pedra_aeneas_write_admission_kernel::{impl core::marker::Copy for pedra_aeneas_write_admission_kernel::DirSyncPlan}]
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 357:16-357:20 -/
+@[reducible]
+def DirSyncPlan.Insts.CoreMarkerCopy : core.marker.Copy DirSyncPlan := {
+  cloneInst := DirSyncPlan.Insts.CoreCloneClone
+}
+
+/-- [pedra_aeneas_write_admission_kernel::{impl core::fmt::Debug for pedra_aeneas_write_admission_kernel::DirSyncPlan}::fmt]:
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 357:22-357:27
+    Visibility: public -/
+def DirSyncPlan.Insts.CoreFmtDebug.fmt
+  (self : DirSyncPlan) (f : core.fmt.Formatter) :
+  Result ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter)
+  := do
+  match self with
+  | DirSyncPlan.SyncDirNow =>
+    core.fmt.Formatter.write_str f (toStr "SyncDirNow")
+  | DirSyncPlan.SkipDirSync =>
+    core.fmt.Formatter.write_str f (toStr "SkipDirSync")
+
+/-- Trait implementation: [pedra_aeneas_write_admission_kernel::{impl core::fmt::Debug for pedra_aeneas_write_admission_kernel::DirSyncPlan}]
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 357:22-357:27 -/
+@[reducible]
+def DirSyncPlan.Insts.CoreFmtDebug : core.fmt.Debug DirSyncPlan := {
+  fmt := DirSyncPlan.Insts.CoreFmtDebug.fmt
+}
+
+/-- Trait implementation: [pedra_aeneas_write_admission_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_write_admission_kernel::DirSyncPlan}]
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 357:29-357:38 -/
+@[reducible]
+def DirSyncPlan.Insts.CoreMarkerStructuralPartialEq :
+  core.marker.StructuralPartialEq DirSyncPlan := {
+}
+
+/-- [pedra_aeneas_write_admission_kernel::{impl core::cmp::PartialEq<pedra_aeneas_write_admission_kernel::DirSyncPlan> for pedra_aeneas_write_admission_kernel::DirSyncPlan}::eq]:
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 357:29-357:38
+    Visibility: public -/
+def DirSyncPlan.Insts.CoreCmpPartialEqDirSyncPlan.eq
+  (self : DirSyncPlan) (other : DirSyncPlan) : Result Bool := do
+  let self1 := read_discriminant self
+  let other1 := read_discriminant other
+  ok (self1 = other1)
+
+/-- Trait implementation: [pedra_aeneas_write_admission_kernel::{impl core::cmp::PartialEq<pedra_aeneas_write_admission_kernel::DirSyncPlan> for pedra_aeneas_write_admission_kernel::DirSyncPlan}]
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 357:29-357:38 -/
+@[reducible]
+def DirSyncPlan.Insts.CoreCmpPartialEqDirSyncPlan : core.cmp.PartialEq
+  DirSyncPlan DirSyncPlan := {
+  eq := DirSyncPlan.Insts.CoreCmpPartialEqDirSyncPlan.eq
+}
+
+/-- [pedra_aeneas_write_admission_kernel::{impl core::cmp::Eq for pedra_aeneas_write_admission_kernel::DirSyncPlan}::assert_fields_are_eq]:
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 357:40-357:42
+    Visibility: public -/
+def DirSyncPlan.Insts.CoreCmpEq.assert_fields_are_eq
+  (self : DirSyncPlan) : Result Unit := do
+  ok ()
+
+/-- Trait implementation: [pedra_aeneas_write_admission_kernel::{impl core::cmp::Eq for pedra_aeneas_write_admission_kernel::DirSyncPlan}]
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 357:40-357:42 -/
+@[reducible]
+def DirSyncPlan.Insts.CoreCmpEq : core.cmp.Eq DirSyncPlan := {
+  partialEqInst := DirSyncPlan.Insts.CoreCmpPartialEqDirSyncPlan
+  assert_fields_are_eq := DirSyncPlan.Insts.CoreCmpEq.assert_fields_are_eq
+}
+
+/-- [pedra_aeneas_write_admission_kernel::dir_sync_plan]:
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 369:0-375:1
+    Visibility: public -/
+def dir_sync_plan (sync : Bool) : Result DirSyncPlan := do
+  let b ← dir_sync_required sync
+  if b
+  then ok DirSyncPlan.SyncDirNow
+  else ok DirSyncPlan.SkipDirSync
+
+/-- [pedra_aeneas_write_admission_kernel::dir_sync_plan_as_is]:
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 381:0-383:1
+    Visibility: public -/
+def dir_sync_plan_as_is (_sync : Bool) : Result DirSyncPlan := do
+  ok DirSyncPlan.SkipDirSync
+
 /-- [pedra_aeneas_write_admission_kernel::cas_absent_put]:
-    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 355:0-357:1
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 388:0-390:1
     Visibility: public -/
 def cas_absent_put (has_live : Bool) : Result Bool := do
   if has_live
@@ -405,13 +508,13 @@ def cas_absent_put (has_live : Bool) : Result Bool := do
   else ok true
 
 /-- [pedra_aeneas_write_admission_kernel::cas_absent_put_as_is]:
-    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 362:0-364:1
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 395:0-397:1
     Visibility: public -/
 def cas_absent_put_as_is (_has_live : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_write_admission_kernel::cas_eq_put]:
-    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 369:0-371:1
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 402:0-404:1
     Visibility: public -/
 def cas_eq_put (live_eq : Bool) : Result Bool := do
   if live_eq
@@ -419,13 +522,13 @@ def cas_eq_put (live_eq : Bool) : Result Bool := do
   else ok false
 
 /-- [pedra_aeneas_write_admission_kernel::cas_eq_put_as_is]:
-    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 376:0-378:1
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 409:0-411:1
     Visibility: public -/
 def cas_eq_put_as_is (_live_eq : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_write_admission_kernel::range_inverted]:
-    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 383:0-385:1
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 416:0-418:1
     Visibility: public -/
 def range_inverted (start_ge_end : Bool) : Result Bool := do
   if start_ge_end
@@ -433,13 +536,13 @@ def range_inverted (start_ge_end : Bool) : Result Bool := do
   else ok false
 
 /-- [pedra_aeneas_write_admission_kernel::range_inverted_as_is]:
-    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 390:0-392:1
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 423:0-425:1
     Visibility: public -/
 def range_inverted_as_is (_start_ge_end : Bool) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_write_admission_kernel::storage_write_recovered]:
-    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 401:0-420:1
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 434:0-453:1
     Visibility: public -/
 def storage_write_recovered
   (mem_bytes : Std.U64) (mem_armed : Bool) (mem_limit : Std.U64) (l0 : Std.U64)
@@ -463,7 +566,7 @@ def storage_write_recovered
   | WriteAdmit.StallL0 => ok false
 
 /-- [pedra_aeneas_write_admission_kernel::storage_write_recovered_as_is]:
-    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 426:0-445:1
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 459:0-478:1
     Visibility: public -/
 def storage_write_recovered_as_is
   (mem_bytes : Std.U64) (mem_armed : Bool) (mem_limit : Std.U64) (l0 : Std.U64)

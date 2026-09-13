@@ -362,3 +362,17 @@ theorem pit_resync_rewrite_fate_iff :
   intro is_resync v
   unfold pit_resync_needs_rewrite
   cases is_resync <;> cases v <;> simp
+
+/-- RFC-0219 P1.1 (átomo `catalog:dir_sync_plan`): o dir-fsync pós-rename
+    (SST `.tmp`, chunk fundido, portão dir do DB) é pago EXATAMENTE em
+    modo sync — o dentry do rename é durável antes de voltar; async
+    pula (recuperação tolera dentry de nome-tmp sumiu). O AS-IS nunca
+    paga (dentry some pós-crash mesmo em sync — dente plantado). -/
+theorem dir_sync_plan_fate_iff :
+    ∀ (sync : Bool) (plan : DirSyncPlan),
+      (dir_sync_plan sync = ok plan) ↔
+        ((sync = true ∧ plan = DirSyncPlan.SyncDirNow) ∨
+          (sync = false ∧ plan = DirSyncPlan.SkipDirSync)) := by
+  intro sync plan
+  unfold dir_sync_plan dir_sync_required
+  cases sync <;> simp_all <;> exact eq_comm

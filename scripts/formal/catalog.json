@@ -6555,6 +6555,36 @@
    }
   },
   {
+   "id": "dir_sync_plan",
+   "finding": "RFC-0219 P1.1",
+   "twin_kind": "atom",
+   "atom": "dir_sync_plan",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P1.1: se o dir-fsync pós-rename é pago é decisão do kernel — modo sync paga inline (dentry do rename durável antes de voltar), async pula, provado ∀ sobre sync como dir_sync_plan_fate_iff em WriteAdmission.lean (o predicado dir_sync_required segue vivo no corpo do plano); os cinco trampolins db.rs (rename SST x2, sync_dir_if_required, fsync_sst_paths, finish_merged_chunk_on) fazem match no plano"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "aeneas": "scripts/aeneas_write_admission.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "dir_sync_plan",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "sync_dir_if_required"
+    }
+   ],
+   "as_is": "dir_sync_plan_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+    "test": "dir_sync_plan_on_live_sync_mode_pays_now"
+   }
+  },
+  {
    "id": "flush_plan",
    "finding": "F2/F43",
    "twin_kind": "close",
