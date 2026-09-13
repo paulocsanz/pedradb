@@ -1,6 +1,6 @@
 # RFC-0215 — Coroa de produto no degrau átomo: spec ×4 + modelo ×4 + fate ×2 + espinha→coroa composta
 
-**Status:** draft
+**Status:** done (2026-09-12 — P0.1, P0.2, P1.1, P1.2, P2.1, P2.2 fechadas; floor_atom 158, floor_extract 120; sweep 3× GREEN em worktree DENTRO de software/)
 **Data:** 2026-09-12
 **Autoria:** agente grind (round 8→9), sucessora direta do RFC-0214
 (espinha de durabilidade fechada, `**Status:** done` no HEAD `85855e56`)
@@ -104,7 +104,9 @@ planta DST verde ANTES do commit, gate GREEN no commit).
 6. **P2.2** sweep final em worktree DENTRO de `software/` (gates 3×
    GREEN + campaign ok + extracts ok + sorry 0, capturas
    `{SCRATCH}/r0215_sweep_*`) + nota datada `EXTRACT.md` + flip
-   `**Status:** done` — status: `todo`
+   `**Status:** done` — status: `done` (2026-09-12; depth-floor
+   GREEN atom=158/extract=120, inventory-terminal ok,
+   twin-contracts ok, campaign ok, extracts 64+24 exit 0, sorry 0)
 
 ## Vereditos / riscos
 
@@ -138,7 +140,7 @@ planta DST verde ANTES do commit, gate GREEN no commit).
 | P1.1 | p1 | fate ×2 átomo: d1_put_ok, c1_advance_commit | done | `put_ok_fate_iff`/`c1_advance_commit_fate_iff` | 2026-09-12 |
 | P1.2 | p1 | coroa↔espinha composta (`ComposeProductCrown.lean` + twin + DST, sem TSV) | done | `product_crown_every_reach`/`wa_d1_modelo_fate_iff` | 2026-09-12 |
 | P2.1 | p2 | http ×6 átomo: bearer/auth/method/ascii | done | `is_bearer_scheme_fate_iff`/`is_non_bearer_auth_scheme_fate_iff`/`authorization_matches_fate_iff`/`normalize_http_method_fate_iff`/`ascii_lower_fate_iff`/`ascii_upper_fate_iff` | 2026-09-12 |
-| P2.2 | p2 | Sweep final + nota EXTRACT.md + flip done | todo | — | 2026-09-12 |
+| P2.2 | p2 | Sweep final + nota EXTRACT.md + flip done | done | `r0215_sweep_*` (3× GREEN + campaign + extracts 64+24 + sorry 0) | 2026-09-12 |
 
 ## Critérios de aceite
 

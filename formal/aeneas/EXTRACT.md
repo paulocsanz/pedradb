@@ -626,3 +626,35 @@ twin kernel `durability_spine_kernel.rs` + planta DST
 `durability_spine_compose_on_live_profile_is_not_ok`. Restam no
 degrau extrato: 136 (nenhum `data_fate` pendente, catálogo
 fechado).
+
+## 2026-09-12 — coroa de produto no degrau átomo (RFC-0215): spec ×4 + modelo ×4 + fate ×2 + espinha→coroa + http ×6
+
+Medido ao vivo no HEAD do 0215: os 16 pares da coroa de produto —
+spec ×4 (Properties.lean: `c1_holds_fate_iff`, `d1_holds_fate_iff`,
+`t1_holds_fate_iff`, `r1_answer_ok_fate_iff`), modelo ×4
+(D1Modelo.lean `d1_modelo_fate_iff`, LsmR1.lean `r1_modelo_fate_iff`,
+T1Modelo.lean `t1_modelo_fate_iff`, C1Modelo.lean
+`c1_modelo_fate_iff`), fate ×2 (`d1_put_ok_fate_iff`,
+`c1_advance_commit_fate_iff`) e http ×6 (Auth.lean:
+`is_bearer_scheme_fate_iff`, `is_non_bearer_auth_scheme_fate_iff`,
+`authorization_matches_fate_iff`; Form.lean:
+`normalize_http_method_fate_iff`, `ascii_lower_fate_iff`,
+`ascii_upper_fate_iff`) — todos promovidos ao degrau átomo com
+teorema iff-∀ sobre o corpo extraído, 1 promoção = 1 commit.
+Escada final do 0215: floor_atom 142→158, floor_extract 136→120
+(close=6, data_fate=0 imutáveis); gate GREEN no HEAD de cada
+promoção; sweep final em worktree DENTRO de software/ com os três
+gates GREEN (depth-floor, inventory-terminal, twin-contracts) +
+campaign ok + extracts --required exit 0 (64 libs + 24 compose) +
+sorry 0 nos wrappers da rodada. Composição espinha→coroa em
+`ComposeProductCrown.lean` (24ª compose lib): sobre todo ledger
+`spine_reach` do 0214, as duas pernas juntas — `d1_modelo = ok
+true` (cita a iff; corpo extraído não reaberto; perna geminada
+`wa_d1_modelo_fate_iff` em WriteAck.lean resolve o choque de import
+das cópias geradas) e `d1_holds = ok true` (perna P0.1); SEM TSV —
+atravessa múltiplos átomos; twin kernel `product_crown_kernel.rs` +
+planta DST `product_crown_compose_on_live_profile_is_not_ok`.
+Bugs do motor achados pelas plantas: SST v5 vazio no reopen caía no
+fail-closed com corrupção inventada (fix 30e572db). Restam no
+degrau extrato: 120 (nenhum `data_fate` pendente, catálogo
+fechado).
