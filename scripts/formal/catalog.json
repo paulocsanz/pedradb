@@ -1232,6 +1232,10 @@
   },
   {
    "id": "lease_next_id",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "o proximo id de lease e exatamente a cadeia citada — saturating_add do max visto 1, cortado abaixo por 1 via Ord.max com lt (as-is devolve 1 fixo: reuso reanima lease morto)"
+   },
    "finding": "F7",
    "twin_kind": "close",
    "single_artifact": true,

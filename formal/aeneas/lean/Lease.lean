@@ -5,6 +5,20 @@ import LeaseKernel
 open Aeneas.Std Result
 open pedra_aeneas_lease_kernel
 
+/-- Any ok-valued Result bind forces the bound term to be ok. -/
+private theorem bind_ok_inv {α β} (x : Result α) (f : α → Result β) (v : β)
+    (h : Aeneas.Std.bind x f = ok v) : ∃ a, x = ok a ∧ f a = ok v := by
+  cases x with
+  | ok a => exact ⟨a, rfl, h⟩
+  | fail e => exact absurd h (by simp)
+  | div => exact absurd h (by simp)
+
+/-- An ok chain reassembles into an ok bind. -/
+private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : β}
+    (a : α) (hx : x = ok a) (h : f a = ok v) : Aeneas.Std.bind x f = ok v := by
+  rw [hx]
+  exact h
+
 /-- Catalog entry: lease 0 is immortal. -/
 theorem lease_live_zero :
     lease_live (0#u64) (5#u64) = ok true := by
@@ -39,3 +53,24 @@ theorem lease_live_iff_zero_or_now_below :
     · split
       · rfl
       · simp [hlt]
+
+/-- Catalog entry (RFC-0218 P2.2, átomo `lease_next_id`): the next
+    lease id is exactly the cited chain — saturating_add max_seen 1,
+    then clamped below by 1 (Ord.max with the lt instance); ids never
+    restart at 1 while a higher id was seen on disk (F7/F56). -/
+theorem next_lease_id_after_fate_iff :
+    ∀ (max_seen_on_disk : U64) (v : U64),
+      (next_lease_id_after max_seen_on_disk = ok v) ↔
+        (∃ i : U64,
+          lift (core.num.U64.saturating_add max_seen_on_disk 1#u64) = ok i ∧
+          core.cmp.Ord.max.default core.cmp.OrdU64.partialOrdInst.lt i 1#u64
+            = ok v) := by
+  intro max_seen_on_disk v
+  constructor
+  · intro h
+    unfold next_lease_id_after at h
+    obtain ⟨i, hi, h⟩ := bind_ok_inv _ _ _ h
+    exact ⟨i, hi, h⟩
+  · rintro ⟨i, hi, h⟩
+    unfold next_lease_id_after
+    exact bind_intro i hi h
