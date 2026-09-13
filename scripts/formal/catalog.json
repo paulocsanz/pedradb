@@ -1784,6 +1784,10 @@
   },
   {
    "id": "range_covers",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.2: fate ∀ sobre range_tombstone_covers no degrau átomo — par citado: key >= start E key < end; planta DST range_tombstone_covers_on_live_queued_is_not_ok"
+   },
    "finding": "F30",
    "twin_kind": "model",
    "single_artifact": true,

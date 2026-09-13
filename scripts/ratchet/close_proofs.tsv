@@ -243,3 +243,4 @@ atom	catalog:write_op_range_end	write_op_range_end_fate_iff	formal/aeneas/lean/M
 atom	catalog:ikey_pack	pack_sequence_and_type_fate_iff	formal/aeneas/lean/Key.lean	key.pack_sequence_and_type
 atom	catalog:prefix	prefix_exclusive_end_fate_iff	formal/aeneas/lean/Prefix.lean	prefix_exclusive_end
 atom	catalog:exact_children	exact_value_children_fate_iff	formal/aeneas/lean/IndexVal.lean	exact_value_children
+atom	catalog:range_covers	range_tombstone_covers_fate_iff	formal/aeneas/lean/Merge.lean	merge.range_tombstone_covers

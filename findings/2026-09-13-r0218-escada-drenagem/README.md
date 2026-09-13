@@ -316,6 +316,8 @@ gates GREEN no commit).
   77→76.
 ## P1.2 — leveling ×4 + merge ×2 + index_val ×3 + key + prefix ×11 átomo
 
+- **merge / range_tombstone_covers (6/11)**: cobrir por túmulo de range como o par citado — `ge key start` abre a porta e `lt key end` fecha (as-is testa só igualdade com start) — `range_tombstone_covers_fate_iff` em `Merge.lean`. Forward: bind_ok_inv + split; reverso: bind_intro com if defeq. Build verde. Planta DST `range_tombstone_covers_on_live_queued_is_not_ok` (pedradb-store, exit 0 no worktree). Gate: floor_atom 216→217, floor_extract 62→61.
+
 - **index_val / exact_value_children (5/11)**: filhos exatos como a cadeia citada — `to_vec` do prefixo, `push 0#u8` (início), `push 1#u8` (fim) — `exact_value_children_fate_iff` em `IndexVal.lean`. Forward: 3× bind_ok_inv + injection; reverso: bind_intro ×3. Build verde. Planta DST `as_is_leaks_nul_sibling` (pedradb-store, exit 0 no worktree). Gate: floor_atom 215→216, floor_extract 63→62.
 
 - **prefix / prefix_exclusive_end (4/11)**: fim exclusivo como o encaminhamento citado — `to_vec` do prefixo e o loop citado decide (incrementa ou some) — `prefix_exclusive_end_fate_iff` em `Prefix.lean`. Forward: unfold + bind_ok_inv; reverso: bind_intro. Build verde. Planta DST `prefix_exclusive_end_on_live_queued_is_not_ok` (pedradb-store, exit 0 no worktree). Gate: floor_atom 214→215, floor_extract 64→63.

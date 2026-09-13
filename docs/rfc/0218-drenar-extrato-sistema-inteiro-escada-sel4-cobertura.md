@@ -127,9 +127,10 @@ nunca por promoção silenciosa.
    JÁ têm teorema — ficam de fora), `range_covers`, `write_op_range_end`,
    `exact_children`, `index_val`, `len_tag`, `ikey_pack`, `prefix` —
    floor_atom 211→222 — status: `todo`
-   (5/11: `value_len_tag_fate_iff`, `write_op_range_end_fate_iff`,
-   `pack_sequence_and_type_fate_iff`, `prefix_exclusive_end_fate_iff` e
-   `exact_value_children_fate_iff` feitos 2026-09-13)
+   (6/11: `value_len_tag_fate_iff`, `write_op_range_end_fate_iff`,
+   `pack_sequence_and_type_fate_iff`, `prefix_exclusive_end_fate_iff`,
+   `exact_value_children_fate_iff` e `range_tombstone_covers_fate_iff`
+   feitos 2026-09-13)
 
 7. **P1.3** si/snapshot/txn ×11: `si_read`, `si_reader`,
    `point_get_prefer`, `point_get_wm`, `snapshot`, `snap_txn_clear`,

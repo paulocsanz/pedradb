@@ -681,3 +681,50 @@ theorem write_op_range_end_fate_iff :
     · subst hk; subst hv; rfl
     · subst hk; subst hv; rfl
     · subst hk; subst hv; rfl
+
+private theorem bind_ok_inv {α β} (x : Result α) (f : α → Result β) (v : β)
+    (h : Aeneas.Std.bind x f = ok v) : ∃ a, x = ok a ∧ f a = ok v := by
+  cases x with
+  | ok a => exact ⟨a, rfl, h⟩
+  | fail e => exact absurd h (by simp)
+  | div => exact absurd h (by simp)
+
+/-- An ok chain reassembles into an ok bind. -/
+private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : β}
+    (a : α) (hx : x = ok a) (h : f a = ok v) : Aeneas.Std.bind x f = ok v := by
+  rw [hx]
+  exact h
+
+/-- RFC-0218 P1.2 6/11 (átomo `catalog:range_covers`, entrada
+    `merge.range_tombstone_covers`): cobrir por túmulo de range é
+    EXATAMENTE o par citado — `key >= start` E `key < end`. O AS-IS
+    testa só igualdade com start (fim ignorado — dente plantado). -/
+theorem range_tombstone_covers_fate_iff :
+    ∀ (start : Slice U8) (end1 : Slice U8) (key : Slice U8) (v : Bool),
+      (merge.range_tombstone_covers start end1 key = ok v) ↔
+      (∃ b, Shared1A.Insts.CoreCmpPartialOrdShared0B.ge
+          (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) key start = ok b ∧
+        ((b = true ∧
+          Shared1A.Insts.CoreCmpPartialOrdShared0B.lt
+            (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) key end1 = ok v) ∨
+         (b = false ∧ v = false))) := by
+  intro start end1 key v
+  constructor
+  · intro hval
+    unfold merge.range_tombstone_covers at hval
+    obtain ⟨b, hgate, hval⟩ := bind_ok_inv _ _ _ hval
+    split at hval
+    · next hb =>
+      exact ⟨b, hgate, Or.inl ⟨hb, hval⟩⟩
+    · next hb =>
+      simp only [Bool.not_eq_true] at hb
+      injection hval with hv
+      exact ⟨b, hgate, Or.inr ⟨hb, hv.symm⟩⟩
+  · rintro ⟨b, hgate, (⟨hb, hlt⟩ | ⟨hb, hv⟩)⟩
+    · subst hb
+      unfold merge.range_tombstone_covers
+      exact bind_intro true hgate hlt
+    · subst hb
+      subst hv
+      unfold merge.range_tombstone_covers
+      exact bind_intro false hgate rfl
