@@ -3624,6 +3624,10 @@
   },
   {
    "id": "apply_step",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "o passo de aplicacao e exatamente a arvore citada — na frente do commit Done; atras, Apply so com entrada presente, buraco e Stop"
+   },
    "finding": "F10-apply",
    "twin_kind": "close",
    "single_artifact": true,

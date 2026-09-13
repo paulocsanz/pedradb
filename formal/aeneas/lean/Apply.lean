@@ -39,3 +39,43 @@ theorem as_is_applies_hole :
     apply_advance_as_is_skip_holes (1#u64) (2#u64) false = ok ApplyAction.Apply ∧
       apply_advance (1#u64) (2#u64) false = ok ApplyAction.Stop := by
   constructor <;> rfl
+
+/-- RFC-0218 P2.2 (átomo `catalog:apply_step`, entrada
+    `apply_advance`): o passo de aplicação é exatamente a árvore citada
+    — na frente do commit, Done; atrás do commit, Apply só com entrada
+    presente, buraco é Stop (o prefixo contíguo é a fronteira). O
+    AS-IS aplica o buraco (dente plantado). -/
+theorem apply_advance_fate_iff :
+    ∀ (last_applied commit_index : U64) (entry_present : Bool)
+      (v : ApplyAction),
+      (apply_advance last_applied commit_index entry_present = ok v) ↔
+        ((v = ApplyAction.Done ∧ last_applied >= commit_index)
+         ∨ (v = ApplyAction.Apply ∧ ¬(last_applied >= commit_index) ∧
+              entry_present = true)
+         ∨ (v = ApplyAction.Stop ∧ ¬(last_applied >= commit_index) ∧
+              entry_present = false)) := by
+  intro last_applied commit_index entry_present v
+  constructor
+  · intro hval
+    unfold apply_advance at hval
+    split at hval
+    · next hc =>
+      injection hval with hv
+      exact Or.inl ⟨hv.symm, hc⟩
+    · next hc =>
+      split at hval
+      · next hp =>
+        injection hval with hv
+        exact Or.inr (Or.inl ⟨hv.symm, hc, hp⟩)
+      · next hp =>
+        simp only [Bool.not_eq_true] at hp
+        injection hval with hv
+        exact Or.inr (Or.inr ⟨hv.symm, hc, hp⟩)
+  · rintro (⟨rfl, hc⟩ | ⟨rfl, hc, hp⟩ | ⟨rfl, hc, hp⟩)
+    · unfold apply_advance
+      rw [if_pos hc]
+    · unfold apply_advance
+      rw [if_neg hc, if_pos hp]
+    · unfold apply_advance
+      have hp' : ¬(entry_present = true) := by simp [hp]
+      rw [if_neg hc, if_neg hp']
