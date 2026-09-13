@@ -2891,6 +2891,10 @@
   },
   {
    "id": "journal_next_pin",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P2.1: fate ∀ sobre next_pin no degrau átomo — sem batch o pin fica; com batch_max o pin anda somente para um batch_max à frente; planta DST next_pin_on_live_journal_is_not_ok"
+   },
    "finding": "H1",
    "twin_kind": "close",
    "single_artifact": true,

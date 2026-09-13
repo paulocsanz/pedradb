@@ -62,3 +62,46 @@ theorem may_advance_pin_fate_iff :
   · rintro hv
     subst hv
     rfl
+
+/-- RFC-0218 P2.1 4/12 (átomo `catalog:journal_next_pin`, entrada
+    `next_pin`): o próximo pin é EXATAMENTE o citado — sem batch, o
+    pin fica; com batch_max, o pin anda para o batch_max somente
+    quando ele está à frente. O AS-IS anda para trás (pin pode
+    regredir — dente plantado). -/
+theorem next_pin_fate_iff :
+    ∀ (pin : U64) (batch_max : Option U64) (r : U64),
+      (next_pin pin batch_max = ok r) ↔
+        ((batch_max = none ∧ r = pin) ∨
+         (∃ m : U64, batch_max = some m ∧
+           ((m > pin ∧ r = m) ∨ (¬ (m > pin) ∧ r = pin)))) := by
+  intro pin batch_max r
+  constructor
+  · intro hval
+    unfold next_pin at hval
+    cases batch_max with
+    | none =>
+      dsimp only at hval
+      injection hval with hv
+      exact Or.inl ⟨rfl, hv.symm⟩
+    | some m =>
+      dsimp only at hval
+      refine Or.inr ⟨m, rfl, ?_⟩
+      split at hval
+      · next hm =>
+        injection hval with hv
+        exact Or.inl ⟨hm, hv.symm⟩
+      · next hm =>
+        injection hval with hv
+        exact Or.inr ⟨hm, hv.symm⟩
+  · rintro (⟨rfl, hv⟩ | ⟨m, rfl, (⟨hm, hv⟩ | ⟨hm, hv⟩)⟩)
+    · subst hv
+      unfold next_pin
+      rfl
+    · subst hv
+      unfold next_pin
+      dsimp only
+      rw [if_pos hm]
+    · subst hv
+      unfold next_pin
+      dsimp only
+      rw [if_neg (by simp [hm])]
