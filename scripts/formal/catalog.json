@@ -7193,6 +7193,10 @@
   },
   {
    "id": "lsm_compact",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.1: fate ∀ sobre lsm_compact no degrau átomo — despacho citado: nível 0 e nível >= MAX_LEVELS não compactam; dentro, o loop citado com drop_all_tombs false; planta DST r1_modelo_on_live_delete_shape_is_not_ok"
+   },
    "entry": "lsm_compact",
    "as_is": "lsm_compact_as_is",
    "finding": "RFC-0166 P2.1",

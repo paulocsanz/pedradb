@@ -119,3 +119,40 @@ theorem r1_modelo_fate_iff :
         rw [ho1]
         simp only [Aeneas.Std.bind_tc_ok]
         exact heq
+
+/-- RFC-0218 P1.1 8/10 (átomo `catalog:lsm_compact`, entrada
+    `lsm_compact`): despacho de compactação R1 é EXATAMENTE o
+    encaminhamento citado — nível 0 não compacta (ok none), nível
+    dentro de MAX_LEVELS entra no loop citado com drop_all_tombs
+    false, nível além de MAX_LEVELS não compacta. O AS-IS passa
+    drop_all_tombs true (derruba túmulos vivos — dente plantado). -/
+theorem lsm_compact_fate_iff :
+    ∀ (s : LsmState) (depth : Usize) (r : Option LsmState),
+      (lsm_compact s depth = ok r) ↔
+      ((depth = 0#usize ∧ r = none) ∨
+       (¬(depth = 0#usize) ∧ depth < MAX_LEVELS ∧
+         lsm_compact_src_loop false depth s depth = ok r) ∨
+       (¬(depth = 0#usize) ∧ ¬(depth < MAX_LEVELS) ∧ r = none)) := by
+  intro s depth r
+  constructor
+  · intro hval
+    unfold lsm_compact at hval
+    split at hval
+    · next hz =>
+      injection hval with hv
+      exact Or.inl ⟨hz, hv.symm⟩
+    · next hz =>
+      split at hval
+      · next hm => exact Or.inr (Or.inl ⟨hz, hm, hval⟩)
+      · next hm =>
+        injection hval with hv
+        exact Or.inr (Or.inr ⟨hz, hm, hv.symm⟩)
+  · rintro (⟨hz, hv⟩ | ⟨hz, hm, hs⟩ | ⟨hz, hm, hv⟩)
+    · unfold lsm_compact
+      rw [if_pos hz, hv]
+    · unfold lsm_compact
+      rw [if_neg hz, if_pos hm]
+      exact hs
+    · unfold lsm_compact
+      rw [if_neg hz, if_neg hm, hv]
+

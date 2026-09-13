@@ -228,6 +228,15 @@ gates GREEN no commit).
 
 ## P1.1 — compact ×7 + lsm_r1 ×3 átomo
 
+- **lsm_r1 / lsm_compact (8/10)**: despacho de compactação R1 como
+  encaminhamento citado — nível 0 e nível ≥ MAX_LEVELS não compactam
+  (ok none); dentro, o loop citado `lsm_compact_src_loop` com
+  `drop_all_tombs false` (3 disjunctos; as-is passa true e derruba
+  túmulos vivos) — `lsm_compact_fate_iff` em `LsmR1.lean`. Forward:
+  duplo split + injection; reverso: rw if_pos/if_neg. Build verde.
+  Planta DST `r1_modelo_on_live_delete_shape_is_not_ok` (pedradb-sim,
+  exit 0 no worktree). Gate: floor_atom 208→209, floor_extract 70→69.
+
 - **lone_tombstone / lone_tombstone_fate (7/10)**: o túmulo
   solitário cai só no nível mais baixo — Drop exige `bottommost` E
   `lone_newest`; todo o resto Keep (3 disjunctos flat) —
