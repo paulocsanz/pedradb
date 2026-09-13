@@ -145,10 +145,40 @@ board**, estendendo este RFC a cada etapa nova descoberta.
 
 ### P1 — U-cells nativas (ranking nº 2; cada fatia: ≥1,0 OU teto datado com número)
 
-- [ ] **P1.1** kafka_changelog_flush 0,036: flush amortizado no compat
+- [x] **P1.1** kafka_changelog_flush 0,036: flush amortizado no compat
   (pipeline completo por chamada — snapshot do hang: 1331/1793 amostras em
   `compact_gate` — vira batch/staged com gate) sem mudar a semântica de
-  durabilidade do flush explícito. — status: `todo`
+  durabilidade do flush explícito. **Feito 2026-09-13** (mecanismo +
+  testes; números abaixo são DIAG Darwin, nunca claim — ratio ≥1,0 é o
+  meter Linux, fatia e4b): kernel `changelog_flush_store_now` +
+  `wal_rotate_archives` (debounce 64 flushes, cap 64 archives) — o rotate
+  decide por cobertura (`walless_covered`, `unpublished_below_floor`,
+  feed settled) e publica durável só quando `!settled ∧ (¬archive_now ∨
+  store_now)`; a janela WAL-less acima do floor PUBLICA (nunca arquiva —
+  frames ≤ floor já cobertos pelo manifesto); frames não-publicados >
+  floor arquivam e o replay no open é filtrado por
+  `sequence > manifest_floor`. Três hazards de durabilidade fechados com
+  guards: (1) `lookup` resolve mem-vs-SST sem comparar seq → replay
+  incondicional sombreava publicados; (2) seqs de bulk intercalam com
+  puts → o floor não prova cobertura ≤ floor; (3) tail meta 1-key e bulk
+  runs são WAL-less → `walless_seq_high` trava truncate. Drain de
+  archives com budget (`WAL_ARCHIVE_UNLINK_BUDGET=4`/chamada; cap conta
+  `wal_archive_live()`, senão o gate dispararia store a cada rotate
+  durante o drain). Naming dos archives (`WAL.archNNNN`,
+  `wal_archive_slot_name`/`wal_archive_slot_of`) ficou em db.rs, não no
+  kernel: `str::pattern`/`format!` é intraduzível na lane aeneas/charon
+  (extração re-carimbada verde, sem arquivo parcial).
+  `verify_checksums` vira subset-check (manifesto ⊆
+  memória — F196 com publish adiado; manifesto nomeando arquivo ausente
+  continua `CorruptManifest`). Suite `rfc0217_changelog_flush_amortized`
+  6/6 (defer/crash-reopen, debounce+drain, cap→store síncrono,
+  crash-feed-parity, below-floor-publishes, publish-at-gate); 4 testes
+  as-is recontratados para o flush adiado (`crash_after_flush…`,
+  `idle_rotate…`, 2 de `verify_checksums`); A/B lib 936 pass / 23 fail =
+  baseline (zero novas). DIAG Darwin OPS=300 batch=32: p50 9,2ms pré →
+  **7,21ms** (5,93 pré-budget), p99 290ms → **72ms** com o budget de
+  unlinks, stores 15/1000 (1/64, geração de MANIFEST); rocks twin
+  0,386ms. — status: `done`
 - [ ] **P1.2** ingest_sst 0,069 + compaction_filter_drop 0,081: sair da
   emulação — ingest = escrita SST direta + install; filter = hook real no
   compactor. — status: `todo`
@@ -196,7 +226,7 @@ dono.
 | P0.3 | p0 | Meter DIAG Darwin: avg_grp ok (mc2 1,93/mc3 2,9/mc4 3,5/mc50 24,4); ratio espera caixa quieta | doing | `234001f7` | 2026-09-13 |
 | P0.4 | p0 | Meter Linux 3-run quiet: gate-blocked 04:42Z (p149 desconectado); binário+driver prontos | doing | — | 2026-09-13 |
 | P0.5 | p0 | Re-adjudicação do dono no Linux: mesmo block do P0.4 | doing | — | 2026-09-13 |
-| P1.1 | p1 | kafka_changelog_flush: flush amortizado | todo | — | 2026-09-13 |
+| P1.1 | p1 | kafka_changelog_flush: flush amortizado | done | `ded231ab` (ratio ≥1,0 = meter Linux e4b) | 2026-09-13 |
 | P1.2 | p1 | ingest_sst + compaction_filter: caminhos nativos | todo | — | 2026-09-13 |
 | P1.3 | p1 | wbwi + write_tx: batch indexado + tx nativos | todo | — | 2026-09-13 |
 | P1.4 | p1 | linkbench_mix: decompor + atacar dono | todo | — | 2026-09-13 |
