@@ -236,3 +236,21 @@ Sítio: `parked_oldest_pair_arcs` — o portão `if parked_unflushed.len() <
 - **Par nasce átomo**: `catalog:parked_pair`. floor_atom 275→276,
   residuals atom 276, single_artifact 295.
 - **Contador**: 56 → **55** (db.rs 34→33).
+
+## P1.3-b — `auto_flush_gate` (flush_kernel)
+
+Sítio: `maybe_auto_flush` — o portão `if skip_auto_flush(global_under,
+cf_under)` decidia inline pular o scan inteiro.
+
+- **Kernel**: `flush_kernel::auto_flush_gate(global_under, cf_under)` →
+  `AutoFlushGate{SkipAllNotDue, ScanColumnFamilies}` (chama
+  `skip_auto_flush`, que segue vivo e provado no corpo).
+- **AS-IS dente**: `auto_flush_gate_as_is` — sempre scana; churn de
+  flush com nada due.
+- **Teorema**: `auto_flush_gate_fate_iff` (∀ sobre os dois bools) em
+  `Flush.lean`.
+- **Extrato**: `aeneas_flush.sh --required` verde.
+- **Planta DST**: `auto_flush_gate_on_live_both_under_skips_scan`.
+- **Par nasce átomo**: `catalog:auto_flush_gate`. floor_atom 276→277,
+  residuals atom 277, single_artifact 296.
+- **Contador**: 55 → **54** (db.rs 33→32).

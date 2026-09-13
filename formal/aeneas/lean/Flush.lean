@@ -359,3 +359,19 @@ theorem parked_pair_plan_fate_iff :
       · exact absurd h1.1 c
       · subst hv
         rfl
+
+/-- RFC-0219 P1.3 (átomo `catalog:auto_flush_gate`): o scan de auto-flush
+    pula INTEIRO EXATAMENTE quando os dois eixos de mem estão sob seus
+    limites — qualquer eixo acima, scana cada CF (o gate due por-CF
+    aplica). O AS-IS sempre scana (churn de flush com nada due — dente
+    plantado). -/
+theorem auto_flush_gate_fate_iff :
+    ∀ (global_under cf_under : Bool) (plan : AutoFlushGate),
+      (auto_flush_gate global_under cf_under = ok plan) ↔
+        ((global_under = true ∧ cf_under = true ∧
+            plan = AutoFlushGate.SkipAllNotDue) ∨
+          (¬(global_under = true ∧ cf_under = true) ∧
+            plan = AutoFlushGate.ScanColumnFamilies)) := by
+  intro global_under cf_under plan
+  unfold auto_flush_gate skip_auto_flush
+  cases global_under <;> cases cf_under <;> simp_all <;> exact eq_comm

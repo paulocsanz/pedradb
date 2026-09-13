@@ -11017,8 +11017,9 @@ impl<E: Env> Db<E> {
                 .cf_write_buffer
                 .values()
                 .all(|&n| !crate::flush_kernel::auto_flush_due(mem, n != 0, n as u64));
-            if crate::flush_kernel::skip_auto_flush(global_under, cf_under) {
-                return Ok(());
+            match crate::flush_kernel::auto_flush_gate(global_under, cf_under) {
+                crate::flush_kernel::AutoFlushGate::SkipAllNotDue => return Ok(()),
+                crate::flush_kernel::AutoFlushGate::ScanColumnFamilies => {}
             }
             let n = self.physical_cfs.len();
             for i in 0..n {

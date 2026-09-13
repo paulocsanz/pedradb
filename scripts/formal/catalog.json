@@ -6705,6 +6705,36 @@
    }
   },
   {
+   "id": "auto_flush_gate",
+   "finding": "RFC-0219 P1.3",
+   "twin_kind": "atom",
+   "atom": "auto_flush_gate",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P1.3: se o scan de auto-flush roda é decisão do kernel — os dois eixos de mem sob seus limites pulam o scan inteiro (nada due); qualquer eixo acima scana cada CF (gate due por-CF aplica), provado ∀ sobre (global_under, cf_under) como auto_flush_gate_fate_iff em Flush.lean (o predicado skip_auto_flush segue vivo no corpo do gate); o trampolim db.rs maybe_auto_flush faz match no plano"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/flush_kernel.rs",
+   "twin": "crates/pedradb-core/src/flush_kernel.rs",
+   "aeneas": "scripts/aeneas_flush.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "auto_flush_gate",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "maybe_auto_flush"
+    }
+   ],
+   "as_is": "auto_flush_gate_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/flush_kernel.rs",
+    "test": "auto_flush_gate_on_live_both_under_skips_scan"
+   }
+  },
+  {
    "id": "flush_plan",
    "finding": "F2/F43",
    "twin_kind": "close",

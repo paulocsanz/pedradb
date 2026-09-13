@@ -302,6 +302,37 @@ pub fn parked_pair_plan_as_is(_parked_len: u64) -> ParkedPairPlan {
     ParkedPairPlan::HandOutOldestPair
 }
 
+/// RFC-0219 P1.3: whether `maybe_auto_flush` scans the column families
+/// at all. Both mem axes under their limits ⇒ nothing due anywhere —
+/// skip the scan; anything over ⇒ scan (the per-CF due gate applies).
+/// Calls [`skip_auto_flush`].
+#[cfg(not(verus_keep_ghost))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AutoFlushGate {
+    /// Both axes under — nothing due anywhere, skip the whole scan.
+    SkipAllNotDue,
+    /// At least one axis over — scan each CF for its own due gate.
+    ScanColumnFamilies,
+}
+
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn auto_flush_gate(global_under: bool, cf_under: bool) -> AutoFlushGate {
+    if skip_auto_flush(global_under, cf_under) {
+        AutoFlushGate::SkipAllNotDue
+    } else {
+        AutoFlushGate::ScanColumnFamilies
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: never skip the scan — SST writes fire even when both axes are
+/// under (pointless flush churn dente).
+#[must_use]
+pub fn auto_flush_gate_as_is(_global_under: bool, _cf_under: bool) -> AutoFlushGate {
+    AutoFlushGate::ScanColumnFamilies
+}
+
 #[cfg(verus_keep_ghost)]
 use vstd::prelude::*;
 
@@ -920,6 +951,40 @@ mod tests {
         assert!(
             !popa.contains("parked_unflushed.len() < 2"),
             "the raw queue-length gate left the trampoline"
+        );
+    }
+
+    #[test]
+    fn auto_flush_gate_on_live_both_under_skips_scan() {
+        // RFC-0219 P1.3: both axes under ⇒ skip the whole auto-flush
+        // scan; anything over ⇒ scan. AS-IS always scans (flush churn
+        // with nothing due).
+        assert_eq!(
+            auto_flush_gate(true, true),
+            AutoFlushGate::SkipAllNotDue
+        );
+        assert_eq!(
+            auto_flush_gate(true, false),
+            AutoFlushGate::ScanColumnFamilies
+        );
+        assert_eq!(
+            auto_flush_gate(false, true),
+            AutoFlushGate::ScanColumnFamilies
+        );
+        assert_eq!(
+            auto_flush_gate_as_is(true, true),
+            AutoFlushGate::ScanColumnFamilies,
+            "AS-IS dente: scan even when both axes are under"
+        );
+        let maf = named_fn_src(include_str!("db.rs"), "maybe_auto_flush")
+            .expect("maybe_auto_flush");
+        assert!(
+            maf.contains("match crate::flush_kernel::auto_flush_gate("),
+            "maybe_auto_flush must match auto_flush_gate"
+        );
+        assert!(
+            !maf.contains("skip_auto_flush(global_under, cf_under)"),
+            "the raw both-under gate left the trampoline"
         );
     }
 }

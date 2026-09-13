@@ -303,3 +303,4 @@ atom	catalog:fence_admission	fence_admission_plan_fate_iff	formal/aeneas/lean/Wr
 atom	catalog:fence_record	fence_record_plan_fate_iff	formal/aeneas/lean/WriteAdmission.lean	fence_record_plan
 atom	catalog:group_batch_sync	group_batch_sync_plan_fate_iff	formal/aeneas/lean/WriteAdmission.lean	group_batch_sync_plan
 atom	catalog:parked_pair	parked_pair_plan_fate_iff	formal/aeneas/lean/Flush.lean	parked_pair_plan
+atom	catalog:auto_flush_gate	auto_flush_gate_fate_iff	formal/aeneas/lean/Flush.lean	auto_flush_gate

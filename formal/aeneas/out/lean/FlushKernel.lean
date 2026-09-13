@@ -642,4 +642,128 @@ def parked_pair_plan_as_is
   (_parked_len : Std.U64) : Result ParkedPairPlan := do
   ok ParkedPairPlan.HandOutOldestPair
 
+/-- [pedra_aeneas_flush_kernel::AutoFlushGate]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 311:0-316:1
+    Visibility: public -/
+@[discriminant isize]
+inductive AutoFlushGate where
+| SkipAllNotDue : AutoFlushGate
+| ScanColumnFamilies : AutoFlushGate
+
+/-- [pedra_aeneas_flush_kernel::{impl core::fmt::Debug for pedra_aeneas_flush_kernel::AutoFlushGate}::fmt]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 310:9-310:14
+    Visibility: public -/
+def AutoFlushGate.Insts.CoreFmtDebug.fmt
+  (self : AutoFlushGate) (f : core.fmt.Formatter) :
+  Result ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter)
+  := do
+  match self with
+  | AutoFlushGate.SkipAllNotDue =>
+    core.fmt.Formatter.write_str f (toStr "SkipAllNotDue")
+  | AutoFlushGate.ScanColumnFamilies =>
+    core.fmt.Formatter.write_str f (toStr "ScanColumnFamilies")
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::fmt::Debug for pedra_aeneas_flush_kernel::AutoFlushGate}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 310:9-310:14 -/
+@[reducible]
+def AutoFlushGate.Insts.CoreFmtDebug : core.fmt.Debug AutoFlushGate := {
+  fmt := AutoFlushGate.Insts.CoreFmtDebug.fmt
+}
+
+/-- [pedra_aeneas_flush_kernel::{impl core::clone::Clone for pedra_aeneas_flush_kernel::AutoFlushGate}::clone]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 310:16-310:21
+    Visibility: public -/
+def AutoFlushGate.Insts.CoreCloneClone.clone
+  (self : AutoFlushGate) : Result AutoFlushGate := do
+  ok self
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::clone::Clone for pedra_aeneas_flush_kernel::AutoFlushGate}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 310:16-310:21 -/
+@[reducible]
+def AutoFlushGate.Insts.CoreCloneClone : core.clone.Clone AutoFlushGate := {
+  clone := AutoFlushGate.Insts.CoreCloneClone.clone
+}
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::marker::Copy for pedra_aeneas_flush_kernel::AutoFlushGate}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 310:23-310:27 -/
+@[reducible]
+def AutoFlushGate.Insts.CoreMarkerCopy : core.marker.Copy AutoFlushGate := {
+  cloneInst := AutoFlushGate.Insts.CoreCloneClone
+}
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_flush_kernel::AutoFlushGate}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 310:29-310:38 -/
+@[reducible]
+def AutoFlushGate.Insts.CoreMarkerStructuralPartialEq :
+  core.marker.StructuralPartialEq AutoFlushGate := {
+}
+
+/-- [pedra_aeneas_flush_kernel::{impl core::cmp::PartialEq<pedra_aeneas_flush_kernel::AutoFlushGate> for pedra_aeneas_flush_kernel::AutoFlushGate}::eq]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 310:29-310:38
+    Visibility: public -/
+def AutoFlushGate.Insts.CoreCmpPartialEqAutoFlushGate.eq
+  (self : AutoFlushGate) (other : AutoFlushGate) : Result Bool := do
+  let self1 := read_discriminant self
+  let other1 := read_discriminant other
+  ok (self1 = other1)
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::cmp::PartialEq<pedra_aeneas_flush_kernel::AutoFlushGate> for pedra_aeneas_flush_kernel::AutoFlushGate}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 310:29-310:38 -/
+@[reducible]
+def AutoFlushGate.Insts.CoreCmpPartialEqAutoFlushGate : core.cmp.PartialEq
+  AutoFlushGate AutoFlushGate := {
+  eq := AutoFlushGate.Insts.CoreCmpPartialEqAutoFlushGate.eq
+}
+
+/-- [pedra_aeneas_flush_kernel::{impl core::cmp::Eq for pedra_aeneas_flush_kernel::AutoFlushGate}::assert_fields_are_eq]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 310:40-310:42
+    Visibility: public -/
+def AutoFlushGate.Insts.CoreCmpEq.assert_fields_are_eq
+  (self : AutoFlushGate) : Result Unit := do
+  ok ()
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::cmp::Eq for pedra_aeneas_flush_kernel::AutoFlushGate}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 310:40-310:42 -/
+@[reducible]
+def AutoFlushGate.Insts.CoreCmpEq : core.cmp.Eq AutoFlushGate := {
+  partialEqInst := AutoFlushGate.Insts.CoreCmpPartialEqAutoFlushGate
+  assert_fields_are_eq := AutoFlushGate.Insts.CoreCmpEq.assert_fields_are_eq
+}
+
+/-- [pedra_aeneas_flush_kernel::{impl core::hash::Hash for pedra_aeneas_flush_kernel::AutoFlushGate}::hash]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 310:44-310:48
+    Visibility: public -/
+def AutoFlushGate.Insts.CoreHashHash.hash
+  {__H : Type} (corehashHasherInst : core.hash.Hasher __H)
+  (self : AutoFlushGate) (state : __H) :
+  Result __H
+  := do
+  let self1 := read_discriminant self
+  Isize.Insts.CoreHashHash.hash corehashHasherInst self1 state
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::hash::Hash for pedra_aeneas_flush_kernel::AutoFlushGate}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 310:44-310:48 -/
+@[reducible]
+def AutoFlushGate.Insts.CoreHashHash : core.hash.Hash AutoFlushGate := {
+  hash := fun {H : Type} (corehashHasherInst : core.hash.Hasher H) =>
+    AutoFlushGate.Insts.CoreHashHash.hash corehashHasherInst
+}
+
+/-- [pedra_aeneas_flush_kernel::auto_flush_gate]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 320:0-326:1
+    Visibility: public -/
+def auto_flush_gate
+  (global_under : Bool) (cf_under : Bool) : Result AutoFlushGate := do
+  let b ← skip_auto_flush global_under cf_under
+  if b
+  then ok AutoFlushGate.SkipAllNotDue
+  else ok AutoFlushGate.ScanColumnFamilies
+
+/-- [pedra_aeneas_flush_kernel::auto_flush_gate_as_is]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 332:0-334:1
+    Visibility: public -/
+def auto_flush_gate_as_is
+  (_global_under : Bool) (_cf_under : Bool) : Result AutoFlushGate := do
+  ok AutoFlushGate.ScanColumnFamilies
+
 end pedra_aeneas_flush_kernel

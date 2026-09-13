@@ -22,7 +22,7 @@
 # the live count of registered count rows.
 floor_extract 12
 floor_close 6
-floor_atom 276
+floor_atom 277
 floor_count 7
 cap_data_fate 0
 handler_loc 111927
