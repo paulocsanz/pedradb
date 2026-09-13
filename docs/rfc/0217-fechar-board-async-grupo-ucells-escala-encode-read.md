@@ -117,18 +117,41 @@ board**, estendendo este RFC a cada etapa nova descoberta.
   é 1 ciclo de latência por membro. Attach verdadeiro exige encode
   member-side + seq sem o write guard (estruturalmente P2.2) — **fatia
   fundida em P2.2**, reabre se o ratio quiet do P0.3 ficar <0,9 com voos
-  cheios. — status: `done`
-- [ ] **P0.3** Meter DIAG Darwin (driver host p211p/p211q): frontier
+  cheios. **Reabertura adjudicada 2026-09-13T09:51Z**: o ratio quiet
+  window ficou <0,9 em mc2–mc4 (min 0,100–0,960) MAS sem voos cheios —
+  a janela fixa espera ANTES do voo (sem early-exit, sem barreira
+  in-flight para sobrepor); dono = **P0.3b** (early-exit), não o attach.
+  — status: `done`
+- [x] **P0.3** Meter DIAG Darwin (driver host p211p/p211q): frontier
   mc2/3/4/6/8, braços window on/off, PHASE/wg; alvo `avg_grp` mc2–mc4
   ≥2,0 e ratio DIAG mc2/mc3 saindo de 0,25–0,39 → ≥0,9; guardas
-  deps_apply_batch/mc50. **Parcial 2026-09-13** (commit `234001f7`,
-  driver 3 rounds `p0217-host-driver.sh`): avg_grp window mc2
-  1,91–1,94 (teto físico 2,0; ≥96%), mc3 2,79–2,93, mc4 3,35–3,65,
-  mc50 10,26 → 24,38; lwait bypass mc8 21,7µs → 0,1µs; guardas
-  apply_batch window/clean 0,92–1,54× (≥1 exceto mc2 0,92);
-  **ratios inutilizáveis** — hostload 16–39 (node externos + caixote-api;
-  clean mc8 min 0,19 com round 7,35× = ruído puro). Alvo de ratio
-  aguarda caixa quieta (re-run pendente). — status: `doing`
+  deps_apply_batch/mc50. **Veredito 2026-09-13T09:51Z** (re-run quiete,
+  3 rounds, min-of-3, peer rocks default sync=false, coluna async
+  `PEDRA_PARITY_ASYNC=1`, binário `234001f7`): **mecanismo comprovado,
+  alvo de ratio FALHOU em baixa concorrência**. avg_grp window no eixo
+  todo: mc2 1,94–1,95 (teto 2,0), mc3 2,91–2,93, mc4 3,74–3,97, mc6
+  5,76–5,80, mc8 6,58–7,18, mc50 25,2; lwait bypass mc8 28,99→0,04µs.
+  Ratios min window vs clean: **mc2–mc4 a janela PERDE** (ycsb_f_mc2
+  0,331→0,100; ycsb_a_mc2 0,342→0,110; overwrite_mc2 0,347→0,136;
+  apply_mc2 1,130→0,960) e **mc6+ GANHA** (apply_mc8 0,451→0,610,
+  apply_mc6 0,474→0,661, ycsb_f_mc6 0,179→0,201, ycsb_a_mc8
+  0,192→0,304, mc50 1,292→1,448). Sinal monotono nos writers e
+  consistente em todos os rounds. Diagnóstico: janela fixa 1ms sem
+  early-exit é imposto de latência quando não há barreira in-flight
+  para sobrepor (mc2: cada commit espera a janela cheia — n cai à
+  metade, avg_grp dobra, qps despenca); onde a barreira já existe
+  (mc6+) o attach in-flight paga a janela. **Default NÃO flipa**
+  (opt-in mantido). Perda honesta convertida em fatia nomeada: **P0.3b
+  early-exit da janela** (fechar a coleta quando todos os writers
+  observados estão attachados, ou limitar a janela ao tempo de voo da
+  barreira in-flight), re-meter DIAG + e4b. — status: `done` (veredito
+  datado; follow-up = P0.3b)
+- [ ] **P0.3b** Early-exit da janela de coleta (aberto por P0.3): kernel
+  `group_window` ganha condição de fechamento antecipado (writers
+  observados == attached, ou janela ≤ voo da barreira in-flight), sem
+  wait-to-grow (veto 0180/0190); alvo: window ≥ clean em mc2–mc4 DIAG
+  (hoje 0,100–0,960 vs 0,331–1,130) mantendo mc6+ e mc50 ≥ clean;
+  depois e4b Linux. — status: `todo`
 - [ ] **P0.4** Meter Linux gate 3-run quiet min-of-3 (âncora p149):
   `ycsb_f_mc4` default 0,491 → **≥1,0** com janela on; guardas ≥ nível
   p211m (ycsb_a_mc4, overwrite_mc4, apply_mc4, mc50); cartazes pagos em
@@ -296,7 +319,8 @@ dono.
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | Kernel janela de coleta + wiring real + testes `rfc0217_group_window_*` | done | `010f61fe` + P0.1b `234001f7` | 2026-09-13 |
 | P0.2 | p0 | Attach in-flight: adjudicado — fundido em P2.2 (encode member-side; voos já cheios) | done | `234001f7` | 2026-09-13 |
-| P0.3 | p0 | Meter DIAG Darwin: avg_grp ok (mc2 1,93/mc3 2,9/mc4 3,5/mc50 24,4); ratio espera caixa quieta | doing | `234001f7` | 2026-09-13 |
+| P0.3 | p0 | Meter DIAG Darwin: avg_grp ok; ratio janela fixa PERDE mc2–4 (0,100–0,960 vs clean), GANHA mc6+; default fica off | done | veredito 09-13T09:51Z (perda→P0.3b) | 2026-09-13 |
+| P0.3b | p0 | Early-exit da janela (writers observados==attached ou janela ≤ voo da barreira) | todo | — | 2026-09-13 |
 | P0.4 | p0 | Meter Linux 3-run quiet: gate-blocked 04:42Z (p149 desconectado); binário+driver prontos | doing | — | 2026-09-13 |
 | P0.5 | p0 | Re-adjudicação do dono no Linux: mesmo block do P0.4 | doing | — | 2026-09-13 |
 | P1.1 | p1 | kafka_changelog_flush: flush amortizado | done | `ded231ab` (ratio ≥1,0 = meter Linux e4b) | 2026-09-13 |
