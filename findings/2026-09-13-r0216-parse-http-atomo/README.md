@@ -211,3 +211,18 @@ verde antes do commit, exatamente 1 teorema público por commit).
   `host_authority_mismatch_on_live_http_is_not_ok` (pedradb-http,
   exit 0, 1 passed). Gate GREEN: floor_atom 174→175, floor_extract
   104→103.
+
+## P2.1 — path ×8 átomo (6/8)
+
+- **origin_path/origin_form_path (6/8)**: o path de roteamento é a
+  cadeia completa citada — strip do fragmento, strip da autoridade
+  HTTP com fallback `//` (strip_prefix → path_after_authority do
+  rest, senão a target1 nua), e o corte no `?`. Composição em 3
+  níveis de ∃/∨ (3 folhas de autoridade × 2 do `?` = 6 no reverso).
+  O literal `toStr "//" request_target_authority._proof_1` é
+  citável direto (o proof é compartilhado entre entradas pelo
+  extrator). No forward, `cases o` elimina o `o` — o ∃ fecha com
+  os literais `some p'`/`none`. Planta DST
+  `origin_form_path_on_live_http_is_not_ok` (pedradb-http, exit 0,
+  1 passed). Gate GREEN: floor_atom 175→176, floor_extract
+  103→102.

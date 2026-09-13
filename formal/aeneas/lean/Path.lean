@@ -224,3 +224,118 @@ theorem host_authority_mismatch_fate_iff :
       rw [hb, hb1]
       simp only [Aeneas.Std.bind_tc_ok]
       simp
+
+/-- RFC-0216 P2.1 6/8 (átomo `catalog:origin_path`, entrada
+  `origin_form_path`): o path de roteamento é exatamente a cadeia
+  citada — strip do fragmento, strip da autoridade HTTP (com fallback
+  `//` do rest), e o corte no `?`. -/
+theorem origin_form_path_fate_iff :
+    ∀ (t : Str) (r : Str),
+      (origin_form_path t = ok r) ↔
+        (∃ (target1 : Str) (o : Option Str) (p : Str),
+            strip_uri_fragment t = ok target1 ∧
+              strip_http_authority target1 = ok o ∧
+                ((∃ (p' : Str), o = some p' ∧ p = p') ∨
+                  (o = none ∧
+                    ((∃ (rest : Str),
+                        core.str.Str.strip_prefix target1
+                            (toStr "//" request_target_authority._proof_1) =
+                          ok (some rest) ∧
+                          path_after_authority rest = ok p) ∨
+                      (core.str.Str.strip_prefix target1
+                          (toStr "//" request_target_authority._proof_1) =
+                          ok none ∧
+                        p = target1)))) ∧
+                  ((core.str.Str.split_once p '?' = ok none ∧ r = p) ∨
+                    (∃ (a : Str) (snd : Str),
+                        core.str.Str.split_once p '?' = ok (some (a, snd)) ∧
+                          r = a))) := by
+  intro t r
+  constructor
+  · intro hval
+    unfold origin_form_path at hval
+    obtain ⟨target1, ht1, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨o, ho, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨p, hpO, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨o2, ho2, hval⟩ := bind_ok_inv _ _ _ hval
+    cases o2 with
+    | none =>
+      have hrp : r = p := (Result.ok.inj hval).symm
+      cases o with
+      | some p' =>
+        simp only at hpO
+        have hpp : p = p' := (Result.ok.inj hpO).symm
+        refine ⟨target1, some p', p, ht1, ho, ?_, ?_⟩
+        · left; exact ⟨p', rfl, hpp⟩
+        · left; exact ⟨ho2, hrp⟩
+      | none =>
+        obtain ⟨o1, ho1, hpO⟩ := bind_ok_inv _ _ _ hpO
+        cases o1 with
+        | some rest =>
+          simp only at hpO
+          refine ⟨target1, none, p, ht1, ho, ?_, ?_⟩
+          · right; refine ⟨rfl, ?_⟩; left; exact ⟨rest, ho1, hpO⟩
+          · left; exact ⟨ho2, hrp⟩
+        | none =>
+          simp only at hpO
+          have hpt : p = target1 := (Result.ok.inj hpO).symm
+          refine ⟨target1, none, p, ht1, ho, ?_, ?_⟩
+          · right; refine ⟨rfl, ?_⟩; right; exact ⟨ho1, hpt⟩
+          · left; exact ⟨ho2, hrp⟩
+    | some pair =>
+      obtain ⟨a, snd⟩ := pair
+      have hra : r = a := (Result.ok.inj hval).symm
+      cases o with
+      | some p' =>
+        simp only at hpO
+        have hpp : p = p' := (Result.ok.inj hpO).symm
+        refine ⟨target1, some p', p, ht1, ho, ?_, ?_⟩
+        · left; exact ⟨p', rfl, hpp⟩
+        · right; exact ⟨a, snd, ho2, hra⟩
+      | none =>
+        obtain ⟨o1, ho1, hpO⟩ := bind_ok_inv _ _ _ hpO
+        cases o1 with
+        | some rest =>
+          simp only at hpO
+          refine ⟨target1, none, p, ht1, ho, ?_, ?_⟩
+          · right; refine ⟨rfl, ?_⟩; left; exact ⟨rest, ho1, hpO⟩
+          · right; exact ⟨a, snd, ho2, hra⟩
+        | none =>
+          simp only at hpO
+          have hpt : p = target1 := (Result.ok.inj hpO).symm
+          refine ⟨target1, none, p, ht1, ho, ?_, ?_⟩
+          · right; refine ⟨rfl, ?_⟩; right; exact ⟨ho1, hpt⟩
+          · right; exact ⟨a, snd, ho2, hra⟩
+  · rintro ⟨target1, o, p, ht1, ho,
+      (⟨p', rfl, rfl⟩ | ⟨rfl, (⟨rest, hsp, hpA⟩ | ⟨hsp, rfl⟩)⟩),
+      (⟨ho2, rfl⟩ | ⟨a, snd, ho2, rfl⟩)⟩
+    · unfold origin_form_path
+      rw [ht1]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [ho]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [ho2]; simp only [Aeneas.Std.bind_tc_ok]
+    · unfold origin_form_path
+      rw [ht1]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [ho]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [ho2]; simp only [Aeneas.Std.bind_tc_ok]
+    · unfold origin_form_path
+      rw [ht1]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [ho]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hsp]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hpA]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [ho2]; simp only [Aeneas.Std.bind_tc_ok]
+    · unfold origin_form_path
+      rw [ht1]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [ho]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hsp]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hpA]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [ho2]; simp only [Aeneas.Std.bind_tc_ok]
+    · unfold origin_form_path
+      rw [ht1]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [ho]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hsp]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [ho2]; simp only [Aeneas.Std.bind_tc_ok]
+    · unfold origin_form_path
+      rw [ht1]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [ho]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [hsp]; simp only [Aeneas.Std.bind_tc_ok]
+      rw [ho2]; simp only [Aeneas.Std.bind_tc_ok]
