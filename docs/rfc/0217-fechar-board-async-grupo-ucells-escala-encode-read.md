@@ -179,9 +179,20 @@ board**, estendendo este RFC a cada etapa nova descoberta.
   **7,21ms** (5,93 pré-budget), p99 290ms → **72ms** com o budget de
   unlinks, stores 15/1000 (1/64, geração de MANIFEST); rocks twin
   0,386ms. — status: `done`
-- [ ] **P1.2** ingest_sst 0,069 + compaction_filter_drop 0,081: sair da
+- [x] **P1.2** ingest_sst 0,069 + compaction_filter_drop 0,081: sair da
   emulação — ingest = escrita SST direta + install; filter = hook real no
-  compactor. — status: `todo`
+  compactor. — status: `done` `92a76a97` — `Db::ingest_sst_file` (seq
+  globais frescas, rewrite+install L0, MANIFEST durável antes do Ok,
+  flush-first parity `allow_write_flush`) + `CompactFilterDecision`/
+  `FilterMergeSource` no merge (Remove = 1 tombstone no topo da run —
+  sem ressurreição no replay; invalidação wholesale dos caches de leitura
+  — regressão de cache-stale pega no A/B); compat nativo
+  (`compact`/`compact_with_filter`/ingest default-CF),
+  `apply_compaction_filter` removido. Suite `rfc0217_native_ingest_filter`
+  8/8; core `--tests` 937/23/4 = baseline (0 novas); compat 94/3 (3
+  pré-existentes em HEAD `52afb58c`). DIAG Darwin n=300 (não-claim):
+  filter 434→835 qps (0,47→0,935 do twin rocks 893; p99 21,3→7,8ms);
+  ingest p50 0,83→0,60ms. Cartaz Linux 3-run = meter e4b (p149).
 - [ ] **P1.3** wbwi 0,494 + myrocks_write_tx 0,751: batch indexado nativo
   + tx single-writer real (`begin_occ`/commit já existem) no lugar do
   WriteBatch emulado. — status: `todo`
@@ -227,7 +238,7 @@ dono.
 | P0.4 | p0 | Meter Linux 3-run quiet: gate-blocked 04:42Z (p149 desconectado); binário+driver prontos | doing | — | 2026-09-13 |
 | P0.5 | p0 | Re-adjudicação do dono no Linux: mesmo block do P0.4 | doing | — | 2026-09-13 |
 | P1.1 | p1 | kafka_changelog_flush: flush amortizado | done | `ded231ab` (ratio ≥1,0 = meter Linux e4b) | 2026-09-13 |
-| P1.2 | p1 | ingest_sst + compaction_filter: caminhos nativos | todo | — | 2026-09-13 |
+| P1.2 | p1 | ingest_sst + compaction_filter: caminhos nativos | done | `92a76a97` (cartaz Linux = e4b; DIAG filter 0,47→0,935) | 2026-09-13 |
 | P1.3 | p1 | wbwi + write_tx: batch indexado + tx nativos | todo | — | 2026-09-13 |
 | P1.4 | p1 | linkbench_mix: decompor + atacar dono | todo | — | 2026-09-13 |
 | P2.1 | p2 | Escala pesada 4GiB: meter + fechar (0,70/0,557) | todo | — | 2026-09-13 |
