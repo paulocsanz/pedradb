@@ -285,6 +285,12 @@ pub trait Engine {
     fn write_phase_snapshot(&self) -> Option<[u64; 7]> {
         None
     }
+    /// Collect/lone-path decomposition (RFC-0217 P0.3b):
+    /// `[catchup_ns, catchup_groups, lone_n, lone_start_ns, lone_apply_ns,
+    /// lone_io_ns, lone_publish_ns]`, or `None`.
+    fn commit_wait_snapshot(&self) -> Option<[u64; 7]> {
+        None
+    }
     /// Fold memtable tail (no SST). Returns tail length before fold.
     fn fold_mem_tail(&self) -> usize {
         0
@@ -2378,6 +2384,7 @@ impl YcsbRunner {
             // across the process, and one invocation runs several shapes).
             let wg0 = e.write_group_stats();
             let phase0 = e.write_phase_snapshot();
+            let cw0 = e.commit_wait_snapshot();
             let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
             let t0 = Instant::now();
             let mut lats = Vec::with_capacity(cfg_ops * clients);
@@ -2453,8 +2460,27 @@ impl YcsbRunner {
             if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
                 let n = b[0].saturating_sub(a[0]).max(1);
                 let us = |d: u64| d as f64 / n as f64 / 1000.0;
+                let cw = e
+                    .commit_wait_snapshot()
+                    .map(|s| {
+                        let (a0, b0) = (cw0.unwrap_or([0; 7]), s);
+                        let cwn = b0[0].saturating_sub(a0[0]);
+                        let cwg = b0[1].saturating_sub(a0[1]).max(1);
+                        let ln = b0[2].saturating_sub(a0[2]).max(1);
+                        let lus = |d: u64| d as f64 / ln as f64 / 1000.0;
+                        format!(
+                            " cw={:.2}µs/grp lone[n={} start={:.2}µs apply={:.2}µs io={:.2}µs pub={:.2}µs]",
+                            cwn as f64 / cwg as f64 / 1000.0,
+                            b0[2].saturating_sub(a0[2]),
+                            lus(b0[3].saturating_sub(a0[3])),
+                            lus(b0[4].saturating_sub(a0[4])),
+                            lus(b0[5].saturating_sub(a0[5])),
+                            lus(b0[6].saturating_sub(a0[6])),
+                        )
+                    })
+                    .unwrap_or_default();
                 eprintln!(
-                "[rocks-parity] {name} mc{clients} phasesΔ (per commit) prepare={:.2}µs wal={:.2}µs mem={:.2}µs publish={:.2}µs flsh={:.2}µs lock_wait={:.2}µs n={n}",
+                "[rocks-parity] {name} mc{clients} phasesΔ (per commit) prepare={:.2}µs wal={:.2}µs mem={:.2}µs publish={:.2}µs flsh={:.2}µs lock_wait={:.2}µs n={n}{cw}",
                 us(b[1].saturating_sub(a[1])),
                 us(b[2].saturating_sub(a[2])),
                 us(b[3].saturating_sub(a[3])),

@@ -247,6 +247,11 @@ impl<E: Env> Engine for CompatEngine<E> {
             st.lock_wait_ns.load(r),
         ])
     }
+    fn commit_wait_snapshot(&self) -> Option<[u64; 7]> {
+        let (cw_ns, cw_groups) = self.db.catchup_wait_stats();
+        let (lone_n, p) = self.db.lone_path_split();
+        Some([cw_ns, cw_groups, lone_n, p[0], p[1], p[2], p[3]])
+    }
     fn write_phase_line(&self) -> Option<String> {
         let st = self.db.write_phase_stats()?;
         let n = st.commits.load(std::sync::atomic::Ordering::Relaxed).max(1);

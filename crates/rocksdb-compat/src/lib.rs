@@ -3288,6 +3288,20 @@ impl<E: PedraEnv> DB<E> {
         self.inner.write_group_stats()
     }
 
+    /// Catch-up/collect wait diagnostics (RFC-0217 P0.3b): total ns leaders
+    /// held groups open + group count.
+    #[must_use]
+    pub fn catchup_wait_stats(&self) -> (u64, u64) {
+        self.inner.catchup_wait_stats()
+    }
+
+    /// Lone/bypass path phase split (ns): `(commits, [start, apply, io,
+    /// publish])` (RFC-0042 P0.2 terms, RFC-0217 P0.3b surface).
+    #[must_use]
+    pub fn lone_path_split(&self) -> (u64, [u64; 4]) {
+        self.inner.lone_path_split()
+    }
+
     /// Whether the verified group policy is pinned (RFC-0058:
     /// [`DB::open_verified`] lone-commit-only).
     #[must_use]
