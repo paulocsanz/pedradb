@@ -223,7 +223,24 @@ board**, estendendo este RFC a cada etapa nova descoberta.
 - [ ] **P2.2** Encode de memtable off-path: encode no membro antes do
   grupo ou batch-encode no apply (alvo: `mem=` saindo de 3,13–14,2µs do
   caminho do líder; recuperar o −0,180 do déficit kvrocks_set_mc50). —
-  status: `todo`
+  status: `doing` (batch-encode no apply landed `9b5ca0f5`; DIAG de fase
+  = fila p22-diag). Landed: `insert_many` (o apply do grupo) agora usa
+  memo batch-local de prefixo — slot `&mut` do shard `tail_idx` mantido
+  através do loop (mata 1 `Bytes::copy_from_slice` + 1 walk por op),
+  acumulador de delta por CF com 1 flush (mata 1 walk por op em
+  `cf_bytes`), slot do `cf_span` (mata 1 walk + re-check por op);
+  `shard_insert` extraído e compartilhado com `tail_append` (paths 1-op
+  inalterados — controle: lone `kvrocks_set` não deve mover). Equivalência
+  provada por teste novo (troca de prefixo point/short/long/one-slash,
+  replace same-seq <16, tombstone, range-del, re-insert em shard
+  existente, cf_bytes/cf_span comparados); o teste pegou 1 divergência
+  real no span durante o desenvolvimento (entrada recém-criada
+  re-checada) e ela foi corrigida. A/B: core `--lib` 937/23 = baseline
+  idêntico (1 flaky `rfc0167_l0_stall` falhou só no baseline); bench
+  `compat_vs_rocks` 6/6; lib bench 28/2 = falhas pré-existentes idem no
+  worktree baseline. Faltam: DIAG `mem=` A/B (base vs patch, intercalado,
+  gate quiet) e o cartaz Linux (e4b). Encode member-side (pré-grupo no
+  cliente) fica como follow-up se o DIAG mostrar `mem=` ainda ≥1µs/op.
 - [ ] **P2.3** Read-side −18%: decompor cursor do scan (`deps_scan`
   single 0,831 DIAG p201o → ≥1,0 no cartaz Linux). — status: `todo`
 - [ ] **P2.4** Escada de admissão (produto): probe com histerese/cache
@@ -258,7 +275,7 @@ dono.
 | P1.3 | p1 | wbwi + write_tx: batch indexado + tx nativos | doing | `5c1f5b43` (wbwi flat overlay landed; micro ratio + veredito tx = e4b) | 2026-09-13 |
 | P1.4 | p1 | linkbench_mix: decompor + atacar dono | doing | `2f083efb` (point_ord_btree incremental; DIAG p50 −52%; cartaz = e4b) | 2026-09-13 |
 | P2.1 | p2 | Escala pesada 4GiB: meter + fechar (0,70/0,557) | todo | — | 2026-09-13 |
-| P2.2 | p2 | Encode memtable off-path | todo | — | 2026-09-13 |
+| P2.2 | p2 | Encode memtable off-path | doing | `9b5ca0f5` (memo batch-local no apply; DIAG fase + cartaz = e4b) | 2026-09-13 |
 | P2.3 | p2 | Read-side: cursor de scan | todo | — | 2026-09-13 |
 | P2.4 | p2 | Escada de admissão: histerese (produto) | todo | — | 2026-09-13 |
 | P2.5 | p2 | Cobertura: delete-heavy, mc9–49, 1GiB, p99 | todo | — | 2026-09-13 |
