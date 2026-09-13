@@ -150,7 +150,7 @@ novo por construção (`single_op`).
       mantido, zero mudança de default**; finding
       `findings/2026-09-11-rfc0211-p0-meter/`; revisável apenas por
       meter futuro min-of-3 ≥1,0 sem regressão de guarda)
-- [ ] **P1.2** Decomposição do residual do braço vencedor
+- [x] **P1.2** Decomposição do residual do braço vencedor
       (`write_phase_stats`: lock_wait vs wal vs publish por commit) —
       nomeia o dono da próxima fatia (ou fecha com número) — status:
       `todo`
@@ -176,7 +176,7 @@ novo por construção (`single_op`).
 | P0.2 | p0 | wiring PEDRA_RMW_SCHED opt-in no submit_after_begin | done (teste de eixo env no caminho real; 0201 10/10; musl 0) | este commit | 2026-09-11 |
 | P0.3 | p0 | meter 4 braços × células + guardiãs, veredito datado | done (p211m 2026-09-12: alvo 0,491→0,836 min +70%, guardiãs todas ≥ clean; 0,836<1,0 = perda honesta, opt-in mantido) | findings/2026-09-11-rfc0211-p0-meter | 2026-09-12 |
 | P1.1 | p1 | flip default pós-meter | done (2026-09-12: regra aplicada — min 0,836 <1,0 ⇒ opt-in mantido, zero default mudado) | findings/2026-09-11-rfc0211-p0-meter | 2026-09-12 |
-| P1.2 | p1 | decomposição do residual (telemetria) | todo | — | 2026-09-11 |
+| P1.2 | p1 | decomposição do residual (telemetria) | done (2026-09-13: dono do 0,836 NÃO é o escalonador — provado nos 2 extremos; dono restante = I/O serial per-commit (fdatasync da coluna paridade), confirmação Linux admission-clean gate-blocked registrada) | findings/2026-09-12-rfc0211-p12-residual | 2026-09-13 |
 | P2.1 | p2 | sweep eixo writers | todo | — | 2026-09-11 |
 | P2.2 | p2 | Grid B quando default mudar | blocked (condicional-datado 2026-09-12: P1.1 opt-in mantido, zero default mudado; abre só por meter futuro que flip default) | P1.1 acima | 2026-09-12 |
 
