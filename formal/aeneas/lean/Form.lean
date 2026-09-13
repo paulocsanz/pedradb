@@ -549,3 +549,22 @@ theorem form_decode_fate_iff :
   rw [hloop]
   exact form_decode_loop_fate b (b.val).length _ 0#usize (Nat.zero_le _)
     (Nat.sub_le _ _) v
+
+
+/-! ### RFC-0216 P1.2 — query ×3 átomo -/
+
+/-- RFC-0216 P1.2 1/3 (átomo `catalog:query_u64_conflict`): o conflito
+u64 é exatamente a desigualdade decidida dos dois lados; o AS-IS
+sempre responde "sem conflito". -/
+theorem query_u64_conflict_fate_iff :
+    ∀ (a b : U64) (r : Bool),
+      (query_u64_conflict a b = ok r) ↔ r = (a != b) := by
+  intro a b r
+  constructor
+  · intro hval
+    unfold query_u64_conflict at hval
+    exact (Result.ok.inj hval).symm
+  · intro hr
+    unfold query_u64_conflict
+    rw [hr]
+

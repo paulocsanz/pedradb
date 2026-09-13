@@ -104,3 +104,12 @@ verde antes do commit, exatamente 1 teorema público por commit).
   Planta DST `form_decode_on_live_http_is_not_ok` (pedradb-http,
   exit 0, 1 passed). Gate GREEN: floor_atom 166→167,
   floor_extract 112→111.
+
+## P1.2 — form ×3 átomo (1/3)
+
+- **query_u64_conflict (1/3)**: o conflito u64 é exatamente a
+  desigualdade decidida dos dois lados (`r = (a != b)`); o mutante
+  AS-IS sempre responde "sem conflito". Prova direta por
+  `Result.ok.inj` nas duas direções — sem loop. Planta DST
+  `f155_query_conflict` (pedradb-http, exit 0, 1 passed). Gate
+  GREEN: floor_atom 167→168, floor_extract 111→110.

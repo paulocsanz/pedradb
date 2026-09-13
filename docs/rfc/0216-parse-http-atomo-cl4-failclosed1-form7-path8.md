@@ -90,7 +90,7 @@ no wrapper, planta DST verde ANTES do commit, gate GREEN no commit).
 4. **P1.2** form ×3 (`Form.lean`): `query_values_conflict`,
    `query_u64_conflict`, `query_part_is_bare_name` — os conflitos de
    query que rejeitam — floor_atom 167→170, floor_extract 111→108 —
-   status: `todo`
+   status: `todo` (1/3: `query_u64_conflict` feito 2026-09-13)
 
 5. **P2.1** path ×8 (`Path.lean`): `origin_form_path`,
    `path_after_authority`, `strip_http_authority`,
@@ -136,7 +136,7 @@ no wrapper, planta DST verde ANTES do commit, gate GREEN no commit).
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | cl ×4 átomo (Content-Length) | done | `keep_body_without_cl_fate_iff`/`invalid_cl_as_zero_fate_iff`/`content_length_repeat_ok_fate_iff`/`short_body_vs_cl_is_error_fate_iff` | 2026-09-13 |
 | P0.2 | p0 | fail_closed ×1 átomo (veredito de erro) | done | `parse_error_writes_status_fate_iff` | 2026-09-13 |
-| P1.1 | p1 | form ×4 átomo (decode/hex) | todo | — | 2026-09-12 |
+| P1.1 | p1 | form ×4 átomo (decode/hex) | done | `form_plus_byte_fate_iff`/`plus_before_percent_fate_iff`/`from_hex_fate_iff`/`form_decode_fate_iff` | 2026-09-13 |
 | P1.2 | p1 | form ×3 átomo (conflitos de query) | todo | — | 2026-09-12 |
 | P2.1 | p2 | path ×8 átomo (autoridade/rota; http 27/27) | todo | — | 2026-09-12 |
 | P2.2 | p2 | Sweep final + nota EXTRACT.md + flip done | todo | — | 2026-09-12 |
