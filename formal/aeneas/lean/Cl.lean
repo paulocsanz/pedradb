@@ -24,3 +24,14 @@ theorem keep_body_without_cl_fate_iff :
   · intro hr
     unfold keep_body_without_cl
     rw [hr]
+
+theorem invalid_cl_as_zero_fate_iff :
+    ∀ (r : Bool), (invalid_cl_as_zero = ok r) ↔ r = false := by
+  intro r
+  constructor
+  · intro hval
+    unfold invalid_cl_as_zero at hval
+    exact (Result.ok.inj hval).symm
+  · intro hr
+    unfold invalid_cl_as_zero
+    rw [hr]

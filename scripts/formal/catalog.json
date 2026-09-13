@@ -2002,6 +2002,10 @@
    "dst_plant": {
     "file": "crates/pedradb-http/src/lib.rs",
     "test": "invalid_cl_as_zero_on_live_http_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "CL invalido (zero) decide exatamente na constante honesta extraida — kernel devolve false (nao e zero); AS-IS aceita zero e a planta prova o dente no HTTP vivo."
    }
   },
   {

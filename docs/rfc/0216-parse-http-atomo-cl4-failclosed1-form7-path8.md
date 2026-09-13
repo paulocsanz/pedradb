@@ -72,7 +72,8 @@ no wrapper, planta DST verde ANTES do commit, gate GREEN no commit).
    `invalid_cl_as_zero`, `content_length_repeat_ok`,
    `short_body_vs_cl_is_error` — iff-∀ sobre os corpos extraídos dos
    gates de Content-Length — floor_atom 158→162, floor_extract
-   120→116 — status: `todo` (1/4: `content_length` feito 2026-09-13)
+   120→116 — status: `todo` (2/4: `content_length`, `invalid_cl_zero`
+   feitos 2026-09-13)
 
 2. **P0.2** fail_closed ×1 (`FailClosed.lean`):
    `parse_error_writes_status` — a perna de erro do parse em átomo;
