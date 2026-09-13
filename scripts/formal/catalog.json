@@ -5547,6 +5547,10 @@
   },
   {
    "id": "run_disjoint",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "disjuncao de run e exatamente o par citado — n = min dos comprimentos, n >= 2 e o all citado sobre 1..n (hi[i-1] < lo[i]); as-is usa <= (empate arma o bisect que ressuscita)"
+   },
    "finding": "RFC-0164 P1.2",
    "twin_kind": "model",
    "single_artifact": true,

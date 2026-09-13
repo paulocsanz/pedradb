@@ -88,3 +88,48 @@ theorem probe_order_covering_fate_iff :
   unfold probe_order_covering
   exact Iff.rfl
 
+/-- RFC-0218 P2.2 (átomo `catalog:run_disjoint`, entrada
+    `run_pairwise_disjoint_los`): disjunção de run é EXATAMENTE o par
+    citado — n = min dos comprimentos, n >= 2 e o all citado sobre
+    1..n (fechado hi[i-1] < lo[i]). O AS-IS usa <= (o empate arma o
+    bisect que ressuscita — dente plantado). -/
+theorem run_disjoint_fate_iff :
+    ∀ (los his : Slice (Slice U8)) (v : Bool),
+      (run_pairwise_disjoint_los los his = ok v) ↔
+        (∃ n : Usize,
+           core.cmp.Ord.min.trait_default core.cmp.OrdUsize
+             (Slice.len los) (Slice.len his) = ok n ∧
+          ((n >= 2#usize ∧
+            ∃ p : Bool × core.ops.range.Range Usize,
+              core.iter.traits.iterator.Iterator.all.default
+                (core.iter.traits.iterator.IteratorRange core.iter.range.StepUsize)
+                run_pairwise_disjoint_los.closure.Insts.CoreOpsFunctionFnMutTupleUsizeBool
+                { start := 1#usize, «end» := n } (his, los) = ok p ∧
+              v = p.1)
+           ∨ (¬ (n >= 2#usize) ∧ v = false))) := by
+  intro los his v
+  constructor
+  · intro hval
+    unfold run_pairwise_disjoint_los at hval
+    obtain ⟨n, hn, hval⟩ := bind_ok_inv _ _ _ hval
+    refine ⟨n, hn, ?_⟩
+    split at hval
+    · next hc =>
+      obtain ⟨p, hp, hval⟩ := bind_ok_inv _ _ _ hval
+      obtain ⟨b, c⟩ := p
+      injection hval with hv
+      exact Or.inl ⟨hc, (b, c), hp, hv.symm⟩
+    · next hc =>
+      injection hval with hv
+      exact Or.inr ⟨hc, hv.symm⟩
+  · rintro ⟨n, hn, (⟨hc, p, hp, hv⟩ | ⟨hc, hv⟩)⟩
+    · unfold run_pairwise_disjoint_los
+      refine bind_intro n hn ?_
+      rw [if_pos hc]
+      refine bind_intro p hp ?_
+      rw [hv]
+      rfl
+    · unfold run_pairwise_disjoint_los
+      refine bind_intro n hn ?_
+      rw [if_neg hc]
+      rw [hv]
