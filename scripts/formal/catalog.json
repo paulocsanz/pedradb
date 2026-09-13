@@ -1646,6 +1646,10 @@
    "dst_plant": {
     "file": "crates/pedradb-store/src/three_teeth_queued.rs",
     "test": "may_compact_through_on_live_queued_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 1/10 P1.1: may_compact_through como árvore citada de 3 gates — recusa through zero / coberto pelo snapshot / term zero, autoriza só com os três abertos; as-is nem olha o term (dente plantado)"
    }
   },
   {

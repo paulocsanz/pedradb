@@ -224,3 +224,16 @@ gates GREEN no commit).
   if_pos/if_neg). Build verde. Planta DST
   `sst_crc_fate_on_live_sst_is_not_ok` (pedradb-core, exit 0 no
   worktree). Gate: floor_atom 195→196, floor_extract 83→82.
+
+
+## P1.1 — compact ×7 + lsm_r1 ×3 átomo
+
+- **compact / may_compact_through (1/10)**: permissão de compactar
+  como árvore citada de 3 gates — recusa through zero, recusa coberto
+  pelo snapshot, recusa term zero; autoriza só com os três abertos
+  (4 disjunctos flat) — `may_compact_through_fate_iff` em
+  `StoreCompact.lean`. Forward: triplo split + injection; reverso:
+  rw if_pos/if_neg encadeado. Build verde. Planta DST
+  `may_compact_through_on_live_queued_is_not_ok` (pedradb-store,
+  exit 0 no worktree). Gate: floor_atom 201→202, floor_extract
+  77→76.

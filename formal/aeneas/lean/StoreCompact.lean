@@ -153,3 +153,55 @@ theorem compact_through_unleft_fate_iff :
         scalar_tac
     · simp [hpos]
       scalar_tac
+
+/-- RFC-0218 P1.1 1/10 (átomo `catalog:compact`, entrada
+    `may_compact_through`): a permissão de compactar através de um
+    índice é EXATAMENTE a árvore citada — recusa through zero, recusa
+    coberto pelo snapshot, recusa term zero; autoriza só com os três
+    gates abertos. O AS-IS nem olha o term (compacta através de líder
+    de term zero — dente plantado). -/
+theorem may_compact_through_fate_iff :
+    ∀ (snapshot_index : U64) (through : U64) (term_at_through : U64)
+      (v : Bool),
+      (may_compact_through snapshot_index through term_at_through = ok v) ↔
+        ((through = 0#u64 ∧ v = false)
+          ∨ (¬(through = 0#u64) ∧ through <= snapshot_index ∧ v = false)
+          ∨ (¬(through = 0#u64) ∧ ¬(through <= snapshot_index)
+              ∧ term_at_through = 0#u64 ∧ v = false)
+          ∨ (¬(through = 0#u64) ∧ ¬(through <= snapshot_index)
+              ∧ ¬(term_at_through = 0#u64) ∧ v = true)) := by
+  intro snapshot_index through term_at_through v
+  constructor
+  · intro hval
+    unfold may_compact_through at hval
+    split at hval
+    · next h1 =>
+      injection hval with hv
+      exact Or.inl ⟨h1, hv.symm⟩
+    · next h1 =>
+      split at hval
+      · next h2 =>
+        injection hval with hv
+        exact Or.inr (Or.inl ⟨h1, h2, hv.symm⟩)
+      · next h2 =>
+        split at hval
+        · next h3 =>
+          injection hval with hv
+          exact Or.inr (Or.inr (Or.inl ⟨h1, h2, h3, hv.symm⟩))
+        · next h3 =>
+          injection hval with hv
+          exact Or.inr (Or.inr (Or.inr ⟨h1, h2, h3, hv.symm⟩))
+  · rintro (⟨h1, hv⟩ | ⟨h1, h2, hv⟩ | ⟨h1, h2, h3, hv⟩ |
+      ⟨h1, h2, h3, hv⟩)
+    · subst hv
+      unfold may_compact_through
+      rw [if_pos h1]
+    · subst hv
+      unfold may_compact_through
+      rw [if_neg h1, if_pos h2]
+    · subst hv
+      unfold may_compact_through
+      rw [if_neg h1, if_neg h2, if_pos h3]
+    · subst hv
+      unfold may_compact_through
+      rw [if_neg h1, if_neg h2, if_neg h3]
