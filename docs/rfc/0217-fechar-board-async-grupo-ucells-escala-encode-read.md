@@ -197,7 +197,23 @@ board**, estendendo este RFC a cada etapa nova descoberta.
   + tx single-writer real (`begin_occ`/commit já existem) no lugar do
   WriteBatch emulado. — status: `todo`
 - [ ] **P1.4** linkbench_mix 0,236: decompor primeiro (mix scan+delete;
-  telemetria read_probe/scan), atacar o dono nomeado. — status: `todo`
+  telemetria read_probe/scan), atacar o dono nomeado. — status: `doing`
+  (ataque landed `2f083efb`; veredito ratio = e4b).
+  Decomposição (DIAG Darwin n=3000, sample macOS + probe): write-side =
+  `fcntl(F_FULLFSYNC)` 92,9% do wall (Darwin-only: std `sync_data` em
+  apple = F_FULLFSYNC 4,18ms/op vs `fsync()` 0,053ms que o rocks usa —
+  80× estrutural, não existe no Linux; fsync_test.c no scratch). Reads
+  do mix pagavam re-sort do `point_ord`: com myrocks/deps o engine abre
+  multi-CF → keys `default\0…` caem no shard point (HashMap) e cada um
+  dos ~750 write→scan rebuildava collect+sort de ~104k entradas
+  (~120µs). Ataque: `point_ord_btree` incremental (build 1x no primeiro
+  range count, insert O(log n) por put quando a view existe, skip de 1
+  atomic quando não — shapes sem scan pagam zero; vale também para o
+  point-path do `last_visible_under_prefix`). DIAG pós: p50 17,7→8,5µs,
+  scan 1,1µs/op, `ord_builds=0` na janela do mix (o build único foi pago
+  no `read_only` anterior). A/B: core --tests 937/23/4 = baseline;
+  compat 95/4 (os 4 r0218 pré-existentes). Sobra Linux (e4b): serial
+  write 4,5µs/commit + read 1,1µs/op vs rocks p50 6,4µs/read.
 
 ### P2 — Escala pesada, encode, read-side, produto, cobertura
 
@@ -239,8 +255,8 @@ dono.
 | P0.5 | p0 | Re-adjudicação do dono no Linux: mesmo block do P0.4 | doing | — | 2026-09-13 |
 | P1.1 | p1 | kafka_changelog_flush: flush amortizado | done | `ded231ab` (ratio ≥1,0 = meter Linux e4b) | 2026-09-13 |
 | P1.2 | p1 | ingest_sst + compaction_filter: caminhos nativos | done | `92a76a97` (cartaz Linux = e4b; DIAG filter 0,47→0,935) | 2026-09-13 |
-| P1.3 | p1 | wbwi + write_tx: batch indexado + tx nativos | todo | — | 2026-09-13 |
-| P1.4 | p1 | linkbench_mix: decompor + atacar dono | todo | — | 2026-09-13 |
+| P1.3 | p1 | wbwi + write_tx: batch indexado + tx nativos | doing | `5c1f5b43` (wbwi flat overlay landed; micro ratio + veredito tx = e4b) | 2026-09-13 |
+| P1.4 | p1 | linkbench_mix: decompor + atacar dono | doing | `2f083efb` (point_ord_btree incremental; DIAG p50 −52%; cartaz = e4b) | 2026-09-13 |
 | P2.1 | p2 | Escala pesada 4GiB: meter + fechar (0,70/0,557) | todo | — | 2026-09-13 |
 | P2.2 | p2 | Encode memtable off-path | todo | — | 2026-09-13 |
 | P2.3 | p2 | Read-side: cursor de scan | todo | — | 2026-09-13 |
