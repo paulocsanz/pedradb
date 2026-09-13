@@ -42,3 +42,32 @@ theorem changelog_needs_sst_rebuild_fate_iff :
       · exact absurd h1.1 (fun h => Bool.noConfusion h)
       · subst hv
         rfl
+/-- RFC-0218 P0.3 2/6 (átomo `catalog:changelog_should_store`): o
+    debounce é EXATAMENTE o portão citado — intervalo 0 nunca
+    armazena na via do commit; intervalo positivo armazena quando os
+    commits desde a última atingem o intervalo. O AS-IS armazena a
+    cada commit (ignora o intervalo — dente plantado). -/
+theorem changelog_should_store_fate_iff :
+    ∀ (commits_since : U64) (interval : U64) (v : Bool),
+      (changelog_should_store commits_since interval = ok v) ↔
+        ((interval > 0#u64 ∧
+            v = decide (commits_since ≥ interval)) ∨
+          (¬(interval > 0#u64) ∧ v = false)) := by
+  intro commits_since interval v
+  constructor
+  · intro hval
+    simp only [changelog_should_store] at hval
+    split at hval
+    · next hg =>
+      exact Or.inl ⟨hg, by injection hval with hv; exact hv.symm⟩
+    · next hg =>
+      exact Or.inr ⟨hg, by injection hval with hv; exact hv.symm⟩
+  · rintro (⟨hg, hv⟩ | ⟨hg, hv⟩)
+    · simp only [changelog_should_store]
+      rw [if_pos hg]
+      subst hv
+      rfl
+    · simp only [changelog_should_store]
+      rw [if_neg hg]
+      subst hv
+      rfl

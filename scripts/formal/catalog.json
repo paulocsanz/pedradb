@@ -6152,7 +6152,11 @@
     "file": "crates/pedradb-core/src/changelog_kernel.rs",
     "test": "debounce_as_is_ignores_interval"
    },
-   "three_teeth": true
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 2/6 P0.3: changelog_should_store como portão citado — intervalo 0 nunca, intervalo > 0 quando commits >= intervalo; floor_atom 187→188"
+   }
   },
   {
    "id": "changelog_budget",

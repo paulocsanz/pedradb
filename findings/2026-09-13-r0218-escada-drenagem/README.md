@@ -93,3 +93,11 @@ gates GREEN no commit).
   falha PREEXISTENTE nesta caixa macOS/PosixFallback — fora do escopo
   r0218, nada de Rust tocado). Gate: floor_atom 186→187,
   floor_extract 92→91.
+
+- **changelog_should_store (2/6)**: portão citado do debounce —
+  intervalo 0 nunca armazena na via do commit; intervalo positivo
+  armazena quando commits >= intervalo —
+  `changelog_should_store_fate_iff` em `Changelog.lean` (split at hval
+  no if Prop; reverso rw if_pos/if_neg). Build verde. Planta DST
+  `debounce_as_is_ignores_interval` (pedradb-core, exit 0). Gate:
+  floor_atom 187→188, floor_extract 91→90.
