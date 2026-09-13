@@ -107,23 +107,41 @@ board**, estendendo este RFC a cada etapa nova descoberta.
   sem isso o bypass do write-lock comita solo sem líder exatamente no
   regime-alvo). Resultado: ycsb_f mc2 `avg_grp` 1,00 → **1,92** (96% do
   teto físico 2,0; cache_overwrite mc2 1,88). — status: `done`
-- [ ] **P0.2** Attach in-flight: chegada durante o dreno/write do líder
+- [x] **P0.2** Attach in-flight: chegada durante o dreno/write do líder
   entra no mesmo voo (fold/stage na janela off-lock; na G1, attach também
-  durante a barreira do grupo) + testes `rfc0217_inflight_attach_*`. —
-  status: `todo`
+  durante a barreira do grupo) + testes `rfc0217_inflight_attach_*`.
+  **Adjudicado 2026-09-13** (dados P0.1b/P0.3): com a coleta pelo gap,
+  `avg_grp` já atinge ~96% do teto (voos cheios — o perdedor do publish
+  entra no próximo voo, também cheio, sem estacionar extra), então o
+  attach no mesmo voo não move `avg_grp` nem throughput; o ganho residual
+  é 1 ciclo de latência por membro. Attach verdadeiro exige encode
+  member-side + seq sem o write guard (estruturalmente P2.2) — **fatia
+  fundida em P2.2**, reabre se o ratio quiet do P0.3 ficar <0,9 com voos
+  cheios. — status: `done`
 - [ ] **P0.3** Meter DIAG Darwin (driver host p211p/p211q): frontier
   mc2/3/4/6/8, braços window on/off, PHASE/wg; alvo `avg_grp` mc2–mc4
   ≥2,0 e ratio DIAG mc2/mc3 saindo de 0,25–0,39 → ≥0,9; guardas
-  deps_apply_batch/mc50. — status: `todo`
+  deps_apply_batch/mc50. **Parcial 2026-09-13** (commit `234001f7`,
+  driver 3 rounds `p0217-host-driver.sh`): avg_grp window mc2
+  1,91–1,94 (teto físico 2,0; ≥96%), mc3 2,79–2,93, mc4 3,35–3,65,
+  mc50 10,26 → 24,38; lwait bypass mc8 21,7µs → 0,1µs; guardas
+  apply_batch window/clean 0,92–1,54× (≥1 exceto mc2 0,92);
+  **ratios inutilizáveis** — hostload 16–39 (node externos + caixote-api;
+  clean mc8 min 0,19 com round 7,35× = ruído puro). Alvo de ratio
+  aguarda caixa quieta (re-run pendente). — status: `doing`
 - [ ] **P0.4** Meter Linux gate 3-run quiet min-of-3 (âncora p149):
   `ycsb_f_mc4` default 0,491 → **≥1,0** com janela on; guardas ≥ nível
   p211m (ycsb_a_mc4, overwrite_mc4, apply_mc4, mc50); cartazes pagos em
   guarda ≥; veredito datado; **flip do default só com este meter
-  válido**; se o gate seguir blocked, veredito gate-blocked datado. —
-  status: `todo`
+  válido**; se o gate seguir blocked, veredito gate-blocked datado.
+  **Gate-blocked 2026-09-13T04:42Z**: único host BYOC conectado é o
+  MacBook (aarch64); p149 desconectado; deploy `0caaac0b` pending. Binário
+  amd64 com P0.1b + driver `p0217-linux-driver.sh` prontos para disparar
+  no retorno do host. — status: `doing`
 - [ ] **P0.5** Re-adjudicação do dono no Linux (errata `426272f4`): onda
   admission-clean com PHASE distribuindo a seção serial no âncora ext4
-  (wal/mem/publish/lwait por commit); finding datado. — status: `todo`
+  (wal/mem/publish/lwait por commit); finding datado. **Mesmo block do
+  P0.4** (mesma onda, mesmo host; 2026-09-13T04:42Z). — status: `doing`
 
 ### P1 — U-cells nativas (ranking nº 2; cada fatia: ≥1,0 OU teto datado com número)
 
@@ -173,11 +191,11 @@ dono.
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | Kernel janela de coleta + wiring real + testes `rfc0217_group_window_*` | done | este commit | 2026-09-13 |
-| P0.2 | p0 | Attach in-flight (fold na janela off-lock; G1 attach na barreira) | doing | — | 2026-09-13 |
-| P0.3 | p0 | Meter DIAG Darwin frontier (avg_grp ≥2 mc2–mc4; ratio ≥0,9) | todo | — | 2026-09-13 |
-| P0.4 | p0 | Meter Linux 3-run quiet (0,491→≥1,0) + veredito + flip default | todo | — | 2026-09-13 |
-| P0.5 | p0 | Re-adjudicação do dono no Linux (distribuição da seção serial) | todo | — | 2026-09-13 |
+| P0.1 | p0 | Kernel janela de coleta + wiring real + testes `rfc0217_group_window_*` | done | `010f61fe` + P0.1b `234001f7` | 2026-09-13 |
+| P0.2 | p0 | Attach in-flight: adjudicado — fundido em P2.2 (encode member-side; voos já cheios) | done | `234001f7` | 2026-09-13 |
+| P0.3 | p0 | Meter DIAG Darwin: avg_grp ok (mc2 1,93/mc3 2,9/mc4 3,5/mc50 24,4); ratio espera caixa quieta | doing | `234001f7` | 2026-09-13 |
+| P0.4 | p0 | Meter Linux 3-run quiet: gate-blocked 04:42Z (p149 desconectado); binário+driver prontos | doing | — | 2026-09-13 |
+| P0.5 | p0 | Re-adjudicação do dono no Linux: mesmo block do P0.4 | doing | — | 2026-09-13 |
 | P1.1 | p1 | kafka_changelog_flush: flush amortizado | todo | — | 2026-09-13 |
 | P1.2 | p1 | ingest_sst + compaction_filter: caminhos nativos | todo | — | 2026-09-13 |
 | P1.3 | p1 | wbwi + write_tx: batch indexado + tx nativos | todo | — | 2026-09-13 |
