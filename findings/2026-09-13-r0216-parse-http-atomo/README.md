@@ -157,3 +157,15 @@ verde antes do commit, exatamente 1 teorema público por commit).
   Path.lean (file-scoped, mesmo molde do Form.lean). Planta DST
   `strip_flag` (pedradb-http, exit 0, 1 passed). Gate GREEN:
   floor_atom 170→171, floor_extract 108→107.
+
+## P2.1 — path ×8 átomo (2/8)
+
+- **strip_uri_fragment (2/8)**: o fragmento é descartado
+  exatamente pelo `split_once` no `#` — sem `#` a target volta
+  inteira, com `#` fica o prefixo `a`. Molde simples de match sobre
+  Option com par: `cases o` + `obtain ⟨a, snd⟩ := pair` no some.
+  No reverso, `simp only [bind_tc_ok]` já reduz o match no
+  constructor (não precisa de `rfl` — "no goals"). Planta DST
+  `origin_strips_absolute_and_network` (pedradb-http, exit 0,
+  1 passed). Gate GREEN: floor_atom 171→172, floor_extract
+  107→106.

@@ -99,7 +99,8 @@ no wrapper, planta DST verde ANTES do commit, gate GREEN no commit).
    `split_host_port`, `strip_uri_fragment`,
    `strip_authority_for_routing` — autoridade e rota em teorema;
    família http 27/27 em átomo — floor_atom 170→178, floor_extract
-   108→100 — status: `todo`
+   108→100 — status: `todo` (2/8: `strip_authority_for_routing`,
+   `strip_uri_fragment` feitos 2026-09-13)
 
 6. **P2.2** sweep final em worktree DENTRO de `software/` (gates 3×
    GREEN + campaign ok + extracts ok + sorry 0, capturas

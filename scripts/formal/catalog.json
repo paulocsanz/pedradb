@@ -2292,6 +2292,10 @@
    "dst_plant": {
     "file": "crates/pedradb-http/src/path_kernel.rs",
     "test": "origin_strips_absolute_and_network"
+   },
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "fragmento descartado exatamente pelo split no # — sem # a target volta inteira, com # fica o prefixo"
    }
   },
   {

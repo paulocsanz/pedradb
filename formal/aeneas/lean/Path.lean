@@ -53,3 +53,33 @@ theorem strip_authority_for_routing_fate_iff :
   · intro hr
     unfold strip_authority_for_routing
     rw [hr]
+
+/-- RFC-0216 P2.1 2/8 (átomo `catalog:strip_uri_fragment`): o
+  fragmento é descartado exatamente pelo split no `#` — sem `#` a
+  target volta inteira, com `#` fica o prefixo. -/
+theorem strip_uri_fragment_fate_iff :
+    ∀ (t : Str) (r : Str),
+      (strip_uri_fragment t = ok r) ↔
+        ((core.str.Str.split_once t '#' = ok none ∧ r = t) ∨
+          (∃ (a : Str) (snd : Str),
+              core.str.Str.split_once t '#' = ok (some (a, snd)) ∧ r = a)) := by
+  intro t r
+  constructor
+  · intro hval
+    unfold strip_uri_fragment at hval
+    obtain ⟨o, ho, hval⟩ := bind_ok_inv _ _ _ hval
+    cases o with
+    | none =>
+      dsimp only at hval
+      exact Or.inl ⟨ho, (Result.ok.inj hval).symm⟩
+    | some pair =>
+      obtain ⟨a, snd⟩ := pair
+      dsimp only at hval
+      exact Or.inr ⟨a, snd, ho, (Result.ok.inj hval).symm⟩
+  · rintro (⟨ho, rfl⟩ | ⟨a, snd, ho, rfl⟩)
+    · unfold strip_uri_fragment
+      rw [ho]
+      simp only [Aeneas.Std.bind_tc_ok]
+    · unfold strip_uri_fragment
+      rw [ho]
+      simp only [Aeneas.Std.bind_tc_ok]
