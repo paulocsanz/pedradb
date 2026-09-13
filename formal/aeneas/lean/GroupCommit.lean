@@ -482,3 +482,25 @@ theorem occ_batch_plan_fate_iff :
       refine bind_intro n ?_ hloop
       rw [if_neg hle, hn]
 
+/-- RFC-0218 P0.1 1/4 (átomo `catalog:group_commit`, entrada
+    `occ_conflict`): o veredito OCC first-committer-wins é exatamente a
+    janela — o conflito é ok EXATAMENTE quando a janela `(snap,
+    last_seq]` é não-vazia E a resposta é a flag tocada, ou a janela é
+    vazia e a resposta é false; sem terceiro destino. O AS-IS
+    serializado planta o dente oposto no mesmo writer do grupo. -/
+theorem occ_conflict_fate_iff :
+    ∀ (snap last_seq : Std.U64) (touched v : Bool),
+      (occ_conflict snap last_seq touched = ok v) ↔
+        ((last_seq > snap ∧ v = touched) ∨
+          (¬(last_seq > snap) ∧ v = false)) := by
+  intro snap last_seq touched v
+  constructor
+  · intro hval
+    rw [occ_conflict_closed_form] at hval
+    split at hval
+    · next hgt => exact Or.inl ⟨hgt, (Result.ok.inj hval).symm⟩
+    · next hgt => exact Or.inr ⟨hgt, (Result.ok.inj hval).symm⟩
+  · rintro (⟨hgt, hv⟩ | ⟨hgt, hv⟩)
+    · rw [occ_conflict_closed_form, if_pos hgt, hv]
+    · rw [occ_conflict_closed_form, if_neg hgt, hv]
+

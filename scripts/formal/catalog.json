@@ -3404,6 +3404,10 @@
    "dst_plant": {
     "file": "crates/pedradb-core/src/group_commit_kernel.rs",
     "test": "occ_conflict_on_live_group_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 1/4 P0.1: occ_conflict como iff exata da janela (snap, last_seq] — conflito = touched sob janela não-vazia, false sob janela vazia; floor_atom 178→179"
    }
   },
   {
