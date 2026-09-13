@@ -301,3 +301,37 @@ theorem isolated_child_byte_fate_iff :
   · rintro hv
     subst hv
     rfl
+
+/-- RFC-0218 P2.1 8/12 (átomo `catalog:isolated`, entrada
+    `isolated_id_matches`): o id isolado casa EXATAMENTE na guarda
+    citada de tamanho — chave menor que o id nunca casa (false);
+    com tamanho suficiente, a decisão é o loop citado
+    `isolated_id_matches_loop` (byte a byte, fronteira em
+    ISOLATED_CHILD_SEP — corpo do loop não reaberto neste degrau).
+    O AS-IS casa por prefixo (irmão vira filho — dente plantado). -/
+theorem isolated_id_matches_fate_iff :
+    ∀ (key id : Slice U8) (v : Bool),
+      (isolated_id_matches key id = ok v) ↔
+        ((key.len < id.len ∧ v = false) ∨
+         (¬ (key.len < id.len) ∧
+            isolated_id_matches_loop key id 0#usize = ok v)) := by
+  intro key id v
+  constructor
+  · intro hval
+    unfold isolated_id_matches at hval
+    dsimp only at hval
+    split at hval
+    · next hc =>
+      injection hval with hv
+      exact Or.inl ⟨hc, hv.symm⟩
+    · next hc =>
+      exact Or.inr ⟨hc, hval⟩
+  · rintro (⟨hc, hv⟩ | ⟨hc, hv⟩)
+    · subst hv
+      unfold isolated_id_matches
+      dsimp only
+      rw [if_pos hc]
+    · unfold isolated_id_matches
+      dsimp only
+      rw [if_neg (by simp [hc])]
+      exact hv

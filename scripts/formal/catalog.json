@@ -2715,6 +2715,10 @@
   },
   {
    "id": "isolated",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P2.1: fate ∀ sobre isolated_id_matches no degrau átomo — chave menor que o id nunca casa; com tamanho suficiente a decisão é o loop citado byte a byte; planta DST isolated_id_matches_on_live_fold_is_not_ok"
+   },
    "finding": "F83",
    "twin_kind": "close",
    "atom": "isolated_child_byte",
