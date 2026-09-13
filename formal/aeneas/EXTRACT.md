@@ -703,3 +703,15 @@ extracts --required exit 0; sorry 0 nos wrappers da rodada. O
 residual de 12 extratos é o registrado: 12 pares canon-excluídos
 (admitted/campaign stand-ins, nunca flipados) + 10 pares cartoon
 Montanha (portão do usuário) — o próximo salto é RFC-0219.
+
+## 2026-09-13 — RFC-0219 P2.1: 15 recusas medidas db.rs (número publicado)
+
+A fila restante de `db.rs` foi medida sítio a sítio: 19 linhas = 15
+`if let` recusados (binding usada no corpo: R1 Err×9, R2 Option×3, R3
+lookup-Option×3 — detalhe e captura datada em
+`findings/2026-09-13-rfc0219-p21-recusas/README.md`) + 4 linhas de
+comentário. Nenhum desses sítios isola uma decisão data-fate em kernel
+sem embrulhar `is_some`/`is_ok` (anti-padrões do RFC). O alvo datado
+do P2 ajusta com o número: teto sem recusa em concurrent.rs =
+310/332 = 93,37% (era 345/367 = 94,01% assumindo 75 pares; medido:
+db.rs rendeu 18 pares em 34 sítios resolvidos).

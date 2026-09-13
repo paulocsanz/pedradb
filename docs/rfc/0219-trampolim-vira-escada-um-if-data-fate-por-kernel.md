@@ -49,9 +49,13 @@ JÁ coberto (nasce átomo: numerador +1), então a % sobe em cada commit:
 início 270/292 = **92,47%**. Alvos DATADOS:
 - P0 fechado: **≥ 92,54%** (273/295 — 3 pulls; 2026-09-14);
 - P1 fechado: **≥ 92,83%** (285/307 — 15 pulls; 2026-09-28);
-- P2 fechado: **≥ 94,01%** (345/367 — a fila medida inteira, 75 pulls;
-  2026-11-30; recusa medida ajusta o alvo datado, nunca gate
-  inventado);
+- P2 fechado: alvo original **≥ 94,01%** (345/367 — a fila medida
+  inteira, 75 pulls; 2026-11-30) — **RE-DATADO 2026-09-13 por recusa
+  medida**: db.rs rendeu 18 pares em 34 sítios (+6 drenos sem par,
+  15 recusas publicadas em
+  `findings/2026-09-13-rfc0219-p21-recusas/`); fim =
+  (288+P₂.₂)/(310+P₂.₂), teto 310/332 = **93,37%** (R_c de
+  concurrent.rs ajusta de novo, número publicado);
 - contador trampolim: 75 → ≤72 (P0) → ≤60 (P1) → 0 medido ou recusa
   nomeada por sítio (P2);
 - portão Montanha (decisão DO USUÁRIO, registrada em ledger, não é
@@ -137,7 +141,7 @@ início 270/292 = **92,47%**. Alvos DATADOS:
 | P1.2 | p1 | +3 ifs db.rs | done | `fence_admission` (ensure_not_fenced) + `fence_record` (fence_durability) + `group_batch_sync` (group_prepare); contador 59→56 | 2026-09-13 |
 | P1.3 | p1 | +3 ifs db.rs | done | `parked_pair` (parked_oldest_pair_arcs) + `auto_flush_gate` + `mem_auto_flush` (maybe_auto_flush, ambos); contador 56→53 | 2026-09-13 |
 | P1.4 | p1 | +3 ifs db.rs (285/307 = 92,83%) | done | `pit_resync_rewrite_plan` (open_with_env_sourced) + `manifest_publish_plan` (persist_manifest) + `changelog_store_plan` (changelog_store_point); contador 53→50 | 2026-09-13 |
-| P2.1 | p2 | fila db.rs restante medida (53−15) | todo | — | 2026-09-13 |
+| P2.1 | p2 | fila db.rs restante medida (53−15) | done | 34 sítios resolvidos: 18 pares (P0 3, P1 12, P2.1 3: parked_pop, group_ack, cf_flush) + 6 drenos em kernels já pareados + **15 recusas medidas publicadas** (`findings/2026-09-13-rfc0219-p21-recusas/`; alvo P2 re-datado: teto 310/332 = 93,37% sem recusa concurrent.rs) | 2026-09-13 |
 | P2.2 | p2 | fila concurrent.rs (22; pausa na paralela) | todo | — | 2026-09-13 |
 | P2.3 | p2 | sweep final + EXTRACT.md + done | todo | — | 2026-09-13 |
 
