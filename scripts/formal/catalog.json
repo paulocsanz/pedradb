@@ -2948,7 +2948,7 @@
       "id": "env_sync",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.2: fate ∀ of the sync of the Env — two futuros ok exatos: Honest promotes the barrier to the length every; Lying returns Ok and the model rolls back whole (RFC-0078); the as-is promotes always."
+        "why": "RFC-0214 P0.2: ∀ fate of the Env sync — exactly two ok futures: Honest promotes the barrier to the full length; Lying returns Ok and the model rolls back entirely (RFC-0078); the as-is always promotes."
       },
       "finding": "RFC-0166 P1.1",
       "twin_kind": "close",
@@ -3092,7 +3092,7 @@
       "id": "wal_sync",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.1: fate ∀ of the sync — exactly two futuros ok, the by honestidade (Honest promotes the barrier the written; Lying returns the watermarks recortadas by the min); legs cited wal_sync_honest_closed/wal_sync_lying_closed (RFC-0198 P1.2)."
+        "why": "RFC-0214 P0.1: ∀ fate of the sync — exactly two ok futures, split by honesty (Honest promotes the barrier to what was written; Lying returns the watermarks clipped by the min); cited legs wal_sync_honest_closed/wal_sync_lying_closed (RFC-0198 P1.2)."
       },
       "finding": "RFC-0166 P1.2",
       "twin_kind": "close",
@@ -3205,7 +3205,7 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "The put confirma exactly when the ledger cruza the barrier: ok s' and exactly the chain honest append->sync->ack with the vao acked->synced, citando the bodies without reabrir"
+        "why": "The put confirms exactly when the ledger crosses the barrier: ok s' and exactly the honest append->sync->ack chain with the acked->synced ordering, citing the bodies without reopening"
       }
     },
     {
@@ -3835,7 +3835,7 @@
       "id": "scale_probes",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "probes of point get sao exactly the saturating_add cited — levels + L0 covering; the as-is walks every live SST (lying GPS)"
+        "why": "point-get probes are exactly the saturating_add cited — levels + L0 covering; the as-is walks every live SST (lying GPS)"
       },
       "finding": "RFC-0176 P0",
       "twin_kind": "close",

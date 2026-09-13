@@ -7,6 +7,7 @@
 
 <p align="center">
   <a href="#license"><img src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg" alt="license: MIT OR Apache-2.0"></a>
+  <a href="https://github.com/paulocsanz/pedradb/actions/workflows/ci.yml"><img src="https://github.com/paulocsanz/pedradb/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/rust-1.88%2B-orange.svg" alt="MSRV 1.88">
   <img src="https://img.shields.io/badge/status-alpha-yellow.svg" alt="status: alpha">
   <img src="https://img.shields.io/badge/unsafe-forbidden%20in%20the%20engine-success.svg" alt="unsafe forbidden in the engine">
@@ -129,9 +130,18 @@ No C++ toolchain is needed.
 Not “no bugs” — machine-checked where it counts. Decision kernels are
 extracted from the production file `rustc` links (Charon + Aeneas → Lean).
 The catalog (`scripts/formal/catalog.json`) lists **151 pairs** in
-the shipped crates. `scripts/formal/pedra_formal.sh --ci` refuses silent
+the shipped crates. `scripts/pedra_formal.sh --ci` refuses silent
 drift between the kernel, its callers, and the extract. Not proven: the
 OS, the disk, rustc, Aeneas, Lean, or Z3.
+
+Reading the gate's exit code: the drift checks (extract stamps, twins,
+clones) are the hard guarantee and pass on this tree. The remaining
+`FAIL` lines are registered classification debt — residuals-freeze and
+tcb-freeze rows mirrored from the main tree on purpose (this tree adds
+none of its own; see *In-flight rows* in
+[`scripts/formal/README.md`](scripts/formal/README.md)). CI holds that
+debt at its current ceiling (107 on `--lint`) and fails on any drift or
+any growth; it does not pretend the tree is at zero.
 
 | Area | Proves | Proof files |
 |---|---|---|
@@ -281,6 +291,14 @@ Fjall settles during hydrate (≈0 s) and is ahead cross-harness on 100M
 - **Oracle testing**: in our lab harness, workloads are diffed against real
   RocksDB. The oracle crate is not part of this repository, and RocksDB is
   never linked into the engine.
+
+**Current test state (honest accounting).** `cargo test -p pedradb-core
+--lib` on this tree: 1,022 passing, 24 known-red. The known-red set —
+bulk-ingest paths, scan/prefix caches, and source-scan guards that pin
+wiring this tree does not ship — is pinned in
+[`ci/known-test-failures.txt`](ci/known-test-failures.txt); CI fails on
+any new failure and never on the registered ones. Shrinking the set
+updates the pin in the same PR.
 
 ## Coming from RocksDB
 
