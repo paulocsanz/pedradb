@@ -1154,6 +1154,10 @@
   },
   {
    "id": "dcs_apply",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "a decisao de avanco sobre o resultado do apply e exatamente a arvore citada — Ok avanca; CasFailed tambem avanca (o CAS perdido nao e erro fatal); Core/LeaseNotFound/Corrupt congelam"
+   },
    "finding": "F12/F22",
    "twin_kind": "close",
    "single_artifact": true,

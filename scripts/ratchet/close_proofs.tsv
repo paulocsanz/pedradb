@@ -289,3 +289,4 @@ atom	catalog:l28_napply_retry	l28_tcp_napply_retry_admitted_fate_iff	formal/aene
 atom	catalog:raft_recover_applied	recover_last_applied_fate_iff	formal/aeneas/lean/Commit.lean	recover_last_applied
 atom	catalog:apply_step	apply_advance_fate_iff	formal/aeneas/lean/Apply.lean	apply_advance
 atom	catalog:ae_f16_gate	ae_f16_safe_fate_iff	formal/aeneas/lean/Ae.lean	ae_f16_safe
+atom	catalog:dcs_apply	dcs_apply_should_advance_result_fate_iff	formal/aeneas/lean/DcsApply.lean	dcs_apply_should_advance_result
