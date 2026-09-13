@@ -360,3 +360,7 @@ gates GREEN no commit).
   injection + hv.symm; reverso: rintro + subst + rfl. Build verde.
   Planta DST `point_get_uses_range_applied` (pedradb-store, exit 0 no
   worktree). Gate: floor_atom 222→223, floor_extract 56→55.
+
+## P2.1 — journal/stream/fold/ship/capi ×12 átomo
+
+- **journal / journal_catch_up_pin (1/12)**: ler com pins atrasados sempre alcança os pins — constante citada true (as-is false: leitura deixa pins para trás) — `catch_up_pins_on_read_fate_iff` em `Pin.lean`. Forward: unfold + injection; reverso: subst + rfl. Build verde. Planta DST `catch_up_pins_on_read_on_live_journal_is_not_ok` (pedradb-journal, exit 0 no worktree). Gate: floor_atom 233→234, floor_extract 45→44.
