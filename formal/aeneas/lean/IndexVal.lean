@@ -47,3 +47,41 @@ theorem value_len_tag_fate_iff :
   · rintro hv
     subst hv
     rfl
+
+private theorem bind_ok_inv {α β} (x : Result α) (f : α → Result β) (v : β)
+    (h : Aeneas.Std.bind x f = ok v) : ∃ a, x = ok a ∧ f a = ok v := by
+  cases x with
+  | ok a => exact ⟨a, rfl, h⟩
+  | fail e => exact absurd h (by simp)
+  | div => exact absurd h (by simp)
+
+/-- An ok chain reassembles into an ok bind. -/
+private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : β}
+    (a : α) (hx : x = ok a) (h : f a = ok v) : Aeneas.Std.bind x f = ok v := by
+  rw [hx]
+  exact h
+
+/-- RFC-0218 P1.2 5/11 (átomo `catalog:exact_children`, entrada
+    `exact_value_children`): os filhos exatos são EXATAMENTE a cadeia
+    citada — o prefixo vira Vec, empurra 0#u8 (início) e 1#u8 (fim).
+    O AS-IS re-usa o len-pref e vaza irmão NUL (dente plantado). -/
+theorem exact_value_children_fate_iff :
+    ∀ (prefix1 : Slice U8) (r : (alloc.vec.Vec U8) × (alloc.vec.Vec U8)),
+      (exact_value_children prefix1 = ok r) ↔
+      (∃ st s1 e, alloc.slice.Slice.to_vec core.clone.CloneU8 prefix1 = ok st ∧
+        alloc.vec.Vec.push st 0#u8 = ok s1 ∧
+        alloc.vec.Vec.push st 1#u8 = ok e ∧
+        r = (s1, e)) := by
+  intro prefix1 r
+  constructor
+  · intro hval
+    unfold exact_value_children at hval
+    obtain ⟨st, hst, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨s1, hs1, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨e, he, hval⟩ := bind_ok_inv _ _ _ hval
+    injection hval with hv
+    exact ⟨st, s1, e, hst, hs1, he, hv.symm⟩
+  · rintro ⟨st, s1, e, hst, hs1, he, hv⟩
+    subst hv
+    unfold exact_value_children
+    exact bind_intro st hst (bind_intro s1 hs1 (bind_intro e he rfl))

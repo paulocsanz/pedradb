@@ -316,6 +316,8 @@ gates GREEN no commit).
   77→76.
 ## P1.2 — leveling ×4 + merge ×2 + index_val ×3 + key + prefix ×11 átomo
 
+- **index_val / exact_value_children (5/11)**: filhos exatos como a cadeia citada — `to_vec` do prefixo, `push 0#u8` (início), `push 1#u8` (fim) — `exact_value_children_fate_iff` em `IndexVal.lean`. Forward: 3× bind_ok_inv + injection; reverso: bind_intro ×3. Build verde. Planta DST `as_is_leaks_nul_sibling` (pedradb-store, exit 0 no worktree). Gate: floor_atom 215→216, floor_extract 63→62.
+
 - **prefix / prefix_exclusive_end (4/11)**: fim exclusivo como o encaminhamento citado — `to_vec` do prefixo e o loop citado decide (incrementa ou some) — `prefix_exclusive_end_fate_iff` em `Prefix.lean`. Forward: unfold + bind_ok_inv; reverso: bind_intro. Build verde. Planta DST `prefix_exclusive_end_on_live_queued_is_not_ok` (pedradb-store, exit 0 no worktree). Gate: floor_atom 214→215, floor_extract 64→63.
 
 - **key / pack_sequence_and_type (3/11)**: empacotar ikey como a cadeia citada — teto `MAX_SEQUENCE_NUMBER` lido e afirmado (`massert (seq <= i)`), `seq <<< 8`, `as_u8` + `lift` do tipo, pacote = `i1 ||| i3` (6 componentes ∃) — `pack_sequence_and_type_fate_iff` em `Key.lean` (moldes `bind_ok_inv`/`bind_intro` locais). Forward: 5× bind_ok_inv + injection; reverso: bind_intro ×5. Build verde. Planta DST `pack_sequence_and_type_on_live_db_is_not_ok` (pedradb-core, exit 0 no worktree). Gate: floor_atom 213→214, floor_extract 65→64.

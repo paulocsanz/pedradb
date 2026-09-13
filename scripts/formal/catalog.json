@@ -6992,6 +6992,10 @@
   },
   {
    "id": "exact_children",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.2: fate ∀ sobre exact_value_children no degrau átomo — cadeia citada: prefixo vira Vec, push 0 (início) e push 1 (fim); planta DST as_is_leaks_nul_sibling"
+   },
    "finding": "F78/F80",
    "twin_kind": "close",
    "single_artifact": true,
