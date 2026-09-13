@@ -285,6 +285,44 @@ pub fn changelog_durable_commit_fate_as_is(
     ChangelogCommitFate::Skip
 }
 
+/// RFC-0219 P0.2: fate of the archived WAL chain at a delete point.
+/// A CHANGELOG watermark only proves the *cache* is current — while the
+/// deferred MANIFEST publish lags the archives, the segments above
+/// `manifest_published_seq` are the only durable copy of their window,
+/// so they are kept; a publish that covers the chain frees the delete.
+#[cfg(not(verus_keep_ghost))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WalArchiveDelete {
+    /// Manifest publish lags the archives — keep every segment.
+    KeepUntilPublished,
+    /// Publish covers the chain — delete (budgeted by the caller).
+    DeleteCovered,
+}
+
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn wal_archive_delete_plan(
+    manifest_published_seq: u64,
+    wal_archive_max_seq: u64,
+) -> WalArchiveDelete {
+    if manifest_published_seq < wal_archive_max_seq {
+        WalArchiveDelete::KeepUntilPublished
+    } else {
+        WalArchiveDelete::DeleteCovered
+    }
+}
+
+/// AS-IS: delete covered-or-not — the un-published window's only durable
+/// copy is unlinked (data-loss window dente).
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn wal_archive_delete_plan_as_is(
+    _manifest_published_seq: u64,
+    _wal_archive_max_seq: u64,
+) -> WalArchiveDelete {
+    WalArchiveDelete::DeleteCovered
+}
+
 #[cfg(verus_keep_ghost)]
 use vstd::prelude::*;
 
@@ -643,6 +681,41 @@ mod tests {
             coc.matches("maybe_persist_changelog_after_durable_commit").count(),
             1,
             "exactly one debounce call, inside the kernel arm"
+        );
+    }
+
+    #[test]
+    fn wal_archive_delete_plan_on_live_unpublished_window_keeps() {
+        // RFC-0219 P0.2: an unpublished archive window is the only durable
+        // copy of its range — kept until the MANIFEST publish covers it.
+        assert_eq!(
+            wal_archive_delete_plan(3, 7),
+            WalArchiveDelete::KeepUntilPublished
+        );
+        assert_eq!(
+            wal_archive_delete_plan(7, 7),
+            WalArchiveDelete::DeleteCovered
+        );
+        assert_eq!(
+            wal_archive_delete_plan(9, 7),
+            WalArchiveDelete::DeleteCovered
+        );
+        // AS-IS dente: deletes the un-published window's only durable copy.
+        assert_eq!(
+            wal_archive_delete_plan_as_is(3, 7),
+            WalArchiveDelete::DeleteCovered
+        );
+        // Live: delete_wal_archives matches the kernel plan; the raw
+        // seq comparison left the trampoline.
+        let dwa = named_fn_src(include_str!("db.rs"), "delete_wal_archives")
+            .expect("delete_wal_archives");
+        assert!(
+            dwa.contains("match crate::changelog_kernel::wal_archive_delete_plan("),
+            "delete_wal_archives must match wal_archive_delete_plan"
+        );
+        assert!(
+            !dwa.contains("manifest_published_seq < self.wal_archive_max_seq"),
+            "delete_wal_archives must not keep the raw seq comparison inline"
         );
     }
 }

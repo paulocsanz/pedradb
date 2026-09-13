@@ -6427,6 +6427,36 @@
    }
   },
   {
+   "id": "wal_archive_delete",
+   "finding": "RFC-0219 P0.2",
+   "twin_kind": "atom",
+   "atom": "wal_archive_delete_plan",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P0.2: o destino keep-vs-delete da cadeia arquivada de WAL é decisão do kernel — guarda enquanto o publish do MANIFEST atrasa os arquivos (segmentos acima de manifest_published_seq são a única cópia durável da janela), provado ∀ sobre (manifest_published_seq, wal_archive_max_seq) como wal_archive_delete_plan_fate_iff em Changelog.lean; o trampolim db.rs delete_wal_archives faz match no plano do kernel"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
+   "twin": "crates/pedradb-core/src/changelog_kernel.rs",
+   "aeneas": "scripts/aeneas_changelog.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "wal_archive_delete_plan",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "delete_wal_archives"
+    }
+   ],
+   "as_is": "wal_archive_delete_plan_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/changelog_kernel.rs",
+    "test": "wal_archive_delete_plan_on_live_unpublished_window_keeps"
+   }
+  },
+  {
    "id": "flush_plan",
    "finding": "F2/F43",
    "twin_kind": "close",

@@ -154,3 +154,37 @@ theorem changelog_durable_commit_fate_fate_iff :
         · exact absurd h3.2.1 (by simp [*])
         · subst hv
           rfl
+/-- RFC-0219 P0.2 (átomo `catalog:wal_archive_delete`): o destino da
+    cadeia arquivada é EXATAMENTE a comparação citada — enquanto o
+    publish do MANIFEST atrasa os arquivos (segmentos acima de
+    manifest_published_seq são a única cópia durável da janela), guarda;
+    publish cobrindo a cadeia, libera o delete. O AS-IS deleta a janela
+    não-publicada (dente plantado no kernel). -/
+theorem wal_archive_delete_plan_fate_iff :
+    ∀ (manifest_published_seq : U64) (wal_archive_max_seq : U64)
+      (v : WalArchiveDelete),
+      (wal_archive_delete_plan manifest_published_seq wal_archive_max_seq
+          = ok v) ↔
+        ((manifest_published_seq < wal_archive_max_seq ∧
+            v = WalArchiveDelete.KeepUntilPublished) ∨
+          (¬(manifest_published_seq < wal_archive_max_seq) ∧
+            v = WalArchiveDelete.DeleteCovered)) := by
+  intro manifest_published_seq wal_archive_max_seq v
+  simp only [wal_archive_delete_plan]
+  split <;> rename_i c
+  · constructor
+    · intro hval
+      injection hval with hv
+      exact Or.inl ⟨c, hv.symm⟩
+    · rintro (⟨-, hv⟩ | h2)
+      · subst hv
+        rfl
+      · exact absurd c h2.1
+  · constructor
+    · intro hval
+      injection hval with hv
+      exact Or.inr ⟨c, hv.symm⟩
+    · rintro (h1 | ⟨-, hv⟩)
+      · exact absurd h1.1 c
+      · subst hv
+        rfl

@@ -41,3 +41,29 @@ sobre `crates/pedradb-core/src/db.rs` + `concurrent.rs`.
 
 Contador pós-P0.1 (medido 2026-09-13, pós-commit):
 - `db.rs`: 52 · `concurrent.rs`: 22 · total: **74**
+
+## P0.2 — wal_archive_delete (2º pull, db.rs `delete_wal_archives`)
+
+- **Sítio**: `delete_wal_archives` — o `if manifest_published_seq <
+  wal_archive_max_seq { return; }` que guardava a cadeia arquivada
+  enquanto o publish do MANIFEST atrasava (RFC-0217 P1.1). Corpo lido:
+  o keep-vs-delete da cadeia.
+- **Kernel nomeado pelo corpo**: `wal_archive_delete_plan(
+  manifest_published_seq, wal_archive_max_seq) -> WalArchiveDelete::
+  {KeepUntilPublished, DeleteCovered}` em `changelog_kernel.rs` (+ dente
+  AS-IS: deleta a janela não-publicada — única cópia durável perdida).
+- **Trampolim**: `delete_wal_archives` faz `match` no plano; a comparação
+  crua de seq saiu do trampolim.
+- **Teorema iff-∀**: `wal_archive_delete_plan_fate_iff` em
+  `Changelog.lean` — guarda sse publish < max da cadeia (∀ sobre os dois
+  u64).
+- **Extrato**: `aeneas_changelog.sh --required` verde, SOURCE re-pinado.
+- **Planta DST**: `wal_archive_delete_plan_on_live_unpublished_window_keeps`
+  (kernel tests; asserção live-caller em `delete_wal_archives`).
+- **Par nasce átomo**: `catalog:wal_archive_delete`. Gate: floor_atom
+  267→268, residuals atom 267→268, single_artifact 286→287,
+  cap_data_fate segue 0.
+- **Contador trampolim**: 74 → **73** (db.rs 52→51).
+
+Contador pós-P0.2 (medido 2026-09-13, pós-commit):
+- `db.rs`: 51 · `concurrent.rs`: 22 · total: **73**

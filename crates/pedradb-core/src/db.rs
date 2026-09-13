@@ -2913,11 +2913,16 @@ impl<E: Env> Db<E> {
         }
         // RFC-0217 P1.1: a CHANGELOG watermark only proves the *cache* is
         // current — not that the data underneath is MANIFEST-published.
-        // While the deferred publish lags the archives (the rotate skipped
-        // it), the segments above `manifest_published_seq` are the only
-        // durable copy of their window: keep them.
-        if self.manifest_published_seq < self.wal_archive_max_seq {
-            return;
+        // RFC-0219 P0.2: the keep-vs-delete fate of the archived chain is
+        // the kernel's decision — while the deferred publish lags the
+        // archives, the segments above `manifest_published_seq` are the
+        // only durable copy of their window: keep them.
+        match crate::changelog_kernel::wal_archive_delete_plan(
+            self.manifest_published_seq,
+            self.wal_archive_max_seq,
+        ) {
+            crate::changelog_kernel::WalArchiveDelete::KeepUntilPublished => return,
+            crate::changelog_kernel::WalArchiveDelete::DeleteCovered => {}
         }
         let mut unlinked_now: u64 = 0;
         while self.wal_archive_unlinked < self.wal_archive_next {

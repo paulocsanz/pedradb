@@ -2024,6 +2024,7 @@ def check_extract(
             (
                 "theorem changelog_should_store_due",
                 "theorem changelog_durable_commit_fate_fate_iff",
+                "theorem wal_archive_delete_plan_fate_iff",
             ),
         ),
         (

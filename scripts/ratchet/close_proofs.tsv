@@ -294,3 +294,4 @@ atom	catalog:dcs_advance_bool	dcs_apply_should_advance_fate_iff	formal/aeneas/le
 atom	catalog:lease_next_id	next_lease_id_after_fate_iff	formal/aeneas/lean/Lease.lean	next_lease_id_after
 atom	catalog:lease_table	lease_table_expired_fate_iff	formal/aeneas/lean/Lease.lean	lease_table_expired
 atom	catalog:changelog_durable_commit	changelog_durable_commit_fate_fate_iff	formal/aeneas/lean/Changelog.lean	changelog_durable_commit_fate
+atom	catalog:wal_archive_delete	wal_archive_delete_plan_fate_iff	formal/aeneas/lean/Changelog.lean	wal_archive_delete_plan

@@ -252,4 +252,114 @@ def changelog_durable_commit_fate_as_is
   := do
   ok ChangelogCommitFate.Skip
 
+/-- [pedra_aeneas_changelog_kernel::WalArchiveDelete]
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 295:0-300:1
+    Visibility: public -/
+@[discriminant isize]
+inductive WalArchiveDelete where
+| KeepUntilPublished : WalArchiveDelete
+| DeleteCovered : WalArchiveDelete
+
+/-- [pedra_aeneas_changelog_kernel::{impl core::clone::Clone for pedra_aeneas_changelog_kernel::WalArchiveDelete}::clone]:
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 294:9-294:14
+    Visibility: public -/
+def WalArchiveDelete.Insts.CoreCloneClone.clone
+  (self : WalArchiveDelete) : Result WalArchiveDelete := do
+  ok self
+
+/-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::clone::Clone for pedra_aeneas_changelog_kernel::WalArchiveDelete}]
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 294:9-294:14 -/
+@[reducible]
+def WalArchiveDelete.Insts.CoreCloneClone : core.clone.Clone WalArchiveDelete
+  := {
+  clone := WalArchiveDelete.Insts.CoreCloneClone.clone
+}
+
+/-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::marker::Copy for pedra_aeneas_changelog_kernel::WalArchiveDelete}]
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 294:16-294:20 -/
+@[reducible]
+def WalArchiveDelete.Insts.CoreMarkerCopy : core.marker.Copy WalArchiveDelete
+  := {
+  cloneInst := WalArchiveDelete.Insts.CoreCloneClone
+}
+
+/-- [pedra_aeneas_changelog_kernel::{impl core::fmt::Debug for pedra_aeneas_changelog_kernel::WalArchiveDelete}::fmt]:
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 294:22-294:27
+    Visibility: public -/
+def WalArchiveDelete.Insts.CoreFmtDebug.fmt
+  (self : WalArchiveDelete) (f : core.fmt.Formatter) :
+  Result ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter)
+  := do
+  match self with
+  | WalArchiveDelete.KeepUntilPublished =>
+    core.fmt.Formatter.write_str f (toStr "KeepUntilPublished")
+  | WalArchiveDelete.DeleteCovered =>
+    core.fmt.Formatter.write_str f (toStr "DeleteCovered")
+
+/-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::fmt::Debug for pedra_aeneas_changelog_kernel::WalArchiveDelete}]
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 294:22-294:27 -/
+@[reducible]
+def WalArchiveDelete.Insts.CoreFmtDebug : core.fmt.Debug WalArchiveDelete := {
+  fmt := WalArchiveDelete.Insts.CoreFmtDebug.fmt
+}
+
+/-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_changelog_kernel::WalArchiveDelete}]
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 294:29-294:38 -/
+@[reducible]
+def WalArchiveDelete.Insts.CoreMarkerStructuralPartialEq :
+  core.marker.StructuralPartialEq WalArchiveDelete := {
+}
+
+/-- [pedra_aeneas_changelog_kernel::{impl core::cmp::PartialEq<pedra_aeneas_changelog_kernel::WalArchiveDelete> for pedra_aeneas_changelog_kernel::WalArchiveDelete}::eq]:
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 294:29-294:38
+    Visibility: public -/
+def WalArchiveDelete.Insts.CoreCmpPartialEqWalArchiveDelete.eq
+  (self : WalArchiveDelete) (other : WalArchiveDelete) : Result Bool := do
+  let self1 := read_discriminant self
+  let other1 := read_discriminant other
+  ok (self1 = other1)
+
+/-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::cmp::PartialEq<pedra_aeneas_changelog_kernel::WalArchiveDelete> for pedra_aeneas_changelog_kernel::WalArchiveDelete}]
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 294:29-294:38 -/
+@[reducible]
+def WalArchiveDelete.Insts.CoreCmpPartialEqWalArchiveDelete :
+  core.cmp.PartialEq WalArchiveDelete WalArchiveDelete := {
+  eq := WalArchiveDelete.Insts.CoreCmpPartialEqWalArchiveDelete.eq
+}
+
+/-- [pedra_aeneas_changelog_kernel::{impl core::cmp::Eq for pedra_aeneas_changelog_kernel::WalArchiveDelete}::assert_fields_are_eq]:
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 294:40-294:42
+    Visibility: public -/
+def WalArchiveDelete.Insts.CoreCmpEq.assert_fields_are_eq
+  (self : WalArchiveDelete) : Result Unit := do
+  ok ()
+
+/-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::cmp::Eq for pedra_aeneas_changelog_kernel::WalArchiveDelete}]
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 294:40-294:42 -/
+@[reducible]
+def WalArchiveDelete.Insts.CoreCmpEq : core.cmp.Eq WalArchiveDelete := {
+  partialEqInst := WalArchiveDelete.Insts.CoreCmpPartialEqWalArchiveDelete
+  assert_fields_are_eq := WalArchiveDelete.Insts.CoreCmpEq.assert_fields_are_eq
+}
+
+/-- [pedra_aeneas_changelog_kernel::wal_archive_delete_plan]:
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 304:0-313:1
+    Visibility: public -/
+def wal_archive_delete_plan
+  (manifest_published_seq : Std.U64) (wal_archive_max_seq : Std.U64) :
+  Result WalArchiveDelete
+  := do
+  if manifest_published_seq < wal_archive_max_seq
+  then ok WalArchiveDelete.KeepUntilPublished
+  else ok WalArchiveDelete.DeleteCovered
+
+/-- [pedra_aeneas_changelog_kernel::wal_archive_delete_plan_as_is]:
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 319:0-324:1
+    Visibility: public -/
+def wal_archive_delete_plan_as_is
+  (_manifest_published_seq : Std.U64) (_wal_archive_max_seq : Std.U64) :
+  Result WalArchiveDelete
+  := do
+  ok WalArchiveDelete.DeleteCovered
+
 end pedra_aeneas_changelog_kernel

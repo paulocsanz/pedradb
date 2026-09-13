@@ -68,8 +68,8 @@ início 270/292 = **92,47%**. Alvos DATADOS:
   escrita (`db.rs`; corpo lido, kernel nomeado pelo corpo — o board
   aponta `wal_commit_plan` como plano dominante com 14 handlers) —
   par nasce átomo, contador 75→74 — status: `done`
-- [ ] **P0.2** +1 `if` do caminho de escrita (`db.rs`) — 272/294 —
-  status: `todo`
+- [x] **P0.2** +1 `if` do caminho de escrita (`db.rs`) — 272/294 —
+  status: `done`
 - [ ] **P0.3** +1 `if` do caminho de escrita (`db.rs`) — 273/295 =
   92,54% — status: `todo`
 - [ ] **P1.1**–**P1.4** +12 `if`s de `db.rs` (escrita e leitura;
@@ -131,7 +131,7 @@ início 270/292 = **92,47%**. Alvos DATADOS:
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | rito do pull + 1º if db.rs (75→74) | done | `changelog_durable_commit` — commit_ops_with casa `changelog_durable_commit_fate` (Changelog.lean iff-∀; contador 74) | 2026-09-13 |
-| P0.2 | p0 | +1 if db.rs (272/294) | todo | — | 2026-09-13 |
+| P0.2 | p0 | +1 if db.rs (272/294) | done | `wal_archive_delete` — delete_wal_archives casa `wal_archive_delete_plan` (contador 73) | 2026-09-13 |
 | P0.3 | p0 | +1 if db.rs (273/295 = 92,54%) | todo | — | 2026-09-13 |
 | P1.1 | p1 | +3 ifs db.rs | todo | — | 2026-09-13 |
 | P1.2 | p1 | +3 ifs db.rs | todo | — | 2026-09-13 |
