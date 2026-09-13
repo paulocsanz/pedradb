@@ -104,6 +104,7 @@ nunca por promoção silenciosa.
    `key_in_window`, `point_bounds_overlap`, `tombstone_reaches_window`,
    `crc_match`, `sst_magic` — a família fail-closed de integridade —
    floor_atom 192→201, sel4_coverage **70,21%** — status: `todo`
+   (1/9: `crc_match_ok_fate_iff` feito 2026-09-13)
 
 5. **P1.1** compact ×7 + lsm_r1 ×3: `compact`, `compact_floor`,
    `compact_peer_counts`, `compact_ready` (store), `compact_split`,

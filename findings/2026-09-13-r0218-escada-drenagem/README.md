@@ -133,3 +133,16 @@ gates GREEN no commit).
   verde. Planta DST `crash_after_sync_recovers_committed`
   (pedradb-sim, exit 0). Gate: floor_atom 191→192, floor_extract
   88→87. **P0.3 fechada: ×6 átomo, 6/6.**
+
+## P0.4 — crc/magic/scan ×9 átomo
+
+- **crc_match (1/9)**: lift puro da igualdade citada — checksum casa
+  sse stored = computed (as-is admite sempre) —
+  `crc_match_ok_fate_iff` em `Crc.lean`. Build verde. Planta DST
+  `crc_match_ok_on_live_wal_is_not_ok` (pedradb-core, exit 0, 1
+  passed — no worktree isolado `../pedradb-r0218-p04-plants` ao HEAD
+  b92a383a: a árvore principal ficou com pedradb-core não-compilável
+  por edição em voo da sessão paralela RFC-0217 em memtable.rs —
+  intocada aqui por cânone; captura
+  r0218_p04_plants_worktree.txt). Gate: floor_atom 192→193,
+  floor_extract 86→85.
