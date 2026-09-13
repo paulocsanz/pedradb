@@ -286,3 +286,4 @@ atom	catalog:scale_predict	predict_get_ns_fate_iff	formal/aeneas/lean/Scale.lean
 atom	catalog:scale_forecast	scale_forecast_fate_iff	formal/aeneas/lean/Scale.lean	scale_forecast
 atom	catalog:l28_durability	l28_durability_ok_fate_iff	formal/aeneas/lean/L28.lean	l28_durability_ok
 atom	catalog:l28_napply_retry	l28_tcp_napply_retry_admitted_fate_iff	formal/aeneas/lean/L28.lean	l28_tcp_napply_retry_admitted
+atom	catalog:raft_recover_applied	recover_last_applied_fate_iff	formal/aeneas/lean/Commit.lean	recover_last_applied

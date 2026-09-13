@@ -6952,6 +6952,10 @@
   },
   {
    "id": "raft_recover_applied",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "o applied recuperado no open e exatamente a constante citada zero — o replay recomeca do zero; o disco nunca dita o applied"
+   },
    "finding": "F10",
    "twin_kind": "close",
    "single_artifact": true,

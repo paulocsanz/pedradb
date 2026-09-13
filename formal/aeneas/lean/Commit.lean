@@ -61,3 +61,20 @@ theorem propose_ack_ok_fate_iff :
   | false =>
     have hnP := of_decide_eq_false hd
     cases v <;> simp [hnP]
+
+/-- RFC-0218 P2.2 (átomo `catalog:raft_recover_applied`, entrada
+    `recover_last_applied`): o applied recuperado no open é exatamente
+    a constante citada zero — o índice aplicado NUNCA é confiado do
+    disco; o replay recomeça do zero. O AS-IS reanima o último applied
+    gravado (dente plantado). -/
+theorem recover_last_applied_fate_iff :
+    ∀ (v : U64), (recover_last_applied = ok v) ↔ (v = 0#u64) := by
+  intro v
+  constructor
+  · intro hval
+    unfold recover_last_applied at hval
+    injection hval with hv
+    exact hv.symm
+  · rintro rfl
+    unfold recover_last_applied
+    rfl
