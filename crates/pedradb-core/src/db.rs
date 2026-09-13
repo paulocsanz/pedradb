@@ -5922,10 +5922,16 @@ impl<E: Env> Db<E> {
     /// Persist MANIFEST every [`BULK_MANIFEST_EVERY`] async bulk installs
     /// (off the write lock). `force` flushes leftover debt (settle).
     fn persist_bulk_manifest(&mut self, force: bool) -> Result<Option<ManifestPersist<E>>> {
-        if crate::write_admission_kernel::dir_sync_required(self.sync) {
-            self.persist_manifest()?;
-            self.bulk_manifest_debt = 0;
-            return Ok(None);
+        // Kernel is the fate: sync pays the publish inline; async
+        // amortizes via debt (AS-IS always-amortize would leave the
+        // sync-mode publish window open across installs).
+        match crate::manifest_kernel::bulk_manifest_persist_fate(self.sync) {
+            crate::manifest_kernel::BulkManifestFate::PersistNow => {
+                self.persist_manifest()?;
+                self.bulk_manifest_debt = 0;
+                return Ok(None);
+            }
+            crate::manifest_kernel::BulkManifestFate::AmortizeDebt => {}
         }
         self.unsynced_ssts.clear();
         if force {

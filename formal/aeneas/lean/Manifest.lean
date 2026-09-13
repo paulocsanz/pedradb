@@ -84,3 +84,35 @@ theorem first_install_action_fate_iff :
       · exact absurd h2.1 (fun h => FirstInstallOutcome.noConfusion h)
       · subst hv
         rfl
+
+/-- RFC-0219 P0.3 (átomo `catalog:bulk_manifest_persist`): o bulk
+    install paga o publish do MANIFEST inline EXATAMENTE quando o
+    default de sync do DB pede dir-sync — sync persiste agora (janela
+    de publish fechada sob a barreira do caller, dívida zerada);
+    async amortiza por dívida. O AS-IS amortiza sempre (janela de
+    publish aberta em modo sync — dente plantado). -/
+theorem bulk_manifest_persist_fate_fate_iff :
+    ∀ (sync : Bool) (fate : BulkManifestFate),
+      (bulk_manifest_persist_fate sync = ok fate) ↔
+        ((sync = true ∧ fate = BulkManifestFate.PersistNow) ∨
+          (sync = false ∧ fate = BulkManifestFate.AmortizeDebt)) := by
+  intro sync fate
+  simp only [bulk_manifest_persist_fate]
+  split <;> rename_i c
+  · constructor
+    · intro hval
+      injection hval with hv
+      exact Or.inl ⟨c, hv.symm⟩
+    · rintro (⟨-, hv⟩ | h2)
+      · subst hv
+        rfl
+      · exact absurd h2.1 (by simp [*])
+  · rw [Bool.not_eq_true] at c
+    constructor
+    · intro hval
+      injection hval with hv
+      exact Or.inr ⟨c, hv.symm⟩
+    · rintro (h1 | ⟨-, hv⟩)
+      · exact absurd h1.1 (by simp [*])
+      · subst hv
+        rfl

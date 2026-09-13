@@ -67,3 +67,42 @@ Contador pós-P0.1 (medido 2026-09-13, pós-commit):
 
 Contador pós-P0.2 (medido 2026-09-13, pós-commit):
 - `db.rs`: 51 · `concurrent.rs`: 22 · total: **73**
+
+## P0.3 — `bulk_manifest_persist` (manifest_kernel)
+
+Sítio: `persist_bulk_manifest` (db.rs ~5924) — o portão
+`if write_admission_kernel::dir_sync_required(self.sync)` decidia inline
+como o publish do MANIFEST de um bulk install é pago.
+
+- **Kernel**: `manifest_kernel::bulk_manifest_persist_fate(sync)` →
+  `BulkManifestFate{PersistNow, AmortizeDebt}` — sync persiste inline
+  (fsync dos SSTs + publish, dívida zerada); async amortiza
+  (`bulk_manifest_debt` a cada `BULK_MANIFEST_EVERY`).
+- **AS-IS dente**: `bulk_manifest_persist_fate_as_is` — amortiza para
+  sempre; em modo sync a janela de publish fica aberta entre installs e
+  um crash reabre inventário anterior aos acks.
+- **Trampolim**: db.rs faz `match` no plano do kernel; o gate dir-sync
+  sai do trampolim.
+- **Teorema**: `bulk_manifest_persist_fate_fate_iff` (∀ sobre sync) em
+  `Manifest.lean` — PersistNow sse sync = true.
+- **Extrato**: `aeneas_manifest.sh --required` verde, SOURCE re-pinado.
+- **Planta DST**: `bulk_manifest_persist_fate_on_live_sync_persists_now`
+  (kernel tests; asserção live-caller em `persist_bulk_manifest`).
+- **Par nasce átomo**: `catalog:bulk_manifest_persist`. Gate: floor_atom
+  268→269, residuals atom 268→269, single_artifact 287→288,
+  cap_data_fate segue 0.
+- **Contador trampolim**: 73 → **72** (db.rs 51→50).
+
+Contador pós-P0.3 (medido 2026-09-13): `db.rs`: 50 · `concurrent.rs`: 22 ·
+total: **72** — P0 fechado (3 pulls).
+
+### Vermelho herdado (não causado por P0.3)
+
+`write_admission_kernel::tests::put_ok_and_recover_path_data_fate_ifs_call_kernels`
+falha em HEAD limpo (85d2d6da, verificado em worktree sem as edições
+P0.3): os sítios crus `open_with_env_sourced: keep_wal_archives` /
+`!keep_wal_archives` / `!wal_archives.is_empty()` vieram do commit
+paralelo `ded231ab` (RFC-0217 P1.1, ancestral do pai pré-goal df11b725)
+sem chamada de kernel — território da sessão RFC-0217, não tocar.
+`commit_ops_with: let Some(op) = records.first()` é if-let pré-existente
+no mesmo teste. Documentado, não corrigido aqui.

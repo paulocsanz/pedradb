@@ -2097,7 +2097,10 @@ def check_extract(
             "./scripts/aeneas_manifest.sh",
             "crates/pedradb-core/src/manifest_kernel.rs",
             "formal/aeneas/lean/Manifest.lean",
-            ("theorem sst_recover_absent_scans",),
+            (
+                "theorem sst_recover_absent_scans",
+                "theorem bulk_manifest_persist_fate_fate_iff",
+            ),
         ),
         (
             "compact",

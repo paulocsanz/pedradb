@@ -6457,6 +6457,36 @@
    }
   },
   {
+   "id": "bulk_manifest_persist",
+   "finding": "RFC-0219 P0.3",
+   "twin_kind": "atom",
+   "atom": "bulk_manifest_persist_fate",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P0.3: como o publish do MANIFEST de um bulk install é pago é decisão do kernel — sync (dir-sync) persiste inline e zera a dívida; async amortiza por bulk_manifest_debt a cada BULK_MANIFEST_EVERY, provado ∀ sobre sync como bulk_manifest_persist_fate_fate_iff em Manifest.lean; o trampolim db.rs persist_bulk_manifest faz match no plano do kernel"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/manifest_kernel.rs",
+   "twin": "crates/pedradb-core/src/manifest_kernel.rs",
+   "aeneas": "scripts/aeneas_manifest.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "bulk_manifest_persist_fate",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "persist_bulk_manifest"
+    }
+   ],
+   "as_is": "bulk_manifest_persist_fate_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/manifest_kernel.rs",
+    "test": "bulk_manifest_persist_fate_on_live_sync_persists_now"
+   }
+  },
+  {
    "id": "flush_plan",
    "finding": "F2/F43",
    "twin_kind": "close",

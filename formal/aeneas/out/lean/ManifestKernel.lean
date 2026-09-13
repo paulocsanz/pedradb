@@ -647,4 +647,128 @@ def first_install_action_as_is_proceed_always
   (_out : FirstInstallOutcome) : Result FirstInstallAction := do
   ok FirstInstallAction.Proceed
 
+/-- [pedra_aeneas_manifest_kernel::BulkManifestFate]
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 165:0-174:1
+    Visibility: public -/
+@[discriminant isize]
+inductive BulkManifestFate where
+| PersistNow : BulkManifestFate
+| AmortizeDebt : BulkManifestFate
+
+/-- [pedra_aeneas_manifest_kernel::{impl core::fmt::Debug for pedra_aeneas_manifest_kernel::BulkManifestFate}::fmt]:
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 164:9-164:14
+    Visibility: public -/
+def BulkManifestFate.Insts.CoreFmtDebug.fmt
+  (self : BulkManifestFate) (f : core.fmt.Formatter) :
+  Result ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter)
+  := do
+  match self with
+  | BulkManifestFate.PersistNow =>
+    core.fmt.Formatter.write_str f (toStr "PersistNow")
+  | BulkManifestFate.AmortizeDebt =>
+    core.fmt.Formatter.write_str f (toStr "AmortizeDebt")
+
+/-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::fmt::Debug for pedra_aeneas_manifest_kernel::BulkManifestFate}]
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 164:9-164:14 -/
+@[reducible]
+def BulkManifestFate.Insts.CoreFmtDebug : core.fmt.Debug BulkManifestFate := {
+  fmt := BulkManifestFate.Insts.CoreFmtDebug.fmt
+}
+
+/-- [pedra_aeneas_manifest_kernel::{impl core::clone::Clone for pedra_aeneas_manifest_kernel::BulkManifestFate}::clone]:
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 164:16-164:21
+    Visibility: public -/
+def BulkManifestFate.Insts.CoreCloneClone.clone
+  (self : BulkManifestFate) : Result BulkManifestFate := do
+  ok self
+
+/-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::clone::Clone for pedra_aeneas_manifest_kernel::BulkManifestFate}]
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 164:16-164:21 -/
+@[reducible]
+def BulkManifestFate.Insts.CoreCloneClone : core.clone.Clone BulkManifestFate
+  := {
+  clone := BulkManifestFate.Insts.CoreCloneClone.clone
+}
+
+/-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::marker::Copy for pedra_aeneas_manifest_kernel::BulkManifestFate}]
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 164:23-164:27 -/
+@[reducible]
+def BulkManifestFate.Insts.CoreMarkerCopy : core.marker.Copy BulkManifestFate
+  := {
+  cloneInst := BulkManifestFate.Insts.CoreCloneClone
+}
+
+/-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_manifest_kernel::BulkManifestFate}]
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 164:29-164:38 -/
+@[reducible]
+def BulkManifestFate.Insts.CoreMarkerStructuralPartialEq :
+  core.marker.StructuralPartialEq BulkManifestFate := {
+}
+
+/-- [pedra_aeneas_manifest_kernel::{impl core::cmp::PartialEq<pedra_aeneas_manifest_kernel::BulkManifestFate> for pedra_aeneas_manifest_kernel::BulkManifestFate}::eq]:
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 164:29-164:38
+    Visibility: public -/
+def BulkManifestFate.Insts.CoreCmpPartialEqBulkManifestFate.eq
+  (self : BulkManifestFate) (other : BulkManifestFate) : Result Bool := do
+  let self1 := read_discriminant self
+  let other1 := read_discriminant other
+  ok (self1 = other1)
+
+/-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::cmp::PartialEq<pedra_aeneas_manifest_kernel::BulkManifestFate> for pedra_aeneas_manifest_kernel::BulkManifestFate}]
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 164:29-164:38 -/
+@[reducible]
+def BulkManifestFate.Insts.CoreCmpPartialEqBulkManifestFate :
+  core.cmp.PartialEq BulkManifestFate BulkManifestFate := {
+  eq := BulkManifestFate.Insts.CoreCmpPartialEqBulkManifestFate.eq
+}
+
+/-- [pedra_aeneas_manifest_kernel::{impl core::cmp::Eq for pedra_aeneas_manifest_kernel::BulkManifestFate}::assert_fields_are_eq]:
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 164:40-164:42
+    Visibility: public -/
+def BulkManifestFate.Insts.CoreCmpEq.assert_fields_are_eq
+  (self : BulkManifestFate) : Result Unit := do
+  ok ()
+
+/-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::cmp::Eq for pedra_aeneas_manifest_kernel::BulkManifestFate}]
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 164:40-164:42 -/
+@[reducible]
+def BulkManifestFate.Insts.CoreCmpEq : core.cmp.Eq BulkManifestFate := {
+  partialEqInst := BulkManifestFate.Insts.CoreCmpPartialEqBulkManifestFate
+  assert_fields_are_eq := BulkManifestFate.Insts.CoreCmpEq.assert_fields_are_eq
+}
+
+/-- [pedra_aeneas_manifest_kernel::{impl core::hash::Hash for pedra_aeneas_manifest_kernel::BulkManifestFate}::hash]:
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 164:44-164:48
+    Visibility: public -/
+def BulkManifestFate.Insts.CoreHashHash.hash
+  {__H : Type} (corehashHasherInst : core.hash.Hasher __H)
+  (self : BulkManifestFate) (state : __H) :
+  Result __H
+  := do
+  let self1 := read_discriminant self
+  Isize.Insts.CoreHashHash.hash corehashHasherInst self1 state
+
+/-- Trait implementation: [pedra_aeneas_manifest_kernel::{impl core::hash::Hash for pedra_aeneas_manifest_kernel::BulkManifestFate}]
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 164:44-164:48 -/
+@[reducible]
+def BulkManifestFate.Insts.CoreHashHash : core.hash.Hash BulkManifestFate := {
+  hash := fun {H : Type} (corehashHasherInst : core.hash.Hasher H) =>
+    BulkManifestFate.Insts.CoreHashHash.hash corehashHasherInst
+}
+
+/-- [pedra_aeneas_manifest_kernel::bulk_manifest_persist_fate]:
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 189:0-195:1
+    Visibility: public -/
+def bulk_manifest_persist_fate (sync : Bool) : Result BulkManifestFate := do
+  if sync
+  then ok BulkManifestFate.PersistNow
+  else ok BulkManifestFate.AmortizeDebt
+
+/-- [pedra_aeneas_manifest_kernel::bulk_manifest_persist_fate_as_is]:
+    Source: '../../../crates/pedradb-core/src/manifest_kernel.rs', lines 202:0-204:1
+    Visibility: public -/
+def bulk_manifest_persist_fate_as_is
+  (_sync : Bool) : Result BulkManifestFate := do
+  ok BulkManifestFate.AmortizeDebt
+
 end pedra_aeneas_manifest_kernel
