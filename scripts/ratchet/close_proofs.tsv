@@ -280,3 +280,4 @@ atom	catalog:probe_order_covering	probe_order_covering_fate_iff	formal/aeneas/le
 atom	catalog:run_disjoint	run_disjoint_fate_iff	formal/aeneas/lean/ProbeOrder.lean	run_pairwise_disjoint_los
 atom	catalog:scale_probes	point_get_probes_fate_iff	formal/aeneas/lean/Scale.lean	point_get_probes
 atom	catalog:scale_probes_worst	probes_worst_fate_iff	formal/aeneas/lean/Scale.lean	probes_worst
+atom	catalog:scale_happy_hot	happy_hot_bps_fate_iff	formal/aeneas/lean/Scale.lean	happy_hot_bps

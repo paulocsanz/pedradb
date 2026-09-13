@@ -8065,6 +8065,10 @@
   },
   {
    "id": "scale_happy_hot",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "fracao quente do caminho feliz e exatamente o gate citado — loja cabendo no warm_cap devolve SCALE_BPS; senao o residual SCALE_HAPPY_COLD_HOT_BPS; as-is diz 100% sempre"
+   },
    "finding": "RFC-0176 P1",
    "twin_kind": "model",
    "single_artifact": true,

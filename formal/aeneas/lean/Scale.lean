@@ -261,3 +261,35 @@ theorem probes_worst_fate_iff :
   unfold probes_worst
   exact Iff.rfl
 
+/-- RFC-0218 P2.2 (átomo `catalog:scale_happy_hot`, entrada
+    `happy_hot_bps`): a fração quente do caminho feliz é EXATAMENTE o
+    gate citado — loja cabendo no warm_cap devolve SCALE_BPS; senão o
+    residual SCALE_HAPPY_COLD_HOT_BPS. O AS-IS diz 100% sempre (a
+    mentira dos 3 TiB — dente plantado). -/
+theorem happy_hot_bps_fate_iff :
+    ∀ (store_bytes ram_bytes : U64) (v : U64),
+      (happy_hot_bps store_bytes ram_bytes = ok v) ↔
+        (∃ i : U64, warm_cap_bytes ram_bytes = ok i ∧
+          ((store_bytes <= i ∧ v = SCALE_BPS)
+           ∨ (¬ (store_bytes <= i) ∧
+              v = SCALE_HAPPY_COLD_HOT_BPS))) := by
+  intro store_bytes ram_bytes v
+  constructor
+  · intro hval
+    unfold happy_hot_bps at hval
+    obtain ⟨i, hi, hval⟩ := bind_ok_inv _ _ _ hval
+    refine ⟨i, hi, ?_⟩
+    split at hval
+    · next hc =>
+      injection hval with hv
+      exact Or.inl ⟨hc, hv.symm⟩
+    · next hc =>
+      injection hval with hv
+      exact Or.inr ⟨hc, hv.symm⟩
+  · rintro ⟨i, hi, (⟨hc, rfl⟩ | ⟨hc, rfl⟩)⟩
+    · unfold happy_hot_bps
+      refine bind_intro i hi ?_
+      rw [if_pos hc]
+    · unfold happy_hot_bps
+      refine bind_intro i hi ?_
+      rw [if_neg hc]
