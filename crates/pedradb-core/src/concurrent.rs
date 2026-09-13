@@ -450,8 +450,11 @@ impl WriteGroup {
     /// lone-path decisions must not count sleepers). Holds no lock while
     /// sleeping; the flush worker's brief `write()` sections proceed.
     fn await_flush_debt<E: Env>(&self, db: &RwLock<Db<E>>) {
-        if !self.flusher_attached.load(Ordering::Relaxed) {
-            return;
+        match crate::flush_kernel::flusher_gate_plan(
+            self.flusher_attached.load(Ordering::Relaxed),
+        ) {
+            crate::flush_kernel::FlusherGate::Workerless => return,
+            crate::flush_kernel::FlusherGate::WorkerDrains => {}
         }
         let max_wait = flush_debt_max_wait();
         let mut waited = Duration::ZERO;
@@ -495,10 +498,13 @@ impl WriteGroup {
     /// Called before `begin_submit` like [`Self::await_flush_debt`] — a
     /// parked writer is not in flight and holds no lock.
     fn await_l0_park<E: Env>(&self, db: &RwLock<Db<E>>) {
-        if !self.flusher_attached.load(Ordering::Relaxed) {
+        match crate::flush_kernel::flusher_gate_plan(
+            self.flusher_attached.load(Ordering::Relaxed),
+        ) {
             // No worker: parking could only hang — lone/workerless paths
             // keep the honest admission error.
-            return;
+            crate::flush_kernel::FlusherGate::Workerless => return,
+            crate::flush_kernel::FlusherGate::WorkerDrains => {}
         }
         let mut parked = false;
         let mut waited = Duration::ZERO;
@@ -546,23 +552,28 @@ impl WriteGroup {
     ) -> Result<SequenceNumber> {
         self.await_flush_debt(db);
         self.await_l0_park(db);
-        if !self.flusher_attached.load(Ordering::Relaxed) {
-            let active = self.begin_submit();
-            if active == 1
-                && !self.recently_concurrent()
-                && !crate::write_admission_kernel::wal_sync_required(true, do_sync, false)
-            {
-                let result = db.write().commit_async_one(op);
-                self.finish_lone();
-                return result;
+        match crate::flush_kernel::flusher_gate_plan(
+            self.flusher_attached.load(Ordering::Relaxed),
+        ) {
+            crate::flush_kernel::FlusherGate::Workerless => {
+                let active = self.begin_submit();
+                if active == 1
+                    && !self.recently_concurrent()
+                    && !crate::write_admission_kernel::wal_sync_required(true, do_sync, false)
+                {
+                    let result = db.write().commit_async_one(op);
+                    self.finish_lone();
+                    return result;
+                }
+                return self.submit_after_begin(db, vec![op], do_sync, None, active);
             }
-            return self.submit_after_begin(db, vec![op], do_sync, None, active);
+            // RFC-0167 P1.1 (worker attached): a `WriteStall` from the commit
+            // is a lost park-vs-admit race (another writer's exit-flush pushed
+            // L0 to the limit between this submit's park pass and admission).
+            // Park for the worker drain and retry, bounded; the first attempt
+            // keeps the lone fast path, retries take the group path.
+            crate::flush_kernel::FlusherGate::WorkerDrains => {}
         }
-        // RFC-0167 P1.1 (worker attached): a `WriteStall` from the commit
-        // is a lost park-vs-admit race (another writer's exit-flush pushed
-        // L0 to the limit between this submit's park pass and admission).
-        // Park for the worker drain and retry, bounded; the first attempt
-        // keeps the lone fast path, retries take the group path.
         let ops = vec![op];
         let deadline = Instant::now() + stall_park_max_wait();
         let mut first = true;
@@ -669,12 +680,17 @@ impl WriteGroup {
     ) -> Result<SequenceNumber> {
         self.await_flush_debt(db);
         self.await_l0_park(db);
-        if !self.flusher_attached.load(Ordering::Relaxed) {
-            let active = self.begin_submit();
-            return self.submit_after_begin(db, ops, do_sync, occ, active);
+        match crate::flush_kernel::flusher_gate_plan(
+            self.flusher_attached.load(Ordering::Relaxed),
+        ) {
+            crate::flush_kernel::FlusherGate::Workerless => {
+                let active = self.begin_submit();
+                return self.submit_after_begin(db, ops, do_sync, occ, active);
+            }
+            // RFC-0167 P1.1: worker attached — stall errors are lost
+            // park-vs-admit races; retry bounded instead of surfacing.
+            crate::flush_kernel::FlusherGate::WorkerDrains => {}
         }
-        // RFC-0167 P1.1: worker attached — stall errors are lost
-        // park-vs-admit races; retry bounded instead of surfacing.
         let ops = ops;
         let occ = occ;
         let deadline = Instant::now() + stall_park_max_wait();
@@ -3279,8 +3295,11 @@ impl<E: Env> ConcurrentDb<E> {
     /// in-flight rule as `await_flush_debt`: called before
     /// `begin_submit`, so an assisting writer reads as idle.
     fn assist_flush_debt(&self) {
-        if !self.writes.flusher_attached.load(Ordering::Relaxed) {
-            return;
+        match crate::flush_kernel::flusher_gate_plan(
+            self.writes.flusher_attached.load(Ordering::Relaxed),
+        ) {
+            crate::flush_kernel::FlusherGate::Workerless => return,
+            crate::flush_kernel::FlusherGate::WorkerDrains => {}
         }
         let Some(cap) = self.flush_debt_cap() else {
             return;

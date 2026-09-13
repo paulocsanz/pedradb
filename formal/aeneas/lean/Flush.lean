@@ -480,3 +480,19 @@ theorem cf_flush_plan_fate_iff :
         simp at hnot
         exact Or.inl ⟨by simpa using hnot, rfl⟩
       · simp [hplan]
+
+/-- RFC-0219 P2.2 (átomo `catalog:flusher_gate_plan`): os regimes de
+    submit/park/assist são decididos EXATAMENTE pela presença do worker
+    de flush — sem worker nada dorme em drain que ninguém corre; com
+    worker o park/retry é limitado pelo drain. O AS-IS diz WorkerDrains
+    sempre (writer workerless dorme para sempre — dente plantado). -/
+theorem flusher_gate_plan_fate_iff :
+    ∀ (attached : Bool) (plan : FlusherGate),
+      (flusher_gate_plan attached = ok plan) ↔
+        ((attached = true ∧
+            plan = FlusherGate.WorkerDrains) ∨
+          (attached = false ∧
+            plan = FlusherGate.Workerless)) := by
+  intro attached plan
+  unfold flusher_gate_plan
+  cases attached <;> simp_all <;> exact eq_comm

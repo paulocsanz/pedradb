@@ -216,6 +216,41 @@ pub fn cf_flush_plan_as_is(_mem_bytes: u64, _limit: u64) -> CfFlushPlan {
     CfFlushPlan::CfNotDueSkip
 }
 
+#[cfg(not(verus_keep_ghost))]
+/// RFC-0219 P2.2: which flush-pipeline regime a submit/park/assist
+/// decision is in — decided by whether a host flush worker is attached.
+/// The five concurrent.rs trampoline gates (`await_flush_debt`,
+/// `await_l0_park`, `submit_one`, `submit_inner`, `assist_flush_debt`)
+/// match this plan.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FlusherGate {
+    /// No worker: parking could only hang — workerless paths keep the
+    /// honest admission error / lone fast path.
+    Workerless,
+    /// Worker attached: park/retry/assist flows are bounded by the drain.
+    WorkerDrains,
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// Park/assist EXACTLY when a host flush worker is attached to drain
+/// the debt/stall the writer would sleep on.
+#[must_use]
+pub fn flusher_gate_plan(attached: bool) -> FlusherGate {
+    if attached {
+        FlusherGate::WorkerDrains
+    } else {
+        FlusherGate::Workerless
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: treats a workerless Db as drained — writers park on debt/stall
+/// with nobody to drain them (unbounded sleep — dente plantado).
+#[must_use]
+pub fn flusher_gate_plan_as_is(_attached: bool) -> FlusherGate {
+    FlusherGate::WorkerDrains
+}
+
 /// Every way acked keys can still depend on the WAL.
 #[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -946,6 +981,40 @@ mod tests {
     }
 
     #[test]
+    fn flusher_gate_plan_on_live_workerless_parks_nowhere() {
+        // RFC-0219 P2.2: park/assist/workerless-submit regimes are decided
+        // by flusher_gate_plan — a workerless Db never sleeps on a drain
+        // nobody runs. AS-IS says WorkerDrains always (workerless writers
+        // park forever — dente).
+        assert_eq!(flusher_gate_plan(true), FlusherGate::WorkerDrains);
+        assert_eq!(flusher_gate_plan(false), FlusherGate::Workerless);
+        assert_eq!(
+            flusher_gate_plan_as_is(false),
+            FlusherGate::WorkerDrains,
+            "AS-IS dente: workerless Db parks on a drain nobody runs"
+        );
+        let cc = include_str!("concurrent.rs");
+        for (name, field) in [
+            ("await_flush_debt", "self"),
+            ("await_l0_park", "self"),
+            ("submit_one", "self"),
+            ("submit_inner", "self"),
+            ("assist_flush_debt", "self.writes"),
+        ] {
+            let body = named_fn_src(cc, name)
+                .unwrap_or_else(|| panic!("{name}"));
+            assert!(
+                body.contains("match crate::flush_kernel::flusher_gate_plan("),
+                "{name} must match flusher_gate_plan"
+            );
+            assert!(
+                !body.contains(&format!("if !{field}.flusher_attached.load")),
+                "{name}: the raw worker gate left the trampoline"
+            );
+        }
+    }
+
+    #[test]
     fn cf_flush_plan_on_live_over_limit_flushes() {
         // RFC-0219 P2.1: inside the armed scan, a family at/over its
         // limit flushes now; below the limit skips. AS-IS skips every
@@ -1085,8 +1154,10 @@ mod tests {
 
     /// Balanced-brace slice of one `fn` from a source file (plant lens).
     fn named_fn_src(src: &str, name: &str) -> Option<String> {
-        let needle = format!("fn {name}(");
-        let start = src.find(&needle)?;
+        // plain fns (`fn name(`) and generic fns (`fn name<E: Env>(`) alike
+        let start = src
+            .find(&format!("fn {name}("))
+            .or_else(|| src.find(&format!("fn {name}<")))?;
         let rest = &src[start..];
         let bytes = rest.as_bytes();
         let brace = bytes.iter().position(|&b| b == b'{')?;

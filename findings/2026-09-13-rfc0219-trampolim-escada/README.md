@@ -423,3 +423,32 @@ teorema RFC-0200 `try_rotate_step_rotates_iff_pins_clear_segment_live`):
   in_keys` (teste de tempo-de-relógio RFC-0149) falha sob carga
   concorrente de cargo e passa 8/8 em máquina ociosa — em 80782f6c
   também só com máquina ociosa; não é regressão do objetivo.
+
+## P2.2 pull 19 — `flusher_gate_plan` (2026-09-13)
+
+Um plano, cinco portões: o regime workerless-vs-worker é decisão do
+kernel `flusher_gate_plan(attached)` (flush_kernel.rs, enum
+`FlusherGate::{Workerless, WorkerDrains}`); AS-IS
+`flusher_gate_plan_as_is` diz WorkerDrains sempre — writer workerless
+dorme em drain que ninguém corre (dente plantado).
+
+Trampolim (concurrent.rs, todos os `if !flusher_attached.load` do
+arquivo):
+
+- `await_flush_debt` (453) — Workerless → return (não dorme sem drain).
+- `await_l0_park` (498) — Workerless → return (park sem worker é hang).
+- `submit_one` (549) — Workerless → caminho lone/`submit_after_begin`.
+- `submit_inner` (672) — idem.
+- `assist_flush_debt` (3282) — Workerless → return (não assiste).
+
+Par: `catalog:flusher_gate_plan`, teorema
+`flusher_gate_plan_fate_iff` (Flush.lean, ∀ sobre `attached`),
+planta DST `flusher_gate_plan_on_live_workerless_parks_nowhere`
+(cobre os 5 handlers por `named_fn_src`; o helper local do
+flush_kernel passou a achar fns genéricas `fn name<E>`). 289/311 =
+93,09%.
+
+Atribuição de vermelho: `rfc0167_l0_stall_parks_until_worker_drains`
+falha igual no pai pré-objetivo 80782f6c (isolado, 2+/2 falhas) e no
+HEAD limpo — flaky de timing pré-existente, não regressão do pull
+(evidência em scratch `p22_rfc0167_attribution.txt`).

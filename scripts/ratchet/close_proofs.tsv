@@ -311,3 +311,4 @@ atom	catalog:changelog_store_plan	changelog_store_plan_fate_iff	formal/aeneas/le
 atom	catalog:parked_pop_plan	parked_pop_plan_fate_iff	formal/aeneas/lean/WriteAdmission.lean	parked_pop_plan
 atom	catalog:group_ack_plan	group_ack_plan_fate_iff	formal/aeneas/lean/GroupCommit.lean	group_ack_plan
 atom	catalog:cf_flush_plan	cf_flush_plan_fate_iff	formal/aeneas/lean/Flush.lean	cf_flush_plan
+atom	catalog:flusher_gate_plan	flusher_gate_plan_fate_iff	formal/aeneas/lean/Flush.lean	flusher_gate_plan
