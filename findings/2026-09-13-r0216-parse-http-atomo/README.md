@@ -113,3 +113,15 @@ verde antes do commit, exatamente 1 teorema público por commit).
   `Result.ok.inj` nas duas direções — sem loop. Planta DST
   `f155_query_conflict` (pedradb-http, exit 0, 1 passed). Gate
   GREEN: floor_atom 167→168, floor_extract 111→110.
+
+## P1.2 — form ×3 átomo (2/3)
+
+- **query_part_is_bare_name (2/3)**: veredito "parte é nome puro"
+  é exatamente a cadeia citada — parte vazia ⇒ falso, parte com
+  `=` ⇒ falso, senão o decode da parte comparado byte a byte com a
+  chave via o eq extraído. Achado da prova: após `simp only
+  [bind_tc_ok]` a condição do if já reduz para literal (`if True`),
+  então `rw [if_pos rfl]` NÃO casa — `simp` fecha; o `if_neg (by
+  simp)` nas condições falsas casa normal. Planta DST
+  `f155_query_conflict` (pedradb-http, exit 0, 1 passed). Gate
+  GREEN: floor_atom 168→169, floor_extract 110→109.

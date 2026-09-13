@@ -2468,6 +2468,10 @@
    "dst_plant": {
     "file": "crates/pedradb-http/src/form_kernel.rs",
     "test": "f155_query_conflict"
+   },
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "parte é nome puro exatamente na cadeia citada: vazia ou com '=' falso, senão decode comparado byte a byte"
    }
   },
   {

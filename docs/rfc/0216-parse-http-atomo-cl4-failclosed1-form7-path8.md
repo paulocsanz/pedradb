@@ -90,7 +90,8 @@ no wrapper, planta DST verde ANTES do commit, gate GREEN no commit).
 4. **P1.2** form ×3 (`Form.lean`): `query_values_conflict`,
    `query_u64_conflict`, `query_part_is_bare_name` — os conflitos de
    query que rejeitam — floor_atom 167→170, floor_extract 111→108 —
-   status: `todo` (1/3: `query_u64_conflict` feito 2026-09-13)
+   status: `todo` (2/3: `query_u64_conflict`,
+   `query_part_is_bare_name` feitos 2026-09-13)
 
 5. **P2.1** path ×8 (`Path.lean`): `origin_form_path`,
    `path_after_authority`, `strip_http_authority`,

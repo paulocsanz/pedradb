@@ -568,3 +568,62 @@ theorem query_u64_conflict_fate_iff :
     unfold query_u64_conflict
     rw [hr]
 
+/-- RFC-0216 P1.2 2/3 (átomo `catalog:query_part_is_bare_name`): o
+veredito "parte é nome puro" é exatamente a cadeia citada — parte
+vazia ⇒ falso, parte com `=` ⇒ falso, senão o decode da parte
+comparado byte a byte com a chave via o eq extraído. -/
+theorem query_part_is_bare_name_fate_iff :
+    ∀ (part key : Str) (r : Bool),
+      (query_part_is_bare_name part key = ok r) ↔
+        ((core.str.Str.is_empty part = ok true ∧ r = false) ∨
+          (core.str.Str.is_empty part = ok false ∧
+            ((core.str.Str.contains part '=' = ok true ∧ r = false) ∨
+              (core.str.Str.contains part '=' = ok false ∧
+                (∃ (v : alloc.vec.Vec U8) (s : Slice U8),
+                    form_decode part = ok v ∧
+                      core.str.Str.as_bytes key = ok s ∧
+                        alloc.vec.Vec.Insts.CoreCmpPartialEqShared0Slice.eq Global
+                          core.cmp.PartialEqU8 v s = ok r))))) := by
+  intro part key r
+  constructor
+  · intro hval
+    unfold query_part_is_bare_name at hval
+    obtain ⟨b, hb, hval⟩ := bind_ok_inv _ _ _ hval
+    split at hval
+    · next hbt =>
+      exact Or.inl ⟨by rw [← hbt]; exact hb, (Result.ok.inj hval).symm⟩
+    · next hbf =>
+      have hbf' : b = false := by simp at hbf; exact hbf
+      obtain ⟨b1, hb1, hval⟩ := bind_ok_inv _ _ _ hval
+      refine Or.inr ⟨by rw [← hbf']; exact hb, ?_⟩
+      split at hval
+      · next hbt1 =>
+        exact Or.inl ⟨by rw [← hbt1]; exact hb1, (Result.ok.inj hval).symm⟩
+      · next hbf1 =>
+        have hbf1' : b1 = false := by simp at hbf1; exact hbf1
+        obtain ⟨v, hv, hval⟩ := bind_ok_inv _ _ _ hval
+        obtain ⟨s, hs, hval⟩ := bind_ok_inv _ _ _ hval
+        exact Or.inr ⟨by rw [← hbf1']; exact hb1, v, s, hv, hs, hval⟩
+  · rintro (⟨hb, rfl⟩ | ⟨hb, (⟨hb1, rfl⟩ | ⟨hb1, v, s, hv, hs, hval⟩)⟩)
+    · unfold query_part_is_bare_name
+      rw [hb]
+      simp only [Aeneas.Std.bind_tc_ok]
+      simp
+    · unfold query_part_is_bare_name
+      rw [hb]
+      simp only [Aeneas.Std.bind_tc_ok]
+      rw [if_neg (by simp), hb1]
+      simp only [Aeneas.Std.bind_tc_ok]
+      simp
+    · unfold query_part_is_bare_name
+      rw [hb]
+      simp only [Aeneas.Std.bind_tc_ok]
+      rw [if_neg (by simp), hb1]
+      simp only [Aeneas.Std.bind_tc_ok]
+      rw [if_neg (by simp)]
+      rw [hv]
+      simp only [Aeneas.Std.bind_tc_ok]
+      rw [hs]
+      simp only [Aeneas.Std.bind_tc_ok]
+      exact hval
+
