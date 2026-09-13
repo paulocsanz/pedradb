@@ -2031,6 +2031,10 @@
    "dst_plant": {
     "file": "crates/pedradb-http/src/lib.rs",
     "test": "content_length_repeat_ok_on_live_http_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "CL repetido decide exatamente na igualdade U64 extraida — ok r e exatamente r = decide (first = next); AS-IS aceita qualquer repeticao e a planta prova o dente."
    }
   },
   {

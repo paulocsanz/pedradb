@@ -35,3 +35,16 @@ theorem invalid_cl_as_zero_fate_iff :
   · intro hr
     unfold invalid_cl_as_zero
     rw [hr]
+
+theorem content_length_repeat_ok_fate_iff :
+    ∀ (first next : Aeneas.Std.U64) (r : Bool),
+      (content_length_repeat_ok first next = ok r) ↔
+        r = decide (first = next) := by
+  intro first next r
+  constructor
+  · intro hval
+    unfold content_length_repeat_ok at hval
+    exact (Result.ok.inj hval).symm
+  · intro hr
+    unfold content_length_repeat_ok
+    rw [hr]

@@ -23,3 +23,14 @@ verde antes do commit, exatamente 1 teorema público por commit).
   o mutante AS-IS devolve true e a planta prova o dente). Planta DST
   `invalid_cl_as_zero_on_live_http_is_not_ok` (pedradb-http, exit 0,
   1 passed). Gate GREEN: floor_atom 159→160, floor_extract 119→118.
+
+## P0.1 — cl ×4 átomo (3/4)
+
+- **cl_repeat_conflict (3/4)**: o gate de Content-Length repetido
+  decide exatamente na igualdade U64 extraída —
+  `content_length_repeat_ok first next = ok r` é exatamente
+  `r = decide (first = next)` (o kernel aceita a repetição somente
+  quando os dois valores são iguais; o mutante AS-IS aceita sempre).
+  Planta DST `content_length_repeat_ok_on_live_http_is_not_ok`
+  (pedradb-http, exit 0, 1 passed). Gate GREEN: floor_atom 160→161,
+  floor_extract 118→117.
