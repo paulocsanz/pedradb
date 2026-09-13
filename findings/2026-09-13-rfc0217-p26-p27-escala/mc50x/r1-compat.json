@@ -1,0 +1,25 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "compat",
+  "sync": false,
+  "peer_policy": "rocks-default",
+  "durability": "async-wal (PEDRA_PARITY_ASYNC=1; WAL write, no fdatasync — NOT G1, not official)",
+  "changelog_interval": 0,
+  "status": "ok",
+  "notes": ["ycsb records=1024 ops=2000 payload=100 dist=zipfian", "engine=compat durability=async-wal (PEDRA_PARITY_ASYNC=1; WAL write, no fdatasync — NOT G1, not official)", "suites: kvrocks", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=0", "peer_policy=rocks-default", "host-default write sync: kvrocks=false myrocks=true surreal=true"],
+  "benches": [
+{
+    "name": "kvrocks_set_mc50",
+    "n": 100000,
+    "qps": 215573.845,
+    "p50_ms": 0.1867,
+    "p95_ms": 0.3053,
+    "p99_ms": 0.9731,
+    "p999_ms": 4.1348,
+    "max_ms": 133.2280,
+    "clients": 50,
+    "errors": 0,
+    "wall_s": 0.4639
+  }
+  ]
+}

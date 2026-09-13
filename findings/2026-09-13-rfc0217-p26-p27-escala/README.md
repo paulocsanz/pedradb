@@ -182,6 +182,13 @@ são incomparáveis, os counters mecânicos abaixo é que fecham):
   256MiB — 151/156/168k vs 107/142/101k — sinal direcional de que o
   shape antigo era MAIS difícil pro Pedra, não mais fácil); rerun
   3-arm intercalado `p26r3b-mc50x` rodando.
+- **mc50x (rerun 3-arm ×7 intercalado, load 11–12, ranges ±10%) FECHOU
+  a pergunta**: compat max 247,7k/med 215,6k; rocks256 max 180,9k/med
+  170,2k; rocks64 max 180,0k/med 165,1k ⇒ **rocks256 ≈ rocks64** (o
+  "64MiB mais rápido" da 1ª passada era espeto de load) e compat ganha
+  **1,267–1,370× (sym) e 1,306–1,376× (asym)** — mesma vitória nas
+  duas configs, **sem artefato de config**. Suspeita sobre o cartaz
+  1,678× Linux rebaixada; oficial = gate (e4b). DIAG Darwin.
 - Artefatos: `scan10m/p26r3-{settle,nosettle}/` + logs `scan10m-
   {settle,nosettle}.log`.
 

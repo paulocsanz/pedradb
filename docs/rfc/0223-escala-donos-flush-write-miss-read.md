@@ -67,13 +67,15 @@
   sobrevive**: tables/op 3,6 vs 4,2 e blocks 726 vs 762 entre braços —
   largura de table, não nível. P50 oficial = gate. Finding
   `2026-09-13-rfc0217-p26-p27-escala` rev.3.
-- [ ] **P0.2** re-meter local quiet: `kvrocks_set_mc50` 3 rounds
+- [x] **P0.2** re-meter local quiet: `kvrocks_set_mc50` 3 rounds
   simétrico 256MiB × 3 rounds shape antigo (Rocks 64MiB via
   `ROCKS_PARITY_ROCKS_MEMTABLE`) — decide se 1,678 era artefato de
-  config — status: `doing` (1ª passada inconclusiva sob load — compat
-  37k–236k qps entre rounds; rerun 3-arm intercalado `p26r3b-mc50x`;
-  sinal direcional: Rocks 64MiB consistentemente mais rápido que
-  256MiB ⇒ shape antigo era MAIS difícil pro Pedra)
+  config — status: `done (DIAG: NÃO é artefato)` — 1ª passada
+  inconclusiva (load espetou 5×); rerun 3-arm intercalado ×7
+  (`p26r3b-mc50x`, ranges ±10%): rocks256 ≈ rocks64 (max 180,9k vs
+  180,0k; med 170,2k vs 165,1k) e compat 215,6k med ⇒ ratio sym
+  1,267–1,370 × ratio asym 1,306–1,376 — **mesma vitória nas duas
+  configs**; suspeita rebaixada, número oficial = gate (P0.4)
 - [x] **P0.3** decompor `flush_check` com o split `7f2758d4`
   (`flush_events`/`flush_work_ns`): nomear gate-only mean × work mean
   @10M — status: `done (DIAG)` — seed 625k commits/8 flushes:
@@ -107,7 +109,7 @@
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | deps_scan @10M settle A/B (pipeline local) | done (DIAG mecânico) | `p26r3` rev.3 | 2026-09-13 |
-| P0.2 | p0 | mc50 simetria A/B 256×64 (pipeline local) | doing | 1ª passada inconclusiva; `p26r3b-mc50x` | 2026-09-13 |
+| P0.2 | p0 | mc50 simetria A/B 256×64 (pipeline local) | done (DIAG: não é artefato) | `p26r3b-mc50x` ×7 intercalado | 2026-09-13 |
 | P0.3 | p0 | split flush gate×work @10M | done (DIAG) | `7f2758d4` + `p26r3`: work 99,85%, gate 58ns/commit | 2026-09-13 |
 | P0.4 | p0 | e4b gate 3-run | todo | blocked p211z | 2026-09-13 |
 | P1.1 | p1 | flush fora do commit (worker bounded) | todo | decidido pelo P0.3 (work, não gate) | 2026-09-13 |
