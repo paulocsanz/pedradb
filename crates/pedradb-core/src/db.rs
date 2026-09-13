@@ -10294,14 +10294,18 @@ impl<E: Env> Db<E> {
     }
 
     pub(crate) fn fence_durability(&mut self, io_error: impl std::fmt::Display, class: FenceClass) {
-        if self.fence_report.is_none() {
-            let published = self.published_seq.load(Ordering::Acquire);
-            self.fence_report = Some(FenceReport {
-                io_error: io_error.to_string(),
-                class,
-                uncertain_from: published.saturating_add(1),
-                uncertain_through: self.last_sequence(),
-            });
+        // Kernel owns the fate: the FIRST fence owns the report.
+        match crate::write_admission_kernel::fence_record_plan(self.fence_report.is_some()) {
+            crate::write_admission_kernel::FenceRecordPlan::RecordFirst => {
+                let published = self.published_seq.load(Ordering::Acquire);
+                self.fence_report = Some(FenceReport {
+                    io_error: io_error.to_string(),
+                    class,
+                    uncertain_from: published.saturating_add(1),
+                    uncertain_through: self.last_sequence(),
+                });
+            }
+            crate::write_admission_kernel::FenceRecordPlan::KeepExisting => {}
         }
         self.durability_fenced = true;
     }

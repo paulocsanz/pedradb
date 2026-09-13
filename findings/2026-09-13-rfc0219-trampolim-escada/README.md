@@ -185,3 +185,20 @@ decidia inline recusar fail-closed.
 - **Par nasce átomo**: `catalog:fence_admission`. floor_atom 272→273,
   residuals atom 273, single_artifact 292.
 - **Contador**: 59 → **58** (db.rs 37→36).
+
+## P1.2-b — `fence_record` (write_admission_kernel)
+
+Sítio: `fence_durability` — o portão `if self.fence_report.is_none()`
+decidia inline se o fence novo registra o relatório.
+
+- **Kernel**: `write_admission_kernel::fence_record_plan(has_report)` →
+  `FenceRecordPlan{RecordFirst, KeepExisting}` — só o primeiro fence
+  registra (janela incerta mais larga, a honesta).
+- **AS-IS dente**: `fence_record_plan_as_is` — re-registra; encolhe a
+  janela que o client sabe estar não-provada.
+- **Teorema**: `fence_record_plan_fate_iff` (∀ sobre o bool) em
+  `WriteAdmission.lean`.
+- **Planta DST**: `fence_record_plan_on_live_first_fence_owns_report`.
+- **Par nasce átomo**: `catalog:fence_record`. floor_atom 273→274,
+  residuals atom 274, single_artifact 293.
+- **Contador**: 58 → **57** (db.rs 36→35).

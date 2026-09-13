@@ -300,3 +300,4 @@ atom	catalog:point_cache_validity	point_cache_validity_fate_iff	formal/aeneas/le
 atom	catalog:point_tombstone	point_tombstone_plan_fate_iff	formal/aeneas/lean/Lookup.lean	point_tombstone_plan
 atom	catalog:dir_sync_plan	dir_sync_plan_fate_iff	formal/aeneas/lean/WriteAdmission.lean	dir_sync_plan
 atom	catalog:fence_admission	fence_admission_plan_fate_iff	formal/aeneas/lean/WriteAdmission.lean	fence_admission_plan
+atom	catalog:fence_record	fence_record_plan_fate_iff	formal/aeneas/lean/WriteAdmission.lean	fence_record_plan

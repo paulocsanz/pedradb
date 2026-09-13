@@ -390,3 +390,16 @@ theorem fence_admission_plan_fate_iff :
   intro fenced plan
   unfold fence_admission_plan
   cases fenced <;> simp_all <;> exact eq_comm
+
+/-- RFC-0219 P1.2 (átomo `catalog:fence_record`): só o PRIMEIRO fence
+    registra o relatório da janela incerta — fence posterior mantém o
+    primeiro (o mais largo, o honesto). O AS-IS re-registra (encolhe a
+    janela que o client sabe estar não-provada — dente plantado). -/
+theorem fence_record_plan_fate_iff :
+    ∀ (has_report : Bool) (plan : FenceRecordPlan),
+      (fence_record_plan has_report = ok plan) ↔
+        ((has_report = true ∧ plan = FenceRecordPlan.KeepExisting) ∨
+          (has_report = false ∧ plan = FenceRecordPlan.RecordFirst)) := by
+  intro has_report plan
+  unfold fence_record_plan
+  cases has_report <;> simp_all <;> exact eq_comm

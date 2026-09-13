@@ -413,6 +413,37 @@ pub fn fence_admission_plan_as_is(_durability_fenced: bool) -> FenceAdmission {
     FenceAdmission::AdmitOps
 }
 
+/// RFC-0219 P1.2: whether a new fence records its report. The FIRST
+/// fence owns the client-visible report (acked prefix / uncertain
+/// window at the moment durability first broke); later fences keep it.
+#[cfg(not(verus_keep_ghost))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FenceRecordPlan {
+    /// No report yet — record this fence's window.
+    RecordFirst,
+    /// A report exists — keep the first (honest, widest) window.
+    KeepExisting,
+}
+
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn fence_record_plan(has_report: bool) -> FenceRecordPlan {
+    if has_report {
+        FenceRecordPlan::KeepExisting
+    } else {
+        FenceRecordPlan::RecordFirst
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: re-record on every fence — the first (widest) uncertain
+/// window is overwritten by later fences, shrinking what the client is
+/// told is unproven (silent-wrong dente).
+#[must_use]
+pub fn fence_record_plan_as_is(_has_report: bool) -> FenceRecordPlan {
+    FenceRecordPlan::RecordFirst
+}
+
 #[cfg(not(verus_keep_ghost))]
 /// `put_if_absent`: live key ⇒ CasMismatch; else put. Data-fate, not Env.
 #[must_use]
@@ -1325,6 +1356,29 @@ mod tests {
         assert!(
             !enf.contains("if self.durability_fenced"),
             "the raw fence gate left the trampoline"
+        );
+    }
+
+    #[test]
+    fn fence_record_plan_on_live_first_fence_owns_report() {
+        // RFC-0219 P1.2: only the FIRST fence records the client-visible
+        // uncertain window; later fences keep it. AS-IS re-records,
+        // shrinking the window the client is told is unproven.
+        assert_eq!(fence_record_plan(false), FenceRecordPlan::RecordFirst);
+        assert_eq!(fence_record_plan(true), FenceRecordPlan::KeepExisting);
+        assert_eq!(
+            fence_record_plan_as_is(true),
+            FenceRecordPlan::RecordFirst,
+            "AS-IS dente: later fence overwrites the first report"
+        );
+        let fd = named_fn_src(include_str!("db.rs"), "fence_durability").expect("fence_durability");
+        assert!(
+            fd.contains("match crate::write_admission_kernel::fence_record_plan("),
+            "fence_durability must match fence_record_plan"
+        );
+        assert!(
+            !fd.contains("fence_report.is_none()"),
+            "the raw first-fence gate left the trampoline"
         );
     }
 
