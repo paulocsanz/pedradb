@@ -1,0 +1,12 @@
+[workspace]
+
+[package]
+name = "pedra-aeneas-env-crash-kernel"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "Shim exposing production env_crash_kernel.rs (+ group_commit_kernel.rs) to Charon"
+
+[lib]
+path = "src/lib.rs"

@@ -12,6 +12,12 @@
 //! **or** any stored tombstone can straddle the window (end past its start,
 //! start before its end — the second clause keeps the prune sharp for files
 //! living after the window under a far-reaching tombstone).
+//!
+//! **Single artifact (Aeneas-paid):** this file is what `rustc` links and
+//! what the Lean theorems run over — Charon+Aeneas extract of these exact
+//! bodies. No Verus twin stands in for them.
+//!
+//!   ./scripts/aeneas_scan.sh
 
 use std::ops::Bound;
 
@@ -73,8 +79,23 @@ pub fn point_bounds_overlap(
     file_before_end && file_after_start
 }
 
+/// AS-IS F167: Unbounded end treated as an empty end — a to-infinity scan
+/// skips every file instead of reading them.
+#[must_use]
+pub fn point_bounds_overlap_as_is(
+    smallest: Option<&[u8]>,
+    largest: Option<&[u8]>,
+    start: Bound<&[u8]>,
+    end: Bound<&[u8]>,
+) -> bool {
+    if matches!(end, Bound::Unbounded) {
+        return false;
+    }
+    point_bounds_overlap(smallest, largest, start, end)
+}
+
 /// Whether `[start, end)` contains `key` (same semantics as
-/// [`crate::merge::user_key_in_range`]; model twin input).
+/// [`crate::merge::user_key_in_range`]; model input).
 #[must_use]
 pub fn key_in_window(key: &[u8], start: Bound<&[u8]>, end: Bound<&[u8]>) -> bool {
     let after_start = match start {
@@ -88,6 +109,16 @@ pub fn key_in_window(key: &[u8], start: Bound<&[u8]>, end: Bound<&[u8]>) -> bool
         Bound::Excluded(e) => key < e,
     };
     after_start && before_end
+}
+
+/// AS-IS: end bound ignored — keys at or past the window end are admitted.
+#[must_use]
+pub fn key_in_window_as_is(key: &[u8], start: Bound<&[u8]>, _end: Bound<&[u8]>) -> bool {
+    match start {
+        Bound::Unbounded => true,
+        Bound::Included(s) => key >= s,
+        Bound::Excluded(s) => key > s,
+    }
 }
 
 /// F167 kernel: must a scan of `[start, end)` read this file?
@@ -350,6 +381,110 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Catalog three-teeth plant (key_in_window): end-ignored window admits
+    /// the excluded boundary key.
+    #[test]
+    fn key_in_window_on_live_window_is_not_ok() {
+        assert!(!key_in_window(
+            b"k-c",
+            Bound::Included(b"k-a"),
+            Bound::Excluded(b"k-c"),
+        ));
+        assert!(
+            key_in_window_as_is(b"k-c", Bound::Included(b"k-a"), Bound::Excluded(b"k-c")),
+            "AS-IS dente: end-ignored window admits the boundary key"
+        );
+        let n = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("pedra-key-window-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut db = crate::Db::open_with(
+            &dir,
+            crate::OpenOptions {
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                ..crate::OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_defer_auto_compact(true);
+        db.put(b"k-a", b"1").unwrap();
+        db.put(b"k-c", b"2").unwrap();
+        db.flush().unwrap();
+        let scan: Vec<Vec<u8>> = db
+            .range_limited(
+                Bound::Included(b"k-a".as_ref()),
+                Bound::Excluded(b"k-c".as_ref()),
+                None,
+            )
+            .into_iter()
+            .map(|(k, _)| k.to_vec())
+            .collect();
+        assert!(
+            !scan.iter().any(|k| k.as_slice() == b"k-c"),
+            "live half-open window must hide k-c; AS-IS would admit it: {scan:?}"
+        );
+        db.close().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Catalog three-teeth plant (point_bounds_overlap): Unbounded end is a
+    /// full window, not an empty one — to-infinity scans must read files.
+    #[test]
+    fn point_bounds_overlap_on_live_bounds_is_not_ok() {
+        assert!(point_bounds_overlap(
+            Some(b"k-z"),
+            Some(b"k-z"),
+            Bound::Included(b"k-m"),
+            Bound::Unbounded,
+        ));
+        assert!(
+            !point_bounds_overlap_as_is(
+                Some(b"k-z"),
+                Some(b"k-z"),
+                Bound::Included(b"k-m"),
+                Bound::Unbounded,
+            ),
+            "AS-IS dente: Unbounded end treated as an empty end skips a live file"
+        );
+        let n = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("pedra-bounds-live-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut db = crate::Db::open_with(
+            &dir,
+            crate::OpenOptions {
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                ..crate::OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_defer_auto_compact(true);
+        db.put(b"k-z", b"tail").unwrap();
+        db.flush().unwrap();
+        let scan: Vec<Vec<u8>> = db
+            .range_limited(Bound::Included(b"k-m".as_ref()), Bound::Unbounded, None)
+            .into_iter()
+            .map(|(k, _)| k.to_vec())
+            .collect();
+        assert!(
+            scan.iter().any(|k| k.as_slice() == b"k-z"),
+            "live to-infinity scan must read the k-z file; AS-IS empty-end skip loses it: {scan:?}"
+        );
+        db.close().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn disjoint_files_still_skipped() {
         // Window strictly after every point and after the tombstone end.
@@ -425,12 +560,8 @@ mod tests {
         );
         let crate_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         assert!(
-            crate_dir.join("verus/sst_crc_fate.rs").is_file(),
-            "RFC-0077 P2.1: sst_crc_fate twin must exist"
-        );
-        assert!(
-            crate_dir.join("verus/scan_guard.rs").is_file(),
-            "RFC-0077 P2.1: scan_guard F167 twin must stay"
+            crate_dir.join("src/sst/scan_kernel.rs").is_file(),
+            "RFC-0077 P2.1: scan_guard F167 single artifact — the kernel is the proof body"
         );
         assert!(
             crate_dir.join("src/db.rs").is_file(),
@@ -503,6 +634,20 @@ mod tests {
             Bound::Included(b"k-e"),
             Bound::Unbounded,
         ));
+    }
+
+    #[test]
+    fn overlaps_user_range_on_live_table_matches_kernel() {
+        let src = include_str!("table.rs");
+        let body = src
+            .split("pub fn overlaps_user_range")
+            .nth(1)
+            .and_then(|s| s.split("pub fn iter_user_range").next())
+            .expect("overlaps_user_range");
+        assert!(
+            body.contains("point_bounds_overlap("),
+            "SstTable::overlaps_user_range must call point_bounds_overlap"
+        );
     }
 
     #[test]

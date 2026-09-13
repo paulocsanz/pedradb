@@ -1,5 +1,17 @@
 //! Exclusive key-lock table for rust-rocksdb `TransactionDB` (2PL).
 //! OCC [`super::OptimisticTransactionDB`] does not use this.
+//!
+//! **Term:** this file is what `rustc` links. Aeneas extracts that body
+//! (`scripts/aeneas_locktab.sh`). A Verus flattened `u64` two-cycle stand-in
+//! of rustc `wait_for_deadlock(&HashMap, &HashMap, u64, u64)` is a model twin
+//! — not last-wins (deleted). `LockTable` I/O (parking_lot / Condvar) stays
+//! rustc-only; the wait-for walk is the term.
+//!
+//!   ./scripts/aeneas_locktab.sh --required
+//!
+//! Aeneas of the rustc body is the term. A Verus stand-in is not last-wins.
+
+#![forbid(unsafe_code)]
 
 use bytes::Bytes;
 use parking_lot::{Condvar, Mutex};
@@ -128,7 +140,7 @@ pub(crate) fn wait_for_deadlock(
 }
 
 /// AS-IS: miss the cycle (wait forever / grant overlapping locks).
-#[allow(dead_code)] // tests + Verus twin; production never calls the mutant
+#[allow(dead_code)] // tests + catalog as-is dente; production never calls the mutant
 pub(crate) fn wait_for_deadlock_as_is(
     _owned: &HashMap<Bytes, u64>,
     _waiting: &HashMap<u64, Bytes>,
@@ -141,7 +153,24 @@ pub(crate) fn wait_for_deadlock_as_is(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytes::Bytes;
+    use std::collections::HashMap;
     use std::time::Duration;
+
+    #[test]
+    fn locktab_has_no_verus_cartoon() {
+        let src = include_str!("locktab.rs");
+        let block = concat!("verus", "!", " {");
+        let cfg = concat!("cfg(", "verus", "_keep", "_ghost)");
+        assert!(
+            !src.contains(block),
+            "flattened u64 two-cycle is not last-wins of rustc HashMap walk"
+        );
+        assert!(
+            !src.contains(cfg),
+            "cfg split hides rustc types from the prover"
+        );
+    }
 
     #[test]
     fn wait_for_deadlock_on_live_cycle_is_not_ok() {
@@ -197,5 +226,25 @@ mod tests {
         );
         waiting.remove(&2);
         assert!(!wait_for_deadlock(&owned, &waiting, 1, 2));
+    }
+
+    #[test]
+    fn three_cycle_is_deadlock() {
+        let mut owned = HashMap::new();
+        let mut waiting = HashMap::new();
+        owned.insert(Bytes::from_static(b"a"), 1);
+        owned.insert(Bytes::from_static(b"b"), 2);
+        owned.insert(Bytes::from_static(b"c"), 3);
+        waiting.insert(1, Bytes::from_static(b"b"));
+        waiting.insert(2, Bytes::from_static(b"c"));
+        waiting.insert(3, Bytes::from_static(b"a"));
+        assert!(
+            wait_for_deadlock(&owned, &waiting, 1, 2),
+            "N-way wait-for: 1→2→3→1 is a deadlock"
+        );
+        assert!(
+            !wait_for_deadlock_as_is(&owned, &waiting, 1, 2),
+            "AS-IS dente: miss the 3-cycle"
+        );
     }
 }

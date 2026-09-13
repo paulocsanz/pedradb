@@ -1,0 +1,12 @@
+[workspace]
+
+[package]
+name = "pedra-aeneas-flush-kernel"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "Standalone crate whose [lib] path is production flush_kernel.rs (RFC-0174 P1.3)"
+
+[lib]
+path = "../../../crates/pedradb-core/src/flush_kernel.rs"

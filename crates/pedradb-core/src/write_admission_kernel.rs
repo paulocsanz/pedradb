@@ -67,9 +67,61 @@ macro_rules! fence_on_sync_fail_body {
     };
 }
 
+/// Order of put-Ok after WAL append: Sync (if required) before Apply/Ok.
+/// Fence = required sync failed — no apply, no Ok.
+macro_rules! wal_commit_plan_body {
+    ($need_sync:expr, $sync_failed:expr) => {
+        if fence_on_sync_fail($need_sync, $sync_failed) {
+            WalCommitPlan::AppendSyncFence
+        } else if $need_sync {
+            WalCommitPlan::AppendSyncApplyOk
+        } else {
+            WalCommitPlan::AppendApplyOk
+        }
+    };
+}
+
+macro_rules! wal_commit_plan_as_is_body {
+    ($need_sync:expr, $sync_failed:expr) => {{
+        let _ = $sync_failed;
+        if $need_sync {
+            WalCommitPlan::AppendSyncApplyOk
+        } else {
+            WalCommitPlan::AppendApplyOk
+        }
+    }};
+}
+
 macro_rules! dir_sync_required_body {
     ($sync:expr) => {
         $sync
+    };
+}
+
+macro_rules! cas_absent_put_body {
+    ($has_live:expr) => {
+        match $has_live {
+            true => false,
+            false => true,
+        }
+    };
+}
+
+macro_rules! cas_eq_put_body {
+    ($live_eq:expr) => {
+        match $live_eq {
+            true => true,
+            false => false,
+        }
+    };
+}
+
+macro_rules! range_inverted_body {
+    ($start_ge_end:expr) => {
+        match $start_ge_end {
+            true => true,
+            false => false,
+        }
     };
 }
 
@@ -98,6 +150,18 @@ pub enum WriteAdmit {
     StallMem,
     /// L0 file count still at/above the armed L0 stall limit.
     StallL0,
+}
+
+/// Put-Ok script after WAL append (RFC-0171 trampoline order).
+#[cfg(not(verus_keep_ghost))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WalCommitPlan {
+    /// No barrier: apply mem, then Ok.
+    AppendApplyOk,
+    /// Barrier Ok: apply mem, then Ok (Sync before Apply).
+    AppendSyncApplyOk,
+    /// Required barrier failed: fence. No apply, no Ok.
+    AppendSyncFence,
 }
 
 #[cfg(not(verus_keep_ghost))]
@@ -185,6 +249,35 @@ pub fn batch_is_empty_as_is(_n: u64) -> bool {
 }
 
 #[cfg(not(verus_keep_ghost))]
+/// Fate of the parked-queue pop after the table's L0 exists.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ParkedPopPlan {
+    /// Queue has a table — pop the oldest parked.
+    PopOldestParked,
+    /// Queue empty — nothing to hand the fold.
+    NoParkedTables,
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// Pop EXACTLY when the parked queue is non-empty (batch_is_empty
+/// stays live and proved in the body).
+#[must_use]
+pub fn parked_pop_plan(parked_len: u64) -> ParkedPopPlan {
+    if batch_is_empty(parked_len) {
+        ParkedPopPlan::NoParkedTables
+    } else {
+        ParkedPopPlan::PopOldestParked
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: pops from the empty queue (front index into nothing — dente).
+#[must_use]
+pub fn parked_pop_plan_as_is(_parked_len: u64) -> ParkedPopPlan {
+    ParkedPopPlan::PopOldestParked
+}
+
+#[cfg(not(verus_keep_ghost))]
 /// Required sync failed ⇒ fence so later fsync cannot publish an unacked prefix.
 #[must_use]
 pub fn fence_on_sync_fail(sync_required: bool, sync_failed: bool) -> bool {
@@ -196,6 +289,21 @@ pub fn fence_on_sync_fail(sync_required: bool, sync_failed: bool) -> bool {
 #[must_use]
 pub fn fence_on_sync_fail_as_is(_sync_required: bool, _sync_failed: bool) -> bool {
     false
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// After append: whether to sync, apply, or fence. Sync is in the variant
+/// name before Apply; Fence has no Apply/Ok.
+#[must_use]
+pub fn wal_commit_plan(need_sync: bool, sync_failed: bool) -> WalCommitPlan {
+    wal_commit_plan_body!(need_sync, sync_failed)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: Apply/Ok even when a required sync failed.
+#[must_use]
+pub fn wal_commit_plan_as_is(need_sync: bool, sync_failed: bool) -> WalCommitPlan {
+    wal_commit_plan_as_is_body!(need_sync, sync_failed)
 }
 
 #[cfg(not(verus_keep_ghost))]
@@ -255,6 +363,35 @@ pub fn pit_resync_needs_rewrite_as_is(_is_resync: bool) -> bool {
 }
 
 #[cfg(not(verus_keep_ghost))]
+/// Fate of the recovered WAL prefix when open sourced a resync report.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PitResyncRewritePlan {
+    /// Resync report ⇒ rewrite the WAL from the recovered prefix.
+    RewriteWalFromPrefix,
+    /// No resync ⇒ keep the recovered prefix on disk as-is.
+    KeepRecoveredPrefix,
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// Rewrite EXACTLY when the report is a resync (pit_resync_needs_rewrite
+/// stays live and proved in the body).
+#[must_use]
+pub fn pit_resync_rewrite_plan(is_resync: bool) -> PitResyncRewritePlan {
+    if pit_resync_needs_rewrite(is_resync) {
+        PitResyncRewritePlan::RewriteWalFromPrefix
+    } else {
+        PitResyncRewritePlan::KeepRecoveredPrefix
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: never rewrite (mid-log damage survives the reopen — dente).
+#[must_use]
+pub fn pit_resync_rewrite_plan_as_is(_is_resync: bool) -> PitResyncRewritePlan {
+    PitResyncRewritePlan::KeepRecoveredPrefix
+}
+
+#[cfg(not(verus_keep_ghost))]
 /// Open-options `sync` requires a directory fsync after rename/create
 /// (CURRENT, MANIFEST, SST publish).
 #[must_use]
@@ -270,24 +407,225 @@ pub fn dir_sync_required_as_is(_sync: bool) -> bool {
     false
 }
 
-/// RFC-0168 hydrate streams live SSTs into page cache. Do that only when
-/// writers are idle: no `submit` / off-lock WAL, not an mc group handoff
-/// (`recently_multi`), and not a 1c put that just Ok'd (`recently_ok` —
-/// the host 200 µs opportunistic hold). Mid-burst warm on a 4 GiB box is
-/// the overwrite_mc4 25M cache hole: P0.70 `checkpoint_wal_if_lone_and_fat`
-/// calls `ConcurrentDb::flush` with inflight=0 between 1c seed puts, each
-/// 256 MiB L0 is under the 3 GiB cap so `take_warm_plan` streams it, then
-/// WAL + mem + warmed SSTs exceed RAM. Settle still warms when idle.
-/// Data-fate is unchanged (SST already installed); this only skips the
-/// read-ahead.
+/// RFC-0219 P1.1: site-level fate of the directory fsync after a file
+/// lands (`.tmp` SST rename, merged chunk rename, or the DB-wide dir
+/// gate). The trampoline `db.rs` sites `match` this plan; the predicate
+/// itself stays [`dir_sync_required`].
+#[cfg(not(verus_keep_ghost))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DirSyncPlan {
+    /// Sync mode: dir-fsync now — the dentry rename is durable before
+    /// returning.
+    SyncDirNow,
+    /// Async mode: skip the dir fsync (amortized; the caller's barrier
+    /// class owns recovery of a vanished tmp-name dentry).
+    SkipDirSync,
+}
+
 #[cfg(not(verus_keep_ghost))]
 #[must_use]
-pub fn flush_warm_allowed(
-    commit_inflight: bool,
-    recently_multi: bool,
-    recently_ok: bool,
+pub fn dir_sync_plan(sync: bool) -> DirSyncPlan {
+    if dir_sync_required(sync) {
+        DirSyncPlan::SyncDirNow
+    } else {
+        DirSyncPlan::SkipDirSync
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: never pay the dir fsync — the rename dentry can vanish after a
+/// crash even in sync mode (site-level dente).
+#[must_use]
+pub fn dir_sync_plan_as_is(_sync: bool) -> DirSyncPlan {
+    DirSyncPlan::SkipDirSync
+}
+
+/// RFC-0219 P1.2: admission of new ops once the Db is durability-fenced
+/// (a durability barrier failed). The trampoline `db.rs
+/// ensure_not_fenced` matches this plan.
+#[cfg(not(verus_keep_ghost))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FenceAdmission {
+    /// No fence recorded — admit the op.
+    AdmitOps,
+    /// Fenced: every subsequent op refuses fail-closed (the acked-prefix
+    /// / uncertain-window report is already recorded).
+    RefuseFenced,
+}
+
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn fence_admission_plan(durability_fenced: bool) -> FenceAdmission {
+    if durability_fenced {
+        FenceAdmission::RefuseFenced
+    } else {
+        FenceAdmission::AdmitOps
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: ops admitted after the fence — a failed barrier keeps serving
+/// writes as if durable (fail-open dente).
+#[must_use]
+pub fn fence_admission_plan_as_is(_durability_fenced: bool) -> FenceAdmission {
+    FenceAdmission::AdmitOps
+}
+
+/// RFC-0219 P1.2: whether a new fence records its report. The FIRST
+/// fence owns the client-visible report (acked prefix / uncertain
+/// window at the moment durability first broke); later fences keep it.
+#[cfg(not(verus_keep_ghost))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FenceRecordPlan {
+    /// No report yet — record this fence's window.
+    RecordFirst,
+    /// A report exists — keep the first (honest, widest) window.
+    KeepExisting,
+}
+
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn fence_record_plan(has_report: bool) -> FenceRecordPlan {
+    if has_report {
+        FenceRecordPlan::KeepExisting
+    } else {
+        FenceRecordPlan::RecordFirst
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: re-record on every fence — the first (widest) uncertain
+/// window is overwritten by later fences, shrinking what the client is
+/// told is unproven (silent-wrong dente).
+#[must_use]
+pub fn fence_record_plan_as_is(_has_report: bool) -> FenceRecordPlan {
+    FenceRecordPlan::RecordFirst
+}
+
+/// RFC-0219 P1.2: whether one group-commit batch forces the group's
+/// sync barrier. Inside the DB group context the batch's explicit
+/// client flag decides: a sync-flagged batch makes the whole group pay
+/// one fsync; an async batch rides the group's aggregate.
+#[cfg(not(verus_keep_ghost))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GroupSyncPlan {
+    /// Client asked sync — the group pays one shared fsync for it.
+    BatchForcesSync,
+    /// Async batch — rides whatever the group's other batches force.
+    BatchRidesGroup,
+}
+
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn group_batch_sync_plan(client_sync: bool) -> GroupSyncPlan {
+    if client_sync {
+        GroupSyncPlan::BatchForcesSync
+    } else {
+        GroupSyncPlan::BatchRidesGroup
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: every batch rides — a client that asked sync is acked without
+/// any barrier (lost acked-durability dente).
+#[must_use]
+pub fn group_batch_sync_plan_as_is(_client_sync: bool) -> GroupSyncPlan {
+    GroupSyncPlan::BatchRidesGroup
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// `put_if_absent`: live key ⇒ CasMismatch; else put. Data-fate, not Env.
+#[must_use]
+pub fn cas_absent_put(has_live: bool) -> bool {
+    cas_absent_put_body!(has_live)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: always put (lost-update / clobber).
+#[must_use]
+pub fn cas_absent_put_as_is(_has_live: bool) -> bool {
+    true
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// `put_if_eq`: live == expected ⇒ put; else CasMismatch. Data-fate, not Env.
+#[must_use]
+pub fn cas_eq_put(live_eq: bool) -> bool {
+    cas_eq_put_body!(live_eq)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: always put (ignore expected).
+#[must_use]
+pub fn cas_eq_put_as_is(_live_eq: bool) -> bool {
+    true
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// `delete_range`: `start >= end` ⇒ refuse. Data-fate, not Env.
+#[must_use]
+pub fn range_inverted(start_ge_end: bool) -> bool {
+    range_inverted_body!(start_ge_end)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: never refuse (would WAL an inverted range tombstone).
+#[must_use]
+pub fn range_inverted_as_is(_start_ge_end: bool) -> bool {
+    false
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// RFC-0213 P2.2: the storage write path COMPOSED over the three
+/// registered kernels — admission gates the append (no Ok ⇒ the write
+/// never reaches the WAL), the plan fences a failed required sync
+/// (Fence ⇒ no publish), and recovery cuts the torn tail. Verdict:
+/// the write is present after recovery.
+#[must_use]
+pub fn storage_write_recovered(
+    mem_bytes: u64,
+    mem_armed: bool,
+    mem_limit: u64,
+    l0: u64,
+    l0_armed: bool,
+    l0_limit: u64,
+    need_sync: bool,
+    sync_failed: bool,
+    len: u64,
+    last_good: u64,
 ) -> bool {
-    !commit_inflight && !recently_multi && !recently_ok
+    match write_admit(mem_bytes, mem_armed, mem_limit, l0, l0_armed, l0_limit) {
+        WriteAdmit::Ok => match wal_commit_plan(need_sync, sync_failed) {
+            WalCommitPlan::AppendSyncFence => false,
+            _ => !torn_tail_needs_cut(len, last_good),
+        },
+        _ => false,
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS dente composto: admission sempre admite, o plano nunca cerca,
+/// recovery nunca corta — o write está "sempre presente" após crash.
+#[must_use]
+pub fn storage_write_recovered_as_is(
+    mem_bytes: u64,
+    mem_armed: bool,
+    mem_limit: u64,
+    l0: u64,
+    l0_armed: bool,
+    l0_limit: u64,
+    need_sync: bool,
+    sync_failed: bool,
+    len: u64,
+    last_good: u64,
+) -> bool {
+    match write_admit_as_is(mem_bytes, mem_armed, mem_limit, l0, l0_armed, l0_limit) {
+        WriteAdmit::Ok => match wal_commit_plan_as_is(need_sync, sync_failed) {
+            WalCommitPlan::AppendSyncFence => false,
+            _ => !torn_tail_needs_cut_as_is(len, last_good),
+        },
+        _ => false,
+    }
 }
 
 #[cfg(verus_keep_ghost)]
@@ -301,6 +639,13 @@ pub enum WriteAdmit {
     Ok,
     StallMem,
     StallL0,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum WalCommitPlan {
+    AppendApplyOk,
+    AppendSyncApplyOk,
+    AppendSyncFence,
 }
 
 pub open spec fn write_admission_idle_spec(mem: bool, pressure: bool, stall: bool) -> bool {
@@ -462,6 +807,42 @@ pub fn fence_on_sync_fail_as_is(sync_required: bool, sync_failed: bool) -> (d: b
     false
 }
 
+pub open spec fn wal_commit_plan_spec(need_sync: bool, sync_failed: bool) -> WalCommitPlan {
+    if fence_on_sync_fail_spec(need_sync, sync_failed) {
+        WalCommitPlan::AppendSyncFence
+    } else if need_sync {
+        WalCommitPlan::AppendSyncApplyOk
+    } else {
+        WalCommitPlan::AppendApplyOk
+    }
+}
+
+pub fn wal_commit_plan(need_sync: bool, sync_failed: bool) -> (d: WalCommitPlan)
+    ensures
+        d == wal_commit_plan_spec(need_sync, sync_failed),
+        need_sync && !sync_failed ==> d == WalCommitPlan::AppendSyncApplyOk,
+        need_sync && sync_failed ==> d == WalCommitPlan::AppendSyncFence,
+        !need_sync ==> d == WalCommitPlan::AppendApplyOk,
+{
+    wal_commit_plan_body!(need_sync, sync_failed)
+}
+
+pub open spec fn wal_commit_plan_as_is_spec(need_sync: bool, _sync_failed: bool) -> WalCommitPlan {
+    if need_sync {
+        WalCommitPlan::AppendSyncApplyOk
+    } else {
+        WalCommitPlan::AppendApplyOk
+    }
+}
+
+pub fn wal_commit_plan_as_is(need_sync: bool, sync_failed: bool) -> (d: WalCommitPlan)
+    ensures
+        d == wal_commit_plan_as_is_spec(need_sync, sync_failed),
+        need_sync ==> d == WalCommitPlan::AppendSyncApplyOk,
+{
+    wal_commit_plan_as_is_body!(need_sync, sync_failed)
+}
+
 pub open spec fn torn_head_is_empty_log_spec(len: u64, tiny_max: u64) -> bool {
     len < tiny_max
 }
@@ -558,6 +939,63 @@ pub fn dir_sync_required_as_is(sync: bool) -> (d: bool)
     false
 }
 
+pub open spec fn cas_absent_put_spec(has_live: bool) -> bool {
+    !has_live
+}
+
+pub fn cas_absent_put(has_live: bool) -> (d: bool)
+    ensures
+        d == cas_absent_put_spec(has_live),
+{
+    cas_absent_put_body!(has_live)
+}
+
+pub fn cas_absent_put_as_is(has_live: bool) -> (d: bool)
+    ensures
+        d == true,
+{
+    let _ = has_live;
+    true
+}
+
+pub open spec fn cas_eq_put_spec(live_eq: bool) -> bool {
+    live_eq
+}
+
+pub fn cas_eq_put(live_eq: bool) -> (d: bool)
+    ensures
+        d == cas_eq_put_spec(live_eq),
+{
+    cas_eq_put_body!(live_eq)
+}
+
+pub fn cas_eq_put_as_is(live_eq: bool) -> (d: bool)
+    ensures
+        d == true,
+{
+    let _ = live_eq;
+    true
+}
+
+pub open spec fn range_inverted_spec(start_ge_end: bool) -> bool {
+    start_ge_end
+}
+
+pub fn range_inverted(start_ge_end: bool) -> (d: bool)
+    ensures
+        d == range_inverted_spec(start_ge_end),
+{
+    range_inverted_body!(start_ge_end)
+}
+
+pub fn range_inverted_as_is(start_ge_end: bool) -> (d: bool)
+    ensures
+        d == false,
+{
+    let _ = start_ge_end;
+    false
+}
+
 proof fn lemma_as_is_skips_dir_sync()
     ensures
         dir_sync_required_spec(true),
@@ -588,28 +1026,6 @@ mod tests {
         );
     }
 
-    /// Mid-burst / mc4 handoff / 1c seed gap must not stream SSTs.
-    #[test]
-    fn rfc0180_flush_warm_skips_inflight_and_multi() {
-        assert!(
-            flush_warm_allowed(false, false, false),
-            "idle explicit flush still warms (RFC-0168 settle)"
-        );
-        assert!(
-            !flush_warm_allowed(true, false, false),
-            "commit_inflight: skip (writer in off-lock WAL / apply)"
-        );
-        assert!(
-            !flush_warm_allowed(false, true, false),
-            "recently_multi: skip (mc4 group handoff)"
-        );
-        assert!(
-            !flush_warm_allowed(false, false, true),
-            "recently_ok: skip (1c seed checkpoint between puts)"
-        );
-        assert!(!flush_warm_allowed(true, true, true));
-    }
-
     #[test]
     fn write_admit_on_live_mem_over_is_not_ok() {
         assert_eq!(
@@ -636,6 +1052,44 @@ mod tests {
         assert!(!wal_sync_required_as_is(true, true, false));
         assert!(!wal_sync_required(true, false, true));
         assert!(wal_sync_required(false, false, true));
+        let prep = named_fn_src(include_str!("db.rs"), "group_prepare").expect("group_prepare");
+        assert!(
+            prep.contains("wal_sync_required("),
+            "group_prepare must match wal_sync_required"
+        );
+        let apply = named_fn_src(include_str!("db.rs"), "group_apply").expect("group_apply");
+        assert!(
+            apply.contains("wal_sync_required("),
+            "group_apply must match wal_sync_required"
+        );
+        let ns = named_fn_src(include_str!("db.rs"), "needs_sync").expect("needs_sync");
+        assert!(
+            ns.contains("wal_sync_required("),
+            "GroupInFlight::needs_sync must match wal_sync_required"
+        );
+        let lead = include_str!("concurrent.rs")
+            .split("fn lead<")
+            .nth(1)
+            .and_then(|s| s.split("fn validate_occ_batch").next())
+            .expect("lead");
+        assert!(
+            lead.contains("wal_sync_required("),
+            "WriteGroup::lead catch-up must match wal_sync_required"
+        );
+        let rs = named_fn_src(include_str!("concurrent.rs"), "resolve_sync").expect("resolve_sync");
+        assert!(
+            rs.contains("wal_sync_required("),
+            "ConcurrentDb::resolve_sync must match wal_sync_required"
+        );
+        let sub = include_str!("concurrent.rs")
+            .split("fn submit_after_begin<")
+            .nth(1)
+            .and_then(|s| s.split("fn lead<").next())
+            .expect("submit_after_begin");
+        assert!(
+            sub.contains("wal_sync_required("),
+            "submit_after_begin must match wal_sync_required"
+        );
     }
 
     #[test]
@@ -643,6 +1097,16 @@ mod tests {
         assert!(seq_exhausted(7, 6));
         assert!(!seq_exhausted_as_is(7, 6));
         assert!(!seq_exhausted(6, 6));
+        let bulk =
+            named_fn_src(include_str!("db.rs"), "bulk_append_puts").expect("bulk_append_puts");
+        assert!(
+            bulk.contains("seq_exhausted("),
+            "bulk_append_puts must match seq_exhausted"
+        );
+        assert!(
+            !bulk.contains("last > MAX_SEQUENCE_NUMBER"),
+            "bulk_append_puts must not keep a raw seq ceiling if"
+        );
     }
 
     #[test]
@@ -650,6 +1114,87 @@ mod tests {
         assert!(batch_is_empty(0));
         assert!(!batch_is_empty_as_is(0));
         assert!(!batch_is_empty(1));
+        let start = named_fn_src(include_str!("db.rs"), "group_start").expect("group_start");
+        assert!(
+            start.contains("batch_is_empty("),
+            "group_start must match batch_is_empty"
+        );
+        let absorb = named_fn_src(include_str!("db.rs"), "group_absorb").expect("group_absorb");
+        assert!(
+            absorb.contains("batch_is_empty("),
+            "group_absorb must match batch_is_empty"
+        );
+        let append =
+            named_fn_src(include_str!("db.rs"), "group_append_ops").expect("group_append_ops");
+        assert!(
+            append.contains("batch_is_empty("),
+            "group_append_ops must match batch_is_empty"
+        );
+        let prep = named_fn_src(include_str!("db.rs"), "group_prepare").expect("group_prepare");
+        assert!(
+            prep.contains("batch_is_empty("),
+            "group_prepare must match batch_is_empty"
+        );
+        let lone =
+            named_fn_src(include_str!("db.rs"), "lone_sync_commit").expect("lone_sync_commit");
+        assert!(
+            lone.contains("batch_is_empty("),
+            "lone_sync_commit must match batch_is_empty"
+        );
+        let prep_ops = named_fn_src(include_str!("db.rs"), "prepare_write_ops_spill")
+            .expect("prepare_write_ops_spill");
+        assert!(
+            prep_ops.contains("batch_is_empty("),
+            "prepare_write_ops_spill must match batch_is_empty"
+        );
+        let apply = named_fn_src(include_str!("db.rs"), "group_apply").expect("group_apply");
+        assert!(
+            apply.contains("batch_is_empty("),
+            "group_apply must match batch_is_empty"
+        );
+        let ns = named_fn_src(include_str!("db.rs"), "needs_sync").expect("needs_sync");
+        assert!(
+            ns.contains("batch_is_empty("),
+            "GroupInFlight::needs_sync must match batch_is_empty"
+        );
+        let occ = named_fn_src(include_str!("concurrent.rs"), "apply_batch_occ_with")
+            .expect("apply_batch_occ_with");
+        assert!(
+            occ.contains("batch_is_empty("),
+            "apply_batch_occ_with must match batch_is_empty"
+        );
+        let obs =
+            named_fn_src(include_str!("db.rs"), "observe_bulk_batch").expect("observe_bulk_batch");
+        assert!(
+            obs.contains("batch_is_empty("),
+            "observe_bulk_batch must match batch_is_empty"
+        );
+        let lead = include_str!("concurrent.rs")
+            .split("fn lead<")
+            .nth(1)
+            .and_then(|s| s.split("fn validate_occ_batch").next())
+            .expect("lead");
+        assert!(
+            lead.contains("batch_is_empty("),
+            "WriteGroup::lead must match batch_is_empty"
+        );
+        let off = include_str!("concurrent.rs")
+            .split("fn finish_group_off_lock")
+            .nth(1)
+            .expect("finish_group_off_lock");
+        assert!(
+            off.contains("batch_is_empty("),
+            "finish_group_off_lock must match batch_is_empty"
+        );
+        let fold = named_fn_src(
+            include_str!("concurrent.rs"),
+            "fold_retired_pending_off_lock",
+        )
+        .expect("fold_retired_pending_off_lock");
+        assert!(
+            fold.contains("batch_is_empty("),
+            "fold_retired_pending_off_lock must match batch_is_empty"
+        );
     }
 
     #[test]
@@ -660,6 +1205,190 @@ mod tests {
     }
 
     #[test]
+    fn wal_commit_plan_on_live_sync_fail_is_not_ok() {
+        assert_eq!(
+            wal_commit_plan(true, false),
+            WalCommitPlan::AppendSyncApplyOk,
+            "need_sync ⇒ Sync before Apply/Ok"
+        );
+        assert_eq!(
+            wal_commit_plan(true, true),
+            WalCommitPlan::AppendSyncFence,
+            "required sync failed ⇒ no apply, no Ok"
+        );
+        assert_eq!(wal_commit_plan(false, true), WalCommitPlan::AppendApplyOk);
+        assert_eq!(
+            wal_commit_plan_as_is(true, true),
+            WalCommitPlan::AppendSyncApplyOk,
+            "AS-IS dente: Apply/Ok after failed sync"
+        );
+        assert!(
+            include_str!("write_admission_kernel.rs").contains("fence_on_sync_fail($need_sync"),
+            "wal_commit_plan must call fence_on_sync_fail"
+        );
+        let commit =
+            named_fn_src(include_str!("db.rs"), "commit_ops_with").expect("commit_ops_with");
+        assert!(
+            commit.contains("wal_commit_plan("),
+            "commit_ops_with must match the plan fn"
+        );
+        assert!(
+            commit.contains("fence_on_sync_fail("),
+            "commit_ops_with must match fence_on_sync_fail"
+        );
+        let db_src = include_str!("db.rs");
+        let sync_fn = db_src
+            .split("pub fn sync(&mut self)")
+            .nth(1)
+            .and_then(|s| s.split("pub fn fence_report").next())
+            .expect("Db::sync");
+        assert!(
+            sync_fn.contains("wal_commit_plan("),
+            "Db::sync must match the plan fn"
+        );
+        assert!(
+            sync_fn.contains("fence_on_sync_fail("),
+            "Db::sync must match fence_on_sync_fail"
+        );
+        let open = named_fn_src(include_str!("db.rs"), "open_with_env_sourced")
+            .expect("open_with_env_sourced");
+        assert!(
+            open.contains("wal_commit_plan("),
+            "PIT WAL rewrite must match the plan fn"
+        );
+        assert!(
+            open.contains("fence_on_sync_fail("),
+            "PIT WAL rewrite must match fence_on_sync_fail"
+        );
+        let torn = db_src
+            .split("torn_tail_needs_cut")
+            .nth(1)
+            .and_then(|s| s.split("let wal = Arc::new").next())
+            .expect("torn_tail_needs_cut site");
+        assert!(
+            torn.contains("wal_commit_plan("),
+            "torn-tail WAL cut must match the plan fn"
+        );
+        assert!(
+            torn.contains("fence_on_sync_fail("),
+            "torn-tail WAL cut must match fence_on_sync_fail"
+        );
+        let lone_sync =
+            named_fn_src(include_str!("db.rs"), "lone_sync_commit").expect("lone_sync_commit");
+        assert!(
+            lone_sync.contains("wal_commit_plan("),
+            "lone_sync_commit must match the plan fn"
+        );
+        assert!(
+            lone_sync.contains("fence_on_sync_fail("),
+            "lone_sync_commit must match fence_on_sync_fail"
+        );
+        let group = named_fn_src(include_str!("db.rs"), "wal_sync_group").expect("wal_sync_group");
+        assert!(
+            group.contains("wal_commit_plan("),
+            "wal_sync_group must match the plan fn"
+        );
+        assert!(
+            group.contains("fence_on_sync_fail("),
+            "wal_sync_group must match fence_on_sync_fail"
+        );
+        let off = include_str!("concurrent.rs")
+            .split("fn finish_group_off_lock")
+            .nth(1)
+            .expect("finish_group_off_lock");
+        assert!(
+            off.contains("fence_on_sync_fail("),
+            "finish_group_off_lock must match fence_on_sync_fail"
+        );
+        assert!(
+            off.contains("wal_commit_plan("),
+            "finish_group_off_lock must match wal_commit_plan"
+        );
+        let finish = named_fn_src(include_str!("db.rs"), "group_finish").expect("group_finish");
+        assert!(
+            finish.contains("wal_commit_plan("),
+            "group_finish must match the plan fn"
+        );
+        assert!(
+            finish.contains("fence_on_sync_fail("),
+            "group_finish must match fence_on_sync_fail"
+        );
+        let vlog =
+            named_fn_src(include_str!("db.rs"), "vlog_prepare_wal").expect("vlog_prepare_wal");
+        assert!(
+            vlog.contains("wal_commit_plan("),
+            "vlog_prepare_wal must match the plan fn"
+        );
+        assert!(
+            vlog.contains("fence_on_sync_fail("),
+            "vlog_prepare_wal must match fence_on_sync_fail"
+        );
+        let sst = named_fn_src(include_str!("db.rs"), "fsync_sst_paths").expect("fsync_sst_paths");
+        assert!(
+            sst.contains("wal_commit_plan("),
+            "fsync_sst_paths must match the plan fn"
+        );
+        assert!(
+            sst.contains("fence_on_sync_fail("),
+            "fsync_sst_paths must match fence_on_sync_fail"
+        );
+        assert!(
+            sst.contains("dir_sync_required("),
+            "fsync_sst_paths must match dir_sync_required"
+        );
+        let ckpt = named_fn_src(include_str!("db.rs"), "write_checkpoint_meta")
+            .expect("write_checkpoint_meta");
+        assert!(
+            ckpt.contains("wal_commit_plan("),
+            "write_checkpoint_meta must match the plan fn"
+        );
+        assert!(
+            ckpt.contains("fence_on_sync_fail("),
+            "write_checkpoint_meta must match fence_on_sync_fail"
+        );
+        let close = named_fn_src(include_str!("db.rs"), "close").expect("Db::close");
+        assert!(
+            close.contains("wal_commit_plan("),
+            "Db::close must match the plan fn"
+        );
+        assert!(
+            close.contains("fence_on_sync_fail("),
+            "Db::close must match fence_on_sync_fail"
+        );
+        assert!(
+            close.contains("vlog_prepare_wal("),
+            "Db::close must prepare vlog through the plan helper"
+        );
+        let rot = named_fn_src(include_str!("db.rs"), "rotate_wal_now").expect("rotate_wal_now");
+        assert!(
+            rot.contains("wal_commit_plan("),
+            "rotate_wal_now must match the plan fn"
+        );
+        assert!(
+            rot.contains("fence_on_sync_fail("),
+            "rotate_wal_now must match fence_on_sync_fail"
+        );
+        let gstart = named_fn_src(include_str!("db.rs"), "group_start").expect("group_start");
+        assert!(
+            gstart.contains("wal_commit_plan("),
+            "group_start must match the plan fn"
+        );
+        assert!(
+            gstart.contains("fence_on_sync_fail("),
+            "group_start must match fence_on_sync_fail"
+        );
+        let gabs = named_fn_src(include_str!("db.rs"), "group_absorb").expect("group_absorb");
+        assert!(
+            gabs.contains("wal_commit_plan("),
+            "group_absorb must match the plan fn"
+        );
+        assert!(
+            gabs.contains("fence_on_sync_fail("),
+            "group_absorb must match fence_on_sync_fail"
+        );
+    }
+
+    #[test]
     fn dir_sync_required_on_live_sync_is_not_ok() {
         assert!(dir_sync_required(true));
         assert!(
@@ -667,6 +1396,103 @@ mod tests {
             "AS-IS dente: never dir-fsync"
         );
         assert!(!dir_sync_required(false));
+    }
+
+    #[test]
+    fn dir_sync_plan_on_live_sync_mode_pays_now() {
+        // RFC-0219 P1.1: the site-level fate — sync mode pays the dir
+        // fsync inline; async skips. AS-IS never pays (dentry can vanish
+        // in sync mode).
+        assert_eq!(dir_sync_plan(true), DirSyncPlan::SyncDirNow);
+        assert_eq!(dir_sync_plan(false), DirSyncPlan::SkipDirSync);
+        assert_eq!(
+            dir_sync_plan_as_is(true),
+            DirSyncPlan::SkipDirSync,
+            "AS-IS dente: rename dentry vanishes after crash in sync mode"
+        );
+        // Live: every rename/dir gate matches the plan; the raw
+        // dir_sync_required if left the trampoline (the predicate stays
+        // the fate's own body).
+        let src = include_str!("db.rs");
+        assert_eq!(
+            src.matches("match crate::write_admission_kernel::dir_sync_plan(")
+                .count(),
+            5,
+            "exactly five dir-sync gates match the plan"
+        );
+        assert!(
+            !src.contains("if crate::write_admission_kernel::dir_sync_required("),
+            "no inline dir_sync_required if remains in db.rs"
+        );
+    }
+
+    #[test]
+    fn fence_admission_plan_on_live_fenced_refuses() {
+        // RFC-0219 P1.2: a fenced Db refuses every new op fail-closed;
+        // AS-IS keeps admitting (fail-open dente).
+        assert_eq!(fence_admission_plan(true), FenceAdmission::RefuseFenced);
+        assert_eq!(fence_admission_plan(false), FenceAdmission::AdmitOps);
+        assert_eq!(
+            fence_admission_plan_as_is(true),
+            FenceAdmission::AdmitOps,
+            "AS-IS dente: ops admitted after the fence"
+        );
+        let enf =
+            named_fn_src(include_str!("db.rs"), "ensure_not_fenced").expect("ensure_not_fenced");
+        assert!(
+            enf.contains("match crate::write_admission_kernel::fence_admission_plan("),
+            "ensure_not_fenced must match fence_admission_plan"
+        );
+        assert!(
+            !enf.contains("if self.durability_fenced"),
+            "the raw fence gate left the trampoline"
+        );
+    }
+
+    #[test]
+    fn fence_record_plan_on_live_first_fence_owns_report() {
+        // RFC-0219 P1.2: only the FIRST fence records the client-visible
+        // uncertain window; later fences keep it. AS-IS re-records,
+        // shrinking the window the client is told is unproven.
+        assert_eq!(fence_record_plan(false), FenceRecordPlan::RecordFirst);
+        assert_eq!(fence_record_plan(true), FenceRecordPlan::KeepExisting);
+        assert_eq!(
+            fence_record_plan_as_is(true),
+            FenceRecordPlan::RecordFirst,
+            "AS-IS dente: later fence overwrites the first report"
+        );
+        let fd = named_fn_src(include_str!("db.rs"), "fence_durability").expect("fence_durability");
+        assert!(
+            fd.contains("match crate::write_admission_kernel::fence_record_plan("),
+            "fence_durability must match fence_record_plan"
+        );
+        assert!(
+            !fd.contains("fence_report.is_none()"),
+            "the raw first-fence gate left the trampoline"
+        );
+    }
+
+    #[test]
+    fn group_batch_sync_plan_on_live_sync_batch_forces_group() {
+        // RFC-0219 P1.2: a sync-flagged batch forces the group's single
+        // fsync; AS-IS lets every batch ride (sync client acked without
+        // barrier).
+        assert_eq!(group_batch_sync_plan(true), GroupSyncPlan::BatchForcesSync);
+        assert_eq!(group_batch_sync_plan(false), GroupSyncPlan::BatchRidesGroup);
+        assert_eq!(
+            group_batch_sync_plan_as_is(true),
+            GroupSyncPlan::BatchRidesGroup,
+            "AS-IS dente: sync batch rides the group"
+        );
+        let gp = named_fn_src(include_str!("db.rs"), "group_prepare").expect("group_prepare");
+        assert!(
+            gp.contains("match crate::write_admission_kernel::group_batch_sync_plan("),
+            "group_prepare must match group_batch_sync_plan"
+        );
+        assert!(
+            !gp.contains("wal_sync_required(true, do_sync, false)"),
+            "the raw client-sync gate left the trampoline"
+        );
     }
 
     #[test]
@@ -700,6 +1526,134 @@ mod tests {
         assert!(!pit_resync_needs_rewrite(false));
     }
 
+    #[test]
+    fn pit_resync_rewrite_plan_on_live_resync_rewrites() {
+        // RFC-0219 P1.4: a resync report rewrites the WAL from the
+        // recovered prefix; AS-IS keeps the damaged log (dente).
+        assert_eq!(
+            pit_resync_rewrite_plan(true),
+            PitResyncRewritePlan::RewriteWalFromPrefix
+        );
+        assert_eq!(
+            pit_resync_rewrite_plan(false),
+            PitResyncRewritePlan::KeepRecoveredPrefix
+        );
+        assert_eq!(
+            pit_resync_rewrite_plan_as_is(true),
+            PitResyncRewritePlan::KeepRecoveredPrefix,
+            "AS-IS dente: resync report never rewrites"
+        );
+        let open = named_fn_src(include_str!("db.rs"), "open_with_env_sourced")
+            .expect("open_with_env_sourced");
+        assert!(
+            open.contains("match crate::write_admission_kernel::pit_resync_rewrite_plan("),
+            "open_with_env_sourced must match pit_resync_rewrite_plan"
+        );
+        assert!(
+            !open.contains("pit_resync_needs_rewrite("),
+            "the raw resync gate left the trampoline"
+        );
+    }
+
+    #[test]
+    fn parked_pop_plan_on_live_nonempty_queue_pops() {
+        // RFC-0219 P2.1: the pop happens EXACTLY when the parked queue
+        // is non-empty; AS-IS pops from the empty queue (dente).
+        assert_eq!(parked_pop_plan(0), ParkedPopPlan::NoParkedTables);
+        assert_eq!(parked_pop_plan(1), ParkedPopPlan::PopOldestParked);
+        assert_eq!(parked_pop_plan(3), ParkedPopPlan::PopOldestParked);
+        assert_eq!(
+            parked_pop_plan_as_is(0),
+            ParkedPopPlan::PopOldestParked,
+            "AS-IS dente: pops from the empty queue"
+        );
+        let top =
+            named_fn_src(include_str!("db.rs"), "take_oldest_parked").expect("take_oldest_parked");
+        assert!(
+            top.contains("match crate::write_admission_kernel::parked_pop_plan("),
+            "take_oldest_parked must match parked_pop_plan"
+        );
+        assert!(
+            !top.contains("batch_is_empty("),
+            "the raw empty-queue gate left the trampoline"
+        );
+    }
+
+    #[test]
+    fn cas_absent_put_on_live_key_is_not_ok() {
+        assert!(cas_absent_put(false));
+        assert!(!cas_absent_put(true));
+        assert!(
+            cas_absent_put_as_is(true),
+            "AS-IS dente: live key still puts"
+        );
+        let body =
+            named_fn_src(include_str!("db.rs"), "put_if_absent_with").expect("put_if_absent_with");
+        assert!(
+            body.contains("cas_absent_put("),
+            "put_if_absent_with must match cas_absent_put"
+        );
+    }
+
+    #[test]
+    fn cas_eq_put_on_live_mismatch_is_not_ok() {
+        assert!(cas_eq_put(true));
+        assert!(!cas_eq_put(false));
+        assert!(cas_eq_put_as_is(false), "AS-IS dente: mismatch still puts");
+        let body = named_fn_src(include_str!("db.rs"), "put_if_eq_with").expect("put_if_eq_with");
+        assert!(
+            body.contains("cas_eq_put("),
+            "put_if_eq_with must match cas_eq_put"
+        );
+    }
+
+    #[test]
+    fn range_inverted_on_live_inverted_is_not_ok() {
+        assert!(range_inverted(true));
+        assert!(!range_inverted(false));
+        assert!(
+            !range_inverted_as_is(true),
+            "AS-IS dente: inverted range still applies"
+        );
+        let body =
+            named_fn_src(include_str!("db.rs"), "delete_range_with").expect("delete_range_with");
+        assert!(
+            body.contains("range_inverted("),
+            "delete_range_with must match range_inverted"
+        );
+        assert!(
+            !body.contains("if s >= e"),
+            "delete_range_with must not keep a raw inverted-range if"
+        );
+    }
+
+    /// RFC-0213 P2.2: the composed storage path over the three
+    /// registered kernels — the AS-IS composed twin lies on every leg
+    /// at once (stall ignored, fence skipped, torn tail never cut).
+    #[test]
+    fn storage_write_recovered_on_live_stall_fence_torn_is_not_ok() {
+        // admitted + published + intact tail ⇒ present after recovery
+        assert!(storage_write_recovered(
+            10, false, 50, 3, false, 8, false, false, 40, 40
+        ));
+        // mem over an armed limit ⇒ refused before the WAL
+        assert!(!storage_write_recovered(
+            100, true, 50, 3, false, 8, false, false, 40, 40
+        ));
+        // required sync failed ⇒ fenced — no publish
+        assert!(!storage_write_recovered(
+            10, false, 50, 3, false, 8, true, true, 40, 40
+        ));
+        // torn tail past last-good ⇒ cut on recovery
+        assert!(!storage_write_recovered(
+            10, false, 50, 3, false, 8, false, false, 90, 40
+        ));
+        assert!(
+            storage_write_recovered_as_is(100, true, 50, 3, false, 8, true, true, 90, 40),
+            "AS-IS dente: stall + fence + torn tail still 'present'"
+        );
+    }
+
     /// RFC-0171 P1.1/P1.2: data-fate `if`s on put-Ok and recover/reopen
     /// must call a kernel (not a raw predicate in `db.rs`).
     #[test]
@@ -713,6 +1667,7 @@ mod tests {
             "wal_sync_group",
             "sync_dir_if_required",
             "ensure_write_admitted_for",
+            "maybe_auto_flush",
         ];
         let rec_fns = ["open_with_env_sourced"];
         let mut bad = Vec::new();
@@ -841,12 +1796,18 @@ mod tests {
             || cond.contains("seq_exhausted(")
             || cond.contains("batch_is_empty(")
             || cond.contains("fence_on_sync_fail(")
+            || cond.contains("wal_commit_plan(")
             || cond.contains("dir_sync_required(")
             || cond.contains("torn_head_is_empty_log(")
             || cond.contains("torn_tail_needs_cut(")
             || cond.contains("seq_after_feed(")
             || cond.contains("pit_resync_needs_rewrite(")
+            || cond.contains("cas_absent_put(")
+            || cond.contains("cas_eq_put(")
+            || cond.contains("range_inverted(")
             || cond.contains("reopen_outcome(")
             || cond.contains("feed_is_lazy(")
+            || cond.contains("skip_auto_flush(")
+            || cond.contains("auto_flush_due(")
     }
 }

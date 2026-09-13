@@ -7,3 +7,4 @@ description = "POSIX fdatasync / fadvise for PedraDB (core stays forbid(unsafe_c
 rust-version.workspace = true
 
 [dependencies]
+libc = "0.2"

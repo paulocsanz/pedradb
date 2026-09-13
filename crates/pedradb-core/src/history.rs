@@ -11,6 +11,7 @@
 
 use crate::env::{Env, EnvFile};
 use crate::error::{CoreError, Result};
+use crate::key::ValueType;
 use crate::wal::crc::crc32c;
 use std::collections::VecDeque;
 use std::io::{Read, Write};
@@ -366,7 +367,12 @@ impl HistoryTier {
         let (key_lo, key_hi) = match key_coverage {
             // An empty segment carries no coverage — keep `None` (always
             // walks; decode of an all-empty tier stays `None` too).
-            Some((lo, hi)) if !lo.is_empty() || !hi.is_empty() => (Some(lo), Some(hi)),
+            Some((lo, hi))
+                if !crate::write_admission_kernel::batch_is_empty(lo.len() as u64)
+                    || !crate::write_admission_kernel::batch_is_empty(hi.len() as u64) =>
+            {
+                (Some(lo), Some(hi))
+            }
             _ => (None, None),
         };
         self.manifest.segs.push_back(SegmentMeta {
@@ -657,6 +663,25 @@ pub struct HistoryRecord {
     pub seq: u64,
     /// 0 = value, 1 = delete, 2 = range delete.
     pub kind: u8,
+}
+
+/// Wire tag for [`HistoryRecord::kind`]: 0 = value, 1 = delete, 2 = range delete.
+///
+/// Not [`ValueType::as_u8`] (Rocks nibble: Deletion=0, Value=1) — that swap
+/// is the AS-IS silent-wrong for this wire.
+#[must_use]
+pub fn archive_kind_tag(kind: ValueType) -> u8 {
+    match kind {
+        ValueType::Value => 0,
+        ValueType::Deletion => 1,
+        ValueType::RangeDeletion => 2,
+    }
+}
+
+/// AS-IS: Rocks nibble (`ValueType::as_u8`) — puts and point-deletes swap.
+#[must_use]
+pub fn archive_kind_tag_as_is(kind: ValueType) -> u8 {
+    kind.as_u8()
 }
 
 /// Walk every record of a serialized segment, verifying the per-record CRC.
@@ -1091,7 +1116,11 @@ impl RemoteTier {
     /// `LATEST` body: `MANIFEST-<n>\n<crc32c hex of that generation>`.
     fn parse_latest_pointer(buf: &str) -> Option<(&str, u32)> {
         let (name, crc_hex) = buf.trim_end().split_once('\n')?;
-        if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains('\0') {
+        if crate::write_admission_kernel::batch_is_empty(name.len() as u64)
+            || name.contains('/')
+            || name.contains('\\')
+            || name.contains('\0')
+        {
             return None;
         }
         let crc = u32::from_str_radix(crc_hex.trim(), 16).ok()?;
@@ -1187,7 +1216,9 @@ impl RemoteTier {
             report.failures.push(("LATEST".into(), "unreadable".into()));
             return;
         };
-        if f.read_to_string(&mut buf).is_err() || buf.trim().is_empty() {
+        if f.read_to_string(&mut buf).is_err()
+            || crate::write_admission_kernel::batch_is_empty(buf.trim().len() as u64)
+        {
             report.errors = report.errors.saturating_add(1);
             report.failures.push(("LATEST".into(), "empty".into()));
             return;
@@ -1232,7 +1263,9 @@ impl RemoteTier {
         if env.exists(&latest) {
             if let Ok(mut f) = env.open_read(&latest) {
                 let mut buf = String::new();
-                if f.read_to_string(&mut buf).is_ok_and(|_| !buf.is_empty()) {
+                if f.read_to_string(&mut buf)
+                    .is_ok_and(|_| !crate::write_admission_kernel::batch_is_empty(buf.len() as u64))
+                {
                     if let Some((name, expect_crc)) = Self::parse_latest_pointer(&buf) {
                         let p = self.segment_path(name);
                         if env.exists(&p) {
@@ -1276,9 +1309,33 @@ impl RemoteTier {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::key::ValueType;
     use std::cell::{Cell, RefCell};
     use std::collections::BTreeMap;
     use std::rc::Rc;
+
+    #[test]
+    fn archive_kind_tag_on_live_note_is_not_ok() {
+        assert_eq!(archive_kind_tag(ValueType::Value), 0);
+        assert_eq!(archive_kind_tag(ValueType::Deletion), 1);
+        assert_eq!(archive_kind_tag(ValueType::RangeDeletion), 2);
+        assert_eq!(archive_kind_tag_as_is(ValueType::Value), 1);
+        assert_eq!(archive_kind_tag_as_is(ValueType::Deletion), 0);
+        let src = include_str!("db.rs");
+        let note = src
+            .split("fn archive_note(")
+            .nth(1)
+            .and_then(|s| s.split("fn archive_flush_chunk").next())
+            .expect("archive_note");
+        assert!(
+            note.contains("archive_kind_tag("),
+            "archive_note must match archive_kind_tag"
+        );
+        assert!(
+            !note.contains("ValueType::Value => 0"),
+            "archive_note must not keep a raw ValueType wire match"
+        );
+    }
 
     /// In-memory `Env` (flat namespace, dir names derived from parents).
     /// Writes commit to the map on sync and on drop.

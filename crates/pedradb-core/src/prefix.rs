@@ -1,5 +1,11 @@
 //! Exclusive end of a prefix scan (F57 / F58).
 //!
+//! **Term:** this file is what `rustc` links. Aeneas extracts that body
+//! (`scripts/aeneas_prefix.sh`). A Seq / clone_bytes view of the rustc
+//! `&[u8]` `to_vec` body is a model twin — not last-wins (deleted).
+//!
+//!   ./scripts/aeneas_prefix.sh --required
+//!
 //! Increment the last non-`0xff` byte. `None` = unbounded (empty or all-`0xff`).
 //! Store, fold, and SQL must call **this** function — not `prefix || [0xff]`.
 
@@ -9,9 +15,10 @@
 #[must_use]
 pub fn prefix_exclusive_end(prefix: &[u8]) -> Option<Vec<u8>> {
     let mut e = prefix.to_vec();
-    while let Some(last) = e.last_mut() {
-        if *last < 0xff {
-            *last += 1;
+    while e.len() > 0 {
+        let i = e.len() - 1;
+        if e[i] < 0xff {
+            e[i] += 1;
             return Some(e);
         }
         e.pop();
@@ -44,6 +51,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn prefix_rs_has_no_verus_cartoon() {
+        let src = include_str!("prefix.rs");
+        let block = concat!("verus", "!", " {");
+        let cfg = concat!("cfg(", "verus", "_keep", "_ghost)");
+        assert!(
+            !src.contains(block),
+            "Seq/clone_bytes stand-in is not last-wins of rustc &[u8]"
+        );
+        assert!(
+            !src.contains(cfg),
+            "cfg split hides rustc types from the prover"
+        );
+    }
+
+    #[test]
     fn ascii_prefix_increments_last() {
         assert_eq!(prefix_exclusive_end(b"ab"), Some(b"ac".to_vec()));
     }
@@ -57,6 +79,27 @@ mod tests {
     fn all_ff_is_unbounded() {
         assert_eq!(prefix_exclusive_end(&[0xff, 0xff]), None);
         assert_eq!(prefix_exclusive_end(b""), None);
+    }
+
+    #[test]
+    fn key_in_prefix_range_on_live_last_is_not_ok() {
+        assert!(key_in_prefix_range(b"ab", b"a", Some(b"b".as_ref())));
+        assert!(!key_in_prefix_range(b"b", b"a", Some(b"b".as_ref())));
+        assert!(key_in_prefix_range(b"z", b"", None));
+        let src = include_str!("db.rs");
+        let last = src
+            .split("pub fn last_under_prefix")
+            .nth(1)
+            .and_then(|s| s.split("pub fn last_under_user_prefix").next())
+            .expect("last_under_prefix");
+        assert!(
+            last.contains("key_in_prefix_range("),
+            "last_under_prefix must match key_in_prefix_range"
+        );
+        assert!(
+            !last.contains("!k.starts_with(prefix)"),
+            "last_under_prefix must not keep a raw starts_with skip"
+        );
     }
 
     #[test]

@@ -1,5 +1,11 @@
 //! Pure WAL recover choices (F4 / F14 / EXPLODE).
 //!
+//! **Single artifact (Aeneas-paid):** this file is what `rustc` links and
+//! what the Lean theorems run over — Charon+Aeneas extract of these exact
+//! bodies. No Verus twin stands in for them.
+//!
+//!   ./scripts/aeneas_wal_recover.sh
+//!
 //! Production [`crate::wal::reader::WalReader::collect_all`] and
 //! [`crate::wal::reader::WalReader::read_record`] call these. Bytes on disk,
 //! torn writes, and fsync are **caller + axiom**.
@@ -19,6 +25,12 @@
 //! - orphan `Middle` / `Last` is **fail-stop**, not clean EOF (F14)
 
 #![forbid(unsafe_code)]
+
+//! **Term:** this file is what `rustc` links. Aeneas extracts that body
+//! (`scripts/aeneas_wal_recover.sh`). A Verus stand-in of RecoverKind billed
+//! as last-wins of a cfg-split file is a model twin (deleted).
+//!
+//!   ./scripts/aeneas_wal_recover.sh --required
 
 use super::format::RecordType;
 
@@ -123,6 +135,21 @@ impl FragKind {
             RecordType::Middle => Self::Middle,
             RecordType::Last => Self::Last,
         }
+    }
+}
+
+/// AS-IS (pair `from_record_type`): the wire `First` byte decodes as
+/// `Middle` — every multi-part record's opening fragment reads as an
+/// orphan continuation, so assembly fail-stops instead of starting the
+/// scratch.
+#[must_use]
+pub fn from_record_type_as_is(t: RecordType) -> FragKind {
+    match t {
+        RecordType::Zero => FragKind::Zero,
+        RecordType::Full => FragKind::Full,
+        RecordType::First => FragKind::Middle,
+        RecordType::Middle => FragKind::Middle,
+        RecordType::Last => FragKind::Last,
     }
 }
 
@@ -295,6 +322,21 @@ pub fn fragment_act_as_is(kind: FragKind, scratch_empty: bool) -> FragAct {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recover_kernel_has_no_verus_cartoon() {
+        let src = include_str!("recover_kernel.rs");
+        let block = concat!("verus", "!", " {");
+        let cfg = concat!("cfg(", "verus", "_keep", "_ghost)");
+        assert!(
+            !src.contains(block),
+            "stand-in is not last-wins of rustc recover_collect_act"
+        );
+        assert!(
+            !src.contains(cfg),
+            "cfg split hides rustc types from the prover"
+        );
+    }
 
     #[test]
     fn resync_only_length_class() {
@@ -517,5 +559,153 @@ mod tests {
             RecoverAct::Resync,
             "AS-IS dente: CRC becomes silent resync"
         );
+    }
+
+    /// Catalog three-teeth plant (from_record_type): the wire FIRST byte
+    /// must open a scratch — the as-is misdecode turns it into an orphan
+    /// continuation and the fragment never assembles.
+    #[test]
+    fn from_record_type_on_wire_type_is_not_ok() {
+        assert_eq!(
+            FragKind::from_record_type(RecordType::First),
+            FragKind::First
+        );
+        assert_eq!(
+            from_record_type_as_is(RecordType::First),
+            FragKind::Middle,
+            "AS-IS dente: FIRST fragment byte decodes as continuation"
+        );
+        // Downstream: the kernel starts the scratch; the misdecode is an
+        // orphan Middle with nothing in flight — F14 fail-stop.
+        assert_eq!(fragment_act(FragKind::First, true), FragAct::Start);
+        assert_eq!(fragment_act(FragKind::Middle, true), FragAct::FailStop);
+    }
+}
+
+/// Kani harnesses (RFC-0166 P0.3) — bounded model checks of the three
+/// RFC-named production fns. Domains are finite enums, so the checks are
+/// exhaustive: every input, functional contract + no panic. Bodies are
+/// straight-line matches (no loops) — no unwind bound is needed beyond the
+/// harness itself (`--default-unwind` covers it).
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    fn recover_kind_of(u: u8) -> RecoverKind {
+        match u {
+            0 => RecoverKind::Record,
+            1 => RecoverKind::CleanEof,
+            2 => RecoverKind::Truncated,
+            3 => RecoverKind::LengthCorrupt,
+            4 => RecoverKind::UnknownType,
+            5 => RecoverKind::OrphanFragment,
+            6 => RecoverKind::Crc,
+            7 => RecoverKind::ZeroHeaderTail,
+            _ => RecoverKind::Other,
+        }
+    }
+
+    fn frag_kind_of(u: u8) -> FragKind {
+        match u {
+            0 => FragKind::Full,
+            1 => FragKind::First,
+            2 => FragKind::Middle,
+            3 => FragKind::Last,
+            _ => FragKind::Zero,
+        }
+    }
+
+    fn record_type_of(u: u8) -> RecordType {
+        match u {
+            0 => RecordType::Zero,
+            1 => RecordType::Full,
+            2 => RecordType::First,
+            3 => RecordType::Middle,
+            _ => RecordType::Last,
+        }
+    }
+
+    /// On-disk type byte maps 1:1 onto the fragment kinds (exhaustive over
+    /// the 5 record types; no panic, no unknown arm).
+    #[kani::proof]
+    fn from_record_type_is_total_bijection() {
+        let u: u8 = kani::any();
+        kani::assume(u <= 4);
+        let t = record_type_of(u);
+        let k = FragKind::from_record_type(t);
+        // Contract: the 1:1 mapping (discriminant identity).
+        let expected = match u {
+            0 => FragKind::Zero,
+            1 => FragKind::Full,
+            2 => FragKind::First,
+            3 => FragKind::Middle,
+            _ => FragKind::Last,
+        };
+        assert!(k == expected);
+        // Distinct record types map to distinct kinds.
+        let v: u8 = kani::any();
+        kani::assume(v <= 4);
+        if u != v {
+            let k2 = FragKind::from_record_type(record_type_of(v));
+            assert!(k != k2);
+        }
+    }
+
+    /// F14 assembly: Full→Yield, First→Start, Zero→Skip; Middle/Last depend
+    /// on scratch; the real kernel NEVER answers CleanEof. Exhaustive over
+    /// 5 kinds × 2 scratch states.
+    #[kani::proof]
+    fn fragment_act_contract_and_divergence() {
+        let u: u8 = kani::any();
+        kani::assume(u <= 4);
+        let kind = frag_kind_of(u);
+        let scratch_empty: bool = kani::any();
+        let act = fragment_act(kind, scratch_empty);
+        match kind {
+            FragKind::Full => assert!(act == FragAct::Yield),
+            FragKind::First => assert!(act == FragAct::Start),
+            FragKind::Zero => assert!(act == FragAct::Skip),
+            FragKind::Middle => {
+                if scratch_empty {
+                    assert!(act == FragAct::FailStop);
+                } else {
+                    assert!(act == FragAct::Accumulate);
+                }
+            }
+            FragKind::Last => {
+                if scratch_empty {
+                    assert!(act == FragAct::FailStop);
+                } else {
+                    assert!(act == FragAct::Yield);
+                }
+            }
+        }
+        // The real kernel never claims clean EOF on an orphan (F14).
+        assert!(act != FragAct::CleanEof);
+        // Anti-vacuity at the model level: AS-IS diverges exactly on the
+        // orphan shape (CleanEof instead of FailStop) and agrees elsewhere.
+        let as_is = fragment_act_as_is(kind, scratch_empty);
+        let orphan = scratch_empty && matches!(kind, FragKind::Middle | FragKind::Last);
+        if orphan {
+            assert!(as_is == FragAct::CleanEof && as_is != act);
+        } else {
+            assert!(as_is == act);
+        }
+    }
+
+    /// F4 resync class: exactly Truncated / LengthCorrupt / UnknownType;
+    /// CRC and orphan fail-stop (the AS-IS resync-on-CRC hole is bounded-
+    /// model-checked to exist and only there). Exhaustive over 9 kinds.
+    #[kani::proof]
+    fn is_length_resyncable_exact_class() {
+        let u: u8 = kani::any();
+        kani::assume(u <= 8);
+        let kind = recover_kind_of(u);
+        let r = is_length_resyncable(kind);
+        let expected = matches!(u, 2 | 3 | 4);
+        assert!(r == expected);
+        // Divergence: AS-IS adds exactly the CRC case.
+        let r_as_is = is_length_resyncable_as_is(kind);
+        assert!(r_as_is == (r || u == 6));
     }
 }

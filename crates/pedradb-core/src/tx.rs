@@ -113,7 +113,7 @@ impl<'db, E: crate::env::Env> Transaction<'db, E> {
             .ensure_snapshot_readable(crate::db::Snapshot::at(self.snapshot))?;
         // L0 write stall (open-items §2.3) — same gate as put/apply_batch.
         self.db.ensure_write_admitted()?;
-        if self.staging.is_empty() {
+        if crate::write_admission_kernel::batch_is_empty(self.staging.len() as u64) {
             self.finished = true;
             return Ok(self.db.last_sequence());
         }
@@ -163,9 +163,8 @@ impl<'db, E: crate::env::Env> Transaction<'db, E> {
         let last_seq = records.last().map_or(0, |o| o.sequence);
         match self.db.commit_ops_with(records, durability) {
             Ok(()) => {
-                // F18: auto-flush must not fail the commit. Async TX parks
-                // (RFC-0184 P0.7); G1 may still write L0.
-                self.db.flush_after_commit_opts(&durability);
+                // F18: TX is durable after commit_ops; auto-flush must not fail the commit.
+                self.db.maybe_auto_flush_best_effort();
                 self.finished = true;
                 Ok(last_seq)
             }

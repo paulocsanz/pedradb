@@ -186,7 +186,10 @@ impl Turnstile {
     pub fn wait_ready(&self) {
         let mut g = self.inner.lock().expect("pct turnstile mutex poisoned");
         let deadline = Instant::now() + DEADLOCK_TIMEOUT;
-        while (g.ready.is_empty() || g.turn.is_some()) && g.finished < self.n {
+        while (crate::write_admission_kernel::batch_is_empty(g.ready.len() as u64)
+            || g.turn.is_some())
+            && g.finished < self.n
+        {
             let now = Instant::now();
             assert!(
                 now < deadline,

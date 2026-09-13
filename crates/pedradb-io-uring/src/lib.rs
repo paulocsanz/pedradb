@@ -255,7 +255,7 @@ impl IoUringFile {
     /// `submit_and_wait(1)` serialized every WAL/SST write (diag-6).
     /// Durability is [`EnvFile::sync_data`] (`fdatasync(2)`, not the ring).
     fn posix_pwrite(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if buf.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(buf.len() as u64) {
             return Ok(0);
         }
         #[cfg(unix)]
@@ -281,7 +281,7 @@ impl IoUringFile {
         let Inner::Uring { state } = &*self.env.inner else {
             return self.posix_pwrite(buf);
         };
-        if buf.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(buf.len() as u64) {
             return Ok(0);
         }
         let mut state = state.lock();
@@ -508,6 +508,13 @@ impl Env for IoUringEnv {
         Ok(fs::metadata(path)?.len())
     }
 
+    fn available_bytes(&self, path: &Path) -> io::Result<Option<u64>> {
+        match pedradb_posix::filesystem_available_bytes(path) {
+            Ok(n) => Ok(Some(n)),
+            Err(_) => Ok(None),
+        }
+    }
+
     fn advise(&self, path: &Path, offset: u64, len: u64, kind: AdviseKind) -> io::Result<()> {
         let f = File::open(path)?;
         let hint = match kind {
@@ -707,6 +714,7 @@ mod tests {
             auto_compact_sst_bytes: None,
             exclusive: true,
             large_value_threshold: None,
+            sst_payload_budget_bytes: None,
         }
     }
 

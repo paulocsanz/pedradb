@@ -3,7 +3,7 @@ name = "pedradb-ops"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "PedraDB ops suite: backup, PITR restore, format migration"
+description = "PedraDB ops suite: backup, PITR restore, format migration, RocksDB→Pedra copy"
 rust-version.workspace = true
 
 [dependencies]
@@ -11,3 +11,15 @@ pedradb-core.workspace = true
 pedradb-io-uring.workspace = true
 crc32c.workspace = true
 thiserror.workspace = true
+# C++ RocksDB as a *reader* for `migrate_from_rocks` only. Never linked into
+# pedradb-core. Default builds stay free of librocksdb.
+rocksdb = { version = "0.22", optional = true, default-features = false }
+
+[features]
+default = []
+from-rocks = ["dep:rocksdb"]
+
+[[test]]
+name = "from_rocks"
+path = "tests/from_rocks.rs"
+required-features = ["from-rocks"]

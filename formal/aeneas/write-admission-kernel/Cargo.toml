@@ -1,0 +1,12 @@
+[workspace]
+
+[package]
+name = "pedra-aeneas-write-admission-kernel"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "Standalone crate whose [lib] path is production write_admission_kernel.rs (RFC-0170 P2.1)"
+
+[lib]
+path = "../../../crates/pedradb-core/src/write_admission_kernel.rs"

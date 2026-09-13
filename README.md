@@ -42,10 +42,10 @@ consistency above the engine. The API is
   submission). One C++ exception, optional and explicit: the RocksDB
   peer behind `rocksdb-parity-bench --features real` (off by default;
   the engine never links it).
-- **Machine-checked where it counts.** 23 decision kernels have
-  Verus-verified twins — table in
-  [Verification](#verification)). Around them: seeded fault
-  injection and close to 1,000 tests.
+- **Machine-checked where it counts.** Decision kernels are proved
+  on the file `rustc` links (Aeneas extract → Lean, 149 catalog
+  pairs — table in [Verification](#verification)). Around them:
+  seeded fault injection and close to 1,000 tests.
 - **A modern write path.** io_uring on Linux with transparent POSIX
   fallback, group commit, a value log for large values, LZ4 block
   compression, bloom filters, block cache, sorted bulk ingest, and local
@@ -126,30 +126,33 @@ No C++ toolchain is needed.
 
 ## Verification
 
-Not “no bugs” — machine-checked where it counts. Decision kernels
-have Verus-verified twins, checked with `scripts/formal/verus_check.sh --all`
-against a pinned Verus. The production kernel is the source of record;
-the twin proves its decision logic. Write-admission (RFC-0171) is
-verified on the file `rustc` links — no side-copy twin. Not proven: the OS, the disk,
-rustc, Verus, or Z3.
+Not “no bugs” — machine-checked where it counts. Decision kernels are
+extracted from the production file `rustc` links (Charon + Aeneas → Lean).
+The catalog (`scripts/formal/catalog.json`) lists **149 pairs** in
+the shipped crates. `scripts/formal/pedra_formal.sh --ci` refuses silent
+drift between the kernel, its callers, and the extract. Not proven: the
+OS, the disk, rustc, Aeneas, Lean, or Z3.
 
 | Area | Proves | Proof files |
 |---|---|---|
-| WAL recovery | a torn tail recovers as a clean prefix; record framing | `wal_recover`, `write_record_count` |
-| Manifest & reopen | newest consistent MANIFEST; reopen under WAL damage; changelog rebuild; crash-dictionary link | `manifest_recover`, `reopen_outcome`, `changelog_rebuild`, `dictionary_link` |
+| WAL recovery | a torn tail recovers as a clean prefix; record framing; WAL state | `wal_recover`, `write_record_count`, `wal_state` |
+| Manifest & reopen | newest consistent MANIFEST; reopen under WAL damage; changelog rebuild | `manifest_recover`, `reopen_outcome`, `changelog` |
 | CRC fate | a mismatch refuses the read — fail-closed | `sst_crc_fate`, `crc_match` |
 | Durability syscalls | fdatasync and io_uring completion return codes | `fdatasync_rc`, `cqe_res` |
+| Durability spine | ack-before-barrier is refused; crash cuts are legal; product crown | `write_ack`, `env_crash`, `d1_modelo`, `product_crown` |
 | Group commit | queue drain and commit visibility; wait-for is deadlock-free | `group_commit`, `wait_for_deadlock` |
 | Flush & compaction | when to flush, when to compact, which CF a rewrite lands in | `flush_decision`, `compact_decision`, `compact_rewrites_sst_cf` |
 | Leveling | the level-size ladder and the two-level pick | `leveling`, `leveling_pick` |
 | Bloom filters | no false negatives; header bound fails closed | `bloom_filter`, `bloom_header` |
 | MVCC visibility | snapshot visibility | `visible_at` |
 | Iterators & scans | window keep, prefix exclusive-end, range-tombstone cover, scan guard | `iter_window`, `prefix_exclusive_end`, `range_covers`, `scan_guard` |
-| Key codecs | sequence+type packing; CF family, prefix codec round-trip, SST family inference | `ikey_pack`, `cf_family`, `cf_family_of`, `cf_encode_effective`, `encode_cf_key`, `decode_cf_key`, `infer_sst_cf` |
+| Key codecs | sequence+type packing; CF family, prefix codec, SST family inference | `ikey_pack`, `cf_family`, `encode_cf_key`, `infer_sst_cf` |
 | Probe order | point lookups probe newest-first; a newer tombstone is never shadowed | `probe_order` |
+| Lookup / LSM R1 | covering probe; no resurrection across levels | `lookup`, `lsm_r1` |
+| Write admission | stall, WAL barrier, torn-head/tail, dir fsync — on the production file | `write_admission_kernel` |
 | Value log | GC decision | `vlog_gc_decision` |
-| PITR restore | archived WAL record is replayed iff `base < seq ≤ target`; a future seq cannot appear | `pitr_window` |
-| Write admission | stall, WAL barrier, torn-head/tail, dir fsync — proved on the production file | `write_admission_kernel` |
+| PITR restore | archived WAL record is replayed iff `base < seq ≤ target` | `pitr_window` |
+| Product properties | D1 durability / R1 no-resurrection / T1 atomicity as rustc-linked predicates | `properties_kernel` |
 
 ## Benchmarks
 
@@ -263,7 +266,7 @@ Fjall settles during hydrate (≈0 s) and is ahead cross-harness on 100M
 
 ## How it's tested
 
-- **Close to 1,000 tests** across the seven crates: unit tests, model tests
+- **Close to 1,000 tests** across the shipped crates: unit tests, model tests
   against `stateright` specifications (recovery, bloom, changelog, prefix,
   range, scan), codec fuzz smoke tests, a WAL durability adversarial suite,
   and a concurrent race stress suite.
@@ -272,10 +275,9 @@ Fjall settles during hydrate (≈0 s) and is ahead cross-harness on 100M
   tails, process kill after commit. Same seed, same execution. It is a
   reproducible injection surface over the real recovery path, not a
   whole-system simulator.
-- **Verus twins**: kernel-to-proof pairs in the shipped crates, checked
-  against a pinned Verus release with `scripts/formal/verus_check.sh --all`
-  — table in [Verification](#verification). Write-admission (RFC-0171) is
-  proved on the production file rustc links.
+- **Aeneas extracts**: kernel-to-proof pairs in the shipped crates
+  (`scripts/aeneas_*.sh`, `formal/aeneas/`). The production file is the
+  term — table in [Verification](#verification).
 - **Oracle testing**: in our lab harness, workloads are diffed against real
   RocksDB. The oracle crate is not part of this repository, and RocksDB is
   never linked into the engine.
@@ -297,6 +299,7 @@ rocksdb = { git = "https://github.com/paulocsanz/pedradb", package = "rocksdb-co
 | Crate | What it is |
 |---|---|
 | `pedradb-core` | The storage engine. `#![forbid(unsafe_code)]`. |
+| `pedradb-spec` | D1/R1/T1 product-property predicates (rustc-linked). |
 | `pedradb-examples` | Runnable ladder: hello-world through a small ledger, then backup / Rocks drop-in. |
 | `pedradb-ops` | Local backup, WAL shipping, point-in-time restore, format migration. |
 | `pedradb-sim` | Seeded fault injection for recovery testing. |

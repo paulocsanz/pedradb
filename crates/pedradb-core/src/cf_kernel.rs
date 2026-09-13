@@ -1,5 +1,11 @@
 //! Pure column-family membership / encode (RFC-0150 P0).
 //!
+//! **Term:** this file is what `rustc` links. Aeneas extracts that body
+//! (`scripts/aeneas_cf.sh`). A Verus u64-nul-pos stand-in of `&[u8]`
+//! `key_in_cf_family` is a model twin — not last-wins (deleted).
+//!
+//!   ./scripts/aeneas_cf.sh --required
+//!
 //! Compat stores `cf\\0user`. Kernel keys without a NUL share the `default`
 //! family. A scan or compact of `default` that treats `lock\\0…` as in-family
 //! is the CF-leak silent-wrong (foreign keys in a CF iterator / compact of
@@ -8,7 +14,7 @@
 //! Production flush/compact/compat call these helpers. Bytes on disk stay
 //! with the caller.
 //!
-//! Verus twin: `crates/pedradb-core/verus/cf_family.rs`.
+//! Aeneas of the rustc body is the term. A Verus stand-in is not last-wins.
 
 #![forbid(unsafe_code)]
 
@@ -20,6 +26,12 @@ pub fn cf_family_of(user_key: &[u8]) -> String {
         Some(i) if i > 0 => String::from_utf8_lossy(&user_key[..i]).into_owned(),
         _ => "default".into(),
     }
+}
+
+/// AS-IS family parse: every key reports `default` (named family lost).
+#[must_use]
+pub fn cf_family_of_as_is(_user_key: &[u8]) -> String {
+    "default".into()
 }
 
 /// Whether `user_key` belongs to `family` (`"default"` matches both raw keys
@@ -53,6 +65,12 @@ pub fn cf_encode_effective<'a>(cf: &'a str, default_raw: bool) -> &'a str {
     }
 }
 
+/// AS-IS effective prefix: `default_raw` ignored — default stays prefixed.
+#[must_use]
+pub fn cf_encode_effective_as_is<'a>(_cf: &'a str, _default_raw: bool) -> &'a str {
+    _cf
+}
+
 /// Encode `key` for `cf` (`cf\0key`, or raw when default-raw).
 #[must_use]
 pub fn encode_cf_key(cf: &str, key: &[u8], default_raw: bool) -> Vec<u8> {
@@ -67,6 +85,12 @@ pub fn encode_cf_key(cf: &str, key: &[u8], default_raw: bool) -> Vec<u8> {
     out
 }
 
+/// AS-IS encode: prefix dropped — `(cf, key)` encodes as the bare key.
+#[must_use]
+pub fn encode_cf_key_as_is(_cf: &str, _key: &[u8], _default_raw: bool) -> Vec<u8> {
+    _key.to_vec()
+}
+
 /// Inverse of [`encode_cf_key`]: strip the `cf\0` prefix, or return `encoded`
 /// unchanged when default-raw.
 #[must_use]
@@ -76,6 +100,12 @@ pub fn decode_cf_key<'a>(cf: &str, encoded: &'a [u8], default_raw: bool) -> &'a 
         return encoded;
     }
     encoded.get(effective.len() + 1..).unwrap_or(&[])
+}
+
+/// AS-IS decode: cf prefix leaks into the user key (encoded unchanged).
+#[must_use]
+pub fn decode_cf_key_as_is<'a>(_cf: &str, _encoded: &'a [u8], _default_raw: bool) -> &'a [u8] {
+    _encoded
 }
 
 /// SST CF tag from key bounds. Empty = mixed / prefix-era (more than one family).
@@ -96,6 +126,13 @@ pub fn infer_sst_cf(smallest: Option<&[u8]>, largest: Option<&[u8]>) -> String {
     }
 }
 
+/// AS-IS tag inference: every file tags `default` (mixed bounds compacted
+/// as default).
+#[must_use]
+pub fn infer_sst_cf_as_is(_smallest: Option<&[u8]>, _largest: Option<&[u8]>) -> String {
+    "default".into()
+}
+
 /// Whether compact of `family` rewrites an SST tagged `sst_cf`.
 ///
 /// Mixed/legacy files (empty tag) are left alone. A tagged file is rewritten
@@ -114,44 +151,24 @@ pub fn compact_rewrites_sst_cf_as_is(_sst_cf: &str, _family: &str) -> bool {
     true
 }
 
-/// AS-IS family loss: every key reports `default` (a `lock\0…` key loses its
-/// family, so per-family flush tagging degrades to one bucket).
-#[must_use]
-pub fn cf_family_of_as_is(_user_key: &[u8]) -> String {
-    "default".into()
-}
-
-/// AS-IS raw-mode loss: `default` always carries its prefix, so the raw
-/// on-disk layout diverges from the engine's raw-default contract.
-#[must_use]
-pub fn cf_encode_effective_as_is(cf: &str, _default_raw: bool) -> &str {
-    cf
-}
-
-/// AS-IS prefix loss: keys stored raw — a `lock` key and a `default` key
-/// collide on the same encoded bytes (cross-CF overwrite).
-#[must_use]
-pub fn encode_cf_key_as_is(_cf: &str, key: &[u8], _default_raw: bool) -> Vec<u8> {
-    key.to_vec()
-}
-
-/// AS-IS strip loss: the `cf\0` prefix leaks into the user key returned to
-/// the application.
-#[must_use]
-pub fn decode_cf_key_as_is<'a, 'b>(_cf: &'a str, encoded: &'b [u8], _default_raw: bool) -> &'b [u8] {
-    encoded
-}
-
-/// AS-IS tag loss: every SST tags `default` (a mixed or `lock` file is
-/// compacted as `default`).
-#[must_use]
-pub fn infer_sst_cf_as_is(_smallest: Option<&[u8]>, _largest: Option<&[u8]>) -> String {
-    "default".into()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cf_kernel_has_no_verus_cartoon() {
+        let src = include_str!("cf_kernel.rs");
+        let block = concat!("verus", "!", " {");
+        let cfg = concat!("cfg(", "verus", "_keep", "_ghost)");
+        assert!(
+            !src.contains(block),
+            "u64-nul-pos stand-in is not last-wins of rustc &[u8]"
+        );
+        assert!(
+            !src.contains(cfg),
+            "cfg split hides rustc types from the prover"
+        );
+    }
 
     #[test]
     fn default_matches_raw_and_prefixed() {

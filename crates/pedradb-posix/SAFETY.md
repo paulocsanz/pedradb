@@ -68,6 +68,21 @@ No `unsafe`. `fsync_file` is `File::sync_all`. `sync_dir_fd` is
 `F_FULLFSYNC`. Directory-fd `fdatasync` is Linux-practical; Darwin is the
 same product tradeoff as WAL.
 
+### `statvfs` (`filesystem_available_bytes`, Unix except Miri)
+
+- `libc::statvfs(path, &mut buf)` — POSIX `int statvfs(const char *, struct statvfs *)`.
+  Layout of `struct statvfs` comes from the `libc` crate (not a local
+  struct: a wrong `f_bavail` would refuse production writes).
+- `path` is a live `CString` for the call; the pointer is not stored.
+- `rc != 0` → `Error::last_os_error()` (errno on this thread). `rc == 0`
+  then `assume_init` on the out-buffer.
+- Free bytes = `f_bavail * f_frsize` (unprivileged available, fragment
+  size). Saturating multiply into `u64`.
+- **Miri / non-Unix:** `Err(Unsupported)` — no FFI. Callers map that to
+  unknown (`None`) and must not treat it as disk-full (RFC-0179).
+- This is a **probe**, not a durability barrier. Linking `libc` here is
+  not the Apple-`fdatasync` hole (that symbol stays a local `extern "C"`).
+
 ## What this crate must not grow
 
 - `mmap`, io_uring, C ABI handles.

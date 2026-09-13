@@ -102,6 +102,12 @@ struct FailState {
     delay_ticks: Cell<u64>,
     /// Stall ticks to add each time a counted op passes while armed.
     delay_per_op: Cell<u64>,
+    /// RFC-0179 P1.1: when true, `Env::available_bytes` returns `available`.
+    space_injected: Cell<bool>,
+    /// Injected free bytes (`None` = unknown probe). Ignored until injected.
+    available: Cell<Option<u64>>,
+    /// RFC-0179: when true, `available_bytes` returns Err (failed probe).
+    probe_err: Cell<bool>,
 }
 
 impl FailState {
@@ -119,13 +125,13 @@ impl FailState {
             return Ok(());
         }
         let left = self.remaining.get();
-        if left == 0 {
+        if pedradb_core::write_admission_kernel::batch_is_empty(left) {
             if self.once.get() && self.fired.get() {
                 return Ok(());
             }
             self.fired.set(true);
             let d = self.delay_per_op.get();
-            if d > 0 {
+            if !pedradb_core::write_admission_kernel::batch_is_empty(d) {
                 self.delay_ticks
                     .set(self.delay_ticks.get().saturating_add(d));
             }
@@ -143,7 +149,7 @@ impl FailState {
             self.remaining.set(left - 1);
         }
         let d = self.delay_per_op.get();
-        if d > 0 {
+        if !pedradb_core::write_admission_kernel::batch_is_empty(d) {
             self.delay_ticks
                 .set(self.delay_ticks.get().saturating_add(d));
         }
@@ -239,6 +245,9 @@ impl<E: Env> FailingEnv<E> {
             short_write_cap: Cell::new(None),
             delay_ticks: Cell::new(0),
             delay_per_op: Cell::new(0),
+            space_injected: Cell::new(false),
+            available: Cell::new(None),
+            probe_err: Cell::new(false),
         };
         Self {
             inner,
@@ -305,6 +314,21 @@ impl<E: Env> FailingEnv<E> {
         self.state.delay_ticks.get()
     }
 
+    /// RFC-0179 P1.1: inject `Env::available_bytes` (`None` = unknown probe).
+    /// Shared across clones (`Rc`), so a handle kept outside `Db` can drop
+    /// free space after open.
+    pub fn set_available_bytes(&self, n: Option<u64>) {
+        self.state.probe_err.set(false);
+        self.state.space_injected.set(true);
+        self.state.available.set(n);
+    }
+
+    /// RFC-0179: inject `available_bytes` Err (failed `statvfs`). Glue maps
+    /// Err → unknown via `disk_probe_or_unknown`; must not false-refuse.
+    pub fn inject_probe_err(&self) {
+        self.state.probe_err.set(true);
+    }
+
     /// Heal even a permanent fault.
     pub fn disarm(&self) {
         self.state.remaining.set(u64::MAX);
@@ -369,7 +393,7 @@ impl<F: EnvFile> Write for FailingFile<F> {
             && self.state.op_class.get().matches(OpClass::Write)
         {
             let left = self.state.remaining.get();
-            if left == 0 {
+            if pedradb_core::write_admission_kernel::batch_is_empty(left) {
                 if self.state.once.get() && self.state.fired.get() {
                     return self.inner.write(buf);
                 }
@@ -380,7 +404,7 @@ impl<F: EnvFile> Write for FailingFile<F> {
                         self.state.remaining.set(u64::MAX);
                     }
                     let n = cap.min(buf.len());
-                    if n == 0 {
+                    if pedradb_core::write_admission_kernel::batch_is_empty(n as u64) {
                         return Err(FaultKind::ShortWrite.to_error());
                     }
                     let wrote = self.inner.write(&buf[..n])?;
@@ -506,6 +530,17 @@ impl<E: Env> Env for FailingEnv<E> {
     fn is_dir(&self, path: &Path) -> io::Result<bool> {
         self.state.gate_class(OpClass::Meta)?;
         self.inner.is_dir(path)
+    }
+
+    fn available_bytes(&self, path: &Path) -> io::Result<Option<u64>> {
+        if self.state.probe_err.get() {
+            return Err(io::Error::other("injected statvfs failure"));
+        }
+        if self.state.space_injected.get() {
+            Ok(self.state.available.get())
+        } else {
+            self.inner.available_bytes(path)
+        }
     }
 }
 

@@ -13,14 +13,67 @@
 //!
 //! Opt-in suites grow the catalog (RFC-0043; never replace the official 16):
 //! `qs` (Quicksilver-inspired), `kvrocks` (Redis GET/SET/pipeline/SCAN),
-//! `myrocks` (sysbench point/range/tx + LinkBench-inspired mix), `rockset`
-//! (`rockset_hybrid` ingest+get), `rocksapi` (mixgraph / WBWI / compaction
-//! filter / ingest). See [`COMPARE_SHAPES`].
+//! `myrocks` (sysbench point/range/tx + LinkBench-inspired mix), `rocksapi`
+//! (mixgraph / WBWI / compaction filter / ingest). See [`COMPARE_SHAPES`]
+//! and `docs/rocksdb-dependents-benchmarks.md`.
 
 #![forbid(unsafe_code)]
 
+pub mod column_a;
 pub mod engines;
 pub mod scale;
+
+/// RFC-0184: WRITEPHASE deltas → kernel diagnosis (per commit).
+pub(crate) fn diagnose_from_phases(
+    pedra_p50_ms: f64,
+    a: [u64; 7],
+    b: [u64; 7],
+    clients: u64,
+    avg_group: f64,
+    read_pct: u64,
+) -> pedradb_core::WriteDiagnosis {
+    diagnose_from_phases_n(
+        pedra_p50_ms,
+        a,
+        b,
+        clients,
+        avg_group,
+        read_pct,
+        b[0].saturating_sub(a[0]).max(1),
+    )
+}
+
+fn diagnose_from_phases_n(
+    pedra_p50_ms: f64,
+    a: [u64; 7],
+    b: [u64; 7],
+    clients: u64,
+    avg_group: f64,
+    read_pct: u64,
+    n: u64,
+) -> pedradb_core::WriteDiagnosis {
+    let n = n.max(1);
+    let per = |i: usize| b[i].saturating_sub(a[i]) / n;
+    pedradb_core::diagnose_write(pedradb_core::WriteGapInput {
+        pedra_ns: (pedra_p50_ms * 1_000_000.0) as u64,
+        rocks_ns: 0,
+        clients,
+        avg_group_bps: (avg_group * 10_000.0) as u64,
+        read_pct,
+        phases: pedradb_core::WritePhases {
+            prepare_ns: per(1),
+            wal_ns: per(2),
+            mem_ns: per(3),
+            publish_ns: per(4),
+            flush_check_ns: per(5),
+            lock_wait_ns: per(6),
+        },
+    })
+}
+
+pub(crate) fn eprint_write_diagnose(tag: &str, d: &pedradb_core::WriteDiagnosis) {
+    eprintln!("[rocks-parity] diagnose {tag} {}", d.line());
+}
 
 use std::time::{Duration, Instant};
 
@@ -49,80 +102,6 @@ pub fn shape_wanted_in(name: &str, only: Option<&str>) -> bool {
 #[must_use]
 pub fn rocks_full_sync_after_write(full_sync: bool, write_sync: bool) -> bool {
     full_sync && write_sync
-}
-
-/// RFC-0163 P1.2: `ROCKS_PARITY_SEED_ASYNC=1` — untimed ycsb seed with the
-/// WAL barrier off (same pattern as `run_c_big`'s untimed seed), restored
-/// before any timed shape. Without it the G1 column pays one fdatasync
-/// per seed put (25M records ≈ hours); the Rocks peer already seeds async
-/// by default. Off by default; when on, `report_json` records it.
-#[must_use]
-pub fn seed_async_enabled() -> bool {
-    std::env::var("ROCKS_PARITY_SEED_ASYNC").as_deref() == Ok("1")
-}
-
-/// RFC-0178 P0.4: re-seed before every mc shape. Default off.
-#[must_use]
-pub fn mc_fresh_enabled() -> bool {
-    std::env::var("ROCKS_PARITY_MC_FRESH").as_deref() == Ok("1")
-}
-
-/// JSON note for the seed barrier (pure — env read once at the call site).
-#[must_use]
-pub fn seed_async_note(enabled: bool) -> Option<&'static str> {
-    enabled.then_some("seed_async=1 (untimed seed WAL-async; timed shapes keep the column sync)")
-}
-
-/// Run the untimed `seed` under the async barrier when `enabled` and the
-/// engine currently syncs before Ok. Engines already async (the Rocks
-/// default peer) pass through untouched.
-pub fn seed_under_async_barrier<E: Engine>(e: &E, enabled: bool, seed: impl FnOnce()) {
-    let column_sync = e.sync();
-    if enabled && column_sync {
-        e.set_write_sync(false);
-    }
-    seed();
-    if enabled && column_sync {
-        e.set_write_sync(column_sync);
-    }
-}
-
-/// RFC-0163 P1.4: client-count ladder for the mc shapes. A csv
-/// `ROCKS_PARITY_CLIENTS_LADDER` (e.g. "4,16,64") runs every mc shape once
-/// per count, ascending, in-process; without it the single
-/// `ROCKS_PARITY_CLIENTS` value applies. Counts < 2 are skipped — the
-/// 1-client rung is the plain single-client shape of every unfiltered run.
-/// Bad entries panic (an official campaign must not silently drop a rung).
-#[must_use]
-pub fn clients_ladder_from(ladder: Option<&str>, single: usize) -> Vec<usize> {
-    let csv = ladder.map(str::trim).filter(|s| !s.is_empty());
-    let Some(csv) = csv else {
-        return if single >= 2 {
-            vec![single]
-        } else {
-            Vec::new()
-        };
-    };
-    let mut ns: Vec<usize> = csv
-        .split(',')
-        .map(|x| {
-            let t = x.trim();
-            t.parse::<usize>()
-                .unwrap_or_else(|_| panic!("ROCKS_PARITY_CLIENTS_LADDER: bad entry {t:?}"))
-        })
-        .filter(|&n| n >= 2)
-        .collect();
-    ns.sort_unstable();
-    ns.dedup();
-    ns
-}
-
-/// Env leg of `clients_ladder_from` (thin, like `seed_async_enabled`).
-pub fn clients_from_env() -> Vec<usize> {
-    clients_ladder_from(
-        std::env::var("ROCKS_PARITY_CLIENTS_LADDER").ok().as_deref(),
-        env_usize("ROCKS_PARITY_CLIENTS", 1),
-    )
 }
 
 /// Live Rocks WAL among dirent names (`NNNNNN.log`). Highest number only —
@@ -271,77 +250,14 @@ pub const COMPARE_SHAPES: &[&str] = &[
     "ycsb_b_unif",
     "ycsb_c_unif",
     "ycsb_c_big",
-    // RFC-0184 P2.36: 95% get mc4 already in BALANCE_SHAPES / run_clients;
-    // compare iterated COMPARE only, so the cell was invisible on the cartaz.
-    "ycsb_b_mc4",
-    // RFC-0184 P2.39: YCSB C (100% get) mc4 — official 16 is 1c only.
-    "ycsb_c_mc4",
-    // RFC-0184 P2.40: Quicksilver hot-get mc4 — 1c qs_hot_get is official qs
-    // suite only; concurrent hot 10% + 1% batch was invisible on the cartaz.
-    "qs_hot_get_mc4",
-    // RFC-0184 P2.41: Quicksilver negative lookup mc4 — 1c is qs suite only.
-    "qs_neg_lookup_mc4",
-    // RFC-0184 P2.42: Quicksilver batch-write mc4 — 1c is qs suite only.
-    "qs_batch_write_mc4",
-    // RFC-0043 — Rockset (→OpenAI) converged index. Ingest batch + point get.
-    "rockset_hybrid",
-    // RFC-0184 P2.43: Rockset hybrid mc4 — 1c is suite-only.
-    "rockset_hybrid_mc4",
-    // YugabyteDB DocDB: intents CF + committed CF (Rocks-based).
-    "yugabyte_docdb_rmw",
-    // RFC-0184 P2.44: Yugabyte DocDB RMW mc4 — 1c is suite-only.
-    "yugabyte_docdb_rmw_mc4",
-    // RFC-0184 P2.45: Venice fanout-get mc4 — 1c is suite-only.
-    "venice_fanout_get_mc4",
-    // RFC-0184 P2.46: Kvrocks GET mc4 — 1c is suite-only; set already has mc50.
-    "kvrocks_get_mc4",
-    // RFC-0184 P2.47: MyRocks oltp_point_select mc4 — 1c is suite-only.
-    "myrocks_point_select_mc4",
-    // RFC-0184 P2.48: Nebula getNeighbors mc4 — 1c is suite-only.
-    "nebula_get_neighbors_mc4",
-    // RFC-0184 P2.49: Arango 2-hop traversal mc4 — 1c is suite-only.
-    "arango_traversal_mc4",
-    // RFC-0184 P2.50: Surreal snapshot-get mc4 — 1c is suite-only; rmw already has mc8.
-    "surreal_tx_get_mc4",
-    // RFC-0184 P2.51: Oxigraph SPO lookup mc4 — 1c is suite-only.
-    "oxigraph_spo_lookup_mc4",
-    // RFC-0184 P2.52: Solana trailing-read mc4 — 1c is suite-only.
-    "solana_trailing_read_mc4",
-    // RFC-0184 P2.53: Kvrocks SCAN mc4 — 1c is suite-only; GET already has mc4.
-    "kvrocks_scan_mc4",
-    // RFC-0184 P2.54: Flink window-state mc4 — 1c is suite-only.
-    "flink_window_state_mc4",
-    // RFC-0184 P2.55: Kafka changelog-flush mc4 — 1c is suite-only.
-    "kafka_changelog_flush_mc4",
-    // RFC-0184 P2.56: Ceph BlueStore omap-read mc4 — 1c is suite-only.
-    "bluestore_omap_read_mc4",
-    // RFC-0184 P2.57: MyRocks oltp_read_only mc4 — 1c is suite-only.
-    "myrocks_read_only_mc4",
-    // RFC-0184 P2.58: WBWI overlay-get mc4 — 1c is suite-only.
-    "wbwi_read_your_writes_mc4",
-    // RFC-0184 P2.59: mixgraph-like mc4 — 1c is already in COMPARE.
-    "mixgraph_like_mc4",
-    // RFC-0184 P2.60: Oxigraph triple-put mc4 — 1c is already in COMPARE.
-    "oxigraph_triple_put_mc4",
-    // RFC-0184 P2.61: Nebula insert-edge mc4 — 1c is already in COMPARE.
-    "nebula_insert_edge_mc4",
-    // RFC-0184 P2.62: Solana shred-append mc4 — 1c is already in COMPARE.
-    "solana_shred_append_mc4",
-    // RFC-0184 P2.63: Arango document CRUD mc4 — 1c is already in COMPARE.
-    "arango_doc_crud_mc4",
-    // RFC-0184 P2.64: Kvrocks pipelined-set mc4 — 1c is already in COMPARE.
-    "kvrocks_pipelined_set_mc4",
-    // RFC-0184 P2.65: Pinterest Rockstore wide-column mc4 — 1c lives in
-    // run_venice; concurrent must not mix with venice_fanout_get_mc4.
-    "rockstore_widecol_rw_mc4",
-    // RFC-0184 P2.66: Kvrocks BlobDB-sized SET mc4 — 1c is already in COMPARE.
-    "kvrocks_blob_set_mc4",
-    // RFC-0184 P2.67: TiKV lock-prewrite mc4 — 1c is already in COMPARE.
-    "deps_lock_prewrite_mc4",
 ];
 
 /// Length of the RFC-0041 official prefix of [`COMPARE_SHAPES`].
 pub const OFFICIAL_16: usize = 16;
+
+/// RFC-0185 column A must-win set (22 names). Re-export so the compare
+/// binary and tests share one list. Subset of [`COMPARE_SHAPES`].
+pub const COLUMN_A_SHAPES: &[&str] = column_a::COLUMN_A_SHAPES;
 
 /// Engine adapter. Both sides implement exactly these ops; the runner measures
 /// only through this trait so the schedule cannot drift between engines.
@@ -420,6 +336,12 @@ pub trait Engine {
     /// Raw phase counters for per-shape deltas: `[commits, prepare, wal,
     /// mem, publish, flush, lock_wait]` ns (RFC-0054 P0.2).
     fn write_phase_snapshot(&self) -> Option<[u64; 7]> {
+        None
+    }
+    /// Collect/lone-path decomposition (RFC-0217 P0.3b):
+    /// `[catchup_ns, catchup_groups, lone_n, lone_start_ns, lone_apply_ns,
+    /// lone_io_ns, lone_publish_ns]`, or `None`.
+    fn commit_wait_snapshot(&self) -> Option<[u64; 7]> {
         None
     }
     /// Fold memtable tail (no SST). Returns tail length before fold.
@@ -649,12 +571,6 @@ impl YcsbRunner {
             build_ns.sort_unstable();
             let bp50 = build_ns[build_ns.len() / 2] as f64 / 1000.0;
             eprintln!("[rocks-parity] deps_apply_batch split p50 build={bp50:.2}µs");
-            blocks.push(summarize(
-                "deps_apply_batch",
-                cfg_ops,
-                t0.elapsed(),
-                &mut lats,
-            ));
             if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
                 let n = b[0].saturating_sub(a[0]).max(1);
                 let us = |d: u64| d as f64 / n as f64 / 1000.0;
@@ -667,12 +583,13 @@ impl YcsbRunner {
                 us(b[5].saturating_sub(a[5])),
                 us(b[6].saturating_sub(a[6])),
             );
-                let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
-                eprint_write_diagnose("deps_apply_batch", &d);
-                if let Some(last) = blocks.last_mut() {
-                    *last = attach_diagnose(std::mem::take(last), Some(&d));
-                }
             }
+            blocks.push(summarize(
+                "deps_apply_batch",
+                cfg_ops,
+                t0.elapsed(),
+                &mut lats,
+            ));
             eprintln!("[rocks-parity] deps_apply_batch done txns={txns} errors={errors}");
         }
 
@@ -814,11 +731,6 @@ impl YcsbRunner {
                 us(b[5].saturating_sub(a[5])),
                 us(b[6].saturating_sub(a[6])),
             );
-                let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
-                eprint_write_diagnose("deps_raftlog", &d);
-                if let Some(last) = blocks.last_mut() {
-                    *last = attach_diagnose(std::mem::take(last), Some(&d));
-                }
             }
             if let Some(line) = e.write_phase_line() {
                 eprintln!("[rocks-parity] deps_raftlog phases {line}");
@@ -833,7 +745,6 @@ impl YcsbRunner {
         if want("deps_cache_overwrite") {
             let mut lats = Vec::with_capacity(cfg_ops);
             let (mut writes, mut errors) = (0u64, 0u64);
-            let phase0 = e.write_phase_snapshot();
             let t0 = Instant::now();
             for _ in 0..cfg_ops {
                 let t = Instant::now();
@@ -852,24 +763,6 @@ impl YcsbRunner {
                 &mut lats,
             ));
             eprintln!("[rocks-parity] deps_cache_overwrite done writes={writes} errors={errors}");
-            if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-                let n = b[0].saturating_sub(a[0]).max(1);
-                let us = |d: u64| d as f64 / n as f64 / 1000.0;
-                eprintln!(
-                    "[rocks-parity] deps_cache_overwrite phasesΔ (per commit) prepare={:.2}µs wal={:.2}µs mem={:.2}µs publish={:.2}µs flsh={:.2}µs lock_wait={:.2}µs n={n}",
-                    us(b[1].saturating_sub(a[1])),
-                    us(b[2].saturating_sub(a[2])),
-                    us(b[3].saturating_sub(a[3])),
-                    us(b[4].saturating_sub(a[4])),
-                    us(b[5].saturating_sub(a[5])),
-                    us(b[6].saturating_sub(a[6])),
-                );
-                let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
-                eprint_write_diagnose("deps_cache_overwrite", &d);
-                if let Some(last) = blocks.last_mut() {
-                    *last = attach_diagnose(std::mem::take(last), Some(&d));
-                }
-            }
         }
 
         // 6. RFC-0043: TiKV prewrite-only ready (lock+default WriteBatch, no
@@ -936,8 +829,6 @@ impl YcsbRunner {
         let mut blocks = Vec::with_capacity(3);
 
         // qs_hot_get — 99% get on the hot 10%, 1% WriteBatch ≥32 on that set.
-        if shape_wanted("qs_hot_get") {
-        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut gets, mut writes, mut errors) = (0u64, 0u64, 0u64);
         let t0 = Instant::now();
@@ -969,18 +860,8 @@ impl YcsbRunner {
         }
         blocks.push(summarize("qs_hot_get", cfg_ops, t0.elapsed(), &mut lats));
         eprintln!("[rocks-parity] qs_hot_get done gets={gets} writes={writes} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 99, cfg_ops as u64);
-            eprint_write_diagnose("qs_hot_get", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        }
 
         // qs_neg_lookup — gets past the keyspace (QS: ~10× more misses).
-        if shape_wanted("qs_neg_lookup") {
-        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut misses, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -996,18 +877,8 @@ impl YcsbRunner {
         }
         blocks.push(summarize("qs_neg_lookup", cfg_ops, t0.elapsed(), &mut lats));
         eprintln!("[rocks-parity] qs_neg_lookup done misses={misses} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
-            eprint_write_diagnose("qs_neg_lookup", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        }
 
         // qs_batch_write — every op is one batched put (QS root write).
-        if shape_wanted("qs_batch_write") {
-        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut puts, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -1036,299 +907,9 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] qs_batch_write done puts={puts} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
-            eprint_write_diagnose("qs_batch_write", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        }
 
         self.rng = rng;
         blocks
-    }
-
-    /// RFC-0184 P2.40–P2.42: qs_hot_get, qs_neg_lookup, qs_batch_write at N clients.
-    pub fn run_qs_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
-        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
-        let mut out = Vec::new();
-        let full = format!("qs_hot_get_mc{clients}");
-        if shape_wanted(&full) {
-        if mc_fresh_enabled() {
-            self.seed(e);
-        }
-        let records = self.cfg.records;
-        let cfg_ops = self.cfg.ops;
-        let batch = self.cfg.batch;
-        let hot = records.div_ceil(10).max(16).min(records);
-        let yval = std::sync::Arc::new(vec![b'q'; self.cfg.payload]);
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
-        let phase0 = e.write_phase_snapshot();
-        let group0 = e.write_group_stats();
-        let t0 = Instant::now();
-        let mut lats = Vec::with_capacity(cfg_ops * clients);
-        let mut errors = 0u64;
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..clients)
-                .map(|c| {
-                    let barrier = barrier.clone();
-                    let yval = yval.clone();
-                    s.spawn(move || {
-                        let mut rng =
-                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
-                        let mut lats = Vec::with_capacity(cfg_ops);
-                        let mut errors = 0u64;
-                        barrier.wait();
-                        for i in 0..cfg_ops {
-                            let t = Instant::now();
-                            let ok = if i % 100 == 0 {
-                                let mut wb = Vec::with_capacity(batch);
-                                for _ in 0..batch {
-                                    let u = (xorshift(&mut rng) as usize) % hot;
-                                    wb.push(CfWrite::Put {
-                                        cf: "default",
-                                        k: ykey(u),
-                                        v: yval.as_ref().clone(),
-                                    });
-                                }
-                                e.batch(wb)
-                            } else {
-                                let u = (xorshift(&mut rng) as usize) % hot;
-                                e.get(&ykey(u)).is_ok()
-                            };
-                            if !ok {
-                                errors += 1;
-                            }
-                            lats.push(ms(t));
-                        }
-                        (lats, errors)
-                    })
-                })
-                .collect();
-            for h in handles {
-                let (mut l, err) = h.join().expect("client thread");
-                errors += err;
-                lats.append(&mut l);
-            }
-        });
-        let wall = t0.elapsed();
-        let mut avg_group = 0.0;
-        eprintln!(
-            "[rocks-parity] qs_hot_get mc{clients} done ops={} errors={errors}",
-            cfg_ops * clients
-        );
-        if let Some((sub1, queued1, groups1, gops1)) = e.write_group_stats() {
-            let (sub0, queued0, groups0, gops0) = group0.unwrap_or((0, 0, 0, 0));
-            let sub = sub1.saturating_sub(sub0);
-            let queued = queued1.saturating_sub(queued0);
-            let groups = groups1.saturating_sub(groups0);
-            let gops = gops1.saturating_sub(gops0);
-            avg_group = if groups == 0 {
-                0.0
-            } else {
-                gops as f64 / groups as f64
-            };
-            eprintln!(
-                "[rocks-parity] write_group timed submits={sub} queued={queued} groups={groups} ops={gops} avg_group={avg_group:.2}"
-            );
-        }
-        let mut blocks = vec![summarize_mc(
-            &full,
-            cfg_ops * clients,
-            wall,
-            &mut lats,
-            clients,
-            errors,
-        )];
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(
-                pct(&lats, 50.0),
-                a,
-                b,
-                clients as u64,
-                avg_group,
-                99,
-                (cfg_ops * clients) as u64,
-            );
-            eprint_write_diagnose(&full, &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        out.extend(blocks);
-        }
-
-        let neg = format!("qs_neg_lookup_mc{clients}");
-        if shape_wanted(&neg) {
-            if mc_fresh_enabled() {
-                self.seed(e);
-            }
-            let records = self.cfg.records;
-            let cfg_ops = self.cfg.ops;
-            let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
-            let phase0 = e.write_phase_snapshot();
-            let t0 = Instant::now();
-            let mut lats = Vec::with_capacity(cfg_ops * clients);
-            let mut errors = 0u64;
-            std::thread::scope(|s| {
-                let handles: Vec<_> = (0..clients)
-                    .map(|c| {
-                        let barrier = barrier.clone();
-                        s.spawn(move || {
-                            let mut rng =
-                                0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
-                            let mut lats = Vec::with_capacity(cfg_ops);
-                            let mut errors = 0u64;
-                            barrier.wait();
-                            for _ in 0..cfg_ops {
-                                let t = Instant::now();
-                                let u = records + (xorshift(&mut rng) as usize % records.max(1));
-                                if e.get(&ykey(u)).is_err() {
-                                    errors += 1;
-                                }
-                                lats.push(ms(t));
-                            }
-                            (lats, errors)
-                        })
-                    })
-                    .collect();
-                for h in handles {
-                    let (mut l, err) = h.join().expect("client thread");
-                    errors += err;
-                    lats.append(&mut l);
-                }
-            });
-            let wall = t0.elapsed();
-            eprintln!(
-                "[rocks-parity] qs_neg_lookup mc{clients} done ops={} errors={errors}",
-                cfg_ops * clients
-            );
-            let mut blocks = vec![summarize_mc(
-                &neg,
-                cfg_ops * clients,
-                wall,
-                &mut lats,
-                clients,
-                errors,
-            )];
-            if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-                let d = diagnose_from_phases_n(
-                    pct(&lats, 50.0),
-                    a,
-                    b,
-                    clients as u64,
-                    0.0,
-                    100,
-                    (cfg_ops * clients) as u64,
-                );
-                eprint_write_diagnose(&neg, &d);
-                if let Some(last) = blocks.last_mut() {
-                    *last = attach_diagnose(std::mem::take(last), Some(&d));
-                }
-            }
-            out.extend(blocks);
-        }
-
-        let batch_name = format!("qs_batch_write_mc{clients}");
-        if shape_wanted(&batch_name) {
-            if mc_fresh_enabled() {
-                self.seed(e);
-            }
-            let records = self.cfg.records;
-            let cfg_ops = self.cfg.ops;
-            let batch = self.cfg.batch;
-            let yval = std::sync::Arc::new(vec![b'q'; self.cfg.payload]);
-            let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
-            let phase0 = e.write_phase_snapshot();
-            let group0 = e.write_group_stats();
-            let t0 = Instant::now();
-            let mut lats = Vec::with_capacity(cfg_ops * clients);
-            let mut errors = 0u64;
-            std::thread::scope(|s| {
-                let handles: Vec<_> = (0..clients)
-                    .map(|c| {
-                        let barrier = barrier.clone();
-                        let yval = yval.clone();
-                        s.spawn(move || {
-                            let mut rng =
-                                0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
-                            let mut lats = Vec::with_capacity(cfg_ops);
-                            let mut errors = 0u64;
-                            barrier.wait();
-                            for _ in 0..cfg_ops {
-                                let t = Instant::now();
-                                let mut wb = Vec::with_capacity(batch);
-                                for _ in 0..batch {
-                                    let u = (xorshift(&mut rng) as usize) % records;
-                                    wb.push(CfWrite::Put {
-                                        cf: "default",
-                                        k: ykey(u),
-                                        v: yval.as_ref().clone(),
-                                    });
-                                }
-                                if !e.batch(wb) {
-                                    errors += 1;
-                                }
-                                lats.push(ms(t));
-                            }
-                            (lats, errors)
-                        })
-                    })
-                    .collect();
-                for h in handles {
-                    let (mut l, err) = h.join().expect("client thread");
-                    errors += err;
-                    lats.append(&mut l);
-                }
-            });
-            let wall = t0.elapsed();
-            let mut avg_group = 0.0;
-            eprintln!(
-                "[rocks-parity] qs_batch_write mc{clients} done ops={} errors={errors}",
-                cfg_ops * clients
-            );
-            if let Some((sub1, queued1, groups1, gops1)) = e.write_group_stats() {
-                let (sub0, queued0, groups0, gops0) = group0.unwrap_or((0, 0, 0, 0));
-                let sub = sub1.saturating_sub(sub0);
-                let queued = queued1.saturating_sub(queued0);
-                let groups = groups1.saturating_sub(groups0);
-                let gops = gops1.saturating_sub(gops0);
-                avg_group = if groups == 0 {
-                    0.0
-                } else {
-                    gops as f64 / groups as f64
-                };
-                eprintln!(
-                    "[rocks-parity] write_group timed submits={sub} queued={queued} groups={groups} ops={gops} avg_group={avg_group:.2}"
-                );
-            }
-            let mut blocks = vec![summarize_mc(
-                &batch_name,
-                cfg_ops * clients,
-                wall,
-                &mut lats,
-                clients,
-                errors,
-            )];
-            if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-                let d = diagnose_from_phases_n(
-                    pct(&lats, 50.0),
-                    a,
-                    b,
-                    clients as u64,
-                    avg_group,
-                    0,
-                    (cfg_ops * clients) as u64,
-                );
-                eprint_write_diagnose(&batch_name, &d);
-                if let Some(last) = blocks.last_mut() {
-                    *last = attach_diagnose(std::mem::take(last), Some(&d));
-                }
-            }
-            out.extend(blocks);
-        }
-        out
     }
 
     /// RFC-0043 P2.3 — Apache Kvrocks (Redis protocol on RocksDB).
@@ -1347,13 +928,6 @@ impl YcsbRunner {
 
         // Untimed Redis-string keyspace (independent of ycsb/).
         let ktab: Vec<Vec<u8>> = (0..records + 25).map(kkey).collect();
-        if shape_wanted("kvrocks_get")
-            || shape_wanted("kvrocks_set")
-            || shape_wanted("kvrocks_pipelined_set")
-            || shape_wanted("kvrocks_scan")
-            || shape_wanted("kvrocks_blob_set")
-            || shape_wanted("kvrocks_set_mc50")
-        {
         for i in 0..records {
             assert!(e.put(&ktab[i], &yval), "kvrocks seed {i}");
         }
@@ -1362,7 +936,6 @@ impl YcsbRunner {
         // tanked kvrocks_set / pipeline.
         for i in 0..records {
             let _ = e.get(&ktab[i]);
-        }
         }
 
         // RFC-0044 P0.5 A/B tool: `ROCKS_PARITY_ONLY=csv` runs a subset of
@@ -1407,7 +980,6 @@ impl YcsbRunner {
 
         // kvrocks_get — redis-benchmark GET (1-op canary).
         if want("kvrocks_get") {
-            let phase0 = e.write_phase_snapshot();
             let mut lats = Vec::with_capacity(cfg_ops);
             let (mut gets, mut errors) = (0u64, 0u64);
             let t0 = Instant::now();
@@ -1421,18 +993,10 @@ impl YcsbRunner {
             }
             blocks.push(summarize("kvrocks_get", cfg_ops, t0.elapsed(), &mut lats));
             eprintln!("[rocks-parity] kvrocks_get done gets={gets} errors={errors}");
-            if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-                let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
-                eprint_write_diagnose("kvrocks_get", &d);
-                if let Some(last) = blocks.last_mut() {
-                    *last = attach_diagnose(std::mem::take(last), Some(&d));
-                }
-            }
         }
 
         // kvrocks_set — redis-benchmark SET (1-op canary).
         if want("kvrocks_set") {
-            let phase0 = e.write_phase_snapshot();
             let mut lats = Vec::with_capacity(cfg_ops);
             let (mut sets, mut errors) = (0u64, 0u64);
             let t0 = Instant::now();
@@ -1447,18 +1011,10 @@ impl YcsbRunner {
             }
             blocks.push(summarize("kvrocks_set", cfg_ops, t0.elapsed(), &mut lats));
             eprintln!("[rocks-parity] kvrocks_set done sets={sets} errors={errors}");
-            if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-                let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
-                eprint_write_diagnose("kvrocks_set", &d);
-                if let Some(last) = blocks.last_mut() {
-                    *last = attach_diagnose(std::mem::take(last), Some(&d));
-                }
-            }
         }
 
         // kvrocks_pipelined_set — pipeline of `batch` SETs → 1 WriteBatch (HL).
         if want("kvrocks_pipelined_set") {
-            let phase0 = e.write_phase_snapshot();
             let mut lats = Vec::with_capacity(cfg_ops);
             let (mut puts, mut errors) = (0u64, 0u64);
             let t0 = Instant::now();
@@ -1478,18 +1034,10 @@ impl YcsbRunner {
                 &mut lats,
             ));
             eprintln!("[rocks-parity] kvrocks_pipelined_set done puts={puts} errors={errors}");
-            if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-                let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
-                eprint_write_diagnose("kvrocks_pipelined_set", &d);
-                if let Some(last) = blocks.last_mut() {
-                    *last = attach_diagnose(std::mem::take(last), Some(&d));
-                }
-            }
         }
 
         // kvrocks_scan — Redis SCAN COUNT=25 over a window (HL).
         if want("kvrocks_scan") {
-            let phase0 = e.write_phase_snapshot();
             let mut lats = Vec::with_capacity(cfg_ops);
             let (mut scans, mut errors) = (0u64, 0u64);
             let t0 = Instant::now();
@@ -1503,13 +1051,6 @@ impl YcsbRunner {
             }
             blocks.push(summarize("kvrocks_scan", cfg_ops, t0.elapsed(), &mut lats));
             eprintln!("[rocks-parity] kvrocks_scan done scans={scans} errors={errors}");
-            if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-                let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
-                eprint_write_diagnose("kvrocks_scan", &d);
-                if let Some(last) = blocks.last_mut() {
-                    *last = attach_diagnose(std::mem::take(last), Some(&d));
-                }
-            }
         }
 
         // kvrocks_blob_set — Kvrocks BlobDB-sized value (16 KiB; their post
@@ -1526,7 +1067,6 @@ impl YcsbRunner {
             let blob_keys: Vec<Vec<u8>> = (0..cfg_ops)
                 .map(|_| bkey(self.pick(&mut rng, blob_n)))
                 .collect();
-            let phase0 = e.write_phase_snapshot();
             let mut lats = Vec::with_capacity(cfg_ops);
             let (mut sets, mut errors) = (0u64, 0u64);
             let t0 = Instant::now();
@@ -1546,13 +1086,6 @@ impl YcsbRunner {
                 &mut lats,
             ));
             eprintln!("[rocks-parity] kvrocks_blob_set done sets={sets} errors={errors}");
-            if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-                let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
-                eprint_write_diagnose("kvrocks_blob_set", &d);
-                if let Some(last) = blocks.last_mut() {
-                    *last = attach_diagnose(std::mem::take(last), Some(&d));
-                }
-            }
         }
 
         self.rng = rng;
@@ -1575,8 +1108,11 @@ impl YcsbRunner {
         let cfg_ops = self.cfg.ops;
         let records = self.cfg.records;
         let yval = std::sync::Arc::new(vec![b'k'; self.cfg.payload]);
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+        // RFC-0211 P1.2: per-shape deltas (cumulative counters; the single
+        // kvrocks_set cell may have run earlier in the same process).
+        let wg0 = e.write_group_stats();
         let phase0 = e.write_phase_snapshot();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
         let t0 = Instant::now();
         let mut lats = Vec::with_capacity(cfg_ops * clients);
         let mut errors = 0u64;
@@ -1610,18 +1146,7 @@ impl YcsbRunner {
             }
         });
         let name = format!("kvrocks_set_mc{clients}");
-        let mut avg_group = 0.0;
-        if let Some((sub, queued, groups, gops)) = e.write_group_stats() {
-            avg_group = if groups == 0 {
-                0.0
-            } else {
-                gops as f64 / groups as f64
-            };
-            eprintln!(
-                "[rocks-parity] write_group submits={sub} queued={queued} groups={groups} ops={gops} avg_group={avg_group:.2}"
-            );
-        }
-        let mut block = summarize_mc(
+        let block = summarize_mc(
             &name,
             cfg_ops * clients,
             t0.elapsed(),
@@ -1633,320 +1158,36 @@ impl YcsbRunner {
             "[rocks-parity] {name} done ops={} errors={errors}",
             cfg_ops * clients
         );
+        if let (Some(a), Some(b)) = (wg0, e.write_group_stats()) {
+            let (sub, queued, groups, gops) = (
+                b.0.saturating_sub(a.0),
+                b.1.saturating_sub(a.1),
+                b.2.saturating_sub(a.2),
+                b.3.saturating_sub(a.3),
+            );
+            let avg = if groups == 0 {
+                0.0
+            } else {
+                gops as f64 / groups as f64
+            };
+            eprintln!(
+                "[rocks-parity] write_group submits={sub} queued={queued} groups={groups} ops={gops} avg_group={avg:.2}"
+            );
+        }
         if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, clients as u64, avg_group, 0);
-            eprint_write_diagnose(&name, &d);
-            block = attach_diagnose(block, Some(&d));
+            let n = b[0].saturating_sub(a[0]).max(1);
+            let us = |d: u64| d as f64 / n as f64 / 1000.0;
+            eprintln!(
+                "[rocks-parity] {name} phasesΔ (per commit) prepare={:.2}µs wal={:.2}µs mem={:.2}µs publish={:.2}µs flsh={:.2}µs lock_wait={:.2}µs n={n}",
+                us(b[1].saturating_sub(a[1])),
+                us(b[2].saturating_sub(a[2])),
+                us(b[3].saturating_sub(a[3])),
+                us(b[4].saturating_sub(a[4])),
+                us(b[5].saturating_sub(a[5])),
+                us(b[6].saturating_sub(a[6])),
+            );
         }
         vec![block]
-    }
-
-    /// RFC-0184 P2.46: kvrocks GET at N clients (redis-benchmark `-c N -t get`).
-    pub fn run_kvrocks_get_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
-        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
-        let full = format!("kvrocks_get_mc{clients}");
-        if !shape_wanted(&full) {
-            return Vec::new();
-        }
-        e.set_write_sync(write_sync_for_suite("kvrocks"));
-        let cfg_ops = self.cfg.ops;
-        let records = self.cfg.records;
-        let yval = vec![b'k'; self.cfg.payload];
-        let ktab: Vec<Vec<u8>> = (0..records).map(kkey).collect();
-        for i in 0..records {
-            assert!(e.put(&ktab[i], &yval), "kvrocks get-mc seed {i}");
-        }
-        for i in 0..records {
-            let _ = e.get(&ktab[i]);
-        }
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
-        let phase0 = e.write_phase_snapshot();
-        let t0 = Instant::now();
-        let mut lats = Vec::with_capacity(cfg_ops * clients);
-        let mut errors = 0u64;
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..clients)
-                .map(|c| {
-                    let barrier = barrier.clone();
-                    s.spawn(move || {
-                        let mut rng =
-                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
-                        let mut lats = Vec::with_capacity(cfg_ops);
-                        let mut errors = 0u64;
-                        barrier.wait();
-                        for _ in 0..cfg_ops {
-                            let t = Instant::now();
-                            let u = self.pick(&mut rng, records);
-                            if e.get_probe(&kkey(u)).is_err() {
-                                errors += 1;
-                            }
-                            lats.push(ms(t));
-                        }
-                        (lats, errors)
-                    })
-                })
-                .collect();
-            for h in handles {
-                let (mut l, err) = h.join().expect("kvrocks get client");
-                errors += err;
-                lats.append(&mut l);
-            }
-        });
-        let wall = t0.elapsed();
-        eprintln!(
-            "[rocks-parity] {full} done ops={} errors={errors}",
-            cfg_ops * clients
-        );
-        let mut blocks = vec![summarize_mc(
-            &full,
-            cfg_ops * clients,
-            wall,
-            &mut lats,
-            clients,
-            errors,
-        )];
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(
-                pct(&lats, 50.0),
-                a,
-                b,
-                clients as u64,
-                0.0,
-                100,
-                (cfg_ops * clients) as u64,
-            );
-            eprint_write_diagnose(&full, &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        blocks
-    }
-
-    /// RFC-0184 P2.53: kvrocks SCAN at N clients (COUNT=25 window).
-    pub fn run_kvrocks_scan_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
-        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
-        let full = format!("kvrocks_scan_mc{clients}");
-        if !shape_wanted(&full) {
-            return Vec::new();
-        }
-        e.set_write_sync(write_sync_for_suite("kvrocks"));
-        let cfg_ops = self.cfg.ops;
-        let records = self.cfg.records;
-        let yval = vec![b'k'; self.cfg.payload];
-        for i in 0..records {
-            assert!(e.put(&kkey(i), &yval), "kvrocks scan-mc seed {i}");
-        }
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
-        let phase0 = e.write_phase_snapshot();
-        let t0 = Instant::now();
-        let mut lats = Vec::with_capacity(cfg_ops * clients);
-        let mut errors = 0u64;
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..clients)
-                .map(|c| {
-                    let barrier = barrier.clone();
-                    s.spawn(move || {
-                        let mut rng =
-                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
-                        let mut lats = Vec::with_capacity(cfg_ops);
-                        let mut errors = 0u64;
-                        barrier.wait();
-                        for _ in 0..cfg_ops {
-                            let t = Instant::now();
-                            let u = self.pick(&mut rng, records);
-                            if e.scan_count(&kkey(u), &kkey(u + 25), 25).is_err() {
-                                errors += 1;
-                            }
-                            lats.push(ms(t));
-                        }
-                        (lats, errors)
-                    })
-                })
-                .collect();
-            for h in handles {
-                let (mut l, err) = h.join().expect("kvrocks scan client");
-                errors += err;
-                lats.append(&mut l);
-            }
-        });
-        let wall = t0.elapsed();
-        eprintln!(
-            "[rocks-parity] {full} done ops={} errors={errors}",
-            cfg_ops * clients
-        );
-        let mut blocks = vec![summarize_mc(
-            &full,
-            cfg_ops * clients,
-            wall,
-            &mut lats,
-            clients,
-            errors,
-        )];
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(
-                pct(&lats, 50.0),
-                a,
-                b,
-                clients as u64,
-                0.0,
-                100,
-                (cfg_ops * clients) as u64,
-            );
-            eprint_write_diagnose(&full, &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        blocks
-    }
-
-    /// RFC-0184 P2.64: kvrocks_pipelined_set at N clients (WriteBatch of `batch` SETs).
-    pub fn run_kvrocks_pipelined_clients<E: Engine + Sync>(
-        &self,
-        e: &E,
-        clients: usize,
-    ) -> Vec<String> {
-        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
-        let full = format!("kvrocks_pipelined_set_mc{clients}");
-        if !shape_wanted(&full) {
-            return Vec::new();
-        }
-        e.set_write_sync(write_sync_for_suite("kvrocks"));
-        let records = self.cfg.records;
-        let cfg_ops = self.cfg.ops;
-        let batch = self.cfg.batch;
-        let yval = std::sync::Arc::new(vec![b'k'; self.cfg.payload]);
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
-        let phase0 = e.write_phase_snapshot();
-        let t0 = Instant::now();
-        let mut lats = Vec::with_capacity(cfg_ops * clients);
-        let mut errors = 0u64;
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..clients)
-                .map(|c| {
-                    let barrier = barrier.clone();
-                    let yval = yval.clone();
-                    s.spawn(move || {
-                        let mut rng =
-                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
-                        let mut lats = Vec::with_capacity(cfg_ops);
-                        let mut errors = 0u64;
-                        barrier.wait();
-                        for _ in 0..cfg_ops {
-                            let t = Instant::now();
-                            let mut keys = Vec::with_capacity(batch);
-                            for _ in 0..batch {
-                                keys.push(kkey(self.pick(&mut rng, records)));
-                            }
-                            if !e.batch_put_same("default", &keys, yval.as_ref()) {
-                                errors += 1;
-                            }
-                            lats.push(ms(t));
-                        }
-                        (lats, errors)
-                    })
-                })
-                .collect();
-            for h in handles {
-                let (mut l, err) = h.join().expect("kvrocks pipeline client");
-                errors += err;
-                lats.append(&mut l);
-            }
-        });
-        let wall = t0.elapsed();
-        eprintln!(
-            "[rocks-parity] {full} done ops={} errors={errors}",
-            cfg_ops * clients
-        );
-        let mut blocks = vec![summarize_mc(
-            &full,
-            cfg_ops * clients,
-            wall,
-            &mut lats,
-            clients,
-            errors,
-        )];
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, clients as u64, 0.0, 0);
-            eprint_write_diagnose(&full, &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        blocks
-    }
-
-    /// RFC-0184 P2.66: kvrocks_blob_set at N clients (16 KiB BlobDB-sized SET).
-    pub fn run_kvrocks_blob_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
-        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
-        let full = format!("kvrocks_blob_set_mc{clients}");
-        if !shape_wanted(&full) {
-            return Vec::new();
-        }
-        e.set_write_sync(write_sync_for_suite("kvrocks"));
-        let records = self.cfg.records;
-        let cfg_ops = self.cfg.ops;
-        let blob_n = records.min(256);
-        let blob = std::sync::Arc::new(vec![b'B'; 16 * 1024]);
-        for i in 0..blob_n {
-            assert!(e.put(&bkey(i), blob.as_ref()), "kvrocks blob mc seed {i}");
-        }
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
-        let phase0 = e.write_phase_snapshot();
-        let t0 = Instant::now();
-        let mut lats = Vec::with_capacity(cfg_ops * clients);
-        let mut errors = 0u64;
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..clients)
-                .map(|c| {
-                    let barrier = barrier.clone();
-                    let blob = blob.clone();
-                    s.spawn(move || {
-                        let mut rng =
-                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
-                        let mut lats = Vec::with_capacity(cfg_ops);
-                        let mut errors = 0u64;
-                        barrier.wait();
-                        for _ in 0..cfg_ops {
-                            let t = Instant::now();
-                            let k = bkey(self.pick(&mut rng, blob_n));
-                            if !e.put(&k, blob.as_ref()) {
-                                errors += 1;
-                            }
-                            lats.push(ms(t));
-                        }
-                        (lats, errors)
-                    })
-                })
-                .collect();
-            for h in handles {
-                let (mut l, err) = h.join().expect("kvrocks blob client");
-                errors += err;
-                lats.append(&mut l);
-            }
-        });
-        let wall = t0.elapsed();
-        eprintln!(
-            "[rocks-parity] {full} done ops={} errors={errors}",
-            cfg_ops * clients
-        );
-        let mut blocks = vec![summarize_mc(
-            &full,
-            cfg_ops * clients,
-            wall,
-            &mut lats,
-            clients,
-            errors,
-        )];
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, clients as u64, 0.0, 0);
-            eprint_write_diagnose(&full, &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        blocks
     }
 
     /// RFC-0043 P2.3 — MyRocks (MySQL + RocksDB) + LinkBench-inspired mix.
@@ -1966,13 +1207,6 @@ impl YcsbRunner {
         let mut blocks = Vec::with_capacity(4);
 
         // Untimed: one node + 4 outgoing links per record (LinkBench seed).
-        // Skip when ONLY=mc4 so we don't pay 5×N host-sync puts before the
-        // concurrent GET harness seeds its own nkey space.
-        if shape_wanted("myrocks_point_select")
-            || shape_wanted("myrocks_read_only")
-            || shape_wanted("myrocks_write_tx")
-            || shape_wanted("linkbench_mix")
-        {
         for i in 0..records {
             assert!(e.put(&nkey(i), &yval), "myrocks node seed {i}");
             for d in 1..=4 {
@@ -1980,11 +1214,8 @@ impl YcsbRunner {
                 assert!(e.put(&lkey(i, dst), &yval), "myrocks link seed");
             }
         }
-        }
 
         // myrocks_point_select — sysbench oltp_point_select (1-op canary).
-        if shape_wanted("myrocks_point_select") {
-        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut gets, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -2004,18 +1235,8 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] myrocks_point_select done gets={gets} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
-            eprint_write_diagnose("myrocks_point_select", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        }
 
         // myrocks_read_only — sysbench oltp_read_only short PK range (HL).
-        if shape_wanted("myrocks_read_only") {
-        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut scans, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -2035,20 +1256,11 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] myrocks_read_only done scans={scans} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
-            eprint_write_diagnose("myrocks_read_only", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        }
 
         // myrocks_write_tx — one OLTP tx = `batch` row updates, one WriteBatch.
-        if shape_wanted("myrocks_write_tx") {
-        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut rows, mut errors) = (0u64, 0u64);
+        let phase0 = e.write_phase_snapshot();
         let t0 = Instant::now();
         for _ in 0..cfg_ops {
             let t = Instant::now();
@@ -2076,18 +1288,23 @@ impl YcsbRunner {
         ));
         eprintln!("[rocks-parity] myrocks_write_tx done rows={rows} errors={errors}");
         if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
-            eprint_write_diagnose("myrocks_write_tx", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
+            let n = b[0].saturating_sub(a[0]).max(1);
+            let us = |d: u64| d as f64 / n as f64 / 1000.0;
+            eprintln!(
+                "[rocks-parity] myrocks_write_tx phasesΔ (per commit, {batch}/op) prepare={:.2}µs wal={:.2}µs mem={:.2}µs publish={:.2}µs flsh={:.2}µs lock_wait={:.2}µs n={n}",
+                us(b[1].saturating_sub(a[1])),
+                us(b[2].saturating_sub(a[2])),
+                us(b[3].saturating_sub(a[3])),
+                us(b[4].saturating_sub(a[4])),
+                us(b[5].saturating_sub(a[5])),
+                us(b[6].saturating_sub(a[6])),
+            );
         }
 
         // linkbench_mix — inspired by LinkBench proportions, not a replay:
-        if shape_wanted("linkbench_mix") {
         //   55% GET_LINKS_LIST (prefix scan), 15% GET_NODE,
         //   25% ADD/UPDATE_LINK as a 4-put batch, 5% DELETE_LINK.
+        e.reset_read_probe();
         let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut scans, mut gets, mut writes, mut deletes, mut errors) =
@@ -2147,181 +1364,32 @@ impl YcsbRunner {
             lats.push(ms(t));
         }
         blocks.push(summarize("linkbench_mix", cfg_ops, t0.elapsed(), &mut lats));
+        let probe = e.read_probe_json().unwrap_or_else(|| "null".into());
+        blocks.push(format!(
+            r#"{{
+    "name": "linkbench_mix_probe",
+    "combined": true,
+    "probe": {probe}
+  }}"#
+        ));
         eprintln!(
             "[rocks-parity] linkbench_mix done scans={scans} gets={gets} writes={writes} deletes={deletes} errors={errors}"
         );
         if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 70, cfg_ops as u64);
-            eprint_write_diagnose("linkbench_mix", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
+            let n = b[0].saturating_sub(a[0]).max(1);
+            let us = |d: u64| d as f64 / n as f64 / 1000.0;
+            eprintln!(
+                "[rocks-parity] linkbench_mix phasesΔ (per commit) prepare={:.2}µs wal={:.2}µs mem={:.2}µs publish={:.2}µs flsh={:.2}µs lock_wait={:.2}µs n={n}",
+                us(b[1].saturating_sub(a[1])),
+                us(b[2].saturating_sub(a[2])),
+                us(b[3].saturating_sub(a[3])),
+                us(b[4].saturating_sub(a[4])),
+                us(b[5].saturating_sub(a[5])),
+                us(b[6].saturating_sub(a[6])),
+            );
         }
 
         self.rng = rng;
-        blocks
-    }
-
-    /// RFC-0184 P2.47: myrocks_point_select at N clients (sysbench oltp_point_select).
-    pub fn run_myrocks_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
-        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
-        let full = format!("myrocks_point_select_mc{clients}");
-        if !shape_wanted(&full) {
-            return Vec::new();
-        }
-        // Timed window is 100% GET. Seed untimed async so we don't pay
-        // 100k host-sync puts (1c suite still uses MyRocks sync-on-commit).
-        e.set_write_sync(false);
-        let records = self.cfg.records;
-        let cfg_ops = self.cfg.ops;
-        let yval = vec![b'm'; self.cfg.payload];
-        for i in 0..records {
-            assert!(e.put(&nkey(i), &yval), "myrocks mc seed {i}");
-        }
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
-        let phase0 = e.write_phase_snapshot();
-        let t0 = Instant::now();
-        let mut lats = Vec::with_capacity(cfg_ops * clients);
-        let mut errors = 0u64;
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..clients)
-                .map(|c| {
-                    let barrier = barrier.clone();
-                    s.spawn(move || {
-                        let mut rng =
-                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
-                        let mut lats = Vec::with_capacity(cfg_ops);
-                        let mut errors = 0u64;
-                        barrier.wait();
-                        for _ in 0..cfg_ops {
-                            let t = Instant::now();
-                            let u = self.pick(&mut rng, records);
-                            if e.get(&nkey(u)).is_err() {
-                                errors += 1;
-                            }
-                            lats.push(ms(t));
-                        }
-                        (lats, errors)
-                    })
-                })
-                .collect();
-            for h in handles {
-                let (mut l, err) = h.join().expect("myrocks client thread");
-                errors += err;
-                lats.append(&mut l);
-            }
-        });
-        let wall = t0.elapsed();
-        eprintln!(
-            "[rocks-parity] {full} done ops={} errors={errors}",
-            cfg_ops * clients
-        );
-        let mut blocks = vec![summarize_mc(
-            &full,
-            cfg_ops * clients,
-            wall,
-            &mut lats,
-            clients,
-            errors,
-        )];
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(
-                pct(&lats, 50.0),
-                a,
-                b,
-                clients as u64,
-                0.0,
-                100,
-                (cfg_ops * clients) as u64,
-            );
-            eprint_write_diagnose(&full, &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        blocks
-    }
-
-    /// RFC-0184 P2.57: myrocks_read_only at N clients (oltp_read_only PK range).
-    pub fn run_myrocks_range_clients<E: Engine + Sync>(
-        &self,
-        e: &E,
-        clients: usize,
-    ) -> Vec<String> {
-        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
-        let full = format!("myrocks_read_only_mc{clients}");
-        if !shape_wanted(&full) {
-            return Vec::new();
-        }
-        e.set_write_sync(false);
-        let records = self.cfg.records;
-        let cfg_ops = self.cfg.ops;
-        let yval = vec![b'm'; self.cfg.payload];
-        for i in 0..records {
-            assert!(e.put(&nkey(i), &yval), "myrocks range-mc seed {i}");
-        }
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
-        let phase0 = e.write_phase_snapshot();
-        let t0 = Instant::now();
-        let mut lats = Vec::with_capacity(cfg_ops * clients);
-        let mut errors = 0u64;
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..clients)
-                .map(|c| {
-                    let barrier = barrier.clone();
-                    s.spawn(move || {
-                        let mut rng =
-                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
-                        let mut lats = Vec::with_capacity(cfg_ops);
-                        let mut errors = 0u64;
-                        barrier.wait();
-                        for _ in 0..cfg_ops {
-                            let t = Instant::now();
-                            let u = self.pick(&mut rng, records);
-                            if e.scan_count(&nkey(u), &nkey(u + 25), 25).is_err() {
-                                errors += 1;
-                            }
-                            lats.push(ms(t));
-                        }
-                        (lats, errors)
-                    })
-                })
-                .collect();
-            for h in handles {
-                let (mut l, err) = h.join().expect("myrocks range client thread");
-                errors += err;
-                lats.append(&mut l);
-            }
-        });
-        let wall = t0.elapsed();
-        eprintln!(
-            "[rocks-parity] {full} done ops={} errors={errors}",
-            cfg_ops * clients
-        );
-        let mut blocks = vec![summarize_mc(
-            &full,
-            cfg_ops * clients,
-            wall,
-            &mut lats,
-            clients,
-            errors,
-        )];
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(
-                pct(&lats, 50.0),
-                a,
-                b,
-                clients as u64,
-                0.0,
-                100,
-                (cfg_ops * clients) as u64,
-            );
-            eprint_write_diagnose(&full, &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
         blocks
     }
 
@@ -2337,24 +1405,14 @@ impl YcsbRunner {
         let mut rng = std::mem::take(&mut self.rng);
         let mut blocks = Vec::with_capacity(5);
 
-        if shape_wanted("surreal_tx_get")
-            || shape_wanted("surreal_tx_put")
-            || shape_wanted("surreal_tx_rmw")
-            || shape_wanted("surreal_tx_scan")
-            || shape_wanted("surreal_tx_batch")
-            || shape_wanted("surreal_tx_rmw_mc8")
-        {
         for i in 0..records {
             assert!(e.put(&skey(i), &yval), "surreal seed {i}");
         }
         for i in 0..records {
             let _ = e.get(&skey(i));
         }
-        }
 
         // surreal_tx_get — read-only txn (snapshot get + commit). HL.
-        if shape_wanted("surreal_tx_get") {
-        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut gets, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -2380,18 +1438,8 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] surreal_tx_get done gets={gets} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
-            eprint_write_diagnose("surreal_tx_get", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        }
 
         // surreal_tx_put — 1 put + commit (canary: one fd/Ok).
-        if shape_wanted("surreal_tx_put") {
-        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut puts, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -2418,18 +1466,8 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] surreal_tx_put done puts={puts} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
-            eprint_write_diagnose("surreal_tx_put", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        }
 
         // surreal_tx_rmw — SurrealQL UPDATE: get + put + one commit (HL).
-        if shape_wanted("surreal_tx_rmw") {
-        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut rmws, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -2465,18 +1503,8 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] surreal_tx_rmw done rmws={rmws} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
-            eprint_write_diagnose("surreal_tx_rmw", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        }
 
         // surreal_tx_scan — snapshot range + commit (HL).
-        if shape_wanted("surreal_tx_scan") {
-        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut scans, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -2502,18 +1530,8 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] surreal_tx_scan done scans={scans} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
-            eprint_write_diagnose("surreal_tx_scan", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        }
 
         // surreal_tx_batch — crud-bench insert: N puts, one commit (HL).
-        if shape_wanted("surreal_tx_batch") {
-        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut rows, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -2541,14 +1559,6 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] surreal_tx_batch done rows={rows} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
-            eprint_write_diagnose("surreal_tx_batch", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        }
 
         self.rng = rng;
         // crud-bench is concurrent; 1c rmw misses OCC conflict + group commit.
@@ -2564,15 +1574,10 @@ impl YcsbRunner {
         clients: usize,
     ) -> Vec<String> {
         assert!(clients >= 2, "multi-client harness needs >= 2 clients");
-        let name = format!("surreal_tx_rmw_mc{clients}");
-        if !shape_wanted(&name) {
-            return Vec::new();
-        }
         let cfg_ops = self.cfg.ops;
         let records = self.cfg.records;
         let yval = std::sync::Arc::new(vec![b's'; self.cfg.payload]);
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
-        let phase0 = e.write_phase_snapshot();
         let t0 = Instant::now();
         let mut lats = Vec::with_capacity(cfg_ops * clients);
         let mut errors = 0u64;
@@ -2623,7 +1628,8 @@ impl YcsbRunner {
                 lats.append(&mut l);
             }
         });
-        let mut block = summarize_mc(
+        let name = format!("surreal_tx_rmw_mc{clients}");
+        let block = summarize_mc(
             &name,
             cfg_ops * clients,
             t0.elapsed(),
@@ -2635,101 +1641,7 @@ impl YcsbRunner {
             "[rocks-parity] {name} done ops={} errors={errors}",
             cfg_ops * clients
         );
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, clients as u64, 0.0, 0);
-            eprint_write_diagnose(&name, &d);
-            block = attach_diagnose(block, Some(&d));
-        }
         vec![block]
-    }
-
-    /// RFC-0184 P2.50: surreal_tx_get at N clients (snapshot get + commit).
-    pub fn run_surreal_get_clients<E: OccEngine + Sync>(
-        &self,
-        e: &E,
-        clients: usize,
-    ) -> Vec<String> {
-        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
-        let full = format!("surreal_tx_get_mc{clients}");
-        if !shape_wanted(&full) {
-            return Vec::new();
-        }
-        // Timed window is snapshot GET + commit. Seed untimed async so we
-        // don't pay 100k host-sync puts (1c suite still uses Surreal
-        // sync-on-commit).
-        e.set_write_sync(false);
-        let records = self.cfg.records;
-        let cfg_ops = self.cfg.ops;
-        let yval = vec![b's'; self.cfg.payload];
-        for i in 0..records {
-            assert!(e.put(&skey(i), &yval), "surreal mc seed {i}");
-        }
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
-        let phase0 = e.write_phase_snapshot();
-        let t0 = Instant::now();
-        let mut lats = Vec::with_capacity(cfg_ops * clients);
-        let mut errors = 0u64;
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..clients)
-                .map(|c| {
-                    let barrier = barrier.clone();
-                    s.spawn(move || {
-                        let mut rng =
-                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
-                        let mut lats = Vec::with_capacity(cfg_ops);
-                        let mut errors = 0u64;
-                        barrier.wait();
-                        for _ in 0..cfg_ops {
-                            let t = Instant::now();
-                            let u = self.pick(&mut rng, records);
-                            let ok = e.with_txn(|tx| match tx.get(&skey(u)) {
-                                Ok(_) => tx.commit(),
-                                Err(()) => false,
-                            });
-                            if !ok {
-                                errors += 1;
-                            }
-                            lats.push(ms(t));
-                        }
-                        (lats, errors)
-                    })
-                })
-                .collect();
-            for h in handles {
-                let (mut l, err) = h.join().expect("surreal get client thread");
-                errors += err;
-                lats.append(&mut l);
-            }
-        });
-        let wall = t0.elapsed();
-        eprintln!(
-            "[rocks-parity] {full} done ops={} errors={errors}",
-            cfg_ops * clients
-        );
-        let mut blocks = vec![summarize_mc(
-            &full,
-            cfg_ops * clients,
-            wall,
-            &mut lats,
-            clients,
-            errors,
-        )];
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(
-                pct(&lats, 50.0),
-                a,
-                b,
-                clients as u64,
-                0.0,
-                100,
-                (cfg_ops * clients) as u64,
-            );
-            eprint_write_diagnose(&full, &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        blocks
     }
 
     /// RFC-0043 P2.6 — NebulaGraph storage: vertex prefix-scan (GO 1-hop)
@@ -2742,16 +1654,12 @@ impl YcsbRunner {
         let yval = vec![b'n'; self.cfg.payload];
         let mut rng = std::mem::take(&mut self.rng);
         let mut blocks = Vec::with_capacity(2);
-        if shape_wanted("nebula_get_neighbors") || shape_wanted("nebula_insert_edge") {
         for i in 0..records {
             for d in 1..=4 {
                 let dst = (i + d) % records;
                 assert!(e.put(&ekey(i, dst), &yval), "nebula seed edge");
             }
         }
-        }
-        if shape_wanted("nebula_get_neighbors") {
-        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut scans, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -2771,17 +1679,7 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] nebula_get_neighbors done scans={scans} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
-            eprint_write_diagnose("nebula_get_neighbors", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        }
 
-        if shape_wanted("nebula_insert_edge") {
-        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut puts, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -2811,178 +1709,7 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] nebula_insert_edge done puts={puts} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
-            eprint_write_diagnose("nebula_insert_edge", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        }
         self.rng = rng;
-        blocks
-    }
-
-    /// RFC-0184 P2.48: nebula_get_neighbors at N clients (GO 1-hop prefix scan).
-    pub fn run_nebula_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
-        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
-        let full = format!("nebula_get_neighbors_mc{clients}");
-        if !shape_wanted(&full) {
-            return Vec::new();
-        }
-        e.set_write_sync(write_sync_for_suite("nebula"));
-        let records = self.cfg.records;
-        let cfg_ops = self.cfg.ops;
-        let yval = vec![b'n'; self.cfg.payload];
-        for i in 0..records {
-            for d in 1..=4 {
-                let dst = (i + d) % records;
-                assert!(e.put(&ekey(i, dst), &yval), "nebula mc seed edge");
-            }
-        }
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
-        let phase0 = e.write_phase_snapshot();
-        let t0 = Instant::now();
-        let mut lats = Vec::with_capacity(cfg_ops * clients);
-        let mut errors = 0u64;
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..clients)
-                .map(|c| {
-                    let barrier = barrier.clone();
-                    s.spawn(move || {
-                        let mut rng =
-                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
-                        let mut lats = Vec::with_capacity(cfg_ops);
-                        let mut errors = 0u64;
-                        barrier.wait();
-                        for _ in 0..cfg_ops {
-                            let t = Instant::now();
-                            let u = self.pick(&mut rng, records);
-                            if e.scan_count(&eprefix(u), &eprefix(u + 1), 25).is_err() {
-                                errors += 1;
-                            }
-                            lats.push(ms(t));
-                        }
-                        (lats, errors)
-                    })
-                })
-                .collect();
-            for h in handles {
-                let (mut l, err) = h.join().expect("nebula client thread");
-                errors += err;
-                lats.append(&mut l);
-            }
-        });
-        let wall = t0.elapsed();
-        eprintln!(
-            "[rocks-parity] {full} done ops={} errors={errors}",
-            cfg_ops * clients
-        );
-        let mut blocks = vec![summarize_mc(
-            &full,
-            cfg_ops * clients,
-            wall,
-            &mut lats,
-            clients,
-            errors,
-        )];
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(
-                pct(&lats, 50.0),
-                a,
-                b,
-                clients as u64,
-                0.0,
-                100,
-                (cfg_ops * clients) as u64,
-            );
-            eprint_write_diagnose(&full, &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        blocks
-    }
-
-    /// RFC-0184 P2.61: nebula_insert_edge at N clients (WriteBatch ingest).
-    pub fn run_nebula_insert_clients<E: Engine + Sync>(
-        &self,
-        e: &E,
-        clients: usize,
-    ) -> Vec<String> {
-        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
-        let full = format!("nebula_insert_edge_mc{clients}");
-        if !shape_wanted(&full) {
-            return Vec::new();
-        }
-        e.set_write_sync(write_sync_for_suite("nebula"));
-        let records = self.cfg.records;
-        let cfg_ops = self.cfg.ops;
-        let batch = self.cfg.batch;
-        let yval = std::sync::Arc::new(vec![b'n'; self.cfg.payload]);
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
-        let phase0 = e.write_phase_snapshot();
-        let t0 = Instant::now();
-        let mut lats = Vec::with_capacity(cfg_ops * clients);
-        let mut errors = 0u64;
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..clients)
-                .map(|c| {
-                    let barrier = barrier.clone();
-                    let yval = yval.clone();
-                    s.spawn(move || {
-                        let mut rng =
-                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
-                        let mut lats = Vec::with_capacity(cfg_ops);
-                        let mut errors = 0u64;
-                        barrier.wait();
-                        for _ in 0..cfg_ops {
-                            let t = Instant::now();
-                            let mut wb = Vec::with_capacity(batch);
-                            for _ in 0..batch {
-                                let src = self.pick(&mut rng, records);
-                                let dst = self.pick(&mut rng, records);
-                                wb.push(CfWrite::Put {
-                                    cf: "default",
-                                    k: ekey(src, dst),
-                                    v: yval.as_ref().clone(),
-                                });
-                            }
-                            if !e.batch(std::mem::take(&mut wb)) {
-                                errors += 1;
-                            }
-                            lats.push(ms(t));
-                        }
-                        (lats, errors)
-                    })
-                })
-                .collect();
-            for h in handles {
-                let (mut l, err) = h.join().expect("nebula insert client thread");
-                errors += err;
-                lats.append(&mut l);
-            }
-        });
-        let wall = t0.elapsed();
-        eprintln!(
-            "[rocks-parity] {full} done ops={} errors={errors}",
-            cfg_ops * clients
-        );
-        let mut blocks = vec![summarize_mc(
-            &full,
-            cfg_ops * clients,
-            wall,
-            &mut lats,
-            clients,
-            errors,
-        )];
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, clients as u64, 0.0, 0);
-            eprint_write_diagnose(&full, &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
         blocks
     }
 
@@ -2997,14 +1724,10 @@ impl YcsbRunner {
         let mut rng = std::mem::take(&mut self.rng);
         let mut blocks = Vec::with_capacity(2);
         let windows = (records / 16).max(1);
-        if shape_wanted("flink_window_state") || shape_wanted("kafka_changelog_flush") {
         for i in 0..records {
             let win = i % windows;
             assert!(e.put(&wkey(win, i), &yval), "flink seed {i}");
         }
-        }
-        if shape_wanted("flink_window_state") {
-        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut ops, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -3028,17 +1751,7 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] flink_window_state done ops={ops} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 50, cfg_ops as u64);
-            eprint_write_diagnose("flink_window_state", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        }
 
-        if shape_wanted("kafka_changelog_flush") {
-        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut puts, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -3067,179 +1780,7 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] kafka_changelog_flush done puts={puts} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
-            eprint_write_diagnose("kafka_changelog_flush", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        }
         self.rng = rng;
-        blocks
-    }
-
-    /// RFC-0184 P2.54: flink_window_state at N clients (put + window scan).
-    pub fn run_flink_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
-        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
-        let full = format!("flink_window_state_mc{clients}");
-        if !shape_wanted(&full) {
-            return Vec::new();
-        }
-        e.set_write_sync(write_sync_for_suite("streaming"));
-        let records = self.cfg.records;
-        let cfg_ops = self.cfg.ops;
-        let yval = std::sync::Arc::new(vec![b'f'; self.cfg.payload]);
-        let windows = (records / 16).max(1);
-        for i in 0..records {
-            let win = i % windows;
-            assert!(e.put(&wkey(win, i), &yval), "flink mc seed {i}");
-        }
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
-        let phase0 = e.write_phase_snapshot();
-        let t0 = Instant::now();
-        let mut lats = Vec::with_capacity(cfg_ops * clients);
-        let mut errors = 0u64;
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..clients)
-                .map(|c| {
-                    let barrier = barrier.clone();
-                    let yval = yval.clone();
-                    s.spawn(move || {
-                        let mut rng =
-                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
-                        let mut lats = Vec::with_capacity(cfg_ops);
-                        let mut errors = 0u64;
-                        barrier.wait();
-                        for i in 0..cfg_ops {
-                            let t = Instant::now();
-                            let u = self.pick(&mut rng, records);
-                            let win = u % windows;
-                            let seq = records + c * cfg_ops + i;
-                            let ok = e.put(&wkey(win, seq), yval.as_ref())
-                                && e.scan_count(&wprefix(win), &wprefix(win + 1), 25).is_ok();
-                            if !ok {
-                                errors += 1;
-                            }
-                            lats.push(ms(t));
-                        }
-                        (lats, errors)
-                    })
-                })
-                .collect();
-            for h in handles {
-                let (mut l, err) = h.join().expect("flink client thread");
-                errors += err;
-                lats.append(&mut l);
-            }
-        });
-        let wall = t0.elapsed();
-        eprintln!(
-            "[rocks-parity] {full} done ops={} errors={errors}",
-            cfg_ops * clients
-        );
-        let mut blocks = vec![summarize_mc(
-            &full,
-            cfg_ops * clients,
-            wall,
-            &mut lats,
-            clients,
-            errors,
-        )];
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(
-                pct(&lats, 50.0),
-                a,
-                b,
-                clients as u64,
-                0.0,
-                50,
-                (cfg_ops * clients) as u64,
-            );
-            eprint_write_diagnose(&full, &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        blocks
-    }
-
-    /// RFC-0184 P2.55: kafka_changelog_flush at N clients (batch + flush).
-    pub fn run_kafka_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
-        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
-        let full = format!("kafka_changelog_flush_mc{clients}");
-        if !shape_wanted(&full) {
-            return Vec::new();
-        }
-        e.set_write_sync(write_sync_for_suite("streaming"));
-        let cfg_ops = self.cfg.ops;
-        let batch = self.cfg.batch;
-        let yval = std::sync::Arc::new(vec![b'f'; self.cfg.payload]);
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
-        let phase0 = e.write_phase_snapshot();
-        let t0 = Instant::now();
-        let mut lats = Vec::with_capacity(cfg_ops * clients);
-        let mut errors = 0u64;
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..clients)
-                .map(|c| {
-                    let barrier = barrier.clone();
-                    let yval = yval.clone();
-                    s.spawn(move || {
-                        let mut lats = Vec::with_capacity(cfg_ops);
-                        let mut errors = 0u64;
-                        barrier.wait();
-                        for i in 0..cfg_ops {
-                            let t = Instant::now();
-                            let mut wb = Vec::with_capacity(batch);
-                            let base = c * cfg_ops + i;
-                            for j in 0..batch {
-                                wb.push(CfWrite::Put {
-                                    cf: "default",
-                                    k: format!("ch/{base:06}/{j:04}").into_bytes(),
-                                    v: yval.as_ref().clone(),
-                                });
-                            }
-                            // 1c kafka_changelog_flush fsyncs memtable every
-                            // changelog. Concurrent flush-per-op is an L0
-                            // storm (named ceiling); mc4 times the ingest
-                            // WriteBatch path only.
-                            let ok = e.batch(std::mem::take(&mut wb));
-                            if !ok {
-                                errors += 1;
-                            }
-                            lats.push(ms(t));
-                        }
-                        (lats, errors)
-                    })
-                })
-                .collect();
-            for h in handles {
-                let (mut l, err) = h.join().expect("kafka client thread");
-                errors += err;
-                lats.append(&mut l);
-            }
-        });
-        let wall = t0.elapsed();
-        eprintln!(
-            "[rocks-parity] {full} done ops={} errors={errors}",
-            cfg_ops * clients
-        );
-        let mut blocks = vec![summarize_mc(
-            &full,
-            cfg_ops * clients,
-            wall,
-            &mut lats,
-            clients,
-            errors,
-        )];
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, clients as u64, 0.0, 0);
-            eprint_write_diagnose(&full, &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
         blocks
     }
 
@@ -3253,13 +1794,9 @@ impl YcsbRunner {
         let yval = vec![b'c'; self.cfg.payload];
         let mut rng = std::mem::take(&mut self.rng);
         let mut blocks = Vec::with_capacity(2);
-        if shape_wanted("bluestore_omap_write") || shape_wanted("bluestore_omap_read") {
         for i in 0..records {
             assert!(e.put(&okey(i), &yval), "ceph omap seed {i}");
         }
-        }
-        if shape_wanted("bluestore_omap_write") {
-        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut puts, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -3288,17 +1825,7 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] bluestore_omap_write done puts={puts} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
-            eprint_write_diagnose("bluestore_omap_write", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        }
 
-        if shape_wanted("bluestore_omap_read") {
-        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut gets, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -3322,98 +1849,7 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] bluestore_omap_read done gets={gets} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
-            eprint_write_diagnose("bluestore_omap_read", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        }
         self.rng = rng;
-        blocks
-    }
-
-    /// RFC-0184 P2.56: bluestore_omap_read at N clients (get + 8-key scan).
-    pub fn run_ceph_read_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
-        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
-        let full = format!("bluestore_omap_read_mc{clients}");
-        if !shape_wanted(&full) {
-            return Vec::new();
-        }
-        // Timed window is GET + short scan. Seed untimed async so we don't
-        // pay 100k host-sync puts (1c suite still uses Ceph sync-on-commit).
-        e.set_write_sync(false);
-        let records = self.cfg.records;
-        let cfg_ops = self.cfg.ops;
-        let yval = vec![b'c'; self.cfg.payload];
-        for i in 0..records {
-            assert!(e.put(&okey(i), &yval), "ceph mc seed {i}");
-        }
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
-        let phase0 = e.write_phase_snapshot();
-        let t0 = Instant::now();
-        let mut lats = Vec::with_capacity(cfg_ops * clients);
-        let mut errors = 0u64;
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..clients)
-                .map(|c| {
-                    let barrier = barrier.clone();
-                    s.spawn(move || {
-                        let mut rng =
-                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
-                        let mut lats = Vec::with_capacity(cfg_ops);
-                        let mut errors = 0u64;
-                        barrier.wait();
-                        for _ in 0..cfg_ops {
-                            let t = Instant::now();
-                            let u = self.pick(&mut rng, records);
-                            let ok = e.get(&okey(u)).is_ok()
-                                && e.scan_count(&okey(u), &okey(u.saturating_add(8)), 8)
-                                    .is_ok();
-                            if !ok {
-                                errors += 1;
-                            }
-                            lats.push(ms(t));
-                        }
-                        (lats, errors)
-                    })
-                })
-                .collect();
-            for h in handles {
-                let (mut l, err) = h.join().expect("ceph read client thread");
-                errors += err;
-                lats.append(&mut l);
-            }
-        });
-        let wall = t0.elapsed();
-        eprintln!(
-            "[rocks-parity] {full} done ops={} errors={errors}",
-            cfg_ops * clients
-        );
-        let mut blocks = vec![summarize_mc(
-            &full,
-            cfg_ops * clients,
-            wall,
-            &mut lats,
-            clients,
-            errors,
-        )];
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(
-                pct(&lats, 50.0),
-                a,
-                b,
-                clients as u64,
-                0.0,
-                100,
-                (cfg_ops * clients) as u64,
-            );
-            eprint_write_diagnose(&full, &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
         blocks
     }
 
@@ -3425,13 +1861,9 @@ impl YcsbRunner {
         let yval = vec![b'S'; self.cfg.payload];
         let mut rng = std::mem::take(&mut self.rng);
         let mut blocks = Vec::with_capacity(2);
-        if shape_wanted("solana_shred_append") || shape_wanted("solana_trailing_read") {
         for i in 0..records {
             assert!(e.put(&shred(i), &yval), "solana shred seed {i}");
         }
-        }
-        if shape_wanted("solana_shred_append") {
-        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut puts, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -3461,17 +1893,7 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] solana_shred_append done puts={puts} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
-            eprint_write_diagnose("solana_shred_append", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        }
 
-        if shape_wanted("solana_trailing_read") {
-        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut scans, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -3491,171 +1913,7 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] solana_trailing_read done scans={scans} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
-            eprint_write_diagnose("solana_trailing_read", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        }
         self.rng = rng;
-        blocks
-    }
-
-    /// RFC-0184 P2.52: solana_trailing_read at N clients (trailing slot scan).
-    pub fn run_solana_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
-        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
-        let full = format!("solana_trailing_read_mc{clients}");
-        if !shape_wanted(&full) {
-            return Vec::new();
-        }
-        e.set_write_sync(write_sync_for_suite("solana"));
-        let records = self.cfg.records;
-        let cfg_ops = self.cfg.ops;
-        let yval = vec![b'S'; self.cfg.payload];
-        for i in 0..records {
-            assert!(e.put(&shred(i), &yval), "solana mc seed {i}");
-        }
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
-        let phase0 = e.write_phase_snapshot();
-        let t0 = Instant::now();
-        let mut lats = Vec::with_capacity(cfg_ops * clients);
-        let mut errors = 0u64;
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..clients)
-                .map(|c| {
-                    let barrier = barrier.clone();
-                    s.spawn(move || {
-                        let mut rng =
-                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
-                        let mut lats = Vec::with_capacity(cfg_ops);
-                        let mut errors = 0u64;
-                        barrier.wait();
-                        for _ in 0..cfg_ops {
-                            let t = Instant::now();
-                            let u = self.pick(&mut rng, records).max(25);
-                            if e.scan_count(&shred(u - 25), &shred(u + 1), 25).is_err() {
-                                errors += 1;
-                            }
-                            lats.push(ms(t));
-                        }
-                        (lats, errors)
-                    })
-                })
-                .collect();
-            for h in handles {
-                let (mut l, err) = h.join().expect("solana client thread");
-                errors += err;
-                lats.append(&mut l);
-            }
-        });
-        let wall = t0.elapsed();
-        eprintln!(
-            "[rocks-parity] {full} done ops={} errors={errors}",
-            cfg_ops * clients
-        );
-        let mut blocks = vec![summarize_mc(
-            &full,
-            cfg_ops * clients,
-            wall,
-            &mut lats,
-            clients,
-            errors,
-        )];
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(
-                pct(&lats, 50.0),
-                a,
-                b,
-                clients as u64,
-                0.0,
-                100,
-                (cfg_ops * clients) as u64,
-            );
-            eprint_write_diagnose(&full, &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        blocks
-    }
-
-    /// RFC-0184 P2.62: solana_shred_append at N clients (WriteBatch of 16 shreds).
-    pub fn run_solana_append_clients<E: Engine + Sync>(
-        &self,
-        e: &E,
-        clients: usize,
-    ) -> Vec<String> {
-        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
-        let full = format!("solana_shred_append_mc{clients}");
-        if !shape_wanted(&full) {
-            return Vec::new();
-        }
-        e.set_write_sync(write_sync_for_suite("solana"));
-        let records = self.cfg.records;
-        let cfg_ops = self.cfg.ops;
-        let yval = std::sync::Arc::new(vec![b'S'; self.cfg.payload]);
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
-        let phase0 = e.write_phase_snapshot();
-        let t0 = Instant::now();
-        let mut lats = Vec::with_capacity(cfg_ops * clients);
-        let mut errors = 0u64;
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..clients)
-                .map(|c| {
-                    let barrier = barrier.clone();
-                    let yval = yval.clone();
-                    s.spawn(move || {
-                        let mut lats = Vec::with_capacity(cfg_ops);
-                        let mut errors = 0u64;
-                        barrier.wait();
-                        let base = records + c * cfg_ops * 16;
-                        for i in 0..cfg_ops {
-                            let t = Instant::now();
-                            let mut wb = Vec::with_capacity(16);
-                            for j in 0..16 {
-                                wb.push(CfWrite::Put {
-                                    cf: "default",
-                                    k: shred(base + i * 16 + j),
-                                    v: yval.as_ref().clone(),
-                                });
-                            }
-                            if !e.batch(std::mem::take(&mut wb)) {
-                                errors += 1;
-                            }
-                            lats.push(ms(t));
-                        }
-                        (lats, errors)
-                    })
-                })
-                .collect();
-            for h in handles {
-                let (mut l, err) = h.join().expect("solana append client thread");
-                errors += err;
-                lats.append(&mut l);
-            }
-        });
-        let wall = t0.elapsed();
-        eprintln!(
-            "[rocks-parity] {full} done ops={} errors={errors}",
-            cfg_ops * clients
-        );
-        let mut blocks = vec![summarize_mc(
-            &full,
-            cfg_ops * clients,
-            wall,
-            &mut lats,
-            clients,
-            errors,
-        )];
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, clients as u64, 0.0, 0);
-            eprint_write_diagnose(&full, &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
         blocks
     }
 
@@ -3667,7 +1925,6 @@ impl YcsbRunner {
         let yval = vec![b'a'; self.cfg.payload];
         let mut rng = std::mem::take(&mut self.rng);
         let mut blocks = Vec::with_capacity(2);
-        if shape_wanted("arango_doc_crud") || shape_wanted("arango_traversal") {
         for i in 0..records {
             assert!(e.put(&dkey(i), &yval), "arango doc seed {i}");
             for d in 1..=3 {
@@ -3675,9 +1932,6 @@ impl YcsbRunner {
                 let _ = e.put(&ekey(i, dst), &yval);
             }
         }
-        }
-        if shape_wanted("arango_doc_crud") {
-        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut ops, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -3707,18 +1961,7 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] arango_doc_crud done ops={ops} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            // 50% get + 20% scan = 70% read (linkbench mix).
-            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 70, cfg_ops as u64);
-            eprint_write_diagnose("arango_doc_crud", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        }
 
-        if shape_wanted("arango_traversal") {
-        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut hops, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -3743,188 +1986,7 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] arango_traversal done hops={hops} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
-            eprint_write_diagnose("arango_traversal", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        }
         self.rng = rng;
-        blocks
-    }
-
-    /// RFC-0184 P2.49: arango_traversal at N clients (2-hop prefix scan).
-    pub fn run_arango_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
-        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
-        let full = format!("arango_traversal_mc{clients}");
-        if !shape_wanted(&full) {
-            return Vec::new();
-        }
-        e.set_write_sync(write_sync_for_suite("arango"));
-        let records = self.cfg.records;
-        let cfg_ops = self.cfg.ops;
-        let yval = vec![b'a'; self.cfg.payload];
-        for i in 0..records {
-            assert!(e.put(&dkey(i), &yval), "arango mc seed {i}");
-            for d in 1..=3 {
-                let dst = (i + d) % records;
-                let _ = e.put(&ekey(i, dst), &yval);
-            }
-        }
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
-        let phase0 = e.write_phase_snapshot();
-        let t0 = Instant::now();
-        let mut lats = Vec::with_capacity(cfg_ops * clients);
-        let mut errors = 0u64;
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..clients)
-                .map(|c| {
-                    let barrier = barrier.clone();
-                    s.spawn(move || {
-                        let mut rng =
-                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
-                        let mut lats = Vec::with_capacity(cfg_ops);
-                        let mut errors = 0u64;
-                        barrier.wait();
-                        for _ in 0..cfg_ops {
-                            let t = Instant::now();
-                            let u = self.pick(&mut rng, records).min(records.saturating_sub(2));
-                            let ok = e.scan_count(&eprefix(u), &eprefix(u + 1), 8).is_ok()
-                                && e.scan_count(&eprefix(u + 1), &eprefix(u + 2), 8).is_ok();
-                            if !ok {
-                                errors += 1;
-                            }
-                            lats.push(ms(t));
-                        }
-                        (lats, errors)
-                    })
-                })
-                .collect();
-            for h in handles {
-                let (mut l, err) = h.join().expect("arango client thread");
-                errors += err;
-                lats.append(&mut l);
-            }
-        });
-        let wall = t0.elapsed();
-        eprintln!(
-            "[rocks-parity] {full} done ops={} errors={errors}",
-            cfg_ops * clients
-        );
-        let mut blocks = vec![summarize_mc(
-            &full,
-            cfg_ops * clients,
-            wall,
-            &mut lats,
-            clients,
-            errors,
-        )];
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(
-                pct(&lats, 50.0),
-                a,
-                b,
-                clients as u64,
-                0.0,
-                100,
-                (cfg_ops * clients) as u64,
-            );
-            eprint_write_diagnose(&full, &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        blocks
-    }
-
-    /// RFC-0184 P2.63: arango_doc_crud at N clients (50% get / 30% put / 20% scan).
-    pub fn run_arango_crud_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
-        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
-        let full = format!("arango_doc_crud_mc{clients}");
-        if !shape_wanted(&full) {
-            return Vec::new();
-        }
-        e.set_write_sync(write_sync_for_suite("arango"));
-        let records = self.cfg.records;
-        let cfg_ops = self.cfg.ops;
-        let yval = std::sync::Arc::new(vec![b'a'; self.cfg.payload]);
-        for i in 0..records {
-            assert!(e.put(&dkey(i), yval.as_ref()), "arango crud mc seed {i}");
-        }
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
-        let phase0 = e.write_phase_snapshot();
-        let t0 = Instant::now();
-        let mut lats = Vec::with_capacity(cfg_ops * clients);
-        let mut errors = 0u64;
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..clients)
-                .map(|c| {
-                    let barrier = barrier.clone();
-                    let yval = yval.clone();
-                    s.spawn(move || {
-                        let mut rng =
-                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
-                        let mut lats = Vec::with_capacity(cfg_ops);
-                        let mut errors = 0u64;
-                        barrier.wait();
-                        for _ in 0..cfg_ops {
-                            let t = Instant::now();
-                            let u = self.pick(&mut rng, records);
-                            let r = xorshift(&mut rng) % 100;
-                            let ok = if r < 50 {
-                                e.get(&dkey(u)).is_ok()
-                            } else if r < 80 {
-                                e.put(&dkey(u), yval.as_ref())
-                            } else {
-                                e.scan_count(&dkey(u), &dkey(u.saturating_add(5)), 5)
-                                    .is_ok()
-                            };
-                            if !ok {
-                                errors += 1;
-                            }
-                            lats.push(ms(t));
-                        }
-                        (lats, errors)
-                    })
-                })
-                .collect();
-            for h in handles {
-                let (mut l, err) = h.join().expect("arango crud client thread");
-                errors += err;
-                lats.append(&mut l);
-            }
-        });
-        let wall = t0.elapsed();
-        eprintln!(
-            "[rocks-parity] {full} done ops={} errors={errors}",
-            cfg_ops * clients
-        );
-        let mut blocks = vec![summarize_mc(
-            &full,
-            cfg_ops * clients,
-            wall,
-            &mut lats,
-            clients,
-            errors,
-        )];
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            // 50% get + 20% scan = 70% read (same as 1c arango_doc_crud).
-            let d = diagnose_from_phases_n(
-                pct(&lats, 50.0),
-                a,
-                b,
-                clients as u64,
-                0.0,
-                70,
-                (cfg_ops * clients) as u64,
-            );
-            eprint_write_diagnose(&full, &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
         blocks
     }
 
@@ -3937,19 +1999,13 @@ impl YcsbRunner {
         let yval = vec![b'V'; self.cfg.payload];
         let mut rng = std::mem::take(&mut self.rng);
         let mut blocks = Vec::with_capacity(2);
-        // Skip when ONLY=mc4 so 500k untimed puts do not leak into the
-        // concurrent harness (same gate as myrocks 1c seed).
-        if shape_wanted("venice_fanout_get") || shape_wanted("rockstore_widecol_rw") {
-            for i in 0..records {
-                assert!(e.put(&dkey(i), &yval), "venice seed {i}");
-                for col in 0..4u16 {
-                    let _ = e.put(&colkey(i, col, 1), &yval);
-                }
+        for i in 0..records {
+            assert!(e.put(&dkey(i), &yval), "venice seed {i}");
+            for col in 0..4u16 {
+                let _ = e.put(&colkey(i, col, 1), &yval);
             }
         }
         const FANOUT: usize = 32;
-        if shape_wanted("venice_fanout_get") {
-        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut gets, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -3976,17 +2032,7 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] venice_fanout_get done gets={gets} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
-            eprint_write_diagnose("venice_fanout_get", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        }
 
-        if shape_wanted("rockstore_widecol_rw") {
-        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut ops, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -4014,524 +2060,7 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] rockstore_widecol_rw done ops={ops} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 50, cfg_ops as u64);
-            eprint_write_diagnose("rockstore_widecol_rw", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        }
         self.rng = rng;
-        blocks
-    }
-
-    /// RFC-0184 P2.45: venice_fanout_get at N clients (32 point-gets / op).
-    pub fn run_venice_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
-        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
-        let full = format!("venice_fanout_get_mc{clients}");
-        if !shape_wanted(&full) {
-            return Vec::new();
-        }
-        e.set_write_sync(write_sync_for_suite("venice"));
-        let records = self.cfg.records;
-        let cfg_ops = self.cfg.ops;
-        let yval = vec![b'V'; self.cfg.payload];
-        for i in 0..records {
-            assert!(e.put(&dkey(i), &yval), "venice mc seed {i}");
-        }
-        const FANOUT: usize = 32;
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
-        let phase0 = e.write_phase_snapshot();
-        let t0 = Instant::now();
-        let mut lats = Vec::with_capacity(cfg_ops * clients);
-        let mut errors = 0u64;
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..clients)
-                .map(|c| {
-                    let barrier = barrier.clone();
-                    s.spawn(move || {
-                        let mut rng =
-                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
-                        let mut lats = Vec::with_capacity(cfg_ops);
-                        let mut errors = 0u64;
-                        barrier.wait();
-                        for _ in 0..cfg_ops {
-                            let t = Instant::now();
-                            let mut ok = true;
-                            for _ in 0..FANOUT {
-                                let u = self.pick(&mut rng, records);
-                                if e.get(&dkey(u)).is_err() {
-                                    ok = false;
-                                    break;
-                                }
-                            }
-                            if !ok {
-                                errors += 1;
-                            }
-                            lats.push(ms(t));
-                        }
-                        (lats, errors)
-                    })
-                })
-                .collect();
-            for h in handles {
-                let (mut l, err) = h.join().expect("venice client thread");
-                errors += err;
-                lats.append(&mut l);
-            }
-        });
-        let wall = t0.elapsed();
-        eprintln!(
-            "[rocks-parity] venice_fanout_get mc{clients} done ops={} errors={errors}",
-            cfg_ops * clients
-        );
-        let mut blocks = vec![summarize_mc(
-            &full,
-            cfg_ops * clients,
-            wall,
-            &mut lats,
-            clients,
-            errors,
-        )];
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(
-                pct(&lats, 50.0),
-                a,
-                b,
-                clients as u64,
-                0.0,
-                100,
-                (cfg_ops * clients) as u64,
-            );
-            eprint_write_diagnose(&full, &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        blocks
-    }
-
-    /// RFC-0184 P2.65: rockstore_widecol_rw at N clients (50% put / 50% col scan).
-    pub fn run_rockstore_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
-        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
-        let full = format!("rockstore_widecol_rw_mc{clients}");
-        if !shape_wanted(&full) {
-            return Vec::new();
-        }
-        e.set_write_sync(write_sync_for_suite("venice"));
-        let records = self.cfg.records;
-        let cfg_ops = self.cfg.ops;
-        let yval = std::sync::Arc::new(vec![b'V'; self.cfg.payload]);
-        for i in 0..records {
-            for col in 0..4u16 {
-                assert!(
-                    e.put(&colkey(i, col, 1), yval.as_ref()),
-                    "rockstore mc seed {i}/{col}"
-                );
-            }
-        }
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
-        let phase0 = e.write_phase_snapshot();
-        let t0 = Instant::now();
-        let mut lats = Vec::with_capacity(cfg_ops * clients);
-        let mut errors = 0u64;
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..clients)
-                .map(|c| {
-                    let barrier = barrier.clone();
-                    let yval = yval.clone();
-                    s.spawn(move || {
-                        let mut rng =
-                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
-                        let mut lats = Vec::with_capacity(cfg_ops);
-                        let mut errors = 0u64;
-                        barrier.wait();
-                        for i in 0..cfg_ops {
-                            let t = Instant::now();
-                            let row = self.pick(&mut rng, records);
-                            let col = (xorshift(&mut rng) % 4) as u16;
-                            let ok = if i % 2 == 0 {
-                                let ts = 2 + (c as u64) * (cfg_ops as u64) + (i as u64);
-                                e.put(&colkey(row, col, ts), yval.as_ref())
-                            } else {
-                                e.scan_count(&colprefix(row, col), &colprefix(row, col + 1), 8)
-                                    .is_ok()
-                            };
-                            if !ok {
-                                errors += 1;
-                            }
-                            lats.push(ms(t));
-                        }
-                        (lats, errors)
-                    })
-                })
-                .collect();
-            for h in handles {
-                let (mut l, err) = h.join().expect("rockstore client thread");
-                errors += err;
-                lats.append(&mut l);
-            }
-        });
-        let wall = t0.elapsed();
-        eprintln!(
-            "[rocks-parity] {full} done ops={} errors={errors}",
-            cfg_ops * clients
-        );
-        let mut blocks = vec![summarize_mc(
-            &full,
-            cfg_ops * clients,
-            wall,
-            &mut lats,
-            clients,
-            errors,
-        )];
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(
-                pct(&lats, 50.0),
-                a,
-                b,
-                clients as u64,
-                0.0,
-                50,
-                (cfg_ops * clients) as u64,
-            );
-            eprint_write_diagnose(&full, &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        blocks
-    }
-
-    /// RFC-0043 — Rockset converged index: ingest batch + point get per op.
-    /// Same-class `sync=false`. Not SQL/aggregator.
-    pub fn run_rockset<E: Engine>(&mut self, e: &E) -> Vec<String> {
-        if !shape_wanted("rockset_hybrid") {
-            return Vec::new();
-        }
-        e.set_write_sync(write_sync_for_suite("rockset"));
-        let records = self.cfg.records;
-        let cfg_ops = self.cfg.ops;
-        let ingest = self.cfg.batch.max(1).min(8);
-        let yval = vec![b'R'; self.cfg.payload];
-        let mut rng = std::mem::take(&mut self.rng);
-        for i in 0..records {
-            assert!(e.put(&dkey(i), &yval), "rockset seed {i}");
-        }
-        let phase0 = e.write_phase_snapshot();
-        let mut lats = Vec::with_capacity(cfg_ops);
-        let mut errors = 0u64;
-        let t0 = Instant::now();
-        for op in 0..cfg_ops {
-            let t = Instant::now();
-            // Real Rockset ingest is a WriteBatch, not 8 serial puts
-            // (those 8× the 1c write-lock tax and were 0.123× vs Rocks).
-            let keys: Vec<Vec<u8>> = (0..ingest)
-                .map(|j| dkey((op * ingest + j) % records))
-                .collect();
-            let q = self.pick(&mut rng, records);
-            let ok = e.batch_put_same("default", &keys, &yval) && e.get(&dkey(q)).is_ok();
-            if !ok {
-                errors += 1;
-            }
-            lats.push(ms(t));
-        }
-        let mut blocks = vec![summarize(
-            "rockset_hybrid",
-            cfg_ops,
-            t0.elapsed(),
-            &mut lats,
-        )];
-        eprintln!("[rocks-parity] rockset_hybrid done ops={cfg_ops} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 50, cfg_ops as u64);
-            eprint_write_diagnose("rockset_hybrid", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        self.rng = rng;
-        blocks
-    }
-
-    /// RFC-0184 P2.43: rockset_hybrid at N clients (ingest batch + point get).
-    pub fn run_rockset_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
-        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
-        let full = format!("rockset_hybrid_mc{clients}");
-        if !shape_wanted(&full) {
-            return Vec::new();
-        }
-        e.set_write_sync(write_sync_for_suite("rockset"));
-        let records = self.cfg.records;
-        let cfg_ops = self.cfg.ops;
-        let ingest = self.cfg.batch.max(1).min(8);
-        let yval = std::sync::Arc::new(vec![b'R'; self.cfg.payload]);
-        for i in 0..records {
-            assert!(e.put(&dkey(i), yval.as_ref()), "rockset mc seed {i}");
-        }
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
-        let phase0 = e.write_phase_snapshot();
-        let group0 = e.write_group_stats();
-        let t0 = Instant::now();
-        let mut lats = Vec::with_capacity(cfg_ops * clients);
-        let mut errors = 0u64;
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..clients)
-                .map(|c| {
-                    let barrier = barrier.clone();
-                    let yval = yval.clone();
-                    s.spawn(move || {
-                        let mut rng =
-                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
-                        let mut lats = Vec::with_capacity(cfg_ops);
-                        let mut errors = 0u64;
-                        barrier.wait();
-                        for op in 0..cfg_ops {
-                            let t = Instant::now();
-                            let keys: Vec<Vec<u8>> = (0..ingest)
-                                .map(|j| {
-                                    dkey(
-                                        (c.wrapping_mul(cfg_ops).wrapping_add(op) * ingest + j)
-                                            % records,
-                                    )
-                                })
-                                .collect();
-                            let q = self.pick(&mut rng, records);
-                            let ok = e.batch_put_same("default", &keys, yval.as_ref())
-                                && e.get(&dkey(q)).is_ok();
-                            if !ok {
-                                errors += 1;
-                            }
-                            lats.push(ms(t));
-                        }
-                        (lats, errors)
-                    })
-                })
-                .collect();
-            for h in handles {
-                let (mut l, err) = h.join().expect("rockset client thread");
-                errors += err;
-                lats.append(&mut l);
-            }
-        });
-        let wall = t0.elapsed();
-        let mut avg_group = 0.0;
-        eprintln!(
-            "[rocks-parity] rockset_hybrid mc{clients} done ops={} errors={errors}",
-            cfg_ops * clients
-        );
-        if let Some((sub1, queued1, groups1, gops1)) = e.write_group_stats() {
-            let (sub0, queued0, groups0, gops0) = group0.unwrap_or((0, 0, 0, 0));
-            let sub = sub1.saturating_sub(sub0);
-            let queued = queued1.saturating_sub(queued0);
-            let groups = groups1.saturating_sub(groups0);
-            let gops = gops1.saturating_sub(gops0);
-            avg_group = if groups == 0 {
-                0.0
-            } else {
-                gops as f64 / groups as f64
-            };
-            eprintln!(
-                "[rocks-parity] write_group timed submits={sub} queued={queued} groups={groups} ops={gops} avg_group={avg_group:.2}"
-            );
-        }
-        let mut blocks = vec![summarize_mc(
-            &full,
-            cfg_ops * clients,
-            wall,
-            &mut lats,
-            clients,
-            errors,
-        )];
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(
-                pct(&lats, 50.0),
-                a,
-                b,
-                clients as u64,
-                avg_group,
-                50,
-                (cfg_ops * clients) as u64,
-            );
-            eprint_write_diagnose(&full, &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        blocks
-    }
-
-    /// YugabyteDB DocDB: intent keyspace then committed keyspace (two
-    /// prefixes on default CF — DocDB uses two Rocks instances; the mix
-    /// is overlay-get vs atomic intent+commit). 70/30. Same-class async.
-    pub fn run_yugabyte<E: Engine>(&mut self, e: &E) -> Vec<String> {
-        if !shape_wanted("yugabyte_docdb_rmw") {
-            return Vec::new();
-        }
-        e.set_write_sync(write_sync_for_suite("yugabyte"));
-        let records = self.cfg.records;
-        let cfg_ops = self.cfg.ops;
-        let yval = vec![b'Y'; self.cfg.payload];
-        let mut rng = std::mem::take(&mut self.rng);
-        for i in 0..records {
-            assert!(e.put(&yckey(i), &yval), "yugabyte seed {i}");
-        }
-        let phase0 = e.write_phase_snapshot();
-        let mut lats = Vec::with_capacity(cfg_ops);
-        let mut errors = 0u64;
-        let t0 = Instant::now();
-        for _ in 0..cfg_ops {
-            let t = Instant::now();
-            let u = self.pick(&mut rng, records);
-            let ok = if xorshift(&mut rng) % 100 < 70 {
-                e.get(&yikey(u)).is_ok() && e.get(&yckey(u)).is_ok()
-            } else {
-                e.batch(vec![
-                    CfWrite::Put {
-                        cf: "default",
-                        k: yikey(u),
-                        v: yval.clone(),
-                    },
-                    CfWrite::Put {
-                        cf: "default",
-                        k: yckey(u),
-                        v: yval.clone(),
-                    },
-                ])
-            };
-            if !ok {
-                errors += 1;
-            }
-            lats.push(ms(t));
-        }
-        let mut blocks = vec![summarize(
-            "yugabyte_docdb_rmw",
-            cfg_ops,
-            t0.elapsed(),
-            &mut lats,
-        )];
-        eprintln!("[rocks-parity] yugabyte_docdb_rmw done ops={cfg_ops} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 70, cfg_ops as u64);
-            eprint_write_diagnose("yugabyte_docdb_rmw", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        self.rng = rng;
-        blocks
-    }
-
-    /// RFC-0184 P2.44: yugabyte_docdb_rmw at N clients (70% overlay-get / 30% RMW).
-    pub fn run_yugabyte_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
-        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
-        let full = format!("yugabyte_docdb_rmw_mc{clients}");
-        if !shape_wanted(&full) {
-            return Vec::new();
-        }
-        e.set_write_sync(write_sync_for_suite("yugabyte"));
-        let records = self.cfg.records;
-        let cfg_ops = self.cfg.ops;
-        let yval = std::sync::Arc::new(vec![b'Y'; self.cfg.payload]);
-        for i in 0..records {
-            assert!(e.put(&yckey(i), yval.as_ref()), "yugabyte mc seed {i}");
-        }
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
-        let phase0 = e.write_phase_snapshot();
-        let group0 = e.write_group_stats();
-        let t0 = Instant::now();
-        let mut lats = Vec::with_capacity(cfg_ops * clients);
-        let mut errors = 0u64;
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..clients)
-                .map(|c| {
-                    let barrier = barrier.clone();
-                    let yval = yval.clone();
-                    s.spawn(move || {
-                        let mut rng =
-                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
-                        let mut lats = Vec::with_capacity(cfg_ops);
-                        let mut errors = 0u64;
-                        barrier.wait();
-                        for _ in 0..cfg_ops {
-                            let t = Instant::now();
-                            let u = self.pick(&mut rng, records);
-                            let ok = if xorshift(&mut rng) % 100 < 70 {
-                                e.get(&yikey(u)).is_ok() && e.get(&yckey(u)).is_ok()
-                            } else {
-                                e.batch(vec![
-                                    CfWrite::Put {
-                                        cf: "default",
-                                        k: yikey(u),
-                                        v: yval.as_ref().clone(),
-                                    },
-                                    CfWrite::Put {
-                                        cf: "default",
-                                        k: yckey(u),
-                                        v: yval.as_ref().clone(),
-                                    },
-                                ])
-                            };
-                            if !ok {
-                                errors += 1;
-                            }
-                            lats.push(ms(t));
-                        }
-                        (lats, errors)
-                    })
-                })
-                .collect();
-            for h in handles {
-                let (mut l, err) = h.join().expect("yugabyte client thread");
-                errors += err;
-                lats.append(&mut l);
-            }
-        });
-        let wall = t0.elapsed();
-        let mut avg_group = 0.0;
-        eprintln!(
-            "[rocks-parity] yugabyte_docdb_rmw mc{clients} done ops={} errors={errors}",
-            cfg_ops * clients
-        );
-        if let Some((sub1, queued1, groups1, gops1)) = e.write_group_stats() {
-            let (sub0, queued0, groups0, gops0) = group0.unwrap_or((0, 0, 0, 0));
-            let sub = sub1.saturating_sub(sub0);
-            let queued = queued1.saturating_sub(queued0);
-            let groups = groups1.saturating_sub(groups0);
-            let gops = gops1.saturating_sub(gops0);
-            avg_group = if groups == 0 {
-                0.0
-            } else {
-                gops as f64 / groups as f64
-            };
-            eprintln!(
-                "[rocks-parity] write_group timed submits={sub} queued={queued} groups={groups} ops={gops} avg_group={avg_group:.2}"
-            );
-        }
-        let mut blocks = vec![summarize_mc(
-            &full,
-            cfg_ops * clients,
-            wall,
-            &mut lats,
-            clients,
-            errors,
-        )];
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(
-                pct(&lats, 50.0),
-                a,
-                b,
-                clients as u64,
-                avg_group,
-                70,
-                (cfg_ops * clients) as u64,
-            );
-            eprint_write_diagnose(&full, &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
         blocks
     }
 
@@ -4545,13 +2074,9 @@ impl YcsbRunner {
         let yval = vec![b'x'; self.cfg.payload];
         let mut rng = std::mem::take(&mut self.rng);
         let mut blocks = Vec::with_capacity(2);
-        if shape_wanted("oxigraph_spo_lookup") || shape_wanted("oxigraph_triple_put") {
         for i in 0..records {
             assert!(e.put(&tkey(i, 0, i), &yval), "oxigraph seed {i}");
         }
-        }
-        if shape_wanted("oxigraph_spo_lookup") {
-        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut gets, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -4571,17 +2096,7 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] oxigraph_spo_lookup done gets={gets} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
-            eprint_write_diagnose("oxigraph_spo_lookup", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        }
 
-        if shape_wanted("oxigraph_triple_put") {
-        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut puts, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -4611,171 +2126,7 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] oxigraph_triple_put done puts={puts} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
-            eprint_write_diagnose("oxigraph_triple_put", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        }
         self.rng = rng;
-        blocks
-    }
-
-    /// RFC-0184 P2.51: oxigraph_spo_lookup at N clients (SPO point get).
-    pub fn run_oxigraph_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
-        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
-        let full = format!("oxigraph_spo_lookup_mc{clients}");
-        if !shape_wanted(&full) {
-            return Vec::new();
-        }
-        e.set_write_sync(write_sync_for_suite("oxigraph"));
-        let records = self.cfg.records;
-        let cfg_ops = self.cfg.ops;
-        let yval = vec![b'x'; self.cfg.payload];
-        for i in 0..records {
-            assert!(e.put(&tkey(i, 0, i), &yval), "oxigraph mc seed {i}");
-        }
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
-        let phase0 = e.write_phase_snapshot();
-        let t0 = Instant::now();
-        let mut lats = Vec::with_capacity(cfg_ops * clients);
-        let mut errors = 0u64;
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..clients)
-                .map(|c| {
-                    let barrier = barrier.clone();
-                    s.spawn(move || {
-                        let mut rng =
-                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
-                        let mut lats = Vec::with_capacity(cfg_ops);
-                        let mut errors = 0u64;
-                        barrier.wait();
-                        for _ in 0..cfg_ops {
-                            let t = Instant::now();
-                            let u = self.pick(&mut rng, records);
-                            if e.get(&tkey(u, 0, u)).is_err() {
-                                errors += 1;
-                            }
-                            lats.push(ms(t));
-                        }
-                        (lats, errors)
-                    })
-                })
-                .collect();
-            for h in handles {
-                let (mut l, err) = h.join().expect("oxigraph client thread");
-                errors += err;
-                lats.append(&mut l);
-            }
-        });
-        let wall = t0.elapsed();
-        eprintln!(
-            "[rocks-parity] {full} done ops={} errors={errors}",
-            cfg_ops * clients
-        );
-        let mut blocks = vec![summarize_mc(
-            &full,
-            cfg_ops * clients,
-            wall,
-            &mut lats,
-            clients,
-            errors,
-        )];
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(
-                pct(&lats, 50.0),
-                a,
-                b,
-                clients as u64,
-                0.0,
-                100,
-                (cfg_ops * clients) as u64,
-            );
-            eprint_write_diagnose(&full, &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        blocks
-    }
-
-    /// RFC-0184 P2.60: oxigraph_triple_put at N clients (WriteBatch ingest).
-    pub fn run_oxigraph_put_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
-        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
-        let full = format!("oxigraph_triple_put_mc{clients}");
-        if !shape_wanted(&full) {
-            return Vec::new();
-        }
-        e.set_write_sync(write_sync_for_suite("oxigraph"));
-        let records = self.cfg.records;
-        let cfg_ops = self.cfg.ops;
-        let batch = self.cfg.batch;
-        let yval = std::sync::Arc::new(vec![b'x'; self.cfg.payload]);
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
-        let phase0 = e.write_phase_snapshot();
-        let t0 = Instant::now();
-        let mut lats = Vec::with_capacity(cfg_ops * clients);
-        let mut errors = 0u64;
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..clients)
-                .map(|c| {
-                    let barrier = barrier.clone();
-                    let yval = yval.clone();
-                    s.spawn(move || {
-                        let mut rng =
-                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
-                        let mut lats = Vec::with_capacity(cfg_ops);
-                        let mut errors = 0u64;
-                        barrier.wait();
-                        for _ in 0..cfg_ops {
-                            let t = Instant::now();
-                            let mut wb = Vec::with_capacity(batch);
-                            for p in 0..batch {
-                                let s = self.pick(&mut rng, records);
-                                let o = self.pick(&mut rng, records);
-                                wb.push(CfWrite::Put {
-                                    cf: "default",
-                                    k: tkey(s, (p % 8) as u16, o),
-                                    v: yval.as_ref().clone(),
-                                });
-                            }
-                            if !e.batch(std::mem::take(&mut wb)) {
-                                errors += 1;
-                            }
-                            lats.push(ms(t));
-                        }
-                        (lats, errors)
-                    })
-                })
-                .collect();
-            for h in handles {
-                let (mut l, err) = h.join().expect("oxigraph put client thread");
-                errors += err;
-                lats.append(&mut l);
-            }
-        });
-        let wall = t0.elapsed();
-        eprintln!(
-            "[rocks-parity] {full} done ops={} errors={errors}",
-            cfg_ops * clients
-        );
-        let mut blocks = vec![summarize_mc(
-            &full,
-            cfg_ops * clients,
-            wall,
-            &mut lats,
-            clients,
-            errors,
-        )];
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, clients as u64, 0.0, 0);
-            eprint_write_diagnose(&full, &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
         blocks
     }
 
@@ -4789,8 +2140,6 @@ impl YcsbRunner {
         let mut rng = std::mem::take(&mut self.rng);
         let mut blocks = Vec::with_capacity(4);
 
-        if shape_wanted("mixgraph_like") {
-        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut ops_ok, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -4817,18 +2166,7 @@ impl YcsbRunner {
         }
         blocks.push(summarize("mixgraph_like", cfg_ops, t0.elapsed(), &mut lats));
         eprintln!("[rocks-parity] mixgraph_like done ops={ops_ok} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            // 1 put + 2 get + 1 scan → 75% read.
-            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 75, cfg_ops as u64);
-            eprint_write_diagnose("mixgraph_like", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        }
 
-        if shape_wanted("wbwi_read_your_writes") {
-        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut gets, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -4849,17 +2187,7 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] wbwi_read_your_writes done gets={gets} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
-            eprint_write_diagnose("wbwi_read_your_writes", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        }
 
-        if shape_wanted("compaction_filter_drop") {
-        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut drops, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -4885,17 +2213,7 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] compaction_filter_drop done drops={drops} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
-            eprint_write_diagnose("compaction_filter_drop", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        }
 
-        if shape_wanted("ingest_sst") {
-        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut ingest, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -4912,182 +2230,12 @@ impl YcsbRunner {
         }
         blocks.push(summarize("ingest_sst", cfg_ops, t0.elapsed(), &mut lats));
         eprintln!("[rocks-parity] ingest_sst done ingest={ingest} errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, 0);
-            eprint_write_diagnose("ingest_sst", &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        }
 
         self.rng = rng;
         blocks
     }
 
-    /// RFC-0184 P2.58: wbwi_read_your_writes at N clients (overlay get).
-    pub fn run_wbwi_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
-        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
-        let full = format!("wbwi_read_your_writes_mc{clients}");
-        if !shape_wanted(&full) {
-            return Vec::new();
-        }
-        let cfg_ops = self.cfg.ops;
-        let yval = std::sync::Arc::new(vec![b'r'; self.cfg.payload]);
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
-        let phase0 = e.write_phase_snapshot();
-        let t0 = Instant::now();
-        let mut lats = Vec::with_capacity(cfg_ops * clients);
-        let mut errors = 0u64;
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..clients)
-                .map(|c| {
-                    let barrier = barrier.clone();
-                    let yval = yval.clone();
-                    s.spawn(move || {
-                        let mut lats = Vec::with_capacity(cfg_ops);
-                        let mut errors = 0u64;
-                        barrier.wait();
-                        for i in 0..cfg_ops {
-                            let t = Instant::now();
-                            let n = c * cfg_ops + i;
-                            let k = format!("wbwi/{n:08}").into_bytes();
-                            let overlay = [(&k[..], yval.as_slice())];
-                            match e.wbwi_overlay_get(&overlay, &k) {
-                                Ok(Some(v)) if v.as_slice() == yval.as_slice() => {}
-                                _ => errors += 1,
-                            }
-                            lats.push(ms(t));
-                        }
-                        (lats, errors)
-                    })
-                })
-                .collect();
-            for h in handles {
-                let (mut l, err) = h.join().expect("wbwi client thread");
-                errors += err;
-                lats.append(&mut l);
-            }
-        });
-        let wall = t0.elapsed();
-        eprintln!(
-            "[rocks-parity] {full} done ops={} errors={errors}",
-            cfg_ops * clients
-        );
-        let mut blocks = vec![summarize_mc(
-            &full,
-            cfg_ops * clients,
-            wall,
-            &mut lats,
-            clients,
-            errors,
-        )];
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(
-                pct(&lats, 50.0),
-                a,
-                b,
-                clients as u64,
-                0.0,
-                100,
-                (cfg_ops * clients) as u64,
-            );
-            eprint_write_diagnose(&full, &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        blocks
-    }
-
-    /// RFC-0184 P2.59: mixgraph_like at N clients (put + 2 get + seek).
-    pub fn run_mixgraph_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
-        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
-        let full = format!("mixgraph_like_mc{clients}");
-        if !shape_wanted(&full) {
-            return Vec::new();
-        }
-        let records = self.cfg.records;
-        let cfg_ops = self.cfg.ops;
-        let yval = std::sync::Arc::new(vec![b'r'; self.cfg.payload]);
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
-        let phase0 = e.write_phase_snapshot();
-        let t0 = Instant::now();
-        let mut lats = Vec::with_capacity(cfg_ops * clients);
-        let mut errors = 0u64;
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..clients)
-                .map(|c| {
-                    let barrier = barrier.clone();
-                    let yval = yval.clone();
-                    s.spawn(move || {
-                        let mut rng =
-                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
-                        let mut lats = Vec::with_capacity(cfg_ops);
-                        let mut errors = 0u64;
-                        barrier.wait();
-                        for _ in 0..cfg_ops {
-                            let t = Instant::now();
-                            let u = self.pick(&mut rng, records);
-                            let k = ykey(u);
-                            let k2 = ykey((u + 1) % records);
-                            let ok_put = e.put(&k, yval.as_ref());
-                            let ok_g1 = e.get(&k).is_ok();
-                            let ok_g2 = e.get(&k2).is_ok();
-                            let end = {
-                                let mut ekey = k.clone();
-                                ekey.push(0xff);
-                                ekey
-                            };
-                            let ok_s = e.scan_count(&k, &end, 8).is_ok();
-                            if !(ok_put && ok_g1 && ok_g2 && ok_s) {
-                                errors += 1;
-                            }
-                            lats.push(ms(t));
-                        }
-                        (lats, errors)
-                    })
-                })
-                .collect();
-            for h in handles {
-                let (mut l, err) = h.join().expect("mixgraph client thread");
-                errors += err;
-                lats.append(&mut l);
-            }
-        });
-        let wall = t0.elapsed();
-        eprintln!(
-            "[rocks-parity] {full} done ops={} errors={errors}",
-            cfg_ops * clients
-        );
-        let mut blocks = vec![summarize_mc(
-            &full,
-            cfg_ops * clients,
-            wall,
-            &mut lats,
-            clients,
-            errors,
-        )];
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            // 1 put + 2 get + 1 scan → 75% read (same as 1c mixgraph_like).
-            let d = diagnose_from_phases_n(
-                pct(&lats, 50.0),
-                a,
-                b,
-                clients as u64,
-                0.0,
-                75,
-                (cfg_ops * clients) as u64,
-            );
-            eprint_write_diagnose(&full, &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        blocks
-    }
-
-    pub fn seed<E: Engine>(&self, e: &E) {
+    pub fn seed<E: Engine>(&mut self, e: &E) {
         let val = vec![b'y'; self.cfg.payload];
         for i in 0..self.cfg.records {
             assert!(e.put(&ykey(i), &val), "seed put {i}");
@@ -5114,7 +2262,7 @@ impl YcsbRunner {
         let records = self.cfg.records;
         let payload = self.cfg.payload;
         let yval = vec![b'y'; payload];
-        let ytab = YKeys::new(records + cfg_ops + 25);
+        let ytab: Vec<Vec<u8>> = (0..records + cfg_ops + 25).map(ykey).collect();
         let mut lats = Vec::with_capacity(cfg_ops);
         let mut updates = 0u64;
         let mut inserts = 0u64;
@@ -5122,19 +2270,18 @@ impl YcsbRunner {
         let mut errors = 0u64;
         let mut latest = records;
         let mut rng = std::mem::take(&mut self.rng);
-        let phase0 = e.write_phase_snapshot();
         let t0 = Instant::now();
         for _ in 0..cfg_ops {
             let t = Instant::now();
             let roll = xorshift(&mut rng) % 100;
             if roll < read_pct {
                 let i = self.pick(&mut rng, latest);
-                if e.get_probe(ytab.key(i)).is_err() {
+                if e.get_probe(&ytab[i]).is_err() {
                     errors += 1;
                 }
             } else if roll < read_pct + insert_pct {
                 // insert (new key) → read-latest window grows
-                if e.put(ytab.key(latest), &yval) {
+                if e.put(&ytab[latest], &yval) {
                     latest += 1;
                     inserts += 1;
                 } else {
@@ -5143,8 +2290,8 @@ impl YcsbRunner {
             } else if scans {
                 // short range scan: [key(i), key(i)+25) window, capped at 25
                 let i = self.pick(&mut rng, latest);
-                let start = ytab.key(i);
-                let mut end = ytab.key(i + 25).to_vec();
+                let start = ytab[i].as_slice();
+                let mut end = ytab[i + 25].clone();
                 end.pop();
                 end.push(b'~');
                 match e.scan_count(start, &end, 25) {
@@ -5153,7 +2300,7 @@ impl YcsbRunner {
                 }
             } else if rmw {
                 let i = self.pick(&mut rng, latest);
-                if e.rmw(ytab.key(i), &yval) {
+                if e.rmw(&ytab[i], &yval) {
                     updates += 1;
                 } else {
                     errors += 1;
@@ -5161,7 +2308,7 @@ impl YcsbRunner {
             } else {
                 // update
                 let i = self.pick(&mut rng, latest);
-                if e.put(ytab.key(i), &yval) {
+                if e.put(&ytab[i], &yval) {
                     updates += 1;
                 } else {
                     errors += 1;
@@ -5171,15 +2318,10 @@ impl YcsbRunner {
         }
         self.rng = rng;
         let wall = t0.elapsed();
-        let mut block = summarize(name, cfg_ops, wall, &mut lats);
+        let block = summarize(name, cfg_ops, wall, &mut lats);
         eprintln!(
             "[rocks-parity] {name} done ops={cfg_ops} updates={updates} inserts={inserts} scans={scan_ops} errors={errors}"
         );
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, 1, 0.0, read_pct);
-            eprint_write_diagnose(name, &d);
-            block = attach_diagnose(block, Some(&d));
-        }
         block
     }
 
@@ -5233,7 +2375,6 @@ impl YcsbRunner {
             "[rocks-parity] ycsb_c_big seed {big} keys in {:.1}s (untimed)",
             t0.elapsed().as_secs_f64()
         );
-        let phase0 = e.write_phase_snapshot();
         let mut rng = std::mem::take(&mut self.rng);
         let mut lats = Vec::with_capacity(cfg_ops);
         let mut errors = 0u64;
@@ -5247,13 +2388,8 @@ impl YcsbRunner {
             lats.push(ms(t));
         }
         self.rng = rng;
-        let mut block = summarize("ycsb_c_big", cfg_ops, t0.elapsed(), &mut lats);
+        let block = summarize("ycsb_c_big", cfg_ops, t0.elapsed(), &mut lats);
         eprintln!("[rocks-parity] ycsb_c_big done (uniform 2^20 keyspace) errors={errors}");
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases_n(pct(&lats, 50.0), a, b, 1, 0.0, 100, cfg_ops as u64);
-            eprint_write_diagnose("ycsb_c_big", &d);
-            block = attach_diagnose(block, Some(&d));
-        }
         Some(block)
     }
 
@@ -5264,34 +2400,45 @@ impl YcsbRunner {
     /// the aggregate. Same op mix as the single-client rows so the two are
     /// directly comparable.
     pub fn run_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
+        self.run_clients_only(
+            e,
+            clients,
+            std::env::var("ROCKS_PARITY_ONLY").ok().as_deref(),
+        )
+    }
+
+    /// Like [`Self::run_clients`] with an explicit `ROCKS_PARITY_ONLY` filter
+    /// (tests drive the shipped skip without mutating process env).
+    pub fn run_clients_only<E: Engine + Sync>(
+        &self,
+        e: &E,
+        clients: usize,
+        only: Option<&str>,
+    ) -> Vec<String> {
         assert!(clients >= 2, "multi-client harness needs >= 2 clients");
         let cfg_ops = self.cfg.ops;
         let records = self.cfg.records;
         let payload = self.cfg.payload;
         let yval = std::sync::Arc::new(vec![b'y'; payload]);
-        let ytab = std::sync::Arc::new(YKeys::new(records));
+        let ytab = std::sync::Arc::new((0..records).map(ykey).collect::<Vec<Vec<u8>>>());
         let mut blocks = Vec::new();
         // (name, read_pct, rmw, overwrite) — mirrors run()/run_deps mixes.
-        // RFC-0163 P1.4: ycsb_b (95% get / 5% put) is the read-dominated
-        // rung of the concurrency ladder.
-        let shapes: [(&str, u64, bool, bool); 5] = [
+        let shapes: [(&str, u64, bool, bool); 3] = [
             ("ycsb_a", 50, false, false),
-            ("ycsb_b", 95, false, false),
-            ("ycsb_c", 100, false, false),
             ("ycsb_f", 50, true, false),
             ("deps_cache_overwrite", 0, false, true),
         ];
         for (name, read_pct, rmw, overwrite) in shapes {
-            let full = format!("{name}_mc{clients}");
-            if !shape_wanted(&full) {
+            let mc_name = format!("{name}_mc{clients}");
+            if !shape_wanted_in(&mc_name, only) && !shape_wanted_in(name, only) {
                 continue;
             }
-            if mc_fresh_enabled() {
-                self.seed(e);
-            }
-            let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+            // RFC-0211 P1.2: per-shape deltas (the counters are cumulative
+            // across the process, and one invocation runs several shapes).
+            let wg0 = e.write_group_stats();
             let phase0 = e.write_phase_snapshot();
-            let group0 = e.write_group_stats();
+            let cw0 = e.commit_wait_snapshot();
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
             let t0 = Instant::now();
             let mut lats = Vec::with_capacity(cfg_ops * clients);
             let mut errors = 0u64;
@@ -5313,11 +2460,11 @@ impl YcsbRunner {
                                 let ok = if overwrite {
                                     e.put(format!("c/{u:06}").as_bytes(), &yval)
                                 } else if xorshift(&mut rng) % 100 < read_pct {
-                                    e.get_probe(ytab.key(u)).is_ok()
+                                    e.get_probe(&ytab[u]).is_ok()
                                 } else if rmw {
-                                    e.rmw(ytab.key(u), &yval)
+                                    e.rmw(&ytab[u], &yval)
                                 } else {
-                                    e.put(ytab.key(u), &yval)
+                                    e.put(&ytab[u], &yval)
                                 };
                                 if !ok {
                                     errors += 1;
@@ -5335,51 +2482,67 @@ impl YcsbRunner {
                 }
             });
             let wall = t0.elapsed();
-            let mut avg_group = 0.0;
-            eprintln!(
-                "[rocks-parity] {name} mc{clients} done ops={} errors={errors}",
-                cfg_ops * clients
-            );
-            if let Some((sub1, queued1, groups1, gops1)) = e.write_group_stats() {
-                let (sub0, queued0, groups0, gops0) = group0.unwrap_or((0, 0, 0, 0));
-                let sub = sub1.saturating_sub(sub0);
-                let queued = queued1.saturating_sub(queued0);
-                let groups = groups1.saturating_sub(groups0);
-                let gops = gops1.saturating_sub(gops0);
-                avg_group = if groups == 0 {
-                    0.0
-                } else {
-                    gops as f64 / groups as f64
-                };
-                eprintln!(
-                    "[rocks-parity] write_group timed submits={sub} queued={queued} groups={groups} ops={gops} avg_group={avg_group:.2}"
-                );
-            }
-            blocks.push(summarize_mc(
+            let block = summarize_mc(
                 &format!("{name}_mc{clients}"),
                 cfg_ops * clients,
                 wall,
                 &mut lats,
                 clients,
                 errors,
-            ));
-            if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-                let d = diagnose_from_phases(
-                    pct(&lats, 50.0),
-                    a,
-                    b,
-                    clients as u64,
-                    avg_group,
-                    read_pct as u64,
+            );
+            eprintln!(
+                "[rocks-parity] {name} mc{clients} done ops={} errors={errors}",
+                cfg_ops * clients
+            );
+            if let (Some(a), Some(b)) = (wg0, e.write_group_stats()) {
+                let (sub, queued, groups, gops) = (
+                    b.0.saturating_sub(a.0),
+                    b.1.saturating_sub(a.1),
+                    b.2.saturating_sub(a.2),
+                    b.3.saturating_sub(a.3),
                 );
-                eprint_write_diagnose(&format!("{name}_mc{clients}"), &d);
-                if let Some(last) = blocks.last_mut() {
-                    *last = attach_diagnose(std::mem::take(last), Some(&d));
-                }
+                let avg = if groups == 0 {
+                    0.0
+                } else {
+                    gops as f64 / groups as f64
+                };
+                eprintln!(
+                    "[rocks-parity] {name} mc{clients} wgΔ submits={sub} queued={queued} groups={groups} ops={gops} avg_group={avg:.2}"
+                );
             }
-            if let Some(line) = e.write_phase_line() {
-                eprintln!("[rocks-parity] {name} mc{clients} phases {line}");
+            if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+                let n = b[0].saturating_sub(a[0]).max(1);
+                let us = |d: u64| d as f64 / n as f64 / 1000.0;
+                let cw = e
+                    .commit_wait_snapshot()
+                    .map(|s| {
+                        let (a0, b0) = (cw0.unwrap_or([0; 7]), s);
+                        let cwn = b0[0].saturating_sub(a0[0]);
+                        let cwg = b0[1].saturating_sub(a0[1]).max(1);
+                        let ln = b0[2].saturating_sub(a0[2]).max(1);
+                        let lus = |d: u64| d as f64 / ln as f64 / 1000.0;
+                        format!(
+                            " cw={:.2}µs/grp lone[n={} start={:.2}µs apply={:.2}µs io={:.2}µs pub={:.2}µs]",
+                            cwn as f64 / cwg as f64 / 1000.0,
+                            b0[2].saturating_sub(a0[2]),
+                            lus(b0[3].saturating_sub(a0[3])),
+                            lus(b0[4].saturating_sub(a0[4])),
+                            lus(b0[5].saturating_sub(a0[5])),
+                            lus(b0[6].saturating_sub(a0[6])),
+                        )
+                    })
+                    .unwrap_or_default();
+                eprintln!(
+                "[rocks-parity] {name} mc{clients} phasesΔ (per commit) prepare={:.2}µs wal={:.2}µs mem={:.2}µs publish={:.2}µs flsh={:.2}µs lock_wait={:.2}µs n={n}{cw}",
+                us(b[1].saturating_sub(a[1])),
+                us(b[2].saturating_sub(a[2])),
+                us(b[3].saturating_sub(a[3])),
+                us(b[4].saturating_sub(a[4])),
+                us(b[5].saturating_sub(a[5])),
+                us(b[6].saturating_sub(a[6])),
+            );
             }
+            blocks.push(block);
         }
         blocks
     }
@@ -5399,9 +2562,11 @@ impl YcsbRunner {
         let mut blocks = Vec::with_capacity(2);
 
         // deps_apply_batch_mcN
-        if shape_wanted(&format!("deps_apply_batch_mc{clients}")) {
-            let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+        {
+            // RFC-0211 P1.2: per-shape deltas (cumulative counters).
+            let wg0 = e.write_group_stats();
             let phase0 = e.write_phase_snapshot();
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
             let t0 = Instant::now();
             let mut lats = Vec::with_capacity(cfg_ops * clients);
             let mut errors = 0u64;
@@ -5474,41 +2639,43 @@ impl YcsbRunner {
                 "[rocks-parity] deps_apply_batch mc{clients} done ops={} errors={errors}",
                 cfg_ops * clients
             );
-            let mut avg_group = 0.0;
-            if let Some((sub, queued, groups, gops)) = e.write_group_stats() {
-                avg_group = if groups == 0 {
+            if let (Some(a), Some(b)) = (wg0, e.write_group_stats()) {
+                let (sub, queued, groups, gops) = (
+                    b.0.saturating_sub(a.0),
+                    b.1.saturating_sub(a.1),
+                    b.2.saturating_sub(a.2),
+                    b.3.saturating_sub(a.3),
+                );
+                let avg = if groups == 0 {
                     0.0
                 } else {
                     gops as f64 / groups as f64
                 };
                 eprintln!(
-                    "[rocks-parity] write_group submits={sub} queued={queued} groups={groups} ops={gops} avg_group={avg_group:.2}"
+                    "[rocks-parity] write_group submits={sub} queued={queued} groups={groups} ops={gops} avg_group={avg:.2}"
                 );
             }
             if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
                 let n = b[0].saturating_sub(a[0]).max(1);
                 let us = |d: u64| d as f64 / n as f64 / 1000.0;
                 eprintln!(
-                    "[rocks-parity] deps_apply_batch_mc{clients} phasesΔ (per commit) prepare={:.2}µs wal={:.2}µs mem={:.2}µs publish={:.2}µs flsh={:.2}µs lock_wait={:.2}µs n={n}",
-                    us(b[1].saturating_sub(a[1])),
-                    us(b[2].saturating_sub(a[2])),
-                    us(b[3].saturating_sub(a[3])),
-                    us(b[4].saturating_sub(a[4])),
-                    us(b[5].saturating_sub(a[5])),
-                    us(b[6].saturating_sub(a[6])),
-                );
-                let d = diagnose_from_phases(pct(&lats, 50.0), a, b, clients as u64, avg_group, 0);
-                eprint_write_diagnose(&format!("deps_apply_batch_mc{clients}"), &d);
-                if let Some(last) = blocks.last_mut() {
-                    *last = attach_diagnose(std::mem::take(last), Some(&d));
-                }
+                "[rocks-parity] deps_apply_batch mc{clients} phasesΔ (per commit) prepare={:.2}µs wal={:.2}µs mem={:.2}µs publish={:.2}µs flsh={:.2}µs lock_wait={:.2}µs n={n}",
+                us(b[1].saturating_sub(a[1])),
+                us(b[2].saturating_sub(a[2])),
+                us(b[3].saturating_sub(a[3])),
+                us(b[4].saturating_sub(a[4])),
+                us(b[5].saturating_sub(a[5])),
+                us(b[6].saturating_sub(a[6])),
+            );
             }
         }
 
         // deps_raftlog_mcN
-        if shape_wanted(&format!("deps_raftlog_mc{clients}")) {
-            let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+        {
+            // RFC-0211 P1.2: per-shape deltas (cumulative counters).
+            let wg0 = e.write_group_stats();
             let phase0 = e.write_phase_snapshot();
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
             let t0 = Instant::now();
             let mut lats = Vec::with_capacity(cfg_ops * clients);
             let mut errors = 0u64;
@@ -5568,155 +2735,42 @@ impl YcsbRunner {
                 "[rocks-parity] deps_raftlog mc{clients} done ops={} errors={errors}",
                 cfg_ops * clients
             );
-            // avg_group 0: write_group_stats is cumulative with apply_mc on
-            // the same engine; don't blame grouping from the other shape.
+            if let (Some(a), Some(b)) = (wg0, e.write_group_stats()) {
+                let (sub, queued, groups, gops) = (
+                    b.0.saturating_sub(a.0),
+                    b.1.saturating_sub(a.1),
+                    b.2.saturating_sub(a.2),
+                    b.3.saturating_sub(a.3),
+                );
+                let avg = if groups == 0 {
+                    0.0
+                } else {
+                    gops as f64 / groups as f64
+                };
+                eprintln!(
+                    "[rocks-parity] write_group submits={sub} queued={queued} groups={groups} ops={gops} avg_group={avg:.2}"
+                );
+            }
             if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-                let d = diagnose_from_phases(pct(&lats, 50.0), a, b, clients as u64, 0.0, 0);
-                eprint_write_diagnose(&name, &d);
-                if let Some(last) = blocks.last_mut() {
-                    *last = attach_diagnose(std::mem::take(last), Some(&d));
-                }
+                let n = b[0].saturating_sub(a[0]).max(1);
+                let us = |d: u64| d as f64 / n as f64 / 1000.0;
+                eprintln!(
+                "[rocks-parity] deps_raftlog mc{clients} phasesΔ (per commit) prepare={:.2}µs wal={:.2}µs mem={:.2}µs publish={:.2}µs flsh={:.2}µs lock_wait={:.2}µs n={n}",
+                us(b[1].saturating_sub(a[1])),
+                us(b[2].saturating_sub(a[2])),
+                us(b[3].saturating_sub(a[3])),
+                us(b[4].saturating_sub(a[4])),
+                us(b[5].saturating_sub(a[5])),
+                us(b[6].saturating_sub(a[6])),
+            );
             }
         }
-        blocks
-    }
-
-    /// RFC-0184 P2.67: deps_lock_prewrite at N clients (lock+default WriteBatch, no commit).
-    pub fn run_lock_prewrite_clients<E: Engine + Sync>(
-        &self,
-        e: &E,
-        clients: usize,
-    ) -> Vec<String> {
-        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
-        let full = format!("deps_lock_prewrite_mc{clients}");
-        if !shape_wanted(&full) {
-            return Vec::new();
-        }
-        let records = self.cfg.records;
-        let cfg_ops = self.cfg.ops;
-        let batch = self.cfg.batch;
-        let yval = std::sync::Arc::new(vec![b'd'; self.cfg.payload]);
-        let ts_src = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1_000_000));
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
-        let phase0 = e.write_phase_snapshot();
-        let t0 = Instant::now();
-        let mut lats = Vec::with_capacity(cfg_ops * clients);
-        let mut errors = 0u64;
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..clients)
-                .map(|c| {
-                    let barrier = barrier.clone();
-                    let yval = yval.clone();
-                    let ts_src = ts_src.clone();
-                    s.spawn(move || {
-                        let mut rng =
-                            0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
-                        let mut lats = Vec::with_capacity(cfg_ops);
-                        let mut errors = 0u64;
-                        barrier.wait();
-                        for _ in 0..cfg_ops {
-                            let t = Instant::now();
-                            let mut pre = Vec::with_capacity(batch * 2);
-                            for _ in 0..batch {
-                                let u = self.pick(&mut rng, records);
-                                let ts = ts_src.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                                pre.push(CfWrite::Put {
-                                    cf: "lock",
-                                    k: ukey(u),
-                                    v: b"L".to_vec(),
-                                });
-                                pre.push(CfWrite::Put {
-                                    cf: "default",
-                                    k: mvcc(u, ts),
-                                    v: yval.as_ref().clone(),
-                                });
-                            }
-                            if !e.batch(pre) {
-                                errors += 1;
-                            }
-                            lats.push(ms(t));
-                        }
-                        (lats, errors)
-                    })
-                })
-                .collect();
-            for h in handles {
-                let (mut l, err) = h.join().expect("lock prewrite client");
-                errors += err;
-                lats.append(&mut l);
-            }
-        });
-        let wall = t0.elapsed();
-        eprintln!(
-            "[rocks-parity] {full} done ops={} errors={errors}",
-            cfg_ops * clients
-        );
-        let mut blocks = vec![summarize_mc(
-            &full,
-            cfg_ops * clients,
-            wall,
-            &mut lats,
-            clients,
-            errors,
-        )];
-        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
-            let d = diagnose_from_phases(pct(&lats, 50.0), a, b, clients as u64, 0.0, 0);
-            eprint_write_diagnose(&full, &d);
-            if let Some(last) = blocks.last_mut() {
-                *last = attach_diagnose(std::mem::take(last), Some(&d));
-            }
-        }
-        let cleanup: Vec<CfWrite> = (0..records)
-            .map(|u| CfWrite::Delete {
-                cf: "lock",
-                k: ukey(u),
-            })
-            .collect();
-        let _ = e.batch(cleanup);
         blocks
     }
 }
 
 pub fn ykey(i: usize) -> Vec<u8> {
     format!("ycsb/{i:06}").into_bytes()
-}
-
-/// Flat ycsb keyspace (RFC-0163 P1.2 relaunch): the same `ykey` bytes in
-/// one buffer plus an end-offset table. At 25M records a
-/// `Vec<Vec<u8>>` keyspace costs ~1.4 GiB of anon and OOM-killed the
-/// compat leg (exit 137) when the mc phase built its table next to the
-/// resident engine under the 3.9 GiB guest cgroup; flat, the same keys
-/// cost ~0.4 GiB. Key bytes are identical — no dataset or rng change.
-pub struct YKeys {
-    bytes: Vec<u8>,
-    ends: Vec<u32>,
-}
-
-impl YKeys {
-    pub fn new(n: usize) -> Self {
-        let mut bytes = Vec::with_capacity(n.saturating_mul(13));
-        let mut ends = Vec::with_capacity(n);
-        for i in 0..n {
-            bytes.extend_from_slice(&ykey(i));
-            ends.push(u32::try_from(bytes.len()).expect("keyspace < 4 GiB"));
-        }
-        Self { bytes, ends }
-    }
-
-    pub fn len(&self) -> usize {
-        self.ends.len()
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.ends.is_empty()
-    }
-
-    pub fn key(&self, i: usize) -> &[u8] {
-        let hi = self.ends[i] as usize;
-        let lo = if i == 0 { 0 } else { self.ends[i - 1] as usize };
-        &self.bytes[lo..hi]
-    }
 }
 
 /// Kvrocks Redis-string key (independent of the YCSB keyspace).
@@ -5742,16 +2796,6 @@ pub fn lprefix(src: usize) -> Vec<u8> {
 /// SurrealDB / crud-bench document key (independent of YCSB).
 pub fn skey(i: usize) -> Vec<u8> {
     format!("s/{i:06}").into_bytes()
-}
-
-/// Yugabyte DocDB intent (provisional) vs committed keyspaces.
-pub fn yikey(i: usize) -> Vec<u8> {
-    format!("yi/{i:06}").into_bytes()
-}
-
-/// Yugabyte DocDB committed row.
-pub fn yckey(i: usize) -> Vec<u8> {
-    format!("yc/{i:06}").into_bytes()
 }
 
 /// Kvrocks BlobDB-sized value key (independent of the 1 KB SET canary).
@@ -5837,71 +2881,6 @@ fn pct(sorted: &[f64], p: f64) -> f64 {
     }
     let idx = ((p / 100.0) * (sorted.len() as f64 - 1.0)).round() as usize;
     sorted[idx.min(sorted.len() - 1)]
-}
-
-/// RFC-0184: WRITEPHASE deltas → kernel diagnosis (per commit).
-fn diagnose_from_phases(
-    pedra_p50_ms: f64,
-    a: [u64; 7],
-    b: [u64; 7],
-    clients: u64,
-    avg_group: f64,
-    read_pct: u64,
-) -> pedradb_core::WriteDiagnosis {
-    diagnose_from_phases_n(
-        pedra_p50_ms,
-        a,
-        b,
-        clients,
-        avg_group,
-        read_pct,
-        b[0].saturating_sub(a[0]).max(1),
-    )
-}
-
-/// Same as [`diagnose_from_phases`] with an explicit ns domain (ops, not
-/// commits). qs_hot_get is 99% get / 1 batch — per-commit would dwarf p50.
-fn diagnose_from_phases_n(
-    pedra_p50_ms: f64,
-    a: [u64; 7],
-    b: [u64; 7],
-    clients: u64,
-    avg_group: f64,
-    read_pct: u64,
-    n: u64,
-) -> pedradb_core::WriteDiagnosis {
-    let n = n.max(1);
-    let per = |i: usize| b[i].saturating_sub(a[i]) / n;
-    pedradb_core::diagnose_write(pedradb_core::WriteGapInput {
-        pedra_ns: (pedra_p50_ms * 1_000_000.0) as u64,
-        rocks_ns: 0,
-        clients,
-        avg_group_bps: (avg_group * 10_000.0) as u64,
-        read_pct,
-        phases: pedradb_core::WritePhases {
-            prepare_ns: per(1),
-            wal_ns: per(2),
-            mem_ns: per(3),
-            publish_ns: per(4),
-            flush_check_ns: per(5),
-            lock_wait_ns: per(6),
-        },
-    })
-}
-
-fn eprint_write_diagnose(tag: &str, d: &pedradb_core::WriteDiagnosis) {
-    eprintln!("[rocks-parity] diagnose {tag} {}", d.line());
-}
-
-/// RFC-0184 P1.2: `diagnose.lever` on the bench object (compare reads it).
-fn attach_diagnose(block: String, d: Option<&pedradb_core::WriteDiagnosis>) -> String {
-    let Some(d) = d else {
-        return block;
-    };
-    block.replace(
-        "\"wall_s\"",
-        &format!("\"diagnose\": {},\n    \"wall_s\"", d.json_object()),
-    )
 }
 
 fn summarize(name: &str, n: usize, wall: Duration, lats_ms: &mut [f64]) -> String {
@@ -6028,6 +3007,11 @@ pub fn peer_anomalies(peer: &std::collections::BTreeMap<String, f64>) -> Vec<Str
             ));
         }
     }
+    if let Some(&qps) = peer.get(column_a::OVERWRITE_MC4_SHAPE) {
+        if column_a::overwrite_mc4_peer_collapsed(qps) {
+            out.push(column_a::overwrite_mc4_collapsed_anomaly(qps));
+        }
+    }
     out
 }
 
@@ -6045,13 +3029,6 @@ pub fn report_json<E: Engine>(e: &E, cfg: &Cfg, benches: &[String], suites: &str
         format!("suites: {suites}"),
     ];
     notes.push("seed: one put per record (not timed)".to_string());
-    if let Some(note) = seed_async_note(seed_async_enabled()) {
-        notes.push(note.to_string());
-    }
-    let clients = clients_from_env();
-    if !clients.is_empty() {
-        notes.push(format!("clients ladder: {:?}", clients));
-    }
     notes.push(format!(
         "cfs: default + {} (TiKV store shape; raftlog = raftdb)",
         DEPS_CFS.join(", ")
@@ -6097,817 +3074,12 @@ pub fn report_json<E: Engine>(e: &E, cfg: &Cfg, benches: &[String], suites: &str
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::{Cell, RefCell};
-
-    /// Minimal Engine that records `set_write_sync` calls (RFC-0163 P1.2
-    /// seed-barrier unit — no real DB behind it).
-    #[derive(Default)]
-    struct BarrierMock {
-        sync: Cell<bool>,
-        toggles: RefCell<Vec<bool>>,
-        seeded: Cell<bool>,
-    }
-
-    impl BarrierMock {
-        fn new(sync: bool) -> Self {
-            Self {
-                sync: Cell::new(sync),
-                ..Self::default()
-            }
-        }
-    }
-
-    impl Engine for BarrierMock {
-        fn label(&self) -> &'static str {
-            "mock"
-        }
-        fn durability(&self) -> &'static str {
-            "mock"
-        }
-        fn sync(&self) -> bool {
-            self.sync.get()
-        }
-        fn set_write_sync(&self, sync: bool) {
-            self.sync.set(sync);
-            self.toggles.borrow_mut().push(sync);
-        }
-        fn put(&self, _: &[u8], _: &[u8]) -> bool {
-            true
-        }
-        fn get(&self, _: &[u8]) -> Result<Option<Vec<u8>>, ()> {
-            Ok(None)
-        }
-        fn scan_count(&self, _: &[u8], _: &[u8], _: usize) -> Result<usize, ()> {
-            Ok(0)
-        }
-        fn put_cf(&self, _: &str, _: &[u8], _: &[u8]) -> bool {
-            true
-        }
-        fn get_cf(&self, _: &str, _: &[u8]) -> Result<Option<Vec<u8>>, ()> {
-            Ok(None)
-        }
-        fn batch(&self, _: Vec<CfWrite>) -> bool {
-            true
-        }
-        fn latest_cf(&self, _: &str, _: &[u8]) -> Result<Option<Vec<u8>>, ()> {
-            Ok(None)
-        }
-        fn scan_count_cf(&self, _: &str, _: &[u8], _: &[u8], _: usize) -> Result<usize, ()> {
-            Ok(0)
-        }
-    }
-
-    #[test]
-    fn seed_barrier_toggles_only_for_sync_engine_when_enabled() {
-        // Enabled + sync column: WAL barrier off before the untimed seed,
-        // column sync restored after — exactly the run_c_big pattern.
-        let e = BarrierMock::new(true);
-        seed_under_async_barrier(&e, true, || e.seeded.set(true));
-        assert!(e.seeded.get(), "seed ran");
-        assert_eq!(*e.toggles.borrow(), vec![false, true], "off then restore");
-        assert!(e.sync(), "column sync restored");
-
-        // Disabled (default): the column is never touched.
-        let e = BarrierMock::new(true);
-        seed_under_async_barrier(&e, false, || e.seeded.set(true));
-        assert!(e.seeded.get());
-        assert!(e.toggles.borrow().is_empty(), "no toggles when disabled");
-
-        // Async engine (the Rocks default peer): pass-through, no toggles.
-        let e = BarrierMock::new(false);
-        seed_under_async_barrier(&e, true, || e.seeded.set(true));
-        assert!(e.seeded.get());
-        assert!(e.toggles.borrow().is_empty(), "async peer untouched");
-    }
-
-    #[test]
-    fn seed_async_note_marks_the_report_only_when_enabled() {
-        assert!(seed_async_note(false).is_none());
-        let note = seed_async_note(true).expect("note when enabled");
-        assert!(
-            note.starts_with("seed_async=1") && note.contains("column sync"),
-            "{note}"
-        );
-    }
-
-    #[test]
-    fn rfc0184_ycsb_c_mc4_in_compare() {
-        assert!(
-            COMPARE_SHAPES.contains(&"ycsb_c_mc4"),
-            "YCSB C 100% get mc4 must be on the cartaz"
-        );
-        assert!(shape_wanted_in("ycsb_c_mc4", Some("ycsb_c_mc4")));
-        assert!(
-            !shape_wanted_in("ycsb_c", Some("ycsb_c_mc4")),
-            "1c C must not leak into ONLY=ycsb_c_mc4"
-        );
-    }
-
-    #[test]
-    fn rfc0184_qs_hot_get_mc4_in_compare() {
-        assert!(
-            COMPARE_SHAPES.contains(&"qs_hot_get_mc4"),
-            "Quicksilver hot-get mc4 must be on the cartaz"
-        );
-        assert!(shape_wanted_in("qs_hot_get_mc4", Some("qs_hot_get_mc4")));
-        assert!(
-            !shape_wanted_in("qs_hot_get", Some("qs_hot_get_mc4")),
-            "1c qs_hot_get must not leak into ONLY=qs_hot_get_mc4"
-        );
-    }
-
-    #[test]
-    fn rfc0184_qs_neg_lookup_mc4_in_compare() {
-        assert!(
-            COMPARE_SHAPES.contains(&"qs_neg_lookup_mc4"),
-            "Quicksilver neg-lookup mc4 must be on the cartaz"
-        );
-        assert!(shape_wanted_in(
-            "qs_neg_lookup_mc4",
-            Some("qs_neg_lookup_mc4")
-        ));
-        assert!(
-            !shape_wanted_in("qs_neg_lookup", Some("qs_neg_lookup_mc4")),
-            "1c qs_neg_lookup must not leak into ONLY=qs_neg_lookup_mc4"
-        );
-        assert!(
-            !shape_wanted_in("qs_hot_get_mc4", Some("qs_neg_lookup_mc4")),
-            "hot-get mc4 must not leak into ONLY=qs_neg_lookup_mc4"
-        );
-    }
-
-    #[test]
-    fn rfc0184_qs_batch_write_mc4_in_compare() {
-        assert!(
-            COMPARE_SHAPES.contains(&"qs_batch_write_mc4"),
-            "Quicksilver batch-write mc4 must be on the cartaz"
-        );
-        assert!(shape_wanted_in(
-            "qs_batch_write_mc4",
-            Some("qs_batch_write_mc4")
-        ));
-        assert!(
-            !shape_wanted_in("qs_batch_write", Some("qs_batch_write_mc4")),
-            "1c qs_batch_write must not leak into ONLY=qs_batch_write_mc4"
-        );
-        assert!(
-            !shape_wanted_in("qs_hot_get_mc4", Some("qs_batch_write_mc4")),
-            "hot-get mc4 must not leak into ONLY=qs_batch_write_mc4"
-        );
-        assert!(
-            !shape_wanted_in("qs_neg_lookup_mc4", Some("qs_batch_write_mc4")),
-            "neg-lookup mc4 must not leak into ONLY=qs_batch_write_mc4"
-        );
-    }
-
-    #[test]
-    fn rfc0184_rockset_hybrid_mc4_in_compare() {
-        assert!(
-            COMPARE_SHAPES.contains(&"rockset_hybrid_mc4"),
-            "Rockset hybrid mc4 must be on the cartaz"
-        );
-        assert!(shape_wanted_in(
-            "rockset_hybrid_mc4",
-            Some("rockset_hybrid_mc4")
-        ));
-        assert!(
-            !shape_wanted_in("rockset_hybrid", Some("rockset_hybrid_mc4")),
-            "1c rockset_hybrid must not leak into ONLY=rockset_hybrid_mc4"
-        );
-        assert!(
-            !shape_wanted_in("qs_batch_write_mc4", Some("rockset_hybrid_mc4")),
-            "qs batch mc4 must not leak into ONLY=rockset_hybrid_mc4"
-        );
-    }
-
-    #[test]
-    fn rfc0184_yugabyte_docdb_rmw_mc4_in_compare() {
-        assert!(
-            COMPARE_SHAPES.contains(&"yugabyte_docdb_rmw_mc4"),
-            "Yugabyte DocDB RMW mc4 must be on the cartaz"
-        );
-        assert!(shape_wanted_in(
-            "yugabyte_docdb_rmw_mc4",
-            Some("yugabyte_docdb_rmw_mc4")
-        ));
-        assert!(
-            !shape_wanted_in("yugabyte_docdb_rmw", Some("yugabyte_docdb_rmw_mc4")),
-            "1c yugabyte_docdb_rmw must not leak into ONLY=yugabyte_docdb_rmw_mc4"
-        );
-        assert!(
-            !shape_wanted_in("rockset_hybrid_mc4", Some("yugabyte_docdb_rmw_mc4")),
-            "rockset mc4 must not leak into ONLY=yugabyte_docdb_rmw_mc4"
-        );
-    }
-
-    #[test]
-    fn rfc0184_venice_fanout_get_mc4_in_compare() {
-        assert!(
-            COMPARE_SHAPES.contains(&"venice_fanout_get_mc4"),
-            "Venice fanout-get mc4 must be on the cartaz"
-        );
-        assert!(shape_wanted_in(
-            "venice_fanout_get_mc4",
-            Some("venice_fanout_get_mc4")
-        ));
-        assert!(
-            !shape_wanted_in("venice_fanout_get", Some("venice_fanout_get_mc4")),
-            "1c venice_fanout_get must not leak into ONLY=venice_fanout_get_mc4"
-        );
-        assert!(
-            !shape_wanted_in("rockstore_widecol_rw", Some("venice_fanout_get_mc4")),
-            "rockstore 1c must not leak into ONLY=venice_fanout_get_mc4"
-        );
-    }
-
-    #[test]
-    fn rfc0184_kvrocks_get_mc4_in_compare() {
-        assert!(
-            COMPARE_SHAPES.contains(&"kvrocks_get_mc4"),
-            "Kvrocks GET mc4 must be on the cartaz"
-        );
-        assert!(shape_wanted_in("kvrocks_get_mc4", Some("kvrocks_get_mc4")));
-        assert!(
-            !shape_wanted_in("kvrocks_get", Some("kvrocks_get_mc4")),
-            "1c kvrocks_get must not leak into ONLY=kvrocks_get_mc4"
-        );
-        assert!(
-            !shape_wanted_in("kvrocks_set_mc50", Some("kvrocks_get_mc4")),
-            "set mc50 must not leak into ONLY=kvrocks_get_mc4"
-        );
-    }
-
-    #[test]
-    fn rfc0184_myrocks_point_select_mc4_in_compare() {
-        assert!(
-            COMPARE_SHAPES.contains(&"myrocks_point_select_mc4"),
-            "MyRocks oltp_point_select mc4 must be on the cartaz"
-        );
-        assert!(shape_wanted_in(
-            "myrocks_point_select_mc4",
-            Some("myrocks_point_select_mc4")
-        ));
-        assert!(
-            !shape_wanted_in("myrocks_point_select", Some("myrocks_point_select_mc4")),
-            "1c myrocks_point_select must not leak into ONLY=myrocks_point_select_mc4"
-        );
-        assert!(
-            !shape_wanted_in("linkbench_mix", Some("myrocks_point_select_mc4")),
-            "linkbench 1c must not leak into ONLY=myrocks_point_select_mc4"
-        );
-    }
-
-    #[test]
-    fn rfc0184_nebula_get_neighbors_mc4_in_compare() {
-        assert!(
-            COMPARE_SHAPES.contains(&"nebula_get_neighbors_mc4"),
-            "Nebula getNeighbors mc4 must be on the cartaz"
-        );
-        assert!(shape_wanted_in(
-            "nebula_get_neighbors_mc4",
-            Some("nebula_get_neighbors_mc4")
-        ));
-        assert!(
-            !shape_wanted_in("nebula_get_neighbors", Some("nebula_get_neighbors_mc4")),
-            "1c nebula_get_neighbors must not leak into ONLY=nebula_get_neighbors_mc4"
-        );
-        assert!(
-            !shape_wanted_in("nebula_insert_edge", Some("nebula_get_neighbors_mc4")),
-            "insert_edge 1c must not leak into ONLY=nebula_get_neighbors_mc4"
-        );
-    }
-
-    #[test]
-    fn rfc0184_arango_traversal_mc4_in_compare() {
-        assert!(
-            COMPARE_SHAPES.contains(&"arango_traversal_mc4"),
-            "Arango 2-hop traversal mc4 must be on the cartaz"
-        );
-        assert!(shape_wanted_in(
-            "arango_traversal_mc4",
-            Some("arango_traversal_mc4")
-        ));
-        assert!(
-            !shape_wanted_in("arango_traversal", Some("arango_traversal_mc4")),
-            "1c arango_traversal must not leak into ONLY=arango_traversal_mc4"
-        );
-        assert!(
-            !shape_wanted_in("arango_doc_crud", Some("arango_traversal_mc4")),
-            "doc_crud 1c must not leak into ONLY=arango_traversal_mc4"
-        );
-    }
-
-    #[test]
-    fn rfc0184_surreal_tx_get_mc4_in_compare() {
-        assert!(
-            COMPARE_SHAPES.contains(&"surreal_tx_get_mc4"),
-            "Surreal snapshot-get mc4 must be on the cartaz"
-        );
-        assert!(shape_wanted_in(
-            "surreal_tx_get_mc4",
-            Some("surreal_tx_get_mc4")
-        ));
-        assert!(
-            !shape_wanted_in("surreal_tx_get", Some("surreal_tx_get_mc4")),
-            "1c surreal_tx_get must not leak into ONLY=surreal_tx_get_mc4"
-        );
-        assert!(
-            !shape_wanted_in("surreal_tx_rmw_mc8", Some("surreal_tx_get_mc4")),
-            "rmw mc8 must not leak into ONLY=surreal_tx_get_mc4"
-        );
-    }
-
-    #[test]
-    fn rfc0184_oxigraph_spo_lookup_mc4_in_compare() {
-        assert!(
-            COMPARE_SHAPES.contains(&"oxigraph_spo_lookup_mc4"),
-            "Oxigraph SPO lookup mc4 must be on the cartaz"
-        );
-        assert!(shape_wanted_in(
-            "oxigraph_spo_lookup_mc4",
-            Some("oxigraph_spo_lookup_mc4")
-        ));
-        assert!(
-            !shape_wanted_in("oxigraph_spo_lookup", Some("oxigraph_spo_lookup_mc4")),
-            "1c oxigraph_spo_lookup must not leak into ONLY=oxigraph_spo_lookup_mc4"
-        );
-        assert!(
-            !shape_wanted_in("oxigraph_triple_put", Some("oxigraph_spo_lookup_mc4")),
-            "triple_put 1c must not leak into ONLY=oxigraph_spo_lookup_mc4"
-        );
-    }
-
-    #[test]
-    fn rfc0184_solana_trailing_read_mc4_in_compare() {
-        assert!(
-            COMPARE_SHAPES.contains(&"solana_trailing_read_mc4"),
-            "Solana trailing-read mc4 must be on the cartaz"
-        );
-        assert!(shape_wanted_in(
-            "solana_trailing_read_mc4",
-            Some("solana_trailing_read_mc4")
-        ));
-        assert!(
-            !shape_wanted_in("solana_trailing_read", Some("solana_trailing_read_mc4")),
-            "1c solana_trailing_read must not leak into ONLY=solana_trailing_read_mc4"
-        );
-        assert!(
-            !shape_wanted_in("solana_shred_append", Some("solana_trailing_read_mc4")),
-            "shred_append 1c must not leak into ONLY=solana_trailing_read_mc4"
-        );
-    }
-
-    #[test]
-    fn rfc0184_kvrocks_scan_mc4_in_compare() {
-        assert!(
-            COMPARE_SHAPES.contains(&"kvrocks_scan_mc4"),
-            "Kvrocks SCAN mc4 must be on the cartaz"
-        );
-        assert!(shape_wanted_in("kvrocks_scan_mc4", Some("kvrocks_scan_mc4")));
-        assert!(
-            !shape_wanted_in("kvrocks_scan", Some("kvrocks_scan_mc4")),
-            "1c kvrocks_scan must not leak into ONLY=kvrocks_scan_mc4"
-        );
-        assert!(
-            !shape_wanted_in("kvrocks_get_mc4", Some("kvrocks_scan_mc4")),
-            "GET mc4 must not leak into ONLY=kvrocks_scan_mc4"
-        );
-    }
-
-    #[test]
-    fn rfc0184_flink_window_state_mc4_in_compare() {
-        assert!(
-            COMPARE_SHAPES.contains(&"flink_window_state_mc4"),
-            "Flink window-state mc4 must be on the cartaz"
-        );
-        assert!(shape_wanted_in(
-            "flink_window_state_mc4",
-            Some("flink_window_state_mc4")
-        ));
-        assert!(
-            !shape_wanted_in("flink_window_state", Some("flink_window_state_mc4")),
-            "1c flink_window_state must not leak into ONLY=flink_window_state_mc4"
-        );
-        assert!(
-            !shape_wanted_in("kafka_changelog_flush", Some("flink_window_state_mc4")),
-            "kafka changelog 1c must not leak into ONLY=flink_window_state_mc4"
-        );
-    }
-
-    #[test]
-    fn rfc0184_kafka_changelog_flush_mc4_in_compare() {
-        assert!(
-            COMPARE_SHAPES.contains(&"kafka_changelog_flush_mc4"),
-            "Kafka changelog-flush mc4 must be on the cartaz"
-        );
-        assert!(shape_wanted_in(
-            "kafka_changelog_flush_mc4",
-            Some("kafka_changelog_flush_mc4")
-        ));
-        assert!(
-            !shape_wanted_in("kafka_changelog_flush", Some("kafka_changelog_flush_mc4")),
-            "1c kafka_changelog_flush must not leak into ONLY=kafka_changelog_flush_mc4"
-        );
-        assert!(
-            !shape_wanted_in("flink_window_state_mc4", Some("kafka_changelog_flush_mc4")),
-            "flink mc4 must not leak into ONLY=kafka_changelog_flush_mc4"
-        );
-    }
-
-    #[test]
-    fn rfc0184_bluestore_omap_read_mc4_in_compare() {
-        assert!(
-            COMPARE_SHAPES.contains(&"bluestore_omap_read_mc4"),
-            "Ceph omap-read mc4 must be on the cartaz"
-        );
-        assert!(shape_wanted_in(
-            "bluestore_omap_read_mc4",
-            Some("bluestore_omap_read_mc4")
-        ));
-        assert!(
-            !shape_wanted_in("bluestore_omap_read", Some("bluestore_omap_read_mc4")),
-            "1c bluestore_omap_read must not leak into ONLY=bluestore_omap_read_mc4"
-        );
-        assert!(
-            !shape_wanted_in("bluestore_omap_write", Some("bluestore_omap_read_mc4")),
-            "omap write 1c must not leak into ONLY=bluestore_omap_read_mc4"
-        );
-    }
-
-    #[test]
-    fn rfc0184_myrocks_read_only_mc4_in_compare() {
-        assert!(
-            COMPARE_SHAPES.contains(&"myrocks_read_only_mc4"),
-            "MyRocks oltp_read_only mc4 must be on the cartaz"
-        );
-        assert!(shape_wanted_in(
-            "myrocks_read_only_mc4",
-            Some("myrocks_read_only_mc4")
-        ));
-        assert!(
-            !shape_wanted_in("myrocks_read_only", Some("myrocks_read_only_mc4")),
-            "1c myrocks_read_only must not leak into ONLY=myrocks_read_only_mc4"
-        );
-        assert!(
-            !shape_wanted_in("myrocks_point_select_mc4", Some("myrocks_read_only_mc4")),
-            "point-select mc4 must not leak into ONLY=myrocks_read_only_mc4"
-        );
-    }
-
-    #[test]
-    fn rfc0184_wbwi_read_your_writes_mc4_in_compare() {
-        assert!(
-            COMPARE_SHAPES.contains(&"wbwi_read_your_writes_mc4"),
-            "WBWI overlay-get mc4 must be on the cartaz"
-        );
-        assert!(shape_wanted_in(
-            "wbwi_read_your_writes_mc4",
-            Some("wbwi_read_your_writes_mc4")
-        ));
-        assert!(
-            !shape_wanted_in("wbwi_read_your_writes", Some("wbwi_read_your_writes_mc4")),
-            "1c wbwi_read_your_writes must not leak into ONLY=wbwi_read_your_writes_mc4"
-        );
-        assert!(
-            !shape_wanted_in("compaction_filter_drop", Some("wbwi_read_your_writes_mc4")),
-            "compact-filter 1c must not leak into ONLY=wbwi_read_your_writes_mc4"
-        );
-    }
-
-    #[test]
-    fn rfc0184_mixgraph_like_mc4_in_compare() {
-        assert!(
-            COMPARE_SHAPES.contains(&"mixgraph_like_mc4"),
-            "mixgraph-like mc4 must be on the cartaz"
-        );
-        assert!(shape_wanted_in("mixgraph_like_mc4", Some("mixgraph_like_mc4")));
-        assert!(
-            !shape_wanted_in("mixgraph_like", Some("mixgraph_like_mc4")),
-            "1c mixgraph_like must not leak into ONLY=mixgraph_like_mc4"
-        );
-        assert!(
-            !shape_wanted_in("compaction_filter_drop", Some("mixgraph_like_mc4")),
-            "compact-filter 1c must not leak into ONLY=mixgraph_like_mc4"
-        );
-    }
-
-    #[test]
-    fn rfc0184_oxigraph_triple_put_mc4_in_compare() {
-        assert!(
-            COMPARE_SHAPES.contains(&"oxigraph_triple_put_mc4"),
-            "Oxigraph triple-put mc4 must be on the cartaz"
-        );
-        assert!(shape_wanted_in(
-            "oxigraph_triple_put_mc4",
-            Some("oxigraph_triple_put_mc4")
-        ));
-        assert!(
-            !shape_wanted_in("oxigraph_triple_put", Some("oxigraph_triple_put_mc4")),
-            "1c oxigraph_triple_put must not leak into ONLY=oxigraph_triple_put_mc4"
-        );
-        assert!(
-            !shape_wanted_in("oxigraph_spo_lookup", Some("oxigraph_triple_put_mc4")),
-            "1c spo_lookup must not leak into ONLY=oxigraph_triple_put_mc4"
-        );
-    }
-
-    #[test]
-    fn rfc0184_nebula_insert_edge_mc4_in_compare() {
-        assert!(
-            COMPARE_SHAPES.contains(&"nebula_insert_edge_mc4"),
-            "Nebula insert-edge mc4 must be on the cartaz"
-        );
-        assert!(shape_wanted_in(
-            "nebula_insert_edge_mc4",
-            Some("nebula_insert_edge_mc4")
-        ));
-        assert!(
-            !shape_wanted_in("nebula_insert_edge", Some("nebula_insert_edge_mc4")),
-            "1c nebula_insert_edge must not leak into ONLY=nebula_insert_edge_mc4"
-        );
-        assert!(
-            !shape_wanted_in("nebula_get_neighbors", Some("nebula_insert_edge_mc4")),
-            "1c get_neighbors must not leak into ONLY=nebula_insert_edge_mc4"
-        );
-    }
-
-    #[test]
-    fn rfc0184_solana_shred_append_mc4_in_compare() {
-        assert!(
-            COMPARE_SHAPES.contains(&"solana_shred_append_mc4"),
-            "Solana shred-append mc4 must be on the cartaz"
-        );
-        assert!(shape_wanted_in(
-            "solana_shred_append_mc4",
-            Some("solana_shred_append_mc4")
-        ));
-        assert!(
-            !shape_wanted_in("solana_shred_append", Some("solana_shred_append_mc4")),
-            "1c solana_shred_append must not leak into ONLY=solana_shred_append_mc4"
-        );
-        assert!(
-            !shape_wanted_in("solana_trailing_read", Some("solana_shred_append_mc4")),
-            "1c trailing_read must not leak into ONLY=solana_shred_append_mc4"
-        );
-    }
-
-    #[test]
-    fn rfc0184_arango_doc_crud_mc4_in_compare() {
-        assert!(
-            COMPARE_SHAPES.contains(&"arango_doc_crud_mc4"),
-            "Arango document CRUD mc4 must be on the cartaz"
-        );
-        assert!(shape_wanted_in(
-            "arango_doc_crud_mc4",
-            Some("arango_doc_crud_mc4")
-        ));
-        assert!(
-            !shape_wanted_in("arango_doc_crud", Some("arango_doc_crud_mc4")),
-            "1c arango_doc_crud must not leak into ONLY=arango_doc_crud_mc4"
-        );
-        assert!(
-            !shape_wanted_in("arango_traversal", Some("arango_doc_crud_mc4")),
-            "1c traversal must not leak into ONLY=arango_doc_crud_mc4"
-        );
-    }
-
-    #[test]
-    fn rfc0184_kvrocks_pipelined_set_mc4_in_compare() {
-        assert!(
-            COMPARE_SHAPES.contains(&"kvrocks_pipelined_set_mc4"),
-            "Kvrocks pipelined-set mc4 must be on the cartaz"
-        );
-        assert!(shape_wanted_in(
-            "kvrocks_pipelined_set_mc4",
-            Some("kvrocks_pipelined_set_mc4")
-        ));
-        assert!(
-            !shape_wanted_in("kvrocks_pipelined_set", Some("kvrocks_pipelined_set_mc4")),
-            "1c kvrocks_pipelined_set must not leak into ONLY=kvrocks_pipelined_set_mc4"
-        );
-        assert!(
-            !shape_wanted_in("kvrocks_set_mc50", Some("kvrocks_pipelined_set_mc4")),
-            "set mc50 must not leak into ONLY=kvrocks_pipelined_set_mc4"
-        );
-    }
-
-    #[test]
-    fn rfc0184_rockstore_widecol_rw_mc4_in_compare() {
-        assert!(
-            COMPARE_SHAPES.contains(&"rockstore_widecol_rw_mc4"),
-            "Rockstore wide-column mc4 must be on the cartaz"
-        );
-        assert!(shape_wanted_in(
-            "rockstore_widecol_rw_mc4",
-            Some("rockstore_widecol_rw_mc4")
-        ));
-        assert!(
-            !shape_wanted_in("rockstore_widecol_rw", Some("rockstore_widecol_rw_mc4")),
-            "1c rockstore_widecol_rw must not leak into ONLY=rockstore_widecol_rw_mc4"
-        );
-        assert!(
-            !shape_wanted_in("venice_fanout_get", Some("rockstore_widecol_rw_mc4")),
-            "1c venice_fanout_get must not leak into ONLY=rockstore_widecol_rw_mc4"
-        );
-        assert!(
-            !shape_wanted_in("venice_fanout_get_mc4", Some("rockstore_widecol_rw_mc4")),
-            "venice fanout mc4 must not leak into ONLY=rockstore_widecol_rw_mc4"
-        );
-    }
-
-    #[test]
-    fn rfc0184_kvrocks_blob_set_mc4_in_compare() {
-        assert!(
-            COMPARE_SHAPES.contains(&"kvrocks_blob_set_mc4"),
-            "Kvrocks blob-set mc4 must be on the cartaz"
-        );
-        assert!(shape_wanted_in(
-            "kvrocks_blob_set_mc4",
-            Some("kvrocks_blob_set_mc4")
-        ));
-        assert!(
-            !shape_wanted_in("kvrocks_blob_set", Some("kvrocks_blob_set_mc4")),
-            "1c kvrocks_blob_set must not leak into ONLY=kvrocks_blob_set_mc4"
-        );
-        assert!(
-            !shape_wanted_in("kvrocks_set", Some("kvrocks_blob_set_mc4")),
-            "1c kvrocks_set must not leak into ONLY=kvrocks_blob_set_mc4"
-        );
-        assert!(
-            !shape_wanted_in("kvrocks_pipelined_set_mc4", Some("kvrocks_blob_set_mc4")),
-            "pipelined-set mc4 must not leak into ONLY=kvrocks_blob_set_mc4"
-        );
-    }
-
-    #[test]
-    fn rfc0184_deps_lock_prewrite_mc4_in_compare() {
-        assert!(
-            COMPARE_SHAPES.contains(&"deps_lock_prewrite_mc4"),
-            "TiKV lock-prewrite mc4 must be on the cartaz"
-        );
-        assert!(shape_wanted_in(
-            "deps_lock_prewrite_mc4",
-            Some("deps_lock_prewrite_mc4")
-        ));
-        assert!(
-            !shape_wanted_in("deps_lock_prewrite", Some("deps_lock_prewrite_mc4")),
-            "1c deps_lock_prewrite must not leak into ONLY=deps_lock_prewrite_mc4"
-        );
-        assert!(
-            !shape_wanted_in("deps_apply_batch_mc4", Some("deps_lock_prewrite_mc4")),
-            "apply mc4 must not leak into ONLY=deps_lock_prewrite_mc4"
-        );
-    }
-
-    #[test]
-    fn rfc0178_mc_only_selects_full_mc_name() {
-        assert!(shape_wanted_in(
-            "deps_cache_overwrite_mc4",
-            Some("deps_cache_overwrite_mc4")
-        ));
-        assert!(!shape_wanted_in(
-            "ycsb_a_mc4",
-            Some("deps_cache_overwrite_mc4")
-        ));
-        assert!(!shape_wanted_in(
-            "deps_cache_overwrite",
-            Some("deps_cache_overwrite_mc4")
-        ));
-        assert!(
-            !shape_wanted_in(
-                "deps_apply_batch_mc4",
-                Some("deps_cache_overwrite_mc4")
-            ),
-            "run_deps_clients must not leak apply when ONLY=overwrite_mc4"
-        );
-        assert!(!shape_wanted_in(
-            "deps_raftlog_mc4",
-            Some("deps_cache_overwrite_mc4")
-        ));
-    }
-
-    #[test]
-    fn rfc0178_mc_fresh_enabled_reads_env() {
-        std::env::remove_var("ROCKS_PARITY_MC_FRESH");
-        assert!(!mc_fresh_enabled());
-        std::env::set_var("ROCKS_PARITY_MC_FRESH", "1");
-        assert!(mc_fresh_enabled());
-        std::env::remove_var("ROCKS_PARITY_MC_FRESH");
-    }
-
-    /// RFC-0163 P1.4: the ladder csv wins over the single value, canonical
-    /// ascending, counts < 2 dropped (free single-client rung), duplicates
-    /// collapse; unset ladder falls back to `ROCKS_PARITY_CLIENTS`.
-    #[test]
-    fn clients_ladder_from_semantics() {
-        assert!(clients_ladder_from(None, 1).is_empty());
-        assert_eq!(clients_ladder_from(None, 4), vec![4]);
-        assert_eq!(clients_ladder_from(Some("4,16,64"), 99), vec![4, 16, 64]);
-        assert_eq!(clients_ladder_from(Some("64, 4,16,4"), 1), vec![4, 16, 64]);
-        assert_eq!(clients_ladder_from(Some("1,4"), 1), vec![4]);
-        assert_eq!(clients_ladder_from(Some(""), 8), vec![8]);
-        assert_eq!(clients_ladder_from(Some("   "), 8), vec![8]);
-        let _ = std::panic::catch_unwind(|| clients_ladder_from(Some("4,6O"), 1));
-    }
-
-    /// RFC-0163 P1.2 relaunch: the flat keyspace returns byte-identical
-    /// `ykey`s across the 6/7/8-digit index boundaries at the real campaign
-    /// size (25M records + ops + 25 scan window).
-    #[test]
-    fn ykeys_flat_matches_ykey_bytes() {
-        let n = 25_000_000 + 100_000 + 25;
-        let yk = YKeys::new(n);
-        assert_eq!(yk.len(), n);
-        assert!(!yk.is_empty());
-        for i in [0usize, 1, 999_999, 1_000_000, 9_999_999, 10_000_000, n - 1] {
-            assert_eq!(yk.key(i), ykey(i), "key({i})");
-        }
-    }
 
     #[test]
     fn shape_wanted_in_unset_keeps_every_shape() {
         assert!(shape_wanted_in("ycsb_a", None));
         assert!(shape_wanted_in("ycsb_c_big", None));
         assert!(shape_wanted_in("deps_raftlog", None));
-    }
-
-    /// RFC-0163 P1.1: every block reports the full tail ladder
-    /// p50 ≤ p95 ≤ p99 ≤ p999 ≤ max, and `p999_ms` is a first-class
-    /// field (the tail is a cell criterion, not an afterthought).
-    #[test]
-    fn summarize_schema_has_p999_and_monotonic_tail() {
-        // 1000 samples 1..=1000 ms: sorted, pct(99.9) must pick the
-        // top-decile-of-a-percent value, not clamp to max.
-        let mut lats: Vec<f64> = (1..=1000).map(f64::from).collect();
-        // shuffle so summarize's internal sort is exercised
-        lats.reverse();
-        let block = summarize("unit_tail", 1000, Duration::from_secs(10), &mut lats);
-        for key in [
-            "\"p50_ms\"",
-            "\"p95_ms\"",
-            "\"p99_ms\"",
-            "\"p999_ms\"",
-            "\"max_ms\"",
-        ] {
-            assert!(block.contains(key), "missing {key} in:\n{block}");
-        }
-        let val = |k: &str| {
-            block
-                .lines()
-                .find(|l| l.contains(k))
-                .and_then(|l| l.split(':').nth(1))
-                .and_then(|s| s.trim().trim_end_matches(',').parse::<f64>().ok())
-                .unwrap_or_else(|| panic!("parse {k} in:\n{block}"))
-        };
-        let (p50, p99, p999, max) = (
-            val("\"p50_ms\""),
-            val("\"p99_ms\""),
-            val("\"p999_ms\""),
-            val("\"max_ms\""),
-        );
-        // pct index = round(p/100 * (len-1)); len=1000 → idx 500/989/998
-        assert_eq!(p50, 501.0, "p50 of 1..=1000");
-        assert_eq!(p99, 990.0, "p99 of 1..=1000");
-        assert_eq!(p999, 999.0, "p999 of 1..=1000");
-        assert_eq!(max, 1000.0);
-        let mc = summarize_mc(
-            "unit_mc",
-            10,
-            Duration::from_secs(1),
-            &mut vec![1.0; 10],
-            4,
-            0,
-        );
-        assert!(
-            mc.contains("\"clients\": 4") && mc.contains("\"p999_ms\""),
-            "mc block keeps tail:\n{mc}"
-        );
-        let d = diagnose_from_phases(
-            0.0033,
-            [0, 0, 0, 0, 0, 0, 0],
-            [1, 30, 2_460, 140, 70, 30, 0],
-            1,
-            0.0,
-            0,
-        );
-        let with = attach_diagnose(mc, Some(&d));
-        assert!(
-            with.contains("\"diagnose\": {\"lever\":\"wal_encode_or_write\""),
-            "RFC-0184 P1.2 bench JSON needs diagnose.lever:\n{with}"
-        );
-        assert!(
-            with.contains("\"clients\": 4"),
-            "attach keeps mc fields:\n{with}"
-        );
-        // RFC-0184 P2.20: ycsb_c_big is 100% get over 2^20 (harness skips
-        // the 1M seed here; same kernel+attach as run_c_big).
-        let mut cbig = summarize("ycsb_c_big", 8, Duration::from_millis(1), &mut vec![0.1; 8]);
-        let d = diagnose_from_phases_n(0.1, [0; 7], [0; 7], 1, 0.0, 100, 8);
-        cbig = attach_diagnose(cbig, Some(&d));
-        assert!(
-            cbig.contains("\"diagnose\": {\"lever\":\"get_path\""),
-            "RFC-0184 P2.20 ycsb_c_big all-reads is get_path:\n{cbig}"
-        );
     }
 
     #[test]
@@ -7028,7 +3200,6 @@ mod tests {
                     .collect::<Vec<_>>(),
                 vec![
                     Some("ycsb_a_mc3"),
-                    Some("ycsb_b_mc3"),
                     Some("ycsb_f_mc3"),
                     Some("deps_cache_overwrite_mc3")
                 ]
@@ -7039,12 +3210,27 @@ mod tests {
             }
             assert!(compat.get(&ykey(0)).unwrap().is_some());
 
+            let mut r_only = YcsbRunner::new(cfg.clone());
+            r_only.seed(&compat);
+            let only_blocks = r_only.run_clients_only(&compat, 3, Some("deps_cache_overwrite_mc3"));
+            assert_eq!(
+                only_blocks
+                    .iter()
+                    .map(|b| b
+                        .split("\"name\": \"")
+                        .nth(1)
+                        .and_then(|s| s.split('"').next()))
+                    .collect::<Vec<_>>(),
+                vec![Some("deps_cache_overwrite_mc3")],
+                "ROCKS_PARITY_ONLY must skip ycsb_a_mc / ycsb_f_mc"
+            );
+
             let cdir = tempfile::tempdir().unwrap();
             let conc = crate::engines::ConcurrentEngine::open(cdir.path());
             let mut r2 = YcsbRunner::new(cfg.clone());
             r2.seed(&conc);
             let blocks2 = r2.run_clients(&conc, 3);
-            assert_eq!(blocks2.len(), 4);
+            assert_eq!(blocks2.len(), 3);
             assert!(conc.get(&ykey(0)).is_ok());
             assert!(conc.get(b"c/000000").is_ok());
         }
@@ -7135,8 +3321,6 @@ mod tests {
 
     #[test]
     fn qs_suite_on_compat_engine() {
-        // RFC-0184 P2.8: qs WRITEPHASE → diagnose.lever (env must be set at open).
-        std::env::set_var("PEDRA_WRITE_PHASE_STATS", "1");
         let dir = tempfile::tempdir().unwrap();
         let e = crate::engines::CompatEngine::open(dir.path());
         let cfg = Cfg {
@@ -7167,21 +3351,52 @@ mod tests {
         );
         for b in &blocks {
             assert!(b.contains("\"p50_ms\""), "{b}");
+        }
+    }
+
+    #[test]
+    fn rfc0185_column_a_shapes_are_the_gate() {
+        assert_eq!(COLUMN_A_SHAPES.len(), 22);
+        assert_eq!(COLUMN_A_SHAPES, column_a::COLUMN_A_SHAPES);
+        for name in COLUMN_A_SHAPES {
             assert!(
-                b.contains("\"diagnose\": {\"lever\":"),
-                "RFC-0184 P2.8 qs JSON needs diagnose.lever:\n{b}"
+                COMPARE_SHAPES.contains(name),
+                "G_A {name} must stay a subset of COMPARE_SHAPES"
             );
         }
-        assert!(
-            blocks[0].contains("\"lever\":\"get_path\""),
-            "qs_hot_get is 99% get:\n{}",
-            blocks[0]
+        assert_eq!(
+            &COMPARE_SHAPES[..OFFICIAL_16],
+            &[
+                "ycsb_a",
+                "ycsb_b",
+                "ycsb_c",
+                "ycsb_d",
+                "ycsb_e",
+                "ycsb_f",
+                "deps_apply_batch",
+                "deps_mvcc_latest",
+                "deps_scan",
+                "deps_raftlog",
+                "deps_cache_overwrite",
+                "ycsb_a_mc4",
+                "ycsb_f_mc4",
+                "deps_cache_overwrite_mc4",
+                "deps_apply_batch_mc4",
+                "deps_raftlog_mc4",
+            ]
         );
-        assert!(
-            blocks[1].contains("\"lever\":\"get_path\""),
-            "qs_neg_lookup is miss get:\n{}",
-            blocks[1]
-        );
+    }
+
+    #[test]
+    fn collapsed_overwrite_mc4_peer_is_anomaly() {
+        let mut peer = std::collections::BTreeMap::new();
+        peer.insert("deps_cache_overwrite_mc4".into(), 120_000.0);
+        let a = peer_anomalies(&peer);
+        assert!(a.iter().any(|s| s.contains("collapsed")), "{a:?}");
+        peer.insert("deps_cache_overwrite_mc4".into(), 270_000.0);
+        assert!(peer_anomalies(&peer)
+            .iter()
+            .all(|s| !s.contains("collapsed")));
     }
 
     #[test]
@@ -7230,38 +3445,6 @@ mod tests {
             "wbwi_read_your_writes",
             "compaction_filter_drop",
             "ingest_sst",
-            "ycsb_b_mc4",
-            "ycsb_c_mc4",
-            "qs_hot_get_mc4",
-            "qs_neg_lookup_mc4",
-            "qs_batch_write_mc4",
-            "rockset_hybrid",
-            "rockset_hybrid_mc4",
-            "yugabyte_docdb_rmw",
-            "yugabyte_docdb_rmw_mc4",
-            "venice_fanout_get_mc4",
-            "kvrocks_get_mc4",
-            "myrocks_point_select_mc4",
-            "nebula_get_neighbors_mc4",
-            "arango_traversal_mc4",
-            "surreal_tx_get_mc4",
-            "oxigraph_spo_lookup_mc4",
-            "solana_trailing_read_mc4",
-            "kvrocks_scan_mc4",
-            "flink_window_state_mc4",
-            "kafka_changelog_flush_mc4",
-            "bluestore_omap_read_mc4",
-            "myrocks_read_only_mc4",
-            "wbwi_read_your_writes_mc4",
-            "mixgraph_like_mc4",
-            "oxigraph_triple_put_mc4",
-            "nebula_insert_edge_mc4",
-            "solana_shred_append_mc4",
-            "arango_doc_crud_mc4",
-            "kvrocks_pipelined_set_mc4",
-            "rockstore_widecol_rw_mc4",
-            "kvrocks_blob_set_mc4",
-            "deps_lock_prewrite_mc4",
         ] {
             assert!(
                 COMPARE_SHAPES.contains(&name),
@@ -7272,8 +3455,6 @@ mod tests {
 
     #[test]
     fn kvrocks_suite_on_compat_engine() {
-        // RFC-0184 P2.9: kvrocks 1c WRITEPHASE → diagnose.lever (env at open).
-        std::env::set_var("PEDRA_WRITE_PHASE_STATS", "1");
         let dir = tempfile::tempdir().unwrap();
         let e = crate::engines::CompatEngine::open(dir.path());
         let cfg = Cfg {
@@ -7304,29 +3485,11 @@ mod tests {
                 Some("kvrocks_set_mc50"),
             ]
         );
-        for b in &blocks {
-            assert!(
-                b.contains("\"diagnose\": {\"lever\":"),
-                "RFC-0184 P2.9 kvrocks JSON needs diagnose.lever:\n{b}"
-            );
-        }
-        assert!(
-            blocks[0].contains("\"lever\":\"get_path\""),
-            "kvrocks_get is GET:\n{}",
-            blocks[0]
-        );
-        assert!(
-            blocks[3].contains("\"lever\":\"get_path\""),
-            "kvrocks_scan is SCAN:\n{}",
-            blocks[3]
-        );
         assert!(e.get(&kkey(0)).unwrap().is_some());
     }
 
     #[test]
     fn myrocks_suite_on_compat_engine() {
-        // RFC-0184 P2.10: myrocks WRITEPHASE → diagnose.lever (env at open).
-        std::env::set_var("PEDRA_WRITE_PHASE_STATS", "1");
         let dir = tempfile::tempdir().unwrap();
         let e = crate::engines::CompatEngine::open(dir.path());
         let cfg = Cfg {
@@ -7355,27 +3518,6 @@ mod tests {
                 Some("linkbench_mix"),
             ]
         );
-        for b in &blocks {
-            assert!(
-                b.contains("\"diagnose\": {\"lever\":"),
-                "RFC-0184 P2.10 myrocks JSON needs diagnose.lever:\n{b}"
-            );
-        }
-        assert!(
-            blocks[0].contains("\"lever\":\"get_path\""),
-            "myrocks_point_select is GET:\n{}",
-            blocks[0]
-        );
-        assert!(
-            blocks[1].contains("\"lever\":\"get_path\""),
-            "myrocks_read_only is range scan:\n{}",
-            blocks[1]
-        );
-        assert!(
-            blocks[3].contains("\"lever\":\"get_path\""),
-            "linkbench_mix is 70% read:\n{}",
-            blocks[3]
-        );
         assert!(e.get(&nkey(0)).unwrap().is_some());
         // Seeded outgoing edge 0 → 1 survives unless the mix deleted it;
         // prefix scan of node 0 must still be well-defined either way.
@@ -7387,8 +3529,6 @@ mod tests {
 
     #[test]
     fn surreal_suite_on_compat_engine() {
-        // RFC-0184 P2.11: surreal WRITEPHASE → diagnose.lever (env at open).
-        std::env::set_var("PEDRA_WRITE_PHASE_STATS", "1");
         let dir = tempfile::tempdir().unwrap();
         let e = crate::engines::CompatEngine::open(dir.path());
         let cfg = Cfg {
@@ -7418,22 +3558,6 @@ mod tests {
                 Some("surreal_tx_batch"),
                 Some("surreal_tx_rmw_mc8"),
             ]
-        );
-        for b in &blocks {
-            assert!(
-                b.contains("\"diagnose\": {\"lever\":"),
-                "RFC-0184 P2.11 surreal JSON needs diagnose.lever:\n{b}"
-            );
-        }
-        assert!(
-            blocks[0].contains("\"lever\":\"get_path\""),
-            "surreal_tx_get is snapshot get:\n{}",
-            blocks[0]
-        );
-        assert!(
-            blocks[3].contains("\"lever\":\"get_path\""),
-            "surreal_tx_scan is snapshot range:\n{}",
-            blocks[3]
         );
         assert!(e.get(&skey(0)).unwrap().is_some());
     }
@@ -7471,136 +3595,36 @@ mod tests {
 
     #[test]
     fn expanding_suites_on_compat_engine() {
-        // RFC-0184 P2.12: nebula WRITEPHASE → diagnose.lever (env at open).
-        std::env::set_var("PEDRA_WRITE_PHASE_STATS", "1");
         let dir = tempfile::tempdir().unwrap();
         let e = crate::engines::CompatEngine::open(dir.path());
         let mut r = YcsbRunner::new(tiny_cfg());
-        let neb = r.run_nebula(&e);
         assert_eq!(
-            block_names(&neb),
+            block_names(&r.run_nebula(&e)),
             vec![Some("nebula_get_neighbors"), Some("nebula_insert_edge"),]
         );
-        for b in &neb {
-            assert!(
-                b.contains("\"diagnose\": {\"lever\":"),
-                "RFC-0184 P2.12 nebula JSON needs diagnose.lever:\n{b}"
-            );
-        }
-        assert!(
-            neb[0].contains("\"lever\":\"get_path\""),
-            "nebula_get_neighbors is prefix scan:\n{}",
-            neb[0]
-        );
-        let stream = r.run_streaming(&e);
         assert_eq!(
-            block_names(&stream),
+            block_names(&r.run_streaming(&e)),
             vec![Some("flink_window_state"), Some("kafka_changelog_flush"),]
         );
-        for b in &stream {
-            assert!(
-                b.contains("\"diagnose\": {\"lever\":"),
-                "RFC-0184 P2.13 streaming JSON needs diagnose.lever:\n{b}"
-            );
-        }
-        assert!(
-            stream[0].contains("\"lever\":\"get_path\""),
-            "flink_window_state is put+scan:\n{}",
-            stream[0]
-        );
-        let ceph = r.run_ceph(&e);
         assert_eq!(
-            block_names(&ceph),
+            block_names(&r.run_ceph(&e)),
             vec![Some("bluestore_omap_write"), Some("bluestore_omap_read"),]
         );
-        for b in &ceph {
-            assert!(
-                b.contains("\"diagnose\": {\"lever\":"),
-                "RFC-0184 P2.14 ceph JSON needs diagnose.lever:\n{b}"
-            );
-        }
-        assert!(
-            ceph[1].contains("\"lever\":\"get_path\""),
-            "bluestore_omap_read is get+scan:\n{}",
-            ceph[1]
-        );
-        let sol = r.run_solana(&e);
         assert_eq!(
-            block_names(&sol),
+            block_names(&r.run_solana(&e)),
             vec![Some("solana_shred_append"), Some("solana_trailing_read"),]
         );
-        for b in &sol {
-            assert!(
-                b.contains("\"diagnose\": {\"lever\":"),
-                "RFC-0184 P2.15 solana JSON needs diagnose.lever:\n{b}"
-            );
-        }
-        assert!(
-            sol[1].contains("\"lever\":\"get_path\""),
-            "solana_trailing_read is scan:\n{}",
-            sol[1]
-        );
-        let ara = r.run_arango(&e);
         assert_eq!(
-            block_names(&ara),
+            block_names(&r.run_arango(&e)),
             vec![Some("arango_doc_crud"), Some("arango_traversal")]
         );
-        for b in &ara {
-            assert!(
-                b.contains("\"diagnose\": {\"lever\":"),
-                "RFC-0184 P2.16 arango JSON needs diagnose.lever:\n{b}"
-            );
-        }
-        assert!(
-            ara[1].contains("\"lever\":\"get_path\""),
-            "arango_traversal is 2-hop scan:\n{}",
-            ara[1]
-        );
-        let ven = r.run_venice(&e);
         assert_eq!(
-            block_names(&ven),
+            block_names(&r.run_venice(&e)),
             vec![Some("venice_fanout_get"), Some("rockstore_widecol_rw"),]
         );
-        for b in &ven {
-            assert!(
-                b.contains("\"diagnose\": {\"lever\":"),
-                "RFC-0184 P2.17 venice JSON needs diagnose.lever:\n{b}"
-            );
-        }
-        assert!(
-            ven[0].contains("\"lever\":\"get_path\""),
-            "venice_fanout_get is 32 point-gets:\n{}",
-            ven[0]
-        );
-        let rok = r.run_rockset(&e);
-        assert_eq!(block_names(&rok), vec![Some("rockset_hybrid")]);
-        assert!(
-            rok[0].contains("\"diagnose\": {\"lever\":"),
-            "rockset_hybrid JSON needs diagnose.lever:\n{}",
-            rok[0]
-        );
-        let yb = r.run_yugabyte(&e);
-        assert_eq!(block_names(&yb), vec![Some("yugabyte_docdb_rmw")]);
-        assert!(
-            yb[0].contains("\"diagnose\": {\"lever\":"),
-            "yugabyte_docdb_rmw JSON needs diagnose.lever:\n{}",
-            yb[0]
-        );
-        let oxi = r.run_oxigraph(&e);
         assert_eq!(
-            block_names(&oxi),
+            block_names(&r.run_oxigraph(&e)),
             vec![Some("oxigraph_spo_lookup"), Some("oxigraph_triple_put"),]
-        );
-        for b in &oxi {
-            assert!(
-                b.contains("\"diagnose\": {\"lever\":"),
-                "RFC-0184 P2.18 oxigraph JSON needs diagnose.lever:\n{b}"
-            );
-        }
-        assert!(
-            oxi[0].contains("\"lever\":\"get_path\""),
-            "oxigraph_spo_lookup is point get:\n{}",
-            oxi[0]
         );
         assert!(ekey(3, 7).starts_with(&eprefix(3)));
         assert!(tkey(1, 0, 1).starts_with(b"t/"));
@@ -7608,31 +3632,17 @@ mod tests {
 
     #[test]
     fn rocksapi_suite_on_compat_engine() {
-        // RFC-0184 P2.19: rocksapi WRITEPHASE → diagnose.lever (env at open).
-        std::env::set_var("PEDRA_WRITE_PHASE_STATS", "1");
         let dir = tempfile::tempdir().unwrap();
         let e = crate::engines::CompatEngine::open(dir.path());
         let mut r = YcsbRunner::new(tiny_cfg());
-        let api = r.run_rocksapi(&e);
         assert_eq!(
-            block_names(&api),
+            block_names(&r.run_rocksapi(&e)),
             vec![
                 Some("mixgraph_like"),
                 Some("wbwi_read_your_writes"),
                 Some("compaction_filter_drop"),
                 Some("ingest_sst"),
             ]
-        );
-        for b in &api {
-            assert!(
-                b.contains("\"diagnose\": {\"lever\":"),
-                "RFC-0184 P2.19 rocksapi JSON needs diagnose.lever:\n{b}"
-            );
-        }
-        assert!(
-            api[1].contains("\"lever\":\"get_path\""),
-            "wbwi_read_your_writes is overlay get:\n{}",
-            api[1]
         );
         let k = b"wbwi-probe";
         let v = b"overlay";

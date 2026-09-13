@@ -106,37 +106,109 @@ macro_rules! contract {
 #[must_use]
 pub fn profile_report() -> &'static [ProfileComponent] {
     &[
+        // --- recovery (fail-closed) ---
         on!("wal_recover", "wal_recover", "fail-closed prefix recovery at open (F4/F14)"),
+        on!("from_record_type", "from_record_type", "type byte → fragment kind (F14)"),
+        on!("fragment_act", "fragment_act", "F14 fragment assembly decision"),
+        on!("physical_payload_act", "physical_payload_act", "F4 payload vs block bounds"),
+        on!("is_length_resyncable", "is_length_resyncable", "F4 resync class is exactly the framing errors"),
         on!("manifest_recover", "manifest_recover", "MANIFEST recovery (F196/G8)"),
+        on!("first_install", "first_install", "first MANIFEST install action (F196)"),
         on!("reopen_outcome", "reopen_outcome", "reopen state equals the pre-crash visible state (F170/F171/G8)"),
         on!("dictionary_link", "dictionary_link", "crash-dictionary put→get link across flush/crash (G1/G8)"),
         on!("vlog_recover", "vlog_recover", "value-log recovery (F51)"),
         on!("blob_gc_pick", "blob_gc_pick", "blob GC picks the active generation"),
+        // --- commit path (single-writer critical section) ---
+        // --- commit path (group level — RFC-0058 P2.1 reactivation) ---
         on!("write_group_merge", "group_commit", "leader/member merge with the proved kernel: first-committer-wins cross-group, group atomicity intra-group (RFC-0057 P2.1 / RFC-0051 P1.3)"),
         on!("group_fence", "group_fence", "one publish watermark per group = max appended member sequence, after WAL durability (RFC-0057 P2.1)"),
+        // --- background decisions ---
         on!("flush_decision", "flush_decision", "when to flush (F2/F43/G1)"),
         on!("flush_publish", "flush_publish", "MANIFEST after durable SST (RFC-0151 P1)"),
+        on!("flush_plan", "flush_plan", "flush plan selection (F2/F43)"),
         on!("compact_decision", "compact_decision", "when to compact (F177/F20)"),
         on!("compact_retention", "compact_retention", "what compaction retains (F177/F20)"),
+        on!("compact_split", "compact_split", "compaction splits before OOM (RFC-0160)"),
+        on!("compact_split_at", "compact_split_at", "compaction split point (RFC-0160)"),
+        on!("lone_tombstone", "lone_tombstone", "lone tombstone fate (F177)"),
         on!("leveling", "leveling", "level-size ladder of the leveled scheduler (F-leveling-sweep)"),
         on!("leveling_pick", "leveling_pick", "leveled job selection: overlap slice, input cap, disjoint gate (F-leveling-sweep)"),
         on!("leveling_pushdown", "leveling_pushdown", "leveled pushdown: disjoint-gated oldest-chunk demotion (F-leveling-sweep)"),
+        on!("leveled_enabled", "leveled_enabled", "leveled scheduling gate (F-leveling-sweep)"),
+        on!("leveling_disjoint", "leveling_disjoint", "level run disjointness (F-leveling-sweep)"),
+        on!("leveling_overlaps", "leveling_overlaps", "key-range overlap test (F-leveling-sweep)"),
+        on!("leveling_total_bytes", "leveling_total_bytes", "level size accounting (F-leveling-sweep)"),
+        // --- reads ---
         on!("changelog", "changelog", "changelog decode/replay (F53)"),
+        on!("changelog_should_store", "changelog_should_store", "changelog debounce should-store decision (RFC-0031 P0.1)"),
+        on!("changelog_budget", "changelog_budget", "changelog rebuild within budget (RFC-0039 P0.3)"),
         on!("range_covers", "range_covers", "range bounds cover the requested span (F30)"),
         on!("prefix", "prefix", "prefix seek bounds (F57/F58)"),
         on!("scan_guard", "scan_guard", "scan lifetime guard (F167)"),
         on!("bloom_header", "bloom_header", "bloom header validation (T1)"),
         on!("bloom_insert", "bloom_insert", "bloom insert (T1)"),
         on!("bloom_may_contain", "bloom_may_contain", "bloom probe — no false negatives (T1/T4)"),
+        // --- montanha (world nodes) ---
+        // --- ship / product surface ---
+        // --- membership / L28 / residuals (catalog pairs; claim On) ---
         on!("group_publish", "group_publish", "group publish after WAL durable"),
         on!("forall_schedules", "forall_schedules", "PCT depth is not ∀ schedules"),
+        on!("probe_order", "probe_order", "L0 equal-lo probe newest-first (RFC-0164)"),
+        on!("run_disjoint", "run_disjoint", "SST run pairwise-disjoint lo (RFC-0164 P1.2)"),
+        on!("probe_order_covering", "probe_order_covering", "covering probe bounds (RFC-0164 P0.2)"),
         on!("fsync_promote", "fsync_promote", "fsync promotes pending"),
         on!("media_durable", "media_durable", "fsync Ok is not media proof"),
+        on!("env_crash", "env_crash", "Env crash geometry: legal cut ∈ [synced, written] (RFC-0166 P1.1)"),
+        on!("env_append", "env_append", "Env append grows written, barrier unmoved (RFC-0166 P1.1)"),
+        on!("env_sync", "env_sync", "honest sync promotes all; lying promotes nothing (RFC-0166 P1.1)"),
+        on!("env_barrier_floor", "env_barrier_floor", "legal crash never loses a synced byte (RFC-0166 P1.1)"),
+        on!("env_no_invented", "env_no_invented", "legal crash never invents a byte (RFC-0166 P1.1)"),
+        on!("env_honest_sync", "env_honest_sync", "honest sync protects the whole log (RFC-0166 P1.1)"),
+        on!("wal_state", "wal_state", "Inv-WAL: acked ⊆ synced ⊆ recoverable prefix (RFC-0166 P1.2)"),
+        on!("wal_append", "wal_append", "append preserves Inv-WAL (RFC-0166 P1.2)"),
+        on!("wal_sync", "wal_sync", "sync preserves Inv-WAL for both honesties (RFC-0166 P1.2)"),
+        on!("wal_ack", "wal_ack", "ack past the barrier is fail-closed; Inv-WAL preserved (RFC-0166 P1.2)"),
+        on!("wal_rotate", "wal_rotate", "rotate only drops a durable+acked log (RFC-0166 P1.2)"),
+        on!("wal_acked_survives", "wal_acked_survives", "every legal crash keeps the acked prefix (RFC-0166 P1.2)"),
+        on!("d1_put_ok", "d1_put_ok", "model write path: append → honest sync → ack-all (RFC-0166 P1.3)"),
+        on!("d1_modelo", "d1_modelo", "D1-modelo: put Ok ⇒ survives every torn prefix (RFC-0166 P1.3)"),
+        on!("write_ack_append", "write_ack_append", "verified write→ack: ledger append step (RFC-0166 P1.4)"),
+        on!("write_ack_barrier", "write_ack_barrier", "verified write→ack: ledger barrier step (RFC-0166 P1.4)"),
+        on!("write_ack_ack", "write_ack_ack", "verified write→ack: ledger ack = put_ok composition, Inv-WAL asserted live (RFC-0166 P1.4)"),
+        on!("d1_durability", "d1_durability", "D1 property spec; refinement theorem is d1_modelo (RFC-0166 P0.1/P1.3/P2.4)"),
+        on!("lsm_probe", "lsm_probe", "Inv-LSM probe: the recency walk answers the newest version — deepest-first AS-IS resurrects (RFC-0166 P2.1)"),
+        on!("lsm_compact", "lsm_compact", "Inv-LSM preserved by compact — newest wins across source levels, bottom tombstones retire (RFC-0166 P2.1)"),
+        on!("lsm_reopen", "lsm_reopen", "Inv-LSM preserved by reopen — the durable order rebuilds the same probe order (RFC-0166 P2.1)"),
+        on!("r1_modelo", "r1_modelo", "R1-modelo: under Inv-LSM the probe answers the newest version — no delete resurrects (RFC-0166 P2.1)"),
+        on!("group_validate", "group_validate", "group membership validation (RFC-0051 P1.3 / RFC-0057 P2.1)"),
+        on!("pct_default_depth", "pct_default_depth", "PCT campaign default depth (RFC-0070 P2.2)"),
+        on!("default_pct_depth_raised", "default_pct_depth_raised", "default PCT depth raised (RFC-0070 P2.2)"),
+        on!("fsync_lie_tcg", "fsync_lie_tcg", "fsync-lie closes the TCG guest (RFC-0078 P2.2)"),
+        on!("stacked_liars", "stacked_liars", "stacked fsync liars refused (RFC-0078 P1.2)"),
+        on!("r1_no_resurrection", "r1_no_resurrection", "R1 property spec; refinement theorem is r1_modelo (RFC-0166 P0.1/P2.1/P2.4)"),
+        on!("t1_atomicity", "t1_atomicity", "T1 property spec; refinement theorem is t1_modelo (RFC-0166 P0.2/P2.2/P2.4)"),
+        on!("c1_quorum", "c1_quorum", "C1 property spec; refinement theorem is c1_modelo (RFC-0166 P0.2/P2.3/P2.4)"),
         on!("fdatasync_rc", "fdatasync_rc", "fdatasync nonzero rc is not Ok"),
         on!("cqe_res", "cqe_res", "negative CQE res is not Ok"),
+        on!("cqe_tags", "cqe_tags", "CQE user-data tag advance (F203)"),
+        on!("cqe_leftover", "cqe_leftover", "leftover CQE adoption decision (F203/U1)"),
+        on!("cqe_submit", "cqe_submit", "submit-err + CQ state decision — WaitMore, never Err (F208)"),
+        on!("cqe_ring_refusal", "cqe_ring_refusal", "CQE ring model admission gate (RFC-0074 P2.2)"),
         on!("crc_match", "crc_match", "CRC mismatch is not Ok"),
         on!("sst_crc", "sst_crc", "SST CRC fate fail-closed"),
+        on!("sst_block_crc", "sst_block_crc", "SST block CRC admission (RFC-0077 P1.1)"),
+        on!("sst_magic", "sst_magic", "SST magic admission — only PEDRSST\\0 opens; a C++ Rocks header refuses (RFC-0186 P2.2)"),
+        on!("tombstone_reaches_window", "tombstone_reaches_window", "range tombstone reaches the window (F167)"),
+        on!("key_in_window", "key_in_window", "key inside the scan window (F167)"),
+        on!("point_bounds_overlap", "point_bounds_overlap", "point bounds overlap (F167)"),
+        // --- RFC-0150 dictionary / compat kernels ---
         on!("cf_family", "cf_family", "CF family membership / encode (scan leak fail-closed)"),
+        on!("cf_family_of", "cf_family_of", "CF family of a key (RFC-0150)"),
+        on!("cf_encode_effective", "cf_encode_effective", "effective CF encode for pooled handles (RFC-0150)"),
+        on!("encode_cf_key", "encode_cf_key", "CF key encoding (RFC-0150)"),
+        on!("decode_cf_key", "decode_cf_key", "CF key decoding (RFC-0150)"),
+        on!("infer_sst_cf", "infer_sst_cf", "SST CF inference from the flush tag (RFC-0150)"),
+        on!("compact_rewrites_sst_cf", "compact_rewrites_sst_cf", "compaction rewrites the SST CF (RFC-0150)"),
         on!("visible_at", "visible_at", "snapshot merge visibility + F30 range tombstone"),
         on!("ikey_pack", "ikey_pack", "InternalKey packed trailer + seq-desc Ord"),
         on!("write_record_count", "write_record_count", "WriteRecord count is atomic (no silent prefix)"),
@@ -145,8 +217,57 @@ pub fn profile_report() -> &'static [ProfileComponent] {
         on!("iter_window", "iter_window", "compat iterator window vs visible_at (RFC-0151 P1)"),
         on!("zero_glue", "zero_glue", "zero remaining glue is not a theorem"),
         on!("lock_interleavings", "lock_interleavings", "lock/OS-scheduler interleavings are not forall"),
+        // --- contracts without a theorem (published, DST-exercised) ---
+        on!("auto_flush_due", "auto_flush_due", "engine kernel (Aeneas single-artifact)"),
+        on!("auto_flush_gate", "auto_flush_gate", "engine kernel (Aeneas single-artifact)"),
+        on!("batch_is_empty", "batch_is_empty", "engine kernel (Aeneas single-artifact)"),
+        on!("bulk_manifest_persist", "bulk_manifest_persist", "engine kernel (Aeneas single-artifact)"),
+        on!("changelog_durable_commit", "changelog_durable_commit", "engine kernel (Aeneas single-artifact)"),
+        on!("changelog_store_plan", "changelog_store_plan", "engine kernel (Aeneas single-artifact)"),
+        on!("dir_sync_plan", "dir_sync_plan", "engine kernel (Aeneas single-artifact)"),
+        on!("dir_sync_required", "dir_sync_required", "engine kernel (Aeneas single-artifact)"),
+        on!("fence_admission", "fence_admission", "engine kernel (Aeneas single-artifact)"),
+        on!("fence_on_sync_fail", "fence_on_sync_fail", "engine kernel (Aeneas single-artifact)"),
+        on!("fence_record", "fence_record", "engine kernel (Aeneas single-artifact)"),
+        on!("group_ack_plan", "group_ack_plan", "engine kernel (Aeneas single-artifact)"),
+        on!("group_batch_sync", "group_batch_sync", "engine kernel (Aeneas single-artifact)"),
+        on!("manifest_publish_plan", "manifest_publish_plan", "engine kernel (Aeneas single-artifact)"),
+        on!("mem_auto_flush", "mem_auto_flush", "engine kernel (Aeneas single-artifact)"),
+        on!("mem_point_decides", "mem_point_decides", "engine kernel (Aeneas single-artifact)"),
+        on!("merge_sift", "merge_sift", "engine kernel (Aeneas single-artifact)"),
+        on!("occ_batch_plan", "occ_batch_plan", "engine kernel (Aeneas single-artifact)"),
+        on!("occ_member_fate", "occ_member_fate", "engine kernel (Aeneas single-artifact)"),
+        on!("occ_snap_published", "occ_snap_published", "engine kernel (Aeneas single-artifact)"),
+        on!("parked_pair", "parked_pair", "engine kernel (Aeneas single-artifact)"),
+        on!("parked_pop_plan", "parked_pop_plan", "engine kernel (Aeneas single-artifact)"),
+        on!("pit_resync_rewrite", "pit_resync_rewrite", "engine kernel (Aeneas single-artifact)"),
+        on!("pit_resync_rewrite_plan", "pit_resync_rewrite_plan", "engine kernel (Aeneas single-artifact)"),
+        on!("point_cache_validity", "point_cache_validity", "engine kernel (Aeneas single-artifact)"),
+        on!("point_tombstone", "point_tombstone", "engine kernel (Aeneas single-artifact)"),
+        on!("prefer_newer_seq", "prefer_newer_seq", "engine kernel (Aeneas single-artifact)"),
+        on!("rwlock_client_may_mutate", "rwlock_client_may_mutate", "engine kernel (Aeneas single-artifact)"),
+        on!("scale_forecast", "scale_forecast", "engine kernel (Aeneas single-artifact)"),
+        on!("scale_happy_hot", "scale_happy_hot", "engine kernel (Aeneas single-artifact)"),
+        on!("scale_predict", "scale_predict", "engine kernel (Aeneas single-artifact)"),
+        on!("scale_probes", "scale_probes", "engine kernel (Aeneas single-artifact)"),
+        on!("scale_probes_worst", "scale_probes_worst", "engine kernel (Aeneas single-artifact)"),
+        on!("scale_warm", "scale_warm", "engine kernel (Aeneas single-artifact)"),
+        on!("seq_after_feed", "seq_after_feed", "engine kernel (Aeneas single-artifact)"),
+        on!("seq_exhausted", "seq_exhausted", "engine kernel (Aeneas single-artifact)"),
+        on!("snap_below_watermark", "snap_below_watermark", "engine kernel (Aeneas single-artifact)"),
+        on!("snap_empty", "snap_empty", "engine kernel (Aeneas single-artifact)"),
+        on!("torn_head_empty_log", "torn_head_empty_log", "engine kernel (Aeneas single-artifact)"),
+        on!("torn_tail_needs_cut", "torn_tail_needs_cut", "engine kernel (Aeneas single-artifact)"),
+        on!("wal_archive_delete", "wal_archive_delete", "engine kernel (Aeneas single-artifact)"),
+        on!("wal_commit_plan", "wal_commit_plan", "engine kernel (Aeneas single-artifact)"),
+        on!("wal_rotate_decision", "wal_rotate_decision", "engine kernel (Aeneas single-artifact)"),
+        on!("wal_sync_required", "wal_sync_required", "engine kernel (Aeneas single-artifact)"),
+        on!("write_admission", "write_admission", "engine kernel (Aeneas single-artifact)"),
+        on!("write_admit", "write_admit", "engine kernel (Aeneas single-artifact)"),
+        on!("write_op_range_end", "write_op_range_end", "engine kernel (Aeneas single-artifact)"),
         contract!("wal_barrier", "WAL write + fdatasync before Ok (RFC-0001 O1 / RFC-0036) — enforced in code, exercised by the crash/EIO battery"),
         contract!("disk_env", "StdEnv pinned by the verified constructors (Env seam; FailingEnv drives the DST battery)"),
+        // --- deliberately off ---
         off!("catchup_window", "pinned to 0 by the verified pin — the merge happens by natural queuing, never by a delay window"),
         off!("async_group_merge", "verified async writes take the write lock themselves (no leader dependency — the pin forces the bypass even under PEDRA_ASYNC_GROUP=1)"),
         off!("io_uring_ring", "no proven ring model (cqe_kernel twin blocked); verified constructors pin StdEnv — the full mode keeps PosixFallback (RFC-0058 P2.2 / RFC-0080)"),
@@ -312,9 +433,7 @@ mod tests {
     #[test]
     fn verified_report_matches_catalog() {
         let catalog = catalog_ids();
-        // 39 pairs: the pre-088f2f9 count minus the kernels of crates this
-        // repo does not ship (088f2f9 dropped the mirrors; the floor follows).
-        assert!(catalog.len() >= 39, "catalog shrank? ids: {catalog:?}");
+        assert!(catalog.len() >= 40, "catalog shrank? ids: {catalog:?}");
         let reported: std::collections::HashSet<&str> = profile_report()
             .iter()
             .filter(|c| c.state == ProfileState::On)
@@ -349,6 +468,20 @@ mod tests {
                 .find(|c| c.component == name)
                 .unwrap_or_else(|| panic!("missing report row {name}"));
             assert_eq!(c.state, ProfileState::Off, "{name}: {c:?}");
+        }
+        for k in [
+            "d1_durability",
+            "d1_modelo",
+            "r1_no_resurrection",
+            "r1_modelo",
+            "t1_atomicity",
+        ] {
+            if catalog.iter().any(|id| id == k) {
+                assert!(
+                    reported.contains(k),
+                    "RFC-0166 P2.4: property/refinement {k} must be an ON report row"
+                );
+            }
         }
         let ring = profile_report()
             .iter()

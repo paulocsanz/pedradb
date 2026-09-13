@@ -86,7 +86,7 @@ pub fn apply_recover_choice(buf: &mut Vec<u8>, choice: RecoverChoice) -> bool {
     match choice {
         RecoverChoice::Clean => true,
         RecoverChoice::TearTail { bytes } => {
-            if buf.is_empty() {
+            if crate::write_admission_kernel::batch_is_empty(buf.len() as u64) {
                 return false;
             }
             let keep = buf.len().saturating_sub(bytes);
@@ -97,7 +97,9 @@ pub fn apply_recover_choice(buf: &mut Vec<u8>, choice: RecoverChoice) -> bool {
             let Some((h, len, _)) = nth_phys(buf, index) else {
                 return false;
             };
-            if len == 0 || h + HEADER_SIZE >= buf.len() {
+            if crate::write_admission_kernel::batch_is_empty(len as u64)
+                || h + HEADER_SIZE >= buf.len()
+            {
                 return false;
             }
             buf[h + HEADER_SIZE] ^= 0xff;
@@ -220,7 +222,9 @@ fn next_phys(buf: &[u8], start: usize) -> Option<(usize, usize, u8)> {
         }
         let typ = buf[o + 6];
         let len = decode_length([buf[o + 4], buf[o + 5]]);
-        if typ == RecordType::Zero as u8 && len == 0 {
+        if typ == RecordType::Zero as u8
+            && crate::write_admission_kernel::batch_is_empty(len as u64)
+        {
             let block = o / BLOCK_SIZE;
             let block_end = block.saturating_add(1).saturating_mul(BLOCK_SIZE);
             if block_end >= buf.len() || block_end <= o {

@@ -48,7 +48,7 @@ impl FileRec {
     }
 
     fn promote(&mut self) {
-        if !self.pending.is_empty() {
+        if !pedradb_core::write_admission_kernel::batch_is_empty(self.pending.len() as u64) {
             self.durable.extend_from_slice(&self.pending);
             self.pending.clear();
         }
@@ -165,13 +165,13 @@ impl Read for RecordingFile {
 
 impl Write for RecordingFile {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if buf.is_empty() {
+        if pedradb_core::write_admission_kernel::batch_is_empty(buf.len() as u64) {
             return Ok(0);
         }
         let mut img = self.image.borrow_mut();
         let mut to_write = buf;
         if let Some(left) = img.short_write_left {
-            if left == 0 {
+            if pedradb_core::write_admission_kernel::batch_is_empty(left as u64) {
                 return Err(io::Error::new(
                     io::ErrorKind::WriteZero,
                     "injected short-write exhausted",

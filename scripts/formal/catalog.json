@@ -1,1192 +1,4021 @@
 {
-  "comment": "Pedra formal glue catalog. Production kernel is the source; Verus file is a twin; callers must invoke the kernel. twin_kind: close = entry (or token_src) is an exec fn in the twin; atom = smaller fn (atom) only; model = same name, stand-in domain (e.g. u64 for &[u8]). status=absent is a recorded gap (script exists, twin file does not).",
-  "pairs": [
+ "comment": "Pedra formal glue catalog for the public engine. Production kernel is the source of record; Aeneas extracts that rustc-linked file. twin_kind: close = entry is the production fn; atom = smaller fn; model = stand-in domain. Verus side-copy twins are retired (single_artifact).",
+ "object_kinds": {
+  "proof": "machine-checked twin — exec==spec (Verus/Kani/Lean)",
+  "campaign": "named plant / seed replay — not forall traces"
+ },
+ "campaign_prefixes": [],
+ "pairs": [
+  {
+   "id": "changelog",
+   "finding": "F53",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
+   "twin": "crates/pedradb-core/src/changelog_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "changelog_needs_sst_rebuild",
+   "as_is": "changelog_needs_sst_rebuild_as_is",
+   "three_teeth": true,
+   "live_callers": [
     {
-      "id": "changelog",
-      "finding": "F53",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
-      "twin": "crates/pedradb-core/verus/changelog_rebuild.rs",
-      "verus": "scripts/verus_changelog_rebuild.sh",
-      "callers": [
-        "crates/pedradb-core/src/db.rs"
-      ],
-      "entry": "changelog_needs_sst_rebuild",
-      "as_is": "changelog_needs_sst_rebuild_as_is",
-      "three_teeth": true,
-      "live_callers": [
-        {
-          "file": "crates/pedradb-core/src/db.rs",
-          "handler": "maybe_rebuild_feed_from_live"
-        }
-      ],
-      "dst_plant": {
-        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
-        "test": "changelog_needs_sst_rebuild_on_live_queued_is_not_ok"
-      }
-    },
-    {
-      "id": "range_covers",
-      "finding": "F30",
-      "twin_kind": "model",
-      "kernel": "crates/pedradb-core/src/merge.rs",
-      "twin": "crates/pedradb-core/verus/range_covers.rs",
-      "verus": "scripts/verus_range_covers.sh",
-      "callers": [
-        "crates/pedradb-core/src/merge.rs",
-        "crates/pedradb-core/src/db.rs"
-      ],
-      "entry": "range_tombstone_covers",
-      "as_is": "range_tombstone_covers_as_is",
-      "three_teeth": true,
-      "live_callers": [
-        {
-          "file": "crates/pedradb-core/src/merge.rs",
-          "handler": "range_deleted"
-        }
-      ],
-      "dst_plant": {
-        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
-        "test": "range_tombstone_covers_on_live_queued_is_not_ok"
-      }
-    },
-    {
-      "id": "prefix",
-      "finding": "F57/F58",
-      "twin_kind": "atom",
-      "atom": "bump_non_ff",
-      "kernel": "crates/pedradb-core/src/prefix.rs",
-      "twin": "crates/pedradb-core/verus/prefix_exclusive_end.rs",
-      "verus": "scripts/verus_prefix_exclusive_end.sh",
-      "callers": [],
-      "entry": "prefix_exclusive_end",
-      "token_src": "prefix_exclusive_end",
-      "token_dst": "*",
-      "as_is": "prefix_exclusive_end_as_is",
-      "three_teeth": true,
-      "live_callers": [
-        {
-          "file": "crates/pedradb-store/src/lib.rs",
-          "handler": "scan_prefix"
-        }
-      ],
-      "dst_plant": {
-        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
-        "test": "prefix_exclusive_end_on_live_queued_is_not_ok"
-      }
-    },
-    {
-      "id": "wal_recover",
-      "finding": "F4/F14",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-core/src/wal/recover_kernel.rs",
-      "twin": "crates/pedradb-core/verus/wal_recover.rs",
-      "verus": "scripts/verus_wal_recover.sh",
-      "callers": [
-        "crates/pedradb-core/src/wal/reader.rs"
-      ],
-      "entry": "recover_collect_act",
-      "data_fate": true,
-      "as_is": "recover_collect_act_as_is",
-      "dst_plant": {
-        "file": "crates/pedradb-sim/src/lib.rs",
-        "test": "recover_collect_act_on_live_exploded_crc_is_not_ok"
-      }
-    },
-    {
-      "id": "bloom_header",
-      "finding": "F166",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-core/src/bloom.rs",
-      "twin": "crates/pedradb-core/verus/bloom_header.rs",
-      "verus": "scripts/verus_bloom_header.sh",
-      "callers": [
-        "crates/pedradb-core/src/bloom.rs"
-      ],
-      "entry": "bloom_header_ok",
-      "as_is": "bloom_header_ok_as_is",
-      "three_teeth": true,
-      "live_callers": [
-        {
-          "file": "crates/pedradb-core/src/bloom.rs",
-          "handler": "decode"
-        }
-      ],
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/bloom.rs",
-        "test": "bloom_header_ok_on_live_decode_is_not_ok"
-      }
-    },
-    {
-      "id": "bloom_insert",
-      "finding": "T1 (docs/formal/bloom-filter-theorems.md)",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-core/src/bloom.rs",
-      "twin": "crates/pedradb-core/verus/bloom_filter.rs",
-      "verus": "scripts/verus_bloom_filter.sh",
-      "callers": [
-        "crates/pedradb-core/src/sst/table.rs"
-      ],
-      "entry": "insert",
-      "as_is": "insert_as_is",
-      "three_teeth": true,
-      "live_callers": [
-        {
-          "file": "crates/pedradb-core/src/sst/table.rs",
-          "handler": "write_sst_try_sorted_on"
-        }
-      ],
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/bloom.rs",
-        "test": "insert_on_live_sst_is_not_ok"
-      }
-    },
-    {
-      "id": "bloom_may_contain",
-      "finding": "T1/T4 (docs/formal/bloom-filter-theorems.md)",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-core/src/bloom.rs",
-      "twin": "crates/pedradb-core/verus/bloom_filter.rs",
-      "verus": "scripts/verus_bloom_filter.sh",
-      "callers": [
-        "crates/pedradb-core/src/sst/table.rs"
-      ],
-      "entry": "may_contain",
-      "as_is": "may_contain_as_is",
-      "three_teeth": true,
-      "live_callers": [
-        {
-          "file": "crates/pedradb-core/src/sst/table.rs",
-          "handler": "point_at"
-        }
-      ],
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/bloom.rs",
-        "test": "may_contain_on_live_sst_is_not_ok"
-      }
-    },
-    {
-      "id": "scan_guard",
-      "finding": "F167",
-      "twin_kind": "model",
-      "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
-      "twin": "crates/pedradb-core/verus/scan_guard.rs",
-      "verus": "scripts/verus_scan_guard.sh",
-      "callers": [
-        "crates/pedradb-core/src/sst/table.rs"
-      ],
-      "entry": "scan_reads_file",
-      "as_is": "scan_reads_file_as_is",
-      "three_teeth": true,
-      "live_callers": [
-        {
-          "file": "crates/pedradb-core/src/sst/table.rs",
-          "handler": "entries_in_user_range_capped"
-        }
-      ],
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/sst/scan_kernel.rs",
-        "test": "scan_reads_file_on_live_sst_is_not_ok"
-      }
-    },
-    {
-      "id": "manifest_recover",
-      "finding": "F196/G8",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-core/src/manifest_kernel.rs",
-      "twin": "crates/pedradb-core/verus/manifest_recover.rs",
-      "verus": "scripts/verus_manifest_recover.sh",
-      "callers": [
-        "crates/pedradb-core/src/db.rs"
-      ],
-      "entry": "sst_recover_action",
-      "data_fate": true,
-      "handlers": [
-        "recover_ssts"
-      ],
-      "as_is": "sst_recover_action_as_is_scan_on_damage",
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/manifest_kernel.rs",
-        "test": "sst_recover_action_on_live_missing_sst_is_not_ok"
-      }
-    },
-    {
-      "id": "reopen_outcome",
-      "finding": "F170/F171/G8",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-core/src/wal/reopen_kernel.rs",
-      "twin": "crates/pedradb-core/verus/reopen_outcome.rs",
-      "verus": "scripts/verus_reopen_outcome.sh",
-      "callers": [
-        "crates/pedradb-core/src/db.rs"
-      ],
-      "entry": "reopen_outcome",
-      "data_fate": true,
-      "handlers": [
-        "open_with_env"
-      ],
-      "as_is": "reopen_outcome_as_is_silent",
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/wal/reopen_kernel.rs",
-        "test": "reopen_outcome_on_live_crc_is_not_ok"
-      }
-    },
-    {
-      "id": "flush_decision",
-      "finding": "F2/F43/G1",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-core/src/flush_kernel.rs",
-      "twin": "crates/pedradb-core/verus/flush_decision.rs",
-      "verus": "scripts/verus_flush_decision.sh",
-      "callers": [
-        "crates/pedradb-core/src/db.rs"
-      ],
-      "entry": "wal_rotate_decision",
-      "data_fate": true,
-      "handlers": [
-        "flush",
-        "try_rotate_wal"
-      ],
-      "as_is": "wal_rotate_decision_as_is_ignore_pin",
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/flush_kernel.rs",
-        "test": "wal_rotate_decision_on_live_pin_is_not_ok"
-      }
-    },
-    {
-      "id": "group_commit",
-      "finding": "RFC-0051-P1.3/RFC-0057-P2.1",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
-      "twin": "crates/pedradb-core/verus/group_commit.rs",
-      "verus": "scripts/verus_group_commit.sh",
-      "callers": [
-        "crates/pedradb-core/src/concurrent.rs"
-      ],
-      "entry": "occ_conflict",
-      "as_is": "occ_conflict_as_is_serialized",
-      "three_teeth": true,
-      "live_callers": [
-        {
-          "file": "crates/pedradb-core/src/concurrent.rs",
-          "handler": "validate_occ_batch"
-        }
-      ],
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/group_commit_kernel.rs",
-        "test": "occ_conflict_on_live_group_is_not_ok"
-      }
-    },
-    {
-      "id": "group_fence",
-      "finding": "RFC-0057-P2.1",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
-      "twin": "crates/pedradb-core/verus/group_commit.rs",
-      "verus": "scripts/verus_group_commit.sh",
-      "callers": [
-        "crates/pedradb-core/src/db.rs"
-      ],
-      "entry": "fence_publish_seq",
-      "as_is": "fence_publish_seq_as_is",
-      "three_teeth": true,
-      "live_callers": [
-        {
-          "file": "crates/pedradb-core/src/db.rs",
-          "handler": "max_appended_seq"
-        }
-      ],
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/group_commit_kernel.rs",
-        "test": "fence_publish_seq_on_live_group_is_not_ok"
-      }
-    },
-    {
-      "id": "compact_decision",
-      "finding": "F177/F20",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-core/src/compact_kernel.rs",
-      "twin": "crates/pedradb-core/verus/compact_decision.rs",
-      "verus": "scripts/verus_compact_decision.sh",
-      "callers": [
-        "crates/pedradb-core/src/db.rs"
-      ],
-      "entry": "compact_pick",
-      "data_fate": true,
-      "handlers": [
-        "compact_with_ssts_only"
-      ],
-      "as_is": "compact_pick_as_is",
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/compact_kernel.rs",
-        "test": "compact_pick_on_live_merge_is_not_ok"
-      }
-    },
-    {
-      "id": "compact_retention",
-      "finding": "F177/F20",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-core/src/compact_kernel.rs",
-      "twin": "crates/pedradb-core/verus/compact_decision.rs",
-      "verus": "scripts/verus_compact_decision.sh",
-      "callers": [
-        "crates/pedradb-core/src/merge.rs"
-      ],
-      "entry": "point_version_fate",
-      "data_fate": true,
-      "handlers": [
-        "gc_snapshot_safe"
-      ],
-      "as_is": "point_version_fate_as_is_drop_under_snapshot",
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/compact_kernel.rs",
-        "test": "point_version_fate_on_live_snapshot_is_not_ok"
-      }
-    },
-    {
-      "id": "dictionary_link",
-      "finding": "G1/G8 (crash dictionary put→get)",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-core/src/wal/reopen_kernel.rs",
-      "twin": "crates/pedradb-core/verus/dictionary_link.rs",
-      "verus": "scripts/verus_dictionary_link.sh",
-      "callers": [
-        "crates/pedradb-core/src/db.rs"
-      ],
-      "entry": "reopen_outcome",
-      "data_fate": true,
-      "handlers": [
-        "open_with_env"
-      ],
-      "as_is": "reopen_outcome_as_is_silent",
-      "dst_plant": {
-        "file": "crates/pedradb-sim/src/lib.rs",
-        "test": "crash_after_sync_recovers_committed"
-      }
-    },
-    {
-      "id": "vlog_recover",
-      "finding": "F51/G-swing",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-core/src/vlog_gc_kernel.rs",
-      "twin": "crates/pedradb-core/verus/vlog_gc_decision.rs",
-      "verus": "scripts/verus_vlog_gc.sh",
-      "callers": [
-        "crates/pedradb-core/src/db.rs"
-      ],
-      "entry": "vlog_recover_action",
-      "data_fate": true,
-      "handlers": [
-        "open_with_env"
-      ],
-      "as_is": "vlog_recover_action_as_is_ignore_swing",
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/vlog_gc_kernel.rs",
-        "test": "vlog_recover_action_on_live_swing_is_not_ok"
-      }
-    },
-    {
-      "id": "blob_gc_pick",
-      "finding": "F-active-gen",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-core/src/vlog_gc_kernel.rs",
-      "twin": "crates/pedradb-core/verus/vlog_gc_decision.rs",
-      "verus": "scripts/verus_vlog_gc.sh",
-      "callers": [
-        "crates/pedradb-core/src/db.rs"
-      ],
-      "entry": "blob_gc_action",
-      "data_fate": true,
-      "handlers": [
-        "compact_blob_auto"
-      ],
-      "as_is": "blob_gc_action_as_is_rewrite_active",
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/vlog_gc_kernel.rs",
-        "test": "blob_gc_action_on_live_active_is_not_ok"
-      }
-    },
-    {
-      "id": "group_publish",
-      "finding": "RFC-0071",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
-      "twin": "crates/pedradb-core/verus/group_commit.rs",
-      "verus": "scripts/verus_group_commit.sh",
-      "callers": [
-        "crates/pedradb-core/src/concurrent.rs"
-      ],
-      "entry": "may_publish_group",
-      "as_is": "may_publish_group_as_is",
-      "three_teeth": true,
-      "live_callers": [
-        {
-          "file": "crates/pedradb-core/src/concurrent.rs",
-          "handler": "finish_group_off_lock"
-        }
-      ],
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/concurrent.rs",
-        "test": "may_publish_group_on_live_group_is_not_ok"
-      }
-    },
-    {
-      "id": "forall_schedules",
-      "finding": "RFC-0070",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
-      "twin": "crates/pedradb-core/verus/group_commit.rs",
-      "verus": "scripts/verus_group_commit.sh",
-      "callers": [
-        "crates/pedradb-core/src/concurrent.rs"
-      ],
-      "entry": "forall_schedules_admitted",
-      "as_is": "forall_schedules_admitted_as_is",
-      "three_teeth": true,
-      "live_callers": [
-        {
-          "file": "crates/pedradb-core/src/concurrent.rs",
-          "handler": "claim_forall_schedules"
-        }
-      ],
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/concurrent.rs",
-        "test": "forall_schedules_admitted_on_live_group_is_not_ok"
-      }
-    },
-    {
-      "id": "fsync_promote",
-      "finding": "RFC-0078",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
-      "twin": "crates/pedradb-core/verus/group_commit.rs",
-      "verus": "scripts/verus_group_commit.sh",
-      "callers": [
-        "crates/pedradb-sim/src/recording.rs"
-      ],
-      "entry": "fsync_promotes_pending",
-      "as_is": "fsync_promotes_pending_as_is",
-      "three_teeth": true,
-      "live_callers": [
-        {
-          "file": "crates/pedradb-sim/src/recording.rs",
-          "handler": "sync_data"
-        }
-      ],
-      "dst_plant": {
-        "file": "crates/pedradb-sim/src/recording.rs",
-        "test": "fsync_promotes_pending_on_live_sim_is_not_ok"
-      }
-    },
-    {
-      "id": "media_durable",
-      "finding": "RFC-0078",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
-      "twin": "crates/pedradb-core/verus/group_commit.rs",
-      "verus": "scripts/verus_group_commit.sh",
-      "callers": [
-        "crates/pedradb-core/src/db.rs"
-      ],
-      "entry": "media_durable_admitted",
-      "as_is": "media_durable_admitted_as_is",
-      "three_teeth": true,
-      "live_callers": [
-        {
-          "file": "crates/pedradb-core/src/db.rs",
-          "handler": "claim_media_durable"
-        }
-      ],
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/db.rs",
-        "test": "media_durable_admitted_on_live_db_is_not_ok"
-      }
-    },
-    {
-      "id": "fdatasync_rc",
-      "finding": "RFC-0073",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-posix/src/lib.rs",
-      "twin": "crates/pedradb-posix/verus/fdatasync_rc.rs",
-      "verus": "scripts/verus_fdatasync_rc.sh",
-      "callers": [
-        "crates/pedradb-posix/src/lib.rs"
-      ],
-      "entry": "fdatasync_rc_ok",
-      "as_is": "fdatasync_rc_ok_as_is",
-      "three_teeth": true,
-      "live_callers": [
-        {
-          "file": "crates/pedradb-posix/src/lib.rs",
-          "handler": "fdatasync_file"
-        }
-      ],
-      "dst_plant": {
-        "file": "crates/pedradb-posix/src/lib.rs",
-        "test": "fdatasync_rc_ok_on_live_posix_is_not_ok"
-      }
-    },
-    {
-      "id": "cqe_res",
-      "finding": "RFC-0074",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-io-uring/src/cqe_kernel.rs",
-      "twin": "crates/pedradb-io-uring/verus/cqe_res.rs",
-      "verus": "scripts/verus_cqe_res.sh",
-      "callers": [
-        "crates/pedradb-io-uring/src/ring.rs"
-      ],
-      "entry": "cqe_res_ok",
-      "as_is": "cqe_res_ok_as_is",
-      "three_teeth": true,
-      "live_callers": [
-        {
-          "file": "crates/pedradb-io-uring/src/ring.rs",
-          "handler": "fsync"
-        }
-      ],
-      "dst_plant": {
-        "file": "crates/pedradb-io-uring/src/lib.rs",
-        "test": "cqe_res_ok_on_live_uring_is_not_ok"
-      }
-    },
-    {
-      "id": "crc_match",
-      "finding": "RFC-0076/0081/0082/0083/0084/0085/0086/0087/0088/0089/0092/0093",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-core/src/wal/crc.rs",
-      "twin": "crates/pedradb-core/verus/crc_match.rs",
-      "verus": "scripts/verus_crc_match.sh",
-      "callers": [
-        "crates/pedradb-core/src/wal/reader.rs",
-        "crates/pedradb-core/src/sst/scan_kernel.rs",
-        "crates/pedradb-core/src/vlog.rs",
-        "crates/pedradb-core/src/manifest.rs",
-        "crates/pedradb-core/src/history.rs",
-        "crates/pedradb-core/src/change_feed.rs",
-        "crates/pedradb-core/src/verify.rs"
-      ],
-      "entry": "crc_match_ok",
-      "as_is": "crc_match_ok_as_is",
-      "three_teeth": true,
-      "live_callers": [
-        {
-          "file": "crates/pedradb-core/src/wal/reader.rs",
-          "handler": "read_record"
-        }
-      ],
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/wal/reader.rs",
-        "test": "crc_match_ok_on_live_wal_is_not_ok"
-      }
-    },
-    {
-      "id": "sst_crc",
-      "finding": "RFC-0077",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
-      "twin": "crates/pedradb-core/verus/sst_crc_fate.rs",
-      "verus": "scripts/verus_sst_crc_fate.sh",
-      "callers": [
-        "crates/pedradb-core/src/sst/table.rs"
-      ],
-      "entry": "sst_crc_fate",
-      "as_is": "sst_crc_fate_as_is",
-      "three_teeth": true,
-      "live_callers": [
-        {
-          "file": "crates/pedradb-core/src/sst/table.rs",
-          "handler": "decode"
-        }
-      ],
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/sst/table.rs",
-        "test": "sst_crc_fate_on_live_sst_is_not_ok"
-      }
-    },
-    {
-      "id": "cf_family",
-      "finding": "RFC-0150 P0",
-      "twin_kind": "model",
-      "kernel": "crates/pedradb-core/src/cf_kernel.rs",
-      "twin": "crates/pedradb-core/verus/cf_family.rs",
-      "verus": "scripts/verus_cf_family.sh",
-      "callers": [
-        "crates/pedradb-core/src/cf_kernel.rs",
-        "crates/pedradb-core/src/memtable.rs",
-        "crates/pedradb-core/src/sst/table.rs",
-        "crates/pedradb-core/src/db.rs",
-        "crates/rocksdb-compat/src/lib.rs"
-      ],
-      "entry": "key_in_cf_family",
-      "data_fate": true,
-      "live_callers": [
-        {
-          "file": "crates/pedradb-core/src/sst/table.rs",
-          "handler": "write_l0_sst_for_family"
-        }
-      ],
-      "as_is": "key_in_cf_family_as_is",
-      "dst_plant": {
-        "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
-        "test": "key_in_cf_family_on_live_scan_is_not_ok"
-      }
-    },
-    {
-      "id": "visible_at",
-      "finding": "RFC-0150 P1 / F30",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-core/src/merge.rs",
-      "twin": "crates/pedradb-core/verus/visible_at.rs",
-      "verus": "scripts/verus_visible_at.sh",
-      "callers": [
-        "crates/pedradb-core/src/merge.rs",
-        "crates/pedradb-core/src/memtable.rs",
-        "crates/pedradb-core/src/db.rs"
-      ],
-      "entry": "visible_at",
-      "data_fate": true,
-      "as_is": "visible_at_as_is",
-      "dst_plant": {
-        "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
-        "test": "visible_at_on_live_range_del_is_not_ok"
-      }
-    },
-    {
-      "id": "ikey_pack",
-      "finding": "RFC-0150 P1",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-core/src/key.rs",
-      "twin": "crates/pedradb-core/verus/ikey_pack.rs",
-      "verus": "scripts/verus_ikey_pack.sh",
-      "callers": [
-        "crates/pedradb-core/src/key.rs"
-      ],
-      "entry": "pack_sequence_and_type",
-      "as_is": "pack_sequence_and_type_as_is",
-      "three_teeth": true,
-      "live_callers": [
-        {
-          "file": "crates/pedradb-core/src/key.rs",
-          "handler": "encode_into"
-        }
-      ],
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/key.rs",
-        "test": "pack_sequence_and_type_on_live_db_is_not_ok"
-      }
-    },
-    {
-      "id": "write_record_count",
-      "finding": "RFC-0150 P2a",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-core/src/batch.rs",
-      "twin": "crates/pedradb-core/verus/write_record_count.rs",
-      "verus": "scripts/verus_write_record_count.sh",
-      "callers": [
-        "crates/pedradb-core/src/batch.rs"
-      ],
-      "entry": "write_record_count_ok",
-      "data_fate": true,
-      "as_is": "write_record_count_ok_as_is",
-      "dst_plant": {
-        "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
-        "test": "write_record_count_ok_on_live_torn_batch_is_not_ok"
-      }
-    },
-    {
-      "id": "pin_gc",
-      "finding": "RFC-0150 P2b / F20",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-core/src/compact_kernel.rs",
-      "twin": "crates/pedradb-core/verus/compact_decision.rs",
-      "verus": "scripts/verus_compact_decision.sh",
-      "callers": [
-        "crates/pedradb-core/src/db.rs"
-      ],
-      "entry": "gc_oldest_from_pin",
-      "data_fate": true,
-      "handlers": [
-        "compact_reclaim"
-      ],
-      "as_is": "gc_oldest_from_pin_as_is",
-      "dst_plant": {
-        "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
-        "test": "gc_oldest_from_pin_on_live_reclaim_is_not_ok"
-      }
-    },
-    {
-      "id": "wait_for_deadlock",
-      "finding": "RFC-0150 P2c",
-      "twin_kind": "model",
-      "kernel": "crates/rocksdb-compat/src/locktab.rs",
-      "twin": "crates/rocksdb-compat/verus/wait_for_deadlock.rs",
-      "verus": "scripts/verus_wait_for_deadlock.sh",
-      "callers": [
-        "crates/rocksdb-compat/src/locktab.rs"
-      ],
-      "entry": "wait_for_deadlock",
-      "data_fate": true,
-      "as_is": "wait_for_deadlock_as_is",
-      "dst_plant": {
-        "file": "crates/rocksdb-compat/src/locktab.rs",
-        "test": "wait_for_deadlock_on_live_cycle_is_not_ok"
-      }
-    },
-    {
-      "id": "flush_publish",
-      "finding": "RFC-0151 P1",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-core/src/flush_kernel.rs",
-      "twin": "crates/pedradb-core/verus/flush_decision.rs",
-      "verus": "scripts/verus_flush_decision.sh",
-      "callers": [
-        "crates/pedradb-core/src/db.rs"
-      ],
-      "entry": "may_publish_manifest",
-      "data_fate": true,
-      "handlers": [
-        "persist_manifest"
-      ],
-      "as_is": "may_publish_manifest_as_is",
-      "dst_plant": {
-        "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
-        "test": "may_publish_manifest_on_live_unsynced_sst_is_not_ok"
-      }
-    },
-    {
-      "id": "iter_window",
-      "finding": "RFC-0151 P1",
-      "twin_kind": "close",
-      "kernel": "crates/rocksdb-compat/src/iter_kernel.rs",
-      "twin": "crates/rocksdb-compat/verus/iter_window.rs",
-      "verus": "scripts/verus_iter_window.sh",
-      "callers": [
-        "crates/rocksdb-compat/src/lib.rs"
-      ],
-      "entry": "iter_window_keep",
-      "data_fate": true,
-      "handlers": [
-        "page_forward",
-        "page_last_n"
-      ],
-      "as_is": "iter_window_keep_as_is",
-      "dst_plant": {
-        "file": "crates/rocksdb-compat/src/lib.rs",
-        "test": "iter_window_keep_on_live_hidden_is_not_ok"
-      }
-    },
-    {
-      "id": "zero_glue",
-      "finding": "RFC-0155",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
-      "twin": "crates/pedradb-core/verus/sst_crc_fate.rs",
-      "verus": "scripts/verus_sst_crc_fate.sh",
-      "callers": [
-        "crates/pedradb-core/src/db.rs"
-      ],
-      "entry": "zero_glue_admitted",
-      "as_is": "zero_glue_admitted_as_is",
-      "three_teeth": true,
-      "live_callers": [
-        {
-          "file": "crates/pedradb-core/src/db.rs",
-          "handler": "claim_zero_glue"
-        }
-      ],
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/db.rs",
-        "test": "zero_glue_admitted_on_live_db_is_not_ok"
-      }
-    },
-    {
-      "id": "lock_interleavings",
-      "finding": "RFC-0155",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
-      "twin": "crates/pedradb-core/verus/group_commit.rs",
-      "verus": "scripts/verus_group_commit.sh",
-      "callers": [
-        "crates/pedradb-core/src/concurrent.rs"
-      ],
-      "entry": "lock_interleavings_admitted",
-      "as_is": "lock_interleavings_admitted_as_is",
-      "three_teeth": true,
-      "live_callers": [
-        {
-          "file": "crates/pedradb-core/src/concurrent.rs",
-          "handler": "claim_lock_interleavings_proven"
-        }
-      ],
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/concurrent.rs",
-        "test": "claim_lock_interleavings_refused_after_put"
-      }
-    },
-    {
-      "id": "leveling",
-      "finding": "F-leveling-sweep",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-core/src/leveling.rs",
-      "twin": "crates/pedradb-core/verus/leveling.rs",
-      "verus": "scripts/verus_leveling.sh",
-      "callers": [
-        "crates/pedradb-core/src/db.rs"
-      ],
-      "entry": "level_target_bytes",
-      "data_fate": true,
-      "handlers": [
-        "prepare_l0_compact",
-        "prepare_pushdown_compact"
-      ],
-      "live_callers": [
-        {
-          "file": "crates/pedradb-core/src/db.rs",
-          "handler": "prepare_pushdown_compact"
-        }
-      ],
-      "as_is": "level_target_bytes_as_is",
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/leveling.rs",
-        "test": "level_target_bytes_on_live_deep_level_is_not_ok"
-      }
-    },
-    {
-      "id": "leveling_pick",
-      "finding": "F-leveling-sweep",
-      "twin_kind": "atom",
-      "atom": "pick_l0_to_l1_model",
-      "kernel": "crates/pedradb-core/src/leveling.rs",
-      "twin": "crates/pedradb-core/verus/leveling_pick.rs",
-      "verus": "scripts/verus_leveling_pick.sh",
-      "callers": [
-        "crates/pedradb-core/src/db.rs"
-      ],
-      "entry": "pick_l0_to_l1",
-      "data_fate": true,
-      "handlers": [
-        "prepare_l0_compact",
-        "prepare_pushdown_compact"
-      ],
-      "live_callers": [
-        {
-          "file": "crates/pedradb-core/src/db.rs",
-          "handler": "prepare_l0_compact"
-        }
-      ],
-      "as_is": "pick_l0_to_l1_as_is_whole_level",
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/leveling.rs",
-        "test": "pick_l0_to_l1_on_live_slice_is_not_ok"
-      }
-    },
-    {
-      "id": "leveling_pushdown",
-      "finding": "F-leveling-sweep",
-      "twin_kind": "atom",
-      "atom": "pick_pushdown_model",
-      "token_src": "pick_pushdown_as_is_blind",
-      "kernel": "crates/pedradb-core/src/leveling.rs",
-      "twin": "crates/pedradb-core/verus/leveling_pick.rs",
-      "verus": "scripts/verus_leveling_pick.sh",
-      "callers": [
-        "crates/pedradb-core/src/db.rs"
-      ],
-      "entry": "pick_pushdown",
-      "data_fate": true,
-      "handlers": [
-        "prepare_pushdown_compact"
-      ],
-      "live_callers": [
-        {
-          "file": "crates/pedradb-core/src/db.rs",
-          "handler": "prepare_pushdown_compact"
-        }
-      ],
-      "as_is": "pick_pushdown_as_is_blind",
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/leveling.rs",
-        "test": "pick_pushdown_on_live_pushdown_gate_is_not_ok"
-      }
-    },
-    {
-      "id": "ops_pitr_window",
-      "finding": "PITR restore_pitr filter",
-      "twin_kind": "close",
-      "kernel": "crates/pedradb-ops/src/ops_kernel.rs",
-      "twin": "crates/pedradb-ops/verus/pitr_window.rs",
-      "verus": "scripts/verus_pitr_window.sh",
-      "callers": [
-        "crates/pedradb-ops/src/lib.rs"
-      ],
-      "entry": "pitr_record_in_window",
-      "as_is": "pitr_record_in_window_as_is",
-      "three_teeth": true,
-      "live_callers": [
-        {
-          "file": "crates/pedradb-ops/src/lib.rs",
-          "handler": "restore_pitr"
-        }
-      ],
-      "dst_plant": {
-        "file": "crates/pedradb-ops/src/ops_kernel.rs",
-        "test": "pitr_record_in_window_on_future_seq_is_not_ok"
-      }
-    },
-    {
-      "id": "write_admission",
-      "finding": "RFC-0171 P0.3",
-      "twin_kind": "close",
-      "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
-      "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
-      "verus": "scripts/verus_write_admission.sh",
-      "callers": ["crates/pedradb-core/src/db.rs"],
-      "entry": "write_admission_idle",
-      "data_fate": true,
-      "as_is": "write_admission_idle_as_is",
-      "three_teeth": true,
-      "live_callers": [{"file": "crates/pedradb-core/src/db.rs", "handler": "write_admission_idle"}],
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/write_admission_kernel.rs",
-        "test": "write_admission_idle_on_live_stall_is_not_ok"
-      }
-    },
-    {
-      "id": "write_admit",
-      "finding": "RFC-0171 P1.1",
-      "twin_kind": "close",
-      "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
-      "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
-      "verus": "scripts/verus_write_admission.sh",
-      "callers": ["crates/pedradb-core/src/db.rs"],
-      "entry": "write_admit",
-      "data_fate": true,
-      "as_is": "write_admit_as_is",
-      "three_teeth": true,
-      "live_callers": [{"file": "crates/pedradb-core/src/db.rs", "handler": "ensure_write_admitted_for"}],
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/write_admission_kernel.rs",
-        "test": "write_admit_on_live_mem_over_is_not_ok"
-      }
-    },
-    {
-      "id": "wal_sync_required",
-      "finding": "RFC-0171 P1.1",
-      "twin_kind": "close",
-      "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
-      "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
-      "verus": "scripts/verus_write_admission.sh",
-      "callers": ["crates/pedradb-core/src/db.rs"],
-      "entry": "wal_sync_required",
-      "data_fate": true,
-      "as_is": "wal_sync_required_as_is",
-      "three_teeth": true,
-      "live_callers": [{"file": "crates/pedradb-core/src/db.rs", "handler": "commit_ops_with"}],
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/write_admission_kernel.rs",
-        "test": "wal_sync_required_on_live_client_true_is_not_ok"
-      }
-    },
-    {
-      "id": "seq_exhausted",
-      "finding": "RFC-0171 P1.1",
-      "twin_kind": "close",
-      "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
-      "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
-      "verus": "scripts/verus_write_admission.sh",
-      "callers": ["crates/pedradb-core/src/db.rs"],
-      "entry": "seq_exhausted",
-      "data_fate": true,
-      "as_is": "seq_exhausted_as_is",
-      "three_teeth": true,
-      "live_callers": [{"file": "crates/pedradb-core/src/db.rs", "handler": "alloc_seq"}],
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/write_admission_kernel.rs",
-        "test": "seq_exhausted_on_live_ceiling_is_not_ok"
-      }
-    },
-    {
-      "id": "batch_is_empty",
-      "finding": "RFC-0171 P1.1",
-      "twin_kind": "close",
-      "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
-      "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
-      "verus": "scripts/verus_write_admission.sh",
-      "callers": ["crates/pedradb-core/src/db.rs"],
-      "entry": "batch_is_empty",
-      "data_fate": true,
-      "as_is": "batch_is_empty_as_is",
-      "three_teeth": true,
-      "live_callers": [{"file": "crates/pedradb-core/src/db.rs", "handler": "apply_batch_with"}],
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/write_admission_kernel.rs",
-        "test": "batch_is_empty_on_live_zero_is_not_ok"
-      }
-    },
-    {
-      "id": "fence_on_sync_fail",
-      "finding": "RFC-0171 P1.1",
-      "twin_kind": "close",
-      "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
-      "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
-      "verus": "scripts/verus_write_admission.sh",
-      "callers": ["crates/pedradb-core/src/db.rs"],
-      "entry": "fence_on_sync_fail",
-      "data_fate": true,
-      "as_is": "fence_on_sync_fail_as_is",
-      "three_teeth": true,
-      "live_callers": [{"file": "crates/pedradb-core/src/db.rs", "handler": "commit_ops_with"}],
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/write_admission_kernel.rs",
-        "test": "fence_on_sync_fail_on_live_required_fail_is_not_ok"
-      }
-    },
-    {
-      "id": "torn_head_empty_log",
-      "finding": "RFC-0171 P1.2",
-      "twin_kind": "close",
-      "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
-      "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
-      "verus": "scripts/verus_write_admission.sh",
-      "callers": ["crates/pedradb-core/src/db.rs"],
-      "entry": "torn_head_is_empty_log",
-      "data_fate": true,
-      "as_is": "torn_head_is_empty_log_as_is",
-      "three_teeth": true,
-      "live_callers": [{"file": "crates/pedradb-core/src/db.rs", "handler": "open_with_env_sourced"}],
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/write_admission_kernel.rs",
-        "test": "torn_head_is_empty_log_on_live_large_wal_is_not_ok"
-      }
-    },
-    {
-      "id": "torn_tail_needs_cut",
-      "finding": "RFC-0171 P1.2",
-      "twin_kind": "close",
-      "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
-      "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
-      "verus": "scripts/verus_write_admission.sh",
-      "callers": ["crates/pedradb-core/src/db.rs"],
-      "entry": "torn_tail_needs_cut",
-      "data_fate": true,
-      "as_is": "torn_tail_needs_cut_as_is",
-      "three_teeth": true,
-      "live_callers": [{"file": "crates/pedradb-core/src/db.rs", "handler": "open_with_env_sourced"}],
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/write_admission_kernel.rs",
-        "test": "torn_tail_needs_cut_on_live_overhang_is_not_ok"
-      }
-    },
-    {
-      "id": "seq_after_feed",
-      "finding": "RFC-0171 P1.2",
-      "twin_kind": "close",
-      "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
-      "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
-      "verus": "scripts/verus_write_admission.sh",
-      "callers": ["crates/pedradb-core/src/db.rs"],
-      "entry": "seq_after_feed",
-      "data_fate": true,
-      "as_is": "seq_after_feed_as_is",
-      "three_teeth": true,
-      "live_callers": [{"file": "crates/pedradb-core/src/db.rs", "handler": "open_with_env_sourced"}],
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/write_admission_kernel.rs",
-        "test": "seq_after_feed_on_live_newer_is_not_ok"
-      }
-    },
-    {
-      "id": "pit_resync_rewrite",
-      "finding": "RFC-0171 P1.2",
-      "twin_kind": "close",
-      "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
-      "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
-      "verus": "scripts/verus_write_admission.sh",
-      "callers": ["crates/pedradb-core/src/db.rs"],
-      "entry": "pit_resync_needs_rewrite",
-      "data_fate": true,
-      "as_is": "pit_resync_needs_rewrite_as_is",
-      "three_teeth": true,
-      "live_callers": [{"file": "crates/pedradb-core/src/db.rs", "handler": "open_with_env_sourced"}],
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/write_admission_kernel.rs",
-        "test": "pit_resync_needs_rewrite_on_live_resync_is_not_ok"
-      }
-    },
-    {
-      "id": "dir_sync_required",
-      "finding": "RFC-0171 P1.1",
-      "twin_kind": "close",
-      "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
-      "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
-      "verus": "scripts/verus_write_admission.sh",
-      "callers": ["crates/pedradb-core/src/db.rs"],
-      "entry": "dir_sync_required",
-      "data_fate": true,
-      "as_is": "dir_sync_required_as_is",
-      "three_teeth": true,
-      "live_callers": [{"file": "crates/pedradb-core/src/db.rs", "handler": "sync_dir_if_required"}],
-      "dst_plant": {
-        "file": "crates/pedradb-core/src/write_admission_kernel.rs",
-        "test": "dir_sync_required_on_live_sync_is_not_ok"
-      }
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "maybe_rebuild_feed_from_live"
     }
-  ],
-  "clones": [
+   ],
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 1/6 P0.3: changelog_needs_sst_rebuild como janela citada — feed vazio com seq>0 rebuild, feed vivo nunca; floor_atom 186→187"
+   }
+  },
+  {
+   "id": "range_covers",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.2: fate ∀ sobre range_tombstone_covers no degrau átomo — par citado: key >= start E key < end; planta DST range_tombstone_covers_on_live_queued_is_not_ok"
+   },
+   "finding": "F30",
+   "twin_kind": "model",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/merge.rs",
+   "twin": "crates/pedradb-core/src/merge.rs",
+   "aeneas": "scripts/aeneas_merge.sh",
+   "callers": [
+    "crates/pedradb-core/src/merge.rs",
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "range_tombstone_covers",
+   "as_is": "range_tombstone_covers_as_is",
+   "three_teeth": true,
+   "live_callers": [
     {
-      "id": "iter_window_merge",
-      "finding": "RFC-0151 P1",
-      "a": "crates/rocksdb-compat/src/iter_kernel.rs",
-      "b": "crates/pedradb-core/src/merge.rs",
-      "fns": [
-        "iter_window_keep"
-      ]
+     "file": "crates/pedradb-core/src/merge.rs",
+     "handler": "range_deleted"
     }
-  ],
-  "models": [
+   ]
+  },
+  {
+   "id": "write_op_range_end",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.2: fate ∀ sobre write_op_range_end no degrau átomo — despacho citado: Deletion/Value sem fim, RangeDeletion carrega o valor; planta DST write_op_range_end_on_live_stage_unapplied_is_not_ok"
+   },
+   "finding": "F30",
+   "twin_kind": "model",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/merge.rs",
+   "twin": "crates/pedradb-core/src/merge.rs",
+   "aeneas": "scripts/aeneas_merge.sh",
+   "callers": [
+    "crates/pedradb-core/src/merge.rs",
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "write_op_range_end",
+   "as_is": "write_op_range_end_as_is",
+   "three_teeth": true,
+   "live_callers": [
     {
-      "crate": "pedradb-core",
-      "test": "recover_model"
-    },
-    {
-      "crate": "pedradb-core",
-      "test": "recover_choose"
-    },
-    {
-      "crate": "pedradb-core",
-      "test": "prefix_model"
-    },
-    {
-      "crate": "pedradb-core",
-      "test": "range_model"
-    },
-    {
-      "crate": "pedradb-core",
-      "test": "changelog_model"
-    },
-    {
-      "crate": "pedradb-core",
-      "test": "bloom_model"
-    },
-    {
-      "crate": "pedradb-core",
-      "test": "scan_model"
-    },
-    {
-      "crate": "pedradb-core",
-      "test": "bloom_filter_model"
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "stage_unapplied"
     }
-  ]
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/merge.rs",
+    "test": "write_op_range_end_on_live_stage_unapplied_is_not_ok"
+   }
+  },
+  {
+   "id": "merge_sift",
+   "finding": "RFC-0187 P1.3 / RFC-0188 P0.2",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/merge.rs",
+   "twin": "crates/pedradb-core/src/merge.rs",
+   "aeneas": "scripts/aeneas_merge.sh",
+   "callers": [
+    "crates/pedradb-core/src/merge.rs"
+   ],
+   "entry": "sift_step",
+   "as_is": "sift_step_as_is",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/merge.rs",
+     "handler": "sift_down"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/merge.rs",
+    "test": "merge_heap_sift_kernel_three_teeth"
+   }
+  },
+  {
+   "id": "prefix",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.2: fate ∀ sobre prefix_exclusive_end no degrau átomo — encaminhamento citado: prefixo vira Vec e o loop citado decide; planta DST prefix_exclusive_end_on_live_queued_is_not_ok"
+   },
+   "finding": "F57/F58",
+   "twin_kind": "close",
+   "atom": "bump_non_ff",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/prefix.rs",
+   "twin": "crates/pedradb-core/src/prefix.rs",
+   "aeneas": "scripts/aeneas_prefix.sh",
+   "callers": [],
+   "entry": "prefix_exclusive_end",
+   "token_src": "prefix_exclusive_end",
+   "token_dst": "*",
+   "as_is": "prefix_exclusive_end_as_is",
+   "three_teeth": true
+  },
+  {
+   "id": "wal_recover",
+   "finding": "F4/F14",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/wal/recover_kernel.rs",
+   "twin": "crates/pedradb-core/src/wal/recover_kernel.rs",
+   "aeneas": "scripts/aeneas_wal_recover.sh",
+   "callers": [
+    "crates/pedradb-core/src/wal/reader.rs"
+   ],
+   "entry": "recover_collect_act",
+   "as_is": "recover_collect_act_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/lib.rs",
+    "test": "recover_collect_act_on_live_exploded_crc_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "o coletor de recovery decide exatamente pelo match extraido — cada um dos nove framing kinds mapeia ao seu fate pela rota que o rustc liga (torn trio: fail-stop em prefixo vazio, keep-prefix vivo, ou resync sob o budget do MAX extraido; crc/zero-header mid-walk resync ou keep-prefix, fail-stop em alinhamento fresco)"
+   }
+  },
+  {
+   "id": "bloom_header",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "cabecalho do bloom admite exatamente a conjuncao citada — k em [1, MAX_K], nbytes cobre div_ceil nbits 8 e nbytes cabe no residual; as-is aceita k ate u32::MAX (probe sem borne)"
+   },
+   "finding": "F166",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/bloom.rs",
+   "twin": "crates/pedradb-core/src/bloom.rs",
+   "aeneas": "scripts/aeneas_bloom.sh",
+   "callers": [
+    "crates/pedradb-core/src/bloom.rs"
+   ],
+   "entry": "bloom_header_ok",
+   "as_is": "bloom_header_ok_as_is",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/bloom.rs",
+     "handler": "decode"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/bloom.rs",
+    "test": "bloom_header_ok_on_live_decode_is_not_ok"
+   }
+  },
+  {
+   "id": "bloom_insert",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "insert escreve exatamente os k probes citados — inativo devolve o proprio filtro; ativo calcula hash_pair e roda o loop citado insert_loop sobre bits; as-is pula os probes (falso negativo)"
+   },
+   "finding": "T1 (docs/formal/bloom-filter-theorems.md)",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/bloom.rs",
+   "twin": "crates/pedradb-core/src/bloom.rs",
+   "aeneas": "scripts/aeneas_bloom.sh",
+   "callers": [
+    "crates/pedradb-core/src/sst/table.rs"
+   ],
+   "entry": "insert",
+   "as_is": "insert_as_is",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/sst/table.rs",
+     "handler": "write_sst_try_sorted_on"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/bloom.rs",
+    "test": "insert_on_live_sst_is_not_ok"
+   }
+  },
+  {
+   "id": "bloom_may_contain",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "a consulta decide exatamente no loop citado — inativo e ok true; ativo calcula hash_pair e a resposta e o loop citado may_contain_loop sobre bits; as-is probeia k+1 bits (falso negativo)"
+   },
+   "finding": "T1/T4 (docs/formal/bloom-filter-theorems.md)",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/bloom.rs",
+   "twin": "crates/pedradb-core/src/bloom.rs",
+   "aeneas": "scripts/aeneas_bloom.sh",
+   "callers": [
+    "crates/pedradb-core/src/sst/table.rs"
+   ],
+   "entry": "may_contain",
+   "as_is": "may_contain_as_is",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/sst/table.rs",
+     "handler": "point_at"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/bloom.rs",
+    "test": "may_contain_on_live_sst_is_not_ok"
+   }
+  },
+  {
+   "id": "scan_guard",
+   "finding": "F167",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
+   "twin": "crates/pedradb-core/src/sst/scan_kernel.rs",
+   "aeneas": "scripts/aeneas_scan.sh",
+   "callers": [
+    "crates/pedradb-core/src/sst/table.rs"
+   ],
+   "entry": "scan_reads_file",
+   "as_is": "scan_reads_file_as_is",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/sst/table.rs",
+     "handler": "entries_in_user_range_capped"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/sst/scan_kernel.rs",
+    "test": "scan_reads_file_on_live_sst_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 8/9 P0.4: scan_reads_file como cadeia citada — bounds dizem lê; senão o any sobre os túmulos decide (v = b1 do par); as-is só olha bounds (túmulo não esconde — dente plantado)"
+   }
+  },
+  {
+   "id": "manifest_recover",
+   "finding": "F196/G8",
+   "twin_kind": "atom",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/manifest_kernel.rs",
+   "twin": "crates/pedradb-core/src/manifest_kernel.rs",
+   "aeneas": "scripts/aeneas_manifest.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "sst_recover_action",
+   "handlers": [
+    "recover_ssts"
+   ],
+   "as_is": "sst_recover_action_as_is_scan_on_damage",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/manifest_kernel.rs",
+    "test": "sst_recover_action_on_live_missing_sst_is_not_ok"
+   },
+   "atom": "sst_recover_action",
+   "atom_reason": {
+    "date": "2026-09-10",
+    "why": "RFC-0191 P2.3 cadence (seventeenth if): the manifest-recovery disposition — recovery refuses to open exactly when the manifest observation is Corrupt, or it is Inventory while an SST listed in the manifest is missing on disk (an absent manifest rescans and installs; a complete inventory serves; damage or a missing file never serves, F196/G8) — proven forall over (obs, listed) as sst_recover_action_refuse_iff_corrupt_or_inventory_missing in Manifest.lean; the db trampoline (recover_ssts) matches the kernel decision"
+   },
+   "three_teeth": true
+  },
+  {
+   "id": "reopen_outcome",
+   "finding": "F170/F171/G8",
+   "twin_kind": "atom",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/wal/reopen_kernel.rs",
+   "twin": "crates/pedradb-core/src/wal/reopen_kernel.rs",
+   "aeneas": "scripts/aeneas_reopen.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "reopen_outcome",
+   "handlers": [
+    "open_with_env"
+   ],
+   "as_is": "reopen_outcome_as_is_silent",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/wal/reopen_kernel.rs",
+    "test": "reopen_outcome_on_live_crc_is_not_ok"
+   },
+   "atom": "reopen_outcome",
+   "atom_reason": {
+    "date": "2026-09-10",
+    "why": "RFC-0191 P2.3 cadence (nineteenth if): the reopen disposition — a WAL reopen serves all records exactly when the log carries no damage; any damage (truncated head, CRC mismatch, zero header, resync) is refused or served only as a reported prefix, never silently served whole, F170/F171/G8 — proven forall over (damage, point_in_time, escalated) as reopen_outcome_serve_all_iff_damage_none in Reopen.lean; the db trampoline (open_with_env) matches the kernel decision"
+   },
+   "three_teeth": true
+  },
+  {
+   "id": "flush_decision",
+   "finding": "F2/F43/G1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/flush_kernel.rs",
+   "twin": "crates/pedradb-core/src/flush_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "wal_rotate_decision",
+   "handlers": [
+    "flush",
+    "try_rotate_wal"
+   ],
+   "as_is": "wal_rotate_decision_as_is_ignore_pin",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/flush_kernel.rs",
+    "test": "wal_rotate_decision_on_live_pin_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "WAL rotate verdict fully fated: rotate exactly when pipeline fully quiescent across all five holds; as-is ignores live pin, refused by DST plant"
+   }
+  },
+  {
+   "id": "wal_rotate_decision",
+   "finding": "RFC-0200 P0.2 close (try_rotate_wal step)",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/flush_kernel.rs",
+   "twin": "crates/pedradb-core/src/flush_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "wal_rotate_decision",
+   "handlers": [
+    "try_rotate_wal"
+   ],
+   "as_is": "wal_rotate_decision_as_is_ignore_pin",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/flush_kernel.rs",
+    "test": "wal_segment_is_empty_on_live_zero_is_not_ok"
+   }
+  },
+  {
+   "id": "occ_snap_published",
+   "finding": "RFC-0045 P2.1 lock-order",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/flush_kernel.rs",
+   "twin": "crates/pedradb-core/src/flush_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/concurrent.rs"
+   ],
+   "entry": "occ_snap_uses_published",
+   "handlers": [
+    "occ_snapshot"
+   ],
+   "as_is": "occ_snap_uses_published_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/flush_kernel.rs",
+    "test": "occ_snap_uses_published_on_live_inflight_is_not_ok"
+   }
+  },
+  {
+   "id": "group_commit",
+   "finding": "RFC-0051-P1.3/RFC-0057-P2.1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/concurrent.rs"
+   ],
+   "entry": "occ_conflict",
+   "as_is": "occ_conflict_as_is_serialized",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/concurrent.rs",
+     "handler": "validate_occ_batch"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/group_commit_kernel.rs",
+    "test": "occ_conflict_on_live_group_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 1/4 P0.1: occ_conflict como iff exata da janela (snap, last_seq] — conflito = touched sob janela não-vazia, false sob janela vazia; floor_atom 178→179"
+   }
+  },
+  {
+   "id": "group_fence",
+   "finding": "RFC-0057-P2.1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "fence_publish_seq",
+   "as_is": "fence_publish_seq_as_is",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "max_appended_seq"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/group_commit_kernel.rs",
+    "test": "fence_publish_seq_on_live_group_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 3/4 P0.1: fence_publish_seq como cadeia citada do loop extraído (molde Form/DecodeFate, combustível = membros restantes); floor_atom 180→181"
+   }
+  },
+  {
+   "id": "compact_decision",
+   "finding": "F177/F20",
+   "twin_kind": "atom",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/compact_kernel.rs",
+   "twin": "crates/pedradb-core/src/compact_kernel.rs",
+   "aeneas": "scripts/aeneas_compact.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "compact_pick",
+   "handlers": [
+    "compact_with_ssts_only"
+   ],
+   "as_is": "compact_pick_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/compact_kernel.rs",
+    "test": "compact_pick_on_live_merge_is_not_ok"
+   },
+   "atom": "compact_pick",
+   "atom_reason": {
+    "date": "2026-09-10",
+    "why": "RFC-0191 P2.3 cadence (eighteenth if): the compaction-pick disposition — a max-level GC rewrite is chosen exactly when no level holds files while GC was requested and files already sit at the max level (a level holding files yields a Merge of it with its successor; without both flags the plan is NoOp, F177/F20) — proven forall over (lowest_level_with_files, files_at_max_level, gc_requested, max_level) as compact_pick_gc_rewrite_max_iff_none_and_gc_and_files_at_max in Compact.lean; the db trampoline (compact_with_ssts_only) matches the kernel decision"
+   },
+   "three_teeth": true
+  },
+  {
+   "id": "compact_retention",
+   "finding": "F177/F20",
+   "twin_kind": "atom",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/compact_kernel.rs",
+   "twin": "crates/pedradb-core/src/compact_kernel.rs",
+   "aeneas": "scripts/aeneas_compact.sh",
+   "callers": [
+    "crates/pedradb-core/src/merge.rs"
+   ],
+   "entry": "point_version_fate",
+   "handlers": [
+    "gc_snapshot_safe"
+   ],
+   "as_is": "point_version_fate_as_is_drop_under_snapshot",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/compact_kernel.rs",
+    "test": "point_version_fate_on_live_snapshot_is_not_ok"
+   },
+   "atom": "point_version_fate",
+   "atom_reason": {
+    "date": "2026-09-10",
+    "why": "RFC-0191 P2.3 cadence (sixteenth if): the point-version retention disposition — a point version is dropped exactly when a newer kept version exists AND it sits at or below the oldest snapshot (a version still visible to the oldest snapshot is never dropped, and a version with no newer kept copy is never dropped either, F177/F20) — proven forall over (this_seq, newer_kept_seq, oldest_snapshot) as point_version_fate_drop_iff_newer_kept_at_or_below_oldest_snapshot in Compact.lean; the merge trampoline (gc_snapshot_safe) matches the kernel decision"
+   },
+   "three_teeth": true
+  },
+  {
+   "id": "dictionary_link",
+   "finding": "G1/G8 (crash dictionary put→get)",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/wal/reopen_kernel.rs",
+   "twin": "crates/pedradb-core/src/wal/reopen_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "reopen_outcome",
+   "handlers": [
+    "open_with_env"
+   ],
+   "as_is": "reopen_outcome_as_is_silent",
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/lib.rs",
+    "test": "crash_after_sync_recovers_committed"
+   },
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 6/6 P0.3: reopen_outcome_flat_fate_iff — tabela completa 4 linhas (sem dano serve tudo; PIT não escalado serve prefixo; escalado ou sem PIT recusa), mais fina que a iff agrupada prévia; floor_atom 191→192"
+   }
+  },
+  {
+   "id": "vlog_recover",
+   "finding": "F51/G-swing",
+   "twin_kind": "atom",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/vlog_gc_kernel.rs",
+   "twin": "crates/pedradb-core/src/vlog_gc_kernel.rs",
+   "aeneas": "scripts/aeneas_vlog_gc.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "vlog_recover_action",
+   "handlers": [
+    "open_with_env"
+   ],
+   "as_is": "vlog_recover_action_as_is_ignore_swing",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/vlog_gc_kernel.rs",
+    "test": "vlog_recover_action_on_live_swing_is_not_ok"
+   },
+   "atom": "vlog_recover_action",
+   "atom_reason": {
+    "date": "2026-09-10",
+    "why": "RFC-0191 P2.3 cadence (twentieth if): the vlog-recovery disposition — recovery refuses to open exactly when the MANIFEST says the swing committed (use_new) while neither file is on disk: blob mode off, large values wanted, no primary, no new (inventing an empty primary would make every large value vanish, F51/G-swing) — proven forall over (blob_active, wants_large, primary_exists, use_new, new_exists) as vlog_recover_action_refuse_open_iff_wants_large_use_new_and_nothing_on_disk in VlogGc.lean; the db trampoline (open_with_env) matches the kernel decision"
+   },
+   "three_teeth": true
+  },
+  {
+   "id": "blob_gc_pick",
+   "finding": "F-active-gen",
+   "twin_kind": "atom",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/vlog_gc_kernel.rs",
+   "twin": "crates/pedradb-core/src/vlog_gc_kernel.rs",
+   "aeneas": "scripts/aeneas_vlog_gc.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "blob_gc_action",
+   "handlers": [
+    "compact_blob_auto"
+   ],
+   "as_is": "blob_gc_action_as_is_rewrite_active",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/vlog_gc_kernel.rs",
+    "test": "blob_gc_action_on_live_active_is_not_ok"
+   },
+   "atom": "blob_gc_action",
+   "atom_reason": {
+    "date": "2026-09-10",
+    "why": "RFC-0191 P2.3 cadence (fifteenth if): the blob-GC disposition — the GC rewrites a blob gen exactly when the gen is inactive AND still carries bytes (an active gen is never rewritten; an empty inactive gen has nothing to rewrite, F-active-gen) — proven forall over (is_active, bytes) as blob_gc_action_rewrite_iff_inactive_with_bytes in VlogGc.lean; the db trampoline (compact_blob_auto) matches the kernel decision"
+   },
+   "three_teeth": true
+  },
+  {
+   "id": "group_publish",
+   "finding": "RFC-0071",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/concurrent.rs"
+   ],
+   "entry": "may_publish_group",
+   "as_is": "may_publish_group_as_is",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/concurrent.rs",
+     "handler": "finish_group_off_lock"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/concurrent.rs",
+    "test": "may_publish_group_on_live_group_is_not_ok"
+   }
+  },
+  {
+   "id": "rwlock_client_may_mutate",
+   "finding": "RFC-0070 data-race client",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/concurrent.rs"
+   ],
+   "entry": "rwlock_client_may_mutate",
+   "handlers": [
+    "finish_group_off_lock"
+   ],
+   "as_is": "rwlock_client_may_mutate_as_is",
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/concurrent.rs",
+     "handler": "finish_group_off_lock"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/group_commit_kernel.rs",
+    "test": "rwlock_client_may_mutate_on_live_off_lock_is_not_ok"
+   },
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0202 P0.1 data-race row: write-lock client protocol — Db mutation permitted exactly while holding the write guard (forall-iff over the extracted body, GroupCommit.lean); AS-IS mutate-after-drop unreachable"
+   }
+  },
+  {
+   "id": "forall_schedules",
+   "finding": "RFC-0070",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/concurrent.rs"
+   ],
+   "entry": "forall_schedules_admitted",
+   "as_is": "forall_schedules_admitted_as_is",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/concurrent.rs",
+     "handler": "claim_forall_schedules"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/concurrent.rs",
+    "test": "forall_schedules_admitted_on_live_group_is_not_ok"
+   }
+  },
+  {
+   "id": "fsync_promote",
+   "finding": "RFC-0078",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "callers": [
+    "crates/pedradb-sim/src/recording.rs"
+   ],
+   "entry": "fsync_promotes_pending",
+   "as_is": "fsync_promotes_pending_as_is",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-sim/src/recording.rs",
+     "handler": "sync_data"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/recording.rs",
+    "test": "fsync_promotes_pending_on_live_sim_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 2/4 P0.1: fsync_promotes_pending como lift puro — pending promove iff OS honesto; floor_atom 179→180"
+   }
+  },
+  {
+   "id": "media_durable",
+   "finding": "RFC-0078",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "media_durable_admitted",
+   "as_is": "media_durable_admitted_as_is",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "claim_media_durable"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/db.rs",
+    "test": "media_durable_admitted_on_live_db_is_not_ok"
+   }
+  },
+  {
+   "id": "fdatasync_rc",
+   "finding": "RFC-0073",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-posix/src/lib.rs",
+   "twin": "crates/pedradb-posix/src/lib.rs",
+   "aeneas": "scripts/aeneas_posix.sh",
+   "callers": [
+    "crates/pedradb-posix/src/lib.rs"
+   ],
+   "entry": "fdatasync_rc_ok",
+   "as_is": "fdatasync_rc_ok_as_is",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-posix/src/lib.rs",
+     "handler": "fdatasync_file"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-posix/src/lib.rs",
+    "test": "fdatasync_rc_ok_on_live_posix_is_not_ok"
+   }
+  },
+  {
+   "id": "cqe_res",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "2026-09-12 RFC-0214 P1.1: fate ∀ sobre cqe_res_ok no degrau átomo — CQE é sucesso iff res >= 0; as-is cqe_res_ok_as_is (tudo sucesso) recusado pela planta DST cqe_res_ok_on_live_uring_is_not_ok"
+   },
+   "finding": "RFC-0074",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-io-uring/src/cqe_kernel.rs",
+   "twin": "crates/pedradb-io-uring/src/cqe_kernel.rs",
+   "aeneas": "scripts/aeneas_cqe.sh",
+   "callers": [
+    "crates/pedradb-io-uring/src/ring.rs"
+   ],
+   "entry": "cqe_res_ok",
+   "as_is": "cqe_res_ok_as_is",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-io-uring/src/ring.rs",
+     "handler": "fsync"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-io-uring/src/lib.rs",
+    "test": "cqe_res_ok_on_live_uring_is_not_ok"
+   }
+  },
+  {
+   "id": "cqe_tags",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "2026-09-12 RFC-0214 P1.1: fate ∀ sobre next_user_data no degrau átomo — tags únicas por SQE (c≠0: (c,c+1) wrapping; c=0: pula o zero reservado, (1,2)); as-is next_user_data_as_is (tag constante por opcode) recusado pela planta DST unique_tags_discard_leftover_same_opcode"
+   },
+   "finding": "F203",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-io-uring/src/cqe_kernel.rs",
+   "twin": "crates/pedradb-io-uring/src/cqe_kernel.rs",
+   "aeneas": "scripts/aeneas_cqe.sh",
+   "callers": [
+    "crates/pedradb-io-uring/src/ring.rs"
+   ],
+   "entry": "next_user_data",
+   "as_is": "next_user_data_as_is",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-io-uring/src/ring.rs",
+     "handler": "submit_sqe"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-io-uring/src/cqe_kernel.rs",
+    "test": "unique_tags_discard_leftover_same_opcode"
+   }
+  },
+  {
+   "id": "cqe_leftover",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "2026-09-12 RFC-0214 P1.1: fate ∀ sobre cqe_act no degrau átomo — CQE tomado iff user_data = want; leftover descartado; as-is cqe_act_as_is (toma qualquer CQE) recusado pela planta DST cqe_act_as_is_adopts_leftover"
+   },
+   "finding": "F203/U1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-io-uring/src/cqe_kernel.rs",
+   "twin": "crates/pedradb-io-uring/src/cqe_kernel.rs",
+   "aeneas": "scripts/aeneas_cqe.sh",
+   "callers": [
+    "crates/pedradb-io-uring/src/ring.rs"
+   ],
+   "entry": "cqe_act",
+   "as_is": "cqe_act_as_is",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-io-uring/src/ring.rs",
+     "handler": "harvest_ready_cqe"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-io-uring/src/cqe_kernel.rs",
+    "test": "cqe_act_as_is_adopts_leftover"
+   }
+  },
+  {
+   "id": "cqe_submit",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "2026-09-12 RFC-0214 P1.1: fate ∀ sobre submit_complete_act no degrau átomo — CQE colhido é usado (UseHarvested), senão espera (WaitMore), submit_err não solta o buffer sob DMA; as-is submit_complete_act_as_is (Err no submit com CQE pendente, F208) recusado pela planta DST harvest_on_submit_err_uses_cqe"
+   },
+   "finding": "F208",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-io-uring/src/cqe_kernel.rs",
+   "twin": "crates/pedradb-io-uring/src/cqe_kernel.rs",
+   "aeneas": "scripts/aeneas_cqe.sh",
+   "callers": [
+    "crates/pedradb-io-uring/src/ring.rs"
+   ],
+   "entry": "submit_complete_act",
+   "as_is": "submit_complete_act_as_is",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-io-uring/src/ring.rs",
+     "handler": "submit_sqe"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-io-uring/src/cqe_kernel.rs",
+    "test": "harvest_on_submit_err_uses_cqe"
+   }
+  },
+  {
+   "id": "cqe_ring_refusal",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "2026-09-12 RFC-0214 P1.1: fate ∀ sobre cqe_ring_model_admitted no degrau átomo — o modelo de anel Verus não é admitido, a porta fica fechada (RFC-0074 P2.2); as-is cqe_ring_model_admitted_as_is (porta aberta) recusado pela planta DST cqe_ring_model_is_not_admitted"
+   },
+   "finding": "RFC-0074 P2.2",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-io-uring/src/cqe_kernel.rs",
+   "twin": "crates/pedradb-io-uring/src/cqe_kernel.rs",
+   "aeneas": "scripts/aeneas_cqe.sh",
+   "callers": [
+    "crates/pedradb-io-uring/src/cqe_kernel.rs"
+   ],
+   "entry": "cqe_ring_model_admitted",
+   "as_is": "cqe_ring_model_admitted_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-io-uring/src/cqe_kernel.rs",
+    "test": "cqe_ring_model_is_not_admitted"
+   }
+  },
+  {
+   "id": "crc_match",
+   "finding": "RFC-0076/0081/0082/0083/0084/0085/0086/0087/0088/0089/0092/0093",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/wal/crc.rs",
+   "twin": "crates/pedradb-core/src/wal/crc.rs",
+   "callers": [
+    "crates/pedradb-core/src/wal/reader.rs",
+    "crates/pedradb-core/src/sst/scan_kernel.rs",
+    "crates/pedradb-core/src/vlog.rs",
+    "crates/pedradb-core/src/manifest.rs",
+    "crates/pedradb-core/src/history.rs",
+    "crates/pedradb-core/src/change_feed.rs",
+    "crates/pedradb-core/src/verify.rs"
+   ],
+   "entry": "crc_match_ok",
+   "as_is": "crc_match_ok_as_is",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/wal/reader.rs",
+     "handler": "read_record"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/wal/reader.rs",
+    "test": "crc_match_ok_on_live_wal_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 1/9 P0.4: crc_match_ok como lift puro da igualdade citada stored = computed; floor_atom 192→193"
+   }
+  },
+  {
+   "id": "sst_crc",
+   "finding": "RFC-0077",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
+   "twin": "crates/pedradb-core/src/sst/scan_kernel.rs",
+   "aeneas": "scripts/aeneas_scan.sh",
+   "callers": [
+    "crates/pedradb-core/src/sst/table.rs"
+   ],
+   "entry": "sst_crc_fate",
+   "as_is": "sst_crc_fate_as_is",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/sst/table.rs",
+     "handler": "decode"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/sst/table.rs",
+    "test": "sst_crc_fate_on_live_sst_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 4/9 P0.4: sst_crc_fate como árvore citada — casa → StripTrailer, mismatch legado → WholeBuffer, mismatch moderno → Reject; floor_atom 195→196"
+   }
+  },
+  {
+   "id": "cf_family",
+   "finding": "RFC-0150 P0",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/cf_kernel.rs",
+   "twin": "crates/pedradb-core/src/cf_kernel.rs",
+   "aeneas": "scripts/aeneas_cf.sh",
+   "callers": [
+    "crates/pedradb-core/src/cf_kernel.rs",
+    "crates/pedradb-core/src/memtable.rs",
+    "crates/pedradb-core/src/sst/table.rs",
+    "crates/pedradb-core/src/db.rs",
+    "crates/rocksdb-compat/src/lib.rs"
+   ],
+   "entry": "key_in_cf_family",
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/sst/table.rs",
+     "handler": "write_l0_sst_for_family"
+    }
+   ],
+   "as_is": "key_in_cf_family_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "key_in_cf_family_on_live_scan_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "familia decidida exatamente pela rota extraida: default = sem separador ou com prefixo 'default', nomeada = overhang estrito + starts_with + 0 separador; o mutante as-is responde in-family para toda chave e a planta DST refuta"
+   }
+  },
+  {
+   "id": "cf_family_of",
+   "finding": "RFC-0150 P0",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/cf_kernel.rs",
+   "twin": "crates/pedradb-core/src/cf_kernel.rs",
+   "aeneas": "scripts/aeneas_cf.sh",
+   "callers": [
+    "crates/pedradb-core/src/cf_kernel.rs"
+   ],
+   "entry": "cf_family_of",
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/cf_kernel.rs",
+     "handler": "infer_sst_cf"
+    }
+   ],
+   "as_is": "cf_family_of_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "cf_family_of_on_live_sst_bounds_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "familia da chave decidida exatamente pela rota extraida: sem NUL ou NUL lider -> 'default'; senao decode lossy dos bytes antes do primeiro NUL, owned pelo Cow; as-is responde 'default' para toda chave e a planta DST refuta"
+   }
+  },
+  {
+   "id": "cf_encode_effective",
+   "finding": "RFC-0150 P0",
+   "twin_kind": "atom",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/cf_kernel.rs",
+   "twin": "crates/pedradb-core/src/cf_kernel.rs",
+   "aeneas": "scripts/aeneas_cf.sh",
+   "callers": [
+    "crates/pedradb-core/src/cf_kernel.rs",
+    "crates/rocksdb-compat/src/lib.rs"
+   ],
+   "entry": "cf_encode_effective",
+   "live_callers": [
+    {
+     "file": "crates/rocksdb-compat/src/lib.rs",
+     "handler": "encode_pooled"
+    }
+   ],
+   "as_is": "cf_encode_effective_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "cf_encode_effective_on_live_default_raw_is_not_ok"
+   },
+   "atom": "cf_encode_effective",
+   "atom_reason": {
+    "date": "2026-09-10",
+    "why": "RFC-0191 P2.3 cadence (twenty-second if): the effective column-family encoding disposition — the effective encoding is empty exactly when the cf is default and default_raw strips it, or the else-branch kept an already-empty cf; any other cf passes through untouched (RFC-0150 P0; the Str equality is the Aeneas boundary, stated over its Result so a fail/div comparison never fakes an empty encoding) — proven forall over (cf, default_raw) as cf_encode_effective_empty_iff_default_raw_else_identity in Cf.lean; the cf trampoline matches the kernel decision"
+   },
+   "three_teeth": true
+  },
+  {
+   "id": "encode_cf_key",
+   "finding": "RFC-0150 P0",
+   "twin_kind": "atom",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/cf_kernel.rs",
+   "twin": "crates/pedradb-core/src/cf_kernel.rs",
+   "aeneas": "scripts/aeneas_cf.sh",
+   "callers": [
+    "crates/pedradb-core/src/cf_kernel.rs",
+    "crates/pedradb-core/src/db.rs",
+    "crates/rocksdb-compat/src/lib.rs"
+   ],
+   "entry": "encode_cf_key",
+   "live_callers": [
+    {
+     "file": "crates/rocksdb-compat/src/lib.rs",
+     "handler": "encode"
+    },
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "compact_ssts_only_cf"
+    }
+   ],
+   "as_is": "encode_cf_key_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "encode_cf_key_on_live_sst_bounds_is_not_ok"
+   },
+   "atom": "encode_cf_key",
+   "atom_reason": {
+    "date": "2026-09-10",
+    "why": "(twenty-seventh if): the encode disposition — encoding yields the bare key exactly when the effective cf encoding is empty; otherwise the output is the capacity-planned chain of effective bytes, one 0 separator, then the key, with every step of the chain ok — proven forall over (cf, key, default_raw, v) as encode_cf_key_ok_iff_bare_key_or_prefixed_vec in Cf.lean; the trampolines (rocksdb-compat encode, compact_ssts_only_cf) match the kernel decision."
+   },
+   "three_teeth": true
+  },
+  {
+   "id": "decode_cf_key",
+   "finding": "RFC-0150 P0",
+   "twin_kind": "atom",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/cf_kernel.rs",
+   "twin": "crates/pedradb-core/src/cf_kernel.rs",
+   "aeneas": "scripts/aeneas_cf.sh",
+   "callers": [
+    "crates/pedradb-core/src/cf_kernel.rs",
+    "crates/rocksdb-compat/src/lib.rs"
+   ],
+   "entry": "decode_cf_key",
+   "live_callers": [
+    {
+     "file": "crates/rocksdb-compat/src/lib.rs",
+     "handler": "decode"
+    }
+   ],
+   "as_is": "decode_cf_key_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "decode_cf_key_on_live_sst_bounds_is_not_ok"
+   },
+   "atom": "decode_cf_key",
+   "atom_reason": {
+    "date": "2026-09-10",
+    "why": "(twenty-sixth if): the decode disposition — decoding is the identity exactly when the effective cf encoding is empty; otherwise the cf\\0 prefix is stripped by slicing from len+1, and a prefix that does not fit the encoded buffer yields the empty slice, never a partial or shifted view — proven forall over (cf, encoded, default_raw, v) as decode_cf_key_ok_iff_identity_or_stripped_past_prefix in Cf.lean; the rocksdb-compat trampoline (decode) matches the kernel decision."
+   },
+   "three_teeth": true
+  },
+  {
+   "id": "infer_sst_cf",
+   "finding": "RFC-0150 P0",
+   "twin_kind": "atom",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/cf_kernel.rs",
+   "twin": "crates/pedradb-core/src/cf_kernel.rs",
+   "aeneas": "scripts/aeneas_cf.sh",
+   "callers": [
+    "crates/pedradb-core/src/cf_kernel.rs",
+    "crates/pedradb-core/src/sst/table.rs"
+   ],
+   "entry": "infer_sst_cf",
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/sst/table.rs",
+     "handler": "write_l0_sst_for_family"
+    }
+   ],
+   "as_is": "infer_sst_cf_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "infer_sst_cf_on_live_flush_tag_is_not_ok"
+   },
+   "atom": "infer_sst_cf",
+   "atom_reason": {
+    "date": "2026-09-10",
+    "why": "(twenty-eighth if): the SST-tag disposition — an SST is tagged with the family of its bounds exactly when both bounds share one family; one-sided bounds take their sole family; no bounds yield the empty (mixed/legacy) tag — never a tag misrepresenting mixed contents — proven forall over (smallest, largest, v) as infer_sst_cf_ok_iff_shared_family_or_empty in Cf.lean; the pedradb-core trampoline (write_l0_sst_for_family) matches the kernel decision."
+   },
+   "three_teeth": true
+  },
+  {
+   "id": "compact_rewrites_sst_cf",
+   "finding": "RFC-0150 P0",
+   "twin_kind": "atom",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/cf_kernel.rs",
+   "twin": "crates/pedradb-core/src/cf_kernel.rs",
+   "aeneas": "scripts/aeneas_cf.sh",
+   "callers": [
+    "crates/pedradb-core/src/cf_kernel.rs",
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "compact_rewrites_sst_cf",
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "compact_ssts_only_cf"
+    }
+   ],
+   "as_is": "compact_rewrites_sst_cf_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "compact_rewrites_sst_cf_on_live_meta_is_not_ok"
+   },
+   "atom": "compact_rewrites_sst_cf",
+   "atom_reason": {
+    "date": "2026-09-10",
+    "why": "(twenty-fifth if): the compact-rewrite disposition — an empty (mixed/legacy) SST tag is never rewritten; a non-empty tag is decided by the in-family test over the representative encoded key of that tag with every monadic step of the route ok — proven forall over (sst_cf, family, v) as compact_rewrites_sst_cf_ok_iff_empty_tag_never_or_representative_in_family in Cf.lean; the pedradb-core trampoline (compact_ssts_only_cf) matches the kernel decision."
+   },
+   "three_teeth": true
+  },
+  {
+   "id": "visible_at",
+   "finding": "RFC-0150 P1 / F30",
+   "twin_kind": "close",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "filtro de get do merge decide exatamente pela rota extraida: Value live se e so se nenhum range cobre a chave; Deletion e RangeDeletion nunca live, qualquer cobertura; as-is responde live para toda versao e a planta DST refuta"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/merge.rs",
+   "twin": "crates/pedradb-core/src/merge.rs",
+   "aeneas": "scripts/aeneas_merge.sh",
+   "callers": [
+    "crates/pedradb-core/src/merge.rs",
+    "crates/pedradb-core/src/memtable.rs",
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "visible_at",
+   "as_is": "visible_at_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "visible_at_on_live_range_del_is_not_ok"
+   }
+  },
+  {
+   "id": "ikey_pack",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.2: fate ∀ sobre pack_sequence_and_type no degrau átomo — cadeia citada: teto MAX_SEQUENCE_NUMBER lido e afirmado (massert), shift 8, tipo u8→u64, pacote = ou bit a bit; planta DST pack_sequence_and_type_on_live_db_is_not_ok"
+   },
+   "finding": "RFC-0150 P1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/key.rs",
+   "twin": "crates/pedradb-core/src/key.rs",
+   "aeneas": "scripts/aeneas_key.sh",
+   "callers": [
+    "crates/pedradb-core/src/key.rs"
+   ],
+   "entry": "pack_sequence_and_type",
+   "as_is": "pack_sequence_and_type_as_is",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/key.rs",
+     "handler": "encode_into"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/key.rs",
+    "test": "pack_sequence_and_type_on_live_db_is_not_ok"
+   }
+  },
+  {
+   "id": "write_record_count",
+   "finding": "RFC-0150 P2a",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/batch.rs",
+   "twin": "crates/pedradb-core/src/batch.rs",
+   "aeneas": "scripts/aeneas_batch.sh",
+   "callers": [
+    "crates/pedradb-core/src/batch.rs"
+   ],
+   "entry": "write_record_count_ok",
+   "as_is": "write_record_count_ok_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "write_record_count_ok_on_live_torn_batch_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "comprimento decodificado do batch confere com o count do prefixo exatamente pela rota extraida: cast u32->usize honesto e o decide da comparacao; as-is admite qualquer comprimento e a planta DST do batch torcido refuta"
+   }
+  },
+  {
+   "id": "pin_gc",
+   "finding": "RFC-0150 P2b / F20",
+   "twin_kind": "atom",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/compact_kernel.rs",
+   "twin": "crates/pedradb-core/src/compact_kernel.rs",
+   "aeneas": "scripts/aeneas_compact.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "gc_oldest_from_pin",
+   "handlers": [
+    "compact_reclaim"
+   ],
+   "as_is": "gc_oldest_from_pin_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "gc_oldest_from_pin_on_live_reclaim_is_not_ok"
+   },
+   "atom": "gc_oldest_from_pin",
+   "atom_reason": {
+    "date": "2026-09-10",
+    "why": "RFC-0191 P2.3 cadence (twenty-third if): the GC oldest-boundary disposition — the boundary is exactly the live pin when one exists; unpinned, it is the visible minimum of last and visible seq, so GC never advances past a pin nor past what is visible (RFC-0150 P2b/F20; the Ord.min is the Aeneas boundary, stated over its Result) — proven forall over (oldest_pin, last_seq, visible_seq, v) as gc_oldest_from_pin_value_iff_pin_or_unpinned_visible_min in Compact.lean; the db trampoline (compact_reclaim) matches the kernel decision"
+   },
+   "three_teeth": true
+  },
+  {
+   "id": "wait_for_deadlock",
+   "finding": "RFC-0150 P2c",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/rocksdb-compat/src/locktab.rs",
+   "twin": "crates/rocksdb-compat/src/locktab.rs",
+   "aeneas": "scripts/aeneas_locktab.sh",
+   "callers": [
+    "crates/rocksdb-compat/src/locktab.rs"
+   ],
+   "entry": "wait_for_deadlock",
+   "as_is": "wait_for_deadlock_as_is",
+   "dst_plant": {
+    "file": "crates/rocksdb-compat/src/locktab.rs",
+    "test": "wait_for_deadlock_on_live_cycle_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0202 P1.1 deadlock row: step-edge bridges with lookup hypotheses over the extracted loop body (nowait=alive, cycle-closes=deadlock, revisit=deadlock, Locktab.lean); full cycle iff needs map semantics — dated boundary in formal/aeneas/EXTRACT.md"
+   }
+  },
+  {
+   "id": "flush_publish",
+   "finding": "RFC-0151 P1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/flush_kernel.rs",
+   "twin": "crates/pedradb-core/src/flush_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "may_publish_manifest",
+   "handlers": [
+    "persist_manifest",
+    "persist_bulk_manifest"
+   ],
+   "as_is": "may_publish_manifest_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "may_publish_manifest_on_live_unsynced_sst_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "manifest-publish verdict fully fated: publish exactly when SST durable; as-is publishes unsynced SSTs, refused by DST plant"
+   }
+  },
+  {
+   "id": "probe_order",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "empate de lo probeia exatamente o mais novo — o resultado e o indice newer citado; as-is devolve o mais velho (ressuscita deletado no empate)"
+   },
+   "finding": "RFC-0164 P0.1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/probe_order_kernel.rs",
+   "twin": "crates/pedradb-core/src/probe_order_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/probe_order_kernel.rs"
+   ],
+   "entry": "first_probe_on_equal_lo",
+   "handlers": [
+    "lookup",
+    "lookup_sst_packed"
+   ],
+   "as_is": "first_probe_on_equal_lo_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "probe_order_on_live_equal_lo_is_not_ok"
+   }
+  },
+  {
+   "id": "run_disjoint",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "disjuncao de run e exatamente o par citado — n = min dos comprimentos, n >= 2 e o all citado sobre 1..n (hi[i-1] < lo[i]); as-is usa <= (empate arma o bisect que ressuscita)"
+   },
+   "finding": "RFC-0164 P1.2",
+   "twin_kind": "model",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/probe_order_kernel.rs",
+   "twin": "crates/pedradb-core/src/probe_order_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "run_pairwise_disjoint_los",
+   "handlers": [
+    "rebuild_sst_runs"
+   ],
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "rebuild_sst_runs"
+    }
+   ],
+   "as_is": "run_pairwise_disjoint_los_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "run_disjoint_on_live_equal_lo_is_not_ok"
+   }
+  },
+  {
+   "id": "iter_window",
+   "finding": "RFC-0151 P1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/rocksdb-compat/src/iter_kernel.rs",
+   "twin": "crates/rocksdb-compat/src/iter_kernel.rs",
+   "aeneas": "scripts/aeneas_iter.sh",
+   "callers": [
+    "crates/rocksdb-compat/src/lib.rs"
+   ],
+   "entry": "iter_window_keep",
+   "handlers": [
+    "page_forward",
+    "page_last_n"
+   ],
+   "as_is": "iter_window_keep_as_is",
+   "dst_plant": {
+    "file": "crates/rocksdb-compat/src/lib.rs",
+    "test": "iter_window_keep_on_live_hidden_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "janela do iterador de compat mantem a entrada se e so se o snapshot ainda esta vivo — identidade sobre o corpo extraido; as-is mantem tudo e ressuscita entradas escondidas, a planta DST refuta"
+   }
+  },
+  {
+   "id": "zero_glue",
+   "finding": "RFC-0155",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
+   "twin": "crates/pedradb-core/src/sst/scan_kernel.rs",
+   "aeneas": "scripts/aeneas_scan.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "zero_glue_admitted",
+   "as_is": "zero_glue_admitted_as_is",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "claim_zero_glue"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/db.rs",
+    "test": "zero_glue_admitted_on_live_db_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 3/9 P0.4: zero_glue_admitted como constante citada false — cola residual zero nunca é lida; floor_atom 194→195"
+   }
+  },
+  {
+   "id": "lock_interleavings",
+   "finding": "RFC-0155",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/concurrent.rs"
+   ],
+   "entry": "lock_interleavings_admitted",
+   "as_is": "lock_interleavings_admitted_as_is",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/concurrent.rs",
+     "handler": "claim_lock_interleavings_proven"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/concurrent.rs",
+    "test": "claim_lock_interleavings_refused_after_put"
+   }
+  },
+  {
+   "id": "leveling",
+   "finding": "F-leveling-sweep",
+   "twin_kind": "atom",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/leveling.rs",
+   "twin": "crates/pedradb-core/src/leveling.rs",
+   "aeneas": "scripts/aeneas_leveling.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "level_target_bytes",
+   "handlers": [
+    "prepare_l0_compact",
+    "prepare_pushdown_compact"
+   ],
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "prepare_pushdown_compact"
+    }
+   ],
+   "as_is": "level_target_bytes_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/leveling.rs",
+    "test": "level_target_bytes_on_live_deep_level_is_not_ok"
+   },
+   "atom": "level_target_bytes",
+   "atom_reason": {
+    "date": "2026-09-10",
+    "why": "(twenty-fourth if): the leveled-target disposition — level 0 has no size target; a non-zero level computes l1_target·FANOUT^min(level−1,18) with saturating arithmetic and every intermediate step ok — proven forall over (level, l1_target, v) as level_target_bytes_ok_iff_zero_or_fanout_chain in Leveling.lean; the pedradb-core trampoline (prepare_l0_compact / prepare_pushdown_compact) matches the kernel decision."
+   },
+   "three_teeth": true
+  },
+  {
+   "id": "leveling_pick",
+   "finding": "F-leveling-sweep",
+   "twin_kind": "close",
+   "atom": "pick_l0_to_l1_model",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/leveling.rs",
+   "twin": "crates/pedradb-core/src/leveling.rs",
+   "aeneas": "scripts/aeneas_leveling.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "pick_l0_to_l1",
+   "handlers": [
+    "prepare_l0_compact",
+    "prepare_pushdown_compact"
+   ],
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "prepare_l0_compact"
+    }
+   ],
+   "as_is": "pick_l0_to_l1_as_is_whole_level",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/leveling.rs",
+    "test": "pick_l0_to_l1_on_live_slice_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "job L0->L1 decidido exatamente pela rota extraida: L0 vazio ou cap 0 => sem job; senao cap min(len,cap) limita a selecao, primeiro arquivo semeia o hull e os loops de sel/slice decidem o job; as-is reabsorve o L1 inteiro e a planta DST refuta"
+   }
+  },
+  {
+   "id": "leveling_pushdown",
+   "finding": "F-leveling-sweep",
+   "twin_kind": "close",
+   "atom": "pick_pushdown_model",
+   "token_src": "pick_pushdown_as_is_blind",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/leveling.rs",
+   "twin": "crates/pedradb-core/src/leveling.rs",
+   "aeneas": "scripts/aeneas_leveling.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "pick_pushdown",
+   "handlers": [
+    "prepare_pushdown_compact"
+   ],
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "prepare_pushdown_compact"
+    }
+   ],
+   "as_is": "pick_pushdown_as_is_blind",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/leveling.rs",
+    "test": "pick_pushdown_on_live_pushdown_gate_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "job de pushdown decidido exatamente pela rota extraida: nivel fonte vazio => sem job; destino nao-disjunto e recusado pelo gate; senao arquivo mais antigo + slice por overlap decidem, com cada passo ok; as-is pula o gate e a planta DST refuta"
+   }
+  },
+  {
+   "id": "d1_durability",
+   "finding": "RFC-0166 P0.1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-spec/src/properties_kernel.rs",
+   "twin": "crates/pedradb-spec/src/properties_kernel.rs",
+   "aeneas": "scripts/aeneas_properties.sh",
+   "callers": [
+    "crates/pedradb-spec/src/properties_kernel.rs"
+   ],
+   "entry": "d1_holds",
+   "as_is": "d1_holds_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-spec/src/properties_kernel.rs",
+    "test": "d1_as_is_does_not_imply_d1"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "spec ×4 P0.1 2/4: D1 aceita (acked, survives) exatamente quando nenhum índice ackado cai em ou além do prefixo sobrevivente (put→Ok durável, promessa G1); loop real via spec_decr_nat; mutante as-is (só synced) recusado pela planta"
+   }
+  },
+  {
+   "id": "r1_no_resurrection",
+   "finding": "RFC-0166 P0.1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-spec/src/properties_kernel.rs",
+   "twin": "crates/pedradb-spec/src/properties_kernel.rs",
+   "aeneas": "scripts/aeneas_properties.sh",
+   "callers": [
+    "crates/pedradb-spec/src/properties_kernel.rs"
+   ],
+   "entry": "r1_answer_ok",
+   "as_is": "r1_answer_ok_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-spec/src/properties_kernel.rs",
+    "test": "r1_as_is_does_not_imply_r1"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "spec ×4 P0.1 4/4: a resposta de leitura passa R1 exatamente quando bate com o primeiro hit na ordem de probe (r1_first_hit_fate caracteriza IsFirstHit; igualdade Option é axioma de extrato citado); mutante as-is (qualquer hit cobridor, delete resurrected) recusado"
+   }
+  },
+  {
+   "id": "t1_atomicity",
+   "finding": "RFC-0166 P0.1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-spec/src/properties_kernel.rs",
+   "twin": "crates/pedradb-spec/src/properties_kernel.rs",
+   "aeneas": "scripts/aeneas_properties.sh",
+   "callers": [
+    "crates/pedradb-spec/src/properties_kernel.rs"
+   ],
+   "entry": "t1_holds",
+   "as_is": "t1_holds_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-spec/src/properties_kernel.rs",
+    "test": "t1_as_is_does_not_imply_t1"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "spec ×4 P0.1 3/4: T1 aceita exatamente quando a tx é all-or-nothing (nunca ambos flags, visíveis nomeiam staged, committed⇒todos, senão nenhum); dois loops reais via spec_decr_nat; mutante as-is (só integridade de bytes) recusado"
+   }
+  },
+  {
+   "id": "c1_quorum",
+   "finding": "RFC-0166 P0.1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-spec/src/properties_kernel.rs",
+   "twin": "crates/pedradb-spec/src/properties_kernel.rs",
+   "aeneas": "scripts/aeneas_properties.sh",
+   "callers": [
+    "crates/pedradb-spec/src/properties_kernel.rs"
+   ],
+   "entry": "c1_holds",
+   "as_is": "c1_holds_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-spec/src/properties_kernel.rs",
+    "test": "c1_as_is_does_not_imply_c1"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "spec ×4 P0.1 1/4: valor servido passa C1 exatamente quando a maioria de TODA config ativa replica (joint exige antiga E nova); mutante as-is (só maioria antiga) recusado pela planta"
+   }
+  },
+  {
+   "id": "leveled_enabled",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.2: fate ∀ sobre leveled_enabled no degrau átomo — leitura citada de PEDRA_LEVELED: ausente/erro liga, presente liga exceto valor aparado 0; planta DST leveled_env_switch_is_not_ok"
+   },
+   "finding": "F-leveling-sweep",
+   "twin_kind": "model",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/leveling.rs",
+   "twin": "crates/pedradb-core/src/leveling.rs",
+   "aeneas": "scripts/aeneas_leveling.sh",
+   "callers": [
+    "crates/pedradb-core/src/concurrent.rs",
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "leveled_enabled",
+   "as_is": "leveled_enabled_as_is",
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "compact_leveled"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/leveling.rs",
+    "test": "leveled_env_switch_is_not_ok"
+   },
+   "three_teeth": true
+  },
+  {
+   "id": "leveling_disjoint",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.2: fate ∀ sobre is_disjoint no degrau átomo — despacho puro: é o outer_loop citado em 0#usize; planta DST is_disjoint_on_live_stack_is_not_ok"
+   },
+   "finding": "F-leveling-sweep",
+   "twin_kind": "model",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/leveling.rs",
+   "twin": "crates/pedradb-core/src/leveling.rs",
+   "aeneas": "scripts/aeneas_leveling.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs",
+    "crates/pedradb-core/src/leveling.rs"
+   ],
+   "entry": "is_disjoint",
+   "as_is": "is_disjoint_as_is",
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "repair_stacked_levels"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/leveling.rs",
+    "test": "is_disjoint_on_live_stack_is_not_ok"
+   },
+   "three_teeth": true
+  },
+  {
+   "id": "leveling_overlaps",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.2: fate ∀ sobre overlaps no degrau átomo — par citado: lo do arquivo <= hull_hi e hi do arquivo >= hull_lo; planta DST overlaps_on_live_slice_is_not_ok"
+   },
+   "finding": "F-leveling-sweep",
+   "twin_kind": "model",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/leveling.rs",
+   "twin": "crates/pedradb-core/src/leveling.rs",
+   "aeneas": "scripts/aeneas_leveling.sh",
+   "callers": [
+    "crates/pedradb-core/src/leveling.rs"
+   ],
+   "entry": "overlaps",
+   "as_is": "overlaps_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/leveling.rs",
+    "test": "overlaps_on_live_slice_is_not_ok"
+   },
+   "three_teeth": true
+  },
+  {
+   "id": "leveling_total_bytes",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.2: fate ∀ sobre total_bytes no degrau átomo — soma citada: iter do slice, map que extrai bytes, sum u64; planta DST total_bytes_on_live_level_is_not_ok"
+   },
+   "finding": "F-leveling-sweep",
+   "twin_kind": "model",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/leveling.rs",
+   "twin": "crates/pedradb-core/src/leveling.rs",
+   "aeneas": "scripts/aeneas_leveling.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs",
+    "crates/pedradb-core/src/leveling.rs"
+   ],
+   "entry": "total_bytes",
+   "as_is": "total_bytes_as_is",
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "prepare_pushdown_compact"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/leveling.rs",
+    "test": "total_bytes_on_live_level_is_not_ok"
+   },
+   "three_teeth": true
+  },
+  {
+   "id": "tombstone_reaches_window",
+   "finding": "F167",
+   "twin_kind": "model",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
+   "twin": "crates/pedradb-core/src/sst/scan_kernel.rs",
+   "aeneas": "scripts/aeneas_scan.sh",
+   "callers": [
+    "crates/pedradb-core/src/sst/scan_kernel.rs"
+   ],
+   "entry": "tombstone_reaches_window",
+   "as_is": "tombstone_reaches_window_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/sst/scan_kernel.rs",
+    "test": "half_open_boundaries"
+   },
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 7/9 P0.4: tombstone_reaches_window como os dois gates citados half-open — alcança sse t_end>start E t_start≤fim (v = a && b); as-is devolve false sempre (dente plantado)"
+   }
+  },
+  {
+   "id": "key_in_window",
+   "finding": "F167",
+   "twin_kind": "model",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
+   "twin": "crates/pedradb-core/src/sst/scan_kernel.rs",
+   "aeneas": "scripts/aeneas_scan.sh",
+   "callers": [
+    "crates/pedradb-core/src/sst/scan_kernel.rs"
+   ],
+   "entry": "key_in_window",
+   "as_is": "key_in_window_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/sst/scan_kernel.rs",
+    "test": "key_in_window_on_live_window_is_not_ok"
+   },
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 5/9 P0.4: key_in_window como os dois gates citados — a chave entra sse passou no start E no fim (v = a && b); as-is 0104 só olha o start (dente plantado)"
+   }
+  },
+  {
+   "id": "point_bounds_overlap",
+   "finding": "F167",
+   "twin_kind": "model",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
+   "twin": "crates/pedradb-core/src/sst/scan_kernel.rs",
+   "aeneas": "scripts/aeneas_scan.sh",
+   "callers": [
+    "crates/pedradb-core/src/sst/scan_kernel.rs"
+   ],
+   "entry": "point_bounds_overlap",
+   "as_is": "point_bounds_overlap_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/sst/scan_kernel.rs",
+    "test": "point_bounds_overlap_on_live_bounds_is_not_ok"
+   },
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 6/9 P0.4: point_bounds_overlap como bounds citados — sem smallest/largest lê; com ambos lê sse lo≤fim E hi≥start; as-is 0240 delega com bounds estourados (dente plantado)"
+   }
+  },
+  {
+   "id": "sst_block_crc",
+   "finding": "RFC-0077 P1.1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
+   "twin": "crates/pedradb-core/src/sst/scan_kernel.rs",
+   "aeneas": "scripts/aeneas_scan.sh",
+   "callers": [
+    "crates/pedradb-core/src/sst/table.rs"
+   ],
+   "entry": "sst_block_crc_ok",
+   "as_is": "sst_block_crc_ok_as_is",
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/sst/table.rs",
+     "handler": "split_block_crc"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/sst/scan_kernel.rs",
+    "test": "sst_block_crc_uses_crc_match_ok"
+   },
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 2/9 P0.4: sst_block_crc_ok como lift da igualdade citada stored = computed (encadeia crc_match_ok); floor_atom 193→194"
+   }
+  },
+  {
+   "id": "sst_magic",
+   "finding": "RFC-0186 P2.2",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/sst/magic_kernel.rs",
+   "twin": "crates/pedradb-core/src/sst/magic_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/sst/table.rs",
+    "crates/pedradb-ops/src/dir_kind.rs"
+   ],
+   "entry": "sst_magic_is_pedra",
+   "as_is": "sst_magic_is_pedra_as_is",
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/sst/table.rs",
+     "handler": "decode"
+    },
+    {
+     "file": "crates/pedradb-ops/src/dir_kind.rs",
+     "handler": "classify_dir_env"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/sst/magic_kernel.rs",
+    "test": "sst_magic_as_is_admits_cpp_header"
+   },
+   "aeneas": "scripts/aeneas_magic.sh",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 9/9 P0.4: sst_magic_is_pedra como cadeia citada — sem 8 bytes recusa; com prefixo possível admite sse o slice-eq PEDRSST\\0 casa; as-is admite qualquer header (drop-in em disco — dente plantado); extract novo MagicKernel via aeneas_magic.sh (shim com const pinada)"
+   }
+  },
+  {
+   "id": "is_length_resyncable",
+   "finding": "F4",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/wal/recover_kernel.rs",
+   "twin": "crates/pedradb-core/src/wal/recover_kernel.rs",
+   "aeneas": "scripts/aeneas_wal_recover.sh",
+   "callers": [
+    "crates/pedradb-core/src/wal/reader.rs"
+   ],
+   "entry": "is_length_resyncable",
+   "as_is": "is_length_resyncable_as_is",
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/wal/reader.rs",
+     "handler": "collect_prefix_all"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/wal/recover_kernel.rs",
+    "test": "resync_only_length_class"
+   },
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 2/4 P0.2: is_length_resyncable como classificador citado — trio de dano de comprimento (Truncated/LengthCorrupt/UnknownType) → true, demais seis → false; floor_atom 183→184"
+   }
+  },
+  {
+   "id": "physical_payload_act",
+   "finding": "F4",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/wal/recover_kernel.rs",
+   "twin": "crates/pedradb-core/src/wal/recover_kernel.rs",
+   "aeneas": "scripts/aeneas_wal_recover.sh",
+   "callers": [
+    "crates/pedradb-core/src/wal/reader.rs"
+   ],
+   "entry": "physical_payload_act",
+   "as_is": "physical_payload_act_as_is",
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/wal/reader.rs",
+     "handler": "read_record"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/wal/recover_kernel.rs",
+    "test": "physical_oversize_and_torn"
+   },
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 3/4 P0.2: physical_payload_act como árvore de três ifs citada — oversize → FailStop, payload além do bloco → FailStop/Truncated por alinhamento, dentro → Continue; floor_atom 184→185"
+   }
+  },
+  {
+   "id": "fragment_act",
+   "finding": "F14",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/wal/recover_kernel.rs",
+   "twin": "crates/pedradb-core/src/wal/recover_kernel.rs",
+   "aeneas": "scripts/aeneas_wal_recover.sh",
+   "callers": [
+    "crates/pedradb-core/src/wal/reader.rs"
+   ],
+   "entry": "fragment_act",
+   "as_is": "fragment_act_as_is",
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/wal/reader.rs",
+     "handler": "read_record"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/wal/recover_kernel.rs",
+    "test": "orphan_middle_last_fail_stop"
+   },
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 4/4 P0.2: fragment_act como tabela completa FragKind × scratch_empty citada — órfão Middle/Last com scratch vazio fail-stopa; floor_atom 185→186"
+   }
+  },
+  {
+   "id": "from_record_type",
+   "finding": "F14",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/wal/recover_kernel.rs",
+   "twin": "crates/pedradb-core/src/wal/recover_kernel.rs",
+   "aeneas": "scripts/aeneas_wal_recover.sh",
+   "callers": [
+    "crates/pedradb-core/src/wal/reader.rs"
+   ],
+   "entry": "from_record_type",
+   "as_is": "from_record_type_as_is",
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/wal/reader.rs",
+     "handler": "read_record"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/wal/recover_kernel.rs",
+    "test": "from_record_type_on_wire_type_is_not_ok"
+   },
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 1/4 P0.2: from_record_type como bijeção total citada RecordType→FragKind (5 ramos); floor_atom 182→183"
+   }
+  },
+  {
+   "id": "compact_split",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.1: fate ∀ sobre compact_should_split no degrau átomo — bind citado: o gate COMPACT_TARGET_FILE_BYTES produz o alvo e a comparação decide; planta DST compact_should_split_bounds_one_output_file"
+   },
+   "finding": "RFC-0160 OOM",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/compact_kernel.rs",
+   "twin": "crates/pedradb-core/src/compact_kernel.rs",
+   "aeneas": "scripts/aeneas_compact.sh",
+   "callers": [
+    "crates/pedradb-core/src/compact_kernel.rs"
+   ],
+   "entry": "compact_should_split",
+   "as_is": "compact_should_split_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/compact_kernel.rs",
+    "test": "compact_should_split_bounds_one_output_file"
+   },
+   "three_teeth": true
+  },
+  {
+   "id": "compact_split_at",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.1: fate ∀ sobre compact_should_split_at no degrau átomo — decide (written >= target), mutantes nunca dividem; planta DST compact_split_mutants_never_split_is_not_ok"
+   },
+   "finding": "RFC-0160 OOM",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/compact_kernel.rs",
+   "twin": "crates/pedradb-core/src/compact_kernel.rs",
+   "aeneas": "scripts/aeneas_compact.sh",
+   "callers": [
+    "crates/pedradb-core/src/compact_kernel.rs"
+   ],
+   "entry": "compact_should_split_at",
+   "as_is": "compact_should_split_at_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/compact_kernel.rs",
+    "test": "compact_split_mutants_never_split_is_not_ok"
+   },
+   "three_teeth": true
+  },
+  {
+   "id": "lone_tombstone",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.1: fate ∀ sobre lone_tombstone_fate no degrau átomo — Drop exige bottommost e único-mais-novo; resto Keep; planta DST theorem_lone_tombstone_on_finite_domain"
+   },
+   "finding": "F177",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/compact_kernel.rs",
+   "twin": "crates/pedradb-core/src/compact_kernel.rs",
+   "aeneas": "scripts/aeneas_compact.sh",
+   "callers": [
+    "crates/pedradb-core/src/compact_kernel.rs",
+    "crates/pedradb-core/src/merge.rs"
+   ],
+   "entry": "lone_tombstone_fate",
+   "as_is": "lone_tombstone_fate_as_is_ignore_bottommost",
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/merge.rs",
+     "handler": "gc_snapshot_safe"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/compact_kernel.rs",
+    "test": "theorem_lone_tombstone_on_finite_domain"
+   },
+   "three_teeth": true
+  },
+  {
+   "id": "changelog_should_store",
+   "finding": "RFC-0031 P0.1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
+   "twin": "crates/pedradb-core/src/changelog_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "changelog_should_store",
+   "as_is": "changelog_should_store_as_is",
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "maybe_persist_changelog_after_durable_commit"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/changelog_kernel.rs",
+    "test": "debounce_as_is_ignores_interval"
+   },
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 2/6 P0.3: changelog_should_store como portão citado — intervalo 0 nunca, intervalo > 0 quando commits >= intervalo; floor_atom 187→188"
+   }
+  },
+  {
+   "id": "changelog_budget",
+   "finding": "RFC-0039 P0.3",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
+   "twin": "crates/pedradb-core/src/changelog_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "changelog_rebuild_within_budget",
+   "as_is": "changelog_rebuild_within_budget_as_is",
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "maybe_rebuild_feed_from_live"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/changelog_kernel.rs",
+    "test": "rebuild_budget_bounds_materialization"
+   },
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 3/6 P0.3: changelog_rebuild_within_budget como lift puro da comparação citada live_entries ≤ budget_entries; floor_atom 188→189"
+   }
+  },
+  {
+   "id": "changelog_durable_commit",
+   "finding": "RFC-0219 P0.1",
+   "twin_kind": "atom",
+   "atom": "changelog_durable_commit_fate",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P0.1: o destino do debounce de CHANGELOG num commit terminado é decisão do kernel — conta sse a resolução de sync do write-admission (flag do cliente vence, senão default do DB) tornou o commit durável, provado ∀ sobre (client_set, client_sync, db_sync) como changelog_durable_commit_fate_fate_iff em Changelog.lean; o trampolim db.rs commit_ops_with faz match no plano do kernel"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
+   "twin": "crates/pedradb-core/src/changelog_kernel.rs",
+   "aeneas": "scripts/aeneas_changelog.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "changelog_durable_commit_fate",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "commit_ops_with"
+    }
+   ],
+   "as_is": "changelog_durable_commit_fate_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/changelog_kernel.rs",
+    "test": "changelog_durable_commit_fate_on_live_client_sync_counts"
+   }
+  },
+  {
+   "id": "wal_archive_delete",
+   "finding": "RFC-0219 P0.2",
+   "twin_kind": "atom",
+   "atom": "wal_archive_delete_plan",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P0.2: o destino keep-vs-delete da cadeia arquivada de WAL é decisão do kernel — guarda enquanto o publish do MANIFEST atrasa os arquivos (segmentos acima de manifest_published_seq são a única cópia durável da janela), provado ∀ sobre (manifest_published_seq, wal_archive_max_seq) como wal_archive_delete_plan_fate_iff em Changelog.lean; o trampolim db.rs delete_wal_archives faz match no plano do kernel"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
+   "twin": "crates/pedradb-core/src/changelog_kernel.rs",
+   "aeneas": "scripts/aeneas_changelog.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "wal_archive_delete_plan",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "delete_wal_archives"
+    }
+   ],
+   "as_is": "wal_archive_delete_plan_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/changelog_kernel.rs",
+    "test": "wal_archive_delete_plan_on_live_unpublished_window_keeps"
+   }
+  },
+  {
+   "id": "bulk_manifest_persist",
+   "finding": "RFC-0219 P0.3",
+   "twin_kind": "atom",
+   "atom": "bulk_manifest_persist_fate",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P0.3: como o publish do MANIFEST de um bulk install é pago é decisão do kernel — sync (dir-sync) persiste inline e zera a dívida; async amortiza por bulk_manifest_debt a cada BULK_MANIFEST_EVERY, provado ∀ sobre sync como bulk_manifest_persist_fate_fate_iff em Manifest.lean; o trampolim db.rs persist_bulk_manifest faz match no plano do kernel"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/manifest_kernel.rs",
+   "twin": "crates/pedradb-core/src/manifest_kernel.rs",
+   "aeneas": "scripts/aeneas_manifest.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "bulk_manifest_persist_fate",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "persist_bulk_manifest"
+    }
+   ],
+   "as_is": "bulk_manifest_persist_fate_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/manifest_kernel.rs",
+    "test": "bulk_manifest_persist_fate_on_live_sync_persists_now"
+   }
+  },
+  {
+   "id": "point_cache_validity",
+   "finding": "RFC-0219 P1.1",
+   "twin_kind": "atom",
+   "atom": "point_cache_validity",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P1.1: o gate F198/F207 de fill/hit do point/prefix cache é decisão do kernel — fill admissível só enquanto published seq ainda é igual ao seq da resposta (publish em curso invalida a resposta pré-publish), provado ∀ sobre (published, answer) como point_cache_validity_fate_iff em Lookup.lean; os três trampolins db.rs (get_after_point_miss, get_at double-check, last_under_user_prefix) fazem match no plano do kernel"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/lookup_kernel.rs",
+   "twin": "crates/pedradb-core/src/lookup_kernel.rs",
+   "aeneas": "scripts/aeneas_lookup.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "point_cache_validity",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "get_after_point_miss"
+    },
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "get_at"
+    },
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "last_under_user_prefix"
+    }
+   ],
+   "as_is": "point_cache_validity_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/lookup_kernel.rs",
+    "test": "point_cache_validity_on_live_publish_advanced_skips_fill"
+   }
+  },
+  {
+   "id": "point_tombstone",
+   "finding": "RFC-0219 P1.1",
+   "twin_kind": "atom",
+   "atom": "point_tombstone_plan",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P1.1: se um ponto achado é servido ou sombreado por range tombstone é decisão do kernel — tombstone cobrindo (t.seq > point_seq via merge::range_deleted) sombreia o valor e o caller lê Deleted (RFC-0150), provado ∀ sobre range_hidden como point_tombstone_plan_fate_iff em Lookup.lean; os quatro trampolins db.rs (lookup x2, caminho lock-free x2) fazem match no plano do kernel"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/lookup_kernel.rs",
+   "twin": "crates/pedradb-core/src/lookup_kernel.rs",
+   "aeneas": "scripts/aeneas_lookup.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "point_tombstone_plan",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "lookup"
+    }
+   ],
+   "as_is": "point_tombstone_plan_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/lookup_kernel.rs",
+    "test": "point_tombstone_plan_on_live_range_hidden_serves_deleted"
+   }
+  },
+  {
+   "id": "dir_sync_plan",
+   "finding": "RFC-0219 P1.1",
+   "twin_kind": "atom",
+   "atom": "dir_sync_plan",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P1.1: se o dir-fsync pós-rename é pago é decisão do kernel — modo sync paga inline (dentry do rename durável antes de voltar), async pula, provado ∀ sobre sync como dir_sync_plan_fate_iff em WriteAdmission.lean (o predicado dir_sync_required segue vivo no corpo do plano); os cinco trampolins db.rs (rename SST x2, sync_dir_if_required, fsync_sst_paths, finish_merged_chunk_on) fazem match no plano"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "aeneas": "scripts/aeneas_write_admission.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "dir_sync_plan",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "sync_dir_if_required"
+    }
+   ],
+   "as_is": "dir_sync_plan_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+    "test": "dir_sync_plan_on_live_sync_mode_pays_now"
+   }
+  },
+  {
+   "id": "fence_admission",
+   "finding": "RFC-0219 P1.2",
+   "twin_kind": "atom",
+   "atom": "fence_admission_plan",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P1.2: admitir ou recusar operações após um fence de durabilidade é decisão do kernel — fence armado recusa fail-closed cada nova operação (o relatório acked-prefix/janela-incerta já está registrado), provado ∀ sobre o bool como fence_admission_plan_fate_iff em WriteAdmission.lean; o trampolim db.rs ensure_not_fenced faz match no plano"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "aeneas": "scripts/aeneas_write_admission.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "fence_admission_plan",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "ensure_not_fenced"
+    }
+   ],
+   "as_is": "fence_admission_plan_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+    "test": "fence_admission_plan_on_live_fenced_refuses"
+   }
+  },
+  {
+   "id": "fence_record",
+   "finding": "RFC-0219 P1.2",
+   "twin_kind": "atom",
+   "atom": "fence_record_plan",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P1.2: se um fence novo registra o relatório é decisão do kernel — só o PRIMEIRO fence registra a janela incerta visível ao client (a mais larga, a honesta); fence posterior mantém, provado ∀ sobre has_report como fence_record_plan_fate_iff em WriteAdmission.lean; o trampolim db.rs fence_durability faz match no plano"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "aeneas": "scripts/aeneas_write_admission.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "fence_record_plan",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "fence_durability"
+    }
+   ],
+   "as_is": "fence_record_plan_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+    "test": "fence_record_plan_on_live_first_fence_owns_report"
+   }
+  },
+  {
+   "id": "group_batch_sync",
+   "finding": "RFC-0219 P1.2",
+   "twin_kind": "atom",
+   "atom": "group_batch_sync_plan",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P1.2: se um batch força a barreira única do grupo é decisão do kernel — batch com flag de sync força o one-fsync compartilhado do grupo (contexto do grupo do DB: client_set=true, db_sync=false), provado ∀ sobre client_sync como group_batch_sync_plan_fate_iff em WriteAdmission.lean; o trampolim db.rs group_prepare faz match no plano"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "aeneas": "scripts/aeneas_write_admission.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "group_batch_sync_plan",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "group_prepare"
+    }
+   ],
+   "as_is": "group_batch_sync_plan_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+    "test": "group_batch_sync_plan_on_live_sync_batch_forces_group"
+   }
+  },
+  {
+   "id": "pit_resync_rewrite_plan",
+   "finding": "RFC-0219 P1.4",
+   "twin_kind": "atom",
+   "atom": "pit_resync_rewrite_plan",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P1.4: reescrever o WAL a partir do prefixo recuperado é decisão do kernel — reescreve EXATAMENTE quando o relatório de recuperação é um resync (pit_resync_needs_rewrite segue vivo e provado no corpo), provado ∀ sobre is_resync como pit_resync_rewrite_plan_fate_iff em WriteAdmission.lean; o AS-IS nunca reescreve (o dano mid-log sobrevive ao próximo open fail-closed — dente); o trampolim db.rs open_with_env_sourced faz match no plano"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "aeneas": "scripts/aeneas_write_admission.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "pit_resync_rewrite_plan",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "open_with_env_sourced"
+    }
+   ],
+   "as_is": "pit_resync_rewrite_plan_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+    "test": "pit_resync_rewrite_plan_on_live_resync_rewrites"
+   }
+  },
+  {
+   "id": "parked_pair",
+   "finding": "RFC-0219 P1.3",
+   "twin_kind": "atom",
+   "atom": "parked_pair_plan",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P1.3: se a fila parked-unflushed entrega o par mais velho para fold é decisão do kernel — dois ou mais entrega (F174 revalida no swap), fila curta espera, provado ∀ sobre parked_len como parked_pair_plan_fate_iff em Flush.lean; o trampolim db.rs parked_oldest_pair_arcs faz match no plano"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/flush_kernel.rs",
+   "twin": "crates/pedradb-core/src/flush_kernel.rs",
+   "aeneas": "scripts/aeneas_flush.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "parked_pair_plan",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "parked_oldest_pair_arcs"
+    }
+   ],
+   "as_is": "parked_pair_plan_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/flush_kernel.rs",
+    "test": "parked_pair_plan_on_live_short_queue_waits"
+   }
+  },
+  {
+   "id": "auto_flush_gate",
+   "finding": "RFC-0219 P1.3",
+   "twin_kind": "atom",
+   "atom": "auto_flush_gate",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P1.3: se o scan de auto-flush roda é decisão do kernel — os dois eixos de mem sob seus limites pulam o scan inteiro (nada due); qualquer eixo acima scana cada CF (gate due por-CF aplica), provado ∀ sobre (global_under, cf_under) como auto_flush_gate_fate_iff em Flush.lean (o predicado skip_auto_flush segue vivo no corpo do gate); o trampolim db.rs maybe_auto_flush faz match no plano"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/flush_kernel.rs",
+   "twin": "crates/pedradb-core/src/flush_kernel.rs",
+   "aeneas": "scripts/aeneas_flush.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "auto_flush_gate",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "maybe_auto_flush"
+    }
+   ],
+   "as_is": "auto_flush_gate_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/flush_kernel.rs",
+    "test": "auto_flush_gate_on_live_both_under_skips_scan"
+   }
+  },
+  {
+   "id": "mem_auto_flush",
+   "finding": "RFC-0219 P1.3",
+   "twin_kind": "atom",
+   "atom": "mem_auto_flush",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P1.3: flushar a mem é decisão do kernel — dispara EXATAMENTE armado e no/acima do limite (auto_flush_due compõe o plano); desarmado ou abaixo segue acumulando, provado ∀ sobre (mem_bytes, limit, armed) como mem_auto_flush_plan_fate_iff em Flush.lean; o AS-IS nunca dispara (mem cresce até o host travar — dente plantado); o trampolim db.rs maybe_auto_flush faz match no plano"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/flush_kernel.rs",
+   "twin": "crates/pedradb-core/src/flush_kernel.rs",
+   "aeneas": "scripts/aeneas_flush.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "mem_auto_flush_plan",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "maybe_auto_flush"
+    }
+   ],
+   "as_is": "mem_auto_flush_plan_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/flush_kernel.rs",
+    "test": "mem_auto_flush_plan_on_live_armed_over_limit_flushes"
+   }
+  },
+  {
+   "id": "manifest_publish_plan",
+   "finding": "RFC-0219 P1.4",
+   "twin_kind": "atom",
+   "atom": "manifest_publish_plan",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P1.4: publicar MANIFEST/CURRENT é decisão do kernel — publica EXATAMENTE quando todo SST listado está durable (may_publish_manifest segue vivo e provado no corpo), provado ∀ sobre sst_durable como manifest_publish_plan_fate_iff em Flush.lean; o AS-IS publica com SST unsynced (CURRENT nomeia arquivo tornado pós-crash — dente); o trampolim db.rs persist_manifest faz match no plano"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/flush_kernel.rs",
+   "twin": "crates/pedradb-core/src/flush_kernel.rs",
+   "aeneas": "scripts/aeneas_flush.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "manifest_publish_plan",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "persist_manifest"
+    }
+   ],
+   "as_is": "manifest_publish_plan_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/flush_kernel.rs",
+    "test": "manifest_publish_plan_on_live_unsynced_sst_holds"
+   }
+  },
+  {
+   "id": "changelog_store_plan",
+   "finding": "RFC-0219 P1.4",
+   "twin_kind": "atom",
+   "atom": "changelog_store_plan",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P1.4: gravar o feed no store point síncrono é decisão do kernel — grava EXATAMENTE quando o publish durable do MANIFEST cobriu a janela arquivada (publish falhado segura: os segmentos arquivados são a única cópia durable), provado ∀ sobre publish_ok como changelog_store_plan_fate_iff em Changelog.lean; o AS-IS grava com publish falhado (o store apaga segmentos sem cobertura — dente); o trampolim db.rs changelog_store_point faz match no plano"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
+   "twin": "crates/pedradb-core/src/changelog_kernel.rs",
+   "aeneas": "scripts/aeneas_changelog.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "changelog_store_plan",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "changelog_store_point"
+    }
+   ],
+   "as_is": "changelog_store_plan_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/changelog_kernel.rs",
+    "test": "changelog_store_plan_on_live_failed_publish_skips"
+   }
+  },
+  {
+   "id": "parked_pop_plan",
+   "finding": "RFC-0219 P2.1",
+   "twin_kind": "atom",
+   "atom": "parked_pop_plan",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P2.1: popar a fila estacionada é decisão do kernel — popa EXATAMENTE quando a fila está não-vazia (batch_is_empty segue vivo e provado no corpo), provado ∀ sobre parked_len como parked_pop_plan_fate_iff em WriteAdmission.lean; o AS-IS popa da fila vazia (dente); o trampolim db.rs take_oldest_parked faz match no plano"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "aeneas": "scripts/aeneas_write_admission.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "parked_pop_plan",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "take_oldest_parked"
+    }
+   ],
+   "as_is": "parked_pop_plan_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+    "test": "parked_pop_plan_on_live_nonempty_queue_pops"
+   }
+  },
+  {
+   "id": "group_ack_plan",
+   "finding": "RFC-0219 P2.1",
+   "twin_kind": "atom",
+   "atom": "group_ack_plan",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P2.1: ackar e publicar o grupo é decisão do kernel — publica EXATAMENTE quando a I/O de WAL do grupo teve sucesso (may_publish_group segue vivo e provado no corpo), provado ∀ sobre wal_io_ok como group_ack_plan_fate_iff em GroupCommit.lean; o AS-IS acka a falha (Ok com mentira — dente); o trampolim db.rs lone_sync_commit faz match no plano"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "aeneas": "scripts/aeneas_group_commit.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "group_ack_plan",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "lone_sync_commit"
+    }
+   ],
+   "as_is": "group_ack_plan_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/group_commit_kernel.rs",
+    "test": "group_ack_plan_on_live_io_fail_fences"
+   }
+  },
+  {
+   "id": "flush_plan",
+   "finding": "F2/F43",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/flush_kernel.rs",
+   "twin": "crates/pedradb-core/src/flush_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "flush_plan",
+   "as_is": "flush_plan_as_is_lose_tail",
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "flush_pipeline"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/flush_kernel.rs",
+    "test": "theorem_flush_plan_on_finite_domain"
+   },
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 4/6 P0.3: flush_plan como árvore de dois ifs citada — imm presente termina-e-flusha, memtable vazio rotaciona, vivo escreve SST antes; floor_atom 189→190"
+   }
+  },
+  {
+   "id": "first_install",
+   "finding": "F196",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/manifest_kernel.rs",
+   "twin": "crates/pedradb-core/src/manifest_kernel.rs",
+   "aeneas": "scripts/aeneas_manifest.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "first_install_action",
+   "as_is": "first_install_action_as_is_proceed_always",
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "recover_ssts"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/manifest_kernel.rs",
+    "test": "f196_first_install_tolerance"
+   },
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 5/6 P0.3: first_install_action como tabela citada — commitado (com/sem sync) prossegue, falha recusa abrir (F196); floor_atom 190→191"
+   }
+  },
+  {
+   "id": "probe_order_covering",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "a lista de candidatos e exatamente o loop citado — newest_first com capacidade len, do zero, porte covering_pos e gate covering_hi_ge decidindo push ou skip"
+   },
+   "finding": "RFC-0164 P0.2",
+   "twin_kind": "model",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/probe_order_kernel.rs",
+   "twin": "crates/pedradb-core/src/probe_order_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "probe_order_covering",
+   "as_is": "probe_order_covering_as_is",
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "lookup_sst_packed"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/probe_order_kernel.rs",
+    "test": "probe_order_covering_on_live_gate_is_not_ok"
+   },
+   "three_teeth": true
+  },
+  {
+   "id": "group_validate",
+   "finding": "RFC-0051-P1.3/RFC-0057-P2.1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/concurrent.rs"
+   ],
+   "entry": "group_validate",
+   "as_is": "occ_conflict_as_is_serialized",
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/concurrent.rs",
+     "handler": "validate_occ_batch"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/group_commit_kernel.rs",
+    "test": "group_members_are_simultaneous"
+   },
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 4/4 P0.1: group_validate como cadeia citada do loop extraído (index→occ_conflict→push, combustível = membros); floor_atom 181→182"
+   }
+  },
+  {
+   "id": "occ_member_fate",
+   "finding": "RFC-0057 P2.1 caller",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/concurrent.rs"
+   ],
+   "entry": "occ_member_fate",
+   "handlers": [
+    "validate_occ_batch"
+   ],
+   "as_is": "occ_member_fate_as_is",
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/concurrent.rs",
+     "handler": "validate_occ_batch"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/group_commit_kernel.rs",
+    "test": "occ_member_fate_on_live_conflict_is_not_ok"
+   },
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0202 P0.2 lost-update row: OCC member fate precedence TooOld > Conflict > Ok (forall-iff over the extracted body, GroupCommit.lean); AS-IS never-abort unreachable; handler validate_occ_batch is the ConcurrentDb caller link"
+   }
+  },
+  {
+   "id": "occ_batch_plan",
+   "finding": "RFC-0057 P2.1 script",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/concurrent.rs"
+   ],
+   "entry": "occ_batch_plan",
+   "handlers": [
+    "validate_occ_batch",
+    "lone_commit"
+   ],
+   "as_is": "occ_batch_plan_as_is",
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/concurrent.rs",
+     "handler": "validate_occ_batch"
+    },
+    {
+     "file": "crates/pedradb-core/src/concurrent.rs",
+     "handler": "lone_commit"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/group_commit_kernel.rs",
+    "test": "occ_batch_plan_on_live_lagging_is_not_ok"
+   },
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "o plano do grupo decide exatamente pela rota min-len: n e o menor input e todo fate vem do loop extraido — upgrade do close RFC-0198 (glue por membro) para o extrato inteiro"
+   }
+  },
+  {
+   "id": "pct_default_depth",
+   "finding": "RFC-0070 P2.2",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/concurrent.rs"
+   ],
+   "entry": "pct_campaign_default_depth",
+   "as_is": "pct_campaign_default_depth_as_is",
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/concurrent.rs",
+     "handler": "claim_default_pct_depth_not_raised"
+    }
+   ],
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/group_commit_kernel.rs",
+    "test": "pct_depth_is_not_forall_schedules"
+   },
+   "three_teeth": true
+  },
+  {
+   "id": "default_pct_depth_raised",
+   "finding": "RFC-0070 P2.2",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/group_commit_kernel.rs"
+   ],
+   "entry": "default_pct_depth_raised",
+   "as_is": "default_pct_depth_raised_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/group_commit_kernel.rs",
+    "test": "pct_depth_is_not_forall_schedules"
+   },
+   "three_teeth": true
+  },
+  {
+   "id": "fsync_lie_tcg",
+   "finding": "RFC-0078 P2.2",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/group_commit_kernel.rs"
+   ],
+   "entry": "fsync_lie_closes_tcg_guest",
+   "as_is": "fsync_lie_closes_tcg_guest_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/group_commit_kernel.rs",
+    "test": "fsync_ok_is_not_media_proof"
+   },
+   "three_teeth": true
+  },
+  {
+   "id": "stacked_liars",
+   "finding": "RFC-0078 P1.2",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/group_commit_kernel.rs"
+   ],
+   "entry": "stacked_fsync_liars_admitted",
+   "as_is": "stacked_fsync_liars_admitted_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/group_commit_kernel.rs",
+    "test": "fsync_ok_is_not_media_proof"
+   },
+   "three_teeth": true
+  },
+  {
+   "id": "env_crash",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "RFC-0214 P0.2: fate ∀ do crash_legal — corte legal exatamente quando synced ≤ cut ≤ written (piso da barreira e teto escrito); as-is ignora o piso e come bytes prometidos."
+   },
+   "finding": "RFC-0166 P1.1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/env_crash_kernel.rs",
+   "twin": "crates/pedradb-core/src/env_crash_kernel.rs",
+   "aeneas": "scripts/aeneas_env_crash.sh",
+   "callers": [
+    "crates/pedradb-core/src/env_crash_kernel.rs",
+    "crates/pedradb-sim/src/three_teeth_plants.rs"
+   ],
+   "entry": "crash_legal",
+   "as_is": "crash_legal_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "env_crash_on_live_recording_is_not_ok"
+   }
+  },
+  {
+   "id": "env_append",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "RFC-0214 P0.2: fate ∀ do append do Env — ok {m with written := w} exatamente quando written+n não estoura (ok w); a barreira não se move."
+   },
+   "finding": "RFC-0166 P1.1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/env_crash_kernel.rs",
+   "twin": "crates/pedradb-core/src/env_crash_kernel.rs",
+   "aeneas": "scripts/aeneas_env_crash.sh",
+   "callers": [
+    "crates/pedradb-core/src/env_crash_kernel.rs",
+    "crates/pedradb-sim/src/three_teeth_plants.rs"
+   ],
+   "entry": "append",
+   "as_is": "crash_legal_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "env_crash_on_live_recording_is_not_ok"
+   }
+  },
+  {
+   "id": "env_sync",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "RFC-0214 P0.2: fate ∀ do sync do Env — dois futuros ok exatos: Honest promove a barreira ao comprimento todo; Lying devolve Ok e o modelo volta inteiro (RFC-0078); as-is promove sempre."
+   },
+   "finding": "RFC-0166 P1.1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/env_crash_kernel.rs",
+   "twin": "crates/pedradb-core/src/env_crash_kernel.rs",
+   "aeneas": "scripts/aeneas_env_crash.sh",
+   "callers": [
+    "crates/pedradb-core/src/env_crash_kernel.rs",
+    "crates/pedradb-sim/src/three_teeth_plants.rs"
+   ],
+   "entry": "sync",
+   "as_is": "sync_lying_promotes_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "env_crash_on_live_recording_is_not_ok"
+   }
+  },
+  {
+   "id": "env_barrier_floor",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "RFC-0214 P0.2: fate ∀ do piso da barreira — ok v com v = true exato: corte ilegal não perde nada; corte legal mantém cut ≥ synced (perna crash_legal_fate_iff, átomo 1/6 da fatia)."
+   },
+   "finding": "RFC-0166 P1.1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/env_crash_kernel.rs",
+   "twin": "crates/pedradb-core/src/env_crash_kernel.rs",
+   "aeneas": "scripts/aeneas_env_crash.sh",
+   "callers": [
+    "crates/pedradb-core/src/env_crash_kernel.rs",
+    "crates/pedradb-sim/src/three_teeth_plants.rs"
+   ],
+   "entry": "barrier_floor_holds",
+   "as_is": "crash_legal_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "env_crash_on_live_recording_is_not_ok"
+   }
+  },
+  {
+   "id": "env_no_invented",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "RFC-0214 P0.2: fate ∀ do teto — ok v com v = true exato: corte ilegal ou cut ≤ written (teto da janela do crash_legal_fate_iff); a recuperação nunca inventa byte."
+   },
+   "finding": "RFC-0166 P1.1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/env_crash_kernel.rs",
+   "twin": "crates/pedradb-core/src/env_crash_kernel.rs",
+   "aeneas": "scripts/aeneas_env_crash.sh",
+   "callers": [
+    "crates/pedradb-core/src/env_crash_kernel.rs",
+    "crates/pedradb-sim/src/three_teeth_plants.rs"
+   ],
+   "entry": "no_invented_bytes_holds",
+   "as_is": "crash_legal_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "env_crash_on_live_recording_is_not_ok"
+   }
+  },
+  {
+   "id": "env_honest_sync",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "RFC-0214 P0.2: fate ∀ do sync honesto — ok v com v = true exato: após a barreira honesta a janela legal colapsa num ponto (written ≤ cut ≤ written força cut = written); todo crash legal preserva o log inteiro; pernas sync_fate_iff + crash_legal_fate_iff."
+   },
+   "finding": "RFC-0166 P1.1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/env_crash_kernel.rs",
+   "twin": "crates/pedradb-core/src/env_crash_kernel.rs",
+   "aeneas": "scripts/aeneas_env_crash.sh",
+   "callers": [
+    "crates/pedradb-core/src/env_crash_kernel.rs",
+    "crates/pedradb-sim/src/three_teeth_plants.rs"
+   ],
+   "entry": "honest_sync_protects_all",
+   "as_is": "sync_lying_promotes_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "env_crash_on_live_recording_is_not_ok"
+   }
+  },
+  {
+   "id": "wal_state",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "RFC-0214 P0.1: fate ∀ de inv_wal — ok v exatamente quando v decide (acked ⊆ synced ∧ synced ⊆ written); perna citada wal_inv_closed (RFC-0191 P2.1)."
+   },
+   "finding": "RFC-0166 P1.2",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+   "twin": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+   "aeneas": "scripts/aeneas_wal_state.sh",
+   "callers": [
+    "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+    "crates/pedradb-sim/src/three_teeth_plants.rs"
+   ],
+   "entry": "inv_wal",
+   "as_is": "inv_wal_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "wal_inv_on_live_recording_is_not_ok"
+   }
+  },
+  {
+   "id": "wal_append",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "RFC-0214 P0.1: fate ∀ do append — ok {s with written := w} exatamente quando a soma written+n não estoura (ok w); perna citada wal_append_closed (RFC-0191 P2.1)."
+   },
+   "finding": "RFC-0166 P1.2",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+   "twin": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+   "aeneas": "scripts/aeneas_wal_state.sh",
+   "callers": [
+    "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+    "crates/pedradb-sim/src/three_teeth_plants.rs"
+   ],
+   "entry": "wal_append",
+   "as_is": "wal_append_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "wal_inv_on_live_recording_is_not_ok"
+   }
+  },
+  {
+   "id": "wal_sync",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "RFC-0214 P0.1: fate ∀ do sync — exatamente dois futuros ok, um por honestidade (Honest promove a barreira a written; Lying devolve as watermarks recortadas pelo min); pernas citadas wal_sync_honest_closed/wal_sync_lying_closed (RFC-0198 P1.2)."
+   },
+   "finding": "RFC-0166 P1.2",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+   "twin": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+   "aeneas": "scripts/aeneas_wal_state.sh",
+   "callers": [
+    "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+    "crates/pedradb-sim/src/three_teeth_plants.rs"
+   ],
+   "entry": "wal_sync",
+   "as_is": "wal_sync_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "wal_inv_on_live_recording_is_not_ok"
+   }
+  },
+  {
+   "id": "wal_ack",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "RFC-0214 P0.1: fate ∀ do ack — exatamente dois futuros ok: dentro da barreira {s with acked := a} (valor saturado contido em synced), fora dela recusa fail-closed (estado volta inteiro); o Ok nunca avança acked além da barreira."
+   },
+   "finding": "RFC-0166 P1.2",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+   "twin": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+   "aeneas": "scripts/aeneas_wal_state.sh",
+   "callers": [
+    "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+    "crates/pedradb-sim/src/three_teeth_plants.rs"
+   ],
+   "entry": "wal_ack",
+   "as_is": "wal_ack_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "wal_inv_on_live_recording_is_not_ok"
+   }
+  },
+  {
+   "id": "wal_rotate",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "RFC-0214 P0.1: fate ∀ do rotate — zera o log exatamente quando tudo é durável e acked (acked = synced = written); cauda não-durável é recusada e o estado volta inteiro; as-is derruba o log sempre."
+   },
+   "finding": "RFC-0166 P1.2",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+   "twin": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+   "aeneas": "scripts/aeneas_wal_state.sh",
+   "callers": [
+    "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+    "crates/pedradb-sim/src/three_teeth_plants.rs"
+   ],
+   "entry": "wal_rotate",
+   "as_is": "wal_rotate_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "wal_inv_on_live_recording_is_not_ok"
+   }
+  },
+  {
+   "id": "wal_acked_survives",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "RFC-0214 P0.1: fate ∀ da corolária de sobrevivência — dois futuros ok decididos pela costura Env (corte legal: v = cut ≥ acked; corte ilegal: v = true); a legalidade é a do Env, não re-provada (P0.2 pinará crash_legal)."
+   },
+   "finding": "RFC-0166 P1.2",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+   "twin": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+   "aeneas": "scripts/aeneas_wal_state.sh",
+   "callers": [
+    "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+    "crates/pedradb-sim/src/three_teeth_plants.rs"
+   ],
+   "entry": "acked_survives_every_legal_crash",
+   "as_is": "acked_survives_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "wal_inv_on_live_recording_is_not_ok"
+   }
+  },
+  {
+   "id": "d1_put_ok",
+   "finding": "RFC-0166 P1.3",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/d1_modelo_kernel.rs",
+   "twin": "crates/pedradb-core/src/d1_modelo_kernel.rs",
+   "aeneas": "scripts/aeneas_d1_modelo.sh",
+   "callers": [
+    "crates/pedradb-core/src/d1_modelo_kernel.rs",
+    "crates/pedradb-sim/src/three_teeth_plants.rs"
+   ],
+   "entry": "put_ok",
+   "as_is": "put_ok_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "d1_modelo_on_live_recording_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "O put confirma exatamente quando o ledger cruza a barreira: ok s' e exatamente a cadeia honesta append->sync->ack com o vao acked->synced, citando os corpos sem reabrir"
+   }
+  },
+  {
+   "id": "d1_modelo",
+   "finding": "RFC-0166 P1.3",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/d1_modelo_kernel.rs",
+   "twin": "crates/pedradb-core/src/d1_modelo_kernel.rs",
+   "aeneas": "scripts/aeneas_d1_modelo.sh",
+   "callers": [
+    "crates/pedradb-core/src/d1_modelo_kernel.rs",
+    "crates/pedradb-sim/src/three_teeth_plants.rs"
+   ],
+   "entry": "d1_modelo",
+   "as_is": "d1_modelo_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "d1_modelo_on_live_recording_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "O desfecho da maquina D1 e exatamente a decisao do spec: ok false so na vereda ackado+crash-legal+corte-antes-do-fim (o buraco do mutante AS-IS); forma de ramos construtiva cita inv_wal/CrashModel.of/crash_legal sem reabrir corpos"
+   }
+  },
+  {
+   "id": "write_ack_append",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "2026-09-12 RFC-0214 P1.1: fate ∀ sobre on_append no degrau átomo — o passo append do ledger é o átomo wal_append (written cresce, acked/synced intocados); as-is write_ack_ledger_as_is (ack sem barreira) recusado pela planta DST verified_write_ack_on_live_profile_is_not_ok"
+   },
+   "finding": "RFC-0166 P1.4",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/write_ack_kernel.rs",
+   "twin": "crates/pedradb-core/src/write_ack_kernel.rs",
+   "aeneas": "scripts/aeneas_write_ack.sh",
+   "callers": [
+    "crates/pedradb-core/src/write_ack_kernel.rs",
+    "crates/pedradb-core/src/concurrent.rs",
+    "crates/pedradb-sim/src/three_teeth_plants.rs"
+   ],
+   "entry": "on_append",
+   "as_is": "write_ack_ledger_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "verified_write_ack_on_live_profile_is_not_ok"
+   }
+  },
+  {
+   "id": "write_ack_barrier",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "átomo write_ack_barrier: o Ok da barreira Honest é exatamente o estado promovido (synced := written) — wal_sync com fsync_promotes_pending; sem Ok com pendências (RFC-0214 P1.1 7/8)"
+   },
+   "finding": "RFC-0166 P1.4",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/write_ack_kernel.rs",
+   "twin": "crates/pedradb-core/src/write_ack_kernel.rs",
+   "aeneas": "scripts/aeneas_write_ack.sh",
+   "callers": [
+    "crates/pedradb-core/src/write_ack_kernel.rs",
+    "crates/pedradb-core/src/concurrent.rs",
+    "crates/pedradb-sim/src/three_teeth_plants.rs"
+   ],
+   "entry": "on_barrier",
+   "as_is": "write_ack_ledger_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "verified_write_ack_on_live_profile_is_not_ok"
+   }
+  },
+  {
+   "id": "write_ack_ack",
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "átomo write_ack_ack: o Ok do ack existe iff acked ≤ synced e é exatamente acked := synced (gap vira acknowledged, saturado promove só até a barreira); fora da invariante a sub checada falha (RFC-0214 P1.1 8/8)"
+   },
+   "finding": "RFC-0166 P1.4",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/write_ack_kernel.rs",
+   "twin": "crates/pedradb-core/src/write_ack_kernel.rs",
+   "aeneas": "scripts/aeneas_write_ack.sh",
+   "callers": [
+    "crates/pedradb-core/src/write_ack_kernel.rs",
+    "crates/pedradb-core/src/concurrent.rs",
+    "crates/pedradb-sim/src/three_teeth_plants.rs"
+   ],
+   "entry": "on_ack",
+   "as_is": "write_ack_ledger_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "verified_write_ack_on_live_profile_is_not_ok"
+   }
+  },
+  {
+   "id": "lsm_probe",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.1: fate ∀ sobre lsm_probe no degrau átomo — um passo do loop citado via loop.eq_def: corpo no nível 0 termina (done) ou desce um nível (cont); planta DST r1_modelo_on_live_delete_shape_is_not_ok"
+   },
+   "entry": "lsm_probe",
+   "as_is": "lsm_probe_as_is",
+   "finding": "RFC-0166 P2.1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/lsm_r1_kernel.rs",
+   "twin": "crates/pedradb-core/src/lsm_r1_kernel.rs",
+   "aeneas": "scripts/aeneas_lsm_r1.sh",
+   "callers": [
+    "crates/pedradb-core/src/lsm_r1_kernel.rs",
+    "crates/pedradb-sim/src/three_teeth_plants.rs"
+   ],
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "r1_modelo_on_live_delete_shape_is_not_ok"
+   }
+  },
+  {
+   "id": "lsm_compact",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.1: fate ∀ sobre lsm_compact no degrau átomo — despacho citado: nível 0 e nível >= MAX_LEVELS não compactam; dentro, o loop citado com drop_all_tombs false; planta DST r1_modelo_on_live_delete_shape_is_not_ok"
+   },
+   "entry": "lsm_compact",
+   "as_is": "lsm_compact_as_is",
+   "finding": "RFC-0166 P2.1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/lsm_r1_kernel.rs",
+   "twin": "crates/pedradb-core/src/lsm_r1_kernel.rs",
+   "aeneas": "scripts/aeneas_lsm_r1.sh",
+   "callers": [
+    "crates/pedradb-core/src/lsm_r1_kernel.rs",
+    "crates/pedradb-sim/src/three_teeth_plants.rs"
+   ],
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "r1_modelo_on_live_delete_shape_is_not_ok"
+   }
+  },
+  {
+   "id": "lsm_reopen",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.1: fate ∀ sobre lsm_reopen no degrau átomo — identidade citada, o estado sai intacto; planta DST r1_modelo_on_live_delete_shape_is_not_ok"
+   },
+   "entry": "lsm_reopen",
+   "as_is": "lsm_reopen_as_is",
+   "finding": "RFC-0166 P2.1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/lsm_r1_kernel.rs",
+   "twin": "crates/pedradb-core/src/lsm_r1_kernel.rs",
+   "aeneas": "scripts/aeneas_lsm_r1.sh",
+   "callers": [
+    "crates/pedradb-core/src/lsm_r1_kernel.rs",
+    "crates/pedradb-sim/src/three_teeth_plants.rs"
+   ],
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "r1_modelo_on_live_delete_shape_is_not_ok"
+   }
+  },
+  {
+   "id": "r1_modelo",
+   "entry": "r1_modelo",
+   "as_is": "r1_modelo_as_is",
+   "finding": "RFC-0166 P2.1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/lsm_r1_kernel.rs",
+   "twin": "crates/pedradb-core/src/lsm_r1_kernel.rs",
+   "aeneas": "scripts/aeneas_lsm_r1.sh",
+   "callers": [
+    "crates/pedradb-core/src/lsm_r1_kernel.rs",
+    "crates/pedradb-sim/src/three_teeth_plants.rs"
+   ],
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
+    "test": "r1_modelo_on_live_delete_shape_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "O desfecho da maquina R1 e exatamente a decisao do spec: ok true quando sonda e mais-novo concordam (ou o inventario nem passa), ok false quando discordam; ramos construtivos citam inv_lsm/lsm_probe/r1_newest sem reabrir corpos"
+   }
+  },
+  {
+   "id": "write_admission",
+   "finding": "RFC-0170 P2.4",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "write_admission_idle",
+   "handlers": [
+    "write_admission_idle"
+   ],
+   "as_is": "write_admission_idle_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+    "test": "write_admission_idle_on_live_stall_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "RFC-0213 P0.1 (RFC-0170 P2.4): o gate idle de write-admission e true exatamente quando nenhum knob de stall esta armado; as-is respondia idle com knobs armados"
+   }
+  },
+  {
+   "id": "write_admit",
+   "finding": "RFC-0170 P2.4",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "write_admit",
+   "handlers": [
+    "ensure_write_admitted_for"
+   ],
+   "as_is": "write_admit_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+    "test": "write_admit_on_live_mem_over_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "hard-admit verdict fully fated over extracted body: StallMem/StallL0/Ok exactly on armed-axis limits; as-is twin refused by DST plant"
+   }
+  },
+  {
+   "id": "wal_sync_required",
+   "finding": "RFC-0171 P1.1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "wal_sync_required",
+   "handlers": [
+    "commit_ops_with"
+   ],
+   "as_is": "wal_sync_required_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+    "test": "wal_sync_required_on_live_client_true_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-11",
+    "why": "RFC-0200 P2.1 data-fate atom: per-commit fdatasync decision is single-valued — client's explicit sync choice when set, else the db-level default (forall-iff over the extracted body, WriteAdmission.lean)"
+   }
+  },
+  {
+   "id": "seq_exhausted",
+   "finding": "RFC-0171 P1.1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "seq_exhausted",
+   "handlers": [
+    "alloc_seq",
+    "open_with_env_sourced"
+   ],
+   "as_is": "seq_exhausted_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+    "test": "seq_exhausted_on_live_ceiling_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "exhaustion verdict fully fated: seq burned past ceiling exactly on seq > max; as-is never reports exhaustion, refused by DST plant"
+   }
+  },
+  {
+   "id": "batch_is_empty",
+   "finding": "RFC-0171 P1.1",
+   "twin_kind": "atom",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "batch_is_empty",
+   "handlers": [
+    "apply_batch_with"
+   ],
+   "as_is": "batch_is_empty_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+    "test": "batch_is_empty_on_live_zero_is_not_ok"
+   },
+   "atom": "batch_is_empty",
+   "atom_reason": {
+    "date": "2026-09-10",
+    "why": "(twenty-ninth if): the empty-batch disposition — a batch of length n routes through the empty path exactly when the machine comparison of n against zero lands in v — proven forall over (n, v) as batch_is_empty_ok_iff_zero in WriteAdmission.lean; the body holds no monadic step, so the iff is the full computation rule of the extracted do-block; the pedradb-core trampoline (group_start in db.rs) matches the kernel decision."
+   }
+  },
+  {
+   "id": "fence_on_sync_fail",
+   "finding": "RFC-0171 P1.1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "fence_on_sync_fail",
+   "handlers": [
+    "commit_ops_with"
+   ],
+   "as_is": "fence_on_sync_fail_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+    "test": "fence_on_sync_fail_on_live_required_fail_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "fence verdict fully fated: trips exactly when sync required and sync failed; as-is never fences, refused by DST plant"
+   }
+  },
+  {
+   "id": "wal_commit_plan",
+   "finding": "RFC-0171 P1.1 script",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "wal_commit_plan",
+   "handlers": [
+    "commit_ops_with"
+   ],
+   "as_is": "wal_commit_plan_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+    "test": "wal_commit_plan_on_live_sync_fail_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "WAL append plan fully fated: AppendSyncFence on sync-needed+failed, AppendSyncApplyOk on sync-needed+ok, AppendApplyOk otherwise; as-is wrong plan, refused by DST plant"
+   }
+  },
+  {
+   "id": "torn_head_empty_log",
+   "finding": "RFC-0171 P1.2",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "torn_head_is_empty_log",
+   "handlers": [
+    "open_with_env_sourced"
+   ],
+   "as_is": "torn_head_is_empty_log_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+    "test": "torn_head_is_empty_log_on_live_large_wal_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "torn-head verdict fully fated: head is empty log exactly when len below tiny bound; as-is calls every head empty, refused by DST plant"
+   }
+  },
+  {
+   "id": "torn_tail_needs_cut",
+   "finding": "RFC-0171 P1.2",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "torn_tail_needs_cut",
+   "handlers": [
+    "open_with_env_sourced"
+   ],
+   "as_is": "torn_tail_needs_cut_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+    "test": "torn_tail_needs_cut_on_live_overhang_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "torn-tail verdict fully fated: cut needed exactly when length overhangs last good offset; as-is never cuts, refused by DST plant"
+   }
+  },
+  {
+   "id": "seq_after_feed",
+   "finding": "RFC-0171 P1.2",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "seq_after_feed",
+   "handlers": [
+    "open_with_env_sourced"
+   ],
+   "as_is": "seq_after_feed_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+    "test": "seq_after_feed_on_live_newer_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "seq-after-feed verdict fully fated: sequence past feed exactly when seq overhangs feed ceiling; as-is never sees past feed, refused by DST plant"
+   }
+  },
+  {
+   "id": "pit_resync_rewrite",
+   "finding": "RFC-0171 P1.2",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "pit_resync_needs_rewrite",
+   "handlers": [
+    "open_with_env_sourced"
+   ],
+   "as_is": "pit_resync_needs_rewrite_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+    "test": "pit_resync_needs_rewrite_on_live_resync_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "pit resync verdict fully fated: rewrite needed exactly when entry is a resync; as-is skips the rewrite, refused by DST plant"
+   }
+  },
+  {
+   "id": "dir_sync_required",
+   "finding": "RFC-0171 P1.1",
+   "twin_kind": "atom",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "dir_sync_required",
+   "handlers": [
+    "sync_dir_if_required"
+   ],
+   "as_is": "dir_sync_required_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+    "test": "dir_sync_required_on_live_sync_is_not_ok"
+   },
+   "atom": "dir_sync_required",
+   "atom_reason": {
+    "date": "2026-09-10",
+    "why": "(thirtieth if): the dir-sync disposition — a rename/create is followed by a directory fsync exactly when open-options sync is on and the flag lands in v — proven forall over (sync, v) as dir_sync_required_ok_iff_sync in WriteAdmission.lean; the body is the pure lift ok sync, so the iff is the full computation rule of the extracted do-block; the pedradb-core trampoline (sync_dir_if_required) matches the kernel decision."
+   }
+  },
+  {
+   "id": "auto_flush_due",
+   "finding": "RFC-0170 P2.4",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/flush_kernel.rs",
+   "twin": "crates/pedradb-core/src/flush_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "auto_flush_due",
+   "handlers": [
+    "maybe_auto_flush"
+   ],
+   "as_is": "auto_flush_due_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/flush_kernel.rs",
+    "test": "auto_flush_due_on_live_over_limit_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "auto-flush verdict fully fated: due exactly when axis armed and bytes reached limit; as-is never flushes on its own, refused by DST plant"
+   }
+  },
+  {
+   "id": "snap_empty",
+   "finding": "RFC-0174 P1.1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/lookup_kernel.rs",
+   "twin": "crates/pedradb-core/src/lookup_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "snap_is_empty",
+   "handlers": [
+    "get_at"
+   ],
+   "as_is": "snap_is_empty_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/lookup_kernel.rs",
+    "test": "snap_is_empty_on_live_zero_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "snapshot-empty verdict fully fated: empty exactly when snapshot seq is zero; as-is never sees empty snapshot, refused by DST plant"
+   }
+  },
+  {
+   "id": "snap_below_watermark",
+   "finding": "RFC-0174 P1.1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/lookup_kernel.rs",
+   "twin": "crates/pedradb-core/src/lookup_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "snap_below_watermark",
+   "handlers": [
+    "get_at"
+   ],
+   "as_is": "snap_below_watermark_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/lookup_kernel.rs",
+    "test": "snap_below_watermark_on_live_below_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "below-watermark verdict fully fated: snapshot below watermark exactly when seq older than earliest visible; as-is never drops below, refused by DST plant"
+   }
+  },
+  {
+   "id": "mem_point_decides",
+   "finding": "RFC-0174 P1.1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/lookup_kernel.rs",
+   "twin": "crates/pedradb-core/src/lookup_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "mem_point_decides",
+   "handlers": [
+    "lookup"
+   ],
+   "as_is": "mem_point_decides_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/lookup_kernel.rs",
+    "test": "mem_point_decides_on_live_hit_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "memtable point verdict fully fated: decision is the hit flag itself; as-is always reports miss, refused by DST plant"
+   }
+  },
+  {
+   "id": "prefer_newer_seq",
+   "finding": "RFC-0174 P1.1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/lookup_kernel.rs",
+   "twin": "crates/pedradb-core/src/lookup_kernel.rs",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "prefer_newer_seq",
+   "handlers": [
+    "lookup"
+   ],
+   "as_is": "prefer_newer_seq_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/lookup_kernel.rs",
+    "test": "prefer_newer_seq_on_live_older_first_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-12",
+    "why": "prefer-newer verdict fully fated: candidate wins exactly when no incumbent or newer seq beats best; as-is prefers everything older included, refused by DST plant"
+   }
+  },
+  {
+   "id": "scale_probes",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "probes de point get sao exatamente o saturating_add citado — levels + L0 cobrindo; as-is anda cada SST vivo (GPS mentindo)"
+   },
+   "finding": "RFC-0176 P0",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/scale_kernel.rs",
+   "twin": "crates/pedradb-core/src/scale_kernel.rs",
+   "aeneas": "scripts/aeneas_scale.sh",
+   "callers": [
+    "crates/pedradb-core/src/scale_kernel.rs"
+   ],
+   "entry": "point_get_probes",
+   "as_is": "point_get_probes_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/scale_kernel.rs",
+    "test": "point_get_probes_on_all_files_walk_is_not_ok"
+   }
+  },
+  {
+   "id": "scale_warm",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "teto do WARM e exatamente a cadeia citada — ceiling 0 e o piso 3 GiB; senao max(piso, 3/4 ceiling) cortado pelo reservado ceiling - 1 GiB; as-is ignora o ceiling (u64::MAX)"
+   },
+   "finding": "RFC-0176 P0",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/scale_kernel.rs",
+   "twin": "crates/pedradb-core/src/scale_kernel.rs",
+   "aeneas": "scripts/aeneas_scale.sh",
+   "callers": [
+    "crates/pedradb-core/src/scale_kernel.rs"
+   ],
+   "entry": "warm_cap_bytes",
+   "as_is": "warm_cap_bytes_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/scale_kernel.rs",
+    "test": "warm_cap_bytes_on_unbounded_warm_is_not_ok"
+   }
+  },
+  {
+   "id": "scale_probes_worst",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "pior caso de producao e exatamente a mesma soma citada — point_get_probes com o trigger cheio do L0; as-is ainda anda cada arquivo vivo"
+   },
+   "finding": "RFC-0176 P1",
+   "twin_kind": "close",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/scale_kernel.rs",
+   "twin": "crates/pedradb-core/src/scale_kernel.rs",
+   "aeneas": "scripts/aeneas_scale.sh",
+   "callers": [
+    "crates/pedradb-core/src/scale_kernel.rs"
+   ],
+   "entry": "probes_worst",
+   "as_is": "probes_worst_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/scale_kernel.rs",
+    "test": "probes_worst_on_all_files_walk_is_not_ok"
+   }
+  },
+  {
+   "id": "scale_predict",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "o relogio previsto e exatamente a cadeia citada — clamps min(hot,SCALE_BPS)/min(noisy,9000), mix hot.tau_ram+(SCALE_BPS-hot).tau_disk, conta u128, taxa (1+eta), try_from com teto u64::MAX; as-is ignora eta"
+   },
+   "finding": "RFC-0176 P1",
+   "twin_kind": "model",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/scale_kernel.rs",
+   "twin": "crates/pedradb-core/src/scale_kernel.rs",
+   "aeneas": "scripts/aeneas_scale.sh",
+   "callers": [
+    "crates/pedradb-core/examples/scale_spectrum.rs"
+   ],
+   "entry": "predict_get_ns",
+   "as_is": "predict_get_ns_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/scale_kernel.rs",
+    "test": "predict_get_ns_on_ignoring_noisy_is_not_ok"
+   }
+  },
+  {
+   "id": "scale_happy_hot",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "fracao quente do caminho feliz e exatamente o gate citado — loja cabendo no warm_cap devolve SCALE_BPS; senao o residual SCALE_HAPPY_COLD_HOT_BPS; as-is diz 100% sempre"
+   },
+   "finding": "RFC-0176 P1",
+   "twin_kind": "model",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/scale_kernel.rs",
+   "twin": "crates/pedradb-core/src/scale_kernel.rs",
+   "aeneas": "scripts/aeneas_scale.sh",
+   "callers": [
+    "crates/pedradb-core/examples/scale_spectrum.rs"
+   ],
+   "entry": "happy_hot_bps",
+   "as_is": "happy_hot_bps_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/scale_kernel.rs",
+    "test": "happy_hot_bps_on_always_hot_is_not_ok"
+   }
+  },
+  {
+   "id": "scale_forecast",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "a tabela RFC-0176 e exatamente a composicao citada — cada campo e o atomo do kernel (sat_mul, level_count callee, point_get_probes, probes_worst, div_ceil, warm_cap_bytes, happy_hot_bps, best/happy/worst_get_ns) e hot e o gate store <= warm_cap; as-is anda todos os arquivos e diz sempre quente"
+   },
+   "finding": "RFC-0176 P1.2",
+   "twin_kind": "model",
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/scale_kernel.rs",
+   "twin": "crates/pedradb-core/src/scale_kernel.rs",
+   "aeneas": "scripts/aeneas_scale.sh",
+   "callers": [],
+   "entry": "scale_forecast",
+   "as_is": "scale_forecast_as_is",
+   "three_teeth": true,
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/scale_kernel.rs",
+    "test": "scale_forecast_on_always_hot_walk_is_not_ok"
+   }
+  }
+ ],
+ "clones": [
+  {
+   "id": "iter_window_merge",
+   "finding": "RFC-0151 P1",
+   "a": "crates/rocksdb-compat/src/iter_kernel.rs",
+   "b": "crates/pedradb-core/src/merge.rs",
+   "agreement": "twin_agrees_with_core_merge_iter_window_on_full_domain",
+   "fns": [
+    "iter_window_keep",
+    "iter_window_keep_as_is"
+   ]
+  }
+ ],
+ "models": [
+  {
+   "crate": "pedradb-core",
+   "test": "recover_model"
+  },
+  {
+   "crate": "pedradb-core",
+   "test": "recover_choose"
+  },
+  {
+   "crate": "pedradb-core",
+   "test": "prefix_model"
+  },
+  {
+   "crate": "pedradb-core",
+   "test": "range_model"
+  },
+  {
+   "crate": "pedradb-core",
+   "test": "changelog_model"
+  },
+  {
+   "crate": "pedradb-core",
+   "test": "bloom_model"
+  },
+  {
+   "crate": "pedradb-core",
+   "test": "scan_model"
+  },
+  {
+   "crate": "pedradb-core",
+   "test": "bloom_filter_model"
+  }
+ ]
 }

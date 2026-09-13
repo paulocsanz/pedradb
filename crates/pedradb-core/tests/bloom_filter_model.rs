@@ -9,8 +9,9 @@
 //! somewhere in the same domain — otherwise the properties above bite nothing.
 //!
 //! The unbounded ∀ versions of T1–T4 are carried by the Kani harnesses
-//! (`#[cfg(kani)] mod kani_proofs` in `src/bloom.rs`), the Verus twin
-//! (`verus/bloom_filter.rs`), and the Aeneas/Lean extract (`formal/aeneas/`).
+//! (`#[cfg(kani)] mod kani_proofs` in `src/bloom.rs`) and the Aeneas/Lean
+//! extract of the production body (`formal/aeneas/`, `BloomKernel.lean`
+//! sorry-free; the Verus twin was deleted 2026-09-09).
 
 use pedradb_core::bloom::{may_contain_mut_extra_probe, may_contain_mut_hash_mismatch};
 use pedradb_core::BloomFilter;

@@ -30,8 +30,10 @@ The `io-uring` 0.7 crate is inherited TCB (its own `unsafe`). `cargo deny`
 advisories cover RUSTSEC. Miri does not emulate a real ring
 (`docs/synthetic-field-residuals.md` P2.5).
 
-RFC-0074 P2.1: `cqe_res_ok` has a Verus twin (`verus/cqe_res.rs`); freeze of
-twin files, not a ring proof. P2.2: `cqe_ring_model_admitted` is always
+RFC-0074 P2.1: `cqe_res_ok` is single-artifact — the kernel body rustc
+links, paid by the Charon+Aeneas extract (`scripts/aeneas_cqe.sh`,
+`CqeKernel.lean`); the `verus/cqe_res.rs` twin and its ghost block were
+deleted 2026-09-09. P2.2: `cqe_ring_model_admitted` is always
 false (no `verus/ring_model.rs`). `submit_sqe` stays TCB.
 
 ## What this crate must not grow

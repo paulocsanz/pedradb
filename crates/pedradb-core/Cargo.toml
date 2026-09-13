@@ -19,6 +19,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
 
 [dependencies]
 crc32c.workspace = true
+pedradb-spec.workspace = true
 thiserror.workspace = true
 parking_lot.workspace = true
 bytes.workspace = true

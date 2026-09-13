@@ -1,0 +1,262 @@
+name = "pedra_kernel"
+defaultTargets = ["Bloom"]
+
+# Optional sibling checkout of Aeneas (see formal/aeneas/PINS.md).
+[[require]]
+name = "aeneas"
+path = "../../../../aeneas/backends/lean"
+
+[[lean_lib]]
+name = "AutoFlushDueDerived"
+
+[[lean_lib]]
+name = "Batch"
+
+[[lean_lib]]
+name = "BatchKernel"
+
+[[lean_lib]]
+name = "Bloom"
+
+[[lean_lib]]
+name = "BloomBridges"
+
+[[lean_lib]]
+name = "BloomKernel"
+
+[[lean_lib]]
+name = "BloomMayContainDerived"
+
+[[lean_lib]]
+name = "Cf"
+
+[[lean_lib]]
+name = "CfKernel"
+
+[[lean_lib]]
+name = "Changelog"
+
+[[lean_lib]]
+name = "ChangelogKernel"
+
+[[lean_lib]]
+name = "Compact"
+
+[[lean_lib]]
+name = "CompactKernel"
+
+[[lean_lib]]
+name = "ComposeConcurrent"
+
+[[lean_lib]]
+name = "ComposeDurabilitySpine"
+
+[[lean_lib]]
+name = "ComposeIterMerge"
+
+[[lean_lib]]
+name = "ComposeProductCrown"
+
+[[lean_lib]]
+name = "ComposeScanCrc"
+
+[[lean_lib]]
+name = "ComposeStorageWrite"
+
+[[lean_lib]]
+name = "CountDerived"
+
+[[lean_lib]]
+name = "Cqe"
+
+[[lean_lib]]
+name = "CqeKernel"
+
+[[lean_lib]]
+name = "Crc"
+
+[[lean_lib]]
+name = "CrcKernel"
+
+[[lean_lib]]
+name = "D1Modelo"
+
+[[lean_lib]]
+name = "D1ModeloKernel"
+
+[[lean_lib]]
+name = "DiskPressure"
+
+[[lean_lib]]
+name = "DiskPressureKernel"
+
+[[lean_lib]]
+name = "EnvCrash"
+
+[[lean_lib]]
+name = "EnvCrashKernel"
+
+[[lean_lib]]
+name = "Flush"
+
+[[lean_lib]]
+name = "FlushAmortBridges"
+
+[[lean_lib]]
+name = "FlushKernel"
+
+[[lean_lib]]
+name = "GroupCommit"
+
+[[lean_lib]]
+name = "GroupCommitKernel"
+
+[[lean_lib]]
+name = "Iter"
+
+[[lean_lib]]
+name = "IterKernel"
+
+[[lean_lib]]
+name = "Key"
+
+[[lean_lib]]
+name = "KeyKernel"
+
+[[lean_lib]]
+name = "Leveling"
+
+[[lean_lib]]
+name = "LevelingKernel"
+
+[[lean_lib]]
+name = "Locktab"
+
+[[lean_lib]]
+name = "LocktabKernel"
+
+[[lean_lib]]
+name = "Lookup"
+
+[[lean_lib]]
+name = "LookupKernel"
+
+[[lean_lib]]
+name = "LsmCompactBridges"
+
+[[lean_lib]]
+name = "LsmCompactDerived"
+
+[[lean_lib]]
+name = "LsmR1"
+
+[[lean_lib]]
+name = "LsmR1Kernel"
+
+[[lean_lib]]
+name = "Magic"
+
+[[lean_lib]]
+name = "MagicKernel"
+
+[[lean_lib]]
+name = "Manifest"
+
+[[lean_lib]]
+name = "ManifestKernel"
+
+[[lean_lib]]
+name = "Merge"
+
+[[lean_lib]]
+name = "MergeKernel"
+
+[[lean_lib]]
+name = "Posix"
+
+[[lean_lib]]
+name = "PosixKernel"
+
+[[lean_lib]]
+name = "Prefix"
+
+[[lean_lib]]
+name = "PrefixKernel"
+
+[[lean_lib]]
+name = "ProbeLadderBridges"
+
+[[lean_lib]]
+name = "ProbeOrder"
+
+[[lean_lib]]
+name = "ProbeOrderCoveringDerived"
+
+[[lean_lib]]
+name = "ProbeOrderKernel"
+
+[[lean_lib]]
+name = "Properties"
+
+[[lean_lib]]
+name = "PropertiesKernel"
+
+[[lean_lib]]
+name = "Reopen"
+
+[[lean_lib]]
+name = "ReopenKernel"
+
+[[lean_lib]]
+name = "Scale"
+
+[[lean_lib]]
+name = "ScaleKernel"
+
+[[lean_lib]]
+name = "ScalePredictDerived"
+
+[[lean_lib]]
+name = "Scan"
+
+[[lean_lib]]
+name = "ScanDecisionBridges"
+
+[[lean_lib]]
+name = "ScanGuardDerived"
+
+[[lean_lib]]
+name = "ScanKernel"
+
+[[lean_lib]]
+name = "VlogGc"
+
+[[lean_lib]]
+name = "VlogGcKernel"
+
+[[lean_lib]]
+name = "WalRecover"
+
+[[lean_lib]]
+name = "WalRecoverKernel"
+
+[[lean_lib]]
+name = "WalState"
+
+[[lean_lib]]
+name = "WalStateKernel"
+
+[[lean_lib]]
+name = "WorkIo"
+
+[[lean_lib]]
+name = "WriteAck"
+
+[[lean_lib]]
+name = "WriteAckKernel"
+
+[[lean_lib]]
+name = "WriteAdmission"
+
+[[lean_lib]]
+name = "WriteAdmissionKernel"

@@ -1,5 +1,13 @@
 //! CQE ownership for the Linux io_uring path (U1 / F203 follow-up).
 //!
+//! **Single artifact (Aeneas-paid):** this file is what `rustc` links and
+//! what the Lean theorems run over — Charon+Aeneas extract of these exact
+//! bodies (`cqe_res_ok` included). No Verus twin or ghost block stands in
+//! for them; `cqe_res_ok` is the term — not a ring model
+//! (`cqe_ring_model_admitted` stays false).
+//!
+//!   ./scripts/aeneas_cqe.sh
+//!
 //! Production Linux `ring::UringState` is the only caller. Bytes on disk, the
 //! ring, and `submit_and_wait` are **caller + axiom**.
 //!
@@ -70,6 +78,13 @@ pub fn cqe_act(user_data: u64, want: u64) -> CqeAct {
     }
 }
 
+/// AS-IS F203/U1: ownership check dropped — any CQE (a leftover from an op
+/// that already returned) is adopted as this op's result.
+#[must_use]
+pub fn cqe_act_as_is(_user_data: u64, _want: u64) -> CqeAct {
+    CqeAct::Take
+}
+
 /// After `submit_and_wait` on the SQE tagged `want`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SubmitCompleteAct {
@@ -93,17 +108,33 @@ pub enum SubmitCompleteAct {
 pub static F208_WAITMORE_AFTER_SUBMIT_ERR: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
+macro_rules! cqe_res_ok_body {
+    ($res:expr) => {
+        $res >= 0
+    };
+}
+
+macro_rules! cqe_res_ok_as_is_body {
+    ($res:expr) => {{
+        let _ = $res;
+        true
+    }};
+}
+
 /// Admit a harvested CQE `res` (RFC-0074). Negative is a kernel errno, not Ok.
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn cqe_res_ok(res: i32) -> bool {
-    res >= 0
+    cqe_res_ok_body!(res)
 }
 
 /// AS-IS: treat any CQE as success (the 0074 hole — false Ok on fsync).
+#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn cqe_res_ok_as_is(_res: i32) -> bool {
-    true
+    cqe_res_ok_as_is_body!(_res)
 }
+
 
 /// RFC-0074 P2.2 / R-uring: a Verus twin of the io_uring *ring* (submit_sqe,
 /// harvest, SQE layout). Always false. `cqe_res_ok` is cataloged; the ring
@@ -164,6 +195,20 @@ mod tests {
         assert_eq!(cqe_act(a, a), CqeAct::Take);
     }
 
+    /// Catalog three-teeth plant (cqe_leftover): a leftover CQE from
+    /// another op must be discarded, never adopted.
+    #[test]
+    fn cqe_act_as_is_adopts_leftover() {
+        let leftover = 0x5f5f; // fsync-tagged CQE left in the ring
+        let want = 0x7777; // the write we are waiting for
+        assert_eq!(cqe_act(leftover, want), CqeAct::Discard);
+        assert_eq!(
+            cqe_act_as_is(leftover, want),
+            CqeAct::Take,
+            "AS-IS dente: ownership check dropped — leftover CQE adopted as this op's result"
+        );
+    }
+
     #[test]
     fn wrapping_skips_zero() {
         let mut c = u64::MAX;
@@ -217,8 +262,8 @@ mod tests {
         {
             let crate_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
             assert!(
-                crate_dir.join("verus/cqe_res.rs").is_file(),
-                "RFC-0074 P2.1: cqe_res_ok twin must exist"
+                crate_dir.join("src/cqe_kernel.rs").is_file(),
+                "RFC-0074 P2.1: cqe_res_ok single artifact — the kernel is the proof body"
             );
             assert!(
                 !crate_dir.join("verus/ring_model.rs").exists(),
@@ -267,13 +312,18 @@ mod tests {
         DmaAfterReturn,
     }
 
-    fn eintr_then_late_cqe(policy: fn(bool, bool) -> SubmitCompleteAct) -> BufLiveness {
+    fn eintr_then_late_cqe(
+        policy: fn(bool, bool) -> SubmitCompleteAct,
+    ) -> BufLiveness {
         // Drain 1: submit_and_wait EINTR, CQ empty.
         match policy(false, false) {
             SubmitCompleteAct::ReturnSubmitErr => BufLiveness::DmaAfterReturn,
             SubmitCompleteAct::WaitMore => {
                 // Still inside submit_sqe; buf live. Late CQE appears.
-                assert_eq!(policy(false, true), SubmitCompleteAct::UseHarvested);
+                assert_eq!(
+                    policy(false, true),
+                    SubmitCompleteAct::UseHarvested
+                );
                 BufLiveness::DmaWhileLive
             }
             SubmitCompleteAct::UseHarvested => {
@@ -344,11 +394,7 @@ mod tests {
             for j in 0..OPS {
                 assert_eq!(
                     cqe_act(tags[j], tags[i]),
-                    if i == j {
-                        CqeAct::Take
-                    } else {
-                        CqeAct::Discard
-                    },
+                    if i == j { CqeAct::Take } else { CqeAct::Discard },
                     "leftover tag {} at op {} must not be adopted",
                     tags[j],
                     tags[i]

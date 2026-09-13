@@ -1,0 +1,15 @@
+[workspace]
+
+[package]
+name = "pedra-aeneas-scan-kernel"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "Shim exposing production sst/scan_kernel.rs (+ wal/crc.rs) to Charon"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+crc32c = "0.6"

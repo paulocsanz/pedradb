@@ -40,7 +40,7 @@ impl BulkRun {
 
     #[must_use]
     pub(crate) fn is_empty(&self) -> bool {
-        self.keys.is_empty()
+        crate::write_admission_kernel::batch_is_empty(self.keys.len() as u64)
     }
 
     #[must_use]

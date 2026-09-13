@@ -1,0 +1,4 @@
+path=crates/pedradb-core/src/write_ack_kernel.rs
+sha256=82fa84e4f9a68469a37b517099ef700cd554e81e6a30150fcae9a77d7334830b
+aeneas=daa85d7
+charon=0.1.232

@@ -121,7 +121,9 @@ impl<R: Read> WalReader<R> {
             // — legitimate only when the rest of the block is zero. A zero
             // header followed by live bytes is corruption and must fail
             // closed instead of silently swallowing the block's records.
-            if rtype_byte == RecordType::Zero as u8 && length == 0 {
+            if rtype_byte == RecordType::Zero as u8
+                && crate::write_admission_kernel::batch_is_empty(length as u64)
+            {
                 if self.block[self.block_cursor + HEADER_SIZE..self.block_end]
                     .iter()
                     .any(|&b| b != 0)
@@ -201,7 +203,10 @@ impl<R: Read> WalReader<R> {
             let payload = &self.block[payload_start..payload_end];
             self.block_cursor = payload_end;
 
-            match fragment_act(FragKind::from_record_type(rtype), self.scratch.is_empty()) {
+            match fragment_act(
+                FragKind::from_record_type(rtype),
+                crate::write_admission_kernel::batch_is_empty(self.scratch.len() as u64),
+            ) {
                 FragAct::Yield => {
                     if rtype == RecordType::Full {
                         self.scratch.clear();
@@ -246,7 +251,7 @@ impl<R: Read> WalReader<R> {
         let mut filled = 0usize;
         while filled < BLOCK_SIZE {
             let n = self.src.read(&mut self.block[filled..])?;
-            if n == 0 {
+            if crate::write_admission_kernel::batch_is_empty(n as u64) {
                 break;
             }
             filled += n;
