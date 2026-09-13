@@ -273,3 +273,4 @@ atom	catalog:ship_stamp	stamp_changed_fate_iff	formal/aeneas/lean/Ship.lean	stam
 atom	catalog:ship_guard	pull_plan_fate_iff	formal/aeneas/lean/Ship.lean	pull_plan
 atom	catalog:c_len	c_len_fate_iff	formal/aeneas/lean/CapiHandles.lean	c_len_admitted
 atom	catalog:bloom_header	bloom_header_fate_iff	formal/aeneas/lean/Bloom.lean	bloom_header_ok
+atom	catalog:bloom_insert	insert_fate_iff	formal/aeneas/lean/Bloom.lean	insert

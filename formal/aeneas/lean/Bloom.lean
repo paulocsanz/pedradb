@@ -231,3 +231,54 @@ theorem bloom_header_fate_iff :
       refine bind_intro ri hri (bind_intro false hb ?_)
       rw [if_neg (by simp)]
       rw [hv]
+
+/-- RFC-0218 P2.2 (átomo `catalog:bloom_insert`, entrada `insert`):
+    o insert escreve EXATAMENTE os k probes citados — inativo devolve
+    o próprio filtro; ativo calcula hash_pair, o nbits citado e roda o
+    loop citado insert_loop sobre bits. O AS-IS pula os probes (falso
+    negativo depois — dente plantado). -/
+theorem insert_fate_iff :
+    ∀ (self : BloomFilter) (key : Slice U8) (r : BloomFilter),
+      (BloomFilter.insert self key = ok r) ↔
+        (∃ b : Bool, BloomFilter.is_active self = ok b ∧
+          ((b = true ∧
+            ∃ h1 h2 : U64, hash_pair key = ok (h1, h2) ∧
+              ∃ v : alloc.vec.Vec U8,
+                BloomFilter.insert_loop self.bits self.k h1 h2
+                  (core.convert.num.FromU64U32.from self.nbits) 0#u32
+                    = ok v ∧
+                  r = { self with bits := v })
+           ∨ (b = false ∧ r = self))) := by
+  intro self key r
+  constructor
+  · intro hval
+    unfold BloomFilter.insert at hval
+    obtain ⟨b, hb, hval⟩ := bind_ok_inv _ _ _ hval
+    refine ⟨b, hb, ?_⟩
+    cases b with
+    | false =>
+      split at hval
+      · next hc => exact absurd hc (by simp)
+      · next hc =>
+        injection hval with hv
+        exact Or.inr ⟨rfl, hv.symm⟩
+    | true =>
+      split at hval
+      · next hc =>
+        obtain ⟨hp, hhp, hval⟩ := bind_ok_inv _ _ _ hval
+        obtain ⟨h1, h2⟩ := hp
+        obtain ⟨v, hvloop, hval⟩ := bind_ok_inv _ _ _ hval
+        injection hval with hr
+        exact Or.inl ⟨rfl, h1, h2, hhp, v, hvloop, hr.symm⟩
+      · next hc => exact absurd hc (by simp)
+  · rintro ⟨b, hb, (⟨rfl, h1, h2, hhp, v, hvloop, hr⟩ | ⟨rfl, hr⟩)⟩
+    · unfold BloomFilter.insert
+      refine bind_intro true hb ?_
+      rw [if_pos rfl]
+      refine bind_intro (h1, h2) hhp ?_
+      refine bind_intro v hvloop ?_
+      rw [hr]
+    · unfold BloomFilter.insert
+      refine bind_intro false hb ?_
+      rw [if_neg (by simp)]
+      rw [hr]

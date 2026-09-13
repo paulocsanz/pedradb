@@ -3217,6 +3217,10 @@
   },
   {
    "id": "bloom_insert",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "insert escreve exatamente os k probes citados — inativo devolve o proprio filtro; ativo calcula hash_pair e roda o loop citado insert_loop sobre bits; as-is pula os probes (falso negativo)"
+   },
    "finding": "T1 (docs/formal/bloom-filter-theorems.md)",
    "twin_kind": "close",
    "single_artifact": true,

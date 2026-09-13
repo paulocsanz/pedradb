@@ -167,7 +167,8 @@ nunca por promoção silenciosa.
    `bloom_may_contain`, `probe_order`, `probe_order_covering`,
    `run_disjoint` — floor_atom 245→266, sel4_coverage **92,47%** —
    status: `todo`
-   (1/21: `bloom_header_fate_iff` feito 2026-09-13)
+   (2/21: `bloom_header_fate_iff` e `insert_fate_iff` feitos
+   2026-09-13)
 
 10. **P2.3** sweep final em worktree DENTRO de `software/` (gates 3×
     GREEN + campaign ok + extracts ok + sorry 0, capturas
