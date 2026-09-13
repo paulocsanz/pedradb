@@ -137,3 +137,39 @@ theorem tx_abort_fate_iff :
       rw [if_neg hn]
       exact bind_intro a hact (bind_intro b heq (bind_intro () hm
         (bind_intro b1 hrc (bind_intro () hm2 rfl))))
+
+/-- RFC-0218 P1.3 11/11 (átomo `catalog:tx_recover`, entrada
+    `tx_recover`): recuperar é EXATAMENTE a decisão citada
+    `leftover_fate` — sobrou tx (não committed) vira aborto cercado
+    com visible zerado; tx committed fica como está. O AS-IS deixa o
+    leftover vivo (visibilidade parcial do mid-apply sobrevive —
+    dente plantado). -/
+theorem tx_recover_fate_iff :
+    ∀ (s r : t1_modelo_kernel.TxState),
+      (t1_modelo_kernel.tx_recover s = ok r) ↔
+        (∃ b : Bool, txn_kernel.leftover_fate s.committed = ok b ∧
+          ((b = true ∧ r = { s with visible := 0#u64, committed := false, aborted := true, fenced := true })
+           ∨ (b = false ∧ r = s))) := by
+  intro s r
+  constructor
+  · intro hval
+    unfold t1_modelo_kernel.tx_recover at hval
+    obtain ⟨b, hlf, hval⟩ := bind_ok_inv _ _ _ hval
+    refine ⟨b, hlf, ?_⟩
+    split at hval
+    · next hb =>
+      injection hval with hv
+      exact Or.inl ⟨hb, hv.symm⟩
+    · next hb =>
+      simp only [Bool.not_eq_true] at hb
+      injection hval with hv
+      exact Or.inr ⟨hb, hv.symm⟩
+  · rintro ⟨b, hlf, (⟨hb, hv⟩ | ⟨hb, hv⟩)⟩
+    · subst hv
+      unfold t1_modelo_kernel.tx_recover
+      refine bind_intro b hlf ?_
+      rw [if_pos hb]
+    · subst hv
+      unfold t1_modelo_kernel.tx_recover
+      refine bind_intro b hlf ?_
+      rw [if_neg (by simp [hb])]

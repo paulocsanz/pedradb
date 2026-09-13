@@ -259,3 +259,4 @@ atom	catalog:should_repair_si_hist	should_repair_si_hist_fate_iff	formal/aeneas/
 atom	catalog:si_read	snapshot_read_plan_fate_iff	formal/aeneas/lean/Si.lean	snapshot_read_plan
 atom	catalog:si_reader	si_reader_beats_fate_iff	formal/aeneas/lean/Si.lean	si_reader_beats
 atom	catalog:tx_abort	tx_abort_fate_iff	formal/aeneas/lean/T1Modelo.lean	tx_abort
+atom	catalog:tx_recover	tx_recover_fate_iff	formal/aeneas/lean/T1Modelo.lean	tx_recover

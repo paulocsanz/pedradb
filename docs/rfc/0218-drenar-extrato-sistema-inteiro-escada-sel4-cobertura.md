@@ -138,13 +138,13 @@ nunca por promoção silenciosa.
    `point_get_prefer`, `point_get_wm`, `snapshot`, `snap_txn_clear`,
    `recover_si_generation`, `should_repair_si_hist`, `tx_abort`,
    `tx_recover`, `rpc_mode` — floor_atom 222→233, sel4_coverage
-   **81,16%** — status: `todo`
-   (10/11: `point_get_prefer_applied_fate_iff`,
+   **81,16%** — status: `done`
+   (11/11 feitos 2026-09-13: `point_get_prefer_applied_fate_iff`,
    `snapshot_needs_txn_meta_clear_fate_iff`, `recover_si_generation_fate_iff`,
    `allow_direct_rpc_fate_iff`, `point_get_watermark_fate_iff`,
    `snapshot_touches_user_key_fate_iff`, `should_repair_si_hist_fate_iff`,
-   `snapshot_read_plan_fate_iff`, `si_reader_beats_fate_iff` e
-   `tx_abort_fate_iff` feitos 2026-09-13)
+   `snapshot_read_plan_fate_iff`, `si_reader_beats_fate_iff`,
+   `tx_abort_fate_iff` e `tx_recover_fate_iff`)
 
 8. **P2.1** periferia ×12: `journal_pin`, `journal_catch_up_pin`,
    `journal_fold_pin`, `journal_next_pin`, `stream_cursor`,
@@ -212,7 +212,7 @@ nunca por promoção silenciosa.
 | P0.4 | p0 | crc/magic/scan ×9 átomo (integridade) | done | r0218 p0.4 átomos 1-9/9 (f8a0b0d2→) | 2026-09-13 |
 | P1.1 | p1 | compact ×7 + lsm_r1 ×3 átomo | done | 10/10 átomo (floor_atom 201→211) | 2026-09-13 |
 | P1.2 | p1 | leveling/merge/index_val/key/prefix ×11 átomo | done | 11/11 átomo (floor_atom 211→222) | 2026-09-13 |
-| P1.3 | p1 | si/snapshot/txn/rpc ×11 átomo | todo | — | 2026-09-13 |
+| P1.3 | p1 | si/snapshot/txn/rpc ×11 átomo | done | 11/11 átomo (floor_atom 222→233) | 2026-09-13 |
 | P2.1 | p2 | journal/stream/fold/ship/capi ×12 átomo | todo | — | 2026-09-13 |
 | P2.2 | p2 | raft/dcs/l28/scale/bloom/probe ×21 átomo | todo | — | 2026-09-13 |
 | P2.3 | p2 | Sweep final + nota EXTRACT.md + flip done | todo | — | 2026-09-13 |
