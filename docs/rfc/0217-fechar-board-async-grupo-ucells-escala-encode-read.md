@@ -403,7 +403,7 @@ dono.
 | P0.1 | p0 | Kernel janela de coleta + wiring real + testes `rfc0217_group_window_*` | done | `010f61fe` + P0.1b `234001f7` | 2026-09-13 |
 | P0.2 | p0 | Attach in-flight: adjudicado — fundido em P2.2 (encode member-side; voos já cheios) | done | `234001f7` | 2026-09-13 |
 | P0.3 | p0 | Meter DIAG Darwin: avg_grp ok; ratio janela fixa PERDE mc2–4 (0,100–0,960 vs clean), GANHA mc6+; default fica off | done | veredito 09-13T09:51Z (perda→P0.3b) | 2026-09-13 |
-| P0.3b | p0 | Early-exit: quiescence fecha cw=42–51µs; janela-≤-voo IMPLEMENTADA (`flight_capped_window_us`, knob default off, EMA do voo, colapso <20µs, twins ok) | blocked e4b | probes 09-13 (`0ba886fe`) + impl 09-13 | 2026-09-13 |
+| P0.3b | p0 | Early-exit: quiescence fecha cw=42–51µs; janela-≤-voo IMPLEMENTADA (`flight_capped_window_us`, knob default off, EMA do voo, colapso <20µs, twins ok) | blocked e4b | probes 09-13 (`0ba886fe`) + impl 09-13 (`9f361642`) | 2026-09-13 |
 | P0.4 | p0 | Meter Linux 3-run quiet: gate-blocked 04:42Z (p149 desconectado); braço flightcap no driver; binário amd64 rebuildado com o knob | doing | — | 2026-09-13 |
 | P0.5 | p0 | Re-adjudicação do dono no Linux: mesmo block do P0.4 | doing | — | 2026-09-13 |
 | P1.1 | p1 | kafka_changelog_flush: flush amortizado | done | `ded231ab` (ratio ≥1,0 = meter Linux e4b) | 2026-09-13 |
