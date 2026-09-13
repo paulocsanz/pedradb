@@ -9,7 +9,7 @@ This crate is the **only** `unsafe` on Pedra's default I/O path
 ### `fdatasync` (`fdatasync_file`, Unix)
 
 - `extern "C" { fn fdatasync(fd: i32) -> i32; }` — POSIX / libSystem
-  `int fdatasync(int)`. Edition 2021 + workspace MSRV 1.75: the block is
+  `int fdatasync(int)`. Edition 2021 + workspace MSRV 1.88: the block is
   **not** `unsafe extern` (stabilized 1.82). The SAFETY comment on the
   block is the signature assertion.
 - Call: `file` is a live `std::fs::File`; `as_raw_fd()` is not stored.

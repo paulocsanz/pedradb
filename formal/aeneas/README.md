@@ -13,4 +13,4 @@ cargo test --manifest-path formal/aeneas/bloom-kernel/Cargo.toml
 ./scripts/aeneas_bloom.sh
 ```
 
-Montanha / raft / store / world extracts are not in this repository.
+Raft / store / world extracts are not in this repository.

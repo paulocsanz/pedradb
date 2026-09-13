@@ -1105,7 +1105,7 @@ def mem_auto_flush_plan
   else ok MemAutoFlushPlan.NotDueKeepMem
 
 /-- [pedra_aeneas_flush_kernel::mem_auto_flush_plan_as_is]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 423:0-429:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 423:0-425:1
     Visibility: public -/
 def mem_auto_flush_plan_as_is
   (_mem_bytes : Std.U64) (_armed : Bool) (_limit : Std.U64) :

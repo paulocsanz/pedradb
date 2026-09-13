@@ -1,4 +1,8 @@
 /target
+**/target/
+formal/aeneas/lean/.lake/
 findings/
 --engine/
 rank-harness.json
+__pycache__/
+*.pyc

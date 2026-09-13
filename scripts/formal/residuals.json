@@ -1,284 +1,328 @@
 {
- "rfc": "0061",
- "updated": "2026-09-13",
- "classes": [
-  "never",
-  "continuous",
-  "parked",
-  "open"
- ],
- "never_floor": [
-  "R-cpu",
-  "R-rustc",
-  "R-verus",
-  "R-crc",
-  "R-deps"
- ],
- "glue": {
-  "kernel_paths": [
-   "crates/pedradb-core/src/bench_gap_kernel.rs",
-   "crates/pedradb-core/src/cf_kernel.rs",
-   "crates/pedradb-core/src/changelog_kernel.rs",
-   "crates/pedradb-core/src/client_axis_kernel.rs",
-   "crates/pedradb-core/src/compact_kernel.rs",
-   "crates/pedradb-core/src/d1_modelo_kernel.rs",
-   "crates/pedradb-core/src/disk_pressure_kernel.rs",
-   "crates/pedradb-core/src/durability_spine_kernel.rs",
-   "crates/pedradb-core/src/env_crash_kernel.rs",
-   "crates/pedradb-core/src/flush_kernel.rs",
-   "crates/pedradb-core/src/get_cost_kernel.rs",
-   "crates/pedradb-core/src/group_commit_kernel.rs",
-   "crates/pedradb-core/src/group_window_kernel.rs",
-   "crates/pedradb-core/src/leftover_page_kernel.rs",
-   "crates/pedradb-core/src/leveling.rs",
-   "crates/pedradb-core/src/lookup_kernel.rs",
-   "crates/pedradb-core/src/lsm_r1_kernel.rs",
-   "crates/pedradb-core/src/manifest_kernel.rs",
-   "crates/pedradb-core/src/probe_order_kernel.rs",
-   "crates/pedradb-core/src/product_crown_kernel.rs",
-   "crates/pedradb-core/src/ratio_curve_kernel.rs",
-   "crates/pedradb-core/src/rmw_sched_kernel.rs",
-   "crates/pedradb-core/src/scale_kernel.rs",
-   "crates/pedradb-core/src/scan_readahead_kernel.rs",
-   "crates/pedradb-core/src/sst/magic_kernel.rs",
-   "crates/pedradb-core/src/sst/scan_kernel.rs",
-   "crates/pedradb-core/src/vlog_gc_kernel.rs",
-   "crates/pedradb-core/src/wal/recover_kernel.rs",
-   "crates/pedradb-core/src/wal/reopen_kernel.rs",
-   "crates/pedradb-core/src/wal/wal_state_kernel.rs",
-   "crates/pedradb-core/src/wal_buffer_kernel.rs",
-   "crates/pedradb-core/src/write_ack_kernel.rs",
-   "crates/pedradb-core/src/write_admission_kernel.rs",
-   "crates/pedradb-core/src/write_cycle_kernel.rs",
-   "crates/pedradb-io-uring/src/cqe_kernel.rs",
-   "crates/pedradb-ops/src/ops_kernel.rs",
-   "crates/pedradb-spec/src/properties_kernel.rs",
-   "crates/rocksdb-compat/src/iter_kernel.rs"
+  "rfc": "0061",
+  "updated": "2026-09-13",
+  "classes": [
+    "never",
+    "continuous",
+    "parked",
+    "open"
   ],
-  "kernel_files": 38,
-  "kernel_loc": 18615,
-  "handler_loc": 69912,
-  "db_rs_extracted": false,
-  "proof_depth": {
-   "extract": 0,
-   "close": 103,
-   "atom": 32,
-   "model": 14,
-   "count": 0
+  "never_floor": [
+    "R-cpu",
+    "R-rustc",
+    "R-verus",
+    "R-crc",
+    "R-deps"
+  ],
+  "glue": {
+    "kernel_paths": [
+      "crates/pedradb-core/src/bench_gap_kernel.rs",
+      "crates/pedradb-core/src/cf_kernel.rs",
+      "crates/pedradb-core/src/changelog_kernel.rs",
+      "crates/pedradb-core/src/client_axis_kernel.rs",
+      "crates/pedradb-core/src/compact_kernel.rs",
+      "crates/pedradb-core/src/d1_modelo_kernel.rs",
+      "crates/pedradb-core/src/disk_pressure_kernel.rs",
+      "crates/pedradb-core/src/durability_spine_kernel.rs",
+      "crates/pedradb-core/src/env_crash_kernel.rs",
+      "crates/pedradb-core/src/flush_kernel.rs",
+      "crates/pedradb-core/src/get_cost_kernel.rs",
+      "crates/pedradb-core/src/group_commit_kernel.rs",
+      "crates/pedradb-core/src/group_window_kernel.rs",
+      "crates/pedradb-core/src/leftover_page_kernel.rs",
+      "crates/pedradb-core/src/leveling.rs",
+      "crates/pedradb-core/src/lookup_kernel.rs",
+      "crates/pedradb-core/src/lsm_r1_kernel.rs",
+      "crates/pedradb-core/src/manifest_kernel.rs",
+      "crates/pedradb-core/src/probe_order_kernel.rs",
+      "crates/pedradb-core/src/product_crown_kernel.rs",
+      "crates/pedradb-core/src/ratio_curve_kernel.rs",
+      "crates/pedradb-core/src/rmw_sched_kernel.rs",
+      "crates/pedradb-core/src/scale_kernel.rs",
+      "crates/pedradb-core/src/scan_readahead_kernel.rs",
+      "crates/pedradb-core/src/sst/magic_kernel.rs",
+      "crates/pedradb-core/src/sst/scan_kernel.rs",
+      "crates/pedradb-core/src/vlog_gc_kernel.rs",
+      "crates/pedradb-core/src/wal/recover_kernel.rs",
+      "crates/pedradb-core/src/wal/reopen_kernel.rs",
+      "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+      "crates/pedradb-core/src/wal_buffer_kernel.rs",
+      "crates/pedradb-core/src/write_ack_kernel.rs",
+      "crates/pedradb-core/src/write_admission_kernel.rs",
+      "crates/pedradb-core/src/write_cycle_kernel.rs",
+      "crates/pedradb-io-uring/src/cqe_kernel.rs",
+      "crates/pedradb-ops/src/ops_kernel.rs",
+      "crates/pedradb-spec/src/properties_kernel.rs",
+      "crates/rocksdb-compat/src/iter_kernel.rs"
+    ],
+    "kernel_files": 38,
+    "kernel_loc": 19034,
+    "handler_loc": 75405,
+    "db_rs_extracted": false,
+    "proof_depth": {
+      "atom": 139,
+      "close": 4,
+      "extract": 8,
+      "model": 0,
+      "count": 7
+    },
+    "kernel_fn_allowlist": {
+      "crates/pedradb-core/src/env_crash_kernel.rs": [
+        "of"
+      ],
+      "crates/pedradb-core/src/wal/wal_state_kernel.rs": [
+        "wal_state_of"
+      ],
+      "crates/pedradb-core/src/d1_modelo_kernel.rs": [
+        "put_lying_never_acks"
+      ],
+      "crates/pedradb-core/src/write_ack_kernel.rs": [
+        "new",
+        "assert_inv",
+        "d1_holds_every_cut",
+        "snapshot"
+      ],
+      "crates/pedradb-core/src/flush_kernel.rs": [
+        "skip_auto_flush"
+      ],
+      "crates/pedradb-core/src/rmw_sched_kernel.rs": [
+        "rmw_group_sched"
+      ],
+      "crates/pedradb-core/src/wal_buffer_kernel.rs": [
+        "should_flush"
+      ],
+      "crates/pedradb-core/src/disk_pressure_kernel.rs": [
+        "disk_pressure_admit",
+        "disk_probe_or_unknown",
+        "compact_allowed_under_pressure",
+        "compact_refuse",
+        "external_write_admitted"
+      ],
+      "crates/pedradb-core/src/lsm_r1_kernel.rs": [
+        "empty",
+        "inv_lsm",
+        "level_distinct",
+        "level_get",
+        "lsm_flush",
+        "lsm_state_of",
+        "lsm_write",
+        "r1_newest"
+      ],
+      "crates/pedradb-core/src/bench_gap_kernel.rs": [
+        "balance_admits",
+        "classify_get",
+        "classify_probes",
+        "cut_token",
+        "diagnose_write",
+        "dominant_phase",
+        "from_token",
+        "growth_token",
+        "json_object",
+        "ns",
+        "predict_get_bottleneck",
+        "predict_probes_bottleneck",
+        "scale_bottleneck",
+        "timed_ns",
+        "token"
+      ],
+      "crates/pedradb-core/src/get_cost_kernel.rs": [
+        "cache_level",
+        "cost_of",
+        "from_token",
+        "get_work",
+        "hit_ns",
+        "mix_ns",
+        "predict_get_composed",
+        "token",
+        "ycsb_key_bytes"
+      ],
+      "crates/pedradb-core/src/scale_kernel.rs": [
+        "best_get_ns",
+        "clients",
+        "expected_avg_group",
+        "grouping_paid",
+        "happy_get_ns",
+        "predict_write",
+        "predict_write_mix",
+        "scale_forecast_with",
+        "token",
+        "walk_distinguishable",
+        "worst_get_ns",
+        "write_forecast_cut",
+        "write_forecast_growth",
+        "write_forecast_next"
+      ]
+    },
+    "single_artifact": 151,
+    "data_fate": 0
   },
-  "kernel_fn_allowlist": {
-   "crates/pedradb-core/src/env_crash_kernel.rs": [
-    "of"
-   ],
-   "crates/pedradb-core/src/wal/wal_state_kernel.rs": [
-    "wal_state_of"
-   ],
-   "crates/pedradb-core/src/d1_modelo_kernel.rs": [
-    "put_lying_never_acks"
-   ],
-   "crates/pedradb-core/src/write_ack_kernel.rs": [
-    "new",
-    "assert_inv",
-    "d1_holds_every_cut",
-    "snapshot"
-   ],
-   "crates/pedradb-core/src/flush_kernel.rs": [
-    "skip_auto_flush"
-   ],
-   "crates/pedradb-core/src/rmw_sched_kernel.rs": [
-    "rmw_group_sched"
-   ],
-   "crates/pedradb-core/src/wal_buffer_kernel.rs": [
-    "should_flush"
-   ],
-   "crates/pedradb-core/src/disk_pressure_kernel.rs": [
-    "disk_pressure_admit",
-    "disk_probe_or_unknown",
-    "compact_allowed_under_pressure",
-    "compact_refuse",
-    "external_write_admitted"
-   ],
-   "crates/pedradb-core/src/lsm_r1_kernel.rs": [
-    "empty",
-    "inv_lsm",
-    "level_distinct",
-    "level_get",
-    "lsm_flush",
-    "lsm_state_of",
-    "lsm_write",
-    "r1_newest"
-   ]
-  },
-  "single_artifact": 149,
-  "data_fate": 0
- },
- "residuals": [
-  {
-   "id": "R-cpu",
-   "title": "CPU / microcode / ISA",
-   "class": "never",
-   "owner": "0061",
-   "close": "another project (ISA proof); Pedra never claims this"
-  },
-  {
-   "id": "R-rustc",
-   "title": "rustc / LLVM",
-   "class": "never",
-   "owner": "0061",
-   "close": "CompCert-class verified compiler; TCB"
-  },
-  {
-   "id": "R-verus",
-   "title": "Verus + Z3 (unverified verifier)",
-   "class": "never",
-   "owner": "0053",
-   "close": "verified verifier; TCB"
-  },
-  {
-   "id": "R-crc",
-   "title": "CRC32C collision axiom",
-   "class": "never",
-   "owner": "0060",
-   "close": "same axiom as VeriBetrKV; not a Pedra theorem. 0076 P2.2 crc_collision_admitted always false (crc_collision_axiom_remains); crc_match_ok is u32 equality, not a collision proof. 0081 P2.2 vlog_crc_collision_axiom_remains (same gate on VALUES.vlog / *.blob). 0082 P2.2 manifest_crc_collision_axiom_remains (LSM + history MANIFEST). 0083 P2.1 wal_open_crc_collision_axiom_remains. 0084 P2.1 checkpoint_crc_collision_axiom_remains. RFC-0155 names existing crc_match fail-closed inhabitant; never_floor row stays"
-  },
-  {
-   "id": "R-deps",
-   "title": "lz4_flex / parking_lot / bytes",
-   "class": "never",
-   "owner": "0061",
-   "close": "verified stubs or extract; de-facto TCB"
-  },
-  {
-   "id": "R-extract",
-   "title": "full-engine extraction into the prover",
-   "class": "open",
-   "owner": "0171",
-   "close": "RFC-0171: production file IS the proved term (no twin copy); db.rs shrinks to Env trampoline; glue.db_rs_extracted stays false (do not dump db.rs). L46 refuse revoked by owner 2026-09-06."
-  },
-  {
-   "id": "R-glue",
-   "title": "non-kernel glue (handler LOC vs kernel LOC; freeze publishes counts)",
-   "class": "continuous",
-   "owner": "0077",
-   "close": "TCB freeze + caller lint + DST oracles; zero-glue is trajectory not a theorem; do not extract db.rs. 0077 P0 extracted SST CRC fate from table.rs decode into scan_kernel (sst_crc_fate; mismatch on modern file is Reject; AS-IS always StripTrailer; crc_mismatch_on_live_sst_is_not_ok). P1.1 sst_block_crc_ok on v5 data blocks (crc_mismatch_on_live_sst_block_is_not_ok: repaired file trailer still Reject). P1.2 Db::open flipped SST is CRC mismatch (crc_mismatch_on_live_sst_db_open_is_not_ok). P2.1 Verus twin sst_crc_fate (catalog sst_crc; scan_guard stays F167). P2.2 zero_glue_admitted always false (zero_glue_is_a_trajectory; db_rs_extracted false). handler glue stays TCB. RFC-0151: every data_fate pair freezes AS-IS + Verus twin + named DST plant (pedra_formal --lint three teeth); RFC-0152: store live Queued RV/AE calls catalog vote/ae_entry; P1.1–P1.36 inbound vote/ae_ack/propose_ack/joint_election/joint_still_active/pending_joint_node/joint_leave_ok/election_grant_from/joint_target/joint_add_target/queued_leave_finish/disk_membership/high_water/participating_member/identity_before_applied/recover_apply/recover_apply_node/recover_truncate/recover_drop_orphan/recover_abort/persist_meta/persist_hist/persist_fence/force_clear/drop_preimages/open_peer_disk/local_id_member/reader_local/discard_uncommitted/discard_leader/removed_step_down/hint_member/drop_repl_slot/drop_sent_through/apply_step; P2.1 rpc_mode three_teeth; P2.2.1 dcs_apply three_teeth inbound CasFailed; P2.2.2 compact may_compact_through inbound missing-term; P2.2.3 snapshot_touches_user_key inbound skip reserved; P2.2.4 si_reader_beats inbound skip lagging ids[0]; P2.2.5 index_val len_pref_value inbound drop NUL sibling; P2.2 remaining 36; db_rs_extracted stays false. RFC-0158 registers catalog pair durable_term (durable_term_if_newer; plant durable_term_rollback_on_live_queued_is_not_ok). RFC-0155 names catalog pair zero_glue (Db::claim_zero_glue; zero_glue_admitted always false; plant zero_glue_admitted_on_live_db_is_not_ok). Residual row stays RFC-0166 P2.4: exec-Verus advanced (write_ack P1.4, lsm_r1 P2.1, t1_modelo P2.2, c1_modelo P2.3) — handler glue still TCB; db_rs_extracted stays false."
-  },
-  {
-   "id": "R-group-glue",
-   "title": "lock / WAL I/O / OS scheduler around group_commit",
-   "class": "continuous",
-   "owner": "0071",
-   "close": "kernel proves group decision + publish-after-WAL 0071 P0 (may_publish_group; failed_wal_sync_does_not_publish_group). P1.1 multi_writer_failed_sync_does_not_publish_group (N-thread finish_group_off_lock). P1.2 after_wal_sync yield + pct_after_failed_fd_does_not_publish. P2.1 Verus twin may_publish_group (catalog group_publish). P2.2 lock_interleavings_admitted always false (claim_lock_interleavings_refused_after_put; AS-IS would admit). Lock/OS-scheduler interleavings of ConcurrentDb stay TCB (0056 P2.1) — campaign not forall π. RFC-0155 names catalog pair lock_interleavings (claim_lock_interleavings_proven; plant claim_lock_interleavings_refused_after_put). Residual row stays 0156 P1.1 planted_chain3_found_by_pct_d3 (chain-3 signature: d=2 0/256 structural, d=3 8/16384; default stays 2; forall_schedules_admitted(3) false)."
-  },
-  {
-   "id": "R-pct",
-   "title": "OS interleavings outside PCT d=2",
-   "class": "continuous",
-   "owner": "0070",
-   "close": "TSan + swarm serial=parallel; not forall schedules. Production claim_forall_schedules fail-closed 0070 P0 (forall_schedules_admitted always false; AS-IS admits pct_depth>=2). P1.1 World/PCT runner (world_pct_run_refuses_forall_schedules; pct_runner_refuses_forall_schedules_at_depth2). P1.2 serial_parallel_is_forall (hashes match is not ∀π; world_swarm_parallel_matches_serial). P2.1 Verus twin forall_schedules_admitted (catalog forall_schedules). P2.2 default PCT depth stays 2 (pct_campaign_default_depth; claim_default_pct_depth_not_raised; world_pct_default_depth_not_raised; pct_runner_default_depth_not_raised; PiPolicy::pct_campaign_default; d>2 remains 0051 planted_depth3_three_teeth; AS-IS default_pct_depth_raised_as_is would admit). Campaign not a theorem of ConcurrentDb interleavings (R-group-glue)"
-  },
-  {
-   "id": "R-fsync-lie",
-   "title": "OS lying on fsync / real torn writes",
-   "class": "continuous",
-   "owner": "0078",
-   "close": "TCG/det_io smoke; recovery kernels cover the model not the drive. 0078 P0: fsync_promotes_pending (Lying does not promote; lying_fsync_does_not_promote_pending) + media_durable_admitted always false (claim_media_durable_refused_after_fsync_ok on live StdEnv put). P1.1 World Lying plant names kernel (world_lying_fsync_plant_names_kernel; crash drops put). P1.2 stacked_fsync_liars_admitted always false (world_run_refuses_stacked_fsync_liars; det_io_status.sh xor RecordingEnv::Lying — RFC-0052). P2.1 Verus twins fsync_promotes_pending + media_durable_admitted (catalog fsync_promote, media_durable). P2.2 fsync_lie_closes_tcg_guest always false (world_fsync_lie_does_not_invent_tcg_guest; R-tcg-guest stays 0079). Do not delete SyncPolicy::Lying. Not an ECC/drive proof. RFC-0155 names existing media_durable fail-closed inhabitant. RFC-0166 P1.1–P1.3 proved the model (crash_legal torn=prefix, Inv-WAL, d1_modelo put Ok survives every legal cut); remaining is the physical drive. Residual row stays Ancora REAL: findings/2026-08-24-tcg-world-smoke/ (C2.3 tcg_and_detio: 215 fdatasync dropadas no guest TCG real, trace hash identico; C2.4 block_eio_fail_closed) + findings/2026-08-27-upstream-fullfsync/ (darwin fsync vs F_FULLFSYNC upstream). Nao e prova de media."
-  },
-  {
-   "id": "R-uring",
-   "title": "io_uring ring (no probable ring model)",
-   "class": "continuous",
-   "owner": "0080",
-   "close": "out of verified profile by contract; PosixFallback; twin blocked. 0080 P0: ring_model_admitted always false; verified_admits_ring(true) false (AS-IS admits want_ring); ConcurrentDb::open_verified + claim_uring_ring_refused_on_verified_open. P1.1 CLI open_verified_db names verified_admits_ring next to posix() (verified_flag_pins_the_profile_and_survives_reopen). P1.2 full_uses_posix_fallback (production_env; full_mode_posix_fallback_when_ring_unavailable). P2.1 ring_twin_admitted always false (no verus/ring_model.rs). P2.2 wal_on_sqe_admitted always false (IoUringFile write/sync_data; production_wal_is_not_on_sqe). Production G1 stays POSIX (0062/0073); do not restore WAL onto the ring. RFC-0155 names existing cqe_res / ring_model_admitted refuse. Residual row stays 0156 P0.3 cqe_leftover_sequence_never_false_ok (64 unique tags; leftover at every position Discard; no-own-CQE always WaitMore; false-Ok only in AS-IS twins)."
-  },
-  {
-   "id": "R-hardware",
-   "title": "field bit-rot / CPU miscompute / media after last scrub",
-   "class": "continuous",
-   "owner": "0093",
-   "close": "CRC+scrub + BitFlip; not ECC proof. crc_match_ok 0076-0092. 0076 P0 WAL reader (crc_mismatch_on_live_wal_is_not_ok). P1.1 SST file trailer via sst_crc_fate (0077 P0; sst_file_crc_uses_crc_match_ok). P1.2 Db::open WAL CRC-field lie (0083). P2.1 Verus twin crc_match_ok (catalog crc_match). P2.2 crc_collision_admitted always false (R-crc never_floor). 0081 P0 vlog read (crc_mismatch_on_live_vlog_is_not_ok). P1.1 numbered blob (crc_mismatch_on_live_blob_is_not_ok). P1.2 Db get_at flipped large value (crc_mismatch_on_live_db_get_large_value_is_not_ok). P2.1 catalog crc_match caller vlog.rs. P2.2 vlog_crc_collision_axiom_remains. 0082 P0 LSM MANIFEST/CURRENT (crc_mismatch_on_live_manifest_is_not_ok). P1.2 history MANIFEST (0086 crc_mismatch_on_live_history_manifest_is_not_ok). P2.1 catalog callers manifest.rs + history.rs. P2.2 manifest_crc_collision_axiom_remains. 0083 P1.2 changelog decode (0085 crc_mismatch_on_live_changelog_is_not_ok; F33 open still Ok). P2.1 wal_open_crc_collision_axiom_remains. P2.2 wal_crc_field_lie_point_in_time_serves_prefix (FailClosed still Crc; PIT reports kind crc). 0084 P0 checkpoint meta (crc_mismatch_on_live_checkpoint_meta_is_not_ok). P1.2 verify_at_rest CHECKPOINT (crc_mismatch_on_live_checkpoint_verify_at_rest_is_not_ok). P2.1 checkpoint_crc_collision_axiom_remains. P2.2 backup_catalog_crc_stays_rfc0060 (CATALOG walk RFC-0060). 0085 P1.1 verify_at_rest CHANGELOG (crc_mismatch_on_live_changelog_verify_at_rest_is_not_ok). P2.1 changelog_crc_collision_axiom_remains. P2.2 changelog_crc_mismatch_open_still_quarantines_f33 (F33 CHANGELOG.corrupt; open still Ok). 0086 P2.2 history_manifest_crc_collision_axiom_remains. 0087 P0 last-record CRC (crc_mismatch_on_live_history_segment_is_not_ok). P2.1 history_segment_crc_collision_axiom_remains. P2.2 history_segment_upload_restore_stay_on_walk (put_segment + verify/db/ops callers). 0088 P0 bloom sidecar scrub (crc_mismatch_on_live_history_bloom_is_not_ok). P1.1 sidecar_may_affect fail-open (crc_mismatch_on_live_history_bloom_sidecar_may_affect_still_walks). P2.1 history_bloom_crc_collision_axiom_remains. P2.2 history_bloom_crc_mismatch_prune_stays_fail_open (scrub fail-closed; prune walks; db.rs stays on sidecar_may_affect). 0089 P0 LATEST crc-hex (crc_mismatch_on_live_history_latest_is_not_ok). P1.2 walk-back refuses named older (crc_mismatch_on_live_history_latest_walkback_refuses_named_older). P2.1 history_latest_crc_collision_axiom_remains. P2.2 history_latest_put_readback_stays_rfc0092 (put identity stays 0092). 0092 P0 put_segment resume (crc_mismatch_on_live_history_put_is_not_ok). P1.2 crc_mismatch_on_live_history_put_names_the_object. P2.1 history_put_resume_requires_byte_equal_after_crc (byte-equal after CRC; P0 tooth stays crc mismatch). P2.2 history_put_crc_collision_axiom_remains. 0093 P0 put_sidecar resume (crc_mismatch_on_live_history_sidecar_put_is_not_ok: XOR same-length remote .bloom payload, .hist intact; AS-IS would no-op). P1.1 crc_mismatch_on_live_history_sidecar_put_names_the_object. P1.2 history_sidecar_put_resume_requires_byte_equal_after_crc (byte-equal after CRC; P0 tooth stays crc mismatch). P2.1 history_sidecar_put_crc_collision_axiom_remains. P2.2 history_sidecar_put_prune_stays_fail_open (prune stays RFC-0088 fail-open). Collision axiom is R-crc; bits after last scrub stay residual"
-  },
-  {
-   "id": "R-unsafe-posix",
-   "title": "unsafe island pedradb-posix (fdatasync FFI)",
-   "class": "continuous",
-   "owner": "0073",
-   "crate": "pedradb-posix",
-   "script": "scripts/miri-unsafe-islands.sh",
-   "safety": "crates/pedradb-posix/SAFETY.md",
-   "close": "SAFETY.md is not a forall proof; Miri ramp is scripts/miri-unsafe-islands.sh. fdatasync_rc_ok 0073 P0 (nonzero rc is not Ok; AS-IS ignores rc; fdatasync_nonzero_rc_is_not_ok). P1.1 fsync_file/sync_dir_fd share the gate (fsync_and_dirfd_share_rc_gate; Darwin fsync_file stays F_FULLFSYNC). P1.2 Miri on safe fn fdatasync_rc_ok_is_safe_predicate. P2.1 Verus twin fdatasync_rc_ok (catalog fdatasync_rc). P2.2 fdatasync_eintr_retry_admitted always false (H1 uncertain; fdatasync_eintr_is_not_retried_as_ok). FFI island stays TCB. RFC-0155 names existing fdatasync_rc fail-closed inhabitant. Residual row stays 0156 P0.1 posix_unsafe_rc_sites_all_gated (scan: every production unsafe FFI rc site gated; new ungated site fails the test)."
-  },
-  {
-   "id": "R-unsafe-uring",
-   "title": "unsafe island pedradb-io-uring (submit_sqe)",
-   "class": "continuous",
-   "owner": "0074",
-   "crate": "pedradb-io-uring",
-   "script": "scripts/miri-unsafe-islands.sh",
-   "safety": "crates/pedradb-io-uring/SAFETY.md",
-   "close": "SAFETY.md is not a forall proof; Miri covers cqe_kernel; ring stays TCB. cqe_res_ok 0074 P0 (negative CQE res is not Ok; AS-IS ignores; linux_cqe_eio_is_not_ok injects -EIO on the test-Linux ring — production G1 is POSIX fdatasync 0073). P1.1 inject asserts kernel. P1.2 production G1 POSIX. P2.1 Verus twin cqe_res_ok (catalog cqe_res; cqe_kernel leaves TCB allowlist). P2.2 cqe_ring_model_admitted always false (no verus/ring_model.rs; cqe_ring_model_is_not_admitted). submit_sqe stays TCB"
-  },
-  {
-   "id": "R-evacuate",
-   "title": "WalRecovery::Evacuate (B2)",
-   "class": "parked",
-   "owner": "0038",
-   "close": "owner decides 0038 P1.1; surface locked to FailClosed | PointInTime (0050 P0.7)"
-  },
-  {
-   "id": "R-vlog-inc",
-   "title": "incremental vlog GC (pick A)",
-   "class": "parked",
-   "owner": "0027",
-   "close": "0026 P0.3 picked C not A"
-  },
-  {
-   "id": "R-vlog-hash",
-   "title": "hash-partitioned value store (pick B)",
-   "class": "parked",
-   "owner": "0028",
-   "close": "0026 P0.3 picked C not B"
-  },
-  {
-   "id": "R-remesure",
-   "title": "quiet-box remesure vs Rocks default sync=false",
-   "class": "parked",
-   "owner": "0041",
-   "close": "quiet host 3x; dirty sandbox is not the official floor; not a proof residual"
-  },
-  {
-   "id": "R-blob-scan",
-   "title": "kvrocks_blob_set / deps_scan official 2x",
-   "class": "parked",
-   "owner": "0054",
-   "close": "owner deprioritized 2026-08-24"
-  },
-  {
-   "id": "R-fd-ceiling",
-   "title": "ycsb_a 2x vs one fdatasync ceiling",
-   "class": "parked",
-   "owner": "0041",
-   "close": "asserted in code; cannot close without dropping G1/peer/shapes"
-  },
-  {
-   "id": "R-pipeline-iff",
-   "title": "Rocks write pipeline (mem off-lock / N-imm / WAL overlap)",
-   "class": "parked",
-   "owner": "0055",
-   "close": "iff P0 numbers obligate"
-  },
-  {
-   "id": "R-tls",
-   "title": "TLS not the lab default / encrypt-at-rest ops-owned",
-   "class": "parked",
-   "owner": "0021",
-   "close": "lab mTLS shipped (RFC-0021); GA default is a product decision — not enabled here"
-  },
-  {
-   "id": "R-fault-grid",
-   "title": "Fault alphabet × op-class grid (exhaustive residual simulation)",
-   "class": "continuous",
-   "owner": "0165",
-   "close": "P0 done: 42 cells decided (37 fireable + 5 vacuous) in pedradb-sim/src/fault_grid.rs; named test fault_grid_every_cell_is_fail_closed (tripped() anti-vacuity; arm permanent only on Meta — probes advisory; Interrupted on Write/Meta one-shot — std retries EINTR forever); lint gate check_fault_grid parses enums from failing.rs (variant without a cell = FAIL; negative probe OpClass::Probe → 7 FAIL); engine bug found+fixed: sub-header torn tail panicked WalReader (slice 7..1) — regression torn_sub_header_tail_after_records_is_clean_eof. P1 media-lie axis (Lying/RecordingEnv short-write/torn tail/RecoverChoice) and P2 crash-point axis (F×C per barrier) + ConcurrentDb remain; grid ≠ ∀π (schedules stay R-group-glue). findings/2026-09-05-fault-grid/"
-  }
- ]
+  "residuals": [
+    {
+      "id": "R-cpu",
+      "title": "CPU / microcode / ISA",
+      "class": "never",
+      "owner": "0061",
+      "close": "another project (ISA proof); Pedra never claims this"
+    },
+    {
+      "id": "R-rustc",
+      "title": "rustc / LLVM",
+      "class": "never",
+      "owner": "0061",
+      "close": "CompCert-class verified compiler; TCB"
+    },
+    {
+      "id": "R-verus",
+      "title": "Verus + Z3 (unverified verifier)",
+      "class": "never",
+      "owner": "0053",
+      "close": "verified verifier; TCB"
+    },
+    {
+      "id": "R-crc",
+      "title": "CRC32C collision axiom",
+      "class": "never",
+      "owner": "0060",
+      "close": "same axiom as VeriBetrKV; not a Pedra theorem. 0076 P2.2 crc_collision_admitted always false (crc_collision_axiom_remains); crc_match_ok is u32 equality, not a collision proof. 0081 P2.2 vlog_crc_collision_axiom_remains (same gate on VALUES.vlog / *.blob). 0082 P2.2 manifest_crc_collision_axiom_remains (LSM + history MANIFEST). 0083 P2.1 wal_open_crc_collision_axiom_remains. 0084 P2.1 checkpoint_crc_collision_axiom_remains. RFC-0155 names existing crc_match fail-closed inhabitant; never_floor row stays"
+    },
+    {
+      "id": "R-deps",
+      "title": "lz4_flex / parking_lot / bytes",
+      "class": "never",
+      "owner": "0061",
+      "close": "verified stubs or extract; de-facto TCB"
+    },
+    {
+      "id": "R-extract",
+      "title": "full-engine extraction into the prover",
+      "class": "open",
+      "owner": "0171",
+      "close": "RFC-0171: production file IS the proved term (no twin copy); db.rs shrinks to Env trampoline; glue.db_rs_extracted stays false (do not dump db.rs). L46 refuse revoked by owner 2026-09-06."
+    },
+    {
+      "id": "R-glue",
+      "title": "non-kernel glue (handler LOC vs kernel LOC; freeze publishes counts)",
+      "class": "continuous",
+      "owner": "0077",
+      "close": "TCB freeze + caller lint + DST oracles; zero-glue is trajectory not a theorem; do not extract db.rs. 0077 P0 extracted SST CRC fate from table.rs decode into scan_kernel (sst_crc_fate; mismatch on modern file is Reject; AS-IS always StripTrailer; crc_mismatch_on_live_sst_is_not_ok). P1.1 sst_block_crc_ok on v5 data blocks (crc_mismatch_on_live_sst_block_is_not_ok: repaired file trailer still Reject). P1.2 Db::open flipped SST is CRC mismatch (crc_mismatch_on_live_sst_db_open_is_not_ok). P2.1 Verus twin sst_crc_fate (catalog sst_crc; scan_guard stays F167). P2.2 zero_glue_admitted always false (zero_glue_is_a_trajectory; db_rs_extracted false). handler glue stays TCB. RFC-0151: every data_fate pair freezes AS-IS + Verus twin + named DST plant (pedra_formal --lint three teeth); RFC-0152: store live Queued RV/AE calls catalog vote/ae_entry; P1.1–P1.36 inbound vote/ae_ack/propose_ack/joint_election/joint_still_active/pending_joint_node/joint_leave_ok/election_grant_from/joint_target/joint_add_target/queued_leave_finish/disk_membership/high_water/participating_member/identity_before_applied/recover_apply/recover_apply_node/recover_truncate/recover_drop_orphan/recover_abort/persist_meta/persist_hist/persist_fence/force_clear/drop_preimages/open_peer_disk/local_id_member/reader_local/discard_uncommitted/discard_leader/removed_step_down/hint_member/drop_repl_slot/drop_sent_through/apply_step; P2.1 rpc_mode three_teeth; P2.2.1 dcs_apply three_teeth inbound CasFailed; P2.2.2 compact may_compact_through inbound missing-term; P2.2.3 snapshot_touches_user_key inbound skip reserved; P2.2.4 si_reader_beats inbound skip lagging ids[0]; P2.2.5 index_val len_pref_value inbound drop NUL sibling; P2.2 remaining 36; db_rs_extracted stays false. RFC-0158 registers catalog pair durable_term (durable_term_if_newer; plant durable_term_rollback_on_live_queued_is_not_ok). RFC-0155 names catalog pair zero_glue (Db::claim_zero_glue; zero_glue_admitted always false; plant zero_glue_admitted_on_live_db_is_not_ok). Residual row stays RFC-0166 P2.4: exec-Verus advanced (write_ack P1.4, lsm_r1 P2.1, t1_modelo P2.2, c1_modelo P2.3) — handler glue still TCB; db_rs_extracted stays false."
+    },
+    {
+      "id": "R-group-glue",
+      "title": "lock / WAL I/O / OS scheduler around group_commit",
+      "class": "continuous",
+      "owner": "0071",
+      "close": "kernel proves group decision + publish-after-WAL 0071 P0 (may_publish_group; failed_wal_sync_does_not_publish_group). P1.1 multi_writer_failed_sync_does_not_publish_group (N-thread finish_group_off_lock). P1.2 after_wal_sync yield + pct_after_failed_fd_does_not_publish. P2.1 Verus twin may_publish_group (catalog group_publish). P2.2 lock_interleavings_admitted always false (claim_lock_interleavings_refused_after_put; AS-IS would admit). Lock/OS-scheduler interleavings of ConcurrentDb stay TCB (0056 P2.1) — campaign not forall π. RFC-0155 names catalog pair lock_interleavings (claim_lock_interleavings_proven; plant claim_lock_interleavings_refused_after_put). Residual row stays 0156 P1.1 planted_chain3_found_by_pct_d3 (chain-3 signature: d=2 0/256 structural, d=3 8/16384; default stays 2; forall_schedules_admitted(3) false)."
+    },
+    {
+      "id": "R-pct",
+      "title": "OS interleavings outside PCT d=2",
+      "class": "continuous",
+      "owner": "0070",
+      "close": "TSan + swarm serial=parallel; not forall schedules. Production claim_forall_schedules fail-closed 0070 P0 (forall_schedules_admitted always false; AS-IS admits pct_depth>=2). P1.1 World/PCT runner (world_pct_run_refuses_forall_schedules; pct_runner_refuses_forall_schedules_at_depth2). P1.2 serial_parallel_is_forall (hashes match is not ∀π; world_swarm_parallel_matches_serial). P2.1 Verus twin forall_schedules_admitted (catalog forall_schedules). P2.2 default PCT depth stays 2 (pct_campaign_default_depth; claim_default_pct_depth_not_raised; world_pct_default_depth_not_raised; pct_runner_default_depth_not_raised; PiPolicy::pct_campaign_default; d>2 remains 0051 planted_depth3_three_teeth; AS-IS default_pct_depth_raised_as_is would admit). Campaign not a theorem of ConcurrentDb interleavings (R-group-glue)"
+    },
+    {
+      "id": "R-fsync-lie",
+      "title": "OS lying on fsync / real torn writes",
+      "class": "continuous",
+      "owner": "0078",
+      "close": "TCG/det_io smoke; recovery kernels cover the model not the drive. 0078 P0: fsync_promotes_pending (Lying does not promote; lying_fsync_does_not_promote_pending) + media_durable_admitted always false (claim_media_durable_refused_after_fsync_ok on live StdEnv put). P1.1 World Lying plant names kernel (world_lying_fsync_plant_names_kernel; crash drops put). P1.2 stacked_fsync_liars_admitted always false (world_run_refuses_stacked_fsync_liars; det_io_status.sh xor RecordingEnv::Lying — RFC-0052). P2.1 Verus twins fsync_promotes_pending + media_durable_admitted (catalog fsync_promote, media_durable). P2.2 fsync_lie_closes_tcg_guest always false (world_fsync_lie_does_not_invent_tcg_guest; R-tcg-guest stays 0079). Do not delete SyncPolicy::Lying. Not an ECC/drive proof. RFC-0155 names existing media_durable fail-closed inhabitant. RFC-0166 P1.1–P1.3 proved the model (crash_legal torn=prefix, Inv-WAL, d1_modelo put Ok survives every legal cut); remaining is the physical drive. Residual row stays Ancora REAL: findings/2026-08-24-tcg-world-smoke/ (C2.3 tcg_and_detio: 215 fdatasync dropadas no guest TCG real, trace hash identico; C2.4 block_eio_fail_closed) + findings/2026-08-27-upstream-fullfsync/ (darwin fsync vs F_FULLFSYNC upstream). Nao e prova de media."
+    },
+    {
+      "id": "R-uring",
+      "title": "io_uring ring (no probable ring model)",
+      "class": "continuous",
+      "owner": "0080",
+      "close": "out of verified profile by contract; PosixFallback; twin blocked. 0080 P0: ring_model_admitted always false; verified_admits_ring(true) false (AS-IS admits want_ring); ConcurrentDb::open_verified + claim_uring_ring_refused_on_verified_open. P1.1 CLI open_verified_db names verified_admits_ring next to posix() (verified_flag_pins_the_profile_and_survives_reopen). P1.2 full_uses_posix_fallback (production_env; full_mode_posix_fallback_when_ring_unavailable). P2.1 ring_twin_admitted always false (no verus/ring_model.rs). P2.2 wal_on_sqe_admitted always false (IoUringFile write/sync_data; production_wal_is_not_on_sqe). Production G1 stays POSIX (0062/0073); do not restore WAL onto the ring. RFC-0155 names existing cqe_res / ring_model_admitted refuse. Residual row stays 0156 P0.3 cqe_leftover_sequence_never_false_ok (64 unique tags; leftover at every position Discard; no-own-CQE always WaitMore; false-Ok only in AS-IS twins)."
+    },
+    {
+      "id": "R-hardware",
+      "title": "field bit-rot / CPU miscompute / media after last scrub",
+      "class": "continuous",
+      "owner": "0093",
+      "close": "CRC+scrub + BitFlip; not ECC proof. crc_match_ok 0076-0092. 0076 P0 WAL reader (crc_mismatch_on_live_wal_is_not_ok). P1.1 SST file trailer via sst_crc_fate (0077 P0; sst_file_crc_uses_crc_match_ok). P1.2 Db::open WAL CRC-field lie (0083). P2.1 Verus twin crc_match_ok (catalog crc_match). P2.2 crc_collision_admitted always false (R-crc never_floor). 0081 P0 vlog read (crc_mismatch_on_live_vlog_is_not_ok). P1.1 numbered blob (crc_mismatch_on_live_blob_is_not_ok). P1.2 Db get_at flipped large value (crc_mismatch_on_live_db_get_large_value_is_not_ok). P2.1 catalog crc_match caller vlog.rs. P2.2 vlog_crc_collision_axiom_remains. 0082 P0 LSM MANIFEST/CURRENT (crc_mismatch_on_live_manifest_is_not_ok). P1.2 history MANIFEST (0086 crc_mismatch_on_live_history_manifest_is_not_ok). P2.1 catalog callers manifest.rs + history.rs. P2.2 manifest_crc_collision_axiom_remains. 0083 P1.2 changelog decode (0085 crc_mismatch_on_live_changelog_is_not_ok; F33 open still Ok). P2.1 wal_open_crc_collision_axiom_remains. P2.2 wal_crc_field_lie_point_in_time_serves_prefix (FailClosed still Crc; PIT reports kind crc). 0084 P0 checkpoint meta (crc_mismatch_on_live_checkpoint_meta_is_not_ok). P1.2 verify_at_rest CHECKPOINT (crc_mismatch_on_live_checkpoint_verify_at_rest_is_not_ok). P2.1 checkpoint_crc_collision_axiom_remains. P2.2 backup_catalog_crc_stays_rfc0060 (CATALOG walk RFC-0060). 0085 P1.1 verify_at_rest CHANGELOG (crc_mismatch_on_live_changelog_verify_at_rest_is_not_ok). P2.1 changelog_crc_collision_axiom_remains. P2.2 changelog_crc_mismatch_open_still_quarantines_f33 (F33 CHANGELOG.corrupt; open still Ok). 0086 P2.2 history_manifest_crc_collision_axiom_remains. 0087 P0 last-record CRC (crc_mismatch_on_live_history_segment_is_not_ok). P2.1 history_segment_crc_collision_axiom_remains. P2.2 history_segment_upload_restore_stay_on_walk (put_segment + verify/db/ops callers). 0088 P0 bloom sidecar scrub (crc_mismatch_on_live_history_bloom_is_not_ok). P1.1 sidecar_may_affect fail-open (crc_mismatch_on_live_history_bloom_sidecar_may_affect_still_walks). P2.1 history_bloom_crc_collision_axiom_remains. P2.2 history_bloom_crc_mismatch_prune_stays_fail_open (scrub fail-closed; prune walks; db.rs stays on sidecar_may_affect). 0089 P0 LATEST crc-hex (crc_mismatch_on_live_history_latest_is_not_ok). P1.2 walk-back refuses named older (crc_mismatch_on_live_history_latest_walkback_refuses_named_older). P2.1 history_latest_crc_collision_axiom_remains. P2.2 history_latest_put_readback_stays_rfc0092 (put identity stays 0092). 0092 P0 put_segment resume (crc_mismatch_on_live_history_put_is_not_ok). P1.2 crc_mismatch_on_live_history_put_names_the_object. P2.1 history_put_resume_requires_byte_equal_after_crc (byte-equal after CRC; P0 tooth stays crc mismatch). P2.2 history_put_crc_collision_axiom_remains. 0093 P0 put_sidecar resume (crc_mismatch_on_live_history_sidecar_put_is_not_ok: XOR same-length remote .bloom payload, .hist intact; AS-IS would no-op). P1.1 crc_mismatch_on_live_history_sidecar_put_names_the_object. P1.2 history_sidecar_put_resume_requires_byte_equal_after_crc (byte-equal after CRC; P0 tooth stays crc mismatch). P2.1 history_sidecar_put_crc_collision_axiom_remains. P2.2 history_sidecar_put_prune_stays_fail_open (prune stays RFC-0088 fail-open). Collision axiom is R-crc; bits after last scrub stay residual"
+    },
+    {
+      "id": "R-unsafe-posix",
+      "title": "unsafe island pedradb-posix (fdatasync FFI)",
+      "class": "continuous",
+      "owner": "0073",
+      "crate": "pedradb-posix",
+      "script": "scripts/miri-unsafe-islands.sh",
+      "safety": "crates/pedradb-posix/SAFETY.md",
+      "close": "SAFETY.md is not a forall proof; Miri ramp is scripts/miri-unsafe-islands.sh. fdatasync_rc_ok 0073 P0 (nonzero rc is not Ok; AS-IS ignores rc; fdatasync_nonzero_rc_is_not_ok). P1.1 fsync_file/sync_dir_fd share the gate (fsync_and_dirfd_share_rc_gate; Darwin fsync_file stays F_FULLFSYNC). P1.2 Miri on safe fn fdatasync_rc_ok_is_safe_predicate. P2.1 Verus twin fdatasync_rc_ok (catalog fdatasync_rc). P2.2 fdatasync_eintr_retry_admitted always false (H1 uncertain; fdatasync_eintr_is_not_retried_as_ok). FFI island stays TCB. RFC-0155 names existing fdatasync_rc fail-closed inhabitant. Residual row stays 0156 P0.1 posix_unsafe_rc_sites_all_gated (scan: every production unsafe FFI rc site gated; new ungated site fails the test)."
+    },
+    {
+      "id": "R-unsafe-uring",
+      "title": "unsafe island pedradb-io-uring (submit_sqe)",
+      "class": "continuous",
+      "owner": "0074",
+      "crate": "pedradb-io-uring",
+      "script": "scripts/miri-unsafe-islands.sh",
+      "safety": "crates/pedradb-io-uring/SAFETY.md",
+      "close": "SAFETY.md is not a forall proof; Miri covers cqe_kernel; ring stays TCB. cqe_res_ok 0074 P0 (negative CQE res is not Ok; AS-IS ignores; linux_cqe_eio_is_not_ok injects -EIO on the test-Linux ring — production G1 is POSIX fdatasync 0073). P1.1 inject asserts kernel. P1.2 production G1 POSIX. P2.1 Verus twin cqe_res_ok (catalog cqe_res; cqe_kernel leaves TCB allowlist). P2.2 cqe_ring_model_admitted always false (no verus/ring_model.rs; cqe_ring_model_is_not_admitted). submit_sqe stays TCB"
+    },
+    {
+      "id": "R-evacuate",
+      "title": "WalRecovery::Evacuate (B2)",
+      "class": "parked",
+      "owner": "0038",
+      "close": "owner decides 0038 P1.1; surface locked to FailClosed | PointInTime (0050 P0.7)"
+    },
+    {
+      "id": "R-vlog-inc",
+      "title": "incremental vlog GC (pick A)",
+      "class": "parked",
+      "owner": "0027",
+      "close": "0026 P0.3 picked C not A"
+    },
+    {
+      "id": "R-vlog-hash",
+      "title": "hash-partitioned value store (pick B)",
+      "class": "parked",
+      "owner": "0028",
+      "close": "0026 P0.3 picked C not B"
+    },
+    {
+      "id": "R-remesure",
+      "title": "quiet-box remesure vs Rocks default sync=false",
+      "class": "parked",
+      "owner": "0041",
+      "close": "quiet host 3x; dirty sandbox is not the official floor; not a proof residual"
+    },
+    {
+      "id": "R-blob-scan",
+      "title": "kvrocks_blob_set / deps_scan official 2x",
+      "class": "parked",
+      "owner": "0054",
+      "close": "owner deprioritized 2026-08-24"
+    },
+    {
+      "id": "R-fd-ceiling",
+      "title": "ycsb_a 2x vs one fdatasync ceiling",
+      "class": "parked",
+      "owner": "0041",
+      "close": "asserted in code; cannot close without dropping G1/peer/shapes"
+    },
+    {
+      "id": "R-pipeline-iff",
+      "title": "Rocks write pipeline (mem off-lock / N-imm / WAL overlap)",
+      "class": "parked",
+      "owner": "0055",
+      "close": "iff P0 numbers obligate"
+    },
+    {
+      "id": "R-tls",
+      "title": "TLS not the lab default / encrypt-at-rest ops-owned",
+      "class": "parked",
+      "owner": "0021",
+      "close": "lab mTLS shipped (RFC-0021); GA default is a product decision — not enabled here"
+    },
+    {
+      "id": "R-fault-grid",
+      "title": "Fault alphabet × op-class grid (exhaustive residual simulation)",
+      "class": "continuous",
+      "owner": "0165",
+      "close": "P0 done: 42 cells decided (37 fireable + 5 vacuous) in pedradb-sim/src/fault_grid.rs; named test fault_grid_every_cell_is_fail_closed (tripped() anti-vacuity; arm permanent only on Meta — probes advisory; Interrupted on Write/Meta one-shot — std retries EINTR forever); lint gate check_fault_grid parses enums from failing.rs (variant without a cell = FAIL; negative probe OpClass::Probe → 7 FAIL); engine bug found+fixed: sub-header torn tail panicked WalReader (slice 7..1) — regression torn_sub_header_tail_after_records_is_clean_eof. P1 media-lie axis (Lying/RecordingEnv short-write/torn tail/RecoverChoice) and P2 crash-point axis (F×C per barrier) + ConcurrentDb remain; grid ≠ ∀π (schedules stay R-group-glue). findings/2026-09-05-fault-grid/"
+    }
+  ]
 }
