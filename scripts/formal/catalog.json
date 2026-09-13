@@ -3246,6 +3246,10 @@
   },
   {
    "id": "bloom_may_contain",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "a consulta decide exatamente no loop citado — inativo e ok true; ativo calcula hash_pair e a resposta e o loop citado may_contain_loop sobre bits; as-is probeia k+1 bits (falso negativo)"
+   },
    "finding": "T1/T4 (docs/formal/bloom-filter-theorems.md)",
    "twin_kind": "close",
    "single_artifact": true,

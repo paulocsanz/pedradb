@@ -282,3 +282,50 @@ theorem insert_fate_iff :
       refine bind_intro false hb ?_
       rw [if_neg (by simp)]
       rw [hr]
+
+/-- RFC-0218 P2.2 (átomo `catalog:bloom_may_contain`, entrada
+    `may_contain`): a consulta decide EXATAMENTE no loop citado —
+    inativo é ok true (sem filtro, tudo pode estar presente); ativo
+    calcula hash_pair e a resposta é o loop citado
+    may_contain_loop sobre bits (false ⇒ ausência certa). O AS-IS
+    probeia k+1 bits (falso negativo — dente plantado). -/
+theorem may_contain_fate_iff :
+    ∀ (self : BloomFilter) (key : Slice U8) (v : Bool),
+      (BloomFilter.may_contain self key = ok v) ↔
+        (∃ b : Bool, BloomFilter.is_active self = ok b ∧
+          ((b = true ∧
+            ∃ h1 h2 : U64, hash_pair key = ok (h1, h2) ∧
+              BloomFilter.may_contain_loop self.bits self.k h1 h2
+                (core.convert.num.FromU64U32.from self.nbits) 0#u32
+                  = ok v)
+           ∨ (b = false ∧ v = true))) := by
+  intro self key v
+  constructor
+  · intro hval
+    unfold BloomFilter.may_contain at hval
+    obtain ⟨b, hb, hval⟩ := bind_ok_inv _ _ _ hval
+    refine ⟨b, hb, ?_⟩
+    cases b with
+    | false =>
+      split at hval
+      · next hc => exact absurd hc (by simp)
+      · next hc =>
+        injection hval with hv
+        exact Or.inr ⟨rfl, hv.symm⟩
+    | true =>
+      split at hval
+      · next hc =>
+        obtain ⟨hp, hhp, hval⟩ := bind_ok_inv _ _ _ hval
+        obtain ⟨h1, h2⟩ := hp
+        exact Or.inl ⟨rfl, h1, h2, hhp, hval⟩
+      · next hc => exact absurd hc (by simp)
+  · rintro ⟨b, hb, (⟨rfl, h1, h2, hhp, hvloop⟩ | ⟨rfl, hv⟩)⟩
+    · unfold BloomFilter.may_contain
+      refine bind_intro true hb ?_
+      rw [if_pos rfl]
+      refine bind_intro (h1, h2) hhp ?_
+      exact hvloop
+    · unfold BloomFilter.may_contain
+      refine bind_intro false hb ?_
+      rw [if_neg (by simp)]
+      rw [hv]
