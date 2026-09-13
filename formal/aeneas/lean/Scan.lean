@@ -773,3 +773,18 @@ theorem sst_block_crc_ok_fate_iff :
     subst hv
     unfold scan_kernel.sst_block_crc_ok wal.crc.crc_match_ok
     rfl
+/-- RFC-0218 P0.4 3/9 (átomo `catalog:zero_glue`): cola residual
+    zero NUNCA é admitida — a constante citada é false (leitura
+    fail-closed: sem cola não há o que ler). O AS-IS acha que a cola
+    sumiu (dente plantado). -/
+theorem zero_glue_admitted_fate_iff :
+    ∀ (v : Bool), (scan_kernel.zero_glue_admitted = ok v) ↔ (v = false) := by
+  intro v
+  constructor
+  · intro hval
+    unfold scan_kernel.zero_glue_admitted at hval
+    injection hval with hv
+    exact hv.symm
+  · rintro hv
+    subst hv
+    rfl

@@ -154,3 +154,9 @@ gates GREEN no commit).
   Build verde. Planta DST `sst_block_crc_uses_crc_match_ok`
   (pedradb-core, exit 0 no worktree). Gate: floor_atom 193→194,
   floor_extract 85→84.
+
+- **zero_glue (3/9)**: constante citada — cola residual zero nunca
+  é admitida (false fixo; as-is acha que sumiu) —
+  `zero_glue_admitted_fate_iff` em `Scan.lean`. Build verde. Planta
+  DST `zero_glue_admitted_on_live_db_is_not_ok` (pedradb-core, exit 0
+  no worktree). Gate: floor_atom 194→195, floor_extract 84→83.

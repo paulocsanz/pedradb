@@ -5526,6 +5526,10 @@
    "dst_plant": {
     "file": "crates/pedradb-core/src/db.rs",
     "test": "zero_glue_admitted_on_live_db_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 3/9 P0.4: zero_glue_admitted como constante citada false — cola residual zero nunca é lida; floor_atom 194→195"
    }
   },
   {
