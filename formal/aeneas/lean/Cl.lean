@@ -13,3 +13,14 @@ theorem keep_body_without_cl_as_is_dente :
     keep_body_without_cl_as_is = ok false := by
   unfold keep_body_without_cl_as_is
   rfl
+
+theorem keep_body_without_cl_fate_iff :
+    ∀ (r : Bool), (keep_body_without_cl = ok r) ↔ r = true := by
+  intro r
+  constructor
+  · intro hval
+    unfold keep_body_without_cl at hval
+    exact (Result.ok.inj hval).symm
+  · intro hr
+    unfold keep_body_without_cl
+    rw [hr]

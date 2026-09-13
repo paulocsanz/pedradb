@@ -1973,6 +1973,10 @@
    "dst_plant": {
     "file": "crates/pedradb-http/src/lib.rs",
     "test": "keep_body_without_cl_on_live_http_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "Gate de Content-Length: request sem CL mantem corpo exatamente quando o kernel responde true (constante honesta extraida); planta DST keep_body_without_cl_on_live_http_is_not_ok no HTTP vivo."
    }
   },
   {

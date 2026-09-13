@@ -185,3 +185,4 @@ atom	catalog:normalize_http_method	normalize_http_method_fate_iff	formal/aeneas/
 atom	catalog:ascii_lower	ascii_lower_fate_iff	formal/aeneas/lean/Auth.lean	ascii_lower
 atom	catalog:ascii_upper	ascii_upper_fate_iff	formal/aeneas/lean/Auth.lean	ascii_upper
 atom	catalog:authorization_matches	authorization_matches_fate_iff	formal/aeneas/lean/Auth.lean	authorization_matches
+atom	catalog:content_length	keep_body_without_cl_fate_iff	formal/aeneas/lean/Cl.lean	keep_body_without_cl
