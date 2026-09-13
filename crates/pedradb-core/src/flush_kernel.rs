@@ -251,6 +251,40 @@ pub fn flusher_gate_plan_as_is(_attached: bool) -> FlusherGate {
     FlusherGate::WorkerDrains
 }
 
+#[cfg(not(verus_keep_ghost))]
+/// RFC-0219 P2.2: whether parked-unflushed bytes are real debt —
+/// at/above one table's worth (`flush_debt_cap`) a writer must
+/// throttle. The trampolines `concurrent.rs await_flush_debt` and
+/// `assist_flush_debt` match this plan.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ParkedDebtPlan {
+    /// Parked bytes at/above the cap — park (bounded) / assist
+    /// (materialize one table inline).
+    DebtAtCap,
+    /// Below the cap — no debt to drain; proceed with the submit.
+    NoDebtBelowCap,
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// Debt EXACTLY when parked-unflushed bytes reach one table's worth.
+#[must_use]
+pub fn parked_debt_plan(parked: u64, cap: u64) -> ParkedDebtPlan {
+    if parked < cap {
+        ParkedDebtPlan::NoDebtBelowCap
+    } else {
+        ParkedDebtPlan::DebtAtCap
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: never throttles — a lone fast writer parks tables faster than
+/// the worker materializes them and the mem layer grows without bound
+/// (the 25M slipstream OOM, v11–v15 — dente plantado).
+#[must_use]
+pub fn parked_debt_plan_as_is(_parked: u64, _cap: u64) -> ParkedDebtPlan {
+    ParkedDebtPlan::NoDebtBelowCap
+}
+
 /// Every way acked keys can still depend on the WAL.
 #[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1012,6 +1046,37 @@ mod tests {
                 "{name}: the raw worker gate left the trampoline"
             );
         }
+    }
+
+    #[test]
+    fn parked_debt_plan_on_live_at_cap_parks() {
+        // RFC-0219 P2.2: debt is real EXACTLY when parked-unflushed bytes
+        // reach one table's worth — the writer throttles (park/assist).
+        // AS-IS never throttles (mem layer grows without bound — the 25M
+        // slipstream OOM — dente).
+        assert_eq!(parked_debt_plan(255, 256), ParkedDebtPlan::NoDebtBelowCap);
+        assert_eq!(parked_debt_plan(256, 256), ParkedDebtPlan::DebtAtCap);
+        assert_eq!(parked_debt_plan(1 << 30, 256), ParkedDebtPlan::DebtAtCap);
+        assert_eq!(
+            parked_debt_plan_as_is(1 << 30, 256),
+            ParkedDebtPlan::NoDebtBelowCap,
+            "AS-IS dente: a table's worth of parked debt never throttles"
+        );
+        let cc = include_str!("concurrent.rs");
+        let afd = named_fn_src(cc, "await_flush_debt").expect("await_flush_debt");
+        assert!(
+            afd.contains("match crate::flush_kernel::parked_debt_plan("),
+            "await_flush_debt must match parked_debt_plan"
+        );
+        let assist = named_fn_src(cc, "assist_flush_debt").expect("assist_flush_debt");
+        assert!(
+            assist.contains("match crate::flush_kernel::parked_debt_plan("),
+            "assist_flush_debt must match parked_debt_plan"
+        );
+        assert!(
+            !assist.contains("parked_unflushed_bytes() < cap"),
+            "the raw debt compare left the trampoline"
+        );
     }
 
     #[test]

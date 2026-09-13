@@ -452,3 +452,20 @@ Atribuição de vermelho: `rfc0167_l0_stall_parks_until_worker_drains`
 falha igual no pai pré-objetivo 80782f6c (isolado, 2+/2 falhas) e no
 HEAD limpo — flaky de timing pré-existente, não regressão do pull
 (evidência em scratch `p22_rfc0167_attribution.txt`).
+
+## P2.2 pull 20 — `parked_debt_plan` (2026-09-13)
+
+Um plano, dois sítios: dívida parked-unflushed é real EXATAMENTE no/acima
+do cap de uma tabela — kernel `parked_debt_plan(parked, cap)`
+(flush_kernel.rs, enum `ParkedDebtPlan::{DebtAtCap, NoDebtBelowCap}`);
+AS-IS nunca freia (OOM slipstream 25M — dente plantado).
+
+Trampolim (concurrent.rs):
+
+- `await_flush_debt` (475) — NoDebtBelowCap → return com note_slept.
+- `assist_flush_debt` (~3313) — NoDebtBelowCap → return.
+
+usize→u64 no trampolim (`as u64`, precedente batch_is_empty). Par:
+`catalog:parked_debt_plan`, teorema `parked_debt_plan_fate_iff`
+(Flush.lean, ∀ sobre (parked, cap)), planta DST
+`parked_debt_plan_on_live_at_cap_parks`. 290/312 = 92,95%.

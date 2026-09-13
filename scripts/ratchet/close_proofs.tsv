@@ -312,3 +312,4 @@ atom	catalog:parked_pop_plan	parked_pop_plan_fate_iff	formal/aeneas/lean/WriteAd
 atom	catalog:group_ack_plan	group_ack_plan_fate_iff	formal/aeneas/lean/GroupCommit.lean	group_ack_plan
 atom	catalog:cf_flush_plan	cf_flush_plan_fate_iff	formal/aeneas/lean/Flush.lean	cf_flush_plan
 atom	catalog:flusher_gate_plan	flusher_gate_plan_fate_iff	formal/aeneas/lean/Flush.lean	flusher_gate_plan
+atom	catalog:parked_debt_plan	parked_debt_plan_fate_iff	formal/aeneas/lean/Flush.lean	parked_debt_plan

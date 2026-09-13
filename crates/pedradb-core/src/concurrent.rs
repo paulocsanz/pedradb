@@ -472,9 +472,15 @@ impl WriteGroup {
                 note_slept(waited);
                 return;
             };
-            if db.read().parked_unflushed_bytes() < cap {
-                note_slept(waited);
-                return;
+            match crate::flush_kernel::parked_debt_plan(
+                db.read().parked_unflushed_bytes() as u64,
+                cap as u64,
+            ) {
+                crate::flush_kernel::ParkedDebtPlan::NoDebtBelowCap => {
+                    note_slept(waited);
+                    return;
+                }
+                crate::flush_kernel::ParkedDebtPlan::DebtAtCap => {}
             }
             if waited >= max_wait {
                 // Flush worker wedged — proceed rather than hang forever;
@@ -3304,8 +3310,12 @@ impl<E: Env> ConcurrentDb<E> {
         let Some(cap) = self.flush_debt_cap() else {
             return;
         };
-        if self.parked_unflushed_bytes() < cap {
-            return;
+        match crate::flush_kernel::parked_debt_plan(
+            self.parked_unflushed_bytes() as u64,
+            cap as u64,
+        ) {
+            crate::flush_kernel::ParkedDebtPlan::NoDebtBelowCap => return,
+            crate::flush_kernel::ParkedDebtPlan::DebtAtCap => {}
         }
         // RFC-0185 P0.3: do not materialize leftover to L0 mid-mc4.
         if self.recently_multi(Duration::from_millis(2)) {

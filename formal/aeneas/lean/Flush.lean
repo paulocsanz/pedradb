@@ -496,3 +496,33 @@ theorem flusher_gate_plan_fate_iff :
   intro attached plan
   unfold flusher_gate_plan
   cases attached <;> simp_all <;> exact eq_comm
+
+/-- RFC-0219 P2.2 (átomo `catalog:parked_debt_plan`): a dívida
+    parked-unflushed é real EXATAMENTE quando alcança uma tabela
+    inteira (cap) — o writer parqueia/assiste; abaixo do cap segue. O
+    AS-IS nunca freia (a camada mem cresce sem limite — o OOM do
+    slipstream 25M — dente plantado). -/
+theorem parked_debt_plan_fate_iff :
+    ∀ (parked cap : U64) (plan : ParkedDebtPlan),
+      (parked_debt_plan parked cap = ok plan) ↔
+        ((parked < cap ∧ plan = ParkedDebtPlan.NoDebtBelowCap) ∨
+          (¬(parked < cap) ∧ plan = ParkedDebtPlan.DebtAtCap)) := by
+  intro parked cap plan
+  simp only [parked_debt_plan]
+  split <;> rename_i c
+  · constructor
+    · intro hval
+      injection hval with hv
+      exact Or.inl ⟨c, hv.symm⟩
+    · rintro (⟨-, hv⟩ | h2)
+      · subst hv
+        rfl
+      · exact absurd c h2.1
+  · constructor
+    · intro hval
+      injection hval with hv
+      exact Or.inr ⟨c, hv.symm⟩
+    · rintro (h1 | ⟨-, hv⟩)
+      · exact absurd h1.1 c
+      · subst hv
+        rfl

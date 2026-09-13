@@ -6991,6 +6991,40 @@
       }
     },
     {
+      "id": "parked_debt_plan",
+      "finding": "RFC-0219 P2.2",
+      "twin_kind": "atom",
+      "atom": "parked_debt_plan",
+      "atom_reason": {
+        "date": "2026-09-13",
+        "why": "RFC-0219 P2.2: a dívida parked-unflushed ser real (parquear/assistir) é decisão do kernel — dívida EXATAMENTE quando os bytes alcançam o cap de uma tabela, provado ∀ sobre (parked, cap) como parked_debt_plan_fate_iff em Flush.lean; o AS-IS nunca freia (camada mem sem limite — OOM slipstream 25M — dente); os trampolins concurrent.rs await_flush_debt e assist_flush_debt fazem match no plano"
+      },
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/flush_kernel.rs",
+      "twin": "crates/pedradb-core/src/flush_kernel.rs",
+      "aeneas": "scripts/aeneas_flush.sh",
+      "callers": [
+        "crates/pedradb-core/src/concurrent.rs"
+      ],
+      "entry": "parked_debt_plan",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/concurrent.rs",
+          "handler": "await_flush_debt"
+        },
+        {
+          "file": "crates/pedradb-core/src/concurrent.rs",
+          "handler": "assist_flush_debt"
+        }
+      ],
+      "as_is": "parked_debt_plan_as_is",
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/flush_kernel.rs",
+        "test": "parked_debt_plan_on_live_at_cap_parks"
+      }
+    },
+    {
       "id": "flush_plan",
       "finding": "F2/F43",
       "twin_kind": "close",
