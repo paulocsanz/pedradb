@@ -278,3 +278,4 @@ atom	catalog:bloom_may_contain	may_contain_fate_iff	formal/aeneas/lean/Bloom.lea
 atom	catalog:probe_order	probe_order_fate_iff	formal/aeneas/lean/ProbeOrder.lean	first_probe_on_equal_lo
 atom	catalog:probe_order_covering	probe_order_covering_fate_iff	formal/aeneas/lean/ProbeOrder.lean	probe_order_covering
 atom	catalog:run_disjoint	run_disjoint_fate_iff	formal/aeneas/lean/ProbeOrder.lean	run_pairwise_disjoint_los
+atom	catalog:scale_probes	point_get_probes_fate_iff	formal/aeneas/lean/Scale.lean	point_get_probes

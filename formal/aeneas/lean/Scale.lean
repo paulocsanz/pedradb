@@ -215,3 +215,37 @@ theorem rfc0176_10b_best_via_best_get_ns :
     unfold SCALE_L0_BEST
     have h : core.num.U64.saturating_add 5#u64 1#u64 = 6#u64 := by native_decide
     simp [h]
+
+/-- Any ok-valued Result bind forces the bound term to be ok. -/
+private theorem bind_ok_inv {α β} (x : Result α) (f : α → Result β) (v : β)
+    (h : Aeneas.Std.bind x f = ok v) : ∃ a, x = ok a ∧ f a = ok v := by
+  cases x with
+  | ok a => exact ⟨a, rfl, h⟩
+  | fail e => exact absurd h (by simp)
+  | div => exact absurd h (by simp)
+
+/-- An ok chain reassembles into an ok bind. -/
+private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : β}
+    (a : α) (hx : x = ok a) (h : f a = ok v) : Aeneas.Std.bind x f = ok v := by
+  rw [hx]
+  exact h
+
+/-- RFC-0218 P2.2 (átomo `catalog:scale_probes`, entrada
+    `point_get_probes`): os probes de um point get são EXATAMENTE o
+    saturating_add citado — levels + L0 cobrindo, sem andar todos os
+    arquivos. O AS-IS anda cada SST vivo (GPS mentindo — dente
+    plantado). -/
+theorem point_get_probes_fate_iff :
+    ∀ (levels l0_covering : U64) (v : U64),
+      (point_get_probes levels l0_covering = ok v) ↔
+        (v = core.num.U64.saturating_add levels l0_covering) := by
+  intro levels l0_covering v
+  constructor
+  · intro hval
+    unfold point_get_probes at hval
+    injection hval with hv
+    exact hv.symm
+  · rintro rfl
+    unfold point_get_probes
+    rfl
+

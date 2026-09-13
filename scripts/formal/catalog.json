@@ -7981,6 +7981,10 @@
   },
   {
    "id": "scale_probes",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "probes de point get sao exatamente o saturating_add citado — levels + L0 cobrindo; as-is anda cada SST vivo (GPS mentindo)"
+   },
    "finding": "RFC-0176 P0",
    "twin_kind": "close",
    "single_artifact": true,
