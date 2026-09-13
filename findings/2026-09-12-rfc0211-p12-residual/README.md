@@ -212,6 +212,33 @@ do inventário rev. 3 é o custo serial per-commit (fdatasync), não
 scheduling; (c) a fatia da escada (admit com histerese) continua
 registrada como achado de produto.
 
+## Errata (2026-09-13, pós-auditoria de cobertura): a coluna async NÃO fdatasynca — o mecanismo nomeado estava errado; o dono corrigido é a seção serial por commit
+
+O veredito acima **mantém** a absolvição do escalonador (provada nos
+dois extremos) e a consequência (b) de que o ataque nº 1 é o custo
+serial per-commit. Mas o mecanismo nomeado — "o fdatasync per-commit
+da coluna de paridade (`PEDRA_PARITY_ASYNC=1` fdatasynca antes do
+Ok)" — é **falso no código**: `PEDRA_PARITY_ASYNC=1` faz
+`opts.set_sync(false)` (`rocksdb-parity-bench/src/engines.rs:83-85`) e
+o caminho async de commit só chama `sync_data` sob plano G1
+(`WalCommitPlan::AppendSync*`; `concurrent.rs:1228-1243`: "Async:
+write() per group, no fdatasync — same process-crash class as RocksDB
+default"). Três evidências independentes refutam a barreira como dono
+do residual async: (1) telemetria Darwin `wal≈0,9–5µs, flsh≈0,03µs`
+por commit — incompatível com fsync; (2) as células mc2–mc8 Darwin
+estão SUB-1 (0,25–0,84 DIAG, sweep P2.1) mesmo com zero barreira; (3)
+o fd-ceiling (família `rfc0041_one_fdatasync_cannot_hit_2x…`) é claim
+da coluna **G1**, nunca da async. Dono corrigido: a **seção serial por
+commit da coluna async** — write() do WAL sob mutex + encode de
+memtable (3,13–14,2µs) + publish sob write-lock — contra o memcpy
+userspace por writer do Rocks `sync=false`. O teste decisivo Linux
+admission-clean continua pendente (mesmo gate-blocked,
+`{SCRATCH}/gate-blocked.txt`), agora com alvo de **decompor a
+distribuição dessa seção no Linux âncora (ext4)**, não de zerar um
+flsh que não existe. O ataque nº 1 (formar grupo em baixa concorrência)
+segue certeiro: amortiza exatamente essa seção serial — e, na G1,
+também a barreira real.
+
 **Parcial 2 — extremo limpo no host Darwin (03:20:03Z), disco real, admissão
 probe-Ok (free » 256MiB, zero escada).** Onda completa rc=0 (27,5s), mesma
 matriz do gate (3 rodadas × clean/rmw × MC/SINGLE/KVR, `PEDRA_PARITY_ASYNC=1`,

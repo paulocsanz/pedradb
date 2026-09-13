@@ -151,3 +151,60 @@ fechado no min** (r3 caiu com load1 4,55; r1/r2 1,390/1,352) ⇒ opt-in
 mantido, residual é dono da P1.2.
 O resto do board: pago (G), read-side (E), pesado-blocked-com-gate-datado
 (C) ou DIAG agendado para Linux 3-run (D).
+
+## Conclusão (rev. 3 — 2026-09-13, com a telemetria nova do 0211)
+
+O antigo buraco nº 1 (escalonamento rmw em writers==ncpu) está
+**adjudicado e fechado como mecanismo**:
+- P0.3: 0,491→0,836 no alvo (mecanismo validado, opt-in);
+- P1.2 (bracket escada↔limpo): o escalonador é **absolvido** do
+  residual — no regime limpo o braço rmw é estritamente melhor no perfil
+  (lwait 10–19µs→0,4µs; mc50 65µs→2,3µs com grupo dobrando) e os ratios
+  não mudam entre braços;
+- P2.1 (sweep mc2/3/6/8, min-of-3): a fronteira cruza entre mc3 e mc6 —
+  delta rmw/clean 0,90×/0,99× (mc2/3) → **1,97×/2,23×** (mc6/8);
+  mecanismo: `avg_grp` 1,0 (clean, sempre) vs 1,04→1,14→2,1→3,1 (rmw,
+  crescendo com writers); guard `deps_apply_batch` 0,91–1,13× passa.
+
+**Novo ranking (dados novos + tudo que já tínhamos):**
+1. **Seção serial por commit na coluna same-class async (write() do WAL
+   sob mutex + encode de memtable + publish; SEM fdatasync — errata
+   abaixo)** — dono do residual 0,836 e candidata a dono dos U-cells
+   1-op em baixa concorrência (ycsb_a/f single→mc4,
+   deps_cache_overwrite, kvrocks_set single/mid). Writers < ~6 não
+   têm com quem agrupar (`avg_grp≈1,0–1,4`): cada commit paga sozinho
+   a seção serial inteira; writers ≥6 o drenar-grupo amortiza e paga
+   (fronteira acima). **Errata (2026-09-13, pós-veredito P1.2):** a
+   coluna async NÃO fdatasynca antes do Ok — `PEDRA_PARITY_ASYNC=1` →
+   `set_sync(false)` (`rocksdb-parity-bench/src/engines.rs:83`) e o
+   commit async só sincroniza sob plano G1 (`concurrent.rs:1228`:
+   "Async: write() per group, no fdatasync"). O fd-ceiling é
+   mecanismo EXCLUSIVO da G1. Telemetria Darwin (flsh≈0, wal≈1µs) com
+   células mc2–mc8 SUB-1 (0,25–0,84 DIAG, sweep P2.1) prova que o dono
+   do residual não é barreira — ele existe sem barreira nenhuma. Dono:
+   seção serial por commit (write() sob mutex do WAL + encode 3–14µs +
+   publish) contra o memcpy userspace por writer do Rocks `sync=false`.
+   Distribuição no Linux âncora: pendente do mesmo gate-blocked.
+   **Ataque nº 1: formar grupo em baixa concorrência** — janela de
+   coleta bounded no líder do grupo (~dezenas de µs) + attach de
+   chegadas ao grupo in-flight (commit que chega durante o voo entra
+   no mesmo write/barrier). Na async amortiza write()+encode em grupo;
+   na G1 amortiza também a barreira real. Alvo medível: `avg_grp`
+   mc2–mc4 saindo de 1,0–1,4 → ≥2 e o ratio cruzando 1,0 no regime
+   âncora (default 0,491; rmw 0,836). Telemetria: a mesma PHASE/wg
+   das ondas p211p/p211q.
+2. **Encode memtable por commit (`mem=3,13–14,2µs`)** — segundo dono
+   quantificado (kvrocks_set_mc50: −0,180 do déficit é mem amortizado).
+   Ataque: encode no membro antes de entrar no grupo (off do caminho do
+   líder) ou batch-encode no apply do grupo.
+3. **Escada de admissão em disco pequeno (banda Reclaim)** — achado de
+   produto: custo por commit de dezenas de ms (macOS 14–18ms; Linux
+   tmpfs 6–7ms) + parks 230–310ms/op; 20–60× no tempo de célula.
+   Ataque: admit com histerese/cache curto, não por commit.
+4. **Read-side (−18%, F8)** e frentes E/C/D inalteradas da rev. 2.
+
+Nada ignorado: (G) pagas não re-medir; (C) blocked-com-gate-datado; (D)
+U-cells DIAG pendentes do mesmo gate-blocked
+(`{SCRATCH}/gate-blocked.txt`, 2026-09-13T03:35Z); o meter oficial das
+ondas DIAG deste ciclo agenda sozinho quando o host brasil reconectar
+(deploy `:p211v` pending + monitor no ar).
