@@ -286,3 +286,46 @@ theorem try_rotate_step_rotates_iff_pins_clear_segment_live :
           (fun e => ok (!e))) = ok true
     rw [hr, if_neg (by simp)]
     exact bind_intro _ he rfl
+/-- RFC-0218 P0.3 4/6 (átomo `catalog:flush_plan`): o plano de
+    flush é EXATAMENTE a árvore de dois ifs citada — imutável
+    presente termina-a-e-flusha; sem imutável, memtable vazio só
+    rotaciona; memtable vivo escreve SST antes de rotacionar. O AS-IS
+    perde a cauda (dente plantado no domínio finito). -/
+theorem flush_plan_fate_iff :
+    ∀ (mem_empty : Bool) (imm_present : Bool) (p : FlushPlan),
+      (flush_plan mem_empty imm_present = ok p) ↔
+        ((imm_present = true ∧ p = FlushPlan.FinishImmThenFlush) ∨
+          (imm_present = false ∧ mem_empty = true ∧
+            p = FlushPlan.RotateOnly) ∨
+          (imm_present = false ∧ mem_empty = false ∧
+            p = FlushPlan.WriteSstThenRotate)) := by
+  intro mem_empty imm_present p
+  constructor
+  · intro hval
+    simp only [flush_plan] at hval
+    split at hval
+    · next hi =>
+      exact Or.inl ⟨hi, by injection hval with hv; exact hv.symm⟩
+    · next hi =>
+      simp only [Bool.not_eq_true] at hi
+      split at hval
+      · next hm =>
+        exact Or.inr (Or.inl ⟨hi, hm, by injection hval with hv; exact hv.symm⟩)
+      · next hm =>
+        simp only [Bool.not_eq_true] at hm
+        refine Or.inr (Or.inr ?_)
+        exact ⟨hi, hm, by injection hval with hv; exact hv.symm⟩
+  · rintro (⟨hi, hv⟩ | ⟨hi, hm, hv⟩ | ⟨hi, hm, hv⟩)
+    · simp only [flush_plan]
+      rw [if_pos hi]
+      subst hv
+      rfl
+    · simp only [flush_plan]
+      rw [if_neg (by simp only [Bool.not_eq_true]; exact hi), if_pos hm]
+      subst hv
+      rfl
+    · simp only [flush_plan]
+      rw [if_neg (by simp only [Bool.not_eq_true]; exact hi),
+          if_neg (by simp only [Bool.not_eq_true]; exact hm)]
+      subst hv
+      rfl

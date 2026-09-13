@@ -108,3 +108,11 @@ gates GREEN no commit).
   (injection direta; as-is devolve true sem freio). Build verde.
   Planta DST `rebuild_budget_bounds_materialization` (pedradb-core,
   exit 0). Gate: floor_atom 188→189, floor_extract 90→89.
+
+- **flush_plan (4/6)**: árvore de dois ifs citada — imm presente
+  termina-e-flusha; sem imm, memtable vazio só rotaciona; memtable
+  vivo escreve SST antes de rotacionar — `flush_plan_fate_iff` em
+  `Flush.lean` (3 ramos; forward split at hval, reverso rw
+  if_pos/if_neg com Bool.not_eq_true). Build verde. Planta DST
+  `theorem_flush_plan_on_finite_domain` (pedradb-core, exit 0). Gate:
+  floor_atom 189→190, floor_extract 89→88.

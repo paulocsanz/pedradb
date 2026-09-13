@@ -6210,7 +6210,11 @@
     "file": "crates/pedradb-core/src/flush_kernel.rs",
     "test": "theorem_flush_plan_on_finite_domain"
    },
-   "three_teeth": true
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 4/6 P0.3: flush_plan como árvore de dois ifs citada — imm presente termina-e-flusha, memtable vazio rotaciona, vivo escreve SST antes; floor_atom 189→190"
+   }
   },
   {
    "id": "first_install",

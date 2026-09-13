@@ -96,9 +96,7 @@ nunca por promoção silenciosa.
    `changelog`, `changelog_budget`, `changelog_should_store`,
    `flush_plan`, `first_install`, `dictionary_link` — floor_atom
    186→192 — status: `todo`
-   (3/6: `changelog_needs_sst_rebuild_fate_iff`,
-   `changelog_should_store_fate_iff` e
-   `changelog_rebuild_within_budget_fate_iff` feitos 2026-09-13)
+   (4/6: átomos changelog ×3 + `flush_plan_fate_iff` feitos 2026-09-13)
 
 4. **P0.4** CRC/mágica/scan ×9 (`Scan.lean`/`Crc.lean`/`MagicKernel`):
    `scan_guard`, `sst_block_crc`, `sst_crc`, `zero_glue`,
