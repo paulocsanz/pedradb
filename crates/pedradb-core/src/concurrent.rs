@@ -3435,6 +3435,31 @@ impl<E: Env> ConcurrentDb<E> {
         self.inner.write().compact_leveled()
     }
 
+    /// Native compaction filter (RFC-0217 P1.2): flush first (mem keys are
+    /// filtered too), then a whole-keyspace rewrite per family with the
+    /// decision applied inside the merge — removed keys never reach an
+    /// output SST.
+    ///
+    /// # Errors
+    /// SST / MANIFEST I/O.
+    pub fn compact_filter(
+        &self,
+        decision: &mut dyn FnMut(&str, &[u8], &[u8]) -> crate::merge::CompactFilterDecision,
+    ) -> Result<()> {
+        self.flush()?;
+        self.inner.write().compact_filter_families(decision)
+    }
+
+    /// Ingest an external Pedra SST into L0 (RFC-0217 P1.2): fresh global
+    /// sequence numbers, direct SST write + install — no WAL, no memtable.
+    /// Durable MANIFEST point before Ok.
+    ///
+    /// # Errors
+    /// Open/decode of `path`; SST or MANIFEST I/O.
+    pub fn ingest_sst_file(&self, path: &std::path::Path, family: &str) -> Result<()> {
+        self.inner.write().ingest_sst_file(path, family)
+    }
+
     /// Compact only SSTs of `cf` (RFC-0065 P0.2). Flushes first so mem keys
     /// of that family are in L0; other families' live files are not rewritten.
     ///

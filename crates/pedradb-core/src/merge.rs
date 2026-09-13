@@ -753,6 +753,26 @@ pub(crate) fn bound_as_ref(b: &Bound<Bytes>) -> Bound<&[u8]> {
     }
 }
 
+/// Decision of a native compaction filter (RFC-0217 P1.2): applied per
+/// user-key run on the newest version while merging, so removed keys never
+/// reach the output SST.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CompactFilterDecision {
+    /// Emit the run unchanged.
+    Keep,
+    /// Remove the user key: the run is replaced by ONE point tombstone at
+    /// its newest sequence (older versions drop). The tombstone keeps the
+    /// manifest seq floor above the WAL frames of the removed key — a
+    /// traceless drop would let WAL replay resurrect it on reopen. Safe on
+    /// a rewrite whose inputs cover the key's whole keyspace (the F177
+    /// [`CompactGcOptions::bottommost`] condition) — a partial job would
+    /// resurrect an older version from a file outside the input.
+    Remove,
+    /// Replace the newest value of the key (older versions pass through;
+    /// retention GC handles them).
+    Change(Bytes),
+}
+
 /// Options for version GC during compaction (RFC-0009 P1.3 / open-items §2.1).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CompactGcOptions {

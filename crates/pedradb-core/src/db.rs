@@ -972,6 +972,9 @@ impl<E: Env> ParallelMergeEnv<E> {
             spec.split_target,
             spec.chunk_budget,
             spec.kit.as_ref(),
+            // RFC-0217 P1.2: the filter route is the sequential whole-family
+            // rewrite (`Db::compact_filter`); the parallel seam never sees one.
+            None,
         )
         .map(|ts| {
             ts.into_iter()
@@ -1063,6 +1066,7 @@ impl<E: Env> PreparedL0Compact<E> {
                 self.split_target,
                 self.chunk_budget,
                 self.kit.as_ref(),
+                None,
             ),
         };
         merged.map(|ts| {
@@ -6398,6 +6402,95 @@ impl<E: Env> Db<E> {
         Ok(())
     }
 
+    /// Ingest an external Pedra SST directly into L0 (RFC-0217 P1.2): the
+    /// file's entries get fresh global sequence numbers above
+    /// `last_sequence` (local order preserved — newest stays newest), are
+    /// re-encoded into a new SST in the DB directory and installed — no WAL
+    /// write, no memtable, no flush pipeline. Durable MANIFEST point before
+    /// Ok: the ingested file is the only copy (ingest semantics, unlike
+    /// flush there is no WAL window to fall back on), so visibility
+    /// ([`Self::publish_sequence`]) only happens after the manifest write.
+    ///
+    /// Rocks `allow_write_flush` parity: lookups are mem-first without a
+    /// sequence comparison against SSTs, so any pending memtable/bulk state
+    /// would shadow ingested keys that carry *higher* sequences. Pending
+    /// state is flushed first (no-op when nothing is pending, the common
+    /// ingest shape).
+    ///
+    /// # Errors
+    /// Open/decode of `path`; SST or MANIFEST I/O; sequence exhaustion.
+    pub fn ingest_sst_file(&mut self, path: &std::path::Path, family: &str) -> Result<()> {
+        if !crate::write_admission_kernel::batch_is_empty(self.mem.len() as u64)
+            || self.imm.is_some()
+            || !self.bulk_runs.is_empty()
+        {
+            self.flush()?;
+        }
+        let table = SstTable::open_on(&self.env, path)?;
+        let n = table.len() as u64;
+        if crate::write_admission_kernel::batch_is_empty(n) {
+            return Ok(());
+        }
+        let seq0 = self.next_seq.fetch_add(n, Ordering::Relaxed);
+        let top = seq0.saturating_add(n.saturating_sub(1));
+        if crate::write_admission_kernel::seq_exhausted(top, MAX_SEQUENCE_NUMBER) {
+            self.next_seq.fetch_sub(n, Ordering::Relaxed);
+            return Err(CoreError::Internal(
+                "sequence number space exhausted".into(),
+            ));
+        }
+        // RFC-0217 P1.1 hazard (3): the ingested range is WAL-less — the
+        // rotate guard must force a publish that covers it.
+        self.walless_seq_high = self.walless_seq_high.max(top);
+        let file_num = self.alloc_file_num();
+        let tmp_path = self.dir.join(format!("{file_num:06}.sst.tmp"));
+        let final_path = self.dir.join(format!("{file_num:06}.sst"));
+        // Iteration is internal order (user asc, seq desc): entry i gets
+        // `top - i`, so the newest version of each key keeps the highest
+        // sequence and per-key recency order is preserved.
+        let mut stream = table.iter_internal_between(None, None);
+        let mut rank = 0u64;
+        let entries = std::iter::from_fn(move || match stream.next_entry() {
+            Ok(Some((ik, val))) => {
+                let seq = top - rank;
+                rank += 1;
+                Some(Ok((InternalKey::new(ik.user_key, seq, ik.kind), val)))
+            }
+            Ok(None) => None,
+            Err(e) => Some(Err(e)),
+        });
+        let written = match crate::sst::write_sst_try_sorted_on(
+            &self.env,
+            &tmp_path,
+            entries,
+            table.len(),
+        ) {
+            Ok(t) => t,
+            Err(e) => {
+                let _ = self.env.remove_file(&tmp_path);
+                return Err(e);
+            }
+        };
+        if let Err(e) = self.env.rename(&tmp_path, &final_path) {
+            let _ = self.env.remove_file(&tmp_path);
+            return Err(CoreError::Io(e));
+        }
+        let table = written.with_path(final_path).with_cf(family.to_string());
+        if let Err(e) = self.install_ssts_at_levels(vec![(table, file_num)], &[0]) {
+            return Err(self.fence_io_err(e));
+        }
+        // Durable point: MANIFEST before Ok, then visibility. A failure
+        // after install leaves the in-memory inventory ahead of the
+        // MANIFEST (dirty window — the next flush/publish reconciles);
+        // Err is returned, so the caller keeps the external file.
+        if let Err(e) = self.persist_manifest() {
+            return Err(self.fence_io_err(e));
+        }
+        self.publish_sequence(top);
+        self.bytes_ingested = self.bytes_ingested.saturating_add(n);
+        Ok(())
+    }
+
     /// Restore an imm memtable after a failed off-lock flush ([`crate::concurrent::ConcurrentDb`]).
     ///
     /// If another imm is already present (dual-flush race), fold this table's
@@ -7098,6 +7191,66 @@ impl<E: Env> Db<E> {
         }
     }
 
+    /// Native compaction filter (RFC-0217 P1.2): whole-keyspace rewrite per
+    /// family with `decision` applied inside the merge — removed keys never
+    /// reach the output SST (no whole-DB materialization, no WAL delete
+    /// round-trip). SSTs only: flush first ([`ConcurrentDb::compact_filter`])
+    /// so mem keys are filtered too.
+    ///
+    /// The decision sees the newest version of each user-key run; non-Value
+    /// newest versions (tombstones) pass through. `Remove` replaces the run
+    /// with one tombstone at the run's newest seq (durable no-resurrection:
+    /// a traceless drop would lower the manifest seq floor and let WAL
+    /// replay resurrect the key on reopen) — see [`FilterMergeSource`].
+    /// Point / count read caches are invalidated wholesale on return.
+    ///
+    /// # Errors
+    /// I/O while rewriting; disk pressure (refuse).
+    pub fn compact_filter_families(
+        &mut self,
+        decision: &mut dyn FnMut(&str, &[u8], &[u8]) -> crate::merge::CompactFilterDecision,
+    ) -> Result<()> {
+        if crate::write_admission_kernel::batch_is_empty(self.ssts.len() as u64) {
+            return Ok(());
+        }
+        let probe = crate::env::probe_available_bytes(&self.env, &self.dir);
+        if let Some((available, need)) = crate::disk_pressure_kernel::compact_refuse(probe) {
+            return Err(CoreError::DiskPressure { available, need });
+        }
+        crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::BEFORE_COMPACT_WRITE)?;
+        // One rewrite per family over that family's whole file set; the
+        // family's keyspace is fully covered, so `bottommost` is asserted.
+        let families: Vec<String> = self
+            .ssts
+            .iter()
+            .map(|t| self.compact_family_key(t).to_string())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        for family in families {
+            let input_idxs: Vec<usize> = self
+                .ssts
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| self.compact_family_key(t) == family)
+                .map(|(i, _)| i)
+                .collect();
+            let mut options = CompactOptions::default();
+            options.gc.bottommost = true;
+            match self.rewrite_ssts(input_idxs, MAX_LSM_LEVEL, options, Some(decision)) {
+                Ok(()) => {}
+                Err(e) => return Err(self.fence_io_err(e)),
+            }
+        }
+        // The rewrites changed point answers behind the point / last-get /
+        // count caches without passing through the write path (the old
+        // WAL-delete emulation got this invalidation from the deletes):
+        // reset wholesale — compact-filter is a rare, heavy operation.
+        self.point_cache_reset.store(true, Ordering::Relaxed);
+        self.invalidate_read_answers(self.last_sequence());
+        Ok(())
+    }
+
     /// Snapshot-safe version GC piggybacked on compaction (open-items §2.1 option b).
     ///
     /// Uses the oldest open [`SnapshotPin`] as the Rocks-style GC floor. With no
@@ -7158,6 +7311,7 @@ impl<E: Env> Db<E> {
                 gc: crate::merge::CompactGcOptions::for_oldest_snapshot(floor),
                 max_input_files: None,
             },
+                            None,
         )?;
         let mut after: u64 = 0;
         for t in &self.ssts {
@@ -7336,7 +7490,7 @@ impl<E: Env> Db<E> {
                 .map(|(i, _)| i)
                 .collect();
             if !crate::write_admission_kernel::batch_is_empty(input_idxs.len() as u64) {
-                self.rewrite_ssts(input_idxs, 1, options)?;
+                self.rewrite_ssts(input_idxs, 1, options, None)?;
             }
         }
         Ok(())
@@ -7721,7 +7875,7 @@ impl<E: Env> Db<E> {
             {
                 continue;
             }
-            self.rewrite_ssts(input_idxs, to_level, options)?;
+            self.rewrite_ssts(input_idxs, to_level, options, None)?;
         }
         Ok(())
     }
@@ -7766,7 +7920,7 @@ impl<E: Env> Db<E> {
                 .unwrap_or(1)
                 .max(1)
         };
-        self.rewrite_ssts(input_idxs, to_level, CompactOptions::default())
+        self.rewrite_ssts(input_idxs, to_level, CompactOptions::default(), None)
     }
 
     /// Snapshot of live SST files (name, level, CF, size, bounds).
@@ -7802,16 +7956,22 @@ impl<E: Env> Db<E> {
         input_idxs: Vec<usize>,
         to_level: u32,
         options: CompactOptions,
+        filter: Option<
+            &mut dyn FnMut(&str, &[u8], &[u8]) -> crate::merge::CompactFilterDecision,
+        >,
     ) -> Result<()> {
         let num = self.next_file_num;
         // F177: tombstone dropping is only visibility-safe when this rewrite
         // covers **every** live SST — otherwise an older version in a file
         // outside the input resurrects once the tombstone is dropped. The
         // landing level is irrelevant: if the input is the whole DB, the
-        // output is the whole DB. Partial rewrites keep tombstones.
+        // output is the whole DB. Partial rewrites keep tombstones. A
+        // caller-asserted `bottommost` (whole keyspace covered per family,
+        // RFC-0217 P1.2 filter route) ORs in — `Remove` decisions rely on
+        // the same condition.
         let bottommost = input_idxs.len() == self.ssts.len();
         let mut gc = options.gc;
-        gc.bottommost = bottommost;
+        gc.bottommost = gc.bottommost || bottommost;
         let options = CompactOptions { gc, ..options };
         let tables: Vec<SstTable> = input_idxs.iter().map(|&i| self.ssts[i].clone()).collect();
         let cf = tables
@@ -7847,6 +8007,9 @@ impl<E: Env> Db<E> {
             // interleave: unlimited chunks are safe here.
             usize::MAX,
             kit.as_ref(),
+            // RFC-0217 P1.2: the decision's family argument is this
+            // rewrite's family (cf-decoded keys arrive encoded).
+            filter.map(|f| (cf.as_str(), f)),
         )?
         .into_iter()
         .map(|t| t.with_cf(cf.clone()))
@@ -10853,6 +11016,7 @@ impl<E: Env> Db<E> {
                                 gc: crate::merge::CompactGcOptions::for_oldest_snapshot(floor),
                                 max_input_files: None,
                             },
+                            None,
                         )?;
                         let mut after: u64 = 0;
                         for t in &self.ssts {
@@ -12164,7 +12328,90 @@ fn sample_span_splits(tables: &[SstTable], parts: usize) -> Vec<Vec<u8>> {
 /// GC rewrites stream too: `GcMergeSource` applies the same retention
 /// decisions per user-key run, so no input table is ever materialized.
 #[allow(clippy::too_many_arguments)]
-fn write_merged_tables_span(
+/// Streaming compaction filter (RFC-0217 P1.2): wraps a [`CompactSource`]
+/// and applies a [`crate::merge::CompactFilterDecision`] per user-key run —
+/// the newest version of the run decides; `Remove` skips the whole run (no
+/// shadow tombstone: whole-keyspace rewrites only, the F177 condition);
+/// `Change` rewrites the newest value. Non-`Value` newest versions (point /
+/// range tombstones) pass through untouched — the filter sees live values
+/// only, and tombstone disposal stays with retention GC.
+///
+/// Lives in db.rs, not merge.rs: the `dyn FnMut` decision closure is outside
+/// what the aeneas/charon extraction lane translates.
+struct FilterMergeSource<'a> {
+    inner: Box<dyn crate::merge::CompactSource + 'a>,
+    decision:
+        &'a mut dyn FnMut(&str, &[u8], &[u8]) -> crate::merge::CompactFilterDecision,
+    /// Family being rewritten (the decision's first argument — cf-decoded
+    /// keys arrive encoded).
+    family: &'a str,
+    run_user: Option<Bytes>,
+    dropping: bool,
+}
+
+impl<'a> FilterMergeSource<'a> {
+    fn new(
+        inner: Box<dyn crate::merge::CompactSource + 'a>,
+        decision: &'a mut dyn FnMut(&str, &[u8], &[u8]) -> crate::merge::CompactFilterDecision,
+        family: &'a str,
+    ) -> Self {
+        Self {
+            inner,
+            decision,
+            family,
+            run_user: None,
+            dropping: false,
+        }
+    }
+}
+
+impl crate::merge::CompactSource for FilterMergeSource<'_> {
+    fn next_entry(&mut self) -> Result<Option<(InternalKey, Bytes)>> {
+        loop {
+            let (ik, val) = match self.inner.next_entry()? {
+                Some(e) => e,
+                None => return Ok(None),
+            };
+            if self.run_user.as_deref() != Some(ik.user_key.as_ref()) {
+                self.run_user = Some(ik.user_key.clone());
+                self.dropping = false;
+                if ik.kind == ValueType::Value {
+                    match (self.decision)(self.family, ik.user_key.as_ref(), val.as_ref()) {
+                        crate::merge::CompactFilterDecision::Keep => {}
+                        crate::merge::CompactFilterDecision::Remove => {
+                            // Replace the run with ONE tombstone at the
+                            // newest seq (the run's older versions drop:
+                            // the tombstone shadows them and the rewrite
+                            // covers the whole keyspace). A traceless drop
+                            // would lower the manifest seq floor and let
+                            // WAL replay resurrect the key on reopen — the
+                            // tombstone is the durable no-resurrection
+                            // guarantee, exactly what the old WAL-delete
+                            // emulation left behind.
+                            self.dropping = true;
+                            return Ok(Some((
+                                InternalKey::new(
+                                    ik.user_key,
+                                    ik.sequence,
+                                    ValueType::Deletion
+                                ),
+                                Bytes::new(),
+                            )));
+                        }
+                        crate::merge::CompactFilterDecision::Change(nv) => {
+                            return Ok(Some((ik, nv)));
+                        }
+                    }
+                }
+            } else if self.dropping {
+                continue;
+            }
+            return Ok(Some((ik, val)));
+        }
+    }
+}
+
+fn write_merged_tables_span<'a>(
     env: &impl Env,
     dir: &Path,
     tables: &[SstTable],
@@ -12177,6 +12424,10 @@ fn write_merged_tables_span(
     hi: Option<&[u8]>,
     file_alloc: &mut dyn FnMut() -> u64,
     span_tag: usize,
+    filter: Option<(
+        &'a str,
+        &mut dyn FnMut(&str, &[u8], &[u8]) -> crate::merge::CompactFilterDecision,
+    )>,
 ) -> Result<Vec<SstTable>> {
     let bloom_hint: usize = tables.iter().map(SstTable::len).sum();
     let mut out: Vec<SstTable> = Vec::new();
@@ -12192,11 +12443,17 @@ fn write_merged_tables_span(
     // decisions per user-key run, so no input table is ever materialized
     // (the old batch path held every decoded input table plus a BTreeMap
     // copy — at bulk-load scale that tripled the merge footprint).
-    let mut source: Box<dyn crate::merge::CompactSource> = if gc.requests_gc() {
+    let mut source: Box<dyn crate::merge::CompactSource + '_> = if gc.requests_gc() {
         Box::new(crate::merge::GcMergeSource::new(merge, gc))
     } else {
         Box::new(merge)
     };
+    // RFC-0217 P1.2: the compaction filter wraps the (possibly GC-rewritten)
+    // stream — dropped keys never reach `write_sst_try_sorted_on`.
+    if let Some(decision) = filter {
+        let (family, decision) = decision;
+        source = Box::new(FilterMergeSource::new(source, decision, family));
+    }
     let mut peeked: Option<Result<(InternalKey, Bytes)>> = None;
     let mut stream_ended = false;
     let mut last_user: Option<Bytes> = None;
@@ -12292,7 +12549,7 @@ fn write_merged_tables_span(
 /// Merge `tables` into one **or more** SSTs split at `split_target` logical
 /// bytes (sequential; bounded jobs and small inputs). `chunk_budget` caps the
 /// chunk count (the reserved file-number range).
-fn write_merged_tables(
+fn write_merged_tables<'a>(
     env: &impl Env,
     dir: &Path,
     first_file_num: u64,
@@ -12302,6 +12559,10 @@ fn write_merged_tables(
     split_target: u64,
     chunk_budget: usize,
     kit: Option<&crate::cache::PayloadKit>,
+    filter: Option<(
+        &'a str,
+        &mut dyn FnMut(&str, &[u8], &[u8]) -> crate::merge::CompactFilterDecision,
+    )>,
 ) -> Result<Vec<SstTable>> {
     let mut next = first_file_num;
     let mut alloc = || {
@@ -12322,6 +12583,7 @@ fn write_merged_tables(
         None,
         &mut alloc,
         0,
+        filter,
     )
 }
 
@@ -12352,6 +12614,7 @@ fn write_merged_tables_parallel<E: Env + Sync>(
             split_target,
             chunk_budget,
             kit,
+            None,
         );
     }
     let splits = sample_span_splits(tables, parts);
@@ -12387,6 +12650,9 @@ fn write_merged_tables_parallel<E: Env + Sync>(
                     span_hi.as_deref(),
                     &mut alloc,
                     i,
+                    // Filters are `&mut dyn FnMut` (not Send) and only ride
+                    // the sequential whole-family rewrite — spans see none.
+                    None,
                 )
             });
             handles.push(handle);

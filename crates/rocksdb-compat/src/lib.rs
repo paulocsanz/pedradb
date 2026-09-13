@@ -25,6 +25,18 @@ pub use api::{
     IngestExternalFileOptions, LiveFile, MergeOperands, SstFileWriter, WriteBatchWithIndex,
     DEFAULT_COLUMN_FAMILY_NAME,
 };
+
+/// Map the rust-rocksdb `CompactionDecision` onto the native core decision
+/// (RFC-0217 P1.2).
+fn to_core_decision(d: CompactionDecision) -> pedradb_core::merge::CompactFilterDecision {
+    match d {
+        CompactionDecision::Keep => pedradb_core::merge::CompactFilterDecision::Keep,
+        CompactionDecision::Remove => pedradb_core::merge::CompactFilterDecision::Remove,
+        CompactionDecision::Change(nv) => {
+            pedradb_core::merge::CompactFilterDecision::Change(bytes::Bytes::from(nv))
+        }
+    }
+}
 pub mod backup;
 pub mod checkpoint;
 pub use backup::{BackupEngine, BackupEngineInfo, BackupEngineOptions, RestoreOptions};
@@ -3306,18 +3318,34 @@ impl<E: PedraEnv> DB<E> {
         r
     }
 
-    /// Manual compaction (whole merge). Runs a compaction filter first if set.
+    /// Manual compaction (whole merge). A set compaction filter
+    /// ([`Options::set_compaction_filter`]) is applied natively inside the
+    /// merge (RFC-0217 P1.2): removed keys never reach an output SST.
     ///
     /// # Errors
     /// Pedra compaction / write errors.
     pub fn compact(&self) -> Result<()> {
-        self.apply_compaction_filter()?;
         let _gate = self.compact_gate.lock();
+        if let Some(filter) = self.compaction_filter.clone() {
+            let codec = &self.codec;
+            let mut native = |cf: &str, key: &[u8], val: &[u8]| {
+                let user = codec.decode(cf, key);
+                let mut f = filter.lock();
+                to_core_decision(f(0, user, val))
+            };
+            return self
+                .inner
+                .compact_filter(&mut native)
+                .map_err(Error::from);
+        }
         self.inner.compact().map_err(Error::from)
     }
 
-    /// Compact after applying `filter` once (RFC-0043 P2.7). Same decisions
-    /// as [`Options::set_compaction_filter`]: Keep / Remove / Change.
+    /// Compact applying `filter` natively inside the merge (RFC-0217 P1.2,
+    /// RFC-0043 P2.7): one whole-keyspace rewrite per family — no whole-DB
+    /// materialization, no WAL delete round-trip. Same decisions as
+    /// [`Options::set_compaction_filter`]: Keep / Remove / Change; the
+    /// filter sees decoded user keys of its column family.
     ///
     /// # Errors
     /// Pedra compaction / write errors.
@@ -3325,53 +3353,13 @@ impl<E: PedraEnv> DB<E> {
     where
         F: FnMut(u32, &[u8], &[u8]) -> CompactionDecision,
     {
-        let names = self.cf_names();
-        for name in names {
-            let cf = ColumnFamily { name: name.clone() };
-            let mut it = self.iterator_cf(&cf, IteratorMode::Start)?;
-            let mut items = Vec::new();
-            while it.valid() {
-                items.push((it.key().to_vec(), it.value().to_vec()));
-                it.next();
-            }
-            for (k, v) in items {
-                match filter(0, &k, &v) {
-                    CompactionDecision::Keep => {}
-                    CompactionDecision::Remove => self.delete_cf(&cf, k)?,
-                    CompactionDecision::Change(nv) => self.put_cf(&cf, k, nv)?,
-                }
-            }
-        }
-        let _gate = self.compact_gate.lock();
-        self.inner.compact().map_err(Error::from)
-    }
-
-    fn apply_compaction_filter(&self) -> Result<()> {
-        let Some(filter) = &self.compaction_filter else {
-            return Ok(());
+        let codec = &self.codec;
+        let mut native = |cf: &str, key: &[u8], val: &[u8]| {
+            let user = codec.decode(cf, key);
+            to_core_decision(filter(0, user, val))
         };
-        let names = self.cf_names();
-        for name in names {
-            let cf = ColumnFamily { name: name.clone() };
-            let mut it = self.iterator_cf(&cf, IteratorMode::Start)?;
-            let mut items = Vec::new();
-            while it.valid() {
-                items.push((it.key().to_vec(), it.value().to_vec()));
-                it.next();
-            }
-            for (k, v) in items {
-                let decision = {
-                    let mut f = filter.lock();
-                    f(0, &k, &v)
-                };
-                match decision {
-                    CompactionDecision::Keep => {}
-                    CompactionDecision::Remove => self.delete_cf(&cf, k)?,
-                    CompactionDecision::Change(nv) => self.put_cf(&cf, k, nv)?,
-                }
-            }
-        }
-        Ok(())
+        let _gate = self.compact_gate.lock();
+        self.inner.compact_filter(&mut native).map_err(Error::from)
     }
 
     /// rust-rocksdb raw iterator (SurrealDB scan / count). An attached
@@ -3421,6 +3409,12 @@ impl<E: PedraEnv> DB<E> {
     }
 
     /// Ingest into a CF with options.
+    ///
+    /// Default CF (raw encoding): the native direct-install path (RFC-0217
+    /// P1.2) — fresh global sequence numbers, one SST write + install, no
+    /// WAL and no memtable; the MANIFEST publish is the durability point.
+    /// Non-default CFs keep the WriteBatch replay: their keys must be
+    /// `cf\0`-encoded, and the external file holds raw user keys.
     pub fn ingest_external_file_cf_opts<P: AsRef<std::path::Path>>(
         &self,
         cf: &ColumnFamily,
@@ -3428,6 +3422,17 @@ impl<E: PedraEnv> DB<E> {
         paths: Vec<P>,
     ) -> Result<()> {
         self.check_cf(&cf.name)?;
+        let native = cf.name.as_ref() == DEFAULT_CF && !self.codec.default_raw;
+        if native {
+            for p in paths {
+                let path = p.as_ref();
+                self.inner.ingest_sst_file(path, "").map_err(Error::from)?;
+                if opts.move_files {
+                    let _ = std::fs::remove_file(path);
+                }
+            }
+            return Ok(());
+        }
         for p in paths {
             let path = p.as_ref();
             let table = crate::api::open_writer_sst(path)?;
