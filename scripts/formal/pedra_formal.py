@@ -1970,6 +1970,7 @@ def check_extract(
             (
                 "theorem snap_is_empty_zero",
                 "theorem point_cache_validity_fate_iff",
+                "theorem point_tombstone_plan_fate_iff",
             ),
         ),
         (

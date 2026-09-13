@@ -98,3 +98,33 @@ theorem point_cache_validity_fate_iff :
       · exact absurd h1.1 c
       · subst hv
         rfl
+
+/-- RFC-0219 P1.1 (átomo `catalog:point_tombstone`): um ponto achado é
+    servido EXATAMENTE quando nenhum range tombstone cobre — tombstone
+    cobrindo (t.seq > point_seq) sombreia o valor e o caller lê Deleted
+    (RFC-0150). O AS-IS nunca sombreia (ressurreição — dente plantado). -/
+theorem point_tombstone_plan_fate_iff :
+    ∀ (range_hidden : Bool) (plan : PointTombstonePlan),
+      (point_tombstone_plan range_hidden = ok plan) ↔
+        ((range_hidden = true ∧ plan = PointTombstonePlan.ShadowedDeleted) ∨
+          (range_hidden = false ∧ plan = PointTombstonePlan.ValueVisible)) := by
+  intro range_hidden plan
+  simp only [point_tombstone_plan]
+  split <;> rename_i c
+  · constructor
+    · intro hval
+      injection hval with hv
+      exact Or.inl ⟨c, hv.symm⟩
+    · rintro (⟨-, hv⟩ | h2)
+      · subst hv
+        rfl
+      · exact absurd h2.1 (by simp [*])
+  · rw [Bool.not_eq_true] at c
+    constructor
+    · intro hval
+      injection hval with hv
+      exact Or.inr ⟨c, hv.symm⟩
+    · rintro (h1 | ⟨-, hv⟩)
+      · exact absurd h1.1 (by simp [*])
+      · subst hv
+        rfl

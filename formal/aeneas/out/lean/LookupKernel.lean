@@ -194,4 +194,112 @@ def point_cache_validity_as_is
   := do
   ok PointCachePlan.CacheCurrent
 
+/-- [pedra_aeneas_lookup_kernel::PointTombstonePlan]
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 157:0-162:1
+    Visibility: public -/
+@[discriminant isize]
+inductive PointTombstonePlan where
+| ValueVisible : PointTombstonePlan
+| ShadowedDeleted : PointTombstonePlan
+
+/-- [pedra_aeneas_lookup_kernel::{impl core::clone::Clone for pedra_aeneas_lookup_kernel::PointTombstonePlan}::clone]:
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 156:9-156:14
+    Visibility: public -/
+def PointTombstonePlan.Insts.CoreCloneClone.clone
+  (self : PointTombstonePlan) : Result PointTombstonePlan := do
+  ok self
+
+/-- Trait implementation: [pedra_aeneas_lookup_kernel::{impl core::clone::Clone for pedra_aeneas_lookup_kernel::PointTombstonePlan}]
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 156:9-156:14 -/
+@[reducible]
+def PointTombstonePlan.Insts.CoreCloneClone : core.clone.Clone
+  PointTombstonePlan := {
+  clone := PointTombstonePlan.Insts.CoreCloneClone.clone
+}
+
+/-- Trait implementation: [pedra_aeneas_lookup_kernel::{impl core::marker::Copy for pedra_aeneas_lookup_kernel::PointTombstonePlan}]
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 156:16-156:20 -/
+@[reducible]
+def PointTombstonePlan.Insts.CoreMarkerCopy : core.marker.Copy
+  PointTombstonePlan := {
+  cloneInst := PointTombstonePlan.Insts.CoreCloneClone
+}
+
+/-- [pedra_aeneas_lookup_kernel::{impl core::fmt::Debug for pedra_aeneas_lookup_kernel::PointTombstonePlan}::fmt]:
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 156:22-156:27
+    Visibility: public -/
+def PointTombstonePlan.Insts.CoreFmtDebug.fmt
+  (self : PointTombstonePlan) (f : core.fmt.Formatter) :
+  Result ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter)
+  := do
+  match self with
+  | PointTombstonePlan.ValueVisible =>
+    core.fmt.Formatter.write_str f (toStr "ValueVisible")
+  | PointTombstonePlan.ShadowedDeleted =>
+    core.fmt.Formatter.write_str f (toStr "ShadowedDeleted")
+
+/-- Trait implementation: [pedra_aeneas_lookup_kernel::{impl core::fmt::Debug for pedra_aeneas_lookup_kernel::PointTombstonePlan}]
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 156:22-156:27 -/
+@[reducible]
+def PointTombstonePlan.Insts.CoreFmtDebug : core.fmt.Debug PointTombstonePlan
+  := {
+  fmt := PointTombstonePlan.Insts.CoreFmtDebug.fmt
+}
+
+/-- Trait implementation: [pedra_aeneas_lookup_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_lookup_kernel::PointTombstonePlan}]
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 156:29-156:38 -/
+@[reducible]
+def PointTombstonePlan.Insts.CoreMarkerStructuralPartialEq :
+  core.marker.StructuralPartialEq PointTombstonePlan := {
+}
+
+/-- [pedra_aeneas_lookup_kernel::{impl core::cmp::PartialEq<pedra_aeneas_lookup_kernel::PointTombstonePlan> for pedra_aeneas_lookup_kernel::PointTombstonePlan}::eq]:
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 156:29-156:38
+    Visibility: public -/
+def PointTombstonePlan.Insts.CoreCmpPartialEqPointTombstonePlan.eq
+  (self : PointTombstonePlan) (other : PointTombstonePlan) : Result Bool := do
+  let self1 := read_discriminant self
+  let other1 := read_discriminant other
+  ok (self1 = other1)
+
+/-- Trait implementation: [pedra_aeneas_lookup_kernel::{impl core::cmp::PartialEq<pedra_aeneas_lookup_kernel::PointTombstonePlan> for pedra_aeneas_lookup_kernel::PointTombstonePlan}]
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 156:29-156:38 -/
+@[reducible]
+def PointTombstonePlan.Insts.CoreCmpPartialEqPointTombstonePlan :
+  core.cmp.PartialEq PointTombstonePlan PointTombstonePlan := {
+  eq := PointTombstonePlan.Insts.CoreCmpPartialEqPointTombstonePlan.eq
+}
+
+/-- [pedra_aeneas_lookup_kernel::{impl core::cmp::Eq for pedra_aeneas_lookup_kernel::PointTombstonePlan}::assert_fields_are_eq]:
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 156:40-156:42
+    Visibility: public -/
+def PointTombstonePlan.Insts.CoreCmpEq.assert_fields_are_eq
+  (self : PointTombstonePlan) : Result Unit := do
+  ok ()
+
+/-- Trait implementation: [pedra_aeneas_lookup_kernel::{impl core::cmp::Eq for pedra_aeneas_lookup_kernel::PointTombstonePlan}]
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 156:40-156:42 -/
+@[reducible]
+def PointTombstonePlan.Insts.CoreCmpEq : core.cmp.Eq PointTombstonePlan := {
+  partialEqInst := PointTombstonePlan.Insts.CoreCmpPartialEqPointTombstonePlan
+  assert_fields_are_eq :=
+    PointTombstonePlan.Insts.CoreCmpEq.assert_fields_are_eq
+}
+
+/-- [pedra_aeneas_lookup_kernel::point_tombstone_plan]:
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 166:0-172:1
+    Visibility: public -/
+def point_tombstone_plan
+  (range_hidden : Bool) : Result PointTombstonePlan := do
+  if range_hidden
+  then ok PointTombstonePlan.ShadowedDeleted
+  else ok PointTombstonePlan.ValueVisible
+
+/-- [pedra_aeneas_lookup_kernel::point_tombstone_plan_as_is]:
+    Source: '../../../crates/pedradb-core/src/lookup_kernel.rs', lines 178:0-180:1
+    Visibility: public -/
+def point_tombstone_plan_as_is
+  (_range_hidden : Bool) : Result PointTombstonePlan := do
+  ok PointTombstonePlan.ValueVisible
+
 end pedra_aeneas_lookup_kernel

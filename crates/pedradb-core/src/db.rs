@@ -9552,16 +9552,17 @@ impl<E: Env> Db<E> {
                 let seq = best_point_seq.unwrap_or(0);
                 // Newest mem layer with a point wins (single-writer). Skip SST.
                 self.get_mem_hit.fetch_add(1, Ordering::Relaxed);
-                return match best_point {
-                    Lookup::Found(_)
-                        if !crate::merge::visible_at(
-                            crate::key::ValueType::Value,
-                            range_deleted(key, seq, &range_tombs),
-                        ) =>
-                    {
-                        Lookup::Deleted
-                    }
-                    other => other,
+                return match (
+                    best_point,
+                    crate::lookup_kernel::point_tombstone_plan(range_deleted(
+                        key, seq, &range_tombs,
+                    )),
+                ) {
+                    (
+                        Lookup::Found(_),
+                        crate::lookup_kernel::PointTombstonePlan::ShadowedDeleted,
+                    ) => Lookup::Deleted,
+                    (other, _) => other,
                 };
             }
         }
@@ -9633,13 +9634,11 @@ impl<E: Env> Db<E> {
         match best_point {
             Lookup::Found(v) => {
                 let seq = best_point_seq.unwrap_or(0);
-                if crate::merge::visible_at(
-                    crate::key::ValueType::Value,
-                    range_deleted(key, seq, &range_tombs),
-                ) {
-                    Lookup::Found(v)
-                } else {
-                    Lookup::Deleted
+                match crate::lookup_kernel::point_tombstone_plan(range_deleted(
+                    key, seq, &range_tombs,
+                )) {
+                    crate::lookup_kernel::PointTombstonePlan::ValueVisible => Lookup::Found(v),
+                    crate::lookup_kernel::PointTombstonePlan::ShadowedDeleted => Lookup::Deleted,
                 }
             }
             Lookup::Deleted => Lookup::Deleted,
@@ -22056,16 +22055,17 @@ mod tests {
                 &mut range_tombs,
             );
             if let Some(seq) = best_point_seq {
-                return match best_point {
-                    Lookup::Found(_)
-                        if !crate::merge::visible_at(
-                            crate::key::ValueType::Value,
-                            range_deleted(key, seq, &range_tombs),
-                        ) =>
-                    {
-                        Lookup::Deleted
-                    }
-                    other => other,
+                return match (
+                    best_point,
+                    crate::lookup_kernel::point_tombstone_plan(range_deleted(
+                        key, seq, &range_tombs,
+                    )),
+                ) {
+                    (
+                        Lookup::Found(_),
+                        crate::lookup_kernel::PointTombstonePlan::ShadowedDeleted,
+                    ) => Lookup::Deleted,
+                    (other, _) => other,
                 };
             }
         }
@@ -22091,13 +22091,11 @@ mod tests {
         match best_point {
             Lookup::Found(v) => {
                 let seq = best_point_seq.unwrap_or(0);
-                if crate::merge::visible_at(
-                    crate::key::ValueType::Value,
-                    range_deleted(key, seq, &range_tombs),
-                ) {
-                    Lookup::Found(v)
-                } else {
-                    Lookup::Deleted
+                match crate::lookup_kernel::point_tombstone_plan(range_deleted(
+                    key, seq, &range_tombs,
+                )) {
+                    crate::lookup_kernel::PointTombstonePlan::ValueVisible => Lookup::Found(v),
+                    crate::lookup_kernel::PointTombstonePlan::ShadowedDeleted => Lookup::Deleted,
                 }
             }
             Lookup::Deleted => Lookup::Deleted,

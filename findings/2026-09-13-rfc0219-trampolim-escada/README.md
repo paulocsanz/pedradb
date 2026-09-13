@@ -127,3 +127,23 @@ decidiam inline `published_seq == snap/snapshot`.
 - **Par nasce átomo**: `catalog:point_cache_validity`. floor_atom
   269→270, residuals atom 270, single_artifact 289.
 - **Contador**: 72 → **68** (db.rs 50→46; −4 sítios num pull só).
+
+## P1.1-b — `point_tombstone` (lookup_kernel)
+
+Sítios: os quatro portões de ponto-achado-sob-range-tombstone — `lookup`
+(mem fast-path + fallback SST) e o caminho lock-free (x2) — decidiam
+inline `merge::visible_at(Value, range_deleted(...))`.
+
+- **Kernel**: `lookup_kernel::point_tombstone_plan(range_hidden)` →
+  `PointTombstonePlan{ValueVisible, ShadowedDeleted}` (RFC-0150:
+  tombstone com t.seq > point_seq sombreia o ponto).
+- **AS-IS dente**: `point_tombstone_plan_as_is` — nunca sombreia;
+  ponto range-deletado escaneia como vivo (ressurreição).
+- **Trampolim**: os quatro sítios fazem `match` no plano.
+- **Teorema**: `point_tombstone_plan_fate_iff` (∀ sobre o bool) em
+  `Lookup.lean`.
+- **Extrato**: `aeneas_lookup.sh --required` verde.
+- **Planta DST**: `point_tombstone_plan_on_live_range_hidden_serves_deleted`.
+- **Par nasce átomo**: `catalog:point_tombstone`. floor_atom 270→271,
+  residuals atom 271, single_artifact 290.
+- **Contador**: 68 → **64** (db.rs 46→42; −4 sítios num pull só).

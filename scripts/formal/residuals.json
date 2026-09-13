@@ -85,7 +85,7 @@
   "proof_depth": {
    "extract": 12,
    "close": 4,
-   "atom": 270,
+   "atom": 271,
    "model": 2,
    "count": 7
   },
@@ -144,7 +144,7 @@
     "tx_state_of"
    ]
   },
-  "single_artifact": 289,
+  "single_artifact": 290,
   "data_fate": 0
  },
  "residuals": [

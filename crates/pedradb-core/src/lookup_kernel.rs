@@ -148,6 +148,37 @@ pub fn point_cache_validity_as_is(_published_seq: u64, _answer_seq: u64) -> Poin
     PointCachePlan::CacheCurrent
 }
 
+/// RFC-0219 P1.1: fate of a Found point read under range tombstones
+/// (RFC-0150). The point candidate won its user key; whether the
+/// caller sees the value is decided here — a covering range tombstone
+/// (`t.seq > point_seq`, computed by `merge::range_deleted`) shadows it.
+#[cfg(not(verus_keep_ghost))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PointTombstonePlan {
+    /// No covering range tombstone — serve the found value.
+    ValueVisible,
+    /// A covering range tombstone hides the point — serve Deleted.
+    ShadowedDeleted,
+}
+
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn point_tombstone_plan(range_hidden: bool) -> PointTombstonePlan {
+    if range_hidden {
+        PointTombstonePlan::ShadowedDeleted
+    } else {
+        PointTombstonePlan::ValueVisible
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: never shadow — a range-deleted point scans as live
+/// (resurrection; RFC-0150 dente).
+#[must_use]
+pub fn point_tombstone_plan_as_is(_range_hidden: bool) -> PointTombstonePlan {
+    PointTombstonePlan::ValueVisible
+}
+
 #[cfg(verus_keep_ghost)]
 use vstd::prelude::*;
 
@@ -464,6 +495,32 @@ mod tests {
                 "{fn_name} must not keep the raw published==answer if"
             );
         }
+    }
+
+    #[test]
+    fn point_tombstone_plan_on_live_range_hidden_serves_deleted() {
+        // RFC-0219 P1.1: a covering range tombstone shadows the found
+        // point — the caller sees Deleted; AS-IS resurrects the value.
+        assert_eq!(point_tombstone_plan(true), PointTombstonePlan::ShadowedDeleted);
+        assert_eq!(point_tombstone_plan(false), PointTombstonePlan::ValueVisible);
+        assert_eq!(
+            point_tombstone_plan_as_is(true),
+            PointTombstonePlan::ValueVisible,
+            "AS-IS dente: range-deleted point scans as live"
+        );
+        // Live: the four point gates match the kernel plan; the inline
+        // visible_at(Value, ..) gate left the trampoline.
+        let lu = named_fn_src(include_str!("db.rs"), "lookup").expect("lookup");
+        assert!(
+            lu.matches("point_tombstone_plan(").count() >= 2,
+            "lookup must match point_tombstone_plan on both gates"
+        );
+        let src = include_str!("db.rs");
+        assert_eq!(
+            src.matches("point_tombstone_plan(").count(),
+            4,
+            "exactly four call sites (lookup x2, lock-free path x2)"
+        );
     }
 
     /// RFC-0174 P1.2: data-fate `if`s on get_at / lookup must call a kernel.

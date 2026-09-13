@@ -6525,6 +6525,36 @@
    }
   },
   {
+   "id": "point_tombstone",
+   "finding": "RFC-0219 P1.1",
+   "twin_kind": "atom",
+   "atom": "point_tombstone_plan",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P1.1: se um ponto achado é servido ou sombreado por range tombstone é decisão do kernel — tombstone cobrindo (t.seq > point_seq via merge::range_deleted) sombreia o valor e o caller lê Deleted (RFC-0150), provado ∀ sobre range_hidden como point_tombstone_plan_fate_iff em Lookup.lean; os quatro trampolins db.rs (lookup x2, caminho lock-free x2) fazem match no plano do kernel"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/lookup_kernel.rs",
+   "twin": "crates/pedradb-core/src/lookup_kernel.rs",
+   "aeneas": "scripts/aeneas_lookup.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "point_tombstone_plan",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "lookup"
+    }
+   ],
+   "as_is": "point_tombstone_plan_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/lookup_kernel.rs",
+    "test": "point_tombstone_plan_on_live_range_hidden_serves_deleted"
+   }
+  },
+  {
    "id": "flush_plan",
    "finding": "F2/F43",
    "twin_kind": "close",
