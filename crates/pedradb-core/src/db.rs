@@ -623,6 +623,11 @@ pub struct WritePhaseStats {
     pub publish_ns: AtomicU64,
     /// `maybe_auto_flush_best_effort`.
     pub flush_check_ns: AtomicU64,
+    /// RFC-0217 P2.7: commits whose flush check did real work (flush /
+    /// stage-imm / park) — splits the flush_check mean into gate vs work.
+    pub flush_events: AtomicU64,
+    /// RFC-0217 P2.7: time of the commits counted by `flush_events`.
+    pub flush_work_ns: AtomicU64,
     /// `ConcurrentDb` bypass: time blocked acquiring the Db write lock.
     pub lock_wait_ns: AtomicU64,
 }
@@ -10703,13 +10708,16 @@ impl<E: Env> Drop for Db<E> {
             let ms = |v: &AtomicU64| v.load(Ordering::Relaxed) as f64 / 1e6;
             println!(
                 "WRITEPHASE commits={} prepare_ms={:.1} wal_ms={:.1} mem_ms={:.1} \
-                 publish_ms={:.1} flush_check_ms={:.1} lock_wait_ms={:.1}",
+                 publish_ms={:.1} flush_check_ms={:.1} flush_events={} flush_work_ms={:.1} \
+                 lock_wait_ms={:.1}",
                 st.commits.load(Ordering::Relaxed),
                 ms(&st.prepare_ns),
                 ms(&st.wal_ns),
                 ms(&st.mem_ns),
                 ms(&st.publish_ns),
                 ms(&st.flush_check_ns),
+                st.flush_events.load(Ordering::Relaxed),
+                ms(&st.flush_work_ns),
                 ms(&st.lock_wait_ns),
             );
         }
@@ -11026,7 +11034,9 @@ impl<E: Env> Db<E> {
         }
     }
 
-    pub(crate) fn maybe_auto_flush(&mut self) -> Result<()> {
+    /// RFC-0217 P2.7: `Ok(true)` = this commit did flush work (a CF flush,
+    /// a staged imm, or a parked family); `Ok(false)` = gate skipped.
+    pub(crate) fn maybe_auto_flush(&mut self) -> Result<bool> {
         if !crate::write_admission_kernel::batch_is_empty(self.physical_cfs.len() as u64) {
             // Hot path: integer compare, not a walk of every memtable key.
             // `cf_families()` scans tail+map (O(entries)) — with CFs registered
@@ -11042,9 +11052,10 @@ impl<E: Env> Db<E> {
                 .values()
                 .all(|&n| !crate::flush_kernel::auto_flush_due(mem, n != 0, n as u64));
             match crate::flush_kernel::auto_flush_gate(global_under, cf_under) {
-                crate::flush_kernel::AutoFlushGate::SkipAllNotDue => return Ok(()),
+                crate::flush_kernel::AutoFlushGate::SkipAllNotDue => return Ok(false),
                 crate::flush_kernel::AutoFlushGate::ScanColumnFamilies => {}
             }
+            let mut did_work = false;
             let n = self.physical_cfs.len();
             for i in 0..n {
                 let fam = self.physical_cfs[i].as_str();
@@ -11063,12 +11074,14 @@ impl<E: Env> Db<E> {
                     let taken = self.mem.take_family(&fam);
                     if !crate::write_admission_kernel::batch_is_empty(taken.len() as u64) {
                         self.push_parked_unflushed(taken);
+                        did_work = true;
                     }
                 } else {
                     self.flush_cf(&fam)?;
+                    did_work = true;
                 }
             }
-            return Ok(());
+            return Ok(did_work);
         }
         let mem = self.mem.approx_memory_usage() as u64;
         let armed = self.auto_flush_bytes.is_some();
@@ -11080,13 +11093,13 @@ impl<E: Env> Db<E> {
                     // `prepare_flush_imm` here — it takes the table out and
                     // `has_imm` goes false (291k mem / 0 SST in the P2.1 attempt).
                     let _ = self.stage_flush_imm()?;
-                    return Ok(());
+                    return Ok(true);
                 }
                 self.auto_flush_mem()?;
             }
             crate::flush_kernel::MemAutoFlushPlan::NotDueKeepMem => {}
         }
-        Ok(())
+        Ok(true)
     }
 
     /// Auto-flush: same SST/WAL path as [`Self::flush`] but does not rewrite
@@ -11110,7 +11123,18 @@ impl<E: Env> Db<E> {
     /// On flush error the MemTable still holds the data; a later explicit
     /// [`Db::flush`] or successful auto-flush can retry.
     pub(crate) fn maybe_auto_flush_best_effort(&mut self) {
-        let _ = self.maybe_auto_flush();
+        // RFC-0217 P2.7: `did_work` + `flush_work_ns` separate the cheap
+        // gate (every commit) from the rare flush inside the same mean.
+        let st = self.phase_stats.clone();
+        let t0 = st.as_ref().map(|_| Instant::now());
+        let did_work = self.maybe_auto_flush().unwrap_or(false);
+        if let (Some(st), Some(t0)) = (st.as_ref(), t0) {
+            if did_work {
+                st.flush_events.fetch_add(1, Ordering::Relaxed);
+                st.flush_work_ns
+                    .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            }
+        }
     }
 
     fn maybe_auto_compact(&mut self) -> Result<()> {

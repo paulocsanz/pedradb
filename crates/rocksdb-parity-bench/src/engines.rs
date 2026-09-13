@@ -509,12 +509,19 @@ impl RocksEngine {
         // Pedra's favor. Both sides must honor the same window: the same
         // env override, the same 256 MiB default. `open_cf` creates the
         // missing CFs from these same Options, so one set covers all.
-        opts.set_write_buffer_size(
-            std::env::var("ROCKS_PARITY_COMPAT_MEMTABLE")
-                .ok()
-                .and_then(|v| v.parse::<usize>().ok())
-                .unwrap_or(256 * 1024 * 1024),
-        );
+        // `ROCKS_PARITY_ROCKS_MEMTABLE` overrides ONLY this side (A/B
+        // probe for the asymmetry: old shape = compat 256 MiB / rocks
+        // default 64 MiB — never set it for an official table).
+        let memtable = std::env::var("ROCKS_PARITY_ROCKS_MEMTABLE")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or_else(|| {
+                std::env::var("ROCKS_PARITY_COMPAT_MEMTABLE")
+                    .ok()
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .unwrap_or(256 * 1024 * 1024)
+            });
+        opts.set_write_buffer_size(memtable);
         let db = rocksdb::DB::open_cf(&opts, path, DEPS_CFS).expect("rocksdb open_cf");
         let wopts_async = rocksdb::WriteOptions::default();
         let mut wopts_sync = rocksdb::WriteOptions::default();
@@ -780,6 +787,19 @@ impl RocksOccEngine {
         let mut opts = rocksdb::Options::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
+        // RFC-0217 audit (2026-09-13): same memtable symmetry fix as
+        // `RocksEngine::open` — never let the peer sit at the 64 MiB
+        // default while the compat side runs 256 MiB.
+        let memtable = std::env::var("ROCKS_PARITY_ROCKS_MEMTABLE")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or_else(|| {
+                std::env::var("ROCKS_PARITY_COMPAT_MEMTABLE")
+                    .ok()
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .unwrap_or(256 * 1024 * 1024)
+            });
+        opts.set_write_buffer_size(memtable);
         let db = rocksdb::OptimisticTransactionDB::open_cf(&opts, path, DEPS_CFS)
             .expect("rocks OptimisticTransactionDB open_cf");
         let wopts_async = rocksdb::WriteOptions::default();
