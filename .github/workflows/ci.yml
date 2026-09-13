@@ -1,0 +1,42 @@
+# CI: build + ratcheted test suite + formal glue lint.
+#
+# Ratchets, not greenwashing: the test step fails on any NEW failing test
+# (the registered set is ci/known-test-failures.txt) and the lint step
+# fails on any drift FAIL plus any growth of the registered debt ceiling.
+# Lean extracts are not built here on purpose: lake + mathlib takes about
+# an hour; scripts/lean_extracts.sh --required covers it locally.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build test suite
+        run: cargo test -q -p pedradb-core --lib --no-run
+      - name: Run tests (ratcheted against ci/known-test-failures.txt)
+        run: |
+          set +e
+          cargo test -q -p pedradb-core --lib > test.log 2>&1
+          python3 scripts/ci_ratchet.py tests test.log ci/known-test-failures.txt
+      - name: Formal glue lint (drift = fail; debt ceiling 107)
+        run: |
+          set +e
+          python3 scripts/formal/pedra_formal.py --lint > lint.log 2>&1
+          python3 scripts/ci_ratchet.py lint lint.log 107
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-logs
+          path: |
+            test.log
+            lint.log

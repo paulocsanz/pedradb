@@ -584,8 +584,8 @@ def check_clones(root: Path, catalog: dict, r: Report) -> None:
 #
 # 2026-08-31: leveling.rs graduated from this allowlist into catalog pairs
 # `leveling` (close) + `leveling_pick` (atom) — twins
-# verus/leveling{,_pick}.rs, plant in src/leveling.rs (findings/
-# 2026-08-31-leveling-kernel-unenrolled). The allowlist is empty; keep it
+# verus/leveling{,_pick}.rs, plant in src/leveling.rs (debt registered
+# 2026-08-31: leveling kernel unenrolled). The allowlist is empty; keep it
 # that way (transitional states get a comment, not a permanent row).
 TCB_FREEZE_ALLOWLIST: dict[str, str] = {
     "crates/pedradb-core/src/disk_pressure_kernel.rs":
@@ -727,7 +727,7 @@ def decision_kernel_paths(root: Path) -> list[Path]:
 
 
 def check_kernel_enrollment(root: Path, glue: dict, r: Report) -> None:
-    """Marker<->registry tooth (findings/2026-08-31-leveling-kernel-unenrolled).
+    """Marker<->registry tooth (debt registered 2026-08-31: leveling kernel unenrolled).
 
     The registry is the explicit side; the `//! kernel:` marker is the
     in-file side. Both directions fail closed:
@@ -796,7 +796,7 @@ def kernel_pub_fns(path: Path) -> set[str]:
 
 
 def check_kernel_fn_surface(root: Path, catalog: dict, glue: dict, r: Report) -> None:
-    """Fn-level enrollment tooth (findings/2026-08-31-leveling-kernel-unenrolled).
+    """Fn-level enrollment tooth (debt registered 2026-08-31: leveling kernel unenrolled).
 
     Enrollment is FILE-level (glob union registry), so a new pub decision fn
     added inside an already-enrolled kernel file is invisible to the sweep
@@ -866,7 +866,7 @@ def check_kernel_fn_surface(root: Path, catalog: dict, glue: dict, r: Report) ->
                     f"residuals freeze: {rel}: pub fn {name} is outside the fn "
                     "surface (no entry/as_is/_as_is/_spec/clone, not in "
                     "glue.kernel_fn_allowlist) — classify it "
-                    "(findings/2026-08-31-leveling-kernel-unenrolled)"
+                    "(debt registered 2026-08-31: leveling kernel unenrolled)"
                 )
         for name in sorted(allow.get(rel, set()) - names):
             r.fail(f"residuals freeze: {rel}: stale kernel_fn_allowlist entry {name} (fn gone)")
