@@ -284,3 +284,4 @@ atom	catalog:scale_happy_hot	happy_hot_bps_fate_iff	formal/aeneas/lean/Scale.lea
 atom	catalog:scale_warm	warm_cap_bytes_fate_iff	formal/aeneas/lean/Scale.lean	warm_cap_bytes
 atom	catalog:scale_predict	predict_get_ns_fate_iff	formal/aeneas/lean/Scale.lean	predict_get_ns
 atom	catalog:scale_forecast	scale_forecast_fate_iff	formal/aeneas/lean/Scale.lean	scale_forecast
+atom	catalog:l28_durability	l28_durability_ok_fate_iff	formal/aeneas/lean/L28.lean	l28_durability_ok

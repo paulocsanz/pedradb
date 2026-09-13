@@ -3941,6 +3941,10 @@
   },
   {
    "id": "l28_durability",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "impressao digital de durabilidade e exatamente a conjuncao citada — get_ok E after_kill_ok E restart_ok em cascata; as-is aceita o primeiro get (buraco 0072)"
+   },
    "finding": "RFC-0072",
    "twin_kind": "close",
    "single_artifact": true,

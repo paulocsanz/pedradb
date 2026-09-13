@@ -721,3 +721,38 @@ theorem l28_tcp_pj_ok_fate_iff :
   intro b v
   unfold l28_tcp_pj_ok
   cases b <;> cases v <;> simp
+
+/-- RFC-0218 P2.2 (átomo `catalog:l28_durability`, entrada
+    `l28_durability_ok`): a impressão digital de durabilidade é
+    EXATAMENTE a conjunção citada — get_ok E after_kill_ok E restart_ok
+    (cascata de ifs). O AS-IS aceita o primeiro get (o buraco 0072 —
+    dente plantado). -/
+theorem l28_durability_ok_fate_iff :
+    ∀ (get_ok after_kill_ok restart_ok : Bool) (v : Bool),
+      (l28_durability_ok get_ok after_kill_ok restart_ok = ok v) ↔
+        ((get_ok = true ∧
+          ((after_kill_ok = true ∧ v = restart_ok)
+           ∨ (after_kill_ok = false ∧ v = false)))
+         ∨ (get_ok = false ∧ v = false)) := by
+  intro get_ok after_kill_ok restart_ok v
+  constructor
+  · intro hval
+    unfold l28_durability_ok at hval
+    split at hval
+    · next hg =>
+      split at hval
+      · next hk =>
+        injection hval with hv
+        exact Or.inl ⟨hg, Or.inl ⟨hk, hv.symm⟩⟩
+      · next hk =>
+        simp only [Bool.not_eq_true] at hk
+        injection hval with hv
+        exact Or.inl ⟨hg, Or.inr ⟨hk, hv.symm⟩⟩
+    · next hg =>
+      simp only [Bool.not_eq_true] at hg
+      injection hval with hv
+      exact Or.inr ⟨hg, hv.symm⟩
+  · rintro (⟨rfl, (⟨rfl, rfl⟩ | ⟨rfl, rfl⟩)⟩ | ⟨rfl, rfl⟩)
+    · rfl
+    · rfl
+    · rfl
