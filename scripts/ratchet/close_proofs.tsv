@@ -261,3 +261,4 @@ atom	catalog:si_reader	si_reader_beats_fate_iff	formal/aeneas/lean/Si.lean	si_re
 atom	catalog:tx_abort	tx_abort_fate_iff	formal/aeneas/lean/T1Modelo.lean	tx_abort
 atom	catalog:tx_recover	tx_recover_fate_iff	formal/aeneas/lean/T1Modelo.lean	tx_recover
 atom	catalog:journal_catch_up_pin	catch_up_pins_on_read_fate_iff	formal/aeneas/lean/Pin.lean	catch_up_pins_on_read
+atom	catalog:journal_fold_pin	fold_pins_on_read_fate_iff	formal/aeneas/lean/Pin.lean	fold_pins_on_read

@@ -151,7 +151,8 @@ nunca por promoção silenciosa.
    `stream_next_seq`, `isolated`, `isolated_child`, `fold_range`,
    `ship_guard`, `ship_stamp`, `c_len` — floor_atom 233→245 — status:
    `todo`
-   (1/12: `catch_up_pins_on_read_fate_iff` feito 2026-09-13)
+   (2/12: `catch_up_pins_on_read_fate_iff` e
+   `fold_pins_on_read_fate_iff` feitos 2026-09-13)
 
 9. **P2.2** raft/dcs/l28/scale/bloom/probe ×21: `apply_step`,
    `ae_f16_gate`, `raft_recover_applied`, `dcs_apply`,

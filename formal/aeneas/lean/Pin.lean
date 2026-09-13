@@ -26,3 +26,20 @@ theorem catch_up_pins_on_read_fate_iff :
   · rintro hv
     subst hv
     rfl
+
+/-- RFC-0218 P2.1 2/12 (átomo `catalog:journal_fold_pin`, entrada
+    `fold_pins_on_read`): varrer NUNCA segura pins — EXATAMENTE a
+    constante citada false. O AS-IS é true (o fold congela o journal
+    — dente plantado). -/
+theorem fold_pins_on_read_fate_iff :
+    ∀ (v : Bool),
+      (fold_pins_on_read = ok v) ↔ (v = false) := by
+  intro v
+  constructor
+  · intro hval
+    unfold fold_pins_on_read at hval
+    injection hval with hv
+    exact hv.symm
+  · rintro hv
+    subst hv
+    rfl
