@@ -6026,7 +6026,11 @@
     "file": "crates/pedradb-core/src/wal/recover_kernel.rs",
     "test": "orphan_middle_last_fail_stop"
    },
-   "three_teeth": true
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 4/4 P0.2: fragment_act como tabela completa FragKind × scratch_empty citada — órfão Middle/Last com scratch vazio fail-stopa; floor_atom 185→186"
+   }
   },
   {
    "id": "from_record_type",

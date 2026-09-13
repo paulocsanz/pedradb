@@ -212,3 +212,4 @@ atom	catalog:group_validate	group_validate_fate_iff	formal/aeneas/lean/GroupComm
 atom	catalog:from_record_type	from_record_type_fate_iff	formal/aeneas/lean/WalRecover.lean	from_record_type
 atom	catalog:is_length_resyncable	is_length_resyncable_fate_iff	formal/aeneas/lean/WalRecover.lean	is_length_resyncable
 atom	catalog:physical_payload_act	physical_payload_act_fate_iff	formal/aeneas/lean/WalRecover.lean	physical_payload_act
+atom	catalog:fragment_act	fragment_act_fate_iff	formal/aeneas/lean/WalRecover.lean	fragment_act

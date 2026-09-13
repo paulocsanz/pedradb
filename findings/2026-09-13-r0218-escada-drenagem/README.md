@@ -72,3 +72,12 @@ gates GREEN no commit).
   at hval; reverso rw if_pos/if_neg). Build verde. Planta DST
   `physical_oversize_and_torn` (pedradb-core, exit 0). Gate:
   floor_atom 184→185, floor_extract 94→93.
+
+- **fragment_act (4/4)**: tabela completa FragKind × scratch_empty citada —
+  Full produz, First começa, órfão (Middle/Last com scratch vazio)
+  fail-stopa, Middle cheio acumula, Last cheio produz, Zero pula —
+  `fragment_act_fate_iff` em `WalRecover.lean` (7 ramos disjuntos;
+  forward simp only + split at hval no if, reverso subst+rfl). Build
+  verde. Planta DST `orphan_middle_last_fail_stop` (pedradb-core,
+  exit 0). Gate: floor_atom 185→186, floor_extract 93→92.
+  **P0.2 fechada: wal/recover ×4 átomo, 4/4.**

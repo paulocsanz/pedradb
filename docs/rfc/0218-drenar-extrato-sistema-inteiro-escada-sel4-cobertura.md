@@ -86,9 +86,10 @@ nunca por promoção silenciosa.
 
 2. **P0.2** wal/recover ×4 (`WalRecover.lean`): `fragment_act`,
    `from_record_type`, `is_length_resyncable`, `physical_payload_act` —
-   o parse fail-closed do WAL — floor_atom 182→186 — status: `todo`
-   (3/4: `from_record_type_fate_iff`, `is_length_resyncable_fate_iff` e
-   `physical_payload_act_fate_iff` feitos 2026-09-13)
+   o parse fail-closed do WAL — floor_atom 182→186 — status: `done`
+   (2026-09-13; 4/4: `from_record_type_fate_iff`,
+   `is_length_resyncable_fate_iff`, `physical_payload_act_fate_iff`,
+   `fragment_act_fate_iff`)
 
 3. **P0.3** changelog ×3 + flush ×1 + manifest ×1 + reopen ×1
    (`Changelog.lean`/`Flush.lean`/`Manifest.lean`/`Reopen.lean`):
@@ -181,7 +182,7 @@ nunca por promoção silenciosa.
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | group_commit ×4 átomo (validação OCC/fence) | done | `occ_conflict_fate_iff`/`fsync_promotes_pending_fate_iff`/`fence_publish_seq_fate_iff`/`group_validate_fate_iff` | 2026-09-13 |
-| P0.2 | p0 | wal/recover ×4 átomo (parse fail-closed) | todo | — | 2026-09-13 |
+| P0.2 | p0 | wal/recover ×4 átomo (parse fail-closed) | done | r0218 p0.2 átomos 1-4/4 (7c62a63c→) | 2026-09-13 |
 | P0.3 | p0 | changelog+flush+manifest+reopen ×6 átomo | todo | — | 2026-09-13 |
 | P0.4 | p0 | crc/magic/scan ×9 átomo (integridade) | todo | — | 2026-09-13 |
 | P1.1 | p1 | compact ×7 + lsm_r1 ×3 átomo | todo | — | 2026-09-13 |

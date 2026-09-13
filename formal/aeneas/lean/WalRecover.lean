@@ -635,3 +635,70 @@ theorem physical_payload_act_fate_iff :
       subst hv
       rfl
 
+/-- RFC-0218 P0.2 4/4 (átomo `catalog:fragment_act`): o destino do
+    fragmento é EXATAMENTE a tabela completa FragKind ×
+    scratch_empty — Full produz, First começa, Middle/Last órfão
+    (scratch vazio) fail-stopa em vez de acumular/produzir, Middle
+    cheio acumula, Last cheio produz, Zero pula. O AS-IS devolve
+    CleanEof para o órfão (EOF silencioso — dente plantado). -/
+theorem fragment_act_fate_iff :
+    ∀ (kind : recover_kernel.FragKind) (scratch_empty : Bool)
+      (act : recover_kernel.FragAct),
+      (recover_kernel.fragment_act kind scratch_empty = ok act) ↔
+        ((kind = recover_kernel.FragKind.Full ∧ act = recover_kernel.FragAct.Yield) ∨
+          (kind = recover_kernel.FragKind.First ∧ act = recover_kernel.FragAct.Start) ∨
+          (kind = recover_kernel.FragKind.Middle ∧ scratch_empty = true ∧
+            act = recover_kernel.FragAct.FailStop) ∨
+          (kind = recover_kernel.FragKind.Middle ∧ scratch_empty = false ∧
+            act = recover_kernel.FragAct.Accumulate) ∨
+          (kind = recover_kernel.FragKind.Last ∧ scratch_empty = true ∧
+            act = recover_kernel.FragAct.FailStop) ∨
+          (kind = recover_kernel.FragKind.Last ∧ scratch_empty = false ∧
+            act = recover_kernel.FragAct.Yield) ∨
+          (kind = recover_kernel.FragKind.Zero ∧ act = recover_kernel.FragAct.Skip)) := by
+  intro kind scratch_empty act
+  constructor
+  · intro hval
+    cases kind with
+    | Full =>
+      unfold recover_kernel.fragment_act at hval
+      injection hval with hv
+      exact Or.inl ⟨rfl, hv.symm⟩
+    | First =>
+      unfold recover_kernel.fragment_act at hval
+      injection hval with hv
+      exact Or.inr (Or.inl ⟨rfl, hv.symm⟩)
+    | Middle =>
+      simp only [recover_kernel.fragment_act] at hval
+      split at hval
+      · next hs =>
+        exact Or.inr (Or.inr (Or.inl ⟨rfl, hs,
+          by injection hval with hv; exact hv.symm⟩))
+      · next hs =>
+        simp only [Bool.not_eq_true] at hs
+        exact Or.inr (Or.inr (Or.inr (Or.inl ⟨rfl, hs,
+          by injection hval with hv; exact hv.symm⟩)))
+    | Last =>
+      simp only [recover_kernel.fragment_act] at hval
+      split at hval
+      · next hs =>
+        exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨rfl, hs,
+          by injection hval with hv; exact hv.symm⟩))))
+      · next hs =>
+        simp only [Bool.not_eq_true] at hs
+        exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨rfl, hs,
+          by injection hval with hv; exact hv.symm⟩)))))
+    | Zero =>
+      unfold recover_kernel.fragment_act at hval
+      injection hval with hv
+      refine Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr ?_)))))
+      exact ⟨rfl, hv.symm⟩
+  · rintro (⟨hk, hv⟩ | ⟨hk, hv⟩ | ⟨hk, hs, hv⟩ | ⟨hk, hs, hv⟩ |
+      ⟨hk, hs, hv⟩ | ⟨hk, hs, hv⟩ | ⟨hk, hv⟩)
+    · subst hk; subst hv; rfl
+    · subst hk; subst hv; rfl
+    · subst hk; subst hs; subst hv; rfl
+    · subst hk; subst hs; subst hv; rfl
+    · subst hk; subst hs; subst hv; rfl
+    · subst hk; subst hs; subst hv; rfl
+    · subst hk; subst hv; rfl
