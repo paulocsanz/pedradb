@@ -5299,6 +5299,10 @@
   },
   {
    "id": "ikey_pack",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.2: fate ∀ sobre pack_sequence_and_type no degrau átomo — cadeia citada: teto MAX_SEQUENCE_NUMBER lido e afirmado (massert), shift 8, tipo u8→u64, pacote = ou bit a bit; planta DST pack_sequence_and_type_on_live_db_is_not_ok"
+   },
    "finding": "RFC-0150 P1",
    "twin_kind": "close",
    "single_artifact": true,

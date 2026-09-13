@@ -292,3 +292,48 @@ theorem internal_key_partial_cmp_is_some_cmp
         ok (some o)) := by
   unfold key.InternalKey.Insts.CoreCmpPartialOrdInternalKey.partial_cmp
   rfl
+
+private theorem bind_ok_inv {α β} (x : Result α) (f : α → Result β) (v : β)
+    (h : Aeneas.Std.bind x f = ok v) : ∃ a, x = ok a ∧ f a = ok v := by
+  cases x with
+  | ok a => exact ⟨a, rfl, h⟩
+  | fail e => exact absurd h (by simp)
+  | div => exact absurd h (by simp)
+
+/-- An ok chain reassembles into an ok bind. -/
+private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : β}
+    (a : α) (hx : x = ok a) (h : f a = ok v) : Aeneas.Std.bind x f = ok v := by
+  rw [hx]
+  exact h
+
+/-- RFC-0218 P1.2 3/11 (átomo `catalog:ikey_pack`, entrada
+    `key.pack_sequence_and_type`): empacotar ikey é EXATAMENTE a cadeia
+    citada — o teto MAX_SEQUENCE_NUMBER é lido e afirmado (massert),
+    a sequência desloca 8, o tipo vira u8 e sobe a u64, e o pacote é o
+    ou bit a bit. O AS-IS descarta a sequência (colisão seq/kind —
+    dente plantado). -/
+theorem pack_sequence_and_type_fate_iff :
+    ∀ (sequence : U64) (kind : key.ValueType) (r : U64),
+      (key.pack_sequence_and_type sequence kind = ok r) ↔
+      (∃ i i1 i2 i3, key.MAX_SEQUENCE_NUMBER = ok i ∧
+        massert (sequence <= i) = ok () ∧
+        (sequence <<< 8#i32) = ok i1 ∧
+        key.ValueType.as_u8 kind = ok i2 ∧
+        lift (core.convert.num.FromU64U8.from i2) = ok i3 ∧
+        r = (i1 ||| i3)) := by
+  intro sequence kind r
+  constructor
+  · intro hval
+    unfold key.pack_sequence_and_type at hval
+    obtain ⟨i, hmax, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨u, hm, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨i1, hsh, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨i2, hu8, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨i3, hl, hval⟩ := bind_ok_inv _ _ _ hval
+    injection hval with hv
+    exact ⟨i, i1, i2, i3, hmax, hm, hsh, hu8, hl, hv.symm⟩
+  · rintro ⟨i, i1, i2, i3, hmax, hm, hsh, hu8, hl, hv⟩
+    subst hv
+    unfold key.pack_sequence_and_type
+    exact bind_intro i hmax (bind_intro () hm (bind_intro i1 hsh
+      (bind_intro i2 hu8 (bind_intro i3 hl rfl))))

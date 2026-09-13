@@ -316,6 +316,8 @@ gates GREEN no commit).
   77→76.
 ## P1.2 — leveling ×4 + merge ×2 + index_val ×3 + key + prefix ×11 átomo
 
+- **key / pack_sequence_and_type (3/11)**: empacotar ikey como a cadeia citada — teto `MAX_SEQUENCE_NUMBER` lido e afirmado (`massert (seq <= i)`), `seq <<< 8`, `as_u8` + `lift` do tipo, pacote = `i1 ||| i3` (6 componentes ∃) — `pack_sequence_and_type_fate_iff` em `Key.lean` (moldes `bind_ok_inv`/`bind_intro` locais). Forward: 5× bind_ok_inv + injection; reverso: bind_intro ×5. Build verde. Planta DST `pack_sequence_and_type_on_live_db_is_not_ok` (pedradb-core, exit 0 no worktree). Gate: floor_atom 213→214, floor_extract 65→64.
+
 - **merge / write_op_range_end (2/11)**: fim do range como o despacho citado — Deletion e Value sem fim (none); RangeDeletion carrega o valor (some) — `write_op_range_end_fate_iff` em `Merge.lean`. Forward: cases kind + injection; reverso: rintro + subst + rfl. Build verde. Planta DST `write_op_range_end_on_live_stage_unapplied_is_not_ok` (pedradb-core, exit 0 no worktree). Gate: floor_atom 212→213, floor_extract 66→65.
 
 - **index_val / value_len_tag (1/11)**: etiqueta de comprimento como o
