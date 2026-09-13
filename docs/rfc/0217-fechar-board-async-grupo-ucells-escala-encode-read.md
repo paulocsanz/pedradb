@@ -414,7 +414,15 @@ board**, estendendo este RFC a cada etapa nova descoberta.
   **hat** ticket 0193; raftlog/mvcc_latest @1024 são WIN Linux);
   suspeitos **hat**: L0/SST count e flush por commit com 10M chaves,
   memtable BTree grande, admission ladder. Dono nomeado → ataque.
-  — status: `todo` (finding P2.5 datado)
+  — status: `in-progress` — decomposição PHASE FEITA (finding
+  `2026-09-13-rfc0217-p26-p27-escala/`, write10m 10,63M commits):
+  wal 4,74µs (50,7% — async, ataque é o P0.4/grouping no meter
+  oficial), **flush_check 2,69µs (28,8%) = dono novo**, mem 1,55µs,
+  publish/prepare <0,1µs; split gate×work landed `7f2758d4`
+  (`flush_events`/`flush_work_ns` no WRITEPHASE) — número do split vem
+  do pipeline local `p26r3` (DIAG), ataque (epoch no gate × flush fora
+  do commit) decidido pelo split; desenrolado no
+  [RFC-0223](0223-escala-donos-flush-write-miss-read.md) P1.1.
 - [ ] **P2.8** (aberto por P2.5) banda mc9–49: DIAG Darwin fechado como
   fronteira contínua (0,29–0,60 de mc9 a mc32; mc49 encosta quando o
   rocks paga cauda — ycsb_a_mc49 4,03 com rocks p999 58ms,
@@ -450,7 +458,7 @@ dono.
 | P2.4 | p2 | Escada de admissão: histerese (produto) | doing | `c4fe195d` (knob opt-in; meter disco pequeno p/ flip default = e4b) | 2026-09-13 |
 | P2.5 | p2 | Cobertura: delete-heavy, mc9–49, 1GiB, p99/p999 | done | finding 09-13 `p25-cobertura` (abriu P2.6/P2.7/P2.8) | 2026-09-13 |
 | P2.6 | p2 | scan-at-scale: ycsb_e 0,001 / deps_scan 0,045 @10M (WIN @1024) — dono rev.2 = seed flush deferido × settle eager; settle+simetria landed | in-progress | finding 09-13 rev.2 (probe refuta skip) | 2026-09-13 |
-| P2.7 | p2 | write-at-scale: raftlog 0,250 / mvcc_latest 0,281 / cache_overwrite 0,037 / ycsb_a 0,656 @10M — PHASE na célula g1 | todo | — | 2026-09-13 |
+| P2.7 | p2 | write-at-scale: raftlog 0,250 / mvcc_latest 0,281 / cache_overwrite 0,037 / ycsb_a 0,656 @10M — PHASE na célula g1 | in-progress | finding 09-13 `p26-p27-escala` (wal 4,74µs 50,7%; flush_check 2,69µs 28,8% = dono novo) + split `7f2758d4`; número do split = pipeline `p26r3` | 2026-09-13 |
 | P2.8 | p2 | Banda mc9–49 DIAG 0,29–0,60 (fronteira contínua; veredito = P0.4/e4b) | todo | — | 2026-09-13 |
 
 ## Acceptance Criteria
