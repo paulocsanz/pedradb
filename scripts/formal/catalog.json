@@ -6239,7 +6239,11 @@
     "file": "crates/pedradb-core/src/manifest_kernel.rs",
     "test": "f196_first_install_tolerance"
    },
-   "three_teeth": true
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 5/6 P0.3: first_install_action como tabela citada — commitado (com/sem sync) prossegue, falha recusa abrir (F196); floor_atom 190→191"
+   }
   },
   {
    "id": "probe_order_covering",

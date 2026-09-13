@@ -116,3 +116,10 @@ gates GREEN no commit).
   if_pos/if_neg com Bool.not_eq_true). Build verde. Planta DST
   `theorem_flush_plan_on_finite_domain` (pedradb-core, exit 0). Gate:
   floor_atom 189→190, floor_extract 89→88.
+
+- **first_install (5/6)**: tabela citada F196 — commitado (com ou sem
+  sync) prossegue; falha recusa abrir —
+  `first_install_action_fate_iff` em `Manifest.lean` (3 ramos disjuntos,
+  reverso refuta por noConfusion). Build verde. Planta DST
+  `f196_first_install_tolerance` (pedradb-core, exit 0). Gate:
+  floor_atom 190→191, floor_extract 88→87.

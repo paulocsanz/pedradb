@@ -35,3 +35,52 @@ theorem sst_recover_action_refuse_iff_corrupt_or_inventory_missing :
   · rintro (hc | ⟨hinv, i, hi⟩)
     · rw [hc]
     · rw [hinv, hi]
+/-- RFC-0218 P0.3 5/6 (átomo `catalog:first_install`): a primeira
+    instalação é EXATAMENTE a tabela citada — manifest commitado
+    (com ou sem sync) prossegue; falha recusa abrir (F196: o FALIDO
+    nunca vira banco). O AS-IS prossegue sempre (abre sobre
+    instalação falida — dente plantado). -/
+theorem first_install_action_fate_iff :
+    ∀ (out : FirstInstallOutcome) (act : FirstInstallAction),
+      (first_install_action out = ok act) ↔
+        ((out = FirstInstallOutcome.Committed ∧
+            act = FirstInstallAction.Proceed) ∨
+          (out = FirstInstallOutcome.CommittedUnsynced ∧
+            act = FirstInstallAction.Proceed) ∨
+          (out = FirstInstallOutcome.Failed ∧
+            act = FirstInstallAction.RefuseOpen)) := by
+  intro out act
+  cases out with
+  | Committed =>
+    constructor
+    · intro hval
+      simp only [first_install_action] at hval
+      injection hval with hv
+      exact Or.inl ⟨rfl, hv.symm⟩
+    · rintro (⟨-, hv⟩ | h2 | h3)
+      · subst hv
+        rfl
+      · exact absurd h2.1 (fun h => FirstInstallOutcome.noConfusion h)
+      · exact absurd h3.1 (fun h => FirstInstallOutcome.noConfusion h)
+  | CommittedUnsynced =>
+    constructor
+    · intro hval
+      simp only [first_install_action] at hval
+      injection hval with hv
+      exact Or.inr (Or.inl ⟨rfl, hv.symm⟩)
+    · rintro (h1 | ⟨-, hv⟩ | h3)
+      · exact absurd h1.1 (fun h => FirstInstallOutcome.noConfusion h)
+      · subst hv
+        rfl
+      · exact absurd h3.1 (fun h => FirstInstallOutcome.noConfusion h)
+  | Failed =>
+    constructor
+    · intro hval
+      simp only [first_install_action] at hval
+      injection hval with hv
+      exact Or.inr (Or.inr ⟨rfl, hv.symm⟩)
+    · rintro (h1 | h2 | ⟨-, hv⟩)
+      · exact absurd h1.1 (fun h => FirstInstallOutcome.noConfusion h)
+      · exact absurd h2.1 (fun h => FirstInstallOutcome.noConfusion h)
+      · subst hv
+        rfl

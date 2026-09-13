@@ -217,3 +217,4 @@ atom	catalog:changelog	changelog_needs_sst_rebuild_fate_iff	formal/aeneas/lean/C
 atom	catalog:changelog_should_store	changelog_should_store_fate_iff	formal/aeneas/lean/Changelog.lean	changelog_should_store
 atom	catalog:changelog_budget	changelog_rebuild_within_budget_fate_iff	formal/aeneas/lean/Changelog.lean	changelog_rebuild_within_budget
 atom	catalog:flush_plan	flush_plan_fate_iff	formal/aeneas/lean/Flush.lean	flush_plan
+atom	catalog:first_install	first_install_action_fate_iff	formal/aeneas/lean/Manifest.lean	first_install_action
