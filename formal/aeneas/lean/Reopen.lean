@@ -106,3 +106,68 @@ theorem reopen_outcome_fate_iff :
   intro damage point_in_time escalated v
   cases damage <;> cases point_in_time <;> cases escalated <;>
     simp [reopen_outcome, eq_comm]
+/-- RFC-0218 P0.3 6/6 (átomo `catalog:dictionary_link`): o destino
+    do reopen é EXATAMENTE a política citada — sem dano serve tudo;
+    dano com point-in-time não escalado serve o prefixo reportado;
+    dano escalado ou sem point-in-time recusa abrir. O AS-IS silencia
+    (serve tudo sobre dano — dente plantado no crash-recover). -/
+theorem reopen_outcome_flat_fate_iff :
+    ∀ (damage : ReopenDamage) (point_in_time : Bool) (escalated : Bool)
+      (outcome : ReopenOutcome),
+      (reopen_outcome damage point_in_time escalated = ok outcome) ↔
+        ((damage = ReopenDamage.None ∧
+            outcome = ReopenOutcome.ServeAll) ∨
+          (damage ≠ ReopenDamage.None ∧ point_in_time = true ∧
+            escalated = true ∧ outcome = ReopenOutcome.RefuseOpen) ∨
+          (damage ≠ ReopenDamage.None ∧ point_in_time = true ∧
+            escalated = false ∧
+            outcome = ReopenOutcome.ServePrefixReport) ∨
+          (damage ≠ ReopenDamage.None ∧ point_in_time = false ∧
+            outcome = ReopenOutcome.RefuseOpen)) := by
+  intro damage point_in_time escalated outcome
+  cases damage with
+  | None =>
+    constructor
+    · intro hval
+      simp only [reopen_outcome] at hval
+      injection hval with hv
+      exact Or.inl ⟨rfl, hv.symm⟩
+    · rintro (⟨-, hv⟩ | h2 | h3 | h4)
+      · subst hv
+        rfl
+      · exact absurd rfl h2.1
+      · exact absurd rfl h3.1
+      · exact absurd rfl h4.1
+  | TruncatedHead | Crc | ZeroHeader | Resync =>
+    constructor
+    · intro hval
+      simp only [reopen_outcome] at hval
+      split at hval
+      · next hpit =>
+        split at hval
+        · next hesc =>
+          exact Or.inr (Or.inl ⟨fun h => ReopenDamage.noConfusion h,
+            hpit, hesc, by injection hval with hv; exact hv.symm⟩)
+        · next hesc =>
+          simp only [Bool.not_eq_true] at hesc
+          exact Or.inr (Or.inr (Or.inl ⟨fun h => ReopenDamage.noConfusion h,
+            hpit, hesc, by injection hval with hv; exact hv.symm⟩))
+      · next hpit =>
+        simp only [Bool.not_eq_true] at hpit
+        exact Or.inr (Or.inr (Or.inr
+          ⟨fun h => ReopenDamage.noConfusion h, hpit,
+            by injection hval with hv; exact hv.symm⟩))
+    · rintro (h1 | ⟨hd, hpit, hesc, hv⟩ | ⟨hd, hpit, hesc, hv⟩ |
+        ⟨hd, hpit, hv⟩)
+      · exact absurd h1.1 (fun h => ReopenDamage.noConfusion h)
+      · subst hpit
+        subst hesc
+        subst hv
+        rfl
+      · subst hpit
+        subst hesc
+        subst hv
+        rfl
+      · subst hpit
+        subst hv
+        rfl

@@ -95,9 +95,9 @@ nunca por promoção silenciosa.
    (`Changelog.lean`/`Flush.lean`/`Manifest.lean`/`Reopen.lean`):
    `changelog`, `changelog_budget`, `changelog_should_store`,
    `flush_plan`, `first_install`, `dictionary_link` — floor_atom
-   186→192 — status: `todo`
-   (5/6: átomos changelog ×3 + `flush_plan_fate_iff` +
-   `first_install_action_fate_iff` feitos 2026-09-13)
+   186→192 — status: `done`
+   (2026-09-13; 6/6: átomos changelog ×3 + `flush_plan_fate_iff` +
+   `first_install_action_fate_iff` + `reopen_outcome_flat_fate_iff`)
 
 4. **P0.4** CRC/mágica/scan ×9 (`Scan.lean`/`Crc.lean`/`MagicKernel`):
    `scan_guard`, `sst_block_crc`, `sst_crc`, `zero_glue`,
@@ -185,7 +185,7 @@ nunca por promoção silenciosa.
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | group_commit ×4 átomo (validação OCC/fence) | done | `occ_conflict_fate_iff`/`fsync_promotes_pending_fate_iff`/`fence_publish_seq_fate_iff`/`group_validate_fate_iff` | 2026-09-13 |
 | P0.2 | p0 | wal/recover ×4 átomo (parse fail-closed) | done | r0218 p0.2 átomos 1-4/4 (7c62a63c→) | 2026-09-13 |
-| P0.3 | p0 | changelog+flush+manifest+reopen ×6 átomo | todo | — | 2026-09-13 |
+| P0.3 | p0 | changelog+flush+manifest+reopen ×6 átomo | done | r0218 p0.3 átomos 1-6/6 (c6e9e586→) | 2026-09-13 |
 | P0.4 | p0 | crc/magic/scan ×9 átomo (integridade) | todo | — | 2026-09-13 |
 | P1.1 | p1 | compact ×7 + lsm_r1 ×3 átomo | todo | — | 2026-09-13 |
 | P1.2 | p1 | leveling/merge/index_val/key/prefix ×11 átomo | todo | — | 2026-09-13 |

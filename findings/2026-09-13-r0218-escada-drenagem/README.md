@@ -123,3 +123,13 @@ gates GREEN no commit).
   reverso refuta por noConfusion). Build verde. Planta DST
   `f196_first_install_tolerance` (pedradb-core, exit 0). Gate:
   floor_atom 190→191, floor_extract 88→87.
+
+- **dictionary_link (6/6)**: política citada do reopen em tabela
+  completa de 4 linhas — sem dano serve tudo; dano com point-in-time
+  não escalado serve o prefixo reportado; dano escalado ou sem
+  point-in-time recusa abrir — `reopen_outcome_flat_fate_iff` em
+  `Reopen.lean` (mais fina que a iff agrupada prévia de 2026-09-12,
+  que permanece; braço combinado 4 danos com split at hval). Build
+  verde. Planta DST `crash_after_sync_recovers_committed`
+  (pedradb-sim, exit 0). Gate: floor_atom 191→192, floor_extract
+  88→87. **P0.3 fechada: ×6 átomo, 6/6.**
