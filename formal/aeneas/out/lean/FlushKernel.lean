@@ -766,4 +766,134 @@ def auto_flush_gate_as_is
   (_global_under : Bool) (_cf_under : Bool) : Result AutoFlushGate := do
   ok AutoFlushGate.ScanColumnFamilies
 
+/-- [pedra_aeneas_flush_kernel::MemAutoFlushPlan]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 341:0-346:1
+    Visibility: public -/
+@[discriminant isize]
+inductive MemAutoFlushPlan where
+| FlushMemNow : MemAutoFlushPlan
+| NotDueKeepMem : MemAutoFlushPlan
+
+/-- [pedra_aeneas_flush_kernel::{impl core::fmt::Debug for pedra_aeneas_flush_kernel::MemAutoFlushPlan}::fmt]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 340:9-340:14
+    Visibility: public -/
+def MemAutoFlushPlan.Insts.CoreFmtDebug.fmt
+  (self : MemAutoFlushPlan) (f : core.fmt.Formatter) :
+  Result ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter)
+  := do
+  match self with
+  | MemAutoFlushPlan.FlushMemNow =>
+    core.fmt.Formatter.write_str f (toStr "FlushMemNow")
+  | MemAutoFlushPlan.NotDueKeepMem =>
+    core.fmt.Formatter.write_str f (toStr "NotDueKeepMem")
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::fmt::Debug for pedra_aeneas_flush_kernel::MemAutoFlushPlan}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 340:9-340:14 -/
+@[reducible]
+def MemAutoFlushPlan.Insts.CoreFmtDebug : core.fmt.Debug MemAutoFlushPlan := {
+  fmt := MemAutoFlushPlan.Insts.CoreFmtDebug.fmt
+}
+
+/-- [pedra_aeneas_flush_kernel::{impl core::clone::Clone for pedra_aeneas_flush_kernel::MemAutoFlushPlan}::clone]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 340:16-340:21
+    Visibility: public -/
+def MemAutoFlushPlan.Insts.CoreCloneClone.clone
+  (self : MemAutoFlushPlan) : Result MemAutoFlushPlan := do
+  ok self
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::clone::Clone for pedra_aeneas_flush_kernel::MemAutoFlushPlan}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 340:16-340:21 -/
+@[reducible]
+def MemAutoFlushPlan.Insts.CoreCloneClone : core.clone.Clone MemAutoFlushPlan
+  := {
+  clone := MemAutoFlushPlan.Insts.CoreCloneClone.clone
+}
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::marker::Copy for pedra_aeneas_flush_kernel::MemAutoFlushPlan}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 340:23-340:27 -/
+@[reducible]
+def MemAutoFlushPlan.Insts.CoreMarkerCopy : core.marker.Copy MemAutoFlushPlan
+  := {
+  cloneInst := MemAutoFlushPlan.Insts.CoreCloneClone
+}
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_flush_kernel::MemAutoFlushPlan}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 340:29-340:38 -/
+@[reducible]
+def MemAutoFlushPlan.Insts.CoreMarkerStructuralPartialEq :
+  core.marker.StructuralPartialEq MemAutoFlushPlan := {
+}
+
+/-- [pedra_aeneas_flush_kernel::{impl core::cmp::PartialEq<pedra_aeneas_flush_kernel::MemAutoFlushPlan> for pedra_aeneas_flush_kernel::MemAutoFlushPlan}::eq]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 340:29-340:38
+    Visibility: public -/
+def MemAutoFlushPlan.Insts.CoreCmpPartialEqMemAutoFlushPlan.eq
+  (self : MemAutoFlushPlan) (other : MemAutoFlushPlan) : Result Bool := do
+  let self1 := read_discriminant self
+  let other1 := read_discriminant other
+  ok (self1 = other1)
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::cmp::PartialEq<pedra_aeneas_flush_kernel::MemAutoFlushPlan> for pedra_aeneas_flush_kernel::MemAutoFlushPlan}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 340:29-340:38 -/
+@[reducible]
+def MemAutoFlushPlan.Insts.CoreCmpPartialEqMemAutoFlushPlan :
+  core.cmp.PartialEq MemAutoFlushPlan MemAutoFlushPlan := {
+  eq := MemAutoFlushPlan.Insts.CoreCmpPartialEqMemAutoFlushPlan.eq
+}
+
+/-- [pedra_aeneas_flush_kernel::{impl core::cmp::Eq for pedra_aeneas_flush_kernel::MemAutoFlushPlan}::assert_fields_are_eq]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 340:40-340:42
+    Visibility: public -/
+def MemAutoFlushPlan.Insts.CoreCmpEq.assert_fields_are_eq
+  (self : MemAutoFlushPlan) : Result Unit := do
+  ok ()
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::cmp::Eq for pedra_aeneas_flush_kernel::MemAutoFlushPlan}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 340:40-340:42 -/
+@[reducible]
+def MemAutoFlushPlan.Insts.CoreCmpEq : core.cmp.Eq MemAutoFlushPlan := {
+  partialEqInst := MemAutoFlushPlan.Insts.CoreCmpPartialEqMemAutoFlushPlan
+  assert_fields_are_eq := MemAutoFlushPlan.Insts.CoreCmpEq.assert_fields_are_eq
+}
+
+/-- [pedra_aeneas_flush_kernel::{impl core::hash::Hash for pedra_aeneas_flush_kernel::MemAutoFlushPlan}::hash]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 340:44-340:48
+    Visibility: public -/
+def MemAutoFlushPlan.Insts.CoreHashHash.hash
+  {__H : Type} (corehashHasherInst : core.hash.Hasher __H)
+  (self : MemAutoFlushPlan) (state : __H) :
+  Result __H
+  := do
+  let self1 := read_discriminant self
+  Isize.Insts.CoreHashHash.hash corehashHasherInst self1 state
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::hash::Hash for pedra_aeneas_flush_kernel::MemAutoFlushPlan}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 340:44-340:48 -/
+@[reducible]
+def MemAutoFlushPlan.Insts.CoreHashHash : core.hash.Hash MemAutoFlushPlan := {
+  hash := fun {H : Type} (corehashHasherInst : core.hash.Hasher H) =>
+    MemAutoFlushPlan.Insts.CoreHashHash.hash corehashHasherInst
+}
+
+/-- [pedra_aeneas_flush_kernel::mem_auto_flush_plan]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 350:0-356:1
+    Visibility: public -/
+def mem_auto_flush_plan
+  (mem_bytes : Std.U64) (armed : Bool) (limit : Std.U64) :
+  Result MemAutoFlushPlan
+  := do
+  let b ← auto_flush_due mem_bytes armed limit
+  if b
+  then ok MemAutoFlushPlan.FlushMemNow
+  else ok MemAutoFlushPlan.NotDueKeepMem
+
+/-- [pedra_aeneas_flush_kernel::mem_auto_flush_plan_as_is]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 362:0-368:1
+    Visibility: public -/
+def mem_auto_flush_plan_as_is
+  (_mem_bytes : Std.U64) (_armed : Bool) (_limit : Std.U64) :
+  Result MemAutoFlushPlan
+  := do
+  ok MemAutoFlushPlan.NotDueKeepMem
+
 end pedra_aeneas_flush_kernel

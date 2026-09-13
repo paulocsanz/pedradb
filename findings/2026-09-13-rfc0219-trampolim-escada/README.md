@@ -254,3 +254,22 @@ cf_under)` decidia inline pular o scan inteiro.
 - **Par nasce átomo**: `catalog:auto_flush_gate`. floor_atom 276→277,
   residuals atom 277, single_artifact 296.
 - **Contador**: 55 → **54** (db.rs 33→32).
+
+## P1.3-c — `mem_auto_flush` (flush_kernel) — FECHA P1.3
+
+Sítio: cauda de `maybe_auto_flush` — o portão `if auto_flush_due(mem,
+n != 0, n as u64)` decidia inline flushar a mem agora.
+
+- **Kernel**: `flush_kernel::mem_auto_flush_plan(mem_bytes, armed,
+  limit)` → `MemAutoFlushPlan{FlushMemNow, NotDueKeepMem}` (chama
+  `auto_flush_due`, que segue vivo e provado no corpo).
+- **AS-IS dente**: `mem_auto_flush_plan_as_is` — nunca dispara; limite
+  armado ignorado, mem cresce até o host travar.
+- **Teorema**: `mem_auto_flush_plan_fate_iff` (∀ sobre
+  (mem_bytes, limit, armed); prova via `bind_ok_inv`/`bind_intro`
+  compondo `auto_flush_due_fate_iff`) em `Flush.lean`.
+- **Extrato**: `aeneas_flush.sh --required` verde.
+- **Planta DST**: `mem_auto_flush_plan_on_live_armed_over_limit_flushes`.
+- **Par nasce átomo**: `catalog:mem_auto_flush`. floor_atom 277→278,
+  residuals atom 278, single_artifact 297.
+- **Contador**: 54 → **53** (db.rs 32→31). P1.3 fechado: 3 pares.

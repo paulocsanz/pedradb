@@ -333,6 +333,40 @@ pub fn auto_flush_gate_as_is(_global_under: bool, _cf_under: bool) -> AutoFlushG
     AutoFlushGate::ScanColumnFamilies
 }
 
+/// RFC-0219 P1.3: whether the mem-level auto-flush fires now. Armed and
+/// at/over the limit ⇒ flush (or stage `imm` for the host worker); else
+/// keep accumulating. Calls [`auto_flush_due`].
+#[cfg(not(verus_keep_ghost))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MemAutoFlushPlan {
+    /// Armed and at/over the armed limit — flush the memtable now.
+    FlushMemNow,
+    /// Not due (unarmed or under the limit) — keep accumulating.
+    NotDueKeepMem,
+}
+
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn mem_auto_flush_plan(mem_bytes: u64, armed: bool, limit: u64) -> MemAutoFlushPlan {
+    if auto_flush_due(mem_bytes, armed, limit) {
+        MemAutoFlushPlan::FlushMemNow
+    } else {
+        MemAutoFlushPlan::NotDueKeepMem
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: never flush — the armed limit is ignored and the memtable
+/// grows until the host stalls (unbounded-mem dente).
+#[must_use]
+pub fn mem_auto_flush_plan_as_is(
+    _mem_bytes: u64,
+    _armed: bool,
+    _limit: u64,
+) -> MemAutoFlushPlan {
+    MemAutoFlushPlan::NotDueKeepMem
+}
+
 #[cfg(verus_keep_ghost)]
 use vstd::prelude::*;
 
@@ -985,6 +1019,37 @@ mod tests {
         assert!(
             !maf.contains("skip_auto_flush(global_under, cf_under)"),
             "the raw both-under gate left the trampoline"
+        );
+    }
+
+    #[test]
+    fn mem_auto_flush_plan_on_live_armed_over_limit_flushes() {
+        // RFC-0219 P1.3: armed and at/over the limit flushes the mem
+        // now; unarmed or under keeps accumulating. AS-IS never flushes
+        // (unbounded mem until the host stalls).
+        assert_eq!(
+            mem_auto_flush_plan(100, true, 50),
+            MemAutoFlushPlan::FlushMemNow
+        );
+        assert_eq!(
+            mem_auto_flush_plan(10, true, 50),
+            MemAutoFlushPlan::NotDueKeepMem
+        );
+        assert_eq!(
+            mem_auto_flush_plan(100, false, 50),
+            MemAutoFlushPlan::NotDueKeepMem,
+            "unarmed never fires"
+        );
+        assert_eq!(
+            mem_auto_flush_plan_as_is(100, true, 50),
+            MemAutoFlushPlan::NotDueKeepMem,
+            "AS-IS dente: armed limit ignored, mem grows unbounded"
+        );
+        let maf = named_fn_src(include_str!("db.rs"), "maybe_auto_flush")
+            .expect("maybe_auto_flush");
+        assert!(
+            maf.contains("match crate::flush_kernel::mem_auto_flush_plan("),
+            "maybe_auto_flush must match mem_auto_flush_plan on the mem gate"
         );
     }
 }

@@ -6735,6 +6735,36 @@
    }
   },
   {
+   "id": "mem_auto_flush",
+   "finding": "RFC-0219 P1.3",
+   "twin_kind": "atom",
+   "atom": "mem_auto_flush",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P1.3: flushar a mem é decisão do kernel — dispara EXATAMENTE armado e no/acima do limite (auto_flush_due compõe o plano); desarmado ou abaixo segue acumulando, provado ∀ sobre (mem_bytes, limit, armed) como mem_auto_flush_plan_fate_iff em Flush.lean; o AS-IS nunca dispara (mem cresce até o host travar — dente plantado); o trampolim db.rs maybe_auto_flush faz match no plano"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/flush_kernel.rs",
+   "twin": "crates/pedradb-core/src/flush_kernel.rs",
+   "aeneas": "scripts/aeneas_flush.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "mem_auto_flush_plan",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "maybe_auto_flush"
+    }
+   ],
+   "as_is": "mem_auto_flush_plan_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/flush_kernel.rs",
+    "test": "mem_auto_flush_plan_on_live_armed_over_limit_flushes"
+   }
+  },
+  {
    "id": "flush_plan",
    "finding": "F2/F43",
    "twin_kind": "close",

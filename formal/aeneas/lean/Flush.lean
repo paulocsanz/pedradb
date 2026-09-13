@@ -375,3 +375,48 @@ theorem auto_flush_gate_fate_iff :
   intro global_under cf_under plan
   unfold auto_flush_gate skip_auto_flush
   cases global_under <;> cases cf_under <;> simp_all <;> exact eq_comm
+
+/-- RFC-0219 P1.3 (átomo `catalog:mem_auto_flush`): o auto-flush de mem
+    dispara EXATAMENTE armado e no/acima do limite — desarmado ou abaixo
+    segue acumulando. O AS-IS nunca dispara (limite armado ignorado, mem
+    cresce até o host travar — dente plantado). -/
+theorem mem_auto_flush_plan_fate_iff :
+    ∀ (mem_bytes limit : U64) (armed : Bool) (plan : MemAutoFlushPlan),
+      (mem_auto_flush_plan mem_bytes armed limit = ok plan) ↔
+        ((armed = true ∧ (mem_bytes >= limit) = true ∧
+            plan = MemAutoFlushPlan.FlushMemNow) ∨
+          (¬(armed = true ∧ (mem_bytes >= limit) = true) ∧
+            plan = MemAutoFlushPlan.NotDueKeepMem)) := by
+  intro mem_bytes limit armed plan
+  simp only [mem_auto_flush_plan]
+  constructor
+  · intro hval
+    obtain ⟨b, hw, hm⟩ := bind_ok_inv _ _ _ hval
+    rw [auto_flush_due_fate_iff] at hw
+    cases b with
+    | true =>
+        simp at hm
+        subst hm
+        rcases hw with ⟨hd, har⟩ | ⟨hd, har⟩
+        · exact Or.inl ⟨har, by simpa using hd.symm, rfl⟩
+        · exact absurd hd (by simp)
+    | false =>
+        simp at hm
+        subst hm
+        refine Or.inr ⟨?_, rfl⟩
+        intro hcon
+        obtain ⟨h1, h2⟩ := hcon
+        simp_all
+  · rintro (⟨har, hover, hplan⟩ | ⟨hnot, hplan⟩)
+    · refine bind_intro true ?_ ?_
+      · rw [auto_flush_due_fate_iff]
+        exact Or.inl ⟨by simp [hover], har⟩
+      · simp [hplan]
+    · refine bind_intro false ?_ ?_
+      · rw [auto_flush_due_fate_iff]
+        cases armed with
+        | true =>
+            simp at hnot
+            exact Or.inl ⟨by simpa using hnot, rfl⟩
+        | false => exact Or.inr ⟨rfl, rfl⟩
+      · simp [hplan]

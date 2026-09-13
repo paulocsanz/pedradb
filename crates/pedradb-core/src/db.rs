@@ -11049,15 +11049,18 @@ impl<E: Env> Db<E> {
         let mem = self.mem.approx_memory_usage() as u64;
         let armed = self.auto_flush_bytes.is_some();
         let limit = self.auto_flush_bytes.unwrap_or(0);
-        if crate::flush_kernel::auto_flush_due(mem, armed, limit as u64) {
-            if self.defer_auto_compact {
-                // Leave the table in `imm` for the host worker. Do not call
-                // `prepare_flush_imm` here — that takes the table out and
-                // `has_imm` goes false (291k mem / 0 SST in the P2.1 attempt).
-                let _ = self.stage_flush_imm()?;
-                return Ok(());
+        match crate::flush_kernel::mem_auto_flush_plan(mem, armed, limit as u64) {
+            crate::flush_kernel::MemAutoFlushPlan::FlushMemNow => {
+                if self.defer_auto_compact {
+                    // Leave the table in `imm` for the host worker. Do not call
+                    // `prepare_flush_imm` here — it takes the table out and
+                    // `has_imm` goes false (291k mem / 0 SST in the P2.1 attempt).
+                    let _ = self.stage_flush_imm()?;
+                    return Ok(());
+                }
+                self.auto_flush_mem()?;
             }
-            self.auto_flush_mem()?;
+            crate::flush_kernel::MemAutoFlushPlan::NotDueKeepMem => {}
         }
         Ok(())
     }
