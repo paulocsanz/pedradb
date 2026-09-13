@@ -5979,6 +5979,11 @@
    "dst_plant": {
     "file": "crates/pedradb-core/src/sst/magic_kernel.rs",
     "test": "sst_magic_as_is_admits_cpp_header"
+   },
+   "aeneas": "scripts/aeneas_magic.sh",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 9/9 P0.4: sst_magic_is_pedra como cadeia citada — sem 8 bytes recusa; com prefixo possível admite sse o slice-eq PEDRSST\\0 casa; as-is admite qualquer header (drop-in em disco — dente plantado); extract novo MagicKernel via aeneas_magic.sh (shim com const pinada)"
    }
   },
   {

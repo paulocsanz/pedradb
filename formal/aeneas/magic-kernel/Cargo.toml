@@ -1,0 +1,9 @@
+[workspace]
+
+[package]
+name = "pedra-aeneas-magic-kernel"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "Shim exposing production sst/magic_kernel.rs to Charon (SST_MAGIC re-exposed)"

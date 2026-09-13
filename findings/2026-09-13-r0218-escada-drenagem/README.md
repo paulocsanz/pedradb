@@ -136,6 +136,20 @@ gates GREEN no commit).
 
 ## P0.4 — crc/magic/scan ×9 átomo
 
+- **sst_magic / scan 9/9 (fechamento P0.4)**: admissão de mágica como
+  cadeia citada — sem os 8 bytes (len header < len mágica) recusa
+  false; com prefixo possível, admite sse o slice-eq do prefixo contra
+  PEDRSST\0 casa (`∃ s, lift = ok s ∧ (¬len≥ → false ∨ len≥ → cadeia
+  index×2 + eq`)) — `sst_magic_is_pedra_fate_iff` em `Magic.lean`.
+  EXTRACT NOVO: `scripts/aeneas_magic.sh` → `MagicKernel.lean` (shim
+  `formal/aeneas/magic-kernel` com const SST_MAGIC re-exposta e pin
+  no script; Charon/Aeneas 0 sorries). Forward: 4× bind_ok_inv
+  (zeta via simp only [] antes do split); reverso: unfold + exact
+  bind_intro com show (if len ≥ len). Build verde. Planta DST
+  `sst_magic_as_is_admits_cpp_header` (pedradb-core, exit 0 no
+  worktree). Gate: floor_atom 200→201, floor_extract 78→77. P0.4
+  fechada 9/9 — P0 fechada (205/292 = 70,21%).
+
 - **scan_guard / scan_reads_file (8/9)**: guardião de leitura como a
   cadeia citada — bounds dizem lê (b true ⇒ v true); senão o iter +
   any sobre os túmulos decide (`∃ i, iter = ok i ∧ ∃ b1 c, any =

@@ -103,11 +103,12 @@ nunca por promoção silenciosa.
    `scan_guard`, `sst_block_crc`, `sst_crc`, `zero_glue`,
    `key_in_window`, `point_bounds_overlap`, `tombstone_reaches_window`,
    `crc_match`, `sst_magic` — a família fail-closed de integridade —
-   floor_atom 192→201, sel4_coverage **70,21%** — status: `todo`
-   (8/9: crc_match, sst_block_crc, zero_glue, `sst_crc_fate_flat_fate_iff`,
-   `key_in_window_fate_iff`, `point_bounds_overlap_fate_iff`,
-   `tombstone_reaches_window_fate_iff` e `scan_reads_file_fate_iff`
-   feitos 2026-09-13)
+   floor_atom 192→201, sel4_coverage **70,21%** — status: `done`
+   (2026-09-13; 9/9: crc_match, sst_block_crc, zero_glue,
+   `sst_crc_fate_flat_fate_iff`, `key_in_window_fate_iff`,
+   `point_bounds_overlap_fate_iff`, `tombstone_reaches_window_fate_iff`,
+   `scan_reads_file_fate_iff` e `sst_magic_is_pedra_fate_iff`
+   — extract novo `MagicKernel` via `scripts/aeneas_magic.sh`)
 
 5. **P1.1** compact ×7 + lsm_r1 ×3: `compact`, `compact_floor`,
    `compact_peer_counts`, `compact_ready` (store), `compact_split`,
@@ -190,7 +191,7 @@ nunca por promoção silenciosa.
 | P0.1 | p0 | group_commit ×4 átomo (validação OCC/fence) | done | `occ_conflict_fate_iff`/`fsync_promotes_pending_fate_iff`/`fence_publish_seq_fate_iff`/`group_validate_fate_iff` | 2026-09-13 |
 | P0.2 | p0 | wal/recover ×4 átomo (parse fail-closed) | done | r0218 p0.2 átomos 1-4/4 (7c62a63c→) | 2026-09-13 |
 | P0.3 | p0 | changelog+flush+manifest+reopen ×6 átomo | done | r0218 p0.3 átomos 1-6/6 (c6e9e586→) | 2026-09-13 |
-| P0.4 | p0 | crc/magic/scan ×9 átomo (integridade) | todo | — | 2026-09-13 |
+| P0.4 | p0 | crc/magic/scan ×9 átomo (integridade) | done | r0218 p0.4 átomos 1-9/9 (f8a0b0d2→) | 2026-09-13 |
 | P1.1 | p1 | compact ×7 + lsm_r1 ×3 átomo | todo | — | 2026-09-13 |
 | P1.2 | p1 | leveling/merge/index_val/key/prefix ×11 átomo | todo | — | 2026-09-13 |
 | P1.3 | p1 | si/snapshot/txn/rpc ×11 átomo | todo | — | 2026-09-13 |
