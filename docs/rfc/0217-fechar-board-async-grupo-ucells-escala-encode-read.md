@@ -90,13 +90,13 @@ board**, estendendo este RFC a cada etapa nova descoberta.
 
 ### P0 — Grupo em baixa concorrência (ranking nº 1; residual 0,491/0,836)
 
-- [ ] **P0.1** Kernel da janela de coleta: `group_window_kernel` puro
+- [x] **P0.1** Kernel da janela de coleta: `group_window_kernel` puro
   (decisão bounded: espera W µs no líder quando ≥2 writers ativos e merge
   elegível; zeros para lone/single; twin AS-IS) + wiring no caminho real
   (`submit_after_begin`/WriteGroup: `PEDRA_GROUP_WINDOW_US=N` torna o
   merge elegível em writers ≥2 e o líder espera W antes de drenar;
   caminho lone `active==1 ∧ ¬recently_concurrent` intocado) + testes
-  `rfc0217_group_window_*` no caminho real. — status: `todo`
+  `rfc0217_group_window_*` no caminho real. — status: `done`
 - [ ] **P0.2** Attach in-flight: chegada durante o dreno/write do líder
   entra no mesmo voo (fold/stage na janela off-lock; na G1, attach também
   durante a barreira do grupo) + testes `rfc0217_inflight_attach_*`. —
@@ -163,8 +163,8 @@ dono.
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | Kernel janela de coleta + wiring real + testes `rfc0217_group_window_*` | todo | — | 2026-09-13 |
-| P0.2 | p0 | Attach in-flight (fold na janela off-lock; G1 attach na barreira) | todo | — | 2026-09-13 |
+| P0.1 | p0 | Kernel janela de coleta + wiring real + testes `rfc0217_group_window_*` | done | este commit | 2026-09-13 |
+| P0.2 | p0 | Attach in-flight (fold na janela off-lock; G1 attach na barreira) | doing | — | 2026-09-13 |
 | P0.3 | p0 | Meter DIAG Darwin frontier (avg_grp ≥2 mc2–mc4; ratio ≥0,9) | todo | — | 2026-09-13 |
 | P0.4 | p0 | Meter Linux 3-run quiet (0,491→≥1,0) + veredito + flip default | todo | — | 2026-09-13 |
 | P0.5 | p0 | Re-adjudicação do dono no Linux (distribuição da seção serial) | todo | — | 2026-09-13 |

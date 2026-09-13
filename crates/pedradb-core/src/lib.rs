@@ -39,6 +39,7 @@ pub mod env_crash_kernel;
 pub mod error;
 pub mod flush_kernel;
 pub mod group_commit_kernel;
+pub mod group_window_kernel;
 pub mod history;
 pub mod host;
 pub mod key;

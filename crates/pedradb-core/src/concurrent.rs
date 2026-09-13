@@ -98,6 +98,9 @@ struct WriteGroup {
     /// knob via [`ConcurrentDb::set_write_group_catchup_window`];
     /// `PEDRA_CATCHUP_US` seeds the default for lab sweeps.
     catchup_window_us: AtomicU64,
+    /// RFC-0217 P0.1: async-only group collection window (µs; 0 = off).
+    /// Parsed from `PEDRA_GROUP_WINDOW_US`; see `group_window_kernel`.
+    group_window_us: AtomicU64,
     /// Diagnostics (RFC-0037 P2.2): submits total / queued-behind-leader /
     /// groups led / ops inside led groups.
     submits: AtomicU64,
@@ -285,6 +288,9 @@ impl WriteGroup {
                     .and_then(|v| v.parse::<u64>().ok())
                     .unwrap_or(CATCHUP_WINDOW_DEFAULT.as_micros() as u64),
             ),
+            group_window_us: AtomicU64::new(crate::group_window_kernel::group_window_us(
+                std::env::var("PEDRA_GROUP_WINDOW_US").ok().as_deref(),
+            )),
             submits: AtomicU64::new(0),
             queued: AtomicU64::new(0),
             batches: AtomicU64::new(0),
@@ -669,7 +675,12 @@ impl WriteGroup {
                 active,
                 self.axis_ncpu,
                 self.async_group_forced,
+            ) || crate::group_window_kernel::merge_eligible(
+                active,
+                self.group_window_us.load(Ordering::Relaxed),
             )
+            // RFC-0217 P0.1: window on makes the merge eligible from 2
+            // writers up (rmw arm keeps its own single-op policy above).
         } && !self.verified.load(Ordering::Relaxed);
 
         // Lone writer (parity bench, sequential client): skip the mpsc hop.
@@ -887,28 +898,40 @@ impl WriteGroup {
             let any_sync = batch
                 .iter()
                 .any(|p| crate::write_admission_kernel::wal_sync_required(true, p.do_sync, false));
-            if crate::write_admission_kernel::wal_sync_required(true, any_sync, false)
-                && batch_ops < CATCHUP_SKIP_OPS
-            {
-                if let Some(bound) =
+            let bound = if batch_ops < CATCHUP_SKIP_OPS {
+                if crate::write_admission_kernel::wal_sync_required(true, any_sync, false) {
                     catchup_wait_bound(window, self.fd_ema(), batch.len(), active, batch_ops)
-                {
-                    let t_wait = Instant::now();
-                    let deadline = t_wait + bound;
-                    let mut g = self.queue.lock();
-                    while batch.len() < self.active.load(Ordering::Relaxed) {
-                        let now = Instant::now();
-                        if now >= deadline {
-                            break;
-                        }
-                        let _timed_out = self.arrived.wait_for(&mut g, deadline - now);
-                        batch.extend(g.pending.drain(..));
-                    }
-                    drop(g);
-                    self.catchup_wait_ns
-                        .fetch_add(t_wait.elapsed().as_nanos() as u64, Ordering::Relaxed);
-                    self.catchup_waits.fetch_add(1, Ordering::Relaxed);
+                } else {
+                    // RFC-0217 P0.1: async-only group — no fd to break even
+                    // against (the 0044 P0.5 reason this hold was skipped),
+                    // so the flat clamped window buys one write()/encode
+                    // pass per group; zero when nobody is missing.
+                    let us = crate::group_window_kernel::async_catchup_bound_us(
+                        self.group_window_us.load(Ordering::Relaxed),
+                        active,
+                        batch.len(),
+                    );
+                    (us > 0).then(|| Duration::from_micros(us))
                 }
+            } else {
+                None
+            };
+            if let Some(bound) = bound {
+                let t_wait = Instant::now();
+                let deadline = t_wait + bound;
+                let mut g = self.queue.lock();
+                while batch.len() < self.active.load(Ordering::Relaxed) {
+                    let now = Instant::now();
+                    if now >= deadline {
+                        break;
+                    }
+                    let _timed_out = self.arrived.wait_for(&mut g, deadline - now);
+                    batch.extend(g.pending.drain(..));
+                }
+                drop(g);
+                self.catchup_wait_ns
+                    .fetch_add(t_wait.elapsed().as_nanos() as u64, Ordering::Relaxed);
+                self.catchup_waits.fetch_add(1, Ordering::Relaxed);
             }
 
             // First write lock: append + absorb anyone who queued during
@@ -2314,6 +2337,17 @@ impl<E: Env> ConcurrentDb<E> {
         let micros = window.as_micros().min(u64::MAX as u128) as u64;
         self.writes
             .catchup_window_us
+            .store(micros, Ordering::Relaxed);
+    }
+
+    /// Set the RFC-0217 P0.1 async group collection window
+    /// (`PEDRA_GROUP_WINDOW_US` at open; see `group_window_kernel`). 0 =
+    /// off; values above the misuse ceiling clamp.
+    pub fn set_group_window(&self, window: Duration) {
+        let micros = (window.as_micros().min(u64::MAX as u128) as u64)
+            .min(crate::group_window_kernel::GROUP_WINDOW_MAX_US);
+        self.writes
+            .group_window_us
             .store(micros, Ordering::Relaxed);
     }
 
