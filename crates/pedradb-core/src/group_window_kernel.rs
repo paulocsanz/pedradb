@@ -124,12 +124,13 @@ pub fn group_window_cap_to_flight(raw: Option<&str>) -> bool {
 /// Capping at the flight keeps the hold bounded by a real serial
 /// section: on ext4 the per-group `write()` is the p201r2 mc4 owner
 /// (one syscall per op on the bypass — the window rides it); on
-/// Darwin-async the flight is ≈1–2 µs, so the window collapses to off
-/// and the AS-IS behavior returns (no regression by construction). A
-/// capped window below one quiescence slice cannot complete a collect —
-/// collapse to 0 rather than pay a lock+park per group. Unsampled
-/// flight seeds at [`GROUP_FLIGHT_SEED_US`] so the first group can form
-/// and measure.
+/// Darwin-async the measured flight is 4.74 µs/commit (10M-scale
+/// write10m PHASE split, 2026-09-13) — below one quiescence slice, so
+/// the window collapses to off and the AS-IS behavior returns (no
+/// regression by construction). A capped window below one quiescence
+/// slice cannot complete a collect — collapse to 0 rather than pay a
+/// lock+park per group. Unsampled flight seeds at
+/// [`GROUP_FLIGHT_SEED_US`] so the first group can form and measure.
 #[must_use]
 pub fn flight_capped_window_us(window_us: u64, flight_ema_us: u64, cap_to_flight: bool) -> u64 {
     if !cap_to_flight || window_us == 0 {
