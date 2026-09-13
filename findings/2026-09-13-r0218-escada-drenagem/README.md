@@ -316,6 +316,8 @@ gates GREEN no commit).
   77→76.
 ## P1.2 — leveling ×4 + merge ×2 + index_val ×3 + key + prefix ×11 átomo
 
+- **leveling / overlaps (8/11)**: sobrepor o hull como o par citado — `as_slice` do `lo` + `le hull_hi` abre a porta; `as_slice` do `hi` + `ge hull_lo` confirma — `overlaps_fate_iff` em `Leveling.lean`. Forward: 2× bind_ok_inv + split + bind_ok_inv; reverso: bind_intro ×3 com if defeq. Build verde. Planta DST `overlaps_on_live_slice_is_not_ok` (pedradb-core, exit 0 no worktree). Gate: floor_atom 218→219, floor_extract 60→59.
+
 - **leveling / is_disjoint (7/11)**: disjunção como o despacho citado — `is_disjoint files` É `is_disjoint_outer_loop files 0#usize` — `is_disjoint_fate_iff` em `Leveling.lean`. Forward/reverso: unfold + exact. Build verde. Planta DST `is_disjoint_on_live_stack_is_not_ok` (pedradb-core, exit 0 no worktree). Gate: floor_atom 217→218, floor_extract 61→60.
 
 - **merge / range_tombstone_covers (6/11)**: cobrir por túmulo de range como o par citado — `ge key start` abre a porta e `lt key end` fecha (as-is testa só igualdade com start) — `range_tombstone_covers_fate_iff` em `Merge.lean`. Forward: bind_ok_inv + split; reverso: bind_intro com if defeq. Build verde. Planta DST `range_tombstone_covers_on_live_queued_is_not_ok` (pedradb-store, exit 0 no worktree). Gate: floor_atom 216→217, floor_extract 62→61.

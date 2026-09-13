@@ -217,3 +217,42 @@ theorem is_disjoint_fate_iff :
   · intro hs
     unfold is_disjoint
     exact hs
+
+/-- RFC-0218 P1.2 8/11 (átomo `catalog:leveling_overlaps`, entrada
+    `overlaps`): sobrepor o hull é EXATAMENTE o par citado — o `lo`
+    do arquivo não passa do hull_hi e o `hi` do arquivo não fica
+    abaixo do hull_lo. O AS-IS ignora o limite superior (hull
+    inflado — dente plantado). -/
+theorem overlaps_fate_iff :
+    ∀ (f : LevelFile) (hull_lo : Slice U8) (hull_hi : Slice U8) (v : Bool),
+      (LevelFile.overlaps f hull_lo hull_hi = ok v) ↔
+      (∃ s b, alloc.vec.Vec.as_slice Global f.lo = ok s ∧
+        Shared1A.Insts.CoreCmpPartialOrdShared0B.le
+          (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) s hull_hi = ok b ∧
+        ((b = true ∧
+          ∃ s1, alloc.vec.Vec.as_slice Global f.hi = ok s1 ∧
+            Shared1A.Insts.CoreCmpPartialOrdShared0B.ge
+              (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) s1 hull_lo = ok v) ∨
+         (b = false ∧ v = false))) := by
+  intro f hull_lo hull_hi v
+  constructor
+  · intro hval
+    unfold LevelFile.overlaps at hval
+    obtain ⟨s, hs, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨b, hb, hval⟩ := bind_ok_inv _ _ _ hval
+    split at hval
+    · next hc =>
+      obtain ⟨s1, hs1, hval⟩ := bind_ok_inv _ _ _ hval
+      exact ⟨s, b, hs, hb, Or.inl ⟨hc, s1, hs1, hval⟩⟩
+    · next hc =>
+      simp only [Bool.not_eq_true] at hc
+      injection hval with hv
+      exact ⟨s, b, hs, hb, Or.inr ⟨hc, hv.symm⟩⟩
+  · rintro ⟨s, b, hs, hb, (⟨hc, s1, hs1, hge⟩ | ⟨hc, hv⟩)⟩
+    · subst hc
+      unfold LevelFile.overlaps
+      exact bind_intro s hs (bind_intro true hb (bind_intro s1 hs1 hge))
+    · subst hc
+      subst hv
+      unfold LevelFile.overlaps
+      exact bind_intro s hs (bind_intro false hb rfl)

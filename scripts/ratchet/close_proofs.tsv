@@ -245,3 +245,4 @@ atom	catalog:prefix	prefix_exclusive_end_fate_iff	formal/aeneas/lean/Prefix.lean
 atom	catalog:exact_children	exact_value_children_fate_iff	formal/aeneas/lean/IndexVal.lean	exact_value_children
 atom	catalog:range_covers	range_tombstone_covers_fate_iff	formal/aeneas/lean/Merge.lean	merge.range_tombstone_covers
 atom	catalog:leveling_disjoint	is_disjoint_fate_iff	formal/aeneas/lean/Leveling.lean	is_disjoint
+atom	catalog:leveling_overlaps	overlaps_fate_iff	formal/aeneas/lean/Leveling.lean	overlaps

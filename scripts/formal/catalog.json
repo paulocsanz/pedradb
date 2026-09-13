@@ -5835,6 +5835,10 @@
   },
   {
    "id": "leveling_overlaps",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.2: fate ∀ sobre overlaps no degrau átomo — par citado: lo do arquivo <= hull_hi e hi do arquivo >= hull_lo; planta DST overlaps_on_live_slice_is_not_ok"
+   },
    "finding": "F-leveling-sweep",
    "twin_kind": "model",
    "single_artifact": true,
