@@ -45,3 +45,22 @@ theorem snapshot_needs_txn_meta_clear_fate_iff :
   · rintro hv
     subst hv
     rfl
+
+/-- RFC-0218 P1.3 6/11 (átomo `catalog:snapshot`, entrada
+    `snapshot_touches_user_key`): o snapshot toca chave de usuário
+    EXATAMENTE quando a chave NÃO é reservada — o lift citado
+    `¬ is_reserved`. O AS-IS é a constante true (toca até reservada —
+    dente plantado). -/
+theorem snapshot_touches_user_key_fate_iff :
+    ∀ (is_reserved : Bool) (v : Bool),
+      (snapshot_touches_user_key is_reserved = ok v) ↔
+      (v = decide (¬ (is_reserved = true))) := by
+  intro is_reserved v
+  constructor
+  · intro hval
+    unfold snapshot_touches_user_key at hval
+    injection hval with hv
+    exact hv.symm
+  · rintro hv
+    subst hv
+    rfl

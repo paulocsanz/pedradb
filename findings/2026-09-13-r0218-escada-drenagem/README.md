@@ -348,6 +348,8 @@ gates GREEN no commit).
 
 - **txn / recover_si_generation (3/11)**: geração SI sobrevive ao restart como o lift citado `loaded_max` (as-is zera) — `recover_si_generation_fate_iff` em `StoreTxn.lean`. Forward: unfold + injection + hv.symm; reverso: rintro + subst + rfl. Build verde. Planta DST `si_generation_survives` (pedradb-store, exit 0 no worktree). Gate: floor_atom 224→225, floor_extract 54→53.
 
+- **snapshot / snapshot_touches_user_key (6/11)**: o snapshot toca chave de usuário exatamente quando a chave NÃO é reservada — lift citado `decide (¬ (is_reserved = true))` (as-is true toca até reservada) — `snapshot_touches_user_key_fate_iff` em `Snapshot.lean`. Forward: unfold + injection + hv.symm; reverso: rintro + subst + rfl. Build verde. Planta DST `snapshot_touches_user_key_on_live_queued_is_not_ok` (pedradb-store, exit 0 no worktree). Gate: floor_atom 227→228, floor_extract 51→50.
+
 - **snapshot / snapshot_needs_txn_meta_clear (2/11)**: restaurar snapshot SEMPRE exige limpar o metadado de txn — constante citada true (as-is false vaza txn meta) — `snapshot_needs_txn_meta_clear_fate_iff` em `Snapshot.lean`. Forward: unfold + injection + hv.symm; reverso: rintro + subst + rfl. Build verde. Planta DST `always_clear_txn_meta` (pedradb-store, exit 0 no worktree). Gate: floor_atom 223→224, floor_extract 55→54.
 
 - **si / point_get_watermark (5/11)**: watermark do point-get como o lift citado `range_applied` — o global_seq não entra (as-is devolve global_seq e lê não-aplicado) — `point_get_watermark_fate_iff` em `Si.lean`. Forward: unfold + injection + hv.symm; reverso: rintro + subst + rfl. Build verde. Planta DST `point_get_uses_range_applied` (pedradb-store, exit 0 no worktree). Gate: floor_atom 226→227, floor_extract 52→51.

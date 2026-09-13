@@ -1683,6 +1683,10 @@
   },
   {
    "id": "snapshot",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.3: fate ∀ sobre snapshot_touches_user_key no degrau átomo — lift citado: toca usuário exatamente quando a chave NÃO é reservada; planta DST snapshot_touches_user_key_on_live_queued_is_not_ok"
+   },
    "finding": "F38/F40/F41",
    "twin_kind": "close",
    "single_artifact": true,
