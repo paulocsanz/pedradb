@@ -1,6 +1,6 @@
 # RFC-0219 — O trampolim vira escada: um `if` data-fate de `db.rs`/`concurrent.rs` por kernel nomeado, a escada classe-seL4 além dos 92,47%
 
-**Status:** draft
+**Status:** done (2026-09-13: P0–P2 fechados; 290/312 = 92,95% medido no fim vs 270/292 = 92,47% no início; sweep worktree verde — `rfc0219_sweep_p23`)
 **Data:** 2026-09-13
 **Autoria:** agente grind (round 11), sucessora direta do RFC-0218
 (degrau extrato drenado, `**Status:** done` no HEAD `95755148`,
@@ -83,13 +83,13 @@ início 270/292 = **92,47%**. Alvos DATADOS:
 - [x] **P1.1**–**P1.4** +12 `if`s de `db.rs` (escrita e leitura;
   4 commits por fatia, 3 por commit) — 285/307 = 92,83% — status:
   P1.1 `done` (P1.2–P1.4 em andamento)
-- [ ] **P2.1** fila `db.rs` restante medida (53−15) — status: `todo`
-- [ ] **P2.2** fila `concurrent.rs` (22) — pausa em sítio tocado pela
+- [x] **P2.1** fila `db.rs` restante medida (53−15) — status: `done`
+- [x] **P2.2** fila `concurrent.rs` (22) — pausa em sítio tocado pela
   sessão paralela (RFC-0217) até ela commitar; nunca construir sobre
-  arquivo não-commitado — status: `todo`
-- [ ] **P2.3** sweep final em worktree DENTRO de `software/` (gates
+  arquivo não-commitado — status: `done`
+- [x] **P2.3** sweep final em worktree DENTRO de `software/` (gates
   verdes, sorry 0, `lean_extracts.sh --required` exit 0) + nota datada
-  em `formal/aeneas/EXTRACT.md` + `**Status:** done` — status: `todo`
+  em `formal/aeneas/EXTRACT.md` + `**Status:** done` — status: `done`
 
 ## Vereditos / riscos
 
@@ -147,7 +147,7 @@ início 270/292 = **92,47%**. Alvos DATADOS:
 | P1.4 | p1 | +3 ifs db.rs (285/307 = 92,83%) | done | `pit_resync_rewrite_plan` (open_with_env_sourced) + `manifest_publish_plan` (persist_manifest) + `changelog_store_plan` (changelog_store_point); contador 53→50 | 2026-09-13 |
 | P2.1 | p2 | fila db.rs restante medida (53−15) | done | 34 sítios resolvidos: 18 pares (P0 3, P1 12, P2.1 3: parked_pop, group_ack, cf_flush) + 6 drenos em kernels já pareados + **15 recusas medidas publicadas** (`findings/2026-09-13-rfc0219-p21-recusas/`; alvo P2 re-datado: teto 310/332 = 93,37% sem recusa concurrent.rs) | 2026-09-13 |
 | P2.2 | p2 | fila concurrent.rs (22; pausa na paralela) | done | 19 sítios de código resolvidos: 2 pares (`flusher_gate_plan` ×5 portões workerless/worker; `parked_debt_plan` ×2) + 9 drenos (changelog_durable_commit_fate ×4, occ bools ×2, fence_admission_plan, manifest_publish_plan ×2) + **3 recusas medidas publicadas** (`findings/2026-09-13-rfc0219-p22-recusas/`; R4 local derivado, R5 wrap-is_empty, R1 Err); contador concurrent.rs 22→6 (3 doc); 290/312 = 92,95% | 2026-09-13 |
-| P2.3 | p2 | sweep final + EXTRACT.md + done | todo | — | 2026-09-13 |
+| P2.3 | p2 | sweep final + EXTRACT.md + done | done | worktree `../pedradb-sweep-p23` @b67e8cc3: depth-floor GREEN, inventory-terminal GREEN, twin-contracts GREEN, campaign ok, `lean_extracts.sh --required` exit 0 (1948 jobs, 64 libs + 24 compose), sorry 0; EXTRACT.md datado ×2 (P2.1/P2.2); `**Status:** done` | 2026-09-13 |
 
 ## Critérios de aceite
 
