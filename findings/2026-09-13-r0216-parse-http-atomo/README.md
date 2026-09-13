@@ -77,3 +77,13 @@ verde antes do commit, exatamente 1 teorema público por commit).
   Planta DST `plus_order_flag_discriminates_as_is` (pedradb-http,
   exit 0, 1 passed). Gate GREEN: floor_atom 164→165,
   floor_extract 114→113.
+
+## P1.1 — form ×4 átomo (3/4)
+
+- **from_hex (3/4)**: o if-tree de 15 folhas extraído espelha os
+  3 blocos ASCII hex (0-9, a-f, A-F) com os offsets `-48/-97/-65`
+  e o `+10`; `r=none` ⇔ fora dos blocos. Achado da prova: em
+  `∃ i i1, A ∧ B ∧ C` os binders vêm antes das provas no pattern
+  rintro (`i, i1, hi, hi1`, não `i, hi, i1, hi1`). Planta DST
+  `hex_letters_decode_as_is_does_not` (pedradb-http, exit 0,
+  1 passed). Gate GREEN: floor_atom 165→166, floor_extract 113→112.

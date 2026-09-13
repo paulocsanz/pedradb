@@ -84,7 +84,8 @@ no wrapper, planta DST verde ANTES do commit, gate GREEN no commit).
 3. **P1.1** form ×4 (`Form.lean`): `form_decode`, `form_plus_byte`,
    `plus_before_percent`, `from_hex` — a decodificação byte a byte e
    o hex — floor_atom 163→167, floor_extract 115→111 — status: `todo`
-   (2/4: `form_plus_byte`, `plus_before_percent` feitos 2026-09-13)
+   (3/4: `form_plus_byte`, `plus_before_percent`, `from_hex` feitos
+   2026-09-13)
 
 4. **P1.2** form ×3 (`Form.lean`): `query_values_conflict`,
    `query_u64_conflict`, `query_part_is_bare_name` — os conflitos de

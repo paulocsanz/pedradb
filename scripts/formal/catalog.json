@@ -2356,6 +2356,10 @@
    "dst_plant": {
     "file": "crates/pedradb-http/src/form_kernel.rs",
     "test": "hex_letters_decode_as_is_does_not"
+   },
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "characteriza from_hex átomo-a-átomo: 15 folhas do if-tree espelham exatamente os 16 dígitos hex; r=nil ⇔ fora dos 3 blocos ASCII"
    }
   },
   {
