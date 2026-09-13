@@ -473,6 +473,12 @@ pub struct ReadProbeSnap {
     pub latest_sst_probed: u64,
     /// `scan_at_raw` calls.
     pub scan_ops: u64,
+    /// Nanos inside `count_visible` (RFC-0217 P1.4 read-side probe).
+    pub scan_ns: u64,
+    /// Lazy ordered-view builds of point shards (one per shard lifetime).
+    pub ord_builds: u64,
+    /// Nanos spent building those views.
+    pub ord_build_ns: u64,
     /// SST files offered to the merge (sum).
     pub scan_sst_probed: u64,
     /// Live SST files now.
@@ -1570,6 +1576,7 @@ pub struct Db<E: Env = StdEnv> {
     latest_sst_fallback: AtomicU64,
     latest_sst_probed: AtomicU64,
     scan_ops: AtomicU64,
+    scan_ns: AtomicU64,
     scan_sst_probed: AtomicU64,
     get_mem_hit: AtomicU64,
     get_sst_fallback: AtomicU64,
@@ -2354,6 +2361,7 @@ impl<E: Env> Db<E> {
             latest_sst_fallback: AtomicU64::new(0),
             latest_sst_probed: AtomicU64::new(0),
             scan_ops: AtomicU64::new(0),
+            scan_ns: AtomicU64::new(0),
             scan_sst_probed: AtomicU64::new(0),
             get_mem_hit: AtomicU64::new(0),
             get_sst_fallback: AtomicU64::new(0),
@@ -2678,7 +2686,9 @@ impl<E: Env> Db<E> {
         self.latest_sst_fallback.store(0, Ordering::Relaxed);
         self.latest_sst_probed.store(0, Ordering::Relaxed);
         self.scan_ops.store(0, Ordering::Relaxed);
+        self.scan_ns.store(0, Ordering::Relaxed);
         self.scan_sst_probed.store(0, Ordering::Relaxed);
+        self.mem.reset_ord_probe();
         self.get_mem_hit.store(0, Ordering::Relaxed);
         self.get_sst_fallback.store(0, Ordering::Relaxed);
         self.get_inline.store(0, Ordering::Relaxed);
@@ -2702,6 +2712,9 @@ impl<E: Env> Db<E> {
             latest_sst_fallback: self.latest_sst_fallback.load(Ordering::Relaxed),
             latest_sst_probed: self.latest_sst_probed.load(Ordering::Relaxed),
             scan_ops: self.scan_ops.load(Ordering::Relaxed),
+            scan_ns: self.scan_ns.load(Ordering::Relaxed),
+            ord_builds: self.mem.ord_probe().0,
+            ord_build_ns: self.mem.ord_probe().1,
             scan_sst_probed: self.scan_sst_probed.load(Ordering::Relaxed),
             sst_count: self.ssts.len(),
             l0_files: self.level_file_count(0),
@@ -4477,7 +4490,12 @@ impl<E: Env> Db<E> {
         // `snapshot` (== visible sequence here) read BEFORE computing: any
         // write published after the answer carries a strictly greater
         // sequence, so the dirty-log check in `CountCache::get` sees it.
+        let t_scan = std::time::Instant::now();
         let n = self.count_visible(snapshot, start, end, limit);
+        self.scan_ns.fetch_add(
+            u64::try_from(t_scan.elapsed().as_nanos()).unwrap_or(u64::MAX),
+            Ordering::Relaxed,
+        );
         if latest {
             self.count_cache.insert(start, end, limit, n, snapshot);
         }

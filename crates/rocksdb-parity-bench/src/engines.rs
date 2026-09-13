@@ -316,12 +316,15 @@ impl<E: Env> Engine for CompatEngine<E> {
     fn read_probe_json(&self) -> Option<String> {
         let p = self.db.read_probe();
         Some(format!(
-            r#"{{"latest_ops":{lo},"latest_mem_hit":{mh},"latest_sst_fallback":{fb},"latest_sst_probed":{sp},"scan_ops":{so},"scan_sst_probed":{ssp},"sst_count":{sc},"l0_files":{l0},"level1_files":{l1},"mem_entries":{me},"block_cache_hits":{ch},"block_cache_misses":{cm},"blocks_decoded":{bd},"get_mem_hit":{gm},"get_sst_fallback":{gs},"get_inline":{gi},"get_vlog":{gv},"mvcc_split_ops":{so2},"mvcc_ns_encode":{ne},"mvcc_ns_last":{nl},"mvcc_ns_get":{ng},"mvcc_ns_copy":{nc}}}"#,
+            r#"{{"latest_ops":{lo},"latest_mem_hit":{mh},"latest_sst_fallback":{fb},"latest_sst_probed":{sp},"scan_ops":{so},"scan_ns":{sn},"ord_builds":{ob},"ord_build_ns":{obn},"scan_sst_probed":{ssp},"sst_count":{sc},"l0_files":{l0},"level1_files":{l1},"mem_entries":{me},"block_cache_hits":{ch},"block_cache_misses":{cm},"blocks_decoded":{bd},"get_mem_hit":{gm},"get_sst_fallback":{gs},"get_inline":{gi},"get_vlog":{gv},"mvcc_split_ops":{so2},"mvcc_ns_encode":{ne},"mvcc_ns_last":{nl},"mvcc_ns_get":{ng},"mvcc_ns_copy":{nc}}}"#,
             lo = p.latest_ops,
             mh = p.latest_mem_hit,
             fb = p.latest_sst_fallback,
             sp = p.latest_sst_probed,
             so = p.scan_ops,
+            sn = p.scan_ns,
+            ob = p.ord_builds,
+            obn = p.ord_build_ns,
             ssp = p.scan_sst_probed,
             sc = p.sst_count,
             l0 = p.l0_files,

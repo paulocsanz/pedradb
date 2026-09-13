@@ -332,8 +332,19 @@ pub struct MemTable {
     /// Lazy sorted view of HashMap-only shards (`lock`/`default`/`write`) for
     /// range / last / count. Invalidated with an atomic so apply does not take
     /// the mutex. The HashMap itself is live (RFC-0154).
-    point_ord: Mutex<BTreeMap<Bytes, Arc<Vec<(PackKey, usize)>>>>,
-    point_ord_live: AtomicBool,
+    /// RFC-0217 P1.4: incrementally-maintained ordered view of point shards
+    /// (`lock`/`default`). Built lazily by the first range count over a
+    /// point CF, then updated by every put into that shard — replaces the
+    /// collect+sort rebuild that each write→count transition paid
+    /// (linkbench_mix DIAG: ~120 µs per ~100k-entry re-sort, sample-backed).
+    /// Shapes that never range-count a point CF never build it: the put
+    /// path checks one relaxed atomic.
+    point_ord_btree: Mutex<BTreeMap<Bytes, BTreeMap<PackKey, usize>>>,
+    point_ord_btree_live: AtomicBool,
+    /// RFC-0217 P1.4 read probe: lazy-view builds (one per shard per
+    /// memtable lifetime) and their collect+build nanos.
+    point_ord_builds: std::sync::atomic::AtomicU64,
+    point_ord_build_ns: std::sync::atomic::AtomicU64,
     /// Highest sequence in `tail` (fast-path guard: snapshot ≥ it ⇒ only the
     /// newest version per key can be visible).
     tail_max_seq: SequenceNumber,
@@ -363,8 +374,10 @@ impl Clone for MemTable {
             map: self.map.clone(),
             tail: self.tail.clone(),
             tail_idx: self.tail_idx.clone(),
-            point_ord: Mutex::new(BTreeMap::new()),
-            point_ord_live: AtomicBool::new(false),
+            point_ord_btree: Mutex::new(BTreeMap::new()),
+            point_ord_btree_live: AtomicBool::new(false),
+            point_ord_builds: std::sync::atomic::AtomicU64::new(0),
+            point_ord_build_ns: std::sync::atomic::AtomicU64::new(0),
             tail_max_seq: self.tail_max_seq,
             tail_ord: Mutex::new(None),
             tail_ord_stale: AtomicBool::new(true),
@@ -590,22 +603,6 @@ fn packed_short_bound(b: Bound<&[u8]>) -> Bound<PackKey> {
             Bound::Excluded((p0, p1, k.len() as u16))
         }
         Bound::Unbounded => Bound::Unbounded,
-    }
-}
-
-fn pack_bound_start(ord: &[(PackKey, usize)], start: Bound<PackKey>) -> usize {
-    match start {
-        Bound::Unbounded => 0,
-        Bound::Included(s) => ord.partition_point(|&(k, _)| k < s),
-        Bound::Excluded(s) => ord.partition_point(|&(k, _)| k <= s),
-    }
-}
-
-fn pack_bound_end(ord: &[(PackKey, usize)], end: Bound<PackKey>) -> usize {
-    match end {
-        Bound::Unbounded => ord.len(),
-        Bound::Included(e) => ord.partition_point(|&(k, _)| k <= e),
-        Bound::Excluded(e) => ord.partition_point(|&(k, _)| k < e),
     }
 }
 
@@ -986,6 +983,7 @@ impl MemTable {
         self.tail_max_seq = 0;
         self.tail_idx.clear();
         self.invalidate_tail_ord();
+        self.point_ord_btree_clear();
         let mut cf_bytes = BTreeMap::new();
         for (uk, vers) in &self.map {
             for v in vers.iter() {
@@ -1046,6 +1044,13 @@ impl MemTable {
             let sk = (p0, p1, key.user_key.len() as u16);
             if point {
                 s.point.insert(sk, i);
+                Self::point_ord_btree_insert_at(
+                    &self.point_ord_btree,
+                    &self.point_ord_btree_live,
+                    pfx,
+                    sk,
+                    i,
+                );
             } else {
                 s.short.insert(sk, i);
             }
@@ -1057,7 +1062,6 @@ impl MemTable {
     }
 
     fn invalidate_tail_ord(&self) {
-        self.point_ord_live.store(false, AtomicOrdering::Relaxed);
         self.tail_ord_stale.store(true, AtomicOrdering::Release);
     }
 
@@ -1123,30 +1127,72 @@ impl MemTable {
         }
     }
 
-    /// Sorted `(pack32, len)` of a HashMap shard. First range after apply
-    /// pays the sort; apply itself never reads this (RFC-0149 P2.1).
-    fn cached_point_ord(&self, pfx: &[u8]) -> Option<Arc<Vec<(PackKey, usize)>>> {
-        if self.point_ord_live.load(AtomicOrdering::Relaxed) {
-            if let Ok(g) = self.point_ord.lock() {
-                if let Some(v) = g.get(pfx) {
-                    return Some(Arc::clone(v));
-                }
-            }
+    /// RFC-0217 P1.4: keep the lazy ordered view of a point shard in step
+    /// (put path). One relaxed atomic when no view was ever built.
+    fn point_ord_btree_insert_at(
+        bt: &Mutex<BTreeMap<Bytes, BTreeMap<PackKey, usize>>>,
+        live: &AtomicBool,
+        pfx: &[u8],
+        sk: PackKey,
+        i: usize,
+    ) {
+        if !live.load(AtomicOrdering::Relaxed) {
+            return;
         }
-        let mut v: Vec<(PackKey, usize)> = {
-            let shard = self.tail_idx.get(pfx)?;
-            if crate::write_admission_kernel::batch_is_empty(shard.point.len() as u64) {
-                return None;
-            }
-            shard.point.iter().map(|(&k, &i)| (k, i)).collect()
-        };
-        v.sort_unstable_by_key(|&(k, _)| k);
-        let arc = Arc::new(v);
-        if let Ok(mut g) = self.point_ord.lock() {
-            g.insert(Bytes::copy_from_slice(pfx), Arc::clone(&arc));
+        let mut g = bt.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(shard_bt) = g.get_mut(pfx) {
+            shard_bt.insert(sk, i);
         }
-        self.point_ord_live.store(true, AtomicOrdering::Relaxed);
-        Some(arc)
+    }
+
+    /// Borrow the lazy ordered view of a point shard, building it once on
+    /// first use (collect + BTree build). The guard must not outlive the
+    /// caller's `&self` borrow: puts run under the Db write lock and
+    /// rebuild/mutate this map exclusively.
+    fn point_ord_btree<'a>(
+        &'a self,
+        pfx: &[u8],
+        shard: &'a TailShard,
+    ) -> Option<std::sync::MutexGuard<'a, BTreeMap<Bytes, BTreeMap<PackKey, usize>>>> {
+        let mut g = self.point_ord_btree.lock().unwrap_or_else(|e| e.into_inner());
+        if g.get(pfx).is_none() {
+            let t0 = std::time::Instant::now();
+            let built: BTreeMap<PackKey, usize> =
+                shard.point.iter().map(|(&k, &v)| (k, v)).collect();
+            let ns = t0.elapsed().as_nanos() as u64;
+            self.point_ord_builds.fetch_add(1, AtomicOrdering::Relaxed);
+            self.point_ord_build_ns.fetch_add(ns, AtomicOrdering::Relaxed);
+            if let std::collections::btree_map::Entry::Vacant(e) = g.entry(Bytes::copy_from_slice(pfx)) {
+                e.insert(built);
+            } else if let Some(bt) = g.get_mut(pfx) {
+                *bt = built;
+            }
+            self.point_ord_btree_live.store(true, AtomicOrdering::Relaxed);
+        }
+        Some(g)
+    }
+
+    /// RFC-0217 P1.4 read probe: (builds, build nanos) since the last reset.
+    pub(crate) fn ord_probe(&self) -> (u64, u64) {
+        (
+            self.point_ord_builds.load(AtomicOrdering::Relaxed),
+            self.point_ord_build_ns.load(AtomicOrdering::Relaxed),
+        )
+    }
+
+    /// Zero the P1.4 lazy-view probe counters.
+    pub(crate) fn reset_ord_probe(&self) {
+        self.point_ord_builds.store(0, AtomicOrdering::Relaxed);
+        self.point_ord_build_ns.store(0, AtomicOrdering::Relaxed);
+    }
+
+    /// Drop lazy ordered views (spill/retire re-indexes the tail).
+    fn point_ord_btree_clear(&mut self) {
+        self.point_ord_btree
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+        self.point_ord_btree_live.store(false, AtomicOrdering::Relaxed);
     }
 
     #[allow(dead_code)]
@@ -1165,6 +1211,7 @@ impl MemTable {
     /// are the reader contract). `None` keeps every version (core default).
     pub fn spill_tail_with_gc(&mut self, floor: Option<SequenceNumber>) {
         self.invalidate_tail_ord();
+        self.point_ord_btree_clear();
         self.tail_max_seq = 0;
         let tail = std::mem::take(&mut self.tail);
         self.tail_idx.clear();
@@ -1864,11 +1911,10 @@ impl MemTable {
             return None;
         }
         if has_point {
-            let ord = self.cached_point_ord(pfx)?;
-            let a = pack_bound_start(&ord, lo);
-            let b = pack_bound_end(&ord, hi);
+            let g = self.point_ord_btree(pfx, shard)?;
+            let bt = g.get(pfx)?;
             let mut n = 0usize;
-            for &(_, i) in &ord[a..b] {
+            for (_, &i) in bt.range((lo, hi)) {
                 if self.tail[i].key.kind == ValueType::Value {
                     n += 1;
                     if n >= limit {
@@ -2022,13 +2068,16 @@ impl MemTable {
                 }
             }
             for pfx in point_pfxs {
-                let Some(ord) = self.cached_point_ord(pfx.as_ref()) else {
+                let Some(shard) = self.tail_idx.get(pfx.as_ref()) else {
                     continue;
                 };
-                let a = pack_bound_start(&ord, lo);
-                let b = pack_bound_end(&ord, hi);
-                if b > a {
-                    let i = ord[b - 1].1;
+                let Some(g) = self.point_ord_btree(pfx.as_ref(), shard) else {
+                    continue;
+                };
+                let Some(bt) = g.get(pfx.as_ref()) else {
+                    continue;
+                };
+                if let Some((_, &i)) = bt.range((lo, hi)).next_back() {
                     if let Some(uk) = self.tail.get(i).map(|v| v.key.user_key.clone()) {
                         if cand.as_ref().is_none_or(|c| uk > *c) {
                             cand = Some(uk);
