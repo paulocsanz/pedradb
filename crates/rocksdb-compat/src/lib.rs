@@ -1324,10 +1324,15 @@ fn encoded_succ(enc: &[u8]) -> Option<Vec<u8>> {
     None
 }
 
+/// Process-wide `default` CF handle for staged ops — one `Arc` instead of
+/// one `String` per [`WriteBatch::put`].
+static DEFAULT_CF_ARC: std::sync::LazyLock<Arc<str>> =
+    std::sync::LazyLock::new(|| DEFAULT_CF.into());
+
 /// Atomic write batch (one Pedra `apply_batch` = all-or-nothing).
 #[derive(Debug, Default)]
 pub struct WriteBatch {
-    ops: Vec<(Option<String>, BatchOp)>,
+    ops: Vec<(Option<Arc<str>>, BatchOp)>,
 }
 
 impl WriteBatch {
@@ -1353,7 +1358,7 @@ impl WriteBatch {
     pub fn put(&mut self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) {
         self.put_cf(
             &ColumnFamily {
-                name: DEFAULT_CF.into(),
+                name: Arc::clone(&DEFAULT_CF_ARC),
             },
             key,
             value,
@@ -1363,7 +1368,7 @@ impl WriteBatch {
     /// Put into a named CF.
     pub fn put_cf(&mut self, cf: &ColumnFamily, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) {
         self.ops.push((
-            Some(cf.name.as_ref().to_string()),
+            Some(Arc::clone(&cf.name)),
             BatchOp::Put {
                 key: Bytes::copy_from_slice(key.as_ref()),
                 value: Bytes::copy_from_slice(value.as_ref()),
@@ -1371,11 +1376,19 @@ impl WriteBatch {
         ));
     }
 
+    /// Stage an owned-Bytes put without a second key/value copy — the
+    /// caller keeps `Bytes` handles for its own overlay (WBWI, RFC-0217
+    /// P1.3). Crate-internal.
+    pub(crate) fn put_cf_bytes(&mut self, cf: &Arc<str>, key: Bytes, value: Bytes) {
+        self.ops
+            .push((Some(Arc::clone(cf)), BatchOp::Put { key, value }));
+    }
+
     /// Delete from the default CF.
     pub fn delete(&mut self, key: impl AsRef<[u8]>) {
         self.delete_cf(
             &ColumnFamily {
-                name: DEFAULT_CF.into(),
+                name: Arc::clone(&DEFAULT_CF_ARC),
             },
             key,
         );
@@ -1384,11 +1397,17 @@ impl WriteBatch {
     /// Delete from a named CF.
     pub fn delete_cf(&mut self, cf: &ColumnFamily, key: impl AsRef<[u8]>) {
         self.ops.push((
-            Some(cf.name.as_ref().to_string()),
+            Some(Arc::clone(&cf.name)),
             BatchOp::Delete {
                 key: Bytes::copy_from_slice(key.as_ref()),
             },
         ));
+    }
+
+    /// Stage an owned-Bytes delete (see [`Self::put_cf_bytes`]).
+    pub(crate) fn delete_cf_bytes(&mut self, cf: &Arc<str>, key: Bytes) {
+        self.ops
+            .push((Some(Arc::clone(cf)), BatchOp::Delete { key }));
     }
 
     /// Range-delete `[start, end)` in a named CF.
@@ -1399,7 +1418,7 @@ impl WriteBatch {
         end: impl AsRef<[u8]>,
     ) {
         self.ops.push((
-            Some(cf.name.as_ref().to_string()),
+            Some(Arc::clone(&cf.name)),
             BatchOp::DeleteRange {
                 start: Bytes::copy_from_slice(start.as_ref()),
                 end: Bytes::copy_from_slice(end.as_ref()),
@@ -2640,7 +2659,7 @@ impl<E: PedraEnv> DB<E> {
         if !self.inner.family_is_latched_async(first_cf) {
             return Ok(false);
         }
-        let family = first_cf.as_str();
+        let family: &str = first_cf;
         let mut n = 0usize;
         for (cf, op) in &batch.ops {
             match (cf.as_deref(), op) {
@@ -6713,6 +6732,57 @@ mod tests {
         );
         db.write(b.get_write_batch()).unwrap();
         assert_eq!(db.get(b"k").unwrap().as_deref(), Some(&b"new"[..]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0217 P1.3: overlay semantics under the flat index —
+    /// last-write-wins, delete overlay (`Some(None)`), missing key, and a
+    /// staged op after a lookup resetting the sorted view.
+    #[test]
+    fn wbwi_overlay_last_write_wins_and_reset() {
+        let mut b = WriteBatchWithIndex::new();
+        b.put(b"k", b"v1");
+        b.put(b"k", b"v2");
+        b.delete(b"d");
+        assert_eq!(b.get_from_batch(b"k").unwrap().unwrap(), b"v2");
+        assert_eq!(b.get_from_batch(b"d"), Some(None));
+        assert_eq!(b.get_from_batch(b"missing"), None);
+        // Stage after lookups: the newest write must win on the next read.
+        b.put(b"k", b"v3");
+        assert_eq!(b.get_from_batch(b"k").unwrap().unwrap(), b"v3");
+    }
+
+    /// RFC-0217 P1.3: the lazily sorted view (staged ops > `SORT_MAX`)
+    /// answers identically to the linear scan — across CFs, repeated keys
+    /// and interleaved deletes.
+    #[test]
+    fn wbwi_big_batch_sorted_view_matches_linear() {
+        let dir = tmp("wbwi-sorted");
+        let db = DB::open_cf(&Options::new(), &dir, &["write"]).unwrap();
+        let write_cf = db.cf_handle("write").unwrap();
+        let mut b = WriteBatchWithIndex::new();
+        // > SORT_MAX default-CF ops, some overwritten, one deleted.
+        for i in 0..40u32 {
+            b.put(format!("k{i:02}"), format!("v{i}"));
+        }
+        b.put(b"k07", b"overwrite");
+        b.delete(b"k11");
+        // Named-CF op: same user key, different family — must not shadow.
+        b.put_cf(&write_cf, b"k07", b"cfval");
+        let read = |b: &WriteBatchWithIndex, k: &str| b.get_from_batch(k);
+        assert_eq!(read(&b, "k00").unwrap().unwrap(), b"v0");
+        assert_eq!(read(&b, "k07").unwrap().unwrap(), b"overwrite");
+        assert_eq!(read(&b, "k11"), Some(None));
+        assert_eq!(read(&b, "k39").unwrap().unwrap(), b"v39");
+        assert_eq!(read(&b, "nope"), None);
+        assert_eq!(
+            b.get_from_batch_cf(&write_cf, b"k07").unwrap().unwrap(),
+            b"cfval"
+        );
+        // The written batch stays all-or-nothing and committed order-safe.
+        db.write(b.get_write_batch()).unwrap();
+        assert_eq!(db.get(b"k07").unwrap().as_deref(), Some(&b"overwrite"[..]));
+        assert!(db.get(b"k11").unwrap().is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -10038,18 +10038,29 @@ impl<E: Env> Db<E> {
             self.ensure_write_admitted_for(&families)?;
         }
         self.observe_bulk_batch(&ops);
+        let st = self.phase_stats.clone();
+        let tp = st.as_ref().map(|_| std::time::Instant::now());
         let (records, seq) = self.prepare_write_ops(ops)?;
+        if let (Some(st), Some(tp)) = (st.as_ref(), tp) {
+            st.prepare_ns
+                .fetch_add(tp.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
         if crate::write_admission_kernel::batch_is_empty(records.len() as u64) {
             return Ok(seq);
         }
         self.vlog_prepare_wal(true)?;
         let sl = records.as_slice();
+        let tw = st.as_ref().map(|_| std::time::Instant::now());
         let (n, sync_r) = {
             let mut w = self.wal.lock();
             let n = w.encode_write_op_batches(&[sl])?;
             let r = w.sync_data();
             (n, r)
         };
+        if let (Some(st), Some(tw)) = (st.as_ref(), tw) {
+            st.wal_ns
+                .fetch_add(tw.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
         // RFC-0071: same plan as wal_sync_group (Fence iff required sync failed).
         let failed = sync_r.is_err();
         match crate::write_admission_kernel::wal_commit_plan(true, failed) {
@@ -10079,8 +10090,19 @@ impl<E: Env> Db<E> {
         }
         self.maybe_persist_changelog_after_durable_commit();
         self.note_dirty_points(&records);
+        let tm = st.as_ref().map(|_| std::time::Instant::now());
         apply_ops_owned(&mut self.mem, records);
+        if let (Some(st), Some(tm)) = (st.as_ref(), tm) {
+            st.mem_ns
+                .fetch_add(tm.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
+        let tpub = st.as_ref().map(|_| std::time::Instant::now());
         self.publish_sequence(seq);
+        if let (Some(st), Some(tpub)) = (st.as_ref(), tpub) {
+            st.publish_ns
+                .fetch_add(tpub.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            st.commits.fetch_add(1, Ordering::Relaxed);
+        }
         // Same as `commit_ops_with` / `commit_async_ops`. P1.1 lone_sync
         // skipped this; 1c G1 then never auto-flushed (imm never staged,
         // write_buffer_size was a no-op for the sequential host).

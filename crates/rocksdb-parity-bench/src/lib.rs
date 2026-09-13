@@ -1201,6 +1201,7 @@ impl YcsbRunner {
         // myrocks_write_tx — one OLTP tx = `batch` row updates, one WriteBatch.
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut rows, mut errors) = (0u64, 0u64);
+        let phase0 = e.write_phase_snapshot();
         let t0 = Instant::now();
         for _ in 0..cfg_ops {
             let t = Instant::now();
@@ -1227,10 +1228,25 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] myrocks_write_tx done rows={rows} errors={errors}");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let n = b[0].saturating_sub(a[0]).max(1);
+            let us = |d: u64| d as f64 / n as f64 / 1000.0;
+            eprintln!(
+                "[rocks-parity] myrocks_write_tx phasesΔ (per commit, {batch}/op) prepare={:.2}µs wal={:.2}µs mem={:.2}µs publish={:.2}µs flsh={:.2}µs lock_wait={:.2}µs n={n}",
+                us(b[1].saturating_sub(a[1])),
+                us(b[2].saturating_sub(a[2])),
+                us(b[3].saturating_sub(a[3])),
+                us(b[4].saturating_sub(a[4])),
+                us(b[5].saturating_sub(a[5])),
+                us(b[6].saturating_sub(a[6])),
+            );
+        }
 
         // linkbench_mix — inspired by LinkBench proportions, not a replay:
         //   55% GET_LINKS_LIST (prefix scan), 15% GET_NODE,
         //   25% ADD/UPDATE_LINK as a 4-put batch, 5% DELETE_LINK.
+        e.reset_read_probe();
+        let phase0 = e.write_phase_snapshot();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut scans, mut gets, mut writes, mut deletes, mut errors) =
             (0u64, 0u64, 0u64, 0u64, 0u64);
@@ -1289,9 +1305,30 @@ impl YcsbRunner {
             lats.push(ms(t));
         }
         blocks.push(summarize("linkbench_mix", cfg_ops, t0.elapsed(), &mut lats));
+        let probe = e.read_probe_json().unwrap_or_else(|| "null".into());
+        blocks.push(format!(
+            r#"{{
+    "name": "linkbench_mix_probe",
+    "combined": true,
+    "probe": {probe}
+  }}"#
+        ));
         eprintln!(
             "[rocks-parity] linkbench_mix done scans={scans} gets={gets} writes={writes} deletes={deletes} errors={errors}"
         );
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let n = b[0].saturating_sub(a[0]).max(1);
+            let us = |d: u64| d as f64 / n as f64 / 1000.0;
+            eprintln!(
+                "[rocks-parity] linkbench_mix phasesΔ (per commit) prepare={:.2}µs wal={:.2}µs mem={:.2}µs publish={:.2}µs flsh={:.2}µs lock_wait={:.2}µs n={n}",
+                us(b[1].saturating_sub(a[1])),
+                us(b[2].saturating_sub(a[2])),
+                us(b[3].saturating_sub(a[3])),
+                us(b[4].saturating_sub(a[4])),
+                us(b[5].saturating_sub(a[5])),
+                us(b[6].saturating_sub(a[6])),
+            );
+        }
 
         self.rng = rng;
         blocks
