@@ -88,9 +88,15 @@
 ### P1 — next wave (ataque condicionado ao P0)
 
 - [ ] **P1.1** ataque ao dono do `flush_check` — DECIDIDO pelo split
-  P0.3: é **work** (99,85%; gate 58ns/commit não paga otimização) ⇒
-  mover flush para fora do commit (worker bounded, interface com
-  RFC-0216 parked-debt) — status: `todo`
+  P0.3: é **work** (99,85%; gate 58ns/commit não paga otimização).
+  Diagnóstico rev.2 (arqueologia pós-split): o I/O de SST **já é
+  off-commit** (bench abre por `open_cf` → `defer_auto_compact(true)` +
+  compact/flush workers); o custo in-commit é o **`take_family`** —
+  partição da memtable por família O(n) sob a write-lock (ramo
+  physical-CF do `maybe_auto_flush`). Ataque: quando a família que
+  venceu o gate **domina** a memtable, estacionar a memtable inteira
+  O(1) (`stage_flush_imm`) em vez de parti-la in-commit; `take_family`
+  fica para famílias pequenas — status: `todo`
 - [ ] **P1.2** `probe_miss` re-meter oficial no gate com bloom real
   (RFC-0160 P1.6 in-tree); se <1,0 persistir, fatia de tuning de bloom
   datada no mesmo commit do finding — status: `todo` (blocked: gate)

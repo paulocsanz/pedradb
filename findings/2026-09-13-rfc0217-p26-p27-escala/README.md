@@ -177,6 +177,23 @@ são incomparáveis, os counters mecânicos abaixo é que fecham):
   **flush work raro diluído** (8 eventos de ~3,1s), não um gate caro.
   ⇒ ataque P1.1 = **mover flush para fora do commit** (worker bounded,
   interface parked-debt RFC-0216), NÃO epoch no gate (58ns não paga).
+
+  **Diagnóstico P1.1 rev.2 (arqueologia pós-split): o "flush work"
+  in-commit NÃO é I/O de SST.** O bench abre por
+  `rocksdb_compat::DB::open_cf` (engines.rs:35) que seta
+  `defer_auto_compact(true)` (lib.rs:2086) e sobe compact + flush
+  workers (lib.rs:2089) — a escrita de SST já é off-commit. Por
+  eliminação (stage_flush_imm é O(1); await_flush_debt vive antes do
+  submit, fora do maybe_auto_flush), os 8×3,1s são o
+  **`take_family`** (ramo physical-CF: `push_parked_unflushed(taken)`,
+  db.rs:11078): partição da memtable por família — O(n) alocando ~MiB
+  de nós BTree **sob a write-lock** (~2–3M entries/evento). O caminho
+  O(1) já existe no ramo global: swap via `stage_flush_imm` (db.rs:6121)
+  + o worker particiona/materializa. Ataque refinado: quando a família
+  que venceu o gate **domina** a memtable, estacionar a memtable
+  inteira (O(1)) em vez de parti-la in-commit; `take_family` fica para
+  famílias pequenas (ex. `lock` — o comentário do memtable.rs:899 é
+  esse caso).
 - mc50 A/B 1ª passada **inconclusiva** sob load (compat 37k–236k qps
   entre rounds; braço Rocks 64MiB consistentemente mais rápido que
   256MiB — 151/156/168k vs 107/142/101k — sinal direcional de que o
