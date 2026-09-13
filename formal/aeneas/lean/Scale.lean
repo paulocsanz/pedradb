@@ -376,3 +376,79 @@ theorem warm_cap_bytes_fate_iff :
         | inr hfinr =>
           obtain ⟨hc2, rfl⟩ := hfinr
           rw [if_neg hc2]
+
+/-- RFC-0218 P2.2 (átomo `catalog:scale_predict`, entrada
+    `predict_get_ns`): o relógio previsto é EXATAMENTE a cadeia citada
+    — clamps min(hot, SCALE_BPS)/min(noisy, 9000), a mix
+    hot·τ_ram + (SCALE_BPS−hot)·τ_disk, a conta em u128, a taxa
+    (1+η) e o try_from com teto u64::MAX. O AS-IS ignora η (dente
+    plantado). -/
+theorem predict_get_ns_fate_iff :
+    ∀ (probes tau_ram_ns tau_disk_ns hot_bps noisy_bps : U64) (v : U64),
+      (predict_get_ns probes tau_ram_ns tau_disk_ns hot_bps noisy_bps
+          = ok v) ↔
+        (∃ hot noisy i i1 i2 mix : U64,
+           core.cmp.Ord.min.trait_default core.cmp.OrdU64 hot_bps SCALE_BPS
+             = ok hot ∧
+           core.cmp.Ord.min.trait_default core.cmp.OrdU64 noisy_bps
+             9000#u64 = ok noisy ∧
+           core.num.U64.saturating_mul hot tau_ram_ns = ok i ∧
+           SCALE_BPS - hot = ok i1 ∧
+           core.num.U64.saturating_mul i1 tau_disk_ns = ok i2 ∧
+           lift (core.num.U64.saturating_add i i2) = ok mix ∧
+         ∃ i3 i4 i5 i6 per i7 i8 i9 i10 i11 taxed : U128,
+           lift (core.convert.num.FromU128U64.from probes) = ok i3 ∧
+           lift (core.convert.num.FromU128U64.from mix) = ok i4 ∧
+           core.num.U128.saturating_mul i3 i4 = ok i5 ∧
+           lift (core.convert.num.FromU128U64.from SCALE_BPS) = ok i6 ∧
+           i5 / i6 = ok per ∧
+           lift (core.convert.num.FromU128U64.from SCALE_BPS) = ok i7 ∧
+           lift (core.convert.num.FromU128U64.from noisy) = ok i8 ∧
+           i7 + i8 = ok i9 ∧
+           core.num.U128.saturating_mul per i9 = ok i10 ∧
+           lift (core.convert.num.FromU128U64.from SCALE_BPS) = ok i11 ∧
+           i10 / i11 = ok taxed ∧
+         ∃ r : core.result.Result U64 core.num.error.TryFromIntError,
+           U64.Insts.CoreConvertTryFromU128TryFromIntError.try_from taxed
+             = ok r ∧
+         ∃ w : U64,
+           core.result.Result.unwrap_or r core.num.U64.MAX = ok w ∧
+           v = w) := by
+  intro probes tau_ram_ns tau_disk_ns hot_bps noisy_bps v
+  constructor
+  · intro hval
+    unfold predict_get_ns at hval
+    obtain ⟨hot, hhot, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨noisy, hnoisy, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨i, hi, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨i1, hi1, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨i2, hi2, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨mix, hmix, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨i3, hi3, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨i4, hi4, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨i5, hi5, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨i6, hi6, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨per, hper, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨i7, hi7, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨i8, hi8, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨i9, hi9, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨i10, hi10, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨i11, hi11, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨taxed, htaxed, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨r, hr, hval⟩ := bind_ok_inv _ _ _ hval
+    exact ⟨hot, noisy, i, i1, i2, mix, hhot, hnoisy, hi, hi1, hi2, hmix,
+      i3, i4, i5, i6, per, i7, i8, i9, i10, i11, taxed, hi3, hi4, hi5,
+      hi6, hper, hi7, hi8, hi9, hi10, hi11, htaxed, r, hr, v, hval, rfl⟩
+  · rintro ⟨hot, noisy, i, i1, i2, mix, hhot, hnoisy, hi, hi1, hi2, hmix,
+      i3, i4, i5, i6, per, i7, i8, i9, i10, i11, taxed, hi3, hi4, hi5,
+      hi6, hper, hi7, hi8, hi9, hi10, hi11, htaxed, r, hr, w, hw, hv⟩
+    unfold predict_get_ns
+    refine bind_intro hot hhot (bind_intro noisy hnoisy
+      (bind_intro i hi (bind_intro i1 hi1 (bind_intro i2 hi2
+      (bind_intro mix hmix (bind_intro i3 hi3 (bind_intro i4 hi4
+      (bind_intro i5 hi5 (bind_intro i6 hi6 (bind_intro per hper
+      (bind_intro i7 hi7 (bind_intro i8 hi8 (bind_intro i9 hi9
+      (bind_intro i10 hi10 (bind_intro i11 hi11 (bind_intro taxed htaxed
+      (bind_intro r hr ?_)))))))))))))))))
+    rw [hv]
+    exact hw

@@ -282,3 +282,4 @@ atom	catalog:scale_probes	point_get_probes_fate_iff	formal/aeneas/lean/Scale.lea
 atom	catalog:scale_probes_worst	probes_worst_fate_iff	formal/aeneas/lean/Scale.lean	probes_worst
 atom	catalog:scale_happy_hot	happy_hot_bps_fate_iff	formal/aeneas/lean/Scale.lean	happy_hot_bps
 atom	catalog:scale_warm	warm_cap_bytes_fate_iff	formal/aeneas/lean/Scale.lean	warm_cap_bytes
+atom	catalog:scale_predict	predict_get_ns_fate_iff	formal/aeneas/lean/Scale.lean	predict_get_ns

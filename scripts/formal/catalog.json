@@ -8050,6 +8050,10 @@
   },
   {
    "id": "scale_predict",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "o relogio previsto e exatamente a cadeia citada — clamps min(hot,SCALE_BPS)/min(noisy,9000), mix hot.tau_ram+(SCALE_BPS-hot).tau_disk, conta u128, taxa (1+eta), try_from com teto u64::MAX; as-is ignora eta"
+   },
    "finding": "RFC-0176 P1",
    "twin_kind": "model",
    "single_artifact": true,
