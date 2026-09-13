@@ -658,3 +658,34 @@ Bugs do motor achados pelas plantas: SST v5 vazio no reopen caía no
 fail-closed com corrupção inventada (fix 30e572db). Restam no
 degrau extrato: 120 (nenhum `data_fate` pendente, catálogo
 fechado).
+
+## 2026-09-13 — superfície de parse HTTP no degrau átomo (RFC-0216): cl ×4 + fail_closed ×1 + form ×7 + path ×8
+
+Medido ao vivo no HEAD do 0216: os 20 pares de parse HTTP —
+cl ×4 (Cl.lean: `keep_body_without_cl_fate_iff`,
+`invalid_cl_as_zero_fate_iff`, `content_length_repeat_ok_fate_iff`,
+`short_body_vs_cl_is_error_fate_iff`), fail_closed ×1
+(FailClosed.lean: `parse_error_writes_status_fate_iff`), form ×7
+(Form.lean: `form_plus_byte_fate_iff`,
+`plus_before_percent_fate_iff`, `from_hex_fate_iff`,
+`form_decode_fate_iff`, `query_values_conflict_fate_iff`,
+`query_u64_conflict_fate_iff`, `query_part_is_bare_name_fate_iff`)
+e path ×8 (Path.lean: `strip_authority_for_routing_fate_iff`,
+`strip_uri_fragment_fate_iff`, `path_after_authority_fate_iff`,
+`strip_http_authority_fate_iff`,
+`host_authority_mismatch_fate_iff`, `origin_form_path_fate_iff`,
+`split_host_port_fate_iff`, `request_target_authority_fate_iff`) —
+todos promovidos ao degrau átomo com teorema iff-∀ sobre o corpo
+extraído, 1 promoção = 1 commit. O `request_target_authority`
+(8/8) fecha o último gate vivo do plano de request: o `?` do
+`strip_prefix("//")` fica citado pelo par opaco
+branch/from_residual do Charon (Continue/Break explícitos no
+enunciado). Escada final do 0216: floor_atom 158→178,
+floor_extract 120→100 (close=6, count=7, data_fate=0 imutáveis);
+gate GREEN no HEAD de cada promoção; sweep final em worktree
+DENTRO de software/ com os três gates GREEN (depth-floor,
+inventory-terminal, twin-contracts) + campaign ok + extracts
+--required exit 0 + sorry 0 nos wrappers da rodada. Família http
+do catálogo 27/27 em átomo — nenhum gate do plano de request
+decidido por teste em vez de teorema. Restam no degrau extrato:
+100 (nenhum `data_fate` pendente, catálogo fechado).

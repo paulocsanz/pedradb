@@ -1,6 +1,6 @@
 # RFC-0216 — Superfície de parse HTTP no degrau átomo: cl ×4 + fail_closed ×1 + form ×7 + path ×8
 
-**Status:** draft
+**Status:** done
 **Data:** 2026-09-12
 **Autoria:** agente grind (round 9→10), sucessora direta do RFC-0215
 (coroa de produto fechada, `**Status:** done` no HEAD `c130482e`)
@@ -105,7 +105,8 @@ no wrapper, planta DST verde ANTES do commit, gate GREEN no commit).
 6. **P2.2** sweep final em worktree DENTRO de `software/` (gates 3×
    GREEN + campaign ok + extracts ok + sorry 0, capturas
    `{SCRATCH}/r0216_sweep_*`) + nota datada `EXTRACT.md` + flip
-   `**Status:** done` — status: `todo`
+   `**Status:** done` — status: `done` (2026-09-13; 3× GREEN
+   atom=178/extract=100, campaign ok, extracts exit 0, sorry 0)
 
 ## Vereditos / riscos
 
@@ -141,7 +142,7 @@ no wrapper, planta DST verde ANTES do commit, gate GREEN no commit).
 | P1.1 | p1 | form ×4 átomo (decode/hex) | done | `form_plus_byte_fate_iff`/`plus_before_percent_fate_iff`/`from_hex_fate_iff`/`form_decode_fate_iff` | 2026-09-13 |
 | P1.2 | p1 | form ×3 átomo (conflitos de query) | done | `query_u64_conflict_fate_iff`/`query_part_is_bare_name_fate_iff`/`query_values_conflict_fate_iff` | 2026-09-13 |
 | P2.1 | p2 | path ×8 átomo (autoridade/rota; http 27/27) | done | `strip_authority_for_routing_fate_iff`/`strip_uri_fragment_fate_iff`/`path_after_authority_fate_iff`/`strip_http_authority_fate_iff`/`host_authority_mismatch_fate_iff`/`origin_form_path_fate_iff`/`split_host_port_fate_iff`/`request_target_authority_fate_iff` | 2026-09-13 |
-| P2.2 | p2 | Sweep final + nota EXTRACT.md + flip done | todo | — | 2026-09-12 |
+| P2.2 | p2 | Sweep final + nota EXTRACT.md + flip done | done | worktree software/: 3× GREEN atom=178/extract=100, campaign ok, extracts exit 0, sorry 0 | 2026-09-13 |
 
 ## Critérios de aceite
 
