@@ -5867,7 +5867,11 @@
     "file": "crates/pedradb-core/src/sst/scan_kernel.rs",
     "test": "half_open_boundaries"
    },
-   "three_teeth": true
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 7/9 P0.4: tombstone_reaches_window como os dois gates citados half-open — alcança sse t_end>start E t_start≤fim (v = a && b); as-is devolve false sempre (dente plantado)"
+   }
   },
   {
    "id": "key_in_window",

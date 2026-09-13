@@ -977,3 +977,61 @@ theorem point_bounds_overlap_fate_iff :
       rfl
     · subst hv; subst hs; subst hh
       exact bind_intro a hA (bind_intro b hB (by cases a <;> rfl))
+
+/-- Gate reaches_start of `tombstone_reaches_window` (DEFEQ ao let do kernel). -/
+private noncomputable def trw_reaches_start (t_end : Slice U8)
+    (start : core.ops.range.Bound (Slice U8)) : Result Bool :=
+  match start with
+  | core.ops.range.Bound.Included s =>
+    Shared1A.Insts.CoreCmpPartialOrdShared0B.gt
+      (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) t_end s
+  | core.ops.range.Bound.Excluded s =>
+    Shared1A.Insts.CoreCmpPartialOrdShared0B.gt
+      (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) t_end s
+  | core.ops.range.Bound.Unbounded => ok true
+
+/-- Gate starts_before_end of `tombstone_reaches_window` (DEFEQ ao let do kernel). -/
+private noncomputable def trw_starts_before_end (t_start : Slice U8)
+    (end1 : core.ops.range.Bound (Slice U8)) : Result Bool :=
+  match end1 with
+  | core.ops.range.Bound.Included e =>
+    Shared1A.Insts.CoreCmpPartialOrdShared0B.le
+      (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) t_start e
+  | core.ops.range.Bound.Excluded e =>
+    Shared1A.Insts.CoreCmpPartialOrdShared0B.lt
+      (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) t_start e
+  | core.ops.range.Bound.Unbounded => ok true
+
+/-- RFC-0218 P0.4 7/9 (átomo `catalog:tombstone_reaches_window`): a
+    janela de túmulo é EXATAMENTE os dois gates citados — o túmulo
+    alcança a janela sse seu fim passou do start E seu começo não
+    passou do fim (v = a && b; half-open). O AS-IS devolve false
+    sempre (túmulo nunca alcança — dente plantado). -/
+theorem tombstone_reaches_window_fate_iff :
+    ∀ (t_start : Slice U8) (t_end : Slice U8)
+      (start : core.ops.range.Bound (Slice U8))
+      (end1 : core.ops.range.Bound (Slice U8)) (v : Bool),
+      (scan_kernel.tombstone_reaches_window t_start t_end start end1 = ok v) ↔
+        (∃ a b, trw_reaches_start t_end start = ok a ∧
+                trw_starts_before_end t_start end1 = ok b ∧
+                v = (a && b)) := by
+  intro t_start t_end start end1 v
+  constructor
+  · intro hval
+    unfold scan_kernel.tombstone_reaches_window at hval
+    obtain ⟨a, hA, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨b, hB, hval⟩ := bind_ok_inv _ _ _ hval
+    split at hval
+    · next hc =>
+      rw [hc] at hA
+      injection hval with hv
+      exact ⟨true, b, hA, hB, hv.symm⟩
+    · next hc =>
+      simp only [Bool.not_eq_true] at hc
+      rw [hc] at hA
+      injection hval with hv
+      exact ⟨false, b, hA, hB, hv.symm⟩
+  · rintro ⟨a, b, hA, hB, hv⟩
+    subst hv
+    unfold scan_kernel.tombstone_reaches_window
+    exact bind_intro a hA (bind_intro b hB (by cases a <;> rfl))

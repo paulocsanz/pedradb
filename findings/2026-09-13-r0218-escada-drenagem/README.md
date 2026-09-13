@@ -136,6 +136,16 @@ gates GREEN no commit).
 
 ## P0.4 — crc/magic/scan ×9 átomo
 
+- **tombstone_reaches_window (7/9)**: janela de túmulo como os dois
+  gates citados half-open — alcança a janela sse t_end > start E
+  t_start não passou do fim (`∃ a b, gate = ok a ∧ gate = ok b ∧
+  v = a && b`, gates privados DEFEQ aos lets; Included/Excluded do
+  start ambos gt) — `tombstone_reaches_window_fate_iff` em
+  `Scan.lean`. Moldo da 5/9: duplo bind_ok_inv + split / cadeia
+  bind_intro. Build verde. Planta DST `half_open_boundaries`
+  (pedradb-core, exit 0 no worktree). Gate: floor_atom 198→199,
+  floor_extract 80→79.
+
 - **point_bounds_overlap (6/9)**: gate de arquivo como bounds citados —
   sem smallest/largest lê (true); com ambos, lê sse lo passou no fim E
   hi passou no start (três disjunctos, o terceiro `∃ a b, v = a && b`

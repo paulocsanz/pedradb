@@ -225,3 +225,4 @@ atom	catalog:zero_glue	zero_glue_admitted_fate_iff	formal/aeneas/lean/Scan.lean	
 atom	catalog:sst_crc	sst_crc_fate_flat_fate_iff	formal/aeneas/lean/Scan.lean	sst_crc_fate
 atom	catalog:key_in_window	key_in_window_fate_iff	formal/aeneas/lean/Scan.lean	key_in_window
 atom	catalog:point_bounds_overlap	point_bounds_overlap_fate_iff	formal/aeneas/lean/Scan.lean	point_bounds_overlap
+atom	catalog:tombstone_reaches_window	tombstone_reaches_window_fate_iff	formal/aeneas/lean/Scan.lean	tombstone_reaches_window
