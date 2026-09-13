@@ -7052,6 +7052,10 @@
   },
   {
    "id": "compact_peer_counts",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.1: fate ∀ sobre peer_counts_for_compact no degrau átomo — par offline ainda conta: quorum não encolhe com queda; planta DST offline_peer_still_counts"
+   },
    "finding": "F28",
    "twin_kind": "close",
    "single_artifact": true,

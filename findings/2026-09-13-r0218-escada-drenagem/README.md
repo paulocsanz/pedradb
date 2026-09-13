@@ -228,6 +228,15 @@ gates GREEN no commit).
 
 ## P1.1 — compact ×7 + lsm_r1 ×3 átomo
 
+- **compact / peer_counts_for_compact (3/10)**: contagem de pares
+  como participação booleana — par offline ainda conta, quorum não
+  encolhe com queda — `peer_counts_for_compact_fate_iff` em
+  `StoreCompact.lean`: `peer_counts_for_compact is_participating = ok v
+  ↔ v = true`. Forward: unfold + injection + hv.symm; reverso:
+  rintro + subst + rfl. Build verde. Planta DST
+  `offline_peer_still_counts` (pedradb-store, exit 0 no worktree).
+  Gate: floor_atom 203→204, floor_extract 75→74.
+
 - **compact_floor / compact_index_floor (2/10)**: piso pós-compactação
   como a soma saturada citada through + 1 (u64::MAX satura — nunca
   envolve a zero) — `compact_index_floor_fate_iff` em

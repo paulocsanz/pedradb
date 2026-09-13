@@ -223,3 +223,21 @@ theorem compact_index_floor_fate_iff :
   · intro hv
     unfold compact_index_floor
     rw [hv]
+
+/-- RFC-0218 P1.1 3/10 (átomo `catalog:compact_peer_counts`, entrada
+    `peer_counts_for_compact`): a contagem de pares para o watermark
+    de compactação é EXATAMENTE a constante citada true — um par
+    offline ainda conta (o quorum não encolhe com queda). O AS-IS
+    conta só quem participa (watermark congelável — dente plantado). -/
+theorem peer_counts_for_compact_fate_iff :
+    ∀ (is_participating : Bool) (v : Bool),
+      (peer_counts_for_compact is_participating = ok v) ↔ (v = true) := by
+  intro is_participating v
+  constructor
+  · intro hval
+    unfold peer_counts_for_compact at hval
+    injection hval with hv
+    exact hv.symm
+  · rintro hv
+    subst hv
+    rfl
