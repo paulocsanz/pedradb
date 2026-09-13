@@ -113,12 +113,13 @@ nunca por promoção silenciosa.
 5. **P1.1** compact ×7 + lsm_r1 ×3: `compact`, `compact_floor`,
    `compact_peer_counts`, `compact_ready` (store), `compact_split`,
    `compact_split_at`, `lone_tombstone` (core), `lsm_compact`,
-   `lsm_probe`, `lsm_reopen` — floor_atom 201→211 — status: `todo`
-   (9/10: `may_compact_through_fate_iff`,
+   `lsm_probe`, `lsm_reopen` — floor_atom 201→211 — status: `done`
+   (10/10 feitos 2026-09-13: `may_compact_through_fate_iff`,
    `compact_index_floor_fate_iff`, `peer_counts_for_compact_fate_iff`,
    `compact_ready_fate_iff`, `compact_should_split_fate_iff`,
    `compact_should_split_at_fate_iff`, `lone_tombstone_fate_iff`,
-   `lsm_compact_fate_iff` e `lsm_probe_fate_iff` feitos 2026-09-13)
+   `lsm_compact_fate_iff`, `lsm_probe_fate_iff` e
+   `lsm_reopen_fate_iff`)
 
 6. **P1.2** leveling ×4 + merge ×2 + index_val ×3 + key ×1 + prefix ×1:
    `leveled_enabled`, `leveling_disjoint`, `leveling_overlaps`,
@@ -197,7 +198,7 @@ nunca por promoção silenciosa.
 | P0.2 | p0 | wal/recover ×4 átomo (parse fail-closed) | done | r0218 p0.2 átomos 1-4/4 (7c62a63c→) | 2026-09-13 |
 | P0.3 | p0 | changelog+flush+manifest+reopen ×6 átomo | done | r0218 p0.3 átomos 1-6/6 (c6e9e586→) | 2026-09-13 |
 | P0.4 | p0 | crc/magic/scan ×9 átomo (integridade) | done | r0218 p0.4 átomos 1-9/9 (f8a0b0d2→) | 2026-09-13 |
-| P1.1 | p1 | compact ×7 + lsm_r1 ×3 átomo | todo | — | 2026-09-13 |
+| P1.1 | p1 | compact ×7 + lsm_r1 ×3 átomo | done | 10/10 átomo (floor_atom 201→211) | 2026-09-13 |
 | P1.2 | p1 | leveling/merge/index_val/key/prefix ×11 átomo | todo | — | 2026-09-13 |
 | P1.3 | p1 | si/snapshot/txn/rpc ×11 átomo | todo | — | 2026-09-13 |
 | P2.1 | p2 | journal/stream/fold/ship/capi ×12 átomo | todo | — | 2026-09-13 |

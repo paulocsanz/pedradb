@@ -228,6 +228,14 @@ gates GREEN no commit).
 
 ## P1.1 — compact ×7 + lsm_r1 ×3 átomo
 
+- **lsm_r1 / lsm_reopen (10/10, fecha P1.1)**: reabrir R1 como a
+  identidade citada — o estado sai intacto (`r = s`) —
+  `lsm_reopen_fate_iff` em `LsmR1.lean`. Forward: unfold + injection +
+  hv.symm; reverso: rintro + subst + rfl. Build verde. Planta DST
+  `r1_modelo_on_live_delete_shape_is_not_ok` (pedradb-sim, exit 0 no
+  worktree). Gate: floor_atom 210→211, floor_extract 68→67. Com este,
+  P1.1 fecha 10/10 (floor_atom 201→211).
+
 - **lsm_r1 / lsm_probe (9/10)**: provar R1 como EXATAMENTE um passo
   do loop citado — via `Aeneas.Std.loop.eq_def` (one-step unfold do
   fixpoint): o corpo no nível 0 ou termina (`done o`) ou desce um

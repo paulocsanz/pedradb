@@ -194,3 +194,20 @@ theorem lsm_probe_fate_iff :
       rw [Aeneas.Std.loop.eq_def]
       rw [hb, hcont]
       exact hloop
+
+/-- RFC-0218 P1.1 10/10 (átomo `catalog:lsm_reopen`, entrada
+    `lsm_reopen`): reabrir R1 é EXATAMENTE a identidade citada — o
+    estado sai intacto (`r = s`). O AS-IS reabre pelo loop que
+    esvazia níveis (dente plantado). -/
+theorem lsm_reopen_fate_iff :
+    ∀ (s : LsmState) (r : LsmState),
+      (lsm_reopen s = ok r) ↔ (r = s) := by
+  intro s r
+  constructor
+  · intro hval
+    unfold lsm_reopen at hval
+    injection hval with hv
+    exact hv.symm
+  · rintro hv
+    subst hv
+    rfl
