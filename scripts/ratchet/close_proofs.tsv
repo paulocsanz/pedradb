@@ -246,3 +246,4 @@ atom	catalog:exact_children	exact_value_children_fate_iff	formal/aeneas/lean/Ind
 atom	catalog:range_covers	range_tombstone_covers_fate_iff	formal/aeneas/lean/Merge.lean	merge.range_tombstone_covers
 atom	catalog:leveling_disjoint	is_disjoint_fate_iff	formal/aeneas/lean/Leveling.lean	is_disjoint
 atom	catalog:leveling_overlaps	overlaps_fate_iff	formal/aeneas/lean/Leveling.lean	overlaps
+atom	catalog:leveling_total_bytes	total_bytes_fate_iff	formal/aeneas/lean/Leveling.lean	total_bytes

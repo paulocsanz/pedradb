@@ -316,6 +316,8 @@ gates GREEN no commit).
   77→76.
 ## P1.2 — leveling ×4 + merge ×2 + index_val ×3 + key + prefix ×11 átomo
 
+- **leveling / total_bytes (9/11)**: total do nível como a soma citada — `Slice.iter`, `Iterator.map` com a closure que extrai `bytes`, `Iterator.sum` u64 (as-is devolve contagem de arquivos) — `total_bytes_fate_iff` em `Leveling.lean`. Forward: 2× bind_ok_inv; reverso: bind_intro ×2. Build verde. Planta DST `total_bytes_on_live_level_is_not_ok` (pedradb-core, exit 0 no worktree). Gate: floor_atom 219→220, floor_extract 59→58.
+
 - **leveling / overlaps (8/11)**: sobrepor o hull como o par citado — `as_slice` do `lo` + `le hull_hi` abre a porta; `as_slice` do `hi` + `ge hull_lo` confirma — `overlaps_fate_iff` em `Leveling.lean`. Forward: 2× bind_ok_inv + split + bind_ok_inv; reverso: bind_intro ×3 com if defeq. Build verde. Planta DST `overlaps_on_live_slice_is_not_ok` (pedradb-core, exit 0 no worktree). Gate: floor_atom 218→219, floor_extract 60→59.
 
 - **leveling / is_disjoint (7/11)**: disjunção como o despacho citado — `is_disjoint files` É `is_disjoint_outer_loop files 0#usize` — `is_disjoint_fate_iff` em `Leveling.lean`. Forward/reverso: unfold + exact. Build verde. Planta DST `is_disjoint_on_live_stack_is_not_ok` (pedradb-core, exit 0 no worktree). Gate: floor_atom 217→218, floor_extract 61→60.

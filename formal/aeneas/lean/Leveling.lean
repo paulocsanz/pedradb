@@ -256,3 +256,32 @@ theorem overlaps_fate_iff :
       subst hv
       unfold LevelFile.overlaps
       exact bind_intro s hs (bind_intro false hb rfl)
+
+/-- RFC-0218 P1.2 9/11 (átomo `catalog:leveling_total_bytes`, entrada
+    `total_bytes`): o total do nível é EXATAMENTE a soma citada — o
+    iterador do slice, o mapa que extrai `bytes` de cada arquivo, e a
+    soma u64. O AS-IS devolve a CONTAGEM de arquivos (bytes trocados
+    por itens — dente plantado). -/
+theorem total_bytes_fate_iff :
+    ∀ (files : Slice LevelFile) (v : U64),
+      (total_bytes files = ok v) ↔
+      (∃ i m, core.slice.Slice.iter files = ok i ∧
+        core.iter.traits.iterator.Iterator.map.default
+          (core.iter.traits.iterator.IteratorSliceIter LevelFile)
+          total_bytes.closure.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileU64 i
+          () = ok m ∧
+        core.iter.traits.iterator.Iterator.sum.default
+          (core.iter.adapters.map.Map.Insts.CoreIterTraitsIteratorIterator
+            (core.iter.traits.iterator.IteratorSliceIter LevelFile)
+            total_bytes.closure.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileU64)
+          U64.Insts.CoreIterTraitsAccumSumU64 m = ok v) := by
+  intro files v
+  constructor
+  · intro hval
+    unfold total_bytes at hval
+    obtain ⟨i, hi, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨m, hm, hval⟩ := bind_ok_inv _ _ _ hval
+    exact ⟨i, m, hi, hm, hval⟩
+  · rintro ⟨i, m, hi, hm, hv⟩
+    unfold total_bytes
+    exact bind_intro i hi (bind_intro m hm hv)

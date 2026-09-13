@@ -5858,6 +5858,10 @@
   },
   {
    "id": "leveling_total_bytes",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.2: fate ∀ sobre total_bytes no degrau átomo — soma citada: iter do slice, map que extrai bytes, sum u64; planta DST total_bytes_on_live_level_is_not_ok"
+   },
    "finding": "F-leveling-sweep",
    "twin_kind": "model",
    "single_artifact": true,
