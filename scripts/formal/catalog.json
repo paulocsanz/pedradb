@@ -3208,6 +3208,10 @@
    "dst_plant": {
     "file": "crates/pedradb-core/src/sst/scan_kernel.rs",
     "test": "scan_reads_file_on_live_sst_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 8/9 P0.4: scan_reads_file como cadeia citada — bounds dizem lê; senão o any sobre os túmulos decide (v = b1 do par); as-is só olha bounds (túmulo não esconde — dente plantado)"
    }
   },
   {

@@ -136,6 +136,17 @@ gates GREEN no commit).
 
 ## P0.4 — crc/magic/scan ×9 átomo
 
+- **scan_guard / scan_reads_file (8/9)**: guardião de leitura como a
+  cadeia citada — bounds dizem lê (b true ⇒ v true); senão o iter +
+  any sobre os túmulos decide (`∃ i, iter = ok i ∧ ∃ b1 c, any =
+  ok (b1, c) ∧ v = b1`) — `scan_reads_file_fate_iff` em `Scan.lean`.
+  Forward: triplo bind_ok_inv, uncurry do let-tupla via coeção defeq
+  (`have hval' : ok b1 = ok v := hval`); reverso: refine bind_intro +
+  show (if false …) + if_neg e cadeia bind_intro (subst hv limpava o
+  b1 — usado rw). Build verde. Planta DST
+  `scan_reads_file_on_live_sst_is_not_ok` (pedradb-core, exit 0 no
+  worktree). Gate: floor_atom 199→200, floor_extract 79→78.
+
 - **tombstone_reaches_window (7/9)**: janela de túmulo como os dois
   gates citados half-open — alcança a janela sse t_end > start E
   t_start não passou do fim (`∃ a b, gate = ok a ∧ gate = ok b ∧

@@ -1035,3 +1035,53 @@ theorem tombstone_reaches_window_fate_iff :
     subst hv
     unfold scan_kernel.tombstone_reaches_window
     exact bind_intro a hA (bind_intro b hB (by cases a <;> rfl))
+
+/-- RFC-0218 P0.4 8/9 (átomo `catalog:scan_guard`, entrada
+    `scan_reads_file`): o guardião de leitura é EXATAMENTE a cadeia
+    citada — bounds dizem lê (b true => true); senão o any sobre os
+    túmulos decide (v = b1 do par retornado). O AS-IS só olha os
+    bounds (túmulo que alcança a janela não esconde — dente
+    plantado). -/
+theorem scan_reads_file_fate_iff :
+    ∀ (smallest : Option (Slice U8)) (largest : Option (Slice U8))
+      (tombs : Slice ((Slice U8) × (Slice U8)))
+      (start : core.ops.range.Bound (Slice U8))
+      (end1 : core.ops.range.Bound (Slice U8)) (v : Bool),
+      (scan_kernel.scan_reads_file smallest largest tombs start end1 = ok v) ↔
+        (∃ b, scan_kernel.point_bounds_overlap smallest largest start end1 = ok b ∧
+          ((b = true ∧ v = true) ∨
+            (b = false ∧ ∃ i, core.slice.Slice.iter tombs = ok i ∧
+              ∃ (b1 : Bool)
+                (c : core.slice.iter.Iter ((Slice U8) × (Slice U8))),
+                core.slice.iter.Iter.Insts.CoreIterTraitsIteratorIteratorSharedAT.any
+                  scan_kernel.scan_reads_file.closure.Insts.CoreOpsFunctionFnMutTupleSharedPairSharedSliceU8SharedSliceU8Bool
+                  i (start, end1) = ok (b1, c) ∧
+                v = b1))) := by
+  intro smallest largest tombs start end1 v
+  constructor
+  · intro hval
+    unfold scan_kernel.scan_reads_file at hval
+    obtain ⟨b, hb, hval⟩ := bind_ok_inv _ _ _ hval
+    split at hval
+    · next hc =>
+      injection hval with hv
+      exact ⟨b, hb, Or.inl ⟨hc, hv.symm⟩⟩
+    · next hc =>
+      simp only [Bool.not_eq_true] at hc
+      obtain ⟨i, hi, hval⟩ := bind_ok_inv _ _ _ hval
+      obtain ⟨p, hp, hval⟩ := bind_ok_inv _ _ _ hval
+      obtain ⟨b1, c⟩ := p
+      have hval' : ok b1 = ok v := hval
+      injection hval' with hv
+      exact ⟨b, hb, Or.inr ⟨hc, i, hi, b1, c, hp, hv.symm⟩⟩
+  · rintro ⟨b, hb, (⟨hbt, hv⟩ | ⟨hbf, i, hi, b1, c, hp, hv⟩)⟩
+    · subst hv; subst hbt
+      unfold scan_kernel.scan_reads_file
+      exact bind_intro true hb rfl
+    · subst hbf
+      rw [hv]
+      unfold scan_kernel.scan_reads_file
+      refine bind_intro false hb ?_
+      show (if false = true then ok true else _) = ok b1
+      rw [if_neg (by decide)]
+      exact bind_intro i hi (bind_intro (b1, c) hp rfl)
