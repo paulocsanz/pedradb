@@ -5886,7 +5886,11 @@
     "file": "crates/pedradb-core/src/sst/scan_kernel.rs",
     "test": "key_in_window_on_live_window_is_not_ok"
    },
-   "three_teeth": true
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 5/9 P0.4: key_in_window como os dois gates citados — a chave entra sse passou no start E no fim (v = a && b); as-is 0104 só olha o start (dente plantado)"
+   }
   },
   {
    "id": "point_bounds_overlap",

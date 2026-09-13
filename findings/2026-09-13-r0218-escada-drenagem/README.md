@@ -136,6 +136,16 @@ gates GREEN no commit).
 
 ## P0.4 — crc/magic/scan ×9 átomo
 
+- **key_in_window (5/9)**: janela booleana como os dois gates citados
+  — a chave entra sse passou no start E passou no fim
+  (`∃ a b, gate_start = ok a ∧ gate_end = ok b ∧ v = a && b`,
+  gates privados DEFEQ aos lets do kernel) —
+  `key_in_window_fate_iff` em `Scan.lean`. Forward com duplo
+  bind_ok_inv + split; reverso exact bind_intro em cadeia. Build
+  verde. Planta DST `key_in_window_on_live_window_is_not_ok`
+  (pedradb-core, exit 0 no worktree). Gate: floor_atom 196→197,
+  floor_extract 82→81.
+
 - **crc_match (1/9)**: lift puro da igualdade citada — checksum casa
   sse stored = computed (as-is admite sempre) —
   `crc_match_ok_fate_iff` em `Crc.lean`. Build verde. Planta DST

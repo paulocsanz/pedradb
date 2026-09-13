@@ -844,3 +844,59 @@ theorem sst_crc_fate_flat_fate_iff :
       rw [if_neg (by simp only [Bool.not_eq_true]; exact hc), if_neg hleg]
       subst hv
       rfl
+
+/-- Gate start of `key_in_window` (DEFEQ to the kernel's `after_start` let). -/
+private noncomputable def key_in_window_after_start (key : Slice U8)
+    (start : core.ops.range.Bound (Slice U8)) : Result Bool :=
+  match start with
+  | core.ops.range.Bound.Included s =>
+    Shared1A.Insts.CoreCmpPartialOrdShared0B.ge
+      (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) key s
+  | core.ops.range.Bound.Excluded s =>
+    Shared1A.Insts.CoreCmpPartialOrdShared0B.gt
+      (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) key s
+  | core.ops.range.Bound.Unbounded => ok true
+
+/-- Gate end of `key_in_window` (DEFEQ to the kernel's `before_end` let). -/
+private noncomputable def key_in_window_before_end (key : Slice U8)
+    (end1 : core.ops.range.Bound (Slice U8)) : Result Bool :=
+  match end1 with
+  | core.ops.range.Bound.Included e =>
+    Shared1A.Insts.CoreCmpPartialOrdShared0B.le
+      (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) key e
+  | core.ops.range.Bound.Excluded e =>
+    Shared1A.Insts.CoreCmpPartialOrdShared0B.lt
+      (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) key e
+  | core.ops.range.Bound.Unbounded => ok true
+
+/-- RFC-0218 P0.4 5/9 (átomo `catalog:key_in_window`): a janela
+    booleana de chaves é EXATAMENTE os dois gates citados — a chave
+    entra sse passou no start E passou no fim (v = a && b). O AS-IS
+    só olha o start (fim da janela ignorado — dente plantado). -/
+theorem key_in_window_fate_iff :
+    ∀ (key : Slice U8) (start : core.ops.range.Bound (Slice U8))
+      (end1 : core.ops.range.Bound (Slice U8)) (v : Bool),
+      (scan_kernel.key_in_window key start end1 = ok v) ↔
+        (∃ a b, key_in_window_after_start key start = ok a ∧
+                key_in_window_before_end key end1 = ok b ∧
+                v = (a && b)) := by
+  intro key start end1 v
+  constructor
+  · intro hval
+    unfold scan_kernel.key_in_window at hval
+    obtain ⟨a, hA, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨b, hB, hval⟩ := bind_ok_inv _ _ _ hval
+    split at hval
+    · next hc =>
+      rw [hc] at hA
+      injection hval with hv
+      exact ⟨true, b, hA, hB, hv.symm⟩
+    · next hc =>
+      simp only [Bool.not_eq_true] at hc
+      rw [hc] at hA
+      injection hval with hv
+      exact ⟨false, b, hA, hB, hv.symm⟩
+  · rintro ⟨a, b, hA, hB, hv⟩
+    subst hv
+    unfold scan_kernel.key_in_window
+    exact bind_intro a hA (bind_intro b hB (by cases a <;> rfl))
