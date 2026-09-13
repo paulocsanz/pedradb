@@ -348,3 +348,24 @@ inline entregar a tabela estacionada ao fold.
 - **Par nasce átomo**: `catalog:parked_pop_plan`. floor_atom 281→282,
   residuals atom 282, single_artifact 301.
 - **Contador**: 50 → **49** (db.rs 29→28).
+
+## P2.1-b — `group_ack_plan` (group_commit_kernel)
+
+Sítio: `lone_sync_commit` — o portão `if !may_publish_group(!failed)`
+decidia inline cercar o grupo (I/O de WAL falhada).
+
+- **Kernel**: `group_commit_kernel::group_ack_plan(wal_io_ok)` →
+  `GroupAckPlan{AckPublishGroup, FenceRefuseIoFail}` (chama
+  `may_publish_group`, que segue vivo e provado no corpo).
+- **AS-IS dente**: `group_ack_plan_as_is` — acka a falha (Ok com
+  mentira, buraco 0071).
+- **Teorema**: `group_ack_plan_fate_iff` (∀ sobre o bool) em
+  `GroupCommit.lean`.
+- **Extrato**: `aeneas_group_commit.sh --required` verde; a cópia em
+  `lean/` era arquivo regular STALE (extrato de 2026-09-08) — virou
+  symlink `../out/lean/GroupCommitKernel.lean` como todo kernel
+  (teoremas existentes rebuildaram verde contra o extrato corrente).
+- **Planta DST**: `group_ack_plan_on_live_io_fail_fences`.
+- **Par nasce átomo**: `catalog:group_ack_plan`. floor_atom 282→283,
+  residuals atom 283, single_artifact 302.
+- **Contador**: 49 → **48** (db.rs 28→27).

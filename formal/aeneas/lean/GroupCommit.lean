@@ -989,3 +989,16 @@ theorem group_validate_fate_iff :
   rw [hloop]
   exact group_validate_loop_fate reads last_seq (reads.val).length _ 0#usize
     (Nat.zero_le _) (Nat.sub_le _ _) v
+
+/-- RFC-0219 P2.1 (átomo `catalog:group_ack_plan`): o grupo (ou commit
+    lone) acka e publica EXATAMENTE quando sua I/O de WAL teve sucesso;
+    I/O falhada cerca — sem publish, sem Ok. O AS-IS acka a falha (Ok
+    com mentira — dente plantado). -/
+theorem group_ack_plan_fate_iff :
+    ∀ (wal_io_ok : Bool) (plan : GroupAckPlan),
+      (group_ack_plan wal_io_ok = ok plan) ↔
+        ((wal_io_ok = true ∧ plan = GroupAckPlan.AckPublishGroup) ∨
+          (wal_io_ok = false ∧ plan = GroupAckPlan.FenceRefuseIoFail)) := by
+  intro wal_io_ok plan
+  unfold group_ack_plan may_publish_group
+  cases wal_io_ok <;> simp_all <;> exact eq_comm

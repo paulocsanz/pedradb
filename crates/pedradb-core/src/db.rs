@@ -10192,10 +10192,13 @@ impl<E: Env> Db<E> {
             }
             crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
             | crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => {
-                if !crate::group_commit_kernel::may_publish_group(!failed) {
-                    let e = sync_r.err().expect("publish refused iff WAL I/O failed");
-                    self.fence_durability(&e, FenceClass::of_core(&e));
-                    return Err(e);
+                match crate::group_commit_kernel::group_ack_plan(!failed) {
+                    crate::group_commit_kernel::GroupAckPlan::FenceRefuseIoFail => {
+                        let e = sync_r.err().expect("publish refused iff WAL I/O failed");
+                        self.fence_durability(&e, FenceClass::of_core(&e));
+                        return Err(e);
+                    }
+                    crate::group_commit_kernel::GroupAckPlan::AckPublishGroup => {}
                 }
             }
         }

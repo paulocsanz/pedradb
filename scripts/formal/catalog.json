@@ -6885,6 +6885,36 @@
    }
   },
   {
+   "id": "group_ack_plan",
+   "finding": "RFC-0219 P2.1",
+   "twin_kind": "atom",
+   "atom": "group_ack_plan",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P2.1: ackar e publicar o grupo é decisão do kernel — publica EXATAMENTE quando a I/O de WAL do grupo teve sucesso (may_publish_group segue vivo e provado no corpo), provado ∀ sobre wal_io_ok como group_ack_plan_fate_iff em GroupCommit.lean; o AS-IS acka a falha (Ok com mentira — dente); o trampolim db.rs lone_sync_commit faz match no plano"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+   "aeneas": "scripts/aeneas_group_commit.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "group_ack_plan",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "lone_sync_commit"
+    }
+   ],
+   "as_is": "group_ack_plan_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/group_commit_kernel.rs",
+    "test": "group_ack_plan_on_live_io_fail_fences"
+   }
+  },
+  {
    "id": "flush_plan",
    "finding": "F2/F43",
    "twin_kind": "close",

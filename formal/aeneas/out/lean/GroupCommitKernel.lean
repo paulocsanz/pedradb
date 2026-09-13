@@ -496,51 +496,154 @@ def rwlock_client_may_read_as_is
 def may_publish_group_as_is (_wal_io_ok : Bool) : Result Bool := do
   ok true
 
+/-- [pedra_aeneas_group_commit_kernel::GroupAckPlan]
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 461:0-466:1
+    Visibility: public -/
+@[discriminant isize]
+inductive GroupAckPlan where
+| AckPublishGroup : GroupAckPlan
+| FenceRefuseIoFail : GroupAckPlan
+
+/-- [pedra_aeneas_group_commit_kernel::{impl core::clone::Clone for pedra_aeneas_group_commit_kernel::GroupAckPlan}::clone]:
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 460:9-460:14
+    Visibility: public -/
+def GroupAckPlan.Insts.CoreCloneClone.clone
+  (self : GroupAckPlan) : Result GroupAckPlan := do
+  ok self
+
+/-- Trait implementation: [pedra_aeneas_group_commit_kernel::{impl core::clone::Clone for pedra_aeneas_group_commit_kernel::GroupAckPlan}]
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 460:9-460:14 -/
+@[reducible]
+def GroupAckPlan.Insts.CoreCloneClone : core.clone.Clone GroupAckPlan := {
+  clone := GroupAckPlan.Insts.CoreCloneClone.clone
+}
+
+/-- Trait implementation: [pedra_aeneas_group_commit_kernel::{impl core::marker::Copy for pedra_aeneas_group_commit_kernel::GroupAckPlan}]
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 460:16-460:20 -/
+@[reducible]
+def GroupAckPlan.Insts.CoreMarkerCopy : core.marker.Copy GroupAckPlan := {
+  cloneInst := GroupAckPlan.Insts.CoreCloneClone
+}
+
+/-- [pedra_aeneas_group_commit_kernel::{impl core::fmt::Debug for pedra_aeneas_group_commit_kernel::GroupAckPlan}::fmt]:
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 460:22-460:27
+    Visibility: public -/
+def GroupAckPlan.Insts.CoreFmtDebug.fmt
+  (self : GroupAckPlan) (f : core.fmt.Formatter) :
+  Result ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter)
+  := do
+  match self with
+  | GroupAckPlan.AckPublishGroup =>
+    core.fmt.Formatter.write_str f (toStr "AckPublishGroup")
+  | GroupAckPlan.FenceRefuseIoFail =>
+    core.fmt.Formatter.write_str f (toStr "FenceRefuseIoFail")
+
+/-- Trait implementation: [pedra_aeneas_group_commit_kernel::{impl core::fmt::Debug for pedra_aeneas_group_commit_kernel::GroupAckPlan}]
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 460:22-460:27 -/
+@[reducible]
+def GroupAckPlan.Insts.CoreFmtDebug : core.fmt.Debug GroupAckPlan := {
+  fmt := GroupAckPlan.Insts.CoreFmtDebug.fmt
+}
+
+/-- Trait implementation: [pedra_aeneas_group_commit_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_group_commit_kernel::GroupAckPlan}]
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 460:29-460:38 -/
+@[reducible]
+def GroupAckPlan.Insts.CoreMarkerStructuralPartialEq :
+  core.marker.StructuralPartialEq GroupAckPlan := {
+}
+
+/-- [pedra_aeneas_group_commit_kernel::{impl core::cmp::PartialEq<pedra_aeneas_group_commit_kernel::GroupAckPlan> for pedra_aeneas_group_commit_kernel::GroupAckPlan}::eq]:
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 460:29-460:38
+    Visibility: public -/
+def GroupAckPlan.Insts.CoreCmpPartialEqGroupAckPlan.eq
+  (self : GroupAckPlan) (other : GroupAckPlan) : Result Bool := do
+  let self1 := read_discriminant self
+  let other1 := read_discriminant other
+  ok (self1 = other1)
+
+/-- Trait implementation: [pedra_aeneas_group_commit_kernel::{impl core::cmp::PartialEq<pedra_aeneas_group_commit_kernel::GroupAckPlan> for pedra_aeneas_group_commit_kernel::GroupAckPlan}]
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 460:29-460:38 -/
+@[reducible]
+def GroupAckPlan.Insts.CoreCmpPartialEqGroupAckPlan : core.cmp.PartialEq
+  GroupAckPlan GroupAckPlan := {
+  eq := GroupAckPlan.Insts.CoreCmpPartialEqGroupAckPlan.eq
+}
+
+/-- [pedra_aeneas_group_commit_kernel::{impl core::cmp::Eq for pedra_aeneas_group_commit_kernel::GroupAckPlan}::assert_fields_are_eq]:
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 460:40-460:42
+    Visibility: public -/
+def GroupAckPlan.Insts.CoreCmpEq.assert_fields_are_eq
+  (self : GroupAckPlan) : Result Unit := do
+  ok ()
+
+/-- Trait implementation: [pedra_aeneas_group_commit_kernel::{impl core::cmp::Eq for pedra_aeneas_group_commit_kernel::GroupAckPlan}]
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 460:40-460:42 -/
+@[reducible]
+def GroupAckPlan.Insts.CoreCmpEq : core.cmp.Eq GroupAckPlan := {
+  partialEqInst := GroupAckPlan.Insts.CoreCmpPartialEqGroupAckPlan
+  assert_fields_are_eq := GroupAckPlan.Insts.CoreCmpEq.assert_fields_are_eq
+}
+
+/-- [pedra_aeneas_group_commit_kernel::group_ack_plan]:
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 472:0-478:1
+    Visibility: public -/
+def group_ack_plan (wal_io_ok : Bool) : Result GroupAckPlan := do
+  let b ← may_publish_group wal_io_ok
+  if b
+  then ok GroupAckPlan.AckPublishGroup
+  else ok GroupAckPlan.FenceRefuseIoFail
+
+/-- [pedra_aeneas_group_commit_kernel::group_ack_plan_as_is]:
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 483:0-485:1
+    Visibility: public -/
+def group_ack_plan_as_is (_wal_io_ok : Bool) : Result GroupAckPlan := do
+  ok GroupAckPlan.AckPublishGroup
+
 /-- [pedra_aeneas_group_commit_kernel::lock_interleavings_admitted]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 461:0-463:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 491:0-493:1
     Visibility: public -/
 def lock_interleavings_admitted : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_group_commit_kernel::lock_interleavings_admitted_as_is]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 468:0-470:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 498:0-500:1
     Visibility: public -/
 def lock_interleavings_admitted_as_is : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_group_commit_kernel::fsync_promotes_pending]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 476:0-478:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 506:0-508:1
     Visibility: public -/
 def fsync_promotes_pending (os_honest : Bool) : Result Bool := do
   ok os_honest
 
 /-- [pedra_aeneas_group_commit_kernel::fsync_promotes_pending_as_is]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 483:0-485:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 513:0-515:1
     Visibility: public -/
 def fsync_promotes_pending_as_is (_os_honest : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_group_commit_kernel::media_durable_admitted]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 490:0-492:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 520:0-522:1
     Visibility: public -/
 def media_durable_admitted (_fsync_ok : Bool) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_group_commit_kernel::media_durable_admitted_as_is]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 497:0-499:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 527:0-529:1
     Visibility: public -/
 def media_durable_admitted_as_is (fsync_ok : Bool) : Result Bool := do
   ok fsync_ok
 
 /-- [pedra_aeneas_group_commit_kernel::stacked_fsync_liars_admitted]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 506:0-508:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 536:0-538:1
     Visibility: public -/
 def stacked_fsync_liars_admitted
   (_lying : Bool) (_det_io : Bool) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_group_commit_kernel::stacked_fsync_liars_admitted_as_is]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 513:0-515:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 543:0-545:1
     Visibility: public -/
 def stacked_fsync_liars_admitted_as_is
   (lying : Bool) (det_io : Bool) : Result Bool := do
@@ -549,13 +652,13 @@ def stacked_fsync_liars_admitted_as_is
   else ok false
 
 /-- [pedra_aeneas_group_commit_kernel::fsync_lie_closes_tcg_guest]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 521:0-523:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 551:0-553:1
     Visibility: public -/
 def fsync_lie_closes_tcg_guest : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_group_commit_kernel::fsync_lie_closes_tcg_guest_as_is]:
-    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 528:0-530:1
+    Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 558:0-560:1
     Visibility: public -/
 def fsync_lie_closes_tcg_guest_as_is : Result Bool := do
   ok true

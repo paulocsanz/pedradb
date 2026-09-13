@@ -454,6 +454,36 @@ pub fn may_publish_group_as_is(_wal_io_ok: bool) -> bool {
     may_publish_group_as_is_body!(_wal_io_ok)
 }
 
+/// RFC-0219 P2.1: fate of the group's visibility publish after the
+/// (lone/group) WAL I/O.
+#[cfg(not(verus_keep_ghost))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GroupAckPlan {
+    /// WAL I/O ok — publish the group's entries and ack the batch.
+    AckPublishGroup,
+    /// WAL I/O failed — fence; no publish, no Ok.
+    FenceRefuseIoFail,
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// Publish EXACTLY when the group's WAL I/O succeeded (may_publish_group
+/// stays live and proved in the body).
+#[must_use]
+pub fn group_ack_plan(wal_io_ok: bool) -> GroupAckPlan {
+    if may_publish_group(wal_io_ok) {
+        GroupAckPlan::AckPublishGroup
+    } else {
+        GroupAckPlan::FenceRefuseIoFail
+    }
+}
+
+/// AS-IS: acks even when the WAL I/O failed (Ok with a lie — dente).
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn group_ack_plan_as_is(_wal_io_ok: bool) -> GroupAckPlan {
+    GroupAckPlan::AckPublishGroup
+}
+
 /// RFC-0071 P2.2: lock / OS-scheduler interleavings around the publish
 /// gate are not a ∀π theorem. Always refuse.
 #[cfg(not(verus_keep_ghost))]
@@ -1024,6 +1054,56 @@ pub fn fence_publish_seq_as_is(member_seqs: &[u64]) -> (p: u64)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn named_fn_src(src: &str, name: &str) -> Option<String> {
+        let needle = format!("fn {name}(");
+        let start = src.find(&needle)?;
+        let rest = &src[start..];
+        let bytes = rest.as_bytes();
+        let brace = bytes.iter().position(|&b| b == b'{')?;
+        let mut depth = 0i32;
+        for (i, &b) in bytes[brace..].iter().enumerate() {
+            if b == b'{' {
+                depth += 1;
+            } else if b == b'}' {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(rest[brace..=brace + i].to_string());
+                }
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn group_ack_plan_on_live_io_fail_fences() {
+        // RFC-0219 P2.1: the group acks/publishes EXACTLY when its WAL
+        // I/O succeeded; I/O failure fences (no publish, no Ok). AS-IS
+        // acks the failure (Ok with a lie — dente).
+        assert_eq!(
+            group_ack_plan(true),
+            GroupAckPlan::AckPublishGroup
+        );
+        assert_eq!(
+            group_ack_plan(false),
+            GroupAckPlan::FenceRefuseIoFail
+        );
+        assert_eq!(
+            group_ack_plan_as_is(false),
+            GroupAckPlan::AckPublishGroup,
+            "AS-IS dente: acks a failed WAL I/O"
+        );
+        let lsc = named_fn_src(include_str!("db.rs"), "lone_sync_commit")
+            .expect("lone_sync_commit");
+        assert!(
+            lsc.contains("match crate::group_commit_kernel::group_ack_plan("),
+            "lone_sync_commit must match group_ack_plan"
+        );
+        assert!(
+            !lsc.contains("may_publish_group("),
+            "the raw publish gate left the trampoline"
+        );
+    }
 
     /// RFC-0157 P1.2 — property sweep over the pure group-commit kernel
     /// family (deterministic seeded trials; the recorded trial IS the
