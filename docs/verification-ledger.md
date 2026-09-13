@@ -11,7 +11,7 @@ sustenta. Uma linha só sobe de camada (`experimento → teorema`) com o
 gate da camada de destino verde no mesmo commit (three-teeth ou
 enumeração completa); nunca por reescrita de ledger.
 
-<!-- ledger-catalog: total=292 proof=266 campaign=26 absent=0 single_artifact=285 aeneas_scripts=224 clones=7 models=34 -->
+<!-- ledger-catalog: total=312 proof=286 campaign=26 absent=0 single_artifact=305 aeneas_scripts=245 clones=7 models=34 -->
 
 ## Teorema — ∀ sobre código/modelo (machine-checked ou enumeração completa)
 
@@ -135,6 +135,12 @@ Recount do marker nesta mesma edição (dívida da própria campanha): os pares
 `merge_sift` (59738caa), `si_hist_repair`, `apply_put_plan`, `hist_load_fate`
 (2d60af11–f42d17ed) entraram no catálogo sem mover o marker — total
 294→298, proof 262→265, single_artifact 288→291, aeneas_scripts 228→231.
+
+Recount do marker 2026-09-13 (dívida do fechamento RFC-0219, achada pela
+auditoria independente de 2026-09-13): as 20 promoções átomo do 0219
+(trampolim→escada, `80782f6c..93a9799e`) entraram no catálogo sem mover o
+marker — total 292→312, proof 266→286, single_artifact 285→305,
+aeneas_scripts 224→245.
 
 ## TCB — axiomas nomeados (fora de prova, por decisão registrada)
 
