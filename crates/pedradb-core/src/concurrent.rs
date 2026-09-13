@@ -352,7 +352,15 @@ impl WriteGroup {
         if last == 0 {
             return false;
         }
-        Self::now_ns().saturating_sub(last) < MULTI_HOLD.as_nanos() as u64
+        // RFC-0217 P0.1b: with the group window on, a peer seen within
+        // the window can still arrive inside a collect hold — the lone
+        // bypass must not steal the leader first (window 0 keeps
+        // MULTI_HOLD exactly).
+        let horizon_us = crate::group_window_kernel::peer_horizon_us(
+            self.group_window_us.load(Ordering::Relaxed),
+            MULTI_HOLD.as_micros() as u64,
+        );
+        Self::now_ns().saturating_sub(last) < Duration::from_micros(horizon_us).as_nanos() as u64
     }
 
     /// Recent WAL `fdatasync` duration (EMA); `WAL_FD_SEED` until the first
@@ -678,9 +686,13 @@ impl WriteGroup {
             ) || crate::group_window_kernel::merge_eligible(
                 active,
                 self.group_window_us.load(Ordering::Relaxed),
+                self.recently_concurrent(),
             )
-            // RFC-0217 P0.1: window on makes the merge eligible from 2
-            // writers up (rmw arm keeps its own single-op policy above).
+            // RFC-0217 P0.1/P0.1b: window on makes the merge eligible
+            // from 2 writers up AND for a lone submitter with a recent
+            // peer (the gap ghost — otherwise the write-lock bypass
+            // commits solo, no leader, no collect; rmw arm above keeps
+            // its own single-op policy).
         } && !self.verified.load(Ordering::Relaxed);
 
         // Lone writer (parity bench, sequential client): skip the mpsc hop.
@@ -898,19 +910,25 @@ impl WriteGroup {
             let any_sync = batch
                 .iter()
                 .any(|p| crate::write_admission_kernel::wal_sync_required(true, p.do_sync, false));
+            let mut collect_mode = false;
             let bound = if batch_ops < CATCHUP_SKIP_OPS {
                 if crate::write_admission_kernel::wal_sync_required(true, any_sync, false) {
                     catchup_wait_bound(window, self.fd_ema(), batch.len(), active, batch_ops)
                 } else {
-                    // RFC-0217 P0.1: async-only group — no fd to break even
-                    // against (the 0044 P0.5 reason this hold was skipped),
-                    // so the flat clamped window buys one write()/encode
-                    // pass per group; zero when nobody is missing.
+                    // RFC-0217 P0.1/P0.1b: async-only group — no fd to
+                    // break even against (the 0044 P0.5 reason this hold
+                    // was skipped), so the flat clamped window buys one
+                    // write()/encode pass per group. P0.1b: the missing
+                    // writer is usually in its client-side gap, invisible
+                    // to `active` (the counter drops at reply consumption),
+                    // so a recent peer opens the collect through the gap.
                     let us = crate::group_window_kernel::async_catchup_bound_us(
                         self.group_window_us.load(Ordering::Relaxed),
                         active,
                         batch.len(),
+                        self.recently_concurrent(),
                     );
+                    collect_mode = us > 0;
                     (us > 0).then(|| Duration::from_micros(us))
                 }
             } else {
@@ -920,13 +938,46 @@ impl WriteGroup {
                 let t_wait = Instant::now();
                 let deadline = t_wait + bound;
                 let mut g = self.queue.lock();
-                while batch.len() < self.active.load(Ordering::Relaxed) {
-                    let now = Instant::now();
-                    if now >= deadline {
-                        break;
+                if collect_mode {
+                    // RFC-0217 P0.1b: collect through the client-side gap.
+                    // A publish releases all followers within µs of each
+                    // other, so arrivals come in bursts; a quiet quiescence
+                    // slice after the first absorb means the burst drained.
+                    // The deadline bounds the whole hold.
+                    let initial = batch.len();
+                    loop {
+                        let now = Instant::now();
+                        if now >= deadline {
+                            break;
+                        }
+                        let slice =
+                            if batch.len() > initial {
+                                Duration::from_micros(
+                                    crate::group_window_kernel::COLLECT_QUIESCE_US,
+                                )
+                                .min(deadline - now)
+                            } else {
+                                deadline - now
+                            };
+                        let woke = self.arrived.wait_for(&mut g, slice);
+                        batch.extend(g.pending.drain(..));
+                        if crate::group_window_kernel::collect_should_break(
+                            woke.timed_out(),
+                            batch.len(),
+                            initial,
+                        ) {
+                            break;
+                        }
                     }
-                    let _timed_out = self.arrived.wait_for(&mut g, deadline - now);
-                    batch.extend(g.pending.drain(..));
+                } else {
+                    while batch.len() < self.active.load(Ordering::Relaxed) {
+                        let now = Instant::now();
+                        if now >= deadline {
+                            break;
+                        }
+                        let _timed_out = self.arrived.wait_for(&mut g, deadline - now);
+                        batch.extend(g.pending.drain(..));
+                    }
                 }
                 drop(g);
                 self.catchup_wait_ns

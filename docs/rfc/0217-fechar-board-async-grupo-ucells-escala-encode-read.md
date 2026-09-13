@@ -96,7 +96,17 @@ board**, estendendo este RFC a cada etapa nova descoberta.
   (`submit_after_begin`/WriteGroup: `PEDRA_GROUP_WINDOW_US=N` torna o
   merge elegível em writers ≥2 e o líder espera W antes de drenar;
   caminho lone `active==1 ∧ ¬recently_concurrent` intocado) + testes
-  `rfc0217_group_window_*` no caminho real. — status: `done`
+  `rfc0217_group_window_*` no caminho real. **P0.1b** (smokes
+  2026-09-13, Darwin DIAG): a janela flat sozinha deixou `avg_grp`
+  1,16 no ycsb_f mc2 (o par no gap client-side é invisível a `active` —
+  o contador cai no consumo da reply); três braços fecharam o fantasma:
+  (1) coleta atravessando o gap no líder (wait com saída por quiessência
+  de 20 µs após o primeiro absorb, bound = janela), (2) horizonte de par
+  estendido à janela (`peer_horizon_us`; bypass lone não rouba o líder),
+  (3) merge elegível por par recente (`merge_eligible(w, win, peers)`;
+  sem isso o bypass do write-lock comita solo sem líder exatamente no
+  regime-alvo). Resultado: ycsb_f mc2 `avg_grp` 1,00 → **1,92** (96% do
+  teto físico 2,0; cache_overwrite mc2 1,88). — status: `done`
 - [ ] **P0.2** Attach in-flight: chegada durante o dreno/write do líder
   entra no mesmo voo (fold/stage na janela off-lock; na G1, attach também
   durante a barreira do grupo) + testes `rfc0217_inflight_attach_*`. —

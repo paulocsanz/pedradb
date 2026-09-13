@@ -11,11 +11,15 @@
 //! 3. the AS-IS twin: window off keeps the 0201 boundary — two writers
 //!    ≤ ncpu stay on the bypass, nobody ever queues behind a leader,
 //!    every commit 1-op;
-//! 4. grouped commits survive reopen (real path end-to-end).
+//! 4. grouped commits survive reopen (real path end-to-end);
+//! 5. P0.1b: the leader collects through the peer's client-side gap —
+//!    a slow writer (inter-op sleep ≫ the leader's cycle) is absorbed
+//!    anyway, because the wait targets the gap ghost, not the queue.
 
 use pedradb_core::concurrent::ConcurrentDb;
 use pedradb_core::db::OpenOptions;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
 use std::time::{Duration, Instant};
 
@@ -159,6 +163,67 @@ fn rfc0217_group_window_off_keeps_the_0201_boundary_twin() {
     );
     assert_visible(&db, 0, rounds);
     assert_visible(&db, 1, rounds);
+}
+
+#[test]
+fn rfc0217_group_window_collects_through_client_gap() {
+    // P0.1b discriminator: writer B sleeps 150µs between puts (inside
+    // the 250µs recent-concurrency horizon, far above the leader's ~µs
+    // cycle), A hammers continuously. A flat-window leader that only
+    // absorbs already-queued arrivals parks B just by luck of overlap;
+    // a collect leader holds through the gap and absorbs B almost
+    // every time.
+    let db = open_async("gap");
+    db.set_group_window(Duration::from_millis(1));
+
+    let b_rounds = 80usize;
+    let stop = Arc::new(AtomicBool::new(false));
+    let barrier = Arc::new(Barrier::new(2));
+    let mut handles = Vec::new();
+    {
+        let db = db.clone();
+        let stop = Arc::clone(&stop);
+        let barrier = Arc::clone(&barrier);
+        handles.push(std::thread::spawn(move || {
+            barrier.wait();
+            let mut i = 0usize;
+            while !stop.load(Ordering::Relaxed) {
+                db.put(&[b'g', b'a', i as u8], b"v").unwrap();
+                i = i.wrapping_add(1);
+            }
+        }));
+    }
+    {
+        let db = db.clone();
+        let stop = Arc::clone(&stop);
+        let barrier = Arc::clone(&barrier);
+        handles.push(std::thread::spawn(move || {
+            barrier.wait();
+            for i in 0..b_rounds {
+                db.put(&[b'g', b'b', i as u8], b"v").unwrap();
+                std::thread::sleep(Duration::from_micros(150));
+            }
+            stop.store(true, Ordering::Relaxed);
+        }));
+    }
+    for h in handles {
+        h.join().unwrap();
+    }
+
+    let (_submits, _queued, groups, group_ops) = db.write_group_stats();
+    let absorbed = group_ops.saturating_sub(groups);
+    assert!(
+        absorbed as usize >= (b_rounds * 7) / 10,
+        "collect must absorb the gap ghost: absorbed {absorbed} of {b_rounds} slow-writer ops \
+         (groups {groups}, ops {group_ops})"
+    );
+    for i in 0..b_rounds {
+        assert_eq!(
+            db.get(&[b'g', b'b', i as u8]).as_deref(),
+            Some(b"v".as_ref()),
+            "slow writer op {i} missing"
+        );
+    }
 }
 
 #[test]
