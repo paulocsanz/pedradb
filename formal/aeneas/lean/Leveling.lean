@@ -199,3 +199,21 @@ theorem pick_pushdown_fate_iff :
         exact congrArg ok hv.symm
       · rw [if_neg hdt]
         exact congrArg ok hv.symm
+
+/-- RFC-0218 P1.2 7/11 (átomo `catalog:leveling_disjoint`, entrada
+    `is_disjoint`): disjunção é EXATAMENTE o loop citado do zero —
+    `is_disjoint files` É o outer_loop em 0#usize (sem pré nem pós).
+    O AS-IS é a constante true (pilha sobreposta aceita — dente
+    plantado). -/
+theorem is_disjoint_fate_iff :
+    ∀ (files : Slice LevelFile) (v : Bool),
+      (is_disjoint files = ok v) ↔
+      (is_disjoint_outer_loop files 0#usize = ok v) := by
+  intro files v
+  constructor
+  · intro hval
+    unfold is_disjoint at hval
+    exact hval
+  · intro hs
+    unfold is_disjoint
+    exact hs

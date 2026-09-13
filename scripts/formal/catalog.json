@@ -5805,6 +5805,10 @@
   },
   {
    "id": "leveling_disjoint",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.2: fate ∀ sobre is_disjoint no degrau átomo — despacho puro: é o outer_loop citado em 0#usize; planta DST is_disjoint_on_live_stack_is_not_ok"
+   },
    "finding": "F-leveling-sweep",
    "twin_kind": "model",
    "single_artifact": true,
