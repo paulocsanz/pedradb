@@ -241,3 +241,4 @@ atom	catalog:lsm_reopen	lsm_reopen_fate_iff	formal/aeneas/lean/LsmR1.lean	lsm_re
 atom	catalog:len_tag	value_len_tag_fate_iff	formal/aeneas/lean/IndexVal.lean	value_len_tag
 atom	catalog:write_op_range_end	write_op_range_end_fate_iff	formal/aeneas/lean/Merge.lean	merge.write_op_range_end
 atom	catalog:ikey_pack	pack_sequence_and_type_fate_iff	formal/aeneas/lean/Key.lean	key.pack_sequence_and_type
+atom	catalog:prefix	prefix_exclusive_end_fate_iff	formal/aeneas/lean/Prefix.lean	prefix_exclusive_end

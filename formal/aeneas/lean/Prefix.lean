@@ -72,3 +72,35 @@ theorem key_in_prefix_range_exclusive (user pref e) :
         else ok false) := by
   unfold key_in_prefix_range
   rfl
+
+private theorem bind_ok_inv {α β} (x : Result α) (f : α → Result β) (v : β)
+    (h : Aeneas.Std.bind x f = ok v) : ∃ a, x = ok a ∧ f a = ok v := by
+  cases x with
+  | ok a => exact ⟨a, rfl, h⟩
+  | fail e => exact absurd h (by simp)
+  | div => exact absurd h (by simp)
+
+/-- An ok chain reassembles into an ok bind. -/
+private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : β}
+    (a : α) (hx : x = ok a) (h : f a = ok v) : Aeneas.Std.bind x f = ok v := by
+  rw [hx]
+  exact h
+
+/-- RFC-0218 P1.2 4/11 (átomo `catalog:prefix`, entrada
+    `prefix_exclusive_end`): o fim exclusivo é EXATAMENTE o
+    encaminhamento citado — o prefixo vira Vec e o loop citado decide
+    (incrementa o último byte ou some). O AS-IS empurra 255 (fim
+    errado engole chaves — dente plantado). -/
+theorem prefix_exclusive_end_fate_iff :
+    ∀ (prefix1 : Slice U8) (r : Option (alloc.vec.Vec U8)),
+      (prefix_exclusive_end prefix1 = ok r) ↔
+      (∃ e, alloc.slice.Slice.to_vec core.clone.CloneU8 prefix1 = ok e ∧
+            prefix_exclusive_end_loop e = ok r) := by
+  intro prefix1 r
+  constructor
+  · intro hval
+    unfold prefix_exclusive_end at hval
+    exact bind_ok_inv _ _ _ hval
+  · rintro ⟨e, he, hs⟩
+    unfold prefix_exclusive_end
+    exact bind_intro e he hs
