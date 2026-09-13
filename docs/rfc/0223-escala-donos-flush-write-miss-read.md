@@ -1,0 +1,125 @@
+# RFC-0223: escala — dívida de flush no write-path, miss-path no read
+
+**Status:** draft
+**Updated:** 2026-09-13
+
+## Background
+
+- @10M (DIAG Darwin quiet, PHASE, binário `0eb0f25e`): perna write
+  10.629.512 commits — **wal 4,74µs/commit (50,7%)**, **flush_check
+  2,69µs (28,8%)**, mem 1,55µs; `l0_files=773` na janela medida, stall
+  408ms (finding `2026-09-13-rfc0217-p26-p27-escala`).
+- `deps_scan` @10M p50 0,2107ms com **setup 231,21µs/op (97% do custo)**:
+  54 L0 files vivos do seed (flush por CF a 256MiB diferido), merge k-way
+  4,75µs (barato), 3,4 blocks decodificados/op com **76% de cache miss**.
+- Fixes landed e **ainda sem re-meter**:
+  - settle pós-seed default (`bf40c5e8`) — drain bounded de L0 após seed;
+  - simetria de memtable 256MiB no lado Rocks (`bf40c5e8`) —
+    `kvrocks_set_mc50 1,678×` (p201q, Linux 3-run min-of-3) é
+    **config-suspeito** até re-run;
+  - split flush gate × flush-work no PHASE (`7f2758d4`) —
+    `flush_events`/`flush_work_ns` ainda sem número;
+  - bloom real em bulk SSTs (RFC-0160 P1.6) — **`probe_miss 0,29×**
+    (2,3–2,4µs vs 651–692ns, RFC-0161 100M 3-run) nunca re-medido
+    com o fix.
+- Gate `linux-gate-p211z` pending (região brasil, host low-disk; 6 gates
+  antigos deletados 2026-09-13 liberando ~43GiB declarados). A imagem já
+  embute a onda e4b (P0.4/P0.5 3-run) e boota sozinha quando o host
+  aceitar o deploy.
+- fjall (única campanha oficial
+  `findings/2026-09-04-fjall-official-guest`): miss-path ~2× pior que
+  fjall (2,3–2,4µs vs 1,1–1,2µs); @100M hydrate 123,7s vs 198,8s
+  (Pedra ganha).
+
+## Problems This Solves
+
+- **Problem:** o write-path em escala gasta 28,8% em `flush_check` sem
+  decomposição — o ataque certo (epoch no gate × mover flush para fora do
+  commit) depende de saber se a média 2,69µs é gate caro por commit ou
+  flushes raros diluídos.
+- **Problem:** o read-path perde na miss-path (0,29× vs Rocks; ~2× vs
+  fjall) e o fix já está in-tree há semanas sem número novo.
+- **Problem:** dois números publicados foram medidos sob harness
+  assimétrico/pré-settle (mc50 com Rocks a 64MiB; scans @10M com dívida
+  de seed) — re-meter antes de qualquer claim novo.
+
+## Proposed Solution
+
+- P0: completar os re-meters (pipeline local quiet: settle A/B + mc50
+  simetria A/B + split gate×work) e o e4b no gate; flipar findings/RFC
+  com números no mesmo commit.
+- P1: atacar o dono que o split nomear no `flush_check`; re-meter
+  oficial do `probe_miss` com bloom real.
+- P2: residual do `deps_scan` pós-settle (settle eager do
+  `SstCountCursor` se continuar dono) e campanha miss-path vs fjall.
+
+## Delivery slices (mandatory)
+
+### P0 — must ship first (meters com os fixes landed)
+
+- [ ] **P0.1** re-meter local quiet: `deps_scan` @10M settle ON × OFF
+  (A/B `ROCKS_PARITY_SETTLE`) — valida o fix P2.6 (baseline OFF:
+  p50 0,2107ms) — status: `doing` (pipeline espera-quiet em scratch,
+  logs `p26r2`)
+- [ ] **P0.2** re-meter local quiet: `kvrocks_set_mc50` 3 rounds
+  simétrico 256MiB × 3 rounds shape antigo (Rocks 64MiB via
+  `ROCKS_PARITY_ROCKS_MEMTABLE`) — decide se 1,678 era artefato de
+  config — status: `doing` (mesmo pipeline)
+- [ ] **P0.3** decompor `flush_check` com o split `7f2758d4`
+  (`flush_events`/`flush_work_ns`): nomear gate-only mean × work mean
+  @10M — status: `doing` (vem do mesmo pipeline; WRITEPHASE no log)
+- [ ] **P0.4** e4b no gate 3-run (P0.4 janela-≤-voo, P0.5 PHASE,
+  P1.4 linkbench, P2.2/P2.3 cartaz, mc50 oficial) — status: `todo`
+  (blocked: `linux-gate-p211z` pending)
+
+### P1 — next wave (ataque condicionado ao P0)
+
+- [ ] **P1.1** ataque ao dono do `flush_check` — se work (flushes
+  in-commit raros): mover flush para fora do commit (worker bounded,
+  interface com RFC-0216 parked-debt); se gate: epoch/histerese no
+  `maybe_auto_flush` — status: `todo`
+- [ ] **P1.2** `probe_miss` re-meter oficial no gate com bloom real
+  (RFC-0160 P1.6 in-tree); se <1,0 persistir, fatia de tuning de bloom
+  datada no mesmo commit do finding — status: `todo` (blocked: gate)
+
+### P2 — later / polish
+
+- [ ] **P2.1** `deps_scan` residual pós-settle: se o setup continuar
+  dono, `SstCountCursor` lazy-first-block / head-by-index — status:
+  `todo`
+- [ ] **P2.2** campanha miss-path vs fjall (probe_miss par) na régua
+  oficial de guest — status: `todo`
+
+## Status (living — update with every PR)
+
+| ID | Band | Title | Status | Task / PR | Updated |
+|----|------|-------|--------|-----------|---------|
+| P0.1 | p0 | deps_scan @10M settle A/B (pipeline local) | doing | scratch `p26r2` | 2026-09-13 |
+| P0.2 | p0 | mc50 simetria A/B 256×64 (pipeline local) | doing | scratch `p26r2` | 2026-09-13 |
+| P0.3 | p0 | split flush gate×work @10M | doing | `7f2758d4` | 2026-09-13 |
+| P0.4 | p0 | e4b gate 3-run | todo | blocked p211z | 2026-09-13 |
+| P1.1 | p1 | ataque ao dono do flush_check | todo | — | 2026-09-13 |
+| P1.2 | p1 | probe_miss re-meter oficial (bloom real) | todo | blocked gate | 2026-09-13 |
+| P2.1 | p2 | SstCountCursor lazy-first-block | todo | — | 2026-09-13 |
+| P2.2 | p2 | miss-path vs fjall oficial | todo | — | 2026-09-13 |
+
+## Acceptance Criteria
+
+- **Tests:** cada ataque com teste unitário próprio; suites
+  `pedradb-core`/`rocksdb-compat`/`rocksdb-parity-bench` sem novos
+  vermelhos (baseline atual: compat 96/3 pré-existentes).
+- **Telemetry:** PHASE (`flush_events`/`flush_work_ns`) e `read_probe`
+  em todo meter; findings com probe JSON anexado.
+- **Documentation:** finding datado por fatia no mesmo commit
+  (`findings/2026-09-*-…`); tabela U-cells e `docs/status.md`
+  atualizadas com o número novo — célula <1,0 vira fatia datada.
+- **Screenshots:** none — backend-only.
+
+## Out of scope
+
+- parked-debt plan e interface do worker de compaction (RFC-0216, outra
+  frente): aqui só consumimos a interface, não redesenhamos.
+- group window / janela-≤-voo (já coberto por P0.3b/P0.4 do RFC-0217;
+  veredito = e4b).
+- Darwin = DIAG, nunca cartaz; nenhum número deste RFC é claim sem o
+  3-run Linux quiet.
