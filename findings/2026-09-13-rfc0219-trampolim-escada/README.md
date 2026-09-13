@@ -312,3 +312,21 @@ fail-closed.
 - **Par nasce átomo**: `catalog:manifest_publish_plan`. floor_atom
   279→280, residuals atom 280, single_artifact 299.
 - **Contador**: 52 → **51** (db.rs 30→29).
+
+## P1.4-c — `changelog_store_plan` (changelog_kernel) — FECHA P1.4
+
+Sítio: `changelog_store_point` — o portão `if
+self.persist_manifest_durable().is_ok()` decidia inline gravar o feed.
+
+- **Kernel**: `changelog_kernel::changelog_store_plan(publish_ok)` →
+  `ChangelogStorePlan{StoreFeed, SkipStorePublishHolds}`.
+- **AS-IS dente**: `changelog_store_plan_as_is` — grava com publish
+  falhado; o store apaga segmentos arquivados sem cobertura publicada.
+- **Teorema**: `changelog_store_plan_fate_iff` (∀ sobre o bool) em
+  `Changelog.lean`.
+- **Extrato**: `aeneas_changelog.sh --required` verde.
+- **Planta DST**: `changelog_store_plan_on_live_failed_publish_skips`.
+- **Par nasce átomo**: `catalog:changelog_store_plan`. floor_atom
+  280→281, residuals atom 281, single_artifact 300.
+- **Contador**: 51 → **50** (db.rs 29→28). P1.4 fechado: 3 pares.
+  **P1 inteiro fechado: 12/12 pares; 285/307 = 92,83%.**

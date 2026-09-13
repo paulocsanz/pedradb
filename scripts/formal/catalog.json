@@ -6825,6 +6825,36 @@
    }
   },
   {
+   "id": "changelog_store_plan",
+   "finding": "RFC-0219 P1.4",
+   "twin_kind": "atom",
+   "atom": "changelog_store_plan",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P1.4: gravar o feed no store point síncrono é decisão do kernel — grava EXATAMENTE quando o publish durable do MANIFEST cobriu a janela arquivada (publish falhado segura: os segmentos arquivados são a única cópia durable), provado ∀ sobre publish_ok como changelog_store_plan_fate_iff em Changelog.lean; o AS-IS grava com publish falhado (o store apaga segmentos sem cobertura — dente); o trampolim db.rs changelog_store_point faz match no plano"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
+   "twin": "crates/pedradb-core/src/changelog_kernel.rs",
+   "aeneas": "scripts/aeneas_changelog.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "changelog_store_plan",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "changelog_store_point"
+    }
+   ],
+   "as_is": "changelog_store_plan_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/changelog_kernel.rs",
+    "test": "changelog_store_plan_on_live_failed_publish_skips"
+   }
+  },
+  {
    "id": "flush_plan",
    "finding": "F2/F43",
    "twin_kind": "close",

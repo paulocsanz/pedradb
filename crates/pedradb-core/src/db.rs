@@ -3001,8 +3001,13 @@ impl<E: Env> Db<E> {
     /// only durable copy of their window; the store below may delete
     /// them, which is safe only after the publish covers them.
     fn changelog_store_point(&mut self) {
-        if self.persist_manifest_durable().is_ok() {
-            self.persist_changelog_best_effort();
+        match crate::changelog_kernel::changelog_store_plan(
+            self.persist_manifest_durable().is_ok(),
+        ) {
+            crate::changelog_kernel::ChangelogStorePlan::StoreFeed => {
+                self.persist_changelog_best_effort();
+            }
+            crate::changelog_kernel::ChangelogStorePlan::SkipStorePublishHolds => {}
         }
     }
 

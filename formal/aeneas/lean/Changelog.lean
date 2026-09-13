@@ -188,3 +188,20 @@ theorem wal_archive_delete_plan_fate_iff :
       · exact absurd h1.1 c
       · subst hv
         rfl
+
+/-- RFC-0219 P1.4 (átomo `catalog:changelog_store_plan`): o store point
+    síncrono grava o feed EXATAMENTE quando o publish durable do
+    MANIFEST cobriu a janela arquivada; publish falhado segura o store
+    — os segmentos arquivados são a única cópia durable da janela. O
+    AS-IS grava com publish falhado (o store apaga segmentos que
+    nenhum MANIFEST publicado cobre — dente plantado). -/
+theorem changelog_store_plan_fate_iff :
+    ∀ (publish_ok : Bool) (plan : ChangelogStorePlan),
+      (changelog_store_plan publish_ok = ok plan) ↔
+        ((publish_ok = true ∧
+            plan = ChangelogStorePlan.StoreFeed) ∨
+          (publish_ok = false ∧
+            plan = ChangelogStorePlan.SkipStorePublishHolds)) := by
+  intro publish_ok plan
+  unfold changelog_store_plan
+  cases publish_ok <;> simp_all <;> exact eq_comm

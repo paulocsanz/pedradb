@@ -285,6 +285,38 @@ pub fn changelog_durable_commit_fate_as_is(
     ChangelogCommitFate::Skip
 }
 
+/// RFC-0219 P1.4: fate of the synchronous store point (RFC-0217 P1.1).
+/// The deferred MANIFEST publish must cover the archived window before
+/// the store may delete those segments.
+#[cfg(not(verus_keep_ghost))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChangelogStorePlan {
+    /// Durable MANIFEST publish covered the window — store the feed.
+    StoreFeed,
+    /// Publish failed/deferred — the archived segments are the only
+    /// durable copy; skip the store.
+    SkipStorePublishHolds,
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// Store the feed EXACTLY when the durable manifest publish is ok.
+#[must_use]
+pub fn changelog_store_plan(publish_ok: bool) -> ChangelogStorePlan {
+    if publish_ok {
+        ChangelogStorePlan::StoreFeed
+    } else {
+        ChangelogStorePlan::SkipStorePublishHolds
+    }
+}
+
+/// AS-IS: stores even when the publish failed — the store deletes
+/// archived segments no published MANIFEST covers (dente).
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn changelog_store_plan_as_is(_publish_ok: bool) -> ChangelogStorePlan {
+    ChangelogStorePlan::StoreFeed
+}
+
 /// RFC-0219 P0.2: fate of the archived WAL chain at a delete point.
 /// A CHANGELOG watermark only proves the *cache* is current — while the
 /// deferred MANIFEST publish lags the archives, the segments above
@@ -681,6 +713,33 @@ mod tests {
             coc.matches("maybe_persist_changelog_after_durable_commit").count(),
             1,
             "exactly one debounce call, inside the kernel arm"
+        );
+    }
+
+    #[test]
+    fn changelog_store_plan_on_live_failed_publish_skips() {
+        // RFC-0219 P1.4: the store may delete archived segments only
+        // after the durable MANIFEST publish covers them; a failed
+        // publish holds the store (AS-IS deletes the only durable copy).
+        assert_eq!(changelog_store_plan(true), ChangelogStorePlan::StoreFeed);
+        assert_eq!(
+            changelog_store_plan(false),
+            ChangelogStorePlan::SkipStorePublishHolds
+        );
+        assert_eq!(
+            changelog_store_plan_as_is(false),
+            ChangelogStorePlan::StoreFeed,
+            "AS-IS dente: stores with the publish failed"
+        );
+        let csp = named_fn_src(include_str!("db.rs"), "changelog_store_point")
+            .expect("changelog_store_point");
+        assert!(
+            csp.contains("match crate::changelog_kernel::changelog_store_plan("),
+            "changelog_store_point must match changelog_store_plan"
+        );
+        assert!(
+            !csp.contains("persist_manifest_durable().is_ok() {"),
+            "the raw publish gate left the trampoline"
         );
     }
 

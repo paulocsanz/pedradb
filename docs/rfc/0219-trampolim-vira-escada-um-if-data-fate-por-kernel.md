@@ -136,7 +136,7 @@ início 270/292 = **92,47%**. Alvos DATADOS:
 | P1.1 | p1 | +3 ifs db.rs | done | `point_cache_validity` (3 portões F198/F207, −4 sítios) + `point_tombstone` (4 portões RFC-0150, −4) + `dir_sync_plan` (5 portões dir-fsync, −5); contador 72→59 | 2026-09-13 |
 | P1.2 | p1 | +3 ifs db.rs | done | `fence_admission` (ensure_not_fenced) + `fence_record` (fence_durability) + `group_batch_sync` (group_prepare); contador 59→56 | 2026-09-13 |
 | P1.3 | p1 | +3 ifs db.rs | done | `parked_pair` (parked_oldest_pair_arcs) + `auto_flush_gate` + `mem_auto_flush` (maybe_auto_flush, ambos); contador 56→53 | 2026-09-13 |
-| P1.4 | p1 | +3 ifs db.rs (285/307 = 92,83%) | todo | — | 2026-09-13 |
+| P1.4 | p1 | +3 ifs db.rs (285/307 = 92,83%) | done | `pit_resync_rewrite_plan` (open_with_env_sourced) + `manifest_publish_plan` (persist_manifest) + `changelog_store_plan` (changelog_store_point); contador 53→50 | 2026-09-13 |
 | P2.1 | p2 | fila db.rs restante medida (53−15) | todo | — | 2026-09-13 |
 | P2.2 | p2 | fila concurrent.rs (22; pausa na paralela) | todo | — | 2026-09-13 |
 | P2.3 | p2 | sweep final + EXTRACT.md + done | todo | — | 2026-09-13 |
