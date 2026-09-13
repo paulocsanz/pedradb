@@ -1,0 +1,27 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "compat",
+  "sync": false,
+  "peer_policy": "rocks-default",
+  "durability": "async-wal (PEDRA_PARITY_ASYNC=1; WAL write, no fdatasync — NOT G1, not official)",
+  "changelog_interval": 0,
+  "status": "ok",
+  "notes": ["ycsb records=10000000 ops=200 payload=100 dist=uniform", "engine=compat durability=async-wal (PEDRA_PARITY_ASYNC=1; WAL write, no fdatasync — NOT G1, not official)", "suites: deps", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=0", "peer_policy=rocks-default", "host-default write sync: kvrocks=false myrocks=true surreal=true"],
+  "benches": [
+{
+    "name": "deps_scan",
+    "n": 200,
+    "qps": 2802.890,
+    "p50_ms": 0.2814,
+    "p95_ms": 0.6398,
+    "p99_ms": 2.2453,
+    "p999_ms": 2.4115,
+    "max_ms": 2.4115,
+    "wall_s": 0.0714
+  },
+{
+    "name": "deps_scan_probe",
+    "probe": {"latest_ops":0,"latest_mem_hit":0,"latest_sst_fallback":0,"latest_sst_probed":0,"scan_ops":200,"scan_ns":70891122,"scan_sst_setup_ns":69932753,"scan_merge_ns":708631,"ord_builds":0,"ord_build_ns":0,"scan_sst_probed":715,"sst_count":28,"l0_files":14,"level1_files":12,"mem_entries":0,"block_cache_hits":23,"block_cache_misses":726,"blocks_decoded":726,"get_mem_hit":0,"get_sst_fallback":0,"get_inline":0,"get_vlog":0,"mvcc_split_ops":0,"mvcc_ns_encode":0,"mvcc_ns_last":0,"mvcc_ns_get":0,"mvcc_ns_copy":0}
+  }
+  ]
+}

@@ -57,36 +57,48 @@
 
 ### P0 — must ship first (meters com os fixes landed)
 
-- [ ] **P0.1** re-meter local quiet: `deps_scan` @10M settle ON × OFF
+- [x] **P0.1** re-meter local quiet: `deps_scan` @10M settle ON × OFF
   (A/B `ROCKS_PARITY_SETTLE`) — valida o fix P2.6 (baseline OFF:
-  p50 0,2107ms) — status: `doing` (pipeline espera-quiet em scratch,
-  logs `p26r2`)
+  p50 0,2107ms) — status: `done (DIAG mecânico)` — pipeline `p26r3`
+  rodou SEM quiet (v2 cancelado esperando; load externo ~13): p50s de
+  janelas 40–70ms incomparáveis sob load, mas counters fecham — settle
+  funciona (memtable 6,27M→0, L0 54→14) e **não completa** sob load
+  (deadline 30s, log "INCOMPLETE after 37.1s"); **dono do setup
+  sobrevive**: tables/op 3,6 vs 4,2 e blocks 726 vs 762 entre braços —
+  largura de table, não nível. P50 oficial = gate. Finding
+  `2026-09-13-rfc0217-p26-p27-escala` rev.3.
 - [ ] **P0.2** re-meter local quiet: `kvrocks_set_mc50` 3 rounds
   simétrico 256MiB × 3 rounds shape antigo (Rocks 64MiB via
   `ROCKS_PARITY_ROCKS_MEMTABLE`) — decide se 1,678 era artefato de
-  config — status: `doing` (mesmo pipeline)
-- [ ] **P0.3** decompor `flush_check` com o split `7f2758d4`
+  config — status: `doing` (1ª passada inconclusiva sob load — compat
+  37k–236k qps entre rounds; rerun 3-arm intercalado `p26r3b-mc50x`;
+  sinal direcional: Rocks 64MiB consistentemente mais rápido que
+  256MiB ⇒ shape antigo era MAIS difícil pro Pedra)
+- [x] **P0.3** decompor `flush_check` com o split `7f2758d4`
   (`flush_events`/`flush_work_ns`): nomear gate-only mean × work mean
-  @10M — status: `doing` (vem do mesmo pipeline; WRITEPHASE no log)
+  @10M — status: `done (DIAG)` — seed 625k commits/8 flushes:
+  **work 24.704,6ms = 99,85% × gate 36,3ms = 58ns/commit**. O
+  2,69µs/commit era flush work raro diluído.
 - [ ] **P0.4** e4b no gate 3-run (P0.4 janela-≤-voo, P0.5 PHASE,
   P1.4 linkbench, P2.2/P2.3 cartaz, mc50 oficial) — status: `todo`
-  (blocked: `linux-gate-p211z` pending)
+  (blocked: `linux-gate-p211z` pending — sem capacidade em `brasil`)
 
 ### P1 — next wave (ataque condicionado ao P0)
 
-- [ ] **P1.1** ataque ao dono do `flush_check` — se work (flushes
-  in-commit raros): mover flush para fora do commit (worker bounded,
-  interface com RFC-0216 parked-debt); se gate: epoch/histerese no
-  `maybe_auto_flush` — status: `todo`
+- [ ] **P1.1** ataque ao dono do `flush_check` — DECIDIDO pelo split
+  P0.3: é **work** (99,85%; gate 58ns/commit não paga otimização) ⇒
+  mover flush para fora do commit (worker bounded, interface com
+  RFC-0216 parked-debt) — status: `todo`
 - [ ] **P1.2** `probe_miss` re-meter oficial no gate com bloom real
   (RFC-0160 P1.6 in-tree); se <1,0 persistir, fatia de tuning de bloom
   datada no mesmo commit do finding — status: `todo` (blocked: gate)
 
 ### P2 — later / polish
 
-- [ ] **P2.1** `deps_scan` residual pós-settle: se o setup continuar
-  dono, `SstCountCursor` lazy-first-block / head-by-index — status:
-  `todo`
+- [ ] **P2.1** `deps_scan` residual pós-settle: CONDIÇÃO CUMPRIDA pelo
+  P0.1 (tables/op ~constantes entre braços = largura de table, não
+  nível) — `SstCountCursor` lazy-first-block / head-by-index —
+  status: `todo` (justificado por dados, rev.3)
 - [ ] **P2.2** campanha miss-path vs fjall (probe_miss par) na régua
   oficial de guest — status: `todo`
 
@@ -94,13 +106,13 @@
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | deps_scan @10M settle A/B (pipeline local) | doing | scratch `p26r2` | 2026-09-13 |
-| P0.2 | p0 | mc50 simetria A/B 256×64 (pipeline local) | doing | scratch `p26r2` | 2026-09-13 |
-| P0.3 | p0 | split flush gate×work @10M | doing | `7f2758d4` | 2026-09-13 |
+| P0.1 | p0 | deps_scan @10M settle A/B (pipeline local) | done (DIAG mecânico) | `p26r3` rev.3 | 2026-09-13 |
+| P0.2 | p0 | mc50 simetria A/B 256×64 (pipeline local) | doing | 1ª passada inconclusiva; `p26r3b-mc50x` | 2026-09-13 |
+| P0.3 | p0 | split flush gate×work @10M | done (DIAG) | `7f2758d4` + `p26r3`: work 99,85%, gate 58ns/commit | 2026-09-13 |
 | P0.4 | p0 | e4b gate 3-run | todo | blocked p211z | 2026-09-13 |
-| P1.1 | p1 | ataque ao dono do flush_check | todo | — | 2026-09-13 |
+| P1.1 | p1 | flush fora do commit (worker bounded) | todo | decidido pelo P0.3 (work, não gate) | 2026-09-13 |
 | P1.2 | p1 | probe_miss re-meter oficial (bloom real) | todo | blocked gate | 2026-09-13 |
-| P2.1 | p2 | SstCountCursor lazy-first-block | todo | — | 2026-09-13 |
+| P2.1 | p2 | SstCountCursor lazy-first-block | todo | condição cumprida (rev.3: tables/op constantes) | 2026-09-13 |
 | P2.2 | p2 | miss-path vs fjall oficial | todo | — | 2026-09-13 |
 
 ## Acceptance Criteria

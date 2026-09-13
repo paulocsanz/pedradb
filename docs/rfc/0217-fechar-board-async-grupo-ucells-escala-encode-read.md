@@ -407,6 +407,12 @@ board**, estendendo este RFC a cada etapa nova descoberta.
   suítes >64MiB; kvrocks_set_mc50 1,678 config-suspeito até re-run).
   Falta: re-meter @10M com settle (DIAG) + gate Linux; cursor settle
   eager segue aberto.
+  **Rev.3 (`p26r3`)**: settle funciona mecanicamente (memtable
+  6,27M→0, L0 54→14) mas não completa sob load 13 (deadline 30s) e o
+  dono do setup SOBREVIVE — tables sondadas/op 3,6 (ON) vs 4,2 (OFF),
+  blocks 726 vs 762: largura de table, não nível ⇒ P2.1 do
+  [RFC-0223](0223-escala-donos-flush-write-miss-read.md)
+  (lazy-first-block) justificado por dados; p50 oficial = gate.
 - [ ] **P2.7** (aberto por P2.5) write-at-scale: meter de atribuição
   `write_phase_stats`/PHASE na célula 10M (g1) para raftlog 0,250 /
   mvcc_latest 0,281 / cache_overwrite 0,037 / ycsb_a 0,656 — o dono

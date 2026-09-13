@@ -87,14 +87,19 @@ estrutural: compactar L0 durante ingest.
 - `ycsbe10m/` — fresh ycsb_e @10M (9,5µs p50)
 - Logs brutos: scratch `p26-decomp2/` (copiados aqui)
 
-## Próximo
+## Próximo (rev. 3)
 
-1. decomp3 (a..e in-order) → confirmar reprodutibilidade do 8,77ms e
-   capturar probe no estado exato pós-a..d (ord_builds / scan counters).
-2. Ataque (A): drain L0 bounded no `spawn_compact_worker` +
-   re-meter deps_scan/ycsb_e/mvcc_latest.
-3. P2.7: flush_check 2,69µs/commit — decompor o check e atacar
-   (epoch-based).
+1. ~~decomp3 (a..e in-order)~~ — cancelado (usuário matou a task; o
+   dono já está nomeado pela rev.2/rev.3).
+2. ~~Ataque (A) drain L0 bounded~~ — refutado pela rev.2 (solo-async
+   auto-drena; o dono era o flush do seed adiado, atacado pelo settle).
+3. **P2.1 (agora justificado por dados): `SstCountCursor`
+   lazy-first-block / head-by-index** — tables sondadas/op ~constantes
+   entre braços settle/nosettle (3,6/4,2).
+4. **P1.1 RFC-0223: flush fora do commit** (worker bounded) — split
+   rev.3: work 99,85% × gate 58ns.
+5. p26r3b-mc50x (3-arm) decide a pergunta do mc50 no DIAG; oficial =
+   gate Linux.
 
 **Veredito (P2.6):** dono = dívida L0 (worker pula drain sob
 commit_inflight) × settle eager do SstCountCursor (setup 97%).
@@ -138,3 +143,51 @@ idle:   l0 1→0 em ≤1,5 s
 - Pendente: re-meter deps_scan/ycsb_e @10M com settle (DIAG) e no gate
   Linux; kvrocks_set_mc50 1,678 fica **config-suspeito** até re-run
   com a simetria.
+
+## Correção rev. 3 (2026-09-13, pipeline `p26r3`): settle funciona
+## mecanicamente mas o dono do setup SOBREVIVE — é a largura das
+## tables, não o nível
+
+Pipeline v3 (`p26r3`, braços A/B consecutivos sob load externo ~13,
+sem espera-quiet; DIAG — p50s de janelas de 40–70ms sob load espetado
+são incomparáveis, os counters mecânicos abaixo é que fecham):
+
+| braço | l0 | mem_entries | tables/op | blocks | setup share |
+|---|---|---|---|---|---|
+| settle-ON (**INCOMPLETO**: deadline 30s sob load) | 14 | **0** | 3,6 | 726 | 98,7% |
+| settle-OFF | 47 | 6.265.728 | 4,2 | 762 | 97,0% |
+
+- **Settle funciona**: `flush()` esvazia o memtable (6,27M→0) e o drain
+  reduz L0 54→14 — mas **não completa** sob load 13 (log: "deps settle
+  INCOMPLETE after 37.1s — debt carries into the timed window";
+  `engines.rs` deadline 30s). Em máquina quieta/gate completa.
+- **O dono estrutural sobrevive ao settle**: tables sondadas/op e
+  blocks decodificados quase não mudam entre braços (3,6 vs 4,2; 726
+  vs 762). A contagem de tables sobrepostas por janela de 25 keys é
+  função da **largura das tables** (seed uniforme → toda table L0 OU L1
+  cobre o keyspace inteiro), não do nível. O `SstCountCursor` continua
+  pagando o 1º bloco por table sobreposta (~3,5/op) dentro do setup.
+  ⇒ **P2.1 (lazy-first-block / head-by-index) fica justificado por
+  dados** — a condição do RFC-0223 ("se o setup continuar dono
+  pós-settle") está cumprida no lado estrutural.
+- **P2.7 split (WRITEPHASE `7f2758d4`, seed 625k commits = 10M keys ×
+  16/commit, 8 flushes × 256MiB ≈ 2GiB):**
+  `flush_check` total 24.740,9ms = **flush_work 24.704,6ms (99,85%)** +
+  **gate puro 36,3ms = 58ns/commit**. O 2,69µs/commit do write10m era
+  **flush work raro diluído** (8 eventos de ~3,1s), não um gate caro.
+  ⇒ ataque P1.1 = **mover flush para fora do commit** (worker bounded,
+  interface parked-debt RFC-0216), NÃO epoch no gate (58ns não paga).
+- mc50 A/B 1ª passada **inconclusiva** sob load (compat 37k–236k qps
+  entre rounds; braço Rocks 64MiB consistentemente mais rápido que
+  256MiB — 151/156/168k vs 107/142/101k — sinal direcional de que o
+  shape antigo era MAIS difícil pro Pedra, não mais fácil); rerun
+  3-arm intercalado `p26r3b-mc50x` rodando.
+- Artefatos: `scan10m/p26r3-{settle,nosettle}/` + logs `scan10m-
+  {settle,nosettle}.log`.
+
+**Veredito P2.6 rev.3:** settle = higiene necessária (mata dívida de
+memtable e o grosso do L0) mas **não suficiente** — o dono do setup
+(largura de table × 1º bloco eager) persiste em qualquer nível;
+veredito de p50 oficial continua no gate. **Veredito P2.7 final:**
+dono = flush work in-commit raro (99,85%) × gate 58ns; ataque =
+flush off-commit.
