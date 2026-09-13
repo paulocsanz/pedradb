@@ -81,3 +81,15 @@ gates GREEN no commit).
   verde. Planta DST `orphan_middle_last_fail_stop` (pedradb-core,
   exit 0). Gate: floor_atom 185→186, floor_extract 93→92.
   **P0.2 fechada: wal/recover ×4 átomo, 4/4.**
+
+## P0.3 — changelog+flush+manifest+reopen ×6 átomo
+
+- **changelog (1/6)**: janela citada do rebuild — feed vazio com
+  seq>0 precisa, feed vivo nunca — `changelog_needs_sst_rebuild_fate_iff`
+  em `Changelog.lean` (2 ramos por cases do Bool; valor decide citado).
+  Build verde. Planta DST: `--test changelog_model` (pedradb-core, 2
+  passed, exit 0 — modelo Stateright sobre o fn real F53; a planta
+  queued viva `changelog_needs_sst_rebuild_on_live_queued_is_not_ok`
+  falha PREEXISTENTE nesta caixa macOS/PosixFallback — fora do escopo
+  r0218, nada de Rust tocado). Gate: floor_atom 186→187,
+  floor_extract 92→91.
