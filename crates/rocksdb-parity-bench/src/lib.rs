@@ -3639,6 +3639,7 @@ mod tests {
             Some(&b"overlay"[..])
         );
         assert!(e.ingest_kvs(&[(b"ing-k".as_slice(), b"ing-v".as_slice())]));
+        assert_eq!(e.get(b"ing-k").unwrap().as_deref(), Some(&b"ing-v"[..]));
         assert!(e.put(b"keep/z", b"1"));
         assert!(e.put(b"drop/z", b"2"));
         assert!(e.flush());
@@ -3648,12 +3649,12 @@ mod tests {
     }
 
     /// RFC-0217 P1.2 (named U-loss `ingest_sst`): a `get` right after
-    /// `ingest_external_file` must see the ingested key. Red as of
-    /// 2026-09-13 — the ingest lands but the read path does not see the
-    /// table yet (P1.2 owns the fix). Kept `#[ignore]` so the gap is
-    /// pinned, not silent.
+    /// `ingest_external_file` must see the ingested key. Was red on
+    /// 2026-09-13 — the native direct-install ran with named CFs, where
+    /// the default CF is `default\0`-prefixed and the raw-key external
+    /// file was invisible to reads. The install path is now gated on
+    /// `codec.default_raw`; this test keeps the replay (CF) leg covered.
     #[test]
-    #[ignore = "RFC-0217 P1.2: ingest read-back not implemented yet"]
     fn rfc0217_p12_ingest_readback() {
         let dir = tempfile::tempdir().unwrap();
         let e = crate::engines::CompatEngine::open(dir.path());

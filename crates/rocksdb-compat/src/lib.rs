@@ -3446,8 +3446,11 @@ impl<E: PedraEnv> DB<E> {
     /// Default CF (raw encoding): the native direct-install path (RFC-0217
     /// P1.2) — fresh global sequence numbers, one SST write + install, no
     /// WAL and no memtable; the MANIFEST publish is the durability point.
-    /// Non-default CFs keep the WriteBatch replay: their keys must be
-    /// `cf\0`-encoded, and the external file holds raw user keys.
+    /// The external file holds raw user keys, so the install is only valid
+    /// while the default CF itself stores raw keys (`codec.default_raw`);
+    /// with named CFs the default CF is `default\0`-prefixed and the
+    /// WriteBatch replay below re-encodes. Non-default CFs always replay:
+    /// their keys must be `cf\0`-encoded too.
     pub fn ingest_external_file_cf_opts<P: AsRef<std::path::Path>>(
         &self,
         cf: &ColumnFamily,
@@ -3455,7 +3458,7 @@ impl<E: PedraEnv> DB<E> {
         paths: Vec<P>,
     ) -> Result<()> {
         self.check_cf(&cf.name)?;
-        let native = cf.name.as_ref() == DEFAULT_CF && !self.codec.default_raw;
+        let native = cf.name.as_ref() == DEFAULT_CF && self.codec.default_raw;
         if native {
             for p in paths {
                 let path = p.as_ref();
