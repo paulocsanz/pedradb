@@ -3313,6 +3313,10 @@
   },
   {
    "id": "fold_range",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P2.1: fate ∀ sobre fold_event_hides_key no degrau átomo — range esconde key entre start e end (gates citados); pontual esconde só key = start; planta DST fold_event_hides_key_on_live_fold_is_not_ok"
+   },
    "finding": "F169",
    "twin_kind": "close",
    "single_artifact": true,
