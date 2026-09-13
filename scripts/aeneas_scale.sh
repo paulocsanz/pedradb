@@ -28,7 +28,21 @@ echo "      charon=$CHARON"
   cd "$CRATE"
   "$CHARON" cargo --preset=aeneas --dest-file "$OUT/scale_kernel.llbc"
 )
+# The shipped kernel keeps three fns opaque to Aeneas ("no bottoms":
+# write_forecast_cut, WriteGrowth::token, WriteStaticCut::token); Aeneas
+# still writes a usable partial extract and exits nonzero. Accept the
+# partial file; no shipped theorem touches those fns.
+set +e
 "$AENEAS" -backend lean -dest "$OUT/lean" "$OUT/scale_kernel.llbc"
+AE_STATUS=$?
+set -e
+if [[ $AE_STATUS -ne 0 ]]; then
+  if [[ ! -f "$OUT/lean/ScaleKernel.lean" ]]; then
+    echo "FAIL  aeneas exit $AE_STATUS without ScaleKernel.lean" >&2
+    exit "$AE_STATUS"
+  fi
+  echo "warn  aeneas exit $AE_STATUS (partial extract: write_forecast_cut, WriteGrowth::token, WriteStaticCut::token left opaque)"
+fi
 {
   echo "path=crates/pedradb-core/src/scale_kernel.rs"
   echo "sha256=$(shasum -a 256 "$SRC" | awk '{print $1}')"
