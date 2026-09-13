@@ -6937,6 +6937,10 @@
   },
   {
    "id": "ae_f16_gate",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "o gate F16 e exatamente a arvore citada — TruncateAndInstall so acima do commit; append apenas na ponta (saturating_add) com slot vazio; conflito de termo decide pelo Refuse dentro do commit (as-is reescreve slot commitado)"
+   },
    "finding": "F16",
    "twin_kind": "close",
    "single_artifact": true,

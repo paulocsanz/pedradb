@@ -167,7 +167,7 @@ nunca por promoção silenciosa.
    `bloom_may_contain`, `probe_order`, `probe_order_covering`,
    `run_disjoint` — floor_atom 245→266, sel4_coverage **92,47%** —
    status: `todo`
-   (16/21: `bloom_header_fate_iff`, `insert_fate_iff`,
+   (17/21: `bloom_header_fate_iff`, `insert_fate_iff`,
    `may_contain_fate_iff`, `probe_order_fate_iff`,
    `probe_order_covering_fate_iff`, `run_disjoint_fate_iff`,
    `point_get_probes_fate_iff`, `probes_worst_fate_iff`,
@@ -175,7 +175,7 @@ nunca por promoção silenciosa.
    `predict_get_ns_fate_iff`, `scale_forecast_fate_iff`,
    `l28_durability_ok_fate_iff`,
    `l28_tcp_napply_retry_admitted_fate_iff`,
-   `recover_last_applied_fate_iff` e `apply_advance_fate_iff` feitos 2026-09-13)
+   `recover_last_applied_fate_iff` `apply_advance_fate_iff` e `ae_f16_safe_fate_iff` feitos 2026-09-13)
 
 10. **P2.3** sweep final em worktree DENTRO de `software/` (gates 3×
     GREEN + campaign ok + extracts ok + sorry 0, capturas
