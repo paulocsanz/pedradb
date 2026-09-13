@@ -282,3 +282,22 @@ theorem as_is_leaks_sibling :
     | div => simp [spec, theta, ham] at ha
   | fail _ => simp [spec, theta, hfm] at hf
   | div => simp [spec, theta, hfm] at hf
+
+/-- RFC-0218 P2.1 7/12 (átomo `catalog:isolated_child`, entrada
+    `isolated_child_byte`): depois de um id exato, o byte de
+    continuação é filho EXATAMENTE quando é a barra citada
+    ISOLATED_CHILD_SEP. O AS-IS aceita qualquer byte (irmão vira
+    filho — dente plantado). -/
+theorem isolated_child_byte_fate_iff :
+    ∀ (next : U8) (v : Bool),
+      (isolated_child_byte next = ok v) ↔
+      (v = decide (next = ISOLATED_CHILD_SEP)) := by
+  intro next v
+  constructor
+  · intro hval
+    unfold isolated_child_byte at hval
+    injection hval with hv
+    exact hv.symm
+  · rintro hv
+    subst hv
+    rfl

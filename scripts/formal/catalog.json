@@ -2741,6 +2741,10 @@
   },
   {
    "id": "isolated_child",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P2.1: fate ∀ sobre isolated_child_byte no degrau átomo — o byte de continuação é filho exatamente quando é a barra ISOLATED_CHILD_SEP; planta DST theorem_next_byte_domain"
+   },
    "finding": "F83",
    "twin_kind": "close",
    "single_artifact": true,

@@ -266,3 +266,4 @@ atom	catalog:journal_pin	may_advance_pin_fate_iff	formal/aeneas/lean/Pin.lean	ma
 atom	catalog:journal_next_pin	next_pin_fate_iff	formal/aeneas/lean/Pin.lean	next_pin
 atom	catalog:stream_next_seq	next_seq_fate_iff	formal/aeneas/lean/Cursor.lean	next_seq
 atom	catalog:stream_cursor	ack_in_order_fate_iff	formal/aeneas/lean/Cursor.lean	ack_in_order
+atom	catalog:isolated_child	isolated_child_byte_fate_iff	formal/aeneas/lean/Isolated.lean	isolated_child_byte
