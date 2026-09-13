@@ -1184,6 +1184,10 @@
   },
   {
    "id": "dcs_advance_bool",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "o bit de avanco e exatamente o ite citado — ok1 forca true; resultado falhado avanca exatamente quando falhou no CAS (as-is devolve so ok1: CAS perdido congela)"
+   },
    "finding": "F12/F22",
    "twin_kind": "close",
    "single_artifact": true,

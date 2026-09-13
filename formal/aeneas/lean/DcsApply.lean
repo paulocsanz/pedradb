@@ -83,3 +83,33 @@ theorem dcs_apply_should_advance_result_fate_iff :
       · intro h
         show ok false = ok v
         rw [h]
+
+/-- Catalog entry (RFC-0218 P2.2, átomo `dcs_advance_bool`): the
+    advance bit is exactly the cited ite — ok1 forces true; a failed
+    result advances exactly when it failed on Cas (F12/F22). -/
+theorem dcs_apply_should_advance_fate_iff :
+    ∀ (ok1 cas_failed : Bool) (v : Bool),
+      (apply_kernel.dcs_apply_should_advance ok1 cas_failed = ok v) ↔
+        (if ok1 = true then v = true else v = cas_failed) := by
+  intro ok1 cas_failed v
+  cases ok1 with
+  | true =>
+    rw [if_pos (by simp : (true : Bool) = true)]
+    constructor
+    · intro h
+      have h' : ok true = ok v := h
+      injection h' with hv
+      exact hv.symm
+    · intro h
+      show ok true = ok v
+      rw [h]
+  | false =>
+    rw [if_neg (by simp : ¬((false : Bool) = true))]
+    constructor
+    · intro h
+      have h' : ok cas_failed = ok v := h
+      injection h' with hv
+      exact hv.symm
+    · intro h
+      show ok cas_failed = ok v
+      rw [h]
