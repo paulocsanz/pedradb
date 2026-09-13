@@ -10691,10 +10691,11 @@ impl<E: Env> Drop for Db<E> {
 
 impl<E: Env> Db<E> {
     fn ensure_not_fenced(&self) -> Result<()> {
-        if self.durability_fenced {
-            Err(CoreError::DurabilityFenced)
-        } else {
-            Ok(())
+        match crate::write_admission_kernel::fence_admission_plan(self.durability_fenced) {
+            crate::write_admission_kernel::FenceAdmission::RefuseFenced => {
+                Err(CoreError::DurabilityFenced)
+            }
+            crate::write_admission_kernel::FenceAdmission::AdmitOps => Ok(()),
         }
     }
 

@@ -169,3 +169,19 @@ DB), `fsync_sst_paths` (conjunto com batch_is_empty aninhado no braço) e
   residuals atom 272, single_artifact 291.
 - **Contador**: 64 → **59** (db.rs 42→37; −5 sítios). P1.1 fechado:
   3 pares, −13 sítios.
+
+## P1.2-a — `fence_admission` (write_admission_kernel)
+
+Sítio: `ensure_not_fenced` — o portão `if self.durability_fenced`
+decidia inline recusar fail-closed.
+
+- **Kernel**: `write_admission_kernel::fence_admission_plan(fenced)` →
+  `FenceAdmission{AdmitOps, RefuseFenced}`.
+- **AS-IS dente**: `fence_admission_plan_as_is` — admite sempre;
+  barreira falhada segue servindo escrita (fail-open).
+- **Teorema**: `fence_admission_plan_fate_iff` (∀ sobre o bool) em
+  `WriteAdmission.lean`.
+- **Planta DST**: `fence_admission_plan_on_live_fenced_refuses`.
+- **Par nasce átomo**: `catalog:fence_admission`. floor_atom 272→273,
+  residuals atom 273, single_artifact 292.
+- **Contador**: 59 → **58** (db.rs 37→36).

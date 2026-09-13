@@ -376,3 +376,17 @@ theorem dir_sync_plan_fate_iff :
   intro sync plan
   unfold dir_sync_plan dir_sync_required
   cases sync <;> simp_all <;> exact eq_comm
+
+/-- RFC-0219 P1.2 (átomo `catalog:fence_admission`): um Db com fence de
+    durabilidade recusa cada nova operação EXATAMENTE quando o fence
+    está armado — fail-closed; sem fence admite. O AS-IS admite sempre
+    (barreira falhada segue servindo escrita como se durável — dente
+    plantado). -/
+theorem fence_admission_plan_fate_iff :
+    ∀ (fenced : Bool) (plan : FenceAdmission),
+      (fence_admission_plan fenced = ok plan) ↔
+        ((fenced = true ∧ plan = FenceAdmission.RefuseFenced) ∨
+          (fenced = false ∧ plan = FenceAdmission.AdmitOps)) := by
+  intro fenced plan
+  unfold fence_admission_plan
+  cases fenced <;> simp_all <;> exact eq_comm

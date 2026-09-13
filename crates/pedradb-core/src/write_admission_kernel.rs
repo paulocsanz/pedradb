@@ -382,6 +382,37 @@ pub fn dir_sync_plan_as_is(_sync: bool) -> DirSyncPlan {
     DirSyncPlan::SkipDirSync
 }
 
+/// RFC-0219 P1.2: admission of new ops once the Db is durability-fenced
+/// (a durability barrier failed). The trampoline `db.rs
+/// ensure_not_fenced` matches this plan.
+#[cfg(not(verus_keep_ghost))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FenceAdmission {
+    /// No fence recorded — admit the op.
+    AdmitOps,
+    /// Fenced: every subsequent op refuses fail-closed (the acked-prefix
+    /// / uncertain-window report is already recorded).
+    RefuseFenced,
+}
+
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn fence_admission_plan(durability_fenced: bool) -> FenceAdmission {
+    if durability_fenced {
+        FenceAdmission::RefuseFenced
+    } else {
+        FenceAdmission::AdmitOps
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: ops admitted after the fence — a failed barrier keeps serving
+/// writes as if durable (fail-open dente).
+#[must_use]
+pub fn fence_admission_plan_as_is(_durability_fenced: bool) -> FenceAdmission {
+    FenceAdmission::AdmitOps
+}
+
 #[cfg(not(verus_keep_ghost))]
 /// `put_if_absent`: live key ⇒ CasMismatch; else put. Data-fate, not Env.
 #[must_use]
@@ -1271,6 +1302,29 @@ mod tests {
         assert!(
             !src.contains("if crate::write_admission_kernel::dir_sync_required("),
             "no inline dir_sync_required if remains in db.rs"
+        );
+    }
+
+    #[test]
+    fn fence_admission_plan_on_live_fenced_refuses() {
+        // RFC-0219 P1.2: a fenced Db refuses every new op fail-closed;
+        // AS-IS keeps admitting (fail-open dente).
+        assert_eq!(fence_admission_plan(true), FenceAdmission::RefuseFenced);
+        assert_eq!(fence_admission_plan(false), FenceAdmission::AdmitOps);
+        assert_eq!(
+            fence_admission_plan_as_is(true),
+            FenceAdmission::AdmitOps,
+            "AS-IS dente: ops admitted after the fence"
+        );
+        let enf = named_fn_src(include_str!("db.rs"), "ensure_not_fenced")
+            .expect("ensure_not_fenced");
+        assert!(
+            enf.contains("match crate::write_admission_kernel::fence_admission_plan("),
+            "ensure_not_fenced must match fence_admission_plan"
+        );
+        assert!(
+            !enf.contains("if self.durability_fenced"),
+            "the raw fence gate left the trampoline"
         );
     }
 

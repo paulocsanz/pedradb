@@ -499,8 +499,112 @@ def dir_sync_plan (sync : Bool) : Result DirSyncPlan := do
 def dir_sync_plan_as_is (_sync : Bool) : Result DirSyncPlan := do
   ok DirSyncPlan.SkipDirSync
 
+/-- [pedra_aeneas_write_admission_kernel::FenceAdmission]
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 390:0-396:1
+    Visibility: public -/
+@[discriminant isize]
+inductive FenceAdmission where
+| AdmitOps : FenceAdmission
+| RefuseFenced : FenceAdmission
+
+/-- [pedra_aeneas_write_admission_kernel::{impl core::clone::Clone for pedra_aeneas_write_admission_kernel::FenceAdmission}::clone]:
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 389:9-389:14
+    Visibility: public -/
+def FenceAdmission.Insts.CoreCloneClone.clone
+  (self : FenceAdmission) : Result FenceAdmission := do
+  ok self
+
+/-- Trait implementation: [pedra_aeneas_write_admission_kernel::{impl core::clone::Clone for pedra_aeneas_write_admission_kernel::FenceAdmission}]
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 389:9-389:14 -/
+@[reducible]
+def FenceAdmission.Insts.CoreCloneClone : core.clone.Clone FenceAdmission := {
+  clone := FenceAdmission.Insts.CoreCloneClone.clone
+}
+
+/-- Trait implementation: [pedra_aeneas_write_admission_kernel::{impl core::marker::Copy for pedra_aeneas_write_admission_kernel::FenceAdmission}]
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 389:16-389:20 -/
+@[reducible]
+def FenceAdmission.Insts.CoreMarkerCopy : core.marker.Copy FenceAdmission := {
+  cloneInst := FenceAdmission.Insts.CoreCloneClone
+}
+
+/-- [pedra_aeneas_write_admission_kernel::{impl core::fmt::Debug for pedra_aeneas_write_admission_kernel::FenceAdmission}::fmt]:
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 389:22-389:27
+    Visibility: public -/
+def FenceAdmission.Insts.CoreFmtDebug.fmt
+  (self : FenceAdmission) (f : core.fmt.Formatter) :
+  Result ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter)
+  := do
+  match self with
+  | FenceAdmission.AdmitOps =>
+    core.fmt.Formatter.write_str f (toStr "AdmitOps")
+  | FenceAdmission.RefuseFenced =>
+    core.fmt.Formatter.write_str f (toStr "RefuseFenced")
+
+/-- Trait implementation: [pedra_aeneas_write_admission_kernel::{impl core::fmt::Debug for pedra_aeneas_write_admission_kernel::FenceAdmission}]
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 389:22-389:27 -/
+@[reducible]
+def FenceAdmission.Insts.CoreFmtDebug : core.fmt.Debug FenceAdmission := {
+  fmt := FenceAdmission.Insts.CoreFmtDebug.fmt
+}
+
+/-- Trait implementation: [pedra_aeneas_write_admission_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_write_admission_kernel::FenceAdmission}]
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 389:29-389:38 -/
+@[reducible]
+def FenceAdmission.Insts.CoreMarkerStructuralPartialEq :
+  core.marker.StructuralPartialEq FenceAdmission := {
+}
+
+/-- [pedra_aeneas_write_admission_kernel::{impl core::cmp::PartialEq<pedra_aeneas_write_admission_kernel::FenceAdmission> for pedra_aeneas_write_admission_kernel::FenceAdmission}::eq]:
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 389:29-389:38
+    Visibility: public -/
+def FenceAdmission.Insts.CoreCmpPartialEqFenceAdmission.eq
+  (self : FenceAdmission) (other : FenceAdmission) : Result Bool := do
+  let self1 := read_discriminant self
+  let other1 := read_discriminant other
+  ok (self1 = other1)
+
+/-- Trait implementation: [pedra_aeneas_write_admission_kernel::{impl core::cmp::PartialEq<pedra_aeneas_write_admission_kernel::FenceAdmission> for pedra_aeneas_write_admission_kernel::FenceAdmission}]
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 389:29-389:38 -/
+@[reducible]
+def FenceAdmission.Insts.CoreCmpPartialEqFenceAdmission : core.cmp.PartialEq
+  FenceAdmission FenceAdmission := {
+  eq := FenceAdmission.Insts.CoreCmpPartialEqFenceAdmission.eq
+}
+
+/-- [pedra_aeneas_write_admission_kernel::{impl core::cmp::Eq for pedra_aeneas_write_admission_kernel::FenceAdmission}::assert_fields_are_eq]:
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 389:40-389:42
+    Visibility: public -/
+def FenceAdmission.Insts.CoreCmpEq.assert_fields_are_eq
+  (self : FenceAdmission) : Result Unit := do
+  ok ()
+
+/-- Trait implementation: [pedra_aeneas_write_admission_kernel::{impl core::cmp::Eq for pedra_aeneas_write_admission_kernel::FenceAdmission}]
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 389:40-389:42 -/
+@[reducible]
+def FenceAdmission.Insts.CoreCmpEq : core.cmp.Eq FenceAdmission := {
+  partialEqInst := FenceAdmission.Insts.CoreCmpPartialEqFenceAdmission
+  assert_fields_are_eq := FenceAdmission.Insts.CoreCmpEq.assert_fields_are_eq
+}
+
+/-- [pedra_aeneas_write_admission_kernel::fence_admission_plan]:
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 400:0-406:1
+    Visibility: public -/
+def fence_admission_plan
+  (durability_fenced : Bool) : Result FenceAdmission := do
+  if durability_fenced
+  then ok FenceAdmission.RefuseFenced
+  else ok FenceAdmission.AdmitOps
+
+/-- [pedra_aeneas_write_admission_kernel::fence_admission_plan_as_is]:
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 412:0-414:1
+    Visibility: public -/
+def fence_admission_plan_as_is
+  (_durability_fenced : Bool) : Result FenceAdmission := do
+  ok FenceAdmission.AdmitOps
+
 /-- [pedra_aeneas_write_admission_kernel::cas_absent_put]:
-    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 388:0-390:1
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 419:0-421:1
     Visibility: public -/
 def cas_absent_put (has_live : Bool) : Result Bool := do
   if has_live
@@ -508,13 +612,13 @@ def cas_absent_put (has_live : Bool) : Result Bool := do
   else ok true
 
 /-- [pedra_aeneas_write_admission_kernel::cas_absent_put_as_is]:
-    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 395:0-397:1
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 426:0-428:1
     Visibility: public -/
 def cas_absent_put_as_is (_has_live : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_write_admission_kernel::cas_eq_put]:
-    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 402:0-404:1
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 433:0-435:1
     Visibility: public -/
 def cas_eq_put (live_eq : Bool) : Result Bool := do
   if live_eq
@@ -522,13 +626,13 @@ def cas_eq_put (live_eq : Bool) : Result Bool := do
   else ok false
 
 /-- [pedra_aeneas_write_admission_kernel::cas_eq_put_as_is]:
-    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 409:0-411:1
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 440:0-442:1
     Visibility: public -/
 def cas_eq_put_as_is (_live_eq : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_write_admission_kernel::range_inverted]:
-    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 416:0-418:1
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 447:0-449:1
     Visibility: public -/
 def range_inverted (start_ge_end : Bool) : Result Bool := do
   if start_ge_end
@@ -536,13 +640,13 @@ def range_inverted (start_ge_end : Bool) : Result Bool := do
   else ok false
 
 /-- [pedra_aeneas_write_admission_kernel::range_inverted_as_is]:
-    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 423:0-425:1
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 454:0-456:1
     Visibility: public -/
 def range_inverted_as_is (_start_ge_end : Bool) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_write_admission_kernel::storage_write_recovered]:
-    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 434:0-453:1
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 465:0-484:1
     Visibility: public -/
 def storage_write_recovered
   (mem_bytes : Std.U64) (mem_armed : Bool) (mem_limit : Std.U64) (l0 : Std.U64)
@@ -566,7 +670,7 @@ def storage_write_recovered
   | WriteAdmit.StallL0 => ok false
 
 /-- [pedra_aeneas_write_admission_kernel::storage_write_recovered_as_is]:
-    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 459:0-478:1
+    Source: '../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 490:0-509:1
     Visibility: public -/
 def storage_write_recovered_as_is
   (mem_bytes : Std.U64) (mem_armed : Bool) (mem_limit : Std.U64) (l0 : Std.U64)

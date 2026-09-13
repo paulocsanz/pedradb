@@ -6585,6 +6585,36 @@
    }
   },
   {
+   "id": "fence_admission",
+   "finding": "RFC-0219 P1.2",
+   "twin_kind": "atom",
+   "atom": "fence_admission_plan",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P1.2: admitir ou recusar operações após um fence de durabilidade é decisão do kernel — fence armado recusa fail-closed cada nova operação (o relatório acked-prefix/janela-incerta já está registrado), provado ∀ sobre o bool como fence_admission_plan_fate_iff em WriteAdmission.lean; o trampolim db.rs ensure_not_fenced faz match no plano"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "aeneas": "scripts/aeneas_write_admission.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "fence_admission_plan",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "ensure_not_fenced"
+    }
+   ],
+   "as_is": "fence_admission_plan_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+    "test": "fence_admission_plan_on_live_fenced_refuses"
+   }
+  },
+  {
    "id": "flush_plan",
    "finding": "F2/F43",
    "twin_kind": "close",
