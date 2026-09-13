@@ -11041,12 +11041,12 @@ impl<E: Env> Db<E> {
                 let Some(limit) = self.write_buffer_for(fam) else {
                     continue;
                 };
-                if !crate::flush_kernel::auto_flush_due(
+                match crate::flush_kernel::cf_flush_plan(
                     self.mem.approx_memory_usage_cf(fam) as u64,
-                    true,
                     limit as u64,
                 ) {
-                    continue;
+                    crate::flush_kernel::CfFlushPlan::CfNotDueSkip => continue,
+                    crate::flush_kernel::CfFlushPlan::FlushCfNow => {}
                 }
                 let fam = self.physical_cfs[i].clone();
                 if self.defer_auto_compact {

@@ -436,3 +436,47 @@ theorem manifest_publish_plan_fate_iff :
   intro sst_durable plan
   unfold manifest_publish_plan may_publish_manifest
   cases sst_durable <;> simp_all <;> exact eq_comm
+
+/-- RFC-0219 P2.1 (átomo `catalog:cf_flush_plan`): dentro do scan armado,
+    a família de colunas flusha AGORA EXATAMENTE quando está no/acima do
+    seu limite; abaixo do limite pula para a próxima família. O AS-IS
+    pula toda família (CF armado sobre o limite só cresce — dente
+    plantado). -/
+theorem cf_flush_plan_fate_iff :
+    ∀ (mem_bytes limit : U64) (plan : CfFlushPlan),
+      (cf_flush_plan mem_bytes limit = ok plan) ↔
+        (((mem_bytes >= limit) = true ∧
+            plan = CfFlushPlan.FlushCfNow) ∨
+          (¬((mem_bytes >= limit) = true) ∧
+            plan = CfFlushPlan.CfNotDueSkip)) := by
+  intro mem_bytes limit plan
+  simp only [cf_flush_plan]
+  constructor
+  · intro hval
+    obtain ⟨b, hw, hm⟩ := bind_ok_inv _ _ _ hval
+    rw [auto_flush_due_fate_iff] at hw
+    cases b with
+    | true =>
+        simp at hm
+        subst hm
+        rcases hw with ⟨hd, har⟩ | ⟨hd, har⟩
+        · exact Or.inl ⟨by simpa using hd.symm, rfl⟩
+        · exact absurd har (by simp)
+    | false =>
+        simp at hm
+        subst hm
+        refine Or.inr ⟨?_, rfl⟩
+        intro hcon
+        rcases hw with ⟨hd, har⟩ | ⟨hd, har⟩
+        · simp_all
+        · exact absurd har (by simp)
+  · rintro (⟨hover, hplan⟩ | ⟨hnot, hplan⟩)
+    · refine bind_intro true ?_ ?_
+      · rw [auto_flush_due_fate_iff]
+        exact Or.inl ⟨by simp [hover], rfl⟩
+      · simp [hplan]
+    · refine bind_intro false ?_ ?_
+      · rw [auto_flush_due_fate_iff]
+        simp at hnot
+        exact Or.inl ⟨by simpa using hnot, rfl⟩
+      · simp [hplan]

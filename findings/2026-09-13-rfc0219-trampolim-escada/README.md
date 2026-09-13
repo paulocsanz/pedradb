@@ -369,3 +369,25 @@ decidia inline cercar o grupo (I/O de WAL falhada).
 - **Par nasce átomo**: `catalog:group_ack_plan`. floor_atom 282→283,
   residuals atom 283, single_artifact 302.
 - **Contador**: 49 → **48** (db.rs 28→27).
+
+## P2.1-c — `cf_flush_plan` (flush_kernel)
+
+Sítio: `maybe_auto_flush` (loop por CF) — o portão `if !
+auto_flush_due(mem_cf, true, limit)` decidia inline pular a família.
+
+- **Kernel**: `flush_kernel::cf_flush_plan(mem_bytes, limit)` →
+  `CfFlushPlan{FlushCfNow, CfNotDueSkip}` (chama `auto_flush_due` com
+  armed=true — o scan chegou à família —, que segue vivo e provado no
+  corpo).
+- **AS-IS dente**: `cf_flush_plan_as_is` — pula toda família; CF armado
+  sobre o limite só cresce.
+- **Teorema**: `cf_flush_plan_fate_iff` (∀ sobre (mem_bytes, limit);
+  prova via `bind_ok_inv`/`bind_intro` compondo
+  `auto_flush_due_fate_iff`) em `Flush.lean`.
+- **Extrato**: `aeneas_flush.sh --required` verde.
+- **Planta DST**: `cf_flush_plan_on_live_over_limit_flushes` (as duas
+  sondas de eixo global_under/cf_under que alimentam `auto_flush_gate`
+  seguem — são computação de entrada, não portão).
+- **Par nasce átomo**: `catalog:cf_flush_plan`. floor_atom 283→284,
+  residuals atom 284, single_artifact 303.
+- **Contador**: 48 → **47** (db.rs 27→26).

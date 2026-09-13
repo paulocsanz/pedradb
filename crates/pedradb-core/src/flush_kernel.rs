@@ -185,6 +185,37 @@ pub fn manifest_publish_plan_as_is(_sst_durable: bool) -> ManifestPublishPlan {
     ManifestPublishPlan::PublishManifest
 }
 
+#[cfg(not(verus_keep_ghost))]
+/// Fate of one column family inside the auto-flush scan.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CfFlushPlan {
+    /// CF armed and at/over its limit — flush this family now.
+    FlushCfNow,
+    /// CF not due — skip to the next family.
+    CfNotDueSkip,
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// Flush the family EXACTLY when armed and at/over its limit
+/// (auto_flush_due stays live and proved in the body; the scan reached
+/// the family, so the axis is armed).
+#[must_use]
+pub fn cf_flush_plan(mem_bytes: u64, limit: u64) -> CfFlushPlan {
+    if auto_flush_due(mem_bytes, true, limit) {
+        CfFlushPlan::FlushCfNow
+    } else {
+        CfFlushPlan::CfNotDueSkip
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: skips every family (armed CFs over the limit keep growing —
+/// dente).
+#[must_use]
+pub fn cf_flush_plan_as_is(_mem_bytes: u64, _limit: u64) -> CfFlushPlan {
+    CfFlushPlan::CfNotDueSkip
+}
+
 /// Every way acked keys can still depend on the WAL.
 #[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -884,6 +915,31 @@ mod tests {
         assert!(
             !pm.contains("may_publish_manifest("),
             "the raw publish gate left the trampoline"
+        );
+    }
+
+    #[test]
+    fn cf_flush_plan_on_live_over_limit_flushes() {
+        // RFC-0219 P2.1: inside the armed scan, a family at/over its
+        // limit flushes now; below the limit skips. AS-IS skips every
+        // family (armed CFs keep growing — dente).
+        assert_eq!(cf_flush_plan(10, 10), CfFlushPlan::FlushCfNow);
+        assert_eq!(cf_flush_plan(11, 10), CfFlushPlan::FlushCfNow);
+        assert_eq!(cf_flush_plan(9, 10), CfFlushPlan::CfNotDueSkip);
+        assert_eq!(
+            cf_flush_plan_as_is(10, 10),
+            CfFlushPlan::CfNotDueSkip,
+            "AS-IS dente: armed family over the limit never flushes"
+        );
+        let maf = named_fn_src(include_str!("db.rs"), "maybe_auto_flush").expect("maybe_auto_flush");
+        assert!(
+            maf.contains("match crate::flush_kernel::cf_flush_plan("),
+            "maybe_auto_flush must match cf_flush_plan"
+        );
+        assert_eq!(
+            maf.matches("auto_flush_due(").count(),
+            2,
+            "only the two axis probes remain (global_under/cf_under feeding auto_flush_gate); the per-CF gate is the kernel match"
         );
     }
 
