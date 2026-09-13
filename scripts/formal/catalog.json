@@ -3161,6 +3161,10 @@
   },
   {
    "id": "ship_stamp",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P2.1: fate ∀ sobre stamp_changed no degrau átomo — stamp agora maior já é mudança; do mesmo tamanho, mudou é o prefixo citado ser diferente; planta DST stamp_changed_on_rewrite_is_not_ok"
+   },
    "finding": "F165",
    "twin_kind": "close",
    "single_artifact": true,

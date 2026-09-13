@@ -269,3 +269,4 @@ atom	catalog:stream_cursor	ack_in_order_fate_iff	formal/aeneas/lean/Cursor.lean	
 atom	catalog:isolated_child	isolated_child_byte_fate_iff	formal/aeneas/lean/Isolated.lean	isolated_child_byte
 atom	catalog:isolated	isolated_id_matches_fate_iff	formal/aeneas/lean/Isolated.lean	isolated_id_matches
 atom	catalog:fold_range	fold_event_hides_key_fate_iff	formal/aeneas/lean/Fold.lean	fold_event_hides_key
+atom	catalog:ship_stamp	stamp_changed_fate_iff	formal/aeneas/lean/Ship.lean	stamp_changed
