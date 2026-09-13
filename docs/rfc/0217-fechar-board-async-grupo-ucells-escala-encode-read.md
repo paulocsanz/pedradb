@@ -195,7 +195,12 @@ board**, estendendo este RFC a cada etapa nova descoberta.
   ingest p50 0,83→0,60ms. Cartaz Linux 3-run = meter e4b (p149).
 - [ ] **P1.3** wbwi 0,494 + myrocks_write_tx 0,751: batch indexado nativo
   + tx single-writer real (`begin_occ`/commit já existem) no lugar do
-  WriteBatch emulado. — status: `todo`
+  WriteBatch emulado. **DIAG micro 2026-09-13** (Darwin, rocksapi,
+  n=300, 3 rounds quiet, peer sync=0): flat overlay `5c1f5b43` move
+  0,307 → 0,317/0,324/0,349 (min +3%, best +13% relativo) — ganho real
+  mas perda honesta permanece; dono do residual = emulação WBWI
+  (per-op ~369ns vs ~117ns do WriteBatchWithIndex nativo; write_tx
+  nativo e cartaz Linux 0,494 = meter e4b). — status: `doing`
 - [ ] **P1.4** linkbench_mix 0,236: decompor primeiro (mix scan+delete;
   telemetria read_probe/scan), atacar o dono nomeado. — status: `doing`
   (ataque landed `2f083efb`; veredito ratio = e4b).
@@ -287,7 +292,7 @@ dono.
 | P0.5 | p0 | Re-adjudicação do dono no Linux: mesmo block do P0.4 | doing | — | 2026-09-13 |
 | P1.1 | p1 | kafka_changelog_flush: flush amortizado | done | `ded231ab` (ratio ≥1,0 = meter Linux e4b) | 2026-09-13 |
 | P1.2 | p1 | ingest_sst + compaction_filter: caminhos nativos | done | `92a76a97` (cartaz Linux = e4b; DIAG filter 0,47→0,935) | 2026-09-13 |
-| P1.3 | p1 | wbwi + write_tx: batch indexado + tx nativos | doing | `5c1f5b43` (wbwi flat overlay landed; micro ratio + veredito tx = e4b) | 2026-09-13 |
+| P1.3 | p1 | wbwi + write_tx: batch indexado + tx nativos | doing | `5c1f5b43` + DIAG micro 09-13: 0,307→0,317–0,349 (perda honesta; cartaz = e4b) | 2026-09-13 |
 | P1.4 | p1 | linkbench_mix: decompor + atacar dono | doing | `2f083efb` (point_ord_btree incremental; DIAG p50 −52%; cartaz = e4b) | 2026-09-13 |
 | P2.1 | p2 | Escala pesada 4GiB: meter + fechar (0,70/0,557) | todo | — | 2026-09-13 |
 | P2.2 | p2 | Encode memtable off-path | doing | `9b5ca0f5` (memo batch-local no apply; DIAG fase + cartaz = e4b) | 2026-09-13 |
