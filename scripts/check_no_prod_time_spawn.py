@@ -37,6 +37,35 @@ TARGETS = [
 
 TEST_MARKER = re.compile(r"#\[cfg\(.*test.*\)\]|mod tests")
 
+# RFC-0222 P0.3: a file whose module is declared under a #[cfg(...test...)]
+# attribute in its parent (lib.rs/main.rs/mod.rs of the same directory) is
+# test-only even when the file itself carries no in-file marker — the
+# heuristic below used to false-positive on such harnesses (98 hits in
+# pedradb-store's three_teeth_queued.rs, cfg(test)-gated in lib.rs).
+TEST_ATTR = re.compile(r"#\[cfg\([^)]*test[^)]*\)\]")
+
+
+def _test_gated_modules(parent: Path) -> set[str]:
+    """Module names declared as `mod name;` directly under a cfg(test) attr."""
+    gated: set[str] = set()
+    if not parent.is_file():
+        return gated
+    lines = parent.read_text(encoding="utf-8", errors="replace").splitlines()
+    for i, line in enumerate(lines):
+        m = re.match(r"\s*mod (\w+)\s*;", line)
+        if m and i > 0 and TEST_ATTR.match(lines[i - 1].strip()):
+            gated.add(m.group(1))
+    return gated
+
+
+def _module_test_gated(path: Path) -> bool:
+    """True when the file's `mod` declaration is cfg(test)-gated upstream."""
+    for parent_name in ("lib.rs", "main.rs", "mod.rs"):
+        if path.stem in _test_gated_modules(path.parent / parent_name):
+            return True
+    return False
+
+
 
 def check(root: Path) -> int:
     violations = 0
@@ -50,6 +79,8 @@ def check(root: Path) -> int:
             # P2.3 rule targets library TTL/lease/oracle logic.
             if "bin" in path.relative_to(base).parts:
                 continue
+            if _module_test_gated(path):
+                continue
             text = path.read_text(encoding="utf-8", errors="replace").splitlines()
             marker = next(
                 (i for i, line in enumerate(text) if TEST_MARKER.search(line)),
@@ -62,8 +93,37 @@ def check(root: Path) -> int:
     return violations
 
 
+def selftest() -> int:
+    """Sabotage proof (RFC-0222 P0.3): a cfg(test)-gated harness module is
+    exempt, a real production hit still fires — both in one synthetic tree."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        src = root / "crates/pedradb-store/src"
+        src.mkdir(parents=True)
+        (src / "lib.rs").write_text(
+            "#[cfg(test)]\nmod harness;\n\nmod prod;\n", encoding="utf-8"
+        )
+        (src / "harness.rs").write_text(
+            "fn t() { let _ = std::time::SystemTime::now(); }\n", encoding="utf-8"
+        )
+        (src / "prod.rs").write_text(
+            "fn p() { let _ = std::time::SystemTime::now(); }\n", encoding="utf-8"
+        )
+        n = check(root)
+        if n != 1:
+            print(f"selftest: FAIL — expected exactly 1 violation (prod.rs), got {n}")
+            return 1
+        print("selftest: OK — gated harness exempt, production hit fires")
+        return 0
+
+
 def main() -> int:
-    root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parent.parent
+    argv = sys.argv[1:]
+    if "--selftest" in argv:
+        return selftest()
+    root = Path(argv[0]) if argv else Path(__file__).resolve().parent.parent
     bad = check(root)
     if bad:
         print(f"check_no_prod_time_spawn: {bad} violation(s)")
