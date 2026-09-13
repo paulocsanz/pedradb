@@ -215,3 +215,337 @@ theorem from_hex_fate_iff :
     · unfold from_hex
       rw [if_neg hn48, if_neg hn97, if_neg hn65]
       rw [hr]
+
+/-! ### RFC-0216 P1.1 4/4 — `form_decode` (átomo `catalog:form_plus`)
+
+O fate do decode como cadeia: combustível = bytes restantes; cada passo
+`cont` é exatamente um passo do corpo extraído com índice estritamente
+crescente e limitado a `len`; o fim é `i = len` com `out = v`. -/
+
+/-- O `+1#usize` do corpo vale exatamente `↑i + 1` em Nat. -/
+private theorem usize_succ_val (i i1 : Usize) (h : (i + 1#usize) = ok i1) :
+    (↑i1 : Nat) = (↑i : Nat) + 1 := by
+  have he := UScalar.add_equiv i 1#usize
+  rw [h] at he
+  dsimp only at he
+  exact he.2.1
+
+/-- No fim (i = len) o corpo devolve exatamente `done out`. -/
+private theorem body_at_end (b : Slice U8) (out : alloc.vec.Vec U8) (i : Usize)
+    (hlen : (↑i : Nat) = (b.val).length) :
+    form_decode_loop.body b out i = ok (ControlFlow.done out) := by
+  have hge : ¬ (i < Slice.len b) := by
+    intro hlt
+    have hn0 := (UScalar.lt_equiv i (Slice.len b)).mp hlt
+    rw [Aeneas.Std.Slice.len_val] at hn0
+    rw [hlen] at hn0
+    exact absurd hn0 (Nat.lt_irrefl _)
+  unfold form_decode_loop.body
+  dsimp +zeta only
+  rw [if_neg hge]
+
+/-- No fim o corpo nunca dá cont. -/
+private theorem body_no_cont_at_end (b : Slice U8) (out : alloc.vec.Vec U8)
+    (i : Usize) (st : alloc.vec.Vec U8 × Usize)
+    (hlen : (↑i : Nat) = (b.val).length)
+    (hB : form_decode_loop.body b out i = ok (ControlFlow.cont st)) : False := by
+  have hge : ¬ (i < Slice.len b) := by
+    intro hlt
+    have hn0 := (UScalar.lt_equiv i (Slice.len b)).mp hlt
+    rw [Aeneas.Std.Slice.len_val] at hn0
+    rw [hlen] at hn0
+    exact absurd hn0 (Nat.lt_irrefl _)
+  unfold form_decode_loop.body at hB
+  dsimp +zeta only at hB
+  rw [if_neg hge] at hB
+  injection hB with hB2
+  contradiction
+
+/-- Sob i < len toda folha do corpo é `cont (out', i')` com o índice
+estritamente crescente e limitado — a inversão das 11 folhas. -/
+private theorem body_inv (b : Slice U8) (out : alloc.vec.Vec U8) (i : Usize)
+    (hlt : (↑i : Nat) < (b.val).length)
+    (cf : ControlFlow (alloc.vec.Vec U8 × Usize) (alloc.vec.Vec U8))
+    (hB : form_decode_loop.body b out i = ok cf) :
+    ∃ (out' : alloc.vec.Vec U8) (i' : Usize),
+      cf = ControlFlow.cont (out', i') ∧
+        (↑i : Nat) < (↑i' : Nat) ∧ (↑i' : Nat) ≤ (b.val).length := by
+  have hlt' : i < Slice.len b := by
+    refine (UScalar.lt_equiv i (Slice.len b)).mpr ?_
+    rw [Aeneas.Std.Slice.len_val]
+    exact hlt
+  unfold form_decode_loop.body at hB
+  dsimp +zeta only at hB
+  rw [if_pos hlt'] at hB
+  obtain ⟨b1, hb1, hB⟩ := bind_ok_inv _ _ _ hB
+  cases b1 with
+  | true =>
+    obtain ⟨i2, hi2, hB⟩ := bind_ok_inv _ _ _ hB
+    split at hB
+    · next h43 =>
+      obtain ⟨i3, hi3, hB⟩ := bind_ok_inv _ _ _ hB
+      obtain ⟨out1, hout1, hB⟩ := bind_ok_inv _ _ _ hB
+      obtain ⟨i4, hi4, hB⟩ := bind_ok_inv _ _ _ hB
+      have hv4 := usize_succ_val i i4 hi4
+      refine ⟨out1, i4, (Result.ok.inj hB).symm, by omega, by omega⟩
+    · next hn43 =>
+      split at hB
+      · next h37 =>
+        obtain ⟨i3, hi3, hB⟩ := bind_ok_inv _ _ _ hB
+        split at hB
+        · next hlt3 =>
+          have hn3 : (↑i3 : Nat) < (b.val).length := by
+            have h0 := (UScalar.lt_equiv i3 (Slice.len b)).mp hlt3
+            rw [Aeneas.Std.Slice.len_val] at h0
+            exact h0
+          obtain ⟨i5, hi5, hB⟩ := bind_ok_inv _ _ _ hB
+          obtain ⟨i6, hi6, hB⟩ := bind_ok_inv _ _ _ hB
+          obtain ⟨o, ho, hB⟩ := bind_ok_inv _ _ _ hB
+          obtain ⟨i7, hi7, hB⟩ := bind_ok_inv _ _ _ hB
+          obtain ⟨o1, ho1, hB⟩ := bind_ok_inv _ _ _ hB
+          have hv5 := usize_succ_val i i5 hi5
+          cases o with
+          | none =>
+            obtain ⟨out1, hout1, hB⟩ := bind_ok_inv _ _ _ hB
+            exact ⟨out1, i5, (Result.ok.inj hB).symm, by omega, by omega⟩
+          | some h =>
+            cases o1 with
+            | none =>
+              obtain ⟨out1, hout1, hB⟩ := bind_ok_inv _ _ _ hB
+              exact ⟨out1, i5, (Result.ok.inj hB).symm, by omega, by omega⟩
+            | some l =>
+              obtain ⟨i8, hi8, hB⟩ := bind_ok_inv _ _ _ hB
+              obtain ⟨i9, hi9, hB⟩ := bind_ok_inv _ _ _ hB
+              obtain ⟨out1, hout1, hB⟩ := bind_ok_inv _ _ _ hB
+              obtain ⟨i10, hi10, hB⟩ := bind_ok_inv _ _ _ hB
+              have h2 := UScalar.add_equiv i 2#usize
+              rw [hi3] at h2
+              dsimp only at h2
+              have h2v : (↑i3 : Nat) = (↑i : Nat) + 2 := h2.2.1
+              have h3 := UScalar.add_equiv i 3#usize
+              rw [hi10] at h3
+              dsimp only at h3
+              have h3v : (↑i10 : Nat) = (↑i : Nat) + 3 := h3.2.1
+              exact ⟨out1, i10, (Result.ok.inj hB).symm, by omega, by omega⟩
+        · next hge3 =>
+          obtain ⟨out1, hout1, hB⟩ := bind_ok_inv _ _ _ hB
+          obtain ⟨i5, hi5, hB⟩ := bind_ok_inv _ _ _ hB
+          have hv5 := usize_succ_val i i5 hi5
+          exact ⟨out1, i5, (Result.ok.inj hB).symm, by omega, by omega⟩
+      · next hn37 =>
+        obtain ⟨out1, hout1, hB⟩ := bind_ok_inv _ _ _ hB
+        obtain ⟨i3, hi3, hB⟩ := bind_ok_inv _ _ _ hB
+        have hv3 := usize_succ_val i i3 hi3
+        exact ⟨out1, i3, (Result.ok.inj hB).symm, by omega, by omega⟩
+  | false =>
+    obtain ⟨i2, hi2, hB⟩ := bind_ok_inv _ _ _ hB
+    split at hB
+    · next h37 =>
+      obtain ⟨i3, hi3, hB⟩ := bind_ok_inv _ _ _ hB
+      split at hB
+      · next hlt3 =>
+        have hn3 : (↑i3 : Nat) < (b.val).length := by
+          have h0 := (UScalar.lt_equiv i3 (Slice.len b)).mp hlt3
+          rw [Aeneas.Std.Slice.len_val] at h0
+          exact h0
+        obtain ⟨i5, hi5, hB⟩ := bind_ok_inv _ _ _ hB
+        obtain ⟨i6, hi6, hB⟩ := bind_ok_inv _ _ _ hB
+        obtain ⟨o, ho, hB⟩ := bind_ok_inv _ _ _ hB
+        obtain ⟨i7, hi7, hB⟩ := bind_ok_inv _ _ _ hB
+        obtain ⟨o1, ho1, hB⟩ := bind_ok_inv _ _ _ hB
+        have hv5 := usize_succ_val i i5 hi5
+        cases o with
+        | none =>
+          obtain ⟨out1, hout1, hB⟩ := bind_ok_inv _ _ _ hB
+          exact ⟨out1, i5, (Result.ok.inj hB).symm, by omega, by omega⟩
+        | some h =>
+          cases o1 with
+          | none =>
+            obtain ⟨out1, hout1, hB⟩ := bind_ok_inv _ _ _ hB
+            exact ⟨out1, i5, (Result.ok.inj hB).symm, by omega, by omega⟩
+          | some l =>
+            obtain ⟨i8, hi8, hB⟩ := bind_ok_inv _ _ _ hB
+            obtain ⟨i9, hi9, hB⟩ := bind_ok_inv _ _ _ hB
+            obtain ⟨out1, hout1, hB⟩ := bind_ok_inv _ _ _ hB
+            obtain ⟨i10, hi10, hB⟩ := bind_ok_inv _ _ _ hB
+            have h2 := UScalar.add_equiv i 2#usize
+            rw [hi3] at h2
+            dsimp only at h2
+            have h2v : (↑i3 : Nat) = (↑i : Nat) + 2 := h2.2.1
+            have h3 := UScalar.add_equiv i 3#usize
+            rw [hi10] at h3
+            dsimp only at h3
+            have h3v : (↑i10 : Nat) = (↑i : Nat) + 3 := h3.2.1
+            exact ⟨out1, i10, (Result.ok.inj hB).symm, by omega, by omega⟩
+      · next hge3 =>
+        obtain ⟨out1, hout1, hB⟩ := bind_ok_inv _ _ _ hB
+        obtain ⟨i5, hi5, hB⟩ := bind_ok_inv _ _ _ hB
+        have hv5 := usize_succ_val i i5 hi5
+        exact ⟨out1, i5, (Result.ok.inj hB).symm, by omega, by omega⟩
+    · next hn37 =>
+      obtain ⟨out1, hout1, hB⟩ := bind_ok_inv _ _ _ hB
+      obtain ⟨i3, hi3, hB⟩ := bind_ok_inv _ _ _ hB
+      have hv3 := usize_succ_val i i3 hi3
+      exact ⟨out1, i3, (Result.ok.inj hB).symm, by omega, by omega⟩
+
+/-- Payload de um cont sob i < len progride: i < i' ≤ len. -/
+private theorem body_cont_progress (b : Slice U8) (out : alloc.vec.Vec U8)
+    (i : Usize) (out' : alloc.vec.Vec U8) (i' : Usize)
+    (hlt : (↑i : Nat) < (b.val).length)
+    (hB : form_decode_loop.body b out i = ok (ControlFlow.cont (out', i'))) :
+    (↑i : Nat) < (↑i' : Nat) ∧ (↑i' : Nat) ≤ (b.val).length := by
+  obtain ⟨out2, i2, hcf, hlt2, hle2⟩ :=
+    body_inv b out i hlt (ControlFlow.cont (out', i')) hB
+  have hp := ControlFlow.cont.inj hcf
+  obtain ⟨-, hii⟩ := Prod.mk.inj hp
+  subst hii
+  exact ⟨hlt2, hle2⟩
+
+/-- Done só no fim, com o out intacto. -/
+private theorem body_done_end (b : Slice U8) (out : alloc.vec.Vec U8)
+    (i : Usize) (r : alloc.vec.Vec U8)
+    (hle : (↑i : Nat) ≤ (b.val).length)
+    (hB : form_decode_loop.body b out i = ok (ControlFlow.done r)) :
+    (↑i : Nat) = (b.val).length ∧ out = r := by
+  by_cases hlt : (↑i : Nat) < (b.val).length
+  · obtain ⟨out2, i2, hcf, -, -⟩ :=
+      body_inv b out i hlt (ControlFlow.done r) hB
+    exact absurd hcf (by intro hh; contradiction)
+  · have hlen : (↑i : Nat) = (b.val).length := by omega
+    refine ⟨hlen, ?_⟩
+    have h := (body_at_end b out i hlen).symm.trans hB
+    exact ControlFlow.done.inj (Result.ok.inj h)
+
+/-- O fate do decode como cadeia: combustível = bytes restantes; cada
+passo `cont` consume pelo menos um byte (i' > i, i' ≤ len) e o fim é
+o `done` exato em i = len com out = v. -/
+private def DecodeFate (b : Slice U8) :
+    Nat → alloc.vec.Vec U8 → Usize → alloc.vec.Vec U8 → Prop
+  | 0, out, i, v =>
+      (↑i : Nat) = (b.val).length ∧ out = v
+  | fuel + 1, out, i, v =>
+      (∃ (out' : alloc.vec.Vec U8) (i' : Usize),
+          form_decode_loop.body b out i = ok (ControlFlow.cont (out', i')) ∧
+            DecodeFate b fuel out' i' v) ∨
+        ((↑i : Nat) = (b.val).length ∧ out = v)
+
+/-- O fate do loop por indução no combustível. -/
+private theorem form_decode_loop_fate (b : Slice U8) :
+    ∀ (fuel : Nat) (out : alloc.vec.Vec U8) (i : Usize),
+      (↑i : Nat) ≤ (b.val).length → (b.val).length - (↑i : Nat) ≤ fuel →
+      ∀ v : alloc.vec.Vec U8,
+        (form_decode_loop b out i = ok v) ↔ DecodeFate b fuel out i v := by
+  intro fuel
+  induction fuel with
+  | zero =>
+    intro out i hile hfuel v
+    have hlen : (↑i : Nat) = (b.val).length := by omega
+    constructor
+    · intro h
+      refine ⟨hlen, ?_⟩
+      unfold form_decode_loop at h
+      rw [loop.eq_def] at h
+      dsimp only at h
+      cases hB : form_decode_loop.body b out i with
+      | ok cf =>
+        cases cf with
+        | done r =>
+          rw [hB] at h
+          dsimp only at h
+          rw [Result.ok.inj h] at hB
+          exact (body_done_end b out i v hile hB).2
+        | cont st =>
+          exact absurd hB (body_no_cont_at_end b out i st hlen)
+      | fail e =>
+        rw [hB] at h
+        dsimp only at h
+        exact absurd h (by simp)
+      | div =>
+        rw [hB] at h
+        dsimp only at h
+        exact absurd h (by simp)
+    · rintro ⟨-, hout⟩
+      unfold form_decode_loop
+      rw [loop.eq_def]
+      dsimp only
+      rw [body_at_end b out i hlen, hout]
+  | succ fuel ih =>
+    intro out i hile hfuel v
+    unfold form_decode_loop
+    rw [loop.eq_def]
+    dsimp only
+    cases hB : form_decode_loop.body b out i with
+    | ok cf =>
+      cases cf with
+      | cont st =>
+        obtain ⟨out', i'⟩ := st
+        dsimp only
+        by_cases hlt : (↑i : Nat) < (b.val).length
+        · obtain ⟨hprog1, hprog2⟩ := body_cont_progress b out i out' i' hlt hB
+          constructor
+          · intro h
+            exact Or.inl ⟨out', i', hB, (ih out' i' hprog2 (by omega) v).mp h⟩
+          · rintro (⟨out2, i2, hbody, hfate⟩ | ⟨hlen, hout⟩)
+            · have hu : ControlFlow.cont (out', i')
+                  = ControlFlow.cont (out2, i2) :=
+                  Result.ok.inj (hB.symm.trans hbody)
+              obtain ⟨hoo, hii⟩ := Prod.mk.inj (ControlFlow.cont.inj hu)
+              subst hoo
+              subst hii
+              exact (ih out' i' hprog2 (by omega) v).mpr hfate
+            · exact absurd hlt (by omega)
+        · have hlen : (↑i : Nat) = (b.val).length := by omega
+          exact absurd hB (body_no_cont_at_end b out i (out', i') hlen)
+      | done r =>
+        dsimp only
+        obtain ⟨hlen, hout⟩ := body_done_end b out i r hile hB
+        constructor
+        · intro h
+          have hrv : r = v := Result.ok.inj h
+          exact Or.inr ⟨hlen, hrv ▸ hout⟩
+        · rintro (⟨out2, i2, hbody, -⟩ | ⟨hlen2, hout2⟩)
+          · have hne := hbody.symm.trans hB
+            injection hne with hne2
+            contradiction
+          · exact congrArg ok (hout.symm.trans hout2)
+    | fail e =>
+      dsimp only
+      constructor
+      · intro h
+        exact absurd h (by simp)
+      · rintro (⟨out2, i2, hbody, -⟩ | ⟨hlen, hout⟩)
+        · exact absurd (hbody.symm.trans hB) (by simp)
+        · exact absurd ((body_at_end b out i hlen).symm.trans hB) (by simp)
+    | div =>
+      dsimp only
+      constructor
+      · intro h
+        exact absurd h (by simp)
+      · rintro (⟨out2, i2, hbody, -⟩ | ⟨hlen, hout⟩)
+        · exact absurd (hbody.symm.trans hB) (by simp)
+        · exact absurd ((body_at_end b out i hlen).symm.trans hB) (by simp)
+
+/-- RFC-0216 P1.1 4/4 (átomo `catalog:form_plus`, entrada
+`form_decode`): o output inteiro do decoder é exatamente a cadeia
+citada dos passos do corpo extraído — cada byte consumido passa por
+`plus_before_percent`/`43→32`/`37→from_hex×2`, o `+3` só ocorre com
+dois hex válidos sob guarda `i+2 < len`, e o resultado final é o out
+acumulado exatamente em `i = len`. O mutante AS-IS troca o ramo do
+`+`; planta `form_decode_on_live_http_is_not_ok` recusa no handler
+vivo. -/
+theorem form_decode_fate_iff :
+    ∀ (s : Str) (b : Slice U8) (v : alloc.vec.Vec U8)
+      (hb : core.str.Str.as_bytes s = ok b),
+      (form_decode s = ok v) ↔
+        DecodeFate b (b.val).length
+          (alloc.vec.Vec.with_capacity U8 (Slice.len b)) 0#usize v := by
+  intro s b v hb
+  have hloop : form_decode s
+      = form_decode_loop b (alloc.vec.Vec.with_capacity U8 (Slice.len b))
+          0#usize := by
+    unfold form_decode
+    rw [hb]
+    simp only [Aeneas.Std.bind_tc_ok]
+  rw [hloop]
+  exact form_decode_loop_fate b (b.val).length _ 0#usize (Nat.zero_le _)
+    (Nat.sub_le _ _) v

@@ -87,3 +87,20 @@ verde antes do commit, exatamente 1 teorema público por commit).
   rintro (`i, i1, hi, hi1`, não `i, hi, i1, hi1`). Planta DST
   `hex_letters_decode_as_is_does_not` (pedradb-http, exit 0,
   1 passed). Gate GREEN: floor_atom 165→166, floor_extract 113→112.
+
+## P1.1 — form ×4 átomo (4/4 — slice fechado)
+
+- **form_decode (4/4)**: primeiro LOOP da família fechado. O fate do
+  output inteiro é a cadeia citada `DecodeFate` (fuel = bytes
+  restantes): cada `cont` é exatamente um passo do corpo extraído
+  com índice estritamente crescente e ≤ len (inversão das 11 folhas:
+  `+`→32, `%` com 0/1/2 hex válidos avança 1, e o `+3` só ocorre com
+  DOIS hex válidos sob guarda `i+2 < len`); `done` só em `i = len`
+  com o out intacto. Indução no combustível com `loop.eq_def`.
+  Armadilhas: `0#usize` no statement trava a elaboração quando há
+  `→` interno (pi postponado — o `intro` falha); ∀-binders diretos
+  (estilo Auth) elaboram. Coerções `↑(2#usize)`/`↑(3#usize)` são
+  opacas ao omega — precisa `have hXv : ↑iX = ↑i + N := hX.2.1`.
+  Planta DST `form_decode_on_live_http_is_not_ok` (pedradb-http,
+  exit 0, 1 passed). Gate GREEN: floor_atom 166→167,
+  floor_extract 112→111.

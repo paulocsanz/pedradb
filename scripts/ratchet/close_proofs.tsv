@@ -193,3 +193,4 @@ atom	catalog:fail_closed	parse_error_writes_status_fate_iff	formal/aeneas/lean/F
 atom	catalog:form_plus_byte	form_plus_byte_fate_iff	formal/aeneas/lean/Form.lean	form_plus_byte
 atom	catalog:plus_before_percent	plus_before_percent_fate_iff	formal/aeneas/lean/Form.lean	plus_before_percent
 atom	catalog:from_hex	from_hex_fate_iff	formal/aeneas/lean/Form.lean	from_hex
+atom	catalog:form_plus	form_decode_fate_iff	formal/aeneas/lean/Form.lean	form_decode
