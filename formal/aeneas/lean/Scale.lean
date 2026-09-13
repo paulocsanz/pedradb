@@ -452,3 +452,82 @@ theorem predict_get_ns_fate_iff :
       (bind_intro r hr ?_)))))))))))))))))
     rw [hv]
     exact hw
+
+/-- RFC-0218 P2.2 (átomo `catalog:scale_forecast`, entrada
+    `scale_forecast`): a tabela RFC-0176 é EXATAMENTE a composição
+    citada — cada campo é o átomo do kernel correspondente
+    (saturating_mul, level_count como callee citado, point_get_probes,
+    probes_worst, div_ceil, warm_cap_bytes, happy_hot_bps, best/happy/
+    worst_get_ns); hot é o gate store <= warm_cap. O AS-IS anda todos
+    os arquivos e diz sempre quente (dente plantado). -/
+theorem scale_forecast_fate_iff :
+    ∀ (keys ram_bytes : U64) (r : ScaleForecast),
+      (scale_forecast keys ram_bytes = ok r) ↔
+        (∃ store_bytes i : U64,
+           core.num.U64.saturating_mul keys SCALE_BYTES_PER_ENTRY
+             = ok store_bytes ∧
+           SCALE_L1_BYTES = ok i ∧
+         ∃ i1 : U32,
+           level_count store_bytes i = ok i1 ∧
+         ∃ levels p_best p_worst n_files warm_cap happy_hot best_ns
+           happy_ns worst_ns : U64,
+           lift (core.convert.num.FromU64U32.from i1) = ok levels ∧
+           point_get_probes levels SCALE_L0_BEST = ok p_best ∧
+           probes_worst levels SCALE_L0_WORST = ok p_worst ∧
+           ((i = 0#u64 ∧ n_files = 0#u64)
+            ∨ (¬ (i = 0#u64) ∧
+               core.num.U64.div_ceil store_bytes i = ok n_files)) ∧
+           warm_cap_bytes ram_bytes = ok warm_cap ∧
+           happy_hot_bps store_bytes ram_bytes = ok happy_hot ∧
+           best_get_ns levels = ok best_ns ∧
+           happy_get_ns levels store_bytes ram_bytes = ok happy_ns ∧
+           worst_get_ns levels SCALE_L0_WORST = ok worst_ns ∧
+           r = ScaleForecast.mk keys ram_bytes store_bytes levels p_best
+             p_worst n_files warm_cap (decide (store_bytes <= warm_cap))
+             happy_hot best_ns happy_ns worst_ns) := by
+  intro keys ram_bytes r
+  constructor
+  · intro hval
+    unfold scale_forecast at hval
+    obtain ⟨store_bytes, hsb, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨i, hi, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨i1, hi1, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨levels, hlevels, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨p_best, hpb, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨p_worst, hpw, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨n_files, hnf, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨warm_cap, hwc, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨happy_hot, hhh, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨best_ns, hbn, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨happy_ns, hhns, hval⟩ := bind_ok_inv _ _ _ hval
+    obtain ⟨worst_ns, hwns, hval⟩ := bind_ok_inv _ _ _ hval
+    injection hval with hr
+    refine ⟨store_bytes, i, hsb, hi, i1, hi1, levels, p_best, p_worst,
+      n_files, warm_cap, happy_hot, best_ns, happy_ns, worst_ns, hlevels,
+      hpb, hpw, ?_, hwc, hhh, hbn, hhns, hwns, hr.symm⟩
+    split at hnf
+    · next hc =>
+      injection hnf with hv
+      exact Or.inl ⟨hc, hv.symm⟩
+    · next hc => exact Or.inr ⟨hc, hnf⟩
+  · rintro ⟨store_bytes, i, hsb, hi, i1, hi1, levels, p_best, p_worst,
+      n_files, warm_cap, happy_hot, best_ns, happy_ns, worst_ns, hlevels,
+      hpb, hpw, hdisj, hwc, hhh, hbn, hhns, hwns, hr⟩
+    unfold scale_forecast
+    refine bind_intro store_bytes hsb (bind_intro i hi (bind_intro i1 hi1
+      (bind_intro levels hlevels (bind_intro p_best hpb
+      (bind_intro p_worst hpw ?_)))))
+    · cases hdisj with
+      | inl hd =>
+        obtain ⟨hc, rfl⟩ := hd
+        refine bind_intro 0#u64 (by rw [if_pos hc]) (bind_intro warm_cap
+          hwc (bind_intro happy_hot hhh (bind_intro best_ns hbn
+          (bind_intro happy_ns hhns (bind_intro worst_ns hwns ?_)))))
+        rw [hr]
+      | inr hd =>
+        obtain ⟨hc, hnf⟩ := hd
+        refine bind_intro n_files (by rw [if_neg hc]; exact hnf)
+          (bind_intro warm_cap hwc (bind_intro happy_hot hhh
+          (bind_intro best_ns hbn (bind_intro happy_ns hhns
+          (bind_intro worst_ns hwns ?_)))))
+        rw [hr]

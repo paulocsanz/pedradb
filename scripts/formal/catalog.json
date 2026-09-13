@@ -8096,6 +8096,10 @@
   },
   {
    "id": "scale_forecast",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "a tabela RFC-0176 e exatamente a composicao citada — cada campo e o atomo do kernel (sat_mul, level_count callee, point_get_probes, probes_worst, div_ceil, warm_cap_bytes, happy_hot_bps, best/happy/worst_get_ns) e hot e o gate store <= warm_cap; as-is anda todos os arquivos e diz sempre quente"
+   },
    "finding": "RFC-0176 P1.2",
    "twin_kind": "model",
    "single_artifact": true,
