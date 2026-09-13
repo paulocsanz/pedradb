@@ -2816,12 +2816,14 @@ fn summarize(name: &str, n: usize, wall: Duration, lats_ms: &mut [f64]) -> Strin
     "p50_ms": {p50:.4},
     "p95_ms": {p95:.4},
     "p99_ms": {p99:.4},
+    "p999_ms": {p999:.4},
     "max_ms": {max:.4},
     "wall_s": {wall_s:.4}
   }}"#,
         p50 = pct(lats_ms, 50.0),
         p95 = pct(lats_ms, 95.0),
         p99 = pct(lats_ms, 99.0),
+        p999 = pct(lats_ms, 99.9),
         max = lats_ms.last().copied().unwrap_or(0.0),
     )
 }
