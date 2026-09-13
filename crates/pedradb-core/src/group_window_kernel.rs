@@ -102,6 +102,52 @@ pub fn peer_horizon_us(window_us: u64, base_us: u64) -> u64 {
     window_us.max(base_us)
 }
 
+/// P0.4 (opened by P0.3b): seed for the flight EMA before the first
+/// real group sample (µs) — same convention as the fd EMA seed
+/// (RFC-0042 P1.1). The bootstrap must open a small real window once so
+/// a group can form and measure the true flight; after that the EMA
+/// owns the cap.
+pub const GROUP_FLIGHT_SEED_US: u64 = 25;
+
+/// Parse `PEDRA_GROUP_WINDOW_CAP_TO_FLIGHT`. Off by default — the flat
+/// clamped window (the P0.3 shape).
+#[must_use]
+pub fn group_window_cap_to_flight(raw: Option<&str>) -> bool {
+    matches!(raw, Some(s) if s == "1" || s.eq_ignore_ascii_case("true"))
+}
+
+/// P0.4: the collect window may not exceed the previous group's
+/// measured **flight** — the off-lock WAL section (`write()`, plus
+/// `fdatasync` on sync groups). P0.3 measured the flat 1000 µs window
+/// LOSING mc2–mc4 (0.10–0.14 vs clean): the wait runs before the flight
+/// with nothing in flight to overlap, so it is pure added latency.
+/// Capping at the flight keeps the hold bounded by a real serial
+/// section: on ext4 the per-group `write()` is the p201r2 mc4 owner
+/// (one syscall per op on the bypass — the window rides it); on
+/// Darwin-async the flight is ≈1–2 µs, so the window collapses to off
+/// and the AS-IS behavior returns (no regression by construction). A
+/// capped window below one quiescence slice cannot complete a collect —
+/// collapse to 0 rather than pay a lock+park per group. Unsampled
+/// flight seeds at [`GROUP_FLIGHT_SEED_US`] so the first group can form
+/// and measure.
+#[must_use]
+pub fn flight_capped_window_us(window_us: u64, flight_ema_us: u64, cap_to_flight: bool) -> u64 {
+    if !cap_to_flight || window_us == 0 {
+        return window_us;
+    }
+    let flight = if flight_ema_us == 0 {
+        GROUP_FLIGHT_SEED_US
+    } else {
+        flight_ema_us
+    };
+    let capped = window_us.min(flight);
+    if capped < COLLECT_QUIESCE_US {
+        0
+    } else {
+        capped
+    }
+}
+
 /// AS-IS twin of [`merge_eligible`] — the 0044-era default: no window,
 /// no low-writer merge (the 0201 `writers > ncpu` arm alone).
 #[must_use]
@@ -230,5 +276,71 @@ mod tests {
         assert!(!merge_eligible_as_is(2, 1_000));
         assert!(!merge_eligible_as_is(8, 1_000));
         assert_eq!(async_catchup_bound_us_as_is(1_000, 4, 1), 0);
+    }
+
+    #[test]
+    fn rfc0217_p04_env_parse_off_by_default() {
+        assert!(!group_window_cap_to_flight(None));
+        assert!(!group_window_cap_to_flight(Some("")));
+        assert!(!group_window_cap_to_flight(Some("0")));
+        assert!(!group_window_cap_to_flight(Some("garbage")));
+        assert!(group_window_cap_to_flight(Some("1")));
+        assert!(group_window_cap_to_flight(Some("true")));
+        assert!(group_window_cap_to_flight(Some("TRUE")));
+    }
+
+    #[test]
+    fn rfc0217_p04_cap_off_is_the_flat_window_twin() {
+        assert_eq!(
+            flight_capped_window_us(1_000, 2, false),
+            1_000,
+            "cap off: full window even with ~0 flight (the P0.3 shape)"
+        );
+        assert_eq!(
+            flight_capped_window_us(0, 500, true),
+            0,
+            "window off stays off regardless of the cap"
+        );
+    }
+
+    #[test]
+    fn rfc0217_p04_window_never_exceeds_flight() {
+        assert_eq!(
+            flight_capped_window_us(1_000, 300, true),
+            300,
+            "flight 300µs: the hold is bounded by the real serial section"
+        );
+        assert_eq!(
+            flight_capped_window_us(200, 300, true),
+            200,
+            "window below the flight keeps the configured window"
+        );
+    }
+
+    #[test]
+    fn rfc0217_p04_flight_below_quiesce_collapses_to_off() {
+        assert_eq!(
+            flight_capped_window_us(1_000, 2, true),
+            0,
+            "Darwin-async flight ≈1–2µs: nothing to ride, collect off"
+        );
+        assert_eq!(
+            flight_capped_window_us(1_000, COLLECT_QUIESCE_US, true),
+            COLLECT_QUIESCE_US,
+            "exactly one quiescence slice is the smallest usable window"
+        );
+        assert_eq!(
+            flight_capped_window_us(1_000, COLLECT_QUIESCE_US - 1, true),
+            0
+        );
+    }
+
+    #[test]
+    fn rfc0217_p04_unsampled_flight_seeds_a_bootstrap_window() {
+        assert_eq!(
+            flight_capped_window_us(1_000, 0, true),
+            GROUP_FLIGHT_SEED_US,
+            "no sample yet: a small real window so the first group can form and measure"
+        );
     }
 }

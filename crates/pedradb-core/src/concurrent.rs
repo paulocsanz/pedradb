@@ -101,6 +101,14 @@ struct WriteGroup {
     /// RFC-0217 P0.1: async-only group collection window (µs; 0 = off).
     /// Parsed from `PEDRA_GROUP_WINDOW_US`; see `group_window_kernel`.
     group_window_us: AtomicU64,
+    /// RFC-0217 P0.4: `PEDRA_GROUP_WINDOW_CAP_TO_FLIGHT=1` bounds the
+    /// collect window by the previous group's measured flight. Default
+    /// off (flat window, the P0.3 shape).
+    group_window_cap_to_flight: AtomicBool,
+    /// RFC-0217 P0.4: EMA (7/8 + 1/8) of the group leader's off-lock WAL
+    /// flight — `write()`, plus `fdatasync` on sync groups — in ns.
+    /// `0` = no sample yet (see `group_window_kernel` for the seed).
+    flight_ema_ns: AtomicU64,
     /// Diagnostics (RFC-0037 P2.2): submits total / queued-behind-leader /
     /// groups led / ops inside led groups.
     submits: AtomicU64,
@@ -291,6 +299,14 @@ impl WriteGroup {
             group_window_us: AtomicU64::new(crate::group_window_kernel::group_window_us(
                 std::env::var("PEDRA_GROUP_WINDOW_US").ok().as_deref(),
             )),
+            group_window_cap_to_flight: AtomicBool::new(
+                crate::group_window_kernel::group_window_cap_to_flight(
+                    std::env::var("PEDRA_GROUP_WINDOW_CAP_TO_FLIGHT")
+                        .ok()
+                        .as_deref(),
+                ),
+            ),
+            flight_ema_ns: AtomicU64::new(0),
             submits: AtomicU64::new(0),
             queued: AtomicU64::new(0),
             batches: AtomicU64::new(0),
@@ -357,7 +373,7 @@ impl WriteGroup {
         // bypass must not steal the leader first (window 0 keeps
         // MULTI_HOLD exactly).
         let horizon_us = crate::group_window_kernel::peer_horizon_us(
-            self.group_window_us.load(Ordering::Relaxed),
+            self.effective_group_window_us(),
             MULTI_HOLD.as_micros() as u64,
         );
         Self::now_ns().saturating_sub(last) < Duration::from_micros(horizon_us).as_nanos() as u64
@@ -382,6 +398,36 @@ impl WriteGroup {
             (prev.saturating_mul(7).saturating_add(sample_ns)) / 8
         };
         self.fd_ema_ns.store(next, Ordering::Relaxed);
+    }
+
+    /// RFC-0217 P0.4: recent group flight (off-lock WAL section —
+    /// `write()` + `fdatasync` on sync groups), µs; 0 = unsampled.
+    fn flight_ema_us(&self) -> u64 {
+        self.flight_ema_ns.load(Ordering::Relaxed) / 1_000
+    }
+
+    fn update_flight_ema(&self, sample_ns: u64) {
+        let prev = self.flight_ema_ns.load(Ordering::Relaxed);
+        let next = if prev == 0 {
+            sample_ns
+        } else {
+            (prev.saturating_mul(7).saturating_add(sample_ns)) / 8
+        };
+        self.flight_ema_ns.store(next, Ordering::Relaxed);
+    }
+
+    /// RFC-0217 P0.4: the window in effect after the flight cap
+    /// (`group_window_kernel::flight_capped_window_us`) — 0 = collect
+    /// off. Every reader of the window (merge eligibility, the async
+    /// collect bound, the peer horizon) must see this value, otherwise a
+    /// collapsed window would still reroute writers into leader groups
+    /// that never collect.
+    fn effective_group_window_us(&self) -> u64 {
+        crate::group_window_kernel::flight_capped_window_us(
+            self.group_window_us.load(Ordering::Relaxed),
+            self.flight_ema_us(),
+            self.group_window_cap_to_flight.load(Ordering::Relaxed),
+        )
     }
 
     #[allow(dead_code)]
@@ -685,14 +731,16 @@ impl WriteGroup {
                 self.async_group_forced,
             ) || crate::group_window_kernel::merge_eligible(
                 active,
-                self.group_window_us.load(Ordering::Relaxed),
+                self.effective_group_window_us(),
                 self.recently_concurrent(),
             )
             // RFC-0217 P0.1/P0.1b: window on makes the merge eligible
             // from 2 writers up AND for a lone submitter with a recent
             // peer (the gap ghost — otherwise the write-lock bypass
             // commits solo, no leader, no collect; rmw arm above keeps
-            // its own single-op policy).
+            // its own single-op policy). P0.4: the flight cap applies
+            // here too — a collapsed window must keep writers on the
+            // bypass (no leader hop for a group that never collects).
         } && !self.verified.load(Ordering::Relaxed);
 
         // Lone writer (parity bench, sequential client): skip the mpsc hop.
@@ -922,8 +970,11 @@ impl WriteGroup {
                     // writer is usually in its client-side gap, invisible
                     // to `active` (the counter drops at reply consumption),
                     // so a recent peer opens the collect through the gap.
+                    // RFC-0217 P0.4: with the flight cap on, the window
+                    // never exceeds the previous group's measured flight
+                    // (Darwin-async ≈0 flight collapses it to off).
                     let us = crate::group_window_kernel::async_catchup_bound_us(
-                        self.group_window_us.load(Ordering::Relaxed),
+                        self.effective_group_window_us(),
                         active,
                         batch.len(),
                         self.recently_concurrent(),
@@ -1294,7 +1345,14 @@ impl WriteGroup {
         );
         // RFC-0166 P1.4: the pinned profile advances its write→ack ledger
         // alongside the real critical section (append → barrier → publish).
+        // RFC-0217 P0.4: sample the off-lock WAL flight (`write()` + fd)
+        // around this section — the collect window rides it. Measurement
+        // runs only with the cap knob on so the default path is AS-IS.
         let pinned = group.verified.load(std::sync::atomic::Ordering::Acquire);
+        let t_flight = group
+            .group_window_cap_to_flight
+            .load(Ordering::Relaxed)
+            .then(Instant::now);
         let mut ledger_bytes = 0u64;
         let io_err = {
             let mut w = wal.lock();
@@ -1320,6 +1378,9 @@ impl WriteGroup {
             }
             e
         };
+        if let Some(t0) = t_flight {
+            group.update_flight_ema(t0.elapsed().as_nanos() as u64);
+        }
         if let (Some(st), Some(t1)) = (pstat.as_ref(), t1) {
             st.wal_ns
                 .fetch_add(t1.elapsed().as_nanos() as u64, Ordering::Relaxed);

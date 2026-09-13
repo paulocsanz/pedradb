@@ -163,9 +163,22 @@ board**, estendendo este RFC a cada etapa nova descoberta.
   é **janela ≤ barreira in-flight** — que só existe no Linux/e4b (lá o
   async paga fdatasync real por grupo; a janela cavalga o voo). Fatia
   re-escopoada: implementar a janela-limitada-ao-voo É o P0.4 (mesma
-  onda e4b); DIAG Darwin não pode validá-la (sem barreira). — status:
-  `blocked e4b` (condicional-datado; mecanismo de early-exit já
-  comprovado `cw=42–51µs`)
+  onda e4b); DIAG Darwin não pode validá-la (sem barreira). **Implementada
+  2026-09-13** (kernel `group_window_kernel::flight_capped_window_us` +
+  `PEDRA_GROUP_WINDOW_CAP_TO_FLIGHT`, default off): a janela nunca excede
+  o **EMA do voo** medido do grupo anterior (seção WAL off-lock:
+  `write()` + fd, mesma fronteira da fase `wal_ns`); voo < slice de
+  quiescência (20µs) colapsa a janela a 0 (Darwin-async voo ≈1–2µs →
+  volta ao AS-IS por construção — sem regressão possível); voo não
+  amostrado semeia 25µs (bootstrap: o primeiro grupo forma e mede). O
+  cap aplica nos TRÊS leitores da janela (merge-eligible, bound async,
+  peer-horizon) via `effective_group_window_us` — janela colapsada
+  mantém writers no bypass (sem hop de líder para grupo que nunca
+  coleta). Twins AS-IS intocados; testes `rfc0217_p04_*` 5/5 +
+  `rfc0217_group_window_*` 8/8 + wiring `rfc0201_*`/amortizes/sticky
+  verdes. Veredito continua **blocked e4b** (só o Linux tem o voo). —
+  status: `blocked e4b` (implementação pronta; mecanismo de early-exit
+  `cw=42–51µs` + janela-≤-voo no binário)
 - [ ] **P0.4** Meter Linux gate 3-run quiet min-of-3 (âncora p149):
   `ycsb_f_mc4` default 0,491 → **≥1,0** com janela on; guardas ≥ nível
   p211m (ycsb_a_mc4, overwrite_mc4, apply_mc4, mc50); cartazes pagos em
@@ -174,7 +187,13 @@ board**, estendendo este RFC a cada etapa nova descoberta.
   **Gate-blocked 2026-09-13T04:42Z**: único host BYOC conectado é o
   MacBook (aarch64); p149 desconectado; deploy `0caaac0b` pending. Binário
   amd64 com P0.1b + driver `p0217-linux-driver.sh` prontos para disparar
-  no retorno do host. — status: `doing`
+  no retorno do host. **Braço flightcap adicionado 2026-09-13**:
+  `ARMS=clean window flightcap` — o braço alvo é agora
+  `flightcap` (`PEDRA_GROUP_WINDOW_US=1000
+  PEDRA_GROUP_WINDOW_CAP_TO_FLIGHT=1`), janela-≤-voo implementada no
+  P0.3b; o braço `window` (flat) fica como perdedor documentado do P0.3
+  para contraste no mesmo gate. Binário amd64 rebuildado com o knob
+  (musl zigbuild `--features real`). — status: `doing`
 - [ ] **P0.5** Re-adjudicação do dono no Linux (errata `426272f4`): onda
   admission-clean com PHASE distribuindo a seção serial no âncora ext4
   (wal/mem/publish/lwait por commit); finding datado. **Mesmo block do
@@ -384,8 +403,8 @@ dono.
 | P0.1 | p0 | Kernel janela de coleta + wiring real + testes `rfc0217_group_window_*` | done | `010f61fe` + P0.1b `234001f7` | 2026-09-13 |
 | P0.2 | p0 | Attach in-flight: adjudicado — fundido em P2.2 (encode member-side; voos já cheios) | done | `234001f7` | 2026-09-13 |
 | P0.3 | p0 | Meter DIAG Darwin: avg_grp ok; ratio janela fixa PERDE mc2–4 (0,100–0,960 vs clean), GANHA mc6+; default fica off | done | veredito 09-13T09:51Z (perda→P0.3b) | 2026-09-13 |
-| P0.3b | p0 | Early-exit da janela: quiescence JÁ fecha em cw=42–51µs; colapso mc2–4 = sem barreira in-flight no DIAG; janela-≤-voo = e4b | blocked e4b | probes 09-13 (`0ba886fe`) | 2026-09-13 |
-| P0.4 | p0 | Meter Linux 3-run quiet: gate-blocked 04:42Z (p149 desconectado); binário+driver prontos | doing | — | 2026-09-13 |
+| P0.3b | p0 | Early-exit: quiescence fecha cw=42–51µs; janela-≤-voo IMPLEMENTADA (`flight_capped_window_us`, knob default off, EMA do voo, colapso <20µs, twins ok) | blocked e4b | probes 09-13 (`0ba886fe`) + impl 09-13 | 2026-09-13 |
+| P0.4 | p0 | Meter Linux 3-run quiet: gate-blocked 04:42Z (p149 desconectado); braço flightcap no driver; binário amd64 rebuildado com o knob | doing | — | 2026-09-13 |
 | P0.5 | p0 | Re-adjudicação do dono no Linux: mesmo block do P0.4 | doing | — | 2026-09-13 |
 | P1.1 | p1 | kafka_changelog_flush: flush amortizado | done | `ded231ab` (ratio ≥1,0 = meter Linux e4b) | 2026-09-13 |
 | P1.2 | p1 | ingest_sst + compaction_filter: caminhos nativos | done | `92a76a97` (cartaz Linux = e4b; DIAG filter 0,47→0,935) | 2026-09-13 |
