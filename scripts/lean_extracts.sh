@@ -20,28 +20,23 @@ if [[ -z "$LAKE" ]]; then
   exit 0
 fi
 
+# Only the libs shipped in this tree (engine crates). Raft/store/stream/
+# http/journal/replicate/fold/world/recipes kernels are not shipped here.
 LIBS=(
-  Lookup RpcMode StoreCompact StoreTxn Snapshot Si IndexVal Changelog
-  Cursor Cl Children Pin Pack Ship Fold Manifest Compact VlogGc TxGlue
-  L28 Tcg Cqe Iter Properties Scale DiskPressure Crc
-  EnvCrash WalState WalRecover Reopen D1Modelo WriteAck WriteAdmission GroupCommit Flush
-  DcsApply StoreApply StoreCommit StoreAeAck StoreVote Key
-  Lease Txn T1Modelo Membership StoreMembership C1Modelo
-  CapiHandles Batch Merge FailClosed ProbeOrder Locktab Scan Cf Fields LsmR1
-  Leveling Posix Form Auth Path World
+  Lookup Changelog Manifest Compact VlogGc
+  Cqe Iter Properties Scale DiskPressure Crc
+  EnvCrash WalState WalRecover Reopen D1Modelo
+  WriteAck WriteAdmission GroupCommit Flush Key
+  Batch Merge ProbeOrder Locktab Scan Cf LsmR1
+  Leveling Posix
 )
 
 # Cross-lib composition: import two Kernels. No generated *Kernel.lean.
 COMPOSE=(
   ComposeIterMerge
-  ComposeMembershipClone
   ComposeScanCrc
-  ComposeC1Membership
   ComposeConcurrent
-  ComposeStoreRaft
-  ComposeStoreFinish
   ComposeStorageWrite
-  ComposeL28
   ComposeDurabilitySpine
   ComposeProductCrown
   LsmCompactBridges

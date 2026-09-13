@@ -139,22 +139,6 @@ A same-day reconfirmation run (whole campaign re-executed after a
 restart, all exits 0) landed inside these bands: probe_miss Pedra 230 ns
 vs Rocks 531–621 ns, prefix 346 vs 350–360 µs, get_hit 60.7 vs 77–98 µs.
 
-### 100M, prior engine (2026-09-04, 3 runs) — superseded, kept for the record
-
-| cell | Pedra med | Rocks med | ratio |
-|---|---:|---:|---:|
-| hydrate | 123.7 s | 152.7 s | **1.23×** |
-| settle | 0.7 s | 61.4 s | **88×** |
-| get_hit | 58.0 µs | 104.4 µs | **1.80×** |
-| prefix_scan | 384.8 µs | 385.6 µs | 1.00× tie (run 2 lost 0.75×) |
-| get_loop | 5.57 ms | 9.38 ms | **1.68×** |
-| multi_get | 5.48 ms | 9.54 ms | **1.74×** |
-| probe_miss p50 | 2.3–2.4 µs | 651–692 ns | **0.29× loss** |
-
-The larger read ratios here are the peer having a slow day on the miss
-path, not an engine jump — which is why cells publish on medians with
-intra-run pairing, and why this table is not the published one.
-
 ## Loss registry
 
 Named losses and refusals, in the open, with dates. A loss moves off
@@ -329,7 +313,7 @@ ycsb 1c/mc, raftlog 1c/mc, kvrocks 1c + mc50, qs, myrocks + linkbench,
 surreal, nebula, streaming, ceph, solana, arango, venice, oxigraph, rocksapi, ycsb_c_big). `rocks-parity-compare` copies it onto each
 ratio row (`diagnose: {"lever":…}` or `null`).
 
-Multi-shape **balance** (RFC-0182 / `/otimizar`): never ship an engine
+Multi-shape **balance** (RFC-0182): never ship an engine
 cut from one cell. `BALANCE_SHAPES` =
 `overwrite_mc4,ycsb_a_mc4,ycsb_b_mc4,ycsb_c_mc4,ycsb_f_mc4,apply_mc4,1c overwrite,qs_hot_get_mc4,qs_neg_lookup_mc4,qs_batch_write_mc4,rockset_hybrid_mc4,yugabyte_docdb_rmw_mc4,venice_fanout_get_mc4,kvrocks_get_mc4,myrocks_point_select_mc4,nebula_get_neighbors_mc4,arango_traversal_mc4,surreal_tx_get_mc4,oxigraph_spo_lookup_mc4,solana_trailing_read_mc4,kvrocks_scan_mc4,flink_window_state_mc4,kafka_changelog_flush_mc4,bluestore_omap_read_mc4,myrocks_read_only_mc4,wbwi_read_your_writes_mc4,mixgraph_like_mc4,oxigraph_triple_put_mc4,nebula_insert_edge_mc4,solana_shred_append_mc4,arango_doc_crud_mc4,kvrocks_pipelined_set_mc4,rockstore_widecol_rw_mc4,kvrocks_blob_set_mc4,deps_lock_prewrite_mc4`.
 

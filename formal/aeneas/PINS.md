@@ -27,5 +27,7 @@ Nix (no local pin until a successful run):
 nix run github:aeneasverif/aeneas#charon -L -- cargo --preset=aeneas
 ```
 
-`lake build Vote` on this host (2026-08-15) accepted `vote_decision_matches_spec`.
-CI without elan still must not say “Lean proved vote” unless `./scripts/lean_vote.sh --required` is green.
+`lake build` on this host (2026-08-15) accepted `vote_decision_matches_spec`
+(raft vote kernel; not shipped in this tree). CI without elan still must not
+say “Lean proved” unless `./scripts/lean_wal_apply_reopen.sh --required` and
+`./scripts/lean_extracts.sh --required` are green.

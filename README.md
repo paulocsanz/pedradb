@@ -43,7 +43,7 @@ consistency above the engine. The API is
   peer behind `rocksdb-parity-bench --features real` (off by default;
   the engine never links it).
 - **Machine-checked where it counts.** Decision kernels are proved
-  on the file `rustc` links (Aeneas extract → Lean, 149 catalog
+  on the file `rustc` links (Aeneas extract → Lean, 150 catalog
   pairs — table in [Verification](#verification)). Around them:
   seeded fault injection and close to 1,000 tests.
 - **A modern write path.** io_uring on Linux with transparent POSIX
@@ -128,7 +128,7 @@ No C++ toolchain is needed.
 
 Not “no bugs” — machine-checked where it counts. Decision kernels are
 extracted from the production file `rustc` links (Charon + Aeneas → Lean).
-The catalog (`scripts/formal/catalog.json`) lists **149 pairs** in
+The catalog (`scripts/formal/catalog.json`) lists **151 pairs** in
 the shipped crates. `scripts/formal/pedra_formal.sh --ci` refuses silent
 drift between the kernel, its callers, and the extract. Not proven: the
 OS, the disk, rustc, Aeneas, Lean, or Z3.
