@@ -3136,6 +3136,10 @@
   },
   {
    "id": "ship_guard",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "plano de envio e exatamente as guardas citadas: arquivo menor que o cursor, ou stamp mudado, devolve Rotated; otherwise Ship com min(len - cursor, max_pull) — nunca envia bytes desalinhados"
+   },
    "finding": "F165",
    "twin_kind": "model",
    "single_artifact": true,

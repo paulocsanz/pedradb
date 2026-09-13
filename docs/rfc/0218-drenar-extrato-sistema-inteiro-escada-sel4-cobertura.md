@@ -151,12 +151,12 @@ nunca por promoção silenciosa.
    `stream_next_seq`, `isolated`, `isolated_child`, `fold_range`,
    `ship_guard`, `ship_stamp`, `c_len` — floor_atom 233→245 — status:
    `todo`
-   (10/12: `catch_up_pins_on_read_fate_iff`,
+   (11/12: `catch_up_pins_on_read_fate_iff`,
    `fold_pins_on_read_fate_iff`, `may_advance_pin_fate_iff`,
    `next_pin_fate_iff`, `next_seq_fate_iff`, `ack_in_order_fate_iff`,
    `isolated_child_byte_fate_iff`, `isolated_id_matches_fate_iff`,
-   `fold_event_hides_key_fate_iff` e `stamp_changed_fate_iff` feitos
-   2026-09-13)
+   `fold_event_hides_key_fate_iff`, `stamp_changed_fate_iff` e
+   `pull_plan_fate_iff` feitos 2026-09-13)
 
 9. **P2.2** raft/dcs/l28/scale/bloom/probe ×21: `apply_step`,
    `ae_f16_gate`, `raft_recover_applied`, `dcs_apply`,
