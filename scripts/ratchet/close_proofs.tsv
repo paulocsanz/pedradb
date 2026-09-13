@@ -207,3 +207,4 @@ atom	catalog:split_host_port	split_host_port_fate_iff	formal/aeneas/lean/Path.le
 atom	catalog:request_target_authority	request_target_authority_fate_iff	formal/aeneas/lean/Path.lean	request_target_authority
 atom	catalog:group_commit	occ_conflict_fate_iff	formal/aeneas/lean/GroupCommit.lean	occ_conflict
 atom	catalog:fsync_promote	fsync_promotes_pending_fate_iff	formal/aeneas/lean/GroupCommit.lean	fsync_promotes_pending
+atom	catalog:group_fence	fence_publish_seq_fate_iff	formal/aeneas/lean/GroupCommit.lean	fence_publish_seq

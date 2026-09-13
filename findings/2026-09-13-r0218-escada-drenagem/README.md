@@ -25,3 +25,16 @@ gates GREEN no commit).
   `fsync_promotes_pending_on_live_sim_is_not_ok` (pedradb-sim,
   exit 0, 9 passed no módulo recording). Gate: floor_atom 179→180,
   floor_extract 99→98.
+
+- **group_fence (3/4, entrada `fence_publish_seq`)**: primeiro átomo de
+  LOOP extraído da rodada — molde Form/DecodeFate transplantado:
+  `FenceFate` (combustível = membros restantes), `loop.eq_def`,
+  progresso estrito `i < i' ≤ len`, `done` só no fim com best = v.
+  `fence_publish_seq_fate_iff`: `(fence_publish_seq member_seqs = ok v)
+  ↔ FenceFate member_seqs (len) 0 0 v`. O max interno do corpo é
+  consumido pelo `bind_ok_inv` sem ramo (ambas as folhas são ok).
+  Achado: `Slice` é ambíguo no wrapper (Aeneas.Std.Slice vs Std.Slice) —
+  qualificar `Aeneas.Std.Slice` como faz `occ_batch_plan_fate_iff`.
+  Build verde (1699 jobs). Planta DST `fence_publish_seq_on_live_group_
+  is_not_ok` + `fence_is_max_member_seq` (pedradb-core, exit 0, 5
+  passed). Gate: floor_atom 180→181, floor_extract 99→97 (com o 2/4).

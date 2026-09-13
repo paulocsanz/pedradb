@@ -520,3 +520,235 @@ theorem fsync_promotes_pending_fate_iff :
     unfold fsync_promotes_pending
     rw [h]
 
+
+/-! ### RFC-0218 P0.1 3/4 — `fence_publish_seq` (átomo `catalog:group_fence`)
+
+O fate do fence como cadeia (molde Form/DecodeFate): combustível =
+membros restantes; cada passo `cont` consome exatamente um membro (i'
+= i+1 ≤ len) e o fim é o `done` exato em i = len com best = v. -/
+
+/-- O `+1#usize` do corpo vale exatamente `↑i + 1` em Nat. -/
+private theorem gc_usize_succ_val (i i1 : Usize) (h : (i + 1#usize) = ok i1) :
+    (↑i1 : Nat) = (↑i : Nat) + 1 := by
+  have he := UScalar.add_equiv i 1#usize
+  rw [h] at he
+  dsimp only at he
+  exact he.2.1
+
+/-- No fim (i = len) o corpo devolve exatamente `done best`. -/
+private theorem fence_body_at_end (member_seqs : Aeneas.Std.Slice Std.U64)
+    (best : Std.U64) (i : Usize)
+    (hlen : (↑i : Nat) = (member_seqs.val).length) :
+    fence_publish_seq_loop.body member_seqs best i
+      = ok (ControlFlow.done best) := by
+  have hge : ¬ (i < Aeneas.Std.Slice.len member_seqs) := by
+    intro hlt
+    have hn0 := (UScalar.lt_equiv i (Aeneas.Std.Slice.len member_seqs)).mp hlt
+    rw [Aeneas.Std.Slice.len_val] at hn0
+    rw [hlen] at hn0
+    exact absurd hn0 (Nat.lt_irrefl _)
+  unfold fence_publish_seq_loop.body
+  dsimp +zeta only
+  rw [if_neg hge]
+
+/-- No fim o corpo nunca dá cont. -/
+private theorem fence_body_no_cont_at_end (member_seqs : Aeneas.Std.Slice Std.U64)
+    (best : Std.U64) (i : Usize) (st : Std.U64 × Usize)
+    (hlen : (↑i : Nat) = (member_seqs.val).length)
+    (hB : fence_publish_seq_loop.body member_seqs best i
+            = ok (ControlFlow.cont st)) : False := by
+  have hge : ¬ (i < Aeneas.Std.Slice.len member_seqs) := by
+    intro hlt
+    have hn0 := (UScalar.lt_equiv i (Aeneas.Std.Slice.len member_seqs)).mp hlt
+    rw [Aeneas.Std.Slice.len_val] at hn0
+    rw [hlen] at hn0
+    exact absurd hn0 (Nat.lt_irrefl _)
+  unfold fence_publish_seq_loop.body at hB
+  dsimp +zeta only at hB
+  rw [if_neg hge] at hB
+  injection hB with hB2
+  contradiction
+
+/-- Sob i < len o corpo é exatamente `cont (best', i')` com o índice
+estritamente crescente e limitado — o max interno é consumido pelo
+bind_ok_inv sem precisar de ramo (ambas as folhas são ok). -/
+private theorem fence_body_inv (member_seqs : Aeneas.Std.Slice Std.U64)
+    (best : Std.U64) (i : Usize)
+    (hlt : (↑i : Nat) < (member_seqs.val).length)
+    (cf : ControlFlow (Std.U64 × Usize) Std.U64)
+    (hB : fence_publish_seq_loop.body member_seqs best i = ok cf) :
+    ∃ (best' : Std.U64) (i' : Usize),
+      cf = ControlFlow.cont (best', i') ∧
+        (↑i : Nat) < (↑i' : Nat) ∧ (↑i' : Nat) ≤ (member_seqs.val).length := by
+  have hlt' : i < Aeneas.Std.Slice.len member_seqs := by
+    refine (UScalar.lt_equiv i (Aeneas.Std.Slice.len member_seqs)).mpr ?_
+    rw [Aeneas.Std.Slice.len_val]
+    exact hlt
+  unfold fence_publish_seq_loop.body at hB
+  dsimp +zeta only at hB
+  rw [if_pos hlt'] at hB
+  obtain ⟨i2, hi2, hB⟩ := bind_ok_inv _ _ _ hB
+  obtain ⟨best1, hbest1, hB⟩ := bind_ok_inv _ _ _ hB
+  obtain ⟨i3, hi3, hB⟩ := bind_ok_inv _ _ _ hB
+  have hv := gc_usize_succ_val i i3 hi3
+  exact ⟨best1, i3, (Result.ok.inj hB).symm, by omega, by omega⟩
+
+/-- Payload de um cont sob i < len progride: i < i' ≤ len. -/
+private theorem fence_body_cont_progress (member_seqs : Aeneas.Std.Slice Std.U64)
+    (best : Std.U64) (i : Usize) (best' : Std.U64) (i' : Usize)
+    (hlt : (↑i : Nat) < (member_seqs.val).length)
+    (hB : fence_publish_seq_loop.body member_seqs best i
+            = ok (ControlFlow.cont (best', i'))) :
+    (↑i : Nat) < (↑i' : Nat) ∧ (↑i' : Nat) ≤ (member_seqs.val).length := by
+  obtain ⟨best2, i2, hcf, hlt2, hle2⟩ :=
+    fence_body_inv member_seqs best i hlt (ControlFlow.cont (best', i')) hB
+  have hp := ControlFlow.cont.inj hcf
+  obtain ⟨-, hii⟩ := Prod.mk.inj hp
+  subst hii
+  exact ⟨hlt2, hle2⟩
+
+/-- Done só no fim, com o best intacto. -/
+private theorem fence_body_done_end (member_seqs : Aeneas.Std.Slice Std.U64)
+    (best : Std.U64) (i : Usize) (r : Std.U64)
+    (hle : (↑i : Nat) ≤ (member_seqs.val).length)
+    (hB : fence_publish_seq_loop.body member_seqs best i
+            = ok (ControlFlow.done r)) :
+    (↑i : Nat) = (member_seqs.val).length ∧ best = r := by
+  by_cases hlt : (↑i : Nat) < (member_seqs.val).length
+  · obtain ⟨best2, i2, hcf, -, -⟩ :=
+      fence_body_inv member_seqs best i hlt (ControlFlow.done r) hB
+    exact absurd hcf (by intro hh; contradiction)
+  · have hlen : (↑i : Nat) = (member_seqs.val).length := by omega
+    refine ⟨hlen, ?_⟩
+    have h := (fence_body_at_end member_seqs best i hlen).symm.trans hB
+    exact ControlFlow.done.inj (Result.ok.inj h)
+
+/-- O fate do fence como cadeia: combustível = membros restantes. -/
+private def FenceFate (member_seqs : Aeneas.Std.Slice Std.U64) :
+    Nat → Std.U64 → Usize → Std.U64 → Prop
+  | 0, best, i, v =>
+      (↑i : Nat) = (member_seqs.val).length ∧ best = v
+  | fuel + 1, best, i, v =>
+      (∃ (best' : Std.U64) (i' : Usize),
+          fence_publish_seq_loop.body member_seqs best i
+            = ok (ControlFlow.cont (best', i')) ∧
+            FenceFate member_seqs fuel best' i' v) ∨
+        ((↑i : Nat) = (member_seqs.val).length ∧ best = v)
+
+/-- O fate do loop por indução no combustível. -/
+private theorem fence_publish_seq_loop_fate (member_seqs : Aeneas.Std.Slice Std.U64) :
+    ∀ (fuel : Nat) (best : Std.U64) (i : Usize),
+      (↑i : Nat) ≤ (member_seqs.val).length →
+      (member_seqs.val).length - (↑i : Nat) ≤ fuel →
+      ∀ v : Std.U64,
+        (fence_publish_seq_loop member_seqs best i = ok v) ↔
+          FenceFate member_seqs fuel best i v := by
+  intro fuel
+  induction fuel with
+  | zero =>
+    intro best i hile hfuel v
+    have hlen : (↑i : Nat) = (member_seqs.val).length := by omega
+    constructor
+    · intro h
+      refine ⟨hlen, ?_⟩
+      unfold fence_publish_seq_loop at h
+      rw [loop.eq_def] at h
+      dsimp only at h
+      cases hB : fence_publish_seq_loop.body member_seqs best i with
+      | ok cf =>
+        cases cf with
+        | done r =>
+          rw [hB] at h
+          dsimp only at h
+          rw [Result.ok.inj h] at hB
+          exact (fence_body_done_end member_seqs best i v hile hB).2
+        | cont st =>
+          exact absurd hB (fence_body_no_cont_at_end member_seqs best i st hlen)
+      | fail e =>
+        rw [hB] at h
+        dsimp only at h
+        exact absurd h (by simp)
+      | div =>
+        rw [hB] at h
+        dsimp only at h
+        exact absurd h (by simp)
+    · rintro ⟨-, hbest⟩
+      unfold fence_publish_seq_loop
+      rw [loop.eq_def]
+      dsimp only
+      rw [fence_body_at_end member_seqs best i hlen, hbest]
+  | succ fuel ih =>
+    intro best i hile hfuel v
+    unfold fence_publish_seq_loop
+    rw [loop.eq_def]
+    dsimp only
+    cases hB : fence_publish_seq_loop.body member_seqs best i with
+    | ok cf =>
+      cases cf with
+      | cont st =>
+        obtain ⟨best', i'⟩ := st
+        dsimp only
+        by_cases hlt : (↑i : Nat) < (member_seqs.val).length
+        · obtain ⟨hprog1, hprog2⟩ :=
+            fence_body_cont_progress member_seqs best i best' i' hlt hB
+          constructor
+          · intro h
+            exact Or.inl ⟨best', i', hB,
+              (ih best' i' hprog2 (by omega) v).mp h⟩
+          · rintro (⟨best2, i2, hbody, hfate⟩ | ⟨hlen, hbest⟩)
+            · have hu : ControlFlow.cont (best', i')
+                  = ControlFlow.cont (best2, i2) :=
+                  Result.ok.inj (hB.symm.trans hbody)
+              obtain ⟨hbb, hii⟩ := Prod.mk.inj (ControlFlow.cont.inj hu)
+              subst hbb
+              subst hii
+              exact (ih best' i' hprog2 (by omega) v).mpr hfate
+            · exact absurd hlt (by omega)
+        · have hlen : (↑i : Nat) = (member_seqs.val).length := by omega
+          exact absurd hB (fence_body_no_cont_at_end member_seqs best i (best', i') hlen)
+      | done r =>
+        dsimp only
+        obtain ⟨hlen, hbest⟩ := fence_body_done_end member_seqs best i r hile hB
+        constructor
+        · intro h
+          have hrv : r = v := Result.ok.inj h
+          exact Or.inr ⟨hlen, hrv ▸ hbest⟩
+        · rintro (⟨best2, i2, hbody, -⟩ | ⟨hlen2, hbest2⟩)
+          · have hne := hbody.symm.trans hB
+            injection hne with hne2
+            contradiction
+          · exact congrArg ok (hbest.symm.trans hbest2)
+    | fail e =>
+      dsimp only
+      constructor
+      · intro h
+        exact absurd h (by simp)
+      · rintro (⟨best2, i2, hbody, -⟩ | ⟨hlen2, hbest2⟩)
+        · exact absurd (hbody.symm.trans hB) (by simp)
+        · exact absurd ((fence_body_at_end member_seqs best i hlen2).symm.trans hB) (by simp)
+    | div =>
+      dsimp only
+      constructor
+      · intro h
+        exact absurd h (by simp)
+      · rintro (⟨best2, i2, hbody, -⟩ | ⟨hlen2, hbest2⟩)
+        · exact absurd (hbody.symm.trans hB) (by simp)
+        · exact absurd ((fence_body_at_end member_seqs best i hlen2).symm.trans hB) (by simp)
+
+/-- RFC-0218 P0.1 3/4 (átomo `catalog:group_fence`, entrada
+    `fence_publish_seq`): o watermark de publish do grupo é exatamente a
+    cadeia citada do loop extraído — cada passo lê um membro
+    (`Slice.index_usize`), atualiza o máximo e avança i estritamente; o
+    fim é `i = len` com o máximo acumulado `best = v`; sem terceiro
+    destino. O AS-IS publica o primeiro membro e ignora o resto
+    (dente plantado). -/
+theorem fence_publish_seq_fate_iff :
+    ∀ (member_seqs : Aeneas.Std.Slice Std.U64) (v : Std.U64),
+      (fence_publish_seq member_seqs = ok v) ↔
+        FenceFate member_seqs (member_seqs.val).length 0#u64 0#usize v := by
+  intro member_seqs v
+  have hloop : fence_publish_seq member_seqs
+      = fence_publish_seq_loop member_seqs 0#u64 0#usize := rfl
+  rw [hloop]
+  exact fence_publish_seq_loop_fate member_seqs (member_seqs.val).length _ 0#usize
+    (Nat.zero_le _) (Nat.sub_le _ _) v

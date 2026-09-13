@@ -3433,6 +3433,10 @@
    "dst_plant": {
     "file": "crates/pedradb-core/src/group_commit_kernel.rs",
     "test": "fence_publish_seq_on_live_group_is_not_ok"
+   },
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 3/4 P0.1: fence_publish_seq como cadeia citada do loop extraído (molde Form/DecodeFate, combustível = membros restantes); floor_atom 180→181"
    }
   },
   {
