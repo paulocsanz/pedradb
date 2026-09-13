@@ -241,3 +241,20 @@ theorem peer_counts_for_compact_fate_iff :
   · rintro hv
     subst hv
     rfl
+
+/-- RFC-0218 P1.1 4/10 (átomo `catalog:compact_ready`, entrada
+    `compact_ready`): pronto-para-compactar é EXATAMENTE o lift citado
+    `min_applied > 0` (decide) — zero aplicado não compacta nada.
+    O AS-IS é a constante true (compacta com zero — dente plantado). -/
+theorem compact_ready_fate_iff :
+    ∀ (m : U64) (v : Bool),
+      (compact_ready m = ok v) ↔ (v = decide (m > 0#u64)) := by
+  intro m v
+  constructor
+  · intro hval
+    unfold compact_ready at hval
+    injection hval with hv
+    exact hv.symm
+  · rintro hv
+    subst hv
+    rfl

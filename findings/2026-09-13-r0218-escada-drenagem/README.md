@@ -228,6 +228,14 @@ gates GREEN no commit).
 
 ## P1.1 — compact ×7 + lsm_r1 ×3 átomo
 
+- **compact / compact_ready (4/10)**: pronto-para-compactar como o
+  lift citado `decide (min_applied > 0)` — zero aplicado não compacta
+  nada — `compact_ready_fate_iff` em `StoreCompact.lean`. Forward:
+  unfold + injection + hv.symm; reverso: rintro + subst + rfl. Build
+  verde. Planta DST `as_is_ready_at_zero_compacts_nothing`
+  (pedradb-store, exit 0 no worktree). Gate: floor_atom 204→205,
+  floor_extract 74→73.
+
 - **compact / peer_counts_for_compact (3/10)**: contagem de pares
   como participação booleana — par offline ainda conta, quorum não
   encolhe com queda — `peer_counts_for_compact_fate_iff` em

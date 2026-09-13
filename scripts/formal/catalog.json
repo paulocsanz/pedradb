@@ -7026,6 +7026,10 @@
   },
   {
    "id": "compact_ready",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.1: fate ∀ sobre compact_ready no degrau átomo — pronto é decide (min_applied > 0), zero não compacta; planta DST as_is_ready_at_zero_compacts_nothing"
+   },
    "finding": "F27",
    "twin_kind": "close",
    "single_artifact": true,
