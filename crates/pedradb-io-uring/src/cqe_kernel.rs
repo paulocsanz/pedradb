@@ -205,7 +205,7 @@ mod tests {
         assert_eq!(
             cqe_act_as_is(leftover, want),
             CqeAct::Take,
-            "AS-IS dente: ownership check dropped — leftover CQE adopted as this op's result"
+            "AS-IS tooth: ownership check dropped — leftover CQE adopted as this op's result"
         );
     }
 
@@ -247,7 +247,7 @@ mod tests {
         assert!(cqe_res_ok(16));
         assert!(!cqe_res_ok(-5));
         assert!(!cqe_res_ok(-1));
-        assert!(cqe_res_ok_as_is(-5), "AS-IS dente: negative CQE looks Ok");
+        assert!(cqe_res_ok_as_is(-5), "AS-IS tooth: negative CQE looks Ok");
     }
 
     /// RFC-0074 P2.2: twin of `cqe_res_ok` is not a ring model.
@@ -256,7 +256,7 @@ mod tests {
         assert!(!cqe_ring_model_admitted());
         assert!(
             cqe_ring_model_admitted_as_is(),
-            "AS-IS dente: res-gate twin looks like a ring proof"
+            "AS-IS tooth: res-gate twin looks like a ring proof"
         );
         #[cfg(not(miri))]
         {
@@ -374,7 +374,7 @@ mod tests {
     /// `Discard`, `submit_complete_act(_, false)` is always `WaitMore`
     /// (never a false Ok from someone else's CQE), and a negative `res`
     /// on our own tag is never Ok. The false-Ok path exists only in the
-    /// AS-IS twins (constant tags + `cqe_res_ok_as_is`) — the dente.
+    /// AS-IS twins (constant tags + `cqe_res_ok_as_is`) — the tooth.
     #[test]
     fn cqe_leftover_sequence_never_false_ok() {
         const OPS: usize = 64;
@@ -426,7 +426,7 @@ mod tests {
         assert!(!cqe_res_ok(-5));
         assert!(cqe_res_ok(0));
         assert!(cqe_res_ok(4096));
-        assert!(cqe_res_ok_as_is(-5), "AS-IS dente: any res is Ok");
+        assert!(cqe_res_ok_as_is(-5), "AS-IS tooth: any res is Ok");
 
         // AS-IS contrast: constant per-opcode tags make the leftover
         // fsync (res=0) look like the current fsync → false Ok.

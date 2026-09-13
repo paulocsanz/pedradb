@@ -222,7 +222,7 @@ mod tests {
         assert_eq!(
             pack_sequence_and_type_as_is(1, ValueType::Deletion),
             pack_sequence_and_type_as_is(0, ValueType::Value),
-            "AS-IS dente: seq|kind without shift collides"
+            "AS-IS tooth: seq|kind without shift collides"
         );
         let del = InternalKey::new(Bytes::from_static(b"k"), 1, ValueType::Deletion);
         let val = InternalKey::new(Bytes::from_static(b"k"), 0, ValueType::Value);

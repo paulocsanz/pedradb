@@ -7053,7 +7053,7 @@ mod tests {
         assert!(!pedradb_core::wal::crc::crc_match_ok(1, 2));
         assert!(
             pedradb_core::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS dente: any CFREG crc would match"
+            "AS-IS tooth: any CFREG crc would match"
         );
         let dir = tmp("cfreg-0090");
         let opts = g1_opts();

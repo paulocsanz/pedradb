@@ -272,7 +272,7 @@ mod tests {
     fn vlog_recover_action_on_live_swing_is_not_ok() {
         let a = vlog_recover_action(false, true, true, true, true);
         let m = vlog_recover_action_as_is_ignore_swing(false, true, true, true, true);
-        assert_ne!(a, m, "AS-IS dente: ignore committed swing");
+        assert_ne!(a, m, "AS-IS tooth: ignore committed swing");
     }
 
     #[test]
@@ -281,7 +281,7 @@ mod tests {
         assert_eq!(
             blob_gc_action_as_is_rewrite_active(true, 4096),
             BlobGcAction::Rewrite,
-            "AS-IS dente: rewrite the live blob"
+            "AS-IS tooth: rewrite the live blob"
         );
         const B_OPEN: u8 = 123;
         const B_CLOSE: u8 = 125;

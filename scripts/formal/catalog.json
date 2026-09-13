@@ -26,14 +26,14 @@
       ],
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "átomo 1/6 P0.3: changelog_needs_sst_rebuild como janela citada — feed vazio com seq>0 rebuild, feed vivo nunca; floor_atom 186→187"
+        "why": "atom 1/6 P0.3: changelog_needs_sst_rebuild the cited window — feed empty with seq>0 rebuild, feed live never; floor_atom 186→187"
       }
     },
     {
       "id": "range_covers",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.2: fate ∀ sobre range_tombstone_covers no degrau átomo — par citado: key >= start E key < end; planta DST range_tombstone_covers_on_live_queued_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.2: fate ∀ over range_tombstone_covers in the atom rung — cited pair: key >= start E key < end; plants DST range_tombstone_covers_on_live_queued_is_not_ok"
       },
       "finding": "F30",
       "twin_kind": "model",
@@ -58,7 +58,7 @@
       "id": "write_op_range_end",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.2: fate ∀ sobre write_op_range_end no degrau átomo — despacho citado: Deletion/Value sem fim, RangeDeletion carrega o valor; planta DST write_op_range_end_on_live_stage_unapplied_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.2: fate ∀ over write_op_range_end in the atom rung — cited dispatch: Deletion/Value without end, RangeDeletion loads the value; plants DST write_op_range_end_on_live_stage_unapplied_is_not_ok"
       },
       "finding": "F30",
       "twin_kind": "model",
@@ -113,7 +113,7 @@
       "id": "prefix",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.2: fate ∀ sobre prefix_exclusive_end no degrau átomo — encaminhamento citado: prefixo vira Vec e o loop citado decide; planta DST prefix_exclusive_end_on_live_queued_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.2: fate ∀ over prefix_exclusive_end in the atom rung — cited dispatch: prefix becomes Vec and the cited loop decides; plants DST prefix_exclusive_end_on_live_queued_is_not_ok"
       },
       "finding": "F57/F58",
       "twin_kind": "close",
@@ -147,14 +147,14 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "o coletor de recovery decide exatamente pelo match extraido — cada um dos nove framing kinds mapeia ao seu fate pela rota que o rustc liga (torn trio: fail-stop em prefixo vazio, keep-prefix vivo, ou resync sob o budget do MAX extraido; crc/zero-header mid-walk resync ou keep-prefix, fail-stop em alinhamento fresco)"
+        "why": "the coletor of recovery decides exactly by the match extraido — each the of the nine framing kinds mapeia to the its fate by the route that the rustc turns on (torn trio: fail-stop in prefix empty, keep-prefix live, or resync under the budget of the MAX extraido; crc/zero-header mid-walk resync or keep-prefix, fail-stop in alinhamento fresco)"
       }
     },
     {
       "id": "bloom_header",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "cabecalho do bloom admite exatamente a conjuncao citada — k em [1, MAX_K], nbytes cobre div_ceil nbits 8 e nbytes cabe no residual; as-is aceita k ate u32::MAX (probe sem borne)"
+        "why": "cabecalho of the bloom admits exactly the conjuncao cited — k in [1, MAX_K], nbytes covers div_ceil nbits 8 and nbytes cabe in the residual; the as-is accepts k ate u32::MAX (probe without borne)"
       },
       "finding": "F166",
       "twin_kind": "close",
@@ -183,7 +183,7 @@
       "id": "bloom_insert",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "insert escreve exatamente os k probes citados — inativo devolve o proprio filtro; ativo calcula hash_pair e roda o loop citado insert_loop sobre bits; as-is pula os probes (falso negativo)"
+        "why": "insert writes exactly the k probes cited — inactive returns the filter itself; the active one computes hash_pair and runs the cited insert_loop loop over bits; the as-is skips the probes (false negative)"
       },
       "finding": "T1 (docs/formal/bloom-filter-theorems.md)",
       "twin_kind": "close",
@@ -212,7 +212,7 @@
       "id": "bloom_may_contain",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "a consulta decide exatamente no loop citado — inativo e ok true; ativo calcula hash_pair e a resposta e o loop citado may_contain_loop sobre bits; as-is probeia k+1 bits (falso negativo)"
+        "why": "the query decides exactly in the cited loop — inactive and ok true; the active one computes hash_pair and the answer and the cited may_contain_loop loop over bits; the as-is probes k+1 bits (false negative)"
       },
       "finding": "T1/T4 (docs/formal/bloom-filter-theorems.md)",
       "twin_kind": "close",
@@ -263,7 +263,7 @@
       },
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "átomo 8/9 P0.4: scan_reads_file como cadeia citada — bounds dizem lê; senão o any sobre os túmulos decide (v = b1 do par); as-is só olha bounds (túmulo não esconde — dente plantado)"
+        "why": "atom 8/9 P0.4: scan_reads_file the cited chain — bounds say reads; otherwise the any over the tombstones decides (v = b1 of the par); the as-is only looks at bounds (tombstone not hides — tooth planted)"
       }
     },
     {
@@ -412,7 +412,7 @@
       },
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "átomo 1/4 P0.1: occ_conflict como iff exata da janela (snap, last_seq] — conflito = touched sob janela não-vazia, false sob janela vazia; floor_atom 178→179"
+        "why": "atom 1/4 P0.1: occ_conflict the iff exact of the window (snap, last_seq] — conflito = touched under window non-empty, false under window empty; floor_atom 178→179"
       }
     },
     {
@@ -440,7 +440,7 @@
       },
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "átomo 3/4 P0.1: fence_publish_seq como cadeia citada do loop extraído (molde Form/DecodeFate, combustível = membros restantes); floor_atom 180→181"
+        "why": "atom 3/4 P0.1: fence_publish_seq the cited chain of the loop extracted (Form/DecodeFate template, fuel = members remaining); floor_atom 180→181"
       }
     },
     {
@@ -518,7 +518,7 @@
       },
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "átomo 6/6 P0.3: reopen_outcome_flat_fate_iff — tabela completa 4 linhas (sem dano serve tudo; PIT não escalado serve prefixo; escalado ou sem PIT recusa), mais fina que a iff agrupada prévia; floor_atom 191→192"
+        "why": "atom 6/6 P0.3: reopen_outcome_flat_fate_iff — table complete 4 rows (without damage serves everything; PIT unscaled serves prefix; scaled or without PIT refuses), finer than the iff agrupada previous; floor_atom 191→192"
       }
     },
     {
@@ -679,7 +679,7 @@
       },
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "átomo 2/4 P0.1: fsync_promotes_pending como lift puro — pending promove iff OS honesto; floor_atom 179→180"
+        "why": "atom 2/4 P0.1: fsync_promotes_pending the lift puro — pending promotes iff OS honest; floor_atom 179→180"
       }
     },
     {
@@ -735,7 +735,7 @@
       "id": "cqe_res",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "2026-09-12 RFC-0214 P1.1: fate ∀ sobre cqe_res_ok no degrau átomo — CQE é sucesso iff res >= 0; as-is cqe_res_ok_as_is (tudo sucesso) recusado pela planta DST cqe_res_ok_on_live_uring_is_not_ok"
+        "why": "2026-09-12 RFC-0214 P1.1: fate ∀ over cqe_res_ok in the atom rung — CQE is success iff res >= 0; the as-is cqe_res_ok_as_is (everything success) refused by the plants DST cqe_res_ok_on_live_uring_is_not_ok"
       },
       "finding": "RFC-0074",
       "twin_kind": "close",
@@ -764,7 +764,7 @@
       "id": "cqe_tags",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "2026-09-12 RFC-0214 P1.1: fate ∀ sobre next_user_data no degrau átomo — tags únicas por SQE (c≠0: (c,c+1) wrapping; c=0: pula o zero reservado, (1,2)); as-is next_user_data_as_is (tag constante por opcode) recusado pela planta DST unique_tags_discard_leftover_same_opcode"
+        "why": "2026-09-12 RFC-0214 P1.1: fate ∀ over next_user_data in the atom rung — tags unique by SQE (c≠0: (c,c+1) wrapping; c=0: skips the zero reservado, (1,2)); the as-is next_user_data_as_is (tag constante per opcode) refused by the plants DST unique_tags_discard_leftover_same_opcode"
       },
       "finding": "F203",
       "twin_kind": "close",
@@ -793,7 +793,7 @@
       "id": "cqe_leftover",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "2026-09-12 RFC-0214 P1.1: fate ∀ sobre cqe_act no degrau átomo — CQE tomado iff user_data = want; leftover descartado; as-is cqe_act_as_is (toma qualquer CQE) recusado pela planta DST cqe_act_as_is_adopts_leftover"
+        "why": "2026-09-12 RFC-0214 P1.1: fate ∀ over cqe_act in the atom rung — CQE taken iff user_data = want; leftover descartado; the as-is cqe_act_as_is (toma any CQE) refused by the plants DST cqe_act_as_is_adopts_leftover"
       },
       "finding": "F203/U1",
       "twin_kind": "close",
@@ -822,7 +822,7 @@
       "id": "cqe_submit",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "2026-09-12 RFC-0214 P1.1: fate ∀ sobre submit_complete_act no degrau átomo — CQE colhido é usado (UseHarvested), senão espera (WaitMore), submit_err não solta o buffer sob DMA; as-is submit_complete_act_as_is (Err no submit com CQE pendente, F208) recusado pela planta DST harvest_on_submit_err_uses_cqe"
+        "why": "2026-09-12 RFC-0214 P1.1: fate ∀ over submit_complete_act in the atom rung — the harvested CQE is used (UseHarvested), otherwise waits (WaitMore), submit_err not releases the buffer under DMA; the as-is submit_complete_act_as_is (Err in the submit with CQE pending, F208) refused by the plants DST harvest_on_submit_err_uses_cqe"
       },
       "finding": "F208",
       "twin_kind": "close",
@@ -851,7 +851,7 @@
       "id": "cqe_ring_refusal",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "2026-09-12 RFC-0214 P1.1: fate ∀ sobre cqe_ring_model_admitted no degrau átomo — o modelo de anel Verus não é admitido, a porta fica fechada (RFC-0074 P2.2); as-is cqe_ring_model_admitted_as_is (porta aberta) recusado pela planta DST cqe_ring_model_is_not_admitted"
+        "why": "2026-09-12 RFC-0214 P1.1: fate ∀ over cqe_ring_model_admitted in the atom rung — the model of ring Verus is not admitted, the door stays closed (RFC-0074 P2.2); the as-is cqe_ring_model_admitted_as_is (door open) refused by the plants DST cqe_ring_model_is_not_admitted"
       },
       "finding": "RFC-0074 P2.2",
       "twin_kind": "close",
@@ -901,7 +901,7 @@
       },
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "átomo 1/9 P0.4: crc_match_ok como lift puro da igualdade citada stored = computed; floor_atom 192→193"
+        "why": "atom 1/9 P0.4: crc_match_ok the lift puro of the cited equality stored = computed; floor_atom 192→193"
       }
     },
     {
@@ -930,7 +930,7 @@
       },
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "átomo 4/9 P0.4: sst_crc_fate como árvore citada — casa → StripTrailer, mismatch legado → WholeBuffer, mismatch moderno → Reject; floor_atom 195→196"
+        "why": "atom 4/9 P0.4: sst_crc_fate the cited tree — matches → StripTrailer, mismatch legado → WholeBuffer, mismatch moderno → Reject; floor_atom 195→196"
       }
     },
     {
@@ -962,7 +962,7 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "familia decidida exatamente pela rota extraida: default = sem separador ou com prefixo 'default', nomeada = overhang estrito + starts_with + 0 separador; o mutante as-is responde in-family para toda chave e a planta DST refuta"
+        "why": "familia decidida exactly by the route extraida: default = without separador or with prefix 'default', nomeada = overhang estrito + starts_with + 0 separador; the mutant the as-is responde in-family for toof the key and the plants DST refuta"
       }
     },
     {
@@ -990,7 +990,7 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "familia da chave decidida exatamente pela rota extraida: sem NUL ou NUL lider -> 'default'; senao decode lossy dos bytes antes do primeiro NUL, owned pelo Cow; as-is responde 'default' para toda chave e a planta DST refuta"
+        "why": "the key family decided exactly by the extracted route: no NUL or leading NUL -> 'default'; otherwise lossy decode of the bytes before the first NUL, owned by the Cow; the as-is answers 'default' for every key and the DST plants refute"
       }
     },
     {
@@ -1159,7 +1159,7 @@
       "twin_kind": "close",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "filtro de get do merge decide exatamente pela rota extraida: Value live se e so se nenhum range cobre a chave; Deletion e RangeDeletion nunca live, qualquer cobertura; as-is responde live para toda versao e a planta DST refuta"
+        "why": "filter of get of the merge decides exactly by the route extraida: Value live if and so if none range covers the key; Deletion and RangeDeletion never live, any coverage; the as-is responde live for every versao and the plants DST refuta"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/merge.rs",
@@ -1181,7 +1181,7 @@
       "id": "ikey_pack",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.2: fate ∀ sobre pack_sequence_and_type no degrau átomo — cadeia citada: teto MAX_SEQUENCE_NUMBER lido e afirmado (massert), shift 8, tipo u8→u64, pacote = ou bit a bit; planta DST pack_sequence_and_type_on_live_db_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.2: fate ∀ over pack_sequence_and_type in the atom rung — cited chain: ceiling MAX_SEQUENCE_NUMBER read and afirmado (massert), shift 8, type u8→u64, package = or bit the bit; plants DST pack_sequence_and_type_on_live_db_is_not_ok"
       },
       "finding": "RFC-0150 P1",
       "twin_kind": "close",
@@ -1225,7 +1225,7 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "comprimento decodificado do batch confere com o count do prefixo exatamente pela rota extraida: cast u32->usize honesto e o decide da comparacao; as-is admite qualquer comprimento e a planta DST do batch torcido refuta"
+        "why": "the decoded length of the batch checks against the count of the prefix exactly by the extracted route: honest u32->usize cast and the comparison decision; the as-is admits any length and the twisted-batch DST plants refute"
       }
     },
     {
@@ -1306,7 +1306,7 @@
       "id": "probe_order",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "empate de lo probeia exatamente o mais novo — o resultado e o indice newer citado; as-is devolve o mais velho (ressuscita deletado no empate)"
+        "why": "tie of lo probes exactly the newest — the result is the cited newer index; the as-is returns the older one (resurrects a delete on the tie)"
       },
       "finding": "RFC-0164 P0.1",
       "twin_kind": "close",
@@ -1331,7 +1331,7 @@
       "id": "run_disjoint",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "disjuncao de run e exatamente o par citado — n = min dos comprimentos, n >= 2 e o all citado sobre 1..n (hi[i-1] < lo[i]); as-is usa <= (empate arma o bisect que ressuscita)"
+        "why": "disjuncao of run and exactly the cited pair — n = min of the comprimentos, n >= 2 and the all cited over 1..n (hi[i-1] < lo[i]); the as-is uses <= (tie arma the bisect that ressuscita)"
       },
       "finding": "RFC-0164 P1.2",
       "twin_kind": "model",
@@ -1380,7 +1380,7 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "janela do iterador de compat mantem a entrada se e so se o snapshot ainda esta vivo — identidade sobre o corpo extraido; as-is mantem tudo e ressuscita entradas escondidas, a planta DST refuta"
+        "why": "window of the iterador of compat mantem the entry if and so if the snapshot still this live — identidade over the body extraido; the as-is mantem everything and ressuscita entries escondidas, the plants DST refuta"
       }
     },
     {
@@ -1409,7 +1409,7 @@
       },
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "átomo 3/9 P0.4: zero_glue_admitted como constante citada false — cola residual zero nunca é lida; floor_atom 194→195"
+        "why": "atom 3/9 P0.4: zero_glue_admitted the constante cited false — residual glue zero is never read; floor_atom 194→195"
       }
     },
     {
@@ -1500,7 +1500,7 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "job L0->L1 decidido exatamente pela rota extraida: L0 vazio ou cap 0 => sem job; senao cap min(len,cap) limita a selecao, primeiro arquivo semeia o hull e os loops de sel/slice decidem o job; as-is reabsorve o L1 inteiro e a planta DST refuta"
+        "why": "the L0->L1 job decided exactly by the extracted route: L0 empty or cap 0 => no job; otherwise cap min(len,cap) bounds the selection, the first file seeds the hull and the sel/slice loops decide the job; the as-is reabsorbs the whole L1 and the DST plants refute"
       }
     },
     {
@@ -1533,7 +1533,7 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "job de pushdown decidido exatamente pela rota extraida: nivel fonte vazio => sem job; destino nao-disjunto e recusado pelo gate; senao arquivo mais antigo + slice por overlap decidem, com cada passo ok; as-is pula o gate e a planta DST refuta"
+        "why": "the pushdown job decided exactly by the extracted route: empty source level => no job; non-disjoint destination is refused by the gate; otherwise oldest file + overlap slice decide, each step ok; the as-is skips the gate and the DST plants refute"
       }
     },
     {
@@ -1556,7 +1556,7 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "spec ×4 P0.1 2/4: D1 aceita (acked, survives) exatamente quando nenhum índice ackado cai em ou além do prefixo sobrevivente (put→Ok durável, promessa G1); loop real via spec_decr_nat; mutante as-is (só synced) recusado pela planta"
+        "why": "spec ×4 P0.1 2/4: D1 accepts (acked, survives) exactly when none index ackado falls in or beyond the prefix surviving (put→Ok durable, promise G1); loop real via spec_decr_nat; mutant the as-is (only synced) refused by the plants"
       }
     },
     {
@@ -1579,7 +1579,7 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "spec ×4 P0.1 4/4: a resposta de leitura passa R1 exatamente quando bate com o primeiro hit na ordem de probe (r1_first_hit_fate caracteriza IsFirstHit; igualdade Option é axioma de extrato citado); mutante as-is (qualquer hit cobridor, delete resurrected) recusado"
+        "why": "spec ×4 P0.1 4/4: the answer of read passes R1 exactly when it matches the first hit in probe order (r1_first_hit_fate characterizes IsFirstHit; equality Option is an axiom of extract cited); mutant the as-is (any hit covering, delete resurrected) refused"
       }
     },
     {
@@ -1602,7 +1602,7 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "spec ×4 P0.1 3/4: T1 aceita exatamente quando a tx é all-or-nothing (nunca ambos flags, visíveis nomeiam staged, committed⇒todos, senão nenhum); dois loops reais via spec_decr_nat; mutante as-is (só integridade de bytes) recusado"
+        "why": "spec ×4 P0.1 3/4: T1 accepts exactly when the tx is all-or-nothing (never both flags, visible name staged, committed⇒all, otherwise none); two real loops via spec_decr_nat; the as-is mutant (only byte integrity) refused"
       }
     },
     {
@@ -1625,14 +1625,14 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "spec ×4 P0.1 1/4: valor servido passa C1 exatamente quando a maioria de TODA config ativa replica (joint exige antiga E nova); mutante as-is (só maioria antiga) recusado pela planta"
+        "why": "spec ×4 P0.1 1/4: value servido passes C1 exactly when the majority of TODA config ativa replica (joint requires old E new); mutant the as-is (only majority old) refused by the plants"
       }
     },
     {
       "id": "leveled_enabled",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.2: fate ∀ sobre leveled_enabled no degrau átomo — leitura citada de PEDRA_LEVELED: ausente/erro liga, presente liga exceto valor aparado 0; planta DST leveled_env_switch_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.2: fate ∀ over leveled_enabled in the atom rung — read cited of PEDRA_LEVELED: absent/error turns on, present turns on except the trimmed value 0; plants DST leveled_env_switch_is_not_ok"
       },
       "finding": "F-leveling-sweep",
       "twin_kind": "model",
@@ -1662,7 +1662,7 @@
       "id": "leveling_disjoint",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.2: fate ∀ sobre is_disjoint no degrau átomo — despacho puro: é o outer_loop citado em 0#usize; planta DST is_disjoint_on_live_stack_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.2: fate ∀ over is_disjoint in the atom rung — dispatch puro: is the outer_cited loop in 0#usize; plants DST is_disjoint_on_live_stack_is_not_ok"
       },
       "finding": "F-leveling-sweep",
       "twin_kind": "model",
@@ -1692,7 +1692,7 @@
       "id": "leveling_overlaps",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.2: fate ∀ sobre overlaps no degrau átomo — par citado: lo do arquivo <= hull_hi e hi do arquivo >= hull_lo; planta DST overlaps_on_live_slice_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.2: fate ∀ over overlaps in the atom rung — cited pair: lo of the file <= hull_hi and hi of the file >= hull_lo; plants DST overlaps_on_live_slice_is_not_ok"
       },
       "finding": "F-leveling-sweep",
       "twin_kind": "model",
@@ -1715,7 +1715,7 @@
       "id": "leveling_total_bytes",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.2: fate ∀ sobre total_bytes no degrau átomo — soma citada: iter do slice, map que extrai bytes, sum u64; planta DST total_bytes_on_live_level_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.2: fate ∀ over total_bytes in the atom rung — adds cited: iter of the slice, map that extrai bytes, sum u64; plants DST total_bytes_on_live_level_is_not_ok"
       },
       "finding": "F-leveling-sweep",
       "twin_kind": "model",
@@ -1761,7 +1761,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "átomo 7/9 P0.4: tombstone_reaches_window como os dois gates citados half-open — alcança sse t_end>start E t_start≤fim (v = a && b); as-is devolve false sempre (dente plantado)"
+        "why": "atom 7/9 P0.4: tombstone_reaches_window the the two gates cited half-open — reaches iff t_end>start E t_start≤end (v = the && b); the as-is returns false always (tooth planted)"
       }
     },
     {
@@ -1784,7 +1784,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "átomo 5/9 P0.4: key_in_window como os dois gates citados — a chave entra sse passou no start E no fim (v = a && b); as-is 0104 só olha o start (dente plantado)"
+        "why": "atom 5/9 P0.4: key_in_window the the two gates cited — the key enters iff passed in the start E in the end (v = the && b); the as-is 0104 only looks at the start (tooth planted)"
       }
     },
     {
@@ -1807,7 +1807,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "átomo 6/9 P0.4: point_bounds_overlap como bounds citados — sem smallest/largest lê; com ambos lê sse lo≤fim E hi≥start; as-is 0240 delega com bounds estourados (dente plantado)"
+        "why": "atom 6/9 P0.4: point_bounds_overlap the bounds cited — without smallest/largest reads; with both reads iff lo≤end E hi≥start; the as-is 0240 delega with bounds overflowing (tooth planted)"
       }
     },
     {
@@ -1836,7 +1836,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "átomo 2/9 P0.4: sst_block_crc_ok como lift da igualdade citada stored = computed (encadeia crc_match_ok); floor_atom 193→194"
+        "why": "atom 2/9 P0.4: sst_block_crc_ok the lift of the cited equality stored = computed (chains crc_match_ok); floor_atom 193→194"
       }
     },
     {
@@ -1869,7 +1869,7 @@
       "aeneas": "scripts/aeneas_magic.sh",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "átomo 9/9 P0.4: sst_magic_is_pedra como cadeia citada — sem 8 bytes recusa; com prefixo possível admite sse o slice-eq PEDRSST\\0 casa; as-is admite qualquer header (drop-in em disco — dente plantado); extract novo MagicKernel via aeneas_magic.sh (shim com const pinada)"
+        "why": "atom 9/9 P0.4: sst_magic_is_pedra the cited chain — without 8 bytes refuses; with prefix possible admits iff the slice-eq PEDRSST\\0 matches; the as-is admits any header (drop-in in disk — tooth planted); extract new MagicKernel via aeneas_magic.sh (shim with const pinada)"
       }
     },
     {
@@ -1898,7 +1898,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "átomo 2/4 P0.2: is_length_resyncable como classificador citado — trio de dano de comprimento (Truncated/LengthCorrupt/UnknownType) → true, demais seis → false; floor_atom 183→184"
+        "why": "atom 2/4 P0.2: is_length_resyncable the classificador cited — trio of damage of length (Truncated/LengthCorrupt/UnknownType) → true, demais six → false; floor_atom 183→184"
       }
     },
     {
@@ -1927,7 +1927,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "átomo 3/4 P0.2: physical_payload_act como árvore de três ifs citada — oversize → FailStop, payload além do bloco → FailStop/Truncated por alinhamento, dentro → Continue; floor_atom 184→185"
+        "why": "atom 3/4 P0.2: physical_payload_act the tree of three ifs cited — oversize → FailStop, payload beyond the block → FailStop/Truncated by alignment, inside → Continue; floor_atom 184→185"
       }
     },
     {
@@ -1956,7 +1956,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "átomo 4/4 P0.2: fragment_act como tabela completa FragKind × scratch_empty citada — órfão Middle/Last com scratch vazio fail-stopa; floor_atom 185→186"
+        "why": "atom 4/4 P0.2: fragment_act the table complete FragKind × scratch_empty cited — orphan Middle/Last with scratch empty fail-stopa; floor_atom 185→186"
       }
     },
     {
@@ -1985,14 +1985,14 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "átomo 1/4 P0.2: from_record_type como bijeção total citada RecordType→FragKind (5 ramos); floor_atom 182→183"
+        "why": "atom 1/4 P0.2: from_record_type the bijection total cited RecordType→FragKind (5 branches); floor_atom 182→183"
       }
     },
     {
       "id": "compact_split",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.1: fate ∀ sobre compact_should_split no degrau átomo — bind citado: o gate COMPACT_TARGET_FILE_BYTES produz o alvo e a comparação decide; planta DST compact_should_split_bounds_one_output_file"
+        "why": "2026-09-13 RFC-0218 P1.1: fate ∀ over compact_should_split in the atom rung — bind cited: the gate COMPACT_TARGET_FILE_BYTES produces the alvo and the comparison decides; plants DST compact_should_split_bounds_one_output_file"
       },
       "finding": "RFC-0160 OOM",
       "twin_kind": "close",
@@ -2015,7 +2015,7 @@
       "id": "compact_split_at",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.1: fate ∀ sobre compact_should_split_at no degrau átomo — decide (written >= target), mutantes nunca dividem; planta DST compact_split_mutants_never_split_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.1: fate ∀ over compact_should_split_at in the atom rung — decides (written >= target), mutants never dividem; plants DST compact_split_mutants_never_split_is_not_ok"
       },
       "finding": "RFC-0160 OOM",
       "twin_kind": "close",
@@ -2038,7 +2038,7 @@
       "id": "lone_tombstone",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.1: fate ∀ sobre lone_tombstone_fate no degrau átomo — Drop exige bottommost e único-mais-novo; resto Keep; planta DST theorem_lone_tombstone_on_finite_domain"
+        "why": "2026-09-13 RFC-0218 P1.1: fate ∀ over lone_tombstone_fate in the atom rung — Drop requires bottommost and single-newest; resto Keep; plants DST theorem_lone_tombstone_on_finite_domain"
       },
       "finding": "F177",
       "twin_kind": "close",
@@ -2089,7 +2089,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "átomo 2/6 P0.3: changelog_should_store como portão citado — intervalo 0 nunca, intervalo > 0 quando commits >= intervalo; floor_atom 187→188"
+        "why": "atom 2/6 P0.3: changelog_should_store the gate cited — interval 0 never, interval > 0 when commits >= interval; floor_atom 187→188"
       }
     },
     {
@@ -2117,7 +2117,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "átomo 3/6 P0.3: changelog_rebuild_within_budget como lift puro da comparação citada live_entries ≤ budget_entries; floor_atom 188→189"
+        "why": "atom 3/6 P0.3: changelog_rebuild_within_budget the lift puro of the cited comparison live_entries ≤ budget_entries; floor_atom 188→189"
       }
     },
     {
@@ -2127,7 +2127,7 @@
       "atom": "changelog_durable_commit_fate",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P0.1: o destino do debounce de CHANGELOG num commit terminado é decisão do kernel — conta sse a resolução de sync do write-admission (flag do cliente vence, senão default do DB) tornou o commit durável, provado ∀ sobre (client_set, client_sync, db_sync) como changelog_durable_commit_fate_fate_iff em Changelog.lean; o trampolim db.rs commit_ops_with faz match no plano do kernel"
+        "why": "RFC-0219 P0.1: the destination of the debounce of CHANGELOG in a finished commit is decision of the kernel — counts iff the resolution of sync of the write-admission (flag of the client wins, otherwise default of the DB) made the commit durable, proved ∀ over (client_set, client_sync, db_sync) the changelog_durable_commit_fate_fate_iff in Changelog.lean; the trampoline db.rs commit_ops_with does match in the plan of the kernel"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
@@ -2157,7 +2157,7 @@
       "atom": "wal_archive_delete_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P0.2: o destino keep-vs-delete da cadeia arquivada de WAL é decisão do kernel — guarda enquanto o publish do MANIFEST atrasa os arquivos (segmentos acima de manifest_published_seq são a única cópia durável da janela), provado ∀ sobre (manifest_published_seq, wal_archive_max_seq) como wal_archive_delete_plan_fate_iff em Changelog.lean; o trampolim db.rs delete_wal_archives faz match no plano do kernel"
+        "why": "RFC-0219 P0.2: the destination keep-vs-delete of the chain arquivada of WAL is decision of the kernel — guard while the publish of the MANIFEST atrasa the files (segments above of manifest_published_seq are the single durable copy of the window), proved ∀ over (manifest_published_seq, wal_archive_max_seq) the wal_archive_delete_plan_fate_iff in Changelog.lean; the trampoline db.rs delete_wal_archives does match in the plan of the kernel"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
@@ -2187,7 +2187,7 @@
       "atom": "bulk_manifest_persist_fate",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P0.3: como o publish do MANIFEST de um bulk install é pago é decisão do kernel — sync (dir-sync) persiste inline e zera a dívida; async amortiza por bulk_manifest_debt a cada BULK_MANIFEST_EVERY, provado ∀ sobre sync como bulk_manifest_persist_fate_fate_iff em Manifest.lean; o trampolim db.rs persist_bulk_manifest faz match no plano do kernel"
+        "why": "RFC-0219 P0.3: the the publish of the MANIFEST of the bulk install is paid is decision of the kernel — sync (dir-sync) persiste inline and zeroes the debt; async amortiza by bulk_manifest_debt the each BULK_MANIFEST_EVERY, proved ∀ over sync the bulk_manifest_persist_fate_fate_iff in Manifest.lean; the trampoline db.rs persist_bulk_manifest does match in the plan of the kernel"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/manifest_kernel.rs",
@@ -2217,7 +2217,7 @@
       "atom": "point_cache_validity",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.1: o gate F198/F207 de fill/hit do point/prefix cache é decisão do kernel — fill admissível só enquanto published seq ainda é igual ao seq da resposta (publish em curso invalida a resposta pré-publish), provado ∀ sobre (published, answer) como point_cache_validity_fate_iff em Lookup.lean; os três trampolins db.rs (get_after_point_miss, get_at double-check, last_under_user_prefix) fazem match no plano do kernel"
+        "why": "RFC-0219 P1.1: the gate F198/F207 of fill/hit of the point/prefix cache is decision of the kernel — fill admissible only while published seq is still equal to the seq of the answer (publish in progress invalidates the answer pre-publish), proved ∀ over (published, answer) the point_cache_validity_fate_iff in Lookup.lean; the three trampolines db.rs (get_after_point_miss, get_at double-check, last_under_user_prefix) match in the plan of the kernel"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/lookup_kernel.rs",
@@ -2255,7 +2255,7 @@
       "atom": "point_tombstone_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.1: se um ponto achado é servido ou sombreado por range tombstone é decisão do kernel — tombstone cobrindo (t.seq > point_seq via merge::range_deleted) sombreia o valor e o caller lê Deleted (RFC-0150), provado ∀ sobre range_hidden como point_tombstone_plan_fate_iff em Lookup.lean; os quatro trampolins db.rs (lookup x2, caminho lock-free x2) fazem match no plano do kernel"
+        "why": "RFC-0219 P1.1: if the point found is servido or shadowed by range tombstone is decision of the kernel — tombstone covering (t.seq > point_seq via merge::range_deleted) shadows the value and the caller reads Deleted (RFC-0150), proved ∀ over range_hidden the point_tombstone_plan_fate_iff in Lookup.lean; the four trampolines db.rs (lookup x2, path lock-free x2) match in the plan of the kernel"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/lookup_kernel.rs",
@@ -2285,7 +2285,7 @@
       "atom": "dir_sync_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.1: se o dir-fsync pós-rename é pago é decisão do kernel — modo sync paga inline (dentry do rename durável antes de voltar), async pula, provado ∀ sobre sync como dir_sync_plan_fate_iff em WriteAdmission.lean (o predicado dir_sync_required segue vivo no corpo do plano); os cinco trampolins db.rs (rename SST x2, sync_dir_if_required, fsync_sst_paths, finish_merged_chunk_on) fazem match no plano"
+        "why": "RFC-0219 P1.1: if the dir-fsync post-rename is paid is decision of the kernel — modo sync pays inline (dentry of the rename durable before the reply), async skips, proved ∀ over sync the dir_sync_plan_fate_iff in WriteAdmission.lean (the predicate dir_sync_required follows live in the body of the plan); the five trampolines db.rs (rename SST x2, sync_dir_if_required, fsync_sst_paths, finish_merged_chunk_on) match in the plan"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
@@ -2315,7 +2315,7 @@
       "atom": "fence_admission_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.2: admitir ou recusar operações após um fence de durabilidade é decisão do kernel — fence armado recusa fail-closed cada nova operação (o relatório acked-prefix/janela-incerta já está registrado), provado ∀ sobre o bool como fence_admission_plan_fate_iff em WriteAdmission.lean; o trampolim db.rs ensure_not_fenced faz match no plano"
+        "why": "RFC-0219 P1.2: admit or refuse operations after the fence of durability is decision of the kernel — fence armed refuses fail-closed each new operation (the report acked-prefix/window-incerta already is registered), proved ∀ over the bool the fence_admission_plan_fate_iff in WriteAdmission.lean; the trampoline db.rs ensure_not_fenced does match in the plan"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
@@ -2345,7 +2345,7 @@
       "atom": "fence_record_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.2: se um fence novo registra o relatório é decisão do kernel — só o PRIMEIRO fence registra a janela incerta visível ao client (a mais larga, a honesta); fence posterior mantém, provado ∀ sobre has_report como fence_record_plan_fate_iff em WriteAdmission.lean; o trampolim db.rs fence_durability faz match no plano"
+        "why": "RFC-0219 P1.2: if the fence new registers the report is decision of the kernel — only the FIRST fence registers the uncertain window visible to the client (the widest, the honest one); a later fence maintains, proved ∀ over has_report the fence_record_plan_fate_iff in WriteAdmission.lean; the trampoline db.rs fence_durability does match in the plan"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
@@ -2375,7 +2375,7 @@
       "atom": "group_batch_sync_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.2: se um batch força a barreira única do grupo é decisão do kernel — batch com flag de sync força o one-fsync compartilhado do grupo (contexto do grupo do DB: client_set=true, db_sync=false), provado ∀ sobre client_sync como group_batch_sync_plan_fate_iff em WriteAdmission.lean; o trampolim db.rs group_prepare faz match no plano"
+        "why": "RFC-0219 P1.2: if the batch forces the single barrier of the group is decision of the kernel — the batch with the sync flag forces the one-fsync shared of the group (context of the DB group: client_set=true, db_sync=false), proved ∀ over client_sync the group_batch_sync_plan_fate_iff in WriteAdmission.lean; the trampoline db.rs group_prepare does match in the plan"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
@@ -2405,7 +2405,7 @@
       "atom": "pit_resync_rewrite_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.4: reescrever o WAL a partir do prefixo recuperado é decisão do kernel — reescreve EXATAMENTE quando o relatório de recuperação é um resync (pit_resync_needs_rewrite segue vivo e provado no corpo), provado ∀ sobre is_resync como pit_resync_rewrite_plan_fate_iff em WriteAdmission.lean; o AS-IS nunca reescreve (o dano mid-log sobrevive ao próximo open fail-closed — dente); o trampolim db.rs open_with_env_sourced faz match no plano"
+        "why": "RFC-0219 P1.4: rewriting the WAL starting from the prefix recovered is decision of the kernel — rewrites EXACTLY when the report of recovery is the resync (pit_resync_needs_rewrite follows live and proved in the body), proved ∀ over is_resync the pit_resync_rewrite_plan_fate_iff in WriteAdmission.lean; the AS-IS never rewrites (the damage mid-log survives to the next open fail-closed — tooth); the trampoline db.rs open_with_env_sourced does match in the plan"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
@@ -2435,7 +2435,7 @@
       "atom": "parked_pair_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.3: se a fila parked-unflushed entrega o par mais velho para fold é decisão do kernel — dois ou mais entrega (F174 revalida no swap), fila curta espera, provado ∀ sobre parked_len como parked_pair_plan_fate_iff em Flush.lean; o trampolim db.rs parked_oldest_pair_arcs faz match no plano"
+        "why": "RFC-0219 P1.3: if the queue parked-unflushed delivers the oldest pair for fold is decision of the kernel — two or more deliver (F174 revalidates on swap), a short queue waits, proved ∀ over parked_len the parked_pair_plan_fate_iff in Flush.lean; the trampoline db.rs parked_oldest_pair_arcs does match in the plan"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",
@@ -2465,7 +2465,7 @@
       "atom": "auto_flush_gate",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.3: se o scan de auto-flush roda é decisão do kernel — os dois eixos de mem sob seus limites pulam o scan inteiro (nada due); qualquer eixo acima scana cada CF (gate due por-CF aplica), provado ∀ sobre (global_under, cf_under) como auto_flush_gate_fate_iff em Flush.lean (o predicado skip_auto_flush segue vivo no corpo do gate); o trampolim db.rs maybe_auto_flush faz match no plano"
+        "why": "RFC-0219 P1.3: if the scan of auto-flush runs is decision of the kernel — the two eixos of mem under its limits pulam the scan whole (nothing due); any eixo above scana each CF (gate due by-CF aplica), proved ∀ over (global_under, cf_under) the auto_flush_gate_fate_iff in Flush.lean (the predicate skip_auto_flush follows live in the body of the gate); the trampoline db.rs maybe_auto_flush does match in the plan"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",
@@ -2495,7 +2495,7 @@
       "atom": "mem_auto_flush_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.3: flushar a mem é decisão do kernel — dispara EXATAMENTE armado e no/acima do limite (auto_flush_due compõe o plano); desarmado ou abaixo segue acumulando, provado ∀ sobre (mem_bytes, limit, armed) como mem_auto_flush_plan_fate_iff em Flush.lean; o AS-IS nunca dispara (mem cresce até o host travar — dente plantado); o trampolim db.rs maybe_auto_flush faz match no plano"
+        "why": "RFC-0219 P1.3: flushing the mem is decision of the kernel — triggers EXACTLY armed and at or above the limit (auto_flush_due composes the plan); disarmed or below keeps accumulating, proved ∀ over (mem_bytes, limit, armed) the mem_auto_flush_plan_fate_iff in Flush.lean; the AS-IS never triggers (mem grows until the host hangs — tooth planted); the trampoline db.rs maybe_auto_flush does match in the plan"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",
@@ -2525,7 +2525,7 @@
       "atom": "manifest_publish_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.4: publicar MANIFEST/CURRENT é decisão do kernel — publica EXATAMENTE quando todo SST listado está durable (may_publish_manifest segue vivo e provado no corpo), provado ∀ sobre sst_durable como manifest_publish_plan_fate_iff em Flush.lean; o AS-IS publica com SST unsynced (CURRENT nomeia arquivo tornado pós-crash — dente); o trampolim db.rs persist_manifest faz match no plano"
+        "why": "RFC-0219 P1.4: publishing MANIFEST/CURRENT is decision of the kernel — publishes EXACTLY when every listed SST is durable (may_publish_manifest follows live and proved in the body), proved ∀ over sst_durable the manifest_publish_plan_fate_iff in Flush.lean; the AS-IS publishes with SST unsynced (CURRENT names the file that turns post-crash — tooth); the trampoline db.rs persist_manifest does match in the plan"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",
@@ -2555,7 +2555,7 @@
       "atom": "changelog_store_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.4: gravar o feed no store point síncrono é decisão do kernel — grava EXATAMENTE quando o publish durable do MANIFEST cobriu a janela arquivada (publish falhado segura: os segmentos arquivados são a única cópia durable), provado ∀ sobre publish_ok como changelog_store_plan_fate_iff em Changelog.lean; o AS-IS grava com publish falhado (o store apaga segmentos sem cobertura — dente); o trampolim db.rs changelog_store_point faz match no plano"
+        "why": "RFC-0219 P1.4: write the feed in the store point synchronous is decision of the kernel — writes EXACTLY when the publish durable of the MANIFEST covered the window arquivada (publish failed holds: the segments archived are the single copy durable), proved ∀ over publish_ok the changelog_store_plan_fate_iff in Changelog.lean; the AS-IS writes with publish failed (the store deletes segments without coverage — tooth); the trampoline db.rs changelog_store_point does match in the plan"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
@@ -2585,7 +2585,7 @@
       "atom": "parked_pop_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P2.1: popar a fila estacionada é decisão do kernel — popa EXATAMENTE quando a fila está não-vazia (batch_is_empty segue vivo e provado no corpo), provado ∀ sobre parked_len como parked_pop_plan_fate_iff em WriteAdmission.lean; o AS-IS popa da fila vazia (dente); o trampolim db.rs take_oldest_parked faz match no plano"
+        "why": "RFC-0219 P2.1: popar the queue estacionada is decision of the kernel — pops EXACTLY when the queue is non-empty (batch_is_empty follows live and proved in the body), proved ∀ over parked_len the parked_pop_plan_fate_iff in WriteAdmission.lean; the AS-IS pops of the queue empty (tooth); the trampoline db.rs take_oldest_parked does match in the plan"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
@@ -2615,7 +2615,7 @@
       "atom": "group_ack_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P2.1: ackar e publicar o grupo é decisão do kernel — publica EXATAMENTE quando a I/O de WAL do grupo teve sucesso (may_publish_group segue vivo e provado no corpo), provado ∀ sobre wal_io_ok como group_ack_plan_fate_iff em GroupCommit.lean; o AS-IS acka a falha (Ok com mentira — dente); o trampolim db.rs lone_sync_commit faz match no plano"
+        "why": "RFC-0219 P2.1: acking and publishing the group is decision of the kernel — publishes EXACTLY when the group's WAL I/O succeeded (may_publish_group follows live and proved in the body), proved ∀ over wal_io_ok the group_ack_plan_fate_iff in GroupCommit.lean; the AS-IS acks the failure (Ok with lie — tooth); the trampoline db.rs lone_sync_commit does match in the plan"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
@@ -2663,7 +2663,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "átomo 4/6 P0.3: flush_plan como árvore de dois ifs citada — imm presente termina-e-flusha, memtable vazio rotaciona, vivo escreve SST antes; floor_atom 189→190"
+        "why": "atom 4/6 P0.3: flush_plan the two-if cited tree — imm present ends-and-flushes, memtable empty rotaciona, live writes SST before; floor_atom 189→190"
       }
     },
     {
@@ -2692,14 +2692,14 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "átomo 5/6 P0.3: first_install_action como tabela citada — commitado (com/sem sync) prossegue, falha recusa abrir (F196); floor_atom 190→191"
+        "why": "atom 5/6 P0.3: first_install_action the cited table — commitado (with/without sync) proceeds, failure refuses to open (F196); floor_atom 190→191"
       }
     },
     {
       "id": "probe_order_covering",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "a lista de candidatos e exatamente o loop citado — newest_first com capacidade len, do zero, porte covering_pos e gate covering_hi_ge decidindo push ou skip"
+        "why": "the list of candidatos and exactly the cited loop — newest_first with capacity len, of the zero, porte covering_pos and gate covering_hi_ge decidindo push or skip"
       },
       "finding": "RFC-0164 P0.2",
       "twin_kind": "model",
@@ -2748,7 +2748,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "átomo 4/4 P0.1: group_validate como cadeia citada do loop extraído (index→occ_conflict→push, combustível = membros); floor_atom 181→182"
+        "why": "atom 4/4 P0.1: group_validate the cited chain of the loop extracted (index→occ_conflict→push, fuel = members); floor_atom 181→182"
       }
     },
     {
@@ -2815,7 +2815,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "o plano do grupo decide exatamente pela rota min-len: n e o menor input e todo fate vem do loop extraido — upgrade do close RFC-0198 (glue por membro) para o extrato inteiro"
+        "why": "the group plan decides exactly by the min-len route: n is the smaller input and every fate comes from the extracted loop — upgrade of the RFC-0198 close (glue by member) to the whole extract"
       }
     },
     {
@@ -2900,7 +2900,7 @@
       "id": "env_crash",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.2: fate ∀ do crash_legal — corte legal exatamente quando synced ≤ cut ≤ written (piso da barreira e teto escrito); as-is ignora o piso e come bytes prometidos."
+        "why": "RFC-0214 P0.2: fate ∀ of the crash_legal — cut legal exactly when synced ≤ cut ≤ written (floor of the barrier and ceiling written); the as-is ignora the floor and come bytes prometidos."
       },
       "finding": "RFC-0166 P1.1",
       "twin_kind": "close",
@@ -2924,7 +2924,7 @@
       "id": "env_append",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.2: fate ∀ do append do Env — ok {m with written := w} exatamente quando written+n não estoura (ok w); a barreira não se move."
+        "why": "RFC-0214 P0.2: fate ∀ of the append of the Env — ok {m with written := w} exactly when written+n does not overflow (ok w); the barrier does not move."
       },
       "finding": "RFC-0166 P1.1",
       "twin_kind": "close",
@@ -2948,7 +2948,7 @@
       "id": "env_sync",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.2: fate ∀ do sync do Env — dois futuros ok exatos: Honest promove a barreira ao comprimento todo; Lying devolve Ok e o modelo volta inteiro (RFC-0078); as-is promove sempre."
+        "why": "RFC-0214 P0.2: fate ∀ of the sync of the Env — two futuros ok exatos: Honest promotes the barrier to the length every; Lying returns Ok and the model rolls back whole (RFC-0078); the as-is promotes always."
       },
       "finding": "RFC-0166 P1.1",
       "twin_kind": "close",
@@ -2972,7 +2972,7 @@
       "id": "env_barrier_floor",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.2: fate ∀ do piso da barreira — ok v com v = true exato: corte ilegal não perde nada; corte legal mantém cut ≥ synced (perna crash_legal_fate_iff, átomo 1/6 da fatia)."
+        "why": "RFC-0214 P0.2: fate ∀ of the floor of the barrier — ok v with v = true exact: cut illegal not loses nothing; cut legal maintains cut ≥ synced (leg crash_legal_fate_iff, atom 1/6 of the fatia)."
       },
       "finding": "RFC-0166 P1.1",
       "twin_kind": "close",
@@ -2996,7 +2996,7 @@
       "id": "env_no_invented",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.2: fate ∀ do teto — ok v com v = true exato: corte ilegal ou cut ≤ written (teto da janela do crash_legal_fate_iff); a recuperação nunca inventa byte."
+        "why": "RFC-0214 P0.2: fate ∀ of the ceiling — ok v with v = true exact: cut illegal or cut ≤ written (ceiling of the window of the crash_legal_fate_iff); the recovery never invents byte."
       },
       "finding": "RFC-0166 P1.1",
       "twin_kind": "close",
@@ -3020,7 +3020,7 @@
       "id": "env_honest_sync",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.2: fate ∀ do sync honesto — ok v com v = true exato: após a barreira honesta a janela legal colapsa num ponto (written ≤ cut ≤ written força cut = written); todo crash legal preserva o log inteiro; pernas sync_fate_iff + crash_legal_fate_iff."
+        "why": "RFC-0214 P0.2: fate ∀ of the sync honest — ok v with v = true exact: after the barrier honest the window legal collapses to a single point (written ≤ cut ≤ written forces cut = written); every crash legal preserves the log whole; legs sync_fate_iff + crash_legal_fate_iff."
       },
       "finding": "RFC-0166 P1.1",
       "twin_kind": "close",
@@ -3044,7 +3044,7 @@
       "id": "wal_state",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.1: fate ∀ de inv_wal — ok v exatamente quando v decide (acked ⊆ synced ∧ synced ⊆ written); perna citada wal_inv_closed (RFC-0191 P2.1)."
+        "why": "RFC-0214 P0.1: fate ∀ of inv_wal — ok v exactly when v decides (acked ⊆ synced ∧ synced ⊆ written); leg cited wal_inv_closed (RFC-0191 P2.1)."
       },
       "finding": "RFC-0166 P1.2",
       "twin_kind": "close",
@@ -3068,7 +3068,7 @@
       "id": "wal_append",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.1: fate ∀ do append — ok {s with written := w} exatamente quando a soma written+n não estoura (ok w); perna citada wal_append_closed (RFC-0191 P2.1)."
+        "why": "RFC-0214 P0.1: fate ∀ of the append — ok {s with written := w} exactly when the adds written+n does not overflow (ok w); leg cited wal_append_closed (RFC-0191 P2.1)."
       },
       "finding": "RFC-0166 P1.2",
       "twin_kind": "close",
@@ -3092,7 +3092,7 @@
       "id": "wal_sync",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.1: fate ∀ do sync — exatamente dois futuros ok, um por honestidade (Honest promove a barreira a written; Lying devolve as watermarks recortadas pelo min); pernas citadas wal_sync_honest_closed/wal_sync_lying_closed (RFC-0198 P1.2)."
+        "why": "RFC-0214 P0.1: fate ∀ of the sync — exactly two futuros ok, the by honestidade (Honest promotes the barrier the written; Lying returns the watermarks recortadas by the min); legs cited wal_sync_honest_closed/wal_sync_lying_closed (RFC-0198 P1.2)."
       },
       "finding": "RFC-0166 P1.2",
       "twin_kind": "close",
@@ -3116,7 +3116,7 @@
       "id": "wal_ack",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.1: fate ∀ do ack — exatamente dois futuros ok: dentro da barreira {s with acked := a} (valor saturado contido em synced), fora dela recusa fail-closed (estado volta inteiro); o Ok nunca avança acked além da barreira."
+        "why": "RFC-0214 P0.1: fate ∀ of the ack — exactly two ok futures: inside the barrier {s with acked := a} (saturated value contained in synced), outside it refuses fail-closed (state rolls back whole); the Ok never advances acked beyond the barrier."
       },
       "finding": "RFC-0166 P1.2",
       "twin_kind": "close",
@@ -3140,7 +3140,7 @@
       "id": "wal_rotate",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.1: fate ∀ do rotate — zera o log exatamente quando tudo é durável e acked (acked = synced = written); cauda não-durável é recusada e o estado volta inteiro; as-is derruba o log sempre."
+        "why": "RFC-0214 P0.1: fate ∀ of the rotate — zeroes the log exactly when everything is durable and acked (acked = synced = written); a non-durable tail is refused and the state rolls back whole; the as-is drops the log always."
       },
       "finding": "RFC-0166 P1.2",
       "twin_kind": "close",
@@ -3164,7 +3164,7 @@
       "id": "wal_acked_survives",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.1: fate ∀ da corolária de sobrevivência — dois futuros ok decididos pela costura Env (corte legal: v = cut ≥ acked; corte ilegal: v = true); a legalidade é a do Env, não re-provada (P0.2 pinará crash_legal)."
+        "why": "RFC-0214 P0.1: fate ∀ of the corollary of survival — two ok futures decided by the Env stitch (legal cut: v = cut ≥ acked; illegal cut: v = true); the legality is the Env's, not re-proved (P0.2 will pin crash_legal)."
       },
       "finding": "RFC-0166 P1.2",
       "twin_kind": "close",
@@ -3205,7 +3205,7 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "O put confirma exatamente quando o ledger cruza a barreira: ok s' e exatamente a cadeia honesta append->sync->ack com o vao acked->synced, citando os corpos sem reabrir"
+        "why": "The put confirma exactly when the ledger cruza the barrier: ok s' and exactly the chain honest append->sync->ack with the vao acked->synced, citando the bodies without reabrir"
       }
     },
     {
@@ -3229,14 +3229,14 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "O desfecho da maquina D1 e exatamente a decisao do spec: ok false so na vereda ackado+crash-legal+corte-antes-do-fim (o buraco do mutante AS-IS); forma de ramos construtiva cita inv_wal/CrashModel.of/crash_legal sem reabrir corpos"
+        "why": "The D1 machine outcome is exactly the spec's decision: ok false only on the acked+legal-crash+cut-before-the-end path (the hole of the AS-IS mutant); the constructive branch form cites inv_wal/CrashModel.of/crash_legal without reopening bodies"
       }
     },
     {
       "id": "write_ack_append",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "2026-09-12 RFC-0214 P1.1: fate ∀ sobre on_append no degrau átomo — o passo append do ledger é o átomo wal_append (written cresce, acked/synced intocados); as-is write_ack_ledger_as_is (ack sem barreira) recusado pela planta DST verified_write_ack_on_live_profile_is_not_ok"
+        "why": "2026-09-12 RFC-0214 P1.1: fate ∀ over on_append in the atom rung — the step append of the ledger is the atom wal_append (written grows, acked/synced untouched); the as-is write_ack_ledger_as_is (ack without barrier) refused by the plants DST verified_write_ack_on_live_profile_is_not_ok"
       },
       "finding": "RFC-0166 P1.4",
       "twin_kind": "close",
@@ -3261,7 +3261,7 @@
       "id": "write_ack_barrier",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "átomo write_ack_barrier: o Ok da barreira Honest é exatamente o estado promovido (synced := written) — wal_sync com fsync_promotes_pending; sem Ok com pendências (RFC-0214 P1.1 7/8)"
+        "why": "atom write_ack_barrier: the Ok of the barrier Honest is exactly the state promovido (synced := written) — wal_sync with fsync_promotes_pending; without Ok with pending items (RFC-0214 P1.1 7/8)"
       },
       "finding": "RFC-0166 P1.4",
       "twin_kind": "close",
@@ -3286,7 +3286,7 @@
       "id": "write_ack_ack",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "átomo write_ack_ack: o Ok do ack existe iff acked ≤ synced e é exatamente acked := synced (gap vira acknowledged, saturado promove só até a barreira); fora da invariante a sub checada falha (RFC-0214 P1.1 8/8)"
+        "why": "atom write_ack_ack: the Ok of the ack there is iff acked ≤ synced and is exactly acked := synced (gap becomes acknowledged, saturated promotes only up to the barrier); outside of the invariant the checked subtraction failure (RFC-0214 P1.1 8/8)"
       },
       "finding": "RFC-0166 P1.4",
       "twin_kind": "close",
@@ -3311,7 +3311,7 @@
       "id": "lsm_probe",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.1: fate ∀ sobre lsm_probe no degrau átomo — um passo do loop citado via loop.eq_def: corpo no nível 0 termina (done) ou desce um nível (cont); planta DST r1_modelo_on_live_delete_shape_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.1: fate ∀ over lsm_probe in the atom rung — one step of the cited loop via loop.eq_def: body in the level 0 ends (done) or goes down the level (cont); plants DST r1_modelo_on_live_delete_shape_is_not_ok"
       },
       "entry": "lsm_probe",
       "as_is": "lsm_probe_as_is",
@@ -3335,7 +3335,7 @@
       "id": "lsm_compact",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.1: fate ∀ sobre lsm_compact no degrau átomo — despacho citado: nível 0 e nível >= MAX_LEVELS não compactam; dentro, o loop citado com drop_all_tombs false; planta DST r1_modelo_on_live_delete_shape_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.1: fate ∀ over lsm_compact in the atom rung — cited dispatch: level 0 and level >= MAX_LEVELS do not compact; inside, the cited loop with drop_all_tombs false; plants DST r1_modelo_on_live_delete_shape_is_not_ok"
       },
       "entry": "lsm_compact",
       "as_is": "lsm_compact_as_is",
@@ -3359,7 +3359,7 @@
       "id": "lsm_reopen",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.1: fate ∀ sobre lsm_reopen no degrau átomo — identidade citada, o estado sai intacto; planta DST r1_modelo_on_live_delete_shape_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.1: fate ∀ over lsm_reopen in the atom rung — identidade cited, the state exits intacto; plants DST r1_modelo_on_live_delete_shape_is_not_ok"
       },
       "entry": "lsm_reopen",
       "as_is": "lsm_reopen_as_is",
@@ -3400,7 +3400,7 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "O desfecho da maquina R1 e exatamente a decisao do spec: ok true quando sonda e mais-novo concordam (ou o inventario nem passa), ok false quando discordam; ramos construtivos citam inv_lsm/lsm_probe/r1_newest sem reabrir corpos"
+        "why": "The R1 machine outcome is exactly the spec's decision: ok true when probe and newest agree (or the inventory does not even pass), ok false when they disagree; constructive branches cite inv_lsm/lsm_probe/r1_newest without reopening bodies"
       }
     },
     {
@@ -3425,7 +3425,7 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0213 P0.1 (RFC-0170 P2.4): o gate idle de write-admission e true exatamente quando nenhum knob de stall esta armado; as-is respondia idle com knobs armados"
+        "why": "RFC-0213 P0.1 (RFC-0170 P2.4): the gate idle of write-admission and true exactly when none knob of stall this armed; the as-is respondia idle with knobs armados"
       }
     },
     {
@@ -3835,7 +3835,7 @@
       "id": "scale_probes",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "probes de point get sao exatamente o saturating_add citado — levels + L0 cobrindo; as-is anda cada SST vivo (GPS mentindo)"
+        "why": "probes of point get sao exactly the saturating_add cited — levels + L0 covering; the as-is walks every live SST (lying GPS)"
       },
       "finding": "RFC-0176 P0",
       "twin_kind": "close",
@@ -3858,7 +3858,7 @@
       "id": "scale_warm",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "teto do WARM e exatamente a cadeia citada — ceiling 0 e o piso 3 GiB; senao max(piso, 3/4 ceiling) cortado pelo reservado ceiling - 1 GiB; as-is ignora o ceiling (u64::MAX)"
+        "why": "the WARM ceiling is exactly the cited chain — ceiling 0 is the floor 3 GiB; otherwise max(floor, 3/4 ceiling) cut by the reserved ceiling - 1 GiB; the as-is ignores the ceiling (u64::MAX)"
       },
       "finding": "RFC-0176 P0",
       "twin_kind": "close",
@@ -3881,7 +3881,7 @@
       "id": "scale_probes_worst",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "pior caso de producao e exatamente a mesma soma citada — point_get_probes com o trigger cheio do L0; as-is ainda anda cada arquivo vivo"
+        "why": "worse matches of producao and exactly the same adds cited — point_get_probes with the trigger full of the L0; the as-is still walks each file live"
       },
       "finding": "RFC-0176 P1",
       "twin_kind": "close",
@@ -3904,7 +3904,7 @@
       "id": "scale_predict",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "o relogio previsto e exatamente a cadeia citada — clamps min(hot,SCALE_BPS)/min(noisy,9000), mix hot.tau_ram+(SCALE_BPS-hot).tau_disk, conta u128, taxa (1+eta), try_from com teto u64::MAX; as-is ignora eta"
+        "why": "the relogio previsto and exactly the cited chain — clamps min(hot,SCALE_BPS)/min(noisy,9000), mix hot.tau_ram+(SCALE_BPS-hot).tau_disk, counts u128, taxa (1+eta), try_from with ceiling u64::MAX; the as-is ignora eta"
       },
       "finding": "RFC-0176 P1",
       "twin_kind": "model",
@@ -3927,7 +3927,7 @@
       "id": "scale_happy_hot",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "fracao quente do caminho feliz e exatamente o gate citado — loja cabendo no warm_cap devolve SCALE_BPS; senao o residual SCALE_HAPPY_COLD_HOT_BPS; as-is diz 100% sempre"
+        "why": "the hot fraction of the happy path is exactly the cited gate — the store fitting in the warm_cap returns SCALE_BPS; otherwise the residual SCALE_HAPPY_COLD_HOT_BPS; the as-is says 100% always"
       },
       "finding": "RFC-0176 P1",
       "twin_kind": "model",
@@ -3950,7 +3950,7 @@
       "id": "scale_forecast",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "a tabela RFC-0176 e exatamente a composicao citada — cada campo e o atomo do kernel (sat_mul, level_count callee, point_get_probes, probes_worst, div_ceil, warm_cap_bytes, happy_hot_bps, best/happy/worst_get_ns) e hot e o gate store <= warm_cap; as-is anda todos os arquivos e diz sempre quente"
+        "why": "the RFC-0176 table is exactly the cited composition — each field is the kernel's atom (sat_mul, level_count callee, point_get_probes, probes_worst, div_ceil, warm_cap_bytes, happy_hot_bps, best/happy/worst_get_ns) and hot is the store <= warm_cap gate; the as-is walks all the files and always says hot"
       },
       "finding": "RFC-0176 P1.2",
       "twin_kind": "model",
@@ -3997,7 +3997,7 @@
       "atom": "cf_flush_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P2.1: dentro do scan armado de auto-flush, flushar a família EXATAMENTE no/acima do limite é decisão do kernel (auto_flush_due segue vivo e provado no corpo), provado ∀ sobre (mem_bytes, limit) como cf_flush_plan_fate_iff em Flush.lean; o AS-IS pula toda família (CF armado só cresce — dente); o trampolim db.rs maybe_auto_flush faz match no plano por família"
+        "why": "RFC-0219 P2.1: inside the armed auto-flush scan, flushing the family EXACTLY at or above the limit is decision of the kernel (auto_flush_due follows live and proved in the body), proved ∀ over (mem_bytes, limit) the cf_flush_plan_fate_iff in Flush.lean; the AS-IS skips every family (CF armed only grows — tooth); the trampoline db.rs maybe_auto_flush does match in the plan per family"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",

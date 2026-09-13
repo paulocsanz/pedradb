@@ -384,7 +384,7 @@ mod tests {
         assert!(!leveled_enabled());
         assert!(
             leveled_enabled_as_is(),
-            "AS-IS dente: PEDRA_LEVELED=0 ignored — rollback lever is decor"
+            "AS-IS tooth: PEDRA_LEVELED=0 ignored — rollback lever is decor"
         );
         std::env::remove_var("PEDRA_LEVELED");
         assert!(leveled_enabled());
@@ -399,7 +399,7 @@ mod tests {
         assert!(!is_disjoint(&touching));
         assert!(
             is_disjoint_as_is(&touching),
-            "AS-IS dente: shared boundary passes as disjoint — whole-level cascade"
+            "AS-IS tooth: shared boundary passes as disjoint — whole-level cascade"
         );
     }
 
@@ -413,7 +413,7 @@ mod tests {
         assert!(chunk.overlaps(hull_lo, hull_hi));
         assert!(
             !overlaps_as_is(&chunk, hull_lo, hull_hi),
-            "AS-IS dente: boundary-touching chunk left out of the slice — overlap survives the job"
+            "AS-IS tooth: boundary-touching chunk left out of the slice — overlap survives the job"
         );
     }
 
@@ -426,7 +426,7 @@ mod tests {
         assert_eq!(
             total_bytes_as_is(&level),
             2,
-            "AS-IS dente: file count standing in for bytes — over-target level reads under target"
+            "AS-IS tooth: file count standing in for bytes — over-target level reads under target"
         );
     }
 
@@ -441,7 +441,7 @@ mod tests {
         assert_ne!(level_target_bytes(20, 2), level_target_bytes_as_is(20, 2));
         assert!(
             level_target_bytes_as_is(20, 2) < level_target_bytes_as_is(19, 2),
-            "AS-IS dente: deep-level target wraps downward"
+            "AS-IS tooth: deep-level target wraps downward"
         );
     }
 
@@ -451,33 +451,33 @@ mod tests {
     /// unbounded job shapes.
     #[test]
     fn pick_l0_to_l1_on_live_slice_is_not_ok() {
-        // Whole-level dente: the far L1 file never overlaps the hull, so the
+        // Whole-level tooth: the far L1 file never overlaps the hull, so the
         // entry keeps it out; the mutant reabsorbs the entire level.
         let l0 = vec![f(0, "j", "t", 1)];
         let l1 = vec![f(1, "m", "p", 1), f(2, "zz", "zzz", 1)];
         let (_, mslice) = pick_l0_to_l1(&l0, &l1, 4).unwrap();
         let (_, aslice) = pick_l0_to_l1_as_is_whole_level(&l0, &l1).unwrap();
         assert!(!mslice.contains(&2));
-        assert!(aslice.contains(&2), "AS-IS dente: whole level reabsorbed");
+        assert!(aslice.contains(&2), "AS-IS tooth: whole level reabsorbed");
 
-        // Uncapped dente: three L0 files, cap 1 — entry selects one, mutant
+        // Uncapped tooth: three L0 files, cap 1 — entry selects one, mutant
         // selects all three.
         let l0c = vec![f(0, "a", "z", 1), f(3, "a", "z", 1), f(4, "a", "z", 1)];
         assert_eq!(pick_l0_to_l1(&l0c, &[], 1).unwrap().0.len(), 1);
         assert_eq!(
             pick_l0_to_l1_as_is_uncapped(&l0c, 1).unwrap().len(),
             3,
-            "AS-IS dente: input cap ignored"
+            "AS-IS tooth: input cap ignored"
         );
 
-        // Blind-pushdown dente: a stacked destination is refused by the
+        // Blind-pushdown tooth: a stacked destination is refused by the
         // entry, blindly rewritten by the mutant.
         let dst = vec![f(0, "a", "m", 1), f(1, "b", "z", 1)];
         let src = vec![f(7, "m", "p", 5)];
         assert!(pick_pushdown(&src, &dst).is_none());
         assert!(
             pick_pushdown_as_is_blind(&src, &dst).is_some(),
-            "AS-IS dente: stacked destination rewritten anyway"
+            "AS-IS tooth: stacked destination rewritten anyway"
         );
     }
 
@@ -504,7 +504,7 @@ mod tests {
         assert!(pick_pushdown(&src, &stacked).is_none());
         assert!(
             pick_pushdown_as_is_blind(&src, &stacked).is_some(),
-            "AS-IS dente: stacked destination rewritten anyway"
+            "AS-IS tooth: stacked destination rewritten anyway"
         );
     }
 }

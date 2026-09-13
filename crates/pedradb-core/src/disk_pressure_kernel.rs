@@ -258,7 +258,7 @@ mod tests {
         assert_eq!(
             disk_pressure_admit_as_is(Some(0)),
             DiskPressureAdmit::Ok,
-            "AS-IS dente: zero free still admits"
+            "AS-IS tooth: zero free still admits"
         );
     }
 
@@ -271,7 +271,7 @@ mod tests {
         assert_eq!(
             disk_probe_or_unknown_as_is(false, None),
             Some(0),
-            "AS-IS dente: probe Err is 0 free (false-refuse)"
+            "AS-IS tooth: probe Err is 0 free (false-refuse)"
         );
         assert_eq!(
             disk_pressure_admit(disk_probe_or_unknown(false, None)),
@@ -311,7 +311,7 @@ mod tests {
         assert!(!external_write_admitted(Some(0)));
         assert!(
             external_write_admitted_as_is(Some(0)),
-            "AS-IS dente: dest copy proceeds at zero free"
+            "AS-IS tooth: dest copy proceeds at zero free"
         );
         let glue = include_str!("env.rs")
             .split("pub fn admit_disk_write")
@@ -457,7 +457,7 @@ mod tests {
         assert_eq!(
             compact_refuse_as_is(Some(0)),
             None,
-            "AS-IS dente: SST write proceeds at zero free"
+            "AS-IS tooth: SST write proceeds at zero free"
         );
         assert!(
             include_str!("db.rs").matches("compact_refuse(").count() >= 4,
@@ -471,8 +471,8 @@ mod tests {
         assert!(live.compact_sst && live.rotate_wal && live.compact_vlog);
         let as_is = disk_pressure_reclaim_plan_as_is(true);
         assert!(as_is.compact_sst);
-        assert!(!as_is.rotate_wal, "AS-IS dente: no WAL recycle");
-        assert!(!as_is.compact_vlog, "AS-IS dente: no vlog GC");
+        assert!(!as_is.rotate_wal, "AS-IS tooth: no WAL recycle");
+        assert!(!as_is.compact_vlog, "AS-IS tooth: no vlog GC");
         let denied = disk_pressure_reclaim_plan(false);
         assert!(!denied.compact_sst && !denied.rotate_wal && !denied.compact_vlog);
         let body = include_str!("db.rs")
@@ -497,7 +497,7 @@ mod tests {
         )));
         assert!(
             compact_allowed_under_pressure_as_is(Some(0)),
-            "AS-IS dente: compact at zero free"
+            "AS-IS tooth: compact at zero free"
         );
     }
 
@@ -508,7 +508,7 @@ mod tests {
         assert!(!external_write_admitted(Some(DISK_HARD_FREE_BYTES - 1)));
         assert!(
             external_write_admitted_as_is(Some(0)),
-            "AS-IS dente: PITR/replica append at zero free"
+            "AS-IS tooth: PITR/replica append at zero free"
         );
     }
 

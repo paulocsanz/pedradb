@@ -1,4 +1,4 @@
 path=crates/pedradb-core/src/sst/magic_kernel.rs
-sha256=0a4922ed99f05bbcc6fd59f6388d8c058c051a634f6d776ab2ac67101a380df3
+sha256=715ee350df8558b280c11c333114e3c63cc2b19d855ca97651530096f69fa876
 aeneas=daa85d7
 charon=0.1.232

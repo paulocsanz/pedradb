@@ -116,7 +116,7 @@ struct WriteGroup {
     batches: AtomicU64,
     batch_ops: AtomicU64,
     /// Last time `active > 1` (ns, `WriteGroup::now_ns`). Fast path stays
-    /// off for [`MULTI_HOLD`] after a concurrent burst so apply's pre+com
+    /// off for [`MULTI_HOLD`] after the concurrent burst so apply's pre+with
     /// from 4 clients share fsyncs instead of each taking the lone-writer
     /// path between the two `write()`s (RFC-0040 P1.2).
     last_multi_ns: AtomicU64,
@@ -192,7 +192,7 @@ struct WriteGroup {
 const CATCHUP_WINDOW_DEFAULT: Duration = Duration::from_micros(50);
 
 /// How long after the last concurrent submit the lone-writer fast path stays
-/// disabled (see `last_multi_ns`). 250 µs covers apply pre→com on this box.
+/// disabled (see `last_multi_ns`). 250 µs covers apply pre→with on this box.
 const MULTI_HOLD: Duration = Duration::from_micros(250);
 
 /// RFC-0044 P0.5: merge concurrent async writers into one group frame/`write()`
@@ -201,7 +201,7 @@ const MULTI_HOLD: Duration = Duration::from_micros(250);
 /// (`client_axis_kernel::async_merge_policy`): concurrent async writers
 /// merge iff they outnumber the CPUs. The 0044 A/B that kept it off ran a
 /// 50-thread herd on a 12-CPU box against the dead WriteThread-merge
-/// shape; the 2026-09-11 attribution meter on the 4-vCPU cartaz box
+/// shape; the 2026-09-11 attribution meter on the 4-vCPU board box
 /// (`findings/2026-09-11-p201-meter-atribuicao/`) has the merge at
 /// 1.52× min-of-3 / 2.10× median vs Rocks `sync=false` on
 /// `kvrocks_set_mc50` while the bypass sits at 0.96×. `PEDRA_ASYNC_GROUP=1`
@@ -3774,7 +3774,7 @@ mod tests {
         assert_eq!(db.get(b"b"), None, "failed sync must not publish the group");
         assert!(
             crate::group_commit_kernel::may_publish_group_as_is(false),
-            "AS-IS dente: publish after failed WAL I/O"
+            "AS-IS tooth: publish after failed WAL I/O"
         );
         assert!(!crate::group_commit_kernel::may_publish_group(false));
         let _ = fs::remove_dir_all(&dir);
@@ -3819,7 +3819,7 @@ mod tests {
         );
         assert!(
             crate::group_commit_kernel::may_publish_group_as_is(false),
-            "AS-IS dente: publish after failed WAL I/O"
+            "AS-IS tooth: publish after failed WAL I/O"
         );
         assert!(!crate::group_commit_kernel::may_publish_group(false));
         let _ = fs::remove_dir_all(&dir);
@@ -3833,7 +3833,7 @@ mod tests {
         assert!(!crate::group_commit_kernel::may_publish_group(false));
         assert!(
             crate::group_commit_kernel::may_publish_group_as_is(false),
-            "AS-IS dente: publish after failed WAL I/O"
+            "AS-IS tooth: publish after failed WAL I/O"
         );
         let dir = temp_dir();
         let env = FenceEnv::new();
@@ -3918,7 +3918,7 @@ mod tests {
         );
         assert!(
             crate::group_commit_kernel::forall_schedules_admitted_as_is(2),
-            "AS-IS dente: d>=2 would claim forall"
+            "AS-IS tooth: d>=2 would claim forall"
         );
         assert!(!crate::group_commit_kernel::forall_schedules_admitted(2));
         let _ = fs::remove_dir_all(&dir);
@@ -3931,7 +3931,7 @@ mod tests {
         assert!(!crate::group_commit_kernel::forall_schedules_admitted(2));
         assert!(
             crate::group_commit_kernel::forall_schedules_admitted_as_is(2),
-            "AS-IS dente: PCT d>=2 would claim forall schedules"
+            "AS-IS tooth: PCT d>=2 would claim forall schedules"
         );
         let dir = temp_dir();
         let db = ConcurrentDb::open(&dir).unwrap();
@@ -3963,7 +3963,7 @@ mod tests {
         );
         assert!(
             crate::group_commit_kernel::default_pct_depth_raised_as_is(),
-            "AS-IS dente: 0070 P2 would claim d>2 is now default"
+            "AS-IS tooth: 0070 P2 would claim d>2 is now default"
         );
         assert!(!crate::group_commit_kernel::default_pct_depth_raised());
         let _ = fs::remove_dir_all(&dir);
@@ -3983,7 +3983,7 @@ mod tests {
         );
         assert!(
             crate::group_commit_kernel::lock_interleavings_admitted_as_is(),
-            "AS-IS dente: green put would claim ∀ lock interleavings"
+            "AS-IS tooth: green put would claim ∀ lock interleavings"
         );
         assert!(!crate::group_commit_kernel::lock_interleavings_admitted());
         assert!(crate::group_commit_kernel::may_publish_group(true));
@@ -6998,7 +6998,7 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// Four clients each apply a fat pre+com pair; every key is visible and
+    /// Four clients each apply the fat pre+with pair; every key is visible and
     /// WAL-durable (G1). Host is not notified per write — grouping still
     /// amortizes fsyncs.
     #[test]

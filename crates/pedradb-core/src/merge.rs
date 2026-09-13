@@ -194,7 +194,7 @@ pub fn sift_step(r_exists: bool, r_lt_l: bool, best_lt_hole: bool) -> SiftStep {
     }
 }
 
-/// AS-IS dente (three-teeth): the repair never happens — the heap trusts
+/// AS-IS tooth (three-teeth): the repair never happens — the heap trusts
 /// slot order and degrades to registration order.
 #[must_use]
 pub fn sift_step_as_is(_r_exists: bool, _r_lt_l: bool, _best_lt_hole: bool) -> SiftStep {
@@ -2112,7 +2112,7 @@ mod tests {
         assert!(!visible_at(ValueType::RangeDeletion, false));
         assert!(
             visible_at_as_is(ValueType::Deletion, true),
-            "AS-IS dente: never hides"
+            "AS-IS tooth: never hides"
         );
         let entries = vec![
             (ik(b"a", 1, ValueType::Value), Bytes::from_static(b"1")),
@@ -2134,7 +2134,7 @@ mod tests {
         assert!(!visible_at(ValueType::Value, true));
         assert!(
             visible_at_as_is(ValueType::Value, true),
-            "AS-IS dente: hidden value scans live"
+            "AS-IS tooth: hidden value scans live"
         );
         let entries = vec![
             (ik(b"b", 1, ValueType::Value), Bytes::from_static(b"1")),

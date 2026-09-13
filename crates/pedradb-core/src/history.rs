@@ -1620,7 +1620,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_match_ok(1, 2));
         assert!(
             crate::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS dente: any history manifest crc would match"
+            "AS-IS tooth: any history manifest crc would match"
         );
         let (root, _tier) = seeded_tier("crc-0086");
         let path = root.join("history").join("MANIFEST");
@@ -1656,7 +1656,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_collision_admitted());
         assert!(
             crate::wal::crc::crc_collision_admitted_as_is(),
-            "AS-IS dente: matching CRC looks collision-free"
+            "AS-IS tooth: matching CRC looks collision-free"
         );
         assert!(
             crate::wal::crc::crc_match_ok(1, 1),
@@ -1683,7 +1683,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_match_ok(1, 2));
         assert!(
             crate::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS dente: any segment crc would match"
+            "AS-IS tooth: any segment crc would match"
         );
         let (root, _tier) = seeded_tier("crc-0087");
         let path = only_segment_path(&root);
@@ -1706,7 +1706,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_collision_admitted());
         assert!(
             crate::wal::crc::crc_collision_admitted_as_is(),
-            "AS-IS dente: matching CRC looks collision-free"
+            "AS-IS tooth: matching CRC looks collision-free"
         );
         assert!(
             crate::wal::crc::crc_match_ok(1, 1),
@@ -1735,7 +1735,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_match_ok(1, 2));
         assert!(
             crate::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS dente: any segment crc would match"
+            "AS-IS tooth: any segment crc would match"
         );
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         for rel in [
@@ -1809,7 +1809,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_match_ok(1, 2));
         assert!(
             crate::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS dente: any bloom sidecar crc would match"
+            "AS-IS tooth: any bloom sidecar crc would match"
         );
         let (root, _tier) = seeded_tier("crc-0088");
         let path = only_bloom_path(&root);
@@ -1839,7 +1839,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_match_ok(1, 2));
         assert!(
             crate::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS dente: any bloom sidecar crc would match"
+            "AS-IS tooth: any bloom sidecar crc would match"
         );
         let (root, _tier) = seeded_tier("crc-0088-p11");
         let path = only_bloom_path(&root);
@@ -1864,7 +1864,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_collision_admitted());
         assert!(
             crate::wal::crc::crc_collision_admitted_as_is(),
-            "AS-IS dente: matching CRC looks collision-free"
+            "AS-IS tooth: matching CRC looks collision-free"
         );
         assert!(
             crate::wal::crc::crc_match_ok(1, 1),
@@ -1891,7 +1891,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_match_ok(1, 2));
         assert!(
             crate::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS dente: any bloom sidecar crc would match"
+            "AS-IS tooth: any bloom sidecar crc would match"
         );
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let db = std::fs::read_to_string(crate_root.join("src/db.rs")).expect("db.rs");
@@ -1931,7 +1931,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_match_ok(1, 2));
         assert!(
             crate::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS dente: any bloom sidecar crc would match"
+            "AS-IS tooth: any bloom sidecar crc would match"
         );
         let (root, tier) = seeded_tier("crc-0091-bloom");
         let id = tier.segment_metas()[0].id;
@@ -1962,7 +1962,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_match_ok(1, 2));
         assert!(
             crate::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS dente: any LATEST crc would match"
+            "AS-IS tooth: any LATEST crc would match"
         );
         let local = temp_root("crc-0089-l");
         let remote_root = temp_root("crc-0089-r");
@@ -2016,7 +2016,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_match_ok(1, 2));
         assert!(
             crate::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS dente: any LATEST crc would match"
+            "AS-IS tooth: any LATEST crc would match"
         );
         let (root, mut tier) = seeded_tier("crc-0089-p12");
         let remote_root = temp_root("crc-0089-p12-r");
@@ -2062,7 +2062,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_collision_admitted());
         assert!(
             crate::wal::crc::crc_collision_admitted_as_is(),
-            "AS-IS dente: matching CRC looks collision-free"
+            "AS-IS tooth: matching CRC looks collision-free"
         );
         assert!(
             crate::wal::crc::crc_match_ok(1, 1),
@@ -2089,7 +2089,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_collision_admitted());
         assert!(
             crate::wal::crc::crc_collision_admitted_as_is(),
-            "AS-IS dente: matching CRC looks collision-free"
+            "AS-IS tooth: matching CRC looks collision-free"
         );
         let hist = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/history.rs"),
@@ -2440,7 +2440,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_match_ok(1, 2));
         assert!(
             crate::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS dente: any same-length remote crc would match"
+            "AS-IS tooth: any same-length remote crc would match"
         );
         let (local, _tier) = seeded_tier("crc-0092");
         let seg = only_segment_path(&local);
@@ -2485,7 +2485,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_match_ok(1, 2));
         assert!(
             crate::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS dente: any same-length remote crc would match"
+            "AS-IS tooth: any same-length remote crc would match"
         );
         let (local, _tier) = seeded_tier("crc-0092-p12");
         let seg = only_segment_path(&local);
@@ -2582,7 +2582,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_collision_admitted());
         assert!(
             crate::wal::crc::crc_collision_admitted_as_is(),
-            "AS-IS dente: matching CRC looks collision-free"
+            "AS-IS tooth: matching CRC looks collision-free"
         );
         assert!(
             crate::wal::crc::crc_match_ok(1, 1),
@@ -2610,7 +2610,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_match_ok(1, 2));
         assert!(
             crate::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS dente: any same-length sidecar crc would match"
+            "AS-IS tooth: any same-length sidecar crc would match"
         );
         let (local, _tier) = seeded_tier("crc-0093");
         let seg = only_segment_path(&local);
@@ -2654,7 +2654,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_match_ok(1, 2));
         assert!(
             crate::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS dente: any same-length sidecar crc would match"
+            "AS-IS tooth: any same-length sidecar crc would match"
         );
         let (local, _tier) = seeded_tier("crc-0093-p11");
         let seg = only_segment_path(&local);
@@ -2757,7 +2757,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_collision_admitted());
         assert!(
             crate::wal::crc::crc_collision_admitted_as_is(),
-            "AS-IS dente: matching CRC looks collision-free"
+            "AS-IS tooth: matching CRC looks collision-free"
         );
         assert!(
             crate::wal::crc::crc_match_ok(1, 1),

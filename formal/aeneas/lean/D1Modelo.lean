@@ -13,9 +13,9 @@ theorem d1_modelo_unacked_vacuous :
   unfold wal.wal_state_kernel.inv_wal
   rfl
 
-/-- AS-IS dente: a cut below the barrier is treated as legal and the
+/-- AS-IS tooth: a cut below the barrier is treated as legal and the
     corollary fails (fixed kernel is vacuously true on that cut). -/
-theorem d1_modelo_as_is_dente :
+theorem d1_modelo_as_is_tooth :
     d1_modelo_kernel.d1_modelo_as_is
       { acked := 10#u64, synced := 10#u64, written := 10#u64 }
       (10#u64) (3#u64) = ok false := by
@@ -64,7 +64,7 @@ theorem put_ok_append_sync_ack :
     simp [lift, hsat, hadd]
   simp [happ, hsync, hsub, hack]
 
-/-- AS-IS dente: Lying sync plus ack-past-barrier (acked > synced). -/
+/-- AS-IS tooth: Lying sync plus ack-past-barrier (acked > synced). -/
 theorem put_ok_as_is_acks_unsynced :
     d1_modelo_kernel.put_ok_as_is
       { acked := 0#u64, synced := 0#u64, written := 0#u64 }
@@ -81,7 +81,7 @@ theorem put_ok_as_is_acks_unsynced :
     env_crash_kernel.SyncHonesty.read_discriminant]
   rfl
 
-/-! ## RFC-0215 P0.2 — coroa de produto no degrau átomo (modelo ×4) -/
+/-! ## RFC-0215 P0.2 — product crown in the atom rung (model ×4) -/
 
 /-- Any ok-valued Result bind forces the bound term to be ok
 (Cf.lean's `bind_ok_inv`, restated for this module). -/
@@ -92,9 +92,9 @@ private theorem bind_ok_inv {α β} (x : Result α) (f : α → Result β) (v : 
   | fail e => exact absurd h (by simp)
   | div => exact absurd h (by simp)
 
-/-- D1 modelo mantém: pelas veredas ok do modelo — invariante falso,
-registro ainda não ackado, crash ilegal, ou corte cobrindo o registro
-(`inv_wal`/`CrashModel.of`/`crash_legal` citados, corpos não reabertos). -/
+/-- D1 model maintains: pelas paths ok of the model — invariant false,
+record still not yet acked, crash illegal, or cut covering the record
+(`inv_wal`/`CrashModel.of`/`crash_legal` cited, bodies not reopened). -/
 def d1m_ok_true (s : wal.wal_state_kernel.WalState)
     (rec_end cut : U64) : Prop :=
   ∃ b, wal.wal_state_kernel.inv_wal s = ok b ∧
@@ -105,8 +105,8 @@ def d1m_ok_true (s : wal.wal_state_kernel.WalState)
           ∃ b1, env_crash_kernel.crash_legal cm cut = ok b1 ∧
             (b1 = false ∨ b1 = true ∧ cut >= rec_end)))
 
-/-- D1 modelo viola: registro ackado, crash legal e corte antes do
-fim do registro — ack que o crash desfaz. -/
+/-- D1 model viola: record ackado, crash legal and cut before of the
+end of the record — ack that the crash desfaz. -/
 def d1m_loses (s : wal.wal_state_kernel.WalState)
     (rec_end cut : U64) : Prop :=
   ∃ b, wal.wal_state_kernel.inv_wal s = ok b ∧ b = true ∧
@@ -116,10 +116,10 @@ def d1m_loses (s : wal.wal_state_kernel.WalState)
           b1 = true ∧ cut < rec_end
 
 /-- RFC-0215 P0.2 1/4 (atom `catalog:d1_modelo`, entry `d1_modelo`):
-o desfecho da máquina D1 é exatamente a decisão que o spec nomeia —
-`ok false` somente na vereda ackado+crash-legal+corte-antes-do-fim
-(o buraco do mutante AS-IS `crash_legal_as_is`, que aceita corte
-abaixo da barreira); `ok true` pelas demais veredas ok. -/
+the outcome of the D1 machine is exactly the decision the spec names —
+`ok false` only on the acked+legal-crash+cut-before-the-end path
+(the hole of the mutant AS-IS `crash_legal_as_is`, that accepts cut
+below of the barrier); `ok true` pelas demais paths ok. -/
 theorem d1_modelo_fate_iff :
     ∀ (s : wal.wal_state_kernel.WalState) (rec_end cut : U64) (v : Bool),
       (d1_modelo_kernel.d1_modelo s rec_end cut = ok v) ↔
@@ -210,15 +210,15 @@ theorem d1_modelo_fate_iff :
           simpa [ge_iff_le] using hN
         rw [decide_eq_false_iff_not.mpr hNG]
 
-/-! ## RFC-0215 P1.1 — coroa de produto no degrau átomo (fate ×2) -/
+/-! ## RFC-0215 P1.1 — product crown in the atom rung (fate ×2) -/
 
 /-- RFC-0215 P1.1 1/2 (atom `catalog:d1_put_ok`, entry `put_ok`):
-o put confirma exatamente quando o ledger cruza a barreira — a
-confirmação `ok s'` do put é exatamente a cadeia honesta
-append→sync→ack com o vão acked→synced (`wal_append`/`wal_sync`/
-`wal_ack` citados, corpos não reabertos). O mutante AS-IS
-(`put_ok_as_is`) promove synced sem barreira e acka o vão inteiro
-(`put_ok_as_is_acks_unsynced`); planta três-dentes recusa. -/
+the put confirma exactly when the ledger cruza the barrier — the
+confirmation `ok s'` of the put is exactly the chain honest
+append→sync→ack with the go acked→synced (`wal_append`/`wal_sync`/
+`wal_ack` cited, bodies not reopened). The mutant AS-IS
+(`put_ok_as_is`) promotes synced without barrier and acka the go whole
+(`put_ok_as_is_acks_unsynced`); the three-teeth plants refuse. -/
 theorem put_ok_fate_iff :
     ∀ (s0 : wal.wal_state_kernel.WalState) (rec_len : U64)
       (s' : wal.wal_state_kernel.WalState),

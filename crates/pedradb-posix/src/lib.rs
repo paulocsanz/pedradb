@@ -153,7 +153,7 @@ fn fdatasync_file_inner(file: &File) -> io::Result<()> {
 ///   Delayed allocation is cheap on async `write`; G1 `fdatasync` of a
 ///   growing WAL still has to allocate extents on the Ok path. Rocks
 ///   `PosixWritableFile::Allocate` pays this up front — Pedra must too
-///   (RFC-0062 P1.1 p11b: coluna B min 0.15 vs Rocks `sync=true`).
+///   (RFC-0062 P1.1 p11b: column B min 0.15 vs Rocks `sync=true`).
 ///
 /// Recovery never observes the reserved region (reads stop at logical
 /// `len`). Best-effort: unsupported FS (`EOPNOTSUPP`) returns `Ok`. Miri
@@ -420,14 +420,14 @@ mod tests {
         assert!(fdatasync_rc_ok(0));
         assert!(!fdatasync_rc_ok(-1));
         assert!(!fdatasync_rc_ok(1));
-        assert!(fdatasync_rc_ok_as_is(-1), "AS-IS dente: ignore rc");
+        assert!(fdatasync_rc_ok_as_is(-1), "AS-IS tooth: ignore rc");
         assert!(
             !fdatasync_eintr_retry_admitted(),
             "EINTR must not retry as Ok (RFC-0015 H1)"
         );
         assert!(
             fdatasync_eintr_retry_admitted_as_is(),
-            "AS-IS dente: swallow EINTR"
+            "AS-IS tooth: swallow EINTR"
         );
     }
 
@@ -468,7 +468,7 @@ mod tests {
     #[test]
     fn fdatasync_rc_ok_on_live_posix_is_not_ok() {
         assert!(!fdatasync_rc_ok(-1));
-        assert!(fdatasync_rc_ok_as_is(-1), "AS-IS dente: ignore rc");
+        assert!(fdatasync_rc_ok_as_is(-1), "AS-IS tooth: ignore rc");
         let dir = temp_dir();
         let path = dir.join("wal.bin");
         let mut f = File::create(&path).unwrap();
@@ -508,7 +508,7 @@ mod tests {
         assert!(fdatasync_rc_ok(0));
         assert!(!fdatasync_rc_ok(-1));
         assert!(!fdatasync_rc_ok(1));
-        assert!(fdatasync_rc_ok_as_is(-1), "AS-IS dente: ignore rc");
+        assert!(fdatasync_rc_ok_as_is(-1), "AS-IS tooth: ignore rc");
         let dir = temp_dir();
         let path = dir.join("g1.bin");
         let mut f = File::create(&path).unwrap();
@@ -555,7 +555,7 @@ mod tests {
     #[test]
     fn fsync_and_dirfd_share_rc_gate() {
         assert!(!fdatasync_rc_ok(-1));
-        assert!(fdatasync_rc_ok_as_is(-1), "AS-IS dente: ignore rc");
+        assert!(fdatasync_rc_ok_as_is(-1), "AS-IS tooth: ignore rc");
         let dir = temp_dir();
         let path = dir.join("g1.bin");
         let mut f = File::create(&path).unwrap();

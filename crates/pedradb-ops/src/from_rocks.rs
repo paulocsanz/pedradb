@@ -452,7 +452,7 @@ mod tests {
         ));
         assert!(
             !options_has_merge_operator_as_is("merge_operator=uint64add"),
-            "AS-IS dente: merge operands copied as values"
+            "AS-IS tooth: merge operands copied as values"
         );
     }
 
@@ -471,7 +471,7 @@ mod tests {
         ]));
         assert!(
             !options_has_blob_as_is("titan.min_blob_size=4096"),
-            "AS-IS dente: blob copied as values"
+            "AS-IS tooth: blob copied as values"
         );
     }
 
@@ -491,11 +491,11 @@ mod tests {
         );
         assert!(
             !options_has_wide_column_as_is("wide_column=true"),
-            "AS-IS dente: entity copied as bytes"
+            "AS-IS tooth: entity copied as bytes"
         );
         assert!(
             !options_has_user_timestamps_as_is("comparator=x.u64ts"),
-            "AS-IS dente: ts suffix copied as key"
+            "AS-IS tooth: ts suffix copied as key"
         );
     }
 

@@ -57,8 +57,8 @@ theorem worst_get_ns_l0_trigger_via_probes_worst :
     have h : core.num.U64.saturating_add 4#u64 4#u64 = 8#u64 := by native_decide
     simp [h]
 
-/-- AS-IS dente: walk every live file as a cold disk probe. -/
-theorem worst_get_ns_as_is_dente :
+/-- AS-IS tooth: walk every live file as a cold disk probe. -/
+theorem worst_get_ns_as_is_tooth :
     worst_get_ns_as_is 913#u64 4#u64 4#u64 = (
       predict_get_ns_as_is 913#u64 SCALE_TAU_RAM_NS SCALE_TAU_DISK_NS 0#u64 0#u64
     ) := by
@@ -83,8 +83,8 @@ theorem happy_get_ns_l0_best_via_point_get :
     have h : core.num.U64.saturating_add 4#u64 1#u64 = 5#u64 := by native_decide
     simp [h]
 
-/-- AS-IS dente: walk every live file as a cold disk probe. -/
-theorem happy_get_ns_as_is_dente :
+/-- AS-IS tooth: walk every live file as a cold disk probe. -/
+theorem happy_get_ns_as_is_tooth :
     happy_get_ns_as_is 913#u64 4#u64 0#u64 0#u64 = (
       predict_get_ns_as_is 913#u64 SCALE_TAU_RAM_NS SCALE_TAU_DISK_NS 0#u64 0#u64
     ) := by
@@ -107,8 +107,8 @@ theorem best_get_ns_l0_best_via_point_get :
     have h : core.num.U64.saturating_add 4#u64 1#u64 = 5#u64 := by native_decide
     simp [h]
 
-/-- AS-IS dente: walk every live file as a cold disk probe. -/
-theorem best_get_ns_as_is_dente :
+/-- AS-IS tooth: walk every live file as a cold disk probe. -/
+theorem best_get_ns_as_is_tooth :
     best_get_ns_as_is 913#u64 4#u64 = (
       predict_get_ns_as_is 913#u64 SCALE_TAU_RAM_NS SCALE_TAU_DISK_NS 0#u64 0#u64
     ) := by
@@ -230,11 +230,11 @@ private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : �
   rw [hx]
   exact h
 
-/-- RFC-0218 P2.2 (átomo `catalog:scale_probes`, entrada
-    `point_get_probes`): os probes de um point get são EXATAMENTE o
-    saturating_add citado — levels + L0 cobrindo, sem andar todos os
-    arquivos. O AS-IS anda cada SST vivo (GPS mentindo — dente
-    plantado). -/
+/-- RFC-0218 P2.2 (atom `catalog:scale_probes`, entry
+    `point_get_probes`): the probes of the point get are EXACTLY the
+    saturating_add cited — levels + L0 covering, without walking all the
+    files. The AS-IS walks every live SST (lying GPS — tooth
+    planted). -/
 theorem point_get_probes_fate_iff :
     ∀ (levels l0_covering : U64) (v : U64),
       (point_get_probes levels l0_covering = ok v) ↔
@@ -249,10 +249,10 @@ theorem point_get_probes_fate_iff :
     unfold point_get_probes
     rfl
 
-/-- RFC-0218 P2.2 (átomo `catalog:scale_probes_worst`, entrada
-    `probes_worst`): o pior caso de produção é EXATAMENTE a mesma soma
-    citada — point_get_probes com o trigger cheio do L0. O AS-IS ainda
-    anda cada arquivo vivo. -/
+/-- RFC-0218 P2.2 (atom `catalog:scale_probes_worst`, entry
+    `probes_worst`): the worst-case production matches is EXACTLY the same adds
+    cited — point_get_probes with the trigger full of the L0. The AS-IS still
+    walks each file live. -/
 theorem probes_worst_fate_iff :
     ∀ (levels l0_max : U64) (v : U64),
       (probes_worst levels l0_max = ok v) ↔
@@ -261,11 +261,11 @@ theorem probes_worst_fate_iff :
   unfold probes_worst
   exact Iff.rfl
 
-/-- RFC-0218 P2.2 (átomo `catalog:scale_happy_hot`, entrada
-    `happy_hot_bps`): a fração quente do caminho feliz é EXATAMENTE o
-    gate citado — loja cabendo no warm_cap devolve SCALE_BPS; senão o
-    residual SCALE_HAPPY_COLD_HOT_BPS. O AS-IS diz 100% sempre (a
-    mentira dos 3 TiB — dente plantado). -/
+/-- RFC-0218 P2.2 (atom `catalog:scale_happy_hot`, entry
+    `happy_hot_bps`): the hot fraction of the happy path is EXACTLY the
+    gate cited — the store fitting in the warm_cap returns SCALE_BPS; otherwise the
+    residual SCALE_HAPPY_COLD_HOT_BPS. The AS-IS diz 100% always (the
+    lie of the 3 TiB — tooth planted). -/
 theorem happy_hot_bps_fate_iff :
     ∀ (store_bytes ram_bytes : U64) (v : U64),
       (happy_hot_bps store_bytes ram_bytes = ok v) ↔
@@ -294,11 +294,11 @@ theorem happy_hot_bps_fate_iff :
       refine bind_intro i hi ?_
       rw [if_neg hc]
 
-/-- RFC-0218 P2.2 (átomo `catalog:scale_warm`, entrada
-    `warm_cap_bytes`): o teto do WARM é EXATAMENTE a cadeia citada —
-    ceiling desconhecido (0) é o piso 3 GiB; senão o maior entre o
-    piso e 3/4 do ceiling, cortado pelo reservado (ceiling − 1 GiB).
-    O AS-IS ignora o ceiling (u64::MAX — dente plantado). -/
+/-- RFC-0218 P2.2 (atom `catalog:scale_warm`, entry
+    `warm_cap_bytes`): the ceiling of the WARM is EXACTLY the cited chain —
+    ceiling unknown (0) is the floor 3 GiB; otherwise the larger between the
+    floor and 3/4 of the ceiling, cut by the reservado (ceiling − 1 GiB).
+    The AS-IS ignora the ceiling (u64::MAX — tooth planted). -/
 theorem warm_cap_bytes_fate_iff :
     ∀ (ram_ceiling : U64) (v : U64),
       (warm_cap_bytes ram_ceiling = ok v) ↔
@@ -377,12 +377,12 @@ theorem warm_cap_bytes_fate_iff :
           obtain ⟨hc2, rfl⟩ := hfinr
           rw [if_neg hc2]
 
-/-- RFC-0218 P2.2 (átomo `catalog:scale_predict`, entrada
-    `predict_get_ns`): o relógio previsto é EXATAMENTE a cadeia citada
+/-- RFC-0218 P2.2 (atom `catalog:scale_predict`, entry
+    `predict_get_ns`): the clock predicts is EXACTLY the cited chain
     — clamps min(hot, SCALE_BPS)/min(noisy, 9000), a mix
     hot·τ_ram + (SCALE_BPS−hot)·τ_disk, a conta em u128, a taxa
-    (1+η) e o try_from com teto u64::MAX. O AS-IS ignora η (dente
-    plantado). -/
+    (1+η) and the try_from with ceiling u64::MAX. The AS-IS ignora η (tooth
+    planted). -/
 theorem predict_get_ns_fate_iff :
     ∀ (probes tau_ram_ns tau_disk_ns hot_bps noisy_bps : U64) (v : U64),
       (predict_get_ns probes tau_ram_ns tau_disk_ns hot_bps noisy_bps
@@ -453,13 +453,13 @@ theorem predict_get_ns_fate_iff :
     rw [hv]
     exact hw
 
-/-- RFC-0218 P2.2 (átomo `catalog:scale_forecast`, entrada
-    `scale_forecast`): a tabela RFC-0176 é EXATAMENTE a composição
-    citada — cada campo é o átomo do kernel correspondente
-    (saturating_mul, level_count como callee citado, point_get_probes,
+/-- RFC-0218 P2.2 (atom `catalog:scale_forecast`, entry
+    `scale_forecast`): the table RFC-0176 is EXACTLY the composition
+    cited — each field is the atom of the kernel corresponding
+    (saturating_mul, level_count the callee cited, point_get_probes,
     probes_worst, div_ceil, warm_cap_bytes, happy_hot_bps, best/happy/
-    worst_get_ns); hot é o gate store <= warm_cap. O AS-IS anda todos
-    os arquivos e diz sempre quente (dente plantado). -/
+    worst_get_ns); hot is the gate store <= warm_cap. The AS-IS walks all
+    the files and always says hot (tooth planted). -/
 theorem scale_forecast_fate_iff :
     ∀ (keys ram_bytes : U64) (r : ScaleForecast),
       (scale_forecast keys ram_bytes = ok r) ↔
