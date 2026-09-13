@@ -5521,6 +5521,10 @@
   },
   {
    "id": "probe_order",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "empate de lo probeia exatamente o mais novo — o resultado e o indice newer citado; as-is devolve o mais velho (ressuscita deletado no empate)"
+   },
    "finding": "RFC-0164 P0.1",
    "twin_kind": "close",
    "single_artifact": true,

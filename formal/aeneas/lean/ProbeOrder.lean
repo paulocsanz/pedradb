@@ -39,3 +39,36 @@ theorem probe_order_covering_as_is_is_loop (nf by_lo pe his key) :
           (alloc.vec.Vec.with_capacity Usize (Slice.len nf)) 0#usize := by
   unfold probe_order_covering_as_is
   rfl
+
+
+/-- Any ok-valued Result bind forces the bound term to be ok. -/
+private theorem bind_ok_inv {α β} (x : Result α) (f : α → Result β) (v : β)
+    (h : Aeneas.Std.bind x f = ok v) : ∃ a, x = ok a ∧ f a = ok v := by
+  cases x with
+  | ok a => exact ⟨a, rfl, h⟩
+  | fail e => exact absurd h (by simp)
+  | div => exact absurd h (by simp)
+
+/-- An ok chain reassembles into an ok bind. -/
+private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : β}
+    (a : α) (hx : x = ok a) (h : f a = ok v) : Aeneas.Std.bind x f = ok v := by
+  rw [hx]
+  exact h
+
+/-- RFC-0218 P2.2 (átomo `catalog:probe_order`, entrada
+    `first_probe_on_equal_lo`): empate de lo probeia EXATAMENTE o mais
+    novo — o resultado é o índice `newer` citado. O AS-IS devolve o mais
+    velho (resurrect no empate — dente plantado). -/
+theorem probe_order_fate_iff :
+    ∀ (newer older : Usize) (v : Usize),
+      (first_probe_on_equal_lo newer older = ok v) ↔ (v = newer) := by
+  intro newer older v
+  constructor
+  · intro hval
+    unfold first_probe_on_equal_lo at hval
+    injection hval with hv
+    exact hv.symm
+  · rintro rfl
+    unfold first_probe_on_equal_lo
+    rfl
+
