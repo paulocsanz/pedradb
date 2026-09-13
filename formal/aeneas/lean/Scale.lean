@@ -293,3 +293,86 @@ theorem happy_hot_bps_fate_iff :
     · unfold happy_hot_bps
       refine bind_intro i hi ?_
       rw [if_neg hc]
+
+/-- RFC-0218 P2.2 (átomo `catalog:scale_warm`, entrada
+    `warm_cap_bytes`): o teto do WARM é EXATAMENTE a cadeia citada —
+    ceiling desconhecido (0) é o piso 3 GiB; senão o maior entre o
+    piso e 3/4 do ceiling, cortado pelo reservado (ceiling − 1 GiB).
+    O AS-IS ignora o ceiling (u64::MAX — dente plantado). -/
+theorem warm_cap_bytes_fate_iff :
+    ∀ (ram_ceiling : U64) (v : U64),
+      (warm_cap_bytes ram_ceiling = ok v) ↔
+        ((ram_ceiling = 0#u64 ∧ WARM_FLOOR_BYTES = ok v)
+         ∨ (¬ (ram_ceiling = 0#u64) ∧
+            ∃ i share i1 cap i2 reserved : U64,
+              core.num.U64.saturating_mul ram_ceiling 3#u64 = ok i ∧
+              i / 4#u64 = ok share ∧
+              WARM_FLOOR_BYTES = ok i1 ∧
+              ((i1 >= share ∧ cap = i1) ∨ (¬ (i1 >= share) ∧ cap = share)) ∧
+              WARM_RESERVE_BYTES = ok i2 ∧
+              lift (core.num.U64.saturating_sub ram_ceiling i2)
+                = ok reserved ∧
+              ((cap <= reserved ∧ v = cap)
+               ∨ (¬ (cap <= reserved) ∧ v = reserved)))) := by
+  intro ram_ceiling v
+  constructor
+  · intro hval
+    unfold warm_cap_bytes at hval
+    split at hval
+    · next hc => exact Or.inl ⟨hc, hval⟩
+    · next hc =>
+      obtain ⟨i, hi, hval⟩ := bind_ok_inv _ _ _ hval
+      obtain ⟨share, hshare, hval⟩ := bind_ok_inv _ _ _ hval
+      obtain ⟨i1, hi1, hval⟩ := bind_ok_inv _ _ _ hval
+      obtain ⟨cap, hcap, hval⟩ := bind_ok_inv _ _ _ hval
+      obtain ⟨i2, hi2, hval⟩ := bind_ok_inv _ _ _ hval
+      obtain ⟨reserved, hreserved, hval⟩ := bind_ok_inv _ _ _ hval
+      refine Or.inr ⟨hc, i, share, i1, cap, i2, reserved, hi, hshare,
+        hi1, ?_, hi2, hreserved, ?_⟩
+      · split at hcap
+        · next hc1 =>
+          injection hcap with hcv
+          exact Or.inl ⟨hc1, hcv.symm⟩
+        · next hc1 =>
+          injection hcap with hcv
+          exact Or.inr ⟨hc1, hcv.symm⟩
+      · split at hval
+        · next hc2 =>
+          injection hval with hv
+          exact Or.inl ⟨hc2, hv.symm⟩
+        · next hc2 =>
+          injection hval with hv
+          exact Or.inr ⟨hc2, hv.symm⟩
+  · rintro (⟨rfl, hv⟩ |
+      ⟨hc, i, share, i1, cap, i2, reserved, hi, hshare, hi1, hcapd, hi2,
+        hreserved, hfin⟩)
+    · unfold warm_cap_bytes
+      rw [if_pos rfl]
+      exact hv
+    · unfold warm_cap_bytes
+      rw [if_neg hc]
+      refine bind_intro i hi
+        (bind_intro share hshare (bind_intro i1 hi1 ?_))
+      cases hcapd with
+      | inl hcapl =>
+        obtain ⟨hc1, rfl⟩ := hcapl
+        refine bind_intro cap (by rw [if_pos hc1]) ?_
+        refine bind_intro i2 hi2 (bind_intro reserved hreserved ?_)
+        cases hfin with
+        | inl hfinl =>
+          obtain ⟨hc2, rfl⟩ := hfinl
+          rw [if_pos hc2]
+        | inr hfinr =>
+          obtain ⟨hc2, rfl⟩ := hfinr
+          rw [if_neg hc2]
+      | inr hcapr =>
+        obtain ⟨hc1, rfl⟩ := hcapr
+        refine bind_intro cap (by rw [if_neg hc1]) ?_
+        refine bind_intro i2 hi2 (bind_intro reserved hreserved ?_)
+        cases hfin with
+        | inl hfinl =>
+          obtain ⟨hc2, rfl⟩ := hfinl
+          rw [if_pos hc2]
+        | inr hfinr =>
+          obtain ⟨hc2, rfl⟩ := hfinr
+          rw [if_neg hc2]

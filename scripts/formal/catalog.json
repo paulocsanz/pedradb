@@ -8004,6 +8004,10 @@
   },
   {
    "id": "scale_warm",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "teto do WARM e exatamente a cadeia citada — ceiling 0 e o piso 3 GiB; senao max(piso, 3/4 ceiling) cortado pelo reservado ceiling - 1 GiB; as-is ignora o ceiling (u64::MAX)"
+   },
    "finding": "RFC-0176 P0",
    "twin_kind": "close",
    "single_artifact": true,
