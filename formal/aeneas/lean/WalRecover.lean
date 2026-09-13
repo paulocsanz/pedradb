@@ -413,3 +413,169 @@ theorem from_record_type_fate_iff :
       · exact absurd h4.1 (fun h => format.RecordType.noConfusion h)
       · subst hv
         rfl
+
+/-- RFC-0218 P0.2 2/4 (átomo `catalog:is_length_resyncable`): a
+    classe de resync é EXATAMENTE o trio de dano de comprimento
+    (Truncated/LengthCorrupt/UnknownType) — os seis demais tipos nunca
+    são resyncable por comprimento. O AS-IS promove Crc a
+    length-resyncable (misclassificação que o fixo recusa — dente
+    plantado). -/
+theorem is_length_resyncable_fate_iff :
+    ∀ (kind : recover_kernel.RecoverKind) (v : Bool),
+      (recover_kernel.is_length_resyncable kind = ok v) ↔
+        ((kind = recover_kernel.RecoverKind.Truncated ∧ v = true) ∨
+          (kind = recover_kernel.RecoverKind.LengthCorrupt ∧ v = true) ∨
+          (kind = recover_kernel.RecoverKind.UnknownType ∧ v = true) ∨
+          (kind = recover_kernel.RecoverKind.Record ∧ v = false) ∨
+          (kind = recover_kernel.RecoverKind.CleanEof ∧ v = false) ∨
+          (kind = recover_kernel.RecoverKind.OrphanFragment ∧ v = false) ∨
+          (kind = recover_kernel.RecoverKind.Crc ∧ v = false) ∨
+          (kind = recover_kernel.RecoverKind.ZeroHeaderTail ∧ v = false) ∨
+          (kind = recover_kernel.RecoverKind.Other ∧ v = false)) := by
+  intro kind v
+  cases kind with
+  | Truncated =>
+    constructor
+    · intro hval
+      injection hval with hv
+      exact Or.inl ⟨rfl, hv.symm⟩
+    · rintro (⟨-, hv⟩ | h2 | h3 | h4 | h5 | h6 | h7 | h8 | h9)
+      · subst hv
+        rfl
+      · exact absurd h2.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h3.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h4.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h5.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h6.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h7.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h8.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h9.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+  | LengthCorrupt =>
+    constructor
+    · intro hval
+      injection hval with hv
+      exact Or.inr (Or.inl ⟨rfl, hv.symm⟩)
+    · rintro (h1 | ⟨-, hv⟩ | h3 | h4 | h5 | h6 | h7 | h8 | h9)
+      · exact absurd h1.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · subst hv
+        rfl
+      · exact absurd h3.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h4.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h5.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h6.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h7.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h8.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h9.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+  | UnknownType =>
+    constructor
+    · intro hval
+      injection hval with hv
+      exact Or.inr (Or.inr (Or.inl ⟨rfl, hv.symm⟩))
+    · rintro (h1 | h2 | ⟨-, hv⟩ | h4 | h5 | h6 | h7 | h8 | h9)
+      · exact absurd h1.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h2.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · subst hv
+        rfl
+      · exact absurd h4.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h5.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h6.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h7.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h8.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h9.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+  | Record =>
+    constructor
+    · intro hval
+      injection hval with hv
+      exact Or.inr (Or.inr (Or.inr (Or.inl ⟨rfl, hv.symm⟩)))
+    · rintro (h1 | h2 | h3 | ⟨-, hv⟩ | h5 | h6 | h7 | h8 | h9)
+      · exact absurd h1.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h2.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h3.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · subst hv
+        rfl
+      · exact absurd h5.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h6.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h7.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h8.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h9.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+  | CleanEof =>
+    constructor
+    · intro hval
+      injection hval with hv
+      exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨rfl, hv.symm⟩))))
+    · rintro (h1 | h2 | h3 | h4 | ⟨-, hv⟩ | h6 | h7 | h8 | h9)
+      · exact absurd h1.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h2.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h3.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h4.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · subst hv
+        rfl
+      · exact absurd h6.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h7.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h8.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h9.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+  | OrphanFragment =>
+    constructor
+    · intro hval
+      injection hval with hv
+      exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨rfl, hv.symm⟩)))))
+    · rintro (h1 | h2 | h3 | h4 | h5 | ⟨-, hv⟩ | h7 | h8 | h9)
+      · exact absurd h1.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h2.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h3.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h4.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h5.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · subst hv
+        rfl
+      · exact absurd h7.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h8.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h9.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+  | Crc =>
+    constructor
+    · intro hval
+      injection hval with hv
+      exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨rfl, hv.symm⟩))))))
+    · rintro (h1 | h2 | h3 | h4 | h5 | h6 | ⟨-, hv⟩ | h8 | h9)
+      · exact absurd h1.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h2.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h3.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h4.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h5.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h6.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · subst hv
+        rfl
+      · exact absurd h8.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h9.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+  | ZeroHeaderTail =>
+    constructor
+    · intro hval
+      injection hval with hv
+      exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨rfl, hv.symm⟩)))))))
+    · rintro (h1 | h2 | h3 | h4 | h5 | h6 | h7 | ⟨-, hv⟩ | h9)
+      · exact absurd h1.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h2.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h3.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h4.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h5.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h6.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h7.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · subst hv
+        rfl
+      · exact absurd h9.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+  | Other =>
+    constructor
+    · intro hval
+      injection hval with hv
+      refine Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr ?_)))))))
+      exact ⟨rfl, hv.symm⟩
+    · rintro (h1 | h2 | h3 | h4 | h5 | h6 | h7 | h8 | ⟨-, hv⟩)
+      · exact absurd h1.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h2.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h3.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h4.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h5.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h6.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h7.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · exact absurd h8.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
+      · subst hv
+        rfl

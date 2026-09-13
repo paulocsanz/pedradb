@@ -5968,7 +5968,11 @@
     "file": "crates/pedradb-core/src/wal/recover_kernel.rs",
     "test": "resync_only_length_class"
    },
-   "three_teeth": true
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 2/4 P0.2: is_length_resyncable como classificador citado — trio de dano de comprimento (Truncated/LengthCorrupt/UnknownType) → true, demais seis → false; floor_atom 183→184"
+   }
   },
   {
    "id": "physical_payload_act",

@@ -57,3 +57,10 @@ gates GREEN no commit).
   reverso refuta por noConfusion). Build verde. Planta DST
   `from_record_type_on_wire_type_is_not_ok` (pedradb-core, exit 0).
   Gate: floor_atom 182→183, floor_extract 96→95.
+
+- **is_length_resyncable (2/4)**: classificador citado — trio de dano de
+  comprimento (Truncated/LengthCorrupt/UnknownType) → true, demais seis
+  tipos → false — `is_length_resyncable_fate_iff` em `WalRecover.lean`
+  (9 ramos disjuntos planos, reverso refuta por noConfusion). Build
+  verde. Planta DST `resync_only_length_class` (pedradb-core, exit 0).
+  Gate: floor_atom 183→184, floor_extract 95→94.
