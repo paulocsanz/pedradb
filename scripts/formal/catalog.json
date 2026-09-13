@@ -6131,6 +6131,10 @@
   },
   {
    "id": "compact_split_at",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.1: fate ∀ sobre compact_should_split_at no degrau átomo — decide (written >= target), mutantes nunca dividem; planta DST compact_split_mutants_never_split_is_not_ok"
+   },
    "finding": "RFC-0160 OOM",
    "twin_kind": "close",
    "single_artifact": true,

@@ -228,6 +228,15 @@ gates GREEN no commit).
 
 ## P1.1 — compact ×7 + lsm_r1 ×3 átomo
 
+- **compact_split_at / compact_should_split_at (6/10)**:
+  dividir-no-ponto como o lift citado `decide (written_bytes >=
+  target)` — mutantes nunca dividem —
+  `compact_should_split_at_fate_iff` em `Compact.lean`. Forward:
+  unfold + injection + hv.symm; reverso: rintro + subst + rfl.
+  Build verde. Planta DST `compact_split_mutants_never_split_is_not_ok`
+  (pedradb-core, exit 0 no worktree). Gate: floor_atom 206→207,
+  floor_extract 72→71.
+
 - **compact_split / compact_should_split (5/10)**: dividir como o
   bind citado — o gate `COMPACT_TARGET_FILE_BYTES` produz o alvo `i` e
   `compact_should_split_at w i` decide —

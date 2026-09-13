@@ -114,10 +114,10 @@ nunca por promoção silenciosa.
    `compact_peer_counts`, `compact_ready` (store), `compact_split`,
    `compact_split_at`, `lone_tombstone` (core), `lsm_compact`,
    `lsm_probe`, `lsm_reopen` — floor_atom 201→211 — status: `todo`
-   (5/10: `may_compact_through_fate_iff`,
+   (6/10: `may_compact_through_fate_iff`,
    `compact_index_floor_fate_iff`, `peer_counts_for_compact_fate_iff`,
-   `compact_ready_fate_iff` e `compact_should_split_fate_iff` feitos
-   2026-09-13)
+   `compact_ready_fate_iff`, `compact_should_split_fate_iff` e
+   `compact_should_split_at_fate_iff` feitos 2026-09-13)
 
 6. **P1.2** leveling ×4 + merge ×2 + index_val ×3 + key ×1 + prefix ×1:
    `leveled_enabled`, `leveling_disjoint`, `leveling_overlaps`,

@@ -117,3 +117,20 @@ theorem compact_should_split_fate_iff :
   · rintro ⟨i, hT, hs⟩
     unfold compact_should_split
     exact bind_intro i hT hs
+
+/-- RFC-0218 P1.1 6/10 (átomo `catalog:compact_split_at`, entrada
+    `compact_should_split_at`): dividir-no-ponto é EXATAMENTE o lift
+    citado `written_bytes >= target` (decide). O AS-IS é a constante
+    false (mutantes nunca dividem — dente plantado). -/
+theorem compact_should_split_at_fate_iff :
+    ∀ (w : U64) (t : U64) (v : Bool),
+      (compact_should_split_at w t = ok v) ↔ (v = decide (w >= t)) := by
+  intro w t v
+  constructor
+  · intro hval
+    unfold compact_should_split_at at hval
+    injection hval with hv
+    exact hv.symm
+  · rintro hv
+    subst hv
+    rfl
