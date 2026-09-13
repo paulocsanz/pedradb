@@ -38,6 +38,12 @@ private theorem bind_ok_inv {α β} (x : Result α) (f : α → Result β) (v : 
   | fail e => exact absurd h (by simp)
   | div => exact absurd h (by simp)
 
+/-- An ok chain reassembles into an ok bind. -/
+private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : β}
+    (a : α) (hx : x = ok a) (h : f a = ok v) : Aeneas.Std.bind x f = ok v := by
+  rw [hx]
+  exact h
+
 /-- T1 modelo mantém: a recuperação devolve estado que passa o
 preditor (`t1_holds_of` citado, corpo não reaberto). -/
 def t1m_holds (s : t1_modelo_kernel.TxState) : Prop :=
@@ -83,3 +89,51 @@ theorem t1_modelo_fate_iff :
         rw [hts]
         simp only [Aeneas.Std.bind_tc_ok]
         exact hviol
+
+/-- RFC-0218 P1.3 10/11 (átomo `catalog:tx_abort`, entrada
+    `tx_abort`): abortar é EXATAMENTE a cadeia citada — tx já
+    committed devolve o próprio estado; senão o commit-action tem que
+    ser Revert (massert), o revert NÃO pode limpar o status (massert),
+    e o abort devolve visible zerado, aborted e CERCOADO. O AS-IS
+    devolve o mesmo estado sem o cerca (commit replay materializa a
+    tx abortada — dente plantado). -/
+theorem tx_abort_fate_iff :
+    ∀ (s r : t1_modelo_kernel.TxState),
+      (t1_modelo_kernel.tx_abort s = ok r) ↔
+        ((s.committed = true ∧ r = s) ∨
+         (s.committed = false ∧
+          ∃ (a : txn_kernel.TxnCommitAction) (b b1 : Bool),
+            txn_kernel.txn_commit_action true = ok a ∧
+            txn_kernel.TxnCommitAction.Insts.CoreCmpPartialEqTxnCommitAction.eq
+              a txn_kernel.TxnCommitAction.Revert = ok b ∧
+            massert b = ok () ∧
+            txn_kernel.revert_clears_status true true = ok b1 ∧
+            massert (¬ b1) = ok () ∧
+            r = { s with visible := 0#u64, aborted := true, fenced := true })) := by
+  intro s r
+  constructor
+  · intro hval
+    unfold t1_modelo_kernel.tx_abort at hval
+    split at hval
+    · next hcom =>
+      injection hval with hv
+      exact Or.inl ⟨hcom, hv.symm⟩
+    · next hcom =>
+      simp only [Bool.not_eq_true] at hcom
+      obtain ⟨a, hact, hval⟩ := bind_ok_inv _ _ _ hval
+      obtain ⟨b, heq, hval⟩ := bind_ok_inv _ _ _ hval
+      obtain ⟨u, hm, hval⟩ := bind_ok_inv _ _ _ hval
+      obtain ⟨b1, hrc, hval⟩ := bind_ok_inv _ _ _ hval
+      obtain ⟨u2, hm2, hval⟩ := bind_ok_inv _ _ _ hval
+      injection hval with hv
+      exact Or.inr ⟨hcom, a, b, b1, hact, heq, hm, hrc, hm2, hv.symm⟩
+  · rintro (⟨hcom, hv⟩ | ⟨hcom, a, b, b1, hact, heq, hm, hrc, hm2, hv⟩)
+    · subst hv
+      unfold t1_modelo_kernel.tx_abort
+      rw [if_pos hcom]
+    · subst hv
+      have hn : ¬ (s.committed = true) := by simp [hcom]
+      unfold t1_modelo_kernel.tx_abort
+      rw [if_neg hn]
+      exact bind_intro a hact (bind_intro b heq (bind_intro () hm
+        (bind_intro b1 hrc (bind_intro () hm2 rfl))))

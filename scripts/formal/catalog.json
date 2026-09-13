@@ -7349,6 +7349,10 @@
   },
   {
    "id": "tx_abort",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.3: fate ∀ sobre tx_abort no degrau átomo — committed devolve o estado; senão commit-action Revert + revert sem limpar status (masserts) e abort cercado com visible zerado; planta DST t1_modelo_on_live_abort_reopen_is_not_ok"
+   },
    "entry": "tx_abort",
    "as_is": "tx_abort_as_is",
    "finding": "RFC-0166 P2.2",
