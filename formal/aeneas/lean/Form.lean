@@ -52,3 +52,14 @@ theorem form_plus_byte_fate_iff :
       rw [if_pos hbt, hr]
     · unfold form_plus_byte
       rw [if_neg hbf, hr]
+
+theorem plus_before_percent_fate_iff :
+    ∀ (r : Bool), (plus_before_percent = ok r) ↔ r = true := by
+  intro r
+  constructor
+  · intro hval
+    unfold plus_before_percent at hval
+    exact (Result.ok.inj hval).symm
+  · intro hr
+    unfold plus_before_percent
+    rw [hr]

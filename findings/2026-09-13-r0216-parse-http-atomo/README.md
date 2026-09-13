@@ -68,3 +68,12 @@ verde antes do commit, exatamente 1 teorema público por commit).
   O mutante AS-IS não converte. Planta DST
   `plus_is_space_before_percent` (pedradb-http, exit 0, 1 passed).
   Gate GREEN: floor_atom 163→164, floor_extract 115→114.
+
+## P1.1 — form ×4 átomo (2/4)
+
+- **plus_before_percent (2/4)**: a flag de ordenação `'+'`-antes-
+  `'%`'` decide exatamente na constante honesta extraída — o decoder
+  trata o `+` antes do escape de percent; o AS-IS não distingue.
+  Planta DST `plus_order_flag_discriminates_as_is` (pedradb-http,
+  exit 0, 1 passed). Gate GREEN: floor_atom 164→165,
+  floor_extract 114→113.
