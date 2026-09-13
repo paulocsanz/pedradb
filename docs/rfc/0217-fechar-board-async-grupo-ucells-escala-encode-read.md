@@ -246,7 +246,22 @@ board**, estendendo este RFC a cada etapa nova descoberta.
 - [ ] **P2.4** Escada de admissão (produto): probe com histerese/cache
   curto em vez de por commit (alvo ≤1ms/commit sob Reclaim; parks
   230–310ms eliminados do caminho quente; guarda: semântica Refuse abaixo
-  do hard intacta, `disk_pressure` 11/11). — status: `todo`
+  do hard intacta, `disk_pressure` 11/11). — status: `doing` (kernel +
+  wiring landed, knob `PEDRA_DISK_PROBE_CACHE_MS` opt-in, default off até
+  meter). Landed: `probe_cached`/`reclaim_ladder_due` no
+  `disk_pressure_kernel` (puras, testadas) + wiring em
+  `ensure_disk_pressure_admitted` — (a) veredito `Ok` fresco (< janela,
+  default 200ms) reusado sem `statvfs`; (b) banda soft SÓ proeba por
+  commit e a escada (compact/rotate/vlog-GC) rate-limited a 1×/1000ms —
+  o commit admite sem esperar a escada (mata as dezenas de ms/commit);
+  (c) Refuse nunca é mascarado fora da janela: banda soft e refuse
+  nunca populam o cache (`disk_ok_probe_at=None`), e o teste prova com
+  contador de probes que o Ok cacheado não re-proeba e que o refuse
+  abaixo do hard volta no commit seguinte ao expirar a janela. Guardiãs:
+  `disk_pressure` 13/13 (11 originais + 2 novas de kernel), 2 testes Db
+  novos no SpaceEnv real (`put` end-to-end com probe contável).
+  Pendente: meter Linux em disco pequeno (efeito ≤1ms/commit + parks) e
+  decidir flip do default (off até lá).
 - [ ] **P2.5** Cobertura dos eixos sem número: sweep delete-heavy (hat:
   perda — única família tocando deletes hoje é perda), concorrência 9–49
   (fronteira mc8→mc50 sem ponto), célula 1 GiB (faixa smoke↔4GiB vazia),

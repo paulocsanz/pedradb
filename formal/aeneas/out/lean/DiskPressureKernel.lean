@@ -332,8 +332,38 @@ def disk_pressure_reclaim_plan_as_is
 def disk_pressure_reclaim_plan_wal_held : Result DiskReclaimPlan := do
   ok { compact_sst := false, rotate_wal := false, compact_vlog := false }
 
+/-- [pedra_aeneas_disk_pressure_kernel::DISK_PROBE_CACHE_MS]
+    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 162:0-162:41
+    Visibility: public -/
+@[global_simps, irreducible] def DISK_PROBE_CACHE_MS : Std.U64 := 200#u64
+
+/-- [pedra_aeneas_disk_pressure_kernel::DISK_RECLAIM_EVERY_MS]
+    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 167:0-167:45
+    Visibility: public -/
+@[global_simps, irreducible] def DISK_RECLAIM_EVERY_MS : Std.U64 := 1000#u64
+
+/-- [pedra_aeneas_disk_pressure_kernel::probe_cached]:
+    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 174:0-176:1
+    Visibility: public -/
+def probe_cached
+  (last_ok : Bool) (ms_since_probe : Std.U64) (cache_ms : Std.U64) :
+  Result Bool
+  := do
+  if cache_ms > 0#u64
+  then if last_ok
+       then ok (ms_since_probe < cache_ms)
+       else ok false
+  else ok false
+
+/-- [pedra_aeneas_disk_pressure_kernel::reclaim_ladder_due]:
+    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 181:0-183:1
+    Visibility: public -/
+def reclaim_ladder_due
+  (ms_since_ladder : Std.U64) (every_ms : Std.U64) : Result Bool := do
+  ok (ms_since_ladder >= every_ms)
+
 /-- [pedra_aeneas_disk_pressure_kernel::external_write_admitted]:
-    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 164:0-169:1
+    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 190:0-195:1
     Visibility: public -/
 def external_write_admitted (available : Option Std.U64) : Result Bool := do
   let dpa ← disk_pressure_admit available
@@ -345,7 +375,7 @@ def external_write_admitted (available : Option Std.U64) : Result Bool := do
   ok (¬ b)
 
 /-- [pedra_aeneas_disk_pressure_kernel::external_write_admitted_as_is]:
-    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 173:0-175:1
+    Source: '../../../crates/pedradb-core/src/disk_pressure_kernel.rs', lines 199:0-201:1
     Visibility: public -/
 def external_write_admitted_as_is
   (_available : Option Std.U64) : Result Bool := do

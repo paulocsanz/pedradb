@@ -156,6 +156,32 @@ pub fn disk_pressure_reclaim_plan_wal_held() -> DiskReclaimPlan {
     }
 }
 
+/// Default short probe cache after an `Ok` verdict (RFC-0217 P2.4). The
+/// per-commit `statvfs` (+ reclaim ladder in the soft band) cost tens of ms
+/// per commit on small disks; a fresh-enough `Ok` is reused for this window.
+pub const DISK_PROBE_CACHE_MS: u64 = 200;
+
+/// Default reclaim-ladder period (RFC-0217 P2.4). In the soft band every
+/// commit still probes (cheap), but the compact/rotate/GC ladder runs at
+/// most once per window — the ladder, not admission, is rate-limited.
+pub const DISK_RECLAIM_EVERY_MS: u64 = 1_000;
+
+/// Probe cadence (RFC-0217 P2.4): reuse the last verdict only when it was
+/// `Ok` and it is still fresh. Anything else (soft band, refuse, never
+/// probed) probes now — a drop below the hard floor is caught by the next
+/// commit, and a refuse is never masked by a stale `Ok` beyond the window.
+#[must_use]
+pub fn probe_cached(last_ok: bool, ms_since_probe: u64, cache_ms: u64) -> bool {
+    cache_ms > 0 && last_ok && ms_since_probe < cache_ms
+}
+
+/// Reclaim-ladder cadence (RFC-0217 P2.4): `true` when the ladder has
+/// never run or the period elapsed. Admission itself never waits on this.
+#[must_use]
+pub fn reclaim_ladder_due(ms_since_ladder: u64, every_ms: u64) -> bool {
+    ms_since_ladder >= every_ms
+}
+
 /// PITR dest / backup sink / HA replica WAL: same hard floor as live `put`.
 ///
 /// Reclaim is still admitted — those callers have nothing to compact on an
@@ -487,5 +513,39 @@ mod tests {
             external_write_admitted_as_is(Some(0)),
             "AS-IS dente: PITR/replica append at zero free"
         );
+    }
+
+    #[test]
+    fn rfc0217_probe_cache_only_after_fresh_ok() {
+        // Fresh Ok within the window: cached (no statvfs that commit).
+        assert!(probe_cached(true, 0, DISK_PROBE_CACHE_MS));
+        assert!(probe_cached(
+            true,
+            DISK_PROBE_CACHE_MS - 1,
+            DISK_PROBE_CACHE_MS
+        ));
+        // Stale Ok, non-Ok verdict, disabled knob, never-probed: probe now.
+        assert!(!probe_cached(true, DISK_PROBE_CACHE_MS, DISK_PROBE_CACHE_MS));
+        assert!(!probe_cached(
+            true,
+            DISK_PROBE_CACHE_MS + 60_000,
+            DISK_PROBE_CACHE_MS
+        ));
+        assert!(!probe_cached(false, 0, DISK_PROBE_CACHE_MS));
+        assert!(!probe_cached(true, 0, 0), "knob off = per-commit probe");
+    }
+
+    #[test]
+    fn rfc0217_reclaim_ladder_rate_limited() {
+        assert!(reclaim_ladder_due(u64::MAX, DISK_RECLAIM_EVERY_MS));
+        assert!(reclaim_ladder_due(
+            DISK_RECLAIM_EVERY_MS,
+            DISK_RECLAIM_EVERY_MS
+        ));
+        assert!(!reclaim_ladder_due(0, DISK_RECLAIM_EVERY_MS));
+        assert!(!reclaim_ladder_due(
+            DISK_RECLAIM_EVERY_MS - 1,
+            DISK_RECLAIM_EVERY_MS
+        ));
     }
 }

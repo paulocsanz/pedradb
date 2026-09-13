@@ -1765,6 +1765,16 @@ pub struct Db<E: Env = StdEnv> {
     /// Last logged disk-pressure state (RFC-0179): 0=ok, 1=reclaim, 2=refuse.
     /// Rate-limits `tracing::warn!` to transitions, not every put.
     disk_pressure_log: AtomicU8,
+    /// RFC-0217 P2.4 probe cache window (ms; `PEDRA_DISK_PROBE_CACHE_MS`,
+    /// 0 = per-commit probe). A fresh `Ok` verdict is reused for this long.
+    disk_probe_cache_ms: u64,
+    /// Instant of the last `Ok` probe (None until the first probe / after a
+    /// refuse). Only `Ok` verdicts ever populate this — the refuse semantic
+    /// below the hard floor stays per-commit outside the cache window.
+    disk_ok_probe_at: Option<std::time::Instant>,
+    /// Instant of the last reclaim-ladder run (RFC-0217 P2.4). In the soft
+    /// band the ladder is rate-limited; admission itself never waits.
+    disk_ladder_at: Option<std::time::Instant>,
 }
 
 impl Db<StdEnv> {
@@ -2436,6 +2446,11 @@ impl<E: Env> Db<E> {
             commits_since_changelog: 0,
             changelog_store_count: 0,
             disk_pressure_log: AtomicU8::new(0),
+            disk_probe_cache_ms: std::env::var_os("PEDRA_DISK_PROBE_CACHE_MS")
+                .and_then(|v| v.to_string_lossy().parse().ok())
+                .unwrap_or(0),
+            disk_ok_probe_at: None,
+            disk_ladder_at: None,
             unsynced_ssts: Vec::new(),
         };
         // RFC-0042 v18: `ScanAndInstall` recovery (legacy dirs, no MANIFEST)
@@ -10644,33 +10659,69 @@ impl<E: Env> Db<E> {
     /// (:p211s wave hang — overlay upperdir tmpfs sits under
     /// `DISK_SOFT_FREE_BYTES`, so every first put was in the reclaim band).
     fn ensure_disk_pressure_admitted(&mut self, wal_held: bool) -> Result<()> {
+        // RFC-0217 P2.4: reuse a fresh `Ok` verdict (knob
+        // `PEDRA_DISK_PROBE_CACHE_MS`) — the per-commit `statvfs` plus the
+        // soft-band ladder cost tens of ms per commit on small disks. Only
+        // `Ok` verdicts are cached; the soft band and every refuse probe.
+        let now = std::time::Instant::now();
+        let since_ok_ms = self
+            .disk_ok_probe_at
+            .map_or(u64::MAX, |t| now.duration_since(t).as_millis() as u64);
+        if crate::disk_pressure_kernel::probe_cached(
+            since_ok_ms != u64::MAX,
+            since_ok_ms,
+            self.disk_probe_cache_ms,
+        ) {
+            return Ok(());
+        }
         let probe = crate::env::probe_available_bytes(&self.env, &self.dir);
         match crate::disk_pressure_kernel::disk_pressure_admit(probe) {
             crate::disk_pressure_kernel::DiskPressureAdmit::Ok => {
                 self.note_disk_pressure(0, probe);
+                self.disk_ok_probe_at = Some(now);
                 Ok(())
             }
             crate::disk_pressure_kernel::DiskPressureAdmit::Reclaim => {
                 self.note_disk_pressure(1, probe);
-                self.reclaim_disk_for_uptime(probe, wal_held);
-                let again = crate::env::probe_available_bytes(&self.env, &self.dir);
-                match crate::disk_pressure_kernel::disk_pressure_admit(again) {
-                    crate::disk_pressure_kernel::DiskPressureAdmit::Refuse { available, need } => {
-                        self.note_disk_pressure(2, Some(available));
-                        Err(CoreError::DiskPressure { available, need })
+                self.disk_ok_probe_at = None;
+                // Ladder cadence (RFC-0217 P2.4): at most once per
+                // `DISK_RECLAIM_EVERY_MS`; the commit still admits without
+                // waiting on compact/rotate/GC.
+                let since_ladder_ms = self
+                    .disk_ladder_at
+                    .map_or(u64::MAX, |t| now.duration_since(t).as_millis() as u64);
+                if crate::disk_pressure_kernel::reclaim_ladder_due(
+                    since_ladder_ms,
+                    crate::disk_pressure_kernel::DISK_RECLAIM_EVERY_MS,
+                ) {
+                    self.disk_ladder_at = Some(now);
+                    self.reclaim_disk_for_uptime(probe, wal_held);
+                    let again = crate::env::probe_available_bytes(&self.env, &self.dir);
+                    match crate::disk_pressure_kernel::disk_pressure_admit(again) {
+                        crate::disk_pressure_kernel::DiskPressureAdmit::Refuse {
+                            available,
+                            need,
+                        } => {
+                            self.note_disk_pressure(2, Some(available));
+                            Err(CoreError::DiskPressure { available, need })
+                        }
+                        crate::disk_pressure_kernel::DiskPressureAdmit::Ok => {
+                            self.note_disk_pressure(0, again);
+                            self.disk_ok_probe_at = Some(now);
+                            Ok(())
+                        }
+                        crate::disk_pressure_kernel::DiskPressureAdmit::Reclaim => {
+                            self.note_disk_pressure(1, again);
+                            Ok(())
+                        }
                     }
-                    crate::disk_pressure_kernel::DiskPressureAdmit::Ok => {
-                        self.note_disk_pressure(0, again);
-                        Ok(())
-                    }
-                    crate::disk_pressure_kernel::DiskPressureAdmit::Reclaim => {
-                        self.note_disk_pressure(1, again);
-                        Ok(())
-                    }
+                } else {
+                    Ok(())
                 }
             }
             crate::disk_pressure_kernel::DiskPressureAdmit::Refuse { available, need } => {
                 self.note_disk_pressure(2, Some(available));
+                self.disk_ok_probe_at = None;
                 self.drop_page_cache_best_effort();
                 Err(CoreError::DiskPressure { available, need })
             }
@@ -13336,6 +13387,19 @@ mod tests {
     #[derive(Clone)]
     struct SpaceEnv {
         available: std::sync::Arc<std::sync::atomic::AtomicU64>,
+        /// RFC-0217 P2.4: `available_bytes` call count (probe-cache proof).
+        probes: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    }
+
+    impl SpaceEnv {
+        fn with_available(n: u64) -> Self {
+            Self {
+                available: std::sync::Arc::new(
+                    std::sync::atomic::AtomicU64::new(n),
+                ),
+                probes: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            }
+        }
     }
 
     impl crate::env::Env for SpaceEnv {
@@ -13381,6 +13445,7 @@ mod tests {
             StdEnv.advise(path, offset, len, kind)
         }
         fn available_bytes(&self, _path: &Path) -> std::io::Result<Option<u64>> {
+            self.probes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let n = self.available.load(std::sync::atomic::Ordering::SeqCst);
             if n == u64::MAX {
                 Ok(None)
@@ -13396,10 +13461,8 @@ mod tests {
     fn put_under_hard_floor_is_disk_pressure_get_ok() {
         use crate::disk_pressure_kernel::DISK_HARD_FREE_BYTES;
         let dir = temp_dir();
-        let available = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(u64::MAX));
-        let env = SpaceEnv {
-            available: std::sync::Arc::clone(&available),
-        };
+        let env = SpaceEnv::with_available(u64::MAX);
+        let available = std::sync::Arc::clone(&env.available);
         let mut db = Db::open_with_env(
             &dir,
             OpenOptions {
@@ -13453,12 +13516,120 @@ mod tests {
     #[test]
     fn unknown_available_bytes_does_not_refuse_writes() {
         let dir = temp_dir();
-        let env = SpaceEnv {
-            available: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(u64::MAX)),
-        };
+        let env = SpaceEnv::with_available(u64::MAX);
         let mut db = Db::open_with_env(&dir, OpenOptions::default(), env).unwrap();
         db.put(b"k", b"v").unwrap();
         assert_eq!(db.get(b"k").as_deref(), Some(b"v".as_ref()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0217 P2.4: one shared axis lock — both knob tests serialize on
+    /// the process-global `PEDRA_DISK_PROBE_CACHE_MS`.
+    static RFC0217_DISK_ENV_AXIS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// RFC-0217 P2.4: a fresh `Ok` verdict is reused (no `statvfs`) for the
+    /// knob window; a refuse below the hard floor resumes the moment the
+    /// window expires — the guard is the window, never longer.
+    #[test]
+    fn rfc0217_disk_probe_cache_window_and_refuse_guard() {
+        let _g = RFC0217_DISK_ENV_AXIS.lock().unwrap_or_else(|e| e.into_inner());
+        struct Restore;
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                std::env::remove_var("PEDRA_DISK_PROBE_CACHE_MS");
+            }
+        }
+        let _restore = Restore;
+        std::env::set_var("PEDRA_DISK_PROBE_CACHE_MS", "10000");
+
+        use crate::disk_pressure_kernel::DISK_HARD_FREE_BYTES;
+        let dir = temp_dir();
+        let env = SpaceEnv::with_available(u64::MAX);
+        let available = std::sync::Arc::clone(&env.available);
+        let probes = std::sync::Arc::clone(&env.probes);
+        let mut db = Db::open_with_env(&dir, OpenOptions::default(), env).unwrap();
+        db.put(b"k", b"v").unwrap(); // first put probes (cache cold)
+        let after_first = probes.load(std::sync::atomic::Ordering::SeqCst);
+        assert!(after_first >= 1);
+
+        // Soft band inside the window: the cached Ok admits WITHOUT probing.
+        available.store(DISK_HARD_FREE_BYTES, std::sync::atomic::Ordering::SeqCst);
+        db.put(b"k2", b"v2").unwrap();
+        assert_eq!(
+            probes.load(std::sync::atomic::Ordering::SeqCst),
+            after_first,
+            "cached Ok must not re-probe inside the window"
+        );
+
+        // Below hard inside the window: still the cached Ok (documented,
+        // bounded exposure)…
+        available.store(1024, std::sync::atomic::Ordering::SeqCst);
+        db.put(b"k3", b"v3").unwrap();
+        assert_eq!(db.get(b"k3").as_deref(), Some(b"v3".as_ref()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+
+        // Window expiry (1 ms knob + sleep): the refuse comes back with the
+        // very next probe — the guard is the window, never longer.
+        std::env::set_var("PEDRA_DISK_PROBE_CACHE_MS", "1");
+        let dir = temp_dir();
+        let env = SpaceEnv::with_available(u64::MAX);
+        let available = std::sync::Arc::clone(&env.available);
+        let probes = std::sync::Arc::clone(&env.probes);
+        let mut db = Db::open_with_env(&dir, OpenOptions::default(), env).unwrap();
+        db.put(b"w1", b"v").unwrap();
+        let before = probes.load(std::sync::atomic::Ordering::SeqCst);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        available.store(1024, std::sync::atomic::Ordering::SeqCst);
+        let err = db.put(b"w2", b"v").unwrap_err();
+        assert!(
+            matches!(
+                err,
+                CoreError::DiskPressure {
+                    available: 1024,
+                    need: DISK_HARD_FREE_BYTES,
+                }
+            ),
+            "expected DiskPressure after window, got {err:?}"
+        );
+        assert!(
+            probes.load(std::sync::atomic::Ordering::SeqCst) > before,
+            "expired window must re-probe"
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0217 P2.4: the soft band never populates the probe cache — with
+    /// the knob on, a drop below the hard floor is caught by the very next
+    /// commit (no ladder, no window).
+    #[test]
+    fn rfc0217_disk_soft_band_never_caches_refuse_next_commit() {
+        let _g = RFC0217_DISK_ENV_AXIS.lock().unwrap_or_else(|e| e.into_inner());
+        struct Restore;
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                std::env::remove_var("PEDRA_DISK_PROBE_CACHE_MS");
+            }
+        }
+        let _restore = Restore;
+        std::env::set_var("PEDRA_DISK_PROBE_CACHE_MS", "10000");
+
+        use crate::disk_pressure_kernel::DISK_HARD_FREE_BYTES;
+        let dir = temp_dir();
+        let env = SpaceEnv::with_available(DISK_HARD_FREE_BYTES);
+        let available = std::sync::Arc::clone(&env.available);
+        let mut db = Db::open_with_env(&dir, OpenOptions::default(), env).unwrap();
+        // Soft band: admits via the (rate-limited) ladder path — no cache.
+        db.put(b"s1", b"v1").unwrap();
+        // Below hard immediately after: refuse NOW, not after any window.
+        available.store(1024, std::sync::atomic::Ordering::SeqCst);
+        let err = db.put(b"s2", b"v2").unwrap_err();
+        assert!(
+            matches!(err, CoreError::DiskPressure { available: 1024, .. }),
+            "soft band must not mask the next-commit refuse, got {err:?}"
+        );
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
