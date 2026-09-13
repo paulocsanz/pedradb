@@ -86,7 +86,7 @@
    "extract": 12,
    "close": 4,
    "atom": 266,
-   "model": 15,
+   "model": 2,
    "count": 7
   },
   "kernel_fn_allowlist": {

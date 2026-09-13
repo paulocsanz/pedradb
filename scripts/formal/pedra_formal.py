@@ -2084,7 +2084,7 @@ def check_extract(
             "./scripts/aeneas_fold.sh",
             "crates/pedradb-fold/src/fold_kernel.rs",
             "formal/aeneas/lean/Fold.lean",
-            ("theorem fold_event_hides_key_is_def",),
+            ("theorem fold_event_hides_key_fate_iff",),
         ),
         (
             "manifest",
