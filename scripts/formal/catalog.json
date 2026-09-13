@@ -5046,6 +5046,10 @@
   },
   {
    "id": "c_len",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "admissao no C ABI e exatamente o teto citado len <= max — valor/chave acima do teto e LIMIT no set/get ao vivo; as-is aceita qualquer comprimento"
+   },
    "finding": "RFC-0075",
    "twin_kind": "close",
    "single_artifact": true,

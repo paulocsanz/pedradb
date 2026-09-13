@@ -11,6 +11,20 @@ theorem c_len_admitted_oversize :
   unfold c_len_admitted
   rfl
 
+/-- Fate iff: admission is exactly the cited bound len <= max. -/
+theorem c_len_fate_iff :
+    ∀ (len max : Usize) (v : Bool),
+      (c_len_admitted len max = ok v) ↔ (v = decide (len <= max)) := by
+  intro len max v
+  constructor
+  · intro hval
+    unfold c_len_admitted at hval
+    injection hval with hv
+    exact hv.symm
+  · rintro hv
+    subst hv
+    rfl
+
 /-- AS-IS dente: oversize still admits. -/
 theorem c_len_admitted_as_is_dente :
     c_len_admitted_as_is (9#usize) (8#usize) = ok true := by

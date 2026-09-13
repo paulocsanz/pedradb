@@ -149,14 +149,14 @@ nunca por promoção silenciosa.
 8. **P2.1** periferia ×12: `journal_pin`, `journal_catch_up_pin`,
    `journal_fold_pin`, `journal_next_pin`, `stream_cursor`,
    `stream_next_seq`, `isolated`, `isolated_child`, `fold_range`,
-   `ship_guard`, `ship_stamp`, `c_len` — floor_atom 233→245 — status:
-   `todo`
-   (11/12: `catch_up_pins_on_read_fate_iff`,
+   `ship_guard`, `ship_stamp`, `c_len` — floor_atom 233→245, sel4_coverage
+   **85,27%** — status: `done`
+   (12/12: `catch_up_pins_on_read_fate_iff`,
    `fold_pins_on_read_fate_iff`, `may_advance_pin_fate_iff`,
    `next_pin_fate_iff`, `next_seq_fate_iff`, `ack_in_order_fate_iff`,
    `isolated_child_byte_fate_iff`, `isolated_id_matches_fate_iff`,
-   `fold_event_hides_key_fate_iff`, `stamp_changed_fate_iff` e
-   `pull_plan_fate_iff` feitos 2026-09-13)
+   `fold_event_hides_key_fate_iff`, `stamp_changed_fate_iff`,
+   `pull_plan_fate_iff` e `c_len_fate_iff` feitos 2026-09-13)
 
 9. **P2.2** raft/dcs/l28/scale/bloom/probe ×21: `apply_step`,
    `ae_f16_gate`, `raft_recover_applied`, `dcs_apply`,
@@ -219,7 +219,7 @@ nunca por promoção silenciosa.
 | P1.1 | p1 | compact ×7 + lsm_r1 ×3 átomo | done | 10/10 átomo (floor_atom 201→211) | 2026-09-13 |
 | P1.2 | p1 | leveling/merge/index_val/key/prefix ×11 átomo | done | 11/11 átomo (floor_atom 211→222) | 2026-09-13 |
 | P1.3 | p1 | si/snapshot/txn/rpc ×11 átomo | done | 11/11 átomo (floor_atom 222→233) | 2026-09-13 |
-| P2.1 | p2 | journal/stream/fold/ship/capi ×12 átomo | todo | — | 2026-09-13 |
+| P2.1 | p2 | journal/stream/fold/ship/capi ×12 átomo | done | 12/12 átomo (floor_atom 233→245) | 2026-09-13 |
 | P2.2 | p2 | raft/dcs/l28/scale/bloom/probe ×21 átomo | todo | — | 2026-09-13 |
 | P2.3 | p2 | Sweep final + nota EXTRACT.md + flip done | todo | — | 2026-09-13 |
 

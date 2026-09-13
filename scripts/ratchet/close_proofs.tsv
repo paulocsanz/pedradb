@@ -271,3 +271,4 @@ atom	catalog:isolated	isolated_id_matches_fate_iff	formal/aeneas/lean/Isolated.l
 atom	catalog:fold_range	fold_event_hides_key_fate_iff	formal/aeneas/lean/Fold.lean	fold_event_hides_key
 atom	catalog:ship_stamp	stamp_changed_fate_iff	formal/aeneas/lean/Ship.lean	stamp_changed
 atom	catalog:ship_guard	pull_plan_fate_iff	formal/aeneas/lean/Ship.lean	pull_plan
+atom	catalog:c_len	c_len_fate_iff	formal/aeneas/lean/CapiHandles.lean	c_len_admitted
