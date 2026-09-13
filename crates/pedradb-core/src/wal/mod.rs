@@ -605,7 +605,7 @@ mod probe_tests {
     /// file path produces a byte-identical segment in both modes — with
     /// `PEDRA_WAL_BUFFER=1` and a 300-byte cap several size-flushes fire
     /// mid-sequence plus a partial drain at close. Staging changes WHEN
-    /// bytes reach the file, never the bytes (`cmp`-identical pós-close).
+    /// bytes reach the file, never the bytes (`cmp`-identical post-close).
     #[test]
     fn rfc0209_buffered_wal_byte_identical_after_close() {
         let _env_axis = RFC0209_ENV_AXIS.lock().unwrap_or_else(|e| e.into_inner());

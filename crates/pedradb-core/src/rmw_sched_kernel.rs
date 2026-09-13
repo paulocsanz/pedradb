@@ -103,7 +103,7 @@ mod tests {
         assert_eq!(
             rmw_group_sched(4, 4, true, None),
             SchedDecision::Merge,
-            "mc4 on the 4-vCPU cartaz box: the rmw regime this RFC owns"
+            "mc4 on the 4-vCPU board box: the rmw regime this RFC owns"
         );
         assert_eq!(
             rmw_group_sched_as_is(4, 4, true, None),

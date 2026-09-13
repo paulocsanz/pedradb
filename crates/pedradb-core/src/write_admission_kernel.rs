@@ -1,7 +1,7 @@
 //! Write-admission + put-Ok path predicates (RFC-0170 P2.4 / RFC-0171 P0.3).
 //!
 //! **Single artifact:** this file is what `rustc` links *and* what Verus
-//! proves (`cfg(verus_keep_ghost)`). No twin-cópia.
+//! proves (`cfg(verus_keep_ghost)`). No twin copy.
 //!
 //!   ./scripts/verus_write_admission.sh
 
@@ -271,7 +271,7 @@ pub fn parked_pop_plan(parked_len: u64) -> ParkedPopPlan {
 }
 
 #[cfg(not(verus_keep_ghost))]
-/// AS-IS: pops from the empty queue (front index into nothing — dente).
+/// AS-IS: pops from the empty queue (front index into nothing — tooth).
 #[must_use]
 pub fn parked_pop_plan_as_is(_parked_len: u64) -> ParkedPopPlan {
     ParkedPopPlan::PopOldestParked
@@ -385,7 +385,7 @@ pub fn pit_resync_rewrite_plan(is_resync: bool) -> PitResyncRewritePlan {
 }
 
 #[cfg(not(verus_keep_ghost))]
-/// AS-IS: never rewrite (mid-log damage survives the reopen — dente).
+/// AS-IS: never rewrite (mid-log damage survives the reopen — tooth).
 #[must_use]
 pub fn pit_resync_rewrite_plan_as_is(_is_resync: bool) -> PitResyncRewritePlan {
     PitResyncRewritePlan::KeepRecoveredPrefix
@@ -434,7 +434,7 @@ pub fn dir_sync_plan(sync: bool) -> DirSyncPlan {
 
 #[cfg(not(verus_keep_ghost))]
 /// AS-IS: never pay the dir fsync — the rename dentry can vanish after a
-/// crash even in sync mode (site-level dente).
+/// crash even in sync mode (site-level tooth).
 #[must_use]
 pub fn dir_sync_plan_as_is(_sync: bool) -> DirSyncPlan {
     DirSyncPlan::SkipDirSync
@@ -465,7 +465,7 @@ pub fn fence_admission_plan(durability_fenced: bool) -> FenceAdmission {
 
 #[cfg(not(verus_keep_ghost))]
 /// AS-IS: ops admitted after the fence — a failed barrier keeps serving
-/// writes as if durable (fail-open dente).
+/// writes as if durable (fail-open tooth).
 #[must_use]
 pub fn fence_admission_plan_as_is(_durability_fenced: bool) -> FenceAdmission {
     FenceAdmission::AdmitOps
@@ -496,7 +496,7 @@ pub fn fence_record_plan(has_report: bool) -> FenceRecordPlan {
 #[cfg(not(verus_keep_ghost))]
 /// AS-IS: re-record on every fence — the first (widest) uncertain
 /// window is overwritten by later fences, shrinking what the client is
-/// told is unproven (silent-wrong dente).
+/// told is unproven (silent-wrong tooth).
 #[must_use]
 pub fn fence_record_plan_as_is(_has_report: bool) -> FenceRecordPlan {
     FenceRecordPlan::RecordFirst
@@ -527,7 +527,7 @@ pub fn group_batch_sync_plan(client_sync: bool) -> GroupSyncPlan {
 
 #[cfg(not(verus_keep_ghost))]
 /// AS-IS: every batch rides — a client that asked sync is acked without
-/// any barrier (lost acked-durability dente).
+/// any barrier (lost acked-durability tooth).
 #[must_use]
 pub fn group_batch_sync_plan_as_is(_client_sync: bool) -> GroupSyncPlan {
     GroupSyncPlan::BatchRidesGroup
@@ -604,8 +604,8 @@ pub fn storage_write_recovered(
 }
 
 #[cfg(not(verus_keep_ghost))]
-/// AS-IS dente composto: admission sempre admite, o plano nunca cerca,
-/// recovery nunca corta — o write está "sempre presente" após crash.
+/// AS-IS composite tooth: admission always admits, the plan never fences,
+/// recovery never cuts — the write is "always present" after crash.
 #[must_use]
 pub fn storage_write_recovered_as_is(
     mem_bytes: u64,
@@ -1022,7 +1022,7 @@ mod tests {
         assert!(!write_admission_idle(true, false, false));
         assert!(
             write_admission_idle_as_is(true, true, true),
-            "AS-IS dente: stall knobs ignored"
+            "AS-IS tooth: stall knobs ignored"
         );
     }
 
@@ -1035,7 +1035,7 @@ mod tests {
         assert_eq!(
             write_admit_as_is(100, true, 50, 0, false, 0),
             WriteAdmit::Ok,
-            "AS-IS dente: mem over still admits"
+            "AS-IS tooth: mem over still admits"
         );
         assert_eq!(write_admit(10, true, 50, 8, true, 4), WriteAdmit::StallL0);
         assert_eq!(write_admit(10, true, 50, 2, true, 4), WriteAdmit::Ok);
@@ -1220,7 +1220,7 @@ mod tests {
         assert_eq!(
             wal_commit_plan_as_is(true, true),
             WalCommitPlan::AppendSyncApplyOk,
-            "AS-IS dente: Apply/Ok after failed sync"
+            "AS-IS tooth: Apply/Ok after failed sync"
         );
         assert!(
             include_str!("write_admission_kernel.rs").contains("fence_on_sync_fail($need_sync"),
@@ -1393,7 +1393,7 @@ mod tests {
         assert!(dir_sync_required(true));
         assert!(
             !dir_sync_required_as_is(true),
-            "AS-IS dente: never dir-fsync"
+            "AS-IS tooth: never dir-fsync"
         );
         assert!(!dir_sync_required(false));
     }
@@ -1408,7 +1408,7 @@ mod tests {
         assert_eq!(
             dir_sync_plan_as_is(true),
             DirSyncPlan::SkipDirSync,
-            "AS-IS dente: rename dentry vanishes after crash in sync mode"
+            "AS-IS tooth: rename dentry vanishes after crash in sync mode"
         );
         // Live: every rename/dir gate matches the plan; the raw
         // dir_sync_required if left the trampoline (the predicate stays
@@ -1429,13 +1429,13 @@ mod tests {
     #[test]
     fn fence_admission_plan_on_live_fenced_refuses() {
         // RFC-0219 P1.2: a fenced Db refuses every new op fail-closed;
-        // AS-IS keeps admitting (fail-open dente).
+        // AS-IS keeps admitting (fail-open tooth).
         assert_eq!(fence_admission_plan(true), FenceAdmission::RefuseFenced);
         assert_eq!(fence_admission_plan(false), FenceAdmission::AdmitOps);
         assert_eq!(
             fence_admission_plan_as_is(true),
             FenceAdmission::AdmitOps,
-            "AS-IS dente: ops admitted after the fence"
+            "AS-IS tooth: ops admitted after the fence"
         );
         let enf =
             named_fn_src(include_str!("db.rs"), "ensure_not_fenced").expect("ensure_not_fenced");
@@ -1459,7 +1459,7 @@ mod tests {
         assert_eq!(
             fence_record_plan_as_is(true),
             FenceRecordPlan::RecordFirst,
-            "AS-IS dente: later fence overwrites the first report"
+            "AS-IS tooth: later fence overwrites the first report"
         );
         let fd = named_fn_src(include_str!("db.rs"), "fence_durability").expect("fence_durability");
         assert!(
@@ -1482,7 +1482,7 @@ mod tests {
         assert_eq!(
             group_batch_sync_plan_as_is(true),
             GroupSyncPlan::BatchRidesGroup,
-            "AS-IS dente: sync batch rides the group"
+            "AS-IS tooth: sync batch rides the group"
         );
         let gp = named_fn_src(include_str!("db.rs"), "group_prepare").expect("group_prepare");
         assert!(
@@ -1500,7 +1500,7 @@ mod tests {
         assert!(torn_head_is_empty_log(8, TINY_WAL_EMPTY_MAX));
         assert!(
             torn_head_is_empty_log_as_is(10_000, TINY_WAL_EMPTY_MAX),
-            "AS-IS dente: large Truncated(0) treated as empty"
+            "AS-IS tooth: large Truncated(0) treated as empty"
         );
         assert!(!torn_head_is_empty_log(10_000, TINY_WAL_EMPTY_MAX));
     }
@@ -1529,7 +1529,7 @@ mod tests {
     #[test]
     fn pit_resync_rewrite_plan_on_live_resync_rewrites() {
         // RFC-0219 P1.4: a resync report rewrites the WAL from the
-        // recovered prefix; AS-IS keeps the damaged log (dente).
+        // recovered prefix; AS-IS keeps the damaged log (tooth).
         assert_eq!(
             pit_resync_rewrite_plan(true),
             PitResyncRewritePlan::RewriteWalFromPrefix
@@ -1541,7 +1541,7 @@ mod tests {
         assert_eq!(
             pit_resync_rewrite_plan_as_is(true),
             PitResyncRewritePlan::KeepRecoveredPrefix,
-            "AS-IS dente: resync report never rewrites"
+            "AS-IS tooth: resync report never rewrites"
         );
         let open = named_fn_src(include_str!("db.rs"), "open_with_env_sourced")
             .expect("open_with_env_sourced");
@@ -1558,14 +1558,14 @@ mod tests {
     #[test]
     fn parked_pop_plan_on_live_nonempty_queue_pops() {
         // RFC-0219 P2.1: the pop happens EXACTLY when the parked queue
-        // is non-empty; AS-IS pops from the empty queue (dente).
+        // is non-empty; AS-IS pops from the empty queue (tooth).
         assert_eq!(parked_pop_plan(0), ParkedPopPlan::NoParkedTables);
         assert_eq!(parked_pop_plan(1), ParkedPopPlan::PopOldestParked);
         assert_eq!(parked_pop_plan(3), ParkedPopPlan::PopOldestParked);
         assert_eq!(
             parked_pop_plan_as_is(0),
             ParkedPopPlan::PopOldestParked,
-            "AS-IS dente: pops from the empty queue"
+            "AS-IS tooth: pops from the empty queue"
         );
         let top =
             named_fn_src(include_str!("db.rs"), "take_oldest_parked").expect("take_oldest_parked");
@@ -1585,7 +1585,7 @@ mod tests {
         assert!(!cas_absent_put(true));
         assert!(
             cas_absent_put_as_is(true),
-            "AS-IS dente: live key still puts"
+            "AS-IS tooth: live key still puts"
         );
         let body =
             named_fn_src(include_str!("db.rs"), "put_if_absent_with").expect("put_if_absent_with");
@@ -1599,7 +1599,7 @@ mod tests {
     fn cas_eq_put_on_live_mismatch_is_not_ok() {
         assert!(cas_eq_put(true));
         assert!(!cas_eq_put(false));
-        assert!(cas_eq_put_as_is(false), "AS-IS dente: mismatch still puts");
+        assert!(cas_eq_put_as_is(false), "AS-IS tooth: mismatch still puts");
         let body = named_fn_src(include_str!("db.rs"), "put_if_eq_with").expect("put_if_eq_with");
         assert!(
             body.contains("cas_eq_put("),
@@ -1613,7 +1613,7 @@ mod tests {
         assert!(!range_inverted(false));
         assert!(
             !range_inverted_as_is(true),
-            "AS-IS dente: inverted range still applies"
+            "AS-IS tooth: inverted range still applies"
         );
         let body =
             named_fn_src(include_str!("db.rs"), "delete_range_with").expect("delete_range_with");
@@ -1650,7 +1650,7 @@ mod tests {
         ));
         assert!(
             storage_write_recovered_as_is(100, true, 50, 3, false, 8, true, true, 90, 40),
-            "AS-IS dente: stall + fence + torn tail still 'present'"
+            "AS-IS tooth: stall + fence + torn tail still 'present'"
         );
     }
 

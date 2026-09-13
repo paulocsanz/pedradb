@@ -10,7 +10,7 @@ open Aeneas.Std Result
 (a) publish fate ∀ (corollary tier over the registered P0.1 close
 `may_publish_group_ok_iff_wal_io_ok`, GroupCommit.lean); (b) rotate fate
 ∀ over the pin record — the exact keep-disjunction comes from the
-extracted body, not intuition; (c) the concrete dentes below become
+extracted body, not intuition; (c) the concrete teeth below become
 COROLLARIES of these foralls by instantiation. No registry row: the
 compose tier spans two kernel libs and registration requires a single
 catalog pair/entry (same reason as the other compose libs). -/
@@ -99,9 +99,9 @@ theorem try_rotate_step_rotates_iff_all_clear_record :
   · rintro ⟨hm, hi, hp, hpa, hc, hr, he⟩
     exact ⟨⟨hm, hi, hp, hpa, hc⟩, hr, he⟩
 
-/-! ### The concrete dentes — corollaries by instantiation (c) -/
+/-! ### The concrete teeth — corollaries by instantiation (c) -/
 
-/-- Off-lock dente, now a COROLLARY: failed WAL I/O does not publish,
+/-- Off-lock tooth, now a COROLLARY: failed WAL I/O does not publish,
     and an inflight commit keeps the WAL (flush must not truncate the
     writer's bytes). -/
 theorem concurrent_publish_and_inflight_keep_wal :
@@ -115,7 +115,7 @@ theorem concurrent_publish_and_inflight_keep_wal :
       parked_unflushed := false, commit_inflight := true }
   exact ⟨concurrent_publish_fate_forall false, hfor.2.mpr (by simp)⟩
 
-/-- Other branch dente, now a COROLLARY: WAL I/O Ok may publish, and an
+/-- Other branch tooth, now a COROLLARY: WAL I/O Ok may publish, and an
     all-clear idle pipeline rotates. -/
 theorem concurrent_publish_ok_and_idle_rotates :
     pedra_aeneas_group_commit_kernel.may_publish_group true = ok true
@@ -128,7 +128,7 @@ theorem concurrent_publish_ok_and_idle_rotates :
       parked_unflushed := false, commit_inflight := false }
   exact ⟨concurrent_publish_fate_forall true, hfor.1.mpr (by simp)⟩
 
-/-- AS-IS dente, now a COROLLARY: publish after failed WAL (the lie),
+/-- AS-IS tooth, now a COROLLARY: publish after failed WAL (the lie),
     but inflight STILL keeps — the pin-hole mutant does not drop
     `commit_inflight` from the keep-disjunction. -/
 theorem concurrent_as_is_publish_lie_inflight_still_keeps :
@@ -144,7 +144,7 @@ theorem concurrent_as_is_publish_lie_inflight_still_keeps :
   unfold pedra_aeneas_group_commit_kernel.may_publish_group_as_is
   rfl
 
-/-- OCC client + publish dente, now a COROLLARY: inflight uses the
+/-- OCC client + publish tooth, now a COROLLARY: inflight uses the
     published snap; failed WAL does not publish. -/
 theorem occ_snap_published_and_no_publish_on_wal_fail :
     pedra_aeneas_flush_kernel.occ_snap_uses_published true = ok true

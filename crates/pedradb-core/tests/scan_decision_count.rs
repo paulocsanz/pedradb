@@ -144,7 +144,7 @@ fn tombstone_walk_charges_one_per_recorded_tombstone() {
     }
 }
 
-/// AS-IS dente (`scan_reads_file_as_is`): the degraded kernel is
+/// AS-IS tooth (`scan_reads_file_as_is`): the degraded kernel is
 /// bounds-only — tombstones are ignored, the decision differs.
 #[test]
 fn as_is_kernel_is_bounds_only() {

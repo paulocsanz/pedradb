@@ -1,5 +1,5 @@
-//! Named model-level D1 corollary (RFC-0166 P1.3): **put Ok ⇒ sobrevive a
-//! todo prefixo de torn**.
+//! Named model-level D1 corollary (RFC-0166 P1.3): **put Ok ⇒ survives
+//! every torn prefix**.
 //!
 //! Composes the P1.1 crash geometry ([`crate::env_crash_kernel`]) with the
 //! P1.2 inductive invariant ([`crate::wal::wal_state_kernel`]):
@@ -47,7 +47,7 @@ pub fn put_ok(s0: WalState, rec_len: u64) -> WalState {
     wal_ack(s2, s2.synced - s2.acked)
 }
 
-/// Named corollary D1-modelo: a record inside the acked prefix of an
+/// Named corollary D1-model: the record inside the acked prefix of an
 /// Inv-WAL state survives every legal torn prefix (the cut keeps the
 /// record whole).
 #[must_use]

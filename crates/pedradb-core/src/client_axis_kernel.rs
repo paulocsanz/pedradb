@@ -25,7 +25,7 @@ pub const PIPELINE_DRAIN_MAX_MEMBERS: usize = 256;
 
 /// AS-IS twin: the cap the async pipeline shipped before RFC-0201
 /// (`ASYNC_GROUP_MAX_MEMBERS`, born from the uncapped-herd measurement of
-/// 0044 in the dead WriteThread-merge shape). Kept as the named dente the
+/// 0044 in the dead WriteThread-merge shape). Kept as the named tooth the
 /// tests pin — the WriteThread multi-op merge still uses it.
 pub const PIPELINE_DRAIN_CAP_AS_IS: usize = 8;
 
@@ -92,7 +92,7 @@ pub fn oversubscription_spin_policy_as_is(writers: usize, ncpu: usize) -> SpinDe
 /// bypass (own write lock — the Rocks shape)?
 ///
 /// Client-axis rule, from the 2026-09-11 attribution meter on the 4-vCPU
-/// cartaz box (`findings/2026-09-11-p201-meter-atribuicao/`):
+/// board box (`findings/2026-09-11-p201-meter-atribuicao/`):
 /// `kvrocks_set_mc50` (50 writers, 12.5× oversubscribed) — bypass 0.96×,
 /// merge **1.52× min-of-3 / 2.10× median** vs Rocks `sync=false`; the
 /// fair handoff is the actual 0.33–0.38× collapse. The 0044 default-off
@@ -143,7 +143,7 @@ mod tests {
         );
     }
 
-    /// RFC-0201 P0.1 dente: the AS-IS twin pins the 0044-era cap-8 convoy
+    /// RFC-0201 P0.1 tooth: the AS-IS twin pins the 0044-era cap-8 convoy
     /// math the cut removes (mc50 = 7 serial convoys vs 1).
     #[test]
     fn rfc0201_drain_convoy_count_as_is_vs_full() {
@@ -185,7 +185,7 @@ mod tests {
         assert_eq!(oversubscription_spin_policy(10, 10), SpinDecision::Spin);
     }
 
-    /// RFC-0201 P0.2 dente: the 0189 spin never parks by policy — the
+    /// RFC-0201 P0.2 tooth: the 0189 spin never parks by policy — the
     /// cegueira the cut names.
     #[test]
     fn rfc0201_spin_policy_as_is_always_spins() {
@@ -207,7 +207,7 @@ mod tests {
         assert!(async_merge_policy(51, 50, None), "writers > ncpu: merge");
         assert!(
             async_merge_policy(50, 4, None),
-            "mc50 on the 4-vCPU cartaz box"
+            "mc50 on the 4-vCPU board box"
         );
         assert!(
             !async_merge_policy(1, 1, None),
@@ -227,7 +227,7 @@ mod tests {
         );
     }
 
-    /// RFC-0201 P0.3 dente: the 0044-era default is env-only — the auto
+    /// RFC-0201 P0.3 tooth: the 0044-era default is env-only — the auto
     /// axis does not exist.
     #[test]
     fn rfc0201_async_merge_policy_as_is_env_only() {

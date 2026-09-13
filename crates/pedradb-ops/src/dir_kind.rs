@@ -189,7 +189,7 @@ mod tests {
         );
         assert!(
             sst_magic_is_pedra_as_is(&rocks_like),
-            "AS-IS dente: any header is Pedra (drop-in lie)"
+            "AS-IS tooth: any header is Pedra (drop-in lie)"
         );
     }
 

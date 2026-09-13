@@ -57,14 +57,14 @@ mod tests {
         assert!(!sst_magic_is_pedra(b""));
     }
 
-    /// RFC-0186 P2.2 dente: the AS-IS twin would admit the C++ header.
+    /// RFC-0186 P2.2 tooth: the AS-IS twin would admit the C++ header.
     #[test]
     fn sst_magic_as_is_admits_cpp_header() {
         let cpp = [0u8; 8];
         assert!(!sst_magic_is_pedra(&cpp));
         assert!(
             super::sst_magic_is_pedra_as_is(&cpp),
-            "AS-IS dente: any header is Pedra (on-disk drop-in lie)"
+            "AS-IS tooth: any header is Pedra (on-disk drop-in lie)"
         );
     }
 }

@@ -51,7 +51,7 @@ mod tests {
         assert!(!iter_window_keep(false));
         assert!(
             iter_window_keep_as_is(false),
-            "AS-IS dente: hidden row stays in the window"
+            "AS-IS tooth: hidden row stays in the window"
         );
         assert!(iter_window_keep(true));
     }

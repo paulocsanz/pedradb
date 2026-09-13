@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Guarda anti-drift aeneas (RFC-0157 follow-up): bloqueia um commit que muda
-# um kernel extraído sem re-carimbar o stamp correspondente. A detecção já
-# existia no pedra_formal.py (FAIL "aeneas SOURCE drifted"); o buraco era a
-# hora do commit — 6 stamps driftaram commitados em 4b243d2 (reparados em
-# c60deda). Dirigido pelos dados: lê path=/sha256= de cada
-# formal/aeneas/out/SOURCE* — kernel novo com stamp novo entra sozinho.
+# Aeneas anti-drift guard (RFC-0157 follow-up): blocks a commit that changes
+# an extracted kernel without re-stamping the matching stamp. The detection
+# already existed in pedra_formal.py (FAIL "aeneas SOURCE drifted"); the hole
+# was commit time — 6 stamps drifted committed in 4b243d2 (repaired in
+# c60deda). Data-driven: reads path=/sha256= from each
+# formal/aeneas/out/SOURCE* — a new kernel with a new stamp enters on its own.
 #
-# Instalar (uma vez por clone): git config core.hooksPath .githooks
-# Emergência:                        git commit --no-verify
-# (o lint completo continua sendo o gate; o hook é a primeira barreira)
+# Install (once per clone): git config core.hooksPath .githooks
+# Emergency:                        git commit --no-verify
+# (the full lint remains the gate; the hook is the first barrier)
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
@@ -17,7 +17,7 @@ for stamp in formal/aeneas/out/SOURCE*; do
   [[ -f "$stamp" ]] || continue
   kpath=$(sed -n 's/^path=//p' "$stamp" 2>/dev/null)
   [[ -n "$kpath" ]] || continue
-  # stamp fora do índice (deleção estaged): o lint cuida disso
+  # stamp outside the index (staged deletion): the lint handles that
   want=$(git show ":$stamp" 2>/dev/null | sed -n 's/^sha256=//p')
   [[ -n "$want" ]] || continue
   if git cat-file -e ":$kpath" 2>/dev/null; then
@@ -25,15 +25,15 @@ for stamp in formal/aeneas/out/SOURCE*; do
   else
     k_staged=""
   fi
-  # só exige quando este par mudou em relação ao HEAD
+  # only required when this pair changed relative to HEAD
   k_head=$(git show "HEAD:$kpath" 2>/dev/null | shasum -a 256 | cut -d' ' -f1)
   w_head=$(git show "HEAD:$stamp" 2>/dev/null | sed -n 's/^sha256=//p')
   [[ "$k_staged" == "$k_head" && "$want" == "$w_head" ]] && continue
   if [[ -z "$k_staged" || "$k_staged" != "$want" ]]; then
     name=${stamp##*/}; name=${name#SOURCE}; name=${name#.}
     [[ -z "$name" ]] && name=vote
-    echo "pre-commit: drift aeneas — $kpath ≠ $stamp" >&2
-    echo "  re-extraia e carimbe: scripts/aeneas_${name}.sh --required && git add $stamp formal/aeneas/out/lean/" >&2
+    echo "pre-commit: aeneas drift — $kpath ≠ $stamp" >&2
+    echo "  re-extract and stamp: scripts/aeneas_${name}.sh --required && git add $stamp formal/aeneas/out/lean/" >&2
     fail=1
   fi
 done

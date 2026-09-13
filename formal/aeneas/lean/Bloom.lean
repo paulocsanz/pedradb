@@ -158,11 +158,11 @@ private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : �
   rw [hx]
   exact h
 
-/-- RFC-0218 P2.2 (átomo `catalog:bloom_header`, entrada
-    `bloom_header_ok`): o cabeçalho admite EXATAMENTE a conjunção
-    citada — k dentro de [1, MAX_K], nbytes cobre div_ceil nbits 8
-    e nbytes cabe no residual. O AS-IS aceita qualquer k (probe
-    sem borne — dente plantado). -/
+/-- RFC-0218 P2.2 (atom `catalog:bloom_header`, entry
+    `bloom_header_ok`): the header admits EXACTLY the conjunction
+    cited — k inside [1, MAX_K], nbytes covers div_ceil nbits 8
+    and nbytes fits in the residual. The AS-IS accepts any k (probe
+    without a bound — tooth planted). -/
 theorem bloom_header_fate_iff :
     ∀ (nbits k nbytes : U32) (residual : U64) (v : Bool),
       (bloom_header_ok nbits k nbytes residual = ok v) ↔
@@ -232,11 +232,11 @@ theorem bloom_header_fate_iff :
       rw [if_neg (by simp)]
       rw [hv]
 
-/-- RFC-0218 P2.2 (átomo `catalog:bloom_insert`, entrada `insert`):
-    o insert escreve EXATAMENTE os k probes citados — inativo devolve
-    o próprio filtro; ativo calcula hash_pair, o nbits citado e roda o
-    loop citado insert_loop sobre bits. O AS-IS pula os probes (falso
-    negativo depois — dente plantado). -/
+/-- RFC-0218 P2.2 (atom `catalog:bloom_insert`, entry `insert`):
+    the insert writes EXACTLY the k probes cited — inactive returns
+    the filter itself; active computes hash_pair, the cited nbits and runs the
+    cited insert_loop loop over bits. The AS-IS skips the probes (false
+    negative afterwards — tooth planted). -/
 theorem insert_fate_iff :
     ∀ (self : BloomFilter) (key : Slice U8) (r : BloomFilter),
       (BloomFilter.insert self key = ok r) ↔
@@ -283,12 +283,12 @@ theorem insert_fate_iff :
       rw [if_neg (by simp)]
       rw [hr]
 
-/-- RFC-0218 P2.2 (átomo `catalog:bloom_may_contain`, entrada
-    `may_contain`): a consulta decide EXATAMENTE no loop citado —
-    inativo é ok true (sem filtro, tudo pode estar presente); ativo
-    calcula hash_pair e a resposta é o loop citado
-    may_contain_loop sobre bits (false ⇒ ausência certa). O AS-IS
-    probeia k+1 bits (falso negativo — dente plantado). -/
+/-- RFC-0218 P2.2 (atom `catalog:bloom_may_contain`, entry
+    `may_contain`): the query decides EXACTLY in the cited loop —
+    inactive is always true (without a filter, everything can be present); active
+    computes hash_pair and the answer is the cited loop
+    may_contain_loop over bits (false ⇒ certain absence). The AS-IS
+    probes k+1 bits (false negative — tooth planted). -/
 theorem may_contain_fate_iff :
     ∀ (self : BloomFilter) (key : Slice U8) (v : Bool),
       (BloomFilter.may_contain self key = ok v) ↔

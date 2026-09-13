@@ -12,7 +12,7 @@ theorem level_target_bytes_l0 (t) :
   unfold level_target_bytes
   rfl
 
-/-- AS-IS dente: L0 target is still zero. -/
+/-- AS-IS tooth: L0 target is still zero. -/
 theorem level_target_bytes_as_is_l0 (t) :
     level_target_bytes_as_is (0#u32) t = ok (0#u64) := by
   unfold level_target_bytes_as_is
@@ -200,11 +200,11 @@ theorem pick_pushdown_fate_iff :
       · rw [if_neg hdt]
         exact congrArg ok hv.symm
 
-/-- RFC-0218 P1.2 7/11 (átomo `catalog:leveling_disjoint`, entrada
-    `is_disjoint`): disjunção é EXATAMENTE o loop citado do zero —
-    `is_disjoint files` É o outer_loop em 0#usize (sem pré nem pós).
-    O AS-IS é a constante true (pilha sobreposta aceita — dente
-    plantado). -/
+/-- RFC-0218 P1.2 7/11 (atom `catalog:leveling_disjoint`, entry
+    `is_disjoint`): disjunction is EXACTLY the cited loop of the zero —
+    `is_disjoint files` Is the outer_loop in 0#usize (in the pre, in the post).
+    The AS-IS is the constante true (stack sobreposta accepts — tooth
+    planted). -/
 theorem is_disjoint_fate_iff :
     ∀ (files : Slice LevelFile) (v : Bool),
       (is_disjoint files = ok v) ↔
@@ -218,11 +218,11 @@ theorem is_disjoint_fate_iff :
     unfold is_disjoint
     exact hs
 
-/-- RFC-0218 P1.2 8/11 (átomo `catalog:leveling_overlaps`, entrada
-    `overlaps`): sobrepor o hull é EXATAMENTE o par citado — o `lo`
-    do arquivo não passa do hull_hi e o `hi` do arquivo não fica
-    abaixo do hull_lo. O AS-IS ignora o limite superior (hull
-    inflado — dente plantado). -/
+/-- RFC-0218 P1.2 8/11 (atom `catalog:leveling_overlaps`, entry
+    `overlaps`): sobrepor the hull is EXACTLY the cited pair — the `lo`
+    of the file does not pass of the hull_hi and the `hi` of the file not stays
+    below of the hull_lo. The AS-IS ignora the limit superior (hull
+    inflado — tooth planted). -/
 theorem overlaps_fate_iff :
     ∀ (f : LevelFile) (hull_lo : Slice U8) (hull_hi : Slice U8) (v : Bool),
       (LevelFile.overlaps f hull_lo hull_hi = ok v) ↔
@@ -257,11 +257,11 @@ theorem overlaps_fate_iff :
       unfold LevelFile.overlaps
       exact bind_intro s hs (bind_intro false hb rfl)
 
-/-- RFC-0218 P1.2 9/11 (átomo `catalog:leveling_total_bytes`, entrada
-    `total_bytes`): o total do nível é EXATAMENTE a soma citada — o
-    iterador do slice, o mapa que extrai `bytes` de cada arquivo, e a
-    soma u64. O AS-IS devolve a CONTAGEM de arquivos (bytes trocados
-    por itens — dente plantado). -/
+/-- RFC-0218 P1.2 9/11 (atom `catalog:leveling_total_bytes`, entry
+    `total_bytes`): the total of the level is EXACTLY the adds cited — the
+    iterator of the slice, the map that extracts `bytes` from each file, and the
+    u64 sum. The AS-IS returns a COUNT of files (bytes swapped
+    for items — tooth planted). -/
 theorem total_bytes_fate_iff :
     ∀ (files : Slice LevelFile) (v : U64),
       (total_bytes files = ok v) ↔
@@ -286,11 +286,11 @@ theorem total_bytes_fate_iff :
     unfold total_bytes
     exact bind_intro i hi (bind_intro m hm hv)
 
-/-- RFC-0218 P1.2 11/11 (átomo `catalog:leveled_enabled`, entrada
-    `leveled_enabled`): o modo leveled é EXATAMENTE a leitura citada
-    da variável PEDRA_LEVELED — ausente/erro liga (true); presente,
-    liga exceto quando o valor aparado é "0". O AS-IS é a constante
-    true (o desligamento por env é engolido — dente plantado). -/
+/-- RFC-0218 P1.2 11/11 (atom `catalog:leveled_enabled`, entry
+    `leveled_enabled`): the leveled mode is EXACTLY the cited read
+    of the PEDRA_LEVELED variable — absent/error turns on (true); present,
+    turns on except when the trimmed value is "0". The AS-IS is the constant
+    true (the env off-switch is swallowed — tooth planted). -/
 theorem leveled_enabled_fate_iff :
     ∀ (b : Bool),
       (leveled_enabled = ok b) ↔

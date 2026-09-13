@@ -477,7 +477,7 @@ pub fn group_ack_plan(wal_io_ok: bool) -> GroupAckPlan {
     }
 }
 
-/// AS-IS: acks even when the WAL I/O failed (Ok with a lie — dente).
+/// AS-IS: acks even when the WAL I/O failed (Ok with a lie — tooth).
 #[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn group_ack_plan_as_is(_wal_io_ok: bool) -> GroupAckPlan {
@@ -1079,13 +1079,13 @@ mod tests {
     fn group_ack_plan_on_live_io_fail_fences() {
         // RFC-0219 P2.1: the group acks/publishes EXACTLY when its WAL
         // I/O succeeded; I/O failure fences (no publish, no Ok). AS-IS
-        // acks the failure (Ok with a lie — dente).
+        // acks the failure (Ok with a lie — tooth).
         assert_eq!(group_ack_plan(true), GroupAckPlan::AckPublishGroup);
         assert_eq!(group_ack_plan(false), GroupAckPlan::FenceRefuseIoFail);
         assert_eq!(
             group_ack_plan_as_is(false),
             GroupAckPlan::AckPublishGroup,
-            "AS-IS dente: acks a failed WAL I/O"
+            "AS-IS tooth: acks a failed WAL I/O"
         );
         let lsc =
             named_fn_src(include_str!("db.rs"), "lone_sync_commit").expect("lone_sync_commit");
@@ -1241,7 +1241,7 @@ mod tests {
         assert_eq!(
             occ_member_fate_as_is(true, true),
             OccMemberFate::Ok,
-            "AS-IS dente: lagging member still Ok"
+            "AS-IS tooth: lagging member still Ok"
         );
         let src = include_str!("concurrent.rs");
         assert!(
@@ -1288,7 +1288,7 @@ mod tests {
         assert_eq!(
             occ_batch_plan_as_is(&too_old, &reads, 10),
             vec![OccMemberFate::Ok, OccMemberFate::Ok, OccMemberFate::Ok],
-            "AS-IS dente: lagging member still Ok"
+            "AS-IS tooth: lagging member still Ok"
         );
         let validate = include_str!("concurrent.rs")
             .split("fn validate_occ_batch")
@@ -1329,7 +1329,7 @@ mod tests {
         assert_eq!(
             occ_batch_plan_as_is(&lag, &lag_read, 10),
             vec![OccMemberFate::Ok],
-            "AS-IS dente: lagging member still Ok"
+            "AS-IS tooth: lagging member still Ok"
         );
         let src = include_str!("concurrent.rs");
         let validate = src
@@ -1357,7 +1357,7 @@ mod tests {
         assert!(!rwlock_client_may_mutate(false));
         assert!(
             rwlock_client_may_mutate_as_is(false),
-            "AS-IS dente: mutate after dropping the write lock"
+            "AS-IS tooth: mutate after dropping the write lock"
         );
         let src = include_str!("concurrent.rs");
         let off = src
@@ -1395,7 +1395,7 @@ mod tests {
         assert!(rwlock_client_may_read(true, true));
         assert!(
             rwlock_client_may_read_as_is(false, false),
-            "AS-IS dente: read Db with no guard"
+            "AS-IS tooth: read Db with no guard"
         );
         let snap = include_str!("concurrent.rs")
             .split("fn occ_snapshot(")
@@ -1413,7 +1413,7 @@ mod tests {
         assert!(!occ_conflict(10, 10, true));
         assert!(
             occ_conflict_as_is_serialized(10, 10, 1, true),
-            "AS-IS dente: serialized scheduler aborts the second intra-group member"
+            "AS-IS tooth: serialized scheduler aborts the second intra-group member"
         );
         let dir = std::env::temp_dir().join(format!(
             "group-commit-{}-{}",
@@ -1468,7 +1468,7 @@ mod tests {
         assert_eq!(
             fence_publish_seq_as_is(&[5, 2, 9, 4]),
             5,
-            "AS-IS dente: fence is the first member, later seqs stay unpublished"
+            "AS-IS tooth: fence is the first member, later seqs stay unpublished"
         );
         let dir = std::env::temp_dir().join(format!(
             "group-fence-{}-{}",
@@ -1542,12 +1542,12 @@ mod tests {
         assert_eq!(
             pct_campaign_default_depth_as_is(),
             3,
-            "AS-IS dente: 0070 would raise default PCT depth"
+            "AS-IS tooth: 0070 would raise default PCT depth"
         );
         assert!(!default_pct_depth_raised());
         assert!(
             default_pct_depth_raised_as_is(),
-            "AS-IS dente: 0070 would claim it raised default depth"
+            "AS-IS tooth: 0070 would claim it raised default depth"
         );
     }
 
@@ -1557,26 +1557,26 @@ mod tests {
         assert!(!fsync_promotes_pending(false));
         assert!(
             fsync_promotes_pending_as_is(false),
-            "AS-IS dente: promote on a lying fsync"
+            "AS-IS tooth: promote on a lying fsync"
         );
         assert!(!media_durable_admitted(true));
         assert!(!media_durable_admitted(false));
         assert!(
             media_durable_admitted_as_is(true),
-            "AS-IS dente: fsync Ok proves the drive"
+            "AS-IS tooth: fsync Ok proves the drive"
         );
         assert!(!media_durable_admitted_as_is(false));
         assert!(!stacked_fsync_liars_admitted(true, true));
         assert!(!stacked_fsync_liars_admitted(true, false));
         assert!(
             stacked_fsync_liars_admitted_as_is(true, true),
-            "AS-IS dente: AND Lying × det_io in one run"
+            "AS-IS tooth: AND Lying × det_io in one run"
         );
         assert!(!stacked_fsync_liars_admitted_as_is(true, false));
         assert!(!fsync_lie_closes_tcg_guest());
         assert!(
             fsync_lie_closes_tcg_guest_as_is(),
-            "AS-IS dente: 0078 would invent a TCG guest"
+            "AS-IS tooth: 0078 would invent a TCG guest"
         );
     }
 
@@ -1593,7 +1593,7 @@ mod tests {
         assert!(!lock_interleavings_admitted());
         assert!(
             lock_interleavings_admitted_as_is(),
-            "AS-IS dente: admit ∀ lock schedules"
+            "AS-IS tooth: admit ∀ lock schedules"
         );
     }
 }

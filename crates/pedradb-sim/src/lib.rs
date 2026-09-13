@@ -280,7 +280,7 @@ mod tests {
         ));
         assert!(
             pedradb_core::group_commit_kernel::fsync_promotes_pending_as_is(false),
-            "AS-IS dente: promote on a lying fsync"
+            "AS-IS tooth: promote on a lying fsync"
         );
         let dir = parent().join(format!(
             "pedradb-lying-0078-{}",

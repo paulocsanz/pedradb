@@ -3,7 +3,7 @@
 //! Twin of [`crate::scale_kernel`] for the **write** path: rank the
 //! structural cut from measured WRITEPHASE slices, predict lock-wait
 //! under serialized leaders, and forecast QPS if `write()` leaves the
-//! wal mutex. The AS-IS dente is the fire-120 generator: always
+//! wal mutex. The AS-IS tooth is the fire-120 generator: always
 //! `LockHold` (500 ns static), independent of the slices.
 
 #![forbid(unsafe_code)]
@@ -34,7 +34,7 @@ pub struct WritePhaseNs {
 
 /// Linux p149b quiet overwrite_mc4 (RFC-0189 P0.1), ns/op.
 /// Pin for tests and `pedra scale-model write --fixture linux-quiet`.
-/// Not a cartaz QPS.
+/// Not a board QPS.
 pub const LINUX_QUIET_0189_P01: WritePhaseNs = WritePhaseNs {
     wal_encode: 350,
     wal_write: 890,
@@ -124,7 +124,7 @@ pub fn serial_cs_ticket_ns(p: WritePhaseNs) -> u64 {
 }
 
 /// Upper bound: `L` fully-serialized group leaders share one CS.
-/// `L<=1` ⇒ 0. Not cartaz QPS — a ceiling on wait if nobody joins.
+/// `L<=1` ⇒ 0. Not board QPS — a ceiling on wait if nobody joins.
 #[must_use]
 pub fn predicted_lock_wait_ns(cs: u64, leaders: u64) -> u64 {
     match leaders {
@@ -179,7 +179,7 @@ pub fn name_cut(p: WritePhaseNs) -> WriteCut {
     best
 }
 
-/// AS-IS dente: always `LockHold` (fire 120), even when guard is 2.23 µs.
+/// AS-IS tooth: always `LockHold` (fire 120), even when guard is 2.23 µs.
 #[must_use]
 pub fn name_cut_as_is(_p: WritePhaseNs) -> WriteCut {
     WriteCut::LockHold
@@ -528,12 +528,12 @@ pub fn write_cycle_forecast(p: WritePhaseNs, leaders: u64) -> WriteCycleForecast
 impl WriteCycleForecast {
     /// CLI dump. `pedra scale-model write` prints this verbatim. The
     /// `tier=ceiling` label is load-bearing (P0.4): this number is a
-    /// deterministic structural bound for ranking cuts — NOT a cartaz
+    /// deterministic structural bound for ranking cuts — NOT a board
     /// QPS forecast and not even an upper bound under L>1 clients.
     #[must_use]
     pub fn render(self) -> String {
         format!(
-            "tier=ceiling (deterministic; structural ranking bound, not a cartaz qps forecast)\n\
+            "tier=ceiling (deterministic; structural ranking bound, not a board qps forecast)\n\
              write-cycle leaders={}\n\
              cut={} cut_as_is={}\n\
              cs_ns={} cs_as_is_ns={}\n\
@@ -753,7 +753,7 @@ mod tests {
         // The render must now carry the tier label that says exactly this.
         let r = write_cycle_forecast(LINUX_QUIET_0189_P01, 4).render();
         assert!(r.starts_with("tier=ceiling"), "{r}");
-        assert!(r.contains("not a cartaz qps forecast"), "{r}");
+        assert!(r.contains("not a board qps forecast"), "{r}");
     }
 
     /// Deterministic tail is the identity: p99 == p50 ⇒ σ̂ = 0, scv = 0,

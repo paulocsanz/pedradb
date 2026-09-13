@@ -3676,7 +3676,7 @@ mod tests {
         assert_eq!(
             crate::sst::sst_crc_fate_as_is(1, 2, 100),
             crate::sst::SstCrcFate::StripTrailer,
-            "AS-IS dente: mismatch still strips"
+            "AS-IS tooth: mismatch still strips"
         );
         let mut mem = MemTable::new();
         mem.put(b"k".as_slice(), 1, b"sst-crc-trailer-0152".as_slice());
@@ -3741,7 +3741,7 @@ mod tests {
         assert!(!crate::sst::sst_block_crc_ok(1, 2));
         assert!(
             crate::sst::sst_block_crc_ok_as_is(1, 2),
-            "AS-IS dente: ignore block mismatch"
+            "AS-IS tooth: ignore block mismatch"
         );
         let mut mem = MemTable::new();
         // Repetitive payload: the writer's first-block probe must keep lz4
@@ -4092,7 +4092,7 @@ mod tests {
         // Reference: the point path already defends the split.
         assert_eq!(table.blocks_for_point(b"k"), 0..2);
 
-        // Prova: a scan starting exactly at the split key must include
+        // Proves: the scan starting exactly at the split key must include
         // block 0 (k@5, k@3) — AS-IS windowed on `first <= k` and returned
         // only [1], silently dropping the newest versions of `k`.
         let got = table.blocks_overlapping_range(Bound::Included(&b"k"[..]), Bound::Unbounded);

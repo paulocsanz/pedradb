@@ -294,8 +294,8 @@ cargo run -q --release -p rocksdb-parity-bench --bin pedra -- diagnose write \
   --wal-ns 10310 --mem-ns 2896 --flush-ns 148310 --lock-ns 560 --prepare-ns 640
 
 # get vs RFC-0176 clock (1B @ 64 GiB). class=as_is_walk ⇒ P = N_files.
-# P2.35: work vector × intel_server_4ghz (happy|capacity|cold). Envelope 0176
-# fica; composed_* é o lower bound (bloom reject não paga pread).
+# P2.35: work vector × intel_server_4ghz (happy|capacity|cold). The 0176
+# envelope stays; composed_* is the lower bound (bloom reject pays no pread).
 cargo run -q --release -p rocksdb-parity-bench --bin pedra -- diagnose get \
   --keys 1000000000 --ram 68719476736 --measured-ns 61000
 cargo run -q --release -p rocksdb-parity-bench --bin pedra -- diagnose get \

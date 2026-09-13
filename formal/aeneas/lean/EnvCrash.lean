@@ -12,8 +12,8 @@ theorem crash_legal_in_window :
   unfold env_crash_kernel.crash_legal
   rfl
 
-/-- AS-IS dente: a cut below the barrier still admits. -/
-theorem crash_legal_as_is_dente :
+/-- AS-IS tooth: a cut below the barrier still admits. -/
+theorem crash_legal_as_is_tooth :
     env_crash_kernel.crash_legal_as_is
       { written := 10#u64, synced := 4#u64 }
       (3#u64) = ok true := by
@@ -42,15 +42,15 @@ theorem sync_lying_does_not_promote :
   unfold group_commit_kernel.fsync_promotes_pending
   simp [env_crash_kernel.SyncHonesty.read_discriminant]
 
-/-! ## RFC-0214 P0.2 — costura Env no degrau átomo (fate ∀) -/
+/-! ## RFC-0214 P0.2 — stitch Env in the atom rung (fate ∀) -/
 
-/-- RFC-0214 P0.2 (atom `catalog:env_crash`): um corte é legal
-EXATAMENTE quando sobrevive entre o piso da barreira e o teto
-escrito — `synced ⊆ cut ⊆ written` (caudas tornadas podem manter
-prefixo; bytes synced nunca somem; nenhum byte é inventado).
-Fate forall sobre o corpo extraído. O mutante AS-IS ignora o piso
-da barreira — um corte abaixo de `synced` é chamado de legal e
-come bytes que a barreira prometeu. -/
+/-- RFC-0214 P0.2 (atom `catalog:env_crash`): the cut is legal
+EXACTLY when survives between the floor of the barrier and the ceiling
+written — `synced ⊆ cut ⊆ written` (caudas tornadas can keep
+prefix; bytes synced never vanish; none byte is invented).
+Fate forall over the body extracted. The mutant AS-IS ignora the floor
+of the barrier — the cut below `synced` is called legal and
+consumes bytes the barrier promised. -/
 theorem crash_legal_fate_iff :
     ∀ (m : env_crash_kernel.CrashModel) (cut : U64) (v : Bool),
       (env_crash_kernel.crash_legal m cut = ok v) ↔
@@ -75,12 +75,12 @@ theorem crash_legal_fate_iff :
       · intro h
         rw [h]
 
-/-- RFC-0214 P0.2 (atom `catalog:env_append`): o append do Env tem
-desfecho ok EXATAMENTE quando a soma dos bytes não estoura — e
-nesse caso o único futuro é `{m with written := w}` (a barreira
-não se move; o comprimento lógico só cresce). Fate forall sobre o
-corpo extraído. O mutante AS-IS da costura é o do `crash_legal`
-(sem piso) — o append real não tem mutant próprio no par. -/
+/-- RFC-0214 P0.2 (atom `catalog:env_append`): the Env append has
+outcome ok EXACTLY when the byte add does not overflow — and
+on that match the single future is `{m with written := w}` (the barrier
+does not move; the logical length only grows). Fate forall over the
+body extracted. The mutant AS-IS of the stitch is the `crash_legal` one
+(without floor) — the real append has no mutant of its own in the pair. -/
 theorem append_fate_iff :
     ∀ (m : env_crash_kernel.CrashModel) (n w : U64),
       (env_crash_kernel.append m n = ok { m with written := w }) ↔
@@ -107,12 +107,12 @@ theorem append_fate_iff :
     rw [h]
     simp only [bind_tc_ok]
 
-/-- RFC-0214 P0.2 (atom `catalog:env_sync`): o sync do Env tem
-desfecho ok com EXATAMENTE dois futuros, um por honestidade —
-Honest promove a barreira ao comprimento todo; Lying devolve Ok e
-o modelo volta inteiro (a barreira não mente — RFC-0078). Fate
-forall sobre o corpo extraído. O mutante AS-IS promove sempre —
-um sync mentiroso é tratado como barreira feita. -/
+/-- RFC-0214 P0.2 (atom `catalog:env_sync`): the Env sync has
+outcome ok with EXACTLY two futures, decided by honesty —
+Honest promotes the barrier to the length every; Lying returns Ok and
+the model rolls back whole (the barrier does not lie — RFC-0078). Fate
+forall over the body extracted. The mutant AS-IS promotes always —
+the lying sync is treated as the barrier done. -/
 theorem sync_fate_iff :
     ∀ (m : env_crash_kernel.CrashModel)
       (h : env_crash_kernel.SyncHonesty)
@@ -154,14 +154,14 @@ theorem sync_fate_iff :
             (fun hh => env_crash_kernel.SyncHonesty.noConfusion hh)
         · rw [he]
 
-/-- RFC-0214 P0.2 (atom `catalog:env_barrier_floor`): a corolária
-do piso vale SEMPRE — o desfecho é `ok v` com `v = true` exato: ou
-o corte é ilegal (nada a perder), ou é legal e então `cut ≥
-synced` (o piso da janela do `crash_legal_fate_iff`, átomo 1/6
-desta fatia). Um crash legal nunca perde byte que a barreira
-honesta tornou durável. Fate forall sobre o corpo extraído; CITA
-`crash_legal_fate_iff`. O mutante AS-IS é o `crash_legal` sem
-piso — o mesmo dente da entrada 1/6. -/
+/-- RFC-0214 P0.2 (atom `catalog:env_barrier_floor`): the corollary
+of the floor holds ALWAYS — the outcome is `ok v` with `v = true` exact: or the
+the cut is illegal (nothing the lose), or is legal and then `cut ≥
+synced` (the floor of the window of the `crash_legal_fate_iff`, atom 1/6
+of this fatia). Um crash legal never loses byte that the barrier
+honest made durable. Fate forall over the body extracted; CITA
+`crash_legal_fate_iff`. The mutant AS-IS is the `crash_legal` without
+floor — the same tooth of the entry 1/6. -/
 theorem barrier_floor_fate_iff :
     ∀ (m : env_crash_kernel.CrashModel) (cut : U64) (v : Bool),
       (env_crash_kernel.barrier_floor_holds m cut = ok v) ↔
@@ -199,13 +199,13 @@ theorem barrier_floor_fate_iff :
   · intro h
     rw [h]
 
-/-- RFC-0214 P0.2 (atom `catalog:env_no_invented`): a corolária do
-teto vale SEMPRE — o desfecho é `ok v` com `v = true` exato: ou o
-corte é ilegal, ou é legal e então `cut ≤ written` (o teto da
-janela do `crash_legal_fate_iff`). A recuperação nunca observa um
-byte que o writer não escreveu. Fate forall sobre o corpo
-extraído; CITA `crash_legal_fate_iff`. O mutante AS-IS é o
-`crash_legal` sem piso. -/
+/-- RFC-0214 P0.2 (atom `catalog:env_no_invented`): the corollary of the
+ceiling holds ALWAYS — the outcome is `ok v` with `v = true` exact: or the
+cut is illegal, or is legal and then `cut ≤ written` (the ceiling of the
+window of the `crash_legal_fate_iff`). The recovery never observa the
+byte that the writer did not write. Fate forall over the body
+extracted; CITA `crash_legal_fate_iff`. The mutant AS-IS is the
+`crash_legal` without floor. -/
 theorem no_invented_bytes_fate_iff :
     ∀ (m : env_crash_kernel.CrashModel) (cut : U64) (v : Bool),
       (env_crash_kernel.no_invented_bytes_holds m cut = ok v) ↔
@@ -244,14 +244,14 @@ theorem no_invented_bytes_fate_iff :
   · intro h
     rw [h]
 
-/-- RFC-0214 P0.2 (atom `catalog:env_honest_sync`): a corolária do
-sync honesto vale SEMPRE — o desfecho é `ok v` com `v = true`
-exato: após a barreira honesta (`synced := written`), a janela
-legal colapsa num ponto (`written ≤ cut ≤ written` força
-`cut = written`, pernas `sync_fate_iff` + `crash_legal_fate_iff`,
-átomos 3/6 e 1/6 desta fatia) — todo crash legal preserva o log
-INTEIRO. Fate forall sobre o corpo extraído. O mutante AS-IS
-promove sync mentiroso — a barreira prometida não existe. -/
+/-- RFC-0214 P0.2 (atom `catalog:env_honest_sync`): the corollary of the
+sync honest holds ALWAYS — the outcome is `ok v` with `v = true`
+exact: after the barrier honest (`synced := written`), the window
+legal collapses to a single point (`written ≤ cut ≤ written` forces
+`cut = written`, legs `sync_fate_iff` + `crash_legal_fate_iff`,
+atoms 3/6 and 1/6 of this slice) — every legal crash preserves the log
+WHOLE. Fate forall over the body extracted. The mutant AS-IS
+promotes a lying sync — the promised barrier does not exist. -/
 theorem honest_sync_fate_iff :
     ∀ (m : env_crash_kernel.CrashModel) (cut : U64) (v : Bool),
       (env_crash_kernel.honest_sync_protects_all m cut = ok v) ↔

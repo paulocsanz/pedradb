@@ -17,8 +17,8 @@ theorem write_admission_idle_mem_stall_refuses :
   unfold write_admission_idle
   rfl
 
-/-- AS-IS dente: stall knobs are ignored (always idle). -/
-theorem write_admission_idle_as_is_dente :
+/-- AS-IS tooth: stall knobs are ignored (always idle). -/
+theorem write_admission_idle_as_is_tooth :
     write_admission_idle_as_is true true true = ok true := by
   unfold write_admission_idle_as_is
   rfl
@@ -31,8 +31,8 @@ theorem write_admit_mem_over_stalls :
   have h : (100#u64 ≥ 50#u64) = true := by native_decide
   simp [h]
 
-/-- AS-IS dente: mem over still admits. -/
-theorem write_admit_as_is_dente :
+/-- AS-IS tooth: mem over still admits. -/
+theorem write_admit_as_is_tooth :
     write_admit_as_is 100#u64 true 50#u64 8#u64 true 4#u64
       = ok WriteAdmit.Ok := by
   unfold write_admit_as_is
@@ -80,8 +80,8 @@ theorem wal_commit_plan_fence_via_fence_on_sync_fail :
     unfold fence_on_sync_fail
     rfl
 
-/-- AS-IS dente: Apply/Ok even after a failed required sync. -/
-theorem wal_commit_plan_as_is_dente :
+/-- AS-IS tooth: Apply/Ok even after a failed required sync. -/
+theorem wal_commit_plan_as_is_tooth :
     wal_commit_plan_as_is true true = ok WalCommitPlan.AppendSyncApplyOk := by
   unfold wal_commit_plan_as_is
   rfl
@@ -115,8 +115,8 @@ theorem cas_absent_put_live_refuses :
   unfold cas_absent_put
   rfl
 
-/-- AS-IS dente: live key still puts. -/
-theorem cas_absent_put_as_is_dente :
+/-- AS-IS tooth: live key still puts. -/
+theorem cas_absent_put_as_is_tooth :
     cas_absent_put_as_is true = ok true := by
   unfold cas_absent_put_as_is
   rfl
@@ -218,8 +218,8 @@ theorem cas_eq_put_mismatch_refuses :
   unfold cas_eq_put
   rfl
 
-/-- AS-IS dente: mismatch still puts. -/
-theorem cas_eq_put_as_is_dente :
+/-- AS-IS tooth: mismatch still puts. -/
+theorem cas_eq_put_as_is_tooth :
     cas_eq_put_as_is false = ok true := by
   unfold cas_eq_put_as_is
   rfl
@@ -363,11 +363,11 @@ theorem pit_resync_rewrite_fate_iff :
   unfold pit_resync_needs_rewrite
   cases is_resync <;> cases v <;> simp
 
-/-- RFC-0219 P1.1 (átomo `catalog:dir_sync_plan`): o dir-fsync pós-rename
-    (SST `.tmp`, chunk fundido, portão dir do DB) é pago EXATAMENTE em
-    modo sync — o dentry do rename é durável antes de voltar; async
-    pula (recuperação tolera dentry de nome-tmp sumiu). O AS-IS nunca
-    paga (dentry some pós-crash mesmo em sync — dente plantado). -/
+/-- RFC-0219 P1.1 (atom `catalog:dir_sync_plan`): the dir-fsync post-rename
+    (SST `.tmp`, chunk fundido, gate dir of the DB) is paid EXACTLY in
+    modo sync — the dentry of the rename is durable before the reply; async
+    skips (recovery tolera dentry of name-tmp vanished). The AS-IS never
+    pays (dentry vanishes post-crash same in sync — tooth planted). -/
 theorem dir_sync_plan_fate_iff :
     ∀ (sync : Bool) (plan : DirSyncPlan),
       (dir_sync_plan sync = ok plan) ↔
@@ -377,11 +377,11 @@ theorem dir_sync_plan_fate_iff :
   unfold dir_sync_plan dir_sync_required
   cases sync <;> simp_all <;> exact eq_comm
 
-/-- RFC-0219 P1.2 (átomo `catalog:fence_admission`): um Db com fence de
-    durabilidade recusa cada nova operação EXATAMENTE quando o fence
-    está armado — fail-closed; sem fence admite. O AS-IS admite sempre
-    (barreira falhada segue servindo escrita como se durável — dente
-    plantado). -/
+/-- RFC-0219 P1.2 (atom `catalog:fence_admission`): the Db with fence of
+    durability refuses each new operation EXACTLY when the fence
+    is armed — fail-closed; without fence admits. The AS-IS always admits
+    (barrier failed follows servindo write the if durable — tooth
+    planted). -/
 theorem fence_admission_plan_fate_iff :
     ∀ (fenced : Bool) (plan : FenceAdmission),
       (fence_admission_plan fenced = ok plan) ↔
@@ -391,10 +391,10 @@ theorem fence_admission_plan_fate_iff :
   unfold fence_admission_plan
   cases fenced <;> simp_all <;> exact eq_comm
 
-/-- RFC-0219 P1.2 (átomo `catalog:fence_record`): só o PRIMEIRO fence
-    registra o relatório da janela incerta — fence posterior mantém o
-    primeiro (o mais largo, o honesto). O AS-IS re-registra (encolhe a
-    janela que o client sabe estar não-provada — dente plantado). -/
+/-- RFC-0219 P1.2 (atom `catalog:fence_record`): only the FIRST fence
+    registers the report of the uncertain window — a later fence maintains the
+    first (the widest, the honest one). The AS-IS re-registers (shrinks the
+    window the client knows to be unproven — tooth planted). -/
 theorem fence_record_plan_fate_iff :
     ∀ (has_report : Bool) (plan : FenceRecordPlan),
       (fence_record_plan has_report = ok plan) ↔
@@ -404,11 +404,11 @@ theorem fence_record_plan_fate_iff :
   unfold fence_record_plan
   cases has_report <;> simp_all <;> exact eq_comm
 
-/-- RFC-0219 P1.2 (átomo `catalog:group_batch_sync`): um batch com flag
-    de sync EXATAMENTE força a barreira única do grupo (one fsync
-    compartilhado); batch async apenas viaja no agregado. O AS-IS deixa
-    tudo viajar (client que pediu sync é ackado sem barreira — dente
-    plantado). -/
+/-- RFC-0219 P1.2 (atom `catalog:group_batch_sync`): the batch with the sync
+    flag EXACTLY forces the single barrier of the group (one shared
+    fsync); an async batch only rides the aggregate. The AS-IS lets
+    everything ride (a client that asked for sync is acked without a barrier — tooth
+    planted). -/
 theorem group_batch_sync_plan_fate_iff :
     ∀ (client_sync : Bool) (plan : GroupSyncPlan),
       (group_batch_sync_plan client_sync = ok plan) ↔
@@ -418,11 +418,11 @@ theorem group_batch_sync_plan_fate_iff :
   unfold group_batch_sync_plan
   cases client_sync <;> simp_all <;> exact eq_comm
 
-/-- RFC-0219 P1.4 (átomo `catalog:pit_resync_rewrite`): o open reescreve
-    o WAL a partir do prefixo recuperado EXATAMENTE quando o relatório
-    de recuperação é um resync; sem resync o prefixo fica no disco
-    como-is. O AS-IS nunca reescreve (o dano mid-log sobrevive ao
-    próximo open fail-closed — dente plantado). -/
+/-- RFC-0219 P1.4 (atom `catalog:pit_resync_rewrite`): the open rewrites
+    the WAL starting from the prefix recovered EXACTLY when the report
+    of recovery is the resync; without resync the prefix stays on the disk
+    the as-is. The AS-IS never rewrites (the damage mid-log survives to the
+    next open fail-closed — tooth planted). -/
 theorem pit_resync_rewrite_plan_fate_iff :
     ∀ (is_resync : Bool) (plan : PitResyncRewritePlan),
       (pit_resync_rewrite_plan is_resync = ok plan) ↔
@@ -434,10 +434,10 @@ theorem pit_resync_rewrite_plan_fate_iff :
   unfold pit_resync_rewrite_plan pit_resync_needs_rewrite
   cases is_resync <;> simp_all <;> exact eq_comm
 
-/-- RFC-0219 P2.1 (átomo `catalog:parked_pop_plan`): o pop da fila
-    estacionada acontece EXATAMENTE quando a fila está não-vazia; fila
-    vazia não entrega nada ao fold. O AS-IS popa da fila vazia (índice
-    de frente no nada — dente plantado). -/
+/-- RFC-0219 P2.1 (atom `catalog:parked_pop_plan`): the parked pop
+    happens EXACTLY when the queue is non-empty; an
+    empty queue delivers nothing to the fold. The AS-IS pops from the empty queue (an
+    index from the front into nothing — tooth planted). -/
 theorem parked_pop_plan_fate_iff :
     ∀ (parked_len : U64) (plan : ParkedPopPlan),
       (parked_pop_plan parked_len = ok plan) ↔

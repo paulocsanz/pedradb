@@ -11,15 +11,15 @@ theorem crc_match_ok_equal :
   unfold crc_match_ok
   rfl
 
-/-- AS-IS dente: mismatch still admits. -/
-theorem crc_match_ok_as_is_dente :
+/-- AS-IS tooth: mismatch still admits. -/
+theorem crc_match_ok_as_is_tooth :
     crc_match_ok_as_is 1#u32 2#u32 = ok true := by
   unfold crc_match_ok_as_is
   rfl
-/-- RFC-0218 P0.4 1/9 (átomo `catalog:crc_match`): a admissão de
-    CRC é EXATAMENTE a igualdade citada — checksum casa sse stored =
-    computed. O AS-IS admite sempre (integridade cega — dente
-    plantado). -/
+/-- RFC-0218 P0.4 1/9 (atom `catalog:crc_match`): the admission of
+    CRC is EXACTLY the cited equality — checksum matches iff stored =
+    computed. The AS-IS always admits (blind integrity — tooth
+    planted). -/
 theorem crc_match_ok_fate_iff :
     ∀ (stored : U32) (computed : U32) (v : Bool),
       (crc_match_ok stored computed = ok v) ↔

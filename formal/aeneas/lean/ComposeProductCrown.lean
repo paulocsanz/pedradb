@@ -1,5 +1,5 @@
 -- Cross-lib composition (RFC-0215 P1.2): the product crown —
--- espinha→coroa. For every RFC-0214 `spine_reach` path, the recovered
+-- spine→crown. For every RFC-0214 `spine_reach` path, the recovered
 -- ledger passes BOTH legs of the product promise:
 --   * the model leg `d1_modelo = ok true` — cited through the iff
 --     twin of the `catalog:d1_modelo` atom (`wa_d1_modelo_fate_iff`,

@@ -501,22 +501,22 @@ mod tests {
         assert!(!ring_model_admitted());
         assert!(
             ring_model_admitted_as_is(),
-            "AS-IS dente: ring looks proven"
+            "AS-IS tooth: ring looks proven"
         );
         assert!(!verified_admits_ring(true));
         assert!(!verified_admits_ring(false));
         assert!(
             verified_admits_ring_as_is(true),
-            "AS-IS dente: verified would take a live ring"
+            "AS-IS tooth: verified would take a live ring"
         );
         assert!(!verified_admits_ring_as_is(false));
         assert!(!ring_twin_admitted());
         assert!(
             ring_twin_admitted_as_is(),
-            "AS-IS dente: ring twin looks proven"
+            "AS-IS tooth: ring twin looks proven"
         );
         assert!(!wal_on_sqe_admitted());
-        assert!(wal_on_sqe_admitted_as_is(), "AS-IS dente: WAL back on SQE");
+        assert!(wal_on_sqe_admitted_as_is(), "AS-IS tooth: WAL back on SQE");
         let twin = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("verus/ring_model.rs");
         assert!(
             !twin.exists(),

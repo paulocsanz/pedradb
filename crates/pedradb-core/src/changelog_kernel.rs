@@ -1,7 +1,7 @@
 //! Pure changelog SST-rebuild gate (RFC-0002 P22 / F53).
 //!
 //! **Single artifact:** this file is what `rustc` links *and* what Verus
-//! proves (`cfg(verus_keep_ghost)`). No twin-cópia.
+//! proves (`cfg(verus_keep_ghost)`). No twin copy.
 //!
 //!   ./scripts/verus_changelog_rebuild.sh
 //!
@@ -108,7 +108,7 @@ pub fn changelog_rebuild_within_budget(live_entries: u64, budget_entries: u64) -
     changelog_rebuild_within_budget_body!(live_entries, budget_entries)
 }
 
-/// AS-IS: always materialize — the 25M OOM dente (guest settle flush held
+/// AS-IS: always materialize — the 25M OOM tooth (guest settle flush held
 /// ~3× live set; killed at 3.3 GB for a 0.61 GiB store).
 #[cfg(not(verus_keep_ghost))]
 #[must_use]
@@ -278,7 +278,7 @@ pub fn changelog_durable_commit_fate(
 }
 
 /// AS-IS: durable commits never count — the cache only ever stores at
-/// flush/close, so every crash pays the full WAL replay (dente).
+/// flush/close, so every crash pays the full WAL replay (tooth).
 #[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn changelog_durable_commit_fate_as_is(
@@ -314,7 +314,7 @@ pub fn changelog_store_plan(publish_ok: bool) -> ChangelogStorePlan {
 }
 
 /// AS-IS: stores even when the publish failed — the store deletes
-/// archived segments no published MANIFEST covers (dente).
+/// archived segments no published MANIFEST covers (tooth).
 #[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn changelog_store_plan_as_is(_publish_ok: bool) -> ChangelogStorePlan {
@@ -349,7 +349,7 @@ pub fn wal_archive_delete_plan(
 }
 
 /// AS-IS: delete covered-or-not — the un-published window's only durable
-/// copy is unlinked (data-loss window dente).
+/// copy is unlinked (data-loss window tooth).
 #[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn wal_archive_delete_plan_as_is(
@@ -694,7 +694,7 @@ mod tests {
             changelog_durable_commit_fate(false, true, false),
             ChangelogCommitFate::Skip
         );
-        // AS-IS dente: durable commits never count — every crash pays the
+        // AS-IS tooth: durable commits never count — every crash pays the
         // full WAL replay.
         assert_eq!(
             changelog_durable_commit_fate_as_is(true, true, true),
@@ -734,7 +734,7 @@ mod tests {
         assert_eq!(
             changelog_store_plan_as_is(false),
             ChangelogStorePlan::StoreFeed,
-            "AS-IS dente: stores with the publish failed"
+            "AS-IS tooth: stores with the publish failed"
         );
         let csp = named_fn_src(include_str!("db.rs"), "changelog_store_point")
             .expect("changelog_store_point");
@@ -764,7 +764,7 @@ mod tests {
             wal_archive_delete_plan(9, 7),
             WalArchiveDelete::DeleteCovered
         );
-        // AS-IS dente: deletes the un-published window's only durable copy.
+        // AS-IS tooth: deletes the un-published window's only durable copy.
         assert_eq!(
             wal_archive_delete_plan_as_is(3, 7),
             WalArchiveDelete::DeleteCovered

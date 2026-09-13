@@ -12,8 +12,8 @@ theorem write_record_count_ok_prefix :
   have h : UScalar.cast UScalarTy.Usize (3#u32) = 3#usize := by native_decide
   simp [h, lift]
 
-/-- AS-IS dente: prefix still admits. -/
-theorem write_record_count_ok_as_is_dente :
+/-- AS-IS tooth: prefix still admits. -/
+theorem write_record_count_ok_as_is_tooth :
     batch.write_record_count_ok_as_is (3#u32) (2#usize) = ok true := by
   unfold batch.write_record_count_ok_as_is
   rfl

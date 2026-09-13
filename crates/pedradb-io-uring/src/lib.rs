@@ -239,7 +239,7 @@ pub fn open_with(path: impl AsRef<Path>, opts: DbOpen) -> CoreResult<Db<IoUringE
 pub struct IoUringFile {
     file: File,
     /// Ring handle for test CQE inject. Production write/fsync is POSIX
-    /// (RFC-0062 P1.1: uring `submit_and_wait` was the coluna B tax).
+    /// (RFC-0062 P1.1: uring `submit_and_wait` was the column B tax).
     #[allow(dead_code)]
     env: IoUringEnv,
     /// Logical cursor for write/read (append opens seek to end).
@@ -291,7 +291,7 @@ impl IoUringFile {
     }
 
     /// Ring fsync (tests / RFC-0050 CQE inject). Production G1 uses POSIX
-    /// `fdatasync` / `fsync` (coluna B: `submit_and_wait` was the tax).
+    /// `fdatasync` / `fsync` (column B: `submit_and_wait` was the tax).
     #[cfg(target_os = "linux")]
     #[cfg_attr(not(test), allow(dead_code))]
     fn uring_fsync(&mut self, datasync: bool) -> io::Result<()> {
@@ -370,7 +370,7 @@ impl Seek for IoUringFile {
 
 impl EnvFile for IoUringFile {
     fn sync_data(&mut self) -> io::Result<()> {
-        // G1 / coluna B: `submit_and_wait` on every Ok was the Linux tax.
+        // G1 / column B: `submit_and_wait` on every Ok was the Linux tax.
         // Tests still use the ring so CQE inject sees the fsync.
         // RFC-0080 P2.2: production WAL sync is not SQE.
         #[cfg(all(test, target_os = "linux"))]
@@ -564,7 +564,7 @@ mod tests {
         assert!(!full_uses_posix_fallback(true));
         assert!(
             !full_uses_posix_fallback_as_is(false),
-            "AS-IS dente: claim live ring when unavailable"
+            "AS-IS tooth: claim live ring when unavailable"
         );
         let env = production_env();
         let ring = env.backend() == IoBackend::IoUring;
@@ -641,7 +641,7 @@ mod tests {
         assert!(!pedradb_core::wal_on_sqe_admitted());
         assert!(
             pedradb_core::wal_on_sqe_admitted_as_is(),
-            "AS-IS dente: WAL back on SQE"
+            "AS-IS tooth: WAL back on SQE"
         );
         assert!(!pedradb_core::ring_twin_admitted());
         let dir = temp_dir();
@@ -894,7 +894,7 @@ mod tests {
         assert!(!crate::cqe_kernel::cqe_res_ok(-5));
         assert!(
             crate::cqe_kernel::cqe_res_ok_as_is(-5),
-            "AS-IS dente: negative CQE looks Ok"
+            "AS-IS tooth: negative CQE looks Ok"
         );
         let env = IoUringEnv::new().unwrap();
         let dir = temp_dir();

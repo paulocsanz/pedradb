@@ -447,21 +447,21 @@ pub const BALANCE_SHAPES: [&str; 35] = [
 /// One cell in a multi-shape board (RFC-0182 / /otimizar).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BalanceCell {
-    /// Ranked Linux 3/3 named loss (today: overwrite_mc4 caixa).
+    /// Ranked Linux 3/3 named loss (today: overwrite_mc4 host).
     pub linux_named_loss: bool,
-    /// Darwin DIAG / host-load — not the cartaz.
+    /// Darwin DIAG / host-load — not the board.
     pub diag_only: bool,
     /// Diagnose lever for this cell.
     pub lever: WriteLever,
 }
 
 /// Engine cut is admitted iff it is the Linux named-loss cell, or it
-/// hits ≥2 **cartaz** cells. A lever that only shows up on DIAG is
+/// hits ≥2 **board** cells. A lever that only shows up on DIAG is
 /// refused (0180-style single-shape overfit).
 #[must_use]
 pub fn balance_admits(cut: WriteLever, cells: &[BalanceCell]) -> bool {
     let mut hits = 0u32;
-    let mut cartaz = 0u32;
+    let mut board = 0u32;
     let mut named = false;
     for c in cells {
         if c.lever != cut {
@@ -472,13 +472,13 @@ pub fn balance_admits(cut: WriteLever, cells: &[BalanceCell]) -> bool {
             named = true;
         }
         if !c.diag_only {
-            cartaz = cartaz.saturating_add(1);
+            board = board.saturating_add(1);
         }
     }
     if hits == 0 {
         return false;
     }
-    named || cartaz >= 2
+    named || board >= 2
 }
 
 /// AS-IS: every cut is admitted (the overfit trap).
@@ -962,7 +962,7 @@ mod tests {
     }
 
     #[test]
-    fn two_cartaz_cells_admit_shared_lever() {
+    fn two_board_cells_admit_shared_lever() {
         let board = [
             BalanceCell {
                 linux_named_loss: false,

@@ -99,11 +99,11 @@ private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : �
   rw [hx]
   exact h
 
-/-- RFC-0218 P1.1 5/10 (átomo `catalog:compact_split`, entrada
-    `compact_should_split`): dividir é EXATAMENTE comparar contra o
-    alvo citado COMPACT_TARGET_FILE_BYTES (bind citado: o gate
-    produz um índice e a comparação decide). O AS-IS nunca divide
-    (ok false — arquivo de saída sem borne; dente plantado). -/
+/-- RFC-0218 P1.1 5/10 (atom `catalog:compact_split`, entry
+    `compact_should_split`): split is EXACTLY the compare against the
+    cited target COMPACT_TARGET_FILE_BYTES (cited bind: the gate
+    produces the index and the comparison decides). The AS-IS never splits
+    (ok false — output file without borne; tooth planted). -/
 theorem compact_should_split_fate_iff :
     ∀ (w : U64) (v : Bool),
       (compact_should_split w = ok v) ↔
@@ -118,10 +118,10 @@ theorem compact_should_split_fate_iff :
     unfold compact_should_split
     exact bind_intro i hT hs
 
-/-- RFC-0218 P1.1 6/10 (átomo `catalog:compact_split_at`, entrada
-    `compact_should_split_at`): dividir-no-ponto é EXATAMENTE o lift
-    citado `written_bytes >= target` (decide). O AS-IS é a constante
-    false (mutantes nunca dividem — dente plantado). -/
+/-- RFC-0218 P1.1 6/10 (atom `catalog:compact_split_at`, entry
+    `compact_should_split_at`): split-in the-point is EXACTLY the lift
+    cited `written_bytes >= target` (decides). The AS-IS is the constante
+    false (mutants never dividem — tooth planted). -/
 theorem compact_should_split_at_fate_iff :
     ∀ (w : U64) (t : U64) (v : Bool),
       (compact_should_split_at w t = ok v) ↔ (v = decide (w >= t)) := by
@@ -135,11 +135,11 @@ theorem compact_should_split_at_fate_iff :
     subst hv
     rfl
 
-/-- RFC-0218 P1.1 7/10 (átomo `catalog:lone_tombstone`, entrada
-    `lone_tombstone_fate`): o túmulo solitário cai SÓ no nível mais
-    baixo — Drop exige bottommost E único-mais-novo; todo o resto
-    Keep. O AS-IS ignora bottommost (Drop fora do fundo — dente
-    plantado). -/
+/-- RFC-0218 P1.1 7/10 (atom `catalog:lone_tombstone`, entry
+    `lone_tombstone_fate`): the lone tombstone falls ONLY in the lowest level
+— Drop requires bottommost AND single-newest; all the rest stays
+    Keep. The AS-IS ignores bottommost (Drop outside the bottom — tooth
+    planted). -/
 theorem lone_tombstone_fate_iff :
     ∀ (bottommost : Bool) (lone_newest : Bool) (r : VersionFate),
       (lone_tombstone_fate bottommost lone_newest = ok r) ↔

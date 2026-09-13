@@ -202,7 +202,7 @@ mod tests {
         assert_eq!(
             reopen_outcome_as_is_silent(ReopenDamage::Crc, false, false),
             ReopenOutcome::ServeAll,
-            "AS-IS dente: damaged WAL served"
+            "AS-IS tooth: damaged WAL served"
         );
     }
 }

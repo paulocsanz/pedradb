@@ -1,4 +1,4 @@
 path=crates/pedradb-core/src/sst/scan_kernel.rs
-sha256=feaee69fb82a49214d74dcefcf2784ad7f3c4c0bcfb0546f184a8a28d2d54f89
+sha256=fd23b30eb41c3d81c4c42e84dc1b5e15319e5eeed5c4d469058d8432c42c952f
 aeneas=daa85d7
 charon=0.1.232

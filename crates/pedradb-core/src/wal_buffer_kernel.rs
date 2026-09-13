@@ -77,7 +77,7 @@ mod tests {
 
     #[test]
     fn wal_buffer_zero_max_is_as_is() {
-        // Misuse guard: a zero cap degenerates to the AS-IS dente —
+        // Misuse guard: a zero cap degenerates to the AS-IS tooth —
         // flush every op, never accumulate.
         for staged in [0u64, 1, 100, 1 << 20] {
             assert_eq!(should_flush(staged, 0), should_flush_as_is(staged, 0));
