@@ -330,3 +330,21 @@ self.persist_manifest_durable().is_ok()` decidia inline gravar o feed.
   280→281, residuals atom 281, single_artifact 300.
 - **Contador**: 51 → **50** (db.rs 29→28). P1.4 fechado: 3 pares.
   **P1 inteiro fechado: 12/12 pares; 285/307 = 92,83%.**
+
+## P2.1-a — `parked_pop_plan` (write_admission_kernel)
+
+Sítio: `take_oldest_parked` — o portão `if batch_is_empty(len)` decidia
+inline entregar a tabela estacionada ao fold.
+
+- **Kernel**: `write_admission_kernel::parked_pop_plan(parked_len)` →
+  `ParkedPopPlan{PopOldestParked, NoParkedTables}` (chama
+  `batch_is_empty`, que segue vivo e provado no corpo).
+- **AS-IS dente**: `parked_pop_plan_as_is` — popa da fila vazia.
+- **Teorema**: `parked_pop_plan_fate_iff` (∀ sobre o u64; prova via
+  `bind_ok_inv`/`bind_intro` compondo `batch_is_empty_ok_iff_zero`) em
+  `WriteAdmission.lean`.
+- **Extrato**: `aeneas_write_admission.sh --required` verde.
+- **Planta DST**: `parked_pop_plan_on_live_nonempty_queue_pops`.
+- **Par nasce átomo**: `catalog:parked_pop_plan`. floor_atom 281→282,
+  residuals atom 282, single_artifact 301.
+- **Contador**: 50 → **49** (db.rs 29→28).

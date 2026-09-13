@@ -433,3 +433,39 @@ theorem pit_resync_rewrite_plan_fate_iff :
   intro is_resync plan
   unfold pit_resync_rewrite_plan pit_resync_needs_rewrite
   cases is_resync <;> simp_all <;> exact eq_comm
+
+/-- RFC-0219 P2.1 (átomo `catalog:parked_pop_plan`): o pop da fila
+    estacionada acontece EXATAMENTE quando a fila está não-vazia; fila
+    vazia não entrega nada ao fold. O AS-IS popa da fila vazia (índice
+    de frente no nada — dente plantado). -/
+theorem parked_pop_plan_fate_iff :
+    ∀ (parked_len : U64) (plan : ParkedPopPlan),
+      (parked_pop_plan parked_len = ok plan) ↔
+        (((parked_len = 0#u64 : Bool) = true ∧
+            plan = ParkedPopPlan.NoParkedTables) ∨
+          ((parked_len = 0#u64 : Bool) = false ∧
+            plan = ParkedPopPlan.PopOldestParked)) := by
+  intro parked_len plan
+  simp only [parked_pop_plan]
+  constructor
+  · intro hval
+    obtain ⟨b, hw, hm⟩ := bind_ok_inv _ _ _ hval
+    rw [batch_is_empty_ok_iff_zero] at hw
+    cases b with
+    | true =>
+        simp at hm
+        subst hm
+        exact Or.inl ⟨hw, rfl⟩
+    | false =>
+        simp at hm
+        subst hm
+        exact Or.inr ⟨hw, rfl⟩
+  · rintro (⟨hz, hplan⟩ | ⟨hz, hplan⟩)
+    · refine bind_intro true ?_ ?_
+      · rw [batch_is_empty_ok_iff_zero]
+        exact hz
+      · simp [hplan]
+    · refine bind_intro false ?_ ?_
+      · rw [batch_is_empty_ok_iff_zero]
+        exact hz
+      · simp [hplan]

@@ -6746,11 +6746,14 @@ impl<E: Env> Db<E> {
 
     /// Pop the oldest parked table after its L0 exists.
     pub fn take_oldest_parked(&mut self) -> Option<MemTable> {
-        if crate::write_admission_kernel::batch_is_empty(self.parked_unflushed.len() as u64) {
-            None
-        } else {
-            let arc = self.parked_unflushed.remove(0);
-            Some(Arc::try_unwrap(arc).unwrap_or_else(|a| (*a).clone()))
+        match crate::write_admission_kernel::parked_pop_plan(
+            self.parked_unflushed.len() as u64,
+        ) {
+            crate::write_admission_kernel::ParkedPopPlan::NoParkedTables => None,
+            crate::write_admission_kernel::ParkedPopPlan::PopOldestParked => {
+                let arc = self.parked_unflushed.remove(0);
+                Some(Arc::try_unwrap(arc).unwrap_or_else(|a| (*a).clone()))
+            }
         }
     }
 

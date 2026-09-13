@@ -6855,6 +6855,36 @@
    }
   },
   {
+   "id": "parked_pop_plan",
+   "finding": "RFC-0219 P2.1",
+   "twin_kind": "atom",
+   "atom": "parked_pop_plan",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "RFC-0219 P2.1: popar a fila estacionada é decisão do kernel — popa EXATAMENTE quando a fila está não-vazia (batch_is_empty segue vivo e provado no corpo), provado ∀ sobre parked_len como parked_pop_plan_fate_iff em WriteAdmission.lean; o AS-IS popa da fila vazia (dente); o trampolim db.rs take_oldest_parked faz match no plano"
+   },
+   "single_artifact": true,
+   "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+   "aeneas": "scripts/aeneas_write_admission.sh",
+   "callers": [
+    "crates/pedradb-core/src/db.rs"
+   ],
+   "entry": "parked_pop_plan",
+   "three_teeth": true,
+   "live_callers": [
+    {
+     "file": "crates/pedradb-core/src/db.rs",
+     "handler": "take_oldest_parked"
+    }
+   ],
+   "as_is": "parked_pop_plan_as_is",
+   "dst_plant": {
+    "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+    "test": "parked_pop_plan_on_live_nonempty_queue_pops"
+   }
+  },
+  {
    "id": "flush_plan",
    "finding": "F2/F43",
    "twin_kind": "close",

@@ -308,3 +308,4 @@ atom	catalog:mem_auto_flush	mem_auto_flush_plan_fate_iff	formal/aeneas/lean/Flus
 atom	catalog:pit_resync_rewrite_plan	pit_resync_rewrite_plan_fate_iff	formal/aeneas/lean/WriteAdmission.lean	pit_resync_rewrite_plan
 atom	catalog:manifest_publish_plan	manifest_publish_plan_fate_iff	formal/aeneas/lean/Flush.lean	manifest_publish_plan
 atom	catalog:changelog_store_plan	changelog_store_plan_fate_iff	formal/aeneas/lean/Changelog.lean	changelog_store_plan
+atom	catalog:parked_pop_plan	parked_pop_plan_fate_iff	formal/aeneas/lean/WriteAdmission.lean	parked_pop_plan

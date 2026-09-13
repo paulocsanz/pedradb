@@ -249,6 +249,35 @@ pub fn batch_is_empty_as_is(_n: u64) -> bool {
 }
 
 #[cfg(not(verus_keep_ghost))]
+/// Fate of the parked-queue pop after the table's L0 exists.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ParkedPopPlan {
+    /// Queue has a table — pop the oldest parked.
+    PopOldestParked,
+    /// Queue empty — nothing to hand the fold.
+    NoParkedTables,
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// Pop EXACTLY when the parked queue is non-empty (batch_is_empty
+/// stays live and proved in the body).
+#[must_use]
+pub fn parked_pop_plan(parked_len: u64) -> ParkedPopPlan {
+    if batch_is_empty(parked_len) {
+        ParkedPopPlan::NoParkedTables
+    } else {
+        ParkedPopPlan::PopOldestParked
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: pops from the empty queue (front index into nothing — dente).
+#[must_use]
+pub fn parked_pop_plan_as_is(_parked_len: u64) -> ParkedPopPlan {
+    ParkedPopPlan::PopOldestParked
+}
+
+#[cfg(not(verus_keep_ghost))]
 /// Required sync failed ⇒ fence so later fsync cannot publish an unacked prefix.
 #[must_use]
 pub fn fence_on_sync_fail(sync_required: bool, sync_failed: bool) -> bool {
@@ -1528,6 +1557,30 @@ mod tests {
         assert!(
             !open.contains("pit_resync_needs_rewrite("),
             "the raw resync gate left the trampoline"
+        );
+    }
+
+    #[test]
+    fn parked_pop_plan_on_live_nonempty_queue_pops() {
+        // RFC-0219 P2.1: the pop happens EXACTLY when the parked queue
+        // is non-empty; AS-IS pops from the empty queue (dente).
+        assert_eq!(parked_pop_plan(0), ParkedPopPlan::NoParkedTables);
+        assert_eq!(parked_pop_plan(1), ParkedPopPlan::PopOldestParked);
+        assert_eq!(parked_pop_plan(3), ParkedPopPlan::PopOldestParked);
+        assert_eq!(
+            parked_pop_plan_as_is(0),
+            ParkedPopPlan::PopOldestParked,
+            "AS-IS dente: pops from the empty queue"
+        );
+        let top = named_fn_src(include_str!("db.rs"), "take_oldest_parked")
+            .expect("take_oldest_parked");
+        assert!(
+            top.contains("match crate::write_admission_kernel::parked_pop_plan("),
+            "take_oldest_parked must match parked_pop_plan"
+        );
+        assert!(
+            !top.contains("batch_is_empty("),
+            "the raw empty-queue gate left the trampoline"
         );
     }
 
