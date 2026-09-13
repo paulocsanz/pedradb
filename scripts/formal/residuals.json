@@ -78,12 +78,12 @@
    "crates/pedradb-raft/src/c1_modelo_kernel.rs",
    "crates/pedradb-world/src/world_kernel.rs"
   ],
-  "kernel_files": 59,
-  "kernel_loc": 23189,
-  "handler_loc": 112092,
+  "kernel_files": 69,
+  "kernel_loc": 28464,
+  "handler_loc": 116716,
   "db_rs_extracted": false,
   "proof_depth": {
-   "extract": 12,
+   "extract": 20,
    "close": 4,
    "atom": 286,
    "model": 2,
