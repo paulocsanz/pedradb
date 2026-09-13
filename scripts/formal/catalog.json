@@ -8023,6 +8023,10 @@
   },
   {
    "id": "scale_probes_worst",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "pior caso de producao e exatamente a mesma soma citada — point_get_probes com o trigger cheio do L0; as-is ainda anda cada arquivo vivo"
+   },
    "finding": "RFC-0176 P1",
    "twin_kind": "close",
    "single_artifact": true,

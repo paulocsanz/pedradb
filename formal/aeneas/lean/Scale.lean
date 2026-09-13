@@ -249,3 +249,15 @@ theorem point_get_probes_fate_iff :
     unfold point_get_probes
     rfl
 
+/-- RFC-0218 P2.2 (átomo `catalog:scale_probes_worst`, entrada
+    `probes_worst`): o pior caso de produção é EXATAMENTE a mesma soma
+    citada — point_get_probes com o trigger cheio do L0. O AS-IS ainda
+    anda cada arquivo vivo. -/
+theorem probes_worst_fate_iff :
+    ∀ (levels l0_max : U64) (v : U64),
+      (probes_worst levels l0_max = ok v) ↔
+        (point_get_probes levels l0_max = ok v) := by
+  intro levels l0_max v
+  unfold probes_worst
+  exact Iff.rfl
+
