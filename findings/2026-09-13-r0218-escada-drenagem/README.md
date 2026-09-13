@@ -228,6 +228,15 @@ gates GREEN no commit).
 
 ## P1.1 — compact ×7 + lsm_r1 ×3 átomo
 
+- **lsm_r1 / lsm_probe (9/10)**: provar R1 como EXATAMENTE um passo
+  do loop citado — via `Aeneas.Std.loop.eq_def` (one-step unfold do
+  fixpoint): o corpo no nível 0 ou termina (`done o`) ou desce um
+  nível (`cont i'`, resto citado) — `lsm_probe_fate_iff` em
+  `LsmR1.lean`. Forward: eq_def + cases no corpo (rfl como testemunha
+  do gate); reverso: eq_def + rw. Build verde. Planta DST
+  `r1_modelo_on_live_delete_shape_is_not_ok` (pedradb-sim, exit 0 no
+  worktree). Gate: floor_atom 209→210, floor_extract 69→68.
+
 - **lsm_r1 / lsm_compact (8/10)**: despacho de compactação R1 como
   encaminhamento citado — nível 0 e nível ≥ MAX_LEVELS não compactam
   (ok none); dentro, o loop citado `lsm_compact_src_loop` com

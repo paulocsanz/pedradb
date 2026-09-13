@@ -236,3 +236,4 @@ atom	catalog:compact_split	compact_should_split_fate_iff	formal/aeneas/lean/Comp
 atom	catalog:compact_split_at	compact_should_split_at_fate_iff	formal/aeneas/lean/Compact.lean	compact_should_split_at
 atom	catalog:lone_tombstone	lone_tombstone_fate_iff	formal/aeneas/lean/Compact.lean	lone_tombstone_fate
 atom	catalog:lsm_compact	lsm_compact_fate_iff	formal/aeneas/lean/LsmR1.lean	lsm_compact
+atom	catalog:lsm_probe	lsm_probe_fate_iff	formal/aeneas/lean/LsmR1.lean	lsm_probe

@@ -7173,6 +7173,10 @@
   },
   {
    "id": "lsm_probe",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.1: fate ∀ sobre lsm_probe no degrau átomo — um passo do loop citado via loop.eq_def: corpo no nível 0 termina (done) ou desce um nível (cont); planta DST r1_modelo_on_live_delete_shape_is_not_ok"
+   },
    "entry": "lsm_probe",
    "as_is": "lsm_probe_as_is",
    "finding": "RFC-0166 P2.1",

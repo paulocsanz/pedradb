@@ -156,3 +156,41 @@ theorem lsm_compact_fate_iff :
     · unfold lsm_compact
       rw [if_neg hz, if_neg hm, hv]
 
+/-- RFC-0218 P1.1 9/10 (átomo `catalog:lsm_probe`, entrada
+    `lsm_probe`): provar R1 é EXATAMENTE um passo do loop citado —
+    o corpo no nível 0 ou termina (done o) ou desce um nível
+    (cont i', resto citado). O AS-IS ignora o nível (dente
+    plantado). -/
+theorem lsm_probe_fate_iff :
+    ∀ (s : LsmState) (key : U64) (o : Option LsmEntry),
+      (lsm_probe s key = ok o) ↔
+      (∃ b, lsm_probe_loop.body s key 0#usize = ok b ∧
+        ((b = ControlFlow.done o) ∨
+         (∃ i', b = ControlFlow.cont i' ∧ lsm_probe_loop s key i' = ok o))) := by
+  intro s key o
+  constructor
+  · intro hval
+    unfold lsm_probe at hval
+    unfold lsm_probe_loop at hval
+    rw [Aeneas.Std.loop.eq_def] at hval
+    cases hb : lsm_probe_loop.body s key 0#usize with
+    | ok b =>
+      rw [hb] at hval
+      cases b with
+      | cont i' =>
+        exact ⟨ControlFlow.cont i', rfl, Or.inr ⟨i', rfl, hval⟩⟩
+      | done o' =>
+        injection hval with hv
+        exact ⟨ControlFlow.done o', rfl, Or.inl (by rw [hv])⟩
+    | fail e => simp [hb] at hval
+    | div => simp [hb] at hval
+  · rintro ⟨b, hb, (hdone | ⟨i', hcont, hloop⟩)⟩
+    · unfold lsm_probe
+      unfold lsm_probe_loop
+      rw [Aeneas.Std.loop.eq_def]
+      rw [hb, hdone]
+    · unfold lsm_probe
+      unfold lsm_probe_loop
+      rw [Aeneas.Std.loop.eq_def]
+      rw [hb, hcont]
+      exact hloop
