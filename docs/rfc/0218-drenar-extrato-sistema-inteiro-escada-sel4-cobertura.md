@@ -1,6 +1,6 @@
 # RFC-0218 — Drenar o degrau extrato do sistema inteiro: a escada classe-seL4 medida por `sel4_coverage`
 
-**Status:** draft
+**Status:** done
 **Data:** 2026-09-13
 **Autoria:** agente grind (round 10→11), sucessora direta do RFC-0216
 (superfície de parse HTTP fechada, `**Status:** done` no HEAD `f45f5b14`)
@@ -229,8 +229,8 @@ nunca por promoção silenciosa.
 | P1.2 | p1 | leveling/merge/index_val/key/prefix ×11 átomo | done | 11/11 átomo (floor_atom 211→222) | 2026-09-13 |
 | P1.3 | p1 | si/snapshot/txn/rpc ×11 átomo | done | 11/11 átomo (floor_atom 222→233) | 2026-09-13 |
 | P2.1 | p2 | journal/stream/fold/ship/capi ×12 átomo | done | 12/12 átomo (floor_atom 233→245) | 2026-09-13 |
-| P2.2 | p2 | raft/dcs/l28/scale/bloom/probe ×21 átomo | todo | — | 2026-09-13 |
-| P2.3 | p2 | Sweep final + nota EXTRACT.md + flip done | todo | — | 2026-09-13 |
+| P2.2 | p2 | raft/dcs/l28/scale/bloom/probe ×21 átomo | done | 21/21 átomo (floor_atom 245→266) | 2026-09-13 |
+| P2.3 | p2 | Sweep final + nota EXTRACT.md + flip done | done | sweep GREEN no worktree pedradb-r0218-p23-sweep @ 4b89a8ce | 2026-09-13 |
 
 ## Critérios de aceite
 

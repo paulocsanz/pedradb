@@ -689,3 +689,17 @@ inventory-terminal, twin-contracts) + campaign ok + extracts
 do catálogo 27/27 em átomo — nenhum gate do plano de request
 decidido por teste em vez de teorema. Restam no degrau extrato:
 100 (nenhum `data_fate` pendente, catálogo fechado).
+
+## 2026-09-13 — RFC-0218 fechada (P0/P1/P2 todas done, 270/292)
+
+A drenagem do RFC-0218 fecha o degrau extrato do sistema inteiro:
+88 pares pagáveis promovidos ao degrau átomo (1 iff-∀ = 1 commit),
+floor_atom 178→266, floor_extract 120→12 (close=6, count=7,
+data_fate=0 imutáveis). Escada: P0.1–P0.4 → 205/292; P1.1–P1.3 →
+237/292; P2.1 → 249/292; P2.2 → 270/292 = 92,47%. Sweep final em
+worktree DENTRO de software/ (pedradb-r0218-p23-sweep @ 4b89a8ce):
+depth-floor, inventory-terminal, twin-contracts GREEN; campaign ok;
+extracts --required exit 0; sorry 0 nos wrappers da rodada. O
+residual de 12 extratos é o registrado: 12 pares canon-excluídos
+(admitted/campaign stand-ins, nunca flipados) + 10 pares cartoon
+Montanha (portão do usuário) — o próximo salto é RFC-0219.
