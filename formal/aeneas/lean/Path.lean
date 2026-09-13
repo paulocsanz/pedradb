@@ -83,3 +83,38 @@ theorem strip_uri_fragment_fate_iff :
     · unfold strip_uri_fragment
       rw [ho]
       simp only [Aeneas.Std.bind_tc_ok]
+
+/-- RFC-0216 P2.1 3/8 (átomo `catalog:path_after_authority`): o path
+  depois da autoridade é exatamente o primeiro `/` em diante — sem
+  `/` a resposta é a raiz `/`, com `/` é o slice index a partir
+  dele. -/
+theorem path_after_authority_fate_iff :
+    ∀ (rest : Str) (r : Str),
+      (path_after_authority rest = ok r) ↔
+        ((core.str.Str.find rest '/' = ok none ∧
+            r = toStr "/" path_after_authority._proof_1) ∨
+          (∃ (i : Usize),
+              core.str.Str.find rest '/' = ok (some i) ∧
+                Str.Insts.CoreOpsIndexIndex.index
+                  core.ops.range.RangeFromUsize.Insts.CoreSliceIndexSliceIndexStrStr
+                  rest { start := i } = ok r)) := by
+  intro rest r
+  constructor
+  · intro hval
+    unfold path_after_authority at hval
+    obtain ⟨o, ho, hval⟩ := bind_ok_inv _ _ _ hval
+    cases o with
+    | none =>
+      dsimp only at hval
+      exact Or.inl ⟨ho, (Result.ok.inj hval).symm⟩
+    | some i =>
+      dsimp only at hval
+      exact Or.inr ⟨i, ho, hval⟩
+  · rintro (⟨ho, rfl⟩ | ⟨i, ho, hindex⟩)
+    · unfold path_after_authority
+      rw [ho]
+      simp only [Aeneas.Std.bind_tc_ok]
+    · unfold path_after_authority
+      rw [ho]
+      simp only [Aeneas.Std.bind_tc_ok]
+      exact hindex

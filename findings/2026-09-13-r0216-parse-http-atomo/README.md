@@ -169,3 +169,15 @@ verde antes do commit, exatamente 1 teorema público por commit).
   `origin_strips_absolute_and_network` (pedradb-http, exit 0,
   1 passed). Gate GREEN: floor_atom 171→172, floor_extract
   107→106.
+
+## P2.1 — path ×8 átomo (3/8)
+
+- **path_after_authority (3/8)**: o path depois da autoridade é o
+  primeiro `/` em diante — sem `/` a resposta é a raiz `toStr "/"`
+  (literal citável via `path_after_authority._proof_1`), com `/` é
+  o `index ... { start := i }` extraído. No some, o `dsimp only`
+  já entrega `hval : index ... = ok r` pronto (não envolver em
+  `Result.ok.inj`). Planta DST
+  `authority_atoms_discriminate_as_is` (pedradb-http, exit 0,
+  1 passed). Gate GREEN: floor_atom 172→173, floor_extract
+  106→105.

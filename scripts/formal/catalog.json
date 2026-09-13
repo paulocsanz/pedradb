@@ -2171,6 +2171,10 @@
    "dst_plant": {
     "file": "crates/pedradb-http/src/path_kernel.rs",
     "test": "authority_atoms_discriminate_as_is"
+   },
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "path depois da autoridade: sem / a raiz, com / o slice index a partir do primeiro /"
    }
   },
   {
