@@ -6043,7 +6043,11 @@
     "file": "crates/pedradb-core/src/wal/recover_kernel.rs",
     "test": "from_record_type_on_wire_type_is_not_ok"
    },
-   "three_teeth": true
+   "three_teeth": true,
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "átomo 1/4 P0.2: from_record_type como bijeção total citada RecordType→FragKind (5 ramos); floor_atom 182→183"
+   }
   },
   {
    "id": "compact_split",

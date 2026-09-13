@@ -337,3 +337,79 @@ theorem recover_collect_act_fate_iff :
       · rcases h6 with ⟨_, hv⟩
         subst hv
         rfl
+
+/-- RFC-0218 P0.2 1/4 (átomo `catalog:from_record_type`): o tipo de
+    fragmento é EXATAMENTE a bijeção total do RecordType do wire —
+    cada um dos 5 tipos mapeia para o seu FragKind, sem terceiro
+    destino. O AS-IS reclassifica First como Middle (dente: fragmento
+    de início vira meio — a planta on-wire recusa). -/
+theorem from_record_type_fate_iff :
+    ∀ (t : format.RecordType) (f : recover_kernel.FragKind),
+      (recover_kernel.FragKind.from_record_type t = ok f) ↔
+        ((t = format.RecordType.Zero ∧ f = recover_kernel.FragKind.Zero) ∨
+          (t = format.RecordType.Full ∧ f = recover_kernel.FragKind.Full) ∨
+          (t = format.RecordType.First ∧ f = recover_kernel.FragKind.First) ∨
+          (t = format.RecordType.Middle ∧ f = recover_kernel.FragKind.Middle) ∨
+          (t = format.RecordType.Last ∧ f = recover_kernel.FragKind.Last)) := by
+  intro t f
+  cases t with
+  | Zero =>
+    constructor
+    · intro hval
+      injection hval with hv
+      exact Or.inl ⟨rfl, hv.symm⟩
+    · rintro (⟨-, hv⟩ | h2 | h3 | h4 | h5)
+      · subst hv
+        rfl
+      · exact absurd h2.1 (fun h => format.RecordType.noConfusion h)
+      · exact absurd h3.1 (fun h => format.RecordType.noConfusion h)
+      · exact absurd h4.1 (fun h => format.RecordType.noConfusion h)
+      · exact absurd h5.1 (fun h => format.RecordType.noConfusion h)
+  | Full =>
+    constructor
+    · intro hval
+      injection hval with hv
+      exact Or.inr (Or.inl ⟨rfl, hv.symm⟩)
+    · rintro (h1 | ⟨-, hv⟩ | h3 | h4 | h5)
+      · exact absurd h1.1 (fun h => format.RecordType.noConfusion h)
+      · subst hv
+        rfl
+      · exact absurd h3.1 (fun h => format.RecordType.noConfusion h)
+      · exact absurd h4.1 (fun h => format.RecordType.noConfusion h)
+      · exact absurd h5.1 (fun h => format.RecordType.noConfusion h)
+  | First =>
+    constructor
+    · intro hval
+      injection hval with hv
+      exact Or.inr (Or.inr (Or.inl ⟨rfl, hv.symm⟩))
+    · rintro (h1 | h2 | ⟨-, hv⟩ | h4 | h5)
+      · exact absurd h1.1 (fun h => format.RecordType.noConfusion h)
+      · exact absurd h2.1 (fun h => format.RecordType.noConfusion h)
+      · subst hv
+        rfl
+      · exact absurd h4.1 (fun h => format.RecordType.noConfusion h)
+      · exact absurd h5.1 (fun h => format.RecordType.noConfusion h)
+  | Middle =>
+    constructor
+    · intro hval
+      injection hval with hv
+      exact Or.inr (Or.inr (Or.inr (Or.inl ⟨rfl, hv.symm⟩)))
+    · rintro (h1 | h2 | h3 | ⟨-, hv⟩ | h5)
+      · exact absurd h1.1 (fun h => format.RecordType.noConfusion h)
+      · exact absurd h2.1 (fun h => format.RecordType.noConfusion h)
+      · exact absurd h3.1 (fun h => format.RecordType.noConfusion h)
+      · subst hv
+        rfl
+      · exact absurd h5.1 (fun h => format.RecordType.noConfusion h)
+  | Last =>
+    constructor
+    · intro hval
+      injection hval with hv
+      exact Or.inr (Or.inr (Or.inr (Or.inr ⟨rfl, hv.symm⟩)))
+    · rintro (h1 | h2 | h3 | h4 | ⟨-, hv⟩)
+      · exact absurd h1.1 (fun h => format.RecordType.noConfusion h)
+      · exact absurd h2.1 (fun h => format.RecordType.noConfusion h)
+      · exact absurd h3.1 (fun h => format.RecordType.noConfusion h)
+      · exact absurd h4.1 (fun h => format.RecordType.noConfusion h)
+      · subst hv
+        rfl

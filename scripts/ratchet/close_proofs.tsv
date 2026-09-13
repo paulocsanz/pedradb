@@ -209,3 +209,4 @@ atom	catalog:group_commit	occ_conflict_fate_iff	formal/aeneas/lean/GroupCommit.l
 atom	catalog:fsync_promote	fsync_promotes_pending_fate_iff	formal/aeneas/lean/GroupCommit.lean	fsync_promotes_pending
 atom	catalog:group_fence	fence_publish_seq_fate_iff	formal/aeneas/lean/GroupCommit.lean	fence_publish_seq
 atom	catalog:group_validate	group_validate_fate_iff	formal/aeneas/lean/GroupCommit.lean	group_validate
+atom	catalog:from_record_type	from_record_type_fate_iff	formal/aeneas/lean/WalRecover.lean	from_record_type

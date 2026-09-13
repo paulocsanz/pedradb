@@ -49,3 +49,11 @@ gates GREEN no commit).
   exit 0, 16 passed — inclui `group_members_are_simultaneous` e o
   property sweep rfc0157). Gate: floor_atom 181→182, floor_extract
   97→96. **P0.1 fechada: group_commit ×4 átomo, 4/4.**
+
+## P0.2 — wal/recover ×4 átomo
+
+- **from_record_type (1/4)**: bijeção total citada RecordType→FragKind —
+  `from_record_type_fate_iff` em `WalRecover.lean` (5 ramos disjuntos,
+  reverso refuta por noConfusion). Build verde. Planta DST
+  `from_record_type_on_wire_type_is_not_ok` (pedradb-core, exit 0).
+  Gate: floor_atom 182→183, floor_extract 96→95.
