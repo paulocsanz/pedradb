@@ -1483,6 +1483,10 @@
   },
   {
    "id": "recover_si_generation",
+   "atom_reason": {
+    "date": "2026-09-13",
+    "why": "2026-09-13 RFC-0218 P1.3: fate ∀ sobre recover_si_generation no degrau átomo — lift citado loaded_max (geração SI sobrevive ao restart); planta DST si_generation_survives"
+   },
    "finding": "F36",
    "twin_kind": "close",
    "single_artifact": true,

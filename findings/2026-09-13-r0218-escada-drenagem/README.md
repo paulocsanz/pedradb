@@ -344,6 +344,8 @@ gates GREEN no commit).
   worktree). Gate: floor_atom 211→212, floor_extract 67→66.
 ## P1.3 — si/snapshot/txn/rpc ×11 átomo
 
+- **txn / recover_si_generation (3/11)**: geração SI sobrevive ao restart como o lift citado `loaded_max` (as-is zera) — `recover_si_generation_fate_iff` em `StoreTxn.lean`. Forward: unfold + injection + hv.symm; reverso: rintro + subst + rfl. Build verde. Planta DST `si_generation_survives` (pedradb-store, exit 0 no worktree). Gate: floor_atom 224→225, floor_extract 54→53.
+
 - **snapshot / snapshot_needs_txn_meta_clear (2/11)**: restaurar snapshot SEMPRE exige limpar o metadado de txn — constante citada true (as-is false vaza txn meta) — `snapshot_needs_txn_meta_clear_fate_iff` em `Snapshot.lean`. Forward: unfold + injection + hv.symm; reverso: rintro + subst + rfl. Build verde. Planta DST `always_clear_txn_meta` (pedradb-store, exit 0 no worktree). Gate: floor_atom 223→224, floor_extract 55→54.
 
 - **si / point_get_prefer_applied (1/11)**: point-get prefere o índice

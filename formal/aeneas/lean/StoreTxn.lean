@@ -315,3 +315,20 @@ theorem unreserve_si_gen_fate_iff :
       exact eq_comm
   · simp [hgt]
     exact eq_comm
+
+/-- RFC-0218 P1.3 3/11 (átomo `catalog:recover_si_generation`, entrada
+    `recover_si_generation`): a geração SI sobrevive ao restart como
+    o lift citado `loaded_max` (identidade). O AS-IS zera (geração
+    reinicia — dente plantado). -/
+theorem recover_si_generation_fate_iff :
+    ∀ (loaded_max : U64) (r : U64),
+      (recover_si_generation loaded_max = ok r) ↔ (r = loaded_max) := by
+  intro loaded_max r
+  constructor
+  · intro hval
+    unfold recover_si_generation at hval
+    injection hval with hv
+    exact hv.symm
+  · rintro hv
+    subst hv
+    rfl
