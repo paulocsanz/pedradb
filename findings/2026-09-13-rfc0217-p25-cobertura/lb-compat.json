@@ -1,0 +1,61 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "compat",
+  "sync": true,
+  "peer_policy": "host-default",
+  "durability": "strongest-data-barrier-before-ok (F_FULLFSYNC on Darwin, fdatasync on Linux; RFC-0001/0036 v2)",
+  "changelog_interval": 0,
+  "status": "ok",
+  "notes": ["ycsb records=1024 ops=5000 payload=100 dist=uniform", "engine=compat durability=strongest-data-barrier-before-ok (F_FULLFSYNC on Darwin, fdatasync on Linux; RFC-0001/0036 v2)", "suites: myrocks", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=0", "peer_policy=host-default", "host-default write sync: kvrocks=false myrocks=true surreal=true"],
+  "benches": [
+{
+    "name": "myrocks_point_select",
+    "n": 5000,
+    "qps": 1684943.246,
+    "p50_ms": 0.0002,
+    "p95_ms": 0.0018,
+    "p99_ms": 0.0022,
+    "p999_ms": 0.0073,
+    "max_ms": 0.0879,
+    "wall_s": 0.0030
+  },
+{
+    "name": "myrocks_read_only",
+    "n": 5000,
+    "qps": 1657390.253,
+    "p50_ms": 0.0002,
+    "p95_ms": 0.0011,
+    "p99_ms": 0.0013,
+    "p999_ms": 0.0045,
+    "max_ms": 0.8393,
+    "wall_s": 0.0030
+  },
+{
+    "name": "myrocks_write_tx",
+    "n": 5000,
+    "qps": 189.948,
+    "p50_ms": 4.0304,
+    "p95_ms": 14.1707,
+    "p99_ms": 17.3887,
+    "p999_ms": 30.1070,
+    "max_ms": 74.1090,
+    "wall_s": 26.3229
+  },
+{
+    "name": "linkbench_mix",
+    "n": 5000,
+    "qps": 824.304,
+    "p50_ms": 0.0060,
+    "p95_ms": 4.0930,
+    "p99_ms": 4.9338,
+    "p999_ms": 8.0432,
+    "max_ms": 8.9983,
+    "wall_s": 6.0657
+  },
+{
+    "name": "linkbench_mix_probe",
+    "combined": true,
+    "probe": {"latest_ops":0,"latest_mem_hit":0,"latest_sst_fallback":0,"latest_sst_probed":0,"scan_ops":2333,"scan_ns":2594524,"ord_builds":0,"ord_build_ns":0,"scan_sst_probed":0,"sst_count":0,"l0_files":0,"level1_files":0,"mem_entries":170373,"block_cache_hits":0,"block_cache_misses":0,"blocks_decoded":0,"get_mem_hit":556,"get_sst_fallback":0,"get_inline":556,"get_vlog":0,"mvcc_split_ops":0,"mvcc_ns_encode":0,"mvcc_ns_last":0,"mvcc_ns_get":0,"mvcc_ns_copy":0}
+  }
+  ]
+}

@@ -1,0 +1,61 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "rocksdb",
+  "sync": true,
+  "peer_policy": "host-default",
+  "durability": "host-default (MyRocks commit-sync / Surreal sync=every; not official Rocks async)",
+  "changelog_interval": 0,
+  "status": "ok",
+  "notes": ["ycsb records=1024 ops=5000 payload=100 dist=uniform", "engine=rocksdb durability=host-default (MyRocks commit-sync / Surreal sync=every; not official Rocks async)", "suites: myrocks", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=0", "peer_policy=host-default", "host-default write sync: kvrocks=false myrocks=true surreal=true"],
+  "benches": [
+{
+    "name": "myrocks_point_select",
+    "n": 5000,
+    "qps": 1869362.936,
+    "p50_ms": 0.0005,
+    "p95_ms": 0.0006,
+    "p99_ms": 0.0009,
+    "p999_ms": 0.0019,
+    "max_ms": 0.0107,
+    "wall_s": 0.0027
+  },
+{
+    "name": "myrocks_read_only",
+    "n": 5000,
+    "qps": 335129.067,
+    "p50_ms": 0.0030,
+    "p95_ms": 0.0032,
+    "p99_ms": 0.0036,
+    "p999_ms": 0.0040,
+    "max_ms": 0.0143,
+    "wall_s": 0.0149
+  },
+{
+    "name": "myrocks_write_tx",
+    "n": 5000,
+    "qps": 8028.576,
+    "p50_ms": 0.0667,
+    "p95_ms": 0.2690,
+    "p99_ms": 1.6627,
+    "p999_ms": 4.1699,
+    "max_ms": 8.6235,
+    "wall_s": 0.6228
+  },
+{
+    "name": "linkbench_mix",
+    "n": 5000,
+    "qps": 92741.365,
+    "p50_ms": 0.0020,
+    "p95_ms": 0.0332,
+    "p99_ms": 0.0520,
+    "p999_ms": 0.0739,
+    "max_ms": 1.1615,
+    "wall_s": 0.0539
+  },
+{
+    "name": "linkbench_mix_probe",
+    "combined": true,
+    "probe": null
+  }
+  ]
+}

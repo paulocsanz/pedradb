@@ -325,11 +325,49 @@ board**, estendendo este RFC a cada etapa nova descoberta.
   novos no SpaceEnv real (`put` end-to-end com probe contável).
   Pendente: meter Linux em disco pequeno (efeito ≤1ms/commit + parks) e
   decidir flip do default (off até lá).
-- [ ] **P2.5** Cobertura dos eixos sem número: sweep delete-heavy (hat:
+- [x] **P2.5** Cobertura dos eixos sem número: sweep delete-heavy (hat:
   perda — única família tocando deletes hoje é perda), concorrência 9–49
   (fronteira mc8→mc50 sem ponto), célula 1 GiB (faixa smoke↔4GiB vazia),
   captura p99/p999 (todas as comparações atuais são throughput). —
-  status: `todo`
+  status: `done` (sweep DIAG 2026-09-13, finding
+  `2026-09-13-rfc0217-p25-cobertura/`; binário `0ba886fe`, braço rocks
+  `--features real`): cobertura completa executada (delete-heavy via
+  linkbench_mix sync-peer DIAG; banda mc9/16/32/49; célula g1 10M
+  records ≈1 GiB vs rocks default sync=false — primeira célula de
+  escala no harness compat-vs-rocks; p99/p999 em todas as formas).
+  **Células novas <1,0 abriram P2.6/P2.7/P2.8** (regra de extensão):
+  scan colapsa com a escala (ycsb_e 7,98–10,05 **WIN** gate Linux @1024
+  → **0,001** @10M DIAG; deps_scan 1,02–1,42 @1024 → **0,045** @10M);
+  write-path degrada com a escala (cache_overwrite 0,512 Linux → 0,037;
+  raftlog 1,58–1,64 WIN Linux → 0,250; mvcc_latest 3,99–4,28 WIN →
+  0,281; ycsb_a 0,656); banda mc9–49 toda 0,29–0,60 no DIAG (fronteira
+  contínua mc2→mc49, dono = P0.4/e4b). Leitura paga em escala:
+  ycsb_b 8,78, c/c_unif/c_big 1,7–2,3, d 1,66, apply_batch 1,47,
+  lock_prewrite 1,57 (DIAG). Delete-heavy DIAG: linkbench_mix 0,009
+  (p99 4,9ms = F_FULLFSYNC Darwin, dono já decomposto no P1.4;
+  peer sync ⇒ nunca claim).
+- [ ] **P2.6** (aberto por P2.5) scan-at-scale — novo dono nº 1 do
+  board de leitura: decompor ycsb_e/deps_scan em 10M records com os
+  probes `scan_sst_setup_ns`/`scan_merge_ns` já no código (`0eb0f25e`);
+  nomear o dono do colapso (suspeitos **hat**: k-way merge por miss sem
+  skip de bloco; decode de blocos em working set 1 GiB; sem sumário de
+  range); ataque candidado = single-pass min-head com stepped cursors
+  (citado no P2.3) + skip por bloco; alvo cartaz Linux 1 GiB ≥1,0.
+  — status: `todo` (finding P2.5 datado)
+- [ ] **P2.7** (aberto por P2.5) write-at-scale: meter de atribuição
+  `write_phase_stats`/PHASE na célula 10M (g1) para raftlog 0,250 /
+  mvcc_latest 0,281 / cache_overwrite 0,037 / ycsb_a 0,656 — o dono
+  @escala não é o dono @1024 (cache_overwrite @1024 = pwrite-por-op
+  **hat** ticket 0193; raftlog/mvcc_latest @1024 são WIN Linux);
+  suspeitos **hat**: L0/SST count e flush por commit com 10M chaves,
+  memtable BTree grande, admission ladder. Dono nomeado → ataque.
+  — status: `todo` (finding P2.5 datado)
+- [ ] **P2.8** (aberto por P2.5) banda mc9–49: DIAG Darwin fechado como
+  fronteira contínua (0,29–0,60 de mc9 a mc32; mc49 encosta quando o
+  rocks paga cauda — ycsb_a_mc49 4,03 com rocks p999 58ms,
+  cache_overwrite_mc49 1,153, ycsb_f_mc49 0,889); nenhum mecanismo novo
+  a implementar — o veredito da banda é o mesmo do P0.4 (janela ≤ voo
+  da barreira, Linux e4b). — status: `todo` (depende de e4b)
 
 ### Regra de extensão (board aberto)
 
@@ -357,7 +395,10 @@ dono.
 | P2.2 | p2 | Encode memtable off-path | doing | `9b5ca0f5`; DIAG 09-13 mem= neutro no Darwin (4,63→4,63/4,82→4,96µs); veredito alvo = e4b | 2026-09-13 |
 | P2.3 | p2 | Read-side: cursor de scan | done | DIAG 09-13: ratio 1,023–1,419 (0,831 não reproduz); dono residual = merge k-way 2,5–3µs/miss; cartaz = e4b | 2026-09-13 |
 | P2.4 | p2 | Escada de admissão: histerese (produto) | doing | `c4fe195d` (knob opt-in; meter disco pequeno p/ flip default = e4b) | 2026-09-13 |
-| P2.5 | p2 | Cobertura: delete-heavy, mc9–49, 1GiB, p99 | todo | — | 2026-09-13 |
+| P2.5 | p2 | Cobertura: delete-heavy, mc9–49, 1GiB, p99/p999 | done | finding 09-13 `p25-cobertura` (abriu P2.6/P2.7/P2.8) | 2026-09-13 |
+| P2.6 | p2 | scan-at-scale: ycsb_e 0,001 / deps_scan 0,045 @10M (WIN @1024) — decompor + atacar | todo | — | 2026-09-13 |
+| P2.7 | p2 | write-at-scale: raftlog 0,250 / mvcc_latest 0,281 / cache_overwrite 0,037 / ycsb_a 0,656 @10M — PHASE na célula g1 | todo | — | 2026-09-13 |
+| P2.8 | p2 | Banda mc9–49 DIAG 0,29–0,60 (fronteira contínua; veredito = P0.4/e4b) | todo | — | 2026-09-13 |
 
 ## Acceptance Criteria
 
