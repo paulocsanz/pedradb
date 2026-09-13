@@ -18,6 +18,17 @@ theorem parse_error_writes_status_as_is_dente :
   unfold parse_error_writes_status_as_is
   rfl
 
+theorem parse_error_writes_status_fate_iff :
+    ∀ (r : Bool), (parse_error_writes_status = ok r) ↔ r = true := by
+  intro r
+  constructor
+  · intro hval
+    unfold parse_error_writes_status at hval
+    exact (Result.ok.inj hval).symm
+  · intro hr
+    unfold parse_error_writes_status
+    rw [hr]
+
 /-- F104: Transfer-Encoding is rejected. -/
 theorem reject_transfer_encoding_true :
     reject_transfer_encoding = ok true := by

@@ -79,7 +79,7 @@ no wrapper, planta DST verde ANTES do commit, gate GREEN no commit).
    `parse_error_writes_status` — a perna de erro do parse em átomo;
    P0 completo = todo veredito de admissão de request (corpo + erro)
    em teorema — floor_atom 162→163, floor_extract 116→115 —
-   status: `todo`
+   status: `done` (2026-09-13; floor_atom 163, floor_extract 115)
 
 3. **P1.1** form ×4 (`Form.lean`): `form_decode`, `form_plus_byte`,
    `plus_before_percent`, `from_hex` — a decodificação byte a byte e
@@ -133,7 +133,7 @@ no wrapper, planta DST verde ANTES do commit, gate GREEN no commit).
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | cl ×4 átomo (Content-Length) | done | `keep_body_without_cl_fate_iff`/`invalid_cl_as_zero_fate_iff`/`content_length_repeat_ok_fate_iff`/`short_body_vs_cl_is_error_fate_iff` | 2026-09-13 |
-| P0.2 | p0 | fail_closed ×1 átomo (veredito de erro) | todo | — | 2026-09-12 |
+| P0.2 | p0 | fail_closed ×1 átomo (veredito de erro) | done | `parse_error_writes_status_fate_iff` | 2026-09-13 |
 | P1.1 | p1 | form ×4 átomo (decode/hex) | todo | — | 2026-09-12 |
 | P1.2 | p1 | form ×3 átomo (conflitos de query) | todo | — | 2026-09-12 |
 | P2.1 | p2 | path ×8 átomo (autoridade/rota; http 27/27) | todo | — | 2026-09-12 |

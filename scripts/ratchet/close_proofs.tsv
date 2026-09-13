@@ -189,3 +189,4 @@ atom	catalog:content_length	keep_body_without_cl_fate_iff	formal/aeneas/lean/Cl.
 atom	catalog:invalid_cl_zero	invalid_cl_as_zero_fate_iff	formal/aeneas/lean/Cl.lean	invalid_cl_as_zero
 atom	catalog:cl_repeat_conflict	content_length_repeat_ok_fate_iff	formal/aeneas/lean/Cl.lean	content_length_repeat_ok
 atom	catalog:short_body_vs_cl	short_body_vs_cl_is_error_fate_iff	formal/aeneas/lean/Cl.lean	short_body_vs_cl_is_error
+atom	catalog:fail_closed	parse_error_writes_status_fate_iff	formal/aeneas/lean/FailClosed.lean	parse_error_writes_status

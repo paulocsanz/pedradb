@@ -47,3 +47,15 @@ verde antes do commit, exatamente 1 teorema público por commit).
   exit 0, 1 passed). Axiomas: os 3 padrão do Lean. Fechamento:
   floor_atom 158→162, floor_extract 120→116, gate GREEN no HEAD de
   cada uma das 4 promoções, 1 teorema público por commit.
+
+## P0.2 — fail_closed ×1 átomo (1/1, FECHAMENTO P0)
+
+- **fail_closed (1/1, FECHAMENTO P0)**: o veredito de erro do parse
+  decide exatamente na constante honesta extraída —
+  `parse_error_writes_status = ok r` é exatamente `r = true` (todo
+  erro de parse escreve uma status line, nunca derruba o socket em
+  silêncio; o mutante AS-IS devolve false). Planta DST
+  `parse_error_writes_status_on_live_http_is_not_ok` (pedradb-http,
+  exit 0, 1 passed). Axiomas: os 3 padrão do Lean. Gate GREEN:
+  floor_atom 162→163, floor_extract 116→115. P0 completo: todo
+  veredito de admissão de request (corpo + erro) em teorema.
