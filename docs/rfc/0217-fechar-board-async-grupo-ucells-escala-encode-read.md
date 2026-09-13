@@ -292,7 +292,7 @@ dono.
 | P2.1 | p2 | Escala pesada 4GiB: meter + fechar (0,70/0,557) | todo | — | 2026-09-13 |
 | P2.2 | p2 | Encode memtable off-path | doing | `9b5ca0f5` (memo batch-local no apply; DIAG fase + cartaz = e4b) | 2026-09-13 |
 | P2.3 | p2 | Read-side: cursor de scan | todo | — | 2026-09-13 |
-| P2.4 | p2 | Escada de admissão: histerese (produto) | todo | — | 2026-09-13 |
+| P2.4 | p2 | Escada de admissão: histerese (produto) | doing | `c4fe195d` (knob opt-in; meter disco pequeno p/ flip default = e4b) | 2026-09-13 |
 | P2.5 | p2 | Cobertura: delete-heavy, mc9–49, 1GiB, p99 | todo | — | 2026-09-13 |
 
 ## Acceptance Criteria
