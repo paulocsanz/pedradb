@@ -100,3 +100,4 @@ m1 (`sel4_coverage`) não sobe por composição. Piso: **300/322 = 93,17%**.
 - Dump de `db.rs` / `concurrent.rs` no prover.
 - Montanha cartoons; `∀π` / media-durable.
 - Promover `R-rustc` para fora de `never_floor`.
+- Executar o filho [RFC-0225](0225-depois-da-espinha-as-espinhas-0220-e-o-denominador-a2a.md) — só o escrever é entrega deste RFC.
