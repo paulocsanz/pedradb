@@ -589,6 +589,7 @@ impl WriteGroup {
                     if Instant::now() >= deadline {
                         return r;
                     }
+                    db.write().unrecord_write_stall();
                     self.stall_parks.fetch_add(1, Ordering::Relaxed);
                     self.await_l0_park(db);
                 }
@@ -1593,7 +1594,7 @@ impl<E: Env> ConcurrentDb<E> {
         let occ_registry = Arc::new(Mutex::new(std::collections::BTreeMap::new()));
         let mut db = db;
         db.set_occ_floor_registry(Arc::clone(&occ_registry));
-        let commit_inflight = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let commit_inflight = db.commit_inflight_handle();
         Self {
             inner: Arc::new(RwLock::new(db)),
             commit_inflight,
@@ -1667,6 +1668,23 @@ impl<E: Env> ConcurrentDb<E> {
         let g = self.sst_envelope.read();
         g.iter()
             .all(|(lo, hi)| key < lo.as_ref() || key > hi.as_ref())
+    }
+
+    fn mark_unsettled(&self) {
+        self.settled_sst_only.store(false, Ordering::Release);
+    }
+
+    /// Rebuild per-SST envelopes after a flush. Settled only when mem,
+    /// imm, parked and bulk tails are empty — otherwise a miss can still
+    /// live in RAM.
+    fn refresh_settled_envelope(&self) {
+        match self.inner.read().settled_sst_envelopes() {
+            None => self.settled_sst_only.store(false, Ordering::Release),
+            Some(env) => {
+                *self.sst_envelope.write() = env;
+                self.settled_sst_only.store(true, Ordering::Release);
+            }
+        }
     }
 
     /// Settled SST-only (compat `get_cf` can reject a miss before TLS).
@@ -2728,6 +2746,7 @@ impl<E: Env> ConcurrentDb<E> {
         crate::pct_hooks::maybe_yield("op_entry");
         let do_sync = self.resolve_sync(opts);
         self.assist_flush_debt();
+        self.mark_unsettled();
         self.writes
             .submit_one(&self.inner, BatchOp::put(key, value), do_sync)
     }
@@ -2786,6 +2805,7 @@ impl<E: Env> ConcurrentDb<E> {
     pub fn delete_with(&self, key: impl AsRef<[u8]>, opts: WriteOptions) -> Result<()> {
         let do_sync = self.resolve_sync(opts);
         self.assist_flush_debt();
+        self.mark_unsettled();
         self.writes
             .submit_one(&self.inner, BatchOp::delete(key), do_sync)
             .map(|_| ())
@@ -2838,6 +2858,7 @@ impl<E: Env> ConcurrentDb<E> {
     ) -> Result<SequenceNumber> {
         let do_sync = self.resolve_sync(opts);
         self.assist_flush_debt();
+        self.mark_unsettled();
         self.writes.submit(&self.inner, ops, do_sync)
     }
 
@@ -2862,6 +2883,7 @@ impl<E: Env> ConcurrentDb<E> {
     ) -> Result<SequenceNumber> {
         // Latched bulk does not park memtables; skip assist/debt (two
         // read locks per 1024-op hydrate batch).
+        self.mark_unsettled();
         self.writes
             .submit_latched_bulk(&self.inner, family, keys, vals, tail)
     }
@@ -2909,7 +2931,11 @@ impl<E: Env> ConcurrentDb<E> {
                 e
             })?
         };
-        let _ = persist;
+        if let Some(persist) = persist {
+            #[cfg(test)]
+            note_bulk_manifest_off_lock(&self.inner);
+            persist.write()?;
+        }
         // At most two pipeline steps: drain existing imm, then switch+flush active.
         // Do **not** loop while concurrent puts refill mem (that would never end).
         for _ in 0..2 {
@@ -2978,6 +3004,8 @@ impl<E: Env> ConcurrentDb<E> {
         // `Db::flush`) — the rotate above dropped the WAL rebuild source
         // for the flushed keys.
         g.persist_changelog_after_explicit_flush();
+        drop(g);
+        self.refresh_settled_envelope();
         Ok(())
     }
 
