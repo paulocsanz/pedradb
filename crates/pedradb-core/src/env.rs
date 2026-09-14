@@ -366,6 +366,18 @@ pub trait SstFileSource: Send + Sync {
     /// # Errors
     /// Underlying I/O.
     fn read_all(&self, path: &Path) -> io::Result<Vec<u8>>;
+
+    /// Best-effort `WILLNEED`/`DONTNEED` on `path`. Default no-op (sim).
+    fn advise(
+        &self,
+        path: &Path,
+        offset: u64,
+        len: u64,
+        kind: AdviseKind,
+    ) -> io::Result<()> {
+        let _ = (path, offset, len, kind);
+        Ok(())
+    }
 }
 
 impl std::fmt::Debug for dyn SstFileSource {
@@ -545,6 +557,16 @@ where
         let mut out = Vec::new();
         file.read_to_end(&mut out)?;
         Ok(out)
+    }
+
+    fn advise(
+        &self,
+        path: &Path,
+        offset: u64,
+        len: u64,
+        kind: AdviseKind,
+    ) -> io::Result<()> {
+        self.env.advise(path, offset, len, kind)
     }
 }
 

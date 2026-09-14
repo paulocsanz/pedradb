@@ -1796,6 +1796,30 @@ impl<E: Env> ConcurrentDb<E> {
         self.inner.read().snapshot()
     }
 
+    /// RFC-0194 A/B leftover DONTNEED policy.
+    pub fn set_sst_page_keep_budget(&self, n: u64) {
+        self.inner.write().set_sst_page_keep_budget(n);
+    }
+
+    /// RFC-0194/0195 A/B warm cap.
+    pub fn set_sst_warm_cap_bytes(&self, n: u64) {
+        self.inner.write().set_sst_warm_cap_bytes(n);
+    }
+
+    /// RFC-0194/0195 opt-in line (`PEDRA_IO_ADVISE_STATS=1`).
+    #[must_use]
+    pub fn io_advise_line(&self) -> Option<String> {
+        if std::env::var_os("PEDRA_IO_ADVISE_STATS").is_none() {
+            return None;
+        }
+        let g = self.inner.read();
+        Some(format!(
+            "leftover_advise=issued:{} scan_readahead=issued:{}",
+            g.leftover_dontneed_issued(),
+            g.scan_readahead_issued()
+        ))
+    }
+
     /// Register a snapshot pin (write lock; open-items §2.1).
     pub fn pin_snapshot(&self) -> SnapshotPin {
         self.inner.write().pin_snapshot()

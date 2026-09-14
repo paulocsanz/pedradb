@@ -342,6 +342,15 @@ impl SstTable {
         !crate::write_admission_kernel::batch_is_empty(self.index.len() as u64)
     }
 
+    pub(crate) fn payload_len_bytes(&self) -> u64 {
+        self.payload_len as u64
+    }
+
+    /// File span of data-block `i` (offset, length) for scan readahead.
+    pub(crate) fn block_file_span(&self, i: usize) -> Option<(u64, u64)> {
+        self.index.get(i).map(|h| (h.offset, u64::from(h.length)))
+    }
+
     #[cfg(test)]
     pub(crate) fn payload_bytes(&self) -> usize {
         self.payload_len

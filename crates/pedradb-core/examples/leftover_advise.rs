@@ -55,13 +55,13 @@ fn main() {
     let db = ConcurrentDb::open_with(
         &dir_bounded,
         OpenOptions {
-            sst_page_keep_budget: 0,
-            sst_warm_cap_bytes: 1,
             auto_flush_bytes: None,
             ..OpenOptions::default()
         },
     )
     .unwrap();
+    db.set_sst_page_keep_budget(0);
+    db.set_sst_warm_cap_bytes(1);
     drive(&db, 6);
     println!("bounded leg line (latch unset): {:?}", db.io_advise_line());
     std::env::set_var("PEDRA_IO_ADVISE_STATS", "1");

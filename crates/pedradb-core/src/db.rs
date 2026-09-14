@@ -1529,6 +1529,14 @@ pub struct Db<E: Env = StdEnv> {
     /// evicted-table block reads reuse open handles instead of paying
     /// `open()` per 4 KiB block. Empty (capacity 0) on legacy opens.
     sst_file_cache: Arc<crate::env::FileHandleCache>,
+    /// RFC-0194 leftover DONTNEED budget (`0` = policy on).
+    sst_page_keep_budget: u64,
+    /// RFC-0194/0195 WARM cap (0 → 3 GiB floor).
+    sst_warm_cap_bytes: u64,
+    /// Compact-input DONTNEED issues (test/telemetry).
+    leftover_dontneed_issued: AtomicU64,
+    /// Scan WILLNEED windows issued (test/telemetry).
+    scan_readahead_issued: AtomicU64,
     /// Latest-snapshot point answers; per-key inval on write (RFC-0035 / 0041).
     /// `Arc` so [`crate::concurrent::ConcurrentDb`] answers a hit without the
     /// Db read lock (YCSB C hit path).
@@ -2365,6 +2373,10 @@ impl<E: Env> Db<E> {
             sst_payload_pool,
             sst_source: source,
             sst_file_cache,
+            sst_page_keep_budget: 0,
+            sst_warm_cap_bytes: crate::scale_kernel::WARM_FLOOR_BYTES,
+            leftover_dontneed_issued: AtomicU64::new(0),
+            scan_readahead_issued: AtomicU64::new(0),
             point_cache,
             last_prefix_cache,
             count_cache,
@@ -3099,6 +3111,73 @@ impl<E: Env> Db<E> {
             .copied()
             .filter(|n| *n > 0)
             .or(self.auto_flush_bytes)
+    }
+
+    fn live_sst_payload_bytes(&self) -> u64 {
+        self.ssts
+            .iter()
+            .map(|t| {
+                let p = t.payload_len_bytes();
+                if p > 0 {
+                    p
+                } else {
+                    self.env.metadata_len(t.path()).unwrap_or(0)
+                }
+            })
+            .sum()
+    }
+
+    fn store_bounded_cache(&self) -> bool {
+        crate::scan_readahead_kernel::scan_readahead_bounded(
+            self.live_sst_payload_bytes(),
+            self.sst_warm_cap_bytes,
+        )
+    }
+
+    fn leftover_drop_pages(&self) -> bool {
+        crate::leftover_page_kernel::leftover_page_advice(
+            self.sst_page_keep_budget,
+            self.live_sst_payload_bytes(),
+            self.sst_warm_cap_bytes,
+            false,
+        ) == crate::leftover_page_kernel::LeftoverPageAdvice::Drop
+    }
+
+    fn advise_leftover_dontneed(&self, paths: &[std::path::PathBuf]) {
+        if !self.leftover_drop_pages() {
+            return;
+        }
+        for p in paths {
+            let _ = self.env.advise(p, 0, 0, AdviseKind::DontNeed);
+            self.leftover_dontneed_issued
+                .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// RFC-0194: compact-input DONTNEED count (tests / PEDRA_IO_ADVISE_STATS).
+    #[must_use]
+    pub fn leftover_dontneed_issued(&self) -> u64 {
+        self.leftover_dontneed_issued.load(Ordering::Relaxed)
+    }
+
+    /// RFC-0195: scan WILLNEED window count.
+    #[must_use]
+    pub fn scan_readahead_issued(&self) -> u64 {
+        self.scan_readahead_issued.load(Ordering::Relaxed)
+    }
+
+    /// RFC-0194 A/B: `0` = policy on (Drop in bounded-cache).
+    pub fn set_sst_page_keep_budget(&mut self, n: u64) {
+        self.sst_page_keep_budget = n;
+    }
+
+    /// RFC-0194/0195 A/B warm cap (`0` → 3 GiB floor).
+    pub fn set_sst_warm_cap_bytes(&mut self, n: u64) {
+        self.sst_warm_cap_bytes = if n == 0 {
+            crate::scale_kernel::WARM_FLOOR_BYTES
+        } else {
+            n
+        };
     }
 
     /// L0 files tagged with `cf` (empty physical set = global L0).
@@ -4858,9 +4937,33 @@ impl<E: Env> Db<E> {
                         0
                     };
                 let db = self;
+                let overlapping = table.blocks_overlapping_range(start, end);
+                let spans: Vec<(u64, u64)> = overlapping
+                    .iter()
+                    .copied()
+                    .filter_map(|i| table.block_file_span(i))
+                    .collect();
+                let bounded = db.store_bounded_cache();
                 let load: Box<
                     dyn FnMut(usize) -> Option<std::sync::Arc<Vec<(InternalKey, Bytes)>>> + '_,
                 > = Box::new(move |bi| {
+                    if bounded {
+                        if let Some(at) = overlapping.iter().position(|&i| i == bi) {
+                            let w = crate::scan_readahead_kernel::scan_readahead_window(
+                                &spans, at, true,
+                            );
+                            if w.len > 0 {
+                                let _ = db.env.advise(
+                                    table.path(),
+                                    w.offset,
+                                    w.len,
+                                    crate::env::AdviseKind::WillNeed,
+                                );
+                                db.scan_readahead_issued
+                                    .fetch_add(1, Ordering::Relaxed);
+                            }
+                        }
+                    }
                     Some(cache.get_or_insert_with_id(id, bi, || {
                         let mut entries = match table.decode_block(bi) {
                             Ok(entries) => entries,
@@ -7542,10 +7645,14 @@ impl<E: Env> Db<E> {
             return Err(e);
         }
 
-        for path in old_paths {
-            if path != final_path {
-                let _ = self.remove_db_file(&path);
-            }
+        let drop_paths: Vec<PathBuf> = old_paths
+            .iter()
+            .filter(|p| **p != final_path)
+            .cloned()
+            .collect();
+        self.advise_leftover_dontneed(&drop_paths);
+        for path in drop_paths {
+            let _ = self.remove_db_file(&path);
         }
         self.compact_count = self.compact_count.saturating_add(1);
         // latest_only rewrite — same auto-blob path as leveled compact.
@@ -7965,6 +8072,9 @@ impl<E: Env> Db<E> {
             self.undo_prepared_l0_compact(undo);
             return Err(e);
         }
+        // RFC-0194: drop input pages from the OS cache after the new
+        // files are durable, before unlink — bounded-cache leftover.
+        self.advise_leftover_dontneed(&old_paths);
         for path in old_paths {
             let _ = self.remove_db_file(&path);
         }
@@ -8199,10 +8309,13 @@ impl<E: Env> Db<E> {
             return Err(e);
         }
 
-        for path in old_paths {
-            if !new_paths.contains(&path) {
-                let _ = self.remove_db_file(&path);
-            }
+        let drop_paths: Vec<PathBuf> = old_paths
+            .into_iter()
+            .filter(|p| !new_paths.contains(p))
+            .collect();
+        self.advise_leftover_dontneed(&drop_paths);
+        for path in drop_paths {
+            let _ = self.remove_db_file(&path);
         }
         self.compact_count = self.compact_count.saturating_add(1);
         if options.gc.keep_only_latest || options.gc.oldest_snapshot.is_some() {
@@ -16212,6 +16325,64 @@ mod tests {
         assert_eq!(db.mem.len(), 0, "active mem parked, not partitioned");
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0194: compact-input DONTNEED fires iff bounded-cache (warm cap
+    /// 1 B) and policy on (budget 0). Hot cap never issues (Fire 118).
+    #[test]
+    fn leftover_dontneed_fires_only_when_bounded() {
+        fn pile_and_compact(warm: u64) -> u64 {
+            let dir = temp_dir();
+            let mut db = Db::open_with(
+                &dir,
+                OpenOptions {
+                    auto_flush_bytes: Some(4 * 1024),
+                    sync: false,
+                    ..OpenOptions::default()
+                },
+            )
+            .unwrap();
+            db.set_sst_page_keep_budget(0);
+            db.set_sst_warm_cap_bytes(warm);
+            db.set_defer_auto_compact(true);
+            let payload = vec![b'x'; 512];
+            let mut x = 0x9e3779b1u32;
+            for _ in 0..8u32 {
+                for _ in 0..16u32 {
+                    x = x.wrapping_mul(1664525).wrapping_add(1013904223);
+                    db.put(x.to_be_bytes(), &payload).unwrap();
+                }
+                db.flush().unwrap();
+            }
+            let _ = db.compact();
+            let n = db.leftover_dontneed_issued();
+            db.close().unwrap();
+            let _ = fs::remove_dir_all(&dir);
+            n
+        }
+        assert!(
+            pile_and_compact(1) > 0,
+            "bounded-cache compact must DONTNEED inputs"
+        );
+        assert_eq!(
+            pile_and_compact(u64::MAX),
+            0,
+            "hot store must keep pages (Fire 118)"
+        );
+    }
+
+    /// RFC-0195: scan_at_raw routes through scan_readahead_window.
+    #[test]
+    fn scan_at_raw_calls_scan_readahead_window() {
+        let src = include_str!("db.rs");
+        assert!(
+            src.contains("scan_readahead_window("),
+            "scan walk must call the 0195 kernel"
+        );
+        assert!(
+            src.contains("leftover_page_advice("),
+            "compact must call the 0194 kernel"
+        );
     }
 
     /// RFC-0149: auto-flush with physical CFs must not scan every memtable
