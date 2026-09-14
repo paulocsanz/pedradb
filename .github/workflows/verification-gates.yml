@@ -186,3 +186,18 @@ jobs:
           grep -q 'GATE inventory-terminal: GREEN' /tmp/i1.log
           python3 scripts/check_inventory_terminal.py --selftest | tee /tmp/is.log
           grep -q 'SELFTEST inventory-terminal: 6/6 sabotages caught' /tmp/is.log
+
+  proof-check-toolchains:
+    name: RFC-0222 P1.1 proof-check.yml pins + --required invocations
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: gate (twice, logs identical) + selftest (3/3 redness)
+        run: |
+          python3 scripts/check_proof_check_toolchains.py | tee /tmp/pc1.log
+          python3 scripts/check_proof_check_toolchains.py | tee /tmp/pc2.log
+          cmp /tmp/pc1.log /tmp/pc2.log
+          grep -q 'GATE proof-check-toolchains: GREEN' /tmp/pc1.log
+          python3 scripts/check_proof_check_toolchains.py --selftest | tee /tmp/pcs.log
+          grep -q 'SELFTEST proof-check-toolchains: 3/3 sabotages caught' /tmp/pcs.log

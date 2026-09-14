@@ -1,6 +1,6 @@
 # RFC-0222: Escada até o par seL4 — gap por eixo com denominador nomeado, medido por máquina
 
-**Status:** active (2026-09-14: P0.1–P0.7 done; P0.8 push = portão do usuário)
+**Status:** active (2026-09-14: P0.1–P0.7 + P1.1 done; P0.8 push = portão do usuário)
 **Updated:** 2026-09-13
 
 ## Background
@@ -40,7 +40,7 @@ Frase de venda permitida (cânone): *"programa de verificação na classe de cla
 
 ### P1 — pisos e CI (semanas)
 
-- [ ] **P1.1** `proof-check.yml` com elan+lean+charon+aeneas pinados por sha; `lean_extracts.sh --required` + 73× `aeneas_*.sh --required` no job (mata o skip→exit 0) — converge com 0221 P1.1 — status: `todo`
+- [x] **P1.1** `proof-check.yml` com elan+lean+charon+aeneas pinados por sha; `lean_extracts.sh --required` + 73× `aeneas_*.sh --required` no job (mata o skip→exit 0) — converge com 0221 P1.1 — status: done (jobs `lean-extracts` + `aeneas-corpus`; pins Lean 4.31.0 / Aeneas `daa85d7` / Charon `340b1af`; gate `check_proof_check_toolchains.py` 3/3 selftest)
 - [ ] **P1.2** pisos do `sel4_gap --gate` ligados ao CI (regredir eixo = red) — status: `todo`
 
 ### P2 — os terminais de pesquisa (nomeados, incrementais; meses+)
@@ -70,7 +70,7 @@ Frase de venda permitida (cânone): *"programa de verificação na classe de cla
 | P0.6 | p0 | 12 caller-lints fechados | done | este commit | 2026-09-14 |
 | P0.7 | p0 | onda de enrollment (fan-out) | done 8/8 | este commit | 2026-09-14 |
 | P0.8 | p0 | CI verde no GitHub (push) | todo | — | 2026-09-13 |
-| P1.1 | p1 | toolchains formais no proof-check.yml | todo | — | 2026-09-13 |
+| P1.1 | p1 | toolchains formais no proof-check.yml | done | este commit | 2026-09-14 |
 | P1.2 | p1 | pisos sel4_gap no CI | todo | — | 2026-09-13 |
 | P2.1 | p2 | teorema topo (via RFC-0220) | todo | — | 2026-09-13 |
 | P2.2 | p2 | espinha de recovery | todo | — | 2026-09-13 |

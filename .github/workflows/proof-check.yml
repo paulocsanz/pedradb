@@ -70,3 +70,55 @@ jobs:
         with:
           kani-version: 0.67.0
           args: -p pedradb-core
+
+  # RFC-0222 P1.1 — Lean extracts + Aeneas corpus. Skip→exit 0 is forbidden:
+  # both jobs pass --required. Pins match formal/aeneas/PINS.md.
+  lean-extracts:
+    name: lean_extracts.sh --required (pinned Lean 4.31.0)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      LEAN_TOOLCHAIN: leanprover/lean4:v4.31.0
+    steps:
+      - uses: actions/checkout@v4
+      - name: install pinned elan + Lean ${{ env.LEAN_TOOLCHAIN }}
+        run: |
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain "${LEAN_TOOLCHAIN}"
+          echo "$HOME/.elan/bin" >> "${GITHUB_PATH}"
+      - name: lean_extracts.sh --required
+        run: bash scripts/lean_extracts.sh --required
+
+  aeneas-corpus:
+    name: every scripts/aeneas_*.sh --required (pinned aeneas+charon)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      AENEAS_REV: daa85d7e89400fa978be83fedbc7e475a83f0889
+      CHARON_REV: 340b1af4df92608d0911fc2ba26eef3fd3a30ab4
+      CHARON_VERSION: "0.1.232"
+    steps:
+      - uses: actions/checkout@v4
+      - name: charon + aeneas must be the pinned shas (never skip)
+        run: |
+          # RFC-0222 P1.1: --required forbids skip→exit 0. The pins are the
+          # recorded clones (formal/aeneas/PINS.md). A runner without the
+          # binaries is RED, not silent green.
+          if ! command -v charon >/dev/null 2>&1 || ! command -v aeneas >/dev/null 2>&1; then
+            echo "::error::charon/aeneas missing; install AENEAS_REV=${AENEAS_REV} CHARON_REV=${CHARON_REV} (${CHARON_VERSION})"
+            exit 1
+          fi
+          aeneas -version
+          charon version
+      - name: every scripts/aeneas_*.sh --required
+        run: |
+          status=0
+          for sh in scripts/aeneas_*.sh; do
+            echo "::group::${sh}"
+            if ! bash "${sh}" --required; then
+              echo "::error::${sh} failed (extract drifted or toolchain pin broke)"
+              status=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "${status}"
