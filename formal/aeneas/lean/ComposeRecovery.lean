@@ -65,3 +65,109 @@ theorem recovery_spine_wal_record_kept :
         prefix_n can_skip skips in_resync =
         ok recover_kernel.RecoverAct.KeepRecord :=
   record_is_kept
+
+/-- RFC-0224 P1.1: WAL fragment spine COMPOSTA — um Full on-wire é
+    FragKind.Full, Yield no collector, Record nunca é length-resyncable,
+    e o guarda físico Continua quando o payload cabe. Dual-unfold de
+    `from_record_type_fate_iff` × `fragment_act_fate_iff` ×
+    `is_length_resyncable_fate_iff` × `physical_payload_act_fate_iff`.
+    Corpos extraídos não abrem. -/
+theorem recovery_wal_full_record_spine :
+    ∀ (scratch_empty : Bool)
+      (length max_payload payload_end block_end block_size : U64)
+      (f : recover_kernel.FragKind) (act : recover_kernel.FragAct)
+      (resync : Bool) (phys : recover_kernel.PhysicalAct),
+      (recover_kernel.FragKind.from_record_type format.RecordType.Full = ok f ∧
+          recover_kernel.fragment_act f scratch_empty = ok act ∧
+          recover_kernel.is_length_resyncable recover_kernel.RecoverKind.Record
+            = ok resync ∧
+          ¬(length > max_payload) ∧ ¬(payload_end > block_end) ∧
+          recover_kernel.physical_payload_act length max_payload payload_end
+            block_end block_size = ok phys) →
+        (f = recover_kernel.FragKind.Full ∧
+          act = recover_kernel.FragAct.Yield ∧
+          resync = false ∧
+          phys = recover_kernel.PhysicalAct.Continue) := by
+  intro scratch_empty length max_payload payload_end block_end block_size
+    f act resync phys ⟨hf, hact, hre, hlen, hend, hphys⟩
+  have hf' := (from_record_type_fate_iff format.RecordType.Full f).mp hf
+  have hf_full : f = recover_kernel.FragKind.Full := by
+    rcases hf' with h0 | hfull | h1 | h2 | h3
+    · cases h0.1
+    · exact hfull.2
+    · cases h1.1
+    · cases h2.1
+    · cases h3.1
+  have hact' := (fragment_act_fate_iff f scratch_empty act).mp hact
+  have hyield : act = recover_kernel.FragAct.Yield := by
+    rcases hact' with hy | hst | hm1 | hm2 | hl1 | hl2 | hz
+    · exact hy.2
+    · exact absurd hst.1 (hf_full ▸ fun h => recover_kernel.FragKind.noConfusion h)
+    · exact absurd hm1.1 (hf_full ▸ fun h => recover_kernel.FragKind.noConfusion h)
+    · exact absurd hm2.1 (hf_full ▸ fun h => recover_kernel.FragKind.noConfusion h)
+    · exact absurd hl1.1 (hf_full ▸ fun h => recover_kernel.FragKind.noConfusion h)
+    · exact absurd hl2.1 (hf_full ▸ fun h => recover_kernel.FragKind.noConfusion h)
+    · exact absurd hz.1 (hf_full ▸ fun h => recover_kernel.FragKind.noConfusion h)
+  have hre' := (is_length_resyncable_fate_iff
+    recover_kernel.RecoverKind.Record resync).mp hre
+  have hfalse : resync = false := by
+    rcases hre' with ht | hl | hu | hr | hc | ho | hcrc | hz | hoth
+    · cases ht.1
+    · cases hl.1
+    · cases hu.1
+    · exact hr.2
+    · cases hc.1
+    · cases ho.1
+    · cases hcrc.1
+    · cases hz.1
+    · cases hoth.1
+  have hphys' := (physical_payload_act_fate_iff length max_payload payload_end
+    block_end block_size phys).mp hphys
+  have hcont : phys = recover_kernel.PhysicalAct.Continue := by
+    rcases hphys' with hfail | hfail2 | htrunc | hcont
+    · exact absurd hfail.1 hlen
+    · exact absurd hfail2.2.1 hend
+    · exact absurd htrunc.2.1 hend
+    · exact hcont.2.2
+  exact ⟨hf_full, hyield, hfalse, hcont⟩
+
+/-- RFC-0224 P1.1: first-install Failed recusa abrir — dual-unfold de
+    `first_install_action_fate_iff`. -/
+theorem recovery_first_install_failed_refuses :
+    ∀ (act : FirstInstallAction),
+      first_install_action FirstInstallOutcome.Failed = ok act →
+        act = FirstInstallAction.RefuseOpen := by
+  intro act h
+  have := (first_install_action_fate_iff FirstInstallOutcome.Failed act).mp h
+  rcases this with h1 | h2 | h3
+  · cases h1.1
+  · cases h2.1
+  · exact h3.2
+
+/-- RFC-0224 P1.1: bulk MANIFEST persist-now EXATAMENTE com sync —
+    dual-unfold de `bulk_manifest_persist_fate_fate_iff`. -/
+theorem recovery_bulk_manifest_sync_persists_now :
+    ∀ (sync : Bool) (fate : BulkManifestFate),
+      (bulk_manifest_persist_fate sync = ok fate) ↔
+        ((sync = true ∧ fate = BulkManifestFate.PersistNow) ∨
+          (sync = false ∧ fate = BulkManifestFate.AmortizeDebt)) :=
+  bulk_manifest_persist_fate_fate_iff
+
+/-- RFC-0224 P1.1: blob GC reescreve EXATAMENTE gen inativo com bytes —
+    dual-unfold de `blob_gc_action_rewrite_iff_inactive_with_bytes`. -/
+theorem recovery_blob_gc_rewrite_iff :
+    ∀ (is_active : Bool) (bytes : U64),
+      (blob_gc_action is_active bytes = ok BlobGcAction.Rewrite)
+        ↔ (is_active = false ∧ bytes > 0#u64) :=
+  blob_gc_action_rewrite_iff_inactive_with_bytes
+
+/-- RFC-0224 P1.1: first-install Failed recusa E blob GC do gen ativo
+    nunca reescreve — os dois átomos compostos. -/
+theorem recovery_failed_install_and_active_gen_never_rewrite :
+    ∀ (act : FirstInstallAction) (bytes : U64),
+      first_install_action FirstInstallOutcome.Failed = ok act →
+        ¬ (blob_gc_action true bytes = ok BlobGcAction.Rewrite) := by
+  intro act bytes hinst hgc
+  have := recovery_first_install_failed_refuses act hinst
+  have ⟨hactive, _⟩ := (recovery_blob_gc_rewrite_iff true bytes).mp hgc
+  cases hactive

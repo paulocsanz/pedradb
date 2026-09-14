@@ -1,6 +1,6 @@
 # RFC-0224: Depois do Piso Verde — a espinha do writer, os 7 átomos de recovery que faltam, e os quatro terminais que o seL4 pagou em anos
 
-**Status:** active (2026-09-14: P0 done — leftover I/O + writer-spine sync/fence/publish)
+**Status:** active (2026-09-14: P0 + P1 done — writer-spine + recovery 11/11)
 **Updated:** 2026-09-14
 
 ## Background
@@ -61,8 +61,8 @@ m1 (`sel4_coverage`) não sobe por composição. Piso: **300/322 = 93,17%**.
 
 ### P1 — recovery 4/11 → 11/11
 
-- [ ] **P1.1** encadear os átomos de recovery ainda fora de `Compose*.lean` (7 restantes; lista viva = `sel4_gap.py` A4) — status: `todo`
-- [ ] **P1.2** piso `recovery_atoms_chained` = 11 no mesmo commit do último elo — status: `todo`
+- [x] **P1.1** encadear os átomos de recovery ainda fora de `Compose*.lean` (7 restantes; lista viva = `sel4_gap.py` A4) — status: done (`ComposeRecovery.lean`: `from_record_type` × `fragment_act` × `is_length_resyncable` × `physical_payload_act` + `first_install_action` + `bulk_manifest_persist_fate` + `blob_gc_action`; A4 4/11→11/11)
+- [x] **P1.2** piso `recovery_atoms_chained` = 11 no mesmo commit do último elo — status: done (floor 4→11; m2 42→49; DEFINING 24,55%→35,15%)
 
 ### P2 — quatro terminais de pesquisa (nomeados)
 
@@ -79,8 +79,8 @@ m1 (`sel4_coverage`) não sobe por composição. Piso: **300/322 = 93,17%**.
 | P0.2 | p0 | writer-spine fence | done | ComposeWriter `writer_fence_chain_iff`; m2 40→41 | 2026-09-14 |
 | P0.3 | p0 | writer-spine publish | done | ComposeWriter `writer_publish_chain_iff`; m2 41→42 | 2026-09-14 |
 | P0.4 | p0 | wiring leftover_page / scan_readahead | done | `90bf4b64` | 2026-09-14 |
-| P1.1 | p1 | recovery atoms 4→11 chained | todo | — | 2026-09-14 |
-| P1.2 | p1 | floor recovery_atoms_chained=11 | todo | — | 2026-09-14 |
+| P1.1 | p1 | recovery atoms 4→11 chained | done | ComposeRecovery 7 átomos | 2026-09-14 |
+| P1.2 | p1 | floor recovery_atoms_chained=11 | done | floor 4→11; DEFINING 35,15% | 2026-09-14 |
 | P2.1 | p2 | pedra_refines (A1) | todo | — | 2026-09-14 |
 | P2.2 | p2 | confinement (A3) | todo | — | 2026-09-14 |
 | P2.3 | p2 | ConcurrentDb ∀ (A6) | todo | — | 2026-09-14 |

@@ -1,5 +1,15 @@
 # Aeneas extract + Lean theorems
 
+## ComposeRecovery 7 remaining (RFC-0224 P1.1–P1.2, 2026-09-14)
+
+- Dual-unfold of the seven unchained recovery atoms:
+  `from_record_type` × `fragment_act` × `is_length_resyncable` ×
+  `physical_payload_act` (WAL Full record spine) + `first_install_action` +
+  `bulk_manifest_persist_fate` + `blob_gc_action`.
+- `lake build ComposeRecovery` 2× green, 0 sorry.
+- A4 4/11→11/11; m2 42→49; DEFINING 24,55%→35,15%. Floor
+  `recovery_atoms_chained=11` same commit.
+
 ## ComposeWriter publish chain (RFC-0224 P0.3 / RFC-0220 P0.5, 2026-09-14)
 
 - Dual-unfold `manifest_publish_plan_fate_iff` × `changelog_durable_commit_fate_fate_iff`.
