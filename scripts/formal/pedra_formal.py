@@ -295,46 +295,46 @@ def check_lint(root: Path, catalog: dict, r: Report) -> None:
 
 # RFC-0152: these catalog kernels must be the store live RV/AE path.
 STORE_LIVE_KERNELS = {
-    "vote": ("crates/pedradb-store/src/lib.rs", "on_request_vote"),
-    "ae_entry": ("crates/pedradb-store/src/lib.rs", "on_append_entries"),
-    "grant_persist": ("crates/pedradb-store/src/lib.rs", "on_request_vote"),
-    "ae_ack": ("crates/pedradb-store/src/lib.rs", "on_append_entries"),
-    "commit_raft": ("crates/pedradb-store/src/lib.rs", "broadcast_append_after_propose"),
-    "joint_election": ("crates/pedradb-store/src/lib.rs", "election_has_joint_quorum"),
-    "joint_leave": ("crates/pedradb-store/src/lib.rs", "pending_joint_on"),
-    "pending_joint_node": ("crates/pedradb-store/src/lib.rs", "pending_joint"),
-    "joint_leave_ok": ("crates/pedradb-store/src/lib.rs", "leave_joint"),
-    "election_grant_from": ("crates/pedradb-store/src/lib.rs", "on_request_vote_reply"),
-    "joint_target": ("crates/pedradb-store/src/lib.rs", "remove_member_joint"),
-    "joint_add_target": ("crates/pedradb-store/src/lib.rs", "add_member_joint"),
-    "queued_leave_finish": ("crates/pedradb-store/src/lib.rs", "finish_uncommitted_leave"),
-    "disk_membership": ("crates/pedradb-store/src/lib.rs", "bind_cluster_identity"),
-    "high_water": ("crates/pedradb-store/src/lib.rs", "open_single_node_with_rng_opts"),
-    "participating_member": ("crates/pedradb-store/src/lib.rs", "is_participating"),
-    "identity_before_applied": ("crates/pedradb-store/src/lib.rs", "apply_range"),
-    "recover_apply": ("crates/pedradb-store/src/lib.rs", "recover_apply_committed"),
-    "recover_apply_node": ("crates/pedradb-store/src/lib.rs", "recover_apply_committed"),
-    "recover_truncate": ("crates/pedradb-store/src/lib.rs", "persist_truncated_logs"),
-    "recover_drop_orphan": ("crates/pedradb-store/src/lib.rs", "persist_log_db"),
-    "recover_abort": ("crates/pedradb-store/src/lib.rs", "abort_leftover_intents"),
-    "persist_meta": ("crates/pedradb-store/src/lib.rs", "persist_u64_meta_all"),
-    "persist_hist": ("crates/pedradb-store/src/lib.rs", "persist_si_keys"),
-    "persist_fence": ("crates/pedradb-store/src/lib.rs", "fence_txn_aborted"),
-    "force_clear": ("crates/pedradb-store/src/lib.rs", "force_local_clear_keys"),
-    "drop_preimages": ("crates/pedradb-store/src/lib.rs", "drop_preimages"),
-    "open_peer_disk": ("crates/pedradb-store/src/lib.rs", "open_with_envs_rng_opts"),
-    "local_id_member": ("crates/pedradb-store/src/lib.rs", "local_node_id"),
-    "reader_local": ("crates/pedradb-store/src/lib.rs", "ids_first_if_local"),
-    "discard_uncommitted": ("crates/pedradb-store/src/lib.rs", "discard_uncommitted_from"),
-    "discard_leader": ("crates/pedradb-store/src/lib.rs", "finish_queued_propose"),
-    "removed_step_down": ("crates/pedradb-store/src/lib.rs", "install_applied_membership"),
-    "hint_member": ("crates/pedradb-store/src/lib.rs", "leader_hint"),
-    "drop_repl_slot": ("crates/pedradb-store/src/lib.rs", "install_applied_membership"),
-    "drop_sent_through": ("crates/pedradb-store/src/lib.rs", "remove_member"),
-    "apply_step": ("crates/pedradb-store/src/lib.rs", "apply_range"),
+    "vote": ("crates/pedradb-store/src/lib_kernel.rs", "on_request_vote"),
+    "ae_entry": ("crates/pedradb-store/src/lib_kernel.rs", "on_append_entries"),
+    "grant_persist": ("crates/pedradb-store/src/lib_kernel.rs", "on_request_vote"),
+    "ae_ack": ("crates/pedradb-store/src/lib_kernel.rs", "on_append_entries"),
+    "commit_raft": ("crates/pedradb-store/src/lib_kernel.rs", "broadcast_append_after_propose"),
+    "joint_election": ("crates/pedradb-store/src/lib_kernel.rs", "election_has_joint_quorum"),
+    "joint_leave": ("crates/pedradb-store/src/lib_kernel.rs", "pending_joint_on"),
+    "pending_joint_node": ("crates/pedradb-store/src/lib_kernel.rs", "pending_joint"),
+    "joint_leave_ok": ("crates/pedradb-store/src/lib_kernel.rs", "leave_joint"),
+    "election_grant_from": ("crates/pedradb-store/src/lib_kernel.rs", "on_request_vote_reply"),
+    "joint_target": ("crates/pedradb-store/src/lib_kernel.rs", "remove_member_joint"),
+    "joint_add_target": ("crates/pedradb-store/src/lib_kernel.rs", "add_member_joint"),
+    "queued_leave_finish": ("crates/pedradb-store/src/lib_kernel.rs", "finish_uncommitted_leave"),
+    "disk_membership": ("crates/pedradb-store/src/lib_kernel.rs", "bind_cluster_identity"),
+    "high_water": ("crates/pedradb-store/src/lib_kernel.rs", "open_single_node_with_rng_opts"),
+    "participating_member": ("crates/pedradb-store/src/lib_kernel.rs", "is_participating"),
+    "identity_before_applied": ("crates/pedradb-store/src/lib_kernel.rs", "apply_range"),
+    "recover_apply": ("crates/pedradb-store/src/lib_kernel.rs", "recover_apply_committed"),
+    "recover_apply_node": ("crates/pedradb-store/src/lib_kernel.rs", "recover_apply_committed"),
+    "recover_truncate": ("crates/pedradb-store/src/lib_kernel.rs", "persist_truncated_logs"),
+    "recover_drop_orphan": ("crates/pedradb-store/src/lib_kernel.rs", "persist_log_db"),
+    "recover_abort": ("crates/pedradb-store/src/lib_kernel.rs", "abort_leftover_intents"),
+    "persist_meta": ("crates/pedradb-store/src/lib_kernel.rs", "persist_u64_meta_all"),
+    "persist_hist": ("crates/pedradb-store/src/lib_kernel.rs", "persist_si_keys"),
+    "persist_fence": ("crates/pedradb-store/src/lib_kernel.rs", "fence_txn_aborted"),
+    "force_clear": ("crates/pedradb-store/src/lib_kernel.rs", "force_local_clear_keys"),
+    "drop_preimages": ("crates/pedradb-store/src/lib_kernel.rs", "drop_preimages"),
+    "open_peer_disk": ("crates/pedradb-store/src/lib_kernel.rs", "open_with_envs_rng_opts"),
+    "local_id_member": ("crates/pedradb-store/src/lib_kernel.rs", "local_node_id"),
+    "reader_local": ("crates/pedradb-store/src/lib_kernel.rs", "ids_first_if_local"),
+    "discard_uncommitted": ("crates/pedradb-store/src/lib_kernel.rs", "discard_uncommitted_from"),
+    "discard_leader": ("crates/pedradb-store/src/lib_kernel.rs", "finish_queued_propose"),
+    "removed_step_down": ("crates/pedradb-store/src/lib_kernel.rs", "install_applied_membership"),
+    "hint_member": ("crates/pedradb-store/src/lib_kernel.rs", "leader_hint"),
+    "drop_repl_slot": ("crates/pedradb-store/src/lib_kernel.rs", "install_applied_membership"),
+    "drop_sent_through": ("crates/pedradb-store/src/lib_kernel.rs", "remove_member"),
+    "apply_step": ("crates/pedradb-store/src/lib_kernel.rs", "apply_range"),
 }
 
-STORE_LIVE_PATH = "crates/pedradb-store/src/lib.rs"
+STORE_LIVE_PATH = "crates/pedradb-store/src/lib_kernel.rs"
 
 
 def check_store_live(_root: Path, catalog: dict, r: Report) -> None:
@@ -583,15 +583,230 @@ def check_clones(root: Path, catalog: dict, r: Report) -> None:
 # 2026-08-31-leveling-kernel-unenrolled). The allowlist is empty; keep it
 # that way (transitional states get a comment, not a permanent row).
 TCB_FREEZE_ALLOWLIST: dict[str, str] = {
+    "crates/montanha-fdb-recipes/src/lib_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-capi/src/lib_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/buggify_hooks_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/bulk_ingest_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/bulk_run_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/cache_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/change_feed_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/concurrent_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/corrupt_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/db/lookup_archive_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/db_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/disk_pressure_kernel.rs":
-        "RFC-0179 Aeneas extract SOURCE.disk_pressure (catalog twin pending)",
-    # 2026-09-12: perf-lane heuristic kernels — scheduling/buffering decisions
-    # with cargo-test AS-IS twins (rfc0209_*/rfc0211_*), no Verus twin by
-    # design (precedent: scan_readahead 0195 pending the same graduation).
-    "crates/pedradb-core/src/wal_buffer_kernel.rs":
-        "RFC-0209 P0.1 heuristic kernel (should_flush; twin cargo-test)",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/env_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/error_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/history_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/host_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/lib_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/lock_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/manifest_mod_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/memtable_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/occ_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/pct_hooks_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/rmw_sched_kernel.rs":
-        "RFC-0211 P0.1 heuristic kernel (rmw_group_sched; twin cargo-test)",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/rng_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/sst/mod_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/sst/table_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/time_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/tx_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/verified_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/verify_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/vlog_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/wal/format_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/wal/mod_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/wal/reader_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/wal/recover_choose_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/wal/writer_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/wal_buffer_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-dcs/src/command_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-dcs/src/lib_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-fold/src/applied_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-fold/src/bin/fold_smoke_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-fold/src/caixote_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-fold/src/export_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-fold/src/follow_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-fold/src/lib_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-fold/src/roles_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-fold/src/ship_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-fold/src/store_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-fold/src/watch_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-http/src/lib_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-io-uring/src/lib_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-io-uring/src/ring_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-journal/src/lib_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-raft/src/bin/pedra-raft-node_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-raft/src/lib_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-raft/src/net_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-raft/src/persist_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-replicate/src/lib_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-spec/src/lib_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/ae_ack_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/bin/cluster_real_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/bin/montanha-fdb-bench_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/bin/montanha-fdb-compare_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/bin/montanha-perf-gate_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/bin/montanha-scale-gate_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/bin/montanha-store-smoke_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/bin/montanha-tcp_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/client_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/commit_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/fdb_compat_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/fdb_layers_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/layers_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/lib_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/msg_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/tcp_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/three_teeth_queued_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/tls_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/vote_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-stream/src/lib_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bandit_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bin/gate_coverage_floor_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bin/gate_crash_injection_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bin/gate_exhaustive_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bin/gate_seed_ratchet_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bin/multiproc_trace_smoke_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bin/peer_msg_tcp_lab_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bin/world_buggify_matrix_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bin/world_hunt_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bin/world_invariant_soak_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bin/world_partition_storm_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bin/world_shrink_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bin/world_smoke_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bin/world_soak_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bin/world_swarm_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/buggify_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/coverage_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/lib_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/net_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/pct_concurrent_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/pct_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/schedule_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/scheduler_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/swarm_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/wenv_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/rocksdb-compat/src/api_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/rocksdb-compat/src/backup_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/rocksdb-compat/src/checkpoint_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/rocksdb-compat/src/env_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/rocksdb-compat/src/knobs_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/rocksdb-compat/src/lib_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/rocksdb-compat/src/shape_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/rocksdb-compat/src/txn_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
 }
 
 # RFC-0166 P2.4: catalog accounting. `l28_*` is a campaign gate (named
@@ -1089,14 +1304,14 @@ ATOM_REASON_DATE = re.compile(r"^(\d{4}-\d{2}-\d{2})$")
 AENEAS_EXTRACTS = (
     ("crates/pedradb-raft/src/vote_kernel.rs", "formal/aeneas/out/SOURCE"),
     ("crates/pedradb-fold/src/isolated_kernel.rs", "formal/aeneas/out/SOURCE.isolated"),
-    ("crates/pedradb-core/src/bloom.rs", "formal/aeneas/out/SOURCE.bloom"),
+    ("crates/pedradb-core/src/bloom_kernel.rs", "formal/aeneas/out/SOURCE.bloom"),
     ("crates/pedradb-raft/src/ae_kernel.rs", "formal/aeneas/out/SOURCE.ae"),
     ("crates/pedradb-raft/src/commit_kernel.rs", "formal/aeneas/out/SOURCE.commit"),
     ("crates/pedradb-core/src/group_commit_kernel.rs", "formal/aeneas/out/SOURCE.group_commit"),
     ("crates/pedradb-core/src/wal/reopen_kernel.rs", "formal/aeneas/out/SOURCE.reopen"),
     ("crates/pedradb-core/src/wal/recover_kernel.rs", "formal/aeneas/out/SOURCE.wal_recover"),
     ("crates/pedradb-raft/src/apply_kernel.rs", "formal/aeneas/out/SOURCE.apply"),
-    ("crates/pedradb-core/src/prefix.rs", "formal/aeneas/out/SOURCE.prefix"),
+    ("crates/pedradb-core/src/prefix_kernel.rs", "formal/aeneas/out/SOURCE.prefix"),
     (
         "crates/pedradb-core/src/write_admission_kernel.rs",
         "formal/aeneas/out/SOURCE.write_admission",
@@ -1144,8 +1359,8 @@ AENEAS_EXTRACTS = (
     ("crates/pedradb-core/src/compact_kernel.rs", "formal/aeneas/out/SOURCE.compact"),
     ("crates/pedradb-core/src/vlog_gc_kernel.rs", "formal/aeneas/out/SOURCE.vlog_gc"),
     ("crates/pedradb-store/src/tx_glue_kernel.rs", "formal/aeneas/out/SOURCE.tx_glue"),
-    ("crates/pedradb-store/src/l28.rs", "formal/aeneas/out/SOURCE.l28"),
-    ("crates/pedradb-world/src/tcg.rs", "formal/aeneas/out/SOURCE.tcg"),
+    ("crates/pedradb-store/src/l28_kernel.rs", "formal/aeneas/out/SOURCE.l28"),
+    ("crates/pedradb-world/src/tcg_kernel.rs", "formal/aeneas/out/SOURCE.tcg"),
     ("crates/pedradb-io-uring/src/cqe_kernel.rs", "formal/aeneas/out/SOURCE.cqe"),
     ("crates/rocksdb-compat/src/iter_kernel.rs", "formal/aeneas/out/SOURCE.iter"),
     (
@@ -1160,7 +1375,7 @@ AENEAS_EXTRACTS = (
         "crates/pedradb-core/src/disk_pressure_kernel.rs",
         "formal/aeneas/out/SOURCE.disk_pressure",
     ),
-    ("crates/pedradb-core/src/wal/crc.rs", "formal/aeneas/out/SOURCE.crc"),
+    ("crates/pedradb-core/src/wal/crc_kernel.rs", "formal/aeneas/out/SOURCE.crc"),
     (
         "crates/pedradb-core/src/env_crash_kernel.rs",
         "formal/aeneas/out/SOURCE.env_crash",
@@ -1197,7 +1412,7 @@ AENEAS_EXTRACTS = (
         "crates/pedradb-store/src/vote_kernel.rs",
         "formal/aeneas/out/SOURCE.store_vote",
     ),
-    ("crates/pedradb-core/src/key.rs", "formal/aeneas/out/SOURCE.key"),
+    ("crates/pedradb-core/src/key_kernel.rs", "formal/aeneas/out/SOURCE.key"),
     (
         "crates/pedradb-dcs/src/lease_kernel.rs",
         "formal/aeneas/out/SOURCE.lease",
@@ -1223,13 +1438,13 @@ AENEAS_EXTRACTS = (
         "formal/aeneas/out/SOURCE.c1_modelo",
     ),
     (
-        "crates/pedradb-capi/src/handles.rs",
+        "crates/pedradb-capi/src/handles_kernel.rs",
         "formal/aeneas/out/SOURCE.capi_handles",
     ),
-    ("crates/pedradb-core/src/batch.rs", "formal/aeneas/out/SOURCE.batch"),
-    ("crates/pedradb-core/src/merge.rs", "formal/aeneas/out/SOURCE.merge"),
+    ("crates/pedradb-core/src/batch_kernel.rs", "formal/aeneas/out/SOURCE.batch"),
+    ("crates/pedradb-core/src/merge_kernel.rs", "formal/aeneas/out/SOURCE.merge"),
     (
-        "crates/pedradb-http/src/fail_closed.rs",
+        "crates/pedradb-http/src/fail_closed_kernel.rs",
         "formal/aeneas/out/SOURCE.fail_closed",
     ),
     (
@@ -1237,7 +1452,7 @@ AENEAS_EXTRACTS = (
         "formal/aeneas/out/SOURCE.probe_order",
     ),
     (
-        "crates/rocksdb-compat/src/locktab.rs",
+        "crates/rocksdb-compat/src/locktab_kernel.rs",
         "formal/aeneas/out/SOURCE.locktab",
     ),
     (
@@ -1257,11 +1472,11 @@ AENEAS_EXTRACTS = (
         "formal/aeneas/out/SOURCE.lsm_r1",
     ),
     (
-        "crates/pedradb-core/src/leveling.rs",
+        "crates/pedradb-core/src/leveling_kernel.rs",
         "formal/aeneas/out/SOURCE.leveling",
     ),
     (
-        "crates/pedradb-posix/src/lib.rs",
+        "crates/pedradb-posix/src/lib_kernel.rs",
         "formal/aeneas/out/SOURCE.posix",
     ),
     (
@@ -1704,7 +1919,7 @@ def check_extract(
             "aeneas extract artifact BloomKernel.lean missing (run ./scripts/aeneas_bloom.sh)"
         )
     bloom_stamp = root / "formal/aeneas/out/SOURCE.bloom"
-    bloom_src = root / "crates/pedradb-core/src/bloom.rs"
+    bloom_src = root / "crates/pedradb-core/src/bloom_kernel.rs"
     if bloom_stamp.is_file() and bloom_src.is_file():
         want = None
         for line in bloom_stamp.read_text(encoding="utf-8").splitlines():
@@ -1873,7 +2088,7 @@ def check_extract(
 
     # RFC-0170 P0.3: prefix.rs stamp.
     pref_stamp = root / "formal/aeneas/out/SOURCE.prefix"
-    pref_src = root / "crates/pedradb-core/src/prefix.rs"
+    pref_src = root / "crates/pedradb-core/src/prefix_kernel.rs"
     if pref_stamp.is_file() and pref_src.is_file():
         want = None
         for line in pref_stamp.read_text(encoding="utf-8").splitlines():
@@ -2138,7 +2353,7 @@ def check_extract(
             "formal/aeneas/out/lean/L28Kernel.lean",
             "def l28_durability_ok",
             "./scripts/aeneas_l28.sh",
-            "crates/pedradb-store/src/l28.rs",
+            "crates/pedradb-store/src/l28_kernel.rs",
             "formal/aeneas/lean/L28.lean",
             ("theorem l28_durability_all_ok",),
         ),
@@ -2147,7 +2362,7 @@ def check_extract(
             "formal/aeneas/out/lean/TcgKernel.lean",
             "def tcg_guest_admitted",
             "./scripts/aeneas_tcg.sh",
-            "crates/pedradb-world/src/tcg.rs",
+            "crates/pedradb-world/src/tcg_kernel.rs",
             "formal/aeneas/lean/Tcg.lean",
             ("theorem tcg_guest_admitted_true",),
         ),
@@ -2201,7 +2416,7 @@ def check_extract(
             "formal/aeneas/out/lean/CrcKernel.lean",
             "def crc_match_ok",
             "./scripts/aeneas_crc.sh",
-            "crates/pedradb-core/src/wal/crc.rs",
+            "crates/pedradb-core/src/wal/crc_kernel.rs",
             "formal/aeneas/lean/Crc.lean",
             ("theorem crc_match_ok_equal",),
         ),

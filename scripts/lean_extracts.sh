@@ -48,6 +48,7 @@ COMPOSE=(
   ComposeWriter
   ComposeRecovery
   ComposeDefining
+  ComposeM2
   LsmCompactBridges
   LsmCompactDerived
   ProbeLadderBridges

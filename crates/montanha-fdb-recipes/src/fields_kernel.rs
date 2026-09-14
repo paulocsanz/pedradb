@@ -107,6 +107,15 @@ pub fn decode_fields(raw: &[u8], n: usize) -> Option<Vec<Vec<u8>>> {
     Some(out)
 }
 
+/// AS-IS: stop at the first NUL instead of length-prefixed fields.
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn decode_fields_as_is(raw: &[u8], n: usize) -> Option<Vec<Vec<u8>>> {
+    let _ = n;
+    let sep = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
+    Some(vec![raw[..sep].to_vec()])
+}
+
 /// AS-IS F60: first `0x00` splits a pair (NUL inside the first field truncates).
 #[cfg(not(verus_keep_ghost))]
 #[must_use]
@@ -221,5 +230,15 @@ mod tests {
             }
         }
         assert_eq!(n, 36);
+    }
+
+    #[test]
+    fn decode_fields_on_raw_nul_split_is_not_ok() {
+        let zip = [b'9', 0x00, b'0'];
+        let raw = encode_fields(&[&zip, b"alice"]);
+        let got = decode_fields(&raw, 2).unwrap();
+        assert_eq!(got[0], zip);
+        let as_is = decode_fields_as_is(&raw, 2).unwrap();
+        assert_ne!(as_is[0], zip, "AS-IS dente: NUL splits the first field");
     }
 }

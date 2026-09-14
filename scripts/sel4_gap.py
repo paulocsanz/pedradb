@@ -105,6 +105,12 @@ def measure() -> dict[str, object]:
     surface_fns = {
         (p.get("kernel") or "", p.get("entry") or "") for p in pairs if p.get("entry")
     }
+    for cl in catalog.get("clones") or []:
+        for fn in cl.get("fns") or []:
+            if cl.get("a"):
+                surface_fns.add((cl["a"], fn))
+            if cl.get("b"):
+                surface_fns.add((cl["b"], fn))
     tot_pub = on_surface = 0
     for rel in enrolled:
         p = REPO / rel

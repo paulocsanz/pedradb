@@ -30,6 +30,12 @@ pub fn packed_children_start(packed: &[u8]) -> Vec<u8> {
     s
 }
 
+/// AS-IS: start is the packed prefix with no separator.
+#[must_use]
+pub fn packed_children_start_as_is(packed: &[u8]) -> Vec<u8> {
+    packed.to_vec()
+}
+
 /// Exclusive end of packed children: `packed || 0x01`.
 #[cfg(not(verus_keep_ghost))]
 #[must_use]
@@ -54,6 +60,12 @@ pub fn packed_children_end_as_is(packed: &[u8]) -> Vec<u8> {
 #[must_use]
 pub fn key_in_half_open(key: &[u8], start: &[u8], end: &[u8]) -> bool {
     key >= start && key < end
+}
+
+/// AS-IS: missing end is treated as included.
+#[must_use]
+pub fn key_in_half_open_as_is(key: &[u8], start: &[u8], end: &[u8]) -> bool {
+    key >= start
 }
 
 /// After `packed`, the next byte is a child iff it is the `0x00` separator.
@@ -230,6 +242,29 @@ mod tests {
     }
 
     /// Catalog three-teeth plant. Direct `as_is_leaks_sibling_900` is **not** this tooth.
+    #[test]
+    fn packed_children_start_on_raw_parent_is_not_ok() {
+        let p = pack90();
+        assert_ne!(
+            packed_children_start(p),
+            packed_children_start_as_is(p),
+            "AS-IS dente: start without 0x00 sep"
+        );
+        assert_eq!(packed_children_start(p).last().copied(), Some(PACKED_CHILD_SEP));
+    }
+
+    #[test]
+    fn key_in_half_open_on_missing_end_is_not_ok() {
+        let start = b"a";
+        let end = b"c";
+        let key = b"c";
+        assert!(!key_in_half_open(key, start, end));
+        assert!(
+            key_in_half_open_as_is(key, start, end),
+            "AS-IS dente: end included"
+        );
+    }
+
     #[test]
     fn packed_children_end_on_live_subspace_is_not_ok() {
         let p = pack90();

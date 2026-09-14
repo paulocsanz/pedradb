@@ -409,12 +409,12 @@ def decode_fields
   decode_fields_loop { start := 0#usize, «end» := n } raw1 0#usize out
 
 /-- [pedra_aeneas_fields_kernel::decode_pair_first_nul::closure]
-    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 114:34-114:45 -/
+    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 123:34-123:45 -/
 @[reducible]
 def decode_pair_first_nul.closure := Unit
 
 /-- [pedra_aeneas_fields_kernel::decode_pair_first_nul::{impl core::ops::function::FnMut<(&'_ u8,), bool> for pedra_aeneas_fields_kernel::decode_pair_first_nul::closure}::call_mut]:
-    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 114:34-114:45 -/
+    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 123:34-123:45 -/
 def
   decode_pair_first_nul.closure.Insts.CoreOpsFunctionFnMutTupleSharedU8Bool.call_mut
   (c : decode_pair_first_nul.closure) (tupled_args : Std.U8) :
@@ -423,7 +423,7 @@ def
   ok (tupled_args = 0#u8, c)
 
 /-- [pedra_aeneas_fields_kernel::decode_pair_first_nul::{impl core::ops::function::FnOnce<(&'_ u8,), bool> for pedra_aeneas_fields_kernel::decode_pair_first_nul::closure}::call_once]:
-    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 114:34-114:45 -/
+    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 123:34-123:45 -/
 def
   decode_pair_first_nul.closure.Insts.CoreOpsFunctionFnOnceTupleSharedU8Bool.call_once
   (c : decode_pair_first_nul.closure) (i : Std.U8) : Result Bool := do
@@ -433,7 +433,7 @@ def
   ok b
 
 /-- Trait implementation: [pedra_aeneas_fields_kernel::decode_pair_first_nul::{impl core::ops::function::FnOnce<(&'_ u8,), bool> for pedra_aeneas_fields_kernel::decode_pair_first_nul::closure}]
-    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 114:34-114:45 -/
+    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 123:34-123:45 -/
 @[reducible]
 def decode_pair_first_nul.closure.Insts.CoreOpsFunctionFnOnceTupleSharedU8Bool
   : core.ops.function.FnOnce decode_pair_first_nul.closure Std.U8 Bool := {
@@ -442,7 +442,7 @@ def decode_pair_first_nul.closure.Insts.CoreOpsFunctionFnOnceTupleSharedU8Bool
 }
 
 /-- Trait implementation: [pedra_aeneas_fields_kernel::decode_pair_first_nul::{impl core::ops::function::FnMut<(&'_ u8,), bool> for pedra_aeneas_fields_kernel::decode_pair_first_nul::closure}]
-    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 114:34-114:45 -/
+    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 123:34-123:45 -/
 @[reducible]
 def decode_pair_first_nul.closure.Insts.CoreOpsFunctionFnMutTupleSharedU8Bool :
   core.ops.function.FnMut decode_pair_first_nul.closure Std.U8 Bool := {
@@ -453,7 +453,7 @@ def decode_pair_first_nul.closure.Insts.CoreOpsFunctionFnMutTupleSharedU8Bool :
 }
 
 /-- [pedra_aeneas_fields_kernel::decode_pair_first_nul]:
-    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 113:0-122:1
+    Source: '../../../crates/montanha-fdb-recipes/src/fields_kernel.rs', lines 122:0-131:1
     Visibility: public -/
 def decode_pair_first_nul
   (raw1 : Slice Std.U8) :
