@@ -93,6 +93,24 @@ pub const HERD_COLLECT_US: u64 = 10;
 /// is extra wait for a syscall that already amortizes 4 puts.
 pub const HERD_TARGET: usize = 4;
 
+/// After a fair unlock, yield-loop this long so waiters can `push` before
+/// the leader snapshots the queue (Rocks `LinkOne` then walk the list).
+/// Stops early at [`join_complete`] (1c: instant). 20µs = one Darwin
+/// `write()` — break-even at +1 op.
+pub const JOIN_LOOK_US: u64 = 20;
+
+/// The WAL frame has everyone in `submit()` (or the mc4 herd).
+#[must_use]
+pub fn join_complete(batch_len: usize, active: usize) -> bool {
+    herd_full(batch_len) || (active > 0 && batch_len >= active)
+}
+
+/// AS-IS: seal after the first drain.
+#[must_use]
+pub fn join_complete_as_is(_batch_len: usize, _active: usize) -> bool {
+    true
+}
+
 /// Frame has the mc4 herd — do not wait more.
 #[must_use]
 pub fn herd_full(batch_len: usize) -> bool {
@@ -256,6 +274,10 @@ mod tests {
             body.contains("group_window_kernel::post_group_grace_us("),
             "lead must grace-spin after a multi-member publish"
         );
+        assert!(
+            body.contains("group_window_kernel::join_complete("),
+            "lead must snapshot the join list like WriteThread"
+        );
     }
 
     #[test]
@@ -276,6 +298,10 @@ mod tests {
             0,
             "AS-IS dente: never grace-spin"
         );
+        assert!(join_complete(4, 1), "herd full");
+        assert!(join_complete(3, 3), "everyone in submit is in the frame");
+        assert!(!join_complete(1, 4), "3 joiners still outside");
+        assert!(join_complete_as_is(1, 8), "AS-IS seals after first drain");
     }
 
     #[test]

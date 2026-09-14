@@ -887,6 +887,9 @@ impl WriteGroup {
                 // until we drop it — and without a fair unlock the leader
                 // re-locks in `lead()` and drains itself (avg_group=1.39).
                 parking_lot::MutexGuard::unlock_fair(g);
+                // Let waiters run their `push` before `lead()` re-locks
+                // (Rocks: LinkOne is wait-free; we only have a mutex).
+                std::thread::yield_now();
                 (None, None)
             } else {
                 let (tx, rx) = mpsc::sync_channel(1);
@@ -972,22 +975,41 @@ impl WriteGroup {
     fn lead<E: Env>(&self, db: &RwLock<Db<E>>) -> Result<SequenceNumber> {
         let mut leader_result: Option<Result<SequenceNumber>> = None;
         loop {
-            let mut batch: Vec<PendingWrite> = {
-                let mut g = self.queue.lock();
-                if crate::write_admission_kernel::batch_is_empty(g.pending.len() as u64) {
-                    g.leader_active = false;
-                    return leader_result.unwrap_or_else(|| {
-                        Err(CoreError::Internal(
-                            "write group leader had no member result".into(),
-                        ))
-                    });
+            // Rocks WriteThread: after election, snapshot whoever already
+            // joined. Fair-unlock + yield let waiters push; this loop
+            // drains until `join_complete` (batch >= active or 4) or 2µs.
+            let join_deadline = Instant::now()
+                + Duration::from_micros(crate::group_window_kernel::JOIN_LOOK_US);
+            let mut batch: Vec<PendingWrite> = Vec::new();
+            loop {
+                {
+                    let mut g = self.queue.lock();
+                    if crate::write_admission_kernel::batch_is_empty(batch.len() as u64)
+                        && crate::write_admission_kernel::batch_is_empty(g.pending.len() as u64)
+                    {
+                        g.leader_active = false;
+                        return leader_result.unwrap_or_else(|| {
+                            Err(CoreError::Internal(
+                                "write group leader had no member result".into(),
+                            ))
+                        });
+                    }
+                    if !crate::write_admission_kernel::batch_is_empty(g.pending.len() as u64)
+                    {
+                        let cap =
+                            crate::client_axis_kernel::pipeline_drain_cap(g.pending.len());
+                        batch.extend(g.pending.drain(..cap));
+                    }
                 }
-                // RFC-0201 P0.1: full drain bounded by the kernel's misuse
-                // floor; the absorb loop below folds the remainder into
-                // this same group frame (no cap-8 convoy).
-                let cap = crate::client_axis_kernel::pipeline_drain_cap(g.pending.len());
-                g.pending.drain(..cap).collect()
-            };
+                let active = self.active.load(Ordering::Relaxed);
+                if crate::group_window_kernel::join_complete(batch.len(), active) {
+                    break;
+                }
+                if Instant::now() >= join_deadline {
+                    break;
+                }
+                std::thread::yield_now();
+            }
 
             // Catch-up window (RFC-0037 P2.2): writers counted in `active`
             // but not yet queued are waking between ops. Hold the group open
@@ -9092,6 +9114,46 @@ mod tests {
     /// directions — `=0` keeps an oversubscribed herd on the bypass,
     /// `=1` merges a two-writer herd (below the line).
     #[test]
+    /// Four threads hit `put` together: the join snapshot must put them
+    /// in one WAL frame (avg_group ≥ 3), not one `write()` each.
+    #[test]
+    fn rfc_writethread_join_four_puts_one_wal_write() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        let barrier = Arc::new(std::sync::Barrier::new(4));
+        let payload = [b'x'; 100];
+        std::thread::scope(|s| {
+            for t in 0..4u8 {
+                let db = &db;
+                let barrier = &barrier;
+                s.spawn(move || {
+                    barrier.wait();
+                    for i in 0..32u8 {
+                        db.put_with([b'j', t, i], &payload, WriteOptions::no_sync())
+                            .unwrap();
+                    }
+                });
+            }
+        });
+        let (submits, _q, groups, ops) = db.write_group_stats();
+        assert_eq!(submits, 128);
+        assert_eq!(ops, 128);
+        let avg = ops as f64 / groups.max(1) as f64;
+        assert!(
+            avg >= 2.5,
+            "join must pack the 4-writer herd: avg_group={avg:.2} groups={groups}"
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     fn rfc0201_async_group_env_pin_overrides_axis() {
         let _env_axis = ENV_AXIS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let ncpu = std::thread::available_parallelism()
