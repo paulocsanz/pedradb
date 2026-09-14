@@ -3374,6 +3374,17 @@ impl<E: PedraEnv> DB<E> {
         self.inner.compact().map_err(Error::from)
     }
 
+    /// One L0→L1 job off the write lock (RFC-0223 P2.1). The bench settle
+    /// path uses this instead of sleeping on the compact worker — under
+    /// load the worker starves and the 30 s poll left L0=14 (p26r3).
+    ///
+    /// # Errors
+    /// SST / MANIFEST I/O.
+    pub fn compact_l0_once(&self) -> Result<bool> {
+        let _gate = self.compact_gate.lock();
+        self.inner.compact_l0_off_lock().map_err(Error::from)
+    }
+
     /// Compact applying `filter` natively inside the merge (RFC-0217 P1.2,
     /// RFC-0043 P2.7): one whole-keyspace rewrite per family — no whole-DB
     /// materialization, no WAL delete round-trip. Same decisions as
@@ -6979,6 +6990,57 @@ mod tests {
             db.get_cf(&lock, b"lk").unwrap().as_deref(),
             Some(&b"lv"[..])
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0223 P2.1: compact_l0_once drains L0 below the trigger (the
+    /// bench settle used to only sleep on the worker — p26r3 left L0=14).
+    #[test]
+    fn compact_l0_once_drains_below_trigger() {
+        let dir = tmp("compact-l0-once");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        opts.set_write_buffer_size(4 * 1024);
+        // No workers: the test drives every L0 job.
+        let db = DB::open_cf_with_env(&opts, &dir, &[], IoUringEnv::default()).unwrap();
+        db.inner.set_defer_auto_compact(true);
+        let payload = vec![b'x'; 512];
+        // Unsorted keys: a monotonic seed latches bulk-ingest (RFC-0159)
+        // and installs at max level (sst_count=12, l0=0) — compact_l0
+        // would be a no-op.
+        let mut x = 0x9e3779b1u32;
+        let first = {
+            x = x.wrapping_mul(1664525).wrapping_add(1013904223);
+            x.to_be_bytes()
+        };
+        db.put(first, &payload).unwrap();
+        for _round in 0..6u32 {
+            for _ in 0..16u32 {
+                x = x.wrapping_mul(1664525).wrapping_add(1013904223);
+                db.put(x.to_be_bytes(), &payload).unwrap();
+            }
+            db.flush().unwrap();
+        }
+        assert!(
+            db.read_probe().l0_files >= pedradb_core::L0_COMPACTION_TRIGGER,
+            "need a pile of L0 files, got {}",
+            db.read_probe().l0_files
+        );
+        let mut jobs = 0usize;
+        while db.read_probe().l0_files >= pedradb_core::L0_COMPACTION_TRIGGER {
+            assert!(
+                db.compact_l0_once().unwrap(),
+                "L0 still at trigger must produce a job"
+            );
+            jobs = jobs.saturating_add(1);
+            assert!(jobs < 32, "drain did not converge");
+        }
+        assert!(
+            db.read_probe().l0_files < pedradb_core::L0_COMPACTION_TRIGGER,
+            "drain must leave L0 below trigger, got {}",
+            db.read_probe().l0_files
+        );
+        assert_eq!(db.get(first).unwrap().as_deref(), Some(payload.as_slice()));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -93,9 +93,10 @@ estrutural: compactar L0 durante ingest.
    dono já está nomeado pela rev.2/rev.3).
 2. ~~Ataque (A) drain L0 bounded~~ — refutado pela rev.2 (solo-async
    auto-drena; o dono era o flush do seed adiado, atacado pelo settle).
-3. **P2.1 (agora justificado por dados): `SstCountCursor`
-   lazy-first-block / head-by-index** — tables sondadas/op ~constantes
-   entre braços settle/nosettle (3,6/4,2).
+3. **P2.1 (retarget 2026-09-14):** lazy-first-block refutado (k-way
+   precisa dos heads). Dono = settle que só dormia. **Landed:**
+   `DB::compact_l0_once` + settle do bench drena L0 ativamente
+   ( Pedra ≡ Rocks `wait_for_compact`).
 4. **P1.1 RFC-0223: flush fora do commit** (worker bounded) — split
    rev.3: work 99,85% × gate 58ns.
 5. p26r3b-mc50x (3-arm) decide a pergunta do mc50 no DIAG; oficial =

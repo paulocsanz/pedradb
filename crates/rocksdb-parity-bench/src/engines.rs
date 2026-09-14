@@ -275,17 +275,20 @@ impl<E: Env> Engine for CompatEngine<E> {
         if !self.db.flush().is_ok() {
             return false;
         }
-        // Bounded drain wait: the host worker needs a write-idle window
-        // to materialize parked mems and merge L0 down. 30 s covers the
-        // 10M-record seed debt (54 files); past the bound the timed
-        // phase runs on the remaining debt and the ratios say so
-        // honestly.
+        // RFC-0223 P2.1: *do* the L0 drain (compact_l0_once) instead of
+        // sleeping on the compact worker. p26r3 under load 13: 30 s of
+        // 20 ms polls left L0=14 (INCOMPLETE) — Rocks wait_for_compact
+        // is a sync drain, this is the Pedra equivalent. Deadline keeps
+        // the bound; remaining debt still carries into the timed window.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
         while std::time::Instant::now() < deadline {
             if self.db.read_probe().l0_files < pedradb_core::L0_COMPACTION_TRIGGER {
                 return true;
             }
-            std::thread::sleep(std::time::Duration::from_millis(20));
+            match self.db.compact_l0_once() {
+                Ok(true) => {}
+                Ok(false) | Err(_) => break,
+            }
         }
         self.db.read_probe().l0_files < pedradb_core::L0_COMPACTION_TRIGGER
     }

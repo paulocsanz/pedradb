@@ -105,10 +105,15 @@
 
 ### P2 — later / polish
 
-- [ ] **P2.1** `deps_scan` residual pós-settle: CONDIÇÃO CUMPRIDA pelo
-  P0.1 (tables/op ~constantes entre braços = largura de table, não
-  nível) — `SstCountCursor` lazy-first-block / head-by-index —
-  status: `todo` (justificado por dados, rev.3)
+- [x] **P2.1** `deps_scan` residual pós-settle: lazy-first-block
+  **refutado** (k-way min-head precisa de todos os heads; tables de
+  keyspace inteiro sobrepõem a janela de 25 keys — adiar o `settle()`
+  do cursor só move o custo de setup→merge). Dono restante = settle
+  que só dormia no worker (p26r3: 30 s de poll, L0=14 INCOMPLETE).
+  **Código landed:** `DB::compact_l0_once` + settle do bench faz o
+  drain L0→L1 (equivalente Pedra do `wait_for_compact`); teste
+  `compact_l0_once_drains_below_trigger`. Re-meter DIAG deps_scan
+  @10M / cartaz = e4b. — status: `done (código)`
 - [ ] **P2.2** campanha miss-path vs fjall (probe_miss par) na régua
   oficial de guest — status: `todo`
 
@@ -122,7 +127,7 @@
 | P0.4 | p0 | e4b gate 3-run | todo | blocked p211z | 2026-09-13 |
 | P1.1 | p1 | dominant family O(1) stage (`take_family` fora do commit) | done (código) | kernel `dominant_family_stage_plan` + `maybe_auto_flush`; DIAG re-meter / cartaz = e4b | 2026-09-14 |
 | P1.2 | p1 | probe_miss re-meter oficial (bloom real) | todo | blocked gate | 2026-09-13 |
-| P2.1 | p2 | SstCountCursor lazy-first-block | todo | condição cumprida (rev.3: tables/op constantes) | 2026-09-13 |
+| P2.1 | p2 | settle drena L0 (compact_l0_once; lazy-cursor refutado) | done (código) | `compact_l0_once` + settle do bench; DIAG re-meter / cartaz = e4b | 2026-09-14 |
 | P2.2 | p2 | miss-path vs fjall oficial | todo | — | 2026-09-13 |
 
 ## Acceptance Criteria
