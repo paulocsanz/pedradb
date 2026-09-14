@@ -72,6 +72,46 @@ def pct(a: float, b: float) -> float:
     return round(100.0 * a / b, 2) if b else 0.0
 
 
+def github_formal_ci_green() -> int:
+    """A9b: 1 iff the newest run of both public formal workflows on
+    `formal-gates` completed with conclusion=success. In-progress or
+    failed/cancelled newest run is 0. Unobservable (no `gh`) is 0."""
+    repo = "paulocsanz/pedradb"
+    branch = "formal-gates"
+    try:
+        for wf in ("proof-check.yml", "verification-gates.yml"):
+            out = subprocess.check_output(
+                [
+                    "gh",
+                    "run",
+                    "list",
+                    "--repo",
+                    repo,
+                    "--branch",
+                    branch,
+                    "--workflow",
+                    wf,
+                    "--json",
+                    "conclusion,status,headSha",
+                    "--limit",
+                    "5",
+                ],
+                timeout=30,
+                stderr=subprocess.DEVNULL,
+            )
+            rows = json.loads(out.decode())
+            if not rows:
+                return 0
+            newest = rows[0]
+            if newest.get("status") != "completed":
+                return 0
+            if newest.get("conclusion") != "success":
+                return 0
+        return 1
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError, IndexError):
+        return 0
+
+
 def run_gates() -> tuple[int, int]:
     green = 0
     for g in CHEAP_GATES:
@@ -124,7 +164,8 @@ def measure() -> dict[str, object]:
             if (
                 (rel, f) in surface_fns
                 or f in al
-                or f.endswith(("_as_is", "_spec"))
+                or "_as_is" in f
+                or f.endswith("_spec")
                 or re.search(rf"fn {f}_as_is\b|fn {f}_spec\b|fn as_is_{f}\b", src)
             ):
                 on_surface += 1
@@ -204,9 +245,7 @@ def measure() -> dict[str, object]:
         "stdlib_sorries_named_in_tcb": min(stdlib_sorries_named, 1),
         "gates_green": gates_green,
         "gates_total": gates_total,
-        # CI do GitHub não é observável da árvore (exige push); eixo fica 0
-        # até P0.8 registrar o run verde.
-        "ci_github_green": 0,
+        "ci_github_green": github_formal_ci_green(),
     }
 
 

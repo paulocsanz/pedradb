@@ -205,8 +205,8 @@
       "crates/rocksdb-compat/src/txn_kernel.rs"
     ],
     "kernel_files": 187,
-    "kernel_loc": 165459,
-    "handler_loc": 119849,
+    "kernel_loc": 165477,
+    "handler_loc": 119793,
     "db_rs_extracted": false,
     "proof_depth": {
       "extract": 20,
@@ -235,15 +235,14 @@
         "skip_auto_flush",
         "dominant_family_stage_plan",
         "occ_snap_lock_order",
-        "wal_segment_is_empty",
-        "flush_plan_as_is_lose_tail",
-        "wal_rotate_decision_as_is_ignore_pin"
+        "wal_segment_is_empty"
       ],
       "crates/pedradb-core/src/rmw_sched_kernel.rs": [
         "rmw_group_sched"
       ],
       "crates/pedradb-core/src/wal_buffer_kernel.rs": [
-        "should_flush"
+        "should_flush",
+        "should_flush_for_workload"
       ],
       "crates/pedradb-core/src/disk_pressure_kernel.rs": [
         "disk_pressure_admit",
@@ -330,27 +329,15 @@
         "ratio_curve_table",
         "render_get_side_anchors",
         "cycle_hat_ns",
-        "render",
-        "cycle_hat_as_is_ns"
+        "render"
       ],
       "crates/pedradb-core/src/product_crown_kernel.rs": [
         "acked_flags"
       ],
-      "crates/pedradb-core/src/compact_kernel.rs": [
-        "point_version_fate_as_is_drop_under_snapshot",
-        "lone_tombstone_fate_as_is_ignore_bottommost"
-      ],
-      "crates/pedradb-core/src/manifest_kernel.rs": [
-        "sst_recover_action_as_is_scan_on_damage",
-        "first_install_action_as_is_proceed_always"
-      ],
-      "crates/pedradb-core/src/vlog_gc_kernel.rs": [
-        "vlog_recover_action_as_is_ignore_swing",
-        "blob_gc_action_as_is_rewrite_active"
-      ],
-      "crates/pedradb-core/src/wal/reopen_kernel.rs": [
-        "reopen_outcome_as_is_silent"
-      ],
+      "crates/pedradb-core/src/compact_kernel.rs": [],
+      "crates/pedradb-core/src/manifest_kernel.rs": [],
+      "crates/pedradb-core/src/vlog_gc_kernel.rs": [],
+      "crates/pedradb-core/src/wal/reopen_kernel.rs": [],
       "crates/pedradb-raft/src/ae_kernel.rs": [],
       "crates/pedradb-raft/src/apply_kernel.rs": [],
       "crates/pedradb-raft/src/membership_kernel.rs": [],
@@ -360,9 +347,7 @@
       "crates/pedradb-store/src/membership_kernel.rs": [
         "queued_finish_from_counts"
       ],
-      "crates/pedradb-store/src/tx_glue_kernel.rs": [
-        "tx_range_action_as_is_local_only"
-      ],
+      "crates/pedradb-store/src/tx_glue_kernel.rs": [],
       "crates/pedradb-store/src/vote_kernel.rs": [],
       "crates/montanha-fdb-recipes/src/lib_kernel.rs": [
         "as_bytes",
@@ -1330,6 +1315,7 @@
         "from_byte"
       ],
       "crates/pedradb-core/src/wal/mod_kernel.rs": [
+        "write_pending_frame_lone",
         "append",
         "append_on",
         "append_record",
@@ -1370,6 +1356,7 @@
         "injected_kind"
       ],
       "crates/pedradb-core/src/wal/writer_kernel.rs": [
+        "drain_staged",
         "add_record",
         "add_records",
         "enable_staging",

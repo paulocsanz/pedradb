@@ -1,5 +1,14 @@
 # Aeneas extract + Lean theorems
 
+## Montanha children: Verus stand-in deleted (2026-09-14)
+
+Four catalog pairs on `children_kernel.rs` (`children`, `children_start`,
+`children_half_open`, `children_next_byte`) were cartoons (`verus!` +
+`verus_keep_ghost`). The stand-in is gone; rustc `&[u8]`/`u8` bodies stay;
+Aeneas restamped `SOURCE.children`. `verus_children_range.sh` fails if
+`verus! {` returns. Plant `rustc_body_is_the_term_no_verus_stand_in`.
+`leftover_next none` (write-path data-fate ifs match kernels).
+
 ## Script tokens (2026-09-14)
 
 `unpaid_script` 2/17 → 0/17. `open_with_env_sourced` names

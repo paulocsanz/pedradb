@@ -87,22 +87,22 @@ def Slice.Insts.CoreCmpPartialOrdSlice {T : Type} (cmpPartialOrdInst :
 }
 
 /-- [pedra_aeneas_children_kernel::PACKED_CHILD_SEP]
-    Source: '../../../crates/montanha-fdb-recipes/src/children_kernel.rs', lines 18:0-18:38
+    Source: '../../../crates/montanha-fdb-recipes/src/children_kernel.rs', lines 16:0-16:38
     Visibility: public -/
 @[global_simps, irreducible] def PACKED_CHILD_SEP : Std.U8 := 0#u8
 
 /-- [pedra_aeneas_children_kernel::PACKED_CHILD_END]
-    Source: '../../../crates/montanha-fdb-recipes/src/children_kernel.rs', lines 20:0-20:38
+    Source: '../../../crates/montanha-fdb-recipes/src/children_kernel.rs', lines 18:0-18:38
     Visibility: public -/
 @[global_simps, irreducible] def PACKED_CHILD_END : Std.U8 := 1#u8
 
 /-- [pedra_aeneas_children_kernel::PACKED_CHILD_END_AS_IS]
-    Source: '../../../crates/montanha-fdb-recipes/src/children_kernel.rs', lines 22:0-22:44
+    Source: '../../../crates/montanha-fdb-recipes/src/children_kernel.rs', lines 20:0-20:44
     Visibility: public -/
 @[global_simps, irreducible] def PACKED_CHILD_END_AS_IS : Std.U8 := 255#u8
 
 /-- [pedra_aeneas_children_kernel::packed_children_start]:
-    Source: '../../../crates/montanha-fdb-recipes/src/children_kernel.rs', lines 27:0-31:1
+    Source: '../../../crates/montanha-fdb-recipes/src/children_kernel.rs', lines 24:0-28:1
     Visibility: public -/
 def packed_children_start
   (packed : Slice Std.U8) : Result (alloc.vec.Vec Std.U8) := do
@@ -110,14 +110,14 @@ def packed_children_start
   alloc.vec.Vec.push s PACKED_CHILD_SEP
 
 /-- [pedra_aeneas_children_kernel::packed_children_start_as_is]:
-    Source: '../../../crates/montanha-fdb-recipes/src/children_kernel.rs', lines 35:0-37:1
+    Source: '../../../crates/montanha-fdb-recipes/src/children_kernel.rs', lines 32:0-34:1
     Visibility: public -/
 def packed_children_start_as_is
   (packed : Slice Std.U8) : Result (alloc.vec.Vec Std.U8) := do
   alloc.slice.Slice.to_vec core.clone.CloneU8 packed
 
 /-- [pedra_aeneas_children_kernel::packed_children_end]:
-    Source: '../../../crates/montanha-fdb-recipes/src/children_kernel.rs', lines 42:0-46:1
+    Source: '../../../crates/montanha-fdb-recipes/src/children_kernel.rs', lines 38:0-42:1
     Visibility: public -/
 def packed_children_end
   (packed : Slice Std.U8) : Result (alloc.vec.Vec Std.U8) := do
@@ -125,7 +125,7 @@ def packed_children_end
   alloc.vec.Vec.push e PACKED_CHILD_END
 
 /-- [pedra_aeneas_children_kernel::packed_children_end_as_is]:
-    Source: '../../../crates/montanha-fdb-recipes/src/children_kernel.rs', lines 52:0-56:1
+    Source: '../../../crates/montanha-fdb-recipes/src/children_kernel.rs', lines 47:0-51:1
     Visibility: public -/
 def packed_children_end_as_is
   (packed : Slice Std.U8) : Result (alloc.vec.Vec Std.U8) := do
@@ -133,7 +133,7 @@ def packed_children_end_as_is
   alloc.vec.Vec.push e PACKED_CHILD_END_AS_IS
 
 /-- [pedra_aeneas_children_kernel::key_in_half_open]:
-    Source: '../../../crates/montanha-fdb-recipes/src/children_kernel.rs', lines 61:0-63:1
+    Source: '../../../crates/montanha-fdb-recipes/src/children_kernel.rs', lines 55:0-57:1
     Visibility: public -/
 def key_in_half_open
   (key : Slice Std.U8) (start : Slice Std.U8) (end1 : Slice Std.U8) :
@@ -149,7 +149,7 @@ def key_in_half_open
   else ok false
 
 /-- [pedra_aeneas_children_kernel::key_in_half_open_as_is]:
-    Source: '../../../crates/montanha-fdb-recipes/src/children_kernel.rs', lines 67:0-69:1
+    Source: '../../../crates/montanha-fdb-recipes/src/children_kernel.rs', lines 61:0-63:1
     Visibility: public -/
 def key_in_half_open_as_is
   (key : Slice Std.U8) (start : Slice Std.U8) (end1 : Slice Std.U8) :
@@ -159,13 +159,13 @@ def key_in_half_open_as_is
     (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) key start
 
 /-- [pedra_aeneas_children_kernel::next_byte_in_packed_children]:
-    Source: '../../../crates/montanha-fdb-recipes/src/children_kernel.rs', lines 74:0-76:1
+    Source: '../../../crates/montanha-fdb-recipes/src/children_kernel.rs', lines 67:0-69:1
     Visibility: public -/
 def next_byte_in_packed_children (next : Std.U8) : Result Bool := do
   ok (next = PACKED_CHILD_SEP)
 
 /-- [pedra_aeneas_children_kernel::next_byte_in_packed_children_as_is]:
-    Source: '../../../crates/montanha-fdb-recipes/src/children_kernel.rs', lines 81:0-83:1
+    Source: '../../../crates/montanha-fdb-recipes/src/children_kernel.rs', lines 73:0-75:1
     Visibility: public -/
 def next_byte_in_packed_children_as_is (next : Std.U8) : Result Bool := do
   ok (next < PACKED_CHILD_END_AS_IS)

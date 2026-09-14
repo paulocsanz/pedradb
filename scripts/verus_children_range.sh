@@ -1,20 +1,17 @@
 #!/usr/bin/env bash
-# Machine-check packed-children exclusive end on the file rustc links
-# (single artifact — not the twin-cópia). RFC-0002 P23 / F59.
+# Packed-children exclusive end (RFC-0002 P23 / F59).
+# The rustc body is the term (Aeneas extract). A Verus stand-in on this
+# file is a cartoon — refuse it.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="$ROOT/crates/montanha-fdb-recipes/src/children_kernel.rs"
-if [[ -x "${VERUS:-}" ]]; then
-  :
-elif [[ -x "$HOME/.local/verus/verus-arm64-macos/verus" ]]; then
-  VERUS="$HOME/.local/verus/verus-arm64-macos/verus"
-elif command -v verus >/dev/null 2>&1; then
-  VERUS="$(command -v verus)"
-else
-  echo "error: verus not found" >&2
-  exit 127
+if grep -nE 'verus![[:space:]]*\{|#\[cfg\((not\()?verus_keep_ghost' "$SRC" >/dev/null; then
+  echo "FAIL  $SRC still has a verus! stand-in; Aeneas of the rustc body is the term" >&2
+  exit 1
 fi
-echo "verus: $VERUS"
-"$VERUS" --version
-echo "proving: $SRC"
-exec "$VERUS" "$SRC" --crate-type=lib --multiple-errors 10 --time "$@"
+if ! grep -q 'fn packed_children_end' "$SRC"; then
+  echo "FAIL  $SRC missing rustc packed_children_end" >&2
+  exit 1
+fi
+echo "ok    no verus! stand-in; rustc children_kernel.rs is the term"
+exit 0

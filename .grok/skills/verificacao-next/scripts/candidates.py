@@ -12,10 +12,13 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[4]
-STORE = ROOT / "crates/pedradb-store/src/lib.rs"
-RAFT = ROOT / "crates/pedradb-raft/src/lib.rs"
+STORE = ROOT / "crates/pedradb-store/src/lib_kernel.rs"
+RAFT = ROOT / "crates/pedradb-raft/src/lib_kernel.rs"
 RFC_DIR = ROOT / "docs/rfc"
-FN_HEAD = re.compile(r"\n\s*fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+FN_OPEN = r"(?:pub(?:\([^)]+\))?\s+)?(?:async\s+)?fn\s+"
+FN_HEAD = re.compile(
+    r"\n\s*" + FN_OPEN + r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:<[^>]*>)?\s*\("
+)
 
 
 def load_json(rel: str) -> dict:
@@ -32,24 +35,41 @@ def load(rel: str) -> str:
 
 
 def test_body(src: str, name: str) -> str:
-    m = re.search(r"\n\s*fn\s+" + re.escape(name) + r"\s*\(", src)
-    if not m:
+    matches = list(
+        re.finditer(
+            r"\n\s*" + FN_OPEN + re.escape(name) + r"\s*(?:<[^>]*>)?\s*\(",
+            src,
+        )
+    )
+    if not matches:
         return ""
-    rest = src[m.start() :]
-    nxt = FN_HEAD.search(rest, 1)
-    return rest if nxt is None else rest[: nxt.start()]
+
+    def body_at(m: re.Match) -> str:
+        nxt = FN_HEAD.search(src, m.end())
+        return src[m.start() : nxt.start()] if nxt else src[m.start() :]
+
+    for m in matches:
+        after = src[m.end() : m.end() + 48]
+        if after.lstrip().startswith("&mut self"):
+            return body_at(m)
+    return body_at(matches[0])
 
 
 def rfc_open_slices() -> list[str]:
-    """Open P-slices on formal RFCs (015x / 0061 / 0056). Skip bench RFCs."""
+    """Open P-slices on formal RFCs. Skip bench RFCs."""
     out: list[str] = []
     for p in sorted(RFC_DIR.glob("*.md")):
         if not (
             p.name.startswith("015")
+            or p.name.startswith("016")
+            or p.name.startswith("017")
+            or p.name.startswith("0187")
+            or p.name.startswith("0188")
+            or p.name.startswith("0191")
             or p.name.startswith("0061")
+            or p.name.startswith("0051")
             or p.name.startswith("0056")
-            or p.name.startswith("0166")
-            or p.name.startswith("0170")
+            or p.name.startswith("0070")
         ):
             continue
         text = p.read_text(encoding="utf-8")
@@ -65,8 +85,8 @@ def main() -> int:
     pairs = cat.get("pairs") or []
     fate = [p for p in pairs if p.get("data_fate")]
     other = [p for p in pairs if not p.get("data_fate")]
-    store = load("crates/pedradb-store/src/lib.rs")
-    raft = load("crates/pedradb-raft/src/lib.rs")
+    store = load("crates/pedradb-store/src/lib_kernel.rs")
+    raft = load("crates/pedradb-raft/src/lib_kernel.rs")
 
     print("== board (search; not a winner) ==")
     print(f"pairs={len(pairs)} data_fate={len(fate)} not_data_fate={len(other)}")
@@ -193,7 +213,653 @@ def main() -> int:
     print("  G never_floor + db_rs_extracted must stay false — not a next proof")
     print("  H L28 TCP / PCT / lock interleavings — campaign not forall")
     print("  I benches/0149/crates.io — not verification")
+    unpaid_script, unpaid_compose = script_compose_board()
+    unpaid_concurrency = concurrency_board()
+    unpaid_scale = scale_board()
+    unpaid_product, product_next = product_board()
+    # Every catalog kernel, not only data_fate. twin==kernel +
+    # single_artifact with a cfg/verus stand-in is still unpaid cartoon
+    # (prefix.rs Seq vs rustc &[u8] hid here).
+    cartoons = sa_unpaid_board(pairs)
+    unpaid_tramp = trampoline_unpaid_data_fate()
+    print_leftover_next(
+        unpaid_script,
+        unpaid_compose,
+        unpaid_concurrency,
+        unpaid_scale,
+        unpaid_product,
+        product_next,
+        cartoons,
+        unpaid_tramp,
+    )
     return capacity_board(cat, res)
+
+
+# Glue handlers. Two payments — do not OR them (that hid compose unpaid
+# behind `_plan(` in the body and sent the grind into an SA factory).
+# Glue method names are never Lean defs; `plan` is the extractable caller.
+# tuple: glue_fn, file, tokens, callee, plan
+GLUE_SCRIPTS = [
+    (
+        "commit_ops_with",
+        "crates/pedradb-core/src/db_kernel.rs",
+        ("append_write_ops", "sync_data", "apply_ops_to_mem", "fence_on_sync_fail"),
+        "wal_sync_required",
+        "wal_commit_plan",
+    ),
+    (
+        "wal_sync_group",
+        "crates/pedradb-core/src/db_kernel.rs",
+        ("sync_data", "fence_on_sync_fail"),
+        "fence_on_sync_fail",
+        "wal_commit_plan",
+    ),
+    (
+        "lone_commit",
+        "crates/pedradb-core/src/concurrent_kernel.rs",
+        ("occ_conflict", "lone_sync_commit"),
+        "occ_conflict",
+        "occ_member_fate",
+    ),
+    (
+        "finish_group_off_lock",
+        "crates/pedradb-core/src/concurrent_kernel.rs",
+        ("write_pending_frame", "sync_data", "fence_on_sync_fail"),
+        "may_publish_group",
+        "wal_commit_plan",
+    ),
+    (
+        "validate_occ_batch",
+        "crates/pedradb-core/src/concurrent_kernel.rs",
+        ("occ_batch_plan", "key_has_write_after"),
+        "occ_conflict",
+        "occ_batch_plan",
+    ),
+    (
+        "lone_sync_commit",
+        "crates/pedradb-core/src/db_kernel.rs",
+        ("sync_data", "fence_on_sync_fail"),
+        "fence_on_sync_fail",
+        "wal_commit_plan",
+    ),
+    (
+        "sync",
+        "crates/pedradb-core/src/db_kernel.rs",
+        ("sync_data", "fence_on_sync_fail"),
+        "fence_on_sync_fail",
+        "wal_commit_plan",
+    ),
+    (
+        "open_with_env_sourced",
+        "crates/pedradb-core/src/db_kernel.rs",
+        (
+            "pit_resync_needs_rewrite",
+            "torn_tail_needs_cut",
+            "wal_commit_plan",
+            "fence_on_sync_fail",
+        ),
+        "fence_on_sync_fail",
+        "wal_commit_plan",
+    ),
+    (
+        "group_finish",
+        "crates/pedradb-core/src/db_kernel.rs",
+        ("wal_sync_group", "write_pending_frame", "fence_on_sync_fail"),
+        "fence_on_sync_fail",
+        "wal_commit_plan",
+    ),
+    (
+        "vlog_prepare_wal",
+        "crates/pedradb-core/src/db_kernel.rs",
+        ("vlog_sync_pending", "vlog_flush_pending", "fence_on_sync_fail"),
+        "fence_on_sync_fail",
+        "wal_commit_plan",
+    ),
+    (
+        "fsync_sst_paths",
+        "crates/pedradb-core/src/db_kernel.rs",
+        ("sync_data", "fence_on_sync_fail", "dir_sync_required"),
+        "fence_on_sync_fail",
+        "wal_commit_plan",
+    ),
+    (
+        "write_checkpoint_meta",
+        "crates/pedradb-core/src/db_kernel.rs",
+        ("sync_all", "fence_on_sync_fail"),
+        "fence_on_sync_fail",
+        "wal_commit_plan",
+    ),
+    (
+        "close",
+        "crates/pedradb-core/src/db_kernel.rs",
+        ("vlog_prepare_wal", "flush", "fence_on_sync_fail"),
+        "fence_on_sync_fail",
+        "wal_commit_plan",
+    ),
+    (
+        "rotate_wal_now",
+        "crates/pedradb-core/src/db_kernel.rs",
+        ("persist_manifest_durable", "flush", "fence_on_sync_fail"),
+        "fence_on_sync_fail",
+        "wal_commit_plan",
+    ),
+    (
+        "try_rotate_wal",
+        "crates/pedradb-core/src/db_kernel.rs",
+        ("wal_rotate_decision", "wal_segment_is_empty", "rotate_wal_now"),
+        "wal_segment_is_empty",
+        "wal_rotate_decision",
+    ),
+    (
+        "group_start",
+        "crates/pedradb-core/src/db_kernel.rs",
+        ("batch_is_empty", "vlog_prepare_wal", "fence_on_sync_fail"),
+        "fence_on_sync_fail",
+        "wal_commit_plan",
+    ),
+    (
+        "group_absorb",
+        "crates/pedradb-core/src/db_kernel.rs",
+        ("batch_is_empty", "vlog_prepare_wal", "fence_on_sync_fail"),
+        "fence_on_sync_fail",
+        "wal_commit_plan",
+    ),
+]
+
+
+def lean_unfolds(name: str) -> bool:
+    lean_dir = ROOT / "formal/aeneas/lean"
+    if not lean_dir.is_dir():
+        return False
+    pat = re.compile(r"\bunfold\s+" + re.escape(name) + r"\b")
+    for p in lean_dir.glob("*.lean"):
+        if pat.search(p.read_text(encoding="utf-8", errors="replace")):
+            return True
+    return False
+
+
+def lean_has_def(name: str) -> bool:
+    lean_dir = ROOT / "formal/aeneas/lean"
+    out_dir = ROOT / "formal/aeneas/out/lean"
+    pat = re.compile(r"\bdef\s+(?:[A-Za-z0-9_]+\.)*" + re.escape(name) + r"\b")
+    for d in (lean_dir, out_dir):
+        if not d.is_dir():
+            continue
+        for p in d.glob("*.lean"):
+            if pat.search(p.read_text(encoding="utf-8", errors="replace")):
+                return True
+    return False
+
+
+# RFC-0191 fire order. P1.6 is per-land hygiene (not a Fire).
+# P2.4 is 0187 inherited / user-gated (not this grind).
+PRODUCT_FIRE_ORDER = (
+    "P0.1",
+    "P0.2",
+    "P0.3",
+    "P1.1",
+    "P1.2",
+    "P1.3",
+    "P1.4",
+    "P2.1",
+    "P2.2",
+    "P1.5",
+    "P2.3",
+)
+PRODUCT_RFC = RFC_DIR / "0191-pacote-garantias-produto.md"
+PRODUCT_TSV = ROOT / "scripts/ratchet/product_guarantees.tsv"
+PRODUCT_CHECKER = ROOT / "scripts/check_product_floor.py"
+
+
+def rfc0191_open() -> list[str]:
+    if not PRODUCT_RFC.is_file():
+        return ["P0.1"]
+    text = PRODUCT_RFC.read_text(encoding="utf-8")
+    return re.findall(r"- \[ \] \*\*(P[012]\.\d+)\*\*", text)
+
+
+def product_board() -> tuple[int, str | None]:
+    """RFC-0191 product rows. Missing ratchet = P0.1 unpaid."""
+    print("== product (RFC-0191: D1/R1/T1/C1 over rustc fn) ==")
+    opens = rfc0191_open()
+    fireable = [s for s in PRODUCT_FIRE_ORDER if s in opens]
+    for s in fireable:
+        print(f"  OPEN {s}")
+    tsv_ok = PRODUCT_TSV.is_file()
+    chk_ok = PRODUCT_CHECKER.is_file()
+    print(f"  tsv={str(tsv_ok).lower()} checker={str(chk_ok).lower()}")
+    if not tsv_ok or not chk_ok:
+        print("  unpaid_product P0.1 ratchet missing")
+        print(f"  unpaid_product={max(len(fireable), 1)} next=P0.1")
+        return max(len(fireable), 1), "P0.1"
+    nxt = fireable[0] if fireable else None
+    unpaid = len(fireable)
+    print(f"  unpaid_product={unpaid} next={nxt or 'none'}")
+    return unpaid, nxt
+
+
+def skip_montanha_path(path: str) -> bool:
+    """Rank 13: leftover_next must not name store/montanha until the user lifts it."""
+    return path.startswith("crates/pedradb-store/") or path.startswith(
+        "crates/montanha"
+    )
+
+
+def trampoline_unpaid_data_fate() -> int:
+    """Unpaid data-fate `if`s on the rustc put/open/write-group path.
+
+    Same fns as `put_ok_and_recover_path_data_fate_ifs_call_kernels` plus
+    ConcurrentDb put/open/lead. Env glue and kernel predicates are paid.
+    """
+    env = (
+        "env.", "exists(", "metadata_len", "cfg!", "debug_assert", "opts.",
+        "exclusive", "source", "sst_payload", "buggify", "per_cf",
+        "write_stall_drain", "defer_auto_compact", "physical_cfs", "let Some(",
+        "stage_flush_imm", "keep_wal_archives", "wal_archives", "resync_origin",
+        "max_sequence", "large_value_threshold", "auto_blob_gc",
+        "deadline", "collect_mode", "herd_only", "CATCHUP", "batch.len()",
+        "batch_ops", "Instant", "now >=",
+    )
+    kern = (
+        "_kernel::", "write_admission_idle(", "write_admit(", "wal_sync_required(",
+        "seq_exhausted(", "batch_is_empty(", "fence_on_sync_fail(",
+        "wal_commit_plan(", "dir_sync_required(", "torn_head_is_empty_log(",
+        "torn_tail_needs_cut(", "seq_after_feed(", "pit_resync_needs_rewrite(",
+        "cas_absent_put(", "cas_eq_put(", "range_inverted(", "reopen_outcome(",
+        "feed_is_lazy(", "skip_auto_flush(", "auto_flush_due(",
+        "herd_collect_us(", "post_group_grace_us(", "merge_eligible(",
+        "herd_full(",
+    )
+    sites = [
+        ("crates/pedradb-core/src/db_kernel.rs", (
+            "put_with", "apply_batch_with", "commit_ops_with", "alloc_seq",
+            "wal_sync_group", "sync_dir_if_required", "ensure_write_admitted_for",
+            "maybe_auto_flush", "open_with_env_sourced",
+        )),
+        ("crates/pedradb-core/src/concurrent_kernel.rs", (
+            "put_with_seq", "open_with_env", "lead",
+        )),
+    ]
+    n = 0
+    for rel, names in sites:
+        src = load(rel)
+        for name in names:
+            body = test_body(src, name)
+            for cond in _if_conds(body):
+                if any(k in cond for k in env) or any(k in cond for k in kern):
+                    continue
+                n += 1
+    print(f"  unpaid_trampoline_data_fate_ifs={n}")
+    return n
+
+
+def _if_conds(body: str) -> list[str]:
+    body = re.sub(r"//.*?$", "", body, flags=re.M)
+    out: list[str] = []
+    i = 0
+    n = len(body)
+    while i + 3 < n:
+        at = (
+            body[i : i + 2] == "if"
+            and (i == 0 or not (body[i - 1].isalnum() or body[i - 1] == "_"))
+            and body[i + 2] in " (\n"
+        )
+        if at:
+            rest = body[i + 2 :]
+            end = rest.find("{")
+            if end >= 0:
+                out.append(rest[:end].strip())
+                i += 2 + end
+                continue
+        i += 1
+    return out
+
+
+def print_leftover_next(
+    unpaid_script: int,
+    unpaid_compose: int,
+    unpaid_concurrency: int,
+    unpaid_scale: int,
+    unpaid_product: int,
+    product_next: str | None,
+    cartoons: list[tuple[str, str]],
+    unpaid_tramp: int = 0,
+) -> None:
+    """Do not replace this with a production fn name. That is the factory."""
+    if unpaid_script or unpaid_compose or unpaid_concurrency or unpaid_scale:
+        print(
+            "  leftover_next unpaid board remains "
+            f"script={unpaid_script} compose={unpaid_compose} "
+            f"concurrency={unpaid_concurrency} scale={unpaid_scale}; "
+            "first UNPAID compose then script then rank 6 then rank 10; "
+            "never leftover is_empty wrap; never compact_refuse spray; skip Montanha"
+        )
+        return
+    # RFC-0191: product remaining beats cartoon (Montanha frozen) and
+    # beats a random trampoline if while P0/P1.1–P1.4/P2.1–P2.2 are open.
+    trampoline_ids = {"P1.5", "P2.3"}
+    if unpaid_product and product_next and product_next not in trampoline_ids:
+        print(
+            f"  leftover_next product remaining RFC-0191 {product_next}; "
+            "references/product.md; ∀ credit (not rfl concrete); "
+            "layer model→atom→close only up; skip Montanha"
+        )
+        print(f"  leftover_next_first RFC-0191 {product_next}")
+        return
+    payable = [(i, f) for i, f in cartoons if not skip_montanha_path(f)]
+    if payable:
+        cid, cfile = payable[0]
+        print(
+            "  leftover_next cartoon remaining; "
+            f"delete verus! stand-in from {cfile}; rustc body stays; "
+            "Aeneas of handler types; Verus only same types; "
+            "never mint; never _body! over u64-vs-bytes; "
+            "never leftover is_empty wrap; never compact_refuse spray; skip Montanha"
+        )
+        print(f"  leftover_next_first {cid} {cfile}")
+        return
+    if unpaid_tramp:
+        slice = product_next if product_next in {"P1.5", "P2.3"} else "P1.5"
+        print(
+            f"  leftover_next trampoline data-fate if remaining RFC-0191 {slice} "
+            f"({unpaid_tramp} unpaid); pull one if into a named kernel "
+            "rustc links with handler types; Aeneas extract of that body; "
+            "cap_data_fate down + atom same commit; "
+            "Verus only same types; never leftover is_empty wrap; "
+            "never compact_refuse spray"
+        )
+        print(f"  leftover_next_first RFC-0191 {slice}")
+        return
+    print(
+        "  leftover_next none — write-path data-fate ifs match named kernels "
+        "(Env glue remains); db_rs_extracted=false; never_floor intact"
+    )
+    print("  leftover_next_first none")
+
+
+def script_compose_board() -> tuple[int, int]:
+    print("== script (rank 4: handler calls the named plan) ==")
+    unpaid_script = 0
+    unpaid_compose = 0
+    for glue, rel, tokens, callee, plan in GLUE_SCRIPTS:
+        src = load(rel)
+        body = test_body(src, glue)
+        if not body:
+            print(f"  MISSING_FN {glue} {rel}")
+            unpaid_script += 1
+            unpaid_compose += 1
+            continue
+        missing = [t for t in tokens if t not in body]
+        calls_plan = plan + "(" in body or "_plan(" in body
+        extra = (" tokens_missing=" + ",".join(missing)) if missing else ""
+        if calls_plan and not missing:
+            print(f"  {glue} plan={plan} calls_plan extra=ok")
+        elif calls_plan and missing:
+            unpaid_script += 1
+            print(f"  {glue} plan={plan} UNPAID tokens_missing={','.join(missing)}")
+        else:
+            unpaid_script += 1
+            print(f"  {glue} plan={plan} UNPAID order still inline{extra}")
+    print(f"  unpaid_script={unpaid_script}/{len(GLUE_SCRIPTS)}")
+    print("== compose glue callers (rank 5: unfold plan AND callee) ==")
+    for glue, rel, tokens, callee, plan in GLUE_SCRIPTS:
+        unfold_plan = lean_unfolds(plan)
+        unfold_callee = lean_unfolds(callee)
+        if unfold_plan and unfold_callee:
+            status = "lean_unfold_plan_and_callee"
+        elif unfold_callee and not unfold_plan:
+            status = "UNPAID callee-only unfold"
+            unpaid_compose += 1
+        else:
+            status = "UNPAID no unfold of plan"
+            unpaid_compose += 1
+        print(
+            f"  {glue} plan={plan} callee={callee} "
+            f"unfold_plan={str(unfold_plan).lower()} "
+            f"unfold_callee={str(unfold_callee).lower()} {status}"
+        )
+    print(f"  unpaid_compose={unpaid_compose}/{len(GLUE_SCRIPTS)}")
+    return unpaid_script, unpaid_compose
+
+
+# Rank 6: named total fn the live handler calls + Lean unfold of that
+# caller AND a callee. Not dump of concurrent.rs / db.rs. Not SA wrap.
+# tuple: label, file, handler, caller, callee
+CONCURRENCY = [
+    (
+        "write-lock client",
+        "crates/pedradb-core/src/concurrent_kernel.rs",
+        "occ_snapshot",
+        "occ_snap_lock_order",
+        "occ_snap_uses_published",
+    ),
+    (
+        "lost-update",
+        "crates/pedradb-core/src/concurrent_kernel.rs",
+        "validate_occ_batch",
+        "occ_batch_plan",
+        "occ_conflict",
+    ),
+    (
+        "deadlock 2PL",
+        "crates/rocksdb-compat/src/locktab_kernel.rs",
+        "lock",
+        "wait_for_deadlock",
+        "wait_for_deadlock",
+    ),
+    (
+        "N-way OCC",
+        "crates/pedradb-core/src/group_commit_kernel.rs",
+        "group_validate",
+        "group_validate",
+        "occ_conflict",
+    ),
+    (
+        "rwlock reader token",
+        "crates/pedradb-core/src/concurrent_kernel.rs",
+        "occ_snapshot",
+        "rwlock_client_may_read",
+        "rwlock_client_may_mutate",
+    ),
+]
+
+
+def concurrency_board() -> int:
+    print("== concurrency (rank 6: named fn + unfold caller AND callee) ==")
+    unpaid = 0
+    for label, rel, handler, caller, callee in CONCURRENCY:
+        src = load(rel)
+        body = test_body(src, handler)
+        calls = bool(body) and (caller + "(" in body)
+        unfold_caller = lean_unfolds(caller)
+        unfold_callee = lean_unfolds(callee)
+        if not body:
+            status = "UNPAID missing handler"
+            unpaid += 1
+        elif not calls:
+            status = "UNPAID handler does not call " + caller
+            unpaid += 1
+        elif not (unfold_caller and unfold_callee):
+            status = "UNPAID no dual-unfold"
+            unpaid += 1
+        else:
+            status = "lean_unfold_caller_and_callee"
+        print(
+            f"  {label} handler={handler} caller={caller} callee={callee} "
+            f"calls={str(calls).lower()} "
+            f"unfold_caller={str(unfold_caller).lower()} "
+            f"unfold_callee={str(unfold_callee).lower()} {status}"
+        )
+    print(f"  unpaid_concurrency={unpaid}/{len(CONCURRENCY)}")
+    return unpaid
+
+
+# Rank 10: enrolled scale_kernel on a concrete N. Handler scale_forecast
+# must call the named clock; Lean unfolds that clock AND a callee.
+SCALE_CLOCKS = [
+    (
+        "best clock",
+        "crates/pedradb-core/src/scale_kernel.rs",
+        "scale_forecast",
+        "best_get_ns",
+        "point_get_probes",
+    ),
+    (
+        "happy clock",
+        "crates/pedradb-core/src/scale_kernel.rs",
+        "scale_forecast",
+        "happy_get_ns",
+        "point_get_probes",
+    ),
+    (
+        "worst clock",
+        "crates/pedradb-core/src/scale_kernel.rs",
+        "scale_forecast",
+        "worst_get_ns",
+        "probes_worst",
+    ),
+]
+
+
+def scale_board() -> int:
+    print("== scale (rank 10: named clock + unfold clock AND callee) ==")
+    unpaid = 0
+    for label, rel, handler, caller, callee in SCALE_CLOCKS:
+        src = load(rel)
+        body = test_body(src, handler)
+        calls = bool(body) and (caller + "(" in body)
+        unfold_caller = lean_unfolds(caller)
+        unfold_callee = lean_unfolds(callee)
+        if not body:
+            status = "UNPAID missing handler"
+            unpaid += 1
+        elif not calls:
+            status = "UNPAID handler does not call " + caller
+            unpaid += 1
+        elif not (unfold_caller and unfold_callee):
+            status = "UNPAID no dual-unfold"
+            unpaid += 1
+        else:
+            status = "lean_unfold_caller_and_callee"
+        print(
+            f"  {label} handler={handler} caller={caller} callee={callee} "
+            f"calls={str(calls).lower()} "
+            f"unfold_caller={str(unfold_caller).lower()} "
+            f"unfold_callee={str(unfold_callee).lower()} {status}"
+        )
+    print(f"  unpaid_scale={unpaid}/{len(SCALE_CLOCKS)}")
+    return unpaid
+
+
+def verus_block(src: str) -> str:
+    m = re.search(r"verus!\s*\{(.*)\}\s*// verus!", src, re.S)
+    return m.group(1) if m else ""
+
+
+def verus_token_kind(src: str) -> str:
+    """Last-wins = same types both compilers see. Toy enum/u64/Seq vs rustc bytes = cartoon."""
+    block = verus_block(src)
+    rustc = src
+    if "verus!" in src and "} // verus!" in src:
+        rustc = src[: src.find("verus!")] + src[src.find("} // verus!") :]
+    standin = bool(re.search(r"\benum\s+ValueType\b", block))
+    if not standin:
+        for m in re.finditer(
+            r"(?:pub\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\((.*?)\)",
+            block,
+            re.S,
+        ):
+            name, params = m.group(1), m.group(2)
+            rm = re.search(
+                r"(?:pub\s+)?fn\s+" + re.escape(name) + r"\s*\((.*?)\)",
+                rustc,
+                re.S,
+            )
+            if not rm:
+                continue
+            rp = rm.group(1)
+            if ("u64" in params or "Seq<" in params) and (
+                "&[u8]" in rp or "Bound<" in rp
+            ):
+                standin = True
+                break
+    if standin:
+        return "cartoon"
+    if "macro_rules!" in src and re.search(r"_body!\s*\(", src):
+        return "macro"
+    # Comment-only mentions (headers narrating a deleted stand-in) are not
+    # cartoons; only code-visible cfg splits are.
+    code = "\n".join(
+        l for l in src.splitlines() if not l.lstrip().startswith("//")
+    )
+    if "verus_keep_ghost" in code or block:
+        return "cartoon"
+    return "none"
+
+
+def sa_unpaid_board(fate: list) -> list[tuple[str, str]]:
+    print(
+        "== single_artifact (rank 7: rustc body extract; "
+        "Verus cartoon ≠ last-wins; all catalog kernels, not only data_fate) =="
+    )
+    unpaid = []
+    skip_extracted = []
+    skip_verus = []
+    cartoon: list[tuple[str, str]] = []
+    paid = []
+    for p in fate:
+        k = p.get("kernel") or ""
+        t = p.get("twin") or ""
+        entry = p.get("entry") or ""
+        kp = ROOT / k
+        src = (
+            kp.read_text(encoding="utf-8", errors="replace") if kp.is_file() else ""
+        )
+        kind = verus_token_kind(src)
+        if kind == "cartoon":
+            cartoon.append((p["id"], k))
+            continue
+        if t and k and t == k and p.get("single_artifact"):
+            paid.append(p["id"])
+            continue
+        if t == k:
+            continue
+        if kind == "macro":
+            skip_verus.append(p["id"])
+            continue
+        if entry and lean_has_def(entry):
+            skip_extracted.append(p["id"])
+            continue
+        unpaid.append(p["id"])
+    print("  unpaid_no_extract", " ".join(unpaid) if unpaid else "none")
+    print(
+        f"  skip_already_extracted={len(skip_extracted)} "
+        "(Lean def of rustc entry exists — SA wrap is not a slice)"
+    )
+    print(
+        f"  skip_verus_same_tokens={len(skip_verus)} "
+        "(macro_rules! last-wins RFC-0171; same types rustc links)"
+    )
+    print(
+        f"  cartoon_twin={len(cartoon)} "
+        "(verus! u64/toy enum/Seq ≠ rustc types — unpaid; "
+        "delete the stand-in; Aeneas of rustc types; never mint)"
+    )
+    if cartoon:
+        payable = [(i, f) for i, f in cartoon if not skip_montanha_path(f)]
+        lead = payable[0] if payable else cartoon[0]
+        print(f"  cartoon_first {lead[0]} {lead[1]}")
+        seen: set[str] = set()
+        for cid, cfile in cartoon:
+            if cfile in seen:
+                continue
+            seen.add(cfile)
+            print(f"    cartoon_file {cfile}")
+    print(
+        f"  catalog_only_skip={len(paid)} "
+        "(twin==kernel already; not a slice)"
+    )
+    return cartoon
 
 
 # RFC-0157 P2.2 — capacity per residual. The mapping below is id ->

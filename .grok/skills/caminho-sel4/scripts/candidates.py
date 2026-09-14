@@ -12,8 +12,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[4]
-STORE = ROOT / "crates/pedradb-store/src/lib.rs"
-RAFT = ROOT / "crates/pedradb-raft/src/lib.rs"
+STORE = ROOT / "crates/pedradb-store/src/lib_kernel.rs"
+RAFT = ROOT / "crates/pedradb-raft/src/lib_kernel.rs"
 RFC_DIR = ROOT / "docs/rfc"
 FN_OPEN = r"(?:pub(?:\([^)]+\))?\s+)?(?:async\s+)?fn\s+"
 FN_HEAD = re.compile(
@@ -85,8 +85,8 @@ def main() -> int:
     pairs = cat.get("pairs") or []
     fate = [p for p in pairs if p.get("data_fate")]
     other = [p for p in pairs if not p.get("data_fate")]
-    store = load("crates/pedradb-store/src/lib.rs")
-    raft = load("crates/pedradb-raft/src/lib.rs")
+    store = load("crates/pedradb-store/src/lib_kernel.rs")
+    raft = load("crates/pedradb-raft/src/lib_kernel.rs")
 
     print("== board (search; not a winner) ==")
     print(f"pairs={len(pairs)} data_fate={len(fate)} not_data_fate={len(other)}")
@@ -221,6 +221,7 @@ def main() -> int:
     # single_artifact with a cfg/verus stand-in is still unpaid cartoon
     # (prefix.rs Seq vs rustc &[u8] hid here).
     cartoons = sa_unpaid_board(pairs)
+    unpaid_tramp = trampoline_unpaid_data_fate()
     print_leftover_next(
         unpaid_script,
         unpaid_compose,
@@ -229,6 +230,7 @@ def main() -> int:
         unpaid_product,
         product_next,
         cartoons,
+        unpaid_tramp,
     )
     return capacity_board(cat, res)
 
@@ -240,56 +242,56 @@ def main() -> int:
 GLUE_SCRIPTS = [
     (
         "commit_ops_with",
-        "crates/pedradb-core/src/db.rs",
+        "crates/pedradb-core/src/db_kernel.rs",
         ("append_write_ops", "sync_data", "apply_ops_to_mem", "fence_on_sync_fail"),
         "wal_sync_required",
         "wal_commit_plan",
     ),
     (
         "wal_sync_group",
-        "crates/pedradb-core/src/db.rs",
+        "crates/pedradb-core/src/db_kernel.rs",
         ("sync_data", "fence_on_sync_fail"),
         "fence_on_sync_fail",
         "wal_commit_plan",
     ),
     (
         "lone_commit",
-        "crates/pedradb-core/src/concurrent.rs",
+        "crates/pedradb-core/src/concurrent_kernel.rs",
         ("occ_conflict", "lone_sync_commit"),
         "occ_conflict",
         "occ_member_fate",
     ),
     (
         "finish_group_off_lock",
-        "crates/pedradb-core/src/concurrent.rs",
+        "crates/pedradb-core/src/concurrent_kernel.rs",
         ("write_pending_frame", "sync_data", "fence_on_sync_fail"),
         "may_publish_group",
         "wal_commit_plan",
     ),
     (
         "validate_occ_batch",
-        "crates/pedradb-core/src/concurrent.rs",
+        "crates/pedradb-core/src/concurrent_kernel.rs",
         ("occ_batch_plan", "key_has_write_after"),
         "occ_conflict",
         "occ_batch_plan",
     ),
     (
         "lone_sync_commit",
-        "crates/pedradb-core/src/db.rs",
+        "crates/pedradb-core/src/db_kernel.rs",
         ("sync_data", "fence_on_sync_fail"),
         "fence_on_sync_fail",
         "wal_commit_plan",
     ),
     (
         "sync",
-        "crates/pedradb-core/src/db.rs",
+        "crates/pedradb-core/src/db_kernel.rs",
         ("sync_data", "fence_on_sync_fail"),
         "fence_on_sync_fail",
         "wal_commit_plan",
     ),
     (
         "open_with_env_sourced",
-        "crates/pedradb-core/src/db.rs",
+        "crates/pedradb-core/src/db_kernel.rs",
         (
             "pit_resync_needs_rewrite",
             "torn_tail_needs_cut",
@@ -301,63 +303,63 @@ GLUE_SCRIPTS = [
     ),
     (
         "group_finish",
-        "crates/pedradb-core/src/db.rs",
+        "crates/pedradb-core/src/db_kernel.rs",
         ("wal_sync_group", "write_pending_frame", "fence_on_sync_fail"),
         "fence_on_sync_fail",
         "wal_commit_plan",
     ),
     (
         "vlog_prepare_wal",
-        "crates/pedradb-core/src/db.rs",
+        "crates/pedradb-core/src/db_kernel.rs",
         ("vlog_sync_pending", "vlog_flush_pending", "fence_on_sync_fail"),
         "fence_on_sync_fail",
         "wal_commit_plan",
     ),
     (
         "fsync_sst_paths",
-        "crates/pedradb-core/src/db.rs",
+        "crates/pedradb-core/src/db_kernel.rs",
         ("sync_data", "fence_on_sync_fail", "dir_sync_required"),
         "fence_on_sync_fail",
         "wal_commit_plan",
     ),
     (
         "write_checkpoint_meta",
-        "crates/pedradb-core/src/db.rs",
+        "crates/pedradb-core/src/db_kernel.rs",
         ("sync_all", "fence_on_sync_fail"),
         "fence_on_sync_fail",
         "wal_commit_plan",
     ),
     (
         "close",
-        "crates/pedradb-core/src/db.rs",
+        "crates/pedradb-core/src/db_kernel.rs",
         ("vlog_prepare_wal", "flush", "fence_on_sync_fail"),
         "fence_on_sync_fail",
         "wal_commit_plan",
     ),
     (
         "rotate_wal_now",
-        "crates/pedradb-core/src/db.rs",
+        "crates/pedradb-core/src/db_kernel.rs",
         ("persist_manifest_durable", "flush", "fence_on_sync_fail"),
         "fence_on_sync_fail",
         "wal_commit_plan",
     ),
     (
         "try_rotate_wal",
-        "crates/pedradb-core/src/db.rs",
+        "crates/pedradb-core/src/db_kernel.rs",
         ("wal_rotate_decision", "wal_segment_is_empty", "rotate_wal_now"),
         "wal_segment_is_empty",
         "wal_rotate_decision",
     ),
     (
         "group_start",
-        "crates/pedradb-core/src/db.rs",
+        "crates/pedradb-core/src/db_kernel.rs",
         ("batch_is_empty", "vlog_prepare_wal", "fence_on_sync_fail"),
         "fence_on_sync_fail",
         "wal_commit_plan",
     ),
     (
         "group_absorb",
-        "crates/pedradb-core/src/db.rs",
+        "crates/pedradb-core/src/db_kernel.rs",
         ("batch_is_empty", "vlog_prepare_wal", "fence_on_sync_fail"),
         "fence_on_sync_fail",
         "wal_commit_plan",
@@ -443,6 +445,76 @@ def skip_montanha_path(path: str) -> bool:
     )
 
 
+def trampoline_unpaid_data_fate() -> int:
+    """Unpaid data-fate `if`s on the rustc put/open/write-group path.
+
+    Same fns as `put_ok_and_recover_path_data_fate_ifs_call_kernels` plus
+    ConcurrentDb put/open/lead. Env glue and kernel predicates are paid.
+    """
+    env = (
+        "env.", "exists(", "metadata_len", "cfg!", "debug_assert", "opts.",
+        "exclusive", "source", "sst_payload", "buggify", "per_cf",
+        "write_stall_drain", "defer_auto_compact", "physical_cfs", "let Some(",
+        "stage_flush_imm", "keep_wal_archives", "wal_archives", "resync_origin",
+        "max_sequence", "large_value_threshold", "auto_blob_gc",
+        "deadline", "collect_mode", "herd_only", "CATCHUP", "batch.len()",
+        "batch_ops", "Instant", "now >=",
+    )
+    kern = (
+        "_kernel::", "write_admission_idle(", "write_admit(", "wal_sync_required(",
+        "seq_exhausted(", "batch_is_empty(", "fence_on_sync_fail(",
+        "wal_commit_plan(", "dir_sync_required(", "torn_head_is_empty_log(",
+        "torn_tail_needs_cut(", "seq_after_feed(", "pit_resync_needs_rewrite(",
+        "cas_absent_put(", "cas_eq_put(", "range_inverted(", "reopen_outcome(",
+        "feed_is_lazy(", "skip_auto_flush(", "auto_flush_due(",
+        "herd_collect_us(", "post_group_grace_us(", "merge_eligible(",
+        "herd_full(",
+    )
+    sites = [
+        ("crates/pedradb-core/src/db_kernel.rs", (
+            "put_with", "apply_batch_with", "commit_ops_with", "alloc_seq",
+            "wal_sync_group", "sync_dir_if_required", "ensure_write_admitted_for",
+            "maybe_auto_flush", "open_with_env_sourced",
+        )),
+        ("crates/pedradb-core/src/concurrent_kernel.rs", (
+            "put_with_seq", "open_with_env", "lead",
+        )),
+    ]
+    n = 0
+    for rel, names in sites:
+        src = load(rel)
+        for name in names:
+            body = test_body(src, name)
+            for cond in _if_conds(body):
+                if any(k in cond for k in env) or any(k in cond for k in kern):
+                    continue
+                n += 1
+    print(f"  unpaid_trampoline_data_fate_ifs={n}")
+    return n
+
+
+def _if_conds(body: str) -> list[str]:
+    body = re.sub(r"//.*?$", "", body, flags=re.M)
+    out: list[str] = []
+    i = 0
+    n = len(body)
+    while i + 3 < n:
+        at = (
+            body[i : i + 2] == "if"
+            and (i == 0 or not (body[i - 1].isalnum() or body[i - 1] == "_"))
+            and body[i + 2] in " (\n"
+        )
+        if at:
+            rest = body[i + 2 :]
+            end = rest.find("{")
+            if end >= 0:
+                out.append(rest[:end].strip())
+                i += 2 + end
+                continue
+        i += 1
+    return out
+
+
 def print_leftover_next(
     unpaid_script: int,
     unpaid_compose: int,
@@ -451,6 +523,7 @@ def print_leftover_next(
     unpaid_product: int,
     product_next: str | None,
     cartoons: list[tuple[str, str]],
+    unpaid_tramp: int = 0,
 ) -> None:
     """Do not replace this with a production fn name. That is the factory."""
     if unpaid_script or unpaid_compose or unpaid_concurrency or unpaid_scale:
@@ -485,16 +558,23 @@ def print_leftover_next(
         )
         print(f"  leftover_next_first {cid} {cfile}")
         return
-    slice = product_next if product_next in {"P1.5", "P2.3"} else "P1.5"
+    if unpaid_tramp:
+        slice = product_next if product_next in {"P1.5", "P2.3"} else "P1.5"
+        print(
+            f"  leftover_next trampoline data-fate if remaining RFC-0191 {slice} "
+            f"({unpaid_tramp} unpaid); pull one if into a named kernel "
+            "rustc links with handler types; Aeneas extract of that body; "
+            "cap_data_fate down + atom same commit; "
+            "Verus only same types; never leftover is_empty wrap; "
+            "never compact_refuse spray"
+        )
+        print(f"  leftover_next_first RFC-0191 {slice}")
+        return
     print(
-        f"  leftover_next trampoline data-fate if remaining RFC-0191 {slice} "
-        "(db.rs/concurrent.rs); pull one if into a named kernel "
-        "rustc links with handler types; Aeneas extract of that body; "
-        "cap_data_fate down + atom same commit; "
-        "Verus only same types; never leftover is_empty wrap; "
-        "never compact_refuse spray; skip Montanha"
+        "  leftover_next none — write-path data-fate ifs match named kernels "
+        "(Env glue remains); db_rs_extracted=false; never_floor intact"
     )
-    print(f"  leftover_next_first RFC-0191 {slice}")
+    print("  leftover_next_first none")
 
 
 def script_compose_board() -> tuple[int, int]:
@@ -548,21 +628,21 @@ def script_compose_board() -> tuple[int, int]:
 CONCURRENCY = [
     (
         "write-lock client",
-        "crates/pedradb-core/src/concurrent.rs",
+        "crates/pedradb-core/src/concurrent_kernel.rs",
         "occ_snapshot",
         "occ_snap_lock_order",
         "occ_snap_uses_published",
     ),
     (
         "lost-update",
-        "crates/pedradb-core/src/concurrent.rs",
+        "crates/pedradb-core/src/concurrent_kernel.rs",
         "validate_occ_batch",
         "occ_batch_plan",
         "occ_conflict",
     ),
     (
         "deadlock 2PL",
-        "crates/rocksdb-compat/src/locktab.rs",
+        "crates/rocksdb-compat/src/locktab_kernel.rs",
         "lock",
         "wait_for_deadlock",
         "wait_for_deadlock",
@@ -576,7 +656,7 @@ CONCURRENCY = [
     ),
     (
         "rwlock reader token",
-        "crates/pedradb-core/src/concurrent.rs",
+        "crates/pedradb-core/src/concurrent_kernel.rs",
         "occ_snapshot",
         "rwlock_client_may_read",
         "rwlock_client_may_mutate",

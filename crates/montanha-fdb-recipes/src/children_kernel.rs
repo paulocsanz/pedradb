@@ -1,9 +1,7 @@
 //! Packed-children exclusive end (RFC-0002 P23 / F59).
 //!
-//! **Single artifact:** this file is what `rustc` links *and* what Verus
-//! proves (`cfg(verus_keep_ghost)`). Vec concat is caller. No twin-cópia.
-//!
-//!   ./scripts/verus_children_range.sh
+//! **Single artifact:** this file is what `rustc` links. Aeneas extracts
+//! the rustc bodies (`scripts/aeneas_children.sh`). No Verus stand-in.
 //!
 //! Production [`crate::Subspace::range_end`] / [`crate::Subspace::children_range`]
 //! / [`crate::Subspace::range_start`] call these. Tuple `pack` is caller.
@@ -22,7 +20,6 @@ pub const PACKED_CHILD_END: u8 = 0x01;
 pub const PACKED_CHILD_END_AS_IS: u8 = 0xff;
 
 /// Inclusive start of packed children: `packed || 0x00`.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn packed_children_start(packed: &[u8]) -> Vec<u8> {
     let mut s = packed.to_vec();
@@ -37,7 +34,6 @@ pub fn packed_children_start_as_is(packed: &[u8]) -> Vec<u8> {
 }
 
 /// Exclusive end of packed children: `packed || 0x01`.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn packed_children_end(packed: &[u8]) -> Vec<u8> {
     let mut e = packed.to_vec();
@@ -47,7 +43,6 @@ pub fn packed_children_end(packed: &[u8]) -> Vec<u8> {
 
 /// AS-IS F59: `packed || 0xff`. Includes prefix-sibling components
 /// (`pack("90")||0xff` contains `pack("900")` under the old join).
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn packed_children_end_as_is(packed: &[u8]) -> Vec<u8> {
     let mut e = packed.to_vec();
@@ -56,7 +51,6 @@ pub fn packed_children_end_as_is(packed: &[u8]) -> Vec<u8> {
 }
 
 /// Half-open membership `[start, end)` (bytewise).
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn key_in_half_open(key: &[u8], start: &[u8], end: &[u8]) -> bool {
     key >= start && key < end
@@ -69,77 +63,16 @@ pub fn key_in_half_open_as_is(key: &[u8], start: &[u8], end: &[u8]) -> bool {
 }
 
 /// After `packed`, the next byte is a child iff it is the `0x00` separator.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn next_byte_in_packed_children(next: u8) -> bool {
     next == PACKED_CHILD_SEP
 }
 
 /// AS-IS: any next byte `< 0xff` is inside `[pack, pack||0xff)`.
-#[cfg(not(verus_keep_ghost))]
 #[must_use]
 pub fn next_byte_in_packed_children_as_is(next: u8) -> bool {
     next < PACKED_CHILD_END_AS_IS
 }
-
-#[cfg(verus_keep_ghost)]
-use vstd::prelude::*;
-
-#[cfg(verus_keep_ghost)]
-verus! {
-
-pub open spec fn packed_child_sep() -> u8 {
-    0x00
-}
-
-pub open spec fn packed_child_end() -> u8 {
-    0x01
-}
-
-pub open spec fn packed_child_end_as_is() -> u8 {
-    0xff
-}
-
-pub open spec fn next_byte_in_packed_children_spec(next: u8) -> bool {
-    next == packed_child_sep()
-}
-
-pub fn next_byte_in_packed_children(next: u8) -> (d: bool)
-    ensures
-        d == next_byte_in_packed_children_spec(next),
-        d == (next == 0x00),
-{
-    next == 0x00
-}
-
-pub open spec fn next_byte_in_packed_children_as_is_spec(next: u8) -> bool {
-    next < 0xff
-}
-
-pub fn next_byte_in_packed_children_as_is(next: u8) -> (d: bool)
-    ensures
-        d == next_byte_in_packed_children_as_is_spec(next),
-        d == (next < 0xff),
-{
-    next < 0xff
-}
-
-proof fn lemma_sep_is_child()
-    ensures
-        next_byte_in_packed_children_spec(0x00),
-{
-}
-
-proof fn lemma_as_is_leaks_zero_char()
-    ensures
-        !next_byte_in_packed_children_spec(0x30),
-        next_byte_in_packed_children_as_is_spec(0x30),
-        packed_child_end() == 0x01,
-        packed_child_end_as_is() == 0xff,
-{
-}
-
-} // verus!
 
 #[cfg(test)]
 mod tests {
@@ -239,6 +172,17 @@ mod tests {
             n += 1;
         }
         assert_eq!(n, 256);
+    }
+
+    #[test]
+    fn rustc_body_is_the_term_no_verus_stand_in() {
+        let src = include_str!("children_kernel.rs");
+        let ghost = ["verus", "_keep_", "ghost"].concat();
+        let bang = ["ver", "us!", " {"].concat();
+        assert!(!src.contains(&ghost), "Verus cfg split deleted");
+        assert!(!src.contains(&bang), "Verus stand-in deleted; Aeneas is the term");
+        assert!(next_byte_in_packed_children(PACKED_CHILD_SEP));
+        assert!(!next_byte_in_packed_children(0x30));
     }
 
     /// Catalog three-teeth plant. Direct `as_is_leaks_sibling_900` is **not** this tooth.
