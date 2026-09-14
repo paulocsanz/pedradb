@@ -2388,7 +2388,11 @@ impl<E: Env> Db<E> {
             sst_source: source,
             sst_file_cache,
             sst_page_keep_budget: 0,
-            sst_warm_cap_bytes: crate::scale_kernel::WARM_FLOOR_BYTES,
+            sst_warm_cap_bytes: std::env::var("PEDRA_SST_WARM_CAP_BYTES")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .filter(|&n| n > 0)
+                .unwrap_or(crate::scale_kernel::WARM_FLOOR_BYTES),
             leftover_dontneed_issued: AtomicU64::new(0),
             scan_readahead_issued: AtomicU64::new(0),
             point_cache,
@@ -4777,6 +4781,33 @@ impl<E: Env> Db<E> {
                 continue;
             }
             self.scan_sst_probed.fetch_add(1, Ordering::Relaxed);
+            if self.store_bounded_cache() {
+                let ids = table.blocks_overlapping_range(start, end);
+                let spans: Vec<(u64, u64)> = ids
+                    .iter()
+                    .copied()
+                    .filter_map(|i| table.block_file_span(i))
+                    .collect();
+                let w = crate::scan_readahead_kernel::scan_readahead_window(
+                    &spans, 0, true,
+                );
+                if w.len > 0 {
+                    let off = spans.first().map(|s| s.0).unwrap_or(w.offset);
+                    let len = w
+                        .offset
+                        .saturating_add(w.len)
+                        .saturating_sub(off)
+                        .max(w.len);
+                    let _ = self.env.advise(
+                        table.path(),
+                        off,
+                        len.min(crate::scan_readahead_kernel::SCAN_READAHEAD_CAP_BYTES),
+                        crate::env::AdviseKind::WillNeed,
+                    );
+                    self.scan_readahead_issued
+                        .fetch_add(1, Ordering::Relaxed);
+                }
+            }
             let c = CountCursor::Sst(SstCountCursor::new(
                 table,
                 start,
