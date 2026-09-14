@@ -5,6 +5,7 @@
 -- A6 OCC member fate ∀ of the plan the write group calls.
 import Aeneas
 import ComposeStorageWrite
+import ComposeRecovery
 import Merge
 import Lookup
 import GroupCommit
@@ -101,3 +102,27 @@ theorem concurrent_db_write_group_forall :
             (¬(too_old_i = true) ∧ ¬(c = true) ∧
               f = OccMemberFate.Ok))) :=
   occ_batch_plan_member_fate_iff
+
+namespace RecoveryBoot
+open pedra_aeneas_manifest_kernel
+open pedra_aeneas_reopen_kernel
+open pedra_aeneas_vlog_gc_kernel
+/-- Recovery boot (manifest × reopen × vlog) refines the spec that a
+    clean open holds EXACTLY on the conjunction of the three registered
+    refuse/serve atoms. Dual-unfold; extract bodies closed. -/
+theorem pedra_refines :
+    ∀ (obs : ManifestObs) (listed : ListedSst)
+      (damage : ReopenDamage) (pit esc : Bool)
+      (blob wants prim use_new new_ex : Bool),
+      (¬ (sst_recover_action obs listed = ok SstRecoverAction.RefuseOpen) ∧
+          reopen_outcome damage pit esc = ok ReopenOutcome.ServeAll ∧
+          ¬ (vlog_recover_action blob wants prim use_new new_ex
+              = ok VlogRecoverAction.RefuseOpen)) ↔
+        (¬ (obs = ManifestObs.Corrupt ∨
+              (obs = ManifestObs.Inventory ∧
+                ∃ i, listed = ListedSst.Missing i)) ∧
+          damage = ReopenDamage.None ∧
+          ¬ (blob = false ∧ wants = true ∧ prim = false ∧ use_new = true ∧
+              new_ex = false)) :=
+  recovery_spine_boot_ok_iff
+end RecoveryBoot
