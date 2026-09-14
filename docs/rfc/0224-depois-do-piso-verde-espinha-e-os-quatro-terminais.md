@@ -1,6 +1,6 @@
 # RFC-0224: Depois do Piso Verde — a espinha do writer, os 7 átomos de recovery que faltam, e os quatro terminais que o seL4 pagou em anos
 
-**Status:** draft
+**Status:** active (2026-09-14: P0.4 done — leftover DontNeed + scan WillNeed no I/O)
 **Updated:** 2026-09-14
 
 ## Background
@@ -26,7 +26,7 @@ CLAIM+EVIDÊNCIA:               75,0%
 ```
 
 - O [RFC-0220](0220-escada-de-composicao-encadeia-os-atomos-dual-unfold.md) P0.2 (workerless) foi pago pelo 0222 P2.1; P0.3–P0.5 da espinha do writer (sync × fence × publish) ainda são `todo`.
-- `leftover_page_kernel` / `scan_readahead_kernel` o rustc liga, mas o I/O em `db.rs` ainda não chama o kernel (enrollment ≠ wiring).
+- `leftover_page_kernel` / `scan_readahead_kernel`: rustc liga **e** o I/O em `db.rs` chama (`90bf4b64`: leftover DontNeed + scan WillNeed).
 
 ## Problems This Solves
 
@@ -57,7 +57,7 @@ m1 (`sel4_coverage`) não sobe por composição. Piso: **300/322 = 93,17%**.
 - [ ] **P0.1** RFC-0220 P0.3: `changelog_durable_commit_fate` × `wal_commit_plan` (Count+sync ⇒ AppendSync; Skip async ⇒ AppendApplyOk) — dual-unfold, `lake build`, m2 sobe no mesmo commit — status: `todo`
 - [ ] **P0.2** RFC-0220 P0.4: `wal_commit_plan::AppendSyncFence` × `fence_admission_plan` — status: `todo`
 - [ ] **P0.3** RFC-0220 P0.5: `manifest_publish_plan` × `changelog_durable_commit_fate` — status: `todo`
-- [ ] **P0.4** wiring: `db.rs` chama `leftover_page_advice` / `scan_readahead_window` no I/O que o kernel nomeia, ou recusa medida de que o I/O é outro (drop_page_cache ≠ leftover compaction) — status: `todo`
+- [x] **P0.4** wiring: `db.rs` chama `leftover_page_advice` / `scan_readahead_window` no I/O que o kernel nomeia, ou recusa medida de que o I/O é outro (drop_page_cache ≠ leftover compaction) — status: done (`90bf4b64`; `leftover_drop_pages` → DontNeed; scan load → WillNeed; teste `scan_at_raw_calls_scan_readahead_window` 2× verde)
 
 ### P1 — recovery 4/11 → 11/11
 
@@ -78,7 +78,7 @@ m1 (`sel4_coverage`) não sobe por composição. Piso: **300/322 = 93,17%**.
 | P0.1 | p0 | writer-spine sync (fate × wal_commit) | todo | — | 2026-09-14 |
 | P0.2 | p0 | writer-spine fence | todo | — | 2026-09-14 |
 | P0.3 | p0 | writer-spine publish | todo | — | 2026-09-14 |
-| P0.4 | p0 | wiring leftover_page / scan_readahead | todo | — | 2026-09-14 |
+| P0.4 | p0 | wiring leftover_page / scan_readahead | done | `90bf4b64` | 2026-09-14 |
 | P1.1 | p1 | recovery atoms 4→11 chained | todo | — | 2026-09-14 |
 | P1.2 | p1 | floor recovery_atoms_chained=11 | todo | — | 2026-09-14 |
 | P2.1 | p2 | pedra_refines (A1) | todo | — | 2026-09-14 |
