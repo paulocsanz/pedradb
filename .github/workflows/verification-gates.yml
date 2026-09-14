@@ -31,7 +31,7 @@ name: verification-gates
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, formal-gates]
   pull_request:
   workflow_dispatch:
 

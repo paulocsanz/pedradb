@@ -12,7 +12,7 @@ name: proof-check
 
 on:
   push:
-    branches: [main]
+    branches: [main, formal-gates]
   schedule:
     - cron: "0 3 * * *"
   workflow_dispatch:
