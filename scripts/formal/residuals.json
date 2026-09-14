@@ -205,8 +205,8 @@
       "crates/rocksdb-compat/src/txn_kernel.rs"
     ],
     "kernel_files": 187,
-    "kernel_loc": 165361,
-    "handler_loc": 119803,
+    "kernel_loc": 165441,
+    "handler_loc": 119849,
     "db_rs_extracted": false,
     "proof_depth": {
       "extract": 20,

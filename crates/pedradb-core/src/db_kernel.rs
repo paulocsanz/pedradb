@@ -2199,6 +2199,14 @@ impl<E: Env> Db<E> {
                     .is_some_and(|r| r.kind == "resync"),
             ) {
                 crate::write_admission_kernel::PitResyncRewritePlan::RewriteWalFromPrefix => {
+                assert!(
+                    crate::write_admission_kernel::pit_resync_needs_rewrite(
+                        point_in_time_report
+                            .as_ref()
+                            .is_some_and(|r| r.kind == "resync"),
+                    ),
+                    "resync report ⇒ rewrite WAL from recovered prefix"
+                );
                 let repair = dir.join(format!("{WAL_FILE_NAME}.repair"));
                 let mut w = Wal::create_on(&env, &repair)?;
                 w.set_full_fsync(opts.wal_full_fsync);
@@ -11601,6 +11609,10 @@ impl<E: Env> Db<E> {
         }
         match crate::write_admission_kernel::dir_sync_plan(sync_dir) {
             crate::write_admission_kernel::DirSyncPlan::SyncDirNow => {
+                assert!(
+                    crate::write_admission_kernel::dir_sync_required(sync_dir),
+                    "DirSyncPlan::SyncDirNow ⇒ dir_sync_required"
+                );
                 if !crate::write_admission_kernel::batch_is_empty(paths.len() as u64) {
                     env.sync_dir(dir)?;
                 }

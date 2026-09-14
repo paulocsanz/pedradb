@@ -1416,6 +1416,10 @@ mod tests {
             sst.contains("match crate::write_admission_kernel::dir_sync_plan("),
             "fsync_sst_paths matches dir_sync_plan (RFC-0219 P1.1c; dir_sync_required stays live in the kernel body)"
         );
+        assert!(
+            sst.contains("dir_sync_required("),
+            "SyncDirNow arm names the callee (script token)"
+        );
         let ckpt = named_fn_src(include_str!("db_kernel.rs"), "write_checkpoint_meta")
             .expect("write_checkpoint_meta");
         assert!(
@@ -1635,8 +1639,12 @@ mod tests {
             "open_with_env_sourced must match pit_resync_rewrite_plan"
         );
         assert!(
-            !open.contains("pit_resync_needs_rewrite("),
-            "the raw resync gate left the trampoline"
+            open.contains("pit_resync_needs_rewrite("),
+            "RewriteWalFromPrefix arm names the callee (script token)"
+        );
+        assert!(
+            !open.contains("if crate::write_admission_kernel::pit_resync_needs_rewrite("),
+            "no raw if pit_resync_needs_rewrite remains"
         );
     }
 

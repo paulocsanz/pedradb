@@ -1,5 +1,16 @@
 # Aeneas extract + Lean theorems
 
+## Script tokens (2026-09-14)
+
+`unpaid_script` 2/17 → 0/17. `open_with_env_sourced` names
+`pit_resync_needs_rewrite` in the `RewriteWalFromPrefix` arm (callee of
+`pit_resync_rewrite_plan`). `fsync_sst_paths` names `dir_sync_required`
+in the `SyncDirNow` arm (callee of `dir_sync_plan`). Same shape as
+`fence_on_sync_fail` inside `wal_commit_plan` matches. Plants:
+`pit_resync_rewrite_plan_on_live_resync_rewrites`,
+`dir_sync_plan_on_live_sync_mode_pays_now`.
+
+
 ## Retired extract script (2026-09-14)
 
 `scripts/aeneas_lockfree.sh` removed: production crate `pedradb-lockfree`
