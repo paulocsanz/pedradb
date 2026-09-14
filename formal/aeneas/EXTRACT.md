@@ -1,5 +1,13 @@
 # Aeneas extract + Lean theorems
 
+## Retired extract script (2026-09-14)
+
+`scripts/aeneas_lockfree.sh` removed: production crate `pedradb-lockfree`
+is gone (no `crates/pedradb-lockfree`). The glob `aeneas_*.sh --required`
+on public CI compiled that path and died. No catalog pair. Not in
+`lean_extracts.sh`. Historical Lean dump stays at
+`formal/aeneas/out/lean/LockfreeKernel.lean`.
+
 ## RFC-0157 stage 2 — rustc put/open scripts (2026-09-14)
 
 `glue.db_rs_extracted` stays **false** (22k+9k not dumped). The rustc
