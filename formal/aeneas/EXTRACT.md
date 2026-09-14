@@ -1,5 +1,12 @@
 # Aeneas extract + Lean theorems
 
+## RFC-0224 P2.1–P2.4 recusas medidas (2026-09-14, HEAD `8ad49dc0`)
+
+- P2.1 `pedra_refines` (A1=0): `findings/2026-09-14-rfc0224-p21-pedra-refines-recusa.md`. `db_rs_extracted=false`.
+- P2.2 confinement (A3=0): reafirma 0222 p23 com HEAD novo. `findings/2026-09-14-rfc0224-p22-confinement-recusa.md`.
+- P2.3 ConcurrentDb ∀ (A6=0): reafirma 0222 p24. `findings/2026-09-14-rfc0224-p23-concurrency-forall-recusa.md`.
+- P2.4 TV object↔Lean: RFC-0172 is idle-IR vs bool spec, not object vs extract. `R-rustc` stays never. `findings/2026-09-14-rfc0224-p24-tv-recusa.md`.
+
 ## ComposeRecovery 7 remaining (RFC-0224 P1.1–P1.2, 2026-09-14)
 
 - Dual-unfold of the seven unchained recovery atoms:

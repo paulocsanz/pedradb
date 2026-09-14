@@ -1,6 +1,6 @@
 # RFC-0224: Depois do Piso Verde — a espinha do writer, os 7 átomos de recovery que faltam, e os quatro terminais que o seL4 pagou em anos
 
-**Status:** active (2026-09-14: P0 + P1 done — writer-spine + recovery 11/11)
+**Status:** done (2026-09-14: P0+P1 proved; P2.1–P2.4 recusas medidas)
 **Updated:** 2026-09-14
 
 ## Background
@@ -66,10 +66,10 @@ m1 (`sel4_coverage`) não sobe por composição. Piso: **300/322 = 93,17%**.
 
 ### P2 — quatro terminais de pesquisa (nomeados)
 
-- [ ] **P2.1** teorema topo `pedra_refines` (A1) ou recusa datada do que falta para um refinamento único — status: `todo`
-- [ ] **P2.2** confinamento (A3) sobre o path rustc-linked de lookup/scan, ou recusa que reafirma `findings/2026-09-14-rfc0222-p23-confinement-recusa.md` com número novo — status: `todo`
-- [ ] **P2.3** ∀ do `ConcurrentDb` (A6) dual-unfold group-commit × caller, ou recusa que reafirma o P2.4 do 0222 — status: `todo`
-- [ ] **P2.4** TV de um objeto pinado (`write_admission_kernel.rs`, RFC-0172) sem promover `R-rustc` — status: `todo`
+- [x] **P2.1** teorema topo `pedra_refines` (A1) ou recusa datada do que falta para um refinamento único — status: done (recusa medida: A1=0; `findings/2026-09-14-rfc0224-p21-pedra-refines-recusa.md`; `db_rs_extracted=false`)
+- [x] **P2.2** confinamento (A3) sobre o path rustc-linked de lookup/scan, ou recusa que reafirma `findings/2026-09-14-rfc0222-p23-confinement-recusa.md` com número novo — status: done (recusa: A3=0; `findings/2026-09-14-rfc0224-p22-confinement-recusa.md` @ `8ad49dc0`)
+- [x] **P2.3** ∀ do `ConcurrentDb` (A6) dual-unfold group-commit × caller, ou recusa que reafirma o P2.4 do 0222 — status: done (recusa: A6=0; `findings/2026-09-14-rfc0224-p23-concurrency-forall-recusa.md` @ `8ad49dc0`)
+- [x] **P2.4** TV de um objeto pinado (`write_admission_kernel.rs`, RFC-0172) sem promover `R-rustc` — status: done (recusa: IR-idle ≠ object↔Lean; `R-rustc` stays never; `findings/2026-09-14-rfc0224-p24-tv-recusa.md`)
 
 ## Status (living — update with every PR)
 
@@ -81,10 +81,10 @@ m1 (`sel4_coverage`) não sobe por composição. Piso: **300/322 = 93,17%**.
 | P0.4 | p0 | wiring leftover_page / scan_readahead | done | `90bf4b64` | 2026-09-14 |
 | P1.1 | p1 | recovery atoms 4→11 chained | done | ComposeRecovery 7 átomos | 2026-09-14 |
 | P1.2 | p1 | floor recovery_atoms_chained=11 | done | floor 4→11; DEFINING 35,15% | 2026-09-14 |
-| P2.1 | p2 | pedra_refines (A1) | todo | — | 2026-09-14 |
-| P2.2 | p2 | confinement (A3) | todo | — | 2026-09-14 |
-| P2.3 | p2 | ConcurrentDb ∀ (A6) | todo | — | 2026-09-14 |
-| P2.4 | p2 | TV one object (R-rustc stays never) | todo | — | 2026-09-14 |
+| P2.1 | p2 | pedra_refines (A1) | done | findings/2026-09-14-rfc0224-p21-pedra-refines-recusa.md | 2026-09-14 |
+| P2.2 | p2 | confinement (A3) | done | findings/2026-09-14-rfc0224-p22-confinement-recusa.md | 2026-09-14 |
+| P2.3 | p2 | ConcurrentDb ∀ (A6) | done | findings/2026-09-14-rfc0224-p23-concurrency-forall-recusa.md | 2026-09-14 |
+| P2.4 | p2 | TV one object (R-rustc stays never) | done | findings/2026-09-14-rfc0224-p24-tv-recusa.md | 2026-09-14 |
 
 ## Acceptance Criteria
 
