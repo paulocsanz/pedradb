@@ -9012,6 +9012,90 @@
       }
     },
     {
+      "id": "herd_collect_us",
+      "finding": "RFC-0217 herd collect",
+      "twin_kind": "atom",
+      "atom": "herd_collect_us",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/group_window_kernel.rs",
+      "twin": "crates/pedradb-core/src/group_window_kernel.rs",
+      "aeneas": "scripts/aeneas_group_window.sh",
+      "callers": [
+        "crates/pedradb-core/src/concurrent_kernel.rs"
+      ],
+      "entry": "herd_collect_us",
+      "as_is": "herd_collect_us_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/concurrent_kernel.rs",
+          "handler": "lead"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/group_window_kernel.rs",
+        "test": "herd_collect_waits_only_for_missing_inflight"
+      },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "A2b: herd_collect_us waits HERD_COLLECT_US iff the frame is not herd_full AND (active>batch OR peers_recent); AS-IS never waits. ConcurrentDb lead calls it. iff-forall herd_collect_us_fate_iff GroupWindow.lean."
+      }
+    },
+    {
+      "id": "herd_full",
+      "finding": "RFC-0217 herd collect",
+      "twin_kind": "atom",
+      "atom": "herd_full",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/group_window_kernel.rs",
+      "twin": "crates/pedradb-core/src/group_window_kernel.rs",
+      "aeneas": "scripts/aeneas_group_window.sh",
+      "callers": [
+        "crates/pedradb-core/src/concurrent_kernel.rs"
+      ],
+      "entry": "herd_full",
+      "as_is": "herd_full_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/group_window_kernel.rs",
+        "test": "herd_collect_waits_only_for_missing_inflight"
+      },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "A2b: herd_full is batch_len >= HERD_TARGET; AS-IS never full. herd_collect_us and post_group_grace_us call it. iff-forall herd_full_fate_iff GroupWindow.lean."
+      }
+    },
+    {
+      "id": "post_group_grace_us",
+      "finding": "RFC-0217 herd collect",
+      "twin_kind": "atom",
+      "atom": "post_group_grace_us",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/group_window_kernel.rs",
+      "twin": "crates/pedradb-core/src/group_window_kernel.rs",
+      "aeneas": "scripts/aeneas_group_window.sh",
+      "callers": [
+        "crates/pedradb-core/src/concurrent_kernel.rs"
+      ],
+      "entry": "post_group_grace_us",
+      "as_is": "post_group_grace_us_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/concurrent_kernel.rs",
+          "handler": "lead"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/group_window_kernel.rs",
+        "test": "herd_collect_waits_only_for_missing_inflight"
+      },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "A2b: post_group_grace_us spins after a multi-member publish iff prev_len>=2 AND not herd_full; AS-IS never spins. ConcurrentDb lead calls it. iff-forall post_group_grace_us_fate_iff GroupWindow.lean."
+      }
+    },
+    {
       "id": "leftover_page_advice",
       "finding": "RFC-0194 P0.1",
       "twin_kind": "close",

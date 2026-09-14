@@ -93,25 +93,31 @@ pub const HERD_COLLECT_US: u64 = 10;
 /// is extra wait for a syscall that already amortizes 4 puts.
 pub const HERD_TARGET: usize = 4;
 
+/// Frame has the mc4 herd — do not wait more.
+#[must_use]
+pub fn herd_full(batch_len: usize) -> bool {
+    batch_len >= HERD_TARGET
+}
+
+/// AS-IS: the frame is never full (would keep spinning).
+#[must_use]
+pub fn herd_full_as_is(_batch_len: usize) -> bool {
+    false
+}
+
 /// Spin [`HERD_COLLECT_US`] when the frame is short AND someone else is
 /// in-flight (`active > batch`) or just got a reply (`peers_recent` —
 /// the leader is alone in `active` after publish, peers are in the
-/// put-loop gap). `batch >= HERD_TARGET` ⇒ 0 (frame is full).
+/// put-loop gap). `herd_full` ⇒ 0 (frame is full).
 #[must_use]
 pub fn herd_collect_us(active: usize, batch_len: usize, peers_recent: bool) -> u64 {
-    if batch_len >= HERD_TARGET {
+    if herd_full(batch_len) {
         0
     } else if active > batch_len || peers_recent {
         HERD_COLLECT_US
     } else {
         0
     }
-}
-
-/// Frame has the mc4 herd — do not wait more.
-#[must_use]
-pub fn herd_full(batch_len: usize) -> bool {
-    batch_len >= HERD_TARGET
 }
 
 /// AS-IS: never wait for the in-flight herd (seal with whoever drained).
@@ -127,11 +133,17 @@ pub fn herd_collect_us_as_is(_active: usize, _batch_len: usize) -> u64 {
 /// `peers_recent` (250µs MULTI_HOLD) forced a 10µs spin on every group.
 #[must_use]
 pub fn post_group_grace_us(prev_len: usize, batch_len: usize) -> u64 {
-    if prev_len >= 2 && batch_len < HERD_TARGET {
+    if prev_len >= 2 && !herd_full(batch_len) {
         HERD_COLLECT_US
     } else {
         0
     }
+}
+
+/// AS-IS: never grace-spin after a multi-member publish.
+#[must_use]
+pub fn post_group_grace_us_as_is(_prev_len: usize, _batch_len: usize) -> u64 {
+    0
 }
 
 /// Collect-loop break: only after at least one arrival beyond the entry
@@ -255,9 +267,15 @@ mod tests {
         assert!(herd_full(4));
         assert!(!herd_full(3));
         assert_eq!(herd_collect_us_as_is(8, 1), 0, "AS-IS seals immediately");
+        assert!(!herd_full_as_is(4), "AS-IS dente: frame never full");
         assert_eq!(post_group_grace_us(4, 1), HERD_COLLECT_US);
         assert_eq!(post_group_grace_us(1, 1), 0, "after a lone group, no grace");
         assert_eq!(post_group_grace_us(4, 4), 0, "already full");
+        assert_eq!(
+            post_group_grace_us_as_is(4, 1),
+            0,
+            "AS-IS dente: never grace-spin"
+        );
     }
 
     #[test]

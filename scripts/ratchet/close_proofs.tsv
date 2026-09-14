@@ -347,3 +347,6 @@ atom	catalog:world_trajectory_fold	check_trajectory_fate_iff	formal/aeneas/lean/
 atom	catalog:liveness_claim	liveness_admitted_fate_iff	formal/aeneas/lean/Membership.lean	liveness_admitted
 atom	catalog:put_handler_plan	put_handler_plan_fate_iff	formal/aeneas/lean/WriteAdmission.lean	put_handler_plan
 atom	catalog:open_wal_head_plan	open_wal_head_plan_fate_iff	formal/aeneas/lean/WriteAdmission.lean	open_wal_head_plan
+atom	catalog:herd_collect_us	herd_collect_us_fate_iff	formal/aeneas/lean/GroupWindow.lean	herd_collect_us
+atom	catalog:herd_full	herd_full_fate_iff	formal/aeneas/lean/GroupWindow.lean	herd_full
+atom	catalog:post_group_grace_us	post_group_grace_us_fate_iff	formal/aeneas/lean/GroupWindow.lean	post_group_grace_us

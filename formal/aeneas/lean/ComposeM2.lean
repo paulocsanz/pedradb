@@ -270,6 +270,9 @@ def m2_fn_check_trajectory : String := "check_trajectory"
 def m2_fn_liveness_admitted : String := "liveness_admitted"
 def m2_fn_put_handler_plan : String := "put_handler_plan"
 def m2_fn_open_wal_head_plan : String := "open_wal_head_plan"
+def m2_fn_herd_collect_us : String := "herd_collect_us"
+def m2_fn_herd_full : String := "herd_full"
+def m2_fn_post_group_grace_us : String := "post_group_grace_us"
 
 /-- Index is inhabited (lean_extracts.sh requires a `theorem`). Proofs of
     each named atom live in the home Lean file. -/

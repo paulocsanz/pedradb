@@ -47,3 +47,43 @@ theorem flight_capped_window_us_fate_iff :
   intro window_us flight_ema_us cap_to_flight
   unfold flight_capped_window_us
   rfl
+
+/-- A2b (atom `catalog:herd_full`): the mc4 frame is full exactly at
+    `HERD_TARGET`. AS-IS never full. -/
+theorem herd_full_fate_iff :
+    ∀ (batch_len : Usize),
+      herd_full batch_len = ok (decide (batch_len ≥ HERD_TARGET)) := by
+  intro batch_len
+  unfold herd_full
+  simp
+
+/-- A2b (atom `catalog:herd_collect_us`): wait `HERD_COLLECT_US` iff the
+    frame is not `herd_full` and (active > batch or a recent peer).
+    Unfolds `herd_full`. AS-IS never waits. -/
+theorem herd_collect_us_fate_iff :
+    ∀ (active batch_len : Usize) (peers_recent : Bool),
+      herd_collect_us active batch_len peers_recent =
+        (do
+          let b ← herd_full batch_len
+          if b then ok 0#u64
+          else if active > batch_len then ok HERD_COLLECT_US
+          else if peers_recent then ok HERD_COLLECT_US
+          else ok 0#u64) := by
+  intro active batch_len peers_recent
+  unfold herd_collect_us
+  rfl
+
+/-- A2b (atom `catalog:post_group_grace_us`): after a multi-member
+    publish, grace-spin iff prev ≥ 2 and the new frame is not `herd_full`.
+    Unfolds `herd_full`. AS-IS never spins. -/
+theorem post_group_grace_us_fate_iff :
+    ∀ (prev_len batch_len : Usize),
+      post_group_grace_us prev_len batch_len =
+        (if prev_len ≥ 2#usize then
+           do
+             let b ← herd_full batch_len
+             if b then ok 0#u64 else ok HERD_COLLECT_US
+         else ok 0#u64) := by
+  intro prev_len batch_len
+  unfold post_group_grace_us
+  rfl
