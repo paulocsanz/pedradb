@@ -11089,10 +11089,23 @@ impl<E: Env> Db<E> {
                     let total_bytes = self.mem.approx_memory_usage() as u64;
                     if crate::flush_kernel::dominant_family_stage_plan(fam_bytes, total_bytes)
                         == crate::flush_kernel::FamilyFlushMode::StageWholeMem
-                        && self.stage_flush_imm().unwrap_or(false)
                     {
-                        did_work = true;
-                        continue;
+                        // Imm free → O(1) swap. Imm occupied (flush worker
+                        // behind, the 8×2.76s @10M seed) → park the whole
+                        // active table O(1) onto the queue the worker
+                        // already drains. Never fall through to take_family.
+                        if self.stage_flush_imm().unwrap_or(false) {
+                            did_work = true;
+                            continue;
+                        }
+                        if !crate::write_admission_kernel::batch_is_empty(
+                            self.mem.len() as u64,
+                        ) {
+                            let taken = std::mem::replace(&mut self.mem, MemTable::new());
+                            self.push_parked_unflushed(taken);
+                            did_work = true;
+                            continue;
+                        }
                     }
                     let taken = self.mem.take_family(&fam);
                     if !crate::write_admission_kernel::batch_is_empty(taken.len() as u64) {
@@ -16190,10 +16203,13 @@ mod tests {
         assert_eq!(db.parked_unflushed_count(), 1, "stage adds no parked table");
         assert_eq!(db.mem.len(), 0, "active mem swapped into imm");
 
-        // Imm slot busy + dominant family due again: falls back to partition.
+        // Imm slot busy + dominant family due again: park the whole
+        // active table (O(1)) — do not take_family the default keys out
+        // of a multi-hundred-MiB sibling family (the 8×2.76s seed).
         seed_cf_mem(&mut db, "default", 20, 64 * 1024, 3000);
         assert!(db.maybe_auto_flush().unwrap());
-        assert_eq!(db.parked_unflushed_count(), 2, "blocked imm partitions");
+        assert_eq!(db.parked_unflushed_count(), 2, "blocked imm parks whole mem");
+        assert_eq!(db.mem.len(), 0, "active mem parked, not partitioned");
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

@@ -216,3 +216,52 @@ memtable e o grosso do L0) mas **não suficiente** — o dono do setup
 veredito de p50 oficial continua no gate. **Veredito P2.7 final:**
 dono = flush work in-commit raro (99,85%) × gate 58ns; ataque =
 flush off-commit.
+
+## Correção rev. 4 (2026-09-14, pipeline `p223`, HEAD P1.1+P2.1)
+
+DIAG Darwin — nunca cartaz. Peer `ROCKS_PARITY_SYNC=0`.
+
+### P2.1 settle ativo — COMPLETE
+
+`deps settle 37.1s (L0 drained)` (p26r3 era INCOMPLETE L0=14).
+
+| | p26r3 settle-ON (poll) | p223 settle-ON (`compact_l0_once`) |
+|---|---|---|
+| l0 | 14 | **0** |
+| level1 | 12 | 17 |
+| sst_count | 28 | 22 |
+| tables/op | 3,6 | **2,0** |
+| blocks/200ops | 726 | 441 |
+| p50_ms | 0,2814 (load) | **0,1493** |
+| setup share | 98,7% | 97,9% |
+
+Drain funciona. Setup continua dono (~98%) com 2 tables/op — janela de
+25 keys ainda paga 1º bloco por table sobreposta. Cartaz = e4b.
+
+### P1.1 stage O(1) — NÃO colapsou `flush_work` (imm ocupado)
+
+WRITEPHASE seed 625k commits / 8 flushes: `flush_check_ms=22128.1
+flush_work_ms=22096.3` (99,85%, **2,76s/evento**) — mesmo dono. Causa:
+`stage_flush_imm` retorna false quando `imm` está ocupado (flush
+worker atrás no seed) e o trampolim caía no `take_family` O(n).
+**Fix no mesmo commit:** família dominante + imm ocupado estaciona a
+memtable inteira na fila parked (O(1) `mem::replace`), nunca
+`take_family`. Teste `rfc0223_dominant_family_stages_whole_mem`
+atualizado.
+
+### qs_neg_lookup 100k ×3 intercalado (família miss-path)
+
+| r | pedra qps | rocks qps | ratio | p50 µs |
+|---|---|---|---|---|
+| 1 | 3.670.561 | 1.785.908 | 2,055 | 0,3 vs 0,5 |
+| 2 | 3.618.703 | 1.820.616 | 1,988 | 0,3 vs 0,5 |
+| 3 | 3.760.135 | 1.819.498 | 2,067 | 0,3 vs 0,5 |
+
+**min=1,988 med=2,055.** DIAG 100k, **não** paga `probe_miss` 0,29× @100M
+(RFC-0161). Bloom real rejeita miss neste tamanho. Oficial = gate.
+
+`deps_cache_overwrite_mc4` **não rodou**: `ROCKS_PARITY_ONLY` no
+`run_deps` 1c não seleciona o shape `_mc4` (saiu `apply_batch_mc4` +
+`raftlog_mc4`). Rank-1 overwrite continua o número Linux 0,557×.
+
+Artefatos: `p223/qs/r{1,2,3}-{compat,rocks}.json`, `p223/scan/`.

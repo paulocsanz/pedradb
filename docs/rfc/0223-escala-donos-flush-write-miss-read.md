@@ -96,12 +96,16 @@
   sempre partição; imm ocupado cai na partição). Integração no ramo
   defer de `maybe_auto_flush`; testes
   `dominant_family_stage_plan_on_live_dominant_stages` +
-  `rfc0223_dominant_family_stages_whole_mem`. Re-meter DIAG
-  write-at-scale (WRITEPHASE `flush_work_ms` deve colapsar) e
-  cartaz = e4b. — status: `done (código)`
+  `rfc0223_dominant_family_stages_whole_mem`. Re-meter p223: stage
+  O(1) **não** colapsou `flush_work` (8×2,76s) — imm ocupado caía no
+  `take_family`; **rev.3** estaciona a memtable inteira na fila parked
+  quando imm está cheio. Cartaz = e4b. — status: `done (código, rev.3)`
 - [ ] **P1.2** `probe_miss` re-meter oficial no gate com bloom real
   (RFC-0160 P1.6 in-tree); se <1,0 persistir, fatia de tuning de bloom
-  datada no mesmo commit do finding — status: `todo` (blocked: gate)
+  datada no mesmo commit do finding — status: `todo` (blocked: gate).
+  DIAG 100k `qs_neg_lookup` ×3 intercalado (família miss): min 1,988
+  med 2,055 vs Rocks `SYNC=0` (p50 0,3 vs 0,5 µs) — **não** paga o
+  0,29× @100M.
 
 ### P2 — later / polish
 
@@ -112,8 +116,10 @@
   que só dormia no worker (p26r3: 30 s de poll, L0=14 INCOMPLETE).
   **Código landed:** `DB::compact_l0_once` + settle do bench faz o
   drain L0→L1 (equivalente Pedra do `wait_for_compact`); teste
-  `compact_l0_once_drains_below_trigger`. Re-meter DIAG deps_scan
-  @10M / cartaz = e4b. — status: `done (código)`
+  `compact_l0_once_drains_below_trigger`. Re-meter p223 DIAG:
+  settle **COMPLETE** 37,1s L0=0 (era INCOMPLETE L0=14); p50 0,149ms;
+  tables/op 3,6→2,0; setup ainda 97,9%. Cartaz = e4b. — status:
+  `done (código + DIAG)`
 - [ ] **P2.2** campanha miss-path vs fjall (probe_miss par) na régua
   oficial de guest — status: `todo`
 
@@ -125,9 +131,9 @@
 | P0.2 | p0 | mc50 simetria A/B 256×64 (pipeline local) | done (DIAG: não é artefato) | `p26r3b-mc50x` ×7 intercalado | 2026-09-13 |
 | P0.3 | p0 | split flush gate×work @10M | done (DIAG) | `7f2758d4` + `p26r3`: work 99,85%, gate 58ns/commit | 2026-09-13 |
 | P0.4 | p0 | e4b gate 3-run | todo | blocked p211z | 2026-09-13 |
-| P1.1 | p1 | dominant family O(1) stage (`take_family` fora do commit) | done (código) | kernel `dominant_family_stage_plan` + `maybe_auto_flush`; DIAG re-meter / cartaz = e4b | 2026-09-14 |
+| P1.1 | p1 | dominant family O(1) stage (`take_family` fora do commit) | done (código, rev.3) | p223: imm ocupado ainda pagava take_family 8×2,76s; agora park whole mem | 2026-09-14 |
 | P1.2 | p1 | probe_miss re-meter oficial (bloom real) | todo | blocked gate | 2026-09-13 |
-| P2.1 | p2 | settle drena L0 (compact_l0_once; lazy-cursor refutado) | done (código) | `compact_l0_once` + settle do bench; DIAG re-meter / cartaz = e4b | 2026-09-14 |
+| P2.1 | p2 | settle drena L0 (compact_l0_once; lazy-cursor refutado) | done (código + DIAG) | p223: COMPLETE 37,1s L0=0 p50 0,149ms tables/op 2,0; setup 97,9% | 2026-09-14 |
 | P2.2 | p2 | miss-path vs fjall oficial | todo | — | 2026-09-13 |
 
 ## Acceptance Criteria
