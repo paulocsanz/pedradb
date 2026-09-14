@@ -1,5 +1,18 @@
 # Aeneas extract + Lean theorems
 
+## ComposeDefining (RFC-0225 P2.2–P2.4, 2026-09-14)
+
+- `formal/aeneas/lean/ComposeDefining.lean`: three lake-checked theorems,
+  0 sorry, registered iff only (extract bodies closed).
+- A1 write-path refinement = `storage_write_path_recovered_iff`
+  (admission × WAL × torn-tail).
+- A3 lookup/scan isolation = `visible_at_fate_iff` × `point_tombstone_plan_fate_iff`
+  (live ⇒ Value ∧ not hidden).
+- A6 write-group member ∀ = `occ_batch_plan_member_fate_iff`
+  (`occ_conflict` × `occ_member_fate`).
+- `lake build ComposeDefining` 2× green. DEFINING 35.15%→85.15% (A1=A3=A6=1).
+  m2 49→54. `db_rs_extracted` false; `R-rustc` stays never. Not seL4 parity.
+
 ## RFC-0224 P2.1–P2.4 recusas medidas (2026-09-14, HEAD `8ad49dc0`)
 
 - P2.1 `pedra_refines` (A1=0): `findings/2026-09-14-rfc0224-p21-pedra-refines-recusa.md`. `db_rs_extracted=false`.

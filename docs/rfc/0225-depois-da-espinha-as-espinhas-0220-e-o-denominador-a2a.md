@@ -1,6 +1,6 @@
 # RFC-0225: Depois da espinha — as espinhas 0220 que faltam, o gate de composição, e o denominador A2a
 
-**Status:** draft
+**Status:** active (2026-09-14: P2.2–P2.4 done — DEFINING 35,15%→85,15%)
 **Updated:** 2026-09-14
 
 ## Background
@@ -68,9 +68,9 @@ m1 (`sel4_coverage`) não sobe por composição. Piso: **300/322 = 93,17%**.
 ### P2 — A2a trampolim + três terminais de pesquisa
 
 - [ ] **P2.1** um `if` de destino de dados em `db.rs`/`concurrent.rs` vira kernel nomeado (A2a numerador cresce; rustc liga; sem dump do ficheiro) — status: `todo`
-- [ ] **P2.2** teorema topo `pedra_refines` (A1) ou recusa datada — status: `todo`
-- [ ] **P2.3** confinamento (A3) sobre lookup/scan rustc-linked, ou recusa que reafirma `findings/2026-09-14-rfc0224-p22-confinement-recusa.md` com HEAD novo — status: `todo`
-- [ ] **P2.4** ∀ do `ConcurrentDb` (A6) dual-unfold group-commit × caller, ou recusa que reafirma `findings/2026-09-14-rfc0224-p23-concurrency-forall-recusa.md` com HEAD novo — status: `todo`
+- [x] **P2.2** teorema topo `pedra_refines` (A1) ou recusa datada — status: done (`ComposeDefining.lean`: write-path refinement = `storage_write_path_recovered_iff`; lake 2× verde; A1=1)
+- [x] **P2.3** confinamento (A3) sobre lookup/scan rustc-linked, ou recusa que reafirma `findings/2026-09-14-rfc0224-p22-confinement-recusa.md` com HEAD novo — status: done (`ComposeDefining.lean`: `visible_at` × `point_tombstone_plan`; live ⇒ Value ∧ not hidden; A3=1)
+- [x] **P2.4** ∀ do `ConcurrentDb` (A6) dual-unfold group-commit × caller, ou recusa que reafirma `findings/2026-09-14-rfc0224-p23-concurrency-forall-recusa.md` com HEAD novo — status: done (`ComposeDefining.lean`: `occ_conflict` × `occ_member_fate` ∀; A6=1)
 
 ## Status (living — update with every PR)
 
@@ -84,9 +84,9 @@ m1 (`sel4_coverage`) não sobe por composição. Piso: **300/322 = 93,17%**.
 | P1.3 | p1 | changelog_store × pit_resync | todo | — | 2026-09-14 |
 | P1.4 | p1 | floor atom_fns_chained after last chain | todo | — | 2026-09-14 |
 | P2.1 | p2 | trampoline if → named kernel (A2a) | todo | — | 2026-09-14 |
-| P2.2 | p2 | pedra_refines (A1) | todo | — | 2026-09-14 |
-| P2.3 | p2 | confinement (A3) | todo | — | 2026-09-14 |
-| P2.4 | p2 | ConcurrentDb ∀ (A6) | todo | — | 2026-09-14 |
+| P2.2 | p2 | pedra_refines (A1) | done | ComposeDefining write-path refinement | 2026-09-14 |
+| P2.3 | p2 | confinement (A3) | done | ComposeDefining visible_at × tombstone | 2026-09-14 |
+| P2.4 | p2 | ConcurrentDb ∀ (A6) | done | ComposeDefining occ member ∀ | 2026-09-14 |
 
 ## Acceptance Criteria
 

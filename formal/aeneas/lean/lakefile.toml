@@ -510,6 +510,9 @@ name = "ComposeWriter"
 name = "ComposeRecovery"
 
 [[lean_lib]]
+name = "ComposeDefining"
+
+[[lean_lib]]
 name = "MagicKernel"
 
 [[lean_lib]]
