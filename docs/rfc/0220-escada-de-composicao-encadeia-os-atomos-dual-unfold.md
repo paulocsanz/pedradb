@@ -73,9 +73,9 @@ Métricas registradas (ambas datadas, monotônicas):
 - [x] **P0.2** `ComposeWriter.lean`: cadeia workerless —
   `flusher_gate_plan` × `parked_debt_plan` (sem worker NADA parqueia,
   inclusive com dívida no cap; ramo as-is: workerless dorme) — status: done (RFC-0222 P2.1, 2026-09-14)
-- [ ] **P0.3** cadeia do sync — `changelog_durable_commit_fate` ×
+- [x] **P0.3** cadeia do sync — `changelog_durable_commit_fate` ×
   `wal_commit_plan` (Count com sync exige AppendSync; Skip async só
-  AppendApplyOk; as-is cerca nada) — status: `todo`
+  AppendApplyOk; as-is cerca nada) — status: done (RFC-0224 P0.1, 2026-09-14)
 - [ ] **P0.4** cadeia do fence — `wal_commit_plan::AppendSyncFence` ×
   `fence_admission_plan` (sync requerido falhou ⇒ cerca recusa TUDO
   depois; as-is admite) — status: `todo`
@@ -119,7 +119,7 @@ Métricas registradas (ambas datadas, monotônicas):
 |----|-------|--------|--------|-----------|---------|
 | P0.1 | p0 | gate compose-floor + selftest | todo | — | 2026-09-13 |
 | P0.2 | p0 | cadeia workerless (flusher_gate × parked_debt) | done | RFC-0222 P2.1 | 2026-09-14 |
-| P0.3 | p0 | cadeia do sync (fate × wal_commit_plan) | todo | — | 2026-09-13 |
+| P0.3 | p0 | cadeia do sync (fate × wal_commit_plan) | done | RFC-0224 P0.1 | 2026-09-14 |
 | P0.4 | p0 | cadeia do fence (wal_commit × fence_admission) | todo | — | 2026-09-13 |
 | P0.5 | p0 | cadeia da publicação (manifest_publish × fate) | todo | — | 2026-09-13 |
 | P0.6 | p0 | sweep P0 + EXTRACT.md | todo | — | 2026-09-13 |

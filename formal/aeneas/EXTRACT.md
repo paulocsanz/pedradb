@@ -1,5 +1,12 @@
 # Aeneas extract + Lean theorems
 
+## ComposeWriter sync chain (RFC-0224 P0.1 / RFC-0220 P0.3, 2026-09-14)
+
+- Dual-unfold `changelog_durable_commit_fate_fate_iff` × `wal_commit_plan_fate_iff`.
+- `writer_sync_chain_iff` / `count_with_sync_requires_append_sync` /
+  `skip_async_is_append_apply_ok` / `writer_sync_as_is_never_counts_and_never_fences`.
+- `lake build ComposeWriter` 2× green, 0 sorry. m2 39→40 (`changelog_durable_commit_fate` now chained; `wal_commit_plan` already was).
+
 ## ComposeWriter (RFC-0222 P2.1 / RFC-0220 P0.2, 2026-09-14)
 
 - `formal/aeneas/lean/ComposeWriter.lean`: dual-unfold of
