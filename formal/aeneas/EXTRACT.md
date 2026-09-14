@@ -8,6 +8,15 @@
   `flusher_gate_plan_as_is_always_drains`. `lake build ComposeWriter` green,
   0 sorry. m2 33→35 (`flusher_gate_plan`, `parked_debt_plan` now chained).
 
+## ComposeRecovery (RFC-0222 P2.2, 2026-09-14)
+
+- `formal/aeneas/lean/ComposeRecovery.lean`: dual-unfold of
+  `sst_recover_action_refuse_iff_corrupt_or_inventory_missing` ×
+  `reopen_outcome_serve_all_iff_damage_none` ×
+  `vlog_recover_action_refuse_open_iff_wants_large_use_new_and_nothing_on_disk`
+  plus `recover_collect_act` KeepRecord. `lake build ComposeRecovery` green.
+  recovery_atoms_chained 0→4 / 11.
+
 **Date:** 2026-08-15
 
 ## ClientAxis (`client_axis_kernel.rs`, RFC-0222 P0.7 2026-09-14)

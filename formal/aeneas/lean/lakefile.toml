@@ -507,6 +507,9 @@ name = "ComposeProductCrown"
 name = "ComposeWriter"
 
 [[lean_lib]]
+name = "ComposeRecovery"
+
+[[lean_lib]]
 name = "MagicKernel"
 
 [[lean_lib]]

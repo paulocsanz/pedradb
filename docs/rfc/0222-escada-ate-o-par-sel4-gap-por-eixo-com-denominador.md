@@ -46,7 +46,7 @@ Frase de venda permitida (cânone): *"programa de verificação na classe de cla
 ### P2 — os terminais de pesquisa (nomeados, incrementais; meses+)
 
 - [x] **P2.1** teorema topo de refinamento pela escada do RFC-0220 (cada fatia 0220 move o eixo 1 aqui) — status: done (`ComposeWriter.lean`: dual-unfold `flusher_gate_plan` × `parked_debt_plan`; workerless nunca WorkerDrains; lake build verde; m2 33→35)
-- [ ] **P2.2** espinha de recovery: os átomos de wal_recover/manifest/reopen/vlog numa única composição boot-estabelece-invariante (eixo 4 do audit) — status: `todo`
+- [x] **P2.2** espinha de recovery: os átomos de wal_recover/manifest/reopen/vlog numa única composição boot-estabelece-invariante (eixo 4 do audit) — status: done (`ComposeRecovery.lean`: dual-unfold sst_recover × reopen_outcome × vlog_recover + wal KeepRecord; lake build verde; recovery_chained 0→4)
 - [ ] **P2.3** confinamento/integridade (2º teorema do seL4) — status: `todo`
 - [ ] **P2.4** redução de concorrência do `ConcurrentDb` via kernel de group-commit — status: `todo`
 - [ ] **P2.5** translation validation de rustc/LLVM pinado num alvo (RFC-0171 P2) — status: `todo`
@@ -73,7 +73,7 @@ Frase de venda permitida (cânone): *"programa de verificação na classe de cla
 | P1.1 | p1 | toolchains formais no proof-check.yml | done | este commit | 2026-09-14 |
 | P1.2 | p1 | pisos sel4_gap no CI | done | este commit | 2026-09-14 |
 | P2.1 | p2 | teorema topo (via RFC-0220) | done | este commit | 2026-09-14 |
-| P2.2 | p2 | espinha de recovery | todo | — | 2026-09-13 |
+| P2.2 | p2 | espinha de recovery | done | este commit | 2026-09-14 |
 | P2.3 | p2 | confinamento/integridade | todo | — | 2026-09-13 |
 | P2.4 | p2 | redução de concorrência | todo | — | 2026-09-13 |
 | P2.5 | p2 | translation validation do binário | todo | — | 2026-09-13 |

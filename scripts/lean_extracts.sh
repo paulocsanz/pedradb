@@ -46,6 +46,7 @@ COMPOSE=(
   ComposeDurabilitySpine
   ComposeProductCrown
   ComposeWriter
+  ComposeRecovery
   LsmCompactBridges
   LsmCompactDerived
   ProbeLadderBridges
