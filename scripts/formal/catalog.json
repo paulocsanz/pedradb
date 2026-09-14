@@ -8767,6 +8767,52 @@
         "file": "crates/pedradb-core/src/scale_kernel.rs",
         "test": "scale_forecast_on_always_hot_walk_is_not_ok"
       }
+    },
+    {
+      "id": "pipeline_drain_cap",
+      "finding": "RFC-0201 P0.1",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/client_axis_kernel.rs",
+      "twin": "crates/pedradb-core/src/client_axis_kernel.rs",
+      "aeneas": "scripts/aeneas_client_axis.sh",
+      "callers": [
+        "crates/pedradb-core/src/concurrent.rs"
+      ],
+      "entry": "pipeline_drain_cap",
+      "as_is": "pipeline_drain_cap_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/client_axis_kernel.rs",
+        "test": "rfc0201_drain_cap_full_below_misuse_floor"
+      },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0222 P0.7 enrollment: pipeline_drain_cap is clamp(queued,1,256) — full drain up to the misuse floor; AS-IS clamps at 8 (cap-8 convoy). Fate forall over the extracted body (ClientAxis.lean). Production WriteGroup::lead calls it."
+      }
+    },
+    {
+      "id": "async_merge_policy",
+      "finding": "RFC-0201 P0.3",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/client_axis_kernel.rs",
+      "twin": "crates/pedradb-core/src/client_axis_kernel.rs",
+      "aeneas": "scripts/aeneas_client_axis.sh",
+      "callers": [
+        "crates/pedradb-core/src/concurrent.rs"
+      ],
+      "entry": "async_merge_policy",
+      "as_is": "async_merge_policy_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/client_axis_kernel.rs",
+        "test": "rfc0201_async_merge_policy_boundary_and_pins"
+      },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0222 P0.7 enrollment: async_merge_policy merges iff env pin or writers>ncpu (ncpu=0 never). AS-IS is env-pin only. Fate forall over the extracted body (ClientAxis.lean). Production submit path calls it."
+      }
     }
   ],
   "clones": [

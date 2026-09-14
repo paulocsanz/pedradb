@@ -2,6 +2,18 @@
 
 **Date:** 2026-08-15
 
+## ClientAxis (`client_axis_kernel.rs`, RFC-0222 P0.7 2026-09-14)
+
+- `[lib] path` = production `crates/pedradb-core/src/client_axis_kernel.rs`.
+- Charon `0.1.232` + Aeneas `daa85d7` → `out/lean/ClientAxisKernel.lean`.
+- Pairs `pipeline_drain_cap` and `async_merge_policy` are single_artifact:
+  production `concurrent.rs` (`WriteGroup::lead` / submit) calls the rustc
+  body; Lean unfolds that body (`pipeline_drain_cap_fate_iff`,
+  `async_merge_policy_fate_iff`).
+- Generated `Ord.max.default core.cmp.OrdUsize` patched to
+  `.partialOrdInst.lt` (same class as txn/c1_modelo) — `drain_convoy_count`.
+- Lean 4.31.0 accepted (no `sorry` in `ClientAxis.lean`).
+
 ## Vote (`vote_kernel.rs`)
 
 - Charon `0.1.232` + Aeneas `daa85d7` → `out/lean/VoteKernel.lean`. Pairs `durable_term`, `grant_persist`, and `vote` are single_artifact: production file is the Verus term.

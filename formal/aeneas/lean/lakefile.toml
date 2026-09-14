@@ -508,3 +508,9 @@ name = "MagicKernel"
 
 [[lean_lib]]
 name = "Magic"
+
+[[lean_lib]]
+name = "ClientAxisKernel"
+
+[[lean_lib]]
+name = "ClientAxis"

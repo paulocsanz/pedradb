@@ -313,3 +313,5 @@ atom	catalog:group_ack_plan	group_ack_plan_fate_iff	formal/aeneas/lean/GroupComm
 atom	catalog:cf_flush_plan	cf_flush_plan_fate_iff	formal/aeneas/lean/Flush.lean	cf_flush_plan
 atom	catalog:flusher_gate_plan	flusher_gate_plan_fate_iff	formal/aeneas/lean/Flush.lean	flusher_gate_plan
 atom	catalog:parked_debt_plan	parked_debt_plan_fate_iff	formal/aeneas/lean/Flush.lean	parked_debt_plan
+atom	catalog:pipeline_drain_cap	pipeline_drain_cap_fate_iff	formal/aeneas/lean/ClientAxis.lean	pipeline_drain_cap
+atom	catalog:async_merge_policy	async_merge_policy_fate_iff	formal/aeneas/lean/ClientAxis.lean	async_merge_policy
