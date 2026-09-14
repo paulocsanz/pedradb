@@ -32,7 +32,7 @@ pub struct WalWriter<W> {
     position: u64,
     /// Reused framing buffer (RFC-0040: no per-record malloc of the payload).
     frame: Vec<u8>,
-    /// RFC-0209 P0.2: user-space staging (opt-in via `PEDRA_WAL_BUFFER`).
+    /// RFC-0209: user-space staging (default on; `PEDRA_WAL_BUFFER=0` off).
     /// `None` (default) = the pre-0209 path, one sink write per frame.
     staged: Option<StagedBuf>,
 }
