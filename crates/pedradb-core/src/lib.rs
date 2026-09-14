@@ -50,6 +50,7 @@ pub mod write_ack_kernel;
 /// Disk-pressure watermarks (RFC-0179): refuse writes before ENOSPC, keep reads up.
 pub mod disk_pressure_kernel;
 pub mod lock;
+pub mod leftover_page_kernel;
 pub mod lookup_kernel;
 pub mod manifest;
 pub mod manifest_kernel;
@@ -64,6 +65,8 @@ pub mod probe_order_kernel;
 pub mod rng;
 /// One-process scale model (RFC-0176): probes, WARM cap, spectrum clock.
 pub mod scale_kernel;
+pub mod scan_readahead_kernel;
+pub mod ratio_curve_kernel;
 pub mod sst;
 pub mod time;
 pub mod tx;

@@ -8858,6 +8858,143 @@
         "date": "2026-09-14",
         "why": "RFC-0222 P0.7 enrollment: flight_capped_window_us is min(window, flight-or-seed) collapsing below one quiescence slice when cap_to_flight; else the flat window. Fate forall over the extracted body (GroupWindow.lean). Production effective_group_window_us calls it."
       }
+    },
+    {
+      "id": "leftover_page_advice",
+      "finding": "RFC-0194 P0.1",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/leftover_page_kernel.rs",
+      "twin": "crates/pedradb-core/src/leftover_page_kernel.rs",
+      "aeneas": "scripts/aeneas_leftover_page.sh",
+      "callers": [
+        "crates/pedradb-core/src/leftover_page_kernel.rs"
+      ],
+      "entry": "leftover_page_advice",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/leftover_page_kernel.rs",
+        "test": "default_budget_never_drops"
+      },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0222 P0.7 enrollment: leftover_page_advice drops iff budget=0 AND uncovered AND above warm cap; AS-IS always KeepDefault. Fate forall over the extracted body (LeftoverPage.lean). rustc now links the module (lib.rs)."
+      },
+      "as_is": "leftover_page_advice_as_is"
+    },
+    {
+      "id": "scan_readahead_window",
+      "finding": "RFC-0195 P0.1",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/scan_readahead_kernel.rs",
+      "twin": "crates/pedradb-core/src/scan_readahead_kernel.rs",
+      "aeneas": "scripts/aeneas_scan_readahead.sh",
+      "callers": [
+        "crates/pedradb-core/src/scan_readahead_kernel.rs"
+      ],
+      "entry": "scan_readahead_window",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/scan_readahead_kernel.rs",
+        "test": "fitting_store_never_reads_ahead"
+      },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0222 P0.7 enrollment: scan_readahead_window is NONE on a hot store (Fire-118/v69); AS-IS always NONE. Fate forall over the extracted body (ScanReadahead.lean). rustc now links the module (lib.rs)."
+      },
+      "as_is": "scan_readahead_window_as_is"
+    },
+    {
+      "id": "serial_cs_ns",
+      "finding": "RFC-0192",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/write_cycle_kernel.rs",
+      "twin": "crates/pedradb-core/src/write_cycle_kernel.rs",
+      "aeneas": "scripts/aeneas_write_cycle.sh",
+      "callers": [
+        "crates/pedradb-core/src/write_cycle_kernel.rs"
+      ],
+      "entry": "serial_cs_ns",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/write_cycle_kernel.rs",
+        "test": "rfc0192_write_off_lock_drops_cs_by_wr"
+      },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0222 P0.7 enrollment: serial_cs_ns is the saturating sum of encode+write+guard+lock+insert+publish+grp; AS-IS is the fire-120 constant 2200 ns. Fate forall over the extracted body (WriteCycle.lean)."
+      },
+      "as_is": "serial_cs_ns_as_is"
+    },
+    {
+      "id": "spine_replay",
+      "finding": "RFC-0214 P2.1",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/durability_spine_kernel.rs",
+      "twin": "crates/pedradb-core/src/durability_spine_kernel.rs",
+      "aeneas": "scripts/aeneas_durability_spine.sh",
+      "callers": [
+        "crates/pedradb-core/src/durability_spine_kernel.rs"
+      ],
+      "entry": "spine_replay",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/durability_spine_kernel.rs",
+        "test": "spine_any_sequence_keeps_inv_and_d1"
+      },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0222 P0.7 enrollment: spine_replay folds WriteAckLedger over ANY step sequence and asserts Inv-WAL per step; AS-IS acks without barrier. Fate forall over the extracted body (DurabilitySpine.lean)."
+      },
+      "as_is": "spine_replay_as_is"
+    },
+    {
+      "id": "cold_permille",
+      "finding": "RFC-0197",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/ratio_curve_kernel.rs",
+      "twin": "crates/pedradb-core/src/ratio_curve_kernel.rs",
+      "aeneas": "scripts/aeneas_ratio_curve.sh",
+      "callers": [
+        "crates/pedradb-core/src/ratio_curve_kernel.rs"
+      ],
+      "entry": "cold_permille",
+      "three_teeth": false,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/ratio_curve_kernel.rs",
+        "test": "rfc0197_cold_permille_zero_hot_and_monotone_bounded"
+      },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0222 P0.7 enrollment: cold_permille is 0 when the store fits the warm cap, else min(1000,(store-warm)*1000/store). Whole-file extract blocked by &'static str; --start-from isolates this predicate. Fate forall (RatioCurve.lean)."
+      }
+    },
+    {
+      "id": "product_crown",
+      "finding": "RFC-0215 P1.2",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/product_crown_kernel.rs",
+      "twin": "crates/pedradb-core/src/product_crown_kernel.rs",
+      "aeneas": "scripts/aeneas_product_crown.sh",
+      "callers": [
+        "crates/pedradb-core/src/product_crown_kernel.rs"
+      ],
+      "entry": "product_crown",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/product_crown_kernel.rs",
+        "test": "crown_agrees_on_every_reachable_ledger"
+      },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0222 P0.7 enrollment: product_crown folds d1_modelo ∧ (legal cut ⇒ d1_holds) over every torn cut; Isolated while (not Iterator.all). Fate forall over the extracted body (ProductCrown.lean)."
+      },
+      "as_is": "product_crown_as_is"
     }
   ],
   "clones": [

@@ -11,7 +11,7 @@ sustenta. Uma linha só sobe de camada (`experimento → teorema`) com o
 gate da camada de destino verde no mesmo commit (three-teeth ou
 enumeração completa); nunca por reescrita de ledger.
 
-<!-- ledger-catalog: total=316 proof=290 campaign=26 absent=0 single_artifact=309 aeneas_scripts=252 clones=7 models=34 -->
+<!-- ledger-catalog: total=322 proof=296 campaign=26 absent=0 single_artifact=315 aeneas_scripts=258 clones=7 models=34 -->
 
 ## Teorema — ∀ sobre código/modelo (machine-checked ou enumeração completa)
 
@@ -164,6 +164,14 @@ Enrollment 2026-09-14 (RFC-0222 P0.7, 2/8): `group_window_kernel.rs`
 já chamava; extract `aeneas_group_window.sh`, teoremas em
 GroupWindow.lean). total 314→316, proof 288→290, single_artifact 307→309,
 aeneas_scripts 250→252.
+
+Enrollment 2026-09-14 (RFC-0222 P0.7, 8/8): os 6 kernels restantes entram
+no catálogo — `leftover_page_advice`, `scan_readahead_window`,
+`serial_cs_ns`, `spine_replay`, `cold_permille` (`--start-from`, lifetime
+CFailure no arquivo inteiro), `product_crown` (Isolated `while`).
+`leftover_page_kernel`/`scan_readahead_kernel` passam a ser `pub mod` no
+lib.rs (o rustc liga). total 316→322, proof 290→296, single_artifact
+309→315, aeneas_scripts 252→258.
 
 ## TCB — axiomas nomeados (fora de prova, por decisão registrada)
 

@@ -1,0 +1,12 @@
+[workspace]
+
+[package]
+name = "pedra-aeneas-durability-spine-kernel"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "Shim exposing production durability_spine_kernel.rs (+ write_ack deps) to Charon"
+
+[lib]
+path = "src/lib.rs"

@@ -26,6 +26,15 @@
   axioms (env parse — not the ∀ pairs).
 - Lean 4.31.0 accepted (no `sorry` in `GroupWindow.lean`).
 
+## LeftoverPage / ScanReadahead / WriteCycle / DurabilitySpine / RatioCurve / ProductCrown (RFC-0222 P0.7 2026-09-14)
+
+- `leftover_page_kernel.rs` / `scan_readahead_kernel.rs`: `[lib] path` = production; now `pub mod` in `lib.rs` (rustc links). `family_upper_bound` Isolated `while` + `wrapping_add` (raw `u8+1` unimplemented). Theorems `leftover_page_advice_fate_iff`, `scan_readahead_window_hot_never`.
+- `write_cycle_kernel.rs`: shim + `write_admission_kernel`. `serial_cs_ns_fate_iff`. Display/`as_str` extract as sorry (unused by the atom).
+- `durability_spine_kernel.rs`: shim of write_ack deps. `spine_replay_fate_iff`.
+- `ratio_curve_kernel.rs`: whole-file Aeneas CFailure on `&'static str` (GetSideAnchor); `--start-from cold_permille`. `cold_permille_fate_iff`.
+- `product_crown_kernel.rs`: shim + `#[cfg(pedra_aeneas)]` import of path-included `properties_kernel`; Isolated `while` (not `Iterator::all`/`map`). `product_crown_fate_iff`.
+- Lean 4.31.0 accepted (no `sorry` in the six wrappers).
+
 ## Vote (`vote_kernel.rs`)
 
 - Charon `0.1.232` + Aeneas `daa85d7` → `out/lean/VoteKernel.lean`. Pairs `durable_term`, `grant_persist`, and `vote` are single_artifact: production file is the Verus term.

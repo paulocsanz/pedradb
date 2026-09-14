@@ -1,0 +1,4 @@
+path=crates/pedradb-core/src/scan_readahead_kernel.rs
+sha256=5a6b0c9a1e32b278f195d7daf939ae1d1f4c80edd525e39adb85b6e7b2bd8bf7
+aeneas=daa85d7
+charon=0.1.232

@@ -317,3 +317,9 @@ atom	catalog:pipeline_drain_cap	pipeline_drain_cap_fate_iff	formal/aeneas/lean/C
 atom	catalog:async_merge_policy	async_merge_policy_fate_iff	formal/aeneas/lean/ClientAxis.lean	async_merge_policy
 atom	catalog:merge_eligible	merge_eligible_fate_iff	formal/aeneas/lean/GroupWindow.lean	merge_eligible
 atom	catalog:flight_capped_window_us	flight_capped_window_us_fate_iff	formal/aeneas/lean/GroupWindow.lean	flight_capped_window_us
+atom	catalog:leftover_page_advice	leftover_page_advice_fate_iff	formal/aeneas/lean/LeftoverPage.lean	leftover_page_advice
+atom	catalog:scan_readahead_window	scan_readahead_window_hot_never	formal/aeneas/lean/ScanReadahead.lean	scan_readahead_window
+atom	catalog:serial_cs_ns	serial_cs_ns_fate_iff	formal/aeneas/lean/WriteCycle.lean	serial_cs_ns
+atom	catalog:spine_replay	spine_replay_fate_iff	formal/aeneas/lean/DurabilitySpine.lean	spine_replay
+atom	catalog:cold_permille	cold_permille_fate_iff	formal/aeneas/lean/RatioCurve.lean	cold_permille
+atom	catalog:product_crown	product_crown_fate_iff	formal/aeneas/lean/ProductCrown.lean	product_crown

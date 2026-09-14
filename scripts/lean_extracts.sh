@@ -23,7 +23,8 @@ fi
 LIBS=(
   Lookup RpcMode StoreCompact StoreTxn Snapshot Si IndexVal Changelog
   Cursor Cl Children Pin Pack Ship Fold Manifest Compact VlogGc TxGlue
-  L28 Tcg Cqe Iter Properties Scale DiskPressure ClientAxis GroupWindow Crc
+  L28 Tcg Cqe Iter Properties Scale DiskPressure ClientAxis GroupWindow
+  LeftoverPage ScanReadahead WriteCycle DurabilitySpine ProductCrown RatioCurve Crc
   EnvCrash WalState WalRecover Reopen D1Modelo WriteAck WriteAdmission GroupCommit Flush
   DcsApply StoreApply StoreCommit StoreAeAck StoreVote Key
   Lease Txn T1Modelo Membership StoreMembership C1Modelo

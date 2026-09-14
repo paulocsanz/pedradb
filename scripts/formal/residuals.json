@@ -78,16 +78,22 @@
       "crates/pedradb-raft/src/c1_modelo_kernel.rs",
       "crates/pedradb-world/src/world_kernel.rs",
       "crates/pedradb-core/src/client_axis_kernel.rs",
-      "crates/pedradb-core/src/group_window_kernel.rs"
+      "crates/pedradb-core/src/group_window_kernel.rs",
+      "crates/pedradb-core/src/leftover_page_kernel.rs",
+      "crates/pedradb-core/src/scan_readahead_kernel.rs",
+      "crates/pedradb-core/src/write_cycle_kernel.rs",
+      "crates/pedradb-core/src/durability_spine_kernel.rs",
+      "crates/pedradb-core/src/ratio_curve_kernel.rs",
+      "crates/pedradb-core/src/product_crown_kernel.rs"
     ],
     "kernel_files": 69,
-    "kernel_loc": 28626,
-    "handler_loc": 116993,
+    "kernel_loc": 28662,
+    "handler_loc": 119276,
     "db_rs_extracted": false,
     "proof_depth": {
       "extract": 20,
       "close": 4,
-      "atom": 290,
+      "atom": 296,
       "model": 2,
       "count": 7
     },
@@ -155,6 +161,52 @@
         "collect_should_break",
         "peer_horizon_us",
         "group_window_cap_to_flight"
+      ],
+      "crates/pedradb-core/src/leftover_page_kernel.rs": [
+        "family_upper_bound",
+        "sst_range_covers_family"
+      ],
+      "crates/pedradb-core/src/scan_readahead_kernel.rs": [
+        "scan_readahead_bounded",
+        "scan_readahead_pair_budget"
+      ],
+      "crates/pedradb-core/src/write_cycle_kernel.rs": [
+        "serial_cs_write_off_lock_ns",
+        "serial_cs_ticket_ns",
+        "predicted_lock_wait_ns",
+        "cycle_ns",
+        "qps_from_cycle_ns",
+        "name_cut",
+        "name_cut_ticket",
+        "lane_collapsed",
+        "predicted_qps_write_off_lock",
+        "sigma_permille_from_p50_p99",
+        "lognormal_mean_mult_permille",
+        "scv_permille_from_p50_p99",
+        "variability_amplification_permille",
+        "calibrated_forecast",
+        "predicted_qps_ticket",
+        "qps_hat_error_permille",
+        "write_cycle_forecast",
+        "as_str",
+        "render"
+      ],
+      "crates/pedradb-core/src/ratio_curve_kernel.rs": [
+        "get_side_ladder_scales",
+        "fit_write_family_curve",
+        "rocks_cycle_ns",
+        "rocks_cycle_spread_ns",
+        "ratio_hat_permille",
+        "ratio_curve",
+        "fit_residual_permille",
+        "cut_to_cross",
+        "ratio_curve_table",
+        "render_get_side_anchors",
+        "cycle_hat_ns",
+        "render"
+      ],
+      "crates/pedradb-core/src/product_crown_kernel.rs": [
+        "acked_flags"
       ]
     },
     "single_artifact": 305,

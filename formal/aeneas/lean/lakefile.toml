@@ -520,3 +520,39 @@ name = "GroupWindowKernel"
 
 [[lean_lib]]
 name = "GroupWindow"
+
+[[lean_lib]]
+name = "LeftoverPageKernel"
+
+[[lean_lib]]
+name = "LeftoverPage"
+
+[[lean_lib]]
+name = "ScanReadaheadKernel"
+
+[[lean_lib]]
+name = "ScanReadahead"
+
+[[lean_lib]]
+name = "WriteCycleKernel"
+
+[[lean_lib]]
+name = "WriteCycle"
+
+[[lean_lib]]
+name = "DurabilitySpineKernel"
+
+[[lean_lib]]
+name = "DurabilitySpine"
+
+[[lean_lib]]
+name = "ProductCrownKernel"
+
+[[lean_lib]]
+name = "ProductCrown"
+
+[[lean_lib]]
+name = "RatioCurveKernel"
+
+[[lean_lib]]
+name = "RatioCurve"
