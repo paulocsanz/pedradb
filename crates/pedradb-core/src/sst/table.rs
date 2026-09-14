@@ -348,6 +348,14 @@ impl SstTable {
     }
 
     #[cfg(test)]
+    pub(crate) fn index_bytes(&self) -> usize {
+        self.index
+            .iter()
+            .map(|h| h.first_user_key.len().saturating_add(16))
+            .sum()
+    }
+
+    #[cfg(test)]
     pub(crate) fn payload_resident(&self) -> bool {
         !self.payload.read().img.is_empty()
     }
@@ -1077,18 +1085,14 @@ impl SstTable {
     fn decode_block_on_file(&self, h: &BlockHandle) -> Result<Vec<(InternalKey, Bytes)>> {
         let kit = self.kit.read().clone();
         let Some(kit) = kit else {
-            // Streaming bulk writer leaves the body on disk and the
-            // in-memory slot empty. Tests use `open_with` (no kit);
-            // hydrate attaches a kit at install.
-            let payload = self.ensure_payload_from_path()?;
-            SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
-            return decode_block_from_payload(
-                &payload,
-                h,
-                self.compressed_blocks,
-                self.block_crc,
-                &self.path,
-            );
+            // RFC-0042: an evicted payload without a file source must
+            // fail closed. Reloading the path here used to serve the
+            // block as Ok (silent-wrong) — the kit is the CRC-verified
+            // source; hydrate attaches it at install.
+            return Err(CoreError::Internal(format!(
+                "SST {} evicted payload has no file source",
+                self.path.display()
+            )));
         };
         if self.block_crc {
             // v5: read exactly this block (CRC included) — rocks-shaped 4 KiB I/O.
@@ -2872,12 +2876,13 @@ fn write_sst_try_sorted_body(
     // filter. Distinct keys are inserted from slices during the encode
     // loop — no `Vec<Bytes>` of every user key.
     const BLOOM_CAP_MAX: usize = 2_097_152;
-    let mut bloom = if crate::write_admission_kernel::batch_is_empty(bloom_hint as u64) {
-        BloomFilter::always_true()
-    } else {
-        BloomFilter::with_capacity(bloom_hint.min(BLOOM_CAP_MAX), DEFAULT_BITS_PER_KEY)
-    };
-    let bloom_active = bloom.is_active();
+    let want_bloom = !crate::write_admission_kernel::batch_is_empty(bloom_hint as u64);
+    // Distinct user keys, collected during encode so the bitset can be
+    // sized by what was actually written — never by the caller's TOTAL
+    // hint (a 100-key chunk with a 100M-key rewrite hint used to ship a
+    // 2.6 MB mostly-zero filter). Inserts past BLOOM_CAP_MAX still run
+    // (FPR rises; the bitset does not grow).
+    let mut bloom_keys: Vec<Bytes> = Vec::new();
     let mut data = Vec::new();
     let mut index: Vec<BlockHandle> = Vec::new();
     let mut block_buf = Vec::new();
@@ -3009,8 +3014,8 @@ fn write_sst_try_sorted_body(
         let same_user = prev_ikey
             .as_ref()
             .is_some_and(|p| p.user_key.as_ref() == uk);
-        if !same_user && bloom_active {
-            bloom.insert(uk);
+        if !same_user && want_bloom {
+            bloom_keys.push(ikey.user_key.clone());
         }
         if crate::write_admission_kernel::batch_is_empty(block_buf.len() as u64) {
             block_first_user = Some(ikey.user_key.clone());
@@ -3055,10 +3060,18 @@ fn write_sst_try_sorted_body(
     )?;
     let key_cp = SstTable::derive_index_accel(&mut index);
     stages.add(|s| &mut s.enc_ns, t_enc);
-    // Bloom inserts ran inside the encode loop (slice, no key clone).
-    if crate::write_admission_kernel::batch_is_empty(n_entries as u64) {
-        bloom = BloomFilter::always_true();
-    }
+    let mut bloom = if !want_bloom
+        || crate::write_admission_kernel::batch_is_empty(n_entries as u64)
+    {
+        BloomFilter::always_true()
+    } else {
+        let n = bloom_keys.len().min(BLOOM_CAP_MAX).max(1);
+        let mut bloom = BloomFilter::with_capacity(n, DEFAULT_BITS_PER_KEY);
+        for k in &bloom_keys {
+            bloom.insert(k);
+        }
+        bloom
+    };
 
     // Header: magic version num_entries max_seq num_blocks data_len (fixed 40 B)
     let mut header = Vec::with_capacity(40);
