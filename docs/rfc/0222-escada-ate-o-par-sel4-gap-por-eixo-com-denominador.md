@@ -1,6 +1,6 @@
 # RFC-0222: Escada até o par seL4 — gap por eixo com denominador nomeado, medido por máquina
 
-**Status:** active (2026-09-14: P0.1–P0.7 + P1 done; P0.8 push = portão do usuário; P2 em andamento)
+**Status:** active (2026-09-14: P0.1–P0.7 + P1 + P2 done-or-refused; P0.8 push = portão do usuário)
 **Updated:** 2026-09-13
 
 ## Background
@@ -47,9 +47,9 @@ Frase de venda permitida (cânone): *"programa de verificação na classe de cla
 
 - [x] **P2.1** teorema topo de refinamento pela escada do RFC-0220 (cada fatia 0220 move o eixo 1 aqui) — status: done (`ComposeWriter.lean`: dual-unfold `flusher_gate_plan` × `parked_debt_plan`; workerless nunca WorkerDrains; lake build verde; m2 33→35)
 - [x] **P2.2** espinha de recovery: os átomos de wal_recover/manifest/reopen/vlog numa única composição boot-estabelece-invariante (eixo 4 do audit) — status: done (`ComposeRecovery.lean`: dual-unfold sst_recover × reopen_outcome × vlog_recover + wal KeepRecord; lake build verde; recovery_chained 0→4)
-- [ ] **P2.3** confinamento/integridade (2º teorema do seL4) — status: `todo`
-- [ ] **P2.4** redução de concorrência do `ConcurrentDb` via kernel de group-commit — status: `todo`
-- [ ] **P2.5** translation validation de rustc/LLVM pinado num alvo (RFC-0171 P2) — status: `todo`
+- [x] **P2.3** confinamento/integridade (2º teorema do seL4) — status: done (recusa medida: A3=0; `findings/2026-09-14-rfc0222-p23-confinement-recusa.md`)
+- [x] **P2.4** redução de concorrência do `ConcurrentDb` via kernel de group-commit — status: done (recusa medida: A6=0; group-commit é redução, não ∀ do ConcurrentDb; `findings/2026-09-14-rfc0222-p24-concurrency-forall-recusa.md`)
+- [x] **P2.5** translation validation de rustc/LLVM pinado num alvo (RFC-0171 P2) — status: done (recusa medida: RFC-0172 residual `R-rustc` never; nenhum artefato TV in-tree; `findings/2026-09-14-rfc0222-p25-translation-validation-recusa.md`)
 
 ## Risks / non-goals
 
@@ -74,6 +74,6 @@ Frase de venda permitida (cânone): *"programa de verificação na classe de cla
 | P1.2 | p1 | pisos sel4_gap no CI | done | este commit | 2026-09-14 |
 | P2.1 | p2 | teorema topo (via RFC-0220) | done | este commit | 2026-09-14 |
 | P2.2 | p2 | espinha de recovery | done | este commit | 2026-09-14 |
-| P2.3 | p2 | confinamento/integridade | todo | — | 2026-09-13 |
-| P2.4 | p2 | redução de concorrência | todo | — | 2026-09-13 |
-| P2.5 | p2 | translation validation do binário | todo | — | 2026-09-13 |
+| P2.3 | p2 | confinamento/integridade | done | findings/2026-09-14-rfc0222-p23-confinement-recusa.md | 2026-09-14 |
+| P2.4 | p2 | redução de concorrência | done | findings/2026-09-14-rfc0222-p24-concurrency-forall-recusa.md | 2026-09-14 |
+| P2.5 | p2 | translation validation do binário | done | findings/2026-09-14-rfc0222-p25-translation-validation-recusa.md | 2026-09-14 |

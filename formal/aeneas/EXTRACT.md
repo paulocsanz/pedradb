@@ -17,6 +17,13 @@
   plus `recover_collect_act` KeepRecord. `lake build ComposeRecovery` green.
   recovery_atoms_chained 0→4 / 11.
 
+## RFC-0222 P2.3–P2.5 recusas medidas (2026-09-14)
+
+- P2.3 confinement: A3=0. Finding `findings/2026-09-14-rfc0222-p23-confinement-recusa.md`.
+- P2.4 ConcurrentDb ∀: A6=0. Finding `findings/2026-09-14-rfc0222-p24-concurrency-forall-recusa.md`.
+- P2.5 rustc/LLVM TV: RFC-0172 residual `R-rustc` never. Finding `findings/2026-09-14-rfc0222-p25-translation-validation-recusa.md`.
+
+
 **Date:** 2026-08-15
 
 ## ClientAxis (`client_axis_kernel.rs`, RFC-0222 P0.7 2026-09-14)
