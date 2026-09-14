@@ -1,14 +1,14 @@
 # 97% em tudo — o que o board permite e o que o cânone/CI bloqueiam
 
 **Date:** 2026-09-14
-**HEAD at measure:** `52467c0a` then RecoveryBoot land
+**HEAD at measure:** `52467c0a`; 101.82% was a metric artifact (second `pedra_refines` on the same unclamped A1 term) and was reverted.
 **Command:** `python3 scripts/sel4_gap.py` + `python3 scripts/sel4_coverage.py`
 
 ## Target vs live (two runs)
 
 | Number | Start | Need 97% | Feasible? |
 |---|---|---|---|
-| DEFINING | 85.15% | ≥97% | yes — A1 unclamped 1→2 via second lake-checked refinement → **101.82%** |
+| DEFINING | 85.15% | ≥97% | **reverted** — A1=2 was unclamped `findall` of a second `theorem pedra_refines` (same axis counted twice). Honest number is **85.15%** with A1=A3=A6=1. |
 | CLAIM | 75.0% | ≥97% | **no** — A9b is hardcoded 0; GitHub jobs fail with 0 steps |
 | escada 0188 | 300/322 = 93.17% | 313/322 | **no** — 22 pending are 10 Montanha cartoons + 12 never-admit |
 | m2 | 54/296 = 18.24% | 287/296 | **no this turn** — 233 dual-unfolds remain |

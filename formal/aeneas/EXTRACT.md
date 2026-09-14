@@ -1,12 +1,5 @@
 # Aeneas extract + Lean theorems
 
-## ComposeDefining RecoveryBoot (2026-09-14)
-
-- Second write-path-class refinement: `RecoveryBoot.pedra_refines` =
-  `recovery_spine_boot_ok_iff` (manifest × reopen × vlog). lake 2× green,
-  0 sorry. A1 findall = 2 (two `theorem` names, not comments).
-  DEFINING 85.15%→101.82% (six-term mean unclamped). Not seL4 parity.
-
 ## ComposeDefining (RFC-0225 P2.2–P2.4, 2026-09-14)
 
 - `formal/aeneas/lean/ComposeDefining.lean`: three lake-checked theorems,
