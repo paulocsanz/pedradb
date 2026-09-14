@@ -11,8 +11,8 @@
 //!   is validated against the **same** `last_seq`, before any of the
 //!   group's own sequences exist — members of the same group are
 //!   simultaneous, with no serialization order between them (intra-group
-//!   writes never conflict). Called by `WriteGroup::validate_occ_batch`
-//!   after collecting each member's read state.
+//!   writes never conflict). Inner loop of [`occ_batch_plan`]; production
+//!   `WriteGroup::validate_occ_batch` calls `occ_batch_plan` (RFC-0222 P0.6).
 //! - **fence** ([`fence_publish_seq`]): the group becomes visible at one
 //!   publish watermark — the max appended member sequence — after WAL
 //!   durability. Called by `GroupInFlight::max_appended_seq` (`db.rs`).

@@ -185,7 +185,7 @@ pub(crate) fn probe_order_covering_as_is(
 /// pair is STRICTLY disjoint — `hi[i-1] < lo[i]`. Equal-`lo` ties (the
 /// put/tombstone shape of findings/2026-09-04-reopen-delete-resurrected)
 /// and overlaps must stay on the newest-first walk
-/// ([`probe_order_covering`]). `SstRun::pairwise_disjoint` wires here;
+/// ([`probe_order_covering`]). `SstRun::disjoint_sorted_by_lo` wires here;
 /// the engine passes parallel arrays in `by_lo` order, and `min` keeps
 /// the fn total on mismatched lengths.
 #[cfg(not(verus_keep_ghost))]
@@ -385,6 +385,40 @@ mod tests {
         let his = [k, k];
         assert!(!run_pairwise_disjoint_los(&los, &his));
         assert!(run_pairwise_disjoint_los_as_is(&los, &his));
+    }
+
+    /// RFC-0222 P0.6: production rebuilds runs through the kernel, not an
+    /// inlined `>=`. The named body is the rustc-linked proof term.
+    #[test]
+    fn disjoint_sorted_by_lo_calls_kernel() {
+        let body = include_str!("db.rs");
+        let needle = "fn disjoint_sorted_by_lo";
+        let start = body.find(needle).expect("disjoint_sorted_by_lo in db.rs");
+        let rest = &body[start..];
+        let brace = rest.find('{').expect("body");
+        let bytes = rest[brace..].as_bytes();
+        let mut depth = 0i32;
+        let mut end = 0usize;
+        for (i, &b) in bytes.iter().enumerate() {
+            if b == b'{' {
+                depth += 1;
+            } else if b == b'}' {
+                depth -= 1;
+                if depth == 0 {
+                    end = brace + i;
+                    break;
+                }
+            }
+        }
+        let fn_body = &rest[..=end];
+        assert!(
+            fn_body.contains("run_pairwise_disjoint_los("),
+            "SstRun::disjoint_sorted_by_lo must call run_pairwise_disjoint_los"
+        );
+        assert!(
+            !fn_body.contains("windows(2)"),
+            "inlined adjacent >= must not return; the kernel owns the predicate"
+        );
     }
 
     /// A real gap (hi[i-1] < lo[i]) arms both rules — the guard is not

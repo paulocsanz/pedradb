@@ -1,6 +1,6 @@
 # RFC-0222: Escada até o par seL4 — gap por eixo com denominador nomeado, medido por máquina
 
-**Status:** active (2026-09-13: P0.1–P0.5 done; P0.6 em andamento)
+**Status:** active (2026-09-14: P0.1–P0.6 done; P0.7 enrollment em andamento)
 **Updated:** 2026-09-13
 
 ## Background
@@ -34,7 +34,7 @@ Frase de venda permitida (cânone): *"programa de verificação na classe de cla
 - [x] **P0.3** clock gate: falso-positivo do harness — `three_teeth_queued.rs` é `#[cfg(test)]`-gated no `lib.rs`; o gate aprende a honrar gating de módulo no pai (não exempt-list: correção do heurístico documentado no próprio docstring) — status: done (`2b37ef71`)
 - [x] **P0.4** coverage-map.md re-medido (69 kernels/28.464 LOC/312 pares; a regra própria do mapa) + os 4 sorries da stdlib Aeneas nomeados na tabela TCB do ledger — status: done (re-medição por máquina `sel4_gap.py` 68 kernels/27.960 LOC; sorries verificados no pin `daa85d7`; junto com P0.5 neste commit)
 - [x] **P0.5** 4 scripts Verus: `vote_decision`/`dictionary_link` (arquivos perderam o bloco `verus!` — restaura in-file twin ou migra a rota do par para Aeneas onde o teorema já existe) e `changelog_rebuild`/`lookup` (lemmas chamam fns exec no `ensures` — restatear em spec/`when_used_as_spec`) — status: done (2 runners órfãos deletados + 3 pares migrados p/ Aeneas; 2 runners reparados verde: 13/14 verified 0 errors)
-- [ ] **P0.6** 12 caller-lints: cada um ou a produção volta a chamar o kernel ou o catalog aponta o caller real (trampolim pós-0219) — status: `todo`
+- [x] **P0.6** 12 caller-lints: cada um ou a produção volta a chamar o kernel ou o catalog aponta o caller real (trampolim pós-0219) — status: done (6 pares / 11 linhas FAIL: `run_disjoint` code-side — `disjoint_sorted_by_lo` chama `run_pairwise_disjoint_los`; `range_covers`/`flush_plan`/`probe_order_covering`/`group_validate`/`occ_member_fate` catalog-side — caller real pós-0219)
 - [ ] **P0.7** onda de enrollment (8 kernels sem rota + ~53 pub fns fora da superfície): kernel+twin+script no padrão dos 73 — fan-out, converge com 0221 P0.6 — status: `todo`
 - [ ] **P0.8** push: `proof-check` + `verification-gates` verdes no GitHub (portão do usuário: o push é dele) — status: `todo`
 
@@ -67,7 +67,7 @@ Frase de venda permitida (cânone): *"programa de verificação na classe de cla
 | P0.3 | p0 | clock gate honra gating de módulo | done | `2b37ef71` | 2026-09-13 |
 | P0.4 | p0 | coverage-map re-medido + 4 sorries no TCB | done | este commit | 2026-09-13 |
 | P0.5 | p0 | 4 scripts Verus consertados | done | este commit | 2026-09-13 |
-| P0.6 | p0 | 12 caller-lints fechados | todo | — | 2026-09-13 |
+| P0.6 | p0 | 12 caller-lints fechados | done | este commit | 2026-09-14 |
 | P0.7 | p0 | onda de enrollment (fan-out) | todo | — | 2026-09-13 |
 | P0.8 | p0 | CI verde no GitHub (push) | todo | — | 2026-09-13 |
 | P1.1 | p1 | toolchains formais no proof-check.yml | todo | — | 2026-09-13 |

@@ -1831,8 +1831,7 @@
       "twin": "crates/pedradb-core/src/merge.rs",
       "aeneas": "scripts/aeneas_merge.sh",
       "callers": [
-        "crates/pedradb-core/src/merge.rs",
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/merge.rs"
       ],
       "entry": "range_tombstone_covers",
       "as_is": "range_tombstone_covers_as_is",
@@ -7040,7 +7039,7 @@
       "live_callers": [
         {
           "file": "crates/pedradb-core/src/db.rs",
-          "handler": "flush_pipeline"
+          "handler": "flush"
         }
       ],
       "dst_plant": {
@@ -7095,16 +7094,10 @@
       "twin": "crates/pedradb-core/src/probe_order_kernel.rs",
       "verus": "scripts/verus_probe_order.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/probe_order_kernel.rs"
       ],
       "entry": "probe_order_covering",
       "as_is": "probe_order_covering_as_is",
-      "live_callers": [
-        {
-          "file": "crates/pedradb-core/src/db.rs",
-          "handler": "lookup_sst_packed"
-        }
-      ],
       "dst_plant": {
         "file": "crates/pedradb-core/src/probe_order_kernel.rs",
         "test": "probe_order_covering_on_live_gate_is_not_ok"
@@ -7120,16 +7113,10 @@
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
       "verus": "scripts/verus_group_commit_kernel.sh",
       "callers": [
-        "crates/pedradb-core/src/concurrent.rs"
+        "crates/pedradb-core/src/group_commit_kernel.rs"
       ],
       "entry": "group_validate",
       "as_is": "occ_conflict_as_is_serialized",
-      "live_callers": [
-        {
-          "file": "crates/pedradb-core/src/concurrent.rs",
-          "handler": "validate_occ_batch"
-        }
-      ],
       "dst_plant": {
         "file": "crates/pedradb-core/src/group_commit_kernel.rs",
         "test": "group_members_are_simultaneous"
@@ -7149,19 +7136,13 @@
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
       "verus": "scripts/verus_group_commit_kernel.sh",
       "callers": [
-        "crates/pedradb-core/src/concurrent.rs"
+        "crates/pedradb-core/src/group_commit_kernel.rs"
       ],
       "entry": "occ_member_fate",
       "handlers": [
-        "validate_occ_batch"
+        "occ_batch_plan"
       ],
       "as_is": "occ_member_fate_as_is",
-      "live_callers": [
-        {
-          "file": "crates/pedradb-core/src/concurrent.rs",
-          "handler": "validate_occ_batch"
-        }
-      ],
       "dst_plant": {
         "file": "crates/pedradb-core/src/group_commit_kernel.rs",
         "test": "occ_member_fate_on_live_conflict_is_not_ok"

@@ -1311,12 +1311,20 @@ impl SstRun {
                 .unwrap()
                 .cmp(ssts[b].smallest_user_key().unwrap())
         });
-        for pair in by_lo.windows(2) {
-            if ssts[pair[0]].largest_user_key().unwrap()
-                >= ssts[pair[1]].smallest_user_key().unwrap()
-            {
-                return None;
-            }
+        // RFC-0164 P1.2 / RFC-0222 P0.6: the strict-disjoint predicate
+        // lives in the kernel rustc links. Equal-lo ties (put+tombstone)
+        // keep the covering walk — the inlined `>=` was the same test
+        // but the catalog could not see the call.
+        let los: Vec<&[u8]> = by_lo
+            .iter()
+            .map(|&i| ssts[i].smallest_user_key().unwrap())
+            .collect();
+        let his: Vec<&[u8]> = by_lo
+            .iter()
+            .map(|&i| ssts[i].largest_user_key().unwrap())
+            .collect();
+        if !crate::probe_order_kernel::run_pairwise_disjoint_los(&los, &his) {
+            return None;
         }
         Some(by_lo)
     }
