@@ -268,3 +268,10 @@ def m2_fn_fdatasync_rc_ok : String := "fdatasync_rc_ok"
 def m2_fn_trajectory_violation : String := "trajectory_violation"
 def m2_fn_check_trajectory : String := "check_trajectory"
 def m2_fn_liveness_admitted : String := "liveness_admitted"
+def m2_fn_put_handler_plan : String := "put_handler_plan"
+def m2_fn_open_wal_head_plan : String := "open_wal_head_plan"
+
+/-- Index is inhabited (lean_extracts.sh requires a `theorem`). Proofs of
+    each named atom live in the home Lean file. -/
+theorem m2_index_names_put_handler :
+    m2_fn_put_handler_plan = "put_handler_plan" := rfl

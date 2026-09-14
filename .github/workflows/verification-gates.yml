@@ -140,7 +140,7 @@ jobs:
           cmp /tmp/d1.log /tmp/d2.log
           grep -q 'GATE depth-floor: GREEN' /tmp/d1.log
           python3 scripts/check_depth_floor.py --selftest | tee /tmp/ds.log
-          grep -q 'SELFTEST depth-floor: 4/4 sabotages caught' /tmp/ds.log
+          grep -q 'SELFTEST depth-floor: 5/5 sabotages caught' /tmp/ds.log
 
   product-floor:
     name: RFC-0191 P0.1 product-guarantee ratchet (D1/R1/T1/C1)

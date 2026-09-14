@@ -3,7 +3,7 @@
 //! (Charon walks this crate; the production files are the source of
 //! truth — never edit copies).
 
-#[path = "../../../../crates/pedradb-core/src/wal/format.rs"]
+#[path = "../../../../crates/pedradb-core/src/wal/format_kernel.rs"]
 pub mod format;
 
 #[path = "../../../../crates/pedradb-core/src/wal/recover_kernel.rs"]

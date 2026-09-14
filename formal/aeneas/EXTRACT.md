@@ -1,5 +1,19 @@
 # Aeneas extract + Lean theorems
 
+## RFC-0157 stage 2 — rustc put/open scripts (2026-09-14)
+
+`glue.db_rs_extracted` stays **false** (22k+9k not dumped). The rustc
+handlers now match extracted total fns in `write_admission_kernel.rs`:
+
+- `put_handler_plan` — `Db::put` → `apply_batch_with`
+- `open_wal_head_plan` — `open_with_env_sourced` WAL-head (composes
+  `torn_head_is_empty_log`)
+
+`aeneas_write_admission.sh --required` restamped SOURCE.write_admission.
+Lean ∀: `put_handler_plan_fate_iff`, `open_wal_head_plan_fate_iff`.
+`lake build WriteAdmission` green. ConcurrentDb open/put still call
+`Db::open_with_env` / write-group `submit_one`.
+
 ## A2b 100% + escada 0188 100% (2026-09-14)
 
 - A2b: 868/925 → **901/901 = 100.0%**. Test-string `pub fn` false positives

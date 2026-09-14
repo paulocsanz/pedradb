@@ -9,4 +9,4 @@ publish = false
 description = "Standalone crate whose [lib] path is production l28.rs"
 
 [lib]
-path = "../../../crates/pedradb-store/src/l28.rs"
+path = "../../../crates/pedradb-store/src/l28_kernel.rs"

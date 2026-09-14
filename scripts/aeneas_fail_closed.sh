@@ -19,7 +19,7 @@ if [[ -z "$CHARON" || -z "$AENEAS" ]]; then
   echo "skip  $msg"; exit 0
 fi
 mkdir -p "$OUT"
-SRC="$ROOT/crates/pedradb-http/src/fail_closed.rs"
+SRC="$ROOT/crates/pedradb-http/src/fail_closed_kernel.rs"
 echo "      charon=$CHARON"
 ( cd "$CRATE" && "$CHARON" cargo --preset=aeneas \
     --start-from 'crate::parse_error_writes_status' \
@@ -142,7 +142,7 @@ if grep -q 'sorry' "$OUT/lean/FailClosedKernel.lean"; then
   exit 1
 fi
 {
-  echo "path=crates/pedradb-http/src/fail_closed.rs"
+  echo "path=crates/pedradb-http/src/fail_closed_kernel.rs"
   echo "sha256=$(shasum -a 256 "$SRC" | awk '{print $1}')"
   echo "aeneas=$("$AENEAS" -version 2>/dev/null | awk '{print $NF}')"
   echo "charon=$("$CHARON" version 2>/dev/null | head -1)"

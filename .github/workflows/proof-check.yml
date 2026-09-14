@@ -76,9 +76,10 @@ jobs:
   lean-extracts:
     name: lean_extracts.sh --required (pinned Lean 4.31.0)
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     env:
       LEAN_TOOLCHAIN: leanprover/lean4:v4.31.0
+      AENEAS_REV: daa85d7e89400fa978be83fedbc7e475a83f0889
     steps:
       - uses: actions/checkout@v4
       - name: install pinned elan + Lean ${{ env.LEAN_TOOLCHAIN }}
@@ -86,19 +87,46 @@ jobs:
           curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
             | sh -s -- -y --default-toolchain "${LEAN_TOOLCHAIN}"
           echo "$HOME/.elan/bin" >> "${GITHUB_PATH}"
+      - name: clone pinned Aeneas Lean stdlib (lakefile path ../../../../aeneas)
+        run: |
+          # formal/aeneas/lean/lakefile.toml requires
+          # ../../../../aeneas/backends/lean — sibling of the repo checkout.
+          git clone --filter=blob:none --no-checkout \
+            https://github.com/AeneasVerif/aeneas.git "${GITHUB_WORKSPACE}/../aeneas"
+          git -C "${GITHUB_WORKSPACE}/../aeneas" fetch --depth 1 origin "${AENEAS_REV}"
+          git -C "${GITHUB_WORKSPACE}/../aeneas" checkout --force FETCH_HEAD
+      - uses: actions/cache@v4
+        with:
+          path: formal/aeneas/lean/.lake
+          key: lake-${{ env.LEAN_TOOLCHAIN }}-${{ hashFiles('formal/aeneas/lean/lake-manifest.json', 'formal/aeneas/lean/lakefile.toml') }}
       - name: lean_extracts.sh --required
         run: bash scripts/lean_extracts.sh --required
 
   aeneas-corpus:
     name: every scripts/aeneas_*.sh --required (pinned aeneas+charon)
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 240
     env:
       AENEAS_REV: daa85d7e89400fa978be83fedbc7e475a83f0889
       CHARON_REV: 340b1af4df92608d0911fc2ba26eef3fd3a30ab4
       CHARON_VERSION: "0.1.232"
     steps:
       - uses: actions/checkout@v4
+      - name: install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            extra-substituters = https://hacl.cachix.org
+            extra-trusted-public-keys = hacl.cachix.org-1:FzsZ2xsByOwKwIWNPII7yMOelJNDZ12mDAj3d1eGX0c=
+      - name: hacl binary cache (pull)
+        uses: cachix/cachix-action@v17
+        with:
+          name: hacl
+          skipPush: true
+      - name: nix-build pinned aeneas (charon is linked into the same bin)
+        run: |
+          nix build "github:AeneasVerif/aeneas/${AENEAS_REV}#aeneas" -L --out-link /tmp/aeneas-result
+          echo "/tmp/aeneas-result/bin" >> "${GITHUB_PATH}"
       - name: charon + aeneas must be the pinned shas (never skip)
         run: |
           # RFC-0222 P1.1: --required forbids skip→exit 0. The pins are the

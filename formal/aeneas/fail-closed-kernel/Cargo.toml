@@ -9,4 +9,4 @@ publish = false
 description = "Standalone crate whose [lib] path is production http fail_closed.rs"
 
 [lib]
-path = "../../../crates/pedradb-http/src/fail_closed.rs"
+path = "../../../crates/pedradb-http/src/fail_closed_kernel.rs"

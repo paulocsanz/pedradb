@@ -6960,6 +6960,66 @@
       }
     },
     {
+      "id": "put_handler_plan",
+      "finding": "RFC-0157 stage 2",
+      "twin_kind": "atom",
+      "atom": "put_handler_plan",
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0157 stage 2: o script rustc-linked de Db::put -> apply_batch_with e o kernel put_handler_plan (empty skip WAL; commit Err restaura next_seq); AS-IS sempre faz flush; trampolim apply_batch_with faz match; iff-forall put_handler_plan_fate_iff em WriteAdmission.lean"
+      },
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "aeneas": "scripts/aeneas_write_admission.sh",
+      "callers": [
+        "crates/pedradb-core/src/db_kernel.rs"
+      ],
+      "entry": "put_handler_plan",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/db_kernel.rs",
+          "handler": "apply_batch_with"
+        }
+      ],
+      "as_is": "put_handler_plan_as_is",
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+        "test": "put_handler_plan_on_live_empty_skips_wal"
+      }
+    },
+    {
+      "id": "open_wal_head_plan",
+      "finding": "RFC-0157 stage 2",
+      "twin_kind": "atom",
+      "atom": "open_wal_head_plan",
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0157 stage 2: o script rustc-linked de open_with_env_sourced no WAL-head e o kernel open_wal_head_plan (WAL ausente skip; Truncated(0) tiny = empty-log via torn_head_is_empty_log); AS-IS sempre recovers; trampolim faz match; iff-forall open_wal_head_plan_fate_iff em WriteAdmission.lean"
+      },
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "aeneas": "scripts/aeneas_write_admission.sh",
+      "callers": [
+        "crates/pedradb-core/src/db_kernel.rs"
+      ],
+      "entry": "open_wal_head_plan",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/db_kernel.rs",
+          "handler": "open_with_env_sourced"
+        }
+      ],
+      "as_is": "open_wal_head_plan_as_is",
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+        "test": "open_wal_head_plan_on_live_missing_skips"
+      }
+    },
+    {
       "id": "group_ack_plan",
       "finding": "RFC-0219 P2.1",
       "twin_kind": "atom",

@@ -9,4 +9,4 @@ publish = false
 description = "Standalone crate whose [lib] path is production capi handles.rs"
 
 [lib]
-path = "../../../crates/pedradb-capi/src/handles.rs"
+path = "../../../crates/pedradb-capi/src/handles_kernel.rs"

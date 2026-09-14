@@ -2049,7 +2049,11 @@ impl<E: Env> Db<E> {
         // RFC-0047 P0.2: set when a PointInTime open discards a WAL suffix.
         let mut point_in_time_report: Option<RecoveryReport> = None;
 
-        if env.exists(&wal_path) {
+        let wal_exists = env.exists(&wal_path);
+        match crate::write_admission_kernel::open_wal_head_plan(wal_exists, false, 0) {
+            crate::write_admission_kernel::OpenWalHeadPlan::Skip => {}
+            crate::write_admission_kernel::OpenWalHeadPlan::EmptyTiny
+            | crate::write_admission_kernel::OpenWalHeadPlan::RecoverSpan => {
             let (records, last_good) = match Wal::recover_span_on(&env, &wal_path) {
                 Ok((records, last_good, resync_origin)) => {
                     if let Some(origin) = resync_origin {
@@ -2092,12 +2096,12 @@ impl<E: Env> Db<E> {
                 }
                 Err(CoreError::Truncated(0)) => {
                     let len = env.metadata_len(&wal_path).unwrap_or(0);
-                    if crate::write_admission_kernel::torn_head_is_empty_log(
-                        len,
-                        crate::write_admission_kernel::TINY_WAL_EMPTY_MAX,
-                    ) {
-                        (Vec::new(), 0)
-                    } else {
+                    match crate::write_admission_kernel::open_wal_head_plan(true, true, len) {
+                        crate::write_admission_kernel::OpenWalHeadPlan::EmptyTiny
+                        | crate::write_admission_kernel::OpenWalHeadPlan::Skip => {
+                            (Vec::new(), 0)
+                        }
+                        crate::write_admission_kernel::OpenWalHeadPlan::RecoverSpan => {
                         let escalated = crate::corrupt::escalate_or_fail(
                             &env,
                             &dir,
@@ -2127,6 +2131,7 @@ impl<E: Env> Db<E> {
                             }
                             _ => return Err(escalated),
                         }
+                    }
                     }
                 }
                 Err(e @ CoreError::Crc { offset, .. }) => {
@@ -2253,6 +2258,7 @@ impl<E: Env> Db<E> {
                     crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
                     | crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => {}
                 }
+            }
             }
         }
 
@@ -9501,20 +9507,40 @@ impl<E: Env> Db<E> {
                 }
             }
         }
-        if crate::write_admission_kernel::batch_is_empty(records.len() as u64) {
-            return Ok(self.last_sequence());
-        }
-        match self.commit_ops_with(records, durability) {
-            Ok(()) => {
-                // F18: the write is already durable (WAL fsync under sync=true). Auto-flush
-                // is a background space concern — failing it must not surface as "put/commit
-                // failed" or clients will retry and the operator loses the success signal.
-                self.maybe_auto_flush_best_effort();
-                Ok(self.last_sequence())
+        let n = records.len() as u64;
+        match crate::write_admission_kernel::put_handler_plan(n, false) {
+            crate::write_admission_kernel::PutHandlerPlan::EmptyOk => {
+                return Ok(self.last_sequence());
             }
-            Err(e) => {
-                self.next_seq.store(seq_checkpoint, Ordering::Relaxed);
-                Err(e)
+            crate::write_admission_kernel::PutHandlerPlan::CommitThenFlush
+            | crate::write_admission_kernel::PutHandlerPlan::RestoreSeqOnCommitErr => {
+                match self.commit_ops_with(records, durability) {
+                    Ok(()) => {
+                        assert!(
+                            matches!(
+                                crate::write_admission_kernel::put_handler_plan(n, false),
+                                crate::write_admission_kernel::PutHandlerPlan::CommitThenFlush
+                            ),
+                            "commit Ok ⇒ CommitThenFlush"
+                        );
+                        // F18: the write is already durable (WAL fsync under sync=true). Auto-flush
+                        // is a background space concern — failing it must not surface as "put/commit
+                        // failed" or clients will retry and the operator loses the success signal.
+                        self.maybe_auto_flush_best_effort();
+                        Ok(self.last_sequence())
+                    }
+                    Err(e) => {
+                        assert!(
+                            matches!(
+                                crate::write_admission_kernel::put_handler_plan(n, true),
+                                crate::write_admission_kernel::PutHandlerPlan::RestoreSeqOnCommitErr
+                            ),
+                            "commit Err ⇒ RestoreSeqOnCommitErr"
+                        );
+                        self.next_seq.store(seq_checkpoint, Ordering::Relaxed);
+                        Err(e)
+                    }
+                }
             }
         }
     }

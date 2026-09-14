@@ -277,6 +277,86 @@ pub fn parked_pop_plan_as_is(_parked_len: u64) -> ParkedPopPlan {
     ParkedPopPlan::PopOldestParked
 }
 
+/// RFC-0157 stage 2: rustc-linked `Db::put` → `apply_batch_with` script.
+/// Empty batch skips WAL; commit Err restores the seq checkpoint; else
+/// commit then best-effort auto-flush (F18, not data-fate).
+#[cfg(not(verus_keep_ghost))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PutHandlerPlan {
+    /// `batch_is_empty` — return last sequence, no WAL.
+    EmptyOk,
+    /// Non-empty and commit succeeded — apply already happened inside
+    /// `commit_ops_with`; trampoline may auto-flush.
+    CommitThenFlush,
+    /// Non-empty and commit failed — restore `next_seq`.
+    RestoreSeqOnCommitErr,
+}
+
+/// Production `apply_batch_with` script: empty skips WAL; commit Err
+/// restores the seq checkpoint.
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn put_handler_plan(n_records: u64, commit_failed: bool) -> PutHandlerPlan {
+    if batch_is_empty(n_records) {
+        PutHandlerPlan::EmptyOk
+    } else if commit_failed {
+        PutHandlerPlan::RestoreSeqOnCommitErr
+    } else {
+        PutHandlerPlan::CommitThenFlush
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: empty batch still WAL-commits; commit Err still flushes (dente).
+#[must_use]
+pub fn put_handler_plan_as_is(_n_records: u64, _commit_failed: bool) -> PutHandlerPlan {
+    PutHandlerPlan::CommitThenFlush
+}
+
+/// RFC-0157 stage 2: rustc-linked `open_with_env_sourced` WAL-head script.
+/// Missing WAL skips recovery; Truncated(0) on a tiny file is empty-log;
+/// anything else recovers (or escalates via `reopen_outcome` in glue).
+#[cfg(not(verus_keep_ghost))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OpenWalHeadPlan {
+    /// No WAL file — skip recover_span.
+    Skip,
+    /// Truncated(0) on a tiny WAL is an empty failed-first-append.
+    EmptyTiny,
+    /// Recover the span (or escalate through `reopen_outcome`).
+    RecoverSpan,
+}
+
+/// Production `open_with_env_sourced` WAL-head script. Composes
+/// `torn_head_is_empty_log` for Truncated(0).
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn open_wal_head_plan(
+    wal_exists: bool,
+    truncated_zero: bool,
+    wal_len: u64,
+) -> OpenWalHeadPlan {
+    if !wal_exists {
+        OpenWalHeadPlan::Skip
+    } else if truncated_zero && torn_head_is_empty_log(wal_len, TINY_WAL_EMPTY_MAX) {
+        OpenWalHeadPlan::EmptyTiny
+    } else {
+        OpenWalHeadPlan::RecoverSpan
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: missing WAL still recovers; tiny Truncated(0) is treated as
+/// a live span (bitrot of an empty first-append is served).
+#[must_use]
+pub fn open_wal_head_plan_as_is(
+    _wal_exists: bool,
+    _truncated_zero: bool,
+    _wal_len: u64,
+) -> OpenWalHeadPlan {
+    OpenWalHeadPlan::RecoverSpan
+}
+
 #[cfg(not(verus_keep_ghost))]
 /// Required sync failed ⇒ fence so later fsync cannot publish an unacked prefix.
 #[must_use]
@@ -1585,6 +1665,79 @@ mod tests {
     }
 
     #[test]
+    fn put_handler_plan_on_live_empty_skips_wal() {
+        assert_eq!(put_handler_plan(0, false), PutHandlerPlan::EmptyOk);
+        assert_eq!(put_handler_plan(0, true), PutHandlerPlan::EmptyOk);
+        assert_eq!(
+            put_handler_plan(1, false),
+            PutHandlerPlan::CommitThenFlush
+        );
+        assert_eq!(
+            put_handler_plan(1, true),
+            PutHandlerPlan::RestoreSeqOnCommitErr
+        );
+        assert_eq!(
+            put_handler_plan_as_is(0, true),
+            PutHandlerPlan::CommitThenFlush,
+            "AS-IS dente: empty batch still commits; commit Err still flushes"
+        );
+        let apply = named_fn_src(include_str!("db_kernel.rs"), "apply_batch_with")
+            .expect("apply_batch_with");
+        assert!(
+            apply.contains("match crate::write_admission_kernel::put_handler_plan("),
+            "apply_batch_with must match put_handler_plan"
+        );
+        let put = named_fn_src(include_str!("db_kernel.rs"), "put_with").expect("put_with");
+        assert!(
+            put.contains("apply_batch_with("),
+            "Db::put_with (rustc put path) calls apply_batch_with"
+        );
+        let cput = named_fn_src(include_str!("concurrent_kernel.rs"), "put_with_seq")
+            .expect("ConcurrentDb::put_with_seq");
+        assert!(
+            cput.contains("submit_one("),
+            "ConcurrentDb put path still submits through the write group"
+        );
+    }
+
+    #[test]
+    fn open_wal_head_plan_on_live_missing_skips() {
+        assert_eq!(
+            open_wal_head_plan(false, false, 0),
+            OpenWalHeadPlan::Skip
+        );
+        assert_eq!(
+            open_wal_head_plan(true, true, 8),
+            OpenWalHeadPlan::EmptyTiny
+        );
+        assert_eq!(
+            open_wal_head_plan(true, true, 10_000),
+            OpenWalHeadPlan::RecoverSpan
+        );
+        assert_eq!(
+            open_wal_head_plan(true, false, 0),
+            OpenWalHeadPlan::RecoverSpan
+        );
+        assert_eq!(
+            open_wal_head_plan_as_is(false, true, 8),
+            OpenWalHeadPlan::RecoverSpan,
+            "AS-IS dente: missing WAL still recovers; tiny Truncated(0) served"
+        );
+        let open = named_fn_src(include_str!("db_kernel.rs"), "open_with_env_sourced")
+            .expect("open_with_env_sourced");
+        assert!(
+            open.contains("match crate::write_admission_kernel::open_wal_head_plan("),
+            "open_with_env_sourced must match open_wal_head_plan"
+        );
+        let copen = named_fn_src(include_str!("concurrent_kernel.rs"), "open_with_env")
+            .expect("ConcurrentDb::open_with_env");
+        assert!(
+            copen.contains("Db::open_with_env("),
+            "ConcurrentDb open path still calls Db::open_with_env"
+        );
+    }
+
+    #[test]
     fn cas_absent_put_on_live_key_is_not_ok() {
         assert!(cas_absent_put(false));
         assert!(!cas_absent_put(true));
@@ -1776,6 +1929,10 @@ mod tests {
             || cond.contains("write_stall_drain")
             || cond.contains("defer_auto_compact")
             || cond.contains("physical_cfs")
+            || cond.contains("let Some(")
+            || cond.contains("stage_flush_imm")
+            || cond.contains("keep_wal_archives")
+            || cond.contains("wal_archives")
             || cond.contains("resync_origin")
             || cond.contains("max_sequence")
             || cond.contains("large_value_threshold")

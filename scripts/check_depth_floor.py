@@ -257,7 +257,8 @@ def selftest() -> int:
 
     # S1: floor raised beyond the registered ladder proofs.
     tampered_floors = dict(floors)
-    tampered_floors["floor_close"] = live["close"] + 1
+    reg_close = sum(1 for r in rows if r["kind"] == "close")
+    tampered_floors["floor_close"] = reg_close + 1
     if check(tampered_floors, actual, rows, reg_errs, live):
         print("SELFTEST depth-floor: caught=shrunk-floor")
         caught += 1

@@ -18,7 +18,7 @@ if [[ -z "$CHARON" || -z "$AENEAS" ]]; then
   echo "skip  $msg"; exit 0
 fi
 mkdir -p "$OUT"
-SRC="$ROOT/crates/pedradb-capi/src/handles.rs"
+SRC="$ROOT/crates/pedradb-capi/src/handles_kernel.rs"
 echo "      charon=$CHARON"
 ( cd "$CRATE" && "$CHARON" cargo --preset=aeneas \
     --start-from 'crate::c_len_admitted' \
@@ -32,7 +32,7 @@ echo "      charon=$CHARON"
     --dest-file "$OUT/capi_handles_kernel.llbc" )
 "$AENEAS" -backend lean -dest "$OUT/lean" "$OUT/capi_handles_kernel.llbc"
 {
-  echo "path=crates/pedradb-capi/src/handles.rs"
+  echo "path=crates/pedradb-capi/src/handles_kernel.rs"
   echo "sha256=$(shasum -a 256 "$SRC" | awk '{print $1}')"
   echo "aeneas=$("$AENEAS" -version 2>/dev/null | awk '{print $NF}')"
   echo "charon=$("$CHARON" version 2>/dev/null | head -1)"

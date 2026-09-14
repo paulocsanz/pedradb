@@ -4,7 +4,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/crates/pedradb-capi/src/handles.rs"
+SRC="$ROOT/crates/pedradb-capi/src/handles_kernel.rs"
 
 if [[ -x "${VERUS:-}" ]]; then
   :

@@ -2,13 +2,13 @@
   "comment": "RFC-0222 P1.2 \u2014 sel4_gap floors. Never regress; raise in the same commit as the proof.",
   "updated": "2026-09-14",
   "floors": {
-    "pairs_covered": 322,
-    "pairs_total": 322,
-    "atom_fns": 318,
-    "atom_fns_chained": 318,
+    "pairs_covered": 324,
+    "pairs_total": 324,
+    "atom_fns": 320,
+    "atom_fns_chained": 320,
     "recovery_atoms_chained": 12,
     "kernel_files_enrolled": 187,
-    "kernel_pub_fns_on_surface": 2998,
+    "kernel_pub_fns_on_surface": 3004,
     "gates_green": 8,
     "stdlib_sorries_named_in_tcb": 1
   }

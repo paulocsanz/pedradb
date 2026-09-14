@@ -9,4 +9,4 @@ publish = false
 description = "Standalone crate whose [lib] path is production tcg.rs"
 
 [lib]
-path = "../../../crates/pedradb-world/src/tcg.rs"
+path = "../../../crates/pedradb-world/src/tcg_kernel.rs"

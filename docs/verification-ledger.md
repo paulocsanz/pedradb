@@ -11,14 +11,14 @@ sustenta. Uma linha só sobe de camada (`experimento → teorema`) com o
 gate da camada de destino verde no mesmo commit (three-teeth ou
 enumeração completa); nunca por reescrita de ledger.
 
-<!-- ledger-catalog: total=322 proof=296 campaign=26 absent=0 single_artifact=315 aeneas_scripts=258 clones=7 models=34 -->
+<!-- ledger-catalog: total=324 proof=298 campaign=26 absent=0 single_artifact=317 aeneas_scripts=260 clones=7 models=34 -->
 
 ## Teorema — ∀ sobre código/modelo (machine-checked ou enumeração completa)
 
 | Garantia | Artefato | Piso nomeado (o que NÃO é) |
 |---|---|---|
 | Kernels de produção verificados (Verus twin / Aeneas Lean) | `scripts/formal/catalog.json` — 261 pares proof; exemplares `catalog:vote`, `catalog:ae_entry`, `catalog:ae_ack`, `catalog:commit_raft`, `catalog:joint_election` | O term de prova é o fonte de produção linkado pelo rustc; twin é gêmeo, não substituto |
-| Exaustivo N≤3: todo escalonamento do espaço de grants do harness mantém o invariantes (66/66, 181 nós) | gate P0.1 `crates/pedradb-world/src/bin/gate_exhaustive.rs` | Não é ∀ interleavings do SO (R-pct/R-glue); é ∀ sobre o espaço enumerado do harness |
+| Exaustivo N≤3: todo escalonamento do espaço de grants do harness mantém o invariantes (66/66, 181 nós) | gate P0.1 `crates/pedradb-world/src/bin/gate_exhaustive_kernel.rs` | Não é ∀ interleavings do SO (R-pct/R-glue); é ∀ sobre o espaço enumerado do harness |
 | Crash-injection em família (RFC-0188 P2.1): todo índice de op falível de cada workload do grid (T,S) recupera fail-closed; T e S medidos no mesmo seam (`FailingEnvArc::tripped`); 4 workloads, T∈{6,9,12} S∈{2,3,4}, 33/33 pontos | gate `gate_crash_injection.rs` (família w0-baseline / w1-double / w2-wide-values / w3-singles) | Fronteira do grid: max T=12, max S=4. Fora: workload com T>12 ou S>4, setor partido/torn write (TCG nightly), ∀π, timing de grupo |
 | Piso de barreiras: TODO sítio `sync_data`/`sync_all`/`sync_dir` de produção está pinado (igualdade exata por (arquivo,tipo)) | gate P0.4 `scripts/check_barrier_floor.py` + `scripts/ratchet/barrier_sites.tsv` | A amarração dinâmica prova sync≥1 no stream injetado, não que cada sítio foi exercitado neste run |
 | Ratchet de seeds: cada seed pinada reproduz seu desfecho/hash de escalonamento | gate P0.2 `gate_seed_ratchet.rs` + `scripts/ratchet/pct_seeds.txt` | Replay determinístico de seeds pinadas; não é descoberta nem ∀ |

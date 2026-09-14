@@ -1,7 +1,7 @@
 //! RFC-0188 P2.4 — minimal upstream repro: Aeneas refuses `dyn`-Trait
 //! types at the TYPE-DECL level ("Dynamic trait types are not supported
 //! yet"). Distilled from the production `StreamingVisibleIter` shape in
-//! `crates/pedradb-core/src/merge.rs`: a struct holding a
+//! `crates/pedradb-core/src/merge_kernel.rs`: a struct holding a
 //! `Box<dyn Iterator>` field (the fire 803 measurement showed the
 //! refusal fires on the TYPE DECL translation, before any body).
 //!

@@ -469,3 +469,85 @@ theorem parked_pop_plan_fate_iff :
       · rw [batch_is_empty_ok_iff_zero]
         exact hz
       · simp [hplan]
+
+/-- RFC-0157 stage 2 (atom `catalog:put_handler_plan`): the rustc-linked
+    `Db::put` → `apply_batch_with` script. Empty batch skips WAL; commit
+    Err restores the seq checkpoint; else commit-then-flush. Unfolds
+    `batch_is_empty` (the callee the plan calls). AS-IS always flushes. -/
+theorem put_handler_plan_fate_iff :
+    ∀ (n : U64) (commit_failed : Bool) (plan : PutHandlerPlan),
+      (put_handler_plan n commit_failed = ok plan) ↔
+        (((n = 0#u64 : Bool) = true ∧ plan = PutHandlerPlan.EmptyOk) ∨
+          ((n = 0#u64 : Bool) = false ∧ commit_failed = true ∧
+            plan = PutHandlerPlan.RestoreSeqOnCommitErr) ∨
+          ((n = 0#u64 : Bool) = false ∧ commit_failed = false ∧
+            plan = PutHandlerPlan.CommitThenFlush)) := by
+  intro n commit_failed plan
+  unfold put_handler_plan
+  cases commit_failed with
+  | true =>
+      constructor
+      · intro hval
+        obtain ⟨b, hw, hm⟩ := bind_ok_inv _ _ _ hval
+        rw [batch_is_empty_ok_iff_zero] at hw
+        cases b with
+        | true =>
+            simp at hm
+            subst hm
+            exact Or.inl ⟨hw, rfl⟩
+        | false =>
+            simp at hm
+            subst hm
+            exact Or.inr (Or.inl ⟨hw, rfl, rfl⟩)
+      · rintro (⟨hz, hplan⟩ | ⟨hz, _, hplan⟩ | ⟨_, hcf, _⟩)
+        · refine bind_intro true ?_ ?_
+          · rw [batch_is_empty_ok_iff_zero]; exact hz
+          · simp [hplan]
+        · refine bind_intro false ?_ ?_
+          · rw [batch_is_empty_ok_iff_zero]; exact hz
+          · simp [hplan]
+        · cases hcf
+  | false =>
+      constructor
+      · intro hval
+        obtain ⟨b, hw, hm⟩ := bind_ok_inv _ _ _ hval
+        rw [batch_is_empty_ok_iff_zero] at hw
+        cases b with
+        | true =>
+            simp at hm
+            subst hm
+            exact Or.inl ⟨hw, rfl⟩
+        | false =>
+            simp at hm
+            subst hm
+            exact Or.inr (Or.inr ⟨hw, rfl, rfl⟩)
+      · rintro (⟨hz, hplan⟩ | ⟨_, hcf, _⟩ | ⟨hz, _, hplan⟩)
+        · refine bind_intro true ?_ ?_
+          · rw [batch_is_empty_ok_iff_zero]; exact hz
+          · simp [hplan]
+        · cases hcf
+        · refine bind_intro false ?_ ?_
+          · rw [batch_is_empty_ok_iff_zero]; exact hz
+          · simp [hplan]
+
+/-- RFC-0157 stage 2 (atom `catalog:open_wal_head_plan`): the rustc-linked
+    `open_with_env_sourced` WAL-head script. Missing WAL skips recover;
+    Truncated(0) on a tiny file is empty-log (unfolds `torn_head_is_empty_log`);
+    else recover/escalate. AS-IS always recovers. -/
+theorem open_wal_head_plan_fate_iff :
+    ∀ (wal_exists truncated_zero : Bool) (wal_len : U64),
+      open_wal_head_plan wal_exists truncated_zero wal_len =
+        ok (if wal_exists = false then OpenWalHeadPlan.Skip
+            else if truncated_zero = true && decide (wal_len < TINY_WAL_EMPTY_MAX)
+              then OpenWalHeadPlan.EmptyTiny
+              else OpenWalHeadPlan.RecoverSpan) := by
+  intro wal_exists truncated_zero wal_len
+  unfold open_wal_head_plan
+  cases wal_exists with
+  | false => simp
+  | true =>
+      cases truncated_zero with
+      | false => simp
+      | true =>
+          simp [torn_head_is_empty_log]
+          split <;> rfl
