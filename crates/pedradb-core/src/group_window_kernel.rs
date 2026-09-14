@@ -89,21 +89,49 @@ pub const COLLECT_QUIESCE_US: u64 = 20;
 /// `wait_for`) is half a Darwin `write()` with no park tax. AS-IS = 0.
 pub const HERD_COLLECT_US: u64 = 10;
 
-/// `active > batch_len` ⇒ the missing writers are in `submit()`; give
-/// them [`HERD_COLLECT_US`] to land in this frame.
+/// Stop spinning once this many members are in the frame (mc4). More
+/// is extra wait for a syscall that already amortizes 4 puts.
+pub const HERD_TARGET: usize = 4;
+
+/// Spin [`HERD_COLLECT_US`] when the frame is short AND someone else is
+/// in-flight (`active > batch`) or just got a reply (`peers_recent` —
+/// the leader is alone in `active` after publish, peers are in the
+/// put-loop gap). `batch >= HERD_TARGET` ⇒ 0 (frame is full).
 #[must_use]
-pub fn herd_collect_us(active: usize, batch_len: usize) -> u64 {
-    if active > batch_len {
+pub fn herd_collect_us(active: usize, batch_len: usize, peers_recent: bool) -> u64 {
+    if batch_len >= HERD_TARGET {
+        0
+    } else if active > batch_len || peers_recent {
         HERD_COLLECT_US
     } else {
         0
     }
 }
 
+/// Frame has the mc4 herd — do not wait more.
+#[must_use]
+pub fn herd_full(batch_len: usize) -> bool {
+    batch_len >= HERD_TARGET
+}
+
 /// AS-IS: never wait for the in-flight herd (seal with whoever drained).
 #[must_use]
 pub fn herd_collect_us_as_is(_active: usize, _batch_len: usize) -> u64 {
     0
+}
+
+/// After a multi-member group publishes, peers are in the reply→put gap
+/// (~µs) while the leader is already on the next drain with `active=1`.
+/// Spin [`HERD_COLLECT_US`] so those puts join this frame. Lone groups
+/// (prev < 2) do not wait — that was avg_group=1.01 / 17 kQPS when
+/// `peers_recent` (250µs MULTI_HOLD) forced a 10µs spin on every group.
+#[must_use]
+pub fn post_group_grace_us(prev_len: usize, batch_len: usize) -> u64 {
+    if prev_len >= 2 && batch_len < HERD_TARGET {
+        HERD_COLLECT_US
+    } else {
+        0
+    }
 }
 
 /// Collect-loop break: only after at least one arrival beyond the entry
@@ -212,18 +240,24 @@ mod tests {
             body.contains("group_window_kernel::herd_collect_us("),
             "async lead must wait for in-flight submitters before sealing the WAL frame"
         );
+        assert!(
+            body.contains("group_window_kernel::post_group_grace_us("),
+            "lead must grace-spin after a multi-member publish"
+        );
     }
 
     #[test]
     fn herd_collect_waits_only_for_missing_inflight() {
-        assert_eq!(herd_collect_us(4, 1), HERD_COLLECT_US);
-        assert_eq!(herd_collect_us(4, 4), 0, "herd already in the batch");
-        assert_eq!(herd_collect_us(1, 1), 0);
-        assert_eq!(
-            herd_collect_us_as_is(8, 1),
-            0,
-            "AS-IS seals immediately"
-        );
+        assert_eq!(herd_collect_us(4, 1, false), HERD_COLLECT_US);
+        assert_eq!(herd_collect_us(1, 1, true), HERD_COLLECT_US, "gap after publish");
+        assert_eq!(herd_collect_us(4, 4, true), 0, "frame already at HERD_TARGET");
+        assert_eq!(herd_collect_us(1, 1, false), 0, "lone 1c never waits");
+        assert!(herd_full(4));
+        assert!(!herd_full(3));
+        assert_eq!(herd_collect_us_as_is(8, 1), 0, "AS-IS seals immediately");
+        assert_eq!(post_group_grace_us(4, 1), HERD_COLLECT_US);
+        assert_eq!(post_group_grace_us(1, 1), 0, "after a lone group, no grace");
+        assert_eq!(post_group_grace_us(4, 4), 0, "already full");
     }
 
     #[test]

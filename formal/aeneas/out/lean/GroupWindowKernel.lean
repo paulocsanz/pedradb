@@ -180,24 +180,53 @@ def async_catchup_bound_us
     Visibility: public -/
 @[global_simps, irreducible] def HERD_COLLECT_US : Std.U64 := 10#u64
 
+/-- [pedra_aeneas_group_window_kernel::HERD_TARGET]
+    Source: '../../../crates/pedradb-core/src/group_window_kernel.rs', lines 94:0-94:33
+    Visibility: public -/
+@[global_simps, irreducible] def HERD_TARGET : Std.Usize := 4#usize
+
 /-- [pedra_aeneas_group_window_kernel::herd_collect_us]:
-    Source: '../../../crates/pedradb-core/src/group_window_kernel.rs', lines 95:0-101:1
+    Source: '../../../crates/pedradb-core/src/group_window_kernel.rs', lines 101:0-109:1
     Visibility: public -/
 def herd_collect_us
-  (active : Std.Usize) (batch_len : Std.Usize) : Result Std.U64 := do
-  if active > batch_len
-  then ok HERD_COLLECT_US
-  else ok 0#u64
+  (active : Std.Usize) (batch_len : Std.Usize) (peers_recent : Bool) :
+  Result Std.U64
+  := do
+  if batch_len >= HERD_TARGET
+  then ok 0#u64
+  else
+    if active > batch_len
+    then ok HERD_COLLECT_US
+    else if peers_recent
+         then ok HERD_COLLECT_US
+         else ok 0#u64
+
+/-- [pedra_aeneas_group_window_kernel::herd_full]:
+    Source: '../../../crates/pedradb-core/src/group_window_kernel.rs', lines 113:0-115:1
+    Visibility: public -/
+def herd_full (batch_len : Std.Usize) : Result Bool := do
+  ok (batch_len >= HERD_TARGET)
 
 /-- [pedra_aeneas_group_window_kernel::herd_collect_us_as_is]:
-    Source: '../../../crates/pedradb-core/src/group_window_kernel.rs', lines 105:0-107:1
+    Source: '../../../crates/pedradb-core/src/group_window_kernel.rs', lines 119:0-121:1
     Visibility: public -/
 def herd_collect_us_as_is
   (_active : Std.Usize) (_batch_len : Std.Usize) : Result Std.U64 := do
   ok 0#u64
 
+/-- [pedra_aeneas_group_window_kernel::post_group_grace_us]:
+    Source: '../../../crates/pedradb-core/src/group_window_kernel.rs', lines 129:0-135:1
+    Visibility: public -/
+def post_group_grace_us
+  (prev_len : Std.Usize) (batch_len : Std.Usize) : Result Std.U64 := do
+  if prev_len >= 2#usize
+  then if batch_len < HERD_TARGET
+       then ok HERD_COLLECT_US
+       else ok 0#u64
+  else ok 0#u64
+
 /-- [pedra_aeneas_group_window_kernel::collect_should_break]:
-    Source: '../../../crates/pedradb-core/src/group_window_kernel.rs', lines 113:0-115:1
+    Source: '../../../crates/pedradb-core/src/group_window_kernel.rs', lines 141:0-143:1
     Visibility: public -/
 def collect_should_break
   (quiesce_timed_out : Bool) (batch_len : Std.Usize) (initial_len : Std.Usize)
@@ -209,19 +238,19 @@ def collect_should_break
   else ok false
 
 /-- [pedra_aeneas_group_window_kernel::peer_horizon_us]:
-    Source: '../../../crates/pedradb-core/src/group_window_kernel.rs', lines 125:0-127:1
+    Source: '../../../crates/pedradb-core/src/group_window_kernel.rs', lines 153:0-155:1
     Visibility: public -/
 def peer_horizon_us
   (window_us : Std.U64) (base_us : Std.U64) : Result Std.U64 := do
   core.cmp.Ord.max.default core.cmp.OrdU64.partialOrdInst.lt window_us base_us
 
 /-- [pedra_aeneas_group_window_kernel::GROUP_FLIGHT_SEED_US]
-    Source: '../../../crates/pedradb-core/src/group_window_kernel.rs', lines 134:0-134:41
+    Source: '../../../crates/pedradb-core/src/group_window_kernel.rs', lines 162:0-162:41
     Visibility: public -/
 @[global_simps, irreducible] def GROUP_FLIGHT_SEED_US : Std.U64 := 25#u64
 
 /-- [pedra_aeneas_group_window_kernel::group_window_cap_to_flight]:
-    Source: '../../../crates/pedradb-core/src/group_window_kernel.rs', lines 139:0-141:1
+    Source: '../../../crates/pedradb-core/src/group_window_kernel.rs', lines 167:0-169:1
     Visibility: public -/
 def group_window_cap_to_flight (raw1 : Option Str) : Result Bool := do
   match raw1 with
@@ -237,7 +266,7 @@ def group_window_cap_to_flight (raw1 : Option Str) : Result Bool := do
       else ok false
 
 /-- [pedra_aeneas_group_window_kernel::flight_capped_window_us]:
-    Source: '../../../crates/pedradb-core/src/group_window_kernel.rs', lines 159:0-174:1
+    Source: '../../../crates/pedradb-core/src/group_window_kernel.rs', lines 187:0-202:1
     Visibility: public -/
 def flight_capped_window_us
   (window_us : Std.U64) (flight_ema_us : Std.U64) (cap_to_flight : Bool) :
@@ -260,14 +289,14 @@ def flight_capped_window_us
   else ok window_us
 
 /-- [pedra_aeneas_group_window_kernel::merge_eligible_as_is]:
-    Source: '../../../crates/pedradb-core/src/group_window_kernel.rs', lines 179:0-181:1
+    Source: '../../../crates/pedradb-core/src/group_window_kernel.rs', lines 207:0-209:1
     Visibility: public -/
 def merge_eligible_as_is
   (_writers : Std.Usize) (_window_us : Std.U64) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_group_window_kernel::async_catchup_bound_us_as_is]:
-    Source: '../../../crates/pedradb-core/src/group_window_kernel.rs', lines 186:0-192:1
+    Source: '../../../crates/pedradb-core/src/group_window_kernel.rs', lines 214:0-220:1
     Visibility: public -/
 def async_catchup_bound_us_as_is
   (_window_us : Std.U64) (_active : Std.Usize) (_batch_len : Std.Usize) :

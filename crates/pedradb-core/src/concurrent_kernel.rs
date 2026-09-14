@@ -115,6 +115,8 @@ struct WriteGroup {
     queued: AtomicU64,
     batches: AtomicU64,
     batch_ops: AtomicU64,
+    /// Members in the last led group (post-publish grace).
+    last_group_len: AtomicUsize,
     /// Last time `active > 1` (ns, `WriteGroup::now_ns`). Fast path stays
     /// off for [`MULTI_HOLD`] after a concurrent burst so apply's pre+com
     /// from 4 clients share fsyncs instead of each taking the lone-writer
@@ -311,6 +313,7 @@ impl WriteGroup {
             queued: AtomicU64::new(0),
             batches: AtomicU64::new(0),
             batch_ops: AtomicU64::new(0),
+            last_group_len: AtomicUsize::new(0),
             last_multi_ns: AtomicU64::new(0),
             last_submit_ns: AtomicU64::new(0),
             last_complete_ns: AtomicU64::new(0),
@@ -1027,6 +1030,11 @@ impl WriteGroup {
                         .max(crate::group_window_kernel::herd_collect_us(
                             active,
                             batch.len(),
+                            false,
+                        ))
+                        .max(crate::group_window_kernel::post_group_grace_us(
+                            self.last_group_len.load(Ordering::Relaxed),
+                            batch.len(),
                         ));
                         collect_mode = us > 0;
                         (us > 0).then(|| Duration::from_micros(us))
@@ -1044,20 +1052,31 @@ impl WriteGroup {
                     // A 10µs condvar wait measured cw=23µs/grp and lost
                     // QPS; the missing writers are already in submit().
                     let initial = batch.len();
+                    let peers = self.recently_concurrent();
                     let herd_only = crate::group_window_kernel::herd_collect_us(
                         active,
                         initial,
-                    ) > 0
+                        false,
+                    )
+                    .max(crate::group_window_kernel::post_group_grace_us(
+                        self.last_group_len.load(Ordering::Relaxed),
+                        initial,
+                    ))
+                        > 0
                         && crate::group_window_kernel::async_catchup_bound_us(
                             self.effective_group_window_us(),
                             active,
                             initial,
-                            self.recently_concurrent(),
+                            peers,
                         ) == 0;
                     if herd_only {
+                        // Do not stop at batch.len() >= active: after
+                        // publish the leader is alone in `active` and
+                        // would seal at 1 (avg_group 2.17). Spin until
+                        // HERD_TARGET or the 10µs bound.
                         while Instant::now() < deadline {
                             batch.extend(g.pending.drain(..));
-                            if batch.len() >= active {
+                            if crate::group_window_kernel::herd_full(batch.len()) {
                                 break;
                             }
                             std::hint::spin_loop();
@@ -1105,6 +1124,8 @@ impl WriteGroup {
                     .fetch_add(t_wait.elapsed().as_nanos() as u64, Ordering::Relaxed);
                 self.catchup_waits.fetch_add(1, Ordering::Relaxed);
             }
+            self.last_group_len
+                .store(batch.len(), Ordering::Relaxed);
 
             // First write lock: append + absorb anyone who queued during
             // prepare (no extra wait). fsync is off that lock; apply is the
