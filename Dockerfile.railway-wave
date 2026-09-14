@@ -1,0 +1,20 @@
+# DIAG Linux Railway vs Rocks SYNC=0. Public rust image — ghcr gate is 403.
+# Not the 4 GiB caixote cartaz. Rocks overwrite < 260kQPS => round discarded.
+FROM rust:bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        clang cmake g++ libclang-dev llvm-dev pkg-config libssl-dev python3 \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src/pedradb
+COPY Cargo.toml Cargo.lock clippy.toml deny.toml ./
+COPY crates crates
+COPY examples examples
+COPY scripts/railway-linux-wave.sh scripts/railway-linux-wave.sh
+RUN chmod +x scripts/railway-linux-wave.sh \
+ && cargo build --release -p rocksdb-parity-bench --features real --bin rocks-parity-bench \
+ && cp target/release/rocks-parity-bench /usr/local/bin/rocks-parity-bench \
+ && rm -rf target
+ENV BIN=/usr/local/bin/rocks-parity-bench \
+    OUT=/data/wave \
+    ROCKS_PARITY_SYNC=0
+WORKDIR /data
+CMD ["/bin/bash", "/src/pedradb/scripts/railway-linux-wave.sh"]
