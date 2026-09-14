@@ -1023,7 +1023,11 @@ impl WriteGroup {
                             active,
                             batch.len(),
                             self.recently_concurrent(),
-                        );
+                        )
+                        .max(crate::group_window_kernel::herd_collect_us(
+                            active,
+                            batch.len(),
+                        ));
                         collect_mode = us > 0;
                         (us > 0).then(|| Duration::from_micros(us))
                     }
@@ -1036,11 +1040,30 @@ impl WriteGroup {
                 let deadline = t_wait + bound;
                 let mut g = self.queue.lock();
                 if collect_mode {
+                    // In-flight herd (active > batch): spin, do not park.
+                    // A 10µs condvar wait measured cw=23µs/grp and lost
+                    // QPS; the missing writers are already in submit().
+                    let initial = batch.len();
+                    let herd_only = crate::group_window_kernel::herd_collect_us(
+                        active,
+                        initial,
+                    ) > 0
+                        && crate::group_window_kernel::async_catchup_bound_us(
+                            self.effective_group_window_us(),
+                            active,
+                            initial,
+                            self.recently_concurrent(),
+                        ) == 0;
+                    if herd_only {
+                        while Instant::now() < deadline {
+                            batch.extend(g.pending.drain(..));
+                            if batch.len() >= active {
+                                break;
+                            }
+                            std::hint::spin_loop();
+                        }
+                    } else {
                     // RFC-0217 P0.1b: collect through the client-side gap.
-                    // A publish releases all followers within µs of each
-                    // other, so arrivals come in bursts; a quiet quiescence
-                    // slice after the first absorb means the burst drained.
-                    // The deadline bounds the whole hold.
                     let initial = batch.len();
                     loop {
                         let now = Instant::now();
@@ -1065,6 +1088,7 @@ impl WriteGroup {
                         ) {
                             break;
                         }
+                    }
                     }
                 } else {
                     while batch.len() < self.active.load(Ordering::Relaxed) {

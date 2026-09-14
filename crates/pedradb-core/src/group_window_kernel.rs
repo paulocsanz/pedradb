@@ -82,6 +82,30 @@ pub fn async_catchup_bound_us(
 /// bursts; a quiet slice after the first absorb means the burst drained.
 pub const COLLECT_QUIESCE_US: u64 = 20;
 
+/// When in-flight writers outnumber the batch they are inside `submit()`,
+/// not in a client gap. Wait this many µs for them to queue before
+/// sealing the WAL frame. Half a Darwin `write()` (20.8µs WRITEPHASE):
+/// break-even at +1 op, win at +2. AS-IS = 0 (seal immediately →
+/// avg_group=1.39, one `write()` per put).
+pub const HERD_COLLECT_US: u64 = 2;
+
+/// `active > batch_len` ⇒ the missing writers are in `submit()`; give
+/// them [`HERD_COLLECT_US`] to land in this frame.
+#[must_use]
+pub fn herd_collect_us(active: usize, batch_len: usize) -> u64 {
+    if active > batch_len {
+        HERD_COLLECT_US
+    } else {
+        0
+    }
+}
+
+/// AS-IS: never wait for the in-flight herd (seal with whoever drained).
+#[must_use]
+pub fn herd_collect_us_as_is(_active: usize, _batch_len: usize) -> u64 {
+    0
+}
+
 /// Collect-loop break: only after at least one arrival beyond the entry
 /// batch went quiet. A silent slice with no arrivals keeps waiting (the
 /// ghost may still be inside the window bound).
@@ -183,6 +207,22 @@ mod tests {
         assert!(
             body.contains("group_window_kernel::flight_capped_window_us("),
             "effective window must call flight_capped_window_us"
+        );
+        assert!(
+            body.contains("group_window_kernel::herd_collect_us("),
+            "async lead must wait for in-flight submitters before sealing the WAL frame"
+        );
+    }
+
+    #[test]
+    fn herd_collect_waits_only_for_missing_inflight() {
+        assert_eq!(herd_collect_us(4, 1), HERD_COLLECT_US);
+        assert_eq!(herd_collect_us(4, 4), 0, "herd already in the batch");
+        assert_eq!(herd_collect_us(1, 1), 0);
+        assert_eq!(
+            herd_collect_us_as_is(8, 1),
+            0,
+            "AS-IS seals immediately"
         );
     }
 
