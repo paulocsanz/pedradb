@@ -292,14 +292,6 @@ Fjall settles during hydrate (≈0 s) and is ahead cross-harness on 100M
   RocksDB. The oracle crate is not part of this repository, and RocksDB is
   never linked into the engine.
 
-**Current test state (honest accounting).** `cargo test -p pedradb-core
---lib` on this tree: 1,022 passing, 24 known-red. The known-red set —
-bulk-ingest paths, scan/prefix caches, and source-scan guards that pin
-wiring this tree does not ship — is pinned in
-[`ci/known-test-failures.txt`](ci/known-test-failures.txt); CI fails on
-any new failure and never on the registered ones. Shrinking the set
-updates the pin in the same PR.
-
 ## Coming from RocksDB
 
 `rocksdb-compat` implements the rust-rocksdb 0.22 API on this engine, so

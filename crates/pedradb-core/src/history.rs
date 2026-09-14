@@ -1738,9 +1738,11 @@ mod tests {
             "AS-IS tooth: any segment crc would match"
         );
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        // db.rs delegates restore/upload to HistoryTier; the CRC walk
+        // lives in this file (and the verify/ops callers). Pin the
+        // production functions, not a stale string in db.rs.
         for rel in [
             "src/history.rs",
-            "src/db.rs",
             "src/verify.rs",
             "../pedradb-ops/src/lib.rs",
         ] {
@@ -1751,6 +1753,11 @@ mod tests {
                 "{rel} must stay on walk_segment_records"
             );
         }
+        let db = std::fs::read_to_string(crate_root.join("src/db.rs")).expect("db.rs");
+        assert!(
+            db.contains("HistoryTier") && db.contains("upload_history_step"),
+            "db.rs restore/upload must stay on HistoryTier"
+        );
 
         let (local, _tier) = seeded_tier("crc-0087-up");
         let seg = only_segment_path(&local);
@@ -1894,12 +1901,11 @@ mod tests {
             "AS-IS tooth: any bloom sidecar crc would match"
         );
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let db = std::fs::read_to_string(crate_root.join("src/db.rs")).expect("db.rs");
-        assert!(
-            db.contains("sidecar_may_affect"),
-            "db.rs restore prune must stay on sidecar_may_affect"
-        );
         let hist = std::fs::read_to_string(crate_root.join("src/history.rs")).expect("history.rs");
+        assert!(
+            hist.contains("sidecar_may_affect"),
+            "history.rs restore prune must stay on sidecar_may_affect"
+        );
         assert!(
             hist.contains("return true; // corrupt sidecar"),
             "mismatch must keep the fail-open walk, not prune"

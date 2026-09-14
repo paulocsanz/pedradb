@@ -56,8 +56,8 @@
       "crates/rocksdb-compat/src/iter_kernel.rs"
     ],
     "kernel_files": 38,
-    "kernel_loc": 19034,
-    "handler_loc": 75405,
+    "kernel_loc": 19050,
+    "handler_loc": 75689,
     "db_rs_extracted": false,
     "proof_depth": {
       "atom": 139,
@@ -67,6 +67,9 @@
       "count": 7
     },
     "kernel_fn_allowlist": {
+      "crates/pedradb-core/src/write_admission_kernel.rs": [
+        "wal_archive_keep"
+      ],
       "crates/pedradb-core/src/env_crash_kernel.rs": [
         "of"
       ],

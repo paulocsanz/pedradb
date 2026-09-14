@@ -55,13 +55,25 @@ impl BulkRun {
 
     #[must_use]
     pub(crate) fn lookup(&self, key: &[u8], snapshot: SequenceNumber) -> Lookup {
+        self.lookup_seq(key, snapshot)
+            .map(|(_, v)| Lookup::Found(v))
+            .unwrap_or(Lookup::NotFound)
+    }
+
+    /// Visible put in this run, with its sequence (for merge vs mem tombs).
+    #[must_use]
+    pub(crate) fn lookup_seq(
+        &self,
+        key: &[u8],
+        snapshot: SequenceNumber,
+    ) -> Option<(SequenceNumber, Bytes)> {
         let Ok(i) = self.keys.binary_search_by(|k| k.as_ref().cmp(key)) else {
-            return Lookup::NotFound;
+            return None;
         };
         if self.seqs[i] > snapshot {
-            return Lookup::NotFound;
+            return None;
         }
-        Lookup::Found(self.vals[i].clone())
+        Some((self.seqs[i], self.vals[i].clone()))
     }
 
     #[must_use]

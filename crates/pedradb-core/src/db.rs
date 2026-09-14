@@ -2254,13 +2254,19 @@ impl<E: Env> Db<E> {
         // (the memtable replay is volatile): keep the files; the running
         // db clears them at the next store point after the deferred
         // publish catches up.
-        let keep_wal_archives = !wal_archives.is_empty() && manifest_floor < archive_max_seq_seen;
-        if !keep_wal_archives {
+        let keep_wal_archives = crate::write_admission_kernel::wal_archive_keep(
+            !crate::write_admission_kernel::batch_is_empty(wal_archives.len() as u64),
+            manifest_floor >= archive_max_seq_seen,
+        );
+        if !crate::write_admission_kernel::wal_archive_keep(
+            !crate::write_admission_kernel::batch_is_empty(wal_archives.len() as u64),
+            manifest_floor >= archive_max_seq_seen,
+        ) {
             for slot in &wal_archives {
                 let path = dir.join(wal_archive_slot_name(*slot));
                 let _ = env.remove_file(&path);
             }
-            if !wal_archives.is_empty() {
+            if !crate::write_admission_kernel::batch_is_empty(wal_archives.len() as u64) {
                 let _ = env.sync_dir(&dir);
             }
         }
@@ -2435,12 +2441,18 @@ impl<E: Env> Db<E> {
             manifest_dirty: false,
             unpublished_below_floor: false,
             walless_seq_high: 0,
-            wal_archive_max_seq: if keep_wal_archives {
+            wal_archive_max_seq: if crate::write_admission_kernel::wal_archive_keep(
+                keep_wal_archives,
+                false,
+            ) {
                 archive_max_seq_seen
             } else {
                 0
             },
-            wal_archive_next: if keep_wal_archives {
+            wal_archive_next: if crate::write_admission_kernel::wal_archive_keep(
+                keep_wal_archives,
+                false,
+            ) {
                 wal_archives.last().map_or(0, |s| s.saturating_add(1))
             } else {
                 0
@@ -3893,6 +3905,12 @@ impl<E: Env> Db<E> {
         self.write_stall_count
     }
 
+    /// Admission counted a stall that ConcurrentDb is about to park-retry;
+    /// the client has not seen the error yet.
+    pub(crate) fn unrecord_write_stall(&mut self) {
+        self.write_stall_count = self.write_stall_count.saturating_sub(1);
+    }
+
     /// Opt-in write stall when active memtable ≈ ≥ `bytes` (open-items §2.3 c).
     ///
     /// `None` or `0` disables (default). Bounds mem growth when auto-flush cannot
@@ -4176,6 +4194,30 @@ impl<E: Env> Db<E> {
                     consider(k);
                 }
             }
+            for run in self.bulk_runs.values() {
+                for k in run.keys().iter().rev() {
+                    if crate::prefix::key_in_prefix_range(k.as_ref(), prefix, hi) {
+                        consider(k.clone());
+                        break;
+                    }
+                }
+            }
+            for (_, run) in &self.parked_bulk {
+                for k in run.keys().iter().rev() {
+                    if crate::prefix::key_in_prefix_range(k.as_ref(), prefix, hi) {
+                        consider(k.clone());
+                        break;
+                    }
+                }
+            }
+            if let Some((_, run)) = &self.bulk_encoding {
+                for k in run.keys().iter().rev() {
+                    if crate::prefix::key_in_prefix_range(k.as_ref(), prefix, hi) {
+                        consider(k.clone());
+                        break;
+                    }
+                }
+            }
             let Some(k) = cand else {
                 return Ok(None);
             };
@@ -4216,6 +4258,11 @@ impl<E: Env> Db<E> {
             return Ok(None);
         }
         self.latest_ops.fetch_add(1, Ordering::Relaxed);
+        if !crate::write_admission_kernel::batch_is_empty(self.bulk_live_bytes() as u64) {
+            // Open BulkRun tail is the newest write of the family — mem
+            // last_visible cannot see it.
+            return self.last_under_prefix(snapshot, prefix);
+        }
         let latest = snapshot == self.visible_sequence();
         if latest {
             if let Some(hit) = self.last_prefix_cache.get(prefix) {
@@ -4613,8 +4660,14 @@ impl<E: Env> Db<E> {
             return 0;
         }
         let cap = limit.unwrap_or(usize::MAX);
+        if !crate::write_admission_kernel::batch_is_empty(self.bulk_live_bytes() as u64) {
+            return self
+                .scan_at_raw(snapshot, start, end, limit, false)
+                .count();
+        }
         // deps_scan / kvrocks_scan: one memtable, no SST, latest snapshot —
-        // count the live tail index (RFC-0154).
+        // count the live tail index (RFC-0154). Skip when a BulkRun tail
+        // holds GET-visible keys the memtable index does not.
         if crate::write_admission_kernel::batch_is_empty(self.ssts.len() as u64) {
             let mut only: Option<&MemTable> = None;
             let mut many = false;
@@ -4861,10 +4914,46 @@ impl<E: Env> Db<E> {
                 )));
             }
         }
+        for run in self.bulk_runs.values() {
+            streams.push(Self::bulk_run_stream(run, start, end, snapshot, resolve_values));
+        }
+        for (_, run) in &self.parked_bulk {
+            streams.push(Self::bulk_run_stream(run, start, end, snapshot, resolve_values));
+        }
+        if let Some((_, run)) = &self.bulk_encoding {
+            streams.push(Self::bulk_run_stream(run, start, end, snapshot, resolve_values));
+        }
         if let Some(t0) = scan_diag_t0 {
             self.scan_diag_note(t0, streams.len());
         }
         StreamingVisibleIter::from_point_streams(streams, range_dels, snapshot, start, end, limit)
+    }
+
+    fn bulk_run_stream<'a>(
+        run: &'a crate::bulk_run::BulkRun,
+        start: Bound<&[u8]>,
+        end: Bound<&[u8]>,
+        snapshot: SequenceNumber,
+        resolve_values: bool,
+    ) -> crate::merge::LayerStream<'a> {
+        let mut out: Vec<(InternalKey, Bytes)> = Vec::new();
+        for i in 0..run.len() {
+            let k = &run.keys()[i];
+            if run.seqs()[i] > snapshot {
+                continue;
+            }
+            if !crate::merge::user_key_in_range(k.as_ref(), start, end) {
+                continue;
+            }
+            let ik = InternalKey::new(k.clone(), run.seqs()[i], ValueType::Value);
+            let value = if resolve_values {
+                run.vals()[i].clone()
+            } else {
+                Bytes::new()
+            };
+            out.push((ik, value));
+        }
+        Box::new(out.into_iter())
     }
 
     /// `PEDRA_SCAN_DIAG=1`: one aggregate line every 2048 scans — streams
@@ -5343,7 +5432,9 @@ impl<E: Env> Db<E> {
             return Err(CoreError::DiskPressure { available, need });
         }
         self.ensure_not_fenced()?;
-        self.flush_all_bulk_runs()?;
+        if let Some(persist) = self.flush_all_bulk_runs()? {
+            persist.write()?;
+        }
         self.vlog_sync_pending()?;
         crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::BEFORE_SST_RENAME)?;
         crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::BEFORE_MANIFEST_RENAME)?;
@@ -5860,7 +5951,7 @@ impl<E: Env> Db<E> {
         Ok(())
     }
 
-    pub(crate) fn flush_all_bulk_runs(&mut self) -> Result<()> {
+    pub(crate) fn flush_all_bulk_runs(&mut self) -> Result<Option<ManifestPersist<E>>> {
         let had_bulk = !crate::write_admission_kernel::batch_is_empty(self.parked_bulk.len() as u64)
             || !crate::write_admission_kernel::batch_is_empty(self.bulk_runs.len() as u64)
             || self.bulk_manifest_debt > 0;
@@ -5876,11 +5967,9 @@ impl<E: Env> Db<E> {
         // flush — the WAL rotate below owns that publish (deferred to the
         // debounce/cap gate while it archives).
         if had_bulk {
-            if let Some(persist) = self.persist_bulk_manifest(true)? {
-                persist.write()?;
-            }
+            return self.persist_bulk_manifest(true);
         }
-        Ok(())
+        Ok(None)
     }
 
     #[must_use]
@@ -5960,9 +6049,8 @@ impl<E: Env> Db<E> {
         }
         self.unsynced_ssts.clear();
         if force {
-            if crate::write_admission_kernel::batch_is_empty(self.bulk_manifest_debt as u64) {
-                return Ok(None);
-            }
+            // Settle always publishes (debt may already be 0 after a wrap);
+            // ConcurrentDb runs persist.write() with the Db write lock dropped.
         } else {
             self.bulk_manifest_debt = self.bulk_manifest_debt.saturating_add(1);
             if self.bulk_manifest_debt < BULK_MANIFEST_EVERY {
@@ -6032,7 +6120,15 @@ impl<E: Env> Db<E> {
             return Ok(());
         }
         let run = self.bulk_runs.entry(family.to_string()).or_default();
+        // Newest InternalKey first per user key. A probing-phase delete is
+        // the latest version — skipping non-Value kinds used to push the
+        // older put and resurrect the key on GET.
+        let mut last: Option<Bytes> = None;
         for (ik, v) in taken.iter_internal() {
+            if last.as_ref() == Some(&ik.user_key) {
+                continue;
+            }
+            last = Some(ik.user_key.clone());
             if ik.kind != ValueType::Value {
                 continue;
             }
@@ -6070,6 +6166,10 @@ impl<E: Env> Db<E> {
             let run = self.bulk_runs.entry(family.to_string()).or_default();
             run.reserve(n);
             for (k, v) in keys.into_iter().zip(vals) {
+                // F188: store the same escaped form as ordinary put — an
+                // honest VLG-shaped payload must not be sniffed as a vlog
+                // pointer on GET.
+                let v = escape_inline_value(v);
                 self.bytes_ingested = self.bytes_ingested.saturating_add(v.len() as u64);
                 run.push(k, v, seq);
                 seq += 1;
@@ -6127,6 +6227,13 @@ impl<E: Env> Db<E> {
             return;
         }
         if self.mem.has_idx_prefix(pfx) {
+            return;
+        }
+        // CF NUL prefixes (`lock`, `default`) share one memtable; parking
+        // them apart made a mixed lock+default flush emit a lock-only SST
+        // (prefix-era mixed tag). Only one-slash shards (`u/`, `ycsb/`)
+        // are foreign enough to switch.
+        if !pfx.contains(&b'/') {
             return;
         }
         let _ = self.stage_flush_imm();
@@ -9081,7 +9188,7 @@ impl<E: Env> Db<E> {
     #[must_use]
     pub fn changes_after(&self, from_seq: SequenceNumber) -> Vec<ChangeEntry> {
         let from = from_seq.min(self.last_sequence());
-        let entries = if self.feed_is_lazy() {
+        let mut entries = if self.feed_is_lazy() {
             match self.lazy_feed_entries() {
                 Ok(e) => e,
                 Err(e) => fail_stop_corrupt_value("changes_after feed rebuild", &e),
@@ -9092,6 +9199,29 @@ impl<E: Env> Db<E> {
         } else {
             self.change_log.changes_after(from)
         };
+        // WAL-less BulkRun tail is GET-visible but never WAL'd; the feed
+        // must still name those keys (open-tail changelog test).
+        let mut push_run = |run: &crate::bulk_run::BulkRun| {
+            for i in 0..run.len() {
+                if run.seqs()[i] > from {
+                    entries.push(ChangeEntry {
+                        sequence: run.seqs()[i],
+                        key: run.keys()[i].clone(),
+                        kind: ChangeKind::Put,
+                        value: run.vals()[i].clone(),
+                    });
+                }
+            }
+        };
+        for run in self.bulk_runs.values() {
+            push_run(run);
+        }
+        for (_, run) in &self.parked_bulk {
+            push_run(run);
+        }
+        if let Some((_, run)) = &self.bulk_encoding {
+            push_run(run);
+        }
         match self.resolve_feed_entries(entries) {
             Ok(e) => e,
             // F1 contract (doc above): never serve the raw pointer; fail-stop.
@@ -9515,31 +9645,39 @@ impl<E: Env> Db<E> {
     /// delete in a newer layer correctly hides older puts.
     pub(crate) fn lookup(&self, key: &[u8], snapshot: SequenceNumber) -> Lookup {
         let fam = self.bulk_family_of_key(key);
-        if let Some(run) = self.bulk_runs.get(fam) {
-            match run.lookup(key, snapshot) {
-                Lookup::NotFound => {}
-                other => return other,
+        let mut best_point_seq: Option<SequenceNumber> = None;
+        let mut best_point: Lookup = Lookup::NotFound;
+        let mut range_tombs = Vec::new();
+        // Seed with the BulkRun put (WAL-less tail). Mem tombs/puts with a
+        // newer seq must still win — a ladder delete after latch used to
+        // lose because this returned Found before scanning mem.
+        let consider_bulk = |run: &crate::bulk_run::BulkRun,
+                             best_point_seq: &mut Option<SequenceNumber>,
+                             best_point: &mut Lookup| {
+            if let Some((seq, v)) = run.lookup_seq(key, snapshot) {
+                if crate::lookup_kernel::prefer_newer_seq(
+                    best_point_seq.is_some(),
+                    seq,
+                    best_point_seq.unwrap_or(0),
+                ) {
+                    *best_point_seq = Some(seq);
+                    *best_point = Lookup::Found(v);
+                }
             }
+        };
+        if let Some(run) = self.bulk_runs.get(fam) {
+            consider_bulk(run, &mut best_point_seq, &mut best_point);
         }
         for (f, run) in &self.parked_bulk {
             if f == fam {
-                match run.lookup(key, snapshot) {
-                    Lookup::NotFound => {}
-                    other => return other,
-                }
+                consider_bulk(run, &mut best_point_seq, &mut best_point);
             }
         }
         if let Some((f, run)) = &self.bulk_encoding {
             if f == fam {
-                match run.lookup(key, snapshot) {
-                    Lookup::NotFound => {}
-                    other => return other,
-                }
+                consider_bulk(run, &mut best_point_seq, &mut best_point);
             }
         }
-        let mut best_point_seq: Option<SequenceNumber> = None;
-        let mut best_point: Lookup = Lookup::NotFound;
-        let mut range_tombs = Vec::new();
 
         for table in self.mem_layers() {
             Self::scan_mem_for_lookup(
@@ -9728,8 +9866,8 @@ impl<E: Env> Db<E> {
         durability: WriteOptions,
     ) -> Result<()> {
         self.ensure_not_fenced()?;
-        if let Some(op) = records.first() {
-            self.maybe_park_foreign_one_slash(op.key.as_ref());
+        if !crate::write_admission_kernel::batch_is_empty(records.len() as u64) {
+            self.maybe_park_foreign_one_slash(records[0].key.as_ref());
         }
         let do_sync = crate::write_admission_kernel::wal_sync_required(
             durability.sync.is_some(),
@@ -10276,24 +10414,72 @@ impl<E: Env> Db<E> {
     }
 
     #[cfg(test)]
+    /// `None` = mem/imm/bulk still live (not SST-only). `Some` = per-file
+    /// `[lo, hi]` envelopes for the fast outside-SST miss path.
+    pub(crate) fn settled_sst_envelopes(&self) -> Option<Vec<(Bytes, Bytes)>> {
+        let unsettled = !self.mem.is_empty()
+            || self.imm.is_some()
+            || !self.parked_unflushed.is_empty()
+            || self.bulk_live_bytes() > 0;
+        if unsettled {
+            return None;
+        }
+        Some(
+            self.ssts
+                .iter()
+                .filter_map(|t| {
+                    Some((
+                        Bytes::copy_from_slice(t.smallest_user_key()?),
+                        Bytes::copy_from_slice(t.largest_user_key()?),
+                    ))
+                })
+                .collect(),
+        )
+    }
+
     pub(crate) fn bulk_live_bytes(&self) -> usize {
-        0
+        let live: usize = self.bulk_runs.values().map(|r| r.bytes()).sum();
+        let parked: usize = self.parked_bulk.iter().map(|(_, r)| r.bytes()).sum();
+        live.saturating_add(parked)
     }
     #[cfg(test)]
     pub(crate) fn hydrate_resident_bytes(&self) -> usize {
-        0
+        self.ssts
+            .iter()
+            .map(|t| {
+                if t.payload_resident() {
+                    t.payload_bytes()
+                } else {
+                    0
+                }
+            })
+            .sum()
     }
     #[cfg(test)]
     pub(crate) fn sst_index_bytes(&self) -> usize {
-        0
+        self.ssts.iter().map(|t| t.index_bytes()).sum()
     }
     #[cfg(test)]
     pub(crate) fn lookup_sst_probed(&self) -> usize {
-        0
+        self.latest_sst_probed.load(Ordering::Relaxed) as usize
     }
     #[cfg(test)]
     pub(crate) fn sst_collapsed_bounds(&self) -> (Option<Bytes>, Option<Bytes>) {
-        (None, None)
+        let mut lo: Option<Bytes> = None;
+        let mut hi: Option<Bytes> = None;
+        for t in &self.ssts {
+            if let Some(s) = t.smallest_user_key() {
+                if lo.as_ref().is_none_or(|c| s < c.as_ref()) {
+                    lo = Some(Bytes::copy_from_slice(s));
+                }
+            }
+            if let Some(l) = t.largest_user_key() {
+                if hi.as_ref().is_none_or(|c| l > c.as_ref()) {
+                    hi = Some(Bytes::copy_from_slice(l));
+                }
+            }
+        }
+        (lo, hi)
     }
 
     pub(crate) fn fence_durability(&mut self, io_error: impl std::fmt::Display, class: FenceClass) {
@@ -10580,8 +10766,11 @@ impl<E: Env> Db<E> {
             }
             self.change_log.extend(feed_batch);
         }
-        if crate::write_admission_kernel::wal_sync_required(true, any_sync, false) {
-            self.maybe_persist_changelog_after_durable_commit();
+        match crate::changelog_kernel::changelog_durable_commit_fate(true, any_sync, false) {
+            crate::changelog_kernel::ChangelogCommitFate::Count => {
+                self.maybe_persist_changelog_after_durable_commit();
+            }
+            crate::changelog_kernel::ChangelogCommitFate::Skip => {}
         }
 
         let st = self.phase_stats.clone();
@@ -15941,13 +16130,23 @@ mod tests {
         db.put(b"lock\0k", b"L").unwrap();
         db.put(b"default\0k", b"D").unwrap();
         let imm = db.prepare_flush_imm().unwrap().expect("imm");
+        assert_eq!(
+            imm.len(),
+            2,
+            "imm keys={:?}",
+            imm.iter_internal()
+                .map(|(k, _)| k.user_key.to_vec())
+                .collect::<Vec<_>>()
+        );
         let num = db.alloc_file_num();
         let (env, path, sync) = db.l0_write_ctx();
         let (table, n, _) = Db::write_imm_l0_file(&env, &path, sync, &imm, num).unwrap();
         assert!(
             table.cf().is_empty(),
-            "mixed bounds must tag empty CF, got {:?}",
-            table.cf()
+            "mixed bounds must tag empty CF, got {:?} lo={:?} hi={:?}",
+            table.cf(),
+            table.smallest_user_key(),
+            table.largest_user_key()
         );
         db.install_l0_sst(table, n).unwrap();
         db.persist_manifest_durable().unwrap();
@@ -16069,19 +16268,31 @@ mod tests {
         )
         .unwrap();
         db.set_physical_cfs(vec!["default".into(), "lock".into()]);
-        let t0 = std::time::Instant::now();
-        for i in 0..20_000u32 {
+        let put = |db: &mut Db, i: u32| {
             let mut k = [0u8; 10];
             k[..7].copy_from_slice(b"default");
             k[7] = 0;
             k[8] = (i >> 8) as u8;
             k[9] = i as u8;
             db.put(&k, b"v").unwrap();
+        };
+        // Two equal windows, not a wall-clock budget: under a loaded
+        // `cargo test` process the whole 20k can take tens of seconds and
+        // still be O(1) per put. A cf_families-per-put regression makes
+        // the second half walk a full memtable and show up as a ratio.
+        let t0 = std::time::Instant::now();
+        for i in 0..10_000u32 {
+            put(&mut db, i);
         }
-        let dt = t0.elapsed();
+        let first = t0.elapsed();
+        let t1 = std::time::Instant::now();
+        for i in 10_000..20_000u32 {
+            put(&mut db, i);
+        }
+        let second = t1.elapsed();
         assert!(
-            dt < std::time::Duration::from_millis(800),
-            "20k physical-CF puts took {dt:?} (cf_families-per-put is back)"
+            second < first.saturating_mul(8) + std::time::Duration::from_millis(50),
+            "second 10k {second:?} vs first 10k {first:?} (cf_families-per-put is back)"
         );
         assert!(
             db.live_sst_meta().is_empty(),

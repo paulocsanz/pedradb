@@ -249,6 +249,22 @@ pub fn batch_is_empty_as_is(_n: u64) -> bool {
 }
 
 #[cfg(not(verus_keep_ghost))]
+/// Keep archived WAL segments whose window is not yet in the MANIFEST
+/// (`has_files && !manifest_covers_archive`). Deleting them would drop
+/// the only durable copy of that seq window.
+#[must_use]
+pub fn wal_archive_keep(has_files: bool, manifest_covers_archive: bool) -> bool {
+    has_files && !manifest_covers_archive
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: never keep (would unlink the only durable copy).
+#[must_use]
+pub fn wal_archive_keep_as_is(_has_files: bool, _manifest_covers_archive: bool) -> bool {
+    false
+}
+
+#[cfg(not(verus_keep_ghost))]
 /// Fate of the parked-queue pop after the table's L0 exists.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ParkedPopPlan {
@@ -1054,13 +1070,13 @@ mod tests {
         assert!(wal_sync_required(false, false, true));
         let prep = named_fn_src(include_str!("db.rs"), "group_prepare").expect("group_prepare");
         assert!(
-            prep.contains("wal_sync_required("),
-            "group_prepare must match wal_sync_required"
+            prep.contains("match crate::write_admission_kernel::group_batch_sync_plan("),
+            "group_prepare matches group_batch_sync_plan (RFC-0219 P1.2c)"
         );
         let apply = named_fn_src(include_str!("db.rs"), "group_apply").expect("group_apply");
         assert!(
-            apply.contains("wal_sync_required("),
-            "group_apply must match wal_sync_required"
+            apply.contains("match crate::changelog_kernel::changelog_durable_commit_fate("),
+            "group_apply matches changelog_durable_commit_fate (RFC-0219 P2.1 drain — same fate as commit_ops_with)"
         );
         let ns = named_fn_src(include_str!("db.rs"), "needs_sync").expect("needs_sync");
         assert!(
@@ -1333,8 +1349,8 @@ mod tests {
             "fsync_sst_paths must match fence_on_sync_fail"
         );
         assert!(
-            sst.contains("dir_sync_required("),
-            "fsync_sst_paths must match dir_sync_required"
+            sst.contains("match crate::write_admission_kernel::dir_sync_plan("),
+            "fsync_sst_paths matches dir_sync_plan (RFC-0219 P1.1c; dir_sync_required stays live in the kernel body)"
         );
         let ckpt = named_fn_src(include_str!("db.rs"), "write_checkpoint_meta")
             .expect("write_checkpoint_meta");
