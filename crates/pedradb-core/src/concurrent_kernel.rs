@@ -882,6 +882,11 @@ impl WriteGroup {
                     occ,
                     occ_err: None,
                 });
+                // Rocks WriteThread: LinkOne (CAS) then the leader snapshots
+                // the whole list. We hold a mutex, so waiters cannot push
+                // until we drop it — and without a fair unlock the leader
+                // re-locks in `lead()` and drains itself (avg_group=1.39).
+                parking_lot::MutexGuard::unlock_fair(g);
                 (None, None)
             } else {
                 let (tx, rx) = mpsc::sync_channel(1);
